@@ -1,4 +1,4 @@
-# Rern
+# Bern
 
 一个基于 [iced](https://github.com/iced-rs/iced) 的运行时驱动 UI 框架。
 
