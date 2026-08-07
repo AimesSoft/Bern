@@ -5,6 +5,7 @@
 //! [`crate::core::widget::WidgetDef`].
 
 pub mod button;
+pub mod h_tab;
 pub mod icon;
 pub mod icon_button;
 pub mod layout;
@@ -20,6 +21,7 @@ use crate::core::registry::Registry;
 /// Registers every built-in control into `registry`.
 pub fn register_builtins(registry: &mut Registry) {
     registry.register(button::Button);
+    registry.register(h_tab::HTab);
     registry.register(icon::Icon);
     registry.register(icon_button::IconButton);
     registry.register(layout::LayoutRef);

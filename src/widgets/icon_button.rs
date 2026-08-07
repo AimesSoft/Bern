@@ -283,20 +283,21 @@ where
                     let target = if state.hovered { 1.0 } else { 0.0 };
                     let remaining = target - state.progress;
                     if remaining.abs() > 0.0005 {
-                        let dt = if let Some(last) = state.last {
-                            now.duration_since(last).as_secs_f32()
-                        } else {
-                            state.last = Some(*now);
-                            0.0
+                        // 空闲后恢复的首帧与上一个时间戳可能相隔很久；直接
+                        // 用它算 dt 会一步补完动画。超过 0.1s 视为动画起点。
+                        let dt = match state.last {
+                            Some(last) => {
+                                let elapsed = now.duration_since(last).as_secs_f32();
+                                if elapsed > 0.1 { 0.0 } else { elapsed }
+                            }
+                            None => 0.0,
                         };
-                        if dt > 0.0 {
-                            state.last = Some(*now);
-                            let step = dt / self.visual.duration;
-                            state.progress = if remaining > 0.0 {
-                                (state.progress + step).min(target)
-                            } else {
-                                (state.progress - step).max(target)
-                            };
+                        state.last = Some(*now);
+                        let step = dt / self.visual.duration;
+                        state.progress = if remaining > 0.0 {
+                            (state.progress + step).min(target)
+                        } else {
+                            (state.progress - step).max(target)
                         };
                         shell.request_redraw();
                     } else {

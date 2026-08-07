@@ -188,6 +188,31 @@ Widget(id: "bg", kind: "rect", area: "root", z: -1, size: Fill,
 这一层是框架的底层机制：控件零参与（引擎自动包裹），应用只负责在收到
 `ThemeRevealDone` 后切换模式，互不耦合。
 
+## 横向 Tab（移植自 nipaplay 左上角导航）
+
+`h_tab` 控件就是 nipaplay 主界面左上角那排 Tab 的移植：加粗标签、
+悬浮时 1.1 倍平滑放大（200ms ease-out），选中的标签用主题强调色，底部
+有一条 3px 高的胶囊指示器，切换时在标签之间滑动（300ms）。
+
+```ron
+Widget(id: "nav", kind: "h_tab", area: "topbar",
+       props: { "items": "首页:tab_home,视频:tab_video,媒体库:tab_library" })
+```
+
+- `items` 是逗号分隔的 `label:key` 列表，`key` 就是该项的交互 id——
+  和按钮一样写在应用的 `ids.rs` 里，构建布局时框架会校验每一项都已注册；
+- 按下某个 Tab 发布 `(key, Pressed)` 事件，应用按 id 切换内容；高亮和
+  胶囊移动由控件自己维护，应用无需驱动；
+- **多页面切换**：应用收到 Tab 事件后，把页面容器（`kind: "layout"`）
+  的 `src` 换成另一个布局文件即可换页——helloworld 里就是
+  `hello_card` / `page_video` / `page_library` 三个独立布局在运行时切换，
+  同一个二进制不重新编译；
+- 配色全部来自 iced 主题（深浅色写死在控件代码里）：未选中标签
+  深色 60% / 浅色 54% 透明度，选中标签和胶囊用主题强调色；
+- 可调属性：`font_size`、`hover_scale`、`duration_ms`（悬浮）、
+  `indicator_ms`（胶囊滑动）、`indicator_height`、`indicator_radius`、
+  `item_padding`。
+
 ## 目录结构
 
 ```text
@@ -203,6 +228,7 @@ Rern/
 │   │   └── store.rs      # 布局目录加载（common + 设备）
 │   ├── icons/            # Material Icons（内嵌字体 + 名称映射）
 │   └── widgets/          # 每个控件一个文件
+│       ├── h_tab.rs      # 横向 Tab（悬浮放大 + 底部胶囊指示器）
 │       ├── rect.rs       # 背景/色块
 │       ├── title.rs      # 标题
 │       ├── icon.rs       # 图标

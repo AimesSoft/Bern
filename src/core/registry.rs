@@ -129,6 +129,20 @@ impl Registry {
             {
                 return Err(BuildError::UnregisteredId(widget.id.clone()));
             }
+            // `h_tab` declares per-item interaction ids in its `items` prop;
+            // each key must be registered in the central ids.rs as well.
+            if widget.kind == crate::widgets::h_tab::NAME {
+                let keys =
+                    crate::widgets::h_tab::validate_items(widget.str_prop("items").unwrap_or(""))
+                        .map_err(|reason| {
+                        BuildError::InvalidLayout(format!("h_tab `{}`: {reason}", widget.id))
+                    })?;
+                for key in keys {
+                    if !self.ids.contains(&key) {
+                        return Err(BuildError::UnregisteredId(key));
+                    }
+                }
+            }
             if !layout.areas.iter().any(|a| a.id == widget.area) {
                 return Err(BuildError::InvalidLayout(format!(
                     "widget `{}` references unknown area `{}`",
