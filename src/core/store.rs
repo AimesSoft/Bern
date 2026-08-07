@@ -42,6 +42,19 @@ impl LayoutStore {
         self.layouts.get(name)
     }
 
+    /// Mutates one widget prop inside a stored layout.
+    ///
+    /// Runtime state such as slider values lives in the layout data, so the
+    /// app patches it here (embedded layouts are not part of the top-level
+    /// layout the app holds). The next build reads the new value.
+    pub fn patch_widget_prop(&mut self, layout: &str, id: &str, prop: &str, value: String) {
+        if let Some(layout) = self.layouts.get_mut(layout)
+            && let Some(widget) = layout.widgets.iter_mut().find(|w| w.id == id)
+        {
+            widget.props.insert(prop.into(), value);
+        }
+    }
+
     /// All layout names currently in the store.
     pub fn names(&self) -> impl Iterator<Item = &String> {
         self.layouts.keys()
@@ -86,5 +99,37 @@ mod tests {
             store.resolve("login_page").is_some(),
             "desktop page missing"
         );
+    }
+
+    #[test]
+    fn patches_stored_widget_props() {
+        let mut store =
+            LayoutStore::load("layouts/desktop", "layouts/common").expect("store loads");
+        let before = store
+            .resolve("login_form")
+            .unwrap()
+            .widgets
+            .iter()
+            .find(|w| w.id == "greeting")
+            .unwrap()
+            .props
+            .get("text")
+            .cloned()
+            .unwrap();
+        assert_eq!(before, "Welcome");
+
+        store.patch_widget_prop("login_form", "greeting", "text", "Hi".into());
+        let after = store
+            .resolve("login_form")
+            .unwrap()
+            .widgets
+            .iter()
+            .find(|w| w.id == "greeting")
+            .unwrap()
+            .props
+            .get("text")
+            .cloned()
+            .unwrap();
+        assert_eq!(after, "Hi");
     }
 }

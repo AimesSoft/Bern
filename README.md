@@ -213,6 +213,33 @@ Widget(id: "nav", kind: "h_tab", area: "topbar",
   `indicator_ms`（胶囊滑动）、`indicator_height`、`indicator_radius`、
   `item_padding`。
 
+## 滑块与进度条（胶囊轨道 + 果冻滑块）
+
+`slider`（可拖动）和 `progress`（纯展示）是**视频播放进度条**的移植，
+照抄 nipaplay 的 `VideoProgressBar`：
+
+- 4px 胶囊轨道（文字色低透明度），已播放部分用文字色胶囊段——深色下
+  是白色（与 nipaplay 完全一致），浅色下自动变深，任何主题都可见；
+- **28 × 16 胶囊滑块**（圆角 = 高的一半，跟随主题文字色）+ 两道柔和阴影；
+- 悬浮时滑块放大 8%（160ms easeOutCubic，逐帧动画）；
+- 按下时滑块被**弹簧压扁**（变窄变长，刚度 620 / 阻尼 22），松开后换
+  低阻尼弹簧（刚度 360 / 阻尼 7.2）**过冲回弹并振荡落定**——这就是
+  nipaplay 的果冻动画，参数原样照抄。
+
+```ron
+// 可拖动滑块：发布 (id, Changed(value))，value ∈ 0..=1
+Widget(id: "seek", kind: "slider", area: "root", props: { "value": "0.35" })
+
+// 纯展示进度条：不响应交互，按 value 显示
+Widget(id: "seek_progress", kind: "progress", area: "root", props: { "value": "0.35" })
+```
+
+- `value` 属性是唯一数据源：拖动/点击后应用把新值写回布局，下一次构建
+  即按新值渲染（helloworld 里 `set_seek` 更新滑块）；
+- 滑块是交互控件，id 照旧写在 `ids.rs`；内嵌在页面布局里时事件 id 会带
+  嵌入前缀（如 `page.seek`），应用用 `{容器id}.{控件id}` 匹配；
+- 可调属性：`value`、`size`（宽度策略）。
+
 ## 目录结构
 
 ```text
@@ -234,6 +261,7 @@ Rern/
 │       ├── icon.rs       # 图标
 │       ├── morph_icon.rs # 形变图标（矢量果冻切换）
 │       ├── icon_button.rs # 图标按钮（悬浮放大 + 图标形变）
+│       ├── slider.rs     # 滑块 + 进度条（胶囊轨道 + 果冻滑块）
 │       ├── text.rs
 │       ├── text_input.rs
 │       └── button.rs

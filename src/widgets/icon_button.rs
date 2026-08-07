@@ -233,7 +233,9 @@ where
     }
 
     fn diff(&self, tree: &mut Tree) {
-        self.content.as_widget().diff(&mut tree.children[0]);
+        // 走 `Tree::diff_children`（带 tag 检查），类型变化时重建子树，
+        // 否则切页/换图标后 downcast 会崩溃。
+        tree.diff_children(std::slice::from_ref(&self.content));
     }
 
     fn update(

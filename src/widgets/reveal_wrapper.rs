@@ -104,7 +104,10 @@ impl<'a, Message> Widget<Message, iced::Theme, iced::Renderer> for RevealWrapper
     }
 
     fn diff(&self, tree: &mut Tree) {
-        self.child.as_widget().diff(&mut tree.children[0]);
+        // 必须走 `Tree::diff_children`（内部按 tag 检查、类型变了就重建
+        // 子树状态）。直接调 `child.diff()` 会绕过检查，切页/换内容时
+        // 子树还是旧类型，后续 layout/update 的 downcast 会崩溃。
+        tree.diff_children(std::slice::from_ref(&self.child));
     }
 
     fn update(

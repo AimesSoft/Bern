@@ -12,6 +12,7 @@ pub mod layout;
 pub mod morph_icon;
 pub mod rect;
 pub(crate) mod reveal_wrapper;
+pub mod slider;
 pub mod text;
 pub mod text_input;
 pub mod title;
@@ -29,5 +30,7 @@ pub fn register_builtins(registry: &mut Registry) {
     registry.register(text::Text);
     registry.register(text_input::TextInput);
     registry.register(rect::Rect);
+    registry.register(slider::Progress);
+    registry.register(slider::Slider);
     registry.register(title::Title);
 }

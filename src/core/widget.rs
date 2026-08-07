@@ -41,6 +41,8 @@ pub enum EventKind {
     TextChanged(String),
     /// A boolean control was toggled.
     Toggled(bool),
+    /// A range control (e.g. a slider) reported a new value in 0..=1.
+    Changed(f32),
     /// Anything else, as a string payload.
     Other(String),
 }
