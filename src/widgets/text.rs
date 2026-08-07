@@ -1,6 +1,8 @@
 //! The `text` control: static text from a layout property.
 //!
-//! Color comes from the active iced theme's text color.
+//! Color comes from the active iced theme's text color. Following the theme
+//! reveal is automatic at the engine level (the registry wraps every control
+//! in a reveal wrapper).
 
 use crate::core::layout::Widget;
 use crate::core::widget::{BuildContext, LayoutMessage, WidgetDef};
@@ -18,11 +20,11 @@ impl WidgetDef for Text {
         NAME
     }
 
-    fn build<'a>(
+    fn build<'a, 't>(
         &self,
         node: &'a Widget,
         _size: Option<crate::core::layout::SizePolicy>,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage> {
         let content = node.str_prop("text").unwrap_or("");
         let size = node

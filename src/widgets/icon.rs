@@ -9,7 +9,7 @@
 //!
 //! The `name` prop accepts a Material icon name via the embedded icon
 //! package; unknown names are rendered as raw text. The color follows the
-//! active iced theme's text color.
+//! active iced theme's text color; following the theme reveal is automatic.
 
 use crate::core::layout::Widget;
 use crate::core::widget::{BuildContext, LayoutMessage, WidgetDef};
@@ -27,11 +27,11 @@ impl WidgetDef for Icon {
         NAME
     }
 
-    fn build<'a>(
+    fn build<'a, 't>(
         &self,
         node: &'a Widget,
         _size: Option<crate::core::layout::SizePolicy>,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage> {
         let name = node.str_prop("name").unwrap_or("");
         let size = node

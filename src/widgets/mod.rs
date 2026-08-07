@@ -9,6 +9,7 @@ pub mod icon;
 pub mod icon_button;
 pub mod layout;
 pub mod rect;
+pub(crate) mod reveal_wrapper;
 pub mod text;
 pub mod text_input;
 pub mod title;

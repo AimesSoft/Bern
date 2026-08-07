@@ -12,11 +12,12 @@
 //! black on light) — built into this control. `scale` and `duration_ms` can
 //! be set per widget through layout props.
 //!
-//! The `icon` prop accepts a Material icon name (e.g. `"add"`, `"favorite"`)
-//! via the embedded icon package; unknown names are rendered as raw text
-//! glyphs (e.g. `"→"`), so both styles work.
+//! The `icon` prop accepts a Material icon name (e.g. `"add_rounded"`,
+//! `"favorite_rounded"`) via the embedded icon package; unknown names are
+//! rendered as raw text glyphs (e.g. `"→"`), so both styles work.
 
 use crate::core::layout::Widget as LayoutWidget;
+use crate::core::ui::PressOrigin;
 use crate::core::widget::{
     BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent,
 };
@@ -66,11 +67,15 @@ impl WidgetDef for IconButton {
         NAME
     }
 
-    fn build<'a>(
+    fn interactive(&self) -> bool {
+        true
+    }
+
+    fn build<'a, 't>(
         &self,
         node: &'a LayoutWidget,
         _size: Option<crate::core::layout::SizePolicy>,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage> {
         let icon_name = node.str_prop("icon").unwrap_or("");
         let glyph_size = node
@@ -82,7 +87,8 @@ impl WidgetDef for IconButton {
         let id = ctx.qualify(&node.id);
 
         // Material icon names render with the embedded icon font; anything
-        // else falls back to a raw text glyph.
+        // else falls back to a raw text glyph. Following the theme reveal is
+        // automatic (the registry wraps this control).
         let content = match crate::icons::glyph(icon_name) {
             Some(glyph) => iced::widget::text(glyph).font(crate::icons::font()),
             None => iced::widget::text(icon_name),
@@ -92,6 +98,7 @@ impl WidgetDef for IconButton {
         IconButtonWidget::new(
             content,
             visual,
+            ctx.press_origin.clone(),
         )
         .on_press(LayoutMessage::Event(WidgetEvent {
             widget_id: id,
@@ -101,23 +108,33 @@ impl WidgetDef for IconButton {
     }
 }
 
-/// The custom iced widget behind `icon_button`: draws a rounded background
-/// and scales the whole content around its center while hovered.
+/// The custom iced widget behind `icon_button`: draws a bare icon and scales
+/// the whole content around its center while hovered. Presses record their
+/// position into the shared [`PressOrigin`], so backgrounds can reveal color
+/// changes from this button. While a theme reveal runs, the button subscribes
+/// changes from this button. Following the theme reveal is handled
+/// automatically by the engine-level wrapper.
 pub struct IconButtonWidget<'a, Message> {
     content: Element<'a, Message>,
     on_press: Option<Message>,
     visual: Visual,
     padding: f32,
+    press_origin: PressOrigin,
 }
 
 impl<'a, Message> IconButtonWidget<'a, Message> {
     /// Creates a new icon button around the given content.
-    fn new(content: impl Into<Element<'a, Message>>, visual: Visual) -> Self {
+    fn new(
+        content: impl Into<Element<'a, Message>>,
+        visual: Visual,
+        press_origin: PressOrigin,
+    ) -> Self {
         Self {
             content: content.into(),
             on_press: None,
             visual,
             padding: 10.0,
+            press_origin,
         }
     }
 
@@ -248,6 +265,8 @@ where
                             "[icon_button] ButtonPressed over bounds {:?}",
                             layout.bounds()
                         );
+                        let center = layout.bounds().center();
+                        self.press_origin.record((center.x, center.y));
                         if let Some(message) = &self.on_press {
                             eprintln!("[icon_button] publishing press message");
                             shell.publish(message.clone());

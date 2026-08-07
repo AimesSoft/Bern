@@ -22,11 +22,15 @@ impl WidgetDef for TextInput {
         NAME
     }
 
-    fn build<'a>(
+    fn interactive(&self) -> bool {
+        true
+    }
+
+    fn build<'a, 't>(
         &self,
         node: &'a Widget,
         size: Option<crate::core::layout::SizePolicy>,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage> {
         let id = ctx.qualify(&node.id);
         let placeholder = node.str_prop("placeholder").unwrap_or("");

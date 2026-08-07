@@ -37,6 +37,23 @@ Layout(
 - `Widget` 的 `area` 声明它属于哪个区域，`size` 声明尺寸策略（`Auto` / `Fill` / `Fixed(px)` / `Weight(n)`）；
 - 区域内排列规则：子区域在前，控件在后（Stack 内按 `z` 排序）。
 
+## 交互 id：集中在单个 rs 文件
+
+所有**交互控件**（`button` / `icon_button` / `text_input`）的 id 集中在应用
+的一个 `ids.rs` 文件里管理，这是单一事实来源：
+
+```rust
+pub const THEME_TOGGLE: &str = "theme_toggle";
+pub const ALL: &[&str] = &[THEME_TOGGLE, /* ... */];
+```
+
+- 启动时 `registry.ids().register_all(ids::ALL)` 注册；
+- 框架构建布局时校验：交互控件 id 必须已注册，否则报
+  `BuildError::UnregisteredId`——布局里拼错/漏改 id 会在启动时直接暴露；
+- 应用代码一律用常量匹配事件，不手写字符串字面量；
+- `ids.rs` 里带一个测试，反向校验布局里的交互 id 与文件声明完全一致，
+  防止两侧漂移。
+
 ## 布局是积木：一个布局可以调用另一个布局
 
 布局文件可以像积木一样组合：用 `kind: "layout"` 控件把另一个布局文件
@@ -76,8 +93,8 @@ rern 内嵌了 Flutter 的 Material Icons 字体与名称映射（Apache-2.0）�
 `icon_button` 和 `icon` 控件的图标名直接用 Flutter 里的名字：
 
 ```ron
-Widget(id: "back", kind: "icon_button", area: "actions", props: { "icon": "arrow_back" })
-Widget(id: "heart", kind: "icon", area: "actions", props: { "name": "favorite", "size": "16" })
+Widget(id: "back", kind: "icon_button", area: "actions", props: { "icon": "arrow_back_rounded" })
+Widget(id: "heart", kind: "icon", area: "actions", props: { "name": "favorite_rounded", "size": "16" })
 ```
 
 - 8825 个图标，名字与 `Icons.xxx` 完全一致（`add`、`dark_mode`、
@@ -108,6 +125,45 @@ fn boot() -> (App, iced::Task<AppMessage>) {
 框架里有一个**主题路由**（[`ThemeRouter`]）：它是运行期唯一持有当前
 `iced::Theme` 的地方，应用代码通过它切换深浅色，`registry.build` 接收路由
 并把主题分发给每个控件。控件只负责「拿到主题 → 用自己的调色板着色」。
+
+### 背景的圆形切换动画（参考 nipaplay）
+
+`rect` 背景控件在颜色因交互切换时（例如点击主题开关），会以**按下按钮的
+坐标**为原点做圆形揭示动画，与 nipaplay 的深浅色切换一致：
+
+- 切到深色：新颜色从按钮位置**向外铺开**，直到盖满控件；
+- 切回浅色：**反向**——旧颜色圆从边缘**向内收缩**到按钮位置，露出新颜色；
+- 非交互式的颜色变化（没有按钮坐标）直接切换，不做动画；
+- 时长默认 420ms、`easeOutCubic` 缓动，可用 `duration_ms` 属性调整：
+
+```ron
+Widget(id: "bg", kind: "rect", area: "root", z: -1, size: Fill,
+       props: { "duration_ms": "600" })
+```
+
+机制：可交互控件（如 `icon_button`）按下时把自身中心坐标写入共享的
+[`PressOrigin`]，背景控件构建时读取并消费它。
+
+### 通知式两阶段切换
+
+点击主题开关时，深浅色模式**不会立即切换**，而是走通知式两阶段流程：
+
+1. 背景从按钮位置开始圆形揭示**目标色**（此时模式还是旧的）；
+2. **引擎层自动跟随**：注册表构建每个控件时自动用
+   [`RevealWrapper`] 包裹（背景控件除外），wrapper 在事件驱动下把控件坐标
+   注册进 [`ThemeReveal`] 协调器（不轮询）；
+3. 圆形扫过控件坐标时，协调器向该控件投递**一条一次性命令**
+   （`take_command`），wrapper 用**目标主题**重新构建该控件——按钮、文本、
+   标题、图标全部随扩散依次切换到目标色，控件本身无需任何订阅代码；
+4. 整个扩散动画完成后（所有控件必然已被覆盖），背景发布
+   `LayoutMessage::ThemeRevealDone`；
+5. 应用收到通知后才真正切换 `ThemeRouter`——保证动画全程可见，且切换瞬间
+   每个控件下方的背景颜色都已改变。
+
+扩散方向由背景自动判定：变暗时圆向外扩大（扫到即命令），变亮时圆向内
+收缩（控件离开旧色圆即命令）。非交互式颜色变化（没有按钮坐标）直接切换。
+这一层是框架的底层机制：控件零参与（引擎自动包裹），应用只负责在收到
+`ThemeRevealDone` 后切换模式，互不耦合。
 
 ## 目录结构
 

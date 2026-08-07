@@ -31,11 +31,11 @@ impl WidgetDef for LayoutRef {
         NAME
     }
 
-    fn build<'a>(
+    fn build<'a, 't>(
         &self,
         node: &'a Widget,
         _size: Option<crate::core::layout::SizePolicy>,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage> {
         let Some(src) = node.str_prop("src") else {
             return error_text("layout widget: missing `src` prop");

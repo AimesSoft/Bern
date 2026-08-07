@@ -2,8 +2,10 @@
 //! layout file, and how events flow back to the application.
 
 use crate::core::layout::{SizePolicy, Widget};
+use crate::core::id::IdRegistry;
 use crate::core::registry::Registry;
 use crate::core::store::LayoutStore;
+use crate::core::ui::{PressOrigin, ThemeReveal};
 use iced::{Element, Length};
 
 /// The message produced by every layout-driven widget.
@@ -15,6 +17,10 @@ use iced::{Element, Length};
 pub enum LayoutMessage {
     /// A runtime event from a widget inside the layout tree.
     Event(WidgetEvent),
+    /// Published by the background when every subscribed button has confirmed
+    /// that the color beneath it changed; the app then completes the deferred
+    /// theme switch.
+    ThemeRevealDone,
 }
 
 /// An event produced by a widget.
@@ -44,37 +50,51 @@ pub enum EventKind {
 /// The `prefix` makes layouts modular: when a layout embeds another layout
 /// as a widget, every id inside the embedded tree is qualified with the
 /// embedding widget's id, so reused building blocks never collide.
-pub struct BuildContext<'a> {
+pub struct BuildContext<'a, 't> {
     /// The active iced theme — the standard interface for light/dark mode.
     /// Controls keep their light and dark palettes in their own code and
-    /// pick colors from this theme.
-    pub theme: &'a iced::Theme,
+    /// pick colors from this theme. Its lifetime is independent so the
+    /// reveal wrapper can rebuild a control with a temporary target theme.
+    pub theme: &'t iced::Theme,
     /// The widget registry, so containers can build their children.
     pub registry: &'a Registry,
     /// The layout store, so `layout` widgets can resolve embedded layouts.
     pub store: &'a LayoutStore,
+    /// The shared press-origin store, so backgrounds can reveal color changes
+    /// from the button that triggered them.
+    pub press_origin: &'a PressOrigin,
+    /// The theme-reveal notification hub (two-phase theme switching).
+    pub theme_reveal: &'a ThemeReveal,
+    /// The central widget-id registry.
+    pub ids: &'a IdRegistry,
     prefix: String,
     depth: u32,
 }
 
-impl<'a> BuildContext<'a> {
+impl<'a, 't> BuildContext<'a, 't> {
     /// Creates the context for a top-level layout build.
     pub fn root(
-        theme: &'a iced::Theme,
+        theme: &'t iced::Theme,
         registry: &'a Registry,
         store: &'a LayoutStore,
+        press_origin: &'a PressOrigin,
+        theme_reveal: &'a ThemeReveal,
+        ids: &'a IdRegistry,
     ) -> Self {
         Self {
             theme,
             registry,
             store,
+            press_origin,
+            theme_reveal,
+            ids,
             prefix: String::new(),
             depth: 0,
         }
     }
 
     /// A child context for an embedded layout, extending the id prefix.
-    pub fn with_prefix(&self, extra: &str) -> Self {
+    pub fn with_prefix(&self, extra: &str) -> BuildContext<'a, 't> {
         let prefix = if self.prefix.is_empty() {
             extra.to_string()
         } else {
@@ -84,6 +104,9 @@ impl<'a> BuildContext<'a> {
             theme: self.theme,
             registry: self.registry,
             store: self.store,
+            press_origin: self.press_origin,
+            theme_reveal: self.theme_reveal,
+            ids: self.ids,
             prefix,
             depth: self.depth + 1,
         }
@@ -113,12 +136,26 @@ pub trait WidgetDef: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Build an iced element for this control from a layout node.
-    fn build<'a>(
+    fn build<'a, 't>(
         &self,
         node: &'a Widget,
         size: Option<SizePolicy>,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage>;
+
+    /// Whether this control produces events (and therefore needs a declared
+    /// interaction id in the central [`IdRegistry`]).
+    fn interactive(&self) -> bool {
+        false
+    }
+
+    /// Whether the engine should automatically follow the theme reveal for
+    /// this control — rebuild it with the target theme the moment the sweep
+    /// covers its position. The background control (the animation body)
+    /// opts out.
+    fn follows_theme_reveal(&self) -> bool {
+        true
+    }
 }
 
 /// Converts a [`SizePolicy`] into optional width/height [`Length`]s.
@@ -156,4 +193,6 @@ pub enum BuildError {
     /// The layout itself is structurally invalid (bad references, duplicate
     /// ids, wrong root count, ...).
     InvalidLayout(String),
+    /// An interactive widget has no declared id in the central registry.
+    UnregisteredId(String),
 }

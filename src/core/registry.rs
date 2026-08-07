@@ -2,17 +2,24 @@
 //! an iced widget tree.
 
 use crate::core::layout::{Area, AreaKind, Layout, Widget};
+use crate::core::id::IdRegistry;
 use crate::core::store::LayoutStore;
 use crate::core::theme::ThemeRouter;
+use crate::core::ui::{PressOrigin, ThemeReveal};
 use crate::core::widget::{BuildContext, BuildError, LayoutMessage, WidgetDef};
+use crate::widgets::reveal_wrapper::{Rebuild, RevealWrapper};
 use iced::widget::{Column, Row, Stack};
 use iced::Element;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Maps widget type names (from layout files) to their implementations.
 #[derive(Default)]
 pub struct Registry {
     widgets: HashMap<&'static str, Box<dyn WidgetDef>>,
+    press_origin: PressOrigin,
+    theme_reveal: ThemeReveal,
+    ids: IdRegistry,
 }
 
 impl Registry {
@@ -41,6 +48,21 @@ impl Registry {
         self.widgets.keys().copied()
     }
 
+    /// The shared press-origin store.
+    pub fn press_origin(&self) -> &PressOrigin {
+        &self.press_origin
+    }
+
+    /// The theme-reveal notification hub.
+    pub fn theme_reveal(&self) -> &ThemeReveal {
+        &self.theme_reveal
+    }
+
+    /// The central widget-id registry.
+    pub fn ids(&self) -> &IdRegistry {
+        &self.ids
+    }
+
     /// Builds a whole layout into one iced element.
     ///
     /// Ordering rule inside an area: child areas first, then widgets (sorted
@@ -51,7 +73,14 @@ impl Registry {
         router: &'a ThemeRouter,
         store: &'a LayoutStore,
     ) -> Result<Element<'a, LayoutMessage>, BuildError> {
-        let ctx = BuildContext::root(router.theme(), self, store);
+        let ctx = BuildContext::root(
+            router.theme(),
+            self,
+            store,
+            &self.press_origin,
+            &self.theme_reveal,
+            &self.ids,
+        );
         self.build_embedded(layout, &ctx)
     }
 
@@ -59,7 +88,7 @@ impl Registry {
     pub fn build_embedded<'a>(
         &'a self,
         layout: &'a Layout,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, '_>,
     ) -> Result<Element<'a, LayoutMessage>, BuildError> {
         self.validate(layout)?;
         let roots: Vec<&Area> = layout
@@ -99,6 +128,11 @@ impl Registry {
             if !self.contains(&widget.kind) {
                 return Err(BuildError::UnknownWidget(widget.kind.clone()));
             }
+            if self.get(&widget.kind).is_some_and(WidgetDef::interactive)
+                && !self.ids.contains(&widget.id)
+            {
+                return Err(BuildError::UnregisteredId(widget.id.clone()));
+            }
             if !layout.areas.iter().any(|a| a.id == widget.area) {
                 return Err(BuildError::InvalidLayout(format!(
                     "widget `{}` references unknown area `{}`",
@@ -122,7 +156,7 @@ impl Registry {
     /// Builds one area and everything inside it.
     fn build_area<'a>(
         &'a self,
-        ctx: &BuildContext<'a>,
+        ctx: &BuildContext<'a, '_>,
         area: &'a Area,
         layout: &'a Layout,
     ) -> Result<Element<'a, LayoutMessage>, BuildError> {
@@ -148,7 +182,7 @@ impl Registry {
             let def = self
                 .get(&widget.kind)
                 .ok_or_else(|| BuildError::UnknownWidget(widget.kind.clone()))?;
-            let element = def.build(widget, widget.size, ctx);
+            let element = self.build_widget(def, widget, ctx);
             items.push((widget.z, 1, index, element));
         }
 
@@ -189,6 +223,51 @@ impl Registry {
             AreaKind::Stack => Stack::with_children(children).into(),
         })
     }
+
+    /// Builds one widget element, wrapping it in the engine-level theme-reveal
+    /// wrapper so it automatically follows the background sweep (the
+    /// background control itself opts out).
+    fn build_widget<'a, 't>(
+        &'a self,
+        def: &'a dyn WidgetDef,
+        widget: &'a Widget,
+        ctx: &BuildContext<'a, 't>,
+    ) -> Element<'a, LayoutMessage> {
+        let element = def.build(widget, widget.size, ctx);
+        if !def.follows_theme_reveal() {
+            return element;
+        }
+
+        // Rebuild closure: re-runs the same control's build with another
+        // theme, so the wrapper can switch its colors when the sweep reaches
+        // it without any per-control code.
+        let size = widget.size;
+        let registry = self;
+        let store = ctx.store;
+        let press_origin = ctx.press_origin;
+        let theme_reveal = ctx.theme_reveal;
+        let ids = ctx.ids;
+        let rebuild: Rebuild<'a, LayoutMessage> =
+            Arc::new(move |theme: &iced::Theme| {
+                let build_ctx = BuildContext::root(
+                    theme,
+                    registry,
+                    store,
+                    press_origin,
+                    theme_reveal,
+                    ids,
+                );
+                def.build(widget, size, &build_ctx)
+            });
+
+        RevealWrapper::new(
+            element,
+            rebuild,
+            ctx.theme.clone(),
+            ctx.theme_reveal.clone(),
+        )
+        .into()
+    }
 }
 
 #[cfg(test)]
@@ -209,8 +288,8 @@ mod tests {
                 widgets: [
                     Widget(id: "greeting", kind: "text", area: "root", props: { "text": "hi" }),
                     Widget(id: "go", kind: "button", area: "root", props: { "label": "Go" }),
-                    Widget(id: "icon", kind: "icon_button", area: "root", props: { "icon": "add" }),
-                    Widget(id: "heart", kind: "icon", area: "root", props: { "name": "favorite", "size": "16" }),
+                    Widget(id: "icon", kind: "icon_button", area: "root", props: { "icon": "add_rounded" }),
+                    Widget(id: "heart", kind: "icon", area: "root", props: { "name": "favorite_rounded", "size": "16" }),
                 ],
             )
             "#,
@@ -219,6 +298,7 @@ mod tests {
 
         let registry = crate::builtin_registry();
         let store = LayoutStore::new();
+        registry.ids().register_all(["go", "icon"]);
         let router = ThemeRouter::new(iced::Theme::Dark);
         let element = registry
             .build(&layout, &router, &store)
@@ -248,6 +328,31 @@ mod tests {
         assert_eq!(
             result.err(),
             Some(BuildError::UnknownWidget("no_such_widget".into()))
+        );
+    }
+
+    #[test]
+    fn interactive_widget_without_declared_id_is_rejected() {
+        let layout = Layout::parse(
+            r#"
+            Layout(
+                areas: [
+                    Area(id: "root", kind: Column),
+                ],
+                widgets: [
+                    Widget(id: "go", kind: "button", area: "root", props: { "label": "Go" }),
+                ],
+            )
+            "#,
+        )
+        .expect("layout parses");
+        let registry = crate::builtin_registry();
+        let store = LayoutStore::new();
+        let router = ThemeRouter::new(iced::Theme::Light);
+        let result = registry.build(&layout, &router, &store);
+        assert_eq!(
+            result.err(),
+            Some(BuildError::UnregisteredId("go".into()))
         );
     }
 
@@ -286,6 +391,7 @@ mod tests {
         let store = LayoutStore::load("layouts/desktop", "layouts/common")
             .expect("layout store loads");
         assert!(store.resolve("login_form").is_some(), "common block missing");
+        registry.ids().register_all(["username", "password", "login"]);
 
         let page = store.resolve("login_page").expect("page layout resolves");
         let router = ThemeRouter::new(iced::Theme::Dark);
