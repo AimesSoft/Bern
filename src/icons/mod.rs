@@ -41,9 +41,10 @@ pub fn glyph_string(name: &str) -> Option<String> {
 /// Call this once at application startup, from your boot/init task:
 ///
 /// ```no_run
-/// # fn main() {}
+/// # fn main() {
 /// let task = rern::icons::load();
 /// # drop(task);
+/// # }
 /// ```
 pub fn load() -> iced::Task<Result<(), iced::font::Error>> {
     iced::font::load(include_bytes!("../../assets/fonts/MaterialIcons-Regular.otf").as_slice())

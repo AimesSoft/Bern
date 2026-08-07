@@ -264,6 +264,25 @@ Widget(id: "seek_progress", kind: "progress", area: "root", props: { "value": "0
   嵌入前缀（如 `page.seek`），应用用 `{容器id}.{控件id}` 匹配；
 - 可调属性：`value`、`size`（宽度策略）。
 
+## 下拉菜单（移植自 nipaplay BlurDropdown）
+
+`dropdown` 控件与 nipaplay 的模糊下拉菜单外观一致：
+
+```ron
+Widget(id: "lib_sort", kind: "dropdown", area: "root",
+       props: { "items": "名称:sort_name,大小:sort_size,时间:sort_time",
+                "selected": "sort_name" })
+```
+
+- 40px 圆角触发器：边框在打开时变强调色，右侧箭头旋转 180°；
+- 点击弹出下方菜单：200ms 淡入 + 0.95→1 缩放，圆角 6 面板 + 柔和阴影，
+  菜单项带分隔线、选中底色、悬浮高亮；
+- 点击菜单项发布 `(item_key, Pressed)` 并关闭；点击菜单外（遮罩）关闭；
+- `items` 的键是交互 id（进 ids.rs），`selected` 由应用点击后写回——
+  和 Tab / 滑块同一套路；
+- 菜单浮层通过 iced overlay 实现，引擎的缩放包装器（ScaleWrapper）与
+  主题揭示包装器都会自动转发浮层，缩放状态下菜单位置/尺寸同样按比例。
+
 ## 目录结构
 
 ```text

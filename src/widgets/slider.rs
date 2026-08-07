@@ -391,7 +391,6 @@ impl Widget<LayoutMessage, iced::Theme, iced::Renderer> for SliderView {
                     blur_radius: if emphasis { 12.0 } else { 8.0 },
                 },
                 snap: false,
-                ..Default::default()
             },
             self.thumb,
         );

@@ -183,6 +183,23 @@ impl<'a, Message> Widget<Message, iced::Theme, iced::Renderer> for RevealWrapper
             renderer,
         )
     }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: iced::Vector,
+    ) -> Option<iced::advanced::overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        self.child.as_widget_mut().overlay(
+            &mut tree.children[0],
+            layout,
+            renderer,
+            viewport,
+            translation,
+        )
+    }
 }
 
 impl<'a, Message: 'a> From<RevealWrapper<'a, Message>> for Element<'a, Message> {

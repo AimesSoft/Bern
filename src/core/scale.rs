@@ -12,11 +12,12 @@
 //! 拖动一个缩放滑块），下一次构建整棵界面就按新比例渲染。
 
 use iced::advanced::layout::{Limits, Node};
+use iced::advanced::overlay;
 use iced::advanced::renderer::Style;
 use iced::advanced::widget::tree::{self, Tree};
-use iced::advanced::{Clipboard, Renderer, Shell, Widget, mouse};
+use iced::advanced::{Clipboard, Overlay, Renderer, Shell, Widget, mouse};
 use iced::event::Event;
-use iced::{Element, Length, Point, Rectangle, Size, Transformation};
+use iced::{Element, Length, Point, Rectangle, Size, Transformation, Vector};
 use std::sync::{Arc, Mutex};
 
 use crate::core::widget::LayoutMessage;
@@ -202,11 +203,138 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for ScaleWrapper<'_, 
             mouse::Interaction::default()
         }
     }
+
+    fn overlay<'b>(
+        &'b mut self,
+        tree: &'b mut Tree,
+        layout: iced::advanced::layout::Layout<'b>,
+        renderer: &iced::Renderer,
+        viewport: &Rectangle,
+        translation: Vector,
+    ) -> Option<overlay::Element<'b, Message, iced::Theme, iced::Renderer>> {
+        let scale = self.scale.get();
+        let child_overlay = if let Some(child_layout) = layout.children().next() {
+            self.child.as_widget_mut().overlay(
+                &mut tree.children[0],
+                child_layout,
+                renderer,
+                viewport,
+                translation,
+            )
+        } else {
+            None
+        };
+        child_overlay.map(|inner| {
+            overlay::Element::new(Box::new(ScaledOverlay {
+                scale,
+                inner,
+            }))
+        })
+    }
 }
 
 impl<'a> From<ScaleWrapper<'a, LayoutMessage>> for Element<'a, LayoutMessage> {
     fn from(wrapper: ScaleWrapper<'a, LayoutMessage>) -> Self {
         Element::new(wrapper)
+    }
+}
+
+/// 把子控件 overlay 整体放大 `scale` 倍。
+///
+/// iced 运行时对 overlay 是两段式：update 阶段调 `overlay()` 得到
+/// overlay A 并布局（布局节点被存下来），draw 阶段**重新**调 `overlay()`
+/// 得到新实例 overlay B，再用 A 的布局节点绘制。因此这里不能缓存虚拟
+/// 节点，也不能在 draw 里重建节点树——`Layout::children()` 会给子节点
+/// 叠加父节点偏移，重建必然二次偏移。
+///
+/// 正确做法：布局阶段用「虚拟窗口」（尺寸 ÷ scale）让内层排布，节点
+/// 原样保留（虚拟坐标）；绘制时对整个 overlay 施加缩放变换；update /
+/// 鼠标交互直接用虚拟坐标布局，鼠标坐标按 1/scale 反向换算。
+struct ScaledOverlay<'a, Message> {
+    scale: f32,
+    inner: overlay::Element<'a, Message, iced::Theme, iced::Renderer>,
+}
+
+impl<Message> Overlay<Message, iced::Theme, iced::Renderer> for ScaledOverlay<'_, Message> {
+    fn layout(&mut self, renderer: &iced::Renderer, bounds: Size) -> Node {
+        let virtual_bounds = Size::new(bounds.width / self.scale, bounds.height / self.scale);
+        self.inner.as_overlay_mut().layout(renderer, virtual_bounds)
+    }
+
+    fn update(
+        &mut self,
+        event: &Event,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+        clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+    ) {
+        let virtual_cursor = match cursor.position() {
+            Some(position) => mouse::Cursor::Available(Point::new(
+                position.x / self.scale,
+                position.y / self.scale,
+            )),
+            None => cursor,
+        };
+        self.inner.as_overlay_mut().update(
+            event,
+            layout,
+            virtual_cursor,
+            renderer,
+            clipboard,
+            shell,
+        );
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &iced::Renderer,
+    ) -> mouse::Interaction {
+        let virtual_cursor = match cursor.position() {
+            Some(position) => mouse::Cursor::Available(Point::new(
+                position.x / self.scale,
+                position.y / self.scale,
+            )),
+            None => cursor,
+        };
+        self.inner.as_overlay().mouse_interaction(
+            layout,
+            virtual_cursor,
+            renderer,
+        )
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut iced::Renderer,
+        theme: &iced::Theme,
+        style: &Style,
+        layout: iced::advanced::layout::Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        let virtual_cursor = match cursor.position() {
+            Some(position) => mouse::Cursor::Available(Point::new(
+                position.x / self.scale,
+                position.y / self.scale,
+            )),
+            None => cursor,
+        };
+        renderer.with_transformation(Transformation::scale(self.scale), |renderer| {
+            self.inner.as_overlay().draw(
+                renderer,
+                theme,
+                style,
+                layout,
+                virtual_cursor,
+            );
+        });
+    }
+
+    fn index(&self) -> f32 {
+        self.inner.as_overlay().index()
     }
 }
 

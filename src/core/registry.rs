@@ -138,13 +138,18 @@ impl Registry {
             {
                 return Err(BuildError::UnregisteredId(widget.id.clone()));
             }
-            // `h_tab` declares per-item interaction ids in its `items` prop;
-            // each key must be registered in the central ids.rs as well.
-            if widget.kind == crate::widgets::h_tab::NAME {
+            // `h_tab` / `dropdown` 在 `items` prop 里声明各自的交互 id，
+            // 每个 key 都必须注册在中央 ids.rs。
+            if widget.kind == crate::widgets::h_tab::NAME
+                || widget.kind == crate::widgets::dropdown::NAME
+            {
                 let keys =
                     crate::widgets::h_tab::validate_items(widget.str_prop("items").unwrap_or(""))
                         .map_err(|reason| {
-                        BuildError::InvalidLayout(format!("h_tab `{}`: {reason}", widget.id))
+                        BuildError::InvalidLayout(format!(
+                            "{} `{}`: {reason}",
+                            widget.kind, widget.id
+                        ))
                     })?;
                 for key in keys {
                     if !self.ids.contains(&key) {
