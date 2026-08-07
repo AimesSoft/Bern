@@ -1,0 +1,10 @@
+[package]
+name = "rern"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.14", features = ["advanced"] }
+ron = "0.12.2"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"

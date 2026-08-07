@@ -1,0 +1,15 @@
+// A reusable building block: greeting + username + password + login button.
+// Any page layout can embed it as a widget with `kind: "layout"`.
+Layout(
+    name: "login_form",
+    areas: [
+        Area(id: "form", kind: Column, padding: 16, spacing: 10),
+        Area(id: "fields", kind: Column, parent: "form", spacing: 10),
+    ],
+    widgets: [
+        Widget(id: "greeting", kind: "title", area: "form", props: { "text": "Welcome" }),
+        Widget(id: "username", kind: "text_input", area: "fields", props: { "placeholder": "Username" }),
+        Widget(id: "password", kind: "text_input", area: "fields", props: { "placeholder": "Password" }),
+        Widget(id: "login", kind: "button", area: "form", size: Fill, props: { "label": "Sign in" }),
+    ],
+)

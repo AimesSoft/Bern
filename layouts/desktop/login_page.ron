@@ -1,0 +1,13 @@
+// Desktop page: background + the shared login_form building block.
+Layout(
+    name: "login_page",
+    areas: [
+        Area(id: "root", kind: Stack),
+    ],
+    widgets: [
+        Widget(id: "bg", kind: "rect", area: "root", z: -1, size: Fill),
+        // Draw the shared block in place; its ids become `form.greeting`,
+        // `form.login`, ... so events stay distinguishable.
+        Widget(id: "form", kind: "layout", area: "root", props: { "src": "login_form" }),
+    ],
+)
