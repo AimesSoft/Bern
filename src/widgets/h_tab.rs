@@ -22,7 +22,10 @@
 //! - hovering zooms the label to `hover_scale` (default 1.1) with a smooth
 //!   200 ms ease-out animation;
 //! - a rounded capsule (default 3 px tall) sits at the bottom of the selected
-//!   label and slides between tabs (300 ms) when the selection changes.
+//!   label and slides between tabs (300 ms) when the selection changes;
+//! - the tab owns its own spacing: 12 px below the capsule, so a title or
+//!   any content placed directly under it in a Column gets a natural gap
+//!   without the layout adding padding.
 
 use crate::core::layout::Widget as LayoutWidget;
 use crate::core::ui::PressOrigin;
@@ -141,6 +144,18 @@ impl WidgetDef for HTab {
             .prop("item_padding")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(8.0);
+        // 选中项由布局的 `selected` prop 决定（键名或索引，默认第一项）。
+        // 应用点击 Tab 后把这个 prop 写回（和滑块 value 同一套路），
+        // 选中项的文字加粗、胶囊滑到该项。
+        let selected = node
+            .prop("selected")
+            .and_then(|s| {
+                items
+                    .iter()
+                    .position(|(_, key)| key == s)
+                    .or_else(|| s.parse::<usize>().ok().filter(|&i| i < items.len()))
+            })
+            .unwrap_or(0);
 
         let is_dark = ctx.theme.extended_palette().is_dark;
         let accent = ctx.theme.extended_palette().primary.base.color;
@@ -150,12 +165,22 @@ impl WidgetDef for HTab {
 
         let labels = items
             .iter()
-            .map(|(label, _)| iced::widget::text(label.clone()).size(font_size).into())
+            .enumerate()
+            .map(|(index, (label, _))| {
+                let mut text = iced::widget::text(label.clone()).size(font_size);
+                if index == selected {
+                    // 选中项加粗：用框架加载的粗体字族（iced 默认字体库
+                    // 没有粗体字面，Weight::Bold 会被静默忽略）。
+                    text = text.font(crate::fonts::bold_font());
+                }
+                text.into()
+            })
             .collect();
 
         HTabView {
             items,
             labels,
+            selected,
             hover_scale,
             hover_duration,
             indicator_duration,
@@ -179,6 +204,8 @@ pub struct HTabView<'a> {
     items: Vec<(String, String)>,
     /// The label elements (colors are applied per-item at draw time).
     labels: Vec<Element<'a, LayoutMessage>>,
+    /// The selected item index (from the layout `selected` prop).
+    selected: usize,
     hover_scale: f32,
     hover_duration: f32,
     indicator_duration: f32,
@@ -193,17 +220,19 @@ pub struct HTabView<'a> {
 
 /// Space between the labels and the capsule indicator.
 const INDICATOR_GAP: f32 = 12.0;
+/// Space below the capsule, owned by this control: content placed directly
+/// under the tab (e.g. a title in a Column) gets this natural gap without
+/// the layout having to add padding.
+const INDICATOR_BOTTOM_PAD: f32 = 12.0;
 
-/// Widget-tree state: hover per item, selected index, and the sliding
-/// capsule animation.
+/// Widget-tree state: hover per item and the sliding capsule animation.
+/// The selected index lives in the layout prop, not here.
 #[derive(Default)]
 struct State {
     /// The hovered item (if any).
     hovered: Option<usize>,
     /// Per-item hover animation progress (0 = rest, 1 = fully hovered).
     hover_progress: Vec<f32>,
-    /// The selected item.
-    selected: usize,
     /// Capsule animation: it slides from `from` to `to`.
     from: usize,
     to: usize,
@@ -213,10 +242,12 @@ struct State {
 }
 
 impl State {
-    fn initial(item_count: usize) -> Self {
+    fn initial(item_count: usize, selected: usize) -> Self {
         Self {
             hover_progress: vec![0.0; item_count],
-            // The capsule rests on the first tab at startup.
+            // The capsule rests on the selected tab at startup.
+            from: selected,
+            to: selected,
             progress: 1.0,
             ..Default::default()
         }
@@ -247,7 +278,7 @@ impl<'a> Widget<LayoutMessage, iced::Theme, iced::Renderer> for HTabView<'a> {
             height = height.max(node.size().height);
             nodes.push(node);
         }
-        let total_height = height + INDICATOR_GAP + self.indicator_height;
+        let total_height = height + INDICATOR_GAP + self.indicator_height + INDICATOR_BOTTOM_PAD;
         let mut x = 0.0;
         for node in &mut nodes {
             node.move_to_mut(Point::new(x + self.item_padding, 0.0));
@@ -261,7 +292,7 @@ impl<'a> Widget<LayoutMessage, iced::Theme, iced::Renderer> for HTabView<'a> {
     }
 
     fn state(&self) -> tree::State {
-        tree::State::Some(Box::new(State::initial(self.items.len())))
+        tree::State::Some(Box::new(State::initial(self.items.len(), self.selected)))
     }
 
     fn children(&self) -> Vec<Tree> {
@@ -272,11 +303,11 @@ impl<'a> Widget<LayoutMessage, iced::Theme, iced::Renderer> for HTabView<'a> {
         tree.diff_children(&self.labels);
         let state = tree.state.downcast_mut::<State>();
         state.hover_progress.resize(self.items.len(), 0.0);
-        if state.selected >= self.items.len() {
-            state.selected = 0;
-            state.from = 0;
-            state.to = 0;
-            state.progress = 1.0;
+        // 布局的 `selected` prop 变了：胶囊从旧位置滑到新位置。
+        if state.to != self.selected {
+            state.from = state.to;
+            state.to = self.selected;
+            state.progress = 0.0;
         }
     }
 
@@ -317,12 +348,6 @@ impl<'a> Widget<LayoutMessage, iced::Theme, iced::Renderer> for HTabView<'a> {
                 if let Some(index) = hovered {
                     let center = item_rects[index].center();
                     self.press_origin.record((center.x, center.y));
-                    if index != state.selected {
-                        state.from = state.selected;
-                        state.to = index;
-                        state.progress = 0.0;
-                        state.selected = index;
-                    }
                     shell.publish(LayoutMessage::Event(WidgetEvent {
                         widget_id: self.items[index].1.clone(),
                         kind: EventKind::Pressed,
@@ -400,7 +425,7 @@ impl<'a> Widget<LayoutMessage, iced::Theme, iced::Renderer> for HTabView<'a> {
             let capsule = Rectangle::new(
                 Point::new(
                     from.x + (to.x - from.x) * eased,
-                    bounds.y + bounds.height - self.indicator_height,
+                    bounds.y + bounds.height - INDICATOR_BOTTOM_PAD - self.indicator_height,
                 ),
                 Size::new(
                     from.width + (to.width - from.width) * eased,
@@ -420,7 +445,7 @@ impl<'a> Widget<LayoutMessage, iced::Theme, iced::Renderer> for HTabView<'a> {
         for (i, child) in child_layouts.iter().enumerate() {
             let label_bounds = child.bounds();
             let center = label_bounds.center();
-            let selected = state.selected == i;
+            let selected = self.selected == i;
             let hovered = state.hovered == Some(i);
             let scale = 1.0 + (self.hover_scale - 1.0) * ease_out_cubic(state.hover_progress[i]);
             let color = if selected {

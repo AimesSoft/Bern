@@ -46,9 +46,7 @@ pub fn glyph_string(name: &str) -> Option<String> {
 /// # drop(task);
 /// ```
 pub fn load() -> iced::Task<Result<(), iced::font::Error>> {
-    iced::font::load(
-        include_bytes!("../../assets/fonts/MaterialIcons-Regular.otf").as_slice(),
-    )
+    iced::font::load(include_bytes!("../../assets/fonts/MaterialIcons-Regular.otf").as_slice())
 }
 
 #[cfg(test)]

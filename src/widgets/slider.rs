@@ -40,9 +40,7 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Renderer, Shell, Widget, mouse};
 use iced::event::Event;
 use iced::window;
-use iced::{
-    Border, Color, Element, Length, Point, Rectangle, Shadow, Size, Vector,
-};
+use iced::{Border, Color, Element, Length, Point, Rectangle, Shadow, Size, Vector};
 use std::time::Instant;
 
 /// The layout name of the interactive slider.
@@ -192,12 +190,7 @@ impl Widget<LayoutMessage, iced::Theme, iced::Renderer> for SliderView {
         Size::new(self.width, Length::Fixed(BAR_HEIGHT))
     }
 
-    fn layout(
-        &mut self,
-        _tree: &mut Tree,
-        _renderer: &iced::Renderer,
-        limits: &Limits,
-    ) -> Node {
+    fn layout(&mut self, _tree: &mut Tree, _renderer: &iced::Renderer, limits: &Limits) -> Node {
         layout::atomic(limits, self.width, Length::Fixed(BAR_HEIGHT))
     }
 
@@ -377,18 +370,14 @@ impl Widget<LayoutMessage, iced::Theme, iced::Renderer> for SliderView {
         let squeeze = state.deform.max(0.0);
         let rebound = (-state.deform).max(0.0);
         let hover_scale = 1.0 + HOVER_SCALE * growth;
-        let width_scale =
-            (hover_scale * (1.0 - 0.42 * squeeze + 0.34 * rebound)).clamp(0.56, 1.38);
+        let width_scale = (hover_scale * (1.0 - 0.42 * squeeze + 0.34 * rebound)).clamp(0.56, 1.38);
         let height_scale =
             (hover_scale * (1.0 + 0.40 * squeeze - 0.30 * rebound)).clamp(0.68, 1.42);
         let thumb_width = THUMB_BASE.width * width_scale;
         let thumb_height = THUMB_BASE.height * height_scale;
         let thumb_x = bounds.x + bounds.width * self.value;
         let thumb = Rectangle::new(
-            Point::new(
-                thumb_x - thumb_width / 2.0,
-                center_y - thumb_height / 2.0,
-            ),
+            Point::new(thumb_x - thumb_width / 2.0, center_y - thumb_height / 2.0),
             Size::new(thumb_width, thumb_height),
         );
         let emphasis = state.dragging || state.hovered || state.deform.abs() > 0.05;

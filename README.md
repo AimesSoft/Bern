@@ -203,6 +203,8 @@ Widget(id: "nav", kind: "h_tab", area: "topbar",
   和按钮一样写在应用的 `ids.rs` 里，构建布局时框架会校验每一项都已注册；
 - 按下某个 Tab 发布 `(key, Pressed)` 事件，应用按 id 切换内容；高亮和
   胶囊移动由控件自己维护，应用无需驱动；
+- **选中项文字加粗**：`selected` prop 指向当前项（应用点击后写回，和
+  滑块 value 同一套路），选中标签用粗体字族渲染；
 - **多页面切换**：应用收到 Tab 事件后，把页面容器（`kind: "layout"`）
   的 `src` 换成另一个布局文件即可换页——helloworld 里就是
   `hello_card` / `page_video` / `page_library` 三个独立布局在运行时切换，
@@ -211,7 +213,12 @@ Widget(id: "nav", kind: "h_tab", area: "topbar",
   深色 60% / 浅色 54% 透明度，选中标签和胶囊用主题强调色；
 - 可调属性：`font_size`、`hover_scale`、`duration_ms`（悬浮）、
   `indicator_ms`（胶囊滑动）、`indicator_height`、`indicator_radius`、
-  `item_padding`。
+  `item_padding`、`selected`。
+
+> iced 0.14 的字体库默认没有粗体字面，`Weight::Bold` 会被忽略。框架的
+> `fonts` 模块启动时加载系统粗体中文字体（macOS 用 Hiragino Sans GB），
+> 应用在 boot 里调用一次 `rern::fonts::load_bold()` 即可让加粗生效；
+> 找不到粗体字体会优雅回退为常规字重。
 
 ## 滑块与进度条（胶囊轨道 + 果冻滑块）
 
