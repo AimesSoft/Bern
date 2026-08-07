@@ -5,7 +5,7 @@
 
 use crate::core::layout::Widget;
 use crate::core::widget::{
-    size_lengths, BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent,
+    BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent, size_lengths,
 };
 use iced::widget::text_input;
 use iced::{Background, Border, Color, Element};
@@ -67,16 +67,16 @@ impl WidgetDef for TextInput {
                 })
             })
             .padding(8u16)
-            .style(move |_theme: &iced::Theme, _status: text_input::Status| {
-                text_input::Style {
+            .style(
+                move |_theme: &iced::Theme, _status: text_input::Status| text_input::Style {
                     background: Background::Color(background),
                     border: Border::default().rounded(radius).color(border_color),
                     icon: text_color,
                     placeholder: placeholder_color,
                     value: text_color,
                     selection: border_color,
-                }
-            })
+                },
+            )
             .into()
     }
 }

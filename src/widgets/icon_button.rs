@@ -15,16 +15,20 @@
 //! The `icon` prop accepts a Material icon name (e.g. `"add_rounded"`,
 //! `"favorite_rounded"`) via the embedded icon package; unknown names are
 //! rendered as raw text glyphs (e.g. `"→"`), so both styles work.
+//!
+//! Material icons render through the engine-level morph foundation
+//! ([`crate::core::morph`]): when the `icon` prop changes, the old glyph
+//! jelly-distorts into the new one instead of swapping instantly. Use
+//! `morph_duration_ms` to tune the morph speed (default 420ms).
 
 use crate::core::layout::Widget as LayoutWidget;
 use crate::core::ui::PressOrigin;
-use crate::core::widget::{
-    BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent,
-};
+use crate::core::widget::{BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent};
+use crate::widgets::morph_icon::MorphIconView;
 use iced::advanced::layout::{Layout, Limits, Node};
 use iced::advanced::renderer::Style;
 use iced::advanced::widget::tree::{self, Tree};
-use iced::advanced::{mouse, Clipboard, Renderer, Shell, Widget};
+use iced::advanced::{Clipboard, Renderer, Shell, Widget, mouse};
 use iced::event::Event;
 use iced::window;
 use iced::{Color, Element, Length, Padding, Rectangle, Size, Transformation};
@@ -88,23 +92,26 @@ impl WidgetDef for IconButton {
 
         // Material icon names render with the embedded icon font; anything
         // else falls back to a raw text glyph. Following the theme reveal is
-        // automatic (the registry wraps this control).
-        let content = match crate::icons::glyph(icon_name) {
-            Some(glyph) => iced::widget::text(glyph).font(crate::icons::font()),
-            None => iced::widget::text(icon_name),
+        // automatic (the registry wraps this control). Material icons use
+        // the vector morph foundation: switching icons jelly-morphs.
+        let morph_duration = node
+            .prop("morph_duration_ms")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(420.0)
+            / 1000.0;
+        let content: Element<'_, LayoutMessage> = match crate::icons::glyph(icon_name) {
+            Some(glyph) => {
+                MorphIconView::new(glyph, visual.icon_color, glyph_size, morph_duration).into()
+            }
+            None => iced::widget::text(icon_name).into(),
         };
-        let content = content.size(glyph_size).color(visual.icon_color);
 
-        IconButtonWidget::new(
-            content,
-            visual,
-            ctx.press_origin.clone(),
-        )
-        .on_press(LayoutMessage::Event(WidgetEvent {
-            widget_id: id,
-            kind: EventKind::Pressed,
-        }))
-        .into()
+        IconButtonWidget::new(content, visual, ctx.press_origin.clone())
+            .on_press(LayoutMessage::Event(WidgetEvent {
+                widget_id: id,
+                kind: EventKind::Pressed,
+            }))
+            .into()
     }
 }
 
@@ -161,8 +168,7 @@ impl State {
     }
 }
 
-impl<'a, Message> Widget<Message, iced::Theme, iced::Renderer>
-    for IconButtonWidget<'a, Message>
+impl<'a, Message> Widget<Message, iced::Theme, iced::Renderer> for IconButtonWidget<'a, Message>
 where
     Message: Clone,
 {
@@ -170,12 +176,7 @@ where
         Size::new(Length::Shrink, Length::Shrink)
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &iced::Renderer,
-        limits: &Limits,
-    ) -> Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &Limits) -> Node {
         let node = self
             .content
             .as_widget_mut()
@@ -338,9 +339,7 @@ where
     }
 }
 
-impl<'a, Message: Clone + 'a> From<IconButtonWidget<'a, Message>>
-    for Element<'a, Message>
-{
+impl<'a, Message: Clone + 'a> From<IconButtonWidget<'a, Message>> for Element<'a, Message> {
     fn from(widget: IconButtonWidget<'a, Message>) -> Self {
         Element::new(widget)
     }

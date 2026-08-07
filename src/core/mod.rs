@@ -2,6 +2,7 @@
 
 pub mod id;
 pub mod layout;
+pub mod morph;
 pub mod registry;
 pub mod store;
 pub mod theme;

@@ -44,9 +44,6 @@ impl WidgetDef for Icon {
             None => iced::widget::text(name),
         };
 
-        content
-            .size(size)
-            .color(ctx.theme.palette().text)
-            .into()
+        content.size(size).color(ctx.theme.palette().text).into()
     }
 }

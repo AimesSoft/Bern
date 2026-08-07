@@ -108,6 +108,29 @@ fn boot() -> (App, iced::Task<AppMessage>) {
 }
 ```
 
+## 矢量形变底层（图标果冻切换）
+
+框架的 [`core::morph`] 模块是引擎级的「图标形变」基础：用 `ttf-parser`
+直接从内嵌字体提取字形轮廓（二次/三次贝塞尔全部采样成折线），按弧长均匀
+重采样、归一化到 24×24 图标网格，再在两个字形之间**逐点插值**。配合带过冲
+回弹的果冻缓动（[`morph::jelly`]），图标从 1 切换到 2 时是真正的矢量
+扭曲形变，而不是交叉淡入。
+
+- `icon_button` 的 `icon` prop 变化时自动触发形变（例如主题开关的
+  `light_mode_rounded` ↔ `dark_mode_rounded`），`morph_duration_ms` 调时长
+  （默认 420ms）；
+- `morph_icon` 是独立的形变图标控件，布局里可直接使用：
+
+```ron
+Widget(id: "toggle", kind: "morph_icon", area: "actions",
+       props: { "icon": "dark_mode_rounded", "size": "20" })
+```
+
+- 任意两个图标都能形变：轮廓数量不一致时（月牙 1 轮廓 → 太阳 9 轮廓），
+  缺失的轮廓从对方字形质心“生长/收缩”，视觉上就是果冻鼓包/回缩；
+- 字形提取有缓存，同一字符只解析一次；动画运行在控件自身状态里，引擎
+  自动跟随主题揭示（`RevealWrapper`），控件无需额外订阅。
+
 ## 深浅色：写进控件代码，用规范接口
 
 深浅色**不允许**在单独的地方（主题文件、配置项）配置。每个控件在它自己的
@@ -176,13 +199,15 @@ Rern/
 │   │   ├── widget.rs     # WidgetDef、LayoutMessage、事件桥
 │   │   ├── registry.rs   # 注册表 + 布局运行时（areas -> iced 树）
 │   │   ├── layout.rs     # RON 布局解析（areas + widgets）
+│   │   ├── morph.rs      # 矢量形变底层（字形提取/重采样/果冻插值）
 │   │   └── store.rs      # 布局目录加载（common + 设备）
 │   ├── icons/            # Material Icons（内嵌字体 + 名称映射）
 │   └── widgets/          # 每个控件一个文件
 │       ├── rect.rs       # 背景/色块
 │       ├── title.rs      # 标题
 │       ├── icon.rs       # 图标
-│       ├── icon_button.rs # 图标按钮（悬浮放大动画）
+│       ├── morph_icon.rs # 形变图标（矢量果冻切换）
+│       ├── icon_button.rs # 图标按钮（悬浮放大 + 图标形变）
 │       ├── text.rs
 │       ├── text_input.rs
 │       └── button.rs

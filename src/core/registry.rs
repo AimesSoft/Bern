@@ -1,15 +1,15 @@
 //! The widget registry and the layout runtime: turns a flat RON layout into
 //! an iced widget tree.
 
-use crate::core::layout::{Area, AreaKind, Layout, Widget};
 use crate::core::id::IdRegistry;
+use crate::core::layout::{Area, AreaKind, Layout, Widget};
 use crate::core::store::LayoutStore;
 use crate::core::theme::ThemeRouter;
 use crate::core::ui::{PressOrigin, ThemeReveal};
 use crate::core::widget::{BuildContext, BuildError, LayoutMessage, WidgetDef};
 use crate::widgets::reveal_wrapper::{Rebuild, RevealWrapper};
-use iced::widget::{Column, Row, Stack};
 use iced::Element;
+use iced::widget::{Column, Row, Stack};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -91,11 +91,7 @@ impl Registry {
         ctx: &BuildContext<'a, '_>,
     ) -> Result<Element<'a, LayoutMessage>, BuildError> {
         self.validate(layout)?;
-        let roots: Vec<&Area> = layout
-            .areas
-            .iter()
-            .filter(|a| a.parent.is_none())
-            .collect();
+        let roots: Vec<&Area> = layout.areas.iter().filter(|a| a.parent.is_none()).collect();
         match roots.as_slice() {
             [root] => self.build_area(ctx, root, layout),
             [] => Err(BuildError::InvalidLayout(
@@ -247,18 +243,11 @@ impl Registry {
         let press_origin = ctx.press_origin;
         let theme_reveal = ctx.theme_reveal;
         let ids = ctx.ids;
-        let rebuild: Rebuild<'a, LayoutMessage> =
-            Arc::new(move |theme: &iced::Theme| {
-                let build_ctx = BuildContext::root(
-                    theme,
-                    registry,
-                    store,
-                    press_origin,
-                    theme_reveal,
-                    ids,
-                );
-                def.build(widget, size, &build_ctx)
-            });
+        let rebuild: Rebuild<'a, LayoutMessage> = Arc::new(move |theme: &iced::Theme| {
+            let build_ctx =
+                BuildContext::root(theme, registry, store, press_origin, theme_reveal, ids);
+            def.build(widget, size, &build_ctx)
+        });
 
         RevealWrapper::new(
             element,
@@ -350,10 +339,7 @@ mod tests {
         let store = LayoutStore::new();
         let router = ThemeRouter::new(iced::Theme::Light);
         let result = registry.build(&layout, &router, &store);
-        assert_eq!(
-            result.err(),
-            Some(BuildError::UnregisteredId("go".into()))
-        );
+        assert_eq!(result.err(), Some(BuildError::UnregisteredId("go".into())));
     }
 
     #[test]
@@ -388,10 +374,15 @@ mod tests {
     #[test]
     fn example_files_load_and_build() {
         let registry = crate::builtin_registry();
-        let store = LayoutStore::load("layouts/desktop", "layouts/common")
-            .expect("layout store loads");
-        assert!(store.resolve("login_form").is_some(), "common block missing");
-        registry.ids().register_all(["username", "password", "login"]);
+        let store =
+            LayoutStore::load("layouts/desktop", "layouts/common").expect("layout store loads");
+        assert!(
+            store.resolve("login_form").is_some(),
+            "common block missing"
+        );
+        registry
+            .ids()
+            .register_all(["username", "password", "login"]);
 
         let page = store.resolve("login_page").expect("page layout resolves");
         let router = ThemeRouter::new(iced::Theme::Dark);

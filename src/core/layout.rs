@@ -35,8 +35,8 @@ impl Layout {
 
     /// Load and parse a layout file from disk.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
-        let source = std::fs::read_to_string(path.as_ref())
-            .map_err(|e| format!("read layout: {e}"))?;
+        let source =
+            std::fs::read_to_string(path.as_ref()).map_err(|e| format!("read layout: {e}"))?;
         Self::parse(&source).map_err(|e| format!("parse layout: {e}"))
     }
 }

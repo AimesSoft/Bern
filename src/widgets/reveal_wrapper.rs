@@ -59,19 +59,12 @@ struct State {
     covered: bool,
 }
 
-impl<'a, Message> Widget<Message, iced::Theme, iced::Renderer>
-    for RevealWrapper<'a, Message>
-{
+impl<'a, Message> Widget<Message, iced::Theme, iced::Renderer> for RevealWrapper<'a, Message> {
     fn size(&self) -> Size<Length> {
         self.child.as_widget().size()
     }
 
-    fn layout(
-        &mut self,
-        tree: &mut Tree,
-        renderer: &iced::Renderer,
-        limits: &Limits,
-    ) -> Node {
+    fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &Limits) -> Node {
         self.child
             .as_widget_mut()
             .layout(&mut tree.children[0], renderer, limits)
@@ -133,7 +126,8 @@ impl<'a, Message> Widget<Message, iced::Theme, iced::Renderer>
                 state.subscriber = Some(self.reveal.subscribe((center.x, center.y)));
                 state.subscribed_epoch = self.reveal.epoch();
             } else if let Some(subscriber) = state.subscriber {
-                self.reveal.update_position(subscriber, (center.x, center.y));
+                self.reveal
+                    .update_position(subscriber, (center.x, center.y));
             }
 
             // The sweep reached this control: rebuild it with the target

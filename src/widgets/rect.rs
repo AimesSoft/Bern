@@ -13,11 +13,11 @@
 
 use crate::core::layout::Widget as LayoutWidget;
 use crate::core::ui::ThemeReveal;
-use crate::core::widget::{size_lengths, BuildContext, LayoutMessage, WidgetDef};
+use crate::core::widget::{BuildContext, LayoutMessage, WidgetDef, size_lengths};
 use iced::advanced::layout::{Layout, Limits, Node};
 use iced::advanced::renderer::{Quad, Style};
 use iced::advanced::widget::tree::{self, Tree};
-use iced::advanced::{mouse, Clipboard, Renderer, Shell, Widget};
+use iced::advanced::{Clipboard, Renderer, Shell, Widget, mouse};
 use iced::event::Event;
 use iced::window;
 use iced::{Border, Color, Element, Length, Rectangle, Size};
@@ -138,12 +138,7 @@ impl Widget<LayoutMessage, iced::Theme, iced::Renderer> for BackgroundWidget {
         Size::new(self.width, self.height)
     }
 
-    fn layout(
-        &mut self,
-        _tree: &mut Tree,
-        _renderer: &iced::Renderer,
-        limits: &Limits,
-    ) -> Node {
+    fn layout(&mut self, _tree: &mut Tree, _renderer: &iced::Renderer, limits: &Limits) -> Node {
         Node::new(limits.resolve(self.width, self.height, Size::ZERO))
     }
 

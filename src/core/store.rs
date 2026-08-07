@@ -76,10 +76,15 @@ mod tests {
 
     #[test]
     fn loads_common_and_device_layouts() {
-        let store =
-            LayoutStore::load("layouts/desktop", "layouts/common").expect("store loads");
+        let store = LayoutStore::load("layouts/desktop", "layouts/common").expect("store loads");
 
-        assert!(store.resolve("login_form").is_some(), "common block missing");
-        assert!(store.resolve("login_page").is_some(), "desktop page missing");
+        assert!(
+            store.resolve("login_form").is_some(),
+            "common block missing"
+        );
+        assert!(
+            store.resolve("login_page").is_some(),
+            "desktop page missing"
+        );
     }
 }

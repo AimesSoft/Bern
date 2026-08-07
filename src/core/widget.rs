@@ -1,8 +1,8 @@
 //! The widget contract: what every control must provide to be usable from a
 //! layout file, and how events flow back to the application.
 
-use crate::core::layout::{SizePolicy, Widget};
 use crate::core::id::IdRegistry;
+use crate::core::layout::{SizePolicy, Widget};
 use crate::core::registry::Registry;
 use crate::core::store::LayoutStore;
 use crate::core::ui::{PressOrigin, ThemeReveal};
@@ -180,10 +180,7 @@ pub enum BuildError {
     /// The layout referenced a widget type that is not registered.
     UnknownWidget(String),
     /// A required property is missing on the node.
-    MissingProp {
-        widget: String,
-        prop: String,
-    },
+    MissingProp { widget: String, prop: String },
     /// A property has an invalid value.
     BadProp {
         widget: String,

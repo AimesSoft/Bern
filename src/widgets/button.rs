@@ -5,7 +5,7 @@
 
 use crate::core::layout::Widget;
 use crate::core::widget::{
-    size_lengths, BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent,
+    BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent, size_lengths,
 };
 use iced::widget::button;
 use iced::{Background, Border, Element};
