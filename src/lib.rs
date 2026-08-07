@@ -25,6 +25,7 @@ pub mod widgets;
 pub use core::id::IdRegistry;
 pub use core::layout::{Area, AreaKind, Layout, SizePolicy, Widget};
 pub use core::registry::Registry;
+pub use core::scale::{MAX_SCALE, MIN_SCALE, UiScale};
 pub use core::store::LayoutStore;
 pub use core::theme::ThemeRouter;
 pub use core::ui::{PressOrigin, ThemeReveal};

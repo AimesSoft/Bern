@@ -3,6 +3,7 @@
 
 use crate::core::id::IdRegistry;
 use crate::core::layout::{Area, AreaKind, Layout, Widget};
+use crate::core::scale::{ScaleWrapper, UiScale};
 use crate::core::store::LayoutStore;
 use crate::core::theme::ThemeRouter;
 use crate::core::ui::{PressOrigin, ThemeReveal};
@@ -19,6 +20,7 @@ pub struct Registry {
     widgets: HashMap<&'static str, Box<dyn WidgetDef>>,
     press_origin: PressOrigin,
     theme_reveal: ThemeReveal,
+    scale: UiScale,
     ids: IdRegistry,
 }
 
@@ -58,6 +60,11 @@ impl Registry {
         &self.theme_reveal
     }
 
+    /// The shared whole-UI scale factor (1.0..=2.0).
+    pub fn scale(&self) -> &UiScale {
+        &self.scale
+    }
+
     /// The central widget-id registry.
     pub fn ids(&self) -> &IdRegistry {
         &self.ids
@@ -81,7 +88,9 @@ impl Registry {
             &self.theme_reveal,
             &self.ids,
         );
-        self.build_embedded(layout, &ctx)
+        let element = self.build_embedded(layout, &ctx)?;
+        // 引擎级整体缩放：包住整棵界面（只包最外层，内嵌布局不重复包）。
+        Ok(ScaleWrapper::new(self.scale.clone(), element).into())
     }
 
     /// Builds a layout (possibly an embedded one) with the given context.
