@@ -138,7 +138,13 @@ impl WidgetDef for Dropdown {
             } else {
                 with_alpha(Color::BLACK, 0.05)
             },
-            item_hover_bg: with_alpha(accent, 0.2),
+            // 悬浮底色用中性色，不用主题强调色：比选中底色略深一档，
+            // 深浅色模式都能清楚分辨「悬浮中」与「已选中」。
+            item_hover_bg: if is_dark {
+                with_alpha(Color::WHITE, 0.16)
+            } else {
+                with_alpha(Color::BLACK, 0.08)
+            },
         };
 
         let selected_label = items
@@ -825,41 +831,37 @@ impl<'a> From<DropdownView<'a>> for Element<'a, LayoutMessage> {
     }
 }
 
-/// 绘制触发器右侧的 V 形箭头，随 `anim` 绕中心旋转 0..180°。
+/// 绘制触发器右侧的 Material 下箭头（圆角款），随 `anim` 绕中心旋转
+/// 0..180°。
 ///
-/// iced 的 `Transformation` 不支持旋转，直接旋转路径顶点；几何使用
-/// 无限裁剪区 + 绝对坐标（绕开 tiny-skia 对非原点几何的双重裁剪 bug）。
+/// 直接用内置的 Material Icons 字形（`keyboard_arrow_down`），通过
+/// canvas 帧变换旋转；iced 的 [`Transformation`] 不支持旋转，但
+/// `canvas::Frame` 的 `with_save` + `translate` + `rotate` 可以。
 fn draw_chevron(renderer: &mut iced::Renderer, bounds: Rectangle, anim: f32, color: Color) {
+    const GLYPH: &str = "keyboard_arrow_down_rounded";
+    let Some(glyph) = crate::icons::glyph(GLYPH) else {
+        return;
+    };
     let angle = std::f32::consts::PI * anim;
-    let size = 12.0_f32;
+    let size = 24.0_f32;
     let cx = bounds.x + bounds.width - 12.0 - size / 2.0;
     let cy = bounds.y + bounds.height / 2.0;
-    let local = [[-3.0, -2.0], [0.0, 2.0], [3.0, -2.0]];
-
-    let mut builder = canvas::path::Builder::new();
-    let mut first = true;
-    for [dx, dy] in local {
-        let x = cx + dx * angle.cos() - dy * angle.sin();
-        let y = cy + dx * angle.sin() + dy * angle.cos();
-        let point = Point::new(x, y);
-        if first {
-            builder.move_to(point);
-            first = false;
-        } else {
-            builder.line_to(point);
-        }
-    }
 
     let mut frame = canvas::Frame::with_bounds(renderer, Rectangle::INFINITE);
-    frame.stroke(
-        &builder.build(),
-        canvas::Stroke {
-            style: canvas::Style::Solid(color),
-            width: 1.6,
-            line_cap: canvas::LineCap::Round,
-            line_join: canvas::LineJoin::Round,
+    frame.with_save(|frame| {
+        // 平移到箭头中心，再旋转：旋转围绕字形中心进行。
+        frame.translate(Vector::new(cx, cy));
+        frame.rotate(angle);
+        frame.fill_text(canvas::Text {
+            content: glyph.to_string(),
+            position: Point::new(0.0, 0.0),
+            size: iced::Pixels(size),
+            font: crate::icons::font(),
+            color,
+            align_x: iced::advanced::text::Alignment::Center,
+            align_y: iced::alignment::Vertical::Center,
             ..Default::default()
-        },
-    );
+        });
+    });
     renderer.draw_geometry(frame.into_geometry());
 }
