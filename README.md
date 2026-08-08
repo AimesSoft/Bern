@@ -13,6 +13,26 @@
 | 控件 | `src/widgets/*.rs` | 每个控件一个文件，实现 `WidgetDef` | 控件行为 + 深浅色配色 |
 | 布局 | `layouts/{common,desktop}/*.ron` | 平铺的两张表：areas + widgets | 界面长什么样 |
 
+## 原生窗口标题栏
+
+Bern 默认保留操作系统标题栏；应用可以通过 `WindowOptions` 单独隐藏标题栏，
+不影响其他 Bern 项目：
+
+```rust
+iced::application(boot, update, view)
+    .window(
+        bern::WindowOptions::new()
+            .hide_title_bar(true)
+            .into_settings(),
+    )
+    .run()
+```
+
+`hide_title_bar(true)` 在 macOS 上会保留 `decorations`，并启用透明标题栏、
+隐藏标题文字及 full-size content view。这样内容可以延伸到窗口顶部，同时
+保留 AppKit 的原生圆角、阴影和窗口按钮。其他平台目前回退为关闭窗口装饰；
+如需鼠标拖动或自定义窗口按钮，应在应用界面层提供相应交互。
+
 ## 布局：平铺，不嵌套
 
 布局文件不写嵌套树，而是两张平表，用 id 表达层级：
@@ -87,15 +107,35 @@ Layout(
 被嵌入的布局里所有 id 都会加上前缀（`form.greeting`、`form.login`），
 所以同一个积木可以在一个页面里用多次，事件也能区分是哪个实例发出的。
 
+`layout` 控件支持 `size: Weight(...)` / `Fill` 占用父级剩余空间，并可用
+`align_x: "left|center|right"`、`align_y: "top|center|bottom"` 对齐内嵌
+内容。例如顶栏右侧操作区：
+
+```ron
+Widget(id: "topbar_actions", kind: "layout", area: "topbar", size: Weight(1),
+       props: { "src": "topbar_actions", "align_x": "right" })
+```
+
+需要让 `Row` / `Column` / `Stack` 容器本身填满父级时，可在 `Area` 上分别
+设置 `width: Fill`、`height: Fill`；两轴分开配置不会让桌面顶栏意外占满
+整个窗口高度。
+
 ## 图标包：Material Icons（默认）
 
 bern 内嵌了 Flutter 的 Material Icons 字体与名称映射（Apache-2.0），
 `icon_button` 和 `icon` 控件的图标名直接用 Flutter 里的名字：
 
 ```ron
-Widget(id: "back", kind: "icon_button", area: "actions", props: { "icon": "arrow_back_rounded" })
+Widget(id: "back", kind: "icon_button", area: "actions",
+       props: { "icon": "arrow_back_rounded", "tooltip": "返回" })
 Widget(id: "heart", kind: "icon", area: "actions", props: { "name": "favorite_rounded", "size": "16" })
 ```
+
+`icon_button` 的 `tooltip` 是强制属性且不能为空；鼠标悬浮会显示提示文字。
+缺失时布局构建直接返回 `BuildError::MissingProp`，避免只有图标却没有可发现
+含义的按钮进入应用。Tooltip 会跟随当前主题：深色模式使用深灰容器和白字，
+浅色模式使用近白容器和黑字；默认 10px 圆角，文字内边距为上下 3px、左右
+9px。
 
 - 8825 个图标，名字与 `Icons.xxx` 完全一致（`add`、`dark_mode`、
   `favorite_rounded`……）；
@@ -220,8 +260,9 @@ Widget(id: "nav", kind: "h_tab", area: "topbar",
   和按钮一样写在应用的 `ids.rs` 里，构建布局时框架会校验每一项都已注册；
 - 按下某个 Tab 发布 `(key, Pressed)` 事件，应用按 id 切换内容；高亮和
   胶囊移动由控件自己维护，应用无需驱动；
-- **选中项文字加粗**：`selected` prop 指向当前项（应用点击后写回，和
-  滑块 value 同一套路），选中标签用粗体字族渲染；
+- **所有标签始终加粗**：选中与未选中标签都用粗体字族渲染；`selected`
+  prop 只负责当前项的强调色和底部胶囊位置（应用点击后写回，和滑块
+  value 同一套路）；
 - **多页面切换**：应用收到 Tab 事件后，把页面容器（`kind: "layout"`）
   的 `src` 换成另一个布局文件即可换页——helloworld 里就是
   `hello_card` / `page_video` / `page_library` 三个独立布局在运行时切换，

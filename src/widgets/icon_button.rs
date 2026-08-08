@@ -5,8 +5,12 @@
 //!
 //! ```ron
 //! Widget(id: "back", kind: "icon_button", area: "actions",
-//!        props: { "icon": "←", "size": "18" })
+//!        props: { "icon": "←", "size": "18", "tooltip": "返回" })
 //! ```
+//!
+//! `tooltip` is required and must be non-empty. Hovering the icon shows it
+//! below the button after a short delay. Layout validation fails with
+//! [`crate::BuildError::MissingProp`] when the property is absent or blank.
 //!
 //! The icon color follows the active iced theme's text color (white on dark,
 //! black on light) — built into this control. `scale` and `duration_ms` can
@@ -24,7 +28,9 @@
 
 use crate::core::layout::Widget as LayoutWidget;
 use crate::core::ui::PressOrigin;
-use crate::core::widget::{BuildContext, EventKind, LayoutMessage, WidgetDef, WidgetEvent};
+use crate::core::widget::{
+    BuildContext, BuildError, EventKind, LayoutMessage, WidgetDef, WidgetEvent,
+};
 use crate::widgets::morph_icon::MorphIconView;
 use iced::advanced::layout::{Layout, Limits, Node};
 use iced::advanced::renderer::Style;
@@ -32,12 +38,14 @@ use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Renderer, Shell, Widget, mouse};
 use iced::event::Event;
 use iced::window;
-use iced::{Color, Element, Length, Padding, Rectangle, Size, Transformation};
+use iced::{Border, Color, Element, Length, Padding, Rectangle, Size, Transformation};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// The layout name of this control.
 pub const NAME: &str = "icon_button";
+
+const TOOLTIP_RADIUS: f32 = 6.0;
 
 /// Rebuilds the button content for a given color (used to switch the icon
 /// to the theme accent color while hovered).
@@ -99,6 +107,20 @@ impl WidgetDef for IconButton {
         true
     }
 
+    fn validate(&self, node: &LayoutWidget) -> Result<(), BuildError> {
+        if node
+            .str_prop("tooltip")
+            .is_some_and(|tooltip| !tooltip.trim().is_empty())
+        {
+            Ok(())
+        } else {
+            Err(BuildError::MissingProp {
+                widget: node.id.clone(),
+                prop: "tooltip".into(),
+            })
+        }
+    }
+
     fn build<'a, 't>(
         &self,
         node: &'a LayoutWidget,
@@ -106,6 +128,9 @@ impl WidgetDef for IconButton {
         ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage> {
         let icon_name = node.str_prop("icon").unwrap_or("");
+        let tooltip_text = node
+            .str_prop("tooltip")
+            .expect("icon_button tooltip was validated before build");
         let glyph_size = node
             .prop("size")
             .and_then(|s| s.parse::<f32>().ok())
@@ -135,12 +160,58 @@ impl WidgetDef for IconButton {
         });
         let content = rebuild(visual.icon_color);
 
-        IconButtonWidget::new(content, rebuild, visual, ctx.press_origin.clone())
-            .on_press(LayoutMessage::Event(WidgetEvent {
-                widget_id: id,
-                kind: EventKind::Pressed,
-            }))
-            .into()
+        let button: Element<'a, LayoutMessage> =
+            IconButtonWidget::new(content, rebuild, visual, ctx.press_origin.clone())
+                .on_press(LayoutMessage::Event(WidgetEvent {
+                    widget_id: id,
+                    kind: EventKind::Pressed,
+                }))
+                .into();
+        let tooltip_style = tooltip_style(ctx.theme);
+        let tooltip_content = iced::widget::container(
+            iced::widget::text(tooltip_text).size(13),
+        )
+        // Horizontal room keeps short labels readable; vertical padding is
+        // deliberately compact so the hint does not look like a button.
+        .padding([3, 9])
+        .style(move |_theme| tooltip_style);
+
+        iced::widget::tooltip(
+            button,
+            tooltip_content,
+            iced::widget::tooltip::Position::Bottom,
+        )
+        .gap(6)
+        // The styled inner container owns its asymmetric padding.
+        .padding(0)
+        .delay(Duration::from_millis(350))
+        .into()
+    }
+}
+
+fn tooltip_style(theme: &iced::Theme) -> iced::widget::container::Style {
+    let (background, text, border) = if theme.extended_palette().is_dark {
+        (
+            Color::from_rgb8(48, 48, 52),
+            Color::WHITE,
+            Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+        )
+    } else {
+        (
+            Color::from_rgb8(250, 250, 252),
+            Color::from_rgb8(20, 20, 22),
+            Color::from_rgba(0.0, 0.0, 0.0, 0.12),
+        )
+    };
+
+    iced::widget::container::Style {
+        text_color: Some(text),
+        background: Some(background.into()),
+        border: Border::default()
+            .rounded(TOOLTIP_RADIUS)
+            .width(1.0)
+            .color(border),
+        ..Default::default()
     }
 }
 
@@ -407,5 +478,22 @@ where
 impl<'a, Message: Clone + 'a> From<IconButtonWidget<'a, Message>> for Element<'a, Message> {
     fn from(widget: IconButtonWidget<'a, Message>) -> Self {
         Element::new(widget)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tooltip_palette_follows_light_and_dark_modes() {
+        let light = tooltip_style(&iced::Theme::Light);
+        let dark = tooltip_style(&iced::Theme::Dark);
+
+        assert_eq!(light.text_color, Some(Color::from_rgb8(20, 20, 22)));
+        assert_eq!(dark.text_color, Some(Color::WHITE));
+        assert_ne!(light.background, dark.background);
+        assert_eq!(light.border.radius, TOOLTIP_RADIUS.into());
+        assert_eq!(dark.border.radius, TOOLTIP_RADIUS.into());
     }
 }

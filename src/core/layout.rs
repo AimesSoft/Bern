@@ -58,6 +58,12 @@ pub struct Area {
     /// Gap between children.
     #[serde(default)]
     pub spacing: Option<f32>,
+    /// Optional horizontal sizing policy for this container.
+    #[serde(default)]
+    pub width: Option<SizePolicy>,
+    /// Optional vertical sizing policy for this container.
+    #[serde(default)]
+    pub height: Option<SizePolicy>,
 }
 
 /// How an area arranges its children.

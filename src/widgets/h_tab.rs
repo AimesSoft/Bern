@@ -146,7 +146,7 @@ impl WidgetDef for HTab {
             .unwrap_or(8.0);
         // 选中项由布局的 `selected` prop 决定（键名或索引，默认第一项）。
         // 应用点击 Tab 后把这个 prop 写回（和滑块 value 同一套路），
-        // 选中项的文字加粗、胶囊滑到该项。
+        // 选中项切换强调色、胶囊滑到该项；所有标签始终使用粗体。
         let selected = node
             .prop("selected")
             .and_then(|s| {
@@ -165,15 +165,13 @@ impl WidgetDef for HTab {
 
         let labels = items
             .iter()
-            .enumerate()
-            .map(|(index, (label, _))| {
-                let mut text = iced::widget::text(label.clone()).size(font_size);
-                if index == selected {
-                    // 选中项加粗：用框架加载的粗体字族（iced 默认字体库
-                    // 没有粗体字面，Weight::Bold 会被静默忽略）。
-                    text = text.font(crate::fonts::bold_font());
-                }
-                text.into()
+            .map(|(label, _)| {
+                // 选中与未选中标签都使用框架加载的粗体字族。iced 默认
+                // 字体库没有粗体字面，Weight::Bold 会被静默忽略。
+                iced::widget::text(label.clone())
+                    .size(font_size)
+                    .font(crate::fonts::bold_font())
+                    .into()
             })
             .collect();
 

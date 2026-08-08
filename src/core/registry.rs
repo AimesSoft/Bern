@@ -2,14 +2,14 @@
 //! an iced widget tree.
 
 use crate::core::id::IdRegistry;
-use crate::core::layout::{Area, AreaKind, Layout, Widget};
+use crate::core::layout::{Area, AreaKind, Layout, SizePolicy, Widget};
 use crate::core::scale::{ScaleWrapper, UiScale};
 use crate::core::store::LayoutStore;
 use crate::core::theme::ThemeRouter;
 use crate::core::ui::{PressOrigin, ThemeReveal};
 use crate::core::widget::{BuildContext, BuildError, LayoutMessage, WidgetDef};
 use crate::widgets::reveal_wrapper::{Rebuild, RevealWrapper};
-use iced::Element;
+use iced::{Element, Length};
 use iced::widget::{Column, Row, Stack};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -130,12 +130,11 @@ impl Registry {
                     widget.id
                 )));
             }
-            if !self.contains(&widget.kind) {
+            let Some(definition) = self.get(&widget.kind) else {
                 return Err(BuildError::UnknownWidget(widget.kind.clone()));
-            }
-            if self.get(&widget.kind).is_some_and(WidgetDef::interactive)
-                && !self.ids.contains(&widget.id)
-            {
+            };
+            definition.validate(widget)?;
+            if definition.interactive() && !self.ids.contains(&widget.id) {
                 return Err(BuildError::UnregisteredId(widget.id.clone()));
             }
             // `h_tab` / `dropdown` 在 `items` prop 里声明各自的交互 id，
@@ -232,6 +231,12 @@ impl Registry {
                 if let Some(padding) = area.padding {
                     row = row.padding(padding);
                 }
+                if let Some(width) = area_length(area.width) {
+                    row = row.width(width);
+                }
+                if let Some(height) = area_length(area.height) {
+                    row = row.height(height);
+                }
                 row.into()
             }
             AreaKind::Column => {
@@ -242,9 +247,24 @@ impl Registry {
                 if let Some(padding) = area.padding {
                     column = column.padding(padding);
                 }
+                if let Some(width) = area_length(area.width) {
+                    column = column.width(width);
+                }
+                if let Some(height) = area_length(area.height) {
+                    column = column.height(height);
+                }
                 column.into()
             }
-            AreaKind::Stack => Stack::with_children(children).into(),
+            AreaKind::Stack => {
+                let mut stack = Stack::with_children(children);
+                if let Some(width) = area_length(area.width) {
+                    stack = stack.width(width);
+                }
+                if let Some(height) = area_length(area.height) {
+                    stack = stack.height(height);
+                }
+                stack.into()
+            }
         })
     }
 
@@ -287,6 +307,15 @@ impl Registry {
     }
 }
 
+fn area_length(policy: Option<SizePolicy>) -> Option<Length> {
+    policy.map(|policy| match policy {
+        SizePolicy::Auto => Length::Shrink,
+        SizePolicy::Fill => Length::Fill,
+        SizePolicy::Fixed(px) => Length::Fixed(px),
+        SizePolicy::Weight(weight) => Length::FillPortion(weight.max(1.0) as u16),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,7 +334,7 @@ mod tests {
                 widgets: [
                     Widget(id: "greeting", kind: "text", area: "root", props: { "text": "hi" }),
                     Widget(id: "go", kind: "button", area: "root", props: { "label": "Go" }),
-                    Widget(id: "icon", kind: "icon_button", area: "root", props: { "icon": "add_rounded" }),
+                    Widget(id: "icon", kind: "icon_button", area: "root", props: { "icon": "add_rounded", "tooltip": "Add" }),
                     Widget(id: "heart", kind: "icon", area: "root", props: { "name": "favorite_rounded", "size": "16" }),
                 ],
             )
@@ -345,6 +374,34 @@ mod tests {
         assert_eq!(
             result.err(),
             Some(BuildError::UnknownWidget("no_such_widget".into()))
+        );
+    }
+
+    #[test]
+    fn icon_button_without_tooltip_is_rejected() {
+        let layout = Layout::parse(
+            r#"
+            Layout(
+                areas: [Area(id: "root", kind: Row)],
+                widgets: [
+                    Widget(id: "icon", kind: "icon_button", area: "root",
+                           props: { "icon": "add_rounded" }),
+                ],
+            )
+            "#,
+        )
+        .expect("layout parses");
+        let registry = crate::builtin_registry();
+        registry.ids().register("icon");
+        let store = LayoutStore::new();
+        let router = ThemeRouter::new(iced::Theme::Light);
+
+        assert_eq!(
+            registry.build(&layout, &router, &store).err(),
+            Some(BuildError::MissingProp {
+                widget: "icon".into(),
+                prop: "tooltip".into(),
+            })
         );
     }
 

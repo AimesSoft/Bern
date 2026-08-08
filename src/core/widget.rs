@@ -145,6 +145,12 @@ pub trait WidgetDef: Send + Sync {
         ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage>;
 
+    /// Validates control-specific required properties before any widget tree
+    /// is built. The default accepts every property set.
+    fn validate(&self, _node: &Widget) -> Result<(), BuildError> {
+        Ok(())
+    }
+
     /// Whether this control produces events (and therefore needs a declared
     /// interaction id in the central [`IdRegistry`]).
     fn interactive(&self) -> bool {
