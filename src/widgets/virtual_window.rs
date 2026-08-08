@@ -792,42 +792,41 @@ fn draw_window<Message>(
         return;
     };
     let window_bounds = window_layout.bounds();
-    let scale = 0.8 + 0.2 * ease_out_back(state.open_progress);
-    let center = window_bounds.center();
-    renderer.with_transformation(
-        Transformation::translate(center.x, center.y)
-            * Transformation::scale(scale)
-            * Transformation::translate(-center.x, -center.y),
-        |renderer| {
-            renderer.fill_quad(
-                Quad {
-                    bounds: window_bounds,
-                    border: Border::default()
-                        .rounded(visual.radius)
-                        .width(1.0)
-                        .color(visual.border),
-                    shadow: Shadow {
-                        color: Color::from_rgba(0.0, 0.0, 0.0, 0.20),
-                        offset: Vector::new(0.0, 5.0),
-                        blur_radius: 15.0,
-                    },
-                    ..Default::default()
+    // Moving a fully populated widget tree with a small vertical offset keeps
+    // the opening motion composited without repeatedly resampling the whole
+    // modal. Scaling the tree used to interact badly with nested clipping on
+    // macOS: the untransformed clip and the overshooting scale briefly exposed
+    // stale pixels from the background.
+    let translate_y = 14.0 * (1.0 - ease_out_cubic(state.open_progress));
+    renderer.with_transformation(Transformation::translate(0.0, translate_y), |renderer| {
+        renderer.fill_quad(
+            Quad {
+                bounds: window_bounds,
+                border: Border::default()
+                    .rounded(visual.radius)
+                    .width(1.0)
+                    .color(visual.border),
+                shadow: Shadow {
+                    color: Color::from_rgba(0.0, 0.0, 0.0, 0.20),
+                    offset: Vector::new(0.0, 5.0),
+                    blur_radius: 15.0,
                 },
-                visual.background,
+                ..Default::default()
+            },
+            visual.background,
+        );
+        renderer.with_layer(window_bounds, |renderer| {
+            content.as_widget().draw(
+                content_tree,
+                renderer,
+                theme,
+                style,
+                window_layout,
+                cursor,
+                viewport,
             );
-            renderer.with_layer(window_bounds, |renderer| {
-                content.as_widget().draw(
-                    content_tree,
-                    renderer,
-                    theme,
-                    style,
-                    window_layout,
-                    cursor,
-                    viewport,
-                );
-            });
-        },
-    );
+        });
+    });
     state.perf.draw.record(started.elapsed());
     state.perf.report_if_due();
 }
@@ -861,12 +860,17 @@ fn update_window<Message: Clone>(
             .as_secs_f32();
         state.open_progress = (elapsed / visual.animation_duration).min(1.0);
         if state.open_progress < 1.0 {
-            // Schedule after the current presentation. On macOS, repeatedly
-            // requesting `NextFrame` from inside RedrawRequested can be
-            // coalesced and produce ~35-40 ms animation frame gaps.
+            // Keep deadlines anchored to the start of the animation. Adding a
+            // full interval to `now` here makes the compositor wait once to
+            // deliver this frame and then makes Iced wait a second time,
+            // effectively reducing a 60 Hz opening animation to about 30 Hz.
             Shell::replace_redraw_request(
                 shell,
-                window::RedrawRequest::At(*now + animation_frame_interval()),
+                window::RedrawRequest::At(next_animation_frame(
+                    state.opened_at,
+                    *now,
+                    animation_frame_interval(),
+                )),
             );
         }
         // This frame only advances the virtual window's opening transform.
@@ -1148,11 +1152,21 @@ fn resolve_window_position(
     )
 }
 
-fn ease_out_back(t: f32) -> f32 {
+fn ease_out_cubic(t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
-    const C1: f32 = 1.70158;
-    const C3: f32 = C1 + 1.0;
-    1.0 + C3 * (t - 1.0).powi(3) + C1 * (t - 1.0).powi(2)
+    1.0 - (1.0 - t).powi(3)
+}
+
+fn next_animation_frame(opened_at: Instant, now: Instant, interval: Duration) -> Instant {
+    let interval_ns = interval.as_nanos().max(1);
+    let elapsed_ns = now
+        .checked_duration_since(opened_at)
+        .unwrap_or_default()
+        .as_nanos();
+    let next_frame = elapsed_ns / interval_ns + 1;
+    let deadline_ns = interval_ns.saturating_mul(next_frame);
+    let deadline = Duration::from_nanos(deadline_ns.min(u128::from(u64::MAX)) as u64);
+    opened_at + deadline
 }
 
 fn float_prop(node: &LayoutWidget, key: &str, default: f32, min: f32, max: f32) -> f32 {
@@ -1223,10 +1237,10 @@ mod tests {
     }
 
     #[test]
-    fn ease_out_back_starts_and_finishes_at_bounds() {
-        assert_eq!(ease_out_back(0.0), 0.0);
-        assert_eq!(ease_out_back(1.0), 1.0);
-        assert!(ease_out_back(0.8) > 1.0, "reference curve should overshoot");
+    fn ease_out_cubic_stays_inside_bounds() {
+        assert_eq!(ease_out_cubic(0.0), 0.0);
+        assert_eq!(ease_out_cubic(1.0), 1.0);
+        assert!((0.0..=1.0).contains(&ease_out_cubic(0.8)));
     }
 
     #[test]

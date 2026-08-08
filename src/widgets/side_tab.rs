@@ -69,7 +69,7 @@ impl WidgetDef for SideTab {
         };
         let primary = &ctx.theme.extended_palette().primary;
         let accent = primary.base.color;
-        let accent_text = primary.base.text;
+        let selected_foreground = Color::WHITE;
         let hover = if is_dark {
             Color::from_rgba(1.0, 1.0, 1.0, 0.06)
         } else {
@@ -79,7 +79,11 @@ impl WidgetDef for SideTab {
         let mut children = Vec::with_capacity(items.len());
         for item in items {
             let is_selected = item.number == selected;
-            let foreground = if is_selected { accent_text } else { inactive };
+            let foreground = if is_selected {
+                selected_foreground
+            } else {
+                inactive
+            };
             let background = if is_selected {
                 accent
             } else {
@@ -111,7 +115,7 @@ impl WidgetDef for SideTab {
                     )
                     .font(crate::icons::font())
                     .size(20)
-                    .color(accent_text)
+                    .color(selected_foreground)
                     .into(),
                 );
             }
@@ -134,10 +138,15 @@ impl WidgetDef for SideTab {
                         }
                         _ => background,
                     };
+                    let border = if matches!(status, button::Status::Hovered) {
+                        Border::default().rounded(8).width(2.0).color(accent)
+                    } else {
+                        Border::default().rounded(8)
+                    };
                     iced::widget::button::Style {
                         background: Some(Background::Color(fill)),
                         text_color: foreground,
-                        border: Border::default().rounded(8),
+                        border,
                         ..Default::default()
                     }
                 });

@@ -45,6 +45,7 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WindowOptions {
     hide_title_bar: bool,
+    start_maximized: bool,
 }
 
 impl WindowOptions {
@@ -52,6 +53,7 @@ impl WindowOptions {
     pub const fn new() -> Self {
         Self {
             hide_title_bar: false,
+            start_maximized: false,
         }
     }
 
@@ -67,11 +69,25 @@ impl WindowOptions {
         self.hide_title_bar
     }
 
+    /// Chooses whether the native window starts maximized.
+    #[must_use]
+    pub const fn start_maximized(mut self, maximized: bool) -> Self {
+        self.start_maximized = maximized;
+        self
+    }
+
+    /// Returns whether the native window is configured to start maximized.
+    pub const fn is_start_maximized(self) -> bool {
+        self.start_maximized
+    }
+
     /// Applies Bern's chrome options to existing iced window settings.
     ///
     /// Other settings such as dimensions, resize behavior, and transparency
     /// are preserved.
     pub fn apply_to(self, mut settings: iced::window::Settings) -> iced::window::Settings {
+        settings.maximized = self.start_maximized;
+
         #[cfg(target_os = "macos")]
         {
             // Do not disable decorations on macOS: doing so selects a fully
@@ -107,7 +123,15 @@ mod tests {
     fn title_bar_is_visible_by_default() {
         let options = WindowOptions::default();
         assert!(!options.is_title_bar_hidden());
+        assert!(!options.is_start_maximized());
         assert!(options.into_settings().decorations);
+    }
+
+    #[test]
+    fn start_maximized_is_applied_to_native_settings() {
+        let options = WindowOptions::new().start_maximized(true);
+        assert!(options.is_start_maximized());
+        assert!(options.into_settings().maximized);
     }
 
     #[test]

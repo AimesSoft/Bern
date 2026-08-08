@@ -27,13 +27,15 @@ use crate::core::widget::{
     BuildContext, BuildError, EventKind, LayoutMessage, WidgetDef, WidgetEvent,
 };
 use crate::core::window::WindowControlAction;
+use iced::advanced::graphics::geometry::Renderer as GeometryRenderer;
 use iced::advanced::layout::{Layout, Limits, Node};
 use iced::advanced::renderer::{Quad, Style};
 use iced::advanced::widget::tree::{self, Tree};
 use iced::advanced::{Clipboard, Renderer, Shell, Widget, mouse};
 use iced::event::Event;
+use iced::widget::canvas;
 use iced::window;
-use iced::{Background, Border, Color, Element, Length, Point, Rectangle, Size};
+use iced::{Background, Border, Color, Element, Length, Point, Rectangle, Size, Vector};
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -107,6 +109,7 @@ impl WidgetDef for WindowControls {
                     item.icon_size,
                     item.tooltip.clone(),
                     false,
+                    false,
                     visual,
                     tooltip_style,
                     ctx.press_origin.clone(),
@@ -122,6 +125,7 @@ impl WidgetDef for WindowControls {
                     .expect("remove_rounded is in the Material icon table"),
                 22.0,
                 "最小化",
+                false,
                 false,
                 visual,
                 tooltip_style,
@@ -142,6 +146,7 @@ impl WidgetDef for WindowControls {
                 icon_size,
                 tooltip,
                 false,
+                maximized,
                 visual,
                 tooltip_style,
                 ctx.press_origin.clone(),
@@ -158,6 +163,7 @@ impl WidgetDef for WindowControls {
             22.0,
             "关闭",
             true,
+            false,
             visual,
             tooltip_style,
             ctx.press_origin.clone(),
@@ -185,6 +191,7 @@ fn caption_button<'a>(
     icon_size: f32,
     tooltip: impl Into<String>,
     is_close: bool,
+    rotate_180: bool,
     visual: Visual,
     tooltip_style: iced::widget::container::Style,
     press_origin: PressOrigin,
@@ -193,8 +200,17 @@ fn caption_button<'a>(
     let icon = iced::widget::text(glyph)
         .font(crate::icons::font())
         .size(icon_size);
-    let button: Element<'a, LayoutMessage> =
-        CaptionButton::new(icon, visual, is_close, press_origin, message).into();
+    let button: Element<'a, LayoutMessage> = CaptionButton::new(
+        icon,
+        glyph,
+        icon_size,
+        visual,
+        is_close,
+        rotate_180,
+        press_origin,
+        message,
+    )
+    .into();
 
     let tooltip_content = iced::widget::container(iced::widget::text(tooltip.into()).size(13))
         .padding([3, 9])
@@ -264,8 +280,11 @@ impl Visual {
 /// One 46×40 caption button with NipaPlay's animated rectangular background.
 struct CaptionButton<'a, Message> {
     content: Element<'a, Message>,
+    glyph: char,
+    icon_size: f32,
     visual: Visual,
     is_close: bool,
+    rotate_180: bool,
     press_origin: PressOrigin,
     on_press: Message,
 }
@@ -273,15 +292,21 @@ struct CaptionButton<'a, Message> {
 impl<'a, Message> CaptionButton<'a, Message> {
     fn new(
         content: impl Into<Element<'a, Message>>,
+        glyph: char,
+        icon_size: f32,
         visual: Visual,
         is_close: bool,
+        rotate_180: bool,
         press_origin: PressOrigin,
         on_press: Message,
     ) -> Self {
         Self {
             content: content.into(),
+            glyph,
+            icon_size,
             visual,
             is_close,
+            rotate_180,
             press_origin,
             on_press,
         }
@@ -471,19 +496,30 @@ where
         );
 
         if let Some(child) = layout.children().next() {
-            self.content.as_widget().draw(
-                &tree.children[0],
-                renderer,
-                theme,
-                &Style {
-                    text_color: self
-                        .visual
-                        .icon(self.is_close, state.hovered || state.pressed),
-                },
-                child,
-                cursor,
-                viewport,
-            );
+            let icon_color = self
+                .visual
+                .icon(self.is_close, state.hovered || state.pressed);
+            if self.rotate_180 {
+                draw_rotated_icon(
+                    renderer,
+                    child.bounds().center(),
+                    self.glyph,
+                    self.icon_size,
+                    icon_color,
+                );
+            } else {
+                self.content.as_widget().draw(
+                    &tree.children[0],
+                    renderer,
+                    theme,
+                    &Style {
+                        text_color: icon_color,
+                    },
+                    child,
+                    cursor,
+                    viewport,
+                );
+            }
         }
     }
 
@@ -518,6 +554,31 @@ where
             translation,
         )
     }
+}
+
+fn draw_rotated_icon(
+    renderer: &mut iced::Renderer,
+    center: Point,
+    glyph: char,
+    size: f32,
+    color: Color,
+) {
+    let mut frame = canvas::Frame::with_bounds(renderer, Rectangle::INFINITE);
+    frame.with_save(|frame| {
+        frame.translate(Vector::new(center.x, center.y));
+        frame.rotate(std::f32::consts::PI);
+        frame.fill_text(canvas::Text {
+            content: glyph.to_string(),
+            position: Point::ORIGIN,
+            size: iced::Pixels(size),
+            font: crate::icons::font(),
+            color,
+            align_x: iced::advanced::text::Alignment::Center,
+            align_y: iced::alignment::Vertical::Center,
+            ..Default::default()
+        });
+    });
+    renderer.draw_geometry(frame.into_geometry());
 }
 
 impl<'a, Message: Clone + 'a> From<CaptionButton<'a, Message>> for Element<'a, Message> {
