@@ -10,7 +10,8 @@
 //!
 //! The icon color follows the active iced theme's text color (white on dark,
 //! black on light) — built into this control. `scale` and `duration_ms` can
-//! be set per widget through layout props.
+//! be set per widget through layout props. While hovered, the icon is
+//! repainted with the theme accent color (and restored on leave).
 //!
 //! The `icon` prop accepts a Material icon name (e.g. `"add_rounded"`,
 //! `"favorite_rounded"`) via the embedded icon package; unknown names are
@@ -32,31 +33,54 @@ use iced::advanced::{Clipboard, Renderer, Shell, Widget, mouse};
 use iced::event::Event;
 use iced::window;
 use iced::{Color, Element, Length, Padding, Rectangle, Size, Transformation};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// The layout name of this control.
 pub const NAME: &str = "icon_button";
 
+/// Rebuilds the button content for a given color (used to switch the icon
+/// to the theme accent color while hovered).
+pub type Rebuild<'a, Message> = Arc<dyn Fn(Color) -> Element<'a, Message> + 'a>;
+
 /// Colors and animation parameters resolved at build time.
 #[derive(Debug, Clone)]
-struct Visual {
-    icon_color: Color,
-    scale: f32,
-    duration: f32,
+pub struct Visual {
+    /// The color of the icon (and any other content).
+    pub icon_color: Color,
+    /// The theme accent color, used when the button is `selected`.
+    pub accent: Color,
+    /// Hover scale factor (>= 1.0).
+    pub scale: f32,
+    /// Scale animation duration in seconds.
+    pub duration: f32,
 }
 
 impl Visual {
+    /// Resolves visuals with the icon-button defaults (scale 1.35, 120 ms).
     fn resolve(node: &LayoutWidget, theme: &iced::Theme) -> Self {
+        Self::resolve_with(node, theme, 1.35, 120.0)
+    }
+
+    /// Resolves visuals from layout props, with configurable defaults
+    /// (used by `action_button`, which shares this scale/press core).
+    pub fn resolve_with(
+        node: &LayoutWidget,
+        theme: &iced::Theme,
+        default_scale: f32,
+        default_duration_ms: f32,
+    ) -> Self {
         Self {
             icon_color: theme.palette().text,
+            accent: theme.extended_palette().primary.base.color,
             scale: node
                 .prop("scale")
                 .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(1.35),
+                .unwrap_or(default_scale),
             duration: node
                 .prop("duration_ms")
                 .and_then(|s| s.parse::<f32>().ok())
-                .unwrap_or(120.0)
+                .unwrap_or(default_duration_ms)
                 / 1000.0,
         }
     }
@@ -99,14 +123,19 @@ impl WidgetDef for IconButton {
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(420.0)
             / 1000.0;
-        let content: Element<'_, LayoutMessage> = match crate::icons::glyph(icon_name) {
-            Some(glyph) => {
-                MorphIconView::new(glyph, visual.icon_color, glyph_size, morph_duration).into()
+        // 悬浮时重建内容并换成主题强调色：图标/文字的颜色在悬浮中变成
+        // 强调色，移开恢复文字色。
+        let rebuild: Rebuild<'a, LayoutMessage> = Arc::new(move |color| {
+            match crate::icons::glyph(icon_name) {
+                Some(glyph) => {
+                    MorphIconView::new(glyph, color, glyph_size, morph_duration).into()
+                }
+                None => iced::widget::text(icon_name).color(color).into(),
             }
-            None => iced::widget::text(icon_name).into(),
-        };
+        });
+        let content = rebuild(visual.icon_color);
 
-        IconButtonWidget::new(content, visual, ctx.press_origin.clone())
+        IconButtonWidget::new(content, rebuild, visual, ctx.press_origin.clone())
             .on_press(LayoutMessage::Event(WidgetEvent {
                 widget_id: id,
                 kind: EventKind::Pressed,
@@ -123,6 +152,8 @@ impl WidgetDef for IconButton {
 /// automatically by the engine-level wrapper.
 pub struct IconButtonWidget<'a, Message> {
     content: Element<'a, Message>,
+    /// Rebuilds the content with a new color (hover → accent).
+    rebuild: Rebuild<'a, Message>,
     on_press: Option<Message>,
     visual: Visual,
     padding: f32,
@@ -130,14 +161,16 @@ pub struct IconButtonWidget<'a, Message> {
 }
 
 impl<'a, Message> IconButtonWidget<'a, Message> {
-    /// Creates a new icon button around the given content.
-    fn new(
+    /// Creates a new hover-scale button around the given content.
+    pub fn new(
         content: impl Into<Element<'a, Message>>,
+        rebuild: Rebuild<'a, Message>,
         visual: Visual,
         press_origin: PressOrigin,
     ) -> Self {
         Self {
             content: content.into(),
+            rebuild,
             on_press: None,
             visual,
             padding: 10.0,
@@ -146,8 +179,14 @@ impl<'a, Message> IconButtonWidget<'a, Message> {
     }
 
     /// Sets the message produced when the button is pressed.
-    fn on_press(mut self, message: Message) -> Self {
+    pub fn on_press(mut self, message: Message) -> Self {
         self.on_press = Some(message);
+        self
+    }
+
+    /// Sets the hit-area padding (visual content is not padded).
+    pub fn padding(mut self, padding: f32) -> Self {
+        self.padding = padding;
         self
     }
 }
@@ -258,6 +297,12 @@ where
             let over = cursor.is_over(layout.bounds());
             if over != state.hovered {
                 state.hovered = over;
+                // 悬浮中图标/文字换成主题强调色，移开恢复文字色。
+                self.content = (self.rebuild)(if over {
+                    self.visual.accent
+                } else {
+                    self.visual.icon_color
+                });
                 shell.request_redraw();
             }
 

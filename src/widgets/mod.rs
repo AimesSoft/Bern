@@ -4,6 +4,7 @@
 //! the fields a theme file may adjust for it. See
 //! [`crate::core::widget::WidgetDef`].
 
+pub mod action_button;
 pub mod button;
 pub mod dropdown;
 pub mod h_tab;
@@ -13,6 +14,7 @@ pub mod layout;
 pub mod morph_icon;
 pub mod rect;
 pub(crate) mod reveal_wrapper;
+pub mod round_button;
 pub mod slider;
 pub mod text;
 pub mod text_input;
@@ -22,6 +24,7 @@ use crate::core::registry::Registry;
 
 /// Registers every built-in control into `registry`.
 pub fn register_builtins(registry: &mut Registry) {
+    registry.register(action_button::ActionButton);
     registry.register(button::Button);
     registry.register(dropdown::Dropdown);
     registry.register(h_tab::HTab);
@@ -32,6 +35,7 @@ pub fn register_builtins(registry: &mut Registry) {
     registry.register(text::Text);
     registry.register(text_input::TextInput);
     registry.register(rect::Rect);
+    registry.register(round_button::RoundButton);
     registry.register(slider::Progress);
     registry.register(slider::Slider);
     registry.register(title::Title);

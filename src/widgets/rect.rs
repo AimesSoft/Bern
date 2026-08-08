@@ -319,7 +319,7 @@ impl Widget<LayoutMessage, iced::Theme, iced::Renderer> for BackgroundWidget {
                 shell.publish(LayoutMessage::ThemeRevealDone);
             }
 
-            if std::env::var("RERN_DEBUG_REVEAL").is_ok() {
+            if std::env::var("BERN_DEBUG_REVEAL").is_ok() {
                 eprintln!(
                     "[bg-reveal] progress={:.3} eased={:.3} subscribers={} covered={} pos={:?}",
                     state.progress,

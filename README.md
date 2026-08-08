@@ -89,7 +89,7 @@ Layout(
 
 ## 图标包：Material Icons（默认）
 
-rern 内嵌了 Flutter 的 Material Icons 字体与名称映射（Apache-2.0），
+bern 内嵌了 Flutter 的 Material Icons 字体与名称映射（Apache-2.0），
 `icon_button` 和 `icon` 控件的图标名直接用 Flutter 里的名字：
 
 ```ron
@@ -100,11 +100,11 @@ Widget(id: "heart", kind: "icon", area: "actions", props: { "name": "favorite_ro
 - 8825 个图标，名字与 `Icons.xxx` 完全一致（`add`、`dark_mode`、
   `favorite_rounded`……）；
 - 未知名字回退为普通文本字形（`"→"` 这类字符仍然可用）；
-- 应用启动时调用一次 `rern::icons::load()` 加载字体：
+- 应用启动时调用一次 `bern::icons::load()` 加载字体：
 
 ```rust
 fn boot() -> (App, iced::Task<AppMessage>) {
-    (App::load(), rern::icons::load().map(AppMessage::FontLoaded))
+    (App::load(), bern::icons::load().map(AppMessage::FontLoaded))
 }
 ```
 
@@ -234,7 +234,7 @@ Widget(id: "nav", kind: "h_tab", area: "topbar",
 
 > iced 0.14 的字体库默认没有粗体字面，`Weight::Bold` 会被忽略。框架的
 > `fonts` 模块启动时加载系统粗体中文字体（macOS 用 Hiragino Sans GB），
-> 应用在 boot 里调用一次 `rern::fonts::load_bold()` 即可让加粗生效；
+> 应用在 boot 里调用一次 `bern::fonts::load_bold()` 即可让加粗生效；
 > 找不到粗体字体会优雅回退为常规字重。
 
 ## 滑块与进度条（胶囊轨道 + 果冻滑块）
@@ -283,6 +283,42 @@ Widget(id: "lib_sort", kind: "dropdown", area: "root",
 - 菜单浮层通过 iced overlay 实现，引擎的缩放包装器（ScaleWrapper）与
   主题揭示包装器都会自动转发浮层，缩放状态下菜单位置/尺寸同样按比例。
 
+## 圆角矩形按钮（移植自 nipaplay 大屏可聚焦动作）
+
+`round_button` 是 nipaplay 大屏操作按钮的移植：**固定**的圆角 8 表面，
+悬浮时表面不变、只有内容放大并出现强调色描边：
+
+```ron
+Widget(id: "lib_sync", kind: "round_button", area: "root",
+       props: { "icon": "sync_rounded", "label": "同步" })
+```
+
+- 浅色 82% / 深色 10% 的白色填充，圆角 8，默认带 1px 文字色描边
+  （一眼可辨「有容器」）；
+- 悬浮时内容放大 1.035（140ms easeOutCubic）+ 描边换 2px 强调色；
+- 图标（Material，带果冻形变）+ 粗体标签，内容色浅色 black87 / 深色白；
+- 可调属性：`label`、`icon`、`icon_size`、`font_size`、`scale`、
+  `duration_ms`；
+  按下发布 `(id, Pressed)` 并记录主题揭示原点。
+- 悬浮时图标和文字变成主题强调色（移开恢复），配合内容放大有明确的
+  交互反馈。
+
+## 无容器图标+文本按钮（action_button）
+
+`action_button` 和 `icon_button` 同一个悬浮缩放核心，但没有容器——
+只有图标和文字，悬浮时整体放大：
+
+```ron
+Widget(id: "lib_sort_btn", kind: "action_button", area: "root",
+       props: { "icon": "sort_by_alpha_rounded", "label": "排序" })
+```
+
+- 21px 图标 + 8px 间距 + 15px 粗体标签（nipaplay 动作按钮布局）；
+- 无背景、无边框，悬浮放大默认 1.08（140ms easeOutCubic），
+  `scale` / `duration_ms` 可调；
+- 图标 Material（带果冻形变），颜色跟随文字色；按下发布 `(id, Pressed)`。
+- 悬浮时图标和文字变成主题强调色（和 `icon_button` 一致）。
+
 ## 输入框（移植自 nipaplay 媒体库搜索框）
 
 `text_input` 直接照抄 nipaplay 媒体库的搜索框外观：
@@ -302,7 +338,7 @@ Widget(id: "lib_search", kind: "text_input", area: "root",
 ## 目录结构
 
 ```text
-Rern/
+Bern/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs
@@ -336,12 +372,12 @@ assets/fonts/                # 内嵌的 MaterialIcons-Regular.otf + 许可证
 ## 用法
 
 ```rust
-let store = rern::LayoutStore::load("layouts/desktop", "layouts/common")?;
+let store = bern::LayoutStore::load("layouts/desktop", "layouts/common")?;
 let layout = store.resolve("login_page").expect("layout exists");
 
-let registry = rern::builtin_registry();
+let registry = bern::builtin_registry();
 let element = registry.build(layout, &iced::Theme::Dark, &store)?;
 ```
 
 布局里的控件事件以 `(widget_id, event)` 的通用形式产生
-（`rern::LayoutMessage::Event`），应用层再映射到自己的类型化消息。
+（`bern::LayoutMessage::Event`），应用层再映射到自己的类型化消息。

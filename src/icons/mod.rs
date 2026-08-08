@@ -1,4 +1,4 @@
-//! Material Icons — the default icon package for rern controls.
+//! Material Icons — the default icon package for bern controls.
 //!
 //! Ported from Flutter's Material Icons (Apache-2.0):
 //!
@@ -42,7 +42,7 @@ pub fn glyph_string(name: &str) -> Option<String> {
 ///
 /// ```no_run
 /// # fn main() {
-/// let task = rern::icons::load();
+/// let task = bern::icons::load();
 /// # drop(task);
 /// # }
 /// ```

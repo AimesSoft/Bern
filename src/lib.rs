@@ -1,4 +1,4 @@
-//! Rern — a runtime-driven UI framework built on top of [iced].
+//! Bern — a runtime-driven UI framework built on top of [iced].
 //!
 //! The core idea: **controls, layout, and behavior are three separate
 //! concerns**, exchanged only through well-defined contracts.
