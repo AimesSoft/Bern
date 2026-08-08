@@ -20,6 +20,7 @@ pub mod split_pane;
 pub mod text;
 pub mod text_input;
 pub mod title;
+pub mod virtual_window;
 
 use crate::core::registry::Registry;
 
@@ -41,4 +42,5 @@ pub fn register_builtins(registry: &mut Registry) {
     registry.register(slider::Progress);
     registry.register(slider::Slider);
     registry.register(title::Title);
+    registry.register(virtual_window::VirtualWindow);
 }

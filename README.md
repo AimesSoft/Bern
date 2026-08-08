@@ -362,6 +362,36 @@ Widget(id: "workspace", kind: "split_pane", area: "root", size: Fill,
   横线留出左右边距；
 - 背景复用 `rect` 的深浅色圆形揭示动画。当前边界为静态分隔线，不支持拖拽。
 
+## 虚拟窗口（virtual_window）
+
+`virtual_window` 参考 Nipaplay 的 `NipaplayWindow`：在当前页面里显示一个
+带圆角、阴影和窗口控制区的模态虚拟窗口。窗口使用全视口 overlay，即使
+声明在页面内容区里也能覆盖顶部 Tab；内容由另一个 RON 布局提供：
+
+```ron
+Widget(id: "settings_window", kind: "virtual_window", area: "root", size: Fill,
+       props: {
+           "src": "settings_content",
+           "title": "设置",
+           "width": "850",
+           "height_factor": "0.8",
+           "scrim_alpha": "0.06",
+       })
+```
+
+- 默认居中，普通模式保留 20px 外边距；双击标题栏切换到保留 10px 边距的
+  铺满模式，再次双击还原；
+- 标题栏支持鼠标拖动，窗口始终保留一段可见标题区，避免完全拖出页面；
+- 默认 15px 圆角、柔和阴影和 250ms `easeOutBack` 入场缩放；
+- macOS 默认显示左上红色关闭点，其他平台显示右上 Fluent 关闭按钮；可用
+  `close_style: "mac"` / `"fluent"` 强制指定；
+- 点击关闭按钮或窗口外遮罩会发布
+  `(window_id, Other("close"))`；窗口 id 因此需要注册在应用 `ids.rs`；
+- `src` 指向 `LayoutStore` 中的内容布局，内部事件 id 自动带窗口前缀；
+- 常用属性：`width`、`height`、`height_factor`、`margin`、`filled_margin`、
+  `radius`、`title_height`、`title_size`、`content_padding`、`scrim_alpha`、
+  `dismiss_on_scrim`、`show_close`、`close_style`、`animation_ms`、`mode`。
+
 ## 目录结构
 
 ```text
@@ -384,6 +414,7 @@ Bern/
 │       ├── morph_icon.rs # 形变图标（矢量果冻切换）
 │       ├── icon_button.rs # 图标按钮（悬浮放大 + 图标形变）
 │       ├── split_pane.rs # 左右/上下多窗口分区 + 细线边界
+│       ├── virtual_window.rs # 可拖动、可铺满的模态虚拟窗口
 │       ├── slider.rs     # 滑块 + 进度条（胶囊轨道 + 果冻滑块）
 │       ├── text.rs
 │       ├── text_input.rs
