@@ -189,7 +189,7 @@ impl WidgetDef for IconButton {
     }
 }
 
-fn tooltip_style(theme: &iced::Theme) -> iced::widget::container::Style {
+pub(crate) fn tooltip_style(theme: &iced::Theme) -> iced::widget::container::Style {
     let (background, text, border) = if theme.extended_palette().is_dark {
         (
             Color::from_rgb8(48, 48, 52),

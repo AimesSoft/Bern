@@ -32,7 +32,9 @@ pub use core::ui::{PressOrigin, ThemeReveal};
 pub use core::widget::{
     BuildContext, BuildError, EventKind, LayoutMessage, WidgetDef, WidgetEvent,
 };
-pub use core::window::WindowOptions;
+pub use core::window::{
+    WindowControlAction, WindowOptions, perform_window_control_action,
+};
 pub use iced;
 
 /// Creates a [`Registry`] pre-loaded with every built-in control.

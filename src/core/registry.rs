@@ -156,6 +156,17 @@ impl Registry {
                     }
                 }
             }
+            // Optional buttons injected to the left of `window_controls`
+            // publish their own declared ids, just like tab/dropdown items.
+            if widget.kind == crate::widgets::window_controls::NAME {
+                for key in crate::widgets::window_controls::leading_item_keys(
+                    widget.str_prop("leading_items").unwrap_or(""),
+                ) {
+                    if !self.ids.contains(&key) {
+                        return Err(BuildError::UnregisteredId(key));
+                    }
+                }
+            }
             if !layout.areas.iter().any(|a| a.id == widget.area) {
                 return Err(BuildError::InvalidLayout(format!(
                     "widget `{}` references unknown area `{}`",

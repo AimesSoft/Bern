@@ -6,6 +6,7 @@ use crate::core::layout::{SizePolicy, Widget};
 use crate::core::registry::Registry;
 use crate::core::store::LayoutStore;
 use crate::core::ui::{PressOrigin, ThemeReveal};
+use crate::core::window::WindowControlAction;
 use iced::{Element, Length};
 
 /// The message produced by every layout-driven widget.
@@ -43,6 +44,8 @@ pub enum EventKind {
     Toggled(bool),
     /// A range control (e.g. a slider) reported a new value in 0..=1.
     Changed(f32),
+    /// A native window-caption button was activated.
+    WindowControl(WindowControlAction),
     /// Anything else, as a string payload.
     Other(String),
 }

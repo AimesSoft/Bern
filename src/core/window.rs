@@ -3,6 +3,44 @@
 //! Bern keeps native chrome decisions separate from RON page layouts: the
 //! application chooses them once while constructing its iced application.
 
+/// A native-window command emitted by the [`window_controls`](crate::widgets::window_controls)
+/// widget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowControlAction {
+    /// Minimize the latest application window.
+    Minimize,
+    /// Toggle the latest application window between maximized and restored.
+    ToggleMaximize,
+    /// Close the latest application window.
+    Close,
+}
+
+/// Converts a [`WindowControlAction`] into the matching iced runtime task.
+///
+/// Applications return this task from `update` after receiving
+/// [`EventKind::WindowControl`](crate::EventKind::WindowControl). Keeping the
+/// task here makes the RON control reusable without binding Bern's widget
+/// layer to one application message type.
+pub fn perform_window_control_action<Message>(
+    action: WindowControlAction,
+) -> iced::Task<Message>
+where
+    Message: Send + 'static,
+{
+    match action {
+        WindowControlAction::Minimize => {
+            iced::window::latest().and_then(|id| iced::window::minimize(id, true))
+        }
+        WindowControlAction::ToggleMaximize => iced::window::latest().and_then(|id| {
+            iced::window::is_maximized(id)
+                .then(move |maximized| iced::window::maximize(id, !maximized))
+        }),
+        WindowControlAction::Close => {
+            iced::window::latest().and_then(iced::window::close)
+        }
+    }
+}
+
 /// Bern's portable native-window options.
 ///
 /// The default preserves the operating system title bar. Use

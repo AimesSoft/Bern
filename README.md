@@ -33,6 +33,38 @@ iced::application(boot, update, view)
 保留 AppKit 的原生圆角、阴影和窗口按钮。其他平台目前回退为关闭窗口装饰；
 如需鼠标拖动或自定义窗口按钮，应在应用界面层提供相应交互。
 
+### NipaPlay 三大窗口键
+
+`window_controls` 是从 Flutter NipaPlay 的 `WindowControlButtons` 直接移植的
+自定义标题栏控件。每个矩形按钮为 46×40px，完整三键总宽 138px；悬浮和
+按下背景使用 90ms `easeOutCubic` 动画。普通按钮随深浅色显示半透明背景，
+关闭按钮悬浮为 `#E81123`、按下为 `#C50F1F` 并使用白色图标。
+
+```ron
+// 完整：最小化、最大化/还原、关闭
+Widget(id: "window_controls", kind: "window_controls", area: "chrome",
+       props: {
+           "maximized": "false",
+           "leading_items": "dark_mode_rounded:切换主题:theme_toggle:20,settings_rounded:设置:settings:20",
+       })
+
+// 只保留关闭键，宽度自动缩为 46px
+Widget(id: "dialog_close", kind: "window_controls", area: "title",
+       props: { "close_only": "true" })
+```
+
+控件发布 `EventKind::WindowControl(action)`；原生窗口直接从应用的 `update`
+返回 `bern::perform_window_control_action(action)`。`maximized` 用于在
+`crop_square_rounded`（最大化）与 `filter_none_rounded`（还原）图标及 Tooltip
+之间切换。`close_only` 版本也可以由应用把 `Close` 解释成关闭虚拟窗口，而
+不是退出整个进程。
+
+`leading_items` 会在最小化键左侧插入任意数量的同风格矩形按钮，格式为
+`icon:tooltip:event_id[:icon_size]`，多项用逗号分隔。点击扩展按钮发布普通
+`Pressed` 事件；它们的 `event_id` 和 Tab 项一样必须注册到应用的 `ids.rs`。
+完整三大键固定占 138px，每增加一项总宽自动增加 46px；`close_only=true`
+时忽略扩展项并保持 46px 宽。
+
 ## 布局：平铺，不嵌套
 
 布局文件不写嵌套树，而是两张平表，用 id 表达层级：
@@ -134,7 +166,7 @@ Widget(id: "heart", kind: "icon", area: "actions", props: { "name": "favorite_ro
 `icon_button` 的 `tooltip` 是强制属性且不能为空；鼠标悬浮会显示提示文字。
 缺失时布局构建直接返回 `BuildError::MissingProp`，避免只有图标却没有可发现
 含义的按钮进入应用。Tooltip 会跟随当前主题：深色模式使用深灰容器和白字，
-浅色模式使用近白容器和黑字；默认 10px 圆角，文字内边距为上下 3px、左右
+浅色模式使用近白容器和黑字；默认 6px 圆角，文字内边距为上下 3px、左右
 9px。
 
 - 8825 个图标，名字与 `Icons.xxx` 完全一致（`add`、`dark_mode`、
