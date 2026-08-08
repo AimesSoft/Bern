@@ -16,6 +16,7 @@ pub mod rect;
 pub(crate) mod reveal_wrapper;
 pub mod round_button;
 pub mod slider;
+pub mod split_pane;
 pub mod text;
 pub mod text_input;
 pub mod title;
@@ -36,6 +37,7 @@ pub fn register_builtins(registry: &mut Registry) {
     registry.register(text_input::TextInput);
     registry.register(rect::Rect);
     registry.register(round_button::RoundButton);
+    registry.register(split_pane::SplitPane);
     registry.register(slider::Progress);
     registry.register(slider::Slider);
     registry.register(title::Title);

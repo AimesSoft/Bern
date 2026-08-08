@@ -335,6 +335,33 @@ Widget(id: "lib_search", kind: "text_input", area: "root",
 - 输入发布 `(id, TextChanged(text))`，应用把新词写回布局 `value`——
   和滑块/下拉同一套路（布局是唯一数据源）。
 
+## 多窗口分区背景（split_pane）
+
+`split_pane` 把页面像桌面多窗口工作区一样切成多个区块，区块之间使用
+主题自适应的 1px 细线分隔。`horizontal` 表示从左到右排列，`vertical`
+表示从上到下排列：
+
+```ron
+Widget(id: "workspace", kind: "split_pane", area: "root", size: Fill,
+       props: {
+           "direction": "horizontal",
+           "panes": "navigation,editor,inspector",
+           "weights": "1,4,2",
+           "divider_width": "1",
+           "divider_inset": "16",
+       })
+```
+
+- `panes` 是逗号分隔的布局名，由 `LayoutStore` 解析并分别嵌入每个区块；
+- `weights` 控制区块比例，缺省时等分；嵌入控件的事件 id 会自动带上
+  `workspace.pane0`、`workspace.pane1` 等前缀；
+- 不传 `panes` 时，用 `sections: "3"` 创建纯分区背景，内容可由页面自己的
+  区域覆盖上去；
+- 某个 pane 对应的布局里可以再次放置 `split_pane`，从而组合左右和上下分区；
+- `divider_inset` 控制分隔线两端留白（默认 12px）：竖线留出上下边距，
+  横线留出左右边距；
+- 背景复用 `rect` 的深浅色圆形揭示动画。当前边界为静态分隔线，不支持拖拽。
+
 ## 目录结构
 
 ```text
@@ -356,6 +383,7 @@ Bern/
 │       ├── icon.rs       # 图标
 │       ├── morph_icon.rs # 形变图标（矢量果冻切换）
 │       ├── icon_button.rs # 图标按钮（悬浮放大 + 图标形变）
+│       ├── split_pane.rs # 左右/上下多窗口分区 + 细线边界
 │       ├── slider.rs     # 滑块 + 进度条（胶囊轨道 + 果冻滑块）
 │       ├── text.rs
 │       ├── text_input.rs
