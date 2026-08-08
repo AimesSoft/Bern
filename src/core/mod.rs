@@ -1,5 +1,6 @@
 //! Core contracts: widgets, layouts, themes, and the registry that joins them.
 
+pub(crate) mod frame_clock;
 pub mod id;
 pub mod layout;
 pub mod morph;

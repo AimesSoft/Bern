@@ -224,12 +224,7 @@ impl<Message> Widget<Message, iced::Theme, iced::Renderer> for ScaleWrapper<'_, 
         } else {
             None
         };
-        child_overlay.map(|inner| {
-            overlay::Element::new(Box::new(ScaledOverlay {
-                scale,
-                inner,
-            }))
-        })
+        child_overlay.map(|inner| overlay::Element::new(Box::new(ScaledOverlay { scale, inner })))
     }
 }
 
@@ -300,11 +295,9 @@ impl<Message> Overlay<Message, iced::Theme, iced::Renderer> for ScaledOverlay<'_
             )),
             None => cursor,
         };
-        self.inner.as_overlay().mouse_interaction(
-            layout,
-            virtual_cursor,
-            renderer,
-        )
+        self.inner
+            .as_overlay()
+            .mouse_interaction(layout, virtual_cursor, renderer)
     }
 
     fn draw(
@@ -323,13 +316,9 @@ impl<Message> Overlay<Message, iced::Theme, iced::Renderer> for ScaledOverlay<'_
             None => cursor,
         };
         renderer.with_transformation(Transformation::scale(self.scale), |renderer| {
-            self.inner.as_overlay().draw(
-                renderer,
-                theme,
-                style,
-                layout,
-                virtual_cursor,
-            );
+            self.inner
+                .as_overlay()
+                .draw(renderer, theme, style, layout, virtual_cursor);
         });
     }
 

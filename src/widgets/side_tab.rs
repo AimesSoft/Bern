@@ -3,12 +3,16 @@
 //! All choices are declared directly on the control as
 //! `material_icon:label:number`, separated by commas. A press publishes the
 //! chosen number through `EventKind::Other` using the parent control id.
+//!
+//! This control only renders the tab list. Layouts that need scrolling must
+//! compose it inside `scroll_layout` instead of creating another scrolling
+//! implementation here.
 
 use crate::core::layout::{SizePolicy, Widget as LayoutWidget};
 use crate::core::widget::{
     BuildContext, BuildError, EventKind, LayoutMessage, WidgetDef, WidgetEvent, size_lengths,
 };
-use iced::widget::{Column, Row, Space, button, container, scrollable};
+use iced::widget::{Column, Row, Space, button, container};
 use iced::{Background, Border, Color, Element, Length};
 
 /// The layout name of this control.
@@ -145,21 +149,9 @@ impl WidgetDef for SideTab {
             .padding([8, 8])
             .width(Length::Fill);
         let (width, height) = size_lengths(size);
-        let scroll_theme = ctx.theme.clone();
-        let scrollable = scrollable(list)
-            .width(Length::Fill)
-            .height(Length::Fill)
-            .style(move |_theme, status| iced::widget::scrollable::default(&scroll_theme, status));
-        let mut host = container(scrollable);
-        if let Some(width) = width {
-            host = host.width(width);
-        } else {
-            host = host.width(Length::Fill);
-        }
+        let mut host = container(list).width(width.unwrap_or(Length::Fill));
         if let Some(height) = height {
             host = host.height(height);
-        } else {
-            host = host.height(Length::Fill);
         }
         host.into()
     }

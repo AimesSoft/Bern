@@ -21,9 +21,7 @@ pub enum WindowControlAction {
 /// [`EventKind::WindowControl`](crate::EventKind::WindowControl). Keeping the
 /// task here makes the RON control reusable without binding Bern's widget
 /// layer to one application message type.
-pub fn perform_window_control_action<Message>(
-    action: WindowControlAction,
-) -> iced::Task<Message>
+pub fn perform_window_control_action<Message>(action: WindowControlAction) -> iced::Task<Message>
 where
     Message: Send + 'static,
 {
@@ -35,9 +33,7 @@ where
             iced::window::is_maximized(id)
                 .then(move |maximized| iced::window::maximize(id, !maximized))
         }),
-        WindowControlAction::Close => {
-            iced::window::latest().and_then(iced::window::close)
-        }
+        WindowControlAction::Close => iced::window::latest().and_then(iced::window::close),
     }
 }
 
@@ -137,9 +133,7 @@ mod tests {
             resizable: false,
             ..Default::default()
         };
-        let settings = WindowOptions::new()
-            .hide_title_bar(true)
-            .apply_to(original);
+        let settings = WindowOptions::new().hide_title_bar(true).apply_to(original);
 
         assert_eq!(settings.size, iced::Size::new(1280.0, 720.0));
         assert!(!settings.resizable);

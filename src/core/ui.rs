@@ -10,6 +10,7 @@
 //!   per-frame polling.
 
 use iced::Theme;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The last recorded press position in window coordinates.
@@ -37,7 +38,13 @@ impl PressOrigin {
 
 /// Notification hub for circular theme reveals.
 #[derive(Debug, Default, Clone)]
-pub struct ThemeReveal(Arc<Mutex<RevealInner>>);
+pub struct ThemeReveal(Arc<RevealShared>);
+
+#[derive(Debug, Default)]
+struct RevealShared {
+    inner: Mutex<RevealInner>,
+    active: AtomicBool,
+}
 
 #[derive(Debug, Default)]
 struct RevealInner {
@@ -66,7 +73,7 @@ impl ThemeReveal {
     /// Starts a reveal toward `target` from `origin`. Returns `false` if one
     /// is already running (the request is ignored).
     pub fn begin(&self, target: Theme, origin: (f32, f32)) -> bool {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.inner.lock().unwrap();
         if inner.active {
             return false;
         }
@@ -76,36 +83,38 @@ impl ThemeReveal {
         inner.origin = origin;
         inner.subscribers.clear();
         inner.next_id = 0;
+        self.0.active.store(true, Ordering::Release);
         true
     }
 
     /// Ends the current reveal.
     pub fn finish(&self) {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.inner.lock().unwrap();
         inner.active = false;
         inner.target = None;
         inner.subscribers.clear();
+        self.0.active.store(false, Ordering::Release);
     }
 
     /// Whether a reveal is currently running.
     pub fn is_active(&self) -> bool {
-        self.0.lock().unwrap().active
+        self.0.active.load(Ordering::Acquire)
     }
 
     /// The generation of the current reveal; widgets re-subscribe when it
     /// changes.
     pub fn epoch(&self) -> u64 {
-        self.0.lock().unwrap().epoch
+        self.0.inner.lock().unwrap().epoch
     }
 
     /// The theme being revealed, if a reveal is running.
     pub fn target(&self) -> Option<Theme> {
-        self.0.lock().unwrap().target.clone()
+        self.0.inner.lock().unwrap().target.clone()
     }
 
     /// The origin of the running reveal.
     pub fn origin(&self) -> Option<(f32, f32)> {
-        let inner = self.0.lock().unwrap();
+        let inner = self.0.inner.lock().unwrap();
         if inner.active {
             Some(inner.origin)
         } else {
@@ -115,12 +124,13 @@ impl ThemeReveal {
 
     /// Number of interactive widgets currently subscribed.
     pub fn subscriber_count(&self) -> usize {
-        self.0.lock().unwrap().subscribers.len()
+        self.0.inner.lock().unwrap().subscribers.len()
     }
 
     /// Number of subscribers the sweep has covered so far.
     pub fn covered_count(&self) -> usize {
         self.0
+            .inner
             .lock()
             .unwrap()
             .subscribers
@@ -132,6 +142,7 @@ impl ThemeReveal {
     /// Positions of all current subscribers (debug aid).
     pub fn positions(&self) -> Vec<(f32, f32)> {
         self.0
+            .inner
             .lock()
             .unwrap()
             .subscribers
@@ -143,7 +154,7 @@ impl ThemeReveal {
     /// Registers an interactive widget position for the current reveal and
     /// returns its subscriber id.
     pub fn subscribe(&self, position: (f32, f32)) -> u64 {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.inner.lock().unwrap();
         let id = inner.next_id;
         inner.next_id += 1;
         inner.subscribers.push(Subscriber {
@@ -157,7 +168,7 @@ impl ThemeReveal {
 
     /// Updates a subscriber's position (called on every event pass).
     pub fn update_position(&self, id: u64, position: (f32, f32)) {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.inner.lock().unwrap();
         if let Some(subscriber) = inner.subscribers.iter_mut().find(|s| s.id == id) {
             subscriber.position = position;
         }
@@ -171,7 +182,7 @@ impl ThemeReveal {
     /// reveal). Every newly covered subscriber receives a one-shot command.
     /// Returns `true` on the transition where all subscribers are covered.
     pub fn notify_covered(&self, origin: (f32, f32), radius: f32, outside: bool) -> bool {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.inner.lock().unwrap();
         let mut any_new = false;
         for subscriber in &mut inner.subscribers {
             if !subscriber.covered {
@@ -196,7 +207,7 @@ impl ThemeReveal {
     /// Delivers the coverage command to a subscriber exactly once. Returns
     /// `true` when the sweep has just reached this subscriber's position.
     pub fn take_command(&self, id: u64) -> bool {
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.inner.lock().unwrap();
         if let Some(subscriber) = inner.subscribers.iter_mut().find(|s| s.id == id)
             && subscriber.command
         {

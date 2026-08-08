@@ -9,3 +9,7 @@ ron = "0.12.2"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 ttf-parser = "0.25"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSScreen"] }

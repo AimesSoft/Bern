@@ -51,7 +51,7 @@ pub(crate) fn themed_toggler<'a>(
     let is_dark = theme.extended_palette().is_dark;
     let primary = &theme.extended_palette().primary;
     let accent = primary.base.color;
-    let accent_hover = primary.strong.color;
+    let accent_hover = brighten(accent, 0.12);
     let off = if is_dark {
         Color::from_rgba(1.0, 1.0, 1.0, 0.18)
     } else {
@@ -92,6 +92,15 @@ pub(crate) fn themed_toggler<'a>(
             }
         })
         .into()
+}
+
+fn brighten(color: Color, amount: f32) -> Color {
+    Color::from_rgba(
+        color.r + (1.0 - color.r) * amount,
+        color.g + (1.0 - color.g) * amount,
+        color.b + (1.0 - color.b) * amount,
+        color.a,
+    )
 }
 
 fn bool_prop(value: Option<&str>, fallback: bool) -> bool {
