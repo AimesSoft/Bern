@@ -283,6 +283,22 @@ Widget(id: "lib_sort", kind: "dropdown", area: "root",
 - 菜单浮层通过 iced overlay 实现，引擎的缩放包装器（ScaleWrapper）与
   主题揭示包装器都会自动转发浮层，缩放状态下菜单位置/尺寸同样按比例。
 
+## 输入框（移植自 nipaplay 媒体库搜索框）
+
+`text_input` 直接照抄 nipaplay 媒体库的搜索框外观：
+
+```ron
+Widget(id: "lib_search", kind: "text_input", area: "root",
+       props: { "placeholder": "搜索媒体库", "value": "" })
+```
+
+- 提示文字（`placeholder`）由布局文件传入，默认显示；
+- 左侧 Material `search_rounded` 图标，正文用粗体；
+- 浅色 82% / 深色 9% 的白色填充，圆角 8 边框（文字色 10%），聚焦时
+  强调色 2px 边框；
+- 输入发布 `(id, TextChanged(text))`，应用把新词写回布局 `value`——
+  和滑块/下拉同一套路（布局是唯一数据源）。
+
 ## 目录结构
 
 ```text
