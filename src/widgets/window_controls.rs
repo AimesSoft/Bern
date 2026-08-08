@@ -86,6 +86,7 @@ impl WidgetDef for WindowControls {
         let close_only = bool_prop(node, "close_only", false);
         let maximized = bool_prop(node, "maximized", false);
         let visual = Visual::resolve(ctx.theme);
+        let tooltip_style = crate::widgets::icon_button::tooltip_style(ctx.theme);
         let id = ctx.qualify(&node.id);
         let leading_items = if close_only {
             Vec::new()
@@ -107,6 +108,7 @@ impl WidgetDef for WindowControls {
                     item.tooltip.clone(),
                     false,
                     visual,
+                    tooltip_style,
                     ctx.press_origin.clone(),
                     LayoutMessage::Event(WidgetEvent {
                         widget_id: ctx.qualify(&item.key),
@@ -122,6 +124,7 @@ impl WidgetDef for WindowControls {
                 "最小化",
                 false,
                 visual,
+                tooltip_style,
                 ctx.press_origin.clone(),
                 LayoutMessage::Event(WidgetEvent {
                     widget_id: id.clone(),
@@ -140,6 +143,7 @@ impl WidgetDef for WindowControls {
                 tooltip,
                 false,
                 visual,
+                tooltip_style,
                 ctx.press_origin.clone(),
                 LayoutMessage::Event(WidgetEvent {
                     widget_id: id.clone(),
@@ -155,6 +159,7 @@ impl WidgetDef for WindowControls {
             "关闭",
             true,
             visual,
+            tooltip_style,
             ctx.press_origin.clone(),
             LayoutMessage::Event(WidgetEvent {
                 widget_id: id,
@@ -181,25 +186,19 @@ fn caption_button<'a>(
     tooltip: impl Into<String>,
     is_close: bool,
     visual: Visual,
+    tooltip_style: iced::widget::container::Style,
     press_origin: PressOrigin,
     message: LayoutMessage,
 ) -> Element<'a, LayoutMessage> {
     let icon = iced::widget::text(glyph)
         .font(crate::icons::font())
         .size(icon_size);
-    let button: Element<'a, LayoutMessage> = CaptionButton::new(
-        icon,
-        visual,
-        is_close,
-        press_origin,
-        message,
-    )
-    .into();
+    let button: Element<'a, LayoutMessage> =
+        CaptionButton::new(icon, visual, is_close, press_origin, message).into();
 
-    let tooltip_style = crate::widgets::icon_button::tooltip_style;
     let tooltip_content = iced::widget::container(iced::widget::text(tooltip.into()).size(13))
         .padding([3, 9])
-        .style(tooltip_style);
+        .style(move |_theme| tooltip_style);
 
     iced::widget::tooltip(
         button,
@@ -243,11 +242,7 @@ impl Visual {
 
     fn background(self, is_close: bool, hovered: bool, pressed: bool) -> Color {
         if is_close && (hovered || pressed) {
-            if pressed {
-                CLOSE_PRESSED
-            } else {
-                CLOSE_HOVER
-            }
+            if pressed { CLOSE_PRESSED } else { CLOSE_HOVER }
         } else if pressed {
             self.pressed_background
         } else if hovered {
@@ -359,10 +354,7 @@ where
     Message: Clone,
 {
     fn size(&self) -> Size<Length> {
-        Size::new(
-            Length::Fixed(BUTTON_WIDTH),
-            Length::Fixed(BUTTON_HEIGHT),
-        )
+        Size::new(Length::Fixed(BUTTON_WIDTH), Length::Fixed(BUTTON_HEIGHT))
     }
 
     fn layout(&mut self, tree: &mut Tree, renderer: &iced::Renderer, limits: &Limits) -> Node {
@@ -372,11 +364,10 @@ where
             Size::new(BUTTON_WIDTH, BUTTON_HEIGHT),
         );
         let child_limits = Limits::new(Size::ZERO, size).loose();
-        let mut child = self.content.as_widget_mut().layout(
-            &mut tree.children[0],
-            renderer,
-            &child_limits,
-        );
+        let mut child =
+            self.content
+                .as_widget_mut()
+                .layout(&mut tree.children[0], renderer, &child_limits);
         child.move_to_mut(Point::new(
             ((size.width - child.size().width) / 2.0).max(0.0),
             ((size.height - child.size().height) / 2.0).max(0.0),
@@ -607,9 +598,7 @@ fn icon_glyph(icon: &str) -> char {
 }
 
 fn bool_prop(node: &LayoutWidget, key: &str, default: bool) -> bool {
-    node.str_prop(key)
-        .and_then(parse_bool)
-        .unwrap_or(default)
+    node.str_prop(key).and_then(parse_bool).unwrap_or(default)
 }
 
 fn validate_bool_prop(node: &LayoutWidget, key: &str) -> Result<(), BuildError> {

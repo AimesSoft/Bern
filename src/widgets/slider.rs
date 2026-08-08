@@ -6,6 +6,7 @@
 //! ```ron
 //! // 可拖动进度条：拖动/点击发布 (id, Changed(value))，value 在 0..=1。
 //! Widget(id: "seek", kind: "slider", area: "root", props: { "value": "0.35" })
+//! // `color_role: "primary"` 让播放段和滑块使用当前主题强调色。
 //!
 //! // 纯展示进度条：不响应交互，只按 value 显示。
 //! Widget(id: "seek_progress", kind: "progress", area: "root", props: { "value": "0.35" })
@@ -124,6 +125,10 @@ fn build_bar<'a, 't>(
         .clamp(0.0, 1.0);
     let (width, _height) = size_lengths(size);
     let text = ctx.theme.palette().text;
+    let active = match node.str_prop("color_role") {
+        Some("primary" | "accent") => ctx.theme.extended_palette().primary.base.color,
+        _ => text,
+    };
 
     SliderView {
         value,
@@ -131,8 +136,8 @@ fn build_bar<'a, 't>(
         interactive,
         width: width.unwrap_or(Length::Fill),
         track: Color::from_rgba(text.r, text.g, text.b, 0.28),
-        played: text,
-        thumb: text,
+        played: active,
+        thumb: active,
         press_origin: ctx.press_origin.clone(),
     }
     .into()

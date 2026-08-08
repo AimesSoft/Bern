@@ -58,6 +58,12 @@ pub struct Area {
     /// Gap between children.
     #[serde(default)]
     pub spacing: Option<f32>,
+    /// Cross-axis horizontal alignment (`left`, `center`, or `right`).
+    #[serde(default)]
+    pub align_x: Option<String>,
+    /// Cross-axis vertical alignment (`top`, `center`, or `bottom`).
+    #[serde(default)]
+    pub align_y: Option<String>,
     /// Optional horizontal sizing policy for this container.
     #[serde(default)]
     pub width: Option<SizePolicy>,

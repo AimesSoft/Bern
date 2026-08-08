@@ -4,6 +4,8 @@
 //! root with `z: -1` and `size: Fill`, and everything else draws on top.
 //! Its fill color follows the active iced theme (light background on light,
 //! dark background on dark) — built into this control.
+//! Applications can pin an exact product palette with `light_color` and
+//! `dark_color` (hex `#RRGGBB` or `#AARRGGBB`) while keeping the same reveal.
 //!
 //! When the color changes because of an interactive press (e.g. a theme
 //! toggle button), the new color reveals with a circular wipe that starts at
@@ -50,7 +52,7 @@ impl WidgetDef for Rect {
         size: Option<crate::core::layout::SizePolicy>,
         ctx: &BuildContext<'a, 't>,
     ) -> Element<'a, LayoutMessage> {
-        let color = ctx.theme.palette().background;
+        let color = resolved_color(node, ctx.theme);
         // During a two-phase reveal the theme has not switched yet: reveal
         // the *target* palette from the coordinator, keeping the current
         // color as the base.
@@ -58,7 +60,7 @@ impl WidgetDef for Rect {
             (
                 ctx.theme_reveal
                     .target()
-                    .map(|target| target.palette().background)
+                    .map(|target| resolved_color(node, &target))
                     .unwrap_or(color),
                 ctx.theme_reveal.origin(),
             )
@@ -81,6 +83,36 @@ impl WidgetDef for Rect {
             reveal: ctx.theme_reveal.clone(),
         }
         .into()
+    }
+}
+
+fn resolved_color(node: &LayoutWidget, theme: &iced::Theme) -> Color {
+    let prop = if theme.extended_palette().is_dark {
+        "dark_color"
+    } else {
+        "light_color"
+    };
+    node.str_prop(prop)
+        .and_then(parse_hex_color)
+        .unwrap_or_else(|| theme.palette().background)
+}
+
+fn parse_hex_color(value: &str) -> Option<Color> {
+    let value = value.trim().trim_start_matches('#');
+    let raw = u32::from_str_radix(value, 16).ok()?;
+    match value.len() {
+        6 => Some(Color::from_rgb8(
+            ((raw >> 16) & 0xFF) as u8,
+            ((raw >> 8) & 0xFF) as u8,
+            (raw & 0xFF) as u8,
+        )),
+        8 => Some(Color::from_rgba8(
+            ((raw >> 16) & 0xFF) as u8,
+            ((raw >> 8) & 0xFF) as u8,
+            (raw & 0xFF) as u8,
+            ((raw >> 24) & 0xFF) as f32 / 255.0,
+        )),
+        _ => None,
     }
 }
 

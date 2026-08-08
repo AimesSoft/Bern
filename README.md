@@ -65,6 +65,10 @@ Widget(id: "dialog_close", kind: "window_controls", area: "title",
 完整三大键固定占 138px，每增加一项总宽自动增加 46px；`close_only=true`
 时忽略扩展项并保持 46px 宽。
 
+三大键和扩展键的 Tooltip 与 `icon_button` 共用同一套主题样式：深色为深灰
+底白字，浅色为近白底黑字；样式在 Bern 当前主题构建时解析，不受应用外层
+固定 iced 主题影响。
+
 ## 布局：平铺，不嵌套
 
 布局文件不写嵌套树，而是两张平表，用 id 表达层级：
@@ -218,8 +222,9 @@ Widget(id: "toggle", kind: "morph_icon", area: "actions",
 自动跟着变，没有任何外部配置参与。
 
 框架里有一个**主题路由**（[`ThemeRouter`]）：它是运行期唯一持有当前
-`iced::Theme` 的地方，应用代码通过它切换深浅色，`registry.build` 接收路由
-并把主题分发给每个控件。控件只负责「拿到主题 → 用自己的调色板着色」。
+`iced::Theme` 和 primary 强调色的地方。`set_accent` 会重建当前深浅模式的
+自定义 iced 主题，`theme_for` 在切换模式时保留强调色；`registry.build`
+把主题分发给每个控件。控件只负责「拿到主题 → 用自己的调色板着色」。
 
 ### 背景的圆形切换动画（参考 nipaplay）
 
@@ -465,6 +470,58 @@ Widget(id: "settings_window", kind: "virtual_window", area: "root", size: Fill,
   `radius`、`title_height`、`title_size`、`content_padding`、`scrim_alpha`、
   `dismiss_on_scrim`、`show_close`、`close_style`、`animation_ms`、`mode`。
 
+## 设置界面控件
+
+Bern 提供 NipaPlay 桌面设置页需要的布局积木和独立设置项控件：
+
+- `side_tab`：`items` 直接传入 `icon:文本:编号`，多项用逗号分隔；点击后由
+  控件自身发布选中的编号，应用只需切换右侧页面；
+- `rounded_container`：用 `src` 承载一个子布局，默认 8px 圆角、0.5px
+  半透明边框，可调整 `padding`、`radius`、`background_opacity` 和
+  `border_opacity`；
+- `switch`：Fluent 风格胶囊开关，使用当前主题的 primary 强调色并发布
+  `Toggled(bool)`；
+- `scroll_layout`：只负责为 `src` 指向的子布局提供滚动视口，不保存页面内容；
+- `divider`：由布局显式放置的主题自适应细分割线；
+- `setting_label`：只绘制设置项的图标、标题和副标题，由布局把它与已有的
+  `switch`、`dropdown`、`slider` 放进同一个 `Row`；
+- `setting_color`、`setting_hotkey`、`setting_action`、`setting_info`：用于
+  Bern 没有通用控件可复用的颜色、快捷键、操作和信息设置项。
+
+```ron
+Widget(id: "settings_nav", kind: "side_tab", area: "left", size: Fill,
+       props: { "items": "palette_rounded:外观:0,language_rounded:语言:1",
+                "selected": "0" })
+
+Widget(id: "auto_play", kind: "switch", area: "row",
+       props: { "value": "true" })
+
+Widget(id: "card", kind: "rounded_container", area: "content",
+       props: { "src": "playback_options", "radius": "8" })
+
+// playback_options.ron：同一 Row 里直接组装说明文字和已有控件
+Area(id: "row_auto_next", kind: Row, parent: "root",
+     padding: 14, spacing: 12, align_y: "center", width: Fill)
+Widget(id: "auto_next_label", kind: "setting_label", area: "row_auto_next",
+       size: Weight(1), props: { "icon": "skip_next_rounded",
+       "title": "自动连播", "subtitle": "播放结束后自动播放下一集" })
+Widget(id: "auto_next", kind: "switch", area: "row_auto_next",
+       props: { "value": "true" })
+
+Widget(id: "play_core", kind: "dropdown", area: "row_play_core",
+       size: Fixed(200), props: {
+           "items": "MDK:play_core_mdk,Libmpv:play_core_libmpv,Erika:play_core_erika",
+           "selected": "play_core_mdk",
+       })
+```
+
+推荐结构是“滚动页布局 → 分区标题 + `rounded_container` → 语义化分区子布局
+→ `setting_label` + 已有交互控件 + `divider`”。交互控件和下拉选项的语义化
+id 必须集中登记到应用的 `ids.rs`；应用行为层只负责把新值写回布局节点。
+
+页面背景 `rect` 还支持 `light_color` / `dark_color` 的 `#RRGGBB` 或
+`#AARRGGBB` 精确色值，同时保留主题圆形揭示动画。
+
 ## 目录结构
 
 ```text
@@ -488,6 +545,16 @@ Bern/
 │       ├── icon_button.rs # 图标按钮（悬浮放大 + 图标形变）
 │       ├── split_pane.rs # 左右/上下多窗口分区 + 细线边界
 │       ├── virtual_window.rs # 可拖动、可铺满的模态虚拟窗口
+│       ├── side_tab.rs # 左侧设置 Tab（图标 + 文本 + 编号）
+│       ├── rounded_container.rs # 可嵌入布局的圆角矩形容器
+│       ├── scroll_layout.rs # 可滚动的子布局容器
+│       ├── divider.rs # 布局显式组装的细分割线
+│       ├── switch.rs # Fluent 风格设置开关
+│       ├── setting_label.rs # 设置项图标、标题和副标题
+│       ├── setting_color.rs # 独立颜色设置项
+│       ├── setting_hotkey.rs # 独立快捷键设置项
+│       ├── setting_action.rs # 独立操作设置项
+│       ├── setting_info.rs # 独立信息设置项
 │       ├── slider.rs     # 滑块 + 进度条（胶囊轨道 + 果冻滑块）
 │       ├── text.rs
 │       ├── text_input.rs

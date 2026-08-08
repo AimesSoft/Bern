@@ -9,8 +9,9 @@ use crate::core::theme::ThemeRouter;
 use crate::core::ui::{PressOrigin, ThemeReveal};
 use crate::core::widget::{BuildContext, BuildError, LayoutMessage, WidgetDef};
 use crate::widgets::reveal_wrapper::{Rebuild, RevealWrapper};
-use iced::{Element, Length};
+use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{Column, Row, Stack};
+use iced::{Element, Length};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -242,6 +243,9 @@ impl Registry {
                 if let Some(padding) = area.padding {
                     row = row.padding(padding);
                 }
+                if let Some(alignment) = vertical_alignment(area.align_y.as_deref()) {
+                    row = row.align_y(alignment);
+                }
                 if let Some(width) = area_length(area.width) {
                     row = row.width(width);
                 }
@@ -257,6 +261,9 @@ impl Registry {
                 }
                 if let Some(padding) = area.padding {
                     column = column.padding(padding);
+                }
+                if let Some(alignment) = horizontal_alignment(area.align_x.as_deref()) {
+                    column = column.align_x(alignment);
                 }
                 if let Some(width) = area_length(area.width) {
                     column = column.width(width);
@@ -325,6 +332,24 @@ fn area_length(policy: Option<SizePolicy>) -> Option<Length> {
         SizePolicy::Fixed(px) => Length::Fixed(px),
         SizePolicy::Weight(weight) => Length::FillPortion(weight.max(1.0) as u16),
     })
+}
+
+fn horizontal_alignment(value: Option<&str>) -> Option<Horizontal> {
+    match value {
+        Some("left" | "start") => Some(Horizontal::Left),
+        Some("center") => Some(Horizontal::Center),
+        Some("right" | "end") => Some(Horizontal::Right),
+        _ => None,
+    }
+}
+
+fn vertical_alignment(value: Option<&str>) -> Option<Vertical> {
+    match value {
+        Some("top" | "start") => Some(Vertical::Top),
+        Some("center") => Some(Vertical::Center),
+        Some("bottom" | "end") => Some(Vertical::Bottom),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
