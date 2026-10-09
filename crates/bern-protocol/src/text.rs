@@ -14,6 +14,11 @@ pub struct LocalizedText {
     pub params: Vec<String>,
 }
 
+/// Resource key of an enum variant label.
+pub fn label_key(enum_name: &str, variant: &str) -> String {
+    format!("{enum_name}.{variant}")
+}
+
 impl LocalizedText {
     pub fn new<'a>(pairs: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
         Self {

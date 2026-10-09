@@ -1,0 +1,10 @@
+[package]
+name = "bern-runtime"
+description = "UI session runtime: windows, session drafts and session command routing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-protocol.workspace = true

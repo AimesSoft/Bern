@@ -8,6 +8,7 @@
 pub mod ast;
 mod expr;
 pub mod items;
+pub mod lower;
 mod ui;
 
 pub use ast::*;

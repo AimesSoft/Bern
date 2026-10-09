@@ -1,0 +1,13 @@
+[package]
+name = "bern-ffi"
+description = "In-process C ABI between native UI frontends and the Bern runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-protocol.workspace = true
+bern-command.workspace = true
+bern-runtime.workspace = true
+bern-transport-ipc.workspace = true

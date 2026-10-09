@@ -23,7 +23,7 @@ pub use descriptor::{
 pub use error::{CommandError, SchemaError};
 pub use message::{CommandOutcome, CommandStatus, Invocation, StateUpdate};
 pub use session::{SessionCommand, session_catalog};
-pub use text::LocalizedText;
+pub use text::{LocalizedText, label_key};
 pub use types::{EnumDef, FieldDef, RecordDef, Type, TypeTable, VariantDef};
 pub use value::Value;
 

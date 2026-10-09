@@ -10,7 +10,7 @@ use bern_ir::spec::{self, ChildShape, ElementShape, PropKind};
 use bern_syntax::*;
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, quote_spanned};
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use syn::Ident;
 
 /// Re-run the macro when `Bern.toml` changes.
@@ -28,95 +28,13 @@ pub fn track(languages: Option<&Languages>) -> TokenStream {
 
 /// Check one `tr!` against the project languages and its own arguments.
 pub fn check_translations(tr: &Tr, languages: Option<&Languages>) -> syn::Result<()> {
-    let mut errors: Vec<syn::Error> = Vec::new();
-    let mut seen = BTreeSet::new();
-    for entry in &tr.entries {
-        if !seen.insert(entry.language.as_str()) {
-            errors.push(syn::Error::new(
-                entry.span,
-                format!("language `{}` is translated twice", entry.language),
-            ));
-        }
-        if let Some(languages) = languages
-            && !languages.supported.contains(&entry.language)
-        {
-            errors.push(syn::Error::new(
-                entry.span,
-                format!(
-                    "language tag `{}` is not in [languages].supported ({}); check the spelling",
-                    entry.language,
-                    languages.supported.join(", ")
-                ),
-            ));
-        }
-    }
-    if let Some(languages) = languages
-        && languages.strict
-    {
-        let missing: Vec<_> = languages
-            .supported
-            .iter()
-            .filter(|language| !seen.contains(language.as_str()))
-            .cloned()
-            .collect();
-        if !missing.is_empty() {
-            errors.push(syn::Error::new(
-                tr.span,
-                format!(
-                    "error[B102]: Missing translation\nMissing language: {}\nRequired languages: {}",
-                    missing.join(", "),
-                    languages.supported.join(", ")
-                ),
-            ));
-        }
-    }
-    let declared: BTreeSet<String> = tr.args.iter().map(|arg| arg.name.to_string()).collect();
-    let mut used = BTreeSet::new();
-    let mut reference: Option<BTreeSet<String>> = None;
-    for entry in &tr.entries {
-        match LocalizedPlaceholders::of(&entry.text) {
-            Err(message) => errors.push(syn::Error::new(entry.span, message)),
-            Ok(names) => {
-                let names: BTreeSet<String> = names.into_iter().collect();
-                for name in &names {
-                    if !declared.contains(name) {
-                        errors.push(syn::Error::new(
-                            entry.span,
-                            format!(
-                                "placeholder `{{{name}}}` has no argument; add `; {name}: value`"
-                            ),
-                        ));
-                    }
-                }
-                match &reference {
-                    None => reference = Some(names.clone()),
-                    Some(first) if *first != names => errors.push(syn::Error::new(
-                        entry.span,
-                        "every translation must use the same placeholders",
-                    )),
-                    _ => {}
-                }
-                used.extend(names);
-            }
-        }
-    }
-    for arg in &tr.args {
-        if !used.contains(&arg.name.to_string()) {
-            errors.push(syn::Error::new(
-                arg.name.span(),
-                format!("argument `{}` is not used by any translation", arg.name),
-            ));
-        }
-    }
-    combine(errors)
-}
-
-struct LocalizedPlaceholders;
-
-impl LocalizedPlaceholders {
-    fn of(text: &str) -> Result<Vec<String>, String> {
-        bern_protocol::LocalizedText::placeholders(text)
-    }
+    let config = languages.map(|languages| (languages.supported.as_slice(), languages.strict));
+    combine(
+        bern_syntax::lower::check_translations(tr, config)
+            .into_iter()
+            .map(|(span, message)| syn::Error::new(span, message))
+            .collect(),
+    )
 }
 
 fn combine(errors: Vec<syn::Error>) -> syn::Result<()> {

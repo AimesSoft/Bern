@@ -22,7 +22,7 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             }
         }
     }
-    let descriptor_value = descriptor::build(&protocol)?;
+    let descriptor_value = bern_syntax::lower::protocol_descriptor(&protocol)?;
     let descriptor_tokens = descriptor::tokens(&descriptor_value);
 
     let p = quote!(::bern::__private::protocol);

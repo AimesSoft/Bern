@@ -13,10 +13,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-adapter-json"
+version = "0.1.0"
+dependencies = [
+ "bern-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bern-command"
 version = "0.1.0"
 dependencies = [
  "bern-protocol",
+]
+
+[[package]]
+name = "bern-compiler"
+version = "0.1.0"
+dependencies = [
+ "bern-ir",
+ "bern-protocol",
+ "bern-syntax",
+ "bern-target-api",
+ "proc-macro2",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+ "toml 0.8.23",
+]
+
+[[package]]
+name = "bern-ffi"
+version = "0.1.0"
+dependencies = [
+ "bern-command",
+ "bern-protocol",
+ "bern-runtime",
+ "bern-transport-ipc",
 ]
 
 [[package]]
@@ -50,12 +84,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-runtime"
+version = "0.1.0"
+dependencies = [
+ "bern-protocol",
+]
+
+[[package]]
 name = "bern-syntax"
 version = "0.1.0"
 dependencies = [
+ "bern-protocol",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "bern-target-api"
+version = "0.1.0"
+dependencies = [
+ "bern-ir",
+ "bern-protocol",
+ "serde",
+]
+
+[[package]]
+name = "bern-transport-ipc"
+version = "0.1.0"
+dependencies = [
+ "bern-adapter-json",
+ "bern-command",
+ "bern-protocol",
+ "bern-runtime",
+ "libc",
+ "serde_json",
 ]
 
 [[package]]
@@ -91,6 +154,12 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
+
+[[package]]
+name = "libc"
+version = "0.2.190"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "memchr"

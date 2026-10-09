@@ -150,8 +150,10 @@ pub struct WindowDef {
     pub initial: WindowInitial,
     pub presentation: Presentation,
     pub role: WindowRole,
-    pub size: Option<(f64, f64)>,
-    pub min_size: Option<(f64, f64)>,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub min_width: Option<f64>,
+    pub min_height: Option<f64>,
     pub content: Node,
     /// Session state types instantiated for each instance of this window.
     pub sessions: Vec<String>,
@@ -491,10 +493,7 @@ impl Node {
     }
 }
 
-/// Resource key of an enum variant label.
-pub fn label_key(enum_name: &str, variant: &str) -> String {
-    format!("{enum_name}.{variant}")
-}
+pub use bern_protocol::label_key;
 
 /// Resource key of a text declared on an element property.
 pub fn text_key(component: &str, node_path: &str, prop: &str) -> String {

@@ -1,0 +1,12 @@
+[package]
+name = "bern-target-api"
+description = "Interface between the Bern compiler and independent UI target modules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-ir.workspace = true
+bern-protocol.workspace = true
+serde.workspace = true
