@@ -36,7 +36,7 @@ pub struct SettingsDraft {
 #[component]
 pub fn settings_window(app: showcase::Client, #[session] settings: SettingsDraft) -> impl View {
     ui! {
-        Tabs(selection: settings.tab) {
+        Tabs(id: tabs, selection: settings.tab) {
             Tab(value: SettingsTab::General, label: tr! { "zh-Hans" => "通用", "en" => "General" }, icon: "gearshape") {
                 Form {
                     Section {

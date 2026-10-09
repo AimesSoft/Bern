@@ -928,12 +928,13 @@ impl<'a> Checker<'a> {
                     ty,
                 )
             }
-            Root::Local(ty) => {
-                let (sub, ty) = self.record_path(ty, rest)?;
+            Root::Local(root) => {
+                let (sub, ty) = self.record_path(root.clone(), rest)?;
                 (
                     ir::Binding::Local {
                         name: root_name,
                         path: sub,
+                        root,
                     },
                     ty,
                 )

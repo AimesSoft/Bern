@@ -101,6 +101,7 @@ impl Server {
             ));
         }
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        remove_stale_sockets(&dir);
         let path = dir.join(format!("{}.sock", host.engine_id()));
         if path.as_os_str().len() > 100 {
             return Err(io::Error::new(
@@ -148,6 +149,24 @@ impl Drop for Server {
         // Wake the accept loop so it observes the flag.
         let _ = UnixStream::connect(&self.path);
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// Remove sockets left behind by engines that ended without cleanup, such
+/// as a process killed by a signal. Live sockets accept connections.
+fn remove_stale_sockets(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "sock")
+            && UnixStream::connect(&path).is_err()
+        {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 }
 

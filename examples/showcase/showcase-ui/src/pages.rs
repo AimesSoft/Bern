@@ -94,7 +94,7 @@ pub fn controls_page(app: showcase::Client, #[session] draft: MainDraft) -> impl
                 title: tr! { "zh-Hans" => "滑块", "en" => "Sliders" },
                 footer: tr! { "zh-Hans" => "拖动时只更新本窗口的预览，松开后提交到引擎。已提交的音量：{volume}", "en" => "Dragging only updates this window's preview; releasing commits to the engine. Committed volume: {volume}"; volume: app.volume }
             ) {
-                Slider(id: volume, label: tr! { "zh-Hans" => "音量", "en" => "Volume" }, value: draft.volume, min: 0, max: 100, step: 1, min_icon: "speaker.fill", max_icon: "speaker.wave.3.fill") => app.set_volume(draft.volume)
+                Slider(id: volume, label: tr! { "zh-Hans" => "音量", "en" => "Volume" }, value: draft.volume, min: 0, max: 100, min_icon: "speaker.fill", max_icon: "speaker.wave.3.fill") => app.set_volume(draft.volume)
                 Slider(id: brightness, label: tr! { "zh-Hans" => "亮度", "en" => "Brightness" }, value: draft.brightness, min: 0, max: 1, min_icon: "sun.min", max_icon: "sun.max.fill")
             }
             Section(title: tr! { "zh-Hans" => "选择", "en" => "Choices" }) {
@@ -133,15 +133,26 @@ pub fn inputs_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
 #[component]
 pub fn library_page(app: showcase::Client, #[session] draft: MainDraft) -> impl View {
     ui! {
-        Navigation(path: draft.path) {
-            List(items: app.items, key: id) |item| {
-                NavLink(id: item_link, route: Route::Item { id: item.id }) {
-                    match item.kind {
-                        ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
-                        ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
-                        ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
-                        ItemKind::Movies => { Label(title: item.kind, icon: "film") }
-                        ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+        Navigation(id: library, path: draft.path) {
+            Form {
+                Section(
+                    title: tr! { "zh-Hans" => "资料库", "en" => "Library" },
+                    footer: tr! { "zh-Hans" => "列表来自引擎状态，按项目编号保持身份。", "en" => "Rows come from engine state and keep their identity by item number." }
+                ) {
+                    ForEach(items: app.items, key: id) |item| {
+                        NavLink(id: item_link, route: Route::Item { id: item.id }) {
+                            Row(gap: 8) {
+                                match item.kind {
+                                    ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
+                                    ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
+                                    ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
+                                    ItemKind::Movies => { Label(title: item.kind, icon: "film") }
+                                    ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+                                }
+                                Spacer
+                                Text(content: tr! { "zh-Hans" => "{count} 项", "en" => "{count} items"; count: item.count }, emphasis: secondary)
+                            }
+                        }
                     }
                 }
             }
@@ -161,7 +172,7 @@ pub fn library_page(app: showcase::Client, #[session] draft: MainDraft) -> impl 
 #[component]
 pub fn item_detail(app: showcase::Client, id: i64, #[session] draft: MainDraft) -> impl View {
     ui! {
-        Form {
+        Form(title: tr! { "zh-Hans" => "项目 {id}", "en" => "Item {id}"; id: id }) {
             Section(title: tr! { "zh-Hans" => "项目", "en" => "Item" }) {
                 Text(content: tr! { "zh-Hans" => "项目编号 {id}", "en" => "Item number {id}"; id: id }, style: title2)
                 if draft.query != "" {

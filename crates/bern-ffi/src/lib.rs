@@ -23,6 +23,8 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+pub use bern_protocol as protocol;
+pub use bern_runtime as runtime;
 pub use bern_runtime::{SessionType, WindowKind};
 
 /// Owned byte buffer returned to the frontend; free with [`bern_buffer_free`].
@@ -222,8 +224,8 @@ fn encode_changes(host: &Host, revision: u64, changes: &[(usize, Value)]) -> Vec
 ///
 /// # Safety
 /// `error` must be null or point to writable memory for one [`BernBuffer`].
-pub unsafe fn start_app(
-    engine: impl EngineProtocol,
+pub unsafe fn start_app<E: EngineProtocol>(
+    make_engine: impl FnOnce() -> E,
     spec: AppSpec,
     fingerprint: u64,
     callbacks: BernCallbacks,
@@ -237,6 +239,7 @@ pub unsafe fn start_app(
         std::ptr::null_mut()
     };
     let started = catch_unwind(AssertUnwindSafe(|| {
+        let engine = make_engine();
         let actual = engine.descriptor().fingerprint();
         if actual != fingerprint {
             return Err(format!(

@@ -1,0 +1,17 @@
+[package]
+name = "bern-cli"
+description = "`bern`: builds Bern applications for their configured targets"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "bern"
+path = "src/main.rs"
+
+[dependencies]
+bern-compiler.workspace = true
+bern-target-api.workspace = true
+bern-backend-swiftui.workspace = true
+serde_json.workspace = true

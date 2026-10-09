@@ -116,7 +116,7 @@ pub fn main_window(
 ) -> impl View {
     ui! {
         SplitView {
-            Sidebar(selection: draft.page) {
+            Sidebar(id: pages, selection: draft.page) {
                 Search(
                     id: sidebar_search,
                     value: draft.query,

@@ -132,7 +132,7 @@ fn start(frontend: &Frontend, fingerprint: u64) -> Result<*mut BernApp, String> 
     };
     let mut error = BernBuffer::empty();
     // SAFETY: `error` is writable.
-    let app = unsafe { start_app(Counter(0), spec(), fingerprint, callbacks, &mut error) };
+    let app = unsafe { start_app(|| Counter(0), spec(), fingerprint, callbacks, &mut error) };
     if app.is_null() {
         // SAFETY: on failure the library wrote an owned UTF-8 buffer.
         let message = unsafe { slice(error.ptr, error.len) };

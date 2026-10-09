@@ -231,8 +231,13 @@ pub enum Binding {
         field: usize,
         path: Vec<usize>,
     },
-    /// Template variable, pattern binding or component parameter.
-    Local { name: String, path: Vec<usize> },
+    /// Template variable, pattern binding or component parameter, with the
+    /// type of the variable itself so record paths can be resolved.
+    Local {
+        name: String,
+        path: Vec<usize>,
+        root: Type,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

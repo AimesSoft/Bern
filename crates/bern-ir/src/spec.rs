@@ -229,7 +229,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         placement: Placement::Within(&["SplitView"]),
         ..spec(
             "Sidebar",
-            &[req("selection", PropKind::SelectionField)],
+            &[
+                req("selection", PropKind::SelectionField),
+                opt("id", PropKind::Id),
+            ],
             Children::Only(&["Search", "Section", "SidebarItem"]),
             "Sidebar list selecting a destination",
         )
@@ -262,13 +265,13 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ),
     spec(
         "Form",
-        &[],
+        &[opt("title", PropKind::DisplayText)],
         Children::Any,
-        "Grouped form of labelled controls",
+        "Grouped form of labelled controls, optionally titling its page",
     ),
     spec(
         "Navigation",
-        &[req("path", PropKind::PathField)],
+        &[req("path", PropKind::PathField), opt("id", PropKind::Id)],
         Children::Any,
         "Push navigation bound to a typed route path",
     ),
@@ -293,7 +296,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     },
     spec(
         "Tabs",
-        &[req("selection", PropKind::SelectionField)],
+        &[
+            req("selection", PropKind::SelectionField),
+            opt("id", PropKind::Id),
+        ],
         Children::Only(&["Tab"]),
         "Sibling pages switched by tabs",
     ),

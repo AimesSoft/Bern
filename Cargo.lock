@@ -13,11 +13,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-adapter-cli"
+version = "0.1.0"
+dependencies = [
+ "bern-adapter-json",
+ "bern-protocol",
+ "bern-transport-ipc",
+ "serde_json",
+]
+
+[[package]]
 name = "bern-adapter-json"
 version = "0.1.0"
 dependencies = [
  "bern-protocol",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bern-adapter-mcp"
+version = "0.1.0"
+dependencies = [
+ "bern-adapter-json",
+ "bern-protocol",
+ "bern-transport-ipc",
+ "serde_json",
+]
+
+[[package]]
+name = "bern-backend-swiftui"
+version = "0.1.0"
+dependencies = [
+ "bern-compiler",
+ "bern-ir",
+ "bern-protocol",
+ "bern-target-api",
+ "serde_json",
+]
+
+[[package]]
+name = "bern-cli"
+version = "0.1.0"
+dependencies = [
+ "bern-backend-swiftui",
+ "bern-compiler",
+ "bern-target-api",
  "serde_json",
 ]
 

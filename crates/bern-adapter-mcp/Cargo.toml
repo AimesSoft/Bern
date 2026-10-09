@@ -1,0 +1,13 @@
+[package]
+name = "bern-adapter-mcp"
+description = "MCP server derived from the Bern command catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-protocol.workspace = true
+bern-adapter-json.workspace = true
+bern-transport-ipc.workspace = true
+serde_json.workspace = true
