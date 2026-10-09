@@ -1,0 +1,43 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/bern-protocol",
+    "crates/bern-syntax",
+    "crates/bern-ir",
+    "crates/bern-command",
+    "crates/bern-macros",
+    "crates/bern",
+    "examples/showcase/showcase-protocol",
+    "examples/showcase/showcase-core",
+    "examples/showcase/showcase-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+
+[workspace.dependencies]
+bern = { path = "crates/bern" }
+bern-macros = { path = "crates/bern-macros" }
+bern-syntax = { path = "crates/bern-syntax" }
+bern-protocol = { path = "crates/bern-protocol" }
+bern-ir = { path = "crates/bern-ir" }
+bern-command = { path = "crates/bern-command" }
+bern-runtime = { path = "crates/bern-runtime" }
+bern-target-api = { path = "crates/bern-target-api" }
+bern-compiler = { path = "crates/bern-compiler" }
+bern-backend-swiftui = { path = "crates/bern-backend-swiftui" }
+bern-adapter-json = { path = "crates/bern-adapter-json" }
+bern-transport-ipc = { path = "crates/bern-transport-ipc" }
+bern-adapter-cli = { path = "crates/bern-adapter-cli" }
+bern-adapter-mcp = { path = "crates/bern-adapter-mcp" }
+bern-ffi = { path = "crates/bern-ffi" }
+syn = { version = "2.0.117", features = ["full", "extra-traits"] }
+quote = "1.0.45"
+proc-macro2 = { version = "1.0.106", features = ["span-locations"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+toml = "0.8.23"
+libc = "0.2.186"

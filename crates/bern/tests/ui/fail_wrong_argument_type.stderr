@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail_wrong_argument_type.rs:40:66
+   |
+40 |     ui! { Button(id: go, label: tr! { "en" => "Go" }) => app.add(draft.name) }
+   |                                                              --- ^^^^^ expected `i64`, found `String`
+   |                                                              |
+   |                                                              arguments to this method are incorrect
+   |
+note: method defined here
+  --> tests/ui/fail_wrong_argument_type.rs:23:12
+   |
+23 |         fn add(&mut self, amount: i64) -> Result<(), CommandError>;
+   |            ^^^            -----------

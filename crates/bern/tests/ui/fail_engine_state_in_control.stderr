@@ -1,0 +1,16 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail_engine_state_in_control.rs:40:71
+   |
+38 | #[component]
+   | ------------ arguments to this function are incorrect
+39 | fn page(app: demo::Client) -> impl View {
+40 |     ui! { TextInput(id: title, label: tr! { "en" => "Title" }, value: app.title) }
+   |                                                                       ^^^^^^^^^ expected `&SessionField<String>`, found `&Binding<String>`
+   |
+   = note: expected reference `&SessionField<String>`
+              found reference `&Binding<String>`
+note: function defined here
+  --> src/__private.rs
+   |
+   | pub fn text_field(_: &SessionField<String>) {}
+   |        ^^^^^^^^^^

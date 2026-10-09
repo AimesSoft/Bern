@@ -1,0 +1,8 @@
+error[E0599]: no method named `launch` found for struct `Client` in the current scope
+  --> tests/ui/fail_unknown_command.rs:40:62
+   |
+ 1 | #[bern::protocol(namespace = "demo", version = 1)]
+   | -------------------------------------------------- method `launch` not found for this struct
+...
+40 |     ui! { Button(id: go, label: tr! { "en" => "Go" }) => app.launch() }
+   |                                                              ^^^^^^ method not found in `Client`

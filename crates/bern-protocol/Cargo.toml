@@ -1,0 +1,11 @@
+[package]
+name = "bern-protocol"
+description = "UI-independent schema for Bern commands, state, values and sessions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

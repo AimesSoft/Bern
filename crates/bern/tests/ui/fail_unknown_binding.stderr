@@ -1,0 +1,5 @@
+error: unknown binding `player`; bindings start at a component parameter or template variable
+  --> tests/ui/fail_unknown_binding.rs:40:25
+   |
+40 |     ui! { Text(content: player.title) }
+   |                         ^^^^^^

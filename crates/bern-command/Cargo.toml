@@ -1,0 +1,10 @@
+[package]
+name = "bern-command"
+description = "Command catalog host shared by the UI, CLI, JSON and MCP entries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-protocol.workspace = true

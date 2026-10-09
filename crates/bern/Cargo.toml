@@ -1,0 +1,15 @@
+[package]
+name = "bern"
+description = "Application-facing interface of the Bern framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-macros.workspace = true
+bern-protocol.workspace = true
+bern-command.workspace = true
+
+[dev-dependencies]
+trybuild = "1"

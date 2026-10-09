@@ -1,0 +1,38 @@
+# Bern project configuration for the control showcase.
+
+[app]
+id = "showcase"
+bundle_id = "dev.bern.showcase"
+version = "0.1.0"
+name = { "zh-Hans" = "Bern 控件展示", "en" = "Bern Showcase" }
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"
+strict = true
+
+[theme]
+mode = "system"
+
+[protocol]
+package = "showcase-protocol"
+source = "showcase-protocol/src/lib.rs"
+
+[engine]
+package = "showcase-core"
+type = "showcase_core::ShowcaseEngine"
+
+[ui]
+package = "showcase-ui"
+sources = [
+    "showcase-ui/src/lib.rs",
+    "showcase-ui/src/pages.rs",
+    "showcase-ui/src/settings.rs",
+]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+# Entries besides the UI. "ipc" assembles the local control channel used by
+# the generated CLI, JSON clients and MCP server; omit it for no listener.
+channels = ["ipc"]

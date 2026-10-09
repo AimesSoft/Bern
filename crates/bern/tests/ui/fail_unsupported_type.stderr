@@ -1,0 +1,13 @@
+error: `u32` cannot cross a Bern boundary; use `i64`
+  --> tests/ui/fail_unsupported_type.rs:40:16
+   |
+40 |     pub count: u32,
+   |                ^^^
+
+warning: unused import: `bern::prelude::*`
+  --> tests/ui/fail_unsupported_type.rs:36:5
+   |
+36 | use bern::prelude::*;
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

@@ -1,0 +1,5 @@
+error: error[B301]: UI action must bind a registered command; add `=> client.command()` to `Button`
+  --> tests/ui/fail_button_without_action.rs:40:11
+   |
+40 |     ui! { Button(id: go, label: tr! { "en" => "Go" }) }
+   |           ^^^^^^

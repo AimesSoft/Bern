@@ -1,0 +1,5 @@
+error: error[B103]: user-visible text must be declared with its translations; use `tr! { "zh-Hans" => "…", "en" => "…" }`
+  --> tests/ui/fail_static_text.rs:40:25
+   |
+40 |     ui! { Text(content: "Hello") }
+   |                         ^^^^^^^

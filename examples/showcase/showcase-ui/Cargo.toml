@@ -1,0 +1,12 @@
+[package]
+name = "showcase-ui"
+description = "UI declarations of the Bern control showcase"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+showcase-protocol = { path = "../showcase-protocol" }

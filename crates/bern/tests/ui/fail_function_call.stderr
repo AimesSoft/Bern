@@ -1,0 +1,5 @@
+error: function and method calls are not allowed in expressions; move the computation into a query or command
+  --> tests/ui/fail_function_call.rs:40:25
+   |
+40 |     ui! { Text(content: format_title(app.title)) }
+   |                         ^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error[E0063]: missing field `app` in initializer of `child_props`
+  --> tests/ui/fail_missing_component_property.rs:40:11
+   |
+40 |     ui! { child() }
+   |           ^^^^^ missing `app`

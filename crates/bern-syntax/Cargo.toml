@@ -1,0 +1,12 @@
+[package]
+name = "bern-syntax"
+description = "Shared parser for Bern declarations, used by the macros and the build tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+syn.workspace = true
+quote.workspace = true
+proc-macro2.workspace = true

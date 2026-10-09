@@ -1,0 +1,5 @@
+error: arbitrary callbacks are not allowed; bind a registered command such as `=> app.save()`
+  --> tests/ui/fail_arbitrary_callback.rs:40:58
+   |
+40 |     ui! { Button(id: go, label: tr! { "en" => "Go" }) => |count| count + 1 }
+   |                                                          ^
