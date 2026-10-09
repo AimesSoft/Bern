@@ -308,6 +308,14 @@ version = "0.1.0"
 dependencies = [
  "bern",
  "showcase-protocol",
+ "showcase-widgets",
+]
+
+[[package]]
+name = "showcase-widgets"
+version = "0.1.0"
+dependencies = [
+ "bern",
 ]
 
 [[package]]

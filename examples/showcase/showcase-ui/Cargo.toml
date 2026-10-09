@@ -10,3 +10,4 @@ publish = false
 [dependencies]
 bern.workspace = true
 showcase-protocol = { path = "../showcase-protocol" }
+showcase-widgets = { path = "../showcase-widgets" }

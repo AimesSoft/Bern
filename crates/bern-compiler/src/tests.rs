@@ -30,6 +30,12 @@ fn showcase_compiles_to_ir() {
     assert_eq!(settings.role, ir::WindowRole::Settings);
     assert_eq!(settings.sessions, vec!["SettingsDraft"]);
     assert!(app.component("main_window").is_some());
+    let widget = app.component("item_count").expect("library component");
+    assert_eq!(widget.module, vec!["showcase_widgets"]);
+    let library = &compiled.libraries[0];
+    assert_eq!(library.package, "showcase-widgets");
+    assert_eq!(library.version, "0.1.0");
+    assert_eq!(library.descriptor_version, ir::LIBRARY_DESCRIPTOR_VERSION);
     assert!(
         app.component("app").is_none(),
         "the root becomes the window catalog"
@@ -368,4 +374,73 @@ mod independent_target {
         );
         assert!(problems.iter().all(|d| d.location.is_some()));
     }
+}
+
+/// A library that lacks a language the application requires is rejected
+/// with the same B102 rule, naming the library and its version.
+#[test]
+fn libraries_must_cover_the_application_languages() {
+    let dir = std::env::temp_dir().join(format!(
+        "bern-library-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let widgets = dir.join("widgets");
+    std::fs::create_dir_all(widgets.join("src")).unwrap();
+    std::fs::write(
+        widgets.join("Cargo.toml"),
+        "[package]\nname = \"widgets\"\nversion = \"2.3.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        widgets.join("Bern.toml"),
+        "[library]\npackage = \"widgets\"\nsources = [\"src/lib.rs\"]\n\n[languages]\nsupported = [\"en\"]\ndefault = \"en\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        widgets.join("src/lib.rs"),
+        r#"
+        #[component]
+        pub fn badge(count: i64) -> impl View {
+            ui! { Text(content: tr! { "en" => "{n} new"; n: count }) }
+        }
+        "#,
+    )
+    .unwrap();
+    let library = config::load_library(&widgets.join("Bern.toml")).unwrap();
+    let described = compile_library(&library).unwrap();
+    assert_eq!(described.version, "2.3.0");
+    assert_eq!(described.components[0].module, vec!["widgets"]);
+    // The application requires `en` and `ja`.
+    let app = config::load(&showcase()).unwrap();
+    let mut app = app;
+    app.languages = vec!["en".into(), "ja".into()];
+    let problems = check_library(&described, &app);
+    let output = problems
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        output.contains("error[B102]") && output.contains("widgets 2.3.0") && output.contains("ja"),
+        "{output}"
+    );
+    // A library cannot hold engine clients or session state.
+    std::fs::write(
+        widgets.join("src/lib.rs"),
+        r#"
+        #[component]
+        pub fn panel(app: demo::Client) -> impl View { ui! { Spacer } }
+        "#,
+    )
+    .unwrap();
+    let errors =
+        compile_library(&config::load_library(&widgets.join("Bern.toml")).unwrap()).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message.contains("value parameters only"))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

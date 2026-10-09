@@ -20,6 +20,7 @@ members = [
     "examples/showcase/showcase-protocol",
     "examples/showcase/showcase-core",
     "examples/showcase/showcase-ui",
+    "examples/showcase/showcase-widgets",
 ]
 
 [workspace.package]

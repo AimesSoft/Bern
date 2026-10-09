@@ -31,6 +31,10 @@ sources = [
 ]
 root = "app"
 
+# Component libraries the UI uses, each with its own Bern.toml.
+[[libraries]]
+manifest = "showcase-widgets/Bern.toml"
+
 [targets.macos]
 platform = "macos"
 # Entries besides the UI. "ipc" assembles the local control channel used by

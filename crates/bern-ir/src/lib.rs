@@ -500,6 +500,29 @@ impl Node {
 
 pub use bern_protocol::label_key;
 
+/// Version of the [`ComponentLibrary`] layout.
+pub const LIBRARY_DESCRIPTOR_VERSION: u32 = 1;
+
+/// Versioned description of a component library crate, generated from its
+/// sources. Applications check it against their own configuration before
+/// using its components: descriptor and IR versions, the crate version it
+/// was generated from, and translations for every required language.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComponentLibrary {
+    pub descriptor_version: u32,
+    pub ir_version: u32,
+    /// Cargo package name of the library.
+    pub package: String,
+    /// Cargo package version the descriptor was generated from.
+    pub version: String,
+    /// Fingerprint of the library sources and configuration.
+    pub source_fingerprint: String,
+    pub languages: Vec<String>,
+    pub types: TypeTable,
+    pub components: Vec<ComponentDef>,
+    pub texts: Vec<LocalizedText>,
+}
+
 /// Resource key of a text declared on an element property.
 pub fn text_key(component: &str, node_path: &str, prop: &str) -> String {
     format!("{component}.{node_path}.{prop}")

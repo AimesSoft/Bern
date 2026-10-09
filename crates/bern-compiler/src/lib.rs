@@ -26,6 +26,8 @@ pub struct Compiled {
     pub app: ir::Application,
     /// Rust path of the protocol module, e.g. `showcase_protocol::showcase`.
     pub protocol_module: String,
+    /// Versioned descriptors of the component libraries in use.
+    pub libraries: Vec<ir::ComponentLibrary>,
     pub warnings: Vec<Diagnostic>,
 }
 
@@ -110,12 +112,12 @@ fn initial_value(expr: &ast::Expr, ty: &Type, types: &TypeTable) -> Result<Value
 }
 
 fn merge_ui_types(
-    protocol: &ProtocolDescriptor,
+    base: &TypeTable,
     values: &[Located<ast::ValueItem>],
-    config: &Config,
+    languages: (&[String], bool),
     diagnostics: &mut Vec<Diagnostic>,
 ) -> TypeTable {
-    let mut types = protocol.types.clone();
+    let mut types = base.clone();
     let protocol_names: BTreeSet<String> = types
         .enums
         .iter()
@@ -146,7 +148,7 @@ fn merge_ui_types(
         }
     }
     let lookup = types.clone();
-    let languages = Some((config.languages.as_slice(), config.strict));
+    let languages = Some(languages);
     for value in values {
         let name = value.item.name.to_string();
         let field = |field: &ast::FieldItem, diagnostics: &mut Vec<Diagnostic>| match resolve_type(
@@ -214,7 +216,7 @@ fn merge_ui_types(
 
 fn param_kind(
     param: &ast::Param,
-    protocol_module: &str,
+    protocol_module: Option<&str>,
     windows_handle: Option<&str>,
     sessions: &[ir::SessionDef],
     types: &TypeTable,
@@ -233,7 +235,9 @@ fn param_kind(
         ast::ParamKind::Prop => match &param.ty {
             ast::TypeRef::Named(path)
                 if name == "Client"
-                    && (path.len() == 1 || path[path.len() - 2] == protocol_module) =>
+                    && protocol_module.is_some_and(|module| {
+                        path.len() == 1 || path[path.len() - 2] == module
+                    }) =>
             {
                 Ok(ir::ParamKind::Client)
             }
@@ -424,6 +428,198 @@ fn window_catalog(
     })
 }
 
+fn source_fingerprint(files: &[&std::path::Path]) -> String {
+    let mut bytes = Vec::new();
+    for file in files {
+        bytes.extend(file.display().to_string().into_bytes());
+        bytes.extend(std::fs::read(file).unwrap_or_default());
+    }
+    format!("{:016x}", bern_protocol::fingerprint_bytes(&bytes))
+}
+
+/// Generate the versioned descriptor of a component library from its
+/// sources. Library components are presentational: they take value
+/// parameters only and cannot own session state or call commands.
+pub fn compile_library(
+    library: &config::LibraryConfig,
+) -> Result<ir::ComponentLibrary, Vec<Diagnostic>> {
+    let mut diagnostics = Vec::new();
+    let mut values = Vec::new();
+    let mut components = Vec::new();
+    let crate_name = library.package.crate_name();
+    for file in &library.sources {
+        let items = match read(file) {
+            Ok(items) => items,
+            Err(errors) => {
+                diagnostics.extend(errors);
+                continue;
+            }
+        };
+        if !items.protocols.is_empty() || !items.sessions.is_empty() {
+            diagnostics.push(Diagnostic::error(format!(
+                "{}: component libraries cannot declare protocols or session state",
+                file.display
+            )));
+        }
+        let module = |relative: &Vec<String>| {
+            let mut module = vec![crate_name.clone()];
+            module.extend(file.module.iter().cloned());
+            module.extend(relative.iter().cloned());
+            module
+        };
+        for (path, item) in items.values {
+            values.push(Located {
+                file: file.display.clone(),
+                module: module(&path),
+                item,
+            });
+        }
+        for (path, item) in items.components {
+            components.push(Located {
+                file: file.display.clone(),
+                module: module(&path),
+                item,
+            });
+        }
+    }
+    let types = merge_ui_types(
+        &TypeTable::default(),
+        &values,
+        (&library.languages, library.strict),
+        &mut diagnostics,
+    );
+    let mut signatures = BTreeMap::new();
+    for component in &components {
+        let mut params = Vec::new();
+        for param in &component.item.params {
+            match param_kind(param, None, None, &[], &types) {
+                Ok(kind) => params.push((param.name.to_string(), kind)),
+                Err(message) => diagnostics.push(
+                    Diagnostic::error(format!(
+                        "{message}; library components take value parameters only"
+                    ))
+                    .at(location(&component.file, param.span)),
+                ),
+            }
+        }
+        let name = component.item.name.to_string();
+        signatures.insert(
+            name.clone(),
+            Signature {
+                name,
+                module: component.module.clone(),
+                params,
+            },
+        );
+    }
+    let protocol = ProtocolDescriptor {
+        descriptor_version: bern_protocol::DESCRIPTOR_VERSION,
+        namespace: "library".into(),
+        version: 0,
+        types: TypeTable::default(),
+        state: vec![],
+        commands: vec![],
+    };
+    let mut checker = Checker::new(
+        &types,
+        &protocol,
+        &[],
+        &signatures,
+        &[],
+        &library.languages,
+        &library.default_language,
+        library.strict,
+    );
+    let mut lowered = Vec::new();
+    for component in &components {
+        let name = component.item.name.to_string();
+        let signature = &signatures[&name];
+        if let Some(body) = checker.component(&component.file, &component.item, signature) {
+            lowered.push(ir::ComponentDef {
+                name,
+                module: component.module.clone(),
+                params: signature
+                    .params
+                    .iter()
+                    .map(|(name, kind)| ir::ParamDef {
+                        name: name.clone(),
+                        kind: kind.clone(),
+                    })
+                    .collect(),
+                body,
+                source: location(&component.file, component.item.span),
+            });
+        }
+    }
+    diagnostics.append(&mut checker.diagnostics);
+    if diagnostics.iter().any(Diagnostic::is_error) {
+        return Err(diagnostics);
+    }
+    let mut texts = std::mem::take(&mut checker.texts);
+    for def in &types.enums {
+        texts.extend(
+            def.variants
+                .iter()
+                .filter_map(|variant| variant.label.clone()),
+        );
+    }
+    let mut files: Vec<&std::path::Path> = vec![&library.manifest];
+    files.extend(library.sources.iter().map(|source| source.path.as_path()));
+    Ok(ir::ComponentLibrary {
+        descriptor_version: ir::LIBRARY_DESCRIPTOR_VERSION,
+        ir_version: IR_VERSION,
+        package: library.package.name.clone(),
+        version: library.version.clone(),
+        source_fingerprint: source_fingerprint(&files),
+        languages: library.languages.clone(),
+        types,
+        components: lowered,
+        texts,
+    })
+}
+
+/// Check that a library descriptor matches this application: versions and
+/// translations for every language the application requires.
+pub fn check_library(library: &ir::ComponentLibrary, config: &Config) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    if library.descriptor_version != ir::LIBRARY_DESCRIPTOR_VERSION
+        || library.ir_version != IR_VERSION
+    {
+        diagnostics.push(Diagnostic::error(format!(
+            "library `{}` was described with descriptor {} / IR {}; this compiler uses {} / {}",
+            library.package,
+            library.descriptor_version,
+            library.ir_version,
+            ir::LIBRARY_DESCRIPTOR_VERSION,
+            IR_VERSION
+        )));
+    }
+    if config.strict {
+        for text in &library.texts {
+            let missing: Vec<_> = config
+                .languages
+                .iter()
+                .filter(|language| !text.translations.contains_key(*language))
+                .cloned()
+                .collect();
+            if !missing.is_empty() {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "Missing translation\nLibrary: {} {}\nText: {}\nMissing language: {}\nRequired languages: {}",
+                        library.package,
+                        library.version,
+                        text.key,
+                        missing.join(", "),
+                        config.languages.join(", ")
+                    ))
+                    .code("B102"),
+                );
+            }
+        }
+    }
+    diagnostics
+}
+
 /// Collect, check and lower a project to IR.
 pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
@@ -501,7 +697,33 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         }
     }
 
-    let types = merge_ui_types(&protocol, &values, config, &mut diagnostics);
+    // Component libraries: versioned descriptors generated from their
+    // sources and checked against this application's configuration.
+    let mut libraries = Vec::new();
+    for manifest in &config.libraries {
+        match config::load_library(manifest).and_then(|library| compile_library(&library)) {
+            Ok(library) => {
+                diagnostics.extend(check_library(&library, config));
+                libraries.push(library);
+            }
+            Err(errors) => diagnostics.extend(errors),
+        }
+    }
+    let mut base_types = protocol.types.clone();
+    for library in &libraries {
+        if let Err(error) = base_types.merge(&library.types) {
+            diagnostics.push(Diagnostic::error(format!(
+                "library `{}`: {}",
+                library.package, error.message
+            )));
+        }
+    }
+    let types = merge_ui_types(
+        &base_types,
+        &values,
+        (&config.languages, config.strict),
+        &mut diagnostics,
+    );
 
     // Session state.
     let mut sessions = Vec::new();
@@ -570,8 +792,22 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         return Err(diagnostics);
     };
 
-    // Signatures.
+    // Signatures, starting with library components.
     let mut signatures = BTreeMap::new();
+    for component in libraries.iter().flat_map(|library| &library.components) {
+        signatures.insert(
+            component.name.clone(),
+            Signature {
+                name: component.name.clone(),
+                module: component.module.clone(),
+                params: component
+                    .params
+                    .iter()
+                    .map(|param| (param.name.clone(), param.kind.clone()))
+                    .collect(),
+            },
+        );
+    }
     for component in &components {
         let name = component.item.name.to_string();
         if signatures.contains_key(&name) {
@@ -587,7 +823,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         for param in &component.item.params {
             match param_kind(
                 param,
-                &protocol_module_name,
+                Some(&protocol_module_name),
                 Some(&handle),
                 &sessions,
                 &types,
@@ -618,7 +854,10 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         &config.default_language,
         config.strict,
     );
-    let mut lowered = Vec::new();
+    let mut lowered: Vec<ir::ComponentDef> = libraries
+        .iter()
+        .flat_map(|library| library.components.clone())
+        .collect();
     let mut root_element = None;
     for component in &components {
         let name = component.item.name.to_string();
@@ -651,6 +890,9 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     }
     diagnostics.append(&mut checker.diagnostics);
     let mut texts = std::mem::take(&mut checker.texts);
+    for library in &libraries {
+        texts.extend(library.texts.iter().cloned());
+    }
 
     let mut graph = BTreeMap::new();
     for component in &lowered {
@@ -729,6 +971,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             texts,
         },
         protocol_module: protocol_module.join("::"),
+        libraries,
         warnings: diagnostics,
     })
 }

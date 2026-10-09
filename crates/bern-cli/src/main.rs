@@ -218,6 +218,23 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
+    for library in &compiled.libraries {
+        let path = workspace
+            .join("target/bern/libraries")
+            .join(format!("{}.json", library.package));
+        let json = serde_json::to_vec_pretty(library).expect("descriptor serializes");
+        if let Err(error) = write_if_changed(&path, &json) {
+            eprintln!("error: cannot write {}: {error}", path.display());
+            return ExitCode::FAILURE;
+        }
+        eprintln!(
+            "  \x1b[1;32mDescribed\x1b[0m {} {} ({} components, sources {})",
+            library.package,
+            library.version,
+            library.components.len(),
+            library.source_fingerprint
+        );
+    }
     let registry = registry();
     let targets: Vec<_> = config
         .targets

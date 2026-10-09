@@ -18,6 +18,41 @@ struct RawConfig {
     ui: RawUi,
     #[serde(default)]
     targets: BTreeMap<String, RawTarget>,
+    #[serde(default)]
+    libraries: Vec<RawLibraryRef>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLibraryRef {
+    manifest: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLibraryConfig {
+    library: RawLibrary,
+    languages: RawLanguages,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLibrary {
+    package: String,
+    sources: Vec<String>,
+}
+
+/// A component library crate, described by its own `Bern.toml`.
+#[derive(Clone, Debug)]
+pub struct LibraryConfig {
+    pub dir: PathBuf,
+    pub manifest: PathBuf,
+    pub package: Package,
+    pub version: String,
+    pub sources: Vec<SourceFile>,
+    pub languages: Vec<String>,
+    pub default_language: String,
+    pub strict: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,6 +160,8 @@ pub struct Config {
     pub ui_sources: Vec<SourceFile>,
     pub root: String,
     pub targets: Vec<TargetConfig>,
+    /// Manifests of component libraries the UI uses.
+    pub libraries: Vec<PathBuf>,
 }
 
 fn valid_language(tag: &str) -> bool {
@@ -171,6 +208,46 @@ fn source_file(dir: &Path, written: &str) -> Result<(PathBuf, Vec<String>), Diag
         )));
     }
     Ok((package_dir, module))
+}
+
+fn read_package_field(dir: &Path, field: &str) -> Result<String, Diagnostic> {
+    let manifest = dir.join("Cargo.toml");
+    let text = std::fs::read_to_string(&manifest).map_err(|error| {
+        Diagnostic::error(format!("cannot read {}: {error}", manifest.display()))
+    })?;
+    let value: toml::Value = text
+        .parse()
+        .map_err(|error| Diagnostic::error(format!("{}: {error}", manifest.display())))?;
+    value
+        .get("package")
+        .and_then(|package| package.get(field))
+        .and_then(|value| match value {
+            toml::Value::String(text) => Some(text.clone()),
+            // `field.workspace = true` inherits from the workspace manifest.
+            toml::Value::Table(table) if table.get("workspace").is_some() => {
+                workspace_package_field(dir, field)
+            }
+            _ => None,
+        })
+        .ok_or_else(|| Diagnostic::error(format!("{} has no package {field}", manifest.display())))
+}
+
+fn workspace_package_field(dir: &Path, field: &str) -> Option<String> {
+    let mut directory = dir.parent();
+    while let Some(current) = directory {
+        if let Ok(text) = std::fs::read_to_string(current.join("Cargo.toml"))
+            && let Ok(value) = text.parse::<toml::Value>()
+            && let Some(found) = value
+                .get("workspace")
+                .and_then(|workspace| workspace.get("package"))
+                .and_then(|package| package.get(field))
+                .and_then(toml::Value::as_str)
+        {
+            return Some(found.to_string());
+        }
+        directory = current.parent();
+    }
+    None
 }
 
 fn read_package_name(dir: &Path) -> Result<String, Diagnostic> {
@@ -381,6 +458,20 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         });
     }
 
+    let libraries: Vec<PathBuf> = raw
+        .libraries
+        .iter()
+        .map(|library| dir.join(&library.manifest))
+        .collect();
+    for library in &libraries {
+        if !library.is_file() {
+            errors.push(Diagnostic::error(format!(
+                "library manifest {} does not exist",
+                library.display()
+            )));
+        }
+    }
+
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -403,6 +494,68 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         ui_sources,
         root: raw.ui.root,
         targets,
+        libraries,
+    })
+}
+
+/// Load a component library manifest (`[library]` + `[languages]`).
+pub fn load_library(path: &Path) -> Result<LibraryConfig, Vec<Diagnostic>> {
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        vec![Diagnostic::error(format!(
+            "cannot read {}: {error}",
+            path.display()
+        ))]
+    })?;
+    let raw: RawLibraryConfig = toml::from_str(&text)
+        .map_err(|error| vec![Diagnostic::error(format!("{}: {error}", path.display()))])?;
+    let dir = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = dir.canonicalize().unwrap_or(dir);
+    let mut errors = Vec::new();
+    let mut sources = Vec::new();
+    let mut dirs = Vec::new();
+    for written in &raw.library.sources {
+        match source_file(&dir, written) {
+            Ok((package_dir, module)) => {
+                dirs.push((written.clone(), package_dir));
+                sources.push(SourceFile {
+                    display: format!("{}/{written}", raw.library.package),
+                    path: dir.join(written),
+                    module,
+                });
+            }
+            Err(error) => errors.push(error),
+        }
+    }
+    for tag in &raw.languages.supported {
+        if !valid_language(tag) {
+            errors.push(Diagnostic::error(format!(
+                "language tag `{tag}` is not a standard tag"
+            )));
+        }
+    }
+    let package = package(&dir, &raw.library.package, &dirs, "library")
+        .map_err(|error| errors.push(error))
+        .ok();
+    let version = package.as_ref().and_then(|package| {
+        read_package_field(&package.dir, "version")
+            .map_err(|error| errors.push(error))
+            .ok()
+    });
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(LibraryConfig {
+        dir,
+        manifest: path.to_path_buf(),
+        package: package.unwrap(),
+        version: version.unwrap(),
+        sources,
+        languages: raw.languages.supported,
+        default_language: raw.languages.default,
+        strict: raw.languages.strict,
     })
 }
 

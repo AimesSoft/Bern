@@ -9,7 +9,7 @@
 - 首个目标平台：macOS（SwiftUI）
 - 主要验证应用：NipaPlay 3.0
 
-项目正在按本文重写，当前没有实现代码；下文能力均为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)：已完成阶段一与阶段二的 macOS 主干，其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
@@ -334,13 +334,15 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | 组件 | 核心语义 | 优先级 |
 | --- | --- | --- |
 | WindowSet 和 Window | 窗口目录、内容、实例策略、原生或虚拟呈现与生命周期 | 初期，macOS 使用原生窗口，Web 使用页面宿主与应用内虚拟窗口 |
-| SplitView 和 Sidebar | 侧边栏与详情分栏、侧边栏分组和选中项 | 初期 |
-| Navigation | 推入导航与返回，绑定类型化路由 | 初期 |
-| Tabs | 同级页面的页签切换 | 初期 |
+| SplitView 和 Sidebar | 侧边栏与详情分栏、侧边栏分组和选中项；Sidebar 可带 `id` 供外部入口切换 | 初期 |
+| Navigation、Destination 和 NavLink | 推入导航与返回，绑定类型化路由；Navigation 可带 `id` 供外部入口返回 | 初期 |
+| Tabs 和 Tab | 同级页面的页签切换；Tabs 可带 `id` 供外部入口切换 | 初期 |
 | Toolbar | 窗口或页面级操作区 | 初期 |
 | Column 和 Row | 单轴排列、间距、对齐、约束 | 初期 |
 | Stack | 叠放顺序、定位及命中关系 | 后续 |
-| Form 和 Section | 分组表单、行标签、分组标题与说明 | 初期 |
+| Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题 | 初期 |
+| Label | 图标与标题组合 | 初期 |
+| Spacer 和 Divider | 弹性空白与分隔线 | 初期 |
 | Text | 本地化或动态文本、文字层级、换行及截断 | 初期 |
 | Button | 可访问名称、语义角色、强调程度、启用状态及激活事件 | 初期 |
 | IconButton | 图标激活、透明热区与可访问名称 | 初期；使用 Bern 配方的目标所有状态无可见按钮容器，原生目标使用平台无边框样式 |
@@ -349,7 +351,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Switch | 布尔状态与修改事件 | 初期 |
 | Slider | 范围值、连续变化和提交事件 | 初期 |
 | Picker | 从有限选项中单选，按场景呈现为菜单或分段控件 | 初期 |
-| ScrollView 和 List | 滚动容器及有身份的列表 | 初期，虚拟化后续 |
+| ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复 | 初期，虚拟化后续 |
 | Image | 图片资源、尺寸及替代文本 | 后续 |
 | Menu 和 Dialog | 操作入口、焦点及关闭行为 | 功能契约验证阶段 |
 | Video | 媒体源、受管理播放器、播放命令、状态与标准控件 | 早期验证 macOS 原生媒体适配及 Web video 映射 |

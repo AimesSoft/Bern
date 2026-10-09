@@ -1,0 +1,11 @@
+# A Bern component library. Its components are presentational: they take
+# value parameters and declare their own translations.
+
+[library]
+package = "showcase-widgets"
+sources = ["src/lib.rs"]
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"
+strict = true

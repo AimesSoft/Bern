@@ -150,7 +150,7 @@ pub fn library_page(app: showcase::Client, #[session] draft: MainDraft) -> impl 
                                     ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
                                 }
                                 Spacer
-                                Text(content: tr! { "zh-Hans" => "{count} 项", "en" => "{count} items"; count: item.count }, emphasis: secondary)
+                                showcase_widgets::item_count(count: item.count)
                             }
                         }
                     }

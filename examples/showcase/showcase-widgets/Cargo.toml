@@ -1,0 +1,11 @@
+[package]
+name = "showcase-widgets"
+description = "A component library used by the Bern showcase"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
