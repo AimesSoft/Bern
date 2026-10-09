@@ -204,11 +204,11 @@ Scene accessory 属于附属呈现能力；不能自动映射成所有 `Window` 
 
 **官方依据。** 可访问界面需支持较大文字、足够对比、非纯颜色提示及 VoiceOver；自绘或重构控件需要保留标签、角色和动作语义。[Accessibility HIG](https://developer.apple.com/design/human-interface-guidelines/accessibility)、[Catch up on accessibility in SwiftUI，WWDC24](https://developer.apple.com/videos/play/wwdc2024/10073/)
 
-**Bern 决策。** 共享 Rust 主题算法处理 Bern 管理的控件与表面，原生系统区域按后端明确标注；Apple 没有要求所有平台使用 Bern 的同一组 RGB 值或色彩算法。
+**Bern 决策。** Apple 平台具备完整的深浅色与语义颜色体系，SwiftUI 目标使用系统语义颜色、材料与标准控件样式，不在窗口、侧边栏、表单等系统表面叠加自定义背景色；应用声明的品牌色映射为 tint 或 AccentColor，未声明时使用用户选择的系统强调色。共享 Rust 主题算法只用于 Bern 自行绘制的控件与表面。
 
-IconButton 在普通、悬停、按下、选中、禁用与焦点状态均无可见容器。原生默认玻璃底板、悬停底板及按钮框不能无意重新引入；使用图标本身的颜色、形状或轮廓反馈，保留透明热区与可访问名称。
+IconButton 使用平台标准的无边框图标按钮样式。系统托管的呈现位置遵循平台规则，例如工具栏为工具栏项统一提供的背景；Bern 不在其他位置额外添加底板。生成代码只使用最低部署版本已有的标准组件与样式，不为较新系统的视觉效果单独调用其专有接口。
 
-该规则属于 Bern 产品决策。它要求单独验证 macOS 键盘焦点和 tvOS 遥控焦点的清晰度，不能仅因使用 SwiftUI `Button` 就声称外观和辅助功能同时合规。
+使用标准组件不等于辅助功能自动合规，仍要单独验证 macOS 键盘焦点和 tvOS 遥控焦点的清晰度。
 
 **Bern 共同验收。** 用实际可访问树与操作检查名称、角色、状态和动作；同时覆盖较大文字、深浅色、增强对比及减少动态效果。仅做截图比色不足以证明可用。
 
