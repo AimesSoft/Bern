@@ -9,6 +9,8 @@
 - 首个目标平台：Web
 - 主要验证应用：NipaPlay 3.0
 
+当前代码进度见 [WebUI 第一阶段实现](Implementation/WebUI-First-Step.md)。本阶段仅实现基础 WebUI 切片，下文的完整能力仍为设计目标。
+
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
 原生 UI 连接机制与实现经验见 [React Native 源码研究](Research/ReactNative.md)，其中区分了运行时渲染、接口代码生成与 Bern 的目标代码生成路线。

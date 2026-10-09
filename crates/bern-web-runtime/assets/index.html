@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>正在打开应用</title>
+    <link rel="stylesheet" href="./style.css">
+    <script type="module" src="./runtime.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="shell-header">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">b</span><span>Bern</span></div>
+        <span id="connection-status" class="connection-status" role="status" aria-live="polite" data-state="connecting">正在连接</span>
+      </header>
+      <main id="main-content" class="main-content" aria-busy="true">
+        <div class="page-heading"><p class="eyebrow">工作空间</p><h1 id="app-title">正在打开应用</h1></div>
+        <div id="app-root" class="app-root"></div>
+      </main>
+      <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+      <footer class="shell-footer"><span>由 Bern 呈现</span><span class="footer-detail">简洁 · 专注</span></footer>
+    </div>
+    <noscript><p class="startup-error">请启用 JavaScript 后重新打开此页面。</p></noscript>
+  </body>
+</html>

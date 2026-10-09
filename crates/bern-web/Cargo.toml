@@ -1,0 +1,11 @@
+[package]
+name = "bern-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-core = { path = "../bern-core" }
+http = "1.5"
+serde_json.workspace = true
