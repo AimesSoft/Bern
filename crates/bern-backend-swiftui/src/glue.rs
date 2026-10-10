@@ -3,111 +3,9 @@
 //! server from the same command catalog.
 
 use bern_ir::Application;
-use bern_protocol::{EnumDef, FieldDef, RecordDef, Type, TypeTable, Value};
 use bern_target_api::BuildContext;
+use bern_target_api::glue::{WindowPresentation, players_expr, resources_expr, session_spec};
 use std::path::Path;
-
-const P: &str = "bern_ffi::protocol";
-
-fn rust_type(ty: &Type) -> String {
-    match ty {
-        Type::Unit => format!("{P}::Type::Unit"),
-        Type::Bool => format!("{P}::Type::Bool"),
-        Type::Int => format!("{P}::Type::Int"),
-        Type::Float => format!("{P}::Type::Float"),
-        Type::Text => format!("{P}::Type::Text"),
-        Type::Enum { name } => format!("{P}::Type::Enum {{ name: {name:?}.into() }}"),
-        Type::Record { name } => format!("{P}::Type::Record {{ name: {name:?}.into() }}"),
-        Type::Optional { inner } => format!("{P}::Type::optional({})", rust_type(inner)),
-        Type::List { inner } => format!("{P}::Type::list({})", rust_type(inner)),
-    }
-}
-
-fn rust_value(value: &Value) -> String {
-    match value {
-        Value::Unit => format!("{P}::Value::Unit"),
-        Value::Bool(value) => format!("{P}::Value::Bool({value})"),
-        Value::Int(value) => format!("{P}::Value::Int({value})"),
-        Value::Float(value) => format!("{P}::Value::Float({value:?})"),
-        Value::Text(value) => format!("{P}::Value::Text({value:?}.into())"),
-        Value::Enum { variant, fields } => format!(
-            "{P}::Value::Enum {{ variant: {variant}, fields: vec![{}] }}",
-            fields.iter().map(rust_value).collect::<Vec<_>>().join(", ")
-        ),
-        Value::Optional(None) => format!("{P}::Value::Optional(None)"),
-        Value::Optional(Some(value)) => format!("{P}::Value::some({})", rust_value(value)),
-        Value::Record(values) => format!(
-            "{P}::Value::Record(vec![{}])",
-            values.iter().map(rust_value).collect::<Vec<_>>().join(", ")
-        ),
-        Value::List(values) => format!(
-            "{P}::Value::List(vec![{}])",
-            values.iter().map(rust_value).collect::<Vec<_>>().join(", ")
-        ),
-    }
-}
-
-fn rust_field(field: &FieldDef) -> String {
-    format!(
-        "{P}::FieldDef {{ name: {:?}.into(), ty: {}, doc: String::new() }}",
-        field.name,
-        rust_type(&field.ty)
-    )
-}
-
-fn rust_enum(def: &EnumDef) -> String {
-    let variants: Vec<_> = def
-        .variants
-        .iter()
-        .map(|variant| {
-            format!(
-                "{P}::VariantDef {{ name: {:?}.into(), fields: vec![{}], label: None }}",
-                variant.name,
-                variant
-                    .fields
-                    .iter()
-                    .map(rust_field)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })
-        .collect();
-    format!(
-        "{P}::EnumDef {{ name: {:?}.into(), variants: vec![{}] }}",
-        def.name,
-        variants.join(", ")
-    )
-}
-
-fn rust_record(def: &RecordDef) -> String {
-    format!(
-        "{P}::RecordDef {{ name: {:?}.into(), fields: vec![{}] }}",
-        def.name,
-        def.fields
-            .iter()
-            .map(rust_field)
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-}
-
-fn rust_types(types: &TypeTable) -> String {
-    format!(
-        "{P}::TypeTable {{\n            enums: vec![{}],\n            records: vec![{}],\n        }}",
-        types
-            .enums
-            .iter()
-            .map(rust_enum)
-            .collect::<Vec<_>>()
-            .join(", "),
-        types
-            .records
-            .iter()
-            .map(rust_record)
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
-}
 
 fn path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
@@ -162,51 +60,6 @@ panic = "unwind"
 }
 
 pub fn lib_rs(context: &BuildContext, app: &Application) -> String {
-    let sessions: Vec<String> = app
-        .sessions
-        .iter()
-        .map(|session| {
-            let fields: Vec<String> = session
-                .fields
-                .iter()
-                .map(|field| {
-                    format!(
-                        "({:?}.into(), {}, {})",
-                        field.name,
-                        rust_type(&field.ty),
-                        rust_value(&field.initial)
-                    )
-                })
-                .collect();
-            format!(
-                "bern_ffi::SessionType {{\n                name: {:?}.into(),\n                fields: vec![{}],\n            }}",
-                session.name,
-                fields.join(", ")
-            )
-        })
-        .collect();
-    let windows: Vec<String> = app
-        .windows
-        .windows
-        .iter()
-        .map(|window| {
-            let indices: Vec<String> = window
-                .sessions
-                .iter()
-                .filter_map(|name| {
-                    app.sessions
-                        .iter()
-                        .position(|session| session.name == *name)
-                })
-                .map(|index| index.to_string())
-                .collect();
-            format!(
-                "bern_ffi::WindowKind {{ id: {:?}.into(), sessions: vec![{}], presentation: bern_ffi::runtime::Presentation::Native }}",
-                window.id,
-                indices.join(", ")
-            )
-        })
-        .collect();
     let ipc = context
         .target
         .channels
@@ -255,15 +108,7 @@ fn spec() -> bern_ffi::AppSpec {{
         ipc: {ipc},
         players: vec![{players}],
         resources: vec![{resources}],
-        session: bern_ffi::runtime::SessionSpec {{
-        types: {types},
-        sessions: vec![
-            {sessions}
-        ],
-        windows: vec![
-            {windows}
-        ],
-        }},
+        session: {session},
     }}
 }}
 "#,
@@ -271,21 +116,9 @@ fn spec() -> bern_ffi::AppSpec {{
         protocol = context.protocol_module,
         engine = context.engine_type,
         bundle = app.app.bundle_id,
-        types = rust_types(&app.types),
-        sessions = sessions.join(",\n            "),
-        windows = windows.join(",\n            "),
-        players = app
-            .players
-            .iter()
-            .map(|player| format!("{:?}.into()", player.id))
-            .collect::<Vec<_>>()
-            .join(", "),
-        resources = app
-            .resources
-            .iter()
-            .map(|resource| format!("{:?}.into()", resource.name))
-            .collect::<Vec<_>>()
-            .join(", "),
+        session = session_spec(app, WindowPresentation::Native),
+        players = players_expr(app),
+        resources = resources_expr(app),
     )
 }
 

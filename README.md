@@ -3,15 +3,16 @@
 Bern 是以命令为中心的 Rust 应用框架。界面用受约束、可静态分析的 Rust 声明编写，每个可操作入口都绑定类型化命令；UI、应用 CLI、JSON 控制通道和 MCP 服务器驱动同一个引擎实例。Bern 把声明编译成各平台的原生 UI，不自研渲染引擎。
 
 - 架构与目标：[设计文档](Docs/Design.md)
-- 当前进度、语法参考与验证记录：[macOS SwiftUI 实现记录](Docs/Implementation/macOS-SwiftUI.md)
-- 平台适配依据：[UI 自适应适配规范](Docs/Adaptation/README.md)
+- 当前进度、语法参考与验证记录：[macOS SwiftUI 实现记录](Docs/Implementation/macOS-SwiftUI.md)、[Web 实现记录](Docs/Implementation/Web.md)
+- 平台适配依据：[UI 自适应适配规范](Docs/Adaptation/README.md)、[Web 视觉规范](Docs/Adaptation/Web.md)
 
-首个后端是 macOS SwiftUI：生成的应用只使用标准 SwiftUI 组件和系统样式，颜色来自系统，业务引擎在应用进程内运行。
+首个后端是 macOS SwiftUI：生成的应用只使用标准 SwiftUI 组件和系统样式，颜色来自系统，业务引擎在应用进程内运行。第二个后端是 Web：页面使用 Bern 自定的视觉规范，颜色由 Bern 主题内核生成并自动适配浅色、深色与更高对比；`app` 构建把引擎编译为 WebAssembly 在页面内运行，窗口呈现为页面内的虚拟窗口。
 
 ## 环境
 
 - Rust 1.99.0（仓库内 `rust-toolchain.toml` 固定版本）
 - Xcode 26 或更新的正式版（提供 macOS 26 及以上 SDK），最低部署目标 macOS 14
+- Web 构建需要 Rust 的 `wasm32-unknown-unknown` 目标：`rustup target add wasm32-unknown-unknown`
 
 ## 构建示例应用
 
@@ -37,6 +38,15 @@ target/bern/macos/bin/showcase window close --window settings#1
 ```
 
 `target/bern/macos/bin/showcase-mcp` 是同一目录派生的 MCP 服务器（stdio）。控制通道只在 `Bern.toml` 的目标声明 `channels = ["ipc"]` 时启动；不声明则应用不监听任何端口。
+
+同一份声明的 Web 版本：
+
+```sh
+cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_app
+python3 -m http.server 8765 --bind 127.0.0.1 --directory target/bern/web_app
+```
+
+然后在浏览器打开 `http://127.0.0.1:8765/`。页面需要经 HTTP 提供，直接打开本地文件无法加载 WebAssembly 模块。
 
 ## 编写应用
 

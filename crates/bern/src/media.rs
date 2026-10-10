@@ -25,23 +25,20 @@ impl MediaSource {
     pub fn file(path: impl AsRef<std::path::Path>) -> Self {
         let path = path.as_ref();
         let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-        let mut url = String::from("file://");
-        for byte in path.to_string_lossy().bytes() {
-            match byte {
-                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
-                    url.push(byte as char)
-                }
-                other => url.push_str(&format!("%{other:02X}")),
-            }
+        Self {
+            url: crate::resources::file_url(&path),
         }
-        Self { url }
     }
 
-    /// A `file://` source for a resource declared in `Bern.toml`, located
-    /// by `resources`. The engine names the resource; the host decides
-    /// where the file is, for example inside the app bundle.
+    /// A source for a resource declared in `Bern.toml`, located by
+    /// `resources`. The engine names the resource; the host decides where
+    /// it is: a file inside the app bundle, or a URL the page serves.
     pub fn resource(resources: &Resources, name: &str) -> Result<Self, CommandError> {
-        resources.path(name).map(Self::file)
+        if resources.is_served() {
+            resources.url(name).map(Self::new)
+        } else {
+            resources.path(name).map(Self::file)
+        }
     }
 }
 

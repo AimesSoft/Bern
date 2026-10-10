@@ -11,4 +11,9 @@ bern-protocol.workspace = true
 bern-command.workspace = true
 bern-runtime.workspace = true
 bern-media.workspace = true
-bern-transport-ipc.workspace = true
+bern-transport-ipc = { workspace = true, optional = true }
+
+[features]
+default = ["ipc"]
+# The local control channel for CLI, JSON and MCP entries (Unix sockets).
+ipc = ["dep:bern-transport-ipc"]

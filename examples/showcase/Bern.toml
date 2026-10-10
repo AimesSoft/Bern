@@ -47,3 +47,9 @@ platform = "macos"
 # Entries besides the UI. "ipc" assembles the local control channel used by
 # the generated CLI, JSON clients and MCP server; omit it for no listener.
 channels = ["ipc"]
+
+# The same app as a web page with the engine compiled to WebAssembly.
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"

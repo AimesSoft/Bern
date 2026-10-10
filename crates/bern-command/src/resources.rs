@@ -6,8 +6,9 @@
 //! [`Resources`]; it never knows where a target puts the files. The host
 //! that runs the engine installs the resources of its product before it
 //! constructs the engine, for example the declared files inside a macOS app
-//! bundle. Tests and headless tools pass resources explicitly, as they pass
-//! a clock. A lookup never falls back to another location.
+//! bundle, or the URL a page serves them from. Tests and headless tools pass
+//! resources explicitly, as they pass a clock. A lookup never falls back to
+//! another location.
 
 use bern_protocol::{CommandError, check_resource_name};
 use std::collections::BTreeSet;
@@ -22,7 +23,11 @@ pub struct Resources {
 
 #[derive(Debug, PartialEq, Eq)]
 struct Located {
-    root: PathBuf,
+    /// Directory holding the files, when the engine can read them.
+    root: Option<PathBuf>,
+    /// URL prefix the files are served from, ending in `/`, when whoever
+    /// plays or shows them is a web page.
+    url_base: Option<String>,
     /// Declared names; `None` serves every file below `root`.
     catalog: Option<BTreeSet<String>>,
 }
@@ -45,7 +50,30 @@ impl Resources {
     ) -> Self {
         Self {
             located: Some(Arc::new(Located {
-                root: root.into(),
+                root: Some(root.into()),
+                url_base: None,
+                catalog: Some(names.into_iter().map(Into::into).collect()),
+            })),
+        }
+    }
+
+    /// The declared `names` as served below `url_base`, a URL prefix such as
+    /// `resources/` relative to the page. The build copies every declared
+    /// file there, so lookups check the catalog but not the server. With
+    /// `root`, the engine can also read the files from that directory.
+    pub fn served(
+        url_base: impl Into<String>,
+        root: Option<PathBuf>,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        let mut url_base = url_base.into();
+        if !url_base.is_empty() && !url_base.ends_with('/') {
+            url_base.push('/');
+        }
+        Self {
+            located: Some(Arc::new(Located {
+                root,
+                url_base: Some(url_base),
                 catalog: Some(names.into_iter().map(Into::into).collect()),
             })),
         }
@@ -56,7 +84,8 @@ impl Resources {
     pub fn directory(root: impl Into<PathBuf>) -> Self {
         Self {
             located: Some(Arc::new(Located {
-                root: root.into(),
+                root: Some(root.into()),
+                url_base: None,
                 catalog: None,
             })),
         }
@@ -79,11 +108,18 @@ impl Resources {
         }
     }
 
+    /// Whether the resources are served to a page under a URL prefix.
+    pub fn is_served(&self) -> bool {
+        self.located
+            .as_deref()
+            .is_some_and(|located| located.url_base.is_some())
+    }
+
     /// Directory that holds the resources, if any.
     pub fn root(&self) -> Option<&Path> {
         self.located
             .as_deref()
-            .map(|located| located.root.as_path())
+            .and_then(|located| located.root.as_deref())
     }
 
     /// The file of a declared resource.
@@ -93,6 +129,35 @@ impl Resources {
     /// catalog, even if a file of that name exists) and `resource_missing`
     /// (declared, but the product lacks the file).
     pub fn path(&self, name: &str) -> Result<PathBuf, CommandError> {
+        let located = self.declared(name)?;
+        let Some(root) = &located.root else {
+            return Err(CommandError::new(
+                "resources_unavailable",
+                format!("`{name}` is served to a page; this engine cannot read its file"),
+            ));
+        };
+        let path = root.join(name);
+        if path.is_file() {
+            Ok(path)
+        } else {
+            Err(CommandError::new(
+                "resource_missing",
+                format!("resource `{name}` is missing: {}", path.display()),
+            ))
+        }
+    }
+
+    /// The URL a player or view loads a declared resource from: below the
+    /// served URL prefix, or the `file:` URL of its file.
+    pub fn url(&self, name: &str) -> Result<String, CommandError> {
+        let located = self.declared(name)?;
+        match &located.url_base {
+            Some(base) => Ok(format!("{base}{name}")),
+            None => self.path(name).map(|path| file_url(&path)),
+        }
+    }
+
+    fn declared(&self, name: &str) -> Result<&Located, CommandError> {
         check_resource_name(name)
             .map_err(|message| CommandError::new("invalid_resource_name", message))?;
         let Some(located) = &self.located else {
@@ -111,24 +176,31 @@ impl Resources {
                 format!("`{name}` is not declared in the [resources] of Bern.toml"),
             ));
         }
-        let path = located.root.join(name);
-        if path.is_file() {
-            Ok(path)
-        } else {
-            Err(CommandError::new(
-                "resource_missing",
-                format!("resource `{name}` is missing: {}", path.display()),
-            ))
+        Ok(located)
+    }
+}
+
+/// `file://` URL of an absolute path, percent-encoding what URLs reserve.
+pub fn file_url(path: &Path) -> String {
+    let mut url = String::from("file://");
+    for byte in path.to_string_lossy().bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                url.push(byte as char)
+            }
+            _ => url.push_str(&format!("%{byte:02X}")),
         }
     }
+    url
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn project() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("bern-resources-{}", std::process::id()));
+    fn project(test: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("bern-resources-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("media")).unwrap();
         std::fs::write(dir.join("media/clip.mp4"), b"clip").unwrap();
@@ -138,7 +210,7 @@ mod tests {
 
     #[test]
     fn lookups_are_strict() {
-        let dir = project();
+        let dir = project("strict");
         let resources = Resources::catalog(&dir, ["media/clip.mp4", "media/gone.mp4"]);
         assert_eq!(
             resources.path("media/clip.mp4").unwrap(),
@@ -164,6 +236,31 @@ mod tests {
                 .unwrap_err()
                 .code,
             "resources_unavailable"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn served_resources_resolve_to_urls_below_the_prefix() {
+        let resources = Resources::served("resources", None, ["media/clip.mp4"]);
+        assert_eq!(
+            resources.url("media/clip.mp4").unwrap(),
+            "resources/media/clip.mp4"
+        );
+        assert_eq!(
+            resources.url("media/other.mp4").unwrap_err().code,
+            "undeclared_resource"
+        );
+        // A page's resources have no file for the engine to read.
+        assert_eq!(
+            resources.path("media/clip.mp4").unwrap_err().code,
+            "resources_unavailable"
+        );
+        let dir = project("served");
+        let files = Resources::catalog(&dir, ["media/clip.mp4"]);
+        assert_eq!(
+            files.url("media/clip.mp4").unwrap(),
+            file_url(&dir.join("media/clip.mp4"))
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

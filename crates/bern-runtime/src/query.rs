@@ -21,9 +21,7 @@
 pub use bern_protocol::Cancellation;
 use bern_protocol::{CommandError, Value};
 use std::collections::BTreeMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
 
 /// What a query shows. An empty result is `Ready` with empty data: success,
 /// not failure.
@@ -394,103 +392,184 @@ impl Clock for ManualClock {
     }
 }
 
-/// Real time. One timer thread runs while timers are pending and ends when
-/// none are left.
-#[derive(Clone)]
-pub struct SystemClock {
-    inner: Arc<SystemTimers>,
-}
+#[cfg(not(target_arch = "wasm32"))]
+pub use thread_clock::SystemClock;
 
-struct SystemTimers {
-    start: Instant,
-    queue: Mutex<TimerQueue>,
-    wake: Condvar,
-}
+#[cfg(not(target_arch = "wasm32"))]
+mod thread_clock {
+    use super::{Clock, Timer};
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::{Arc, Condvar, Mutex};
+    use std::time::{Duration, Instant};
 
-#[derive(Default)]
-struct TimerQueue {
-    sequence: u64,
-    timers: Vec<(Instant, u64, Timer)>,
-    running: bool,
-}
-
-impl Default for SystemClock {
-    fn default() -> Self {
-        Self::new()
+    /// Real time. One timer thread runs while timers are pending and ends when
+    /// none are left.
+    #[derive(Clone)]
+    pub struct SystemClock {
+        inner: Arc<SystemTimers>,
     }
-}
 
-impl SystemClock {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(SystemTimers {
-                start: Instant::now(),
-                queue: Mutex::new(TimerQueue::default()),
-                wake: Condvar::new(),
-            }),
+    struct SystemTimers {
+        start: Instant,
+        queue: Mutex<TimerQueue>,
+        wake: Condvar,
+    }
+
+    #[derive(Default)]
+    struct TimerQueue {
+        sequence: u64,
+        timers: Vec<(Instant, u64, Timer)>,
+        running: bool,
+    }
+
+    impl Default for SystemClock {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
-    fn run(timers: Arc<SystemTimers>) {
-        let mut queue = timers.queue.lock().expect("timer lock");
-        loop {
-            let now = Instant::now();
-            let next = queue
-                .timers
-                .iter()
-                .enumerate()
-                .min_by_key(|(_, (due, sequence, _))| (*due, *sequence))
-                .map(|(index, (due, _, _))| (index, *due));
-            match next {
-                None => {
+    impl SystemClock {
+        pub fn new() -> Self {
+            Self {
+                inner: Arc::new(SystemTimers {
+                    start: Instant::now(),
+                    queue: Mutex::new(TimerQueue::default()),
+                    wake: Condvar::new(),
+                }),
+            }
+        }
+
+        fn run(timers: Arc<SystemTimers>) {
+            let mut queue = timers.queue.lock().expect("timer lock");
+            loop {
+                let now = Instant::now();
+                let next = queue
+                    .timers
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, (due, sequence, _))| (*due, *sequence))
+                    .map(|(index, (due, _, _))| (index, *due));
+                match next {
+                    None => {
+                        queue.running = false;
+                        return;
+                    }
+                    Some((index, due)) if due <= now => {
+                        let (_, _, task) = queue.timers.remove(index);
+                        drop(queue);
+                        // A failing task must not stop the timers behind it.
+                        let _ = catch_unwind(AssertUnwindSafe(task));
+                        queue = timers.queue.lock().expect("timer lock");
+                    }
+                    Some((_, due)) => {
+                        queue = timers
+                            .wake
+                            .wait_timeout(queue, due - now)
+                            .expect("timer lock")
+                            .0;
+                    }
+                }
+            }
+        }
+    }
+
+    impl Clock for SystemClock {
+        fn now_ms(&self) -> u64 {
+            self.inner.start.elapsed().as_millis() as u64
+        }
+
+        fn after_ms(&self, delay_ms: u64, task: Timer) {
+            let mut queue = self.inner.queue.lock().expect("timer lock");
+            queue.sequence += 1;
+            let sequence = queue.sequence;
+            queue.timers.push((
+                Instant::now() + Duration::from_millis(delay_ms),
+                sequence,
+                task,
+            ));
+            if !queue.running {
+                queue.running = true;
+                let timers = Arc::clone(&self.inner);
+                if std::thread::Builder::new()
+                    .name("bern-timers".into())
+                    .spawn(move || SystemClock::run(timers))
+                    .is_err()
+                {
                     queue.running = false;
-                    return;
-                }
-                Some((index, due)) if due <= now => {
-                    let (_, _, task) = queue.timers.remove(index);
-                    drop(queue);
-                    // A failing task must not stop the timers behind it.
-                    let _ = catch_unwind(AssertUnwindSafe(task));
-                    queue = timers.queue.lock().expect("timer lock");
-                }
-                Some((_, due)) => {
-                    queue = timers
-                        .wake
-                        .wait_timeout(queue, due - now)
-                        .expect("timer lock")
-                        .0;
                 }
             }
+            self.inner.wake.notify_one();
         }
     }
 }
 
-impl Clock for SystemClock {
-    fn now_ms(&self) -> u64 {
-        self.inner.start.elapsed().as_millis() as u64
+#[cfg(target_arch = "wasm32")]
+pub use page_clock::SystemClock;
+
+#[cfg(target_arch = "wasm32")]
+mod page_clock {
+    use super::{Clock, Timer};
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    #[link(wasm_import_module = "bern")]
+    unsafe extern "C" {
+        /// Milliseconds from the page's monotonic clock.
+        fn now_ms() -> f64;
+        /// Call `bern_timer_fired(id)` once `delay_ms` have passed.
+        fn set_timer(id: u32, delay_ms: f64);
     }
 
-    fn after_ms(&self, delay_ms: u64, task: Timer) {
-        let mut queue = self.inner.queue.lock().expect("timer lock");
-        queue.sequence += 1;
-        let sequence = queue.sequence;
-        queue.timers.push((
-            Instant::now() + Duration::from_millis(delay_ms),
-            sequence,
-            task,
-        ));
-        if !queue.running {
-            queue.running = true;
-            let timers = Arc::clone(&self.inner);
-            if std::thread::Builder::new()
-                .name("bern-timers".into())
-                .spawn(move || SystemClock::run(timers))
-                .is_err()
-            {
-                queue.running = false;
+    static TIMERS: Mutex<(u32, BTreeMap<u32, Timer>)> = Mutex::new((0, BTreeMap::new()));
+
+    /// Real time on a web page: timers are the page's own, so tasks run on
+    /// the page's thread between events.
+    #[derive(Clone)]
+    pub struct SystemClock {
+        start: f64,
+    }
+
+    impl Default for SystemClock {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl SystemClock {
+        pub fn new() -> Self {
+            // SAFETY: the page provides `bern.now_ms` with this signature.
+            Self {
+                start: unsafe { now_ms() },
             }
         }
-        self.inner.wake.notify_one();
+    }
+
+    impl Clock for SystemClock {
+        fn now_ms(&self) -> u64 {
+            // SAFETY: as in `new`.
+            (unsafe { now_ms() } - self.start).max(0.0) as u64
+        }
+
+        fn after_ms(&self, delay_ms: u64, task: Timer) {
+            let id = {
+                let mut timers = TIMERS.lock().expect("timer lock");
+                timers.0 = timers.0.wrapping_add(1);
+                let id = timers.0;
+                timers.1.insert(id, task);
+                id
+            };
+            // SAFETY: the page provides `bern.set_timer` with this signature.
+            unsafe { set_timer(id, delay_ms as f64) };
+        }
+    }
+
+    /// The page calls this when a timer set through `bern.set_timer` is due.
+    #[unsafe(no_mangle)]
+    pub extern "C" fn bern_timer_fired(id: u32) {
+        let task = TIMERS.lock().expect("timer lock").1.remove(&id);
+        if let Some(task) = task {
+            task();
+        }
     }
 }
 
@@ -498,6 +577,7 @@ impl Clock for SystemClock {
 mod tests {
     use super::*;
     use std::sync::mpsc::channel;
+    use std::time::Duration;
 
     /// A search provider whose latency the scenario chooses per query.
     struct Search {

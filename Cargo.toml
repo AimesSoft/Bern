@@ -19,6 +19,7 @@ members = [
     "crates/bern-target-api",
     "crates/bern-compiler",
     "crates/bern-backend-swiftui",
+    "crates/bern-backend-web",
     "examples/showcase/showcase-protocol",
     "examples/showcase/showcase-core",
     "examples/showcase/showcase-ui",
@@ -44,6 +45,7 @@ bern-theme = { path = "crates/bern-theme" }
 bern-target-api = { path = "crates/bern-target-api" }
 bern-compiler = { path = "crates/bern-compiler" }
 bern-backend-swiftui = { path = "crates/bern-backend-swiftui" }
+bern-backend-web = { path = "crates/bern-backend-web" }
 bern-adapter-json = { path = "crates/bern-adapter-json" }
 bern-transport-ipc = { path = "crates/bern-transport-ipc" }
 bern-adapter-cli = { path = "crates/bern-adapter-cli" }

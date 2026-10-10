@@ -167,6 +167,44 @@ fn engine_errors_keep_state_and_panics_poison_the_engine() {
 }
 
 #[test]
+fn a_local_host_runs_jobs_on_the_calling_thread_in_order() {
+    let host = Host::start_local(Counter(0));
+    let add = |amount: i64| Invocation {
+        command: 0,
+        params: vec![Value::Int(amount)],
+    };
+    // A listener that dispatches again: the nested command waits until the
+    // running one has finished and published.
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let nested = host.clone();
+    let log = Arc::clone(&seen);
+    let _subscription = host.subscribe(move |update| {
+        log.lock().unwrap().push(update.revision);
+        if update.revision == 1 {
+            nested.dispatch(add(10), context(), |_| {});
+        }
+    });
+    let replied = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&replied);
+    host.dispatch(add(1), context(), move |outcome| {
+        assert_eq!(outcome.revision, 1);
+        flag.store(true, Ordering::SeqCst);
+    });
+    // Everything ran before `dispatch` returned.
+    assert!(replied.load(Ordering::SeqCst));
+    assert_eq!(*seen.lock().unwrap(), vec![1, 2]);
+    assert_eq!(host.snapshot(), (2, vec![Value::Int(11)]));
+    assert_eq!(
+        host.dispatch_blocking(add(1), context()).result,
+        Ok(Value::Unit)
+    );
+    host.stop();
+    let outcome = host.dispatch_blocking(add(1), context());
+    assert_eq!(outcome.result.unwrap_err().code, "engine_stopped");
+    assert_eq!(host.snapshot().1, vec![Value::Int(12)]);
+}
+
+#[test]
 fn dropping_a_subscription_stops_updates() {
     let host = Host::start(Counter(0));
     let (sender, receiver) = std::sync::mpsc::channel();

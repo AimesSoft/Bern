@@ -123,6 +123,8 @@ struct RawTarget {
     platform: String,
     ui: Option<String>,
     web_mode: Option<String>,
+    application_transport: Option<String>,
+    application_codec: Option<String>,
     #[serde(default)]
     channels: Vec<String>,
 }
@@ -597,9 +599,45 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
 
     let mut targets = Vec::new();
     for (name, target) in raw.targets {
-        if target.platform == "browser" && target.web_mode.is_none() {
+        if target.platform == "browser" {
+            match target.web_mode.as_deref() {
+                None => errors.push(Diagnostic::error(format!(
+                    "target `{name}`: browser targets must set `web_mode = \"app\"` or `\"ui\"`"
+                ))),
+                Some("app") | Some("ui") => {}
+                Some(other) => errors.push(Diagnostic::error(format!(
+                    "target `{name}`: `web_mode = \"{other}\"` is unknown; use \"app\" or \"ui\""
+                ))),
+            }
+            // `app` runs the engine in the page; `ui` reaches a separate
+            // engine over a browser transport. Mismatches fail here
+            // instead of building a page that cannot reach its engine.
+            let (transport, codec) = match target.web_mode.as_deref() {
+                Some("ui") => ("websocket", Some("json")),
+                _ => ("in-process", None),
+            };
+            if let Some(declared) = &target.application_transport
+                && declared != transport
+            {
+                errors.push(Diagnostic::error(format!(
+                    "target `{name}`: `web_mode = \"{}\"` uses `application_transport = \"{transport}\"`, not `\"{declared}\"`",
+                    target.web_mode.as_deref().unwrap_or("app")
+                )));
+            }
+            if let Some(declared) = &target.application_codec
+                && Some(declared.as_str()) != codec
+            {
+                errors.push(Diagnostic::error(format!(
+                    "target `{name}`: `application_codec = \"{declared}\"` does not apply; {}",
+                    match codec {
+                        Some(codec) => format!("the WebUI channel uses `{codec}`"),
+                        None => "the in-page engine is called directly".into(),
+                    }
+                )));
+            }
+        } else if target.web_mode.is_some() {
             errors.push(Diagnostic::error(format!(
-                "target `{name}`: browser targets must set `web_mode = \"app\"` or `\"ui\"`"
+                "target `{name}`: `web_mode` applies to browser targets only"
             )));
         }
         for channel in &target.channels {
@@ -613,6 +651,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             name,
             platform: target.platform,
             ui: target.ui,
+            web_mode: target.web_mode,
             channels: target.channels,
         });
     }

@@ -59,10 +59,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-backend-web"
+version = "0.1.0"
+dependencies = [
+ "bern-ir",
+ "bern-media",
+ "bern-protocol",
+ "bern-target-api",
+ "bern-theme",
+ "serde_json",
+]
+
+[[package]]
 name = "bern-cli"
 version = "0.1.0"
 dependencies = [
  "bern-backend-swiftui",
+ "bern-backend-web",
  "bern-compiler",
  "bern-target-api",
  "serde_json",

@@ -371,6 +371,7 @@ mod independent_target {
                 name: "outline".into(),
                 platform: "test".into(),
                 ui: Some("outline".into()),
+                web_mode: None,
                 channels: vec![],
             })
             .unwrap();

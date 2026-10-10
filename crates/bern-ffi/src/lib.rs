@@ -276,6 +276,33 @@ fn presentation_action(command: SessionCommand) -> Option<WindowAction> {
     })
 }
 
+/// The local control channel, when this build includes one.
+#[cfg(feature = "ipc")]
+type Channel = bern_transport_ipc::Server;
+
+/// Builds without the `ipc` feature, such as WebAssembly, have no channel.
+#[cfg(not(feature = "ipc"))]
+enum Channel {}
+
+#[cfg(feature = "ipc")]
+fn start_channel(
+    host: &Host,
+    sessions: &Sessions,
+    media: &MediaHub,
+    bundle_id: &str,
+) -> Result<Channel, String> {
+    bern_transport_ipc::Server::start(host.clone(), sessions.clone(), media.clone(), bundle_id)
+        .map_err(|error| format!("cannot start the control channel: {error}"))
+}
+
+#[cfg(not(feature = "ipc"))]
+fn start_channel(_: &Host, _: &Sessions, _: &MediaHub, _: &str) -> Result<Channel, String> {
+    Err(
+        "this build of the runtime has no control channel; remove `ipc` from the target's channels"
+            .into(),
+    )
+}
+
 /// The running application behind the C handle.
 pub struct BernApp {
     host: Host,
@@ -287,7 +314,7 @@ pub struct BernApp {
     queries: query::Subscriptions,
     _subscription: Subscription,
     _media_subscription: MediaSubscription,
-    channel: Option<bern_transport_ipc::Server>,
+    channel: Option<Channel>,
 }
 
 fn encode_changes(host: &Host, revision: u64, changes: &[(usize, Value)]) -> Vec<u8> {
@@ -349,7 +376,14 @@ pub unsafe fn start_app<E: EngineProtocol>(
         if !resources.is_empty() {
             let root = std::str::from_utf8(resources)
                 .map_err(|_| "the resource directory path is not UTF-8".to_string())?;
-            Resources::catalog(root, spec.resources.iter().cloned())
+            // A page has no files: there `resources` is the URL prefix the
+            // declared resources are served from.
+            let located = if cfg!(target_arch = "wasm32") {
+                Resources::served(root, None, spec.resources.iter().cloned())
+            } else {
+                Resources::catalog(root, spec.resources.iter().cloned())
+            };
+            located
                 .install()
                 .map_err(|message| format!("cannot install the app's resources: {message}"))?;
         }
@@ -390,15 +424,7 @@ pub unsafe fn start_app<E: EngineProtocol>(
             callbacks.media_state(&media::state_bytes(update.revision, &update.players));
         });
         let channel = if spec.ipc {
-            Some(
-                bern_transport_ipc::Server::start(
-                    host.clone(),
-                    sessions.clone(),
-                    media.clone(),
-                    spec.bundle_id,
-                )
-                .map_err(|error| format!("cannot start the control channel: {error}"))?,
-            )
+            Some(start_channel(&host, &sessions, &media, spec.bundle_id)?)
         } else {
             None
         };
@@ -497,11 +523,17 @@ pub unsafe extern "C" fn bern_app_engine_id(app: *mut BernApp) -> BernBuffer {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bern_app_channel(app: *mut BernApp) -> BernBuffer {
     with_app(app, BernBuffer::empty(), |app| {
+        #[cfg(feature = "ipc")]
         let path = app
             .channel
             .as_ref()
             .map(|server| server.path().to_string_lossy().into_owned())
             .unwrap_or_default();
+        #[cfg(not(feature = "ipc"))]
+        let path = match &app.channel {
+            Some(never) => match *never {},
+            None => String::new(),
+        };
         BernBuffer::from_vec(path.into_bytes())
     })
 }
@@ -905,6 +937,28 @@ pub unsafe extern "C" fn bern_session_complete(
     // SAFETY: guaranteed by the caller.
     let bytes = unsafe { slice(bytes, len) };
     with_app(app, (), |app| app.bridge.complete(request, bytes))
+}
+
+/// Memory for bytes a WebAssembly host passes in: `len` bytes, released
+/// with [`bern_bytes_free`]. Native hosts pass their own memory instead.
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub extern "C" fn bern_bytes_alloc(len: usize) -> *mut u8 {
+    let mut bytes = std::mem::ManuallyDrop::new(Vec::<u8>::with_capacity(len.max(1)));
+    bytes.as_mut_ptr()
+}
+
+/// Release memory from [`bern_bytes_alloc`].
+///
+/// # Safety
+/// `ptr` and `len` must come from one `bern_bytes_alloc` call.
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_bytes_free(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() {
+        // SAFETY: allocated by `bern_bytes_alloc` with this capacity.
+        drop(unsafe { Vec::from_raw_parts(ptr, 0, len.max(1)) });
+    }
 }
 
 /// Release a buffer returned by this library.

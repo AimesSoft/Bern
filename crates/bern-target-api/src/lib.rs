@@ -6,6 +6,8 @@
 //! imports a concrete target, and disabling one target leaves the others
 //! buildable.
 
+pub mod glue;
+
 use bern_ir::{Application, IR_VERSION, SourceLocation};
 use std::fmt;
 use std::ops::RangeInclusive;
@@ -145,6 +147,8 @@ pub struct TargetConfig {
     pub name: String,
     pub platform: String,
     pub ui: Option<String>,
+    /// Web build mode: `app` (engine in the page) or `ui` (separate engine).
+    pub web_mode: Option<String>,
     pub channels: Vec<String>,
 }
 
@@ -440,6 +444,7 @@ mod tests {
             name: "t".into(),
             platform: platform.into(),
             ui: ui.map(String::from),
+            web_mode: None,
             channels: vec![],
         }
     }

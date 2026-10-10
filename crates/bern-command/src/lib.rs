@@ -6,6 +6,10 @@
 //! updates. The UI, CLI, JSON channel and MCP server all call the same
 //! host; none of them re-implements business logic.
 //!
+//! On WebAssembly there are no threads: the engine runs on the calling
+//! thread instead, one job at a time, and requests made while a job runs
+//! (from a reply or a state listener) wait in order until it finishes.
+//!
 //! Queries are read-only. Their providers start on the engine thread in
 //! arrival order, so they see the state left by the commands before them,
 //! but they answer through a [`QueryAnswer`] that may be completed later
@@ -19,8 +23,9 @@ use bern_protocol::{
     Cancellation, CommandError, CommandOutcome, CommandStatus, Invocation, ProtocolDescriptor,
     StateUpdate, Value,
 };
+use std::collections::VecDeque;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -158,6 +163,17 @@ impl Drop for QueryAnswer {
     }
 }
 
+fn stopped_outcome(revision: u64) -> CommandOutcome {
+    CommandOutcome {
+        status: CommandStatus::Completed,
+        revision,
+        result: Err(CommandError::new(
+            "engine_stopped",
+            "the engine has stopped",
+        )),
+    }
+}
+
 fn cancelled() -> CommandError {
     CommandError::new("cancelled", "the request was cancelled")
 }
@@ -174,7 +190,55 @@ struct Shared {
 #[derive(Clone)]
 pub struct Host {
     shared: Arc<Shared>,
-    jobs: Sender<Job>,
+    jobs: Jobs,
+}
+
+/// Where jobs go: the engine thread, or the caller's thread when there
+/// are no threads.
+#[derive(Clone)]
+enum Jobs {
+    Thread(Sender<Job>),
+    Local(Arc<LocalJobs>),
+}
+
+struct LocalJobs {
+    worker: Mutex<Box<dyn FnMut(Job) -> bool + Send>>,
+    pending: Mutex<VecDeque<Job>>,
+    draining: AtomicBool,
+    stopped: AtomicBool,
+}
+
+impl LocalJobs {
+    /// Queue a job and, unless a job is already running further up the
+    /// stack, run queued jobs until none are left.
+    fn push(&self, job: Job) -> Result<(), Job> {
+        if self.stopped.load(Ordering::Acquire) {
+            return Err(job);
+        }
+        self.pending.lock().expect("job lock").push_back(job);
+        if self.draining.swap(true, Ordering::AcqRel) {
+            // A job is running further up the stack; it drains this one.
+            return Ok(());
+        }
+        loop {
+            let Some(job) = self.pending.lock().expect("job lock").pop_front() else {
+                break;
+            };
+            if self.stopped.load(Ordering::Acquire) {
+                // Queued behind a stop: answer as the stopped engine does.
+                if let Job::Invoke { reply, .. } = job {
+                    reply(stopped_outcome(0));
+                }
+                continue;
+            }
+            let keep = (self.worker.lock().expect("worker lock"))(job);
+            if !keep {
+                self.stopped.store(true, Ordering::Release);
+            }
+        }
+        self.draining.store(false, Ordering::Release);
+        Ok(())
+    }
 }
 
 /// Keeps a state listener registered until dropped.
@@ -191,6 +255,19 @@ impl Drop for Subscription {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+fn new_engine_id() -> String {
+    #[link(wasm_import_module = "bern")]
+    unsafe extern "C" {
+        /// A random 32-bit value from the host page.
+        fn random_u32() -> u32;
+    }
+    // SAFETY: the page provides `bern.random_u32` with this signature.
+    let (high, low) = unsafe { (random_u32(), random_u32()) };
+    format!("{high:08x}{:06x}", low & 0xff_ffff)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn new_engine_id() -> String {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let nanos = std::time::SystemTime::now()
@@ -207,25 +284,73 @@ fn new_engine_id() -> String {
 }
 
 impl Host {
-    /// Start the engine on its own thread.
+    /// Start the engine on its own thread, or on the calling thread where
+    /// there are no threads.
     pub fn start(engine: impl EngineProtocol) -> Host {
+        if cfg!(target_arch = "wasm32") {
+            Self::start_local(engine)
+        } else {
+            Self::start_thread(engine)
+        }
+    }
+
+    fn shared(engine: &impl EngineProtocol) -> Arc<Shared> {
         let descriptor = engine.descriptor();
         let initial = engine.snapshot();
         debug_assert_eq!(initial.len(), descriptor.state.len());
-        let shared = Arc::new(Shared {
+        Arc::new(Shared {
             engine_id: new_engine_id(),
             descriptor,
             state: Mutex::new((0, initial)),
             listeners: Mutex::new(Vec::new()),
             next_listener: AtomicU64::new(1),
-        });
+        })
+    }
+
+    fn start_thread(engine: impl EngineProtocol) -> Host {
+        let shared = Self::shared(&engine);
         let (jobs, receiver) = channel::<Job>();
-        let worker = Arc::clone(&shared);
+        let mut worker = Worker::new(engine, Arc::clone(&shared));
         thread::Builder::new()
             .name("bern-engine".into())
-            .spawn(move || run(engine, worker, receiver))
+            .spawn(move || {
+                while let Ok(job) = receiver.recv() {
+                    if !worker.handle(job) {
+                        break;
+                    }
+                }
+            })
             .expect("start engine thread");
-        Host { shared, jobs }
+        Host {
+            shared,
+            jobs: Jobs::Thread(jobs),
+        }
+    }
+
+    /// Run jobs on the thread that dispatches them. Replies and listeners
+    /// run before `dispatch` returns, except for requests made while a job
+    /// is running, which run right after it. Blocking calls must not be
+    /// made from a reply or listener in this mode.
+    pub fn start_local(engine: impl EngineProtocol) -> Host {
+        let shared = Self::shared(&engine);
+        let mut worker = Worker::new(engine, Arc::clone(&shared));
+        let local = LocalJobs {
+            worker: Mutex::new(Box::new(move |job| worker.handle(job))),
+            pending: Mutex::new(VecDeque::new()),
+            draining: AtomicBool::new(false),
+            stopped: AtomicBool::new(false),
+        };
+        Host {
+            shared,
+            jobs: Jobs::Local(Arc::new(local)),
+        }
+    }
+
+    fn send(&self, job: Job) -> Result<(), Job> {
+        match &self.jobs {
+            Jobs::Thread(sender) => sender.send(job).map_err(|error| error.0),
+            Jobs::Local(local) => local.push(job),
+        }
     }
 
     pub fn engine_id(&self) -> &str {
@@ -284,21 +409,13 @@ impl Host {
         reply: impl FnOnce(CommandOutcome) + Send + 'static,
     ) {
         let reply: Reply = Box::new(reply);
-        if let Err(error) = self.jobs.send(Job::Invoke {
+        if let Err(Job::Invoke { reply, .. }) = self.send(Job::Invoke {
             invocation,
             context,
             cancellation,
             reply,
-        }) && let Job::Invoke { reply, .. } = error.0
-        {
-            reply(CommandOutcome {
-                status: CommandStatus::Completed,
-                revision: self.snapshot().0,
-                result: Err(CommandError::new(
-                    "engine_stopped",
-                    "the engine has stopped",
-                )),
-            });
+        }) {
+            reply(stopped_outcome(self.snapshot().0));
         }
     }
 
@@ -312,14 +429,7 @@ impl Host {
         self.dispatch(invocation, context, move |outcome| {
             let _ = sender.send(outcome);
         });
-        receiver.recv().unwrap_or(CommandOutcome {
-            status: CommandStatus::Completed,
-            revision: 0,
-            result: Err(CommandError::new(
-                "engine_stopped",
-                "the engine has stopped",
-            )),
-        })
+        receiver.recv().unwrap_or(stopped_outcome(0))
     }
 
     /// Run a query and wait at most `timeout` for its answer. A late answer
@@ -376,7 +486,7 @@ impl Host {
 
     /// Stop the engine thread after already queued commands.
     pub fn stop(&self) {
-        let _ = self.jobs.send(Job::Stop);
+        let _ = self.send(Job::Stop);
     }
 }
 
@@ -401,14 +511,24 @@ fn validate(descriptor: &ProtocolDescriptor, invocation: &Invocation) -> Result<
     Ok(())
 }
 
-fn run(
-    mut engine: impl EngineProtocol,
+/// The engine and the state it leaves for the next job.
+struct Worker<E> {
+    engine: E,
     shared: Arc<Shared>,
-    receiver: std::sync::mpsc::Receiver<Job>,
-) {
-    let descriptor = shared.descriptor;
-    let mut poisoned = false;
-    while let Ok(job) = receiver.recv() {
+    poisoned: bool,
+}
+
+impl<E: EngineProtocol> Worker<E> {
+    fn new(engine: E, shared: Arc<Shared>) -> Self {
+        Self {
+            engine,
+            shared,
+            poisoned: false,
+        }
+    }
+
+    /// Run one job; `false` once the engine should stop.
+    fn handle(&mut self, job: Job) -> bool {
         let Job::Invoke {
             invocation,
             context: _context,
@@ -416,16 +536,18 @@ fn run(
             reply,
         } = job
         else {
-            break;
+            return false;
         };
+        let (engine, shared) = (&mut self.engine, &self.shared);
+        let descriptor = shared.descriptor;
         let is_query = descriptor
             .commands
             .get(invocation.command)
             .is_some_and(|spec| spec.is_query());
-        if is_query && !poisoned {
+        if is_query && !self.poisoned {
             let answer = QueryAnswer {
                 reply: Some(reply),
-                shared: Arc::clone(&shared),
+                shared: Arc::clone(shared),
                 command: invocation.command,
                 cancellation,
             };
@@ -437,11 +559,12 @@ fn run(
             } else if catch_unwind(AssertUnwindSafe(|| engine.query(&invocation, answer))).is_err()
             {
                 // The answer was dropped while unwinding and reported the failure.
-                poisoned = true;
+                self.poisoned = true;
             }
-            continue;
+            return true;
         }
-        let result = if poisoned {
+        let poisoned = &mut self.poisoned;
+        let result = if *poisoned {
             Err(CommandError::new(
                 "engine_failed",
                 "the engine stopped accepting commands after an internal failure",
@@ -463,22 +586,23 @@ fn run(
                         Ok(value)
                     }),
                     Err(_) => {
-                        poisoned = true;
+                        *poisoned = true;
                         Err(CommandError::new("engine_failed", "the command panicked"))
                     }
                 },
             }
         };
-        let revision = if poisoned {
+        let revision = if *poisoned {
             shared.state.lock().expect("state lock").0
         } else {
-            publish(&shared, engine.snapshot())
+            publish(shared, engine.snapshot())
         };
         reply(CommandOutcome {
             status: CommandStatus::Completed,
             revision,
             result,
         });
+        true
     }
 }
 
