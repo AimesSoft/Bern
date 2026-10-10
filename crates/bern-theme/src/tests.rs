@@ -121,6 +121,18 @@ fn selected_navigation_is_filled_with_the_accent() {
 }
 
 #[test]
+fn brand_text_stays_as_vivid_as_reading_allows() {
+    for mode in MODES {
+        let snapshot = generate(None, mode, ContrastPolicy::Standard);
+        let accent = snapshot.token("accent").unwrap().oklch();
+        let text = snapshot.token("accent.text").unwrap().oklch();
+        // Close to the accent, not a pale or muddy stand-in for it.
+        assert!((text.l - accent.l).abs() < 0.12, "{mode:?}: {text:?}");
+        assert!(text.c > 0.15, "{mode:?}: {text:?}");
+    }
+}
+
+#[test]
 fn media_progress_is_neutral_and_stands_out_from_its_track() {
     let magenta = Srgb::new(0xff, 0x00, 0xff);
     for mode in MODES {

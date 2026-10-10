@@ -92,7 +92,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 | `text.primary`、`text.secondary`、`text.placeholder` | 正文、次要说明、输入提示 | 对各表面与悬停、按下底色各 ≥ 4.5:1 |
 | `icon.primary`、`icon.secondary` | 操作图标、辅助图标 | 同上 ≥ 3:1 |
 | `accent`、`on_accent` | 主要按钮、侧边栏与竖排导航的选中项、开关开启、滑块已选范围、图标按钮悬停；其上文字图标 | `on_accent`/`accent` ≥ 4.5:1；`accent` 对画布、面板与浮层 ≥ 3:1 |
-| `accent.text` | 链接、平直按钮、选中页签的文字，图标按钮按下与选中 | 对各表面 ≥ 4.5:1 |
+| `accent.text` | 链接、平直按钮、选中页签的文字，图标按钮按下与选中；从 `accent` 的明度出发，只移动到可读所需的程度，保持与强调色一样鲜明 | 对各表面 ≥ 4.5:1 |
 | `status.success`、`status.warning`、`status.error` 及 `on_*` | 状态前景与状态底色上的前景 | 前景对各表面 ≥ 4.5:1；`on_error`/`status.error.surface` ≥ 4.5:1 |
 | `control.border` | 输入框、复选框等靠边界识别的控件 | 对所在表面 ≥ 3:1 |
 | `separator` | 卡片边框、分隔线、带文字按钮的轮廓（装饰性） | 不检查对比，分类为装饰 |

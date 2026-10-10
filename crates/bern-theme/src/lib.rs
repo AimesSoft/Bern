@@ -1,4 +1,4 @@
-//! Bern Theme Algorithm v4.
+//! Bern Theme Algorithm v5.
 //!
 //! The theme kernel generates semantic colors and control recipes for
 //! targets whose UI framework has no complete light/dark system of its own
@@ -24,7 +24,7 @@ pub use color::{Oklch, Srgb, contrast};
 pub use recipes::{RECIPES, Recipe, RecipeState};
 
 /// Version of the generation rules; a change may alter emitted colors.
-pub const ALGORITHM_VERSION: u32 = 4;
+pub const ALGORITHM_VERSION: u32 = 5;
 
 /// Version of the snapshot layout.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -451,9 +451,12 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
         brand_at(accent_l, brand_chroma),
         SURFACES,
     );
+    // Text in the brand colour starts from the accent itself and moves
+    // only as far as reading on every surface requires, so plain buttons,
+    // links and selected tabs stay as vivid as the accent allows.
     b.solve(
         "accent.text",
-        brand_at(b.pick(0.5, 0.76), brand_chroma),
+        brand_at(accent_l, brand_chroma),
         levels.text,
         READS_ON,
     );
