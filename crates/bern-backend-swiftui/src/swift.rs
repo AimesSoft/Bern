@@ -7,7 +7,8 @@
 use crate::names::{case, double, member, pascal, string};
 use bern_ir::{
     Action, Application, Binding, ComponentArg, ComponentDef, Element, Expr, ExprKind, IfLetNode,
-    IfNode, MatchNode, MediaOp, Node, ParamKind, Prop, Text, WindowDef, WindowOp, WindowRole,
+    IfNode, MatchArm, MatchNode, MediaOp, Node, ParamKind, Prop, Text, WindowDef, WindowOp,
+    WindowRole,
 };
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -841,37 +842,50 @@ impl<'a> Generator<'a> {
         let def = self.types().enum_def(&node.enum_name).expect("enum");
         out.open(format!("switch {} {{", self.expr(&node.value)));
         for arm in &node.arms {
-            match arm.variant {
-                None => out.open("default:"),
-                Some(index) => {
-                    let variant = &def.variants[index as usize];
-                    if variant.fields.is_empty() {
-                        out.open(format!("case .{}:", case(&variant.name)));
-                    } else {
-                        let patterns: Vec<_> = variant
-                            .fields
-                            .iter()
-                            .enumerate()
-                            .map(|(field, _)| {
-                                arm.bindings
-                                    .iter()
-                                    .find(|binding| binding.field == field)
-                                    .map(|binding| format!("let {}", member(&binding.name)))
-                                    .unwrap_or_else(|| "_".into())
-                            })
-                            .collect();
-                        out.open(format!(
-                            "case .{}({}):",
-                            case(&variant.name),
-                            patterns.join(", ")
-                        ));
-                    }
-                }
-            }
+            out.open(format!("{}:", case_pattern(def, arm)));
             self.nodes(out, &arm.body, ctx);
             out.indent -= 1;
         }
         out.close("}");
+    }
+
+    /// The text a row shows first, as a Swift `String` expression: the
+    /// first `Text` or `Label` in reading order, through containers and
+    /// `match` arms. Links use it as their name in `ui.inspect`.
+    fn row_label(&self, nodes: &[Node]) -> Option<String> {
+        nodes.iter().find_map(|node| match node {
+            Node::Element(element) => match element.kind.as_str() {
+                "Text" => self.text_prop(element, "content"),
+                "Label" => self.text_prop(element, "title"),
+                _ => self.row_label(&element.children),
+            },
+            Node::Match(node) => {
+                let def = self.types().enum_def(&node.enum_name)?;
+                let arms = node
+                    .arms
+                    .iter()
+                    .map(|arm| {
+                        let label = self.row_label(&arm.body)?;
+                        Some(format!("{}: return {label}", case_pattern(def, arm)))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(format!(
+                    "{{ () -> String in switch {} {{ {} }} }}()",
+                    self.expr(&node.value),
+                    arms.join("; ")
+                ))
+            }
+            Node::Component(_) | Node::If(_) | Node::IfLet(_) => None,
+        })
+    }
+
+    /// The label of the selected option, as a Swift `String` expression.
+    fn selected_label(&self, selection: &str, options: &[(String, String)]) -> String {
+        let cases: Vec<_> = options
+            .iter()
+            .map(|(value, label)| format!("if {selection} == {value} {{ return {label} }}; "))
+            .collect();
+        format!("{{ () -> String in {}return \"\" }}()", cases.concat())
     }
 
     fn font(&self, out: &mut Out, element: &Element) {
@@ -1058,8 +1072,10 @@ impl<'a> Generator<'a> {
                 out.close("}");
                 if let Some(path) = &ctx.path {
                     out.line(format!(
-                        ".bernControl({}, role: \"link\", label: \"\", actions: BernControlActions(activate: {{ {path} = {path} + [{route}] }}))",
-                        self.target(element, ctx)
+                        ".bernControl({}, role: \"link\", label: {}, actions: BernControlActions(activate: {{ {path} = {path} + [{route}] }}))",
+                        self.target(element, ctx),
+                        self.row_label(&element.children)
+                            .unwrap_or_else(|| "\"\"".into())
                     ));
                 }
             }
@@ -1296,14 +1312,21 @@ impl<'a> Generator<'a> {
                 prompt.unwrap_or_else(|| "\"\"".into())
             ));
         }
+        // Destinations with their labels: the detail column and the
+        // sidebar control are both named after the selected one.
+        let titled: Vec<_> = items
+            .iter()
+            .filter_map(|(value, label)| Some((self.expr((*value)?), self.text((*label)?))))
+            .collect();
         if sidebar.id.is_some() {
             let options: Vec<String> = items
                 .iter()
                 .filter_map(|(value, _)| value.map(|value| self.expr(value)))
                 .collect();
             out.line(format!(
-                ".bernControl({}, role: \"sidebar\", label: \"\", actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
+                ".bernControl({}, role: \"sidebar\", label: {}, actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
                 self.target(sidebar, ctx),
+                self.selected_label(&selection, &titled),
                 options.join(", ")
             ));
         }
@@ -1314,17 +1337,11 @@ impl<'a> Generator<'a> {
         out.close("}");
         // The detail column is titled by the selected sidebar destination,
         // as macOS sidebar apps are.
-        let titled: Vec<_> = items
-            .iter()
-            .filter_map(|(value, label)| Some((self.expr((*value)?), self.text((*label)?))))
-            .collect();
         if !titled.is_empty() {
-            out.open(".navigationTitle({ () -> String in");
-            for (value, label) in &titled {
-                out.line(format!("if {selection} == {value} {{ return {label} }}"));
-            }
-            out.line("return \"\"");
-            out.close("}())");
+            out.line(format!(
+                ".navigationTitle({})",
+                self.selected_label(&selection, &titled)
+            ));
         }
         self.toolbar(out, &detail.children, ctx);
         out.close("}");
@@ -1426,7 +1443,7 @@ impl<'a> Generator<'a> {
             let Node::Element(tab) = node else { continue };
             let label = self.text_prop(tab, "label").unwrap_or_default();
             let value = tab.expr("value").map(|v| self.expr(v)).unwrap_or_default();
-            options.push(value.clone());
+            options.push((value.clone(), label.clone()));
             out.open("SwiftUI.Group {");
             self.nodes(out, &tab.children, ctx);
             out.close("}");
@@ -1445,9 +1462,14 @@ impl<'a> Generator<'a> {
         out.close("}");
         if element.id.is_some() {
             out.line(format!(
-                ".bernControl({}, role: \"tabs\", label: \"\", actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
+                ".bernControl({}, role: \"tabs\", label: {}, actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
                 self.target(element, ctx),
-                options.join(", ")
+                self.selected_label(&selection, &options),
+                options
+                    .iter()
+                    .map(|(value, _)| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
     }
@@ -1701,8 +1723,9 @@ impl<'a> Generator<'a> {
         out.line("");
         out.open("init() {");
         out.open(format!(
-            "BernHost.shared.start(fingerprint: 0x{fingerprint:016x}, kinds: [{}]) {{ field, reader in",
-            kinds.join(", ")
+            "BernHost.shared.start(fingerprint: 0x{fingerprint:016x}, kinds: [{}], primary: {}) {{ field, reader in",
+            kinds.join(", "),
+            string(&app.windows.primary)
         ));
         out.line("try BernEngine.shared.bernApply(field, &reader)");
         out.close("}");
@@ -1750,6 +1773,27 @@ impl<'a> Generator<'a> {
 }
 
 /// `(value, label)` of every sidebar item, in declaration order.
+/// `case .variant(let a, _)` for one arm of a `match`, or `default`.
+fn case_pattern(def: &EnumDef, arm: &MatchArm) -> String {
+    let Some(index) = arm.variant else {
+        return "default".into();
+    };
+    let variant = &def.variants[index as usize];
+    if variant.fields.is_empty() {
+        return format!("case .{}", case(&variant.name));
+    }
+    let patterns: Vec<_> = (0..variant.fields.len())
+        .map(|field| {
+            arm.bindings
+                .iter()
+                .find(|binding| binding.field == field)
+                .map(|binding| format!("let {}", member(&binding.name)))
+                .unwrap_or_else(|| "_".into())
+        })
+        .collect();
+    format!("case .{}({})", case(&variant.name), patterns.join(", "))
+}
+
 fn sidebar_items(sidebar: &Element) -> Vec<(Option<&Expr>, Option<&Text>)> {
     let mut items = Vec::new();
     fn visit<'e>(element: &'e Element, items: &mut Vec<(Option<&'e Expr>, Option<&'e Text>)>) {

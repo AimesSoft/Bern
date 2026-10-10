@@ -430,6 +430,7 @@ final class BernHost {
     @ObservationIgnored private var revision: UInt64 = 0
     @ObservationIgnored private var apply: ((UInt32, inout BernReader) throws -> Void)?
     @ObservationIgnored private var kinds: [BernWindowKind] = []
+    @ObservationIgnored private var primary = ""
     @ObservationIgnored private var windows: [String: BernWindowContext] = [:]
     @ObservationIgnored private var pendingOpens: [String: [UInt64]] = [:]
     @ObservationIgnored private var openWindow: OpenWindowAction?
@@ -445,11 +446,19 @@ final class BernHost {
 
     /// Start the engine in this process and load the first state snapshot.
     func start(
-        fingerprint: UInt64, kinds: [BernWindowKind],
+        fingerprint: UInt64, kinds: [BernWindowKind], primary: String,
         apply: @escaping (UInt32, inout BernReader) throws -> Void
     ) {
         guard handle == nil else { return }
+        // `initial: open` windows open when the session starts. Restoring a
+        // previous session's closed windows would contradict that, so window
+        // open/closed state is not restored; frames are still remembered.
+        UserDefaults.standard.register(defaults: [
+            "ApplePersistenceIgnoreState": true,
+            "NSQuitAlwaysKeepsWindows": false,
+        ])
         self.kinds = kinds
+        self.primary = primary
         self.apply = apply
         var error = BernBuffer(ptr: nil, len: 0, capacity: 0)
         let callbacks = BernCallbacks(
@@ -706,6 +715,12 @@ final class BernHost {
             openWindow?(id: kindID)
         }
         NSApplication.shared.activate()
+    }
+
+    /// Reopen the primary window, as clicking the Dock icon does.
+    func reopenPrimary() {
+        guard !primary.isEmpty, windows[primary] == nil else { return }
+        open(primary)
     }
 
     /// Request closing a window kind's instance through the close protocol.
@@ -1523,6 +1538,13 @@ struct BernWindowRoot<Content: View>: View {
 
 final class BernAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows {
+            MainActor.assumeIsolated { BernHost.shared.reopenPrimary() }
+        }
+        return true
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { BernHost.shared.stop() }
