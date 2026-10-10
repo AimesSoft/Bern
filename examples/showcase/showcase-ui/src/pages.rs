@@ -129,7 +129,8 @@ pub fn inputs_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
     }
 }
 
-/// Keyed engine list with push navigation to a detail page.
+/// Keyed engine list, filtered by the sidebar search through an
+/// asynchronous engine query, with push navigation to a detail page.
 #[component]
 pub fn library_page(
     app: showcase::Client,
@@ -141,20 +142,29 @@ pub fn library_page(
             Form {
                 Section(
                     title: tr! { "zh-Hans" => "资料库", "en" => "Library" },
-                    footer: tr! { "zh-Hans" => "列表来自引擎状态，按项目编号保持身份。", "en" => "Rows come from engine state and keep their identity by item number." }
+                    footer: tr! { "zh-Hans" => "列表来自引擎查询：侧边栏搜索按类别名称筛选，中英文均可；每次输入都是新的请求，只显示最新一次的结果。行按项目编号保持身份。", "en" => "Rows come from an engine query: the sidebar search filters them by category name in either language. Every edit is a new request and only the newest answer is shown. Rows keep their identity by item number." }
                 ) {
-                    ForEach(items: app.items, key: id) |item| {
-                        NavLink(id: item_link, route: Route::Item { id: item.id, clip: item.clip }) {
-                            Row(gap: 8) {
-                                match item.kind {
-                                    ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
-                                    ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
-                                    ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
-                                    ItemKind::Movies => { Label(title: item.kind, icon: "film") }
-                                    ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+                    Query(
+                        id: library_results,
+                        query: app.search_library(draft.query),
+                        loading: tr! { "zh-Hans" => "正在搜索…", "en" => "Searching…" },
+                        empty: tr! { "zh-Hans" => "没有与“{query}”匹配的项目", "en" => "No Items Match “{query}”"; query: draft.query },
+                        failed: tr! { "zh-Hans" => "无法搜索", "en" => "Search Failed" },
+                        icon: "magnifyingglass"
+                    ) |items| {
+                        ForEach(items: items, key: id) |item| {
+                            NavLink(id: item_link, route: Route::Item { id: item.id, clip: item.clip }) {
+                                Row(gap: 8) {
+                                    match item.kind {
+                                        ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
+                                        ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
+                                        ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
+                                        ItemKind::Movies => { Label(title: item.kind, icon: "film") }
+                                        ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+                                    }
+                                    Spacer
+                                    showcase_widgets::item_count(count: item.count)
                                 }
-                                Spacer
-                                showcase_widgets::item_count(count: item.count)
                             }
                         }
                     }

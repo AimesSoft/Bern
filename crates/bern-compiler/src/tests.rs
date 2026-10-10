@@ -681,3 +681,157 @@ fn video_and_close_diagnostics() {
         "{output}"
     );
 }
+
+const QUERY_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "demo", version = 1)]
+pub mod demo {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Mode {
+        #[label(tr! { "en" => "Fast", "ja" => "速い" })]
+        Fast,
+        #[label(tr! { "en" => "Slow", "ja" => "遅い" })]
+        Slow,
+    }
+
+    #[value]
+    pub struct Hit {
+        pub id: i64,
+        pub title: String,
+    }
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+        pub title: String,
+        pub mode: Mode,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self, amount: i64) -> Result<(), CommandError>;
+    }
+
+    #[queries]
+    pub trait Queries {
+        #[reads(count)]
+        fn find(&self, text: String, answer: Answer<Vec<Hit>>);
+        fn first(&self, text: String, answer: Answer<Option<Hit>>);
+        fn total(&self, answer: Answer<i64>);
+    }
+}
+"#;
+
+fn query_errors(body: &str) -> String {
+    match compile_project(QUERY_PROTOCOL, &wrap(body)) {
+        Ok(_) => panic!("expected `{body}` to fail"),
+        Err(errors) => errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+#[test]
+fn query_bindings_lower_with_typed_templates() {
+    let compiled = compile_project(
+        QUERY_PROTOCOL,
+        &wrap(
+            r#"Column {
+            Query(
+                id: hits,
+                query: app.find(draft.name),
+                loading: tr! { "en" => "Searching…", "ja" => "検索中…" },
+                empty: tr! { "en" => "No hits for {text}", "ja" => "{text} は見つかりません"; text: draft.name },
+                icon: "magnifyingglass"
+            ) |hits| {
+                ForEach(items: hits, key: id) |hit| { Text(content: hit.title) }
+            }
+            Query(id: best, query: app.first(draft.name), empty: tr! { "en" => "None", "ja" => "なし" }) |hit| {
+                Text(content: hit.title)
+            }
+            Query(id: total, query: app.total()) |count| { Text(content: count) }
+        }"#,
+        ),
+    )
+    .unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
+        )
+    });
+    let app = &compiled.app;
+    let find = app.protocol.command("demo.find").unwrap().1;
+    assert!(find.is_query());
+    assert_eq!(find.reads, vec!["count"]);
+    let page = app.component("page").unwrap();
+    let mut queries = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node
+            && element.kind == "Query"
+        {
+            queries.push(element.clone());
+        }
+    });
+    assert_eq!(queries.len(), 3);
+    let hits = &queries[0];
+    assert_eq!(hits.id.as_deref(), Some("hits"));
+    let binding = hits.query("query").unwrap();
+    assert_eq!(binding.query, 1);
+    assert_eq!(binding.args.len(), 1);
+    let hit = Type::Record { name: "Hit".into() };
+    assert_eq!(binding.result, Type::list(hit.clone()));
+    assert_eq!(hits.template.as_ref().unwrap().ty, Type::list(hit.clone()));
+    assert!(hits.text("empty").is_some() && hits.text("loading").is_some());
+    // An optional result shows the value inside it.
+    assert_eq!(queries[1].template.as_ref().unwrap().ty, hit);
+    assert_eq!(queries[2].template.as_ref().unwrap().ty, Type::Int);
+}
+
+#[test]
+fn query_diagnostics() {
+    let cases = [
+        (
+            r#"Button(id: go, label: tr! { "en" => "Go", "ja" => "行く" }) => app.find(draft.name)"#,
+            "`find` is a query",
+        ),
+        (
+            r#"Query(id: q, query: app.add(1)) |x| { Spacer }"#,
+            "`add` is a command",
+        ),
+        (
+            r#"Query(id: q, query: app.lookup(1)) |x| { Spacer }"#,
+            "has no query `lookup`",
+        ),
+        (
+            r#"Query(id: q, query: app.total(), empty: tr! { "en" => "None", "ja" => "なし" }) |n| { Spacer }"#,
+            "`empty:` needs a query whose result can be empty",
+        ),
+        (
+            r#"Query(id: q, query: app.find(draft.on)) |x| { Spacer }"#,
+            "argument `text` must be text, found bool",
+        ),
+        (
+            r#"Query(id: q, query: app.find(draft.name)) |hits| { Text(content: hits) }"#,
+            "has no text presentation",
+        ),
+        (
+            r#"Query(id: q, query: windows.main.find(draft.name)) |x| { Spacer }"#,
+            "not the typed engine client",
+        ),
+        (r#"Query(id: q, query: app.total())"#, "needs a template"),
+        (
+            r#"Text(content: app.find(draft.name))"#,
+            "calls are not allowed",
+        ),
+    ];
+    for (body, expected) in cases {
+        let output = query_errors(body);
+        assert!(
+            output.contains(expected),
+            "`{body}` should report `{expected}`, got:\n{output}"
+        );
+    }
+}

@@ -39,6 +39,8 @@ fn tool(spec: &CommandSpec, input: Json, session: bool) -> Json {
     };
     if session {
         description.push_str(" (acts on the running UI through its real controls)");
+    } else if spec.kind == OperationKind::Query {
+        description.push_str(" (read-only query; changes nothing)");
     }
     json!({
         "name": spec.external.mcp,
@@ -323,22 +325,42 @@ mod tests {
                 ty: Type::Int,
                 doc: String::new(),
             }],
-            commands: vec![CommandSpec {
-                id: "player.seek".into(),
-                name: "seek".into(),
-                doc: "Move the playback position".into(),
-                kind: OperationKind::Command,
-                scope: Scope::Engine,
-                params: vec![ParamSpec {
-                    name: "position_ms".into(),
-                    ty: Type::Int,
-                    doc: String::new(),
-                }],
-                result: Type::Unit,
-                errors: vec![],
-                policy: CommandPolicy::default(),
-                external: ExternalNames::derive("player", "seek"),
-            }],
+            commands: vec![
+                CommandSpec {
+                    id: "player.seek".into(),
+                    name: "seek".into(),
+                    doc: "Move the playback position".into(),
+                    kind: OperationKind::Command,
+                    scope: Scope::Engine,
+                    params: vec![ParamSpec {
+                        name: "position_ms".into(),
+                        ty: Type::Int,
+                        doc: String::new(),
+                    }],
+                    result: Type::Unit,
+                    errors: vec![],
+                    policy: CommandPolicy::default(),
+                    external: ExternalNames::derive("player", "seek"),
+                    reads: vec![],
+                },
+                CommandSpec {
+                    id: "player.chapters".into(),
+                    name: "chapters".into(),
+                    doc: "Chapters that start after a position".into(),
+                    kind: OperationKind::Query,
+                    scope: Scope::Engine,
+                    params: vec![ParamSpec {
+                        name: "after_ms".into(),
+                        ty: Type::Int,
+                        doc: String::new(),
+                    }],
+                    result: Type::list(Type::Text),
+                    errors: vec![],
+                    policy: CommandPolicy::default(),
+                    external: ExternalNames::derive("player", "chapters"),
+                    reads: vec!["position_ms".into()],
+                },
+            ],
         }
     }
 
@@ -364,6 +386,19 @@ mod tests {
             .find(|tool| tool["name"] == "player_seek")
             .unwrap();
         assert_eq!(seek["inputSchema"]["required"], json!(["position_ms"]));
+        assert_eq!(seek["annotations"]["readOnlyHint"], false);
+        // Queries come from the same catalog and are marked read-only.
+        let chapters = tools
+            .iter()
+            .find(|tool| tool["name"] == "player_chapters")
+            .unwrap();
+        assert_eq!(chapters["annotations"]["readOnlyHint"], true);
+        assert!(
+            chapters["description"]
+                .as_str()
+                .unwrap()
+                .ends_with("(read-only query; changes nothing)")
+        );
         let inspect = tools
             .iter()
             .find(|tool| tool["name"] == "ui_inspect")

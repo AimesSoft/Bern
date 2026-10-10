@@ -214,3 +214,133 @@ fn names_convert_between_cases() {
     assert_eq!(pascal_case("main_window"), "MainWindow");
     assert_eq!(camel_case("last_action"), "lastAction");
 }
+
+const QUERY_PROTOCOL: &str = r#"
+    #[bern::protocol(namespace = "library", version = 1)]
+    pub mod library {
+        use bern::prelude::*;
+
+        #[value]
+        pub struct Item { pub id: i64, pub title: String }
+
+        #[state]
+        pub struct State { pub items: Vec<Item> }
+
+        #[commands]
+        pub trait Commands {
+            fn add(&mut self, title: String) -> Result<i64, CommandError>;
+        }
+
+        #[queries]
+        pub trait Queries {
+            /// Items whose title contains `text`
+            #[reads(items)]
+            #[errors("invalid_search")]
+            fn search(&self, text: String, answer: Answer<Vec<Item>>);
+        }
+    }
+"#;
+
+#[test]
+fn queries_lower_after_commands_as_read_only_overlapping_operations() {
+    let items = parse_source_file(QUERY_PROTOCOL).unwrap();
+    let protocol = &items.protocols[0].1;
+    let queries = protocol.queries.as_ref().unwrap();
+    assert_eq!(queries.methods[0].name, "search");
+    assert_eq!(queries.methods[0].reads[0], "items");
+    let descriptor = lower::protocol_descriptor(protocol).unwrap();
+    assert_eq!(descriptor.commands.len(), 2);
+    let (index, search) = descriptor.command("library.search").unwrap();
+    assert_eq!(index, 1);
+    assert!(search.is_query());
+    assert_eq!(search.doc, "Items whose title contains `text`");
+    assert_eq!(search.params[0].name, "text");
+    assert_eq!(
+        search.result,
+        bern_protocol::Type::list(bern_protocol::Type::Record {
+            name: "Item".into()
+        })
+    );
+    assert_eq!(search.reads, vec!["items"]);
+    assert_eq!(search.errors, vec!["invalid_search"]);
+    assert_eq!(
+        search.policy.concurrency,
+        bern_protocol::Concurrency::Overlapping
+    );
+    assert!(search.policy.cancellable);
+    assert_eq!(search.external.cli, vec!["library", "search"]);
+    assert_eq!(search.external.mcp, "library_search");
+}
+
+#[test]
+fn query_declarations_must_read_and_answer_through_answer() {
+    for (from, to, needle) in [
+        (
+            "fn search(&self",
+            "fn search(&mut self",
+            "a query takes `&self`",
+        ),
+        (
+            ", answer: Answer<Vec<Item>>);",
+            ") -> Vec<Item>;",
+            "answers through its last parameter",
+        ),
+        (
+            "answer: Answer<Vec<Item>>);",
+            "answer: Answer<Vec<Item>>) -> bool;",
+            "returns nothing",
+        ),
+        (
+            "#[reads(items)]",
+            "#[reads(count)]",
+            "`count` is not a field",
+        ),
+        (
+            "#[reads(items)]",
+            "#[idempotent]",
+            "not supported on queries",
+        ),
+    ] {
+        let source = QUERY_PROTOCOL.replace(from, to);
+        let result = parse_source_file(&source)
+            .and_then(|items| lower::protocol_descriptor(&items.protocols[0].1).map(|_| ()));
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains(needle), "{to}: {error}");
+    }
+}
+
+#[test]
+fn only_the_query_property_holds_a_call() {
+    let body = parse_ui(quote! {
+        Query(id: results, query: app.search(draft.text, 3)) |items| { Spacer }
+    })
+    .unwrap();
+    let Node::Element(element) = &body.nodes[0] else {
+        panic!()
+    };
+    let Expr::Query(call) = &element.prop("query").unwrap().value else {
+        panic!()
+    };
+    assert_eq!(call.receiver_path(), "app");
+    assert_eq!(call.method, "search");
+    assert_eq!(call.args.len(), 2);
+    // A component argument named `query` is still a plain binding.
+    let body = parse_ui(quote! { page(query: draft.query) }).unwrap();
+    let Node::Component(call) = &body.nodes[0] else {
+        panic!()
+    };
+    assert!(matches!(call.args[0].value, Expr::Path(_)));
+    for (tokens, needle) in [
+        (
+            quote! { Text(content: app.search(draft.text)) },
+            "calls are not allowed",
+        ),
+        (
+            quote! { Query(id: results, query: search(draft.text)) |items| { Spacer } },
+            "called on a typed client",
+        ),
+    ] {
+        let error = parse_ui(tokens).unwrap_err().to_string();
+        assert!(error.contains(needle), "{error}");
+    }
+}

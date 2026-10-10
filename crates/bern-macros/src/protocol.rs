@@ -81,6 +81,23 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 }
                 kept.push(quote!(#cleaned));
             }
+            Item::Trait(item_trait)
+                if item_trait
+                    .attrs
+                    .iter()
+                    .any(|attr| is_bern_attr(attr, "queries")) =>
+            {
+                let mut cleaned = item_trait.clone();
+                cleaned.attrs.retain(|attr| !is_bern_attr(attr, "queries"));
+                for trait_item in &mut cleaned.items {
+                    if let syn::TraitItem::Fn(method) = trait_item {
+                        method.attrs.retain(|attr| {
+                            !is_bern_attr(attr, "errors") && !is_bern_attr(attr, "reads")
+                        });
+                    }
+                }
+                kept.push(quote!(#cleaned));
+            }
             other => kept.push(quote!(#other)),
         }
     }
@@ -102,6 +119,85 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 #(let #params: #types = #b::BernValue::from_value(&invocation.params[#positions])?;)*
                 let result = #commands_name::#name(&mut self.0, #(#params),*)?;
                 ::std::result::Result::Ok(#b::BernValue::to_value(&result))
+            }
+        }
+    });
+
+    let queries: Vec<&bern_syntax::QueryItem> = protocol
+        .queries
+        .iter()
+        .flat_map(|queries| &queries.methods)
+        .collect();
+    let queries_name = protocol.queries.as_ref().map(|queries| &queries.name);
+    let engine_bound = match queries_name {
+        Some(queries_name) => quote!(#commands_name + #queries_name),
+        None => quote!(#commands_name),
+    };
+    let first_query = protocol.commands.methods.len();
+    let query_arms = queries.iter().enumerate().map(|(offset, method)| {
+        let index = first_query + offset;
+        let name = &method.name;
+        let queries_name = queries_name.expect("queries trait");
+        let params: Vec<_> = (0..method.params.len())
+            .map(|position| format_ident!("p{}", position))
+            .collect();
+        let types: Vec<_> = method.params.iter().map(|param| &param.syn_ty).collect();
+        let positions: Vec<_> = (0..method.params.len()).collect();
+        quote! {
+            #index => {
+                let decoded = (|| -> ::std::result::Result<_, #p::CommandError> {
+                    ::std::result::Result::Ok((#(<#types as #b::BernValue>::from_value(&invocation.params[#positions])?,)*))
+                })();
+                match decoded {
+                    ::std::result::Result::Ok((#(#params,)*)) => #queries_name::#name(
+                        &self.0,
+                        #(#params,)*
+                        ::bern::query::Answer::new(answer),
+                    ),
+                    ::std::result::Result::Err(error) => answer.send(::std::result::Result::Err(error)),
+                }
+            }
+        }
+    });
+    let query_fn = if queries.is_empty() {
+        TokenStream::new()
+    } else {
+        quote! {
+            fn query(
+                &self,
+                invocation: &#p::Invocation,
+                answer: ::bern::__private::command::QueryAnswer,
+            ) {
+                match invocation.command {
+                    #(#query_arms)*
+                    _ => answer.send(::std::result::Result::Err(#p::CommandError::new(
+                        "unknown_command",
+                        "unknown query index",
+                    ))),
+                }
+            }
+        }
+    };
+    let query_methods = queries.iter().map(|method| {
+        let name = &method.name;
+        let params: Vec<_> = method.params.iter().map(|param| &param.name).collect();
+        let types: Vec<_> = method.params.iter().map(|param| &param.syn_ty).collect();
+        let result = &method.result_ty;
+        // A `Query` over an optional result shows the value inside it.
+        let shown = match (&method.result, option_inner(result)) {
+            (bern_syntax::TypeRef::Optional(_), Some(inner)) => quote!(#inner),
+            _ => quote!(#result),
+        };
+        let doc = if method.doc.is_empty() {
+            format!("Binding of the `{}` query.", method.name)
+        } else {
+            method.doc.clone()
+        };
+        quote! {
+            #[doc = #doc]
+            #[allow(unused_variables)]
+            pub fn #name(&self, #(#params: #types),*) -> #b::QueryRef<#result, #shown> {
+                #b::QueryRef::declared()
             }
         }
     });
@@ -137,8 +233,9 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         #vis mod #ident {
             #(#kept)*
 
-            /// Implemented by the application engine next to the command trait.
-            pub trait Engine: #commands_name + ::std::marker::Send + 'static {
+            /// Implemented by the application engine next to the command
+            /// and query traits.
+            pub trait Engine: #engine_bound + ::std::marker::Send + 'static {
                 /// The current read-only state snapshot.
                 fn state(&self) -> &#state_name;
             }
@@ -171,6 +268,8 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                     }
                 }
 
+                #query_fn
+
                 fn snapshot(&self) -> ::std::vec::Vec<#p::Value> {
                     let state = Engine::state(&self.0);
                     ::std::vec![#(#b::BernValue::to_value(&state.#state_fields)),*]
@@ -186,6 +285,7 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 
             impl Client {
                 #(#client_methods)*
+                #(#query_methods)*
             }
 
             impl #b::Prop for Client {
@@ -202,4 +302,22 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             #track
         }
     })
+}
+
+/// `T` when `ty` is written `Option<T>`.
+fn option_inner(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    let last = path.path.segments.last()?;
+    if last.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    match args.args.first() {
+        Some(syn::GenericArgument::Type(inner)) => Some(inner),
+        _ => None,
+    }
 }

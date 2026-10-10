@@ -7,6 +7,7 @@
 
 pub mod bind;
 pub mod media;
+pub mod query;
 
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
 pub use bern_macros::{component, players, protocol, session, tr, ui, value};
@@ -22,6 +23,7 @@ pub trait View {}
 pub mod prelude {
     pub use crate::bind::{Binding, SessionField};
     pub use crate::media::{MediaSource, Player};
+    pub use crate::query::Answer;
     pub use crate::{CommandError, View, component, tr, ui};
 }
 

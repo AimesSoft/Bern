@@ -20,22 +20,38 @@ fn descriptor() -> &'static ProtocolDescriptor {
             ty: Type::Int,
             doc: String::new(),
         }],
-        commands: vec![CommandSpec {
-            id: "counter.add".into(),
-            name: "add".into(),
-            doc: String::new(),
-            kind: OperationKind::Command,
-            scope: Scope::Engine,
-            params: vec![ParamSpec {
-                name: "amount".into(),
-                ty: Type::Int,
+        commands: vec![
+            CommandSpec {
+                id: "counter.add".into(),
+                name: "add".into(),
                 doc: String::new(),
-            }],
-            result: Type::Int,
-            errors: vec![],
-            policy: CommandPolicy::default(),
-            external: ExternalNames::derive("counter", "add"),
-        }],
+                kind: OperationKind::Command,
+                scope: Scope::Engine,
+                params: vec![ParamSpec {
+                    name: "amount".into(),
+                    ty: Type::Int,
+                    doc: String::new(),
+                }],
+                result: Type::Int,
+                errors: vec![],
+                policy: CommandPolicy::default(),
+                external: ExternalNames::derive("counter", "add"),
+                reads: vec![],
+            },
+            CommandSpec {
+                id: "counter.double".into(),
+                name: "double".into(),
+                doc: "Twice the value, answered from another thread".into(),
+                kind: OperationKind::Query,
+                scope: Scope::Engine,
+                params: vec![],
+                result: Type::Int,
+                errors: vec![],
+                policy: CommandPolicy::default(),
+                external: ExternalNames::derive("counter", "double"),
+                reads: vec!["value".into()],
+            },
+        ],
     })
 }
 
@@ -51,6 +67,13 @@ impl EngineProtocol for Counter {
         };
         self.0 += amount;
         Ok(Value::Int(self.0))
+    }
+    fn query(&self, _: &Invocation, answer: bern_command::QueryAnswer) {
+        let value = self.0;
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            answer.send(Ok(Value::Int(value * 2)));
+        });
     }
     fn snapshot(&self) -> Vec<Value> {
         vec![Value::Int(self.0)]
@@ -173,6 +196,24 @@ fn commands_state_and_updates_reach_the_shared_engine() {
         })
         .unwrap();
     assert!(matches!(bad, ServerMessage::Result { ok: false, .. }));
+    // A query from the same catalog, answered asynchronously by the engine.
+    let reply = client
+        .request(|request_id| ClientMessage::Command {
+            request_id,
+            engine_id: engine.clone(),
+            command: "counter.double".into(),
+            params: Default::default(),
+        })
+        .unwrap();
+    match reply {
+        ServerMessage::Result {
+            ok, result, error, ..
+        } => {
+            assert!(ok, "{error:?}");
+            assert_eq!(result, Some(json!(10)));
+        }
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

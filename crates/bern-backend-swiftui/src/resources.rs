@@ -34,6 +34,33 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bern.query.loading",
+        &[
+            ("zh-Hans", "正在载入…"),
+            ("zh-Hant", "正在載入…"),
+            ("en", "Loading…"),
+            ("ja", "読み込み中…"),
+        ],
+    ),
+    (
+        "bern.query.failed",
+        &[
+            ("zh-Hans", "无法载入"),
+            ("zh-Hant", "無法載入"),
+            ("en", "Couldn’t Load"),
+            ("ja", "読み込めませんでした"),
+        ],
+    ),
+    (
+        "bern.query.retry",
+        &[
+            ("zh-Hans", "重试"),
+            ("zh-Hant", "重試"),
+            ("en", "Try Again"),
+            ("ja", "再試行"),
+        ],
+    ),
+    (
         "bern.media.video",
         &[
             ("zh-Hans", "视频"),

@@ -107,4 +107,14 @@ pub mod showcase {
         #[errors("invalid_name")]
         fn set_display_name(&mut self, name: String) -> Result<(), CommandError>;
     }
+
+    #[queries]
+    pub trait Queries {
+        /// Library items whose category name contains `text`, in any
+        /// language; an empty text lists every item. Broad searches answer
+        /// later than narrow ones, as a real index would.
+        #[reads(items)]
+        #[errors("invalid_search")]
+        fn search_library(&self, text: String, answer: Answer<Vec<Item>>);
+    }
 }

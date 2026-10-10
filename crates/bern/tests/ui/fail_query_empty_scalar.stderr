@@ -1,0 +1,18 @@
+error[E0277]: the trait bound `i64: EmptyResult` is not satisfied
+  --> tests/ui/fail_query_empty_scalar.rs:38:48
+   |
+38 |     ui! { Query(id: total, query: app.count(), empty: tr! { "en" => "None" }) |count| { Text(content: count) } }
+   |                                                ^^^^^ the trait `EmptyResult` is not implemented for `i64`
+   |
+help: the following other types implement trait `EmptyResult`
+  --> src/bind.rs
+   |
+   | impl<T> EmptyResult for Vec<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Vec<T>`
+   | impl<T> EmptyResult for Option<T> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Option<T>`
+note: required by a bound in `bern::__private::query_empty`
+  --> src/__private.rs
+   |
+   | pub fn query_empty<T: EmptyResult, S>(_: &QueryRef<T, S>) {}
+   |                       ^^^^^^^^^^^ required by this bound in `query_empty`

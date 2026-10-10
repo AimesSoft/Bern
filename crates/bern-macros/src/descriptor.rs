@@ -2,7 +2,9 @@
 //! reconstructs exactly the same value at run time.
 
 use crate::types::type_tokens;
-use bern_protocol::{FieldDef, LocalizedText, ProtocolDescriptor, Retry};
+use bern_protocol::{
+    Concurrency, FieldDef, LocalizedText, OperationKind, ProtocolDescriptor, Retry,
+};
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -81,24 +83,35 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
             Retry::Never => quote!(#p::Retry::Never),
             Retry::Idempotent => quote!(#p::Retry::Idempotent),
         };
+        let kind = match command.kind {
+            OperationKind::Command => quote!(#p::OperationKind::Command),
+            OperationKind::Query => quote!(#p::OperationKind::Query),
+        };
+        let concurrency = match command.policy.concurrency {
+            Concurrency::Serial => quote!(#p::Concurrency::Serial),
+            Concurrency::Overlapping => quote!(#p::Concurrency::Overlapping),
+        };
+        let cancellable = command.policy.cancellable;
         let cli = command.external.cli.iter().map(|word| string(word));
         let mcp = string(&command.external.mcp);
+        let reads = command.reads.iter().map(|field| string(field));
         quote! {
             #p::CommandSpec {
                 id: #id,
                 name: #name,
                 doc: #doc,
-                kind: #p::OperationKind::Command,
+                kind: #kind,
                 scope: #p::Scope::Engine,
                 params: ::std::vec![#(#params),*],
                 result: #result,
                 errors: ::std::vec![#(#errors),*],
                 policy: #p::CommandPolicy {
-                    concurrency: #p::Concurrency::Serial,
+                    concurrency: #concurrency,
                     retry: #retry,
-                    cancellable: false,
+                    cancellable: #cancellable,
                 },
                 external: #p::ExternalNames { cli: ::std::vec![#(#cli),*], mcp: #mcp },
+                reads: ::std::vec![#(#reads),*],
             }
         }
     });

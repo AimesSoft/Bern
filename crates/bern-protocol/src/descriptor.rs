@@ -25,6 +25,10 @@ pub enum OperationKind {
 pub enum Concurrency {
     /// Requests run one after another in arrival order.
     Serial,
+    /// Requests start in arrival order, after the commands queued before
+    /// them, but answer independently and possibly out of order. Queries
+    /// whose providers answer asynchronously use it.
+    Overlapping,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +101,16 @@ pub struct CommandSpec {
     pub errors: Vec<String>,
     pub policy: CommandPolicy,
     pub external: ExternalNames,
+    /// State fields a query reads. A query's answer is stale once one of
+    /// them changes, so live subscriptions request it again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reads: Vec<String>,
+}
+
+impl CommandSpec {
+    pub fn is_query(&self) -> bool {
+        self.kind == OperationKind::Query
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -233,6 +247,20 @@ impl ProtocolDescriptor {
                 self.types.check_type(&param.ty, &mut Vec::new())?;
             }
             self.types.check_type(&command.result, &mut Vec::new())?;
+            if !command.reads.is_empty() && !command.is_query() {
+                return Err(DescriptorError(format!(
+                    "command `{}` declares state reads; only queries do",
+                    command.id
+                )));
+            }
+            for field in &command.reads {
+                if self.state_index(field).is_none() {
+                    return Err(DescriptorError(format!(
+                        "query `{}` reads `{field}`, which is not a state field",
+                        command.id
+                    )));
+                }
+            }
         }
         check_external_names(self.commands.iter())?;
         Ok(())
@@ -279,6 +307,7 @@ mod tests {
             errors: vec![],
             policy: CommandPolicy::default(),
             external: ExternalNames::derive(namespace, name),
+            reads: vec![],
         }
     }
 
@@ -317,6 +346,26 @@ mod tests {
         descriptor(vec![command("player", "seek"), command("player", "pause")])
             .validate()
             .unwrap();
+    }
+
+    #[test]
+    fn only_queries_read_declared_state_fields() {
+        let mut query = command("player", "search");
+        query.kind = OperationKind::Query;
+        query.reads = vec!["position_ms".into()];
+        let mut with_state = descriptor(vec![query.clone()]);
+        with_state.state.push(StateField {
+            name: "position_ms".into(),
+            ty: Type::Int,
+            doc: String::new(),
+        });
+        with_state.validate().unwrap();
+        // Unknown field.
+        assert!(descriptor(vec![query.clone()]).validate().is_err());
+        // A command cannot declare reads.
+        let mut command_reads = with_state.clone();
+        command_reads.commands[0].kind = OperationKind::Command;
+        assert!(command_reads.validate().is_err());
     }
 
     #[test]

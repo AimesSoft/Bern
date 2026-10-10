@@ -1,0 +1,5 @@
+error: a query takes `&self`: queries only read engine state, commands change it
+  --> tests/ui/fail_query_mut_self.rs:23:19
+   |
+23 |         fn search(&mut self, text: String, answer: Answer<Vec<Book>>);
+   |                   ^

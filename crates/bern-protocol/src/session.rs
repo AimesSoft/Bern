@@ -103,6 +103,7 @@ fn spec(
             ..CommandPolicy::default()
         },
         external: ExternalNames::derive(namespace, name),
+        reads: vec![],
     }
 }
 

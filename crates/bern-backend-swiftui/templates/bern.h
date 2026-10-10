@@ -24,6 +24,7 @@ typedef struct {
     void (*on_session_request)(void *context, uint64_t request, const uint8_t *bytes, size_t len);
     void (*on_media_request)(void *context, const uint8_t *bytes, size_t len);
     void (*on_media_state)(void *context, const uint8_t *bytes, size_t len);
+    void (*on_query)(void *context, uint64_t subscription, const uint8_t *bytes, size_t len);
 } BernCallbacks;
 
 BernApp *bern_app_start(uint64_t fingerprint, BernCallbacks callbacks, BernBuffer *error);
@@ -38,6 +39,9 @@ BernBuffer bern_window_request_close(BernApp *app, uint32_t kind, uint64_t gener
 BernBuffer bern_window_confirm_close(BernApp *app, uint32_t kind, uint64_t generation, const uint8_t *bytes, size_t len);
 BernBuffer bern_session_set(BernApp *app, uint32_t kind, uint64_t generation, uint32_t session, uint32_t field, const uint8_t *value, size_t len);
 void bern_session_complete(BernApp *app, uint64_t request, const uint8_t *bytes, size_t len);
+BernBuffer bern_query_open(BernApp *app, uint32_t kind, uint64_t generation, uint32_t query);
+BernBuffer bern_query_request(BernApp *app, uint64_t subscription, const uint8_t *params, size_t len);
+void bern_query_close(BernApp *app, uint64_t subscription);
 BernBuffer bern_media_executor_attached(BernApp *app, const uint8_t *bytes, size_t len);
 void bern_media_executor_detached(BernApp *app);
 BernBuffer bern_media_snapshot(BernApp *app);

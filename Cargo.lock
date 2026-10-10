@@ -10,6 +10,7 @@ dependencies = [
  "bern-macros",
  "bern-media",
  "bern-protocol",
+ "bern-runtime",
  "trybuild",
 ]
 

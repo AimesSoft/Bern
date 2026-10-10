@@ -125,6 +125,9 @@ pub enum Expr {
         rhs: Box<Expr>,
         span: Span,
     },
+    /// `client.query(args)`: a typed query binding. It is only written as
+    /// the `query:` property of `Query`; calls exist nowhere else.
+    Query(Action),
 }
 
 impl Expr {
@@ -136,6 +139,7 @@ impl Expr {
             Expr::Tr(tr) => tr.span,
             Expr::Path(path) => path.span(),
             Expr::Variant(variant) => variant.ty.span(),
+            Expr::Query(call) => call.span,
         }
     }
 }
@@ -146,7 +150,8 @@ pub struct Prop {
     pub value: Expr,
 }
 
-/// `receiver.member.method(args)` after `=>`.
+/// `receiver.member.method(args)`: an action after `=>`, or the query call
+/// of a `query:` property.
 #[derive(Clone, Debug)]
 pub struct Action {
     pub receiver: Vec<Ident>,

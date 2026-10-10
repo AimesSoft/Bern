@@ -5,21 +5,39 @@
 //! commands one after another and publishes consistent, versioned state
 //! updates. The UI, CLI, JSON channel and MCP server all call the same
 //! host; none of them re-implements business logic.
+//!
+//! Queries are read-only. Their providers start on the engine thread in
+//! arrival order, so they see the state left by the commands before them,
+//! but they answer through a [`QueryAnswer`] that may be completed later
+//! and from any thread. A query request carries a [`Cancellation`]; the
+//! provider can stop early, and an answer that arrives after cancellation
+//! is reported as `cancelled` instead of as a result.
 
 use bern_protocol::{
-    CommandError, CommandOutcome, CommandStatus, Invocation, ProtocolDescriptor, StateUpdate, Value,
+    Cancellation, CommandError, CommandOutcome, CommandStatus, Invocation, ProtocolDescriptor,
+    StateUpdate, Value,
 };
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 /// Implemented by the code `#[bern::protocol]` generates for an engine.
 pub trait EngineProtocol: Send + 'static {
     fn descriptor(&self) -> &'static ProtocolDescriptor;
     /// Run a command whose parameters already match the catalog.
     fn invoke(&mut self, invocation: &Invocation) -> Result<Value, CommandError>;
+    /// Start a read-only query whose parameters already match the catalog.
+    /// The provider answers through `answer`, now or later.
+    fn query(&self, invocation: &Invocation, answer: QueryAnswer) {
+        let _ = invocation;
+        answer.send(Err(CommandError::new(
+            "unknown_command",
+            "this engine provides no queries",
+        )));
+    }
     /// Current value of every state field, in descriptor order.
     fn snapshot(&self) -> Vec<Value>;
 }
@@ -61,9 +79,85 @@ enum Job {
     Invoke {
         invocation: Invocation,
         context: CallContext,
+        cancellation: Cancellation,
         reply: Reply,
     },
     Stop,
+}
+
+/// The pending answer of one query request. The provider answers exactly
+/// once, from any thread; dropping it unanswered fails the request with
+/// `query_dropped` (or `cancelled` when nobody waits for it any more).
+pub struct QueryAnswer {
+    reply: Option<Reply>,
+    shared: Arc<Shared>,
+    command: usize,
+    cancellation: Cancellation,
+}
+
+impl QueryAnswer {
+    /// Whether the requester no longer wants this answer. Providers doing
+    /// expensive work check it and stop early.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+
+    /// The request's cancellation flag, for work that outlives a check.
+    pub fn cancellation(&self) -> Cancellation {
+        self.cancellation.clone()
+    }
+
+    /// Answer the query. The value is checked against the declared result.
+    pub fn send(mut self, result: Result<Value, CommandError>) {
+        self.finish(result);
+    }
+
+    fn finish(&mut self, result: Result<Value, CommandError>) {
+        let Some(reply) = self.reply.take() else {
+            return;
+        };
+        let descriptor = self.shared.descriptor;
+        let spec = &descriptor.commands[self.command];
+        let result = if self.cancellation.is_cancelled() {
+            Err(cancelled())
+        } else {
+            result.and_then(|value| {
+                value
+                    .check(&spec.result, &descriptor.types)
+                    .map_err(|error| {
+                        CommandError::new(
+                            "invalid_result",
+                            format!("`{}` returned an invalid result: {error}", spec.id),
+                        )
+                    })?;
+                Ok(value)
+            })
+        };
+        let revision = self.shared.state.lock().map(|state| state.0).unwrap_or(0);
+        reply(CommandOutcome {
+            status: CommandStatus::Completed,
+            revision,
+            result,
+        });
+    }
+}
+
+impl Drop for QueryAnswer {
+    fn drop(&mut self) {
+        let error = if thread::panicking() {
+            CommandError::new("engine_failed", "the query panicked")
+        } else {
+            CommandError::new(
+                "query_dropped",
+                "the query provider dropped the request without answering",
+            )
+        };
+        self.finish(Err(error));
+    }
+}
+
+fn cancelled() -> CommandError {
+    CommandError::new("cancelled", "the request was cancelled")
 }
 
 struct Shared {
@@ -158,17 +252,40 @@ impl Host {
         validate(self.shared.descriptor, invocation)
     }
 
-    /// Queue a command; `reply` runs on the engine thread when it finishes.
+    /// Whether the catalog entry at `command` is a read-only query.
+    pub fn is_query(&self, command: usize) -> bool {
+        self.shared
+            .descriptor
+            .commands
+            .get(command)
+            .is_some_and(|spec| spec.is_query())
+    }
+
+    /// Queue a command or query; `reply` runs once it finishes, on the
+    /// engine thread for commands and on the answering thread for queries.
     pub fn dispatch(
         &self,
         invocation: Invocation,
         context: CallContext,
         reply: impl FnOnce(CommandOutcome) + Send + 'static,
     ) {
+        self.dispatch_cancellable(invocation, context, Cancellation::new(), reply);
+    }
+
+    /// Queue a request whose query can be cancelled through `cancellation`.
+    /// Commands are not cancellable and ignore it.
+    pub fn dispatch_cancellable(
+        &self,
+        invocation: Invocation,
+        context: CallContext,
+        cancellation: Cancellation,
+        reply: impl FnOnce(CommandOutcome) + Send + 'static,
+    ) {
         let reply: Reply = Box::new(reply);
         if let Err(error) = self.jobs.send(Job::Invoke {
             invocation,
             context,
+            cancellation,
             reply,
         }) && let Job::Invoke { reply, .. } = error.0
         {
@@ -200,6 +317,41 @@ impl Host {
                 "engine_stopped",
                 "the engine has stopped",
             )),
+        })
+    }
+
+    /// Run a query and wait at most `timeout` for its answer. A late answer
+    /// is cancelled and reported as `query_timeout`; queries have no side
+    /// effects, so asking again is always safe.
+    pub fn query_blocking(
+        &self,
+        invocation: Invocation,
+        context: CallContext,
+        timeout: Duration,
+    ) -> CommandOutcome {
+        let (sender, receiver) = channel();
+        let cancellation = Cancellation::new();
+        self.dispatch_cancellable(invocation, context, cancellation.clone(), move |outcome| {
+            let _ = sender.send(outcome);
+        });
+        receiver.recv_timeout(timeout).unwrap_or_else(|error| {
+            cancellation.cancel();
+            CommandOutcome {
+                status: CommandStatus::Completed,
+                revision: self.snapshot().0,
+                result: Err(match error {
+                    std::sync::mpsc::RecvTimeoutError::Timeout => CommandError::new(
+                        "query_timeout",
+                        format!(
+                            "the query did not answer within {} ms; it was cancelled",
+                            timeout.as_millis()
+                        ),
+                    ),
+                    std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                        CommandError::new("engine_stopped", "the engine has stopped")
+                    }
+                }),
+            }
         })
     }
 
@@ -258,11 +410,35 @@ fn run(
         let Job::Invoke {
             invocation,
             context: _context,
+            cancellation,
             reply,
         } = job
         else {
             break;
         };
+        let is_query = descriptor
+            .commands
+            .get(invocation.command)
+            .is_some_and(|spec| spec.is_query());
+        if is_query && !poisoned {
+            let answer = QueryAnswer {
+                reply: Some(reply),
+                shared: Arc::clone(&shared),
+                command: invocation.command,
+                cancellation,
+            };
+            if let Err(error) = validate(descriptor, &invocation) {
+                answer.send(Err(error));
+            } else if answer.is_cancelled() {
+                // Superseded while queued: the provider never starts.
+                drop(answer);
+            } else if catch_unwind(AssertUnwindSafe(|| engine.query(&invocation, answer))).is_err()
+            {
+                // The answer was dropped while unwinding and reported the failure.
+                poisoned = true;
+            }
+            continue;
+        }
         let result = if poisoned {
             Err(CommandError::new(
                 "engine_failed",

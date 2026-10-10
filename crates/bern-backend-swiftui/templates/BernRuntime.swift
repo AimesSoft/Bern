@@ -402,6 +402,13 @@ private func bernOnMediaState(_ context: UnsafeMutableRawPointer?, _ bytes: Unsa
     DispatchQueue.main.async { MainActor.assumeIsolated { BernMedia.shared.receive(data) } }
 }
 
+private func bernOnQuery(
+    _ context: UnsafeMutableRawPointer?, _ subscription: UInt64, _ bytes: UnsafePointer<UInt8>?, _ count: Int
+) {
+    let data = bernCopy(bytes, count)
+    DispatchQueue.main.async { MainActor.assumeIsolated { BernHost.shared.receiveQuery(subscription, data) } }
+}
+
 /// Media functions of the bridge that answer at once.
 enum BernMediaCall {
     case attachExecutor, create, bind
@@ -428,6 +435,7 @@ final class BernHost {
     @ObservationIgnored private var openWindow: OpenWindowAction?
     @ObservationIgnored private var openSettings: OpenSettingsAction?
     @ObservationIgnored private var openedInitial = false
+    @ObservationIgnored private var queries: [UInt64: @MainActor ([UInt8]) -> Void] = [:]
     @ObservationIgnored let controls = BernControls()
 
     var failure: BernFailure?
@@ -447,7 +455,7 @@ final class BernHost {
         let callbacks = BernCallbacks(
             context: nil, on_state: bernOnState, on_reply: bernOnReply,
             on_session_request: bernOnSessionRequest, on_media_request: bernOnMediaRequest,
-            on_media_state: bernOnMediaState)
+            on_media_state: bernOnMediaState, on_query: bernOnQuery)
         guard let app = bern_app_start(fingerprint, callbacks, &error) else {
             startupError = String(decoding: Self.take(error), as: UTF8.self)
             return
@@ -589,6 +597,49 @@ final class BernHost {
             failure = BernFailure(window: pending.window, code: "invalid_reply", message: "\(error)")
             pending.completion?(BernCommandFailure(code: "invalid_reply", message: "\(error)"))
         }
+    }
+
+    // MARK: Queries
+
+    /// Open a subscription to catalog query `index` for a window instance;
+    /// later states of it go to `receive`.
+    func queryOpen(
+        _ context: BernWindowContext, index: UInt32, receive: @escaping @MainActor ([UInt8]) -> Void
+    ) throws -> UInt64 {
+        guard let handle, context.generation > 0 else {
+            throw BernCommandFailure(code: "target_not_found", message: "the window is not attached")
+        }
+        var reader = BernReader(Self.take(bern_query_open(handle, context.kind, context.generation, index)))
+        guard try reader.u8() == 0 else {
+            throw BernCommandFailure(code: try reader.text(), message: try reader.text())
+        }
+        let subscription = try reader.u64()
+        queries[subscription] = receive
+        return subscription
+    }
+
+    /// Ask for new parameters; returns the subscription's state right away.
+    func queryRequest(_ subscription: UInt64, _ params: [UInt8]) throws -> [UInt8] {
+        guard let handle else {
+            throw BernCommandFailure(code: "engine_stopped", message: "the engine is not running")
+        }
+        let bytes = params.withUnsafeBufferPointer { buffer in
+            Self.take(bern_query_request(handle, subscription, buffer.baseAddress, buffer.count))
+        }
+        var reader = BernReader(bytes)
+        guard try reader.u8() == 0 else {
+            throw BernCommandFailure(code: try reader.text(), message: try reader.text())
+        }
+        return Array(bytes.dropFirst())
+    }
+
+    func queryClose(_ subscription: UInt64) {
+        queries[subscription] = nil
+        if let handle { bern_query_close(handle, subscription) }
+    }
+
+    func receiveQuery(_ subscription: UInt64, _ bytes: [UInt8]) {
+        queries[subscription]?(bytes)
     }
 
     // MARK: Windows
@@ -1120,6 +1171,275 @@ enum BernSnapshot {
                 .replacingOccurrences(of: "/", with: "-")
             let file = directory.appendingPathComponent(String(format: "%03d-%@.png", sequence, name))
             try? image.representation(using: .png, properties: [:])?.write(to: file)
+        }
+    }
+}
+
+// MARK: - Queries
+
+/// What a query subscription shows, as the session runtime reports it.
+enum BernQueryPhase<Data> {
+    case idle
+    case loading
+    case ready(Data)
+    /// New parameters are loading; the previous data stays visible.
+    case refreshing(Data)
+    /// The last request failed; data from the last success stays visible.
+    case failed(previous: Data?, code: String, message: String)
+}
+
+/// Releases a query subscription and its control registration when the
+/// owning view's identity ends — also when its window closes.
+final class BernQueryOwner: @unchecked Sendable {
+    var subscription: UInt64?
+    var control: UUID?
+
+    deinit {
+        let subscription = subscription
+        let control = control
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                if let subscription { BernHost.shared.queryClose(subscription) }
+                if let control { BernHost.shared.controls.remove(control) }
+            }
+        }
+    }
+}
+
+/// One subscription to a catalog query. Every parameter change is a new
+/// request with a new version; the session runtime cancels the previous
+/// request and forwards only the answer for the current version, and
+/// states older than the last one shown are ignored here as well.
+@MainActor
+@Observable
+final class BernQuery<Data: BernCodable> {
+    private(set) var phase: BernQueryPhase<Data> = .idle
+    @ObservationIgnored let index: UInt32
+    @ObservationIgnored private var version: UInt64 = 0
+    @ObservationIgnored private let owner = BernQueryOwner()
+    @ObservationIgnored private var generation: UInt64 = 0
+    @ObservationIgnored private var requested: [UInt8]?
+    @ObservationIgnored private var wanted: (window: BernWindowContext, params: [UInt8], target: String)?
+    @ObservationIgnored private var scheduled = false
+    @ObservationIgnored var count: ((Data) -> Int)?
+
+    init(index: UInt32) {
+        self.index = index
+    }
+
+    /// Called while the view renders: remember the parameters it shows and
+    /// request them after the update, never during it.
+    func want(_ window: BernWindowContext, params: [UInt8], target: String) {
+        guard window.generation > 0 else { return }
+        if window.generation == generation, params == requested, owner.subscription != nil {
+            wanted = nil
+            return
+        }
+        wanted = (window, params, target)
+        guard !scheduled else { return }
+        scheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.flush() }
+        }
+    }
+
+    private func flush() {
+        scheduled = false
+        guard let (window, params, target) = wanted else { return }
+        wanted = nil
+        let host = BernHost.shared
+        do {
+            if owner.subscription != nil, generation != window.generation {
+                close()
+            }
+            if owner.subscription == nil {
+                owner.subscription = try host.queryOpen(window, index: index) { [weak self] bytes in
+                    self?.receive(bytes)
+                }
+                generation = window.generation
+                register(window, target: target)
+            }
+            if params != requested { request(params) }
+        } catch let problem as BernCommandFailure {
+            phase = .failed(previous: nil, code: problem.code, message: problem.message)
+        } catch {}
+    }
+
+    private func request(_ params: [UInt8]) {
+        guard let subscription = owner.subscription else { return }
+        requested = params
+        do {
+            receive(try BernHost.shared.queryRequest(subscription, params))
+        } catch let problem as BernCommandFailure {
+            phase = .failed(previous: nil, code: problem.code, message: problem.message)
+        } catch {}
+    }
+
+    /// Ask again with the current parameters.
+    func retry() {
+        if let requested { request(requested) }
+    }
+
+    private func close() {
+        if let subscription = owner.subscription { BernHost.shared.queryClose(subscription) }
+        owner.subscription = nil
+        requested = nil
+        version = 0
+    }
+
+    /// The query as a control: `ui.inspect` reports its state and
+    /// `ui.activate` asks again.
+    private func register(_ window: BernWindowContext, target: String) {
+        let token = owner.control ?? UUID()
+        owner.control = token
+        BernHost.shared.controls.register(
+            token,
+            BernControlEntry(
+                target: target, window: window.id, role: "query", label: "", enabled: true,
+                actions: BernControlActions(
+                    activate: { [weak self] in self?.retry() },
+                    value: { [weak self] in self?.summary })))
+    }
+
+    func receive(_ bytes: [UInt8]) {
+        var reader = BernReader(bytes)
+        do {
+            let next = try reader.u64()
+            guard next >= version else { return }
+            let phase: BernQueryPhase<Data>
+            switch try reader.u8() {
+            case 0: phase = .idle
+            case 1: phase = .loading
+            case 2: phase = .ready(try Data(bern: &reader))
+            case 3: phase = .refreshing(try Data(bern: &reader))
+            case 4:
+                let previous = try reader.u8() == 1 ? try Data(bern: &reader) : nil
+                phase = .failed(previous: previous, code: try reader.text(), message: try reader.text())
+            default: throw BernDecodeError(message: "unknown query phase")
+            }
+            version = next
+            self.phase = phase
+            BernSnapshot.schedule()
+        } catch {
+            phase = .failed(previous: nil, code: "invalid_state", message: "\(error)")
+        }
+    }
+
+    /// Machine-readable state for `ui.inspect`.
+    var summary: String {
+        let size = { (data: Data) in self.count.map { " (\($0(data)))" } ?? "" }
+        switch phase {
+        case .idle: return "idle"
+        case .loading: return "loading v\(version)"
+        case .ready(let data): return "ready v\(version)\(size(data))"
+        case .refreshing(let data): return "refreshing v\(version)\(size(data))"
+        case .failed(let previous, let code, let message):
+            return "failed v\(version) \(code): \(message)\(previous.map(size) ?? "")"
+        }
+    }
+}
+
+/// A `Query` declaration: owns its subscription and shows each state with
+/// standard controls. `shown` maps the data to what the template shows,
+/// or `nil` when it is empty.
+struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
+    let target: String
+    let params: [UInt8]
+    let loading: String
+    let empty: String?
+    let emptyIcon: String
+    let failed: String
+    let shown: (Data) -> Shown?
+    let content: (Shown) -> Content
+    @Environment(BernWindowContext.self) private var window
+    @State private var query: BernQuery<Data>
+
+    init(
+        query index: UInt32, target: String, params: [UInt8], loading: String, empty: String?,
+        emptyIcon: String, failed: String, count: ((Data) -> Int)?, shown: @escaping (Data) -> Shown?,
+        @ViewBuilder content: @escaping (Shown) -> Content
+    ) {
+        self.target = target
+        self.params = params
+        self.loading = loading
+        self.empty = empty
+        self.emptyIcon = emptyIcon
+        self.failed = failed
+        self.shown = shown
+        self.content = content
+        let query = BernQuery<Data>(index: index)
+        query.count = count
+        _query = State(initialValue: query)
+    }
+
+    var body: some View {
+        let _ = query.want(window, params: params, target: target)
+        switch query.phase {
+        case .idle, .loading:
+            BernQueryProgress(text: loading)
+        case .ready(let data):
+            presented(data)
+        case .refreshing(let data):
+            BernQueryProgress(text: loading)
+            presented(data)
+        case .failed(let previous, _, let message):
+            if let previous {
+                BernQueryFailureRow(title: failed, message: message) { query.retry() }
+                presented(previous)
+            } else {
+                ContentUnavailableView {
+                    Label(failed, systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(verbatim: message)
+                } actions: {
+                    Button(BernText.string("bern.query.retry")) { query.retry() }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    @ViewBuilder private func presented(_ data: Data) -> some View {
+        if let value = shown(data) {
+            content(value)
+        } else if let empty {
+            ContentUnavailableView(empty, systemImage: emptyIcon)
+                .frame(maxWidth: .infinity)
+        }
+    }
+}
+
+/// Small progress row shown while a query loads or refreshes.
+struct BernQueryProgress: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(verbatim: text).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// A failure shown next to the data from the last success.
+struct BernQueryFailureRow: View {
+    let title: String
+    let message: String
+    let retry: () -> Void
+
+    var body: some View {
+        HStack {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: title)
+                    Text(verbatim: message).font(.footnote).foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "exclamationmark.triangle")
+            }
+            Spacer()
+            Button(BernText.string("bern.query.retry"), action: retry)
         }
     }
 }

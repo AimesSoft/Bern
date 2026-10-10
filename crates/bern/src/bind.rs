@@ -140,6 +140,29 @@ impl CommandRef {
     }
 }
 
+/// A query binding produced by a typed client method. `T` is the query's
+/// result and `S` what a `Query` template variable shows: the result
+/// itself, or the value inside an optional result.
+#[must_use = "a query reference only has meaning as the `query:` of a `Query`"]
+pub struct QueryRef<T, S = T> {
+    _marker: PhantomData<fn() -> (T, S)>,
+}
+
+impl<T, S> QueryRef<T, S> {
+    pub const fn declared() -> Self {
+        Self {
+            _marker: PhantomData,
+        }
+    }
+}
+
+/// Query results with an empty state: lists and optionals. Only these
+/// accept the `empty:` text of a `Query`.
+pub trait EmptyResult {}
+
+impl<T> EmptyResult for Vec<T> {}
+impl<T> EmptyResult for Option<T> {}
+
 /// A window kind in the generated window handle.
 #[derive(Clone, Copy)]
 pub struct WindowRef {

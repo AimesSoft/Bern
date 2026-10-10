@@ -82,8 +82,30 @@ pub struct CommandsItem {
     pub span: Span,
 }
 
-/// A `#[bern::protocol]` module: value types, one state struct and one
-/// command trait.
+/// A read-only query: `fn search(&self, text: String, answer: Answer<Vec<Item>>);`
+#[derive(Clone, Debug)]
+pub struct QueryItem {
+    pub name: Ident,
+    pub params: Vec<CommandParam>,
+    /// `T` of the final `Answer<T>` parameter.
+    pub result: TypeRef,
+    pub result_ty: syn::Type,
+    pub doc: String,
+    pub errors: Vec<String>,
+    /// State fields the answer depends on, from `#[reads(…)]`.
+    pub reads: Vec<Ident>,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct QueriesItem {
+    pub name: Ident,
+    pub methods: Vec<QueryItem>,
+    pub span: Span,
+}
+
+/// A `#[bern::protocol]` module: value types, one state struct, one
+/// command trait and an optional query trait.
 #[derive(Clone, Debug)]
 pub struct ProtocolItem {
     pub args: ProtocolArgs,
@@ -92,6 +114,7 @@ pub struct ProtocolItem {
     pub values: Vec<ValueItem>,
     pub state: StateItem,
     pub commands: CommandsItem,
+    pub queries: Option<QueriesItem>,
     pub uses: Vec<syn::ItemUse>,
 }
 
@@ -665,6 +688,124 @@ fn parse_command(method: &syn::TraitItemFn) -> syn::Result<CommandItem> {
     })
 }
 
+/// `T` when `ty` is `Answer<T>`.
+fn answer_type(ty: &syn::Type) -> Option<&syn::Type> {
+    let syn::Type::Path(path) = ty else {
+        return None;
+    };
+    let last = path.path.segments.last()?;
+    if last.ident != "Answer" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    match args.args.iter().collect::<Vec<_>>().as_slice() {
+        [syn::GenericArgument::Type(inner)] => Some(inner),
+        _ => None,
+    }
+}
+
+fn parse_query(method: &syn::TraitItemFn) -> syn::Result<QueryItem> {
+    let sig = &method.sig;
+    let name = sig.ident.clone();
+    check_known_attrs(&method.attrs, &["errors", "reads"], "queries")?;
+    if method.default.is_some() {
+        return Err(error(
+            name.span(),
+            "queries are answered by the engine, not in the protocol",
+        ));
+    }
+    if sig.asyncness.is_some() || !sig.generics.params.is_empty() {
+        return Err(error(
+            name.span(),
+            "queries are not async or generic; answer later through `answer: Answer<T>`",
+        ));
+    }
+    let mut inputs = sig.inputs.iter();
+    match inputs.next() {
+        Some(syn::FnArg::Receiver(receiver))
+            if receiver.reference.is_some() && receiver.mutability.is_none() => {}
+        Some(syn::FnArg::Receiver(receiver)) if receiver.mutability.is_some() => {
+            return Err(error(
+                receiver.span(),
+                "a query takes `&self`: queries only read engine state, commands change it",
+            ));
+        }
+        _ => {
+            return Err(error(
+                name.span(),
+                "a query takes `&self` as its first parameter",
+            ));
+        }
+    }
+    let typed: Vec<&syn::PatType> = inputs
+        .map(|input| match input {
+            syn::FnArg::Typed(typed) => typed,
+            syn::FnArg::Receiver(_) => unreachable!(),
+        })
+        .collect();
+    let Some((answer, rest)) = typed.split_last() else {
+        return Err(error(
+            name.span(),
+            "a query answers through its last parameter, `answer: Answer<T>`",
+        ));
+    };
+    let Some(result_ty) = answer_type(&answer.ty) else {
+        return Err(error(
+            answer.ty.span(),
+            "a query answers through its last parameter, `answer: Answer<T>`",
+        ));
+    };
+    let mut params = Vec::new();
+    for typed in rest {
+        let syn::Pat::Ident(pat) = &*typed.pat else {
+            return Err(error(typed.pat.span(), "parameters must be simple names"));
+        };
+        if answer_type(&typed.ty).is_some() {
+            return Err(error(
+                typed.ty.span(),
+                "a query has one `Answer<T>`, as its last parameter",
+            ));
+        }
+        params.push(CommandParam {
+            name: pat.ident.clone(),
+            ty: type_ref(&typed.ty)?,
+            syn_ty: (*typed.ty).clone(),
+        });
+    }
+    if let syn::ReturnType::Type(_, ty) = &sig.output {
+        return Err(error(
+            ty.span(),
+            "a query returns nothing; it answers through `answer`, now or later",
+        ));
+    }
+    let mut errors = Vec::new();
+    if let Some(attr) = find_attr(&method.attrs, "errors") {
+        let list = attr.parse_args_with(
+            syn::punctuated::Punctuated::<syn::LitStr, syn::Token![,]>::parse_terminated,
+        )?;
+        errors = list.iter().map(syn::LitStr::value).collect();
+    }
+    let mut reads = Vec::new();
+    if let Some(attr) = find_attr(&method.attrs, "reads") {
+        let list = attr.parse_args_with(
+            syn::punctuated::Punctuated::<Ident, syn::Token![,]>::parse_terminated,
+        )?;
+        reads = list.into_iter().collect();
+    }
+    Ok(QueryItem {
+        result: type_ref(result_ty)?,
+        result_ty: result_ty.clone(),
+        params,
+        doc: doc_comment(&method.attrs),
+        errors,
+        reads,
+        span: name.span(),
+        name,
+    })
+}
+
 fn strip_marker(item: &Item, marker: &str) -> Item {
     let mut item = item.clone();
     let attrs = match &mut item {
@@ -689,6 +830,7 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
     let mut values = Vec::new();
     let mut state = None;
     let mut commands = None;
+    let mut queries = None;
     let mut uses = Vec::new();
     for item in items {
         match item {
@@ -744,11 +886,37 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
                     span: item_trait.ident.span(),
                 });
             }
+            Item::Trait(item_trait) if find_attr(&item_trait.attrs, "queries").is_some() => {
+                if queries.is_some() {
+                    return Err(error(
+                        item_trait.ident.span(),
+                        "a protocol has at most one `#[queries]` trait",
+                    ));
+                }
+                reject_generics(&item_trait.generics, &item_trait.ident)?;
+                let mut methods = Vec::new();
+                for trait_item in &item_trait.items {
+                    match trait_item {
+                        syn::TraitItem::Fn(method) => methods.push(parse_query(method)?),
+                        other => {
+                            return Err(error(
+                                other.span(),
+                                "the query trait only contains query methods",
+                            ));
+                        }
+                    }
+                }
+                queries = Some(QueriesItem {
+                    name: item_trait.ident.clone(),
+                    methods,
+                    span: item_trait.ident.span(),
+                });
+            }
             other => {
                 return Err(error(
                     other.span(),
                     "a protocol module contains `use` items, `#[value]` types, one `#[state]` \
-                     struct and one `#[commands]` trait",
+                     struct, one `#[commands]` trait and an optional `#[queries]` trait",
                 ));
             }
         }
@@ -772,6 +940,7 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
         values,
         state,
         commands,
+        queries,
         uses,
     })
 }

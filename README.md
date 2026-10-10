@@ -20,13 +20,14 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-示例展示侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、搜索、列表到详情的推入导航、工具栏分段选择器、视频播放（AVFoundation，命令驱动的标准控制条），以及带页签的设置窗口和关闭前确认，支持简体中文和英文。
+示例展示侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、经异步引擎查询筛选列表的侧边栏搜索、列表到详情的推入导航、工具栏分段选择器、视频播放（AVFoundation，命令驱动的标准控制条），以及带页签的设置窗口和关闭前确认，支持简体中文和英文。
 
 应用运行时，可以用同一套命令从外部驱动它：
 
 ```sh
 target/bern/macos/bin/showcase --help
 target/bern/macos/bin/showcase showcase record --action Primary
+target/bern/macos/bin/showcase showcase search-library --text mo
 target/bern/macos/bin/showcase ui inspect
 target/bern/macos/bin/showcase ui select --target main_window.pages --option Library
 target/bern/macos/bin/showcase media players
@@ -39,8 +40,8 @@ target/bern/macos/bin/showcase window close --window settings#1
 
 一个 Bern 应用由三部分组成：
 
-1. **协议**（`#[bern::protocol]`）：值类型、只读状态和命令 trait。
-2. **引擎**：实现命令 trait 的普通 Rust 代码，不依赖任何 UI。
+1. **协议**（`#[bern::protocol]`）：值类型、只读状态、命令 trait，以及可选的只读查询 trait。
+2. **引擎**：实现命令与查询 trait 的普通 Rust 代码，不依赖任何 UI；查询可以稍后在任意线程作答。
 3. **界面**：`#[component]` 函数，主体是一个 `ui!` 声明。
 
 ```rust

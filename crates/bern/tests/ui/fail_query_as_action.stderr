@@ -1,0 +1,16 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail_query_as_action.rs:38:58
+   |
+38 |     ui! { Button(id: go, label: tr! { "en" => "Go" }) => app.search(draft.text) }
+   |                                                          ^^^^------
+   |                                                          |   |
+   |                                                          |   arguments to this function are incorrect
+   |                                                          expected `CommandRef`, found `QueryRef<Vec<Book>>`
+   |
+   = note: expected struct `CommandRef`
+              found struct `QueryRef<Vec<Book>>`
+note: function defined here
+  --> src/__private.rs
+   |
+   | pub fn command(_: CommandRef) {}
+   |        ^^^^^^^

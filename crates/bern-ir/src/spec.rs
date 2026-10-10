@@ -51,6 +51,9 @@ pub enum PropKind {
     MediaSource,
     /// An application player from the `#[bern::players]` catalog.
     Player,
+    /// A typed query call such as `app.search(draft.text)`, whose result
+    /// feeds the element's template.
+    Query,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -496,6 +499,23 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
+        template: true,
+        interactive: true,
+        ..spec(
+            "Query",
+            &[
+                req("id", PropKind::Id),
+                req("query", PropKind::Query),
+                opt("loading", PropKind::DisplayText),
+                opt("empty", PropKind::DisplayText),
+                opt("failed", PropKind::DisplayText),
+                opt("icon", PropKind::Icon),
+            ],
+            Children::Any,
+            "Result of an asynchronous query: loading, ready, refreshing, failed and empty states; the template shows the data",
+        )
+    },
+    ComponentSpec {
         interactive: true,
         ..spec(
             "Picker",
@@ -682,6 +702,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
                     .into(),
         });
     }
+    if spec.name == "Query" && shape.props.contains(&"icon") && !shape.props.contains(&"empty") {
+        errors.push(ShapeError {
+            prop: Some("icon".into()),
+            message: "`icon:` decorates the `empty:` state; declare `empty:` too".into(),
+        });
+    }
     if spec.name == "Window" {
         let check = shape.props.contains(&"confirm_close");
         if check != shape.props.contains(&"close_message") {
@@ -782,6 +808,23 @@ mod tests {
         }
         assert!(check_shape(&shape("Video", vec!["id", "source"], false)).is_empty());
         assert!(check_shape(&shape("Video", vec!["id", "player"], false)).is_empty());
+    }
+
+    #[test]
+    fn queries_need_a_call_an_id_and_a_template() {
+        let mut query = shape("Query", vec!["id", "query"], false);
+        assert!(
+            check_shape(&query)
+                .iter()
+                .any(|error| error.message.contains("template"))
+        );
+        query.has_template = true;
+        assert!(check_shape(&query).is_empty());
+        query.props.push("icon");
+        assert!(!check_shape(&query).is_empty());
+        query.props.push("empty");
+        assert!(check_shape(&query).is_empty());
+        assert!(!check_shape(&shape("Query", vec!["query"], false)).is_empty());
     }
 
     #[test]

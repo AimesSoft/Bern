@@ -21,7 +21,7 @@ pub use descriptor::{
     check_external_names, valid_name,
 };
 pub use error::{CommandError, SchemaError};
-pub use message::{CommandOutcome, CommandStatus, Invocation, StateUpdate};
+pub use message::{Cancellation, CommandOutcome, CommandStatus, Invocation, StateUpdate};
 pub use session::{SessionCommand, session_catalog};
 pub use text::{LocalizedText, label_key};
 pub use types::{EnumDef, FieldDef, RecordDef, Type, TypeTable, VariantDef};

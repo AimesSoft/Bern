@@ -1,0 +1,16 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail_query_of_command.rs:38:37
+   |
+38 |     ui! { Query(id: add, query: app.add("x")) |id| { Spacer } }
+   |                                     ^^^
+   |                                     |
+   |                                     expected `&QueryRef<_, _>`, found `&CommandRef`
+   |                                     arguments to this function are incorrect
+   |
+   = note: expected reference `&QueryRef<_, _>`
+              found reference `&CommandRef`
+note: function defined here
+  --> src/__private.rs
+   |
+   | pub fn query_result<T, S: BernValue>(_: &QueryRef<T, S>) -> S::Ref {
+   |        ^^^^^^^^^^^^

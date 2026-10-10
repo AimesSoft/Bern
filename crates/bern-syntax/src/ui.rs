@@ -70,7 +70,18 @@ fn parse_props(input: ParseStream<'_>) -> syn::Result<Vec<Prop>> {
             ));
         }
         content.parse::<Token![:]>()?;
-        let value = parse_expr(&content, true)?;
+        let value = match call_segments(&content) {
+            Some(segments) if name == "query" => {
+                if segments < 2 {
+                    return Err(content.error(
+                        "a query is called on a typed client, for example \
+                         `query: app.search(draft.text)`",
+                    ));
+                }
+                Expr::Query(parse_call(&content)?)
+            }
+            _ => parse_expr(&content, true)?,
+        };
         if props.iter().any(|prop: &Prop| prop.name == name) {
             return Err(syn::Error::new(
                 name.span(),
@@ -129,14 +140,32 @@ fn parse_element(input: ParseStream<'_>) -> syn::Result<Element> {
     })
 }
 
+/// Number of path segments when the input starts with `a.b(…)`.
+fn call_segments(input: ParseStream<'_>) -> Option<usize> {
+    let fork = input.fork();
+    fork.parse::<Ident>().ok()?;
+    let mut segments = 1;
+    while fork.peek(Token![.]) {
+        fork.parse::<Token![.]>().ok()?;
+        fork.parse::<Ident>().ok()?;
+        segments += 1;
+    }
+    fork.peek(token::Paren).then_some(segments)
+}
+
 fn parse_action(input: ParseStream<'_>) -> syn::Result<Action> {
-    let span = input.span();
     if input.peek(Token![|]) || input.peek(Token![move]) || input.peek(token::Brace) {
         return Err(input.error(
             "arbitrary callbacks are not allowed; bind a registered command such as \
              `=> app.save()`",
         ));
     }
+    parse_call(input)
+}
+
+/// `receiver.member.method(positional args)`.
+fn parse_call(input: ParseStream<'_>) -> syn::Result<Action> {
+    let span = input.span();
     let mut segments: Vec<Ident> = vec![input.parse()?];
     while input.peek(Token![.]) {
         input.parse::<Token![.]>()?;

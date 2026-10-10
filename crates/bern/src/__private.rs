@@ -65,6 +65,12 @@ pub fn same_type<T>(_: &T, _: &T) {}
 
 pub fn command(_: CommandRef) {}
 
+pub fn query_result<T, S: BernValue>(_: &QueryRef<T, S>) -> S::Ref {
+    S::reference()
+}
+
+pub fn query_empty<T: EmptyResult, S>(_: &QueryRef<T, S>) {}
+
 pub fn enum_value<E: BernEnum>(_: &E) {}
 
 pub fn assert_value<T: BernValue>() {}

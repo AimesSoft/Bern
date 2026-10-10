@@ -3,7 +3,7 @@
 
 use crate::{ProtocolItem, TypeRef, ValueKind};
 use bern_protocol::{
-    CommandPolicy, CommandSpec, DESCRIPTOR_VERSION, EnumDef, ExternalNames, FieldDef,
+    CommandPolicy, CommandSpec, Concurrency, DESCRIPTOR_VERSION, EnumDef, ExternalNames, FieldDef,
     LocalizedText, OperationKind, ParamSpec, ProtocolDescriptor, RecordDef, Retry, Scope,
     StateField, Type, TypeTable, VariantDef,
 };
@@ -73,6 +73,10 @@ fn protocol_types(protocol: &ProtocolItem) -> Vec<&TypeRef> {
     }
     types.extend(protocol.state.fields.iter().map(|field| &field.ty));
     for method in &protocol.commands.methods {
+        types.extend(method.params.iter().map(|param| &param.ty));
+        types.push(&method.result);
+    }
+    for method in protocol.queries.iter().flat_map(|queries| &queries.methods) {
         types.extend(method.params.iter().map(|param| &param.ty));
         types.push(&method.result);
     }
@@ -183,6 +187,7 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
         commands.push(CommandSpec {
             id: format!("{namespace}.{name}"),
             external: ExternalNames::derive(&namespace, &name),
+            reads: vec![],
             name,
             doc: method.doc.clone(),
             kind: OperationKind::Command,
@@ -197,6 +202,51 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
                     Retry::Never
                 },
                 ..CommandPolicy::default()
+            },
+        });
+    }
+    // Queries follow the commands in the catalog, so adding one never
+    // renumbers a command.
+    for method in protocol.queries.iter().flat_map(|queries| &queries.methods) {
+        let name = method.name.to_string();
+        let mut params = Vec::new();
+        for param in &method.params {
+            params.push(ParamSpec {
+                name: param.name.to_string(),
+                ty: resolve(&param.ty, &types, param.name.span())?,
+                doc: String::new(),
+            });
+        }
+        let mut reads = Vec::new();
+        for field in &method.reads {
+            if !state.iter().any(|state| *field == state.name) {
+                return Err(syn::Error::new(
+                    field.span(),
+                    format!(
+                        "`{field}` is not a field of the protocol state; `#[reads(…)]` names \
+                         the state fields the query's answer depends on"
+                    ),
+                ));
+            }
+            reads.push(field.to_string());
+        }
+        commands.push(CommandSpec {
+            id: format!("{namespace}.{name}"),
+            external: ExternalNames::derive(&namespace, &name),
+            reads,
+            name,
+            doc: method.doc.clone(),
+            kind: OperationKind::Query,
+            scope: Scope::Engine,
+            params,
+            result: resolve(&method.result, &types, method.span)?,
+            errors: method.errors.clone(),
+            // Reads can always be repeated; answers may overlap and a
+            // superseded request is cancelled.
+            policy: CommandPolicy {
+                concurrency: Concurrency::Overlapping,
+                retry: Retry::Idempotent,
+                cancellable: true,
             },
         });
     }

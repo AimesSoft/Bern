@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Version of the IR layout. Targets declare the range they consume.
-pub const IR_VERSION: u32 = 1;
+pub const IR_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
@@ -378,6 +378,22 @@ pub enum Prop {
     Player {
         id: String,
     },
+    /// A typed query call whose result feeds the element's template.
+    Query {
+        query: QueryBinding,
+    },
+}
+
+/// A query of the engine catalog bound with its arguments. The arguments
+/// are restricted expressions; when their values change, the target asks
+/// again under a new parameter version and shows only the current answer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QueryBinding {
+    /// Catalog index of the query in the protocol.
+    pub query: usize,
+    pub args: Vec<Expr>,
+    /// The query's declared result.
+    pub result: Type,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -516,6 +532,13 @@ impl Element {
     pub fn expr(&self, name: &str) -> Option<&Expr> {
         match self.props.get(name) {
             Some(Prop::Expr { expr }) => Some(expr),
+            _ => None,
+        }
+    }
+
+    pub fn query(&self, name: &str) -> Option<&QueryBinding> {
+        match self.props.get(name) {
+            Some(Prop::Query { query }) => Some(query),
             _ => None,
         }
     }

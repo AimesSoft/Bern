@@ -141,8 +141,19 @@ fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
         }
         text.push('\n');
     }
-    for spec in &descriptor.commands {
+    for spec in descriptor.commands.iter().filter(|spec| !spec.is_query()) {
         list(&mut text, spec, &descriptor.types);
+    }
+    let queries: Vec<_> = descriptor
+        .commands
+        .iter()
+        .filter(|spec| spec.is_query())
+        .collect();
+    if !queries.is_empty() {
+        text.push_str("\nQueries (read only; waits for the engine's answer):\n");
+        for spec in queries {
+            list(&mut text, spec, &descriptor.types);
+        }
     }
     let (media_types, media_specs) = media_catalog();
     text.push_str("\nMedia commands (act on the engine's players):\n");
@@ -371,6 +382,46 @@ mod tests {
             vec![("position_ms".to_string(), "90000".to_string())]
         );
         assert!(parse(&["a".into(), "--x".into()]).is_err());
+    }
+
+    #[test]
+    fn help_lists_queries_apart_from_commands() {
+        use bern_protocol::{
+            CommandPolicy, DESCRIPTOR_VERSION, ExternalNames, OperationKind, ParamSpec, Scope,
+        };
+        let spec = |name: &str, kind| CommandSpec {
+            id: format!("library.{name}"),
+            name: name.into(),
+            doc: format!("{name} doc"),
+            kind,
+            scope: Scope::Engine,
+            params: vec![ParamSpec {
+                name: "search_text".into(),
+                ty: Type::Text,
+                doc: String::new(),
+            }],
+            result: Type::Unit,
+            errors: vec![],
+            policy: CommandPolicy::default(),
+            external: ExternalNames::derive("library", name),
+            reads: vec![],
+        };
+        let descriptor = ProtocolDescriptor {
+            descriptor_version: DESCRIPTOR_VERSION,
+            namespace: "library".into(),
+            version: 1,
+            types: TypeTable::default(),
+            state: vec![],
+            commands: vec![
+                spec("add", OperationKind::Command),
+                spec("search", OperationKind::Query),
+            ],
+        };
+        let text = help("library-cli", &descriptor);
+        let queries = text.find("Queries (read only").unwrap();
+        assert!(text.find("library add").unwrap() < queries);
+        assert!(text.find("library search").unwrap() > queries);
+        assert!(text.contains("--search-text <text>"));
     }
 
     #[test]

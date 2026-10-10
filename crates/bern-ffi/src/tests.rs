@@ -1,10 +1,14 @@
 //! Drive the C ABI the way a frontend does, with Rust callbacks.
 
 use super::*;
+use bern_command::QueryAnswer;
 use bern_protocol::{
     CommandPolicy, CommandSpec, DESCRIPTOR_VERSION, ExternalNames, OperationKind, ParamSpec,
     ProtocolDescriptor, Scope, StateField, TypeTable,
 };
+use bern_protocol::{Concurrency, Retry};
+use bern_runtime::query::ManualClock;
+use query::{bern_query_open, bern_query_request};
 use std::sync::{Condvar, OnceLock};
 
 fn descriptor() -> &'static ProtocolDescriptor {
@@ -19,26 +23,53 @@ fn descriptor() -> &'static ProtocolDescriptor {
             ty: Type::Int,
             doc: String::new(),
         }],
-        commands: vec![CommandSpec {
-            id: "counter.add".into(),
-            name: "add".into(),
-            doc: String::new(),
-            kind: OperationKind::Command,
-            scope: Scope::Engine,
-            params: vec![ParamSpec {
-                name: "amount".into(),
-                ty: Type::Int,
+        commands: vec![
+            CommandSpec {
+                id: "counter.add".into(),
+                name: "add".into(),
                 doc: String::new(),
-            }],
-            result: Type::Int,
-            errors: vec![],
-            policy: CommandPolicy::default(),
-            external: ExternalNames::derive("counter", "add"),
-        }],
+                kind: OperationKind::Command,
+                scope: Scope::Engine,
+                params: vec![ParamSpec {
+                    name: "amount".into(),
+                    ty: Type::Int,
+                    doc: String::new(),
+                }],
+                result: Type::Int,
+                errors: vec![],
+                policy: CommandPolicy::default(),
+                external: ExternalNames::derive("counter", "add"),
+                reads: vec![],
+            },
+            CommandSpec {
+                id: "counter.peek".into(),
+                name: "peek".into(),
+                doc: String::new(),
+                kind: OperationKind::Query,
+                scope: Scope::Engine,
+                params: vec![ParamSpec {
+                    name: "delay_ms".into(),
+                    ty: Type::Int,
+                    doc: String::new(),
+                }],
+                result: Type::Int,
+                errors: vec![],
+                policy: CommandPolicy {
+                    concurrency: Concurrency::Overlapping,
+                    retry: Retry::Idempotent,
+                    cancellable: true,
+                },
+                external: ExternalNames::derive("counter", "peek"),
+                reads: vec!["value".into()],
+            },
+        ],
     })
 }
 
-struct Counter(i64);
+struct Counter {
+    value: i64,
+    clock: ManualClock,
+}
 
 impl EngineProtocol for Counter {
     fn descriptor(&self) -> &'static ProtocolDescriptor {
@@ -48,11 +79,23 @@ impl EngineProtocol for Counter {
         let Value::Int(amount) = invocation.params[0] else {
             unreachable!()
         };
-        self.0 += amount;
-        Ok(Value::Int(self.0))
+        self.value += amount;
+        Ok(Value::Int(self.value))
+    }
+    /// `peek(delay_ms)` answers the value after `delay_ms` on the clock.
+    fn query(&self, invocation: &Invocation, answer: QueryAnswer) {
+        let Value::Int(delay) = invocation.params[0] else {
+            unreachable!()
+        };
+        if delay < 0 {
+            return answer.send(Err(CommandError::new("bad_delay", "negative delay")));
+        }
+        let value = self.value;
+        self.clock
+            .after(delay as u64, move || answer.send(Ok(Value::Int(value))));
     }
     fn snapshot(&self) -> Vec<Value> {
-        vec![Value::Int(self.0)]
+        vec![Value::Int(self.value)]
     }
 }
 
@@ -113,6 +156,10 @@ extern "C" fn on_media_state(context: *mut c_void, bytes: *const u8, len: usize)
     record(context, "media_state", 0, bytes, len);
 }
 
+extern "C" fn on_query(context: *mut c_void, subscription: u64, bytes: *const u8, len: usize) {
+    record(context, "query", subscription, bytes, len);
+}
+
 fn spec() -> AppSpec {
     AppSpec {
         bundle_id: "dev.bern.ffi-test",
@@ -133,6 +180,14 @@ fn spec() -> AppSpec {
 }
 
 fn start(frontend: &Frontend, fingerprint: u64) -> Result<*mut BernApp, String> {
+    start_with(frontend, fingerprint, ManualClock::new())
+}
+
+fn start_with(
+    frontend: &Frontend,
+    fingerprint: u64,
+    clock: ManualClock,
+) -> Result<*mut BernApp, String> {
     let callbacks = BernCallbacks {
         context: frontend as *const Frontend as *mut c_void,
         on_state,
@@ -140,10 +195,12 @@ fn start(frontend: &Frontend, fingerprint: u64) -> Result<*mut BernApp, String> 
         on_session_request: on_session,
         on_media_request,
         on_media_state,
+        on_query,
     };
     let mut error = BernBuffer::empty();
+    let engine = || Counter { value: 0, clock };
     // SAFETY: `error` is writable.
-    let app = unsafe { start_app(|| Counter(0), spec(), fingerprint, callbacks, &mut error) };
+    let app = unsafe { start_app(engine, spec(), fingerprint, callbacks, &mut error) };
     if app.is_null() {
         // SAFETY: on failure the library wrote an owned UTF-8 buffer.
         let message = unsafe { slice(error.ptr, error.len) };
@@ -428,6 +485,142 @@ fn close_confirmations_cross_the_abi() {
     assert_eq!(
         take(unsafe { bern_window_request_close(app, 0, generation, 0, 1) }),
         vec![0, 0]
+    );
+    unsafe { bern_app_stop(app) };
+}
+
+/// A decoded query state message.
+#[derive(Debug, PartialEq)]
+enum Shown {
+    Loading,
+    Ready(i64),
+    Refreshing(i64),
+    Failed(Option<i64>, String),
+}
+
+fn shown(bytes: &[u8]) -> (u64, Shown) {
+    let mut reader = Reader::new(bytes);
+    let version = reader.u64().unwrap();
+    let shown = match reader.u8().unwrap() {
+        1 => Shown::Loading,
+        2 => Shown::Ready(reader.i64().unwrap()),
+        3 => Shown::Refreshing(reader.i64().unwrap()),
+        4 => {
+            let previous = (reader.u8().unwrap() == 1).then(|| reader.i64().unwrap());
+            let code = reader.text().unwrap();
+            assert!(!reader.text().unwrap().is_empty());
+            Shown::Failed(previous, code)
+        }
+        other => panic!("phase {other}"),
+    };
+    assert!(reader.is_finished());
+    (version, shown)
+}
+
+fn request(app: *mut BernApp, subscription: u64, delay: i64) -> (u64, Shown) {
+    let mut params = Writer::new();
+    params.i64(delay);
+    // SAFETY: valid buffer.
+    let reply = take(unsafe {
+        bern_query_request(app, subscription, params.bytes.as_ptr(), params.bytes.len())
+    });
+    assert_eq!(reply[0], 0, "{reply:?}");
+    shown(&reply[1..])
+}
+
+fn wait_timers(clock: &ManualClock, count: usize) {
+    for _ in 0..500 {
+        if clock.pending() >= count {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    panic!("the provider did not schedule its answer");
+}
+
+#[test]
+fn query_subscriptions_show_only_current_answers() {
+    let frontend = Box::new(Frontend::default());
+    let clock = ManualClock::new();
+    let app = start_with(&frontend, descriptor().fingerprint(), clock.clone()).unwrap();
+    let opened = take(unsafe { bern_window_opened(app, 0) });
+    let mut reader = Reader::new(&opened);
+    reader.u8().unwrap();
+    let generation = reader.u64().unwrap();
+
+    // Commands are not queries.
+    let refused = take(unsafe { bern_query_open(app, 0, generation, 0) });
+    assert_eq!(refused[0], 1);
+    let opened = take(unsafe { bern_query_open(app, 0, generation, 1) });
+    let mut reader = Reader::new(&opened);
+    assert_eq!(reader.u8().unwrap(), 0);
+    let subscription = reader.u64().unwrap();
+
+    // A slow request, then a fast one while the first provider is still
+    // working: the answers arrive out of order.
+    assert_eq!(request(app, subscription, 300), (1, Shown::Loading));
+    wait_timers(&clock, 1);
+    assert_eq!(request(app, subscription, 100), (2, Shown::Loading));
+    wait_timers(&clock, 2);
+    clock.advance(100);
+    let (id, bytes) = frontend.wait_for("query");
+    assert_eq!(id, subscription);
+    assert_eq!(shown(&bytes), (2, Shown::Ready(0)));
+    // The older answer is late: it is dropped and never reaches the view.
+    clock.advance(200);
+    assert!(
+        !frontend
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(kind, _, _)| kind == "query")
+    );
+
+    // The query reads `value`: a command that changes it refreshes the
+    // subscription with the same parameters, keeping the data visible.
+    let mut params = Writer::new();
+    params.i64(5);
+    unsafe { bern_app_dispatch(app, 0, params.bytes.as_ptr(), params.bytes.len(), 1) };
+    let (_, bytes) = frontend.wait_for("query");
+    assert_eq!(shown(&bytes), (3, Shown::Refreshing(0)));
+    wait_timers(&clock, 1);
+    clock.advance(100);
+    let (_, bytes) = frontend.wait_for("query");
+    assert_eq!(shown(&bytes), (3, Shown::Ready(5)));
+
+    // A failure keeps the previous data next to the error.
+    assert_eq!(request(app, subscription, -1).0, 4);
+    let (_, bytes) = frontend.wait_for("query");
+    assert_eq!(
+        shown(&bytes),
+        (4, Shown::Failed(Some(5), "bad_delay".into()))
+    );
+
+    // Closing the window ends its subscriptions; the old instance is stale.
+    request(app, subscription, 100);
+    wait_timers(&clock, 1);
+    unsafe { bern_window_closed(app, 0, generation) };
+    clock.advance(100);
+    let mut params = Writer::new();
+    params.i64(1);
+    let ended = take(unsafe {
+        bern_query_request(app, subscription, params.bytes.as_ptr(), params.bytes.len())
+    });
+    let mut reader = Reader::new(&ended);
+    assert_eq!(reader.u8().unwrap(), 1);
+    assert_eq!(reader.text().unwrap(), "target_not_found");
+    let stale = take(unsafe { bern_query_open(app, 0, generation, 1) });
+    let mut reader = Reader::new(&stale);
+    assert_eq!(reader.u8().unwrap(), 1);
+    assert_eq!(reader.text().unwrap(), "stale_window");
+    assert!(
+        !frontend
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(kind, _, _)| kind == "query")
     );
     unsafe { bern_app_stop(app) };
 }

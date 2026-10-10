@@ -32,6 +32,10 @@ const MAX_LINE: usize = 1 << 20;
 /// reported as unknown.
 const MEDIA_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a query may take to answer. A late query is cancelled; it has
+/// no side effects, so the caller can simply ask again.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Directory holding the sockets of one application, unique per user.
 pub fn socket_dir(bundle_id: &str) -> PathBuf {
     let base = std::env::var_os("TMPDIR")
@@ -305,16 +309,19 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) ->
                 } else if let Some((index, spec)) = descriptor.command(&command) {
                     let outcome =
                         params_from_json(spec, &params, &descriptor.types).map(|params| {
-                            host.dispatch_blocking(
-                                Invocation {
-                                    command: index,
-                                    params,
-                                },
-                                CallContext {
-                                    entry,
-                                    request_id: request_id.clone(),
-                                },
-                            )
+                            let invocation = Invocation {
+                                command: index,
+                                params,
+                            };
+                            let context = CallContext {
+                                entry,
+                                request_id: request_id.clone(),
+                            };
+                            if spec.is_query() {
+                                host.query_blocking(invocation, context, QUERY_TIMEOUT)
+                            } else {
+                                host.dispatch_blocking(invocation, context)
+                            }
                         });
                     match outcome {
                         Ok(outcome) => ServerMessage::Result {

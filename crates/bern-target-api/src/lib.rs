@@ -396,7 +396,7 @@ mod tests {
                 ui: "swiftui",
                 platforms: &["macos"],
                 version: "0",
-                ir_versions: 1..=1,
+                ir_versions: IR_VERSION..=IR_VERSION,
                 color_source: ColorSource::Native,
                 components: &[],
                 windows: WindowCapabilities {

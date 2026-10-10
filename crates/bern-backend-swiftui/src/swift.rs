@@ -658,6 +658,72 @@ impl<'a> Generator<'a> {
         ));
     }
 
+    /// A `Query`: the runtime view owns the subscription and shows the
+    /// loading, refreshing, failed and empty states; the template shows
+    /// the data. Its parameters are encoded on every render; the runtime
+    /// requests them only when they change.
+    fn query(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (Some(binding), Some(template)) = (element.query("query"), &element.template) else {
+            return;
+        };
+        let data = swift_type(&binding.result);
+        let shown = swift_type(&template.ty);
+        let params = if binding.args.is_empty() {
+            "[]".to_string()
+        } else {
+            let encode: Vec<_> = binding
+                .args
+                .iter()
+                .map(|arg| format!("({}).encode(bern: &writer)", self.expr(arg)))
+                .collect();
+            format!(
+                "{{ var writer = BernWriter(); {}; return writer.bytes }}()",
+                encode.join("; ")
+            )
+        };
+        let framework = |key: &str| format!("BernText.string({})", string(key));
+        let loading = self
+            .text_prop(element, "loading")
+            .unwrap_or_else(|| framework("bern.query.loading"));
+        let failed = self
+            .text_prop(element, "failed")
+            .unwrap_or_else(|| framework("bern.query.failed"));
+        let empty = self.text_prop(element, "empty");
+        let icon = element.icon("icon").unwrap_or("tray");
+        // The declared empty rule: an empty list or a missing optional.
+        let (shown_body, count) = match &binding.result {
+            Type::List { .. } if empty.is_some() => (
+                "data.isEmpty ? nil : data",
+                format!("{{ (data: {data}) in data.count }}"),
+            ),
+            Type::List { .. } => ("data", format!("{{ (data: {data}) in data.count }}")),
+            Type::Optional { .. } => (
+                "data",
+                format!("{{ (data: {data}) in data == nil ? 0 : 1 }}"),
+            ),
+            _ => ("data", "nil".to_string()),
+        };
+        out.open("BernQueryView(");
+        out.line(format!(
+            "query: {}, target: {},",
+            binding.query,
+            self.target(element, ctx)
+        ));
+        out.line(format!("params: {params},"));
+        out.line(format!(
+            "loading: {loading}, empty: {}, emptyIcon: {}, failed: {failed},",
+            empty.unwrap_or_else(|| "nil".into()),
+            string(icon)
+        ));
+        out.line(format!(
+            "count: {count}, shown: {{ (data: {data}) -> {shown}? in {shown_body} }}"
+        ));
+        out.close(format!(") {{ {} in", member(&template.var)));
+        out.indent += 1;
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
     fn nodes(&self, out: &mut Out, nodes: &[Node], ctx: &Ctx) {
         let mut emitted = false;
         for node in nodes {
@@ -871,6 +937,7 @@ impl<'a> Generator<'a> {
             }
             "Slider" => self.slider(out, element, ctx),
             "Video" => self.video(out, element, ctx),
+            "Query" => self.query(out, element, ctx),
             "Picker" => {
                 let field_ref = element.field("value").expect("picker field");
                 let field = self.field(element, "value").expect("picker field");

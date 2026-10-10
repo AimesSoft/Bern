@@ -10,6 +10,7 @@
 //! to its UI thread. All functions catch Rust panics at the boundary.
 
 mod media;
+mod query;
 
 use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
 use bern_media::{MediaHub, MediaSubscription};
@@ -71,6 +72,8 @@ pub struct BernCallbacks {
     pub on_media_request: extern "C" fn(*mut c_void, *const u8, usize),
     /// Merged media state: revision, then every player.
     pub on_media_state: extern "C" fn(*mut c_void, *const u8, usize),
+    /// New display state of a query subscription.
+    pub on_query: extern "C" fn(*mut c_void, u64, *const u8, usize),
 }
 
 impl BernCallbacks {
@@ -88,6 +91,9 @@ impl BernCallbacks {
     }
     fn media_state(&self, bytes: &[u8]) {
         (self.on_media_state)(self.context, bytes.as_ptr(), bytes.len());
+    }
+    fn query(&self, subscription: u64, bytes: &[u8]) {
+        (self.on_query)(self.context, subscription, bytes.as_ptr(), bytes.len());
     }
 }
 
@@ -218,6 +224,7 @@ pub struct BernApp {
     sessions: Sessions,
     bridge: Arc<UiBridge>,
     media: MediaHub,
+    queries: query::Subscriptions,
     _subscription: Subscription,
     _media_subscription: MediaSubscription,
     channel: Option<bern_transport_ipc::Server>,
@@ -281,10 +288,15 @@ pub unsafe fn start_app<E: EngineProtocol>(
         });
         let sessions = Sessions::new();
         sessions.register(bridge.clone());
+        let queries = query::Subscriptions::default();
         let updates = host.clone();
+        let stale = Arc::clone(&queries);
         let subscription = host.subscribe(move |update| {
             let bytes = encode_changes(&updates, update.revision, &update.changes);
             callbacks.state(&bytes);
+            // Answers of queries that read a changed field are stale.
+            let changed: Vec<usize> = update.changes.iter().map(|(field, _)| *field).collect();
+            query::refresh(&updates, &stale, callbacks, &changed);
         });
         let media = MediaHub::new(&spec.players);
         let media_subscription = media.subscribe(move |update| {
@@ -310,6 +322,7 @@ pub unsafe fn start_app<E: EngineProtocol>(
             sessions,
             bridge,
             media,
+            queries,
             _subscription: subscription,
             _media_subscription: media_subscription,
             channel,
@@ -568,9 +581,11 @@ pub unsafe extern "C" fn bern_window_closed(app: *mut BernApp, kind: u32, genera
                 .then_some(id)
                 .flatten()
         };
-        // Window-scoped media goes with the instance; application players stay.
+        // Window-scoped media and queries go with the instance;
+        // application players stay.
         if let Some(id) = closed {
             app.media.release_window(&id);
+            app.queries.lock().expect("query lock").close_window(&id);
         }
     })
 }

@@ -159,6 +159,13 @@ impl<'a> Gen<'a> {
                 };
                 quote!((#lhs) #op (#rhs))
             }
+            Expr::Query(call) => {
+                self.error(
+                    call.span,
+                    "a query call is only valid as the `query:` property of `Query`",
+                );
+                quote!(())
+            }
         }
     }
 
@@ -483,6 +490,7 @@ impl<'a> Gen<'a> {
             route: ctx.route.clone(),
         };
         let mut pushed = 0;
+        let mut query = None;
 
         // Bindings that children depend on come first.
         for prop in &element.props {
@@ -490,6 +498,26 @@ impl<'a> Gen<'a> {
                 continue;
             };
             match prop_spec.kind {
+                PropKind::Query => match &prop.value {
+                    Expr::Query(call) => {
+                        let tokens = self.call(call, "queries");
+                        let span = call.method.span();
+                        // Spanned at the call so type errors point at it.
+                        let mut var = self.fresh("query");
+                        var.set_span(span);
+                        pre.push(quote_spanned!(span=> let #var = #tokens;));
+                        if let Some(template) = &element.template {
+                            pre.push(quote_spanned!(span=> let #template = ::bern::__private::query_result(&#var);));
+                            self.scope.push(template.to_string());
+                            pushed += 1;
+                        }
+                        query = Some(var);
+                    }
+                    other => self.error(
+                        other.span(),
+                        "expected a query call such as `app.search(draft.text)`",
+                    ),
+                },
                 PropKind::SelectionField => {
                     if let Expr::Path(path) = &prop.value {
                         let tokens = self.path(path);
@@ -666,8 +694,17 @@ impl<'a> Gen<'a> {
                         "expected an application player such as `players.preview`",
                     ),
                 },
-                PropKind::SelectionField | PropKind::PathField | PropKind::Items => {}
+                PropKind::SelectionField
+                | PropKind::PathField
+                | PropKind::Items
+                | PropKind::Query => {}
             }
+        }
+        // Only results that can be empty take an `empty:` state.
+        if let (Some(var), Some(empty)) = (&query, element.prop("empty")) {
+            let span = empty.name.span();
+            let var = Ident::new(&var.to_string(), span);
+            pre.push(quote_spanned!(span=> ::bern::__private::query_empty(&#var);));
         }
 
         if name == "WindowSet" {
@@ -689,18 +726,25 @@ impl<'a> Gen<'a> {
     }
 
     fn action(&mut self, action: &Action) -> TokenStream {
-        let root = &action.receiver[0];
+        let call = self.call(action, "actions");
+        let span = action.method.span();
+        quote_spanned!(span=> ::bern::__private::command(#call);)
+    }
+
+    /// A typed client call; `rustc` checks the method and its arguments.
+    fn call(&mut self, call: &Action, what: &str) -> TokenStream {
+        let root = &call.receiver[0];
         if !self.in_scope(&root.to_string()) {
             self.error(
                 root.span(),
-                format!("unknown client `{root}`; actions call a typed client parameter"),
+                format!("unknown client `{root}`; {what} call a typed client parameter"),
             );
         }
-        let receiver = &action.receiver;
-        let method = &action.method;
-        let args: Vec<_> = action.args.iter().map(|arg| self.value(arg)).collect();
-        let span = action.method.span();
-        quote_spanned!(span=> ::bern::__private::command(#(#receiver).*.#method(#(#args),*));)
+        let receiver = &call.receiver;
+        let method = &call.method;
+        let args: Vec<_> = call.args.iter().map(|arg| self.value(arg)).collect();
+        let span = call.method.span();
+        quote_spanned!(span=> #(#receiver).*.#method(#(#args),*))
     }
 
     fn window_set(&mut self, element: &Element) {

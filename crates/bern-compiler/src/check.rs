@@ -476,6 +476,36 @@ impl<'a> Checker<'a> {
                         props.insert(prop_name, ir::Prop::Field { field });
                     }
                 }
+                PropKind::Query => {
+                    let Some(query) = self.query(&prop.value, scope) else {
+                        continue;
+                    };
+                    let shown = match &query.result {
+                        Type::Optional { inner } => (**inner).clone(),
+                        other => other.clone(),
+                    };
+                    if let Some(empty) = element.prop("empty")
+                        && !matches!(query.result, Type::Optional { .. } | Type::List { .. })
+                    {
+                        self.error(
+                            empty.name.span(),
+                            format!(
+                                "`empty:` needs a query whose result can be empty (a list or an \
+                                 optional), found {}",
+                                query.result.display()
+                            ),
+                        );
+                    }
+                    if let Some(var) = &element.template {
+                        scope.push(var.to_string(), Root::Local(shown.clone()));
+                        pushed += 1;
+                        template = Some(ir::Template {
+                            var: var.to_string(),
+                            ty: shown,
+                        });
+                    }
+                    props.insert(prop_name, ir::Prop::Query { query });
+                }
                 PropKind::Items => {
                     let Some(expr) = self.expr(&prop.value, scope) else {
                         continue;
@@ -587,7 +617,10 @@ impl<'a> Checker<'a> {
                 },
                 PropKind::MediaSource => self.media_source(&prop.value, scope),
                 PropKind::Player => self.player(&prop.value, scope),
-                PropKind::SelectionField | PropKind::PathField | PropKind::Items => continue,
+                PropKind::SelectionField
+                | PropKind::PathField
+                | PropKind::Items
+                | PropKind::Query => continue,
             };
             if let Some(lowered) = lowered {
                 props.insert(prop_name, lowered);
@@ -1218,6 +1251,13 @@ impl<'a> Checker<'a> {
                     ty: Type::Bool,
                 })
             }
+            ast::Expr::Query(call) => {
+                self.error(
+                    call.span,
+                    "a query call is only valid as the `query:` property of `Query`",
+                );
+                None
+            }
         }
     }
 
@@ -1316,6 +1356,68 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Lower `client.query(args)` against the protocol's query catalog.
+    fn query(&mut self, expr: &ast::Expr, scope: &Scope) -> Option<ir::QueryBinding> {
+        let ast::Expr::Query(call) = expr else {
+            self.error(
+                expr.span(),
+                "expected a query call such as `app.search(draft.text)`",
+            );
+            return None;
+        };
+        let root = call.receiver[0].to_string();
+        if !matches!(scope.get(&root), Some(Root::Client)) || call.receiver.len() != 1 {
+            self.error(
+                call.receiver[0].span(),
+                format!("`{root}` is not the typed engine client; queries are called on it"),
+            );
+            return None;
+        }
+        let method = call.method.to_string();
+        let Some(query) = self.protocol.commands.iter().position(|c| c.name == method) else {
+            self.error(
+                call.method.span(),
+                format!(
+                    "protocol `{}` has no query `{method}`; declare it in the `#[queries]` trait",
+                    self.protocol.namespace
+                ),
+            );
+            return None;
+        };
+        let spec = self.protocol.commands[query].clone();
+        if !spec.is_query() {
+            self.error(
+                call.method.span(),
+                format!(
+                    "`{method}` is a command; `query:` binds a read-only query from the \
+                     `#[queries]` trait"
+                ),
+            );
+            return None;
+        }
+        if spec.params.len() != call.args.len() {
+            self.error(
+                call.method.span(),
+                format!(
+                    "`{}` takes {} argument(s), found {}",
+                    spec.id,
+                    spec.params.len(),
+                    call.args.len()
+                ),
+            );
+            return None;
+        }
+        let mut args = Vec::new();
+        for (arg, param) in call.args.iter().zip(&spec.params) {
+            args.push(self.expect(arg, &param.ty, scope, &format!("argument `{}`", param.name))?);
+        }
+        Some(ir::QueryBinding {
+            query,
+            args,
+            result: spec.result,
+        })
+    }
+
     fn action(&mut self, action: &ast::Action, scope: &Scope) -> Option<ir::Action> {
         let root = action.receiver[0].to_string();
         match scope.get(&root) {
@@ -1340,6 +1442,16 @@ impl<'a> Checker<'a> {
                     return None;
                 };
                 let spec = self.protocol.commands[command].clone();
+                if spec.is_query() {
+                    self.error(
+                        action.method.span(),
+                        format!(
+                            "`{method}` is a query: it only reads, so it is shown with \
+                             `Query(query: {root}.{method}(…))`; actions run commands"
+                        ),
+                    );
+                    return None;
+                }
                 if spec.params.len() != action.args.len() {
                     self.error(
                         action.method.span(),

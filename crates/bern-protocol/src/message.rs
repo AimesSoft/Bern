@@ -1,4 +1,6 @@
 use crate::{CommandError, Value};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A validated command call addressed by catalog index.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,4 +32,24 @@ pub struct CommandOutcome {
 pub struct StateUpdate {
     pub revision: u64,
     pub changes: Vec<(usize, Value)>,
+}
+
+/// Signals a query provider that its answer is no longer wanted: the
+/// subscription moved on to newer parameters or ended. Clones share the
+/// same flag, so the requester and the provider see one request.
+#[derive(Clone, Debug, Default)]
+pub struct Cancellation(Arc<AtomicBool>);
+
+impl Cancellation {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }

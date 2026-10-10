@@ -5,7 +5,7 @@
 - 工具链：Rust 1.99.0（Edition 2024）；Swift 6.3.2，以 Swift 6 语言模式编译；Xcode 26.5（SDK 26.5）
 - 部署：最低 macOS 14，构建本机架构，本地临时签名
 
-本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议与最小异步查询场景）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
+本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议与声明式异步查询）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
 
 ## 完成情况
 
@@ -47,8 +47,8 @@
 | 列表按 key 保持实例 | 完成 | `ForEach(items, id: \.key)`；键必须是 `i64` 或 `String` 字段 |
 | 键盘、输入法、语义标签 | 部分 | 使用系统控件与可访问名称；输入法组合与键盘遍历未实测 |
 | 不写深浅色分支，控件跟随系统 | 完成 | 未设置任何颜色 |
-| “搜索列表 → 详情 → 播放 → 返回” | 部分 | 列表 → 详情 → 在应用级播放器中打开并播放 → 返回，经真实控件驱动，返回后播放继续；侧边栏搜索仍只保存草稿，没有接到查询 |
-| 可控时钟与异步顺序场景 | 完成 | `bern_runtime::query`：参数版本、取消、只接受当前结果；`ManualClock` 场景测试中较早的慢搜索不会覆盖较新的结果。查询尚未接到 UI 声明 |
+| “搜索列表 → 详情 → 播放 → 返回” | 完成 | 侧边栏搜索经引擎查询 `showcase.search_library` 筛选列表 → 详情 → 在应用级播放器中打开并播放 → 返回，经真实控件驱动，返回后搜索结果与播放都保留 |
+| 可控时钟与异步顺序场景 | 完成 | 查询在协议中声明、在 `ui!` 中以 `Query` 绑定（见“异步查询”与“查询订阅与答复”）；`showcase-core` 的场景测试用 `ManualClock` 驱动真实引擎、宿主与会话订阅，较早的慢搜索不会覆盖较新的结果；C ABI 测试覆盖同一路径 |
 | 主窗口与设置窗口：四入口打开/关闭/激活、重复打开复用、独立草稿 | 完成 | 窗口实例带代次，重开后旧引用被拒绝 |
 | 关闭确认、模态阻挡、确认失效 | 完成 | 见“窗口关闭协议”；系统关闭按钮与 File > Close 先走关闭检查 |
 | 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放 |
@@ -65,8 +65,8 @@
 | `bern-protocol` | 值、schema、命令与状态描述、框架会话命令目录、二进制编码 |
 | `bern-media` | 媒体契约：`MediaSource`、播放器身份、标准媒体命令与状态、执行端协议、`MediaHub`（路由与状态归并） |
 | `bern-ir` | 平台无关 IR、组件规格表、组件库描述 |
-| `bern-command` | 引擎宿主：边界校验、串行执行、按修订号发布状态 |
-| `bern-runtime` | UI 会话：窗口实例与代次、窗口作用域草稿、关闭协议、会话命令路由；异步查询资源与可控时钟 |
+| `bern-command` | 引擎宿主：边界校验、串行执行命令、异步作答且可取消的只读查询、按修订号发布状态 |
+| `bern-runtime` | UI 会话：窗口实例与代次、窗口作用域草稿、关闭协议、会话命令路由；异步查询资源、窗口所属的查询订阅与时钟（系统时钟、可控时钟） |
 | `bern-compiler` | 读取 `Bern.toml`、显式源码收集、语义检查、输出 IR |
 | `bern-target-api` | 目标描述、能力检查、构建计划、按平台解析默认目标 |
 | `bern-backend-swiftui` | `swiftui + macos` 目标：生成 Swift、Rust 胶水 crate 与资源 |
@@ -103,10 +103,18 @@ pub mod showcase {
         #[errors("out_of_range")]
         fn set_volume(&mut self, value: f64) -> Result<(), CommandError>;
     }
+
+    #[queries]
+    pub trait Queries {
+        /// 按类别名称搜索资料库
+        #[reads(items)]
+        #[errors("invalid_search")]
+        fn search_library(&self, text: String, answer: Answer<Vec<Item>>);
+    }
 }
 ```
 
-协议模块自包含：只含 `use`、`#[value]` 类型、一个 `#[state]` 和一个 `#[commands]`。宏生成描述、引擎适配器 `Adapter<E>`、需要实现的 `Engine` trait，以及 UI 声明用的类型化客户端 `Client`。命令 ID 为 `命名空间.名称`；CLI 名称为 `showcase set-volume`，MCP 工具名为 `showcase_set_volume`，冲突时报错。跨边界类型限于 `bool`、`i64`、`f64`、`String`、`Option`、`Vec`、枚举与记录；`i32`、引用、泛型等会给出替代建议。
+协议模块自包含：只含 `use`、`#[value]` 类型、一个 `#[state]`、一个 `#[commands]` 和可选的 `#[queries]`。宏生成描述、引擎适配器 `Adapter<E>`、需要实现的 `Engine` trait（同时要求命令与查询 trait），以及 UI 声明用的类型化客户端 `Client`。命令 ID 为 `命名空间.名称`；CLI 名称为 `showcase set-volume`，MCP 工具名为 `showcase_set_volume`，冲突时报错。跨边界类型限于 `bool`、`i64`、`f64`、`String`、`Option`、`Vec`、枚举与记录；`i32`、引用、泛型等会给出替代建议。
 
 ### 会话状态与组件
 
@@ -139,6 +147,29 @@ pub fn controls_page(app: showcase::Client, #[session] draft: MainDraft) -> impl
 - 根组件主体为 `WindowSet(handle: AppWindows, primary: main) { Window(…) { … } }`，并生成类型化窗口句柄 `windows.settings.open()`。
 - 应用级播放器用 `#[bern::players]` 声明，字段名就是稳定的 `player_id`；组件以 `players: Players` 参数接收，动作写成 `=> players.preview.open(clip)`、`play()`、`pause()`、`seek(ms)`、`set_volume(v)`、`set_muted(b)`。
 - `MediaSource { url }` 是框架值类型（`bern::prelude::MediaSource`），可以出现在协议状态、命令参数与 UI 值里；协议和 UI 不能自行声明同名类型。
+
+### 异步查询
+
+查询只读：方法取 `&self`，最后一个参数是 `answer: Answer<T>`，没有返回值。提供器可以立即作答，也可以把 `answer` 交给计时器或其他线程稍后作答（`answer.ok(v)`、`answer.fail(e)`、`answer.send(r)`）；`answer.is_cancelled()` 让提供器在请求作废时提前停止。`#[reads(字段)]` 声明答复依赖的状态字段，`#[errors(...)]` 与命令相同。`&mut self`、带返回值、缺少 `Answer<T>`、读未声明的字段都会报错。
+
+```rust
+Query(
+    id: library_results,
+    query: app.search_library(draft.query),
+    loading: tr! { "zh-Hans" => "正在搜索…", "en" => "Searching…" },
+    empty: tr! { "zh-Hans" => "没有与“{query}”匹配的项目", "en" => "No Items Match “{query}”"; query: draft.query },
+    failed: tr! { "zh-Hans" => "无法搜索", "en" => "Search Failed" },
+    icon: "magnifyingglass"
+) |items| {
+    ForEach(items: items, key: id) |item| { … }
+}
+```
+
+- `query:` 是 `ui!` 里唯一能写调用的位置，而且只能调用引擎客户端上的查询；参数是受限表达式，由 `rustc` 与编译器检查类型。客户端的查询方法返回 `QueryRef`，命令方法返回 `CommandRef`：把查询写成 `=>` 动作、把命令写进 `query:` 都编译失败。
+- 模板变量是查询结果；结果是 `Option<T>` 时是其中的 `T`。
+- 状态：首次加载显示 `loading` 文案与系统进度指示；就绪由模板显示数据；刷新时保留上一份数据，并在其上方显示进度行；失败而没有数据时显示 `ContentUnavailableView` 与“重试”，有上一份数据时在数据上方显示错误行与“重试”。`loading`、`failed` 省略时使用框架文案。
+- 空结果是成功：列表为空或可选结果为 `None` 时，若声明了 `empty` 则显示以 `icon`（默认 `tray`）为图标的 `ContentUnavailableView`，否则模板照常显示空数据。`empty` 只能用于列表或可选结果，`icon` 必须与 `empty` 同时出现。
+- 查询登记为控件 `组件.id`，角色 `query`：`ui.inspect` 的值形如 `ready v3 (2)`（阶段、参数版本、条数），`ui.activate` 以当前参数重新请求。
 
 ### Video
 
@@ -179,7 +210,7 @@ pub fn app(app: showcase::Client, windows: AppWindows, players: Players,
 
 ### 组件规格
 
-规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Picker`。可操作控件必须有 `id`。
+规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`。IR 因加入查询绑定升为版本 2。可操作控件必须有 `id`。
 
 默认行为：`Column` 前缘对齐；`Row` 垂直居中；未写 `style` 时使用平台默认样式。`Search` 在 SwiftUI 目标中只能放在 `Sidebar` 内；`Picker` 的枚举不能携带数据。
 
@@ -223,6 +254,33 @@ flowchart LR
 - **标准控制条**：系统控件（无边框按钮、`Slider`、系统文字样式），位于视频下方而非覆盖在画面上，颜色全部来自系统；拖动进度和音量只改本地预览，松开时提交一次命令，状态更新不会回调成命令。控件登记为 `目标.play_pause`、`目标.position`、`目标.mute`、`目标.volume`，可由 `ui.*` 驱动；视频区域登记为角色 `video`，值为当前阶段与时间。无媒体、加载、失败、不可用时显示系统 `ContentUnavailableView` 或 `ProgressView`，不在视频上叠加文字。
 - **生命周期**：视图附着按窗口记录；窗口关闭时立即解除该窗口的附着、释放其组件拥有的播放器，应用级播放器继续。执行端断开时所有播放器变为 `Unavailable`，等待中的请求失败，不再显示已确认的“正在播放”。
 
+### 查询订阅与答复
+
+```mermaid
+sequenceDiagram
+    participant V as Query 视图
+    participant R as 会话运行时（订阅）
+    participant H as 引擎宿主
+    participant P as 查询提供器
+    V->>R: 参数 "m"（版本 1）
+    R->>H: 请求 1（可取消）
+    H->>P: search_library("m")
+    V->>R: 参数 "mo"（版本 2，取消请求 1）
+    R->>H: 请求 2
+    H->>P: search_library("mo")
+    P-->>R: 答复 2
+    R-->>V: 就绪（版本 2）
+    P-->>R: 请求 1 已取消
+    Note over R: 丢弃，不覆盖版本 2
+```
+
+- **目录**：查询排在命令之后，`kind: query`、`concurrency: overlapping`（按到达顺序启动、答复可以乱序）、`retry: idempotent`、`cancellable: true`，`reads` 列出依赖的状态字段。CLI 名称、MCP 工具与 JSON 调用和命令一样从同一目录派生（`showcase showcase search-library --text mo`、`showcase_search_library`）；CLI 帮助把查询单独列出，MCP 工具标为 `readOnlyHint`。
+- **宿主**：提供器在引擎线程上按到达顺序启动，看到之前命令留下的状态，然后通过 `Answer<T>` 在任意时刻、任意线程作答；答复按结果 schema 校验（`invalid_result`）。请求取消后才作答的返回 `cancelled`，提供器丢弃未答复的请求返回 `query_dropped`，排队时已被取消的请求不会启动提供器；提供器 panic 与命令一样使引擎拒绝后续请求。查询不发布新的修订号。
+- **会话订阅**：生成的 `Query` 视图为自己的窗口实例打开订阅（`bern_query_open`），每次渲染编码参数，参数变化后在本次更新之外调用 `bern_query_request`。运行时（`QuerySubscriptions`，基于 `bern_runtime::query::Query`）为每次请求分配新版本并取消上一请求，只把当前版本的答复经 `on_query` 回调交给视图；Swift 侧同样忽略比已显示状态更旧的版本。视图身份结束（例如切换到其他页面）时订阅结束，窗口关闭时运行时结束该窗口的全部订阅，在途请求随之取消；导航栈覆盖页面时订阅保留。
+- **随状态刷新**：引擎修订中有字段属于某个查询的 `#[reads]` 时，该查询的每个订阅以相同参数重新请求，界面保留数据并显示“刷新”；例如添加或删除项目后搜索结果自动更新。
+- **外部入口**：CLI、JSON 与 MCP 的每次调用是一次请求，最多等待 10 秒，超时返回 `query_timeout` 并取消请求；查询没有副作用，可以直接再次调用。
+- **示例提供器**：`showcase-core` 的搜索按类别的全部译名（中文与英文）匹配，`!` 开头返回 `invalid_search`。宽泛的搜索比精确的搜索慢（0 个字符 250 ms，1 个 900 ms，2 个 450 ms，更多 150 ms），因此快速输入时答复会乱序到达；计时来自注入的时钟，应用中是 `SystemClock`，测试中是 `ManualClock`。
+
 ### 窗口关闭协议
 
 - 请求关闭（UI 动作、系统关闭按钮与 File > Close、`window.close`）都先求值窗口声明的关闭检查，再由会话运行时决定：`Closed` 立即关闭；`ConfirmationRequired` 返回确认 ID、绑定的草稿修订号和可选决策，同时以系统警告框（窗口级 sheet）显示。重复请求返回同一个确认，不重复弹框。
@@ -239,6 +297,7 @@ flowchart LR
 target/bern/macos/bin/showcase --help
 target/bern/macos/bin/showcase state
 target/bern/macos/bin/showcase showcase record --action Primary
+target/bern/macos/bin/showcase showcase search-library --text mo
 target/bern/macos/bin/showcase ui inspect
 target/bern/macos/bin/showcase ui select --target main_window.pages --option Library
 target/bern/macos/bin/showcase ui activate --target "library_page.item_link[2]"
@@ -254,7 +313,7 @@ target/bern/macos/bin/showcase window close --window settings#1
 target/bern/macos/bin/showcase window confirm-close --window settings#1 --confirmation settings#1:c1 --decision Save
 ```
 
-退出码：0 成功，1 命令失败，2 用法错误，3 无法连接。CLI 只连接已运行的引擎，不会另起一份。`showcase-mcp` 通过 stdio 实现 MCP（JSON-RPC 2.0，协议版本 2025-06-18 / 2025-03-26 / 2024-11-05），工具来自引擎命令目录、媒体命令目录与框架会话命令目录，另有 `bern_state` 与 `bern_sessions`。JSON 客户端订阅后除引擎状态更新外，还会收到完整的 `media` 播放器状态（新修订号覆盖旧的）。`MediaSource` 参数在 CLI 中可以直接写 URL。
+退出码：0 成功，1 命令失败，2 用法错误，3 无法连接。CLI 只连接已运行的引擎，不会另起一份。`showcase-mcp` 通过 stdio 实现 MCP（JSON-RPC 2.0，协议版本 2025-06-18 / 2025-03-26 / 2024-11-05），工具来自引擎命令目录（含只读查询）、媒体命令目录与框架会话命令目录，另有 `bern_state` 与 `bern_sessions`。JSON 客户端订阅后除引擎状态更新外，还会收到完整的 `media` 播放器状态（新修订号覆盖旧的）。`MediaSource` 参数在 CLI 中可以直接写 URL。
 
 ## 本地化、主题与视觉规则
 
@@ -277,6 +336,19 @@ open target/bern/macos/Showcase.app
 开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_CLOSE_SIGNAL=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，与点按标题栏关闭按钮相同，供没有屏幕访问的工具验证系统关闭路径。这三项只用于开发检查，默认关闭。
 
 ## 验证记录
+
+2026-10-10，声明式异步查询，本机 macOS 27.0.1（arm64）：
+
+- `cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；`bern build` 无警告，生成的 Swift 以 `-swift-version 6` 类型检查零错误零警告。
+- 新增测试：协议描述（只有查询声明读取的字段，字段必须存在）；宿主 4 项（查询看到之前命令的状态且不产生修订、答复从其他线程乱序到达、取消/丢弃/非法结果/超时、提供器 panic 使引擎拒绝后续请求）；运行时 2 项（订阅随窗口结束、读取的字段变化时以相同参数刷新；系统时钟按到期顺序触发）；解析 3 项与组件规格 1 项；编译器正反用例各 1 组；rustc 用例 1 个通过（声明、引擎、宿主端到端）与 5 个失败（查询写成动作、`query:` 写命令、参数类型错误、标量结果写 `empty:`、查询取 `&mut self`）；C ABI 1 项（乱序答复只显示当前版本、状态变化刷新、失败保留旧数据、关窗后订阅结束）；IPC 与 CLI、MCP 的查询用例；`showcase-core` 场景 3 项（`ManualClock` 下“m”慢、“mo”快时页面保持“mo”的结果并计入 1 次丢弃；中文类别名匹配、添加项目后刷新、失败保留旧数据、空结果；外部入口得到同样的答复）。
+- 实机（隔离实例，`-ApplePersistenceIgnoreState YES`，CLI 用 `--engine` 指定）：
+  - 列表页登记查询控件 `library_page.library_results`，`ui.inspect` 为 `ready v1 (5)`。经真实搜索框 `ui edit` 相隔约 20 ms 输入“m”与“mo”：立即 `refreshing v3 (5)`，0.52 s 后 `ready v3 (1)`（影片），直到 1.6 s 仍不变，“m”在 0.9 s 时的答复没有出现。
+  - 截图（中文浅色）：刷新时进度行在旧数据上方；“zzz”显示居中的“没有与“zzz”匹配的项目”；“!x”在有旧数据时显示错误行与“重试”，离开页面再回来（新订阅 `v1`）时显示 `ContentUnavailableView` 与“重试”。英文深色下空结果文案为英文，颜色全部来自系统。
+  - 搜索“影”“下载”分别得到影片与下载。在列表打开时用 CLI `showcase add-item --kind Downloads`：0.01 s `refreshing v3 (1)`，0.43 s `ready v3 (2)`。`ui activate --target library_page.library_results` 以当前参数重新请求。离开列表页后查询控件消失（订阅结束），回来后是新订阅。
+  - 搜索进行中关闭主窗口：直接关闭、无错误；重新打开的 `main#2` 草稿为新，查询 `ready v1 (5)`。
+  - CLI：`showcase search-library --text mo` 约 0.47 s 返回影片；`--text '!x'` 退出码 1（`invalid_search`）；帮助单独列出“Queries”。JSON：目录中 `kind: query`、`concurrency: overlapping`、`reads: [items]`，原始套接字调用返回音乐。MCP：29 个工具，`showcase_search_library` 带 `readOnlyHint`、`idempotentHint`，调用“照片”返回照片，“!”返回 `isError`。
+
+未完成的验证：真实键盘在搜索框里输入（用 `ui.edit` 走同一个 setter 代替）、真实点按“重试”（用 `ui.activate` 代替）、VoiceOver 读出进度行。
 
 2026-10-10，Video、窗口关闭协议与异步查询，本机 macOS 27.0.1（arm64）：
 
@@ -311,7 +383,8 @@ open target/bern/macos/Showcase.app
 ## 未完成与已知限制
 
 - 多实例窗口、最小化与恢复命令、虚拟窗口、自适应布局（`Adaptive`）、焦点管理、菜单命令生成、应用内实时切换语言均未实现。
-- 异步查询只有运行时语义（`bern_runtime::query`）与场景测试，尚无查询声明、引擎侧查询提供器与 UI 绑定；侧边栏搜索没有接到查询。
+- 查询只读引擎（作用域 Engine）；会话作用域的查询、分页与增量结果、输入防抖、外部入口订阅查询结果（目前每次调用得到一次答复）均未实现。`#[reads]` 由开发者声明，宏只检查字段存在，不能证明提供器只读这些字段。
+- `Query` 的进度行与错误行作为普通行出现在数据上方，刷新时列表会下移一行；没有覆盖在内容上的刷新指示。
 - Video 未实现：倍速与轨道选择、全屏与画中画、海报、循环、自动播放与初始静音等媒体属性、覆盖层（字幕、弹幕）、系统媒体键与 Now Playing（会绕过命令，因此未接入）、受保护媒体。HLS 需经 HTTP 加载。同一 source 声明在一个窗口里挂载多次时第二个播放器创建失败（`player_exists`）。
 - 进程内执行端与引擎同生同灭，“执行端断开”只由 hub 测试覆盖。
 - 应用退出（Cmd-Q）不经过窗口关闭检查。
