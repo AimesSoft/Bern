@@ -168,6 +168,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-theme"
+version = "0.1.0"
+
+[[package]]
 name = "bern-transport-ipc"
 version = "0.1.0"
 dependencies = [

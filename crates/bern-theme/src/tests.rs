@@ -1,0 +1,202 @@
+use super::*;
+
+/// Seeds across hue, lightness and chroma, plus the extremes users pick.
+fn seeds() -> Vec<Srgb> {
+    let mut seeds = vec![
+        DEFAULT_SEED,
+        Srgb::BLACK,
+        Srgb::WHITE,
+        Srgb::new(0x80, 0x80, 0x80),
+        Srgb::new(0xff, 0xff, 0x00),
+        Srgb::new(0x00, 0xff, 0x00),
+        Srgb::new(0xff, 0x00, 0xff),
+        Srgb::new(0x00, 0xff, 0xff),
+        Srgb::new(0xe4, 0x57, 0x2e),
+        Srgb::new(0x6b, 0x7a, 0x8f),
+    ];
+    for hue in (0..360).step_by(15) {
+        for l in [0.35, 0.55, 0.75, 0.9] {
+            for c in [0.04, 0.12, 0.3] {
+                seeds.push(Oklch::new(l, c, f64::from(hue)).to_srgb());
+            }
+        }
+    }
+    seeds
+}
+
+const MODES: [Mode; 2] = [Mode::Light, Mode::Dark];
+const POLICIES: [ContrastPolicy; 2] = [ContrastPolicy::Standard, ContrastPolicy::More];
+
+#[test]
+fn every_declared_pairing_passes_for_every_seed_mode_and_policy() {
+    let mut fallbacks = Vec::new();
+    for seed in seeds() {
+        for mode in MODES {
+            for policy in POLICIES {
+                let snapshot = generate(Some(seed), mode, policy);
+                for check in &snapshot.checks {
+                    assert!(
+                        check.passed(),
+                        "{seed} {mode:?} {policy:?}: {} on {} is {:.2}:1, needs {}:1",
+                        check.foreground,
+                        check.background,
+                        check.ratio,
+                        check.required
+                    );
+                }
+                fallbacks.extend(
+                    snapshot
+                        .fallbacks
+                        .iter()
+                        .map(|reason| format!("{seed} {mode:?} {policy:?}: {reason}")),
+                );
+            }
+        }
+    }
+    assert!(fallbacks.is_empty(), "{}", fallbacks.join("\n"));
+}
+
+#[test]
+fn generation_is_deterministic() {
+    for seed in [DEFAULT_SEED, Srgb::new(0xe4, 0x57, 0x2e)] {
+        for mode in MODES {
+            for policy in POLICIES {
+                assert_eq!(
+                    generate(Some(seed), mode, policy),
+                    generate(Some(seed), mode, policy)
+                );
+            }
+        }
+    }
+    assert_eq!(
+        generate(None, Mode::Light, ContrastPolicy::Standard),
+        generate(Some(DEFAULT_SEED), Mode::Light, ContrastPolicy::Standard)
+    );
+}
+
+#[test]
+fn surfaces_rise_in_lightness_in_dark_mode_and_are_not_inverted_light() {
+    let lum = |snapshot: &Snapshot, name: &str| snapshot.token(name).unwrap().luminance();
+    let dark = generate(None, Mode::Dark, ContrastPolicy::Standard);
+    let light = generate(None, Mode::Light, ContrastPolicy::Standard);
+    let order = [
+        "surface.host",
+        "surface.canvas",
+        "surface.panel",
+        "surface.raised",
+    ];
+    for pair in order.windows(2) {
+        assert!(lum(&dark, pair[0]) < lum(&dark, pair[1]), "dark {pair:?}");
+        assert!(
+            lum(&light, pair[0]) < lum(&light, pair[1]),
+            "light {pair:?}"
+        );
+    }
+    // Inverting the light canvas would give near black; dark mode uses a
+    // dark grey with room for text and raised surfaces.
+    let canvas = dark.token("surface.canvas").unwrap();
+    assert!(canvas.luminance() > 0.005 && canvas.luminance() < 0.05);
+}
+
+#[test]
+fn brand_roles_keep_the_seed_hue_and_status_ignores_it() {
+    let orange = Srgb::new(0xe4, 0x57, 0x2e);
+    for seed in [DEFAULT_SEED, orange] {
+        let snapshot = generate(Some(seed), Mode::Light, ContrastPolicy::Standard);
+        let hue_gap = |a: f64, b: f64| {
+            let gap = (a - b).rem_euclid(360.0);
+            gap.min(360.0 - gap)
+        };
+        let accent = snapshot.token("accent").unwrap().oklch();
+        assert!(
+            hue_gap(accent.h, seed.oklch().h) < 10.0,
+            "{seed}: {accent:?}"
+        );
+    }
+    let status = |seed: Srgb| {
+        let snapshot = generate(Some(seed), Mode::Dark, ContrastPolicy::Standard);
+        [
+            "status.success",
+            "status.warning",
+            "status.error",
+            "status.error.surface",
+        ]
+        .map(|name| snapshot.token(name).unwrap())
+    };
+    assert_eq!(status(DEFAULT_SEED), status(orange));
+}
+
+#[test]
+fn more_contrast_raises_text_to_seven_to_one() {
+    let snapshot = generate(None, Mode::Dark, ContrastPolicy::More);
+    for name in ["text.primary", "text.secondary", "text.placeholder"] {
+        let ratio = contrast(
+            snapshot.token(name).unwrap(),
+            snapshot.token("surface.raised").unwrap(),
+        );
+        assert!(ratio >= 7.0, "{name}: {ratio}");
+    }
+}
+
+#[test]
+fn recipes_reference_existing_tokens_and_icon_buttons_paint_no_container() {
+    let snapshot = generate(None, Mode::Light, ContrastPolicy::Standard);
+    for recipe in RECIPES {
+        for state in recipe.states {
+            for (slot, token) in state.slots {
+                assert!(
+                    *token == "transparent" || snapshot.token(token).is_some(),
+                    "{}.{}.{slot} uses unknown token `{token}`",
+                    recipe.name,
+                    state.state
+                );
+            }
+        }
+        let interactive = recipe.name != "window.chrome";
+        assert_eq!(
+            recipe.state("focus").is_some(),
+            interactive,
+            "{} focus state",
+            recipe.name
+        );
+    }
+    let icon_button = RECIPES.iter().find(|r| r.name == "icon_button").unwrap();
+    for state in icon_button.states {
+        for (slot, token) in state.slots {
+            if *slot == "background" || *slot == "border" {
+                assert_eq!(*token, "transparent", "icon_button.{}", state.state);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_snapshot_carries_its_versions_and_inputs() {
+    let snapshot = generate(Some(Srgb::new(1, 2, 3)), Mode::Dark, ContrastPolicy::More);
+    assert_eq!(snapshot.schema_version, SCHEMA_VERSION);
+    assert_eq!(snapshot.algorithm_version, ALGORITHM_VERSION);
+    assert_eq!(snapshot.seed, Srgb::new(1, 2, 3));
+    assert_eq!(
+        (snapshot.mode, snapshot.contrast),
+        (Mode::Dark, ContrastPolicy::More)
+    );
+    let names: Vec<_> = snapshot.tokens.iter().map(|token| token.name).collect();
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(names, sorted, "tokens are sorted and unique");
+}
+
+#[test]
+#[ignore = "prints the default palettes for review"]
+fn print_default_palettes() {
+    for mode in MODES {
+        for policy in POLICIES {
+            let snapshot = generate(None, mode, policy);
+            println!("== {} {}", mode.name(), policy.name());
+            for token in &snapshot.tokens {
+                println!("{:28} {} {:3}", token.name, token.color, token.alpha);
+            }
+        }
+    }
+}
