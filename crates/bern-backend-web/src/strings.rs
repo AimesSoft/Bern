@@ -124,6 +124,15 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bern.window.reopen",
+        &[
+            ("zh-Hans", "打开“{title}”"),
+            ("zh-Hant", "打開「{title}」"),
+            ("en", "Open {title}"),
+            ("ja", "「{title}」を開く"),
+        ],
+    ),
+    (
         "bern.window.settings",
         &[
             ("zh-Hans", "设置"),

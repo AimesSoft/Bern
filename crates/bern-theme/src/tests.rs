@@ -75,10 +75,11 @@ fn generation_is_deterministic() {
 }
 
 #[test]
-fn surfaces_rise_in_lightness_in_dark_mode_and_are_not_inverted_light() {
+fn surfaces_layer_the_web_way_and_dark_is_not_inverted_light() {
     let lum = |snapshot: &Snapshot, name: &str| snapshot.token(name).unwrap().luminance();
     let dark = generate(None, Mode::Dark, ContrastPolicy::Standard);
     let light = generate(None, Mode::Light, ContrastPolicy::Standard);
+    // Dark: layers grow lighter as they rise.
     let order = [
         "surface.host",
         "surface.canvas",
@@ -87,15 +88,32 @@ fn surfaces_rise_in_lightness_in_dark_mode_and_are_not_inverted_light() {
     ];
     for pair in order.windows(2) {
         assert!(lum(&dark, pair[0]) < lum(&dark, pair[1]), "dark {pair:?}");
-        assert!(
-            lum(&light, pair[0]) < lum(&light, pair[1]),
-            "light {pair:?}"
-        );
     }
-    // Inverting the light canvas would give near black; dark mode uses a
-    // dark grey with room for text and raised surfaces.
+    // Light: a white page and raised layers, a faint grey sidebar.
+    assert_eq!(light.token("surface.canvas"), Some(Srgb::WHITE));
+    assert_eq!(light.token("surface.raised"), Some(Srgb::WHITE));
+    assert!(lum(&light, "surface.panel") < lum(&light, "surface.canvas"));
+    assert!(lum(&light, "surface.host") < lum(&light, "surface.panel"));
+    // Inverting the white page would give black; dark mode uses a dark
+    // grey with room for text and raised layers.
     let canvas = dark.token("surface.canvas").unwrap();
-    assert!(canvas.luminance() > 0.005 && canvas.luminance() < 0.05);
+    assert!(canvas.luminance() > 0.003 && canvas.luminance() < 0.05);
+}
+
+#[test]
+fn selection_is_a_light_tint_with_an_indicator() {
+    for mode in MODES {
+        let snapshot = generate(None, mode, ContrastPolicy::Standard);
+        let selection = snapshot.token("selection.background").unwrap();
+        let accent = snapshot.token("accent").unwrap();
+        let panel = snapshot.token("surface.panel").unwrap();
+        // Close to the sidebar's own lightness, unlike a solid accent bar.
+        assert!(
+            contrast(selection, panel) < contrast(accent, panel),
+            "{mode:?}"
+        );
+        assert!(snapshot.token("selection.indicator").is_some());
+    }
 }
 
 #[test]
@@ -152,7 +170,7 @@ fn recipes_reference_existing_tokens_and_icon_buttons_paint_no_container() {
                 );
             }
         }
-        let interactive = recipe.name != "window.chrome";
+        let interactive = !matches!(recipe.name, "window.chrome" | "dialog");
         assert_eq!(
             recipe.state("focus").is_some(),
             interactive,

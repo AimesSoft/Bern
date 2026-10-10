@@ -32,13 +32,14 @@ const FOCUS: RecipeState = state("focus", &[("ring", "focus.indicator")]);
 pub const RECIPES: &[Recipe] = &[
     Recipe {
         name: "button.standard",
+        // The label identifies the button; its outline is decorative.
         states: &[
             state(
                 "rest",
                 &[
-                    ("background", "surface.raised"),
+                    ("background", "surface.canvas"),
                     ("foreground", "text.primary"),
-                    ("border", "control.border"),
+                    ("border", "separator"),
                 ],
             ),
             state(
@@ -46,7 +47,7 @@ pub const RECIPES: &[Recipe] = &[
                 &[
                     ("background", "button.standard.hover"),
                     ("foreground", "text.primary"),
-                    ("border", "control.border"),
+                    ("border", "separator"),
                 ],
             ),
             state(
@@ -54,7 +55,7 @@ pub const RECIPES: &[Recipe] = &[
                 &[
                     ("background", "button.standard.pressed"),
                     ("foreground", "text.primary"),
-                    ("border", "control.border"),
+                    ("border", "separator"),
                 ],
             ),
             FOCUS,
@@ -302,9 +303,9 @@ pub const RECIPES: &[Recipe] = &[
             state(
                 "selected",
                 &[
-                    ("background", "surface.raised"),
+                    ("background", "surface.canvas"),
                     ("foreground", "text.primary"),
-                    ("border", "control.border"),
+                    ("border", "separator"),
                 ],
             ),
             FOCUS,
@@ -315,6 +316,34 @@ pub const RECIPES: &[Recipe] = &[
                     ("foreground", "disabled.foreground"),
                 ],
             ),
+        ],
+    },
+    Recipe {
+        name: "nav_item",
+        states: &[
+            state(
+                "rest",
+                &[
+                    ("background", "transparent"),
+                    ("foreground", "text.secondary"),
+                ],
+            ),
+            state(
+                "hover",
+                &[
+                    ("background", "hover.overlay"),
+                    ("foreground", "text.primary"),
+                ],
+            ),
+            state(
+                "selected",
+                &[
+                    ("background", "selection.background"),
+                    ("foreground", "selection.foreground"),
+                    ("indicator", "selection.indicator"),
+                ],
+            ),
+            FOCUS,
         ],
     },
     Recipe {
@@ -341,13 +370,6 @@ pub const RECIPES: &[Recipe] = &[
                     ("foreground", "text.primary"),
                 ],
             ),
-            state(
-                "selected",
-                &[
-                    ("background", "selection.background"),
-                    ("foreground", "selection.foreground"),
-                ],
-            ),
             FOCUS,
         ],
     },
@@ -364,19 +386,32 @@ pub const RECIPES: &[Recipe] = &[
             state(
                 "hover",
                 &[
-                    ("background", "hover.overlay"),
+                    ("background", "transparent"),
                     ("foreground", "text.primary"),
                 ],
             ),
             state(
                 "selected",
                 &[
-                    ("background", "hover.overlay"),
-                    ("foreground", "accent.text"),
+                    ("background", "transparent"),
+                    ("foreground", "text.primary"),
+                    ("indicator", "accent"),
                 ],
             ),
             FOCUS,
         ],
+    },
+    Recipe {
+        name: "dialog",
+        states: &[state(
+            "open",
+            &[
+                ("background", "surface.raised"),
+                ("foreground", "text.primary"),
+                ("border", "separator"),
+                ("scrim", "scrim"),
+            ],
+        )],
     },
     Recipe {
         name: "window.chrome",

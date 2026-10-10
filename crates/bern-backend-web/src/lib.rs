@@ -50,7 +50,17 @@ fn html_escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
-fn index_html(app: &Application) -> String {
+/// A version for this build's page files. Browsers and static hosts cache
+/// them; URLs carrying the version make every rebuild load fresh files.
+fn build_version() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!("{:x}", nanos as u64)
+}
+
+fn index_html(app: &Application, version: &str) -> String {
     let title = app
         .app
         .name
@@ -63,9 +73,9 @@ fn index_html(app: &Application) -> String {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
-<link rel="stylesheet" href="theme.css">
-<link rel="stylesheet" href="bern.css">
-<script type="module" src="app.js"></script>
+<link rel="stylesheet" href="theme.css?v={version}">
+<link rel="stylesheet" href="bern.css?v={version}">
+<script type="module" src="app.js?v={version}"></script>
 </head>
 <body>
 <div id="bern-host" class="bern-host"></div>
@@ -74,6 +84,7 @@ fn index_html(app: &Application) -> String {
 "#,
         lang = html_escape(&app.languages.default),
         title = html_escape(title),
+        version = html_escape(version),
     )
 }
 
@@ -145,6 +156,7 @@ impl Target for WebBrowser {
             windows: WindowCapabilities {
                 native: false,
                 virtual_windows: true,
+                floating: true,
             },
             channels: &["ipc"],
             media: Some(MediaSupport {
@@ -252,8 +264,9 @@ impl Target for WebBrowser {
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
         let strings = strings::tables(app);
         let remote = context.target.web_mode.as_deref() == Some("ui");
+        let version = build_version();
         let mut files = vec![
-            GeneratedFile::text("index.html", index_html(app)),
+            GeneratedFile::text("index.html", index_html(app, &version)),
             GeneratedFile::text("bern.js", RUNTIME),
             GeneratedFile::text("bern.css", STYLES),
             GeneratedFile::text("theme.css", theme::stylesheet(app)),
@@ -262,8 +275,9 @@ impl Target for WebBrowser {
                 Generator::new(app).generate(
                     app.protocol.fingerprint(),
                     &strings,
-                    WASM,
+                    &format!("{WASM}?v={version}"),
                     if remote { "ui" } else { "app" },
+                    &version,
                 ),
             ),
             GeneratedFile::text(

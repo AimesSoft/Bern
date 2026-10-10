@@ -27,6 +27,8 @@ pub enum ColorSource {
 pub struct WindowCapabilities {
     pub native: bool,
     pub virtual_windows: bool,
+    /// Draggable, resizable windows: native windows, or floating panels.
+    pub floating: bool,
 }
 
 /// The media backend and video presenter a target assembles for `Video`.
@@ -324,6 +326,12 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
                     window.id, descriptor.id
                 )));
             }
+            bern_ir::Presentation::Floating if !descriptor.windows.floating => {
+                diagnostics.push(Diagnostic::error(format!(
+                    "window `{}` requests floating presentation, which target `{}` cannot provide",
+                    window.id, descriptor.id
+                )));
+            }
             bern_ir::Presentation::Virtual if !descriptor.windows.virtual_windows => {
                 diagnostics.push(Diagnostic::error(format!(
                     "window `{}` requests virtual presentation, which target `{}` has not implemented",
@@ -419,6 +427,7 @@ mod tests {
                 windows: WindowCapabilities {
                     native: true,
                     virtual_windows: false,
+                    floating: true,
                 },
                 channels: &[],
                 media: None,

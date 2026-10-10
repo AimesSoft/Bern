@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Version of the IR layout. Targets declare the range they consume.
-pub const IR_VERSION: u32 = 3;
+pub const IR_VERSION: u32 = 4;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
@@ -175,8 +175,14 @@ pub enum WindowInitial {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Presentation {
+    /// Native where the target has system windows, otherwise the host's
+    /// virtual presentation (on the web: the page, or a dialog).
     Auto,
+    /// The host's in-app presentation, even where native windows exist.
     Virtual,
+    /// A draggable, resizable window: a native window, or a floating panel
+    /// inside the page.
+    Floating,
     NativeRequired,
 }
 

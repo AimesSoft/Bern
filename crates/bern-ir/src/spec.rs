@@ -189,7 +189,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("initial", PropKind::Keyword(&["open", "closed"])),
                 opt(
                     "presentation",
-                    PropKind::Keyword(&["auto", "virtual", "native_required"]),
+                    PropKind::Keyword(&["auto", "virtual", "floating", "native_required"]),
                 ),
                 opt("role", PropKind::Keyword(&["standard", "settings"])),
                 opt("width", PropKind::Number),

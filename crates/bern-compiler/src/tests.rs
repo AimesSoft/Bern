@@ -335,6 +335,7 @@ mod independent_target {
                 windows: WindowCapabilities {
                     native: false,
                     virtual_windows: true,
+                    floating: false,
                 },
                 channels: &[],
                 media: None,
@@ -390,6 +391,14 @@ mod independent_target {
                 .any(|d| d.message.contains("has no media backend"))
         );
         assert!(problems.iter().all(|d| d.location.is_some()));
+        // A floating window needs a target that can draw one.
+        let mut floating = app.clone();
+        floating.windows.windows[1].presentation = ir::Presentation::Floating;
+        let problems = target.check(&floating, &TargetConfig::default());
+        assert!(problems.iter().any(|d| {
+            d.message
+                .contains("window `settings` requests floating presentation")
+        }));
     }
 }
 

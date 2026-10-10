@@ -66,6 +66,7 @@ impl Target for SwiftUiMacos {
             windows: WindowCapabilities {
                 native: true,
                 virtual_windows: false,
+                floating: true,
             },
             channels: &["ipc"],
             media: Some(MediaSupport {

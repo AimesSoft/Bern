@@ -1011,7 +1011,7 @@ function enabledOf(enabled) {
 }
 
 export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled }, action) {
-  const kind = ctx.inToolbar ? "plain" : prominence ?? "standard";
+  const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
   const node = el(
@@ -1029,7 +1029,7 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
   control(ctx, {
     target: () => target(ctx, id), role: "button", label, enabled: isEnabled, actions: { activate: action },
   });
-  p.append(node);
+  p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, node) : node);
 }
 
 export function IconButton(p, ctx, { id, icon: name, label, enabled }, action) {
@@ -1096,7 +1096,7 @@ export function TextInput(p, ctx, { id, label, field, prompt, kind }, submit) {
     target: () => target(ctx, id), role: "text_input", label,
     actions: { edit: (value) => field.set(value), submit, value: kind === "secure" ? null : () => field.peek() },
   });
-  p.append(labelled(input, label, kind === "multiline"));
+  p.append(labelled(input, label, true));
 }
 
 export function Search(p, ctx, { id, field, prompt }, submit) {
@@ -1108,7 +1108,10 @@ export function Search(p, ctx, { id, field, prompt }, submit) {
   editable(input, field);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.isComposing) submit?.();
-    if (event.key === "Escape") field.set("");
+    if (event.key === "Escape" && field.peek() !== "") {
+      event.preventDefault();
+      field.set("");
+    }
   });
   const clear = el("button", { class: "bern-search-clear", type: "button", tabindex: "-1" }, icon("xmark.circle.fill", 14));
   bindAttr(clear, "aria-label", () => tr("bern.search.clear"));
@@ -1248,7 +1251,7 @@ export function Stack(p, ctx, { axis, gap, padding, align }, children) {
   });
   if (gap !== undefined) node.style.gap = `${gap}px`;
   if (padding !== undefined) node.style.padding = `${padding}px`;
-  children(node, ctx);
+  children(node, { ...ctx, inGroup: false });
   p.append(node);
 }
 
@@ -1287,7 +1290,7 @@ export function Section(p, ctx, { title, footer }, children) {
     bindText(note, footer);
     node.append(note);
   }
-  children(group, ctx);
+  children(group, { ...ctx, inGroup: true });
   p.append(node);
 }
 
@@ -1463,19 +1466,43 @@ export function Navigation(p, ctx, { id, path }, content, destination) {
   const inner = { ...ctx, path };
   // The root page stays mounted under pushed destinations, so its
   // subscriptions, players and scroll position survive going back.
-  const root = el("div", { class: "bern-nav-page" });
-  const top = el("div", { class: "bern-nav-page" });
+  const root = el("div", { class: "bern-nav-page", tabindex: "-1" });
+  const top = el("div", { class: "bern-nav-page", tabindex: "-1" });
+  top.addEventListener("keydown", (event) => {
+    const escape = event.key === "Escape" && !event.isComposing;
+    if ((escape || (event.altKey && event.key === "ArrowLeft")) && !event.defaultPrevented && back()) {
+      event.preventDefault();
+    }
+  });
   p.append(root, top);
   content(root, inner);
   const region = new Region(top);
   let shown = 0;
   let owner = null;
+  // Focus moves into a pushed page and, going back, returns to what was
+  // focused when that page was pushed.
+  const returns = [];
+  let mounted = false;
   effect(() => {
     const routes = path.get();
     root.hidden = routes.length > 0;
     top.hidden = routes.length === 0;
-    if (routes.length === shown && routes.length === 0) return;
+    if (routes.length === shown && routes.length === 0) {
+      mounted = true;
+      return;
+    }
+    const deeper = routes.length > shown;
+    const shallower = routes.length < shown;
+    if (deeper) returns.push(document.activeElement);
     shown = routes.length;
+    if (mounted && (deeper || shallower)) {
+      const back = shallower ? returns[routes.length] : null;
+      if (shallower) returns.length = routes.length;
+      requestAnimationFrame(() => {
+        if (back?.isConnected && !back.closest("[hidden]")) back.focus({ preventScroll: true });
+        else (routes.length ? top : root).focus({ preventScroll: true });
+      });
+    }
     untrack(() => {
       owner?.dispose();
       region.clear();
@@ -1488,6 +1515,7 @@ export function Navigation(p, ctx, { id, path }, content, destination) {
         region.fill((fragment) => destination(fragment, inner, () => route));
       });
     });
+    mounted = true;
   });
   onCleanup(() => owner?.dispose());
   if (id) {
@@ -1518,26 +1546,41 @@ export function NavLink(p, ctx, { id, route, label }, children) {
   p.append(node);
 }
 
+/// Underline tabs. At a wide dialog's root they become a vertical
+/// navigation beside the content.
 export function Tabs(p, ctx, { id, selection, tabs, selectedLabel }) {
   const bar = el("div", { class: "bern-tabbar", role: "tablist" });
-  const panels = el("div", { class: "bern-tabpanels" });
+  const panels = el("div", { class: "bern-tabpanels", role: "tabpanel" });
+  const node = el("div", { class: "bern-tabs" }, bar, panels);
   const entries = tabs.map((tab) => {
     const text = el("span");
     bindText(text, tab.label);
-    const button = el("button", { class: `bern-tab${tab.icon ? " bern-tab-icon" : ""}`, type: "button", role: "tab" },
-      tab.icon ? icon(tab.icon, 20) : null, text);
+    const button = el("button", { class: "bern-tab", type: "button", role: "tab" }, tab.icon ? icon(tab.icon, 16) : null, text);
     button.addEventListener("click", () => selection.set(tab.value));
     button.addEventListener("keydown", (event) => {
-      const move = { ArrowRight: 1, ArrowLeft: -1 }[event.key];
-      if (!move) return;
+      const vertical = node.classList.contains("bern-tabs-vertical");
+      const keys = vertical ? { ArrowDown: 1, ArrowUp: -1 } : { ArrowRight: 1, ArrowLeft: -1 };
+      const move = { ...keys, Home: -Infinity, End: Infinity }[event.key];
+      if (move === undefined) return;
+      event.preventDefault();
       const index = tabs.indexOf(tab);
-      const next = tabs[(index + move + tabs.length) % tabs.length];
-      selection.set(next.value);
-      entries[tabs.indexOf(next)].button.focus();
+      const at = move === -Infinity ? 0 : move === Infinity ? tabs.length - 1 : (index + move + tabs.length) % tabs.length;
+      selection.set(tabs[at].value);
+      entries[at].button.focus();
     });
     bar.append(button);
     return { tab, button };
   });
+  if (ctx.win?.dialog) {
+    const observer = new ResizeObserver(() => {
+      const content = node.parentElement;
+      const vertical = !!content?.classList.contains("bern-window-content") && content.clientWidth >= 640;
+      node.classList.toggle("bern-tabs-vertical", vertical);
+      bar.setAttribute("aria-orientation", vertical ? "vertical" : "horizontal");
+    });
+    observer.observe(node);
+    onCleanup(() => observer.disconnect());
+  }
   const region = new Region(panels);
   let shown = null;
   let owner = null;
@@ -1574,7 +1617,7 @@ export function Tabs(p, ctx, { id, selection, tabs, selectedLabel }) {
       },
     });
   }
-  p.append(el("div", { class: "bern-tabs" }, bar, panels));
+  p.append(node);
 }
 
 /// The result of an asynchronous query. The subscription belongs to the
@@ -2176,7 +2219,9 @@ const MINIMIZED = 1;
 const HIDDEN = 2;
 const ACTION = { activate: 0, close: 1, minimize: 2, restore: 3, maximize: 4, move: 5, resize: 6 };
 
-/// One virtual window instance: its kind, generation, sessions and frame.
+/// One window instance: its kind, generation, sessions and frame. The main
+/// window is the page, other windows are dialogs, and only a declared
+/// `presentation: floating` gets a movable frame.
 class Win {
   constructor(manager, index, kind) {
     this.manager = manager;
@@ -2185,11 +2230,19 @@ class Win {
     this.generation = 0n;
     this.id = "";
     this.sessions = {};
-    this.state = cell({ visibility: VISIBLE, maximized: kind.id === manager.primary && kind.resizable, frame: null });
+    this.state = cell({ visibility: VISIBLE, maximized: false, frame: null });
     this.pendingClose = cell(null);
     this.failure = cell(null);
     this.commandInFlight = false;
     this.allowsClose = false;
+  }
+
+  get floating() {
+    return this.spec.presentation === "floating";
+  }
+
+  get dialog() {
+    return this.spec.presentation === "dialog";
   }
 
   fail(failure) {
@@ -2203,39 +2256,77 @@ class Win {
     return host.sessionSet(this, session, field, writer.finish());
   }
 
-  /// Window actions available now, as bits in `WindowAction` order.
+  /// Window actions available now, as bits in `WindowAction` order. The
+  /// page and dialogs only activate and close.
   actions() {
+    const always = (1 << ACTION.activate) | (1 << ACTION.close);
+    if (!this.floating) return always;
     const { visibility, maximized } = this.state.peek();
     const narrow = this.manager.narrow.peek();
     const resizable = this.spec.resizable;
     const normal = visibility !== MINIMIZED;
     const bits = [
-      [ACTION.activate, true],
-      [ACTION.close, true],
-      [ACTION.minimize, normal && !this.spec.settings],
+      [ACTION.minimize, normal],
       [ACTION.restore, visibility === MINIMIZED || (maximized && resizable)],
       [ACTION.maximize, normal && resizable && !maximized],
       [ACTION.move, normal && !maximized && !narrow],
       [ACTION.resize, normal && resizable && !maximized && !narrow],
     ];
-    return bits.reduce((all, [bit, on]) => (on ? all | (1 << bit) : all), 0);
+    return bits.reduce((all, [bit, on]) => (on ? all | (1 << bit) : all), always);
+  }
+
+  /// The window's frame in the page area, from layout: an opening
+  /// animation's scale does not change it.
+  frame() {
+    const desktop = this.manager.desktop.getBoundingClientRect();
+    const rect = this.element.getBoundingClientRect();
+    const width = this.element.offsetWidth;
+    const height = this.element.offsetHeight;
+    return {
+      x: rect.left + (rect.width - width) / 2 - desktop.left,
+      y: rect.top + (rect.height - height) / 2 - desktop.top,
+      width,
+      height,
+    };
   }
 
   reportFacts() {
     if (!this.generation || !this.element) return;
-    const desktop = this.manager.desktop.getBoundingClientRect();
-    const rect = this.element.getBoundingClientRect();
-    const { visibility } = this.state.peek();
+    const { visibility, maximized } = this.state.peek();
     host.windowFacts(this, {
       visibility: document.hidden ? HIDDEN : visibility,
-      size: this.state.peek().maximized && visibility !== MINIMIZED ? 1 : 0,
-      x: rect.left - desktop.left,
-      y: rect.top - desktop.top,
-      width: rect.width,
-      height: rect.height,
+      size: maximized && visibility !== MINIMIZED ? 1 : 0,
+      ...this.frame(),
       focused: this.manager.active.peek() === this && document.hasFocus() && visibility !== MINIMIZED,
       actions: this.actions(),
     });
+  }
+}
+
+const FOCUSABLE = "button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])";
+
+function focusables(container) {
+  return [...container.querySelectorAll(FOCUSABLE)].filter((node) => !node.disabled && node.getClientRects().length > 0);
+}
+
+/// Keep Tab and Shift+Tab inside a modal container.
+function trapFocus(container, event) {
+  const items = focusables(container);
+  if (!items.length) {
+    event.preventDefault();
+    return;
+  }
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (!container.contains(document.activeElement)) {
+    event.preventDefault();
+    first.focus();
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
   }
 }
 
@@ -2249,11 +2340,19 @@ class WindowManager {
     this.narrow = cell(false);
     this.root = root;
     this.desktop = el("main", { class: "bern-desktop" });
-    this.switcher = el("div", { class: "bern-switcher", role: "toolbar" });
     const name = el("span", { class: "bern-appname" });
     bindText(name, () => tr("app.name"));
-    const settings = app.windows.find((kind) => kind.settings);
+    const bar = el("header", { class: "bern-appbar" }, name);
+    // The window switcher exists only for floating windows, the only ones
+    // that can be minimized or hidden behind each other.
+    if (app.windows.some((kind) => kind.presentation === "floating")) {
+      this.switcher = el("div", { class: "bern-switcher", role: "toolbar" });
+      bindAttr(this.switcher, "aria-label", () => tr("bern.window.switcher"));
+      bar.append(this.switcher);
+      effect(() => this.renderSwitcher());
+    }
     const trailing = el("div", { class: "bern-appbar-trailing" });
+    const settings = app.windows.find((kind) => kind.settings);
     if (settings) {
       const button = el("button", { class: "bern-icon-button", type: "button" }, icon("gearshape", 16));
       bindAttr(button, "aria-label", () => tr("bern.window.settings"));
@@ -2267,10 +2366,24 @@ class WindowManager {
         }
       });
     }
-    bindAttr(this.switcher, "aria-label", () => tr("bern.window.switcher"));
-    root.append(el("header", { class: "bern-appbar" }, name, this.switcher, trailing), this.desktop);
-    effect(() => this.renderSwitcher());
-    const measure = () => this.narrow.set(this.desktop.clientWidth < 960);
+    bar.append(trailing);
+    root.append(bar, this.desktop);
+    // Closing the main window by a command leaves the page with a way back.
+    const main = app.windows.find((kind) => kind.presentation === "page");
+    if (main) {
+      const title = el("h1", { class: "bern-empty-title" });
+      bindText(title, () => tr("app.name"));
+      const reopen = el("button", { class: "bern-button bern-button-prominent", type: "button" });
+      bindText(reopen, () => fmt("bern.window.reopen", { title: tr(main.title) }));
+      reopen.addEventListener("click", () => this.open(main.id));
+      const empty = el("div", { class: "bern-empty-page" }, title, reopen);
+      this.desktop.append(empty);
+      effect(() => {
+        empty.hidden = this.order.get().some((win) => win.spec === main);
+      });
+    }
+    document.addEventListener("keydown", (event) => this.keydown(event));
+    const measure = () => this.narrow.set(this.desktop.clientWidth < 768);
     new ResizeObserver(() => {
       measure();
       for (const win of this.windows.values()) win.reportFacts();
@@ -2286,11 +2399,11 @@ class WindowManager {
   }
 
   renderSwitcher() {
-    const order = this.order.get();
     const active = this.active.get();
+    this.order.get();
     this.switcher.replaceChildren();
     for (const kind of this.app.windows) {
-      if (kind.settings) continue;
+      if (kind.presentation !== "floating") continue;
       const win = this.windows.get(kind.id);
       const state = win?.state.get();
       const text = el("span");
@@ -2302,13 +2415,25 @@ class WindowManager {
       button.addEventListener("click", () => this.open(kind.id));
       this.switcher.append(button);
     }
-    for (const win of order) if (win.spec.settings) {
-      const text = el("span");
-      bindText(text, () => tr(win.spec.title));
-      const button = el("button", { class: "bern-switch-item", type: "button" }, text);
-      button.setAttribute("aria-pressed", win === active ? "true" : "false");
-      button.addEventListener("click", () => this.open(win.spec.id));
-      this.switcher.append(button);
+  }
+
+  /// The topmost open dialog, which holds keyboard focus.
+  topDialog() {
+    const dialogs = [...this.windows.values()].filter((win) => win.dialog);
+    return dialogs.sort((a, b) => Number(a.root.style.zIndex) - Number(b.root.style.zIndex)).pop() ?? null;
+  }
+
+  /// Escape closes the top dialog through the close protocol; Tab stays
+  /// inside it. Its own confirmation or alert handles keys first.
+  keydown(event) {
+    const top = this.topDialog();
+    if (!top || event.defaultPrevented) return;
+    if (top.pendingClose.peek() || top.failure.peek()) return;
+    if (event.key === "Escape" && !event.isComposing) {
+      event.preventDefault();
+      this.close(top);
+    } else if (event.key === "Tab") {
+      trapFocus(top.element, event);
     }
   }
 
@@ -2337,20 +2462,86 @@ class WindowManager {
       const type = this.app.sessions[sessionIndex];
       win.sessions[type.name] = new SessionState(win, sessionIndex, type, reader);
     }
+    win.returnFocus = document.activeElement;
     this.windows.set(id, win);
     this.mount(win);
     this.order.set([...this.order.peek(), win]);
     this.activate(win);
+    if (win.dialog) {
+      // Focus moves into the dialog: its first control, else the dialog.
+      requestAnimationFrame(() => {
+        const content = win.element.querySelector(".bern-window-content");
+        (focusables(content)[0] ?? win.element).focus();
+      });
+    }
     return win;
   }
 
   mount(win) {
     const kind = win.spec;
     win.scope = new Scope(null);
+    const ctx = { win, s: win.sessions, comp: kind.id, key: null, page: page(), path: null };
+    const body = el("div", { class: "bern-window-body" });
+    const content = el("div", { class: "bern-window-content" });
+    within(win.scope, () => {
+      if (win.dialog) this.mountDialog(win, ctx, body);
+      else if (win.floating) this.mountFloating(win, body);
+      else {
+        win.element = el("div", { class: "bern-window bern-window-page", "data-bern-window": kind.id }, body);
+        win.root = win.element;
+      }
+      if (!win.dialog) body.append(pageHeader(ctx, null, false));
+      body.append(content);
+      kind.render(content, ctx);
+      if (kind.closeCheck) win.closeCheck = kind.closeCheck(win);
+      if (win.floating) effect(() => this.place(win));
+      effect(() => this.dialog(win));
+      effect(() => this.alert(win));
+    });
+    win.element.addEventListener("pointerdown", () => this.activate(win), true);
+    this.desktop.append(win.root);
+    requestAnimationFrame(() => win.reportFacts());
+  }
+
+  /// A modal dialog over a scrim: the title and toolbar in its header with
+  /// a close button, and no minimize or maximize.
+  mountDialog(win, ctx, body) {
+    const kind = win.spec;
+    const header = pageHeader(ctx, () => tr(kind.title), true);
+    header.classList.add("bern-dialog-header");
+    header.querySelector(".bern-page-title").id = `bern-title-${kind.id}`;
+    const close = el("button", { class: "bern-icon-button", type: "button" }, icon("xmark", 16));
+    bindAttr(close, "aria-label", () => tr("bern.window.close"));
+    bindAttr(close, "title", () => tr("bern.window.close"));
+    close.addEventListener("click", () => this.close(win));
+    header.append(close);
+    const element = el("section", {
+      class: "bern-window bern-window-dialog", role: "dialog", "aria-modal": "true",
+      "aria-labelledby": `bern-title-${kind.id}`, "data-bern-window": kind.id, tabindex: "-1",
+    }, header, body);
+    element.style.setProperty("--bern-dialog-width", `${kind.width ?? 560}px`);
+    if (kind.height) element.style.height = `${kind.height}px`;
+    const layer = el("div", { class: "bern-dialog-layer" }, element);
+    // A click that starts and ends on the scrim requests closing.
+    let fromScrim = false;
+    layer.addEventListener("pointerdown", (event) => {
+      fromScrim = event.target === layer;
+    });
+    layer.addEventListener("click", (event) => {
+      if (fromScrim && event.target === layer) this.close(win);
+      fromScrim = false;
+    });
+    win.element = element;
+    win.root = layer;
+  }
+
+  /// A floating window: a movable, resizable panel with its own title bar.
+  mountFloating(win, body) {
+    const kind = win.spec;
     const title = el("h1", { class: "bern-window-title", id: `bern-title-${kind.id}` });
     bindText(title, () => tr(kind.title));
     const button = (name, label, action) => {
-      const node = el("button", { class: "bern-icon-button bern-window-control", type: "button" }, icon(name, 14));
+      const node = el("button", { class: "bern-icon-button bern-window-control", type: "button" }, icon(name, 16));
       bindAttr(node, "aria-label", label);
       bindAttr(node, "title", label);
       node.addEventListener("click", (event) => {
@@ -2360,48 +2551,29 @@ class WindowManager {
       return node;
     };
     const controlsBox = el("div", { class: "bern-window-controls" });
-    within(win.scope, () => {
-      if (!kind.settings) {
-        controlsBox.append(button("minus", () => tr("bern.window.minimize"), () => this.command(win, "minimize")));
-        if (kind.resizable) {
-          const toggle = button("square", () => tr(win.state.get().maximized ? "bern.window.restore" : "bern.window.maximize"),
-            () => this.command(win, win.state.peek().maximized ? "restore" : "maximize"));
-          effect(() => toggle.replaceChildren(icon(win.state.get().maximized ? "square.on.square" : "square", 14)));
-          controlsBox.append(toggle);
-        }
-      }
-      controlsBox.append(button("xmark", () => tr("bern.window.close"), () => this.close(win)));
-    });
-    const titlebar = el("div", { class: "bern-titlebar" }, el("div", { class: "bern-titlebar-spacer" }), title, controlsBox);
-    const body = el("div", { class: "bern-window-body" });
+    controlsBox.append(button("minus", () => tr("bern.window.minimize"), () => this.command(win, "minimize")));
+    if (kind.resizable) {
+      const toggle = button("square", () => tr(win.state.get().maximized ? "bern.window.restore" : "bern.window.maximize"),
+        () => this.command(win, win.state.peek().maximized ? "restore" : "maximize"));
+      effect(() => toggle.replaceChildren(icon(win.state.get().maximized ? "square.on.square" : "square", 16)));
+      controlsBox.append(toggle);
+    }
+    controlsBox.append(button("xmark", () => tr("bern.window.close"), () => this.close(win)));
+    const titlebar = el("div", { class: "bern-titlebar" }, title, controlsBox);
     const element = el("section", {
-      class: `bern-window${kind.settings ? " bern-window-settings" : ""}`,
-      role: "dialog", "aria-labelledby": `bern-title-${kind.id}`, "data-bern-window": kind.id,
+      class: "bern-window bern-window-floating", role: "dialog", "aria-labelledby": `bern-title-${kind.id}`,
+      "data-bern-window": kind.id,
     }, titlebar, body);
     win.element = element;
-    win.body = body;
-    element.addEventListener("pointerdown", () => this.activate(win), true);
+    win.root = element;
     titlebar.addEventListener("dblclick", () => {
       if (kind.resizable) this.command(win, win.state.peek().maximized ? "restore" : "maximize");
     });
     this.draggable(win, titlebar);
     if (kind.resizable) this.resizable(win);
-    within(win.scope, () => {
-      const ctx = { win, s: win.sessions, comp: kind.id, key: null, page: page(), path: null };
-      body.append(pageHeader(ctx, null, false));
-      const content = el("div", { class: "bern-window-content" });
-      body.append(content);
-      kind.render(content, ctx);
-      if (kind.closeCheck) win.closeCheck = kind.closeCheck(win);
-      effect(() => this.place(win));
-      effect(() => this.dialog(win));
-      effect(() => this.alert(win));
-    });
-    this.desktop.append(element);
-    requestAnimationFrame(() => win.reportFacts());
   }
 
-  /// Size and position from the declaration, the primary window maximized.
+  /// A floating window's size and position, from its frame or declaration.
   place(win) {
     const { visibility, maximized, frame } = win.state.get();
     const element = win.element;
@@ -2414,13 +2586,13 @@ class WindowManager {
     const kind = win.spec;
     const desktop = this.desktop.getBoundingClientRect();
     const width = Math.min(frame?.width ?? kind.width ?? 640, desktop.width);
-    const height = frame?.height ?? (kind.settings ? null : Math.min(kind.height ?? 480, desktop.height));
+    const height = Math.min(frame?.height ?? kind.height ?? 480, desktop.height);
     const x = frame?.x ?? Math.max(0, (desktop.width - width) / 2);
-    const y = frame?.y ?? Math.max(16, (desktop.height - (height ?? 360)) / 3);
+    const y = frame?.y ?? Math.max(16, (desktop.height - height) / 3);
     element.style.left = `${x}px`;
     element.style.top = `${y}px`;
     element.style.width = `${width}px`;
-    element.style.height = height === null ? "" : `${height}px`;
+    element.style.height = `${height}px`;
     if (kind.minWidth) element.style.minWidth = `${kind.minWidth}px`;
     if (kind.minHeight) element.style.minHeight = `${kind.minHeight}px`;
   }
@@ -2430,12 +2602,15 @@ class WindowManager {
     requestAnimationFrame(() => win.reportFacts());
   }
 
+  /// Bring a window forward: the page stays at the bottom, floating
+  /// windows above it and dialogs above everything.
   activate(win) {
     const order = this.order.peek().filter((candidate) => candidate !== win);
     order.push(win);
     this.order.set(order);
     order.forEach((candidate, index) => {
-      candidate.element.style.zIndex = String(10 + index);
+      const layer = candidate.dialog ? 1000 : candidate.floating ? 10 : 0;
+      candidate.root.style.zIndex = String(layer + index);
       candidate.element.classList.toggle("bern-window-active", candidate === win);
     });
     const previous = this.active.peek();
@@ -2444,8 +2619,8 @@ class WindowManager {
     win.reportFacts();
   }
 
-  /// A window command, run the same way for the title bar and for every
-  /// entry; it reports the facts it causes as caused by a command.
+  /// A window command, run the same way for the window's own controls and
+  /// for every entry; it reports the facts it causes as caused by a command.
   command(win, action, args = {}) {
     const actions = win.actions();
     if (!(actions & (1 << ACTION[action]))) {
@@ -2483,9 +2658,7 @@ class WindowManager {
   }
 
   frameOf(win) {
-    const desktop = this.desktop.getBoundingClientRect();
-    const rect = win.element.getBoundingClientRect();
-    return { x: rect.left - desktop.left, y: rect.top - desktop.top, width: rect.width, height: rect.height };
+    return win.frame();
   }
 
   activateTop(except) {
@@ -2643,19 +2816,39 @@ class WindowManager {
 
   finishClose(win) {
     win.scope.dispose();
-    win.element.remove();
+    win.root.remove();
     this.windows.delete(win.spec.id);
     this.order.set(this.order.peek().filter((candidate) => candidate !== win));
     host.windowClosed(win.kind, win.generation);
     if (this.active.peek() === win) this.activateTop(win);
+    // Focus returns to what opened the dialog.
+    if (win.dialog && win.returnFocus?.isConnected) win.returnFocus.focus();
   }
 
-  /// The close confirmation as a modal dialog over its own window.
+  /// A modal alert over its own window; Escape chooses `cancel` and Tab
+  /// stays inside.
+  modal(win, title, detail, buttons, cancel, initial) {
+    const heading = el("h2", { class: "bern-alert-title", id: `bern-alert-${win.spec.id}` }, title);
+    const box = el("div", {
+      class: "bern-alert", role: "alertdialog", "aria-modal": "true", "aria-labelledby": `bern-alert-${win.spec.id}`,
+    }, heading, el("p", { class: "bern-alert-detail" }, detail), el("div", { class: "bern-alert-buttons" }, ...buttons));
+    const scrim = el("div", { class: "bern-scrim" }, box);
+    scrim.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !event.isComposing) {
+        event.preventDefault();
+        cancel.click();
+      } else if (event.key === "Tab") trapFocus(box, event);
+    });
+    win.element.append(scrim);
+    queueMicrotask(() => initial.focus());
+    onCleanup(() => scrim.remove());
+  }
+
+  /// The close confirmation: Save, Don't Save and Cancel, or Discard and
+  /// Cancel, with the main choice last.
   dialog(win) {
     const pending = win.pendingClose.get();
     if (!pending) return;
-    const message = el("h2", { class: "bern-dialog-title" }, pending.message);
-    const detail = el("p", { class: "bern-dialog-detail" }, tr(pending.canSave ? "bern.close.save_detail" : "bern.close.discard_detail"));
     const choice = (label, decision, kind) => {
       const node = el("button", { class: `bern-button bern-button-${kind}`, type: "button" }, tr(label));
       node.addEventListener("click", () => this.confirmClose(win, pending.id, decision, (failure) => {
@@ -2663,45 +2856,25 @@ class WindowManager {
       }));
       return node;
     };
-    const buttons = pending.canSave
-      ? [choice("bern.close.save", 0, "prominent"), choice("bern.close.dont_save", 1, "destructive-plain"), choice("bern.close.cancel", 2, "standard")]
-      : [choice("bern.close.discard", 1, "destructive"), choice("bern.close.cancel", 2, "standard")];
-    const box = el("div", { class: "bern-dialog", role: "alertdialog", "aria-modal": "true", "aria-labelledby": `bern-dialog-${win.spec.id}` }, message, detail, el("div", { class: "bern-dialog-buttons" }, ...buttons));
-    message.id = `bern-dialog-${win.spec.id}`;
-    const scrim = el("div", { class: "bern-scrim" }, box);
-    scrim.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") buttons[buttons.length - 1].click();
-      if (event.key === "Tab") {
-        const first = buttons[0];
-        const last = buttons[buttons.length - 1];
-        if (event.shiftKey && document.activeElement === first) {
-          event.preventDefault();
-          last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
-          event.preventDefault();
-          first.focus();
-        }
-      }
-    });
-    win.element.append(scrim);
-    queueMicrotask(() => buttons[0].focus());
-    onCleanup(() => scrim.remove());
+    const cancel = choice("bern.close.cancel", 2, "standard");
+    const detail = tr(pending.canSave ? "bern.close.save_detail" : "bern.close.discard_detail");
+    if (pending.canSave) {
+      const save = choice("bern.close.save", 0, "prominent");
+      const discard = choice("bern.close.dont_save", 1, "destructive-plain");
+      discard.classList.add("bern-alert-aside");
+      this.modal(win, pending.message, detail, [discard, cancel, save], cancel, save);
+    } else {
+      this.modal(win, pending.message, detail, [cancel, choice("bern.close.discard", 1, "destructive")], cancel, cancel);
+    }
   }
 
-  /// A failed command shows a dialog in its window.
+  /// A failed command shows an alert in its window.
   alert(win) {
     const failure = win.failure.get();
     if (!failure) return;
     const ok = el("button", { class: "bern-button bern-button-prominent", type: "button" }, tr("bern.alert.ok"));
     ok.addEventListener("click", () => win.failure.set(null));
-    const box = el("div", { class: "bern-dialog", role: "alertdialog", "aria-modal": "true" },
-      el("h2", { class: "bern-dialog-title" }, tr("bern.alert.failed")),
-      el("p", { class: "bern-dialog-detail" }, failure.message || failure.code || String(failure)),
-      el("div", { class: "bern-dialog-buttons" }, ok));
-    const scrim = el("div", { class: "bern-scrim" }, box);
-    win.element.append(scrim);
-    queueMicrotask(() => ok.focus());
-    onCleanup(() => scrim.remove());
+    this.modal(win, tr("bern.alert.failed"), failure.message || failure.code || String(failure), [ok], ok, ok);
   }
 }
 

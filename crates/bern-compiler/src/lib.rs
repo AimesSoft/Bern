@@ -416,6 +416,7 @@ fn window_catalog(
         };
         let presentation = match keyword("presentation", "auto").as_str() {
             "virtual" => ir::Presentation::Virtual,
+            "floating" => ir::Presentation::Floating,
             "native_required" => ir::Presentation::NativeRequired,
             _ => ir::Presentation::Auto,
         };

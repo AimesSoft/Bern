@@ -1,4 +1,4 @@
-//! Bern Theme Algorithm v1.
+//! Bern Theme Algorithm v2.
 //!
 //! The theme kernel generates semantic colors and control recipes for
 //! targets whose UI framework has no complete light/dark system of its own
@@ -24,7 +24,7 @@ pub use color::{Oklch, Srgb, contrast};
 pub use recipes::{RECIPES, Recipe, RecipeState};
 
 /// Version of the generation rules; a change may alter emitted colors.
-pub const ALGORITHM_VERSION: u32 = 1;
+pub const ALGORITHM_VERSION: u32 = 2;
 
 /// Version of the snapshot layout.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -361,49 +361,41 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     let brand_chroma = brand.c.min(MAX_BRAND_CHROMA);
     let brand_at = |l: f64, c: f64| Oklch::new(l, c, brand.h);
 
-    // Surfaces, darkest to most raised in dark mode; in light mode the
-    // canvas is a light grey that groups and raised surfaces stand out on.
-    b.fixed(
-        "surface.host",
-        neutral(b.pick(0.925, 0.165), SURFACE_CHROMA),
-    );
-    b.fixed(
-        "surface.canvas",
-        neutral(b.pick(0.972, 0.205), SURFACE_CHROMA),
-    );
-    b.fixed(
-        "surface.panel",
-        neutral(b.pick(0.995, 0.245), SURFACE_CHROMA),
-    );
+    // Surfaces. Light: a white page and cards, a faint grey for the
+    // sidebar and secondary areas, and white raised layers set apart by
+    // border and shadow. Dark: layers grow lighter as they rise.
+    b.fixed("surface.host", neutral(b.pick(0.965, 0.13), SURFACE_CHROMA));
+    let canvas = b.pick(1.0, 0.175);
+    b.fixed("surface.canvas", neutral(canvas, SURFACE_CHROMA));
+    b.fixed("surface.panel", neutral(b.pick(0.982, 0.2), SURFACE_CHROMA));
     b.fixed(
         "surface.raised",
-        neutral(b.pick(1.0, 0.285), SURFACE_CHROMA),
+        neutral(b.pick(1.0, 0.225), SURFACE_CHROMA),
     );
     b.fixed(
         "hover.overlay",
-        neutral(b.pick(0.935, 0.325), SURFACE_CHROMA),
+        neutral(b.pick(0.955, 0.25), SURFACE_CHROMA),
     );
     b.fixed(
         "pressed.overlay",
-        neutral(b.pick(0.895, 0.365), SURFACE_CHROMA),
+        neutral(b.pick(0.925, 0.29), SURFACE_CHROMA),
     );
     b.fixed(
         "disabled.surface",
-        neutral(b.pick(0.94, 0.27), SURFACE_CHROMA),
+        neutral(b.pick(0.955, 0.24), SURFACE_CHROMA),
     );
-    // Decorative: separates rows that are already identified by content.
-    b.fixed("separator", neutral(b.pick(0.905, 0.335), SURFACE_CHROMA));
-    let step = b.pick(0.035, 0.045);
+    // Decorative: card borders and dividers between content that is
+    // already identified by its text.
+    b.fixed("separator", neutral(b.pick(0.915, 0.29), SURFACE_CHROMA));
+    // Standard buttons sit on the page colour.
+    let step = b.pick(0.03, 0.04);
     b.fixed(
         "button.standard.hover",
-        neutral(b.pick(1.0, 0.285) - b.pick(step, -step), SURFACE_CHROMA),
+        neutral(canvas - b.pick(step, -step), SURFACE_CHROMA),
     );
     b.fixed(
         "button.standard.pressed",
-        neutral(
-            b.pick(1.0, 0.285) - b.pick(2.0 * step, -2.0 * step),
-            SURFACE_CHROMA,
-        ),
+        neutral(canvas - b.pick(2.0 * step, -2.0 * step), SURFACE_CHROMA),
     );
 
     // Text and icons must read on every surface and row state.
@@ -469,11 +461,23 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
         levels.graphic,
         SURFACES,
     );
-    b.solve_pair(
+    // Selection: a light tint of the brand with readable text and a
+    // brand indicator bar, so a selected item is not told by colour alone.
+    b.fixed(
         "selection.background",
+        brand_at(b.pick(0.95, 0.27), brand_chroma.min(0.045)),
+    );
+    b.solve(
         "selection.foreground",
-        brand_at(accent_l, brand_chroma * 0.85),
-        &["surface.panel"],
+        brand_at(b.pick(0.3, 0.92), brand_chroma.min(0.06)),
+        levels.text,
+        &["selection.background"],
+    );
+    b.solve(
+        "selection.indicator",
+        brand_at(accent_l, brand_chroma),
+        levels.graphic,
+        &["selection.background", "surface.panel"],
     );
     b.variant(
         "button.prominent.hover",
