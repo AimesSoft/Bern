@@ -270,6 +270,7 @@ impl Target for WebBrowser {
             GeneratedFile::text("bern.js", RUNTIME),
             GeneratedFile::text("bern.css", STYLES),
             GeneratedFile::text("theme.css", theme::stylesheet(app)),
+            GeneratedFile::text("THIRD_PARTY_NOTICES.txt", icons::NOTICES),
             GeneratedFile::text(
                 "app.js",
                 Generator::new(app).generate(

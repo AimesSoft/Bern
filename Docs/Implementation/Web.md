@@ -1,7 +1,7 @@
 # Web 实现记录
 
 - 日期：2026-10-10
-- 依据：[Bern 架构设计 v0.13](../Design.md)、[Web 视觉规范 v0.3](../Adaptation/Web.md)
+- 依据：[Bern 架构设计 v0.13](../Design.md)、[Web 视觉规范 v0.4](../Adaptation/Web.md)
 - 工具链：Rust 1.99.0（`wasm32-unknown-unknown`）；不依赖 wasm-bindgen，页面直接实例化 WebAssembly 模块
 - 验证浏览器：Claude 桌面应用的内置浏览器（Chromium 内核）
 
@@ -69,7 +69,7 @@ flowchart LR
   - 推入导航保留根页面（隐藏而非卸载），返回后查询订阅、播放器与滚动位置仍在。
   - 控件登记与 macOS 相同：目标 ID、角色、名称、启用状态与用户输入使用的同一闭包。
   - 本地化：按浏览器语言选择受支持的语言（`zh-CN` 等映射到 `zh-Hans`），文本保留 `{name}` 占位并按名称填充。
-- **图标**：Bern 图标集的 Web 版本是 Bern 自己绘制的 24 × 24 描边 SVG（齿轮与星形由几何计算生成）；应用用到 Web 图标表中没有的名字时构建失败并指向声明。
+- **图标**：Web 版本用 Lucide（`lucide-static` v1.54.0）。所用的 41 个 Lucide SVG 与其 LICENSE 原样保存在 `crates/bern-backend-web/icons/lucide/`，以 `include_str!` 编入，构建时不联网。`icons.rs` 的对照表把每个 SF Symbols 名字对应到一个 Lucide 图标，并为 `.fill` 名字标明填充方式：整体（`play.fill`、`pause.fill`、`speaker.fill`）、部分（`speaker.wave.3.fill`、`speaker.slash.fill` 只填喇叭，`sun.max.fill` 只填圆盘）、镂空（`xmark.circle.fill` 用遮罩把叉号从实心圆中挖出；遮罩 id 是占位符，运行时为每个图标实例替换成唯一 id）。填充保留 2 px 描边，实心版与线条版轮廓一致。运行时的 `icon()` 在根 `<svg>` 上设置 Lucide 的描边属性。生成的页面目录包含 `THIRD_PARTY_NOTICES.txt`（ISC 与 Feather 的 MIT 授权全文），`app.js` 的图标表前有指向它的注释。应用用到对照表中没有的名字时构建失败并指向声明。
 - **媒体**：每个播放器一个 HTML `<video>`；执行端完成 hub 的加载、卸载、播放、暂停、跳转、音量、静音请求，`play()` 以 Promise 的结果完成请求，跳转以 `seeked` 完成；媒体事件只作为观测报告，不派发命令。视图把播放器的元素放入自己的区域，单视图（`multi_view: false`）。
 
 ## 窗口呈现
@@ -170,6 +170,12 @@ flowchart LR
 - macOS：系统 `Slider`（macOS 26 及以上分支）加 `.tint(.primary)` 后，非活动窗口中已播放部分为浅灰 `#bfbfbf`，不再是强调色；把可用性判断临时改为 macOS 99 构建回退分支后，回退的形状（6 pt 轨道、20 × 16 pt 白色滑块）与系统滑块重合，非活动窗口中已播放部分随系统变浅。截图都来自后台窗口，活动窗口中的颜色未截图验证。
 - `cargo test --workspace` 146 项通过（新增：媒体进度为中性色且与轨道达到 3:1），clippy 与 fmt 通过；Swift 生成代码在 Swift 6 模式下类型检查通过。
 - 随后把侧边栏、对话框竖排导航与窗口切换条的选中项改为填满强调色、去掉左侧竖线（主题算法 v4）：浅色与深色模式下侧边栏选中项为 `#2f6fe4` 底、白字，竖排导航选中项计算样式同样为 `rgb(47, 111, 228)` 底、白字，`::before` 为 `none`；生成的 `theme.css` 中不再有 `selection` 变量。
+
+2026-10-10，图标改用 Lucide（内置浏览器，`app` 构建）：
+
+- 侧边栏、工具栏、图标按钮与设置按钮显示 Lucide 图标；搜索框输入后，清除按钮为实心圆中挖空的叉号；视频控制条的播放为实心三角，音量为实心喇叭加线条声波（放大到 72 px 检查）。
+- 生成目录中有 `THIRD_PARTY_NOTICES.txt`，开头说明来源与修改，随后是 ISC 与 MIT 授权全文。
+- 新增测试：每个对照项都来自 `lucide-static v1.54.0` 文件、填充所指的形状存在、只有 `.fill` 名字被填充；填充方式按表生成（整体、部分、镂空遮罩）；声明文本包含两份授权。
 
 ## 未完成与已知限制
 

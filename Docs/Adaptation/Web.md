@@ -1,6 +1,6 @@
 # Bern Web 视觉规范
 
-- 版本：v0.3
+- 版本：v0.4
 - 官方资料核查日期：2026-10-10，Asia/Shanghai
 - 阶段：Web 后端的视觉与交互规范（[架构设计](../Design.md)“Web 应用与 WebUI”要求先单独成文）
 - 关联：[Bern 架构设计 v0.13](../Design.md)、[自适应适配规范](README.md)
@@ -236,8 +236,14 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ## 8. 图标
 
-- Bern 图标集采用 SF Symbols 命名。Web 后端为每个名字提供 Bern 自绘的 24 × 24 viewBox 描边 SVG（1.75 px 圆头，`currentColor`）。
-- 应用用到 Web 图标表中没有的名字时构建失败并指向该声明。彩色图像与品牌图形属于内容，不参与主题着色。
+- Bern 图标集采用 SF Symbols 命名。Web 后端用 [Lucide](https://lucide.dev)（`lucide-static` v1.54.0）绘制：每个名字对应一个 Lucide 图标，对照表在 `bern-backend-web` 中；所用的 Lucide SVG 原样保存在仓库里，构建时不联网获取。
+- 外观即 Lucide 的设计规范：24 × 24 画布、2 px 居中描边、圆头与圆角连接，颜色为 `currentColor`，跟随所在控件的配方。
+- 实心名称（以 `.fill` 结尾）：Lucide 官方不提供实心版，Bern 在线条版上加填充并保留 2 px 描边，使实心版与线条版轮廓一致。每个实心名称在对照表中标明填充方式：
+  - **整体填充**：只有闭合形状的图标，如 `play.fill`、`pause.fill`。
+  - **部分填充**：只填指定的形状，其余保留线条，如 `speaker.wave.3.fill` 只填喇叭，声波仍是线条。
+  - **镂空**：填满外形，再把内部的线条从中挖空，如 `xmark.circle.fill` 是实心圆中挖出的叉号。
+- 应用用到对照表中没有的名字时构建失败并指向该声明。彩色图像与品牌图形属于内容，不参与主题着色。
+- 授权：Lucide 为 ISC 授权，其中源自 Feather 的图标为 MIT 授权，两者都要求随副本保留版权与授权声明。生成的页面目录包含 `THIRD_PARTY_NOTICES.txt`，收录两份授权全文；加了填充的图标是基于 Lucide 的修改版，不作为官方 Lucide 图标发布。
 
 ## 9. 可访问性与本地化
 

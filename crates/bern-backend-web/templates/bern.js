@@ -854,14 +854,18 @@ export function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+let iconSequence = 0;
+
+/// A Lucide icon: the shapes inherit Lucide's stroke from the root, and a
+/// knocked-out icon's mask gets an id of its own.
 export function icon(name, size = 16) {
   const svg = document.createElementNS(SVG, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", size);
-  svg.setAttribute("height", size);
-  svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("class", "bern-icon");
-  svg.innerHTML = icons[name] ?? icons.circle ?? "";
+  for (const [attribute, value] of [
+    ["viewBox", "0 0 24 24"], ["width", size], ["height", size], ["fill", "none"], ["stroke", "currentColor"],
+    ["stroke-width", "2"], ["stroke-linecap", "round"], ["stroke-linejoin", "round"], ["aria-hidden", "true"],
+    ["class", "bern-icon"],
+  ]) svg.setAttribute(attribute, value);
+  svg.innerHTML = (icons[name] ?? icons.circle ?? "").replaceAll("__ID__", `bern-icon-${++iconSequence}`);
   return svg;
 }
 

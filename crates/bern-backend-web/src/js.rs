@@ -1349,6 +1349,9 @@ impl<'a> Generator<'a> {
         ));
         out.line(format!("primary: {},", string(&app.windows.primary)));
         out.line(format!("strings: {strings},"));
+        out.line(
+            "// Icons: Lucide (ISC; icons derived from Feather MIT), see THIRD_PARTY_NOTICES.txt.",
+        );
         out.line(format!("icons: {{ {} }},", icons.join(", ")));
         out.line("engine,");
         out.line(format!("sessions: [{}],", sessions.join(", ")));
