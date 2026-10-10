@@ -1,4 +1,4 @@
-error: unknown component `Marquee`; built-in components are: WindowSet, Window, Column, Row, Spacer, Divider, ScrollView, SplitView, Sidebar, Detail, SidebarItem, Section, Form, Navigation, Destination, NavLink, Tabs, Tab, Toolbar, List, ForEach, Text, Label, Button, IconButton, TextInput, Search, Switch, Slider, Picker
+error: unknown component `Marquee`; built-in components are: WindowSet, Window, Column, Row, Spacer, Divider, ScrollView, SplitView, Sidebar, Detail, SidebarItem, Section, Form, Navigation, Destination, NavLink, Tabs, Tab, Toolbar, List, ForEach, Text, Label, Button, IconButton, TextInput, Search, Switch, Slider, Video, Picker
   --> tests/ui/fail_unknown_component.rs:40:11
    |
 40 |     ui! { Marquee(content: tr! { "en" => "Hi" }) }

@@ -33,6 +33,159 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
             ("ja", "アプリを起動できませんでした"),
         ],
     ),
+    (
+        "bern.media.video",
+        &[
+            ("zh-Hans", "视频"),
+            ("zh-Hant", "影片"),
+            ("en", "Video"),
+            ("ja", "ビデオ"),
+        ],
+    ),
+    (
+        "bern.media.play",
+        &[
+            ("zh-Hans", "播放"),
+            ("zh-Hant", "播放"),
+            ("en", "Play"),
+            ("ja", "再生"),
+        ],
+    ),
+    (
+        "bern.media.pause",
+        &[
+            ("zh-Hans", "暂停"),
+            ("zh-Hant", "暫停"),
+            ("en", "Pause"),
+            ("ja", "一時停止"),
+        ],
+    ),
+    (
+        "bern.media.mute",
+        &[
+            ("zh-Hans", "静音"),
+            ("zh-Hant", "靜音"),
+            ("en", "Mute"),
+            ("ja", "消音"),
+        ],
+    ),
+    (
+        "bern.media.unmute",
+        &[
+            ("zh-Hans", "取消静音"),
+            ("zh-Hant", "取消靜音"),
+            ("en", "Unmute"),
+            ("ja", "消音を解除"),
+        ],
+    ),
+    (
+        "bern.media.position",
+        &[
+            ("zh-Hans", "播放位置"),
+            ("zh-Hant", "播放位置"),
+            ("en", "Playback Position"),
+            ("ja", "再生位置"),
+        ],
+    ),
+    (
+        "bern.media.volume",
+        &[
+            ("zh-Hans", "音量"),
+            ("zh-Hant", "音量"),
+            ("en", "Volume"),
+            ("ja", "音量"),
+        ],
+    ),
+    (
+        "bern.media.live",
+        &[
+            ("zh-Hans", "直播"),
+            ("zh-Hant", "直播"),
+            ("en", "Live"),
+            ("ja", "ライブ"),
+        ],
+    ),
+    (
+        "bern.media.empty",
+        &[
+            ("zh-Hans", "没有媒体"),
+            ("zh-Hant", "沒有媒體"),
+            ("en", "No Media"),
+            ("ja", "メディアがありません"),
+        ],
+    ),
+    (
+        "bern.media.failed",
+        &[
+            ("zh-Hans", "无法播放"),
+            ("zh-Hant", "無法播放"),
+            ("en", "Can’t Play"),
+            ("ja", "再生できません"),
+        ],
+    ),
+    (
+        "bern.media.unavailable",
+        &[
+            ("zh-Hans", "播放器不可用"),
+            ("zh-Hant", "播放器無法使用"),
+            ("en", "Player Unavailable"),
+            ("ja", "プレーヤーを使用できません"),
+        ],
+    ),
+    (
+        "bern.close.save",
+        &[
+            ("zh-Hans", "存储"),
+            ("zh-Hant", "儲存"),
+            ("en", "Save"),
+            ("ja", "保存"),
+        ],
+    ),
+    (
+        "bern.close.dont_save",
+        &[
+            ("zh-Hans", "不存储"),
+            ("zh-Hant", "不儲存"),
+            ("en", "Don’t Save"),
+            ("ja", "保存しない"),
+        ],
+    ),
+    (
+        "bern.close.discard",
+        &[
+            ("zh-Hans", "放弃更改"),
+            ("zh-Hant", "放棄更改"),
+            ("en", "Discard Changes"),
+            ("ja", "変更を破棄"),
+        ],
+    ),
+    (
+        "bern.close.cancel",
+        &[
+            ("zh-Hans", "取消"),
+            ("zh-Hant", "取消"),
+            ("en", "Cancel"),
+            ("ja", "キャンセル"),
+        ],
+    ),
+    (
+        "bern.close.save_detail",
+        &[
+            ("zh-Hans", "如果不存储，你的更改将会丢失。"),
+            ("zh-Hant", "如果不儲存，你的更改將會遺失。"),
+            ("en", "Your changes will be lost if you don’t save them."),
+            ("ja", "保存しないと、変更内容は失われます。"),
+        ],
+    ),
+    (
+        "bern.close.discard_detail",
+        &[
+            ("zh-Hans", "关闭窗口会放弃这些更改。"),
+            ("zh-Hant", "關閉視窗會放棄這些更改。"),
+            ("en", "Closing the window discards these changes."),
+            ("ja", "ウインドウを閉じると、これらの変更は破棄されます。"),
+        ],
+    ),
 ];
 
 /// Languages the runtime's own strings are translated into.

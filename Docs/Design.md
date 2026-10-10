@@ -9,7 +9,7 @@
 - 首个目标平台：macOS（SwiftUI）
 - 主要验证应用：NipaPlay 3.0
 
-当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)：已完成阶段一与阶段二的 macOS 主干，其余能力仍为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议和最小异步查询场景，其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 

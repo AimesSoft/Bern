@@ -20,7 +20,7 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-示例展示侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、搜索、列表到详情的推入导航、工具栏分段选择器，以及带页签的设置窗口，支持简体中文和英文。
+示例展示侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、搜索、列表到详情的推入导航、工具栏分段选择器、视频播放（AVFoundation，命令驱动的标准控制条），以及带页签的设置窗口和关闭前确认，支持简体中文和英文。
 
 应用运行时，可以用同一套命令从外部驱动它：
 
@@ -29,6 +29,8 @@ target/bern/macos/bin/showcase --help
 target/bern/macos/bin/showcase showcase record --action Primary
 target/bern/macos/bin/showcase ui inspect
 target/bern/macos/bin/showcase ui select --target main_window.pages --option Library
+target/bern/macos/bin/showcase media players
+target/bern/macos/bin/showcase window close --window settings#1
 ```
 
 `target/bern/macos/bin/showcase-mcp` 是同一目录派生的 MCP 服务器（stdio）。控制通道只在 `Bern.toml` 的目标声明 `channels = ["ipc"]` 时启动；不声明则应用不监听任何端口。

@@ -9,12 +9,17 @@
 //! Callbacks may run on engine or channel threads; the frontend moves work
 //! to its UI thread. All functions catch Rust panics at the boundary.
 
+mod media;
+
 use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
+use bern_media::{MediaHub, MediaSubscription};
 use bern_protocol::{
     CommandError, CommandOutcome, Invocation, Reader, SessionCommand, Type, Value, Writer, decode,
     encode, session_catalog,
 };
-use bern_runtime::{SessionHandler, SessionSpec, Sessions, UiSession};
+use bern_runtime::{
+    CloseDecision, CloseStep, DecisionStep, SessionHandler, SessionSpec, Sessions, UiSession,
+};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -23,6 +28,7 @@ use std::sync::mpsc::{Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+pub use bern_media as media_contract;
 pub use bern_protocol as protocol;
 pub use bern_runtime as runtime;
 pub use bern_runtime::{SessionType, WindowKind};
@@ -61,6 +67,10 @@ pub struct BernCallbacks {
     pub on_reply: extern "C" fn(*mut c_void, u64, *const u8, usize),
     /// A session command from an external entry for the live UI.
     pub on_session_request: extern "C" fn(*mut c_void, u64, *const u8, usize),
+    /// A media request for the frontend's media executor.
+    pub on_media_request: extern "C" fn(*mut c_void, *const u8, usize),
+    /// Merged media state: revision, then every player.
+    pub on_media_state: extern "C" fn(*mut c_void, *const u8, usize),
 }
 
 impl BernCallbacks {
@@ -72,6 +82,12 @@ impl BernCallbacks {
     }
     fn session_request(&self, request: u64, bytes: &[u8]) {
         (self.on_session_request)(self.context, request, bytes.as_ptr(), bytes.len());
+    }
+    fn media_request(&self, bytes: &[u8]) {
+        (self.on_media_request)(self.context, bytes.as_ptr(), bytes.len());
+    }
+    fn media_state(&self, bytes: &[u8]) {
+        (self.on_media_state)(self.context, bytes.as_ptr(), bytes.len());
     }
 }
 
@@ -86,6 +102,8 @@ pub struct AppSpec {
     /// Start the local control channel for CLI, JSON and MCP entries.
     pub ipc: bool,
     pub session: SessionSpec,
+    /// Players owned by the application, from the `#[bern::players]` catalog.
+    pub players: Vec<String>,
 }
 
 /// Forwards session commands from external entries to the frontend, which
@@ -199,7 +217,9 @@ pub struct BernApp {
     session: Arc<Mutex<UiSession>>,
     sessions: Sessions,
     bridge: Arc<UiBridge>,
+    media: MediaHub,
     _subscription: Subscription,
+    _media_subscription: MediaSubscription,
     channel: Option<bern_transport_ipc::Server>,
 }
 
@@ -266,10 +286,19 @@ pub unsafe fn start_app<E: EngineProtocol>(
             let bytes = encode_changes(&updates, update.revision, &update.changes);
             callbacks.state(&bytes);
         });
+        let media = MediaHub::new(&spec.players);
+        let media_subscription = media.subscribe(move |update| {
+            callbacks.media_state(&media::state_bytes(update.revision, &update.players));
+        });
         let channel = if spec.ipc {
             Some(
-                bern_transport_ipc::Server::start(host.clone(), sessions.clone(), spec.bundle_id)
-                    .map_err(|error| format!("cannot start the control channel: {error}"))?,
+                bern_transport_ipc::Server::start(
+                    host.clone(),
+                    sessions.clone(),
+                    media.clone(),
+                    spec.bundle_id,
+                )
+                .map_err(|error| format!("cannot start the control channel: {error}"))?,
             )
         } else {
             None
@@ -280,7 +309,9 @@ pub unsafe fn start_app<E: EngineProtocol>(
             session,
             sessions,
             bridge,
+            media,
             _subscription: subscription,
+            _media_subscription: media_subscription,
             channel,
         })
     }));
@@ -326,6 +357,7 @@ pub unsafe extern "C" fn bern_app_stop(app: *mut BernApp) {
     let app = unsafe { Box::from_raw(app) };
     let _ = catch_unwind(AssertUnwindSafe(|| {
         app.sessions.unregister(&app.bridge.session_id);
+        app.media.detach_executor();
         app.host.stop();
         drop(app);
     }));
@@ -376,21 +408,31 @@ fn outcome_bytes(
     command: usize,
     outcome: &CommandOutcome,
 ) -> Vec<u8> {
+    result_bytes(
+        &outcome.result,
+        outcome.revision,
+        &descriptor.commands[command].result,
+        &descriptor.types,
+    )
+}
+
+/// `0, revision, result` or `1, revision, code, message`.
+fn result_bytes(
+    result: &Result<Value, CommandError>,
+    revision: u64,
+    ty: &Type,
+    types: &bern_protocol::TypeTable,
+) -> Vec<u8> {
     let mut writer = Writer::new();
-    match &outcome.result {
+    match result {
         Ok(value) => {
             writer.u8(0);
-            writer.u64(outcome.revision);
-            encode(
-                value,
-                &descriptor.commands[command].result,
-                &descriptor.types,
-                &mut writer,
-            );
+            writer.u64(revision);
+            encode(value, ty, types, &mut writer);
         }
         Err(error) => {
             writer.u8(1);
-            writer.u64(outcome.revision);
+            writer.u64(revision);
             write_error(&mut writer, error);
         }
     }
@@ -514,10 +556,113 @@ pub unsafe extern "C" fn bern_window_opened(app: *mut BernApp, kind: u32) -> Ber
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bern_window_closed(app: *mut BernApp, kind: u32, generation: u64) {
     with_app(app, (), |app| {
-        app.session
-            .lock()
-            .expect("session lock")
-            .window_closed(kind as usize, generation);
+        let closed = {
+            let mut session = app.session.lock().expect("session lock");
+            let id = session
+                .spec()
+                .windows
+                .get(kind as usize)
+                .map(|window| format!("{}#{generation}", window.id));
+            session
+                .window_closed(kind as usize, generation)
+                .then_some(id)
+                .flatten()
+        };
+        // Window-scoped media goes with the instance; application players stay.
+        if let Some(id) = closed {
+            app.media.release_window(&id);
+        }
+    })
+}
+
+/// Request closing a window instance after the frontend evaluated the
+/// window's declared close check. Returns `0, 0` to close now,
+/// `0, 1, confirmation, draft revision` when a decision is needed, or
+/// `1, code, message`.
+///
+/// # Safety
+/// `app` must be null or a live handle from `bern_app_start`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_window_request_close(
+    app: *mut BernApp,
+    kind: u32,
+    generation: u64,
+    needs_confirmation: u8,
+    can_save: u8,
+) -> BernBuffer {
+    with_app(app, BernBuffer::empty(), |app| {
+        let step = app.session.lock().expect("session lock").request_close(
+            kind as usize,
+            generation,
+            needs_confirmation != 0,
+            can_save != 0,
+        );
+        let mut writer = Writer::new();
+        match step {
+            Ok(CloseStep::Close) => {
+                writer.u8(0);
+                writer.u8(0);
+            }
+            Ok(CloseStep::Confirm(confirmation)) => {
+                writer.u8(0);
+                writer.u8(1);
+                writer.text(&confirmation.id);
+                writer.u64(confirmation.draft_revision);
+            }
+            Err(error) => return BernBuffer::from_vec(error_bytes(&error)),
+        }
+        BernBuffer::from_vec(writer.bytes)
+    })
+}
+
+/// Decide a pending close confirmation. Layout of `bytes`: confirmation
+/// text, decision u32 (0 save, 1 discard, 2 cancel). Returns `0, step`
+/// (0 close, 1 save, 2 cancel) or `1, code, message`; stale decisions fail
+/// with `stale_confirmation` or `stale_window`.
+///
+/// # Safety
+/// `bytes` must point to `len` readable bytes or be null with `len == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_window_confirm_close(
+    app: *mut BernApp,
+    kind: u32,
+    generation: u64,
+    bytes: *const u8,
+    len: usize,
+) -> BernBuffer {
+    // SAFETY: guaranteed by the caller.
+    let bytes = unsafe { slice(bytes, len) };
+    with_app(app, BernBuffer::empty(), |app| {
+        let mut reader = Reader::new(bytes);
+        let decided = (|| {
+            let confirmation = reader
+                .text()
+                .map_err(|error| CommandError::invalid_params(error.0))?;
+            let decision = reader
+                .u32()
+                .ok()
+                .and_then(CloseDecision::from_index)
+                .ok_or_else(|| CommandError::invalid_params("unknown close decision"))?;
+            app.session.lock().expect("session lock").confirm_close(
+                kind as usize,
+                generation,
+                &confirmation,
+                decision,
+            )
+        })();
+        BernBuffer::from_vec(match decided {
+            Ok(step) => {
+                let mut writer = Writer::new();
+                writer.u8(0);
+                writer.u8(match step {
+                    DecisionStep::Close => 0,
+                    DecisionStep::Save => 1,
+                    DecisionStep::Cancel => 2,
+                });
+                writer.bytes
+            }
+            Err(error) => error_bytes(&error),
+        })
     })
 }
 

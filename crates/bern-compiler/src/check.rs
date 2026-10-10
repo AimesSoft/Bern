@@ -20,6 +20,7 @@ pub struct Signature {
 enum Root {
     Client,
     Windows,
+    Players,
     Session(String),
     Local(Type),
 }
@@ -108,6 +109,7 @@ pub struct Checker<'a> {
     pub sessions: &'a [ir::SessionDef],
     pub signatures: &'a BTreeMap<String, Signature>,
     pub window_ids: &'a [String],
+    pub player_ids: &'a [String],
     pub languages: &'a [String],
     pub default_language: &'a str,
     pub strict: bool,
@@ -126,6 +128,7 @@ impl<'a> Checker<'a> {
         sessions: &'a [ir::SessionDef],
         signatures: &'a BTreeMap<String, Signature>,
         window_ids: &'a [String],
+        player_ids: &'a [String],
         languages: &'a [String],
         default_language: &'a str,
         strict: bool,
@@ -136,6 +139,7 @@ impl<'a> Checker<'a> {
             sessions,
             signatures,
             window_ids,
+            player_ids,
             languages,
             default_language,
             strict,
@@ -172,6 +176,7 @@ impl<'a> Checker<'a> {
             let root = match kind {
                 ir::ParamKind::Client => Root::Client,
                 ir::ParamKind::Windows => Root::Windows,
+                ir::ParamKind::Players => Root::Players,
                 ir::ParamKind::Value { ty } => Root::Local(ty.clone()),
                 ir::ParamKind::Session { session } => Root::Session(session.clone()),
             };
@@ -580,6 +585,8 @@ impl<'a> Checker<'a> {
                         None
                     }
                 },
+                PropKind::MediaSource => self.media_source(&prop.value, scope),
+                PropKind::Player => self.player(&prop.value, scope),
                 PropKind::SelectionField | PropKind::PathField | PropKind::Items => continue,
             };
             if let Some(lowered) = lowered {
@@ -765,6 +772,64 @@ impl<'a> Checker<'a> {
         Some(ir::Prop::Window { id })
     }
 
+    fn media_source(&mut self, expr: &ast::Expr, scope: &Scope) -> Option<ir::Prop> {
+        let ast::Expr::Path(path) = expr else {
+            self.error(
+                expr.span(),
+                "expected a `MediaSource` binding such as `app.clip`",
+            );
+            return None;
+        };
+        let lowered = self.binding(path, scope)?;
+        let source = Type::Record {
+            name: bern_media::MEDIA_SOURCE.into(),
+        };
+        if lowered.ty != source && lowered.ty != Type::optional(source) {
+            self.error(
+                path.span(),
+                format!(
+                    "`source` needs a MediaSource or Option<MediaSource>, found {}",
+                    lowered.ty.display()
+                ),
+            );
+            return None;
+        }
+        Some(ir::Prop::Expr { expr: lowered })
+    }
+
+    /// `players.preview` names an application player.
+    fn player_ref(&mut self, segments: &[syn::Ident], scope: &Scope) -> Option<String> {
+        let root = segments.first()?;
+        if !matches!(scope.get(&root.to_string()), Some(Root::Players)) || segments.len() != 2 {
+            self.error(
+                root.span(),
+                "expected an application player such as `players.preview`",
+            );
+            return None;
+        }
+        let id = segments[1].to_string();
+        if !self.player_ids.contains(&id) {
+            self.error(
+                segments[1].span(),
+                format!("player `{id}` is not declared in the #[bern::players] catalog"),
+            );
+            return None;
+        }
+        Some(id)
+    }
+
+    fn player(&mut self, expr: &ast::Expr, scope: &Scope) -> Option<ir::Prop> {
+        let ast::Expr::Path(path) = expr else {
+            self.error(
+                expr.span(),
+                "expected an application player such as `players.preview`",
+            );
+            return None;
+        };
+        self.player_ref(&path.segments, scope)
+            .map(|id| ir::Prop::Player { id })
+    }
+
     fn field_prop(
         &mut self,
         expr: &ast::Expr,
@@ -902,6 +967,13 @@ impl<'a> Checker<'a> {
             }
             Root::Windows => {
                 self.error(path.span(), "window handles are only used in actions");
+                return None;
+            }
+            Root::Players => {
+                self.error(
+                    path.span(),
+                    "players are used by `Video(player: …)` and in actions such as `players.preview.play()`",
+                );
                 return None;
             }
             Root::Session(session) => {
@@ -1321,6 +1393,52 @@ impl<'a> Checker<'a> {
                 };
                 Some(ir::Action::Window { op, window })
             }
+            Some(Root::Players) => {
+                let player = self.player_ref(&action.receiver, scope)?;
+                let method = action.method.to_string();
+                let Some(op) = ir::MediaOp::ALL
+                    .into_iter()
+                    .find(|op| op.method() == method)
+                else {
+                    self.error(
+                        action.method.span(),
+                        format!(
+                            "players support {}, not `{method}`",
+                            ir::MediaOp::ALL.map(ir::MediaOp::method).join(", ")
+                        ),
+                    );
+                    return None;
+                };
+                let params: Vec<(&str, Type)> = match op {
+                    ir::MediaOp::Open => vec![(
+                        "source",
+                        Type::Record {
+                            name: bern_media::MEDIA_SOURCE.into(),
+                        },
+                    )],
+                    ir::MediaOp::Seek => vec![("position_ms", Type::Int)],
+                    ir::MediaOp::SetVolume => vec![("volume", Type::Float)],
+                    ir::MediaOp::SetMuted => vec![("muted", Type::Bool)],
+                    ir::MediaOp::Play | ir::MediaOp::Pause => vec![],
+                };
+                if params.len() != action.args.len() {
+                    self.error(
+                        action.method.span(),
+                        format!(
+                            "`{}` takes {} argument(s), found {}",
+                            op.command(),
+                            params.len(),
+                            action.args.len()
+                        ),
+                    );
+                    return None;
+                }
+                let mut args = Vec::new();
+                for (arg, (name, ty)) in action.args.iter().zip(&params) {
+                    args.push(self.expect(arg, ty, scope, &format!("argument `{name}`"))?);
+                }
+                Some(ir::Action::Media { player, op, args })
+            }
             _ => {
                 self.error(
                     action.receiver[0].span(),
@@ -1405,6 +1523,24 @@ impl<'a> Checker<'a> {
                         self.error(
                             other.span(),
                             "pass the window handle, e.g. `windows: windows`",
+                        );
+                        None
+                    }
+                },
+                ir::ParamKind::Players => match &arg.value {
+                    ast::Expr::Path(path)
+                        if path.segments.len() == 1
+                            && matches!(
+                                scope.get(&path.segments[0].to_string()),
+                                Some(Root::Players)
+                            ) =>
+                    {
+                        Some(ir::ComponentArg::Players)
+                    }
+                    other => {
+                        self.error(
+                            other.span(),
+                            "pass the player catalog, e.g. `players: players`",
                         );
                         None
                     }

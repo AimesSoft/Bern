@@ -164,6 +164,57 @@ impl WindowRef {
     }
 }
 
+/// A media player declared with `#[bern::players]`. Its methods are the
+/// standard media commands, usable as actions such as
+/// `=> players.preview.open(clip.source)`.
+#[derive(Clone, Copy)]
+pub struct PlayerRef {
+    _private: (),
+}
+
+impl PlayerRef {
+    pub const fn declared() -> Self {
+        Self { _private: () }
+    }
+    /// Load a new source (`media.open`).
+    #[allow(unused_variables)]
+    pub fn open(&self, source: crate::media::MediaSource) -> CommandRef {
+        CommandRef::declared()
+    }
+    /// Start or resume playback (`media.play`).
+    pub fn play(&self) -> CommandRef {
+        CommandRef::declared()
+    }
+    /// Pause playback (`media.pause`).
+    pub fn pause(&self) -> CommandRef {
+        CommandRef::declared()
+    }
+    /// Move the playback position (`media.seek`).
+    #[allow(unused_variables)]
+    pub fn seek(&self, position_ms: i64) -> CommandRef {
+        CommandRef::declared()
+    }
+    /// Set the volume between 0 and 1 (`media.set_volume`).
+    #[allow(unused_variables)]
+    pub fn set_volume(&self, volume: f64) -> CommandRef {
+        CommandRef::declared()
+    }
+    /// Mute or unmute audio (`media.set_muted`).
+    #[allow(unused_variables)]
+    pub fn set_muted(&self, muted: bool) -> CommandRef {
+        CommandRef::declared()
+    }
+}
+
+/// Values a `Video(source: …)` can follow: a `MediaSource`, optional or not.
+pub trait SourceBinding {}
+
+impl SourceBinding for Binding<crate::media::MediaSource> {}
+impl SourceBinding for Binding<Option<crate::media::MediaSource>> {}
+impl SourceBinding for SessionField<crate::media::MediaSource> {}
+impl SourceBinding for SessionField<Option<crate::media::MediaSource>> {}
+impl SourceBinding for crate::media::MediaSourceRef {}
+
 macro_rules! scalar {
     ($ty:ty, $variant:ident, $name:literal) => {
         impl BernValue for $ty {

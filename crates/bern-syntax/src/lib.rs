@@ -14,9 +14,9 @@ mod ui;
 pub use ast::*;
 pub use items::{
     CommandItem, CommandParam, CommandsItem, ComponentItem, FieldItem, Param, ParamKind,
-    ProtocolArgs, ProtocolItem, SessionItem, SourceItems, StateItem, ValueItem, ValueKind,
-    VariantItem, doc_comment, is_bern_attr, parse_component, parse_protocol, parse_protocol_args,
-    parse_session, parse_source_file, parse_value, type_ref,
+    PlayerField, PlayersItem, ProtocolArgs, ProtocolItem, SessionItem, SourceItems, StateItem,
+    ValueItem, ValueKind, VariantItem, doc_comment, is_bern_attr, parse_component, parse_players,
+    parse_protocol, parse_protocol_args, parse_session, parse_source_file, parse_value, type_ref,
 };
 
 /// Parse the body of a `ui!` invocation.
@@ -27,6 +27,20 @@ pub fn parse_ui(tokens: proc_macro2::TokenStream) -> syn::Result<UiBody> {
 /// Parse a standalone `tr!` invocation body.
 pub fn parse_tr(tokens: proc_macro2::TokenStream) -> syn::Result<Tr> {
     syn::parse2::<expr::TrBody>(tokens).map(|body| body.0)
+}
+
+/// Lower snake case identifiers used for ids: `preview`, `main_window`.
+pub fn valid_id(name: &str) -> bool {
+    bern_protocol::valid_name(name)
+}
+
+/// Whether a type mentions the named type anywhere.
+pub fn mentions(ty: &TypeRef, name: &str) -> bool {
+    match ty {
+        TypeRef::Named(path) => path.last().is_some_and(|last| last == name),
+        TypeRef::Optional(inner) | TypeRef::List(inner) => mentions(inner, name),
+        _ => false,
+    }
 }
 
 /// Convert `snake_case` to `PascalCase`.

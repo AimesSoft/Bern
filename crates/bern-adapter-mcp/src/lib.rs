@@ -7,6 +7,7 @@
 //! envelopes are never passed off as MCP messages.
 
 use bern_adapter_json::{ClientMessage, ServerMessage, command_input_schema};
+use bern_media::media_catalog;
 use bern_protocol::{CommandSpec, OperationKind, ProtocolDescriptor, Retry, session_catalog};
 use bern_transport_ipc::Client;
 use serde_json::{Map, Value as Json, json};
@@ -85,6 +86,12 @@ impl<'a> Server<'a> {
                 )
             })
             .collect();
+        let (media_types, media_specs) = media_catalog();
+        tools.extend(
+            media_specs
+                .iter()
+                .map(|spec| tool(spec, command_input_schema(spec, &media_types), false)),
+        );
         let (session_types, session_specs) = session_catalog();
         tools.extend(
             session_specs
@@ -125,10 +132,12 @@ impl<'a> Server<'a> {
     fn call(&mut self, name: &str, mut arguments: Map<String, Json>) -> Json {
         let descriptor = self.descriptor;
         let (_, session_specs) = session_catalog();
+        let (_, media_specs) = media_catalog();
         let message =
             if let Some(spec) = descriptor
                 .commands
                 .iter()
+                .chain(&media_specs)
                 .find(|spec| spec.external.mcp == name)
             {
                 let id = spec.id.clone();
@@ -235,6 +244,7 @@ impl<'a> Server<'a> {
                     "serverInfo": { "name": self.name, "version": self.version },
                     "instructions": format!(
                         "Tools control the running `{}` application. Engine tools change business state; \
+                         media_* tools drive the engine's players by player_id (see media_players); \
                          ui_* and window_* tools act on the live UI through its real controls — call ui_inspect \
                          first to find control targets.",
                         self.descriptor.namespace
@@ -360,6 +370,12 @@ mod tests {
             .unwrap();
         assert_eq!(inspect["annotations"]["readOnlyHint"], true);
         assert!(inspect["inputSchema"]["properties"]["session_id"].is_object());
+        let play = tools
+            .iter()
+            .find(|tool| tool["name"] == "media_play")
+            .unwrap();
+        assert_eq!(play["inputSchema"]["required"], json!(["player_id"]));
+        assert!(play["inputSchema"]["properties"]["session_id"].is_null());
     }
 
     #[test]

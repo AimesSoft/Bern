@@ -13,8 +13,8 @@ mod swift;
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
 use bern_target_api::{
-    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, Target,
-    TargetConfig, TargetDescriptor, WindowCapabilities, check_common,
+    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
+    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common,
 };
 use std::path::PathBuf;
 
@@ -24,6 +24,14 @@ pub use swift::Generator;
 pub const MINIMUM_MACOS: &str = "14.0";
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
+const MEDIA: &str = include_str!("../templates/BernMedia.swift");
+
+/// Swift sources compiled into the app, in order.
+const SOURCES: &[&str] = &[
+    "BernRuntime.swift",
+    "BernMedia.swift",
+    "BernGenerated.swift",
+];
 const HEADER: &str = include_str!("../templates/bern.h");
 
 pub struct SwiftUiMacos;
@@ -60,6 +68,16 @@ impl Target for SwiftUiMacos {
                 virtual_windows: false,
             },
             channels: &["ipc"],
+            media: Some(MediaSupport {
+                contract_versions: bern_media::MEDIA_CONTRACT_VERSION
+                    ..=bern_media::MEDIA_CONTRACT_VERSION,
+                backend: "avfoundation",
+                backend_version: "1",
+                presenter: "avplayerview",
+                presenter_version: "1",
+                background_playback: true,
+                multi_view: true,
+            }),
         }
     }
 
@@ -174,6 +192,7 @@ impl Target for SwiftUiMacos {
         let bundle = PathBuf::from(format!("{product}.app"));
         let mut files = vec![
             GeneratedFile::text("Sources/BernRuntime.swift", RUNTIME),
+            GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text(
                 "Sources/BernGenerated.swift",
@@ -214,6 +233,20 @@ impl Target for SwiftUiMacos {
             ));
         }
         let (architecture, _) = architecture();
+        let media = self
+            .descriptor()
+            .media
+            .filter(|_| app.uses_media())
+            .map(|media| {
+                serde_json::json!({
+                    "contract": bern_media::MEDIA_CONTRACT_VERSION,
+                    "backend": media.backend,
+                    "backend_version": media.backend_version,
+                    "presenter": media.presenter,
+                    "presenter_version": media.presenter_version,
+                    "players": app.players.iter().map(|player| &player.id).collect::<Vec<_>>(),
+                })
+            });
         let manifest = serde_json::json!({
             "target": self.descriptor().id,
             "ui": "swiftui",
@@ -231,6 +264,7 @@ impl Target for SwiftUiMacos {
             "protocol": app.protocol.namespace,
             "protocol_fingerprint": format!("{:016x}", app.protocol.fingerprint()),
             "languages": app.languages.supported,
+            "media": media,
             "app_bundle": bundle,
         });
         files.push(GeneratedFile::text(
@@ -289,6 +323,10 @@ impl Target for SwiftUiMacos {
             "SwiftUI".into(),
             "-framework".into(),
             "AppKit".into(),
+            "-framework".into(),
+            "AVFoundation".into(),
+            "-framework".into(),
+            "AVKit".into(),
             "-module-cache-path".into(),
             context
                 .workspace_dir
@@ -301,7 +339,7 @@ impl Target for SwiftUiMacos {
         } else {
             vec!["-Onone".to_string(), "-g".into()]
         });
-        for file in ["BernRuntime.swift", "BernGenerated.swift"] {
+        for file in SOURCES {
             swiftc.push(sources.join(file).display().to_string());
         }
         swiftc.push("-o".into());

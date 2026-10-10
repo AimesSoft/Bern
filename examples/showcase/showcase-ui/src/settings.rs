@@ -43,8 +43,11 @@ pub fn settings_window(app: showcase::Client, #[session] settings: SettingsDraft
                         Switch(id: launch_at_login, label: tr! { "zh-Hans" => "登录时打开", "en" => "Open at login" }, value: settings.launch_at_login)
                         Switch(id: check_updates, label: tr! { "zh-Hans" => "自动检查更新", "en" => "Check for updates automatically" }, value: settings.check_updates)
                     }
-                    Section {
-                        TextInput(id: display_name, label: tr! { "zh-Hans" => "显示名称", "en" => "Display name" }, value: settings.display_name, prompt: tr! { "zh-Hans" => "未设置", "en" => "Not set" })
+                    Section(footer: tr! { "zh-Hans" => "关闭窗口时，若有未存储的名称，会询问是否存储。", "en" => "When you close the window with an unsaved name, you’re asked whether to save it." }) {
+                        TextInput(id: display_name, label: tr! { "zh-Hans" => "显示名称", "en" => "Display name" }, value: settings.display_name, prompt: tr! { "zh-Hans" => "新名称", "en" => "New name" }) => app.set_display_name(settings.display_name)
+                        if app.display_name != "" {
+                            Text(content: tr! { "zh-Hans" => "已存储的名称：{name}", "en" => "Saved name: {name}"; name: app.display_name }, emphasis: secondary)
+                        }
                     }
                 }
             }

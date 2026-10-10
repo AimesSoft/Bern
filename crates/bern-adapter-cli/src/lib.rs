@@ -6,6 +6,7 @@
 //! 1 command failed, 2 usage error, 3 no connection.
 
 use bern_adapter_json::{ClientMessage, ServerMessage, from_json};
+use bern_media::{MEDIA_SOURCE, media_catalog};
 use bern_protocol::{CommandSpec, ProtocolDescriptor, Type, TypeTable, session_catalog};
 use bern_transport_ipc::Client;
 use serde_json::{Map, Value as Json};
@@ -84,6 +85,10 @@ fn value(text: &str, ty: &Type, types: &TypeTable) -> Result<Json, String> {
         Type::Enum { name } if types.enum_def(name).is_some_and(|def| def.is_unit_only()) => {
             Json::String(text.to_string())
         }
+        // A media source may be given as its URL.
+        Type::Record { name } if name == MEDIA_SOURCE && !text.trim_start().starts_with('{') => {
+            serde_json::json!({ "url": text })
+        }
         _ => serde_json::from_str(text).map_err(|error| format!("expected JSON: {error}"))?,
     };
     from_json(&json, ty, types).map_err(|error| error.message)?;
@@ -139,6 +144,11 @@ fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
     for spec in &descriptor.commands {
         list(&mut text, spec, &descriptor.types);
     }
+    let (media_types, media_specs) = media_catalog();
+    text.push_str("\nMedia commands (act on the engine's players):\n");
+    for spec in &media_specs {
+        list(&mut text, spec, &media_types);
+    }
     text.push_str("\nUI session commands (need a running UI):\n");
     for spec in &session_specs {
         list(&mut text, spec, &session_types);
@@ -180,9 +190,11 @@ pub fn run_with(
         return if options.help { 0 } else { USAGE_ERROR };
     }
     let (session_types, session_specs) = session_catalog();
+    let (media_types, media_specs) = media_catalog();
     let words = options.words.join(" ");
     enum Target<'a> {
         Engine(&'a CommandSpec),
+        Media(&'a CommandSpec),
         Session(&'a CommandSpec),
         State,
         Sessions,
@@ -194,6 +206,11 @@ pub fn run_with(
         .find(|spec| spec.external.cli.join(" ") == words)
     {
         Target::Engine(spec)
+    } else if let Some(spec) = media_specs
+        .iter()
+        .find(|spec| spec.external.cli.join(" ") == words)
+    {
+        Target::Media(spec)
     } else if let Some(spec) = session_specs
         .iter()
         .find(|spec| spec.external.cli.join(" ") == words)
@@ -211,11 +228,11 @@ pub fn run_with(
         }
     };
     let mut params = Map::new();
-    if let Target::Engine(spec) | Target::Session(spec) = target {
-        let types = if matches!(target, Target::Engine(_)) {
-            &descriptor.types
-        } else {
-            &session_types
+    if let Target::Engine(spec) | Target::Media(spec) | Target::Session(spec) = target {
+        let types = match target {
+            Target::Engine(_) => &descriptor.types,
+            Target::Media(_) => &media_types,
+            _ => &session_types,
         };
         for (param, text) in &options.params {
             let Some(param_spec) = spec
@@ -270,7 +287,7 @@ pub fn run_with(
     let engine_id = client.engine_id.clone();
     let session_id = options.session.clone();
     let reply = client.request(|request_id| match target {
-        Target::Engine(spec) => ClientMessage::Command {
+        Target::Engine(spec) | Target::Media(spec) => ClientMessage::Command {
             request_id,
             engine_id,
             command: spec.id.clone(),
@@ -315,11 +332,14 @@ pub fn run_with(
         Ok(ServerMessage::Catalog {
             protocol,
             session_commands,
+            media_commands,
             ..
         }) => {
-            print(
-                &serde_json::json!({ "protocol": protocol, "session_commands": session_commands }),
-            );
+            print(&serde_json::json!({
+                "protocol": protocol,
+                "media_commands": media_commands,
+                "session_commands": session_commands,
+            }));
             0
         }
         Ok(other) => {
@@ -367,5 +387,14 @@ mod tests {
             Json::Null
         );
         assert!(value("[1,2]", &Type::list(Type::Int), &types).is_ok());
+        let (media_types, _) = media_catalog();
+        let source = Type::Record {
+            name: MEDIA_SOURCE.into(),
+        };
+        assert_eq!(
+            value("file:///a.mp4", &source, &media_types).unwrap(),
+            serde_json::json!({ "url": "file:///a.mp4" })
+        );
+        assert!(value("{\"url\": 1}", &source, &media_types).is_err());
     }
 }

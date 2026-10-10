@@ -68,3 +68,7 @@ pub fn command(_: CommandRef) {}
 pub fn enum_value<E: BernEnum>(_: &E) {}
 
 pub fn assert_value<T: BernValue>() {}
+
+pub fn media_source<S: SourceBinding>(_: &S) {}
+
+pub fn player(_: &PlayerRef) {}

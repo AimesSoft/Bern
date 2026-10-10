@@ -644,6 +644,28 @@ impl<'a> Gen<'a> {
                 PropKind::TypeName => {
                     self.ident_prop(&prop.value, &prop_name);
                 }
+                PropKind::MediaSource => match &prop.value {
+                    Expr::Path(path) => {
+                        let tokens = self.path(path);
+                        pre.push(quote_spanned!(path.span()=> ::bern::__private::media_source(&#tokens);));
+                    }
+                    other => self.error(
+                        other.span(),
+                        "expected a `MediaSource` binding such as `app.clip`",
+                    ),
+                },
+                PropKind::Player => match &prop.value {
+                    Expr::Path(path) if path.segments.len() == 2 => {
+                        let tokens = self.path(path);
+                        pre.push(
+                            quote_spanned!(path.span()=> ::bern::__private::player(&#tokens);),
+                        );
+                    }
+                    other => self.error(
+                        other.span(),
+                        "expected an application player such as `players.preview`",
+                    ),
+                },
                 PropKind::SelectionField | PropKind::PathField | PropKind::Items => {}
             }
         }

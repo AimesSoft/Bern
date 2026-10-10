@@ -328,6 +328,7 @@ mod independent_target {
                     virtual_windows: true,
                 },
                 channels: &[],
+                media: None,
             }
         }
         fn check(&self, app: &ir::Application, _: &TargetConfig) -> Vec<Diagnostic> {
@@ -371,6 +372,12 @@ mod independent_target {
             problems
                 .iter()
                 .any(|d| d.message.contains("does not support `SplitView`"))
+        );
+        // Video needs a media backend the target does not have.
+        assert!(
+            problems
+                .iter()
+                .any(|d| d.message.contains("has no media backend"))
         );
         assert!(problems.iter().all(|d| d.location.is_some()));
     }
@@ -443,4 +450,234 @@ fn libraries_must_cover_the_application_languages() {
             .any(|e| e.message.contains("value parameters only"))
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+const MEDIA_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "demo", version = 1)]
+pub mod demo {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+        pub clip: Option<MediaSource>,
+        pub saved: String,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn save(&mut self, name: String) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+/// A project with application players, a media page and close checks.
+fn media_project(window_props: &str, window_action: &str, body: &str) -> String {
+    format!(
+        r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {{
+    pub name: String,
+}}
+
+#[bern::session]
+pub struct Other {{
+    pub note: String,
+}}
+
+#[bern::players]
+pub struct Players {{
+    /// The application's preview player.
+    pub preview: Player,
+}}
+
+#[component]
+pub fn app(
+    app: demo::Client,
+    windows: AppWindows,
+    players: Players,
+    #[session] draft: Draft,
+    #[session] other: Other,
+) -> impl View {{
+    ui! {{
+        WindowSet(handle: AppWindows, primary: main) {{
+            Window(id: main, title: tr! {{ "en" => "Main", "ja" => "メイン" }}, initial: open{window_props}) {{
+                page(app: app, players: players)
+            }}{window_action}
+            Window(id: notes, title: tr! {{ "en" => "Notes", "ja" => "メモ" }}) {{
+                notes_page()
+            }}
+        }}
+    }}
+}}
+
+#[component]
+pub fn notes_page(#[session] other: Other) -> impl View {{
+    ui! {{ TextInput(id: note, label: tr! {{ "en" => "Note", "ja" => "メモ" }}, value: other.note) }}
+}}
+
+#[component]
+pub fn page(app: demo::Client, players: Players, #[session] draft: Draft) -> impl View {{
+    ui! {{
+        {body}
+    }}
+}}
+"#
+    )
+}
+
+fn media_errors(window_props: &str, window_action: &str, body: &str) -> String {
+    match compile_project(
+        MEDIA_PROTOCOL,
+        &media_project(window_props, window_action, body),
+    ) {
+        Ok(_) => panic!("expected `{window_props}` / `{body}` to fail"),
+        Err(errors) => errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+const CLOSE_CHECK: &str = r#", confirm_close: draft.name != app.saved, close_message: tr! { "en" => "Save the name?", "ja" => "名前を保存しますか？" }"#;
+
+#[test]
+fn video_players_and_close_checks_lower_to_ir() {
+    let compiled = compile_project(
+        MEDIA_PROTOCOL,
+        &media_project(
+            CLOSE_CHECK,
+            " => app.save(draft.name)",
+            r#"Column {
+                Video(id: clip, source: app.clip, fit: cover)
+                Video(id: preview, player: players.preview, controls: none, label: tr! { "en" => "Preview", "ja" => "プレビュー" })
+                Button(id: play, label: tr! { "en" => "Play", "ja" => "再生" }) => players.preview.play()
+                Button(id: seek, label: tr! { "en" => "Start", "ja" => "最初" }) => players.preview.seek(0)
+                if let Some(clip) = app.clip {
+                    Button(id: open, label: tr! { "en" => "Open", "ja" => "開く" }) => players.preview.open(clip)
+                }
+                TextInput(id: name, label: tr! { "en" => "Name", "ja" => "名前" }, value: draft.name)
+            }"#,
+        ),
+    )
+    .unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
+        )
+    });
+    let app = &compiled.app;
+    assert_eq!(
+        app.players,
+        vec![ir::PlayerDef {
+            id: "preview".into(),
+            doc: "The application's preview player.".into()
+        }]
+    );
+    assert!(app.uses_media());
+    assert!(app.types.record_def(bern_media::MEDIA_SOURCE).is_some());
+    let main = app.window("main").unwrap();
+    let close = main.close.as_ref().expect("close check");
+    assert_eq!(close.when.sessions(), vec!["Draft".to_string()]);
+    assert!(matches!(close.save, Some(ir::Action::Engine { .. })));
+    assert!(app.window("notes").unwrap().close.is_none());
+    let page = app.component("page").unwrap();
+    let mut actions = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node
+            && let Some(ir::Action::Media { player, op, .. }) = &element.action
+        {
+            actions.push((player.clone(), *op));
+        }
+    });
+    assert_eq!(
+        actions,
+        vec![
+            ("preview".to_string(), ir::MediaOp::Play),
+            ("preview".to_string(), ir::MediaOp::Seek),
+            ("preview".to_string(), ir::MediaOp::Open),
+        ]
+    );
+}
+
+#[test]
+fn video_and_close_diagnostics() {
+    let video = [
+        (r#"Video(id: v)"#, "exactly one of `source:`"),
+        (
+            r#"Video(id: v, source: app.clip, player: players.preview)"#,
+            "exactly one of `source:`",
+        ),
+        (
+            r#"Video(id: v, source: app.count)"#,
+            "`source` needs a MediaSource or Option<MediaSource>, found int",
+        ),
+        (
+            r#"Video(id: v, player: players.extra)"#,
+            "player `extra` is not declared",
+        ),
+        (
+            r#"Button(id: b, label: tr! { "en" => "B", "ja" => "B" }) => players.preview.rewind()"#,
+            "players support open, play, pause, seek, set_volume, set_muted",
+        ),
+        (
+            r#"Button(id: b, label: tr! { "en" => "B", "ja" => "B" }) => players.preview.seek(draft.name)"#,
+            "argument `position_ms` must be int, found text",
+        ),
+        (
+            r#"Text(content: players.preview)"#,
+            "players are used by `Video(player: …)`",
+        ),
+    ];
+    for (body, expected) in video {
+        let output = media_errors("", "", body);
+        assert!(
+            output.contains(expected),
+            "`{body}` should report `{expected}`, got:\n{output}"
+        );
+    }
+    let close = [
+        (
+            r#", confirm_close: draft.name != """#,
+            "",
+            "declared together",
+        ),
+        ("", " => app.save(draft.name)", "needs `confirm_close:`"),
+        (
+            r#", confirm_close: other.note != "", close_message: tr! { "en" => "Discard?", "ja" => "破棄しますか？" }"#,
+            "",
+            "reads `Other`, which this window does not own",
+        ),
+        (
+            CLOSE_CHECK,
+            " => windows.notes.open()",
+            "must be an engine command",
+        ),
+    ];
+    for (props, action, expected) in close {
+        let output = media_errors(props, action, "Spacer");
+        assert!(
+            output.contains(expected),
+            "`{props}{action}` should report `{expected}`, got:\n{output}"
+        );
+    }
+    let declared = MEDIA_PROTOCOL.replace(
+        "#[state]",
+        "#[value]\n    pub struct MediaSource { pub url: String }\n\n    #[state]",
+    );
+    let output = match compile_project(&declared, &media_project("", "", "Spacer")) {
+        Ok(_) => panic!("declaring MediaSource must fail"),
+        Err(errors) => errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    assert!(
+        output.contains("`MediaSource` is a framework type"),
+        "{output}"
+    );
 }

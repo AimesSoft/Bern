@@ -7,7 +7,7 @@
 use crate::names::{case, double, member, pascal, string};
 use bern_ir::{
     Action, Application, Binding, ComponentArg, ComponentDef, Element, Expr, ExprKind, IfLetNode,
-    IfNode, MatchNode, Node, ParamKind, Prop, Text, WindowDef, WindowOp, WindowRole,
+    IfNode, MatchNode, MediaOp, Node, ParamKind, Prop, Text, WindowDef, WindowOp, WindowRole,
 };
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -338,6 +338,7 @@ fn generate_engine(out: &mut Out, app: &Application) {
             .map(|param| format!("_ {}: {}", member(&param.name), swift_type(&param.ty)))
             .collect();
         params.push("from window: BernWindowContext?".into());
+        params.push("completion: (@MainActor (BernCommandFailure?) -> Void)? = nil".into());
         out.open(format!(
             "func {}({}) {{",
             member(&command.name),
@@ -345,16 +346,16 @@ fn generate_engine(out: &mut Out, app: &Application) {
         ));
         if command.params.is_empty() {
             out.line(format!(
-                "BernHost.shared.dispatch({index}, window: window?.id) {{ _ in }}"
+                "BernHost.shared.dispatch({index}, window: window?.id, encode: {{ _ in }}, completion: completion)"
             ));
         } else {
             out.open(format!(
-                "BernHost.shared.dispatch({index}, window: window?.id) {{ writer in"
+                "BernHost.shared.dispatch({index}, window: window?.id, encode: {{ writer in"
             ));
             for param in &command.params {
                 out.line(format!("{}.encode(bern: &writer)", member(&param.name)));
             }
-            out.close("}");
+            out.close("}, completion: completion)");
         }
         out.close("}");
     }
@@ -595,7 +596,66 @@ impl<'a> Generator<'a> {
                 }
                 WindowOp::Close => format!("BernHost.shared.close({})", string(window)),
             },
+            Action::Media { player, op, args } => {
+                let player = string(player);
+                let arg = || args.first().map(|arg| self.expr(arg)).unwrap_or_default();
+                let media = "BernMedia.shared";
+                match op {
+                    MediaOp::Open => format!(
+                        "{media}.open({player}, url: ({}).url, window: bernWindow.id)",
+                        arg()
+                    ),
+                    MediaOp::Play => {
+                        format!("{media}.command(.play, player: {player}, window: bernWindow.id)")
+                    }
+                    MediaOp::Pause => {
+                        format!("{media}.command(.pause, player: {player}, window: bernWindow.id)")
+                    }
+                    MediaOp::Seek => format!(
+                        "{media}.seek({player}, positionMs: {}, window: bernWindow.id)",
+                        arg()
+                    ),
+                    MediaOp::SetVolume => format!(
+                        "{media}.setVolume({player}, volume: {}, window: bernWindow.id)",
+                        arg()
+                    ),
+                    MediaOp::SetMuted => format!(
+                        "{media}.setMuted({player}, muted: {}, window: bernWindow.id)",
+                        arg()
+                    ),
+                }
+            }
         }
+    }
+
+    /// A `Video`: the shared runtime view, bound to a declaration's own
+    /// player or to an application player.
+    fn video(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self
+            .text_prop(element, "label")
+            .unwrap_or_else(|| "nil".into());
+        let binding = match (element.expr("source"), element.prop("player")) {
+            (Some(source), _) => {
+                let value = self.expr(source);
+                if matches!(source.ty, Type::Optional { .. }) {
+                    format!(".source({value}?.url)")
+                } else {
+                    format!(".source({value}.url)")
+                }
+            }
+            (None, Some(Prop::Player { id })) => format!(".player({})", string(id)),
+            _ => ".source(nil)".into(),
+        };
+        let controls = element.keyword("controls") != Some("none");
+        let fit = match element.keyword("fit") {
+            Some("cover") => ".cover",
+            Some("fill") => ".fill",
+            _ => ".contain",
+        };
+        out.line(format!(
+            "BernVideo(target: {}, label: {label}, binding: {binding}, controls: {controls}, fit: {fit})",
+            self.target(element, ctx)
+        ));
     }
 
     fn nodes(&self, out: &mut Out, nodes: &[Node], ctx: &Ctx) {
@@ -810,6 +870,7 @@ impl<'a> Generator<'a> {
                 ));
             }
             "Slider" => self.slider(out, element, ctx),
+            "Video" => self.video(out, element, ctx),
             "Picker" => {
                 let field_ref = element.field("value").expect("picker field");
                 let field = self.field(element, "value").expect("picker field");
@@ -1358,7 +1419,7 @@ impl<'a> Generator<'a> {
                         sessions.push(session.clone());
                     }
                 }
-                ParamKind::Windows => {}
+                ParamKind::Windows | ParamKind::Players => {}
             }
         }
         if client || self.uses_engine(&[&component.body]) {
@@ -1433,9 +1494,75 @@ impl<'a> Generator<'a> {
         } else if !frame.is_empty() {
             out.line(format!(".frame({})", frame.join(", ")));
         }
+        if window.close.is_some() {
+            out.line(".onAppear { context.closeCheck = bernCloseCheck() }");
+        }
         out.close("}");
+        if let Some(close) = &window.close {
+            self.close_check(out, close);
+        }
         out.close("}");
         out.line("");
+    }
+
+    /// Lines that bind the sessions and engine an expression reads.
+    fn locals(&self, out: &mut Out, exprs: &[&Expr]) {
+        let mut sessions = Vec::new();
+        for expr in exprs {
+            for session in expr.sessions() {
+                if !sessions.contains(&session) {
+                    sessions.push(session);
+                }
+            }
+        }
+        for session in sessions {
+            out.line(format!(
+                "let {} = context.session({}.self)",
+                session_var(&session),
+                session_class(&session)
+            ));
+        }
+    }
+
+    /// The window's close check: evaluated against its own drafts when
+    /// closing is requested, with the declared save command.
+    fn close_check(&self, out: &mut Out, close: &bern_ir::CloseCheck) {
+        let engine = close.exprs().iter().any(|expr| expr.reads_engine())
+            || matches!(close.save, Some(Action::Engine { .. }));
+        out.line("");
+        out.open("private func bernCloseCheck() -> BernCloseCheck {");
+        out.line("let context = self.context");
+        if engine {
+            out.line("let bernEngine = self.bernEngine");
+        }
+        out.open("return BernCloseCheck(");
+        out.open("needsConfirmation: {");
+        self.locals(out, &[&close.when]);
+        out.line(format!("return {}", self.expr(&close.when)));
+        out.close("},");
+        out.open("message: {");
+        self.locals(out, &close.message.exprs());
+        out.line(format!("return {}", self.text(&close.message)));
+        out.close("},");
+        match &close.save {
+            Some(Action::Engine { command, args }) => {
+                let spec = &self.app.protocol.commands[*command];
+                out.open("save: { done in");
+                self.locals(out, &args.iter().collect::<Vec<_>>());
+                let mut values: Vec<_> = args.iter().map(|arg| self.expr(arg)).collect();
+                values.push("from: context".into());
+                values.push("completion: done".into());
+                out.line(format!(
+                    "bernEngine.{}({})",
+                    member(&spec.name),
+                    values.join(", ")
+                ));
+                out.close("}");
+            }
+            _ => out.line("save: nil"),
+        }
+        out.close(")");
+        out.close("}");
     }
 
     pub fn generate(&self, fingerprint: u64) -> String {

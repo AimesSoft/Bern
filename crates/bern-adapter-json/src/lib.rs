@@ -348,6 +348,9 @@ pub enum ServerMessage {
         namespace: String,
         catalog_version: u32,
         catalog_fingerprint: String,
+        /// Version of the standard media commands and player state.
+        #[serde(default)]
+        media_contract: u32,
     },
     Result {
         request_id: String,
@@ -369,6 +372,10 @@ pub enum ServerMessage {
         protocol: Box<ProtocolDescriptor>,
         session_commands: Vec<CommandSpec>,
         session_types: TypeTable,
+        #[serde(default)]
+        media_commands: Vec<CommandSpec>,
+        #[serde(default)]
+        media_types: TypeTable,
     },
     Sessions {
         request_id: String,
@@ -377,6 +384,11 @@ pub enum ServerMessage {
     Update {
         revision: String,
         changes: Map<String, Json>,
+    },
+    /// Merged state of every media player, newest revision wins.
+    Media {
+        revision: String,
+        players: Vec<Json>,
     },
     Error {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -393,7 +405,20 @@ pub fn welcome(engine_id: &str, descriptor: &ProtocolDescriptor) -> ServerMessag
         namespace: descriptor.namespace.clone(),
         catalog_version: descriptor.version,
         catalog_fingerprint: descriptor.fingerprint().to_string(),
+        media_contract: bern_media::MEDIA_CONTRACT_VERSION,
     }
+}
+
+/// Media players as JSON `MediaPlayer` objects.
+pub fn media_players_json(players: &[Value]) -> Vec<Json> {
+    let (types, _) = bern_media::media_catalog();
+    let player = Type::Record {
+        name: "MediaPlayer".into(),
+    };
+    players
+        .iter()
+        .map(|value| to_json(value, &player, &types))
+        .collect()
 }
 
 /// State values keyed by field name.

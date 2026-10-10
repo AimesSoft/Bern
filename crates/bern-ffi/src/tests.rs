@@ -105,6 +105,14 @@ extern "C" fn on_session(context: *mut c_void, request: u64, bytes: *const u8, l
     record(context, "session", request, bytes, len);
 }
 
+extern "C" fn on_media_request(context: *mut c_void, bytes: *const u8, len: usize) {
+    record(context, "media_request", 0, bytes, len);
+}
+
+extern "C" fn on_media_state(context: *mut c_void, bytes: *const u8, len: usize) {
+    record(context, "media_state", 0, bytes, len);
+}
+
 fn spec() -> AppSpec {
     AppSpec {
         bundle_id: "dev.bern.ffi-test",
@@ -120,6 +128,7 @@ fn spec() -> AppSpec {
                 sessions: vec![0],
             }],
         },
+        players: vec!["preview".into()],
     }
 }
 
@@ -129,6 +138,8 @@ fn start(frontend: &Frontend, fingerprint: u64) -> Result<*mut BernApp, String> 
         on_state,
         on_reply,
         on_session_request: on_session,
+        on_media_request,
+        on_media_state,
     };
     let mut error = BernBuffer::empty();
     // SAFETY: `error` is writable.
@@ -254,5 +265,169 @@ fn commands_drafts_and_session_requests_cross_the_abi() {
         Value::Text("main#2".into())
     );
 
+    unsafe { bern_app_stop(app) };
+}
+
+fn call(
+    function: unsafe extern "C" fn(*mut BernApp, *const u8, usize) -> BernBuffer,
+    app: *mut BernApp,
+    bytes: &[u8],
+) -> Vec<u8> {
+    // SAFETY: valid buffer and live handle.
+    take(unsafe { function(app, bytes.as_ptr(), bytes.len()) })
+}
+
+#[test]
+fn media_players_cross_the_abi() {
+    use bern_media::{ExecOp, ExecRequest, Observation, Phase};
+    let frontend = Box::new(Frontend::default());
+    let app = start(&frontend, descriptor().fingerprint()).unwrap();
+
+    // Without an executor, players are unavailable and commands refused.
+    let mut params = Writer::new();
+    params.text("preview");
+    // SAFETY: valid buffer.
+    unsafe { media::bern_media_dispatch(app, 3, params.bytes.as_ptr(), params.bytes.len(), 9) };
+    let (_, reply) = frontend.wait_for("reply");
+    let mut reader = Reader::new(&reply);
+    assert_eq!(reader.u8().unwrap(), 1);
+    reader.u64().unwrap();
+    assert_eq!(reader.text().unwrap(), "executor_unavailable");
+
+    // The frontend attaches its executor.
+    let mut capabilities = Writer::new();
+    capabilities.text("test");
+    capabilities.text("1");
+    capabilities.u8(1);
+    capabilities.u8(1);
+    assert_eq!(
+        call(
+            media::bern_media_executor_attached,
+            app,
+            &capabilities.bytes
+        ),
+        vec![0]
+    );
+
+    // A declaration creates and binds its own player; the load reaches
+    // the executor once even when the binding is reported again.
+    let mut create = Writer::new();
+    create.text("main#1/page.video");
+    create.text("main#1");
+    assert_eq!(call(media::bern_media_create, app, &create.bytes), vec![0]);
+    let mut bind = Writer::new();
+    bind.text("main#1/page.video");
+    bind.u8(1);
+    bind.text("file:///clip.mp4");
+    for _ in 0..2 {
+        let bound = call(media::bern_media_bind, app, &bind.bytes);
+        let mut reader = Reader::new(&bound);
+        assert_eq!(reader.u8().unwrap(), 0);
+        assert_eq!(reader.u64().unwrap(), 1);
+    }
+    let (_, request) = frontend.wait_for("media_request");
+    let load = ExecRequest::decode(&request).unwrap();
+    assert_eq!(
+        load.op,
+        ExecOp::Load {
+            url: "file:///clip.mp4".into()
+        }
+    );
+    let mut done = Writer::new();
+    done.u64(load.request);
+    done.u8(0);
+    // SAFETY: valid buffer.
+    unsafe { media::bern_media_complete(app, done.bytes.as_ptr(), done.bytes.len()) };
+    let ready = Observation {
+        phase: Phase::Ready,
+        duration_ms: Some(4_000),
+        seekable: true,
+        ..Observation::idle()
+    };
+    let event = ready.encode("main#1/page.video", 1);
+    // SAFETY: valid buffer.
+    unsafe { media::bern_media_event(app, event.as_ptr(), event.len()) };
+    let state = take(unsafe { media::bern_media_snapshot(app) });
+    let mut reader = Reader::new(&state);
+    reader.u64().unwrap();
+    assert_eq!(reader.u32().unwrap(), 2);
+    let (types, _) = bern_media::media_catalog();
+    let player = Type::Record {
+        name: "MediaPlayer".into(),
+    };
+    let first = decode(&player, &types, &mut reader).unwrap();
+    let Value::Record(fields) = first else {
+        panic!()
+    };
+    assert_eq!(fields[0], Value::Text("main#1/page.video".into()));
+    assert_eq!(fields[5], Value::unit_variant(Phase::Ready.index()));
+    assert!(decode(&player, &types, &mut reader).is_ok());
+    assert!(reader.is_finished());
+
+    // Play from the UI goes through the same command and executor.
+    let mut params = Writer::new();
+    params.text("main#1/page.video");
+    // SAFETY: valid buffer.
+    unsafe { media::bern_media_dispatch(app, 3, params.bytes.as_ptr(), params.bytes.len(), 10) };
+    let (_, request) = frontend.wait_for("media_request");
+    let play = ExecRequest::decode(&request).unwrap();
+    assert_eq!(play.op, ExecOp::Play);
+    let mut done = Writer::new();
+    done.u64(play.request);
+    done.u8(0);
+    // SAFETY: valid buffer.
+    unsafe { media::bern_media_complete(app, done.bytes.as_ptr(), done.bytes.len()) };
+    let (token, reply) = frontend.wait_for("reply");
+    assert_eq!(token, 10);
+    let mut reader = Reader::new(&reply);
+    assert_eq!(reader.u8().unwrap(), 0);
+    reader.u64().unwrap();
+    assert_eq!(reader.i64().unwrap(), 1);
+
+    // Releasing the owner's player asks the executor to release it.
+    let mut release = Writer::new();
+    release.text("main#1/page.video");
+    // SAFETY: valid buffer.
+    unsafe { media::bern_media_release(app, release.bytes.as_ptr(), release.bytes.len()) };
+    let (_, request) = frontend.wait_for("media_request");
+    assert_eq!(ExecRequest::decode(&request).unwrap().op, ExecOp::Release);
+
+    unsafe { bern_app_stop(app) };
+}
+
+#[test]
+fn close_confirmations_cross_the_abi() {
+    let frontend = Box::new(Frontend::default());
+    let app = start(&frontend, descriptor().fingerprint()).unwrap();
+    let opened = take(unsafe { bern_window_opened(app, 0) });
+    let mut reader = Reader::new(&opened);
+    assert_eq!(reader.u8().unwrap(), 0);
+    let generation = reader.u64().unwrap();
+    let request = take(unsafe { bern_window_request_close(app, 0, generation, 1, 1) });
+    let mut reader = Reader::new(&request);
+    assert_eq!((reader.u8().unwrap(), reader.u8().unwrap()), (0, 1));
+    let confirmation = reader.text().unwrap();
+    assert_eq!(reader.u64().unwrap(), 0);
+    let decide = |decision: u32| {
+        let mut bytes = Writer::new();
+        bytes.text(&confirmation);
+        bytes.u32(decision);
+        // SAFETY: valid buffer and live handle.
+        take(unsafe {
+            bern_window_confirm_close(app, 0, generation, bytes.bytes.as_ptr(), bytes.bytes.len())
+        })
+    };
+    // Save is chosen: the frontend runs the save command next.
+    assert_eq!(decide(0), vec![0, 1]);
+    // The confirmation was used; deciding again is stale.
+    let stale = decide(1);
+    let mut reader = Reader::new(&stale);
+    assert_eq!(reader.u8().unwrap(), 1);
+    assert_eq!(reader.text().unwrap(), "stale_confirmation");
+    // Without a failing check, closing proceeds at once.
+    assert_eq!(
+        take(unsafe { bern_window_request_close(app, 0, generation, 0, 1) }),
+        vec![0, 0]
+    );
     unsafe { bern_app_stop(app) };
 }

@@ -27,6 +27,24 @@ pub struct WindowCapabilities {
     pub virtual_windows: bool,
 }
 
+/// The media backend and video presenter a target assembles for `Video`.
+/// The two are versioned separately from the target and from each other.
+#[derive(Clone, Debug)]
+pub struct MediaSupport {
+    /// Versions of the media contract both parts implement.
+    pub contract_versions: RangeInclusive<u32>,
+    /// Media backend that loads and plays, for example `avfoundation`.
+    pub backend: &'static str,
+    pub backend_version: &'static str,
+    /// Presenter that attaches players to views, for example `avplayerview`.
+    pub presenter: &'static str,
+    pub presenter_version: &'static str,
+    /// Players keep playing while no view is attached.
+    pub background_playback: bool,
+    /// Several views may show one player at the same time.
+    pub multi_view: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct TargetDescriptor {
     /// Stable target id, for example `swiftui-macos`.
@@ -43,6 +61,8 @@ pub struct TargetDescriptor {
     pub windows: WindowCapabilities,
     /// Entry channels the target's host can assemble besides the UI.
     pub channels: &'static [&'static str],
+    /// Media support for `Video` and application players, if any.
+    pub media: Option<MediaSupport>,
 }
 
 impl TargetDescriptor {
@@ -240,6 +260,45 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
     for component in &app.components {
         component.body.walk(&mut visit);
     }
+    if app.uses_media() {
+        let mut video = None;
+        let mut find = |node: &bern_ir::Node| {
+            if let bern_ir::Node::Element(element) = node
+                && element.kind == "Video"
+                && video.is_none()
+            {
+                video = Some(element.source.clone());
+            }
+        };
+        for component in &app.components {
+            component.body.walk(&mut find);
+        }
+        let at = |diagnostic: Diagnostic| match &video {
+            Some(location) => diagnostic.at(location.clone()),
+            None => diagnostic,
+        };
+        match &descriptor.media {
+            None => diagnostics.push(at(Diagnostic::error(format!(
+                "target `{}` has no media backend; `Video` and application players cannot be built",
+                descriptor.id
+            )))),
+            Some(media)
+                if !media
+                    .contract_versions
+                    .contains(&bern_media::MEDIA_CONTRACT_VERSION) =>
+            {
+                diagnostics.push(at(Diagnostic::error(format!(
+                    "target `{}` pairs media backend `{}` and presenter `{}` for media contract versions {:?}; this build uses version {}",
+                    descriptor.id,
+                    media.backend,
+                    media.presenter,
+                    media.contract_versions,
+                    bern_media::MEDIA_CONTRACT_VERSION
+                ))));
+            }
+            Some(_) => {}
+        }
+    }
     for window in &app.windows.windows {
         match window.presentation {
             bern_ir::Presentation::NativeRequired if !descriptor.windows.native => {
@@ -345,6 +404,7 @@ mod tests {
                     virtual_windows: false,
                 },
                 channels: &[],
+                media: None,
             }
         }
         fn check(&self, _: &Application, _: &TargetConfig) -> Vec<Diagnostic> {

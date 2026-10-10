@@ -5,7 +5,7 @@
 - 工具链：Rust 1.99.0（Edition 2024）；Swift 6.3.2，以 Swift 6 语言模式编译；Xcode 26.5（SDK 26.5）
 - 部署：最低 macOS 14，构建本机架构，本地临时签名
 
-本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
+本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议与最小异步查询场景）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
 
 ## 完成情况
 
@@ -21,7 +21,7 @@
 | 业务核心与 UI 分离，命令和状态可在无 UI 环境运行 | 完成 | `showcase-core` 只依赖协议；其测试通过共享 `Host` 无界面运行 |
 | 注册命令目录并生成各入口描述；重复标识、未知命令、参数不匹配无法通过 | 完成 | 命令描述含 ID、目录版本、参数和结果 schema、作用域、策略、错误码和显式 CLI/MCP 名称；名称冲突报错 |
 | 标准控件自动生成会话命令，业务动作缺失绑定编译失败（B301） | 完成 | 输入框、开关、滑块、选择器等写会话字段；按钮缺少命令报 B301 |
-| 窗口目录检查 | 部分 | 已检查重复 ID、主窗口、窗口命令引用和呈现能力；首版只支持单实例窗口，多实例参数与 key 未实现 |
+| 窗口目录检查 | 部分 | 已检查重复 ID、主窗口、窗口命令引用、呈现能力和关闭检查（只能读本窗口拥有的草稿，存储动作必须是引擎命令）；首版只支持单实例窗口，多实例参数与 key 未实现 |
 | 本地化文本类型与严格诊断 | 完成 | 本地化文本、运行时文本、普通字符串分开；缺少语言（B102）、展示属性直接写字面量（B103）、插值不一致均报错 |
 | 目标能力描述中声明颜色来源 | 完成 | `ColorSource::Native` / `BernTheme`；macOS 为 Native |
 
@@ -41,18 +41,19 @@
 | 滑块产生带参数命令 | 完成 | 拖动只改会话预览，松开提交 `showcase.set_volume(value)` |
 | 四入口驱动同一实例；无 UI 引擎可运行；缺少会话返回明确错误 | 完成 | 无会话返回 `requires_ui_session`，多会话未指定返回 `session_required` |
 | 标准编辑、选择动作由会话命令驱动，CLI/MCP 可调用 | 完成 | `ui.edit`、`ui.set_bool`、`ui.set_number`、`ui.select`、`ui.activate`、`ui.back` 等，经真实控件闭包执行 |
-| 已接受与完成结果可区分 | 部分 | 协议保留 `Accepted`/`Completed`；首版命令均同步完成 |
+| 已接受与完成结果可区分 | 部分 | 引擎命令同步完成；媒体命令在播放器状态的 `request` 中区分已接受（Accepted）、执行端已执行（Executed）与失败（Failed），实际播放只看执行端回报的 `phase` |
 | 会话命令写回控件不触发重复动作 | 完成 | 写入通过同一 setter；SwiftUI 对程序写回不调用绑定 setter；开关使用幂等的设置而非翻转 |
 | 条件分支挂载与卸载、订阅清理 | 完成 | `if` / `if let` / `match`；控件登记随视图出现与消失 |
 | 列表按 key 保持实例 | 完成 | `ForEach(items, id: \.key)`；键必须是 `i64` 或 `String` 字段 |
 | 键盘、输入法、语义标签 | 部分 | 使用系统控件与可访问名称；输入法组合与键盘遍历未实测 |
 | 不写深浅色分支，控件跟随系统 | 完成 | 未设置任何颜色 |
-| “搜索列表 → 详情 → 返回” | 部分 | 推入、返回可由 UI 与 CLI 驱动；搜索只保存草稿，没有查询 |
-| 可控时钟与异步顺序场景 | 未做 | 首版没有异步查询 |
+| “搜索列表 → 详情 → 播放 → 返回” | 部分 | 列表 → 详情 → 在应用级播放器中打开并播放 → 返回，经真实控件驱动，返回后播放继续；侧边栏搜索仍只保存草稿，没有接到查询 |
+| 可控时钟与异步顺序场景 | 完成 | `bern_runtime::query`：参数版本、取消、只接受当前结果；`ManualClock` 场景测试中较早的慢搜索不会覆盖较新的结果。查询尚未接到 UI 声明 |
 | 主窗口与设置窗口：四入口打开/关闭/激活、重复打开复用、独立草稿 | 完成 | 窗口实例带代次，重开后旧引用被拒绝 |
-| 关闭确认、模态阻挡、确认失效 | 未做 | |
-| 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false |
-| macOS Video 验证 | 未做 | |
+| 关闭确认、模态阻挡、确认失效 | 完成 | 见“窗口关闭协议”；系统关闭按钮与 File > Close 先走关闭检查 |
+| 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放 |
+| 最小化后恢复 | 未做 | 没有最小化、恢复命令 |
+| macOS Video 验证 | 完成 | 见“Video”；用受控测试媒体实测 AVFoundation 播放 |
 
 ## 工程结构
 
@@ -62,9 +63,10 @@
 | `bern-macros` | `#[bern::protocol]`、`#[bern::value]`、`#[bern::session]`、`#[component]` |
 | `bern-syntax` | 宏与编译器共用的唯一解析器，以及协议描述的降级 |
 | `bern-protocol` | 值、schema、命令与状态描述、框架会话命令目录、二进制编码 |
+| `bern-media` | 媒体契约：`MediaSource`、播放器身份、标准媒体命令与状态、执行端协议、`MediaHub`（路由与状态归并） |
 | `bern-ir` | 平台无关 IR、组件规格表、组件库描述 |
 | `bern-command` | 引擎宿主：边界校验、串行执行、按修订号发布状态 |
-| `bern-runtime` | UI 会话：窗口实例与代次、窗口作用域草稿、会话命令路由 |
+| `bern-runtime` | UI 会话：窗口实例与代次、窗口作用域草稿、关闭协议、会话命令路由；异步查询资源与可控时钟 |
 | `bern-compiler` | 读取 `Bern.toml`、显式源码收集、语义检查、输出 IR |
 | `bern-target-api` | 目标描述、能力检查、构建计划、按平台解析默认目标 |
 | `bern-backend-swiftui` | `swiftui + macos` 目标：生成 Swift、Rust 胶水 crate 与资源 |
@@ -135,10 +137,49 @@ pub fn controls_page(app: showcase::Client, #[session] draft: MainDraft) -> impl
 - `tr! { "zh-Hans" => "按钮共按下 {count} 次", "en" => "…"; count: app.activations }`：插值参数写在分号之后。
 - 组件引用使用命名参数：`item_detail(app: app, id: id)`，库组件写成 `showcase_widgets::item_count(count: item.count)`。
 - 根组件主体为 `WindowSet(handle: AppWindows, primary: main) { Window(…) { … } }`，并生成类型化窗口句柄 `windows.settings.open()`。
+- 应用级播放器用 `#[bern::players]` 声明，字段名就是稳定的 `player_id`；组件以 `players: Players` 参数接收，动作写成 `=> players.preview.open(clip)`、`play()`、`pause()`、`seek(ms)`、`set_volume(v)`、`set_muted(b)`。
+- `MediaSource { url }` 是框架值类型（`bern::prelude::MediaSource`），可以出现在协议状态、命令参数与 UI 值里；协议和 UI 不能自行声明同名类型。
+
+### Video
+
+```rust
+#[bern::players]
+pub struct Players {
+    /// 跨页面、跨窗口持续播放
+    pub preview: Player,
+}
+
+Video(id: featured, source: app.featured_source)                 // 由声明创建播放器
+Video(id: preview, player: players.preview, controls: standard)  // 附着到应用级播放器
+```
+
+- `source:` 与 `player:` 必须且只能写一个，类型分别为 `MediaSource`/`Option<MediaSource>` 的绑定和应用级播放器；`controls` 为 `standard`（默认）或 `none`，`fit` 为 `contain`（默认）、`cover`、`fill`，`label` 是可访问名称。
+- source 方式：播放器属于声明所在的组件实例，`player_id` 为 `窗口实例/组件.控件id`（如 `main#1/media_page.featured`）。源由绑定决定：同一个值不会重复加载；新值以新的源版本加载；外部 `media.open` 返回 `source_bound`，换源要调用源所有者的命令（示例中为 `showcase feature`）。组件实例结束或窗口关闭时释放播放器。
+- player 方式：只附着呈现；源由该播放器的命令更新。视图卸载只解除附着，应用级播放器在离开页面或关闭窗口后继续播放。
+
+### 窗口关闭检查
+
+```rust
+#[component]
+pub fn app(app: showcase::Client, windows: AppWindows, players: Players,
+           #[session] draft: MainDraft, #[session] profile: SettingsDraft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, …, confirm_close: draft.notes != "",
+                   close_message: tr! { "zh-Hans" => "要放弃备注吗？", "en" => "Discard your notes?" }) { … }
+            Window(id: settings, …, confirm_close: profile.display_name != "" && profile.display_name != app.display_name,
+                   close_message: tr! { … }) { … } => app.set_display_name(profile.display_name)
+        }
+    }
+}
+```
+
+- `confirm_close` 是受限布尔表达式，`close_message` 是 `tr!` 文本，两者同时出现；`Window` 上的动作是存储命令（只能是引擎命令），有它时决策为“存储 / 不存储 / 取消”，否则为“放弃更改 / 取消”。
+- 根组件的 `#[session]` 参数按窗口实例求值，只能用在拥有该会话类型的窗口的关闭检查里，编译器检查归属。
 
 ### 组件规格
 
-规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Picker`。可操作控件必须有 `id`。
+规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Picker`。可操作控件必须有 `id`。
 
 默认行为：`Column` 前缘对齐；`Row` 垂直居中；未写 `style` 时使用平台默认样式。`Search` 在 SwiftUI 目标中只能放在 `Sidebar` 内；`Picker` 的枚举不能携带数据。
 
@@ -160,7 +201,35 @@ flowchart LR
 - **进程内桥接**：固定 C ABI（`bern.h`）只有少量函数。参数、状态与回执按 `bern_protocol::codec` 的二进制布局传递，两端由生成代码按 schema 编解码；接收端仍做 schema 校验。前端与引擎的目录指纹不一致时拒绝启动。
 - **引擎**：命令在专用线程上串行执行；参数在边界校验；panic 使引擎拒绝后续命令；状态按字段比较，只在变化时递增修订号。
 - **窗口与会话**：窗口出现时向运行时登记，获得代次与外部 ID（如 `settings#2`）。草稿属于窗口实例，关闭即释放；带旧代次的写入返回 `stale_window`。
-- **控件登记与会话命令**：每个可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、启用状态，以及与用户输入相同的动作闭包。外部的 `ui.activate` 等命令在主线程上经这些闭包执行；禁用控件返回 `target_unavailable`，同一目标挂载在多处返回 `target_ambiguous`；密码框的值不暴露。
+- **控件登记与会话命令**：每个可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、启用状态，以及与用户输入相同的动作闭包。外部的 `ui.activate` 等命令在主线程上经这些闭包执行；禁用控件返回 `target_unavailable`，被本窗口关闭确认阻挡的控件返回 `target_blocked`，同一目标挂载在多处返回 `target_ambiguous`；密码框的值不暴露。`ui.inspect` 的 `reason` 给出不可操作原因（`disabled`、`blocked_by_modal`）。
+
+### Video 与媒体
+
+```mermaid
+flowchart LR
+    Bar[标准控制条] -->|media.* 命令| Hub[MediaHub]
+    Ext[CLI / JSON / MCP] -->|media.* 命令| Hub
+    Decl[Video source 绑定] -->|源版本加载| Hub
+    Hub -->|带源版本的请求| AV[AVFoundation 执行端]
+    AV -->|执行结果| Hub
+    AV -->|观察到的事实（带源版本）| Hub
+    Hub -->|归并后的播放器状态| Bar
+    Hub -->|归并后的播放器状态| Ext
+```
+
+- **媒体契约**（`bern-media`，契约版本 1）：命令 `media.players`、`media.state`（查询），`media.open`、`media.play`、`media.pause`、`media.seek`、`media.set_volume`、`media.set_muted`；CLI 为 `showcase media play --player-id …`，MCP 工具为 `media_play` 等。播放器状态 `MediaPlayer` 含 `owner`、`source_bound`、`source`、`source_version`、`phase`（Idle、Loading、Ready、Playing、Paused、Buffering、Ended、Failed、Unavailable）、`position_ms`、`duration_ms`（未知或直播时为空）、`seekable`、`volume`、`muted`、`error`、`views` 与最近一次请求 `request`。
+- **路由与归并**：命令先在 `MediaHub` 校验（`player_not_found`、`no_source`、`media_failed`、`not_seekable`、`out_of_range`、`source_bound`、`executor_unavailable`），再带当前源版本交给执行端；执行端按版本拒绝过期请求（`stale_source`）。执行端回报的是事实，只有与当前源版本一致时才归并；合并事实不会产生任何命令。命令在执行端完成后才返回结果；外部入口等待 10 秒仍无结果时返回 `media_timeout`（结果未知）。
+- **执行端与呈现**：应用启动时 AVFoundation 执行端登记到 hub；每个 `player_id` 一个 `AVPlayer`，周期观察 0.5 秒。视频由 `AVPlayerView` 呈现，`controlsStyle = .none`、不接收键鼠、不接入 Now Playing，因此播放状态只会因 Bern 命令改变。新源加载后保持暂停，等待播放命令。
+- **标准控制条**：系统控件（无边框按钮、`Slider`、系统文字样式），位于视频下方而非覆盖在画面上，颜色全部来自系统；拖动进度和音量只改本地预览，松开时提交一次命令，状态更新不会回调成命令。控件登记为 `目标.play_pause`、`目标.position`、`目标.mute`、`目标.volume`，可由 `ui.*` 驱动；视频区域登记为角色 `video`，值为当前阶段与时间。无媒体、加载、失败、不可用时显示系统 `ContentUnavailableView` 或 `ProgressView`，不在视频上叠加文字。
+- **生命周期**：视图附着按窗口记录；窗口关闭时立即解除该窗口的附着、释放其组件拥有的播放器，应用级播放器继续。执行端断开时所有播放器变为 `Unavailable`，等待中的请求失败，不再显示已确认的“正在播放”。
+
+### 窗口关闭协议
+
+- 请求关闭（UI 动作、系统关闭按钮与 File > Close、`window.close`）都先求值窗口声明的关闭检查，再由会话运行时决定：`Closed` 立即关闭；`ConfirmationRequired` 返回确认 ID、绑定的草稿修订号和可选决策，同时以系统警告框（窗口级 sheet）显示。重复请求返回同一个确认，不重复弹框。
+- `window.confirm_close` 提交与对话框相同的类型化决策：`Save` 运行声明的存储命令，失败则 `Rejected`（`save_failed: …`）且窗口保留；`Discard` 关闭并释放草稿；`Cancel` 返回 `Rejected`（`cancelled`）。
+- 确认绑定窗口代次与草稿修订号：确认之后草稿又改变、确认已被处理、或窗口已关闭重开时，决策返回 `stale_confirmation` 或 `stale_window`，不会丢弃后来的修改。
+- 确认待决时，该窗口的控件对所有入口都被阻挡（`target_blocked`），其他窗口不受影响。
+- 系统关闭的拦截：窗口有关闭检查时，Bern 以转发代理替换窗口委托，只实现 `windowShouldClose(_:)`，其余委托消息转给 SwiftUI 原有的委托。
 
 ## 外部入口
 
@@ -176,12 +245,21 @@ target/bern/macos/bin/showcase ui activate --target "library_page.item_link[2]"
 target/bern/macos/bin/showcase window open --kind settings
 ```
 
-退出码：0 成功，1 命令失败，2 用法错误，3 无法连接。CLI 只连接已运行的引擎，不会另起一份。`showcase-mcp` 通过 stdio 实现 MCP（JSON-RPC 2.0，协议版本 2025-06-18 / 2025-03-26 / 2024-11-05），工具来自引擎命令目录与框架会话命令目录，另有 `bern_state` 与 `bern_sessions`。
+```sh
+target/bern/macos/bin/showcase media players
+target/bern/macos/bin/showcase media open --player-id preview --source file:///…/aurora.mp4
+target/bern/macos/bin/showcase media play --player-id preview
+target/bern/macos/bin/showcase media seek --player-id "main#1/media_page.featured" --position-ms 4000
+target/bern/macos/bin/showcase window close --window settings#1
+target/bern/macos/bin/showcase window confirm-close --window settings#1 --confirmation settings#1:c1 --decision Save
+```
+
+退出码：0 成功，1 命令失败，2 用法错误，3 无法连接。CLI 只连接已运行的引擎，不会另起一份。`showcase-mcp` 通过 stdio 实现 MCP（JSON-RPC 2.0，协议版本 2025-06-18 / 2025-03-26 / 2024-11-05），工具来自引擎命令目录、媒体命令目录与框架会话命令目录，另有 `bern_state` 与 `bern_sessions`。JSON 客户端订阅后除引擎状态更新外，还会收到完整的 `media` 播放器状态（新修订号覆盖旧的）。`MediaSource` 参数在 CLI 中可以直接写 URL。
 
 ## 本地化、主题与视觉规则
 
 - 资源键可追溯到源码：元素文案为 `组件.节点路径.属性`，枚举标签为 `枚举.变体`，应用名为 `app.name`。生成各语言的 `Localizable.strings` 与 `InfoPlist.strings`；`{name}` 按参数顺序转为 `%1$@`。Info.plist 声明 `CFBundleDevelopmentRegion` 与 `CFBundleLocalizations`。
-- 框架自身文案（失败提示等）内置 zh-Hans、zh-Hant、en、ja；应用要求其他语言时构建失败。
+- 框架自身文案（失败提示、视频控制条、关闭确认按钮等）内置 zh-Hans、zh-Hant、en、ja；应用要求其他语言时构建失败。
 - 颜色全部来自系统：生成代码不设置颜色、背景或材质。未声明品牌色时使用用户的系统强调色。
 - 设置窗口按内容定高、切换页签时自动调整；侧边栏详情列以选中项名称为标题，`Form(title:)` 可为推入页面命名。
 
@@ -192,13 +270,28 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-产物位于 `target/bern/macos/`：`Showcase.app`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。
+产物位于 `target/bern/macos/`：`Showcase.app`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
 
-开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG；`BERN_APPEARANCE=light|dark` 用于覆盖外观。这两项只用于开发检查，默认关闭。
+示例的受控测试媒体在 `examples/showcase/media/`，由 `make-media.sh` 用 ffmpeg 生成：`aurora.mp4`（8 秒）、`tides.mp4`（6 秒）、`broken.mp4`（不是影片，用于失败）、`live/live.m3u8`（没有结束标记的 HLS，时长未知、不可跳转；AVFoundation 只通过 HTTP 播放 HLS，例如 `python3 -m http.server --directory examples/showcase/media`）。
+
+开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_CLOSE_SIGNAL=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，与点按标题栏关闭按钮相同，供没有屏幕访问的工具验证系统关闭路径。这三项只用于开发检查，默认关闭。
 
 ## 验证记录
 
-2026-10-10，本机 macOS 27.0.1（arm64）：
+2026-10-10，Video、窗口关闭协议与异步查询，本机 macOS 27.0.1（arm64）：
+
+- `cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；生成的 Swift（含 `BernMedia.swift`）以 `-swift-version 6` 类型检查零错误零警告。
+- 新增测试：`bern-media` 12 项（路由与执行后才回复、事实不产生命令、旧源版本回报被忽略、源绑定不重复加载与拒绝外部换源、未知时长与失败、超时结果未知、执行端断开、组件与窗口释放、版本化快照）；`bern-runtime` 关闭协议 3 项与查询场景 3 项；C ABI 与 IPC 的媒体及关闭用例；编译器 Video、播放器与关闭检查的正反用例；rustc 失败用例 4 个（Video 缺少来源、来源类型错误、播放器动作参数类型错误、关闭检查缺少文案）。
+- 实机（隔离实例，不与其他运行中的 Showcase 共用窗口恢复状态）：
+  - 页面播放器：经真实控件播放，CLI 暂停、跳转到 4000 ms，`ui set-bool`/`ui set-number` 静音和调音量，状态与实际播放一致。重复 `showcase feature --clip Pattern` 不重新加载；换为色条后源版本 2、时长 6000；换为损坏文件后 `Failed`（系统错误“无法打开”），`media play` 返回 `media_failed`；外部 `media open` 返回 `source_bound`。
+  - 应用级播放器：MCP `media_open`、`media_play` 生效；列表 → 详情 →“在预览播放器中打开”→ 控制条播放 → 返回后仍为 `Playing`，附着视图数从 1 变为 0；回到“视频”页重新附着。关闭主窗口后页面播放器被释放，应用级播放器继续播放。
+  - 直播 HLS（本机 HTTP）：`Playing`，`duration_ms` 为空，进度条禁用并显示“直播”，`media seek` 返回 `not_seekable`。
+  - 关闭协议：备注有内容时 `window close` 与系统关闭（SIGUSR1 → `performClose`）返回同一个确认，系统警告框以窗口 sheet 显示，窗口控件对 CLI 返回 `target_blocked`；`Cancel` → `Rejected`，之后修改草稿再用旧确认 `Discard` → `stale_confirmation`；新确认 `Discard` → 窗口关闭、引擎继续运行；关闭后旧窗口 ID 返回 `target_not_found`。设置窗口以空白名称 `Save` → `Rejected`（`save_failed: invalid_name`）窗口保留，有效名称 `Save` → 关闭且引擎状态更新。没有未存储内容时，系统关闭直接关闭窗口。
+  - 截图：浅色与深色下视频页与控制条使用系统控件与系统颜色，视频画面保持原色；关闭确认为标准系统警告框。
+
+未完成的验证：真实点按标题栏关闭按钮与 Cmd-W（没有屏幕与辅助功能权限，用 `performClose(_:)` 代替）；VoiceOver 读出视频控制条；Intel 与 macOS 14 真机。
+
+2026-10-10，阶段一与阶段二主干，本机 macOS 27.0.1（arm64）：
 
 - `cargo test --workspace` 全部通过，`cargo clippy --workspace --all-targets -- -D warnings` 无警告，`cargo fmt --check` 通过。
 - 编译失败用例覆盖：按钮无命令、任意回调、控件写引擎状态、命令参数类型错误、未知命令、显示 bool、静态文本、未知组件、未知绑定、match 不完整、缺少组件参数、函数调用、不支持的类型。
@@ -217,7 +310,11 @@ open target/bern/macos/Showcase.app
 
 ## 未完成与已知限制
 
-- 设计中的异步查询、可控时钟场景、关闭确认与模态、多实例窗口、虚拟窗口、Video、自适应布局（`Adaptive`）、焦点管理、菜单命令生成、应用内实时切换语言均未实现。
+- 多实例窗口、最小化与恢复命令、虚拟窗口、自适应布局（`Adaptive`）、焦点管理、菜单命令生成、应用内实时切换语言均未实现。
+- 异步查询只有运行时语义（`bern_runtime::query`）与场景测试，尚无查询声明、引擎侧查询提供器与 UI 绑定；侧边栏搜索没有接到查询。
+- Video 未实现：倍速与轨道选择、全屏与画中画、海报、循环、自动播放与初始静音等媒体属性、覆盖层（字幕、弹幕）、系统媒体键与 Now Playing（会绕过命令，因此未接入）、受保护媒体。HLS 需经 HTTP 加载。同一 source 声明在一个窗口里挂载多次时第二个播放器创建失败（`player_exists`）。
+- 进程内执行端与引擎同生同灭，“执行端断开”只由 hub 测试覆盖。
+- 应用退出（Cmd-Q）不经过窗口关闭检查。
 - 首版引擎命令同步完成，没有执行中句柄、取消与进度。
 - 组件库只支持展示型组件（值参数），不能持有会话状态或调用命令；库从源码现场生成描述，尚无预发布描述的分发与缓存。
 - Web、GTK、WinUI 3 等其他目标与 Bern 主题算法属于后续阶段。

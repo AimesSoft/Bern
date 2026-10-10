@@ -5,6 +5,7 @@ members = [
     "crates/bern-syntax",
     "crates/bern-ir",
     "crates/bern-command",
+    "crates/bern-media",
     "crates/bern-runtime",
     "crates/bern-adapter-json",
     "crates/bern-transport-ipc",
@@ -36,6 +37,7 @@ bern-syntax = { path = "crates/bern-syntax" }
 bern-protocol = { path = "crates/bern-protocol" }
 bern-ir = { path = "crates/bern-ir" }
 bern-command = { path = "crates/bern-command" }
+bern-media = { path = "crates/bern-media" }
 bern-runtime = { path = "crates/bern-runtime" }
 bern-target-api = { path = "crates/bern-target-api" }
 bern-compiler = { path = "crates/bern-compiler" }

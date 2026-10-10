@@ -8,6 +8,7 @@
 mod component;
 mod config;
 mod descriptor;
+mod players;
 mod protocol;
 mod session;
 mod types;
@@ -65,6 +66,31 @@ pub fn session(args: TokenStream, item: TokenStream) -> TokenStream {
         .into();
     }
     session::expand(item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Declare the media players owned by the application. Every field is a
+/// `Player`; its name is the stable `player_id` all entries use.
+///
+/// ```ignore
+/// #[bern::players]
+/// pub struct Players {
+///     /// Keeps playing across pages and windows.
+///     pub preview: Player,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn players(args: TokenStream, item: TokenStream) -> TokenStream {
+    if !args.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`players` takes no arguments",
+        )
+        .into_compile_error()
+        .into();
+    }
+    players::expand(item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

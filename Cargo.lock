@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "bern-command",
  "bern-macros",
+ "bern-media",
  "bern-protocol",
  "trybuild",
 ]
@@ -17,6 +18,7 @@ name = "bern-adapter-cli"
 version = "0.1.0"
 dependencies = [
  "bern-adapter-json",
+ "bern-media",
  "bern-protocol",
  "bern-transport-ipc",
  "serde_json",
@@ -26,6 +28,7 @@ dependencies = [
 name = "bern-adapter-json"
 version = "0.1.0"
 dependencies = [
+ "bern-media",
  "bern-protocol",
  "serde",
  "serde_json",
@@ -36,6 +39,7 @@ name = "bern-adapter-mcp"
 version = "0.1.0"
 dependencies = [
  "bern-adapter-json",
+ "bern-media",
  "bern-protocol",
  "bern-transport-ipc",
  "serde_json",
@@ -47,6 +51,7 @@ version = "0.1.0"
 dependencies = [
  "bern-compiler",
  "bern-ir",
+ "bern-media",
  "bern-protocol",
  "bern-target-api",
  "serde_json",
@@ -74,6 +79,7 @@ name = "bern-compiler"
 version = "0.1.0"
 dependencies = [
  "bern-ir",
+ "bern-media",
  "bern-protocol",
  "bern-syntax",
  "bern-target-api",
@@ -89,6 +95,7 @@ name = "bern-ffi"
 version = "0.1.0"
 dependencies = [
  "bern-command",
+ "bern-media",
  "bern-protocol",
  "bern-runtime",
  "bern-transport-ipc",
@@ -117,6 +124,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-media"
+version = "0.1.0"
+dependencies = [
+ "bern-protocol",
+]
+
+[[package]]
 name = "bern-protocol"
 version = "0.1.0"
 dependencies = [
@@ -135,6 +149,7 @@ dependencies = [
 name = "bern-syntax"
 version = "0.1.0"
 dependencies = [
+ "bern-media",
  "bern-protocol",
  "proc-macro2",
  "quote",
@@ -146,6 +161,7 @@ name = "bern-target-api"
 version = "0.1.0"
 dependencies = [
  "bern-ir",
+ "bern-media",
  "bern-protocol",
  "serde",
 ]
@@ -156,6 +172,7 @@ version = "0.1.0"
 dependencies = [
  "bern-adapter-json",
  "bern-command",
+ "bern-media",
  "bern-protocol",
  "bern-runtime",
  "libc",

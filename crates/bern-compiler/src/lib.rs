@@ -111,6 +111,29 @@ fn initial_value(expr: &ast::Expr, ty: &Type, types: &TypeTable) -> Result<Value
     Ok(value)
 }
 
+/// Types written in the fields of a value declaration.
+fn value_types(value: &ast::ValueItem) -> Vec<&ast::TypeRef> {
+    match &value.kind {
+        ValueKind::Enum(variants) => variants
+            .iter()
+            .flat_map(|variant| variant.fields.iter().map(|field| &field.ty))
+            .collect(),
+        ValueKind::Record(fields) => fields.iter().map(|field| &field.ty).collect(),
+    }
+}
+
+/// Add framework value types such as `MediaSource` when declarations use
+/// them and the protocol has not brought them in already.
+fn add_framework_types(types: &mut TypeTable, mentioned: &[&ast::TypeRef]) {
+    if types.record_def(bern_media::MEDIA_SOURCE).is_none()
+        && mentioned
+            .iter()
+            .any(|ty| bern_syntax::mentions(ty, bern_media::MEDIA_SOURCE))
+    {
+        types.records.push(bern_media::media_source_def());
+    }
+}
+
 fn merge_ui_types(
     base: &TypeTable,
     values: &[Located<ast::ValueItem>],
@@ -127,6 +150,15 @@ fn merge_ui_types(
     let mut seen = BTreeSet::new();
     for value in values {
         let name = value.item.name.to_string();
+        if name == bern_media::MEDIA_SOURCE {
+            diagnostics.push(
+                Diagnostic::error(
+                    "`MediaSource` is a framework type; use it from `bern::prelude` instead of declaring it",
+                )
+                .at(location(&value.file, value.item.span)),
+            );
+            continue;
+        }
         if protocol_names.contains(&name) || !seen.insert(name.clone()) {
             diagnostics.push(
                 Diagnostic::error(format!(
@@ -218,6 +250,7 @@ fn param_kind(
     param: &ast::Param,
     protocol_module: Option<&str>,
     windows_handle: Option<&str>,
+    players_handle: Option<&str>,
     sessions: &[ir::SessionDef],
     types: &TypeTable,
 ) -> Result<ir::ParamKind, String> {
@@ -243,6 +276,9 @@ fn param_kind(
             }
             ast::TypeRef::Named(_) if Some(name.as_str()) == windows_handle => {
                 Ok(ir::ParamKind::Windows)
+            }
+            ast::TypeRef::Named(_) if Some(name.as_str()) == players_handle => {
+                Ok(ir::ParamKind::Players)
             }
             ast::TypeRef::Named(_) if sessions.iter().any(|session| session.name == name) => Err(
                 format!("session state `{name}` must be marked `#[session]`"),
@@ -387,6 +423,61 @@ fn window_catalog(
             "settings" => ir::WindowRole::Settings,
             _ => ir::WindowRole::Standard,
         };
+        let close = match (window.expr("confirm_close"), window.text("close_message")) {
+            (Some(when), Some(message)) => Some(ir::CloseCheck {
+                when: when.clone(),
+                message: message.clone(),
+                save: window.action.clone(),
+            }),
+            _ => None,
+        };
+        if let Some(check) = &close {
+            if matches!(
+                check.save,
+                Some(ir::Action::Window { .. } | ir::Action::Media { .. })
+            ) {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "window `{id}`: the save action must be an engine command"
+                    ))
+                    .at(window.source.clone()),
+                );
+            }
+            // The check reads the closing window's own drafts.
+            for exprs in check.exprs() {
+                for session in exprs.sessions() {
+                    if !sessions.contains(&session) {
+                        diagnostics.push(
+                            Diagnostic::error(format!(
+                                "window `{id}`'s close check reads `{session}`, which this window does not own; its components own: {}",
+                                if sessions.is_empty() { "none".to_string() } else { sessions.join(", ") }
+                            ))
+                            .at(window.source.clone()),
+                        );
+                    }
+                }
+            }
+        }
+        // Session parameters of the root exist per window instance and are
+        // only meaningful in that window's close check.
+        let mut content_sessions = Vec::new();
+        content.walk(&mut |node| {
+            if let ir::Node::Component(reference) = node {
+                for (_, arg) in &reference.args {
+                    if let ir::ComponentArg::Value { expr } = arg {
+                        content_sessions.extend(expr.sessions());
+                    }
+                }
+            }
+        });
+        if let Some(session) = content_sessions.first() {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "window `{id}` passes `{session}` state from the root; components take their own `#[session]` parameters"
+                ))
+                .at(window.source.clone()),
+            );
+        }
         windows.push(ir::WindowDef {
             id,
             title,
@@ -399,6 +490,7 @@ fn window_catalog(
             min_height: window.number("min_height"),
             content,
             sessions,
+            close,
         });
     }
     if windows
@@ -482,8 +574,19 @@ pub fn compile_library(
             });
         }
     }
+    let mut base = TypeTable::default();
+    let mentioned: Vec<&ast::TypeRef> = values
+        .iter()
+        .flat_map(|value| value_types(&value.item))
+        .chain(
+            components
+                .iter()
+                .flat_map(|component| component.item.params.iter().map(|param| &param.ty)),
+        )
+        .collect();
+    add_framework_types(&mut base, &mentioned);
     let types = merge_ui_types(
-        &TypeTable::default(),
+        &base,
         &values,
         (&library.languages, library.strict),
         &mut diagnostics,
@@ -492,7 +595,7 @@ pub fn compile_library(
     for component in &components {
         let mut params = Vec::new();
         for param in &component.item.params {
-            match param_kind(param, None, None, &[], &types) {
+            match param_kind(param, None, None, None, &[], &types) {
                 Ok(kind) => params.push((param.name.to_string(), kind)),
                 Err(message) => diagnostics.push(
                     Diagnostic::error(format!(
@@ -525,6 +628,7 @@ pub fn compile_library(
         &protocol,
         &[],
         &signatures,
+        &[],
         &[],
         &library.languages,
         &library.default_language,
@@ -654,6 +758,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     // UI sources.
     let mut values = Vec::new();
     let mut sessions_ast = Vec::new();
+    let mut players_ast = Vec::new();
     let mut components = Vec::new();
     for file in &config.ui_sources {
         let items = match read(file) {
@@ -688,6 +793,13 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 item,
             });
         }
+        for (path, item) in items.players {
+            players_ast.push(Located {
+                file: file.display.clone(),
+                module: module(&path),
+                item,
+            });
+        }
         for (path, item) in items.components {
             components.push(Located {
                 file: file.display.clone(),
@@ -696,6 +808,32 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             });
         }
     }
+    for extra in players_ast.iter().skip(1) {
+        diagnostics.push(
+            Diagnostic::error(
+                "an application declares at most one #[bern::players] catalog; add players as fields",
+            )
+            .at(location(&extra.file, extra.item.span)),
+        );
+    }
+    let players_handle = players_ast
+        .first()
+        .map(|located| located.item.name.to_string());
+    let players: Vec<ir::PlayerDef> = players_ast
+        .first()
+        .map(|located| {
+            located
+                .item
+                .players
+                .iter()
+                .map(|player| ir::PlayerDef {
+                    id: player.name.to_string(),
+                    doc: player.doc.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let player_ids: Vec<String> = players.iter().map(|player| player.id.clone()).collect();
 
     // Component libraries: versioned descriptors generated from their
     // sources and checked against this application's configuration.
@@ -718,6 +856,21 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             )));
         }
     }
+    let mentioned: Vec<&ast::TypeRef> = values
+        .iter()
+        .flat_map(|value| value_types(&value.item))
+        .chain(
+            sessions_ast
+                .iter()
+                .flat_map(|session| session.item.fields.iter().map(|field| &field.ty)),
+        )
+        .chain(
+            components
+                .iter()
+                .flat_map(|component| component.item.params.iter().map(|param| &param.ty)),
+        )
+        .collect();
+    add_framework_types(&mut base_types, &mentioned);
     let types = merge_ui_types(
         &base_types,
         &values,
@@ -825,6 +978,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 param,
                 Some(&protocol_module_name),
                 Some(&handle),
+                players_handle.as_deref(),
                 &sessions,
                 &types,
             ) {
@@ -850,6 +1004,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         &sessions,
         &signatures,
         &window_ids,
+        &player_ids,
         &config.languages,
         &config.default_language,
         config.strict,
@@ -967,6 +1122,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             types,
             sessions,
             windows,
+            players,
             components: lowered,
             texts,
         },

@@ -1,0 +1,21 @@
+error[E0277]: the trait bound `Binding<String>: SourceBinding` is not satisfied
+  --> tests/ui/fail_video_source_type.rs:33:35
+   |
+33 |     ui! { Video(id: clip, source: app.title) }
+   |                                   ---^^^^^^
+   |                                   |
+   |                                   the trait `SourceBinding` is not implemented for `Binding<String>`
+   |                                   required by a bound introduced by this call
+   |
+help: the following other types implement trait `SourceBinding`
+  --> src/bind.rs
+   |
+   | impl SourceBinding for Binding<crate::media::MediaSource> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Binding<bern::media::MediaSource>`
+   | impl SourceBinding for Binding<Option<crate::media::MediaSource>> {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `Binding<Option<bern::media::MediaSource>>`
+note: required by a bound in `bern::__private::media_source`
+  --> src/__private.rs
+   |
+   | pub fn media_source<S: SourceBinding>(_: &S) {}
+   |                        ^^^^^^^^^^^^^ required by this bound in `media_source`

@@ -7,9 +7,11 @@
 use bern::prelude::*;
 use showcase_protocol::showcase;
 
+mod media;
 mod pages;
 mod settings;
 
+pub use media::*;
 pub use pages::*;
 pub use settings::*;
 
@@ -26,6 +28,8 @@ pub enum Page {
     Inputs,
     #[label(tr! { "zh-Hans" => "列表与详情", "en" => "List & Detail" })]
     Library,
+    #[label(tr! { "zh-Hans" => "视频", "en" => "Video" })]
+    Media,
 }
 
 /// Segmented filter shown in toolbars and forms.
@@ -53,7 +57,14 @@ pub enum Density {
 /// Routes pushed inside the library page.
 #[bern::value]
 pub enum Route {
-    Item { id: i64 },
+    Item { id: i64, clip: MediaSource },
+}
+
+/// Media players owned by the application.
+#[bern::players]
+pub struct Players {
+    /// Plays library items; keeps playing across pages and windows.
+    pub preview: Player,
 }
 
 /// Drafts of one main window. Each window instance owns its own copy.
@@ -79,9 +90,16 @@ pub struct MainDraft {
     pub density: Density,
 }
 
-/// The application: a main window and a settings window.
+/// The application: a main window and a settings window. Each window's
+/// close check reads that window's own drafts.
 #[component]
-pub fn app(app: showcase::Client, windows: AppWindows) -> impl View {
+pub fn app(
+    app: showcase::Client,
+    windows: AppWindows,
+    players: Players,
+    #[session] draft: MainDraft,
+    #[session] profile: SettingsDraft,
+) -> impl View {
     ui! {
         WindowSet(handle: AppWindows, primary: main) {
             Window(
@@ -91,18 +109,22 @@ pub fn app(app: showcase::Client, windows: AppWindows) -> impl View {
                 width: 920,
                 height: 640,
                 min_width: 720,
-                min_height: 480
+                min_height: 480,
+                confirm_close: draft.notes != "",
+                close_message: tr! { "zh-Hans" => "要放弃备注吗？", "en" => "Discard your notes?" }
             ) {
-                main_window(app: app, windows: windows)
+                main_window(app: app, windows: windows, players: players)
             }
             Window(
                 id: settings,
                 title: tr! { "zh-Hans" => "设置", "en" => "Settings" },
                 role: settings,
-                width: 520
+                width: 520,
+                confirm_close: profile.display_name != "" && profile.display_name != app.display_name,
+                close_message: tr! { "zh-Hans" => "要存储对显示名称的更改吗？", "en" => "Do you want to save the display name?" }
             ) {
                 settings_window(app: app)
-            }
+            } => app.set_display_name(profile.display_name)
         }
     }
 }
@@ -112,6 +134,7 @@ pub fn app(app: showcase::Client, windows: AppWindows) -> impl View {
 pub fn main_window(
     app: showcase::Client,
     windows: AppWindows,
+    players: Players,
     #[session] draft: MainDraft,
 ) -> impl View {
     ui! {
@@ -130,6 +153,7 @@ pub fn main_window(
                 }
                 Section(title: tr! { "zh-Hans" => "数据", "en" => "Data" }) {
                     SidebarItem(value: Page::Library, label: tr! { "zh-Hans" => "列表与详情", "en" => "List & Detail" }, icon: "list.bullet.rectangle")
+                    SidebarItem(value: Page::Media, label: tr! { "zh-Hans" => "视频", "en" => "Video" }, icon: "play.rectangle")
                 }
             }
             Detail {
@@ -138,7 +162,8 @@ pub fn main_window(
                     Page::Buttons => { buttons_page(app: app, windows: windows) }
                     Page::Controls => { controls_page(app: app) }
                     Page::Inputs => { inputs_page(app: app) }
-                    Page::Library => { library_page(app: app) }
+                    Page::Library => { library_page(app: app, players: players) }
+                    Page::Media => { media_page(app: app, players: players) }
                 }
             }
         }

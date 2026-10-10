@@ -6,8 +6,8 @@
 //! `requires_ui_session`.
 
 use crate::{
-    CommandPolicy, CommandSpec, ExternalNames, FieldDef, OperationKind, ParamSpec, RecordDef,
-    Retry, Scope, Type, TypeTable,
+    CommandPolicy, CommandSpec, EnumDef, ExternalNames, FieldDef, OperationKind, ParamSpec,
+    RecordDef, Retry, Scope, Type, TypeTable, VariantDef,
 };
 
 /// Identifies one framework session command.
@@ -24,10 +24,11 @@ pub enum SessionCommand {
     WindowOpen,
     WindowClose,
     WindowActivate,
+    WindowConfirmClose,
 }
 
 impl SessionCommand {
-    pub const ALL: [SessionCommand; 11] = [
+    pub const ALL: [SessionCommand; 12] = [
         SessionCommand::Inspect,
         SessionCommand::Activate,
         SessionCommand::Edit,
@@ -39,6 +40,7 @@ impl SessionCommand {
         SessionCommand::WindowOpen,
         SessionCommand::WindowClose,
         SessionCommand::WindowActivate,
+        SessionCommand::WindowConfirmClose,
     ];
 
     pub fn id(self) -> &'static str {
@@ -54,6 +56,7 @@ impl SessionCommand {
             SessionCommand::WindowOpen => "window.open",
             SessionCommand::WindowClose => "window.close",
             SessionCommand::WindowActivate => "window.activate",
+            SessionCommand::WindowConfirmClose => "window.confirm_close",
         }
     }
 
@@ -91,6 +94,9 @@ fn spec(
             "requires_ui_session".into(),
             "target_not_found".into(),
             "target_unavailable".into(),
+            "target_blocked".into(),
+            "stale_window".into(),
+            "stale_confirmation".into(),
         ],
         policy: CommandPolicy {
             retry,
@@ -110,23 +116,91 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
         ty,
         doc: doc.into(),
     };
+    let unit_enum = |name: &str, variants: &[&str]| EnumDef {
+        name: name.into(),
+        variants: variants
+            .iter()
+            .map(|variant| VariantDef {
+                name: (*variant).into(),
+                fields: vec![],
+                label: None,
+            })
+            .collect(),
+    };
+    let decision = || Type::Enum {
+        name: "CloseDecision".into(),
+    };
+    let close_result = Type::Record {
+        name: "CloseResult".into(),
+    };
     let types = TypeTable {
-        enums: vec![],
-        records: vec![RecordDef {
-            name: "ControlInfo".into(),
-            fields: vec![
-                field("target", Type::Text, "Stable control identity"),
-                field("window", Type::Text, "Owning window instance"),
-                field("role", Type::Text, "Semantic role"),
-                field("label", Type::Text, "Resolved accessible name"),
-                field("enabled", Type::Bool, "Whether the control can be operated"),
-                field(
-                    "value",
-                    Type::optional(Type::Text),
-                    "Current value, when the control has one",
-                ),
-            ],
-        }],
+        enums: vec![
+            unit_enum(
+                "CloseOutcome",
+                &["Closed", "Rejected", "ConfirmationRequired"],
+            ),
+            unit_enum("CloseDecision", &["Save", "Discard", "Cancel"]),
+        ],
+        records: vec![
+            RecordDef {
+                name: "ControlInfo".into(),
+                fields: vec![
+                    field("target", Type::Text, "Stable control identity"),
+                    field("window", Type::Text, "Owning window instance"),
+                    field("role", Type::Text, "Semantic role"),
+                    field("label", Type::Text, "Resolved accessible name"),
+                    field("enabled", Type::Bool, "Whether the control can be operated"),
+                    field(
+                        "value",
+                        Type::optional(Type::Text),
+                        "Current value, when the control has one",
+                    ),
+                    field(
+                        "reason",
+                        Type::optional(Type::Text),
+                        "Why the control cannot be operated: `disabled` or `blocked_by_modal`",
+                    ),
+                ],
+            },
+            RecordDef {
+                name: "CloseResult".into(),
+                fields: vec![
+                    field(
+                        "outcome",
+                        Type::Enum {
+                            name: "CloseOutcome".into(),
+                        },
+                        "Closed, rejected, or waiting for a confirmation decision",
+                    ),
+                    field("window", Type::Text, "Window instance"),
+                    field(
+                        "confirmation",
+                        Type::optional(Type::Text),
+                        "Confirmation to decide with window.confirm_close",
+                    ),
+                    field(
+                        "draft_revision",
+                        Type::Int,
+                        "Draft revision the confirmation is bound to",
+                    ),
+                    field(
+                        "decisions",
+                        Type::list(decision()),
+                        "Decisions the confirmation accepts",
+                    ),
+                    field(
+                        "message",
+                        Type::optional(Type::Text),
+                        "The declared confirmation message, as shown in the dialog",
+                    ),
+                    field(
+                        "reason",
+                        Type::optional(Type::Text),
+                        "Why closing was rejected",
+                    ),
+                ],
+            },
+        ],
     };
     let target = || param("target", Type::Text, "Control identity from ui.inspect");
     let commands = vec![
@@ -205,9 +279,9 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
         spec(
             SessionCommand::WindowClose,
             OperationKind::Command,
-            "Request closing a window instance",
+            "Request closing a window instance; its declared close check may ask for a confirmation",
             vec![param("window", Type::Text, "Window instance id")],
-            Type::Unit,
+            close_result.clone(),
             Retry::Idempotent,
         ),
         spec(
@@ -217,6 +291,22 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             vec![param("window", Type::Text, "Window instance id")],
             Type::Unit,
             Retry::Idempotent,
+        ),
+        spec(
+            SessionCommand::WindowConfirmClose,
+            OperationKind::Command,
+            "Decide a pending close confirmation, as its dialog would",
+            vec![
+                param("window", Type::Text, "Window instance id"),
+                param(
+                    "confirmation",
+                    Type::Text,
+                    "Confirmation id from window.close",
+                ),
+                param("decision", decision(), "Save, Discard or Cancel"),
+            ],
+            close_result,
+            Retry::Never,
         ),
     ];
     (types, commands)

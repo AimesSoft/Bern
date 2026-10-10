@@ -27,6 +27,7 @@ package = "showcase-ui"
 sources = [
     "showcase-ui/src/lib.rs",
     "showcase-ui/src/pages.rs",
+    "showcase-ui/src/media.rs",
     "showcase-ui/src/settings.rs",
 ]
 root = "app"

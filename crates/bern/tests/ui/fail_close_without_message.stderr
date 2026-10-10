@@ -1,0 +1,5 @@
+error: `confirm_close:` and `close_message:` are declared together
+  --> tests/ui/fail_close_without_message.rs:35:13
+   |
+35 |             Window(id: main, title: tr! { "en" => "Main" }, initial: open, confirm_close: draft.name != "") {
+   |             ^^^^^^

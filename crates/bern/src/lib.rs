@@ -6,9 +6,10 @@
 //! into native UI for each target.
 
 pub mod bind;
+pub mod media;
 
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
-pub use bern_macros::{component, protocol, session, tr, ui, value};
+pub use bern_macros::{component, players, protocol, session, tr, ui, value};
 pub use bern_protocol::{
     CommandError, CommandOutcome, Invocation, LocalizedText, ProtocolDescriptor, SchemaError,
     StateUpdate, Type, Value,
@@ -20,6 +21,7 @@ pub trait View {}
 
 pub mod prelude {
     pub use crate::bind::{Binding, SessionField};
+    pub use crate::media::{MediaSource, Player};
     pub use crate::{CommandError, View, component, tr, ui};
 }
 

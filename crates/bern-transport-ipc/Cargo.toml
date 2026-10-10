@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 bern-protocol.workspace = true
+bern-media.workspace = true
 bern-command.workspace = true
 bern-runtime.workspace = true
 bern-adapter-json.workspace = true

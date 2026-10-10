@@ -90,6 +90,7 @@ fn showcase_generates_swift_that_type_checks() {
         .arg("-import-objc-header")
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
+        .arg(sources.join("BernMedia.swift"))
         .arg(sources.join("BernGenerated.swift"))
         .output()
         .unwrap();

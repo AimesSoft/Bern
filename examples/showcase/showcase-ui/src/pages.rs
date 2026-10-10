@@ -1,6 +1,6 @@
 //! Detail pages of the main window.
 
-use crate::{AppWindows, MainDraft, Route};
+use crate::{AppWindows, MainDraft, Players, Route};
 use bern::prelude::*;
 use showcase_protocol::showcase::{self, Action, ItemKind};
 
@@ -131,7 +131,11 @@ pub fn inputs_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
 
 /// Keyed engine list with push navigation to a detail page.
 #[component]
-pub fn library_page(app: showcase::Client, #[session] draft: MainDraft) -> impl View {
+pub fn library_page(
+    app: showcase::Client,
+    players: Players,
+    #[session] draft: MainDraft,
+) -> impl View {
     ui! {
         Navigation(id: library, path: draft.path) {
             Form {
@@ -140,7 +144,7 @@ pub fn library_page(app: showcase::Client, #[session] draft: MainDraft) -> impl 
                     footer: tr! { "zh-Hans" => "列表来自引擎状态，按项目编号保持身份。", "en" => "Rows come from engine state and keep their identity by item number." }
                 ) {
                     ForEach(items: app.items, key: id) |item| {
-                        NavLink(id: item_link, route: Route::Item { id: item.id }) {
+                        NavLink(id: item_link, route: Route::Item { id: item.id, clip: item.clip }) {
                             Row(gap: 8) {
                                 match item.kind {
                                     ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
@@ -161,7 +165,7 @@ pub fn library_page(app: showcase::Client, #[session] draft: MainDraft) -> impl 
             }
             Destination |route| {
                 match route {
-                    Route::Item { id } => { item_detail(app: app, id: id) }
+                    Route::Item { id, clip } => { item_detail(app: app, players: players, id: id, clip: clip) }
                 }
             }
         }
@@ -170,7 +174,13 @@ pub fn library_page(app: showcase::Client, #[session] draft: MainDraft) -> impl 
 
 /// Detail page for one library item.
 #[component]
-pub fn item_detail(app: showcase::Client, id: i64, #[session] draft: MainDraft) -> impl View {
+pub fn item_detail(
+    app: showcase::Client,
+    players: Players,
+    id: i64,
+    clip: MediaSource,
+    #[session] draft: MainDraft,
+) -> impl View {
     ui! {
         Form(title: tr! { "zh-Hans" => "项目 {id}", "en" => "Item {id}"; id: id }) {
             Section(title: tr! { "zh-Hans" => "项目", "en" => "Item" }) {
@@ -178,6 +188,13 @@ pub fn item_detail(app: showcase::Client, id: i64, #[session] draft: MainDraft) 
                 if draft.query != "" {
                     Text(content: tr! { "zh-Hans" => "搜索：{query}", "en" => "Search: {query}"; query: draft.query }, emphasis: secondary)
                 }
+            }
+            Section(
+                title: tr! { "zh-Hans" => "媒体", "en" => "Media" },
+                footer: tr! { "zh-Hans" => "在应用级预览播放器中打开；返回列表后仍会继续播放。", "en" => "Opens in the application's preview player, which keeps playing after you go back." }
+            ) {
+                Video(id: preview, player: players.preview, label: tr! { "zh-Hans" => "预览播放器", "en" => "Preview player" })
+                Button(id: open_clip, label: tr! { "zh-Hans" => "在预览播放器中打开", "en" => "Open in Preview Player" }, icon: "play.rectangle") => players.preview.open(clip)
             }
             Section {
                 Button(id: remove_item, label: tr! { "zh-Hans" => "删除此项目", "en" => "Delete This Item" }, role: destructive) => app.remove_item(id)

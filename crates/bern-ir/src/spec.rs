@@ -46,6 +46,11 @@ pub enum PropKind {
     WindowId,
     /// Name of the generated window handle type.
     TypeName,
+    /// Binding of a `MediaSource`, optional or not, followed by the player
+    /// the declaration creates.
+    MediaSource,
+    /// An application player from the `#[bern::players]` catalog.
+    Player,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -135,6 +140,10 @@ pub const TEXT_STYLES: &[&str] = &[
 
 pub const EMPHASIS: &[&str] = &["primary", "secondary", "tertiary"];
 
+/// How video fills its frame: keep the aspect ratio and letterbox, keep it
+/// and crop, or stretch.
+pub const VIDEO_FIT: &[&str] = &["contain", "cover", "fill"];
+
 const fn spec(
     name: &'static str,
     props: &'static [PropSpec],
@@ -168,6 +177,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     },
     ComponentSpec {
         placement: Placement::Within(&["WindowSet"]),
+        action: ActionRule::Optional,
         ..spec(
             "Window",
             &[
@@ -183,9 +193,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("height", PropKind::Number),
                 opt("min_width", PropKind::Number),
                 opt("min_height", PropKind::Number),
+                opt("confirm_close", PropKind::Bool),
+                opt("close_message", PropKind::LocalizedText),
             ],
             Children::One,
-            "Logical window with its own identity and state",
+            "Logical window with its own identity and state; `confirm_close` asks before closing, and the action saves",
         )
     },
     spec(
@@ -470,6 +482,22 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ComponentSpec {
         interactive: true,
         ..spec(
+            "Video",
+            &[
+                req("id", PropKind::Id),
+                opt("source", PropKind::MediaSource),
+                opt("player", PropKind::Player),
+                opt("label", PropKind::DisplayText),
+                opt("controls", PropKind::Keyword(&["standard", "none"])),
+                opt("fit", PropKind::Keyword(VIDEO_FIT)),
+            ],
+            Children::None,
+            "Video of a player created from `source` or attached with `player`, with the standard command-driven controls",
+        )
+    },
+    ComponentSpec {
+        interactive: true,
+        ..spec(
             "Picker",
             &[
                 req("id", PropKind::Id),
@@ -645,6 +673,31 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             });
         }
     }
+    if spec.name == "Video" && shape.props.contains(&"source") == shape.props.contains(&"player") {
+        errors.push(ShapeError {
+            prop: None,
+            message:
+                "`Video` takes exactly one of `source:` (a player created for this declaration) \
+                      or `player:` (an application player)"
+                    .into(),
+        });
+    }
+    if spec.name == "Window" {
+        let check = shape.props.contains(&"confirm_close");
+        if check != shape.props.contains(&"close_message") {
+            errors.push(ShapeError {
+                prop: None,
+                message: "`confirm_close:` and `close_message:` are declared together".into(),
+            });
+        }
+        if shape.has_action && !check {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a `Window` action is its save command, which needs `confirm_close:`"
+                    .into(),
+            });
+        }
+    }
     if spec.name == "Navigation" {
         let destinations = children
             .iter()
@@ -715,6 +768,20 @@ mod tests {
                 spec.name
             );
         }
+    }
+
+    #[test]
+    fn video_takes_a_source_or_a_player() {
+        for props in [vec!["id"], vec!["id", "source", "player"]] {
+            let errors = check_shape(&shape("Video", props, false));
+            assert!(
+                errors
+                    .iter()
+                    .any(|error| error.message.contains("exactly one"))
+            );
+        }
+        assert!(check_shape(&shape("Video", vec!["id", "source"], false)).is_empty());
+        assert!(check_shape(&shape("Video", vec!["id", "player"], false)).is_empty());
     }
 
     #[test]

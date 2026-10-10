@@ -48,6 +48,19 @@ pub mod showcase {
         pub kind: ItemKind,
         /// Number of files in the item.
         pub count: i64,
+        /// Media that plays the item.
+        pub clip: MediaSource,
+    }
+
+    /// A sample clip of the media page.
+    #[value]
+    pub enum Clip {
+        #[label(tr! { "zh-Hans" => "测试图", "en" => "Test Pattern" })]
+        Pattern,
+        #[label(tr! { "zh-Hans" => "色条", "en" => "Color Bars" })]
+        Bars,
+        #[label(tr! { "zh-Hans" => "损坏的文件", "en" => "Damaged File" })]
+        Damaged,
     }
 
     #[state]
@@ -60,6 +73,12 @@ pub mod showcase {
         pub volume: f64,
         /// Sample library items.
         pub items: Vec<Item>,
+        /// Clip featured on the media page.
+        pub featured: Clip,
+        /// Source of the featured clip; the media page's video follows it.
+        pub featured_source: MediaSource,
+        /// Saved display name, edited in the settings window.
+        pub display_name: String,
     }
 
     #[commands]
@@ -78,5 +97,14 @@ pub mod showcase {
         /// Remove an item by id.
         #[errors("not_found")]
         fn remove_item(&mut self, id: i64) -> Result<(), CommandError>;
+
+        /// Feature a clip on the media page.
+        #[idempotent]
+        fn feature(&mut self, clip: Clip) -> Result<(), CommandError>;
+
+        /// Save the display name: 1 to 40 characters, not only spaces.
+        #[idempotent]
+        #[errors("invalid_name")]
+        fn set_display_name(&mut self, name: String) -> Result<(), CommandError>;
     }
 }

@@ -7,9 +7,11 @@
 //! same [`bern_command::Host`] and the same live UI sessions as the UI.
 
 use bern_adapter_json::{
-    self as json, ClientMessage, ServerMessage, SessionInfo, params_from_json, state_json, to_json,
+    self as json, ClientMessage, ServerMessage, SessionInfo, media_players_json, params_from_json,
+    state_json, to_json,
 };
 use bern_command::{CallContext, Entry, Host, Subscription};
+use bern_media::{MediaCommand, MediaHub, MediaSubscription, media_catalog};
 use bern_protocol::{
     CommandError, Invocation, PROTOCOL_VERSION, SessionCommand, fingerprint_bytes, session_catalog,
 };
@@ -22,8 +24,13 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 const MAX_LINE: usize = 1 << 20;
+
+/// How long a media command waits for the executor before its outcome is
+/// reported as unknown.
+const MEDIA_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Directory holding the sockets of one application, unique per user.
 pub fn socket_dir(bundle_id: &str) -> PathBuf {
@@ -85,8 +92,14 @@ pub struct Server {
 }
 
 impl Server {
-    /// Start serving `host` and `sessions` for the application `bundle_id`.
-    pub fn start(host: Host, sessions: Sessions, bundle_id: &str) -> io::Result<Server> {
+    /// Start serving `host`, its media players and live UI `sessions` for
+    /// the application `bundle_id`.
+    pub fn start(
+        host: Host,
+        sessions: Sessions,
+        media: MediaHub,
+        bundle_id: &str,
+    ) -> io::Result<Server> {
         let dir = socket_dir(bundle_id);
         std::fs::DirBuilder::new()
             .recursive(true)
@@ -128,10 +141,11 @@ impl Server {
                     }
                     let host = host.clone();
                     let sessions = sessions.clone();
+                    let media = media.clone();
                     let _ = thread::Builder::new()
                         .name("bern-ipc-connection".into())
                         .spawn(move || {
-                            let _ = serve(stream, host, sessions);
+                            let _ = serve(stream, host, sessions, media);
                         });
                 }
             })?;
@@ -205,7 +219,7 @@ fn read_line(reader: &mut BufReader<UnixStream>, line: &mut Vec<u8>) -> io::Resu
     Ok(true)
 }
 
-fn serve(stream: UnixStream, host: Host, sessions: Sessions) -> io::Result<()> {
+fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) -> io::Result<()> {
     let writer: Writer = Arc::new(Mutex::new(stream.try_clone()?));
     let mut reader = BufReader::new(stream);
     let mut line = Vec::new();
@@ -261,7 +275,8 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions) -> io::Result<()> {
     send(&writer, &json::welcome(host.engine_id(), descriptor))?;
 
     let (session_types, session_specs) = session_catalog();
-    let mut subscription: Option<Subscription> = None;
+    let (media_types, media_specs) = media_catalog();
+    let mut subscription: Option<(Subscription, MediaSubscription)> = None;
     while read_line(&mut reader, &mut line)? {
         let message: ClientMessage = match serde_json::from_slice(&line) {
             Ok(message) => message,
@@ -323,6 +338,21 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions) -> io::Result<()> {
                             error: Some(problem),
                         },
                     }
+                } else if let Some(media_command) = MediaCommand::from_id(&command) {
+                    let spec = &media_specs[media_command.index() as usize];
+                    let result = params_from_json(spec, &params, &media_types)
+                        .and_then(|params| {
+                            media.dispatch_blocking(media_command, params, MEDIA_TIMEOUT)
+                        })
+                        .map(|value| to_json(&value, &spec.result, &media_types));
+                    ServerMessage::Result {
+                        request_id,
+                        status: "completed".into(),
+                        revision: media.snapshot().0.to_string(),
+                        ok: result.is_ok(),
+                        error: result.as_ref().err().cloned(),
+                        result: result.ok(),
+                    }
                 } else {
                     ServerMessage::Result {
                         request_id,
@@ -376,6 +406,8 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions) -> io::Result<()> {
                 protocol: Box::new(descriptor.clone()),
                 session_commands: session_specs.clone(),
                 session_types: session_types.clone(),
+                media_commands: media_specs.clone(),
+                media_types: media_types.clone(),
             },
             ClientMessage::Sessions { request_id } => ServerMessage::Sessions {
                 request_id,
@@ -390,7 +422,7 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions) -> io::Result<()> {
             },
             ClientMessage::Subscribe { request_id } => {
                 let updates = Arc::clone(&writer);
-                subscription = Some(host.subscribe(move |update| {
+                let engine = host.subscribe(move |update| {
                     let _ = send(
                         &updates,
                         &ServerMessage::Update {
@@ -398,7 +430,18 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions) -> io::Result<()> {
                             changes: state_json(descriptor, &update.changes),
                         },
                     );
-                }));
+                });
+                let updates = Arc::clone(&writer);
+                let players = media.subscribe(move |update| {
+                    let _ = send(
+                        &updates,
+                        &ServerMessage::Media {
+                            revision: update.revision.to_string(),
+                            players: media_players_json(&update.players),
+                        },
+                    );
+                });
+                subscription = Some((engine, players));
                 let (revision, values) = host.snapshot();
                 let values: Vec<(usize, _)> = values.into_iter().enumerate().collect();
                 ServerMessage::State {

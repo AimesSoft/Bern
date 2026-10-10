@@ -1,0 +1,5 @@
+error: `Video` takes exactly one of `source:` (a player created for this declaration) or `player:` (an application player)
+  --> tests/ui/fail_video_without_source.rs:33:11
+   |
+33 |     ui! { Video(id: clip, fit: cover) }
+   |           ^^^^^

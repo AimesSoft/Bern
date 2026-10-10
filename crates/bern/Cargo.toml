@@ -13,3 +13,4 @@ bern-command.workspace = true
 
 [dev-dependencies]
 trybuild = "1"
+bern-media.workspace = true

@@ -104,6 +104,24 @@ pub struct SessionItem {
     pub span: Span,
 }
 
+/// One application player in a `#[bern::players]` struct.
+#[derive(Clone, Debug)]
+pub struct PlayerField {
+    pub name: Ident,
+    pub doc: String,
+    pub span: Span,
+}
+
+/// A `#[bern::players]` struct: media players owned by the application,
+/// shared by every window and addressed by their field names.
+#[derive(Clone, Debug)]
+pub struct PlayersItem {
+    pub name: Ident,
+    pub players: Vec<PlayerField>,
+    pub doc: String,
+    pub span: Span,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParamKind {
     /// Passed by the caller.
@@ -139,6 +157,7 @@ pub struct SourceItems {
     pub protocols: Vec<(Vec<String>, ProtocolItem)>,
     pub values: Vec<(Vec<String>, ValueItem)>,
     pub sessions: Vec<(Vec<String>, SessionItem)>,
+    pub players: Vec<(Vec<String>, PlayersItem)>,
     pub components: Vec<(Vec<String>, ComponentItem)>,
 }
 
@@ -464,6 +483,61 @@ pub fn parse_session(item: &Item) -> syn::Result<SessionItem> {
     Ok(SessionItem {
         name: item.ident.clone(),
         fields,
+        doc: doc_comment(&item.attrs),
+        span: item.ident.span(),
+    })
+}
+
+/// Parse a `#[bern::players]` struct (marker attribute already removed).
+/// Every field is a `Player`; its name is the stable `player_id`.
+pub fn parse_players(item: &Item) -> syn::Result<PlayersItem> {
+    let Item::Struct(item) = item else {
+        return Err(error(item.span(), "`#[bern::players]` applies to structs"));
+    };
+    reject_generics(&item.generics, &item.ident)?;
+    check_known_attrs(&item.attrs, &["players"], "player catalogs")?;
+    let syn::Fields::Named(fields) = &item.fields else {
+        return Err(error(
+            item.ident.span(),
+            "declare players as named fields: `pub preview: Player`",
+        ));
+    };
+    let mut players = Vec::new();
+    for field in &fields.named {
+        let name = field.ident.clone().unwrap();
+        check_known_attrs(&field.attrs, &[], "players")?;
+        if !matches!(field.vis, syn::Visibility::Public(_)) {
+            return Err(error(name.span(), format!("player `{name}` must be `pub`")));
+        }
+        let is_player = matches!(&field.ty, syn::Type::Path(path)
+        if path.qself.is_none()
+            && path.path.segments.last().is_some_and(|segment| {
+                segment.ident == "Player" && segment.arguments.is_none()
+            }));
+        if !is_player {
+            return Err(error(
+                field.ty.span(),
+                "every field of a player catalog has the type `Player`",
+            ));
+        }
+        if !crate::valid_id(&name.to_string()) {
+            return Err(error(
+                name.span(),
+                "player names are lower snake case; they become stable player ids",
+            ));
+        }
+        players.push(PlayerField {
+            doc: doc_comment(&field.attrs),
+            span: name.span(),
+            name,
+        });
+    }
+    if players.is_empty() {
+        return Err(error(item.ident.span(), "declare at least one player"));
+    }
+    Ok(PlayersItem {
+        name: item.ident.clone(),
+        players,
         doc: doc_comment(&item.attrs),
         span: item.ident.span(),
     })
@@ -819,6 +893,13 @@ fn collect(items: &[Item], path: &mut Vec<String>, out: &mut SourceItems) -> syn
                 reject_cfg(attrs, "session state")?;
                 out.sessions
                     .push((path.clone(), parse_session(&strip_marker(item, "session"))?));
+            }
+            Item::Struct(syn::ItemStruct { attrs, .. })
+                if find_attr(attrs, "players").is_some() =>
+            {
+                reject_cfg(attrs, "player catalogs")?;
+                out.players
+                    .push((path.clone(), parse_players(&strip_marker(item, "players"))?));
             }
             Item::Fn(func) if find_attr(&func.attrs, "component").is_some() => {
                 out.components

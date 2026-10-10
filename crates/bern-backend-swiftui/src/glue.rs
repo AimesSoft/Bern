@@ -246,6 +246,7 @@ fn spec() -> bern_ffi::AppSpec {{
     bern_ffi::AppSpec {{
         bundle_id: {bundle:?},
         ipc: {ipc},
+        players: vec![{players}],
         session: bern_ffi::runtime::SessionSpec {{
         types: {types},
         sessions: vec![
@@ -265,6 +266,12 @@ fn spec() -> bern_ffi::AppSpec {{
         types = rust_types(&app.types),
         sessions = sessions.join(",\n            "),
         windows = windows.join(",\n            "),
+        players = app
+            .players
+            .iter()
+            .map(|player| format!("{:?}.into()", player.id))
+            .collect::<Vec<_>>()
+            .join(", "),
     )
 }
 

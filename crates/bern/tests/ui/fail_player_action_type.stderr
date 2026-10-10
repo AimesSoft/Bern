@@ -1,0 +1,13 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail_player_action_type.rs:33:83
+   |
+33 |     ui! { Button(id: seek, label: tr! { "en" => "Seek" }) => players.preview.seek(draft.name) }
+   |                                                                              ---- ^^^^^ expected `i64`, found `String`
+   |                                                                              |
+   |                                                                              arguments to this method are incorrect
+   |
+note: method defined here
+  --> src/bind.rs
+   |
+   |     pub fn seek(&self, position_ms: i64) -> CommandRef {
+   |            ^^^^

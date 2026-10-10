@@ -58,10 +58,46 @@ fn label(enum_name: &str, variant: &str, tr: &crate::Tr) -> LocalizedText {
     }
 }
 
+/// Every type written in a protocol: value fields, state and parameters.
+fn protocol_types(protocol: &ProtocolItem) -> Vec<&TypeRef> {
+    let mut types = Vec::new();
+    for value in &protocol.values {
+        match &value.kind {
+            ValueKind::Enum(variants) => {
+                for variant in variants {
+                    types.extend(variant.fields.iter().map(|field| &field.ty));
+                }
+            }
+            ValueKind::Record(fields) => types.extend(fields.iter().map(|field| &field.ty)),
+        }
+    }
+    types.extend(protocol.state.fields.iter().map(|field| &field.ty));
+    for method in &protocol.commands.methods {
+        types.extend(method.params.iter().map(|param| &param.ty));
+        types.push(&method.result);
+    }
+    types
+}
+
 /// Collect the protocol's types, state and commands into a descriptor.
 pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescriptor> {
     // Names first, so field types can refer to any declared value.
     let mut types = TypeTable::default();
+    for value in &protocol.values {
+        if value.name == bern_media::MEDIA_SOURCE {
+            return Err(syn::Error::new(
+                value.span,
+                "`MediaSource` is a framework type; use it from `bern::prelude` instead of declaring it",
+            ));
+        }
+    }
+    // Framework value types join the table when the protocol uses them.
+    if protocol_types(protocol)
+        .into_iter()
+        .any(|ty| crate::mentions(ty, bern_media::MEDIA_SOURCE))
+    {
+        types.records.push(bern_media::media_source_def());
+    }
     for value in &protocol.values {
         match &value.kind {
             ValueKind::Enum(_) => types.enums.push(EnumDef {

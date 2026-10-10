@@ -197,6 +197,16 @@ final class BernWindowContext {
     let isSettings: Bool
     @ObservationIgnored let sessions: [any BernSessionState]
     @ObservationIgnored var dismiss: DismissAction?
+    /// The window's declared close check, set by the generated window root.
+    @ObservationIgnored var closeCheck: BernCloseCheck? {
+        didSet { installCloseGuard() }
+    }
+    /// The close confirmation shown as this window's dialog. While it is
+    /// pending, the window's controls are blocked for every entry.
+    var pendingClose: BernPendingClose?
+    @ObservationIgnored private(set) weak var nsWindow: NSWindow?
+    @ObservationIgnored private var closeGuard: BernCloseGuard?
+    @ObservationIgnored var allowsClose = false
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
 
@@ -213,8 +223,28 @@ final class BernWindowContext {
     }
 
     func attached(generation: UInt64, id: String) {
+        // A new instance starts without a pending or finished close.
+        if generation != self.generation {
+            allowsClose = false
+            pendingClose = nil
+        }
         self.generation = generation
         self.id = id
+    }
+
+    func found(_ window: NSWindow?) {
+        guard let window, window !== nsWindow else { return }
+        nsWindow = window
+        installCloseGuard()
+    }
+
+    /// Windows with a close check route the system close button and
+    /// File > Close through the close protocol before anything closes.
+    private func installCloseGuard() {
+        guard closeCheck != nil, let window = nsWindow, closeGuard?.window !== window else { return }
+        let guardian = BernCloseGuard(window: window, context: self)
+        closeGuard = guardian
+        window.delegate = guardian
     }
 
     /// Write one session field through Rust, which validates it.
@@ -272,6 +302,11 @@ final class BernControls {
         if matches.count > 1 {
             throw BernCommandFailure(code: "target_ambiguous", message: "`\(target)` is mounted in several places")
         }
+        if BernHost.shared.isBlocked(matches[0].window) {
+            throw BernCommandFailure(
+                code: "target_blocked",
+                message: "`\(target)` is blocked by the close confirmation of `\(matches[0].window)`; decide it with window.confirm_close")
+        }
         guard matches[0].enabled else {
             throw BernCommandFailure(code: "target_unavailable", message: "`\(target)` is disabled")
         }
@@ -313,6 +348,13 @@ extension View {
 
 // MARK: - Host
 
+/// What to do when the reply of a command arrives.
+struct BernPendingReply {
+    let window: String?
+    var success: ((inout BernReader) throws -> Void)? = nil
+    var completion: (@MainActor (BernCommandFailure?) -> Void)? = nil
+}
+
 struct BernFailure: Identifiable {
     let id = UUID()
     let window: String?
@@ -350,13 +392,33 @@ private func bernOnSessionRequest(
     DispatchQueue.main.async { MainActor.assumeIsolated { BernHost.shared.receiveSessionRequest(request, data) } }
 }
 
+private func bernOnMediaRequest(_ context: UnsafeMutableRawPointer?, _ bytes: UnsafePointer<UInt8>?, _ count: Int) {
+    let data = bernCopy(bytes, count)
+    DispatchQueue.main.async { MainActor.assumeIsolated { BernMedia.shared.backend.perform(data) } }
+}
+
+private func bernOnMediaState(_ context: UnsafeMutableRawPointer?, _ bytes: UnsafePointer<UInt8>?, _ count: Int) {
+    let data = bernCopy(bytes, count)
+    DispatchQueue.main.async { MainActor.assumeIsolated { BernMedia.shared.receive(data) } }
+}
+
+/// Media functions of the bridge that answer at once.
+enum BernMediaCall {
+    case attachExecutor, create, bind
+}
+
+/// Media functions of the bridge that answer later or not at all.
+enum BernMediaPost {
+    case release, view, complete, event
+}
+
 @MainActor
 @Observable
 final class BernHost {
     static let shared = BernHost()
 
     @ObservationIgnored private var handle: OpaquePointer?
-    @ObservationIgnored private var replies: [UInt64: (window: String?, success: ((inout BernReader) throws -> Void)?)] = [:]
+    @ObservationIgnored private var replies: [UInt64: BernPendingReply] = [:]
     @ObservationIgnored private var nextToken: UInt64 = 1
     @ObservationIgnored private var revision: UInt64 = 0
     @ObservationIgnored private var apply: ((UInt32, inout BernReader) throws -> Void)?
@@ -384,7 +446,8 @@ final class BernHost {
         var error = BernBuffer(ptr: nil, len: 0, capacity: 0)
         let callbacks = BernCallbacks(
             context: nil, on_state: bernOnState, on_reply: bernOnReply,
-            on_session_request: bernOnSessionRequest)
+            on_session_request: bernOnSessionRequest, on_media_request: bernOnMediaRequest,
+            on_media_state: bernOnMediaState)
         guard let app = bern_app_start(fingerprint, callbacks, &error) else {
             startupError = String(decoding: Self.take(error), as: UTF8.self)
             return
@@ -394,6 +457,8 @@ final class BernHost {
         engineID = String(decoding: Self.take(bern_app_engine_id(app)), as: UTF8.self)
         channel = String(decoding: Self.take(bern_app_channel(app)), as: UTF8.self)
         receiveState(Self.take(bern_app_snapshot(app)))
+        BernMedia.shared.attachExecutor()
+        BernMedia.shared.receive(Self.take(bern_media_snapshot(app)))
     }
 
     func stop() {
@@ -430,15 +495,79 @@ final class BernHost {
         _ command: UInt32, window: String?, _ encode: (inout BernWriter) -> Void,
         success: ((inout BernReader) throws -> Void)? = nil
     ) {
+        send(command, window: window, encode: encode, reply: BernPendingReply(window: window, success: success))
+    }
+
+    /// Dispatch an engine command and learn whether it succeeded.
+    func dispatch(
+        _ command: UInt32, window: String?, encode: (inout BernWriter) -> Void,
+        completion: (@MainActor (BernCommandFailure?) -> Void)?
+    ) {
+        send(command, window: window, encode: encode, reply: BernPendingReply(window: window, completion: completion))
+    }
+
+    private func send(
+        _ command: UInt32, window: String?, encode: (inout BernWriter) -> Void, reply: BernPendingReply
+    ) {
+        guard let handle else {
+            reply.completion?(BernCommandFailure(code: "engine_stopped", message: "the engine is not running"))
+            return
+        }
+        var writer = BernWriter()
+        encode(&writer)
+        let token = nextToken
+        nextToken += 1
+        replies[token] = reply
+        writer.bytes.withUnsafeBufferPointer { buffer in
+            bern_app_dispatch(handle, command, buffer.baseAddress, buffer.count, token)
+        }
+    }
+
+    /// Dispatch a media command; `window` receives a failure alert.
+    func dispatchMedia(_ command: UInt32, window: String?, _ encode: (inout BernWriter) -> Void) {
         guard let handle else { return }
         var writer = BernWriter()
         encode(&writer)
         let token = nextToken
         nextToken += 1
-        replies[token] = (window, success)
+        replies[token] = BernPendingReply(window: window)
         writer.bytes.withUnsafeBufferPointer { buffer in
-            bern_app_dispatch(handle, command, buffer.baseAddress, buffer.count, token)
+            bern_media_dispatch(handle, command, buffer.baseAddress, buffer.count, token)
         }
+    }
+
+    func mediaCall(_ call: BernMediaCall, _ bytes: [UInt8]) -> [UInt8] {
+        guard let handle else { return [] }
+        let buffer = bytes.withUnsafeBufferPointer { pointer in
+            switch call {
+            case .attachExecutor: bern_media_executor_attached(handle, pointer.baseAddress, pointer.count)
+            case .create: bern_media_create(handle, pointer.baseAddress, pointer.count)
+            case .bind: bern_media_bind(handle, pointer.baseAddress, pointer.count)
+            }
+        }
+        return Self.take(buffer)
+    }
+
+    func mediaPost(_ post: BernMediaPost, _ bytes: [UInt8]) {
+        guard let handle else { return }
+        bytes.withUnsafeBufferPointer { pointer in
+            switch post {
+            case .release: bern_media_release(handle, pointer.baseAddress, pointer.count)
+            case .view: bern_media_view(handle, pointer.baseAddress, pointer.count)
+            case .complete: bern_media_complete(handle, pointer.baseAddress, pointer.count)
+            case .event: bern_media_event(handle, pointer.baseAddress, pointer.count)
+            }
+        }
+    }
+
+    /// Read a `0` or `1, code, message` answer.
+    func status(_ bytes: [UInt8]) -> BernCommandFailure? {
+        var reader = BernReader(bytes)
+        guard let status = try? reader.u8() else {
+            return BernCommandFailure(code: "engine_stopped", message: "the engine is not running")
+        }
+        guard status != 0 else { return nil }
+        return BernCommandFailure(code: (try? reader.text()) ?? "failed", message: (try? reader.text()) ?? "")
     }
 
     func receiveReply(_ token: UInt64, _ bytes: [UInt8]) {
@@ -449,12 +578,16 @@ final class BernHost {
             _ = try reader.u64()
             if status == 0 {
                 try pending.success?(&reader)
+                pending.completion?(nil)
             } else {
-                failure = BernFailure(
-                    window: pending.window, code: try reader.text(), message: try reader.text())
+                let code = try reader.text()
+                let message = try reader.text()
+                failure = BernFailure(window: pending.window, code: code, message: message)
+                pending.completion?(BernCommandFailure(code: code, message: message))
             }
         } catch {
             failure = BernFailure(window: pending.window, code: "invalid_reply", message: "\(error)")
+            pending.completion?(BernCommandFailure(code: "invalid_reply", message: "\(error)"))
         }
     }
 
@@ -494,6 +627,7 @@ final class BernHost {
     func detach(_ context: BernWindowContext) {
         guard let handle, windows[context.kindID] === context else { return }
         windows[context.kindID] = nil
+        BernMedia.shared.windowClosed(context.id)
         bern_window_closed(handle, context.kind, context.generation)
     }
 
@@ -523,8 +657,132 @@ final class BernHost {
         NSApplication.shared.activate()
     }
 
+    /// Request closing a window kind's instance through the close protocol.
     func close(_ kindID: String) {
-        windows[kindID]?.dismiss?()
+        guard let context = windows[kindID] else { return }
+        do {
+            _ = try requestClose(context)
+        } catch let problem as BernCommandFailure {
+            failure = BernFailure(window: context.id, code: problem.code, message: problem.message)
+        } catch {}
+    }
+
+    // MARK: Close protocol
+
+    /// The system window showing a window kind, for development aids.
+    func systemWindow(_ kindID: String) -> NSWindow? {
+        windows[kindID]?.nsWindow
+    }
+
+    func isBlocked(_ windowID: String) -> Bool {
+        windows.values.contains { $0.id == windowID && $0.pendingClose != nil }
+    }
+
+    /// Run the window's declared close check and ask the session runtime
+    /// whether to close now or to wait for a confirmation decision. A
+    /// pending confirmation is returned again rather than asked twice.
+    func requestClose(_ context: BernWindowContext) throws -> BernCloseResult {
+        guard let handle, context.generation > 0 else {
+            throw BernCommandFailure(code: "target_not_found", message: "the window is not attached")
+        }
+        let check = context.closeCheck
+        let needsConfirmation = check?.needsConfirmation() ?? false
+        let canSave = check?.save != nil
+        var reader = BernReader(
+            Self.take(
+                bern_window_request_close(
+                    handle, context.kind, context.generation, needsConfirmation ? 1 : 0, canSave ? 1 : 0)))
+        if try reader.u8() != 0 {
+            throw BernCommandFailure(code: try reader.text(), message: try reader.text())
+        }
+        if try reader.u8() == 0 {
+            finishClose(context)
+            return BernCloseResult(outcome: .closed, window: context.id)
+        }
+        let pending = BernPendingClose(
+            id: try reader.text(), message: check?.message() ?? "", canSave: canSave,
+            draftRevision: try reader.u64())
+        if context.pendingClose != pending { context.pendingClose = pending }
+        BernSnapshot.schedule()
+        return BernCloseResult(
+            outcome: .confirmationRequired, window: context.id, confirmation: pending.id,
+            draftRevision: pending.draftRevision, decisions: pending.decisions, message: pending.message)
+    }
+
+    /// Apply a decision from the dialog or from an external entry. A save
+    /// that fails keeps the window open.
+    func confirmClose(
+        _ context: BernWindowContext, confirmation: String, decision: BernCloseDecision,
+        completion: @escaping @MainActor (Result<BernCloseResult, BernCommandFailure>) -> Void
+    ) {
+        guard let handle else {
+            completion(.failure(BernCommandFailure(code: "engine_stopped", message: "the engine is not running")))
+            return
+        }
+        var writer = BernWriter()
+        writer.text(confirmation)
+        writer.u32(decision.rawValue)
+        let bytes = writer.bytes.withUnsafeBufferPointer { buffer in
+            Self.take(bern_window_confirm_close(handle, context.kind, context.generation, buffer.baseAddress, buffer.count))
+        }
+        var reader = BernReader(bytes)
+        let revision = context.pendingClose?.draftRevision ?? 0
+        do {
+            if try reader.u8() != 0 {
+                let problem = BernCommandFailure(code: try reader.text(), message: try reader.text())
+                // A stale confirmation no longer describes the window.
+                if problem.code == "stale_confirmation", context.pendingClose?.id == confirmation {
+                    context.pendingClose = nil
+                }
+                completion(.failure(problem))
+                return
+            }
+            let step = try reader.u8()
+            context.pendingClose = nil
+            BernSnapshot.schedule()
+            switch step {
+            case 0:
+                finishClose(context)
+                completion(.success(BernCloseResult(outcome: .closed, window: context.id, draftRevision: revision)))
+            case 1:
+                guard let save = context.closeCheck?.save else {
+                    completion(.failure(BernCommandFailure(code: "invalid_params", message: "no save command")))
+                    return
+                }
+                save { [weak self] problem in
+                    if let problem {
+                        completion(
+                            .success(
+                                BernCloseResult(
+                                    outcome: .rejected, window: context.id, draftRevision: revision,
+                                    reason: "save_failed: \(problem.code): \(problem.message)")))
+                    } else {
+                        self?.finishClose(context)
+                        completion(.success(BernCloseResult(outcome: .closed, window: context.id, draftRevision: revision)))
+                    }
+                }
+            default:
+                completion(
+                    .success(
+                        BernCloseResult(outcome: .rejected, window: context.id, draftRevision: revision, reason: "cancelled")))
+            }
+        } catch {
+            completion(.failure(BernCommandFailure(code: "invalid_reply", message: "\(error)")))
+        }
+    }
+
+    /// Decide from the window's own dialog.
+    func decide(_ context: BernWindowContext, _ pending: BernPendingClose, _ decision: BernCloseDecision) {
+        confirmClose(context, confirmation: pending.id, decision: decision) { _ in }
+    }
+
+    private func finishClose(_ context: BernWindowContext) {
+        context.allowsClose = true
+        if let window = context.nsWindow {
+            window.close()
+        } else {
+            context.dismiss?()
+        }
     }
 
     /// Open windows declared `initial: open` once per session.
@@ -594,6 +852,9 @@ final class BernHost {
                     writer.u8(entry.enabled ? 1 : 0)
                     let value: String? = entry.actions.value.flatMap { $0() }
                     value.encode(bern: &writer)
+                    let reason: String? =
+                        isBlocked(entry.window) ? "blocked_by_modal" : (entry.enabled ? nil : "disabled")
+                    reason.encode(bern: &writer)
                 }
             }
         case 1:  // ui.activate
@@ -653,12 +914,24 @@ final class BernHost {
             }
         case 9:  // window.close
             let context = try window(try reader.text())
-            context.dismiss?()
-            complete(request, command: command) { _ in }
+            let result = try requestClose(context)
+            complete(request, command: command) { result.encode(&$0) }
         case 10:  // window.activate
             let context = try window(try reader.text())
             open(context.kindID)
             complete(request, command: command) { _ in }
+        case 11:  // window.confirm_close
+            let context = try window(try reader.text())
+            let confirmation = try reader.text()
+            guard let decision = BernCloseDecision(rawValue: try reader.u32()) else {
+                throw BernCommandFailure(code: "invalid_params", message: "unknown close decision")
+            }
+            confirmClose(context, confirmation: confirmation, decision: decision) { [weak self] result in
+                switch result {
+                case .success(let result): self?.complete(request, command: command) { result.encode(&$0) }
+                case .failure(let problem): self?.fail(request, problem)
+                }
+            }
         default:
             throw BernCommandFailure(code: "unknown_command", message: "unknown session command \(command)")
         }
@@ -666,6 +939,123 @@ final class BernHost {
 
     private func unsupported(_ entry: BernControlEntry, _ action: String) -> BernCommandFailure {
         BernCommandFailure(code: "target_unavailable", message: "`\(entry.target)` (\(entry.role)) does not support \(action)")
+    }
+}
+
+// MARK: - Close protocol types
+
+/// A window's declared close check, generated from its `Window` declaration.
+struct BernCloseCheck {
+    /// Whether closing needs a decision, evaluated when closing is requested.
+    let needsConfirmation: @MainActor () -> Bool
+    /// The declared confirmation message.
+    let message: @MainActor () -> String
+    /// The declared save command; it reports whether it succeeded.
+    let save: (@MainActor (@escaping @MainActor (BernCommandFailure?) -> Void) -> Void)?
+}
+
+/// A close confirmation waiting for a decision.
+struct BernPendingClose: Identifiable, Equatable {
+    let id: String
+    let message: String
+    let canSave: Bool
+    let draftRevision: UInt64
+
+    var decisions: [BernCloseDecision] { canSave ? [.save, .discard, .cancel] : [.discard, .cancel] }
+}
+
+/// Decisions in the order of the session catalog's `CloseDecision`.
+enum BernCloseDecision: UInt32 {
+    case save, discard, cancel
+}
+
+/// The session catalog's `CloseResult`, encoded field by field.
+struct BernCloseResult {
+    enum Outcome: UInt32 {
+        case closed, rejected, confirmationRequired
+    }
+
+    let outcome: Outcome
+    let window: String
+    var confirmation: String? = nil
+    var draftRevision: UInt64 = 0
+    var decisions: [BernCloseDecision] = []
+    var message: String? = nil
+    var reason: String? = nil
+
+    func encode(_ writer: inout BernWriter) {
+        writer.u32(outcome.rawValue)
+        writer.text(window)
+        confirmation.encode(bern: &writer)
+        writer.i64(Int64(draftRevision))
+        writer.u32(UInt32(decisions.count))
+        for decision in decisions { writer.u32(decision.rawValue) }
+        message.encode(bern: &writer)
+        reason.encode(bern: &writer)
+    }
+}
+
+/// Stands in as the window's delegate so that a close the system asks for
+/// first runs the close protocol. Every other delegate message goes to the
+/// delegate SwiftUI installed.
+@MainActor
+final class BernCloseGuard: NSObject, NSWindowDelegate {
+    // Read by the Objective-C runtime's forwarding, which is not isolated;
+    // it is only set once, on the main thread.
+    nonisolated(unsafe) private let original: (any NSWindowDelegate)?
+    private(set) weak var window: NSWindow?
+    private weak var context: BernWindowContext?
+
+    init(window: NSWindow, context: BernWindowContext) {
+        self.original = window.delegate
+        self.window = window
+        self.context = context
+    }
+
+    nonisolated override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || (original?.responds(to: selector) ?? false)
+    }
+
+    nonisolated override func forwardingTarget(for selector: Selector!) -> Any? {
+        if original?.responds(to: selector) == true { return original }
+        return super.forwardingTarget(for: selector)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let context, !context.allowsClose else {
+            return original?.windowShouldClose?(sender) ?? true
+        }
+        do {
+            _ = try BernHost.shared.requestClose(context)
+        } catch let problem as BernCommandFailure {
+            BernHost.shared.failure = BernFailure(window: context.id, code: problem.code, message: problem.message)
+        } catch {}
+        return false
+    }
+}
+
+/// Reports the NSWindow that hosts a window root.
+private struct BernWindowReader: NSViewRepresentable {
+    let found: @MainActor (NSWindow?) -> Void
+
+    final class ReaderView: NSView {
+        var found: (@MainActor (NSWindow?) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            found?(window)
+        }
+    }
+
+    func makeNSView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.found = found
+        return view
+    }
+
+    func updateNSView(_ view: ReaderView, context: Context) {
+        view.found = found
+        if let window = view.window { found(window) }
     }
 }
 
@@ -691,6 +1081,25 @@ enum BernSnapshot {
         }
     }
 
+    private static var closeSignal: DispatchSourceSignal?
+
+    /// Development aid, off unless `BERN_DEV_CLOSE_SIGNAL` names a window
+    /// kind: SIGUSR1 then calls `performClose(_:)` on that window, exactly
+    /// what its title-bar close button does, so tools without screen access
+    /// can exercise the system close path.
+    static func installCloseSignal() {
+        guard closeSignal == nil,
+            let kind = ProcessInfo.processInfo.environment["BERN_DEV_CLOSE_SIGNAL"]
+        else { return }
+        signal(SIGUSR1, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+        source.setEventHandler {
+            MainActor.assumeIsolated { BernHost.shared.systemWindow(kind)?.performClose(nil) }
+        }
+        source.resume()
+        closeSignal = source
+    }
+
     static func schedule() {
         guard directory != nil else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
@@ -706,6 +1115,7 @@ enum BernSnapshot {
             guard let view = window.contentView?.superview ?? window.contentView else { continue }
             guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
             view.cacheDisplay(in: view.bounds, to: image)
+            BernMedia.drawFrames(in: view, onto: image)
             let name = (window.identifier?.rawValue ?? "window-\(window.windowNumber)")
                 .replacingOccurrences(of: "/", with: "-")
             let file = directory.appendingPathComponent(String(format: "%03d-%@.png", sequence, name))
@@ -743,9 +1153,35 @@ struct BernWindowRoot<Content: View>: View {
                 content
             }
         }
+        .alert(
+            context.pendingClose?.message ?? "",
+            isPresented: Binding(get: { context.pendingClose != nil }, set: { _ in }),
+            presenting: context.pendingClose
+        ) { pending in
+            if pending.canSave {
+                Button(BernText.string("bern.close.save")) { host.decide(context, pending, .save) }
+                Button(BernText.string("bern.close.dont_save"), role: .destructive) {
+                    host.decide(context, pending, .discard)
+                }
+            } else {
+                Button(BernText.string("bern.close.discard"), role: .destructive) {
+                    host.decide(context, pending, .discard)
+                }
+            }
+            Button(BernText.string("bern.close.cancel"), role: .cancel) { host.decide(context, pending, .cancel) }
+        } message: { pending in
+            Text(verbatim: BernText.string(pending.canSave ? "bern.close.save_detail" : "bern.close.discard_detail"))
+        }
+        .overlay(alignment: .topLeading) {
+            BernWindowReader { [context] window in context.found(window) }
+                .frame(width: 0, height: 0)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .environment(context)
         .onAppear {
             BernSnapshot.applyAppearance()
+            BernSnapshot.installCloseSignal()
             host.registerActions(openWindow: openWindow, openSettings: openSettings)
             context.dismiss = dismiss
             host.attach(context)

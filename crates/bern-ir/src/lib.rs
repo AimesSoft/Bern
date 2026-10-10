@@ -25,6 +25,8 @@ pub struct Application {
     pub types: TypeTable,
     pub sessions: Vec<SessionDef>,
     pub windows: WindowCatalog,
+    /// Media players owned by the application, shared by every window.
+    pub players: Vec<PlayerDef>,
     pub components: Vec<ComponentDef>,
     /// Every localized text with its stable resource key.
     pub texts: Vec<LocalizedText>,
@@ -44,6 +46,34 @@ impl Application {
     pub fn window(&self, id: &str) -> Option<&WindowDef> {
         self.windows.windows.iter().find(|window| window.id == id)
     }
+
+    /// Whether any declaration plays media.
+    pub fn uses_media(&self) -> bool {
+        let mut uses = !self.players.is_empty();
+        let mut visit = |node: &Node| {
+            if let Node::Element(element) = node
+                && element.kind == "Video"
+            {
+                uses = true;
+            }
+        };
+        for component in &self.components {
+            component.body.walk(&mut visit);
+        }
+        for window in &self.windows.windows {
+            window.content.walk(&mut visit);
+        }
+        uses
+    }
+}
+
+/// An application player from the `#[bern::players]` catalog. Its id is
+/// the stable `player_id` every entry uses.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlayerDef {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -157,6 +187,19 @@ pub struct WindowDef {
     pub content: Node,
     /// Session state types instantiated for each instance of this window.
     pub sessions: Vec<String>,
+    /// Declared close check, run whenever closing is requested.
+    pub close: Option<CloseCheck>,
+}
+
+/// The close check of a window. When `when` holds, closing waits for a
+/// decision: Save (running `save`), Discard or Cancel. The expressions are
+/// evaluated against the closing window's own session drafts.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CloseCheck {
+    pub when: Expr,
+    pub message: Text,
+    /// Engine command a Save decision runs; closing waits for its result.
+    pub save: Option<Action>,
 }
 
 /// Static window kinds declared by the root `WindowSet`. The first version
@@ -182,6 +225,8 @@ pub enum ParamKind {
     Client,
     /// The generated window handle.
     Windows,
+    /// The application's player catalog.
+    Players,
     /// A value of a schema type, read-only inside the component.
     Value {
         #[serde(rename = "type")]
@@ -298,16 +343,41 @@ pub struct FieldRef {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Prop {
-    Keyword { value: String },
-    Number { value: f64 },
-    Icon { name: String },
-    Text { text: Text },
-    Expr { expr: Expr },
-    Field { field: FieldRef },
-    Window { id: String },
-    TypeName { name: String },
-    Key { field: usize, name: String },
-    Id { value: String },
+    Keyword {
+        value: String,
+    },
+    Number {
+        value: f64,
+    },
+    Icon {
+        name: String,
+    },
+    Text {
+        text: Text,
+    },
+    Expr {
+        expr: Expr,
+    },
+    Field {
+        field: FieldRef,
+    },
+    Window {
+        id: String,
+    },
+    TypeName {
+        name: String,
+    },
+    Key {
+        field: usize,
+        name: String,
+    },
+    Id {
+        value: String,
+    },
+    /// An application player.
+    Player {
+        id: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -318,6 +388,53 @@ pub enum WindowOp {
     Activate,
 }
 
+/// A standard media command on an application player.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MediaOp {
+    Open,
+    Play,
+    Pause,
+    Seek,
+    SetVolume,
+    SetMuted,
+}
+
+impl MediaOp {
+    pub const ALL: [MediaOp; 6] = [
+        MediaOp::Open,
+        MediaOp::Play,
+        MediaOp::Pause,
+        MediaOp::Seek,
+        MediaOp::SetVolume,
+        MediaOp::SetMuted,
+    ];
+
+    /// Method name in declarations, for example `open`.
+    pub fn method(self) -> &'static str {
+        match self {
+            MediaOp::Open => "open",
+            MediaOp::Play => "play",
+            MediaOp::Pause => "pause",
+            MediaOp::Seek => "seek",
+            MediaOp::SetVolume => "set_volume",
+            MediaOp::SetMuted => "set_muted",
+        }
+    }
+
+    /// Command id in the media catalog, for example `media.open`.
+    pub fn command(self) -> &'static str {
+        match self {
+            MediaOp::Open => "media.open",
+            MediaOp::Play => "media.play",
+            MediaOp::Pause => "media.pause",
+            MediaOp::Seek => "media.seek",
+            MediaOp::SetVolume => "media.set_volume",
+            MediaOp::SetMuted => "media.set_muted",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
@@ -325,6 +442,13 @@ pub enum Action {
     Engine { command: usize, args: Vec<Expr> },
     /// Generated window session command.
     Window { op: WindowOp, window: String },
+    /// Standard media command on an application player; the player id is
+    /// the first parameter, `args` the rest.
+    Media {
+        player: String,
+        op: MediaOp,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -402,6 +526,7 @@ impl Element {
 pub enum ComponentArg {
     Client,
     Windows,
+    Players,
     Value { expr: Expr },
 }
 
@@ -495,6 +620,77 @@ impl Node {
                 }
             }
         }
+    }
+}
+
+impl Expr {
+    /// Visit this expression and every sub-expression.
+    pub fn walk<'a>(&'a self, visit: &mut impl FnMut(&'a Expr)) {
+        visit(self);
+        match &self.kind {
+            ExprKind::Literal { .. } | ExprKind::Binding { .. } => {}
+            ExprKind::Variant { fields, .. } => {
+                for field in fields {
+                    field.walk(visit);
+                }
+            }
+            ExprKind::Not { expr } | ExprKind::Neg { expr } => expr.walk(visit),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                lhs.walk(visit);
+                rhs.walk(visit);
+            }
+        }
+    }
+
+    /// Session state types this expression reads.
+    pub fn sessions(&self) -> Vec<String> {
+        let mut sessions = Vec::new();
+        self.walk(&mut |expr| {
+            if let ExprKind::Binding {
+                binding: Binding::Session { session, .. },
+            } = &expr.kind
+                && !sessions.contains(session)
+            {
+                sessions.push(session.clone());
+            }
+        });
+        sessions
+    }
+
+    /// Whether this expression reads engine state.
+    pub fn reads_engine(&self) -> bool {
+        let mut reads = false;
+        self.walk(&mut |expr| {
+            if let ExprKind::Binding {
+                binding: Binding::Engine { .. },
+            } = &expr.kind
+            {
+                reads = true;
+            }
+        });
+        reads
+    }
+}
+
+impl Text {
+    /// Expressions interpolated into this text.
+    pub fn exprs(&self) -> Vec<&Expr> {
+        match self {
+            Text::Localized { args, .. } => args.iter().map(|(_, expr)| expr).collect(),
+            Text::Dynamic { expr } => vec![expr],
+        }
+    }
+}
+
+impl CloseCheck {
+    /// Every expression the check evaluates.
+    pub fn exprs(&self) -> Vec<&Expr> {
+        let mut exprs = vec![&self.when];
+        exprs.extend(self.message.exprs());
+        if let Some(Action::Engine { args, .. }) = &self.save {
+            exprs.extend(args);
+        }
+        exprs
     }
 }
 

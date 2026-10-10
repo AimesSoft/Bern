@@ -3,8 +3,13 @@
 //! A UI session owns window instances and the typed session drafts each
 //! window carries. It validates every write against the declared schema and
 //! gives each window instance a generation, so a reference to a closed
-//! window is rejected instead of writing into a newer instance. It contains
-//! no UI SDK code: targets report window facts and forward control input.
+//! window is rejected instead of writing into a newer instance. It also runs
+//! the close protocol: a close request either closes the window or yields a
+//! confirmation bound to the window's generation and draft revision, so a
+//! decision made before later edits cannot discard them. It contains no UI
+//! SDK code: targets report window facts and forward control input.
+
+pub mod query;
 
 use bern_protocol::{CommandError, SessionCommand, Type, TypeTable, Value};
 use std::collections::BTreeMap;
@@ -44,11 +49,86 @@ pub struct WindowInstance {
     pub drafts: Vec<Vec<Value>>,
 }
 
+/// A typed decision on a pending close confirmation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CloseDecision {
+    /// Run the window's declared save command, then close if it succeeds.
+    Save,
+    /// Close without saving; the window's drafts are released.
+    Discard,
+    /// Keep the window open.
+    Cancel,
+}
+
+impl CloseDecision {
+    pub const ALL: [CloseDecision; 3] = [
+        CloseDecision::Save,
+        CloseDecision::Discard,
+        CloseDecision::Cancel,
+    ];
+
+    pub fn index(self) -> u32 {
+        Self::ALL
+            .iter()
+            .position(|decision| *decision == self)
+            .unwrap() as u32
+    }
+
+    pub fn from_index(index: u32) -> Option<Self> {
+        Self::ALL.get(index as usize).copied()
+    }
+}
+
+/// A close request that needs a decision. It names the window generation
+/// and the draft revision it was made for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Confirmation {
+    pub id: String,
+    pub window: String,
+    pub generation: u64,
+    pub draft_revision: u64,
+    pub can_save: bool,
+}
+
+impl Confirmation {
+    /// Decisions this confirmation accepts.
+    pub fn decisions(&self) -> Vec<CloseDecision> {
+        CloseDecision::ALL
+            .into_iter()
+            .filter(|decision| self.can_save || *decision != CloseDecision::Save)
+            .collect()
+    }
+}
+
+/// What a close request leads to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CloseStep {
+    /// No declared check objects: the target closes the window now.
+    Close,
+    /// A declared check needs a decision. Repeated requests while it is
+    /// pending return the same confirmation instead of asking again.
+    Confirm(Confirmation),
+}
+
+/// What the target does after an accepted decision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DecisionStep {
+    /// Close the window.
+    Close,
+    /// Run the declared save command; close only if it succeeds.
+    Save,
+    /// Keep the window open; the close request is rejected.
+    Cancel,
+}
+
 #[derive(Debug)]
 struct WindowState {
     generation: u64,
     open: bool,
     drafts: Vec<Vec<Value>>,
+    /// Incremented by every accepted draft write of this instance.
+    revision: u64,
+    pending: Option<Confirmation>,
 }
 
 /// Window instances and drafts of one UI session.
@@ -58,6 +138,7 @@ pub struct UiSession {
     spec: Arc<SessionSpec>,
     windows: Vec<WindowState>,
     revision: u64,
+    confirmations: u64,
 }
 
 fn stale() -> CommandError {
@@ -65,6 +146,10 @@ fn stale() -> CommandError {
         "stale_window",
         "the window instance was closed; use the current instance",
     )
+}
+
+fn stale_confirmation(message: &str) -> CommandError {
+    CommandError::new("stale_confirmation", message)
 }
 
 impl UiSession {
@@ -76,6 +161,8 @@ impl UiSession {
                 generation: 0,
                 open: false,
                 drafts: Vec::new(),
+                revision: 0,
+                pending: None,
             })
             .collect();
         Self {
@@ -83,6 +170,7 @@ impl UiSession {
             spec,
             windows,
             revision: 0,
+            confirmations: 0,
         }
     }
 
@@ -136,6 +224,8 @@ impl UiSession {
             state.generation += 1;
             state.open = true;
             state.drafts = drafts;
+            state.revision = 0;
+            state.pending = None;
             self.revision += 1;
         }
         Ok(self.instance(kind))
@@ -148,6 +238,7 @@ impl UiSession {
             Some(state) if state.open && state.generation == generation => {
                 state.open = false;
                 state.drafts.clear();
+                state.pending = None;
                 self.revision += 1;
                 true
             }
@@ -211,12 +302,129 @@ impl UiSession {
         value.check(ty, &self.spec.types).map_err(|error| {
             CommandError::invalid_params(format!("{}.{name}: {error}", session_type.name))
         })?;
-        let current = &mut self.windows[kind].drafts[slot][field];
+        let state = &mut self.windows[kind];
+        let current = &mut state.drafts[slot][field];
         if *current != value {
             *current = value;
+            // A pending confirmation keeps its revision and becomes stale.
+            state.revision += 1;
             self.revision += 1;
         }
         Ok(self.revision)
+    }
+
+    fn open_state(
+        &mut self,
+        kind: usize,
+        generation: u64,
+    ) -> Result<&mut WindowState, CommandError> {
+        let state = self
+            .windows
+            .get_mut(kind)
+            .ok_or_else(|| CommandError::new("target_not_found", "unknown window kind"))?;
+        if !state.open || state.generation != generation {
+            return Err(stale());
+        }
+        Ok(state)
+    }
+
+    /// Draft revision of an open window instance.
+    pub fn draft_revision(&self, kind: usize) -> Option<u64> {
+        self.windows
+            .get(kind)
+            .filter(|state| state.open)
+            .map(|state| state.revision)
+    }
+
+    /// The pending close confirmation of a window, which blocks its
+    /// controls until it is decided.
+    pub fn pending_close(&self, kind: usize) -> Option<&Confirmation> {
+        self.windows
+            .get(kind)
+            .filter(|state| state.open)
+            .and_then(|state| state.pending.as_ref())
+    }
+
+    /// Request closing a window instance. The target evaluated the
+    /// window's declared close check into `needs_confirmation`; `can_save`
+    /// tells whether the window declares a save command.
+    pub fn request_close(
+        &mut self,
+        kind: usize,
+        generation: u64,
+        needs_confirmation: bool,
+        can_save: bool,
+    ) -> Result<CloseStep, CommandError> {
+        let window = format!(
+            "{}#{generation}",
+            self.spec
+                .windows
+                .get(kind)
+                .map(|kind| kind.id.as_str())
+                .unwrap_or_default()
+        );
+        let state = self.open_state(kind, generation)?;
+        if let Some(pending) = &state.pending {
+            if pending.draft_revision == state.revision {
+                return Ok(CloseStep::Confirm(pending.clone()));
+            }
+            // Drafts changed since the confirmation; it no longer applies.
+            state.pending = None;
+        }
+        if !needs_confirmation {
+            return Ok(CloseStep::Close);
+        }
+        let revision = state.revision;
+        self.confirmations += 1;
+        let confirmation = Confirmation {
+            id: format!("{window}:c{}", self.confirmations),
+            window,
+            generation,
+            draft_revision: revision,
+            can_save,
+        };
+        self.windows[kind].pending = Some(confirmation.clone());
+        Ok(CloseStep::Confirm(confirmation))
+    }
+
+    /// Decide a pending confirmation. A decision for another confirmation,
+    /// a closed or reopened window, or drafts edited after the confirmation
+    /// is rejected as stale.
+    pub fn confirm_close(
+        &mut self,
+        kind: usize,
+        generation: u64,
+        confirmation: &str,
+        decision: CloseDecision,
+    ) -> Result<DecisionStep, CommandError> {
+        let state = self.open_state(kind, generation)?;
+        let Some(pending) = state.pending.clone() else {
+            return Err(stale_confirmation(
+                "no close confirmation is pending for this window; request closing again",
+            ));
+        };
+        if pending.id != confirmation {
+            return Err(stale_confirmation(
+                "this is not the window's current close confirmation",
+            ));
+        }
+        if pending.draft_revision != state.revision {
+            state.pending = None;
+            return Err(stale_confirmation(
+                "the window's drafts changed after this confirmation; request closing again",
+            ));
+        }
+        if decision == CloseDecision::Save && !pending.can_save {
+            return Err(CommandError::invalid_params(
+                "this window declares no save command; decide Discard or Cancel",
+            ));
+        }
+        state.pending = None;
+        Ok(match decision {
+            CloseDecision::Save => DecisionStep::Save,
+            CloseDecision::Discard => DecisionStep::Close,
+            CloseDecision::Cancel => DecisionStep::Cancel,
+        })
     }
 
     pub fn get(
@@ -379,6 +587,120 @@ mod tests {
                 .unwrap_err()
                 .code,
             "stale_window"
+        );
+    }
+
+    #[test]
+    fn closing_without_a_failing_check_closes_at_once() {
+        let mut session = UiSession::new("s", spec());
+        session.window_opened(1).unwrap();
+        assert_eq!(
+            session.request_close(1, 1, false, false),
+            Ok(CloseStep::Close)
+        );
+        assert_eq!(
+            session.request_close(1, 7, false, false).unwrap_err().code,
+            "stale_window"
+        );
+    }
+
+    #[test]
+    fn confirmations_merge_and_bind_to_generation_and_revision() {
+        let mut session = UiSession::new("s", spec());
+        session.window_opened(0).unwrap();
+        session
+            .set(0, 1, 0, 0, Value::Text("draft".into()))
+            .unwrap();
+        let CloseStep::Confirm(first) = session.request_close(0, 1, true, true).unwrap() else {
+            panic!("expected a confirmation")
+        };
+        assert_eq!(first.window, "main#1");
+        assert_eq!(first.draft_revision, 1);
+        assert_eq!(
+            first.decisions(),
+            vec![
+                CloseDecision::Save,
+                CloseDecision::Discard,
+                CloseDecision::Cancel
+            ]
+        );
+        // A repeated request returns the same confirmation: one dialog.
+        assert_eq!(
+            session.request_close(0, 1, true, true),
+            Ok(CloseStep::Confirm(first.clone()))
+        );
+        assert!(session.pending_close(0).is_some());
+        // Cancel keeps the window; the old confirmation cannot be reused.
+        assert_eq!(
+            session.confirm_close(0, 1, &first.id, CloseDecision::Cancel),
+            Ok(DecisionStep::Cancel)
+        );
+        assert!(session.pending_close(0).is_none());
+        assert_eq!(
+            session
+                .confirm_close(0, 1, &first.id, CloseDecision::Discard)
+                .unwrap_err()
+                .code,
+            "stale_confirmation"
+        );
+        // Edits made after a confirmation invalidate it, so it cannot
+        // discard them.
+        let CloseStep::Confirm(second) = session.request_close(0, 1, true, true).unwrap() else {
+            panic!()
+        };
+        assert_ne!(second.id, first.id);
+        session.set(0, 1, 0, 0, Value::Text("more".into())).unwrap();
+        assert_eq!(
+            session
+                .confirm_close(0, 1, &second.id, CloseDecision::Discard)
+                .unwrap_err()
+                .code,
+            "stale_confirmation"
+        );
+        let CloseStep::Confirm(third) = session.request_close(0, 1, true, true).unwrap() else {
+            panic!()
+        };
+        assert_eq!(third.draft_revision, 2);
+        assert_eq!(
+            session.confirm_close(0, 1, &third.id, CloseDecision::Save),
+            Ok(DecisionStep::Save)
+        );
+    }
+
+    #[test]
+    fn confirmations_end_with_their_window_instance() {
+        let mut session = UiSession::new("s", spec());
+        session.window_opened(0).unwrap();
+        let CloseStep::Confirm(old) = session.request_close(0, 1, true, false).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            session
+                .confirm_close(0, 1, &old.id, CloseDecision::Save)
+                .unwrap_err()
+                .code,
+            "invalid_params"
+        );
+        assert_eq!(
+            session.confirm_close(0, 1, &old.id, CloseDecision::Discard),
+            Ok(DecisionStep::Close)
+        );
+        assert!(session.window_closed(0, 1));
+        session.window_opened(0).unwrap();
+        // A decision for the closed instance cannot touch the new one.
+        assert_eq!(
+            session
+                .confirm_close(0, 1, &old.id, CloseDecision::Discard)
+                .unwrap_err()
+                .code,
+            "stale_window"
+        );
+        assert_eq!(
+            session
+                .confirm_close(0, 2, &old.id, CloseDecision::Discard)
+                .unwrap_err()
+                .code,
+            "stale_confirmation"
         );
     }
 

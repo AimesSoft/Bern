@@ -77,12 +77,43 @@ impl SessionHandler for FakeUi {
     }
 }
 
-fn start(name: &str) -> (Server, String) {
+/// Performs every media request at once and reports the result, like a
+/// media backend that loads instantly.
+struct InstantMedia {
+    hub: MediaHub,
+}
+
+impl bern_media::MediaExecutor for InstantMedia {
+    fn execute(&self, request: bern_media::ExecRequest) {
+        self.hub.complete(request.request, Ok(()));
+        if let bern_media::ExecOp::Load { .. } = request.op {
+            self.hub.observe(
+                &request.player,
+                request.source_version,
+                bern_media::Observation {
+                    phase: bern_media::Phase::Ready,
+                    duration_ms: Some(8_000),
+                    seekable: true,
+                    ..bern_media::Observation::idle()
+                },
+            );
+        }
+    }
+}
+
+fn start_with_media(name: &str, media: MediaHub) -> (Server, String) {
     let bundle = format!("dev.bern.test.{name}.{}", std::process::id());
     let host = Host::start(Counter(0));
     let sessions = Sessions::new();
     sessions.register(Arc::new(FakeUi));
-    (Server::start(host, sessions, &bundle).unwrap(), bundle)
+    (
+        Server::start(host, sessions, media, &bundle).unwrap(),
+        bundle,
+    )
+}
+
+fn start(name: &str) -> (Server, String) {
+    start_with_media(name, MediaHub::default())
 }
 
 #[test]
@@ -212,5 +243,86 @@ fn dropping_the_server_removes_the_socket() {
     assert!(matches!(
         Client::connect(&bundle, None, "cli", None),
         Err(ConnectError::NoEngine)
+    ));
+}
+
+#[test]
+fn media_commands_reach_the_same_players() {
+    let media = MediaHub::new(&["preview".to_string()]);
+    media.attach_executor(
+        Arc::new(InstantMedia { hub: media.clone() }),
+        bern_media::MediaCapabilities {
+            backend: "test".into(),
+            backend_version: "1".into(),
+            background_playback: true,
+            multi_view: true,
+        },
+    );
+    let (_server, bundle) = start_with_media("media", media.clone());
+    let mut client = Client::connect(&bundle, None, "cli", None).unwrap();
+    let engine = client.engine_id.clone();
+    let mut watcher = Client::connect(&bundle, None, "json", None).unwrap();
+    watcher
+        .request(|request_id| ClientMessage::Subscribe { request_id })
+        .unwrap();
+    let command = |client: &mut Client, command: &str, params: serde_json::Value| {
+        client
+            .request(|request_id| ClientMessage::Command {
+                request_id,
+                engine_id: engine.clone(),
+                command: command.into(),
+                params: params.as_object().unwrap().clone(),
+            })
+            .unwrap()
+    };
+    let reply = command(
+        &mut client,
+        "media.open",
+        json!({ "player_id": "preview", "source": { "url": "file:///clip.mp4" } }),
+    );
+    assert!(
+        matches!(reply, ServerMessage::Result { ok: true, result: Some(ref r), .. } if *r == json!(1)),
+        "{reply:?}"
+    );
+    // Subscribers see the merged state of the same player.
+    let ready = loop {
+        match watcher.read().unwrap() {
+            ServerMessage::Media { players, .. } if players[0]["phase"] == json!("Ready") => {
+                break players[0].clone();
+            }
+            _ => continue,
+        }
+    };
+    assert_eq!(ready["source"]["url"], json!("file:///clip.mp4"));
+    assert_eq!(ready["duration_ms"], json!(8000));
+    let reply = command(
+        &mut client,
+        "media.state",
+        json!({ "player_id": "preview" }),
+    );
+    assert!(
+        matches!(reply, ServerMessage::Result { ok: true, result: Some(ref r), .. } if r["request"]["status"] == json!("Executed")),
+        "{reply:?}"
+    );
+    let reply = command(
+        &mut client,
+        "media.seek",
+        json!({ "player_id": "preview", "position_ms": 9000 }),
+    );
+    assert!(
+        matches!(reply, ServerMessage::Result { ok: false, error: Some(ref e), .. } if e.code == "out_of_range"),
+        "{reply:?}"
+    );
+    let reply = command(&mut client, "media.play", json!({ "player_id": "missing" }));
+    assert!(
+        matches!(reply, ServerMessage::Result { ok: false, error: Some(ref e), .. } if e.code == "player_not_found"),
+        "{reply:?}"
+    );
+    let catalog = client
+        .request(|request_id| ClientMessage::Catalog { request_id })
+        .unwrap();
+    assert!(matches!(
+        catalog,
+        ServerMessage::Catalog { ref media_commands, .. } if media_commands.iter().any(|spec| spec.id == "media.play")
     ));
 }

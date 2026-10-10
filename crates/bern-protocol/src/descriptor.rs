@@ -138,8 +138,8 @@ impl From<SchemaError> for DescriptorError {
     }
 }
 
-/// Namespaces used by framework-provided session and window commands.
-pub const RESERVED_NAMESPACES: &[&str] = &["bern", "ui", "window", "session"];
+/// Namespaces used by framework-provided session, window and media commands.
+pub const RESERVED_NAMESPACES: &[&str] = &["bern", "ui", "window", "session", "media"];
 
 pub fn valid_name(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_lowercase())

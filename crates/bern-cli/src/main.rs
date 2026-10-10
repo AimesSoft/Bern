@@ -73,19 +73,21 @@ fn find_manifest(start: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The nearest enclosing Cargo workspace, as Cargo resolves it. A
+/// checkout nested inside another workspace (such as a Git worktree inside
+/// its main checkout) builds against its own crates and target directory.
 fn find_workspace(start: &Path) -> Option<PathBuf> {
     let mut directory = Some(start.to_path_buf());
-    let mut found = None;
     while let Some(current) = directory {
         let manifest = current.join("Cargo.toml");
         if std::fs::read_to_string(&manifest)
             .is_ok_and(|text| text.lines().any(|line| line.trim() == "[workspace]"))
         {
-            found = Some(current.clone());
+            return Some(current);
         }
         directory = current.parent().map(Path::to_path_buf);
     }
-    found
+    None
 }
 
 fn report(diagnostics: &[Diagnostic]) {
