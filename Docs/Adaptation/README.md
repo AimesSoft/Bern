@@ -23,7 +23,7 @@ Bern 的自适应以当前窗口空间、内容关系、输入能力和平台规
 | Android TV 和 Google TV | [Android](Android.md#8-android-tv--google-tv) | 遥控器、方向导航、播放按键与电视布局 |
 | iPhone Duo 折叠屏 | [Apple 平台](Apple.md#6-iphone-duo已公布设备的动态适配) | 内外屏、姿态区域、动态多场景能力 |
 | iPad 和 iPadOS | [Apple 平台](Apple.md#4-ipados--ipad可调整窗口与混合输入) | 可调整窗口、主辅布局、菜单及触摸键鼠并存 |
-| Web 浏览器 | [Web 视觉规范](Web.md) | Bern 自定视觉语言、主题角色与控件配方、虚拟窗口、浏览器托管边界 |
+| Web 浏览器 | [Web 视觉规范](Web.md) | Bern 自有的中性网页风格、主题角色与控件配方、页面与对话框呈现、浏览器托管边界 |
 | Emby 和 Jellyfin | [媒体客户端](MediaClients.md) | 官方客户端行为、品牌与协议边界、Bern 媒体界面契约 |
 
 上述链接按主题组织，避免为同一个系统的不同设备重复维护互相矛盾的规则。Android 折叠屏和双屏也纳入 Android 文档，不能用 iPhone Duo 规则替代其平台接口。
