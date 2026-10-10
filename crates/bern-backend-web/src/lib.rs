@@ -395,6 +395,16 @@ impl Target for WebBrowser {
             },
         ];
         let mut products = vec![output.join("index.html")];
+        if !remote {
+            // A target switched from `ui` to `app` must not keep the engine
+            // host and its programs next to a page that no longer uses them.
+            steps.push(BuildStep::RemoveIfExists {
+                path: output.join("bin"),
+            });
+            steps.push(BuildStep::RemoveIfExists {
+                path: output.join("glue/host"),
+            });
+        }
         if remote {
             let host_target = context.workspace_dir.join("target/bern-web-glue/host");
             let built = host_target.join(profile);

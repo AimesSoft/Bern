@@ -13,7 +13,7 @@
 | --- | --- | --- |
 | 实现前单独定义 Web 视觉规范 | 完成 | [Docs/Adaptation/Web.md](../Adaptation/Web.md)：度量与字号、主题角色与声明的配对、控件配方、各组件呈现与键盘行为、虚拟窗口、焦点、动效、图标与验收 |
 | Bern 主题内核：角色、控件配方、快照、确定性、受控配对、品牌种子变化 | 完成 | `bern-theme`（Bern Theme Algorithm v1），见“主题内核” |
-| 同一声明与命令 schema 生成两个独立目录 | 完成 | `web_app`、`web_ui` 各自生成到 `target/bern/<目标名>/`；两种模式的 WebAssembly 编译目录分开（`target/bern-web-glue/app`、`…/ui`），切换模式不混用产物 |
+| 同一声明与命令 schema 生成两个独立目录；模式变化不残留另一模式的产物 | 完成 | `web_app`、`web_ui` 各自生成到 `target/bern/<目标名>/`；两种模式的 WebAssembly 编译目录分开（`target/bern-web-glue/app`、`…/ui`）。把同一目标从 `ui` 改为 `app` 后构建会删除引擎宿主程序与其胶水 crate，改回 `ui` 后页面模块重新不含引擎代码（实测） |
 | `app` 在没有独立引擎服务时完成示例业务 | 完成 | 引擎、会话运行时与 C ABI 编译为一个 WebAssembly 模块，在页面内运行 |
 | 不支持 WASM 的业务依赖明确失败 | 部分 | 依赖无法编译到 `wasm32` 时，构建在 Cargo 步骤失败并输出编译器诊断；尚未给出指向 `Bern.toml` 的专门诊断 |
 | `ui` 产物不包含业务处理器与服务端依赖 | 完成 | 页面模块只链接协议 crate 与 `bern-ffi`（`remote` 特性）；产物中没有任何 `showcase_core` 符号（`app` 构建有 1368 个） |
