@@ -1,6 +1,6 @@
 # Apple 平台自适应适配
 
-- 核查日期：2026-10-09（Asia/Shanghai）。
+- 核查日期：2026-10-09（Asia/Shanghai）；第 9 节的来源于 2026-10-10 核查。
 - 范围：macOS、iOS / iPhone、iPadOS / iPad、tvOS / Apple TV，以及已公布的 iPhone Duo。
 - 关联：[Bern 框架设计](../Design.md)。本文是后端设计与验收依据，不表示相关后端已经实现。
 - **官方依据**说明 Apple 已发表的规则或能力；**Bern 决策**说明本项目如何映射，二者不能互换。
@@ -224,7 +224,31 @@ IconButton 使用平台标准的无边框图标按钮样式。系统托管的呈
 
 系统外部媒体入口、应用自有控制条和系统自带播放器控件分别记录来源与支持边界；不能将三者笼统标成“原生播放”。
 
-## 9. 官方来源与读取状态
+## 9. 随包资源
+
+**官方依据。** macOS 应用包把不是代码的内容放在 `Contents/Resources/`；可执行代码、框架、插件等各有固定位置，位置错误可能到公证时才暴露为签名问题。同一文档说明签名工具会把名称含点的目录当作包处理（针对嵌套代码的子目录给出）。[Placing content in a bundle](https://developer.apple.com/documentation/bundleresources/placing-content-in-a-bundle)
+
+**官方依据。** `Bundle.resourceURL` 返回包内存放资源的子目录的文件 URL，macOS 10.6 起可用；非标准包格式可能没有可用路径。[Bundle.resourceURL](https://developer.apple.com/documentation/foundation/bundle/resourceurl)
+
+**Bern 决策。** 资源声明与引擎解析规则见设计文档“随包资源”；macOS SwiftUI 目标的映射如下。
+
+| 维度 | Bern 适配决策 |
+| --- | --- |
+| 位置 | 资源 `a/b.ext` 复制到 `Contents/Resources/a/b.ext`；`<语言>.lproj` 留给生成的本地化表 |
+| 名称 | 目录段不能含 `.`（文件名可以），同时避开 `.lproj` 与签名工具的包识别；违反时构建检查报错并指向 `Bern.toml` 条目 |
+| 复制 | 只复制文件内容，不带扩展属性；在签名之前完成；删除不再声明的旧资源，保留生成的本地化文件 |
+| 解析 | Swift 宿主启动引擎时传入 `Bundle.main.resourceURL`，生成的 Rust 胶水带有声明的名称目录，二者在构造引擎前装配；引擎得到包内文件 URL，不依赖构建机路径 |
+| 范围 | 只发布数据文件；可执行代码、框架和插件需要各自的位置与签名，首版不作为资源支持 |
+
+其他 Apple 平台的包结构在相应目标实现时按官方文档另行映射，应用的资源声明不变。
+
+**Bern 验收。**
+
+- 把应用复制到构建目录之外并移走源码中的资源文件，声明的资源仍能从包内加载。
+- 未声明的名称即使在包中有同名文件也返回 `undeclared_resource`。
+- 从清单删除资源后重新构建，包中不再残留旧文件，签名校验通过。
+
+## 10. 官方来源与读取状态
 
 以下条目均在核查日期访问；“正文”只说明资料证据已读，不说明 Bern 已实现或通过测试。
 
@@ -246,12 +270,14 @@ IconButton 使用平台标准的无边框图标按钮样式。系统托管的呈
 | [Design for iPhone Duo](https://developer.apple.com/videos/play/tech-talks/111466/) | 正文 | Duo 姿态、侧向控件与内容空间 |
 | [Strike a pose with adaptive layouts](https://developer.apple.com/videos/play/tech-talks/111463/) | 正文 | Duo 区域与排列机制；具体符号版本实现时复核 |
 | [Leverage multiple displays and scenes](https://developer.apple.com/videos/play/tech-talks/111464/) | 正文 | Duo 铰链、动态多场景与附属呈现 |
+| [Placing content in a bundle](https://developer.apple.com/documentation/bundleresources/placing-content-in-a-bundle) · [官方正文数据](https://developer.apple.com/tutorials/data/documentation/bundleresources/placing-content-in-a-bundle.json) | 正文 | 2026-10-10 核查；macOS 包内各类内容的位置与签名影响 |
+| [Bundle.resourceURL](https://developer.apple.com/documentation/foundation/bundle/resourceurl) · [官方正文数据](https://developer.apple.com/tutorials/data/documentation/foundation/bundle/resourceurl.json) | 正文 | 2026-10-10 核查；macOS 10.6+ 等平台 |
 | [Designing for macOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-macos/) | 仅搜索可见 | HTML 要求 JavaScript；本文 macOS 硬性结论由已读资料支撑 |
 | [Designing for iOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-ios) | 仅搜索可见 | HTML 要求 JavaScript；未把索引当完整正文 |
 | [Designing for iPadOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-ipados) | 仅搜索可见 | HTML 要求 JavaScript；具体新能力采用 WWDC25 正文 |
 | [Designing for tvOS](https://developer.apple.com/design/human-interface-guidelines/designing-for-tvos) | 仅搜索可见 | HTML 要求 JavaScript；焦点、安全区域和视频采用已读正文 |
 
-## 10. 实现前必须明确的项目决策
+## 11. 实现前必须明确的项目决策
 
 - SwiftUI 目标按 macOS、iOS、iPadOS、tvOS 分别列版本与能力，不用一个总开关代表 Apple 支持。
 - 环境协议保留不规则区域及动态 scene 能力；Apple 类型映射留在目标模块，公共 IR 不绑定 UIKit 符号。

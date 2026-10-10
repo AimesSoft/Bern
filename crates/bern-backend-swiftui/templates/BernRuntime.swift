@@ -465,7 +465,13 @@ final class BernHost {
             context: nil, on_state: bernOnState, on_reply: bernOnReply,
             on_session_request: bernOnSessionRequest, on_media_request: bernOnMediaRequest,
             on_media_state: bernOnMediaState, on_query: bernOnQuery)
-        guard let app = bern_app_start(fingerprint, callbacks, &error) else {
+        // Declared resources live in the bundle's Resources directory; the
+        // engine resolves them by name through the host.
+        let resources = Array((Bundle.main.resourceURL?.path ?? "").utf8)
+        let started = resources.withUnsafeBufferPointer { pointer in
+            bern_app_start(fingerprint, pointer.baseAddress, pointer.count, callbacks, &error)
+        }
+        guard let app = started else {
             startupError = String(decoding: Self.take(error), as: UTF8.self)
             return
         }

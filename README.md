@@ -20,7 +20,7 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-示例展示侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、经异步引擎查询筛选列表的侧边栏搜索、列表到详情的推入导航、工具栏分段选择器、视频播放（AVFoundation，命令驱动的标准控制条），以及带页签的设置窗口和关闭前确认，支持简体中文和英文。
+示例展示侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、经异步引擎查询筛选列表的侧边栏搜索、列表到详情的推入导航、工具栏分段选择器、视频播放（AVFoundation，命令驱动的标准控制条，示例片段作为随包资源发布在应用包内），以及带页签的设置窗口和关闭前确认，支持简体中文和英文。
 
 应用运行时，可以用同一套命令从外部驱动它：
 
@@ -56,7 +56,7 @@ pub fn counter(app: counter::Client) -> impl View {
 }
 ```
 
-`rustc` 会检查每个绑定和命令参数的类型；以下写法都无法编译：按钮不绑定命令、任意回调、让控件写引擎状态、缺少翻译。`Bern.toml` 声明语言、主题、源码清单和目标，详见示例 [examples/showcase/Bern.toml](examples/showcase/Bern.toml)。
+`rustc` 会检查每个绑定和命令参数的类型；以下写法都无法编译：按钮不绑定命令、任意回调、让控件写引擎状态、缺少翻译。`Bern.toml` 声明语言、主题、源码清单、随包资源和目标，详见示例 [examples/showcase/Bern.toml](examples/showcase/Bern.toml)。
 
 ## 开发检查
 

@@ -1,6 +1,7 @@
-//! `Bern.toml`: project, language, theme, source and target configuration.
+//! `Bern.toml`: project, language, theme, source, resource and target
+//! configuration.
 
-use bern_ir::{Srgb, ThemeMode};
+use bern_ir::{ResourceDef, SourceLocation, Srgb, ThemeMode};
 use bern_target_api::{Diagnostic, TargetConfig};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -20,6 +21,15 @@ struct RawConfig {
     targets: BTreeMap<String, RawTarget>,
     #[serde(default)]
     libraries: Vec<RawLibraryRef>,
+    resources: Option<RawResources>,
+}
+
+/// `[resources]`: files and directories, relative to `Bern.toml`, that ship
+/// with the built application.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawResources {
+    paths: Vec<toml::Spanned<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +172,9 @@ pub struct Config {
     pub targets: Vec<TargetConfig>,
     /// Manifests of component libraries the UI uses.
     pub libraries: Vec<PathBuf>,
+    /// Files shipped with the application, directories expanded, sorted by
+    /// name.
+    pub resources: Vec<ResourceDef>,
 }
 
 fn valid_language(tag: &str) -> bool {
@@ -291,6 +304,152 @@ fn package(
         name,
         dir: package_dir,
     })
+}
+
+/// Line and column (both from 1) of a byte offset in the manifest.
+fn manifest_location(file: &str, text: &str, offset: usize) -> SourceLocation {
+    let before = &text[..offset.min(text.len())];
+    let line_start = before.rfind('\n').map_or(0, |index| index + 1);
+    SourceLocation {
+        file: file.to_string(),
+        line: before.matches('\n').count() as u32 + 1,
+        column: before[line_start..].chars().count() as u32 + 1,
+    }
+}
+
+/// Check the `[resources]` entries and expand directories into the files
+/// they ship. Every problem is an error at the entry that declared it.
+fn resources(
+    dir: &Path,
+    manifest: &str,
+    text: &str,
+    raw: &RawResources,
+    errors: &mut Vec<Diagnostic>,
+) -> Vec<ResourceDef> {
+    let mut found: Vec<ResourceDef> = Vec::new();
+    for entry in &raw.paths {
+        let written = entry.get_ref().as_str();
+        let declared = manifest_location(manifest, text, entry.span().start);
+        let error = |message: String| Diagnostic::error(message).at(declared.clone());
+        if let Err(message) = bern_protocol::check_resource_name(written) {
+            errors.push(error(message));
+            continue;
+        }
+        // No part of the path may be a symbolic link: what ships is what
+        // the entry names, inside the project directory.
+        let mut path = dir.to_path_buf();
+        let mut kind = None;
+        for segment in written.split('/') {
+            path.push(segment);
+            match std::fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    kind = Some(Err(format!(
+                        "resource `{written}`: {} is a symbolic link; list the file it points to",
+                        path.display()
+                    )));
+                    break;
+                }
+                Ok(metadata) => kind = Some(Ok(metadata.file_type())),
+                Err(_) => {
+                    kind = Some(Err(format!(
+                        "resource `{written}` does not exist: {}",
+                        dir.join(written).display()
+                    )));
+                    break;
+                }
+            }
+        }
+        match kind {
+            Some(Ok(file_type)) if file_type.is_file() => found.push(ResourceDef {
+                name: written.to_string(),
+                declared,
+            }),
+            Some(Ok(file_type)) if file_type.is_dir() => {
+                let before = found.len();
+                if let Err(message) = directory_files(&path, written, &declared, &mut found) {
+                    errors.push(error(message));
+                } else if found.len() == before {
+                    errors.push(error(format!(
+                        "resource directory `{written}` has no files to ship"
+                    )));
+                }
+            }
+            Some(Ok(_)) => errors.push(error(format!(
+                "resource `{written}` is neither a file nor a directory"
+            ))),
+            Some(Err(message)) => errors.push(error(message)),
+            None => {}
+        }
+    }
+    // One name, one file: no duplicates, and no names a case-insensitive
+    // file system would merge.
+    let mut by_name: std::collections::BTreeMap<String, &ResourceDef> = Default::default();
+    for resource in &found {
+        match by_name.get(&resource.name.to_lowercase()) {
+            Some(first) if first.name == resource.name => errors.push(
+                Diagnostic::error(format!(
+                    "resource `{}` is listed twice; it is already declared at line {}",
+                    resource.name, first.declared.line
+                ))
+                .at(resource.declared.clone()),
+            ),
+            Some(first) => errors.push(
+                Diagnostic::error(format!(
+                    "resources `{}` and `{}` differ only in case",
+                    first.name, resource.name
+                ))
+                .at(resource.declared.clone()),
+            ),
+            None => {
+                by_name.insert(resource.name.to_lowercase(), resource);
+            }
+        }
+    }
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found.dedup_by(|a, b| a.name == b.name);
+    found
+}
+
+/// Every non-hidden file below `path`, named `prefix/relative/path`.
+fn directory_files(
+    path: &Path,
+    prefix: &str,
+    declared: &SourceLocation,
+    found: &mut Vec<ResourceDef>,
+) -> Result<(), String> {
+    let mut entries: Vec<_> = std::fs::read_dir(path)
+        .and_then(|entries| entries.collect::<Result<Vec<_>, _>>())
+        .map_err(|error| format!("cannot read resource directory {}: {error}", path.display()))?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        if file_name.starts_with('.') {
+            continue;
+        }
+        let name = format!("{prefix}/{file_name}");
+        bern_protocol::check_resource_name(&name)?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("cannot read {}: {error}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "resource `{name}`: {} is a symbolic link; list the file it points to",
+                entry.path().display()
+            ));
+        } else if file_type.is_dir() {
+            directory_files(&entry.path(), &name, declared, found)?;
+        } else if file_type.is_file() {
+            found.push(ResourceDef {
+                name,
+                declared: declared.clone(),
+            });
+        } else {
+            return Err(format!(
+                "resource `{name}` is neither a file nor a directory"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Load and validate a project configuration.
@@ -471,6 +630,11 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             )));
         }
     }
+    let resources = raw
+        .resources
+        .as_ref()
+        .map(|raw| resources(&dir, &path.display().to_string(), &text, raw, &mut errors))
+        .unwrap_or_default();
 
     if !errors.is_empty() {
         return Err(errors);
@@ -495,6 +659,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         root: raw.ui.root,
         targets,
         libraries,
+        resources,
     })
 }
 
@@ -571,6 +736,143 @@ mod tests {
         for tag in ["", "EN", "english", "zh_Hans", "zh-"] {
             assert!(!valid_language(tag), "{tag}");
         }
+    }
+
+    /// Check `[resources]` written as `entries` in a project holding
+    /// `files` (paths relative to the project, created empty unless they
+    /// end in `/`).
+    fn check_resources(files: &[&str], entries: &str) -> (Vec<ResourceDef>, Vec<Diagnostic>) {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "bern-resources-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for file in files {
+            let path = dir.join(file);
+            if file.ends_with('/') {
+                std::fs::create_dir_all(&path).unwrap();
+            } else {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(&path, b"x").unwrap();
+            }
+        }
+        #[derive(Deserialize)]
+        struct Manifest {
+            resources: RawResources,
+        }
+        let text = format!("# Bern.toml\n[resources]\npaths = [\n{entries}\n]\n");
+        let raw: Manifest = toml::from_str(&text).unwrap();
+        let mut errors = Vec::new();
+        let found = resources(&dir, "Bern.toml", &text, &raw.resources, &mut errors);
+        let _ = std::fs::remove_dir_all(&dir);
+        (found, errors)
+    }
+
+    fn names(found: &[ResourceDef]) -> Vec<&str> {
+        found
+            .iter()
+            .map(|resource| resource.name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn resources_expand_directories_and_point_at_their_entries() {
+        let (found, errors) = check_resources(
+            &[
+                "media/b.mp4",
+                "data/seed.json",
+                "data/nested/more.json",
+                "data/.DS_Store",
+                "data/.git/config",
+            ],
+            "  \"media/b.mp4\",\n  \"data\",",
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(
+            names(&found),
+            ["data/nested/more.json", "data/seed.json", "media/b.mp4"]
+        );
+        // Each file points at the entry that declared it: line 4 is the
+        // first entry, line 5 the directory.
+        let media = &found[2].declared;
+        assert_eq!(
+            (media.file.as_str(), media.line, media.column),
+            ("Bern.toml", 4, 3)
+        );
+        assert_eq!(found[0].declared.line, 5);
+    }
+
+    #[test]
+    fn resource_errors_are_strict_and_located() {
+        let cases: &[(&[&str], &str, &str)] = &[
+            (&[], "\"media/missing.mp4\"", "does not exist"),
+            (&["a.mp4"], "\"/a.mp4\"", "is absolute"),
+            (&["a.mp4"], "\"../a.mp4\"", "starts with `.`"),
+            (&["a b.mp4"], "\"a b.mp4\"", "contains ` `"),
+            (&["empty/"], "\"empty\"", "has no files to ship"),
+            (&["only/.hidden"], "\"only\"", "has no files to ship"),
+            (&["d/a b.txt"], "\"d\"", "contains ` `"),
+            (&["a.mp4"], "\"a.mp4\", \"a.mp4\"", "listed twice"),
+            (&["d/a.mp4"], "\"d\", \"d/a.mp4\"", "listed twice"),
+            (&["d/A.mp4", "e/a.mp4"], "\"d/A.mp4\", \"e/a.mp4\"", ""),
+        ];
+        for (files, entries, expected) in cases {
+            let (_, errors) = check_resources(files, entries);
+            if expected.is_empty() {
+                assert!(errors.is_empty(), "{entries}: {errors:?}");
+                continue;
+            }
+            assert_eq!(errors.len(), 1, "{entries}: {errors:?}");
+            assert!(
+                errors[0].message.contains(expected),
+                "{entries}: {}",
+                errors[0].message
+            );
+            let location = errors[0].location.as_ref().expect("located");
+            assert_eq!((location.file.as_str(), location.line), ("Bern.toml", 4));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_links_and_case_collisions_are_rejected() {
+        let (_, errors) = check_resources(&["a.mp4", "A.MP4"], "\"a.mp4\", \"A.MP4\"");
+        // A case-insensitive file system has one file; a case-sensitive one
+        // has two that would merge on another machine. Both are errors.
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].message.contains("differ only in case")
+                || errors[0].message.contains("listed twice"),
+            "{}",
+            errors[0].message
+        );
+
+        let dir = std::env::temp_dir().join(format!("bern-resources-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("real")).unwrap();
+        std::fs::write(dir.join("real/a.mp4"), b"x").unwrap();
+        std::os::unix::fs::symlink(dir.join("real"), dir.join("linked")).unwrap();
+        std::os::unix::fs::symlink(dir.join("real/a.mp4"), dir.join("real/b.mp4")).unwrap();
+        #[derive(Deserialize)]
+        struct Manifest {
+            resources: RawResources,
+        }
+        for entry in ["linked/a.mp4", "real"] {
+            let text = format!("[resources]\npaths = [\"{entry}\"]\n");
+            let raw: Manifest = toml::from_str(&text).unwrap();
+            let mut errors = Vec::new();
+            resources(&dir, "Bern.toml", &text, &raw.resources, &mut errors);
+            assert_eq!(errors.len(), 1, "{entry}: {errors:?}");
+            assert!(
+                errors[0].message.contains("symbolic link"),
+                "{}",
+                errors[0].message
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

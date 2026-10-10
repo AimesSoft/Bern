@@ -221,12 +221,17 @@ pub fn lib_rs(context: &BuildContext, app: &Application) -> String {
 pub use bern_ffi::{{BernApp, BernBuffer, BernCallbacks}};
 
 /// Start the engine for the frontend generated from the same catalog.
+/// `resources` is the bundle directory holding the declared resources.
 ///
 /// # Safety
-/// `error` must be null or point to writable memory for one `BernBuffer`.
+/// `resources` must point to `resources_len` readable bytes or be null with
+/// `resources_len == 0`; `error` must be null or point to writable memory
+/// for one `BernBuffer`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bern_app_start(
     fingerprint: u64,
+    resources: *const u8,
+    resources_len: usize,
     callbacks: BernCallbacks,
     error: *mut BernBuffer,
 ) -> *mut BernApp {{
@@ -236,6 +241,8 @@ pub unsafe extern "C" fn bern_app_start(
             || {protocol}::Adapter(<{engine} as ::std::default::Default>::default()),
             spec(),
             fingerprint,
+            resources,
+            resources_len,
             callbacks,
             error,
         )
@@ -247,6 +254,7 @@ fn spec() -> bern_ffi::AppSpec {{
         bundle_id: {bundle:?},
         ipc: {ipc},
         players: vec![{players}],
+        resources: vec![{resources}],
         session: bern_ffi::runtime::SessionSpec {{
         types: {types},
         sessions: vec![
@@ -270,6 +278,12 @@ fn spec() -> bern_ffi::AppSpec {{
             .players
             .iter()
             .map(|player| format!("{:?}.into()", player.id))
+            .collect::<Vec<_>>()
+            .join(", "),
+        resources = app
+            .resources
+            .iter()
+            .map(|resource| format!("{:?}.into()", resource.name))
             .collect::<Vec<_>>()
             .join(", "),
     )

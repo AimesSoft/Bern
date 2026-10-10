@@ -51,6 +51,15 @@ fn showcase_compiles_to_ir() {
     }
     assert!(keys.contains("Page.Text"));
     assert!(keys.contains("app.name"));
+    // Declared resources, with the manifest entry that declared each.
+    let names: Vec<&str> = app.resources.iter().map(|r| r.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["media/aurora.mp4", "media/broken.mp4", "media/tides.mp4"]
+    );
+    let declared = &app.resources[0].declared;
+    assert!(declared.file.ends_with("Bern.toml"), "{}", declared.file);
+    assert!(declared.line > 1 && declared.column > 1, "{declared:?}");
     // The IR is serializable and versioned.
     let json = serde_json::to_string(app).unwrap();
     let back: ir::Application = serde_json::from_str(&json).unwrap();

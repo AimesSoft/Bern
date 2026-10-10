@@ -27,7 +27,9 @@ typedef struct {
     void (*on_query)(void *context, uint64_t subscription, const uint8_t *bytes, size_t len);
 } BernCallbacks;
 
-BernApp *bern_app_start(uint64_t fingerprint, BernCallbacks callbacks, BernBuffer *error);
+// `resources`: UTF-8 path of the bundle directory holding the declared
+// resource files, or NULL with length 0.
+BernApp *bern_app_start(uint64_t fingerprint, const uint8_t *resources, size_t resources_len, BernCallbacks callbacks, BernBuffer *error);
 void bern_app_stop(BernApp *app);
 BernBuffer bern_app_snapshot(BernApp *app);
 BernBuffer bern_app_engine_id(BernApp *app);

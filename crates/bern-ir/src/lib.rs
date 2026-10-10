@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Version of the IR layout. Targets declare the range they consume.
-pub const IR_VERSION: u32 = 2;
+pub const IR_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
@@ -30,6 +30,8 @@ pub struct Application {
     pub components: Vec<ComponentDef>,
     /// Every localized text with its stable resource key.
     pub texts: Vec<LocalizedText>,
+    /// Files shipped with the application, sorted by name.
+    pub resources: Vec<ResourceDef>,
 }
 
 impl Application {
@@ -65,6 +67,19 @@ impl Application {
         }
         uses
     }
+}
+
+/// A file the application ships with its build, declared in the
+/// `[resources]` table of `Bern.toml`. Engines resolve it by name at run
+/// time; each target decides where it lives in the product. Neither the
+/// contents nor a build machine path are part of the IR.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceDef {
+    /// The file's `/`-separated path relative to `Bern.toml`, for example
+    /// `media/aurora.mp4`.
+    pub name: String,
+    /// The `[resources]` entry that declared the file.
+    pub declared: SourceLocation,
 }
 
 /// An application player from the `#[bern::players]` catalog. Its id is

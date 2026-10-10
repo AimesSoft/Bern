@@ -205,6 +205,19 @@ pub enum BuildStep {
     RemoveIfExists {
         path: PathBuf,
     },
+    /// Make `dir` hold exactly `files` plus the paths in `keep`, which
+    /// other steps own (for example generated localizations). Files are
+    /// copied by content, without extended attributes; a destination whose
+    /// size and modification time match its source is left alone. Anything
+    /// else below `dir` is removed, so files dropped from a declaration do
+    /// not linger in the product.
+    Mirror {
+        dir: PathBuf,
+        /// Source file and destination relative to `dir`.
+        files: Vec<(PathBuf, PathBuf)>,
+        /// Paths relative to `dir` to leave in place.
+        keep: Vec<PathBuf>,
+    },
 }
 
 #[derive(Clone, Debug, Default)]

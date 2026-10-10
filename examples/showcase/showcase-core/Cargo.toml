@@ -10,3 +10,7 @@ publish = false
 [dependencies]
 bern.workspace = true
 showcase-protocol = { path = "../showcase-protocol" }
+
+[dev-dependencies]
+# Tests resolve resources with the catalog `Bern.toml` declares.
+bern-compiler.workspace = true

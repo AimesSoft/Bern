@@ -36,6 +36,12 @@ root = "app"
 [[libraries]]
 manifest = "showcase-widgets/Bern.toml"
 
+# Files that ship inside the built app. Each path is relative to this file
+# and is also the name the engine resolves at run time. The HLS stream in
+# media/live is served over HTTP during development and does not ship.
+[resources]
+paths = ["media/aurora.mp4", "media/tides.mp4", "media/broken.mp4"]
+
 [targets.macos]
 platform = "macos"
 # Entries besides the UI. "ipc" assembles the local control channel used by

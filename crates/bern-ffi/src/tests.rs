@@ -176,6 +176,7 @@ fn spec() -> AppSpec {
             }],
         },
         players: vec!["preview".into()],
+        resources: vec!["media/clip.mp4".into()],
     }
 }
 
@@ -188,6 +189,16 @@ fn start_with(
     fingerprint: u64,
     clock: ManualClock,
 ) -> Result<*mut BernApp, String> {
+    launch(frontend, fingerprint, None, || Counter { value: 0, clock })
+}
+
+/// Start with an engine factory and the host's resource directory.
+fn launch<E: EngineProtocol>(
+    frontend: &Frontend,
+    fingerprint: u64,
+    resources: Option<&str>,
+    engine: impl FnOnce() -> E,
+) -> Result<*mut BernApp, String> {
     let callbacks = BernCallbacks {
         context: frontend as *const Frontend as *mut c_void,
         on_state,
@@ -198,9 +209,20 @@ fn start_with(
         on_query,
     };
     let mut error = BernBuffer::empty();
-    let engine = || Counter { value: 0, clock };
-    // SAFETY: `error` is writable.
-    let app = unsafe { start_app(engine, spec(), fingerprint, callbacks, &mut error) };
+    let (resources, resources_len) =
+        resources.map_or((std::ptr::null(), 0), |root| (root.as_ptr(), root.len()));
+    // SAFETY: `resources` is null or a live string, `error` is writable.
+    let app = unsafe {
+        start_app(
+            engine,
+            spec(),
+            fingerprint,
+            resources,
+            resources_len,
+            callbacks,
+            &mut error,
+        )
+    };
     if app.is_null() {
         // SAFETY: on failure the library wrote an owned UTF-8 buffer.
         let message = unsafe { slice(error.ptr, error.len) };
@@ -225,6 +247,66 @@ fn a_stale_frontend_cannot_start_the_engine() {
     let frontend = Frontend::default();
     let error = start(&frontend, 7).unwrap_err();
     assert!(error.contains("rebuild"), "{error}");
+}
+
+#[test]
+fn the_host_installs_declared_resources_before_the_engine_starts() {
+    use bern_command::resources::Resources;
+    let dir = std::env::temp_dir().join(format!("bern-ffi-resources-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("media")).unwrap();
+    std::fs::write(dir.join("media/clip.mp4"), b"clip").unwrap();
+    std::fs::write(dir.join("media/extra.mp4"), b"extra").unwrap();
+    let root = dir.to_str().unwrap();
+    let frontend = Frontend::default();
+    let fingerprint = descriptor().fingerprint();
+    let counter = || Counter {
+        value: 0,
+        clock: ManualClock::new(),
+    };
+
+    // A host without resources leaves every lookup unavailable.
+    let app = launch(&frontend, fingerprint, None, || {
+        let error = Resources::host().path("media/clip.mp4").unwrap_err();
+        assert_eq!(error.code, "resources_unavailable");
+        counter()
+    })
+    .unwrap();
+    // SAFETY: `app` is live and not used afterwards.
+    unsafe { bern_app_stop(app) };
+
+    // The engine sees the declared names in the host's directory only.
+    let seen = Mutex::new(None);
+    let app = launch(&frontend, fingerprint, Some(root), || {
+        let resources = Resources::host();
+        *seen.lock().unwrap() = Some((
+            resources.path("media/clip.mp4"),
+            resources.path("media/extra.mp4").unwrap_err().code,
+        ));
+        counter()
+    })
+    .unwrap();
+    unsafe { bern_app_stop(app) };
+    let (clip, extra) = seen.lock().unwrap().take().unwrap();
+    assert_eq!(clip.unwrap(), dir.join("media/clip.mp4"));
+    assert_eq!(extra, "undeclared_resource");
+
+    // The process keeps one resource directory; the same one may start again.
+    let error = launch(&frontend, fingerprint, Some("/elsewhere"), counter).unwrap_err();
+    assert!(error.contains("already uses the resources"), "{error}");
+    let app = launch(&frontend, fingerprint, Some(root), counter).unwrap();
+    unsafe { bern_app_stop(app) };
+
+    // A failing engine constructor reports why.
+    let error = launch(&frontend, fingerprint, None, || -> Counter {
+        panic!("clip `media/clip.mp4` is missing")
+    })
+    .unwrap_err();
+    assert!(
+        error.contains("panicked while starting: clip `media/clip.mp4` is missing"),
+        "{error}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

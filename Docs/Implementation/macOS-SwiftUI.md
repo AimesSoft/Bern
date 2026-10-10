@@ -1,11 +1,11 @@
 # macOS SwiftUI 实现记录
 
 - 日期：2026-10-10
-- 依据：[Bern 架构设计 v0.11](../Design.md)、[Apple 平台适配](../Adaptation/Apple.md)
+- 依据：[Bern 架构设计 v0.12](../Design.md)、[Apple 平台适配](../Adaptation/Apple.md)
 - 工具链：Rust 1.99.0（Edition 2024）；Swift 6.3.2，以 Swift 6 语言模式编译；Xcode 26.5（SDK 26.5）
 - 部署：最低 macOS 14，构建本机架构，本地临时签名
 
-本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议与声明式异步查询）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
+本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、声明式异步查询与随包资源）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
 
 ## 完成情况
 
@@ -65,9 +65,9 @@
 | `bern-protocol` | 值、schema、命令与状态描述、框架会话命令目录、二进制编码 |
 | `bern-media` | 媒体契约：`MediaSource`、播放器身份、标准媒体命令与状态、执行端协议、`MediaHub`（路由与状态归并） |
 | `bern-ir` | 平台无关 IR、组件规格表、组件库描述 |
-| `bern-command` | 引擎宿主：边界校验、串行执行命令、异步作答且可取消的只读查询、按修订号发布状态 |
+| `bern-command` | 引擎宿主：边界校验、串行执行命令、异步作答且可取消的只读查询、按修订号发布状态；宿主装配的随包资源 `Resources` |
 | `bern-runtime` | UI 会话：窗口实例与代次、窗口作用域草稿、关闭协议、会话命令路由；异步查询资源、窗口所属的查询订阅与时钟（系统时钟、可控时钟） |
-| `bern-compiler` | 读取 `Bern.toml`、显式源码收集、语义检查、输出 IR |
+| `bern-compiler` | 读取 `Bern.toml`、校验并展开随包资源、显式源码收集、语义检查、输出 IR |
 | `bern-target-api` | 目标描述、能力检查、构建计划、按平台解析默认目标 |
 | `bern-backend-swiftui` | `swiftui + macos` 目标：生成 Swift、Rust 胶水 crate 与资源 |
 | `bern-ffi` | 进程内 C ABI |
@@ -208,9 +208,30 @@ pub fn app(app: showcase::Client, windows: AppWindows, players: Players,
 - `confirm_close` 是受限布尔表达式，`close_message` 是 `tr!` 文本，两者同时出现；`Window` 上的动作是存储命令（只能是引擎命令），有它时决策为“存储 / 不存储 / 取消”，否则为“放弃更改 / 取消”。
 - 根组件的 `#[session]` 参数按窗口实例求值，只能用在拥有该会话类型的窗口的关闭检查里，编译器检查归属。
 
+### 随包资源
+
+```toml
+# Bern.toml：每项是相对本文件的文件或目录，也是引擎使用的资源名称
+[resources]
+paths = ["media/aurora.mp4", "media/tides.mp4", "media/broken.mp4"]
+```
+
+```rust
+use bern::resources::Resources;
+
+let resources = Resources::host();                                  // 应用宿主装配
+let clip = MediaSource::resource(&resources, "media/aurora.mp4")?;  // 包内文件 URL
+let seed = resources.path("data/seed.json")?;                       // 包内文件路径
+```
+
+- 名称是相对 `Bern.toml` 的 `/` 分隔路径，每段只能用 ASCII 字母、数字、`-`、`_`、`.`，不以 `.` 开头；目录展开为其下全部文件（跳过隐藏项）。条目不存在、符号链接、空目录、名称不合法、重复列出、只有大小写不同都是构建错误，位置指向 `Bern.toml` 中的条目（如 `examples/showcase/Bern.toml:43:10`）。规则由 `bern_protocol::check_resource_name` 定义，构建与运行时共用。
+- macOS 目标另外拒绝含 `.` 的目录段与以 `.lproj` 结尾的段（签名工具把含点目录当作包，`.lproj` 存放生成的本地化），报错同样指向声明位置。
+- 引擎按名称解析：`Resources::host()` 是宿主为本进程装配的资源；`Resources::catalog(目录, 名称)` 与宿主相同但显式给出；`Resources::directory(目录)` 不带名称目录，只供测试与工具。错误码为 `invalid_resource_name`、`resources_unavailable`（没有宿主装配，例如单元测试直接调用 `Default`）、`undeclared_resource`（即使包里有同名文件）、`resource_missing`。没有回退路径。
+- 示例引擎 `ShowcaseEngine::new(时钟, 资源)` 与注入时钟的方式相同；`Default` 使用 `SystemClock` 与 `Resources::host()`。片段解析失败时引擎无法构造，应用显示“the engine panicked while starting: resources_unavailable: …”这样带原因的启动错误。测试用 `bern_compiler::config::load` 读取示例的 `Bern.toml`，以与应用包相同的名称目录在源码目录中解析，因此引擎使用未声明的名称会在测试中失败。
+
 ### 组件规格
 
-规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`。IR 因加入查询绑定升为版本 2。可操作控件必须有 `id`。
+规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`。IR 因加入查询绑定升为版本 2，加入随包资源清单后为版本 3。可操作控件必须有 `id`。
 
 默认行为：`Column` 前缘对齐；`Row` 垂直居中；未写 `style` 时使用平台默认样式。`Search` 在 SwiftUI 目标中只能放在 `Sidebar` 内；`Picker` 的枚举不能携带数据。
 
@@ -234,6 +255,8 @@ flowchart LR
 - **窗口与会话**：窗口出现时向运行时登记，获得代次与外部 ID（如 `settings#2`）。草稿属于窗口实例，关闭即释放；带旧代次的写入返回 `stale_window`。
 - **启动与重新打开**：`initial: open` 表示会话初始化时打开一次，因此不恢复上次运行时窗口的开关状态（`ApplePersistenceIgnoreState`），否则上次退出前关掉的主窗口启动后不出现；窗口尺寸与位置仍由系统记住。主窗口不存在时，点 Dock 图标（重新打开事件）打开主窗口，与“系统设置”“音乐”一致。
 - **控件登记与会话命令**：每个可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、启用状态，以及与用户输入相同的动作闭包。名称取控件自己的文案；侧边栏与标签页取当前选中项的文案，导航链接取行内第一段文字（经过容器与 `match` 分支），导航容器与查询没有名称。外部的 `ui.activate` 等命令在主线程上经这些闭包执行；禁用控件返回 `target_unavailable`，被本窗口关闭确认阻挡的控件返回 `target_blocked`，同一目标挂载在多处返回 `target_ambiguous`；密码框的值不暴露。`ui.inspect` 的 `reason` 给出不可操作原因（`disabled`、`blocked_by_modal`）。
+
+- **随包资源**：构建计划在签名之前以 `Mirror` 步骤把声明的文件复制到 `Showcase.app/Contents/Resources/<名称>`：只复制内容、不带扩展属性，大小与修改时间相同的文件不重复复制，删除不再声明的旧文件，保留生成的 `<语言>.lproj`。生成的胶水把声明名称写入 `AppSpec.resources`；Swift 宿主启动时把 `Bundle.main.resourceURL` 的路径传给 `bern_app_start`，`bern-ffi` 在构造引擎之前以“包内目录 + 声明名称”装配 `Resources::host()`。同一进程再次以不同目录装配会失败。`build.json` 记录资源名称。
 
 ### Video 与媒体
 
@@ -330,13 +353,25 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-产物位于 `target/bern/macos/`：`Showcase.app`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
+产物位于 `target/bern/macos/`：`Showcase.app`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
 
-示例的受控测试媒体在 `examples/showcase/media/`，由 `make-media.sh` 用 ffmpeg 生成：`aurora.mp4`（8 秒）、`tides.mp4`（6 秒）、`broken.mp4`（不是影片，用于失败）、`live/live.m3u8`（没有结束标记的 HLS，时长未知、不可跳转；AVFoundation 只通过 HTTP 播放 HLS，例如 `python3 -m http.server --directory examples/showcase/media`）。
+示例的受控测试媒体在 `examples/showcase/media/`，由 `make-media.sh` 用 ffmpeg 生成：`aurora.mp4`（8 秒）、`tides.mp4`（6 秒）、`broken.mp4`（不是影片，用于失败）声明为随包资源，随应用包发布；`live/live.m3u8`（没有结束标记的 HLS，时长未知、不可跳转）不随包发布，只作开发辅助：AVFoundation 只通过 HTTP 播放 HLS，例如 `python3 -m http.server --directory examples/showcase/media`。
 
 开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_CLOSE_SIGNAL=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，与点按标题栏关闭按钮相同，供没有屏幕访问的工具验证系统关闭路径。这三项只用于开发检查，默认关闭。
 
 ## 验证记录
+
+2026-10-10，随包资源，本机 macOS 27.0.1（arm64）：
+
+- `cargo test --workspace`（110 项）、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；`bern build` 无警告，`codesign --verify --deep --strict` 通过。
+- 新增测试：资源名称规则；`Bern.toml` 校验 3 组（目录展开与跳过隐藏项、每个文件指向声明它的条目；不存在、绝对路径、`..`、非法字符、空目录、重复列出、目录内文件重复、只有大小写不同、符号链接均报错且定位到条目）；macOS 目标拒绝 `.lproj` 与含 `.` 的目录段；生成的胶水、`build.json` 与构建计划（`Mirror` 在签名之前，保留本地化文件）；构建驱动的 `Mirror`（只留声明与保留的文件、源文件改变时重新复制、文件与目录互换）；`Resources` 的四种错误；C ABI 3 项（无资源目录时 `resources_unavailable`、宿主目录中只有声明名称可解析、同一进程以不同目录再次装配被拒绝，以及引擎构造失败时启动错误带上原因）；`showcase-core` 以 `Bern.toml` 声明的名称目录解析片段，没有宿主时引擎不能构造。
+- 实机：把 `Showcase.app` 复制到仓库之外的临时目录，并把源码中的 `examples/showcase/media` 改名移走，直接启动复制出的应用（`-ApplePersistenceIgnoreState YES`，CLI 用 `--engine` 指定）：
+  - `showcase state` 中 `featured_source` 与 6 个项目的片段都是复制出的包内 `…/elsewhere/Showcase.app/Contents/Resources/media/*.mp4`。
+  - `ui select --target main_window.pages --option Media` 后，`media players` 中 `main#1/media_page.featured` 为 `Ready`、时长 8000 ms、可跳转，来源为包内的 `aurora.mp4`；`media play` 后 `Playing`；`showcase feature --clip Bars` 后源版本 2、时长 6000（`tides.mp4`）；`--clip Damaged` 后 `Failed`（“无法打开”，`broken.mp4`）；`showcase add-item` 新增项目的片段同样来自包内。
+  - 源码媒体移走时 `bern check` 对三个条目分别报 `resource … does not exist`，位置为 `examples/showcase/Bern.toml:43:10`、`:30`、`:49`。
+- 在包的 `Contents/Resources` 中放入未声明的旧文件后重新构建：旧文件被删除，本地化文件保留，未变化的片段没有重新复制（inode 与修改时间不变），签名校验通过。
+
+未完成的验证：资源目录较大时的复制耗时；在另一台机器上运行构建产物（本次以复制到其他目录并移走源码代替）。
 
 2026-10-10，声明式异步查询，本机 macOS 27.0.1（arm64）：
 
@@ -402,4 +437,4 @@ open target/bern/macos/Showcase.app
 - Web、GTK、WinUI 3 等其他目标与 Bern 主题算法属于后续阶段。
 - 控件目标 ID 为 `组件.控件id`；同一组件在一个窗口中出现多次时目标会冲突，需要指定上下文（返回 `target_ambiguous`）。
 - 设置窗口禁用了滚动以贴合内容高度，内容超出屏幕高度时无法滚动。
-- 应用还不能声明随包资源文件。示例片段以编译时的源码目录绝对路径加载（`showcase-core` 中的 `MEDIA`），构建出的应用只在构建它的机器上能播放这些片段。
+- 随包资源只能由应用清单声明，组件库不能；资源只解析为本机文件路径与文件 URL，引擎与媒体执行端不在同一位置（WebUI 等）时的地址方案尚未实现；可执行代码、框架与插件不能作为资源发布；没有列出资源目录的接口。

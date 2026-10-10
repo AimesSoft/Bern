@@ -12,6 +12,7 @@
 mod media;
 mod query;
 
+use bern_command::resources::Resources;
 use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
 use bern_media::{MediaHub, MediaSubscription};
 use bern_protocol::{
@@ -110,6 +111,8 @@ pub struct AppSpec {
     pub session: SessionSpec,
     /// Players owned by the application, from the `#[bern::players]` catalog.
     pub players: Vec<String>,
+    /// Names of the resource files declared in `Bern.toml`.
+    pub resources: Vec<String>,
 }
 
 /// Forwards session commands from external entries to the frontend, which
@@ -247,17 +250,37 @@ fn encode_changes(host: &Host, revision: u64, changes: &[(usize, Value)]) -> Vec
     writer.bytes
 }
 
+/// Text of a panic payload, for startup errors.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> &str {
+    payload
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("no message")
+}
+
 /// Start an application. Called from the generated `bern_app_start`.
 ///
+/// `resources` is the UTF-8 path of the directory where the product keeps
+/// the declared resource files, or null when the host has none. The
+/// declared names and that directory are installed as the process's
+/// [`Resources`] before the engine is constructed.
+///
 /// # Safety
-/// `error` must be null or point to writable memory for one [`BernBuffer`].
+/// `resources` must point to `resources_len` readable bytes or be null with
+/// `resources_len == 0`. `error` must be null or point to writable memory
+/// for one [`BernBuffer`].
 pub unsafe fn start_app<E: EngineProtocol>(
     make_engine: impl FnOnce() -> E,
     spec: AppSpec,
     fingerprint: u64,
+    resources: *const u8,
+    resources_len: usize,
     callbacks: BernCallbacks,
     error: *mut BernBuffer,
 ) -> *mut BernApp {
+    // SAFETY: guaranteed by the caller.
+    let resources = unsafe { slice(resources, resources_len) };
     let fail = |message: String| {
         if !error.is_null() {
             // SAFETY: the caller provides writable memory for one buffer.
@@ -266,6 +289,13 @@ pub unsafe fn start_app<E: EngineProtocol>(
         std::ptr::null_mut()
     };
     let started = catch_unwind(AssertUnwindSafe(|| {
+        if !resources.is_empty() {
+            let root = std::str::from_utf8(resources)
+                .map_err(|_| "the resource directory path is not UTF-8".to_string())?;
+            Resources::catalog(root, spec.resources.iter().cloned())
+                .install()
+                .map_err(|message| format!("cannot install the app's resources: {message}"))?;
+        }
         let engine = make_engine();
         let actual = engine.descriptor().fingerprint();
         if actual != fingerprint {
@@ -331,7 +361,10 @@ pub unsafe fn start_app<E: EngineProtocol>(
     match started {
         Ok(Ok(app)) => Box::into_raw(Box::new(app)),
         Ok(Err(message)) => fail(message),
-        Err(_) => fail("the engine panicked while starting".into()),
+        Err(payload) => fail(format!(
+            "the engine panicked while starting: {}",
+            panic_message(payload.as_ref())
+        )),
     }
 }
 

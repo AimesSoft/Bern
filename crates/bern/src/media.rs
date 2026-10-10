@@ -5,7 +5,8 @@
 //! from the shared media contract, so every entry and target agrees on it.
 
 use crate::bind::{BernValue, Binding, Readable, ToRef};
-use bern_protocol::{SchemaError, Value};
+use crate::resources::Resources;
+use bern_protocol::{CommandError, SchemaError, Value};
 
 /// Playable media: an http(s) URL or a file URL. A resource locator is not
 /// user-visible text and needs no translation.
@@ -34,6 +35,13 @@ impl MediaSource {
             }
         }
         Self { url }
+    }
+
+    /// A `file://` source for a resource declared in `Bern.toml`, located
+    /// by `resources`. The engine names the resource; the host decides
+    /// where the file is, for example inside the app bundle.
+    pub fn resource(resources: &Resources, name: &str) -> Result<Self, CommandError> {
+        resources.path(name).map(Self::file)
     }
 }
 
@@ -85,6 +93,21 @@ mod tests {
             MediaSource::file("/no such dir/clip #1.mp4").url,
             "file:///no%20such%20dir/clip%20%231.mp4"
         );
+    }
+
+    #[test]
+    fn resource_sources_are_file_urls_of_declared_files() {
+        let dir = std::env::temp_dir().join(format!("bern-media-resource-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("media")).unwrap();
+        std::fs::write(dir.join("media/clip.mp4"), b"clip").unwrap();
+        let resources = Resources::catalog(&dir, ["media/clip.mp4"]);
+        assert_eq!(
+            MediaSource::resource(&resources, "media/clip.mp4").unwrap(),
+            MediaSource::file(dir.join("media/clip.mp4"))
+        );
+        let error = MediaSource::resource(&resources, "media/other.mp4").unwrap_err();
+        assert_eq!(error.code, "undeclared_resource");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

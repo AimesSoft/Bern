@@ -9,6 +9,7 @@ mod codec;
 mod descriptor;
 mod error;
 mod message;
+mod resource;
 mod session;
 mod text;
 mod types;
@@ -22,6 +23,7 @@ pub use descriptor::{
 };
 pub use error::{CommandError, SchemaError};
 pub use message::{Cancellation, CommandOutcome, CommandStatus, Invocation, StateUpdate};
+pub use resource::check_resource_name;
 pub use session::{SessionCommand, session_catalog};
 pub use text::{LocalizedText, label_key};
 pub use types::{EnumDef, FieldDef, RecordDef, Type, TypeTable, VariantDef};

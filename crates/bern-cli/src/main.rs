@@ -7,6 +7,7 @@
 
 use bern_compiler::{Compiled, Config};
 use bern_target_api::{BuildContext, BuildStep, Diagnostic, Registry, Target};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -107,6 +108,70 @@ fn write_if_changed(path: &Path, contents: &[u8]) -> std::io::Result<bool> {
     Ok(true)
 }
 
+/// Remove everything below `dir/relative` that no wanted path needs.
+fn prune(dir: &Path, relative: &Path, wanted: &BTreeSet<PathBuf>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir.join(relative))? {
+        let entry = entry?;
+        let path = relative.join(entry.file_name());
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            if wanted.contains(&path) {
+                // A wanted file replaces a directory of the same name.
+                std::fs::remove_dir_all(entry.path())?;
+            } else if wanted.iter().any(|wanted| wanted.starts_with(&path)) {
+                prune(dir, &path, wanted)?;
+            } else {
+                std::fs::remove_dir_all(entry.path())?;
+            }
+        } else if !wanted.contains(&path) {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+/// Copy the contents of `from` to `to` unless `to` already has the same
+/// size and modification time; extended attributes are not copied.
+fn copy_contents(from: &Path, to: &Path) -> std::io::Result<()> {
+    let source = std::fs::metadata(from)?;
+    let modified = source.modified()?;
+    if let Ok(existing) = std::fs::metadata(to)
+        && existing.is_file()
+        && existing.len() == source.len()
+        && existing.modified().is_ok_and(|time| time == modified)
+    {
+        return Ok(());
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut input = std::fs::File::open(from)?;
+    let mut output = std::fs::File::create(to)?;
+    std::io::copy(&mut input, &mut output)?;
+    output.set_modified(modified)
+}
+
+fn mirror(dir: &Path, files: &[(PathBuf, PathBuf)], keep: &[PathBuf]) -> Result<(), String> {
+    let wanted: BTreeSet<PathBuf> = files
+        .iter()
+        .map(|(_, to)| to.clone())
+        .chain(keep.iter().cloned())
+        .collect();
+    std::fs::create_dir_all(dir)
+        .and_then(|()| prune(dir, Path::new(""), &wanted))
+        .map_err(|error| format!("cannot update {}: {error}", dir.display()))?;
+    for (from, to) in files {
+        copy_contents(from, &dir.join(to)).map_err(|error| {
+            format!(
+                "cannot copy {} to {}: {error}",
+                from.display(),
+                dir.join(to).display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 fn run_step(step: &BuildStep) -> Result<(), String> {
     match step {
         BuildStep::Run {
@@ -139,6 +204,7 @@ fn run_step(step: &BuildStep) -> Result<(), String> {
                 to.display()
             )
         }),
+        BuildStep::Mirror { dir, files, keep } => mirror(dir, files, keep),
         BuildStep::RemoveIfExists { path } => {
             if path.is_dir() {
                 std::fs::remove_dir_all(path).map_err(|error| error.to_string())
@@ -331,4 +397,73 @@ fn main() -> ExitCode {
         }
     }
     ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn files_below(dir: &Path) -> Vec<String> {
+        fn walk(dir: &Path, relative: &Path, out: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir.join(relative)).unwrap() {
+                let entry = entry.unwrap();
+                let path = relative.join(entry.file_name());
+                if entry.file_type().unwrap().is_dir() {
+                    walk(dir, &path, out);
+                } else {
+                    out.push(path.display().to_string());
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, Path::new(""), &mut out);
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn mirror_ships_exactly_the_declared_files() {
+        let root = std::env::temp_dir().join(format!("bern-mirror-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (project, bundle) = (root.join("project"), root.join("Resources"));
+        std::fs::create_dir_all(project.join("media")).unwrap();
+        std::fs::create_dir_all(bundle.join("en.lproj")).unwrap();
+        std::fs::create_dir_all(bundle.join("old")).unwrap();
+        std::fs::write(project.join("media/a.mp4"), b"first").unwrap();
+        std::fs::write(project.join("media/b.mp4"), b"bee").unwrap();
+        std::fs::write(bundle.join("en.lproj/Localizable.strings"), b"strings").unwrap();
+        std::fs::write(bundle.join("old/stale.mp4"), b"stale").unwrap();
+        std::fs::write(bundle.join("media"), b"was a file").unwrap();
+        let files = |names: &[&str]| -> Vec<(PathBuf, PathBuf)> {
+            names
+                .iter()
+                .map(|name| (project.join(name), PathBuf::from(name)))
+                .collect()
+        };
+        let keep = vec![PathBuf::from("en.lproj/Localizable.strings")];
+
+        mirror(&bundle, &files(&["media/a.mp4", "media/b.mp4"]), &keep).unwrap();
+        assert_eq!(
+            files_below(&bundle),
+            ["en.lproj/Localizable.strings", "media/a.mp4", "media/b.mp4"]
+        );
+        assert_eq!(std::fs::read(bundle.join("media/a.mp4")).unwrap(), b"first");
+
+        // A changed source is copied again; a dropped one disappears.
+        std::fs::write(project.join("media/a.mp4"), b"second!").unwrap();
+        mirror(&bundle, &files(&["media/a.mp4"]), &keep).unwrap();
+        assert_eq!(
+            files_below(&bundle),
+            ["en.lproj/Localizable.strings", "media/a.mp4"]
+        );
+        assert_eq!(
+            std::fs::read(bundle.join("media/a.mp4")).unwrap(),
+            b"second!"
+        );
+
+        // Nothing declared: only the kept files remain.
+        mirror(&bundle, &[], &keep).unwrap();
+        assert_eq!(files_below(&bundle), ["en.lproj/Localizable.strings"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

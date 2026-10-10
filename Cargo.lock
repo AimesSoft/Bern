@@ -310,6 +310,7 @@ name = "showcase-core"
 version = "0.1.0"
 dependencies = [
  "bern",
+ "bern-compiler",
  "showcase-protocol",
 ]
 

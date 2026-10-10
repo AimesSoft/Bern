@@ -83,6 +83,7 @@ impl Target for SwiftUiMacos {
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
         let mut diagnostics = check_common(self, app);
+        diagnostics.extend(resources::check_declared(app));
         let framework = resources::framework_languages();
         for language in &app.languages.supported {
             if !framework.contains(&language.as_str()) {
@@ -216,19 +217,9 @@ impl Target for SwiftUiMacos {
                 contents,
             });
         }
-        for (language, table) in resources::string_tables(app) {
+        for (path, table) in resources::localization_files(app) {
             files.push(GeneratedFile::text(
-                bundle.join(format!(
-                    "Contents/Resources/{language}.lproj/Localizable.strings"
-                )),
-                table,
-            ));
-        }
-        for (language, table) in resources::info_plist_tables(app) {
-            files.push(GeneratedFile::text(
-                bundle.join(format!(
-                    "Contents/Resources/{language}.lproj/InfoPlist.strings"
-                )),
+                bundle.join("Contents/Resources").join(path),
                 table,
             ));
         }
@@ -265,6 +256,7 @@ impl Target for SwiftUiMacos {
             "protocol_fingerprint": format!("{:016x}", app.protocol.fingerprint()),
             "languages": app.languages.supported,
             "media": media,
+            "resources": app.resources.iter().map(|resource| &resource.name).collect::<Vec<_>>(),
             "app_bundle": bundle,
         });
         files.push(GeneratedFile::text(
@@ -361,6 +353,25 @@ impl Target for SwiftUiMacos {
             },
             BuildStep::CreateDir {
                 path: bundle.join("Contents/MacOS"),
+            },
+            // Declared resources ship in Contents/Resources next to the
+            // generated localizations, before the bundle is signed.
+            BuildStep::Mirror {
+                dir: bundle.join("Contents/Resources"),
+                files: app
+                    .resources
+                    .iter()
+                    .map(|resource| {
+                        (
+                            context.project_dir.join(&resource.name),
+                            PathBuf::from(&resource.name),
+                        )
+                    })
+                    .collect(),
+                keep: resources::localization_files(app)
+                    .into_iter()
+                    .map(|(path, _)| path)
+                    .collect(),
             },
             BuildStep::Run {
                 description: "Compile the SwiftUI frontend".into(),

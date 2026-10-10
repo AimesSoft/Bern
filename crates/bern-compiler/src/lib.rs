@@ -1125,6 +1125,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             players,
             components: lowered,
             texts,
+            resources: config.resources.clone(),
         },
         protocol_module: protocol_module.join("::"),
         libraries,

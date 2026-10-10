@@ -13,6 +13,8 @@
 //! provider can stop early, and an answer that arrives after cancellation
 //! is reported as `cancelled` instead of as a result.
 
+pub mod resources;
+
 use bern_protocol::{
     Cancellation, CommandError, CommandOutcome, CommandStatus, Invocation, ProtocolDescriptor,
     StateUpdate, Value,

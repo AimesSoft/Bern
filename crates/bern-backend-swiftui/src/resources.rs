@@ -1,8 +1,11 @@
-//! Bundle resources: Info.plist and per-language string tables.
+//! Bundle resources: Info.plist, per-language string tables and the rules
+//! for declared resource files.
 
 use bern_ir::Application;
 use bern_protocol::LocalizedText;
+use bern_target_api::Diagnostic;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 /// Strings the SwiftUI runtime shows itself, with built-in translations.
 pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
@@ -314,6 +317,55 @@ pub fn string_tables(app: &Application) -> BTreeMap<String, String> {
         tables.insert(language.clone(), lines.join("\n"));
     }
     tables
+}
+
+/// Localization files generated into `Contents/Resources`, with paths
+/// relative to that directory.
+pub fn localization_files(app: &Application) -> Vec<(PathBuf, String)> {
+    let mut files: Vec<(PathBuf, String)> = string_tables(app)
+        .into_iter()
+        .map(|(language, table)| {
+            (
+                format!("{language}.lproj/Localizable.strings").into(),
+                table,
+            )
+        })
+        .collect();
+    files.extend(
+        info_plist_tables(app)
+            .into_iter()
+            .map(|(language, table)| (format!("{language}.lproj/InfoPlist.strings").into(), table)),
+    );
+    files
+}
+
+/// Declared resources the bundle cannot hold. A resource `a/b.ext` ships
+/// as `Contents/Resources/a/b.ext`: its directories may not contain `.`,
+/// because code signing treats such directories as nested bundles, and no
+/// part may end in `.lproj`, which holds the generated localizations.
+pub fn check_declared(app: &Application) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for resource in &app.resources {
+        let segments: Vec<&str> = resource.name.split('/').collect();
+        let (_, directories) = segments.split_last().expect("names are not empty");
+        let problem = if let Some(part) = segments.iter().find(|part| part.ends_with(".lproj")) {
+            format!("`{part}` is where the macOS bundle keeps localizations")
+        } else if let Some(directory) = directories.iter().find(|part| part.contains('.')) {
+            format!(
+                "the directory `{directory}` contains `.`, which code signing reads as a nested bundle"
+            )
+        } else {
+            continue;
+        };
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "resource `{}` cannot ship in the macOS app: {problem}; rename it",
+                resource.name
+            ))
+            .at(resource.declared.clone()),
+        );
+    }
+    diagnostics
 }
 
 /// `InfoPlist.strings` contents per language, localizing the app name.
