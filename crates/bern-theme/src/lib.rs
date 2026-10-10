@@ -1,4 +1,4 @@
-//! Bern Theme Algorithm v2.
+//! Bern Theme Algorithm v3.
 //!
 //! The theme kernel generates semantic colors and control recipes for
 //! targets whose UI framework has no complete light/dark system of its own
@@ -24,7 +24,7 @@ pub use color::{Oklch, Srgb, contrast};
 pub use recipes::{RECIPES, Recipe, RecipeState};
 
 /// Version of the generation rules; a change may alter emitted colors.
-pub const ALGORITHM_VERSION: u32 = 2;
+pub const ALGORITHM_VERSION: u32 = 3;
 
 /// Version of the snapshot layout.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -443,17 +443,25 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     // pair; text in the brand color must also read on every surface.
     const SURFACES: &[&str] = &["surface.canvas", "surface.panel", "surface.raised"];
     let accent_l = brand.l.clamp(b.pick(0.45, 0.55), b.pick(0.62, 0.72));
+    // The accent also colors icons on every surface as hover feedback.
     b.solve_pair(
         "accent",
         "on_accent",
         brand_at(accent_l, brand_chroma),
-        &["surface.canvas", "surface.panel"],
+        SURFACES,
+    );
+    // Brand text also labels a selected item on the selection tint.
+    let mut reads_on_selection = READS_ON.to_vec();
+    reads_on_selection.push("selection.background");
+    b.fixed(
+        "selection.background",
+        brand_at(b.pick(0.95, 0.27), brand_chroma.min(0.045)),
     );
     b.solve(
         "accent.text",
         brand_at(b.pick(0.5, 0.76), brand_chroma),
         levels.text,
-        READS_ON,
+        &reads_on_selection,
     );
     b.solve(
         "focus.indicator",
@@ -463,10 +471,6 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     );
     // Selection: a light tint of the brand with readable text and a
     // brand indicator bar, so a selected item is not told by colour alone.
-    b.fixed(
-        "selection.background",
-        brand_at(b.pick(0.95, 0.27), brand_chroma.min(0.045)),
-    );
     b.solve(
         "selection.foreground",
         brand_at(b.pick(0.3, 0.92), brand_chroma.min(0.06)),
@@ -514,6 +518,22 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
             "surface.panel",
             "surface.raised",
             "control.thumb",
+        ],
+    );
+
+    // Media progress: the played part is neutral, never the accent, so it
+    // does not compete with the picture; the rest of the track is a faint
+    // groove. The played part must stand out from both.
+    b.fixed("media.track", neutral(b.pick(0.9, 0.36), SURFACE_CHROMA));
+    b.solve(
+        "media.played",
+        neutral(b.pick(0.3, 0.9), TEXT_CHROMA),
+        levels.graphic,
+        &[
+            "media.track",
+            "surface.canvas",
+            "surface.panel",
+            "surface.raised",
         ],
     );
 

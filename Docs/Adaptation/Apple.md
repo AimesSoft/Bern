@@ -224,6 +224,8 @@ IconButton 使用平台标准的无边框图标按钮样式。系统托管的呈
 
 系统外部媒体入口、应用自有控制条和系统自带播放器控件分别记录来源与支持边界；不能将三者笼统标成“原生播放”。
 
+**Bern 决策（标准控制条的进度与音量）。** `controls: standard` 的进度与音量使用专用的媒体进度条，不复用 `Slider` 组件的外观：已播放部分为中性的 `.primary`，不使用应用强调色。macOS 26 及以上直接使用系统 `Slider`，以 `.tint(.primary)` 取得中性的已播放部分，滑块保持系统外观；低于 macOS 26 时使用 Bern 绘制的回退，形状照 macOS 26 的系统滑块：6 pt 圆角轨道（未播放部分为 `quaternaryLabelColor`），20 × 16 pt 的白色圆角滑块（圆角 7 pt）带柔和阴影与细轮廓。回退向辅助功能报告为系统 `Slider`，接受方向键调整；拖动只更新预览，松开时提交一次跳转，与系统 `Slider` 的编辑结束相同。上述尺寸来自本机 macOS 27.0.1 上系统 `Slider` 的实际渲染（2026-10-10），不是 Apple 公布的规格。
+
 ## 9. 随包资源
 
 **官方依据。** macOS 应用包把不是代码的内容放在 `Contents/Resources/`；可执行代码、框架、插件等各有固定位置，位置错误可能到公证时才暴露为签名问题。同一文档说明签名工具会把名称含点的目录当作包处理（针对嵌套代码的子目录给出）。[Placing content in a bundle](https://developer.apple.com/documentation/bundleresources/placing-content-in-a-bundle)

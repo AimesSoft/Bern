@@ -100,6 +100,7 @@ pub fn svg(name: &str) -> Option<String> {
         "checkmark" => stroke("M5 12.5l4.5 4.5L19 7.5"),
         "chevron.left" => stroke("M14.5 5.5L8 12l6.5 6.5"),
         "chevron.right" => stroke("M9.5 5.5L16 12l-6.5 6.5"),
+        "chevron.down" => stroke("M5.5 9.5L12 16l6.5-6.5"),
         "chevron.up.chevron.down" => stroke("M8 9.5l4-4 4 4M8 14.5l4 4 4-4"),
         "circle" => circle(12.0, 12.0, 8.0),
         "square" => stroke(
@@ -226,6 +227,7 @@ pub const RUNTIME_ICONS: &[&str] = &[
     "chevron.left",
     "chevron.right",
     "chevron.up.chevron.down",
+    "chevron.down",
     "checkmark",
     "magnifyingglass",
     "xmark.circle.fill",

@@ -187,6 +187,7 @@ Video(id: preview, player: players.preview, controls: standard)  // 附着到应
 - `source:` 与 `player:` 必须且只能写一个，类型分别为 `MediaSource`/`Option<MediaSource>` 的绑定和应用级播放器；`controls` 为 `standard`（默认）或 `none`，`fit` 为 `contain`（默认）、`cover`、`fill`，`label` 是可访问名称。
 - source 方式：播放器属于声明所在的组件实例，`player_id` 为 `窗口实例/组件.控件id`（如 `main#1/media_page.featured`）。源由绑定决定：同一个值不会重复加载；新值以新的源版本加载；外部 `media.open` 返回 `source_bound`，换源要调用源所有者的命令（示例中为 `showcase feature`）。组件实例结束或窗口关闭时释放播放器。
 - player 方式：只附着呈现；源由该播放器的命令更新。视图卸载只解除附着，应用级播放器在离开页面或关闭窗口后继续播放。
+- 标准控制条的进度与音量使用 `BernScrubber`：macOS 26 及以上是系统 `Slider` 加 `.tint(.primary)`，已播放部分为中性色；更早的系统绘制同样形状的回退（6 pt 轨道、20 × 16 pt 白色圆角滑块、柔和阴影，非活动窗口中已播放部分变浅），向辅助功能报告为系统 `Slider`，方向键逐步调整。拖动只更新预览，松开时提交一次，与 `Slider` 的编辑结束相同。见 [Apple 适配](../Adaptation/Apple.md) 第 8 节。
 
 ### 窗口关闭检查
 

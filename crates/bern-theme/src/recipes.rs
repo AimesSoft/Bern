@@ -177,10 +177,7 @@ pub const RECIPES: &[Recipe] = &[
             ),
             state(
                 "hover",
-                &[
-                    ("background", "transparent"),
-                    ("foreground", "icon.primary"),
-                ],
+                &[("background", "transparent"), ("foreground", "accent")],
             ),
             state(
                 "pressed",
@@ -241,17 +238,46 @@ pub const RECIPES: &[Recipe] = &[
     },
     Recipe {
         name: "switch",
+        // An outlined track when off, a filled one when on.
         states: &[
             state(
                 "off",
-                &[("track", "control.track"), ("thumb", "control.thumb")],
+                &[
+                    ("track", "transparent"),
+                    ("border", "control.border"),
+                    ("thumb", "control.border"),
+                ],
             ),
-            state("on", &[("track", "accent"), ("thumb", "control.thumb")]),
+            state(
+                "off.hover",
+                &[
+                    ("track", "transparent"),
+                    ("border", "text.secondary"),
+                    ("thumb", "text.secondary"),
+                ],
+            ),
+            state(
+                "on",
+                &[
+                    ("track", "accent"),
+                    ("border", "transparent"),
+                    ("thumb", "on_accent"),
+                ],
+            ),
+            state(
+                "on.hover",
+                &[
+                    ("track", "button.prominent.hover"),
+                    ("border", "transparent"),
+                    ("thumb", "on_accent"),
+                ],
+            ),
             FOCUS,
             state(
                 "disabled",
                 &[
-                    ("track", "disabled.surface"),
+                    ("track", "transparent"),
+                    ("border", "disabled.foreground"),
                     ("thumb", "disabled.foreground"),
                 ],
             ),
@@ -259,6 +285,7 @@ pub const RECIPES: &[Recipe] = &[
     },
     Recipe {
         name: "slider",
+        // The thumb is an accent dot inside a ring of the thumb color.
         states: &[
             state(
                 "rest",
@@ -267,6 +294,27 @@ pub const RECIPES: &[Recipe] = &[
                     ("track", "control.track"),
                     ("thumb", "control.thumb"),
                     ("thumb_border", "control.border"),
+                    ("thumb_center", "accent"),
+                ],
+            ),
+            state(
+                "hover",
+                &[
+                    ("fill", "accent"),
+                    ("track", "control.track"),
+                    ("thumb", "control.thumb"),
+                    ("thumb_border", "control.border"),
+                    ("thumb_center", "button.prominent.hover"),
+                ],
+            ),
+            state(
+                "active",
+                &[
+                    ("fill", "accent"),
+                    ("track", "control.track"),
+                    ("thumb", "control.thumb"),
+                    ("thumb_border", "control.border"),
+                    ("thumb_center", "button.prominent.pressed"),
                 ],
             ),
             FOCUS,
@@ -277,6 +325,34 @@ pub const RECIPES: &[Recipe] = &[
                     ("track", "disabled.surface"),
                     ("thumb", "disabled.surface"),
                     ("thumb_border", "disabled.foreground"),
+                    ("thumb_center", "disabled.foreground"),
+                ],
+            ),
+        ],
+    },
+    Recipe {
+        name: "media_scrubber",
+        // Neutral progress, so it does not compete with the picture.
+        states: &[
+            state(
+                "rest",
+                &[
+                    ("fill", "media.played"),
+                    ("track", "media.track"),
+                    ("thumb", "control.thumb"),
+                    ("thumb_border", "control.border"),
+                    ("shadow", "scrim"),
+                ],
+            ),
+            FOCUS,
+            state(
+                "disabled",
+                &[
+                    ("fill", "disabled.foreground"),
+                    ("track", "media.track"),
+                    ("thumb", "disabled.surface"),
+                    ("thumb_border", "disabled.foreground"),
+                    ("shadow", "transparent"),
                 ],
             ),
         ],
@@ -394,8 +470,54 @@ pub const RECIPES: &[Recipe] = &[
                 "selected",
                 &[
                     ("background", "transparent"),
-                    ("foreground", "text.primary"),
+                    ("foreground", "accent.text"),
                     ("indicator", "accent"),
+                ],
+            ),
+            // Tabs set vertically, as a wide dialog's navigation.
+            state(
+                "selected.vertical",
+                &[
+                    ("background", "selection.background"),
+                    ("foreground", "accent.text"),
+                    ("indicator", "accent"),
+                ],
+            ),
+            FOCUS,
+        ],
+    },
+    Recipe {
+        name: "menu",
+        // A popup list; the trigger uses `field`.
+        states: &[
+            state(
+                "popup",
+                &[
+                    ("background", "surface.raised"),
+                    ("border", "separator"),
+                    ("shadow", "scrim"),
+                ],
+            ),
+            state(
+                "rest",
+                &[
+                    ("background", "transparent"),
+                    ("foreground", "text.primary"),
+                ],
+            ),
+            state(
+                "hover",
+                &[
+                    ("background", "hover.overlay"),
+                    ("foreground", "text.primary"),
+                ],
+            ),
+            state(
+                "selected",
+                &[
+                    ("background", "transparent"),
+                    ("foreground", "text.primary"),
+                    ("check", "accent.text"),
                 ],
             ),
             FOCUS,

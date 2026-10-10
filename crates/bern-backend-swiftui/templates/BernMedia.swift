@@ -786,18 +786,17 @@ struct BernVideoControls: View {
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-            Slider(
+            BernScrubber(
                 value: SwiftUI.Binding(get: { scrubbing ?? min(position, duration) }, set: { scrubbing = $0 }),
-                in: 0...max(duration, 1)
-            ) {
-                Text(verbatim: BernText.string("bern.media.position"))
-            } onEditingChanged: { editing in
+                in: 0...max(duration, 1),
+                step: 5000,
+                label: BernText.string("bern.media.position")
+            ) { editing in
                 if !editing, let value = scrubbing {
                     seek(value)
                     scrubbing = nil
                 }
             }
-            .labelsHidden()
             .disabled(!seekable)
             .bernControl(
                 "\(target).position", role: "slider", label: BernText.string("bern.media.position"),
@@ -823,18 +822,17 @@ struct BernVideoControls: View {
                 actions: BernControlActions(
                     activate: toggleMuted, setBool: { setMuted($0) },
                     value: { (current?.muted ?? false) ? "true" : "false" }))
-            Slider(
+            BernScrubber(
                 value: SwiftUI.Binding(get: { volumePreview ?? state?.volume ?? 1 }, set: { volumePreview = $0 }),
-                in: 0...1
-            ) {
-                Text(verbatim: BernText.string("bern.media.volume"))
-            } onEditingChanged: { editing in
+                in: 0...1,
+                step: 0.05,
+                label: BernText.string("bern.media.volume")
+            ) { editing in
                 if !editing, let value = volumePreview {
                     setVolume(value)
                     volumePreview = nil
                 }
             }
-            .labelsHidden()
             .frame(width: 80)
             .disabled(!controllable)
             .bernControl(
@@ -843,5 +841,138 @@ struct BernVideoControls: View {
                 actions: BernControlActions(
                     setNumber: { setVolume($0) }, value: { BernText.text(current?.volume ?? 1) }))
         }
+    }
+}
+
+/// The media progress bar: the played part is neutral, never the accent,
+/// so it does not compete with the picture. macOS 26 and later use the
+/// system slider, whose knob is already a capsule; earlier systems draw
+/// the same shape. Either way editing begins, the value previews, and
+/// editing ends once, as with `Slider`.
+struct BernScrubber: View {
+    @SwiftUI.Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let label: String
+    let onEditingChanged: (Bool) -> Void
+
+    init(
+        value: SwiftUI.Binding<Double>, in range: ClosedRange<Double>, step: Double, label: String,
+        onEditingChanged: @escaping (Bool) -> Void
+    ) {
+        _value = value
+        self.range = range
+        self.step = step
+        self.label = label
+        self.onEditingChanged = onEditingChanged
+    }
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            Slider(value: $value, in: range) {
+                Text(verbatim: label)
+            } onEditingChanged: { editing in
+                onEditingChanged(editing)
+            }
+            .labelsHidden()
+            .tint(.primary)
+        } else {
+            BernScrubberShape(value: $value, range: range, step: step, onEditingChanged: onEditingChanged)
+                .accessibilityRepresentation {
+                    Slider(value: $value, in: range) {
+                        Text(verbatim: label)
+                    } onEditingChanged: { editing in
+                        onEditingChanged(editing)
+                    }
+                }
+        }
+    }
+}
+
+/// The macOS 26 slider's shape, drawn for earlier systems: a 6 pt rounded
+/// track and a 20 x 16 pt white knob with a soft shadow.
+private struct BernScrubberShape: View {
+    @SwiftUI.Binding var value: Double
+    let range: ClosedRange<Double>
+    let step: Double
+    let onEditingChanged: (Bool) -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlActiveState) private var activeState
+    @State private var dragging = false
+
+    private static let knob = CGSize(width: 20, height: 16)
+    private static let track: CGFloat = 6
+
+    private var span: Double { max(range.upperBound - range.lowerBound, .ulpOfOne) }
+
+    private func set(_ next: Double) {
+        value = min(max(next, range.lowerBound), range.upperBound)
+    }
+
+    private func nudge(_ steps: Double) -> KeyPress.Result {
+        guard isEnabled else { return .ignored }
+        onEditingChanged(true)
+        set(value + steps * step)
+        onEditingChanged(false)
+        return .handled
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let travel = max(geometry.size.width - Self.knob.width, 0)
+            let fraction = min(max((value - range.lowerBound) / span, 0), 1)
+            let x = travel * fraction
+            let split = x + Self.knob.width / 2
+            ZStack(alignment: .leading) {
+                // The two parts meet under the knob, so neither is drawn
+                // over the other.
+                Capsule()
+                    .fill(Color(nsColor: .quaternaryLabelColor))
+                    .frame(width: max(geometry.size.width - split, 0), height: Self.track)
+                    .offset(x: split)
+                // Like the system slider, the played part dims in an
+                // inactive window.
+                Capsule()
+                    .fill(
+                        isEnabled && activeState != .inactive
+                            ? Color.primary : Color(nsColor: .tertiaryLabelColor))
+                    .frame(width: split, height: Self.track)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.white)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(isEnabled ? 0.2 : 0), radius: 1.5, y: 0.5)
+                    .frame(width: Self.knob.width, height: Self.knob.height)
+                    .scaleEffect(dragging ? 1.1 : 1)
+                    .offset(x: x)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { drag in
+                        if !dragging {
+                            dragging = true
+                            onEditingChanged(true)
+                        }
+                        let at = (drag.location.x - Self.knob.width / 2) / max(travel, 1)
+                        set(range.lowerBound + min(max(at, 0), 1) * span)
+                    }
+                    .onEnded { _ in
+                        dragging = false
+                        onEditingChanged(false)
+                    }
+            )
+            .allowsHitTesting(isEnabled)
+            .animation(.easeOut(duration: 0.15), value: dragging)
+        }
+        .frame(height: 22)
+        .focusable(isEnabled)
+        .onKeyPress(.leftArrow) { nudge(-1) }
+        .onKeyPress(.downArrow) { nudge(-1) }
+        .onKeyPress(.rightArrow) { nudge(1) }
+        .onKeyPress(.upArrow) { nudge(1) }
     }
 }

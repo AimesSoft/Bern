@@ -1178,6 +1178,159 @@ export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxI
   p.append(labelled(track, label, true, input));
 }
 
+let typeaheadReset = 0;
+
+/// Bern's own dropdown, a select-only combobox (WAI-ARIA APG). The list is
+/// a popover in the browser's top layer, so cards, dialogs and scroll
+/// containers never clip it. Focus stays on the trigger; the active option
+/// is announced through `aria-activedescendant`. Choosing runs `select`,
+/// the same closure touch and external entries use.
+function dropdown(options, field, select) {
+  const listId = `bern-listbox-${++fieldSequence}`;
+  const value = el("span", { class: "bern-dropdown-value" });
+  const trigger = el("button", {
+    class: "bern-dropdown", type: "button", role: "combobox", "aria-haspopup": "listbox",
+    "aria-expanded": "false", "aria-controls": listId, popovertarget: listId,
+  }, value, icon("chevron.down", 16));
+  const list = el("div", { class: "bern-menu", role: "listbox", id: listId, popover: "auto", tabindex: "-1" });
+  let active = -1;
+  // Keep the active option visible inside the list only.
+  const reveal = () => {
+    const item = items[active];
+    if (!item) return;
+    if (item.offsetTop < list.scrollTop) list.scrollTop = item.offsetTop - 4;
+    else if (item.offsetTop + item.offsetHeight > list.scrollTop + list.clientHeight) {
+      list.scrollTop = item.offsetTop + item.offsetHeight - list.clientHeight + 4;
+    }
+  };
+  const setActive = (index) => {
+    active = index;
+    items.forEach((item, at) => item.classList.toggle("bern-menu-active", at === index));
+    if (index >= 0) {
+      trigger.setAttribute("aria-activedescendant", items[index].id);
+      reveal();
+    } else trigger.removeAttribute("aria-activedescendant");
+  };
+  const isOpen = () => list.matches(":popover-open");
+  const selected = () => options.findIndex((option) => eq(option.value, field.peek()));
+  const close = () => {
+    if (isOpen()) list.hidePopover();
+  };
+  const choose = (index, refocus = true) => {
+    if (index >= 0) select(options[index].name);
+    close();
+    if (refocus) trigger.focus();
+  };
+  const items = options.map((option, index) => {
+    const text = el("span", { class: "bern-menu-text" });
+    bindText(text, option.label);
+    const check = icon("checkmark", 16);
+    check.classList.add("bern-menu-check");
+    const item = el("div", { class: "bern-menu-item", role: "option", id: `${listId}-${index}` }, text, check);
+    item.addEventListener("pointermove", () => {
+      if (active !== index) setActive(index);
+    });
+    item.addEventListener("click", () => choose(index));
+    list.append(item);
+    return item;
+  });
+  // Below the trigger, or above it when there is more room there. Placed
+  // before the list shows, from the trigger alone: the list's height is
+  // capped by the room it gets.
+  const place = () => {
+    const anchor = trigger.getBoundingClientRect();
+    const below = innerHeight - anchor.bottom - 12;
+    const above = anchor.top - 12;
+    const up = below < 160 && above > below;
+    list.style.minWidth = `${anchor.width}px`;
+    list.style.maxWidth = `${Math.max(anchor.width, innerWidth - anchor.left - 8)}px`;
+    list.style.left = `${Math.max(8, anchor.left)}px`;
+    list.style.top = up ? "auto" : `${anchor.bottom + 4}px`;
+    list.style.bottom = up ? `${innerHeight - anchor.top + 4}px` : "auto";
+    list.style.maxHeight = `${Math.min(328, up ? above : below)}px`;
+  };
+  const dismiss = (event) => {
+    if (!list.contains(event.target)) close();
+  };
+  list.addEventListener("beforetoggle", (event) => {
+    const open = event.newState === "open";
+    trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) {
+      place();
+      setActive(Math.max(0, selected()));
+      addEventListener("scroll", dismiss, true);
+      addEventListener("resize", close);
+    } else {
+      setActive(-1);
+      removeEventListener("scroll", dismiss, true);
+      removeEventListener("resize", close);
+    }
+  });
+  list.addEventListener("toggle", (event) => {
+    if (event.newState === "open") reveal();
+  });
+  // Typing jumps to the next option whose label starts with the typed text.
+  let typed = "";
+  const typeahead = (key) => {
+    clearTimeout(typeaheadReset);
+    typeaheadReset = setTimeout(() => {
+      typed = "";
+    }, 500);
+    typed += key.toLowerCase();
+    const start = typed.length === 1 ? active + 1 : Math.max(active, 0);
+    for (let step = 0; step < options.length; step++) {
+      const index = (start + step) % options.length;
+      if (untrack(options[index].label).toLowerCase().startsWith(typed)) return index;
+    }
+    return -1;
+  };
+  trigger.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    const key = event.key;
+    const printable = key.length === 1 && key !== " " && !event.ctrlKey && !event.metaKey && !event.altKey;
+    if (!isOpen()) {
+      if (["ArrowDown", "ArrowUp", "Enter", " "].includes(key) || printable) {
+        event.preventDefault();
+        list.showPopover();
+        if (printable) {
+          const found = typeahead(key);
+          if (found >= 0) setActive(found);
+        }
+      }
+      return;
+    }
+    const last = options.length - 1;
+    const moves = { ArrowDown: Math.min(last, active + 1), ArrowUp: Math.max(0, active - 1), Home: 0, End: last };
+    if (key in moves && !(event.altKey && key === "ArrowUp")) {
+      event.preventDefault();
+      setActive(moves[key]);
+    } else if (key === "Enter" || key === " " || (event.altKey && key === "ArrowUp")) {
+      event.preventDefault();
+      choose(active);
+    } else if (key === "Escape") {
+      // Handled here, so an enclosing dialog does not also close.
+      event.preventDefault();
+      close();
+    } else if (key === "Tab") {
+      choose(active, false);
+    } else if (printable) {
+      event.preventDefault();
+      const found = typeahead(key);
+      if (found >= 0) setActive(found);
+    }
+  });
+  effect(() => {
+    const current = field.get();
+    const index = options.findIndex((option) => eq(option.value, current));
+    value.textContent = index >= 0 ? options[index].label() : "";
+    items.forEach((item, at) => item.setAttribute("aria-selected", at === index ? "true" : "false"));
+  });
+  onCleanup(close);
+  const node = el("div", { class: "bern-dropdown-wrap" }, trigger, list);
+  node.control = trigger;
+  return node;
+}
+
 export function Picker(p, ctx, { id, label, field, options, style }) {
   let node;
   const select = (name) => {
@@ -1221,20 +1374,7 @@ export function Picker(p, ctx, { id, label, field, options, style }) {
       });
     });
   } else {
-    const element = el("select", { class: "bern-select" });
-    for (const option of options) {
-      const item = el("option", { value: option.name });
-      bindText(item, option.label);
-      element.append(item);
-    }
-    effect(() => {
-      const value = field.get();
-      const option = options.find((candidate) => eq(candidate.value, value));
-      if (option) element.value = option.name;
-    });
-    element.addEventListener("change", () => select(element.value));
-    node = el("div", { class: "bern-select-wrap" }, element, icon("chevron.up.chevron.down", 12));
-    node.control = element;
+    node = dropdown(options, field, select);
   }
   mark(node.control ?? node, ctx, id);
   control(ctx, {
@@ -2121,6 +2261,89 @@ export function Video(p, ctx, { id, source, player, label, controls, fit }) {
   p.append(node);
 }
 
+/// The media progress bar, a control of its own rather than the Slider:
+/// neutral progress and a capsule knob. Pointer drags and keys update a
+/// preview; releasing the pointer or the key commits once.
+function scrubber({ label, text, step, page, preview, commit }) {
+  const fill = el("div", { class: "bern-scrubber-fill" });
+  const knob = el("div", { class: "bern-scrubber-knob" });
+  const node = el("div", { class: "bern-scrubber", role: "slider", tabindex: "0", "aria-valuemin": "0" },
+    el("div", { class: "bern-scrubber-track" }, fill), knob);
+  bindAttr(node, "aria-label", label);
+  let max = 1;
+  let value = 0;
+  let pending = null;
+  let disabled = false;
+  const clamp = (number) => Math.min(max, Math.max(0, number));
+  const render = () => {
+    const shown = pending ?? value;
+    node.style.setProperty("--bern-progress", String(max > 0 ? clamp(shown) / max : 0));
+    node.setAttribute("aria-valuemax", String(max));
+    node.setAttribute("aria-valuenow", String(Math.round(shown * 1000) / 1000));
+    node.setAttribute("aria-valuetext", text(shown));
+  };
+  const move = (next) => {
+    pending = clamp(next);
+    preview?.(pending);
+    render();
+  };
+  const finish = () => {
+    if (pending === null) return;
+    const next = pending;
+    pending = null;
+    commit(next);
+    render();
+  };
+  const at = (event) => {
+    const rect = node.getBoundingClientRect();
+    const half = knob.offsetWidth / 2;
+    return ((event.clientX - rect.left - half) / Math.max(1, rect.width - 2 * half)) * max;
+  };
+  node.addEventListener("pointerdown", (event) => {
+    if (disabled || event.button !== 0) return;
+    event.preventDefault();
+    node.focus();
+    node.setPointerCapture(event.pointerId);
+    node.classList.add("bern-scrubber-dragging");
+    move(at(event));
+  });
+  node.addEventListener("pointermove", (event) => {
+    if (node.hasPointerCapture(event.pointerId)) move(at(event));
+  });
+  const release = (event) => {
+    if (!node.hasPointerCapture(event.pointerId)) return;
+    node.releasePointerCapture(event.pointerId);
+    node.classList.remove("bern-scrubber-dragging");
+    finish();
+  };
+  node.addEventListener("pointerup", release);
+  node.addEventListener("pointercancel", release);
+  const KEYS = ["ArrowLeft", "ArrowDown", "ArrowRight", "ArrowUp", "PageDown", "PageUp", "Home", "End"];
+  node.addEventListener("keydown", (event) => {
+    if (disabled || !KEYS.includes(event.key)) return;
+    event.preventDefault();
+    const from = pending ?? value;
+    const by = { ArrowLeft: -step, ArrowDown: -step, ArrowRight: step, ArrowUp: step, PageDown: -page(max), PageUp: page(max) };
+    move(event.key === "Home" ? 0 : event.key === "End" ? max : from + by[event.key]);
+  });
+  node.addEventListener("keyup", (event) => {
+    if (KEYS.includes(event.key)) finish();
+  });
+  node.addEventListener("blur", finish);
+  return {
+    node,
+    previewing: () => pending !== null,
+    update(next) {
+      max = Math.max(next.max, 0);
+      if (pending === null) value = next.value;
+      disabled = next.disabled;
+      node.setAttribute("aria-disabled", disabled ? "true" : "false");
+      node.tabIndex = disabled ? -1 : 0;
+      render();
+    },
+  };
+}
+
 function videoControls(ctx, id, playerID, state) {
   const current = () => media.players.peek().get(playerID) ?? null;
   const playing = (s) => s && (s.phase === PHASE.Playing || s.phase === PHASE.Buffering);
@@ -2137,28 +2360,21 @@ function videoControls(ctx, id, playerID, state) {
   play.addEventListener("click", togglePlayback);
   const positionText = el("span", { class: "bern-video-time" });
   const durationText = el("span", { class: "bern-video-time" });
-  const position = el("input", { class: "bern-slider bern-video-position", type: "range", min: 0, max: 1, step: "any" });
-  let scrubbing = null;
-  position.addEventListener("input", () => {
-    scrubbing = Number(position.value);
-    positionText.textContent = time(scrubbing);
+  const position = scrubber({
+    label: () => tr("bern.media.position"), text: time, step: 5000, page: (max) => max / 10,
+    preview: (ms) => {
+      positionText.textContent = time(ms);
+    },
+    commit: seek,
   });
-  position.addEventListener("change", () => {
-    if (scrubbing !== null) seek(scrubbing);
-    scrubbing = null;
-  });
+  position.node.classList.add("bern-video-position");
   const mute = el("button", { class: "bern-icon-button", type: "button" });
   mute.addEventListener("click", () => setMuted(!(current()?.muted ?? false)));
-  const volume = el("input", { class: "bern-slider bern-video-volume", type: "range", min: 0, max: 1, step: "any" });
-  let volumePreview = null;
-  volume.addEventListener("input", () => {
-    volumePreview = Number(volume.value);
+  const volume = scrubber({
+    label: () => tr("bern.media.volume"), text: (level) => `${Math.round(level * 100)}%`, step: 0.05,
+    page: () => 0.1, commit: setVolume,
   });
-  volume.addEventListener("change", () => {
-    if (volumePreview !== null) setVolume(volumePreview);
-    volumePreview = null;
-  });
-  const fill = (input, ratio) => input.style.setProperty("--bern-fill", `${Math.min(1, Math.max(0, ratio)) * 100}%`);
+  volume.node.classList.add("bern-video-volume");
   effect(() => {
     const s = state();
     const isPlaying = playing(s);
@@ -2169,13 +2385,8 @@ function videoControls(ctx, id, playerID, state) {
     play.disabled = !playable(s);
     const duration = s?.durationMs === null || !s ? 0 : Number(s.durationMs);
     const at = s ? Number(s.positionMs) : 0;
-    position.max = Math.max(duration, 1);
-    position.disabled = !seekable(s);
-    if (scrubbing === null) {
-      position.value = Math.min(at, duration);
-      positionText.textContent = time(at);
-    }
-    fill(position, duration > 0 ? (scrubbing ?? at) / duration : 0);
+    position.update({ value: Math.min(at, duration), max: duration, disabled: !seekable(s) });
+    if (!position.previewing()) positionText.textContent = time(at);
     durationText.textContent = s?.durationMs != null ? time(s.durationMs) : playable(s) ? tr("bern.media.live") : "--:--";
     const muted = s?.muted ?? false;
     const muteLabel = tr(muted ? "bern.media.unmute" : "bern.media.mute");
@@ -2183,12 +2394,8 @@ function videoControls(ctx, id, playerID, state) {
     mute.setAttribute("aria-label", muteLabel);
     mute.title = muteLabel;
     mute.disabled = !controllable(s);
-    volume.disabled = !controllable(s);
-    if (volumePreview === null) volume.value = s?.volume ?? 1;
-    fill(volume, volumePreview ?? s?.volume ?? 1);
+    volume.update({ value: s?.volume ?? 1, max: 1, disabled: !controllable(s) });
   });
-  bindAttr(position, "aria-label", () => tr("bern.media.position"));
-  bindAttr(volume, "aria-label", () => tr("bern.media.volume"));
   const register = (name, entry) => control(ctx, { ...entry, target: () => `${target(ctx, id)}.${name}` });
   register("play_pause", {
     role: "button", label: () => tr(playing(state()) ? "bern.media.pause" : "bern.media.play"),
@@ -2209,7 +2416,7 @@ function videoControls(ctx, id, playerID, state) {
     role: "slider", label: () => tr("bern.media.volume"), enabled: () => controllable(state()),
     actions: { setNumber: setVolume, value: () => num(current()?.volume ?? 1) },
   });
-  return el("div", { class: "bern-video-controls" }, play, positionText, position, durationText, mute, volume);
+  return el("div", { class: "bern-video-controls" }, play, positionText, position.node, durationText, mute, volume.node);
 }
 
 // MARK: - Windows

@@ -117,6 +117,23 @@ fn selection_is_a_light_tint_with_an_indicator() {
 }
 
 #[test]
+fn media_progress_is_neutral_and_stands_out_from_its_track() {
+    let magenta = Srgb::new(0xff, 0x00, 0xff);
+    for mode in MODES {
+        let snapshot = generate(Some(magenta), mode, ContrastPolicy::Standard);
+        let played = snapshot.token("media.played").unwrap();
+        let track = snapshot.token("media.track").unwrap();
+        // Never the brand: a vivid seed leaves the played part grey.
+        assert!(played.oklch().c < 0.03, "{mode:?}: {played}");
+        assert!(contrast(played, track) >= 3.0, "{mode:?}");
+        assert!(
+            contrast(played, snapshot.token("surface.panel").unwrap()) >= 3.0,
+            "{mode:?}"
+        );
+    }
+}
+
+#[test]
 fn brand_roles_keep_the_seed_hue_and_status_ignores_it() {
     let orange = Srgb::new(0xe4, 0x57, 0x2e);
     for seed in [DEFAULT_SEED, orange] {
