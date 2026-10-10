@@ -694,6 +694,17 @@ impl<'a> Gen<'a> {
                         "expected an application player such as `players.preview`",
                     ),
                 },
+                PropKind::Feature => match &prop.value {
+                    Expr::Variant(variant) if variant.fields.is_empty() && !variant.has_braces => {
+                        let ty = &variant.ty;
+                        let feature = &variant.variant;
+                        pre.push(quote_spanned!(feature.span()=> ::bern::__private::feature(&#ty::#feature);));
+                    }
+                    other => self.error(
+                        other.span(),
+                        "expected a feature of the component's contract, e.g. `MediaFeature::Clip`",
+                    ),
+                },
                 PropKind::SelectionField
                 | PropKind::PathField
                 | PropKind::Items
@@ -711,11 +722,24 @@ impl<'a> Gen<'a> {
             self.window_set(element);
         }
 
-        let children = element
-            .children
-            .as_ref()
-            .map(|children| self.nodes(children, &child_ctx))
-            .unwrap_or_default();
+        let children = match (&element.children, name.as_str()) {
+            // The layouts of one `Adaptive` are alternatives: the same
+            // control id in two of them names the same control.
+            (Some(children), "Adaptive") => {
+                let before = self.ids.clone();
+                let mut all = before.clone();
+                let mut tokens = TokenStream::new();
+                for child in children {
+                    self.ids = before.clone();
+                    tokens.extend(self.node(child, &child_ctx));
+                    all.extend(self.ids.drain());
+                }
+                self.ids = all;
+                tokens
+            }
+            (Some(children), _) => self.nodes(children, &child_ctx),
+            (None, _) => TokenStream::new(),
+        };
         for _ in 0..pushed {
             self.scope.pop();
         }
@@ -795,13 +819,14 @@ impl<'a> Gen<'a> {
     }
 }
 
-pub fn expand(tokens: TokenStream) -> syn::Result<TokenStream> {
+pub fn expand(args: TokenStream, tokens: TokenStream) -> syn::Result<TokenStream> {
     let func: syn::ItemFn = syn::parse2(tokens)?;
     let mut stripped = func.clone();
     stripped
         .attrs
         .retain(|attr| !is_bern_attr(attr, "component"));
-    let component = parse_component(stripped.clone())?;
+    let features = bern_syntax::parse_component_args(args)?;
+    let component = bern_syntax::parse_component_with(stripped.clone(), features)?;
     let languages =
         crate::config::languages().map_err(|message| syn::Error::new(component.span, message))?;
     let strict = languages.as_ref().is_none_or(|languages| languages.strict);
@@ -862,6 +887,10 @@ pub fn expand(tokens: TokenStream) -> syn::Result<TokenStream> {
     };
     let track = track(languages.as_ref());
     let props_doc = format!("Properties of the `{name}` component.");
+    let contract = component
+        .features
+        .as_ref()
+        .map(|path| quote!(::bern::__private::features::<#path>();));
     Ok(quote! {
         #errors
 
@@ -886,6 +915,7 @@ pub fn expand(tokens: TokenStream) -> syn::Result<TokenStream> {
                 #checks
             }
             #(let _ = &#all_names;)*
+            #contract
             ::bern::__private::Declared
         }
 

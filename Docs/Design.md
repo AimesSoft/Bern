@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.13
+- 版本：v0.14
 - 状态：架构设计草案
 - 更新日期：2026-10-10
 - 项目名称：Bern UI
@@ -9,7 +9,7 @@
 - 首个目标平台：macOS（SwiftUI）
 - 主要验证应用：NipaPlay 3.0
 
-当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md) 与 [Web 实现记录](Implementation/Web.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；其余能力仍为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md) 与 [Web 实现记录](Implementation/Web.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
@@ -354,7 +354,10 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Picker | 从有限选项中单选，按场景呈现为菜单或分段控件 | 初期 |
 | ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复 | 初期，虚拟化后续 |
 | Image | 图片资源、尺寸及替代文本 | 后续 |
-| Menu 和 Dialog | 操作入口、焦点及关闭行为 | 功能契约验证阶段 |
+| Menu 和 MenuItem | 收纳操作入口的菜单；每个菜单项绑定命令，可绑定功能 | 阶段四 |
+| Adaptive 和 Layout | 按可用宽度在 `compact` 与 `expanded` 布局之间选择，保留状态 | 阶段四 |
+| LanguagePicker | 运行时切换界面语言 | 阶段四 |
+| Dialog | 应用内对话框、焦点及关闭行为 | 后续（窗口的对话框呈现见“声明式多窗口”） |
 | Video | 媒体源、受管理播放器、播放命令、状态与标准控件 | 早期验证 macOS 原生媒体适配及 Web video 映射 |
 
 组件规范必须写清默认行为，避免由首个后端反向定义标准：
@@ -559,7 +562,25 @@ Missing language: ja
 Required languages: zh-Hans, en, ja
 ```
 
-语言切换必须通知依赖文本重新计算。首次版本支持基础插值；复数、日期、数字、货币和 RTL 需要明确的格式化及布局规则，后续独立扩展。英文复数不能通过简单插值自动保证语法正确，翻译语义质量也不属于完整性检查的保证。
+诊断各有编号，负面用例能互相区分：
+
+| 编号 | 问题 |
+| --- | --- |
+| B101 | 语言标签重复，或不在 `[languages].supported` 中（拼写错误） |
+| B102 | 缺少必需语言的翻译 |
+| B103 | 展示属性直接写字面量，绕过本地化声明 |
+| B104 | 插值不合法：占位符没有对应参数、参数未被任何翻译使用、各语言的占位符集合不一致，或占位符写法错误 |
+
+首次版本支持基础插值；复数、日期、数字、货币和 RTL 需要明确的格式化及布局规则，后续独立扩展。英文复数不能通过简单插值自动保证语法正确，翻译语义质量也不属于完整性检查的保证。
+
+### 运行时切换语言
+
+显示语言属于 UI 会话：macOS 应用的界面是一个会话，每个 Web 页面各是一个会话。会话启动时按系统或浏览器的语言偏好在支持列表中选出语言，之后可以在运行中切换：
+
+- `LanguagePicker(id: …, label: …)` 组件列出支持的语言，每项用该语言自己的名称显示（如“简体中文”“English”“日本語”），选择即切换。
+- 会话命令 `ui.set_language`（参数为语言标签）供 CLI、JSON 与 MCP 使用，与组件走同一条切换路径；`ui.language` 返回当前语言。不在支持列表中的标签返回 `unsupported_language`。
+
+切换时所有本地化文本（含窗口标题、标签、提示与框架自身文案）在同一次更新中重新计算。引擎状态、会话草稿、导航路径、打开的窗口与播放器都不受影响，不重建窗口。平台托管的系统文案（例如 macOS 菜单栏中由系统提供的项目）随系统语言，不在切换范围内，须在后端文档中说明。
 
 ### 平台资源生成
 
@@ -577,6 +598,25 @@ Required languages: zh-Hans, en, ja
 
 切换布局保留应用状态。局部编辑内容、焦点、滚动位置等是否跨分支保留，必须通过稳定身份及迁移规则定义；不按组件在树中的位置自动推断为同一实例。
 
+首版的声明方式：
+
+```toml
+[layouts]
+compact_below = 600   # 逻辑单位：Adaptive 所在位置的可用宽度
+```
+
+```rust
+Adaptive(id: clip_choice) {
+    Layout(size: expanded) { /* 宽布局 */ }
+    Layout(size: compact) { /* 窄布局 */ }
+}
+```
+
+- 选择依据是 `Adaptive` 所在位置的可用宽度：小于 `compact_below` 为 `compact`，否则为 `expanded`。任何宽度都恰好落入一个尺寸，规则确定、可测试。输入方式与 TV 尺寸后续扩展，首版不声称检查了它们。
+- `Adaptive` 只能包含 `Layout`，并且必须为每个尺寸各提供一个；缺少或重复报 B401。使用 `Adaptive` 而没有配置 `[layouts]` 报 B402。
+- 状态保留规则：引擎状态与会话草稿不在视图树中，切换布局不受影响；控件身份是“组件 + 控件 `id`”，两个布局中 `id` 相同的控件是同一控件，切换后焦点迁移到它（目标支持焦点迁移时）；滚动位置与未提交的局部编辑首版不迁移。
+- 带 `id` 的 `Adaptive` 出现在 `ui.inspect` 中，值为当前尺寸，外部入口可以确认布局切换。
+
 ### Feature 与 Command
 
 Feature 表示用户能完成的一项功能，Command 表示执行某个引擎或会话动作的请求。Feature 可以由一个命令实现，也可以由多个交互步骤组成。
@@ -592,7 +632,45 @@ Feature Contract 必须显式声明功能标识、适用范围和实现绑定。
 | subtitle | 选择字幕轨道 | 字幕菜单 | 更多菜单中的字幕项 |
 | fullscreen | 切换全屏 | 工具栏按钮 | 更多菜单中的全屏项 |
 
-Feature 的具体宏语法待定，但引用必须类型化。契约到命令、入口到 Feature 的绑定都需要显式表达，不能根据按钮文案或命令名称猜测。
+契约到命令、入口到 Feature 的绑定都需要显式表达，不能根据按钮文案或命令名称猜测。首版语法：
+
+```rust
+/// 媒体页能完成的功能。
+#[bern::features]
+pub enum MediaFeature {
+    /// 选择要播放的片段。
+    #[commands(feature)]
+    Clip,
+    /// 切换全屏。
+    #[commands(toggle_fullscreen)]
+    #[layouts(expanded)]
+    #[exempt(browser, "浏览器全屏需要用户手势，无法由命令触发")]
+    Fullscreen,
+}
+
+#[component(features = MediaFeature)]
+pub fn media_page(app: showcase::Client) -> impl View {
+    ui! {
+        Adaptive(id: clip_choice) {
+            Layout(size: expanded) {
+                Row { Button(id: bars, label: …, feature: MediaFeature::Clip) => app.feature(Clip::Bars) }
+            }
+            Layout(size: compact) {
+                Menu(id: clip_menu, label: …) {
+                    MenuItem(id: bars, label: …, feature: MediaFeature::Clip) => app.feature(Clip::Bars)
+                }
+            }
+        }
+    }
+}
+```
+
+- `#[bern::features]` 声明一个契约的功能集合，变体即功能标识，引用经 `rustc` 类型检查。
+- `#[commands(…)]` 列出实现该功能的命令：协议中的命令名，或 `media.<操作>` 标准媒体命令。绑定到该功能的入口只能运行这些命令。
+- `#[layouts(…)]` 限定功能适用的尺寸，省略时适用于所有尺寸。
+- `#[guaranteed("理由")]` 对无法静态证明的条件入口给出人工保证；`#[exempt(平台, "理由")]` 声明能力豁免，平台名与 `[targets.*].platform` 一致（如 `macos`、`browser`）。
+- `#[component(features = X)]` 把组件确立为契约范围；范围内运行业务命令的入口用 `feature: X::变体` 绑定功能。可以带 `feature` 的元素是有业务动作的 Button、IconButton、MenuItem、TextInput、Search 与 Slider。
+- 不同入口形式由组件表达：同一功能在宽布局可以是按钮，在窄布局可以是 `Menu` 中的 `MenuItem`。
 
 ### 覆盖检查规则
 
@@ -617,6 +695,25 @@ compact: missing
 ```
 
 静态检查证明的是：在已声明的结构、适用条件和能力范围内，存在关联到功能的入口。它不能证明入口没有被遮挡、焦点可到达、权限总是满足或操作必然成功。这些行为仍需 UI 测试和应用级测试验证。
+
+首版的检查规则：
+
+- **范围**：从契约组件出发，递归进入它渲染的子组件、`Menu`、`Tabs` 的各页、`Navigation` 的目标页与 `Adaptive` 的各布局。子组件若有自己的契约，属于该契约的入口由子契约检查。
+- **尺寸**：`Adaptive` 的某个 `Layout` 中的入口只覆盖该尺寸；不在任何 `Adaptive` 中的入口覆盖所有尺寸。
+- **条件**：位于 `if`、`if let`、`match` 分支中的入口是条件入口。框架能证明的只有一种情形：同一功能在该条件的每个分支中都有入口（`if` 带 `else`、`if let` 带 `else`、`match` 覆盖全部变体），此时视为无条件覆盖。
+- **业务入口**：契约范围内运行引擎命令或标准媒体命令的入口都必须绑定功能。窗口、导航、会话草稿等会话操作不需要功能，但仍须绑定会话命令。
+
+每个功能在每个适用尺寸上得到一个结果。`bern check` 与 `bern build` 为每个目标输出完整报告，构建还把它写入产物目录的 `features.json`：
+
+| 结果 | 含义 | 诊断 |
+| --- | --- | --- |
+| 已覆盖 | 存在无条件入口 | — |
+| 人工保证 | 只有条件入口，功能声明了 `#[guaranteed]`；报告中单列为未证明 | 警告 B206 |
+| 豁免 | 没有入口，当前目标平台在 `#[exempt]` 中 | 提示 B205 |
+| 缺失 | 没有入口且未豁免 | 错误 B201 |
+| 未证明 | 只有条件入口且没有人工保证 | 错误 B203 |
+
+此外，契约范围内未绑定功能的业务入口报 B202；入口运行的命令不在其功能的 `#[commands]` 中报 B204；`feature:` 引用不属于所在契约，或出现在任何契约范围之外，也报 B204。
 
 ## 强制命令化与多入口引擎
 
@@ -1394,6 +1491,13 @@ Web 实现前先单独定义 Web 视觉规范，并完成 Bern 主题内核：�
 
 通过负面用例验证：缺少语言、非法插值、漏掉必需 Feature、未登记业务入口、无法证明的条件入口与能力豁免能被区分。测试运行时切换语言和布局，不丢失应共享的业务状态。
 
+验收内容：
+
+- 编译器对 B101–B104、B201–B206、B401–B402 各有负面用例，诊断编号与位置互不混淆；豁免与人工保证在报告中与“已覆盖”分开。
+- 示例应用声明一个功能契约，同一功能在宽布局为按钮、在窄布局为菜单项，`bern check` 输出完整的覆盖报告。
+- macOS 与 Web 都实现 `Adaptive`、`Menu`、`MenuItem` 与 `LanguagePicker`；改变窗口宽度时布局切换，外部入口可以看到当前尺寸，会话草稿与引擎状态不变，同 `id` 的控件在两种布局中保持同一目标。
+- 运行中经 `LanguagePicker` 与 `ui.set_language` 切换语言，界面文本全部更新，草稿、导航与窗口保持不变。
+
 ### 阶段五 扩展性与其他原生前端验证
 
 在扩展大量组件之前，分批完成 `gtk + linux` 和 `winui3 + windows` 两个默认桌面组合的最小示例，并用显式选择的 `flutter + macos` 验证后端可替换性。它们使用同一业务核心、应用协议和公共 IR，验证目标扩展不依赖重写解析器，也不要求把业务改写为 UI 宿主语言。
@@ -1485,3 +1589,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.11 | 首个正式后端改为 macOS SwiftUI，Web 顺延为第二个；主题改为原生优先、算法兜底；macOS 使用标准组件与系统样式、不单独调用新系统视觉接口，最低 macOS 14，引擎默认同进程运行；扩充初期组件并重排实施阶段 |
 | v0.12 | 增加随包资源：`Bern.toml` 的受限声明与严格构建校验、IR 资源清单、目标复制，以及引擎经宿主装配的 `Resources` 按名称解析 |
 | v0.13 | 虚拟呈现遵循宿主的设计习惯：网页中主窗口即页面，次级窗口为对话框或侧边面板，浮动窗口改为显式选择的 `presentation: floating`；不提供的窗口动作如实报告为不可用；Web 视觉规范定为 Bern 自有的中性网页风格 |
+| v0.14 | 确定阶段四的声明方式：`[layouts]` 断点与 `Adaptive`/`Layout`、`Menu`/`MenuItem`、`#[bern::features]` 功能契约与覆盖检查（B201–B206）、本地化诊断编号（B101–B104）、按 UI 会话的运行时语言切换（`LanguagePicker` 与 `ui.set_language`） |

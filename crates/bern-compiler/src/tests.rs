@@ -101,6 +101,15 @@ fn compile_ui(ui: &str) -> Result<Compiled, Vec<Diagnostic>> {
 }
 
 fn compile_project(protocol: &str, ui: &str) -> Result<Compiled, Vec<Diagnostic>> {
+    compile_project_with(protocol, ui, "")
+}
+
+/// Like `compile_project`, with extra `Bern.toml` tables.
+fn compile_project_with(
+    protocol: &str,
+    ui: &str,
+    manifest: &str,
+) -> Result<Compiled, Vec<Diagnostic>> {
     let dir = std::env::temp_dir().join(format!(
         "bern-compiler-test-{}-{}",
         std::process::id(),
@@ -148,7 +157,9 @@ root = "app"
 
 [targets.macos]
 platform = "macos"
-"#,
+"#
+        .to_string()
+            + manifest,
     )
     .unwrap();
     let config = config::load(&dir.join("Bern.toml"))?;
@@ -269,11 +280,23 @@ fn diagnostics_cover_the_documented_failures() {
         ),
         (
             r#"Text(content: tr! { "en" => "{a}", "ja" => "{b}"; a: app.count })"#,
-            "same placeholders",
+            "error[B104]: every translation must use the same placeholders",
+        ),
+        (
+            r#"Text(content: tr! { "en" => "{n}", "ja" => "{n}" })"#,
+            "error[B104]: placeholder `{n}` has no argument",
+        ),
+        (
+            r#"Text(content: tr! { "en" => "Hi", "ja" => "やあ"; n: app.count })"#,
+            "error[B104]: argument `n` is not used",
         ),
         (
             r#"Text(content: tr! { "en" => "Hi", "ja" => "やあ", "fr" => "Salut" })"#,
-            "language tag `fr` is not in [languages].supported",
+            "error[B101]: language tag `fr` is not in [languages].supported",
+        ),
+        (
+            r#"Text(content: tr! { "en" => "Hi", "en" => "Hey", "ja" => "やあ" })"#,
+            "error[B101]: language `en` is translated twice",
         ),
         (r#"page(app: app, windows: windows)"#, "recursively"),
         (r#"missing_page()"#, "unknown component `missing_page`"),
@@ -851,6 +874,257 @@ fn query_diagnostics() {
         assert!(
             output.contains(expected),
             "`{body}` should report `{expected}`, got:\n{output}"
+        );
+    }
+}
+
+/// Phase four: adaptive layouts and feature contracts.
+mod contracts {
+    use super::*;
+
+    const PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "demo", version = 1)]
+pub mod demo {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self, amount: i64) -> Result<(), CommandError>;
+        fn reset(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+    const LAYOUTS: &str = "\n[layouts]\ncompact_below = 600\n";
+
+    const ADD: &str = r#"Button(id: add, label: tr! { "en" => "Add", "ja" => "追加" }, feature: PageFeature::Add) => app.add(1)"#;
+
+    fn project(features: &str, body: &str) -> String {
+        format!(
+            r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {{
+    pub on: bool,
+}}
+
+#[bern::features]
+pub enum PageFeature {{
+    /// Add one.
+    #[commands(add)]
+    {features}
+    Add,
+}}
+
+#[component]
+pub fn app(app: demo::Client, windows: AppWindows) -> impl View {{
+    ui! {{
+        WindowSet(handle: AppWindows, primary: main) {{
+            Window(id: main, title: tr! {{ "en" => "Main", "ja" => "メイン" }}, initial: open) {{
+                Column {{
+                    page(app: app)
+                    other(app: app)
+                }}
+            }}
+        }}
+    }}
+}}
+
+#[component(features = PageFeature)]
+pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {{
+    ui! {{
+        {body}
+    }}
+}}
+
+#[component]
+pub fn other(app: demo::Client) -> impl View {{
+    ui! {{ Spacer }}
+}}
+"#
+        )
+    }
+
+    fn compiled(features: &str, body: &str) -> Compiled {
+        compile_project_with(PROTOCOL, &project(features, body), LAYOUTS).unwrap_or_else(|errors| {
+            panic!(
+                "{}",
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        })
+    }
+
+    fn failure(features: &str, body: &str, manifest: &str) -> String {
+        match compile_project_with(PROTOCOL, &project(features, body), manifest) {
+            Ok(_) => panic!("expected `{body}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    /// The report on `platform`, as text.
+    fn report(compiled: &Compiled, platform: &str) -> String {
+        bern_target_api::feature_report(&compiled.app, platform)
+            .diagnostics
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn layouts(compact: &str, expanded: &str) -> String {
+        format!(
+            "Adaptive(id: choice) {{ Layout(size: expanded) {{ {expanded} }} Layout(size: compact) {{ {compact} }} }}"
+        )
+    }
+
+    #[test]
+    fn a_feature_reached_in_every_size_is_covered() {
+        let menu = format!(
+            r#"Menu(id: more, label: tr! {{ "en" => "More", "ja" => "その他" }}) {{ {} }}"#,
+            ADD.replace("Button", "MenuItem")
+        );
+        let compiled = compiled("", &layouts(&menu, ADD));
+        let contract = &compiled.app.contracts[0];
+        assert_eq!(contract.component, "page");
+        let feature = &contract.features[0];
+        assert_eq!(feature.commands, ["demo.add"]);
+        for size in &feature.coverage {
+            assert_eq!(
+                size.coverage,
+                ir::Coverage::Covered {
+                    entries: vec!["page.add".into()]
+                },
+                "{size:?}"
+            );
+        }
+        assert!(report(&compiled, "macos").is_empty());
+    }
+
+    #[test]
+    fn a_feature_missing_in_one_size_is_b201() {
+        let compiled = compiled("", &layouts("Spacer", ADD));
+        let output = report(&compiled, "macos");
+        assert!(
+            output.contains("error[B201]: Feature missing in adaptive layout\nContract: PageFeature\nFeature: Add\ncompact: missing"),
+            "{output}"
+        );
+        assert!(!output.contains("expanded: missing"), "{output}");
+    }
+
+    #[test]
+    fn a_business_entry_without_a_feature_is_b202() {
+        let body = format!(
+            r#"Column {{ {ADD} Button(id: reset, label: tr! {{ "en" => "Reset", "ja" => "リセット" }}) => app.reset() }}"#
+        );
+        let output = failure("", &body, LAYOUTS);
+        assert!(output.contains("error[B202]"), "{output}");
+        assert!(
+            output.contains("`page.reset` runs `demo.reset`"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn a_conditional_entry_is_unproven_b203_or_guaranteed_b206() {
+        let body = format!("if draft.on {{ {ADD} }}");
+        let output = report(&compiled("", &body), "macos");
+        assert!(output.contains("error[B203]"), "{output}");
+        let output = report(
+            &compiled(r#"#[guaranteed("shown whenever the draft is on")]"#, &body),
+            "macos",
+        );
+        assert!(output.contains("warning[B206]"), "{output}");
+        assert!(!output.contains("error"), "{output}");
+    }
+
+    #[test]
+    fn every_branch_reaching_a_feature_is_proven() {
+        let body = format!(
+            "if draft.on {{ {ADD} }} else {{ {} }}",
+            ADD.replace("id: add", "id: add_too")
+        );
+        let compiled = compiled("", &body);
+        assert!(report(&compiled, "macos").is_empty());
+        assert!(matches!(
+            compiled.app.contracts[0].features[0].coverage[0].coverage,
+            ir::Coverage::Covered { .. }
+        ));
+    }
+
+    #[test]
+    fn wrong_commands_and_stray_features_are_b204() {
+        let body = r#"Button(id: reset, label: tr! { "en" => "Reset", "ja" => "リセット" }, feature: PageFeature::Add) => app.reset()"#;
+        let output = failure("", body, LAYOUTS);
+        assert!(output.contains("error[B204]"), "{output}");
+        assert!(
+            output.contains("the feature is implemented by demo.add"),
+            "{output}"
+        );
+        let stray = project("", ADD).replace(
+            "ui! { Spacer }",
+            r#"ui! { Button(id: x, label: tr! { "en" => "X", "ja" => "X" }, feature: PageFeature::Add) => app.add(1) }"#,
+        );
+        let output = match compile_project_with(PROTOCOL, &stray, LAYOUTS) {
+            Ok(_) => panic!("a feature outside its scope must fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(output.contains("error[B204]"), "{output}");
+        assert!(
+            output.contains("outside the scope of contract `PageFeature`"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn an_exemption_applies_to_its_platform_only_b205() {
+        let compiled = compiled(
+            r#"#[exempt(macos, "no such control on this platform")]"#,
+            "Spacer",
+        );
+        let output = report(&compiled, "macos");
+        assert!(output.contains("note[B205]"), "{output}");
+        assert!(!output.contains("error"), "{output}");
+        assert!(report(&compiled, "browser").contains("error[B201]"));
+    }
+
+    #[test]
+    fn adaptive_needs_every_size_b401_and_breakpoints_b402() {
+        let only_expanded = format!("Adaptive {{ Layout(size: expanded) {{ {ADD} }} }}");
+        let output = failure("", &only_expanded, LAYOUTS);
+        assert!(
+            output.contains("error[B401]: `Adaptive` needs exactly one `Layout(size: compact)`"),
+            "{output}"
+        );
+        let output = failure("", &layouts(ADD, ADD), "");
+        assert!(output.contains("error[B402]"), "{output}");
+    }
+
+    #[test]
+    fn the_same_control_id_names_one_control_across_layouts() {
+        // Duplicates within one layout are still errors.
+        let twice = layouts(&format!("Column {{ {ADD} {ADD} }}"), ADD);
+        let output = failure("", &twice, LAYOUTS);
+        assert!(
+            output.contains("control id `add` is used twice"),
+            "{output}"
         );
     }
 }

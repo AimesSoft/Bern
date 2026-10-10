@@ -1,11 +1,11 @@
 # macOS SwiftUI 实现记录
 
 - 日期：2026-10-10
-- 依据：[Bern 架构设计 v0.12](../Design.md)、[Apple 平台适配](../Adaptation/Apple.md)
+- 依据：[Bern 架构设计 v0.14](../Design.md)、[Apple 平台适配](../Adaptation/Apple.md)
 - 工具链：Rust 1.99.0（Edition 2024）；Swift 6.3.2，以 Swift 6 语言模式编译；Xcode 26.5（SDK 26.5）
 - 部署：最低 macOS 14，构建本机架构，本地临时签名
 
-本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
+本文记录阶段一（编译边界验证）、阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）与阶段四（本地化与功能契约）在 macOS 上的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
 
 ## 完成情况
 
@@ -33,9 +33,9 @@
 | 引擎与会话运行时在应用进程内运行 | 完成 | Rust 静态库链接进应用 |
 | 显式装配本地 IPC 通道，提供 CLI、JSON、MCP，连接同一引擎 | 完成 | `channels = ["ipc"]`；生成 `bin/showcase` 与 `bin/showcase-mcp` |
 | 未装配外部入口时无辅助进程、无监听；本地调用不经过 JSON | 完成 | 桥接使用类型化二进制值；`ipc = false` 由单元测试覆盖；装配 IPC 时实测无子进程、无 TCP 端口 |
-| 只用标准 SwiftUI 组件与系统样式，无按版本分支的代码 | 完成 | 生成测试检查不含 `Color(`、`.background(`、`glassEffect`、`#available` |
+| 只用标准 SwiftUI 组件与系统样式，无按版本分支的代码 | 完成 | 生成测试检查生成的视图代码不含 `Color(`、`.background(`、`glassEffect`、`#available`；唯一的例外是运行时模板中视频控制条的媒体进度条，按项目决定在 macOS 26 以下绘制回退（见 [Apple 适配](../Adaptation/Apple.md) 第 8 节） |
 | 浅色与深色截图，与系统自带应用对照 | 部分 | 浅色、深色、英文截图已检查；与“系统设置”的并排对照未做（见验证记录） |
-| 切换应用语言后文本更新；严格模式负面用例编译失败 | 完成 | 通过系统按应用指定语言验证；应用内实时切换未实现 |
+| 切换应用语言后文本更新；严格模式负面用例编译失败 | 完成 | 通过系统按应用指定语言验证；应用内实时切换在阶段四实现 |
 | 版本不兼容、外部入口断开、结果未知 | 部分 | 协议版本、目录指纹、前端与引擎指纹不匹配均明确失败；会话请求超时返回 `ui_timeout`（结果未知），不重放 |
 | 状态变化只更新相关展示，批次内一致 | 完成 | 引擎按修订号发布字段差异；Swift 侧为按字段观察的 `@Observable` |
 | 滑块产生带参数命令 | 完成 | 拖动只改会话预览，松开提交 `showcase.set_volume(value)` |
@@ -54,6 +54,16 @@
 | 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放 |
 | 最小化后恢复 | 完成 | `window.minimize`、`window.restore`、`window.maximize`、`window.move`、`window.resize` 与查询 `window.list`；系统完成的最小化、缩放、移动与聚焦以带来源和代次的事实同步，不派发命令（见“窗口呈现”）；最小化不释放草稿、导航与查询订阅 |
 | macOS Video 验证 | 完成 | 见“Video”；用受控测试媒体实测 AVFoundation 播放 |
+
+### 阶段四 本地化与功能契约
+
+| 设计要求 | 状态 | 说明 |
+| --- | --- | --- |
+| `compact` 与 `expanded` 布局 | 完成 | `[layouts] compact_below`；`Adaptive` 生成 `BernAdaptive`，用 `onGeometryChange` 量自身可用宽度并选择布局 |
+| 按钮、菜单等不同入口形式 | 完成 | `Menu` / `MenuItem` 生成系统 `Menu`；菜单项的控件登记挂在菜单按钮上，菜单未打开时外部入口也能执行 |
+| 功能契约与覆盖检查 | 完成 | 与目标无关，见 [设计文档](../Design.md)“覆盖检查规则”；`bern check` 输出每个功能在每个尺寸上的结果 |
+| 负面用例互相区分 | 完成 | 编译器测试分别覆盖 B101–B104、B201–B206、B401–B402 |
+| 运行时切换语言与布局，不丢失应共享的状态 | 完成 | 见“验证记录”；语言经 `LanguagePicker` 与 `ui.set_language` 切换 |
 
 ## 工程结构
 
@@ -232,7 +242,7 @@ let seed = resources.path("data/seed.json")?;                       // 包内文
 
 ### 组件规格
 
-规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`。IR 因加入查询绑定升为版本 2，加入随包资源清单后为版本 3。可操作控件必须有 `id`。
+规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`；阶段四加入 `Adaptive`、`Layout`、`Menu`、`MenuItem` 与 `LanguagePicker`。IR 因加入查询绑定升为版本 2，加入随包资源清单后为版本 3，浮动窗口呈现为版本 4，布局断点与功能契约为版本 5。可操作控件必须有 `id`；同一 `Adaptive` 的不同布局中 `id` 相同的控件是同一控件。
 
 默认行为：`Column` 前缘对齐；`Row` 垂直居中；未写 `style` 时使用平台默认样式。`Search` 在 SwiftUI 目标中只能放在 `Sidebar` 内；`Picker` 的枚举不能携带数据。
 
@@ -351,6 +361,9 @@ target/bern/macos/bin/showcase window confirm-close --window settings#1 --confir
 
 ## 本地化、主题与视觉规则
 
+- 运行时语言：`BernLanguage`（`@Observable`）持有当前语言与对应的 `.lproj` 资源包，`BernText.string` 都经它查找，因此切换语言后读取文本的视图在同一次更新中重新计算。支持的语言取自应用包的本地化列表，启动时取系统为本应用选择的首选语言。`ui.language` 返回当前语言，`ui.set_language` 切换，不支持的标签返回 `unsupported_language`。系统托管的文案（菜单栏中由系统提供的项目等）仍随系统语言。
+- `LanguagePicker` 生成系统 `Picker`，选项用 `Locale` 给出的语言自称。
+
 - 资源键可追溯到源码：元素文案为 `组件.节点路径.属性`，枚举标签为 `枚举.变体`，应用名为 `app.name`。生成各语言的 `Localizable.strings` 与 `InfoPlist.strings`；`{name}` 按参数顺序转为 `%1$@`。Info.plist 声明 `CFBundleDevelopmentRegion` 与 `CFBundleLocalizations`。
 - 框架自身文案（失败提示、视频控制条、关闭确认按钮等）内置 zh-Hans、zh-Hant、en、ja；应用要求其他语言时构建失败。
 - 颜色全部来自系统：生成代码不设置颜色、背景或材质。未声明品牌色时使用用户的系统强调色。
@@ -449,9 +462,16 @@ open target/bern/macos/Showcase.app
 - 与“系统设置”并排对照需要屏幕访问，本次没有获得授权，未进行。
 - 输入法组合、键盘遍历、VoiceOver 未实测；macOS 14 与 Intel 真机未测试。
 
+2026-10-10，阶段四，本机 macOS 27.0.1：
+
+- `bern check` 输出 `MediaFeature::Clip` 在 `compact` 与 `expanded` 都由 `media_page.pattern`、`media_page.bars`、`media_page.damaged` 覆盖。
+- 宽 920 pt 时 `ui.inspect` 中 `media_page.clip_choice` 为 `expanded`，三个片段按钮挂载；`window.resize` 到 720 pt 后为 `compact`，挂载“换片”菜单（`media_page.clip_menu`），三个菜单项仍是 `media_page.pattern`、`bars`、`damaged`。菜单未打开时 `ui.activate --target media_page.bars` 让引擎的 `featured` 变为 `Bars`。
+- 设置窗口的显示名称草稿写入“Ada”后执行 `ui.set_language --language en`：侧边栏、页面标题、菜单、设置页签与表单全部变为英文（截图），`ui.language` 返回 `en`，草稿仍是“Ada”，两个窗口都保持打开；`--language fr` 返回 `unsupported_language`。
+- 新增测试：编译器 9 项（覆盖、B201、B202、B203 与 B206、条件分支全覆盖、B204、B205 只对所列平台、B401 与 B402、同 `id` 跨布局），`rustc` 侧 2 项（声明能编译、未知功能报错）；生成的 Swift 在 Swift 6 模式下类型检查通过。
+
 ## 未完成与已知限制
 
-- 多实例窗口、最小化与恢复命令、虚拟窗口、自适应布局（`Adaptive`）、焦点管理、菜单命令生成、应用内实时切换语言均未实现。
+- 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）、菜单栏命令生成均未实现。
 - 查询只读引擎（作用域 Engine）；会话作用域的查询、分页与增量结果、输入防抖、外部入口订阅查询结果（目前每次调用得到一次答复）均未实现。`#[reads]` 由开发者声明，宏只检查字段存在，不能证明提供器只读这些字段。
 - `Query` 的进度行与错误行作为普通行出现在数据上方，刷新时列表会下移一行；没有覆盖在内容上的刷新指示。
 - Video 未实现：倍速与轨道选择、全屏与画中画、海报、循环、自动播放与初始静音等媒体属性、覆盖层（字幕、弹幕）、系统媒体键与 Now Playing（会绕过命令，因此未接入）、受保护媒体。HLS 需经 HTTP 加载。同一 source 声明在一个窗口里挂载多次时第二个播放器创建失败（`player_exists`）。

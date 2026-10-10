@@ -1,0 +1,8 @@
+error[E0599]: no variant, associated function, or constant named `Remove` found for enum `PageFeature` in the current scope
+  --> tests/ui/fail_unknown_feature.rs:27:77
+   |
+19 | pub enum PageFeature {
+   | -------------------- variant, associated function, or constant `Remove` not found for this enum
+...
+27 |         Button(id: add, label: tr! { "en" => "Add" }, feature: PageFeature::Remove) => app.add(1)
+   |                                                                             ^^^^^^ variant, associated function, or constant not found in `PageFeature`

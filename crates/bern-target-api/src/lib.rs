@@ -79,6 +79,8 @@ impl TargetDescriptor {
 pub enum Severity {
     Error,
     Warning,
+    /// Information a report must show, such as an exemption.
+    Note,
 }
 
 /// A diagnostic pointing back to the developer's declaration.
@@ -107,6 +109,13 @@ impl Diagnostic {
         }
     }
 
+    pub fn note(message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Note,
+            ..Self::error(message)
+        }
+    }
+
     pub fn code(mut self, code: &'static str) -> Self {
         self.code = Some(code);
         self
@@ -127,6 +136,7 @@ impl fmt::Display for Diagnostic {
         let level = match self.severity {
             Severity::Error => "error",
             Severity::Warning => "warning",
+            Severity::Note => "note",
         };
         match self.code {
             Some(code) => write!(f, "{level}[{code}]: {}", self.message)?,
@@ -141,6 +151,98 @@ impl fmt::Display for Diagnostic {
         }
         Ok(())
     }
+}
+
+/// A feature contract report for one platform: the result of every
+/// feature in every applicable size, and the diagnostics they raise.
+#[derive(Clone, Debug, Default)]
+pub struct FeatureReport {
+    pub diagnostics: Vec<Diagnostic>,
+    /// `(contract, feature, size, result)` rows, in declaration order.
+    pub rows: Vec<(String, String, bern_ir::LayoutSize, bern_ir::FeatureResult)>,
+}
+
+impl FeatureReport {
+    /// One line per row, for terminals.
+    pub fn lines(&self) -> Vec<String> {
+        self.rows
+            .iter()
+            .map(|(contract, feature, size, result)| {
+                let outcome = match result {
+                    bern_ir::FeatureResult::Covered { entries } => {
+                        format!("covered by {}", entries.join(", "))
+                    }
+                    bern_ir::FeatureResult::Guaranteed { entries, reason } => format!(
+                        "NOT PROVEN, manually guaranteed ({reason}); conditional entries {}",
+                        entries.join(", ")
+                    ),
+                    bern_ir::FeatureResult::Exempt { reason } => format!("exempt: {reason}"),
+                    bern_ir::FeatureResult::Missing => "MISSING".into(),
+                    bern_ir::FeatureResult::Unproven { entries } => {
+                        format!("UNPROVEN: only conditional entries {}", entries.join(", "))
+                    }
+                };
+                format!("{contract}::{feature} [{}] {outcome}", size.name())
+            })
+            .collect()
+    }
+}
+
+/// Evaluate every feature contract for `platform`: exemptions apply only
+/// to their platform; missing and unproven features are errors (B201,
+/// B203), manual guarantees warnings (B206) and exemptions notes (B205).
+pub fn feature_report(app: &Application, platform: &str) -> FeatureReport {
+    let mut report = FeatureReport::default();
+    for contract in &app.contracts {
+        for feature in &contract.features {
+            for (size, result) in feature.results(platform) {
+                let name = format!("{}::{}", contract.name, feature.name);
+                let diagnostic = match &result {
+                    bern_ir::FeatureResult::Covered { .. } => None,
+                    bern_ir::FeatureResult::Missing => Some(
+                        Diagnostic::error(format!(
+                            "Feature missing in adaptive layout\nContract: {}\nFeature: {}\n{}: missing",
+                            contract.name,
+                            feature.name,
+                            size.name()
+                        ))
+                        .code("B201"),
+                    ),
+                    bern_ir::FeatureResult::Unproven { entries } => Some(
+                        Diagnostic::error(format!(
+                            "`{name}` is reached in `{}` only under conditions the framework cannot prove ({}); add an unconditional entry, or `#[guaranteed(\"why\")]`",
+                            size.name(),
+                            entries.join(", ")
+                        ))
+                        .code("B203"),
+                    ),
+                    bern_ir::FeatureResult::Exempt { reason } => Some(
+                        Diagnostic::note(format!(
+                            "`{name}` is exempt in `{}` on {platform}: {reason}",
+                            size.name()
+                        ))
+                        .code("B205"),
+                    ),
+                    bern_ir::FeatureResult::Guaranteed { reason, .. } => Some(
+                        Diagnostic::warning(format!(
+                            "`{name}` in `{}` is not proven; accepted by a manual guarantee: {reason}",
+                            size.name()
+                        ))
+                        .code("B206"),
+                    ),
+                };
+                if let Some(diagnostic) = diagnostic {
+                    report
+                        .diagnostics
+                        .push(diagnostic.at(feature.source.clone()));
+                }
+                report
+                    .rows
+                    .push((contract.name.clone(), feature.name.clone(), size, result));
+            }
+        }
+    }
+    report
 }
 
 /// Target settings from `[targets.<name>]` in `Bern.toml`.

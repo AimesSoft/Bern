@@ -14,6 +14,10 @@ strict = true
 [theme]
 mode = "system"
 
+# Layout sizes: an `Adaptive` narrower than this uses its compact layout.
+[layouts]
+compact_below = 560
+
 [protocol]
 package = "showcase-protocol"
 source = "showcase-protocol/src/lib.rs"

@@ -331,8 +331,19 @@ fn main() -> ExitCode {
             }
         };
         let descriptor = target.descriptor();
-        let problems = target.check(&compiled.app, target_config);
+        let mut problems = target.check(&compiled.app, target_config);
+        let features = bern_target_api::feature_report(&compiled.app, &target_config.platform);
+        problems.extend(features.diagnostics.iter().cloned());
         report(&problems);
+        if !features.rows.is_empty() {
+            eprintln!(
+                "   \x1b[1;32mFeatures\x1b[0m for {} ({})",
+                descriptor.id, target_config.platform
+            );
+            for line in features.lines() {
+                eprintln!("            {line}");
+            }
+        }
         if problems.iter().any(Diagnostic::is_error) {
             eprintln!(
                 "error: `{}` cannot be built for `{}`",
@@ -364,6 +375,24 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        let features_json = serde_json::json!({
+            "platform": target_config.platform,
+            "features": features
+                .rows
+                .iter()
+                .map(|(contract, feature, size, result)| serde_json::json!({
+                    "contract": contract,
+                    "feature": feature,
+                    "size": size,
+                    "result": result,
+                }))
+                .collect::<Vec<_>>(),
+        });
+        let mut files = files;
+        files.push(bern_target_api::GeneratedFile::text(
+            "features.json",
+            serde_json::to_string_pretty(&features_json).expect("report serializes"),
+        ));
         let mut changed = 0;
         for file in &files {
             match write_if_changed(&context.output_dir.join(&file.path), &file.contents) {

@@ -156,10 +156,53 @@ protocol BernLabeled {
     var bernLabel: String { get }
 }
 
+/// The session's interface language. Every localized text reads its
+/// strings through it, so switching re-renders them in one update while
+/// drafts, navigation and windows stay. Changed on the main actor only.
+@Observable
+final class BernLanguage: @unchecked Sendable {
+    static let shared = BernLanguage()
+
+    /// The languages the bundle is localized for.
+    let supported: [String]
+    private(set) var current: String
+    private(set) var bundle: Bundle
+
+    private init() {
+        // The bundle lists a language once per source of localizations.
+        var declared: [String] = []
+        for language in Bundle.main.localizations where language != "Base" && !declared.contains(language) {
+            declared.append(language)
+        }
+        supported = declared
+        let initial = Bundle.main.preferredLocalizations.first ?? declared.first ?? "en"
+        current = initial
+        bundle = Self.bundle(for: initial)
+    }
+
+    private static func bundle(for language: String) -> Bundle {
+        Bundle.main.path(forResource: language, ofType: "lproj").flatMap(Bundle.init(path:)) ?? .main
+    }
+
+    /// Switch to a supported language; false for any other tag.
+    @discardableResult
+    func select(_ language: String) -> Bool {
+        guard supported.contains(language) else { return false }
+        bundle = Self.bundle(for: language)
+        current = language
+        return true
+    }
+
+    /// A language's own name for itself, such as “简体中文” or “English”.
+    static func autonym(_ language: String) -> String {
+        Locale(identifier: language).localizedString(forIdentifier: language) ?? language
+    }
+}
+
 /// Localized resources and Bern's basic, locale-independent formatting.
 enum BernText {
     static func string(_ key: String) -> String {
-        Bundle.main.localizedString(forKey: key, value: nil, table: nil)
+        BernLanguage.shared.bundle.localizedString(forKey: key, value: nil, table: nil)
     }
 
     static func format(_ key: String, _ arguments: [String]) -> String {
@@ -372,6 +415,53 @@ private struct BernControl: ViewModifier {
                         actions: actions))
             }
             .onDisappear { BernHost.shared.controls.remove(token) }
+    }
+}
+
+/// Chooses one layout by the available width. Engine state and session
+/// drafts live outside the view tree, so switching keeps them, and controls
+/// keep their identity through the same `id` in both layouts.
+struct BernAdaptive<Compact: View, Expanded: View>: View {
+    /// The size external entries read; a reference, so the registered
+    /// control always reports the current one.
+    @MainActor
+    final class Current {
+        var size = "expanded"
+    }
+
+    let breakpoint: CGFloat
+    let target: String?
+    let compact: () -> Compact
+    let expanded: () -> Expanded
+    @State private var width: CGFloat?
+    @State private var current = Current()
+
+    init(
+        breakpoint: CGFloat, target: String?, @ViewBuilder compact: @escaping () -> Compact,
+        @ViewBuilder expanded: @escaping () -> Expanded
+    ) {
+        self.breakpoint = breakpoint
+        self.target = target
+        self.compact = compact
+        self.expanded = expanded
+    }
+
+    private var size: String { (width ?? .infinity) < breakpoint ? "compact" : "expanded" }
+
+    var body: some View {
+        let chosen = Group {
+            if size == "compact" { compact() } else { expanded() }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+        .onChange(of: size, initial: true) { current.size = size }
+        if let target {
+            let current = self.current
+            chosen.bernControl(
+                target, role: "adaptive", label: "", actions: BernControlActions(value: { current.size }))
+        } else {
+            chosen
+        }
     }
 }
 
@@ -1226,6 +1316,16 @@ final class BernHost {
         case 17:  // window.resize
             let context = try window(try reader.text())
             try resize(context, width: try reader.f64(), height: try reader.f64(), request: request, command: command)
+        case 18:  // ui.language
+            complete(request, command: command) { writer in writer.text(BernLanguage.shared.current) }
+        case 19:  // ui.set_language
+            let language = try reader.text()
+            guard BernLanguage.shared.select(language) else {
+                throw BernCommandFailure(
+                    code: "unsupported_language",
+                    message: "`\(language)` is not supported; supported: \(BernLanguage.shared.supported.joined(separator: ", "))")
+            }
+            complete(request, command: command) { _ in }
         default:
             throw BernCommandFailure(code: "unknown_command", message: "unknown session command \(command)")
         }

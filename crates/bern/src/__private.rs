@@ -78,3 +78,7 @@ pub fn assert_value<T: BernValue>() {}
 pub fn media_source<S: SourceBinding>(_: &S) {}
 
 pub fn player(_: &PlayerRef) {}
+
+pub fn feature<F: crate::Features>(_: &F) {}
+
+pub fn features<F: crate::Features>() {}

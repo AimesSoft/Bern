@@ -1,7 +1,7 @@
 # Web 实现记录
 
 - 日期：2026-10-10
-- 依据：[Bern 架构设计 v0.13](../Design.md)、[Web 视觉规范 v0.4](../Adaptation/Web.md)
+- 依据：[Bern 架构设计 v0.14](../Design.md)、[Web 视觉规范 v0.5](../Adaptation/Web.md)
 - 工具链：Rust 1.99.0（`wasm32-unknown-unknown`）；不依赖 wasm-bindgen，页面直接实例化 WebAssembly 模块
 - 验证浏览器：Claude 桌面应用的内置浏览器（Chromium 内核）
 
@@ -95,6 +95,13 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 - **下拉菜单**：`automatic`、`menu` 样式不再用 `<select>`。触发器是 `role="combobox"` 的按钮，列表是 Popover API 的 `popover="auto"` 元素（顶层，不受卡片、对话框与滚动容器裁切；外部点按自动关闭），在 `beforetoggle` 中按触发器位置同步定位（下方不足 160 px 且上方更宽时向上），最高 328 px。焦点留在触发器上，活动项用 `aria-activedescendant`；键盘按 APG 只选组合框；Esc 在触发器上处理并阻止默认动作，所以对话框不会一起关闭；滚动页面或改变窗口大小时关闭。选择调用与外部入口相同的 `select` 闭包。
 - **媒体进度条**：视频控制条的进度与音量改用 `scrubber()`，不再是 range 输入。`role="slider"`，`aria-valuetext` 为时间或百分比；指针按下即跳到该点并开始预览，拖动只更新预览（进度时间同步显示），松开提交一次；方向键每次 5 秒（音量 5%），PageUp / PageDown 每次 10%，Home / End 到首尾，键松开时提交。已播放部分为 `media.played`，未播放为 `media.track`，滑块 20 × 16 px、圆角 7、`control.thumb` 加 0.5 px 轮廓与投影，拖动时放大到 1.1 倍。
 
+## 阶段四：自适应布局、菜单与语言
+
+- **`Adaptive`**：生成 `B.Adaptive(p, ctx, { id, breakpoint, layouts: { compact, expanded } })`，断点来自 `[layouts]`。运行时用 `ResizeObserver` 量容器宽度，尺寸变化时只重建布局区域；切换前聚焦的控件按 `data-bern-target` 在新布局中找回焦点，目标在未打开的菜单里时聚焦菜单按钮。
+- **`Menu` / `MenuItem`**：菜单按钮加 Popover API 弹出菜单，键盘按 APG Menu Button；与下拉菜单共用定位（`placePopover`）。每个菜单项按 `id` 登记，外部入口可在菜单关闭时执行。
+- **语言**：当前语言与字符串表是响应式单元，`tr()` 读取它们，所有文本绑定在切换时一次更新；`<html lang>` 与页面标题由同一效果更新。`ui.language`、`ui.set_language` 在会话请求中处理（命令序号 18、19）。`LanguagePicker` 复用自绘下拉菜单，选项名用 `Intl.DisplayNames` 取语言自称。
+- **功能契约报告**：`bern build` 为每个目标把报告写入产物目录的 `features.json`。
+
 ## `ui` 构建
 
 ```mermaid
@@ -176,6 +183,14 @@ flowchart LR
 - 侧边栏、工具栏、图标按钮与设置按钮显示 Lucide 图标；搜索框输入后，清除按钮为实心圆中挖空的叉号；视频控制条的播放为实心三角，音量为实心喇叭加线条声波（放大到 72 px 检查）。
 - 生成目录中有 `THIRD_PARTY_NOTICES.txt`，开头说明来源与修改，随后是 ISC 与 MIT 授权全文。
 - 新增测试：每个对照项都来自 `lucide-static v1.54.0` 文件、填充所指的形状存在、只有 `.fill` 名字被填充；填充方式按表生成（整体、部分、镂空遮罩）；声明文本包含两份授权。
+
+2026-10-10，阶段四（内置浏览器，`app` 构建）：
+
+- 1280 宽时媒体页的 `media_page.clip_choice` 为 `expanded`，显示三个片段按钮；聚焦“色条”后把视口改为 480 宽，变为 `compact`，显示“换片”菜单，焦点移到菜单按钮；按 ↓ 打开菜单并聚焦“测试图”，再 ↓、Enter 选择“色条”，菜单关闭、焦点回到按钮、片段变为色条；改回 1280 宽后回到按钮布局，片段仍是色条。600 宽时容器为 566 px，按规则仍为 `expanded`。
+- 设置对话框中显示名称草稿为“Ada”，经语言选择器选“English”：整页（侧边栏、页面、对话框、视频页说明）变为英文，`<html lang>` 为 `en`、页面标题为“Bern Showcase”，草稿、对话框与当前页面保持。
+- `features.json` 列出 `MediaFeature::Clip` 在两个尺寸的覆盖入口。
+- `ui` 构建（重启后的引擎宿主）：CLI 的 `ui language` 返回 `"zh-Hans"`；`ui set-language --language en` 后浏览器页面变为英文（`<html lang>` 为 `en`，侧边栏分组为“Controls”），`ui language` 返回 `"en"`；`--language ja` 返回 `unsupported_language` 并列出支持的语言。
+- `cargo test --workspace` 159 项通过，clippy 与 fmt 通过。
 
 ## 未完成与已知限制
 

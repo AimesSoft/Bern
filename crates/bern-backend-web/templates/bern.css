@@ -1355,6 +1355,59 @@ textarea.bern-field {
   visibility: visible;
 }
 
+/* Menu buttons: a standard button with a trailing chevron, opening a
+ * popover menu of command items. */
+.bern-menu-wrap {
+  display: inline-flex;
+}
+
+.bern-menu-button .bern-icon:last-child {
+  color: var(--bern-icon-secondary);
+}
+
+button.bern-menu-item {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--bern-text-primary);
+  font: inherit;
+  text-align: start;
+}
+
+button.bern-menu-item .bern-icon {
+  width: var(--bern-glyph);
+  height: var(--bern-glyph);
+  color: var(--bern-icon-secondary);
+}
+
+button.bern-menu-item:focus {
+  outline: none;
+  background: var(--bern-hover-overlay);
+}
+
+button.bern-menu-item:active:not(:disabled) {
+  background: var(--bern-pressed-overlay);
+}
+
+button.bern-menu-item.bern-destructive,
+button.bern-menu-item.bern-destructive .bern-icon {
+  color: var(--bern-status-error);
+}
+
+button.bern-menu-item:disabled,
+button.bern-menu-item:disabled .bern-icon {
+  color: var(--bern-disabled-foreground);
+  cursor: default;
+}
+
+.bern-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--bern-separator);
+}
+
 .bern-segmented {
   display: inline-flex;
   padding: 2px;
@@ -1565,6 +1618,32 @@ textarea.bern-field {
   .bern-form {
     padding: 16px;
   }
+}
+
+/* MARK: Adaptive layouts */
+
+/* Fills the available width it judges the layout size by. */
+.bern-adaptive {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  align-self: stretch;
+  min-width: 0;
+}
+
+/* Inside a card, each child of the chosen layout is a card row. */
+.bern-group > .bern-adaptive {
+  min-height: 0;
+  padding: 0;
+}
+
+.bern-group > .bern-adaptive > * {
+  min-height: var(--bern-row-height);
+  padding: 12px 16px;
+}
+
+.bern-group > .bern-adaptive > * + * {
+  border-top: 1px solid var(--bern-separator);
 }
 
 /* MARK: Navigation */
@@ -2004,7 +2083,8 @@ textarea.bern-field {
   .bern-scrubber-knob {
     border: 1px solid ButtonText;
   }
-  .bern-menu-item.bern-menu-active {
+  .bern-menu-item.bern-menu-active,
+  button.bern-menu-item:focus {
     outline: 2px solid Highlight;
     outline-offset: -2px;
   }

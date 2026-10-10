@@ -1,6 +1,6 @@
 # Bern Web 视觉规范
 
-- 版本：v0.4
+- 版本：v0.5
 - 官方资料核查日期：2026-10-10，Asia/Shanghai
 - 阶段：Web 后端的视觉与交互规范（[架构设计](../Design.md)“Web 应用与 WebUI”要求先单独成文）
 - 关联：[Bern 架构设计 v0.13](../Design.md)、[自适应适配规范](README.md)
@@ -222,6 +222,25 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 - 首次加载：居中的进度指示与 `loading` 文案；刷新：保留数据，在其上方显示一行进度与文案；失败：无数据时居中的错误图标、文案与“重试”，有数据时为数据上方的一行错误与“重试”；空结果：居中的 32 px 图标（默认 `tray`）与 `empty` 文案。
 
+### 5.16 Adaptive 与 Layout
+
+- `Adaptive` 是填满可用宽度的块容器，用 `ResizeObserver` 量自己的宽度：小于 `[layouts].compact_below` 时挂载 `compact` 布局，否则挂载 `expanded` 布局。容器未渲染（宽度不可知）时保留上一个尺寸。
+- 切换只重建布局内容；会话草稿与引擎状态不在视图树中，不受影响。切换前焦点所在控件的 `data-bern-target` 在新布局中找到同名控件则把焦点移过去；同名控件在未打开的菜单里时，焦点移到该菜单的按钮。
+- 在卡片（Section）中，布局的每个子元素各占一行，与卡片的其他行一样有分隔线。
+- 带 `id` 时登记为 `adaptive` 角色，值为当前尺寸。
+
+### 5.17 Menu 与 MenuItem
+
+- 遵循 WAI-ARIA APG 的 Menu Button 模式：触发器是 standard 按钮（图标、标签、尾端 `chevron.down`），`aria-haspopup="menu"`；菜单是浏览器顶层中的弹出层（Popover API，`role="menu"`），外观与下拉菜单相同（`menu` 配方），不被卡片、对话框与滚动容器裁切。
+- 菜单项是 `role="menuitem"` 的按钮，高 32 px，图标 16 px 在前；`role: destructive` 用 `status.error` 文字；`Divider` 为 1 px `separator`。悬停与键盘焦点为 `hover.overlay` 底色。
+- 键盘：↓、Enter、Space 打开并聚焦第一项，↑ 打开并聚焦最后一项；菜单内 ↑ ↓ 循环移动，Home / End 到首尾，输入字母跳到以其开头的项；Enter / Space 执行并关闭，焦点回到按钮；Esc 关闭（不关闭外层对话框）并回到按钮；Tab 关闭。
+- 每个菜单项按自己的 `id` 登记为按钮控件，外部入口的 `ui.activate` 在菜单未打开时也走同一个命令闭包。
+
+### 5.18 LanguagePicker
+
+- 外观与行为同下拉菜单（5.13），选项是支持的语言，每项用该语言自己的名称（`Intl.DisplayNames`，如“简体中文”“English”）。
+- 选择后整页的本地化文本在同一次更新中切换，`<html lang>` 与页面标题随之改变；窗口、对话框、草稿、导航与焦点保持。
+
 ## 6. 状态与焦点
 
 - **焦点环。** 仅 `:focus-visible`：2 px `focus.indicator` 外框，外扩 2 px，圆角随控件；卡片内的控件焦点环内收，避免被裁切。焦点元素滚动到可见区域，不被应用栏或页面头遮挡。
@@ -248,7 +267,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 ## 9. 可访问性与本地化
 
 - 根元素 `lang` 为解析后的语言。
-- 角色映射：Button → `button`；IconButton → `button` + `aria-label`；Switch → `switch` / `checkbox`；Slider → 原生 range；媒体进度条 → `slider`；Picker automatic / menu → `combobox` + `listbox` / `option`；Picker segmented / radio → `radiogroup` + `radio`；Tabs → `tablist` / `tab` / `tabpanel`；Sidebar → `listbox` / `option`（`aria-selected`）；NavLink → `link`；对话框 → `dialog`（`aria-modal`、`aria-labelledby`）；浮动窗口 → `dialog`（非模态）；关闭确认 → `alertdialog`；Query 的进度与错误行 → `status` / `alert`。
+- 角色映射：Menu → `button`（`aria-haspopup="menu"`）+ `menu` / `menuitem`；LanguagePicker → `combobox` + `listbox`；Button → `button`；IconButton → `button` + `aria-label`；Switch → `switch` / `checkbox`；Slider → 原生 range；媒体进度条 → `slider`；Picker automatic / menu → `combobox` + `listbox` / `option`；Picker segmented / radio → `radiogroup` + `radio`；Tabs → `tablist` / `tab` / `tabpanel`；Sidebar → `listbox` / `option`（`aria-selected`）；NavLink → `link`；对话框 → `dialog`（`aria-modal`、`aria-labelledby`）；浮动窗口 → `dialog`（非模态）；关闭确认 → `alertdialog`；Query 的进度与错误行 → `status` / `alert`。
 - 控件身份写入 `data-bern-target`，与 `ui.inspect` 的目标 ID 一致。
 
 ## 10. Bern 验收

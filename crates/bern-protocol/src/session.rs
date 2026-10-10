@@ -31,10 +31,13 @@ pub enum SessionCommand {
     WindowMaximize,
     WindowMove,
     WindowResize,
+    Language,
+    SetLanguage,
 }
 
 impl SessionCommand {
-    pub const ALL: [SessionCommand; 18] = [
+    /// Frontends address commands by position: new commands go last.
+    pub const ALL: [SessionCommand; 20] = [
         SessionCommand::Inspect,
         SessionCommand::Activate,
         SessionCommand::Edit,
@@ -53,6 +56,8 @@ impl SessionCommand {
         SessionCommand::WindowMaximize,
         SessionCommand::WindowMove,
         SessionCommand::WindowResize,
+        SessionCommand::Language,
+        SessionCommand::SetLanguage,
     ];
 
     pub fn id(self) -> &'static str {
@@ -75,6 +80,8 @@ impl SessionCommand {
             SessionCommand::WindowMaximize => "window.maximize",
             SessionCommand::WindowMove => "window.move",
             SessionCommand::WindowResize => "window.resize",
+            SessionCommand::Language => "ui.language",
+            SessionCommand::SetLanguage => "ui.set_language",
         }
     }
 
@@ -392,6 +399,29 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             vec![target()],
             Type::Unit,
             Retry::Never,
+        ),
+        spec(
+            SessionCommand::Language,
+            OperationKind::Query,
+            "The session's interface language tag",
+            vec![],
+            Type::Text,
+            Retry::Idempotent,
+        ),
+        with_errors(
+            spec(
+                SessionCommand::SetLanguage,
+                OperationKind::Command,
+                "Switch the interface language; every localized text updates while drafts, navigation and windows stay",
+                vec![param(
+                    "language",
+                    Type::Text,
+                    "A supported language tag, such as `en`",
+                )],
+                Type::Unit,
+                Retry::Idempotent,
+            ),
+            &["unsupported_language"],
         ),
         spec(
             SessionCommand::WindowOpen,

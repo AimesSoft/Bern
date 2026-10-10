@@ -852,8 +852,17 @@ impl<'a> Generator<'a> {
             }
             "List" | "ForEach" => self.list(out, element),
             "Tabs" => self.tabs(out, element),
+            "Adaptive" => self.adaptive(out, element),
+            "Menu" => self.menu(out, element),
+            "LanguagePicker" => out.line(format!(
+                "B.LanguagePicker(p, ctx, {});",
+                Self::props(vec![
+                    ("id", Some(self.id(element))),
+                    ("label", self.text_prop(element, "label")),
+                ])
+            )),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "WindowSet"
-            | "Window" => {
+            | "Window" | "Layout" | "MenuItem" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),
@@ -1091,6 +1100,69 @@ impl<'a> Generator<'a> {
             self.nodes(out, &destination.children);
         }
         out.close("});");
+    }
+
+    /// One builder per layout size; the runtime picks one by the available
+    /// width and the breakpoint from `[layouts]`.
+    fn adaptive(&self, out: &mut Out, element: &Element) {
+        let breakpoint = self
+            .app
+            .layouts
+            .map(|layouts| number(layouts.compact_below))
+            .unwrap_or_else(|| "0".into());
+        out.open("B.Adaptive(p, ctx, {");
+        if element.id.is_some() {
+            out.line(format!("id: {},", self.id(element)));
+        }
+        out.line(format!("breakpoint: {breakpoint},"));
+        out.open("layouts: {");
+        for node in &element.children {
+            let Node::Element(layout) = node else {
+                continue;
+            };
+            let Some(size) = layout.keyword("size") else {
+                continue;
+            };
+            out.open(format!("{size}: (p, ctx) => {{"));
+            self.nodes(out, &layout.children);
+            out.close("},");
+        }
+        out.close("},");
+        out.close("});");
+    }
+
+    /// A menu button and its items; dividers are `null`.
+    fn menu(&self, out: &mut Out, element: &Element) {
+        out.open(format!(
+            "B.Menu(p, ctx, {}, [",
+            Self::props(vec![
+                ("id", Some(self.id(element))),
+                ("label", self.text_prop(element, "label")),
+                ("icon", element.icon("icon").map(string)),
+            ])
+        ));
+        for node in &element.children {
+            let Node::Element(item) = node else { continue };
+            if item.kind == "Divider" {
+                out.line("null,");
+                continue;
+            }
+            let enabled = item
+                .expr("enabled")
+                .map(|expr| format!("() => {}", self.expr(expr)));
+            out.line(format!(
+                "{},",
+                Self::props(vec![
+                    ("id", Some(self.id(item))),
+                    ("label", self.text_prop(item, "label")),
+                    ("icon", item.icon("icon").map(string)),
+                    ("role", Self::keyword(item, "role")),
+                    ("enabled", enabled),
+                    ("action", Some(self.action_fn(item))),
+                ])
+            ));
+        }
+        out.close("]);");
     }
 
     fn tabs(&self, out: &mut Out, element: &Element) {

@@ -75,20 +75,17 @@ pub fn location(file: &str, span: Span) -> SourceLocation {
 /// Turn a message from the shared checks into a diagnostic, lifting a
 /// leading `error[Bxxx]: ` into the diagnostic code.
 pub fn shared_diagnostic(file: &str, span: Span, message: &str) -> Diagnostic {
-    for code in ["B102", "B103", "B301"] {
+    for code in CODES {
         let prefix = format!("error[{code}]: ");
         if let Some(rest) = message.strip_prefix(&prefix) {
-            return Diagnostic::error(rest)
-                .code(match code {
-                    "B102" => "B102",
-                    "B103" => "B103",
-                    _ => "B301",
-                })
-                .at(location(file, span));
+            return Diagnostic::error(rest).code(code).at(location(file, span));
         }
     }
     Diagnostic::error(message).at(location(file, span))
 }
+
+/// Diagnostic codes the shared checks put in front of their messages.
+const CODES: [&str; 7] = ["B101", "B102", "B103", "B104", "B301", "B401", "B402"];
 
 pub fn is_labeled_enum(ty: &Type, types: &TypeTable) -> bool {
     match ty {
@@ -117,6 +114,10 @@ pub struct Checker<'a> {
     pub component: String,
     pub diagnostics: Vec<Diagnostic>,
     pub texts: Vec<LocalizedText>,
+    /// Feature contracts by enum name, with their feature names.
+    pub contracts: &'a BTreeMap<String, Vec<String>>,
+    /// Breakpoints from `[layouts]`, if declared.
+    pub layouts: Option<ir::LayoutConfig>,
     ids: BTreeSet<String>,
 }
 
@@ -132,8 +133,12 @@ impl<'a> Checker<'a> {
         languages: &'a [String],
         default_language: &'a str,
         strict: bool,
+        contracts: &'a BTreeMap<String, Vec<String>>,
+        layouts: Option<ir::LayoutConfig>,
     ) -> Self {
         Self {
+            contracts,
+            layouts,
             types,
             protocol,
             sessions,
@@ -617,6 +622,7 @@ impl<'a> Checker<'a> {
                 },
                 PropKind::MediaSource => self.media_source(&prop.value, scope),
                 PropKind::Player => self.player(&prop.value, scope),
+                PropKind::Feature => self.feature(&prop.value),
                 PropKind::SelectionField
                 | PropKind::PathField
                 | PropKind::Items
@@ -627,11 +633,25 @@ impl<'a> Checker<'a> {
             }
         }
 
-        let children = element
-            .children
-            .as_ref()
-            .map(|children| self.nodes(children, path, &child_ctx, scope))
-            .unwrap_or_default();
+        let children = match (&element.children, name.as_str()) {
+            // The layouts of one `Adaptive` are alternatives: the same
+            // control id in two of them names the same control.
+            (Some(children), "Adaptive") => {
+                let before = self.ids.clone();
+                let mut all = before.clone();
+                let mut lowered = Vec::new();
+                for (index, child) in children.iter().enumerate() {
+                    self.ids = before.clone();
+                    lowered.extend(self.node(child, &format!("{path}.{index}"), &child_ctx, scope));
+                    all.append(&mut self.ids);
+                }
+                self.ids = all;
+                self.adaptive(element, &lowered);
+                lowered
+            }
+            (Some(children), _) => self.nodes(children, path, &child_ctx, scope),
+            (None, _) => Vec::new(),
+        };
         for _ in 0..pushed {
             scope.pop();
         }
@@ -679,6 +699,66 @@ impl<'a> Checker<'a> {
             );
         }
         Some(value)
+    }
+
+    /// `feature: Contract::Feature`, naming a declared feature.
+    fn feature(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
+        let ast::Expr::Variant(variant) = expr else {
+            self.error(
+                expr.span(),
+                "expected a feature of the component's contract, e.g. `MediaFeature::Clip`",
+            );
+            return None;
+        };
+        let contract = variant.ty.to_string();
+        let feature = variant.variant.to_string();
+        let Some(features) = self.contracts.get(&contract) else {
+            self.error(
+                variant.ty.span(),
+                format!("`{contract}` is not a `#[bern::features]` contract"),
+            );
+            return None;
+        };
+        if !features.contains(&feature) {
+            self.error(
+                variant.variant.span(),
+                format!(
+                    "contract `{contract}` has no feature `{feature}`; features: {}",
+                    features.join(", ")
+                ),
+            );
+            return None;
+        }
+        Some(ir::Prop::Feature { contract, feature })
+    }
+
+    /// An `Adaptive` has one `Layout` per size, and needs `[layouts]`.
+    fn adaptive(&mut self, element: &ast::Element, layouts: &[ir::Node]) {
+        if self.layouts.is_none() {
+            self.error(
+                element.span,
+                "error[B402]: `Adaptive` needs the breakpoints of `[layouts]` in Bern.toml, e.g. `compact_below = 600`",
+            );
+        }
+        let sizes: Vec<&str> = layouts
+            .iter()
+            .filter_map(|node| match node {
+                ir::Node::Element(layout) => layout.keyword("size"),
+                _ => None,
+            })
+            .collect();
+        for size in ir::LayoutSize::ALL {
+            let count = sizes.iter().filter(|name| **name == size.name()).count();
+            if count != 1 {
+                self.error(
+                    element.span,
+                    format!(
+                        "error[B401]: `Adaptive` needs exactly one `Layout(size: {})`, found {count}",
+                        size.name()
+                    ),
+                );
+            }
+        }
     }
 
     fn keyword(&mut self, expr: &ast::Expr, allowed: &[&str]) -> Option<ir::Prop> {

@@ -11,7 +11,7 @@ pub mod query;
 
 pub use bern_command::resources;
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
-pub use bern_macros::{component, players, protocol, session, tr, ui, value};
+pub use bern_macros::{component, features, players, protocol, session, tr, ui, value};
 pub use bern_protocol::{
     CommandError, CommandOutcome, Invocation, LocalizedText, ProtocolDescriptor, SchemaError,
     StateUpdate, Type, Value,
@@ -21,11 +21,14 @@ pub use bern_protocol::{
 /// targets generate the actual views from the collected description.
 pub trait View {}
 
+/// A `#[bern::features]` contract: its variants are the features.
+pub trait Features: Copy + 'static {}
+
 pub mod prelude {
     pub use crate::bind::{Binding, SessionField};
     pub use crate::media::{MediaSource, Player};
     pub use crate::query::Answer;
-    pub use crate::{CommandError, View, component, tr, ui};
+    pub use crate::{CommandError, Features, View, component, tr, ui};
 }
 
 #[doc(hidden)]

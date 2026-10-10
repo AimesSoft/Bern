@@ -309,8 +309,12 @@ export function eq(a, b) {
 
 // MARK: - Text
 
-let strings = {};
-let language = "en";
+// The session's language and its strings are cells: switching language
+// re-runs every binding that shows text, in one update.
+const languageCell = cell("en");
+const stringsCell = cell({});
+let supportedLanguages = [];
+let allStrings = {};
 
 function chooseLanguage(supported, fallback) {
   const wanted = [...(navigator.languages || []), navigator.language].filter(Boolean);
@@ -334,7 +338,28 @@ function chooseLanguage(supported, fallback) {
 }
 
 export function tr(key) {
-  return strings[key] ?? key;
+  return stringsCell.get()[key] ?? key;
+}
+
+/// Switch the interface language. Drafts, navigation and windows stay;
+/// only text bindings update.
+function setLanguage(tag) {
+  if (!supportedLanguages.includes(tag)) {
+    throw new CommandFailure("unsupported_language", `\`${tag}\` is not supported; supported: ${supportedLanguages.join(", ")}`);
+  }
+  batch(() => {
+    languageCell.set(tag);
+    stringsCell.set(allStrings[tag] ?? {});
+  });
+}
+
+/// A language's own name for itself, such as “简体中文” or “English”.
+function autonym(tag) {
+  try {
+    return new Intl.DisplayNames([tag], { type: "language" }).of(tag) ?? tag;
+  } catch {
+    return tag;
+  }
 }
 
 /// A translation with `{name}` placeholders filled from `args`.
@@ -746,6 +771,8 @@ function sessionRequest(request, bytes) {
         ok();
         break;
       }
+      case 18: ok((writer) => writer.text(languageCell.peek())); break; // ui.language
+      case 19: setLanguage(reader.text()); ok(); break; // ui.set_language
       default:
         throw new CommandFailure("unknown_command", `unknown session command ${index}`);
     }
@@ -1184,6 +1211,22 @@ export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxI
 
 let typeaheadReset = 0;
 
+/// Place a popover below `anchor`, or above it when there is more room
+/// there. It runs before the popover shows, from the anchor alone: the
+/// popover's height is capped by the room it gets.
+function placePopover(popover, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const below = innerHeight - rect.bottom - 12;
+  const above = rect.top - 12;
+  const up = below < 160 && above > below;
+  popover.style.minWidth = `${rect.width}px`;
+  popover.style.maxWidth = `${Math.max(rect.width, innerWidth - rect.left - 8)}px`;
+  popover.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - 168))}px`;
+  popover.style.top = up ? "auto" : `${rect.bottom + 4}px`;
+  popover.style.bottom = up ? `${innerHeight - rect.top + 4}px` : "auto";
+  popover.style.maxHeight = `${Math.min(328, up ? above : below)}px`;
+}
+
 /// Bern's own dropdown, a select-only combobox (WAI-ARIA APG). The list is
 /// a popover in the browser's top layer, so cards, dialogs and scroll
 /// containers never clip it. Focus stays on the trigger; the active option
@@ -1238,21 +1281,7 @@ function dropdown(options, field, select) {
     list.append(item);
     return item;
   });
-  // Below the trigger, or above it when there is more room there. Placed
-  // before the list shows, from the trigger alone: the list's height is
-  // capped by the room it gets.
-  const place = () => {
-    const anchor = trigger.getBoundingClientRect();
-    const below = innerHeight - anchor.bottom - 12;
-    const above = anchor.top - 12;
-    const up = below < 160 && above > below;
-    list.style.minWidth = `${anchor.width}px`;
-    list.style.maxWidth = `${Math.max(anchor.width, innerWidth - anchor.left - 8)}px`;
-    list.style.left = `${Math.max(8, anchor.left)}px`;
-    list.style.top = up ? "auto" : `${anchor.bottom + 4}px`;
-    list.style.bottom = up ? `${innerHeight - anchor.top + 4}px` : "auto";
-    list.style.maxHeight = `${Math.min(328, up ? above : below)}px`;
-  };
+  const place = () => placePopover(list, trigger);
   const dismiss = (event) => {
     if (!list.contains(event.target)) close();
   };
@@ -1762,6 +1791,178 @@ export function Tabs(p, ctx, { id, selection, tabs, selectedLabel }) {
     });
   }
   p.append(node);
+}
+
+/// Chooses one layout by the available width. Engine state and session
+/// drafts live outside the view tree, so switching keeps them; focus moves
+/// to the control with the same identity in the new layout.
+export function Adaptive(p, ctx, { id, breakpoint, layouts }) {
+  const node = el("div", { class: "bern-adaptive" });
+  const size = cell(null);
+  const observer = new ResizeObserver(() => {
+    // A hidden container has no width to judge by; keep the last size.
+    if (!node.getClientRects().length) return;
+    size.set(node.clientWidth < breakpoint ? "compact" : "expanded");
+  });
+  observer.observe(node);
+  onCleanup(() => observer.disconnect());
+  const region = new Region(node);
+  let owner = null;
+  let shown = null;
+  effect(() => {
+    const current = size.get() ?? "expanded";
+    if (current === shown) return;
+    shown = current;
+    untrack(() => {
+      const focused = node.contains(document.activeElement)
+        ? document.activeElement.closest("[data-bern-target]")?.getAttribute("data-bern-target")
+        : null;
+      owner?.dispose();
+      region.clear();
+      owner = new Scope(null);
+      within(owner, () => region.fill((fragment) => layouts[current](fragment, ctx)));
+      if (focused) {
+        // A control inside a closed menu is reached through its button.
+        const next = node.querySelector(`[data-bern-target="${CSS.escape(focused)}"]`);
+        const closed = next?.closest("[popover]:not(:popover-open)");
+        (closed ? node.querySelector(`[popovertarget="${closed.id}"]`) : next)?.focus();
+      }
+    });
+  });
+  onCleanup(() => owner?.dispose());
+  if (id) {
+    control(ctx, {
+      target: () => target(ctx, id), role: "adaptive", label: () => "",
+      actions: { value: () => size.peek() ?? "expanded" },
+    });
+  }
+  p.append(node);
+}
+
+/// A menu button (WAI-ARIA APG Menu Button): the menu is a popover in the
+/// top layer and takes focus while open. Each item runs its command through
+/// the same closure external entries activate, open or not.
+export function Menu(p, ctx, { id, label, icon: name }, items) {
+  const menuId = `bern-menu-${++fieldSequence}`;
+  const text = el("span");
+  bindText(text, label);
+  const trigger = el("button", {
+    class: "bern-button bern-button-standard bern-menu-button", type: "button", "aria-haspopup": "menu",
+    "aria-expanded": "false", "aria-controls": menuId, popovertarget: menuId,
+  }, name ? icon(name, 16) : null, text, icon("chevron.down", 16));
+  const list = el("div", { class: "bern-menu", role: "menu", id: menuId, popover: "auto" });
+  bindAttr(list, "aria-label", label);
+  const buttons = [];
+  for (const item of items) {
+    if (!item) {
+      list.append(el("div", { class: "bern-menu-separator", role: "separator" }));
+      continue;
+    }
+    const itemText = el("span", { class: "bern-menu-text" });
+    bindText(itemText, item.label);
+    const button = el("button", {
+      class: `bern-menu-item${item.role === "destructive" ? " bern-destructive" : ""}`, type: "button",
+      role: "menuitem", tabindex: "-1",
+    }, item.icon ? icon(item.icon, 16) : null, itemText);
+    const isEnabled = enabledOf(item.enabled);
+    effect(() => {
+      button.disabled = !isEnabled();
+    });
+    mark(button, ctx, item.id);
+    button.addEventListener("click", () => {
+      list.hidePopover();
+      trigger.focus();
+      item.action();
+    });
+    button.addEventListener("pointermove", () => {
+      if (!button.disabled && document.activeElement !== button) button.focus();
+    });
+    control(ctx, {
+      target: () => target(ctx, item.id), role: "button", label: item.label, enabled: isEnabled,
+      actions: { activate: item.action },
+    });
+    list.append(button);
+    buttons.push(button);
+  }
+  const enabled = () => buttons.filter((button) => !button.disabled);
+  const focusAt = (index) => {
+    const available = enabled();
+    if (!available.length) return;
+    available[(index + available.length) % available.length].focus();
+  };
+  let focusLast = false;
+  list.addEventListener("beforetoggle", (event) => {
+    const open = event.newState === "open";
+    trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) placePopover(list, trigger);
+  });
+  list.addEventListener("toggle", (event) => {
+    if (event.newState === "open") focusAt(focusLast ? -1 : 0);
+    focusLast = false;
+  });
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      focusLast = event.key === "ArrowUp";
+      list.showPopover();
+    }
+  });
+  list.addEventListener("keydown", (event) => {
+    const available = enabled();
+    const at = available.indexOf(document.activeElement);
+    const move = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: available.length - 1 }[event.key];
+    if (move !== undefined) {
+      event.preventDefault();
+      focusAt(move);
+    } else if (event.key === "Escape") {
+      // Handled here, so an enclosing dialog does not also close.
+      event.preventDefault();
+      list.hidePopover();
+      trigger.focus();
+    } else if (event.key === "Tab") {
+      list.hidePopover();
+    } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const letter = event.key.toLowerCase();
+      const from = Math.max(at, 0);
+      for (let step = 1; step <= available.length; step++) {
+        const candidate = available[(from + step) % available.length];
+        if (candidate.textContent.trim().toLowerCase().startsWith(letter)) {
+          candidate.focus();
+          break;
+        }
+      }
+    }
+  });
+  onCleanup(() => {
+    if (list.matches(":popover-open")) list.hidePopover();
+  });
+  mark(trigger, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id), role: "menu", label,
+    actions: { value: () => (list.matches(":popover-open") ? "open" : "closed") },
+  });
+  const holder = el("div", { class: "bern-menu-wrap" }, trigger, list);
+  p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, holder) : holder);
+}
+
+/// Switches the interface language among the supported languages; each is
+/// listed by its own name.
+export function LanguagePicker(p, ctx, { id, label }) {
+  const options = supportedLanguages.map((tag) => ({ value: tag, name: tag, label: () => autonym(tag) }));
+  const field = { get: () => languageCell.get(), peek: () => languageCell.peek(), set: setLanguage };
+  const select = (name) => {
+    if (!supportedLanguages.includes(name)) return false;
+    setLanguage(name);
+    return true;
+  };
+  const node = dropdown(options, field, select);
+  mark(node.control, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id), role: "picker", label,
+    actions: { select, value: () => languageCell.peek() },
+  });
+  if (ctx.inToolbar) p.append(node);
+  else p.append(labelled(node, label, false, node.control));
 }
 
 /// The result of an asynchronous query. The subscription belongs to the
@@ -3128,10 +3329,15 @@ export function closeWindow(id) {
 /// that open at launch.
 export async function start(app) {
   icons = app.icons;
-  language = chooseLanguage(app.languages, app.defaultLanguage);
-  strings = app.strings[language] ?? app.strings[app.defaultLanguage] ?? {};
-  document.documentElement.lang = language;
-  document.title = tr("app.name");
+  supportedLanguages = app.languages;
+  allStrings = app.strings;
+  const initial = chooseLanguage(app.languages, app.defaultLanguage);
+  languageCell.set(initial);
+  stringsCell.set(app.strings[initial] ?? app.strings[app.defaultLanguage] ?? {});
+  effect(() => {
+    document.documentElement.lang = languageCell.get();
+    document.title = tr("app.name");
+  });
   engine = app.engine;
   const root = document.getElementById("bern-host");
   try {

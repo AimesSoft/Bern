@@ -54,6 +54,8 @@ pub enum PropKind {
     /// A typed query call such as `app.search(draft.text)`, whose result
     /// feeds the element's template.
     Query,
+    /// A feature of the enclosing contract, such as `MediaFeature::Clip`.
+    Feature,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,6 +144,12 @@ pub const TEXT_STYLES: &[&str] = &[
 ];
 
 pub const EMPHASIS: &[&str] = &["primary", "secondary", "tertiary"];
+
+/// Layout sizes of `Adaptive`, as written in `Layout(size: …)`.
+pub const LAYOUT_SIZES: &[&str] = &["compact", "expanded"];
+
+/// The feature an entry with a business action reaches.
+const FEATURE: PropSpec = opt("feature", PropKind::Feature);
 
 /// How video fills its frame: keep the aspect ratio and letterbox, keep it
 /// and crop, or stretch.
@@ -334,9 +342,64 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     spec(
         "Toolbar",
         &[],
-        Children::Only(&["Button", "IconButton", "Picker"]),
+        Children::Only(&["Button", "IconButton", "Picker", "Menu"]),
         "Window or page level actions",
     ),
+    spec(
+        "Adaptive",
+        &[opt("id", PropKind::Id)],
+        Children::Only(&["Layout"]),
+        "Chooses one `Layout` per size by the available width; state is kept across sizes",
+    ),
+    ComponentSpec {
+        placement: Placement::Within(&["Adaptive"]),
+        ..spec(
+            "Layout",
+            &[req("size", PropKind::Keyword(LAYOUT_SIZES))],
+            Children::Any,
+            "Content of one layout size",
+        )
+    },
+    ComponentSpec {
+        interactive: true,
+        ..spec(
+            "Menu",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("icon", PropKind::Icon),
+            ],
+            Children::Only(&["MenuItem", "Divider"]),
+            "Button opening a menu of commands",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Menu"]),
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "MenuItem",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("icon", PropKind::Icon),
+                opt("role", PropKind::Keyword(&["normal", "destructive"])),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "Menu command bound to a registered command",
+        )
+    },
+    ComponentSpec {
+        interactive: true,
+        ..spec(
+            "LanguagePicker",
+            &[req("id", PropKind::Id), req("label", PropKind::DisplayText)],
+            Children::None,
+            "Switches the interface language among the supported languages at run time",
+        )
+    },
     ComponentSpec {
         template: true,
         ..spec(
@@ -399,6 +462,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                     PropKind::Keyword(&["standard", "prominent", "plain"]),
                 ),
                 opt("enabled", PropKind::Bool),
+                FEATURE,
             ],
             Children::None,
             "Button bound to a registered command",
@@ -414,6 +478,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("icon", PropKind::Icon),
                 req("label", PropKind::DisplayText),
                 opt("enabled", PropKind::Bool),
+                FEATURE,
             ],
             Children::None,
             "Icon-only button with an accessible name",
@@ -430,6 +495,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("value", PropKind::TextField),
                 opt("prompt", PropKind::DisplayText),
                 opt("kind", PropKind::Keyword(&["plain", "secure", "multiline"])),
+                FEATURE,
             ],
             Children::None,
             "Text editing bound to a session draft; the action runs on submit",
@@ -444,6 +510,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("value", PropKind::TextField),
                 opt("prompt", PropKind::DisplayText),
+                FEATURE,
             ],
             Children::None,
             "Search text bound to a session draft; the action runs on submit",
@@ -477,6 +544,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("step", PropKind::Number),
                 opt("min_icon", PropKind::Icon),
                 opt("max_icon", PropKind::Icon),
+                FEATURE,
             ],
             Children::None,
             "Range value previewed in the session; the action runs on commit",

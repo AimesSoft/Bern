@@ -278,7 +278,10 @@ pub fn check_translations(
         if !seen.insert(entry.language.as_str()) {
             problems.push((
                 entry.span,
-                format!("language `{}` is translated twice", entry.language),
+                format!(
+                    "error[B101]: language `{}` is translated twice",
+                    entry.language
+                ),
             ));
         }
         if let Some((supported, _)) = languages
@@ -287,7 +290,7 @@ pub fn check_translations(
             problems.push((
                 entry.span,
                 format!(
-                    "language tag `{}` is not in [languages].supported ({}); check the spelling",
+                    "error[B101]: language tag `{}` is not in [languages].supported ({}); check the spelling",
                     entry.language,
                     supported.join(", ")
                 ),
@@ -316,7 +319,7 @@ pub fn check_translations(
     let mut reference: Option<BTreeSet<String>> = None;
     for entry in &tr.entries {
         match LocalizedText::placeholders(&entry.text) {
-            Err(message) => problems.push((entry.span, message)),
+            Err(message) => problems.push((entry.span, format!("error[B104]: {message}"))),
             Ok(names) => {
                 let names: BTreeSet<String> = names.into_iter().collect();
                 for name in &names {
@@ -324,7 +327,7 @@ pub fn check_translations(
                         problems.push((
                             entry.span,
                             format!(
-                                "placeholder `{{{name}}}` has no argument; add `; {name}: value`"
+                                "error[B104]: placeholder `{{{name}}}` has no argument; add `; {name}: value`"
                             ),
                         ));
                     }
@@ -333,7 +336,7 @@ pub fn check_translations(
                     None => reference = Some(names.clone()),
                     Some(first) if *first != names => problems.push((
                         entry.span,
-                        "every translation must use the same placeholders".to_string(),
+                        "error[B104]: every translation must use the same placeholders".to_string(),
                     )),
                     _ => {}
                 }
@@ -345,7 +348,10 @@ pub fn check_translations(
         if !used.contains(&arg.name.to_string()) {
             problems.push((
                 arg.name.span(),
-                format!("argument `{}` is not used by any translation", arg.name),
+                format!(
+                    "error[B104]: argument `{}` is not used by any translation",
+                    arg.name
+                ),
             ));
         }
     }

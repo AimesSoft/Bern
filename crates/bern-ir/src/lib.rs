@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Version of the IR layout. Targets declare the range they consume.
-pub const IR_VERSION: u32 = 4;
+pub const IR_VERSION: u32 = 5;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
@@ -32,6 +32,11 @@ pub struct Application {
     pub texts: Vec<LocalizedText>,
     /// Files shipped with the application, sorted by name.
     pub resources: Vec<ResourceDef>,
+    /// Layout breakpoints from `[layouts]`, when the application declares
+    /// them.
+    pub layouts: Option<LayoutConfig>,
+    /// Feature contracts with the coverage the compiler proved.
+    pub contracts: Vec<FeatureContract>,
 }
 
 impl Application {
@@ -66,6 +71,175 @@ impl Application {
             window.content.walk(&mut visit);
         }
         uses
+    }
+}
+
+/// Breakpoints choosing between layout sizes, from `[layouts]`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LayoutConfig {
+    /// Available width, in logical units, below which `compact` applies.
+    pub compact_below: f64,
+}
+
+impl LayoutConfig {
+    /// The size for an available width: every width maps to exactly one.
+    pub fn size(&self, width: f64) -> LayoutSize {
+        if width < self.compact_below {
+            LayoutSize::Compact
+        } else {
+            LayoutSize::Expanded
+        }
+    }
+}
+
+/// A layout size of `Adaptive`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutSize {
+    Compact,
+    Expanded,
+}
+
+impl LayoutSize {
+    pub const ALL: [LayoutSize; 2] = [LayoutSize::Compact, LayoutSize::Expanded];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            LayoutSize::Compact => "compact",
+            LayoutSize::Expanded => "expanded",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|size| size.name() == name)
+    }
+}
+
+/// A `#[bern::features]` contract: what users can do within the scope of
+/// one component, and how each feature is reached in each layout size.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FeatureContract {
+    /// The features enum, for example `MediaFeature`.
+    pub name: String,
+    /// The component whose subtree is the contract's scope.
+    pub component: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc: String,
+    pub features: Vec<FeatureDef>,
+    pub source: SourceLocation,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FeatureDef {
+    /// The variant, for example `Clip`.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc: String,
+    /// Command ids implementing the feature: protocol commands such as
+    /// `showcase.feature`, or standard media commands such as `media.play`.
+    pub commands: Vec<String>,
+    /// Sizes the feature applies to.
+    pub layouts: Vec<LayoutSize>,
+    /// A manual guarantee for coverage that cannot be proven statically.
+    pub guaranteed: Option<String>,
+    pub exemptions: Vec<Exemption>,
+    /// What the compiler proved, per applicable size.
+    pub coverage: Vec<SizeCoverage>,
+    pub source: SourceLocation,
+}
+
+/// A platform on which a feature need not be reachable, with the reason.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Exemption {
+    pub platform: String,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SizeCoverage {
+    pub size: LayoutSize,
+    pub coverage: Coverage,
+}
+
+/// Entries found for a feature in one size, by control target.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Coverage {
+    /// At least one entry is present whatever the state.
+    Covered {
+        entries: Vec<String>,
+    },
+    /// Entries exist only under conditions the framework cannot prove.
+    Conditional {
+        entries: Vec<String>,
+    },
+    Missing,
+}
+
+/// The outcome for one feature in one size on one platform.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "snake_case")]
+pub enum FeatureResult {
+    Covered {
+        entries: Vec<String>,
+    },
+    /// Only conditional entries, accepted by a manual guarantee; not proven.
+    Guaranteed {
+        entries: Vec<String>,
+        reason: String,
+    },
+    /// Not reachable, and exempt on this platform.
+    Exempt {
+        reason: String,
+    },
+    Missing,
+    /// Only conditional entries and no guarantee.
+    Unproven {
+        entries: Vec<String>,
+    },
+}
+
+impl FeatureResult {
+    /// Whether the result fails a strict build.
+    pub fn is_error(&self) -> bool {
+        matches!(
+            self,
+            FeatureResult::Missing | FeatureResult::Unproven { .. }
+        )
+    }
+}
+
+impl FeatureDef {
+    /// The results on `platform`, per applicable size.
+    pub fn results(&self, platform: &str) -> Vec<(LayoutSize, FeatureResult)> {
+        let exemption = self
+            .exemptions
+            .iter()
+            .find(|exemption| exemption.platform == platform);
+        self.coverage
+            .iter()
+            .map(|SizeCoverage { size, coverage }| {
+                let result = match (coverage, exemption, &self.guaranteed) {
+                    (Coverage::Covered { entries }, _, _) => FeatureResult::Covered {
+                        entries: entries.clone(),
+                    },
+                    (_, Some(exemption), _) => FeatureResult::Exempt {
+                        reason: exemption.reason.clone(),
+                    },
+                    (Coverage::Conditional { entries }, None, Some(reason)) => {
+                        FeatureResult::Guaranteed {
+                            entries: entries.clone(),
+                            reason: reason.clone(),
+                        }
+                    }
+                    (Coverage::Conditional { entries }, None, None) => FeatureResult::Unproven {
+                        entries: entries.clone(),
+                    },
+                    (Coverage::Missing, None, _) => FeatureResult::Missing,
+                };
+                (*size, result)
+            })
+            .collect()
     }
 }
 
@@ -402,6 +576,11 @@ pub enum Prop {
     /// A typed query call whose result feeds the element's template.
     Query {
         query: QueryBinding,
+    },
+    /// The feature of the enclosing contract an entry reaches.
+    Feature {
+        contract: String,
+        feature: String,
     },
 }
 

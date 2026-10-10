@@ -44,6 +44,8 @@ const ICONS: &[(&str, &str, Fill)] = &[
         Fill::None,
     ),
     ("circle", lucide!("circle"), Fill::None),
+    ("ellipsis", lucide!("ellipsis"), Fill::None),
+    ("ellipsis.circle", lucide!("circle-ellipsis"), Fill::None),
     ("square", lucide!("square"), Fill::None),
     ("square.on.square", lucide!("copy"), Fill::None),
     ("magnifyingglass", lucide!("search"), Fill::None),

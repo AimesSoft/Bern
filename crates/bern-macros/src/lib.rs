@@ -8,6 +8,7 @@
 mod component;
 mod config;
 mod descriptor;
+mod features;
 mod players;
 mod protocol;
 mod session;
@@ -96,17 +97,37 @@ pub fn players(args: TokenStream, item: TokenStream) -> TokenStream {
 }
 
 /// Declare an exportable component whose body is one `ui!` declaration.
+/// `#[component(features = X)]` makes the component the scope of the
+/// feature contract `X`.
 #[proc_macro_attribute]
 pub fn component(args: TokenStream, item: TokenStream) -> TokenStream {
+    component::expand(args.into(), item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// Declare a feature contract: what users can do within a component's
+/// scope, and the commands each feature is implemented by.
+///
+/// ```ignore
+/// #[bern::features]
+/// pub enum MediaFeature {
+///     /// Choose which clip plays.
+///     #[commands(feature)]
+///     Clip,
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn features(args: TokenStream, item: TokenStream) -> TokenStream {
     if !args.is_empty() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
-            "`component` takes no arguments",
+            "`features` takes no arguments",
         )
         .into_compile_error()
         .into();
     }
-    component::expand(item.into())
+    features::expand(item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

@@ -1111,11 +1111,142 @@ impl<'a> Generator<'a> {
                 self.toolbar(out, &element.children, ctx);
             }
             "Tabs" => self.tabs(out, element, ctx),
+            "Adaptive" => self.adaptive(out, element, ctx),
+            "Menu" => self.menu(out, element, ctx),
+            "LanguagePicker" => {
+                let label = self.text_prop(element, "label").unwrap_or_default();
+                out.open(
+                    "SwiftUI.Picker(selection: SwiftUI.Binding(get: { BernLanguage.shared.current }, set: { BernLanguage.shared.select($0) })) {",
+                );
+                out.open(
+                    "SwiftUI.ForEach(BernLanguage.shared.supported, id: \\.self) { language in",
+                );
+                out.line("SwiftUI.Text(verbatim: BernLanguage.autonym(language)).tag(language)");
+                out.close("}");
+                out.close("} label: {");
+                out.indent += 1;
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                out.close("}");
+                out.line(format!(
+                    ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ BernLanguage.shared.select($0) }}, value: {{ BernLanguage.shared.current }}))",
+                    self.target(element, ctx)
+                ));
+            }
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Search" | "Toolbar"
-            | "WindowSet" | "Window" => {
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),
+        }
+    }
+
+    /// One closure per layout size; `BernAdaptive` picks one by the
+    /// available width and the breakpoint from `[layouts]`.
+    fn adaptive(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let breakpoint = self
+            .app
+            .layouts
+            .map(|layouts| layouts.compact_below)
+            .unwrap_or(0.0);
+        let target = if element.id.is_some() {
+            self.target(element, ctx)
+        } else {
+            "nil".into()
+        };
+        let layout = |size: &str| {
+            element.children.iter().find_map(|node| match node {
+                Node::Element(layout) if layout.keyword("size") == Some(size) => Some(layout),
+                _ => None,
+            })
+        };
+        out.open(format!(
+            "BernAdaptive(breakpoint: {breakpoint:?}, target: {target}, compact: {{"
+        ));
+        if let Some(compact) = layout("compact") {
+            self.nodes(out, &compact.children, ctx);
+        }
+        out.close("}, expanded: {");
+        out.indent += 1;
+        if let Some(expanded) = layout("expanded") {
+            self.nodes(out, &expanded.children, ctx);
+        }
+        out.close("})");
+    }
+
+    /// A menu of command items. The items are registered on the menu button,
+    /// so external entries reach them whether the menu is open or not.
+    fn menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let items: Vec<&Element> = element
+            .children
+            .iter()
+            .filter_map(|node| match node {
+                Node::Element(item) => Some(item),
+                _ => None,
+            })
+            .collect();
+        out.open("SwiftUI.Menu {");
+        for item in &items {
+            if item.kind == "Divider" {
+                out.line("SwiftUI.Divider()");
+                continue;
+            }
+            let item_label = self.text_prop(item, "label").unwrap_or_default();
+            let action = item
+                .action
+                .as_ref()
+                .map(|a| self.action(a))
+                .unwrap_or_default();
+            let role = if item.keyword("role") == Some("destructive") {
+                "role: .destructive, "
+            } else {
+                ""
+            };
+            out.open(format!("SwiftUI.Button({role}action: {{"));
+            out.line(&action);
+            out.close("}) {");
+            out.indent += 1;
+            match item.icon("icon") {
+                Some(icon) => out.line(format!(
+                    "SwiftUI.Label({item_label}, systemImage: {})",
+                    string(icon)
+                )),
+                None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
+            }
+            out.close("}");
+            if let Some(enabled) = item.expr("enabled") {
+                out.line(format!(".disabled(!({}))", self.expr(enabled)));
+            }
+        }
+        out.close("} label: {");
+        out.indent += 1;
+        match element.icon("icon") {
+            Some(icon) => out.line(format!(
+                "SwiftUI.Label({label}, systemImage: {})",
+                string(icon)
+            )),
+            None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
+        }
+        out.close("}");
+        out.line(format!(
+            ".bernControl({}, role: \"menu\", label: {label}, actions: BernControlActions())",
+            self.target(element, ctx)
+        ));
+        for item in items.iter().filter(|item| item.kind == "MenuItem") {
+            let item_label = self.text_prop(item, "label").unwrap_or_default();
+            let action = item
+                .action
+                .as_ref()
+                .map(|a| self.action(a))
+                .unwrap_or_default();
+            let enabled = item
+                .expr("enabled")
+                .map(|expr| self.expr(expr))
+                .unwrap_or_else(|| "true".into());
+            out.line(format!(
+                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}))",
+                self.target(item, ctx)
+            ));
         }
     }
 

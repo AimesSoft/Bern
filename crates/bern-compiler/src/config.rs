@@ -1,7 +1,7 @@
 //! `Bern.toml`: project, language, theme, source, resource and target
 //! configuration.
 
-use bern_ir::{ResourceDef, SourceLocation, Srgb, ThemeMode};
+use bern_ir::{LayoutConfig, ResourceDef, SourceLocation, Srgb, ThemeMode};
 use bern_target_api::{Diagnostic, TargetConfig};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -22,6 +22,15 @@ struct RawConfig {
     #[serde(default)]
     libraries: Vec<RawLibraryRef>,
     resources: Option<RawResources>,
+    layouts: Option<RawLayouts>,
+}
+
+/// `[layouts]`: breakpoints between layout sizes.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawLayouts {
+    /// Available width, in logical units, below which `compact` applies.
+    compact_below: f64,
 }
 
 /// `[resources]`: files and directories, relative to `Bern.toml`, that ship
@@ -177,6 +186,8 @@ pub struct Config {
     /// Files shipped with the application, directories expanded, sorted by
     /// name.
     pub resources: Vec<ResourceDef>,
+    /// Breakpoints from `[layouts]`, if declared.
+    pub layouts: Option<LayoutConfig>,
 }
 
 fn valid_language(tag: &str) -> bool {
@@ -539,6 +550,21 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             ThemeMode::System
         }
     };
+    let layouts = match &raw.layouts {
+        None => None,
+        Some(layouts) if layouts.compact_below.is_finite() && layouts.compact_below > 0.0 => {
+            Some(LayoutConfig {
+                compact_below: layouts.compact_below,
+            })
+        }
+        Some(layouts) => {
+            errors.push(Diagnostic::error(format!(
+                "[layouts].compact_below must be a positive width, not {}",
+                layouts.compact_below
+            )));
+            None
+        }
+    };
     let brand_seed = match &raw.theme.brand_seed {
         None => None,
         Some(seed) => {
@@ -699,6 +725,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         targets,
         libraries,
         resources,
+        layouts,
     })
 }
 

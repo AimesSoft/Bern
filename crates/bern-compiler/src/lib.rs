@@ -7,6 +7,7 @@
 
 mod check;
 pub mod config;
+mod features;
 
 pub use check::{Signature, location};
 pub use config::{Config, SourceFile};
@@ -624,6 +625,7 @@ pub fn compile_library(
         state: vec![],
         commands: vec![],
     };
+    let no_contracts = BTreeMap::new();
     let mut checker = Checker::new(
         &types,
         &protocol,
@@ -634,6 +636,8 @@ pub fn compile_library(
         &library.languages,
         &library.default_language,
         library.strict,
+        &no_contracts,
+        None,
     );
     let mut lowered = Vec::new();
     for component in &components {
@@ -761,6 +765,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     let mut sessions_ast = Vec::new();
     let mut players_ast = Vec::new();
     let mut components = Vec::new();
+    let mut features_ast = Vec::new();
     for file in &config.ui_sources {
         let items = match read(file) {
             Ok(items) => items,
@@ -803,6 +808,13 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         }
         for (path, item) in items.components {
             components.push(Located {
+                file: file.display.clone(),
+                module: module(&path),
+                item,
+            });
+        }
+        for (path, item) in items.features {
+            features_ast.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
                 item,
@@ -998,6 +1010,69 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         );
     }
 
+    // Feature contracts and the components scoping them.
+    let mut contract_features: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for located in &features_ast {
+        let name = located.item.name.to_string();
+        if contract_features.contains_key(&name) || signatures.contains_key(&name) {
+            diagnostics.push(
+                Diagnostic::error(format!("contract `{name}` is declared more than once"))
+                    .at(location(&located.file, located.item.span)),
+            );
+            continue;
+        }
+        contract_features.insert(
+            name,
+            located
+                .item
+                .features
+                .iter()
+                .map(|feature| feature.name.to_string())
+                .collect(),
+        );
+    }
+    let mut contract_scopes: BTreeMap<String, String> = BTreeMap::new();
+    for component in &components {
+        let Some(path) = &component.item.features else {
+            continue;
+        };
+        let contract = path
+            .segments
+            .last()
+            .map(|segment| segment.ident.to_string())
+            .unwrap_or_default();
+        let span = path.segments.last().map(|segment| segment.ident.span());
+        let at = location(&component.file, span.unwrap_or(component.item.span));
+        if !contract_features.contains_key(&contract) {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "`{contract}` is not a `#[bern::features]` contract in the listed sources"
+                ))
+                .at(at),
+            );
+        } else if let Some(other) = contract_scopes.get(&contract) {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "contract `{contract}` already scopes component `{other}`; a contract has one scope"
+                ))
+                .at(at),
+            );
+        } else {
+            contract_scopes.insert(contract, component.item.name.to_string());
+        }
+    }
+    for located in &features_ast {
+        let name = located.item.name.to_string();
+        if !contract_scopes.contains_key(&name) {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "contract `{name}` scopes no component; add `#[component(features = {name})]` to the screen it describes"
+                ))
+                .at(location(&located.file, located.item.span)),
+            );
+        }
+    }
+
     // Components.
     let mut checker = Checker::new(
         &types,
@@ -1009,6 +1084,8 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         &config.languages,
         &config.default_language,
         config.strict,
+        &contract_features,
+        config.layouts,
     );
     let mut lowered: Vec<ir::ComponentDef> = libraries
         .iter()
@@ -1076,6 +1153,31 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         .as_ref()
         .and_then(|root| window_catalog(root, handle, &graph, &signatures, &mut diagnostics));
 
+    // Feature contracts: what each scope proves it reaches.
+    let mut contracts: Vec<ir::FeatureContract> = features_ast
+        .iter()
+        .filter_map(|located| {
+            let name = located.item.name.to_string();
+            let component = contract_scopes.get(&name)?.clone();
+            Some(features::lower(
+                &features::Declared {
+                    file: &located.file,
+                    item: &located.item,
+                },
+                component,
+                &protocol,
+                &mut diagnostics,
+            ))
+        })
+        .collect();
+    features::prove(
+        &mut contracts,
+        &lowered,
+        windows.as_ref(),
+        &protocol,
+        &mut diagnostics,
+    );
+
     // Every label is a resource; keys must be unique.
     for def in &types.enums {
         for variant in &def.variants {
@@ -1127,6 +1229,8 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             components: lowered,
             texts,
             resources: config.resources.clone(),
+            layouts: config.layouts,
+            contracts,
         },
         protocol_module: protocol_module.join("::"),
         libraries,

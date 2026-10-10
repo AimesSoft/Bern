@@ -169,6 +169,39 @@ pub struct ComponentItem {
     pub name: Ident,
     pub params: Vec<Param>,
     pub body: UiBody,
+    /// `#[component(features = X)]`: the contract this component scopes.
+    pub features: Option<syn::Path>,
+    pub doc: String,
+    pub span: Span,
+}
+
+/// A command a feature is implemented by: a protocol command such as
+/// `feature`, or a standard media command such as `media.play`.
+#[derive(Clone, Debug)]
+pub struct CommandRef {
+    pub name: String,
+    pub span: Span,
+}
+
+/// One variant of a `#[bern::features]` enum.
+#[derive(Clone, Debug)]
+pub struct FeatureItem {
+    pub name: Ident,
+    pub doc: String,
+    pub commands: Vec<CommandRef>,
+    /// `#[layouts(…)]`; empty for every size.
+    pub layouts: Vec<Ident>,
+    pub guaranteed: Option<syn::LitStr>,
+    /// `#[exempt(platform, "reason")]`.
+    pub exemptions: Vec<(Ident, syn::LitStr)>,
+    pub span: Span,
+}
+
+/// A `#[bern::features]` enum: a feature contract's features.
+#[derive(Clone, Debug)]
+pub struct FeaturesItem {
+    pub name: Ident,
+    pub features: Vec<FeatureItem>,
     pub doc: String,
     pub span: Span,
 }
@@ -182,6 +215,7 @@ pub struct SourceItems {
     pub sessions: Vec<(Vec<String>, SessionItem)>,
     pub players: Vec<(Vec<String>, PlayersItem)>,
     pub components: Vec<(Vec<String>, ComponentItem)>,
+    pub features: Vec<(Vec<String>, FeaturesItem)>,
 }
 
 fn error(span: Span, message: impl std::fmt::Display) -> syn::Error {
@@ -946,7 +980,35 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
 }
 
 /// Parse a `#[component]` function (marker attribute already removed).
+/// Parse `#[component]` arguments: nothing, or `features = Path`.
+pub fn parse_component_args(args: TokenStream) -> syn::Result<Option<syn::Path>> {
+    if args.is_empty() {
+        return Ok(None);
+    }
+    let parser = |input: syn::parse::ParseStream| -> syn::Result<syn::Path> {
+        let key: Ident = input.parse()?;
+        if key != "features" {
+            return Err(error(key.span(), "expected `features = FeaturesEnum`"));
+        }
+        input.parse::<syn::Token![=]>()?;
+        let path: syn::Path = input.parse()?;
+        if !input.is_empty() {
+            return Err(input.error("expected only `features = FeaturesEnum`"));
+        }
+        Ok(path)
+    };
+    syn::parse::Parser::parse2(parser, args).map(Some)
+}
+
 pub fn parse_component(func: ItemFn) -> syn::Result<ComponentItem> {
+    parse_component_with(func, None)
+}
+
+/// Parse a component whose `#[component(…)]` arguments were read already.
+pub fn parse_component_with(
+    func: ItemFn,
+    features: Option<syn::Path>,
+) -> syn::Result<ComponentItem> {
     let name = func.sig.ident.clone();
     reject_cfg(&func.attrs, "components")?;
     check_known_attrs(&func.attrs, &["component"], "components")?;
@@ -1016,7 +1078,112 @@ pub fn parse_component(func: ItemFn) -> syn::Result<ComponentItem> {
         name,
         params,
         body,
+        features,
         func,
+    })
+}
+
+fn parse_command_refs(attr: &Attribute) -> syn::Result<Vec<CommandRef>> {
+    attr.parse_args_with(|input: syn::parse::ParseStream| {
+        let mut refs = Vec::new();
+        while !input.is_empty() {
+            let first: Ident = input.parse()?;
+            let mut name = first.to_string();
+            if input.peek(syn::Token![.]) {
+                input.parse::<syn::Token![.]>()?;
+                let second: Ident = input.parse()?;
+                name = format!("{name}.{second}");
+            }
+            refs.push(CommandRef {
+                name,
+                span: first.span(),
+            });
+            if input.is_empty() {
+                break;
+            }
+            input.parse::<syn::Token![,]>()?;
+        }
+        Ok(refs)
+    })
+}
+
+/// Parse a `#[bern::features]` enum (marker attribute already removed).
+pub fn parse_features(item: &Item) -> syn::Result<FeaturesItem> {
+    let Item::Enum(item) = item else {
+        return Err(error(
+            item.span(),
+            "`#[bern::features]` declares an enum whose variants are the features",
+        ));
+    };
+    check_known_attrs(&item.attrs, &["features"], "feature contracts")?;
+    if !item.generics.params.is_empty() {
+        return Err(error(
+            item.ident.span(),
+            "feature contracts cannot be generic",
+        ));
+    }
+    let mut features = Vec::new();
+    for variant in &item.variants {
+        if !matches!(variant.fields, syn::Fields::Unit) {
+            return Err(error(
+                variant.ident.span(),
+                "features are plain variants without fields",
+            ));
+        }
+        check_known_attrs(
+            &variant.attrs,
+            &["commands", "layouts", "guaranteed", "exempt"],
+            "features",
+        )?;
+        let mut feature = FeatureItem {
+            name: variant.ident.clone(),
+            doc: doc_comment(&variant.attrs),
+            commands: Vec::new(),
+            layouts: Vec::new(),
+            guaranteed: None,
+            exemptions: Vec::new(),
+            span: variant.ident.span(),
+        };
+        for attr in &variant.attrs {
+            if is_bern_attr(attr, "commands") {
+                feature.commands.extend(parse_command_refs(attr)?);
+            } else if is_bern_attr(attr, "layouts") {
+                let sizes = attr.parse_args_with(
+                    syn::punctuated::Punctuated::<Ident, syn::Token![,]>::parse_terminated,
+                )?;
+                feature.layouts.extend(sizes);
+            } else if is_bern_attr(attr, "guaranteed") {
+                feature.guaranteed = Some(attr.parse_args::<syn::LitStr>()?);
+            } else if is_bern_attr(attr, "exempt") {
+                let (platform, reason) =
+                    attr.parse_args_with(|input: syn::parse::ParseStream| {
+                        let platform: Ident = input.parse()?;
+                        input.parse::<syn::Token![,]>()?;
+                        let reason: syn::LitStr = input.parse()?;
+                        Ok((platform, reason))
+                    })?;
+                feature.exemptions.push((platform, reason));
+            }
+        }
+        if feature.commands.is_empty() {
+            return Err(error(
+                variant.ident.span(),
+                "a feature names the commands that implement it: `#[commands(…)]`",
+            ));
+        }
+        features.push(feature);
+    }
+    if features.is_empty() {
+        return Err(error(
+            item.ident.span(),
+            "a feature contract declares at least one feature",
+        ));
+    }
+    Ok(FeaturesItem {
+        name: item.ident.clone(),
+        features,
+        doc: doc_comment(&item.attrs),
+        span: item.ident.span(),
     })
 }
 
@@ -1070,9 +1237,23 @@ fn collect(items: &[Item], path: &mut Vec<String>, out: &mut SourceItems) -> syn
                 out.players
                     .push((path.clone(), parse_players(&strip_marker(item, "players"))?));
             }
+            Item::Enum(syn::ItemEnum { attrs, .. }) if find_attr(attrs, "features").is_some() => {
+                reject_cfg(attrs, "feature contracts")?;
+                out.features.push((
+                    path.clone(),
+                    parse_features(&strip_marker(item, "features"))?,
+                ));
+            }
             Item::Fn(func) if find_attr(&func.attrs, "component").is_some() => {
-                out.components
-                    .push((path.clone(), parse_component(strip_fn_marker(func))?));
+                let args = match &find_attr(&func.attrs, "component").map(|attr| &attr.meta) {
+                    Some(Meta::List(list)) => list.tokens.clone(),
+                    _ => TokenStream::new(),
+                };
+                let features = parse_component_args(args)?;
+                out.components.push((
+                    path.clone(),
+                    parse_component_with(strip_fn_marker(func), features)?,
+                ));
             }
             _ => {}
         }

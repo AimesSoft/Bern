@@ -40,6 +40,9 @@ pub fn settings_window(app: showcase::Client, #[session] settings: SettingsDraft
             Tab(value: SettingsTab::General, label: tr! { "zh-Hans" => "通用", "en" => "General" }, icon: "gearshape") {
                 Form {
                     Section {
+                        LanguagePicker(id: language, label: tr! { "zh-Hans" => "语言", "en" => "Language" })
+                    }
+                    Section {
                         Switch(id: launch_at_login, label: tr! { "zh-Hans" => "登录时打开", "en" => "Open at login" }, value: settings.launch_at_login)
                         Switch(id: check_updates, label: tr! { "zh-Hans" => "自动检查更新", "en" => "Check for updates automatically" }, value: settings.check_updates)
                     }
