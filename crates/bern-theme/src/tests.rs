@@ -101,18 +101,22 @@ fn surfaces_layer_the_web_way_and_dark_is_not_inverted_light() {
 }
 
 #[test]
-fn selection_is_a_light_tint_with_an_indicator() {
+fn selected_navigation_is_filled_with_the_accent() {
+    let nav = RECIPES
+        .iter()
+        .find(|recipe| recipe.name == "nav_item")
+        .unwrap();
+    let selected = nav.state("selected").unwrap();
+    assert!(selected.slots.contains(&("background", "accent")));
+    assert!(selected.slots.contains(&("foreground", "on_accent")));
+    assert!(selected.slots.iter().all(|(slot, _)| *slot != "indicator"));
     for mode in MODES {
         let snapshot = generate(None, mode, ContrastPolicy::Standard);
-        let selection = snapshot.token("selection.background").unwrap();
         let accent = snapshot.token("accent").unwrap();
-        let panel = snapshot.token("surface.panel").unwrap();
-        // Close to the sidebar's own lightness, unlike a solid accent bar.
-        assert!(
-            contrast(selection, panel) < contrast(accent, panel),
-            "{mode:?}"
-        );
-        assert!(snapshot.token("selection.indicator").is_some());
+        // The fill alone marks the item on the sidebar, and its label reads.
+        assert!(contrast(accent, snapshot.token("surface.panel").unwrap()) >= 3.0);
+        assert!(contrast(snapshot.token("on_accent").unwrap(), accent) >= 4.5);
+        assert!(snapshot.token("selection.background").is_none());
     }
 }
 

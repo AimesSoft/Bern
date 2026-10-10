@@ -1,4 +1,4 @@
-//! Bern Theme Algorithm v3.
+//! Bern Theme Algorithm v4.
 //!
 //! The theme kernel generates semantic colors and control recipes for
 //! targets whose UI framework has no complete light/dark system of its own
@@ -24,7 +24,7 @@ pub use color::{Oklch, Srgb, contrast};
 pub use recipes::{RECIPES, Recipe, RecipeState};
 
 /// Version of the generation rules; a change may alter emitted colors.
-pub const ALGORITHM_VERSION: u32 = 3;
+pub const ALGORITHM_VERSION: u32 = 4;
 
 /// Version of the snapshot layout.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -443,45 +443,25 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     // pair; text in the brand color must also read on every surface.
     const SURFACES: &[&str] = &["surface.canvas", "surface.panel", "surface.raised"];
     let accent_l = brand.l.clamp(b.pick(0.45, 0.55), b.pick(0.62, 0.72));
-    // The accent also colors icons on every surface as hover feedback.
+    // The accent also colors icons on every surface as hover feedback, and
+    // fills selected navigation items on the sidebar's panel.
     b.solve_pair(
         "accent",
         "on_accent",
         brand_at(accent_l, brand_chroma),
         SURFACES,
     );
-    // Brand text also labels a selected item on the selection tint.
-    let mut reads_on_selection = READS_ON.to_vec();
-    reads_on_selection.push("selection.background");
-    b.fixed(
-        "selection.background",
-        brand_at(b.pick(0.95, 0.27), brand_chroma.min(0.045)),
-    );
     b.solve(
         "accent.text",
         brand_at(b.pick(0.5, 0.76), brand_chroma),
         levels.text,
-        &reads_on_selection,
+        READS_ON,
     );
     b.solve(
         "focus.indicator",
         brand_at(b.pick(0.52, 0.74), brand_chroma),
         levels.graphic,
         SURFACES,
-    );
-    // Selection: a light tint of the brand with readable text and a
-    // brand indicator bar, so a selected item is not told by colour alone.
-    b.solve(
-        "selection.foreground",
-        brand_at(b.pick(0.3, 0.92), brand_chroma.min(0.06)),
-        levels.text,
-        &["selection.background"],
-    );
-    b.solve(
-        "selection.indicator",
-        brand_at(accent_l, brand_chroma),
-        levels.graphic,
-        &["selection.background", "surface.panel"],
     );
     b.variant(
         "button.prominent.hover",

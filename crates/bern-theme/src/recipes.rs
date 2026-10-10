@@ -396,6 +396,8 @@ pub const RECIPES: &[Recipe] = &[
     },
     Recipe {
         name: "nav_item",
+        // A selected item is filled with the accent, its text and icon in
+        // `on_accent`; there is no indicator bar.
         states: &[
             state(
                 "rest",
@@ -413,10 +415,13 @@ pub const RECIPES: &[Recipe] = &[
             ),
             state(
                 "selected",
+                &[("background", "accent"), ("foreground", "on_accent")],
+            ),
+            state(
+                "selected.hover",
                 &[
-                    ("background", "selection.background"),
-                    ("foreground", "selection.foreground"),
-                    ("indicator", "selection.indicator"),
+                    ("background", "button.prominent.hover"),
+                    ("foreground", "on_accent"),
                 ],
             ),
             FOCUS,
@@ -474,14 +479,11 @@ pub const RECIPES: &[Recipe] = &[
                     ("indicator", "accent"),
                 ],
             ),
-            // Tabs set vertically, as a wide dialog's navigation.
+            // Tabs set vertically, as a wide dialog's navigation, select
+            // as navigation items do.
             state(
                 "selected.vertical",
-                &[
-                    ("background", "selection.background"),
-                    ("foreground", "accent.text"),
-                    ("indicator", "accent"),
-                ],
+                &[("background", "accent"), ("foreground", "on_accent")],
             ),
             FOCUS,
         ],

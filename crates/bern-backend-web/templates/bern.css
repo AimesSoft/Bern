@@ -153,8 +153,8 @@ button:disabled {
 }
 
 .bern-switch-item[aria-pressed="true"] {
-  background: var(--bern-selection-background);
-  color: var(--bern-selection-foreground);
+  background: var(--bern-accent);
+  color: var(--bern-on-accent);
   font-weight: 500;
 }
 
@@ -1451,37 +1451,24 @@ textarea.bern-field {
   }
 }
 
+/* A selected item is filled with the accent; no indicator bar. */
 .bern-sidebar-item[aria-selected="true"],
 .bern-tabs-vertical .bern-tab[aria-selected="true"] {
-  background: var(--bern-selection-background);
-  color: var(--bern-selection-foreground);
+  background: var(--bern-accent);
+  color: var(--bern-on-accent);
   font-weight: 500;
 }
 
-.bern-sidebar-item[aria-selected="true"] .bern-icon {
-  color: var(--bern-selection-foreground);
-}
-
-/* A selected tab is told in the saturated accent. */
-.bern-tabs-vertical .bern-tab[aria-selected="true"],
+.bern-sidebar-item[aria-selected="true"] .bern-icon,
 .bern-tabs-vertical .bern-tab[aria-selected="true"] .bern-icon {
-  color: var(--bern-accent-text);
+  color: var(--bern-on-accent);
 }
 
-.bern-sidebar-item[aria-selected="true"]::before,
-.bern-tabs-vertical .bern-tab[aria-selected="true"]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--bern-selection-indicator);
-}
-
-.bern-tabs-vertical .bern-tab[aria-selected="true"]::before {
-  background: var(--bern-accent);
+@media (hover: hover) {
+  .bern-sidebar-item[aria-selected="true"]:hover,
+  .bern-tabs-vertical .bern-tab[aria-selected="true"]:hover {
+    background: var(--bern-button-prominent-hover);
+  }
 }
 
 /* MARK: Split view and sidebar */

@@ -11,7 +11,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 - **页面就是应用。** 主窗口不画窗口外框、标题栏或窗口按钮；网页没有“窗口”这个概念，次级界面用对话框或侧边面板呈现。可拖动的浮动窗口只在应用显式声明 `presentation: floating` 时出现。
 - **安静的表面，清楚的层级。** 页面为纯色画布，内容分组用细边框卡片；颜色只用于主要操作、选中、焦点与状态，不用大面积品牌色或装饰性渐变。
-- **交互反馈用高饱和的强调色。** 选中的页签、图标按钮的悬停与按下、开关的开启与滑块的已选范围都用强调色，不用灰度变化表示。视频进度是例外：已播放部分用中性色，避免与画面争夺注意力。
+- **交互反馈用高饱和的强调色。** 侧边栏与竖排导航的选中项填满强调色，选中的页签、图标按钮的悬停与按下、开关的开启与滑块的已选范围都用强调色，不用灰度或浅色底表示；导航项不带左侧竖线。视频进度是例外：已播放部分用中性色，避免与画面争夺注意力。
 - **网页的密度与尺度。** 正文 14 px，按钮、输入框与下拉菜单高 32 px，按钮横向更宽；粗略指针下控件与点按区域整体放大。
 - **一套配色算法。** 生成的 CSS 只引用 `--bern-*` 变量，组件样式中没有字面颜色；浅色、深色、提高对比由同一算法生成，应用不写任何深浅色分支。
 - **浏览器托管部分不伪装。** 滚动条、文本选区由浏览器绘制，Bern 通过 `color-scheme` 让它们与当前模式一致。下拉菜单由 Bern 自绘，使它与页面的样式、深浅模式一致，并在各浏览器中表现相同。
@@ -91,15 +91,14 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 | `surface.host` | 对话框遮罩下方与浮动窗口之间的页面底色 | — |
 | `text.primary`、`text.secondary`、`text.placeholder` | 正文、次要说明、输入提示 | 对各表面与悬停、按下底色各 ≥ 4.5:1 |
 | `icon.primary`、`icon.secondary` | 操作图标、辅助图标 | 同上 ≥ 3:1 |
-| `accent`、`on_accent` | 主要按钮、开关开启、滑块已选范围、图标按钮悬停；其上文字图标 | `on_accent`/`accent` ≥ 4.5:1；`accent` 对画布、面板与浮层 ≥ 3:1 |
-| `accent.text` | 链接、平直按钮、选中页签的文字，图标按钮按下与选中 | 对各表面与 `selection.background` ≥ 4.5:1 |
+| `accent`、`on_accent` | 主要按钮、侧边栏与竖排导航的选中项、开关开启、滑块已选范围、图标按钮悬停；其上文字图标 | `on_accent`/`accent` ≥ 4.5:1；`accent` 对画布、面板与浮层 ≥ 3:1 |
+| `accent.text` | 链接、平直按钮、选中页签的文字，图标按钮按下与选中 | 对各表面 ≥ 4.5:1 |
 | `status.success`、`status.warning`、`status.error` 及 `on_*` | 状态前景与状态底色上的前景 | 前景对各表面 ≥ 4.5:1；`on_error`/`status.error.surface` ≥ 4.5:1 |
 | `control.border` | 输入框、复选框等靠边界识别的控件 | 对所在表面 ≥ 3:1 |
 | `separator` | 卡片边框、分隔线、带文字按钮的轮廓（装饰性） | 不检查对比，分类为装饰 |
 | `control.track`、`control.thumb` | 滑块的未选轨道；圆钮与圆钮外环 | track 对表面 ≥ 3:1；thumb 对 track 与 accent ≥ 3:1 |
 | `media.played`、`media.track` | 视频进度条的已播放部分与未播放轨道 | played 对 track 与面板 ≥ 3:1；track 为装饰 |
 | `focus.indicator` | 焦点环 | 对各表面 ≥ 3:1 |
-| `selection.background`、`selection.foreground`、`selection.indicator` | 侧边栏与列表的选中项：浅色强调底、文字、左侧指示条 | foreground/background ≥ 4.5:1；indicator 对 background 与面板 ≥ 3:1 |
 | `hover.overlay`、`pressed.overlay` | 行、导航项与平直控件的悬停、按下底色（不透明） | 其上的文字仍满足各自配对 |
 | `disabled.foreground`、`disabled.surface` | 禁用文字与禁用底色 | 不可用控件单独分类：foreground/surface ≥ 3:1 |
 | `scrim` | 对话框遮罩 | 遮罩上的对话框为不透明 raised 表面 |
@@ -118,9 +117,9 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 | `slider` | rest、hover、active、focus、disabled | 未选轨道 control.track，已选范围 accent；圆钮为 control.thumb 外环、1 px control.border 轮廓、accent 圆心，悬停与拖动时圆心为 button.prominent.hover / pressed |
 | `media_scrubber` | rest、hover、active、focus、disabled | 已播放 media.played，未播放 media.track；滑块 control.thumb 加 0.5 px control.border 轮廓与投影 |
 | `segmented` | rest、selected、hover、focus、disabled | 外槽 panel；选中段 canvas + text.primary + separator；未选中 text.secondary |
-| `nav_item` | rest、hover、selected、focus | 透明 / text.secondary；悬停 hover.overlay + text.primary；选中 selection.background + selection.foreground + 左侧 2 px selection.indicator |
+| `nav_item` | rest、hover、selected、focus | 透明 / text.secondary；悬停 hover.overlay + text.primary；选中 accent + on_accent（文字与图标），选中且悬停 button.prominent.hover；没有指示条 |
 | `row` | rest、hover、pressed、focus | 透明 / text.primary；悬停 hover.overlay |
-| `tab` | rest、selected、hover、focus | 透明 / text.secondary；选中 accent.text + 2 px accent 下划线；竖排时选中为 selection.background + accent.text + accent 指示条 |
+| `tab` | rest、selected、hover、focus | 透明 / text.secondary；选中 accent.text + 2 px accent 下划线；竖排时选中同 `nav_item` |
 | `menu` | rest、hover、selected、focus | 弹出层 raised / separator / 投影；项透明 / text.primary，悬停与键盘活动项 hover.overlay，选中项尾端 accent.text 对勾、字重 500；触发器用 `field` |
 | `dialog` | — | raised / text.primary / separator；遮罩 scrim |
 
@@ -130,7 +129,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ### 5.1 窗口：WindowSet 与 Window
 
-- **应用栏。** 页面顶部是 48 px 的应用栏（`surface.canvas`，下边框 `separator`）：前端为应用名（`headline`）；尾端为设置按钮（`gearshape` 图标按钮），在应用声明了 `role: settings` 的窗口时出现，Ctrl / Cmd + , 有同样效果。只有存在 `presentation: floating` 的窗口时，应用栏中间才出现窗口切换条。
+- **应用栏。** 页面顶部是 48 px 的应用栏（`surface.canvas`，下边框 `separator`）：前端为应用名（`headline`）；尾端为设置按钮（`gearshape` 图标按钮），在应用声明了 `role: settings` 的窗口时出现，Ctrl / Cmd + , 有同样效果。只有存在 `presentation: floating` 的窗口时，应用栏中间才出现窗口切换条，当前窗口的项填满强调色。
 - **主窗口就是页面。** 主窗口的内容直接铺满应用栏下方的区域，没有标题栏、窗口按钮和投影。主窗口被命令关闭后，该区域显示居中的应用名与“打开 {窗口标题}”按钮，页面本身不关闭。
 - **对话框（次级窗口的默认呈现）。** 设置窗口与其他次级窗口呈现为居中的对话框：
   - 宽度取窗口声明的宽度（未声明时 560 px），不超过视口减 32 px；高度贴合内容，最高为视口的 85%，内容区滚动。
@@ -146,7 +145,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 - 侧边栏宽 240 px（可拖动 200–320 px，Window Splitter 模式），`surface.panel`，右边框 `separator`；详情栏 `surface.canvas`。
 - 侧边栏顶部为 Search（高 32 px）；Section 标题 `caption2`、`text.secondary`，上方留 16 px。
-- SidebarItem 用 `nav_item` 配方：高 32 px、左右内边距 10 px、6 px 圆角；图标 16 px；选中项浅色强调底、文字加粗到 500，左侧 2 px 指示条。Listbox 模式：上下方向键移动并选中，Home / End 到首尾。
+- SidebarItem 用 `nav_item` 配方：高 32 px、左右内边距 10 px、6 px 圆角；图标 16 px；选中项填满强调色，文字与图标为 `on_accent`，字重 500，不带左侧竖线。Listbox 模式：上下方向键移动并选中，Home / End 到首尾。
 - 详情栏顶部是页面头：高 64 px，标题为所选项的文字（`title2`），工具栏项在尾端；窄屏为 56 px、`title3`。
 - 视口宽度 < 768 px 时，侧边栏成为第一页，选中项后显示详情，页面头前端出现返回按钮。
 
@@ -164,7 +163,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 ### 5.5 Tabs 与 Tab
 
 - 默认为顶部下划线页签（Tabs 模式，`role="tablist"`）：标签 14 px，有图标时图标 16 px 在标签前；选中项文字与图标为 `accent.text`，加 2 px `accent` 下划线，其他 `text.secondary`；页签栏下边框 `separator`。左右方向键切换并激活。
-- 对话框根部的 Tabs 在宽屏为左侧竖排导航：形状同 `nav_item`，选中项为 `selection.background` 底、`accent.text` 文字与图标、左侧 `accent` 指示条；上下方向键切换。
+- 对话框根部的 Tabs 在宽屏为左侧竖排导航，形状与选中样式同 `nav_item`（选中项填满强调色、不带竖线）；上下方向键切换。
 
 ### 5.6 Toolbar
 
