@@ -173,6 +173,7 @@ fn spec() -> AppSpec {
             windows: vec![WindowKind {
                 id: "main".into(),
                 sessions: vec![0],
+                presentation: bern_runtime::Presentation::Native,
             }],
         },
         players: vec!["preview".into()],
@@ -403,6 +404,103 @@ fn commands_drafts_and_session_requests_cross_the_abi() {
         worker.join().unwrap().unwrap(),
         Value::Text("main#2".into())
     );
+
+    unsafe { bern_app_stop(app) };
+}
+
+/// Report window facts as the frontend does: `actions` lists the indices
+/// of the available `WindowAction`s.
+fn report(app: *mut BernApp, generation: u64, source: u8, visibility: u8, actions: &[u32]) -> u64 {
+    let bits = actions.iter().fold(0, |bits, action| bits | 1 << action);
+    // SAFETY: live handle.
+    unsafe {
+        bern_window_facts(
+            app, 0, generation, source, visibility, 0, 10.0, 40.0, 920.0, 640.0, 1, bits,
+        )
+    }
+}
+
+#[test]
+fn window_presentation_comes_from_reported_facts() {
+    let frontend = Frontend::default();
+    let app = start(&frontend, descriptor().fingerprint()).unwrap();
+    let opened = take(unsafe { bern_window_opened(app, 0) });
+    let mut reader = Reader::new(&opened);
+    assert_eq!(reader.u8().unwrap(), 0);
+    let generation = reader.u64().unwrap();
+    // SAFETY: the handle stays valid until `bern_app_stop` below.
+    let sessions = unsafe { &*app }.sessions.clone();
+    let field = |info: &Value, index: usize| match info {
+        Value::Record(fields) => fields[index].clone(),
+        other => panic!("not a record: {other:?}"),
+    };
+    let list = |sessions: &Sessions| match sessions.handle(None, SessionCommand::WindowList, vec![])
+    {
+        Ok(Value::List(infos)) => infos,
+        other => panic!("unexpected {other:?}"),
+    };
+
+    // Before the frontend reports the window, it is opening and offers
+    // nothing; window.list is answered without asking the frontend.
+    let infos = list(&sessions);
+    assert_eq!(field(&infos[0], 0), Value::Text("main#1".into()));
+    assert_eq!(field(&infos[0], 3), Value::unit_variant(0));
+    let minimize = |sessions: &Sessions| {
+        sessions.handle(
+            None,
+            SessionCommand::WindowMinimize,
+            vec![Value::Text("main#1".into())],
+        )
+    };
+    assert_eq!(minimize(&sessions).unwrap_err().code, "target_unavailable");
+
+    // Facts from the user or system: visible, can be minimized.
+    let minimize_bit = WindowAction::Minimize.index();
+    let restore_bit = WindowAction::Restore.index();
+    assert_eq!(report(app, generation, 1, 0, &[minimize_bit]), 1);
+    let infos = list(&sessions);
+    assert_eq!(field(&infos[0], 3), Value::unit_variant(1));
+    assert_eq!(field(&infos[0], 10), Value::some(Value::unit_variant(1)));
+
+    // The command reaches the frontend, which minimizes the window,
+    // reports the new facts and answers with no value; the result is the
+    // window as the runtime now records it.
+    let worker = {
+        let sessions = sessions.clone();
+        std::thread::spawn(move || minimize(&sessions))
+    };
+    let (request, bytes) = frontend.wait_for("session");
+    let mut reader = Reader::new(&bytes);
+    let index = reader.u32().unwrap();
+    assert_eq!(
+        SessionCommand::ALL[index as usize],
+        SessionCommand::WindowMinimize
+    );
+    assert_eq!(reader.text().unwrap(), "main#1");
+    assert_eq!(report(app, generation, 0, 1, &[restore_bit]), 2);
+    let mut answer = Writer::new();
+    answer.u8(0);
+    answer.u32(index);
+    // SAFETY: valid buffer.
+    unsafe { bern_session_complete(app, request, answer.bytes.as_ptr(), answer.bytes.len()) };
+    let info = worker.join().unwrap().unwrap();
+    assert_eq!(field(&info, 4), Value::unit_variant(1));
+    assert_eq!(
+        field(&info, 8),
+        Value::List(vec![Value::unit_variant(restore_bit)])
+    );
+    assert_eq!(field(&info, 9), Value::Int(2));
+    assert_eq!(field(&info, 10), Value::some(Value::unit_variant(0)));
+
+    // A minimized window cannot be minimized again, and facts of a closed
+    // instance are dropped.
+    assert_eq!(
+        minimize(&sessions).unwrap_err().message,
+        "`main#1` cannot minimize now; available: restore"
+    );
+    unsafe { bern_window_closed(app, 0, generation) };
+    assert_eq!(report(app, generation, 1, 0, &[minimize_bit]), 0);
+    assert!(list(&sessions).is_empty());
 
     unsafe { bern_app_stop(app) };
 }

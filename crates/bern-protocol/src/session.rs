@@ -25,10 +25,16 @@ pub enum SessionCommand {
     WindowClose,
     WindowActivate,
     WindowConfirmClose,
+    WindowList,
+    WindowMinimize,
+    WindowRestore,
+    WindowMaximize,
+    WindowMove,
+    WindowResize,
 }
 
 impl SessionCommand {
-    pub const ALL: [SessionCommand; 12] = [
+    pub const ALL: [SessionCommand; 18] = [
         SessionCommand::Inspect,
         SessionCommand::Activate,
         SessionCommand::Edit,
@@ -41,6 +47,12 @@ impl SessionCommand {
         SessionCommand::WindowClose,
         SessionCommand::WindowActivate,
         SessionCommand::WindowConfirmClose,
+        SessionCommand::WindowList,
+        SessionCommand::WindowMinimize,
+        SessionCommand::WindowRestore,
+        SessionCommand::WindowMaximize,
+        SessionCommand::WindowMove,
+        SessionCommand::WindowResize,
     ];
 
     pub fn id(self) -> &'static str {
@@ -57,11 +69,30 @@ impl SessionCommand {
             SessionCommand::WindowClose => "window.close",
             SessionCommand::WindowActivate => "window.activate",
             SessionCommand::WindowConfirmClose => "window.confirm_close",
+            SessionCommand::WindowList => "window.list",
+            SessionCommand::WindowMinimize => "window.minimize",
+            SessionCommand::WindowRestore => "window.restore",
+            SessionCommand::WindowMaximize => "window.maximize",
+            SessionCommand::WindowMove => "window.move",
+            SessionCommand::WindowResize => "window.resize",
         }
     }
 
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|command| command.id() == id)
+    }
+
+    /// Commands that act on a window's presentation. The target performs
+    /// them and the session runtime answers with the window's facts.
+    pub fn is_presentation(self) -> bool {
+        matches!(
+            self,
+            SessionCommand::WindowMinimize
+                | SessionCommand::WindowRestore
+                | SessionCommand::WindowMaximize
+                | SessionCommand::WindowMove
+                | SessionCommand::WindowResize
+        )
     }
 }
 
@@ -107,6 +138,12 @@ fn spec(
     }
 }
 
+fn with_errors(mut spec: CommandSpec, errors: &[&str]) -> CommandSpec {
+    spec.errors
+        .extend(errors.iter().map(|error| (*error).to_string()));
+    spec
+}
+
 /// Type table and command specs for the framework session catalog.
 pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
     let control = Type::Record {
@@ -134,6 +171,10 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
     let close_result = Type::Record {
         name: "CloseResult".into(),
     };
+    let named_enum = |name: &str| Type::Enum { name: name.into() };
+    let window_info = Type::Record {
+        name: "WindowInfo".into(),
+    };
     let types = TypeTable {
         enums: vec![
             unit_enum(
@@ -141,6 +182,17 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                 &["Closed", "Rejected", "ConfirmationRequired"],
             ),
             unit_enum("CloseDecision", &["Save", "Discard", "Cancel"]),
+            unit_enum("WindowPresentation", &["Native", "Virtual"]),
+            unit_enum("WindowLifecycle", &["Opening", "Open", "Closing"]),
+            unit_enum("WindowVisibility", &["Visible", "Minimized", "Hidden"]),
+            unit_enum("WindowSize", &["Normal", "Maximized", "FullScreen"]),
+            unit_enum(
+                "WindowAction",
+                &[
+                    "Activate", "Close", "Minimize", "Restore", "Maximize", "Move", "Resize",
+                ],
+            ),
+            unit_enum("WindowChangeSource", &["Command", "System"]),
         ],
         records: vec![
             RecordDef {
@@ -201,9 +253,81 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                     ),
                 ],
             },
+            RecordDef {
+                name: "WindowFrame".into(),
+                fields: vec![
+                    field(
+                        "x",
+                        Type::Float,
+                        "Left edge in points from the main display's left edge",
+                    ),
+                    field(
+                        "y",
+                        Type::Float,
+                        "Top edge in points below the main display's top edge",
+                    ),
+                    field("width", Type::Float, "Outer width in points"),
+                    field("height", Type::Float, "Outer height in points"),
+                ],
+            },
+            RecordDef {
+                name: "WindowInfo".into(),
+                fields: vec![
+                    field("window", Type::Text, "Window instance"),
+                    field("kind", Type::Text, "Window kind id"),
+                    field(
+                        "presentation",
+                        named_enum("WindowPresentation"),
+                        "Native system window or virtual window",
+                    ),
+                    field(
+                        "lifecycle",
+                        named_enum("WindowLifecycle"),
+                        "Opening until the platform reports it; Closing while a close confirmation waits",
+                    ),
+                    field(
+                        "visibility",
+                        named_enum("WindowVisibility"),
+                        "Visible, minimized or hidden, as the platform reports it",
+                    ),
+                    field(
+                        "size",
+                        named_enum("WindowSize"),
+                        "Normal, maximized or full screen",
+                    ),
+                    field(
+                        "frame",
+                        Type::optional(Type::Record {
+                            name: "WindowFrame".into(),
+                        }),
+                        "Outer frame; absent while opening",
+                    ),
+                    field(
+                        "focused",
+                        Type::Bool,
+                        "Whether the window has keyboard focus",
+                    ),
+                    field(
+                        "actions",
+                        Type::list(named_enum("WindowAction")),
+                        "Window actions available now",
+                    ),
+                    field(
+                        "version",
+                        Type::Int,
+                        "Bumped by every change of this instance's presentation",
+                    ),
+                    field(
+                        "changed_by",
+                        Type::optional(named_enum("WindowChangeSource")),
+                        "Whether the latest change came from a command or from the user and system",
+                    ),
+                ],
+            },
         ],
     };
     let target = || param("target", Type::Text, "Control identity from ui.inspect");
+    let window = || param("window", Type::Text, "Window instance id");
     let commands = vec![
         spec(
             SessionCommand::Inspect,
@@ -281,7 +405,7 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             SessionCommand::WindowClose,
             OperationKind::Command,
             "Request closing a window instance; its declared close check may ask for a confirmation",
-            vec![param("window", Type::Text, "Window instance id")],
+            vec![window()],
             close_result.clone(),
             Retry::Idempotent,
         ),
@@ -289,7 +413,7 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             SessionCommand::WindowActivate,
             OperationKind::Command,
             "Bring a window instance to the front",
-            vec![param("window", Type::Text, "Window instance id")],
+            vec![window()],
             Type::Unit,
             Retry::Idempotent,
         ),
@@ -298,7 +422,7 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             OperationKind::Command,
             "Decide a pending close confirmation, as its dialog would",
             vec![
-                param("window", Type::Text, "Window instance id"),
+                window(),
                 param(
                     "confirmation",
                     Type::Text,
@@ -308,6 +432,68 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             ],
             close_result,
             Retry::Never,
+        ),
+        spec(
+            SessionCommand::WindowList,
+            OperationKind::Query,
+            "List the open window instances with their actual presentation and available actions",
+            vec![],
+            Type::list(window_info.clone()),
+            Retry::Idempotent,
+        ),
+        spec(
+            SessionCommand::WindowMinimize,
+            OperationKind::Command,
+            "Minimize a window instance; its drafts and navigation stay",
+            vec![window()],
+            window_info.clone(),
+            Retry::Idempotent,
+        ),
+        spec(
+            SessionCommand::WindowRestore,
+            OperationKind::Command,
+            "Undo one step: bring a minimized window back, or leave full screen or the maximized size",
+            vec![window()],
+            window_info.clone(),
+            Retry::Never,
+        ),
+        spec(
+            SessionCommand::WindowMaximize,
+            OperationKind::Command,
+            "Grow a window instance to fill its display, as the platform zooms windows",
+            vec![window()],
+            window_info.clone(),
+            Retry::Idempotent,
+        ),
+        with_errors(
+            spec(
+                SessionCommand::WindowMove,
+                OperationKind::Command,
+                "Move a window instance so its top-left corner is at x, y; its title bar must stay on a display",
+                vec![
+                    window(),
+                    param("x", Type::Float, "Left edge in points"),
+                    param("y", Type::Float, "Top edge in points"),
+                ],
+                window_info.clone(),
+                Retry::Idempotent,
+            ),
+            &["out_of_range"],
+        ),
+        with_errors(
+            spec(
+                SessionCommand::WindowResize,
+                OperationKind::Command,
+                "Resize a window instance, keeping its top-left corner; the size must respect the window's minimum",
+                vec![
+                    window(),
+                    param("width", Type::Float, "Outer width in points"),
+                    param("height", Type::Float, "Outer height in points"),
+                ],
+                window_info,
+                Retry::Idempotent,
+            ),
+            &["out_of_range"],
         ),
     ];
     (types, commands)

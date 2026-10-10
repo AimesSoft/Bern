@@ -5,7 +5,7 @@
 - 工具链：Rust 1.99.0（Edition 2024）；Swift 6.3.2，以 Swift 6 语言模式编译；Xcode 26.5（SDK 26.5）
 - 部署：最低 macOS 14，构建本机架构，本地临时签名
 
-本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、声明式异步查询与随包资源）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
+本文记录阶段一（编译边界验证）与阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
 
 ## 完成情况
 
@@ -52,7 +52,7 @@
 | 主窗口与设置窗口：四入口打开/关闭/激活、重复打开复用、独立草稿 | 完成 | 窗口实例带代次，重开后旧引用被拒绝；启动时总是打开 `initial: open` 的主窗口，主窗口关闭后点 Dock 图标重新打开 |
 | 关闭确认、模态阻挡、确认失效 | 完成 | 见“窗口关闭协议”；系统关闭按钮与 File > Close 先走关闭检查 |
 | 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放 |
-| 最小化后恢复 | 未做 | 没有最小化、恢复命令 |
+| 最小化后恢复 | 完成 | `window.minimize`、`window.restore`、`window.maximize`、`window.move`、`window.resize` 与查询 `window.list`；系统完成的最小化、缩放、移动与聚焦以带来源和代次的事实同步，不派发命令（见“窗口呈现”）；最小化不释放草稿、导航与查询订阅 |
 | macOS Video 验证 | 完成 | 见“Video”；用受控测试媒体实测 AVFoundation 播放 |
 
 ## 工程结构
@@ -253,6 +253,11 @@ flowchart LR
 - **进程内桥接**：固定 C ABI（`bern.h`）只有少量函数。参数、状态与回执按 `bern_protocol::codec` 的二进制布局传递，两端由生成代码按 schema 编解码；接收端仍做 schema 校验。前端与引擎的目录指纹不一致时拒绝启动。
 - **引擎**：命令在专用线程上串行执行；参数在边界校验；panic 使引擎拒绝后续命令；状态按字段比较，只在变化时递增修订号。
 - **窗口与会话**：窗口出现时向运行时登记，获得代次与外部 ID（如 `settings#2`）。草稿属于窗口实例，关闭即释放；带旧代次的写入返回 `stale_window`。
+- **窗口呈现**：真实窗口属于目标。宿主观察每个 `NSWindow` 的最小化、全屏、缩放、移动、尺寸（实时缩放结束时一次）、聚焦、遮挡与可见性，以及应用隐藏，把结果作为事实报告给会话运行时：可见性（可见、最小化、隐藏）、尺寸状态（普通、最大化、全屏）、以主显示器左上角为原点的外框、是否聚焦、当前可用动作，并标明来源（命令或用户与系统）。事实带窗口代次，旧实例的迟到事实返回 `stale_window` 被丢弃；值不变时版本号不变。事实从不派发命令，外部入口也无法注入事实。
+  - `window.list` 由运行时按记录的事实回答，不经过界面线程；窗口刚挂载、事实未到时生命周期为 `Opening`，关闭确认待决时为 `Closing`（目前 Bern 唯一的模态关系）。
+  - 呈现命令先按事实检查动作是否可用（否则 `target_unavailable`，并列出可用动作），再由宿主执行，等 AppKit 报告完成（最小化与恢复等待动画结束的通知，超时 5 秒返回 `ui_timeout`），最后返回运行时记录的窗口信息，因此结果是实际状态而不是请求。
+  - 最大化即 AppKit 的缩放；只有可调整大小的窗口能最大化（固定尺寸窗口的 `isZoomed` 不算）。恢复一次撤销一步：最小化、全屏、最大化依次。AppKit 没有可回到的尺寸时（窗口以缩放尺寸启动），恢复到最大化前的外框，或居中的声明尺寸。
+  - `window.move` 要求标题栏仍在某个显示器的可见区域内，`window.resize` 保持左上角并遵守窗口的最小与最大尺寸（含 SwiftUI 按根视图设置的内容尺寸），越界返回 `out_of_range` 并给出限制。
 - **启动与重新打开**：`initial: open` 表示会话初始化时打开一次，因此不恢复上次运行时窗口的开关状态（`ApplePersistenceIgnoreState`），否则上次退出前关掉的主窗口启动后不出现；窗口尺寸与位置仍由系统记住。主窗口不存在时，点 Dock 图标（重新打开事件）打开主窗口，与“系统设置”“音乐”一致。
 - **控件登记与会话命令**：每个可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、启用状态，以及与用户输入相同的动作闭包。名称取控件自己的文案；侧边栏与标签页取当前选中项的文案，导航链接取行内第一段文字（经过容器与 `match` 分支），导航容器与查询没有名称。外部的 `ui.activate` 等命令在主线程上经这些闭包执行；禁用控件返回 `target_unavailable`，被本窗口关闭确认阻挡的控件返回 `target_blocked`，同一目标挂载在多处返回 `target_ambiguous`；密码框的值不暴露。`ui.inspect` 的 `reason` 给出不可操作原因（`disabled`、`blocked_by_modal`）。
 
@@ -326,6 +331,10 @@ target/bern/macos/bin/showcase ui inspect
 target/bern/macos/bin/showcase ui select --target main_window.pages --option Library
 target/bern/macos/bin/showcase ui activate --target "library_page.item_link[2]"
 target/bern/macos/bin/showcase window open --kind settings
+target/bern/macos/bin/showcase window list
+target/bern/macos/bin/showcase window minimize --window main#1
+target/bern/macos/bin/showcase window restore --window main#1
+target/bern/macos/bin/showcase window resize --window main#1 --width 1000 --height 700
 ```
 
 ```sh
@@ -357,7 +366,7 @@ open target/bern/macos/Showcase.app
 
 示例的受控测试媒体在 `examples/showcase/media/`，由 `make-media.sh` 用 ffmpeg 生成：`aurora.mp4`（8 秒）、`tides.mp4`（6 秒）、`broken.mp4`（不是影片，用于失败）声明为随包资源，随应用包发布；`live/live.m3u8`（没有结束标记的 HLS，时长未知、不可跳转）不随包发布，只作开发辅助：AVFoundation 只通过 HTTP 播放 HLS，例如 `python3 -m http.server --directory examples/showcase/media`。
 
-开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_CLOSE_SIGNAL=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，与点按标题栏关闭按钮相同，供没有屏幕访问的工具验证系统关闭路径。这三项只用于开发检查，默认关闭。
+开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_WINDOW_SIGNALS=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，SIGUSR2 调用 `performMiniaturize(_:)`，与点按标题栏的关闭、最小化按钮相同，供没有屏幕访问的工具验证系统关闭路径和来自用户的窗口事实。这三项只用于开发检查，默认关闭。
 
 ## 验证记录
 
@@ -407,6 +416,21 @@ open target/bern/macos/Showcase.app
 - 设置窗口修改显示名称后 `window close` 返回确认，系统警告框“要存储对显示名称的更改吗？”带存储、不存储、取消；待决时开关返回 `target_blocked`；`Save` 后窗口关闭，引擎 `display_name` 更新。
 - 视频页：精选片段 `Ready 0:00 / 0:08`，预览播放器 `Idle`，其播放与进度控件禁用；截图中画面、系统控制条与片段按钮正常。
 
+2026-10-10，窗口最小化、恢复与呈现查询：
+
+- 新增测试：运行时 3 项（事实按实例计版本、旧代次被拒、未变化不升版本；动作按事实判断可用并列出可用动作；`WindowInfo` 符合会话目录 schema）；C ABI 1 项（事实未到时 `Opening` 且拒绝最小化；`window.list` 不经过界面；最小化命令到达前端、前端报告事实后无值答复，结果是运行时记录的窗口；关闭后迟到事实被丢弃）。共 114 项通过，clippy 与 fmt 干净，生成的 Swift 零警告。
+- 实机（CLI）：
+  - `window minimize --window main#1` 约 0.58 s 后返回（等动画结束），`Minimized`、可用动作只剩激活、关闭、恢复，来源 `Command`；`sessions` 仍为 `main#1`，控件仍登记。恢复后搜索框文字、所选页面与查询订阅（`ready v1 (1)`）不变。
+  - 恢复一次撤销一步；以缩放尺寸启动的窗口恢复到居中的声明尺寸 920 × 640。最大化后 `Maximized`，再恢复回到原外框；无可恢复时返回 `target_unavailable`。
+  - `window move --x 120 --y 90`、`window resize --width 1000 --height 700` 返回实际外框；`--width 300 --height 200` 返回“needs at least 720 × 532”（`out_of_range`）；`--x 99999` 返回标题栏不在任何显示器上。
+  - 设置窗口（固定尺寸）为 `Normal`，可用动作为激活、关闭、移动；最小化与调整尺寸返回 `target_unavailable`。
+  - 系统路径：`BERN_DEV_WINDOW_SIGNALS=main` 下 SIGUSR2（`performMiniaturize`，与黄色按钮相同）后，`window.list` 为 `Minimized`、来源 `System`，没有派发命令；对应用发送重新打开事件（与点 Dock 图标相同）后恢复为 `Visible`，来源 `System`。
+  - 刚打开的设置窗口起初报告为隐藏：AppKit 在窗口上屏前发出移动与尺寸通知，上屏本身在应用未激活时不发出所观察的通知。改为同时以键值观察跟踪 `isVisible` 后为 `Visible`。
+  - 关闭已最小化的主窗口直接关闭；MCP 共 35 个工具，`window_list` 带 `readOnlyHint`，`window_restore` 不幂等。
+  - `window activate` 后 `focused` 仍为 false：macOS 14 起激活是协作式的，后台应用不能从前台应用（本次为 Claude）抢走焦点；事实如实反映。
+
+未完成的验证：真实点按黄色、绿色按钮与双击标题栏（以 `performMiniaturize(_:)` 代替黄色按钮）；进入全屏后恢复（没有全屏命令，系统路径需要屏幕访问）；应用隐藏（Cmd-H）时为 `Hidden`；多显示器下的坐标与标题栏检查。
+
 2026-10-10，阶段一与阶段二主干，本机 macOS 27.0.1（arm64）：
 
 - `cargo test --workspace` 全部通过，`cargo clippy --workspace --all-targets -- -D warnings` 无警告，`cargo fmt --check` 通过。
@@ -432,6 +456,7 @@ open target/bern/macos/Showcase.app
 - Video 未实现：倍速与轨道选择、全屏与画中画、海报、循环、自动播放与初始静音等媒体属性、覆盖层（字幕、弹幕）、系统媒体键与 Now Playing（会绕过命令，因此未接入）、受保护媒体。HLS 需经 HTTP 加载。同一 source 声明在一个窗口里挂载多次时第二个播放器创建失败（`player_exists`）。
 - 进程内执行端与引擎同生同灭，“执行端断开”只由 hub 测试覆盖。
 - 应用退出（Cmd-Q）不经过窗口关闭检查。
+- 窗口呈现：没有进入全屏的命令（全屏只能由用户进入，可由 `window.restore` 退出）；`window.activate` 受系统协作式激活限制，后台应用不一定获得焦点；虚拟窗口的呈现属于 Web 阶段。
 - 首版引擎命令同步完成，没有执行中句柄、取消与进度。
 - 组件库只支持展示型组件（值参数），不能持有会话状态或调用命令；库从源码现场生成描述，尚无预发布描述的分发与缓存。
 - Web、GTK、WinUI 3 等其他目标与 Bern 主题算法属于后续阶段。

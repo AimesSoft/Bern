@@ -206,6 +206,13 @@ final class BernWindowContext {
     var pendingClose: BernPendingClose?
     @ObservationIgnored private(set) weak var nsWindow: NSWindow?
     @ObservationIgnored private var closeGuard: BernCloseGuard?
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var visibility: NSKeyValueObservation?
+    /// Set while a window command runs, so the facts it causes are
+    /// reported as caused by a command rather than by the user.
+    @ObservationIgnored var commandInFlight = false
+    /// The frame `window.maximize` left, for `window.restore`.
+    @ObservationIgnored var restoreFrame: NSRect?
     @ObservationIgnored var allowsClose = false
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
@@ -236,6 +243,37 @@ final class BernWindowContext {
         guard let window, window !== nsWindow else { return }
         nsWindow = window
         installCloseGuard()
+        observe(window)
+        reportFacts()
+    }
+
+    /// Whatever the user or the system does to the window is reported as a
+    /// fact, never turned into a command. A live resize is reported once
+    /// it ends.
+    private func observe(_ window: NSWindow) {
+        for observer in observers { NotificationCenter.default.removeObserver(observer) }
+        let names: [Notification.Name] = [
+            NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification,
+            NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
+            NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+            NSWindow.didMoveNotification, NSWindow.didResizeNotification,
+            NSWindow.didEndLiveResizeNotification, NSWindow.didChangeOcclusionStateNotification,
+        ]
+        observers = names.map { name in
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) {
+                [weak self] _ in
+                MainActor.assumeIsolated { self?.reportFacts() }
+            }
+        }
+        // Ordering a window on or off screen posts none of the above.
+        visibility = window.observe(\.isVisible) { [weak self] _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.reportFacts() } }
+        }
+    }
+
+    func reportFacts() {
+        guard let window = nsWindow, generation > 0, !window.inLiveResize else { return }
+        BernHost.shared.reportFacts(self, window)
     }
 
     /// Windows with a close check route the system close button and
@@ -366,6 +404,9 @@ struct BernFailure: Identifiable {
 struct BernWindowKind {
     let id: String
     let isSettings: Bool
+    /// The declared content size, used when a window has no other size to
+    /// return to.
+    let defaultSize: NSSize?
 }
 
 private func bernCopy(_ bytes: UnsafePointer<UInt8>?, _ count: Int) -> [UInt8] {
@@ -431,7 +472,7 @@ final class BernHost {
     @ObservationIgnored private var apply: ((UInt32, inout BernReader) throws -> Void)?
     @ObservationIgnored private var kinds: [BernWindowKind] = []
     @ObservationIgnored private var primary = ""
-    @ObservationIgnored private var windows: [String: BernWindowContext] = [:]
+    @ObservationIgnored private(set) var windows: [String: BernWindowContext] = [:]
     @ObservationIgnored private var pendingOpens: [String: [UInt64]] = [:]
     @ObservationIgnored private var openWindow: OpenWindowAction?
     @ObservationIgnored private var openSettings: OpenSettingsAction?
@@ -482,6 +523,14 @@ final class BernHost {
         receiveState(Self.take(bern_app_snapshot(app)))
         BernMedia.shared.attachExecutor()
         BernMedia.shared.receive(Self.take(bern_media_snapshot(app)))
+        // Hiding the app hides every window without minimizing it.
+        for name in [NSApplication.didHideNotification, NSApplication.didUnhideNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    for context in BernHost.shared.windows.values { context.reportFacts() }
+                }
+            }
+        }
     }
 
     func stop() {
@@ -681,6 +730,7 @@ final class BernHost {
             }
             context.attached(generation: generation, id: id)
             windows[context.kindID] = context
+            context.reportFacts()
             BernSnapshot.schedule()
             for request in pendingOpens.removeValue(forKey: context.kindID) ?? [] {
                 complete(request, command: 8) { $0.text(id) }
@@ -744,6 +794,164 @@ final class BernHost {
     /// The system window showing a window kind, for development aids.
     func systemWindow(_ kindID: String) -> NSWindow? {
         windows[kindID]?.nsWindow
+    }
+
+    // MARK: Window presentation
+
+    /// Report what AppKit shows for a window: visibility, size state, the
+    /// frame with a top-left origin on the main display, focus, and the
+    /// window actions available now, as bits in `WindowAction` order.
+    func reportFacts(_ context: BernWindowContext, _ window: NSWindow) {
+        guard let handle else { return }
+        let state = BernWindowState(window)
+        let frame = BernWindowState.topLeft(window.frame)
+        _ = bern_window_facts(
+            handle, context.kind, context.generation, context.commandInFlight ? 0 : 1,
+            state.visibility, state.size, frame.minX, frame.minY, frame.width, frame.height,
+            window.isKeyWindow ? 1 : 0, state.actions)
+    }
+
+    private func nsWindow(_ context: BernWindowContext) throws -> NSWindow {
+        guard let window = context.nsWindow else {
+            throw BernCommandFailure(code: "target_unavailable", message: "`\(context.id)` has no system window yet")
+        }
+        return window
+    }
+
+    private func unavailable(_ context: BernWindowContext, _ action: String) -> BernCommandFailure {
+        BernCommandFailure(code: "target_unavailable", message: "`\(context.id)` cannot \(action) now")
+    }
+
+    /// Run a window action and answer once AppKit reports that it is done:
+    /// at once for synchronous changes, or when `name` is posted for
+    /// animated ones. The facts it causes are reported before the answer.
+    private func perform(
+        _ context: BernWindowContext, request: UInt64, command: UInt32,
+        until name: Notification.Name? = nil, _ action: () -> Void
+    ) {
+        context.commandInFlight = true
+        let finish: @MainActor (BernCommandFailure?) -> Void = { [weak self] failure in
+            context.reportFacts()
+            context.commandInFlight = false
+            if let failure {
+                self?.fail(request, failure)
+            } else {
+                self?.complete(request, command: command) { _ in }
+            }
+        }
+        guard let name, let window = context.nsWindow else {
+            action()
+            finish(nil)
+            return
+        }
+        let wait = BernWait()
+        wait.observer = NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { _ in
+            MainActor.assumeIsolated { if wait.finish() { finish(nil) } }
+        }
+        action()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            MainActor.assumeIsolated {
+                if wait.finish() {
+                    finish(BernCommandFailure(
+                        code: "ui_timeout",
+                        message: "AppKit did not finish the window change in time; the outcome is unknown"))
+                }
+            }
+        }
+    }
+
+    private func minimize(_ context: BernWindowContext, request: UInt64, command: UInt32) throws {
+        let window = try nsWindow(context)
+        guard BernWindowState(window).can(.minimize) else { throw unavailable(context, "minimize") }
+        perform(context, request: request, command: command, until: NSWindow.didMiniaturizeNotification) {
+            window.miniaturize(nil)
+        }
+    }
+
+    /// Undo one step, the most recent first: minimized, full screen, zoomed.
+    private func restore(_ context: BernWindowContext, request: UInt64, command: UInt32) throws {
+        let window = try nsWindow(context)
+        if window.isMiniaturized {
+            perform(context, request: request, command: command, until: NSWindow.didDeminiaturizeNotification) {
+                window.deminiaturize(nil)
+            }
+        } else if window.styleMask.contains(.fullScreen) {
+            perform(context, request: request, command: command, until: NSWindow.didExitFullScreenNotification) {
+                window.toggleFullScreen(nil)
+            }
+        } else if BernWindowState(window).size == 1 {
+            // An animated zoom returns once the animation is done. AppKit
+            // has nothing to return to for a window that opened zoomed;
+            // it then gets the frame maximize left or its declared size.
+            let fallback = context.restoreFrame ?? defaultFrame(context, window)
+            context.restoreFrame = nil
+            perform(context, request: request, command: command) {
+                window.zoom(nil)
+                if window.isZoomed { window.setFrame(fallback, display: true, animate: true) }
+            }
+        } else {
+            throw unavailable(context, "restore")
+        }
+    }
+
+    private func maximize(_ context: BernWindowContext, request: UInt64, command: UInt32) throws {
+        let window = try nsWindow(context)
+        guard BernWindowState(window).can(.maximize) else { throw unavailable(context, "maximize") }
+        context.restoreFrame = window.frame
+        perform(context, request: request, command: command) { window.zoom(nil) }
+    }
+
+    /// The declared size centred on the window's display, within its limits;
+    /// two thirds of the display without a declaration.
+    private func defaultFrame(_ context: BernWindowContext, _ window: NSWindow) -> NSRect {
+        let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? window.frame
+        let declared = kinds.first { $0.id == context.kindID }?.defaultSize.map {
+            window.frameRect(forContentRect: NSRect(origin: .zero, size: $0)).size
+        }
+        let (minimum, maximum) = BernWindowState.limits(window)
+        let wanted = declared ?? NSSize(width: visible.width * 2 / 3, height: visible.height * 2 / 3)
+        let size = NSSize(
+            width: min(max(wanted.width, minimum.width), maximum.width, visible.width),
+            height: min(max(wanted.height, minimum.height), maximum.height, visible.height))
+        return NSRect(
+            x: visible.midX - size.width / 2, y: visible.midY - size.height / 2, width: size.width,
+            height: size.height)
+    }
+
+    /// Move the top-left corner to `x, y`, keeping the title bar on a display.
+    private func move(_ context: BernWindowContext, x: Double, y: Double, request: UInt64, command: UInt32) throws {
+        let window = try nsWindow(context)
+        guard BernWindowState(window).can(.move) else { throw unavailable(context, "move") }
+        let frame = BernWindowState.fromTopLeft(x: x, y: y, size: window.frame.size)
+        let titleBar = NSRect(x: frame.minX, y: frame.maxY - 28, width: frame.width, height: 28)
+        guard NSScreen.screens.contains(where: {
+            let visible = $0.visibleFrame.intersection(titleBar)
+            return visible.width >= 40 && visible.height >= 1
+        }) else {
+            throw BernCommandFailure(
+                code: "out_of_range", message: "at \(x), \(y) the title bar of `\(context.id)` would be off every display")
+        }
+        perform(context, request: request, command: command) { window.setFrame(frame, display: true) }
+    }
+
+    /// Resize keeping the top-left corner, within the window's own limits.
+    private func resize(
+        _ context: BernWindowContext, width: Double, height: Double, request: UInt64, command: UInt32
+    ) throws {
+        let window = try nsWindow(context)
+        guard BernWindowState(window).can(.resize) else { throw unavailable(context, "resize") }
+        let (minimum, maximum) = BernWindowState.limits(window)
+        guard width >= minimum.width, height >= minimum.height, width <= maximum.width, height <= maximum.height
+        else {
+            let limit = maximum.width < .greatestFiniteMagnitude / 2 ? " up to \(Int(maximum.width)) × \(Int(maximum.height))" : ""
+            throw BernCommandFailure(
+                code: "out_of_range",
+                message: "`\(context.id)` needs at least \(Int(minimum.width.rounded(.up))) × \(Int(minimum.height.rounded(.up)))\(limit)")
+        }
+        var frame = window.frame
+        frame.origin.y = frame.maxY - height
+        frame.size = NSSize(width: width, height: height)
+        perform(context, request: request, command: command) { window.setFrame(frame, display: true) }
     }
 
     func isBlocked(_ windowID: String) -> Bool {
@@ -1004,6 +1212,20 @@ final class BernHost {
                 case .failure(let problem): self?.fail(request, problem)
                 }
             }
+        case 12:  // window.list is answered by the session runtime
+            throw BernCommandFailure(code: "unknown_command", message: "window.list is answered by the runtime")
+        case 13:  // window.minimize
+            try minimize(try window(try reader.text()), request: request, command: command)
+        case 14:  // window.restore
+            try restore(try window(try reader.text()), request: request, command: command)
+        case 15:  // window.maximize
+            try maximize(try window(try reader.text()), request: request, command: command)
+        case 16:  // window.move
+            let context = try window(try reader.text())
+            try move(context, x: try reader.f64(), y: try reader.f64(), request: request, command: command)
+        case 17:  // window.resize
+            let context = try window(try reader.text())
+            try resize(context, width: try reader.f64(), height: try reader.f64(), request: request, command: command)
         default:
             throw BernCommandFailure(code: "unknown_command", message: "unknown session command \(command)")
         }
@@ -1011,6 +1233,84 @@ final class BernHost {
 
     private func unsupported(_ entry: BernControlEntry, _ action: String) -> BernCommandFailure {
         BernCommandFailure(code: "target_unavailable", message: "`\(entry.target)` (\(entry.role)) does not support \(action)")
+    }
+}
+
+// MARK: - Window presentation types
+
+/// A window's AppKit state in the terms of the session catalog.
+@MainActor
+struct BernWindowState {
+    /// `WindowAction` order of the session catalog.
+    enum Action: UInt32 {
+        case activate, close, minimize, restore, maximize, move, resize
+    }
+
+    let visibility: UInt8
+    let size: UInt8
+    let actions: UInt32
+
+    init(_ window: NSWindow) {
+        let mask = window.styleMask
+        let minimized = window.isMiniaturized
+        let fullScreen = mask.contains(.fullScreen)
+        // A window that cannot be resized reports `isZoomed` when its fixed
+        // frame equals its standard frame; only resizable windows zoom.
+        let zoomed = !fullScreen && mask.contains(.resizable) && window.isZoomed
+        visibility = minimized ? 1 : (window.isVisible && !NSApplication.shared.isHidden ? 0 : 2)
+        size = fullScreen ? 2 : (zoomed ? 1 : 0)
+        let normal = !minimized && !fullScreen
+        let available: [(Action, Bool)] = [
+            (.activate, true),
+            (.close, mask.contains(.closable)),
+            (.minimize, normal && mask.contains(.miniaturizable)),
+            (.restore, minimized || fullScreen || zoomed),
+            (.maximize, normal && !zoomed && mask.contains(.resizable)),
+            (.move, normal),
+            (.resize, normal && mask.contains(.resizable)),
+        ]
+        actions = available.reduce(0) { bits, entry in entry.1 ? bits | 1 << entry.0.rawValue : bits }
+    }
+
+    func can(_ action: Action) -> Bool { actions & 1 << action.rawValue != 0 }
+
+    /// AppKit frames grow upwards from the main display's bottom-left
+    /// corner; the catalog measures from its top-left corner, downwards.
+    static func topLeft(_ frame: NSRect) -> NSRect {
+        let top = NSScreen.screens.first?.frame.maxY ?? 0
+        return NSRect(x: frame.minX, y: top - frame.maxY, width: frame.width, height: frame.height)
+    }
+
+    static func fromTopLeft(x: Double, y: Double, size: NSSize) -> NSRect {
+        let top = NSScreen.screens.first?.frame.maxY ?? 0
+        return NSRect(x: x, y: top - y - size.height, width: size.width, height: size.height)
+    }
+
+    /// Smallest and largest outer size: the window's frame limits combined
+    /// with the content limits SwiftUI sets from the root view.
+    static func limits(_ window: NSWindow) -> (NSSize, NSSize) {
+        let contentMin = window.frameRect(forContentRect: NSRect(origin: .zero, size: window.contentMinSize)).size
+        let contentMax = window.frameRect(forContentRect: NSRect(origin: .zero, size: window.contentMaxSize)).size
+        let minimum = NSSize(
+            width: max(window.minSize.width, contentMin.width, 1), height: max(window.minSize.height, contentMin.height, 1))
+        let maximum = NSSize(
+            width: min(window.maxSize.width, contentMax.width), height: min(window.maxSize.height, contentMax.height))
+        return (minimum, maximum)
+    }
+}
+
+/// Finishes a waiting window command once: by its notification or by the
+/// timeout, whichever comes first.
+@MainActor
+final class BernWait {
+    var observer: NSObjectProtocol?
+    private var done = false
+
+    func finish() -> Bool {
+        guard !done else { return false }
+        done = true
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        return true
     }
 }
 
@@ -1153,23 +1453,32 @@ enum BernSnapshot {
         }
     }
 
-    private static var closeSignal: DispatchSourceSignal?
+    private static var windowSignals: [DispatchSourceSignal] = []
 
-    /// Development aid, off unless `BERN_DEV_CLOSE_SIGNAL` names a window
-    /// kind: SIGUSR1 then calls `performClose(_:)` on that window, exactly
-    /// what its title-bar close button does, so tools without screen access
-    /// can exercise the system close path.
-    static func installCloseSignal() {
-        guard closeSignal == nil,
-            let kind = ProcessInfo.processInfo.environment["BERN_DEV_CLOSE_SIGNAL"]
+    /// Development aid, off unless `BERN_DEV_WINDOW_SIGNALS` names a window
+    /// kind: SIGUSR1 then calls `performClose(_:)` and SIGUSR2
+    /// `performMiniaturize(_:)` on that window, exactly what its title-bar
+    /// buttons do, so tools without screen access can exercise the system
+    /// close path and facts that come from the user.
+    static func installWindowSignals() {
+        guard windowSignals.isEmpty,
+            let kind = ProcessInfo.processInfo.environment["BERN_DEV_WINDOW_SIGNALS"]
         else { return }
-        signal(SIGUSR1, SIG_IGN)
-        let source = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
-        source.setEventHandler {
-            MainActor.assumeIsolated { BernHost.shared.systemWindow(kind)?.performClose(nil) }
+        let actions: [(Int32, @MainActor (NSWindow) -> Void)] = [
+            (SIGUSR1, { $0.performClose(nil) }),
+            (SIGUSR2, { $0.performMiniaturize(nil) }),
+        ]
+        windowSignals = actions.map { number, action in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler {
+                MainActor.assumeIsolated {
+                    if let window = BernHost.shared.systemWindow(kind) { action(window) }
+                }
+            }
+            source.resume()
+            return source
         }
-        source.resume()
-        closeSignal = source
     }
 
     static func schedule() {
@@ -1522,7 +1831,7 @@ struct BernWindowRoot<Content: View>: View {
         .environment(context)
         .onAppear {
             BernSnapshot.applyAppearance()
-            BernSnapshot.installCloseSignal()
+            BernSnapshot.installWindowSignals()
             host.registerActions(openWindow: openWindow, openSettings: openSettings)
             context.dismiss = dismiss
             host.attach(context)

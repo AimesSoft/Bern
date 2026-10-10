@@ -37,6 +37,8 @@ BernBuffer bern_app_channel(BernApp *app);
 void bern_app_dispatch(BernApp *app, uint32_t command, const uint8_t *params, size_t len, uint64_t token);
 BernBuffer bern_window_opened(BernApp *app, uint32_t kind);
 void bern_window_closed(BernApp *app, uint32_t kind, uint64_t generation);
+// Presentation facts of a window instance; see `bern_window_facts` in bern-ffi.
+uint64_t bern_window_facts(BernApp *app, uint32_t kind, uint64_t generation, uint8_t source, uint8_t visibility, uint8_t size, double x, double y, double width, double height, uint8_t focused, uint32_t actions);
 BernBuffer bern_window_request_close(BernApp *app, uint32_t kind, uint64_t generation, uint8_t needs_confirmation, uint8_t can_save);
 BernBuffer bern_window_confirm_close(BernApp *app, uint32_t kind, uint64_t generation, const uint8_t *bytes, size_t len);
 BernBuffer bern_session_set(BernApp *app, uint32_t kind, uint64_t generation, uint32_t session, uint32_t field, const uint8_t *value, size_t len);

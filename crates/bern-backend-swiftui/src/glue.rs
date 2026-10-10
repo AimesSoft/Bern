@@ -201,7 +201,7 @@ pub fn lib_rs(context: &BuildContext, app: &Application) -> String {
                 .map(|index| index.to_string())
                 .collect();
             format!(
-                "bern_ffi::WindowKind {{ id: {:?}.into(), sessions: vec![{}] }}",
+                "bern_ffi::WindowKind {{ id: {:?}.into(), sessions: vec![{}], presentation: bern_ffi::runtime::Presentation::Native }}",
                 window.id,
                 indices.join(", ")
             )

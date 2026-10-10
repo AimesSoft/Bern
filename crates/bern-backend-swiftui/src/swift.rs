@@ -1699,8 +1699,16 @@ impl<'a> Generator<'a> {
             .windows
             .iter()
             .map(|window| {
+                let size = match (window.width, window.height) {
+                    (Some(width), Some(height)) => format!(
+                        "NSSize(width: {}, height: {})",
+                        double(width),
+                        double(height)
+                    ),
+                    _ => "nil".into(),
+                };
                 format!(
-                    "BernWindowKind(id: {}, isSettings: {})",
+                    "BernWindowKind(id: {}, isSettings: {}, defaultSize: {size})",
                     string(&window.id),
                     window.role == WindowRole::Settings
                 )

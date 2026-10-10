@@ -20,7 +20,8 @@ use bern_protocol::{
     encode, session_catalog,
 };
 use bern_runtime::{
-    CloseDecision, CloseStep, DecisionStep, SessionHandler, SessionSpec, Sessions, UiSession,
+    CloseDecision, CloseStep, DecisionStep, FactSource, Frame, SessionHandler, SessionSpec,
+    Sessions, SizeState, UiSession, Visibility, WindowAction, WindowFacts, WindowInfo,
 };
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -158,10 +159,33 @@ impl SessionHandler for UiBridge {
             .iter()
             .find(|spec| spec.id == command.id())
             .expect("catalog entry");
+        for (value, param) in params.iter().zip(&spec.params) {
+            value.check(&param.ty, &types)?;
+        }
+        // The session runtime answers from the facts the frontend reported,
+        // and refuses actions those facts do not offer before the frontend
+        // runs them.
+        let presented = {
+            let session = self.session.lock().expect("session lock");
+            if command == SessionCommand::WindowList {
+                return Ok(Value::List(
+                    session
+                        .window_infos()
+                        .iter()
+                        .map(WindowInfo::to_value)
+                        .collect(),
+                ));
+            }
+            match (presentation_action(command), params.first()) {
+                (Some(action), Some(Value::Text(window))) => {
+                    Some(session.check_action(window, action)?)
+                }
+                _ => None,
+            }
+        };
         let mut writer = Writer::new();
         writer.u32(index as u32);
         for (value, param) in params.iter().zip(&spec.params) {
-            value.check(&param.ty, &types)?;
             encode(value, &param.ty, &types, &mut writer);
         }
         let request = self.next.fetch_add(1, Ordering::Relaxed);
@@ -174,6 +198,23 @@ impl SessionHandler for UiBridge {
         let result = receiver.recv_timeout(Duration::from_secs(10));
         self.pending.lock().expect("pending lock").remove(&request);
         match result {
+            // The frontend answers once the platform reported the new
+            // facts; the result is the instance as the runtime now sees it.
+            Ok(Ok(_)) if presented.is_some() => {
+                let instance = presented.expect("checked");
+                self.session
+                    .lock()
+                    .expect("session lock")
+                    .window_info(instance.kind)
+                    .filter(|info| info.window == instance.id)
+                    .map(|info| info.to_value())
+                    .ok_or_else(|| {
+                        CommandError::new(
+                            "stale_window",
+                            format!("`{}` closed while the command ran", instance.id),
+                        )
+                    })
+            }
             Ok(Ok(value)) => {
                 value.check(&spec.result, &types).map_err(|error| {
                     CommandError::new("ui_failed", format!("invalid UI result: {error}"))
@@ -197,9 +238,13 @@ impl UiBridge {
         let mut reader = Reader::new(bytes);
         let result = match reader.u8() {
             Ok(0) => {
-                // Find the command to know the result type.
+                // Find the command to know the result type. Presentation
+                // commands answer with no value; the runtime adds the facts.
                 let result_type = reader.u32().ok().and_then(|index| {
                     let command = SessionCommand::ALL.get(index as usize)?;
+                    if command.is_presentation() {
+                        return Some(Type::Unit);
+                    }
                     let (_, specs) = session_catalog();
                     specs
                         .into_iter()
@@ -217,6 +262,18 @@ impl UiBridge {
         };
         let _ = sender.send(result);
     }
+}
+
+/// The window action a presentation command performs.
+fn presentation_action(command: SessionCommand) -> Option<WindowAction> {
+    Some(match command {
+        SessionCommand::WindowMinimize => WindowAction::Minimize,
+        SessionCommand::WindowRestore => WindowAction::Restore,
+        SessionCommand::WindowMaximize => WindowAction::Maximize,
+        SessionCommand::WindowMove => WindowAction::Move,
+        SessionCommand::WindowResize => WindowAction::Resize,
+        _ => return None,
+    })
 }
 
 /// The running application behind the C handle.
@@ -620,6 +677,73 @@ pub unsafe extern "C" fn bern_window_closed(app: *mut BernApp, kind: u32, genera
             app.media.release_window(&id);
             app.queries.lock().expect("query lock").close_window(&id);
         }
+    })
+}
+
+/// The frontend reports what the platform shows for a window instance.
+/// `visibility` indexes visible, minimized, hidden; `size` indexes normal,
+/// maximized, full screen; `actions` sets bit `WindowAction::index()` for
+/// each action available now; `source` is 0 when a window command caused
+/// the change and 1 for the user or the system. The frame is in points
+/// with the origin at the top-left of the main display. Returns the fact
+/// version, or 0 when the facts are invalid or the instance is stale.
+///
+/// # Safety
+/// `app` must be null or a live handle from `bern_app_start`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn bern_window_facts(
+    app: *mut BernApp,
+    kind: u32,
+    generation: u64,
+    source: u8,
+    visibility: u8,
+    size: u8,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    focused: u8,
+    actions: u32,
+) -> u64 {
+    with_app(app, 0, |app| {
+        let visibility = match visibility {
+            0 => Visibility::Visible,
+            1 => Visibility::Minimized,
+            2 => Visibility::Hidden,
+            _ => return 0,
+        };
+        let size = match size {
+            0 => SizeState::Normal,
+            1 => SizeState::Maximized,
+            2 => SizeState::FullScreen,
+            _ => return 0,
+        };
+        let source = match source {
+            0 => FactSource::Command,
+            1 => FactSource::System,
+            _ => return 0,
+        };
+        if ![x, y, width, height].iter().all(|value| value.is_finite()) {
+            return 0;
+        }
+        let facts = WindowFacts {
+            visibility,
+            size,
+            frame: Frame {
+                x,
+                y,
+                width,
+                height,
+            },
+            focused: focused != 0,
+            actions: WindowAction::from_bits(actions),
+        };
+        app.session
+            .lock()
+            .expect("session lock")
+            .window_facts(kind as usize, generation, facts, source)
+            .unwrap_or(0)
     })
 }
 

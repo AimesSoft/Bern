@@ -31,6 +31,8 @@ target/bern/macos/bin/showcase showcase search-library --text mo
 target/bern/macos/bin/showcase ui inspect
 target/bern/macos/bin/showcase ui select --target main_window.pages --option Library
 target/bern/macos/bin/showcase media players
+target/bern/macos/bin/showcase window list
+target/bern/macos/bin/showcase window minimize --window main#1
 target/bern/macos/bin/showcase window close --window settings#1
 ```
 
