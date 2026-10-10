@@ -152,6 +152,24 @@ textarea {
   gap: 4px;
 }
 
+/* The engine host is out of reach (WebUI build). */
+.bern-link-banner {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bern-surface-raised);
+  border-bottom: 1px solid var(--bern-separator);
+  color: var(--bern-status-warning);
+  font-weight: 500;
+}
+
+.bern-link-detail {
+  color: var(--bern-text-secondary);
+  font-weight: 400;
+}
+
 .bern-desktop {
   position: relative;
   flex: 1;

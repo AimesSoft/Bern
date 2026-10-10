@@ -302,6 +302,10 @@ pub enum ClientMessage {
         entry: String,
         #[serde(default)]
         catalog_fingerprint: Option<String>,
+        /// Proof that the client may use this channel, for channels that
+        /// are reachable by other local programs, such as WebSocket.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        token: Option<String>,
     },
     Command {
         request_id: String,
@@ -330,6 +334,221 @@ pub enum ClientMessage {
     Subscribe {
         request_id: String,
     },
+    /// Stop waiting for a query's answer; the engine may stop early.
+    Cancel {
+        request_id: String,
+    },
+    /// Register the connected page as a live UI session that external
+    /// entries can address. After a reconnect the page asks to `resume`
+    /// its previous session, which the host grants while that id is free
+    /// and belongs to the same engine instance.
+    OpenSession {
+        request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resume: Option<String>,
+    },
+    /// The page's open window instances, after every change.
+    SessionWindows {
+        windows: Vec<String>,
+    },
+    /// The page's answer to a `session_request`.
+    SessionResult {
+        request_id: String,
+        ok: bool,
+        #[serde(default)]
+        result: Option<Json>,
+        #[serde(default)]
+        error: Option<CommandError>,
+    },
+    /// The page runs players as a media executor.
+    MediaAttach {
+        backend: String,
+        backend_version: String,
+        background_playback: bool,
+        multi_view: bool,
+    },
+    MediaCreate {
+        player: String,
+        owner: String,
+    },
+    MediaBind {
+        player: String,
+        #[serde(default)]
+        url: Option<String>,
+    },
+    MediaRelease {
+        player: String,
+    },
+    /// Every player owned by a closed window instance ends.
+    MediaReleaseWindow {
+        window: String,
+    },
+    MediaView {
+        token: String,
+        #[serde(default)]
+        player: Option<String>,
+        #[serde(default)]
+        window: Option<String>,
+    },
+    /// The executor finished request `request`.
+    MediaComplete {
+        request: String,
+        ok: bool,
+        #[serde(default)]
+        error: Option<CommandError>,
+    },
+    /// What the executor observed for a player and source version.
+    MediaEvent {
+        player: String,
+        source_version: String,
+        observation: MediaObservation,
+    },
+}
+
+/// `bern_media::Observation` on control channels.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MediaObservation {
+    pub phase: String,
+    pub position_ms: i64,
+    #[serde(default)]
+    pub duration_ms: Option<i64>,
+    pub seekable: bool,
+    pub volume: f64,
+    pub muted: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl MediaObservation {
+    pub fn from_observation(observation: &bern_media::Observation) -> Self {
+        Self {
+            phase: observation.phase.name().to_string(),
+            position_ms: observation.position_ms,
+            duration_ms: observation.duration_ms,
+            seekable: observation.seekable,
+            volume: observation.volume,
+            muted: observation.muted,
+            error: observation.error.clone(),
+        }
+    }
+
+    pub fn to_observation(&self) -> Result<bern_media::Observation, CommandError> {
+        let phase = bern_media::Phase::ALL
+            .into_iter()
+            .find(|phase| phase.name() == self.phase)
+            .ok_or_else(|| {
+                CommandError::invalid_params(format!("unknown media phase `{}`", self.phase))
+            })?;
+        if !self.volume.is_finite() {
+            return Err(CommandError::invalid_params("volume must be finite"));
+        }
+        Ok(bern_media::Observation {
+            phase,
+            position_ms: self.position_ms,
+            duration_ms: self.duration_ms,
+            seekable: self.seekable,
+            volume: self.volume,
+            muted: self.muted,
+            error: self.error.clone(),
+        })
+    }
+}
+
+/// A request for a media executor reached over a control channel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MediaRequestMessage {
+    pub request: String,
+    pub player: String,
+    pub source_version: String,
+    pub op: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub muted: Option<bool>,
+}
+
+impl MediaRequestMessage {
+    pub fn from_request(request: &bern_media::ExecRequest) -> Self {
+        use bern_media::ExecOp;
+        let mut message = Self {
+            request: request.request.to_string(),
+            player: request.player.clone(),
+            source_version: request.source_version.to_string(),
+            op: String::new(),
+            url: None,
+            position_ms: None,
+            volume: None,
+            muted: None,
+        };
+        message.op = match &request.op {
+            ExecOp::Load { url } => {
+                message.url = Some(url.clone());
+                "load"
+            }
+            ExecOp::Unload => "unload",
+            ExecOp::Play => "play",
+            ExecOp::Pause => "pause",
+            ExecOp::Seek { position_ms } => {
+                message.position_ms = Some(*position_ms);
+                "seek"
+            }
+            ExecOp::SetVolume { volume } => {
+                message.volume = Some(*volume);
+                "set_volume"
+            }
+            ExecOp::SetMuted { muted } => {
+                message.muted = Some(*muted);
+                "set_muted"
+            }
+            ExecOp::Release => "release",
+        }
+        .to_string();
+        message
+    }
+
+    pub fn to_request(&self) -> Result<bern_media::ExecRequest, CommandError> {
+        use bern_media::ExecOp;
+        let number = |text: &str, what: &str| {
+            text.parse::<u64>()
+                .map_err(|_| CommandError::invalid_params(format!("`{what}` is not a number")))
+        };
+        let missing = |field: &str| {
+            CommandError::invalid_params(format!("media `{}` needs `{field}`", self.op))
+        };
+        let op = match self.op.as_str() {
+            "load" => ExecOp::Load {
+                url: self.url.clone().ok_or_else(|| missing("url"))?,
+            },
+            "unload" => ExecOp::Unload,
+            "play" => ExecOp::Play,
+            "pause" => ExecOp::Pause,
+            "seek" => ExecOp::Seek {
+                position_ms: self.position_ms.ok_or_else(|| missing("position_ms"))?,
+            },
+            "set_volume" => ExecOp::SetVolume {
+                volume: self.volume.ok_or_else(|| missing("volume"))?,
+            },
+            "set_muted" => ExecOp::SetMuted {
+                muted: self.muted.ok_or_else(|| missing("muted"))?,
+            },
+            "release" => ExecOp::Release,
+            other => {
+                return Err(CommandError::invalid_params(format!(
+                    "unknown media operation `{other}`"
+                )));
+            }
+        };
+        Ok(bern_media::ExecRequest {
+            request: number(&self.request, "request")?,
+            player: self.player.clone(),
+            source_version: number(&self.source_version, "source_version")?,
+            op,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -395,6 +614,20 @@ pub enum ServerMessage {
         request_id: Option<String>,
         error: CommandError,
     },
+    /// The page is registered as UI session `session_id`.
+    SessionOpened {
+        request_id: String,
+        session_id: String,
+    },
+    /// An external entry runs a session command on the page.
+    SessionRequest {
+        request_id: String,
+        command: String,
+        #[serde(default)]
+        params: Map<String, Json>,
+    },
+    /// A request for the page's media executor.
+    MediaRequest(MediaRequestMessage),
 }
 
 /// The welcome message for a descriptor.
@@ -418,6 +651,44 @@ pub fn media_players_json(players: &[Value]) -> Vec<Json> {
     players
         .iter()
         .map(|value| to_json(value, &player, &types))
+        .collect()
+}
+
+/// Players from a `media` message, in the media contract's schema.
+pub fn media_players_from_json(players: &[Json]) -> Result<Vec<Value>, SchemaError> {
+    let (types, _) = bern_media::media_catalog();
+    let player = Type::Record {
+        name: "MediaPlayer".into(),
+    };
+    players
+        .iter()
+        .map(|json| from_json(json, &player, &types))
+        .collect()
+}
+
+/// State changes from an `update` or `state` message, by field index.
+pub fn state_from_json(
+    descriptor: &ProtocolDescriptor,
+    values: &Map<String, Json>,
+) -> Result<Vec<(usize, Value)>, SchemaError> {
+    let mut changes = Vec::new();
+    for (name, json) in values {
+        let index = descriptor
+            .state_index(name)
+            .ok_or_else(|| SchemaError::new(format!("unknown state field `{name}`")))?;
+        let field = &descriptor.state[index];
+        changes.push((index, from_json(json, &field.ty, &descriptor.types)?));
+    }
+    changes.sort_by_key(|(index, _)| *index);
+    Ok(changes)
+}
+
+/// Session command parameters as a JSON object, for `session_request`.
+pub fn params_json(spec: &CommandSpec, params: &[Value], types: &TypeTable) -> Map<String, Json> {
+    spec.params
+        .iter()
+        .zip(params)
+        .map(|(param, value)| (param.name.clone(), to_json(value, &param.ty, types)))
         .collect()
 }
 

@@ -1175,7 +1175,13 @@ impl<'a> Generator<'a> {
         )
     }
 
-    pub fn generate(&self, fingerprint: u64, strings: &serde_json::Value, wasm: &str) -> String {
+    pub fn generate(
+        &self,
+        fingerprint: u64,
+        strings: &serde_json::Value,
+        wasm: &str,
+        mode: &str,
+    ) -> String {
         let app = self.app;
         let types = self.types();
         let mut out = Out::default();
@@ -1317,6 +1323,7 @@ impl<'a> Generator<'a> {
             .collect();
         out.line("// Startup.");
         out.open("B.start({");
+        out.line(format!("mode: {},", string(mode)));
         out.line(format!("wasm: {},", string(wasm)));
         out.line(format!("fingerprint: 0x{fingerprint:016x}n,"));
         out.line("resources: \"resources/\",");

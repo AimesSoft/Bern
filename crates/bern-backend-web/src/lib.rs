@@ -2,10 +2,16 @@
 //!
 //! Generates a static page from the shared IR: HTML, the Bern Web
 //! stylesheet with theme variables from the Bern theme kernel, the
-//! JavaScript runtime and the generated application module. The `app`
-//! build compiles the engine, the UI session runtime and the C ABI to one
-//! WebAssembly module the page runs; windows are virtual windows inside the
-//! page. See `Docs/Adaptation/Web.md` for the visual spec it implements.
+//! JavaScript runtime and the generated application module. Windows are
+//! virtual windows inside the page. See `Docs/Adaptation/Web.md` for the
+//! visual spec it implements.
+//!
+//! * `web_mode = "app"`: the engine, the UI session runtime and the C ABI
+//!   run in the page as one WebAssembly module.
+//! * `web_mode = "ui"`: the page runs the UI session runtime only and
+//!   reaches the engine of a separate engine host over WebSocket; the build
+//!   also produces that host, which serves the page, and the CLI and MCP
+//!   programs that reach the same engine through its IPC channel.
 
 mod glue;
 mod icons;
@@ -140,7 +146,7 @@ impl Target for WebBrowser {
                 native: false,
                 virtual_windows: true,
             },
-            channels: &[],
+            channels: &["ipc"],
             media: Some(MediaSupport {
                 contract_versions: bern_media::MEDIA_CONTRACT_VERSION
                     ..=bern_media::MEDIA_CONTRACT_VERSION,
@@ -156,22 +162,29 @@ impl Target for WebBrowser {
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
         let mut diagnostics = check_common(self, app);
-        match config.web_mode.as_deref() {
-            Some("app") => {}
-            Some("ui") => diagnostics.push(Diagnostic::error(format!(
-                "target `{}`: the WebUI build (`web_mode = \"ui\"`) is not implemented yet",
-                config.name
-            ))),
-            _ => diagnostics.push(Diagnostic::error(format!(
-                "target `{}`: set `web_mode = \"app\"` or `\"ui\"`",
-                config.name
-            ))),
-        }
+        let ui = match config.web_mode.as_deref() {
+            Some("app") => false,
+            Some("ui") => true,
+            _ => {
+                diagnostics.push(Diagnostic::error(format!(
+                    "target `{}`: set `web_mode = \"app\"` or `\"ui\"`",
+                    config.name
+                )));
+                false
+            }
+        };
         for channel in &config.channels {
-            diagnostics.push(Diagnostic::error(format!(
-                "target `{}`: channel `{channel}` is not available in a browser; the page cannot listen for local connections",
-                config.name
-            )));
+            if !ui {
+                diagnostics.push(Diagnostic::error(format!(
+                    "target `{}`: channel `{channel}` needs a process that can listen; the `app` build runs only in the page (use `web_mode = \"ui\"`, whose engine host assembles it)",
+                    config.name
+                )));
+            } else if channel != "ipc" {
+                diagnostics.push(Diagnostic::error(format!(
+                    "target `{}`: unknown channel `{channel}`",
+                    config.name
+                )));
+            }
         }
         let framework = strings::framework_languages();
         for language in &app.languages.supported {
@@ -238,6 +251,7 @@ impl Target for WebBrowser {
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
         let strings = strings::tables(app);
+        let remote = context.target.web_mode.as_deref() == Some("ui");
         let mut files = vec![
             GeneratedFile::text("index.html", index_html(app)),
             GeneratedFile::text("bern.js", RUNTIME),
@@ -245,19 +259,44 @@ impl Target for WebBrowser {
             GeneratedFile::text("theme.css", theme::stylesheet(app)),
             GeneratedFile::text(
                 "app.js",
-                Generator::new(app).generate(app.protocol.fingerprint(), &strings, WASM),
+                Generator::new(app).generate(
+                    app.protocol.fingerprint(),
+                    &strings,
+                    WASM,
+                    if remote { "ui" } else { "app" },
+                ),
             ),
-            GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
-            GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
+            GeneratedFile::text(
+                "glue/page/Cargo.toml",
+                glue::page_cargo_toml(context, app, remote),
+            ),
+            GeneratedFile::text(
+                "glue/page/src/lib.rs",
+                glue::page_lib_rs(context, app, remote),
+            ),
         ];
+        let mut crates = vec!["glue/page"];
+        if remote {
+            files.extend([
+                GeneratedFile::text("glue/host/Cargo.toml", glue::host_cargo_toml(context, app)),
+                GeneratedFile::text("glue/host/src/host.rs", glue::host_rs(context, app)),
+                GeneratedFile::text("glue/host/src/cli.rs", glue::cli_rs(context, app)),
+                GeneratedFile::text("glue/host/src/mcp.rs", glue::mcp_rs(context, app)),
+            ]);
+            crates.push("glue/host");
+        }
+        // Pin the generated crates to the workspace's dependency versions.
         let lock = context.workspace_dir.join("Cargo.lock");
-        if let Ok(contents) = std::fs::read(&lock)
-            && !context.output_dir.join("glue/Cargo.lock").exists()
-        {
-            files.push(GeneratedFile {
-                path: "glue/Cargo.lock".into(),
-                contents,
-            });
+        if let Ok(contents) = std::fs::read(&lock) {
+            for dir in crates {
+                let path = PathBuf::from(dir).join("Cargo.lock");
+                if !context.output_dir.join(&path).exists() {
+                    files.push(GeneratedFile {
+                        path,
+                        contents: contents.clone(),
+                    });
+                }
+            }
         }
         let manifest = serde_json::json!({
             "target": self.descriptor().id,
@@ -268,7 +307,10 @@ impl Target for WebBrowser {
             "generator": "bern-backend-web",
             "generator_version": env!("CARGO_PKG_VERSION"),
             "profile": if context.release { "release" } else { "debug" },
-            "engine_deployment": "in-page",
+            "engine_deployment": if remote { "engine-host" } else { "in-page" },
+            "application_transport": if remote { "websocket" } else { "in-process" },
+            "application_codec": if remote { Some("json") } else { None },
+            "channels": context.target.channels,
             "ui_bridge": "wasm-c-abi",
             "color_source": "bern-theme",
             "theme_algorithm": bern_theme::ALGORITHM_VERSION,
@@ -291,30 +333,45 @@ impl Target for WebBrowser {
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
         let output = &context.output_dir;
+        let remote = context.target.web_mode.as_deref() == Some("ui");
         let profile = if context.release { "release" } else { "debug" };
-        let glue_target = context.workspace_dir.join("target/bern-web-glue");
-        let module = glue_target
+        // Separate target directories, so switching modes never mixes an
+        // engine-carrying module with a WebUI one.
+        let mode = if remote { "ui" } else { "app" };
+        let page_target = context
+            .workspace_dir
+            .join(format!("target/bern-web-glue/{mode}"));
+        let module = page_target
             .join(RUST_TARGET)
             .join(profile)
             .join("bern_web_app.wasm");
-        let mut cargo = vec![
-            "build".to_string(),
-            "--manifest-path".into(),
-            output.join("glue/Cargo.toml").display().to_string(),
-            "--target".into(),
-            RUST_TARGET.into(),
-            "--target-dir".into(),
-            glue_target.display().to_string(),
-        ];
-        if context.release {
-            cargo.push("--release".into());
-        }
-        let steps = vec![
+        let cargo = |manifest: &str, target_dir: &PathBuf, rust_target: Option<&str>| {
+            let mut args = vec![
+                "build".to_string(),
+                "--manifest-path".into(),
+                output.join(manifest).display().to_string(),
+                "--target-dir".into(),
+                target_dir.display().to_string(),
+            ];
+            if let Some(rust_target) = rust_target {
+                args.push("--target".into());
+                args.push(rust_target.into());
+            }
+            if context.release {
+                args.push("--release".into());
+            }
+            args
+        };
+        let mut steps = vec![
             BuildStep::Run {
-                description: "Build the engine and runtime for WebAssembly".into(),
+                description: if remote {
+                    "Build the page runtime for WebAssembly".into()
+                } else {
+                    "Build the engine and runtime for WebAssembly".into()
+                },
                 program: "cargo".into(),
-                args: cargo,
-                cwd: output.join("glue"),
+                args: cargo("glue/page/Cargo.toml", &page_target, Some(RUST_TARGET)),
+                cwd: output.join("glue/page"),
                 env: vec![],
             },
             BuildStep::Copy {
@@ -337,9 +394,33 @@ impl Target for WebBrowser {
                 keep: vec![],
             },
         ];
-        Ok(BuildPlan {
-            steps,
-            products: vec![output.join("index.html")],
-        })
+        let mut products = vec![output.join("index.html")];
+        if remote {
+            let host_target = context.workspace_dir.join("target/bern-web-glue/host");
+            let built = host_target.join(profile);
+            let program = glue::program(app);
+            steps.push(BuildStep::Run {
+                description: "Build the engine host, CLI and MCP server".into(),
+                program: "cargo".into(),
+                args: cargo("glue/host/Cargo.toml", &host_target, None),
+                cwd: output.join("glue/host"),
+                env: vec![],
+            });
+            steps.push(BuildStep::CreateDir {
+                path: output.join("bin"),
+            });
+            for name in [
+                format!("{program}-host"),
+                program.clone(),
+                format!("{program}-mcp"),
+            ] {
+                steps.push(BuildStep::Copy {
+                    from: built.join(&name),
+                    to: output.join("bin").join(&name),
+                });
+                products.push(output.join("bin").join(&name));
+            }
+        }
+        Ok(BuildPlan { steps, products })
     }
 }

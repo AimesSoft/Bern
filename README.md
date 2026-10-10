@@ -48,6 +48,15 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory target/bern/web_app
 
 然后在浏览器打开 `http://127.0.0.1:8765/`。页面需要经 HTTP 提供，直接打开本地文件无法加载 WebAssembly 模块。
 
+WebUI 版本把引擎放在独立的引擎宿主中，页面、CLI 与 MCP 驱动同一个引擎：
+
+```sh
+cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_ui
+target/bern/web_ui/bin/showcase-host
+```
+
+宿主打印带令牌的地址（`http://127.0.0.1:…/#token=…`），在浏览器打开它；`target/bern/web_ui/bin/showcase` 与 `showcase-mcp` 连接同一个引擎。
+
 ## 编写应用
 
 一个 Bern 应用由三部分组成：

@@ -165,12 +165,16 @@ pub unsafe extern "C" fn bern_media_dispatch(
             ),
             Ok(params) => {
                 let hub = media.clone();
-                media.dispatch(command, params, move |result| {
-                    callbacks.reply(
-                        token,
-                        &result_bytes(&result, hub.snapshot().0, &spec.result, &types),
-                    );
-                });
+                media.dispatch(
+                    command,
+                    params,
+                    Box::new(move |result| {
+                        callbacks.reply(
+                            token,
+                            &result_bytes(&result, hub.snapshot().0, &spec.result, &types),
+                        );
+                    }),
+                );
             }
         }
     })

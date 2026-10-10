@@ -238,6 +238,7 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) ->
             protocol_version,
             entry,
             catalog_fingerprint,
+            ..
         }) => {
             if protocol_version != PROTOCOL_VERSION {
                 return send(
@@ -427,6 +428,24 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) ->
                     })
                     .collect(),
             },
+            // Pages register sessions and run players over the WebSocket
+            // channel of a WebUI engine host; this channel serves tools.
+            ClientMessage::Cancel { .. }
+            | ClientMessage::OpenSession { .. }
+            | ClientMessage::SessionWindows { .. }
+            | ClientMessage::SessionResult { .. }
+            | ClientMessage::MediaAttach { .. }
+            | ClientMessage::MediaCreate { .. }
+            | ClientMessage::MediaBind { .. }
+            | ClientMessage::MediaRelease { .. }
+            | ClientMessage::MediaReleaseWindow { .. }
+            | ClientMessage::MediaView { .. }
+            | ClientMessage::MediaComplete { .. }
+            | ClientMessage::MediaEvent { .. } => error(
+                None,
+                "invalid_message",
+                "this channel serves tools; pages connect through the engine host's WebSocket channel",
+            ),
             ClientMessage::Subscribe { request_id } => {
                 let updates = Arc::clone(&writer);
                 let engine = host.subscribe(move |update| {
@@ -567,6 +586,7 @@ impl Client {
                 protocol_version: PROTOCOL_VERSION,
                 entry: entry.to_string(),
                 catalog_fingerprint: fingerprint.map(|value| value.to_string()),
+                token: None,
             })
             .map_err(ConnectError::Io)?;
         match client.read().map_err(ConnectError::Io)? {

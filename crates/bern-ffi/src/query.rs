@@ -10,7 +10,8 @@
 //! ask again with the same parameters.
 
 use super::{BernApp, BernBuffer, BernCallbacks, error_bytes, slice, with_app};
-use bern_command::{CallContext, Entry, Host};
+use crate::link::EngineLink;
+use bern_command::{CallContext, Entry};
 use bern_protocol::{
     CommandError, Invocation, ProtocolDescriptor, Reader, Value, Writer, decode, encode,
 };
@@ -76,7 +77,7 @@ fn current(
 /// Send a request to the engine; its answer updates the subscription and,
 /// when still current, the frontend.
 pub(crate) fn send(
-    host: &Host,
+    host: &dyn EngineLink,
     subscriptions: &Subscriptions,
     callbacks: BernCallbacks,
     id: u64,
@@ -87,7 +88,7 @@ pub(crate) fn send(
     let descriptor = host.descriptor();
     let answers = Arc::clone(subscriptions);
     let cancellation = ticket.cancellation.clone();
-    host.dispatch_cancellable(
+    host.dispatch(
         Invocation {
             command: query,
             params,
@@ -97,7 +98,7 @@ pub(crate) fn send(
             request_id: format!("query-{id}-{}", ticket.version),
         },
         cancellation,
-        move |outcome| {
+        Box::new(move |outcome| {
             let bytes = {
                 let mut subscriptions = answers.lock().expect("query lock");
                 match subscriptions.resolve(id, &ticket, outcome.result) {
@@ -108,14 +109,14 @@ pub(crate) fn send(
             if let Some(bytes) = bytes {
                 callbacks.query(id, &bytes);
             }
-        },
+        }),
     );
 }
 
 /// Engine state fields changed: ask again for every subscription whose
 /// query reads one of them, and show that it is refreshing.
 pub(crate) fn refresh(
-    host: &Host,
+    host: &dyn EngineLink,
     subscriptions: &Subscriptions,
     callbacks: BernCallbacks,
     changed: &[usize],
@@ -252,7 +253,7 @@ pub unsafe extern "C" fn bern_query_request(
                 )
             };
             send(
-                &app.host,
+                app.host.as_ref(),
                 &app.queries,
                 app.callbacks,
                 subscription,

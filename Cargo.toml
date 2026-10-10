@@ -10,6 +10,7 @@ members = [
     "crates/bern-theme",
     "crates/bern-adapter-json",
     "crates/bern-transport-ipc",
+    "crates/bern-transport-ws",
     "crates/bern-ffi",
     "crates/bern-adapter-cli",
     "crates/bern-adapter-mcp",
@@ -48,6 +49,7 @@ bern-backend-swiftui = { path = "crates/bern-backend-swiftui" }
 bern-backend-web = { path = "crates/bern-backend-web" }
 bern-adapter-json = { path = "crates/bern-adapter-json" }
 bern-transport-ipc = { path = "crates/bern-transport-ipc" }
+bern-transport-ws = { path = "crates/bern-transport-ws" }
 bern-adapter-cli = { path = "crates/bern-adapter-cli" }
 bern-adapter-mcp = { path = "crates/bern-adapter-mcp" }
 bern-ffi = { path = "crates/bern-ffi" }

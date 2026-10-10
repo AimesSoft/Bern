@@ -9,12 +9,15 @@
 //! Callbacks may run on engine or channel threads; the frontend moves work
 //! to its UI thread. All functions catch Rust panics at the boundary.
 
+pub mod link;
 mod media;
 mod query;
+#[cfg(feature = "remote")]
+pub mod remote;
 
 use bern_command::resources::Resources;
-use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
-use bern_media::{MediaHub, MediaSubscription};
+use bern_command::{CallContext, EngineProtocol, Entry, Host};
+use bern_media::MediaHub;
 use bern_protocol::{
     CommandError, CommandOutcome, Invocation, Reader, SessionCommand, Type, Value, Writer, decode,
     encode, session_catalog,
@@ -23,11 +26,12 @@ use bern_runtime::{
     CloseDecision, CloseStep, DecisionStep, FactSource, Frame, SessionHandler, SessionSpec,
     Sessions, SizeState, UiSession, Visibility, WindowAction, WindowFacts, WindowInfo,
 };
+use link::{EngineLink, Guard, MediaLink};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -118,12 +122,22 @@ pub struct AppSpec {
 
 /// Forwards session commands from external entries to the frontend, which
 /// runs them through the real control bindings.
-struct UiBridge {
-    session_id: String,
+pub(crate) struct UiBridge {
+    pub(crate) session_id: String,
     callbacks: BernCallbacks,
     session: Arc<Mutex<UiSession>>,
-    pending: Mutex<BTreeMap<u64, Sender<Result<Value, CommandError>>>>,
+    pending: Mutex<BTreeMap<u64, PendingRequest>>,
     next: AtomicU64,
+}
+
+pub(crate) type SessionReply = Box<dyn FnOnce(Result<Value, CommandError>) + Send>;
+
+/// A session command the frontend is running.
+struct PendingRequest {
+    command: SessionCommand,
+    /// The window a presentation command acts on; its facts are the result.
+    presented: Option<bern_runtime::WindowInstance>,
+    reply: SessionReply,
 }
 
 fn write_error(writer: &mut Writer, error: &CommandError) {
@@ -150,6 +164,38 @@ impl SessionHandler for UiBridge {
     }
 
     fn handle(&self, command: SessionCommand, params: Vec<Value>) -> Result<Value, CommandError> {
+        let (sender, receiver) = channel();
+        let request = self.run(
+            command,
+            params,
+            Box::new(move |result| {
+                let _ = sender.send(result);
+            }),
+        );
+        let result = receiver.recv_timeout(Duration::from_secs(10));
+        if let Some(request) = request {
+            self.pending.lock().expect("pending lock").remove(&request);
+        }
+        result.unwrap_or_else(|_| {
+            Err(CommandError::new(
+                "ui_timeout",
+                "the UI did not answer in time; the outcome is unknown",
+            ))
+        })
+    }
+}
+
+impl UiBridge {
+    /// Run a session command. `reply` gets the result: at once when the
+    /// session runtime answers from its own records or refuses the command,
+    /// otherwise when the frontend completes it. Returns the request id
+    /// while the frontend runs it.
+    pub(crate) fn run(
+        &self,
+        command: SessionCommand,
+        params: Vec<Value>,
+        reply: SessionReply,
+    ) -> Option<u64> {
         let (types, specs) = session_catalog();
         let index = SessionCommand::ALL
             .iter()
@@ -160,7 +206,10 @@ impl SessionHandler for UiBridge {
             .find(|spec| spec.id == command.id())
             .expect("catalog entry");
         for (value, param) in params.iter().zip(&spec.params) {
-            value.check(&param.ty, &types)?;
+            if let Err(error) = value.check(&param.ty, &types) {
+                reply(Err(error.into()));
+                return None;
+            }
         }
         // The session runtime answers from the facts the frontend reported,
         // and refuses actions those facts do not offer before the frontend
@@ -168,17 +217,23 @@ impl SessionHandler for UiBridge {
         let presented = {
             let session = self.session.lock().expect("session lock");
             if command == SessionCommand::WindowList {
-                return Ok(Value::List(
-                    session
-                        .window_infos()
-                        .iter()
-                        .map(WindowInfo::to_value)
-                        .collect(),
-                ));
+                let infos = session.window_infos();
+                drop(session);
+                reply(Ok(Value::List(
+                    infos.iter().map(WindowInfo::to_value).collect(),
+                )));
+                return None;
             }
             match (presentation_action(command), params.first()) {
                 (Some(action), Some(Value::Text(window))) => {
-                    Some(session.check_action(window, action)?)
+                    match session.check_action(window, action) {
+                        Ok(instance) => Some(instance),
+                        Err(error) => {
+                            drop(session);
+                            reply(Err(error));
+                            return None;
+                        }
+                    }
                 }
                 _ => None,
             }
@@ -189,78 +244,70 @@ impl SessionHandler for UiBridge {
             encode(value, &param.ty, &types, &mut writer);
         }
         let request = self.next.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = channel();
-        self.pending
-            .lock()
-            .expect("pending lock")
-            .insert(request, sender);
+        self.pending.lock().expect("pending lock").insert(
+            request,
+            PendingRequest {
+                command,
+                presented,
+                reply,
+            },
+        );
         self.callbacks.session_request(request, &writer.bytes);
-        let result = receiver.recv_timeout(Duration::from_secs(10));
-        self.pending.lock().expect("pending lock").remove(&request);
-        match result {
-            // The frontend answers once the platform reported the new
-            // facts; the result is the instance as the runtime now sees it.
-            Ok(Ok(_)) if presented.is_some() => {
-                let instance = presented.expect("checked");
-                self.session
-                    .lock()
-                    .expect("session lock")
-                    .window_info(instance.kind)
-                    .filter(|info| info.window == instance.id)
-                    .map(|info| info.to_value())
-                    .ok_or_else(|| {
-                        CommandError::new(
-                            "stale_window",
-                            format!("`{}` closed while the command ran", instance.id),
-                        )
-                    })
-            }
-            Ok(Ok(value)) => {
-                value.check(&spec.result, &types).map_err(|error| {
-                    CommandError::new("ui_failed", format!("invalid UI result: {error}"))
-                })?;
-                Ok(value)
-            }
-            Ok(Err(error)) => Err(error),
-            Err(_) => Err(CommandError::new(
-                "ui_timeout",
-                "the UI did not answer in time; the outcome is unknown",
-            )),
-        }
+        Some(request)
     }
-}
 
-impl UiBridge {
     fn complete(&self, request: u64, bytes: &[u8]) {
-        let Some(sender) = self.pending.lock().expect("pending lock").remove(&request) else {
+        let Some(pending) = self.pending.lock().expect("pending lock").remove(&request) else {
             return;
         };
+        let (types, specs) = session_catalog();
         let mut reader = Reader::new(bytes);
         let result = match reader.u8() {
             Ok(0) => {
-                // Find the command to know the result type. Presentation
-                // commands answer with no value; the runtime adds the facts.
-                let result_type = reader.u32().ok().and_then(|index| {
-                    let command = SessionCommand::ALL.get(index as usize)?;
-                    if command.is_presentation() {
-                        return Some(Type::Unit);
-                    }
-                    let (_, specs) = session_catalog();
-                    specs
-                        .into_iter()
-                        .find(|spec| spec.id == command.id())
-                        .map(|spec| spec.result)
-                });
-                let (types, _) = session_catalog();
-                match result_type {
-                    Some(ty) => decode(&ty, &types, &mut reader)
-                        .map_err(|error| CommandError::new("ui_failed", error.0)),
-                    None => Err(CommandError::new("ui_failed", "malformed UI reply")),
+                let answered = reader
+                    .u32()
+                    .ok()
+                    .and_then(|index| SessionCommand::ALL.get(index as usize).copied());
+                if answered != Some(pending.command) {
+                    Err(CommandError::new("ui_failed", "malformed UI reply"))
+                } else if let Some(instance) = pending.presented {
+                    // Presentation commands answer once the platform
+                    // reported the new facts; the result is the instance
+                    // as the runtime now sees it.
+                    self.session
+                        .lock()
+                        .expect("session lock")
+                        .window_info(instance.kind)
+                        .filter(|info| info.window == instance.id)
+                        .map(|info| info.to_value())
+                        .ok_or_else(|| {
+                            CommandError::new(
+                                "stale_window",
+                                format!("`{}` closed while the command ran", instance.id),
+                            )
+                        })
+                } else {
+                    let ty = &specs
+                        .iter()
+                        .find(|spec| spec.id == pending.command.id())
+                        .expect("catalog entry")
+                        .result;
+                    decode(ty, &types, &mut reader)
+                        .map_err(|error| CommandError::new("ui_failed", error.0))
+                        .and_then(|value| {
+                            value.check(ty, &types).map_err(|error| {
+                                CommandError::new(
+                                    "ui_failed",
+                                    format!("invalid UI result: {error}"),
+                                )
+                            })?;
+                            Ok(value)
+                        })
                 }
             }
             _ => Err(read_error(&mut reader)),
         };
-        let _ = sender.send(result);
+        (pending.reply)(result);
     }
 }
 
@@ -305,19 +352,22 @@ fn start_channel(_: &Host, _: &Sessions, _: &MediaHub, _: &str) -> Result<Channe
 
 /// The running application behind the C handle.
 pub struct BernApp {
-    host: Host,
+    host: Arc<dyn EngineLink>,
     callbacks: BernCallbacks,
     session: Arc<Mutex<UiSession>>,
     sessions: Sessions,
     bridge: Arc<UiBridge>,
-    media: MediaHub,
+    media: Arc<dyn MediaLink>,
     queries: query::Subscriptions,
-    _subscription: Subscription,
-    _media_subscription: MediaSubscription,
+    _subscription: Guard,
+    _media_subscription: Guard,
     channel: Option<Channel>,
+    /// The engine host's channel, in the WebUI build.
+    #[cfg(feature = "remote")]
+    remote: Option<Arc<remote::Remote>>,
 }
 
-fn encode_changes(host: &Host, revision: u64, changes: &[(usize, Value)]) -> Vec<u8> {
+fn encode_changes(host: &dyn EngineLink, revision: u64, changes: &[(usize, Value)]) -> Vec<u8> {
     let descriptor = host.descriptor();
     let mut writer = Writer::new();
     writer.u64(revision);
@@ -395,51 +445,25 @@ pub unsafe fn start_app<E: EngineProtocol>(
             ));
         }
         let host = Host::start(engine);
-        let session_id = format!("{}-ui", host.engine_id());
-        let session = Arc::new(Mutex::new(UiSession::new(
-            session_id.clone(),
-            Arc::new(spec.session),
-        )));
-        let bridge = Arc::new(UiBridge {
-            session_id,
-            callbacks,
-            session: Arc::clone(&session),
-            pending: Mutex::new(BTreeMap::new()),
-            next: AtomicU64::new(1),
-        });
-        let sessions = Sessions::new();
-        sessions.register(bridge.clone());
-        let queries = query::Subscriptions::default();
-        let updates = host.clone();
-        let stale = Arc::clone(&queries);
-        let subscription = host.subscribe(move |update| {
-            let bytes = encode_changes(&updates, update.revision, &update.changes);
-            callbacks.state(&bytes);
-            // Answers of queries that read a changed field are stale.
-            let changed: Vec<usize> = update.changes.iter().map(|(field, _)| *field).collect();
-            query::refresh(&updates, &stale, callbacks, &changed);
-        });
         let media = MediaHub::new(&spec.players);
-        let media_subscription = media.subscribe(move |update| {
-            callbacks.media_state(&media::state_bytes(update.revision, &update.players));
-        });
+        let sessions = Sessions::new();
         let channel = if spec.ipc {
             Some(start_channel(&host, &sessions, &media, spec.bundle_id)?)
         } else {
             None
         };
-        Ok(BernApp {
-            host,
-            callbacks,
-            session,
+        let session_id = format!("{}-ui", host.engine_id());
+        let app = assemble(
+            Arc::new(host),
+            Arc::new(media),
             sessions,
-            bridge,
-            media,
-            queries,
-            _subscription: subscription,
-            _media_subscription: media_subscription,
+            session_id,
+            spec.session,
+            callbacks,
             channel,
-        })
+        );
+        app.sessions.register(app.bridge.clone());
+        Ok(app)
     }));
     match started {
         Ok(Ok(app)) => Box::into_raw(Box::new(app)),
@@ -451,7 +475,59 @@ pub unsafe fn start_app<E: EngineProtocol>(
     }
 }
 
-fn with_app<T>(app: *mut BernApp, fallback: T, body: impl FnOnce(&BernApp) -> T) -> T {
+/// The application around an engine link and a media link: the UI
+/// session, its bridge for external session commands, query
+/// subscriptions and the state and media listeners.
+pub(crate) fn assemble(
+    host: Arc<dyn EngineLink>,
+    media: Arc<dyn MediaLink>,
+    sessions: Sessions,
+    session_id: String,
+    spec: SessionSpec,
+    callbacks: BernCallbacks,
+    channel: Option<Channel>,
+) -> BernApp {
+    let session = Arc::new(Mutex::new(UiSession::new(
+        session_id.clone(),
+        Arc::new(spec),
+    )));
+    let bridge = Arc::new(UiBridge {
+        session_id,
+        callbacks,
+        session: Arc::clone(&session),
+        pending: Mutex::new(BTreeMap::new()),
+        next: AtomicU64::new(1),
+    });
+    let queries = query::Subscriptions::default();
+    let updates = Arc::clone(&host);
+    let stale = Arc::clone(&queries);
+    let subscription = host.subscribe(Box::new(move |update| {
+        let bytes = encode_changes(updates.as_ref(), update.revision, &update.changes);
+        callbacks.state(&bytes);
+        // Answers of queries that read a changed field are stale.
+        let changed: Vec<usize> = update.changes.iter().map(|(field, _)| *field).collect();
+        query::refresh(updates.as_ref(), &stale, callbacks, &changed);
+    }));
+    let media_subscription = media.subscribe(Box::new(move |update| {
+        callbacks.media_state(&media::state_bytes(update.revision, &update.players));
+    }));
+    BernApp {
+        host,
+        callbacks,
+        session,
+        sessions,
+        bridge,
+        media,
+        queries,
+        _subscription: subscription,
+        _media_subscription: media_subscription,
+        channel,
+        #[cfg(feature = "remote")]
+        remote: None,
+    }
+}
+
+pub(crate) fn with_app<T>(app: *mut BernApp, fallback: T, body: impl FnOnce(&BernApp) -> T) -> T {
     if app.is_null() {
         return fallback;
     }
@@ -463,7 +539,7 @@ fn with_app<T>(app: *mut BernApp, fallback: T, body: impl FnOnce(&BernApp) -> T)
 
 /// # Safety
 /// `bytes` must point to `len` readable bytes or be null with `len == 0`.
-unsafe fn slice<'a>(bytes: *const u8, len: usize) -> &'a [u8] {
+pub(crate) unsafe fn slice<'a>(bytes: *const u8, len: usize) -> &'a [u8] {
     if bytes.is_null() || len == 0 {
         &[]
     } else {
@@ -501,7 +577,7 @@ pub unsafe extern "C" fn bern_app_snapshot(app: *mut BernApp) -> BernBuffer {
     with_app(app, BernBuffer::empty(), |app| {
         let (revision, values) = app.host.snapshot();
         let changes: Vec<(usize, Value)> = values.into_iter().enumerate().collect();
-        BernBuffer::from_vec(encode_changes(&app.host, revision, &changes))
+        BernBuffer::from_vec(encode_changes(app.host.as_ref(), revision, &changes))
     })
 }
 
@@ -512,7 +588,7 @@ pub unsafe extern "C" fn bern_app_snapshot(app: *mut BernApp) -> BernBuffer {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn bern_app_engine_id(app: *mut BernApp) -> BernBuffer {
     with_app(app, BernBuffer::empty(), |app| {
-        BernBuffer::from_vec(app.host.engine_id().as_bytes().to_vec())
+        BernBuffer::from_vec(app.host.engine_id().into_bytes())
     })
 }
 
@@ -618,10 +694,11 @@ pub unsafe extern "C" fn bern_app_dispatch(
                         entry: Entry::Ui,
                         request_id: token.to_string(),
                     },
-                    move |outcome| {
+                    bern_protocol::Cancellation::new(),
+                    Box::new(move |outcome| {
                         let bytes = outcome_bytes(descriptor, command, &outcome);
                         callbacks.reply(token, &bytes);
-                    },
+                    }),
                 );
             }
             Err(error) => {
@@ -677,6 +754,7 @@ pub unsafe extern "C" fn bern_window_opened(app: *mut BernApp, kind: u32) -> Ber
             .lock()
             .expect("session lock")
             .window_opened(kind as usize);
+        app.host.windows_changed(app.bridge.windows());
         BernBuffer::from_vec(match opened {
             Ok(instance) => instance_bytes(app, &instance),
             Err(error) => error_bytes(&error),
@@ -708,6 +786,7 @@ pub unsafe extern "C" fn bern_window_closed(app: *mut BernApp, kind: u32, genera
         if let Some(id) = closed {
             app.media.release_window(&id);
             app.queries.lock().expect("query lock").close_window(&id);
+            app.host.windows_changed(app.bridge.windows());
         }
     })
 }

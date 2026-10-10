@@ -133,6 +133,33 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bern.link.lost",
+        &[
+            ("zh-Hans", "与引擎的连接已断开，正在重新连接…"),
+            ("zh-Hant", "與引擎的連線已中斷，正在重新連線…"),
+            ("en", "Lost the connection to the engine. Reconnecting…"),
+            ("ja", "エンジンとの接続が切れました。再接続しています…"),
+        ],
+    ),
+    (
+        "bern.link.restarted",
+        &[
+            ("zh-Hans", "引擎已重新启动，页面将重新载入。"),
+            ("zh-Hant", "引擎已重新啟動，頁面將重新載入。"),
+            ("en", "The engine restarted. Reloading the page."),
+            ("ja", "エンジンが再起動しました。ページを再読み込みします。"),
+        ],
+    ),
+    (
+        "bern.link.failed",
+        &[
+            ("zh-Hans", "无法连接到引擎"),
+            ("zh-Hant", "無法連線到引擎"),
+            ("en", "Can’t Connect to the Engine"),
+            ("ja", "エンジンに接続できません"),
+        ],
+    ),
+    (
         "bern.media.video",
         &[
             ("zh-Hans", "视频"),

@@ -12,8 +12,12 @@ bern-command.workspace = true
 bern-runtime.workspace = true
 bern-media.workspace = true
 bern-transport-ipc = { workspace = true, optional = true }
+bern-adapter-json = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = ["ipc"]
 # The local control channel for CLI, JSON and MCP entries (Unix sockets).
 ipc = ["dep:bern-transport-ipc"]
+# The WebUI link to the engine and media hub of a separate engine host.
+remote = ["dep:bern-adapter-json", "dep:serde_json"]

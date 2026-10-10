@@ -399,6 +399,12 @@ class Host {
         set_timer: (id, delay) => {
           setTimeout(() => this.exports.bern_timer_fired(id), Math.max(0, delay));
         },
+        // WebUI build: messages to the engine host and connection changes.
+        link_send: (ptr, len) => link.send(new TextDecoder().decode(this.copy(ptr, len))),
+        link_status: (ptr, len) => {
+          const status = JSON.parse(new TextDecoder().decode(this.copy(ptr, len)));
+          this.defer(null, () => link.status(status));
+        },
       },
     };
     const response = await fetch(url);
@@ -445,6 +451,17 @@ class Host {
     const bytes = new Uint8Array(this.exports.memory.buffer, ptr, len).slice();
     this.exports.bern_buffer_free(this.slot);
     return bytes;
+  }
+
+  /// The WebUI build: the page's runtime for an engine in an engine host.
+  startRemote(token) {
+    const bytes = new TextEncoder().encode(token);
+    this.app = this.withBytes(bytes, (ptr, len) => this.exports.bern_webui_start(ptr, len));
+  }
+
+  remote(name, text) {
+    const bytes = new TextEncoder().encode(text ?? "");
+    this.withBytes(bytes, (ptr, len) => this.exports[name](this.app, ptr, len));
   }
 
   start(fingerprint, resources) {
@@ -595,14 +612,229 @@ let engine = { apply() {} };
 
 // MARK: - Session requests
 
-/// External entries reach the page through the control channel of the
-/// WebUI build; the in-page engine of the app build has none.
+/// Run a session command of an external entry through the same closures
+/// the user's input runs, in the order of the framework session catalog.
 function sessionRequest(request, bytes) {
-  const writer = new Writer();
-  writer.u8(1);
-  writer.text("unknown_command");
-  writer.text("this page answers session commands only through a control channel");
-  host.sessionComplete(request, writer.finish());
+  const reader = new Reader(bytes);
+  const index = reader.u32();
+  const ok = (encode) => {
+    const writer = new Writer();
+    writer.u8(0);
+    writer.u32(index);
+    encode?.(writer);
+    host.sessionComplete(request, writer.finish());
+  };
+  const fail = (failure) => {
+    const writer = new Writer();
+    writer.u8(1);
+    writer.text(failure?.code ?? "ui_failed");
+    writer.text(failure?.message ?? String(failure));
+    host.sessionComplete(request, writer.finish());
+  };
+  const find = (targetName) => {
+    const matches = controlEntries().filter((entry) => entry.target() === targetName);
+    if (matches.length === 0) throw new CommandFailure("target_not_found", `no mounted control \`${targetName}\`; see ui.inspect`);
+    if (matches.length > 1) throw new CommandFailure("target_ambiguous", `\`${targetName}\` is mounted in several places`);
+    const entry = matches[0];
+    if (entry.window.pendingClose.peek()) {
+      throw new CommandFailure("target_blocked", `\`${targetName}\` is blocked by the close confirmation of \`${entry.window.id}\`; decide it with window.confirm_close`);
+    }
+    if (entry.enabled && !entry.enabled()) throw new CommandFailure("target_unavailable", `\`${targetName}\` is disabled`);
+    return entry;
+  };
+  const action = (entry, name) => {
+    const run = entry.actions[name];
+    if (!run) throw new CommandFailure("target_unavailable", `\`${entry.target()}\` (${entry.role}) does not support ${name}`);
+    return run;
+  };
+  const windowNamed = (id) => {
+    const win = [...manager.windows.values()].find((candidate) => candidate.id === id);
+    if (!win) throw new CommandFailure("target_not_found", `no open window \`${id}\``);
+    return win;
+  };
+  const closeResult = (writer, result) => {
+    writer.u32(result.outcome);
+    writer.text(result.window);
+    writeOptional(writer, result.id ?? null, (w, v) => w.text(v));
+    writer.i64(BigInt(result.draftRevision ?? 0n));
+    const decisions = result.outcome === 2 ? (result.canSave ? [0, 1, 2] : [1, 2]) : [];
+    writer.u32(decisions.length);
+    for (const decision of decisions) writer.u32(decision);
+    writeOptional(writer, result.message ?? null, (w, v) => w.text(v));
+    writeOptional(writer, result.reason ?? null, (w, v) => w.text(v));
+  };
+  try {
+    switch (index) {
+      case 0: { // ui.inspect
+        const entries = controlEntries();
+        ok((writer) => {
+          writer.u32(entries.length);
+          for (const entry of entries) {
+            const enabled = entry.enabled ? untrack(entry.enabled) : true;
+            writer.text(entry.target());
+            writer.text(entry.window.id);
+            writer.text(entry.role);
+            writer.text(entry.label ? untrack(entry.label) : "");
+            writer.u8(enabled ? 1 : 0);
+            writeOptional(writer, entry.actions.value ? untrack(entry.actions.value) : null, (w, v) => w.text(v));
+            const reason = entry.window.pendingClose.peek() ? "blocked_by_modal" : enabled ? null : "disabled";
+            writeOptional(writer, reason, (w, v) => w.text(v));
+          }
+        });
+        break;
+      }
+      case 1: action(find(reader.text()), "activate")(); ok(); break;
+      case 2: { const entry = find(reader.text()); action(entry, "edit")(reader.text()); ok(); break; }
+      case 3: action(find(reader.text()), "submit")(); ok(); break;
+      case 4: { const entry = find(reader.text()); action(entry, "setBool")(reader.bool()); ok(); break; }
+      case 5: { const entry = find(reader.text()); action(entry, "setNumber")(reader.f64()); ok(); break; }
+      case 6: {
+        const entry = find(reader.text());
+        const option = reader.text();
+        if (!action(entry, "select")(option)) throw new CommandFailure("invalid_params", `\`${entry.target()}\` has no option \`${option}\``);
+        ok();
+        break;
+      }
+      case 7: {
+        if (!action(find(reader.text()), "back")()) throw new CommandFailure("target_unavailable", "nothing to go back to");
+        ok();
+        break;
+      }
+      case 8: { // window.open
+        const id = reader.text();
+        if (!manager.app.windows.some((kind) => kind.id === id)) throw new CommandFailure("target_not_found", `no window kind \`${id}\``);
+        const win = manager.open(id);
+        ok((writer) => writer.text(win.id));
+        break;
+      }
+      case 9: { // window.close
+        const win = windowNamed(reader.text());
+        const result = manager.requestClose(win);
+        ok((writer) => closeResult(writer, result));
+        break;
+      }
+      case 10: manager.open(windowNamed(reader.text()).spec.id); ok(); break;
+      case 11: { // window.confirm_close
+        const win = windowNamed(reader.text());
+        const confirmation = reader.text();
+        const decision = reader.u32();
+        if (decision > 2) throw new CommandFailure("invalid_params", "unknown close decision");
+        manager.confirmClose(win, confirmation, decision, (failure, result) => {
+          if (failure) fail(failure);
+          else ok((writer) => closeResult(writer, result));
+        });
+        break;
+      }
+      case 13: manager.command(windowNamed(reader.text()), "minimize"); ok(); break;
+      case 14: manager.command(windowNamed(reader.text()), "restore"); ok(); break;
+      case 15: manager.command(windowNamed(reader.text()), "maximize"); ok(); break;
+      case 16: {
+        const win = windowNamed(reader.text());
+        manager.command(win, "move", { x: reader.f64(), y: reader.f64() });
+        ok();
+        break;
+      }
+      case 17: {
+        const win = windowNamed(reader.text());
+        const width = reader.f64();
+        const height = reader.f64();
+        const minimum = { width: win.spec.minWidth ?? 240, height: win.spec.minHeight ?? 160 };
+        if (width < minimum.width || height < minimum.height) {
+          throw new CommandFailure("out_of_range", `\`${win.id}\` needs at least ${minimum.width} × ${minimum.height}`);
+        }
+        manager.command(win, "resize", { width, height });
+        ok();
+        break;
+      }
+      default:
+        throw new CommandFailure("unknown_command", `unknown session command ${index}`);
+    }
+  } catch (error) {
+    fail(error);
+  }
+}
+
+// MARK: - Engine host link
+
+/// The WebUI build's channel to its engine host: one WebSocket, opened
+/// again after a drop. Waiting requests fail with an unknown outcome when
+/// it drops; nothing is sent again by itself.
+const link = {
+  socket: null,
+  attempts: 0,
+  engineID: null,
+  sessionID: null,
+  connected: cell(false),
+  problem: cell(null),
+  firstConnect: null,
+
+  open() {
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${scheme}://${location.host}/bern`);
+    this.socket = socket;
+    socket.addEventListener("open", () => {
+      this.attempts = 0;
+      host.exports.bern_remote_open(host.app);
+    });
+    socket.addEventListener("message", (event) => host.remote("bern_remote_receive", String(event.data)));
+    socket.addEventListener("close", (event) => {
+      if (this.socket !== socket) return;
+      this.socket = null;
+      host.remote("bern_remote_closed", event.reason || `code ${event.code}`);
+      if (this.problem.peek()?.final) return;
+      const delay = Math.min(10000, 500 * 2 ** this.attempts++);
+      setTimeout(() => this.open(), delay);
+    });
+  },
+
+  send(text) {
+    if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(text);
+  },
+
+  status(status) {
+    if (status.state === "connected") {
+      if (this.engineID && status.engine_id !== this.engineID) {
+        // The engine host restarted: this page's session ended with it.
+        this.problem.set({ key: "bern.link.restarted", final: true });
+        setTimeout(() => location.reload(), 1500);
+        return;
+      }
+      this.engineID = status.engine_id;
+      this.sessionID = status.session_id;
+      this.problem.set(null);
+      this.connected.set(true);
+      this.firstConnect?.resolve();
+      this.firstConnect = null;
+    } else if (status.state === "disconnected") {
+      this.connected.set(false);
+      if (!this.problem.peek()?.final) this.problem.set({ key: "bern.link.lost" });
+    } else if (status.state === "failed") {
+      this.connected.set(false);
+      this.problem.set({ key: "bern.link.failed", detail: status.message, final: true });
+      this.socket?.close();
+      this.firstConnect?.reject(new Error(status.message));
+      this.firstConnect = null;
+    }
+  },
+};
+
+/// The banner telling the user the engine host is out of reach.
+function linkBanner(root) {
+  const banner = el("div", { class: "bern-link-banner", role: "status" });
+  effect(() => {
+    const problem = link.problem.get();
+    banner.hidden = !problem;
+    if (!problem) return;
+    banner.replaceChildren(icon("exclamationmark.triangle", 14), el("span", {}, tr(problem.key)));
+    if (problem.detail) banner.append(el("span", { class: "bern-link-detail" }, problem.detail));
+  });
+  root.prepend(banner);
+}
+
+/// Player ids are unique per engine host: qualify those of window
+/// declarations by session in the WebUI build.
+function sessionPrefix() {
+  return link.sessionID ? `${link.sessionID}/` : "";
 }
 
 // MARK: - DOM
@@ -1786,7 +2018,7 @@ let viewSequence = 0;
 /// player, with the standard command-driven control bar.
 export function Video(p, ctx, { id, source, player, label, controls, fit }) {
   const name = label ?? (() => tr("bern.media.video"));
-  const playerID = player ?? `${ctx.win.id}/${target(ctx, id)}`;
+  const playerID = player ?? `${sessionPrefix()}${ctx.win.id}/${target(ctx, id)}`;
   const state = () => media.players.get().get(playerID) ?? null;
   if (source) {
     const failure = media.create(playerID, ctx.win.id);
@@ -2520,7 +2752,20 @@ export async function start(app) {
   const root = document.getElementById("bern-host");
   try {
     await host.load(app.wasm);
-    host.start(app.fingerprint, app.resources);
+    if (app.mode === "ui") {
+      // The channel credential travels in the address fragment, which the
+      // browser never sends to the server.
+      const token = new URLSearchParams(location.hash.slice(1)).get("token") ?? "";
+      host.startRemote(token);
+      linkBanner(root);
+      const connected = new Promise((resolve, reject) => {
+        link.firstConnect = { resolve, reject };
+      });
+      link.open();
+      await connected;
+    } else {
+      host.start(app.fingerprint, app.resources);
+    }
     media.attach();
   } catch (error) {
     root.replaceChildren(el("div", { class: "bern-startup-failure", role: "alert" },
@@ -2531,7 +2776,8 @@ export async function start(app) {
   for (const kind of app.windows) {
     if (kind.initial) manager.open(kind.id);
   }
-  window.bern = { host, manager, controls: controlEntries };
+  // Development handle for inspecting the running page.
+  window.bern = { host, manager, link, controls: controlEntries };
 }
 
 /// Dispatch an engine command for a control in `ctx`'s window.

@@ -108,11 +108,13 @@ dependencies = [
 name = "bern-ffi"
 version = "0.1.0"
 dependencies = [
+ "bern-adapter-json",
  "bern-command",
  "bern-media",
  "bern-protocol",
  "bern-runtime",
  "bern-transport-ipc",
+ "serde_json",
 ]
 
 [[package]]
@@ -194,6 +196,19 @@ dependencies = [
  "bern-protocol",
  "bern-runtime",
  "libc",
+ "serde_json",
+]
+
+[[package]]
+name = "bern-transport-ws"
+version = "0.1.0"
+dependencies = [
+ "bern-adapter-json",
+ "bern-command",
+ "bern-ffi",
+ "bern-media",
+ "bern-protocol",
+ "bern-runtime",
  "serde_json",
 ]
 
