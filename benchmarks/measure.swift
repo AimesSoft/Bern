@@ -1,4 +1,4 @@
-// Measure a desktop app on macOS: the time from starting its executable
+// Measure desktop apps on macOS: the time from starting an executable
 // until its first window is on screen, and its memory once it has
 // settled. Memory is the physical footprint (what Activity Monitor shows)
 // of the app and of every process it brought up: its child processes
@@ -6,10 +6,14 @@
 // (the pages of Tauri and Dioxus run in those).
 //
 //   swiftc -O measure.swift -o measure
-//   ./measure <executable> [runs]
+//   ./measure <runs> <executable>...
 //
-// Prints JSON: {"launch_s": [...], "memory_bytes": [...]}, one entry per
-// run after an unmeasured first run that warms the caches.
+// Every app first runs once unmeasured to warm the caches. Then each
+// round starts every app once, beginning one app later each round, so
+// that drift on the machine falls on all of them alike.
+//
+// Prints JSON, one entry per executable in the order given:
+// [{"launch_s": [...], "memory_bytes": [...]}, ...], one value per run.
 
 import AppKit
 import CoreGraphics
@@ -104,21 +108,25 @@ func measure(_ path: String) -> (launch: Double, memory: Double)? {
 }
 
 let arguments = CommandLine.arguments
-guard arguments.count >= 2 else {
-    FileHandle.standardError.write("usage: measure <executable> [runs]\n".data(using: .utf8)!)
+guard arguments.count >= 3, let runs = Int(arguments[1]), runs > 0 else {
+    FileHandle.standardError.write("usage: measure <runs> <executable>...\n".data(using: .utf8)!)
     exit(2)
 }
-let runs = arguments.count > 2 ? Int(arguments[2]) ?? 5 : 5
-_ = measure(arguments[1])
-var launches: [Double] = []
-var memories: [Double] = []
-for _ in 0..<runs {
-    guard let result = measure(arguments[1]) else {
-        FileHandle.standardError.write("no window within 60 s\n".data(using: .utf8)!)
-        exit(1)
+let apps = Array(arguments.dropFirst(2))
+for app in apps { _ = measure(app) }
+var launches = Array(repeating: [Double](), count: apps.count)
+var memories = Array(repeating: [Double](), count: apps.count)
+for round in 0..<runs {
+    for step in 0..<apps.count {
+        let index = (round + step) % apps.count
+        guard let result = measure(apps[index]) else {
+            FileHandle.standardError.write("\(apps[index]): no window within 60 s\n".data(using: .utf8)!)
+            exit(1)
+        }
+        launches[index].append(result.launch)
+        memories[index].append(result.memory)
     }
-    launches.append(result.launch)
-    memories.append(result.memory)
 }
-let json = try! JSONSerialization.data(withJSONObject: ["launch_s": launches, "memory_bytes": memories])
+let json = try! JSONSerialization.data(
+    withJSONObject: apps.indices.map { ["launch_s": launches[$0], "memory_bytes": memories[$0]] })
 print(String(decoding: json, as: UTF8.self))

@@ -1,6 +1,8 @@
 # Measure the same Hello World in Bern and in other cross-platform
 # frameworks on one Mac: package size, time to the first window, memory.
-# Run it from the Actions tab; the merged results are the artifact
+# Each framework builds in its own job; one job then measures them all on
+# the same machine, taking turns, so that they meet the same conditions.
+# Run it from the Actions tab; the results are the artifact
 # `benchmark-results` (results.json), which the README charts read.
 name: Benchmarks
 
@@ -16,21 +18,36 @@ on:
         type: string
       runs:
         description: Measured launches per framework (after one warm-up)
-        default: "5"
+        default: "10"
+        type: string
+      frameworks:
+        description: Frameworks to build and measure, separated by spaces
+        default: bern gpui dioxus tauri electron flutter react-native avalonia qt
         type: string
 
 permissions:
   contents: read
 
 jobs:
-  measure:
-    name: ${{ matrix.framework }}
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      frameworks: ${{ steps.list.outputs.frameworks }}
+    steps:
+      - id: list
+        env:
+          FRAMEWORKS: ${{ inputs.frameworks }}
+        run: echo "frameworks=$(python3 -c 'import json, os; print(json.dumps(os.environ["FRAMEWORKS"].split()))')" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build ${{ matrix.framework }}
+    needs: plan
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        framework: [bern, gpui, dioxus, tauri, electron, flutter, react-native, avalonia, qt]
+        framework: ${{ fromJSON(needs.plan.outputs.frameworks) }}
     steps:
       - uses: actions/checkout@v5
       - if: matrix.framework == 'avalonia'
@@ -41,34 +58,33 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - name: Build and measure
-        run: benchmarks/run.sh ${{ matrix.framework }} ${{ inputs.runs }}
+      - name: Build
+        run: benchmarks/build.sh ${{ matrix.framework }} built
       - uses: actions/upload-artifact@v5
         with:
-          name: result-${{ matrix.framework }}
-          path: benchmarks/out/${{ matrix.framework }}.json
+          name: build-${{ matrix.framework }}
+          path: built/
           if-no-files-found: error
+          compression-level: 0
 
-  collect:
-    needs: measure
-    if: always()
-    runs-on: ubuntu-latest
+  measure:
+    needs: build
+    # Measure whatever built; a framework that failed to build is left out.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 90
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v5
         with:
-          pattern: result-*
-          path: results
+          pattern: build-*
+          path: built
           merge-multiple: true
-      - name: Merge
-        run: |
-          python3 - <<'PY'
-          import glob, json
-          results = sorted((json.load(open(path)) for path in glob.glob("results/*.json")), key=lambda r: r["framework"])
-          json.dump({"results": results}, open("results.json", "w"), indent=2)
-          for r in results:
-              print(f'{r["framework"]:<13} {r["version"]:<16} {r["package_bytes"] / 1e6:7.1f} MB {r["launch_s"]:6.2f} s {r["memory_bytes"] / 1e6:6.0f} MB  {r["machine"]}')
-          PY
+      - name: Measure
+        env:
+          RUNS: ${{ inputs.runs }}
+        run: benchmarks/measure.sh built "$RUNS"
       - uses: actions/upload-artifact@v5
         with:
           name: benchmark-results
-          path: results.json
+          path: built/results.json
