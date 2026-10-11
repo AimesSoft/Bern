@@ -61,6 +61,7 @@ fn registry() -> Registry {
     registry.register(Box::new(bern_backend_swiftui::SwiftUiMacos));
     registry.register(Box::new(bern_backend_web::WebBrowser));
     registry.register(Box::new(bern_backend_gtk::GtkLinux));
+    registry.register(Box::new(bern_backend_winui3::WinUi3Windows));
     registry
 }
 
@@ -153,6 +154,20 @@ fn copy_contents(from: &Path, to: &Path) -> std::io::Result<()> {
     output.set_modified(modified)
 }
 
+/// Copy `from` to a new file that then replaces `to`. Overwriting an
+/// executable in place keeps the file and its cached code signature on
+/// macOS, which then kills the rebuilt program at launch; a running old
+/// version also keeps its own file.
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut name = to.file_name().unwrap_or_default().to_os_string();
+    name.push(".bern-new");
+    let staged = to.with_file_name(name);
+    std::fs::copy(from, &staged)?;
+    std::fs::rename(&staged, to).inspect_err(|_| {
+        let _ = std::fs::remove_file(&staged);
+    })
+}
+
 fn mirror(dir: &Path, files: &[(PathBuf, PathBuf)], keep: &[PathBuf]) -> Result<(), String> {
     let wanted: BTreeSet<PathBuf> = files
         .iter()
@@ -199,7 +214,7 @@ fn run_step(step: &BuildStep) -> Result<(), String> {
         }
         BuildStep::CreateDir { path } => std::fs::create_dir_all(path)
             .map_err(|error| format!("cannot create {}: {error}", path.display())),
-        BuildStep::Copy { from, to } => std::fs::copy(from, to).map(|_| ()).map_err(|error| {
+        BuildStep::Copy { from, to } => replace_file(from, to).map_err(|error| {
             format!(
                 "cannot copy {} to {}: {error}",
                 from.display(),
@@ -442,7 +457,12 @@ mod tests {
                 if entry.file_type().unwrap().is_dir() {
                     walk(dir, &path, out);
                 } else {
-                    out.push(path.display().to_string());
+                    // `/`-separated on every platform, as resource names are.
+                    let parts: Vec<String> = path
+                        .components()
+                        .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                        .collect();
+                    out.push(parts.join("/"));
                 }
             }
         }

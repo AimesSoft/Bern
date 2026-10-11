@@ -479,7 +479,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let dir = dir.canonicalize().unwrap_or(dir);
+    let dir = canonical(dir);
     let mut errors = Vec::new();
 
     if !bern_protocol::valid_name(&raw.app.id) {
@@ -743,7 +743,7 @@ pub fn load_library(path: &Path) -> Result<LibraryConfig, Vec<Diagnostic>> {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
-    let dir = dir.canonicalize().unwrap_or(dir);
+    let dir = canonical(dir);
     let mut errors = Vec::new();
     let mut sources = Vec::new();
     let mut dirs = Vec::new();
@@ -788,6 +788,21 @@ pub fn load_library(path: &Path) -> Result<LibraryConfig, Vec<Diagnostic>> {
         default_language: raw.languages.default,
         strict: raw.languages.strict,
     })
+}
+
+/// The absolute form of `dir`, without the verbatim prefix Windows gives
+/// canonical paths (`\\?\C:\…`), which Cargo manifests and tools reject.
+fn canonical(dir: PathBuf) -> PathBuf {
+    let Ok(path) = dir.canonicalize() else {
+        return dir;
+    };
+    if cfg!(windows)
+        && let Some(rest) = path.to_string_lossy().strip_prefix(r"\\?\")
+        && !rest.starts_with(r"UNC\")
+    {
+        return PathBuf::from(rest);
+    }
+    path
 }
 
 #[cfg(test)]

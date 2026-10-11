@@ -181,13 +181,41 @@ impl Resources {
 }
 
 /// `file://` URL of an absolute path, percent-encoding what URLs reserve.
+/// Windows paths become `file:///C:/dir/file`, without the verbatim
+/// prefix of canonical paths.
 pub fn file_url(path: &Path) -> String {
+    let text = path.to_string_lossy();
     let mut url = String::from("file://");
-    for byte in path.to_string_lossy().bytes() {
+    let windows_path;
+    let mut drive = false;
+    let path: &str = if cfg!(windows) {
+        let plain = text
+            .strip_prefix(r"\\?\UNC\")
+            .map(|rest| format!(r"\\{rest}"))
+            .or_else(|| text.strip_prefix(r"\\?\").map(str::to_string))
+            .unwrap_or_else(|| text.to_string());
+        windows_path = plain.replace('\\', "/");
+        match windows_path.strip_prefix("//") {
+            // A share: `file://server/share/…`.
+            Some(share) => share,
+            None => {
+                // `C:/dir` gains the root slash; a rooted `/dir` has it.
+                if !windows_path.starts_with('/') {
+                    url.push('/');
+                }
+                drive = windows_path.as_bytes().get(1) == Some(&b':');
+                &windows_path
+            }
+        }
+    } else {
+        &text
+    };
+    for (index, byte) in path.bytes().enumerate() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
                 url.push(byte as char)
             }
+            b':' if drive && index == 1 => url.push(':'),
             _ => url.push_str(&format!("%{byte:02X}")),
         }
     }
@@ -263,5 +291,22 @@ mod tests {
             file_url(&dir.join("media/clip.mp4"))
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_paths_become_file_urls() {
+        assert_eq!(
+            file_url(Path::new(r"C:\Users\me\My Clip.mp4")),
+            "file:///C:/Users/me/My%20Clip.mp4"
+        );
+        assert_eq!(
+            file_url(Path::new(r"\\?\C:\media\clip.mp4")),
+            "file:///C:/media/clip.mp4"
+        );
+        assert_eq!(
+            file_url(Path::new(r"\\server\share\clip.mp4")),
+            "file://server/share/clip.mp4"
+        );
     }
 }

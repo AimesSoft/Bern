@@ -89,9 +89,14 @@ fn hex(bytes: &[u8]) -> String {
 
 /// A random token from the operating system, as hex.
 pub fn random_token(bytes: usize) -> std::io::Result<String> {
-    use std::io::Read;
     let mut buffer = vec![0u8; bytes];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        std::fs::File::open("/dev/urandom")?.read_exact(&mut buffer)?;
+    }
+    #[cfg(windows)]
+    getrandom::fill(&mut buffer).map_err(|error| std::io::Error::other(error.to_string()))?;
     Ok(hex(&buffer))
 }
 

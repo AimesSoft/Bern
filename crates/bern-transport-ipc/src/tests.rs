@@ -142,12 +142,19 @@ fn start(name: &str) -> (Server, String) {
 #[test]
 fn commands_state_and_updates_reach_the_shared_engine() {
     let (server, bundle) = start("commands");
-    let mode = std::fs::metadata(server.path())
-        .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_eq!(mode, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(server.path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+    // The server lives until the end of the test.
+    #[cfg(not(unix))]
+    let _ = &server;
     let mut client =
         Client::connect(&bundle, None, "cli", Some(descriptor().fingerprint())).unwrap();
     assert_eq!(client.namespace, "counter");

@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.15
+- 版本：v0.16
 - 状态：架构设计草案
 - 更新日期：2026-10-11
 - 项目名称：Bern UI
@@ -9,7 +9,7 @@
 - 首个目标平台：macOS（SwiftUI）
 - 主要验证应用：NipaPlay 3.0
 
-当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md) 与 [Linux GTK 实现记录](Implementation/Linux-GTK.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）；其余能力仍为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md)、[Linux GTK 实现记录](Implementation/Linux-GTK.md) 与 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）与第二批 `winui3 + windows`（C# 宿主上的 WinUI 3 与 Windows App SDK，展示应用与四入口在 Windows 11 上验证）；其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
@@ -93,8 +93,8 @@ Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel，与 NipaP
 | --- | --- | --- | --- |
 | Web DOM | 浏览器 | Web 应用或 WebUI；共用 HTML、CSS、绑定与前端 WASM，按模式决定是否包含业务引擎 | 第二个正式后端，需 Bern 自定视觉规范与主题算法，两种模式均需验收 |
 | SwiftUI | macOS、iOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS 与 iOS 默认；macOS 为首个正式后端，iOS 后续实现 |
-| GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；后续实现 |
-| WinUI 3 | Windows | WinUI 3 界面、平台宿主与 Rust 桥接 | Windows 默认；后续实现 |
+| GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；阶段五第一批已实现 |
+| WinUI 3 | Windows | WinUI 3 界面、C# 平台宿主与 Rust 桥接 | Windows 默认；阶段五第二批已实现 |
 | Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；后续实现 |
 | Flutter | Flutter 支持且 Bern 已适配的平台 | Dart Widget、绑定代码与 Flutter 工程集成 | 可选跨平台目标 |
 | GPUI | Windows、macOS、Linux | GPUI Rust UI 与原生集成 | 可选桌面目标 |
@@ -1267,11 +1267,11 @@ GTK 4 不提供窗口位置的读取与设置，Wayland 合成器也不报告窗
 
 ### Windows 默认 WinUI 3
 
-Windows 默认通过 WinUI 3 目标生成界面、平台宿主和 Rust 绑定。具体采用 XAML 与 C++/WinRT、C#/.NET 等哪种宿主方案在原型阶段确定；业务逻辑和命令目录继续保留在独立 Rust 引擎中，不要求改写成宿主语言。
+Windows 默认通过 WinUI 3 目标生成界面、平台宿主和 Rust 绑定。宿主采用 C#/.NET：生成的 C# 代码调用随目标模块分发的 C# 运行时，界面全部以代码构建，不生成 XAML 页面；业务逻辑和命令目录继续保留在独立 Rust 引擎中，引擎、会话运行时与 C 接口编译为应用目录中的 `bern_app.dll`，C# 运行时以 P/Invoke 调用与 SwiftUI 目标相同的进程内接口。C# 运行时不属于 Bern 工作区的构建，.NET 不成为构建其他目标的前置条件。
 
-后端负责 UI 线程调度、平台对象生命周期、事件与命令的双向映射、主题资源、焦点、输入法、可访问性及窗口集成。状态写回必须遵守防止原生回调重复派发的统一规则。
+后端负责 UI 线程调度、平台对象生命周期、事件与命令的双向映射、主题资源、焦点、输入法、可访问性及窗口集成。状态写回必须遵守防止原生回调重复派发的统一规则。应用按 Windows 惯例单实例运行，再次启动显示主窗口，最后一个窗口关闭后退出；品牌色映射为 `SystemAccentColor` 及其各档浅色与深色资源。
 
-Windows App SDK、所需 Windows SDK、最低系统版本、构建环境和部署方式由目标描述明确声明。WinUI 3 支持范围需要实际构建与运行验证，不能把“Windows 原生”当作支持所有 Windows 环境的保证。
+Windows App SDK、所需 Windows SDK、最低系统版本、构建环境和部署方式由目标描述明确声明：首版使用 Windows App SDK 1.8（随应用部署）与 .NET 10（框架依赖），目标框架 `net10.0-windows10.0.26100.0`，最低 Windows 10 2004（10.0.19041），应用不打包。WinUI 3 支持范围需要实际构建与运行验证，不能把“Windows 原生”当作支持所有 Windows 环境的保证。
 
 ### Android 与 iOS
 
@@ -1502,7 +1502,7 @@ Web 实现前先单独定义 Web 视觉规范，并完成 Bern 主题内核：�
 
 ### 阶段五 扩展性与其他原生前端验证
 
-在扩展大量组件之前，分批完成 `gtk + linux` 和 `winui3 + windows` 两个默认桌面组合的最小示例，并用显式选择的 `flutter + macos` 验证后端可替换性。第一批 `gtk + linux` 已完成，见 [Linux GTK 实现记录](Implementation/Linux-GTK.md)。它们使用同一业务核心、应用协议和公共 IR，验证目标扩展不依赖重写解析器，也不要求把业务改写为 UI 宿主语言。
+在扩展大量组件之前，分批完成 `gtk + linux` 和 `winui3 + windows` 两个默认桌面组合的最小示例，并用显式选择的 `flutter + macos` 验证后端可替换性。第一批 `gtk + linux` 已完成，见 [Linux GTK 实现记录](Implementation/Linux-GTK.md)；第二批 `winui3 + windows` 已完成，见 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)。它们使用同一业务核心、应用协议和公共 IR，验证目标扩展不依赖重写解析器，也不要求把业务改写为 UI 宿主语言。
 
 验收内容包括生成代码可构建、状态可订阅、带参数命令与错误可返回、列表身份正确、订阅可释放、同一主题快照能正确映射深浅色，以及目标禁用后其他构建仍独立可用。系统托管控件按其主题能力单独验证。需要新增公共语义的部分应单列说明，不能用复制整套编译器的方式通过验收。
 
@@ -1593,3 +1593,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.13 | 虚拟呈现遵循宿主的设计习惯：网页中主窗口即页面，次级窗口为对话框或侧边面板，浮动窗口改为显式选择的 `presentation: floating`；不提供的窗口动作如实报告为不可用；Web 视觉规范定为 Bern 自有的中性网页风格 |
 | v0.14 | 确定阶段四的声明方式：`[layouts]` 断点与 `Adaptive`/`Layout`、`Menu`/`MenuItem`、`#[bern::features]` 功能契约与覆盖检查（B201–B206）、本地化诊断编号（B101–B104）、按 UI 会话的运行时语言切换（`LanguagePicker` 与 `ui.set_language`） |
 | v0.15 | 阶段五第一批：`gtk + linux` 目标采用 gtk4-rs 与显式声明的 libadwaita（最低 GTK 4.14、libadwaita 1.5），运行时 crate 不进入工作区默认构建；如实报告 GTK 4 与 Wayland 下不可用或无法确认的窗口动作 |
+| v0.16 | 阶段五第二批：`winui3 + windows` 目标以 C#/.NET 为宿主，代码构建界面、经 P/Invoke 调用 `bern_app.dll` 中的同一进程内接口；声明 Windows App SDK 1.8、.NET 10 与最低 Windows 版本；单实例并在最后一个窗口关闭后退出；本地控制通道与资源文件 URL 支持 Windows |

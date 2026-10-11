@@ -163,7 +163,7 @@ GtkVideo 面向预览、嵌入动画和简单媒体控制，官方明确列出�
 
 ## 可操作验收清单
 
-以下场景须在真实目标上执行。GNOME／GTK 部分的首轮执行情况见 [Linux GTK 实现记录](../Implementation/Linux-GTK.md)；Windows 尚未运行。
+以下场景须在真实目标上执行。GNOME／GTK 部分的首轮执行情况见 [Linux GTK 实现记录](../Implementation/Linux-GTK.md)，Windows／WinUI 3 部分见 [Windows WinUI 3 实现记录](../Implementation/Windows-WinUI3.md)。
 
 ### Windows 验收
 

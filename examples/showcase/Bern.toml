@@ -57,6 +57,10 @@ channels = ["ipc"]
 platform = "linux"
 channels = ["ipc"]
 
+[targets.windows]
+platform = "windows"
+channels = ["ipc"]
+
 # The same app as a web page with the engine compiled to WebAssembly.
 [targets.web_app]
 ui = "web"

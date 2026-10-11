@@ -2,9 +2,12 @@
 //!
 //! An application host assembles this channel explicitly; nothing listens
 //! by default. The server accepts newline-delimited JSON control messages on
-//! a Unix domain socket inside a per-user directory (mode 0700, socket 0600)
-//! and only serves peers running as the same user. Every request reaches the
-//! same [`bern_command::Host`] and the same live UI sessions as the UI.
+//! a Unix domain socket inside a per-user directory and only serves the same
+//! user: on Unix the directory is mode 0700, the socket 0600 and peers are
+//! checked by user id; on Windows (AF_UNIX, Windows 10 1803 and later) the
+//! directory is in the user's own temporary directory, which only that user
+//! can open. Every request reaches the same [`bern_command::Host`] and the
+//! same live UI sessions as the UI.
 
 use bern_adapter_json::{
     self as json, ClientMessage, ServerMessage, SessionInfo, media_players_json, params_from_json,
@@ -16,10 +19,8 @@ use bern_protocol::{
     CommandError, Invocation, PROTOCOL_VERSION, SessionCommand, fingerprint_bytes, session_catalog,
 };
 use bern_runtime::Sessions;
+use platform::{UnixListener, UnixStream};
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -38,55 +39,118 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Directory holding the sockets of one application, unique per user.
 pub fn socket_dir(bundle_id: &str) -> PathBuf {
-    let base = std::env::var_os("TMPDIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join(format!(
+    platform::temp_dir().join(format!(
         "bern-{:016x}",
         fingerprint_bytes(bundle_id.as_bytes())
     ))
 }
 
-fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
-    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
-    {
-        let mut uid: libc::uid_t = 0;
-        let mut gid: libc::gid_t = 0;
-        // SAFETY: the descriptor is a connected Unix socket owned by `stream`.
-        let result = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) };
-        if result != 0 {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(uid)
+#[cfg(unix)]
+mod platform {
+    use std::io;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    use std::os::unix::io::AsRawFd;
+    pub(crate) use std::os::unix::net::{UnixListener, UnixStream};
+    use std::path::{Path, PathBuf};
+
+    pub(crate) fn temp_dir() -> PathBuf {
+        std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
     }
-    #[cfg(target_os = "linux")]
-    {
-        let mut credentials = libc::ucred {
-            pid: 0,
-            uid: 0,
-            gid: 0,
-        };
-        let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
-        // SAFETY: valid socket and correctly sized output buffer.
-        let result = unsafe {
-            libc::getsockopt(
-                stream.as_raw_fd(),
-                libc::SOL_SOCKET,
-                libc::SO_PEERCRED,
-                (&mut credentials as *mut libc::ucred).cast(),
-                &mut length,
-            )
-        };
-        if result != 0 {
-            return Err(io::Error::last_os_error());
+
+    fn current_uid() -> u32 {
+        // SAFETY: geteuid has no preconditions.
+        unsafe { libc::geteuid() }
+    }
+
+    /// Create the socket directory, owned by this user and private to it.
+    pub(crate) fn prepare_dir(dir: &Path) -> io::Result<()> {
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+        if std::fs::metadata(dir)?.uid() != current_uid() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the control channel directory belongs to another user",
+            ));
         }
-        Ok(credentials.uid)
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+    }
+
+    pub(crate) fn secure_socket(path: &Path) -> io::Result<()> {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+    }
+
+    fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+        {
+            let mut uid: libc::uid_t = 0;
+            let mut gid: libc::gid_t = 0;
+            // SAFETY: the descriptor is a connected Unix socket owned by `stream`.
+            let result = unsafe { libc::getpeereid(stream.as_raw_fd(), &mut uid, &mut gid) };
+            if result != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(uid)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let mut credentials = libc::ucred {
+                pid: 0,
+                uid: 0,
+                gid: 0,
+            };
+            let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+            // SAFETY: valid socket and correctly sized output buffer.
+            let result = unsafe {
+                libc::getsockopt(
+                    stream.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    libc::SO_PEERCRED,
+                    (&mut credentials as *mut libc::ucred).cast(),
+                    &mut length,
+                )
+            };
+            if result != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(credentials.uid)
+        }
+    }
+
+    /// Whether a connected peer runs as this user.
+    pub(crate) fn peer_allowed(stream: &UnixStream) -> bool {
+        peer_uid(stream).is_ok_and(|uid| uid == current_uid())
     }
 }
 
-fn current_uid() -> u32 {
-    // SAFETY: geteuid has no preconditions.
-    unsafe { libc::geteuid() }
+#[cfg(windows)]
+mod platform {
+    use std::io;
+    use std::path::{Path, PathBuf};
+    pub(crate) use uds_windows::{UnixListener, UnixStream};
+
+    /// The user's own temporary directory, which other users cannot open.
+    pub(crate) fn temp_dir() -> PathBuf {
+        std::env::temp_dir()
+    }
+
+    pub(crate) fn prepare_dir(dir: &Path) -> io::Result<()> {
+        std::fs::create_dir_all(dir)
+    }
+
+    /// The socket inherits the access of the user's temporary directory.
+    pub(crate) fn secure_socket(_: &Path) -> io::Result<()> {
+        Ok(())
+    }
+
+    /// Only this user can reach the socket file, so every peer is this
+    /// user (or an administrator).
+    pub(crate) fn peer_allowed(_: &UnixStream) -> bool {
+        true
+    }
 }
 
 /// A running control channel. Dropping it stops accepting and removes the socket.
@@ -105,19 +169,7 @@ impl Server {
         bundle_id: &str,
     ) -> io::Result<Server> {
         let dir = socket_dir(bundle_id);
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&dir)?;
-        let metadata = std::fs::metadata(&dir)?;
-        use std::os::unix::fs::MetadataExt;
-        if metadata.uid() != current_uid() {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "the control channel directory belongs to another user",
-            ));
-        }
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        platform::prepare_dir(&dir)?;
         remove_stale_sockets(&dir);
         let path = dir.join(format!("{}.sock", host.engine_id()));
         if path.as_os_str().len() > 100 {
@@ -128,7 +180,7 @@ impl Server {
         }
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path)?;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        platform::secure_socket(&path)?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
         thread::Builder::new()
@@ -139,9 +191,8 @@ impl Server {
                         break;
                     }
                     let Ok(stream) = stream else { continue };
-                    match peer_uid(&stream) {
-                        Ok(uid) if uid == current_uid() => {}
-                        _ => continue,
+                    if !platform::peer_allowed(&stream) {
+                        continue;
                     }
                     let host = host.clone();
                     let sessions = sessions.clone();
