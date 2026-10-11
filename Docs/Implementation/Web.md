@@ -42,6 +42,8 @@
 
 ## `app` 构建
 
+页面图标：没有声明 `[app].icon` 时生成 Bern 标志的 `favicon.svg`、512 像素的 `icon.png` 与铺满方形的 `apple-touch-icon.png`（主屏幕图标），声明时三处都用该 PNG；`index.html` 以带构建版本的地址引用它们。`ui` 构建使用同一页面。
+
 ```mermaid
 flowchart LR
     Page[生成的页面 app.js + bern.js] -->|C ABI 导出| Wasm[WebAssembly 模块]

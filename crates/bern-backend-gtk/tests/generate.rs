@@ -129,6 +129,14 @@ fn showcase_generates_a_gtk_application() {
     let desktop =
         std::fs::read_to_string(output.join("Showcase/dev.bern.showcase.desktop")).unwrap();
     assert!(desktop.contains("Name[zh_CN]=Bern 控件展示"), "{desktop}");
+    // Without `[app].icon` the Bern logo sits beside the executable, named
+    // after the application, and the desktop entry shows it.
+    let icon = output.join("Showcase/icons/dev.bern.showcase.png");
+    let png = std::fs::read(&icon).unwrap();
+    assert_eq!(bern_target_api::icon::png_size(&png), Some((512, 512)));
+    // Desktop entries write paths with `/`, also when generated on Windows.
+    let written = icon.display().to_string().replace('\\', "/");
+    assert!(desktop.contains(&format!("Icon={written}\n")), "{desktop}");
 
     // Every component is realized; colors come from the system style.
     let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();

@@ -1,0 +1,38 @@
+# The smallest Bern application: one window that says hello.
+
+[app]
+id = "hello"
+bundle_id = "dev.bern.hello"
+version = "0.1.0"
+name = { "zh-Hans" = "你好", "en" = "Hello" }
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "en"
+
+[protocol]
+package = "hello-protocol"
+source = "hello-protocol/src/lib.rs"
+
+[engine]
+package = "hello-core"
+type = "hello_core::HelloEngine"
+
+[ui]
+package = "hello-ui"
+sources = ["hello-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+
+[targets.linux]
+platform = "linux"
+
+[targets.windows]
+platform = "windows"
+
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"

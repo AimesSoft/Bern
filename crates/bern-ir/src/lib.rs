@@ -271,6 +271,11 @@ pub struct AppInfo {
     pub bundle_id: String,
     pub name: LocalizedText,
     pub version: String,
+    /// The application icon from `[app].icon`: a square PNG's
+    /// `/`-separated path relative to `Bern.toml`. Without one, targets use
+    /// the Bern logo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

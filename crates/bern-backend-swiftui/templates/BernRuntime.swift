@@ -1929,6 +1929,10 @@ struct BernWindowRoot<Content: View>: View {
                 .accessibilityHidden(true)
         }
         .environment(context)
+        // The interface language, not the system's, picks localized symbol
+        // variants (for example `textformat` is “Aa” in English and “格式”
+        // in Chinese) and formats numbers and dates.
+        .environment(\.locale, Locale(identifier: BernLanguage.shared.current))
         .onAppear {
             BernSnapshot.applyAppearance()
             BernSnapshot.installWindowSignals()

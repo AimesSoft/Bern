@@ -1,6 +1,6 @@
-//! Generate the showcase for `winui3 + windows` and, on Windows with .NET
-//! installed, compile the generated application, so generator mistakes
-//! fail here rather than in `bern build`.
+//! Generate the showcase for `winui3 + windows` and, on Windows with the
+//! Visual Studio C++ tools installed, compile the generated sources for both
+//! front ends, so generator mistakes fail here rather than in `bern build`.
 
 use bern_backend_winui3::{WinUi3Windows, product_name};
 use bern_ir::Application;
@@ -118,7 +118,9 @@ fn showcase_generates_a_winui3_application() {
         "{lib}"
     );
     let cargo = std::fs::read_to_string(output.join("glue/Cargo.toml")).unwrap();
-    assert!(cargo.contains(r#"crate-type = ["cdylib"]"#), "{cargo}");
+    assert!(cargo.contains(r#"crate-type = ["staticlib"]"#), "{cargo}");
+    let cargo_config = std::fs::read_to_string(output.join("glue/.cargo/config.toml")).unwrap();
+    assert!(cargo_config.contains("+crt-static"), "{cargo_config}");
     assert!(
         !cargo.contains(r"\\?\") && !cargo.contains("//?/"),
         "{cargo}"
@@ -131,44 +133,78 @@ fn showcase_generates_a_winui3_application() {
     ] {
         assert!(manifest.contains(expected), "{manifest}");
     }
-    let project = std::fs::read_to_string(output.join("app/Showcase.csproj")).unwrap();
-    for expected in [
-        "<UseWinUI>true</UseWinUI>",
-        "<WindowsPackageType>None</WindowsPackageType>",
-        "<AssemblyName>showcase</AssemblyName>",
-        "<Product>Bern 控件展示</Product>",
-        "Link=\"bern_app.dll\"",
-    ] {
-        assert!(project.contains(expected), "missing `{expected}`");
+    for expected in [r#""ui_bridge": "cpp""#, r#""xaml-islands""#] {
+        assert!(manifest.contains(expected), "{manifest}");
     }
+    let script = std::fs::read_to_string(output.join("app/build.bat")).unwrap();
+    for expected in [
+        "vcvarsall.bat",
+        "cppwinrt.exe",
+        "microsoft.windowsappsdk.winui 1.8.260803003",
+        "Microsoft.WindowsAppRuntime.Bootstrap.dll",
+        "set \"EXE=showcase\"",
+        "bern_app.lib",
+    ] {
+        assert!(script.contains(expected), "missing `{expected}`");
+    }
+    assert!(
+        script.contains("\r\n") && !script.contains("\r\r"),
+        "CRLF lines"
+    );
+    // Without `[app].icon` the executable carries the Bern logo.
+    let ico = std::fs::read(output.join("app/app.ico")).unwrap();
+    assert_eq!(&ico[..4], &[0, 0, 1, 0]);
+    let resource = std::fs::read_to_string(output.join("app/app.rc")).unwrap();
+    assert!(resource.contains("1 ICON \"app.ico\""), "{resource}");
+    assert!(
+        resource.contains("VALUE \"ProductName\", \"Bern 控件展示\""),
+        "{resource}"
+    );
+    let identity = std::fs::read_to_string(output.join("app/app_id.h")).unwrap();
+    assert!(
+        identity.contains("#define BERN_BUNDLE_ID \"dev.bern.showcase\""),
+        "{identity}"
+    );
+    let manifest = std::fs::read_to_string(output.join("app/app.manifest")).unwrap();
+    assert!(manifest.contains("maxversiontested"), "{manifest}");
     for runtime in [
-        "Bern/BernCore.cs",
-        "Bern/BernMedia.cs",
-        "Bern/BernStructure.cs",
+        "runtime/bern_base.h",
+        "runtime/bern_main.cpp",
+        "runtime/bern_winui.cpp",
+        "runtime/bern_islands.cpp",
+        "runtime/bern_ui_windows.inl",
     ] {
         assert!(output.join("app").join(runtime).is_file(), "{runtime}");
     }
 
     // Every component is realized; colors come from the system theme.
-    let app = std::fs::read_to_string(output.join("app/App.cs")).unwrap();
-    assert!(!app.contains("unsupported"), "{app}");
-    for forbidden in ["Color.FromArgb", "Colors.", "SolidColorBrush"] {
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(!ui.contains("unsupported"), "{ui}");
+    for forbidden in ["ColorHelper", "Colors::", "SolidColorBrush"] {
         assert!(
-            !app.contains(forbidden),
+            !ui.contains(forbidden),
             "generated code must not use `{forbidden}`"
         );
     }
     for expected in [
-        "B.SplitView(p, c, \"pages\", new Field(0, 0)",
-        "B.Navigation(p, c, \"library\"",
-        "B.Query(p, c, \"library_results\"",
-        "B.Adaptive(p, c, \"clip_choice\",",
-        "B.Tabs(p, c, \"tabs\"",
-        "B.Video(p, c, \"preview\", source: null, player: \"preview\"",
-        "static CloseCheck close_settings(Ctx c) => new()",
-        "Launcher.Run(Ui.App, \"dev.bern.showcase\")",
+        "B::SplitView(p, c, \"pages\", Field{0, 0}",
+        "B::Navigation(p, c, \"library\"",
+        "B::Query(p, c, {.id = \"library_results\"",
+        "B::Adaptive(p, c, \"clip_choice\",",
+        "B::Tabs(p, c, \"tabs\"",
+        "B::Video(p, c, {.id = \"preview\", .player = \"preview\"",
+        "static CloseCheck close_settings(Ctx const& c) {",
+        "static std::vector<WindowDef> Windows() {",
     ] {
-        assert!(app.contains(expected), "missing `{expected}`");
+        assert!(ui.contains(expected), "missing `{expected}`");
+    }
+    let catalog = std::fs::read_to_string(output.join("app/app_catalog.cpp")).unwrap();
+    for expected in [
+        "Catalog BernCatalog() {",
+        "c.bundleId = \"dev.bern.showcase\";",
+        "L\"Bern 控件展示\"",
+    ] {
+        assert!(catalog.contains(expected), "missing `{expected}`");
     }
 
     // The plan builds the engine library, then the application, ships the
@@ -182,7 +218,7 @@ fn showcase_generates_a_winui3_application() {
             _ => None,
         })
         .collect();
-    assert_eq!(programs, ["cargo", "dotnet"]);
+    assert_eq!(programs, ["cargo", "cmd"]);
     let mirror = plan
         .steps
         .iter()
@@ -211,30 +247,28 @@ fn showcase_generates_a_winui3_application() {
     compile(&output);
 }
 
-/// Compile the generated application on Windows where .NET is installed.
+/// Compile the generated sources on Windows where the Visual Studio C++
+/// tools are installed. Linking needs the engine library, which `bern
+/// build` makes; compiling both front ends checks the generator.
 #[cfg(windows)]
 fn compile(output: &Path) {
     use std::process::Command;
-    let dotnet = Command::new("dotnet")
-        .arg("--version")
-        .output()
-        .is_ok_and(|result| result.status.success());
-    if !dotnet {
-        eprintln!(".NET not installed; skipping the compile check");
+    let vswhere = Path::new(&std::env::var("ProgramFiles(x86)").unwrap_or_default())
+        .join("Microsoft Visual Studio/Installer/vswhere.exe");
+    if !vswhere.is_file() {
+        eprintln!("the Visual Studio C++ tools are not installed; skipping the compile check");
         return;
     }
-    let result = Command::new("dotnet")
-        .arg("build")
-        .arg(output.join("app/Showcase.csproj"))
-        .arg("--output")
-        .arg(output.join("compiled"))
-        .arg("--nologo")
-        .env("DOTNET_CLI_TELEMETRY_OPTOUT", "1")
+    let result = Command::new("cmd")
+        .args(["/d", "/c"])
+        .arg(output.join("app/build.bat"))
+        .arg("compile")
+        .current_dir(output.join("app"))
         .output()
         .unwrap();
     assert!(
         result.status.success(),
-        "the C# compiler rejected the generated application:\n{}",
+        "the C++ compiler rejected the generated application:\n{}",
         String::from_utf8_lossy(&result.stdout)
     );
 }

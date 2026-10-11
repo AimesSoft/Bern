@@ -350,6 +350,8 @@ pub fn check_declared(app: &Application) -> Vec<Diagnostic> {
         let (_, directories) = segments.split_last().expect("names are not empty");
         let problem = if let Some(part) = segments.iter().find(|part| part.ends_with(".lproj")) {
             format!("`{part}` is where the macOS bundle keeps localizations")
+        } else if resource.name == crate::ICON_FILE {
+            format!("`{}` is the application icon", crate::ICON_FILE)
         } else if let Some(directory) = directories.iter().find(|part| part.contains('.')) {
             format!(
                 "the directory `{directory}` contains `.`, which code signing reads as a nested bundle"
@@ -414,6 +416,8 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
     <string>{name}</string>
     <key>CFBundleExecutable</key>
     <string>{executable}</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>{bundle}</string>
     <key>CFBundleInfoDictionaryVersion</key>

@@ -1,9 +1,13 @@
 <div align="center">
 
+<img src="Docs/Assets/logo/bern-logo.svg" width="128" alt="Bern のロゴ">
+
 <h1>Bern</h1>
 
-<p><b>アプリは Rust で一度だけ宣言し、すべてのデスクトップに本物のネイティブ UI を届ける。</b><br>
-すべてのコントロールは型付きコマンドであり、人もスクリプトも AI エージェントも同じものを使います。</p>
+<p><b>一つの Rust 宣言を、各プラットフォーム自身のネイティブ UI へコンパイル。</b></p>
+
+<p>デスクトップのために生まれ、AI のために作られた：SwiftUI、WinUI 3、GTK 4、そして Web。<br>
+デスクトップには JS エンジンも組み込みブラウザーもありません。どのボタンも、生まれながらに AI が呼べる MCP ツールです。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
@@ -13,27 +17,27 @@
 </p>
 
 <p>
-<img alt="ステータス：アーリープレビュー" src="https://img.shields.io/badge/%E3%82%B9%E3%83%86%E3%83%BC%E3%82%BF%E3%82%B9-%E3%82%A2%E3%83%BC%E3%83%AA%E3%83%BC%E3%83%97%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC-F59E0B?style=flat-square">
+<img alt="AI ネイティブ：MCP 内蔵" src="https://img.shields.io/badge/AI%20%E3%83%8D%E3%82%A4%E3%83%86%E3%82%A3%E3%83%96-MCP%20%E5%86%85%E8%94%B5-8B5CF6?style=flat-square">
+<img alt="メモリ約 40 MB" src="https://img.shields.io/badge/%E3%83%A1%E3%83%A2%E3%83%AA-%E7%B4%84%2040%20MB-0EA5E9?style=flat-square">
+<img alt="JS エンジンなし" src="https://img.shields.io/badge/JS%20%E3%82%A8%E3%83%B3%E3%82%B8%E3%83%B3-%E3%81%AA%E3%81%97-111827?style=flat-square">
 <img alt="Rust 1.99" src="https://img.shields.io/badge/Rust-1.99-B7410E?style=flat-square&logo=rust&logoColor=white">
-<a href="Cargo.toml"><img alt="ライセンス：MIT" src="https://img.shields.io/badge/%E3%83%A9%E3%82%A4%E3%82%BB%E3%83%B3%E3%82%B9-MIT-22C55E?style=flat-square"></a>
-<img alt="MCP サーバー同梱" src="https://img.shields.io/badge/MCP-%E3%82%B5%E3%83%BC%E3%83%90%E3%83%BC%E5%90%8C%E6%A2%B1-8B5CF6?style=flat-square">
-<img alt="ローカライズ内蔵" src="https://img.shields.io/badge/%E3%83%AD%E3%83%BC%E3%82%AB%E3%83%A9%E3%82%A4%E3%82%BA-%E5%86%85%E8%94%B5-0EA5E9?style=flat-square">
-<img alt="ダークモード自動対応" src="https://img.shields.io/badge/%E3%83%80%E3%83%BC%E3%82%AF%E3%83%A2%E3%83%BC%E3%83%89-%E8%87%AA%E5%8B%95%E5%AF%BE%E5%BF%9C-111827?style=flat-square">
+<a href="LICENSE"><img alt="ライセンス：MIT" src="https://img.shields.io/badge/%E3%83%A9%E3%82%A4%E3%82%BB%E3%83%B3%E3%82%B9-MIT-22C55E?style=flat-square"></a>
+<img alt="状態：早期プレビュー" src="https://img.shields.io/badge/%E7%8A%B6%E6%85%8B-%E6%97%A9%E6%9C%9F%E3%83%97%E3%83%AC%E3%83%93%E3%83%A5%E3%83%BC-F59E0B?style=flat-square">
 </p>
 
 <p>
-<a href="README.md">English</a> ·
-<a href="README.zh-Hans.md">简体中文</a> ·
+<a href="README.md">简体中文</a> ·
+<a href="README.en.md">English</a> ·
 <a href="README.zh-Hant.md">繁體中文</a> ·
 <b>日本語</b>
 </p>
 
 <p>
-<a href="#-クイックスタート">クイックスタート</a> ·
-<a href="#-しくみ">しくみ</a> ·
-<a href="#-コードの雰囲気">コード</a> ·
-<a href="#-対応プラットフォーム">プラットフォーム</a> ·
-<a href="#-ロードマップ">ロードマップ</a> ·
+<a href="#bern-を選ぶ理由">Bern を選ぶ理由</a> ·
+<a href="#ai-のための設計">AI のための設計</a> ·
+<a href="#実測値">実測値</a> ·
+<a href="#他のフレームワークとの比較">比較</a> ·
+<a href="#クイックスタート">クイックスタート</a> ·
 <a href="Docs/Design.md">設計ドキュメント</a>
 </p>
 
@@ -54,46 +58,138 @@
 
 <p align="center"><sub>ひとつの <code>controls_page</code> 宣言から、4 つの UI ツールキットへ。デスクトップでは Bern は自前のピクセルを一切描きません。<br>スイッチもスライダーもサイドバーも、プラットフォーム標準のコントロールとプラットフォームの配色です。</sub></p>
 
-## ✨ Bern を選ぶ理由
-
-Bern はコマンド中心の Rust アプリケーションフレームワークです。インターフェースは制約付きで静的解析できる Rust の宣言として書き、`bern build` が各プラットフォームのネイティブ UI ツールキットへコンパイルします。ビジネスロジックは普通の Rust エンジンに置き、インターフェース上で操作できるものはすべて型付きコマンドに結び付けられます。そのため UI、アプリの CLI、JSON チャネル、MCP サーバーは**同じエンジンインスタンス**を動かします。
+## Bern を選ぶ理由
 
 <table>
 <tr>
 <td width="33%" valign="top">
-<h3>🖥️ 見た目だけでなく本物のネイティブ</h3>
-macOS では SwiftUI、Windows では WinUI 3、Linux では GTK 4 と libadwaita。標準コントロール、システムカラー、ダークモード、アクセントカラー、アクセシビリティは Bern のレンダラーではなくプラットフォームから来ます。
+<h3>ネイティブ UI へコンパイル</h3>
+一つの Rust 宣言を、SwiftUI、WinUI 3、GTK 4、Web へコンパイルします。<br><br>
+目指すところは React Native に近く、一つのコードでどのプラットフォームでもネイティブのコントロールになります。やり方は違います。React Native は実行時に JS エンジンからネイティブビューを調整し、Bern はビルド時に各プラットフォーム自身の UI コードを生成します。実行時には JS エンジンも仮想 DOM もなく、UI はシステムのコントロールそのものです。
 </td>
 <td width="33%" valign="top">
-<h3>⌘ すべての操作はコマンド</h3>
-ボタンに任意のコールバックは持たせられません。ひとつの型付きカタログにあるコマンドに結び付け、引数・エラー・リトライ方針をすべての入口で共有します。
+<h3>AI のための設計：正しく書けて、すぐ使える</h3>
+AI がコードを書くときに漏らした翻訳、UI の入口、未登録のボタン、コマンド化されていない操作は、すべてコンパイルエラーになり、ファイルと行を指し示します。<br><br>
+AI がアプリを使うときは、どのボタンも MCP ツールです。コントロールの意味を読み、マウスのクリックと同じコードを通ります。スクリーンショットにも座標にも頼りません。
 </td>
 <td width="33%" valign="top">
-<h3>🤖 最初からエージェント対応</h3>
-同じカタログからアプリの CLI と MCP サーバーを生成します。エージェントは動作中の UI を読み取り（<code>ui.inspect</code>）、ウィンドウや閉じる確認も含めて実際のコントロールを通じて操作できます。
+<h3>クロスプラットフォームとは思えない軽さ</h3>
+デスクトップにはブラウザーエンジンも JS エンジンもなく、業務エンジンはネイティブコードにコンパイルされ、アプリのプロセス内で動きます。<br><br>
+release ビルドのショーケースの実測：macOS でメモリ <b>39 MB</b>、<b>0.4 秒</b>でウィンドウ表示、アプリバンドル全体で <b>2.6 MB</b>。Windows でメモリ <b>35 MB</b>、<b>0.3 秒</b>、アプリ全体で <b>4.2 MB</b>、.NET 不要。Web アプリ全体は Rust エンジン込みで gzip 後 <b>187 KB</b>。
+</td>
+</tr>
+</table>
+
+## AI のための設計
+
+### コードを書く：AI が忘れたことは、コンパイラーが覚えている
+
+AI が UI を書くときに多い問題は、書き間違いより書き漏れです。機能を足したのに狭い画面のレイアウトに入口を置き忘れる、新しい文言を一つの言語でしか書かない、コマンドを迂回してコールバックをぶら下げる。ほかのフレームワークではユーザーが見つけるまで残りますが、Bern ではどれもコンパイルを通りません。制約が厳しいほど、AI は中途半端な仕事を渡しにくくなります。
+
+| 漏れたもの | Bern の扱い |
+| :-- | :-- |
+| ある文言の翻訳が一つ足りない | コンパイルエラー B102。各言語は `tr!` で UI のすぐ隣にまとめて書くので、漏れが一目でわかります。直接書いたリテラルは B103（厳格モード、既定で有効） |
+| ある表示モードで機能に入口がない | コンパイルエラー B201。ページは提供すべき機能を機能契約で宣言し、コンパイラーがレイアウト（`compact`、`expanded`）ごとに各機能の入口を証明します。広い画面にあって狭い画面にないのも不可 |
+| 契約の範囲内の入口が機能に登録されていない | コンパイルエラー B202。逆も不可で、入口が自分の機能に属さないコマンドを実行すると B204 |
+| 入口が条件分岐の中にしかなく、常に使えると証明できない | コンパイルエラー B203。人による保証を明示した場合を除く |
+| ボタンに任意のコードをぶら下げたい | 書けません。ボタンはコマンドカタログの型付きコマンドにしか結び付けられず、コントロールがエンジンの状態を直接書き換えることもできません |
+
+エラーは人のためでもあり、エージェントのためでもあります。番号、理由、位置がはっきりしているので、エージェントは自分で直して再ビルドできます。以下はショーケースで実際に出た 2 回分の出力です。1 回目は英語の翻訳を一つ消し、それを戻してから、2 回目は狭いレイアウトの「Change Clip」メニューを消しました。
+
+```text
+$ bern check
+error[B102]: Missing translation
+Missing language: en
+Required languages: zh-Hans, en
+  --> showcase-ui/src/pages.rs:13:31
+
+$ bern check
+error[B201]: Feature missing in adaptive layout
+Contract: MediaFeature
+Feature: Clip
+compact: missing
+  --> showcase-ui/src/media.rs:14:5
+```
+
+ビルドのたびに、ターゲットごとの機能カバレッジの完全なレポート（`features.json`）も出力され、カバー済み、免除、人による保証のみが分けて記載されます。
+
+### アプリを使う：ピクセルではなく意味を読む
+
+多くのフレームワークでは、AI にデスクトップアプリを操作させるには、スクリーンショット、認識、座標計算、疑似クリックが必要です。Bern のアプリは MCP サーバーを備えています。UI のすべてのコントロールに安定した名前と役割があり、エージェントは構造を読み、ユーザーのクリックと同じコードで操作し、アプリは起きたことをそのまま答えます。
+
+```sh
+$ showcase ui inspect                 # エージェントが読むのはピクセルではなく意味
+[{ "target": "controls_page.sync", "role": "switch", "label": "Sync", "value": "false", "enabled": true, … }, …]
+
+$ showcase ui set-bool --target controls_page.sync --value true
+
+$ showcase window close --window settings#1
+{ "outcome": "ConfirmationRequired", "message": "Do you want to save the display name?",
+  "decisions": ["Save", "Discard", "Cancel"], "confirmation": "settings#1:c1", … }
+
+$ showcase window confirm-close --window settings#1 --confirmation settings#1:c1 --decision Save
+{ "outcome": "Rejected", "reason": "save_failed: invalid_name: a display name has 1 to 40 characters …" }
+```
+
+同じ操作が MCP ツール（`ui_inspect`、`ui_activate`、`window_close`…）としてエージェントに提供され、業務コマンドもそれぞれツールになります（例：`showcase_set_display_name`）。ボタンが無効、ダイアログでふさがれている、対象が存在しないといった場合、エージェントが受け取るのは何も起きないクリックではなく、明確なエラーコードです。
+
+## 実測値
+
+| | macOS · SwiftUI | Windows · WinUI 3 | Web · WebAssembly |
+| :-- | :-- | :-- | :-- |
+| 起動からウィンドウ表示まで | 0.41 秒 | 0.32 秒 | – |
+| メモリ | 39 MB | 35 MB | – |
+| サイズ | アプリバンドル 2.6 MB（実行ファイル 2.3 MB）、フレームワークの同梱なし | アプリフォルダー 4.2 MB、エンジンは実行ファイル内、UI フレームワークはシステムのもの | 全アセットを gzip して 187 KB、Rust エンジンを含む |
+
+<details>
+<summary>測定方法</summary>
+<br>
+
+- 対象：release ビルドのショーケース（6 ページ、メインと設定のウィンドウ、ビデオプレーヤー）。2026-10-11 に測定し、各項目 3 回以上の中央値。
+- macOS：Apple M4、メモリ 16 GB、macOS 27.0.1。メモリは `footprint` の物理フットプリントで、アクティビティモニタの「メモリ」列と同じ指標。
+- Windows：Intel Core i5-13490F、メモリ 32 GB、Windows 11 25H2。メモリはプライベートワーキングセットで、タスクマネージャーの「メモリ」列と同じ指標。
+- 起動時間：プロセスの起動から、コマンドラインが表示中のネイティブウィンドウを読めるまで。エンジンの起動とローカル制御チャネルの準備を含みます。
+- Windows の値は WinUI 3 フロントエンド（システムに Windows App Runtime 1.8 がある場合）。ランタイムがないシステムでは、同じプログラムがシステムの XAML にフォールバックし、起動 0.54 秒、メモリ 19 MB です。どちらも .NET と VC++ ランタイムは不要で、アプリフォルダーには実行ファイルと 400 KB のブートストラップ DLL だけがあります。
+
+</details>
+
+## その他の機能
+
+<table>
+<tr>
+<td width="33%" valign="top">
+<h3>すべての操作はコマンド</h3>
+ボタンに任意のコールバックは持たせられません。ひとつの型付きカタログにあるコマンドに結び付け、引数・エラー・リトライ方針を UI、コマンドライン、JSON、MCP で共有します。
+</td>
+<td width="33%" valign="top">
+<h3>コンパイル時にチェック</h3>
+<code>rustc</code> がすべてのバインディングとコマンド引数を型検査します。コマンドのないボタン、任意のコールバック、エンジン状態を書き換えるコントロール、翻訳漏れはコンパイルできません。
+</td>
+<td width="33%" valign="top">
+<h3>ロジックは Rust のまま</h3>
+エンジンは UI に依存しない普通の Rust コードで、ウィンドウなしでテストできます。デスクトップではアプリのプロセス内で、ブラウザーでは WebAssembly として動きます。
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
-<h3>🦀 ロジックは Rust のまま</h3>
-エンジンは UI に依存しない普通の Rust コードで、ウィンドウなしでテストできます。デスクトップではアプリのプロセス内で、ブラウザーでは WebAssembly として動きます。
-</td>
-<td width="33%" valign="top">
-<h3>🧭 コンパイル時にチェック</h3>
-<code>rustc</code> がすべてのバインディングとコマンド引数を型検査します。コマンドのないボタン、任意のコールバック、エンジン状態を書き換えるコントロール、翻訳漏れはコンパイルできません。
-</td>
-<td width="33%" valign="top">
-<h3>🌍 初日からローカライズ</h3>
+<h3>初日からローカライズ</h3>
 <code>tr!</code> で各言語の文言を UI のすぐ隣に置きます。厳格モードのビルドは翻訳漏れを拒否し、実行中に言語を切り替えても入力中の内容は失われません。
+</td>
+<td width="33%" valign="top">
+<h3>ダークモードは設定不要</h3>
+色はプラットフォームのテーマから来ます。ダークモード、アクセントカラー、ハイコントラストはシステムに従い、宣言したブランドカラーはシステムのアクセントカラーになります。Web では Bern のテーマカーネルが配色一式を生成します。
+</td>
+<td width="33%" valign="top">
+<h3>宣言的マルチウィンドウ</h3>
+各ウィンドウが下書き、閉じる前のチェック、保存コマンドを持ちます。最小化・最大化・移動・リサイズもコマンドで、プラットフォームの実際の状態で応答します。
 </td>
 </tr>
 </table>
 
 <details>
-<summary><b>さらに：</b>マルチウィンドウ、メディア、非同期クエリ、アダプティブレイアウト…</summary>
+<summary><b>さらに：</b>動画、非同期クエリ、アダプティブレイアウト、型付きナビゲーション…</summary>
 <br>
 
-- **宣言的マルチウィンドウ**：メインウィンドウと設定ウィンドウがそれぞれ下書き、閉じる前のチェック、保存コマンドを持ちます。最小化・最大化・移動・リサイズもコマンドで、プラットフォームの実際の状態で応答します。
 - **動画**：`Video` は AVFoundation、Windows Media Foundation、GStreamer、HTML メディアで再生され、コントロールバーはコマンド駆動、プレーヤーはページをまたいで再生を続けられます。
 - **非同期クエリ**：`Query` の購読は読み込み中・空・失敗・更新中の状態を持ち、最新の応答だけを表示します。
 - **アダプティブレイアウト**：ビューが実際に得た幅に応じて `compact` と `expanded` を切り替えます。
@@ -103,7 +199,7 @@ macOS では SwiftUI、Windows では WinUI 3、Linux では GTK 4 と libadwait
 
 </details>
 
-## 🧩 しくみ
+## しくみ
 
 ```mermaid
 flowchart LR
@@ -129,7 +225,7 @@ flowchart LR
 2. **エンジン**：それらのトレイトを普通の Rust で実装します。ウィンドウもコントロールも通信路も知りません。
 3. **インターフェース**：本体が `ui!` 宣言である `#[component]` 関数。コンパイラーがこれを共通の中間表現（IR）に読み込み、各ターゲットモジュールがそこからネイティブコードを生成します。ターゲットを増やしてもパーサー、IR、ビジネスロジックには手を入れません。
 
-## 🍃 コードの雰囲気
+## コードの雰囲気
 
 <table>
 <tr>
@@ -224,7 +320,7 @@ counter-mcp   # 同じカタログを AI エージェントへ
 
 `Bern.toml` では言語、テーマ、ソース、同梱リソース、ビルドターゲットを宣言します。完全な例は[ショーケース](examples/showcase)をご覧ください。文字スタイル、ボタン、スイッチ、スライダー、テキストフィールド、エンジンのクエリによる検索、リストから詳細へのナビゲーション、動画、そしてタブと閉じる確認を持つ設定ウィンドウを備えたサイドバー型アプリです。
 
-## 🖥️ 対応プラットフォーム
+## 対応プラットフォーム
 
 <table>
 <tr>
@@ -241,8 +337,8 @@ counter-mcp   # 同じカタログを AI エージェントへ
 </tr>
 <tr>
 <td><b>Windows</b><br><code>winui3 + windows</code></td>
-<td>Windows App SDK 1.8 上の WinUI 3、C# ホスト · Windows 10 2004 以降</td>
-<td>プロセス内（<code>bern_app.dll</code>）</td>
+<td>C++/WinRT：Windows App Runtime 1.8 があれば WinUI 3、なければシステムの XAML · Windows 10 2004 以降</td>
+<td>プロセス内（静的リンク）</td>
 <td><img alt="利用可能" src="https://img.shields.io/badge/-%E5%88%A9%E7%94%A8%E5%8F%AF%E8%83%BD-22C55E?style=flat-square"> <a href="Docs/Implementation/Windows-WinUI3.md">実装記録</a></td>
 </tr>
 <tr>
@@ -273,12 +369,162 @@ counter-mcp   # 同じカタログを AI エージェントへ
 
 UI 技術を省略するとプラットフォームの既定が選ばれます。既定が使えないときは、別の技術へ黙って切り替えずにエラーになります。
 
-## 🚀 クイックスタート
+## 他のフレームワークとの比較
+
+<p align="center">
+<a href="https://github.com/zed-industries/zed/tree/main/crates/gpui"><img alt="GPUI" src="https://img.shields.io/badge/GPUI-084CCF?style=for-the-badge&logo=zedindustries&logoColor=white"></a>
+<a href="https://dioxuslabs.com"><img alt="Dioxus" src="https://img.shields.io/badge/Dioxus-4A5568?style=for-the-badge"></a>
+<a href="https://flutter.dev"><img alt="Flutter" src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white"></a>
+<a href="https://reactnative.dev"><img alt="React Native" src="https://img.shields.io/badge/React%20Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB"></a>
+<a href="https://uniapp.dcloud.net.cn"><img alt="uni-app" src="https://img.shields.io/badge/uni--app-4A5568?style=for-the-badge"></a>
+<br>
+<a href="https://www.electronjs.org"><img alt="Electron" src="https://img.shields.io/badge/Electron-47848F?style=for-the-badge&logo=electron&logoColor=white"></a>
+<a href="https://tauri.app"><img alt="Tauri" src="https://img.shields.io/badge/Tauri-24C8D8?style=for-the-badge&logo=tauri&logoColor=white"></a>
+<a href="https://avaloniaui.net"><img alt="Avalonia" src="https://img.shields.io/badge/Avalonia-8B44AC?style=for-the-badge&logo=avaloniaui&logoColor=white"></a>
+<a href="https://www.qt.io"><img alt="Qt" src="https://img.shields.io/badge/Qt-41CD52?style=for-the-badge&logo=qt&logoColor=white"></a>
+</p>
+
+どのフレームワークも同じ問いに答えています。一つのコードが、各プラットフォームの UI にどうやってなるのか。答えが違えば、トレードオフも違います。以下は各プロジェクトの公式ドキュメントに基づきます。サイズやメモリはバージョンや設定で大きく変わるため、ここでは構造の違いだけを比べます。Bern 自身の数値は[実測値](#実測値)を参照してください。
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/routes-ja-dark.svg">
+<img alt="四つの技術ルート：ビルド時にネイティブ UI コードを生成（Bern）、実行時にネイティブビューを駆動（React Native、uni-app x）、独自の描画エンジン（Flutter、GPUI、Avalonia、Qt）、Web 技術（Electron、Tauri、Dioxus、uni-app）" src="Docs/Assets/compare/routes-ja-light.svg" width="100%">
+</picture>
+
+前の二つのルートではシステムのコントロールが手に入ります。外観、アクセシビリティ、入力メソッド、ダークモードはシステムが受け持ち、代わりにコントロールはプラットフォームごとに少しずつ違います。後の二つはどこでも同じ UI を描き、代わりに各プラットフォームのデザインと振る舞いを自分で追いかけるか、ブラウザーを同梱します。
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/landscape-ja-dark.svg">
+<img alt="UI の出どころと同梱するランタイム：Bern はシステムのコントロールで、ランタイムが最も少ない隅にあります" src="Docs/Assets/compare/landscape-ja-light.svg" width="100%">
+</picture>
+
+この図はアーキテクチャの模式図で、優劣ではありません。横軸は UI 要素がシステムのコントロールか、フレームワークの自前描画や Web ページか。縦軸はアプリが同梱するランタイムの量（ブラウザーエンジン、JS エンジン、描画エンジン、言語ランタイム）です。
+
+### 技術
+
+| フレームワーク | UI の記述 | ロジック | UI の描き方 | アプリに同梱するもの | ライセンス |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| **Bern** | Rust（`ui!` 宣言） | Rust | ビルド時に SwiftUI、WinUI 3、GTK 4、Web のコードを生成し、UI はシステムのコントロール | なし。WinUI 3 もシステムのものを使い、ない場合はシステムの XAML | MIT |
+| **GPUI** | Rust | Rust | 独自の GPU 描画（Metal、Vulkan、DirectX） | 追加のランタイムなし | Apache-2.0 |
+| **Dioxus** | Rust（RSX、React 風） | Rust | デスクトップとモバイルは既定でシステムの WebView、Web は WebAssembly。ネイティブ描画の Blitz は実験段階 | システムの WebView に依存 | MIT / Apache-2.0 |
+| **Flutter** | Dart | Dart | 独自エンジン（Impeller、Skia）が Material と Cupertino 風のウィジェットを描画 | Flutter エンジン | BSD-3-Clause |
+| **React Native** | JavaScript / TypeScript（React） | JavaScript / TypeScript | ネイティブビューを実行時に JS が調整 | Hermes JS エンジン | MIT |
+| **uni-app** | Vue | JavaScript / TypeScript。uni-app x は UTS | クラシックモードは WebView。uni-app x は Kotlin、Swift などのネイティブ言語にコンパイルし、ネイティブビューで描画 | フレームワークのランタイム | Apache-2.0 |
+| **Electron** | HTML / CSS / JavaScript | JavaScript / TypeScript（Node.js） | 組み込みの Chromium | Chromium と Node.js | MIT |
+| **Tauri** | 任意の Web フロントエンド | Rust | システムの WebView（WebView2、WKWebView、WebKitGTK） | ブラウザーエンジンなし。システムの WebView に依存 | MIT / Apache-2.0 |
+| **Avalonia** | XAML と C# | C# / .NET | 独自の Skia 描画 | .NET ランタイム（自己完結型または Native AOT） | MIT |
+| **Qt** | C++ と QML（Python も可） | C++ | Qt Widgets は各プラットフォームの見た目を模倣、Qt Quick は独自のシーングラフで描画 | Qt ライブラリ | LGPLv3 / GPLv3 / 商用 |
+
+### プラットフォームと機能
+
+● 対応　◐ 一部対応またはコミュニティ頼み　— 非対応
+
+| フレームワーク | macOS | Windows | Linux | モバイル | Web | ネイティブの外観 | MCP 内蔵 | コンパイル時チェック |
+| :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
+| **Bern** | ● | ● | ● | — | ● | ● | ● | ● |
+| **GPUI** | ● | ● | ● | — | — | — | — | — |
+| **Dioxus** | ● | ● | ● | ● | ● | — | — | — |
+| **Flutter** | ● | ● | ● | ● | ● | — | — | — |
+| **React Native** | ◐ | ◐ | — | ● | ◐ | ● | — | — |
+| **uni-app** | — | — | — | ● | ● | ◐ | — | — |
+| **Electron** | ● | ● | ● | — | — | — | — | — |
+| **Tauri** | ● | ● | ● | ● | — | — | — | — |
+| **Avalonia** | ● | ● | ● | ● | ● | — | — | — |
+| **Qt** | ● | ● | ● | ● | ● | ◐ | — | — |
+
+- **モバイル**：iOS と Android。React Native のデスクトップ版は Microsoft が保守し、uni-app はミニプログラムと HarmonyOS にも対応します。Bern のモバイル対応は計画中です。
+- **ネイティブの外観**：コントロールがプラットフォーム自身のもので、外観、アクセシビリティ、入力メソッドをシステムが提供します。Qt Widgets と uni-app x はそれに近いため一部対応としました。
+- **MCP 内蔵**：フレームワークに付属し、動作中の UI を操作する MCP サーバーとコマンドライン。ほかのフレームワークは、アクセシビリティ API や Playwright、Flutter Driver などのテストツールで外から自動化できます。
+- **コンパイル時チェック**：翻訳漏れ、あるレイアウトで機能に入口がない、入口が機能に登録されていない、といった問題をコンパイラーが直接エラーにします（[AI のための設計](#ai-のための設計)を参照）。ほかのフレームワークでは多くの場合、リンター、翻訳ツール、テストで見つけます。
+- **成熟度**：Electron と Qt は非常に成熟しています。Flutter、React Native、uni-app、Tauri、Avalonia は成熟、Dioxus は発展中、GPUI は Zed エディターを支えていますが汎用コンポーネントはまだ初期段階、Bern は早期プレビューです。
+
+### 性能とリソース
+
+UI 層とロジック層がどの言語で、どう実行されるかが、実行時のオーバーヘッドの上限を決めます。ネイティブコンパイルで GC のない言語が最も軽く、JIT やバイトコード解釈の言語はエンジンを同梱し、メモリも多く使います。
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/languages-ja-dark.svg">
+<img alt="言語と実行方式：Bern の UI 層は各プラットフォームのネイティブ UI コード（Swift、C++、Rust）、ロジック層は Rust で、同一プロセス内で C ABI 経由で呼び出し、GC はありません" src="Docs/Assets/compare/languages-ja-light.svg" width="100%">
+</picture>
+
+一行の文字を表示するだけの同じウィンドウでも、パッケージサイズ、起動時間、メモリはフレームワークによって大きく違います。Bern の行は実測で、ほかは今のところ机上の見積もりです。今後 M4 上の CI で統一して実測し、置き換えます。
+
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/resources-ja-dark.svg">
+<img alt="Hello World のリソース：Bern は実測でパッケージ 2.0 MB、起動 0.28 秒、メモリ 20 MB。ほかのフレームワークは見積もり" src="Docs/Assets/compare/resources-ja-light.svg" width="100%">
+</picture>
+
+### どれを選ぶか
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img alt="Electron" src="https://img.shields.io/badge/Electron-47848F?style=flat-square&logo=electron&logoColor=white"><br>
+<b>向いている</b>：Web チームで、最も成熟したエコシステムとプラットフォーム間で最もそろった挙動がほしい場合。<br>
+<b>代償</b>：アプリごとに Chromium と Node.js を同梱するため、サイズとメモリが大きくなります。
+</td>
+<td width="50%" valign="top">
+<img alt="Tauri" src="https://img.shields.io/badge/Tauri-24C8D8?style=flat-square&logo=tauri&logoColor=white"><br>
+<b>向いている</b>：Web フロントエンドを保ちつつ、小さなアプリと Rust のバックエンドがほしい場合。<br>
+<b>代償</b>：UI は Web ページのまま。システムの WebView はプラットフォームごとに違うため、それぞれテストが必要です。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<img alt="Flutter" src="https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=flutter&logoColor=white"><br>
+<b>向いている</b>：モバイル優先で、どこでもピクセル単位で同じ見た目が必要な場合。<br>
+<b>代償</b>：コントロールは自前描画で、デスクトップの見た目と振る舞いは自分で追いかけます。Dart を使います。
+</td>
+<td valign="top">
+<img alt="React Native" src="https://img.shields.io/badge/React%20Native-20232A?style=flat-square&logo=react&logoColor=61DAFB"><br>
+<b>向いている</b>：React のチームが、ネイティブのコントロールでモバイルアプリを作る場合。<br>
+<b>代償</b>：モバイルが中心で、デスクトップは Microsoft の版に頼り、Linux はありません。実行時に JS エンジンとブリッジがあります。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<img alt="Avalonia" src="https://img.shields.io/badge/Avalonia-8B44AC?style=flat-square&logo=avaloniaui&logoColor=white"><br>
+<b>向いている</b>：.NET と XAML のチームで、デスクトップ間でそろった見た目がほしい場合。<br>
+<b>代償</b>：システムのコントロールではなく自前描画。.NET ランタイムか AOT コンパイルが必要です。
+</td>
+<td valign="top">
+<img alt="Qt" src="https://img.shields.io/badge/Qt-41CD52?style=flat-square&logo=qt&logoColor=white"><br>
+<b>向いている</b>：C++ のプロジェクト、産業・組み込み、数十年の安定性が必要な場合。<br>
+<b>代償</b>：ライセンス（LGPL か商用）に注意。Qt Quick は自前描画です。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<img alt="GPUI" src="https://img.shields.io/badge/GPUI-084CCF?style=flat-square&logo=zedindustries&logoColor=white"><br>
+<b>向いている</b>：エディターのように性能を突き詰める Rust のデスクトップアプリ。<br>
+<b>代償</b>：自前描画で、一般的なコントロールやアクセシビリティは自分で補います。デスクトップのみ。
+</td>
+<td valign="top">
+<img alt="Dioxus" src="https://img.shields.io/badge/Dioxus-4A5568?style=flat-square"><br>
+<b>向いている</b>：React の書き方が好きな Rust のフルスタック。一つのコードで Web、デスクトップ、モバイル。<br>
+<b>代償</b>：デスクトップとモバイルは今のところ WebView の UI。ネイティブ描画は実験段階です。
+</td>
+</tr>
+<tr>
+<td valign="top">
+<img alt="uni-app" src="https://img.shields.io/badge/uni--app-4A5568?style=flat-square"><br>
+<b>向いている</b>：中国のマルチターゲット（ミニプログラム、アプリ、H5、HarmonyOS）を一つのコードで。<br>
+<b>代償</b>：デスクトップアプリのターゲットはありません。クラシックモードのアプリは WebView です。
+</td>
+<td valign="top">
+<img alt="Bern" src="https://img.shields.io/badge/Bern-4A8BEF?style=flat-square"><br>
+<b>向いている</b>：各プラットフォームのシステムの外観、Rust の業務ロジック、そして AI が書けて使えることを求めるデスクトップアプリ。<br>
+<b>まだ向かない</b>：今すぐモバイルが必要なプロジェクトや、成熟したサードパーティのコンポーネント群に頼るプロジェクト。Bern は早期プレビューです。
+</td>
+</tr>
+</table>
+
+## クイックスタート
 
 Rust 1.99（`rust-toolchain.toml` で固定）と、ビルドするターゲットのツールチェーンが必要です。どのビルドでも `target/bern/<ターゲット>/bin/` にアプリの CLI と MCP サーバーが生成されます。
 
 <details open>
-<summary><b>🍎 macOS</b> · Xcode 26 以降</summary>
+<summary><b>macOS</b> · Xcode 26 以降</summary>
 
 ```sh
 cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target macos
@@ -288,19 +534,19 @@ open target/bern/macos/Showcase.app
 </details>
 
 <details>
-<summary><b>🪟 Windows</b> · .NET SDK 10</summary>
+<summary><b>Windows</b> · Visual Studio の「C++ によるデスクトップ開発」</summary>
 
 ```powershell
 cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target windows
 target\bern\windows\Showcase\showcase.exe
 ```
 
-Windows App SDK は初回ビルド時に NuGet から復元され、実行ファイルと一緒に配置されます。
+初回ビルド時に Windows SDK の `cppwinrt` で C++/WinRT ヘッダーを生成し、キャッシュします。アプリのフォルダーには実行ファイル、400 KB のブートストラップ DLL、リソースだけが入り、.NET も同梱の Windows App SDK も不要です。
 
 </details>
 
 <details>
-<summary><b>🐧 Linux</b> · GTK 4.14 と libadwaita 1.5 の開発パッケージ</summary>
+<summary><b>Linux</b> · GTK 4.14 と libadwaita 1.5 の開発パッケージ</summary>
 
 ```sh
 sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav
@@ -311,7 +557,7 @@ target/bern/linux/Showcase/showcase
 </details>
 
 <details>
-<summary><b>🌐 Web</b> · <code>rustup target add wasm32-unknown-unknown</code></summary>
+<summary><b>Web</b> · <code>rustup target add wasm32-unknown-unknown</code></summary>
 
 ```sh
 # エンジンを WebAssembly にコンパイルし、ページ内で動かす
@@ -339,17 +585,17 @@ showcase-mcp                                                 # stdio の MCP サ
 
 制御チャネルはターゲットが `channels = ["ipc"]` を宣言したときだけ起動します。宣言しなければアプリはどのポートも待ち受けません。
 
-## 🗺️ ロードマップ
+## ロードマップ
 
-| フェーズ | 内容 | |
-| :-- | :-- | :-: |
-| 1 · 2 | コンパイル境界の検証。macOS SwiftUI で UI・CLI・JSON・MCP が同じエンジンを動かす | ✅ |
-| 3 | Web のビジュアル仕様、テーマカーネル、WebAssembly アプリと WebUI の 2 種類のビルド | ✅ |
-| 4 | アダプティブレイアウト、メニュー、機能契約、実行時の言語切り替え | ✅ |
-| 5 | ほかのネイティブフロントエンド：GTK 4 ✅ · WinUI 3 ✅ · `flutter + macos` | 🚧 |
-| 6 | コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール、NipaPlay 3.0 への導入 | ⏳ |
+| フェーズ | 内容 | 状態 |
+| :-- | :-- | :-- |
+| 1 · 2 | コンパイル境界の検証。macOS SwiftUI で UI・CLI・JSON・MCP が同じエンジンを動かす | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
+| 3 | Web のビジュアル仕様、テーマカーネル、WebAssembly アプリと WebUI の 2 種類のビルド | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
+| 4 | アダプティブレイアウト、メニュー、機能契約、実行時の言語切り替え | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
+| 5 | ほかのネイティブフロントエンド：GTK 4（完了）· WinUI 3（完了）· `flutter + macos`（次） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 6 | コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール、NipaPlay 3.0 への導入 | <img alt="計画中" src="https://img.shields.io/badge/-%E8%A8%88%E7%94%BB%E4%B8%AD-94A3B8?style=flat-square"> |
 
-## 📂 リポジトリ構成
+## リポジトリ構成
 
 <details>
 <summary>クレートとディレクトリ</summary>
@@ -372,7 +618,7 @@ showcase-mcp                                                 # stdio の MCP サ
 
 </details>
 
-## 🛠️ 開発
+## 開発
 
 ```sh
 cargo fmt --all --check
@@ -380,9 +626,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-テストには、コンパイルに失敗しなければならない宣言が含まれます。また、ツールキットがある環境では生成されたアプリを型検査します。Xcode で Swift 6、開発パッケージで GTK、Windows では .NET で C# を検査します。
+テストには、コンパイルに失敗しなければならない宣言が含まれます。また、ツールキットがある環境では生成されたアプリを型検査します。Xcode で Swift 6、開発パッケージで GTK、Windows では生成された 2 つのフロントエンドを MSVC でコンパイルします。
 
-## 📖 ドキュメント
+## ドキュメント
 
 - [設計ドキュメント](Docs/Design.md)：目標、アーキテクチャ、コンポーネント、テーマ、コマンド、ウィンドウ、メディア
 - [適応仕様](Docs/Adaptation/README.md)：Apple、Windows と Linux、Web、Android、HarmonyOS
@@ -390,9 +636,9 @@ cargo test --workspace
 
 設計ドキュメントと実装記録は中国語で書かれています。
 
-## 📄 ライセンス
+## ライセンス
 
-MIT（[`Cargo.toml`](Cargo.toml) で宣言）。
+[MIT](LICENSE) © 2026 MCDFSteve
 
 <div align="center">
 <br>

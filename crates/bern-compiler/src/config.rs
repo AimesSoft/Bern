@@ -81,6 +81,8 @@ struct RawApp {
     bundle_id: String,
     version: String,
     name: BTreeMap<String, String>,
+    /// A square PNG, relative to `Bern.toml`; the Bern logo without it.
+    icon: Option<toml::Spanned<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +170,8 @@ pub struct Config {
     pub bundle_id: String,
     pub version: String,
     pub name: BTreeMap<String, String>,
+    /// `[app].icon`: a checked square PNG relative to `dir`.
+    pub icon: Option<String>,
     pub languages: Vec<String>,
     pub default_language: String,
     pub strict: bool,
@@ -328,6 +332,59 @@ fn manifest_location(file: &str, text: &str, offset: usize) -> SourceLocation {
         line: before.matches('\n').count() as u32 + 1,
         column: before[line_start..].chars().count() as u32 + 1,
     }
+}
+
+/// Check `[app].icon`: a file inside the project, reached without symbolic
+/// links, holding a square PNG of a size every platform scales down from.
+fn app_icon(
+    dir: &Path,
+    manifest: &str,
+    text: &str,
+    entry: &toml::Spanned<String>,
+    errors: &mut Vec<Diagnostic>,
+) -> Option<String> {
+    let written = entry.get_ref().as_str();
+    let declared = manifest_location(manifest, text, entry.span().start);
+    let error = |message: String| Diagnostic::error(message).at(declared.clone());
+    if let Err(message) = bern_protocol::check_resource_name(written) {
+        errors.push(error(format!("[app].icon: {message}")));
+        return None;
+    }
+    let mut path = dir.to_path_buf();
+    for segment in written.split('/') {
+        path.push(segment);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                errors.push(error(format!(
+                    "[app].icon `{written}`: {} is a symbolic link; name the file it points to",
+                    path.display()
+                )));
+                return None;
+            }
+            Ok(_) => {}
+            Err(_) => {
+                errors.push(error(format!(
+                    "[app].icon `{written}` does not exist: {}",
+                    dir.join(written).display()
+                )));
+                return None;
+            }
+        }
+    }
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(failure) => {
+            errors.push(error(format!(
+                "[app].icon `{written}` cannot be read: {failure}"
+            )));
+            return None;
+        }
+    };
+    if let Err(message) = bern_target_api::icon::check(&bytes) {
+        errors.push(error(format!("[app].icon `{written}` {message}")));
+        return None;
+    }
+    Some(written.to_string())
 }
 
 /// Check the `[resources]` entries and expand directories into the files
@@ -700,6 +757,10 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         .as_ref()
         .map(|raw| resources(&dir, &path.display().to_string(), &text, raw, &mut errors))
         .unwrap_or_default();
+    let icon =
+        raw.app.icon.as_ref().and_then(|entry| {
+            app_icon(&dir, &path.display().to_string(), &text, entry, &mut errors)
+        });
 
     if !errors.is_empty() {
         return Err(errors);
@@ -710,6 +771,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         bundle_id: raw.app.bundle_id,
         version: raw.app.version,
         name: raw.app.name,
+        icon,
         languages: raw.languages.supported,
         default_language: raw.languages.default,
         strict: raw.languages.strict,
@@ -976,5 +1038,68 @@ mod tests {
             PathBuf::from("/p/ui")
         );
         assert!(source_file(dir, "ui/pages.rs").is_err());
+    }
+
+    /// Check `[app].icon = entry` in a project holding `files`.
+    fn check_icon(files: &[(&str, Vec<u8>)], entry: &str) -> (Option<String>, Vec<Diagnostic>) {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "bern-icon-test-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (file, bytes) in files {
+            let path = dir.join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, bytes).unwrap();
+        }
+        #[derive(Deserialize)]
+        struct Manifest {
+            icon: toml::Spanned<String>,
+        }
+        let text = format!("# Bern.toml\nicon = \"{entry}\"\n");
+        let raw: Manifest = toml::from_str(&text).unwrap();
+        let mut errors = Vec::new();
+        let found = app_icon(&dir, "Bern.toml", &text, &raw.icon, &mut errors);
+        let _ = std::fs::remove_dir_all(&dir);
+        (found, errors)
+    }
+
+    /// The first bytes of a PNG of `width` × `height` pixels.
+    fn png(width: u32, height: u32) -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        bytes.extend_from_slice(&width.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes
+    }
+
+    #[test]
+    fn app_icons_are_square_pngs_in_the_project() {
+        let (found, errors) = check_icon(&[("art/icon.png", png(1024, 1024))], "art/icon.png");
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(found.as_deref(), Some("art/icon.png"));
+        for (files, entry, expected) in [
+            (vec![], "icon.png", "does not exist"),
+            (vec![("icon.png", png(300, 300))], "icon.png", "1024"),
+            (vec![("icon.png", png(512, 256))], "icon.png", "square"),
+            (
+                vec![("icon.png", b"GIF89a".to_vec())],
+                "icon.png",
+                "not a PNG",
+            ),
+            (vec![], "../icon.png", "[app].icon"),
+        ] {
+            let (found, errors) = check_icon(&files, entry);
+            assert!(found.is_none(), "{entry}");
+            assert_eq!(errors.len(), 1, "{entry}: {errors:?}");
+            assert!(
+                errors[0].message.contains(expected),
+                "{entry}: {}",
+                errors[0].message
+            );
+            assert_eq!(errors[0].location.as_ref().map(|at| at.line), Some(2));
+        }
     }
 }

@@ -361,7 +361,7 @@ target/bern/macos/bin/showcase window confirm-close --window settings#1 --confir
 
 ## 本地化、主题与视觉规则
 
-- 运行时语言：`BernLanguage`（`@Observable`）持有当前语言与对应的 `.lproj` 资源包，`BernText.string` 都经它查找，因此切换语言后读取文本的视图在同一次更新中重新计算。支持的语言取自应用包的本地化列表，启动时取系统为本应用选择的首选语言。`ui.language` 返回当前语言，`ui.set_language` 切换，不支持的标签返回 `unsupported_language`。系统托管的文案（菜单栏中由系统提供的项目等）仍随系统语言。
+- 运行时语言：`BernLanguage`（`@Observable`）持有当前语言与对应的 `.lproj` 资源包，`BernText.string` 都经它查找，因此切换语言后读取文本的视图在同一次更新中重新计算。支持的语言取自应用包的本地化列表，启动时取系统为本应用选择的首选语言。`ui.language` 返回当前语言，`ui.set_language` 切换，不支持的标签返回 `unsupported_language`。每个窗口根视图的 `locale` 环境值取当前语言，因此 SF Symbols 的本地化变体（例如 `textformat` 在英文中为“Aa”、在中文中为“格式”）与数字、日期格式随应用语言而不是系统语言。系统托管的文案（菜单栏中由系统提供的项目等）仍随系统语言。
 - `LanguagePicker` 生成系统 `Picker`，选项用 `Locale` 给出的语言自称。
 
 - 资源键可追溯到源码：元素文案为 `组件.节点路径.属性`，枚举标签为 `枚举.变体`，应用名为 `app.name`。生成各语言的 `Localizable.strings` 与 `InfoPlist.strings`；`{name}` 按参数顺序转为 `%1$@`。Info.plist 声明 `CFBundleDevelopmentRegion` 与 `CFBundleLocalizations`。
@@ -376,13 +376,25 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-产物位于 `target/bern/macos/`：`Showcase.app`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
+产物位于 `target/bern/macos/`：`Showcase.app`、调试符号 `Showcase.app.dSYM`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
+
+应用图标为 `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`）。没有声明 `[app].icon` 时是 Bern 标志铺满方形画布的版本，16 到 1024 像素各一张 PNG，由系统裁成圆角方形；圆形图标会被 macOS 放进灰色底板，所以 macOS 不用圆形版。资源同步保留这个文件，随包资源不能与它同名。
+
+调试符号不随应用包发布：debug 与 release 都以 `-g` 编译，swiftc 写在 `Contents/MacOS/` 中的 dSYM 在签名前移到包旁边的 `Showcase.app.dSYM`（lldb 与崩溃报告符号化在这里查找），上次构建留下的 dSYM 先删除。release 还以 `-dead_strip` 链接，并在签名前用 `strip -S -x` 去掉可执行文件中由 dSYM 保留的调试与本地符号：展示应用的包为 2.6 MB，可执行文件 2.2 MB（此前 5.7 MB），dSYM 约 9 MB。
 
 示例的受控测试媒体在 `examples/showcase/media/`，由 `make-media.sh` 用 ffmpeg 生成：`aurora.mp4`（8 秒）、`tides.mp4`（6 秒）、`broken.mp4`（不是影片，用于失败）声明为随包资源，随应用包发布；`live/live.m3u8`（没有结束标记的 HLS，时长未知、不可跳转）不随包发布，只作开发辅助：AVFoundation 只通过 HTTP 播放 HLS，例如 `python3 -m http.server --directory examples/showcase/media`。
 
 开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_WINDOW_SIGNALS=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，SIGUSR2 调用 `performMiniaturize(_:)`，与点按标题栏的关闭、最小化按钮相同，供没有屏幕访问的工具验证系统关闭路径和来自用户的窗口事实。这三项只用于开发检查，默认关闭。
 
 ## 验证记录
+
+2026-10-11，调试符号与可执行文件体积，本机 macOS 27.0.1（arm64）：
+
+- 此前 release 构建本身不生成 dSYM，但 debug 构建由 swiftc 写入包内的 `Contents/MacOS/Showcase.dSYM`（约 41 MB）会一直留到之后的 release 包里，且与 release 可执行文件的 UUID 不一致。现在 debug 构建后包内只有可执行文件，`Showcase.app.dSYM` 在包旁边，UUID 与可执行文件一致；随后的 release 构建同样如此（dSYM 9.0 MB），`codesign --verify --deep --strict` 通过，`atos` 以 dSYM 解析出 `bern_app_start` 等符号。
+- release 可执行文件：只加 `-dead_strip` 为 3.8 MB，再剥离符号为 2.35 MB（此前 5.95 MB）；整个应用包 2.6 MB。`-g` 让 release 的 Swift 编译多约 0.4 秒。
+- 功能：直接启动 release 包（`-ApplePersistenceIgnoreState YES`，CLI 用 `--engine`），页面切换、开关、滑块、选择器、按钮与禁用按钮的 `target_unavailable`、精选片段播放、设置窗口的关闭确认与 `Save` 均正常。
+- 性能（口径同 README，预热 1 次后 3 次取中位数，`footprint` 以字节计）：新可执行文件 0.413 秒、39.5 MB（复测 0.409 秒、40.0 MB）；只换回旧可执行文件 0.377 秒、39.9 MB，差异在测量波动之内。
+- `cargo test --workspace`（171 项）、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；新增断言：dSYM 在签名前移出包、上次的 dSYM 先删除、产物包含 dSYM，release 以 `-g` 与 `-dead_strip` 编译并在签名前剥离符号。
 
 2026-10-10，随包资源，本机 macOS 27.0.1（arm64）：
 

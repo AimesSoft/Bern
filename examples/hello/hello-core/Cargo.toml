@@ -1,0 +1,12 @@
+[package]
+name = "hello-core"
+description = "The Bern hello world: core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+hello-protocol = { path = "../hello-protocol" }

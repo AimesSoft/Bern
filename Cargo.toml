@@ -29,6 +29,9 @@ members = [
     "examples/showcase/showcase-core",
     "examples/showcase/showcase-ui",
     "examples/showcase/showcase-widgets",
+    "examples/hello/hello-protocol",
+    "examples/hello/hello-core",
+    "examples/hello/hello-ui",
 ]
 
 [workspace.package]

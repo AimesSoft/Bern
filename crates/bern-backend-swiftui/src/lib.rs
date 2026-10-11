@@ -14,7 +14,7 @@ use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common,
+    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
 
@@ -22,6 +22,9 @@ pub use swift::Generator;
 
 /// Minimum deployment target, chosen in the design document.
 pub const MINIMUM_MACOS: &str = "14.0";
+
+/// The application icon in `Contents/Resources` (`CFBundleIconFile`).
+pub const ICON_FILE: &str = "AppIcon.icns";
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
@@ -224,6 +227,14 @@ impl Target for SwiftUiMacos {
                 table,
             ));
         }
+        // The application icon: the declared one, or the Bern logo on a
+        // full square that macOS cuts to its rounded shape.
+        let icon = icon::images(app, &context.project_dir, icon::Shape::Masked)
+            .map_err(|message| vec![Diagnostic::error(message)])?;
+        files.push(GeneratedFile {
+            path: bundle.join("Contents/Resources").join(ICON_FILE),
+            contents: icon::icns(&icon),
+        });
         let (architecture, _) = architecture();
         let media = self
             .descriptor()
@@ -327,24 +338,33 @@ impl Target for SwiftUiMacos {
                 .display()
                 .to_string(),
         ];
+        // Both profiles keep debug symbols, in a dSYM outside the bundle;
+        // release builds also drop unreferenced code.
         swiftc.extend(if context.release {
-            vec!["-O".to_string()]
+            vec![
+                "-O".to_string(),
+                "-g".into(),
+                "-Xlinker".into(),
+                "-dead_strip".into(),
+            ]
         } else {
             vec!["-Onone".to_string(), "-g".into()]
         });
         for file in SOURCES {
             swiftc.push(sources.join(file).display().to_string());
         }
+        let executable = bundle.join("Contents/MacOS").join(&product);
         swiftc.push("-o".into());
-        swiftc.push(
-            bundle
-                .join("Contents/MacOS")
-                .join(&product)
-                .display()
-                .to_string(),
-        );
+        swiftc.push(executable.display().to_string());
+        // swiftc writes the dSYM next to the executable, inside the bundle;
+        // it ships beside the bundle instead, where lldb and crash report
+        // symbolication find it.
+        let linked_symbols = bundle
+            .join("Contents/MacOS")
+            .join(format!("{product}.dSYM"));
+        let symbols = output.join(format!("{product}.app.dSYM"));
 
-        let steps = vec![
+        let mut steps = vec![
             BuildStep::Run {
                 description: "Build the Rust engine and bridge".into(),
                 program: "cargo".into(),
@@ -372,7 +392,16 @@ impl Target for SwiftUiMacos {
                 keep: resources::localization_files(app)
                     .into_iter()
                     .map(|(path, _)| path)
+                    .chain([PathBuf::from(ICON_FILE)])
                     .collect(),
+            },
+            // Symbols of an earlier build must not stay in or beside the
+            // bundle.
+            BuildStep::RemoveIfExists {
+                path: linked_symbols.clone(),
+            },
+            BuildStep::RemoveIfExists {
+                path: symbols.clone(),
             },
             BuildStep::Run {
                 description: "Compile the SwiftUI frontend".into(),
@@ -381,6 +410,32 @@ impl Target for SwiftUiMacos {
                 cwd: output.clone(),
                 env,
             },
+            BuildStep::Run {
+                description: "Move the debug symbols out of the bundle".into(),
+                program: "mv".into(),
+                args: vec![
+                    linked_symbols.display().to_string(),
+                    symbols.display().to_string(),
+                ],
+                cwd: output.clone(),
+                env: vec![],
+            },
+        ];
+        if context.release {
+            steps.push(BuildStep::Run {
+                description: "Strip the symbols the dSYM keeps from the executable".into(),
+                program: "xcrun".into(),
+                args: vec![
+                    "strip".into(),
+                    "-S".into(),
+                    "-x".into(),
+                    executable.display().to_string(),
+                ],
+                cwd: output.clone(),
+                env: vec![],
+            });
+        }
+        steps.extend([
             BuildStep::CreateDir {
                 path: output.join("bin"),
             },
@@ -404,13 +459,14 @@ impl Target for SwiftUiMacos {
                 cwd: output.clone(),
                 env: vec![],
             },
-        ];
+        ]);
         Ok(BuildPlan {
             steps,
             products: vec![
                 bundle,
                 output.join("bin").join(&cli),
                 output.join("bin").join(format!("{cli}-mcp")),
+                symbols,
             ],
         })
     }

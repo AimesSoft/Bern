@@ -101,6 +101,8 @@ target/bern/linux/Showcase/showcase
 
 需要 GTK 4.14 与 libadwaita 1.5 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase` 与 `bin/showcase-mcp`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
 
+应用图标在 `Showcase/icons/dev.bern.showcase.png`（没有声明 `[app].icon` 时为 512 像素的 Bern 标志）。启动时这个目录加入图标主题的搜索路径，窗口的默认图标名为 `bundle_id`；找不到时在标准错误报告。生成的 `.desktop` 文件以绝对路径指向它。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标，把生成的文件复制到 `~/.local/share/applications/` 后程序坞显示标志；构建不会写入用户目录。
+
 开发时 `BERN_SNAPSHOT_DIR` 让程序在每次变化后把各窗口渲染为 `<目录>/<窗口>.png`（窗口最小化时不绘制），`BERN_APPEARANCE=light|dark` 覆盖系统外观；两者默认关闭。
 
 ## 验证记录

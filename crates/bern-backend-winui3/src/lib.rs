@@ -1,14 +1,18 @@
 //! The `winui3 + windows` target.
 //!
-//! Generates a C# application from the shared IR: WinUI 3 on the Windows
-//! App SDK, following the Fluent controls, cards and navigation of Windows
-//! 11, with colors from the system theme. The engine runs in the
-//! application process: the runtime (C# templates in `templates/`) reaches
-//! it through the same in-process C ABI the SwiftUI target uses, built here
-//! as `bern_app.dll`. .NET and the Windows App SDK are requirements of this
-//! target's build only.
+//! Generates a C++/WinRT application from the shared IR, following the
+//! Fluent controls, cards and navigation of Windows. One executable carries
+//! two front ends over the same runtime (C++ templates in `templates/cpp`):
+//! WinUI 3, through the Windows App Runtime the system has, and the system
+//! XAML of Windows 10 and 11 in XAML Islands when there is none. Nothing is
+//! installed or carried along: no .NET, no Windows App SDK copy, and the C
+//! runtime is linked statically. The engine runs in the application
+//! process behind the same in-process C ABI the SwiftUI target uses, linked
+//! in as a static library. The Visual Studio C++ tools, a Windows SDK and
+//! the Windows App SDK headers are requirements of this target's build
+//! only.
 
-mod cs;
+mod cpp;
 mod glue;
 mod strings;
 
@@ -16,41 +20,48 @@ use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common,
+    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
 
-pub use cs::Generator;
-pub use glue::{MINIMUM_WINDOWS, TARGET_FRAMEWORK, WINDOWS_APP_SDK};
+pub use cpp::Generator;
+pub use glue::{MINIMUM_WINDOWS, PACKAGES, WINDOWS_APP_SDK};
 
-/// The C# runtime, copied into every generated application.
+/// The C++ runtime, copied into every generated application.
 const RUNTIME: &[(&str, &str)] = &[
-    ("BernValue.cs", include_str!("../templates/BernValue.cs")),
+    ("bern_base.h", include_str!("../templates/cpp/bern_base.h")),
     (
-        "BernReactive.cs",
-        include_str!("../templates/BernReactive.cs"),
-    ),
-    ("BernCore.cs", include_str!("../templates/BernCore.cs")),
-    ("BernHost.cs", include_str!("../templates/BernHost.cs")),
-    ("BernLayout.cs", include_str!("../templates/BernLayout.cs")),
-    (
-        "BernWindows.cs",
-        include_str!("../templates/BernWindows.cs"),
+        "bern_base.cpp",
+        include_str!("../templates/cpp/bern_base.cpp"),
     ),
     (
-        "BernSession.cs",
-        include_str!("../templates/BernSession.cs"),
+        "bern_main.cpp",
+        include_str!("../templates/cpp/bern_main.cpp"),
     ),
     (
-        "BernWidgets.cs",
-        include_str!("../templates/BernWidgets.cs"),
+        "bern_winui.cpp",
+        include_str!("../templates/cpp/bern_winui.cpp"),
     ),
     (
-        "BernStructure.cs",
-        include_str!("../templates/BernStructure.cs"),
+        "bern_islands.cpp",
+        include_str!("../templates/cpp/bern_islands.cpp"),
     ),
-    ("BernQuery.cs", include_str!("../templates/BernQuery.cs")),
-    ("BernMedia.cs", include_str!("../templates/BernMedia.cs")),
+    (
+        "bern_ui_core.inl",
+        include_str!("../templates/cpp/bern_ui_core.inl"),
+    ),
+    (
+        "bern_ui_widgets.inl",
+        include_str!("../templates/cpp/bern_ui_widgets.inl"),
+    ),
+    (
+        "bern_ui_structure.inl",
+        include_str!("../templates/cpp/bern_ui_structure.inl"),
+    ),
+    (
+        "bern_ui_windows.inl",
+        include_str!("../templates/cpp/bern_ui_windows.inl"),
+    ),
 ];
 
 pub struct WinUi3Windows;
@@ -167,28 +178,48 @@ impl Target for WinUi3Windows {
         let product = product_name(app);
         let executable = executable(app);
         let profile = if context.release { "release" } else { "debug" };
-        let library = context
-            .workspace_dir
-            .join("target/bern-glue-windows")
-            .join(profile)
-            .join("bern_app.dll");
+        let target_dir = context.workspace_dir.join("target/bern-glue-windows");
+        let engine = target_dir.join(profile).join("bern_app.lib");
+        let cache = context.workspace_dir.join("target/bern-winrt");
+        let bundle = context.output_dir.join(&product);
+        let generator = Generator::new(app);
         let mut files = vec![
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
+            GeneratedFile::text("glue/.cargo/config.toml", glue::cargo_config()),
             GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
-                format!("app/{product}.csproj"),
-                glue::csproj(app, &executable, &library),
+                "app/build.bat",
+                glue::build_script(&glue::Script {
+                    bundle: &bundle,
+                    executable: &executable,
+                    engine: &engine,
+                    cache: &cache,
+                    release: context.release,
+                }),
             ),
             GeneratedFile::text("app/app.manifest", glue::manifest(app)),
+            GeneratedFile::text("app/app.rc", glue::resource_script(app, &executable)),
+            GeneratedFile {
+                path: "app/app.ico".into(),
+                contents: icon::ico(
+                    &icon::images(app, &context.project_dir, icon::Shape::AsDrawn)
+                        .map_err(|message| vec![Diagnostic::error(message)])?,
+                ),
+            },
+            GeneratedFile::text("app/app_id.h", generator.identity()),
             GeneratedFile::text(
-                "app/App.cs",
-                Generator::new(app).generate(app.protocol.fingerprint()),
+                "app/app_catalog.cpp",
+                generator.catalog(app.protocol.fingerprint()),
             ),
+            GeneratedFile::text("app/app_ui.inl", generator.interface()),
         ];
         for (name, contents) in RUNTIME {
-            files.push(GeneratedFile::text(format!("app/Bern/{name}"), *contents));
+            files.push(GeneratedFile::text(
+                format!("app/runtime/{name}"),
+                *contents,
+            ));
         }
         let lock = context.workspace_dir.join("Cargo.lock");
         if let Ok(contents) = std::fs::read(&lock)
@@ -222,14 +253,15 @@ impl Target for WinUi3Windows {
             "generator_version": env!("CARGO_PKG_VERSION"),
             "toolkit": {
                 "windows_app_sdk": WINDOWS_APP_SDK,
-                "dotnet": TARGET_FRAMEWORK,
+                "packages": PACKAGES.iter().map(|(id, version)| format!("{id} {version}")).collect::<Vec<_>>(),
                 "minimum_windows": MINIMUM_WINDOWS,
             },
             "architecture": std::env::consts::ARCH,
             "runtime_identifier": glue::runtime_identifier(),
             "profile": profile,
             "engine_deployment": "in-process",
-            "ui_bridge": "csharp",
+            "ui_bridge": "cpp",
+            "frontends": ["winui3", "xaml-islands"],
             "channels": context.target.channels,
             "color_source": "native",
             "protocol": app.protocol.namespace,
@@ -268,19 +300,6 @@ impl Target for WinUi3Windows {
         if context.release {
             cargo.push("--release".into());
         }
-        let dotnet = vec![
-            "build".to_string(),
-            output
-                .join("app")
-                .join(format!("{product}.csproj"))
-                .display()
-                .to_string(),
-            "--configuration".into(),
-            if context.release { "Release" } else { "Debug" }.into(),
-            "--output".into(),
-            bundle.display().to_string(),
-            "--nologo".into(),
-        ];
         let steps = vec![
             BuildStep::Run {
                 description: "Build the engine library and the entries".into(),
@@ -290,14 +309,15 @@ impl Target for WinUi3Windows {
                 env: vec![],
             },
             BuildStep::Run {
-                description: "Build the WinUI 3 application".into(),
-                program: "dotnet".into(),
-                args: dotnet,
-                cwd: output.join("app"),
-                env: vec![
-                    ("DOTNET_CLI_TELEMETRY_OPTOUT".into(), "1".into()),
-                    ("DOTNET_NOLOGO".into(), "1".into()),
+                description: "Build the Windows application".into(),
+                program: "cmd".into(),
+                args: vec![
+                    "/d".into(),
+                    "/c".into(),
+                    output.join("app").join("build.bat").display().to_string(),
                 ],
+                cwd: output.join("app"),
+                env: vec![],
             },
             // Declared resources ship next to the executable, which finds
             // them relative to itself.

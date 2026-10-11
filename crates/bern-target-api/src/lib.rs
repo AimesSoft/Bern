@@ -7,6 +7,7 @@
 //! buildable.
 
 pub mod glue;
+pub mod icon;
 
 use bern_ir::{Application, IR_VERSION, SourceLocation};
 use std::fmt;

@@ -3,7 +3,7 @@
 
 use bern_backend_swiftui::{MINIMUM_MACOS, SwiftUiMacos};
 use bern_ir::{Application, ResourceDef, SourceLocation};
-use bern_target_api::{BuildContext, BuildStep, Target, TargetConfig};
+use bern_target_api::{BuildContext, BuildPlan, BuildStep, Target, TargetConfig};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -112,6 +112,19 @@ fn showcase_generates_swift_that_type_checks() {
     );
     let manifest = std::fs::read_to_string(output.join("build.json")).unwrap();
     assert!(manifest.contains(r#""media/tides.mp4""#), "{manifest}");
+    // Without `[app].icon` the bundle carries the Bern logo, which the
+    // resource mirror keeps.
+    let icns = std::fs::read(output.join("Showcase.app/Contents/Resources/AppIcon.icns")).unwrap();
+    assert_eq!(&icns[..4], b"icns");
+    assert_eq!(
+        u32::from_be_bytes([icns[4], icns[5], icns[6], icns[7]]) as usize,
+        icns.len()
+    );
+    let plist = std::fs::read_to_string(output.join("Showcase.app/Contents/Info.plist")).unwrap();
+    assert!(
+        plist.contains("<key>CFBundleIconFile</key>\n    <string>AppIcon</string>"),
+        "{plist}"
+    );
     let plan = SwiftUiMacos.plan(&compiled.app, &context).unwrap();
     let mirror = plan
         .steps
@@ -137,6 +150,65 @@ fn showcase_generates_swift_that_type_checks() {
     );
     assert!(keep.contains(&PathBuf::from("en.lproj/InfoPlist.strings")));
     assert!(keep.contains(&PathBuf::from("zh-Hans.lproj/Localizable.strings")));
+
+    // Debug symbols never ship in the bundle: the dSYM swiftc writes next to
+    // the executable moves beside the bundle before signing, and release
+    // builds strip what the dSYM keeps from the executable.
+    let symbols = output.join("Showcase.app.dSYM");
+    // Programs run, with the tool xcrun runs.
+    let programs = |plan: &BuildPlan| -> Vec<String> {
+        plan.steps
+            .iter()
+            .filter_map(|step| match step {
+                BuildStep::Run { program, args, .. } if program == "xcrun" => {
+                    Some(format!("xcrun {}", args[0]))
+                }
+                BuildStep::Run { program, .. } => Some(program.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let moved = plan.steps.iter().position(|step| {
+        matches!(step, BuildStep::Run { program, args, .. }
+            if program == "mv"
+                && args[0] == output.join("Showcase.app/Contents/MacOS/Showcase.dSYM").display().to_string()
+                && args[1] == symbols.display().to_string())
+    });
+    assert!(moved.is_some_and(|moved| moved < sign), "{:?}", plan.steps);
+    assert!(
+        plan.steps
+            .iter()
+            .any(|step| matches!(step, BuildStep::RemoveIfExists { path } if path == &symbols))
+    );
+    assert!(plan.products.contains(&symbols));
+    assert!(!programs(&plan).contains(&"xcrun strip".to_string()));
+    let release = SwiftUiMacos
+        .plan(
+            &compiled.app,
+            &BuildContext {
+                release: true,
+                ..context.clone()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        programs(&release),
+        ["cargo", "xcrun swiftc", "mv", "xcrun strip", "codesign"]
+    );
+    let swiftc = release
+        .steps
+        .iter()
+        .find_map(|step| match step {
+            BuildStep::Run { args, .. } if args[0] == "swiftc" => Some(args),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        swiftc
+            .windows(2)
+            .any(|pair| pair == ["-Xlinker", "-dead_strip"])
+    );
+    assert!(swiftc.contains(&"-g".to_string()));
 
     let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
     for forbidden in [

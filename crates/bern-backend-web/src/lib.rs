@@ -24,7 +24,7 @@ use bern_ir::{Application, IR_VERSION, Node};
 use bern_protocol::Type;
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common,
+    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
 
@@ -60,7 +60,51 @@ fn build_version() -> String {
     format!("{:x}", nanos as u64)
 }
 
-fn index_html(app: &Application, version: &str) -> String {
+/// The page icons: the Bern logo as SVG with a PNG beside it and a square
+/// one for home screens, or the declared PNG for all three uses. Returns
+/// the files and their `<link>` elements.
+fn page_icons(
+    app: &Application,
+    context: &BuildContext,
+    version: &str,
+) -> Result<(Vec<GeneratedFile>, String), Vec<Diagnostic>> {
+    let failed = |message: String| vec![Diagnostic::error(message)];
+    let round = icon::images(app, &context.project_dir, icon::Shape::AsDrawn).map_err(failed)?;
+    let largest = icon::largest(&round);
+    let version = html_escape(version);
+    let png = format!(
+        "<link rel=\"icon\" type=\"image/png\" sizes=\"{size}x{size}\" href=\"icon.png?v={version}\">\n",
+        size = largest.size
+    );
+    let mut files = vec![GeneratedFile {
+        path: "icon.png".into(),
+        contents: largest.png.to_vec(),
+    }];
+    if !icon::is_default(app) {
+        return Ok((
+            files,
+            format!("{png}<link rel=\"apple-touch-icon\" href=\"icon.png?v={version}\">\n"),
+        ));
+    }
+    let square = icon::default_images(icon::Shape::Masked);
+    let touch = square
+        .iter()
+        .find(|image| image.size == 256)
+        .expect("the logo has a 256 pixel square");
+    files.push(GeneratedFile::text("favicon.svg", icon::DEFAULT_SVG));
+    files.push(GeneratedFile {
+        path: "apple-touch-icon.png".into(),
+        contents: touch.png.to_vec(),
+    });
+    Ok((
+        files,
+        format!(
+            "<link rel=\"icon\" type=\"image/svg+xml\" href=\"favicon.svg?v={version}\">\n{png}<link rel=\"apple-touch-icon\" href=\"apple-touch-icon.png?v={version}\">\n"
+        ),
+    ))
+}
+
+fn index_html(app: &Application, version: &str, icons: &str) -> String {
     let title = app
         .app
         .name
@@ -73,7 +117,7 @@ fn index_html(app: &Application, version: &str) -> String {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
-<link rel="stylesheet" href="theme.css?v={version}">
+{icons}<link rel="stylesheet" href="theme.css?v={version}">
 <link rel="stylesheet" href="bern.css?v={version}">
 <script type="module" src="app.js?v={version}"></script>
 </head>
@@ -265,8 +309,9 @@ impl Target for WebBrowser {
         let strings = strings::tables(app);
         let remote = context.target.web_mode.as_deref() == Some("ui");
         let version = build_version();
+        let (icon_files, icon_links) = page_icons(app, context, &version)?;
         let mut files = vec![
-            GeneratedFile::text("index.html", index_html(app, &version)),
+            GeneratedFile::text("index.html", index_html(app, &version, &icon_links)),
             GeneratedFile::text("bern.js", RUNTIME),
             GeneratedFile::text("bern.css", STYLES),
             GeneratedFile::text("theme.css", theme::stylesheet(app)),
@@ -290,6 +335,7 @@ impl Target for WebBrowser {
                 glue::page_lib_rs(context, app, remote),
             ),
         ];
+        files.extend(icon_files);
         let mut crates = vec!["glue/page"];
         if remote {
             files.extend([

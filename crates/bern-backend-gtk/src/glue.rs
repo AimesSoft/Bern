@@ -167,7 +167,7 @@ fn main() {{
 /// language, so the desktop shows it for the running windows. Install it
 /// into `~/.local/share/applications` to launch the build from the
 /// desktop.
-pub fn desktop_entry(app: &Application, executable: &Path) -> String {
+pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> String {
     let mut entry = String::from("[Desktop Entry]\nType=Application\n");
     let default = app
         .app
@@ -188,7 +188,7 @@ pub fn desktop_entry(app: &Application, executable: &Path) -> String {
         entry.push_str(&format!("Name[{locale}]={name}\n"));
     }
     entry.push_str(&format!("Exec={}\n", path(executable)));
-    entry.push_str("Icon=application-x-executable\n");
+    entry.push_str(&format!("Icon={}\n", path(icon)));
     entry.push_str("Terminal=false\nCategories=Utility;\n");
     entry.push_str("StartupNotify=true\nDBusActivatable=false\n");
     entry

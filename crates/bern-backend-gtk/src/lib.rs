@@ -15,7 +15,7 @@ use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common,
+    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
 
@@ -48,6 +48,12 @@ pub fn product_name(app: &Application) -> String {
             }
         })
         .collect()
+}
+
+/// The application icon beside the executable, named after the
+/// application so the icon theme finds it: `icons/<bundle id>.png`.
+pub fn icon_file(app: &Application) -> PathBuf {
+    PathBuf::from("icons").join(format!("{}.png", app.app.bundle_id))
 }
 
 fn executable(app: &Application) -> String {
@@ -147,9 +153,21 @@ impl Target for GtkLinux {
             GeneratedFile::text("app/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
                 PathBuf::from(&product).join(format!("{}.desktop", app.app.bundle_id)),
-                glue::desktop_entry(app, &context.output_dir.join(&product).join(&executable)),
+                glue::desktop_entry(
+                    app,
+                    &context.output_dir.join(&product).join(&executable),
+                    &context.output_dir.join(&product).join(icon_file(app)),
+                ),
             ),
         ];
+        // The application icon next to the executable, which adds the
+        // directory to the icon theme and names it after the application.
+        let images = icon::images(app, &context.project_dir, icon::Shape::AsDrawn)
+            .map_err(|message| vec![Diagnostic::error(message)])?;
+        files.push(GeneratedFile {
+            path: PathBuf::from(&product).join(icon_file(app)),
+            contents: icon::largest(&images).png.to_vec(),
+        });
         let lock = context.workspace_dir.join("Cargo.lock");
         if let Ok(contents) = std::fs::read(&lock)
             && !context.output_dir.join("app/Cargo.lock").exists()

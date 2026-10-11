@@ -285,6 +285,26 @@ fn start_engine(host: &Host, start: StartEngine) -> Result<(), String> {
     Ok(())
 }
 
+/// The application icon: `icons/<bundle id>.png` beside the executable joins
+/// the icon theme's search path, and windows take it as their icon.
+fn install_icon(bundle_id: &str) {
+    let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("icons")))
+        .filter(|dir| dir.is_dir())
+    else {
+        return;
+    };
+    if let Some(display) = gtk::gdk::Display::default() {
+        let theme = gtk::IconTheme::for_display(&display);
+        theme.add_search_path(&dir);
+        if !theme.has_icon(bundle_id) {
+            eprintln!("bern: the application icon {bundle_id}.png is missing from {}", dir.display());
+        }
+    }
+    gtk::Window::set_default_icon_name(bundle_id);
+}
+
 /// Accent colors from the brand color, for libadwaita's named colors.
 fn brand_css(red: u8, green: u8, blue: u8) -> String {
     format!(
@@ -330,6 +350,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     let failed_startup = Rc::clone(&failed);
     application.connect_startup(move |application| {
         snapshot::apply_appearance();
+        install_icon(host().def.bundle_id);
         if let Some((red, green, blue)) = host().def.brand_seed {
             let provider = gtk::CssProvider::new();
             provider.load_from_string(&brand_css(red, green, blue));
