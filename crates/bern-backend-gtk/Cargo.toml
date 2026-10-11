@@ -1,0 +1,17 @@
+[package]
+name = "bern-backend-gtk"
+description = "GTK target: generates Linux applications on GTK 4 and libadwaita from the Bern IR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-ir.workspace = true
+bern-protocol.workspace = true
+bern-media.workspace = true
+bern-target-api.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+bern-compiler.workspace = true

@@ -1,15 +1,15 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.14
+- 版本：v0.15
 - 状态：架构设计草案
-- 更新日期：2026-10-10
+- 更新日期：2026-10-11
 - 项目名称：Bern UI
 - 计划仓库名称：bern-ui
 - 主要开发语言：Rust
 - 首个目标平台：macOS（SwiftUI）
 - 主要验证应用：NipaPlay 3.0
 
-当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md) 与 [Web 实现记录](Implementation/Web.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；其余能力仍为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md) 与 [Linux GTK 实现记录](Implementation/Linux-GTK.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）；其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
@@ -1257,11 +1257,13 @@ Flutter 目标模块生成 Dart Widget、属性与事件绑定、本地化数据
 
 ### Linux 默认 GTK
 
-Linux 默认通过 GTK 目标生成控件结构、状态绑定和命令适配。可以采用 Rust 的 GTK 绑定接入通用前端运行时；GTK 版本与具体绑定方案在原型验证后确定，并写入目标支持矩阵。
+Linux 默认通过 GTK 目标生成控件结构、状态绑定和命令适配。目标采用 Rust 的 GTK 绑定（gtk4-rs），生成的 Rust 代码调用独立的 GTK 运行时 crate，引擎与会话运行时在同一进程内经同一进程内接口连接；GTK 4、libadwaita 与绑定版本写入目标支持矩阵和构建清单。
 
 后端负责主循环调度、对象与订阅释放、输入法、焦点、可访问性、窗口及视频表面集成。系统外观检测、显示环境和发行依赖按实际目标验证，不从“使用 GTK”推定所有 Linux 桌面已经兼容。
 
-libadwaita 是独立的可选集成，不作为 GTK 默认路线的隐含依赖。其控件与主题能力若被采用，需要单独声明并符合 Bern 的命令和主题契约。
+`gtk + linux` 目标显式采用 libadwaita：它提供 GNOME HIG 的标准容器与行、自适应分栏、对话框，以及跟随系统深浅色与强调色的样式管理器，是 GNOME 平台视觉规范的原生实现。这一依赖由目标描述与构建清单声明（首版最低 GTK 4.14、libadwaita 1.5，即 Ubuntu 24.04 的版本），控件仍经 Bern 的命令契约，颜色全部来自 libadwaita；不提供 libadwaita 的环境或其他 Linux UI 路线须作为另外的目标声明，不由 GTK 目标静默改变依赖。GTK 运行时不属于 Bern 工作区的默认构建，只在生成的 Linux 应用中编译，GTK 不成为构建其他目标的前置条件。
+
+GTK 4 不提供窗口位置的读取与设置，Wayland 合成器也不报告窗口已最小化：目标如实报告这些动作不可用或结果未知，不把请求发出当作已完成。
 
 ### Windows 默认 WinUI 3
 
@@ -1500,7 +1502,7 @@ Web 实现前先单独定义 Web 视觉规范，并完成 Bern 主题内核：�
 
 ### 阶段五 扩展性与其他原生前端验证
 
-在扩展大量组件之前，分批完成 `gtk + linux` 和 `winui3 + windows` 两个默认桌面组合的最小示例，并用显式选择的 `flutter + macos` 验证后端可替换性。它们使用同一业务核心、应用协议和公共 IR，验证目标扩展不依赖重写解析器，也不要求把业务改写为 UI 宿主语言。
+在扩展大量组件之前，分批完成 `gtk + linux` 和 `winui3 + windows` 两个默认桌面组合的最小示例，并用显式选择的 `flutter + macos` 验证后端可替换性。第一批 `gtk + linux` 已完成，见 [Linux GTK 实现记录](Implementation/Linux-GTK.md)。它们使用同一业务核心、应用协议和公共 IR，验证目标扩展不依赖重写解析器，也不要求把业务改写为 UI 宿主语言。
 
 验收内容包括生成代码可构建、状态可订阅、带参数命令与错误可返回、列表身份正确、订阅可释放、同一主题快照能正确映射深浅色，以及目标禁用后其他构建仍独立可用。系统托管控件按其主题能力单独验证。需要新增公共语义的部分应单列说明，不能用复制整套编译器的方式通过验收。
 
@@ -1590,3 +1592,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.12 | 增加随包资源：`Bern.toml` 的受限声明与严格构建校验、IR 资源清单、目标复制，以及引擎经宿主装配的 `Resources` 按名称解析 |
 | v0.13 | 虚拟呈现遵循宿主的设计习惯：网页中主窗口即页面，次级窗口为对话框或侧边面板，浮动窗口改为显式选择的 `presentation: floating`；不提供的窗口动作如实报告为不可用；Web 视觉规范定为 Bern 自有的中性网页风格 |
 | v0.14 | 确定阶段四的声明方式：`[layouts]` 断点与 `Adaptive`/`Layout`、`Menu`/`MenuItem`、`#[bern::features]` 功能契约与覆盖检查（B201–B206）、本地化诊断编号（B101–B104）、按 UI 会话的运行时语言切换（`LanguagePicker` 与 `ui.set_language`） |
+| v0.15 | 阶段五第一批：`gtk + linux` 目标采用 gtk4-rs 与显式声明的 libadwaita（最低 GTK 4.14、libadwaita 1.5），运行时 crate 不进入工作区默认构建；如实报告 GTK 4 与 Wayland 下不可用或无法确认的窗口动作 |

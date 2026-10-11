@@ -1,0 +1,970 @@
+//! Native windows: instances and their drafts, page headers, the close
+//! protocol and presentation facts.
+//!
+//! Every declared window is a libadwaita application window. An instance
+//! registers with the session runtime when it opens and gets a generation
+//! and an id such as `settings#2`; its drafts live in cells mirrored from
+//! the runtime. Closing always runs the declared close check first, from
+//! the title bar, Ctrl+W, a declared action or an external entry.
+
+use crate::ctx::Page;
+use crate::host::{host, status, take, with_bytes};
+use crate::protocol::{Value, Writer, decode, encode};
+use crate::reactive::{Cell, Scope, effect, untrack};
+use crate::text::tr;
+use crate::{CloseCheck, Ctx, Done, Failure, Field, Parent, snapshot};
+use adw::prelude::*;
+use std::cell::{Cell as StdCell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+use std::time::Duration;
+
+/// A close confirmation waiting for a decision.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct PendingClose {
+    pub(crate) id: String,
+    pub(crate) message: String,
+    pub(crate) can_save: bool,
+    pub(crate) draft_revision: u64,
+}
+
+/// Outcome of a close request or decision, as the session catalog's
+/// `CloseResult` describes it.
+pub(crate) struct CloseResult {
+    pub(crate) outcome: u32,
+    pub(crate) window: String,
+    pub(crate) confirmation: Option<String>,
+    pub(crate) draft_revision: u64,
+    pub(crate) decisions: Vec<u32>,
+    pub(crate) message: Option<String>,
+    pub(crate) reason: Option<String>,
+}
+
+pub(crate) const CLOSED: u32 = 0;
+pub(crate) const REJECTED: u32 = 1;
+pub(crate) const CONFIRMATION_REQUIRED: u32 = 2;
+
+impl CloseResult {
+    fn closed(window: &str, draft_revision: u64) -> Self {
+        Self {
+            outcome: CLOSED,
+            window: window.to_string(),
+            confirmation: None,
+            draft_revision,
+            decisions: vec![],
+            message: None,
+            reason: None,
+        }
+    }
+
+    fn rejected(window: &str, draft_revision: u64, reason: String) -> Self {
+        Self {
+            outcome: REJECTED,
+            reason: Some(reason),
+            ..Self::closed(window, draft_revision)
+        }
+    }
+
+    pub(crate) fn to_value(&self) -> Value {
+        let text = |value: &Option<String>| match value {
+            Some(value) => Value::some(Value::Text(value.clone())),
+            None => Value::none(),
+        };
+        Value::Record(vec![
+            Value::unit_variant(self.outcome),
+            Value::Text(self.window.clone()),
+            text(&self.confirmation),
+            Value::Int(self.draft_revision as i64),
+            Value::List(
+                self.decisions
+                    .iter()
+                    .map(|decision| Value::unit_variant(*decision))
+                    .collect(),
+            ),
+            text(&self.message),
+            text(&self.reason),
+        ])
+    }
+}
+
+/// What the platform shows for a window, in the session catalog's terms.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Facts {
+    /// 0 visible, 1 minimized, 2 hidden.
+    pub(crate) visibility: u8,
+    /// 0 normal, 1 maximized, 2 full screen.
+    pub(crate) size: u8,
+    pub(crate) width: f64,
+    pub(crate) height: f64,
+    pub(crate) focused: bool,
+    pub(crate) actions: u32,
+}
+
+/// Window actions, by their index in the session catalog. GTK 4 cannot
+/// place windows, so `Move` (5) is never available.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Action {
+    Activate = 0,
+    Close = 1,
+    Minimize = 2,
+    Restore = 3,
+    Maximize = 4,
+    Resize = 6,
+}
+
+struct Wait {
+    satisfied: Box<dyn Fn(&Facts) -> bool>,
+    complete: Option<Done>,
+}
+
+/// A window instance.
+pub(crate) struct Win {
+    pub(crate) kind: usize,
+    pub(crate) generation: u64,
+    pub(crate) id: String,
+    cells: HashMap<usize, Vec<Cell<Value>>>,
+    pub(crate) window: adw::ApplicationWindow,
+    toasts: adw::ToastOverlay,
+    pub(crate) pending: Cell<Option<PendingClose>>,
+    allow_close: StdCell<bool>,
+    pub(crate) scope: Scope,
+    command: StdCell<bool>,
+    minimize_requested: StdCell<bool>,
+    waits: RefCell<Vec<Wait>>,
+    dialog: RefCell<Option<adw::AlertDialog>>,
+    report_queued: StdCell<bool>,
+    closed: StdCell<bool>,
+}
+
+impl Win {
+    pub(crate) fn cell(&self, field: Field) -> Cell<Value> {
+        self.cells
+            .get(&field.session)
+            .and_then(|cells| cells.get(field.field))
+            .cloned()
+            .unwrap_or_else(|| Cell::new(Value::Unit))
+    }
+
+    /// Write a draft field: the session runtime first, then the cell.
+    pub(crate) fn write(&self, field: Field, value: Value) -> bool {
+        let host = host();
+        let Some((_, ty, _)) = host
+            .def
+            .sessions
+            .get(field.session)
+            .and_then(|session| session.fields.get(field.field))
+        else {
+            return false;
+        };
+        let mut writer = Writer::new();
+        encode(&value, ty, &host.def.types, &mut writer);
+        let bytes = with_bytes(&writer.bytes, |ptr, len| {
+            // SAFETY: the handle is live; the value bytes are valid for
+            // this call.
+            take(unsafe {
+                bern_ffi::bern_session_set(
+                    host.app(),
+                    self.kind as u32,
+                    self.generation,
+                    field.session as u32,
+                    field.field as u32,
+                    ptr,
+                    len,
+                )
+            })
+        });
+        match status(&bytes) {
+            Ok(_) => {
+                self.cell(field).set(value);
+                snapshot::schedule();
+                true
+            }
+            Err(failure) => {
+                eprintln!("bern: {}: {}", failure.code, failure.message);
+                false
+            }
+        }
+    }
+
+    /// Show a failed command to the user.
+    pub(crate) fn fail(&self, failure: &Failure) {
+        let toast = adw::Toast::new(&format!(
+            "{} — {}",
+            tr("bern.alert.failed"),
+            failure.message
+        ));
+        toast.set_timeout(6);
+        self.toasts.add_toast(toast);
+    }
+
+    pub(crate) fn is_blocked(&self) -> bool {
+        self.pending.peek().is_some()
+    }
+
+    fn def(&self) -> &'static crate::WindowDef {
+        &host().def.windows[self.kind]
+    }
+
+    pub(crate) fn kind_id(&self) -> &'static str {
+        self.def().id
+    }
+
+    fn resizable(&self) -> bool {
+        self.window.is_resizable()
+    }
+
+    pub(crate) fn facts(&self) -> Facts {
+        let window = &self.window;
+        let state = window
+            .surface()
+            .and_then(|surface| surface.downcast::<gtk::gdk::Toplevel>().ok())
+            .map(|toplevel| toplevel.state())
+            .unwrap_or(gtk::gdk::ToplevelState::empty());
+        let minimized = state.contains(gtk::gdk::ToplevelState::MINIMIZED)
+            || (self.minimize_requested.get()
+                && state.contains(gtk::gdk::ToplevelState::SUSPENDED));
+        let visibility = if !window.is_visible() {
+            2
+        } else if minimized {
+            1
+        } else {
+            0
+        };
+        let size = if window.is_fullscreen() {
+            2
+        } else if window.is_maximized() {
+            1
+        } else {
+            0
+        };
+        // The window's own size, without the shadow its surface includes.
+        let (width, height) = (window.width() as f64, window.height() as f64);
+        let mut actions = (1 << Action::Activate as u32) | (1 << Action::Close as u32);
+        if visibility == 0 {
+            actions |= 1 << Action::Minimize as u32;
+        }
+        if visibility == 1 || size != 0 {
+            actions |= 1 << Action::Restore as u32;
+        }
+        if self.resizable() && size == 0 {
+            actions |= (1 << Action::Maximize as u32) | (1 << Action::Resize as u32);
+        }
+        Facts {
+            visibility,
+            size,
+            width,
+            height,
+            focused: window.is_active(),
+            actions,
+        }
+    }
+
+    /// Report the current facts to the session runtime, then finish the
+    /// presentation commands they satisfy.
+    pub(crate) fn report(self: &Rc<Self>) {
+        if self.closed.get() {
+            return;
+        }
+        let facts = self.facts();
+        if facts.visibility == 0 {
+            self.minimize_requested.set(false);
+        }
+        // SAFETY: the handle is live while the application runs.
+        unsafe {
+            bern_ffi::bern_window_facts(
+                host().app(),
+                self.kind as u32,
+                self.generation,
+                if self.command.get() { 0 } else { 1 },
+                facts.visibility,
+                facts.size,
+                0.0,
+                0.0,
+                facts.width,
+                facts.height,
+                facts.focused as u8,
+                facts.actions,
+            )
+        };
+        let finished: Vec<Wait> = {
+            let mut waits = self.waits.borrow_mut();
+            let (done, waiting): (Vec<_>, Vec<_>) =
+                waits.drain(..).partition(|wait| (wait.satisfied)(&facts));
+            *waits = waiting;
+            done
+        };
+        for mut wait in finished {
+            if let Some(complete) = wait.complete.take() {
+                complete(Ok(()));
+            }
+        }
+        if self.waits.borrow().is_empty() {
+            self.command.set(false);
+        }
+    }
+
+    /// Report facts once after the current changes settle.
+    pub(crate) fn schedule_report(self: &Rc<Self>) {
+        if self.report_queued.replace(true) {
+            return;
+        }
+        let win = Rc::clone(self);
+        glib::idle_add_local_once(move || {
+            win.report_queued.set(false);
+            win.report();
+        });
+    }
+
+    /// Perform a presentation change and finish `complete` once the facts
+    /// show it, or with `ui_timeout` after five seconds.
+    fn perform(
+        self: &Rc<Self>,
+        change: impl FnOnce(&adw::ApplicationWindow),
+        satisfied: impl Fn(&Facts) -> bool + 'static,
+        complete: Done,
+    ) {
+        self.command.set(true);
+        self.waits.borrow_mut().push(Wait {
+            satisfied: Box::new(satisfied),
+            complete: Some(complete),
+        });
+        change(&self.window);
+        self.schedule_report();
+        let win = Rc::downgrade(self);
+        glib::timeout_add_local_once(Duration::from_secs(5), move || {
+            let Some(win) = win.upgrade() else { return };
+            win.report();
+            let expired: Vec<Wait> = win.waits.borrow_mut().drain(..).collect();
+            for mut wait in expired {
+                if let Some(complete) = wait.complete.take() {
+                    complete(Err(Failure::new(
+                        "ui_timeout",
+                        "the window system did not report the change in time; the outcome is unknown",
+                    )));
+                }
+            }
+            win.command.set(false);
+        });
+    }
+}
+
+struct Manager {
+    windows: RefCell<Vec<Rc<Win>>>,
+}
+
+thread_local! {
+    static MANAGER: Manager = const { Manager { windows: RefCell::new(Vec::new()) } };
+}
+
+pub(crate) fn all() -> Vec<Rc<Win>> {
+    MANAGER.with(|manager| manager.windows.borrow().clone())
+}
+
+pub(crate) fn named(id: &str) -> Result<Rc<Win>, Failure> {
+    all()
+        .into_iter()
+        .find(|win| win.id == id)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no open window `{id}`")))
+}
+
+fn instance_of(kind: usize) -> Option<Rc<Win>> {
+    all().into_iter().find(|win| win.kind == kind)
+}
+
+/// A page header: the innermost title or title widget, a back button
+/// while something can go back, and the page's tools.
+pub(crate) fn header(page: &Rc<Page>, fallback: Option<Rc<dyn Fn() -> String>>) -> adw::HeaderBar {
+    let header = adw::HeaderBar::new();
+    let back = gtk::Button::from_icon_name("go-previous-symbolic");
+    back.add_css_class("flat");
+    header.pack_start(&back);
+    let clicked = Rc::clone(page);
+    back.connect_clicked(move |_| {
+        if let Some(back) = clicked.back() {
+            back();
+        }
+    });
+    header.pack_end(&page.tools);
+    let title = adw::WindowTitle::new("", "");
+    let page = Rc::clone(page);
+    let shown = header.clone();
+    effect(move || {
+        page.version.track();
+        back.set_tooltip_text(Some(&tr("bern.navigation.back")));
+        back.set_visible(page.back().is_some());
+        match page.title_widget() {
+            Some(widget) => {
+                if shown.title_widget().as_ref() != Some(&widget) {
+                    shown.set_title_widget(Some(&widget));
+                }
+            }
+            None => {
+                let text = page
+                    .title()
+                    .or_else(|| fallback.as_ref().map(|fallback| fallback()))
+                    .unwrap_or_default();
+                title.set_title(&text);
+                if shown.title_widget().as_ref() != Some(title.upcast_ref()) {
+                    shown.set_title_widget(Some(&title));
+                }
+            }
+        }
+    });
+    header
+}
+
+/// Generation, id and draft cells of a new window instance.
+type Instance = (u64, String, HashMap<usize, Vec<Cell<Value>>>);
+
+fn decode_instance(bytes: &[u8]) -> Result<Instance, Failure> {
+    let host = host();
+    let mut reader = status(bytes)?;
+    let malformed = |error: crate::protocol::CodecError| Failure::new("invalid_reply", error.0);
+    let generation = reader.u64().map_err(malformed)?;
+    let id = reader.text().map_err(malformed)?;
+    let slots = reader.u32().map_err(malformed)?;
+    let mut cells = HashMap::new();
+    for _ in 0..slots {
+        let session = reader.u32().map_err(malformed)? as usize;
+        let def = host
+            .def
+            .sessions
+            .get(session)
+            .ok_or_else(|| Failure::new("invalid_reply", "unknown session type"))?;
+        let mut values = Vec::new();
+        for (_, ty, _) in &def.fields {
+            values.push(Cell::new(
+                decode(ty, &host.def.types, &mut reader).map_err(malformed)?,
+            ));
+        }
+        cells.insert(session, values);
+    }
+    Ok((generation, id, cells))
+}
+
+/// Open a window of `kind`, or show the one already open. Returns the
+/// instance id.
+pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
+    let host = host();
+    let kind = host
+        .def
+        .windows
+        .iter()
+        .position(|window| window.id == kind_id)
+        .ok_or_else(|| Failure::new("target_not_found", format!("no window kind `{kind_id}`")))?;
+    if let Some(existing) = instance_of(kind) {
+        existing.window.present();
+        return Ok(existing.id.clone());
+    }
+    let application = host.application.get().expect("application").clone();
+    // SAFETY: the handle is live while the application runs.
+    let bytes = take(unsafe { bern_ffi::bern_window_opened(host.app(), kind as u32) });
+    let (generation, id, cells) = decode_instance(&bytes)?;
+    let def = &host.def.windows[kind];
+
+    let window = adw::ApplicationWindow::new(&application);
+    let width = def.width.map(|width| width as i32).unwrap_or(-1);
+    let height = def.height.map(|height| height as i32).unwrap_or(-1);
+    window.set_default_size(width, height);
+    if def.min_width.is_some() || def.min_height.is_some() {
+        window.set_size_request(
+            def.min_width.map(|width| width as i32).unwrap_or(-1),
+            def.min_height.map(|height| height as i32).unwrap_or(-1),
+        );
+    }
+    let toasts = adw::ToastOverlay::new();
+    window.set_content(Some(&toasts));
+
+    let win = Rc::new(Win {
+        kind,
+        generation,
+        id: id.clone(),
+        cells,
+        window: window.clone(),
+        toasts: toasts.clone(),
+        pending: Cell::new(None),
+        allow_close: StdCell::new(false),
+        scope: Scope::detached(),
+        command: StdCell::new(false),
+        minimize_requested: StdCell::new(false),
+        waits: RefCell::new(Vec::new()),
+        dialog: RefCell::new(None),
+        report_queued: StdCell::new(false),
+        closed: StdCell::new(false),
+    });
+    MANAGER.with(|manager| manager.windows.borrow_mut().push(Rc::clone(&win)));
+
+    let page = Page::new();
+    let title_key = def.title;
+    let view = adw::ToolbarView::new();
+    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    content.set_vexpand(true);
+    view.set_content(Some(&content));
+    toasts.set_child(Some(&view));
+    let render = def.render;
+    let settings = def.settings;
+    win.scope.run(|| {
+        let title_window = window.clone();
+        effect(move || title_window.set_title(Some(&tr(title_key))));
+        let bar = header(&page, Some(Rc::new(move || tr(title_key))));
+        view.add_top_bar(&bar);
+        let shown = Rc::clone(&page);
+        let revealed = view.clone();
+        effect(move || {
+            shown.version.track();
+            revealed.set_reveal_top_bars(!shown.header_hidden());
+        });
+        let ctx = Ctx::root(Rc::clone(&win), Some(Rc::clone(&page)));
+        render(&Parent::of_box(&content), &ctx);
+        let blocked = Rc::clone(&win);
+        let guarded = content.clone();
+        effect(move || guarded.set_sensitive(blocked.pending.get().is_none()));
+    });
+
+    if settings {
+        let escape = gtk::ShortcutController::new();
+        escape.add_shortcut(gtk::Shortcut::new(
+            gtk::ShortcutTrigger::parse_string("Escape"),
+            Some(gtk::NamedAction::new("window.close")),
+        ));
+        window.add_controller(escape);
+    }
+
+    let guard = Rc::downgrade(&win);
+    window.connect_close_request(move |_| {
+        let Some(win) = guard.upgrade() else {
+            return glib::Propagation::Proceed;
+        };
+        let proceed = win.allow_close.get()
+            || match request_close_from(&win, false) {
+                Ok(result) => result.outcome == CLOSED,
+                Err(failure) => {
+                    win.fail(&failure);
+                    false
+                }
+            };
+        if !proceed {
+            return glib::Propagation::Stop;
+        }
+        // The window goes away now; the instance ends with it.
+        closed(&win);
+        glib::Propagation::Proceed
+    });
+    for property in [
+        "maximized",
+        "fullscreened",
+        "is-active",
+        "visible",
+        "default-width",
+        "default-height",
+    ] {
+        let watched = Rc::downgrade(&win);
+        window.connect_notify_local(Some(property), move |_, _| {
+            if let Some(win) = watched.upgrade() {
+                win.schedule_report();
+            }
+        });
+    }
+    let observed = Rc::downgrade(&win);
+    window.connect_realize(move |window| {
+        let Some(surface) = window.surface() else {
+            return;
+        };
+        let layout = observed.clone();
+        surface.connect_layout(move |_, _, _| {
+            if let Some(win) = layout.upgrade() {
+                win.schedule_report();
+            }
+        });
+        if let Ok(toplevel) = surface.downcast::<gtk::gdk::Toplevel>() {
+            let state = observed.clone();
+            toplevel.connect_state_notify(move |_| {
+                if let Some(win) = state.upgrade() {
+                    win.schedule_report();
+                }
+            });
+        }
+    });
+    window.present();
+    win.schedule_report();
+    snapshot::watch(&win);
+    Ok(id)
+}
+
+/// The window instance ended: release its drafts, controls and
+/// subscriptions; application players stay.
+fn closed(win: &Rc<Win>) {
+    if win.closed.replace(true) {
+        return;
+    }
+    MANAGER.with(|manager| {
+        manager
+            .windows
+            .borrow_mut()
+            .retain(|candidate| !Rc::ptr_eq(candidate, win))
+    });
+    win.scope.dispose();
+    for mut wait in win.waits.borrow_mut().drain(..) {
+        if let Some(complete) = wait.complete.take() {
+            complete(Err(Failure::new(
+                "stale_window",
+                format!("`{}` closed while the command ran", win.id),
+            )));
+        }
+    }
+    // SAFETY: the handle is live while the application runs.
+    unsafe { bern_ffi::bern_window_closed(host().app(), win.kind as u32, win.generation) };
+}
+
+fn evaluate(win: &Rc<Win>) -> Option<CloseCheck> {
+    let check = win.def().close?;
+    let ctx = Ctx::root(Rc::clone(win), None);
+    Some(untrack(|| check(&ctx)))
+}
+
+/// Run the window's close check and ask the session runtime whether to
+/// close now or wait for a decision. A pending confirmation is returned
+/// again rather than asked twice. `close` closes the window when the
+/// outcome is to close; the window's own close request passes false and
+/// lets the close go on.
+fn request_close_from(win: &Rc<Win>, close: bool) -> Result<CloseResult, Failure> {
+    let check = evaluate(win);
+    let needs = check.as_ref().is_some_and(|check| check.needs_confirmation);
+    let can_save = check.as_ref().is_some_and(|check| check.save.is_some());
+    // SAFETY: the handle is live while the application runs.
+    let bytes = take(unsafe {
+        bern_ffi::bern_window_request_close(
+            host().app(),
+            win.kind as u32,
+            win.generation,
+            needs as u8,
+            can_save as u8,
+        )
+    });
+    let mut reader = status(&bytes)?;
+    let malformed = |error: crate::protocol::CodecError| Failure::new("invalid_reply", error.0);
+    if reader.u8().map_err(malformed)? == 0 {
+        if close {
+            finish_close(win);
+        } else {
+            win.allow_close.set(true);
+        }
+        return Ok(CloseResult::closed(&win.id, 0));
+    }
+    let pending = PendingClose {
+        id: reader.text().map_err(malformed)?,
+        message: check.map(|check| check.message).unwrap_or_default(),
+        can_save,
+        draft_revision: reader.u64().map_err(malformed)?,
+    };
+    win.pending.set(Some(pending.clone()));
+    show_dialog(win, &pending);
+    snapshot::schedule();
+    Ok(CloseResult {
+        outcome: CONFIRMATION_REQUIRED,
+        window: win.id.clone(),
+        confirmation: Some(pending.id.clone()),
+        draft_revision: pending.draft_revision,
+        decisions: if pending.can_save {
+            vec![0, 1, 2]
+        } else {
+            vec![1, 2]
+        },
+        message: Some(pending.message.clone()),
+        reason: None,
+    })
+}
+
+pub(crate) fn request_close(win: &Rc<Win>) -> Result<CloseResult, Failure> {
+    request_close_from(win, true)
+}
+
+/// Close the window after the close protocol decided to: destroy it
+/// directly, as a close request now would only close a dialog that is
+/// still on it.
+fn finish_close(win: &Rc<Win>) {
+    win.allow_close.set(true);
+    closed(win);
+    win.window.destroy();
+}
+
+fn show_dialog(win: &Rc<Win>, pending: &PendingClose) {
+    if let Some(dialog) = win.dialog.borrow().as_ref() {
+        // The same confirmation is already on screen.
+        if dialog.heading().map(|heading| heading.to_string()) == Some(pending.message.clone()) {
+            return;
+        }
+    }
+    let detail = if pending.can_save {
+        tr("bern.close.save_detail")
+    } else {
+        tr("bern.close.discard_detail")
+    };
+    let dialog = adw::AlertDialog::new(Some(&pending.message), Some(&detail));
+    dialog.add_response("cancel", &tr("bern.close.cancel"));
+    if pending.can_save {
+        dialog.add_response("discard", &tr("bern.close.dont_save"));
+        dialog.add_response("save", &tr("bern.close.save"));
+        dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
+        dialog.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("save"));
+    } else {
+        dialog.add_response("discard", &tr("bern.close.discard"));
+        dialog.set_response_appearance("discard", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+    }
+    dialog.set_close_response("cancel");
+    let decided = Rc::downgrade(win);
+    let confirmation = pending.id.clone();
+    dialog.connect_response(None, move |dialog, response| {
+        let Some(win) = decided.upgrade() else { return };
+        // Answered elsewhere, for example by an external entry.
+        if win.dialog.borrow().as_ref() != Some(dialog) {
+            return;
+        }
+        win.dialog.borrow_mut().take();
+        let decision = match response {
+            "save" => 0,
+            "discard" => 1,
+            _ => 2,
+        };
+        confirm_close(&win, &confirmation, decision, Box::new(|_| {}));
+    });
+    *win.dialog.borrow_mut() = Some(dialog.clone());
+    dialog.present(Some(&win.window));
+}
+
+fn dismiss_dialog(win: &Rc<Win>) {
+    let dialog = win.dialog.borrow_mut().take();
+    if let Some(dialog) = dialog {
+        dialog.force_close();
+    }
+}
+
+/// Apply a decision from the dialog or from an external entry. A save
+/// that fails keeps the window open.
+pub(crate) fn confirm_close(
+    win: &Rc<Win>,
+    confirmation: &str,
+    decision: u32,
+    completion: Box<dyn FnOnce(Result<CloseResult, Failure>)>,
+) {
+    let mut writer = Writer::new();
+    writer.text(confirmation);
+    writer.u32(decision);
+    let bytes = with_bytes(&writer.bytes, |ptr, len| {
+        // SAFETY: the handle is live; the bytes are valid for this call.
+        take(unsafe {
+            bern_ffi::bern_window_confirm_close(
+                host().app(),
+                win.kind as u32,
+                win.generation,
+                ptr,
+                len,
+            )
+        })
+    });
+    let revision = win
+        .pending
+        .peek()
+        .map(|pending| pending.draft_revision)
+        .unwrap_or(0);
+    let mut reader = match status(&bytes) {
+        Ok(reader) => reader,
+        Err(failure) => {
+            // A stale confirmation no longer describes the window.
+            if failure.code == "stale_confirmation"
+                && win
+                    .pending
+                    .peek()
+                    .is_some_and(|pending| pending.id == confirmation)
+            {
+                win.pending.set(None);
+                dismiss_dialog(win);
+            }
+            completion(Err(failure));
+            return;
+        }
+    };
+    let step = reader.u8().unwrap_or(2);
+    win.pending.set(None);
+    dismiss_dialog(win);
+    snapshot::schedule();
+    match step {
+        0 => {
+            finish_close(win);
+            completion(Ok(CloseResult::closed(&win.id, revision)));
+        }
+        1 => {
+            let Some(save) = evaluate(win).and_then(|check| check.save) else {
+                completion(Err(Failure::new("invalid_params", "no save command")));
+                return;
+            };
+            let saved = Rc::clone(win);
+            let ctx = Ctx::root(Rc::clone(win), None);
+            save(
+                &ctx,
+                Box::new(move |result| match result {
+                    Ok(()) => {
+                        finish_close(&saved);
+                        completion(Ok(CloseResult::closed(&saved.id, revision)));
+                    }
+                    Err(failure) => completion(Ok(CloseResult::rejected(
+                        &saved.id,
+                        revision,
+                        format!("save_failed: {}: {}", failure.code, failure.message),
+                    ))),
+                }),
+            );
+        }
+        _ => completion(Ok(CloseResult::rejected(
+            &win.id,
+            revision,
+            "cancelled".into(),
+        ))),
+    }
+}
+
+/// Whether the window system reports minimized windows. Wayland
+/// compositors do not: a minimized window only loses focus.
+fn observes_minimize(window: &adw::ApplicationWindow) -> bool {
+    !WidgetExt::display(window)
+        .type_()
+        .name()
+        .contains("Wayland")
+}
+
+pub(crate) fn minimize(win: &Rc<Win>, done: Done) {
+    win.minimize_requested.set(true);
+    if !observes_minimize(&win.window) {
+        win.window.minimize();
+        win.schedule_report();
+        done(Err(Failure::new(
+            "ui_timeout",
+            "the request was sent, but this Wayland compositor does not report minimized windows, so the outcome is unknown; window.activate shows the window again",
+        )));
+        return;
+    }
+    win.perform(
+        |window| window.minimize(),
+        |facts| facts.visibility == 1,
+        done,
+    );
+}
+
+pub(crate) fn restore(win: &Rc<Win>, done: Done) {
+    let facts = win.facts();
+    if facts.visibility == 1 {
+        win.perform(
+            |window| window.present(),
+            |facts| facts.visibility == 0,
+            done,
+        );
+    } else if facts.size == 2 {
+        win.perform(
+            |window| window.unfullscreen(),
+            |facts| facts.size != 2,
+            done,
+        );
+    } else {
+        win.perform(|window| window.unmaximize(), |facts| facts.size == 0, done);
+    }
+}
+
+pub(crate) fn maximize(win: &Rc<Win>, done: Done) {
+    win.perform(|window| window.maximize(), |facts| facts.size == 1, done);
+}
+
+pub(crate) fn resize(win: &Rc<Win>, width: f64, height: f64, done: Done) {
+    let def = win.def();
+    let (minimum_width, minimum_height) =
+        (def.min_width.unwrap_or(1.0), def.min_height.unwrap_or(1.0));
+    if width < minimum_width || height < minimum_height {
+        done(Err(Failure::new(
+            "out_of_range",
+            format!(
+                "`{}` needs at least {} × {}",
+                win.id,
+                crate::value::number(minimum_width),
+                crate::value::number(minimum_height)
+            ),
+        )));
+        return;
+    }
+    win.perform(
+        move |window| window.set_default_size(width.round() as i32, height.round() as i32),
+        move |facts| {
+            (facts.width - width.round()).abs() <= 1.0
+                && (facts.height - height.round()).abs() <= 1.0
+        },
+        done,
+    );
+}
+
+/// Open the windows declared `initial: open`.
+pub(crate) fn open_initial() {
+    let kinds: Vec<&'static str> = host()
+        .def
+        .windows
+        .iter()
+        .filter(|window| window.initial_open)
+        .map(|window| window.id)
+        .collect();
+    for kind in kinds {
+        if let Err(failure) = open(kind) {
+            eprintln!("bern: cannot open `{kind}`: {}", failure.message);
+        }
+    }
+}
+
+/// The application was activated again, for example from the launcher:
+/// show the primary window, opening it when it was closed.
+pub(crate) fn reopen_primary() {
+    let primary = host().def.primary;
+    if let Err(failure) = open(primary) {
+        eprintln!("bern: cannot open `{primary}`: {}", failure.message);
+    }
+}
+
+/// `windows.<kind>.open()` and `activate()` in declarations.
+pub fn open_window(ctx: &Ctx, kind: &str) {
+    if let Err(failure) = open(kind) {
+        ctx.win().fail(&failure);
+    }
+}
+
+/// `windows.<kind>.close()` in declarations: the close protocol, as from
+/// the title bar.
+pub fn close_window(ctx: &Ctx, kind: &str) {
+    let found = all().into_iter().find(|win| win.kind_id() == kind);
+    if let Some(win) = found
+        && let Err(failure) = request_close(&win)
+    {
+        ctx.win().fail(&failure);
+    }
+}
+
+/// Application actions and their shortcuts.
+pub(crate) fn install_actions(application: &adw::Application) {
+    let quit = gio::SimpleAction::new("quit", None);
+    let quitting = application.clone();
+    quit.connect_activate(move |_, _| quitting.quit());
+    application.add_action(&quit);
+    application.set_accels_for_action("app.quit", &["<Control>q"]);
+    application.set_accels_for_action("window.close", &["<Control>w"]);
+}
+
+/// A window explaining why the engine could not start.
+pub(crate) fn show_startup_error(application: &adw::Application, message: &str) {
+    let window = adw::ApplicationWindow::new(application);
+    window.set_default_size(480, 320);
+    let page = adw::StatusPage::new();
+    page.set_icon_name(Some("dialog-error-symbolic"));
+    page.set_title(&tr("bern.startup.failed"));
+    page.set_description(Some(message));
+    let view = adw::ToolbarView::new();
+    view.add_top_bar(&adw::HeaderBar::new());
+    view.set_content(Some(&page));
+    window.set_content(Some(&view));
+    window.present();
+}

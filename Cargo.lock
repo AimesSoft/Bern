@@ -47,6 +47,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-backend-gtk"
+version = "0.1.0"
+dependencies = [
+ "bern-compiler",
+ "bern-ir",
+ "bern-media",
+ "bern-protocol",
+ "bern-target-api",
+ "serde_json",
+]
+
+[[package]]
 name = "bern-backend-swiftui"
 version = "0.1.0"
 dependencies = [
@@ -74,6 +86,7 @@ dependencies = [
 name = "bern-cli"
 version = "0.1.0"
 dependencies = [
+ "bern-backend-gtk",
  "bern-backend-swiftui",
  "bern-backend-web",
  "bern-compiler",

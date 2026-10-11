@@ -1,5 +1,7 @@
 [workspace]
 resolver = "3"
+# The GTK runtime builds only inside generated Linux applications.
+exclude = ["crates/bern-gtk"]
 members = [
     "crates/bern-protocol",
     "crates/bern-syntax",
@@ -21,6 +23,7 @@ members = [
     "crates/bern-compiler",
     "crates/bern-backend-swiftui",
     "crates/bern-backend-web",
+    "crates/bern-backend-gtk",
     "examples/showcase/showcase-protocol",
     "examples/showcase/showcase-core",
     "examples/showcase/showcase-ui",
@@ -47,6 +50,7 @@ bern-target-api = { path = "crates/bern-target-api" }
 bern-compiler = { path = "crates/bern-compiler" }
 bern-backend-swiftui = { path = "crates/bern-backend-swiftui" }
 bern-backend-web = { path = "crates/bern-backend-web" }
+bern-backend-gtk = { path = "crates/bern-backend-gtk" }
 bern-adapter-json = { path = "crates/bern-adapter-json" }
 bern-transport-ipc = { path = "crates/bern-transport-ipc" }
 bern-transport-ws = { path = "crates/bern-transport-ws" }

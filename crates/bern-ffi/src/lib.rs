@@ -10,8 +10,8 @@
 //! to its UI thread. All functions catch Rust panics at the boundary.
 
 pub mod link;
-mod media;
-mod query;
+pub mod media;
+pub mod query;
 #[cfg(feature = "remote")]
 pub mod remote;
 

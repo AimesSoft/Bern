@@ -60,6 +60,7 @@ fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(bern_backend_swiftui::SwiftUiMacos));
     registry.register(Box::new(bern_backend_web::WebBrowser));
+    registry.register(Box::new(bern_backend_gtk::GtkLinux));
     registry
 }
 
