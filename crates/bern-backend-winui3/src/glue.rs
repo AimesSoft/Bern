@@ -284,6 +284,27 @@ impl Frontends {
     }
 }
 
+/// Script lines that find Visual Studio with the C++ tools and load its
+/// build environment for this machine, going to `no_vs` without it and to
+/// `failed` when loading fails. Both labels belong to the script.
+pub fn visual_studio_setup() -> String {
+    let arch = architecture();
+    let component = if arch == "arm64" {
+        "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+    } else {
+        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+    };
+    format!(
+        r#"set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" goto no_vs
+set "VS="
+for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires {component} -property installationPath`) do set "VS=%%i"
+if not defined VS goto no_vs
+call "%VS%\VC\Auxiliary\Build\vcvarsall.bat" {arch} >nul || goto failed
+"#
+    )
+}
+
 /// The compiler options of every source, the precompiled header's included.
 pub fn compile_options(release: bool, frontends: Frontends) -> String {
     let opt = if release { "/O1 /DNDEBUG" } else { "/Od /Z7" };
@@ -315,11 +336,6 @@ pub fn runtime_installer() -> String {
 /// compile` only compiles.
 pub fn build_script(script: &Script) -> String {
     let arch = architecture();
-    let component = if arch == "arm64" {
-        "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
-    } else {
-        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
-    };
     let package = |id: &str| {
         PACKAGES
             .iter()
@@ -378,13 +394,7 @@ set "CACHE={cache}"
 set "ARCH={arch}"
 set "DEBUGINFO={debug}"
 
-set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
-if not exist "%VSWHERE%" goto no_vs
-set "VS="
-for /f "usebackq delims=" %%i in (`"%VSWHERE%" -latest -products * -requires {component} -property installationPath`) do set "VS=%%i"
-if not defined VS goto no_vs
-call "%VS%\VC\Auxiliary\Build\vcvarsall.bat" {arch} >nul || goto failed
-if not defined WindowsSDKVersion goto no_sdk
+{visual_studio}if not defined WindowsSDKVersion goto no_sdk
 
 set "PACKAGES=%NUGET_PACKAGES%"
 if not defined PACKAGES set "PACKAGES=%USERPROFILE%\.nuget\packages"
@@ -464,6 +474,7 @@ exit /b 1
 :failed
 exit /b 1
 "#,
+        visual_studio = visual_studio_setup(),
         bundle = windows_path(script.bundle),
         executable = script.executable,
         engine = windows_path(script.engine),

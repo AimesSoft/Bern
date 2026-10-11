@@ -83,6 +83,8 @@ struct RawApp {
     name: BTreeMap<String, String>,
     /// A square PNG, relative to `Bern.toml`; the Bern logo without it.
     icon: Option<toml::Spanned<String>>,
+    /// Who publishes the application, for installers and packages.
+    publisher: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +175,8 @@ pub struct Config {
     pub name: BTreeMap<String, String>,
     /// `[app].icon`: a checked square PNG relative to `dir`.
     pub icon: Option<String>,
+    /// `[app].publisher`, trimmed; `None` when absent or blank.
+    pub publisher: Option<String>,
     pub languages: Vec<String>,
     pub default_language: String,
     pub strict: bool,
@@ -804,6 +808,11 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         version: raw.app.version,
         name: raw.app.name,
         icon,
+        publisher: raw
+            .app
+            .publisher
+            .map(|publisher| publisher.trim().to_string())
+            .filter(|publisher| !publisher.is_empty()),
         languages: raw.languages.supported,
         default_language: raw.languages.default,
         strict: raw.languages.strict,

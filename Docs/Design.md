@@ -1203,6 +1203,7 @@ icon = "art/icon.png"
 | `bern new <路径>` | 在空目录中创建应用 |
 | `bern run` | 构建一个目标并启动它 |
 | `bern build` | 构建目标 |
+| `bern package` | 按 release 构建，并生成供安装与分发的包 |
 | `bern check` | 只做声明、本地化与功能覆盖检查，不生成、不调用工具链 |
 | `bern doctor` | 检查本机构建各目标需要的工具，给出缺少时的安装方法 |
 | `bern ir` | 输出编译得到的 IR |
@@ -1218,6 +1219,17 @@ icon = "art/icon.png"
 `bern run` 默认选择本机系统的桌面目标，没有时选择任何系统都能构建的目标。构建后按目标模块给出的方式启动：桌面目标直接运行可执行文件并等待它退出；Web `app` 构建在 127.0.0.1 上提供页面（与 WebUI 宿主相同的 `Host` 校验，不带 WebSocket 通道）并打开浏览器；WebUI 构建运行引擎宿主，打开它打印的地址。
 
 `bern doctor` 检查 Rust 版本（1.99 起）、macOS SDK 26 与 Swift 编译器、带 C++ 工具的 Visual Studio 与含 `cppwinrt.exe` 的 Windows SDK 以及 MSVC 版 Rust、GTK 4.14 与 libadwaita 1.5 的开发包、`wasm32-unknown-unknown` 目标。在项目内运行时还列出 Bern 的来源与每个目标在本机能否构建；本机能构建的已声明目标缺少工具时以失败退出。
+
+`bern package` 按 release 构建本机能构建的目标，再由目标模块生成安装包，统一写入 `target/bern/dist/`：
+
+| 目标 | 包 | 说明 |
+| --- | --- | --- |
+| macOS | `<产品>-<版本>-macos-<架构>.dmg` | 应用与指向“应用程序”的链接；应用 CLI 与 MCP 服务器放在 `Contents/Helpers` |
+| Windows | `…-windows-<架构>-setup.exe` 与 `.zip` | 安装程序由 Bern 生成并用同一套 MSVC 编译：按当前用户安装到 `%LOCALAPPDATA%\Programs`，不需要管理员权限，创建开始菜单快捷方式与“应用和功能”中的卸载项，`/S` 静默安装与卸载；应用运行时拒绝覆盖或卸载。`.zip` 为免安装版本。两者都带 `bin\` 中的 CLI 与 MCP 服务器 |
+| Linux | `<程序>_<版本>_<架构>.deb` 与 `.tar.gz` | `.deb` 安装到 `/opt/<bundle_id>`，附带菜单项、图标主题中的图标与 `/usr/bin` 启动器，依赖声明 GTK 4.14 与 libadwaita 1.5，使用媒体时另加 GStreamer；系统没有 `dpkg-deb` 时只生成 `.tar.gz` |
+| Web | `<程序>-<版本>-web.zip`，WebUI 为 `…-webui-<系统>-<架构>` | 只含服务器需要的文件；WebUI 另含引擎宿主及其 CLI 与 MCP 服务器 |
+
+签名所需的证书只留在构建的机器或 CI 服务中，经环境变量提供，不写入 `Bern.toml`：`BERN_MACOS_SIGNING_IDENTITY` 以强化运行时与安全时间戳签名应用、工具与磁盘映像，`BERN_MACOS_NOTARY_PROFILE` 再提交公证并装订；`BERN_WINDOWS_CERTIFICATE`（证书库中的指纹或 `.pfx`，密码取自 `BERN_WINDOWS_CERTIFICATE_PASSWORD`）以 `signtool` 签名应用、工具与安装程序并加 RFC 3161 时间戳。没有配置时仍生成包，并说明未签名的后果。`[app].publisher` 是可选的发布者名称，显示在安装程序、卸载项与 Debian 包中。
 
 直接写在 `Window` 中的控件以窗口 id 作为组件名，目标形如 `main.add_one`；写在组件中的控件仍为 `组件名.控件 id`。四个目标一致。
 
@@ -1650,4 +1662,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.16 | 阶段五第二批：`winui3 + windows` 目标以 C#/.NET 为宿主，代码构建界面、经 P/Invoke 调用 `bern_app.dll` 中的同一进程内接口；声明 Windows App SDK 1.8、.NET 10 与最低 Windows 版本；单实例并在最后一个窗口关闭后退出；本地控制通道与资源文件 URL 支持 Windows |
 | v0.17 | `winui3 + windows` 宿主改为 C++/WinRT：一个可执行文件含 WinUI 3 与系统 XAML（XAML Islands）两套前端，启动时按系统是否有 Windows App Runtime 自动选择；引擎以静态库链入，C 运行库静态链接，不需要 .NET，不随附 Windows App SDK |
 | v0.18 | 增加应用图标：`[app].icon` 声明方形 PNG 并严格校验；未声明时各目标使用 Bern 标志，分别生成 macOS 的 `.icns`、Windows 的图标资源、Linux 的图标主题条目与 Web 的页面图标 |
-| v0.19 | 增加构建工具命令 `bern new`、`bern run` 与 `bern doctor`；生成的胶水按项目自身 `bern` 依赖的来源引用 Bern crate，项目不再需要位于 Bern 仓库内；未指定目标时按本机系统与工具选择目标；直接写在窗口中的控件以窗口 id 命名；Windows 目标以预编译头做增量构建，改用 Windows App SDK 2.x 并接受任何 2.x 运行时（包括 Windows 11 自带的），可用 `frontends` 只编译 WinUI 3 或系统 XAML |
+| v0.19 | 增加构建工具命令 `bern new`、`bern run` 与 `bern doctor`；生成的胶水按项目自身 `bern` 依赖的来源引用 Bern crate，项目不再需要位于 Bern 仓库内；未指定目标时按本机系统与工具选择目标；直接写在窗口中的控件以窗口 id 命名；Windows 目标以预编译头做增量构建，改用 Windows App SDK 2.x 并接受任何 2.x 运行时（包括 Windows 11 自带的），可用 `frontends` 只编译 WinUI 3 或系统 XAML；增加 `bern package` 与 `[app].publisher`，生成 macOS 磁盘映像、Windows 安装程序、Debian 包与 Web 压缩包，签名经环境变量配置 |

@@ -565,6 +565,14 @@ bern 0.1.0 on macOS (aarch64)
 
 </details>
 
+### アプリを配布する
+
+```sh
+bern package
+```
+
+このコンピューターでビルドできるターゲットを release でビルドし、`target/bern/dist/` にパッケージを書き出します。macOS は `.dmg`、Windows はインストーラー（ユーザーごと、管理者権限不要）と `.zip`、Linux は `.deb` と `.tar.gz`、Web は静的サイトのアーカイブです。どのパッケージにもアプリの CLI と MCP サーバーが入ります。署名は環境変数で設定し、証明書はリポジトリに入れません：`BERN_MACOS_SIGNING_IDENTITY` と `BERN_MACOS_NOTARY_PROFILE`（署名と公証）、`BERN_WINDOWS_CERTIFICATE`（証明書の拇印または `.pfx`）。設定がなくてもパッケージは作られ、未署名の影響を知らせます。
+
 ### ショーケースを動かす
 
 Bern リポジトリのショーケースは、すべてのコンポーネント、2 つのウィンドウ、ビデオプレーヤーを使います。リポジトリのディレクトリで：
@@ -596,7 +604,7 @@ showcase-mcp                                                 # stdio の MCP サ
 | 3 | Web のビジュアル仕様、テーマカーネル、WebAssembly アプリと WebUI の 2 種類のビルド | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 4 | アダプティブレイアウト、メニュー、機能契約、実行時の言語切り替え | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 5 | ほかのネイティブフロントエンド：GTK 4（完了）· WinUI 3（完了）· `flutter + macos`（次） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor` は完了）、NipaPlay 3.0 への導入 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 6 | コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor`・`package` は完了）、NipaPlay 3.0 への導入 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## リポジトリ構成
 

@@ -167,6 +167,38 @@ fn main() {{
 /// language, so the desktop shows it for the running windows. Install it
 /// into `~/.local/share/applications` to launch the build from the
 /// desktop.
+/// `DEBIAN/control` of the Debian package: GTK and libadwaita as the
+/// target needs them, and the GStreamer plugins when the app plays media.
+pub fn debian_control(
+    app: &Application,
+    package: &str,
+    architecture: &str,
+    installed_kb: u64,
+) -> String {
+    let name = app
+        .app
+        .name
+        .get(&app.languages.default)
+        .unwrap_or(&app.app.id)
+        .to_string();
+    let maintainer = app
+        .app
+        .publisher
+        .clone()
+        .unwrap_or_else(|| format!("{name} maintainers"));
+    let mut depends = vec!["libgtk-4-1 (>= 4.14)", "libadwaita-1-0 (>= 1.5)"];
+    let mut extra = String::new();
+    if app.uses_media() {
+        depends.extend(["libgtk-4-media-gstreamer", "gstreamer1.0-plugins-good"]);
+        extra.push_str("Recommends: gstreamer1.0-libav\n");
+    }
+    format!(
+        "Package: {package}\nVersion: {version}\nArchitecture: {architecture}\nMaintainer: {maintainer}\nInstalled-Size: {installed_kb}\nDepends: {depends}\n{extra}Section: misc\nPriority: optional\nDescription: {name}\n Built with Bern.\n",
+        version = app.app.version,
+        depends = depends.join(", "),
+    )
+}
+
 pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> String {
     let mut entry = String::from("[Desktop Entry]\nType=Application\n");
     let default = app
@@ -192,4 +224,43 @@ pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> Strin
     entry.push_str("Terminal=false\nCategories=Utility;\n");
     entry.push_str("StartupNotify=true\nDBusActivatable=false\n");
     entry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn app(example: &str) -> Application {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(example)
+            .join("Bern.toml");
+        let config = bern_compiler::config::load(&manifest).unwrap();
+        bern_compiler::compile(&config).unwrap().app
+    }
+
+    #[test]
+    fn debian_packages_need_gtk_and_gstreamer_only_with_media() {
+        let hello = debian_control(&app("hello"), "hello", "arm64", 4321);
+        for expected in [
+            "Package: hello\n",
+            "Architecture: arm64\n",
+            "Installed-Size: 4321\n",
+            "Depends: libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5)\n",
+            "Maintainer: Hello maintainers\n",
+        ] {
+            assert!(hello.contains(expected), "{hello}");
+        }
+        assert!(!hello.contains("gstreamer"));
+        let showcase = debian_control(&app("showcase"), "showcase", "amd64", 1);
+        assert!(
+            showcase.contains("libgtk-4-media-gstreamer, gstreamer1.0-plugins-good")
+                && showcase.contains("Recommends: gstreamer1.0-libav"),
+            "{showcase}"
+        );
+        // The description's second line is indented, as Debian requires.
+        assert!(
+            showcase.contains("\nDescription: ") && showcase.ends_with("\n Built with Bern.\n")
+        );
+    }
 }

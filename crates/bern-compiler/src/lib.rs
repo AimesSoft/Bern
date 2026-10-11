@@ -1212,6 +1212,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 name,
                 version: config.version.clone(),
                 icon: config.icon.clone(),
+                publisher: config.publisher.clone(),
             },
             languages: ir::Languages {
                 supported: config.languages.clone(),

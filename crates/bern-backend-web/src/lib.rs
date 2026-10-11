@@ -24,7 +24,8 @@ use bern_ir::{Application, IR_VERSION, Node};
 use bern_protocol::Type;
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
+    Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
+    dist_dir, files_below, icon, package_architecture,
 };
 use std::path::PathBuf;
 
@@ -506,7 +507,72 @@ impl Target for WebBrowser {
         Ok(BuildPlan {
             steps,
             products,
+            notes: Vec::new(),
             run: Some(run),
+        })
+    }
+
+    /// The files a server needs, in one archive: the page and its assets
+    /// for an `app` build; with a `ui` build also the engine host and its
+    /// command line and MCP server, for this machine.
+    fn package(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        _signing: &Signing,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let output = &context.output_dir;
+        let remote = context.target.web_mode.as_deref() == Some("ui");
+        let program = glue::program(app);
+        let dist = dist_dir(context);
+        let staged = output.join("package").join(&program);
+        // Generated sources and build reports stay behind.
+        let files: Vec<_> = files_below(output)
+            .map_err(|error| {
+                vec![Diagnostic::error(format!(
+                    "cannot read {}: {error}",
+                    output.display()
+                ))]
+            })?
+            .into_iter()
+            .filter(|(_, path)| {
+                let top = path.components().next().map(|part| part.as_os_str());
+                !matches!(
+                    top.and_then(|top| top.to_str()),
+                    Some("glue" | "package" | "build.json" | "features.json")
+                )
+            })
+            .collect();
+        let stem = if remote {
+            format!(
+                "{program}-{}-webui-{}-{}",
+                app.app.version,
+                std::env::consts::OS,
+                package_architecture()
+            )
+        } else {
+            format!("{program}-{}-web", app.app.version)
+        };
+        let (archive_step, archive_file) = archive(&staged, &dist.join(stem));
+        Ok(BuildPlan {
+            steps: vec![
+                BuildStep::RemoveIfExists {
+                    path: output.join("package"),
+                },
+                BuildStep::CreateDir { path: dist.clone() },
+                BuildStep::Mirror {
+                    dir: staged,
+                    files,
+                    keep: vec![],
+                },
+                BuildStep::RemoveIfExists {
+                    path: archive_file.clone(),
+                },
+                archive_step,
+            ],
+            products: vec![archive_file],
+            run: None,
+            notes: Vec::new(),
         })
     }
 }

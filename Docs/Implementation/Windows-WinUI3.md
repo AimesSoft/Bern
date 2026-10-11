@@ -138,6 +138,15 @@ target\bern\windows\Showcase\showcase.exe
 - `BERN_DUMP_TREE`：把元素树和尺寸写到标准错误。
 - 调试构建在未处理的异常时，按 PDB 把调用栈（函数与行号）写到标准错误。PDB 留在 `app/obj/<配置>/`，不进入应用目录。
 
+### 打包
+
+`bern package --target windows` 按 release 构建，生成 `<产品>-<版本>-windows-<架构>-setup.exe` 与同名 `.zip`：
+
+- 应用目录与 `bin\` 中的 CLI、MCP 服务器先复制到暂存目录；有 `BERN_WINDOWS_CERTIFICATE` 时用 `signtool` 签名这些程序，再签安装程序（证书库指纹或 `.pfx`，RFC 3161 时间戳）。证书与密码只从环境变量读取，不写进生成的脚本。
+- 安装程序由 Bern 生成（`templates/installer/setup.cpp`），文件作为资源编进可执行文件，用同一套 MSVC 编译。它按当前用户安装到 `%LOCALAPPDATA%\Programs\<产品>`，不需要管理员权限；创建开始菜单快捷方式，在“应用和功能”中登记卸载项；提示按系统界面语言显示（英文、简体中文、繁体中文、日文），`/S` 静默安装。清单声明 `asInvoker`，否则 Windows 会把名字含 setup 的程序当作需要提权的安装程序。
+- 安装目录中的 `uninstall.exe` 是安装程序的副本，先把自己复制到临时目录再执行，以便删除整个目录；`/S` 静默卸载。应用或其工具在运行时（按进程映像路径判断），安装与卸载都拒绝进行，不删任何文件；`uninstall.exe` 最后删除，中途失败也能再次卸载。
+- 实测（2026-10-12，新项目）：安装程序 5.08 MB，`.zip` 1.94 MB；静默安装后文件、快捷方式与卸载项正确，从安装位置启动并经 `bin\my-app.exe` 驱动；运行中卸载与覆盖安装都被拒绝，关闭后卸载清除目录、快捷方式与卸载项；中文确认框显示正常；Defender 没有报告。未签名时 SmartScreen 会提示。
+
 ## 实测数据
 
 2026-10-11，同一台机器，release 构建。启动时间为从启动到窗口可见，首次启动另计；内存为窗口显示 5 秒后的私有工作集。
@@ -154,7 +163,7 @@ target\bern\windows\Showcase\showcase.exe
 
 2026-10-11，Windows 11 25H2 实体机，经 SSH 构建，以计划任务把应用启动到用户的桌面会话，由生成的 CLI 驱动；截图来自开发快照中的窗口截取。两种前端分别执行：
 
-- **构建与测试**：`cargo test --workspace` 在 macOS 与 Windows 上各 191 项通过；Windows 上包含经预编译头用 MSVC 编译生成的两套前端。`cargo clippy` 与 `cargo fmt --check` 通过。
+- **构建与测试**：`cargo test --workspace` 在 macOS 与 Windows 上各 195 项通过；Windows 上包含经预编译头用 MSVC 编译生成的两套前端。`cargo clippy` 与 `cargo fmt --check` 通过。
 - **前端选择**（按 Windows App SDK 2.5.1 编译）：默认启动加载 `C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.2_2.5.1.0_x64__8wekyb3d8bbwe\Microsoft.ui.xaml.dll`；`BERN_APP_RUNTIME=inbox` 时加载 `C:\Windows\SystemApps\Microsoft.WindowsAppRuntime.CBS.2_8wekyb3d8bbwe` 中的 2.2，新项目与展示应用都正常（展示应用逐页切换并打开设置窗口，样式完整）；`BERN_APP_RUNTIME=none` 或设置 `BERN_FORCE_ISLANDS` 后用 `C:\Windows\System32\Windows.UI.Xaml.dll`，进程中没有 Windows App Runtime。
 - **只编译一套前端**：`frontends = ["xaml-islands"]` 时应用目录只有可执行文件，进程不加载引导程序；`frontends = ["winui3"]` 在两种运行时上都正常，`BERN_APP_RUNTIME=none` 时弹出中文提示框（标题为应用名，正文与“是/否”），选“否”后以退出码 1 结束。
 - **控件与引擎**：`ui select` 在各页之间切换，按钮页、开关页、输入页、列表页、视频页的控件全部登记。

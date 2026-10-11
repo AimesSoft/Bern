@@ -105,6 +105,14 @@ target/bern/linux/Showcase/showcase
 
 开发时 `BERN_SNAPSHOT_DIR` 让程序在每次变化后把各窗口渲染为 `<目录>/<窗口>.png`（窗口最小化时不绘制），`BERN_APPEARANCE=light|dark` 覆盖系统外观；两者默认关闭。
 
+### 打包
+
+`bern package --target linux` 按 release 构建，生成 `<程序>_<版本>_<架构>.deb`（系统有 `dpkg-deb` 时）与 `<产品>-<版本>-linux-<架构>.tar.gz`：
+
+- `.deb` 把应用、图标与 `bin/` 中的 CLI、MCP 服务器装到 `/opt/<bundle_id>`，另有 `/usr/share/applications/<bundle_id>.desktop`、`hicolor` 图标主题中的图标与 `/usr/bin/<程序>` 启动器；依赖 `libgtk-4-1 (>= 4.14)` 与 `libadwaita-1-0 (>= 1.5)`，使用媒体时另加 `libgtk-4-media-gstreamer` 与 `gstreamer1.0-plugins-good`，并推荐 `gstreamer1.0-libav`。维护者取自 `[app].publisher`。
+- 暂存时保留可执行权限，打包前把文件统一为 644、程序与目录为 755。
+- 实测（2026-10-12，Ubuntu 24.04 ARM64）：`.deb` 1.06 MB，`.tar.gz` 1.9 MB；`desktop-file-validate` 通过，`apt-get -s install` 能解析全部依赖；解开 `.deb` 后从 `/opt` 位置启动并经包内 CLI 驱动正常。虚拟机的 sudo 需要密码，没有实际安装。没有桌面会话时，GTK 启动会等约 25 秒的 D-Bus 门户超时，引擎与控制通道随后才就绪。
+
 ## 验证记录
 
 2026-10-11，Ubuntu 24.04（aarch64，GNOME 46 Wayland），经 SSH 驱动虚拟机桌面会话中的应用，截图来自开发快照：

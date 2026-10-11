@@ -565,6 +565,14 @@ bern 0.1.0 on macOS (aarch64)
 
 </details>
 
+### Ship an app
+
+```sh
+bern package
+```
+
+Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, and an archive of the static site for the Web. Every package carries the app's CLI and MCP server. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`). Without them the packages are still made, with a note on what being unsigned means.
+
 ### Run the showcase
 
 The showcase in the Bern repository uses every component, two windows and a video player. From the repository directory:
@@ -596,7 +604,7 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 | 3 | Web visual spec, theme kernel, WebAssembly app and WebUI builds | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 4 | Adaptive layouts, menus, feature contracts, runtime language switching | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 5 | Other native front ends: GTK 4 (done) · WinUI 3 (done) · `flutter + macos` (next) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
-| 6 | Component library, packaging, incremental builds, tooling (`bern new`, `run` and `doctor` done), NipaPlay 3.0 | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
+| 6 | Component library, packaging, incremental builds, tooling (`bern new`, `run`, `doctor` and `package` done), NipaPlay 3.0 | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
 
 ## Repository
 

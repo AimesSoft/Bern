@@ -14,13 +14,15 @@
 
 mod cpp;
 mod glue;
+mod installer;
 mod strings;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
+    Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
+    dist_dir, files_below, icon,
 };
 use std::path::PathBuf;
 
@@ -377,12 +379,126 @@ impl Target for WinUi3Windows {
         ];
         Ok(BuildPlan {
             steps,
+            notes: Vec::new(),
             run: Some(Run::Program(bundle.join(exe(&executable)))),
             products: vec![
                 bundle.join(exe(&executable)),
                 output.join("bin").join(exe(&executable)),
                 output.join("bin").join(exe(&format!("{executable}-mcp"))),
             ],
+        })
+    }
+
+    /// An installer (`setup.exe`) that installs for the current user
+    /// without administrator rights, and a `.zip` of the same folder for
+    /// people who do not install. Both carry the command line and the MCP
+    /// server in `bin\`. Signed with the certificate from [`Signing`].
+    fn package(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        signing: &Signing,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let product = product_name(app);
+        let executable = executable(app);
+        let output = &context.output_dir;
+        let bundle = output.join(&product);
+        let staged = output.join("package").join(&product);
+        let installer_dir = output.join("installer");
+        let dist = dist_dir(context);
+        let setup = dist.join(installer::setup_name(app));
+        let mut files = files_below(&bundle).map_err(|error| {
+            vec![Diagnostic::error(format!(
+                "cannot read {}: {error}",
+                bundle.display()
+            ))]
+        })?;
+        for program in [executable.clone(), format!("{executable}-mcp")] {
+            let name = exe(&program);
+            files.push((
+                output.join("bin").join(&name),
+                PathBuf::from("bin").join(&name),
+            ));
+        }
+        // The installer carries the staged copies, which are the signed ones.
+        let payload: Vec<installer::Payload> = installer::payload(&files)
+            .into_iter()
+            .map(|file| installer::Payload {
+                source: staged.join(&file.path),
+                ..file
+            })
+            .collect();
+        let programs: Vec<PathBuf> = payload
+            .iter()
+            .filter(|file| {
+                file.path
+                    .extension()
+                    .is_some_and(|extension| extension == "exe")
+            })
+            .map(|file| file.source.clone())
+            .collect();
+        let text = |name: &str, contents: String| BuildStep::Write {
+            path: installer_dir.join(name),
+            contents: contents.into_bytes(),
+        };
+        let (zip_step, zip) = archive(
+            &staged,
+            &dist.join(format!(
+                "{product}-{}-windows-{}",
+                app.app.version,
+                glue::architecture()
+            )),
+        );
+        let steps = vec![
+            BuildStep::RemoveIfExists {
+                path: output.join("package"),
+            },
+            BuildStep::Mirror {
+                dir: staged.clone(),
+                files,
+                keep: vec![],
+            },
+            text("setup.cpp", installer::SETUP_CPP.to_string()),
+            text(
+                "setup_info.h",
+                installer::setup_info(app, &executable, &payload),
+            ),
+            text(
+                "setup.rc",
+                installer::setup_rc(app, &output.join("app/app.ico"), &payload),
+            ),
+            text("setup.manifest", installer::SETUP_MANIFEST.to_string()),
+            text("package.bat", installer::package_script(&programs, &setup)),
+            BuildStep::CreateDir { path: dist.clone() },
+            BuildStep::RemoveIfExists {
+                path: setup.clone(),
+            },
+            BuildStep::RemoveIfExists { path: zip.clone() },
+            BuildStep::Run {
+                description: "Make the installer".into(),
+                program: "cmd".into(),
+                args: vec![
+                    "/d".into(),
+                    "/c".into(),
+                    installer_dir.join("package.bat").display().to_string(),
+                ],
+                cwd: installer_dir.clone(),
+                env: vec![],
+            },
+            zip_step,
+        ];
+        let mut notes = Vec::new();
+        if signing.windows_certificate.is_none() {
+            notes.push(
+                "the installer and the app are not signed: SmartScreen warns about them and security software may flag a new program (set BERN_WINDOWS_CERTIFICATE)"
+                    .into(),
+            );
+        }
+        Ok(BuildPlan {
+            steps,
+            products: vec![setup, zip],
+            run: None,
+            notes,
         })
     }
 }

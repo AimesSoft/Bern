@@ -376,6 +376,11 @@ pub enum BuildStep {
     RemoveIfExists {
         path: PathBuf,
     },
+    /// Write a file, creating its directory.
+    Write {
+        path: PathBuf,
+        contents: Vec<u8>,
+    },
     /// Make `dir` hold exactly `files` plus the paths in `keep`, which
     /// other steps own (for example generated localizations). Files are
     /// copied by content, without extended attributes; a destination whose
@@ -398,6 +403,9 @@ pub struct BuildPlan {
     pub products: Vec<PathBuf>,
     /// How `bern run` starts the built application.
     pub run: Option<Run>,
+    /// What the person building should know about the products, printed
+    /// after the steps; for example that a package is not signed.
+    pub notes: Vec<String>,
 }
 
 /// How `bern run` starts a built application.
@@ -437,6 +445,163 @@ pub trait Target: Send + Sync {
     /// Steps that turn generated files into the final product.
     fn plan(&self, app: &Application, context: &BuildContext)
     -> Result<BuildPlan, Vec<Diagnostic>>;
+
+    /// Steps that turn a release build, which `plan` has made, into the
+    /// packages people install, in [`dist_dir`].
+    fn package(
+        &self,
+        _app: &Application,
+        _context: &BuildContext,
+        _signing: &Signing,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        Err(vec![Diagnostic::error(format!(
+            "target `{}` cannot make packages yet",
+            self.descriptor().id
+        ))])
+    }
+}
+
+/// How packages are signed, from the environment of `bern package`.
+/// Certificates stay with the person or the CI service that builds; none
+/// of this goes into `Bern.toml`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Signing {
+    /// `BERN_MACOS_SIGNING_IDENTITY`: a signing identity in the keychain,
+    /// for distribution a "Developer ID Application" one.
+    pub macos_identity: Option<String>,
+    /// `BERN_MACOS_NOTARY_PROFILE`: a keychain profile made with
+    /// `xcrun notarytool store-credentials`.
+    pub macos_notary_profile: Option<String>,
+    /// `BERN_WINDOWS_CERTIFICATE`: the SHA-1 thumbprint of a code signing
+    /// certificate in the user's store, or a `.pfx` file.
+    pub windows_certificate: Option<String>,
+    /// `BERN_WINDOWS_CERTIFICATE_PASSWORD`: the password of the `.pfx`.
+    pub windows_certificate_password: Option<String>,
+}
+
+impl Signing {
+    pub fn from_env() -> Signing {
+        let var = |name: &str| {
+            std::env::var(name)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        };
+        Signing {
+            macos_identity: var("BERN_MACOS_SIGNING_IDENTITY"),
+            macos_notary_profile: var("BERN_MACOS_NOTARY_PROFILE"),
+            windows_certificate: var("BERN_WINDOWS_CERTIFICATE"),
+            windows_certificate_password: var("BERN_WINDOWS_CERTIFICATE_PASSWORD"),
+        }
+    }
+}
+
+/// Where packages go: `target/bern/dist/` of the workspace.
+pub fn dist_dir(context: &BuildContext) -> PathBuf {
+    context
+        .workspace_dir
+        .join("target")
+        .join("bern")
+        .join("dist")
+}
+
+/// The build machine's architecture as packages name it: `arm64` or
+/// `x64` (`x86_64` on macOS, where that is the usual name).
+pub fn package_architecture() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        (_, "aarch64") => "arm64",
+        ("macos", _) => "x86_64",
+        _ => "x64",
+    }
+}
+
+/// A step that archives `dir`, with `dir` itself as the top folder, into
+/// `stem` plus the extension the build machine's own tools make: `.zip`
+/// on macOS (`ditto`) and Windows (`tar`), `.tar.gz` on Linux (`tar`).
+pub fn archive(dir: &std::path::Path, stem: &std::path::Path) -> (BuildStep, PathBuf) {
+    let parent = dir.parent().unwrap_or(dir).to_path_buf();
+    let name = dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let with = |extension: &str| {
+        let mut file = stem.as_os_str().to_owned();
+        file.push(extension);
+        PathBuf::from(file)
+    };
+    let (program, args, out) = match std::env::consts::OS {
+        "macos" => {
+            let out = with(".zip");
+            let args = vec![
+                "-c".to_string(),
+                "-k".into(),
+                // Plain files: no resource forks, extended attributes or
+                // quarantine flags (`__MACOSX/._*` entries elsewhere).
+                "--norsrc".into(),
+                "--noextattr".into(),
+                "--noqtn".into(),
+                "--keepParent".into(),
+                dir.display().to_string(),
+                out.display().to_string(),
+            ];
+            ("ditto", args, out)
+        }
+        "windows" => {
+            let out = with(".zip");
+            let args = vec![
+                "-a".to_string(),
+                "-c".into(),
+                "-f".into(),
+                out.display().to_string(),
+                "-C".into(),
+                parent.display().to_string(),
+                name.clone(),
+            ];
+            ("tar", args, out)
+        }
+        _ => {
+            let out = with(".tar.gz");
+            let args = vec![
+                "-czf".to_string(),
+                out.display().to_string(),
+                "-C".into(),
+                parent.display().to_string(),
+                name.clone(),
+            ];
+            ("tar", args, out)
+        }
+    };
+    let step = BuildStep::Run {
+        description: format!("Archive {name}"),
+        program: program.into(),
+        args,
+        cwd: parent,
+        env: vec![],
+    };
+    (step, out)
+}
+
+/// Every file below `dir`, as (path, path relative to `dir`), sorted.
+pub fn files_below(dir: &std::path::Path) -> std::io::Result<Vec<(PathBuf, PathBuf)>> {
+    fn walk(
+        dir: &std::path::Path,
+        relative: &std::path::Path,
+        out: &mut Vec<(PathBuf, PathBuf)>,
+    ) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(dir.join(relative))? {
+            let entry = entry?;
+            let path = relative.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                walk(dir, &path, out)?;
+            } else {
+                out.push((dir.join(&path), path));
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(dir, std::path::Path::new(""), &mut out)?;
+    out.sort();
+    Ok(out)
 }
 
 /// Check the parts of the IR every target must agree on: IR version,
@@ -684,5 +849,30 @@ mod tests {
             r#"version = "0.1""#
         );
         assert_eq!(toml_string(r#"C:\a "b""#), r#""C:\\a \"b\"""#);
+    }
+
+    #[test]
+    fn archives_use_the_build_machine_s_own_tools() {
+        let (step, out) = archive(
+            std::path::Path::new("/stage/Hello"),
+            std::path::Path::new("/dist/Hello-1.0"),
+        );
+        let BuildStep::Run { program, args, .. } = step else {
+            panic!("a command");
+        };
+        match std::env::consts::OS {
+            "macos" => {
+                assert_eq!(
+                    (program.as_str(), out),
+                    ("ditto", PathBuf::from("/dist/Hello-1.0.zip"))
+                );
+                assert!(args.contains(&"--noextattr".to_string()));
+            }
+            "windows" => assert_eq!(program, "tar"),
+            _ => assert_eq!(
+                (program.as_str(), out),
+                ("tar", PathBuf::from("/dist/Hello-1.0.tar.gz"))
+            ),
+        }
     }
 }

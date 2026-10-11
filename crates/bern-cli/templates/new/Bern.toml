@@ -9,6 +9,8 @@ version = "0.1.0"
 name = { {{app_names}} }
 # A square PNG of 1024 pixels; without it the app uses the Bern logo.
 # icon = "icon.png"
+# Shown by installers and package managers.
+# publisher = "Your Name"
 
 [languages]
 supported = [{{languages}}]

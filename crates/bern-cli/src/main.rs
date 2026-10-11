@@ -24,6 +24,7 @@ Usage:
   bern new <path> [--bundle-id ID] [--languages LIST] [--bern-path DIR]
   bern run    [--manifest PATH] [--target NAME] [--release]
   bern build  [--manifest PATH] [--target NAME] [--release]
+  bern package [--manifest PATH] [--target NAME]
   bern check  [--manifest PATH] [--target NAME]
   bern doctor [--manifest PATH]
   bern ir     [--manifest PATH]
@@ -32,6 +33,7 @@ Commands:
   new          Create an application in <path>: a window with a counter
   run          Build one target and start it (default: this computer's)
   build        Build targets (default: every one this computer can build)
+  package      Make release packages to install, in target/bern/dist
   check        Check declarations, translations and feature coverage
   doctor       Show what this computer needs to build each target
   ir           Print the compiled IR as JSON
@@ -45,6 +47,12 @@ Options:
                the template has text in en, zh-Hans, zh-Hant and ja)
   --bern-path  Bern checkout the project builds with (default: the checkout this
                bern was built from, else the Git repository)
+
+Signing (bern package; without it packages are not signed for distribution):
+  BERN_MACOS_SIGNING_IDENTITY        Developer ID Application identity in the keychain
+  BERN_MACOS_NOTARY_PROFILE          notarytool keychain profile, to notarize the .dmg
+  BERN_WINDOWS_CERTIFICATE           SHA-1 thumbprint of a certificate in the user's store, or a .pfx
+  BERN_WINDOWS_CERTIFICATE_PASSWORD  password of the .pfx
 ";
 
 #[derive(Debug, Default)]
@@ -72,6 +80,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
     let allowed: &[&str] = match command.as_str() {
         "new" => &["--bundle-id", "--languages", "--bern-path"],
         "run" | "build" => &["--manifest", "--target", "--release"],
+        "package" => &["--manifest", "--target"],
         "check" => &["--manifest", "--target"],
         "doctor" | "ir" => &["--manifest"],
         other => return Err(format!("unknown command `{other}`\n\n{USAGE}")),
@@ -192,8 +201,9 @@ fn prune(dir: &Path, relative: &Path, wanted: &BTreeSet<PathBuf>) -> std::io::Re
     Ok(())
 }
 
-/// Copy the contents of `from` to `to` unless `to` already has the same
-/// size and modification time; extended attributes are not copied.
+/// Copy the contents and permissions (an executable stays executable) of
+/// `from` to `to` unless `to` already has the same size and modification
+/// time; extended attributes are not copied.
 fn copy_contents(from: &Path, to: &Path) -> std::io::Result<()> {
     let source = std::fs::metadata(from)?;
     let modified = source.modified()?;
@@ -202,7 +212,7 @@ fn copy_contents(from: &Path, to: &Path) -> std::io::Result<()> {
         && existing.len() == source.len()
         && existing.modified().is_ok_and(|time| time == modified)
     {
-        return Ok(());
+        return std::fs::set_permissions(to, source.permissions());
     }
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)?;
@@ -210,6 +220,7 @@ fn copy_contents(from: &Path, to: &Path) -> std::io::Result<()> {
     let mut input = std::fs::File::open(from)?;
     let mut output = std::fs::File::create(to)?;
     std::io::copy(&mut input, &mut output)?;
+    output.set_permissions(source.permissions())?;
     output.set_modified(modified)
 }
 
@@ -290,6 +301,26 @@ fn run_step(step: &BuildStep) -> Result<(), String> {
                 Ok(())
             }
         }
+        BuildStep::Write { path, contents } => write_if_changed(path, contents)
+            .map(|_| ())
+            .map_err(|error| format!("cannot write {}: {error}", path.display())),
+    }
+}
+
+/// Run a plan's steps; false after reporting the first failure.
+fn run_steps(steps: &[BuildStep]) -> bool {
+    for step in steps {
+        if let Err(message) = run_step(step) {
+            eprintln!("error: {message}");
+            return false;
+        }
+    }
+    true
+}
+
+fn print_notes(notes: &[String]) {
+    for note in notes {
+        eprintln!("       \x1b[1;33mNote\x1b[0m {note}");
     }
 }
 
@@ -493,7 +524,7 @@ fn describe(framework: &Framework) -> String {
     }
 }
 
-/// `bern check`, `bern build`, `bern run` and `bern ir`.
+/// `bern check`, `bern build`, `bern package`, `bern run` and `bern ir`.
 fn build(options: &Options) -> ExitCode {
     let Some(manifest) = manifest(options) else {
         eprintln!(
@@ -580,7 +611,7 @@ fn build(options: &Options) -> ExitCode {
         let mut here = Vec::new();
         for (target_config, target) in targets {
             if !builds_here(target) {
-                if options.command == "build" {
+                if options.command != "run" {
                     eprintln!(
                         "   \x1b[1;33mSkipping\x1b[0m {}: builds on {}",
                         target_config.name,
@@ -629,6 +660,7 @@ fn build(options: &Options) -> ExitCode {
         eprintln!("error: `bern run` starts one target");
         return ExitCode::FAILURE;
     }
+    let signing = bern_target_api::Signing::from_env();
     let framework = if options.command == "check" {
         None
     } else {
@@ -701,7 +733,7 @@ fn build(options: &Options) -> ExitCode {
             &workspace,
             target_config,
             framework,
-            options.release,
+            options.release || options.command == "package",
         );
         let files = match target.generate(&compiled.app, &context) {
             Ok(files) => files,
@@ -751,14 +783,28 @@ fn build(options: &Options) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        for step in &plan.steps {
-            if let Err(message) = run_step(step) {
-                eprintln!("error: {message}");
-                return ExitCode::FAILURE;
-            }
+        if !run_steps(&plan.steps) {
+            return ExitCode::FAILURE;
         }
         for product in &plan.products {
             eprintln!("   \x1b[1;32mFinished\x1b[0m {}", product.display());
+        }
+        print_notes(&plan.notes);
+        if options.command == "package" {
+            let packages = match target.package(&compiled.app, &context, &signing) {
+                Ok(packages) => packages,
+                Err(errors) => {
+                    report(&errors);
+                    return ExitCode::FAILURE;
+                }
+            };
+            if !run_steps(&packages.steps) {
+                return ExitCode::FAILURE;
+            }
+            for product in &packages.products {
+                eprintln!("   \x1b[1;32mPackaged\x1b[0m {}", product.display());
+            }
+            print_notes(&packages.notes);
         }
         if options.command == "run" {
             let Some(run) = &plan.run else {
@@ -843,6 +889,21 @@ mod tests {
             std::fs::read(bundle.join("media/a.mp4")).unwrap(),
             b"second!"
         );
+
+        // A program stays executable.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::write(project.join("tool"), b"#!/bin/sh").unwrap();
+            std::fs::set_permissions(project.join("tool"), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+            mirror(&bundle, &files(&["tool"]), &keep).unwrap();
+            let mode = std::fs::metadata(bundle.join("tool"))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o755);
+        }
 
         // Nothing declared: only the kept files remain.
         mirror(&bundle, &[], &keep).unwrap();

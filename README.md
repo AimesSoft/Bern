@@ -565,6 +565,14 @@ bern 0.1.0 on macOS (aarch64)
 
 </details>
 
+### 发布应用
+
+```sh
+bern package
+```
+
+按 release 构建本机能构建的目标，在 `target/bern/dist/` 中生成安装包：macOS 的 `.dmg`，Windows 的安装程序（按当前用户安装，不需要管理员权限）与免安装的 `.zip`，Linux 的 `.deb` 与 `.tar.gz`，Web 的静态站点压缩包。每个包都带应用 CLI 与 MCP 服务器。签名用环境变量配置，证书不进仓库：`BERN_MACOS_SIGNING_IDENTITY` 与 `BERN_MACOS_NOTARY_PROFILE`（签名并公证），`BERN_WINDOWS_CERTIFICATE`（证书指纹或 `.pfx`）。没有配置时照样生成，并提示未签名的后果。
+
 ### 运行展示应用
 
 Bern 仓库中的展示应用用到全部组件、两个窗口和视频播放器。在仓库目录中：
@@ -596,7 +604,7 @@ showcase-mcp                                                 # 经 stdio 的 MCP
 | 3 | Web 视觉规范、主题内核、WebAssembly 应用与 WebUI 两种构建 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 4 | 自适应布局、菜单、功能契约、运行时切换语言 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 5 | 其他原生前端：GTK 4（已完成）· WinUI 3（已完成）· `flutter + macos`（下一步） | <img alt="进行中" src="https://img.shields.io/badge/-%E8%BF%9B%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | 组件库、打包、增量构建、开发工具（`bern new`、`run`、`doctor` 已完成），接入 NipaPlay 3.0 | <img alt="进行中" src="https://img.shields.io/badge/-%E8%BF%9B%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 6 | 组件库、打包、增量构建、开发工具（`bern new`、`run`、`doctor`、`package` 已完成），接入 NipaPlay 3.0 | <img alt="进行中" src="https://img.shields.io/badge/-%E8%BF%9B%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## 仓库结构
 

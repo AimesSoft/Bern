@@ -386,6 +386,15 @@ open target/bern/macos/Showcase.app
 
 开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_WINDOW_SIGNALS=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，SIGUSR2 调用 `performMiniaturize(_:)`，与点按标题栏的关闭、最小化按钮相同，供没有屏幕访问的工具验证系统关闭路径和来自用户的窗口事实。这三项只用于开发检查，默认关闭。
 
+### 打包
+
+`bern package --target macos` 按 release 构建，生成 `target/bern/dist/<产品>-<版本>-macos-<架构>.dmg`：
+
+- 应用复制到暂存目录，应用 CLI 与 MCP 服务器放进 `Contents/Helpers`，先签工具、再签应用；磁盘映像里另有指向“应用程序”的链接。
+- 有 `BERN_MACOS_SIGNING_IDENTITY` 时以强化运行时与安全时间戳签名，并签磁盘映像；再有 `BERN_MACOS_NOTARY_PROFILE` 时经 `notarytool` 公证并装订。没有时做临时签名，只能在本机打开，并提示 Gatekeeper 会拒绝。
+- 磁盘映像在有 `diskutil image` 的系统上用它生成（macOS 27 上 `hdiutil create` 已提示弃用），否则用 `hdiutil`。
+- 实测（2026-10-12，新项目）：磁盘映像 1.8 MB；挂载后签名校验通过，从映像中直接启动应用，`Contents/Helpers/my-app state` 能读到引擎状态。公证需要 Developer ID，这台机器只有开发证书，未实测。
+
 ## 验证记录
 
 2026-10-11，调试符号与可执行文件体积，本机 macOS 27.0.1（arm64）：

@@ -15,7 +15,8 @@ use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
+    Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
+    dist_dir, files_below, icon, package_architecture,
 };
 use std::path::PathBuf;
 
@@ -58,6 +59,22 @@ pub fn icon_file(app: &Application) -> PathBuf {
 
 fn executable(app: &Application) -> String {
     app.app.id.replace('_', "-")
+}
+
+/// Files writable only by their owner, as installed files are: 644, and
+/// 755 for programs and directories.
+fn normalize_permissions(dir: &std::path::Path) -> BuildStep {
+    BuildStep::Run {
+        description: "Set the file permissions".into(),
+        program: "chmod".into(),
+        args: vec![
+            "-R".into(),
+            "u+rwX,go+rX,go-w".into(),
+            dir.display().to_string(),
+        ],
+        cwd: dir.parent().unwrap_or(dir).to_path_buf(),
+        env: vec![],
+    }
 }
 
 impl Target for GtkLinux {
@@ -290,12 +307,173 @@ impl Target for GtkLinux {
         ];
         Ok(BuildPlan {
             steps,
+            notes: Vec::new(),
             run: Some(Run::Program(bundle.join(&executable))),
             products: vec![
                 bundle.join(&executable),
                 output.join("bin").join(&executable),
                 output.join("bin").join(format!("{executable}-mcp")),
             ],
+        })
+    }
+
+    /// A Debian package (with `dpkg-deb`, where the system has it) that
+    /// installs into `/opt/<bundle id>` with a menu entry, an icon in the
+    /// icon theme and a launcher in `/usr/bin`, and a `.tar.gz` of the same
+    /// folder to run without installing. Both carry the command line and
+    /// the MCP server in `bin/`.
+    fn package(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        _signing: &Signing,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let product = product_name(app);
+        let executable = executable(app);
+        let output = &context.output_dir;
+        let bundle = output.join(&product);
+        let stage = output.join("package");
+        let dist = dist_dir(context);
+        let id = &app.app.bundle_id;
+        let desktop = format!("{id}.desktop");
+        let read = |error: std::io::Error| {
+            vec![Diagnostic::error(format!(
+                "cannot read {}: {error}",
+                bundle.display()
+            ))]
+        };
+        // The desktop entry beside the build points into the build; the
+        // package writes its own.
+        let mut files: Vec<_> = files_below(&bundle)
+            .map_err(read)?
+            .into_iter()
+            .filter(|(_, path)| path != std::path::Path::new(&desktop))
+            .collect();
+        for program in [executable.clone(), format!("{executable}-mcp")] {
+            files.push((
+                output.join("bin").join(&program),
+                PathBuf::from("bin").join(&program),
+            ));
+        }
+        let portable = stage.join(&product);
+        let (archive_step, archive_file) = archive(
+            &portable,
+            &dist.join(format!(
+                "{product}-{}-linux-{}",
+                app.app.version,
+                package_architecture()
+            )),
+        );
+        let mut steps = vec![
+            BuildStep::RemoveIfExists {
+                path: stage.clone(),
+            },
+            BuildStep::CreateDir { path: dist.clone() },
+            BuildStep::Mirror {
+                dir: portable,
+                files: files.clone(),
+                keep: vec![],
+            },
+            BuildStep::RemoveIfExists {
+                path: archive_file.clone(),
+            },
+            normalize_permissions(&stage),
+            archive_step,
+        ];
+        let mut products = vec![archive_file];
+        let mut notes = Vec::new();
+        let dpkg = std::process::Command::new("dpkg-deb")
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success());
+        if dpkg {
+            let root = stage.join("deb");
+            let installed = PathBuf::from("/opt").join(id);
+            let icon_bytes = std::fs::read(bundle.join(icon_file(app))).map_err(read)?;
+            let size = icon::png_size(&icon_bytes).map_or(256, |(width, _)| width);
+            let architecture = match std::env::consts::ARCH {
+                "aarch64" => "arm64",
+                "x86_64" => "amd64",
+                other => other,
+            };
+            let deb = dist.join(format!(
+                "{executable}_{}_{architecture}.deb",
+                app.app.version
+            ));
+            let installed_size: u64 = files
+                .iter()
+                .filter_map(|(source, _)| std::fs::metadata(source).ok())
+                .map(|metadata| metadata.len())
+                .sum();
+            steps.extend([
+                BuildStep::Mirror {
+                    dir: root.join(installed.strip_prefix("/").expect("absolute")),
+                    files,
+                    keep: vec![],
+                },
+                BuildStep::Write {
+                    path: root.join("usr/share/applications").join(&desktop),
+                    contents: glue::desktop_entry(
+                        app,
+                        &installed.join(&executable),
+                        std::path::Path::new(id),
+                    )
+                    .into_bytes(),
+                },
+                BuildStep::Write {
+                    path: root
+                        .join("usr/share/icons/hicolor")
+                        .join(format!("{size}x{size}/apps/{id}.png")),
+                    contents: icon_bytes,
+                },
+                BuildStep::CreateDir {
+                    path: root.join("usr/bin"),
+                },
+                BuildStep::Run {
+                    description: "Link the launcher".into(),
+                    program: "ln".into(),
+                    args: vec![
+                        "-s".into(),
+                        installed.join(&executable).display().to_string(),
+                        root.join("usr/bin").join(&executable).display().to_string(),
+                    ],
+                    cwd: stage.clone(),
+                    env: vec![],
+                },
+                BuildStep::Write {
+                    path: root.join("DEBIAN/control"),
+                    contents: glue::debian_control(
+                        app,
+                        &executable,
+                        architecture,
+                        installed_size.div_ceil(1024),
+                    )
+                    .into_bytes(),
+                },
+                BuildStep::RemoveIfExists { path: deb.clone() },
+                normalize_permissions(&root),
+                BuildStep::Run {
+                    description: "Make the Debian package".into(),
+                    program: "dpkg-deb".into(),
+                    args: vec![
+                        "--root-owner-group".into(),
+                        "--build".into(),
+                        root.display().to_string(),
+                        deb.display().to_string(),
+                    ],
+                    cwd: stage.clone(),
+                    env: vec![],
+                },
+            ]);
+            products.insert(0, deb);
+        } else {
+            notes.push("dpkg-deb is not installed here, so there is no .deb; the .tar.gz runs on any Linux with GTK 4.14 and libadwaita 1.5".into());
+        }
+        Ok(BuildPlan {
+            steps,
+            products,
+            run: None,
+            notes,
         })
     }
 }
