@@ -3,7 +3,7 @@
   "productName": "hello",
   "version": "0.1.0",
   "identifier": "dev.bern.benchmarks.tauri",
-  "build": { "frontendDist": "dist" },
+  "build": { "frontendDist": "web" },
   "app": {
     "windows": [{ "title": "Hello", "width": 480, "height": 320 }],
     "security": { "csp": null }
