@@ -1,0 +1,13 @@
+[package]
+name = "hello-dioxus"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+dioxus = { version = "0.7.10", features = ["desktop"] }
+
+[profile.release]
+strip = true

@@ -1,0 +1,15 @@
+[package]
+name = "hello-gpui"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Its own workspace: not part of Bern's.
+[workspace]
+
+[dependencies]
+# Shaders compiled when the app starts, so the build needs no Metal toolchain.
+gpui = { version = "0.2.2", features = ["runtime_shaders"] }
+
+[profile.release]
+strip = true

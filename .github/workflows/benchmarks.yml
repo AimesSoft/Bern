@@ -1,0 +1,74 @@
+# Measure the same Hello World in Bern and in other cross-platform
+# frameworks on one Mac: package size, time to the first window, memory.
+# Run it from the Actions tab; the merged results are the artifact
+# `benchmark-results` (results.json), which the README charts read.
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: >-
+          Runner label. GitHub's hosted macOS runners are Apple silicon
+          virtual machines; for an Apple M4, register a self-hosted runner
+          with a label such as `m4` and give that label here.
+        default: macos-latest
+        type: string
+      runs:
+        description: Measured launches per framework (after one warm-up)
+        default: "5"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: ${{ matrix.framework }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [bern, gpui, dioxus, tauri, electron, flutter, react-native, avalonia, qt]
+    steps:
+      - uses: actions/checkout@v4
+      - if: matrix.framework == 'avalonia'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - if: matrix.framework == 'electron' || matrix.framework == 'react-native'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build and measure
+        run: benchmarks/run.sh ${{ matrix.framework }} ${{ inputs.runs }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.framework }}
+          path: benchmarks/out/${{ matrix.framework }}.json
+          if-no-files-found: error
+
+  collect:
+    needs: measure
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: results
+          merge-multiple: true
+      - name: Merge
+        run: |
+          python3 - <<'PY'
+          import glob, json
+          results = sorted((json.load(open(path)) for path in glob.glob("results/*.json")), key=lambda r: r["framework"])
+          json.dump({"results": results}, open("results.json", "w"), indent=2)
+          for r in results:
+              print(f'{r["framework"]:<13} {r["version"]:<16} {r["package_bytes"] / 1e6:7.1f} MB {r["launch_s"]:6.2f} s {r["memory_bytes"] / 1e6:6.0f} MB  {r["machine"]}')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: results.json
