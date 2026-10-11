@@ -15,6 +15,9 @@
 //! * The first message must carry the token generated at start. The token
 //!   travels in the address fragment, which browsers never send to servers,
 //!   so the static files reveal nothing; the address is the credential.
+//!
+//! [`FileServer`] serves a page alone, without a channel, for builds whose
+//! engine runs in the page itself.
 
 mod channel;
 mod digest;
@@ -147,18 +150,92 @@ fn serve(stream: TcpStream, env: Arc<Env>, root: &std::path::Path, port: u16) ->
         writer.flush()?;
         return websocket(reader, writer, env);
     }
+    serve_files(&mut writer, &request, root)
+}
+
+/// Answer a request for a file below `root`.
+fn serve_files(
+    writer: &mut TcpStream,
+    request: &http::Request,
+    root: &std::path::Path,
+) -> io::Result<()> {
     match request.method.as_str() {
         "GET" | "HEAD" => match http::resolve(root, &request.path) {
             Some(file) => http::serve_file(
-                &mut writer,
+                writer,
                 &file,
                 request.header("Range"),
                 request.method == "HEAD",
             ),
-            None => http::error(&mut writer, "404 Not Found"),
+            None => http::error(writer, "404 Not Found"),
         },
-        _ => http::error(&mut writer, "405 Method Not Allowed"),
+        _ => http::error(writer, "405 Method Not Allowed"),
     }
+}
+
+/// Serves the files of a page whose engine runs in the page itself, such
+/// as a `web_app` build, for `bern run`: 127.0.0.1 only, with the same
+/// `Host` rule as [`Server`], and no WebSocket channel.
+pub struct FileServer {
+    address: SocketAddr,
+    stop: Arc<AtomicBool>,
+}
+
+impl FileServer {
+    /// Serve `root` on 127.0.0.1 at `port` (0 picks a free port).
+    pub fn start(root: PathBuf, port: u16) -> io::Result<FileServer> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, port))?;
+        let address = listener.local_addr()?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let root = Arc::new(root);
+        thread::Builder::new()
+            .name("bern-files".into())
+            .spawn(move || {
+                for stream in listener.incoming() {
+                    if flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let Ok(stream) = stream else { continue };
+                    let root = Arc::clone(&root);
+                    let _ = thread::Builder::new()
+                        .name("bern-files-connection".into())
+                        .spawn(move || {
+                            let _ = serve_page(stream, &root, address.port());
+                        });
+                }
+            })?;
+        Ok(FileServer { address, stop })
+    }
+
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    /// The page address.
+    pub fn url(&self) -> String {
+        format!("http://127.0.0.1:{}/", self.address.port())
+    }
+}
+
+impl Drop for FileServer {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        let _ = TcpStream::connect(self.address);
+    }
+}
+
+fn serve_page(stream: TcpStream, root: &std::path::Path, port: u16) -> io::Result<()> {
+    let mut writer = stream.try_clone()?;
+    let mut reader = BufReader::new(stream);
+    let request = http::read_request(&mut reader)?;
+    if !request
+        .header("Host")
+        .is_some_and(|host| own_host(host, port))
+    {
+        return http::error(&mut writer, "403 Forbidden");
+    }
+    serve_files(&mut writer, &request, root)
 }
 
 fn websocket(reader: BufReader<TcpStream>, writer: TcpStream, env: Arc<Env>) -> io::Result<()> {

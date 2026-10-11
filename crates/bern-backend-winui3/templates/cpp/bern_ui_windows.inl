@@ -546,6 +546,8 @@ inline std::string Open(std::string const& kindId) {
         holder.Children().Append(content);
         Ctx ctx;
         ctx.win = raw;
+        // Controls written in the window itself are named after it.
+        ctx.comp = def.id;
         ctx.page = page;
         def.render(Parent::Of(content), ctx);
         Reactive::Run([holder, raw] { holder.IsHitTestVisible(!raw->pending.Get().has_value()); });
@@ -1251,17 +1253,38 @@ inline void Finish() {
 
 #if BERN_WINUI
 
+/// The runtime's resource index, when WinUI has to be told where it is.
+inline std::wstring resourceIndex;
+
 struct BernApplication : xaml::ApplicationT<BernApplication, xaml::Markup::IXamlMetadataProvider> {
     xaml::XamlTypeInfo::XamlControlsXamlMetaDataProvider provider;
 
     BernApplication() {
+        // The copy of the runtime Windows ships with does not lead WinUI to
+        // its own resources (the control styles among them); point at them.
+        if (!resourceIndex.empty()) {
+            ResourceManagerRequested([](auto&&, xaml::ResourceManagerRequestedEventArgs const& args) {
+                args.CustomResourceManager(winrt::Microsoft::Windows::ApplicationModel::Resources::ResourceManager(resourceIndex));
+            });
+        }
         auto appearance = Dev::Appearance();
         if (appearance == "dark") RequestedTheme(xaml::ApplicationTheme::Dark);
         else if (appearance == "light") RequestedTheme(xaml::ApplicationTheme::Light);
+        // WinUI ends the process on an unhandled error; say what it was.
+        UnhandledException([](auto&&, xaml::UnhandledExceptionEventArgs const& args) {
+            char code[16];
+            std::snprintf(code, sizeof code, "0x%08lx", static_cast<unsigned long>(args.Exception().value));
+            bern::Report("unhandled WinUI error " + std::string(code) + ": " + winrt::to_string(args.Message()));
+        });
     }
 
     void OnLaunched(xaml::LaunchActivatedEventArgs const&) {
-        Resources().MergedDictionaries().Append(controls::XamlControlsResources());
+        try {
+            Resources().MergedDictionaries().Append(controls::XamlControlsResources());
+        } catch (winrt::hresult_error const& error) {
+            bern::Report("cannot load the WinUI control styles: " + winrt::to_string(error.message()));
+            throw;
+        }
         if (!Launch(Resources())) Exit();
     }
 
@@ -1271,8 +1294,10 @@ struct BernApplication : xaml::ApplicationT<BernApplication, xaml::Markup::IXaml
 };
 
 /// Run the application on WinUI 3. Returns when the last window closed.
-inline int Run(AppDef const& definition) {
+/// `resources`: the runtime's resource index, when WinUI has to be told.
+inline int Run(AppDef const& definition, std::wstring const& resources) {
     app = &definition;
+    resourceIndex = resources;
     xaml::Application::Start([](auto&&) { winrt::make<BernApplication>(); });
     Finish();
     return 0;

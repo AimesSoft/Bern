@@ -42,10 +42,12 @@ struct Inner {
 pub struct Ctx(Rc<Inner>);
 
 impl Ctx {
+    /// The context of a window's own content: controls written in the
+    /// window itself are named after it.
     pub(crate) fn root(win: Rc<Win>, page: Option<Rc<Page>>) -> Self {
         Self(Rc::new(Inner {
+            comp: win.kind_id(),
             win,
-            comp: "",
             key: None,
             locals: None,
             page,

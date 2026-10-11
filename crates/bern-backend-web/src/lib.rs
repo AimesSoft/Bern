@@ -23,7 +23,7 @@ use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_protocol::Type;
 use bern_target_api::{
-    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
+    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
@@ -485,6 +485,7 @@ impl Target for WebBrowser {
                 program.clone(),
                 format!("{program}-mcp"),
             ] {
+                let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
                 steps.push(BuildStep::Copy {
                     from: built.join(&name),
                     to: output.join("bin").join(&name),
@@ -492,6 +493,20 @@ impl Target for WebBrowser {
                 products.push(output.join("bin").join(&name));
             }
         }
-        Ok(BuildPlan { steps, products })
+        let run = if remote {
+            let host = format!(
+                "{}-host{}",
+                glue::program(app),
+                std::env::consts::EXE_SUFFIX
+            );
+            Run::PageHost(output.join("bin").join(host))
+        } else {
+            Run::Page(output.clone())
+        };
+        Ok(BuildPlan {
+            steps,
+            products,
+            run: Some(run),
+        })
     }
 }

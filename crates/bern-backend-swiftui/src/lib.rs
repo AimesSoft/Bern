@@ -13,7 +13,7 @@ mod swift;
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
 use bern_target_api::{
-    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
+    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
@@ -57,6 +57,10 @@ fn architecture() -> (&'static str, &'static str) {
 }
 
 impl Target for SwiftUiMacos {
+    fn build_hosts(&self) -> &'static [&'static str] {
+        &["macos"]
+    }
+
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
             id: "swiftui-macos",
@@ -462,6 +466,7 @@ impl Target for SwiftUiMacos {
         ]);
         Ok(BuildPlan {
             steps,
+            run: Some(Run::Program(bundle.join("Contents/MacOS").join(&product))),
             products: vec![
                 bundle,
                 output.join("bin").join(&cli),

@@ -14,7 +14,7 @@ mod strings;
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
-    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
+    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
@@ -61,6 +61,10 @@ fn executable(app: &Application) -> String {
 }
 
 impl Target for GtkLinux {
+    fn build_hosts(&self) -> &'static [&'static str] {
+        &["linux"]
+    }
+
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
             id: "gtk-linux",
@@ -286,6 +290,7 @@ impl Target for GtkLinux {
         ];
         Ok(BuildPlan {
             steps,
+            run: Some(Run::Program(bundle.join(&executable))),
             products: vec![
                 bundle.join(&executable),
                 output.join("bin").join(&executable),

@@ -1,57 +1,116 @@
 //! `bern`: the build tool.
 //!
-//! It loads `Bern.toml`, compiles the declarations to IR, resolves each
-//! target through the registry, lets the target check and generate, and
-//! runs the target's build plan. The build tool is separate from the
-//! application CLI that `bern build` generates.
+//! It creates projects, loads `Bern.toml`, compiles the declarations to
+//! IR, resolves each target through the registry, lets the target check
+//! and generate, runs the target's build plan and starts what it built. The
+//! build tool is separate from the application CLI that `bern build`
+//! generates.
+
+mod doctor;
+mod framework;
+mod new;
+mod run;
 
 use bern_compiler::{Compiled, Config};
-use bern_target_api::{BuildContext, BuildStep, Diagnostic, Registry, Target};
+use bern_target_api::{BuildContext, BuildStep, Diagnostic, Framework, Registry, Target};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 const USAGE: &str = "\
-bern: build Bern applications
+bern: create, check, build and run Bern applications
 
 Usage:
-  bern build [--manifest PATH] [--target NAME] [--release]
-  bern check [--manifest PATH] [--target NAME]
-  bern ir    [--manifest PATH]
+  bern new <path> [--bundle-id ID] [--languages LIST] [--bern-path DIR]
+  bern run    [--manifest PATH] [--target NAME] [--release]
+  bern build  [--manifest PATH] [--target NAME] [--release]
+  bern check  [--manifest PATH] [--target NAME]
+  bern doctor [--manifest PATH]
+  bern ir     [--manifest PATH]
 
+Commands:
+  new          Create an application in <path>: a window with a counter
+  run          Build one target and start it (default: this computer's)
+  build        Build targets (default: every one this computer can build)
+  check        Check declarations, translations and feature coverage
+  doctor       Show what this computer needs to build each target
+  ir           Print the compiled IR as JSON
+
+Options:
   --manifest   Path to Bern.toml (default: search from the current directory)
-  --target     Target name from [targets.<name>] (default: every target)
+  --target     Target name from [targets.<name>]
   --release    Optimized build
+  --bundle-id  Reverse-DNS bundle id (default: com.example.<name>)
+  --languages  Languages, comma-separated, the default first (default: en,zh-Hans;
+               the template has text in en, zh-Hans, zh-Hant and ja)
+  --bern-path  Bern checkout the project builds with (default: the checkout this
+               bern was built from, else the Git repository)
 ";
 
+#[derive(Debug, Default)]
 struct Options {
     command: String,
+    /// `bern new <path>`.
+    path: Option<PathBuf>,
     manifest: Option<PathBuf>,
     target: Option<String>,
     release: bool,
+    bundle_id: Option<String>,
+    languages: Option<Vec<String>>,
+    bern_path: Option<PathBuf>,
 }
 
 fn parse() -> Result<Options, String> {
-    let mut args = std::env::args().skip(1);
+    parse_args(std::env::args().skip(1))
+}
+
+fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String> {
     let command = args.next().ok_or_else(|| USAGE.to_string())?;
     if command == "--help" || command == "-h" || command == "help" {
         return Err(USAGE.to_string());
     }
+    let allowed: &[&str] = match command.as_str() {
+        "new" => &["--bundle-id", "--languages", "--bern-path"],
+        "run" | "build" => &["--manifest", "--target", "--release"],
+        "check" => &["--manifest", "--target"],
+        "doctor" | "ir" => &["--manifest"],
+        other => return Err(format!("unknown command `{other}`\n\n{USAGE}")),
+    };
     let mut options = Options {
         command,
-        manifest: None,
-        target: None,
-        release: false,
+        ..Options::default()
     };
     while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--manifest" => {
-                options.manifest = Some(args.next().ok_or("--manifest needs a path")?.into())
-            }
-            "--target" => options.target = Some(args.next().ok_or("--target needs a name")?),
-            "--release" => options.release = true,
-            other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
+        if arg.starts_with("--") && !allowed.contains(&arg.as_str()) {
+            return Err(format!(
+                "`bern {}` does not take `{arg}`\n\n{USAGE}",
+                options.command
+            ));
         }
+        let mut value = || args.next().ok_or(format!("{arg} needs a value"));
+        match arg.as_str() {
+            "--manifest" => options.manifest = Some(value()?.into()),
+            "--target" => options.target = Some(value()?),
+            "--release" => options.release = true,
+            "--bundle-id" => options.bundle_id = Some(value()?),
+            "--languages" => {
+                options.languages = Some(
+                    value()?
+                        .split(',')
+                        .map(|language| language.trim().to_string())
+                        .filter(|language| !language.is_empty())
+                        .collect(),
+                )
+            }
+            "--bern-path" => options.bern_path = Some(value()?.into()),
+            _ if options.command == "new" && options.path.is_none() => {
+                options.path = Some(arg.into())
+            }
+            other => return Err(format!("unexpected argument `{other}`\n\n{USAGE}")),
+        }
+    }
+    if options.command == "new" && options.path.is_none() {
+        return Err(format!("`bern new` needs a path\n\n{USAGE}"));
     }
     Ok(options)
 }
@@ -239,12 +298,13 @@ fn context(
     compiled: &Compiled,
     workspace: &Path,
     target: &bern_target_api::TargetConfig,
+    framework: &Framework,
     release: bool,
 ) -> BuildContext {
     BuildContext {
         project_dir: config.dir.clone(),
         workspace_dir: workspace.to_path_buf(),
-        output_dir: workspace.join("target/bern").join(&target.name),
+        output_dir: workspace.join("target").join("bern").join(&target.name),
         target: target.clone(),
         protocol_package: config.protocol_package.name.clone(),
         protocol_path: config.protocol_package.dir.clone(),
@@ -252,8 +312,35 @@ fn context(
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        framework: framework.clone(),
         release,
     }
+}
+
+/// How an operating system is called in messages.
+fn os_name(os: &str) -> &str {
+    match os {
+        "macos" => "macOS",
+        "windows" => "Windows",
+        "linux" => "Linux",
+        other => other,
+    }
+}
+
+/// Whether this computer can build `target`.
+fn builds_here(target: &dyn Target) -> bool {
+    let hosts = target.build_hosts();
+    hosts.is_empty() || hosts.contains(&std::env::consts::OS)
+}
+
+/// Operating systems that can build `target`, for messages.
+fn hosts_text(target: &dyn Target) -> String {
+    target
+        .build_hosts()
+        .iter()
+        .map(|os| os_name(os))
+        .collect::<Vec<_>>()
+        .join(" or ")
 }
 
 fn main() -> ExitCode {
@@ -264,9 +351,154 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    match options.command.as_str() {
+        "new" => create(&options),
+        "doctor" => doctor(&options),
+        _ => build(&options),
+    }
+}
+
+fn manifest(options: &Options) -> Option<PathBuf> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let Some(manifest) = options.manifest.clone().or_else(|| find_manifest(&cwd)) else {
-        eprintln!("error: no Bern.toml found; pass --manifest");
+    options.manifest.clone().or_else(|| find_manifest(&cwd))
+}
+
+/// `bern new`.
+fn create(options: &Options) -> ExitCode {
+    let source = match &options.bern_path {
+        Some(path) => match path.canonicalize() {
+            Ok(path) if new::is_checkout(&path) => new::Source::Checkout(path),
+            _ => {
+                eprintln!("error: {} is not a Bern checkout", path.display());
+                return ExitCode::FAILURE;
+            }
+        },
+        None => new::Source::default_for_this_build(),
+    };
+    let path = options.path.clone().expect("parsed");
+    let project = match new::NewProject::new(
+        path,
+        options.bundle_id.clone(),
+        options.languages.clone(),
+        source,
+    ) {
+        Ok(project) => project,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(message) = project.write() {
+        eprintln!("error: {message}");
+        return ExitCode::FAILURE;
+    }
+    eprintln!(
+        "    \x1b[1;32mCreated\x1b[0m {} ({}) in {}",
+        project.name(),
+        project.id,
+        project.dir.display()
+    );
+    match &project.source {
+        new::Source::Checkout(checkout) => {
+            eprintln!("             with Bern from {}", checkout.display())
+        }
+        new::Source::Git(url) => eprintln!("             with Bern from {url}"),
+    }
+    eprintln!();
+    eprintln!("Start it on this computer:");
+    eprintln!();
+    eprintln!("    cd {}", project.dir.display());
+    eprintln!("    bern run");
+    eprintln!();
+    eprintln!("`bern doctor` shows what each target needs to build here.");
+    ExitCode::SUCCESS
+}
+
+/// `bern doctor`.
+fn doctor(options: &Options) -> ExitCode {
+    let checks = doctor::checks();
+    eprintln!(
+        "bern {} on {} ({})",
+        env!("CARGO_PKG_VERSION"),
+        os_name(std::env::consts::OS),
+        std::env::consts::ARCH
+    );
+    eprintln!();
+    doctor::print(&checks);
+    let missing = |check: &doctor::Check| matches!(check.status, doctor::Status::Missing(..));
+    // Without a project only Rust is required; in one, every declared
+    // target that builds here.
+    let mut failed = checks
+        .iter()
+        .any(|check| check.platforms.is_empty() && missing(check));
+    let Some(manifest) = manifest(options) else {
+        return if failed {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        };
+    };
+    eprintln!();
+    let config = match bern_compiler::config::load(&manifest) {
+        Ok(config) => config,
+        Err(errors) => {
+            report(&errors);
+            return ExitCode::FAILURE;
+        }
+    };
+    eprintln!("Project {} ({})", config.app_id, manifest.display());
+    match find_workspace(&config.dir)
+        .ok_or_else(|| format!("{} is not inside a Cargo workspace", config.dir.display()))
+        .and_then(|workspace| framework::detect(&workspace, &config.engine_package.name))
+    {
+        Ok(framework) => eprintln!("    Bern from {}", describe(&framework)),
+        Err(message) => {
+            eprintln!("    \x1b[1;31merror\x1b[0m: {message}");
+            failed = true;
+        }
+    }
+    for target in &config.targets {
+        let check = checks
+            .iter()
+            .find(|check| check.platforms.contains(&target.platform.as_str()));
+        let state = match check.map(|check| &check.status) {
+            Some(doctor::Status::Ready(_)) => "\x1b[32mbuilds here\x1b[0m".to_string(),
+            Some(doctor::Status::Missing(..)) => {
+                failed = true;
+                format!(
+                    "\x1b[31mneeds {}, see above\x1b[0m",
+                    check.map_or("", |check| check.title)
+                )
+            }
+            Some(doctor::Status::Elsewhere(os)) => format!("\x1b[2mbuilds on {os}\x1b[0m"),
+            None => format!("unknown platform `{}`", target.platform),
+        };
+        eprintln!("    {:<12} {state}", target.name);
+    }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn describe(framework: &Framework) -> String {
+    match framework {
+        Framework::Path(crates) => crates.parent().unwrap_or(crates).display().to_string(),
+        Framework::Git { url, reference } => match reference {
+            Some((kind, value)) => format!("{url} ({kind} {value})"),
+            None => url.clone(),
+        },
+        Framework::Registry(version) => format!("crates.io ({version})"),
+    }
+}
+
+/// `bern check`, `bern build`, `bern run` and `bern ir`.
+fn build(options: &Options) -> ExitCode {
+    let Some(manifest) = manifest(options) else {
+        eprintln!(
+            "error: no Bern.toml found; pass --manifest, or create a project with `bern new`"
+        );
         return ExitCode::from(2);
     };
     let config = match bern_compiler::config::load(&manifest) {
@@ -291,10 +523,6 @@ fn main() -> ExitCode {
             serde_json::to_string_pretty(&compiled.app).expect("IR serializes")
         );
         return ExitCode::SUCCESS;
-    }
-    if options.command != "build" && options.command != "check" {
-        eprintln!("{USAGE}");
-        return ExitCode::from(2);
     }
     let Some(workspace) = find_workspace(&config.dir) else {
         eprintln!(
@@ -321,16 +549,23 @@ fn main() -> ExitCode {
         );
     }
     let registry = registry();
-    let targets: Vec<_> = config
-        .targets
-        .iter()
-        .filter(|target| {
-            options
-                .target
-                .as_ref()
-                .is_none_or(|name| *name == target.name)
-        })
-        .collect();
+    let mut targets = Vec::new();
+    for target_config in &config.targets {
+        if options
+            .target
+            .as_ref()
+            .is_some_and(|name| *name != target_config.name)
+        {
+            continue;
+        }
+        match registry.resolve(target_config) {
+            Ok(target) => targets.push((target_config, target)),
+            Err(error) => {
+                report(&[error]);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
     if targets.is_empty() {
         eprintln!(
             "error: no matching [targets.*] entry in {}",
@@ -338,14 +573,74 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     }
-    for target_config in targets {
-        let target: &dyn Target = match registry.resolve(target_config) {
-            Ok(target) => target,
-            Err(error) => {
-                report(&[error]);
+    // Without --target, `build` builds what this computer can, and `run`
+    // starts this computer's own target, else one any computer builds.
+    // Targets whose tools are missing here are skipped with what to install.
+    if options.target.is_none() && options.command != "check" {
+        let mut here = Vec::new();
+        for (target_config, target) in targets {
+            if !builds_here(target) {
+                if options.command == "build" {
+                    eprintln!(
+                        "   \x1b[1;33mSkipping\x1b[0m {}: builds on {}",
+                        target_config.name,
+                        hosts_text(target)
+                    );
+                }
+                continue;
+            }
+            if let Some(doctor::Check {
+                title,
+                status: doctor::Status::Missing(problem, fix),
+                ..
+            }) = doctor::check(&target_config.platform)
+            {
+                eprintln!(
+                    "   \x1b[1;33mSkipping\x1b[0m {}: needs {title}: {problem}",
+                    target_config.name
+                );
+                for line in fix.lines() {
+                    eprintln!("            {line}");
+                }
+                continue;
+            }
+            here.push((target_config, target));
+        }
+        targets = here;
+        if options.command == "run" {
+            let native = targets
+                .iter()
+                .position(|(_, target)| !target.build_hosts().is_empty());
+            targets = native
+                .or((!targets.is_empty()).then_some(0))
+                .map(|index| vec![targets.swap_remove(index)])
+                .unwrap_or_default();
+        }
+        if targets.is_empty() {
+            eprintln!(
+                "error: no target in {} builds on {}; pass --target to generate one anyway",
+                manifest.display(),
+                os_name(std::env::consts::OS)
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+    if options.command == "run" && targets.len() != 1 {
+        eprintln!("error: `bern run` starts one target");
+        return ExitCode::FAILURE;
+    }
+    let framework = if options.command == "check" {
+        None
+    } else {
+        match framework::detect(&workspace, &config.engine_package.name) {
+            Ok(framework) => Some(framework),
+            Err(message) => {
+                eprintln!("error: cannot tell where Bern comes from: {message}");
                 return ExitCode::FAILURE;
             }
-        };
+        }
+    };
+    for (target_config, target) in targets {
         let descriptor = target.descriptor();
         let mut problems = target.check(&compiled.app, target_config);
         let features = bern_target_api::feature_report(&compiled.app, &target_config.platform);
@@ -374,14 +669,38 @@ fn main() -> ExitCode {
             compiled.app.components.len(),
             compiled.app.windows.windows.len()
         );
-        if options.command == "check" {
+        let Some(framework) = &framework else {
             continue;
+        };
+        // What a named target needs on this computer, before any tool
+        // fails with a message of its own.
+        let needs = options
+            .target
+            .as_ref()
+            .and_then(|_| doctor::check(&target_config.platform));
+        match needs.map(|check| (check.title, check.status)) {
+            Some((title, doctor::Status::Missing(problem, fix))) => {
+                eprintln!(
+                    "error: building `{}` needs {title}: {problem}",
+                    target_config.name
+                );
+                for line in fix.lines() {
+                    eprintln!("       {line}");
+                }
+                return ExitCode::FAILURE;
+            }
+            Some((_, doctor::Status::Elsewhere(os))) => {
+                eprintln!("error: `{}` builds on {os}", target_config.name);
+                return ExitCode::FAILURE;
+            }
+            _ => {}
         }
         let context = context(
             &config,
             &compiled,
             &workspace,
             target_config,
+            framework,
             options.release,
         );
         let files = match target.generate(&compiled.app, &context) {
@@ -440,6 +759,19 @@ fn main() -> ExitCode {
         }
         for product in &plan.products {
             eprintln!("   \x1b[1;32mFinished\x1b[0m {}", product.display());
+        }
+        if options.command == "run" {
+            let Some(run) = &plan.run else {
+                eprintln!("error: `{}` builds nothing to start", descriptor.id);
+                return ExitCode::FAILURE;
+            };
+            return match run::start(run) {
+                Ok(code) => code,
+                Err(message) => {
+                    eprintln!("error: {message}");
+                    ExitCode::FAILURE
+                }
+            };
         }
     }
     ExitCode::SUCCESS
@@ -516,5 +848,51 @@ mod tests {
         mirror(&bundle, &[], &keep).unwrap();
         assert_eq!(files_below(&bundle), ["en.lproj/Localizable.strings"]);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn parsed(args: &[&str]) -> Result<Options, String> {
+        parse_args(args.iter().map(|arg| arg.to_string()))
+    }
+
+    #[test]
+    fn each_command_takes_its_own_options() {
+        let new = parsed(&[
+            "new",
+            "work/my_app",
+            "--languages",
+            "ja, en",
+            "--bundle-id",
+            "dev.me.app",
+        ])
+        .unwrap();
+        assert_eq!(new.path, Some(PathBuf::from("work/my_app")));
+        assert_eq!(
+            new.languages,
+            Some(vec!["ja".to_string(), "en".to_string()])
+        );
+        assert_eq!(new.bundle_id.as_deref(), Some("dev.me.app"));
+        assert!(parsed(&["new"]).unwrap_err().contains("needs a path"));
+        assert!(
+            parsed(&["new", "a", "b"])
+                .unwrap_err()
+                .contains("unexpected argument `b`")
+        );
+        assert!(
+            parsed(&["new", "a", "--release"])
+                .unwrap_err()
+                .contains("does not take `--release`")
+        );
+
+        let run = parsed(&["run", "--target", "web_app", "--release"]).unwrap();
+        assert_eq!(run.target.as_deref(), Some("web_app"));
+        assert!(run.release);
+        assert!(parsed(&["check", "--release"]).is_err());
+        assert!(parsed(&["doctor", "--target", "macos"]).is_err());
+        assert!(
+            parsed(&["build", "--target"])
+                .unwrap_err()
+                .contains("needs a value")
+        );
+        assert!(parsed(&["deploy"]).unwrap_err().contains("unknown command"));
     }
 }

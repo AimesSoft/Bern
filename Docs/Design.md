@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.18
+- 版本：v0.19
 - 状态：架构设计草案
 - 更新日期：2026-10-11
 - 项目名称：Bern UI
@@ -9,7 +9,7 @@
 - 首个目标平台：macOS（SwiftUI）
 - 主要验证应用：NipaPlay 3.0
 
-当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md)、[Linux GTK 实现记录](Implementation/Linux-GTK.md) 与 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）与第二批 `winui3 + windows`（C++/WinRT 宿主，系统有 Windows App Runtime 时用 WinUI 3、没有时回退到系统 XAML，展示应用与四入口在 Windows 11 上按两种前端验证）；其余能力仍为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md)、[Linux GTK 实现记录](Implementation/Linux-GTK.md) 与 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）与第二批 `winui3 + windows`（C++/WinRT 宿主，系统有 Windows App Runtime 时用 WinUI 3、没有时回退到系统 XAML，展示应用与四入口在 Windows 11 上按两种前端验证）；阶段六先行提供了开发工具 `bern new`、`bern run` 与 `bern doctor`，项目可以独立于 Bern 仓库构建；其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
@@ -229,6 +229,7 @@ platform = "linux"       # ui 默认 gtk
 
 [targets.native_windows]
 platform = "windows"     # ui 默认 winui3
+frontends = ["winui3", "xaml-islands"]   # 默认两个都编译，可只写其一
 
 [targets.flutter_macos]
 ui = "flutter"
@@ -250,7 +251,7 @@ application_transport = "websocket"
 application_codec = "json"
 ```
 
-`web_app` 与 `web_ui` 是项目内的目标名称；`web_mode` 才是构建模式。示例中的 `websocket` 是传输，`json` 是编码；WebUI 也可使用另行实现并验收的浏览器兼容传输。连接地址通过运行时连接配置提供，凭据不写入静态构建资源。`app` 必须装配浏览器内引擎适配，`ui` 必须装配独立引擎客户端；不兼容配置在构建时失败。配置拼写与 `bern build --target web_app`、`bern build --target web_ui` 命令形式均为草案。
+Windows 目标的 `frontends` 选择编译哪几套前端：`winui3`、`xaml-islands`，默认两个都编译；列表为空、名称未知或重复，以及用在其他平台上，都在构建时失败。`web_app` 与 `web_ui` 是项目内的目标名称；`web_mode` 才是构建模式。示例中的 `websocket` 是传输，`json` 是编码；WebUI 也可使用另行实现并验收的浏览器兼容传输。连接地址通过运行时连接配置提供，凭据不写入静态构建资源。`app` 必须装配浏览器内引擎适配，`ui` 必须装配独立引擎客户端；不兼容配置在构建时失败。配置拼写与 `bern build --target web_app`、`bern build --target web_ui` 命令形式均为草案。
 
 这些目标可以共享组件声明、功能契约和业务核心。因能力或平台交互需要不同布局时，差异必须在可分析的自适应分支或显式平台扩展中表达。
 
@@ -1191,6 +1192,35 @@ icon = "art/icon.png"
 
 初期优先保证全量构建正确和可重复；增量编译、开发服务器及热更新在闭环验证后增加。默认构建不执行应用业务代码，不访问真实用户状态以决定生成结构。
 
+与应用无关、编译代价又高的部分由目标模块缓存，并按其全部输入判断是否失效。Windows 目标把 C++/WinRT 头文件与运行时放进按配置保存的预编译头，以运行时与编译选项的指纹、编译器版本、SDK 版本和路径为键；应用的改动只重新编译生成的源码。
+
+### 构建工具命令
+
+`bern` 是构建工具，与构建生成的应用 CLI 是两个程序：
+
+| 命令 | 作用 |
+| --- | --- |
+| `bern new <路径>` | 在空目录中创建应用 |
+| `bern run` | 构建一个目标并启动它 |
+| `bern build` | 构建目标 |
+| `bern check` | 只做声明、本地化与功能覆盖检查，不生成、不调用工具链 |
+| `bern doctor` | 检查本机构建各目标需要的工具，给出缺少时的安装方法 |
+| `bern ir` | 输出编译得到的 IR |
+
+`bern new` 生成独立的 Cargo 工作区：`Bern.toml`、根 `Cargo.toml`、与 Bern 一致的 `rust-toolchain.toml`、`.gitignore`，以及协议、引擎、界面三个 crate。起始应用是一个带计数的窗口：状态一个字段，两条命令，界面上两个按钮，引擎附带单元测试。名称取目录名，`-` 与 `_` 都可以，应用 id 为小写下划线形式；`--bundle-id` 默认 `com.example.<名称>`；`--languages` 默认 `en,zh-Hans`，第一个为默认语言，模板只带 `en`、`zh-Hans`、`zh-Hant`、`ja` 四种文案，其他语言在创建后自行补充。`Bern.toml` 声明全部四个目标，桌面目标开启 `channels = ["ipc"]`，并注明删去即不监听任何通道。新项目必须直接通过全部编译检查，由测试保证。
+
+新项目的 `bern` 依赖默认指向构建当前 `bern` 的检出目录；该目录不存在或位于 Cargo 的 Git 缓存时改用公开仓库，也可以用 `--bern-path` 指定检出目录。
+
+生成的胶水 crate 不假定项目位于 Bern 仓库内。构建驱动经 `cargo metadata --no-deps` 读出引擎包 `bern` 依赖的来源，胶水按同一来源引用每个 Bern crate：检出目录时取同一 `crates` 目录下的 crate，Git 仓库时使用同一地址与 `branch`、`tag` 或 `rev`，crates.io 时使用同一版本要求。来源必须完全相同，否则应用与胶水会得到两份 Bern crate、类型互不兼容。
+
+未指定 `--target` 时，`bern build` 构建本机能构建的全部目标：目标模块声明可构建的操作系统（SwiftUI 为 macOS，WinUI 3 为 Windows，GTK 为 Linux，Web 不限），其他系统的目标以及本机缺少工具的目标被跳过，并说明原因与安装方法。指定目标时，不在本机系统或缺少工具都直接失败，不进入工具链。`bern check` 始终检查全部目标。
+
+`bern run` 默认选择本机系统的桌面目标，没有时选择任何系统都能构建的目标。构建后按目标模块给出的方式启动：桌面目标直接运行可执行文件并等待它退出；Web `app` 构建在 127.0.0.1 上提供页面（与 WebUI 宿主相同的 `Host` 校验，不带 WebSocket 通道）并打开浏览器；WebUI 构建运行引擎宿主，打开它打印的地址。
+
+`bern doctor` 检查 Rust 版本（1.99 起）、macOS SDK 26 与 Swift 编译器、带 C++ 工具的 Visual Studio 与含 `cppwinrt.exe` 的 Windows SDK 以及 MSVC 版 Rust、GTK 4.14 与 libadwaita 1.5 的开发包、`wasm32-unknown-unknown` 目标。在项目内运行时还列出 Bern 的来源与每个目标在本机能否构建；本机能构建的已声明目标缺少工具时以失败退出。
+
+直接写在 `Window` 中的控件以窗口 id 作为组件名，目标形如 `main.add_one`；写在组件中的控件仍为 `组件名.控件 id`。四个目标一致。
+
 ## 跨语言绑定
 
 Web、Flutter、SwiftUI、GTK、WinUI 3 和 Compose 使用统一定义的 UI 绑定 schema，具体传递方式各自适配。采用 Rust 绑定的目标可以直接使用本地类型化接口，跨语言目标使用相应桥接，不强制所有后端经过 FFI。UI 绑定管理展示值、原生事件到命令的映射和前端实例；统一命令协议定义引擎与会话调用，业务引擎仍不需要理解平台控件。两者不能因同样使用 FFI 或消息传递就混为一个接口。
@@ -1291,11 +1321,11 @@ GTK 4 不提供窗口位置的读取与设置，Wayland 合成器也不报告窗
 
 Windows 默认通过 WinUI 3 目标生成界面、平台宿主和 Rust 绑定。宿主采用 C++/WinRT：生成的 C++ 代码调用随目标模块分发的 C++ 运行时，界面全部以代码构建，不生成 XAML 页面；业务逻辑和命令目录继续保留在独立 Rust 引擎中，引擎、会话运行时与 C 接口编译为静态库链入同一个可执行文件，运行时直接调用与 SwiftUI 目标相同的进程内接口。C++ 运行时不属于 Bern 工作区的构建，MSVC 与 Windows SDK 不成为构建其他目标的前置条件。
 
-应用只使用系统已有的组件：同一个可执行文件包含两套前端，启动时由 Windows App Runtime 的引导程序决定。系统有对应版本的 Windows App Runtime 时使用 WinUI 3（Windows 11 外观）；没有时不提示安装，而是回退到每台 Windows 10 与 11 都有的系统 XAML，经 XAML Islands 承载（Windows 10 外观）。两套前端共用一份运行时源码与一份生成代码，按 XAML 命名空间各编译一次；窗口事实与命令在两者中都经 Win32 取得。应用不随附 .NET、Windows App SDK 或 VC++ 运行库，C 运行库静态链接。
+应用只使用系统已有的组件：同一个可执行文件默认包含两套前端，启动时选择。系统有 Windows App Runtime 2（任何 2.x，其他程序安装的或 Windows 11 自带的）时使用 WinUI 3（Windows 11 外观）；没有时不提示安装，而是回退到每台 Windows 10 与 11 都有的系统 XAML，经 XAML Islands 承载（Windows 10 外观）。目标也可以用 `frontends` 只编译其中一套：只有系统 XAML 时不查找运行时、不随附引导程序；只有 WinUI 3 时，没有运行时的系统上按界面语言提示，并可在浏览器中打开最新运行时的安装程序。两套前端共用一份运行时源码与一份生成代码，按 XAML 命名空间各编译一次；窗口事实与命令在两者中都经 Win32 取得。应用不随附 .NET、Windows App SDK 或 VC++ 运行库，C 运行库静态链接。
 
 后端负责 UI 线程调度、平台对象生命周期、事件与命令的双向映射、主题资源、焦点、输入法、可访问性及窗口集成。状态写回必须遵守防止原生回调重复派发的统一规则。应用按 Windows 惯例单实例运行，再次启动显示主窗口，最后一个窗口关闭后退出；品牌色映射为 `SystemAccentColor` 及其各档浅色与深色资源。
 
-Windows App SDK、所需 Windows SDK、最低系统版本、构建环境和部署方式由目标描述明确声明：首版按 Windows App SDK 1.8 编写（其头文件与元数据只用于构建，运行时使用系统的 Windows App Runtime 1.8），C++/WinRT 头文件由 Windows SDK 的 `cppwinrt` 生成，最低 Windows 10 2004（10.0.19041），应用不打包。WinUI 3 与回退前端的支持范围需要实际构建与运行验证，不能把“Windows 原生”当作支持所有 Windows 环境的保证。
+Windows App SDK、所需 Windows SDK、最低系统版本、构建环境和部署方式由目标描述明确声明：按最新的 Windows App SDK 编写（目前 2.5.1，其头文件与元数据只用于构建），只使用每个 2.x 都有的接口，运行时接受任何 2.x：先用引导程序找其他程序安装的，再经系统的动态依赖接口找 Windows 11 自带的副本（`Microsoft.WindowsAppRuntime.CBS.2`，这时由应用把 WinUI 指向这份运行时的资源索引）；C++/WinRT 头文件由 Windows SDK 的 `cppwinrt` 生成，最低 Windows 10 2004（10.0.19041），应用不打包。WinUI 3 与回退前端的支持范围需要实际构建与运行验证，不能把“Windows 原生”当作支持所有 Windows 环境的保证。
 
 ### Android 与 iOS
 
@@ -1620,3 +1650,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.16 | 阶段五第二批：`winui3 + windows` 目标以 C#/.NET 为宿主，代码构建界面、经 P/Invoke 调用 `bern_app.dll` 中的同一进程内接口；声明 Windows App SDK 1.8、.NET 10 与最低 Windows 版本；单实例并在最后一个窗口关闭后退出；本地控制通道与资源文件 URL 支持 Windows |
 | v0.17 | `winui3 + windows` 宿主改为 C++/WinRT：一个可执行文件含 WinUI 3 与系统 XAML（XAML Islands）两套前端，启动时按系统是否有 Windows App Runtime 自动选择；引擎以静态库链入，C 运行库静态链接，不需要 .NET，不随附 Windows App SDK |
 | v0.18 | 增加应用图标：`[app].icon` 声明方形 PNG 并严格校验；未声明时各目标使用 Bern 标志，分别生成 macOS 的 `.icns`、Windows 的图标资源、Linux 的图标主题条目与 Web 的页面图标 |
+| v0.19 | 增加构建工具命令 `bern new`、`bern run` 与 `bern doctor`；生成的胶水按项目自身 `bern` 依赖的来源引用 Bern crate，项目不再需要位于 Bern 仓库内；未指定目标时按本机系统与工具选择目标；直接写在窗口中的控件以窗口 id 命名；Windows 目标以预编译头做增量构建，改用 Windows App SDK 2.x 并接受任何 2.x 运行时（包括 Windows 11 自带的），可用 `frontends` 只编译 WinUI 3 或系统 XAML |

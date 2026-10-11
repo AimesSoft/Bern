@@ -1,7 +1,8 @@
 // Bern runtime for Windows: the shared part, compiled once.
 // Generated build input; do not edit.
 
-#include "bern_base.h"
+// Through the precompiled header, which starts with bern_base.h.
+#include "bern_pch.h"
 
 #include <shlwapi.h>
 

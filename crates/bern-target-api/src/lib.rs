@@ -255,6 +255,66 @@ pub struct TargetConfig {
     /// Web build mode: `app` (engine in the page) or `ui` (separate engine).
     pub web_mode: Option<String>,
     pub channels: Vec<String>,
+    /// Windows front ends to build, from [`WINDOWS_FRONTENDS`]; both unless
+    /// the target names fewer. Empty for other platforms.
+    pub frontends: Vec<String>,
+}
+
+/// The Windows front ends: WinUI 3 on the Windows App Runtime, and the
+/// system XAML through XAML Islands, which every Windows 10 and 11 has.
+pub const WINDOWS_FRONTENDS: [&str; 2] = ["winui3", "xaml-islands"];
+
+/// Where the Bern crates come from: the source of the project's own `bern`
+/// dependency. Generated crates take every Bern crate from it, so the
+/// application and the code generated around it share one copy of each.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Framework {
+    /// A checkout whose `crates` directory holds every Bern crate.
+    Path(PathBuf),
+    /// A Git repository, at the reference the project names, if any:
+    /// `("branch", …)`, `("tag", …)` or `("rev", …)`.
+    Git {
+        url: String,
+        reference: Option<(String, String)>,
+    },
+    /// A release on crates.io, with the project's version requirement.
+    Registry(String),
+}
+
+impl Framework {
+    /// The dependency on the Bern crate `name`, as the inside of an inline
+    /// table, for example `path = "/src/bern/crates/bern-ffi"`.
+    pub fn dependency(&self, name: &str) -> String {
+        match self {
+            Framework::Path(crates) => {
+                let path = crates.join(name).display().to_string();
+                format!("path = {}", toml_string(&path.replace('\\', "/")))
+            }
+            Framework::Git { url, reference } => {
+                let mut out = format!("git = {}", toml_string(url));
+                if let Some((kind, value)) = reference {
+                    out.push_str(&format!(", {kind} = {}", toml_string(value)));
+                }
+                out
+            }
+            Framework::Registry(version) => format!("version = {}", toml_string(version)),
+        }
+    }
+}
+
+/// A TOML basic string.
+pub fn toml_string(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 /// Paths and packages a target needs to plan its build.
@@ -275,6 +335,8 @@ pub struct BuildContext {
     pub engine_path: PathBuf,
     /// Rust path of the engine type, which implements `Default`.
     pub engine_type: String,
+    /// Where generated crates take the Bern crates from.
+    pub framework: Framework,
     pub release: bool,
 }
 
@@ -334,11 +396,33 @@ pub struct BuildPlan {
     pub steps: Vec<BuildStep>,
     /// Final artifacts, for reporting.
     pub products: Vec<PathBuf>,
+    /// How `bern run` starts the built application.
+    pub run: Option<Run>,
+}
+
+/// How `bern run` starts a built application.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Run {
+    /// Start the program and wait until it exits.
+    Program(PathBuf),
+    /// Serve the directory on the loopback interface and open its
+    /// `index.html` in the browser.
+    Page(PathBuf),
+    /// Start the program, which serves its own page and prints the address
+    /// on a line `open <address>`; open that address in the browser and
+    /// wait until the program exits.
+    PageHost(PathBuf),
 }
 
 /// A UI target module.
 pub trait Target: Send + Sync {
     fn descriptor(&self) -> TargetDescriptor;
+
+    /// Operating systems that can build this target, as
+    /// `std::env::consts::OS` names them; empty when any can.
+    fn build_hosts(&self) -> &'static [&'static str] {
+        &[]
+    }
 
     /// Report constructs this target cannot realize, with locations.
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic>;
@@ -558,6 +642,7 @@ mod tests {
             ui: ui.map(String::from),
             web_mode: None,
             channels: vec![],
+            frontends: vec![],
         }
     }
 
@@ -577,5 +662,27 @@ mod tests {
         assert!(error.message.contains("gtk + linux"), "{}", error.message);
         assert!(registry.resolve(&config("macos", Some("flutter"))).is_err());
         assert!(registry.resolve(&config("amiga", None)).is_err());
+    }
+
+    #[test]
+    fn generated_crates_name_bern_crates_like_the_project() {
+        let path = Framework::Path(PathBuf::from("/src/Bern/crates"));
+        assert_eq!(
+            path.dependency("bern-ffi"),
+            r#"path = "/src/Bern/crates/bern-ffi""#
+        );
+        let git = Framework::Git {
+            url: "https://github.com/AimesSoft/Bern".into(),
+            reference: Some(("branch".into(), "master".into())),
+        };
+        assert_eq!(
+            git.dependency("bern-ffi"),
+            r#"git = "https://github.com/AimesSoft/Bern", branch = "master""#
+        );
+        assert_eq!(
+            Framework::Registry("0.1".into()).dependency("bern-ffi"),
+            r#"version = "0.1""#
+        );
+        assert_eq!(toml_string(r#"C:\a "b""#), r#""C:\\a \"b\"""#);
     }
 }

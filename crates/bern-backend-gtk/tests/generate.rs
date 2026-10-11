@@ -4,7 +4,7 @@
 
 use bern_backend_gtk::{GtkLinux, product_name};
 use bern_ir::Application;
-use bern_target_api::{BuildContext, BuildStep, Registry, Target, TargetConfig};
+use bern_target_api::{BuildContext, BuildStep, Framework, Registry, Target, TargetConfig};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -100,6 +100,7 @@ fn showcase_generates_a_gtk_application() {
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        framework: Framework::Path(root.join("crates")),
         release: false,
     };
     let files = GtkLinux.generate(&compiled.app, &context).unwrap();

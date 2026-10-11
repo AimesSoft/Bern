@@ -19,7 +19,7 @@ mod strings;
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
-    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport,
+    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
@@ -37,6 +37,11 @@ const RUNTIME: &[(&str, &str)] = &[
     (
         "bern_main.cpp",
         include_str!("../templates/cpp/bern_main.cpp"),
+    ),
+    ("bern_pch.h", include_str!("../templates/cpp/bern_pch.h")),
+    (
+        "bern_pch.cpp",
+        include_str!("../templates/cpp/bern_pch.cpp"),
     ),
     (
         "bern_winui.cpp",
@@ -63,6 +68,22 @@ const RUNTIME: &[(&str, &str)] = &[
         include_str!("../templates/cpp/bern_ui_windows.inl"),
     ),
 ];
+
+/// What the precompiled header is made of that Bern knows, as a
+/// fingerprint: every runtime header it includes and the compiler options.
+/// The build script adds the compiler, the SDK and the paths.
+fn precompiled_identity(release: bool, frontends: glue::Frontends) -> String {
+    let mut bytes = Vec::new();
+    for (name, contents) in RUNTIME
+        .iter()
+        .filter(|(name, _)| name.ends_with(".h") || name.ends_with(".inl"))
+    {
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.extend_from_slice(contents.as_bytes());
+    }
+    bytes.extend_from_slice(glue::compile_options(release, frontends).as_bytes());
+    format!("{:016x}", bern_protocol::fingerprint_bytes(&bytes))
+}
 
 pub struct WinUi3Windows;
 
@@ -96,6 +117,10 @@ fn exe(name: &str) -> String {
 }
 
 impl Target for WinUi3Windows {
+    fn build_hosts(&self) -> &'static [&'static str] {
+        &["windows"]
+    }
+
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
             id: "winui3-windows",
@@ -182,6 +207,7 @@ impl Target for WinUi3Windows {
         let engine = target_dir.join(profile).join("bern_app.lib");
         let cache = context.workspace_dir.join("target/bern-winrt");
         let bundle = context.output_dir.join(&product);
+        let frontends = glue::Frontends::of(&context.target.frontends);
         let generator = Generator::new(app);
         let mut files = vec![
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
@@ -197,6 +223,8 @@ impl Target for WinUi3Windows {
                     engine: &engine,
                     cache: &cache,
                     release: context.release,
+                    precompiled: &precompiled_identity(context.release, frontends),
+                    frontends,
                 }),
             ),
             GeneratedFile::text("app/app.manifest", glue::manifest(app)),
@@ -261,7 +289,7 @@ impl Target for WinUi3Windows {
             "profile": profile,
             "engine_deployment": "in-process",
             "ui_bridge": "cpp",
-            "frontends": ["winui3", "xaml-islands"],
+            "frontends": frontends.names(),
             "channels": context.target.channels,
             "color_source": "native",
             "protocol": app.protocol.namespace,
@@ -349,11 +377,43 @@ impl Target for WinUi3Windows {
         ];
         Ok(BuildPlan {
             steps,
+            run: Some(Run::Program(bundle.join(exe(&executable)))),
             products: vec![
                 bundle.join(exe(&executable)),
                 output.join("bin").join(exe(&executable)),
                 output.join("bin").join(exe(&format!("{executable}-mcp"))),
             ],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_profile_has_its_own_precompiled_header() {
+        let both = glue::Frontends::of(&[]);
+        let debug = precompiled_identity(false, both);
+        assert_eq!(debug, precompiled_identity(false, both), "stable");
+        assert_ne!(debug, precompiled_identity(true, both));
+        // Each choice of front ends has its own.
+        let winui = glue::Frontends::of(&["winui3".to_string()]);
+        assert_eq!(
+            winui,
+            glue::Frontends {
+                winui: true,
+                islands: false
+            }
+        );
+        assert_ne!(debug, precompiled_identity(false, winui));
+        // Nothing generated per application goes into it, so it survives
+        // every change to the application.
+        let header = RUNTIME
+            .iter()
+            .find(|(name, _)| *name == "bern_pch.h")
+            .map(|(_, contents)| *contents)
+            .unwrap();
+        assert!(!header.contains("app_ui.inl") && !header.contains("app_id.h"));
     }
 }

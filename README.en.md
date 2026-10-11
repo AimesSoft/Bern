@@ -149,7 +149,7 @@ The same operations are MCP tools for agents (`ui_inspect`, `ui_activate`, `wind
 - macOS: Apple M4, 16 GB, macOS 27.0.1. Memory is the physical footprint from `footprint`, the measure of Activity Monitor's Memory column.
 - Windows: Intel Core i5-13490F, 32 GB, Windows 11 25H2. Memory is the private working set, the measure of Task Manager's Memory column.
 - Launch time: from starting the process until the command line sees a visible native window, including engine start and the local control channel.
-- The Windows numbers are the WinUI 3 front end (Windows App Runtime 1.8 present). Without the runtime, the same program falls back to the system XAML: 0.54 s, 19 MB. Neither needs .NET or the VC++ runtime; the app folder holds the executable and a 400 KB bootstrapper DLL.
+- The Windows numbers are the WinUI 3 front end (measured with Windows App Runtime 1.8; builds now use 2.x). Without the runtime, the same program falls back to the system XAML: 0.54 s, 19 MB. Neither needs .NET or the VC++ runtime; the app folder holds the executable and a 400 KB bootstrapper DLL.
 
 </details>
 
@@ -337,7 +337,7 @@ counter-mcp   # the same catalog for AI agents
 </tr>
 <tr>
 <td><b>Windows</b><br><code>winui3 + windows</code></td>
-<td>C++/WinRT: WinUI 3 when Windows App Runtime 1.8 is present, otherwise the system XAML · Windows 10 2004+</td>
+<td>C++/WinRT: WinUI 3 when a Windows App Runtime 2 is present (installed by another app or shipped with Windows 11), otherwise the system XAML; either can also be built alone · Windows 10 2004+</td>
 <td>In process (statically linked)</td>
 <td><img alt="available" src="https://img.shields.io/badge/-available-22C55E?style=flat-square"> <a href="Docs/Implementation/Windows-WinUI3.md">notes</a></td>
 </tr>
@@ -521,55 +521,58 @@ For the same window showing one line of text, package size, launch time and memo
 
 ## Quick start
 
-You need Rust 1.99 (pinned by `rust-toolchain.toml`) plus the toolchain of the target you build. Every build also produces the application CLI and MCP server in `target/bern/<target>/bin/`.
-
-<details open>
-<summary><b>macOS</b> · Xcode 26 or later</summary>
+You need Rust 1.99 (`rustup` installs it from `rust-toolchain.toml`) plus the toolchain of the target you build. First install the build tool `bern` from source:
 
 ```sh
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target macos
-open target/bern/macos/Showcase.app
+git clone https://github.com/AimesSoft/Bern
+cd Bern
+cargo install --path crates/bern-cli
 ```
 
-</details>
+### Create an app
 
-<details>
-<summary><b>Windows</b> · Visual Studio “Desktop development with C++”</summary>
-
-```powershell
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target windows
-target\bern\windows\Showcase\showcase.exe
-```
-
-The first build generates the C++/WinRT headers with the Windows SDK's `cppwinrt` and caches them. The app folder holds only the executable, a 400 KB bootstrapper DLL and the resources: no .NET, no bundled Windows App SDK.
-
-</details>
-
-<details>
-<summary><b>Linux</b> · GTK 4.14 and libadwaita 1.5 development packages</summary>
+In any directory:
 
 ```sh
-sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target linux
-target/bern/linux/Showcase/showcase
+bern new my_app
+cd my_app
+bern run
 ```
 
-</details>
+The new app is a window with a counter, with one crate each for the protocol, the engine and the interface, and all four targets declared in `Bern.toml`. `bern run` builds the target for this computer and starts it: SwiftUI on macOS, WinUI 3 on Windows, GTK on Linux; `bern run --target web_app` opens it in the browser. Every build also produces the application CLI and MCP server in `target/bern/<target>/bin/`.
+
+`bern doctor` lists what this computer still needs for each target, and how to install it:
+
+```text
+$ bern doctor
+bern 0.1.0 on macOS (aarch64)
+
+[✓] Rust: rustc 1.99.0, cargo 1.99.0
+[✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
+[-] Windows · WinUI 3: builds on Windows
+[-] Linux · GTK 4: builds on Linux
+[✓] Web · WebAssembly: the wasm32-unknown-unknown target
+```
 
 <details>
-<summary><b>Web</b> · <code>rustup target add wasm32-unknown-unknown</code></summary>
+<summary><b>What each platform needs</b></summary>
+<br>
 
-```sh
-# The engine compiled to WebAssembly, running in the page
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_app
-python3 -m http.server 8765 --bind 127.0.0.1 --directory target/bern/web_app
-
-# Or the page as a UI for a separate engine host
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_ui
-target/bern/web_ui/bin/showcase-host
-```
+- **macOS**: Xcode 26 or later. After installing it from the App Store, run `sudo xcode-select --switch /Applications/Xcode.app`.
+- **Windows**: Visual Studio 2022 or later with “Desktop development with C++” (the Build Tools are enough) and a Windows 11 SDK; Rust on the MSVC toolchain. The first build generates the C++/WinRT headers with the Windows SDK's `cppwinrt` and precompiles them with the runtime (about 2.4 GB per profile, under `target`); later builds compile only the app's own code, about 5 s for a new app and 9 s for the showcase. The app folder holds only the executable, a 400 KB bootstrapper DLL and the resources: no .NET, no bundled Windows App SDK.
+- **Linux**: GTK 4.14 and libadwaita 1.5 development packages, for example `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`.
+- **Web**: `rustup target add wasm32-unknown-unknown`. A `web_app` build compiles the engine to WebAssembly and runs it in the page; a `web_ui` build makes the page the UI of a separate engine host, which `bern run` starts before opening its address.
 
 </details>
+
+### Run the showcase
+
+The showcase in the Bern repository uses every component, two windows and a video player. From the repository directory:
+
+```sh
+cd examples/showcase
+bern run
+```
 
 ### Drive the running app
 
@@ -593,7 +596,7 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 | 3 | Web visual spec, theme kernel, WebAssembly app and WebUI builds | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 4 | Adaptive layouts, menus, feature contracts, runtime language switching | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 5 | Other native front ends: GTK 4 (done) · WinUI 3 (done) · `flutter + macos` (next) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
-| 6 | Component library, packaging, incremental builds, tooling, NipaPlay 3.0 | <img alt="planned" src="https://img.shields.io/badge/-planned-94A3B8?style=flat-square"> |
+| 6 | Component library, packaging, incremental builds, tooling (`bern new`, `run` and `doctor` done), NipaPlay 3.0 | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
 
 ## Repository
 
@@ -613,7 +616,9 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 | `crates/bern-adapter-cli` · `-mcp` · `-json` | Entries derived from the command catalog |
 | `crates/bern-transport-ipc` · `-ws` | Local control channel and WebSocket transport |
 | `crates/bern-theme` | Bern's color algorithm for targets without a native theme |
+| `crates/bern-cli` | The build tool `bern`: create, check, build, run and check the environment |
 | `examples/showcase` | The control showcase used on every platform |
+| `examples/hello` | The smallest app: one window, one line |
 | `Docs/` | Design document, platform adaptation specs and implementation notes |
 
 </details>

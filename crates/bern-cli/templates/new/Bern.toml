@@ -1,0 +1,51 @@
+# {{name}}, a Bern application. `bern run` builds it and starts it on this
+# computer; `bern build --target <name>` builds one of the targets below.
+
+[app]
+id = "{{id}}"
+# Change this to a reverse-DNS name you own before you ship.
+bundle_id = "{{bundle_id}}"
+version = "0.1.0"
+name = { {{app_names}} }
+# A square PNG of 1024 pixels; without it the app uses the Bern logo.
+# icon = "icon.png"
+
+[languages]
+supported = [{{languages}}]
+default = "{{default_language}}"
+
+[protocol]
+package = "{{package}}-protocol"
+source = "{{package}}-protocol/src/lib.rs"
+
+[engine]
+package = "{{package}}-core"
+type = "{{id}}_core::{{engine}}"
+
+[ui]
+package = "{{package}}-ui"
+sources = ["{{package}}-ui/src/lib.rs"]
+root = "app"
+
+# `channels = ["ipc"]` lets the generated command line and MCP server drive
+# the running app. Remove it to ship an app that listens to nothing.
+
+[targets.macos]
+platform = "macos"
+channels = ["ipc"]
+
+[targets.windows]
+platform = "windows"
+channels = ["ipc"]
+# WinUI 3 where Windows has a Windows App Runtime 2, the system XAML
+# elsewhere. Name one front end to build only that one.
+# frontends = ["winui3", "xaml-islands"]
+
+[targets.linux]
+platform = "linux"
+channels = ["ipc"]
+
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"

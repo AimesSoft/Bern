@@ -3,7 +3,7 @@
 
 use bern_backend_swiftui::{MINIMUM_MACOS, SwiftUiMacos};
 use bern_ir::{Application, ResourceDef, SourceLocation};
-use bern_target_api::{BuildContext, BuildPlan, BuildStep, Target, TargetConfig};
+use bern_target_api::{BuildContext, BuildPlan, BuildStep, Framework, Target, TargetConfig};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -93,6 +93,7 @@ fn showcase_generates_swift_that_type_checks() {
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        framework: Framework::Path(root.join("crates")),
         release: false,
     };
     let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();

@@ -1680,6 +1680,17 @@ impl<'a> Generator<'a> {
             sessions.join(", ")
         ));
         out.line("@Environment(BernEngine.self) private var bernEngine");
+        // Content written inline in the window sees the same names as a
+        // component body: the window and its sessions.
+        out.line("private var bernWindow: BernWindowContext { context }");
+        for session in &window.sessions {
+            out.line(format!(
+                "private var {}: {} {{ context.session({}.self) }}",
+                session_var(session),
+                session_class(session),
+                session_class(session)
+            ));
+        }
         out.line("");
         out.open("var body: some View {");
         out.open("BernWindowRoot(context: context) {");

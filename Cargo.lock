@@ -109,7 +109,9 @@ dependencies = [
  "bern-backend-web",
  "bern-backend-winui3",
  "bern-compiler",
+ "bern-protocol",
  "bern-target-api",
+ "bern-transport-ws",
  "serde_json",
 ]
 

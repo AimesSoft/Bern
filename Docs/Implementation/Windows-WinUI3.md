@@ -1,8 +1,8 @@
 # Windows WinUI 3 实现记录
 
 - 日期：2026-10-11
-- 依据：[Bern 架构设计 v0.17](../Design.md)、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
-- 工具链：Rust 1.99.0；Visual Studio 2022 生成工具 17.14（MSVC 14.44，C++20）；Windows SDK 10.0.26100（含 `cppwinrt.exe`）；Windows App SDK 1.8 的组件包（只取头文件与元数据：Foundation 1.8.260803002、WinUI 1.8.260803003、InteractiveExperiences 1.8.260708001，以及 WebView2 1.0.3179.45 的元数据）
+- 依据：[Bern 架构设计 v0.19](../Design.md)、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
+- 工具链：Rust 1.99.0；Visual Studio 2022 生成工具 17.14（MSVC 14.44，C++20）；Windows SDK 10.0.26100（含 `cppwinrt.exe`）；Windows App SDK 2.5.1 的组件包（只取头文件与元数据：Foundation 2.3.12、WinUI 2.3.9、InteractiveExperiences 2.1.9，以及 WebView2 1.0.3719.77 的元数据）
 - 验证环境：Windows 11 专业版 25H2（版本 26200，x64 实体机），显示缩放 150%
 
 本文记录阶段五第二批 `winui3 + windows` 目标的完成情况。第一版宿主是 C#/.NET，应用需要目标机器装有 .NET 10，并随附约 141 MB 的 Windows App SDK。现已改为 C++/WinRT：同一个可执行文件里有两套前端，启动时自动选择，只使用系统已有的组件。展示应用（`examples/showcase`）的声明、协议、业务核心与 IR 都没有改动；解析器、公共 IR 与核心检查规则也没有为此修改。
@@ -14,15 +14,27 @@
 - 生成的胶水 crate 把引擎、会话运行时与 `bern-ffi` 的 C 接口编译为 `bern_app.lib`（`staticlib`，并以 `+crt-static` 静态链接 C 运行库）。C++ 运行时直接调用与 SwiftUI 目标相同的进程内接口；回调复制字节后经消息窗口转到 UI 线程，按到达顺序处理。
 - 界面全部用代码构建，不生成 XAML 页面，也不经过 XAML 编译器。
 
-**一个程序，两套前端，启动时自动选择：**
+**两套前端，默认都编译，启动时自动选择：**
 
-| 条件 | 前端 | 外观 |
-| --- | --- | --- |
-| 引导程序在系统中找到 Windows App Runtime 1.8 | WinUI 3（`Microsoft.UI.Xaml`），Mica 背景与 `TitleBar` | Windows 11 |
-| 找不到运行时（Windows 10，或没有装 1.8 的 Windows 11） | 系统自带的 XAML（`Windows.UI.Xaml`），经 XAML Islands 承载在 Win32 窗口中 | Windows 10 |
+`[targets.windows]` 的 `frontends` 默认是 `["winui3", "xaml-islands"]`，也可以只写其中一个：
 
-- 选择由入口的 `MddBootstrapInitialize2(0x00010008, …, MddBootstrapInitializeOptions_None)` 决定：找到运行时就用 WinUI 3，找不到时不弹窗、不引导安装，直接回退。随程序只附带 400 KB 的 `Microsoft.WindowsAppRuntime.Bootstrap.dll`。
-- 两套前端共用一份源码。XAML 部分写成 `.inl`，分别在 `bern::winui`（`xaml` 为 `Microsoft::UI::Xaml`）与 `bern::islands`（`xaml` 为 `Windows::UI::Xaml`）两个命名空间里各包含一次。类型差异用 `#if BERN_WINUI` 处理，资源键等取值差异用 `kWinUI ? … : …`。生成的界面代码 `app_ui.inl` 也同样包含两次。
+```toml
+[targets.windows]
+platform = "windows"
+frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
+```
+
+| 条件 | 两个都编译 | 只有 WinUI 3 | 只有系统 XAML |
+| --- | --- | --- | --- |
+| 系统有 Windows App Runtime 2（任何 2.x：其他程序装的，或 Windows 11 自带的） | WinUI 3（`Microsoft.UI.Xaml`），Mica 背景与 `TitleBar`，Windows 11 外观 | 同左 | 系统 XAML |
+| 没有（Windows 10，或没有 2.x 的 Windows 11） | 系统自带的 XAML（`Windows.UI.Xaml`），经 XAML Islands 承载在 Win32 窗口中，Windows 10 外观 | 提示框，可在浏览器中打开安装程序 | 同左 |
+
+- **运行时按顺序找。** 先用引导程序 `MddBootstrapInitialize2(0x00020000, L"", 2.0.0.0, None)` 找其他程序装的任何 2.x：2.0 起框架包只按主版本区分（`Microsoft.WindowsAppRuntime.2`），2.x 之间兼容。应用按最新的 2.5.1 编译，只用每个 2.x 都有的接口；展示应用在 2.2 上逐页实测通过。找不到时，再经系统的动态依赖接口（`TryCreatePackageDependency`、`AddPackageDependency`，Windows 11 才有）加载 Windows 自带的 `Microsoft.WindowsAppRuntime.CBS.2`。两者都不弹窗，也不引导安装。
+- **Windows 自带的运行时。** Windows 11 25H2 带有 `CBS.2`（2.2）、`CBS.1.8`、`CBS.1.6` 与 `CBS`（1.5），都在 `C:\Windows\SystemApps`，给系统自己的组件用。实测普通程序能挂上 `CBS.2` 与 `CBS.1.6`，挂不上 `CBS.1.8` 与 `CBS`。`CBS.2` 比商店版少了各语言的 `.mui`，而且 WinUI 不会自己找到它的 `resources.pri`：直接使用时报 `Cannot locate resource from 'ms-appx:///Microsoft.UI.Xaml/Themes/themeresources.xaml'` 并退出。所以用它时，应用在 `Application.ResourceManagerRequested` 中用这份运行时自己的 `resources.pri` 创建资源管理器交给 WinUI。
+- **只编译 WinUI 3。** 找不到运行时时，按界面语言弹出提示（标题为应用名），选“是”用默认浏览器打开最新运行时的安装程序 `https://aka.ms/windowsappsdk/2.5/latest/windowsappruntimeinstall-<架构>.exe`（微软的固定地址，跳转到下载服务器），然后退出；装好后再次打开即可。
+- **只编译系统 XAML。** 不找运行时，不链接也不随附引导程序；预编译头只含一个前端，首次构建约 39 秒。
+- 编译了 WinUI 3 时，随程序附带 400 KB 的 `Microsoft.WindowsAppRuntime.Bootstrap.dll`。
+- 两套前端共用一份源码。XAML 部分写成 `.inl`，分别在 `bern::winui`（`xaml` 为 `Microsoft::UI::Xaml`）与 `bern::islands`（`xaml` 为 `Windows::UI::Xaml`）两个命名空间里各包含一次。类型差异用 `#if BERN_WINUI` 处理，资源键等取值差异用 `kWinUI ? … : …`。生成的界面代码 `app_ui.inl` 也同样在 `bern_winui.cpp` 与 `bern_islands.cpp` 中各包含一次。编译哪套前端由 `BERN_WITH_WINUI` 与 `BERN_WITH_ISLANDS` 两个宏决定。
 - 窗口的事实、命令和关闭拦截在两种模式下都走 Win32：`GetWindowRect`、`IsIconic`、`IsZoomed`、`ShowWindow`、`WM_CLOSE`、`WM_GETMINMAXINFO`。WinUI 窗口用子类化的窗口过程接管；Islands 窗口本来就是 Bern 自己的 Win32 窗口。只有在 WinUI 下设置尺寸与位置时使用 `AppWindow`，它了解延伸到标题栏的外框。
 
 ## 完成情况
@@ -32,7 +44,7 @@
 | 生成代码可构建 | 完成 | `bern build --target windows` 先构建 `bern_app.lib`、CLI 与 MCP 服务器，再运行生成的 `build.bat`：生成 C++/WinRT 头文件（按版本缓存），用 MSVC 编译运行时与生成代码，链接为一个可执行文件。生成测试在装有 VS C++ 工具的 Windows 上编译两套前端 |
 | 新目标不改解析器、公共 IR 与业务核心 | 完成 | `bern-backend-winui3`：C++ 生成器（`cpp.rs`）、构建胶水（`glue.rs`）与 `templates/cpp/` 下的运行时 |
 | 具体框架 SDK 不是全局前置条件 | 完成 | C++ 运行时以模板随目标模块分发，只在生成的应用中编译；macOS 上 `cargo test --workspace` 与 clippy 不需要 Windows 工具链 |
-| 运行时只使用系统依赖 | 完成 | 不需要 .NET；不随附 Windows App SDK；C 运行库静态链接，不需要 VC++ 运行库。有系统的 Windows App Runtime 1.8 时用它，没有时用系统 XAML |
+| 运行时只使用系统依赖 | 完成 | 不需要 .NET；不随附 Windows App SDK；C 运行库静态链接，不需要 VC++ 运行库。有任何 Windows App Runtime 2（其他程序装的，或 Windows 11 自带的）时用它，没有时用系统 XAML |
 | 省略 UI 技术时的默认解析 | 完成 | `platform = "windows"` 解析为 `winui3-windows`（测试） |
 | 状态订阅、命令与错误返回 | 完成 | 引擎状态按字段镜像为响应式单元；失败显示在窗口底部，WinUI 下是 `InfoBar`，Islands 下是同样位置的错误条 |
 | 列表身份、订阅释放 | 完成 | `ForEach` 按键保留行；查询订阅随视图与窗口结束 |
@@ -48,7 +60,8 @@
 | `bern-backend-winui3` | 目标描述、检查，从 IR 生成 C++，生成胶水 crate、构建脚本与构建计划 |
 | `templates/cpp/bern_base.h/.cpp` | 与 XAML 无关的部分：值与编解码、响应式单元与作用域、文案与语言、引擎宿主（消息窗口、定时器、单实例）、媒体执行端、开发快照的 PNG 编码 |
 | `templates/cpp/bern_ui_*.inl` | XAML 部分，每种前端各包含一次：上下文、父容器与区域、控件登记、`FlexPanel`、样式与图标（`core`）；标准控件（`widgets`）；条件、列表、导航、页签、自适应、查询与视频（`structure`）；窗口、关闭协议、会话命令、快照与应用生命周期（`windows`） |
-| `bern_winui.cpp`、`bern_islands.cpp`、`bern_main.cpp` | 两个前端的编译单元与入口（引导、选择前端、单实例） |
+| `templates/cpp/bern_pch.h/.cpp` | 预编译头：两个前端的 C++/WinRT 头文件，以及运行时在 `bern::winui` 与 `bern::islands` 两个命名空间中各一份 |
+| `bern_winui.cpp`、`bern_islands.cpp`、`bern_main.cpp` | 两个前端的编译单元，各自只把生成的 `app_ui.inl` 放进自己的命名空间；入口（引导、选择前端、单实例） |
 | 生成的胶水 crate | `target/bern/windows/glue/`：`bern_app.lib`、`cli.rs`、`mcp.rs`，以及静态链接 C 运行库的 `.cargo/config.toml` |
 | 生成的应用源码 | `target/bern/windows/app/`：`app_ui.inl`（组件与窗口，两套前端共用）、`app_catalog.cpp`（文案表、类型表、命令与会话，只编译一次）、`app_id.h`、`app.manifest`（每显示器 DPI 感知 v2，声明测试过的 Windows 版本，Islands 需要）、`app.rc`（版本信息）、`build.bat`、`runtime/` |
 
@@ -101,7 +114,15 @@ target\bern\windows\Showcase\showcase.exe
 - **构建脚本**：用 `vswhere` 找到 Visual Studio，加载 `vcvarsall`。
 - **Windows App SDK 组件包**：先在 NuGet 缓存中找，找不到时用 Windows 自带的 `curl` 与 `tar` 从 nuget.org 取到 `target/bern-winrt/packages/`。
 - **C++/WinRT 头文件**：用 Windows SDK 的 `cppwinrt.exe` 生成，按 SDK 与 WinUI 版本缓存在 `target/bern-winrt/`（约 110 MB，只生成一次）。
-- **增量构建**：头文件缓存好以后，一次调试构建约 55 秒，release 约 90 秒（含 Rust 部分）。
+- **预编译头**：C++/WinRT 头文件与运行时占了编译的绝大部分（WinUI 3 前端单独编译约 46 秒，其中解析头文件约 23 秒），而它们与应用无关。`bern_pch.h` 把两者都放进一个预编译头，每个配置一份，放在 `app/obj/debug/` 或 `app/obj/release/`（约 2.4 GB）。它只在运行时模板、编译选项、MSVC 版本、SDK 或路径变化时重新生成：脚本把 Bern 算出的运行时与选项指纹、`VCToolsVersion`、SDK 版本和各路径写进 `pch.key`，下次构建对比一致就直接复用。其余五个编译单元每次都用 `/MP` 并行编译，引擎库由 cargo 增量构建。
+- **构建时间**（i5-13490F，16 线程）：
+
+  | 情形 | 之前 | 现在 |
+  | --- | --- | --- |
+  | 首次调试构建（生成预编译头） | 约 60 秒 | 约 82 秒 |
+  | 新项目：未改动、改界面、改引擎 | 约 60 秒 | 5–6 秒 |
+  | 展示应用：再次构建 | 约 60 秒 | 约 9 秒 |
+  | 首次 release 构建 / 再次 | 约 90 秒 | 约 95 秒 / 5 秒 |
 
 产物位于 `target/bern/windows/`：`Showcase/`（`showcase.exe`、`Microsoft.WindowsAppRuntime.Bootstrap.dll` 与 `resources/`）、`bin/showcase.exe` 与 `bin/showcase-mcp.exe`，以及构建清单 `build.json`（记录前端、组件包版本与最低 Windows 版本）。
 
@@ -112,14 +133,16 @@ target\bern\windows\Showcase\showcase.exe
 - `BERN_SNAPSHOT_DIR`：每次变化后输出两种快照。`<窗口>.png` 是 XAML 内容的渲染，打开的对话框和菜单另存为 `-popup<n>.png`；`<窗口>-window.png` 用 `PrintWindow` 截取应用自己的窗口，含标题栏、Mica 与视频画面。
 - `BERN_APPEARANCE=light|dark`：覆盖系统外观。
 - `BERN_FORCE_ISLANDS`：在装有运行时的机器上试用回退前端。
+- `BERN_APP_RUNTIME=installed|inbox|none`：只用其他程序装的运行时、只用 Windows 自带的，或当作都没有（只编译 WinUI 3 时会出现提示框）。
+- WinUI 的未处理错误与控件样式加载失败写到标准错误，然后照常结束进程。
 - `BERN_DUMP_TREE`：把元素树和尺寸写到标准错误。
-- 调试构建在未处理的异常时，按 PDB 把调用栈（函数与行号）写到标准错误。PDB 留在 `app/obj/`，不进入应用目录。
+- 调试构建在未处理的异常时，按 PDB 把调用栈（函数与行号）写到标准错误。PDB 留在 `app/obj/<配置>/`，不进入应用目录。
 
 ## 实测数据
 
 2026-10-11，同一台机器，release 构建。启动时间为从启动到窗口可见，首次启动另计；内存为窗口显示 5 秒后的私有工作集。
 
-| | WinUI 3（系统 Runtime 1.8） | 系统 XAML（Islands） | 第一版 C#/.NET |
+| | WinUI 3（测量时为 Runtime 1.8） | 系统 XAML（Islands） | 第一版 C#/.NET |
 | --- | --- | --- | --- |
 | 启动 | 0.32 秒（首次 0.51 秒） | 0.54 秒 | 0.62 秒 |
 | 内存 | 35 MB | 19 MB | 42 MB |
@@ -131,8 +154,9 @@ target\bern\windows\Showcase\showcase.exe
 
 2026-10-11，Windows 11 25H2 实体机，经 SSH 构建，以计划任务把应用启动到用户的桌面会话，由生成的 CLI 驱动；截图来自开发快照中的窗口截取。两种前端分别执行：
 
-- **构建与测试**：`cargo test --workspace` 在 macOS 与 Windows 上各 172 项通过；Windows 上包含用 MSVC 编译生成的两套前端。`cargo clippy` 与 `cargo fmt --check` 通过。
-- **前端选择**：默认启动加载 `C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.1.8_…\Microsoft.UI.Xaml.dll`；设置 `BERN_FORCE_ISLANDS` 后加载 `C:\Windows\System32\Windows.UI.Xaml.dll`，进程中没有 Windows App Runtime。
+- **构建与测试**：`cargo test --workspace` 在 macOS 与 Windows 上各 191 项通过；Windows 上包含经预编译头用 MSVC 编译生成的两套前端。`cargo clippy` 与 `cargo fmt --check` 通过。
+- **前端选择**（按 Windows App SDK 2.5.1 编译）：默认启动加载 `C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.2_2.5.1.0_x64__8wekyb3d8bbwe\Microsoft.ui.xaml.dll`；`BERN_APP_RUNTIME=inbox` 时加载 `C:\Windows\SystemApps\Microsoft.WindowsAppRuntime.CBS.2_8wekyb3d8bbwe` 中的 2.2，新项目与展示应用都正常（展示应用逐页切换并打开设置窗口，样式完整）；`BERN_APP_RUNTIME=none` 或设置 `BERN_FORCE_ISLANDS` 后用 `C:\Windows\System32\Windows.UI.Xaml.dll`，进程中没有 Windows App Runtime。
+- **只编译一套前端**：`frontends = ["xaml-islands"]` 时应用目录只有可执行文件，进程不加载引导程序；`frontends = ["winui3"]` 在两种运行时上都正常，`BERN_APP_RUNTIME=none` 时弹出中文提示框（标题为应用名，正文与“是/否”），选“否”后以退出码 1 结束。
 - **控件与引擎**：`ui select` 在各页之间切换，按钮页、开关页、输入页、列表页、视频页的控件全部登记。
 - **控件操作**：`ui activate` 后引擎计数增加，禁用按钮报告 `disabled`；`ui set-bool`、`ui set-number`、`ui select` 生效，工具栏中绑定同一字段的选择器同步变化；`ui edit` 中英文混合文字与 `ui submit` 生效。
 - **查询与导航**：查询从 `loading v1` 变为 `ready v1 (5)`，每行生成一个链接；`ui activate --target "library_page.item_link[2]"` 推入详情页，页头出现返回按钮，`ui back` 返回列表。
@@ -158,7 +182,9 @@ target\bern\windows\Showcase\showcase.exe
 
 ## 未完成与已知限制
 
-- **WinUI 3 只认 Windows App Runtime 1.8。** 引导程序按主次版本查找：只装有 2.x（例如系统应用依赖的 2.5）或其他 1.x 的机器会回退到系统 XAML。是否接受 2.x，要等确认 2.x 与按 1.8 元数据编译的代码二进制兼容之后再定。
+- **使用 Windows 自带的运行时不是微软公开说明的用法。** 微软的部署指南只说明非打包应用要自己部署运行时；`CBS.2` 是 Windows 给自己组件用的副本，第三方程序能用是实测结果，以后的 Windows 更新可能改变它的名称、内容或可用性。所以其他程序装的 2.x 总是优先。哪些 Windows 11 版本自带 `CBS.2` 也只在 25H2（26200.9457）上确认过。
+- 只编译 WinUI 3 时，提示框的“是”只验证到会打开安装程序的地址，测试中没有实际下载安装。
+- 应用按 2.5.1 编译、接受 2.0 起的运行时：只在 2.2 与 2.5.1 上实测过，没有 2.0、2.1 的机器。
 - 未提供 MSIX 打包、安装程序、应用图标与代码签名。未签名的新程序可能被安全软件的启发式规则误判，正式分发需要签名。
 - 回退前端没有 `SelectorBar`、`InfoBar` 与 `TitleBar`，分别以按钮组、自绘错误条与系统标题栏代替。
 - 页面工具放在页头，没有使用 `CommandBar`；`Menu` 的菜单项不呈现 `destructive` 角色。

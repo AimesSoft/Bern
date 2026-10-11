@@ -149,7 +149,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - macOS：Apple M4、16 GB 記憶體、macOS 27.0.1。記憶體為 `footprint` 的實體占用，即活動監視器「記憶體」欄位的口徑。
 - Windows：Intel Core i5-13490F、32 GB 記憶體、Windows 11 25H2。記憶體為私人工作集，即工作管理員「記憶體」欄位的口徑。
 - 啟動時間：從啟動行程到命令列讀到可見的原生視窗為止，包含引擎啟動與本機控制通道就緒。
-- Windows 表中為 WinUI 3 前端（系統中有 Windows App Runtime 1.8）。沒有執行環境的系統上，同一個程式退回系統 XAML：啟動 0.54 秒，記憶體 19 MB。兩種情況都不需要 .NET 與 VC++ 執行環境，應用程式目錄只有執行檔與 400 KB 的啟動程式 DLL。
+- Windows 表中為 WinUI 3 前端（測量時系統中有 Windows App Runtime 1.8，現在按 2.x 建置）。沒有執行環境的系統上，同一個程式退回系統 XAML：啟動 0.54 秒，記憶體 19 MB。兩種情況都不需要 .NET 與 VC++ 執行環境，應用程式目錄只有執行檔與 400 KB 的啟動程式 DLL。
 
 </details>
 
@@ -337,7 +337,7 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 </tr>
 <tr>
 <td><b>Windows</b><br><code>winui3 + windows</code></td>
-<td>C++/WinRT：有 Windows App Runtime 1.8 時用 WinUI 3，沒有時退回系統 XAML · Windows 10 2004 以上</td>
+<td>C++/WinRT：有 Windows App Runtime 2（其他程式安裝的或 Windows 11 內建的）時用 WinUI 3，沒有時退回系統 XAML，也可以只編譯其中之一 · Windows 10 2004 以上</td>
 <td>應用程式行程內（靜態連結）</td>
 <td><img alt="可用" src="https://img.shields.io/badge/-%E5%8F%AF%E7%94%A8-22C55E?style=flat-square"> <a href="Docs/Implementation/Windows-WinUI3.md">實作紀錄</a></td>
 </tr>
@@ -521,55 +521,58 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 
 ## 快速開始
 
-需要 Rust 1.99（由 `rust-toolchain.toml` 固定），以及所建置目標的工具鏈。每次建置也會在 `target/bern/<目標>/bin/` 中產生應用程式 CLI 與 MCP 伺服器。
-
-<details open>
-<summary><b>macOS</b> · Xcode 26 或更新版本</summary>
+需要 Rust 1.99（`rustup` 依 `rust-toolchain.toml` 自動安裝），以及所建置目標的工具鏈。先從原始碼安裝建置工具 `bern`：
 
 ```sh
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target macos
-open target/bern/macos/Showcase.app
+git clone https://github.com/AimesSoft/Bern
+cd Bern
+cargo install --path crates/bern-cli
 ```
 
-</details>
+### 建立應用程式
 
-<details>
-<summary><b>Windows</b> · Visual Studio 的「使用 C++ 的桌面開發」</summary>
-
-```powershell
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target windows
-target\bern\windows\Showcase\showcase.exe
-```
-
-首次建置時以 Windows SDK 的 `cppwinrt` 產生 C++/WinRT 標頭檔並快取。應用程式目錄只有執行檔、400 KB 的啟動程式 DLL 與資源，不需要 .NET，也不隨附 Windows App SDK。
-
-</details>
-
-<details>
-<summary><b>Linux</b> · GTK 4.14 與 libadwaita 1.5 的開發套件</summary>
+在任意目錄中：
 
 ```sh
-sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target linux
-target/bern/linux/Showcase/showcase
+bern new my_app
+cd my_app
+bern run
 ```
 
-</details>
+新的應用程式是一個帶計數的視窗，協定、引擎與介面各一個 crate，四個目標都已在 `Bern.toml` 中宣告。`bern run` 建置本機的目標並啟動它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在瀏覽器中開啟。每次建置也會在 `target/bern/<目標>/bin/` 中產生應用程式 CLI 與 MCP 伺服器。
+
+`bern doctor` 列出本機建置每個目標還缺什麼、怎麼安裝：
+
+```text
+$ bern doctor
+bern 0.1.0 on macOS (aarch64)
+
+[✓] Rust: rustc 1.99.0, cargo 1.99.0
+[✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
+[-] Windows · WinUI 3: builds on Windows
+[-] Linux · GTK 4: builds on Linux
+[✓] Web · WebAssembly: the wasm32-unknown-unknown target
+```
 
 <details>
-<summary><b>Web</b> · <code>rustup target add wasm32-unknown-unknown</code></summary>
+<summary><b>各平台需要的工具</b></summary>
+<br>
 
-```sh
-# 引擎編譯為 WebAssembly，在頁面內執行
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_app
-python3 -m http.server 8765 --bind 127.0.0.1 --directory target/bern/web_app
-
-# 或者頁面作為獨立引擎宿主的介面
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_ui
-target/bern/web_ui/bin/showcase-host
-```
+- **macOS**：Xcode 26 或更新版本。從 App Store 安裝後執行 `sudo xcode-select --switch /Applications/Xcode.app`。
+- **Windows**：Visual Studio 2022 或更新版本的「使用 C++ 的桌面開發」（只裝建置工具也可以），含 Windows 11 SDK；Rust 使用 MSVC 工具鏈。首次建置時以 Windows SDK 的 `cppwinrt` 產生 C++/WinRT 標頭檔，並把它們與執行階段預先編譯（每個設定約 2.4 GB，放在 `target` 中）；之後的建置只編譯應用程式自己的程式碼，新專案約 5 秒，展示應用程式約 9 秒。應用程式目錄只有執行檔、400 KB 的啟動程式 DLL 與資源，不需要 .NET，也不隨附 Windows App SDK。
+- **Linux**：GTK 4.14 與 libadwaita 1.5 的開發套件，例如 `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`。
+- **Web**：`rustup target add wasm32-unknown-unknown`。`web_app` 建置把引擎編譯為 WebAssembly 在頁面內執行；`web_ui` 建置讓頁面作為獨立引擎宿主的介面，`bern run` 啟動宿主並開啟它的位址。
 
 </details>
+
+### 執行展示應用程式
+
+Bern 儲存庫中的展示應用程式用到全部元件、兩個視窗與影片播放器。在儲存庫目錄中：
+
+```sh
+cd examples/showcase
+bern run
+```
 
 ### 從外部驅動執行中的應用程式
 
@@ -593,7 +596,7 @@ showcase-mcp                                                 # 經 stdio 的 MCP
 | 3 | Web 視覺規範、主題核心、WebAssembly 應用程式與 WebUI 兩種建置 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 4 | 自適應版面、選單、功能契約、執行時切換語言 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 5 | 其他原生前端：GTK 4（已完成）· WinUI 3（已完成）· `flutter + macos`（下一步） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | 元件庫、打包、增量建置、開發工具，接入 NipaPlay 3.0 | <img alt="規劃中" src="https://img.shields.io/badge/-%E8%A6%8F%E5%8A%83%E4%B8%AD-94A3B8?style=flat-square"> |
+| 6 | 元件庫、打包、增量建置、開發工具（`bern new`、`run`、`doctor` 已完成），接入 NipaPlay 3.0 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## 儲存庫結構
 
@@ -613,7 +616,9 @@ showcase-mcp                                                 # 經 stdio 的 MCP
 | `crates/bern-adapter-cli` · `-mcp` · `-json` | 從命令目錄衍生的入口 |
 | `crates/bern-transport-ipc` · `-ws` | 本機控制通道與 WebSocket 傳輸 |
 | `crates/bern-theme` | 為沒有原生主題的目標提供的 Bern 色彩演算法 |
+| `crates/bern-cli` | 建置工具 `bern`：建立、檢查、建置、執行與環境檢查 |
 | `examples/showcase` | 在各平台上使用的控制項展示應用程式 |
+| `examples/hello` | 最小的應用程式：一個視窗、一行字 |
 | `Docs/` | 設計文件、平台適配規範與實作紀錄 |
 
 </details>

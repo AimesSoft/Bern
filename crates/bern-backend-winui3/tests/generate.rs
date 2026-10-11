@@ -4,7 +4,7 @@
 
 use bern_backend_winui3::{WinUi3Windows, product_name};
 use bern_ir::Application;
-use bern_target_api::{BuildContext, BuildStep, Registry, Target, TargetConfig};
+use bern_target_api::{BuildContext, BuildStep, Framework, Registry, Target, TargetConfig};
 use std::path::{Path, PathBuf};
 
 fn workspace() -> PathBuf {
@@ -94,6 +94,7 @@ fn showcase_generates_a_winui3_application() {
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        framework: Framework::Path(root.join("crates")),
         release: false,
     };
     let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
@@ -140,10 +141,15 @@ fn showcase_generates_a_winui3_application() {
     for expected in [
         "vcvarsall.bat",
         "cppwinrt.exe",
-        "microsoft.windowsappsdk.winui 1.8.260803003",
+        "microsoft.windowsappsdk.winui 2.3.9",
         "Microsoft.WindowsAppRuntime.Bootstrap.dll",
         "set \"EXE=showcase\"",
         "bern_app.lib",
+        // The precompiled header is made once per profile and reused.
+        "set \"OBJ=%APP%\\obj\\debug\"",
+        "/Yc\"bern_pch.h\"",
+        "/Yu\"bern_pch.h\"",
+        "pch.key",
     ] {
         assert!(script.contains(expected), "missing `{expected}`");
     }
@@ -170,6 +176,7 @@ fn showcase_generates_a_winui3_application() {
     for runtime in [
         "runtime/bern_base.h",
         "runtime/bern_main.cpp",
+        "runtime/bern_pch.h",
         "runtime/bern_winui.cpp",
         "runtime/bern_islands.cpp",
         "runtime/bern_ui_windows.inl",
@@ -245,6 +252,82 @@ fn showcase_generates_a_winui3_application() {
     );
 
     compile(&output);
+}
+
+/// A target may build one front end alone: the system XAML without the
+/// bootstrapper, or WinUI 3 that offers the runtime's installer.
+#[test]
+fn a_target_can_build_one_front_end() {
+    let root = workspace();
+    let (config, compiled) = showcase();
+    let generate = |frontends: &[&str]| {
+        let target = TargetConfig {
+            frontends: frontends.iter().map(|name| name.to_string()).collect(),
+            ..windows_target(&config)
+        };
+        let context = BuildContext {
+            project_dir: config.dir.clone(),
+            workspace_dir: root.clone(),
+            output_dir: root.join("target/bern-test/winui3-frontends"),
+            target,
+            protocol_package: config.protocol_package.name.clone(),
+            protocol_path: config.protocol_package.dir.clone(),
+            protocol_module: compiled.protocol_module.clone(),
+            engine_package: config.engine_package.name.clone(),
+            engine_path: config.engine_package.dir.clone(),
+            engine_type: config.engine_type.clone(),
+            framework: Framework::Path(root.join("crates")),
+            release: false,
+        };
+        let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+        let text = |name: &str| {
+            files
+                .iter()
+                .find(|file| file.path == Path::new(name))
+                .map(|file| String::from_utf8(file.contents.clone()).unwrap())
+                .unwrap()
+        };
+        (
+            text("app/build.bat"),
+            text("build.json"),
+            text("app/app_id.h"),
+        )
+    };
+
+    let (script, manifest, _) = generate(&["xaml-islands"]);
+    assert!(script.contains("/DBERN_WITH_WINUI=0 /DBERN_WITH_ISLANDS=1"));
+    assert!(!script.contains("bern_winui.cpp") && script.contains("bern_islands.cpp"));
+    assert!(!script.contains("Bootstrap.lib"), "no bootstrapper to link");
+    assert!(script.contains(r#"del /q "%OUT%\Microsoft.WindowsAppRuntime.Bootstrap.dll""#));
+    assert!(
+        manifest.contains(
+            r#""frontends": [
+    "xaml-islands"
+  ]"#
+        ),
+        "{manifest}"
+    );
+
+    let (script, manifest, identity) = generate(&["winui3"]);
+    assert!(script.contains("/DBERN_WITH_WINUI=1 /DBERN_WITH_ISLANDS=0"));
+    assert!(script.contains("bern_winui.cpp") && !script.contains("bern_islands.cpp"));
+    assert!(script.contains("Microsoft.WindowsAppRuntime.Bootstrap.lib"));
+    assert!(manifest.contains(r#""winui3""#) && !manifest.contains(r#""xaml-islands""#));
+    assert!(
+        identity.contains(r#"#define BERN_RUNTIME_INSTALLER L"https://aka.ms/windowsappsdk/2.5/latest/windowsappruntimeinstall-"#),
+        "{identity}"
+    );
+
+    // Each choice has its own precompiled header.
+    let (both, _, _) = generate(&[]);
+    let key = |script: &str| {
+        script
+            .lines()
+            .find(|line| line.starts_with("set \"KEY="))
+            .unwrap()
+            .to_string()
+    };
+    assert_ne!(key(&both), key(&script));
 }
 
 /// Compile the generated sources on Windows where the Visual Studio C++

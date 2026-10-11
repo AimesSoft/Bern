@@ -230,6 +230,27 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
             ("ja", "ウインドウを閉じると、これらの変更は破棄されます。"),
         ],
     ),
+    (
+        "bern.runtime.missing",
+        &[
+            (
+                "zh-Hans",
+                "此应用需要 Windows App Runtime 2，这台电脑上还没有。\n\n要现在用浏览器下载微软的安装程序吗？安装完成后请重新打开此应用。",
+            ),
+            (
+                "zh-Hant",
+                "此 App 需要 Windows App Runtime 2，這台電腦上還沒有。\n\n要現在以瀏覽器下載 Microsoft 的安裝程式嗎？安裝完成後請重新開啟此 App。",
+            ),
+            (
+                "en",
+                "This app needs the Windows App Runtime 2, which this computer doesn’t have yet.\n\nDownload Microsoft’s installer in your browser now? Open the app again once it’s installed.",
+            ),
+            (
+                "ja",
+                "このアプリには Windows App Runtime 2 が必要ですが、このコンピューターにはまだありません。\n\nMicrosoft のインストーラーを今すぐブラウザーでダウンロードしますか？インストール後にアプリをもう一度開いてください。",
+            ),
+        ],
+    ),
 ];
 
 pub fn framework_languages() -> Vec<&'static str> {

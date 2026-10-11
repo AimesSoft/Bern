@@ -2,7 +2,7 @@
 //! configuration.
 
 use bern_ir::{LayoutConfig, ResourceDef, SourceLocation, Srgb, ThemeMode};
-use bern_target_api::{Diagnostic, TargetConfig};
+use bern_target_api::{Diagnostic, TargetConfig, WINDOWS_FRONTENDS};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -138,6 +138,7 @@ struct RawTarget {
     application_codec: Option<String>,
     #[serde(default)]
     channels: Vec<String>,
+    frontends: Option<Vec<String>>,
 }
 
 /// A Rust source file listed in the configuration.
@@ -723,6 +724,36 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
                 "target `{name}`: `web_mode` applies to browser targets only"
             )));
         }
+        // Windows builds both front ends unless the target names fewer.
+        let frontends = match (target.platform.as_str(), target.frontends) {
+            ("windows", None) => WINDOWS_FRONTENDS.map(str::to_string).to_vec(),
+            ("windows", Some(frontends)) => {
+                if frontends.is_empty() {
+                    errors.push(Diagnostic::error(format!(
+                        "target `{name}`: `frontends` lists none; name \"winui3\", \"xaml-islands\" or both"
+                    )));
+                }
+                for (index, frontend) in frontends.iter().enumerate() {
+                    if !WINDOWS_FRONTENDS.contains(&frontend.as_str()) {
+                        errors.push(Diagnostic::error(format!(
+                            "target `{name}`: unknown front end `{frontend}`; use \"winui3\" or \"xaml-islands\""
+                        )));
+                    } else if frontends[..index].contains(frontend) {
+                        errors.push(Diagnostic::error(format!(
+                            "target `{name}`: `frontends` lists `{frontend}` twice"
+                        )));
+                    }
+                }
+                frontends
+            }
+            (_, Some(_)) => {
+                errors.push(Diagnostic::error(format!(
+                    "target `{name}`: `frontends` applies to Windows targets only"
+                )));
+                Vec::new()
+            }
+            (_, None) => Vec::new(),
+        };
         for channel in &target.channels {
             if channel != "ipc" {
                 errors.push(Diagnostic::error(format!(
@@ -736,6 +767,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             ui: target.ui,
             web_mode: target.web_mode,
             channels: target.channels,
+            frontends,
         });
     }
 

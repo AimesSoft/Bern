@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["{{package}}-protocol", "{{package}}-core", "{{package}}-ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+
+[workspace.dependencies]
+bern = { {{bern}} }
+{{package}}-protocol = { path = "{{package}}-protocol" }

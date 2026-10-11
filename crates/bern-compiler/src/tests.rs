@@ -110,6 +110,15 @@ fn compile_project_with(
     ui: &str,
     manifest: &str,
 ) -> Result<Compiled, Vec<Diagnostic>> {
+    let dir = write_project(protocol, ui, manifest);
+    let config = config::load(&dir.join("Bern.toml"));
+    let result = config.and_then(|config| compile(&config));
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+/// A throwaway project in a new directory, with extra `Bern.toml` tables.
+fn write_project(protocol: &str, ui: &str, manifest: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "bern-compiler-test-{}-{}",
         std::process::id(),
@@ -162,10 +171,60 @@ platform = "macos"
             + manifest,
     )
     .unwrap();
-    let config = config::load(&dir.join("Bern.toml"))?;
-    let result = compile(&config);
+    dir
+}
+
+#[test]
+fn windows_builds_both_front_ends_unless_told_otherwise() {
+    let load = |table: &str| {
+        let dir = write_project(
+            PROTOCOL,
+            "",
+            &format!("\n[targets.windows]\nplatform = \"windows\"\n{table}"),
+        );
+        let result = config::load(&dir.join("Bern.toml"));
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    };
+    let frontends = |config: &config::Config| {
+        let windows = config
+            .targets
+            .iter()
+            .find(|target| target.name == "windows")
+            .unwrap();
+        windows.frontends.clone()
+    };
+    assert_eq!(frontends(&load("").unwrap()), ["winui3", "xaml-islands"]);
+    assert_eq!(
+        frontends(&load("frontends = [\"winui3\"]").unwrap()),
+        ["winui3"]
+    );
+    assert_eq!(
+        frontends(&load("frontends = [\"xaml-islands\"]").unwrap()),
+        ["xaml-islands"]
+    );
+    let macos = load("").unwrap();
+    assert!(
+        macos
+            .targets
+            .iter()
+            .find(|target| target.name == "macos")
+            .unwrap()
+            .frontends
+            .is_empty()
+    );
+
+    let message = |table: &str| load(table).unwrap_err()[0].message.clone();
+    assert!(message("frontends = []").contains("lists none"));
+    assert!(message("frontends = [\"uwp\"]").contains("unknown front end `uwp`"));
+    assert!(message("frontends = [\"winui3\", \"winui3\"]").contains("twice"));
+    let dir = write_project(PROTOCOL, "", "frontends = [\"winui3\"]\n");
+    let error = config::load(&dir.join("Bern.toml")).unwrap_err();
     let _ = std::fs::remove_dir_all(&dir);
-    result
+    assert!(
+        error[0].message.contains("Windows targets only"),
+        "{error:?}"
+    );
 }
 
 fn wrap(body: &str) -> String {
@@ -397,6 +456,7 @@ mod independent_target {
                 ui: Some("outline".into()),
                 web_mode: None,
                 channels: vec![],
+                frontends: vec![],
             })
             .unwrap();
         // The outline target lacks most components and reports each one

@@ -149,7 +149,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - macOS：Apple M4、メモリ 16 GB、macOS 27.0.1。メモリは `footprint` の物理フットプリントで、アクティビティモニタの「メモリ」列と同じ指標。
 - Windows：Intel Core i5-13490F、メモリ 32 GB、Windows 11 25H2。メモリはプライベートワーキングセットで、タスクマネージャーの「メモリ」列と同じ指標。
 - 起動時間：プロセスの起動から、コマンドラインが表示中のネイティブウィンドウを読めるまで。エンジンの起動とローカル制御チャネルの準備を含みます。
-- Windows の値は WinUI 3 フロントエンド（システムに Windows App Runtime 1.8 がある場合）。ランタイムがないシステムでは、同じプログラムがシステムの XAML にフォールバックし、起動 0.54 秒、メモリ 19 MB です。どちらも .NET と VC++ ランタイムは不要で、アプリフォルダーには実行ファイルと 400 KB のブートストラップ DLL だけがあります。
+- Windows の値は WinUI 3 フロントエンド（測定時はシステムに Windows App Runtime 1.8。現在は 2.x でビルド）。ランタイムがないシステムでは、同じプログラムがシステムの XAML にフォールバックし、起動 0.54 秒、メモリ 19 MB です。どちらも .NET と VC++ ランタイムは不要で、アプリフォルダーには実行ファイルと 400 KB のブートストラップ DLL だけがあります。
 
 </details>
 
@@ -337,7 +337,7 @@ counter-mcp   # 同じカタログを AI エージェントへ
 </tr>
 <tr>
 <td><b>Windows</b><br><code>winui3 + windows</code></td>
-<td>C++/WinRT：Windows App Runtime 1.8 があれば WinUI 3、なければシステムの XAML · Windows 10 2004 以降</td>
+<td>C++/WinRT：Windows App Runtime 2（ほかのアプリが入れたもの、または Windows 11 に付属のもの）があれば WinUI 3、なければシステムの XAML。どちらか一方だけのビルドも可能 · Windows 10 2004 以降</td>
 <td>プロセス内（静的リンク）</td>
 <td><img alt="利用可能" src="https://img.shields.io/badge/-%E5%88%A9%E7%94%A8%E5%8F%AF%E8%83%BD-22C55E?style=flat-square"> <a href="Docs/Implementation/Windows-WinUI3.md">実装記録</a></td>
 </tr>
@@ -521,55 +521,58 @@ UI 層とロジック層がどの言語で、どう実行されるかが、実�
 
 ## クイックスタート
 
-Rust 1.99（`rust-toolchain.toml` で固定）と、ビルドするターゲットのツールチェーンが必要です。どのビルドでも `target/bern/<ターゲット>/bin/` にアプリの CLI と MCP サーバーが生成されます。
-
-<details open>
-<summary><b>macOS</b> · Xcode 26 以降</summary>
+Rust 1.99（`rustup` が `rust-toolchain.toml` に従って自動でインストール）と、ビルドするターゲットのツールチェーンが必要です。まずビルドツール `bern` をソースからインストールします。
 
 ```sh
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target macos
-open target/bern/macos/Showcase.app
+git clone https://github.com/AimesSoft/Bern
+cd Bern
+cargo install --path crates/bern-cli
 ```
 
-</details>
+### アプリを作る
 
-<details>
-<summary><b>Windows</b> · Visual Studio の「C++ によるデスクトップ開発」</summary>
-
-```powershell
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target windows
-target\bern\windows\Showcase\showcase.exe
-```
-
-初回ビルド時に Windows SDK の `cppwinrt` で C++/WinRT ヘッダーを生成し、キャッシュします。アプリのフォルダーには実行ファイル、400 KB のブートストラップ DLL、リソースだけが入り、.NET も同梱の Windows App SDK も不要です。
-
-</details>
-
-<details>
-<summary><b>Linux</b> · GTK 4.14 と libadwaita 1.5 の開発パッケージ</summary>
+任意のディレクトリで：
 
 ```sh
-sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target linux
-target/bern/linux/Showcase/showcase
+bern new my_app
+cd my_app
+bern run
 ```
 
-</details>
+新しいアプリはカウンター付きのウィンドウで、プロトコル、エンジン、UI がそれぞれ一つの crate になり、4 つのターゲットすべてが `Bern.toml` に宣言されています。`bern run` はこのコンピューターのターゲットをビルドして起動します。macOS では SwiftUI、Windows では WinUI 3、Linux では GTK です。`bern run --target web_app` はブラウザーで開きます。どのビルドでも `target/bern/<ターゲット>/bin/` にアプリの CLI と MCP サーバーが生成されます。
+
+`bern doctor` は、このコンピューターで各ターゲットをビルドするのに足りないものと、そのインストール方法を示します。
+
+```text
+$ bern doctor
+bern 0.1.0 on macOS (aarch64)
+
+[✓] Rust: rustc 1.99.0, cargo 1.99.0
+[✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
+[-] Windows · WinUI 3: builds on Windows
+[-] Linux · GTK 4: builds on Linux
+[✓] Web · WebAssembly: the wasm32-unknown-unknown target
+```
 
 <details>
-<summary><b>Web</b> · <code>rustup target add wasm32-unknown-unknown</code></summary>
+<summary><b>プラットフォームごとに必要なツール</b></summary>
+<br>
 
-```sh
-# エンジンを WebAssembly にコンパイルし、ページ内で動かす
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_app
-python3 -m http.server 8765 --bind 127.0.0.1 --directory target/bern/web_app
-
-# あるいは、独立したエンジンホストの UI としてのページ
-cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml --target web_ui
-target/bern/web_ui/bin/showcase-host
-```
+- **macOS**：Xcode 26 以降。App Store からインストールしたあと `sudo xcode-select --switch /Applications/Xcode.app` を実行します。
+- **Windows**：Visual Studio 2022 以降の「C++ によるデスクトップ開発」（Build Tools だけでも可）と Windows 11 SDK。Rust は MSVC ツールチェーンを使います。初回のビルドで Windows SDK の `cppwinrt` が C++/WinRT ヘッダーを生成し、ランタイムと一緒にプリコンパイルします（構成ごとに約 2.4 GB、`target` 内）。以降のビルドはアプリ自身のコードだけをコンパイルし、新しいアプリで約 5 秒、ショーケースで約 9 秒です。アプリのフォルダーには実行ファイル、400 KB のブートストラップ DLL、リソースだけがあり、.NET は不要で、Windows App SDK も同梱しません。
+- **Linux**：GTK 4.14 と libadwaita 1.5 の開発パッケージ。例：`sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`。
+- **Web**：`rustup target add wasm32-unknown-unknown`。`web_app` ビルドはエンジンを WebAssembly にコンパイルしてページ内で動かし、`web_ui` ビルドはページを独立したエンジンホストの UI にします。`bern run` はホストを起動してそのアドレスを開きます。
 
 </details>
+
+### ショーケースを動かす
+
+Bern リポジトリのショーケースは、すべてのコンポーネント、2 つのウィンドウ、ビデオプレーヤーを使います。リポジトリのディレクトリで：
+
+```sh
+cd examples/showcase
+bern run
+```
 
 ### 動いているアプリを外から操作する
 
@@ -593,7 +596,7 @@ showcase-mcp                                                 # stdio の MCP サ
 | 3 | Web のビジュアル仕様、テーマカーネル、WebAssembly アプリと WebUI の 2 種類のビルド | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 4 | アダプティブレイアウト、メニュー、機能契約、実行時の言語切り替え | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 5 | ほかのネイティブフロントエンド：GTK 4（完了）· WinUI 3（完了）· `flutter + macos`（次） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール、NipaPlay 3.0 への導入 | <img alt="計画中" src="https://img.shields.io/badge/-%E8%A8%88%E7%94%BB%E4%B8%AD-94A3B8?style=flat-square"> |
+| 6 | コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor` は完了）、NipaPlay 3.0 への導入 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## リポジトリ構成
 
@@ -613,7 +616,9 @@ showcase-mcp                                                 # stdio の MCP サ
 | `crates/bern-adapter-cli` · `-mcp` · `-json` | コマンドカタログから派生する入口 |
 | `crates/bern-transport-ipc` · `-ws` | ローカル制御チャネルと WebSocket 通信 |
 | `crates/bern-theme` | ネイティブのテーマを持たないターゲット向けの Bern 配色アルゴリズム |
+| `crates/bern-cli` | ビルドツール `bern`：作成、チェック、ビルド、実行、環境の確認 |
 | `examples/showcase` | 各プラットフォームで使うコントロールのショーケース |
+| `examples/hello` | 最小のアプリ：ウィンドウ一つ、一行の文字 |
 | `Docs/` | 設計ドキュメント、プラットフォーム適応仕様、実装記録 |
 
 </details>
