@@ -32,18 +32,18 @@ jobs:
       matrix:
         framework: [bern, gpui, dioxus, tauri, electron, flutter, react-native, avalonia, qt]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - if: matrix.framework == 'avalonia'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
       - if: matrix.framework == 'electron' || matrix.framework == 'react-native'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
       - name: Build and measure
         run: benchmarks/run.sh ${{ matrix.framework }} ${{ inputs.runs }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: result-${{ matrix.framework }}
           path: benchmarks/out/${{ matrix.framework }}.json
@@ -54,7 +54,7 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           pattern: result-*
           path: results
@@ -68,7 +68,7 @@ jobs:
           for r in results:
               print(f'{r["framework"]:<13} {r["version"]:<16} {r["package_bytes"] / 1e6:7.1f} MB {r["launch_s"]:6.2f} s {r["memory_bytes"] / 1e6:6.0f} MB  {r["machine"]}')
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: benchmark-results
           path: results.json

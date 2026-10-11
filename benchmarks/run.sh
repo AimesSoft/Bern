@@ -81,11 +81,13 @@ flutter)
     version="$(flutter --version --machine | python3 -c 'import json,sys; print(json.load(sys.stdin)["frameworkVersion"])')"
     ;;
 react-native)
-    rn=0.83
+    # React Native for macOS follows a React Native release line.
+    rn=0.83.10
+    rn_macos=0.83.0
     (cd "$work" && npx --yes @react-native-community/cli@latest init Hello --version "$rn" --skip-install --skip-git-init --install-pods false >/dev/null)
     cp "$here/apps/react-native/App.tsx" "$work/Hello/App.tsx"
     (cd "$work/Hello" && npm install --no-audit --no-fund --silent \
-        && npx --yes react-native-macos-init --version "$rn" >/dev/null \
+        && npx --yes react-native-macos-init --version "$rn_macos" >/dev/null \
         && cd macos && pod install --silent \
         && xcodebuild -quiet -workspace Hello.xcworkspace -scheme Hello-macOS -configuration Release \
             -derivedDataPath build CODE_SIGNING_ALLOWED=NO)
