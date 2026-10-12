@@ -11,7 +11,6 @@ use crate::swift::{Generator, Platform};
 use crate::{check_swiftui, component_names, glue, product_name, resources};
 use bern_ir::IR_VERSION;
 use bern_ir::{Application, WindowInitial};
-use bern_target_api::glue::WindowPresentation;
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Target, TargetConfig, TargetDescriptor, WindowCapabilities, icon,
@@ -115,10 +114,7 @@ impl Target for SwiftUiIos {
                 Generator::new(app, Platform::Ios).generate(app.protocol.fingerprint()),
             ),
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
-            GeneratedFile::text(
-                "glue/src/lib.rs",
-                glue::lib_rs(context, app, WindowPresentation::Virtual),
-            ),
+            GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app, Platform::Ios)),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(

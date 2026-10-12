@@ -338,7 +338,7 @@ counter-mcp   # 同じカタログを AI エージェントへ
 </tr>
 <tr>
 <td><b>iOS</b><br><code>swiftui + ios</code></td>
-<td>SwiftUI、macOS と同じ生成コード。シーンは一つで、ほかのウインドウはシート · iOS 17 以降</td>
+<td>SwiftUI、macOS と同じ生成コード。ほかのウインドウは iPhone ではシート、iPad では独立したウインドウ · iOS 17 以降</td>
 <td>プロセス内</td>
 <td><img alt="シミュレータ" src="https://img.shields.io/badge/-%E3%82%B7%E3%83%9F%E3%83%A5%E3%83%AC%E3%83%BC%E3%82%BF-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">実装記録</a></td>
 </tr>

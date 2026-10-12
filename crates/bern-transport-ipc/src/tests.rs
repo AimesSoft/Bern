@@ -294,6 +294,27 @@ fn dropping_the_server_removes_the_socket() {
     ));
 }
 
+/// An engine that takes the connection but cannot answer, as an iOS app
+/// suspended in the background, is reported instead of waited for.
+#[test]
+fn an_engine_that_does_not_answer_is_reported() {
+    let dir = socket_dir(&format!("dev.bern.test.silent.{}", std::process::id()));
+    platform::prepare_dir(&dir).unwrap();
+    let path = dir.join("silent.sock");
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let started = std::time::Instant::now();
+    let result = Client::connect_within(&path, "cli", None, Duration::from_millis(200));
+    assert!(
+        matches!(result, Err(ConnectError::NoAnswer)),
+        "{:?}",
+        result.err().map(|e| e.to_string())
+    );
+    assert!(started.elapsed() < Duration::from_secs(5));
+    drop(listener);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn media_commands_reach_the_same_players() {
     let media = MediaHub::new(&["preview".to_string()]);

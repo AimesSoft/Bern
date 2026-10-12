@@ -33,6 +33,9 @@ const MAX_LINE: usize = 1 << 20;
 /// reported as unknown.
 const MEDIA_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long a client waits for the handshake.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// How long a query may take to answer. A late query is cancelled; it has
 /// no side effects, so the caller can simply ask again.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
@@ -551,6 +554,8 @@ pub enum ConnectError {
     NotFound(String),
     Io(io::Error),
     Rejected(CommandError),
+    /// The engine took the connection but did not answer the handshake.
+    NoAnswer,
 }
 
 impl std::fmt::Display for ConnectError {
@@ -567,6 +572,9 @@ impl std::fmt::Display for ConnectError {
             ConnectError::NotFound(engine) => write!(f, "engine `{engine}` is not running"),
             ConnectError::Io(error) => write!(f, "connection failed: {error}"),
             ConnectError::Rejected(error) => write!(f, "the engine refused the connection: {error}"),
+            ConnectError::NoAnswer => f.write_str(
+                "the engine does not answer; an app the system suspended, such as an iOS app in the background, answers once it runs again",
+            ),
         }
     }
 }
@@ -633,7 +641,22 @@ impl Client {
         entry: &str,
         fingerprint: Option<u64>,
     ) -> Result<Client, ConnectError> {
+        Self::connect_within(path, entry, fingerprint, HANDSHAKE_TIMEOUT)
+    }
+
+    fn connect_within(
+        path: &Path,
+        entry: &str,
+        fingerprint: Option<u64>,
+        handshake: Duration,
+    ) -> Result<Client, ConnectError> {
         let stream = UnixStream::connect(path).map_err(ConnectError::Io)?;
+        // An engine answers the handshake at once unless it is not running
+        // at all, such as an iOS app suspended in the background; commands
+        // afterwards may take their time.
+        stream
+            .set_read_timeout(Some(handshake))
+            .map_err(ConnectError::Io)?;
         let mut client = Client {
             reader: BufReader::new(stream.try_clone().map_err(ConnectError::Io)?),
             writer: stream,
@@ -649,7 +672,11 @@ impl Client {
                 token: None,
             })
             .map_err(ConnectError::Io)?;
-        match client.read().map_err(ConnectError::Io)? {
+        let reply = client.read().map_err(|error| match error.kind() {
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => ConnectError::NoAnswer,
+            _ => ConnectError::Io(error),
+        })?;
+        match reply {
             ServerMessage::Welcome {
                 engine_id,
                 namespace,
@@ -657,6 +684,10 @@ impl Client {
             } => {
                 client.engine_id = engine_id;
                 client.namespace = namespace;
+                client
+                    .writer
+                    .set_read_timeout(None)
+                    .map_err(ConnectError::Io)?;
                 Ok(client)
             }
             ServerMessage::Error { error, .. } => Err(ConnectError::Rejected(error)),

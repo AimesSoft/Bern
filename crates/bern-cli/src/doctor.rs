@@ -174,8 +174,8 @@ fn macos() -> Status {
     Status::Ready(format!("macOS SDK {sdk}, Swift {swift}"))
 }
 
-/// The iOS simulator SDK, a simulator to run in, and the Rust targets
-/// for the simulator and the Mac.
+/// The iOS simulator SDK and the Rust target for the simulator. A
+/// simulator to run in is `bern run`'s concern, not the build's.
 fn ios() -> Status {
     let fix = "install Xcode 26 or newer from the App Store with the iOS platform, then run\nsudo xcode-select --switch /Applications/Xcode.app";
     let Some(sdk) = output("xcrun", &["--sdk", "iphonesimulator", "--show-sdk-version"]) else {
@@ -209,16 +209,6 @@ fn ios() -> Status {
         return Status::Missing(
             format!("the {simulator} target is not installed"),
             format!("rustup target add {simulator}"),
-        );
-    }
-    let devices = output("xcrun", &["simctl", "list", "devices", "available"]).unwrap_or_default();
-    if !devices
-        .lines()
-        .any(|line| line.contains("iPhone") || line.contains("iPad"))
-    {
-        return Status::Missing(
-            "no iOS simulator".into(),
-            "add one in Xcode > Window > Devices and Simulators".into(),
         );
     }
     Status::Ready(format!("iOS simulator SDK {sdk}, the {simulator} target"))

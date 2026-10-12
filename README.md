@@ -338,7 +338,7 @@ counter-mcp   # 同一份命令目录，提供给 AI Agent
 </tr>
 <tr>
 <td><b>iOS</b><br><code>swiftui + ios</code></td>
-<td>SwiftUI，与 macOS 共用生成代码；一个场景，其他窗口为 sheet · iOS 17 及以上</td>
+<td>SwiftUI，与 macOS 共用生成代码；iPhone 上其他窗口为 sheet，iPad 上是独立的窗口 · iOS 17 及以上</td>
 <td>应用进程内</td>
 <td><img alt="模拟器" src="https://img.shields.io/badge/-%E6%A8%A1%E6%8B%9F%E5%99%A8-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">实现记录</a></td>
 </tr>

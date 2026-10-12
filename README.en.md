@@ -338,7 +338,7 @@ counter-mcp   # the same catalog for AI agents
 </tr>
 <tr>
 <td><b>iOS</b><br><code>swiftui + ios</code></td>
-<td>SwiftUI, the same generated code as on macOS; one scene, other windows as sheets · iOS 17+</td>
+<td>SwiftUI, the same generated code as on macOS; other windows are sheets on iPhone and windows of their own on iPad · iOS 17+</td>
 <td>In process</td>
 <td><img alt="simulator" src="https://img.shields.io/badge/-simulator-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">notes</a></td>
 </tr>

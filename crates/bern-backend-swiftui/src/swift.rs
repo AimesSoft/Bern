@@ -1829,19 +1829,32 @@ impl<'a> Generator<'a> {
         .into_iter()
         .flatten()
         .collect();
-        // On iOS the scene and the sheets size windows; declared sizes are
-        // for desktop windows.
-        if self.platform == Platform::Macos {
-            if window.role == WindowRole::Settings {
+        match self.platform {
+            Platform::Macos if window.role == WindowRole::Settings => {
                 if let Some(width) = window.width {
                     out.line(format!(".frame(width: {})", double(width)));
                 }
                 // macOS settings windows fit their content and resize per tab.
                 out.line(".scrollDisabled(true)");
                 out.line(".fixedSize(horizontal: false, vertical: true)");
-            } else if !frame.is_empty() {
+            }
+            Platform::Macos if !frame.is_empty() => {
                 out.line(format!(".frame({})", frame.join(", ")));
             }
+            // The minimum size applies where people resize windows (iPad);
+            // iPhone screens and sheets size them.
+            Platform::Ios
+                if window.role != WindowRole::Settings
+                    && (window.min_width.is_some() || window.min_height.is_some()) =>
+            {
+                let side = |value: Option<f64>| value.map(double).unwrap_or_else(|| "nil".into());
+                out.line(format!(
+                    ".bernMinimumSize(width: {}, height: {})",
+                    side(window.min_width),
+                    side(window.min_height)
+                ));
+            }
+            _ => {}
         }
         if window.close.is_some() {
             out.line(".onAppear { context.closeCheck = bernCloseCheck() }");
@@ -2057,12 +2070,45 @@ impl<'a> Generator<'a> {
         }
     }
 
-    /// The one scene of an iOS app: the primary window fills it and every
-    /// other window is a sheet over it, titled and with a close button
-    /// unless its content brings its own navigation.
+    /// The scenes of an iOS app. The primary window's scene hosts the
+    /// virtual windows: on iPhone every other window is a sheet over the
+    /// primary, titled and with a close button unless its content brings
+    /// its own navigation; on iPad only settings is. On iPad every other
+    /// window has a scene of its own, identified by its kind, so opening it
+    /// again brings the open one forward, and titled in a toolbar unless
+    /// its content brings its own navigation. A settings window opens with
+    /// Command-Comma, as settings do.
     fn ios_scene(&self, out: &mut Out, initial: &[String]) {
         let app = self.app;
-        out.open("SwiftUI.WindowGroup {");
+        let window_group = |out: &mut Out, window: &WindowDef| {
+            out.open(format!(
+                "SwiftUI.WindowGroup(SwiftUI.Text(verbatim: BernText.string({})), id: {}, for: String.self) {{ _ in",
+                string(&window.title.key),
+                string(&window.id)
+            ));
+        };
+        let scene_modifiers = |out: &mut Out, window: &WindowDef| {
+            out.close(format!("}} defaultValue: {{ {} }}", string(&window.id)));
+            if let (Some(width), Some(height)) = (window.width, window.height) {
+                out.line(format!(
+                    ".defaultSize(width: {}, height: {})",
+                    double(width),
+                    double(height)
+                ));
+            }
+            if window.min_width.is_some() || window.min_height.is_some() {
+                out.line(".windowResizability(.contentMinSize)");
+            }
+        };
+        let Some(primary) = app
+            .windows
+            .windows
+            .iter()
+            .find(|w| w.id == app.windows.primary)
+        else {
+            return;
+        };
+        window_group(out, primary);
         out.open(format!(
             "BernVirtualHost(initial: [{}]) {{ kind in",
             initial.join(", ")
@@ -2087,7 +2133,40 @@ impl<'a> Generator<'a> {
         out.close("}");
         out.close("}");
         out.line(".environment(BernEngine.shared)");
-        out.close("}");
+        scene_modifiers(out, primary);
+        if let Some(settings) = app
+            .windows
+            .windows
+            .iter()
+            .find(|window| window.role == WindowRole::Settings)
+        {
+            out.open(".commands {");
+            out.open("SwiftUI.CommandGroup(replacing: .appSettings) {");
+            out.line(format!(
+                "SwiftUI.Button(BernText.string({}) + \"…\") {{ BernHost.shared.open({}) }}",
+                string(&settings.title.key),
+                string(&settings.id)
+            ));
+            out.line("    .keyboardShortcut(\",\")");
+            out.close("}");
+            out.close("}");
+        }
+        for (index, window) in app.windows.windows.iter().enumerate() {
+            if window.id == app.windows.primary || window.role == WindowRole::Settings {
+                continue;
+            }
+            window_group(out, window);
+            if self.has_navigation(&window.content, 0) {
+                out.line(format!("BernWindow{index}()"));
+            } else {
+                out.line(format!(
+                    "BernWindowChrome(title: {}) {{ BernWindow{index}() }}",
+                    string(&window.title.key)
+                ));
+            }
+            out.line("    .environment(BernEngine.shared)");
+            scene_modifiers(out, window);
+        }
     }
 
     /// Whether a window's content has a navigation container of its own,

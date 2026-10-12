@@ -1,12 +1,14 @@
 // Bern SwiftUI runtime: the iOS part. Generated build input; do not edit.
 //
-// An iOS app has one scene, so Bern windows are virtual windows inside it,
-// presented as iOS presents them: the primary window fills the scene and
-// the other windows are sheets over it, the latest on top. Covered windows
-// keep their drafts but cannot come forward until the windows over them
-// close, so they report neither `activate` nor `close` as available. What
-// the system does — a sheet swiped away, the app going to the background —
-// is reported to the session runtime as a fact.
+// Where the app can open several windows (iPad), every Bern window but
+// settings is a window of its own; settings, and on iPhone every window,
+// is a virtual window in the primary window's scene, presented as iOS
+// presents them: the primary window fills the scene and the other windows
+// are sheets over it, the latest on top. Covered windows keep their drafts
+// but cannot come forward until the windows over them close, so they
+// report neither `activate` nor `close` as available. What the system
+// does — a window or sheet closed by the user, a scene going to the
+// background — is reported to the session runtime as a fact.
 
 import AVKit
 import SwiftUI
@@ -14,29 +16,40 @@ import UIKit
 
 // MARK: - Platform state
 
-/// Where a window instance shows, and whether its root declared a close
-/// check, which decides whether its sheet may be swiped away.
+/// Where a window instance shows, its scene's phase, and whether its root
+/// declared a close check, which decides whether its sheet may be swiped
+/// away.
 @MainActor
 @Observable
 final class BernWindowPlatform {
     var hasCloseCheck = false
-    /// The root's frame in the scene, in points.
+    /// The root's frame in its window, in points.
     @ObservationIgnored var frame: CGRect = .zero
+    /// The system window the root is in: its own, or the primary's for a
+    /// sheet.
+    @ObservationIgnored weak var window: UIWindow?
+    @ObservationIgnored var phase: ScenePhase = .active
+    /// Whether the window appears active: iPadOS keeps the scenes of
+    /// several windows active, and only the front one appears active.
+    @ObservationIgnored var appearsActive = true
+    @ObservationIgnored var observers: [NSObjectProtocol] = []
 }
 
-/// The virtual windows of the scene.
+/// The windows of the app: whether they can be windows of their own, and
+/// the virtual ones in the primary window's scene.
 @MainActor
 @Observable
 final class BernHostPlatform {
-    /// Whether the primary window fills the scene; closed, the scene offers
-    /// to open it again.
+    /// Windows other than settings are windows of their own: the app runs
+    /// where it can open several windows (iPad).
+    @ObservationIgnored var nativeWindows = false
+    /// Without windows of their own: whether the primary window fills the
+    /// scene; closed, the scene offers to open it again.
     var primaryOpen = true
-    /// Window kinds shown as sheets, bottom first.
+    /// Window kinds shown as sheets over the primary window, bottom first.
     var sheets: [String] = []
-    /// The scene is in the foreground and receives input.
-    var active = true
-    /// The scene is on screen, also while inactive.
-    var visible = true
+    @ObservationIgnored var openWindow: OpenWindowAction?
+    @ObservationIgnored var dismissWindow: DismissWindowAction?
 }
 
 extension BernWindowContext {
@@ -47,75 +60,125 @@ extension BernWindowContext {
     func closeCheckChanged() {
         platform.hasCloseCheck = closeCheck != nil
     }
+
+    /// The system window the root is in; its key status is the window's
+    /// focus.
+    func found(_ window: UIWindow?) {
+        guard let window, window !== platform.window else { return }
+        platform.window = window
+        for observer in platform.observers { NotificationCenter.default.removeObserver(observer) }
+        platform.observers = [UIWindow.didBecomeKeyNotification, UIWindow.didResignKeyNotification].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportFacts() }
+            }
+        }
+        reportFacts()
+    }
 }
 
 // MARK: - Windows
 
 extension BernHost {
-    func platformWillStart() {}
+    /// iPad opens windows of their own when the app allows several scenes;
+    /// the engine learns it before it starts, for the window facts.
+    func platformWillStart() {
+        let manifest = Bundle.main.object(forInfoDictionaryKey: "UIApplicationSceneManifest") as? [String: Any]
+        let multiple = manifest?["UIApplicationSupportsMultipleScenes"] as? Bool ?? false
+        platform.nativeWindows = multiple && UIDevice.current.userInterfaceIdiom == .pad
+        bern_app_native_windows(platform.nativeWindows ? 1 : 0)
+    }
 
     func platformDidStart() {}
 
-    /// Open a window kind: the primary fills the scene again, any other
-    /// becomes the top sheet. An open window stays where it is.
+    func registerActions(openWindow: OpenWindowAction, dismissWindow: DismissWindowAction) {
+        platform.openWindow = openWindow
+        platform.dismissWindow = dismissWindow
+    }
+
+    /// Whether a window kind is a window of its own rather than virtual.
+    func isNative(_ kindID: String) -> Bool {
+        platform.nativeWindows && !(kinds.first { $0.id == kindID }?.isSettings ?? false)
+    }
+
+    /// Open a window kind. A window of its own opens, or comes forward when
+    /// open; a virtual primary fills the scene again, and any other virtual
+    /// window becomes the top sheet.
     func open(_ kindID: String) {
         guard kinds.contains(where: { $0.id == kindID }) else { return }
-        if kindID == primary {
+        if isNative(kindID) {
+            // The value identifies the window, so an open one comes forward.
+            platform.openWindow?(id: kindID, value: kindID)
+        } else if kindID == primary {
             platform.primaryOpen = true
         } else if !platform.sheets.contains(kindID) {
             platform.sheets.append(kindID)
         }
     }
 
-    /// The window that receives input: the top sheet, or the primary.
-    private var top: String? {
-        platform.sheets.last ?? (platform.primaryOpen ? primary : nil)
+    /// Whether a sheet covers the window: sheets cover the primary window
+    /// and the sheets below them.
+    func isCovered(_ context: BernWindowContext) -> Bool {
+        if let index = platform.sheets.firstIndex(of: context.kindID) {
+            return index < platform.sheets.count - 1
+        }
+        return context.kindID == primary && !platform.sheets.isEmpty
     }
 
-    func isTop(_ context: BernWindowContext) -> Bool { top == context.kindID }
+    private func covered(_ context: BernWindowContext) -> BernCommandFailure {
+        BernCommandFailure(
+            code: "target_unavailable",
+            message: "`\(context.id)` is covered by another window; close the windows over it first")
+    }
 
-    /// Only the top window is in front; iOS cannot bring a covered one
-    /// over the sheets above it.
+    /// A window of its own comes forward; a covered window cannot, as iOS
+    /// cannot bring it over the sheets above it.
     func activate(_ context: BernWindowContext) throws {
-        guard isTop(context) else {
-            throw BernCommandFailure(
-                code: "target_unavailable",
-                message: "`\(context.id)` is covered by another window; close the windows over it first")
+        guard !isCovered(context) else { throw covered(context) }
+        if isNative(context.kindID) {
+            platform.openWindow?(id: context.kindID, value: context.kindID)
         }
     }
 
-    /// The top window and the primary can close; a covered sheet holds the
-    /// sheets over it.
+    /// Windows of their own and the primary can close; a covered sheet holds
+    /// the sheets over it.
     func checkClosable(_ context: BernWindowContext) throws {
-        guard isTop(context) || context.kindID == primary else {
-            throw BernCommandFailure(
-                code: "target_unavailable",
-                message: "`\(context.id)` is covered by another window; close the windows over it first")
+        guard isNative(context.kindID) || context.kindID == primary || !isCovered(context) else {
+            throw covered(context)
         }
     }
 
     func finishClose(_ context: BernWindowContext) {
         context.allowsClose = true
-        if context.kindID == primary {
+        if isNative(context.kindID) {
+            platform.dismissWindow?(id: context.kindID, value: context.kindID)
+        } else if context.kindID == primary {
             platform.primaryOpen = false
         } else if let index = platform.sheets.firstIndex(of: context.kindID) {
             platform.sheets.removeSubrange(index...)
         }
     }
 
-    /// Report a virtual window: visible while the scene is on screen, its
-    /// frame in the scene, focused when it is the top window of an active
-    /// scene. Only the top window activates; it and the primary close.
+    /// Report a window: visible while its scene is on screen, its frame on
+    /// the screen, focused when it appears active, its system window is key
+    /// in an active scene and nothing covers it. Uncovered windows activate;
+    /// windows of their own, the primary and the top sheet close.
     func reportFacts(_ context: BernWindowContext) {
         guard let handle, context.generation > 0 else { return }
-        let top = isTop(context)
-        let closable = top || context.kindID == primary
-        let actions: UInt32 = (top ? 1 << 0 : 0) | (closable ? 1 << 1 : 0)
-        let frame = context.platform.frame
+        let window = context.platform.window
+        let phase = context.platform.phase
+        let covered = isCovered(context)
+        let closable = isNative(context.kindID) || context.kindID == primary || !covered
+        let actions: UInt32 = (covered ? 0 : 1 << 0) | (closable ? 1 << 1 : 0)
+        var frame = context.platform.frame
+        if let window, let screen = window.windowScene?.screen {
+            frame = window.convert(frame, to: screen.coordinateSpace)
+        }
+        let focused = phase == .active && context.platform.appearsActive
+            && (window?.isKeyWindow ?? true) && !covered
         _ = bern_window_facts(
             handle, context.kind, context.generation, context.commandInFlight ? 0 : 1,
-            platform.visible ? 0 : 2, 0, frame.minX, frame.minY, frame.width, frame.height,
-            platform.active && top ? 1 : 0, actions)
+            phase == .background ? 2 : 0, 0, frame.minX, frame.minY, frame.width, frame.height,
+            focused ? 1 : 0, actions)
     }
 
     func refreshFacts() {
@@ -145,31 +208,122 @@ extension BernHost {
     }
 }
 
-/// The window root's iOS part: reports where the window shows, and keeps a
-/// sheet whose closing needs a decision from being swiped away; its close
-/// button asks instead.
+/// The window root's iOS part: finds the system window, follows the
+/// scene's phase, reports where the window shows, keeps SwiftUI's window
+/// actions for the host, and keeps a sheet whose closing needs a decision
+/// from being swiped away; its close button asks instead.
 struct BernWindowPlatformModifier: ViewModifier {
     let context: BernWindowContext
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
         let confirms = context.platform.hasCloseCheck && (context.closeCheck?.needsConfirmation() ?? false)
         content
+            .overlay(alignment: .topLeading) {
+                BernWindowReader { [context] window in context.found(window) }
+                    .frame(width: 0, height: 0)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                 context.platform.frame = frame
                 context.reportFacts()
             }
+            .onChange(of: scenePhase, initial: true) { _, phase in
+                context.platform.phase = phase
+                context.reportFacts()
+            }
+            .modifier(BernAppearsActiveReader(context: context))
             .interactiveDismissDisabled(confirms)
+            .onAppear {
+                BernHost.shared.registerActions(openWindow: openWindow, dismissWindow: dismissWindow)
+            }
+    }
+}
+
+/// Follows whether the window appears active, from iOS 18; before it, an
+/// active scene's key window counts as the front one.
+private struct BernAppearsActiveReader: ViewModifier {
+    let context: BernWindowContext
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.modifier(Reader(context: context))
+        } else {
+            content
+        }
+    }
+
+    @available(iOS 18.0, *)
+    private struct Reader: ViewModifier {
+        let context: BernWindowContext
+        @Environment(\.appearsActive) private var appearsActive
+
+        func body(content: Content) -> some View {
+            content.onChange(of: appearsActive, initial: true) { _, active in
+                context.platform.appearsActive = active
+                context.reportFacts()
+            }
+        }
+    }
+}
+
+/// Reports the system window a root is in.
+private struct BernWindowReader: UIViewRepresentable {
+    let found: @MainActor (UIWindow?) -> Void
+
+    final class ReaderView: UIView {
+        var found: (@MainActor (UIWindow?) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            found?(window)
+        }
+    }
+
+    func makeUIView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.isUserInteractionEnabled = false
+        view.found = found
+        return view
+    }
+
+    func updateUIView(_ view: ReaderView, context: Context) {
+        view.found = found
+        if let window = view.window { found(window) }
+    }
+}
+
+extension View {
+    /// A window's declared minimum size, where people resize windows (iPad).
+    func bernMinimumSize(width: CGFloat?, height: CGFloat?) -> some View {
+        modifier(BernMinimumSize(width: width, height: height))
+    }
+}
+
+struct BernMinimumSize: ViewModifier {
+    let width: CGFloat?
+    let height: CGFloat?
+
+    func body(content: Content) -> some View {
+        if BernHost.shared.platform.nativeWindows {
+            content.frame(minWidth: width, minHeight: height)
+        } else {
+            content
+        }
     }
 }
 
 // MARK: - Scene
 
-/// The app's scene: the primary window fills it and the other windows are
-/// sheets over it. `window` makes the root of a window kind.
+/// The primary window's scene: the primary window fills it and the
+/// virtual windows are sheets over it. `window` makes the root of a window
+/// kind.
 struct BernVirtualHost<Window: View>: View {
     let initial: [String]
     let window: (String) -> Window
-    @Environment(\.scenePhase) private var scenePhase
 
     init(initial: [String], @ViewBuilder window: @escaping (String) -> Window) {
         self.initial = initial
@@ -180,7 +334,8 @@ struct BernVirtualHost<Window: View>: View {
         let host = BernHost.shared
         let platform = host.platform
         Group {
-            if platform.primaryOpen {
+            // A primary window of its own closes with its scene.
+            if platform.primaryOpen || platform.nativeWindows {
                 window(host.primary)
             } else {
                 BernClosedPrimary()
@@ -189,11 +344,6 @@ struct BernVirtualHost<Window: View>: View {
         .modifier(BernSheets(depth: 0, window: window))
         .preferredColorScheme(BernSnapshot.colorScheme)
         .task { host.openInitial(initial) }
-        .onChange(of: scenePhase, initial: true) { _, phase in
-            platform.active = phase == .active
-            platform.visible = phase != .background
-            host.refreshFacts()
-        }
         .onChange(of: platform.sheets) { host.refreshFacts() }
         .onChange(of: platform.primaryOpen) { host.refreshFacts() }
     }
@@ -264,6 +414,26 @@ struct BernSheetChrome<Content: View>: View {
                         Button(BernText.string("bern.window.done")) { BernHost.shared.close(kind) }
                     }
                 }
+        }
+    }
+}
+
+/// A window of its own (iPad) whose content brings no navigation: titled,
+/// in a toolbar the window controls sit in, as iPad windows are.
+struct BernWindowChrome<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle(BernText.string(title))
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

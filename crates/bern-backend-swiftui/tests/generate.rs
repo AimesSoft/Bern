@@ -337,17 +337,30 @@ fn showcase_generates_ios_swift_that_type_checks() {
     // Windows are virtual; the channel listens only where `bern run` names
     // a directory the Mac reaches.
     let glue = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
-    assert!(glue.contains("Presentation::Virtual"), "{glue}");
+    // Settings is always virtual; the main window is native where the app
+    // says it can open several windows (iPad).
+    assert!(
+        glue.contains(r#"id: "settings".into(), sessions: vec![1], presentation: bern_ffi::runtime::Presentation::Virtual"#),
+        "{glue}"
+    );
+    assert!(
+        glue.contains("presentation: if NATIVE_WINDOWS.load("),
+        "{glue}"
+    );
+    assert!(
+        glue.contains("pub extern \"C\" fn bern_app_native_windows(native: u8)"),
+        "{glue}"
+    );
     assert!(
         glue.contains(r#"ipc: ::std::env::var_os("BERN_IPC_DIR").is_some()"#),
         "{glue}"
     );
     // A flat bundle: Info.plist and the localizations at its top, a launch
-    // screen so the app fills the screen, one scene.
+    // screen so the app fills the screen, several scenes for iPad windows.
     let plist = std::fs::read_to_string(output.join("Showcase.app/Info.plist")).unwrap();
     for expected in [
         "<key>UILaunchScreen</key>",
-        "<key>UIApplicationSupportsMultipleScenes</key>\n        <false/>",
+        "<key>UIApplicationSupportsMultipleScenes</key>\n        <true/>",
         &format!("<key>MinimumOSVersion</key>\n    <string>{MINIMUM_IOS}</string>"),
         "<key>CFBundleIconName</key>\n            <string>AppIcon</string>",
     ] {
@@ -410,6 +423,12 @@ fn showcase_generates_ios_swift_that_type_checks() {
     let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
     for expected in [
         "import UIKit",
+        r#"id: "main", for: String.self) { _ in"#,
+        r#"} defaultValue: { "main" }"#,
+        ".defaultSize(width: 920.0, height: 640.0)",
+        ".windowResizability(.contentMinSize)",
+        ".bernMinimumSize(width: 720.0, height: 480.0)",
+        "CommandGroup(replacing: .appSettings)",
         "BernVirtualHost(initial: [])",
         r#"BernSheetChrome(kind: "settings", title: "#,
         ".navigationTitle(bernWindow.title)",

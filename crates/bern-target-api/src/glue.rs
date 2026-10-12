@@ -109,6 +109,20 @@ pub enum WindowPresentation {
 
 /// The `bern_ffi::runtime::SessionSpec` of an application.
 pub fn session_spec(app: &Application, presentation: WindowPresentation) -> String {
+    let presentation = match presentation {
+        WindowPresentation::Native => "bern_ffi::runtime::Presentation::Native",
+        WindowPresentation::Virtual => "bern_ffi::runtime::Presentation::Virtual",
+    };
+    session_spec_with(app, &|_| presentation.to_string())
+}
+
+/// The `bern_ffi::runtime::SessionSpec` of an application whose window
+/// kinds present as the Rust expression `presentation` returns for each,
+/// for targets that choose at run time.
+pub fn session_spec_with(
+    app: &Application,
+    presentation: &dyn Fn(&bern_ir::WindowDef) -> String,
+) -> String {
     let sessions: Vec<String> = app
         .sessions
         .iter()
@@ -132,10 +146,6 @@ pub fn session_spec(app: &Application, presentation: WindowPresentation) -> Stri
             )
         })
         .collect();
-    let presentation = match presentation {
-        WindowPresentation::Native => "Native",
-        WindowPresentation::Virtual => "Virtual",
-    };
     let windows: Vec<String> = app
         .windows
         .windows
@@ -152,9 +162,10 @@ pub fn session_spec(app: &Application, presentation: WindowPresentation) -> Stri
                 .map(|index| index.to_string())
                 .collect();
             format!(
-                "bern_ffi::WindowKind {{ id: {:?}.into(), sessions: vec![{}], presentation: bern_ffi::runtime::Presentation::{presentation} }}",
+                "bern_ffi::WindowKind {{ id: {:?}.into(), sessions: vec![{}], presentation: {} }}",
                 window.id,
-                indices.join(", ")
+                indices.join(", "),
+                presentation(window)
             )
         })
         .collect();

@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.23
+- 版本：v0.24
 - 状态：架构设计草案
 - 更新日期：2026-10-12
 - 项目名称：Bern UI
@@ -8,7 +8,7 @@
 - 主要开发语言：Rust
 - 首个目标平台：macOS（SwiftUI）
 
-当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[iOS SwiftUI 实现记录](Implementation/iOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md)、[Linux GTK 实现记录](Implementation/Linux-GTK.md) 与 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）与第二批 `winui3 + windows`（C++/WinRT 宿主，系统有 Windows App Runtime 时用 WinUI 3、没有时回退到系统 XAML，展示应用与四入口在 Windows 11 上按两种前端验证），以及 `swiftui + ios` 的模拟器构建（与 macOS 共用生成器，一个场景中的虚拟窗口，展示应用与四入口在 iOS 26 模拟器上验证）；阶段六先行提供了开发工具 `bern new`、`bern run` 与 `bern doctor`，项目可以独立于 Bern 仓库构建，并补上组件库第一批 `Image`、`Progress`、`Grid` 与 `Stack`；其余能力仍为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[iOS SwiftUI 实现记录](Implementation/iOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md)、[Linux GTK 实现记录](Implementation/Linux-GTK.md) 与 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）与第二批 `winui3 + windows`（C++/WinRT 宿主，系统有 Windows App Runtime 时用 WinUI 3、没有时回退到系统 XAML，展示应用与四入口在 Windows 11 上按两种前端验证），以及 `swiftui + ios` 的模拟器构建（与 macOS 共用生成器，iPhone 上一个场景中的虚拟窗口、iPad 上的原生多窗口，展示应用与四入口在 iOS 26 模拟器上验证）；阶段六先行提供了开发工具 `bern new`、`bern run` 与 `bern doctor`，项目可以独立于 Bern 仓库构建，并补上组件库第一批 `Image`、`Progress`、`Grid` 与 `Stack`；其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
@@ -1349,7 +1349,8 @@ Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift 
 iOS 目标（`swiftui + ios`）已确定以下做法：
 
 - 与 macOS 共用 SwiftUI 生成器、运行时与 C ABI，引擎以静态库链入应用进程；窗口、场景与生命周期在平台各自的运行时文件中实现，生成器只在场景、窗口尺寸与少数控件样式上区分平台。最低 iOS 17，与 macOS 14 同一代。
-- 一个场景，窗口都是虚拟窗口，形式遵循 iOS 习惯：主窗口铺满场景，其他窗口是按打开顺序叠放的 sheet，带标题与经关闭协议关闭的“完成”按钮；关闭检查需要确认时不能下滑关闭。被盖住的窗口不能单独激活或关闭，如实报告为不可用。iPad 暂不使用多场景。
+- 同一个应用包，窗口的呈现方式在启动时按设备决定并告诉引擎。iPhone 只有一个场景，窗口都是虚拟窗口，形式遵循 iOS 习惯：主窗口铺满场景，其他窗口是按打开顺序叠放的 sheet，带标题与经关闭协议关闭的“完成”按钮；关闭检查需要确认时不能下滑关闭。被盖住的窗口不能单独激活或关闭，如实报告为不可用。
+- iPad 支持多个窗口（应用声明多场景），除设置外每种窗口是原生窗口：一个以窗口种类为值的 `WindowGroup`，再次打开时把已有窗口调到前面，保持每种窗口一个实例；声明的默认尺寸与最小尺寸用于可调整大小的 iPad 窗口。iPadOS 没有设置场景，设置窗口仍是主窗口上的 sheet，⌘, 打开。最小化、移动与调整尺寸没有公开接口，报告为不可用。窗口化模式下几个窗口的场景可以同时活动，焦点按窗口是否显示为活动（`appearsActive`）报告。
 - 前后台变化作为窗口事实报告（进入后台为隐藏、失去焦点）；媒体只报告 AVFoundation 的实际状态。
 - 先构建模拟器应用。模拟器中的应用经 IPC 通道接受 Mac 上的 CLI、JSON 与 MCP 入口：`bern run` 把 Mac 的目录经 `BERN_IPC_DIR` 交给应用，iOS 上只有设置了该目录时通道才监听。真机的签名、描述文件、安装与打包后续实现。
 
@@ -1676,3 +1677,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
 | v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |
 | v0.23 | `swiftui + ios`：与 macOS 共用生成器与运行时，平台部分分为 AppKit 与 UIKit 两个运行时文件；一个场景中的虚拟窗口（主窗口铺满、其他窗口为 sheet）；模拟器构建与 `bern run` 安装启动，`BERN_IPC_DIR` 让 Mac 上的 CLI 与 MCP 连到模拟器中的应用；最低 iOS 17 |
+| v0.24 | iPad：同一个 iOS 应用包在 iPad 上使用原生多窗口（每种窗口一个 `WindowGroup`，以窗口种类为值保持单实例），设置仍为 sheet 并以 ⌘, 打开；呈现方式在启动时按设备决定并报告给引擎；声明的默认与最小尺寸用于可调整的 iPad 窗口；焦点按窗口是否显示为活动报告；IPC 客户端的握手有超时，被系统挂起的应用报告为不应答 |

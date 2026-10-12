@@ -30,6 +30,9 @@ typedef struct {
 // `resources`: UTF-8 path of the bundle directory holding the declared
 // resource files, or NULL with length 0.
 BernApp *bern_app_start(uint64_t fingerprint, const uint8_t *resources, size_t resources_len, BernCallbacks callbacks, BernBuffer *error);
+// iOS only, before `bern_app_start`: whether windows other than settings
+// are native windows, as where the app can open several (iPad).
+void bern_app_native_windows(uint8_t native);
 void bern_app_stop(BernApp *app);
 BernBuffer bern_app_snapshot(BernApp *app);
 BernBuffer bern_app_engine_id(BernApp *app);

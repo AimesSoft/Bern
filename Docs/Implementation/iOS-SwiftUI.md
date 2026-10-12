@@ -1,11 +1,11 @@
 # iOS SwiftUI 实现记录
 
 - 日期：2026-10-12
-- 依据：[Bern 架构设计 v0.23](../Design.md)
-- 工具链：Rust 1.99.0（`aarch64-apple-ios-sim` 与 `aarch64-apple-ios`）；Xcode 26.5，iOS 26.5 SDK，Swift 6.3.2
-- 验证环境：iPhone 17 Pro 模拟器，iOS 26.5（M4 Mac）
+- 依据：[Bern 架构设计 v0.24](../Design.md)
+- 工具链：Rust 1.99.0（`aarch64-apple-ios-sim` 与 `aarch64-apple-ios`）；Xcode 26.5，iOS 26.5 SDK，Swift 6.3.2；iPad 窗口化模式的后半部分用 Xcode 27.0，iOS 27.0 模拟器 SDK，Swift 6.4
+- 验证环境：iPhone 17 Pro 与 iPad Pro 13 英寸（M5）模拟器，iOS 26.5（M4 Mac）
 
-本文记录 `swiftui + ios` 目标的实际完成情况。展示应用（`examples/showcase`）的声明、协议、业务核心和 IR 不变，只增加了 `[targets.ios]`；生成器与 macOS 共用，按平台区分窗口、场景与少数控件样式。这一版构建模拟器应用；真机目标能编译链接，但还没有签名、安装与打包。
+本文记录 `swiftui + ios` 目标的实际完成情况。同一个应用包在 iPhone 与 iPad 上运行，窗口的呈现方式在运行时按设备决定（见“iPad”）。展示应用（`examples/showcase`）的声明、协议、业务核心和 IR 不变，只增加了 `[targets.ios]`；生成器与 macOS 共用，按平台区分窗口、场景与少数控件样式。这一版构建模拟器应用；真机目标能编译链接，但还没有签名、安装与打包。
 
 ## 完成情况
 
@@ -13,9 +13,10 @@
 | --- | --- | --- |
 | 生成代码可构建 | 完成 | `bern build --target ios` 生成 Swift 与胶水 crate，构建模拟器应用包、Mac 上的 CLI 与 MCP 服务器；生成测试按 iOS 模拟器 SDK 对生成的 Swift 做类型检查 |
 | 窗口、导航、菜单与生命周期按平台区分 | 完成 | 运行时分为共用的 `BernRuntime.swift`、`BernMedia.swift` 与平台文件 `BernAppKit.swift`（macOS）、`BernUIKit.swift`（iOS），构建只编译自己平台的那一个 |
-| 不支持原生多窗口时用虚拟窗口 | 完成 | 一个场景：主窗口铺满，其他窗口是叠在上面的 sheet；窗口事实报告为 `Virtual` |
+| 不支持原生多窗口时用虚拟窗口 | 完成 | iPhone：一个场景，主窗口铺满，其他窗口是叠在上面的 sheet；窗口事实报告为 `Virtual` |
+| 支持多窗口的环境按已验证的原生能力选择 | 完成 | iPad：除设置外每种窗口是独立的原生窗口（`WindowGroup` 场景），报告为 `Native`；设置是主窗口上的 sheet |
 | 前后台生命周期 | 完成 | 进入后台时窗口报告为隐藏、失去焦点，回到前台恢复；媒体按 AVFoundation 的实际状态报告 |
-| 屏幕旋转、键盘、安全区域 | 部分 | 键盘输入与安全区域实测；旋转由 SwiftUI 处理，未实测 |
+| 屏幕旋转、键盘、安全区域 | 部分 | 键盘输入、安全区域与 iPad 窗口缩放（停在最小尺寸）实测；旋转由 SwiftUI 处理，未实测 |
 | 状态可订阅；带参数命令与错误返回 | 完成 | 与 macOS 相同的运行时：引擎状态、会话草稿、查询、关闭协议 |
 | Video 原生呈现 | 完成 | AVFoundation 执行端与 `AVPlayerLayer` 呈现、命令驱动的控制条 |
 | 真机构建与打包 | 未完成 | 引擎与界面能按 `aarch64-apple-ios` 编译链接；签名、描述文件、安装与 `bern package` 未做 |
@@ -29,7 +30,7 @@
 | `templates/BernUIKit.swift` | iOS 平台部分：虚拟窗口宿主、sheet、窗口事实、开发快照、视频视图 |
 | `templates/BernAppKit.swift` | macOS 平台部分，从原来的 `BernRuntime.swift` 分出，行为不变 |
 
-生成的应用包是 iOS 的扁平结构：可执行文件、`Info.plist`、各语言的 `.lproj` 与随包资源都在包的顶层。图标由 `actool` 把 1024 像素的 PNG 编译进 `Assets.car`（未声明图标时是 Bern 标志的方形版本，声明的较小图标先用 `sips` 放大）。`Info.plist` 声明启动屏（否则应用以兼容模式显示，不铺满屏幕）、一个场景、iPhone 与 iPad、最低 iOS 17.0。
+生成的应用包是 iOS 的扁平结构：可执行文件、`Info.plist`、各语言的 `.lproj` 与随包资源都在包的顶层。图标由 `actool` 把 1024 像素的 PNG 编译进 `Assets.car`（未声明图标时是 Bern 标志的方形版本，声明的较小图标先用 `sips` 放大）。`Info.plist` 声明启动屏（否则应用以兼容模式显示，不铺满屏幕）、多场景（iPad 的多窗口；iPhone 始终只有一个场景）、iPhone 与 iPad、iPad 上的全部四个方向、最低 iOS 17.0。
 
 最低 iOS 17：与 macOS 14 同一代，运行时用到的 Observation、`ContentUnavailableView` 等从这一版起提供。
 
@@ -37,21 +38,33 @@
 
 生成器只在以下几处按平台区分：
 
-- **场景**：macOS 每个窗口种类一个 `Window` 或 `Settings` 场景；iOS 只有一个 `WindowGroup`，内容是 `BernVirtualHost`。
-- **窗口尺寸**：声明的宽高与最小尺寸只用于桌面窗口，iOS 上由屏幕与 sheet 决定。
+- **场景**：macOS 每个窗口种类一个 `Window` 或 `Settings` 场景；iOS 没有这两种场景，主窗口与设置以外的每种窗口各是一个 `WindowGroup`，主窗口的场景内容是 `BernVirtualHost`（它在 iPhone 上承载所有虚拟窗口，在 iPad 上承载设置）。
+- **窗口尺寸**：声明的宽高与最小尺寸只用于人能调整大小的窗口，即 iPad；iPhone 上由屏幕与 sheet 决定。
 - **侧边栏**：iOS 上分栏视图在窄屏时折叠为导航栈，侧边栏是第一屏，标题为窗口标题（`.navigationTitle(bernWindow.title)`）。侧边栏控件登记在整个分栏视图上，所以只显示详情时外部入口也能切换页面（macOS 上效果相同）。
 - **文本输入**：iOS 的表单只显示输入框的提示文字，不显示标签。单行与密码输入改为 `LabeledContent`（标签在左、输入在右，与“设置”应用相同），多行输入的标签放在上方。
 - **控件样式**：`Switch` 的 `checkbox` 样式在 iOS 上是开关（iOS 没有复选框）；`Picker` 的 `radio` 样式在 iOS 上是带勾选标记的内嵌列表。
 
 ## 窗口
 
-iOS 应用只有一个场景，按设计文档用虚拟窗口，形式遵循 iOS 的习惯：
+iPhone 只能有一个场景，按设计文档用虚拟窗口，形式遵循 iOS 的习惯（iPad 上设置窗口同样如此）：
 
 - **主窗口**铺满场景。被命令关闭后，场景显示应用名与“打开“…””按钮，点按后重新打开（新的实例代次）。
 - **其他窗口**是 sheet，按打开顺序一层叠一层：导航栏显示窗口标题，右上角“完成”按钮经关闭协议请求关闭。设置窗口的页签是 sheet 底部的标签栏。
 - **下滑关闭**：没有待确认的修改时可以下滑关闭，作为系统事实报告（`changed_by: System`）；关闭检查需要确认时禁止下滑，只能用“完成”按钮，此时弹出存储、不存储、取消。
 - **窗口动作**：只有最上面的窗口可以激活；它和主窗口可以关闭。被 sheet 盖住的窗口不能被提到前面（iOS 只能先关掉上面的），`window.activate` 与 `window.close` 返回 `target_unavailable`；`minimize`、`restore`、`maximize`、`move`、`resize` 同样返回 `target_unavailable`，并列出可用动作。
 - **窗口事实**：可见性跟随场景（进入后台为隐藏），帧是窗口根视图在场景中的位置（点），只有活动场景中最上面的窗口有焦点。
+
+## iPad
+
+同一个应用包在 iPad 上按苹果的说明处理窗口：
+
+- **能否开多个窗口**：SwiftUI 应用在 iPadOS 上声明了 `UIApplicationSupportsMultipleScenes` 时可以打开多个窗口（`supportsMultipleWindows` 的说明），iPhone 上同样的声明不起作用。运行时在启动引擎前按“iPad 且声明了多场景”决定，经 `bern_app_native_windows` 告诉引擎，窗口事实里的呈现方式因此与实际一致：iPad 上是 `Native`，iPhone 上是 `Virtual`。
+- **窗口**：iPadOS 没有 macOS 的 `Window`（单个窗口）场景，只有 `WindowGroup`。每种窗口是一个 `WindowGroup(id:for:)`，打开时以窗口种类作为值（`openWindow(id:value:)`）；SwiftUI 对同一个值不新开窗口而把已有的调到前面，与 Bern 每种窗口默认一个实例的规则一致。关闭用 `dismissWindow(id:value:)`，激活即再次打开。窗口标题是声明的标题，系统的窗口列表与菜单栏用它区分窗口。
+- **设置**：iPadOS 没有 `Settings` 场景；设置窗口是主窗口上的表单 sheet，与 iPhone 相同。人机界面指南要求接了键盘时 ⌘, 打开设置，生成的 `.commands` 把 iPadOS 菜单栏里的“设置”项换成打开设置窗口，快捷键 ⌘,。
+- **次级窗口的外观**：内容没有自带导航时放在带行内标题的导航栈里。WWDC25 的《Elevate the design of your iPad app》要求工具栏包住窗口控件，否则系统使用只为兼容而存在的安全区；有了工具栏，窗口化时窗口控件排在标题栏前缘。
+- **尺寸**：TN3192 要求支持可调整大小的场景（启动屏、iPad 上全部四个方向、不用 `UIRequiresFullScreen`），SwiftUI 以 `.windowResizability(.contentMinSize)` 与内容的最小 `frame` 表达最小尺寸。生成代码对声明了最小尺寸的窗口加上这两者（`frame` 只在 iPad 上生效，iPhone 不受影响），声明了宽高的窗口加 `.defaultSize`。
+- **窗口事实**：每个窗口的可见性来自它自己场景的阶段（全屏模式下切到另一个窗口时，原来的窗口为隐藏），帧是窗口根视图在屏幕上的位置。窗口化模式下几个窗口的场景同时是活动的，系统窗口也各自是自己场景的 key，只有最前面的窗口“显示为活动”，所以焦点还要看 SwiftUI 的 `appearsActive`（iOS 18 起）；iOS 17 没有这个值，焦点只看场景阶段与 key。被设置 sheet 盖住的主窗口不能激活，与 iPhone 相同。没有公开接口最小化、移动或调整 iPad 窗口，这些命令返回 `target_unavailable`。
+- **导航**：常规宽度下分栏视图并排显示侧边栏与详情，侧边栏顶部是窗口标题；`Adaptive` 按内容宽度选择布局，视频页在 iPad 上是展开布局。
 
 ## 本地控制通道
 
@@ -60,6 +73,8 @@ iOS 应用只有一个场景，按设计文档用虚拟窗口，形式遵循 iOS
 `BERN_IPC_DIR` 在其他平台上同样有效：它代替临时目录作为各应用套接字目录的上级目录。
 
 模拟器里的应用与 macOS 版包标识相同时，两者的引擎在同一个目录里，CLI 会列出两个引擎并要求用 `--engine` 指定。
+
+iOS 会挂起完全在后台的应用，挂起时引擎不应答。客户端的握手因此有 5 秒的超时，超时报告“引擎不应答”，不再无限等待；握手之后的命令不受这个超时限制。
 
 ## 媒体
 
@@ -76,7 +91,7 @@ open -a Simulator
 bern run --target ios
 ```
 
-`bern run --target ios` 把应用装进正在运行的 iOS 模拟器并启动，应用的输出显示在终端，直到应用退出；`BERN_*` 环境变量（例如 `BERN_APPEARANCE=dark`）一并交给应用。没有正在运行的模拟器时报错并提示启动方法。不带 `--target` 的 `bern run` 优先选择与本机系统相同的目标，Mac 上仍然启动 macOS 版。`bern doctor` 检查 iOS 模拟器 SDK、Rust 的模拟器目标与可用的模拟器。
+`bern run --target ios` 把应用装进正在运行的 iOS 模拟器并启动，应用的输出显示在终端，直到应用退出；`BERN_*` 环境变量（例如 `BERN_APPEARANCE=dark`）一并交给应用。没有正在运行的模拟器时报错并提示启动方法。不带 `--target` 的 `bern run` 优先选择与本机系统相同的目标，Mac 上仍然启动 macOS 版。`bern doctor` 检查 iOS 模拟器 SDK 与 Rust 的模拟器目标；有没有可运行的模拟器只影响 `bern run`，不影响构建（Xcode 更新后模拟器设备要过一阵才加载完，此时构建不应失败）。
 
 构建步骤：为模拟器构建引擎静态库（`IPHONEOS_DEPLOYMENT_TARGET=17.0`）与为 Mac 构建 CLI、MCP 服务器；把随包资源镜像到包顶层；`actool` 编译图标；`xcrun --sdk iphonesimulator swiftc` 编译界面；dSYM 移到包旁；ad hoc 签名。
 
@@ -95,6 +110,25 @@ bern run --target ios
 - **MCP**：`showcase-mcp` 完成 `initialize`，`window_list` 返回模拟器里应用的 `Virtual` 窗口。
 - **macOS 未受影响**：运行时拆分后重新构建运行 macOS 版，设置窗口、关闭协议、最小化与恢复由 CLI 实测正常。
 
+iPad，同日，iPad Pro 13 英寸（M5）模拟器（iOS 26.5，全屏模式）。展示应用只有主窗口与设置窗口，为测试多窗口临时加了一个普通的“检查器”窗口（未提交）：
+
+- 主窗口为 `Native`、可见、有焦点（帧 1032 × 1324），分栏视图并排显示侧边栏与详情，右下角是 iPadOS 26 的窗口缩放手柄。
+- `window open --kind inspector` 打开独立的窗口（`Native`，带“检查器”标题栏），全屏模式下切到它，主窗口为 `Hidden`；`window activate --window main#1` 切回主窗口；再次打开检查器得到同一个实例 `inspector#1`；`window close` 关闭检查器，系统回到主屏幕，主窗口仍在后台。
+- 设置以表单 sheet 显示在主窗口上（`Virtual`，宽 580），此时主窗口无焦点，检查器在后台。
+- 视频页在 iPad 宽度下是展开布局，预览播放器播放正常。
+- 应用整个进入后台后被挂起，原来的 CLI 在握手时一直等待；加上握手超时后改为报告引擎不应答（新增测试）。
+- 回到 iPhone 回归：三个窗口都是 `Virtual`，检查器是带“完成”按钮的 sheet，被设置盖住时 `window activate` 返回 `target_unavailable`。
+
+iPad 窗口化模式，同日，同一模拟器在“设置 > 多任务与手势”中选了“窗口化 App”；后半部分换到 Xcode 27.0 重新构建：
+
+- 窗口带 iPadOS 26 的窗口控件，主窗口的控件排在侧边栏工具栏前缘，检查器的控件排在它的标题栏前缘；拖动右下角缩放时停在声明的最小尺寸 720 × 480；主窗口与检查器可以同时显示、互相部分遮挡。
+- 焦点：最初按“场景活动且系统窗口为 key”报告，两个窗口同时报告有焦点——窗口化时两个场景都是活动的，系统窗口也都是 key。之后改为记住最近被命令或场景激活带到前面的窗口，命令切换正确，但点按后面的窗口时两个场景都保持活动、没有任何阶段变化，记住的窗口就过时了；打开新窗口时，后面窗口的场景还会先变为不活动再变回活动，被当成了“到了前面”。最后改用 `appearsActive`：`window open`、`window activate` 来回切换与点按两个窗口，每次都只有最前面的窗口报告有焦点。
+- 按 Home 键时 iPadOS 把窗口推到屏幕边缘露出主屏幕，应用没有被挂起（CLI 立即得到回答），场景仍是活动的，窗口仍报告可见、主窗口有焦点；点程序坞图标回来后不变。
+- 重新启动应用时 iPadOS 只恢复了上次最前面的检查器，主窗口留在“隐藏窗口”里，引擎只看到 `inspector#1`；`window open --kind main` 把主窗口找回来。
+- `window close` 关闭检查器，主窗口得到焦点；设置在 iPad 上以 sheet 打开（`Virtual`），关闭后主窗口恢复焦点。
+- 有一次重装后应用窗口全黑、没有控制通道（进程里没有 IPC 线程，环境里没有 `BERN_IPC_DIR`），同时留下一份启动时在 `UIApplicationMain` 准备阶段读取包信息崩溃的报告，像是安装与启动重叠；重新运行后正常，没有再出现。
+- iPhone 17 Pro 回归：检查器与设置依次叠为 sheet，被盖住的窗口没有可用动作，点“完成”关闭检查器后主窗口恢复焦点。
+
 展示应用随之调整：图片页的两行图片从 `Row` 改为 `Grid`，原来四张 120 宽的图片在 iPhone 上放不下、被两侧裁掉，现在窄屏时自动换行，宽窗口中仍是一行。
 
 ## 未完成与已知限制
@@ -102,7 +136,10 @@ bern run --target ios
 - 只构建模拟器应用。真机需要开发者签名与描述文件，安装与 `bern package` 未实现。
 - HDR：模拟器显示不了 HDR，增益图在模拟器里只解码 SDR 版本；真机上图片按 HDR 解码，视频由 `AVPlayerLayer` 显示，HDR 均未验证。
 - 真机上没有声明后台音频，进入后台后系统会暂停播放；只在模拟器里观察过（模拟器里继续播放）。
-- iPad 未实测。iPad 的多窗口（多场景）没有使用，同样是一个场景中的虚拟窗口。
+- iPadOS 菜单栏中的“设置”与 ⌘, 只经过类型检查，未实测（模拟器上没有接键盘的菜单栏操作）。
+- iOS 17 没有 `appearsActive`，几个窗口同时显示时可能都报告有焦点；手上没有 iOS 17 的模拟器，未验证。
+- iPadOS 重新启动应用时只恢复它记住的窗口，主窗口不一定在启动时打开；Bern 按系统恢复的窗口报告。
+- 全屏模式下关闭当前窗口后，系统回到主屏幕，不会切到应用的其他窗口；其他窗口仍在后台，从程序坞或应用切换器回到它们。
 - 屏幕旋转未实测。
 - 被 sheet 盖住的窗口不能单独激活或关闭，需要先关掉上面的窗口。
 - 窗口内容自带分栏或导航栈时，它作为 sheet 打开时没有“完成”按钮（嵌套的导航栈会出问题），只能下滑或用命令关闭。

@@ -13,7 +13,6 @@ mod swift;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
-use bern_target_api::glue::WindowPresentation;
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, dist_dir,
@@ -133,7 +132,7 @@ impl Target for SwiftUiMacos {
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text(
                 "glue/src/lib.rs",
-                glue::lib_rs(context, app, WindowPresentation::Native),
+                glue::lib_rs(context, app, Platform::Macos),
             ),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),

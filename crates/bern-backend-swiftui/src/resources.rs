@@ -498,9 +498,10 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
     )
 }
 
-/// The Info.plist of an iOS app for the simulator: one scene, which Bern
-/// presents every window in; a launch screen, so the app fills the screen;
-/// the icon from the compiled asset catalog.
+/// The Info.plist of an iOS app for the simulator: several scenes, which
+/// iPad opens as windows (iPhone keeps one); a launch screen and every
+/// orientation on iPad, as resizable iPad windows need; the icon from the
+/// compiled asset catalog.
 pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) -> String {
     let name = translation(
         &app.app.name,
@@ -564,7 +565,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
-        <false/>
+        <true/>
     </dict>
     <key>UIDeviceFamily</key>
     <array>
