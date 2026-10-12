@@ -447,11 +447,11 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 <img alt="前後端語言與執行方式：Bern 的介面層是各平台原生 UI 程式碼（Swift、C++、Rust），邏輯層是 Rust，同行程經 C ABI 呼叫，沒有垃圾回收" src="Docs/Assets/compare/languages-zh-Hant-light.svg" width="100%">
 </picture>
 
-同樣一個只顯示一行字的視窗，各框架的套件大小、啟動時間與記憶體差別很大。Bern 一列是實測；其他框架目前是紙面估算，之後會在 M4 上以 CI 統一實測後取代。
+同樣一個只顯示一行字的視窗，各框架的套件大小、啟動時間與記憶體差別很大。下圖在同一台 CI 虛擬機（GitHub 託管的 Apple M1）上實測：各框架用自己的工具建置 release 套件，測量時輪流啟動，每個 10 次取中位數；Bern 的啟動時間另以 M4 本機實測，圖中有註明。腳本在 [benchmarks/](benchmarks/) 中，可以在 Actions 裡重新執行 Benchmarks 工作流程。
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/resources-zh-Hant-dark.svg">
-<img alt="Hello World 的資源占用：Bern 實測套件 2.0 MB、啟動 0.28 秒、記憶體 20 MB；其他框架為估算" src="Docs/Assets/compare/resources-zh-Hant-light.svg" width="100%">
+<img alt="Hello World 的資源占用（實測）：Bern 套件 2.1 MB、啟動 0.20 秒（M4 本機；CI 虛擬機上 0.26 秒）、記憶體 18 MB；GPUI 4.2 MB、0.28 秒、27 MB；Electron 301 MB、1.07 秒、77 MB" src="Docs/Assets/compare/resources-zh-Hant-light.svg" width="100%">
 </picture>
 
 ### 怎麼選

@@ -447,11 +447,11 @@ The languages of the UI and logic layers, and how they run, set the ceiling of r
 <img alt="Languages and execution: Bern's UI layer is each platform's native UI code (Swift, C++, Rust) and its logic layer is Rust, called in process through a C ABI, with no garbage collection" src="Docs/Assets/compare/languages-en-light.svg" width="100%">
 </picture>
 
-For the same window showing one line of text, package size, launch time and memory differ widely. Bern's row is measured; the others are paper estimates for now, to be replaced by uniform CI runs on an M4.
+For the same window showing one line of text, package size, launch time and memory differ widely. The chart is measured on one CI virtual machine (a GitHub-hosted Apple M1): each framework's own tools build a release package, and the apps take turns starting, ten times each, median shown. Bern's launch time is also measured on an M4, as the chart's footnote says. The scripts are in [benchmarks/](benchmarks/); the Benchmarks workflow reruns them from the Actions tab.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/resources-en-dark.svg">
-<img alt="Hello World footprint: Bern measures 2.0 MB, 0.28 s and 20 MB; the other frameworks are estimates" src="Docs/Assets/compare/resources-en-light.svg" width="100%">
+<img alt="Hello World footprint, measured: Bern 2.1 MB, 0.20 s (on an M4; 0.26 s on the CI machine), 18 MB; GPUI 4.2 MB, 0.28 s, 27 MB; Electron 301 MB, 1.07 s, 77 MB" src="Docs/Assets/compare/resources-en-light.svg" width="100%">
 </picture>
 
 ### Which one to choose

@@ -63,6 +63,11 @@ TEXT = {
         drawn_band="一致的界面：自己绘制，或携带浏览器",
         resources_title="Hello World 的资源占用",
         resources_note="Bern 为实测；其余为纸面估算，以后由 M4 上的 CI 实测替换",
+        resources_note_measured="同一台机器实测：{machine}，macOS {macos}，release 构建，{runs} 次热启动的中位数",
+        resources_note_partial="；斜线为未能构建的估算",
+        resources_footer_local="* {name} 的启动时间为 {machine} 本机实测（macOS {macos}，{runs} 次中位数）；在上述 CI 虚拟机上为 {ci:.2f} s。",
+        resources_footer_measured=("包体为各框架自己的工具打出的结果：.app、自包含发布目录或 Rust 可执行文件；启动为从运行到窗口出现。",
+                                   "内存为窗口出现 4 秒后的物理占用，含子进程与随之启动的 WebKit 进程。由 benchmarks/ 与 Benchmarks 工作流生成。"),
         panels=("包体大小（对数刻度）", "启动到窗口可见", "空闲内存"),
         measured="实测", estimated="估算", no_desktop="没有桌面应用目标",
         resources_footer=("Bern：Apple M4，release 构建，热启动 6 次的中位数。",
@@ -95,6 +100,11 @@ TEXT = {
         drawn_band="一致的介面：自己繪製，或攜帶瀏覽器",
         resources_title="Hello World 的資源占用",
         resources_note="Bern 為實測；其餘為紙面估算，之後由 M4 上的 CI 實測取代",
+        resources_note_measured="同一台機器實測：{machine}，macOS {macos}，release 建置，{runs} 次熱啟動的中位數",
+        resources_note_partial="；斜線為未能建置的估算",
+        resources_footer_local="* {name} 的啟動時間為 {machine} 本機實測（macOS {macos}，{runs} 次中位數）；在上述 CI 虛擬機上為 {ci:.2f} s。",
+        resources_footer_measured=("套件大小為各框架自己的工具產生的結果：.app、自包含發佈目錄或 Rust 執行檔；啟動為從執行到視窗出現。",
+                                   "記憶體為視窗出現 4 秒後的實體占用，含子行程與隨之啟動的 WebKit 行程。由 benchmarks/ 與 Benchmarks 工作流程產生。"),
         panels=("套件大小（對數刻度）", "啟動到視窗可見", "閒置記憶體"),
         measured="實測", estimated="估算", no_desktop="沒有桌面應用程式目標",
         resources_footer=("Bern：Apple M4，release 建置，熱啟動 6 次的中位數。",
@@ -127,6 +137,11 @@ TEXT = {
         drawn_band="Same UI everywhere: own renderer or a browser",
         resources_title="Hello World footprint",
         resources_note="Bern is measured; the rest are paper estimates, to be replaced by CI runs on an M4",
+        resources_note_measured="Measured on {machine}, macOS {macos}: release builds, median of {runs} warm starts",
+        resources_note_partial="; hatched bars are estimates",
+        resources_footer_local="* {name}'s launch time was measured locally on an {machine} (macOS {macos}, median of {runs}); on the CI virtual machine above it is {ci:.2f} s.",
+        resources_footer_measured=("Package: what each framework's own tools produce (.app, self-contained folder or Rust binary). Launch: start to window on screen.",
+                                   "Memory: physical footprint 4 s after the window appears, child and WebKit processes included. From benchmarks/ and its workflow."),
         panels=("Package size (log scale)", "Launch to window", "Idle memory"),
         measured="Measured", estimated="Estimate", no_desktop="No desktop app target",
         resources_footer=("Bern: Apple M4, release build, median of 6 warm starts.",
@@ -159,6 +174,11 @@ TEXT = {
         drawn_band="同じ見た目：自前で描画するか、ブラウザを同梱",
         resources_title="Hello World のリソース",
         resources_note="Bern は実測、ほかは机上の見積もり。M4 の CI 実測で置き換える予定",
+        resources_note_measured="同一マシンで実測：{machine}、macOS {macos}、release ビルド、ウォームスタート {runs} 回の中央値",
+        resources_note_partial="。斜線は見積もり",
+        resources_footer_local="* {name} の起動時間は {machine} での実測（macOS {macos}、{runs} 回の中央値）。上記の CI 仮想マシンでは {ci:.2f} s。",
+        resources_footer_measured=("パッケージは各フレームワーク自身のツールが作るもの（.app、自己完結フォルダー、Rust 実行ファイル）。起動は開始から表示まで。",
+                                   "メモリは表示 4 秒後の物理フットプリントで、子プロセスと同時に起動した WebKit プロセスを含む。benchmarks/ のワークフローで生成。"),
         panels=("パッケージサイズ（対数）", "起動からウィンドウ表示", "アイドル時のメモリ"),
         measured="実測", estimated="見積もり", no_desktop="デスクトップ向けなし",
         resources_footer=("Bern：Apple M4、release ビルド、ウォームスタート 6 回の中央値。",
@@ -340,6 +360,36 @@ RESOURCES = [
     ("uniapp", None, None, None, False),
 ]
 
+# Measurements from the Benchmarks workflow, when its `results.json` is in
+# benchmarks/: the same Hello World on one machine. Frameworks it could not
+# build stay estimates. Rows go from the smallest package to the largest.
+RESULTS = HERE.parents[2] / "benchmarks" / "results.json"
+MEASURED = {}
+if RESULTS.exists():
+    for result in json.loads(RESULTS.read_text())["results"]:
+        MEASURED["rn" if result["framework"] == "react-native" else result["framework"]] = result
+    RESOURCES = sorted(
+        (
+            (key, MEASURED[key]["package_bytes"] / 1e6, MEASURED[key]["launch_s"], MEASURED[key]["memory_bytes"] / 1e6, True)
+            if key in MEASURED
+            else (key, size, start, memory, False)
+            for key, size, start, memory, _ in RESOURCES
+        ),
+        key=lambda row: (row[1] is None, row[1] or 0),
+    )
+
+# Launch times measured on a developer machine (`benchmarks/local.json`,
+# written by `benchmarks/run.sh` there) replace the CI ones and are marked
+# with an asterisk; the footer names the machine and keeps the CI value.
+LOCAL = {}
+if MEASURED and (HERE.parents[2] / "benchmarks" / "local.json").exists():
+    for result in json.loads((HERE.parents[2] / "benchmarks" / "local.json").read_text())["results"]:
+        key = "rn" if result["framework"] == "react-native" else result["framework"]
+        if key in MEASURED:
+            LOCAL[key] = result
+    RESOURCES = [(key, size, LOCAL[key]["launch_s"] if key in LOCAL else start, memory, measured)
+                 for key, size, start, memory, measured in RESOURCES]
+
 
 def hatch(theme):
     t = THEMES[theme]
@@ -350,13 +400,26 @@ def hatch(theme):
 def resources(theme, lang):
     import math
     t, s = THEMES[theme], TEXT[lang]
+    if MEASURED:
+        sample = next(iter(MEASURED.values()))
+        note = s["resources_note_measured"].format(
+            machine=sample["machine"], macos=sample["macos"], runs=len(sample["launch_runs_s"]))
+        if len(MEASURED) < sum(1 for row in RESOURCES if row[1] is not None):
+            note += s["resources_note_partial"]
+        footer = list(s["resources_footer_measured"])
+        for key, result in LOCAL.items():
+            footer.append(s["resources_footer_local"].format(
+                name=FRAMEWORKS[key]["name"], machine=result["machine"], macos=result["macos"],
+                runs=len(result["launch_runs_s"]), ci=MEASURED[key]["launch_s"]))
+    else:
+        note, footer = s["resources_note"], s["resources_footer"]
     W = 960
     top, row_h = 150, 40
-    H = top + row_h * len(RESOURCES) + 92
+    H = top + row_h * len(RESOURCES) + 92 + 20 * (len(footer) - 2)
     out = [
         f'<defs>{hatch(theme)}</defs>',
         f'<text x="40" y="52" font-size="22" font-weight="700" fill="{t["text"]}">{esc(s["resources_title"])}</text>',
-        f'<text x="40" y="78" font-size="14" fill="{t["muted"]}">{esc(s["resources_note"])}</text>',
+        f'<text x="40" y="78" font-size="14" fill="{t["muted"]}">{esc(note)}</text>',
     ]
     # Legend, laid out from the right edge.
     right = W - 40
@@ -369,12 +432,14 @@ def resources(theme, lang):
     for (px, pw), title in zip(panels, s["panels"]):
         out.append(f'<text x="{px}" y="{top - 22}" font-size="13.5" font-weight="600" fill="{t["muted"]}">{esc(title)}</text>')
         out.append(f'<line x1="{px}" y1="{top - 10}" x2="{px}" y2="{top + row_h * len(RESOURCES) - 6}" stroke="{t["border"]}"/>')
+    # Room for the largest value of each panel.
+    largest = [max((row[i] for row in RESOURCES if row[i] is not None), default=1) for i in (1, 2, 3)]
     scales = [
-        lambda v: math.log10(max(v, 1)) / math.log10(300),
-        lambda v: v / 1.2,
-        lambda v: v / 180,
+        lambda v: math.log10(max(v, 1)) / math.log10(max(300, largest[0] * 1.1)),
+        lambda v: v / max(1.2, largest[1] * 1.1),
+        lambda v: v / max(180, largest[2] * 1.1),
     ]
-    units = [lambda v: f"{v:.1f} MB" if v < 10 and v != int(v) or v < 3 else f"{v:g} MB", lambda v: f"{v:.2f} s", lambda v: f"{v:g} MB"]
+    units = [lambda v: f"{v:.1f} MB" if v < 10 else f"{v:.0f} MB", lambda v: f"{v:.2f} s", lambda v: f"{v:.0f} MB"]
     for index, (key, size, start, memory, measured) in enumerate(RESOURCES):
         cy = top + index * row_h + row_h / 2 - 6
         if index % 2 == 0:
@@ -384,15 +449,17 @@ def resources(theme, lang):
         if size is None:
             out.append(f'<text x="{panels[0][0] + 10}" y="{cy + 5}" font-size="13" fill="{t["muted"]}">{esc(s["no_desktop"])}</text>')
             continue
-        for (px, pw), value, scale, unit in zip(panels, (size, start, memory), scales, units):
+        for panel, ((px, pw), value, scale, unit) in enumerate(zip(panels, (size, start, memory), scales, units)):
             bar = max(4, min(1.0, scale(value)) * (pw - 70))
             fill = t["accent"] if measured else "url(#hatch)"
             out.append(f'<rect x="{px + 1}" y="{cy - 7}" width="{bar:.1f}" height="14" rx="5" fill="{fill}"/>')
             label = unit(value) if measured else "≈" + unit(value)
+            if panel == 1 and key in LOCAL:
+                label += " *"
             out.append(f'<text x="{px + bar + 8:.1f}" y="{cy + 5}" font-size="12.5" font-weight="{700 if measured else 500}" '
                        f'fill="{t["text"] if measured else t["muted"]}">{esc(label)}</text>')
-    for line, text in enumerate(s["resources_footer"]):
-        out.append(f'<text x="40" y="{H - 48 + line * 20}" font-size="12.5" fill="{t["muted"]}">{esc(text)}</text>')
+    for line, text in enumerate(footer):
+        out.append(f'<text x="40" y="{H - 28 - 20 * (len(footer) - 1) + line * 20}" font-size="12.5" fill="{t["muted"]}">{esc(text)}</text>')
     return svg(W, H, theme, "\n".join(out))
 
 

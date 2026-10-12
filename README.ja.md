@@ -447,11 +447,11 @@ UI 層とロジック層がどの言語で、どう実行されるかが、実�
 <img alt="言語と実行方式：Bern の UI 層は各プラットフォームのネイティブ UI コード（Swift、C++、Rust）、ロジック層は Rust で、同一プロセス内で C ABI 経由で呼び出し、GC はありません" src="Docs/Assets/compare/languages-ja-light.svg" width="100%">
 </picture>
 
-一行の文字を表示するだけの同じウィンドウでも、パッケージサイズ、起動時間、メモリはフレームワークによって大きく違います。Bern の行は実測で、ほかは今のところ机上の見積もりです。今後 M4 上の CI で統一して実測し、置き換えます。
+一行の文字を表示するだけの同じウィンドウでも、パッケージサイズ、起動時間、メモリはフレームワークによって大きく違います。図は同じ CI 仮想マシン（GitHub ホストの Apple M1）での実測です。各フレームワーク自身のツールで release パッケージを作り、交互に 10 回ずつ起動した中央値を示します。Bern の起動時間は M4 でも実測しており、図の注記のとおりです。スクリプトは [benchmarks/](benchmarks/) にあり、Actions の Benchmarks ワークフローで再実行できます。
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/resources-ja-dark.svg">
-<img alt="Hello World のリソース：Bern は実測でパッケージ 2.0 MB、起動 0.28 秒、メモリ 20 MB。ほかのフレームワークは見積もり" src="Docs/Assets/compare/resources-ja-light.svg" width="100%">
+<img alt="Hello World のリソース（実測）：Bern は 2.1 MB、起動 0.20 秒（M4。CI 仮想マシンでは 0.26 秒）、メモリ 18 MB。GPUI は 4.2 MB、0.28 秒、27 MB。Electron は 301 MB、1.07 秒、77 MB" src="Docs/Assets/compare/resources-ja-light.svg" width="100%">
 </picture>
 
 ### どれを選ぶか

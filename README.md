@@ -447,11 +447,11 @@ counter-mcp   # 同一份命令目录，提供给 AI Agent
 <img alt="前后端语言与执行方式：Bern 的界面层是各平台原生 UI 代码（Swift、C++、Rust），逻辑层是 Rust，同进程经 C ABI 调用，没有垃圾回收" src="Docs/Assets/compare/languages-light.svg" width="100%">
 </picture>
 
-同样一个只显示一行字的窗口，各框架的包体、启动时间与内存差别很大。Bern 一栏是实测；其他框架目前是纸面估算，以后会在 M4 上用 CI 统一实测后替换。
+同样一个只显示一行字的窗口，各框架的包体、启动时间与内存差别很大。下图在同一台 CI 虚拟机（GitHub 托管的 Apple M1）上实测：各框架用自己的工具打 release 包，测量时轮流启动，每个 10 次取中位数；Bern 的启动时间另用 M4 本机实测，图中有注明。脚本在 [benchmarks/](benchmarks/) 中，可以在 Actions 里重新运行 Benchmarks 工作流。
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/resources-dark.svg">
-<img alt="Hello World 的资源占用：Bern 实测包体 2.0 MB、启动 0.28 秒、内存 20 MB；其他框架为估算" src="Docs/Assets/compare/resources-light.svg" width="100%">
+<img alt="Hello World 的资源占用（实测）：Bern 包体 2.1 MB、启动 0.20 秒（M4 本机；CI 虚拟机上 0.26 秒）、内存 18 MB；GPUI 4.2 MB、0.28 秒、27 MB；Electron 301 MB、1.07 秒、77 MB" src="Docs/Assets/compare/resources-light.svg" width="100%">
 </picture>
 
 ### 怎么选
