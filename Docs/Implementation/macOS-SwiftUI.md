@@ -74,7 +74,7 @@
 | `Grid` | `LazyVGrid` | 一列 `GridItem(.adaptive(minimum: min_width), spacing: gap)`，行距同为 `gap` |
 | `Stack` | `ZStack(alignment:)` | 九个方位对应 `.topLeading` 到 `.bottomTrailing` |
 
-在展示应用的“图片与布局”页验证：同一张 16:9 图片在 120×90 的框中按 `contain`、`cover`、`fill` 分别留白、裁掉两边、拉伸，只写宽度的标志保持比例；层叠中标志在右上角；音量（引擎状态，`total: 100`）与亮度（会话草稿）两个进度条在 CLI 执行 `showcase set-volume --value 90` 与 `ui set-number --target layout_page.layout_brightness --value 0.2` 后立即变为 90% 与 20%；920 宽的窗口中网格为三列。HDR 图片在 M4 的内建屏幕（EDR 余量最高 2 倍）上验证：测试图左半为 SDR 白、右半为它的 4 倍，用 ScreenCaptureKit 以 HDR 截取窗口读像素值。改为 HDR 解码并允许高动态范围之前，带增益图的 JPEG 只显示 SDR 基础图（右半 0.96），PQ 的 PNG 被压进 SDR（0.94）；之后系统把余量提到 2.0，两者右半分别为 1.79 与 1.87，普通 SDR 图仍为 1.0。带 EXIF 方向 6 的照片按竖图显示。
+在展示应用的“图片与布局”页验证：同一张 16:9 图片在 120×90 的框中按 `contain`、`cover`、`fill` 分别留白、裁掉两边、拉伸，只写宽度的标志保持比例；层叠中标志在右上角；音量（引擎状态，`total: 100`）与亮度（会话草稿）两个进度条在 CLI 执行 `showcase set-volume --value 90` 与 `ui set-number --target layout_page.layout_brightness --value 0.2` 后立即变为 90% 与 20%；920 宽的窗口中网格为三列。HDR 图片在 M4 的内建屏幕（EDR 余量最高 2 倍）上验证：测试图左半为 SDR 白、右半为它的 4 倍，用 ScreenCaptureKit 以 HDR 截取窗口读像素值。改为 HDR 解码并允许高动态范围之前，带增益图的 JPEG 只显示 SDR 基础图（右半 0.96），PQ 的 PNG 被压进 SDR（0.94）；之后系统把余量提到 2.0，两者右半分别为 1.79 与 1.87，普通 SDR 图仍为 1.0。带 EXIF 方向 6 的照片按竖图显示。HDR 视频不用额外处理：`AVPlayerView` 自动按 EDR 显示，用 ffmpeg 把 PQ 测试图编成 10 位 HEVC（BT.2020、PQ、HDR10 元数据）作为展示应用的精选片段播放，画面最亮处为 SDR 白的 1.48 倍。
 
 另外，Bern 的引擎几乎不增加启动时间：用 `benchmarks/measure.swift` 在 M4 上测，Hello 10 次启动的中位数为 0.20 s，只有一个窗口和一行文字的空白 SwiftUI 应用 5 次的中位数为 0.22 s。
 

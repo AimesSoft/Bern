@@ -58,7 +58,7 @@
 | `Query` | 加载：转圈与文案；空结果与无数据失败：紧凑的 `AdwStatusPage`（失败带“重试”）；刷新与有数据的失败：数据上方的状态行 |
 | `Adaptive` / `Layout` | 一个零高度的绘图区测量可用宽度，按 `[layouts]` 断点选择布局 |
 | `Video` | `GtkPicture` 显示播放器的 `GtkMediaFile`，下方为标准控制条（见“媒体”） |
-| `Image` | `GtkPicture`（`content-fit` 对应 `fit`，可缩小）放在固定尺寸的 `BernPictureFrame` 中：`GtkPicture` 本身要求原图大小，这个小部件把它限制为声明的宽高，得到更多空间时仍靠前缘；只写一边时另一边按图片比例。JPEG 经 gdk-pixbuf 解码并按 EXIF 方向转正（GTK 4.14 自己的加载器忽略方向），其他格式用 GTK 的加载器。`label` 为替代文本，没有时对辅助技术隐藏 |
+| `Image` | `GtkPicture`（`content-fit` 对应 `fit`，可缩小）放在固定尺寸的 `BernPictureFrame` 中：`GtkPicture` 本身要求原图大小，这个小部件把它限制为声明的宽高，得到更多空间时仍靠前缘；只写一边时另一边按图片比例。JPEG 经 gdk-pixbuf 解码并按 EXIF 方向转正（GTK 4.14 自己的加载器忽略方向），其他格式用 GTK 的加载器。HDR 图片（PQ、HLG 的 PNG，带增益图的 JPEG）由 `bern-image` 解码：GTK 4.16 起在 Wayland 上且打开了色彩管理（4.16 至 4.18.0 默认打开，4.18.1 起要用户设置 `GDK_DEBUG=color-mgmt`）时，以全部增益、线性 BT.2020 交给 GTK（`GdkMemoryTextureBuilder` 与 rec2100-linear，运行时查找，同一个程序也能在 4.14 上运行）；其他情况下先转成 SDR：增益图为作者给的 SDR 图，PQ 与 HLG 做色调映射。实测 GTK 4.14：PQ 图不再发灰，增益图显示 SDR 图。`label` 为替代文本，没有时对辅助技术隐藏 |
 | `Progress` | 有 `value` 时为标签下的 `GtkProgressBar`，由标签命名；没有时为 `GtkSpinner` 加 `dim-label` 文字（libadwaita 1.5 还没有 `AdwSpinner`） |
 | `Grid` | 同宽单元格的 `GtkFlowBox`：每格至少 `min_width` 宽，不可选择，单元格本身不获得焦点 |
 | `Stack` | `GtkGrid` 的同一个格子，子元素的顺序即叠放顺序，按 `align` 设 `halign` 与 `valign`；外面一层横向 `GtkBox` 让它保持自身尺寸 |
@@ -151,5 +151,6 @@ target/bern/linux/Showcase/showcase
 - `Menu` 的菜单项图标与 `destructive` 角色不呈现（GNOME 菜单通常只有文字）。
 - 多实例窗口、焦点迁移、Flatpak 等打包与图标安装尚未实现；桌面文件的 `Exec` 是构建机上的绝对路径。
 - 设置窗口切换页签只构建选中的页签；窄窗口下没有底部视图切换栏。
-- `Image` 在 Ubuntu 24.04 的 GTK 4.14 上（虚拟机经 Broadway，只有 SDR 输出）实测：带增益图的 JPEG 显示其 SDR 基础图，PQ 的 PNG 整体发灰、对比度低。按 GTK 的 NEWS 与源码：4.14 没有色彩空间；4.16 加入 `GdkColorState`，加载 PNG 时读取 cICP 并在合成时转换，PQ 与 HLG 图片因此显示正确；HDR 输出依赖 Wayland 的 `wp_color_manager_v1`（4.17.5 起），但 4.18.1 起改为需要 `GDK_DEBUG=color-mgmt` 才启用，主线（4.24）仍是如此；GTK 的 JPEG 加载器固定按 sRGB 解码，不读增益图与 ICC，带增益图的 JPEG 只能显示基础图，除非 Bern 自己解码增益图。较新 GTK 上的效果尚未实测。
+- HDR 图片的 HDR 输出（GTK 4.16 起、Wayland、打开色彩管理）没有实测：测试用的虚拟机是 GTK 4.14，也不能输出 HDR。GTK 的 JPEG 加载器不读增益图，所以增益图由 Bern 应用；GTK 的色彩空间转换只截断不做色调映射，所以 GTK 不输出 HDR 时由 Bern 先转成 SDR。
+- `Video` 的 HDR 视频依赖 GTK：GTK 4.16 起 GStreamer 的帧带有色彩空间，HDR 输出同样需要打开色彩管理；未实测。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。

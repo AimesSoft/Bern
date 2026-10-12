@@ -11,6 +11,7 @@ bern-protocol.workspace = true
 bern-command.workspace = true
 bern-runtime.workspace = true
 bern-media.workspace = true
+bern-image = { workspace = true, optional = true }
 bern-transport-ipc = { workspace = true, optional = true }
 bern-adapter-json = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
@@ -19,5 +20,11 @@ serde_json = { workspace = true, optional = true }
 default = ["ipc"]
 # The local control channel for CLI, JSON and MCP entries (Unix sockets).
 ipc = ["dep:bern-transport-ipc"]
+# Decoding HDR pictures for frontends that draw them themselves (Windows).
+picture = ["dep:bern-image"]
 # The WebUI link to the engine and media hub of a separate engine host.
 remote = ["dep:bern-adapter-json", "dep:serde_json"]
+
+# Tests cover the optional picture interface too.
+[dev-dependencies]
+bern-ffi = { path = ".", features = ["picture"] }

@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.20
+- 版本：v0.21
 - 状态：架构设计草案
 - 更新日期：2026-10-11
 - 项目名称：Bern UI
@@ -355,7 +355,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Slider | 范围值、连续变化和提交事件 | 初期 |
 | Picker | 从有限选项中单选，按场景呈现为菜单或分段控件 | 初期 |
 | ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复 | 初期，虚拟化后续 |
-| Image | 随包的 PNG 或 JPEG 资源；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正；目标能显示 HDR 时，带增益图或 PQ、HLG 的图片按高动态范围显示，否则显示其 SDR 版本 | 阶段六；首版只显示随包资源，HDR 已在 macOS 与 Web（Chrome）验证，Windows 与 Linux 尚未在 HDR 显示器上验证 |
+| Image | 随包的 PNG 或 JPEG 资源；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正。HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）在显示器能显示 HDR 时按高动态范围显示，SDR 白保持在系统的 SDR 亮度，高光按显示器峰值做色调映射；不能显示 HDR 时，带增益图的 JPEG 显示作者给的 SDR 图，PQ 与 HLG 做色调映射 | 阶段六；首版只显示随包资源。HDR 在 macOS 与 Web（Chrome）实测；Windows 自绘，只在 SDR 显示器上实测；Linux 的 HDR 输出要 GTK 4.16 起并由用户打开 GTK 的色彩管理，未实测 |
 | Progress | 有 `value` 时是进度条，进度为 `value / total`（`total` 默认 1，超出范围按边界显示）；没有 `value` 时是不确定进度；`label` 同时是可访问名称 | 阶段六 |
 | Menu 和 MenuItem | 收纳操作入口的菜单；每个菜单项绑定命令，可绑定功能 | 阶段四 |
 | Adaptive 和 Layout | 按可用宽度在 `compact` 与 `expanded` 布局之间选择，保留状态 | 阶段四 |
@@ -1455,6 +1455,7 @@ Bern 在一个 Rust workspace 中开发，不为编译器另外创建仓库。�
 | bern-target-api | 公共目标描述、能力、生成器及构建适配接口 |
 | bern-theme | 纯 Rust 色彩算法、语义颜色与配方 schema、对比检查及主题快照 |
 | bern-media | MediaSource、播放器身份、标准媒体命令与状态、执行端路由及媒体能力契约，不依赖具体 UI SDK |
+| bern-image | 为不能自行显示 HDR 图片的目标解码 PQ、HLG 的 PNG 与带增益图的 JPEG（ISO 21496-1、Ultra HDR），输出以 SDR 白为 1.0 的线性光，并提供转为 SDR 的色调映射 |
 | bern-media-backend-* | Web HTMLMediaElement、平台媒体设施或第三方播放内核的执行适配 |
 | bern-video-presenter-* | 兼容的媒体后端与 UI 目标之间的视频附着、布局、覆盖层及呈现能力适配 |
 | bern-compiler | 语义检查、结构分析及通过公共接口协调生成，不依赖具体目标 |
@@ -1666,3 +1667,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.18 | 增加应用图标：`[app].icon` 声明方形 PNG 并严格校验；未声明时各目标使用 Bern 标志，分别生成 macOS 的 `.icns`、Windows 的图标资源、Linux 的图标主题条目与 Web 的页面图标 |
 | v0.19 | 增加构建工具命令 `bern new`、`bern run` 与 `bern doctor`；生成的胶水按项目自身 `bern` 依赖的来源引用 Bern crate，项目不再需要位于 Bern 仓库内；未指定目标时按本机系统与工具选择目标；直接写在窗口中的控件以窗口 id 命名；Windows 目标以预编译头做增量构建，改用 Windows App SDK 2.x 并接受任何 2.x 运行时（包括 Windows 11 自带的），可用 `frontends` 只编译 WinUI 3 或系统 XAML；增加 `bern package` 与 `[app].publisher`，生成 macOS 磁盘映像、Windows 安装程序、Debian 包与 Web 压缩包，签名经环境变量配置 |
 | v0.20 | 组件库第一批：`Image`（随包 PNG 与 JPEG，编译器检查资源已声明，包括组件库中的引用）、`Progress`（确定与不确定进度，数值为受限表达式）、`Grid`（不小于 `min_width` 的等宽自适应列）与 `Stack`（叠放与九方位对齐）；IR 版本 6 |
+| v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |

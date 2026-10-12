@@ -57,6 +57,8 @@ fn showcase_compiles_to_ir() {
         names,
         [
             "images/bern.png",
+            "images/hdr-gainmap.jpg",
+            "images/hdr-pq.png",
             "images/landscape.jpg",
             "media/aurora.mp4",
             "media/broken.mp4",

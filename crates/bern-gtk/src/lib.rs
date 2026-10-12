@@ -13,6 +13,7 @@
 
 mod controls;
 pub mod ctx;
+mod hdr;
 mod host;
 mod icons;
 mod media;

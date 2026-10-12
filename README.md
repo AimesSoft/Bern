@@ -196,7 +196,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - **类型化导航**：侧边栏、带类型化路由的推入导航、页签、工具栏与菜单。
 - **功能契约**：声明组件在每种布局中必须覆盖的功能，由编译器证明覆盖完整。
 - **随包资源**：在 `Bern.toml` 中声明文件，构建时检查，运行时按名称定位。
-- **图片与布局**：`Image` 显示随包图片，未声明的资源在编译时报错；`Grid` 按可用宽度自动增减列数，`Stack` 叠放并按九个方位对齐，`Progress` 显示进度条或不确定进度。
+- **图片与布局**：`Image` 显示随包图片，未声明的资源在编译时报错，HDR 图片（PQ、HLG 的 PNG 与带增益图的 JPEG）在能显示 HDR 的屏幕上按 HDR 显示；`Grid` 按可用宽度自动增减列数，`Stack` 叠放并按九个方位对齐，`Progress` 显示进度条或不确定进度。
 
 </details>
 

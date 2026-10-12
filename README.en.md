@@ -196,7 +196,7 @@ Each window has its own drafts, close check and save command; minimize, maximize
 - **Typed navigation**: sidebars, push navigation with typed routes, tabs, toolbars and menus.
 - **Feature contracts**: declare which features a component must cover in each layout; the compiler proves the coverage.
 - **Bundled resources**: files declared in `Bern.toml`, checked at build time and located by name at runtime.
-- **Images and layout**: `Image` shows bundled pictures, and an undeclared one fails to compile; `Grid` adds and drops columns with the width, `Stack` layers views with nine alignments, `Progress` shows a bar or indeterminate progress.
+- **Images and layout**: `Image` shows bundled pictures, HDR ones (PQ and HLG PNGs, JPEGs with a gain map) in HDR where the display can, and an undeclared one fails to compile; `Grid` adds and drops columns with the width, `Stack` layers views with nine alignments, `Progress` shows a bar or indeterminate progress.
 
 </details>
 

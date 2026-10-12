@@ -11,6 +11,8 @@
 
 pub mod link;
 pub mod media;
+#[cfg(feature = "picture")]
+pub mod picture;
 pub mod query;
 #[cfg(feature = "remote")]
 pub mod remote;

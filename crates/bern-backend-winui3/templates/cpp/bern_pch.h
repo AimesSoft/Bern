@@ -9,13 +9,33 @@
 
 #include "bern_base.h"
 
+#include <d2d1_3.h>
+#include <d2d1effects_2.h>
+#include <d3d11.h>
 #include <dwmapi.h>
+#include <dxgi1_6.h>
 #include <winrt/Windows.Graphics.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Storage.Streams.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
+
+// HDR pictures draw with Direct2D into swap chains.
+#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "d3d11.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "dxguid.lib")
+
+// The native interfaces of the two SwapChainPanels. The WinUI 3 and the
+// Windows SDK headers both call theirs ISwapChainPanelNative, with
+// different IDs, so a build with both front ends declares them here.
+struct __declspec(uuid("63aad0b8-7c24-40ff-85a8-640d944cc325")) IBernWinUISwapChainPanelNative : ::IUnknown {
+    virtual HRESULT __stdcall SetSwapChain(IDXGISwapChain* swapChain) = 0;
+};
+struct __declspec(uuid("f92f19d2-3ade-45a6-a20c-f6f1ea90554b")) IBernIslandsSwapChainPanelNative : ::IUnknown {
+    virtual HRESULT __stdcall SetSwapChain(IDXGISwapChain* swapChain) = 0;
+};
 
 #if BERN_WITH_WINUI
 // The WinUI 3 front end, on the Windows App Runtime 2 the system has.

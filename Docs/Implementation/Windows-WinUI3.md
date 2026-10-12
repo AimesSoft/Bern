@@ -92,6 +92,8 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | `Grid` | 自定义面板 `GridPanel`：列数为放得下的最大值，列宽平分，每行与该行最高的单元格一样高 |
 | `Stack` | 单格 `Grid`，子元素叠放，按 `align` 设对齐 |
 
+HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Image`：WinUI 3 的 `Image` 没有 HDR（[microsoft-ui-xaml#67](https://github.com/microsoft/microsoft-ui-xaml/issues/67)、[WindowsAppSDK#6291](https://github.com/microsoft/WindowsAppSDK/issues/6291)），系统 XAML 的文档也只说它能解码。Bern 用 `bern_picture_kind` 认出 HDR 图片后，在后台线程以 `bern_picture_decode`（`bern-image`，经 `bern-ffi` 的 `picture` 功能）解码成线性 scRGB，在界面线程上传为 Direct2D 的 32 位浮点位图，画进 `SwapChainPanel` 里 16 位浮点、scRGB 色彩空间的交换链；系统合成器直接合成它，两种前端用同一套代码（两套 SDK 头文件中的 `ISwapChainPanelNative` 同名不同 ID，预编译头里另行声明）。光的处理按窗口所在的显示器：DXGI 给出是否在 HDR 模式与峰值亮度，显示配置给出用户设的 SDR 亮度；Direct2D 的白电平调整把图片的 1.0 放到 SDR 亮度，HDR 色调映射把高光压到显示器峰值，SDR 模式下压到 SDR 白。带增益图的 JPEG 按显示器余量解码，SDR 显示器上就是作者给的 SDR 图。只要有 HDR 图片在屏幕上，每秒检查一次显示器，HDR 开关、SDR 亮度变化或窗口移到另一块显示器时重画，增益图按新的余量重新解码；设备丢失时重建设备。没有 Direct3D 或解码失败时退回 XAML 的 `Image`。实测（PC 为 SDR 显示器，两种前端相同）：增益图显示为作者给的 SDR 图（编码值 166 与 241，ImageIO 读基础图为 166 与 237）；PQ 图左右分别为 194 与 244，高光没有截断。
+
 `Image` 与 `Stack` 外面各有一层 `Grid`，所以在会拉伸子元素的列中保持自身尺寸并靠前缘。在展示应用的“图片与布局”页按两种前端验证：效果与 macOS 相同，`contain` 的图片在框内居中；网格三列；CLI 修改音量与亮度后两个进度条立即更新。
 
 图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。
@@ -207,7 +209,8 @@ target\bern\windows\Showcase\showcase.exe
 - 应用按 2.5.1 编译、接受 2.0 起的运行时：只在 2.2 与 2.5.1 上实测过，没有 2.0、2.1 的机器。
 - 未提供 MSIX 打包、安装程序、应用图标与代码签名。未签名的新程序可能被安全软件的启发式规则误判，正式分发需要签名。
 - 回退前端没有 `SelectorBar`、`InfoBar` 与 `TitleBar`，分别以按钮组、自绘错误条与系统标题栏代替。
-- `Image` 不显示 HDR 图片：WinUI 3 的 `Image` 控件目前不支持 HDR。WinUI 的 HDR/WCG 功能提案 [microsoft-ui-xaml#67](https://github.com/microsoft/microsoft-ui-xaml/issues/67) 仍未实现（2026 年 9 月列入 Backlog）；[WindowsAppSDK#6291](https://github.com/microsoft/WindowsAppSDK/issues/6291) 中微软维护者答复 WinUI 3 “does not have full HDR support at this time”；社区实测 `Image` 显示 HDR 图片被截到 SDR，可行做法是 `SwapChainPanel` 加 Direct2D（微软示例 D2DAdvancedColorImages）。Bern 尚未实现这条路径。测试用的 PC 没有确认是否为 HDR 显示器，窗口快照（`RenderTargetBitmap`）只有 8 位 SDR；快照中带增益图的 JPEG 为其 SDR 基础图，带 EXIF 方向的照片已转正，两种前端相同。
+- HDR 图片只在 SDR 显示器上实测过：测试用的 PC 没有 HDR 显示器，HDR 模式下的亮度未验证。
+- `Video` 不显示 HDR：WinUI 3 的 `MediaPlayerElement` 目前不支持 HDR（[microsoft-ui-xaml#9238](https://github.com/microsoft/microsoft-ui-xaml/issues/9238)，微软工程师的解释是 UWP 靠 CoreWindow 判断显示器，Windows App SDK 应用没有 CoreWindow），要显示 HDR 视频需要让播放引擎直接输出到 `SwapChainPanel`，未实现。
 - 页面工具放在页头，没有使用 `CommandBar`；`Menu` 的菜单项不呈现 `destructive` 角色。
 - 品牌色的浅色与深色档位按与白色、黑色混合近似生成。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。

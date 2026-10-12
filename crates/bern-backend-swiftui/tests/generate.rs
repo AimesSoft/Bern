@@ -77,6 +77,8 @@ fn showcase_generates_swift_that_type_checks() {
         names,
         [
             "images/bern.png",
+            "images/hdr-gainmap.jpg",
+            "images/hdr-pq.png",
             "images/landscape.jpg",
             "media/aurora.mp4",
             "media/broken.mp4",
@@ -113,7 +115,7 @@ fn showcase_generates_swift_that_type_checks() {
     let glue = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
     assert!(
         glue.contains(
-            r#"resources: vec!["images/bern.png".into(), "images/landscape.jpg".into(), "media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
+            r#"resources: vec!["images/bern.png".into(), "images/hdr-gainmap.jpg".into(), "images/hdr-pq.png".into(), "images/landscape.jpg".into(), "media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
         ),
         "{glue}"
     );

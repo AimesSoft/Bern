@@ -196,7 +196,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - **型別化導覽**：側邊欄、帶型別化路由的推入式導覽、分頁、工具列與選單。
 - **功能契約**：宣告元件在每種版面中必須涵蓋的功能，由編譯器證明涵蓋完整。
 - **隨附資源**：在 `Bern.toml` 中宣告檔案，建置時檢查，執行時依名稱定位。
-- **圖片與版面**：`Image` 顯示隨附圖片，未宣告的資源在編譯時報錯；`Grid` 依可用寬度自動增減欄數，`Stack` 疊放並依九個方位對齊，`Progress` 顯示進度列或不確定進度。
+- **圖片與版面**：`Image` 顯示隨附圖片，未宣告的資源在編譯時報錯，HDR 圖片（PQ、HLG 的 PNG 與帶增益圖的 JPEG）在能顯示 HDR 的螢幕上以 HDR 顯示；`Grid` 依可用寬度自動增減欄數，`Stack` 疊放並依九個方位對齊，`Progress` 顯示進度列或不確定進度。
 
 </details>
 

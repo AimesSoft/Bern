@@ -792,24 +792,16 @@ struct ImageProps {
     char const* fit = nullptr;
 };
 
-/// A picture from a declared resource. With one side given, the other
-/// follows the picture's aspect ratio. Without a label it is decorative.
-inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
+/// The XAML picture: SDR pictures, and HDR ones where they cannot be drawn
+/// as HDR. `framed` when both sides are given.
+inline controls::Image SdrImage(ImageProps const& props, std::vector<uint8_t> bytes, TextFn const& name) {
     controls::Image image;
     std::string_view fit = props.fit ? props.fit : "contain";
     bool framed = props.width && props.height;
     image.Stretch(!framed || fit == "contain" ? media::Stretch::Uniform
         : fit == "cover" ? media::Stretch::UniformToFill
         : media::Stretch::Fill);
-    // The declared frame. With both sides, the picture fits inside it and
-    // is centered when it keeps its aspect ratio; with one, the picture
-    // sets the other.
-    controls::Grid frame;
-    frame.HorizontalAlignment(xaml::HorizontalAlignment::Left);
-    frame.VerticalAlignment(xaml::VerticalAlignment::Top);
     if (framed) {
-        frame.Width(*props.width);
-        frame.Height(*props.height);
         image.HorizontalAlignment(xaml::HorizontalAlignment::Center);
         image.VerticalAlignment(xaml::VerticalAlignment::Center);
     } else {
@@ -818,13 +810,399 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
         image.HorizontalAlignment(xaml::HorizontalAlignment::Left);
         image.VerticalAlignment(xaml::VerticalAlignment::Top);
     }
-    frame.Children().Append(image);
     media::Imaging::BitmapImage bitmap;
     image.Source(bitmap);
-    if (auto bytes = ResourceBytes(props.source); !bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
-    else Report(std::string("image ") + props.source + ": the resource cannot be read");
-    if (props.label) BindName(image, Bound(ctx, props.label));
+    if (!bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
+    if (name) BindName(image, name);
     else xaml::Automation::AutomationProperties::SetAccessibilityView(image, xaml::Automation::Peers::AccessibilityView::Raw);
+    return image;
+}
+
+// ---------------------------------------------------------------------------
+// HDR pictures. XAML's Image shows SDR only, so a PQ or HLG PNG or a JPEG
+// with a gain map is decoded by Rust (`bern_picture_decode`) and drawn by
+// Direct2D into an scRGB swap chain in a SwapChainPanel, which the system
+// compositor shows in HDR. Light is fitted to the display: SDR white at the
+// user's SDR brightness, highlights tone mapped to the display's peak, and
+// on an SDR display a gain map gives the SDR picture its author made.
+
+namespace Hdr {
+
+using SwapChainPanelNative = std::conditional_t<kWinUI, IBernWinUISwapChainPanelNative, IBernIslandsSwapChainPanelNative>;
+
+/// What a display shows: whether it is in HDR, its SDR white and its peak
+/// in nits.
+struct Display {
+    bool hdr = false;
+    float sdrWhite = 80;
+    float peak = 80;
+    bool operator==(Display const&) const = default;
+    /// Peak over SDR white: how much brighter than white it can show.
+    float Headroom() const { return hdr ? (std::max)(1.0f, peak / sdrWhite) : 1.0f; }
+};
+
+/// The display `hwnd` is on, as DXGI and the display configuration
+/// report it now.
+inline Display QueryDisplay(HWND hwnd) {
+    Display display;
+    HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+    winrt::com_ptr<IDXGIFactory1> factory;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.put())))) return display;
+    for (UINT a = 0;; ++a) {
+        winrt::com_ptr<IDXGIAdapter1> adapter;
+        if (factory->EnumAdapters1(a, adapter.put()) != S_OK) break;
+        for (UINT o = 0;; ++o) {
+            winrt::com_ptr<IDXGIOutput> output;
+            if (adapter->EnumOutputs(o, output.put()) != S_OK) break;
+            auto output6 = output.try_as<IDXGIOutput6>();
+            DXGI_OUTPUT_DESC1 desc{};
+            if (!output6 || FAILED(output6->GetDesc1(&desc)) || desc.Monitor != monitor) continue;
+            display.hdr = desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+            if (display.hdr) display.peak = desc.MaxLuminance > 0 ? desc.MaxLuminance : 1000.0f;
+        }
+    }
+    if (!display.hdr) return display;
+    // The SDR brightness the user chose for this display.
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
+    GetMonitorInfoW(monitor, &info);
+    UINT32 paths = 0, modes = 0;
+    if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &paths, &modes) != ERROR_SUCCESS) return display;
+    std::vector<DISPLAYCONFIG_PATH_INFO> pathInfo(paths);
+    std::vector<DISPLAYCONFIG_MODE_INFO> modeInfo(modes);
+    if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &paths, pathInfo.data(), &modes, modeInfo.data(), nullptr) != ERROR_SUCCESS)
+        return display;
+    for (UINT32 i = 0; i < paths; ++i) {
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME source{};
+        source.header = {DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, sizeof(source), pathInfo[i].sourceInfo.adapterId, pathInfo[i].sourceInfo.id};
+        if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS || wcscmp(source.viewGdiDeviceName, info.szDevice) != 0) continue;
+        DISPLAYCONFIG_SDR_WHITE_LEVEL white{};
+        white.header = {DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL, sizeof(white), pathInfo[i].targetInfo.adapterId, pathInfo[i].targetInfo.id};
+        if (DisplayConfigGetDeviceInfo(&white.header) == ERROR_SUCCESS && white.SDRWhiteLevel > 0)
+            display.sdrWhite = white.SDRWhiteLevel * 80.0f / 1000.0f;
+        break;
+    }
+    display.peak = (std::max)(display.peak, display.sdrWhite);
+    return display;
+}
+
+/// The Direct3D and Direct2D devices every HDR picture draws with.
+struct Gpu {
+    winrt::com_ptr<ID3D11Device> d3d;
+    winrt::com_ptr<IDXGIFactory2> factory;
+    winrt::com_ptr<ID2D1DeviceContext> context;
+};
+
+inline std::shared_ptr<Gpu>& CurrentGpu() {
+    static std::shared_ptr<Gpu> gpu;
+    return gpu;
+}
+
+/// The devices, made on first use; null when Direct3D is unavailable.
+inline std::shared_ptr<Gpu> GetGpu() {
+    auto& gpu = CurrentGpu();
+    if (gpu) return gpu;
+    auto made = std::make_shared<Gpu>();
+    UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, made->d3d.put(), nullptr, nullptr);
+    if (FAILED(hr)) {
+        made->d3d = nullptr;
+        hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, made->d3d.put(), nullptr, nullptr);
+    }
+    if (FAILED(hr)) return nullptr;
+    auto dxgiDevice = made->d3d.as<IDXGIDevice>();
+    winrt::com_ptr<IDXGIAdapter> adapter;
+    if (FAILED(dxgiDevice->GetAdapter(adapter.put())) || FAILED(adapter->GetParent(IID_PPV_ARGS(made->factory.put())))) return nullptr;
+    winrt::com_ptr<ID2D1Factory1> factory;
+    D2D1_FACTORY_OPTIONS options{};
+    if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), &options, factory.put_void()))) return nullptr;
+    winrt::com_ptr<ID2D1Device> device;
+    if (FAILED(factory->CreateDevice(dxgiDevice.get(), device.put()))) return nullptr;
+    if (FAILED(device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, made->context.put()))) return nullptr;
+    gpu = made;
+    return gpu;
+}
+
+/// One HDR picture on screen.
+struct View : std::enable_shared_from_this<View> {
+    controls::SwapChainPanel panel;
+    controls::Grid frame{nullptr};
+    Win* win = nullptr;
+    std::shared_ptr<std::vector<uint8_t>> bytes;
+    ImageProps props;
+    TextFn name;
+    bool gainMap = false;
+    std::shared_ptr<Gpu> gpu;
+    winrt::com_ptr<ID2D1Bitmap1> bitmap;
+    uint32_t width = 0, height = 0;
+    float peak = 1;
+    /// The headroom the gain map was applied for; negative before decoding.
+    float decodedFor = -1;
+    bool decoding = false;
+    Display display;
+    winrt::com_ptr<IDXGISwapChain1> chain;
+    UINT chainWidth = 0, chainHeight = 0;
+    /// Whether the swap chain shows the current bitmap at its size.
+    bool rendered = false;
+
+    HWND Window() const { return win ? win->hwnd : nullptr; }
+
+    /// Size the panel from the picture's aspect ratio: the fitted rectangle
+    /// for `contain` in a frame, the frame for `cover` and `fill`, the
+    /// missing side with one given.
+    void Layout() {
+        if (!width || !height) return;
+        double aspect = double(width) / height;
+        std::string_view fit = props.fit ? props.fit : "contain";
+        if (props.width && props.height) {
+            if (fit == "contain") {
+                double w = *props.width, h = *props.height;
+                if (w / h > aspect) w = h * aspect;
+                else h = w / aspect;
+                panel.Width(w);
+                panel.Height(h);
+            } else {
+                panel.Width(*props.width);
+                panel.Height(*props.height);
+            }
+        } else if (props.width) {
+            panel.Width(*props.width);
+            panel.Height(*props.width / aspect);
+        } else if (props.height) {
+            panel.Height(*props.height);
+            panel.Width(*props.height * aspect);
+        }
+    }
+
+    /// Show the XAML picture instead, when this one cannot be drawn.
+    void FallBack() {
+        frame.Children().Clear();
+        frame.Children().Append(SdrImage(props, *bytes, name));
+        chain = nullptr;
+        bitmap = nullptr;
+    }
+
+    /// Take a decoded picture: premultiply it and make it a Direct2D bitmap.
+    void Upload(BernPicture& picture, float headroom) {
+        gpu = GetGpu();
+        if (!gpu) return FallBack();
+        for (size_t i = 0; i + 3 < picture.len; i += 4) {
+            float alpha = picture.pixels[i + 3];
+            picture.pixels[i] *= alpha;
+            picture.pixels[i + 1] *= alpha;
+            picture.pixels[i + 2] *= alpha;
+        }
+        auto properties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_NONE,
+            D2D1::PixelFormat(DXGI_FORMAT_R32G32B32A32_FLOAT, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        winrt::com_ptr<ID2D1Bitmap1> made;
+        if (FAILED(gpu->context->CreateBitmap(D2D1::SizeU(picture.width, picture.height), picture.pixels, picture.width * 16, properties, made.put()))) {
+            Report(std::string("HDR picture ") + props.source + ": too large for the GPU");
+            return FallBack();
+        }
+        bitmap = made;
+        width = picture.width;
+        height = picture.height;
+        peak = picture.peak;
+        decodedFor = headroom;
+        Layout();
+        Render();
+    }
+
+    /// Draw the picture for the display it is on now.
+    void Render() {
+        if (!bitmap || !gpu) return;
+        auto now = QueryDisplay(Window());
+        bool changed = !(now == display);
+        display = now;
+        // A gain map applies as much gain as the display has headroom for.
+        if (gainMap && !decoding && std::abs(display.Headroom() - decodedFor) > 0.05f) Decode(shared_from_this(), display.Headroom());
+        float scaleX = panel.CompositionScaleX(), scaleY = panel.CompositionScaleY();
+        double w = panel.ActualWidth(), h = panel.ActualHeight();
+        if (w <= 0 || h <= 0) return;
+        UINT pw = (std::max)(1L, std::lround(w * scaleX)), ph = (std::max)(1L, std::lround(h * scaleY));
+        if (!chain) {
+            DXGI_SWAP_CHAIN_DESC1 desc{};
+            desc.Width = pw;
+            desc.Height = ph;
+            desc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            desc.SampleDesc.Count = 1;
+            desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+            desc.BufferCount = 2;
+            desc.Scaling = DXGI_SCALING_STRETCH;
+            desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+            desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+            if (FAILED(gpu->factory->CreateSwapChainForComposition(gpu->d3d.get(), &desc, nullptr, chain.put()))) return FallBack();
+            if (auto chain3 = chain.try_as<IDXGISwapChain3>()) chain3->SetColorSpace1(DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+            if (FAILED(panel.as<SwapChainPanelNative>()->SetSwapChain(chain.get()))) return FallBack();
+            chainWidth = pw;
+            chainHeight = ph;
+        } else if (pw != chainWidth || ph != chainHeight) {
+            if (FAILED(chain->ResizeBuffers(0, pw, ph, DXGI_FORMAT_UNKNOWN, 0))) return FallBack();
+            chainWidth = pw;
+            chainHeight = ph;
+        } else if (!changed && w > 0 && rendered) {
+            return;
+        }
+        if (auto chain2 = chain.try_as<IDXGISwapChain2>()) {
+            DXGI_MATRIX_3X2_F inverse{1.0f / scaleX, 0, 0, 1.0f / scaleY, 0, 0};
+            chain2->SetMatrixTransform(&inverse);
+        }
+
+        auto context = gpu->context;
+        winrt::com_ptr<IDXGISurface> surface;
+        if (FAILED(chain->GetBuffer(0, IID_PPV_ARGS(surface.put())))) return;
+        auto targetProperties = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+            D2D1::PixelFormat(DXGI_FORMAT_R16G16B16A16_FLOAT, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        winrt::com_ptr<ID2D1Bitmap1> target;
+        if (FAILED(context->CreateBitmapFromDxgiSurface(surface.get(), &targetProperties, target.put()))) return;
+
+        // scRGB is 80 nits at 1.0; the picture's 1.0 is SDR white.
+        float sdrWhite = display.hdr ? display.sdrWhite : 80.0f;
+        winrt::com_ptr<ID2D1Effect> white, tone;
+        if (FAILED(context->CreateEffect(CLSID_D2D1WhiteLevelAdjustment, white.put())) || FAILED(context->CreateEffect(CLSID_D2D1HdrToneMap, tone.put())))
+            return FallBack();
+        white->SetInput(0, bitmap.get());
+        white->SetValue(D2D1_WHITELEVELADJUSTMENT_PROP_INPUT_WHITE_LEVEL, 80.0f);
+        white->SetValue(D2D1_WHITELEVELADJUSTMENT_PROP_OUTPUT_WHITE_LEVEL, sdrWhite);
+        tone->SetInputEffect(0, white.get());
+        tone->SetValue(D2D1_HDRTONEMAP_PROP_INPUT_MAX_LUMINANCE, peak * sdrWhite);
+        tone->SetValue(D2D1_HDRTONEMAP_PROP_OUTPUT_MAX_LUMINANCE, display.hdr ? display.peak : 80.0f);
+        tone->SetValue(D2D1_HDRTONEMAP_PROP_DISPLAY_MODE, display.hdr ? D2D1_HDRTONEMAP_DISPLAY_MODE_HDR : D2D1_HDRTONEMAP_DISPLAY_MODE_SDR);
+        winrt::com_ptr<ID2D1Image> output;
+        tone->GetOutput(output.put());
+
+        // `cover` crops the picture to the panel; otherwise the panel has
+        // the picture's shape or is stretched by `fill`.
+        std::string_view fit = props.fit ? props.fit : "contain";
+        float sx = float(pw) / width, sy = float(ph) / height;
+        D2D1_RECT_F source{0, 0, float(width), float(height)};
+        if (props.width && props.height && fit == "cover") {
+            float s = (std::max)(sx, sy);
+            float cw = pw / s, ch = ph / s;
+            source = {(width - cw) / 2, (height - ch) / 2, (width + cw) / 2, (height + ch) / 2};
+            sx = sy = s;
+        }
+        context->SetTarget(target.get());
+        context->SetDpi(96, 96);
+        context->BeginDraw();
+        context->Clear(D2D1::ColorF(0, 0, 0, 0));
+        context->SetTransform(D2D1::Matrix3x2F::Scale(sx, sy));
+        context->DrawImage(output.get(), D2D1::Point2F(0, 0), source, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
+        context->SetTransform(D2D1::Matrix3x2F::Identity());
+        HRESULT drawn = context->EndDraw();
+        context->SetTarget(nullptr);
+        HRESULT presented = SUCCEEDED(drawn) ? chain->Present(1, 0) : drawn;
+        rendered = SUCCEEDED(presented);
+        if (presented == D2DERR_RECREATE_TARGET || presented == DXGI_ERROR_DEVICE_REMOVED || presented == DXGI_ERROR_DEVICE_RESET) {
+            // The GPU went away: start over with new devices.
+            CurrentGpu() = nullptr;
+            chain = nullptr;
+            bitmap = nullptr;
+            Decode(shared_from_this(), display.Headroom());
+        }
+    }
+
+    /// Decode on a background thread, then upload on this one.
+    static winrt::fire_and_forget Decode(std::shared_ptr<View> view, float headroom) {
+        winrt::apartment_context ui;
+        view->decoding = true;
+        auto bytes = view->bytes;
+        float applied = view->gainMap ? headroom : 0.0f;
+        co_await winrt::resume_background();
+        BernPicture picture{};
+        bool decoded = bern_picture_decode(bytes->data(), bytes->size(), applied, &picture);
+        co_await ui;
+        view->decoding = false;
+        if (!decoded) {
+            Report(std::string("HDR picture ") + view->props.source + ": does not decode");
+            view->FallBack();
+            co_return;
+        }
+        view->rendered = false;
+        view->Upload(picture, headroom);
+        bern_picture_free(picture);
+    }
+};
+
+/// Every HDR picture on screen, for the display check.
+inline std::map<int64_t, std::shared_ptr<View>> views;
+inline int64_t nextView = 1;
+inline UINT_PTR timer = 0;
+
+/// Once a second, while HDR pictures are on screen, redraw those whose
+/// display changed: HDR switched on or off, SDR brightness changed, or the
+/// window moved to another display.
+inline void CALLBACK Tick(HWND, UINT, UINT_PTR, DWORD) {
+    std::map<HWND, Display> seen;
+    for (auto& [token, view] : views) {
+        auto hwnd = view->Window();
+        auto found = seen.find(hwnd);
+        if (found == seen.end()) found = seen.emplace(hwnd, QueryDisplay(hwnd)).first;
+        if (!(found->second == view->display)) view->Render();
+    }
+}
+
+/// Put an HDR picture in `frame`, falling back to the XAML picture when it
+/// cannot be drawn.
+inline void Show(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<std::vector<uint8_t>> bytes, ImageProps const& props, TextFn name, bool gainMap) {
+    auto view = std::make_shared<View>();
+    view->frame = frame;
+    view->win = ctx.win;
+    view->bytes = std::move(bytes);
+    view->props = props;
+    view->name = name;
+    view->gainMap = gainMap;
+    std::string_view fit = props.fit ? props.fit : "contain";
+    bool framed = props.width && props.height;
+    bool centered = framed && fit == "contain";
+    view->panel.HorizontalAlignment(centered ? xaml::HorizontalAlignment::Center : framed ? xaml::HorizontalAlignment::Stretch : xaml::HorizontalAlignment::Left);
+    view->panel.VerticalAlignment(centered ? xaml::VerticalAlignment::Center : framed ? xaml::VerticalAlignment::Stretch : xaml::VerticalAlignment::Top);
+    if (name) BindName(view->panel, name);
+    else xaml::Automation::AutomationProperties::SetAccessibilityView(view->panel, xaml::Automation::Peers::AccessibilityView::Raw);
+    frame.Children().Append(view->panel);
+    std::weak_ptr<View> weak = view;
+    view->panel.SizeChanged([weak](auto&&, auto&&) {
+        if (auto view = weak.lock()) view->Render();
+    });
+    view->panel.CompositionScaleChanged([weak](auto&&, auto&&) {
+        if (auto view = weak.lock()) view->Render();
+    });
+    auto token = nextView++;
+    views[token] = view;
+    if (!timer) timer = SetTimer(nullptr, 0, 1000, Tick);
+    Reactive::OnCleanup([token] {
+        views.erase(token);
+        if (views.empty() && timer) {
+            KillTimer(nullptr, timer);
+            timer = 0;
+        }
+    });
+    view->display = QueryDisplay(view->Window());
+    View::Decode(view, view->display.Headroom());
+}
+
+}
+
+/// A picture from a declared resource. With one side given, the other
+/// follows the picture's aspect ratio. Without a label it is decorative.
+/// HDR pictures are drawn in HDR where the display shows it.
+inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
+    // The declared frame. With both sides, the picture fits inside it and
+    // is centered when it keeps its aspect ratio; with one, the picture
+    // sets the other.
+    controls::Grid frame;
+    frame.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+    frame.VerticalAlignment(xaml::VerticalAlignment::Top);
+    if (props.width && props.height) {
+        frame.Width(*props.width);
+        frame.Height(*props.height);
+    }
+    auto bytes = std::make_shared<std::vector<uint8_t>>(ResourceBytes(props.source));
+    if (bytes->empty()) Report(std::string("image ") + props.source + ": the resource cannot be read");
+    TextFn name = props.label ? Bound(ctx, props.label) : nullptr;
+    uint32_t kind = bytes->empty() ? 0 : bern_picture_kind(bytes->data(), bytes->size());
+    if (kind != 0 && Hdr::GetGpu()) Hdr::Show(frame, ctx, bytes, props, name, kind == 3);
+    else frame.Children().Append(SdrImage(props, *bytes, name));
     // Where a column would stretch the picture, it keeps its size at the
     // leading edge.
     controls::Grid holder;

@@ -87,6 +87,23 @@ void bern_media_view(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_media_complete(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_media_event(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_buffer_free(BernBuffer buffer);
+
+/// An HDR picture decoded by Rust: RGBA rows in linear scRGB with straight
+/// alpha, 1.0 at SDR white.
+struct BernPicture {
+    uint32_t width;
+    uint32_t height;
+    float peak;
+    float* pixels;
+    size_t len;
+};
+
+/// 0 not HDR, 1 PQ, 2 HLG, 3 a gain map.
+uint32_t bern_picture_kind(uint8_t const* data, size_t len);
+/// `headroom` (display peak over SDR white) decides how much of a gain map
+/// applies; zero applies all of it.
+bool bern_picture_decode(uint8_t const* data, size_t len, float headroom, BernPicture* out);
+void bern_picture_free(BernPicture picture);
 }
 
 namespace bern {

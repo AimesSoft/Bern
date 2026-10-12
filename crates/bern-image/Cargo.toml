@@ -1,0 +1,12 @@
+[package]
+name = "bern-image"
+description = "HDR pictures for the targets whose UI toolkit cannot decode them: PQ and HLG PNGs and JPEGs with gain maps, as linear light"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+png = "0.18"
+zune-jpeg = "0.5"

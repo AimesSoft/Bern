@@ -1086,7 +1086,7 @@ pub struct ImageProps {
 #[allow(non_snake_case)]
 pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
     let path = std::path::Path::new(&crate::host::resources_dir()).join(props.source);
-    let picture = match oriented(&path) {
+    let picture = match crate::hdr::texture(&path).or_else(|| oriented(&path)) {
         Some(texture) => gtk::Picture::for_paintable(&texture),
         None => gtk::Picture::for_filename(&path),
     };

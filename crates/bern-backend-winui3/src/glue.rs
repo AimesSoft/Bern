@@ -63,7 +63,7 @@ name = "{executable}-mcp"
 path = "src/mcp.rs"
 
 [dependencies]
-bern-ffi = {{ {ffi}{ipc} }}
+bern-ffi = {{ {ffi}{ipc}, features = ["picture"] }}
 bern-adapter-cli = {{ {cli_adapter} }}
 bern-adapter-mcp = {{ {mcp_adapter} }}
 {protocol} = {{ path = "{protocol_path}" }}

@@ -159,6 +159,21 @@ pub fn layout_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
                 }
             }
             Section(
+                title: tr! { "zh-Hans" => "HDR 图片", "en" => "HDR Pictures" },
+                footer: tr! { "zh-Hans" => "左半边是 SDR 白，右半边亮四倍。能显示 HDR 的屏幕上右半边更亮；其他屏幕上显示作者给的 SDR 版本或压缩后的高光。", "en" => "The left half is SDR white, the right half four times as bright. On a display that shows HDR the right half is brighter; elsewhere the author's SDR version or compressed highlights show." }
+            ) {
+                Row(gap: 16, align: top) {
+                    Column(gap: 6, align: center) {
+                        Image(source: "images/hdr-gainmap.jpg", label: tr! { "zh-Hans" => "带增益图的 JPEG", "en" => "JPEG with a gain map" }, width: 192, height: 108)
+                        Text(content: tr! { "zh-Hans" => "增益图 JPEG", "en" => "Gain map JPEG" }, style: caption, emphasis: secondary)
+                    }
+                    Column(gap: 6, align: center) {
+                        Image(source: "images/hdr-pq.png", label: tr! { "zh-Hans" => "PQ 编码的 PNG", "en" => "PNG in PQ" }, width: 192, height: 108)
+                        Text(content: tr! { "zh-Hans" => "PQ PNG", "en" => "PQ PNG" }, style: caption, emphasis: secondary)
+                    }
+                }
+            }
+            Section(
                 title: tr! { "zh-Hans" => "层叠", "en" => "Layers" },
                 footer: tr! { "zh-Hans" => "后写的一层在上面；标志对齐到右上角。", "en" => "Later layers sit on top; the mark aligns to the top trailing corner." }
             ) {

@@ -109,7 +109,7 @@ fn showcase_generates_a_winui3_application() {
     let lib = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
     assert!(
         lib.contains(
-            r#"resources: vec!["images/bern.png".into(), "images/landscape.jpg".into(), "media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
+            r#"resources: vec!["images/bern.png".into(), "images/hdr-gainmap.jpg".into(), "images/hdr-pq.png".into(), "images/landscape.jpg".into(), "media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
         ),
         "{lib}"
     );
