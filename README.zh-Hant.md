@@ -337,6 +337,12 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 <td><img alt="可用" src="https://img.shields.io/badge/-%E5%8F%AF%E7%94%A8-22C55E?style=flat-square"> <a href="Docs/Implementation/macOS-SwiftUI.md">實作紀錄</a></td>
 </tr>
 <tr>
+<td><b>iOS</b><br><code>swiftui + ios</code></td>
+<td>SwiftUI，與 macOS 共用產生的程式碼；一個場景，其他視窗為 sheet · iOS 17 以上</td>
+<td>應用程式行程內</td>
+<td><img alt="模擬器" src="https://img.shields.io/badge/-%E6%A8%A1%E6%93%AC%E5%99%A8-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">實作紀錄</a></td>
+</tr>
+<tr>
 <td><b>Windows</b><br><code>winui3 + windows</code></td>
 <td>C++/WinRT：有 Windows App Runtime 2（其他程式安裝的或 Windows 11 內建的）時用 WinUI 3，沒有時退回系統 XAML，也可以只編譯其中之一 · Windows 10 2004 以上</td>
 <td>應用程式行程內（靜態連結）</td>
@@ -362,7 +368,7 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 </tr>
 <tr>
 <td><b>下一步</b></td>
-<td><code>flutter + macos</code>（驗證後端可替換），之後是 iOS、Android 與 HarmonyOS</td>
+<td><code>flutter + macos</code>（驗證後端可替換），之後是 iOS 實機打包、Android 與 HarmonyOS</td>
 <td>–</td>
 <td><img alt="規劃中" src="https://img.shields.io/badge/-%E8%A6%8F%E5%8A%83%E4%B8%AD-94A3B8?style=flat-square"> <a href="Docs/Adaptation/README.md">適配規範</a></td>
 </tr>
@@ -422,7 +428,7 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 
 | 框架 | macOS | Windows | Linux | 行動端 | Web | 原生外觀 | 內建 MCP | 編譯期檢查 |
 | :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| **Bern** | ● | ● | ● | — | ● | ● | ● | ● |
+| **Bern** | ● | ● | ● | ◐ | ● | ● | ● | ● |
 | **GPUI** | ● | ● | ● | — | — | — | — | — |
 | **Dioxus** | ● | ● | ● | ● | ● | — | — | — |
 | **Flutter** | ● | ● | ● | ● | ● | — | — | — |
@@ -433,7 +439,7 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 | **Avalonia** | ● | ● | ● | ● | ● | — | — | — |
 | **Qt** | ● | ● | ● | ● | ● | ◐ | — | — |
 
-- **行動端**：iOS 與 Android。React Native 的桌面版本由微軟維護，uni-app 另涵蓋小程式與鴻蒙，Bern 的行動端在規劃中。
+- **行動端**：iOS 與 Android。React Native 的桌面版本由微軟維護，uni-app 另涵蓋小程式與鴻蒙，Bern 的 iOS 目標已能建置模擬器應用程式，實機打包與 Android 在規劃中。
 - **原生外觀**：控制項就是平台自己的控制項，外觀、無障礙與輸入法由系統提供。Qt Widgets 與 uni-app x 接近原生，記為部分。
 - **內建 MCP**：框架自帶、面向執行中介面的 MCP 伺服器與命令列。其他框架可以藉助無障礙介面，或 Playwright、Flutter Driver 等測試工具從外部自動化。
 - **編譯期檢查**：翻譯缺漏、功能在某個版面沒有入口、入口沒有登記功能，都由編譯器直接報錯（見[為 AI 而建](#為-ai-而建)）。其他框架多藉助 lint、翻譯工具或測試發現這類問題。
@@ -540,7 +546,7 @@ cd my_app
 bern run
 ```
 
-新的應用程式是一個帶計數的視窗，協定、引擎與介面各一個 crate，四個目標都已在 `Bern.toml` 中宣告。`bern run` 建置本機的目標並啟動它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在瀏覽器中開啟。每次建置也會在 `target/bern/<目標>/bin/` 中產生應用程式 CLI 與 MCP 伺服器。
+新的應用程式是一個帶計數的視窗，協定、引擎與介面各一個 crate，五個目標都已在 `Bern.toml` 中宣告。`bern run` 建置本機的目標並啟動它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在瀏覽器中開啟，`bern run --target ios` 安裝到正在執行的 iOS 模擬器。每次建置也會在 `target/bern/<目標>/bin/` 中產生應用程式 CLI 與 MCP 伺服器。
 
 `bern doctor` 列出本機建置每個目標還缺什麼、怎麼安裝：
 
@@ -550,6 +556,7 @@ bern 0.1.0 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
+[✓] iOS · SwiftUI: iOS simulator SDK 26.5, the aarch64-apple-ios-sim target
 [-] Windows · WinUI 3: builds on Windows
 [-] Linux · GTK 4: builds on Linux
 [✓] Web · WebAssembly: the wasm32-unknown-unknown target
@@ -560,6 +567,7 @@ bern 0.1.0 on macOS (aarch64)
 <br>
 
 - **macOS**：Xcode 26 或更新版本。從 App Store 安裝後執行 `sudo xcode-select --switch /Applications/Xcode.app`。
+- **iOS**：Xcode 的 iOS 平台與一個 iOS 模擬器，以及 `rustup target add aarch64-apple-ios-sim`。目前建置模擬器應用程式，實機的簽署與打包還沒有做。
 - **Windows**：Visual Studio 2022 或更新版本的「使用 C++ 的桌面開發」（只裝建置工具也可以），含 Windows 11 SDK；Rust 使用 MSVC 工具鏈。首次建置時以 Windows SDK 的 `cppwinrt` 產生 C++/WinRT 標頭檔，並把它們與執行階段預先編譯（每個設定約 2.4 GB，放在 `target` 中）；之後的建置只編譯應用程式自己的程式碼，新專案約 5 秒，展示應用程式約 9 秒。應用程式目錄只有執行檔、400 KB 的啟動程式 DLL 與資源，不需要 .NET，也不隨附 Windows App SDK。
 - **Linux**：GTK 4.14 與 libadwaita 1.5 的開發套件，例如 `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`。
 - **Web**：`rustup target add wasm32-unknown-unknown`。`web_app` 建置把引擎編譯為 WebAssembly 在頁面內執行；`web_ui` 建置讓頁面作為獨立引擎宿主的介面，`bern run` 啟動宿主並開啟它的位址。
@@ -604,7 +612,7 @@ showcase-mcp                                                 # 經 stdio 的 MCP
 | 1 · 2 | 編譯邊界驗證；macOS SwiftUI，介面、CLI、JSON 與 MCP 驅動同一引擎 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 3 | Web 視覺規範、主題核心、WebAssembly 應用程式與 WebUI 兩種建置 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 4 | 自適應版面、選單、功能契約、執行時切換語言 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
-| 5 | 其他原生前端：GTK 4（已完成）· WinUI 3（已完成）· `flutter + macos`（下一步） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 5 | 其他原生前端：GTK 4（已完成）· WinUI 3（已完成）· iOS（模擬器，已完成）· `flutter + macos`（下一步） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 | 6 | 元件庫（第一批 `Image`、`Progress`、`Grid`、`Stack` 已完成）、打包、增量建置、開發工具（`bern new`、`run`、`doctor`、`package` 已完成） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## 儲存庫結構
@@ -646,7 +654,7 @@ cargo test --workspace
 
 - [設計文件](Docs/Design.md)：目標、架構、元件、主題、命令、視窗與媒體
 - [適配規範](Docs/Adaptation/README.md)：Apple、Windows 與 Linux、Web、Android、HarmonyOS
-- 實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- 實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 設計與實作文件以簡體中文撰寫。
 

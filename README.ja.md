@@ -337,6 +337,12 @@ counter-mcp   # 同じカタログを AI エージェントへ
 <td><img alt="利用可能" src="https://img.shields.io/badge/-%E5%88%A9%E7%94%A8%E5%8F%AF%E8%83%BD-22C55E?style=flat-square"> <a href="Docs/Implementation/macOS-SwiftUI.md">実装記録</a></td>
 </tr>
 <tr>
+<td><b>iOS</b><br><code>swiftui + ios</code></td>
+<td>SwiftUI、macOS と同じ生成コード。シーンは一つで、ほかのウインドウはシート · iOS 17 以降</td>
+<td>プロセス内</td>
+<td><img alt="シミュレータ" src="https://img.shields.io/badge/-%E3%82%B7%E3%83%9F%E3%83%A5%E3%83%AC%E3%83%BC%E3%82%BF-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">実装記録</a></td>
+</tr>
+<tr>
 <td><b>Windows</b><br><code>winui3 + windows</code></td>
 <td>C++/WinRT：Windows App Runtime 2（ほかのアプリが入れたもの、または Windows 11 に付属のもの）があれば WinUI 3、なければシステムの XAML。どちらか一方だけのビルドも可能 · Windows 10 2004 以降</td>
 <td>プロセス内（静的リンク）</td>
@@ -362,7 +368,7 @@ counter-mcp   # 同じカタログを AI エージェントへ
 </tr>
 <tr>
 <td><b>次の予定</b></td>
-<td><code>flutter + macos</code>（バックエンドの差し替え検証）、続いて iOS、Android、HarmonyOS</td>
+<td><code>flutter + macos</code>（バックエンドの差し替え検証）、続いて iOS 実機パッケージ、Android、HarmonyOS</td>
 <td>–</td>
 <td><img alt="計画中" src="https://img.shields.io/badge/-%E8%A8%88%E7%94%BB%E4%B8%AD-94A3B8?style=flat-square"> <a href="Docs/Adaptation/README.md">適応仕様</a></td>
 </tr>
@@ -422,7 +428,7 @@ UI 技術を省略するとプラットフォームの既定が選ばれます�
 
 | フレームワーク | macOS | Windows | Linux | モバイル | Web | ネイティブの外観 | MCP 内蔵 | コンパイル時チェック |
 | :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| **Bern** | ● | ● | ● | — | ● | ● | ● | ● |
+| **Bern** | ● | ● | ● | ◐ | ● | ● | ● | ● |
 | **GPUI** | ● | ● | ● | — | — | — | — | — |
 | **Dioxus** | ● | ● | ● | ● | ● | — | — | — |
 | **Flutter** | ● | ● | ● | ● | ● | — | — | — |
@@ -433,7 +439,7 @@ UI 技術を省略するとプラットフォームの既定が選ばれます�
 | **Avalonia** | ● | ● | ● | ● | ● | — | — | — |
 | **Qt** | ● | ● | ● | ● | ● | ◐ | — | — |
 
-- **モバイル**：iOS と Android。React Native のデスクトップ版は Microsoft が保守し、uni-app はミニプログラムと HarmonyOS にも対応します。Bern のモバイル対応は計画中です。
+- **モバイル**：iOS と Android。React Native のデスクトップ版は Microsoft が保守し、uni-app はミニプログラムと HarmonyOS にも対応します。Bern の iOS ターゲットはシミュレータ用アプリをビルドできます。実機パッケージと Android は計画中です。
 - **ネイティブの外観**：コントロールがプラットフォーム自身のもので、外観、アクセシビリティ、入力メソッドをシステムが提供します。Qt Widgets と uni-app x はそれに近いため一部対応としました。
 - **MCP 内蔵**：フレームワークに付属し、動作中の UI を操作する MCP サーバーとコマンドライン。ほかのフレームワークは、アクセシビリティ API や Playwright、Flutter Driver などのテストツールで外から自動化できます。
 - **コンパイル時チェック**：翻訳漏れ、あるレイアウトで機能に入口がない、入口が機能に登録されていない、といった問題をコンパイラーが直接エラーにします（[AI のための設計](#ai-のための設計)を参照）。ほかのフレームワークでは多くの場合、リンター、翻訳ツール、テストで見つけます。
@@ -540,7 +546,7 @@ cd my_app
 bern run
 ```
 
-新しいアプリはカウンター付きのウィンドウで、プロトコル、エンジン、UI がそれぞれ一つの crate になり、4 つのターゲットすべてが `Bern.toml` に宣言されています。`bern run` はこのコンピューターのターゲットをビルドして起動します。macOS では SwiftUI、Windows では WinUI 3、Linux では GTK です。`bern run --target web_app` はブラウザーで開きます。どのビルドでも `target/bern/<ターゲット>/bin/` にアプリの CLI と MCP サーバーが生成されます。
+新しいアプリはカウンター付きのウィンドウで、プロトコル、エンジン、UI がそれぞれ一つの crate になり、5 つのターゲットすべてが `Bern.toml` に宣言されています。`bern run` はこのコンピューターのターゲットをビルドして起動します。macOS では SwiftUI、Windows では WinUI 3、Linux では GTK です。`bern run --target web_app` はブラウザーで開き、`bern run --target ios` は起動中の iOS シミュレータにインストールします。どのビルドでも `target/bern/<ターゲット>/bin/` にアプリの CLI と MCP サーバーが生成されます。
 
 `bern doctor` は、このコンピューターで各ターゲットをビルドするのに足りないものと、そのインストール方法を示します。
 
@@ -550,6 +556,7 @@ bern 0.1.0 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
+[✓] iOS · SwiftUI: iOS simulator SDK 26.5, the aarch64-apple-ios-sim target
 [-] Windows · WinUI 3: builds on Windows
 [-] Linux · GTK 4: builds on Linux
 [✓] Web · WebAssembly: the wasm32-unknown-unknown target
@@ -560,6 +567,7 @@ bern 0.1.0 on macOS (aarch64)
 <br>
 
 - **macOS**：Xcode 26 以降。App Store からインストールしたあと `sudo xcode-select --switch /Applications/Xcode.app` を実行します。
+- **iOS**：Xcode の iOS プラットフォームと iOS シミュレータ、および `rustup target add aarch64-apple-ios-sim`。現在はシミュレータ用アプリをビルドします。実機の署名とパッケージはまだです。
 - **Windows**：Visual Studio 2022 以降の「C++ によるデスクトップ開発」（Build Tools だけでも可）と Windows 11 SDK。Rust は MSVC ツールチェーンを使います。初回のビルドで Windows SDK の `cppwinrt` が C++/WinRT ヘッダーを生成し、ランタイムと一緒にプリコンパイルします（構成ごとに約 2.4 GB、`target` 内）。以降のビルドはアプリ自身のコードだけをコンパイルし、新しいアプリで約 5 秒、ショーケースで約 9 秒です。アプリのフォルダーには実行ファイル、400 KB のブートストラップ DLL、リソースだけがあり、.NET は不要で、Windows App SDK も同梱しません。
 - **Linux**：GTK 4.14 と libadwaita 1.5 の開発パッケージ。例：`sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`。
 - **Web**：`rustup target add wasm32-unknown-unknown`。`web_app` ビルドはエンジンを WebAssembly にコンパイルしてページ内で動かし、`web_ui` ビルドはページを独立したエンジンホストの UI にします。`bern run` はホストを起動してそのアドレスを開きます。
@@ -604,7 +612,7 @@ showcase-mcp                                                 # stdio の MCP サ
 | 1 · 2 | コンパイル境界の検証。macOS SwiftUI で UI・CLI・JSON・MCP が同じエンジンを動かす | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 3 | Web のビジュアル仕様、テーマカーネル、WebAssembly アプリと WebUI の 2 種類のビルド | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 4 | アダプティブレイアウト、メニュー、機能契約、実行時の言語切り替え | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
-| 5 | ほかのネイティブフロントエンド：GTK 4（完了）· WinUI 3（完了）· `flutter + macos`（次） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 5 | ほかのネイティブフロントエンド：GTK 4（完了）· WinUI 3（完了）· iOS（シミュレータ、完了）· `flutter + macos`（次） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 | 6 | コンポーネントライブラリ（第 1 弾の `Image`・`Progress`・`Grid`・`Stack` は完了）、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor`・`package` は完了） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## リポジトリ構成
@@ -646,7 +654,7 @@ cargo test --workspace
 
 - [設計ドキュメント](Docs/Design.md)：目標、アーキテクチャ、コンポーネント、テーマ、コマンド、ウィンドウ、メディア
 - [適応仕様](Docs/Adaptation/README.md)：Apple、Windows と Linux、Web、Android、HarmonyOS
-- 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 設計ドキュメントと実装記録は中国語で書かれています。
 

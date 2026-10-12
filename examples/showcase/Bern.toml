@@ -52,6 +52,12 @@ platform = "macos"
 # the generated CLI, JSON clients and MCP server; omit it for no listener.
 channels = ["ipc"]
 
+# The same app on iOS, built for the simulator: one scene, the settings
+# window as a sheet. The IPC channel lets the CLI on the Mac reach it.
+[targets.ios]
+platform = "ios"
+channels = ["ipc"]
+
 # The same app on Linux: GTK 4 with libadwaita, the engine in process.
 [targets.linux]
 platform = "linux"

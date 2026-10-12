@@ -92,7 +92,7 @@
 | `bern-runtime` | UI 会话：窗口实例与代次、窗口作用域草稿、关闭协议、会话命令路由；异步查询资源、窗口所属的查询订阅与时钟（系统时钟、可控时钟） |
 | `bern-compiler` | 读取 `Bern.toml`、校验并展开随包资源、显式源码收集、语义检查、输出 IR |
 | `bern-target-api` | 目标描述、能力检查、构建计划、按平台解析默认目标 |
-| `bern-backend-swiftui` | `swiftui + macos` 目标：生成 Swift、Rust 胶水 crate 与资源 |
+| `bern-backend-swiftui` | `swiftui + macos` 目标：生成 Swift、Rust 胶水 crate 与资源。Swift 运行时分为与 iOS 共用的 `BernRuntime.swift`、`BernMedia.swift` 和 macOS 专用的 `BernAppKit.swift`（窗口事实与命令、关闭守卫、开发快照、`AVPlayerView`）；iOS 见 [iOS SwiftUI 实现记录](iOS-SwiftUI.md) |
 | `bern-ffi` | 进程内 C ABI |
 | `bern-adapter-json` / `bern-transport-ipc` | JSON 编码与本地控制通道 |
 | `bern-adapter-cli` / `bern-adapter-mcp` | 从命令目录派生的应用 CLI 与 MCP 服务器 |

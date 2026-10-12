@@ -6,12 +6,14 @@
 //! process; the build links it as a static library.
 
 mod glue;
+pub mod ios;
 mod names;
 mod resources;
 mod swift;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
+use bern_target_api::glue::WindowPresentation;
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, dist_dir,
@@ -19,7 +21,8 @@ use bern_target_api::{
 };
 use std::path::PathBuf;
 
-pub use swift::Generator;
+pub use ios::{MINIMUM_IOS, SwiftUiIos};
+pub use swift::{Generator, Platform};
 
 /// Minimum deployment target, chosen in the design document.
 pub const MINIMUM_MACOS: &str = "14.0";
@@ -29,18 +32,20 @@ pub const ICON_FILE: &str = "AppIcon.icns";
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
+const APPKIT: &str = include_str!("../templates/BernAppKit.swift");
 
 /// Swift sources compiled into the app, in order.
 const SOURCES: &[&str] = &[
     "BernRuntime.swift",
     "BernMedia.swift",
+    "BernAppKit.swift",
     "BernGenerated.swift",
 ];
 const HEADER: &str = include_str!("../templates/bern.h");
 
 pub struct SwiftUiMacos;
 
-fn component_names() -> &'static [&'static str] {
+pub(crate) fn component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
     NAMES.get_or_init(|| COMPONENTS.iter().map(|spec| spec.name).collect())
 }
@@ -91,25 +96,7 @@ impl Target for SwiftUiMacos {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
-        let mut diagnostics = check_common(self, app);
-        diagnostics.extend(resources::check_declared(app));
-        let framework = resources::framework_languages();
-        for language in &app.languages.supported {
-            if !framework.contains(&language.as_str()) {
-                diagnostics.push(Diagnostic::error(format!(
-                    "the SwiftUI runtime has no `{language}` translation of its own texts; supported: {}",
-                    framework.join(", ")
-                )));
-            }
-        }
-        for channel in &config.channels {
-            if !self.descriptor().channels.contains(&channel.as_str()) {
-                diagnostics.push(Diagnostic::error(format!(
-                    "target `{}`: channel `{channel}` is not available on macOS",
-                    config.name
-                )));
-            }
-        }
+        let mut diagnostics = check_swiftui(self, app, config, Platform::Macos);
         for window in &app.windows.windows {
             if window.id == app.windows.primary && window.initial != WindowInitial::Open {
                 diagnostics.push(Diagnostic::error(format!(
@@ -124,72 +111,6 @@ impl Target for SwiftUiMacos {
                 )));
             }
         }
-        let mut visit = |node: &Node, parent: Option<&str>| {
-            if let Node::Element(element) = node {
-                if element.kind == "Search" && parent != Some("Sidebar") {
-                    diagnostics.push(
-                        Diagnostic::error("the SwiftUI target places `Search` in a `Sidebar` only")
-                            .at(element.source.clone()),
-                    );
-                }
-                if element.kind == "Picker"
-                    && let Some(field) = element.field("value")
-                    && let bern_protocol::Type::Enum { name } = &field.ty
-                    && app
-                        .types
-                        .enum_def(name)
-                        .is_some_and(|def| !def.is_unit_only())
-                {
-                    diagnostics.push(
-                        Diagnostic::error(format!(
-                            "`Picker` lists the variants of `{name}`, which must not carry data"
-                        ))
-                        .at(element.source.clone()),
-                    );
-                }
-            }
-        };
-        fn walk(node: &Node, parent: Option<&str>, visit: &mut dyn FnMut(&Node, Option<&str>)) {
-            visit(node, parent);
-            let name = match node {
-                Node::Element(element) => Some(element.kind.as_str()),
-                _ => parent,
-            };
-            match node {
-                Node::Element(element) => {
-                    for child in &element.children {
-                        walk(child, name, visit);
-                    }
-                }
-                Node::If(node) => {
-                    for child in node
-                        .branches
-                        .iter()
-                        .flat_map(|(_, body)| body)
-                        .chain(&node.otherwise)
-                    {
-                        walk(child, name, visit);
-                    }
-                }
-                Node::IfLet(node) => {
-                    for child in node.then.iter().chain(&node.otherwise) {
-                        walk(child, name, visit);
-                    }
-                }
-                Node::Match(node) => {
-                    for child in node.arms.iter().flat_map(|arm| &arm.body) {
-                        walk(child, name, visit);
-                    }
-                }
-                Node::Component(_) => {}
-            }
-        }
-        for component in &app.components {
-            walk(&component.body, None, &mut visit);
-        }
-        for window in &app.windows.windows {
-            walk(&window.content, None, &mut visit);
-        }
         diagnostics
     }
 
@@ -203,13 +124,17 @@ impl Target for SwiftUiMacos {
         let mut files = vec![
             GeneratedFile::text("Sources/BernRuntime.swift", RUNTIME),
             GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
+            GeneratedFile::text("Sources/BernAppKit.swift", APPKIT),
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text(
                 "Sources/BernGenerated.swift",
-                Generator::new(app).generate(app.protocol.fingerprint()),
+                Generator::new(app, Platform::Macos).generate(app.protocol.fingerprint()),
             ),
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
-            GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
+            GeneratedFile::text(
+                "glue/src/lib.rs",
+                glue::lib_rs(context, app, WindowPresentation::Native),
+            ),
             GeneratedFile::text("glue/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
@@ -669,4 +594,105 @@ impl Target for SwiftUiMacos {
             notes,
         })
     }
+}
+
+/// What both SwiftUI targets check: the common rules, the bundle layout of
+/// the resources, the runtime's own translations, channels, and where
+/// `Search` and `Picker` can go.
+pub(crate) fn check_swiftui(
+    target: &dyn Target,
+    app: &Application,
+    config: &TargetConfig,
+    platform: Platform,
+) -> Vec<Diagnostic> {
+    let system = match platform {
+        Platform::Macos => "macOS",
+        Platform::Ios => "iOS",
+    };
+    let mut diagnostics = check_common(target, app);
+    diagnostics.extend(resources::check_declared(app, platform));
+    let framework = resources::framework_languages();
+    for language in &app.languages.supported {
+        if !framework.contains(&language.as_str()) {
+            diagnostics.push(Diagnostic::error(format!(
+                "the SwiftUI runtime has no `{language}` translation of its own texts; supported: {}",
+                framework.join(", ")
+            )));
+        }
+    }
+    for channel in &config.channels {
+        if !target.descriptor().channels.contains(&channel.as_str()) {
+            diagnostics.push(Diagnostic::error(format!(
+                "target `{}`: channel `{channel}` is not available on {system}",
+                config.name
+            )));
+        }
+    }
+    let mut visit = |node: &Node, parent: Option<&str>| {
+        if let Node::Element(element) = node {
+            if element.kind == "Search" && parent != Some("Sidebar") {
+                diagnostics.push(
+                    Diagnostic::error("the SwiftUI target places `Search` in a `Sidebar` only")
+                        .at(element.source.clone()),
+                );
+            }
+            if element.kind == "Picker"
+                && let Some(field) = element.field("value")
+                && let bern_protocol::Type::Enum { name } = &field.ty
+                && app
+                    .types
+                    .enum_def(name)
+                    .is_some_and(|def| !def.is_unit_only())
+            {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "`Picker` lists the variants of `{name}`, which must not carry data"
+                    ))
+                    .at(element.source.clone()),
+                );
+            }
+        }
+    };
+    fn walk(node: &Node, parent: Option<&str>, visit: &mut dyn FnMut(&Node, Option<&str>)) {
+        visit(node, parent);
+        let name = match node {
+            Node::Element(element) => Some(element.kind.as_str()),
+            _ => parent,
+        };
+        match node {
+            Node::Element(element) => {
+                for child in &element.children {
+                    walk(child, name, visit);
+                }
+            }
+            Node::If(node) => {
+                for child in node
+                    .branches
+                    .iter()
+                    .flat_map(|(_, body)| body)
+                    .chain(&node.otherwise)
+                {
+                    walk(child, name, visit);
+                }
+            }
+            Node::IfLet(node) => {
+                for child in node.then.iter().chain(&node.otherwise) {
+                    walk(child, name, visit);
+                }
+            }
+            Node::Match(node) => {
+                for child in node.arms.iter().flat_map(|arm| &arm.body) {
+                    walk(child, name, visit);
+                }
+            }
+            Node::Component(_) => {}
+        }
+    }
+    for component in &app.components {
+        walk(&component.body, None, &mut visit);
+    }
+    for window in &app.windows.windows {
+        walk(&window.content, None, &mut visit);
+    }
+    diagnostics
 }

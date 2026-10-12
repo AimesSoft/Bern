@@ -428,13 +428,22 @@ struct Ctx {
     path: Option<String>,
 }
 
+/// The system the Swift is generated for. SwiftUI is shared; windows,
+/// scenes and a few control styles are not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Platform {
+    Macos,
+    Ios,
+}
+
 pub struct Generator<'a> {
     app: &'a Application,
+    platform: Platform,
 }
 
 impl<'a> Generator<'a> {
-    pub fn new(app: &'a Application) -> Self {
-        Self { app }
+    pub fn new(app: &'a Application, platform: Platform) -> Self {
+        Self { app, platform }
     }
 
     fn types(&self) -> &TypeTable {
@@ -939,9 +948,10 @@ impl<'a> Generator<'a> {
                 ));
                 out.line(format!("SwiftUI.Text(verbatim: {label})"));
                 out.close("}");
-                match element.keyword("style") {
-                    Some("switch") => out.line(".toggleStyle(.switch)"),
-                    Some("checkbox") => out.line(".toggleStyle(.checkbox)"),
+                // iOS has no checkboxes; its toggles are switches.
+                match (element.keyword("style"), self.platform) {
+                    (Some("switch"), _) => out.line(".toggleStyle(.switch)"),
+                    (Some("checkbox"), Platform::Macos) => out.line(".toggleStyle(.checkbox)"),
                     _ => {}
                 }
                 out.line(format!(
@@ -973,6 +983,11 @@ impl<'a> Generator<'a> {
                 match element.keyword("style") {
                     Some("menu") => out.line(".pickerStyle(.menu)"),
                     Some("segmented") => out.line(".pickerStyle(.segmented)"),
+                    // iOS lists the options with a checkmark instead of
+                    // radio buttons.
+                    Some("radio") if self.platform == Platform::Ios => {
+                        out.line(".pickerStyle(.inline)")
+                    }
                     Some("radio") => out.line(".pickerStyle(.radioGroup)"),
                     Some("inline") => out.line(".pickerStyle(.inline)"),
                     _ => {}
@@ -1382,6 +1397,17 @@ impl<'a> Generator<'a> {
             .unwrap_or_else(|| "nil".into());
         let binding = self.binding_of(&field);
         let kind = element.keyword("kind").unwrap_or("plain");
+        // An iOS form shows a text field's prompt, not its label: the label
+        // goes beside a single line, as in Settings, and above several.
+        let ios = self.platform == Platform::Ios;
+        if ios {
+            if kind == "multiline" {
+                out.open("SwiftUI.VStack(alignment: .leading, spacing: 6) {");
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+            } else {
+                out.open("SwiftUI.LabeledContent {");
+            }
+        }
         match kind {
             "secure" => out.open(format!(
                 "SwiftUI.SecureField(text: {binding}, prompt: {prompt}) {{"
@@ -1397,6 +1423,17 @@ impl<'a> Generator<'a> {
         out.close("}");
         if kind == "multiline" {
             out.line(".lineLimit(3...8)");
+        }
+        if ios {
+            if kind == "multiline" {
+                out.close("}");
+            } else {
+                out.line(".multilineTextAlignment(.trailing)");
+                out.close("} label: {");
+                out.indent += 1;
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                out.close("}");
+            }
         }
         let action = element.action.as_ref().map(|a| self.action(a));
         if let Some(action) = &action {
@@ -1519,17 +1556,10 @@ impl<'a> Generator<'a> {
             .iter()
             .filter_map(|(value, label)| Some((self.expr((*value)?), self.text((*label)?))))
             .collect();
-        if sidebar.id.is_some() {
-            let options: Vec<String> = items
-                .iter()
-                .filter_map(|(value, _)| value.map(|value| self.expr(value)))
-                .collect();
-            out.line(format!(
-                ".bernControl({}, role: \"sidebar\", label: {}, actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
-                self.target(sidebar, ctx),
-                self.selected_label(&selection, &titled),
-                options.join(", ")
-            ));
+        // A compact iOS split view shows the sidebar as the first screen of
+        // a stack, titled like the window.
+        if self.platform == Platform::Ios {
+            out.line(".navigationTitle(bernWindow.title)");
         }
         out.close("} detail: {");
         out.indent += 1;
@@ -1546,6 +1576,20 @@ impl<'a> Generator<'a> {
         }
         self.toolbar(out, &detail.children, ctx);
         out.close("}");
+        // The sidebar is a control of the whole split view, which stays
+        // mounted while a compact layout shows only the detail.
+        if sidebar.id.is_some() {
+            let options: Vec<String> = items
+                .iter()
+                .filter_map(|(value, _)| value.map(|value| self.expr(value)))
+                .collect();
+            out.line(format!(
+                ".bernControl({}, role: \"sidebar\", label: {}, actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
+                self.target(sidebar, ctx),
+                self.selected_label(&selection, &titled),
+                options.join(", ")
+            ));
+        }
     }
 
     fn sidebar_child(&self, out: &mut Out, element: &Element) {
@@ -1785,15 +1829,19 @@ impl<'a> Generator<'a> {
         .into_iter()
         .flatten()
         .collect();
-        if window.role == WindowRole::Settings {
-            if let Some(width) = window.width {
-                out.line(format!(".frame(width: {})", double(width)));
+        // On iOS the scene and the sheets size windows; declared sizes are
+        // for desktop windows.
+        if self.platform == Platform::Macos {
+            if window.role == WindowRole::Settings {
+                if let Some(width) = window.width {
+                    out.line(format!(".frame(width: {})", double(width)));
+                }
+                // macOS settings windows fit their content and resize per tab.
+                out.line(".scrollDisabled(true)");
+                out.line(".fixedSize(horizontal: false, vertical: true)");
+            } else if !frame.is_empty() {
+                out.line(format!(".frame({})", frame.join(", ")));
             }
-            // macOS settings windows fit their content and resize per tab.
-            out.line(".scrollDisabled(true)");
-            out.line(".fixedSize(horizontal: false, vertical: true)");
-        } else if !frame.is_empty() {
-            out.line(format!(".frame({})", frame.join(", ")));
         }
         if window.close.is_some() {
             out.line(".onAppear { context.closeCheck = bernCloseCheck() }");
@@ -1871,7 +1919,10 @@ impl<'a> Generator<'a> {
         let mut out = Out::default();
         out.line("// Generated by Bern from the Rust declarations. Do not edit.");
         out.line("");
-        out.line("import AppKit");
+        out.line(match self.platform {
+            Platform::Macos => "import AppKit",
+            Platform::Ios => "import UIKit",
+        });
         out.line("import SwiftUI");
         out.line("");
         out.line("// MARK: - Values");
@@ -1913,19 +1964,22 @@ impl<'a> Generator<'a> {
             .map(|window| {
                 let size = match (window.width, window.height) {
                     (Some(width), Some(height)) => format!(
-                        "NSSize(width: {}, height: {})",
+                        "CGSize(width: {}, height: {})",
                         double(width),
                         double(height)
                     ),
                     _ => "nil".into(),
                 };
                 format!(
-                    "BernWindowKind(id: {}, isSettings: {}, defaultSize: {size})",
+                    "BernWindowKind(id: {}, title: {}, isSettings: {}, defaultSize: {size})",
                     string(&window.id),
+                    string(&window.title.key),
                     window.role == WindowRole::Settings
                 )
             })
             .collect();
+        // Windows that open with the session besides the primary; a macOS
+        // settings window opens only on request.
         let initial: Vec<String> = app
             .windows
             .windows
@@ -1933,14 +1987,16 @@ impl<'a> Generator<'a> {
             .filter(|window| {
                 window.initial == bern_ir::WindowInitial::Open
                     && window.id != app.windows.primary
-                    && window.role != WindowRole::Settings
+                    && (self.platform == Platform::Ios || window.role != WindowRole::Settings)
             })
             .map(|window| string(&window.id))
             .collect();
         out.line("@main");
         out.open("struct BernApplication: App {");
-        out.line("@NSApplicationDelegateAdaptor(BernAppDelegate.self) private var delegate");
-        out.line("");
+        if self.platform == Platform::Macos {
+            out.line("@NSApplicationDelegateAdaptor(BernAppDelegate.self) private var delegate");
+            out.line("");
+        }
         out.open("init() {");
         out.open(format!(
             "BernHost.shared.start(fingerprint: 0x{fingerprint:016x}, kinds: [{}], primary: {}) {{ field, reader in",
@@ -1952,7 +2008,20 @@ impl<'a> Generator<'a> {
         out.close("}");
         out.line("");
         out.open("var body: some Scene {");
-        for index in order {
+        match self.platform {
+            Platform::Macos => self.macos_scenes(&mut out, &order, &initial),
+            Platform::Ios => self.ios_scene(&mut out, &initial),
+        }
+        out.close("}");
+        out.close("}");
+        out.finish()
+    }
+
+    /// One SwiftUI scene per window kind: `Window`, or `Settings` for the
+    /// settings window.
+    fn macos_scenes(&self, out: &mut Out, order: &[usize], initial: &[String]) {
+        let app = self.app;
+        for &index in order {
             let window = &app.windows.windows[index];
             let title = format!("BernText.string({})", string(&window.title.key));
             if window.role == WindowRole::Settings {
@@ -1986,9 +2055,64 @@ impl<'a> Generator<'a> {
                 }
             }
         }
+    }
+
+    /// The one scene of an iOS app: the primary window fills it and every
+    /// other window is a sheet over it, titled and with a close button
+    /// unless its content brings its own navigation.
+    fn ios_scene(&self, out: &mut Out, initial: &[String]) {
+        let app = self.app;
+        out.open("SwiftUI.WindowGroup {");
+        out.open(format!(
+            "BernVirtualHost(initial: [{}]) {{ kind in",
+            initial.join(", ")
+        ));
+        out.open("switch kind {");
+        for (index, window) in app.windows.windows.iter().enumerate() {
+            out.line(format!("case {}:", string(&window.id)));
+            out.indent += 1;
+            if window.id == app.windows.primary || self.has_navigation(&window.content, 0) {
+                out.line(format!("BernWindow{index}()"));
+            } else {
+                out.line(format!(
+                    "BernSheetChrome(kind: {}, title: {}) {{ BernWindow{index}() }}",
+                    string(&window.id),
+                    string(&window.title.key)
+                ));
+            }
+            out.indent -= 1;
+        }
+        out.line("default:");
+        out.line("    SwiftUI.EmptyView()");
         out.close("}");
         out.close("}");
-        out.finish()
+        out.line(".environment(BernEngine.shared)");
+        out.close("}");
+    }
+
+    /// Whether a window's content has a navigation container of its own,
+    /// directly or through the components it calls.
+    fn has_navigation(&self, node: &Node, depth: usize) -> bool {
+        // Components cannot call themselves forever; the depth only guards
+        // against a cycle the compiler would report.
+        if depth > 64 {
+            return false;
+        }
+        let mut found = false;
+        node.walk(&mut |node| match node {
+            Node::Element(element)
+                if matches!(element.kind.as_str(), "SplitView" | "Navigation") =>
+            {
+                found = true;
+            }
+            Node::Component(call) => {
+                if let Some(component) = self.app.component(&call.component) {
+                    found |= self.has_navigation(&component.body, depth + 1);
+                }
+            }
+            _ => {}
+        });
+        found
     }
 }
 

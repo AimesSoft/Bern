@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.22
+- 版本：v0.23
 - 状态：架构设计草案
 - 更新日期：2026-10-12
 - 项目名称：Bern UI
@@ -8,7 +8,7 @@
 - 主要开发语言：Rust
 - 首个目标平台：macOS（SwiftUI）
 
-当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md)、[Linux GTK 实现记录](Implementation/Linux-GTK.md) 与 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）与第二批 `winui3 + windows`（C++/WinRT 宿主，系统有 Windows App Runtime 时用 WinUI 3、没有时回退到系统 XAML，展示应用与四入口在 Windows 11 上按两种前端验证）；阶段六先行提供了开发工具 `bern new`、`bern run` 与 `bern doctor`，项目可以独立于 Bern 仓库构建，并补上组件库第一批 `Image`、`Progress`、`Grid` 与 `Stack`；其余能力仍为设计目标。
+当前实现进度见 [macOS SwiftUI 实现记录](Implementation/macOS-SwiftUI.md)、[iOS SwiftUI 实现记录](Implementation/iOS-SwiftUI.md)、[Web 实现记录](Implementation/Web.md)、[Linux GTK 实现记录](Implementation/Linux-GTK.md) 与 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)：已完成阶段一与阶段二的 macOS 主干，包括 Video、窗口关闭协议、窗口最小化与恢复、最小异步查询场景和随包资源；阶段三已完成 Web 视觉规范、Bern 主题内核、Web `app` 构建与 WebUI 构建（独立引擎宿主、WebSocket 通道与四入口联调）；阶段四已完成 `compact`/`expanded` 自适应布局、菜单入口、功能契约与覆盖检查、本地化诊断编号与运行时语言切换（macOS 与 Web）；阶段五已完成第一批 `gtk + linux`（GTK 4 与 libadwaita，展示应用与四入口在 Ubuntu 上验证）与第二批 `winui3 + windows`（C++/WinRT 宿主，系统有 Windows App Runtime 时用 WinUI 3、没有时回退到系统 XAML，展示应用与四入口在 Windows 11 上按两种前端验证），以及 `swiftui + ios` 的模拟器构建（与 macOS 共用生成器，一个场景中的虚拟窗口，展示应用与四入口在 iOS 26 模拟器上验证）；阶段六先行提供了开发工具 `bern new`、`bern run` 与 `bern doctor`，项目可以独立于 Bern 仓库构建，并补上组件库第一批 `Image`、`Progress`、`Grid` 与 `Stack`；其余能力仍为设计目标。
 
 平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
 
@@ -91,7 +91,7 @@ Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel。Bern 作�
 | UI 技术 | 目标运行平台 | 生成产物 | 定位与阶段 |
 | --- | --- | --- | --- |
 | Web DOM | 浏览器 | Web 应用或 WebUI；共用 HTML、CSS、绑定与前端 WASM，按模式决定是否包含业务引擎 | 第二个正式后端，需 Bern 自定视觉规范与主题算法，两种模式均需验收 |
-| SwiftUI | macOS、iOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS 与 iOS 默认；macOS 为首个正式后端，iOS 后续实现 |
+| SwiftUI | macOS、iOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS 与 iOS 默认；macOS 为首个正式后端，iOS 目标已构建模拟器应用，真机签名与打包后续实现 |
 | GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；阶段五第一批已实现 |
 | WinUI 3 | Windows | WinUI 3 界面（无运行时时回退到系统 XAML）、C++/WinRT 平台宿主与 Rust 桥接 | Windows 默认；阶段五第二批已实现 |
 | Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；后续实现 |
@@ -354,13 +354,13 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Slider | 范围值、连续变化和提交事件 | 初期 |
 | Picker | 从有限选项中单选，按场景呈现为菜单或分段控件 | 初期 |
 | ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复 | 初期，虚拟化后续 |
-| Image | 随包的 PNG 或 JPEG 资源；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正。HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）在显示器能显示 HDR 时按高动态范围显示，SDR 白保持在系统的 SDR 亮度，高光按显示器峰值做色调映射；不能显示 HDR 时，带增益图的 JPEG 显示作者给的 SDR 图，PQ 与 HLG 做色调映射 | 阶段六；首版只显示随包资源。HDR 在 macOS 与 Web（Chrome）实测；Windows 自绘，只在 SDR 显示器上实测；Linux 的 HDR 输出要 GTK 4.16 起并由用户打开 GTK 的色彩管理，未实测 |
+| Image | 随包的 PNG 或 JPEG 资源；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正。HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）在显示器能显示 HDR 时按高动态范围显示，SDR 白保持在系统的 SDR 亮度，高光按显示器峰值做色调映射；不能显示 HDR 时，带增益图的 JPEG 显示作者给的 SDR 图，PQ 与 HLG 做色调映射 | 阶段六；首版只显示随包资源。HDR 在 macOS 与 Web（Chrome）实测；Windows 自绘，只在 SDR 显示器上实测；Linux 的 HDR 输出要 GTK 4.16 起并由用户打开 GTK 的色彩管理，未实测；iOS 模拟器显示 SDR 版本，真机未实测 |
 | Progress | 有 `value` 时是进度条，进度为 `value / total`（`total` 默认 1，超出范围按边界显示）；没有 `value` 时是不确定进度；`label` 同时是可访问名称 | 阶段六 |
 | Menu 和 MenuItem | 收纳操作入口的菜单；每个菜单项绑定命令，可绑定功能 | 阶段四 |
 | Adaptive 和 Layout | 按可用宽度在 `compact` 与 `expanded` 布局之间选择，保留状态 | 阶段四 |
 | LanguagePicker | 运行时切换界面语言 | 阶段四 |
 | Dialog | 应用内对话框、焦点及关闭行为 | 后续（窗口的对话框呈现见“声明式多窗口”） |
-| Video | 媒体源、受管理播放器、播放命令、状态与标准控件 | 早期验证 macOS 原生媒体适配及 Web video 映射。HDR 视频在 macOS 实测；Windows 由媒体引擎输出，只在 SDR 显示器上实测；Linux 与 Web 未实测 |
+| Video | 媒体源、受管理播放器、播放命令、状态与标准控件 | 早期验证 macOS 原生媒体适配及 Web video 映射。HDR 视频在 macOS 实测；Windows 由媒体引擎输出，只在 SDR 显示器上实测；Linux、Web 与 iOS 未实测 |
 
 组件规范必须写清默认行为，避免由首个后端反向定义标准：
 
@@ -1346,6 +1346,13 @@ Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift 
 
 移动端适配必须处理前后台生命周期、屏幕旋转、平台导航、键盘、安全区域与资源释放。原生多窗口或多场景能力按实际环境检测；不可用时提供保留各窗口状态的虚拟窗口及窄屏切换。具体 FFI 工具、工程模板及打包流程在验证后确定。
 
+iOS 目标（`swiftui + ios`）已确定以下做法：
+
+- 与 macOS 共用 SwiftUI 生成器、运行时与 C ABI，引擎以静态库链入应用进程；窗口、场景与生命周期在平台各自的运行时文件中实现，生成器只在场景、窗口尺寸与少数控件样式上区分平台。最低 iOS 17，与 macOS 14 同一代。
+- 一个场景，窗口都是虚拟窗口，形式遵循 iOS 习惯：主窗口铺满场景，其他窗口是按打开顺序叠放的 sheet，带标题与经关闭协议关闭的“完成”按钮；关闭检查需要确认时不能下滑关闭。被盖住的窗口不能单独激活或关闭，如实报告为不可用。iPad 暂不使用多场景。
+- 前后台变化作为窗口事实报告（进入后台为隐藏、失去焦点）；媒体只报告 AVFoundation 的实际状态。
+- 先构建模拟器应用。模拟器中的应用经 IPC 通道接受 Mac 上的 CLI、JSON 与 MCP 入口：`bern run` 把 Mac 的目录经 `BERN_IPC_DIR` 交给应用，iOS 上只有设置了该目录时通道才监听。真机的签名、描述文件、安装与打包后续实现。
+
 ## 声明式视频与可扩展媒体后端
 
 ### 专门的视频语义
@@ -1668,3 +1675,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.20 | 组件库第一批：`Image`（随包 PNG 与 JPEG，编译器检查资源已声明，包括组件库中的引用）、`Progress`（确定与不确定进度，数值为受限表达式）、`Grid`（不小于 `min_width` 的等宽自适应列）与 `Stack`（叠放与九方位对齐）；IR 版本 6 |
 | v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
 | v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |
+| v0.23 | `swiftui + ios`：与 macOS 共用生成器与运行时，平台部分分为 AppKit 与 UIKit 两个运行时文件；一个场景中的虚拟窗口（主窗口铺满、其他窗口为 sheet）；模拟器构建与 `bern run` 安装启动，`BERN_IPC_DIR` 让 Mac 上的 CLI 与 MCP 连到模拟器中的应用；最低 iOS 17 |

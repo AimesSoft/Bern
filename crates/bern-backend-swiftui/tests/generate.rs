@@ -1,9 +1,9 @@
 //! Generate the showcase and type-check the Swift output with the installed
 //! toolchain, so generator mistakes fail here rather than in `bern build`.
 
-use bern_backend_swiftui::{MINIMUM_MACOS, SwiftUiMacos};
+use bern_backend_swiftui::{MINIMUM_IOS, MINIMUM_MACOS, SwiftUiIos, SwiftUiMacos};
 use bern_ir::{Application, ResourceDef, SourceLocation};
-use bern_target_api::{BuildContext, BuildPlan, BuildStep, Framework, Target, TargetConfig};
+use bern_target_api::{BuildContext, BuildPlan, BuildStep, Framework, Target};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -50,7 +50,8 @@ fn resources_must_fit_the_bundle_layout() {
             declared: declared.clone(),
         });
     }
-    let problems = SwiftUiMacos.check(&app, &config.targets[0]);
+    let macos = config.targets.iter().find(|t| t.name == "macos").unwrap();
+    let problems = SwiftUiMacos.check(&app, macos);
     let messages: Vec<&str> = problems.iter().map(|d| d.message.as_str()).collect();
     assert_eq!(problems.len(), 3, "{messages:?}");
     assert!(messages[0].contains("`en.lproj` is where the macOS bundle keeps localizations"));
@@ -85,25 +86,11 @@ fn showcase_generates_swift_that_type_checks() {
             "media/tides.mp4"
         ]
     );
-    let target_config = config.targets[0].clone();
-    let problems = SwiftUiMacos.check(&compiled.app, &target_config);
-    assert!(problems.is_empty(), "{problems:?}");
     let output = root.join("target/bern-test/swiftui");
     let _ = std::fs::remove_dir_all(&output);
-    let context = BuildContext {
-        project_dir: config.dir.clone(),
-        workspace_dir: root.clone(),
-        output_dir: output.clone(),
-        target: TargetConfig { ..target_config },
-        protocol_package: config.protocol_package.name.clone(),
-        protocol_path: config.protocol_package.dir.clone(),
-        protocol_module: compiled.protocol_module.clone(),
-        engine_package: config.engine_package.name.clone(),
-        engine_path: config.engine_package.dir.clone(),
-        engine_type: config.engine_type.clone(),
-        framework: Framework::Path(root.join("crates")),
-        release: false,
-    };
+    let context = context(&config, &compiled, "macos", &output);
+    let problems = SwiftUiMacos.check(&compiled.app, &context.target);
+    assert!(problems.is_empty(), "{problems:?}");
     let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
     for file in &files {
         let path = output.join(&file.path);
@@ -256,12 +243,235 @@ fn showcase_generates_swift_that_type_checks() {
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
         .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernAppKit.swift"))
         .arg(sources.join("BernGenerated.swift"))
         .output()
         .unwrap();
     assert!(
         result.status.success(),
         "swiftc rejected the generated code:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+/// The build context of target `name` of the showcase, writing to `output`.
+fn context(
+    config: &bern_compiler::Config,
+    compiled: &bern_compiler::Compiled,
+    name: &str,
+    output: &Path,
+) -> BuildContext {
+    let root = workspace();
+    let target = config
+        .targets
+        .iter()
+        .find(|target| target.name == name)
+        .unwrap_or_else(|| panic!("the showcase declares target `{name}`"))
+        .clone();
+    BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.to_path_buf(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    }
+}
+
+#[test]
+fn ios_resources_must_not_take_the_bundles_own_names() {
+    let (config, compiled) = showcase();
+    let mut app: Application = compiled.app;
+    let declared = SourceLocation {
+        file: "Bern.toml".into(),
+        line: 40,
+        column: 10,
+    };
+    for name in [
+        "Info.plist",
+        "Assets.car",
+        "Showcase",
+        "AppIcon60x60@2x.png",
+        "docs/Info.plist",
+    ] {
+        app.resources.push(ResourceDef {
+            name: name.into(),
+            declared: declared.clone(),
+        });
+    }
+    let target = config.targets.iter().find(|t| t.name == "ios").unwrap();
+    let problems = SwiftUiIos.check(&app, target);
+    let messages: Vec<&str> = problems.iter().map(|d| d.message.as_str()).collect();
+    // A file of the same name in a directory is no conflict.
+    assert_eq!(problems.len(), 4, "{messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("is a file of the iOS bundle itself")),
+        "{messages:?}"
+    );
+}
+
+#[test]
+fn showcase_generates_ios_swift_that_type_checks() {
+    let root = workspace();
+    let (config, compiled) = showcase();
+    let target = config.targets.iter().find(|t| t.name == "ios").unwrap();
+    let problems = SwiftUiIos.check(&compiled.app, target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/swiftui-ios");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = context(&config, &compiled, "ios", &output);
+    let files = SwiftUiIos.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    // Windows are virtual; the channel listens only where `bern run` names
+    // a directory the Mac reaches.
+    let glue = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
+    assert!(glue.contains("Presentation::Virtual"), "{glue}");
+    assert!(
+        glue.contains(r#"ipc: ::std::env::var_os("BERN_IPC_DIR").is_some()"#),
+        "{glue}"
+    );
+    // A flat bundle: Info.plist and the localizations at its top, a launch
+    // screen so the app fills the screen, one scene.
+    let plist = std::fs::read_to_string(output.join("Showcase.app/Info.plist")).unwrap();
+    for expected in [
+        "<key>UILaunchScreen</key>",
+        "<key>UIApplicationSupportsMultipleScenes</key>\n        <false/>",
+        &format!("<key>MinimumOSVersion</key>\n    <string>{MINIMUM_IOS}</string>"),
+        "<key>CFBundleIconName</key>\n            <string>AppIcon</string>",
+    ] {
+        assert!(plist.contains(expected), "{expected}\n{plist}");
+    }
+    assert!(
+        output
+            .join("Showcase.app/zh-Hans.lproj/Localizable.strings")
+            .exists()
+    );
+    let icon =
+        std::fs::read(output.join("Assets.xcassets/AppIcon.appiconset/AppIcon.png")).unwrap();
+    assert_eq!(bern_target_api::icon::png_size(&icon), Some((1024, 1024)));
+
+    let plan = SwiftUiIos.plan(&compiled.app, &context).unwrap();
+    let programs: Vec<String> = plan
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            BuildStep::Run { program, args, .. } if program == "xcrun" => Some(format!(
+                "xcrun {}",
+                args.iter()
+                    .find(|a| !a.starts_with('-') && *a != "iphonesimulator")
+                    .unwrap()
+            )),
+            BuildStep::Run { program, .. } => Some(program.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        programs,
+        [
+            "cargo",
+            "cargo",
+            "xcrun actool",
+            "xcrun swiftc",
+            "mv",
+            "codesign"
+        ]
+    );
+    // The engine for the simulator, the command line tools for the Mac.
+    let targets: Vec<&String> = plan
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            BuildStep::Run { program, args, .. } if program == "cargo" => args
+                .windows(2)
+                .find(|pair| pair[0] == "--target")
+                .map(|pair| &pair[1]),
+            _ => None,
+        })
+        .collect();
+    assert!(targets[0].ends_with("-apple-ios-sim") || targets[0] == "x86_64-apple-ios");
+    assert!(targets[1].ends_with("-apple-darwin"));
+    assert!(matches!(
+        &plan.run,
+        Some(bern_target_api::Run::Simulator { bundle_id, .. }) if bundle_id == "dev.bern.showcase"
+    ));
+
+    let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+    for expected in [
+        "import UIKit",
+        "BernVirtualHost(initial: [])",
+        r#"BernSheetChrome(kind: "settings", title: "#,
+        ".navigationTitle(bernWindow.title)",
+    ] {
+        assert!(
+            generated.contains(expected),
+            "generated Swift lacks `{expected}`"
+        );
+    }
+    for forbidden in [
+        "AppKit",
+        "NSApplication",
+        "#available",
+        "Color(",
+        ".background(",
+    ] {
+        assert!(
+            !generated.contains(forbidden),
+            "generated Swift must not use `{forbidden}`"
+        );
+    }
+    let Some(sdk) = Command::new("xcrun")
+        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    else {
+        eprintln!("no iOS simulator SDK; skipping type check");
+        return;
+    };
+    let architecture = if std::env::consts::ARCH == "x86_64" {
+        "x86_64"
+    } else {
+        "arm64"
+    };
+    let sources = output.join("Sources");
+    let result = Command::new("xcrun")
+        .args([
+            "swiftc",
+            "-typecheck",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+            "-sdk",
+        ])
+        .arg(sdk)
+        .arg("-target")
+        .arg(format!("{architecture}-apple-ios{MINIMUM_IOS}-simulator"))
+        .arg("-module-cache-path")
+        .arg(root.join("target/bern-swift-module-cache"))
+        .arg("-import-objc-header")
+        .arg(sources.join("bern.h"))
+        .arg(sources.join("BernRuntime.swift"))
+        .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernUIKit.swift"))
+        .arg(sources.join("BernGenerated.swift"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "swiftc rejected the generated iOS code:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
 }

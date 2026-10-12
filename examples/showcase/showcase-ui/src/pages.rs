@@ -139,7 +139,7 @@ pub fn layout_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
                 title: tr! { "zh-Hans" => "图片", "en" => "Images" },
                 footer: tr! { "zh-Hans" => "图片是随包资源。同一张 16:9 的图片放进 120×90 的框：完整显示留出空白，填满会裁掉两边，拉伸会变形。", "en" => "Pictures are bundled resources. The same 16:9 picture in a 120×90 frame: Contain leaves bars, Cover crops the sides, Fill stretches it." }
             ) {
-                Row(gap: 16, align: top) {
+                Grid(min_width: 120, gap: 16) {
                     Column(gap: 6, align: center) {
                         Image(source: "images/landscape.jpg", label: tr! { "zh-Hans" => "曼德博集合，完整显示", "en" => "Mandelbrot set, contained" }, width: 120, height: 90, fit: contain)
                         Text(content: tr! { "zh-Hans" => "完整显示", "en" => "Contain" }, style: caption, emphasis: secondary)
@@ -162,7 +162,7 @@ pub fn layout_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
                 title: tr! { "zh-Hans" => "HDR 图片", "en" => "HDR Pictures" },
                 footer: tr! { "zh-Hans" => "左半边是 SDR 白，右半边亮四倍。能显示 HDR 的屏幕上右半边更亮；其他屏幕上显示作者给的 SDR 版本或压缩后的高光。", "en" => "The left half is SDR white, the right half four times as bright. On a display that shows HDR the right half is brighter; elsewhere the author's SDR version or compressed highlights show." }
             ) {
-                Row(gap: 16, align: top) {
+                Grid(min_width: 192, gap: 16) {
                     Column(gap: 6, align: center) {
                         Image(source: "images/hdr-gainmap.jpg", label: tr! { "zh-Hans" => "带增益图的 JPEG", "en" => "JPEG with a gain map" }, width: 192, height: 108)
                         Text(content: tr! { "zh-Hans" => "增益图 JPEG", "en" => "Gain map JPEG" }, style: caption, emphasis: secondary)

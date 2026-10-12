@@ -420,6 +420,9 @@ pub enum Run {
     /// on a line `open <address>`; open that address in the browser and
     /// wait until the program exits.
     PageHost(PathBuf),
+    /// Install the app bundle into the booted iOS simulator, start it there
+    /// and wait until it exits.
+    Simulator { app: PathBuf, bundle_id: String },
 }
 
 /// A UI target module.

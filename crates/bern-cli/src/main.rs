@@ -127,6 +127,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
 fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(bern_backend_swiftui::SwiftUiMacos));
+    registry.register(Box::new(bern_backend_swiftui::SwiftUiIos));
     registry.register(Box::new(bern_backend_web::WebBrowser));
     registry.register(Box::new(bern_backend_gtk::GtkLinux));
     registry.register(Box::new(bern_backend_winui3::WinUi3Windows));
@@ -352,6 +353,7 @@ fn context(
 fn os_name(os: &str) -> &str {
     match os {
         "macos" => "macOS",
+        "ios" => "iOS",
         "windows" => "Windows",
         "linux" => "Linux",
         other => other,
@@ -639,10 +641,16 @@ fn build(options: &Options) -> ExitCode {
         }
         targets = here;
         if options.command == "run" {
+            // This computer's own platform first, such as macOS rather than
+            // the iOS simulator on a Mac, then another native target.
+            let own = targets
+                .iter()
+                .position(|(config, _)| config.platform == std::env::consts::OS);
             let native = targets
                 .iter()
                 .position(|(_, target)| !target.build_hosts().is_empty());
-            targets = native
+            targets = own
+                .or(native)
                 .or((!targets.is_empty()).then_some(0))
                 .map(|index| vec![targets.swap_remove(index)])
                 .unwrap_or_default();

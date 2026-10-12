@@ -46,6 +46,7 @@ const SPECS: &[Spec] = &[
         Some(("macos", "macOS")),
         macos,
     ),
+    ("iOS · SwiftUI", &["ios"], Some(("macos", "macOS")), ios),
     (
         "Windows · WinUI 3",
         &["windows"],
@@ -171,6 +172,56 @@ fn macos() -> Status {
         })
         .unwrap_or("found");
     Status::Ready(format!("macOS SDK {sdk}, Swift {swift}"))
+}
+
+/// The iOS simulator SDK, a simulator to run in, and the Rust targets
+/// for the simulator and the Mac.
+fn ios() -> Status {
+    let fix = "install Xcode 26 or newer from the App Store with the iOS platform, then run\nsudo xcode-select --switch /Applications/Xcode.app";
+    let Some(sdk) = output("xcrun", &["--sdk", "iphonesimulator", "--show-sdk-version"]) else {
+        return Status::Missing("no iOS simulator SDK".into(), fix.into());
+    };
+    if version(&sdk).is_none_or(|found| found < MACOS_SDK) {
+        return Status::Missing(
+            format!(
+                "iOS SDK {sdk}; SwiftUI needs SDK {}.{} or newer",
+                MACOS_SDK.0, MACOS_SDK.1
+            ),
+            fix.into(),
+        );
+    }
+    let simulator = if std::env::consts::ARCH == "x86_64" {
+        "x86_64-apple-ios"
+    } else {
+        "aarch64-apple-ios-sim"
+    };
+    let Some(sysroot) = output("rustc", &["--print", "sysroot"]) else {
+        return Status::Missing(
+            "rustc is not installed".into(),
+            "install Rust from https://rustup.rs".into(),
+        );
+    };
+    if !Path::new(&sysroot)
+        .join("lib/rustlib")
+        .join(simulator)
+        .is_dir()
+    {
+        return Status::Missing(
+            format!("the {simulator} target is not installed"),
+            format!("rustup target add {simulator}"),
+        );
+    }
+    let devices = output("xcrun", &["simctl", "list", "devices", "available"]).unwrap_or_default();
+    if !devices
+        .lines()
+        .any(|line| line.contains("iPhone") || line.contains("iPad"))
+    {
+        return Status::Missing(
+            "no iOS simulator".into(),
+            "add one in Xcode > Window > Devices and Simulators".into(),
+        );
+    }
+    Status::Ready(format!("iOS simulator SDK {sdk}, the {simulator} target"))
 }
 
 fn windows() -> Status {

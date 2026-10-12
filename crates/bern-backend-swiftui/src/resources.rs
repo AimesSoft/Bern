@@ -1,6 +1,7 @@
 //! Bundle resources: Info.plist, per-language string tables and the rules
 //! for declared resource files.
 
+use crate::swift::Platform;
 use bern_ir::Application;
 use bern_protocol::LocalizedText;
 use bern_target_api::Diagnostic;
@@ -9,6 +10,26 @@ use std::path::PathBuf;
 
 /// Strings the SwiftUI runtime shows itself, with built-in translations.
 pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
+    // iOS shows windows other than the primary as sheets, closed with this
+    // button, and offers to open the primary window again once it closed.
+    (
+        "bern.window.done",
+        &[
+            ("zh-Hans", "完成"),
+            ("zh-Hant", "完成"),
+            ("en", "Done"),
+            ("ja", "完了"),
+        ],
+    ),
+    (
+        "bern.window.open",
+        &[
+            ("zh-Hans", "打开“%@”"),
+            ("zh-Hant", "打開「%@」"),
+            ("en", "Open “%@”"),
+            ("ja", "“%@”を開く"),
+        ],
+    ),
     (
         "bern.alert.failed",
         &[
@@ -343,15 +364,42 @@ pub fn localization_files(app: &Application) -> Vec<(PathBuf, String)> {
 /// as `Contents/Resources/a/b.ext`: its directories may not contain `.`,
 /// because code signing treats such directories as nested bundles, and no
 /// part may end in `.lproj`, which holds the generated localizations.
-pub fn check_declared(app: &Application) -> Vec<Diagnostic> {
+/// What an iOS app bundle holds at its top besides the executable, the
+/// icon images and the localizations.
+const IOS_BUNDLE_FILES: &[&str] = &[
+    "Info.plist",
+    "PkgInfo",
+    "Assets.car",
+    "_CodeSignature",
+    "embedded.mobileprovision",
+    "Frameworks",
+    "PlugIns",
+    "SC_Info",
+];
+
+pub fn check_declared(app: &Application, platform: Platform) -> Vec<Diagnostic> {
+    let system = match platform {
+        Platform::Macos => "macOS",
+        Platform::Ios => "iOS",
+    };
+    // An iOS bundle keeps its own files at the top, next to the resources.
+    let product = crate::product_name(app);
+    let reserved = |first: &str| -> bool {
+        platform == Platform::Ios
+            && (IOS_BUNDLE_FILES.contains(&first)
+                || first == product
+                || first.starts_with(crate::ios::ICON_NAME))
+    };
     let mut diagnostics = Vec::new();
     for resource in &app.resources {
         let segments: Vec<&str> = resource.name.split('/').collect();
         let (_, directories) = segments.split_last().expect("names are not empty");
         let problem = if let Some(part) = segments.iter().find(|part| part.ends_with(".lproj")) {
-            format!("`{part}` is where the macOS bundle keeps localizations")
-        } else if resource.name == crate::ICON_FILE {
+            format!("`{part}` is where the {system} bundle keeps localizations")
+        } else if platform == Platform::Macos && resource.name == crate::ICON_FILE {
             format!("`{}` is the application icon", crate::ICON_FILE)
+        } else if reserved(segments[0]) {
+            format!("`{}` is a file of the iOS bundle itself", segments[0])
         } else if let Some(directory) = directories.iter().find(|part| part.contains('.')) {
             format!(
                 "the directory `{directory}` contains `.`, which code signing reads as a nested bundle"
@@ -361,7 +409,7 @@ pub fn check_declared(app: &Application) -> Vec<Diagnostic> {
         };
         diagnostics.push(
             Diagnostic::error(format!(
-                "resource `{}` cannot ship in the macOS app: {problem}; rename it",
+                "resource `{}` cannot ship in the {system} app: {problem}; rename it",
                 resource.name
             ))
             .at(resource.declared.clone()),
@@ -439,6 +487,105 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
     <true/>
     <key>NSSupportsAutomaticTermination</key>
     <false/>
+</dict>
+</plist>
+"#,
+        region = xml(&app.languages.default),
+        name = xml(name),
+        executable = xml(executable),
+        bundle = xml(&app.app.bundle_id),
+        version = xml(&app.app.version),
+    )
+}
+
+/// The Info.plist of an iOS app for the simulator: one scene, which Bern
+/// presents every window in; a launch screen, so the app fills the screen;
+/// the icon from the compiled asset catalog.
+pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) -> String {
+    let name = translation(
+        &app.app.name,
+        &app.languages.default,
+        &app.languages.default,
+    );
+    let localizations: String = app
+        .languages
+        .supported
+        .iter()
+        .map(|language| format!("\n        <string>{}</string>", xml(language)))
+        .collect();
+    let icons = format!(
+        r#"<dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconName</key>
+            <string>{icon}</string>
+        </dict>
+    </dict>"#,
+        icon = crate::ios::ICON_NAME
+    );
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>{region}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{name}</string>
+    <key>CFBundleExecutable</key>
+    <string>{executable}</string>
+    <key>CFBundleIcons</key>
+    {icons}
+    <key>CFBundleIcons~ipad</key>
+    {icons}
+    <key>CFBundleIdentifier</key>
+    <string>{bundle}</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleLocalizations</key>
+    <array>{localizations}
+    </array>
+    <key>CFBundleName</key>
+    <string>{name}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{version}</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>iPhoneSimulator</string>
+    </array>
+    <key>CFBundleVersion</key>
+    <string>{version}</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>MinimumOSVersion</key>
+    <string>{minimum_ios}</string>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>1</integer>
+        <integer>2</integer>
+    </array>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
 </dict>
 </plist>
 "#,

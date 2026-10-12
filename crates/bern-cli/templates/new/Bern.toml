@@ -36,6 +36,12 @@ root = "app"
 platform = "macos"
 channels = ["ipc"]
 
+# iOS, built for the simulator; `bern run --target ios` starts it in the
+# simulator that is running.
+[targets.ios]
+platform = "ios"
+channels = ["ipc"]
+
 [targets.windows]
 platform = "windows"
 channels = ["ipc"]

@@ -1,9 +1,10 @@
-// Bern media runtime for SwiftUI on macOS. Generated build input; do not edit.
+// Bern media runtime for SwiftUI. Generated build input; do not edit.
 //
 // AVFoundation is the media executor: it performs the requests the Rust
 // media hub routes to it and reports what it observes, tagged with the
 // source version it played. Reports are facts; nothing here turns them into
-// commands. Video views attach an AVPlayerView without its own controls,
+// commands. Video views attach a player view without its own controls
+// (AVPlayerView on macOS, an AVPlayerLayer on iOS; see the platform files),
 // so every playback change starts as a Bern media command. The standard
 // control bar uses system controls and system colors; video pixels keep
 // their original colors.
@@ -197,42 +198,6 @@ final class BernMedia {
         BernHost.shared.mediaPost(.view, writer.bytes)
     }
 
-    /// Development snapshots: caching a view's display leaves out video
-    /// layers, so draw the current frame of each local file into the image.
-    static func drawFrames(in root: NSView, onto image: NSBitmapImageRep) {
-        var views: [BernPlayerView] = []
-        func collect(_ view: NSView) {
-            if let player = view as? BernPlayerView { views.append(player) }
-            view.subviews.forEach(collect)
-        }
-        collect(root)
-        guard !views.isEmpty, let context = NSGraphicsContext(bitmapImageRep: image) else { return }
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        for view in views where view.window != nil && !view.isHiddenOrHasHiddenAncestor {
-            guard let player = view.player, let item = player.currentItem,
-                let asset = item.asset as? AVURLAsset, asset.url.isFileURL
-            else { continue }
-            let generator = AVAssetImageGenerator(asset: asset)
-            generator.appliesPreferredTrackTransform = true
-            generator.requestedTimeToleranceBefore = .zero
-            generator.requestedTimeToleranceAfter = .zero
-            guard let frame = try? generator.copyCGImage(at: player.currentTime(), actualTime: nil) else { continue }
-            var rect = view.convert(view.bounds, to: root)
-            if root.isFlipped {
-                rect.origin.y = root.bounds.height - rect.maxY
-            }
-            let size = CGSize(width: frame.width, height: frame.height)
-            let fit = min(rect.width / size.width, rect.height / size.height)
-            let drawn = CGRect(
-                x: rect.midX - size.width * fit / 2, y: rect.midY - size.height * fit / 2,
-                width: size.width * fit, height: size.height * fit)
-            // The image's context is already in points.
-            context.cgContext.draw(frame, in: drawn)
-        }
-    }
-
     /// A window instance closed. Its views stop presenting at once, even
     /// while the toolkit keeps the closed window's views for later.
     func windowClosed(_ window: String) {
@@ -252,6 +217,7 @@ final class BernMediaBackend {
 
     func player(_ id: String) -> BernAVPlayer {
         if let player = players[id] { return player }
+        if players.isEmpty { bernPrepareMediaSession() }
         let player = BernAVPlayer(id: id)
         players[id] = player
         return player
@@ -332,6 +298,7 @@ final class BernAVPlayer {
     private var playerObservations: [NSKeyValueObservation] = []
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
+    private var jumpObserver: NSObjectProtocol?
     private var failureMessage: String?
     private var ended = false
     private var started = false
@@ -385,6 +352,22 @@ final class BernAVPlayer {
                 self.report()
             }
         }
+        // A player that played to its end and then moves without a seek is
+        // no longer at the end; iOS moves it to the start when the app goes
+        // to the background.
+        jumpObserver = center.addObserver(
+            forName: AVPlayerItem.timeJumpedNotification, object: item, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.version == version, self.ended else { return }
+                let duration = item.duration
+                let current = self.player.currentTime()
+                if duration.isNumeric, current.isNumeric, current.seconds < duration.seconds - 0.25 {
+                    self.ended = false
+                    self.report()
+                }
+            }
+        }
         player.replaceCurrentItem(with: item)
         report()
     }
@@ -434,6 +417,8 @@ final class BernAVPlayer {
         itemObservations = []
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
+        if let jumpObserver { NotificationCenter.default.removeObserver(jumpObserver) }
+        jumpObserver = nil
         failureMessage = nil
         ended = false
         started = false
@@ -486,69 +471,6 @@ final class BernAVPlayer {
         writer.u8(player.isMuted ? 1 : 0)
         error.encode(bern: &writer)
         BernHost.shared.mediaPost(.event, writer.bytes)
-    }
-}
-
-// MARK: - Video presenter
-
-/// An AVPlayerView that only presents: no controls, no keyboard or mouse
-/// handling and no Now Playing integration, so it never changes playback
-/// on its own.
-final class BernPlayerView: AVPlayerView {
-    override var acceptsFirstResponder: Bool { false }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-}
-
-/// Attaches a player to a view and reports the attachment to the hub.
-struct BernVideoSurface: NSViewRepresentable {
-    let playerID: String
-    let window: String
-    let gravity: AVLayerVideoGravity
-
-    final class Coordinator {
-        var token: String?
-        var playerID: String?
-        var window: String?
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeNSView(context: Context) -> BernPlayerView {
-        let view = BernPlayerView()
-        view.controlsStyle = .none
-        view.updatesNowPlayingInfoCenter = false
-        view.showsFullScreenToggleButton = false
-        view.videoGravity = gravity
-        attach(view, context.coordinator)
-        return view
-    }
-
-    func updateNSView(_ view: BernPlayerView, context: Context) {
-        view.videoGravity = gravity
-        if context.coordinator.playerID != playerID || context.coordinator.window != window {
-            Self.detach(context.coordinator)
-            attach(view, context.coordinator)
-        }
-    }
-
-    static func dismantleNSView(_ view: BernPlayerView, coordinator: Coordinator) {
-        detach(coordinator)
-    }
-
-    private func attach(_ view: BernPlayerView, _ coordinator: Coordinator) {
-        let token = UUID().uuidString
-        coordinator.token = token
-        coordinator.playerID = playerID
-        coordinator.window = window
-        BernMedia.shared.attach(view, token: token, player: playerID, window: window)
-    }
-
-    private static func detach(_ coordinator: Coordinator) {
-        if let token = coordinator.token { BernMedia.shared.detach(token: token) }
-        coordinator.token = nil
-        coordinator.playerID = nil
-        coordinator.window = nil
     }
 }
 
@@ -845,8 +767,8 @@ struct BernVideoControls: View {
 }
 
 /// The media progress bar: the played part is neutral, never the accent,
-/// so it does not compete with the picture. macOS 26 and later use the
-/// system slider, whose knob is already a capsule; earlier systems draw
+/// so it does not compete with the picture. iOS and macOS 26 and later use
+/// the system slider, whose knob is already a capsule; earlier macOS draws
 /// the same shape. Either way editing begins, the value previews, and
 /// editing ends once, as with `Slider`.
 struct BernScrubber: View {
@@ -868,14 +790,9 @@ struct BernScrubber: View {
     }
 
     var body: some View {
+        #if os(macOS)
         if #available(macOS 26, *) {
-            Slider(value: $value, in: range) {
-                Text(verbatim: label)
-            } onEditingChanged: { editing in
-                onEditingChanged(editing)
-            }
-            .labelsHidden()
-            .tint(.primary)
+            slider
         } else {
             BernScrubberShape(value: $value, range: range, step: step, onEditingChanged: onEditingChanged)
                 .accessibilityRepresentation {
@@ -886,93 +803,18 @@ struct BernScrubber: View {
                     }
                 }
         }
-    }
-}
-
-/// The macOS 26 slider's shape, drawn for earlier systems: a 6 pt rounded
-/// track and a 20 x 16 pt white knob with a soft shadow.
-private struct BernScrubberShape: View {
-    @SwiftUI.Binding var value: Double
-    let range: ClosedRange<Double>
-    let step: Double
-    let onEditingChanged: (Bool) -> Void
-    @Environment(\.isEnabled) private var isEnabled
-    @Environment(\.controlActiveState) private var activeState
-    @State private var dragging = false
-
-    private static let knob = CGSize(width: 20, height: 16)
-    private static let track: CGFloat = 6
-
-    private var span: Double { max(range.upperBound - range.lowerBound, .ulpOfOne) }
-
-    private func set(_ next: Double) {
-        value = min(max(next, range.lowerBound), range.upperBound)
+        #else
+        slider
+        #endif
     }
 
-    private func nudge(_ steps: Double) -> KeyPress.Result {
-        guard isEnabled else { return .ignored }
-        onEditingChanged(true)
-        set(value + steps * step)
-        onEditingChanged(false)
-        return .handled
-    }
-
-    var body: some View {
-        GeometryReader { geometry in
-            let travel = max(geometry.size.width - Self.knob.width, 0)
-            let fraction = min(max((value - range.lowerBound) / span, 0), 1)
-            let x = travel * fraction
-            let split = x + Self.knob.width / 2
-            ZStack(alignment: .leading) {
-                // The two parts meet under the knob, so neither is drawn
-                // over the other.
-                Capsule()
-                    .fill(Color(nsColor: .quaternaryLabelColor))
-                    .frame(width: max(geometry.size.width - split, 0), height: Self.track)
-                    .offset(x: split)
-                // Like the system slider, the played part dims in an
-                // inactive window.
-                Capsule()
-                    .fill(
-                        isEnabled && activeState != .inactive
-                            ? Color.primary : Color(nsColor: .tertiaryLabelColor))
-                    .frame(width: split, height: Self.track)
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.white)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
-                    )
-                    .shadow(color: .black.opacity(isEnabled ? 0.2 : 0), radius: 1.5, y: 0.5)
-                    .frame(width: Self.knob.width, height: Self.knob.height)
-                    .scaleEffect(dragging ? 1.1 : 1)
-                    .offset(x: x)
-            }
-            .frame(maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { drag in
-                        if !dragging {
-                            dragging = true
-                            onEditingChanged(true)
-                        }
-                        let at = (drag.location.x - Self.knob.width / 2) / max(travel, 1)
-                        set(range.lowerBound + min(max(at, 0), 1) * span)
-                    }
-                    .onEnded { _ in
-                        dragging = false
-                        onEditingChanged(false)
-                    }
-            )
-            .allowsHitTesting(isEnabled)
-            .animation(.easeOut(duration: 0.15), value: dragging)
+    private var slider: some View {
+        Slider(value: $value, in: range) {
+            Text(verbatim: label)
+        } onEditingChanged: { editing in
+            onEditingChanged(editing)
         }
-        .frame(height: 22)
-        .focusable(isEnabled)
-        .onKeyPress(.leftArrow) { nudge(-1) }
-        .onKeyPress(.downArrow) { nudge(-1) }
-        .onKeyPress(.rightArrow) { nudge(1) }
-        .onKeyPress(.upArrow) { nudge(1) }
+        .labelsHidden()
+        .tint(.primary)
     }
 }

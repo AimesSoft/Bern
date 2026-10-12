@@ -37,12 +37,21 @@ const MEDIA_TIMEOUT: Duration = Duration::from_secs(10);
 /// no side effects, so the caller can simply ask again.
 const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// The variable naming the directory the per-application socket
+/// directories go in, instead of the temporary directory. `bern run` sets
+/// it for an app in the iOS simulator to the Mac's temporary directory,
+/// where the Mac's command line tools look.
+pub const DIR_VARIABLE: &str = "BERN_IPC_DIR";
+
 /// Directory holding the sockets of one application, unique per user.
 pub fn socket_dir(bundle_id: &str) -> PathBuf {
-    platform::temp_dir().join(format!(
-        "bern-{:016x}",
-        fingerprint_bytes(bundle_id.as_bytes())
-    ))
+    std::env::var_os(DIR_VARIABLE)
+        .map(PathBuf::from)
+        .unwrap_or_else(platform::temp_dir)
+        .join(format!(
+            "bern-{:016x}",
+            fingerprint_bytes(bundle_id.as_bytes())
+        ))
 }
 
 #[cfg(unix)]

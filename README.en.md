@@ -337,6 +337,12 @@ counter-mcp   # the same catalog for AI agents
 <td><img alt="available" src="https://img.shields.io/badge/-available-22C55E?style=flat-square"> <a href="Docs/Implementation/macOS-SwiftUI.md">notes</a></td>
 </tr>
 <tr>
+<td><b>iOS</b><br><code>swiftui + ios</code></td>
+<td>SwiftUI, the same generated code as on macOS; one scene, other windows as sheets · iOS 17+</td>
+<td>In process</td>
+<td><img alt="simulator" src="https://img.shields.io/badge/-simulator-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">notes</a></td>
+</tr>
+<tr>
 <td><b>Windows</b><br><code>winui3 + windows</code></td>
 <td>C++/WinRT: WinUI 3 when a Windows App Runtime 2 is present (installed by another app or shipped with Windows 11), otherwise the system XAML; either can also be built alone · Windows 10 2004+</td>
 <td>In process (statically linked)</td>
@@ -362,7 +368,7 @@ counter-mcp   # the same catalog for AI agents
 </tr>
 <tr>
 <td><b>Next</b></td>
-<td><code>flutter + macos</code> (backend replaceability), then iOS, Android and HarmonyOS</td>
+<td><code>flutter + macos</code> (backend replaceability), then iOS device packages, Android and HarmonyOS</td>
 <td>–</td>
 <td><img alt="planned" src="https://img.shields.io/badge/-planned-94A3B8?style=flat-square"> <a href="Docs/Adaptation/README.md">adaptation</a></td>
 </tr>
@@ -422,7 +428,7 @@ The chart is a sketch by architecture, not a ranking: the horizontal axis is whe
 
 | Framework | macOS | Windows | Linux | Mobile | Web | Native look | Built-in MCP | Compile-time checks |
 | :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| **Bern** | ● | ● | ● | — | ● | ● | ● | ● |
+| **Bern** | ● | ● | ● | ◐ | ● | ● | ● | ● |
 | **GPUI** | ● | ● | ● | — | — | — | — | — |
 | **Dioxus** | ● | ● | ● | ● | ● | — | — | — |
 | **Flutter** | ● | ● | ● | ● | ● | — | — | — |
@@ -433,7 +439,7 @@ The chart is a sketch by architecture, not a ranking: the horizontal axis is whe
 | **Avalonia** | ● | ● | ● | ● | ● | — | — | — |
 | **Qt** | ● | ● | ● | ● | ● | ◐ | — | — |
 
-- **Mobile**: iOS and Android. React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern's mobile targets are planned.
+- **Mobile**: iOS and Android. React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern's iOS target builds simulator apps; device packages and Android are planned.
 - **Native look**: the controls are the platform's own, with look, accessibility and input methods from the system. Qt Widgets and uni-app x come close and count as partly.
 - **Built-in MCP**: an MCP server and command line that come with the framework and act on the running interface. Other frameworks can be automated from outside through accessibility APIs or test tools such as Playwright and Flutter Driver.
 - **Compile-time checks**: a missing translation, a feature without an entry in some layout, or an entry not registered to a feature is a compiler error (see [Built for AI](#built-for-ai)). Other frameworks mostly find these with linters, translation tools or tests.
@@ -540,7 +546,7 @@ cd my_app
 bern run
 ```
 
-The new app is a window with a counter, with one crate each for the protocol, the engine and the interface, and all four targets declared in `Bern.toml`. `bern run` builds the target for this computer and starts it: SwiftUI on macOS, WinUI 3 on Windows, GTK on Linux; `bern run --target web_app` opens it in the browser. Every build also produces the application CLI and MCP server in `target/bern/<target>/bin/`.
+The new app is a window with a counter, with one crate each for the protocol, the engine and the interface, and all five targets declared in `Bern.toml`. `bern run` builds the target for this computer and starts it: SwiftUI on macOS, WinUI 3 on Windows, GTK on Linux; `bern run --target web_app` opens it in the browser, and `bern run --target ios` installs it in the running iOS simulator. Every build also produces the application CLI and MCP server in `target/bern/<target>/bin/`.
 
 `bern doctor` lists what this computer still needs for each target, and how to install it:
 
@@ -550,6 +556,7 @@ bern 0.1.0 on macOS (aarch64)
 
 [✓] Rust: rustc 1.99.0, cargo 1.99.0
 [✓] macOS · SwiftUI: macOS SDK 26.5, Swift 6.3.2
+[✓] iOS · SwiftUI: iOS simulator SDK 26.5, the aarch64-apple-ios-sim target
 [-] Windows · WinUI 3: builds on Windows
 [-] Linux · GTK 4: builds on Linux
 [✓] Web · WebAssembly: the wasm32-unknown-unknown target
@@ -560,6 +567,7 @@ bern 0.1.0 on macOS (aarch64)
 <br>
 
 - **macOS**: Xcode 26 or later. After installing it from the App Store, run `sudo xcode-select --switch /Applications/Xcode.app`.
+- **iOS**: Xcode's iOS platform and an iOS simulator, plus `rustup target add aarch64-apple-ios-sim`. Builds are for the simulator for now; device signing and packages are not done yet.
 - **Windows**: Visual Studio 2022 or later with “Desktop development with C++” (the Build Tools are enough) and a Windows 11 SDK; Rust on the MSVC toolchain. The first build generates the C++/WinRT headers with the Windows SDK's `cppwinrt` and precompiles them with the runtime (about 2.4 GB per profile, under `target`); later builds compile only the app's own code, about 5 s for a new app and 9 s for the showcase. The app folder holds only the executable, a 400 KB bootstrapper DLL and the resources: no .NET, no bundled Windows App SDK.
 - **Linux**: GTK 4.14 and libadwaita 1.5 development packages, for example `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`.
 - **Web**: `rustup target add wasm32-unknown-unknown`. A `web_app` build compiles the engine to WebAssembly and runs it in the page; a `web_ui` build makes the page the UI of a separate engine host, which `bern run` starts before opening its address.
@@ -604,7 +612,7 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 | 1 · 2 | Compile-time boundary; macOS SwiftUI with UI, CLI, JSON and MCP on one engine | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 3 | Web visual spec, theme kernel, WebAssembly app and WebUI builds | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 4 | Adaptive layouts, menus, feature contracts, runtime language switching | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
-| 5 | Other native front ends: GTK 4 (done) · WinUI 3 (done) · `flutter + macos` (next) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
+| 5 | Other native front ends: GTK 4 (done) · WinUI 3 (done) · iOS (simulator, done) · `flutter + macos` (next) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
 | 6 | Component library (first set done: `Image`, `Progress`, `Grid`, `Stack`), packaging, incremental builds, tooling (`bern new`, `run`, `doctor` and `package` done) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
 
 ## Repository
@@ -646,7 +654,7 @@ Tests include declarations that must fail to compile, and type-check the generat
 
 - [Design document](Docs/Design.md) – goals, architecture, components, theming, commands, windows, media
 - [Adaptation specs](Docs/Adaptation/README.md) – Apple, Windows and Linux, Web, Android, HarmonyOS
-- Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 The design and implementation documents are written in Chinese.
 
