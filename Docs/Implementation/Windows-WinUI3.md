@@ -207,7 +207,7 @@ target\bern\windows\Showcase\showcase.exe
 - 应用按 2.5.1 编译、接受 2.0 起的运行时：只在 2.2 与 2.5.1 上实测过，没有 2.0、2.1 的机器。
 - 未提供 MSIX 打包、安装程序、应用图标与代码签名。未签名的新程序可能被安全软件的启发式规则误判，正式分发需要签名。
 - 回退前端没有 `SelectorBar`、`InfoBar` 与 `TitleBar`，分别以按钮组、自绘错误条与系统标题栏代替。
-- `Image` 显示 HDR 图片尚未验证：测试用的 PC 没有确认是否为 HDR 显示器，窗口快照（`RenderTargetBitmap`）本身只有 8 位 SDR，看不出屏幕上的实际效果。快照中带增益图的 JPEG 为其 SDR 基础图，带 EXIF 方向的照片已转正，两种前端相同。
+- `Image` 不显示 HDR 图片：WinUI 3 的 `Image` 控件目前不支持 HDR。WinUI 的 HDR/WCG 功能提案 [microsoft-ui-xaml#67](https://github.com/microsoft/microsoft-ui-xaml/issues/67) 仍未实现（2026 年 9 月列入 Backlog）；[WindowsAppSDK#6291](https://github.com/microsoft/WindowsAppSDK/issues/6291) 中微软维护者答复 WinUI 3 “does not have full HDR support at this time”；社区实测 `Image` 显示 HDR 图片被截到 SDR，可行做法是 `SwapChainPanel` 加 Direct2D（微软示例 D2DAdvancedColorImages）。Bern 尚未实现这条路径。测试用的 PC 没有确认是否为 HDR 显示器，窗口快照（`RenderTargetBitmap`）只有 8 位 SDR；快照中带增益图的 JPEG 为其 SDR 基础图，带 EXIF 方向的照片已转正，两种前端相同。
 - 页面工具放在页头，没有使用 `CommandBar`；`Menu` 的菜单项不呈现 `destructive` 角色。
 - 品牌色的浅色与深色档位按与白色、黑色混合近似生成。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。
