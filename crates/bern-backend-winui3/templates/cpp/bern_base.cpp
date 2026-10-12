@@ -4,6 +4,11 @@
 // Through the precompiled header, which starts with bern_base.h.
 #include "bern_pch.h"
 
+#include <audiosessiontypes.h>
+#include <d3d11_4.h>
+#include <mfapi.h>
+#include <mferror.h>
+#include <mfmediaengine.h>
 #include <shlwapi.h>
 
 #include <winrt/Windows.Globalization.h>
@@ -693,6 +698,10 @@ void Dispatch(int command, Values const& args, Done done, std::function<void(Fai
 // ---------------------------------------------------------------------------
 // Media
 
+#pragma comment(lib, "mfplat.lib")
+#pragma comment(lib, "mfuuid.lib")
+#pragma comment(lib, "oleaut32.lib")
+
 std::string PlayerState::Describe() const {
     static char const* const names[] = {"Idle", "Loading", "Ready", "Playing", "Paused", "Buffering", "Ended", "Failed", "Unavailable"};
     std::string name = phase < 9 ? names[phase] : "Unavailable";
@@ -701,78 +710,235 @@ std::string PlayerState::Describe() const {
 
 namespace Media {
 
-using namespace winrt::Windows::Media::Playback;
-using winrt::Windows::Foundation::TimeSpan;
+static bool Started() {
+    static bool const started = SUCCEEDED(MFStartup(MF_VERSION));
+    return started;
+}
 
-/// One player of the executor.
+/// The Direct3D device the media engines decode and draw with, behind one
+/// DXGI device manager; null without Direct3D 11 video support, and the
+/// engines then play sound only.
+static IMFDXGIDeviceManager* DeviceManager() {
+    static winrt::com_ptr<ID3D11Device> device;
+    static winrt::com_ptr<IMFDXGIDeviceManager> manager;
+    static UINT token = 0;
+    if (device && device->GetDeviceRemovedReason() == S_OK) return manager.get();
+    // A device the GPU lost is replaced; the engines open the new one
+    // through the manager.
+    winrt::com_ptr<ID3D11Device> made;
+    UINT flags = D3D11_CREATE_DEVICE_VIDEO_SUPPORT | D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, nullptr, 0, D3D11_SDK_VERSION, made.put(), nullptr, nullptr)))
+        return nullptr;
+    // The engines use it from their own threads.
+    if (auto multithread = made.try_as<ID3D11Multithread>()) multithread->SetMultithreadProtected(TRUE);
+    if (!manager && FAILED(MFCreateDXGIDeviceManager(&token, manager.put()))) return nullptr;
+    if (FAILED(manager->ResetDevice(made.get(), token))) return nullptr;
+    device = made;
+    return manager.get();
+}
+
+struct Stream;
+
+/// Takes an engine's events, which arrive on its threads, to its stream on
+/// the UI thread.
+struct Notify : winrt::implements<Notify, IMFMediaEngineNotify> {
+    std::weak_ptr<Stream> stream;
+    uint64_t engine;
+    Notify(std::weak_ptr<Stream> stream, uint64_t engine) : stream(std::move(stream)), engine(engine) {}
+    HRESULT __stdcall EventNotify(DWORD event, DWORD_PTR param1, DWORD param2) noexcept override;
+};
+
+/// A view showing a player, newest last.
+struct Screen {
+    uint64_t token = 0;
+    std::function<void(Frames const&)> changed;
+    uint32_t width = 0, height = 0;
+};
+
+/// The views of each player, kept apart from its stream, which a release
+/// ends while views may still show the player.
+static std::unordered_map<std::string, std::vector<Screen>> screens;
+
+/// One player of the executor. Each source gets a media engine of its own,
+/// so that late events of the previous one are told apart. The engine draws
+/// its frames into a swap chain of its own (windowless swap chain mode),
+/// which views show; Windows tone maps HDR video there for SDR displays.
 struct Stream : std::enable_shared_from_this<Stream> {
     std::string id;
-    MediaPlayer player;
+    winrt::com_ptr<IMFMediaEngineEx> engine;
+    /// The engine events belong to.
+    uint64_t serial = 0;
     uint64_t version = 0;
-    bool loaded = false, started = false, opened = false, ended = false, released = false;
+    bool loaded = false, started = false, waiting = false, windowless = false, released = false;
+    double volume = 1;
+    bool muted = false;
     std::optional<std::string> error;
     std::chrono::steady_clock::time_point lastReport{};
-    TimeSpan lastPosition{};
+    double lastPosition = 0;
     std::vector<std::function<void()>> seeks;
+    Frames frames;
+    /// The size the engine draws at.
+    uint32_t drawnWidth = 0, drawnHeight = 0;
 
-    explicit Stream(std::string name) : id(std::move(name)) {
-        player.AutoPlay(false);
-        // Commands come through the hub; the system media controls would
-        // bypass it.
-        player.CommandManager().IsEnabled(false);
+    explicit Stream(std::string name) : id(std::move(name)) {}
+
+    /// A new engine with the player's volume, for a new source.
+    void Start() {
+        Stop();
+        if (!Started()) winrt::throw_hresult(MF_E_PLATFORM_NOT_INITIALIZED);
+        winrt::com_ptr<IMFMediaEngineClassFactory> factory;
+        winrt::check_hresult(CoCreateInstance(CLSID_MFMediaEngineClassFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(factory.put())));
+        winrt::com_ptr<IMFAttributes> attributes;
+        winrt::check_hresult(MFCreateAttributes(attributes.put(), 4));
+        auto notify = winrt::make_self<Notify>(weak_from_this(), serial);
+        winrt::check_hresult(attributes->SetUnknown(MF_MEDIA_ENGINE_CALLBACK, static_cast<IMFMediaEngineNotify*>(notify.get())));
+        if (auto manager = DeviceManager()) winrt::check_hresult(attributes->SetUnknown(MF_MEDIA_ENGINE_DXGI_MANAGER, manager));
+        else bern::Report("video " + id + ": no Direct3D 11 video device, sound only");
+        winrt::check_hresult(attributes->SetUINT32(MF_MEDIA_ENGINE_AUDIO_CATEGORY, AudioCategory_Media));
+        winrt::check_hresult(attributes->SetGUID(MF_MEDIA_ENGINE_BROWSER_COMPATIBILITY_MODE, MF_MEDIA_ENGINE_BROWSER_COMPATIBILITY_MODE_IE_EDGE));
+        winrt::com_ptr<IMFMediaEngine> made;
+        winrt::check_hresult(factory->CreateInstance(0, attributes.get(), made.put()));
+        engine = made.as<IMFMediaEngineEx>();
+        engine->SetVolume(volume);
+        engine->SetMuted(muted);
     }
 
-    void Watch() {
-        std::weak_ptr<Stream> weak = shared_from_this();
-        auto on = [weak](auto action) {
-            return [weak, action](auto&&...) {
-                Host::Post([weak, action] {
-                    if (auto self = weak.lock()) action(*self);
-                });
-            };
-        };
-        player.MediaOpened(on([](Stream& s) { s.opened = true; s.Report(); }));
-        player.MediaFailed([weak](auto&&, MediaPlayerFailedEventArgs const& args) {
-            auto text = Describe(args);
-            Host::Post([weak, text] {
-                if (auto self = weak.lock()) { self->error = text; self->Report(); }
-            });
-        });
-        player.MediaEnded(on([](Stream& s) { s.ended = true; s.Report(); }));
-        player.VolumeChanged(on([](Stream& s) { s.Report(); }));
-        player.IsMutedChanged(on([](Stream& s) { s.Report(); }));
-        auto session = player.PlaybackSession();
-        session.PlaybackStateChanged(on([](Stream& s) { s.Report(); }));
-        session.NaturalDurationChanged(on([](Stream& s) { s.Report(); }));
-        session.SeekCompleted(on([](Stream& s) {
-            s.Report();
-            auto done = std::move(s.seeks);
-            s.seeks.clear();
+    /// Shut the engine down; its later events are ignored.
+    void Stop() {
+        ++serial;
+        windowless = false;
+        drawnWidth = drawnHeight = 0;
+        Present(Frames{});
+        if (engine) {
+            engine->Shutdown();
+            engine = nullptr;
+        }
+    }
+
+    /// Change what the views show.
+    void Present(Frames next) {
+        if (next.chain == frames.chain && next.width == frames.width && next.height == frames.height) return;
+        frames = next;
+        Announce();
+    }
+
+    /// Tell each view what it shows: the newest the frames, the others the
+    /// size only.
+    void Announce() {
+        auto found = screens.find(id);
+        if (found == screens.end()) return;
+        std::vector<std::pair<std::function<void(Frames const&)>, Frames>> calls;
+        auto const& list = found->second;
+        for (size_t i = 0; i < list.size(); ++i)
+            calls.emplace_back(list[i].changed, Frames{i + 1 == list.size() ? frames.chain : nullptr, frames.width, frames.height});
+        for (auto& [changed, shown] : calls)
+            if (changed) changed(shown);
+    }
+
+    /// Draw at the size the newest view shows the video, or at the video's
+    /// own size before it has one.
+    void Fit() { Fit(frames.width, frames.height); }
+
+    void Fit(uint32_t width, uint32_t height) {
+        if (!engine || !windowless) return;
+        if (auto found = screens.find(id); found != screens.end() && !found->second.empty() && found->second.back().width && found->second.back().height) {
+            width = found->second.back().width;
+            height = found->second.back().height;
+        }
+        if (!width || !height || (width == drawnWidth && height == drawnHeight)) return;
+        RECT target{0, 0, static_cast<LONG>(width), static_cast<LONG>(height)};
+        if (SUCCEEDED(engine->UpdateVideoStream(nullptr, &target, nullptr))) {
+            drawnWidth = width;
+            drawnHeight = height;
+        }
+    }
+
+    /// With the metadata, or a new format: have the engine draw into a
+    /// swap chain and give it to the views.
+    void ShowVideo() {
+        DWORD width = 0, height = 0;
+        // The size with the pixel aspect ratio applied.
+        if (!engine || !engine->HasVideo() || FAILED(engine->GetNativeVideoSize(&width, &height)) || !width || !height) {
+            Present(Frames{});
+            return;
+        }
+        HANDLE chain = nullptr;
+        if (!windowless) windowless = SUCCEEDED(engine->EnableWindowlessSwapchainMode(TRUE));
+        if (windowless) {
+            drawnWidth = drawnHeight = 0;
+            Fit(width, height);
+            // The engine owns the handle.
+            if (FAILED(engine->GetVideoSwapchainHandle(&chain))) chain = nullptr;
+        }
+        if (!chain) bern::Report("video " + id + ": the media engine gives no swap chain, sound only");
+        Present(Frames{chain, static_cast<uint32_t>(width), static_cast<uint32_t>(height)});
+    }
+
+    void Handle(DWORD event, DWORD_PTR param1, DWORD param2) {
+        if (released) return;
+        switch (event) {
+        case MF_MEDIA_ENGINE_EVENT_LOADEDMETADATA:
+        case MF_MEDIA_ENGINE_EVENT_FORMATCHANGE:
+            ShowVideo();
+            Report();
+            break;
+        case MF_MEDIA_ENGINE_EVENT_WAITING:
+        case MF_MEDIA_ENGINE_EVENT_BUFFERINGSTARTED:
+            waiting = true;
+            Report();
+            break;
+        case MF_MEDIA_ENGINE_EVENT_PLAYING:
+        case MF_MEDIA_ENGINE_EVENT_BUFFERINGENDED:
+            waiting = false;
+            Report();
+            break;
+        case MF_MEDIA_ENGINE_EVENT_SEEKED: {
+            Report();
+            auto done = std::move(seeks);
+            seeks.clear();
             for (auto& complete : done) complete();
-        }));
-        session.PositionChanged(on([](Stream& s) {
-            if (s.released) return;
+            break;
+        }
+        case MF_MEDIA_ENGINE_EVENT_ERROR:
+            error = Describe(static_cast<MF_MEDIA_ENGINE_ERR>(param1), static_cast<HRESULT>(param2));
+            Report();
+            break;
+        case MF_MEDIA_ENGINE_EVENT_TIMEUPDATE: {
             // Playback reports twice a second; a jump reports at once.
-            auto position = s.player.PlaybackSession().Position();
-            auto jumped = std::abs(std::chrono::duration_cast<std::chrono::milliseconds>(position - s.lastPosition).count()) > 750;
-            if (jumped || std::chrono::steady_clock::now() - s.lastReport >= std::chrono::milliseconds(500)) s.Report();
-        }));
+            double position = engine ? engine->GetCurrentTime() : 0;
+            if (std::abs(position - lastPosition) > 0.75 || std::chrono::steady_clock::now() - lastReport >= std::chrono::milliseconds(500)) Report();
+            break;
+        }
+        case MF_MEDIA_ENGINE_EVENT_LOADEDDATA:
+        case MF_MEDIA_ENGINE_EVENT_CANPLAY:
+        case MF_MEDIA_ENGINE_EVENT_CANPLAYTHROUGH:
+        case MF_MEDIA_ENGINE_EVENT_DURATIONCHANGE:
+        case MF_MEDIA_ENGINE_EVENT_PLAY:
+        case MF_MEDIA_ENGINE_EVENT_PAUSE:
+        case MF_MEDIA_ENGINE_EVENT_ENDED:
+        case MF_MEDIA_ENGINE_EVENT_VOLUMECHANGE:
+        case MF_MEDIA_ENGINE_EVENT_STALLED:
+        case MF_MEDIA_ENGINE_EVENT_EMPTIED:
+            Report();
+            break;
+        default:
+            break;
+        }
     }
 
     /// What went wrong, as a sentence with the system's error code.
-    static std::string Describe(MediaPlayerFailedEventArgs const& args) {
-        if (!args.ErrorMessage().empty()) return Utf8(args.ErrorMessage());
+    static std::string Describe(MF_MEDIA_ENGINE_ERR code, HRESULT result) {
         std::string text;
-        switch (args.Error()) {
-        case MediaPlayerError::SourceNotSupported: text = "The file is damaged or its format is not supported"; break;
-        case MediaPlayerError::DecodingError: text = "The media could not be decoded"; break;
-        case MediaPlayerError::NetworkError: text = "The media could not be loaded from the network"; break;
-        case MediaPlayerError::Aborted: text = "Loading the media was aborted"; break;
+        switch (code) {
+        case MF_MEDIA_ENGINE_ERR_SRC_NOT_SUPPORTED: text = "The file is damaged or its format is not supported"; break;
+        case MF_MEDIA_ENGINE_ERR_DECODE: text = "The media could not be decoded"; break;
+        case MF_MEDIA_ENGINE_ERR_NETWORK: text = "The media could not be loaded from the network"; break;
+        case MF_MEDIA_ENGINE_ERR_ABORTED: text = "Loading the media was aborted"; break;
         default: text = "The media could not be played"; break;
         }
-        if (auto code = args.ExtendedErrorCode().value) {
+        if (FAILED(result)) {
             char hex[16];
-            std::snprintf(hex, sizeof hex, "0x%08X", static_cast<unsigned>(code));
+            std::snprintf(hex, sizeof hex, "0x%08X", static_cast<unsigned>(result));
             text += std::string(" (") + hex + ")";
         }
         return text;
@@ -781,40 +947,43 @@ struct Stream : std::enable_shared_from_this<Stream> {
     uint32_t CurrentPhase() const {
         if (!loaded) return Phase::Idle;
         if (error) return Phase::Failed;
-        auto state = player.PlaybackSession().PlaybackState();
-        if (!opened) return started ? Phase::Buffering : Phase::Loading;
-        if (ended) return Phase::Ended;
-        switch (state) {
-        case MediaPlaybackState::Playing: return Phase::Playing;
-        case MediaPlaybackState::Buffering:
-        case MediaPlaybackState::Opening: return started ? Phase::Buffering : Phase::Loading;
-        default: return started ? Phase::Paused : Phase::Ready;
-        }
+        if (!engine) return Phase::Loading;
+        auto ready = engine->GetReadyState();
+        if (ready < MF_MEDIA_ENGINE_READY_HAVE_METADATA) return started ? Phase::Buffering : Phase::Loading;
+        if (engine->IsEnded()) return Phase::Ended;
+        if (!engine->IsPaused()) return waiting || ready < MF_MEDIA_ENGINE_READY_HAVE_FUTURE_DATA ? Phase::Buffering : Phase::Playing;
+        return started ? Phase::Paused : Phase::Ready;
     }
 
     void Report() {
         // Events queued before the player was released arrive afterwards.
         if (!Host::handle || released) return;
-        auto session = player.PlaybackSession();
         lastReport = std::chrono::steady_clock::now();
-        lastPosition = session.Position();
+        double position = engine ? engine->GetCurrentTime() : 0;
+        lastPosition = position;
         auto phase = CurrentPhase();
-        auto duration = session.NaturalDuration();
-        bool known = opened && duration.count() > 0;
+        // Unknown before the metadata, infinite for live streams.
+        double duration = engine ? engine->GetDuration() : std::nan("");
+        bool known = std::isfinite(duration) && duration > 0;
+        bool seekable = false;
+        if (known) {
+            winrt::com_ptr<IMFMediaTimeRange> ranges;
+            seekable = SUCCEEDED(engine->GetSeekable(ranges.put())) && ranges && ranges->GetLength() > 0;
+        }
         Writer w;
         w.Text(id);
         w.U64(version);
         w.U32(phase);
-        w.I64((std::max)(int64_t{0}, std::chrono::duration_cast<std::chrono::milliseconds>(session.Position()).count()));
+        w.I64((std::max)(int64_t{0}, std::llround(position * 1000)));
         if (known) {
             w.U8(1);
-            w.I64(std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+            w.I64(std::llround(duration * 1000));
         } else {
             w.U8(0);
         }
-        w.U8(known && session.CanSeek() ? 1 : 0);
-        w.F64(std::round(player.Volume() * 1000) / 1000);
-        w.U8(player.IsMuted() ? 1 : 0);
+        w.U8(seekable ? 1 : 0);
+        w.F64(std::round(volume * 1000) / 1000);
+        w.U8(muted ? 1 : 0);
         if (phase == Phase::Failed && error) {
             w.U8(1);
             w.Text(*error);
@@ -824,76 +993,75 @@ struct Stream : std::enable_shared_from_this<Stream> {
         bern_media_event(Host::handle, w.bytes.data(), w.bytes.size());
     }
 
-    void Load(std::string url, uint64_t next) {
+    void Load(std::string const& url, uint64_t next) {
         version = next;
-        started = opened = ended = false;
+        started = waiting = false;
         error.reset();
         loaded = true;
-        player.Pause();
-        player.Source(nullptr);
-        Report();
-        LoadSource(std::move(url), next);
-    }
-
-    winrt::fire_and_forget LoadSource(std::string url, uint64_t next) {
-        std::weak_ptr<Stream> weak = shared_from_this();
         try {
-            winrt::Windows::Media::Core::MediaSource source{nullptr};
+            Start();
+            std::wstring location{Wide(url)};
+            // Local files go to the engine as paths.
             if (url.rfind("file:", 0) == 0) {
                 wchar_t path[MAX_PATH * 2];
                 DWORD length = MAX_PATH * 2;
-                winrt::check_hresult(PathCreateFromUrlW(Wide(url).c_str(), path, &length, 0));
-                auto file = co_await winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(path);
-                source = winrt::Windows::Media::Core::MediaSource::CreateFromStorageFile(file);
-            } else {
-                source = winrt::Windows::Media::Core::MediaSource::CreateFromUri(winrt::Windows::Foundation::Uri(Wide(url)));
+                winrt::check_hresult(PathCreateFromUrlW(location.c_str(), path, &length, 0));
+                location = path;
             }
-            Host::Post([weak, next, source] {
-                auto self = weak.lock();
-                if (!self || self->version != next || self->released) return;
-                self->player.Source(source);
-            });
+            BSTR source = SysAllocString(location.c_str());
+            HRESULT result = engine->SetSource(source);
+            SysFreeString(source);
+            winrt::check_hresult(result);
         } catch (winrt::hresult_error const& failure) {
             auto message = Utf8(failure.message());
-            Host::Post([weak, next, message] {
-                auto self = weak.lock();
-                if (!self || self->version != next) return;
-                self->error = message.substr(0, message.find('\n'));
-                self->Report();
-            });
+            error = message.substr(0, message.find('\n'));
         }
+        Report();
     }
 
     void Unload(uint64_t next) {
         version = next;
-        started = opened = ended = loaded = false;
+        started = waiting = loaded = false;
         error.reset();
-        player.Pause();
-        player.Source(nullptr);
+        Stop();
         Report();
     }
 
     void Play() {
-        if (ended) {
-            ended = false;
-            player.PlaybackSession().Position(TimeSpan{});
-        }
         started = true;
-        player.Play();
+        if (engine) {
+            if (engine->IsEnded()) engine->SetCurrentTime(0);
+            engine->Play();
+        }
         Report();
     }
 
     void Pause() {
-        player.Pause();
+        if (engine) engine->Pause();
+        Report();
+    }
+
+    void SetVolume(double next) {
+        volume = next;
+        if (engine) engine->SetVolume(next);
+        Report();
+    }
+
+    void SetMuted(bool next) {
+        muted = next;
+        if (engine) engine->SetMuted(next);
         Report();
     }
 
     void Seek(int64_t positionMs, std::function<void()> done) {
-        ended = false;
+        if (!engine) {
+            done();
+            return;
+        }
         auto shared = std::make_shared<std::function<void()>>(std::move(done));
         seeks.push_back([shared] { if (*shared) { auto f = std::move(*shared); *shared = nullptr; f(); } });
-        player.PlaybackSession().Position(std::chrono::milliseconds((std::max)(int64_t{0}, positionMs)));
-        // A seek the session finishes at once reports no completion.
+        engine->SetCurrentTime(static_cast<double>((std::max)(int64_t{0}, positionMs)) / 1000);
+        // A seek that reports no completion still completes.
         std::weak_ptr<Stream> weak = shared_from_this();
         Host::After(std::chrono::seconds(3), [weak, shared] {
             if (!*shared) return;
@@ -908,11 +1076,24 @@ struct Stream : std::enable_shared_from_this<Stream> {
         if (released) return;
         released = true;
         seeks.clear();
-        player.Pause();
-        player.Source(nullptr);
-        player.Close();
+        Stop();
     }
 };
+
+HRESULT __stdcall Notify::EventNotify(DWORD event, DWORD_PTR param1, DWORD param2) noexcept {
+    // The engine waits for this one before it settles.
+    if (event == MF_MEDIA_ENGINE_EVENT_NOTIFYSTABLESTATE) {
+        SetEvent(reinterpret_cast<HANDLE>(param1));
+        return S_OK;
+    }
+    try {
+        Host::Post([stream = stream, engine = engine, event, param1, param2] {
+            if (auto self = stream.lock(); self && self->serial == engine) self->Handle(event, param1, param2);
+        });
+    } catch (...) {
+    }
+    return S_OK;
+}
 
 static std::unordered_map<std::string, std::shared_ptr<Stream>> streams;
 static Cell<std::shared_ptr<std::map<std::string, PlayerState> const>> players{std::make_shared<std::map<std::string, PlayerState> const>()};
@@ -921,14 +1102,51 @@ static uint64_t views = 0;
 
 static std::shared_ptr<Stream> StreamOf(std::string const& id) {
     auto& slot = streams[id];
-    if (!slot) {
-        slot = std::make_shared<Stream>(id);
-        slot->Watch();
-    }
+    if (!slot) slot = std::make_shared<Stream>(id);
     return slot;
 }
 
-MediaPlayer Player(std::string const& id) { return StreamOf(id)->player; }
+static std::unordered_map<uint64_t, std::string> screenPlayers;
+static uint64_t nextScreen = 1;
+
+uint64_t Show(std::string const& player, std::function<void(Frames const&)> changed) {
+    auto token = nextScreen++;
+    screenPlayers[token] = player;
+    screens[player].push_back(Screen{token, std::move(changed)});
+    auto stream = StreamOf(player);
+    stream->Fit();
+    stream->Announce();
+    return token;
+}
+
+void Hide(uint64_t screen) {
+    auto found = screenPlayers.find(screen);
+    if (found == screenPlayers.end()) return;
+    auto player = found->second;
+    screenPlayers.erase(found);
+    auto& list = screens[player];
+    bool newest = !list.empty() && list.back().token == screen;
+    std::erase_if(list, [screen](Screen const& s) { return s.token == screen; });
+    if (list.empty()) screens.erase(player);
+    if (!newest) return;
+    // The next newest view shows the frames.
+    if (auto stream = streams.find(player); stream != streams.end()) {
+        stream->second->Fit();
+        stream->second->Announce();
+    }
+}
+
+void Resize(uint64_t screen, uint32_t width, uint32_t height) {
+    auto found = screenPlayers.find(screen);
+    if (found == screenPlayers.end()) return;
+    if (auto list = screens.find(found->second); list != screens.end())
+        for (auto& s : list->second)
+            if (s.token == screen) {
+                s.width = width;
+                s.height = height;
+            }
+    if (auto stream = streams.find(found->second); stream != streams.end()) stream->second->Fit();
+}
 
 std::string Time(int64_t milliseconds) {
     auto seconds = (std::max)(int64_t{0}, milliseconds) / 1000;
@@ -951,10 +1169,10 @@ static std::optional<Failure> StatusOf(Bytes const& reply) {
 
 void AttachExecutor() {
     Writer w;
-    w.Text("windows-mediaplayer");
+    w.Text("windows-mediaengine");
     w.Text("1");
     w.U8(1);  // keeps playing without a view
-    w.U8(1);  // several views may show one player
+    w.U8(0);  // one view shows a player at a time, the newest
     if (auto failure = StatusOf(Call(bern_media_executor_attached, w.bytes))) Report("media executor: " + failure->message);
     ReceiveState(Host::Take(bern_media_snapshot(Host::handle)));
 }
@@ -1052,8 +1270,8 @@ void Request(Bytes const& bytes) {
         case 2: stream->Play(); Complete(request, std::nullopt); break;
         case 3: stream->Pause(); Complete(request, std::nullopt); break;
         case 4: stream->Seek(reader.I64(), [request] { Complete(request, std::nullopt); }); break;
-        case 5: stream->player.Volume((std::clamp)(reader.F64(), 0.0, 1.0)); Complete(request, std::nullopt); break;
-        case 6: stream->player.IsMuted(reader.U8() != 0); Complete(request, std::nullopt); break;
+        case 5: stream->SetVolume((std::clamp)(reader.F64(), 0.0, 1.0)); Complete(request, std::nullopt); break;
+        case 6: stream->SetMuted(reader.U8() != 0); Complete(request, std::nullopt); break;
         default: Complete(request, Failure{"unknown_command", "unknown media operation"}); break;
         }
     } catch (DecodeError const&) {

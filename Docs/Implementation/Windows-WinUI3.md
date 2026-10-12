@@ -50,7 +50,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 列表身份、订阅释放 | 完成 | `ForEach` 按键保留行；查询订阅随视图与窗口结束 |
 | 深浅色 | 完成 | 颜色全部来自系统主题资源，经 `ThemeResource` 绑定，运行中切换主题也会更新；Islands 窗口的标题栏经 DWM 跟随深浅色 |
 | 原生多窗口、关闭确认、窗口事实 | 完成 | 两种模式均已实测 |
-| Video 原生呈现 | 完成 | `Windows.Media.Playback.MediaPlayer` 执行端，两种模式各自的 `MediaPlayerElement` 呈现 |
+| Video 原生呈现 | 完成 | Media Foundation 媒体引擎执行端，两种模式以 `SwapChainPanel` 显示引擎的交换链；HDR 视频在 SDR 显示器上经系统色调映射，HDR 显示器未实测 |
 | 阶段四：`Adaptive`、`Menu`、`LanguagePicker`、运行时切换语言 | 完成 | 两种模式均已实测 |
 
 ## 工程结构
@@ -81,7 +81,8 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | `Form` / `Section` | 滚动页面，卡片行（`CardBackgroundFillColorDefaultBrush` 与描边、圆角） | 卡片为 Windows 10 的列表底色，无圆角 |
 | `Text` / `Label` | WinUI 字体样式（`TitleLargeTextBlockStyle` 等）；次要文字为 0.65 不透明度 | 系统字体样式（`HeaderTextBlockStyle` 等） |
 | `Button` / `IconButton` | `prominent` 为 `AccentButtonStyle`；`plain` 与图标按钮以轻量样式资源设为透明；`destructive` 为危险色 | 同左，取 Windows 10 的对应资源 |
-| `TextInput` / `Search` / `Switch` / `Slider` / `Menu` / `LanguagePicker` / `Query` / `Adaptive` / `Video` | 与 C# 版相同：`TextBox`/`PasswordBox`、`AutoSuggestBox`、`ToggleSwitch`/`CheckBox`、带图标的 `Slider`、`DropDownButton` 与 `MenuFlyout`、`ComboBox`、`ProgressRing` 与状态行、按可用宽度选择布局、`MediaPlayerElement` 与标准控制条 | 同左 |
+| `TextInput` / `Search` / `Switch` / `Slider` / `Menu` / `LanguagePicker` / `Query` / `Adaptive` | 与 C# 版相同：`TextBox`/`PasswordBox`、`AutoSuggestBox`、`ToggleSwitch`/`CheckBox`、带图标的 `Slider`、`DropDownButton` 与 `MenuFlyout`、`ComboBox`、`ProgressRing` 与状态行、按可用宽度选择布局 | 同左 |
+| `Video` | `SwapChainPanel` 显示媒体引擎的交换链（见“媒体”），下方为标准控制条 | 同左 |
 
 组件库第一批在两种前端上用相同的代码：
 
@@ -113,7 +114,13 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 
 ## 媒体
 
-与 C# 版行为相同：每个 `player_id` 对应一个 `MediaPlayer`，把观察结果报告给媒体中心，从不自行派发命令。本地文件经 `PathCreateFromUrlW` 与 `StorageFile` 打开，网络地址交给 `MediaSource.CreateFromUri`；新源到达时，较早的加载结果作废。`MediaPlayerElement` 在两种前端下都是系统控件，同一个 `MediaPlayer` 可以交给任一前端呈现。
+执行端把观察结果报告给媒体中心，从不自行派发命令。每个 `player_id` 对应一个播放器，每加载一个源新建一个 Media Foundation 媒体引擎（`IMFMediaEngine`），换源后旧引擎迟到的事件因此能认出并丢弃；音量与静音记在播放器上，换源后沿用。本地文件经 `PathCreateFromUrlW` 转成路径交给引擎，网络地址原样交给引擎。引擎的事件从它自己的线程转到界面线程后报告，阶段按 HTML 媒体元素的语义（就绪状态、`paused`、`ended`、是否在等数据）得出。
+
+画面不用 `MediaPlayerElement`：WinUI 3 的 `MediaPlayerElement` 不显示 HDR（[microsoft-ui-xaml#9238](https://github.com/microsoft/microsoft-ui-xaml/issues/9238)，微软工程师的解释是 UWP 靠 CoreWindow 判断显示器，Windows App SDK 应用没有 CoreWindow）。引擎用一个带视频支持的 Direct3D 11 设备解码，拿到元数据后进入无窗口交换链模式（`EnableWindowlessSwapchainMode`），把画面画进它自己的交换链；`Video` 用 `SwapChainPanel` 的 `ISwapChainPanelNative2::SetSwapChainHandle` 显示这个交换链，两种前端同一套代码（与 HDR 图片一样，两套头文件里的接口同名不同 ID，预编译头里另行声明）。这是微软 Media Foundation 示例与 Chromium 播放受保护视频的做法，HDR 视频怎样输出由引擎与系统决定。引擎按视频在屏幕上占的像素绘制（`UpdateVideoStream`）；`SwapChainPanel` 把交换链的一个像素当作一个 DIP，所以面板的 DIP 尺寸设为像素数、再按显示缩放缩回，交换链的像素与屏幕像素一一对应。`fit` 由面板的位置、缩放与外框的裁剪实现：`contain` 居中留边，`cover` 裁掉超出外框的部分，`fill` 拉伸。
+
+一个引擎只有一个交换链，所以一个播放器同一时间只在一个视图中显示画面（`multi_view: false`）：最新附着的视图显示，它解除附着后交还给上一个仍在的视图，与 Web 的单视图一致。
+
+实测（2026-10-12，PC 为 2560×1440、150% 缩放的 SDR 显示器，由 CLI 读回状态；以下在 WinUI 3 前端全部测过，Islands 前端测了 HDR10 测试片与预览播放器在页面间转移，结果相同）：精选片段加载后 `Ready 0 / 8000`，播放、暂停、播完为 `Ended` 后再播放从头开始、跳转到 5000、静音与音量 0.4 都生效；换为色条后静音与音量保留，换为损坏文件后 `Failed`（“The file is damaged or its format is not supported (0xC00D36C4)”）。4:3 的测试片放进 16:9 的外框，三种 `fit` 都正确，最大化与改变窗口大小后重新排布；视频尺寸正确说明 150% 下的缩放校正生效。应用级预览播放器在项目详情页播放，回到视频页后画面出现在视频页的视图中。本机 HTTP 提供的 HLS 直播打开后为 `Ready`，播放后 `Playing`，`duration_ms` 为空，`media seek` 返回 `not_seekable`，画面正常。用 ffmpeg 编成 10 位 HEVC（BT.2020、PQ、HDR10 元数据）的测试片，左半为 SDR 白（203 尼特）、右半为它的 4 倍，在 SDR 模式下由系统做色调映射：左右分别为 237 与 252，渐变平滑，没有发灰。HDR 模式下的输出未验证：测试用的 PC 没有 HDR 显示器。开发快照的窗口截取（`PrintWindow`）里有视频画面。
 
 ## 构建与运行
 
@@ -200,7 +207,7 @@ target\bern\windows\Showcase\showcase.exe
 
 - 没有 Windows App Runtime 的干净 Windows 10 与 Windows 11。本机的 Islands 结果来自强制回退。
 - 只装有系统组件版运行时（`Microsoft.WindowsAppRuntime.CBS`）时，非打包应用能否经引导程序使用它。
-- 键盘与手动操作（Ctrl+W、Esc、Alt+←、输入法）、讲述人与完整的键盘遍历、高对比主题、多显示器、ARM64、网络与 HLS 源。
+- 键盘与手动操作（Ctrl+W、Esc、Alt+←、输入法）、讲述人与完整的键盘遍历、高对比主题、多显示器、ARM64、远程网络源（HLS 只经本机 HTTP 测过）。
 
 ## 未完成与已知限制
 
@@ -210,7 +217,8 @@ target\bern\windows\Showcase\showcase.exe
 - 未提供 MSIX 打包、安装程序、应用图标与代码签名。未签名的新程序可能被安全软件的启发式规则误判，正式分发需要签名。
 - 回退前端没有 `SelectorBar`、`InfoBar` 与 `TitleBar`，分别以按钮组、自绘错误条与系统标题栏代替。
 - HDR 图片只在 SDR 显示器上实测过：测试用的 PC 没有 HDR 显示器，HDR 模式下的亮度未验证。
-- `Video` 不显示 HDR：WinUI 3 的 `MediaPlayerElement` 目前不支持 HDR（[microsoft-ui-xaml#9238](https://github.com/microsoft/microsoft-ui-xaml/issues/9238)，微软工程师的解释是 UWP 靠 CoreWindow 判断显示器，Windows App SDK 应用没有 CoreWindow），要显示 HDR 视频需要让播放引擎直接输出到 `SwapChainPanel`，未实现。
+- HDR 视频只在 SDR 显示器上实测过：HDR 模式下由媒体引擎与系统输出 HDR，测试用的 PC 没有 HDR 显示器，未验证。
+- 同一个播放器同一时间只在最新附着的视图中显示画面，较早的视图只显示外框。
 - 页面工具放在页头，没有使用 `CommandBar`；`Menu` 的菜单项不呈现 `destructive` 角色。
 - 品牌色的浅色与深色档位按与白色、黑色混合近似生成。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。

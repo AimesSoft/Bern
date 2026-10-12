@@ -141,12 +141,14 @@ impl Target for WinUi3Windows {
             media: Some(MediaSupport {
                 contract_versions: bern_media::MEDIA_CONTRACT_VERSION
                     ..=bern_media::MEDIA_CONTRACT_VERSION,
-                backend: "windows-mediaplayer",
+                backend: "windows-mediaengine",
                 backend_version: "1",
-                presenter: "mediaplayerelement",
+                presenter: "swapchainpanel",
                 presenter_version: "1",
                 background_playback: true,
-                multi_view: true,
+                // A media engine draws into one swap chain, which the
+                // newest view shows.
+                multi_view: false,
             }),
         }
     }

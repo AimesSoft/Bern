@@ -129,7 +129,7 @@ fn showcase_generates_a_winui3_application() {
     let manifest = std::fs::read_to_string(output.join("build.json")).unwrap();
     for expected in [
         r#""ui": "winui3""#,
-        r#""backend": "windows-mediaplayer""#,
+        r#""backend": "windows-mediaengine""#,
         r#""media/tides.mp4""#,
     ] {
         assert!(manifest.contains(expected), "{manifest}");

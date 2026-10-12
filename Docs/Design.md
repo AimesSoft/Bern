@@ -1,8 +1,8 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.21
+- 版本：v0.22
 - 状态：架构设计草案
-- 更新日期：2026-10-11
+- 更新日期：2026-10-12
 - 项目名称：Bern UI
 - 计划仓库名称：bern-ui
 - 主要开发语言：Rust
@@ -361,7 +361,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Adaptive 和 Layout | 按可用宽度在 `compact` 与 `expanded` 布局之间选择，保留状态 | 阶段四 |
 | LanguagePicker | 运行时切换界面语言 | 阶段四 |
 | Dialog | 应用内对话框、焦点及关闭行为 | 后续（窗口的对话框呈现见“声明式多窗口”） |
-| Video | 媒体源、受管理播放器、播放命令、状态与标准控件 | 早期验证 macOS 原生媒体适配及 Web video 映射 |
+| Video | 媒体源、受管理播放器、播放命令、状态与标准控件 | 早期验证 macOS 原生媒体适配及 Web video 映射。HDR 视频在 macOS 实测；Windows 由媒体引擎输出，只在 SDR 显示器上实测；Linux 与 Web 未实测 |
 
 组件规范必须写清默认行为，避免由首个后端反向定义标准：
 
@@ -1668,3 +1668,4 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.19 | 增加构建工具命令 `bern new`、`bern run` 与 `bern doctor`；生成的胶水按项目自身 `bern` 依赖的来源引用 Bern crate，项目不再需要位于 Bern 仓库内；未指定目标时按本机系统与工具选择目标；直接写在窗口中的控件以窗口 id 命名；Windows 目标以预编译头做增量构建，改用 Windows App SDK 2.x 并接受任何 2.x 运行时（包括 Windows 11 自带的），可用 `frontends` 只编译 WinUI 3 或系统 XAML；增加 `bern package` 与 `[app].publisher`，生成 macOS 磁盘映像、Windows 安装程序、Debian 包与 Web 压缩包，签名经环境变量配置 |
 | v0.20 | 组件库第一批：`Image`（随包 PNG 与 JPEG，编译器检查资源已声明，包括组件库中的引用）、`Progress`（确定与不确定进度，数值为受限表达式）、`Grid`（不小于 `min_width` 的等宽自适应列）与 `Stack`（叠放与九方位对齐）；IR 版本 6 |
 | v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
+| v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |

@@ -950,6 +950,62 @@ inline xaml::FrameworkElement ControlBar(Ctx const& ctx, std::string const& id, 
     return bar;
 }
 
+using SwapChainPanelNative2 = std::conditional_t<kWinUI, IBernWinUISwapChainPanelNative2, IBernIslandsSwapChainPanelNative2>;
+
+/// A player's frames on screen: the swap chain its media engine draws
+/// into, in a SwapChainPanel. The engine draws as many pixels as the video
+/// takes up on screen; the panel is that many DIPs large and scaled back by
+/// the display scale, so that each pixel of the swap chain is one on screen.
+struct VideoScreen {
+    controls::SwapChainPanel panel;
+    controls::Canvas canvas;
+    media::ScaleTransform scale;
+    controls::Grid frame{nullptr};
+    std::string fit;
+    Media::Frames frames;
+    HANDLE shown = nullptr;
+    uint64_t token = 0;
+
+    void Show(Media::Frames const& next) {
+        frames = next;
+        if (next.chain != shown) {
+            shown = next.chain;
+            HRESULT result = panel.as<SwapChainPanelNative2>()->SetSwapChainHandle(shown);
+            if (FAILED(result) && shown) Report("video: the panel does not take the media engine's swap chain");
+        }
+        Layout();
+    }
+
+    void Layout() {
+        double w = frame.ActualWidth(), h = frame.ActualHeight();
+        if (w <= 0 || h <= 0) return;
+        media::RectangleGeometry clip;
+        clip.Rect({0, 0, static_cast<float>(w), static_cast<float>(h)});
+        frame.Clip(clip);
+        if (!frames.width || !frames.height) return;
+        // The swap chain keeps the video's shape: the fitted rectangle for
+        // `contain`, the covering one for `cover`, which the frame crops,
+        // and for `fill`, stretched to the frame.
+        double aspect = double(frames.width) / frames.height;
+        bool wider = w / h > aspect;
+        bool covers = fit == "cover" || fit == "fill";
+        double cw = wider == covers ? w : h * aspect;
+        double ch = wider == covers ? w / aspect : h;
+        double dw = fit == "fill" ? w : cw, dh = fit == "fill" ? h : ch;
+        auto root = frame.XamlRoot();
+        double s = root ? root.RasterizationScale() : 1.0;
+        long pw = (std::max)(1L, std::lround(cw * s)), ph = (std::max)(1L, std::lround(ch * s));
+        panel.Width(static_cast<double>(pw));
+        panel.Height(static_cast<double>(ph));
+        scale.ScaleX(dw / pw);
+        scale.ScaleY(dh / ph);
+        // On whole pixels, so that the frames stay sharp.
+        controls::Canvas::SetLeft(panel, std::round((w - dw) / 2 * s) / s);
+        controls::Canvas::SetTop(panel, std::round((h - dh) / 2 * s) / s);
+        Media::Resize(token, static_cast<uint32_t>(pw), static_cast<uint32_t>(ph));
+    }
+};
+
 struct VideoProps {
     char const* id = "";
     Get source;
@@ -981,17 +1037,18 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
         }
     }
 
-    controls::MediaPlayerElement element;
-    element.AreTransportControlsEnabled(false);
-    std::string_view fit = props.fit ? props.fit : "";
-    element.Stretch(fit == "cover" ? media::Stretch::UniformToFill : fit == "fill" ? media::Stretch::Fill : media::Stretch::Uniform);
-    element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
-    element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
-    element.SetMediaPlayer(Media::Player(playerId));
     controls::Grid frame;
     frame.MinHeight(120);
     if (auto style = Styles::Themed(L"Grid", {{L"Background", Keys::VideoBackground}})) frame.Style(style);
-    frame.Children().Append(element);
+    auto screen = std::make_shared<VideoScreen>();
+    screen->frame = frame;
+    screen->fit = props.fit ? props.fit : "contain";
+    auto element = screen->panel;
+    element.RenderTransform(screen->scale);
+    element.IsHitTestVisible(false);
+    screen->canvas.IsHitTestVisible(false);
+    screen->canvas.Children().Append(element);
+    frame.Children().Append(screen->canvas);
     controls::StackPanel status;
     status.Spacing(6);
     status.HorizontalAlignment(xaml::HorizontalAlignment::Center);
@@ -1005,10 +1062,25 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
         double height = (std::max)(120.0, std::round(args.NewSize().Width * 9.0 / 16));
         if (std::isnan(frame.Height()) || std::abs(frame.Height() - height) > 0.5) frame.Height(height);
     });
+    std::weak_ptr<VideoScreen> weak = screen;
+    frame.SizeChanged([weak](auto&&, auto&&) {
+        if (auto screen = weak.lock()) screen->Layout();
+    });
+    // On a display of another scale.
+    element.CompositionScaleChanged([weak](auto&&, auto&&) {
+        if (auto screen = weak.lock()) screen->Layout();
+    });
+    screen->token = Media::Show(playerId, [weak](Media::Frames const& frames) {
+        if (auto screen = weak.lock()) screen->Show(frames);
+    });
     auto token = Media::AttachView(playerId, win->id);
-    Reactive::OnCleanup([token, element] {
+    Reactive::OnCleanup([token, screen] {
         Media::DetachView(token);
-        try { element.SetMediaPlayer(nullptr); } catch (...) {}
+        Media::Hide(screen->token);
+        if (screen->shown) {
+            screen->shown = nullptr;
+            try { screen->panel.as<SwapChainPanelNative2>()->SetSwapChainHandle(nullptr); } catch (...) {}
+        }
     });
     Reactive::Run([element, status, playerId, labelText] {
         auto state = Media::State(playerId);

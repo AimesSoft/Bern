@@ -7,7 +7,10 @@
 #pragma once
 
 #include <windows.h>
-// The macro of the same name hides the XAML method.
+// Before C++/WinRT, so that its objects may implement classic COM
+// interfaces.
+#include <unknwn.h>
+// The macro of the same name hides the XAML and media engine methods.
 #undef GetCurrentTime
 
 #include <algorithm>
@@ -35,8 +38,6 @@
 
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.Media.Core.h>
-#include <winrt/Windows.Media.Playback.h>
 
 // ---------------------------------------------------------------------------
 // The in-process C interface of the engine (`bern_app`, linked statically).
@@ -543,8 +544,8 @@ inline std::string engineId;
 }
 
 // ---------------------------------------------------------------------------
-// The media executor: one Windows.Media.Playback.MediaPlayer per player,
-// reporting what it does as observations, never as commands.
+// The media executor: a Media Foundation media engine per player and
+// source, reporting what it does as observations, never as commands.
 
 /// The standard media commands declarations use on players, by their index
 /// in the media catalog.
@@ -580,8 +581,20 @@ void AttachExecutor();
 void DetachExecutor();
 void ReceiveState(Bytes const& bytes);
 void Request(Bytes const& bytes);
-/// The executor's player for `id`, which views present.
-winrt::Windows::Media::Playback::MediaPlayer Player(std::string const& id);
+/// What a view of a player shows: the swap chain the player's media engine
+/// draws into, and the video's size in square pixels. The chain is null
+/// while there is no video and for every view but the newest of a player.
+struct Frames {
+    HANDLE chain = nullptr;
+    uint32_t width = 0, height = 0;
+};
+/// Show `player`'s frames in a new view, which shows them until a newer
+/// view does; `changed` runs on the UI thread with what it shows now.
+uint64_t Show(std::string const& player, std::function<void(Frames const&)> changed);
+void Hide(uint64_t screen);
+/// The size in pixels the video shows at in `screen`, which the engine
+/// draws at while that view is the newest.
+void Resize(uint64_t screen, uint32_t width, uint32_t height);
 /// Dispatch a standard media command on `player` with its arguments after
 /// the player id.
 void Send(MediaOp op, std::string const& player, Values const& args, std::function<void(Failure const&)> failed);

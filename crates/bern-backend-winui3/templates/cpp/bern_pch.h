@@ -21,7 +21,8 @@
 #include <winrt/Windows.UI.h>
 #include <winrt/Windows.UI.Xaml.Interop.h>
 
-// HDR pictures draw with Direct2D into swap chains.
+// HDR pictures draw with Direct2D into swap chains; videos show the swap
+// chains of media engines.
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -35,6 +36,12 @@ struct __declspec(uuid("63aad0b8-7c24-40ff-85a8-640d944cc325")) IBernWinUISwapCh
 };
 struct __declspec(uuid("f92f19d2-3ade-45a6-a20c-f6f1ea90554b")) IBernIslandsSwapChainPanelNative : ::IUnknown {
     virtual HRESULT __stdcall SetSwapChain(IDXGISwapChain* swapChain) = 0;
+};
+struct __declspec(uuid("88fd8248-10da-4810-bb4c-010dd27faea9")) IBernWinUISwapChainPanelNative2 : IBernWinUISwapChainPanelNative {
+    virtual HRESULT __stdcall SetSwapChainHandle(HANDLE swapChain) = 0;
+};
+struct __declspec(uuid("d5a2f60c-37b2-44a2-937b-8d8eb9726821")) IBernIslandsSwapChainPanelNative2 : IBernIslandsSwapChainPanelNative {
+    virtual HRESULT __stdcall SetSwapChainHandle(HANDLE swapChain) = 0;
 };
 
 #if BERN_WITH_WINUI
