@@ -95,6 +95,13 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
         let cli = command.external.cli.iter().map(|word| string(word));
         let mcp = string(&command.external.mcp);
         let reads = command.reads.iter().map(|field| string(field));
+        let on = match &command.on {
+            Some(event) => {
+                let event = string(event);
+                quote!(::std::option::Option::Some(#event))
+            }
+            None => quote!(::std::option::Option::None),
+        };
         quote! {
             #p::CommandSpec {
                 id: #id,
@@ -112,14 +119,27 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
                 },
                 external: #p::ExternalNames { cli: ::std::vec![#(#cli),*], mcp: #mcp },
                 reads: ::std::vec![#(#reads),*],
+                on: #on,
             }
         }
+    });
+    let events = descriptor.events.iter().map(|event| {
+        let name = string(&event.name);
+        let doc = string(&event.doc);
+        let params = event.params.iter().map(|param| {
+            let name = string(&param.name);
+            let ty = type_tokens(&param.ty);
+            let doc = string(&param.doc);
+            quote!(#p::ParamSpec { name: #name, ty: #ty, doc: #doc })
+        });
+        quote!(#p::EventSpec { name: #name, doc: #doc, params: ::std::vec![#(#params),*] })
     });
     let namespace = string(&descriptor.namespace);
     let version = descriptor.version;
     let descriptor_version = descriptor.descriptor_version;
     quote! {
         #p::ProtocolDescriptor {
+            modules: ::std::vec::Vec::new(),
             descriptor_version: #descriptor_version,
             namespace: #namespace,
             version: #version,
@@ -129,6 +149,7 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
             },
             state: ::std::vec![#(#state),*],
             commands: ::std::vec![#(#commands),*],
+            events: ::std::vec![#(#events),*],
         }
     }
 }

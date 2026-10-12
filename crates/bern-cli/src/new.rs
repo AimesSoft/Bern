@@ -13,7 +13,7 @@ pub const REPOSITORY: &str = "https://github.com/AimesSoft/Bern";
 pub const LANGUAGES: [&str; 4] = ["en", "zh-Hans", "zh-Hant", "ja"];
 
 /// The template's text in each of [`LANGUAGES`].
-const TEXT: &[(&str, [&str; 4])] = &[
+pub(crate) const TEXT: &[(&str, [&str; 4])] = &[
     (
         "greeting",
         [
@@ -296,7 +296,7 @@ impl NewProject {
 }
 
 /// A Rust string literal.
-fn rust_string(text: &str) -> String {
+pub(crate) fn rust_string(text: &str) -> String {
     format!("{text:?}")
 }
 

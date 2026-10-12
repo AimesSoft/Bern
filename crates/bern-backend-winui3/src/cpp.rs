@@ -252,6 +252,8 @@ impl<'a> Generator<'a> {
             Binding::Local { name, path, .. } => {
                 Self::path(format!("c.Local({})", string(name)), path)
             }
+            // The WinUI runtime keeps no window idle state yet.
+            Binding::Window { .. } => literal(&bern_protocol::Value::Bool(false)),
         }
     }
 

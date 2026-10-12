@@ -8,6 +8,7 @@
 
 mod doctor;
 mod framework;
+mod module;
 mod new;
 mod run;
 
@@ -22,6 +23,7 @@ bern: create, check, build and run Bern applications
 
 Usage:
   bern new <path> [--bundle-id ID] [--languages LIST] [--bern-path DIR]
+  bern new --module <id> [--manifest PATH]
   bern run    [--manifest PATH] [--target NAME] [--release]
   bern build  [--manifest PATH] [--target NAME] [--release]
   bern package [--manifest PATH] [--target NAME]
@@ -30,7 +32,8 @@ Usage:
   bern ir     [--manifest PATH]
 
 Commands:
-  new          Create an application in <path>: a window with a counter
+  new          Create an application in <path>: a window with a counter; with
+               --module, a module of the application in modules/<id>
   run          Build one target and start it (default: this computer's)
   build        Build targets (default: every one this computer can build)
   package      Make release packages to install, in target/bern/dist
@@ -66,6 +69,8 @@ struct Options {
     bundle_id: Option<String>,
     languages: Option<Vec<String>>,
     bern_path: Option<PathBuf>,
+    /// `bern new --module <id>`.
+    module: Option<String>,
 }
 
 fn parse() -> Result<Options, String> {
@@ -78,7 +83,13 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
         return Err(USAGE.to_string());
     }
     let allowed: &[&str] = match command.as_str() {
-        "new" => &["--bundle-id", "--languages", "--bern-path"],
+        "new" => &[
+            "--bundle-id",
+            "--languages",
+            "--bern-path",
+            "--module",
+            "--manifest",
+        ],
         "run" | "build" => &["--manifest", "--target", "--release"],
         "package" => &["--manifest", "--target"],
         "check" => &["--manifest", "--target"],
@@ -112,13 +123,14 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
                 )
             }
             "--bern-path" => options.bern_path = Some(value()?.into()),
+            "--module" => options.module = Some(value()?),
             _ if options.command == "new" && options.path.is_none() => {
                 options.path = Some(arg.into())
             }
             other => return Err(format!("unexpected argument `{other}`\n\n{USAGE}")),
         }
     }
-    if options.command == "new" && options.path.is_none() {
+    if options.command == "new" && options.path.is_none() && options.module.is_none() {
         return Err(format!("`bern new` needs a path\n\n{USAGE}"));
     }
     Ok(options)
@@ -344,6 +356,23 @@ fn context(
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        modules: config
+            .modules
+            .iter()
+            .zip(&compiled.module_protocols)
+            .map(|(module, protocol_module)| bern_target_api::ModuleBuild {
+                id: module.id.clone(),
+                protocol_package: module.protocol_package.name.clone(),
+                protocol_path: module.protocol_package.dir.clone(),
+                protocol_module: protocol_module.clone(),
+                engine_package: module.engine_package.name.clone(),
+                engine_path: module.engine_package.dir.clone(),
+                engine_type: module.engine_type.clone(),
+                optional: module.optional,
+                enabled: module.enabled,
+                depends: module.depends.clone(),
+            })
+            .collect(),
         framework: framework.clone(),
         release,
     }
@@ -396,8 +425,48 @@ fn manifest(options: &Options) -> Option<PathBuf> {
     options.manifest.clone().or_else(|| find_manifest(&cwd))
 }
 
+/// `bern new --module <id>`.
+fn create_module(options: &Options, id: &str) -> ExitCode {
+    let Some(manifest) = manifest(options) else {
+        eprintln!(
+            "error: no Bern.toml here or in a parent directory; run inside the application or pass --manifest"
+        );
+        return ExitCode::FAILURE;
+    };
+    let module = match module::NewModule::new(&manifest, id) {
+        Ok(module) => module,
+        Err(message) => {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match module.write() {
+        Ok(notes) => {
+            eprintln!(
+                "    \x1b[1;32mCreated\x1b[0m module `{id}` in {}",
+                module.app_dir.join(module.path()).display()
+            );
+            eprintln!(
+                "             listed under [[modules]] in {}",
+                manifest.display()
+            );
+            for note in notes {
+                eprintln!("    note: {note}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("error: {message}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// `bern new`.
 fn create(options: &Options) -> ExitCode {
+    if let Some(id) = &options.module {
+        return create_module(options, id);
+    }
     let source = match &options.bern_path {
         Some(path) => match path.canonicalize() {
             Ok(path) if new::is_checkout(&path) => new::Source::Checkout(path),

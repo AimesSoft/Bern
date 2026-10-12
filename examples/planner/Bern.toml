@@ -1,0 +1,36 @@
+# A Bern application built from modules: the planner shell assembles a
+# notes module and a tags module, which depends on notes. Each module has
+# its own protocol, engine, UI and manifest under modules/.
+
+[app]
+id = "planner"
+bundle_id = "dev.bern.planner"
+version = "0.1.0"
+name = { "zh-Hans" = "计划", "en" = "Planner" }
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"
+
+[protocol]
+package = "planner-protocol"
+source = "planner-protocol/src/lib.rs"
+
+[engine]
+package = "planner-core"
+type = "planner_core::PlannerEngine"
+
+[ui]
+package = "planner-ui"
+sources = "planner-ui/src"
+root = "app"
+
+[[modules]]
+path = "modules/notes"
+
+[[modules]]
+path = "modules/tags"
+
+[targets.macos]
+platform = "macos"
+channels = ["ipc"]

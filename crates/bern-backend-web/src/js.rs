@@ -315,6 +315,8 @@ impl<'a> Generator<'a> {
                     self.path(field.ty.clone(), path)
                 )
             }
+            // The Web runtime keeps no window idle state yet.
+            Binding::Window { .. } => "false".into(),
             Binding::Local { name, path, root } => {
                 format!("{}(){}", local(name), self.path(root.clone(), path))
             }
@@ -428,7 +430,11 @@ impl<'a> Generator<'a> {
                 let spec = &self.app.protocol.commands[*command];
                 let mut values = vec!["ctx".to_string()];
                 values.extend(args.iter().map(|arg| self.expr(arg)));
-                format!("C.{}({})", spec.name, values.join(", "))
+                format!(
+                    "C.{}({})",
+                    self.app.protocol.command_symbol(spec),
+                    values.join(", ")
+                )
             }
             Action::Window { op, window } => match op {
                 WindowOp::Open | WindowOp::Activate => format!("B.openWindow({})", string(window)),
@@ -1281,7 +1287,11 @@ impl<'a> Generator<'a> {
                 let mut values = vec!["ctx".to_string()];
                 values.extend(args.iter().map(|arg| self.expr(arg)));
                 values.push("done".into());
-                format!("(done) => C.{}({})", spec.name, values.join(", "))
+                format!(
+                    "(done) => C.{}({})",
+                    self.app.protocol.command_symbol(spec),
+                    values.join(", ")
+                )
             }
             _ => "null".into(),
         };
@@ -1369,7 +1379,7 @@ impl<'a> Generator<'a> {
             signature.push("done".into());
             out.line(format!(
                 "{}: ({}) => B.dispatch(ctx, {index}, (w) => {{ {} }}, done),",
-                command.name,
+                app.protocol.command_symbol(command),
                 signature.join(", "),
                 encoders.join(" ")
             ));

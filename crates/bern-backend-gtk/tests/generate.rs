@@ -100,6 +100,7 @@ fn showcase_generates_a_gtk_application() {
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
         framework: Framework::Path(root.join("crates")),
         release: false,
     };
@@ -211,5 +212,59 @@ fn showcase_generates_a_gtk_application() {
         result.status.success(),
         "rustc rejected the generated application:\n{}",
         String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+/// GTK shows no style overrides yet: an application declaring them fails
+/// the GTK check at the rule, unless the rule exempts Linux.
+#[test]
+fn style_overrides_gtk_cannot_show_fail_the_check() {
+    let root = workspace();
+    let config = bern_compiler::config::load(&root.join("examples/planner/Bern.toml")).unwrap();
+    let mut compiled = bern_compiler::compile(&config).unwrap();
+    let target = TargetConfig {
+        name: "linux".into(),
+        platform: "linux".into(),
+        ui: None,
+        web_mode: None,
+        channels: Vec::new(),
+        frontends: Vec::new(),
+    };
+    let errors = GtkLinux.check(&compiled.app, &target);
+    assert!(
+        errors.iter().any(|error| error
+            .message
+            .contains("cannot show `scale` on `SidebarItem`")),
+        "{errors:?}"
+    );
+    // GTK has no canvas, shows marked text plain and keeps a sidebar's
+    // items fixed.
+    assert!(
+        errors.iter().any(|error| error
+            .message
+            .contains("cannot build `Sidebar` items that come and go")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("does not support `Canvas`")),
+        "{errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("shows `Text(mark:)` as plain text")),
+        "{errors:?}"
+    );
+    for rule in &mut compiled.app.style.rules {
+        rule.exempt.push("linux".into());
+    }
+    let errors = GtkLinux.check(&compiled.app, &target);
+    assert!(
+        !errors
+            .iter()
+            .any(|error| error.message.contains("cannot show")),
+        "{errors:?}"
     );
 }

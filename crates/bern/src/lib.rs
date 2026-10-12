@@ -11,7 +11,7 @@ pub mod query;
 
 pub use bern_command::resources;
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
-pub use bern_macros::{component, features, players, protocol, session, tr, ui, value};
+pub use bern_macros::{component, features, players, protocol, session, style, tr, ui, value};
 pub use bern_protocol::{
     CommandError, CommandOutcome, Invocation, LocalizedText, ProtocolDescriptor, SchemaError,
     StateUpdate, Type, Value,
@@ -28,7 +28,7 @@ pub mod prelude {
     pub use crate::bind::{Binding, SessionField};
     pub use crate::media::{MediaSource, Player};
     pub use crate::query::Answer;
-    pub use crate::{CommandError, Features, View, component, tr, ui};
+    pub use crate::{CommandError, Features, View, component, style, tr, ui};
 }
 
 #[doc(hidden)]

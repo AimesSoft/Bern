@@ -9,16 +9,20 @@ pub mod ast;
 mod expr;
 pub mod items;
 pub mod lower;
+pub mod style;
 mod ui;
 
 pub use ast::*;
 pub use items::{
-    CommandItem, CommandParam, CommandRef, CommandsItem, ComponentItem, FeatureItem, FeaturesItem,
-    FieldItem, Param, ParamKind, PlayerField, PlayersItem, ProtocolArgs, ProtocolItem, QueriesItem,
-    QueryItem, SessionItem, SourceItems, StateItem, ValueItem, ValueKind, VariantItem, doc_comment,
-    is_bern_attr, parse_component, parse_component_args, parse_component_with, parse_features,
-    parse_players, parse_protocol, parse_protocol_args, parse_session, parse_source_file,
-    parse_value, type_ref,
+    CommandItem, CommandParam, CommandRef, CommandsItem, ComponentItem, EventItem, EventsItem,
+    FeatureItem, FeaturesItem, FieldItem, Param, ParamKind, PlayerField, PlayersItem, ProtocolArgs,
+    ProtocolItem, QueriesItem, QueryItem, SessionItem, SourceItems, StateItem, ValueItem,
+    ValueKind, VariantItem, doc_comment, is_bern_attr, parse_component, parse_component_args,
+    parse_component_with, parse_features, parse_players, parse_protocol, parse_protocol_args,
+    parse_session, parse_source_file, parse_value, parse_value_args, type_ref,
+};
+pub use style::{
+    MotionDecl, StyleArg, StyleItem, StyleProp, StyleRuleItem, StyleValue, parse_style,
 };
 
 /// Parse the body of a `ui!` invocation.

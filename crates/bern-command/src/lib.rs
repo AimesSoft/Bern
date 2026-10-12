@@ -17,7 +17,11 @@
 //! provider can stop early, and an answer that arrives after cancellation
 //! is reported as `cancelled` instead of as a result.
 
+mod composite;
+pub mod outbox;
 pub mod resources;
+
+pub use composite::{Composite, ModuleEngine};
 
 use bern_protocol::{
     Cancellation, CommandError, CommandOutcome, CommandStatus, Invocation, ProtocolDescriptor,
@@ -47,6 +51,17 @@ pub trait EngineProtocol: Send + 'static {
     }
     /// Current value of every state field, in descriptor order.
     fn snapshot(&self) -> Vec<Value>;
+    /// The optional modules the application starts with, as saved by
+    /// [`EngineProtocol::modules_changed`]; `None` keeps each module's
+    /// default.
+    fn initial_modules(&self) -> Option<Vec<String>> {
+        None
+    }
+    /// The optional modules running after a change, for the application to
+    /// save.
+    fn modules_changed(&mut self, enabled: &[String]) {
+        let _ = enabled;
+    }
 }
 
 /// Which entry a request came through, for diagnostics and policy.

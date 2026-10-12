@@ -1,0 +1,11 @@
+[package]
+name = "tags-protocol"
+description = "Protocol of the planner's tags module"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true

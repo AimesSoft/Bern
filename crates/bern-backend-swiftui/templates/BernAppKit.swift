@@ -750,3 +750,99 @@ struct BernScrubberShape: View {
         .onKeyPress(.upArrow) { nudge(1) }
     }
 }
+
+// MARK: - Chrome, immersion and idleness
+
+/// A window's chrome, immersion and idleness: `unified` lays the content
+/// under a transparent title bar; `immersive` hides the title bar, its
+/// controls and the toolbar, and the pointer once it rests; `idleAfter`
+/// turns `idle` on after that many seconds without input in the window.
+struct BernWindowBehavior: ViewModifier {
+    let context: BernWindowContext
+    let unified: Bool
+    let idleAfter: Double?
+    let immersive: Bool
+    @State private var monitor = BernEventMonitor()
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                apply(attempts: 20)
+                if let idleAfter {
+                    monitor.start(context: context, after: idleAfter)
+                }
+            }
+            .onDisappear { monitor.stop() }
+            .onChange(of: immersive) { apply(attempts: 20) }
+            .onChange(of: context.idle) { _, idle in
+                if idle && immersive {
+                    NSCursor.setHiddenUntilMouseMoves(true)
+                }
+            }
+    }
+
+    /// Set the window up once SwiftUI has created it.
+    private func apply(attempts: Int) {
+        guard let window = context.platform.nsWindow else {
+            if attempts > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { apply(attempts: attempts - 1) }
+            }
+            return
+        }
+        let underTitle = unified || immersive
+        if underTitle {
+            window.styleMask.insert(.fullSizeContentView)
+        } else {
+            window.styleMask.remove(.fullSizeContentView)
+        }
+        window.titlebarAppearsTransparent = underTitle
+        window.titleVisibility = underTitle ? .hidden : .visible
+        window.toolbar?.isVisible = !immersive
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(kind)?.isHidden = immersive
+        }
+    }
+}
+
+/// Watches input in one window and turns its `idle` on after a quiet spell.
+@MainActor
+final class BernEventMonitor {
+    private var monitor: Any?
+    private var timer: Timer?
+
+    func start(context: BernWindowContext, after seconds: Double) {
+        stop()
+        context.platform.nsWindow?.acceptsMouseMovedEvents = true
+        let events: NSEvent.EventTypeMask = [
+            .mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown,
+            .leftMouseDragged, .scrollWheel, .keyDown,
+        ]
+        monitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self, weak context] event in
+            if let context, event.window === context.platform.nsWindow {
+                MainActor.assumeIsolated { self?.reset(context, after: seconds) }
+            }
+            return event
+        }
+        reset(context, after: seconds)
+    }
+
+    func stop() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        monitor = nil
+        timer?.invalidate()
+        timer = nil
+    }
+
+    private func reset(_ context: BernWindowContext, after seconds: Double) {
+        context.platform.nsWindow?.acceptsMouseMovedEvents = true
+        if context.idle {
+            context.idle = false
+        }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak context] _ in
+            MainActor.assumeIsolated { context?.idle = true }
+        }
+    }
+}

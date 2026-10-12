@@ -5,13 +5,14 @@
 //! [`Application`] and decides privately how to realize it.
 
 pub mod spec;
+pub mod style;
 
 use bern_protocol::{LocalizedText, ProtocolDescriptor, Type, TypeTable, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Version of the IR layout. Targets declare the range they consume.
-pub const IR_VERSION: u32 = 6;
+pub const IR_VERSION: u32 = 8;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
@@ -37,6 +38,9 @@ pub struct Application {
     pub layouts: Option<LayoutConfig>,
     /// Feature contracts with the coverage the compiler proved.
     pub contracts: Vec<FeatureContract>,
+    /// Style overrides and motion tokens from `style!`.
+    #[serde(default)]
+    pub style: style::StyleSheet,
 }
 
 impl Application {
@@ -393,6 +397,27 @@ pub struct WindowDef {
     pub sessions: Vec<String>,
     /// Declared close check, run whenever closing is requested.
     pub close: Option<CloseCheck>,
+    /// Whether content extends under a transparent title bar.
+    #[serde(default)]
+    pub chrome: WindowChrome,
+    /// While true, the window hides its title bar and toolbar (and on
+    /// touch platforms the status bar), and the pointer once it rests.
+    #[serde(default)]
+    pub immersive: Option<Expr>,
+    /// Seconds without input after which `window.idle` turns true.
+    #[serde(default)]
+    pub idle_after: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WindowChrome {
+    /// The platform's title bar.
+    #[default]
+    Standard,
+    /// Content under a transparent title bar, the system window controls
+    /// over it.
+    Unified,
 }
 
 /// The close check of a window. When `when` holds, closing waits for a
@@ -425,8 +450,9 @@ pub struct SourceLocation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ParamKind {
-    /// The typed engine client.
-    Client,
+    /// The typed engine client of the application protocol (its namespace)
+    /// or of one of its modules.
+    Client { namespace: String },
     /// The generated window handle.
     Windows,
     /// The application's player catalog.
@@ -487,6 +513,8 @@ pub enum Binding {
         path: Vec<usize>,
         root: Type,
     },
+    /// UI state of the hosting window, such as `window.idle`.
+    Window { field: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

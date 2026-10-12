@@ -342,7 +342,7 @@ fn generate_engine(out: &mut Out, app: &Application) {
         params.push("completion: (@MainActor (BernCommandFailure?) -> Void)? = nil".into());
         out.open(format!(
             "func {}({}) {{",
-            member(&command.name),
+            member(&app.protocol.command_symbol(command)),
             params.join(", ")
         ));
         if command.params.is_empty() {
@@ -450,6 +450,24 @@ impl<'a> Generator<'a> {
         &self.app.types
     }
 
+    /// The platform's name in `style!`.
+    fn style_platform(&self) -> &'static str {
+        match self.platform {
+            Platform::Macos => "macos",
+            Platform::Ios => "ios",
+        }
+    }
+
+    /// The style of a control from `style!`, if any.
+    fn style_of(&self, element: &Element) -> Option<crate::style::Resolved> {
+        crate::style::resolve(
+            self.app,
+            self.style_platform(),
+            &element.kind,
+            element.keyword("variant"),
+        )
+    }
+
     fn binding_path(&self, mut ty: Type, path: &[usize]) -> String {
         let mut out = String::new();
         for index in path {
@@ -465,6 +483,7 @@ impl<'a> Generator<'a> {
 
     fn binding(&self, binding: &Binding) -> String {
         match binding {
+            Binding::Window { field } => format!("bernWindow.{}", member(field)),
             Binding::Engine { field, path } => {
                 let state = &self.app.protocol.state[*field];
                 format!(
@@ -562,6 +581,130 @@ impl<'a> Generator<'a> {
         }
     }
 
+    /// A `Canvas`: its drawing runs on values captured when the view is
+    /// built, so state the drawing reads still updates the view.
+    fn canvas(&self, out: &mut Out, element: &Element) {
+        let mut captures = Vec::new();
+        let mut body = Out {
+            indent: out.indent + 1,
+            ..Out::default()
+        };
+        self.drawing(&mut body, &element.children, &mut captures);
+        let list = if captures.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "[{}] ",
+                captures
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| format!("v{index} = {value}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        out.line(format!("SwiftUI.Canvas {{ {list}context, size in"));
+        out.lines.extend(body.lines);
+        out.line("}");
+        let length = |name| {
+            element
+                .number(name)
+                .map(double)
+                .unwrap_or_else(|| "nil".into())
+        };
+        let (width, height) = (length("width"), length("height"));
+        out.line(format!(
+            ".frame(width: {width}, height: {height}){}",
+            match (element.number("width"), element.number("height")) {
+                (None, None) => ".frame(maxWidth: .infinity, maxHeight: .infinity)",
+                (None, Some(_)) => ".frame(maxWidth: .infinity)",
+                (Some(_), None) => ".frame(maxHeight: .infinity)",
+                _ => "",
+            }
+        ));
+        match self.text_prop(element, "label") {
+            Some(label) => {
+                out.line(".accessibilityElement(children: .ignore)");
+                out.line(".accessibilityAddTraits(.isImage)");
+                out.line(format!(
+                    ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
+                ));
+            }
+            None => out.line(".accessibilityHidden(true)"),
+        }
+    }
+
+    fn drawing(&self, out: &mut Out, nodes: &[Node], captures: &mut Vec<String>) {
+        fn capture(captures: &mut Vec<String>, value: String) -> String {
+            captures.push(value);
+            format!("v{}", captures.len() - 1)
+        }
+        let color = |element: &Element, name: &str| {
+            element
+                .keyword(name)
+                .map(|role| format!(".role({})", string(role)))
+                .unwrap_or_else(|| "nil".into())
+        };
+        let number = |element: &Element, name: &str, default: f64| {
+            double(element.number(name).unwrap_or(default))
+        };
+        for node in nodes {
+            // A canvas holds its drawing elements directly.
+            let Node::Element(element) = node else {
+                continue;
+            };
+            match element.kind.as_str() {
+                "Shape" => {
+                    let at = |name: &str, extent: &str, origin: &str| match element.number(name) {
+                        Some(value) => double(value),
+                        None => format!("size.{extent} - {origin}"),
+                    };
+                    let x = number(element, "x", 0.0);
+                    let y = number(element, "y", 0.0);
+                    out.line(format!(
+                            "BernDraw.shape(&context, {}, CGRect(x: {x}, y: {y}, width: {}, height: {}), corner: {}, fill: {}, stroke: {}, strokeWidth: {}, opacity: {})",
+                            string(element.keyword("kind").unwrap_or("rect")),
+                            at("width", "width", &x),
+                            at("height", "height", &y),
+                            number(element, "corner", 8.0),
+                            color(element, "fill"),
+                            color(element, "stroke"),
+                            number(element, "stroke_width", 1.0),
+                            number(element, "opacity", 1.0),
+                        ));
+                }
+                "Series" => {
+                    let values = element.expr("values").expect("series values");
+                    let list = match &values.ty {
+                        Type::List { inner } if matches!(**inner, Type::Int) => {
+                            format!("({}).map {{ Double($0) }}", self.expr(values))
+                        }
+                        _ => self.expr(values),
+                    };
+                    let values = capture(captures, list);
+                    let max = match element.expr("max") {
+                        Some(max) => capture(captures, format!("Double({})", self.expr(max))),
+                        None => "nil".into(),
+                    };
+                    out.line(format!(
+                            "BernDraw.series(&context, size, values: {values}, max: {max}, area: {}, fill: {}, stroke: {}, strokeWidth: {}, opacity: {})",
+                            element.keyword("kind") == Some("area"),
+                            color(element, "fill"),
+                            color(element, "stroke"),
+                            number(element, "stroke_width", 2.0),
+                            number(element, "opacity", 1.0),
+                        ));
+                }
+                "Pattern" => out.line(format!(
+                    "BernDraw.pattern(&context, size, BernPatterns.`{}`, opacity: {})",
+                    element.keyword("name").expect("pattern name"),
+                    number(element, "opacity", 1.0),
+                )),
+                _ => {}
+            }
+        }
+    }
+
     fn text_prop(&self, element: &Element, name: &str) -> Option<String> {
         element.text(name).map(|text| self.text(text))
     }
@@ -598,7 +741,11 @@ impl<'a> Generator<'a> {
                 let spec = &self.app.protocol.commands[*command];
                 let mut values: Vec<_> = args.iter().map(|arg| self.expr(arg)).collect();
                 values.push("from: bernWindow".into());
-                format!("bernEngine.{}({})", member(&spec.name), values.join(", "))
+                format!(
+                    "bernEngine.{}({})",
+                    member(&self.app.protocol.command_symbol(spec)),
+                    values.join(", ")
+                )
             }
             Action::Window { op, window } => match op {
                 WindowOp::Open | WindowOp::Activate => {
@@ -749,39 +896,134 @@ impl<'a> Generator<'a> {
     }
 
     fn toolbar(&self, out: &mut Out, children: &[Node], ctx: &Ctx) {
-        let items: Vec<&Element> = children
+        let toolbars: Vec<&Element> = children
             .iter()
             .filter_map(|node| match node {
                 Node::Element(element) if element.kind == "Toolbar" => Some(element),
                 _ => None,
             })
-            .flat_map(|toolbar| {
-                toolbar.children.iter().filter_map(|node| match node {
-                    Node::Element(element) => Some(element),
-                    _ => None,
-                })
-            })
+            .filter(|toolbar| !toolbar.children.is_empty())
             .collect();
-        if items.is_empty() {
+        if toolbars.is_empty() {
             return;
         }
         out.open(".toolbar {");
-        for item in items {
-            let placement = if item.kind == "Picker" {
-                ".principal"
-            } else {
-                ".primaryAction"
-            };
-            out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
-            self.element(out, item, ctx);
-            out.close("}");
+        for toolbar in toolbars {
+            self.nav_walk(
+                out,
+                &toolbar.children,
+                &|out, item| {
+                    let placement = if item.kind == "Picker" {
+                        ".principal"
+                    } else {
+                        ".primaryAction"
+                    };
+                    out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
+                    self.element(out, item, ctx);
+                    out.close("}");
+                },
+                Some(ctx),
+            );
         }
         out.close("}");
     }
 
+    /// Whether an element moves when it appears, disappears or replaces a
+    /// shared element: its container then animates the change.
+    fn moves(element: &Element) -> bool {
+        ["appear", "disappear", "hero"]
+            .iter()
+            .any(|prop| element.keyword(prop).is_some())
+    }
+
+    /// The spring a container animates its moving children with.
+    fn children_motion(&self, nodes: &[Node]) -> Option<String> {
+        nodes.iter().find_map(|node| match node {
+            Node::Element(element) if Self::moves(element) => {
+                let transition = element
+                    .keyword("appear")
+                    .or(element.keyword("disappear"))
+                    .and_then(|name| crate::style::transition(self.app, name));
+                Some(match transition {
+                    Some((_, motion)) => motion,
+                    None => crate::style::motion(self.app, "hero"),
+                })
+            }
+            _ => None,
+        })
+    }
+
+    /// What changes when children appear, disappear or reorder: their
+    /// conditions and list identities, for `.animation(_:value:)`.
+    fn change_key(&self, nodes: &[Node]) -> Option<String> {
+        let mut parts = Vec::new();
+        for node in nodes {
+            match node {
+                Node::If(node) => {
+                    for (condition, _) in &node.branches {
+                        parts.push(format!("AnyHashable({})", self.expr(condition)));
+                    }
+                }
+                Node::Element(element) if element.kind == "ForEach" || element.kind == "List" => {
+                    if let (Some(items), Some(Prop::Key { name, .. })) =
+                        (element.expr("items"), element.prop("key"))
+                    {
+                        parts.push(format!(
+                            "AnyHashable(({}).map(\\.{}))",
+                            self.expr(items),
+                            member(name)
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+        (!parts.is_empty()).then(|| format!("[{}]", parts.join(", ")))
+    }
+
+    /// An element's transitions, shared element and reflow.
+    fn motion_modifiers(&self, out: &mut Out, element: &Element) {
+        let appear = element
+            .keyword("appear")
+            .and_then(|name| crate::style::transition(self.app, name));
+        let disappear = element
+            .keyword("disappear")
+            .and_then(|name| crate::style::transition(self.app, name));
+        if appear.is_some() || disappear.is_some() {
+            let part = |transition: &Option<(String, String)>| match transition {
+                Some((swift, motion)) => (format!("AnyTransition{swift}"), motion.clone()),
+                None => ("nil".into(), "nil".into()),
+            };
+            let (insertion, insertion_motion) = part(&appear);
+            let (removal, removal_motion) = part(&disappear);
+            out.line(format!(
+                ".bernTransition(insertion: {insertion}, insertionMotion: {insertion_motion}, removal: {removal}, removalMotion: {removal_motion})"
+            ));
+        }
+        if let Some(hero) = element.keyword("hero") {
+            match element.expr("hero_key") {
+                Some(key) => out.line(format!(".bernHero(\"{hero}-\\({})\")", self.expr(key))),
+                None => out.line(format!(".bernHero({})", string(hero))),
+            }
+        }
+        if let Some(token) = element.keyword("reflow")
+            && element.kind != "ForEach"
+            && element.kind != "List"
+            && let Some(key) = self.change_key(&element.children)
+        {
+            out.line(format!(
+                ".animation({}.animation, value: {key})",
+                crate::style::motion(self.app, token)
+            ));
+        }
+    }
+
     fn node(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
         match node {
-            Node::Element(element) => self.element(out, element, ctx),
+            Node::Element(element) => {
+                self.element(out, element, ctx);
+                self.motion_modifiers(out, element);
+            }
             Node::Component(reference) => {
                 let component = self.app.component(&reference.component).expect("component");
                 let args: Vec<_> = component
@@ -814,6 +1056,16 @@ impl<'a> Generator<'a> {
     }
 
     fn if_node(&self, out: &mut Out, node: &IfNode, ctx: &Ctx) {
+        // Branches whose elements move animate the change of condition.
+        let motion = node
+            .branches
+            .iter()
+            .map(|(_, body)| body)
+            .chain(std::iter::once(&node.otherwise))
+            .find_map(|body| self.children_motion(body));
+        if motion.is_some() {
+            out.open("SwiftUI.Group {");
+        }
         for (index, (condition, body)) in node.branches.iter().enumerate() {
             let keyword = if index == 0 { "if" } else { "} else if" };
             if index == 0 {
@@ -830,6 +1082,18 @@ impl<'a> Generator<'a> {
             self.nodes(out, &node.otherwise, ctx);
         }
         out.close("}");
+        if let Some(motion) = motion {
+            out.close("}");
+            let conditions: Vec<String> = node
+                .branches
+                .iter()
+                .map(|(condition, _)| self.expr(condition))
+                .collect();
+            out.line(format!(
+                ".animation({motion}.animation, value: [{}])",
+                conditions.join(", ")
+            ));
+        }
     }
 
     fn if_let(&self, out: &mut Out, node: &IfLetNode, ctx: &Ctx) {
@@ -889,14 +1153,6 @@ impl<'a> Generator<'a> {
     }
 
     /// The label of the selected option, as a Swift `String` expression.
-    fn selected_label(&self, selection: &str, options: &[(String, String)]) -> String {
-        let cases: Vec<_> = options
-            .iter()
-            .map(|(value, label)| format!("if {selection} == {value} {{ return {label} }}; "))
-            .collect();
-        format!("{{ () -> String in {}return \"\" }}()", cases.concat())
-    }
-
     fn font(&self, out: &mut Out, element: &Element) {
         if let Some(style) = element.keyword("style") {
             let font = match style {
@@ -927,7 +1183,11 @@ impl<'a> Generator<'a> {
                     Some("tertiary") => out.line(".foregroundStyle(.tertiary)"),
                     _ => {}
                 }
+                if let Some(role) = element.keyword("mark") {
+                    out.line(format!(".bernMark(.role({}))", string(role)));
+                }
             }
+            "Canvas" => self.canvas(out, element),
             "Label" => {
                 let title = self.text_prop(element, "title").unwrap_or_default();
                 let icon = element.icon("icon").unwrap_or("circle");
@@ -1186,6 +1446,20 @@ impl<'a> Generator<'a> {
                         inner.key = Some(format!("{var}.{}", member(name)));
                         self.nodes(out, &element.children, &inner);
                         out.close("}");
+                        // Items that move, or a list that reflows, animate
+                        // when the list changes.
+                        let motion = self.children_motion(&element.children).or_else(|| {
+                            element
+                                .keyword("reflow")
+                                .map(|token| crate::style::motion(self.app, token))
+                        });
+                        if let Some(motion) = motion {
+                            out.line(format!(
+                                ".animation({motion}.animation, value: ({}).map(\\.{}))",
+                                self.expr(items),
+                                member(name)
+                            ));
+                        }
                     }
                     _ => {
                         out.open(format!("SwiftUI.{view} {{"));
@@ -1367,14 +1641,39 @@ impl<'a> Generator<'a> {
             _ => out.line(format!("SwiftUI.Text(verbatim: {label})")),
         }
         out.close("}");
-        if element.kind == "IconButton" {
-            out.line(".buttonStyle(.borderless)");
-            out.line(format!(".help({label})"));
-        } else {
-            match element.keyword("prominence") {
-                Some("prominent") => out.line(".buttonStyle(.borderedProminent)"),
-                Some("plain") => out.line(".buttonStyle(.borderless)"),
-                _ => {}
+        let style = self.style_of(element);
+        match &style {
+            // The style draws the button; its transforms follow the
+            // button's own pressed state.
+            Some(style) if style.draws_look() => {
+                out.line(format!(
+                    ".buttonStyle(BernButtonStyle(style: BernStyles.{}))",
+                    style.name
+                ));
+                if element.kind == "IconButton" {
+                    out.line(format!(".help({label})"));
+                }
+            }
+            _ => {
+                if element.kind == "IconButton" {
+                    out.line(".buttonStyle(.borderless)");
+                    out.line(format!(".help({label})"));
+                } else {
+                    match element.keyword("prominence") {
+                        Some("prominent") => out.line(".buttonStyle(.borderedProminent)"),
+                        Some("plain") => out.line(".buttonStyle(.borderless)"),
+                        _ => {}
+                    }
+                }
+                if let Some(style) = &style {
+                    if let Some(size) = style.size() {
+                        out.line(format!(
+                            ".controlSize({})",
+                            crate::style::control_size(size)
+                        ));
+                    }
+                    out.line(format!(".bernFeedback(BernStyles.{})", style.name));
+                }
             }
         }
         let enabled = element.expr("enabled").map(|expr| self.expr(expr));
@@ -1512,17 +1811,38 @@ impl<'a> Generator<'a> {
         };
         let selection = self.field(sidebar, "selection").expect("selection field");
         out.open("SwiftUI.NavigationSplitView {");
-        out.open(format!(
-            "SwiftUI.List(selection: SwiftUI.Binding(get: {{ Optional({selection}) }}, set: {{ if let value = $0 {{ {selection} = value }} }})) {{"
-        ));
-        for node in &sidebar.children {
-            if let Node::Element(child) = node {
-                self.sidebar_child(out, child);
-            }
+        // Styled items draw their own selection: the list keeps none, and
+        // each row selects itself.
+        let mut styled = false;
+        for child in &sidebar.children {
+            child.walk(&mut |node| {
+                if let Node::Element(item) = node
+                    && item.kind == "SidebarItem"
+                    && self.style_of(item).is_some()
+                {
+                    styled = true;
+                }
+            });
         }
+        let rows = styled.then(|| {
+            format!("SwiftUI.Binding(get: {{ {selection} }}, set: {{ {selection} = $0 }})")
+        });
+        if rows.is_some() {
+            out.open("SwiftUI.List {");
+        } else {
+            out.open(format!(
+                "SwiftUI.List(selection: SwiftUI.Binding(get: {{ Optional({selection}) }}, set: {{ if let value = $0 {{ {selection} = value }} }})) {{"
+            ));
+        }
+        self.sidebar_nodes(out, &sidebar.children, rows.as_deref());
         out.close("}");
         out.line(".navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 320)");
-        let items = sidebar_items(sidebar);
+        let mut labeled = false;
+        for child in &sidebar.children {
+            child.walk(&mut |node| {
+                labeled |= matches!(node, Node::Element(item) if item.kind == "SidebarItem");
+            });
+        }
         if let Some(search) = sidebar.children.iter().find_map(|node| match node {
             Node::Element(child) if child.kind == "Search" => Some(child),
             _ => None,
@@ -1550,12 +1870,9 @@ impl<'a> Generator<'a> {
                 prompt.unwrap_or_else(|| "\"\"".into())
             ));
         }
-        // Destinations with their labels: the detail column and the
-        // sidebar control are both named after the selected one.
-        let titled: Vec<_> = items
-            .iter()
-            .filter_map(|(value, label)| Some((self.expr((*value)?), self.text((*label)?))))
-            .collect();
+        // The detail column and the sidebar control are both named after
+        // the selected destination.
+        let title = labeled.then(|| self.nav_label(&selection, &sidebar.children, "SidebarItem"));
         // A compact iOS split view shows the sidebar as the first screen of
         // a stack, titled like the window.
         if self.platform == Platform::Ios {
@@ -1568,40 +1885,261 @@ impl<'a> Generator<'a> {
         out.close("}");
         // The detail column is titled by the selected sidebar destination,
         // as macOS sidebar apps are.
-        if !titled.is_empty() {
-            out.line(format!(
-                ".navigationTitle({})",
-                self.selected_label(&selection, &titled)
-            ));
+        if let Some(title) = &title {
+            out.line(format!(".navigationTitle({title})"));
         }
         self.toolbar(out, &detail.children, ctx);
         out.close("}");
         // The sidebar is a control of the whole split view, which stays
         // mounted while a compact layout shows only the detail.
         if sidebar.id.is_some() {
-            let options: Vec<String> = items
-                .iter()
-                .filter_map(|(value, _)| value.map(|value| self.expr(value)))
-                .collect();
+            let ty = swift_type(&sidebar.field("selection").expect("selection field").ty);
             out.line(format!(
-                ".bernControl({}, role: \"sidebar\", label: {}, actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
+                ".bernControl({}, role: \"sidebar\", label: {}, actions: BernControlActions(select: {{ name in guard let value = {}.first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
                 self.target(sidebar, ctx),
-                self.selected_label(&selection, &titled),
-                options.join(", ")
+                title.clone().unwrap_or_else(|| "\"\"".into()),
+                self.nav_values(&sidebar.children, "SidebarItem", &ty)
             ));
+        }
+        self.nav_fallback(out, sidebar, &selection, "SidebarItem");
+    }
+
+    /// Sidebar children: sections and items, also inside conditions and
+    /// lists, which is how items of modules that can be switched off arrive.
+    fn sidebar_nodes(&self, out: &mut Out, nodes: &[Node], rows: Option<&str>) {
+        self.nav_walk(
+            out,
+            nodes,
+            &|out, element| self.sidebar_child(out, element, rows),
+            None,
+        );
+    }
+
+    /// Items of a navigation container through `if`, `if let`, `match` and
+    /// `ForEach`, as the container's own builder takes them; `item` writes
+    /// each one. In a toolbar (`toolbar` set), a repetition is one group.
+    fn nav_walk(
+        &self,
+        out: &mut Out,
+        nodes: &[Node],
+        item: &dyn Fn(&mut Out, &Element),
+        toolbar: Option<&Ctx>,
+    ) {
+        for node in nodes {
+            match node {
+                Node::Element(element) if element.kind == "ForEach" => {
+                    let (Some(items), Some(template), Some(Prop::Key { name, .. })) = (
+                        element.expr("items"),
+                        &element.template,
+                        element.prop("key"),
+                    ) else {
+                        continue;
+                    };
+                    let var = member(&template.var);
+                    let each = format!(
+                        "SwiftUI.ForEach({}, id: \\.{}) {{ {var} in",
+                        self.expr(items),
+                        member(name)
+                    );
+                    match toolbar {
+                        Some(ctx) => {
+                            out.open("SwiftUI.ToolbarItemGroup(placement: .primaryAction) {");
+                            out.open(each);
+                            let mut inner = ctx.clone();
+                            inner.key = Some(format!("{var}.{}", member(name)));
+                            self.nodes(out, &element.children, &inner);
+                            out.close("}");
+                            out.close("}");
+                        }
+                        None => {
+                            out.open(each);
+                            self.nav_walk(out, &element.children, item, toolbar);
+                            out.close("}");
+                        }
+                    }
+                }
+                Node::Element(element) => item(out, element),
+                Node::If(node) => {
+                    for (index, (condition, body)) in node.branches.iter().enumerate() {
+                        if index > 0 {
+                            out.indent -= 1;
+                        }
+                        let keyword = if index == 0 { "if" } else { "} else if" };
+                        out.open(format!("{keyword} {} {{", self.expr(condition)));
+                        self.nav_walk(out, body, item, toolbar);
+                    }
+                    if !node.otherwise.is_empty() {
+                        out.indent -= 1;
+                        out.open("} else {");
+                        self.nav_walk(out, &node.otherwise, item, toolbar);
+                    }
+                    out.close("}");
+                }
+                Node::IfLet(node) => {
+                    out.open(format!(
+                        "if let {} = {} {{",
+                        member(&node.var),
+                        self.expr(&node.value)
+                    ));
+                    self.nav_walk(out, &node.then, item, toolbar);
+                    if !node.otherwise.is_empty() {
+                        out.indent -= 1;
+                        out.open("} else {");
+                        self.nav_walk(out, &node.otherwise, item, toolbar);
+                    }
+                    out.close("}");
+                }
+                Node::Match(node) => {
+                    let def = self.types().enum_def(&node.enum_name).expect("enum");
+                    out.open(format!("switch {} {{", self.expr(&node.value)));
+                    for arm in &node.arms {
+                        out.open(format!("{}:", case_pattern(def, arm)));
+                        if arm.body.is_empty() {
+                            out.line("SwiftUI.EmptyView()");
+                        }
+                        self.nav_walk(out, &arm.body, item, toolbar);
+                        out.indent -= 1;
+                    }
+                    out.close("}");
+                }
+                Node::Component(_) => {}
+            }
         }
     }
 
-    fn sidebar_child(&self, out: &mut Out, element: &Element) {
+    /// Swift statements that run `item` for each item a navigation
+    /// container shows now, through the same conditions and lists as its
+    /// view; elements that are not items are looked into.
+    fn nav_statements(&self, nodes: &[Node], item: &dyn Fn(&Element) -> Option<String>) -> String {
+        let mut statements = Vec::new();
+        for node in nodes {
+            match node {
+                Node::Element(element) if element.kind == "ForEach" => {
+                    let (Some(items), Some(template)) = (element.expr("items"), &element.template)
+                    else {
+                        continue;
+                    };
+                    statements.push(format!(
+                        "for {} in {} {{ {} }}",
+                        member(&template.var),
+                        self.expr(items),
+                        self.nav_statements(&element.children, item)
+                    ));
+                }
+                Node::Element(element) => match item(element) {
+                    Some(statement) => statements.push(statement),
+                    None => statements.push(self.nav_statements(&element.children, item)),
+                },
+                Node::If(node) => {
+                    let mut text = String::new();
+                    for (index, (condition, body)) in node.branches.iter().enumerate() {
+                        if index > 0 {
+                            text.push_str(" else ");
+                        }
+                        text.push_str(&format!(
+                            "if {} {{ {} }}",
+                            self.expr(condition),
+                            self.nav_statements(body, item)
+                        ));
+                    }
+                    if !node.otherwise.is_empty() {
+                        text.push_str(&format!(
+                            " else {{ {} }}",
+                            self.nav_statements(&node.otherwise, item)
+                        ));
+                    }
+                    statements.push(text);
+                }
+                Node::IfLet(node) => statements.push(format!(
+                    "if let {} = {} {{ {} }} else {{ {} }}",
+                    member(&node.var),
+                    self.expr(&node.value),
+                    self.nav_statements(&node.then, item),
+                    self.nav_statements(&node.otherwise, item)
+                )),
+                Node::Match(node) => {
+                    let def = self.types().enum_def(&node.enum_name).expect("enum");
+                    let arms: Vec<_> = node
+                        .arms
+                        .iter()
+                        .map(|arm| {
+                            let body = self.nav_statements(&arm.body, item);
+                            format!(
+                                "{}: {}",
+                                case_pattern(def, arm),
+                                if body.is_empty() {
+                                    "break".into()
+                                } else {
+                                    body
+                                }
+                            )
+                        })
+                        .collect();
+                    statements.push(format!(
+                        "switch {} {{ {} }}",
+                        self.expr(&node.value),
+                        arms.join("; ")
+                    ));
+                }
+                Node::Component(_) => {}
+            }
+        }
+        statements.retain(|statement| !statement.is_empty());
+        statements.join("; ")
+    }
+
+    /// The values of the items of `kind` shown now, as a Swift `[ty]`.
+    fn nav_values(&self, nodes: &[Node], kind: &str, ty: &str) -> String {
+        let statements = self.nav_statements(nodes, &|element| {
+            (element.kind == kind).then(|| {
+                let value = element
+                    .expr("value")
+                    .map(|v| self.expr(v))
+                    .unwrap_or_default();
+                format!("items.append({value})")
+            })
+        });
+        format!("{{ () -> [{ty}] in var items: [{ty}] = []; {statements}; return items }}()")
+    }
+
+    /// The label of the selected item of `kind`, as a Swift `String`.
+    fn nav_label(&self, selection: &str, nodes: &[Node], kind: &str) -> String {
+        let statements = self.nav_statements(nodes, &|element| {
+            (element.kind == kind).then(|| {
+                let value = element
+                    .expr("value")
+                    .map(|v| self.expr(v))
+                    .unwrap_or_default();
+                let label = self.text_prop(element, "label").unwrap_or_default();
+                format!("if {selection} == {value} {{ return {label} }}")
+            })
+        });
+        format!("{{ () -> String in {statements}; return \"\" }}()")
+    }
+
+    /// When the selected item goes away, select the container's
+    /// `fallback`, or else the first item shown.
+    fn nav_fallback(&self, out: &mut Out, element: &Element, selection: &str, kind: &str) {
+        if !dynamic_items(&element.children) {
+            return;
+        }
+        let ty = swift_type(&element.field("selection").expect("selection field").ty);
+        let target = element
+            .expr("fallback")
+            .map(|value| format!("Optional({})", self.expr(value)))
+            .unwrap_or_else(|| "visible.first".into());
+        out.line(format!(
+            ".onChange(of: {}, initial: true) {{ _, visible in if !visible.contains({selection}), let value = {target} {{ {selection} = value }} }}",
+            self.nav_values(&element.children, kind, &ty)
+        ));
+    }
+
+    fn sidebar_child(&self, out: &mut Out, element: &Element, rows: Option<&str>) {
         match element.kind.as_str() {
             "Section" => {
                 let title = self.text_prop(element, "title");
                 out.open("SwiftUI.Section {");
-                for node in &element.children {
-                    if let Node::Element(child) = node {
-                        self.sidebar_child(out, child);
-                    }
-                }
+                self.sidebar_nodes(out, &element.children, rows);
                 match title {
                     Some(title) => {
                         out.close("} header: {");
@@ -1611,6 +2149,30 @@ impl<'a> Generator<'a> {
                     }
                     None => out.close("}"),
                 }
+            }
+            "SidebarItem" if rows.is_some() => {
+                let label = self.text_prop(element, "label").unwrap_or_default();
+                let value = element
+                    .expr("value")
+                    .map(|v| self.expr(v))
+                    .unwrap_or_default();
+                let icon = element
+                    .icon("icon")
+                    .map(string)
+                    .unwrap_or_else(|| "nil".into());
+                // Items without a style of their own still show which is
+                // selected.
+                let style = self
+                    .style_of(element)
+                    .map(|style| format!("BernStyles.{}", style.name))
+                    .unwrap_or_else(|| {
+                        "BernStyle(selected: BernLook(fill: .role(\"selection.background\")))"
+                            .into()
+                    });
+                out.line(format!(
+                    "BernSidebarRow(label: {label}, systemImage: {icon}, value: {value}, selection: {}, style: {style})",
+                    rows.unwrap_or_default()
+                ));
             }
             "SidebarItem" => {
                 let label = self.text_prop(element, "label").unwrap_or_default();
@@ -1683,40 +2245,40 @@ impl<'a> Generator<'a> {
             "SwiftUI.TabView(selection: {}) {{",
             self.binding_of(&selection)
         ));
-        let mut options = Vec::new();
-        for node in &element.children {
-            let Node::Element(tab) = node else { continue };
-            let label = self.text_prop(tab, "label").unwrap_or_default();
-            let value = tab.expr("value").map(|v| self.expr(v)).unwrap_or_default();
-            options.push((value.clone(), label.clone()));
-            out.open("SwiftUI.Group {");
-            self.nodes(out, &tab.children, ctx);
-            out.close("}");
-            out.open(".tabItem {");
-            match tab.icon("icon") {
-                Some(icon) => out.line(format!(
-                    "SwiftUI.Label({label}, systemImage: {})",
-                    string(icon)
-                )),
-                None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
-            }
-            out.close("}");
-            out.line(format!(".tag({value})"));
-            self.toolbar(out, &tab.children, ctx);
-        }
+        self.nav_walk(
+            out,
+            &element.children,
+            &|out, tab| {
+                let label = self.text_prop(tab, "label").unwrap_or_default();
+                let value = tab.expr("value").map(|v| self.expr(v)).unwrap_or_default();
+                out.open("SwiftUI.Group {");
+                self.nodes(out, &tab.children, ctx);
+                out.close("}");
+                out.open(".tabItem {");
+                match tab.icon("icon") {
+                    Some(icon) => out.line(format!(
+                        "SwiftUI.Label({label}, systemImage: {})",
+                        string(icon)
+                    )),
+                    None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
+                }
+                out.close("}");
+                out.line(format!(".tag({value})"));
+                self.toolbar(out, &tab.children, ctx);
+            },
+            None,
+        );
         out.close("}");
         if element.id.is_some() {
+            let ty = swift_type(&element.field("selection").expect("selection field").ty);
             out.line(format!(
-                ".bernControl({}, role: \"tabs\", label: {}, actions: BernControlActions(select: {{ name in guard let value = [{}].first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
+                ".bernControl({}, role: \"tabs\", label: {}, actions: BernControlActions(select: {{ name in guard let value = {}.first(where: {{ $0.bernName == name }}) else {{ return false }}; {selection} = value; return true }}, value: {{ {selection}.bernName }}))",
                 self.target(element, ctx),
-                self.selected_label(&selection, &options),
-                options
-                    .iter()
-                    .map(|(value, _)| value.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                self.nav_label(&selection, &element.children, "Tab"),
+                self.nav_values(&element.children, "Tab", &ty)
             ));
         }
+        self.nav_fallback(out, element, &selection, "Tab");
     }
 
     fn uses_engine(&self, nodes: &[&Node]) -> bool {
@@ -1747,7 +2309,7 @@ impl<'a> Generator<'a> {
                 ParamKind::Value { ty } => {
                     out.line(format!("let {}: {}", member(&param.name), swift_type(ty)))
                 }
-                ParamKind::Client => client = true,
+                ParamKind::Client { .. } => client = true,
                 ParamKind::Session { session } => {
                     if !sessions.contains(session) {
                         sessions.push(session.clone());
@@ -1814,6 +2376,24 @@ impl<'a> Generator<'a> {
         };
         self.node(out, &window.content, &ctx);
         out.close("}");
+        if window.chrome == bern_ir::WindowChrome::Unified
+            || window.immersive.is_some()
+            || window.idle_after.is_some()
+        {
+            out.line(format!(
+                ".modifier(BernWindowBehavior(context: context, unified: {}, idleAfter: {}, immersive: {}))",
+                window.chrome == bern_ir::WindowChrome::Unified,
+                window
+                    .idle_after
+                    .map(double)
+                    .unwrap_or_else(|| "nil".into()),
+                window
+                    .immersive
+                    .as_ref()
+                    .map(|expr| self.expr(expr))
+                    .unwrap_or_else(|| "false".into())
+            ));
+        }
         for session in &window.sessions {
             out.line(format!(
                 ".environment(context.session({}.self))",
@@ -1916,7 +2496,7 @@ impl<'a> Generator<'a> {
                 values.push("completion: done".into());
                 out.line(format!(
                     "bernEngine.{}({})",
-                    member(&spec.name),
+                    member(&self.app.protocol.command_symbol(spec)),
                     values.join(", ")
                 ));
                 out.close("}");
@@ -1945,6 +2525,46 @@ impl<'a> Generator<'a> {
         }
         for def in &app.types.records {
             generate_record(&mut out, def);
+        }
+        let styles = crate::style::used(app, self.style_platform());
+        if !styles.is_empty() {
+            out.line("// MARK: - Styles");
+            out.line("");
+            out.line("/// The style overrides of `style!` on this platform.");
+            out.open("enum BernStyles {");
+            for style in &styles {
+                out.line(crate::style::declaration(app, style));
+            }
+            out.close("}");
+            out.line("");
+        }
+        if !app.style.patterns.is_empty() {
+            out.line("/// The patterns of `style!`.");
+            out.open("enum BernPatterns {");
+            for pattern in &app.style.patterns {
+                let bands = pattern
+                    .bands
+                    .iter()
+                    .map(|band| {
+                        format!(
+                            "BernBand(color: {}, width: {}, opacity: {})",
+                            band.color
+                                .as_ref()
+                                .map(crate::style::color)
+                                .unwrap_or_else(|| "nil".into()),
+                            double(band.width),
+                            double(band.opacity)
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.line(format!(
+                    "static let `{}` = BernPatternDef(bands: [{bands}], twill: {})",
+                    pattern.name, pattern.twill
+                ));
+            }
+            out.close("}");
+            out.line("");
         }
         out.line("// MARK: - Engine state");
         out.line("");
@@ -2217,19 +2837,13 @@ fn case_pattern(def: &EnumDef, arm: &MatchArm) -> String {
     format!("case .{}({})", case(&variant.name), patterns.join(", "))
 }
 
-fn sidebar_items(sidebar: &Element) -> Vec<(Option<&Expr>, Option<&Text>)> {
-    let mut items = Vec::new();
-    fn visit<'e>(element: &'e Element, items: &mut Vec<(Option<&'e Expr>, Option<&'e Text>)>) {
-        for node in &element.children {
-            if let Node::Element(child) = node {
-                if child.kind == "SidebarItem" {
-                    items.push((child.expr("value"), child.text("label")));
-                } else {
-                    visit(child, items);
-                }
-            }
-        }
-    }
-    visit(sidebar, &mut items);
-    items
+/// Whether navigation items sit in conditions or repetitions, also inside
+/// a sidebar's sections.
+fn dynamic_items(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(element) if element.kind == "ForEach" => true,
+        Node::Element(element) if element.kind == "Section" => dynamic_items(&element.children),
+        Node::Element(_) | Node::Component(_) => false,
+        Node::If(_) | Node::IfLet(_) | Node::Match(_) => true,
+    })
 }

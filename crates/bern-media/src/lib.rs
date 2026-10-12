@@ -328,6 +328,7 @@ pub fn media_catalog() -> (TypeTable, Vec<CommandSpec>) {
             },
             external: ExternalNames::derive(namespace, name),
             reads: vec![],
+            on: None,
         }
     };
     let version = || Type::Int;

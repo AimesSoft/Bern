@@ -18,7 +18,8 @@ pub struct Signature {
 
 #[derive(Clone, Debug)]
 enum Root {
-    Client,
+    /// A typed engine client, by the namespace of its protocol.
+    Client(String),
     Windows,
     Players,
     Session(String),
@@ -28,7 +29,64 @@ enum Root {
 #[derive(Default)]
 struct Scope(Vec<(String, Root)>);
 
+/// What the application's modules contribute to the shell's slots.
+#[derive(Default)]
+pub struct Contributions {
+    /// Slot id to `(module namespace, component)`, in module order.
+    pub slots: BTreeMap<String, Vec<(String, String)>>,
+    /// Page slot id to the enum selecting its pages and the pages the
+    /// modules add, in module order.
+    pub pages: BTreeMap<String, PageSlot>,
+    /// Namespaces of every protocol, whose clients expansions pass on;
+    /// the application's first.
+    pub namespaces: Vec<String>,
+    /// Modules that can be switched off: what they contribute shows only
+    /// while they run.
+    pub optional: BTreeSet<String>,
+}
+
+pub struct PageSlot {
+    pub enum_name: String,
+    pub pages: Vec<ContributedPage>,
+}
+
+pub struct ContributedPage {
+    pub module: String,
+    pub variant: String,
+    pub label: BTreeMap<String, String>,
+    pub icon: Option<String>,
+    pub component: String,
+}
+
+/// Scope name under which an expansion passes the `namespace` client.
+fn slot_client(namespace: &str) -> String {
+    format!("__bern_client_{namespace}")
+}
+
+impl Contributions {
+    /// `declaration`, shown only while `module` runs when it is optional.
+    fn guarded(&self, module: &str, declaration: String) -> String {
+        match self.namespaces.first() {
+            Some(shell) if self.optional.contains(module) => format!(
+                "if {}.{}.{module} {{ {declaration} }}",
+                slot_client(shell),
+                bern_protocol::MODULES_NAMESPACE
+            ),
+            _ => declaration,
+        }
+    }
+}
+
 impl Scope {
+    /// The first name bound to a root of the same kind as `root`.
+    fn name_of(&self, wanted: fn(&Root) -> bool) -> Option<String> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(_, root)| wanted(root))
+            .map(|(name, _)| name.clone())
+    }
+
     fn get(&self, name: &str) -> Option<&Root> {
         self.0
             .iter()
@@ -118,6 +176,15 @@ pub struct Checker<'a> {
     pub contracts: &'a BTreeMap<String, Vec<String>>,
     /// Breakpoints from `[layouts]`, if declared.
     pub layouts: Option<ir::LayoutConfig>,
+    /// What modules contribute to slots, expanded where the shell places
+    /// `Slot`, `Pages` and `PageContent`.
+    pub contributions: Contributions,
+    /// `(control, variant)` pairs `style!` declares.
+    pub variants: Vec<(String, String)>,
+    /// Transition, motion token and pattern names `style!` provides.
+    pub transitions: Vec<String>,
+    pub tokens: Vec<String>,
+    pub patterns: Vec<String>,
     ids: BTreeSet<String>,
 }
 
@@ -152,6 +219,11 @@ impl<'a> Checker<'a> {
             component: String::new(),
             diagnostics: Vec::new(),
             texts: Vec::new(),
+            contributions: Contributions::default(),
+            variants: Vec::new(),
+            transitions: Vec::new(),
+            tokens: Vec::new(),
+            patterns: Vec::new(),
             ids: BTreeSet::new(),
         }
     }
@@ -179,7 +251,7 @@ impl<'a> Checker<'a> {
         let mut scope = Scope::default();
         for (name, kind) in &signature.params {
             let root = match kind {
-                ir::ParamKind::Client => Root::Client,
+                ir::ParamKind::Client { namespace } => Root::Client(namespace.clone()),
                 ir::ParamKind::Windows => Root::Windows,
                 ir::ParamKind::Players => Root::Players,
                 ir::ParamKind::Value { ty } => Root::Local(ty.clone()),
@@ -208,11 +280,211 @@ impl<'a> Checker<'a> {
         ctx: &Ctx,
         scope: &mut Scope,
     ) -> Vec<ir::Node> {
-        nodes
+        let mut lowered = Vec::new();
+        for (index, node) in nodes.iter().enumerate() {
+            let path = format!("{prefix}.{index}");
+            match node {
+                ast::Node::Element(element)
+                    if matches!(
+                        element.name.to_string().as_str(),
+                        "Slot" | "Pages" | "PageContent"
+                    ) =>
+                {
+                    lowered.extend(self.expand(element, &path, ctx, scope));
+                }
+                node => lowered.extend(self.node(node, &path, ctx, scope)),
+            }
+        }
+        lowered
+    }
+
+    /// Replace a `Slot`, `Pages` or `PageContent` with what the modules
+    /// contribute, written as ordinary declarations and checked like them.
+    fn expand(
+        &mut self,
+        element: &ast::Element,
+        path: &str,
+        ctx: &Ctx,
+        scope: &mut Scope,
+    ) -> Vec<ir::Node> {
+        let name = element.name.to_string();
+        let prop_names: Vec<String> = element
+            .props
             .iter()
-            .enumerate()
-            .filter_map(|(index, node)| self.node(node, &format!("{prefix}.{index}"), ctx, scope))
-            .collect()
+            .map(|prop| prop.name.to_string())
+            .collect();
+        let shape = ElementShape {
+            name: &name,
+            props: prop_names.iter().map(String::as_str).collect(),
+            has_template: element.template.is_some(),
+            children: element.children.as_ref().map(|_| Vec::new()),
+            has_action: element.action.is_some(),
+            parent: ctx.parent.as_deref(),
+            is_root: ctx.is_root,
+        };
+        let errors = spec::check_shape(&shape);
+        if !errors.is_empty() {
+            for error in errors {
+                self.error(element.span, error.message);
+            }
+            return Vec::new();
+        }
+        let ident = |prop: &str| match element.prop(prop).map(|prop| &prop.value) {
+            Some(ast::Expr::Path(path)) => path.single().map(ToString::to_string),
+            _ => None,
+        };
+        let key = if name == "Slot" { "id" } else { "slot" };
+        let Some(slot) = ident(key) else {
+            self.error(
+                element.span,
+                format!("`{name}` names its slot with `{key}: name`"),
+            );
+            return Vec::new();
+        };
+        let text = match name.as_str() {
+            "Slot" => {
+                let contributed = self
+                    .contributions
+                    .slots
+                    .get(&slot)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut calls = Vec::new();
+                for (module, component) in &contributed {
+                    match self.slot_call(component, scope) {
+                        Ok(call) => calls.push(self.contributions.guarded(module, call)),
+                        Err(message) => self.error(element.span, message),
+                    }
+                }
+                calls.join("\n")
+            }
+            "Pages" => {
+                let Some(pages) = self.contributions.pages.get(&slot) else {
+                    return Vec::new();
+                };
+                pages
+                    .pages
+                    .iter()
+                    .map(|page| {
+                        let label: Vec<String> = page
+                            .label
+                            .iter()
+                            .map(|(language, text)| format!("{language:?} => {text:?}"))
+                            .collect();
+                        let icon = page
+                            .icon
+                            .as_ref()
+                            .map(|icon| format!(", icon: {icon:?}"))
+                            .unwrap_or_default();
+                        self.contributions.guarded(
+                            &page.module,
+                            format!(
+                                "SidebarItem(value: {}::{}, label: tr! {{ {} }}{icon})",
+                                pages.enum_name,
+                                page.variant,
+                                label.join(", ")
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+            _ => {
+                let selected = match element.prop("selected").map(|prop| &prop.value) {
+                    Some(ast::Expr::Path(path)) => path.dotted(),
+                    _ => {
+                        self.error(
+                            element.span,
+                            "`selected:` binds the session field holding the page",
+                        );
+                        return Vec::new();
+                    }
+                };
+                let Some(pages) = self.contributions.pages.get(&slot) else {
+                    return Vec::new();
+                };
+                let mut arms = Vec::new();
+                let mut failures = Vec::new();
+                for page in &pages.pages {
+                    match self.slot_call(&page.component, scope) {
+                        Ok(call) => arms.push(format!(
+                            "{}::{} => {{ {} }}",
+                            pages.enum_name,
+                            page.variant,
+                            self.contributions.guarded(&page.module, call)
+                        )),
+                        Err(message) => failures.push(message),
+                    }
+                }
+                for message in failures {
+                    self.error(element.span, message);
+                }
+                if arms.is_empty() {
+                    return Vec::new();
+                }
+                format!("match {selected} {{ {} _ => {{}} }}", arms.join(" "))
+            }
+        };
+        if text.is_empty() {
+            return Vec::new();
+        }
+        let parsed = match text
+            .parse::<proc_macro2::TokenStream>()
+            .map_err(|error| error.to_string())
+            .and_then(|tokens| ast::parse_ui(tokens).map_err(|error| error.to_string()))
+        {
+            Ok(body) => body,
+            Err(error) => {
+                self.error(element.span, format!("cannot expand `{name}`: {error}"));
+                return Vec::new();
+            }
+        };
+        let pushed = self.contributions.namespaces.clone();
+        for namespace in &pushed {
+            scope.push(slot_client(namespace), Root::Client(namespace.clone()));
+        }
+        let lowered = self.nodes(&parsed.nodes, &format!("{path}.{name}"), ctx, scope);
+        for _ in &pushed {
+            scope.pop();
+        }
+        lowered
+    }
+
+    /// The call of a contributed component: its clients from the slot's
+    /// scope, the window handle and players by the names the shell gave
+    /// them; session state comes from the hosting window as usual.
+    fn slot_call(&self, component: &str, scope: &Scope) -> Result<String, String> {
+        let signature = self
+            .signatures
+            .get(component)
+            .ok_or_else(|| format!("contributed component `{component}` is not declared"))?;
+        let mut args = Vec::new();
+        for (param, kind) in &signature.params {
+            match kind {
+                ir::ParamKind::Client { namespace } => {
+                    args.push(format!("{param}: {}", slot_client(namespace)));
+                }
+                ir::ParamKind::Windows => {
+                    let name = scope
+                        .name_of(|root| matches!(root, Root::Windows))
+                        .ok_or_else(|| format!("contributed component `{component}` takes the window handle; give the component holding the slot a `windows` parameter"))?;
+                    args.push(format!("{param}: {name}"));
+                }
+                ir::ParamKind::Players => {
+                    let name = scope
+                        .name_of(|root| matches!(root, Root::Players))
+                        .ok_or_else(|| format!("contributed component `{component}` takes the players; give the component holding the slot a `players` parameter"))?;
+                    args.push(format!("{param}: {name}"));
+                }
+                ir::ParamKind::Session { .. } => {}
+                ir::ParamKind::Value { .. } => {
+                    return Err(format!(
+                        "contributed component `{component}` takes the value `{param}`; components placed in slots take clients, the window handle, players and session state only"
+                    ));
+                }
+            }
+        }
+        Ok(format!("{component}({})", args.join(", ")))
     }
 
     fn node(
@@ -406,14 +678,10 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|prop| prop.name.to_string())
             .collect();
+        // Items of navigation containers may be conditional or repeated:
+        // what counts is the elements in each branch and template.
         let child_names: Option<Vec<Option<String>>> = element.children.as_ref().map(|children| {
-            children
-                .iter()
-                .map(|child| match child {
-                    ast::Node::Element(child) => Some(child.name.to_string()),
-                    _ => None,
-                })
-                .collect()
+            ast::child_names(children, spec::DYNAMIC_ITEMS.contains(&name.as_str()))
         });
         let shape = ElementShape {
             name: &name,
@@ -452,7 +720,12 @@ impl<'a> Checker<'a> {
         let mut id = None;
         let mut template = None;
         let mut child_ctx = Ctx {
-            parent: Some(name.clone()),
+            // A repetition places its template where it stands itself.
+            parent: if name == "ForEach" {
+                ctx.parent.clone()
+            } else {
+                Some(name.clone())
+            },
             is_root: false,
             selection: ctx.selection.clone(),
             route: ctx.route.clone(),
@@ -620,7 +893,12 @@ impl<'a> Checker<'a> {
                 PropKind::BoolField => self.field_prop(&prop.value, scope, FieldExpect::Bool),
                 PropKind::NumberField => self.field_prop(&prop.value, scope, FieldExpect::Number),
                 PropKind::PickerField => self.field_prop(&prop.value, scope, FieldExpect::Picker),
-                PropKind::SelectionValue => match ctx.selection.clone() {
+                // A container's `fallback` is one of its own values.
+                PropKind::SelectionValue => match if prop_name == "fallback" {
+                    child_ctx.selection.clone()
+                } else {
+                    ctx.selection.clone()
+                } {
                     Some(selection) => self
                         .expect(&prop.value, &selection, scope, "this value")
                         .map(|expr| ir::Prop::Expr { expr }),
@@ -643,6 +921,133 @@ impl<'a> Checker<'a> {
                 },
                 PropKind::KeyField => self.key(&prop.value, template.as_ref()),
                 PropKind::WindowId => self.window_id(&prop.value, &name, &prop_name),
+                // Slots are expanded before elements are lowered.
+                PropKind::SlotName => None,
+                PropKind::Transition | PropKind::MotionToken | PropKind::HeroName => {
+                    match &prop.value {
+                        ast::Expr::Path(path) if path.single().is_some() => {
+                            let value = path.single().unwrap().to_string();
+                            let known = match prop_spec.kind {
+                                PropKind::Transition => self.transitions.contains(&value),
+                                PropKind::MotionToken => self.tokens.contains(&value),
+                                _ => true,
+                            };
+                            if known {
+                                Some(ir::Prop::Keyword { value })
+                            } else {
+                                let what = if prop_spec.kind == PropKind::Transition {
+                                    "transition; declare it under `transition { … }` in `style!`"
+                                } else {
+                                    "motion token; declare it under `motion { … }` in `style!`"
+                                };
+                                self.error(prop.value.span(), format!("`{value}` is not a {what}"));
+                                None
+                            }
+                        }
+                        other => {
+                            self.error(other.span(), format!("`{prop_name}` takes a name"));
+                            None
+                        }
+                    }
+                }
+                PropKind::ColorRole => match &prop.value {
+                    ast::Expr::Path(path) => {
+                        let role = path.dotted();
+                        if bern_ir::style::COLOR_ROLES.contains(&role.as_str()) {
+                            Some(ir::Prop::Keyword { value: role })
+                        } else {
+                            self.error(
+                                prop.value.span(),
+                                format!(
+                                    "`{role}` is not a color role; use one of {}",
+                                    bern_ir::style::COLOR_ROLES.join(", ")
+                                ),
+                            );
+                            None
+                        }
+                    }
+                    other => {
+                        self.error(
+                            other.span(),
+                            "a color is a role such as `accent` or `fill.subtle`",
+                        );
+                        None
+                    }
+                },
+                PropKind::PatternName => match &prop.value {
+                    ast::Expr::Path(path) if path.single().is_some() => {
+                        let value = path.single().unwrap().to_string();
+                        if self.patterns.contains(&value) {
+                            Some(ir::Prop::Keyword { value })
+                        } else {
+                            self.error(
+                                prop.value.span(),
+                                format!("`{value}` is not a pattern; declare it under `pattern {{ … }}` in `style!`"),
+                            );
+                            None
+                        }
+                    }
+                    other => {
+                        self.error(other.span(), "`name` takes a pattern's name");
+                        None
+                    }
+                },
+                PropKind::NumberList => match self.expr(&prop.value, scope) {
+                    Some(lowered) if matches!(&lowered.ty, Type::List { inner } if matches!(**inner, Type::Int | Type::Float)) => {
+                        Some(ir::Prop::Expr { expr: lowered })
+                    }
+                    Some(lowered) => {
+                        self.error(
+                            prop.value.span(),
+                            format!(
+                                "`{prop_name}` is a list of numbers, found {}",
+                                lowered.ty.display()
+                            ),
+                        );
+                        None
+                    }
+                    None => None,
+                },
+                PropKind::KeyValue => match self.expr(&prop.value, scope) {
+                    Some(lowered)
+                        if matches!(lowered.ty, Type::Int | Type::Text | Type::Enum { .. }) =>
+                    {
+                        Some(ir::Prop::Expr { expr: lowered })
+                    }
+                    Some(lowered) => {
+                        self.error(
+                            prop.value.span(),
+                            format!(
+                                "`{prop_name}` identifies with text, a number or an enum, found {}",
+                                lowered.ty.display()
+                            ),
+                        );
+                        None
+                    }
+                    None => None,
+                },
+                PropKind::StyleVariant => {
+                    match &prop.value {
+                        ast::Expr::Path(path) if path.single().is_some() => {
+                            let variant = path.single().unwrap().to_string();
+                            if self.variants.iter().any(|(component, declared)| {
+                                *component == name && *declared == variant
+                            }) {
+                                Some(ir::Prop::Keyword { value: variant })
+                            } else {
+                                self.error(
+                                    prop.value.span(),
+                                    format!("`style!` declares no variant `{name}.{variant}`"),
+                                );
+                                None
+                            }
+                        }
+                        other => {
+                            self.error(other.span(), "a variant is a name, e.g. `variant: hero`");
+                            None
+                        }
+                    }
+                }
                 PropKind::TypeName => match &prop.value {
                     ast::Expr::Path(path) if path.single().is_some() => Some(ir::Prop::TypeName {
                         name: path.single().unwrap().to_string(),
@@ -1068,7 +1473,7 @@ impl<'a> Checker<'a> {
                 }
                 Some(ir::FieldRef { session, field, ty })
             }
-            Some(Root::Client) => {
+            Some(Root::Client(_)) => {
                 self.error(
                     path.span(),
                     "controls only write to session state; engine state changes through commands",
@@ -1109,6 +1514,26 @@ impl<'a> Checker<'a> {
 
     fn binding(&mut self, path: &ast::PathExpr, scope: &Scope) -> Option<ir::Expr> {
         let root_name = path.segments[0].to_string();
+        // `window` names the hosting window's UI state unless a parameter
+        // or variable takes the name.
+        if root_name == "window" && scope.get(&root_name).is_none() {
+            let field = path.segments.get(1).map(ToString::to_string);
+            if field.as_deref() != Some("idle") || path.segments.len() != 2 {
+                self.error(
+                    path.span(),
+                    "the hosting window offers `window.idle`: whether it had no input for `idle_after` seconds",
+                );
+                return None;
+            }
+            return Some(ir::Expr {
+                kind: ir::ExprKind::Binding {
+                    binding: ir::Binding::Window {
+                        field: "idle".into(),
+                    },
+                },
+                ty: Type::Bool,
+            });
+        }
         let Some(root) = scope.get(&root_name).cloned() else {
             self.error(
                 path.span(),
@@ -1120,7 +1545,7 @@ impl<'a> Checker<'a> {
         };
         let rest = &path.segments[1..];
         let (binding, ty) = match root {
-            Root::Client => {
+            Root::Client(namespace) => {
                 let Some(first) = rest.first() else {
                     self.error(
                         path.span(),
@@ -1128,19 +1553,28 @@ impl<'a> Checker<'a> {
                     );
                     return None;
                 };
-                let Some(field) = self.protocol.state_index(&first.to_string()) else {
-                    self.error(
-                        first.span(),
-                        format!(
-                            "protocol `{}` has no state field `{first}`",
-                            self.protocol.namespace
-                        ),
-                    );
-                    return None;
-                };
-                let (sub, ty) =
-                    self.record_path(self.protocol.state[field].ty.clone(), &rest[1..])?;
-                (ir::Binding::Engine { field, path: sub }, ty)
+                if namespace == self.protocol.namespace {
+                    let Some(field) = self.protocol.state_index(&first.to_string()) else {
+                        self.error(
+                            first.span(),
+                            format!(
+                                "protocol `{}` has no state field `{first}`",
+                                self.protocol.namespace
+                            ),
+                        );
+                        return None;
+                    };
+                    let (sub, ty) =
+                        self.record_path(self.protocol.state[field].ty.clone(), &rest[1..])?;
+                    (ir::Binding::Engine { field, path: sub }, ty)
+                } else {
+                    // A module's state is the application state field named
+                    // after the module.
+                    let field = self.protocol.state_index(&namespace)?;
+                    let (sub, ty) =
+                        self.record_path(self.protocol.state[field].ty.clone(), rest)?;
+                    (ir::Binding::Engine { field, path: sub }, ty)
+                }
             }
             Root::Windows => {
                 self.error(path.span(), "window handles are only used in actions");
@@ -1510,20 +1944,23 @@ impl<'a> Checker<'a> {
             return None;
         };
         let root = call.receiver[0].to_string();
-        if !matches!(scope.get(&root), Some(Root::Client)) || call.receiver.len() != 1 {
-            self.error(
-                call.receiver[0].span(),
-                format!("`{root}` is not the typed engine client; queries are called on it"),
-            );
-            return None;
-        }
+        let namespace = match scope.get(&root) {
+            Some(Root::Client(namespace)) if call.receiver.len() == 1 => namespace.clone(),
+            _ => {
+                self.error(
+                    call.receiver[0].span(),
+                    format!("`{root}` is not the typed engine client; queries are called on it"),
+                );
+                return None;
+            }
+        };
         let method = call.method.to_string();
-        let Some(query) = self.protocol.commands.iter().position(|c| c.name == method) else {
+        let id = format!("{namespace}.{method}");
+        let Some(query) = self.protocol.commands.iter().position(|c| c.id == id) else {
             self.error(
                 call.method.span(),
                 format!(
-                    "protocol `{}` has no query `{method}`; declare it in the `#[queries]` trait",
-                    self.protocol.namespace
+                    "protocol `{namespace}` has no query `{method}`; declare it in the `#[queries]` trait"
                 ),
             );
             return None;
@@ -1565,7 +2002,7 @@ impl<'a> Checker<'a> {
     fn action(&mut self, action: &ast::Action, scope: &Scope) -> Option<ir::Action> {
         let root = action.receiver[0].to_string();
         match scope.get(&root) {
-            Some(Root::Client) => {
+            Some(Root::Client(namespace)) => {
                 if action.receiver.len() != 1 {
                     self.error(
                         action.span,
@@ -1574,13 +2011,12 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 let method = action.method.to_string();
-                let Some(command) = self.protocol.commands.iter().position(|c| c.name == method)
-                else {
+                let id = format!("{namespace}.{method}");
+                let Some(command) = self.protocol.commands.iter().position(|c| c.id == id) else {
                     self.error(
                         action.method.span(),
                         format!(
-                            "protocol `{}` has no command `{method}`; register it in the command trait",
-                            self.protocol.namespace
+                            "protocol `{namespace}` has no command `{method}`; register it in the command trait"
                         ),
                     );
                     return None;
@@ -1750,18 +2186,21 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let lowered = match kind {
-                ir::ParamKind::Client => match &arg.value {
+                ir::ParamKind::Client { namespace } => match &arg.value {
                     ast::Expr::Path(path)
                         if path.segments.len() == 1
                             && matches!(
                                 scope.get(&path.segments[0].to_string()),
-                                Some(Root::Client)
+                                Some(Root::Client(given)) if given == namespace
                             ) =>
                     {
                         Some(ir::ComponentArg::Client)
                     }
                     other => {
-                        self.error(other.span(), "pass the typed client, e.g. `app: app`");
+                        self.error(
+                            other.span(),
+                            format!("pass the typed `{namespace}` client, e.g. `{namespace}: {namespace}`"),
+                        );
                         None
                     }
                 },

@@ -105,6 +105,20 @@ pub struct CommandSpec {
     /// them changes, so live subscriptions request it again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reads: Vec<String>,
+    /// For a command answering another module's event: the event, as
+    /// `module.event`. It runs after each command emitting that event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<String>,
+}
+
+/// Something a module reports so the modules depending on it can react,
+/// such as `playback.opened`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EventSpec {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc: String,
+    pub params: Vec<ParamSpec>,
 }
 
 impl CommandSpec {
@@ -133,6 +147,14 @@ pub struct ProtocolDescriptor {
     pub types: TypeTable,
     pub state: Vec<StateField>,
     pub commands: Vec<CommandSpec>,
+    /// Events this protocol emits, in declaration order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<EventSpec>,
+    /// Namespaces of the modules composed into this catalog, in order.
+    /// Their commands keep their own namespace in their ids, and each
+    /// module's state is the state field of the same name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modules: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,7 +175,10 @@ impl From<SchemaError> for DescriptorError {
 }
 
 /// Namespaces used by framework-provided session, window and media commands.
-pub const RESERVED_NAMESPACES: &[&str] = &["bern", "ui", "window", "session", "media"];
+pub const RESERVED_NAMESPACES: &[&str] = &["bern", "ui", "window", "session", "media", "modules"];
+
+/// Namespace of the commands switching optional modules on and off.
+pub const MODULES_NAMESPACE: &str = "modules";
 
 pub fn valid_name(name: &str) -> bool {
     name.starts_with(|c: char| c.is_ascii_lowercase())
@@ -170,6 +195,19 @@ impl ProtocolDescriptor {
             .iter()
             .enumerate()
             .find(|(_, spec)| spec.id == id)
+    }
+
+    /// A name for `command` that is unique in this catalog, for generated
+    /// code: the command's own name in the application's namespace, the
+    /// namespace and name joined by `_` in a module's, such as
+    /// `downloads_add`.
+    pub fn command_symbol(&self, command: &CommandSpec) -> String {
+        match command.id.strip_suffix(&format!(".{}", command.name)) {
+            Some(namespace) if namespace != self.namespace => {
+                format!("{namespace}_{}", command.name)
+            }
+            _ => command.name.clone(),
+        }
     }
 
     pub fn state_index(&self, name: &str) -> Option<usize> {
@@ -199,11 +237,17 @@ impl ProtocolDescriptor {
                 self.namespace
             )));
         }
-        if RESERVED_NAMESPACES.contains(&self.namespace.as_str()) {
-            return Err(DescriptorError(format!(
-                "protocol namespace `{}` is reserved for framework commands",
-                self.namespace
-            )));
+        for namespace in std::iter::once(&self.namespace).chain(&self.modules) {
+            if !valid_name(namespace) {
+                return Err(DescriptorError(format!(
+                    "invalid module namespace `{namespace}`; use lower snake case"
+                )));
+            }
+            if RESERVED_NAMESPACES.contains(&namespace.as_str()) {
+                return Err(DescriptorError(format!(
+                    "protocol namespace `{namespace}` is reserved for framework commands"
+                )));
+            }
         }
         self.types.validate()?;
         let mut state_names = BTreeMap::new();
@@ -224,7 +268,15 @@ impl ProtocolDescriptor {
                     command.name
                 )));
             }
-            if command.id != format!("{}.{}", self.namespace, command.name) {
+            let owner = command
+                .id
+                .strip_suffix(&format!(".{}", command.name))
+                .unwrap_or_default();
+            let switch = owner == MODULES_NAMESPACE && !self.modules.is_empty();
+            if owner != self.namespace
+                && !self.modules.iter().any(|module| module == owner)
+                && !switch
+            {
                 return Err(DescriptorError(format!(
                     "command `{}` must use the id `{}.{}`",
                     command.name, self.namespace, command.name
@@ -308,11 +360,14 @@ mod tests {
             policy: CommandPolicy::default(),
             external: ExternalNames::derive(namespace, name),
             reads: vec![],
+            on: None,
         }
     }
 
     fn descriptor(commands: Vec<CommandSpec>) -> ProtocolDescriptor {
         ProtocolDescriptor {
+            modules: Vec::new(),
+            events: Vec::new(),
             descriptor_version: DESCRIPTOR_VERSION,
             namespace: "player".into(),
             version: 1,

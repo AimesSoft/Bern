@@ -256,6 +256,8 @@ final class BernWindowContext {
     /// reported as caused by a command rather than by the user.
     @ObservationIgnored var commandInFlight = false
     @ObservationIgnored var allowsClose = false
+    /// Whether the window had no input for its `idle_after` seconds.
+    var idle = false
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
 
@@ -1440,7 +1442,7 @@ struct BernWindowRoot<Content: View>: View {
                     Text(verbatim: error)
                 }
             } else {
-                content
+                content.bernHeroRoot()
             }
         }
         .alert(

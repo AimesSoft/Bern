@@ -1,0 +1,35 @@
+# The notes module: a list of notes the planner shows on its main page.
+
+[module]
+id = "notes"
+name = { "zh-Hans" = "笔记", "en" = "Notes" }
+optional = true
+
+[module.protocol]
+package = "notes-protocol"
+source = "protocol/src/lib.rs"
+
+[module.engine]
+package = "notes-core"
+type = "notes_core::NotesEngine"
+path = "core"
+
+[module.ui]
+package = "notes-ui"
+sources = "ui/src"
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"
+
+# The notes page joins the shell's main page slot, and a summary line joins
+# its overview.
+[[pages]]
+slot = "main"
+id = "notes"
+label = { "zh-Hans" = "笔记", "en" = "Notes" }
+icon = "note.text"
+component = "notes_page"
+
+[contributes]
+summary = ["notes_summary"]

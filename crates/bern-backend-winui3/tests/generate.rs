@@ -94,6 +94,7 @@ fn showcase_generates_a_winui3_application() {
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
         framework: Framework::Path(root.join("crates")),
         release: false,
     };
@@ -274,6 +275,7 @@ fn a_target_can_build_one_front_end() {
             engine_package: config.engine_package.name.clone(),
             engine_path: config.engine_package.dir.clone(),
             engine_type: config.engine_type.clone(),
+            modules: Vec::new(),
             framework: Framework::Path(root.join("crates")),
             release: false,
         };

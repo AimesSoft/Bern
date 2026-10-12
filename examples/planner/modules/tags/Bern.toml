@@ -1,0 +1,21 @@
+# The tags module: labels for the planner's notes. It has no UI of its own;
+# the shell shows its state.
+
+[module]
+id = "tags"
+name = { "zh-Hans" = "标签", "en" = "Tags" }
+depends = ["notes"]
+optional = true
+
+[module.protocol]
+package = "tags-protocol"
+source = "protocol/src/lib.rs"
+
+[module.engine]
+package = "tags-core"
+type = "tags_core::TagsEngine"
+path = "core"
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"

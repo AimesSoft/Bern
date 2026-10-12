@@ -1,0 +1,13 @@
+[package]
+name = "tags-core"
+description = "Engine of the planner's tags module"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+tags-protocol = { path = "../protocol" }
+notes-protocol = { path = "../../notes/protocol" }

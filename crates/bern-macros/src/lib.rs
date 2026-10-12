@@ -45,10 +45,10 @@ pub fn protocol(args: TokenStream, item: TokenStream) -> TokenStream {
 /// Declare an enum or record used by UI declarations outside a protocol.
 #[proc_macro_attribute]
 pub fn value(args: TokenStream, item: TokenStream) -> TokenStream {
-    if !args.is_empty() {
-        return syn::Error::new(proc_macro2::Span::call_site(), "`value` takes no arguments")
-            .into_compile_error()
-            .into();
+    // `pages = "slot"` only matters to the build tool, which reads it from
+    // the source.
+    if let Err(error) = bern_syntax::parse_value_args(args.into()) {
+        return error.into_compile_error().into();
     }
     values::expand_standalone(item.into())
         .unwrap_or_else(syn::Error::into_compile_error)
@@ -141,6 +141,16 @@ pub fn ui(_input: TokenStream) -> TokenStream {
     )
     .into_compile_error()
     .into()
+}
+
+/// The application's style overrides and motion tokens. The build tool
+/// reads and checks them; for `rustc` the declaration only has to parse.
+#[proc_macro]
+pub fn style(input: TokenStream) -> TokenStream {
+    match bern_syntax::parse_style(input.into()) {
+        Ok(_) => TokenStream::new(),
+        Err(error) => error.into_compile_error().into(),
+    }
 }
 
 /// Localized text. Only valid inside `ui!` and `#[label(...)]`.

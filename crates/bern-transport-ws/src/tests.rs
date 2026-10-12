@@ -11,6 +11,8 @@ fn host() -> Host {
             static DESCRIPTOR: std::sync::OnceLock<bern_protocol::ProtocolDescriptor> =
                 std::sync::OnceLock::new();
             DESCRIPTOR.get_or_init(|| bern_protocol::ProtocolDescriptor {
+                modules: Vec::new(),
+                events: Vec::new(),
                 descriptor_version: bern_protocol::DESCRIPTOR_VERSION,
                 namespace: "empty".into(),
                 version: 1,

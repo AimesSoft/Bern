@@ -17,6 +17,8 @@ pub fn app(app: {{id}}::Client, windows: AppWindows) -> impl View {
                         Button(id: add_one, label: tr! { {{text:add_one}} }, prominence: prominent) => app.add_one()
                         Button(id: reset, label: tr! { {{text:reset}} }) => app.reset()
                     }
+                    // Modules added with `bern new --module` show here.
+                    Slot(id: extras)
                 }
             }
         }

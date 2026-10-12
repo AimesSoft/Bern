@@ -3,8 +3,8 @@
 
 use crate::{ProtocolItem, TypeRef, ValueKind};
 use bern_protocol::{
-    CommandPolicy, CommandSpec, Concurrency, DESCRIPTOR_VERSION, EnumDef, ExternalNames, FieldDef,
-    LocalizedText, OperationKind, ParamSpec, ProtocolDescriptor, RecordDef, Retry, Scope,
+    CommandPolicy, CommandSpec, Concurrency, DESCRIPTOR_VERSION, EnumDef, EventSpec, ExternalNames,
+    FieldDef, LocalizedText, OperationKind, ParamSpec, ProtocolDescriptor, RecordDef, Retry, Scope,
     StateField, Type, TypeTable, VariantDef,
 };
 use proc_macro2::Span;
@@ -188,6 +188,10 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
             id: format!("{namespace}.{name}"),
             external: ExternalNames::derive(&namespace, &name),
             reads: vec![],
+            on: method
+                .on
+                .as_ref()
+                .map(|(module, event)| format!("{module}.{event}")),
             name,
             doc: method.doc.clone(),
             kind: OperationKind::Command,
@@ -234,6 +238,7 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
             id: format!("{namespace}.{name}"),
             external: ExternalNames::derive(&namespace, &name),
             reads,
+            on: None,
             name,
             doc: method.doc.clone(),
             kind: OperationKind::Query,
@@ -250,7 +255,25 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
             },
         });
     }
+    let mut events = Vec::new();
+    for event in protocol.events.iter().flat_map(|events| &events.methods) {
+        let mut params = Vec::new();
+        for param in &event.params {
+            params.push(ParamSpec {
+                name: param.name.to_string(),
+                ty: resolve(&param.ty, &types, param.name.span())?,
+                doc: String::new(),
+            });
+        }
+        events.push(EventSpec {
+            name: event.name.to_string(),
+            doc: event.doc.clone(),
+            params,
+        });
+    }
     let descriptor = ProtocolDescriptor {
+        modules: Vec::new(),
+        events,
         descriptor_version: DESCRIPTOR_VERSION,
         namespace,
         version: protocol.args.version,

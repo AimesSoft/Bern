@@ -1,0 +1,10 @@
+[package]
+name = "{{package}}-ui"
+description = "The {{id}} module: its interface"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+{{package}}-protocol = { path = "../protocol" }

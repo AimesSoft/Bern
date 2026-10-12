@@ -84,3 +84,15 @@ pub fn player(_: &PlayerRef) {}
 pub fn feature<F: crate::Features>(_: &F) {}
 
 pub fn features<F: crate::Features>() {}
+
+/// The hosting window's UI state, as `window.idle` reads it.
+pub struct WindowState {
+    /// Whether the window had no input for its `idle_after` seconds.
+    pub idle: <bool as BernValue>::Ref,
+}
+
+pub fn window() -> WindowState {
+    WindowState {
+        idle: bool::reference(),
+    }
+}

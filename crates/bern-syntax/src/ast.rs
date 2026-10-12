@@ -260,6 +260,50 @@ pub enum Node {
     Match(MatchNode),
 }
 
+/// The element names among `children`, `None` for anything else. With
+/// `items`, for navigation containers, the elements in each branch of a
+/// condition or `match` and in each `ForEach` template count instead.
+pub fn child_names(children: &[Node], items: bool) -> Vec<Option<String>> {
+    fn flatten(nodes: &[Node], out: &mut Vec<Option<String>>) {
+        for node in nodes {
+            match node {
+                Node::Element(child) if child.name == "ForEach" => {
+                    flatten(child.children.as_deref().unwrap_or(&[]), out)
+                }
+                Node::Element(child) => out.push(Some(child.name.to_string())),
+                Node::If(node) => {
+                    for (_, body) in &node.branches {
+                        flatten(body, out);
+                    }
+                    flatten(node.otherwise.as_deref().unwrap_or(&[]), out);
+                }
+                Node::IfLet(node) => {
+                    flatten(&node.then, out);
+                    flatten(node.otherwise.as_deref().unwrap_or(&[]), out);
+                }
+                Node::Match(node) => {
+                    for arm in &node.arms {
+                        flatten(&arm.body, out);
+                    }
+                }
+                Node::Component(_) => out.push(None),
+            }
+        }
+    }
+    if items {
+        let mut out = Vec::new();
+        flatten(children, &mut out);
+        return out;
+    }
+    children
+        .iter()
+        .map(|child| match child {
+            Node::Element(child) => Some(child.name.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 impl Node {
     pub fn span(&self) -> Span {
         match self {

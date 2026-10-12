@@ -33,6 +33,14 @@ members = [
     "examples/hello/hello-protocol",
     "examples/hello/hello-core",
     "examples/hello/hello-ui",
+    "examples/planner/planner-protocol",
+    "examples/planner/planner-core",
+    "examples/planner/planner-ui",
+    "examples/planner/modules/notes/protocol",
+    "examples/planner/modules/notes/core",
+    "examples/planner/modules/notes/ui",
+    "examples/planner/modules/tags/protocol",
+    "examples/planner/modules/tags/core",
 ]
 
 [workspace.package]

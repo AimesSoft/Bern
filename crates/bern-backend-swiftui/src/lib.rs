@@ -9,6 +9,7 @@ mod glue;
 pub mod ios;
 mod names;
 mod resources;
+mod style;
 mod swift;
 
 use bern_ir::spec::COMPONENTS;
@@ -31,12 +32,14 @@ pub const ICON_FILE: &str = "AppIcon.icns";
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
+const STYLE: &str = include_str!("../templates/BernStyle.swift");
 const APPKIT: &str = include_str!("../templates/BernAppKit.swift");
 
 /// Swift sources compiled into the app, in order.
 const SOURCES: &[&str] = &[
     "BernRuntime.swift",
     "BernMedia.swift",
+    "BernStyle.swift",
     "BernAppKit.swift",
     "BernGenerated.swift",
 ];
@@ -68,6 +71,11 @@ impl Target for SwiftUiMacos {
 
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
+            styles: style::SUPPORT,
+            motion: &["appear", "disappear", "reflow", "hero"],
+            window_chrome: true,
+            text_marks: true,
+            dynamic_items: true,
             id: "swiftui-macos",
             ui: "swiftui",
             platforms: &["macos"],
@@ -123,6 +131,7 @@ impl Target for SwiftUiMacos {
         let mut files = vec![
             GeneratedFile::text("Sources/BernRuntime.swift", RUNTIME),
             GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
+            GeneratedFile::text("Sources/BernStyle.swift", STYLE),
             GeneratedFile::text("Sources/BernAppKit.swift", APPKIT),
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text(

@@ -40,7 +40,13 @@ pub struct WebBrowser;
 
 fn component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| COMPONENTS.iter().map(|spec| spec.name).collect())
+    NAMES.get_or_init(|| {
+        COMPONENTS
+            .iter()
+            .map(|spec| spec.name)
+            .filter(|name| !bern_ir::spec::DRAWING.contains(name))
+            .collect()
+    })
 }
 
 fn html_escape(value: &str) -> String {
@@ -191,6 +197,11 @@ fn nested_optional(ty: &Type) -> bool {
 impl Target for WebBrowser {
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
+            styles: &[],
+            motion: &[],
+            window_chrome: false,
+            text_marks: false,
+            dynamic_items: false,
             id: "web-browser",
             ui: "web",
             platforms: &["browser"],

@@ -142,6 +142,7 @@ fn spec(
         },
         external: ExternalNames::derive(namespace, name),
         reads: vec![],
+        on: None,
     }
 }
 

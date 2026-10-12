@@ -6,6 +6,7 @@
 //! of commands, state and values is defined once.
 
 mod codec;
+mod compose;
 mod descriptor;
 mod error;
 mod message;
@@ -16,10 +17,13 @@ mod types;
 mod value;
 
 pub use codec::{CodecError, Reader, Writer, decode, encode};
+pub use compose::{
+    MODULES_STATE_TYPE, ModulePart, SET_ENABLED, command_offsets, compose, module_state_type,
+};
 pub use descriptor::{
-    CommandPolicy, CommandSpec, Concurrency, DescriptorError, ExternalNames, OperationKind,
-    ParamSpec, ProtocolDescriptor, RESERVED_NAMESPACES, Retry, Scope, StateField,
-    check_external_names, valid_name,
+    CommandPolicy, CommandSpec, Concurrency, DescriptorError, EventSpec, ExternalNames,
+    MODULES_NAMESPACE, OperationKind, ParamSpec, ProtocolDescriptor, RESERVED_NAMESPACES, Retry,
+    Scope, StateField, check_external_names, valid_name,
 };
 pub use error::{CommandError, SchemaError};
 pub use message::{Cancellation, CommandOutcome, CommandStatus, Invocation, StateUpdate};

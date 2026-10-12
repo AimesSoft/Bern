@@ -193,3 +193,90 @@ pub fn resources_expr(app: &Application) -> String {
         .collect::<Vec<_>>()
         .join(", ")
 }
+
+/// The expression creating the application engine: the protocol adapter
+/// around the engine, or with modules the composite of the shell and every
+/// module engine.
+pub fn engine_expr(context: &crate::BuildContext) -> String {
+    let adapter = |protocol: &str, engine: &str| {
+        format!("{protocol}::Adapter(<{engine} as ::std::default::Default>::default())")
+    };
+    let shell = adapter(&context.protocol_module, &context.engine_type);
+    if context.modules.is_empty() {
+        return shell;
+    }
+    let modules: Vec<String> = context
+        .modules
+        .iter()
+        .map(|module| {
+            let depends: Vec<String> = module
+                .depends
+                .iter()
+                .map(|id| format!("{id:?}.to_string()"))
+                .collect();
+            format!(
+                "::bern::__private::command::ModuleEngine {{ descriptor: {}::descriptor(), start: ::std::boxed::Box::new(|| ::std::boxed::Box::new({})), optional: {}, enabled: {}, depends: ::std::vec![{}] }}",
+                module.protocol_module,
+                adapter(&module.protocol_module, &module.engine_type),
+                module.optional,
+                module.enabled,
+                depends.join(", ")
+            )
+        })
+        .collect();
+    format!(
+        "::bern::__private::command::Composite::new(::std::boxed::Box::new({shell}), ::std::vec![{}]).unwrap_or_else(|error| panic!(\"{{error}}\"))",
+        modules.join(", ")
+    )
+}
+
+/// The expression giving the application catalog as a
+/// `&'static ProtocolDescriptor`.
+pub fn descriptor_expr(context: &crate::BuildContext) -> String {
+    let shell = format!("{}::descriptor()", context.protocol_module);
+    if context.modules.is_empty() {
+        return shell;
+    }
+    let modules: Vec<String> = context
+        .modules
+        .iter()
+        .map(|module| {
+            format!(
+                "::bern::__private::protocol::ModulePart {{ descriptor: {}::descriptor(), optional: {} }}",
+                module.protocol_module, module.optional
+            )
+        })
+        .collect();
+    format!(
+        "::std::boxed::Box::leak(::std::boxed::Box::new(::bern::__private::protocol::compose({shell}, &[{}]).unwrap_or_else(|error| panic!(\"{{error}}\"))))",
+        modules.join(", ")
+    )
+}
+
+/// Cargo dependency lines for the modules' protocol crates, their engine
+/// crates when `engines` is set, and `bern` itself, which composes them.
+pub fn module_dependencies(context: &crate::BuildContext, engines: bool) -> String {
+    if context.modules.is_empty() {
+        return String::new();
+    }
+    let path = |path: &std::path::Path| path.display().to_string().replace('\\', "/");
+    let mut lines = vec![format!(
+        "bern = {{ {} }}",
+        context.framework.dependency("bern")
+    )];
+    for module in &context.modules {
+        lines.push(format!(
+            "{} = {{ path = \"{}\" }}",
+            module.protocol_package,
+            path(&module.protocol_path)
+        ));
+        if engines {
+            lines.push(format!(
+                "{} = {{ path = \"{}\" }}",
+                module.engine_package,
+                path(&module.engine_path)
+            ));
+        }
+    }
+    lines.join("\n") + "\n"
+}

@@ -46,6 +46,9 @@ pub struct ValueItem {
     pub name: Ident,
     pub kind: ValueKind,
     pub doc: String,
+    /// `#[bern::value(pages = "main")]`: the enum selecting the pages of a
+    /// page slot, which modules extend with their pages.
+    pub pages: Option<String>,
     pub span: Span,
 }
 
@@ -72,6 +75,25 @@ pub struct CommandItem {
     pub doc: String,
     pub errors: Vec<String>,
     pub idempotent: bool,
+    /// `#[on(module::event)]`: the event this command answers, as
+    /// `(module, event)`.
+    pub on: Option<(Ident, Ident)>,
+    pub span: Span,
+}
+
+/// An event a module emits: `fn opened(&self, path: String);`
+#[derive(Clone, Debug)]
+pub struct EventItem {
+    pub name: Ident,
+    pub params: Vec<CommandParam>,
+    pub doc: String,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug)]
+pub struct EventsItem {
+    pub name: Ident,
+    pub methods: Vec<EventItem>,
     pub span: Span,
 }
 
@@ -115,6 +137,7 @@ pub struct ProtocolItem {
     pub state: StateItem,
     pub commands: CommandsItem,
     pub queries: Option<QueriesItem>,
+    pub events: Option<EventsItem>,
     pub uses: Vec<syn::ItemUse>,
 }
 
@@ -216,6 +239,7 @@ pub struct SourceItems {
     pub players: Vec<(Vec<String>, PlayersItem)>,
     pub components: Vec<(Vec<String>, ComponentItem)>,
     pub features: Vec<(Vec<String>, FeaturesItem)>,
+    pub styles: Vec<(Vec<String>, crate::StyleItem)>,
 }
 
 fn error(span: Span, message: impl std::fmt::Display) -> syn::Error {
@@ -458,8 +482,45 @@ fn reject_generics(generics: &syn::Generics, name: &Ident) -> syn::Result<()> {
     Ok(())
 }
 
+/// The arguments of a `#[bern::value(…)]` marker: only `pages = "slot"`.
+pub fn parse_value_args(tokens: proc_macro2::TokenStream) -> syn::Result<Option<String>> {
+    if tokens.is_empty() {
+        return Ok(None);
+    }
+    let meta: syn::MetaNameValue = syn::parse2(tokens)?;
+    if !meta.path.is_ident("pages") {
+        return Err(error(
+            meta.path.span(),
+            "`value` takes only `pages = \"slot\"`",
+        ));
+    }
+    match &meta.value {
+        syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(slot),
+            ..
+        }) if crate::valid_id(&slot.value()) => Ok(Some(slot.value())),
+        other => Err(error(
+            other.span(),
+            "`pages` names a slot in lower snake case, e.g. `pages = \"main\"`",
+        )),
+    }
+}
+
+/// The `pages` argument of the `#[bern::value(…)]` marker, if the caller
+/// left the marker in place.
+fn value_pages(attrs: &[Attribute]) -> syn::Result<Option<String>> {
+    for attr in attrs {
+        if is_bern_attr(attr, "value")
+            && let syn::Meta::List(list) = &attr.meta
+        {
+            return parse_value_args(list.tokens.clone());
+        }
+    }
+    Ok(None)
+}
+
 /// Parse an enum or struct marked as a Bern value type. The marker
-/// attribute itself must already be removed by the caller.
+/// attribute may still be present; its `pages` argument is read.
 pub fn parse_value(item: &Item) -> syn::Result<ValueItem> {
     match item {
         Item::Enum(item) => {
@@ -498,14 +559,22 @@ pub fn parse_value(item: &Item) -> syn::Result<ValueItem> {
                 name: item.ident.clone(),
                 kind: ValueKind::Enum(variants),
                 doc: doc_comment(&item.attrs),
+                pages: value_pages(&item.attrs)?,
                 span: item.ident.span(),
             })
         }
         Item::Struct(item) => {
             reject_generics(&item.generics, &item.ident)?;
             check_known_attrs(&item.attrs, &["value"], "value types")?;
+            if value_pages(&item.attrs)?.is_some() {
+                return Err(error(
+                    item.ident.span(),
+                    "`pages` marks the enum selecting a slot's pages; a struct cannot",
+                ));
+            }
             Ok(ValueItem {
                 name: item.ident.clone(),
+                pages: None,
                 kind: ValueKind::Record(parse_named_fields(
                     &item.fields,
                     &item.ident,
@@ -629,7 +698,7 @@ pub fn parse_protocol_args(args: TokenStream, span: Span) -> syn::Result<Protoco
 fn parse_command(method: &syn::TraitItemFn) -> syn::Result<CommandItem> {
     let sig = &method.sig;
     let name = sig.ident.clone();
-    check_known_attrs(&method.attrs, &["errors", "idempotent"], "commands")?;
+    check_known_attrs(&method.attrs, &["errors", "idempotent", "on"], "commands")?;
     if method.default.is_some() {
         return Err(error(
             name.span(),
@@ -710,6 +779,21 @@ fn parse_command(method: &syn::TraitItemFn) -> syn::Result<CommandItem> {
         )?;
         errors = list.iter().map(syn::LitStr::value).collect();
     }
+    let on = match find_attr(&method.attrs, "on") {
+        Some(attr) => {
+            let path: syn::Path = attr.parse_args()?;
+            match path.segments.iter().collect::<Vec<_>>().as_slice() {
+                [module, event] => Some((module.ident.clone(), event.ident.clone())),
+                _ => {
+                    return Err(error(
+                        path.span(),
+                        "name the event as `#[on(module::event)]`",
+                    ));
+                }
+            }
+        }
+        None => None,
+    };
     Ok(CommandItem {
         result: type_ref(&result_ty)?,
         result_ty,
@@ -717,6 +801,7 @@ fn parse_command(method: &syn::TraitItemFn) -> syn::Result<CommandItem> {
         doc: doc_comment(&method.attrs),
         errors,
         idempotent: find_attr(&method.attrs, "idempotent").is_some(),
+        on,
         span: name.span(),
         name,
     })
@@ -865,6 +950,7 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
     let mut state = None;
     let mut commands = None;
     let mut queries = None;
+    let mut events = None;
     let mut uses = Vec::new();
     for item in items {
         match item {
@@ -946,11 +1032,38 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
                     span: item_trait.ident.span(),
                 });
             }
+            Item::Trait(item_trait) if find_attr(&item_trait.attrs, "events").is_some() => {
+                if events.is_some() {
+                    return Err(error(
+                        item_trait.ident.span(),
+                        "a protocol has at most one `#[events]` trait",
+                    ));
+                }
+                reject_generics(&item_trait.generics, &item_trait.ident)?;
+                let mut methods = Vec::new();
+                for trait_item in &item_trait.items {
+                    match trait_item {
+                        syn::TraitItem::Fn(method) => methods.push(parse_event(method)?),
+                        other => {
+                            return Err(error(
+                                other.span(),
+                                "the events trait only contains event methods",
+                            ));
+                        }
+                    }
+                }
+                events = Some(EventsItem {
+                    name: item_trait.ident.clone(),
+                    methods,
+                    span: item_trait.ident.span(),
+                });
+            }
             other => {
                 return Err(error(
                     other.span(),
                     "a protocol module contains `use` items, `#[value]` types, one `#[state]` \
-                     struct, one `#[commands]` trait and an optional `#[queries]` trait",
+                     struct, one `#[commands]` trait, an optional `#[queries]` trait and an \
+                     optional `#[events]` trait",
                 ));
             }
         }
@@ -975,7 +1088,52 @@ pub fn parse_protocol(args: ProtocolArgs, module: ItemMod) -> syn::Result<Protoc
         state,
         commands,
         queries,
+        events,
         uses,
+    })
+}
+
+/// Parse an event declaration: `fn opened(&self, path: String);`.
+fn parse_event(method: &syn::TraitItemFn) -> syn::Result<EventItem> {
+    let sig = &method.sig;
+    let name = sig.ident.clone();
+    check_known_attrs(&method.attrs, &[], "events")?;
+    if method.default.is_some() || !matches!(sig.output, syn::ReturnType::Default) {
+        return Err(error(
+            name.span(),
+            "an event is declared as `fn name(&self, …);` without a body or result",
+        ));
+    }
+    let mut inputs = sig.inputs.iter();
+    match inputs.next() {
+        Some(syn::FnArg::Receiver(receiver))
+            if receiver.reference.is_some() && receiver.mutability.is_none() => {}
+        _ => {
+            return Err(error(
+                name.span(),
+                "an event takes `&self` as its first parameter",
+            ));
+        }
+    }
+    let mut params = Vec::new();
+    for input in inputs {
+        let syn::FnArg::Typed(typed) = input else {
+            unreachable!()
+        };
+        let syn::Pat::Ident(pat) = &*typed.pat else {
+            return Err(error(typed.pat.span(), "parameters must be simple names"));
+        };
+        params.push(CommandParam {
+            name: pat.ident.clone(),
+            ty: type_ref(&typed.ty)?,
+            syn_ty: (*typed.ty).clone(),
+        });
+    }
+    Ok(EventItem {
+        span: name.span(),
+        doc: doc_comment(&method.attrs),
+        params,
+        name,
     })
 }
 
@@ -1220,8 +1378,8 @@ fn collect(items: &[Item], path: &mut Vec<String>, out: &mut SourceItems) -> syn
                 if find_attr(attrs, "value").is_some() =>
             {
                 reject_cfg(attrs, "value types")?;
-                out.values
-                    .push((path.clone(), parse_value(&strip_marker(item, "value"))?));
+                // The marker stays: it may carry `pages = "slot"`.
+                out.values.push((path.clone(), parse_value(item)?));
             }
             Item::Struct(syn::ItemStruct { attrs, .. })
                 if find_attr(attrs, "session").is_some() =>
@@ -1243,6 +1401,17 @@ fn collect(items: &[Item], path: &mut Vec<String>, out: &mut SourceItems) -> syn
                     path.clone(),
                     parse_features(&strip_marker(item, "features"))?,
                 ));
+            }
+            Item::Macro(item)
+                if item
+                    .mac
+                    .path
+                    .segments
+                    .last()
+                    .is_some_and(|segment| segment.ident == "style") =>
+            {
+                out.styles
+                    .push((path.clone(), crate::parse_style(item.mac.tokens.clone())?));
             }
             Item::Fn(func) if find_attr(&func.attrs, "component").is_some() => {
                 let args = match &find_attr(&func.attrs, "component").map(|attr| &attr.meta) {

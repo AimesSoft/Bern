@@ -91,7 +91,13 @@ pub struct WinUi3Windows;
 
 fn component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| COMPONENTS.iter().map(|spec| spec.name).collect())
+    NAMES.get_or_init(|| {
+        COMPONENTS
+            .iter()
+            .map(|spec| spec.name)
+            .filter(|name| !bern_ir::spec::DRAWING.contains(name))
+            .collect()
+    })
 }
 
 /// Directory name of the product, e.g. `Showcase` for app id `showcase`.
@@ -125,6 +131,11 @@ impl Target for WinUi3Windows {
 
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
+            styles: &[],
+            motion: &[],
+            window_chrome: false,
+            text_marks: false,
+            dynamic_items: false,
             id: "winui3-windows",
             ui: "winui3",
             platforms: &["windows"],

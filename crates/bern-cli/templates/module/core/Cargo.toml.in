@@ -1,0 +1,10 @@
+[package]
+name = "{{package}}-core"
+description = "The {{id}} module: its engine"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+{{package}}-protocol = { path = "../protocol" }

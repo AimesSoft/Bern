@@ -31,7 +31,13 @@ pub struct GtkLinux;
 
 fn component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| COMPONENTS.iter().map(|spec| spec.name).collect())
+    NAMES.get_or_init(|| {
+        COMPONENTS
+            .iter()
+            .map(|spec| spec.name)
+            .filter(|name| !bern_ir::spec::DRAWING.contains(name))
+            .collect()
+    })
 }
 
 /// Directory and executable name of the product, e.g. `Showcase` and
@@ -84,6 +90,11 @@ impl Target for GtkLinux {
 
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
+            styles: &[],
+            motion: &[],
+            window_chrome: false,
+            text_marks: false,
+            dynamic_items: false,
             id: "gtk-linux",
             ui: "gtk",
             platforms: &["linux"],
@@ -168,7 +179,10 @@ impl Target for GtkLinux {
             GeneratedFile::text("app/src/main.rs", glue::main_rs(context, app)),
             GeneratedFile::text(
                 "app/src/ui.rs",
-                Generator::new(app).generate(app.protocol.fingerprint(), &context.protocol_module),
+                Generator::new(app).generate(
+                    app.protocol.fingerprint(),
+                    &bern_target_api::glue::descriptor_expr(context),
+                ),
             ),
             GeneratedFile::text("app/src/cli.rs", glue::cli_rs(context, app)),
             GeneratedFile::text("app/src/mcp.rs", glue::mcp_rs(context, app)),

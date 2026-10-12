@@ -1,0 +1,15 @@
+[package]
+name = "planner-ui"
+description = "UI of the Bern planner example"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+planner-protocol = { path = "../planner-protocol" }
+notes-protocol = { path = "../modules/notes/protocol" }
+notes-ui = { path = "../modules/notes/ui" }
+tags-protocol = { path = "../modules/tags/protocol" }

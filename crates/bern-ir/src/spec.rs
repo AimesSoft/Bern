@@ -51,6 +51,24 @@ pub enum PropKind {
     WindowId,
     /// Name of the generated window handle type.
     TypeName,
+    /// Name of a slot that modules contribute to.
+    SlotName,
+    /// Name of a style variant the application declares in `style!`.
+    StyleVariant,
+    /// Name of a transition from `style!`, such as `pop` or `fade`.
+    Transition,
+    /// Name of a motion token, such as `smooth`.
+    MotionToken,
+    /// Name pairing two elements as one shared element.
+    HeroName,
+    /// A text, number or enum value identifying something, read only.
+    KeyValue,
+    /// A semantic color role, such as `accent` or `fill.subtle`.
+    ColorRole,
+    /// A list of numbers, read only, such as the values a `Series` draws.
+    NumberList,
+    /// Name of a pattern from `style!`.
+    PatternName,
     /// Binding of a `MediaSource`, optional or not, followed by the player
     /// the declaration creates.
     MediaSource,
@@ -114,9 +132,53 @@ pub struct ComponentSpec {
 
 impl ComponentSpec {
     pub fn prop(&self, name: &str) -> Option<&'static PropSpec> {
-        self.props.iter().find(|prop| prop.name == name)
+        self.props
+            .iter()
+            .find(|prop| prop.name == name)
+            .or_else(|| {
+                self.moves()
+                    .then(|| MOTION_PROPS.iter().find(|prop| prop.name == name))
+                    .flatten()
+            })
+    }
+
+    /// Whether the element takes the motion properties: everything shown
+    /// in a layout, not window, slot or navigation structure.
+    pub fn moves(&self) -> bool {
+        !matches!(
+            self.name,
+            "WindowSet"
+                | "Window"
+                | "Layout"
+                | "Slot"
+                | "Pages"
+                | "PageContent"
+                | "Destination"
+                | "Detail"
+                | "Tab"
+                | "MenuItem"
+                | "SidebarItem"
+                | "Section"
+        )
     }
 }
+
+/// Properties every element shown in a layout takes: how it appears and
+/// disappears, how its children make room, and which shared element it is.
+/// Navigation containers whose items may sit in `if`, `if let`, `match`
+/// and `ForEach`; each branch and template holds only allowed items.
+pub const DYNAMIC_ITEMS: &[&str] = &["Sidebar", "Tabs", "Toolbar"];
+
+/// Drawing components: a target without a canvas lists none of them.
+pub const DRAWING: &[&str] = &["Canvas", "Shape", "Series", "Pattern"];
+
+pub const MOTION_PROPS: &[PropSpec] = &[
+    opt("appear", PropKind::Transition),
+    opt("disappear", PropKind::Transition),
+    opt("reflow", PropKind::MotionToken),
+    opt("hero", PropKind::HeroName),
+    opt("hero_key", PropKind::KeyValue),
+];
 
 const fn req(name: &'static str, kind: PropKind) -> PropSpec {
     PropSpec {
@@ -227,6 +289,9 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("min_height", PropKind::Number),
                 opt("confirm_close", PropKind::Bool),
                 opt("close_message", PropKind::LocalizedText),
+                opt("chrome", PropKind::Keyword(&["standard", "unified"])),
+                opt("immersive", PropKind::Bool),
+                opt("idle_after", PropKind::Number),
             ],
             Children::One,
             "Logical window with its own identity and state; `confirm_close` asks before closing, and the action saves",
@@ -292,8 +357,9 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("selection", PropKind::SelectionField),
                 opt("id", PropKind::Id),
+                opt("fallback", PropKind::SelectionValue),
             ],
-            Children::Only(&["Search", "Section", "SidebarItem"]),
+            Children::Only(&["Search", "Section", "SidebarItem", "Pages"]),
             "Sidebar list selecting a destination",
         )
     },
@@ -309,6 +375,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("value", PropKind::SelectionValue),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
+                opt("variant", PropKind::StyleVariant),
             ],
             Children::None,
             "Selectable sidebar destination",
@@ -322,6 +389,30 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         ],
         Children::Any,
         "Titled group inside a form, list or sidebar",
+    ),
+    spec(
+        "Slot",
+        &[req("id", PropKind::SlotName)],
+        Children::None,
+        "Where the application's modules contribute components, in the order Bern.toml lists the modules",
+    ),
+    ComponentSpec {
+        placement: Placement::Within(&["Sidebar", "Section"]),
+        ..spec(
+            "Pages",
+            &[req("slot", PropKind::SlotName)],
+            Children::None,
+            "One sidebar item for every page the modules contribute to a page slot",
+        )
+    },
+    spec(
+        "PageContent",
+        &[
+            req("slot", PropKind::SlotName),
+            req("selected", PropKind::SelectionField),
+        ],
+        Children::None,
+        "The contributed page of a page slot that `selected` names; nothing for the application's own pages",
     ),
     spec(
         "Form",
@@ -359,6 +450,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         &[
             req("selection", PropKind::SelectionField),
             opt("id", PropKind::Id),
+            opt("fallback", PropKind::SelectionValue),
         ],
         Children::Only(&["Tab"]),
         "Sibling pages switched by tabs",
@@ -467,10 +559,73 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("content", PropKind::DisplayText),
             opt("style", PropKind::Keyword(TEXT_STYLES)),
             opt("emphasis", PropKind::Keyword(EMPHASIS)),
+            opt("mark", PropKind::ColorRole),
         ],
         Children::None,
-        "Text with a semantic style",
+        "Text with a semantic style; `mark` draws a band of the color under each line",
     ),
+    spec(
+        "Canvas",
+        &[
+            opt("width", PropKind::Number),
+            opt("height", PropKind::Number),
+            opt("label", PropKind::DisplayText),
+        ],
+        Children::Only(&["Shape", "Series", "Pattern"]),
+        "A drawing of shapes, data series and patterns in order; `label` describes what it shows, without one it is decorative",
+    ),
+    ComponentSpec {
+        placement: Placement::Within(&["Canvas"]),
+        ..spec(
+            "Shape",
+            &[
+                req(
+                    "kind",
+                    PropKind::Keyword(&["rect", "rounded", "capsule", "ellipse"]),
+                ),
+                opt("x", PropKind::Number),
+                opt("y", PropKind::Number),
+                opt("width", PropKind::Number),
+                opt("height", PropKind::Number),
+                opt("corner", PropKind::Number),
+                opt("fill", PropKind::ColorRole),
+                opt("stroke", PropKind::ColorRole),
+                opt("stroke_width", PropKind::Number),
+                opt("opacity", PropKind::Number),
+            ],
+            Children::None,
+            "A shape in canvas units; without a size it fills the canvas",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Canvas"]),
+        ..spec(
+            "Series",
+            &[
+                req("values", PropKind::NumberList),
+                opt("kind", PropKind::Keyword(&["area", "line"])),
+                opt("max", PropKind::NumberValue),
+                opt("fill", PropKind::ColorRole),
+                opt("stroke", PropKind::ColorRole),
+                opt("stroke_width", PropKind::Number),
+                opt("opacity", PropKind::Number),
+            ],
+            Children::None,
+            "Numbers drawn across the canvas width as an area or a line, scaled to `max` (their largest without it)",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Canvas"]),
+        ..spec(
+            "Pattern",
+            &[
+                req("name", PropKind::PatternName),
+                opt("opacity", PropKind::Number),
+            ],
+            Children::None,
+            "A pattern from `style!` tiled over the canvas",
+        )
+    },
     spec(
         "Label",
         &[
@@ -521,6 +676,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                     PropKind::Keyword(&["standard", "prominent", "plain"]),
                 ),
                 opt("enabled", PropKind::Bool),
+                opt("variant", PropKind::StyleVariant),
                 FEATURE,
             ],
             Children::None,
@@ -537,6 +693,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("icon", PropKind::Icon),
                 req("label", PropKind::DisplayText),
                 opt("enabled", PropKind::Bool),
+                opt("variant", PropKind::StyleVariant),
                 FEATURE,
             ],
             Children::None,

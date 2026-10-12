@@ -8,6 +8,7 @@
 mod check;
 pub mod config;
 mod features;
+pub mod style;
 
 pub use check::{Signature, location};
 pub use config::{Config, SourceFile};
@@ -15,11 +16,11 @@ pub use config::{Config, SourceFile};
 use bern_ir::{self as ir, IR_VERSION};
 use bern_protocol::{
     EnumDef, FieldDef, LocalizedText, ProtocolDescriptor, RecordDef, Type, TypeTable, Value,
-    VariantDef,
+    VariantDef, compose,
 };
 use bern_syntax::{self as ast, ValueKind};
 use bern_target_api::Diagnostic;
-use check::{Checker, shared_diagnostic};
+use check::{Checker, ContributedPage, Contributions, PageSlot, shared_diagnostic};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Result of a successful compilation.
@@ -27,6 +28,8 @@ pub struct Compiled {
     pub app: ir::Application,
     /// Rust path of the protocol module, e.g. `showcase_protocol::showcase`.
     pub protocol_module: String,
+    /// Rust paths of the modules' protocol modules, in application order.
+    pub module_protocols: Vec<String>,
     /// Versioned descriptors of the component libraries in use.
     pub libraries: Vec<ir::ComponentLibrary>,
     pub warnings: Vec<Diagnostic>,
@@ -35,7 +38,32 @@ pub struct Compiled {
 struct Located<T> {
     file: String,
     module: Vec<String>,
+    /// Namespace of the application or module the source belongs to.
+    home: String,
     item: T,
+}
+
+/// Which protocol a `…::Client` parameter names: the protocol modules of
+/// the application and of its modules, by their Rust module name.
+struct Clients {
+    /// `(Rust module name, namespace)`, the application first.
+    protocols: Vec<(String, String)>,
+}
+
+impl Clients {
+    /// The namespace of a `Client` type written as `path`, in a source of
+    /// the module (or application) whose namespace is `home`. A bare
+    /// `Client` names the home protocol.
+    fn namespace(&self, path: &[String], home: &str) -> Option<String> {
+        if path.len() == 1 {
+            return Some(home.to_string());
+        }
+        let module = &path[path.len() - 2];
+        self.protocols
+            .iter()
+            .find(|(name, _)| name == module)
+            .map(|(_, namespace)| namespace.clone())
+    }
 }
 
 fn syn_error(file: &str, error: syn::Error) -> Vec<Diagnostic> {
@@ -249,7 +277,7 @@ fn merge_ui_types(
 
 fn param_kind(
     param: &ast::Param,
-    protocol_module: Option<&str>,
+    clients: Option<(&Clients, &str)>,
     windows_handle: Option<&str>,
     players_handle: Option<&str>,
     sessions: &[ir::SessionDef],
@@ -269,11 +297,13 @@ fn param_kind(
         ast::ParamKind::Prop => match &param.ty {
             ast::TypeRef::Named(path)
                 if name == "Client"
-                    && protocol_module.is_some_and(|module| {
-                        path.len() == 1 || path[path.len() - 2] == module
-                    }) =>
+                    && clients
+                        .is_some_and(|(clients, home)| clients.namespace(path, home).is_some()) =>
             {
-                Ok(ir::ParamKind::Client)
+                let (clients, home) = clients.expect("checked");
+                Ok(ir::ParamKind::Client {
+                    namespace: clients.namespace(path, home).expect("checked"),
+                })
             }
             ast::TypeRef::Named(_) if Some(name.as_str()) == windows_handle => {
                 Ok(ir::ParamKind::Windows)
@@ -493,6 +523,12 @@ fn window_catalog(
             content,
             sessions,
             close,
+            chrome: match window.keyword("chrome") {
+                Some("unified") => ir::WindowChrome::Unified,
+                _ => ir::WindowChrome::Standard,
+            },
+            immersive: window.expr("immersive").cloned(),
+            idle_after: window.number("idle_after"),
         });
     }
     if windows
@@ -541,6 +577,7 @@ pub fn compile_library(
     let mut values = Vec::new();
     let mut components = Vec::new();
     let crate_name = library.package.crate_name();
+    let home = String::new();
     for file in &library.sources {
         let items = match read(file) {
             Ok(items) => items,
@@ -565,6 +602,7 @@ pub fn compile_library(
             values.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
+                home: home.clone(),
                 item,
             });
         }
@@ -572,6 +610,7 @@ pub fn compile_library(
             components.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
+                home: home.clone(),
                 item,
             });
         }
@@ -618,6 +657,8 @@ pub fn compile_library(
         );
     }
     let protocol = ProtocolDescriptor {
+        modules: Vec::new(),
+        events: Vec::new(),
         descriptor_version: bern_protocol::DESCRIPTOR_VERSION,
         namespace: "library".into(),
         version: 0,
@@ -742,7 +783,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             protocol_file.display
         ))]);
     };
-    let protocol = bern_syntax::lower::protocol_descriptor(protocol_item)
+    let shell = bern_syntax::lower::protocol_descriptor(protocol_item)
         .map_err(|error| syn_error(&protocol_file.display, error))?;
     let protocol_module_name = protocol_item.module.ident.to_string();
     let mut protocol_module = vec![config.protocol_package.crate_name()];
@@ -750,15 +791,107 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     protocol_module.extend(protocol_path.iter().cloned());
     protocol_module.push(protocol_module_name.clone());
     let languages = Some((config.languages.as_slice(), config.strict));
-    for value in &protocol_item.values {
-        if let ValueKind::Enum(variants) = &value.kind {
-            for tr in variants.iter().filter_map(|variant| variant.label.as_ref()) {
-                for (span, message) in bern_syntax::lower::check_translations(tr, languages) {
-                    diagnostics.push(shared_diagnostic(&protocol_file.display, span, &message));
+    let check_labels = |item: &ast::ProtocolItem, file: &str, diagnostics: &mut Vec<Diagnostic>| {
+        for value in &item.values {
+            if let ValueKind::Enum(variants) = &value.kind {
+                for tr in variants.iter().filter_map(|variant| variant.label.as_ref()) {
+                    for (span, message) in bern_syntax::lower::check_translations(tr, languages) {
+                        diagnostics.push(shared_diagnostic(file, span, &message));
+                    }
                 }
             }
         }
+    };
+    check_labels(protocol_item, &protocol_file.display, &mut diagnostics);
+
+    // Module protocols, composed with the application's into one catalog.
+    let mut clients = Clients {
+        protocols: vec![(protocol_module_name.clone(), shell.namespace.clone())],
+    };
+    let mut module_descriptors = Vec::new();
+    let mut module_protocols = Vec::new();
+    for module in &config.modules {
+        let file = &module.protocol_source;
+        let items = read(file)?;
+        let [(path, item)] = items.protocols.as_slice() else {
+            return Err(vec![Diagnostic::error(format!(
+                "{} must contain exactly one #[bern::protocol] module",
+                file.display
+            ))]);
+        };
+        let descriptor = bern_syntax::lower::protocol_descriptor(item)
+            .map_err(|error| syn_error(&file.display, error))?;
+        if descriptor.namespace != module.id {
+            diagnostics.push(Diagnostic::error(format!(
+                "{}: the protocol of module `{}` must use `namespace = \"{}\"`, not `{}`",
+                file.display, module.id, module.id, descriptor.namespace
+            )));
+        }
+        check_labels(item, &file.display, &mut diagnostics);
+        let name = item.module.ident.to_string();
+        if clients.protocols.iter().any(|(other, _)| *other == name) {
+            diagnostics.push(Diagnostic::error(format!(
+                "{}: protocol module `{name}` has the name of another protocol module; name it after the module",
+                file.display
+            )));
+        }
+        clients
+            .protocols
+            .push((name.clone(), descriptor.namespace.clone()));
+        let mut rust_path = vec![module.protocol_package.crate_name()];
+        rust_path.extend(file.module.iter().cloned());
+        rust_path.extend(path.iter().cloned());
+        rust_path.push(name);
+        module_protocols.push(rust_path.join("::"));
+        module_descriptors.push(descriptor);
     }
+    // A module answers only the events of modules it depends on; the
+    // application answers any module's events.
+    for (descriptor, module) in module_descriptors.iter().zip(&config.modules) {
+        for command in &descriptor.commands {
+            let Some(on) = &command.on else { continue };
+            let emitter = on.split('.').next().unwrap_or_default();
+            if !module
+                .depends
+                .iter()
+                .any(|dependency| dependency == emitter)
+            {
+                diagnostics.push(Diagnostic::error(format!(
+                    "{}: `{}` answers `{on}`, but module `{}` does not depend on `{emitter}`; add it to `depends`",
+                    module.protocol_source.display, command.id, module.id
+                )));
+            }
+        }
+    }
+    for command in &shell.commands {
+        if let Some(on) = &command.on
+            && on.split('.').next() == Some(shell.namespace.as_str())
+        {
+            diagnostics.push(Diagnostic::error(format!(
+                "{}: `{}` answers the application's own event `{on}`; events reach the modules and the application above the emitter",
+                protocol_file.display, command.id
+            )));
+        }
+    }
+    let protocol = if module_descriptors.is_empty() {
+        shell
+    } else {
+        let parts: Vec<bern_protocol::ModulePart<'_>> = module_descriptors
+            .iter()
+            .zip(&config.modules)
+            .map(|(descriptor, module)| bern_protocol::ModulePart {
+                descriptor,
+                optional: module.optional,
+            })
+            .collect();
+        match compose(&shell, &parts) {
+            Ok(protocol) => protocol,
+            Err(error) => {
+                diagnostics.push(Diagnostic::error(error.0));
+                return Err(diagnostics);
+            }
+        }
+    };
 
     // UI sources.
     let mut values = Vec::new();
@@ -766,7 +899,18 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     let mut players_ast = Vec::new();
     let mut components = Vec::new();
     let mut features_ast = Vec::new();
-    for file in &config.ui_sources {
+    let mut styles = Vec::new();
+    let ui_sources = config
+        .ui_sources
+        .iter()
+        .map(|file| (file, protocol.namespace.clone()))
+        .chain(config.modules.iter().flat_map(|module| {
+            module
+                .ui_sources
+                .iter()
+                .map(move |file| (file, module.id.clone()))
+        }));
+    for (file, home) in ui_sources {
         let items = match read(file) {
             Ok(items) => items,
             Err(errors) => {
@@ -789,6 +933,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             values.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
+                home: home.clone(),
                 item,
             });
         }
@@ -796,6 +941,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             sessions_ast.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
+                home: home.clone(),
                 item,
             });
         }
@@ -803,6 +949,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             players_ast.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
+                home: home.clone(),
                 item,
             });
         }
@@ -810,13 +957,25 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             components.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
+                home: home.clone(),
                 item,
             });
+        }
+        for (_, item) in items.styles {
+            if home == protocol.namespace {
+                styles.push((file.display.clone(), item));
+            } else {
+                diagnostics.push(Diagnostic::error(format!(
+                    "{}: modules cannot declare `style!`; the application's interface declares one for every module",
+                    file.display
+                )));
+            }
         }
         for (path, item) in items.features {
             features_ast.push(Located {
                 file: file.display.clone(),
                 module: module(&path),
+                home: home.clone(),
                 item,
             });
         }
@@ -884,12 +1043,109 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         )
         .collect();
     add_framework_types(&mut base_types, &mentioned);
-    let types = merge_ui_types(
+    let mut types = merge_ui_types(
         &base_types,
         &values,
         (&config.languages, config.strict),
         &mut diagnostics,
     );
+
+    // Slots: the enums marked `pages = "slot"` gain a variant for every
+    // page the modules add to that slot.
+    let mut page_enums: BTreeMap<String, String> = BTreeMap::new();
+    for value in &values {
+        if let Some(slot) = &value.item.pages
+            && let Some(other) = page_enums.insert(slot.clone(), value.item.name.to_string())
+        {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "page slot `{slot}` is already selected by `{other}`; one enum per page slot"
+                ))
+                .at(location(&value.file, value.item.span)),
+            );
+        }
+    }
+    let mut contributions = Contributions {
+        namespaces: std::iter::once(protocol.namespace.clone())
+            .chain(config.modules.iter().map(|module| module.id.clone()))
+            .collect(),
+        optional: config
+            .modules
+            .iter()
+            .filter(|module| module.optional)
+            .map(|module| module.id.clone())
+            .collect(),
+        ..Contributions::default()
+    };
+    for module in &config.modules {
+        for page in &module.pages {
+            let Some(enum_name) = page_enums.get(&page.slot) else {
+                diagnostics.push(Diagnostic::error(format!(
+                    "module `{}` adds page `{}` to slot `{}`, but no enum in the application's UI is marked `#[bern::value(pages = \"{}\")]`",
+                    module.id, page.id, page.slot, page.slot
+                )));
+                continue;
+            };
+            let variant = ast::pascal_case(&page.id);
+            let Some(def) = types.enums.iter_mut().find(|def| &def.name == enum_name) else {
+                continue;
+            };
+            if def.variant_index(&variant).is_some() {
+                diagnostics.push(Diagnostic::error(format!(
+                    "module `{}` adds page `{}`, but `{enum_name}` already has a variant `{variant}`",
+                    module.id, page.id
+                )));
+                continue;
+            }
+            if config.strict {
+                for language in &config.languages {
+                    if !page.label.contains_key(language) {
+                        diagnostics.push(
+                            Diagnostic::error(format!(
+                                "Missing translation\nProperty: label of page `{}` in {}\nMissing language: {language}",
+                                page.id,
+                                module.manifest.display()
+                            ))
+                            .code("B102"),
+                        );
+                    }
+                }
+            }
+            def.variants.push(VariantDef {
+                name: variant.clone(),
+                fields: Vec::new(),
+                label: Some(LocalizedText {
+                    key: bern_protocol::label_key(enum_name, &variant),
+                    translations: page.label.clone(),
+                    params: Vec::new(),
+                }),
+            });
+            contributions
+                .pages
+                .entry(page.slot.clone())
+                .or_insert_with(|| PageSlot {
+                    enum_name: enum_name.clone(),
+                    pages: Vec::new(),
+                })
+                .pages
+                .push(ContributedPage {
+                    module: module.id.clone(),
+                    variant,
+                    label: page.label.clone(),
+                    icon: page.icon.clone(),
+                    component: page.component.clone(),
+                });
+        }
+        for (slot, placed) in &module.contributes {
+            for component in placed {
+                contributions
+                    .slots
+                    .entry(slot.clone())
+                    .or_default()
+                    .push((module.id.clone(), component.clone()));
+            }
+        }
+    }
 
     // Session state.
     let mut sessions = Vec::new();
@@ -989,7 +1245,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         for param in &component.item.params {
             match param_kind(
                 param,
-                Some(&protocol_module_name),
+                Some((&clients, &component.home)),
                 Some(&handle),
                 players_handle.as_deref(),
                 &sessions,
@@ -1008,6 +1264,27 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 params,
             },
         );
+    }
+
+    // Every contributed component is declared by the module contributing it.
+    for module in &config.modules {
+        let placed = module
+            .pages
+            .iter()
+            .map(|page| &page.component)
+            .chain(module.contributes.values().flatten());
+        for component in placed {
+            let home = components
+                .iter()
+                .find(|located| located.item.name == component.as_str())
+                .map(|located| located.home.as_str());
+            if home != Some(module.id.as_str()) {
+                diagnostics.push(Diagnostic::error(format!(
+                    "module `{}` places component `{component}`, which its UI sources do not declare",
+                    module.id
+                )));
+            }
+        }
     }
 
     // Feature contracts and the components scoping them.
@@ -1087,6 +1364,24 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         &contract_features,
         config.layouts,
     );
+    checker.contributions = contributions;
+    let style = style::lower(&styles, &mut diagnostics);
+    checker.variants = style::variants(&style);
+    checker.transitions = style
+        .transitions
+        .iter()
+        .map(|transition| transition.name.clone())
+        .collect();
+    checker.tokens = style
+        .motion
+        .iter()
+        .map(|token| token.name.clone())
+        .collect();
+    checker.patterns = style
+        .patterns
+        .iter()
+        .map(|pattern| pattern.name.clone())
+        .collect();
     let mut lowered: Vec<ir::ComponentDef> = libraries
         .iter()
         .flat_map(|library| library.components.clone())
@@ -1253,8 +1548,10 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             resources: config.resources.clone(),
             layouts: config.layouts,
             contracts,
+            style,
         },
         protocol_module: protocol_module.join("::"),
+        module_protocols,
         libraries,
         warnings: diagnostics,
     })

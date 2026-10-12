@@ -564,3 +564,47 @@ struct BernVideoSurface: UIViewRepresentable {
         coordinator.window = nil
     }
 }
+
+// MARK: - Chrome, immersion and idleness
+
+/// A window's immersion and idleness on iOS: `immersive` hides the status
+/// bar and the home indicator; `idleAfter` turns `idle` on after that many
+/// seconds without a touch or pointer movement. iOS scenes have no title
+/// bar, so `unified` changes nothing.
+struct BernWindowBehavior: ViewModifier {
+    let context: BernWindowContext
+    let unified: Bool
+    let idleAfter: Double?
+    let immersive: Bool
+    @State private var timer = BernIdleTimer()
+
+    func body(content: Content) -> some View {
+        content
+            .statusBarHidden(immersive)
+            .persistentSystemOverlays(immersive ? .hidden : .automatic)
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0).onChanged { _ in touched() })
+            .onContinuousHover { _ in touched() }
+            .onAppear { touched() }
+    }
+
+    private func touched() {
+        guard let idleAfter else { return }
+        timer.reset(context, after: idleAfter)
+    }
+}
+
+@MainActor
+final class BernIdleTimer {
+    private var timer: Timer?
+
+    func reset(_ context: BernWindowContext, after seconds: Double) {
+        if context.idle {
+            context.idle = false
+        }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak context] _ in
+            MainActor.assumeIsolated { context?.idle = true }
+        }
+    }
+}

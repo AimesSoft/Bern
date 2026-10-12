@@ -21,8 +21,111 @@ struct RawConfig {
     targets: BTreeMap<String, RawTarget>,
     #[serde(default)]
     libraries: Vec<RawLibraryRef>,
+    #[serde(default)]
+    modules: Vec<RawModuleRef>,
     resources: Option<RawResources>,
     layouts: Option<RawLayouts>,
+}
+
+/// `[[modules]]`: a module directory holding its own `Bern.toml`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModuleRef {
+    path: String,
+}
+
+/// A module manifest: `[module]` with its protocol, engine and UI, and the
+/// languages its translations cover.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModuleConfig {
+    module: RawModule,
+    languages: RawLanguages,
+    #[serde(default)]
+    pages: Vec<RawPage>,
+    /// Slot id to the module's components placed there, in order.
+    #[serde(default)]
+    contributes: BTreeMap<String, Vec<String>>,
+}
+
+/// `[[pages]]`: a page the module adds to one of the shell's page slots.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPage {
+    slot: String,
+    id: String,
+    label: BTreeMap<String, String>,
+    icon: Option<String>,
+    component: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModule {
+    id: String,
+    name: BTreeMap<String, String>,
+    #[serde(default)]
+    depends: Vec<String>,
+    #[serde(default)]
+    optional: bool,
+    /// Whether an optional module runs before the application saved a
+    /// choice; by default it does.
+    enabled: Option<bool>,
+    protocol: RawProtocol,
+    engine: RawEngine,
+    ui: Option<RawModuleUi>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModuleUi {
+    package: String,
+    sources: RawSources,
+}
+
+/// Source files: a list of `.rs` files, or one directory whose `.rs` files
+/// are all collected.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawSources {
+    Directory(String),
+    Files(Vec<String>),
+}
+
+/// One module of the application.
+#[derive(Clone, Debug)]
+pub struct ModuleConfig {
+    pub id: String,
+    pub dir: PathBuf,
+    pub manifest: PathBuf,
+    pub name: BTreeMap<String, String>,
+    pub depends: Vec<String>,
+    pub optional: bool,
+    /// Whether an optional module runs before the application saved a choice.
+    pub enabled: bool,
+    pub protocol_package: Package,
+    pub protocol_source: SourceFile,
+    pub engine_package: Package,
+    /// Rust path of the module engine type, which implements `Default`.
+    pub engine_type: String,
+    pub ui_package: Option<Package>,
+    pub ui_sources: Vec<SourceFile>,
+    pub languages: Vec<String>,
+    /// Pages the module adds to the shell's page slots.
+    pub pages: Vec<PageConfig>,
+    /// Slot id to the module's components placed there, in order.
+    pub contributes: BTreeMap<String, Vec<String>>,
+}
+
+/// A page a module contributes to a page slot.
+#[derive(Clone, Debug)]
+pub struct PageConfig {
+    pub slot: String,
+    pub id: String,
+    pub label: BTreeMap<String, String>,
+    pub icon: Option<String>,
+    /// The module component showing the page.
+    pub component: String,
 }
 
 /// `[layouts]`: breakpoints between layout sizes.
@@ -120,13 +223,16 @@ struct RawEngine {
     package: String,
     #[serde(rename = "type")]
     type_path: String,
+    /// The package directory, relative to the manifest; by default the
+    /// directory named like the package.
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawUi {
     package: String,
-    sources: Vec<String>,
+    sources: RawSources,
     root: String,
 }
 
@@ -192,6 +298,8 @@ pub struct Config {
     pub targets: Vec<TargetConfig>,
     /// Manifests of component libraries the UI uses.
     pub libraries: Vec<PathBuf>,
+    /// The application's modules, in the order `Bern.toml` lists them.
+    pub modules: Vec<ModuleConfig>,
     /// Files shipped with the application, directories expanded, sorted by
     /// name.
     pub resources: Vec<ResourceDef>,
@@ -209,6 +317,57 @@ fn valid_language(tag: &str) -> bool {
         && parts.all(|part| {
             (2..=8).contains(&part.len()) && part.chars().all(|c| c.is_ascii_alphanumeric())
         })
+}
+
+/// The source files `sources` names, relative to `base` inside the project
+/// `dir`: listed files as written, or every `.rs` file below a directory,
+/// sorted by path.
+fn expand_sources(dir: &Path, base: &str, sources: &RawSources) -> Result<Vec<String>, Diagnostic> {
+    let join = |written: &str| {
+        if base.is_empty() {
+            written.to_string()
+        } else {
+            format!("{base}/{written}")
+        }
+    };
+    match sources {
+        RawSources::Files(files) => Ok(files.iter().map(|file| join(file)).collect()),
+        RawSources::Directory(directory) if directory.ends_with(".rs") => Ok(vec![join(directory)]),
+        RawSources::Directory(directory) => {
+            let relative = join(directory.trim_end_matches('/'));
+            let mut found = Vec::new();
+            rust_files(&dir.join(&relative), &relative, &mut found)?;
+            found.sort();
+            if found.is_empty() {
+                return Err(Diagnostic::error(format!(
+                    "source directory `{relative}` holds no .rs files"
+                )));
+            }
+            Ok(found)
+        }
+    }
+}
+
+fn rust_files(path: &Path, written: &str, found: &mut Vec<String>) -> Result<(), Diagnostic> {
+    let entries = std::fs::read_dir(path).map_err(|error| {
+        Diagnostic::error(format!(
+            "cannot read source directory {}: {error}",
+            path.display()
+        ))
+    })?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let child = format!("{written}/{name}");
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => rust_files(&entry.path(), &child, found)?,
+            Ok(kind) if kind.is_file() && name.ends_with(".rs") => found.push(child),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Resolve `pkg/src/a/b.rs` into the package directory and module path.
@@ -640,6 +799,10 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         }
     };
 
+    let ui_written = expand_sources(&dir, "", &raw.ui.sources).unwrap_or_else(|error| {
+        errors.push(error);
+        Vec::new()
+    });
     let mut resolve = |written: &str| -> Option<SourceFile> {
         match source_file(&dir, written) {
             Ok((_, module)) => Some(SourceFile {
@@ -654,7 +817,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         }
     };
     let protocol_source = resolve(&raw.protocol.source);
-    let ui_sources: Vec<SourceFile> = raw.ui.sources.iter().filter_map(|s| resolve(s)).collect();
+    let ui_sources: Vec<SourceFile> = ui_written.iter().filter_map(|s| resolve(s)).collect();
 
     let protocol_package = protocol_source.as_ref().and_then(|source| {
         let package_dir = source_file(&dir, &source.display).ok()?.0;
@@ -678,10 +841,16 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
     let ui_package = package(&dir, &raw.ui.package, &ui_dirs, "UI")
         .map_err(|error| errors.push(error))
         .ok();
-    let engine_package = package(&dir, &raw.engine.package, &[], "engine")
-        .map_err(|error| errors.push(error))
-        .ok();
-    if raw.ui.sources.is_empty() {
+    let engine_dir = dir.join(raw.engine.path.as_deref().unwrap_or(&raw.engine.package));
+    let engine_package = package(
+        &dir,
+        &raw.engine.package,
+        &[(raw.engine.package.clone(), engine_dir)],
+        "engine",
+    )
+    .map_err(|error| errors.push(error))
+    .ok();
+    if ui_written.is_empty() {
         errors.push(Diagnostic::error("[ui].sources lists no files"));
     }
 
@@ -788,6 +957,51 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             )));
         }
     }
+    let mut modules: Vec<ModuleConfig> = Vec::new();
+    for entry in &raw.modules {
+        match load_module(&dir, &entry.path) {
+            Ok(module) => {
+                if modules.iter().any(|other| other.id == module.id) {
+                    errors.push(Diagnostic::error(format!(
+                        "module `{}` is listed twice",
+                        module.id
+                    )));
+                }
+                for language in &raw.languages.supported {
+                    if !module.languages.contains(language) {
+                        errors.push(Diagnostic::error(format!(
+                            "module `{}` does not translate `{language}`, which the application supports; add it to {}",
+                            module.id,
+                            module.manifest.display()
+                        )));
+                    }
+                }
+                modules.push(module);
+            }
+            Err(module_errors) => errors.extend(module_errors),
+        }
+    }
+    for (index, module) in modules.iter().enumerate() {
+        for dependency in &module.depends {
+            match modules.iter().position(|other| &other.id == dependency) {
+                Some(position) if position < index && modules[position].optional && !module.optional => {
+                    errors.push(Diagnostic::error(format!(
+                        "module `{}` always runs but depends on the optional module `{dependency}`; make it optional too",
+                        module.id
+                    )))
+                }
+                Some(position) if position < index => {}
+                Some(_) => errors.push(Diagnostic::error(format!(
+                    "module `{}` depends on `{dependency}`, which Bern.toml lists after it; list modules after the ones they depend on",
+                    module.id
+                ))),
+                None => errors.push(Diagnostic::error(format!(
+                    "module `{}` depends on `{dependency}`, which is not a module of this application",
+                    module.id
+                ))),
+            }
+        }
+    }
     let resources = raw
         .resources
         .as_ref()
@@ -827,8 +1041,158 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         root: raw.ui.root,
         targets,
         libraries,
+        modules,
         resources,
         layouts,
+    })
+}
+
+/// Load the module at `written` (relative to the project directory `dir`).
+/// Its source paths are kept relative to `dir`, like the application's.
+fn load_module(dir: &Path, written: &str) -> Result<ModuleConfig, Vec<Diagnostic>> {
+    let base = written.trim_end_matches('/');
+    let manifest = dir.join(base).join("Bern.toml");
+    let text = std::fs::read_to_string(&manifest).map_err(|error| {
+        vec![Diagnostic::error(format!(
+            "cannot read module manifest {}: {error}",
+            manifest.display()
+        ))]
+    })?;
+    let raw: RawModuleConfig = toml::from_str(&text).map_err(|error| {
+        vec![Diagnostic::error(format!(
+            "{}: {error}",
+            manifest.display()
+        ))]
+    })?;
+    let mut errors = Vec::new();
+    let id = raw.module.id;
+    if !bern_protocol::valid_name(&id) {
+        errors.push(Diagnostic::error(format!(
+            "{}: module id `{id}` must be lower snake case",
+            manifest.display()
+        )));
+    }
+    let mut resolve = |written: &str| -> Option<SourceFile> {
+        match source_file(dir, written) {
+            Ok((_, module)) => Some(SourceFile {
+                display: written.to_string(),
+                path: dir.join(written),
+                module,
+            }),
+            Err(error) => {
+                errors.push(error);
+                None
+            }
+        }
+    };
+    let protocol_source = resolve(&format!("{base}/{}", raw.module.protocol.source));
+    let mut ui_sources = Vec::new();
+    let mut ui_dirs = Vec::new();
+    if let Some(ui) = &raw.module.ui {
+        match expand_sources(dir, base, &ui.sources) {
+            Ok(files) => {
+                for file in files {
+                    if let Ok((package_dir, _)) = source_file(dir, &file) {
+                        ui_dirs.push((file.clone(), package_dir));
+                    }
+                    ui_sources.extend(resolve(&file));
+                }
+            }
+            Err(error) => errors.push(error),
+        }
+    }
+    let protocol_package = protocol_source.as_ref().and_then(|source| {
+        let package_dir = source_file(dir, &source.display).ok()?.0;
+        package(
+            dir,
+            &raw.module.protocol.package,
+            &[(source.display.clone(), package_dir)],
+            "protocol",
+        )
+        .map_err(|error| errors.push(error))
+        .ok()
+    });
+    let ui_package = raw.module.ui.as_ref().and_then(|ui| {
+        package(dir, &ui.package, &ui_dirs, "UI")
+            .map_err(|error| errors.push(error))
+            .ok()
+    });
+    let engine_dir = dir.join(base).join(
+        raw.module
+            .engine
+            .path
+            .as_deref()
+            .unwrap_or(&raw.module.engine.package),
+    );
+    let engine_package = package(
+        dir,
+        &raw.module.engine.package,
+        &[(raw.module.engine.package.clone(), engine_dir)],
+        "engine",
+    )
+    .map_err(|error| errors.push(error))
+    .ok();
+    for page in &raw.pages {
+        for (what, name) in [("slot", &page.slot), ("page id", &page.id)] {
+            if !bern_protocol::valid_name(name) {
+                errors.push(Diagnostic::error(format!(
+                    "{}: {what} `{name}` must be lower snake case",
+                    manifest.display()
+                )));
+            }
+        }
+        if raw.module.ui.is_none() {
+            errors.push(Diagnostic::error(format!(
+                "{}: page `{}` needs the module's [module.ui] to show it",
+                manifest.display(),
+                page.id
+            )));
+        }
+    }
+    for slot in raw.contributes.keys() {
+        if !bern_protocol::valid_name(slot) {
+            errors.push(Diagnostic::error(format!(
+                "{}: slot `{slot}` must be lower snake case",
+                manifest.display()
+            )));
+        }
+    }
+    if raw.module.enabled.is_some() && !raw.module.optional {
+        errors.push(Diagnostic::error(format!(
+            "{}: `enabled` applies to optional modules; add `optional = true` or remove it",
+            manifest.display()
+        )));
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(ModuleConfig {
+        id,
+        dir: canonical(dir.join(base)),
+        manifest,
+        name: raw.module.name,
+        depends: raw.module.depends,
+        optional: raw.module.optional,
+        enabled: raw.module.enabled.unwrap_or(true),
+        protocol_package: protocol_package.unwrap(),
+        protocol_source: protocol_source.unwrap(),
+        engine_package: engine_package.unwrap(),
+        engine_type: raw.module.engine.type_path,
+        ui_package,
+        ui_sources,
+        languages: raw.languages.supported,
+        pages: raw
+            .pages
+            .into_iter()
+            .map(|page| PageConfig {
+                slot: page.slot,
+                id: page.id,
+                label: page.label,
+                icon: page.icon,
+                component: page.component,
+            })
+            .collect(),
+        contributes: raw.contributes,
     })
 }
 

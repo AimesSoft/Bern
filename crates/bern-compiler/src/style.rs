@@ -1,0 +1,679 @@
+//! Lower `style!` into the application's style sheet and check it: known
+//! controls, properties and states, semantic color roles, explicit colors
+//! for both modes, and motion tokens that exist.
+
+use crate::check::location;
+use bern_ir::style::{
+    BUILT_IN_MOTION, Band, COLOR_ROLES, ColorRef, ControlSize, Edge, MotionToken, PatternDef,
+    StateStyle, StyleEffect, StyleRule, StyleSheet, StyleState, TransitionDef, TransitionKind,
+    built_in_transitions,
+};
+use bern_ir::{SourceLocation, Srgb};
+use bern_syntax::{StyleArg, StyleItem, StyleValue};
+use bern_target_api::Diagnostic;
+use proc_macro2::Span;
+
+/// Platforms a rule may name in `#[target(…)]` and `#[exempt(…)]`.
+pub const PLATFORMS: [&str; 5] = ["macos", "ios", "windows", "linux", "browser"];
+
+/// Controls that take style overrides, with the states that apply to them.
+const STYLEABLE: &[(&str, &[StyleState])] = &[
+    (
+        "Button",
+        &[
+            StyleState::Hover,
+            StyleState::Pressed,
+            StyleState::Focus,
+            StyleState::Disabled,
+        ],
+    ),
+    (
+        "IconButton",
+        &[
+            StyleState::Hover,
+            StyleState::Pressed,
+            StyleState::Focus,
+            StyleState::Disabled,
+        ],
+    ),
+    (
+        "SidebarItem",
+        &[
+            StyleState::Hover,
+            StyleState::Pressed,
+            StyleState::Selected,
+            StyleState::Focus,
+        ],
+    ),
+];
+
+/// Effects allowed outside any state, and those allowed inside one.
+const BASE_EFFECTS: &[&str] = &[
+    "background",
+    "foreground",
+    "border",
+    "corner",
+    "padding",
+    "size",
+];
+const STATE_EFFECTS: &[&str] = &[
+    "background",
+    "foreground",
+    "border",
+    "scale",
+    "offset",
+    "opacity",
+    "system",
+    "none",
+];
+/// Only the selected state fills or marks an item.
+const SELECTED_EFFECTS: &[&str] = &["fill", "indicator"];
+
+struct Lowering<'a> {
+    file: &'a str,
+    diagnostics: &'a mut Vec<Diagnostic>,
+}
+
+impl Lowering<'_> {
+    fn error(&mut self, span: Span, message: impl Into<String>) {
+        self.diagnostics
+            .push(Diagnostic::error(message.into()).at(location(self.file, span)));
+    }
+
+    fn location(&self, span: Span) -> SourceLocation {
+        location(self.file, span)
+    }
+
+    fn number(&mut self, value: &StyleValue, what: &str) -> Option<f64> {
+        match value {
+            StyleValue::Number(number, _) => Some(*number),
+            other => {
+                self.error(other.span(), format!("{what} is a number"));
+                None
+            }
+        }
+    }
+
+    fn color(&mut self, value: &StyleValue) -> Option<ColorRef> {
+        match value {
+            StyleValue::Name(_) => {
+                let role = value.dotted().unwrap_or_default();
+                if COLOR_ROLES.contains(&role.as_str()) {
+                    Some(ColorRef::Role { role })
+                } else {
+                    self.error(
+                        value.span(),
+                        format!(
+                            "`{role}` is not a color role; use one of {}",
+                            COLOR_ROLES.join(", ")
+                        ),
+                    );
+                    None
+                }
+            }
+            StyleValue::Call { name, args } if name == "color" => {
+                let mut light = None;
+                let mut dark = None;
+                for arg in args {
+                    let slot = match arg.name.as_ref().map(ToString::to_string).as_deref() {
+                        Some("light") => &mut light,
+                        Some("dark") => &mut dark,
+                        _ => {
+                            self.error(
+                                name.span(),
+                                "write `color(light: \"#RRGGBB\", dark: \"#RRGGBB\")`",
+                            );
+                            return None;
+                        }
+                    };
+                    match &arg.value {
+                        StyleValue::Text(hex, span) => match Srgb::parse(hex) {
+                            Some(color) => *slot = Some(color),
+                            None => self.error(*span, format!("`{hex}` is not a `#RRGGBB` color")),
+                        },
+                        other => self.error(other.span(), "a color is written `\"#RRGGBB\"`"),
+                    }
+                }
+                match (light, dark) {
+                    (Some(light), Some(dark)) => Some(ColorRef::Fixed { light, dark }),
+                    _ => {
+                        self.error(
+                            name.span(),
+                            "a fixed color gives both modes: `color(light: \"#…\", dark: \"#…\")`",
+                        );
+                        None
+                    }
+                }
+            }
+            other => {
+                self.error(
+                    other.span(),
+                    "a color is a role such as `accent` or `color(light: …, dark: …)`",
+                );
+                None
+            }
+        }
+    }
+
+    /// The trailing motion token of a call such as `scale(1.03, snappy)`.
+    fn motion(&mut self, args: &[StyleArg], sheet: &StyleSheet) -> String {
+        let named = args
+            .iter()
+            .rev()
+            .find(|arg| arg.name.is_none() && matches!(arg.value, StyleValue::Name(_)));
+        match named.and_then(|arg| arg.value.dotted()) {
+            Some(token) if sheet.token(&token).is_some() => token,
+            Some(token) => {
+                let span = named
+                    .map(|arg| arg.value.span())
+                    .unwrap_or_else(Span::call_site);
+                self.error(
+                    span,
+                    format!("`{token}` is not a motion token; declare it under `motion {{ … }}`"),
+                );
+                "smooth".into()
+            }
+            None => "smooth".into(),
+        }
+    }
+
+    fn numbers(&mut self, args: &[StyleArg]) -> (Vec<f64>, Vec<(String, f64)>) {
+        let mut positional = Vec::new();
+        let mut named = Vec::new();
+        for arg in args {
+            if let StyleValue::Number(number, _) = arg.value {
+                match &arg.name {
+                    Some(name) => named.push((name.to_string(), number)),
+                    None => positional.push(number),
+                }
+            }
+        }
+        (positional, named)
+    }
+
+    fn effect(&mut self, value: &StyleValue, sheet: &StyleSheet) -> Option<StyleEffect> {
+        match value {
+            StyleValue::Name(path) if path.len() == 1 && path[0] == "system" => {
+                Some(StyleEffect::System)
+            }
+            StyleValue::Name(path) if path.len() == 1 && path[0] == "none" => {
+                Some(StyleEffect::Nothing)
+            }
+            StyleValue::Call { name, args } => {
+                let first = args.first().map(|arg| &arg.value);
+                let (positional, named) = self.numbers(args);
+                let get = |key: &str| {
+                    named
+                        .iter()
+                        .find(|(name, _)| name == key)
+                        .map(|(_, value)| *value)
+                };
+                match name.to_string().as_str() {
+                    "background" => Some(StyleEffect::Background {
+                        color: self.color(first?)?,
+                    }),
+                    "foreground" => Some(StyleEffect::Foreground {
+                        color: self.color(first?)?,
+                    }),
+                    "fill" => Some(StyleEffect::Fill {
+                        color: self.color(first?)?,
+                    }),
+                    "border" => Some(StyleEffect::Border {
+                        color: self.color(first?)?,
+                        width: get("width").unwrap_or(1.0),
+                    }),
+                    "indicator" => {
+                        let edge = match args
+                            .iter()
+                            .find(|arg| arg.name.as_ref().is_some_and(|name| name == "edge"))
+                            .and_then(|arg| arg.value.dotted())
+                            .as_deref()
+                        {
+                            None | Some("leading") => Edge::Leading,
+                            Some("trailing") => Edge::Trailing,
+                            Some("top") => Edge::Top,
+                            Some("bottom") => Edge::Bottom,
+                            Some(other) => {
+                                self.error(name.span(), format!("`{other}` is not an edge; use leading, trailing, top or bottom"));
+                                Edge::Leading
+                            }
+                        };
+                        Some(StyleEffect::Indicator {
+                            color: self.color(first?)?,
+                            edge,
+                            width: get("width").unwrap_or(3.0),
+                        })
+                    }
+                    "scale" => {
+                        let uniform = positional.first().copied();
+                        let x = get("x").or(uniform);
+                        let y = get("y").or(uniform);
+                        let (Some(x), Some(y)) = (x, y) else {
+                            self.error(
+                                name.span(),
+                                "write `scale(1.03, token)` or `scale(x: 0.97, y: 0.9, token)`",
+                            );
+                            return None;
+                        };
+                        Some(StyleEffect::Scale {
+                            x,
+                            y,
+                            motion: self.motion(args, sheet),
+                        })
+                    }
+                    "offset" => Some(StyleEffect::Offset {
+                        x: get("x").unwrap_or(0.0),
+                        y: get("y").unwrap_or(0.0),
+                        motion: self.motion(args, sheet),
+                    }),
+                    "opacity" => {
+                        let Some(value) = positional.first().copied() else {
+                            self.error(name.span(), "write `opacity(0.6, token)`");
+                            return None;
+                        };
+                        Some(StyleEffect::Opacity {
+                            value,
+                            motion: self.motion(args, sheet),
+                        })
+                    }
+                    other => {
+                        self.error(name.span(), format!("`{other}` is not a style effect"));
+                        None
+                    }
+                }
+            }
+            other => {
+                self.error(other.span(), "expected an effect such as `scale(1.03, snappy)`, `fill(accent)`, `system` or `none`");
+                None
+            }
+        }
+    }
+}
+
+/// Lower every `style!` of the application. `items` pairs each with the
+/// file declaring it.
+pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -> StyleSheet {
+    let mut sheet = StyleSheet {
+        motion: BUILT_IN_MOTION
+            .iter()
+            .map(|(name, period, damping)| MotionToken {
+                name: (*name).into(),
+                period: *period,
+                damping: *damping,
+            })
+            .collect(),
+        rules: Vec::new(),
+        transitions: built_in_transitions(),
+        patterns: Vec::new(),
+    };
+    if items.len() > 1 {
+        for (file, item) in &items[1..] {
+            let mut lowering = Lowering { file, diagnostics };
+            lowering.error(item.span, "an application declares at most one `style!`");
+        }
+    }
+    let Some((file, item)) = items.first() else {
+        return sheet;
+    };
+    let mut lowering = Lowering { file, diagnostics };
+    for decl in &item.motion {
+        let StyleValue::Call { name, args } = &decl.value else {
+            lowering.error(
+                decl.value.span(),
+                "a motion token is `spring(period: T, damping: ζ)`",
+            );
+            continue;
+        };
+        if name != "spring" {
+            lowering.error(
+                name.span(),
+                "a motion token is `spring(period: T, damping: ζ)`",
+            );
+            continue;
+        }
+        let (_, named) = lowering.numbers(args);
+        let get = |key: &str| {
+            named
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| *value)
+        };
+        let (Some(period), Some(damping)) = (get("period"), get("damping")) else {
+            lowering.error(name.span(), "a spring needs `period:` and `damping:`");
+            continue;
+        };
+        if !(period > 0.0 && damping > 0.0) {
+            lowering.error(name.span(), "a spring's period and damping are positive");
+            continue;
+        }
+        let token = MotionToken {
+            name: decl.name.to_string(),
+            period,
+            damping,
+        };
+        match sheet
+            .motion
+            .iter_mut()
+            .find(|existing| existing.name == token.name)
+        {
+            Some(existing) => *existing = token,
+            None => sheet.motion.push(token),
+        }
+    }
+    for decl in &item.transitions {
+        let StyleValue::Call { name, args } = &decl.value else {
+            lowering.error(decl.value.span(), "a transition is `fade(token)`, `pop(from: 0.8, token)` or `slide(edge: bottom, distance: 16, token)`");
+            continue;
+        };
+        let (positional, named) = lowering.numbers(args);
+        let get = |key: &str| {
+            named
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| *value)
+        };
+        let kind = match name.to_string().as_str() {
+            "fade" => TransitionKind::Fade,
+            "pop" => TransitionKind::Pop {
+                from: get("from").or(positional.first().copied()).unwrap_or(0.8),
+            },
+            "slide" => {
+                let edge = match args
+                    .iter()
+                    .find(|arg| arg.name.as_ref().is_some_and(|name| name == "edge"))
+                    .and_then(|arg| arg.value.dotted())
+                    .as_deref()
+                {
+                    Some("leading") => Edge::Leading,
+                    Some("trailing") => Edge::Trailing,
+                    Some("top") => Edge::Top,
+                    None | Some("bottom") => Edge::Bottom,
+                    Some(other) => {
+                        lowering.error(
+                            name.span(),
+                            format!(
+                                "`{other}` is not an edge; use leading, trailing, top or bottom"
+                            ),
+                        );
+                        Edge::Bottom
+                    }
+                };
+                TransitionKind::Slide {
+                    edge,
+                    distance: get("distance").unwrap_or(16.0),
+                }
+            }
+            other => {
+                lowering.error(
+                    name.span(),
+                    format!("`{other}` is not a transition; use fade, pop or slide"),
+                );
+                continue;
+            }
+        };
+        let transition = TransitionDef {
+            name: decl.name.to_string(),
+            kind,
+            motion: lowering.motion(args, &sheet),
+        };
+        match sheet
+            .transitions
+            .iter_mut()
+            .find(|existing| existing.name == transition.name)
+        {
+            Some(existing) => *existing = transition,
+            None => sheet.transitions.push(transition),
+        }
+    }
+    for decl in &item.patterns {
+        let StyleValue::Call { name, args } = &decl.value else {
+            lowering.error(
+                decl.value.span(),
+                "a pattern is `check(band(color, width, opacity), gap(width), …, twill: true)`",
+            );
+            continue;
+        };
+        if name != "check" {
+            lowering.error(name.span(), "a pattern is `check(band(…), gap(…), …)`");
+            continue;
+        }
+        let mut pattern = PatternDef {
+            name: decl.name.to_string(),
+            bands: Vec::new(),
+            twill: false,
+        };
+        for arg in args {
+            match (&arg.name, &arg.value) {
+                (Some(key), StyleValue::Name(path)) if key == "twill" => {
+                    pattern.twill = path.len() == 1 && path[0] == "true";
+                }
+                (
+                    None,
+                    StyleValue::Call {
+                        name: kind,
+                        args: band,
+                    },
+                ) if kind == "band" => {
+                    let (Some(color), Some(width)) = (band.first(), band.get(1)) else {
+                        lowering.error(kind.span(), "a band is `band(color, width, opacity)`");
+                        continue;
+                    };
+                    let Some(color) = lowering.color(&color.value) else {
+                        continue;
+                    };
+                    let Some(width) = lowering.number(&width.value, "a band's width") else {
+                        continue;
+                    };
+                    let opacity = match band.get(2) {
+                        Some(opacity) => lowering
+                            .number(&opacity.value, "a band's opacity")
+                            .unwrap_or(1.0),
+                        None => 1.0,
+                    };
+                    pattern.bands.push(Band {
+                        color: Some(color),
+                        width,
+                        opacity,
+                    });
+                }
+                (
+                    None,
+                    StyleValue::Call {
+                        name: kind,
+                        args: gap,
+                    },
+                ) if kind == "gap" => {
+                    let Some(width) = gap
+                        .first()
+                        .and_then(|width| lowering.number(&width.value, "a gap's width"))
+                    else {
+                        continue;
+                    };
+                    pattern.bands.push(Band {
+                        color: None,
+                        width,
+                        opacity: 0.0,
+                    });
+                }
+                (_, other) => lowering.error(
+                    other.span(),
+                    "a pattern holds `band(…)`, `gap(…)` and `twill: true`",
+                ),
+            }
+        }
+        if !pattern
+            .bands
+            .iter()
+            .any(|band| band.color.is_some() && band.width > 0.0)
+        {
+            lowering.error(
+                name.span(),
+                "a pattern needs a colored band wider than zero",
+            );
+            continue;
+        }
+        match sheet
+            .patterns
+            .iter_mut()
+            .find(|existing| existing.name == pattern.name)
+        {
+            Some(existing) => *existing = pattern,
+            None => sheet.patterns.push(pattern),
+        }
+    }
+    for rule in &item.rules {
+        let component = rule.component.to_string();
+        let Some((_, states)) = STYLEABLE.iter().find(|(name, _)| *name == component) else {
+            lowering.error(
+                rule.component.span(),
+                format!(
+                    "`{component}` does not take style overrides yet; styleable: {}",
+                    STYLEABLE
+                        .iter()
+                        .map(|(name, _)| *name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
+            continue;
+        };
+        let mut targets = Vec::new();
+        for target in &rule.targets {
+            let name = target.to_string();
+            if PLATFORMS.contains(&name.as_str()) {
+                targets.push(name);
+            } else {
+                lowering.error(
+                    target.span(),
+                    format!("`{name}` is not a platform; use {}", PLATFORMS.join(", ")),
+                );
+            }
+        }
+        let mut exempt = Vec::new();
+        for (target, _) in &rule.exempt {
+            let name = target.to_string();
+            if PLATFORMS.contains(&name.as_str()) {
+                exempt.push(name);
+            } else {
+                lowering.error(
+                    target.span(),
+                    format!("`{name}` is not a platform; use {}", PLATFORMS.join(", ")),
+                );
+            }
+        }
+        let mut lowered = StyleRule {
+            component: component.clone(),
+            variant: rule.variant.as_ref().map(ToString::to_string),
+            targets,
+            exempt,
+            base: Vec::new(),
+            states: Vec::new(),
+            settle: None,
+            source: lowering.location(rule.span),
+        };
+        for prop in &rule.props {
+            let name = prop.name.to_string();
+            if name == "settle" {
+                match prop.value.dotted() {
+                    Some(token) if sheet.token(&token).is_some() => lowered.settle = Some(token),
+                    _ => lowering.error(prop.value.span(), "`settle` names a motion token"),
+                }
+                continue;
+            }
+            if let Some(state) = StyleState::ALL.iter().find(|state| state.name() == name) {
+                if !states.contains(state) {
+                    lowering.error(
+                        prop.name.span(),
+                        format!("`{component}` has no `{name}` state"),
+                    );
+                    continue;
+                }
+                let mut effects = Vec::new();
+                for term in prop.value.terms() {
+                    let Some(effect) = lowering.effect(term, &sheet) else {
+                        continue;
+                    };
+                    let allowed = STATE_EFFECTS.contains(&effect.name())
+                        || (*state == StyleState::Selected
+                            && SELECTED_EFFECTS.contains(&effect.name()));
+                    if allowed {
+                        effects.push(effect);
+                    } else {
+                        lowering.error(
+                            term.span(),
+                            format!("`{}` does not apply in the `{name}` state", effect.name()),
+                        );
+                    }
+                }
+                lowered.states.push(StateStyle {
+                    state: *state,
+                    effects,
+                });
+                continue;
+            }
+            let effect =
+                match name.as_str() {
+                    "corner" => lowering
+                        .number(&prop.value, "`corner`")
+                        .map(|radius| StyleEffect::Corner { radius }),
+                    "padding" => lowering
+                        .number(&prop.value, "`padding`")
+                        .map(|length| StyleEffect::Padding { length }),
+                    "size" => match prop.value.dotted().as_deref() {
+                        Some("small") => Some(StyleEffect::Size {
+                            size: ControlSize::Small,
+                        }),
+                        Some("regular") => Some(StyleEffect::Size {
+                            size: ControlSize::Regular,
+                        }),
+                        Some("large") => Some(StyleEffect::Size {
+                            size: ControlSize::Large,
+                        }),
+                        Some("extra_large") => Some(StyleEffect::Size {
+                            size: ControlSize::ExtraLarge,
+                        }),
+                        _ => {
+                            lowering.error(
+                                prop.value.span(),
+                                "`size` is small, regular, large or extra_large",
+                            );
+                            None
+                        }
+                    },
+                    "background" | "foreground" | "border" => {
+                        let call = StyleValue::Call {
+                            name: prop.name.clone(),
+                            args: vec![StyleArg {
+                                name: None,
+                                value: prop.value.clone(),
+                            }],
+                        };
+                        lowering.effect(&call, &sheet)
+                    }
+                    other => {
+                        lowering.error(
+                        prop.name.span(),
+                        format!(
+                            "`{other}` is not a style property; use {}, a state ({}) or `settle`",
+                            BASE_EFFECTS.join(", "),
+                            states.iter().map(|state| state.name()).collect::<Vec<_>>().join(", ")
+                        ),
+                    );
+                        None
+                    }
+                };
+            lowered.base.extend(effect);
+        }
+        sheet.rules.push(lowered);
+    }
+    sheet
+}
+
+/// The variants each control kind declares, for checking `variant:`.
+pub fn variants(sheet: &StyleSheet) -> Vec<(String, String)> {
+    sheet
+        .rules
+        .iter()
+        .filter_map(|rule| Some((rule.component.clone(), rule.variant.clone()?)))
+        .collect()
+}

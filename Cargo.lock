@@ -78,6 +78,7 @@ dependencies = [
  "bern-ir",
  "bern-media",
  "bern-protocol",
+ "bern-syntax",
  "bern-target-api",
  "serde_json",
 ]
@@ -116,9 +117,11 @@ dependencies = [
  "bern-backend-winui3",
  "bern-compiler",
  "bern-protocol",
+ "bern-syntax",
  "bern-target-api",
  "bern-transport-ws",
  "serde_json",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -449,10 +452,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "notes-core"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "notes-protocol",
+]
+
+[[package]]
+name = "notes-protocol"
+version = "0.1.0"
+dependencies = [
+ "bern",
+]
+
+[[package]]
+name = "notes-ui"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "notes-protocol",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "planner-core"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "planner-protocol",
+]
+
+[[package]]
+name = "planner-protocol"
+version = "0.1.0"
+dependencies = [
+ "bern",
+]
+
+[[package]]
+name = "planner-ui"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "notes-protocol",
+ "notes-ui",
+ "planner-protocol",
+ "tags-protocol",
+]
 
 [[package]]
 name = "png"
@@ -629,6 +681,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tags-core"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "notes-protocol",
+ "tags-protocol",
+]
+
+[[package]]
+name = "tags-protocol"
+version = "0.1.0"
+dependencies = [
+ "bern",
 ]
 
 [[package]]

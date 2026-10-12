@@ -19,6 +19,8 @@ use std::time::Duration;
 fn descriptor() -> &'static ProtocolDescriptor {
     static DESCRIPTOR: OnceLock<ProtocolDescriptor> = OnceLock::new();
     DESCRIPTOR.get_or_init(|| ProtocolDescriptor {
+        modules: Vec::new(),
+        events: Vec::new(),
         descriptor_version: DESCRIPTOR_VERSION,
         namespace: "counter".into(),
         version: 1,
@@ -44,6 +46,7 @@ fn descriptor() -> &'static ProtocolDescriptor {
             policy: CommandPolicy::default(),
             external: ExternalNames::derive("counter", "add"),
             reads: vec![],
+            on: None,
         }],
     })
 }

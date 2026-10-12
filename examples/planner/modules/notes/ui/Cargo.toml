@@ -1,0 +1,12 @@
+[package]
+name = "notes-ui"
+description = "UI of the planner's notes module"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+notes-protocol = { path = "../protocol" }

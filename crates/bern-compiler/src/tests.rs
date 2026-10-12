@@ -415,6 +415,11 @@ mod independent_target {
     impl Target for Outline {
         fn descriptor(&self) -> TargetDescriptor {
             TargetDescriptor {
+                styles: &[],
+                motion: &[],
+                window_chrome: false,
+                text_marks: false,
+                dynamic_items: false,
                 id: "outline-test",
                 ui: "outline",
                 platforms: &["test"],
@@ -1313,5 +1318,280 @@ fn image_and_progress_diagnostics() {
                 .join("\n"),
         };
         assert!(message.contains(expected), "{body}\n{message}");
+    }
+}
+
+#[test]
+fn modules_compose_into_one_catalog_and_bind_by_namespace() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/planner/Bern.toml");
+    let config = config::load(&manifest).unwrap();
+    let ids: Vec<_> = config
+        .modules
+        .iter()
+        .map(|module| module.id.as_str())
+        .collect();
+    assert_eq!(ids, ["notes", "tags"]);
+    assert_eq!(config.modules[1].depends, ["notes"]);
+    // `sources = "ui/src"` collects the directory.
+    let files: Vec<_> = config.modules[0]
+        .ui_sources
+        .iter()
+        .map(|file| file.display.as_str())
+        .collect();
+    assert_eq!(
+        files,
+        [
+            "modules/notes/ui/src/lib.rs",
+            "modules/notes/ui/src/list.rs",
+            "modules/notes/ui/src/page.rs"
+        ]
+    );
+
+    let compiled = compile(&config).unwrap();
+    let protocol = &compiled.app.protocol;
+    assert_eq!(protocol.modules, ["notes", "tags"]);
+    let fields: Vec<_> = protocol
+        .state
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    // Both modules are optional, so the switches follow them.
+    assert_eq!(fields, ["title", "activity", "notes", "tags", "modules"]);
+    assert!(config.modules.iter().all(|module| module.optional));
+    assert!(compiled.app.types.record_def("NotesState").is_some());
+    assert_eq!(
+        compiled.module_protocols,
+        ["notes_protocol::notes", "tags_protocol::tags"]
+    );
+    let list = compiled
+        .app
+        .components
+        .iter()
+        .find(|component| component.name == "notes_list")
+        .unwrap();
+    assert_eq!(
+        list.params[0].kind,
+        ir::ParamKind::Client {
+            namespace: "notes".into()
+        }
+    );
+    // `notes.count` reads the `count` field inside the `notes` state field.
+    let notes = protocol.state_index("notes").unwrap();
+    let mut found = false;
+    list.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node {
+            for prop in element.props.values() {
+                if format!("{prop:?}").contains(&format!("field: {notes}, path: [1]")) {
+                    found = true;
+                }
+            }
+        }
+    });
+    assert!(found, "a binding reads notes.count");
+
+    // The notes page joins the `main` page slot's enum, and the summary slot
+    // and page content call the contributed components.
+    let pages = compiled.app.types.enum_def("MainPage").unwrap();
+    let variants: Vec<_> = pages.variants.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(variants, ["Overview", "Archive", "Notes"]);
+    assert_eq!(
+        pages.variants[2].label.as_ref().unwrap().translations["en"],
+        "Notes"
+    );
+    let mut calls = Vec::new();
+    for component in &compiled.app.components {
+        let mut refs = Vec::new();
+        component_refs(&component.body, &mut refs);
+        calls.extend(
+            refs.into_iter()
+                .map(|called| (component.name.clone(), called)),
+        );
+    }
+    assert!(calls.contains(&("overview".into(), "notes_summary".into())));
+    assert!(calls.contains(&("main_window".into(), "notes_page".into())));
+}
+
+#[test]
+fn module_manifests_are_checked() {
+    let planner = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/planner");
+    let text = std::fs::read_to_string(planner.join("Bern.toml")).unwrap();
+    // Tags listed before the notes module it depends on.
+    let swapped = text.replace(
+        "[[modules]]\npath = \"modules/notes\"\n\n[[modules]]\npath = \"modules/tags\"",
+        "[[modules]]\npath = \"modules/tags\"\n\n[[modules]]\npath = \"modules/notes\"",
+    );
+    assert_ne!(swapped, text);
+    let manifest = planner.join(format!("Bern-swapped-{}.toml", std::process::id()));
+    std::fs::write(&manifest, swapped).unwrap();
+    let errors = config::load(&manifest).unwrap_err();
+    let _ = std::fs::remove_file(&manifest);
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.message.contains("lists after it")),
+        "{errors:?}"
+    );
+}
+
+#[test]
+fn navigation_items_may_come_and_go() {
+    let sidebar = |props: &str, items: &str| {
+        wrap(&format!(
+            r#"SplitView {{
+                Sidebar(selection: draft.mode{props}) {{
+                    SidebarItem(value: Mode::Fast, label: tr! {{ "en" => "Fast", "ja" => "速い" }})
+                    {items}
+                }}
+                Detail {{ Spacer }}
+            }}"#
+        ))
+    };
+    compile_ui(&sidebar(
+        ", fallback: Mode::Fast",
+        r#"if draft.on {
+            SidebarItem(value: Mode::Slow, label: tr! { "en" => "Slow", "ja" => "遅い" })
+        }
+        match app.mode {
+            Mode::Slow => { SidebarItem(value: Mode::Slow, label: tr! { "en" => "Slow", "ja" => "遅い" }) }
+            _ => {}
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    for (props, items, expected) in [
+        (
+            "",
+            "if draft.on { Text(content: app.title) }",
+            "cannot contain `Text`",
+        ),
+        (", fallback: 3", "", "this value"),
+    ] {
+        let message = match compile_ui(&sidebar(props, items)) {
+            Ok(_) => panic!("expected `{items}` with `{props}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{props} {items}: {message}");
+    }
+}
+
+#[test]
+fn canvas_and_text_marks_are_checked() {
+    let with_style = |body: &str| {
+        format!(
+            "{}\nstyle! {{ pattern {{ check1: check(band(accent, 2, 0.3), gap(4), twill: true) }} }}\n",
+            wrap(body)
+        )
+    };
+    let compiled = compile_ui(&with_style(
+        r#"Column {
+            Text(content: app.title, mark: accent)
+            Canvas(height: 40, label: tr! { "en" => "Chart", "ja" => "図" }) {
+                Shape(kind: rounded, corner: 6, fill: fill.subtle)
+                Pattern(name: check1, opacity: 0.5)
+            }
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let pattern = compiled.app.style.pattern("check1").unwrap();
+    assert_eq!(pattern.bands.len(), 2);
+    assert!(pattern.bands[1].color.is_none());
+    assert!(pattern.twill);
+
+    for (body, expected) in [
+        (
+            "Text(content: app.title, mark: brand)",
+            "is not a color role",
+        ),
+        ("Canvas { Pattern(name: plaid) }", "is not a pattern"),
+        (
+            "Canvas { Series(values: app.count) }",
+            "is a list of numbers",
+        ),
+        ("Shape(kind: rect)", "Canvas"),
+        ("Canvas { Text(content: app.title) }", "cannot contain"),
+    ] {
+        let message = match compile_ui(&with_style(body)) {
+            Ok(_) => panic!("expected `{body}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn style_rules_are_lowered_and_checked() {
+    let source = |body: &str| {
+        let item: syn::ItemMacro = syn::parse_str(&format!("style! {{ {body} }}")).unwrap();
+        bern_syntax::parse_style(item.mac.tokens).unwrap()
+    };
+    let lower = |body: &str| {
+        let mut diagnostics = Vec::new();
+        let sheet = style::lower(&[("ui.rs".into(), source(body))], &mut diagnostics);
+        (sheet, diagnostics)
+    };
+    let (sheet, diagnostics) = lower(
+        "motion { jelly: spring(period: 0.5, damping: 0.4) }
+         SidebarItem { corner: 8, hover: background(fill.subtle) + scale(1.03, snappy), selected: indicator(accent, edge: leading, width: 4), settle: jelly }
+         #[target(macos)] Button.hero { background: color(light: \"#FF2E55\", dark: \"#FF5577\"), size: large }",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(sheet.token("jelly").unwrap().period, 0.5);
+    assert_eq!(sheet.rules.len(), 2);
+    let item = &sheet.rules[0];
+    assert_eq!(item.states.len(), 2);
+    assert_eq!(item.states[0].effects.len(), 2);
+    assert_eq!(item.settle.as_deref(), Some("jelly"));
+    assert_eq!(sheet.rules[1].targets, ["macos"]);
+    assert_eq!(
+        style::variants(&sheet),
+        [("Button".to_string(), "hero".to_string())]
+    );
+
+    for (body, expected) in [
+        ("Slider { corner: 4 }", "does not take style overrides"),
+        ("Button { background: brand }", "is not a color role"),
+        (
+            "Button { hover: scale(1.1, wobble) }",
+            "is not a motion token",
+        ),
+        (
+            "Button { selected: fill(accent) }",
+            "has no `selected` state",
+        ),
+        (
+            "SidebarItem { hover: fill(accent) }",
+            "does not apply in the `hover` state",
+        ),
+        (
+            "Button { background: color(light: \"#FFFFFF\") }",
+            "gives both modes",
+        ),
+        ("#[target(amiga)] Button { corner: 4 }", "is not a platform"),
+        ("Button { width: 4 }", "is not a style property"),
+        (
+            "pattern { plain: check(gap(4)) }",
+            "needs a colored band wider than zero",
+        ),
+        (
+            "pattern { plain: stripes(band(accent, 2)) }",
+            "a pattern is `check(",
+        ),
+        (
+            "pattern { plain: check(band(brand, 2)) }",
+            "is not a color role",
+        ),
+    ] {
+        let (_, diagnostics) = lower(body);
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains(expected)),
+            "{body}: {diagnostics:?}"
+        );
     }
 }

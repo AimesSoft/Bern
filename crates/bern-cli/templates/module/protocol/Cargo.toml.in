@@ -1,0 +1,9 @@
+[package]
+name = "{{package}}-protocol"
+description = "The {{id}} module: its state and commands"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true

@@ -4,7 +4,10 @@
 
 use bern_ir::Application;
 use bern_target_api::BuildContext;
-use bern_target_api::glue::{WindowPresentation, players_expr, resources_expr, session_spec};
+use bern_target_api::glue::{
+    WindowPresentation, descriptor_expr, engine_expr, module_dependencies, players_expr,
+    resources_expr, session_spec,
+};
 use std::path::Path;
 
 fn path(path: &Path) -> String {
@@ -41,7 +44,7 @@ bern-adapter-cli = {{ {cli_adapter} }}
 bern-adapter-mcp = {{ {mcp_adapter} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {engine} = {{ path = "{engine_path}" }}
-
+{modules}
 [workspace]
 
 [profile.release]
@@ -66,6 +69,7 @@ panic = "unwind"
         protocol_path = path(&context.protocol_path),
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
+        modules = module_dependencies(context, true),
     )
 }
 
@@ -91,7 +95,7 @@ fn main() -> bern_gtk::glib::ExitCode {{
             // points to writable memory for one buffer.
             unsafe {{
                 bern_ffi::start_app(
-                    || {protocol}::Adapter(<{engine} as ::std::default::Default>::default()),
+                    || {engine},
                     spec(),
                     0x{fingerprint:016x},
                     resources.as_ptr(),
@@ -115,8 +119,7 @@ fn spec() -> bern_ffi::AppSpec {{
 }}
 "#,
         namespace = app.protocol.namespace,
-        protocol = context.protocol_module,
-        engine = context.engine_type,
+        engine = engine_expr(context),
         fingerprint = app.protocol.fingerprint(),
         bundle = app.app.bundle_id,
         session = session_spec(app, WindowPresentation::Native),
@@ -131,13 +134,13 @@ pub fn cli_rs(context: &BuildContext, app: &Application) -> String {
 
 fn main() {{
     std::process::exit(bern_adapter_cli::run(
-        {protocol}::descriptor(),
+        {descriptor},
         {bundle:?},
         {name:?},
     ));
 }}
 "#,
-        protocol = context.protocol_module,
+        descriptor = descriptor_expr(context),
         bundle = app.app.bundle_id,
         name = app.app.id.replace('_', "-"),
     )
@@ -149,14 +152,14 @@ pub fn mcp_rs(context: &BuildContext, app: &Application) -> String {
 
 fn main() {{
     std::process::exit(bern_adapter_mcp::run(
-        {protocol}::descriptor(),
+        {descriptor},
         {bundle:?},
         {name:?},
         {version:?},
     ));
 }}
 "#,
-        protocol = context.protocol_module,
+        descriptor = descriptor_expr(context),
         bundle = app.app.bundle_id,
         name = app.app.id.replace('_', "-"),
         version = app.app.version,

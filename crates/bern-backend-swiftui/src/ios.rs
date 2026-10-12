@@ -26,6 +26,7 @@ pub const ICON_NAME: &str = "AppIcon";
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
+const STYLE: &str = include_str!("../templates/BernStyle.swift");
 const UIKIT: &str = include_str!("../templates/BernUIKit.swift");
 const HEADER: &str = include_str!("../templates/bern.h");
 
@@ -33,6 +34,7 @@ const HEADER: &str = include_str!("../templates/bern.h");
 const SOURCES: &[&str] = &[
     "BernRuntime.swift",
     "BernMedia.swift",
+    "BernStyle.swift",
     "BernUIKit.swift",
     "BernGenerated.swift",
 ];
@@ -58,6 +60,11 @@ impl Target for SwiftUiIos {
 
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
+            styles: crate::style::SUPPORT,
+            motion: &["appear", "disappear", "reflow", "hero"],
+            window_chrome: true,
+            text_marks: true,
+            dynamic_items: true,
             id: "swiftui-ios",
             ui: "swiftui",
             platforms: &["ios"],
@@ -107,6 +114,7 @@ impl Target for SwiftUiIos {
         let mut files = vec![
             GeneratedFile::text("Sources/BernRuntime.swift", RUNTIME),
             GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
+            GeneratedFile::text("Sources/BernStyle.swift", STYLE),
             GeneratedFile::text("Sources/BernUIKit.swift", UIKIT),
             GeneratedFile::text("Sources/bern.h", HEADER),
             GeneratedFile::text(

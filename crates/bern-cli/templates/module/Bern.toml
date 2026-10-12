@@ -1,0 +1,43 @@
+# The {{id}} module: its own protocol, engine and interface. The
+# application lists it under [[modules]] in its Bern.toml.
+
+[module]
+id = "{{id}}"
+name = { {{names}} }
+# Modules this one calls, reads or answers events of. The application lists
+# them before this one.
+depends = []
+# `optional = true` lets the application switch this module off at run
+# time; `enabled = false` then keeps it off until switched on.
+# optional = true
+
+[module.protocol]
+package = "{{package}}-protocol"
+source = "protocol/src/lib.rs"
+
+[module.engine]
+package = "{{package}}-core"
+type = "{{crate}}_core::{{engine}}"
+path = "core"
+
+[module.ui]
+package = "{{package}}-ui"
+sources = "ui/src"
+
+[languages]
+supported = [{{languages}}]
+default = "{{default_language}}"
+
+# A page in one of the application's page slots, whose enum is marked
+# `#[bern::value(pages = "main")]` in the application's interface.
+# [[pages]]
+# slot = "main"
+# id = "{{id}}"
+# label = { {{names}} }
+# icon = "square.grid.2x2"
+# component = "{{id}}_page"
+
+# Components this module places in the application's slots: the new
+# application template has `Slot(id: extras)` in its window.
+[contributes]
+extras = ["{{id}}_page"]

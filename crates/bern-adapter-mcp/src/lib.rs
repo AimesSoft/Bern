@@ -316,6 +316,8 @@ mod tests {
 
     fn descriptor() -> ProtocolDescriptor {
         ProtocolDescriptor {
+            modules: Vec::new(),
+            events: Vec::new(),
             descriptor_version: DESCRIPTOR_VERSION,
             namespace: "player".into(),
             version: 1,
@@ -342,6 +344,7 @@ mod tests {
                     policy: CommandPolicy::default(),
                     external: ExternalNames::derive("player", "seek"),
                     reads: vec![],
+                    on: None,
                 },
                 CommandSpec {
                     id: "player.chapters".into(),
@@ -359,6 +362,7 @@ mod tests {
                     policy: CommandPolicy::default(),
                     external: ExternalNames::derive("player", "chapters"),
                     reads: vec!["position_ms".into()],
+                    on: None,
                 },
             ],
         }

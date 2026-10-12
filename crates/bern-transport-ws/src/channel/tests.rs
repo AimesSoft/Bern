@@ -24,6 +24,7 @@ fn descriptor() -> &'static ProtocolDescriptor {
             policy,
             external: ExternalNames::derive("counter", name),
             reads: vec![],
+            on: None,
         };
         let delay = || {
             vec![ParamSpec {
@@ -33,6 +34,8 @@ fn descriptor() -> &'static ProtocolDescriptor {
             }]
         };
         ProtocolDescriptor {
+            modules: Vec::new(),
+            events: Vec::new(),
             descriptor_version: DESCRIPTOR_VERSION,
             namespace: "counter".into(),
             version: 1,

@@ -75,12 +75,21 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 for trait_item in &mut cleaned.items {
                     if let syn::TraitItem::Fn(method) = trait_item {
                         method.attrs.retain(|attr| {
-                            !is_bern_attr(attr, "errors") && !is_bern_attr(attr, "idempotent")
+                            !is_bern_attr(attr, "errors")
+                                && !is_bern_attr(attr, "idempotent")
+                                && !is_bern_attr(attr, "on")
                         });
                     }
                 }
                 kept.push(quote!(#cleaned));
             }
+            // Events are emitted through the generated `emit` functions;
+            // the trait itself only declares them.
+            Item::Trait(item_trait)
+                if item_trait
+                    .attrs
+                    .iter()
+                    .any(|attr| is_bern_attr(attr, "events")) => {}
             Item::Trait(item_trait)
                 if item_trait
                     .attrs
@@ -220,6 +229,71 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         }
     });
 
+    // What other modules reach this one through: queued commands, events
+    // and the current state, all through the application engine's outbox.
+    let o = quote!(::bern::__private::command::outbox);
+    let namespace = &protocol.args.namespace;
+    let calls = protocol.commands.methods.iter().enumerate().map(|(index, method)| {
+        let name = &method.name;
+        let params: Vec<_> = method.params.iter().map(|param| &param.name).collect();
+        let types: Vec<_> = method.params.iter().map(|param| &param.syn_ty).collect();
+        let doc = format!(
+            "Queue `{namespace}.{name}` to run after the command being handled."
+        );
+        quote! {
+            #[doc = #doc]
+            pub fn #name(#(#params: #types),*) {
+                #o::call(#namespace, #index, ::std::vec![#(#b::BernValue::to_value(&#params)),*]);
+            }
+        }
+    });
+    let events = protocol.events.iter().flat_map(|events| &events.methods).map(|event| {
+        let name = &event.name;
+        let event_name = name.to_string();
+        let params: Vec<_> = event.params.iter().map(|param| &param.name).collect();
+        let types: Vec<_> = event.params.iter().map(|param| &param.syn_ty).collect();
+        let doc = if event.doc.is_empty() {
+            format!("Emit `{namespace}.{name}`.")
+        } else {
+            event.doc.clone()
+        };
+        quote! {
+            #[doc = #doc]
+            pub fn #name(#(#params: #types),*) {
+                #o::emit(#namespace, #event_name, ::std::vec![#(#b::BernValue::to_value(&#params)),*]);
+            }
+        }
+    });
+    let state_positions: Vec<_> = (0..state_fields.len()).collect();
+    let reach = quote! {
+        /// Commands of this module for the modules depending on it. Each
+        /// queues its command to run after the command being handled.
+        pub mod calls {
+            #![allow(unused_imports)]
+            use super::*;
+            use ::bern::prelude::*;
+            #(#calls)*
+        }
+
+        /// The events this module emits to the modules depending on it,
+        /// which answer them after the command being handled.
+        pub mod emit {
+            #![allow(unused_imports)]
+            use super::*;
+            use ::bern::prelude::*;
+            #(#events)*
+        }
+
+        /// This module's current state, for a module depending on it while
+        /// it handles a command; `None` elsewhere or while this module is
+        /// off.
+        pub fn current_state() -> ::std::option::Option<#state_name> {
+            let values = #o::state_of(#namespace)?;
+            ::std::option::Option::Some(#state_name {
+                #(#state_fields: #b::BernValue::from_value(values.get(#state_positions)?).ok()?,)*
+            })
+        }
+    };
     let vis = &module.vis;
     let ident = &module.ident;
     let attrs: Vec<_> = module
@@ -238,6 +312,19 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             pub trait Engine: #engine_bound + ::std::marker::Send + 'static {
                 /// The current read-only state snapshot.
                 fn state(&self) -> &#state_name;
+
+                /// For an application with optional modules: the modules it
+                /// starts with, as saved from `modules_changed`. `None`
+                /// keeps each module's default.
+                fn initial_modules(&self) -> ::std::option::Option<::std::vec::Vec<::std::string::String>> {
+                    ::std::option::Option::None
+                }
+
+                /// For an application with optional modules: the modules
+                /// running after a change, for the engine to save.
+                fn modules_changed(&mut self, enabled: &[::std::string::String]) {
+                    let _ = enabled;
+                }
             }
 
             /// The protocol descriptor: types, state and command catalog.
@@ -274,6 +361,14 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                     let state = Engine::state(&self.0);
                     ::std::vec![#(#b::BernValue::to_value(&state.#state_fields)),*]
                 }
+
+                fn initial_modules(&self) -> ::std::option::Option<::std::vec::Vec<::std::string::String>> {
+                    Engine::initial_modules(&self.0)
+                }
+
+                fn modules_changed(&mut self, enabled: &[::std::string::String]) {
+                    Engine::modules_changed(&mut self.0, enabled)
+                }
             }
 
             /// Typed client used by UI declarations: read-only state bindings
@@ -298,6 +393,8 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                     self.clone()
                 }
             }
+
+            #reach
 
             #track
         }

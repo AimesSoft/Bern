@@ -243,6 +243,7 @@ fn showcase_generates_swift_that_type_checks() {
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
         .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernStyle.swift"))
         .arg(sources.join("BernAppKit.swift"))
         .arg(sources.join("BernGenerated.swift"))
         .output()
@@ -279,6 +280,7 @@ fn context(
         engine_package: config.engine_package.name.clone(),
         engine_path: config.engine_package.dir.clone(),
         engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
         framework: Framework::Path(root.join("crates")),
         release: false,
     }
@@ -478,6 +480,7 @@ fn showcase_generates_ios_swift_that_type_checks() {
         .arg(sources.join("bern.h"))
         .arg(sources.join("BernRuntime.swift"))
         .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernStyle.swift"))
         .arg(sources.join("BernUIKit.swift"))
         .arg(sources.join("BernGenerated.swift"))
         .output()
@@ -485,6 +488,227 @@ fn showcase_generates_ios_swift_that_type_checks() {
     assert!(
         result.status.success(),
         "swiftc rejected the generated iOS code:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+const DYNAMIC_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "demo", version = 1)]
+pub mod demo {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Dest {
+        Home,
+        Feed,
+        Extra,
+    }
+
+    #[value]
+    pub struct Entry {
+        pub name: String,
+        pub dest: Dest,
+    }
+
+    #[state]
+    pub struct State {
+        pub entries: Vec<Entry>,
+        pub levels: Vec<i64>,
+        pub mode: Dest,
+        pub picked: Option<Dest>,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self, amount: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+const DYNAMIC_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {
+    pub dest: demo::Dest,
+    pub tab: demo::Dest,
+    pub more: bool,
+}
+
+#[component]
+pub fn app(app: demo::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Main" }, initial: open) {
+                page(app: app)
+            }
+        }
+    }
+}
+
+#[component]
+pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        SplitView {
+            Sidebar(id: nav, selection: draft.dest, fallback: Dest::Home) {
+                SidebarItem(value: Dest::Home, label: tr! { "en" => "Home" })
+                if draft.more {
+                    SidebarItem(value: Dest::Extra, label: tr! { "en" => "Extra" })
+                }
+                Section(title: tr! { "en" => "Entries" }) {
+                    ForEach(items: app.entries, key: name) |entry| {
+                        SidebarItem(value: entry.dest, label: entry.name)
+                    }
+                }
+                match app.mode {
+                    Dest::Feed => { SidebarItem(value: Dest::Feed, label: tr! { "en" => "Feed" }) }
+                    _ => {}
+                }
+            }
+            Detail {
+                Tabs(id: tabs, selection: draft.tab) {
+                    Tab(value: Dest::Home, label: tr! { "en" => "Home" }) {
+                        Column {
+                            Switch(id: more, label: tr! { "en" => "More" }, value: draft.more)
+                            Canvas(height: 40) {
+                                Series(values: app.levels, kind: area)
+                            }
+                            Text(content: tr! { "en" => "Marked" }, mark: accent)
+                            Toolbar {
+                                if draft.more {
+                                    Button(id: add, label: tr! { "en" => "Add" }) => app.add(1)
+                                }
+                                ForEach(items: app.entries, key: name) |entry| {
+                                    Button(id: open, label: entry.name) => app.add(2)
+                                }
+                            }
+                        }
+                    }
+                    if let Some(picked) = app.picked {
+                        Tab(value: picked, label: tr! { "en" => "Picked" }) {
+                            Spacer
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+
+/// Items of a sidebar, tabs and a toolbar in conditions, a `match` and
+/// lists, with a canvas and a marked text: the Swift type-checks.
+#[test]
+fn dynamic_navigation_items_type_check() {
+    let root = workspace();
+    let dir = root.join("target/bern-test/dynamic-project");
+    let _ = std::fs::remove_dir_all(&dir);
+    for (package, source) in [
+        ("demo-protocol", DYNAMIC_PROTOCOL),
+        ("demo-ui", DYNAMIC_UI),
+        ("demo-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "demo"
+bundle_id = "dev.bern.demo"
+version = "0.1.0"
+name = { "en" = "Demo" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "demo-protocol"
+source = "demo-protocol/src/lib.rs"
+
+[engine]
+package = "demo-core"
+type = "demo_core::Engine"
+
+[ui]
+package = "demo-ui"
+sources = ["demo-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let output = root.join("target/bern-test/swiftui-dynamic");
+    let _ = std::fs::remove_dir_all(&output);
+    let mut context = context(&config, &compiled, "macos", &output);
+    context.project_dir = dir.clone();
+    let problems = SwiftUiMacos.check(&compiled.app, &context.target);
+    assert!(problems.is_empty(), "{problems:?}");
+    for file in SwiftUiMacos.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+    // The selection falls back when its item goes away.
+    assert!(
+        generated.contains(".onChange(of: { () -> [Dest] in"),
+        "{generated}"
+    );
+    if !Command::new("xcrun")
+        .arg("--find")
+        .arg("swiftc")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("swiftc not available; skipping type check");
+        return;
+    }
+    let sources = output.join("Sources");
+    let result = Command::new("xcrun")
+        .args([
+            "swiftc",
+            "-typecheck",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+        ])
+        .arg("-target")
+        .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+        .arg("-module-cache-path")
+        .arg(root.join("target/bern-swift-module-cache"))
+        .arg("-import-objc-header")
+        .arg(sources.join("bern.h"))
+        .arg(sources.join("BernRuntime.swift"))
+        .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernStyle.swift"))
+        .arg(sources.join("BernAppKit.swift"))
+        .arg(sources.join("BernGenerated.swift"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "swiftc rejected the generated code:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
 }

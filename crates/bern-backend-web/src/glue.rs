@@ -12,7 +12,10 @@
 
 use bern_ir::Application;
 use bern_target_api::BuildContext;
-use bern_target_api::glue::{WindowPresentation, players_expr, resources_expr, session_spec};
+use bern_target_api::glue::{
+    WindowPresentation, descriptor_expr, engine_expr, module_dependencies, players_expr,
+    resources_expr, session_spec,
+};
 use std::path::Path;
 
 fn path(path: &Path) -> String {
@@ -58,7 +61,7 @@ path = "src/lib.rs"
 [dependencies]
 {ffi}
 {protocol} = {{ path = "{protocol_path}" }}
-{engine}
+{engine}{modules}
 [workspace]
 
 [profile.release]
@@ -69,6 +72,7 @@ lto = true
         version = app.app.version,
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
+        modules = module_dependencies(context, !remote),
     )
 }
 
@@ -157,7 +161,7 @@ pub unsafe extern "C" fn bern_webui_start(token: *const u8, token_len: usize) ->
     let token = String::from_utf8_lossy(token).into_owned();
     bern_ffi::remote::start(
         spec(),
-        {protocol}::descriptor(),
+        {descriptor},
         (!token.is_empty()).then_some(token),
         callbacks(),
         // SAFETY: the page provides these imports.
@@ -166,7 +170,7 @@ pub unsafe extern "C" fn bern_webui_start(token: *const u8, token_len: usize) ->
     )
 }}
 "#,
-            protocol = context.protocol_module,
+            descriptor = descriptor_expr(context),
         )
     } else {
         format!(
@@ -187,7 +191,7 @@ pub unsafe extern "C" fn bern_web_start(
     // SAFETY: forwarded from the caller.
     unsafe {{
         bern_ffi::start_app(
-            || {protocol}::Adapter(<{engine} as ::std::default::Default>::default()),
+            || {engine},
             spec(),
             fingerprint,
             resources,
@@ -198,8 +202,7 @@ pub unsafe extern "C" fn bern_web_start(
     }}
 }}
 "#,
-            protocol = context.protocol_module,
-            engine = context.engine_type,
+            engine = engine_expr(context),
         )
     };
     let doc = if remote {
@@ -251,7 +254,7 @@ bern-adapter-cli = {{ {cli} }}
 bern-adapter-mcp = {{ {mcp} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {engine} = {{ path = "{engine_path}" }}
-
+{modules}
 [workspace]
 "#,
         id = app.app.id.replace('_', "-"),
@@ -267,6 +270,7 @@ bern-adapter-mcp = {{ {mcp} }}
         protocol_path = path(&context.protocol_path),
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
+        modules = module_dependencies(context, true),
     )
 }
 
@@ -317,9 +321,7 @@ fn main() {{
         eprintln!("error: {{message}}");
         std::process::exit(1);
     }}
-    let host = bern_command::Host::start({protocol}::Adapter(
-        <{engine} as ::std::default::Default>::default(),
-    ));
+    let host = bern_command::Host::start({engine});
     let media = bern_media::MediaHub::new(&[{players}]);
     let sessions = bern_runtime::Sessions::new();
     {ipc_start}
@@ -344,8 +346,7 @@ fn usage() -> ! {{
 "#,
         namespace = app.protocol.namespace,
         program = program(app),
-        protocol = context.protocol_module,
-        engine = context.engine_type,
+        engine = engine_expr(context),
         resources = resources_expr(app),
         players = players_expr(app),
         ipc_doc = if ipc {
@@ -376,13 +377,13 @@ pub fn cli_rs(context: &BuildContext, app: &Application) -> String {
 
 fn main() {{
     std::process::exit(bern_adapter_cli::run(
-        {protocol}::descriptor(),
+        {descriptor},
         {bundle:?},
         {name:?},
     ));
 }}
 "#,
-        protocol = context.protocol_module,
+        descriptor = descriptor_expr(context),
         bundle = app.app.bundle_id,
         name = program(app),
     )
@@ -394,14 +395,14 @@ pub fn mcp_rs(context: &BuildContext, app: &Application) -> String {
 
 fn main() {{
     std::process::exit(bern_adapter_mcp::run(
-        {protocol}::descriptor(),
+        {descriptor},
         {bundle:?},
         {name:?},
         {version:?},
     ));
 }}
 "#,
-        protocol = context.protocol_module,
+        descriptor = descriptor_expr(context),
         bundle = app.app.bundle_id,
         name = program(app),
         version = app.app.version,

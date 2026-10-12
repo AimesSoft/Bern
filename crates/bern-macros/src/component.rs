@@ -84,6 +84,11 @@ impl<'a> Gen<'a> {
 
     fn path(&mut self, path: &PathExpr) -> TokenStream {
         let root = &path.segments[0];
+        // `window.idle`: the hosting window's UI state.
+        if root == "window" && !self.in_scope("window") {
+            let rest = &path.segments[1..];
+            return quote!(::bern::__private::window() #(.#rest)*);
+        }
         if !self.in_scope(&root.to_string()) {
             self.error(
                 root.span(),
@@ -444,13 +449,7 @@ impl<'a> Gen<'a> {
         let name = element.name.to_string();
         let prop_names: Vec<String> = element.props.iter().map(|p| p.name.to_string()).collect();
         let child_names: Option<Vec<Option<String>>> = element.children.as_ref().map(|children| {
-            children
-                .iter()
-                .map(|child| match child {
-                    Node::Element(child) => Some(child.name.to_string()),
-                    _ => None,
-                })
-                .collect()
+            bern_syntax::child_names(children, spec::DYNAMIC_ITEMS.contains(&name.as_str()))
         });
         let shape = ElementShape {
             name: &name,
@@ -484,7 +483,12 @@ impl<'a> Gen<'a> {
         let mut pre = Vec::new();
         let mut post = Vec::new();
         let mut child_ctx = Ctx {
-            parent: Some(name.clone()),
+            // A repetition places its template where it stands itself.
+            parent: if name == "ForEach" {
+                ctx.parent.clone()
+            } else {
+                Some(name.clone())
+            },
             is_root: false,
             selection: ctx.selection.clone(),
             route: ctx.route.clone(),
@@ -659,7 +663,13 @@ impl<'a> Gen<'a> {
                 }
                 PropKind::SelectionValue => {
                     let value = self.value(&prop.value);
-                    match &ctx.selection {
+                    // A container's `fallback` is one of its own values.
+                    let selection = if prop.name == "fallback" {
+                        &child_ctx.selection
+                    } else {
+                        &ctx.selection
+                    };
+                    match selection {
                         Some(selection) => {
                             let span = prop.value.span();
                             pre.push(quote_spanned!(span=> ::bern::__private::same_type(&#selection, &#value);))
@@ -697,7 +707,24 @@ impl<'a> Gen<'a> {
                         window_ids.push(id);
                     }
                 }
-                PropKind::TypeName => {
+                PropKind::ColorRole => {}
+                PropKind::NumberList => {
+                    let value = self.value(&prop.value);
+                    let span = prop.value.span();
+                    pre.push(quote_spanned!(span=> let _ = &#value;));
+                }
+                PropKind::KeyValue => {
+                    let value = self.value(&prop.value);
+                    let span = prop.value.span();
+                    pre.push(quote_spanned!(span=> let _ = &#value;));
+                }
+                PropKind::TypeName
+                | PropKind::SlotName
+                | PropKind::StyleVariant
+                | PropKind::Transition
+                | PropKind::MotionToken
+                | PropKind::HeroName
+                | PropKind::PatternName => {
                     self.ident_prop(&prop.value, &prop_name);
                 }
                 PropKind::MediaSource => match &prop.value {

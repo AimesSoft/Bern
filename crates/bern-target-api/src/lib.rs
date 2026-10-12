@@ -68,6 +68,86 @@ pub struct TargetDescriptor {
     pub channels: &'static [&'static str],
     /// Media support for `Video` and application players, if any.
     pub media: Option<MediaSupport>,
+    /// Style overrides the target can show; none by default.
+    pub styles: &'static [StyleSupport],
+    /// Motion properties the target shows (`appear`, `disappear`,
+    /// `reflow`, `hero`); the others change without motion.
+    pub motion: &'static [&'static str],
+    /// Whether windows honor `chrome`, `immersive` and `idle_after`.
+    pub window_chrome: bool,
+    /// Whether `Text(mark:)` draws its highlight; otherwise the text shows
+    /// plain.
+    pub text_marks: bool,
+    /// Whether items of `Sidebar`, `Tabs` and `Toolbar` may come and go
+    /// with `if`, `if let`, `match` and `ForEach`.
+    pub dynamic_items: bool,
+}
+
+/// The style effects a target shows for one control kind: outside any
+/// state, and in each state.
+#[derive(Clone, Copy, Debug)]
+pub struct StyleSupport {
+    pub component: &'static str,
+    pub base: &'static [&'static str],
+    pub states: &'static [(bern_ir::style::StyleState, &'static [&'static str])],
+}
+
+impl StyleSupport {
+    fn shows(&self, state: Option<bern_ir::style::StyleState>, effect: &str) -> bool {
+        match state {
+            None => self.base.contains(&effect),
+            Some(state) => self
+                .states
+                .iter()
+                .any(|(supported, effects)| *supported == state && effects.contains(&effect)),
+        }
+    }
+}
+
+/// Style overrides `descriptor` cannot show on its platforms, unless the
+/// rule exempts the platform.
+fn check_styles(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    for platform in descriptor.platforms {
+        for rule in app.style.rules_for(platform) {
+            if rule.exempt.iter().any(|exempt| exempt == platform) {
+                continue;
+            }
+            let support = descriptor
+                .styles
+                .iter()
+                .find(|support| support.component == rule.component);
+            let effects =
+                rule.base
+                    .iter()
+                    .map(|effect| (None, effect))
+                    .chain(rule.states.iter().flat_map(|state| {
+                        state
+                            .effects
+                            .iter()
+                            .map(move |effect| (Some(state.state), effect))
+                    }));
+            for (state, effect) in effects {
+                if support.is_some_and(|support| support.shows(state, effect.name())) {
+                    continue;
+                }
+                let place = match state {
+                    Some(state) => format!(" in the `{}` state", state.name()),
+                    None => String::new(),
+                };
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "target `{}` cannot show `{}` on `{}`{place}; write `#[exempt({platform}, \"…\")]` on the rule to keep {platform}'s own look, or `#[target(…)]` to apply it elsewhere",
+                        descriptor.id,
+                        effect.name(),
+                        rule.component
+                    ))
+                    .at(rule.source.clone()),
+                );
+            }
+        }
+    }
+    diagnostics
 }
 
 impl TargetDescriptor {
@@ -335,9 +415,30 @@ pub struct BuildContext {
     pub engine_path: PathBuf,
     /// Rust path of the engine type, which implements `Default`.
     pub engine_type: String,
+    /// The application's modules, in catalog order.
+    pub modules: Vec<ModuleBuild>,
     /// Where generated crates take the Bern crates from.
     pub framework: Framework,
     pub release: bool,
+}
+
+/// The crates of one application module, for the generated glue.
+#[derive(Clone, Debug)]
+pub struct ModuleBuild {
+    pub id: String,
+    pub protocol_package: String,
+    pub protocol_path: PathBuf,
+    /// Rust path of the module's protocol module, e.g. `downloads_protocol::downloads`.
+    pub protocol_module: String,
+    pub engine_package: String,
+    pub engine_path: PathBuf,
+    /// Rust path of the module engine type, which implements `Default`.
+    pub engine_type: String,
+    /// Whether the module can be switched off at run time.
+    pub optional: bool,
+    /// Whether an optional module runs before the application saved a choice.
+    pub enabled: bool,
+    pub depends: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -607,6 +708,19 @@ pub fn files_below(dir: &std::path::Path) -> std::io::Result<Vec<(PathBuf, PathB
     Ok(out)
 }
 
+/// Whether navigation items sit in conditions or repetitions, also inside
+/// a sidebar's sections.
+fn has_dynamic_items(nodes: &[bern_ir::Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        bern_ir::Node::Element(element) if element.kind == "ForEach" => true,
+        bern_ir::Node::Element(element) if element.kind == "Section" => {
+            has_dynamic_items(&element.children)
+        }
+        bern_ir::Node::Element(_) | bern_ir::Node::Component(_) => false,
+        bern_ir::Node::If(_) | bern_ir::Node::IfLet(_) | bern_ir::Node::Match(_) => true,
+    })
+}
+
 /// Check the parts of the IR every target must agree on: IR version,
 /// supported components and window presentation requirements.
 pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
@@ -633,6 +747,83 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
     };
     for component in &app.components {
         component.body.walk(&mut visit);
+    }
+    diagnostics.extend(check_styles(&descriptor, app));
+    let mut still = std::collections::BTreeSet::new();
+    for component in &app.components {
+        component.body.walk(&mut |node| {
+            if let bern_ir::Node::Element(element) = node {
+                for prop in bern_ir::spec::MOTION_PROPS {
+                    if prop.name != "hero_key"
+                        && element.props.contains_key(prop.name)
+                        && !descriptor.motion.contains(&prop.name)
+                    {
+                        still.insert(prop.name);
+                    }
+                }
+            }
+        });
+    }
+    if !descriptor.dynamic_items {
+        let mut dynamic = None;
+        for component in &app.components {
+            component.body.walk(&mut |node| {
+                if let bern_ir::Node::Element(element) = node
+                    && bern_ir::spec::DYNAMIC_ITEMS.contains(&element.kind.as_str())
+                    && dynamic.is_none()
+                    && has_dynamic_items(&element.children)
+                {
+                    dynamic = Some(element);
+                }
+            });
+        }
+        if let Some(element) = dynamic {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "target `{}` cannot build `{}` items that come and go with `if`, `match` or `ForEach`, including pages of modules that can be switched off",
+                    descriptor.id, element.kind
+                ))
+                .at(element.source.clone()),
+            );
+        }
+    }
+    if !descriptor.text_marks {
+        let mut marked = false;
+        for component in &app.components {
+            component.body.walk(&mut |node| {
+                if let bern_ir::Node::Element(element) = node
+                    && element.kind == "Text"
+                    && element.props.contains_key("mark")
+                {
+                    marked = true;
+                }
+            });
+        }
+        if marked {
+            diagnostics.push(Diagnostic::warning(format!(
+                "target `{}` shows `Text(mark:)` as plain text, without the highlight",
+                descriptor.id
+            )));
+        }
+    }
+    if !descriptor.window_chrome {
+        for window in &app.windows.windows {
+            if window.chrome != bern_ir::WindowChrome::Standard
+                || window.immersive.is_some()
+                || window.idle_after.is_some()
+            {
+                diagnostics.push(Diagnostic::warning(format!(
+                    "target `{}` keeps window `{}`'s standard title bar: `chrome`, `immersive` and `idle_after` have no effect there, and `window.idle` stays false",
+                    descriptor.id, window.id
+                )));
+            }
+        }
+    }
+    for prop in still {
+        diagnostics.push(Diagnostic::warning(format!(
+            "target `{}` shows `{prop}` without motion: the change happens at once",
+            descriptor.id
+        )));
     }
     if app.uses_media() {
         let mut video = None;
@@ -772,6 +963,11 @@ mod tests {
     impl Target for Fake {
         fn descriptor(&self) -> TargetDescriptor {
             TargetDescriptor {
+                styles: &[],
+                motion: &[],
+                window_chrome: false,
+                text_marks: false,
+                dynamic_items: false,
                 id: "fake-macos",
                 ui: "swiftui",
                 platforms: &["macos"],

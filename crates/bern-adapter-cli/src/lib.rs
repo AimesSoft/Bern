@@ -405,8 +405,11 @@ mod tests {
             policy: CommandPolicy::default(),
             external: ExternalNames::derive("library", name),
             reads: vec![],
+            on: None,
         };
         let descriptor = ProtocolDescriptor {
+            modules: Vec::new(),
+            events: Vec::new(),
             descriptor_version: DESCRIPTOR_VERSION,
             namespace: "library".into(),
             version: 1,
