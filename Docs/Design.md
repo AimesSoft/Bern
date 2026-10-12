@@ -355,7 +355,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Slider | 范围值、连续变化和提交事件 | 初期 |
 | Picker | 从有限选项中单选，按场景呈现为菜单或分段控件 | 初期 |
 | ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复 | 初期，虚拟化后续 |
-| Image | 随包的 PNG 或 JPEG 资源；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正；目标能显示 HDR 时，带增益图或 PQ、HLG 的图片按高动态范围显示，否则显示其 SDR 版本 | 阶段六；首版只显示随包资源，HDR 已在 macOS 与 Web（Chrome）实现 |
+| Image | 随包的 PNG 或 JPEG 资源；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正；目标能显示 HDR 时，带增益图或 PQ、HLG 的图片按高动态范围显示，否则显示其 SDR 版本 | 阶段六；首版只显示随包资源，HDR 已在 macOS 与 Web（Chrome）验证，Windows 与 Linux 尚未在 HDR 显示器上验证 |
 | Progress | 有 `value` 时是进度条，进度为 `value / total`（`total` 默认 1，超出范围按边界显示）；没有 `value` 时是不确定进度；`label` 同时是可访问名称 | 阶段六 |
 | Menu 和 MenuItem | 收纳操作入口的菜单；每个菜单项绑定命令，可绑定功能 | 阶段四 |
 | Adaptive 和 Layout | 按可用宽度在 `compact` 与 `expanded` 布局之间选择，保留状态 | 阶段四 |

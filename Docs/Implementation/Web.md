@@ -99,7 +99,7 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 
 ## 组件库第一批
 
-- **图片**：`<img>`，地址为 `resources/` 下的资源名称（两种构建都把资源复制到这里），`object-fit` 对应 `fit`；只写一边时另一边为 `auto`，按图片比例。`label` 写入 `alt`，没有时 `alt` 为空，即装饰图片。在表单分组中单独成行并靠前缘。含有图片的 `Row` 与 `Column` 不会缩到比内容还窄（`min-width: min-content`），否则窗口窄于内容时列会被压缩，固定尺寸的图片溢出到相邻的列上；其他布局仍可以缩小并让文字换行。HDR 由浏览器决定：Chrome 154 在 macOS 上按 HDR 显示带增益图的 JPEG 与 PQ 的 PNG（右半 1.69 与 1.85 倍 SDR 白），macOS 27 的 WKWebView 显示 SDR 版本，`dynamic-range-limit: no-limit` 也不改变。
+- **图片**：`<img>`，地址为 `resources/` 下的资源名称（两种构建都把资源复制到这里），`object-fit` 对应 `fit`；只写一边时另一边为 `auto`，按图片比例。`label` 写入 `alt`，没有时 `alt` 为空，即装饰图片。在表单分组中单独成行并靠前缘。含有图片的 `Row` 与 `Column` 不会缩到比内容还窄（`min-width: min-content`），否则窗口窄于内容时列会被压缩，固定尺寸的图片溢出到相邻的列上；其他布局仍可以缩小并让文字换行。HDR 由浏览器决定：Chrome 154 在 macOS 上按 HDR 显示带增益图的 JPEG 与 PQ 的 PNG（右半 1.69 与 1.85 倍 SDR 白），同一台 Mac 上默认配置的 WKWebView（macOS 27）显示 SDR 版本，`dynamic-range-limit: no-limit` 也不改变；Safari 未测。
 - **进度**：有 `value` 时是轨道加填充的 `role="progressbar"`，带 `aria-valuenow` 与 `aria-valuemax`，标签在上；轨道与滑块同为 `control.track`，填充为 `accent`，宽度变化用 `--bern-motion` 过渡（减少动态效果时为 0）。没有 `value` 时为查询已在用的 `.bern-spinner` 加次要文字。
 - **网格**：CSS Grid，`grid-template-columns: repeat(auto-fill, minmax(min(100%, min_width), 1fr))`，`gap` 默认 8 px。
 - **层叠**：一个单元格的 CSS Grid，每层 `grid-area: 1 / 1`，`place-items` 对应 `align` 的九个方位；宽度为 `fit-content`，所以与最大的一层一样大，不会被分组撑满。

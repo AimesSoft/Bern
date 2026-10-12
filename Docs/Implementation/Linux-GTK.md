@@ -151,5 +151,5 @@ target/bern/linux/Showcase/showcase
 - `Menu` 的菜单项图标与 `destructive` 角色不呈现（GNOME 菜单通常只有文字）。
 - 多实例窗口、焦点迁移、Flatpak 等打包与图标安装尚未实现；桌面文件的 `Exec` 是构建机上的绝对路径。
 - 设置窗口切换页签只构建选中的页签；窄窗口下没有底部视图切换栏。
-- `Image` 不显示 HDR：GTK 4.14 没有色彩管理（4.16 起才有色彩空间），带增益图的 JPEG 显示其 SDR 基础图，PQ 的 PNG 被当作 sRGB 显示，整体发灰、对比度低。
+- `Image` 在 Ubuntu 24.04 的 GTK 4.14 上（虚拟机经 Broadway，只有 SDR 输出）实测：带增益图的 JPEG 显示其 SDR 基础图，PQ 的 PNG 整体发灰、对比度低，因为 GTK 4.14 还没有色彩管理（GTK 4.16 起才有）。较新的 GTK 配合支持 HDR 的合成器时的效果尚未验证。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。
