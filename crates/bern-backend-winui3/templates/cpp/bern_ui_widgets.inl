@@ -637,6 +637,242 @@ inline void Stack(Parent const& p, Ctx const& ctx, StackProps props, Build const
     Place(p, panel);
 }
 
+/// The cells of a `Grid`: equal columns, as many as fit at `minWidth` or
+/// wider, filled row by row; each row as tall as its tallest cell.
+struct GridPanel : controls::PanelT<GridPanel> {
+    double minWidth = 120;
+    double spacing = 8;
+    xaml::Thickness padding{0, 0, 0, 0};
+
+    std::vector<xaml::UIElement> Shown() {
+        std::vector<xaml::UIElement> shown;
+        for (auto child : Children())
+            if (child.Visibility() == xaml::Visibility::Visible) shown.push_back(child);
+        return shown;
+    }
+
+    /// Columns and their width in `width`; without a bound, one row.
+    std::pair<size_t, float> Columns(float width, size_t count) const {
+        auto gap = static_cast<float>(spacing);
+        if (std::isinf(width)) return {(std::max)(count, size_t{1}), static_cast<float>(minWidth)};
+        auto columns = (std::max)(static_cast<size_t>((width + gap) / static_cast<float>(minWidth + spacing)), size_t{1});
+        return {columns, (std::max)(0.0f, (width - gap * static_cast<float>(columns - 1)) / static_cast<float>(columns))};
+    }
+
+    float Horizontal() const { return static_cast<float>(padding.Left + padding.Right); }
+    float Vertical() const { return static_cast<float>(padding.Top + padding.Bottom); }
+
+    Size MeasureOverride(Size available) {
+        float inner = std::isinf(available.Width) ? INFINITY : (std::max)(0.0f, available.Width - Horizontal());
+        auto shown = Shown();
+        auto [columns, cell] = Columns(inner, shown.size());
+        float height = 0;
+        for (size_t start = 0; start < shown.size(); start += columns) {
+            float row = 0;
+            for (size_t i = start; i < (std::min)(start + columns, shown.size()); ++i) {
+                shown[i].Measure(Size{cell, INFINITY});
+                row = (std::max)(row, shown[i].DesiredSize().Height);
+            }
+            height += row + (start > 0 ? static_cast<float>(spacing) : 0.0f);
+        }
+        float width = std::isinf(inner) ? (cell + static_cast<float>(spacing)) * static_cast<float>(shown.size()) - static_cast<float>(spacing) : inner;
+        return Size{(std::max)(0.0f, width) + Horizontal(), height + Vertical()};
+    }
+
+    Size ArrangeOverride(Size final) {
+        auto shown = Shown();
+        auto [columns, cell] = Columns((std::max)(0.0f, final.Width - Horizontal()), shown.size());
+        auto gap = static_cast<float>(spacing);
+        float top = static_cast<float>(padding.Top);
+        for (size_t start = 0; start < shown.size(); start += columns) {
+            auto end = (std::min)(start + columns, shown.size());
+            float row = 0;
+            for (size_t i = start; i < end; ++i) row = (std::max)(row, shown[i].DesiredSize().Height);
+            for (size_t i = start; i < end; ++i)
+                shown[i].Arrange(Rect{static_cast<float>(padding.Left) + static_cast<float>(i - start) * (cell + gap), top, cell, row});
+            top += row + gap;
+        }
+        for (auto child : Children())
+            if (child.Visibility() != xaml::Visibility::Visible) child.Arrange(Rect{0, 0, 0, 0});
+        return final;
+    }
+};
+
+struct GridProps {
+    double minWidth = 120;
+    std::optional<double> gap;
+    std::optional<double> padding;
+};
+
+inline void Grid(Parent const& p, Ctx const& ctx, GridProps props, Build const& children) {
+    auto impl = winrt::make_self<GridPanel>();
+    impl->minWidth = props.minWidth;
+    impl->spacing = props.gap.value_or(8);
+    double pad = props.padding.value_or(0);
+    impl->padding = xaml::Thickness{pad, pad, pad, pad};
+    controls::Panel panel = impl.as<controls::Panel>();
+    children(Parent::Of(panel), ctx);
+    Place(p, panel);
+}
+
+struct LayersProps {
+    char const* align = nullptr;
+};
+
+/// `Stack`: layers in the one cell of a grid, later ones above earlier
+/// ones, as large as the largest.
+inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build const& children) {
+    std::string_view align = props.align ? props.align : "center";
+    auto h = align.ends_with("leading") ? xaml::HorizontalAlignment::Left
+        : align.ends_with("trailing") ? xaml::HorizontalAlignment::Right
+        : xaml::HorizontalAlignment::Center;
+    auto v = align.starts_with("top") ? xaml::VerticalAlignment::Top
+        : align.starts_with("bottom") ? xaml::VerticalAlignment::Bottom
+        : xaml::VerticalAlignment::Center;
+    controls::Grid layers;
+    layers.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+    layers.VerticalAlignment(xaml::VerticalAlignment::Top);
+    children(Parent::Aligned(layers, h, v), ctx);
+    // Where a column would stretch the stack, it keeps its size at the
+    // leading edge.
+    controls::Grid holder;
+    holder.Children().Append(layers);
+    Place(p, holder);
+}
+
+/// The bytes of a declared resource, from `resources` next to the
+/// executable; empty when it cannot be read.
+inline std::vector<uint8_t> ResourceBytes(std::string_view name) {
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;) {
+        auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (length < path.size()) {
+            path.resize(length);
+            break;
+        }
+        path.resize(path.size() * 2);
+    }
+    std::wstring file = path.substr(0, path.find_last_of(L'\\')) + L"\\resources\\" + std::wstring(Wide(name));
+    std::replace(file.begin(), file.end(), L'/', L'\\');
+    std::vector<uint8_t> bytes;
+    HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) return bytes;
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(handle, &size) && size.QuadPart > 0 && size.QuadPart < (1LL << 30)) {
+        bytes.resize(static_cast<size_t>(size.QuadPart));
+        DWORD read = 0;
+        if (!ReadFile(handle, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) || read != bytes.size()) bytes.clear();
+    }
+    CloseHandle(handle);
+    return bytes;
+}
+
+/// Decode `bytes` into `bitmap`, back on the UI thread.
+inline winrt::fire_and_forget LoadPicture(media::Imaging::BitmapImage bitmap, std::vector<uint8_t> bytes, std::string name) {
+    winrt::apartment_context ui;
+    try {
+        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+        winrt::Windows::Storage::Streams::DataWriter writer(stream);
+        writer.WriteBytes(bytes);
+        co_await writer.StoreAsync();
+        writer.DetachStream();
+        stream.Seek(0);
+        co_await ui;
+        co_await bitmap.SetSourceAsync(stream);
+    } catch (winrt::hresult_error const& error) {
+        Report("image " + name + ": " + Utf8(error.message()));
+    }
+}
+
+struct ImageProps {
+    char const* source = "";
+    Str label;
+    std::optional<double> width;
+    std::optional<double> height;
+    char const* fit = nullptr;
+};
+
+/// A picture from a declared resource. With one side given, the other
+/// follows the picture's aspect ratio. Without a label it is decorative.
+inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
+    controls::Image image;
+    std::string_view fit = props.fit ? props.fit : "contain";
+    bool framed = props.width && props.height;
+    image.Stretch(!framed || fit == "contain" ? media::Stretch::Uniform
+        : fit == "cover" ? media::Stretch::UniformToFill
+        : media::Stretch::Fill);
+    // The declared frame. With both sides, the picture fits inside it and
+    // is centered when it keeps its aspect ratio; with one, the picture
+    // sets the other.
+    controls::Grid frame;
+    frame.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+    frame.VerticalAlignment(xaml::VerticalAlignment::Top);
+    if (framed) {
+        frame.Width(*props.width);
+        frame.Height(*props.height);
+        image.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        image.VerticalAlignment(xaml::VerticalAlignment::Center);
+    } else {
+        if (props.width) image.Width(*props.width);
+        if (props.height) image.Height(*props.height);
+        image.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+        image.VerticalAlignment(xaml::VerticalAlignment::Top);
+    }
+    frame.Children().Append(image);
+    media::Imaging::BitmapImage bitmap;
+    image.Source(bitmap);
+    if (auto bytes = ResourceBytes(props.source); !bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
+    else Report(std::string("image ") + props.source + ": the resource cannot be read");
+    if (props.label) BindName(image, Bound(ctx, props.label));
+    else xaml::Automation::AutomationProperties::SetAccessibilityView(image, xaml::Automation::Peers::AccessibilityView::Raw);
+    // Where a column would stretch the picture, it keeps its size at the
+    // leading edge.
+    controls::Grid holder;
+    holder.Children().Append(frame);
+    Place(p, holder);
+}
+
+struct ProgressProps {
+    Get value;
+    std::optional<double> total;
+    Str label;
+};
+
+/// A progress bar of `value` out of `total` under its label, or without a
+/// value a progress ring beside it.
+inline void Progress(Parent const& p, Ctx const& ctx, ProgressProps props) {
+    auto label = Bound(ctx, props.label);
+    if (props.value) {
+        double total = props.total.value_or(1);
+        controls::ProgressBar bar;
+        bar.Minimum(0);
+        bar.Maximum(total);
+        Reactive::Run([bar, ctx, value = props.value, total] {
+            double current = R::AsDouble(value(ctx));
+            bar.Value(current > 0 ? (std::min)(current, total) : 0);
+        });
+        BindName(bar, label);
+        Place(p, Stacked(label, bar));
+        return;
+    }
+    controls::ProgressRing ring;
+    ring.IsActive(true);
+    ring.Width(20);
+    ring.Height(20);
+    BindName(ring, label);
+    controls::StackPanel row;
+    row.Orientation(controls::Orientation::Horizontal);
+    row.Spacing(8);
+    row.Children().Append(ring);
+    if (label) {
+        auto text = TextOf(label);
+        Secondary(text);
+        text.VerticalAlignment(xaml::VerticalAlignment::Center);
+        row.Children().Append(text);
+    }
+    Place(p, row);
+}
+
 inline void Spacer(Parent const& p) { p.Add(MakeSpacer()); }
 
 inline void Divider(Parent const& p) {

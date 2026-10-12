@@ -1955,6 +1955,55 @@ struct BernWindowRoot<Content: View>: View {
     }
 }
 
+enum BernImageFit {
+    case contain, cover, fill
+}
+
+/// A picture from a declared resource in Contents/Resources. With one side
+/// given, the other follows the picture's aspect ratio. A label makes it an
+/// image for assistive technologies; without one it is decorative.
+struct BernImage: View {
+    let name: String
+    let label: String?
+    let width: CGFloat?
+    let height: CGFloat?
+    let fit: BernImageFit
+
+    @MainActor private static var loaded: [String: NSImage] = [:]
+
+    @MainActor static func picture(_ name: String) -> NSImage? {
+        if let image = loaded[name] { return image }
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent(name),
+              let image = NSImage(contentsOf: url) else { return nil }
+        loaded[name] = image
+        return image
+    }
+
+    var body: some View {
+        let image = Self.picture(name)
+        let size = image?.size ?? .zero
+        let ratio = size.width > 0 && size.height > 0 ? size.width / size.height : 1
+        let shown = Group {
+            if let image {
+                switch fit {
+                case .contain: SwiftUI.Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
+                case .cover: SwiftUI.Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                case .fill: SwiftUI.Image(nsImage: image).resizable()
+                }
+            } else {
+                Color.clear
+            }
+        }
+        .frame(width: width ?? height.map { $0 * ratio }, height: height ?? width.map { $0 / ratio })
+        .clipped()
+        if let label {
+            shown.accessibilityElement().accessibilityLabel(Text(verbatim: label)).accessibilityAddTraits(.isImage)
+        } else {
+            shown.accessibilityHidden(true)
+        }
+    }
+}
+
 final class BernAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 

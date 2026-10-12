@@ -1,0 +1,5 @@
+error: `pictures/cover.gif` is not a PNG or JPEG image (.png, .jpg or .jpeg)
+  --> tests/ui/fail_image_not_a_picture.rs:39:25
+   |
+39 |     ui! { Image(source: "pictures/cover.gif", width: 120) }
+   |                         ^^^^^^^^^^^^^^^^^^^^

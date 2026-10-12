@@ -248,7 +248,8 @@ pub fn dispatch(ctx: &Ctx, command: usize, args: Vec<Value>, done: Option<Done>)
     });
 }
 
-fn resources_dir() -> String {
+/// The directory of the declared resources, next to the executable.
+pub(crate) fn resources_dir() -> String {
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join("resources")))
@@ -299,7 +300,10 @@ fn install_icon(bundle_id: &str) {
         let theme = gtk::IconTheme::for_display(&display);
         theme.add_search_path(&dir);
         if !theme.has_icon(bundle_id) {
-            eprintln!("bern: the application icon {bundle_id}.png is missing from {}", dir.display());
+            eprintln!(
+                "bern: the application icon {bundle_id}.png is missing from {}",
+                dir.display()
+            );
         }
     }
     gtk::Window::set_default_icon_name(bundle_id);

@@ -58,6 +58,10 @@
 | `Query` | 加载：转圈与文案；空结果与无数据失败：紧凑的 `AdwStatusPage`（失败带“重试”）；刷新与有数据的失败：数据上方的状态行 |
 | `Adaptive` / `Layout` | 一个零高度的绘图区测量可用宽度，按 `[layouts]` 断点选择布局 |
 | `Video` | `GtkPicture` 显示播放器的 `GtkMediaFile`，下方为标准控制条（见“媒体”） |
+| `Image` | `GtkPicture`（`content-fit` 对应 `fit`，可缩小）放在固定尺寸的 `BernPictureFrame` 中：`GtkPicture` 本身要求原图大小，这个小部件把它限制为声明的宽高，得到更多空间时仍靠前缘；只写一边时另一边按图片比例。`label` 为替代文本，没有时对辅助技术隐藏 |
+| `Progress` | 有 `value` 时为标签下的 `GtkProgressBar`，由标签命名；没有时为 `GtkSpinner` 加 `dim-label` 文字（libadwaita 1.5 还没有 `AdwSpinner`） |
+| `Grid` | 同宽单元格的 `GtkFlowBox`：每格至少 `min_width` 宽，不可选择，单元格本身不获得焦点 |
+| `Stack` | `GtkGrid` 的同一个格子，子元素的顺序即叠放顺序，按 `align` 设 `halign` 与 `valign`；外面一层横向 `GtkBox` 让它保持自身尺寸 |
 
 图标使用 Bern 的 SF Symbols 命名，映射到 freedesktop 符号图标名（例如 `magnifyingglass` → `system-search-symbolic`），由用户的图标主题绘制；GNOME 上即 Adwaita 图标。
 
@@ -132,6 +136,11 @@ target/bern/linux/Showcase/showcase
 - **外观**：浅色与深色（`BERN_APPEARANCE=dark`）下主窗口与设置窗口全部为 libadwaita 标准样式。
 
 - **手动验证**（在虚拟机桌面中由用户操作）：备注有内容时点按标题栏关闭按钮与按 Ctrl+W 都先弹出“要放弃备注吗？”；设置窗口按 Esc 关闭；推入的详情页按 Esc 与 Alt+← 返回列表；中文输入法在“名字”中输入，预览正确显示。
+
+2026-10-12，组件库第一批，同一虚拟机，应用经 Broadway（`gtk4-broadwayd`，不需要桌面会话）显示在浏览器中：
+
+- `bern-backend-gtk` 的测试（包括对生成的应用做类型检查）通过，`bern-gtk` 的 clippy 没有警告，应用日志没有 GTK 警告。
+- “图片与布局”页：三种 `fit` 在 120×90 的框中分别留白、裁掉两边、拉伸，只写宽度的标志保持比例；层叠中标志在右上角；网格在 680 宽的表单中为三列；不确定进度为转圈加灰色文字。CLI 执行 `showcase set-volume --value 90` 与 `ui set-number --target layout_page.layout_brightness --value 0.2` 后两个进度条立即变为 90% 与 20%。
 
 未完成的验证：真实声卡下的播放；完整的键盘遍历、屏幕阅读器；高对比与大字体；X11 会话与 KDE Plasma；分数缩放与多显示器。
 

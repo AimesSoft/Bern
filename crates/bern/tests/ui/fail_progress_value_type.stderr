@@ -1,0 +1,18 @@
+error[E0277]: the trait bound `String: Numeric` is not satisfied
+  --> tests/ui/fail_progress_value_type.rs:39:27
+   |
+39 |     ui! { Progress(value: app.title) }
+   |                           ^^^ the trait `Numeric` is not implemented for `String`
+   |
+help: the following other types implement trait `Numeric`
+  --> src/bind.rs
+   |
+   | impl Numeric for i64 {}
+   | ^^^^^^^^^^^^^^^^^^^^ `i64`
+   | impl Numeric for f64 {}
+   | ^^^^^^^^^^^^^^^^^^^^ `f64`
+note: required by a bound in `bern::__private::number_value`
+  --> src/__private.rs
+   |
+   | pub fn number_value<N: Numeric>(_: &N) {}
+   |                        ^^^^^^^ required by this bound in `number_value`

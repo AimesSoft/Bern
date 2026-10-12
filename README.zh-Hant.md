@@ -75,7 +75,7 @@ AI 使用應用程式時，每個按鈕都是 MCP 工具：讀的是控制項的
 <td width="33%" valign="top">
 <h3>輕到不像跨平台</h3>
 桌面上不帶瀏覽器核心與 JS 引擎，商業引擎編譯成原生程式碼，在應用程式行程內執行。<br><br>
-實測 release 版展示應用程式：macOS 記憶體 <b>39 MB</b>、<b>0.4 秒</b>出現視窗，整個應用程式套件 <b>2.6 MB</b>；Windows 記憶體 <b>35 MB</b>、<b>0.3 秒</b>出現視窗，整個應用程式 <b>4.2 MB</b>，不需要 .NET；整個 Web 應用程式連同 Rust 引擎 gzip 後 <b>187 KB</b>。
+實測 release 版展示應用程式：macOS 記憶體 <b>39 MB</b>、<b>0.4 秒</b>出現視窗，整個應用程式套件 <b>2.7 MB</b>；Windows 記憶體 <b>35 MB</b>、<b>0.3 秒</b>出現視窗，整個應用程式 <b>4.2 MB</b>，不需要 .NET；整個 Web 應用程式連同 Rust 引擎 gzip 後 <b>189 KB</b>。
 </td>
 </tr>
 </table>
@@ -139,7 +139,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 | :-- | :-- | :-- | :-- |
 | 啟動到視窗可見 | 0.41 秒 | 0.32 秒 | – |
 | 記憶體 | 39 MB | 35 MB | – |
-| 大小 | 應用程式套件 2.6 MB（執行檔 2.3 MB），不內嵌任何框架 | 應用程式目錄 4.2 MB，引擎在執行檔內，介面框架用系統的 | 全部資源 gzip 後 187 KB，含 Rust 引擎 |
+| 大小 | 應用程式套件 2.7 MB（執行檔 2.3 MB），不內嵌任何框架 | 應用程式目錄 4.2 MB，引擎在執行檔內，介面框架用系統的 | 全部資源 gzip 後 189 KB，含 Rust 引擎 |
 
 <details>
 <summary>測量方法</summary>
@@ -196,6 +196,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - **型別化導覽**：側邊欄、帶型別化路由的推入式導覽、分頁、工具列與選單。
 - **功能契約**：宣告元件在每種版面中必須涵蓋的功能，由編譯器證明涵蓋完整。
 - **隨附資源**：在 `Bern.toml` 中宣告檔案，建置時檢查，執行時依名稱定位。
+- **圖片與版面**：`Image` 顯示隨附圖片，未宣告的資源在編譯時報錯；`Grid` 依可用寬度自動增減欄數，`Stack` 疊放並依九個方位對齊，`Progress` 顯示進度列或不確定進度。
 
 </details>
 
@@ -604,7 +605,7 @@ showcase-mcp                                                 # 經 stdio 的 MCP
 | 3 | Web 視覺規範、主題核心、WebAssembly 應用程式與 WebUI 兩種建置 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 4 | 自適應版面、選單、功能契約、執行時切換語言 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 5 | 其他原生前端：GTK 4（已完成）· WinUI 3（已完成）· `flutter + macos`（下一步） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | 元件庫、打包、增量建置、開發工具（`bern new`、`run`、`doctor`、`package` 已完成），接入 NipaPlay 3.0 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 6 | 元件庫（第一批 `Image`、`Progress`、`Grid`、`Stack` 已完成）、打包、增量建置、開發工具（`bern new`、`run`、`doctor`、`package` 已完成），接入 NipaPlay 3.0 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## 儲存庫結構
 

@@ -817,6 +817,51 @@ impl<'a> Generator<'a> {
                     ");",
                 );
             }
+            "Grid" => {
+                let props = Self::props(vec![
+                    ("minWidth", element.number("min_width").map(number)),
+                    ("gap", element.number("gap").map(number)),
+                    ("padding", element.number("padding").map(number)),
+                ]);
+                self.children(
+                    out,
+                    &format!("B.Grid(p, ctx, {props}, "),
+                    &element.children,
+                    ");",
+                );
+            }
+            "Stack" => {
+                let props = Self::props(vec![("align", Self::keyword(element, "align"))]);
+                self.children(
+                    out,
+                    &format!("B.Layers(p, ctx, {props}, "),
+                    &element.children,
+                    ");",
+                );
+            }
+            "Image" => out.line(format!(
+                "B.Image(p, ctx, {});",
+                Self::props(vec![
+                    ("source", element.resource("source").map(string)),
+                    ("label", self.text_prop(element, "label")),
+                    ("width", element.number("width").map(number)),
+                    ("height", element.number("height").map(number)),
+                    ("fit", Self::keyword(element, "fit")),
+                ])
+            )),
+            "Progress" => out.line(format!(
+                "B.Progress(p, ctx, {});",
+                Self::props(vec![
+                    (
+                        "value",
+                        element
+                            .expr("value")
+                            .map(|value| format!("() => {}", self.expr(value)))
+                    ),
+                    ("total", element.number("total").map(number)),
+                    ("label", self.text_prop(element, "label")),
+                ])
+            )),
             "Spacer" => out.line("B.Spacer(p);"),
             "Divider" => out.line("B.Divider(p);"),
             "ScrollView" => {

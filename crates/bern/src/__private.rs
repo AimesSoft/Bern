@@ -45,6 +45,8 @@ pub fn bool_field(_: &SessionField<bool>) {}
 
 pub fn number_field(_: &SessionField<f64>) {}
 
+pub fn number_value<N: Numeric>(_: &N) {}
+
 pub fn picker_field<E: LabeledEnum>(_: &SessionField<E>) {}
 
 pub fn selection_field<E: BernEnum>(_: &SessionField<E>) -> E {

@@ -1048,6 +1048,76 @@ impl<'a> Generator<'a> {
                 }
                 self.toolbar(out, &element.children, ctx);
             }
+            "Grid" => {
+                let gap = double(element.number("gap").unwrap_or(8.0));
+                out.open(format!(
+                    "SwiftUI.LazyVGrid(columns: [SwiftUI.GridItem(.adaptive(minimum: {}), spacing: {gap})], alignment: .leading, spacing: {gap}) {{",
+                    double(element.number("min_width").unwrap_or(120.0))
+                ));
+                self.nodes(out, &element.children, ctx);
+                out.close("}");
+                if let Some(padding) = element.number("padding") {
+                    out.line(format!(".padding({})", double(padding)));
+                }
+            }
+            "Stack" => {
+                let alignment = match element.keyword("align") {
+                    Some("top_leading") => ".topLeading",
+                    Some("top") => ".top",
+                    Some("top_trailing") => ".topTrailing",
+                    Some("leading") => ".leading",
+                    Some("trailing") => ".trailing",
+                    Some("bottom_leading") => ".bottomLeading",
+                    Some("bottom") => ".bottom",
+                    Some("bottom_trailing") => ".bottomTrailing",
+                    _ => ".center",
+                };
+                out.open(format!("SwiftUI.ZStack(alignment: {alignment}) {{"));
+                self.nodes(out, &element.children, ctx);
+                out.close("}");
+            }
+            "Image" => {
+                let fit = match element.keyword("fit") {
+                    Some("cover") => ".cover",
+                    Some("fill") => ".fill",
+                    _ => ".contain",
+                };
+                let length = |name| {
+                    element
+                        .number(name)
+                        .map(double)
+                        .unwrap_or_else(|| "nil".into())
+                };
+                out.line(format!(
+                    "BernImage(name: {}, label: {}, width: {}, height: {}, fit: {fit})",
+                    string(element.resource("source").unwrap_or_default()),
+                    self.text_prop(element, "label")
+                        .unwrap_or_else(|| "nil".into()),
+                    length("width"),
+                    length("height"),
+                ));
+            }
+            "Progress" => {
+                let label = self.text_prop(element, "label");
+                let head = match element.expr("value") {
+                    Some(value) => {
+                        let total = double(element.number("total").unwrap_or(1.0));
+                        format!(
+                            "SwiftUI.ProgressView(value: min(max(Double({}), 0), {total}), total: {total})",
+                            self.expr(value)
+                        )
+                    }
+                    None => "SwiftUI.ProgressView()".into(),
+                };
+                match label {
+                    Some(label) => {
+                        out.open(format!("{} {{", head.trim_end_matches("()")));
+                        out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                        out.close("}");
+                    }
+                    None => out.line(head),
+                }
+            }
             "Spacer" => out.line("SwiftUI.Spacer()"),
             "Divider" => out.line("SwiftUI.Divider()"),
             "ScrollView" => {

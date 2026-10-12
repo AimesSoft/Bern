@@ -87,6 +87,12 @@ impl Displayable for SessionField<f64> {}
 impl<E: LabeledEnum> Displayable for Binding<E> {}
 impl<E: LabeledEnum> Displayable for SessionField<E> {}
 
+/// Numbers a `Progress` value can be.
+pub trait Numeric {}
+
+impl Numeric for i64 {}
+impl Numeric for f64 {}
+
 /// Types usable as a stable list key.
 pub trait ListKey {}
 

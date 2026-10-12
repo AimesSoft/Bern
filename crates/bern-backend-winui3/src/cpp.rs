@@ -734,6 +734,47 @@ impl<'a> Generator<'a> {
                 ),
                 &element.children,
             ),
+            "Grid" => self.call(
+                out,
+                &format!(
+                    "B::Grid(p, c, {}, ",
+                    designated(&[
+                        ("minWidth", Self::number(element, "min_width")),
+                        ("gap", Self::number(element, "gap")),
+                        ("padding", Self::number(element, "padding")),
+                    ])
+                ),
+                &element.children,
+            ),
+            "Stack" => self.call(
+                out,
+                &format!(
+                    "B::Layers(p, c, {}, ",
+                    designated(&[("align", Self::keyword(element, "align"))])
+                ),
+                &element.children,
+            ),
+            "Image" => out.line(format!(
+                "B::Image(p, c, {});",
+                designated(&[
+                    ("source", element.resource("source").map(string)),
+                    ("label", self.text_prop(element, "label")),
+                    ("width", Self::number(element, "width")),
+                    ("height", Self::number(element, "height")),
+                    ("fit", Self::keyword(element, "fit")),
+                ])
+            )),
+            "Progress" => out.line(format!(
+                "B::Progress(p, c, {});",
+                designated(&[
+                    (
+                        "value",
+                        element.expr("value").map(|value| self.getter(value))
+                    ),
+                    ("total", Self::number(element, "total")),
+                    ("label", self.text_prop(element, "label")),
+                ])
+            )),
             "Spacer" => out.line("B::Spacer(p);"),
             "Divider" => out.line("B::Divider(p);"),
             "ScrollView" => self.call(

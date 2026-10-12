@@ -26,6 +26,8 @@ pub enum Page {
     Controls,
     #[label(tr! { "zh-Hans" => "输入框", "en" => "Text Fields" })]
     Inputs,
+    #[label(tr! { "zh-Hans" => "图片与布局", "en" => "Images & Layout" })]
+    Layout,
     #[label(tr! { "zh-Hans" => "列表与详情", "en" => "List & Detail" })]
     Library,
     #[label(tr! { "zh-Hans" => "视频", "en" => "Video" })]
@@ -150,6 +152,7 @@ pub fn main_window(
                     SidebarItem(value: Page::Buttons, label: tr! { "zh-Hans" => "按钮", "en" => "Buttons" }, icon: "hand.tap")
                     SidebarItem(value: Page::Controls, label: tr! { "zh-Hans" => "开关与滑块", "en" => "Switches & Sliders" }, icon: "switch.2")
                     SidebarItem(value: Page::Inputs, label: tr! { "zh-Hans" => "输入框", "en" => "Text Fields" }, icon: "character.cursor.ibeam")
+                    SidebarItem(value: Page::Layout, label: tr! { "zh-Hans" => "图片与布局", "en" => "Images & Layout" }, icon: "photo")
                 }
                 Section(title: tr! { "zh-Hans" => "数据", "en" => "Data" }) {
                     SidebarItem(value: Page::Library, label: tr! { "zh-Hans" => "列表与详情", "en" => "List & Detail" }, icon: "list.bullet.rectangle")
@@ -162,6 +165,7 @@ pub fn main_window(
                     Page::Buttons => { buttons_page(app: app, windows: windows) }
                     Page::Controls => { controls_page(app: app) }
                     Page::Inputs => { inputs_page(app: app) }
+                    Page::Layout => { layout_page(app: app) }
                     Page::Library => { library_page(app: app, players: players) }
                     Page::Media => { media_page(app: app, players: players) }
                 }

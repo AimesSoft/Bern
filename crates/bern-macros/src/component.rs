@@ -611,7 +611,35 @@ impl<'a> Gen<'a> {
                     }
                     other => self.error(other.span(), "expected an icon name literal"),
                 },
+                PropKind::ImageResource => match &prop.value {
+                    Expr::Literal {
+                        value: Literal::Text(name),
+                        span,
+                    } => {
+                        if let Err(message) = bern_protocol::check_resource_name(name) {
+                            self.error(*span, message);
+                        } else if !name.rsplit_once('.').is_some_and(|(_, ext)| {
+                            spec::IMAGE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
+                        }) {
+                            self.error(
+                                *span,
+                                format!(
+                                    "`{name}` is not a PNG or JPEG image (.png, .jpg or .jpeg)"
+                                ),
+                            );
+                        }
+                    }
+                    other => self.error(
+                        other.span(),
+                        "expected the name of a declared resource, e.g. \"images/cover.png\"",
+                    ),
+                },
                 PropKind::Number => self.literal_number(&prop.value),
+                PropKind::NumberValue => {
+                    let value = self.value(&prop.value);
+                    let span = prop.value.span();
+                    pre.push(quote_spanned!(span=> ::bern::__private::number_value(&#value);));
+                }
                 PropKind::Bool => {
                     let value = self.value(&prop.value);
                     let span = prop.value.span();

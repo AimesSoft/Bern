@@ -17,6 +17,7 @@ mod host;
 mod icons;
 mod media;
 mod parent;
+mod picture;
 mod query;
 pub mod reactive;
 mod session;

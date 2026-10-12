@@ -717,6 +717,64 @@ button:disabled {
   flex: 1;
 }
 
+.bern-grid {
+  display: grid;
+  min-width: 0;
+}
+
+/* Stack: every layer in the same cell, later ones on top; as large as
+   the largest layer. */
+.bern-layers {
+  display: grid;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.bern-layers > * {
+  grid-area: 1 / 1;
+}
+
+.bern-image {
+  display: block;
+  flex: none;
+  min-width: 0;
+}
+
+.bern-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bern-progress-indeterminate {
+  flex-direction: row;
+  align-items: center;
+}
+
+.bern-progress-label {
+  color: var(--bern-text-primary);
+}
+
+.bern-progress-indeterminate .bern-progress-label {
+  color: var(--bern-text-secondary);
+}
+
+.bern-progress-track {
+  height: var(--bern-track);
+  border-radius: calc(var(--bern-track) / 2);
+  background: var(--bern-control-track);
+  overflow: hidden;
+}
+
+.bern-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bern-accent);
+  transition: width var(--bern-motion);
+}
+
 .bern-divider {
   align-self: stretch;
   margin: 0;
@@ -849,6 +907,11 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+}
+
+/* A picture or a stack of layers as a row of its own, at the leading edge. */
+.bern-row-media {
+  justify-content: flex-start;
 }
 
 .bern-row-stacked {

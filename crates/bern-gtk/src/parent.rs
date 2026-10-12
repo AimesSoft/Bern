@@ -14,6 +14,11 @@ use std::rc::{Rc, Weak};
 enum Sink {
     Box(gtk::Box),
     List(gtk::ListBox),
+    /// The cells of a `Grid`, each at least this wide.
+    Flow(gtk::FlowBox, i32),
+    /// The layers of a `Stack`: every child in the grid's one cell, placed
+    /// by the alignments.
+    Layers(gtk::Grid, gtk::Align, gtk::Align),
 }
 
 enum Item {
@@ -108,6 +113,26 @@ impl Parent {
         }
     }
 
+    /// Cells of a flow box, `min_width` wide or wider.
+    pub(crate) fn of_flow(flow: &gtk::FlowBox, min_width: i32) -> Self {
+        Self {
+            sink: Sink::Flow(flow.clone(), min_width),
+            region: Region::new(None),
+            horizontal: false,
+            cross: None,
+        }
+    }
+
+    /// Layers in the one cell of `grid`, aligned in it.
+    pub(crate) fn of_layers(grid: &gtk::Grid, halign: gtk::Align, valign: gtk::Align) -> Self {
+        Self {
+            sink: Sink::Layers(grid.clone(), halign, valign),
+            region: Region::new(None),
+            horizontal: false,
+            cross: None,
+        }
+    }
+
     /// Whether children are rows of a boxed list, as in form sections.
     pub fn is_list(&self) -> bool {
         matches!(self.sink, Sink::List(_))
@@ -120,6 +145,36 @@ impl Parent {
     fn insert_at(&self, widget: &gtk::Widget, index: usize) {
         match &self.sink {
             Sink::List(list) => list.insert(widget, index as i32),
+            Sink::Flow(flow, min_width) => {
+                flow.insert(widget, index as i32);
+                // The cell, not its content, is what the flow box sizes
+                // and focuses; content keeps the focus.
+                if let Some(cell) = widget.parent() {
+                    cell.set_size_request(*min_width, -1);
+                    cell.set_focusable(false);
+                }
+            }
+            Sink::Layers(grid, halign, valign) => {
+                widget.set_halign(*halign);
+                widget.set_valign(*valign);
+                grid.attach(widget, 0, 0, 1, 1);
+                // Later children draw above earlier ones: move it to its
+                // place among the layers.
+                let mut previous = None;
+                let mut child = grid.first_child();
+                let mut position = 0;
+                while let Some(current) = child {
+                    if position == index {
+                        break;
+                    }
+                    child = current.next_sibling();
+                    if &current != widget {
+                        position += 1;
+                        previous = Some(current);
+                    }
+                }
+                widget.insert_after(grid, previous.as_ref());
+            }
             Sink::Box(container) => {
                 let mut previous = None;
                 let mut child = container.first_child();
@@ -150,6 +205,8 @@ impl Parent {
                     }
                 }
             }
+            Sink::Flow(flow, _) => flow.remove(widget),
+            Sink::Layers(grid, _, _) => grid.remove(widget),
             Sink::Box(container) => container.remove(widget),
         }
     }

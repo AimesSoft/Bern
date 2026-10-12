@@ -75,7 +75,7 @@ AI がアプリを使うときは、どのボタンも MCP ツールです。コ
 <td width="33%" valign="top">
 <h3>クロスプラットフォームとは思えない軽さ</h3>
 デスクトップにはブラウザーエンジンも JS エンジンもなく、業務エンジンはネイティブコードにコンパイルされ、アプリのプロセス内で動きます。<br><br>
-release ビルドのショーケースの実測：macOS でメモリ <b>39 MB</b>、<b>0.4 秒</b>でウィンドウ表示、アプリバンドル全体で <b>2.6 MB</b>。Windows でメモリ <b>35 MB</b>、<b>0.3 秒</b>、アプリ全体で <b>4.2 MB</b>、.NET 不要。Web アプリ全体は Rust エンジン込みで gzip 後 <b>187 KB</b>。
+release ビルドのショーケースの実測：macOS でメモリ <b>39 MB</b>、<b>0.4 秒</b>でウィンドウ表示、アプリバンドル全体で <b>2.7 MB</b>。Windows でメモリ <b>35 MB</b>、<b>0.3 秒</b>、アプリ全体で <b>4.2 MB</b>、.NET 不要。Web アプリ全体は Rust エンジン込みで gzip 後 <b>189 KB</b>。
 </td>
 </tr>
 </table>
@@ -139,7 +139,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 | :-- | :-- | :-- | :-- |
 | 起動からウィンドウ表示まで | 0.41 秒 | 0.32 秒 | – |
 | メモリ | 39 MB | 35 MB | – |
-| サイズ | アプリバンドル 2.6 MB（実行ファイル 2.3 MB）、フレームワークの同梱なし | アプリフォルダー 4.2 MB、エンジンは実行ファイル内、UI フレームワークはシステムのもの | 全アセットを gzip して 187 KB、Rust エンジンを含む |
+| サイズ | アプリバンドル 2.7 MB（実行ファイル 2.3 MB）、フレームワークの同梱なし | アプリフォルダー 4.2 MB、エンジンは実行ファイル内、UI フレームワークはシステムのもの | 全アセットを gzip して 189 KB、Rust エンジンを含む |
 
 <details>
 <summary>測定方法</summary>
@@ -196,6 +196,7 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 - **型付きナビゲーション**：サイドバー、型付きルートによるプッシュナビゲーション、タブ、ツールバー、メニュー。
 - **機能契約**：各レイアウトでコンポーネントが満たすべき機能を宣言し、網羅をコンパイラーが証明します。
 - **同梱リソース**：`Bern.toml` で宣言したファイルをビルド時に検査し、実行時は名前で参照します。
+- **画像とレイアウト**：`Image` は同梱画像を表示し、宣言されていないリソースはコンパイルエラーになります。`Grid` は幅に応じて列数を増減し、`Stack` は 9 方向の配置で重ね、`Progress` はプログレスバーか不確定の進捗を表示します。
 
 </details>
 
@@ -604,7 +605,7 @@ showcase-mcp                                                 # stdio の MCP サ
 | 3 | Web のビジュアル仕様、テーマカーネル、WebAssembly アプリと WebUI の 2 種類のビルド | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 4 | アダプティブレイアウト、メニュー、機能契約、実行時の言語切り替え | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 5 | ほかのネイティブフロントエンド：GTK 4（完了）· WinUI 3（完了）· `flutter + macos`（次） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor`・`package` は完了）、NipaPlay 3.0 への導入 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 6 | コンポーネントライブラリ（第 1 弾の `Image`・`Progress`・`Grid`・`Stack` は完了）、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor`・`package` は完了）、NipaPlay 3.0 への導入 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## リポジトリ構成
 

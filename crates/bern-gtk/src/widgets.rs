@@ -1008,6 +1008,175 @@ pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
     place(p, &container);
 }
 
+#[derive(Default)]
+pub struct GridProps {
+    pub min_width: f64,
+    pub gap: Option<f64>,
+    pub padding: Option<f64>,
+}
+
+/// Equal columns, as many as fit at `min_width` or wider: a flow box whose
+/// cells share each line.
+#[allow(non_snake_case)]
+pub fn Grid(p: &Parent, ctx: &Ctx, props: GridProps, children: Build) {
+    let flow = gtk::FlowBox::new();
+    flow.set_homogeneous(true);
+    flow.set_selection_mode(gtk::SelectionMode::None);
+    flow.set_activate_on_single_click(false);
+    flow.set_min_children_per_line(1);
+    flow.set_max_children_per_line(64);
+    flow.set_valign(gtk::Align::Start);
+    let gap = props.gap.unwrap_or(8.0).max(0.0) as u32;
+    flow.set_row_spacing(gap);
+    flow.set_column_spacing(gap);
+    if let Some(padding) = props.padding {
+        let padding = padding as i32;
+        flow.set_margin_top(padding);
+        flow.set_margin_bottom(padding);
+        flow.set_margin_start(padding);
+        flow.set_margin_end(padding);
+    }
+    children(&Parent::of_flow(&flow, props.min_width.round() as i32), ctx);
+    place(p, &flow);
+}
+
+#[derive(Default)]
+pub struct LayersProps {
+    pub align: Option<&'static str>,
+}
+
+/// `Stack`: layers in one grid cell, later ones above earlier ones.
+#[allow(non_snake_case)]
+pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
+    use gtk::Align::{Center, End, Start};
+    let (valign, halign) = match props.align.unwrap_or("center") {
+        "top_leading" => (Start, Start),
+        "top" => (Start, Center),
+        "top_trailing" => (Start, End),
+        "leading" => (Center, Start),
+        "trailing" => (Center, End),
+        "bottom_leading" => (End, Start),
+        "bottom" => (End, Center),
+        "bottom_trailing" => (End, End),
+        _ => (Center, Center),
+    };
+    let grid = gtk::Grid::new();
+    grid.set_halign(Start);
+    grid.set_valign(Start);
+    children(&Parent::of_layers(&grid, halign, valign), ctx);
+    // The stack is as large as its largest layer; where a column would
+    // stretch it, it keeps that size at the leading edge.
+    let holder = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    holder.append(&grid);
+    place(p, &holder);
+}
+
+#[derive(Default)]
+pub struct ImageProps {
+    /// Name of the declared resource.
+    pub source: &'static str,
+    pub label: Option<Str>,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub fit: Option<&'static str>,
+}
+
+/// A picture from a declared resource. With one side given, the other
+/// follows the picture's aspect ratio. Without a label it is decorative.
+#[allow(non_snake_case)]
+pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
+    let path = std::path::Path::new(&crate::host::resources_dir()).join(props.source);
+    let picture = gtk::Picture::for_filename(&path);
+    picture.set_can_shrink(true);
+    picture.set_content_fit(match props.fit {
+        Some("cover") => gtk::ContentFit::Cover,
+        Some("fill") => gtk::ContentFit::Fill,
+        _ => gtk::ContentFit::Contain,
+    });
+    let (natural_width, natural_height) = picture
+        .paintable()
+        .map(|paintable| (paintable.intrinsic_width(), paintable.intrinsic_height()))
+        .unwrap_or((0, 0));
+    let ratio = if natural_width > 0 && natural_height > 0 {
+        f64::from(natural_width) / f64::from(natural_height)
+    } else {
+        1.0
+    };
+    let width = props.width.or(props.height.map(|height| height * ratio));
+    let height = props.height.or(props.width.map(|width| width / ratio));
+    match &props.label {
+        Some(label) => {
+            let text = bound_text(ctx, label);
+            let described = picture.clone();
+            effect(move || described.set_alternative_text(Some(&text())));
+        }
+        None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
+    }
+    let frame = crate::picture::Frame::new(
+        &picture,
+        width.unwrap_or(0.0).round() as i32,
+        height.unwrap_or(0.0).round() as i32,
+    );
+    place(p, &frame);
+}
+
+#[derive(Default)]
+pub struct ProgressProps {
+    pub value: Option<Get>,
+    pub total: Option<f64>,
+    pub label: Option<Str>,
+}
+
+/// A progress bar of `value` out of `total` under its label, or without a
+/// value a spinner beside it.
+#[allow(non_snake_case)]
+pub fn Progress(p: &Parent, ctx: &Ctx, props: ProgressProps) {
+    let label = props.label.as_ref().map(|text| {
+        let label = gtk::Label::new(None);
+        label.set_xalign(0.0);
+        label.set_wrap(true);
+        bind_label(&label, bound_text(ctx, text));
+        label
+    });
+    let container = match props.value {
+        Some(value) => {
+            let total = props.total.unwrap_or(1.0);
+            let bar = gtk::ProgressBar::new();
+            let shown = bar.clone();
+            let ctx = ctx.clone();
+            effect(move || {
+                let current = as_f64(&value(&ctx));
+                shown.set_fraction((current / total).clamp(0.0, 1.0));
+            });
+            let column = gtk::Box::new(gtk::Orientation::Vertical, 6);
+            column.set_hexpand(true);
+            if let Some(label) = &label {
+                bar.update_relation(&[gtk::accessible::Relation::LabelledBy(
+                    &[label.upcast_ref()],
+                )]);
+                column.append(label);
+            }
+            column.append(&bar);
+            column
+        }
+        None => {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            let spinner = gtk::Spinner::new();
+            spinner.start();
+            row.append(&spinner);
+            if let Some(label) = &label {
+                label.add_css_class("dim-label");
+                spinner.update_relation(&[gtk::accessible::Relation::LabelledBy(&[
+                    label.upcast_ref()
+                ])]);
+                row.append(label);
+            }
+            row
+        }
+    };
+    place(p, &container);
+}
+
 #[allow(non_snake_case)]
 pub fn Spacer(p: &Parent) {
     let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);

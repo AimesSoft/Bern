@@ -109,7 +109,7 @@ fn showcase_generates_a_winui3_application() {
     let lib = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
     assert!(
         lib.contains(
-            r#"resources: vec!["media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
+            r#"resources: vec!["images/bern.png".into(), "images/landscape.jpg".into(), "media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
         ),
         "{lib}"
     );
@@ -235,13 +235,10 @@ fn showcase_generates_a_winui3_application() {
         })
         .expect("a mirror step");
     assert_eq!(mirror.0, &output.join("Showcase/resources"));
-    assert_eq!(
-        mirror.1[0],
-        (
-            config.dir.join("media/aurora.mp4"),
-            PathBuf::from("media/aurora.mp4")
-        )
-    );
+    assert!(mirror.1.contains(&(
+        config.dir.join("media/aurora.mp4"),
+        PathBuf::from("media/aurora.mp4")
+    )));
     assert_eq!(
         plan.products,
         [

@@ -75,7 +75,7 @@ When an AI uses the app, every button is an MCP tool: it reads what the controls
 <td width="33%" valign="top">
 <h3>Too light to feel cross-platform</h3>
 No browser engine and no JS engine on the desktop; the business engine compiles to native code and runs in the app process.<br><br>
-Measured on the release showcase: on macOS <b>39 MB</b> of memory and a window in <b>0.4 s</b>, with a <b>2.6 MB</b> app bundle; on Windows <b>35 MB</b> and <b>0.3 s</b>, <b>4.2 MB</b> for the whole app, no .NET; the whole web app with its Rust engine is <b>187 KB</b> gzipped.
+Measured on the release showcase: on macOS <b>39 MB</b> of memory and a window in <b>0.4 s</b>, with a <b>2.7 MB</b> app bundle; on Windows <b>35 MB</b> and <b>0.3 s</b>, <b>4.2 MB</b> for the whole app, no .NET; the whole web app with its Rust engine is <b>189 KB</b> gzipped.
 </td>
 </tr>
 </table>
@@ -139,7 +139,7 @@ The same operations are MCP tools for agents (`ui_inspect`, `ui_activate`, `wind
 | :-- | :-- | :-- | :-- |
 | Launch to visible window | 0.41 s | 0.32 s | – |
 | Memory | 39 MB | 35 MB | – |
-| Size | 2.6 MB app bundle (2.3 MB executable), no frameworks embedded | 4.2 MB app folder, engine inside the executable, UI framework from the system | 187 KB for all assets gzipped, Rust engine included |
+| Size | 2.7 MB app bundle (2.3 MB executable), no frameworks embedded | 4.2 MB app folder, engine inside the executable, UI framework from the system | 189 KB for all assets gzipped, Rust engine included |
 
 <details>
 <summary>How it was measured</summary>
@@ -196,6 +196,7 @@ Each window has its own drafts, close check and save command; minimize, maximize
 - **Typed navigation**: sidebars, push navigation with typed routes, tabs, toolbars and menus.
 - **Feature contracts**: declare which features a component must cover in each layout; the compiler proves the coverage.
 - **Bundled resources**: files declared in `Bern.toml`, checked at build time and located by name at runtime.
+- **Images and layout**: `Image` shows bundled pictures, and an undeclared one fails to compile; `Grid` adds and drops columns with the width, `Stack` layers views with nine alignments, `Progress` shows a bar or indeterminate progress.
 
 </details>
 
@@ -604,7 +605,7 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 | 3 | Web visual spec, theme kernel, WebAssembly app and WebUI builds | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 4 | Adaptive layouts, menus, feature contracts, runtime language switching | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 5 | Other native front ends: GTK 4 (done) · WinUI 3 (done) · `flutter + macos` (next) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
-| 6 | Component library, packaging, incremental builds, tooling (`bern new`, `run`, `doctor` and `package` done), NipaPlay 3.0 | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
+| 6 | Component library (first set done: `Image`, `Progress`, `Grid`, `Stack`), packaging, incremental builds, tooling (`bern new`, `run`, `doctor` and `package` done), NipaPlay 3.0 | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
 
 ## Repository
 

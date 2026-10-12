@@ -578,9 +578,41 @@ impl<'a> Checker<'a> {
                     .display(&prop.value, scope, key, true)
                     .map(|text| ir::Prop::Text { text }),
                 PropKind::Icon => self.icon(&prop.value),
-                PropKind::Number => self
-                    .number(&prop.value)
-                    .map(|value| ir::Prop::Number { value }),
+                PropKind::ImageResource => self.image_resource(&prop.value),
+                PropKind::Number => self.number(&prop.value).and_then(|value| {
+                    // Sizes of pictures and grid cells, and the total of a
+                    // progress, are lengths and amounts above zero.
+                    let positive = matches!(
+                        (name.as_str(), prop_name.as_str()),
+                        ("Image", "width" | "height")
+                            | ("Grid", "min_width")
+                            | ("Progress", "total")
+                    );
+                    if positive && value <= 0.0 {
+                        self.error(
+                            prop.value.span(),
+                            format!("`{prop_name}` must be above zero"),
+                        );
+                        return None;
+                    }
+                    Some(ir::Prop::Number { value })
+                }),
+                PropKind::NumberValue => match self.expr(&prop.value, scope) {
+                    Some(lowered) if matches!(lowered.ty, Type::Int | Type::Float) => {
+                        Some(ir::Prop::Expr { expr: lowered })
+                    }
+                    Some(lowered) => {
+                        self.error(
+                            prop.value.span(),
+                            format!(
+                                "`{prop_name}` must be a number, found {}",
+                                lowered.ty.display()
+                            ),
+                        );
+                        None
+                    }
+                    None => None,
+                },
                 PropKind::Bool => self
                     .expect(&prop.value, &Type::Bool, scope, "this property")
                     .map(|expr| ir::Prop::Expr { expr }),
@@ -806,6 +838,38 @@ impl<'a> Checker<'a> {
                 None
             }
         }
+    }
+
+    /// `"images/cover.png"`: the name of a PNG or JPEG resource. Whether
+    /// `[resources]` declares it is checked for the whole application,
+    /// library components included, once the components are lowered.
+    fn image_resource(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
+        let ast::Expr::Literal {
+            value: Literal::Text(name),
+            span,
+        } = expr
+        else {
+            self.error(
+                expr.span(),
+                "expected the name of a declared resource, e.g. \"images/cover.png\"",
+            );
+            return None;
+        };
+        if let Err(message) = bern_protocol::check_resource_name(name) {
+            self.error(*span, message);
+            return None;
+        }
+        let extension = name
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_ascii_lowercase());
+        if !extension.is_some_and(|ext| spec::IMAGE_EXTENSIONS.contains(&ext.as_str())) {
+            self.error(
+                *span,
+                format!("`{name}` is not a PNG or JPEG image (.png, .jpg or .jpeg)"),
+            );
+            return None;
+        }
+        Some(ir::Prop::Resource { name: name.clone() })
     }
 
     fn number(&mut self, expr: &ast::Expr) -> Option<f64> {

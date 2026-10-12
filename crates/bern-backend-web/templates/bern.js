@@ -1428,6 +1428,68 @@ export function Stack(p, ctx, { axis, gap, padding, align }, children) {
   p.append(node);
 }
 
+/// Equal columns, as many as fit at `minWidth` or wider.
+export function Grid(p, ctx, { minWidth, gap, padding }, children) {
+  const node = el("div", { class: "bern-grid" });
+  node.style.gridTemplateColumns = `repeat(auto-fill, minmax(min(100%, ${minWidth}px), 1fr))`;
+  node.style.gap = `${gap ?? 8}px`;
+  if (padding !== undefined) node.style.padding = `${padding}px`;
+  children(node, { ...ctx, inGroup: false });
+  p.append(node);
+}
+
+/// Where the layers of a `Stack` sit: `align-items` then `justify-items`.
+const LAYER_PLACE = {
+  top_leading: "start start", top: "start center", top_trailing: "start end",
+  leading: "center start", center: "center center", trailing: "center end",
+  bottom_leading: "end start", bottom: "end center", bottom_trailing: "end end",
+};
+
+/// `Stack`: children share one grid cell, later ones above earlier ones,
+/// and the stack is as large as its largest layer.
+export function Layers(p, ctx, { align }, children) {
+  const node = el("div", { class: "bern-layers" });
+  node.style.placeItems = LAYER_PLACE[align ?? "center"];
+  children(node, { ...ctx, inGroup: false });
+  p.append(ctx.inGroup ? el("div", { class: "bern-row bern-row-media" }, node) : node);
+}
+
+/// A picture from a declared resource, served below `resources/`. With
+/// one side given, the other follows the picture's aspect ratio. Without
+/// a label it is decorative.
+export function Image(p, ctx, { source, label, width, height, fit }) {
+  const src = `resources/${source.split("/").map(encodeURIComponent).join("/")}`;
+  const node = el("img", { class: "bern-image", src, alt: "", draggable: "false", decoding: "async" });
+  node.style.objectFit = fit ?? "contain";
+  if (width !== undefined) node.style.width = `${width}px`;
+  if (height !== undefined) node.style.height = `${height}px`;
+  if (label) bindAttr(node, "alt", label);
+  p.append(ctx.inGroup ? el("div", { class: "bern-row bern-row-media" }, node) : node);
+}
+
+/// A progress bar of `value` out of `total`, or without a value an
+/// indeterminate spinner.
+export function Progress(p, ctx, { value, total, label }) {
+  const caption = label ? el("span", { class: "bern-progress-label" }) : null;
+  if (label) bindText(caption, label);
+  let indicator;
+  if (value) {
+    const max = total ?? 1;
+    const fill = el("div", { class: "bern-progress-fill" });
+    indicator = el("div", { class: "bern-progress-track", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(max) }, fill);
+    effect(() => {
+      const current = Math.min(Math.max(Number(value()) || 0, 0), max);
+      fill.style.width = `${(current / max) * 100}%`;
+      indicator.setAttribute("aria-valuenow", String(current));
+    });
+  } else {
+    indicator = el("span", { class: "bern-spinner", role: "progressbar" });
+  }
+  if (label) bindAttr(indicator, "aria-label", label);
+  const kind = value ? "bern-progress-bar" : "bern-progress-indeterminate";
+  p.append(el("div", { class: `bern-progress ${kind}` }, value ? caption : indicator, value ? indicator : caption));
+}
+
 export function Spacer(p) {
   p.append(el("div", { class: "bern-spacer" }));
 }

@@ -129,6 +129,78 @@ pub fn inputs_page(app: showcase::Client, #[session] draft: MainDraft) -> impl V
     }
 }
 
+/// Pictures from declared resources, layers, progress and a grid of
+/// engine items.
+#[component]
+pub fn layout_page(app: showcase::Client, #[session] draft: MainDraft) -> impl View {
+    ui! {
+        Form {
+            Section(
+                title: tr! { "zh-Hans" => "图片", "en" => "Images" },
+                footer: tr! { "zh-Hans" => "图片是随包资源。同一张 16:9 的图片放进 120×90 的框：完整显示留出空白，填满会裁掉两边，拉伸会变形。", "en" => "Pictures are bundled resources. The same 16:9 picture in a 120×90 frame: Contain leaves bars, Cover crops the sides, Fill stretches it." }
+            ) {
+                Row(gap: 16, align: top) {
+                    Column(gap: 6, align: center) {
+                        Image(source: "images/landscape.jpg", label: tr! { "zh-Hans" => "曼德博集合，完整显示", "en" => "Mandelbrot set, contained" }, width: 120, height: 90, fit: contain)
+                        Text(content: tr! { "zh-Hans" => "完整显示", "en" => "Contain" }, style: caption, emphasis: secondary)
+                    }
+                    Column(gap: 6, align: center) {
+                        Image(source: "images/landscape.jpg", label: tr! { "zh-Hans" => "曼德博集合，填满", "en" => "Mandelbrot set, covering" }, width: 120, height: 90, fit: cover)
+                        Text(content: tr! { "zh-Hans" => "填满", "en" => "Cover" }, style: caption, emphasis: secondary)
+                    }
+                    Column(gap: 6, align: center) {
+                        Image(source: "images/landscape.jpg", label: tr! { "zh-Hans" => "曼德博集合，拉伸", "en" => "Mandelbrot set, stretched" }, width: 120, height: 90, fit: fill)
+                        Text(content: tr! { "zh-Hans" => "拉伸", "en" => "Fill" }, style: caption, emphasis: secondary)
+                    }
+                    Column(gap: 6, align: center) {
+                        Image(source: "images/bern.png", label: tr! { "zh-Hans" => "Bern 标志", "en" => "The Bern mark" }, width: 64)
+                        Text(content: tr! { "zh-Hans" => "只给宽度", "en" => "Width only" }, style: caption, emphasis: secondary)
+                    }
+                }
+            }
+            Section(
+                title: tr! { "zh-Hans" => "层叠", "en" => "Layers" },
+                footer: tr! { "zh-Hans" => "后写的一层在上面；标志对齐到右上角。", "en" => "Later layers sit on top; the mark aligns to the top trailing corner." }
+            ) {
+                Stack(align: top_trailing) {
+                    Image(source: "images/landscape.jpg", label: tr! { "zh-Hans" => "曼德博集合", "en" => "Mandelbrot set" }, width: 320, height: 180, fit: cover)
+                    Column(padding: 8) {
+                        Image(source: "images/bern.png", width: 40)
+                    }
+                }
+            }
+            Section(
+                title: tr! { "zh-Hans" => "进度", "en" => "Progress" },
+                footer: tr! { "zh-Hans" => "进度条绑定引擎状态或会话草稿；没有数值时是不确定的进度。", "en" => "Progress bars follow engine state or session drafts; without a value, progress is indeterminate." }
+            ) {
+                Progress(value: app.volume, total: 100, label: tr! { "zh-Hans" => "已提交的音量", "en" => "Committed volume" })
+                Progress(value: draft.brightness, label: tr! { "zh-Hans" => "亮度", "en" => "Brightness" })
+                Slider(id: layout_brightness, label: tr! { "zh-Hans" => "亮度", "en" => "Brightness" }, value: draft.brightness, min: 0, max: 1)
+                Progress(label: tr! { "zh-Hans" => "正在等待…", "en" => "Waiting…" })
+            }
+            Section(
+                title: tr! { "zh-Hans" => "网格", "en" => "Grid" },
+                footer: tr! { "zh-Hans" => "列宽至少 140，窗口变宽时自动增加列数。项目来自引擎状态。", "en" => "Columns are at least 140 wide; widening the window adds columns. Items come from engine state." }
+            ) {
+                Grid(min_width: 140, gap: 12) {
+                    ForEach(items: app.items, key: id) |item| {
+                        Column(gap: 4) {
+                            match item.kind {
+                                ItemKind::Documents => { Label(title: item.kind, icon: "doc") }
+                                ItemKind::Photos => { Label(title: item.kind, icon: "photo") }
+                                ItemKind::Music => { Label(title: item.kind, icon: "music.note") }
+                                ItemKind::Movies => { Label(title: item.kind, icon: "film") }
+                                ItemKind::Downloads => { Label(title: item.kind, icon: "arrow.down.circle") }
+                            }
+                            showcase_widgets::item_count(count: item.count)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Keyed engine list, filtered by the sidebar search through an
 /// asynchronous engine query, with push navigation to a detail page.
 #[component]

@@ -44,7 +44,7 @@ manifest = "showcase-widgets/Bern.toml"
 # and is also the name the engine resolves at run time. The HLS stream in
 # media/live is served over HTTP during development and does not ship.
 [resources]
-paths = ["media/aurora.mp4", "media/tides.mp4", "media/broken.mp4"]
+paths = ["media/aurora.mp4", "media/tides.mp4", "media/broken.mp4", "images/landscape.jpg", "images/bern.png"]
 
 [targets.macos]
 platform = "macos"

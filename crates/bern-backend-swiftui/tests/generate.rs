@@ -75,7 +75,13 @@ fn showcase_generates_swift_that_type_checks() {
         .collect();
     assert_eq!(
         names,
-        ["media/aurora.mp4", "media/broken.mp4", "media/tides.mp4"]
+        [
+            "images/bern.png",
+            "images/landscape.jpg",
+            "media/aurora.mp4",
+            "media/broken.mp4",
+            "media/tides.mp4"
+        ]
     );
     let target_config = config.targets[0].clone();
     let problems = SwiftUiMacos.check(&compiled.app, &target_config);
@@ -107,7 +113,7 @@ fn showcase_generates_swift_that_type_checks() {
     let glue = std::fs::read_to_string(output.join("glue/src/lib.rs")).unwrap();
     assert!(
         glue.contains(
-            r#"resources: vec!["media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
+            r#"resources: vec!["images/bern.png".into(), "images/landscape.jpg".into(), "media/aurora.mp4".into(), "media/broken.mp4".into(), "media/tides.mp4".into()]"#
         ),
         "{glue}"
     );
@@ -142,13 +148,10 @@ fn showcase_generates_swift_that_type_checks() {
         unreachable!()
     };
     assert_eq!(dir, &output.join("Showcase.app/Contents/Resources"));
-    assert_eq!(
-        files[0],
-        (
-            config.dir.join("media/aurora.mp4"),
-            PathBuf::from("media/aurora.mp4")
-        )
-    );
+    assert!(files.contains(&(
+        config.dir.join("media/aurora.mp4"),
+        PathBuf::from("media/aurora.mp4")
+    )));
     assert!(keep.contains(&PathBuf::from("en.lproj/InfoPlist.strings")));
     assert!(keep.contains(&PathBuf::from("zh-Hans.lproj/Localizable.strings")));
 

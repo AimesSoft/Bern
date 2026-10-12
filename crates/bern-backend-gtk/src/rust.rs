@@ -570,6 +570,40 @@ impl<'a> Generator<'a> {
                 &element.children,
                 ");",
             ),
+            "Grid" => self.children(
+                out,
+                &format!(
+                    "b::Grid(p, c, b::GridProps {{ min_width: {}, gap: {}, padding: {} }}, ",
+                    float(element.number("min_width").unwrap_or(120.0)),
+                    Self::number(element, "gap"),
+                    Self::number(element, "padding"),
+                ),
+                &element.children,
+                ");",
+            ),
+            "Stack" => self.children(
+                out,
+                &format!(
+                    "b::Layers(p, c, b::LayersProps {{ align: {} }}, ",
+                    Self::keyword(element, "align")
+                ),
+                &element.children,
+                ");",
+            ),
+            "Image" => out.line(format!(
+                "b::Image(p, c, b::ImageProps {{ source: {}, label: {}, width: {}, height: {}, fit: {} }});",
+                string(element.resource("source").unwrap_or_default()),
+                some(self.text_prop(element, "label")),
+                Self::number(element, "width"),
+                Self::number(element, "height"),
+                Self::keyword(element, "fit"),
+            )),
+            "Progress" => out.line(format!(
+                "b::Progress(p, c, b::ProgressProps {{ value: {}, total: {}, label: {} }});",
+                some(element.expr("value").map(|value| self.getter(value))),
+                Self::number(element, "total"),
+                some(self.text_prop(element, "label")),
+            )),
             "Spacer" => out.line("b::Spacer(p);"),
             "Divider" => out.line("b::Divider(p);"),
             "ScrollView" => self.children(

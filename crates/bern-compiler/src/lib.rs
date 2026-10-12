@@ -1178,6 +1178,26 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         &mut diagnostics,
     );
 
+    // Pictures come from declared resources, in library components too.
+    for component in &lowered {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node
+                && let Some(name) = element.resource("source")
+                && !config
+                    .resources
+                    .iter()
+                    .any(|resource| resource.name == name)
+            {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "resource `{name}` is not declared; list it under [resources] in Bern.toml"
+                    ))
+                    .at(element.source.clone()),
+                );
+            }
+        });
+    }
+
     // Every label is a resource; keys must be unique.
     for def in &types.enums {
         for variant in &def.variants {

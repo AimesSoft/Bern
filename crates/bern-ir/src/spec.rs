@@ -18,8 +18,13 @@ pub enum PropKind {
     LocalizedText,
     /// Icon name literal from the Bern icon set (SF Symbols naming).
     Icon,
+    /// Name literal of a declared image resource (PNG or JPEG), such as
+    /// `"images/cover.png"`.
+    ImageResource,
     /// Numeric literal in logical units.
     Number,
+    /// Numeric restricted expression (int or float), read only.
+    NumberValue,
     /// Boolean restricted expression.
     Bool,
     /// Writable session text field.
@@ -155,6 +160,22 @@ const FEATURE: PropSpec = opt("feature", PropKind::Feature);
 /// and crop, or stretch.
 pub const VIDEO_FIT: &[&str] = &["contain", "cover", "fill"];
 
+/// Where the layers of a `Stack` sit when they are smaller than it.
+pub const STACK_ALIGN: &[&str] = &[
+    "top_leading",
+    "top",
+    "top_trailing",
+    "leading",
+    "center",
+    "trailing",
+    "bottom_leading",
+    "bottom",
+    "bottom_trailing",
+];
+
+/// File extensions an `Image` resource may have.
+pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg"];
+
 const fn spec(
     name: &'static str,
     props: &'static [PropSpec],
@@ -233,6 +254,22 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         ],
         Children::Any,
         "Horizontal arrangement",
+    ),
+    spec(
+        "Grid",
+        &[
+            req("min_width", PropKind::Number),
+            opt("gap", PropKind::Number),
+            opt("padding", PropKind::Number),
+        ],
+        Children::Any,
+        "Equal columns, as many as fit with each at least `min_width` wide; children fill them row by row",
+    ),
+    spec(
+        "Stack",
+        &[opt("align", PropKind::Keyword(STACK_ALIGN))],
+        Children::Any,
+        "Layers on top of each other, later children above earlier ones; as large as the largest",
     ),
     spec("Spacer", &[], Children::None, "Flexible space"),
     spec("Divider", &[], Children::None, "Separator line"),
@@ -443,6 +480,28 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         ],
         Children::None,
         "Icon and title",
+    ),
+    spec(
+        "Image",
+        &[
+            req("source", PropKind::ImageResource),
+            opt("label", PropKind::DisplayText),
+            opt("width", PropKind::Number),
+            opt("height", PropKind::Number),
+            opt("fit", PropKind::Keyword(VIDEO_FIT)),
+        ],
+        Children::None,
+        "Picture from a declared resource, sized by `width` and/or `height`; `label` describes it, without one it is decorative",
+    ),
+    spec(
+        "Progress",
+        &[
+            opt("value", PropKind::NumberValue),
+            opt("total", PropKind::Number),
+            opt("label", PropKind::DisplayText),
+        ],
+        Children::None,
+        "Progress of `value` out of `total` (1 unless given) as a bar; without `value`, an indeterminate spinner",
     ),
     ComponentSpec {
         action: ActionRule::Required,
@@ -694,6 +753,21 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: None,
             message: "`List` needs both `items:` and `key:` for data rows".into(),
+        });
+    }
+    if spec.name == "Image" && !shape.props.contains(&"width") && !shape.props.contains(&"height") {
+        errors.push(ShapeError {
+            prop: None,
+            message: "`Image` needs `width:`, `height:` or both; with one, the other follows the picture's aspect ratio".into(),
+        });
+    }
+    if spec.name == "Progress" && shape.props.contains(&"total") && !shape.props.contains(&"value")
+    {
+        errors.push(ShapeError {
+            prop: Some("total".into()),
+            message:
+                "`total:` needs a `value:`; without one, `Progress` is an indeterminate spinner"
+                    .into(),
         });
     }
     match (spec.action, shape.has_action) {

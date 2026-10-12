@@ -55,7 +55,13 @@ fn showcase_compiles_to_ir() {
     let names: Vec<&str> = app.resources.iter().map(|r| r.name.as_str()).collect();
     assert_eq!(
         names,
-        ["media/aurora.mp4", "media/broken.mp4", "media/tides.mp4"]
+        [
+            "images/bern.png",
+            "images/landscape.jpg",
+            "media/aurora.mp4",
+            "media/broken.mp4",
+            "media/tides.mp4"
+        ]
     );
     let declared = &app.resources[0].declared;
     assert!(declared.file.ends_with("Bern.toml"), "{}", declared.file);
@@ -1186,5 +1192,124 @@ pub fn other(app: demo::Client) -> impl View {{
             output.contains("control id `add` is used twice"),
             "{output}"
         );
+    }
+}
+
+/// Compile `body` in a project that declares the resource `pics/a.png`.
+fn with_picture(body: &str) -> Result<Compiled, Vec<Diagnostic>> {
+    let dir = write_project(
+        PROTOCOL,
+        &wrap(body),
+        "\n[resources]\npaths = [\"pics/a.png\"]\n",
+    );
+    std::fs::create_dir_all(dir.join("pics")).unwrap();
+    std::fs::write(dir.join("pics/a.png"), b"\x89PNG").unwrap();
+    let config = config::load(&dir.join("Bern.toml"));
+    let result = config.and_then(|config| compile(&config));
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+#[test]
+fn images_progress_grids_and_stacks_lower_to_ir() {
+    let compiled = with_picture(
+        r#"Column {
+            Image(source: "pics/a.png", label: tr! { "en" => "A", "ja" => "エー" }, width: 64)
+            Progress(value: app.count, total: 10, label: tr! { "en" => "Done", "ja" => "完了" })
+            Progress
+            Grid(min_width: 100, gap: 4) {
+                Stack(align: bottom_trailing) {
+                    Image(source: "pics/a.png", width: 32, height: 32, fit: cover)
+                    Spacer
+                }
+            }
+        }"#,
+    )
+    .unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let page = compiled.app.component("page").unwrap();
+    let mut kinds = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node {
+            kinds.push(element.kind.clone());
+            match element.kind.as_str() {
+                "Image" => assert_eq!(element.resource("source"), Some("pics/a.png")),
+                "Progress" if element.text("label").is_some() => {
+                    assert_eq!(element.expr("value").unwrap().ty, Type::Int);
+                    assert_eq!(element.number("total"), Some(10.0));
+                }
+                "Grid" => assert_eq!(element.number("min_width"), Some(100.0)),
+                "Stack" => assert_eq!(element.keyword("align"), Some("bottom_trailing")),
+                _ => {}
+            }
+        }
+    });
+    assert_eq!(
+        kinds,
+        [
+            "Column", "Image", "Progress", "Progress", "Grid", "Stack", "Image", "Spacer"
+        ]
+    );
+}
+
+#[test]
+fn image_and_progress_diagnostics() {
+    let cases = [
+        (
+            r#"Image(source: "pics/b.png", width: 10)"#,
+            "resource `pics/b.png` is not declared",
+        ),
+        (
+            r#"Image(source: "pics/a.gif", width: 10)"#,
+            "`pics/a.gif` is not a PNG or JPEG image",
+        ),
+        (
+            r#"Image(source: "../a.png", width: 10)"#,
+            "hidden files, `.` and `..` are not resources",
+        ),
+        (
+            r#"Image(source: app.title, width: 10)"#,
+            "expected the name of a declared resource",
+        ),
+        (
+            r#"Image(source: "pics/a.png")"#,
+            "`Image` needs `width:`, `height:` or both",
+        ),
+        (
+            r#"Image(source: "pics/a.png", width: 0)"#,
+            "`width` must be above zero",
+        ),
+        (
+            r#"Progress(value: app.title)"#,
+            "`value` must be a number, found",
+        ),
+        (r#"Progress(total: 5)"#, "`total:` needs a `value:`"),
+        (
+            r#"Grid(min_width: -4) { Spacer }"#,
+            "`min_width` must be above zero",
+        ),
+        (
+            r#"Stack(align: middle) { Spacer }"#,
+            "expected one of: top_leading",
+        ),
+    ];
+    for (body, expected) in cases {
+        let message = match with_picture(body) {
+            Ok(_) => panic!("expected `{body}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{body}\n{message}");
     }
 }

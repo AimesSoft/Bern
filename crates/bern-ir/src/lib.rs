@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Version of the IR layout. Targets declare the range they consume.
-pub const IR_VERSION: u32 = 5;
+pub const IR_VERSION: u32 = 6;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Application {
@@ -556,6 +556,10 @@ pub enum Prop {
     Icon {
         name: String,
     },
+    /// A declared resource, by its name in `[resources]`.
+    Resource {
+        name: String,
+    },
     Text {
         text: Text,
     },
@@ -727,6 +731,13 @@ impl Element {
     pub fn icon(&self, name: &str) -> Option<&str> {
         match self.props.get(name) {
             Some(Prop::Icon { name }) => Some(name),
+            _ => None,
+        }
+    }
+
+    pub fn resource(&self, name: &str) -> Option<&str> {
+        match self.props.get(name) {
+            Some(Prop::Resource { name }) => Some(name),
             _ => None,
         }
     }

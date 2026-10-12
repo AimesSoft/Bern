@@ -65,6 +65,17 @@
 | 负面用例互相区分 | 完成 | 编译器测试分别覆盖 B101–B104、B201–B206、B401–B402 |
 | 运行时切换语言与布局，不丢失应共享的状态 | 完成 | 见“验证记录”；语言经 `LanguagePicker` 与 `ui.set_language` 切换 |
 
+### 阶段六 组件库第一批
+
+| 组件 | SwiftUI | 说明 |
+| --- | --- | --- |
+| `Image` | 运行时视图 `BernImage` | 从 `Contents/Resources` 读取 `NSImage`（按名称缓存），`resizable()` 后按 `fit` 用 `.fit`、`.fill` 或直接拉伸，`frame` 后 `clipped()`；只写一边时另一边按图片比例。有 `label` 时是带名称的图片元素，没有时对辅助技术隐藏 |
+| `Progress` | `ProgressView` | 有 `value` 时为 `ProgressView(value:total:)`，数值先限制在 0 到 `total`；没有时为不确定的 `ProgressView()`（转圈）；`label` 是它的标签 |
+| `Grid` | `LazyVGrid` | 一列 `GridItem(.adaptive(minimum: min_width), spacing: gap)`，行距同为 `gap` |
+| `Stack` | `ZStack(alignment:)` | 九个方位对应 `.topLeading` 到 `.bottomTrailing` |
+
+在展示应用的“图片与布局”页验证：同一张 16:9 图片在 120×90 的框中按 `contain`、`cover`、`fill` 分别留白、裁掉两边、拉伸，只写宽度的标志保持比例；层叠中标志在右上角；音量（引擎状态，`total: 100`）与亮度（会话草稿）两个进度条在 CLI 执行 `showcase set-volume --value 90` 与 `ui set-number --target layout_page.layout_brightness --value 0.2` 后立即变为 90% 与 20%；920 宽的窗口中网格为三列。另外，Bern 的引擎几乎不增加启动时间：用 `benchmarks/measure.swift` 在 M4 上测，Hello 10 次启动的中位数为 0.20 s，只有一个窗口和一行文字的空白 SwiftUI 应用 5 次的中位数为 0.22 s。
+
 ## 工程结构
 
 | crate | 职责 |
@@ -242,9 +253,9 @@ let seed = resources.path("data/seed.json")?;                       // 包内文
 
 ### 组件规格
 
-规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`；阶段四加入 `Adaptive`、`Layout`、`Menu`、`MenuItem` 与 `LanguagePicker`。IR 因加入查询绑定升为版本 2，加入随包资源清单后为版本 3，浮动窗口呈现为版本 4，布局断点与功能契约为版本 5。可操作控件必须有 `id`；同一 `Adaptive` 的不同布局中 `id` 相同的控件是同一控件。
+规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`；阶段四加入 `Adaptive`、`Layout`、`Menu`、`MenuItem` 与 `LanguagePicker`；阶段六加入 `Image`、`Progress`、`Grid` 与 `Stack`。IR 因加入查询绑定升为版本 2，加入随包资源清单后为版本 3，浮动窗口呈现为版本 4，布局断点与功能契约为版本 5，资源属性（`Image` 的 `source`）为版本 6。可操作控件必须有 `id`；同一 `Adaptive` 的不同布局中 `id` 相同的控件是同一控件。
 
-默认行为：`Column` 前缘对齐；`Row` 垂直居中；未写 `style` 时使用平台默认样式。`Search` 在 SwiftUI 目标中只能放在 `Sidebar` 内；`Picker` 的枚举不能携带数据。
+默认行为：`Column` 前缘对齐；`Row` 垂直居中；`Grid` 的 `gap` 为 8；`Stack` 居中；未写 `style` 时使用平台默认样式。`Image` 的 `source` 必须是声明过的 PNG 或 JPEG 资源，编译器在整个应用（包括组件库中的组件）范围内检查，`width`、`height` 至少写一个且大于零；`Progress` 的 `value` 是整数或浮点数的受限表达式，`total` 必须大于零且只能与 `value` 一起写。`Search` 在 SwiftUI 目标中只能放在 `Sidebar` 内；`Picker` 的枚举不能携带数据。
 
 ## 运行结构
 

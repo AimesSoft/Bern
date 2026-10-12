@@ -97,6 +97,15 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 - **下拉菜单**：`automatic`、`menu` 样式不再用 `<select>`。触发器是 `role="combobox"` 的按钮，列表是 Popover API 的 `popover="auto"` 元素（顶层，不受卡片、对话框与滚动容器裁切；外部点按自动关闭），在 `beforetoggle` 中按触发器位置同步定位（下方不足 160 px 且上方更宽时向上），最高 328 px。焦点留在触发器上，活动项用 `aria-activedescendant`；键盘按 APG 只选组合框；Esc 在触发器上处理并阻止默认动作，所以对话框不会一起关闭；滚动页面或改变窗口大小时关闭。选择调用与外部入口相同的 `select` 闭包。
 - **媒体进度条**：视频控制条的进度与音量改用 `scrubber()`，不再是 range 输入。`role="slider"`，`aria-valuetext` 为时间或百分比；指针按下即跳到该点并开始预览，拖动只更新预览（进度时间同步显示），松开提交一次；方向键每次 5 秒（音量 5%），PageUp / PageDown 每次 10%，Home / End 到首尾，键松开时提交。已播放部分为 `media.played`，未播放为 `media.track`，滑块 20 × 16 px、圆角 7、`control.thumb` 加 0.5 px 轮廓与投影，拖动时放大到 1.1 倍。
 
+## 组件库第一批
+
+- **图片**：`<img>`，地址为 `resources/` 下的资源名称（两种构建都把资源复制到这里），`object-fit` 对应 `fit`；只写一边时另一边为 `auto`，按图片比例。`label` 写入 `alt`，没有时 `alt` 为空，即装饰图片。在表单分组中单独成行并靠前缘。
+- **进度**：有 `value` 时是轨道加填充的 `role="progressbar"`，带 `aria-valuenow` 与 `aria-valuemax`，标签在上；轨道与滑块同为 `control.track`，填充为 `accent`，宽度变化用 `--bern-motion` 过渡（减少动态效果时为 0）。没有 `value` 时为查询已在用的 `.bern-spinner` 加次要文字。
+- **网格**：CSS Grid，`grid-template-columns: repeat(auto-fill, minmax(min(100%, min_width), 1fr))`，`gap` 默认 8 px。
+- **层叠**：一个单元格的 CSS Grid，每层 `grid-area: 1 / 1`，`place-items` 对应 `align` 的九个方位；宽度为 `fit-content`，所以与最大的一层一样大，不会被分组撑满。
+
+在内置浏览器（800 宽）验证：三种 `fit`、只写宽度与层叠的效果与 macOS 相同；网格为四列；进度条的 `aria-valuenow` 分别为 50（`total` 100）与 0.6，名称为各自的标签，装饰图片的 `alt` 为空。
+
 ## 阶段四：自适应布局、菜单与语言
 
 - **`Adaptive`**：生成 `B.Adaptive(p, ctx, { id, breakpoint, layouts: { compact, expanded } })`，断点来自 `[layouts]`。运行时用 `ResizeObserver` 量容器宽度，尺寸变化时只重建布局区域；切换前聚焦的控件按 `data-bern-target` 在新布局中找回焦点，目标在未打开的菜单里时聚焦菜单按钮。

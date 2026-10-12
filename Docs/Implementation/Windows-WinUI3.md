@@ -83,6 +83,17 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | `Button` / `IconButton` | `prominent` 为 `AccentButtonStyle`；`plain` 与图标按钮以轻量样式资源设为透明；`destructive` 为危险色 | 同左，取 Windows 10 的对应资源 |
 | `TextInput` / `Search` / `Switch` / `Slider` / `Menu` / `LanguagePicker` / `Query` / `Adaptive` / `Video` | 与 C# 版相同：`TextBox`/`PasswordBox`、`AutoSuggestBox`、`ToggleSwitch`/`CheckBox`、带图标的 `Slider`、`DropDownButton` 与 `MenuFlyout`、`ComboBox`、`ProgressRing` 与状态行、按可用宽度选择布局、`MediaPlayerElement` 与标准控制条 | 同左 |
 
+组件库第一批在两种前端上用相同的代码：
+
+| Bern | 两种前端 |
+| --- | --- |
+| `Image` | `Image` 显示 `BitmapImage`：从可执行文件旁的 `resources` 读出资源字节，写入内存流后回到界面线程 `SetSourceAsync`（未打包的应用没有 `ms-appx`）。两边都写时外面是声明尺寸的 `Grid`，`contain` 为 `Uniform` 并居中，`cover` 为 `UniformToFill`，`fill` 为 `Fill`；只写一边时为 `Uniform`，另一边按图片比例。`label` 为自动化名称，没有时 `AccessibilityView` 为 `Raw` |
+| `Progress` | 有 `value` 时为标签下的 `ProgressBar`（`Minimum` 0，`Maximum` 为 `total`）；没有时为 20 px 的 `ProgressRing` 加次要文字 |
+| `Grid` | 自定义面板 `GridPanel`：列数为放得下的最大值，列宽平分，每行与该行最高的单元格一样高 |
+| `Stack` | 单格 `Grid`，子元素叠放，按 `align` 设对齐 |
+
+`Image` 与 `Stack` 外面各有一层 `Grid`，所以在会拉伸子元素的列中保持自身尺寸并靠前缘。在展示应用的“图片与布局”页按两种前端验证：效果与 macOS 相同，`contain` 的图片在框内居中；网格三列；CLI 修改音量与亮度后两个进度条立即更新。
+
 图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。
 
 ## 运行结构
