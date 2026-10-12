@@ -741,6 +741,13 @@ button:disabled {
   min-width: 0;
 }
 
+/* A picture keeps its declared size, so a stack holding one does not
+   shrink below its content: the picture never spills over its
+   neighbours. Other stacks may still shrink and wrap their text. */
+.bern-stack:has(.bern-image) {
+  min-width: min-content;
+}
+
 .bern-progress {
   display: flex;
   flex-direction: column;

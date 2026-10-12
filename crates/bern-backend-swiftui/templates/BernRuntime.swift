@@ -1962,6 +1962,10 @@ enum BernImageFit {
 /// A picture from a declared resource in Contents/Resources. With one side
 /// given, the other follows the picture's aspect ratio. A label makes it an
 /// image for assistive technologies; without one it is decorative.
+///
+/// HDR pictures show in high dynamic range where the display has headroom:
+/// a JPEG or HEIC with a gain map decodes to HDR (macOS 15 and later), a
+/// PQ or HLG PNG keeps its range; elsewhere they are tone mapped.
 struct BernImage: View {
     let name: String
     let label: String?
@@ -1969,31 +1973,61 @@ struct BernImage: View {
     let height: CGFloat?
     let fit: BernImageFit
 
-    @MainActor private static var loaded: [String: NSImage] = [:]
+    struct Picture {
+        let image: CGImage
+        let orientation: SwiftUI.Image.Orientation
+        /// Width over height as shown, after the orientation.
+        let ratio: CGFloat
+    }
 
-    @MainActor static func picture(_ name: String) -> NSImage? {
-        if let image = loaded[name] { return image }
+    @MainActor private static var loaded: [String: Picture] = [:]
+
+    @MainActor static func picture(_ name: String) -> Picture? {
+        if let picture = loaded[name] { return picture }
         guard let url = Bundle.main.resourceURL?.appendingPathComponent(name),
-              let image = NSImage(contentsOf: url) else { return nil }
-        loaded[name] = image
-        return image
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        var decoded: CGImage?
+        if #available(macOS 15, *) {
+            decoded = CGImageSourceCreateImageAtIndex(
+                source, 0, [kCGImageSourceDecodeRequest: kCGImageSourceDecodeToHDR] as CFDictionary)
+        }
+        guard let image = decoded ?? CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        // ImageIO leaves the EXIF orientation to the caller.
+        let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        let exif = (properties?[kCGImagePropertyOrientation] as? UInt32) ?? 1
+        let orientation: SwiftUI.Image.Orientation = switch exif {
+            case 2: .upMirrored
+            case 3: .down
+            case 4: .downMirrored
+            case 5: .leftMirrored
+            case 6: .right
+            case 7: .rightMirrored
+            case 8: .left
+            default: .up
+        }
+        let turned = (5...8).contains(exif)
+        let w = CGFloat(turned ? image.height : image.width), h = CGFloat(turned ? image.width : image.height)
+        let picture = Picture(image: image, orientation: orientation, ratio: w > 0 && h > 0 ? w / h : 1)
+        loaded[name] = picture
+        return picture
     }
 
     var body: some View {
-        let image = Self.picture(name)
-        let size = image?.size ?? .zero
-        let ratio = size.width > 0 && size.height > 0 ? size.width / size.height : 1
+        let picture = Self.picture(name)
+        let ratio = picture?.ratio ?? 1
         let shown = Group {
-            if let image {
+            if let picture {
+                let image = SwiftUI.Image(decorative: picture.image, scale: 1, orientation: picture.orientation)
                 switch fit {
-                case .contain: SwiftUI.Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
-                case .cover: SwiftUI.Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
-                case .fill: SwiftUI.Image(nsImage: image).resizable()
+                case .contain: image.resizable().aspectRatio(contentMode: .fit)
+                case .cover: image.resizable().aspectRatio(contentMode: .fill)
+                case .fill: image.resizable()
                 }
             } else {
                 Color.clear
             }
         }
+        .allowedDynamicRange(.high)
         .frame(width: width ?? height.map { $0 * ratio }, height: height ?? width.map { $0 / ratio })
         .clipped()
         if let label {

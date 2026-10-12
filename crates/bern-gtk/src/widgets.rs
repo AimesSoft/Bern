@@ -1086,7 +1086,10 @@ pub struct ImageProps {
 #[allow(non_snake_case)]
 pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
     let path = std::path::Path::new(&crate::host::resources_dir()).join(props.source);
-    let picture = gtk::Picture::for_filename(&path);
+    let picture = match oriented(&path) {
+        Some(texture) => gtk::Picture::for_paintable(&texture),
+        None => gtk::Picture::for_filename(&path),
+    };
     picture.set_can_shrink(true);
     picture.set_content_fit(match props.fit {
         Some("cover") => gtk::ContentFit::Cover,
@@ -1118,6 +1121,19 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         height.unwrap_or(0.0).round() as i32,
     );
     place(p, &frame);
+}
+
+/// A JPEG turned upright by its EXIF orientation, which GTK's own loader
+/// ignores. gdk-pixbuf reads it; for JPEG it decodes the same 8-bit
+/// picture GTK would. Other formats are left to GTK's loaders.
+fn oriented(path: &std::path::Path) -> Option<gtk::gdk::Texture> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if extension != "jpg" && extension != "jpeg" {
+        return None;
+    }
+    let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file(path).ok()?;
+    let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
+    Some(gtk::gdk::Texture::for_pixbuf(&upright))
 }
 
 #[derive(Default)]
