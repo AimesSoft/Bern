@@ -111,7 +111,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 | `button.prominent` | 同上 | accent / on_accent；悬停、按下为 accent 的明度变体，仍满足 on_accent 配对 |
 | `button.plain` | 同上 | 透明 / accent.text；悬停 hover.overlay |
 | `button.destructive` | 同上 | status.error.surface / on_error；standard 与 plain 的危险角色改用 status.error 文字 |
-| `icon_button` | rest、hover、pressed、selected、focus、disabled | **所有状态无可见底色或边框**；前景 icon.secondary → accent（悬停）→ accent.text（按下、选中） |
+| `icon_button` | rest、hover、pressed、selected、focus、disabled | 默认配方各状态都不画底色或边框；前景 icon.secondary → accent（悬停）→ accent.text（按下、选中） |
 | `field` | rest、hover、focus、error、disabled | raised / text.primary / control.border；聚焦时边界 accent 并显示焦点环；错误时边界与说明 status.error |
 | `switch` | off、on、focus、disabled | 关：透明轨道加 1 px control.border 边框，圆钮 control.border，悬停时边框与圆钮为 text.secondary；开：轨道 accent，圆钮 on_accent，悬停轨道 button.prominent.hover |
 | `slider` | rest、hover、active、focus、disabled | 未选轨道 control.track，已选范围 accent；圆钮为 control.thumb 外环、1 px control.border 轮廓、accent 圆心，悬停与拖动时圆心为 button.prominent.hover / pressed |
@@ -274,7 +274,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 - 浅色、深色、提高对比、强制颜色四种环境下，每个组件的全部适用状态都有截图检查；受控配对由 `bern-theme` 测试证明。
 - 页面中没有桌面窗口的外观：主窗口无标题栏与窗口按钮，设置窗口为带标题与关闭按钮的对话框；浮动窗口只在声明 `presentation: floating` 时出现。
-- 至少三种品牌种子下重复配对检查，并目视检查主要按钮、选中与焦点；图标按钮在全部状态下都没有可见容器。
+- 至少三种品牌种子下重复配对检查，并目视检查主要按钮、选中与焦点。
 - 键盘可以完成侧边栏、页签、表单、下拉菜单、媒体进度条、对话框（打开、切换、Esc 关闭、焦点返回）与关闭确认的全部操作；输入法组合期间不提交写入。
 - 下拉菜单在卡片、对话框与滚动容器中弹出时不被裁切；视频进度条的已播放部分不使用强调色。
 - `pointer: coarse` 下所有可点目标不小于 44 × 44 px。

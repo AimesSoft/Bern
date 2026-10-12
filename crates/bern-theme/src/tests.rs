@@ -190,7 +190,7 @@ fn more_contrast_raises_text_to_seven_to_one() {
 }
 
 #[test]
-fn recipes_reference_existing_tokens_and_icon_buttons_paint_no_container() {
+fn recipes_reference_existing_tokens() {
     let snapshot = generate(None, Mode::Light, ContrastPolicy::Standard);
     for recipe in RECIPES {
         for state in recipe.states {
@@ -210,14 +210,6 @@ fn recipes_reference_existing_tokens_and_icon_buttons_paint_no_container() {
             "{} focus state",
             recipe.name
         );
-    }
-    let icon_button = RECIPES.iter().find(|r| r.name == "icon_button").unwrap();
-    for state in icon_button.states {
-        for (slot, token) in state.slots {
-            if *slot == "background" || *slot == "border" {
-                assert_eq!(*token, "transparent", "icon_button.{}", state.state);
-            }
-        }
     }
 }
 

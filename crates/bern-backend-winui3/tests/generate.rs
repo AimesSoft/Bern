@@ -184,13 +184,14 @@ fn showcase_generates_a_winui3_application() {
         assert!(output.join("app").join(runtime).is_file(), "{runtime}");
     }
 
-    // Every component is realized; colors come from the system theme.
+    // Every component is realized; without style overrides, colors come
+    // from the system theme.
     let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
     assert!(!ui.contains("unsupported"), "{ui}");
     for forbidden in ["ColorHelper", "Colors::", "SolidColorBrush"] {
         assert!(
             !ui.contains(forbidden),
-            "generated code must not use `{forbidden}`"
+            "generated code without style overrides uses `{forbidden}`"
         );
     }
     for expected in [

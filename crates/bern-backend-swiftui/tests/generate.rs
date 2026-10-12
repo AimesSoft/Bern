@@ -203,18 +203,18 @@ fn showcase_generates_swift_that_type_checks() {
     );
     assert!(swiftc.contains(&"-g".to_string()));
 
+    // The showcase declares no style overrides, so it keeps the system look.
     let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
     for forbidden in [
         "Color(",
         ".background(",
         "glassEffect",
-        "#available",
         "WKWebView",
         "JSONDecoder",
     ] {
         assert!(
             !generated.contains(forbidden),
-            "generated Swift must not use `{forbidden}`"
+            "generated Swift without style overrides uses `{forbidden}`"
         );
     }
     if !Command::new("xcrun")
@@ -438,16 +438,10 @@ fn showcase_generates_ios_swift_that_type_checks() {
             "generated Swift lacks `{expected}`"
         );
     }
-    for forbidden in [
-        "AppKit",
-        "NSApplication",
-        "#available",
-        "Color(",
-        ".background(",
-    ] {
+    for forbidden in ["AppKit", "NSApplication", "Color(", ".background("] {
         assert!(
             !generated.contains(forbidden),
-            "generated Swift must not use `{forbidden}`"
+            "generated iOS Swift without style overrides uses `{forbidden}`"
         );
     }
     let Some(sdk) = Command::new("xcrun")

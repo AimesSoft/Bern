@@ -139,13 +139,14 @@ fn showcase_generates_a_gtk_application() {
     let written = icon.display().to_string().replace('\\', "/");
     assert!(desktop.contains(&format!("Icon={written}\n")), "{desktop}");
 
-    // Every component is realized; colors come from the system style.
+    // Every component is realized; without style overrides, colors come
+    // from the system style.
     let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
     assert!(!ui.contains("unsupported"), "{ui}");
     for forbidden in ["CssProvider", "rgb(", "@define-color", "gdk::RGBA"] {
         assert!(
             !ui.contains(forbidden),
-            "generated code must not use `{forbidden}`"
+            "generated code without style overrides uses `{forbidden}`"
         );
     }
     for expected in [

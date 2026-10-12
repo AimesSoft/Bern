@@ -1,7 +1,6 @@
 //! Control recipes: which token fills each slot of a control in each
 //! state. Recipes name roles, never colors, so one table serves every mode,
-//! seed and contrast policy. `transparent` means the slot is not painted;
-//! an icon button paints no container in any state.
+//! seed and contrast policy. `transparent` means the slot is not painted.
 
 /// The slots of one control state, as `(slot, token)`.
 #[derive(Debug)]

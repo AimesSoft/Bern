@@ -1040,7 +1040,7 @@ button:disabled {
   background: transparent;
 }
 
-/* Icon buttons paint no container in any state; feedback is the icon
+/* The default icon button paints no container; feedback is the icon
  * color, and keyboard focus keeps its ring. */
 .bern-icon-button {
   display: inline-flex;

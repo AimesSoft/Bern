@@ -1,8 +1,8 @@
 //! The `swiftui + macos` target.
 //!
 //! Generates idiomatic SwiftUI from the shared IR: standard scenes,
-//! containers and controls with system styles, no custom colors and no
-//! version-gated calls to newer visual APIs. The engine runs in the app
+//! containers and controls, which keep the system styles and colors
+//! unless the app declares style overrides. The engine runs in the app
 //! process; the build links it as a static library.
 
 mod glue;

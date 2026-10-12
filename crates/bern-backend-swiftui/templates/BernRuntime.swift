@@ -4,8 +4,8 @@
 // decodes typed values, mirrors engine state into observable objects,
 // mirrors window-scoped session drafts, and runs session commands from
 // external entries through the same control bindings the user operates.
-// It contains no business logic and no custom colors: every surface keeps
-// the system appearance. What differs between macOS and iOS — windows,
+// It contains no business logic; without style overrides every surface
+// keeps the system appearance. What differs between macOS and iOS — windows,
 // lifecycle, snapshots and the video view — is in BernAppKit.swift and
 // BernUIKit.swift, of which a build compiles the one for its platform.
 
