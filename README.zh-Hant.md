@@ -605,7 +605,7 @@ showcase-mcp                                                 # 經 stdio 的 MCP
 | 3 | Web 視覺規範、主題核心、WebAssembly 應用程式與 WebUI 兩種建置 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 4 | 自適應版面、選單、功能契約、執行時切換語言 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
 | 5 | 其他原生前端：GTK 4（已完成）· WinUI 3（已完成）· `flutter + macos`（下一步） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | 元件庫（第一批 `Image`、`Progress`、`Grid`、`Stack` 已完成）、打包、增量建置、開發工具（`bern new`、`run`、`doctor`、`package` 已完成），接入 NipaPlay 3.0 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 6 | 元件庫（第一批 `Image`、`Progress`、`Grid`、`Stack` 已完成）、打包、增量建置、開發工具（`bern new`、`run`、`doctor`、`package` 已完成） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## 儲存庫結構
 

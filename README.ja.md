@@ -605,7 +605,7 @@ showcase-mcp                                                 # stdio の MCP サ
 | 3 | Web のビジュアル仕様、テーマカーネル、WebAssembly アプリと WebUI の 2 種類のビルド | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 4 | アダプティブレイアウト、メニュー、機能契約、実行時の言語切り替え | <img alt="完了" src="https://img.shields.io/badge/-%E5%AE%8C%E4%BA%86-22C55E?style=flat-square"> |
 | 5 | ほかのネイティブフロントエンド：GTK 4（完了）· WinUI 3（完了）· `flutter + macos`（次） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | コンポーネントライブラリ（第 1 弾の `Image`・`Progress`・`Grid`・`Stack` は完了）、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor`・`package` は完了）、NipaPlay 3.0 への導入 | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+| 6 | コンポーネントライブラリ（第 1 弾の `Image`・`Progress`・`Grid`・`Stack` は完了）、パッケージング、インクリメンタルビルド、開発ツール（`bern new`・`run`・`doctor`・`package` は完了） | <img alt="進行中" src="https://img.shields.io/badge/-%E9%80%B2%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
 
 ## リポジトリ構成
 

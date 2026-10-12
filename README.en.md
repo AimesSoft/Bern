@@ -605,7 +605,7 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 | 3 | Web visual spec, theme kernel, WebAssembly app and WebUI builds | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 4 | Adaptive layouts, menus, feature contracts, runtime language switching | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
 | 5 | Other native front ends: GTK 4 (done) · WinUI 3 (done) · `flutter + macos` (next) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
-| 6 | Component library (first set done: `Image`, `Progress`, `Grid`, `Stack`), packaging, incremental builds, tooling (`bern new`, `run`, `doctor` and `package` done), NipaPlay 3.0 | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
+| 6 | Component library (first set done: `Image`, `Progress`, `Grid`, `Stack`), packaging, incremental builds, tooling (`bern new`, `run`, `doctor` and `package` done) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
 
 ## Repository
 
