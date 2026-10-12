@@ -8,6 +8,8 @@
 
 pub mod glue;
 pub mod icon;
+pub mod style;
+pub mod texts;
 
 use bern_ir::{Application, IR_VERSION, SourceLocation};
 use std::fmt;
@@ -524,6 +526,16 @@ pub enum Run {
     /// Install the app bundle into the booted iOS simulator, start it there
     /// and wait until it exits.
     Simulator { app: PathBuf, bundle_id: String },
+    /// Install the APK on the Android device `adb` reaches, start its
+    /// activity and show its log until it exits.
+    Android {
+        apk: PathBuf,
+        package: String,
+        adb: PathBuf,
+        /// The socket on this computer and the app's abstract socket that
+        /// `adb forward` joins, for the control channel.
+        forward: Option<(PathBuf, String)>,
+    },
 }
 
 /// A UI target module.

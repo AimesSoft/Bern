@@ -59,6 +59,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-backend-compose"
+version = "0.1.0"
+dependencies = [
+ "bern-compiler",
+ "bern-ir",
+ "bern-protocol",
+ "bern-target-api",
+ "bern-transport-ipc",
+ "serde_json",
+]
+
+[[package]]
 name = "bern-backend-gtk"
 version = "0.1.0"
 dependencies = [
@@ -111,6 +123,7 @@ dependencies = [
 name = "bern-cli"
 version = "0.1.0"
 dependencies = [
+ "bern-backend-compose",
  "bern-backend-gtk",
  "bern-backend-swiftui",
  "bern-backend-web",
@@ -159,6 +172,7 @@ dependencies = [
  "bern-protocol",
  "bern-runtime",
  "bern-transport-ipc",
+ "jni-sys",
  "serde_json",
 ]
 
@@ -405,6 +419,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 
 [[package]]
+name = "jni-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
+dependencies = [
+ "jni-sys-macros",
+]
+
+[[package]]
+name = "jni-sys-macros"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.190"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -551,9 +584,9 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190"
 dependencies = [
  "bitflags",
  "errno",

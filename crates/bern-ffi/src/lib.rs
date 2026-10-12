@@ -9,6 +9,8 @@
 //! Callbacks may run on engine or channel threads; the frontend moves work
 //! to its UI thread. All functions catch Rust panics at the boundary.
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod link;
 pub mod media;
 #[cfg(feature = "picture")]

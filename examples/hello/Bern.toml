@@ -32,6 +32,10 @@ platform = "linux"
 [targets.windows]
 platform = "windows"
 
+[targets.android]
+platform = "android"
+channels = ["ipc"]
+
 [targets.web_app]
 ui = "web"
 platform = "browser"

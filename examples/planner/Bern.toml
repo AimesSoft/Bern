@@ -34,3 +34,7 @@ path = "modules/tags"
 [targets.macos]
 platform = "macos"
 channels = ["ipc"]
+
+[targets.android]
+platform = "android"
+channels = ["ipc"]

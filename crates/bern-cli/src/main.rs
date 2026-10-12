@@ -143,6 +143,7 @@ fn registry() -> Registry {
     registry.register(Box::new(bern_backend_web::WebBrowser));
     registry.register(Box::new(bern_backend_gtk::GtkLinux));
     registry.register(Box::new(bern_backend_winui3::WinUi3Windows));
+    registry.register(Box::new(bern_backend_compose::ComposeAndroid));
     registry
 }
 
@@ -383,6 +384,7 @@ fn os_name(os: &str) -> &str {
     match os {
         "macos" => "macOS",
         "ios" => "iOS",
+        "android" => "Android",
         "windows" => "Windows",
         "linux" => "Linux",
         other => other,

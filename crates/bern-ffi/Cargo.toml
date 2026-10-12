@@ -16,6 +16,10 @@ bern-transport-ipc = { workspace = true, optional = true }
 bern-adapter-json = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
+# The JNI bridge of the Kotlin frontend.
+[target.'cfg(target_os = "android")'.dependencies]
+jni-sys = "0.4"
+
 [features]
 default = ["ipc"]
 # The local control channel for CLI, JSON and MCP entries (Unix sockets).

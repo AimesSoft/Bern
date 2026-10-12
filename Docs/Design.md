@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.27
+- 版本：v0.28
 - 状态：架构设计草案
 - 更新日期：2026-10-12
 - 项目名称：Bern UI
@@ -94,7 +94,7 @@ Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel。Bern 作�
 | SwiftUI | macOS、iOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS 与 iOS 默认；macOS 为首个正式后端，iOS 目标已构建模拟器应用，真机签名与打包后续实现 |
 | GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；阶段五第一批已实现 |
 | WinUI 3 | Windows | WinUI 3 界面（无运行时时回退到系统 XAML）、C++/WinRT 平台宿主与 Rust 桥接 | Windows 默认；阶段五第二批已实现 |
-| Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；后续实现 |
+| Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；第一版已实现 |
 | Flutter | Flutter 支持且 Bern 已适配的平台 | Dart Widget、绑定代码与 Flutter 工程集成 | 可选跨平台目标 |
 | GPUI | Windows、macOS、Linux | GPUI Rust UI 与原生集成 | 可选桌面目标 |
 | AppKit | macOS | AppKit 控件及窗口集成 | 可独立扩展，或辅助 SwiftUI 适配 |
@@ -1665,6 +1665,17 @@ Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift 
 
 移动端适配必须处理前后台生命周期、屏幕旋转、平台导航、键盘、安全区域与资源释放。原生多窗口或多场景能力按实际环境检测；不可用时提供保留各窗口状态的虚拟窗口及窄屏切换。具体 FFI 工具、工程模板及打包流程在验证后确定。
 
+**`compose + android` 的实现。** 目标模块 `bern-backend-compose` 从 IR 生成 Kotlin 与 Jetpack Compose（Material 3），放进它生成的 Gradle 工程：
+
+- 引擎、会话运行时与桥接用 NDK 编译成 `libbern_app.so`，在应用进程内运行；Kotlin 运行时通过 JNI 调用它，引擎的回调在 Rust 线程上进入 Kotlin 后转到主线程。值的二进制布局与 C ABI 相同。
+- 一个 Activity 承载所有窗口：主窗口铺满屏幕，其他窗口叠在上面，系统返回关闭最上面的窗口。Activity 自己处理旋转等配置变化，窗口与草稿不因此重建。顶栏显示窗口或页面的标题、返回与工具栏操作。
+- 侧边栏分栏在宽度不小于 600dp 时并排显示，较窄时先显示列表、选中后进入目标页，系统返回回到列表。标签页显示为底部导航栏。
+- 颜色来自 Material 3 配色，Android 12 起跟随壁纸的动态取色，深浅色跟随系统。界面语言从系统语言中选应用支持的，字符串表放在 APK 的 assets 中，运行时切换语言不重建界面。
+- 控制通道监听抽象套接字；`bern run` 安装并启动应用后用 `adb forward` 把它接到这台电脑的应用目录，构建同时生成在这台电脑上运行的命令行与 MCP 服务，所以 `ui.inspect` 等外部入口与桌面相同。
+- 工具链：Android SDK 与 NDK、Gradle 9.4 以上、JDK 17 以上。生成的工程使用 Android Gradle 插件 9.3、Compose BOM 2026.09，compileSdk 37、targetSdk 36、minSdk 26（Android 8.0），只构建 arm64-v8a。首次构建由 Gradle 下载插件与库。
+
+实现进度：已在小米 MIX 2S（LineageOS，Android 15）上运行 `examples/hello` 与 `examples/planner`，验证了模块、侧栏与条件出现的项、开关、按钮、样式覆盖、`Canvas` 与图案、文字标注、控制通道。条件分支中元素的出现与消失过渡、列表中后加入的项的出现过渡、容器的 `reflow` 已实现，其中过渡尚未在设备上逐帧确认。尚未实现：共享元素（`hero`）、窗口的 `chrome`、`immersive` 与 `idle_after`、`Query`、`Video`、发布打包与签名。这些在能力描述中声明不支持，构建检查时报错或警告。
+
 iOS 目标（`swiftui + ios`）已确定以下做法：
 
 - 与 macOS 共用 SwiftUI 生成器、运行时与 C ABI，引擎以静态库链入应用进程；窗口、场景与生命周期在平台各自的运行时文件中实现，生成器只在场景、窗口尺寸与少数控件样式上区分平台。最低 iOS 17，与 macOS 14 同一代。
@@ -2000,6 +2011,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
 | v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |
 | v0.23 | `swiftui + ios`：与 macOS 共用生成器与运行时，平台部分分为 AppKit 与 UIKit 两个运行时文件；一个场景中的虚拟窗口（主窗口铺满、其他窗口为 sheet）；模拟器构建与 `bern run` 安装启动，`BERN_IPC_DIR` 让 Mac 上的 CLI 与 MCP 连到模拟器中的应用；最低 iOS 17 |
+| v0.28 | `compose + android` 第一版：生成 Kotlin、Compose 与 Gradle 工程，引擎经 NDK 编译后通过 JNI 在进程内运行；控制通道经 `adb forward` 接入；样式覆盖、`Canvas`、文字标注、条件出现的导航项与出现、消失、重排动效；`bern run` 安装到连接的设备；框架自带文字与样式规则合并移入共享的目标接口 |
 | v0.27 | 实现 v0.25 与 v0.26 的 SwiftUI 部分并在 macOS 上验证：模块组合、插槽与可选模块，`style!` 的覆盖与动效 token，结构过渡、共享元素与窗口沉浸，`Canvas` 与图案（`style!` 中的 `pattern` 块，新增 `gap`），`Text` 标注，导航容器中按条件与列表出现的项及 `fallback`；目标能力描述增加标注与动态导航项，做不到的构建时报错或警告 |
 | v0.26 | 模块化应用的设计：应用由外壳与多个模块组成，每个模块有自己的协议、引擎、界面、翻译与资源；命令目录与状态按命名空间合并，模块间通过依赖模块的命令与事件交互；插槽与页面插槽让模块向外壳贡献界面；可选模块可在运行时开关并沿依赖级联；`sources` 可以写目录；`bern new --module` |
 | v0.25 | 样式覆盖、动效与自绘的设计（尚未实现）：标准控件默认原生外观，应用用 `style!` 声明全应用的样式覆盖与动效 token，颜色只用语义角色并由主题内核检查，目标做不到的覆盖在构建时报出；元素可声明出现、消失、重排过渡与共享元素；导航容器的项可按条件出现；窗口增加 `chrome`、`immersive` 与 `idle_after`；`Canvas` 与 `Text` 标注；新增 `fill.subtle`、`fill.strong` 角色。删除图标按钮不画容器、不覆盖系统托管表面等外观限制；功能所需的较新系统接口可以按版本分支使用 |

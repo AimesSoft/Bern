@@ -54,6 +54,7 @@ const SPECS: &[Spec] = &[
         windows,
     ),
     ("Linux · GTK 4", &["linux"], Some(("linux", "Linux")), linux),
+    ("Android · Compose", &["android"], None, android),
     ("Web · WebAssembly", &["browser"], None, web),
 ];
 
@@ -212,6 +213,37 @@ fn ios() -> Status {
         );
     }
     Status::Ready(format!("iOS simulator SDK {sdk}, the {simulator} target"))
+}
+
+/// The Android SDK, NDK and Gradle, and the Rust target for phones.
+fn android() -> Status {
+    let tools = match bern_backend_compose::toolchain::describe() {
+        Ok(tools) => tools,
+        Err(problem) => {
+            return Status::Missing(
+                problem,
+                "install Android Studio with the NDK (SDK Manager → SDK Tools), and Gradle 9.4 or newer".into(),
+            );
+        }
+    };
+    let target = bern_backend_compose::RUST_TARGET;
+    let Some(sysroot) = output("rustc", &["--print", "sysroot"]) else {
+        return Status::Missing(
+            "rustc is not installed".into(),
+            "install Rust from https://rustup.rs".into(),
+        );
+    };
+    if !Path::new(&sysroot)
+        .join("lib/rustlib")
+        .join(target)
+        .is_dir()
+    {
+        return Status::Missing(
+            format!("the {target} target is not installed"),
+            format!("rustup target add {target}"),
+        );
+    }
+    Status::Ready(format!("{tools}, the {target} target"))
 }
 
 fn windows() -> Status {

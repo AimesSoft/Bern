@@ -46,6 +46,17 @@ const QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 /// where the Mac's command line tools look.
 pub const DIR_VARIABLE: &str = "BERN_IPC_DIR";
 
+/// The abstract socket an Android app listens on: an app cannot share a
+/// directory with the developer's tools, so the tools reach it through
+/// `adb forward` to this name.
+pub fn android_socket(bundle_id: &str) -> String {
+    format!("bern.{bundle_id}")
+}
+
+/// The socket in [`socket_dir`] that `bern run` forwards to the Android
+/// app's [`android_socket`], named like an engine.
+pub const ANDROID_FORWARD: &str = "android.sock";
+
 /// Directory holding the sockets of one application, unique per user.
 pub fn socket_dir(bundle_id: &str) -> PathBuf {
     std::env::var_os(DIR_VARIABLE)
@@ -77,6 +88,7 @@ mod platform {
     }
 
     /// Create the socket directory, owned by this user and private to it.
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub(crate) fn prepare_dir(dir: &Path) -> io::Result<()> {
         std::fs::DirBuilder::new()
             .recursive(true)
@@ -91,6 +103,7 @@ mod platform {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
     }
 
+    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub(crate) fn secure_socket(path: &Path) -> io::Result<()> {
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
     }
@@ -107,7 +120,7 @@ mod platform {
             }
             Ok(uid)
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "android"))]
         {
             let mut credentials = libc::ucred {
                 pid: 0,
@@ -132,9 +145,13 @@ mod platform {
         }
     }
 
-    /// Whether a connected peer runs as this user.
+    /// Whether a connected peer runs as this user. On Android the app is
+    /// its own user, and the developer's tools arrive through `adb`, which
+    /// runs as the shell user (or as root on development builds).
     pub(crate) fn peer_allowed(stream: &UnixStream) -> bool {
-        peer_uid(stream).is_ok_and(|uid| uid == current_uid())
+        peer_uid(stream).is_ok_and(|uid| {
+            uid == current_uid() || (cfg!(target_os = "android") && (uid == 2000 || uid == 0))
+        })
     }
 }
 
@@ -169,6 +186,9 @@ mod platform {
 pub struct Server {
     path: PathBuf,
     stop: Arc<AtomicBool>,
+    /// The abstract address to connect to when stopping.
+    #[cfg(target_os = "android")]
+    wake: std::os::unix::net::SocketAddr,
 }
 
 impl Server {
@@ -180,19 +200,16 @@ impl Server {
         media: MediaHub,
         bundle_id: &str,
     ) -> io::Result<Server> {
-        let dir = socket_dir(bundle_id);
-        platform::prepare_dir(&dir)?;
-        remove_stale_sockets(&dir);
-        let path = dir.join(format!("{}.sock", host.engine_id()));
-        if path.as_os_str().len() > 100 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "control channel path is too long for a Unix socket",
-            ));
-        }
-        let _ = std::fs::remove_file(&path);
-        let listener = UnixListener::bind(&path)?;
-        platform::secure_socket(&path)?;
+        #[cfg(target_os = "android")]
+        let (listener, path, wake) = {
+            use std::os::android::net::SocketAddrExt;
+            let name = android_socket(bundle_id);
+            let address = std::os::unix::net::SocketAddr::from_abstract_name(name.as_bytes())?;
+            let listener = UnixListener::bind_addr(&address)?;
+            (listener, PathBuf::from(format!("@{name}")), address)
+        };
+        #[cfg(not(target_os = "android"))]
+        let (listener, path) = Self::bind(bundle_id, &host)?;
         let stop = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stop);
         thread::Builder::new()
@@ -216,7 +233,31 @@ impl Server {
                         });
                 }
             })?;
-        Ok(Server { path, stop })
+        Ok(Server {
+            path,
+            stop,
+            #[cfg(target_os = "android")]
+            wake,
+        })
+    }
+
+    /// The socket in the application's directory.
+    #[cfg(not(target_os = "android"))]
+    fn bind(bundle_id: &str, host: &Host) -> io::Result<(UnixListener, PathBuf)> {
+        let dir = socket_dir(bundle_id);
+        platform::prepare_dir(&dir)?;
+        remove_stale_sockets(&dir);
+        let path = dir.join(format!("{}.sock", host.engine_id()));
+        if path.as_os_str().len() > 100 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "control channel path is too long for a Unix socket",
+            ));
+        }
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path)?;
+        platform::secure_socket(&path)?;
+        Ok((listener, path))
     }
 
     pub fn path(&self) -> &Path {
@@ -228,13 +269,19 @@ impl Drop for Server {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         // Wake the accept loop so it observes the flag.
-        let _ = UnixStream::connect(&self.path);
-        let _ = std::fs::remove_file(&self.path);
+        #[cfg(target_os = "android")]
+        let _ = UnixStream::connect_addr(&self.wake);
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = UnixStream::connect(&self.path);
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 
 /// Remove sockets left behind by engines that ended without cleanup, such
 /// as a process killed by a signal. Live sockets accept connections.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 fn remove_stale_sockets(dir: &Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;

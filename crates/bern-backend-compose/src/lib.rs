@@ -1,0 +1,362 @@
+//! The `compose + android` target.
+//!
+//! Generates Jetpack Compose from the shared IR: Material 3 containers and
+//! controls in the system's colors, inside a Gradle project. The engine
+//! runs in the app process; the build compiles it with the NDK into
+//! `libbern_app.so`, which the Kotlin runtime loads through JNI.
+
+mod glue;
+mod kotlin;
+mod names;
+mod project;
+mod style;
+pub mod toolchain;
+
+use bern_ir::spec::COMPONENTS;
+use bern_ir::{Application, IR_VERSION};
+use bern_target_api::{
+    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, Run, Target,
+    TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
+};
+use std::path::PathBuf;
+
+pub use kotlin::Generator;
+pub use project::{MINIMUM_SDK, TARGET_SDK};
+
+const RUNTIME: &str = include_str!("../templates/BernRuntime.kt");
+const VIEWS: &str = include_str!("../templates/BernViews.kt");
+const STYLE: &str = include_str!("../templates/BernStyle.kt");
+
+/// The Rust target of the engine library: 64-bit ARM, which every phone
+/// of the supported Android versions runs.
+pub const RUST_TARGET: &str = "aarch64-linux-android";
+
+/// Components not realized yet: video and queries.
+const UNSUPPORTED: &[&str] = &["Video", "Query"];
+
+pub struct ComposeAndroid;
+
+fn component_names() -> &'static [&'static str] {
+    static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        COMPONENTS
+            .iter()
+            .map(|spec| spec.name)
+            .filter(|name| !UNSUPPORTED.contains(name))
+            .collect()
+    })
+}
+
+/// Gradle project and APK name, e.g. `Showcase` for app id `showcase`.
+pub fn product_name(app: &Application) -> String {
+    names::pascal(&app.app.id)
+}
+
+impl Target for ComposeAndroid {
+    fn build_hosts(&self) -> &'static [&'static str] {
+        &["macos", "linux"]
+    }
+
+    fn descriptor(&self) -> TargetDescriptor {
+        TargetDescriptor {
+            styles: style::SUPPORT,
+            motion: &["appear", "disappear", "reflow"],
+            window_chrome: false,
+            text_marks: true,
+            dynamic_items: true,
+            id: "compose-android",
+            ui: "compose",
+            platforms: &["android"],
+            version: env!("CARGO_PKG_VERSION"),
+            ir_versions: IR_VERSION..=IR_VERSION,
+            color_source: ColorSource::Native,
+            components: component_names(),
+            windows: WindowCapabilities {
+                native: false,
+                virtual_windows: true,
+                floating: false,
+            },
+            channels: &["ipc"],
+            media: None,
+        }
+    }
+
+    fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let mut diagnostics = check_common(self, app);
+        for channel in &config.channels {
+            if !self.descriptor().channels.contains(&channel.as_str()) {
+                diagnostics.push(Diagnostic::error(format!(
+                    "target `{}`: channel `{channel}` is not available on Android",
+                    config.name
+                )));
+            }
+        }
+        let framework = bern_target_api::texts::framework_languages();
+        for language in &app.languages.supported {
+            if !framework.contains(&language.as_str()) {
+                diagnostics.push(Diagnostic::error(format!(
+                    "the Compose runtime has no `{language}` translation of its own texts; supported: {}",
+                    framework.join(", ")
+                )));
+            }
+        }
+        diagnostics
+    }
+
+    fn generate(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+    ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let product = product_name(app);
+        let package = names::package(&app.app.bundle_id);
+        let main = PathBuf::from("project/app/src/main");
+        let sources = main.join("kotlin");
+        let mut files = vec![
+            GeneratedFile::text("project/settings.gradle.kts", project::settings(&product)),
+            GeneratedFile::text("project/build.gradle.kts", project::root_build()),
+            GeneratedFile::text("project/gradle.properties", project::GRADLE_PROPERTIES),
+            GeneratedFile::text("project/app/build.gradle.kts", project::app_build(app)),
+            GeneratedFile::text(main.join("AndroidManifest.xml"), project::manifest()),
+            GeneratedFile::text(main.join("res/values/themes.xml"), project::theme(false)),
+            GeneratedFile::text(
+                main.join("res/values-night/themes.xml"),
+                project::theme(true),
+            ),
+            GeneratedFile::text(sources.join("dev/bern/runtime/BernRuntime.kt"), RUNTIME),
+            GeneratedFile::text(sources.join("dev/bern/runtime/BernViews.kt"), VIEWS),
+            GeneratedFile::text(sources.join("dev/bern/runtime/BernStyle.kt"), STYLE),
+            GeneratedFile::text(
+                sources
+                    .join(package.replace('.', "/"))
+                    .join("BernGenerated.kt"),
+                Generator::new(app).generate(&package, app.protocol.fingerprint()),
+            ),
+            GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
+            GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
+        ];
+        if glue::ipc(context) {
+            files.extend([
+                GeneratedFile::text("tools/Cargo.toml", glue::tools_cargo_toml(context, app)),
+                GeneratedFile::text("tools/src/cli.rs", glue::cli_rs(context, app)),
+                GeneratedFile::text("tools/src/mcp.rs", glue::mcp_rs(context, app)),
+            ]);
+        }
+        let lock = context.workspace_dir.join("Cargo.lock");
+        if let Ok(contents) = std::fs::read(&lock) {
+            for crate_dir in ["glue", "tools"] {
+                if !context
+                    .output_dir
+                    .join(crate_dir)
+                    .join("Cargo.lock")
+                    .exists()
+                {
+                    files.push(GeneratedFile {
+                        path: PathBuf::from(crate_dir).join("Cargo.lock"),
+                        contents: contents.clone(),
+                    });
+                }
+            }
+        }
+        for (dir, contents) in project::app_names(app) {
+            files.push(GeneratedFile::text(
+                main.join("res").join(dir).join("strings.xml"),
+                contents,
+            ));
+        }
+        for (language, table) in project::text_tables(app) {
+            files.push(GeneratedFile::text(
+                main.join(format!("assets/bern/texts/{language}.json")),
+                table,
+            ));
+        }
+        // The launcher icon: the declared one, or the Bern logo, as drawn.
+        let images = icon::images(app, &context.project_dir, icon::Shape::AsDrawn)
+            .map_err(|message| vec![Diagnostic::error(message)])?;
+        files.push(GeneratedFile {
+            path: main.join("res/mipmap-xxxhdpi/ic_launcher.png"),
+            contents: icon::largest(&images).png.to_vec(),
+        });
+        let manifest = serde_json::json!({
+            "target": self.descriptor().id,
+            "ui": "compose",
+            "platform": "android",
+            "ir_version": app.ir_version,
+            "generator": "bern-backend-compose",
+            "generator_version": env!("CARGO_PKG_VERSION"),
+            "minimum_sdk": MINIMUM_SDK,
+            "target_sdk": TARGET_SDK,
+            "abi": "arm64-v8a",
+            "profile": if context.release { "release" } else { "debug" },
+            "engine_deployment": "in-process",
+            "ui_bridge": "jni",
+            "color_source": "native",
+            "protocol": app.protocol.namespace,
+            "protocol_fingerprint": format!("{:016x}", app.protocol.fingerprint()),
+            "languages": app.languages.supported,
+            "resources": app.resources.iter().map(|resource| &resource.name).collect::<Vec<_>>(),
+            "package": app.app.bundle_id,
+        });
+        files.push(GeneratedFile::text(
+            "build.json",
+            serde_json::to_string_pretty(&manifest).expect("manifest"),
+        ));
+        Ok(files)
+    }
+
+    fn plan(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let tools = toolchain::find().map_err(|message| vec![Diagnostic::error(message)])?;
+        let product = product_name(app);
+        let output = &context.output_dir;
+        let gradle_project = output.join("project");
+        let profile = if context.release { "release" } else { "debug" };
+        let glue_target = context.workspace_dir.join("target/bern-glue");
+        let library = glue_target
+            .join(RUST_TARGET)
+            .join(profile)
+            .join("libbern_app.so");
+        let bin = toolchain::ndk_bin(&tools.ndk);
+        let linker = bin.join(format!("{RUST_TARGET}{MINIMUM_SDK}-clang"));
+        let path = |path: &PathBuf| path.display().to_string();
+        let env = vec![
+            (
+                "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER".to_string(),
+                path(&linker),
+            ),
+            ("CC_aarch64_linux_android".to_string(), path(&linker)),
+            (
+                "AR_aarch64_linux_android".to_string(),
+                path(&bin.join("llvm-ar")),
+            ),
+        ];
+        let mut cargo = vec![
+            "build".to_string(),
+            "--manifest-path".into(),
+            path(&output.join("glue/Cargo.toml")),
+            "--target".into(),
+            RUST_TARGET.into(),
+            "--target-dir".into(),
+            path(&glue_target),
+        ];
+        if context.release {
+            cargo.push("--release".into());
+        }
+        let mut gradle_env = vec![("ANDROID_HOME".to_string(), path(&tools.sdk))];
+        if let Some(java_home) = &tools.java_home {
+            gradle_env.push(("JAVA_HOME".to_string(), path(java_home)));
+        }
+        let task = if context.release {
+            "assembleRelease"
+        } else {
+            "assembleDebug"
+        };
+        let apk = gradle_project
+            .join("app/build/outputs/apk")
+            .join(profile)
+            .join(format!("app-{profile}.apk"));
+        let product_apk = output.join(format!("{product}.apk"));
+        let jni = gradle_project.join("app/src/main/jniLibs/arm64-v8a");
+        let assets = gradle_project.join("app/src/main/assets/bern/resources");
+        let mut steps = vec![
+            BuildStep::Run {
+                description: "Build the Rust engine and bridge".into(),
+                program: "cargo".into(),
+                args: cargo,
+                cwd: output.join("glue"),
+                env,
+            },
+            BuildStep::CreateDir { path: jni.clone() },
+            BuildStep::Copy {
+                from: library,
+                to: jni.join("libbern_app.so"),
+            },
+            // Declared resources ship as assets, which the runtime unpacks.
+            BuildStep::Mirror {
+                dir: assets,
+                files: app
+                    .resources
+                    .iter()
+                    .map(|resource| {
+                        (
+                            context.project_dir.join(&resource.name),
+                            PathBuf::from(&resource.name),
+                        )
+                    })
+                    .collect(),
+                keep: Vec::new(),
+            },
+            BuildStep::Run {
+                description: "Build the Compose frontend".into(),
+                program: path(&tools.gradle),
+                args: vec![
+                    "--project-dir".into(),
+                    path(&gradle_project),
+                    "--console=plain".into(),
+                    "--quiet".into(),
+                    task.into(),
+                ],
+                cwd: gradle_project.clone(),
+                env: gradle_env,
+            },
+            BuildStep::Copy {
+                from: apk,
+                to: product_apk.clone(),
+            },
+        ];
+        let mut products = vec![product_apk.clone()];
+        let mut forward = None;
+        if glue::ipc(context) {
+            // The command line and MCP server run on this computer.
+            let tools_target = context.workspace_dir.join("target/bern-tools");
+            let mut cargo = vec![
+                "build".to_string(),
+                "--manifest-path".into(),
+                path(&output.join("tools/Cargo.toml")),
+                "--target-dir".into(),
+                path(&tools_target),
+            ];
+            if context.release {
+                cargo.push("--release".into());
+            }
+            steps.push(BuildStep::Run {
+                description: "Build the command line and MCP server".into(),
+                program: "cargo".into(),
+                args: cargo,
+                cwd: output.join("tools"),
+                env: Vec::new(),
+            });
+            steps.push(BuildStep::CreateDir {
+                path: output.join("bin"),
+            });
+            let cli = app.app.id.replace('_', "-");
+            for program in [cli.clone(), format!("{cli}-mcp")] {
+                let program = format!("{program}{}", std::env::consts::EXE_SUFFIX);
+                steps.push(BuildStep::Copy {
+                    from: tools_target.join(profile).join(&program),
+                    to: output.join("bin").join(&program),
+                });
+                products.push(output.join("bin").join(&program));
+            }
+            forward = Some((
+                bern_transport_ipc::socket_dir(&app.app.bundle_id)
+                    .join(bern_transport_ipc::ANDROID_FORWARD),
+                bern_transport_ipc::android_socket(&app.app.bundle_id),
+            ));
+        }
+        Ok(BuildPlan {
+            steps,
+            notes: Vec::new(),
+            run: Some(Run::Android {
+                apk: product_apk,
+                package: app.app.bundle_id.clone(),
+                adb: toolchain::adb(),
+                forward,
+            }),
+            products,
+        })
+    }
+}

@@ -26,6 +26,7 @@ members = [
     "crates/bern-backend-web",
     "crates/bern-backend-gtk",
     "crates/bern-backend-winui3",
+    "crates/bern-backend-compose",
     "examples/showcase/showcase-protocol",
     "examples/showcase/showcase-core",
     "examples/showcase/showcase-ui",
@@ -66,6 +67,7 @@ bern-backend-swiftui = { path = "crates/bern-backend-swiftui" }
 bern-backend-web = { path = "crates/bern-backend-web" }
 bern-backend-gtk = { path = "crates/bern-backend-gtk" }
 bern-backend-winui3 = { path = "crates/bern-backend-winui3" }
+bern-backend-compose = { path = "crates/bern-backend-compose" }
 bern-adapter-json = { path = "crates/bern-adapter-json" }
 bern-transport-ipc = { path = "crates/bern-transport-ipc" }
 bern-transport-ws = { path = "crates/bern-transport-ws" }

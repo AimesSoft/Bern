@@ -20,5 +20,6 @@ bern-backend-swiftui.workspace = true
 bern-backend-web.workspace = true
 bern-backend-gtk.workspace = true
 bern-backend-winui3.workspace = true
+bern-backend-compose.workspace = true
 serde_json.workspace = true
 toml.workspace = true

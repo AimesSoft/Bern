@@ -18,7 +18,118 @@ pub fn start(run: &Run) -> Result<ExitCode, String> {
         Run::Page(root) => serve(root),
         Run::PageHost(program) => host(program),
         Run::Simulator { app, bundle_id } => simulator(app, bundle_id),
+        Run::Android {
+            apk,
+            package,
+            adb,
+            forward,
+        } => android(apk, package, adb, forward.as_ref()),
     }
+}
+
+/// Install the APK on the one Android device `adb` reaches, start it, and
+/// show its log until the app's process ends.
+fn android(
+    apk: &Path,
+    package: &str,
+    adb: &Path,
+    forward: Option<&(std::path::PathBuf, String)>,
+) -> Result<ExitCode, String> {
+    let run = |args: &[&str]| {
+        Command::new(adb)
+            .args(args)
+            .output()
+            .map_err(|error| format!("cannot run {}: {error}", adb.display()))
+    };
+    let devices = run(&["devices"])?;
+    let listed: Vec<String> = String::from_utf8_lossy(&devices.stdout)
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.strip_suffix("\tdevice").map(str::to_string))
+        .collect();
+    let device = match listed.as_slice() {
+        [device] => device.clone(),
+        [] => {
+            return Err(
+                "no Android device is connected; connect one with USB debugging on, or start an emulator"
+                    .into(),
+            );
+        }
+        _ => {
+            return Err(format!(
+                "several Android devices are connected ({}); keep one",
+                listed.join(", ")
+            ));
+        }
+    };
+    eprintln!(
+        "    \x1b[1;32mInstalling\x1b[0m {} on {device}",
+        apk.display()
+    );
+    let installed = run(&["install", "-r", &apk.display().to_string()])?;
+    if !installed.status.success() {
+        return Err(format!(
+            "cannot install {}: {}",
+            apk.display(),
+            String::from_utf8_lossy(&installed.stdout).trim()
+        ));
+    }
+    eprintln!("    \x1b[1;32mRunning\x1b[0m {package} on {device}");
+    run(&["shell", "am", "force-stop", package])?;
+    let started = run(&[
+        "shell",
+        "am",
+        "start",
+        "-W",
+        "-n",
+        &format!("{package}/.MainActivity"),
+    ])?;
+    if !started.status.success() {
+        return Err(format!("cannot start {package}"));
+    }
+    let pid = || {
+        run(&["shell", "pidof", "-s", package])
+            .ok()
+            .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+            .filter(|pid| !pid.is_empty())
+    };
+    let Some(process) = pid() else {
+        return Err(format!("{package} ended right after it started"));
+    };
+    // The application's command line tools on this computer reach the
+    // app's control channel through a forwarded socket.
+    if let Some((local, remote)) = forward {
+        if let Some(dir) = local.parent() {
+            let _ = std::fs::create_dir_all(dir);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+            }
+        }
+        let _ = std::fs::remove_file(local);
+        let forwarded = run(&[
+            "forward",
+            &format!("localfilesystem:{}", local.display()),
+            &format!("localabstract:{remote}"),
+        ])?;
+        if !forwarded.status.success() {
+            eprintln!(
+                "warning: cannot forward the control channel: {}",
+                String::from_utf8_lossy(&forwarded.stderr).trim()
+            );
+        }
+    }
+    let mut log = Command::new(adb)
+        .args(["logcat", "-v", "brief", &format!("--pid={process}")])
+        .spawn()
+        .map_err(|error| format!("cannot read the device log: {error}"))?;
+    while pid().as_deref() == Some(process.as_str()) {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    let _ = log.kill();
+    let _ = log.wait();
+    Ok(ExitCode::SUCCESS)
 }
 
 fn exit_code(code: Option<i32>) -> ExitCode {
