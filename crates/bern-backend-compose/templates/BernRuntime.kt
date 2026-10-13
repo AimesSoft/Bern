@@ -9,8 +9,10 @@
 package dev.bern.runtime
 
 import android.content.Context
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.annotation.Keep
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -517,10 +519,12 @@ object BernNative {
 }
 
 /// Callbacks of the Rust runtime. They arrive on engine and channel
-/// threads; the work moves to the main thread.
+/// threads; the work moves to the main thread, except the file questions,
+/// which the calling thread waits for.
 @Keep
-class BernBridge {
+class BernBridge(context: Context) {
     private val main = Handler(Looper.getMainLooper())
+    private val documents = context.contentResolver
 
     @Keep
     fun onState(bytes: ByteArray) {
@@ -550,6 +554,25 @@ class BernBridge {
     @Keep
     fun onQuery(subscription: Long, bytes: ByteArray) {
         main.post { BernHost.receiveQuery(subscription, bytes) }
+    }
+
+    /// The name the system shows for a document the app was given, such
+    /// as a `content:` file from the picker; null when it has none.
+    @Keep
+    fun fileName(uri: String): String? = try {
+        documents.query(Uri.parse(uri), arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    } catch (error: Exception) {
+        null
+    }
+
+    /// A descriptor the engine reads a document through, which it closes;
+    /// -1 when the document cannot be opened.
+    @Keep
+    fun openFile(uri: String): Int = try {
+        documents.openFileDescriptor(Uri.parse(uri), "r")?.detachFd() ?: -1
+    } catch (error: Exception) {
+        -1
     }
 }
 
@@ -610,7 +633,7 @@ object BernHost {
             startupError = "cannot unpack the app's resources: ${error.message}"
             return
         }
-        val reader = BernReader(BernNative.start(fingerprint, resources, BernBridge()))
+        val reader = BernReader(BernNative.start(fingerprint, resources, BernBridge(context.applicationContext)))
         if (reader.u8() != 0) {
             startupError = reader.text()
             return

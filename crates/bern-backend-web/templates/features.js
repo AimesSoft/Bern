@@ -1200,9 +1200,12 @@ function acceptOf(kinds) {
 }
 
 /// A page URL for a file the user gave: picked, dropped or opened with the
-/// application. The browser keeps it while the page lives.
+/// application. The browser keeps it while the page lives, and the engine
+/// reads the file's name and bytes through it.
 function fileURL(file) {
-  return URL.createObjectURL(file);
+  const url = URL.createObjectURL(file);
+  B.pageFiles.set(url, file);
+  return url;
 }
 
 /// The browser's open panel for `kinds`; `give(url)` runs with the chosen

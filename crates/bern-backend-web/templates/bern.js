@@ -398,6 +398,32 @@ class CommandFailure extends Error {
 
 // MARK: - WebAssembly host
 
+/// The files the user gave the page (picked, dropped or opened with the
+/// application), by the `blob:` URL the engine knows them by.
+export const pageFiles = new Map();
+
+/// The bytes of `blob`, read at once. The engine runs on the page's thread
+/// and reads without waiting, and a synchronous request is the only way to
+/// read a blob there; the bytes arrive as text decoded one byte per letter.
+function readSync(blob) {
+  const url = URL.createObjectURL(blob);
+  try {
+    const request = new XMLHttpRequest();
+    request.open("GET", url, false);
+    request.overrideMimeType("text/plain; charset=x-user-defined");
+    request.send();
+    if (request.status !== 200 && request.status !== 0) return null;
+    const text = request.responseText;
+    const bytes = new Uint8Array(text.length);
+    for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff;
+    return bytes;
+  } catch {
+    return null;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 class Host {
   constructor() {
     this.app = 0;
@@ -420,6 +446,22 @@ class Host {
         on_query: (subscription, ptr, len) =>
           this.defer(this.copy(ptr, len), (bytes) => this.queries.get(subscription)?.(bytes)),
         random_u32: () => crypto.getRandomValues(new Uint32Array(1))[0],
+        // Files the page was given, which the engine reads.
+        file_name: (ptr, len, out, capacity) => {
+          const file = pageFiles.get(this.text(ptr, len));
+          if (!file) return -1;
+          const bytes = new TextEncoder().encode(file.name);
+          if (bytes.length <= capacity) new Uint8Array(this.exports.memory.buffer, out, bytes.length).set(bytes);
+          return bytes.length;
+        },
+        file_size: (ptr, len) => pageFiles.get(this.text(ptr, len))?.size ?? -1,
+        file_read: (ptr, len, offset, out, count) => {
+          const file = pageFiles.get(this.text(ptr, len));
+          const bytes = file ? readSync(file.slice(offset, offset + count)) : null;
+          if (!bytes) return -1;
+          new Uint8Array(this.exports.memory.buffer, out, bytes.length).set(bytes);
+          return bytes.length;
+        },
         now_ms: () => performance.now(),
         set_timer: (id, delay) => {
           setTimeout(() => this.exports.bern_timer_fired(id), Math.max(0, delay));
@@ -441,6 +483,10 @@ class Host {
 
   copy(ptr, len) {
     return new Uint8Array(this.exports.memory.buffer, ptr, len).slice();
+  }
+
+  text(ptr, len) {
+    return new TextDecoder().decode(new Uint8Array(this.exports.memory.buffer, ptr, len));
   }
 
   /// Callbacks arrive while Rust is running; their work happens after the

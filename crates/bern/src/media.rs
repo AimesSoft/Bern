@@ -8,6 +8,8 @@ use crate::bind::{BernValue, Binding, Readable, ToRef};
 use crate::resources::Resources;
 use bern_protocol::{CommandError, SchemaError, Value};
 
+pub use bern_command::files::SourceFile;
+
 /// Playable media: an http(s) URL or a file URL. A resource locator is not
 /// user-visible text and needs no translation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -28,6 +30,22 @@ impl MediaSource {
         Self {
             url: crate::resources::file_url(&path),
         }
+    }
+
+    /// The name the user knows the file by: the last part of a local path
+    /// or web address, or the name the system gave a document it handed
+    /// the application (an Android `content:` document, a file a web page
+    /// was given). `None` when there is none.
+    pub fn file_name(&self) -> Option<String> {
+        bern_command::files::name(&self.url)
+    }
+
+    /// The file, opened for reading: a local file, or a document the system
+    /// or the page handed the application. A web address answers
+    /// `unreadable_source`; a file that is gone or no longer readable,
+    /// `source_unavailable`. Reading blocks the calling thread.
+    pub fn open(&self) -> Result<SourceFile, CommandError> {
+        bern_command::files::open(&self.url)
     }
 
     /// A source for a resource declared in `Bern.toml`, located by

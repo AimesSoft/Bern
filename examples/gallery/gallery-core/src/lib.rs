@@ -5,6 +5,7 @@ use bern::media::MediaSource;
 use bern::query::Answer;
 use bern::resources::Resources;
 use gallery_protocol::gallery::{self, Accent, Appearance, State, Swatch};
+use std::io::Read;
 
 pub struct GalleryEngine {
     state: State,
@@ -105,9 +106,9 @@ impl gallery::Commands for GalleryEngine {
     }
 
     fn play(&mut self, source: MediaSource) -> Result<(), CommandError> {
-        let name = file_name(&source.url);
+        let notice = format!("▶ {}", describe(&source));
         self.state.clip = source;
-        self.notify(format!("▶ {name}"));
+        self.notify(notice);
         Ok(())
     }
 
@@ -123,29 +124,6 @@ impl gallery::Commands for GalleryEngine {
         self.collect_favorites();
         Ok(())
     }
-}
-
-/// The last part of a URL's path, percent-decoded.
-fn file_name(url: &str) -> String {
-    let last = url.rsplit('/').next().unwrap_or(url).as_bytes();
-    let mut bytes = Vec::with_capacity(last.len());
-    let mut i = 0;
-    while i < last.len() {
-        let hex = last
-            .get(i + 1..i + 3)
-            .and_then(|hex| u8::from_str_radix(std::str::from_utf8(hex).ok()?, 16).ok());
-        match (last[i], hex) {
-            (b'%', Some(byte)) => {
-                bytes.push(byte);
-                i += 3;
-            }
-            (byte, _) => {
-                bytes.push(byte);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 impl gallery::Queries for GalleryEngine {
@@ -167,5 +145,55 @@ impl gallery::Queries for GalleryEngine {
 impl gallery::Engine for GalleryEngine {
     fn state(&self) -> &State {
         &self.state
+    }
+}
+
+/// What the notice says about a clip: the name the user knows it by, and,
+/// when the engine can read the file, its container and size, taken from
+/// the file itself as an engine that recognizes a video by its first bytes
+/// would.
+fn describe(source: &MediaSource) -> String {
+    let name = source.file_name().unwrap_or_else(|| source.url.clone());
+    let Ok(mut file) = source.open() else {
+        return name;
+    };
+    let mut head = [0u8; 12];
+    let kind = match file.read_exact(&mut head) {
+        Ok(()) if &head[4..8] == b"ftyp" => "MP4 · ",
+        Ok(()) if head[..4] == [0x1a, 0x45, 0xdf, 0xa3] => "Matroska · ",
+        _ => "",
+    };
+    format!("{name} · {kind}{}", size(file.len()))
+}
+
+fn size(bytes: u64) -> String {
+    match bytes {
+        0..1_000 => format!("{bytes} B"),
+        1_000..1_000_000 => format!("{:.0} KB", bytes as f64 / 1e3),
+        _ => format!("{:.1} MB", bytes as f64 / 1e6),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clips_are_described_from_their_files() {
+        let dir = std::env::temp_dir().join(format!("gallery-describe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("Tides #1.mp4");
+        let mut bytes = b"\0\0\0\x18ftypmp42".to_vec();
+        bytes.resize(2_500_000, 0);
+        std::fs::write(&path, bytes).unwrap();
+        assert_eq!(
+            describe(&MediaSource::file(&path)),
+            "Tides #1.mp4 · MP4 · 2.5 MB"
+        );
+        assert_eq!(
+            describe(&MediaSource::new("https://example.com/a%20b.mkv")),
+            "a b.mkv"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

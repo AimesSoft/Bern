@@ -54,6 +54,12 @@ channels = ["ipc"]
 platform = "windows"
 channels = ["ipc"]
 
+# The engine runs in the page, compiled to WebAssembly.
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"
+
 # The WebUI build: the page connects to a separate engine host, which also
 # serves the CLI, JSON and MCP entries through its IPC channel.
 [targets.web_ui]

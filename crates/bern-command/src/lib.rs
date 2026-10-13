@@ -18,6 +18,7 @@
 //! is reported as `cancelled` instead of as a result.
 
 mod composite;
+pub mod files;
 pub mod outbox;
 pub mod resources;
 

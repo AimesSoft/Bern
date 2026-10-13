@@ -147,6 +147,11 @@ bern package --target android
 - **四档尺寸**：用 `wm density` 把窗口设为 448、896、1344、1493 dp 宽（断点 600 / 1024 / 1440），海报墙的页边距量得 16、24、32、约 48 dp（`window.compact`、`medium`、`expanded`、`large`）；896 dp 起侧栏与详情并排。胶片页的 `Adaptive(id: film_controls)` 在 `ui.inspect` 中依次为 `compact`（图标按钮）、`medium`（文字按钮）、`expanded`（文字按钮加提示文字），1493 dp 时详情约 1213 dp 宽，仍为 `expanded`。
 - **构建与测试**：`cargo test -p bern-backend-compose`（新增画廊的生成测试）、`cargo clippy -p bern-backend-compose --all-targets -- -D warnings` 通过；画廊与探针的 Kotlin 由 Gradle 编译通过。
 
+2026-10-14，引擎读取交来的文件，Android 模拟器（Android 15），`examples/gallery`：
+
+- 把 `tides.mp4` 以“海浪 Tides #2.mp4”放进模拟器的 `Movies` 并让媒体库建索引，用 `am start -a android.intent.action.VIEW --grant-read-uri-permission` 把 `content://media/external/video/media/29` 交给应用；切到画框页后拖放区收下它并播放，引擎状态中的提示为“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”：名字来自系统的显示名，MP4 由文件开头的 `ftyp` 认出，大小来自描述符。
+- 经 CLI 播放不存在的 `content://media/external/video/media/9999`：取不到名字、打不开，提示只显示地址。
+
 ## 未完成与已知限制
 
 - 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。
@@ -159,7 +164,7 @@ bern package --target android
 - 列表项移除时没有消失过渡。
 - 带样式的侧栏项不支持方向键切换。
 - 图标只覆盖常用的名字，其余显示圆点。
-- 交给应用的文件是 `content://` 地址：没有文件名，引擎不能当作路径读取，只有交给 Bern 的播放器与图片时能读。引擎读取这类文件的途径待定。
+- 交给应用的文件是 `content://` 地址。引擎经 `MediaSource::file_name()` 与 `open()` 读取：Rust 一侧经 JNI 调 `BernBridge.fileName` 与 `openFile`，前者查 `OpenableColumns.DISPLAY_NAME`，后者用内容解析器打开文档并交出文件描述符（`detachFd`），引擎当普通文件读取。经管道提供内容的文档提供方给出的描述符不能跳转、长度为 0。
 - 只有当前屏幕上的控件登记快捷键：手机上停在侧栏时，页面工具栏的快捷键不生效。
 - 胶片的放大与停靠在宽屏布局、`arrival: nudge` 的晃动在 Android 上未逐帧确认。
 - 错峰：一次更新加入几个子元素（而不是容器本身出现）时的错峰、系统关闭动画时不错峰，未验证；画廊与探针都没有一次加入几行的操作。时序是在动画放慢 100 倍时量的，正常速度下的间隔是按倍率换算的。

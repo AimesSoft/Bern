@@ -526,6 +526,10 @@ open target/bern/macos/Showcase.app
 - **四档尺寸**：`BernWindowContext` 记录窗口内容宽度，`window.compact` 等按 `[layouts]` 断点计算；`Adaptive` 按自己的可用宽度选档，没有对应 `Layout` 的档按“先大后小”借用。经“系统事件”改变窗口大小：宽 600 时胶片页为 `compact`（图标按钮），1100 时为 `medium`（文字按钮），1470 时为 `expanded`（多一行说明）。窗口宽度在 1470 封顶（屏幕宽度）；打开检查器时系统会加宽窗口。
 - 发给窗口的鼠标移动事件（`CGEventPostToPid`）不经过应用的本地事件监视器，不能用来唤醒静置的页面；本次没有移动真实指针。
 
+## 引擎读取交来的文件
+
+2026-10-14：`file://` 地址由引擎直接打开，不经宿主。`examples/gallery` 经 `ui.set_file` 收到本地的“海浪 Tides #2.mp4”后，引擎状态中的提示为“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”。地址与路径的互相转换（含 Windows 的盘符与共享路径）由 `bern-command` 的单元测试覆盖。
+
 ## 未完成与已知限制
 
 - 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）、菜单栏命令生成均未实现。

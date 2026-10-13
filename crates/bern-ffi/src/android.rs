@@ -14,11 +14,13 @@ use crate::{
     bern_window_opened, bern_window_request_close, media, query, start_app,
 };
 use bern_command::EngineProtocol;
+use bern_command::files::{Opener, SourceFile};
+use bern_protocol::CommandError;
 use jni_sys::{
     JNI_OK, JNIEnv, JavaVM, jbyte, jbyteArray, jdouble, jint, jlong, jmethodID, jobject, jsize,
-    jvalue,
+    jstring, jvalue,
 };
-use std::ffi::{CStr, c_void};
+use std::ffi::{CStr, CString, c_void};
 
 /// The JNI types, for the generated glue's `start`.
 pub use jni_sys;
@@ -33,6 +35,8 @@ struct Bridge {
     on_media_request: jmethodID,
     on_media_state: jmethodID,
     on_query: jmethodID,
+    file_name: jmethodID,
+    open_file: jmethodID,
 }
 
 impl Bridge {
@@ -69,6 +73,32 @@ impl Bridge {
             let Some(env) = self.env() else { return };
             let array = bytes_out(env, bytes);
             self.call(method, &[jvalue { l: array }], array);
+        }
+    }
+
+    /// Ask the bridge about the document `uri`: `call` calls a method with
+    /// the URI as a Java string and reads the result while the environment
+    /// is at hand. An exception the method threw is dropped, answering
+    /// `None`.
+    unsafe fn ask<T>(&self, uri: &str, call: impl FnOnce(*mut JNIEnv, jvalue) -> T) -> Option<T> {
+        // SAFETY: the environment belongs to this thread.
+        unsafe {
+            let env = self.env()?;
+            // Document URIs are ASCII, where modified UTF-8 is UTF-8.
+            let text = CString::new(uri).ok()?;
+            let argument = ((**env).v1_6.NewStringUTF)(env, text.as_ptr());
+            if argument.is_null() {
+                ((**env).v1_6.ExceptionClear)(env);
+                return None;
+            }
+            let answer = call(env, jvalue { l: argument });
+            let thrown = ((**env).v1_6.ExceptionCheck)(env);
+            if thrown {
+                ((**env).v1_6.ExceptionDescribe)(env);
+                ((**env).v1_6.ExceptionClear)(env);
+            }
+            ((**env).v1_6.DeleteLocalRef)(env, argument);
+            (!thrown).then_some(answer)
         }
     }
 
@@ -139,6 +169,68 @@ extern "C" fn on_query(context: *mut c_void, subscription: u64, bytes: *const u8
     unsafe {
         let bridge = bridge(context);
         bridge.numbered(bridge.on_query, subscription, crate::slice(bytes, len));
+    }
+}
+
+/// The documents the system hands the application (`content:` URIs),
+/// opened through the Kotlin bridge's content resolver.
+struct Documents(*mut Bridge);
+
+// SAFETY: the bridge lives as long as the process, its object is a global
+// reference, and every call attaches the calling thread first.
+unsafe impl Send for Documents {}
+unsafe impl Sync for Documents {}
+
+impl Opener for Documents {
+    fn name(&self, url: &str) -> Option<String> {
+        // SAFETY: the bridge outlives every engine thread.
+        let bridge = unsafe { &*self.0 };
+        // SAFETY: `fileName` takes a string and answers a string or null.
+        let name = unsafe {
+            bridge.ask(url, |env, argument| {
+                let name: jstring = ((**env).v1_6.CallObjectMethodA)(
+                    env,
+                    bridge.object,
+                    bridge.file_name,
+                    &argument,
+                );
+                if name.is_null() {
+                    return None;
+                }
+                let len = ((**env).v1_6.GetStringLength)(env, name).max(0);
+                let mut units = vec![0u16; len as usize];
+                ((**env).v1_6.GetStringRegion)(env, name, 0, len, units.as_mut_ptr());
+                ((**env).v1_6.DeleteLocalRef)(env, name);
+                Some(String::from_utf16_lossy(&units))
+            })
+        };
+        name.flatten()
+    }
+
+    fn open(&self, url: &str) -> Result<SourceFile, CommandError> {
+        use std::os::fd::FromRawFd;
+        // SAFETY: as above.
+        let bridge = unsafe { &*self.0 };
+        // SAFETY: `openFile` takes a string and answers an int.
+        let fd = unsafe {
+            bridge.ask(url, |env, argument| {
+                ((**env).v1_6.CallIntMethodA)(env, bridge.object, bridge.open_file, &argument)
+            })
+        };
+        match fd {
+            Some(fd) if fd >= 0 => {
+                // SAFETY: the bridge detached the descriptor for us to own.
+                let file = unsafe { std::fs::File::from_raw_fd(fd) };
+                let len = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+                Ok(SourceFile::new(file, len))
+            }
+            _ => Err(CommandError::new(
+                "source_unavailable",
+                format!(
+                    "the system did not open `{url}`; it may be gone, or the permission to read it lost"
+                ),
+            )),
+        }
     }
 }
 
@@ -239,6 +331,8 @@ pub unsafe fn start<E: EngineProtocol>(
             method(c"onMediaRequest", c"([B)V"),
             method(c"onMediaState", c"([B)V"),
             method(c"onQuery", c"(J[B)V"),
+            method(c"fileName", c"(Ljava/lang/String;)Ljava/lang/String;"),
+            method(c"openFile", c"(Ljava/lang/String;)I"),
         ];
         if methods.iter().any(|method| method.is_null()) {
             ((**env).v1_6.ExceptionClear)(env);
@@ -255,7 +349,10 @@ pub unsafe fn start<E: EngineProtocol>(
             on_media_request: methods[3],
             on_media_state: methods[4],
             on_query: methods[5],
+            file_name: methods[6],
+            open_file: methods[7],
         }));
+        bern_command::files::install("content", Documents(context));
         let callbacks = BernCallbacks {
             context: context.cast(),
             on_state,

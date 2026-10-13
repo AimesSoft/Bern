@@ -1,6 +1,6 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.30
+- 版本：v0.31
 - 状态：架构设计草案
 - 更新日期：2026-10-14
 - 项目名称：Bern UI
@@ -1766,7 +1766,7 @@ WebUI 的 JSON 控制通道必须使用浏览器可访问的传输，示例采�
 
 两种构建的标准 Video 节点都默认生成 HTML `<video>` 并绑定媒体协议，不经过 Canvas 逐帧复制或要求应用上传纹理。WebUI 连接独立引擎不意味着视频必须在服务端播放：浏览器播放器作为媒体执行端登记，命令路由到实际持有该播放器的执行端，结果与事件归并到引擎中的唯一播放器状态。控制通道不承担视频字节传输；媒体源、用户激活限制和控制条遵循下文的视频契约。
 
-用户在页面里选到或拖入的文件以页面的 `blob:` 地址交给动作，地址里没有文件名，也只在这个页面里有效：页面的播放器与图片能读，WebUI 中原生运行的引擎读不到。需要文件名或文件内容的引擎在 Web 上和 Android 一样还缺一条读取途径，做法待定。
+用户在页面里选到或拖入的文件以页面的 `blob:` 地址交给动作，地址里没有文件名，也只在这个页面里有效：页面的播放器与图片能读。引擎在页面中时经 `MediaSource::file_name()` 与 `open()` 读取它的名字与内容，见“引擎读取交来的文件”；WebUI 中原生运行的引擎读不到页面的文件。
 
 WindowSet 使用一个页面宿主，Window 默认按网页习惯虚拟呈现：主窗口就是页面，次级窗口呈现为对话框或侧边面板（设置窗口默认为对话框），声明 `presentation: floating` 的窗口呈现为可拖动、可调整大小的浮动窗口。后端处理层叠、焦点、模态及窄屏呈现，窗口实例不依赖浏览器弹窗。原生视频覆盖层与虚拟呈现的层叠需要共同验证。
 
@@ -1831,7 +1831,7 @@ Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift 
 
 v0.29 的能力在 Compose 上全部实现，能力描述列出全部 `features` 与 `scroll_scale`、`scroll_opacity`、`nudge` 等动效属性；`examples/gallery` 在 Android 模拟器（Android 15）上逐项验证，各项结果写在对应小节。手指与多指操作经模拟器的 gRPC 触摸接口发送，`input` 命令只能模拟单指。实测中修了四个问题：胶片初始定位后，各格的位置按定位前的窗口坐标与定位后的滚动量合算，跟随把字段写回了第二格，改为按滚动内容中的坐标记录；绑定的内边距随弹簧收到零时越过零，Compose 拒绝负值而崩溃；没有控件获得焦点时快捷键收不到按键；取色只采到图片中间的一个像素。
 
-已知缺口：Android 交给应用的文件（选择器、拖放、“用…打开”）是 `content://` 地址，地址里没有文件名，引擎也不能当作路径读取，只有交给 Bern 的播放器与图片时能读。需要文件名或文件内容的引擎（例如按文件名与开头内容匹配资料）在 Android 上还缺一条读取途径，做法待定。
+Android 交给应用的文件（选择器、拖放、“用…打开”）是 `content://` 地址，地址里没有文件名，也不是路径。引擎经 `MediaSource::file_name()` 与 `open()` 读取它的名字与内容：宿主经内容解析器取显示名、打开文档并交出文件描述符，见“引擎读取交来的文件”。
 
 iOS 目标（`swiftui + ios`）已确定以下做法：
 
@@ -1930,6 +1930,22 @@ macOS、Linux 和 Windows 可以分别接入其平台媒体设施，也可以由
 能力检查区分构建时支持与运行时可用。硬件解码、字幕、受保护媒体、系统权限和浏览器限制分别描述，不能因为存在 Video 节点就认为全部可用。默认控制条根据能力组合可用动作；项目要求的必需 Feature 仍按原有规则检查，不能静默隐藏后声称已覆盖。
 
 视频内容像素保持原始颜色，控制条、加载状态和错误提示使用统一主题。弹幕、字幕和自定义工具栏通过声明的覆盖层组合，必须验证原生视频表面上的层叠和命中能力，不假设所有平台都与 DOM 一样。
+
+### 引擎读取交来的文件
+
+用户选中、拖入或用应用打开的文件以 `MediaSource` 交给引擎。播放器与图片按地址读取它；引擎自己也常要读：按文件名与开头的内容认出作品、计算校验值、交给应用自带的解码内核。地址的写法因平台而异：macOS、iOS、Linux 与 Windows 交 `file://` 地址；Android 交 `content://` 文档地址，它没有文件名，也不是路径；网页交页面的 `blob:` 地址。引擎不分辨这些写法，统一经 `MediaSource` 读取：
+
+```rust
+let name = source.file_name();   // Option<String>
+let mut file = source.open()?;    // Read + Seek，file.len() 是字节数
+```
+
+- `file_name()`：`file://` 取路径的最后一段，http(s) 取地址路径的最后一段，都做百分号解码；`content://` 取系统为这份文档显示的名字（`OpenableColumns.DISPLAY_NAME`）；`blob:` 取用户交给页面的文件的名字。没有名字时为 `None`。
+- `open()`：`file://` 直接打开本地文件；`content://` 由 Android 宿主经内容解析器打开，把文件描述符交给引擎持有，引擎当普通文件读取，可以跳转；`blob:` 由页面读取它记住的那个文件，每次读一段。http(s) 地址答复 `unreadable_source`，引擎用自己的网络客户端获取；文件已不存在或读取授权已失去时答复 `source_unavailable`；不是地址时答复 `invalid_url`。
+- 读取在调用的线程上同步进行。原生目标的命令在引擎线程上执行，读开头几 MB 与读本地文件的成本相同；长时间的读取交给引擎自己的线程，`SourceFile` 可以移到其他线程。Web 的引擎与页面在同一线程，页面用同步请求读取文件的一段，读取期间页面不响应，适合读开头与计算校验，不适合把大文件整份读入。
+- 本地文件与地址解析在引擎一侧完成（`bern-command` 的 `files` 模块）；只有宿主能解析的地址，由宿主在引擎启动时为这个协议登记打开方式，Android 登记 `content`；Web 由页面提供文件名、大小与按段读取三个导入。应用代码在各目标上相同。
+- 限制：Android 上经管道提供内容的文档提供方（例如部分网盘）给出的描述符不能跳转，长度为 0；WebUI 构建的引擎在独立的引擎宿主中，读不到页面的文件，`blob:` 地址答复 `unreadable_source`，把文件交给引擎宿主需要另行设计；iOS 与 macOS 选择器交来的文件在应用运行期间可读，应用重启后的长期访问（安全作用域书签）尚未实现，未验证。Android 的选择器保留读取授权，重启后仍可读。
+- 实现进度：`examples/gallery` 的引擎在播放时用 `file_name()` 与 `open()` 写出提示，例如“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”，其中的格式由文件开头的字节认出，大小来自打开的文件。Android 模拟器上用“打开方式”把媒体库中的视频（`content://media/external/video/media/29`）交给应用，引擎得到系统显示的中文文件名、认出 MP4、读出大小；不存在的文档只显示地址。Web（引擎在页面中的构建）在浏览器中把页面构造的真实视频文件拖入画框，得到同样的提示，控制台没有报错。macOS 上经 `ui.set_file` 交给本地文件，结果相同。iOS、Linux 与 Windows 交的是 `file://` 地址，走同一段代码，未单独验证。
 
 ## 工程组织
 
@@ -2168,6 +2184,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
 | v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |
 | v0.23 | `swiftui + ios`：与 macOS 共用生成器与运行时，平台部分分为 AppKit 与 UIKit 两个运行时文件；一个场景中的虚拟窗口（主窗口铺满、其他窗口为 sheet）；模拟器构建与 `bern run` 安装启动，`BERN_IPC_DIR` 让 Mac 上的 CLI 与 MCP 连到模拟器中的应用；最低 iOS 17 |
+| v0.31 | 引擎读取交来的文件：`MediaSource::file_name()` 与 `open()` 统一读取本地文件、Android 的 `content://` 文档与网页的 `blob:` 文件，宿主为只有它能解析的协议登记打开方式 |
 | v0.30 | 设计稿可行性审阅后补的四项：容器的 `stagger` 让子元素错峰出现；`Rail` 把子元素放在状态给出的比例处或铺在两点之间；`PopoverButton` 弹出放任意内容的浮层；尺寸档扩展为 `compact`、`medium`、`expanded`、`large` 四档，表达式可读 `window.compact` 等窗口档位 |
 | v0.29 | 媒体类应用需要的能力（逐项进行中）：带内容的按钮与 `reveal: hover`，样式的 `shadow`；侧边栏底部区域 `SidebarFooter`，工具栏中的 `Search` 与搜索结果；会话动作（`draft.x.set(…)`、`toggle()`），侧面板 `Inspector`，轻提示 `Toast`，`Switch(style: button)`，对话框窗口 `role: dialog`；表达式的 `if`，绑定状态的长度与 `animate`，容器尺寸，`Video` 的圆角，`appearance`；快捷键 `shortcut` 与会话命令 `ui.focus`；运行时选择的强调色与明暗（`accents`、`WindowSet(accent:, appearance:)`）；分体开关按钮 `SplitButton`；引擎给出的图片 `Image(source: app.x)`，形状取图片的平均色 `Shape(fill_from:)` 并向一侧渐隐 `fade`；按钮的 `pick` 与 `files` 弹出打开面板，拖放区 `Drop`，会话命令 `ui.set_file`；工具栏用 `Divider` 分组；联动：`scroll_scale`、`scroll_opacity`，`ScrollView(snap:, position:, arrival:)`，`nudge`，手势区 `Pinch` 与 `Swipe`；`Drop(opens: true)` 接收系统交给应用的文件并登记文档类型；目标能力描述增加 `features` 清单；重复项中的控件身份带上每一层的 key，经过组件也一样；新增示例 `examples/gallery`；以上能力 SwiftUI、Compose 与 Web 都已实现，Web 同时补上了样式覆盖、`Canvas` 与标注、结构过渡与共享元素、可增减的侧栏项与窗口静置 |
 | v0.28 | `compose + android` 第一版：生成 Kotlin、Compose 与 Gradle 工程，引擎经 NDK 编译后通过 JNI 在进程内运行；控制通道经 `adb forward` 接入；样式覆盖、`Canvas`、文字标注、条件出现的导航项，出现、消失、重排与共享元素动效，`Query`，基于 Media3 的 `Video`，沉浸与空闲，`bern package` 生成 APK 与 AAB；`bern run` 安装到连接的设备；框架自带文字与样式规则合并移入共享的目标接口 |
