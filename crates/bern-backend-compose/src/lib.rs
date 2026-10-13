@@ -15,8 +15,8 @@ pub mod toolchain;
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION};
 use bern_target_api::{
-    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, Run, Target,
-    TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
+    BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
+    Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
 };
 use std::path::PathBuf;
 
@@ -26,13 +26,14 @@ pub use project::{MINIMUM_SDK, TARGET_SDK};
 const RUNTIME: &str = include_str!("../templates/BernRuntime.kt");
 const VIEWS: &str = include_str!("../templates/BernViews.kt");
 const STYLE: &str = include_str!("../templates/BernStyle.kt");
+const MEDIA: &str = include_str!("../templates/BernMedia.kt");
 
 /// The Rust target of the engine library: 64-bit ARM, which every phone
 /// of the supported Android versions runs.
 pub const RUST_TARGET: &str = "aarch64-linux-android";
 
-/// Components not realized yet: video and queries.
-const UNSUPPORTED: &[&str] = &["Video", "Query"];
+/// Components not realized yet.
+const UNSUPPORTED: &[&str] = &[];
 
 pub struct ComposeAndroid;
 
@@ -60,8 +61,8 @@ impl Target for ComposeAndroid {
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
             styles: style::SUPPORT,
-            motion: &["appear", "disappear", "reflow"],
-            window_chrome: false,
+            motion: &["appear", "disappear", "reflow", "hero"],
+            window_chrome: true,
             text_marks: true,
             dynamic_items: true,
             id: "compose-android",
@@ -77,7 +78,18 @@ impl Target for ComposeAndroid {
                 floating: false,
             },
             channels: &["ipc"],
-            media: None,
+            media: Some(MediaSupport {
+                contract_versions: bern_media::MEDIA_CONTRACT_VERSION
+                    ..=bern_media::MEDIA_CONTRACT_VERSION,
+                backend: "media3",
+                backend_version: "1",
+                presenter: "playerview",
+                presenter_version: "1",
+                // Playing on without a view needs a media service, which
+                // the app does not declare.
+                background_playback: false,
+                multi_view: false,
+            }),
         }
     }
 
@@ -126,6 +138,7 @@ impl Target for ComposeAndroid {
             GeneratedFile::text(sources.join("dev/bern/runtime/BernRuntime.kt"), RUNTIME),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernViews.kt"), VIEWS),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernStyle.kt"), STYLE),
+            GeneratedFile::text(sources.join("dev/bern/runtime/BernMedia.kt"), MEDIA),
             GeneratedFile::text(
                 sources
                     .join(package.replace('.', "/"))
@@ -357,6 +370,74 @@ impl Target for ComposeAndroid {
                 forward,
             }),
             products,
+        })
+    }
+
+    /// The release APK, for installing directly, and the Android App
+    /// Bundle, for stores, in the distribution directory. Gradle signs both
+    /// with the key the `BERN_ANDROID_*` variables name, or with the debug
+    /// key.
+    fn package(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        signing: &Signing,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let tools = toolchain::find().map_err(|message| vec![Diagnostic::error(message)])?;
+        if signing.android_keystore.is_some()
+            && (signing.android_keystore_password.is_none() || signing.android_key_alias.is_none())
+        {
+            return Err(vec![Diagnostic::error(
+                "BERN_ANDROID_KEYSTORE needs BERN_ANDROID_KEYSTORE_PASSWORD and BERN_ANDROID_KEY_ALIAS",
+            )]);
+        }
+        let product = product_name(app);
+        let gradle_project = context.output_dir.join("project");
+        let dist = bern_target_api::dist_dir(context);
+        let name = |extension: &str| {
+            dist.join(format!("{product}-{}-android.{extension}", app.app.version))
+        };
+        let path = |path: &PathBuf| path.display().to_string();
+        let mut env = vec![("ANDROID_HOME".to_string(), path(&tools.sdk))];
+        if let Some(java_home) = &tools.java_home {
+            env.push(("JAVA_HOME".to_string(), path(java_home)));
+        }
+        let steps = vec![
+            BuildStep::Run {
+                description: "Bundle the app for stores".into(),
+                program: path(&tools.gradle),
+                args: vec![
+                    "--project-dir".into(),
+                    path(&gradle_project),
+                    "--console=plain".into(),
+                    "--quiet".into(),
+                    "bundleRelease".into(),
+                ],
+                cwd: gradle_project.clone(),
+                env,
+            },
+            BuildStep::CreateDir { path: dist.clone() },
+            BuildStep::Copy {
+                from: gradle_project.join("app/build/outputs/apk/release/app-release.apk"),
+                to: name("apk"),
+            },
+            BuildStep::Copy {
+                from: gradle_project.join("app/build/outputs/bundle/release/app-release.aab"),
+                to: name("aab"),
+            },
+        ];
+        let mut notes = Vec::new();
+        if signing.android_keystore.is_none() {
+            notes.push(
+                "signed with the debug key: installable for testing, not accepted by stores (set BERN_ANDROID_KEYSTORE, BERN_ANDROID_KEYSTORE_PASSWORD and BERN_ANDROID_KEY_ALIAS)"
+                    .into(),
+            );
+        }
+        Ok(BuildPlan {
+            steps,
+            products: vec![name("apk"), name("aab")],
+            run: None,
+            notes,
         })
     }
 }

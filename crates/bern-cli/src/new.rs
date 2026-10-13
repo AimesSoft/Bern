@@ -397,7 +397,7 @@ mod tests {
         project.write().unwrap();
         assert!(project.write().unwrap_err().contains("not empty"));
         let config = bern_compiler::config::load(&project.dir.join("Bern.toml")).unwrap();
-        assert_eq!(config.targets.len(), 5);
+        assert_eq!(config.targets.len(), 6);
         let compiled = bern_compiler::compile(&config).unwrap();
         assert!(compiled.warnings.is_empty(), "{:?}", compiled.warnings);
         let _ = std::fs::remove_dir_all(&root);

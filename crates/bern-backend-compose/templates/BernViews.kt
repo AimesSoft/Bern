@@ -106,6 +106,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -113,7 +116,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
@@ -175,8 +181,86 @@ object BernIcons {
         "phone.fill" -> Icons.Filled.Call
         "pencil.line" -> Icons.Filled.Create
         "checkmark.seal" -> Icons.Filled.Done
-        else -> Icons.Filled.Info
+        "pause", "pause.fill" -> pause
+        "speaker.wave.2.fill", "speaker.wave.2", "speaker.fill" -> volumeUp
+        "speaker.slash.fill", "speaker.slash" -> volumeOff
+        "square.grid.2x2", "square.grid.2x2.fill", "rectangle.grid.2x2" -> grid
+        "archivebox", "archivebox.fill" -> archive
+        "tray", "tray.fill", "tray.full" -> inbox
+        "photo", "photo.fill", "photo.on.rectangle" -> photo
+        "film", "film.fill", "video", "video.fill", "play.rectangle.fill" -> movie
+        "music.note", "music.note.list" -> music
+        "folder", "folder.fill" -> folder
+        "tag", "tag.fill" -> tag
+        "globe" -> language
+        "sun.max", "moon", "circle.lefthalf.filled", "paintbrush", "paintpalette" -> palette
+        "arrow.down.circle", "arrow.down.to.line" -> download
+        "slider.horizontal.3", "dial.low" -> tune
+        "textformat", "textformat.size" -> text
+        // Names without a counterpart show a neutral dot.
+        else -> dot
     }
+
+    // Media icons the core set lacks, from the Material icon paths.
+    private val pause by lazy { icon("Pause", "M6,19h4L10,5L6,5v14zM14,5v14h4L18,5h-4z") }
+    private val volumeUp by lazy {
+        icon(
+            "VolumeUp",
+            "M3,9v6h4l5,5L12,4L7,9L3,9zM16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02zM14,3.23v2.06c2.89,0.86 5,3.54 5,6.71s-2.11,5.85 -5,6.71v2.06c4.01,-0.91 7,-4.49 7,-8.77s-2.99,-7.86 -7,-8.77z",
+        )
+    }
+    private val volumeOff by lazy {
+        icon(
+            "VolumeOff",
+            "M16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v2.21l2.45,2.45c0.03,-0.2 0.05,-0.41 0.05,-0.63zM19,12c0,0.94 -0.2,1.82 -0.54,2.64l1.51,1.51C20.63,14.91 21,13.5 21,12c0,-4.28 -2.99,-7.86 -7,-8.77v2.06c2.89,0.86 5,3.54 5,6.71zM4.27,3L3,4.27 7.73,9L3,9v6h4l5,5v-6.73l4.25,4.25c-0.67,0.52 -1.42,0.93 -2.25,1.18v2.06c1.38,-0.31 2.63,-0.95 3.69,-1.81L19.73,21 21,19.73l-9,-9L4.27,3zM12,4L9.91,6.09 12,8.18L12,4z",
+        )
+    }
+
+    private val grid by lazy {
+        icon("Grid", "M3,3v8h8V3H3zM9,9H5V5h4V9zM3,13v8h8v-8H3zM9,19H5v-4h4V19zM13,3v8h8V3H13zM19,9h-4V5h4V9zM13,13v8h8v-8H13zM19,19h-4v-4h4V19z")
+    }
+    private val archive by lazy {
+        icon("Archive", "M20.54,5.23l-1.39,-1.68C18.88,3.21 18.47,3 18,3H6c-0.47,0 -0.88,0.21 -1.16,0.55L3.46,5.23C3.17,5.57 3,6.02 3,6.5V19c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2V6.5c0,-0.48 -0.17,-0.93 -0.46,-1.27zM12,17.5L6.5,12H10v-2h4v2h3.5L12,17.5zM5.12,5l0.81,-1h12l0.94,1H5.12z")
+    }
+    private val inbox by lazy {
+        icon("Inbox", "M19,3H4.99c-1.11,0 -1.98,0.89 -1.98,2L3,19c0,1.1 0.88,2 1.99,2H19c1.1,0 2,-0.9 2,-2V5c0,-1.11 -0.9,-2 -2,-2zM19,15h-4c0,1.66 -1.35,3 -3,3s-3,-1.34 -3,-3H4.99V5H19v10z")
+    }
+    private val photo by lazy {
+        icon("Photo", "M21,19V5c0,-1.1 -0.9,-2 -2,-2H5c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2zM8.5,13.5l2.5,3.01L14.5,12l4.5,6H5l3.5,-4.5z")
+    }
+    private val movie by lazy {
+        icon("Movie", "M18,4l2,4h-3l-2,-4h-2l2,4h-3l-2,-4H8l2,4H7L5,4H4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V4h-4z")
+    }
+    private val music by lazy {
+        icon("Music", "M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z")
+    }
+    private val folder by lazy {
+        icon("Folder", "M10,4H4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V8c0,-1.1 -0.9,-2 -2,-2h-8l-2,-2z")
+    }
+    private val tag by lazy {
+        icon("Tag", "M21.41,11.58l-9,-9C12.05,2.22 11.55,2 11,2H4c-1.1,0 -2,0.9 -2,2v7c0,0.55 0.22,1.05 0.59,1.42l9,9c0.36,0.36 0.86,0.58 1.41,0.58 0.55,0 1.05,-0.22 1.41,-0.59l7,-7c0.37,-0.36 0.59,-0.86 0.59,-1.41 0,-0.55 -0.23,-1.06 -0.59,-1.42zM5.5,7C4.67,7 4,6.33 4,5.5S4.67,4 5.5,4 7,4.67 7,5.5 6.33,7 5.5,7z")
+    }
+    private val language by lazy {
+        icon("Language", "M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM18.92,8h-2.95c-0.32,-1.25 -0.78,-2.45 -1.38,-3.56 1.84,0.63 3.37,1.91 4.33,3.56zM12,4.04c0.83,1.2 1.48,2.53 1.91,3.96h-3.82c0.43,-1.43 1.08,-2.76 1.91,-3.96zM4.26,14C4.1,13.36 4,12.69 4,12s0.1,-1.36 0.26,-2h3.38c-0.08,0.66 -0.14,1.32 -0.14,2 0,0.68 0.06,1.34 0.14,2H4.26zM5.08,16h2.95c0.32,1.25 0.78,2.45 1.38,3.56 -1.84,-0.63 -3.37,-1.9 -4.33,-3.56zM8.03,8H5.08c0.96,-1.66 2.49,-2.93 4.33,-3.56C8.81,5.55 8.35,6.75 8.03,8zM12,19.96c-0.83,-1.2 -1.48,-2.53 -1.91,-3.96h3.82c-0.43,1.43 -1.08,2.76 -1.91,3.96zM14.34,14H9.66c-0.09,-0.66 -0.16,-1.32 -0.16,-2 0,-0.68 0.07,-1.35 0.16,-2h4.68c0.09,0.65 0.16,1.32 0.16,2 0,0.68 -0.07,1.34 -0.16,2zM14.59,19.56c0.6,-1.11 1.06,-2.31 1.38,-3.56h2.95c-0.96,1.65 -2.49,2.93 -4.33,3.56zM16.36,14c0.08,-0.66 0.14,-1.32 0.14,-2 0,-0.68 -0.06,-1.34 -0.14,-2h3.38c0.16,0.64 0.26,1.31 0.26,2s-0.1,1.36 -0.26,2h-3.38z")
+    }
+    private val palette by lazy {
+        icon("Palette", "M12,3c-4.97,0 -9,4.03 -9,9s4.03,9 9,9c0.83,0 1.5,-0.67 1.5,-1.5 0,-0.39 -0.15,-0.74 -0.39,-1.01 -0.23,-0.26 -0.38,-0.61 -0.38,-0.99 0,-0.83 0.67,-1.5 1.5,-1.5H16c2.76,0 5,-2.24 5,-5 0,-4.42 -4.03,-8 -9,-8zM6.5,12c-0.83,0 -1.5,-0.67 -1.5,-1.5S5.67,9 6.5,9 8,9.67 8,10.5 7.33,12 6.5,12zM9.5,8C8.67,8 8,7.33 8,6.5S8.67,5 9.5,5s1.5,0.67 1.5,1.5S10.33,8 9.5,8zM14.5,8c-0.83,0 -1.5,-0.67 -1.5,-1.5S13.67,5 14.5,5s1.5,0.67 1.5,1.5S15.33,8 14.5,8zM17.5,12c-0.83,0 -1.5,-0.67 -1.5,-1.5S16.67,9 17.5,9s1.5,0.67 1.5,1.5 -0.67,1.5 -1.5,1.5z")
+    }
+    private val download by lazy {
+        icon("Download", "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z")
+    }
+    private val tune by lazy {
+        icon("Tune", "M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h4V5h-4V3h-2v6z")
+    }
+    private val text by lazy {
+        icon("Text", "M2.5,4v3h5v12h3V7h5V4H2.5zM21.5,9h-9v3h3v7h3v-7h3V9z")
+    }
+    private val dot by lazy { icon("Dot", "M12,12m-4,0a4,4 0,1 0,8 0a4,4 0,1 0,-8 0") }
+
+    private fun icon(name: String, path: String): ImageVector =
+        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
+            .addPath(PathParser().parsePathString(path).toNodes(), fill = SolidColor(Color.Black))
+            .build()
 }
 
 // MARK: - Keys
@@ -273,11 +357,11 @@ fun BernIconButton(
     onClick: () -> Unit,
 ) {
     val content: @Composable RowScope.() -> Unit = {
-        Icon(icon ?: Icons.Filled.Info, contentDescription = label)
+        Icon(icon ?: BernIcons.get(""), contentDescription = label)
     }
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { modifier, interaction ->
         IconButton(onClick = onClick, enabled = enabled, modifier = modifier, interactionSource = interaction) {
-            Icon(icon ?: Icons.Filled.Info, contentDescription = label)
+            Icon(icon ?: BernIcons.get(""), contentDescription = label)
         }
     }
     if (style == null) {
@@ -606,10 +690,11 @@ fun BernNavLink(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Co
 @Composable
 fun BernSplitView(
     title: String,
+    showingDetail: MutableState<Boolean>,
     sidebar: @Composable (showDetail: () -> Unit) -> Unit,
     detail: @Composable () -> Unit,
 ) {
-    var showingDetail by rememberSaveable { mutableStateOf(false) }
+    var showingDetail by showingDetail
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (maxWidth >= 600.dp) {
             BernChrome(title = title)
@@ -668,7 +753,240 @@ fun RowScope.BernTabItem(label: String, icon: ImageVector?, selected: Boolean, o
     NavigationBarItem(
         selected = selected,
         onClick = onClick,
-        icon = { Icon(icon ?: Icons.Filled.Info, contentDescription = null) },
+        icon = { Icon(icon ?: BernIcons.get(""), contentDescription = null) },
         label = { Text(label) },
     )
+}
+
+// MARK: - Queries
+
+/// What a query subscription shows, as the session runtime reports it.
+sealed class BernQueryPhase<out T> {
+    data object Idle : BernQueryPhase<Nothing>()
+    data object Loading : BernQueryPhase<Nothing>()
+    data class Ready<T>(val data: T) : BernQueryPhase<T>()
+    /// New parameters are loading; the previous data stays visible.
+    data class Refreshing<T>(val data: T) : BernQueryPhase<T>()
+    /// The last request failed; data from the last success stays visible.
+    data class Failed<T>(val previous: T?, val code: String, val message: String) : BernQueryPhase<T>()
+}
+
+/// One subscription to a catalog query. Every parameter change is a new
+/// request with a new version; the session runtime cancels the previous
+/// request and forwards only the answer for the current version, and
+/// states older than the last one shown are ignored here as well.
+class BernQuery<T>(private val index: Int, private val decode: (BernReader) -> T) {
+    var phase by mutableStateOf<BernQueryPhase<T>>(BernQueryPhase.Idle)
+        private set
+    var count: ((T) -> Int)? = null
+    private var version = 0L
+    private var subscription: Long? = null
+    private var generation = 0L
+    private var requested: ByteArray? = null
+    private val control = Any()
+
+    /// After each composition: open the subscription for the window and
+    /// request the parameters it shows, if they changed.
+    fun want(window: BernWindowContext, params: ByteArray, target: String) {
+        if (window.generation == 0L) return
+        try {
+            if (subscription != null && generation != window.generation) close()
+            if (subscription == null) {
+                subscription = BernHost.queryOpen(window, index) { receive(it) }
+                generation = window.generation
+                BernHost.controls.register(
+                    control,
+                    BernControlEntry(
+                        target, window.id, "query", "", true,
+                        BernControlActions(activate = { retry() }, value = { summary }),
+                    ),
+                )
+            }
+            if (!params.contentEquals(requested)) request(params)
+        } catch (problem: BernCommandFailure) {
+            phase = BernQueryPhase.Failed(null, problem.code, problem.message)
+        }
+    }
+
+    private fun request(params: ByteArray) {
+        val subscription = subscription ?: return
+        requested = params
+        val reader = BernReader(BernNative.queryRequest(BernHost.handle, subscription, params))
+        if (reader.u8() != 0) {
+            phase = BernQueryPhase.Failed(null, reader.text(), reader.text())
+            return
+        }
+        receive(reader)
+    }
+
+    /// Ask again with the current parameters.
+    fun retry() {
+        requested?.let(::request)
+    }
+
+    fun close() {
+        subscription?.let(BernHost::queryClose)
+        subscription = null
+        requested = null
+        version = 0
+        BernHost.controls.remove(control)
+    }
+
+    private fun receive(bytes: ByteArray) = receive(BernReader(bytes))
+
+    private fun receive(reader: BernReader) {
+        try {
+            val next = reader.u64()
+            if (next < version) return
+            val phase: BernQueryPhase<T> = when (reader.u8()) {
+                0 -> BernQueryPhase.Idle
+                1 -> BernQueryPhase.Loading
+                2 -> BernQueryPhase.Ready(decode(reader))
+                3 -> BernQueryPhase.Refreshing(decode(reader))
+                4 -> {
+                    val previous = if (reader.u8() == 1) decode(reader) else null
+                    BernQueryPhase.Failed(previous, reader.text(), reader.text())
+                }
+                else -> throw BernDecodeError("unknown query phase")
+            }
+            version = next
+            this.phase = phase
+        } catch (error: Exception) {
+            phase = BernQueryPhase.Failed(null, "invalid_state", error.toString())
+        }
+    }
+
+    /// Machine-readable state for `ui.inspect`.
+    val summary: String
+        get() {
+            fun size(data: T): String = count?.let { " (${it(data)})" } ?: ""
+            return when (val phase = phase) {
+                is BernQueryPhase.Idle -> "idle"
+                is BernQueryPhase.Loading -> "loading v$version"
+                is BernQueryPhase.Ready -> "ready v$version${size(phase.data)}"
+                is BernQueryPhase.Refreshing -> "refreshing v$version${size(phase.data)}"
+                is BernQueryPhase.Failed ->
+                    "failed v$version ${phase.code}: ${phase.message}${phase.previous?.let(::size) ?: ""}"
+            }
+        }
+}
+
+/// A `Query` declaration: owns its subscription and shows each state with
+/// standard components. `shown` maps the data to what the template shows,
+/// or null when it is empty.
+@Composable
+fun <T, S> BernQueryView(
+    query: Int,
+    target: String,
+    params: ByteArray,
+    loading: String,
+    empty: String?,
+    emptyIcon: String,
+    failed: String,
+    decode: (BernReader) -> T,
+    count: ((T) -> Int)?,
+    shown: (T) -> S?,
+    content: @Composable (S) -> Unit,
+) {
+    val window = LocalBernWindow.current
+    val state = remember { BernQuery(query, decode).also { it.count = count } }
+    SideEffect { state.want(window, params, target) }
+    DisposableEffect(state) { onDispose { state.close() } }
+    val presented: @Composable (T) -> Unit = { data ->
+        val value = shown(data)
+        if (value != null) {
+            content(value)
+        } else if (empty != null) {
+            BernUnavailable(empty, BernIcons.get(emptyIcon), null, null)
+        }
+    }
+    when (val phase = state.phase) {
+        is BernQueryPhase.Idle, is BernQueryPhase.Loading -> BernQueryProgress(loading)
+        is BernQueryPhase.Ready -> presented(phase.data)
+        is BernQueryPhase.Refreshing -> {
+            BernQueryProgress(loading)
+            presented(phase.data)
+        }
+        is BernQueryPhase.Failed -> {
+            val previous = phase.previous
+            if (previous != null) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Warning, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(failed)
+                        Text(phase.message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { state.retry() }) { Text(BernText.string("bern.query.retry")) }
+                }
+                presented(previous)
+            } else {
+                BernUnavailable(failed, Icons.Filled.Warning, phase.message) { state.retry() }
+            }
+        }
+    }
+}
+
+/// A small progress row shown while a query loads or refreshes.
+@Composable
+fun BernQueryProgress(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/// Nothing to show yet: an icon, a title, why, and a way to try again.
+@Composable
+fun BernUnavailable(title: String, icon: ImageVector, message: String?, retry: (() -> Unit)?) {
+    Column(
+        Modifier.fillMaxWidth().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        if (message != null) {
+            Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (retry != null) {
+            TextButton(onClick = retry) { Text(BernText.string("bern.query.retry")) }
+        }
+    }
+}
+
+/// A picker in the top bar: the chosen option, opening a menu of the
+/// others, as the bar has room for one line.
+@Composable
+fun <T> BernToolbarPicker(
+    label: String,
+    options: List<T>,
+    selected: T,
+    optionLabel: (T) -> String,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        TextButton(onClick = { expanded = true }) {
+            Text(optionLabel(selected))
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = label)
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for (option in options) {
+                DropdownMenuItem(
+                    text = { Text(optionLabel(option)) },
+                    leadingIcon = if (option == selected) {
+                        { Icon(Icons.Filled.Check, contentDescription = null) }
+                    } else {
+                        null
+                    },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
 }

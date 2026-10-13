@@ -11,7 +11,7 @@ use crate::{
     AppSpec, BernApp, BernBuffer, BernCallbacks, bern_app_channel, bern_app_dispatch,
     bern_app_engine_id, bern_app_snapshot, bern_app_stop, bern_buffer_free, bern_session_complete,
     bern_session_set, bern_window_closed, bern_window_confirm_close, bern_window_facts,
-    bern_window_opened, bern_window_request_close, query, start_app,
+    bern_window_opened, bern_window_request_close, media, query, start_app,
 };
 use bern_command::EngineProtocol;
 use jni_sys::{
@@ -445,4 +445,55 @@ native!(Java_dev_bern_runtime_BernNative_queryRequest(
 
 native!(Java_dev_bern_runtime_BernNative_queryClose(_env, handle: jlong, subscription: jlong) -> () {
     query::bern_query_close(app(handle), subscription as u64)
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaExecutorAttached(
+    env, handle: jlong, bytes: jbyteArray
+) -> jbyteArray {
+    let bytes = bytes_in(env, bytes);
+    buffer_out(
+        env,
+        media::bern_media_executor_attached(app(handle), bytes.as_ptr(), bytes.len()),
+    )
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaSnapshot(env, handle: jlong) -> jbyteArray {
+    buffer_out(env, media::bern_media_snapshot(app(handle)))
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaDispatch(
+    env, handle: jlong, command: jint, params: jbyteArray, token: jlong
+) -> () {
+    let params = bytes_in(env, params);
+    media::bern_media_dispatch(app(handle), command as u32, params.as_ptr(), params.len(), token as u64)
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaCreate(env, handle: jlong, bytes: jbyteArray) -> jbyteArray {
+    let bytes = bytes_in(env, bytes);
+    buffer_out(env, media::bern_media_create(app(handle), bytes.as_ptr(), bytes.len()))
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaBind(env, handle: jlong, bytes: jbyteArray) -> jbyteArray {
+    let bytes = bytes_in(env, bytes);
+    buffer_out(env, media::bern_media_bind(app(handle), bytes.as_ptr(), bytes.len()))
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaRelease(env, handle: jlong, bytes: jbyteArray) -> () {
+    let bytes = bytes_in(env, bytes);
+    media::bern_media_release(app(handle), bytes.as_ptr(), bytes.len())
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaView(env, handle: jlong, bytes: jbyteArray) -> () {
+    let bytes = bytes_in(env, bytes);
+    media::bern_media_view(app(handle), bytes.as_ptr(), bytes.len())
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaComplete(env, handle: jlong, bytes: jbyteArray) -> () {
+    let bytes = bytes_in(env, bytes);
+    media::bern_media_complete(app(handle), bytes.as_ptr(), bytes.len())
+});
+
+native!(Java_dev_bern_runtime_BernNative_mediaEvent(env, handle: jlong, bytes: jbyteArray) -> () {
+    let bytes = bytes_in(env, bytes);
+    media::bern_media_event(app(handle), bytes.as_ptr(), bytes.len())
 });

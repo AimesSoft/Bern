@@ -12,6 +12,7 @@ pub const ANDROID_GRADLE_PLUGIN: &str = "9.3.3";
 pub const KOTLIN: &str = "2.4.21";
 pub const COMPOSE_BOM: &str = "2026.09.00";
 pub const ACTIVITY_COMPOSE: &str = "1.13.0";
+pub const MEDIA3: &str = "1.11.1";
 pub const COMPILE_SDK: u32 = 37;
 pub const TARGET_SDK: u32 = 36;
 /// Android 8.0, chosen in the design discussion: Compose and the adaptive
@@ -96,12 +97,27 @@ android {{
         }}
     }}
 
+    signingConfigs {{
+        // The release key from the environment of `bern package`; the
+        // passwords never go into a file.
+        val keystore = System.getenv("BERN_ANDROID_KEYSTORE")
+        if (keystore != null) {{
+            create("release") {{
+                storeFile = file(keystore)
+                storePassword = System.getenv("BERN_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("BERN_ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("BERN_ANDROID_KEY_PASSWORD")
+                    ?: System.getenv("BERN_ANDROID_KEYSTORE_PASSWORD")
+            }}
+        }}
+    }}
+
     buildTypes {{
         release {{
             isMinifyEnabled = false
-            // Signed with the debug key for local installs; `bern package`
-            // signs for distribution.
-            signingConfig = signingConfigs.getByName("debug")
+            // Without a release key, the debug key: installable for
+            // testing, not for a store.
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }}
     }}
 
@@ -122,6 +138,8 @@ dependencies {{
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.media3:media3-exoplayer:{MEDIA3}")
+    implementation("androidx.media3:media3-ui:{MEDIA3}")
 }}
 "#,
         bundle = app.app.bundle_id,

@@ -53,6 +53,12 @@ channels = ["ipc"]
 platform = "linux"
 channels = ["ipc"]
 
+# Android phones; `bern run --target android` installs the app on the
+# connected device and starts it.
+[targets.android]
+platform = "android"
+channels = ["ipc"]
+
 [targets.web_app]
 ui = "web"
 platform = "browser"

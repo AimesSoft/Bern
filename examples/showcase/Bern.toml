@@ -82,3 +82,7 @@ web_mode = "ui"
 application_transport = "websocket"
 application_codec = "json"
 channels = ["ipc"]
+
+[targets.android]
+platform = "android"
+channels = ["ipc"]

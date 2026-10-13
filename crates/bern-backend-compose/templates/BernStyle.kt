@@ -12,6 +12,10 @@ package dev.bern.runtime
 
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
@@ -605,3 +609,48 @@ fun BernAppear(enter: EnterTransition, content: @Composable () -> Unit) {
 @Composable
 fun Modifier.bernReflow(motion: BernMotion): Modifier =
     if (bernReduceMotion()) this else animateContentSize(motion.spec())
+
+// MARK: - Shared elements
+
+/// The shared transition of the window the elements pair up in.
+@OptIn(ExperimentalSharedTransitionApi::class)
+val LocalBernShared = staticCompositionLocalOf<SharedTransitionScope?> { null }
+
+/// The animated branch an element appears or disappears with.
+val LocalBernVisibility = staticCompositionLocalOf<AnimatedVisibilityScope?> { null }
+
+/// The window's root of shared elements.
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun BernHeroRoot(content: @Composable () -> Unit) {
+    SharedTransitionLayout {
+        CompositionLocalProvider(LocalBernShared provides this) { content() }
+    }
+}
+
+/// One of the elements sharing `key` in a window: when one replaces
+/// another, it grows from where the other was, moved by `motion`. Each is
+/// laid out at its own size and scaled to the moving bounds, so text does
+/// not wrap on the way, and the two cross-fade.
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun BernHero(key: String, motion: BernMotion, content: @Composable () -> Unit) {
+    val shared = LocalBernShared.current
+    val visibility = LocalBernVisibility.current
+    if (shared == null || visibility == null || bernReduceMotion()) {
+        content()
+        return
+    }
+    with(shared) {
+        Box(
+            Modifier.sharedBounds(
+                rememberSharedContentState(key),
+                visibility,
+                enter = fadeIn(motion.spec()),
+                exit = fadeOut(motion.spec()),
+                boundsTransform = { _, _ -> motion.spec() },
+                resizeMode = SharedTransitionScope.ResizeMode.scaleToBounds(),
+            ),
+        ) { content() }
+    }
+}

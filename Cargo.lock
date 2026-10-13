@@ -64,6 +64,7 @@ version = "0.1.0"
 dependencies = [
  "bern-compiler",
  "bern-ir",
+ "bern-media",
  "bern-protocol",
  "bern-target-api",
  "bern-transport-ipc",

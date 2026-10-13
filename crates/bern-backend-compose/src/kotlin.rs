@@ -4,7 +4,8 @@
 use crate::names::{double, float, member, pascal, string};
 use bern_ir::{
     Action, Application, Binding, ComponentArg, ComponentDef, Element, Expr, ExprKind, IfLetNode,
-    IfNode, MatchArm, MatchNode, Node, ParamKind, Prop, Text, WindowDef, WindowOp, WindowRole,
+    IfNode, MatchArm, MatchNode, MediaOp, Node, ParamKind, Prop, Text, WindowDef, WindowOp,
+    WindowRole,
 };
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -640,8 +641,30 @@ impl<'a> Generator<'a> {
                 WindowOp::Open | WindowOp::Activate => format!("BernHost.open({})", string(window)),
                 WindowOp::Close => format!("BernHost.close({})", string(window)),
             },
-            // The target declares no media backend; the check reports it.
-            Action::Media { .. } => "Unit".into(),
+            Action::Media { player, op, args } => {
+                let player = string(player);
+                let arg = || args.first().map(|arg| self.expr(arg)).unwrap_or_default();
+                match op {
+                    MediaOp::Open => {
+                        format!("BernMedia.open({player}, ({}).url, bernWindow.id)", arg())
+                    }
+                    MediaOp::Play => {
+                        format!("BernMedia.command(BernMediaCommand.Play, {player}, bernWindow.id)")
+                    }
+                    MediaOp::Pause => format!(
+                        "BernMedia.command(BernMediaCommand.Pause, {player}, bernWindow.id)"
+                    ),
+                    MediaOp::Seek => {
+                        format!("BernMedia.seek({player}, {}, bernWindow.id)", arg())
+                    }
+                    MediaOp::SetVolume => {
+                        format!("BernMedia.setVolume({player}, {}, bernWindow.id)", arg())
+                    }
+                    MediaOp::SetMuted => {
+                        format!("BernMedia.setMuted({player}, {}, bernWindow.id)", arg())
+                    }
+                }
+            }
         }
     }
 
@@ -667,16 +690,32 @@ impl<'a> Generator<'a> {
 
     fn node(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
         match node {
-            Node::Element(element) => match element.keyword("appear") {
+            Node::Element(element) => {
                 // Added later, as an item of a list, the element plays its
                 // appearing transition.
-                Some(name) if !ctx.animated => {
+                let appear = element.keyword("appear").filter(|_| !ctx.animated);
+                if let Some(name) = appear {
                     out.open(format!("BernAppear({}) {{", self.enter(Some(name))));
-                    self.element(out, element, ctx);
+                }
+                match element.keyword("hero") {
+                    Some(hero) => {
+                        let key = match element.expr("hero_key") {
+                            Some(key) => format!("\"{hero}-${{{}}}\"", self.expr(key)),
+                            None => string(hero),
+                        };
+                        out.open(format!(
+                            "BernHero({key}, {}) {{",
+                            crate::style::motion(self.app, "hero")
+                        ));
+                        self.element(out, element, ctx);
+                        out.close("}");
+                    }
+                    None => self.element(out, element, ctx),
+                }
+                if appear.is_some() {
                     out.close("}");
                 }
-                _ => self.element(out, element, ctx),
-            },
+            }
             Node::Component(reference) => {
                 let component = self.app.component(&reference.component).expect("component");
                 let args: Vec<_> = component
@@ -739,7 +778,9 @@ impl<'a> Generator<'a> {
             .flatten()
             .any(|node| {
                 matches!(node, Node::Element(element)
-                    if element.keyword("appear").is_some() || element.keyword("disappear").is_some())
+                    if element.keyword("appear").is_some()
+                        || element.keyword("disappear").is_some()
+                        || element.keyword("hero").is_some())
             })
     }
 
@@ -760,7 +801,8 @@ impl<'a> Generator<'a> {
     }
 
     /// A condition whose branches appear and disappear with their
-    /// elements' transitions: one animated visibility per branch.
+    /// elements' transitions: the branch shown replaces the previous one in
+    /// the same place, and shared elements pair up across the two.
     fn animated_if(&self, out: &mut Out, node: &IfNode, ctx: &Ctx) {
         out.open("run {");
         let mut branch = String::new();
@@ -769,28 +811,58 @@ impl<'a> Generator<'a> {
         }
         branch.push_str(&node.branches.len().to_string());
         out.line(format!("val bernBranch = {branch}"));
-        let inner = Ctx {
-            animated: true,
-            ..ctx.clone()
-        };
-        let bodies = node
+        let bodies: Vec<&Vec<Node>> = node
             .branches
             .iter()
             .map(|(_, body)| body)
-            .chain(std::iter::once(&node.otherwise));
-        for (index, body) in bodies.enumerate() {
-            if body.is_empty() {
-                continue;
-            }
+            .chain(std::iter::once(&node.otherwise))
+            .collect();
+        // Each branch enters with its first element's appearing transition
+        // and leaves with its disappearing one; shared elements alone
+        // cross-fade.
+        let mut enters = Vec::new();
+        let mut exits = Vec::new();
+        for body in &bodies {
             let first = body.iter().find_map(|node| match node {
                 Node::Element(element) => Some(element),
                 _ => None,
             });
-            out.open(format!(
-                "AnimatedVisibility(visible = bernBranch == {index}, enter = {}, exit = {}) {{",
-                self.enter(first.and_then(|element| element.keyword("appear"))),
-                self.exit(first.and_then(|element| element.keyword("disappear")))
-            ));
+            let hero = body.iter().any(
+                |node| matches!(node, Node::Element(element) if element.keyword("hero").is_some()),
+            );
+            let appear = first.and_then(|element| element.keyword("appear"));
+            let disappear = first.and_then(|element| element.keyword("disappear"));
+            let fade = |name: Option<&str>, enter: bool| match (name, hero) {
+                (None, true) => format!(
+                    "{}(BernTransition.Fade, {})",
+                    if enter { "bernEnter" } else { "bernExit" },
+                    crate::style::motion(self.app, "hero")
+                ),
+                (name, _) if enter => self.enter(name),
+                (name, _) => self.exit(name),
+            };
+            enters.push(fade(appear, true));
+            exits.push(fade(disappear, false));
+        }
+        out.line(format!("val bernEnters = listOf({})", enters.join(", ")));
+        out.line(format!("val bernExits = listOf({})", exits.join(", ")));
+        out.open("AnimatedContent(");
+        out.line("targetState = bernBranch,");
+        out.line("transitionSpec = { (bernEnters[targetState] togetherWith bernExits[initialState]).using(SizeTransform(clip = false)) },");
+        out.line("label = \"branch\",");
+        out.close(") { bernShown ->");
+        out.indent += 1;
+        let inner = Ctx {
+            animated: true,
+            ..ctx.clone()
+        };
+        out.open("CompositionLocalProvider(LocalBernVisibility provides this) {");
+        out.open("when (bernShown) {");
+        for (index, body) in bodies.iter().enumerate() {
+            if body.is_empty() {
+                continue;
+            }
+            out.open(format!("{index} -> {{"));
             if body.len() > 1 {
                 out.open("Column {");
                 self.nodes(out, body, &inner.within(Scope::Column));
@@ -800,6 +872,10 @@ impl<'a> Generator<'a> {
             }
             out.close("}");
         }
+        out.line("else -> {}");
+        out.close("}");
+        out.close("}");
+        out.close("}");
         out.close("}");
     }
 
@@ -1066,6 +1142,36 @@ impl<'a> Generator<'a> {
                 out.close("}");
             }
             "List" | "ForEach" => self.list(out, element, ctx),
+            "Query" => self.query(out, element, ctx),
+            "Video" => {
+                let label = self
+                    .text_prop(element, "label")
+                    .unwrap_or_else(|| "null".into());
+                let binding = match (element.expr("source"), element.prop("player")) {
+                    (Some(source), _) => {
+                        let value = self.expr(source);
+                        if matches!(source.ty, Type::Optional { .. }) {
+                            format!("BernVideoBinding.Source(({value})?.url)")
+                        } else {
+                            format!("BernVideoBinding.Source(({value}).url)")
+                        }
+                    }
+                    (None, Some(Prop::Player { id })) => {
+                        format!("BernVideoBinding.Player({})", string(id))
+                    }
+                    _ => "BernVideoBinding.Source(null)".into(),
+                };
+                let fit = match element.keyword("fit") {
+                    Some("cover") => "BernVideoFit.Cover",
+                    Some("fill") => "BernVideoFit.Fill",
+                    _ => "BernVideoFit.Contain",
+                };
+                out.line(format!(
+                    "BernVideo({}, {label}, {binding}, {}, {fit})",
+                    self.target(element, ctx),
+                    element.keyword("controls") != Some("none")
+                ));
+            }
             "SplitView" => self.split_view(out, element, ctx),
             "Navigation" => self.navigation(out, element, ctx),
             "NavLink" => {
@@ -1388,6 +1494,66 @@ impl<'a> Generator<'a> {
         }
     }
 
+    /// A `Query`: the runtime view owns the subscription and shows the
+    /// loading, refreshing, failed and empty states; the template shows the
+    /// data. Its parameters are encoded on every composition; the runtime
+    /// requests them only when they change.
+    fn query(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (Some(binding), Some(template)) = (element.query("query"), &element.template) else {
+            return;
+        };
+        let data = kotlin_type(&binding.result);
+        let encode: Vec<_> = binding
+            .args
+            .iter()
+            .map(|arg| encode(&arg.ty, &format!("({})", self.expr(arg)), "writer"))
+            .collect();
+        let params = format!(
+            "run {{ val writer = BernWriter(); {}; writer.bytes() }}",
+            encode.join("; ")
+        );
+        let framework = |key: &str| format!("BernText.string({})", string(key));
+        let loading = self
+            .text_prop(element, "loading")
+            .unwrap_or_else(|| framework("bern.query.loading"));
+        let failed = self
+            .text_prop(element, "failed")
+            .unwrap_or_else(|| framework("bern.query.failed"));
+        let empty = self.text_prop(element, "empty");
+        let icon = element.icon("icon").unwrap_or("tray");
+        // The declared empty rule: an empty list or a missing optional.
+        let (shown, count) = match &binding.result {
+            Type::List { .. } if empty.is_some() => (
+                "if (data.isEmpty()) null else data",
+                format!("{{ data: {data} -> data.size }}"),
+            ),
+            Type::List { .. } => ("data", format!("{{ data: {data} -> data.size }}")),
+            Type::Optional { .. } => (
+                "data",
+                format!("{{ data: {data} -> if (data == null) 0 else 1 }}"),
+            ),
+            _ => ("data", "null".to_string()),
+        };
+        out.open("BernQueryView(");
+        out.line(format!("{}, {},", binding.query, self.target(element, ctx)));
+        out.line(format!("{params},"));
+        out.line(format!(
+            "{loading}, {}, {}, {failed},",
+            empty.unwrap_or_else(|| "null".into()),
+            string(icon)
+        ));
+        out.line(format!(
+            "{{ reader -> {} }},",
+            decode(&binding.result, "reader")
+        ));
+        out.line(format!("{count},"));
+        out.line(format!("{{ data: {data} -> {shown} }},"));
+        out.close(format!(") {{ {} ->", member(&template.var)));
+        out.indent += 1;
+        self.nodes(out, &element.children, ctx);
+        out.close("}");
+    }
+
     fn menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
         out.line(format!(
@@ -1464,6 +1630,30 @@ impl<'a> Generator<'a> {
                         "TextButton(onClick = {{ {action} }}, enabled = {enabled}, modifier = Modifier.testTag({target})) {{ Text({label}) }}"
                     )),
                 }
+            }
+            "Picker" => {
+                let field_ref = item.field("value").expect("picker field");
+                let field = self.field(item, "value").expect("picker field");
+                let label = self.text_prop(item, "label").unwrap_or_default();
+                let enum_type = kotlin_type(&field_ref.ty);
+                let labeled = match &field_ref.ty {
+                    Type::Enum { name } => self.types().enum_def(name).is_some_and(|def| {
+                        def.variants.iter().all(|variant| variant.label.is_some())
+                    }),
+                    _ => false,
+                };
+                let option_label = if labeled {
+                    "it.bernLabel"
+                } else {
+                    "it.bernName"
+                };
+                let target = self.target(item, ctx);
+                out.line(format!(
+                    "BernControl({target}, \"picker\", {label}, actions = BernControlActions(select = {{ name -> {enum_type}.fromBernName(name)?.let {{ {field} = it; true }} ?: false }}, value = {{ {field}.bernName }}))"
+                ));
+                out.line(format!(
+                    "BernToolbarPicker({label}, {enum_type}.entries, {field}, {{ {option_label} }}, {{ {field} = it }}, Modifier.testTag({target}))"
+                ));
             }
             _ => self.element(out, item, ctx),
         }
@@ -1651,13 +1841,16 @@ impl<'a> Generator<'a> {
             "SidebarItem",
         );
         self.nav_fallback(out, sidebar, &selection, "bernVisible");
+        // Where only one column fits, choosing a destination opens it, for
+        // the user and for external entries alike.
+        out.line("val bernShowing = rememberSaveable { mutableStateOf(false) }");
         if sidebar.id.is_some() {
             out.line(format!(
-                "BernControl({}, \"sidebar\", bernSelected, actions = BernControlActions(select = {{ name -> bernVisible.firstOrNull {{ it.bernName == name }}?.let {{ {selection} = it; true }} ?: false }}, value = {{ {selection}.bernName }}))",
+                "BernControl({}, \"sidebar\", bernSelected, actions = BernControlActions(select = {{ name -> bernVisible.firstOrNull {{ it.bernName == name }}?.let {{ {selection} = it; bernShowing.value = true; true }} ?: false }}, value = {{ {selection}.bernName }}))",
                 self.target(sidebar, ctx)
             ));
         }
-        out.open("BernSplitView(bernSelected, sidebar = { bernShowDetail ->");
+        out.open("BernSplitView(bernSelected, bernShowing, sidebar = { bernShowDetail ->");
         self.sidebar_nodes(out, &sidebar.children, &selection, ctx);
         out.close("}, detail = {");
         out.indent += 1;
@@ -1847,7 +2040,21 @@ impl<'a> Generator<'a> {
         if let Some(close) = &window.close {
             self.close_check(out, close);
         }
-        out.open("BernWindowRoot(context) {");
+        // `chrome` has nothing to change on a phone, whose windows have no
+        // title bar; immersion hides the top bar and the system bars.
+        let mut args = Vec::new();
+        if let Some(idle) = window.idle_after {
+            args.push(format!("idleAfter = {}", double(idle)));
+        }
+        if let Some(immersive) = &window.immersive {
+            args.push(format!("immersive = {}", self.expr(immersive)));
+        }
+        let args = if args.is_empty() {
+            String::new()
+        } else {
+            format!(", {}", args.join(", "))
+        };
+        out.open(format!("BernWindowRoot(context{args}) {{"));
         let ctx = Ctx {
             component: window.id.clone(),
             ..Ctx::default()
@@ -2025,7 +2232,10 @@ impl<'a> Generator<'a> {
 const PLATFORM: &str = "android";
 
 const IMPORTS: &[&str] = &[
+    "androidx.compose.animation.AnimatedContent",
     "androidx.compose.animation.AnimatedVisibility",
+    "androidx.compose.animation.SizeTransform",
+    "androidx.compose.animation.togetherWith",
     "androidx.compose.foundation.Canvas",
     "androidx.compose.ui.graphics.Color",
     "androidx.compose.ui.semantics.Role",
@@ -2057,11 +2267,13 @@ const IMPORTS: &[&str] = &[
     "androidx.compose.material3.TextButton",
     "androidx.compose.material3.VerticalDivider",
     "androidx.compose.runtime.Composable",
+    "androidx.compose.runtime.CompositionLocalProvider",
     "androidx.compose.runtime.LaunchedEffect",
     "androidx.compose.runtime.getValue",
     "androidx.compose.runtime.key",
     "androidx.compose.runtime.mutableStateOf",
     "androidx.compose.runtime.remember",
+    "androidx.compose.runtime.saveable.rememberSaveable",
     "androidx.compose.runtime.setValue",
     "androidx.compose.ui.Alignment",
     "androidx.compose.ui.Modifier",

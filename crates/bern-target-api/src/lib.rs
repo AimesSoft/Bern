@@ -593,6 +593,14 @@ pub struct Signing {
     pub windows_certificate: Option<String>,
     /// `BERN_WINDOWS_CERTIFICATE_PASSWORD`: the password of the `.pfx`.
     pub windows_certificate_password: Option<String>,
+    /// `BERN_ANDROID_KEYSTORE`: the keystore holding the upload or release
+    /// key. Gradle reads it and the variables below from the environment;
+    /// the passwords never go into a file.
+    pub android_keystore: Option<String>,
+    /// `BERN_ANDROID_KEYSTORE_PASSWORD`.
+    pub android_keystore_password: Option<String>,
+    /// `BERN_ANDROID_KEY_ALIAS`: the key in the keystore.
+    pub android_key_alias: Option<String>,
 }
 
 impl Signing {
@@ -607,6 +615,9 @@ impl Signing {
             macos_notary_profile: var("BERN_MACOS_NOTARY_PROFILE"),
             windows_certificate: var("BERN_WINDOWS_CERTIFICATE"),
             windows_certificate_password: var("BERN_WINDOWS_CERTIFICATE_PASSWORD"),
+            android_keystore: var("BERN_ANDROID_KEYSTORE"),
+            android_keystore_password: var("BERN_ANDROID_KEYSTORE_PASSWORD"),
+            android_key_alias: var("BERN_ANDROID_KEY_ALIAS"),
         }
     }
 }

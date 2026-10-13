@@ -40,6 +40,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -52,7 +53,15 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.delay
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
@@ -451,6 +460,15 @@ object BernNative {
     external fun queryOpen(app: Long, kind: Int, generation: Long, index: Int): ByteArray
     external fun queryRequest(app: Long, subscription: Long, params: ByteArray): ByteArray
     external fun queryClose(app: Long, subscription: Long)
+    external fun mediaExecutorAttached(app: Long, bytes: ByteArray): ByteArray
+    external fun mediaSnapshot(app: Long): ByteArray
+    external fun mediaDispatch(app: Long, command: Int, params: ByteArray, token: Long)
+    external fun mediaCreate(app: Long, bytes: ByteArray): ByteArray
+    external fun mediaBind(app: Long, bytes: ByteArray): ByteArray
+    external fun mediaRelease(app: Long, bytes: ByteArray)
+    external fun mediaView(app: Long, bytes: ByteArray)
+    external fun mediaComplete(app: Long, bytes: ByteArray)
+    external fun mediaEvent(app: Long, bytes: ByteArray)
 }
 
 /// Callbacks of the Rust runtime. They arrive on engine and channel
@@ -475,10 +493,14 @@ class BernBridge {
     }
 
     @Keep
-    fun onMediaRequest(bytes: ByteArray) {}
+    fun onMediaRequest(bytes: ByteArray) {
+        main.post { BernMedia.backend.perform(bytes) }
+    }
 
     @Keep
-    fun onMediaState(bytes: ByteArray) {}
+    fun onMediaState(bytes: ByteArray) {
+        main.post { BernMedia.receive(bytes) }
+    }
 
     @Keep
     fun onQuery(subscription: Long, bytes: ByteArray) {
@@ -550,6 +572,7 @@ object BernHost {
         engineID = String(BernNative.engineId(handle), Charsets.UTF_8)
         channel = String(BernNative.channel(handle), Charsets.UTF_8)
         receiveState(BernNative.snapshot(handle))
+        BernMedia.attachExecutor(context)
     }
 
     // MARK: Engine state and commands
@@ -588,6 +611,26 @@ object BernHost {
         val token = nextToken++
         replies[token] = reply
         BernNative.dispatch(handle, command, writer.bytes(), token)
+    }
+
+    /// Dispatch a media command; the window receives a failure alert.
+    fun dispatchMedia(command: Int, window: String?, encode: (BernWriter) -> Unit) {
+        if (handle == 0L) return
+        val writer = BernWriter()
+        encode(writer)
+        val token = nextToken++
+        replies[token] = BernPendingReply(window)
+        BernNative.mediaDispatch(handle, command, writer.bytes(), token)
+    }
+
+    /// Read a `0` or `1, code, message` answer.
+    fun status(bytes: ByteArray): BernCommandFailure? {
+        val reader = BernReader(bytes)
+        return try {
+            if (reader.u8() == 0) null else BernCommandFailure(reader.text(), reader.text())
+        } catch (_: Exception) {
+            BernCommandFailure("engine_stopped", "the engine is not running")
+        }
     }
 
     fun receiveReply(token: Long, bytes: ByteArray) {
@@ -663,6 +706,7 @@ object BernHost {
     fun detach(context: BernWindowContext) {
         if (handle == 0L || windows[context.kindID] !== context) return
         windows.remove(context.kindID)
+        BernMedia.windowClosed(context.id)
         BernNative.windowClosed(handle, context.kind, context.generation)
         reportFacts()
     }
@@ -1131,7 +1175,41 @@ private fun BernClosedPrimary() {
 /// shows the top bar, close confirmations and command failures.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BernWindowRoot(context: BernWindowContext, content: @Composable () -> Unit) {
+fun BernWindowRoot(
+    context: BernWindowContext,
+    idleAfter: Double? = null,
+    immersive: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val top = BernHost.sheets.lastOrNull() ?: BernHost.primary
+    val onTop = top == context.kindID
+    // `window.idle`: no touch, pointer or key input for `idleAfter` seconds.
+    var input by remember { mutableLongStateOf(0L) }
+    if (idleAfter != null) {
+        LaunchedEffect(input) {
+            context.idle = false
+            delay((idleAfter * 1000).toLong())
+            context.idle = true
+        }
+    }
+    // Immersive: the top bar and the system bars hide; a swipe from the
+    // edge shows the system bars for a moment.
+    val view = LocalView.current
+    val activity = LocalContext.current as? android.app.Activity
+    val hidden = immersive && onTop
+    DisposableEffect(hidden, activity) {
+        val window = activity?.window
+        if (window != null) {
+            val controller = WindowCompat.getInsetsController(window, view)
+            if (hidden) {
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        onDispose {}
+    }
     DisposableEffect(context) {
         BernHost.attach(context)
         onDispose { BernHost.detach(context) }
@@ -1147,8 +1225,25 @@ fun BernWindowRoot(context: BernWindowContext, content: @Composable () -> Unit) 
         val back = chrome.lastOrNull { it.back != null }?.back
         val sheet = context.kindID != BernHost.primary
         Scaffold(
+            modifier = if (idleAfter == null) {
+                Modifier
+            } else {
+                Modifier
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                awaitPointerEvent(PointerEventPass.Initial)
+                                input += 1
+                            }
+                        }
+                    }
+                    .onPreviewKeyEvent {
+                        input += 1
+                        false
+                    }
+            },
             topBar = {
-                TopAppBar(
+                if (!hidden) TopAppBar(
                     title = { Text(title, maxLines = 1) },
                     navigationIcon = {
                         when {
@@ -1172,11 +1267,12 @@ fun BernWindowRoot(context: BernWindowContext, content: @Composable () -> Unit) 
                         Text(error)
                     }
                 } else {
-                    content()
+                    BernHeroRoot(content)
                 }
             }
         }
-        if (back != null) BackHandler(onBack = back)
+        // Only the window on top goes back; the ones below it wait.
+        BackHandler(enabled = back != null && onTop) { back?.invoke() }
         context.pendingClose?.let { pending ->
             AlertDialog(
                 onDismissRequest = { BernHost.confirmClose(context, pending.id, 2) { _, _ -> } },

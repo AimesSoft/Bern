@@ -124,32 +124,30 @@ fn planner_generates_styles_drawing_and_dynamic_items() {
     assert!(kotlin.contains("if (bernPlannerDraft.page !in bernVisible)"));
     // Tags pop in when added.
     assert!(kotlin.contains("BernAppear(bernEnter(BernTransition.Pop("));
+    // The title grows from one style to the other; the window goes
+    // immersive once idle.
+    assert!(kotlin.contains("BernHero(\"title\", BernMotion("));
+    assert!(kotlin.contains("AnimatedContent("));
+    assert!(kotlin.contains("BernWindowRoot(context, idleAfter = 3.0, immersive = "));
 }
 
 #[test]
-fn showcase_reports_what_android_does_not_show_yet() {
-    // The showcase declares no Android target until Android shows them.
-    let (_, compiled) = compile("showcase");
-    let target = TargetConfig {
-        name: "android".into(),
-        platform: "android".into(),
-        ui: None,
-        web_mode: None,
-        channels: Vec::new(),
-        frontends: Vec::new(),
-    };
-    let problems = ComposeAndroid.check(&compiled.app, &target);
-    let messages: Vec<String> = problems.iter().map(|p| p.message.clone()).collect();
+fn showcase_generates_video_queries_and_windows() {
+    let (config, compiled) = compile("showcase");
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
     assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("does not support `Video`")),
-        "{messages:?}"
+        kotlin.contains("BernVideo(\"media_page.featured\""),
+        "{kotlin}"
     );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("does not support `Query`")),
-        "{messages:?}"
-    );
+    assert!(kotlin.contains("BernQueryView("));
+    assert!(kotlin.contains("BernTabs(content = {"));
+    assert!(kotlin.contains("BernToolbarPicker("));
+    assert!(kotlin.contains("\"settings\" -> BernWindow"));
+    let build = file(&files, "app/build.gradle.kts");
+    assert!(build.contains("androidx.media3:media3-exoplayer"));
 }

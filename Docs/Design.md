@@ -1674,7 +1674,11 @@ Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift 
 - 控制通道监听抽象套接字；`bern run` 安装并启动应用后用 `adb forward` 把它接到这台电脑的应用目录，构建同时生成在这台电脑上运行的命令行与 MCP 服务，所以 `ui.inspect` 等外部入口与桌面相同。
 - 工具链：Android SDK 与 NDK、Gradle 9.4 以上、JDK 17 以上。生成的工程使用 Android Gradle 插件 9.3、Compose BOM 2026.09，compileSdk 37、targetSdk 36、minSdk 26（Android 8.0），只构建 arm64-v8a。首次构建由 Gradle 下载插件与库。
 
-实现进度：已在小米 MIX 2S（LineageOS，Android 15）上运行 `examples/hello` 与 `examples/planner`，验证了模块、侧栏与条件出现的项、开关、按钮、样式覆盖、`Canvas` 与图案、文字标注、控制通道。条件分支中元素的出现与消失过渡、列表中后加入的项的出现过渡、容器的 `reflow` 已实现，其中过渡尚未在设备上逐帧确认。尚未实现：共享元素（`hero`）、窗口的 `chrome`、`immersive` 与 `idle_after`、`Query`、`Video`、发布打包与签名。这些在能力描述中声明不支持，构建检查时报错或警告。
+- 视频：Media3 的 ExoPlayer 是媒体执行端，`Video` 用不带自身控件的 `PlayerView` 显示画面，控制条由 Material 组件组成，所有播放变化都经 Bern 媒体命令。一个播放器同一时刻只在一个视图中显示；后台继续播放需要媒体服务，应用目前不声明，所以能力描述中声明不支持后台播放。
+- `bern package` 在 `target/bern/dist/` 生成发布版 APK（直接安装）与 Android App Bundle（上架商店）。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS` 读取发布密钥，密码不写进任何文件；没有这些变量时用调试密钥签名，并提示不能上架。
+- `chrome` 对手机不起作用，手机窗口没有标题栏；`immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；`idle_after` 由触摸、指针与按键重新计时。
+
+实现进度：已在小米 MIX 2S（LineageOS，Android 15）上运行 `examples/hello`、`examples/planner` 与 `examples/showcase`。验证了模块、侧栏与条件出现的项、开关、按钮、样式覆盖、`Canvas` 与图案、文字标注、控制通道，showcase 的各页（文字、按钮、开关与滑块、输入框、图片与布局、`Query` 查询列表、视频播放）与设置窗口；列表中后加入的项的弹出过渡与共享元素（标题在两种字号间放大）用录屏逐帧确认；沉浸模式静置后隐藏顶栏与系统栏、触摸后恢复；设置窗口叠在详情页上时，返回先关闭设置窗口。条件分支的切换用 `AnimatedContent`，新旧分支占同一位置；共享元素按自身尺寸布局后缩放到移动的边界，文字在过渡中不重新换行。HDR 图片在这台手机上按 SDR 显示，HDR 显示未验证。
 
 iOS 目标（`swiftui + ios`）已确定以下做法：
 
@@ -2011,7 +2015,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
 | v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |
 | v0.23 | `swiftui + ios`：与 macOS 共用生成器与运行时，平台部分分为 AppKit 与 UIKit 两个运行时文件；一个场景中的虚拟窗口（主窗口铺满、其他窗口为 sheet）；模拟器构建与 `bern run` 安装启动，`BERN_IPC_DIR` 让 Mac 上的 CLI 与 MCP 连到模拟器中的应用；最低 iOS 17 |
-| v0.28 | `compose + android` 第一版：生成 Kotlin、Compose 与 Gradle 工程，引擎经 NDK 编译后通过 JNI 在进程内运行；控制通道经 `adb forward` 接入；样式覆盖、`Canvas`、文字标注、条件出现的导航项与出现、消失、重排动效；`bern run` 安装到连接的设备；框架自带文字与样式规则合并移入共享的目标接口 |
+| v0.28 | `compose + android` 第一版：生成 Kotlin、Compose 与 Gradle 工程，引擎经 NDK 编译后通过 JNI 在进程内运行；控制通道经 `adb forward` 接入；样式覆盖、`Canvas`、文字标注、条件出现的导航项，出现、消失、重排与共享元素动效，`Query`，基于 Media3 的 `Video`，沉浸与空闲，`bern package` 生成 APK 与 AAB；`bern run` 安装到连接的设备；框架自带文字与样式规则合并移入共享的目标接口 |
 | v0.27 | 实现 v0.25 与 v0.26 的 SwiftUI 部分并在 macOS 上验证：模块组合、插槽与可选模块，`style!` 的覆盖与动效 token，结构过渡、共享元素与窗口沉浸，`Canvas` 与图案（`style!` 中的 `pattern` 块，新增 `gap`），`Text` 标注，导航容器中按条件与列表出现的项及 `fallback`；目标能力描述增加标注与动态导航项，做不到的构建时报错或警告 |
 | v0.26 | 模块化应用的设计：应用由外壳与多个模块组成，每个模块有自己的协议、引擎、界面、翻译与资源；命令目录与状态按命名空间合并，模块间通过依赖模块的命令与事件交互；插槽与页面插槽让模块向外壳贡献界面；可选模块可在运行时开关并沿依赖级联；`sources` 可以写目录；`bern new --module` |
 | v0.25 | 样式覆盖、动效与自绘的设计（尚未实现）：标准控件默认原生外观，应用用 `style!` 声明全应用的样式覆盖与动效 token，颜色只用语义角色并由主题内核检查，目标做不到的覆盖在构建时报出；元素可声明出现、消失、重排过渡与共享元素；导航容器的项可按条件出现；窗口增加 `chrome`、`immersive` 与 `idle_after`；`Canvas` 与 `Text` 标注；新增 `fill.subtle`、`fill.strong` 角色。删除图标按钮不画容器、不覆盖系统托管表面等外观限制；功能所需的较新系统接口可以按版本分支使用 |

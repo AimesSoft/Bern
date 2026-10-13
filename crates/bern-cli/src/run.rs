@@ -107,12 +107,12 @@ fn android(
                 let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
             }
         }
+        // A forward of an earlier run would keep its socket file only
+        // until the file is removed; start over.
+        let local_spec = format!("localfilesystem:{}", local.display());
+        let _ = run(&["forward", "--remove", &local_spec]);
         let _ = std::fs::remove_file(local);
-        let forwarded = run(&[
-            "forward",
-            &format!("localfilesystem:{}", local.display()),
-            &format!("localabstract:{remote}"),
-        ])?;
+        let forwarded = run(&["forward", &local_spec, &format!("localabstract:{remote}")])?;
         if !forwarded.status.success() {
             eprintln!(
                 "warning: cannot forward the control channel: {}",
