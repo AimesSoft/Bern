@@ -182,7 +182,11 @@ object BernIcons {
         "pencil.line" -> Icons.Filled.Create
         "checkmark.seal" -> Icons.Filled.Done
         "pause", "pause.fill" -> pause
-        "speaker.wave.2.fill", "speaker.wave.2", "speaker.fill" -> volumeUp
+        "speaker.wave.2.fill", "speaker.wave.2", "speaker.wave.3.fill", "speaker.wave.3" -> volumeUp
+        "speaker.wave.1.fill", "speaker.wave.1" -> volumeDown
+        "speaker.fill", "speaker" -> volumeMute
+        "sun.min", "sun.min.fill" -> brightnessLow
+        "sun.max", "sun.max.fill" -> brightnessHigh
         "speaker.slash.fill", "speaker.slash" -> volumeOff
         "square.grid.2x2", "square.grid.2x2.fill", "rectangle.grid.2x2" -> grid
         "archivebox", "archivebox.fill" -> archive
@@ -193,10 +197,10 @@ object BernIcons {
         "folder", "folder.fill" -> folder
         "tag", "tag.fill" -> tag
         "globe" -> language
-        "sun.max", "moon", "circle.lefthalf.filled", "paintbrush", "paintpalette" -> palette
+        "moon", "circle.lefthalf.filled", "paintbrush", "paintpalette" -> palette
         "arrow.down.circle", "arrow.down.to.line" -> download
         "slider.horizontal.3", "dial.low" -> tune
-        "textformat", "textformat.size" -> text
+        "textformat", "textformat.size", "textformat.size.smaller", "textformat.size.larger" -> text
         // Names without a counterpart show a neutral dot.
         else -> dot
     }
@@ -216,6 +220,16 @@ object BernIcons {
         )
     }
 
+    private val volumeDown by lazy {
+        icon("VolumeDown", "M18.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02zM5,9v6h4l5,5V4L9,9H5z")
+    }
+    private val volumeMute by lazy { icon("VolumeMute", "M7,9v6h4l5,5V4l-5,5H7z") }
+    private val brightnessLow by lazy {
+        icon("BrightnessLow", "M20,15.31L23.31,12 20,8.69V4h-4.69L12,0.69 8.69,4H4v4.69L0.69,12 4,15.31V20h4.69L12,23.31 15.31,20H20v-4.69zM12,18c-3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6 6,2.69 6,6 -2.69,6 -6,6z")
+    }
+    private val brightnessHigh by lazy {
+        icon("BrightnessHigh", "M20,8.69V4h-4.69L12,0.69 8.69,4H4v4.69L0.69,12 4,15.31V20h4.69L12,23.31 15.31,20H20v-4.69L23.31,12 20,8.69zM12,18c-3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6 6,2.69 6,6 -2.69,6 -6,6zM12,8c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4 -1.79,-4 -4,-4z")
+    }
     private val grid by lazy {
         icon("Grid", "M3,3v8h8V3H3zM9,9H5V5h4V9zM3,13v8h8v-8H3zM9,19H5v-4h4V19zM13,3v8h8V3H13zM19,9h-4V5h4V9zM13,13v8h8v-8H13zM19,19h-4v-4h4V19z")
     }
