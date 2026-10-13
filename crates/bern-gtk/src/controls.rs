@@ -24,6 +24,12 @@ pub(crate) struct Actions {
     /// Go back; false when there is nothing to go back to.
     pub(crate) back: Option<Rc<dyn Fn() -> bool>>,
     pub(crate) value: Option<Rc<dyn Fn() -> Option<String>>>,
+    /// Take the keyboard focus.
+    pub(crate) focus: Option<Rc<dyn Fn()>>,
+    /// Take a file as if the user chose or dropped it, then act.
+    pub(crate) set_file: Option<Rc<dyn Fn(String)>>,
+    /// The kinds of file `set_file` takes.
+    pub(crate) file_kinds: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -72,4 +78,17 @@ pub(crate) fn register(
 
 pub(crate) fn entries() -> Vec<Entry> {
     CONTROLS.with(|controls| controls.borrow().values().cloned().collect())
+}
+
+/// The mounted control of `id` in the context, as a shortcut reaches it.
+pub(crate) fn find(ctx: &Ctx, id: &str) -> Option<Entry> {
+    let target = ctx.target(id);
+    CONTROLS.with(|controls| {
+        controls
+            .borrow()
+            .values()
+            .rev()
+            .find(|entry| entry.target == target)
+            .cloned()
+    })
 }

@@ -773,6 +773,23 @@ function sessionRequest(request, bytes) {
       }
       case 18: ok((writer) => writer.text(languageCell.peek())); break; // ui.language
       case 19: setLanguage(reader.text()); ok(); break; // ui.set_language
+      case 20: action(find(reader.text()), "focus")(); ok(); break; // ui.focus
+      case 21: { // ui.set_file
+        const entry = find(reader.text());
+        const url = reader.text();
+        const give = action(entry, "setFile");
+        try {
+          new URL(url);
+        } catch {
+          throw new CommandFailure("invalid_url", `\`${url}\` is not a URL`);
+        }
+        if (hooks.accepts && !hooks.accepts(url, entry.actions.fileKinds ?? "any")) {
+          throw new CommandFailure("unsupported_file", `\`${entry.target()}\` takes ${entry.actions.fileKinds}, not \`${url}\``);
+        }
+        give(url);
+        ok();
+        break;
+      }
       default:
         throw new CommandFailure("unknown_command", `unknown session command ${index}`);
     }
@@ -864,6 +881,30 @@ function sessionPrefix() {
   return link.sessionID ? `${link.sessionID}/` : "";
 }
 
+// MARK: - Hooks
+
+/// Parts of the page `features.js` provides: styles, structural motion and
+/// the like. It fills these in when it loads, before anything is built.
+export const hooks = {
+  /// `(node, style, { selected })`: a `style!` override on a control.
+  style: null,
+  /// `(node, done)`: plays the disappearing transition of `node`, then
+  /// calls `done`; false when it has none.
+  exit: null,
+  /// `(win, seconds)`: keeps `win.idle` from the window's input.
+  idle: null,
+  /// `(node, property, value, motion)`: a length bound to state.
+  length: null,
+  /// `(url, kinds)`: whether a file at `url` is one of `kinds`.
+  accepts: null,
+  /// The stagger clock of the container being built, if any.
+  clock: null,
+  /// `(step)`: a new stagger clock.
+  makeClock: null,
+  /// `(clock, body)`: runs `body` with `clock` as the current one.
+  withClock: null,
+};
+
 // MARK: - DOM
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -903,12 +944,50 @@ export function bindText(node, getter) {
   });
 }
 
-function bindAttr(node, name, getter) {
+export function bindAttr(node, name, getter) {
   effect(() => {
     const value = getter();
     if (value === null || value === undefined || value === false) node.removeAttribute(name);
     else node.setAttribute(name, value === true ? "" : value);
   });
+}
+
+/// Whether elements mounting now play their `appear` transition: true
+/// while `When` or `Each` change after their first display, for the
+/// elements they mount themselves.
+let entering = false;
+/// Whether an update after the first display is mounting elements, at any
+/// depth: containers that stagger their children play them then.
+let updating = false;
+
+export function structural(animated, body) {
+  const saved = [entering, updating];
+  entering = animated;
+  updating = updating || animated;
+  try {
+    return body();
+  } finally {
+    [entering, updating] = saved;
+  }
+}
+
+export function isEntering() {
+  return entering;
+}
+
+export function isUpdating() {
+  return updating;
+}
+
+/// Runs `body` with the stagger clock of a container, when there is one.
+function withClock(clock, body) {
+  return clock && hooks.withClock ? hooks.withClock(clock, body) : body();
+}
+
+/// Take `node` off the page, once its disappearing transition has played.
+function leave(node) {
+  if (node.bernExiting) return;
+  if (!(node.nodeType === 1 && hooks.exit?.(node, () => node.remove()))) node.remove();
 }
 
 /// A region between two markers whose contents a builder replaces.
@@ -919,7 +998,9 @@ class Region {
     parent.append(this.start, this.end);
   }
   clear() {
-    while (this.start.nextSibling && this.start.nextSibling !== this.end) this.start.nextSibling.remove();
+    const nodes = [];
+    for (let node = this.start.nextSibling; node && node !== this.end; node = node.nextSibling) nodes.push(node);
+    for (const node of nodes) leave(node);
   }
   /// A detached fragment the builder fills, then inserted at once.
   fill(build) {
@@ -950,10 +1031,11 @@ export function controlEntries() {
 
 export function target(ctx, id) {
   const base = `${ctx.comp}.${id}`;
-  return ctx.key ? `${base}[${ctx.key()}]` : base;
+  // The key of every repeated row the control is in, outermost first.
+  return base + (ctx.keys ?? []).map((key) => `[${key()}]`).join("");
 }
 
-function mark(node, ctx, id) {
+export function mark(node, ctx, id) {
   effect(() => node.setAttribute("data-bern-target", target(ctx, id)));
 }
 
@@ -963,10 +1045,10 @@ function mark(node, ctx, id) {
 /// component name for control targets, the row key inside lists, the page
 /// whose header shows titles and tools, and the enclosing navigation path.
 export function child(ctx, comp) {
-  return { ...ctx, comp, key: null };
+  return { ...ctx, comp };
 }
 
-function page() {
+export function page() {
   return {
     titles: cell([]), backs: cell([]), toolCount: cell(0),
     tools: el("div", { class: "bern-tools", role: "toolbar" }),
@@ -997,7 +1079,7 @@ export function tools(ctx, build) {
   build(holder, { ...ctx, inToolbar: true });
 }
 
-function pageHeader(ctx, fallback, always) {
+export function pageHeader(ctx, fallback, always) {
   const back = el("button", { class: "bern-icon-button bern-back", type: "button" }, icon("chevron.left", 18));
   bindAttr(back, "aria-label", () => tr("bern.navigation.back"));
   back.addEventListener("click", () => {
@@ -1019,7 +1101,7 @@ function pageHeader(ctx, fallback, always) {
 
 // MARK: - Components
 
-const STYLE_CLASS = {
+export const STYLE_CLASS = {
   large_title: "large-title", title: "title", title2: "title2", title3: "title3", headline: "headline",
   subheadline: "subheadline", body: "body", callout: "callout", footnote: "footnote", caption: "caption",
   caption2: "caption2",
@@ -1041,7 +1123,7 @@ function enabledOf(enabled) {
   return enabled ?? (() => true);
 }
 
-export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled }, action) {
+export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds }, action) {
   const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
@@ -1058,12 +1140,14 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
   mark(node, ctx, id);
   node.addEventListener("click", () => action());
   control(ctx, {
-    target: () => target(ctx, id), role: "button", label, enabled: isEnabled, actions: { activate: action },
+    target: () => target(ctx, id), role: "button", label, enabled: isEnabled,
+    actions: { activate: action, ...(setFile ? { setFile, fileKinds } : {}) },
   });
+  if (style) hooks.style?.(node, style, {});
   p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, node) : node);
 }
 
-export function IconButton(p, ctx, { id, icon: name, label, enabled }, action) {
+export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds }, action) {
   const node = el("button", { class: "bern-icon-button", type: "button" }, icon(name, 16));
   bindAttr(node, "aria-label", label);
   bindAttr(node, "title", label);
@@ -1074,8 +1158,10 @@ export function IconButton(p, ctx, { id, icon: name, label, enabled }, action) {
   mark(node, ctx, id);
   node.addEventListener("click", () => action());
   control(ctx, {
-    target: () => target(ctx, id), role: "button", label, enabled: isEnabled, actions: { activate: action },
+    target: () => target(ctx, id), role: "button", label, enabled: isEnabled,
+    actions: { activate: action, ...(setFile ? { setFile, fileKinds } : {}) },
   });
+  if (style) hooks.style?.(node, style, {});
   p.append(node);
 }
 
@@ -1130,7 +1216,7 @@ export function TextInput(p, ctx, { id, label, field, prompt, kind }, submit) {
   p.append(labelled(input, label, true));
 }
 
-export function Search(p, ctx, { id, field, prompt }, submit) {
+export function Search(p, ctx, { id, field, prompt }, submit, results) {
   const input = el("input", { class: "bern-search-input", type: "search", autocomplete: "off" });
   if (prompt) {
     bindAttr(input, "placeholder", prompt);
@@ -1156,9 +1242,57 @@ export function Search(p, ctx, { id, field, prompt }, submit) {
   mark(input, ctx, id);
   control(ctx, {
     target: () => target(ctx, id), role: "search", label: prompt ?? (() => ""),
-    actions: { edit: (value) => field.set(value), submit, value: () => field.peek() },
+    actions: { edit: (value) => field.set(value), submit, value: () => field.peek(), focus: () => input.focus() },
   });
-  p.append(el("div", { class: "bern-search" }, icon("magnifyingglass", 14), input, clear));
+  const box = el("div", { class: "bern-search" }, icon("magnifyingglass", 14), input, clear);
+  if (results) searchResults(box, input, field, ctx, results);
+  p.append(box);
+}
+
+/// Results of a search field in a popover below it, shown while the field
+/// has focus and text; choosing a result moves focus into the panel, which
+/// keeps it open until focus leaves both.
+function searchResults(box, input, field, ctx, results) {
+  const panel = el("div", { class: "bern-search-results", popover: "manual", role: "region" });
+  results(panel, ctx);
+  box.append(panel);
+  const open = cell(false);
+  // Choosing a result closes the list.
+  panel.addEventListener("click", (event) => {
+    if (event.target.closest("button, [role=button]")) open.set(false);
+  });
+  const inside = () => box.contains(document.activeElement);
+  const update = () => open.set(inside() && field.peek() !== "");
+  input.addEventListener("focus", update);
+  input.addEventListener("input", update);
+  box.addEventListener("focusout", () => setTimeout(update, 120));
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && open.peek()) {
+      event.preventDefault();
+      open.set(false);
+    }
+  });
+  effect(() => {
+    field.get();
+    untrack(update);
+  });
+  effect(() => {
+    const show = open.get();
+    if (show && !panel.matches(":popover-open")) {
+      placePopover(panel, box);
+      // At least 280 wide, and within the window.
+      const rect = box.getBoundingClientRect();
+      const width = Math.min(Math.max(rect.width, 280), innerWidth - 16);
+      panel.style.minWidth = `${width}px`;
+      panel.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
+      panel.showPopover();
+    } else if (!show && panel.matches(":popover-open")) {
+      panel.hidePopover();
+    }
+  });
+  onCleanup(() => {
+    if (panel.matches(":popover-open")) panel.hidePopover();
+  });
 }
 
 export function Switch(p, ctx, { id, label, field, style }) {
@@ -1214,7 +1348,7 @@ let typeaheadReset = 0;
 /// Place a popover below `anchor`, or above it when there is more room
 /// there. It runs before the popover shows, from the anchor alone: the
 /// popover's height is capped by the room it gets.
-function placePopover(popover, anchor) {
+export function placePopover(popover, anchor) {
   const rect = anchor.getBoundingClientRect();
   const below = innerHeight - rect.bottom - 12;
   const above = rect.top - 12;
@@ -1430,7 +1564,7 @@ export function Stack(p, ctx, { axis, gap, padding, align }, children) {
 
 /// Equal columns, as many as fit at `minWidth` or wider.
 export function Grid(p, ctx, { minWidth, gap, padding }, children) {
-  const node = el("div", { class: "bern-grid" });
+  const node = el("div", { class: "bern-grid bern-fill-width" });
   node.style.gridTemplateColumns = `repeat(auto-fill, minmax(min(100%, ${minWidth}px), 1fr))`;
   node.style.gap = `${gap ?? 8}px`;
   if (padding !== undefined) node.style.padding = `${padding}px`;
@@ -1486,7 +1620,8 @@ export function Progress(p, ctx, { value, total, label }) {
     indicator = el("span", { class: "bern-spinner", role: "progressbar" });
   }
   if (label) bindAttr(indicator, "aria-label", label);
-  const kind = value ? "bern-progress-bar" : "bern-progress-indeterminate";
+  // A progress bar takes the width it gets, as on the native targets.
+  const kind = value ? "bern-progress-bar bern-fill-width" : "bern-progress-indeterminate";
   p.append(el("div", { class: `bern-progress ${kind}` }, value ? caption : indicator, value ? indicator : caption));
 }
 
@@ -1499,7 +1634,8 @@ export function Divider(p) {
 }
 
 export function ScrollView(p, ctx, { axis }, children) {
-  const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"}` });
+  // A scroll view takes the room it gets, as on the native targets.
+  const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
   children(node, ctx);
   p.append(node);
 }
@@ -1535,16 +1671,22 @@ export function When(p, ctx, branch, arms) {
   const region = new Region(p);
   let current = Symbol("none");
   let owner = null;
+  let first = true;
+  const clock = hooks.clock?.() ?? null;
   effect(() => {
     const next = branch();
     if (next === current) return;
     current = next;
+    const animated = !first;
+    first = false;
     untrack(() => {
       owner?.dispose();
       region.clear();
       owner = new Scope(null);
       const arm = arms[next];
-      if (arm) within(owner, () => region.fill((fragment) => arm(fragment, ctx)));
+      if (arm) {
+        within(owner, () => structural(animated, () => withClock(clock, () => region.fill((fragment) => arm(fragment, ctx)))));
+      }
     });
   });
   onCleanup(() => owner?.dispose());
@@ -1563,12 +1705,20 @@ function range(start, end) {
 /// Keyed rows: a row keeps its DOM, controls and state while its key
 /// stays; its value is a cell the row's bindings read. Each row is the
 /// range between two markers, so rows add no wrapper elements.
-export function Each(p, ctx, { items, key }, row) {
+export function Each(p, ctx, { items, key, stagger }, row) {
   const region = new Region(p);
   let rows = new Map();
+  let first = true;
+  // Rows added in one update appear one after another with `stagger`;
+  // otherwise they follow the stagger of the container they are in.
+  const clock = stagger ? hooks.makeClock?.(stagger) ?? null : hooks.clock?.() ?? null;
+  // A staggering list that appears in an update plays its rows in turn.
+  if (stagger && clock) clock.play = isUpdating();
   effect(() => {
     const list = items();
-    untrack(() => {
+    const animated = !first;
+    first = false;
+    untrack(() => structural(animated, () => withClock(clock, () => {
       const next = new Map();
       for (const item of list) {
         const id = key(item);
@@ -1583,7 +1733,15 @@ export function Each(p, ctx, { items, key }, row) {
           const start = document.createComment("");
           const end = document.createComment("");
           fragment.append(start);
-          within(owner, () => row(fragment, { ...ctx, key: () => String(key(value.peek())) }, () => value.get()));
+          const rowKey = () => String(key(value.peek()));
+          within(owner, () => row(fragment, { ...ctx, key: rowKey, keys: [...(ctx.keys ?? []), rowKey] }, () => value.get()));
+          // The row's element, known by its key: scroll views find their
+          // items this way.
+          const element = [...fragment.childNodes].find((node) => node.nodeType === 1);
+          if (element) {
+            element.dataset.bernItem = "";
+            element.bernKey = key(item);
+          }
           fragment.append(end);
           region.end.before(fragment);
           entry = { value, owner, start, end };
@@ -1592,7 +1750,7 @@ export function Each(p, ctx, { items, key }, row) {
       }
       for (const stale of rows.values()) {
         stale.owner.dispose();
-        for (const node of range(stale.start, stale.end)) node.remove();
+        for (const node of range(stale.start, stale.end)) leave(node);
       }
       // Reorder in place: move only rows that are out of position.
       let anchor = region.start;
@@ -1601,7 +1759,7 @@ export function Each(p, ctx, { items, key }, row) {
         anchor = entry.end;
       }
       rows = next;
-    });
+    })));
   });
   onCleanup(() => {
     for (const entry of rows.values()) entry.owner.dispose();
@@ -1858,13 +2016,31 @@ export function Tabs(p, ctx, { id, selection, tabs, selectedLabel }) {
 /// Chooses one layout by the available width. Engine state and session
 /// drafts live outside the view tree, so switching keeps them; focus moves
 /// to the control with the same identity in the new layout.
-export function Adaptive(p, ctx, { id, breakpoint, layouts }) {
+const SIZES = ["compact", "medium", "expanded", "large"];
+
+/// The size of a width by the breakpoints of `[layouts]`.
+export function sizeOf(width, breakpoints) {
+  if (width < breakpoints.compact) return "compact";
+  if (breakpoints.medium && width < breakpoints.medium) return "medium";
+  if (!breakpoints.expanded || width < breakpoints.expanded) return "expanded";
+  return "large";
+}
+
+/// The layout a size shows: its own, else the next larger declared one,
+/// else the next smaller.
+function layoutFor(size, layouts) {
+  if (layouts[size]) return size;
+  const at = SIZES.indexOf(size);
+  return [...SIZES.slice(at + 1), ...SIZES.slice(0, at).reverse()].find((name) => layouts[name]);
+}
+
+export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
   const node = el("div", { class: "bern-adaptive" });
   const size = cell(null);
   const observer = new ResizeObserver(() => {
     // A hidden container has no width to judge by; keep the last size.
     if (!node.getClientRects().length) return;
-    size.set(node.clientWidth < breakpoint ? "compact" : "expanded");
+    size.set(sizeOf(node.clientWidth, breakpoints));
   });
   observer.observe(node);
   onCleanup(() => observer.disconnect());
@@ -1872,7 +2048,7 @@ export function Adaptive(p, ctx, { id, breakpoint, layouts }) {
   let owner = null;
   let shown = null;
   effect(() => {
-    const current = size.get() ?? "expanded";
+    const current = layoutFor(size.get() ?? "expanded", layouts);
     if (current === shown) return;
     shown = current;
     untrack(() => {
@@ -1908,10 +2084,16 @@ export function Menu(p, ctx, { id, label, icon: name }, items) {
   const menuId = `bern-menu-${++fieldSequence}`;
   const text = el("span");
   bindText(text, label);
+  // In a toolbar a menu with an icon shows only the icon.
+  const iconOnly = Boolean(name) && ctx.inToolbar;
   const trigger = el("button", {
-    class: "bern-button bern-button-standard bern-menu-button", type: "button", "aria-haspopup": "menu",
-    "aria-expanded": "false", "aria-controls": menuId, popovertarget: menuId,
-  }, name ? icon(name, 16) : null, text, icon("chevron.down", 16));
+    class: iconOnly ? "bern-icon-button bern-menu-button" : "bern-button bern-button-standard bern-menu-button", type: "button",
+    "aria-haspopup": "menu", "aria-expanded": "false", "aria-controls": menuId, popovertarget: menuId,
+  }, name ? icon(name, 16) : null, iconOnly ? null : text, iconOnly ? null : icon("chevron.down", 16));
+  if (iconOnly) {
+    bindAttr(trigger, "aria-label", label);
+    bindAttr(trigger, "title", label);
+  }
   const list = el("div", { class: "bern-menu", role: "menu", id: menuId, popover: "auto" });
   bindAttr(list, "aria-label", label);
   const buttons = [];
@@ -1941,7 +2123,7 @@ export function Menu(p, ctx, { id, label, icon: name }, items) {
     });
     control(ctx, {
       target: () => target(ctx, item.id), role: "button", label: item.label, enabled: isEnabled,
-      actions: { activate: item.action },
+      actions: { activate: item.action, ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}) },
     });
     list.append(button);
     buttons.push(button);
@@ -2466,7 +2648,7 @@ let viewSequence = 0;
 
 /// A video of a declaration's own player (`source`) or of an application
 /// player, with the standard command-driven control bar.
-export function Video(p, ctx, { id, source, player, label, controls, fit }) {
+export function Video(p, ctx, { id, source, player, label, controls, fit, corner, animate }) {
   const name = label ?? (() => tr("bern.media.video"));
   const playerID = player ?? `${sessionPrefix()}${ctx.win.id}/${target(ctx, id)}`;
   const state = () => media.players.get().get(playerID) ?? null;
@@ -2523,8 +2705,13 @@ export function Video(p, ctx, { id, source, player, label, controls, fit }) {
       return s ? describe(s) : null;
     } },
   });
-  const node = el("div", { class: "bern-video" }, surface);
+  const node = el("div", { class: "bern-video bern-fill-width" }, surface);
   if (controls !== false) node.append(videoControls(ctx, id, playerID, state));
+  // A rounded picture: the surface clips the video to its corners.
+  if (corner !== undefined) {
+    surface.classList.add("bern-video-rounded");
+    hooks.length?.(surface, "borderRadius", corner, animate);
+  }
   p.append(node);
 }
 
@@ -2709,6 +2896,13 @@ class Win {
     this.failure = cell(null);
     this.commandInFlight = false;
     this.allowsClose = false;
+    /// `window.idle`: no input for the window's `idle_after` seconds.
+    this.idle = cell(false);
+    /// `window.compact` and its siblings: the size of the window's width.
+    this.compact = cell(false);
+    this.medium = cell(false);
+    this.expanded = cell(true);
+    this.large = cell(false);
   }
 
   get floating() {
@@ -2966,7 +3160,12 @@ class WindowManager {
       }
       if (!win.dialog) body.append(pageHeader(ctx, null, false));
       body.append(content);
+      if (this.app.layouts) this.sizeWindow(win);
       kind.render(content, ctx);
+      if (kind.idleAfter) hooks.idle?.(win, kind.idleAfter);
+      // Immersive: the page header and its toolbar hide, and the pointer
+      // once the window is idle.
+      if (kind.immersive) effect(() => win.element.classList.toggle("bern-immersive", kind.immersive(ctx) === true));
       if (kind.closeCheck) win.closeCheck = kind.closeCheck(win);
       if (win.floating) effect(() => this.place(win));
       effect(() => this.dialog(win));
@@ -2975,6 +3174,22 @@ class WindowManager {
     win.element.addEventListener("pointerdown", () => this.activate(win), true);
     this.desktop.append(win.root);
     requestAnimationFrame(() => win.reportFacts());
+  }
+
+  /// Keeps `window.compact` and its siblings to the width of the window.
+  sizeWindow(win) {
+    const update = () => {
+      const width = win.element.clientWidth;
+      if (!width) return;
+      const size = sizeOf(width, this.app.layouts);
+      batch(() => {
+        for (const name of SIZES) win[name].set(name === size);
+      });
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(win.element);
+    onCleanup(() => observer.disconnect());
+    update();
   }
 
   /// A modal dialog over a scrim: the title and toolbar in its header with

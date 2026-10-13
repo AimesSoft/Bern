@@ -134,6 +134,71 @@ pub(crate) struct Win {
     dialog: RefCell<Option<adw::AlertDialog>>,
     report_queued: StdCell<bool>,
     closed: StdCell<bool>,
+    /// The layer above the content where shared elements leave pictures of
+    /// themselves.
+    pub(crate) ghosts: gtk::Fixed,
+    /// `window.idle`: no input for `idle_after` seconds.
+    idle: Cell<bool>,
+    /// The layout size of the window's width.
+    size: Cell<&'static str>,
+    immersive: Cell<bool>,
+    /// Toolbar views whose top bars follow `chrome` and `immersive`.
+    views: RefCell<Vec<glib::WeakRef<adw::ToolbarView>>>,
+    shortcuts: RefCell<Vec<Shortcut>>,
+    next_shortcut: StdCell<u64>,
+}
+
+/// A mounted shortcut: its token, keys and action.
+type Shortcut = (u64, Keys, Rc<dyn Fn()>);
+
+/// A keyboard shortcut: the modifiers and the key, lowercase.
+#[derive(Clone, Debug, PartialEq)]
+struct Keys {
+    modifiers: gtk::gdk::ModifierType,
+    key: String,
+}
+
+/// `cmd+shift+k` as modifiers and a key; `cmd` is Control here.
+fn parse_keys(text: &str) -> Keys {
+    let mut modifiers = gtk::gdk::ModifierType::empty();
+    let mut key = String::new();
+    for part in text.split('+') {
+        match part {
+            "cmd" | "ctrl" => modifiers |= gtk::gdk::ModifierType::CONTROL_MASK,
+            "alt" => modifiers |= gtk::gdk::ModifierType::ALT_MASK,
+            "shift" => modifiers |= gtk::gdk::ModifierType::SHIFT_MASK,
+            other => key = other.to_string(),
+        }
+    }
+    Keys { modifiers, key }
+}
+
+/// The name of a pressed key, as shortcuts write keys.
+fn key_name(keyval: gtk::gdk::Key) -> Option<String> {
+    use gtk::gdk::Key;
+    let named = match keyval {
+        Key::space => "space",
+        Key::Escape => "escape",
+        Key::Return | Key::KP_Enter => "return",
+        Key::Tab | Key::ISO_Left_Tab => "tab",
+        Key::BackSpace | Key::Delete => "delete",
+        Key::Up => "up",
+        Key::Down => "down",
+        Key::Left => "left",
+        Key::Right => "right",
+        Key::Home => "home",
+        Key::End => "end",
+        Key::Page_Up => "pageup",
+        Key::Page_Down => "pagedown",
+        other => {
+            return other
+                .to_lower()
+                .to_unicode()
+                .filter(|c| !c.is_control())
+                .map(|c| c.to_string());
+        }
+    };
+    Some(named.to_string())
 }
 
 impl Win {
@@ -199,6 +264,106 @@ impl Win {
 
     pub(crate) fn is_blocked(&self) -> bool {
         self.pending.peek().is_some()
+    }
+
+    /// Show a notice at the bottom of the window.
+    pub(crate) fn show_toast(&self, toast: &adw::Toast) {
+        self.toasts.add_toast(toast.clone());
+    }
+
+    /// UI state of the window, recording a dependency: `idle`, and the
+    /// layout size `compact`, `medium`, `expanded` or `large`.
+    pub(crate) fn state(&self, field: &str) -> Value {
+        match field {
+            "idle" => Value::Bool(self.idle.get()),
+            size => Value::Bool(self.size.get() == size),
+        }
+    }
+
+    /// A toolbar view of the window: its top bars follow `chrome` and hide
+    /// while the window is immersive.
+    pub(crate) fn chrome_view(self: &Rc<Self>, view: &adw::ToolbarView) {
+        if self.def().unified {
+            view.set_top_bar_style(adw::ToolbarStyle::Flat);
+        }
+        self.views.borrow_mut().push(view.downgrade());
+        view.set_reveal_top_bars(!self.immersive.peek());
+    }
+
+    /// Run `run` on `keys` while the current scope lasts. The latest
+    /// shortcut for keys wins.
+    pub(crate) fn add_shortcut(self: &Rc<Self>, keys: &str, run: Rc<dyn Fn()>) {
+        let token = self.next_shortcut.get();
+        self.next_shortcut.set(token + 1);
+        self.shortcuts
+            .borrow_mut()
+            .push((token, parse_keys(keys), run));
+        let win = Rc::downgrade(self);
+        crate::reactive::on_cleanup(move || {
+            if let Some(win) = win.upgrade() {
+                win.shortcuts
+                    .borrow_mut()
+                    .retain(|(candidate, _, _)| *candidate != token);
+            }
+        });
+    }
+
+    fn shortcut_for(
+        &self,
+        keyval: gtk::gdk::Key,
+        state: gtk::gdk::ModifierType,
+    ) -> Option<Rc<dyn Fn()>> {
+        let key = key_name(keyval)?;
+        let wanted = gtk::gdk::ModifierType::CONTROL_MASK
+            | gtk::gdk::ModifierType::ALT_MASK
+            | gtk::gdk::ModifierType::SHIFT_MASK
+            | gtk::gdk::ModifierType::SUPER_MASK;
+        let pressed = Keys {
+            modifiers: state & wanted,
+            key,
+        };
+        let found = self
+            .shortcuts
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(_, keys, _)| *keys == pressed)
+            .map(|(_, keys, run)| (keys.clone(), Rc::clone(run)))?;
+        // A key without a modifier does not fire while text is being edited.
+        let plain = !found
+            .0
+            .modifiers
+            .intersects(gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::ALT_MASK);
+        let editing = gtk::prelude::GtkWindowExt::focus(&self.window).is_some_and(|focus| {
+            focus.is::<gtk::Text>() || focus.is::<gtk::TextView>() || focus.is::<gtk::Editable>()
+        });
+        if plain && editing {
+            return None;
+        }
+        Some(found.1)
+    }
+
+    /// Input arrived: `window.idle` is false until the window rests again.
+    fn rest(self: &Rc<Self>, seconds: f64, timer: &Rc<RefCell<Option<glib::SourceId>>>) {
+        if self.idle.peek() {
+            self.idle.set(false);
+            snapshot::schedule();
+        }
+        if let Some(source) = timer.borrow_mut().take() {
+            source.remove();
+        }
+        let win = Rc::downgrade(self);
+        let done = Rc::clone(timer);
+        *timer.borrow_mut() = Some(glib::timeout_add_local_once(
+            Duration::from_secs_f64(seconds.max(0.0)),
+            move || {
+                done.borrow_mut().take();
+                if let Some(win) = win.upgrade() {
+                    win.idle.set(true);
+                    snapshot::schedule();
+                }
+            },
+        ));
     }
 
     fn def(&self) -> &'static crate::WindowDef {
@@ -466,14 +631,34 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     let width = def.width.map(|width| width as i32).unwrap_or(-1);
     let height = def.height.map(|height| height as i32).unwrap_or(-1);
     window.set_default_size(width, height);
-    if def.min_width.is_some() || def.min_height.is_some() {
-        window.set_size_request(
-            def.min_width.map(|width| width as i32).unwrap_or(-1),
-            def.min_height.map(|height| height as i32).unwrap_or(-1),
-        );
+    // libadwaita's breakpoints need a minimum size; without one declared,
+    // the smallest size GNOME's own applications take.
+    window.set_size_request(
+        def.min_width.map(|width| width as i32).unwrap_or(360),
+        def.min_height.map(|height| height as i32).unwrap_or(294),
+    );
+    if def.dialog {
+        // A dialog shows over the primary window and blocks it.
+        if let Some(primary) = instance_of(
+            host.def
+                .windows
+                .iter()
+                .position(|window| window.id == host.def.primary)
+                .unwrap_or(usize::MAX),
+        ) {
+            window.set_transient_for(Some(&primary.window));
+            window.set_modal(true);
+            window.set_destroy_with_parent(true);
+        }
     }
     let toasts = adw::ToastOverlay::new();
-    window.set_content(Some(&toasts));
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(&toasts));
+    let ghosts = gtk::Fixed::new();
+    ghosts.set_can_target(false);
+    overlay.add_overlay(&ghosts);
+    overlay.set_clip_overlay(&ghosts, true);
+    window.set_content(Some(&overlay));
 
     let win = Rc::new(Win {
         kind,
@@ -491,6 +676,13 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         dialog: RefCell::new(None),
         report_queued: StdCell::new(false),
         closed: StdCell::new(false),
+        ghosts,
+        idle: Cell::new(false),
+        size: Cell::new("expanded"),
+        immersive: Cell::new(false),
+        views: RefCell::new(Vec::new()),
+        shortcuts: RefCell::new(Vec::new()),
+        next_shortcut: StdCell::new(1),
     });
     MANAGER.with(|manager| manager.windows.borrow_mut().push(Rc::clone(&win)));
 
@@ -499,6 +691,19 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     let view = adw::ToolbarView::new();
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.set_vexpand(true);
+    // A probe with no height measures the window's width for its size.
+    let probe = gtk::DrawingArea::new();
+    probe.set_content_height(0);
+    probe.set_hexpand(true);
+    let sized = Rc::downgrade(&win);
+    probe.connect_resize(move |_, width, _| {
+        if width > 0
+            && let Some(win) = sized.upgrade()
+        {
+            win.size.set(crate::structure::size_of(f64::from(width)));
+        }
+    });
+    content.append(&probe);
     view.set_content(Some(&content));
     toasts.set_child(Some(&view));
     let render = def.render;
@@ -508,20 +713,67 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         effect(move || title_window.set_title(Some(&tr(title_key))));
         let bar = header(&page, Some(Rc::new(move || tr(title_key))));
         view.add_top_bar(&bar);
+        if def.unified {
+            view.set_top_bar_style(adw::ToolbarStyle::Flat);
+        }
         let shown = Rc::clone(&page);
         let revealed = view.clone();
+        let immersed = Rc::clone(&win);
         effect(move || {
             shown.version.track();
-            revealed.set_reveal_top_bars(!shown.header_hidden());
+            revealed.set_reveal_top_bars(!shown.header_hidden() && !immersed.immersive.get());
         });
         let ctx = Ctx::root(Rc::clone(&win), Some(Rc::clone(&page)));
+        watch_input(&win, def.idle_after);
+        if let Some(immersive) = def.immersive {
+            let at = ctx.clone();
+            let shown = Rc::clone(&win);
+            effect(move || {
+                let on = immersive(&at);
+                shown.immersive.set(on);
+                for view in shown
+                    .views
+                    .borrow()
+                    .iter()
+                    .filter_map(|view| view.upgrade())
+                {
+                    view.set_reveal_top_bars(!on);
+                }
+                // The pointer hides while the window rests immersed.
+                let hidden = on && shown.idle.get();
+                shown
+                    .window
+                    .set_cursor_from_name(if hidden { Some("none") } else { None });
+            });
+        }
+        let app: &'static crate::AppDef = host.def;
+        if let Some(theme) = &app.theme {
+            follow_theme(&ctx, theme);
+        }
         render(&Parent::of_box(&content), &ctx);
         let blocked = Rc::clone(&win);
         let guarded = content.clone();
         effect(move || guarded.set_sensitive(blocked.pending.get().is_none()));
     });
 
-    if settings {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let shortcuts = Rc::downgrade(&win);
+    keys.connect_key_pressed(move |_, keyval, _, state| {
+        let run = shortcuts
+            .upgrade()
+            .and_then(|win| win.shortcut_for(keyval, state));
+        match run {
+            Some(run) => {
+                run();
+                glib::Propagation::Stop
+            }
+            None => glib::Propagation::Proceed,
+        }
+    });
+    window.add_controller(keys);
+
+    if settings || def.dialog {
         let escape = gtk::ShortcutController::new();
         escape.add_shortcut(gtk::Shortcut::new(
             gtk::ShortcutTrigger::parse_string("Escape"),
@@ -589,6 +841,91 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     win.schedule_report();
     snapshot::watch(&win);
     Ok(id)
+}
+
+/// `window.idle`: pointer, touch, wheel and key input in the window start
+/// the count of `seconds` again.
+fn watch_input(win: &Rc<Win>, seconds: Option<f64>) {
+    let Some(seconds) = seconds else { return };
+    let timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
+    let rest = {
+        let win = Rc::downgrade(win);
+        let timer = Rc::clone(&timer);
+        Rc::new(move || {
+            if let Some(win) = win.upgrade() {
+                win.rest(seconds, &timer);
+            }
+        })
+    };
+    let pointer = gtk::EventControllerMotion::new();
+    pointer.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let moved = Rc::clone(&rest);
+    // Content moving under a still pointer makes GTK report motion at the
+    // same place; only a pointer that moves is input.
+    let last = StdCell::new(None::<(f64, f64)>);
+    pointer.connect_motion(move |_, x, y| {
+        if last.replace(Some((x, y))) != Some((x, y)) {
+            moved();
+        }
+    });
+    win.window.add_controller(pointer);
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let typed = Rc::clone(&rest);
+    keys.connect_key_pressed(move |_, _, _, _| {
+        typed();
+        glib::Propagation::Proceed
+    });
+    win.window.add_controller(keys);
+    let wheel = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::BOTH_AXES);
+    wheel.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let scrolled = Rc::clone(&rest);
+    wheel.connect_scroll(move |_, _, _| {
+        scrolled();
+        glib::Propagation::Proceed
+    });
+    win.window.add_controller(wheel);
+    let press = gtk::GestureClick::new();
+    press.set_propagation_phase(gtk::PropagationPhase::Capture);
+    press.set_button(0);
+    let pressed = Rc::clone(&rest);
+    press.connect_pressed(move |_, _, _, _| pressed());
+    win.window.add_controller(press);
+    let ended = Rc::clone(&timer);
+    win.scope.on_dispose(move || {
+        if let Some(source) = ended.borrow_mut().take() {
+            source.remove();
+        }
+    });
+    rest();
+}
+
+/// `WindowSet(accent:, appearance:)`: the accent and appearance every
+/// window shows, chosen at run time.
+fn follow_theme(ctx: &Ctx, theme: &'static crate::ThemeDef) {
+    if let Some(accent) = theme.accent {
+        let at = ctx.clone();
+        effect(move || {
+            let variant = crate::value::tag(&accent(&at));
+            untrack(|| crate::theme::set_accent(theme.accents, variant));
+        });
+    }
+    if let Some(appearance) = theme.appearance {
+        let at = ctx.clone();
+        effect(move || {
+            let variant = crate::value::tag(&appearance(&at));
+            let name = variant
+                .and_then(|variant| {
+                    theme
+                        .appearances
+                        .iter()
+                        .find(|(candidate, _)| *candidate == variant)
+                })
+                .map(|(_, name)| *name)
+                .unwrap_or("system");
+            untrack(|| crate::theme::set_appearance(name));
+        });
+    }
 }
 
 /// The window instance ended: release its drafts, controls and
@@ -877,8 +1214,10 @@ pub(crate) fn maximize(win: &Rc<Win>, done: Done) {
 
 pub(crate) fn resize(win: &Rc<Win>, width: f64, height: f64, done: Done) {
     let def = win.def();
-    let (minimum_width, minimum_height) =
-        (def.min_width.unwrap_or(1.0), def.min_height.unwrap_or(1.0));
+    let (minimum_width, minimum_height) = (
+        def.min_width.unwrap_or(360.0),
+        def.min_height.unwrap_or(294.0),
+    );
     if width < minimum_width || height < minimum_height {
         done(Err(Failure::new(
             "out_of_range",

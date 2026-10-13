@@ -115,6 +115,8 @@ enum FieldExpect {
     Text,
     Bool,
     Number,
+    File,
+    Position,
     Picker,
     Selection,
     Path,
@@ -844,6 +846,18 @@ impl<'a> Checker<'a> {
                     ir::Prop::Id { value }
                 }),
                 PropKind::Keyword(allowed) => self.keyword(&prop.value, allowed),
+                PropKind::Flag => match &prop.value {
+                    ast::Expr::Literal {
+                        value: Literal::Bool(value),
+                        ..
+                    } => Some(ir::Prop::Keyword {
+                        value: value.to_string(),
+                    }),
+                    other => {
+                        self.error(other.span(), "expected `true` or `false`");
+                        None
+                    }
+                },
                 PropKind::DisplayText => self
                     .display(&prop.value, scope, key, false)
                     .map(|text| ir::Prop::Text { text }),
@@ -851,8 +865,54 @@ impl<'a> Checker<'a> {
                     .display(&prop.value, scope, key, true)
                     .map(|text| ir::Prop::Text { text }),
                 PropKind::Icon => self.icon(&prop.value),
-                PropKind::ImageResource => self.image_resource(&prop.value),
-                PropKind::Number => self.number(&prop.value).and_then(|value| {
+                PropKind::Shortcut => match &prop.value {
+                    ast::Expr::Literal {
+                        value: Literal::Text(text),
+                        span,
+                    } => match spec::parse_shortcut(text) {
+                        Ok(value) => Some(ir::Prop::Keyword { value }),
+                        Err(message) => {
+                            self.error(*span, format!("shortcut \"{text}\": {message}"));
+                            None
+                        }
+                    },
+                    other => {
+                        self.error(other.span(), "a shortcut is a literal such as \"cmd+k\"");
+                        None
+                    }
+                },
+                // A picture is a declared resource, or a `MediaSource`
+                // the engine gives: a file or an http(s) URL.
+                PropKind::ImageResource => match &prop.value {
+                    ast::Expr::Path(_) => self.media_source(&prop.value, scope),
+                    _ => self.image_resource(&prop.value),
+                },
+                // A literal length is checked like a number; any other
+                // numeric expression is a length that follows it.
+                PropKind::Length
+                    if !matches!(
+                        &prop.value,
+                        ast::Expr::Literal { .. } | ast::Expr::Unary { .. }
+                    ) =>
+                {
+                    match self.expr(&prop.value, scope) {
+                        Some(lowered) if matches!(lowered.ty, Type::Int | Type::Float) => {
+                            Some(ir::Prop::Expr { expr: lowered })
+                        }
+                        Some(lowered) => {
+                            self.error(
+                                prop.value.span(),
+                                format!(
+                                    "`{prop_name}` is a length, found {}",
+                                    lowered.ty.display()
+                                ),
+                            );
+                            None
+                        }
+                        None => None,
+                    }
+                }
+                PropKind::Number | PropKind::Length => self.number(&prop.value).and_then(|value| {
                     // Sizes of pictures and grid cells, and the total of a
                     // progress, are lengths and amounts above zero.
                     let positive = matches!(
@@ -861,10 +921,29 @@ impl<'a> Checker<'a> {
                             | ("Grid", "min_width")
                             | ("Progress", "total")
                     );
+                    let positive = positive
+                        || matches!(
+                            (name.as_str(), prop_name.as_str()),
+                            (_, "scroll_scale") | ("Swipe", "distance")
+                        );
                     if positive && value <= 0.0 {
                         self.error(
                             prop.value.span(),
                             format!("`{prop_name}` must be above zero"),
+                        );
+                        return None;
+                    }
+                    if prop_name == "stagger" && !(0.0..=1.0).contains(&value) {
+                        self.error(
+                            prop.value.span(),
+                            "`stagger` is a delay from 0 to 1 second between children",
+                        );
+                        return None;
+                    }
+                    if prop_name == "scroll_opacity" && !(0.0..=1.0).contains(&value) {
+                        self.error(
+                            prop.value.span(),
+                            "`scroll_opacity` is an opacity from 0 to 1",
                         );
                         return None;
                     }
@@ -892,6 +971,29 @@ impl<'a> Checker<'a> {
                 PropKind::TextField => self.field_prop(&prop.value, scope, FieldExpect::Text),
                 PropKind::BoolField => self.field_prop(&prop.value, scope, FieldExpect::Bool),
                 PropKind::NumberField => self.field_prop(&prop.value, scope, FieldExpect::Number),
+                PropKind::FileField => self.field_prop(&prop.value, scope, FieldExpect::File),
+                PropKind::PositionField => {
+                    self.field_prop(&prop.value, scope, FieldExpect::Position)
+                }
+                PropKind::FileKinds => match &prop.value {
+                    ast::Expr::Literal {
+                        value: Literal::Text(text),
+                        span,
+                    } => match spec::parse_file_kinds(text) {
+                        Ok(value) => Some(ir::Prop::Keyword { value }),
+                        Err(message) => {
+                            self.error(*span, format!("files \"{text}\": {message}"));
+                            None
+                        }
+                    },
+                    other => {
+                        self.error(
+                            other.span(),
+                            "the kinds of file are a literal such as \"video .srt\"",
+                        );
+                        None
+                    }
+                },
                 PropKind::PickerField => self.field_prop(&prop.value, scope, FieldExpect::Picker),
                 // A container's `fallback` is one of its own values.
                 PropKind::SelectionValue => match if prop_name == "fallback" {
@@ -1089,6 +1191,12 @@ impl<'a> Checker<'a> {
             (Some(children), _) => self.nodes(children, path, &child_ctx, scope),
             (None, _) => Vec::new(),
         };
+        if let (Some(ir::Prop::Number { value: min }), Some(ir::Prop::Number { value: max })) =
+            (props.get("min"), props.get("max"))
+            && min >= max
+        {
+            self.error(element.span, format!("`{name}` needs `min` below `max`"));
+        }
         for _ in 0..pushed {
             scope.pop();
         }
@@ -1186,11 +1294,30 @@ impl<'a> Checker<'a> {
             .collect();
         for size in ir::LayoutSize::ALL {
             let count = sizes.iter().filter(|name| **name == size.name()).count();
-            if count != 1 {
+            let required = ir::LayoutSize::REQUIRED.contains(&size);
+            if (required && count != 1) || count > 1 {
                 self.error(
                     element.span,
                     format!(
                         "error[B401]: `Adaptive` needs exactly one `Layout(size: {})`, found {count}",
+                        size.name()
+                    ),
+                );
+            }
+            // An optional size needs its breakpoint to have any width.
+            if count == 1
+                && !required
+                && let Some(config) = self.layouts
+                && !config.has(size)
+            {
+                let breakpoint = match size {
+                    ir::LayoutSize::Medium => "medium_below",
+                    _ => "expanded_below",
+                };
+                self.error(
+                    element.span,
+                    format!(
+                        "error[B401]: `Layout(size: {})` needs `{breakpoint}` in `[layouts]` of Bern.toml",
                         size.name()
                     ),
                 );
@@ -1450,6 +1577,13 @@ impl<'a> Checker<'a> {
                     FieldExpect::Text => ty == Type::Text,
                     FieldExpect::Bool => ty == Type::Bool,
                     FieldExpect::Number => ty == Type::Float,
+                    FieldExpect::File => {
+                        let source = Type::Record {
+                            name: bern_media::MEDIA_SOURCE.into(),
+                        };
+                        ty == source || ty == Type::optional(source)
+                    }
+                    FieldExpect::Position => matches!(ty, Type::Int | Type::Text),
                     FieldExpect::Picker => is_labeled_enum(&ty, self.types),
                     FieldExpect::Selection => matches!(ty, Type::Enum { .. }),
                     FieldExpect::Path => {
@@ -1461,6 +1595,10 @@ impl<'a> Checker<'a> {
                         FieldExpect::Text => "a `String` field",
                         FieldExpect::Bool => "a `bool` field",
                         FieldExpect::Number => "an `f64` field",
+                        FieldExpect::File => "a `MediaSource` or `Option<MediaSource>` field",
+                        FieldExpect::Position => {
+                            "an `i64` or `String` field, like the keys of the items"
+                        }
                         FieldExpect::Picker => "an enum field whose variants all have labels",
                         FieldExpect::Selection => "an enum field",
                         FieldExpect::Path => "a `Vec` of a route enum",
@@ -1518,18 +1656,44 @@ impl<'a> Checker<'a> {
         // or variable takes the name.
         if root_name == "window" && scope.get(&root_name).is_none() {
             let field = path.segments.get(1).map(ToString::to_string);
-            if field.as_deref() != Some("idle") || path.segments.len() != 2 {
+            let sizes = ir::LayoutSize::ALL.map(ir::LayoutSize::name);
+            let known = field.as_deref() == Some("idle")
+                || field.as_deref().is_some_and(|name| sizes.contains(&name));
+            if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.idle`: whether it had no input for `idle_after` seconds",
+                    "the hosting window offers `window.idle` (no input for `idle_after` seconds) and its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`",
                 );
                 return None;
             }
+            let field = field.unwrap_or_default();
+            if field != "idle" {
+                match self.layouts {
+                    None => {
+                        self.error(
+                            path.span(),
+                            format!("error[B402]: `window.{field}` needs the breakpoints of `[layouts]` in Bern.toml, e.g. `compact_below = 600`"),
+                        );
+                    }
+                    Some(config) => {
+                        let size = ir::LayoutSize::parse(&field).expect("size");
+                        if !config.has(size) {
+                            let breakpoint = if size == ir::LayoutSize::Medium {
+                                "medium_below"
+                            } else {
+                                "expanded_below"
+                            };
+                            self.error(
+                                path.span(),
+                                format!("`window.{field}` needs `{breakpoint}` in `[layouts]` of Bern.toml; without it the window is never {field}"),
+                            );
+                        }
+                    }
+                }
+            }
             return Some(ir::Expr {
                 kind: ir::ExprKind::Binding {
-                    binding: ir::Binding::Window {
-                        field: "idle".into(),
-                    },
+                    binding: ir::Binding::Window { field },
                 },
                 ty: Type::Bool,
             });
@@ -1636,6 +1800,23 @@ impl<'a> Checker<'a> {
         scope: &Scope,
         what: &str,
     ) -> Option<ir::Expr> {
+        // A whole number written where a decimal is expected is that
+        // decimal: `draft.size.set(12)` for an `f64` field.
+        if let (
+            ast::Expr::Literal {
+                value: Literal::Int(whole),
+                ..
+            },
+            Type::Float,
+        ) = (expr, ty)
+        {
+            return Some(ir::Expr {
+                kind: ir::ExprKind::Literal {
+                    value: Value::Float(*whole as f64),
+                },
+                ty: Type::Float,
+            });
+        }
         let lowered = self.expr(expr, scope)?;
         if lowered.ty != *ty {
             self.error(
@@ -1835,6 +2016,47 @@ impl<'a> Checker<'a> {
                     "a query call is only valid as the `query:` property of `Query`",
                 );
                 None
+            }
+            ast::Expr::If {
+                cond,
+                then,
+                otherwise,
+                span,
+            } => {
+                let cond = self.expr(cond, scope)?;
+                if cond.ty != Type::Bool {
+                    self.error(
+                        *span,
+                        format!("an `if` condition is a `bool`, found {}", cond.ty.display()),
+                    );
+                    return None;
+                }
+                let then = self.expr(then, scope)?;
+                let otherwise = self.expr(otherwise, scope)?;
+                // A whole number beside a float is a float.
+                let ty = match (&then.ty, &otherwise.ty) {
+                    (a, b) if a == b => a.clone(),
+                    (Type::Int, Type::Float) | (Type::Float, Type::Int) => Type::Float,
+                    (a, b) => {
+                        self.error(
+                            *span,
+                            format!(
+                                "both branches of an `if` have the same type, found {} and {}",
+                                a.display(),
+                                b.display()
+                            ),
+                        );
+                        return None;
+                    }
+                };
+                Some(ir::Expr {
+                    kind: ir::ExprKind::If {
+                        cond: Box::new(cond),
+                        then: Box::new(then),
+                        otherwise: Box::new(otherwise),
+                    },
+                    ty,
+                })
             }
         }
     }
@@ -2084,6 +2306,51 @@ impl<'a> Checker<'a> {
                     }
                 };
                 Some(ir::Action::Window { op, window })
+            }
+            Some(Root::Session(session)) => {
+                if action.receiver.len() != 2 {
+                    self.error(
+                        action.span,
+                        "session actions look like `draft.panel.set(true)` or `draft.panel.toggle()`",
+                    );
+                    return None;
+                }
+                let session = session.clone();
+                let def = self.sessions.iter().find(|def| def.name == session)?;
+                let name = action.receiver[1].to_string();
+                let Some(field) = def.field_index(&name) else {
+                    self.error(
+                        action.receiver[1].span(),
+                        format!("`{session}` has no field `{name}`"),
+                    );
+                    return None;
+                };
+                let ty = def.fields[field].ty.clone();
+                let field = ir::FieldRef { session, field, ty };
+                let op = match (action.method.to_string().as_str(), action.args.as_slice()) {
+                    ("set", [value]) => ir::SessionOp::Set {
+                        value: self.expect(value, &field.ty, scope, "the new value")?,
+                    },
+                    ("toggle", []) if field.ty == Type::Bool => ir::SessionOp::Toggle,
+                    ("toggle", []) => {
+                        self.error(
+                            action.method.span(),
+                            format!(
+                                "`toggle()` flips a `bool`; `{name}` is {}",
+                                field.ty.display()
+                            ),
+                        );
+                        return None;
+                    }
+                    _ => {
+                        self.error(
+                            action.method.span(),
+                            "session fields support `set(value)` and, for a `bool`, `toggle()`",
+                        );
+                        return None;
+                    }
+                };
+                Some(ir::Action::Session { field, op })
             }
             Some(Root::Players) => {
                 let player = self.player_ref(&action.receiver, scope)?;

@@ -334,6 +334,47 @@ fn run(request: u64, index: u32, reader: &mut Reader<'_>) -> Result<(), Failure>
             }
             ok(Value::Unit);
         }
+        20 => {
+            let entry = find(&reader.text().map_err(malformed)?)?;
+            let focus = entry
+                .actions
+                .focus
+                .clone()
+                .ok_or_else(|| unsupported(&entry, "focus"))?;
+            focus();
+            ok(Value::Unit);
+        }
+        21 => {
+            let entry = find(&reader.text().map_err(malformed)?)?;
+            let url = reader.text().map_err(malformed)?;
+            let give = entry
+                .actions
+                .set_file
+                .clone()
+                .ok_or_else(|| unsupported(&entry, "set_file"))?;
+            let scheme = url
+                .split_once("://")
+                .map(|(scheme, rest)| (scheme.to_ascii_lowercase(), rest))
+                .filter(|(_, rest)| !rest.is_empty());
+            if !matches!(
+                scheme.as_ref().map(|(scheme, _)| scheme.as_str()),
+                Some("file" | "http" | "https")
+            ) {
+                return Err(Failure::new(
+                    "invalid_url",
+                    format!("`{url}` is not a file:// or http(s) URL"),
+                ));
+            }
+            let kinds = entry.actions.file_kinds.unwrap_or("any");
+            if !crate::features::accepts(&url, kinds) {
+                return Err(Failure::new(
+                    "unsupported_file",
+                    format!("`{}` takes {kinds}, not `{url}`", entry.target),
+                ));
+            }
+            give(url);
+            ok(Value::Unit);
+        }
         other => {
             return Err(Failure::new(
                 "unknown_command",

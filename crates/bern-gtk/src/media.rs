@@ -592,9 +592,12 @@ pub struct VideoProps {
     pub label: Option<Str>,
     pub controls: bool,
     pub fit: Option<&'static str>,
+    /// Rounded corners of the picture, bound or fixed.
+    pub corner: Option<crate::motion::Num>,
+    pub animate: Option<crate::motion::Curve>,
 }
 
-fn url_of(value: &Value) -> Option<String> {
+pub(crate) fn url_of(value: &Value) -> Option<String> {
     let value = match value {
         Value::Optional(Some(inner)) => inner.as_ref(),
         Value::Optional(None) => return None,
@@ -779,7 +782,13 @@ pub fn Video(p: &Parent, ctx: &Ctx, props: VideoProps) {
     });
     picture.set_can_shrink(true);
     let frame = gtk::AspectFrame::new(0.5, 0.5, 16.0 / 9.0, false);
-    frame.set_child(Some(&picture));
+    match &props.corner {
+        Some(corner) => {
+            let clip = crate::features::rounded(ctx, &picture, corner, props.animate);
+            frame.set_child(Some(&clip));
+        }
+        None => frame.set_child(Some(&picture)),
+    }
     frame.set_hexpand(true);
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&frame));

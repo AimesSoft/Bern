@@ -245,6 +245,8 @@ pub struct Draft {{
     pub name: String,
     pub on: bool,
     pub mode: demo::Mode,
+    pub file: MediaSource,
+    pub size: f64,
 }}
 
 #[component]
@@ -420,6 +422,7 @@ mod independent_target {
                 window_chrome: false,
                 text_marks: false,
                 dynamic_items: false,
+                features: &[],
                 id: "outline-test",
                 ui: "outline",
                 platforms: &["test"],
@@ -495,6 +498,43 @@ mod independent_target {
             d.message
                 .contains("window `settings` requests floating presentation")
         }));
+    }
+
+    #[test]
+    fn targets_name_the_features_they_lack() {
+        let app = with_engine_pictures(
+            r#"Column {
+                Canvas(height: 80, label: tr! { "en" => "Header", "ja" => "ヘッダー" }) {
+                    Shape(kind: rect, fill_from: app.poster, fade: down)
+                }
+                Image(source: app.cover, width: 100)
+                Button(id: open, label: tr! { "en" => "Open", "ja" => "開く" }, pick: draft.file) => app.add(1)
+                ScrollView(snap: start) {
+                    Text(content: app.title, scroll_scale: 1.1)
+                }
+                Column(stagger: 0.03) { Spacer(appear: fade) }
+                Rail { Spacer(at: 0.5) }
+                PopoverButton(id: more, label: tr! { "en" => "More", "ja" => "その他" }) { Spacer }
+            }"#,
+        )
+        .unwrap_or_else(|errors| panic!("{errors:?}"))
+        .app;
+        let problems = check_common(&Outline, &app);
+        for expected in [
+            "target `outline-test` cannot show pictures from a `MediaSource`",
+            "target `outline-test` cannot fill a shape from a picture or fade it",
+            "target `outline-test` cannot ask for a file with `pick:`",
+            "target `outline-test` cannot snap a scroll view to its items",
+            "target `outline-test` does not follow scrolling with `scroll_scale`: items keep their look",
+            "target `outline-test` does not stagger: children appear together",
+            "target `outline-test` cannot place elements on a `Rail`",
+            "target `outline-test` cannot build a `PopoverButton`",
+        ] {
+            assert!(
+                problems.iter().any(|d| d.message.contains(expected)),
+                "{expected}: {problems:?}"
+            );
+        }
     }
 }
 
@@ -1191,6 +1231,52 @@ pub fn other(app: demo::Client) -> impl View {{
     }
 
     #[test]
+    fn optional_sizes_need_their_breakpoints_and_borrow_layouts() {
+        let medium = format!(
+            "Adaptive(id: choice) {{ Layout(size: compact) {{ {ADD} }} Layout(size: medium) {{ {ADD} }} Layout(size: expanded) {{ {ADD} }} }}"
+        );
+        let output = failure("", &medium, LAYOUTS);
+        assert!(
+            output.contains("`Layout(size: medium)` needs `medium_below`"),
+            "{output}"
+        );
+        let four = "\n[layouts]\ncompact_below = 600\nmedium_below = 1024\nexpanded_below = 1440\n";
+        compile_project_with(PROTOCOL, &project("", &medium), four)
+            .unwrap_or_else(|errors| panic!("{errors:?}"));
+        // A size without a layout of its own shows the next larger one,
+        // else the next smaller.
+        use ir::LayoutSize::{Compact, Expanded, Large, Medium};
+        assert_eq!(Medium.shown(&[Compact, Expanded]), Some(Expanded));
+        assert_eq!(Large.shown(&[Compact, Expanded]), Some(Expanded));
+        assert_eq!(Medium.shown(&[Compact, Medium, Expanded]), Some(Medium));
+        let config = ir::LayoutConfig {
+            compact_below: 600.0,
+            medium_below: Some(1024.0),
+            expanded_below: Some(1440.0),
+        };
+        assert_eq!(
+            [599.0, 600.0, 1023.0, 1024.0, 1439.0, 1440.0].map(|width| config.size(width)),
+            [Compact, Medium, Medium, Expanded, Expanded, Large]
+        );
+        // The window's size reads the same breakpoints.
+        let padding = format!(
+            "Column(padding: if window.large {{ 48 }} else if window.medium {{ 24 }} else {{ 16 }}) {{ {ADD} }}"
+        );
+        compile_project_with(PROTOCOL, &project("", &padding), four)
+            .unwrap_or_else(|errors| panic!("{errors:?}"));
+        let output = failure("", &padding, "");
+        assert!(output.contains("error[B402]: `window.large`"), "{output}");
+        let output = failure("", &padding, LAYOUTS);
+        assert!(output.contains("needs `expanded_below`"), "{output}");
+        let disordered = "\n[layouts]\ncompact_below = 600\nmedium_below = 500\n";
+        let output = failure("", &padding, disordered);
+        assert!(
+            output.contains("[layouts].medium_below must be wider than compact_below"),
+            "{output}"
+        );
+    }
+
+    #[test]
     fn the_same_control_id_names_one_control_across_layouts() {
         // Duplicates within one layout are still errors.
         let twice = layouts(&format!("Column {{ {ADD} {ADD} }}"), ADD);
@@ -1284,6 +1370,10 @@ fn image_and_progress_diagnostics() {
         ),
         (
             r#"Image(source: app.title, width: 10)"#,
+            "`source` needs a MediaSource or Option<MediaSource>, found text",
+        ),
+        (
+            r#"Image(source: 3, width: 10)"#,
             "expected the name of a declared resource",
         ),
         (
@@ -1310,6 +1400,95 @@ fn image_and_progress_diagnostics() {
     ];
     for (body, expected) in cases {
         let message = match with_picture(body) {
+            Ok(_) => panic!("expected `{body}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{body}\n{message}");
+    }
+}
+
+/// Compile `body` with pictures the engine gives and the resource
+/// `pics/a.png`.
+fn with_engine_pictures(body: &str) -> Result<Compiled, Vec<Diagnostic>> {
+    let protocol = PROTOCOL.replace(
+        "pub mode: Mode,",
+        "pub mode: Mode,\n        pub poster: Option<MediaSource>,\n        pub cover: MediaSource,",
+    );
+    let dir = write_project(
+        &protocol,
+        &wrap(body),
+        "\n[resources]\npaths = [\"pics/a.png\"]\n",
+    );
+    std::fs::create_dir_all(dir.join("pics")).unwrap();
+    std::fs::write(dir.join("pics/a.png"), b"\x89PNG").unwrap();
+    let config = config::load(&dir.join("Bern.toml"));
+    let result = config.and_then(|config| compile(&config));
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+#[test]
+fn pictures_come_from_the_engine_and_color_shapes() {
+    let compiled = with_engine_pictures(
+        r#"Column {
+            Image(source: app.poster, height: 150, label: tr! { "en" => "Poster", "ja" => "ポスター" })
+            Image(source: app.cover, width: 100, fit: cover)
+            Canvas(height: 180, label: tr! { "en" => "Header", "ja" => "ヘッダー" }) {
+                Shape(kind: rect, fill_from: app.poster, fade: down)
+                Shape(kind: rect, fill_from: "pics/a.png", opacity: 0.5)
+            }
+        }"#,
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = compiled.app.component("page").unwrap();
+    let mut seen = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node {
+            match element.kind.as_str() {
+                "Image" => seen.push(element.expr("source").unwrap().ty.display()),
+                "Shape" => seen.push(format!(
+                    "{:?} {:?} {:?}",
+                    element.expr("fill_from").map(|expr| expr.ty.display()),
+                    element.resource("fill_from"),
+                    element.keyword("fade")
+                )),
+                _ => {}
+            }
+        }
+    });
+    assert_eq!(
+        seen,
+        [
+            "MediaSource?",
+            "MediaSource",
+            r#"Some("MediaSource?") None Some("down")"#,
+            r#"None Some("pics/a.png") None"#,
+        ]
+    );
+
+    for (body, expected) in [
+        (
+            "Image(source: app.count, width: 10)",
+            "`source` needs a MediaSource or Option<MediaSource>, found int",
+        ),
+        (
+            "Canvas { Shape(kind: rect, fill_from: app.title) }",
+            "found text",
+        ),
+        (
+            "Canvas { Shape(kind: rect, fill_from: \"pics/b.png\") }",
+            "resource `pics/b.png` is not declared",
+        ),
+        (
+            "Canvas { Shape(kind: rect, fill_from: app.poster, fade: sideways) }",
+            "expected one of: up, down, left, right",
+        ),
+    ] {
+        let message = match with_engine_pictures(body) {
             Ok(_) => panic!("expected `{body}` to fail"),
             Err(errors) => errors
                 .iter()
@@ -1434,6 +1613,504 @@ fn module_manifests_are_checked() {
 }
 
 #[test]
+fn sidebar_footers_and_toolbar_searches_are_checked() {
+    let window = |footer: &str, toolbar: &str| {
+        wrap(&format!(
+            r#"SplitView {{
+                Sidebar(selection: draft.mode) {{
+                    SidebarItem(value: Mode::Fast, label: tr! {{ "en" => "Fast", "ja" => "速い" }})
+                    {footer}
+                }}
+                Detail {{
+                    Toolbar {{ {toolbar} }}
+                    Spacer
+                }}
+            }}"#
+        ))
+    };
+    let footer = "SidebarFooter { Text(content: app.title) }";
+    let search = "Search(id: find, value: draft.name) { Text(content: app.title) }";
+    compile_ui(&window(footer, search)).unwrap_or_else(|errors| panic!("{errors:?}"));
+    for (footer, toolbar, expected) in [
+        (
+            format!("{footer} {footer}"),
+            String::new(),
+            "at most one `SidebarFooter`",
+        ),
+        (
+            String::new(),
+            format!("{search} {}", search.replace("find", "again")),
+            "at most one `Search`",
+        ),
+        (
+            String::new(),
+            format!("if draft.on {{ {search} }}"),
+            "stands directly in its `Toolbar`",
+        ),
+    ] {
+        let message = match compile_ui(&window(&footer, &toolbar)) {
+            Ok(_) => panic!("expected `{footer}` / `{toolbar}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{footer} {toolbar}: {message}");
+    }
+    let outside = errors(footer);
+    assert!(outside.contains("SidebarFooter"), "{outside}");
+}
+
+#[test]
+fn session_actions_panels_and_notices_are_checked() {
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+            Button(id: open, label: tr! { "en" => "Open", "ja" => "開く" }) => draft.on.set(true)
+            Button(id: flip, label: tr! { "en" => "Flip", "ja" => "反転" }) => draft.on.toggle()
+            Button(id: fast, label: tr! { "en" => "Fast", "ja" => "速い" }) => draft.mode.set(Mode::Fast)
+            Button(id: large, label: tr! { "en" => "Large", "ja" => "大" }) => draft.size.set(18)
+            Switch(id: panel, label: tr! { "en" => "Panel", "ja" => "パネル" }, value: draft.on, style: button, icon: "sidebar.right")
+            Toast(content: app.title, key: app.count, duration: 2)
+            Inspector(presented: draft.on, width: 300) {
+                Text(content: app.title)
+            }
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let mut ops = Vec::new();
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node
+                && let Some(ir::Action::Session { op, .. }) = &element.action
+            {
+                ops.push(matches!(op, ir::SessionOp::Toggle));
+                // A whole number set on a decimal field is that decimal.
+                if let ir::SessionOp::Set { value } = op
+                    && value.ty == Type::Float
+                {
+                    assert_eq!(
+                        value.kind,
+                        ir::ExprKind::Literal {
+                            value: Value::Float(18.0)
+                        }
+                    );
+                }
+            }
+        });
+    }
+    assert_eq!(ops, [false, true, false, false]);
+    compile_ui(&wrap(
+        r#"Toolbar {
+            SplitButton(id: danmaku, label: tr! { "en" => "Comments", "ja" => "コメント" }, icon: "text.bubble", value: draft.on) {
+                Switch(id: merge, label: tr! { "en" => "Merge", "ja" => "まとめる" }, value: draft.on)
+            }
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+
+    let label = r#"label: tr! { "en" => "Go", "ja" => "行く" }"#;
+    for (body, expected) in [
+        (
+            format!("Button(id: go, {label}) => draft.name.toggle()"),
+            "flips a `bool`",
+        ),
+        (
+            format!("Button(id: go, {label}) => draft.on.set(\"yes\")"),
+            "the new value",
+        ),
+        (
+            format!("Button(id: go, {label}) => draft.on.clear()"),
+            "support `set(value)`",
+        ),
+        (
+            "Column { if draft.on { Inspector(presented: draft.on) { Spacer } } }".to_string(),
+            "stands directly in the container",
+        ),
+        (
+            "Column { Inspector(presented: draft.on) { Spacer } Inspector(presented: draft.on) { Spacer } }"
+                .to_string(),
+            "at most one `Inspector`",
+        ),
+    ] {
+        let message = errors(&body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn files_are_picked_and_dropped() {
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+            Toolbar {
+                IconButton(id: open, icon: "folder", label: tr! { "en" => "Open", "ja" => "開く" }, pick: draft.file, files: "Video, .SRT", shortcut: "cmd+o") => app.add(1)
+                Divider
+                Menu(id: more, label: tr! { "en" => "More", "ja" => "その他" }) {
+                    MenuItem(id: folder, label: tr! { "en" => "Folder", "ja" => "フォルダ" }, pick: draft.file, files: "folder") => app.add(2)
+                }
+            }
+            Drop(id: drop, label: tr! { "en" => "Drop", "ja" => "ドロップ" }, value: draft.file, files: "video", over: draft.on, opens: true) {
+                Text(content: app.title, nudge: draft.on)
+            } => app.add(3)
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = compiled.app.component("page").unwrap();
+    let mut seen = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node
+            && let Some(files) = element.keyword("files")
+        {
+            let field = element.field("pick").or(element.field("value")).unwrap();
+            seen.push(format!("{} {files} {}", element.kind, field.ty.display()));
+        }
+    });
+    assert_eq!(
+        seen,
+        [
+            "IconButton video .srt MediaSource",
+            "MenuItem folder MediaSource",
+            "Drop video MediaSource",
+        ]
+    );
+    let mut flags = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node {
+            if let Some(opens) = element.keyword("opens") {
+                flags.push(format!("opens {opens}"));
+            }
+            if let Some(nudge) = element.expr("nudge") {
+                flags.push(format!("nudge {}", nudge.ty.display()));
+            }
+        }
+    });
+    assert_eq!(flags, ["opens true", "nudge bool"]);
+
+    let open =
+        r#"IconButton(id: open, icon: "folder", label: tr! { "en" => "Open", "ja" => "開く" }"#;
+    for (body, expected) in [
+        (format!(r#"{open}, pick: draft.file, files: "movies") => app.add(1)"#), "neither a kind"),
+        (format!(r#"{open}, pick: draft.file, files: "any video") => app.add(1)"#), "`any` already takes every file"),
+        (format!(r#"{open}, pick: draft.file, files: "video .mp4 video") => app.add(1)"#), "written twice"),
+        (format!(r#"{open}, files: "video") => app.add(1)"#), "add `pick: draft.file`"),
+        (format!(r#"{open}, pick: draft.name) => app.add(1)"#), "a `MediaSource` or `Option<MediaSource>` field"),
+        (
+            r#"Drop(id: d, label: tr! { "en" => "D", "ja" => "D" }, value: draft.file) { Spacer }"#.to_string(),
+            "UI action must bind",
+        ),
+        (
+            r#"Drop(id: d, label: tr! { "en" => "D", "ja" => "D" }, value: draft.file) { Spacer Spacer } => app.add(1)"#.to_string(),
+            "takes exactly one child",
+        ),
+        (format!(r#"Toolbar {{ Divider {open}) => app.add(1) }}"#), "put it between items"),
+        (format!(r#"Toolbar {{ {open}) => app.add(1) Divider Divider {open}) => app.add(1) }}"#), "put it between items"),
+        (
+            format!(r#"Toolbar {{ {open}) => app.add(1) if draft.on {{ Divider }} }}"#),
+            "stands directly in it",
+        ),
+        (
+            r#"Drop(id: d, label: tr! { "en" => "D", "ja" => "D" }, value: draft.file, opens: yes) { Spacer } => app.add(1)"#.to_string(),
+            "expected `true` or `false`",
+        ),
+        ("Text(content: app.title, nudge: app.title)".to_string(), "bool"),
+    ] {
+        let message = errors(&body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn scrolling_and_gestures_link_to_values() {
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+            ScrollView(axis: horizontal, snap: center, position: draft.name) {
+                Row(gap: 30) {
+                    Text(content: app.title, scroll_scale: 1.12, scroll_opacity: 0.6)
+                }
+            }
+            Pinch(id: zoom, label: tr! { "en" => "Zoom", "ja" => "拡大" }, value: draft.size, min: 100, max: 320) {
+                Spacer
+            } => app.add(1)
+            Swipe(id: level, label: tr! { "en" => "Level", "ja" => "レベル" }, value: draft.size, min: 0, max: 1, axis: vertical, distance: 200) {
+                Spacer
+            }
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = compiled.app.component("page").unwrap();
+    let mut seen = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node {
+            match element.kind.as_str() {
+                "ScrollView" => seen.push(format!(
+                    "{:?} {}",
+                    element.keyword("snap"),
+                    element.field("position").unwrap().ty.display()
+                )),
+                "Text" => seen.push(format!(
+                    "{:?} {:?}",
+                    element.number("scroll_scale"),
+                    element.number("scroll_opacity")
+                )),
+                "Pinch" | "Swipe" => seen.push(format!(
+                    "{} {:?} {:?} {}",
+                    element.kind,
+                    element.number("min"),
+                    element.number("distance"),
+                    element.action.is_some()
+                )),
+                _ => {}
+            }
+        }
+    });
+    assert_eq!(
+        seen,
+        [
+            r#"Some("center") text"#,
+            "Some(1.12) Some(0.6)",
+            "Pinch Some(100.0) None true",
+            "Swipe Some(0.0) Some(200.0) false",
+        ]
+    );
+
+    let pinch = r#"Pinch(id: z, label: tr! { "en" => "Z", "ja" => "Z" }, value: draft.size"#;
+    for (body, expected) in [
+        ("Text(content: app.title, scroll_scale: 0)".to_string(), "`scroll_scale` must be above zero"),
+        ("Text(content: app.title, scroll_opacity: 1.5)".to_string(), "an opacity from 0 to 1"),
+        ("ScrollView(position: draft.on) { Spacer }".to_string(), "an `i64` or `String` field"),
+        ("ScrollView(snap: middle) { Spacer }".to_string(), "expected one of: start, center"),
+        ("ScrollView(arrival: nudge) { Spacer }".to_string(), "add `position: draft.x`"),
+        (format!("{pinch}, min: 3, max: 3) {{ Spacer }}"), "`Pinch` needs `min` below `max`"),
+        (format!("{pinch}, min: 1, max: 3)"), "takes exactly one child"),
+        (format!("{pinch}, min: 1, max: 3, distance: 4) {{ Spacer }}"), "distance"),
+        (
+            r#"Swipe(id: s, label: tr! { "en" => "S", "ja" => "S" }, value: draft.size, min: 0, max: 1, distance: 0) { Spacer }"#.to_string(),
+            "`distance` must be above zero",
+        ),
+    ] {
+        let message = errors(&body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn rails_stagger_and_popover_buttons() {
+    let compiled = compile_ui(&wrap(
+        r#"Column(gap: 8, stagger: 0.03) {
+            Text(content: app.title, appear: fade)
+            Rail(anchor: start) {
+                Text(content: app.title, at: draft.size, animate: smooth)
+                Canvas(from: 0, to: draft.size) { Shape(kind: rect, fill: fill.subtle) }
+                if draft.on {
+                    Spacer(at: 1)
+                }
+            }
+            Grid(min_width: 120, stagger: 0.05) {
+                Text(content: app.title, appear: fade)
+            }
+            PopoverButton(id: volume, label: tr! { "en" => "Volume", "ja" => "音量" }, icon: "speaker.wave.3.fill", presented: draft.on) {
+                Slider(id: level, label: tr! { "en" => "Level", "ja" => "レベル" }, value: draft.size, min: 0, max: 1)
+            }
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = compiled.app.component("page").unwrap();
+    let mut seen = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node {
+            if let Some(step) = element.number("stagger") {
+                seen.push(format!("{} staggers {step}", element.kind));
+            }
+            for name in ["at", "from", "to"] {
+                if element.prop(name).is_some() {
+                    seen.push(format!("{} {name}", element.kind));
+                }
+            }
+            if element.kind == "PopoverButton" {
+                seen.push(format!("popover {}", element.field("presented").is_some()));
+            }
+        }
+    });
+    assert_eq!(
+        seen,
+        [
+            "Column staggers 0.03",
+            "Text at",
+            "Canvas from",
+            "Canvas to",
+            "Spacer at",
+            "Grid staggers 0.05",
+            "popover true",
+        ]
+    );
+    for (body, expected) in [
+        (
+            "Text(content: app.title, at: 0.5)",
+            "place an element on the `Rail` it stands in",
+        ),
+        (
+            "Rail { Spacer }",
+            "needs `at:` (a fraction of the rail) or `from:` and `to:`",
+        ),
+        ("Rail { Spacer(at: 0.1, from: 0, to: 1) }", "not both"),
+        ("Rail { Spacer(from: 0) }", "`from:` and `to:` go together"),
+        ("Rail { Spacer(at: draft.on) }", "`at` must be a number"),
+        (
+            "Text(content: app.title, stagger: 0.1)",
+            "spaces out the children of a container",
+        ),
+        (
+            "Column(stagger: 2) { Spacer }",
+            "a delay from 0 to 1 second",
+        ),
+        (
+            "Rail(axis: diagonal) { Spacer(at: 0) }",
+            "expected one of: horizontal, vertical",
+        ),
+    ] {
+        let message = errors(body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn lengths_follow_state_and_ifs_choose_values() {
+    let compiled = compile_ui(&wrap(
+        r#"Column(padding: if window.idle { 0 } else { 24 }, gap: if draft.on { 8 } else { 2.5 }, width: 320, animate: hero, appearance: dark) {
+            Grid(min_width: if draft.on { 120 } else { 240 }) { Spacer }
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let mut column = None;
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node
+                && element.kind == "Column"
+            {
+                column = Some(element.clone());
+            }
+        });
+    }
+    let column = column.expect("column");
+    assert!(
+        matches!(column.prop("padding"), Some(ir::Prop::Expr { expr }) if expr.ty == Type::Int)
+    );
+    // A whole number beside a float makes a float.
+    assert!(matches!(column.prop("gap"), Some(ir::Prop::Expr { expr }) if expr.ty == Type::Float));
+    assert!(matches!(column.prop("width"), Some(ir::Prop::Number { value }) if *value == 320.0));
+    assert_eq!(column.keyword("animate"), Some("hero"));
+    assert_eq!(column.keyword("appearance"), Some("dark"));
+
+    for (body, expected) in [
+        (
+            "Column(padding: if app.title { 0 } else { 1 }) { Spacer }",
+            "condition is a `bool`",
+        ),
+        (
+            "Column(padding: if draft.on { 0 } else { app.title }) { Spacer }",
+            "same type",
+        ),
+        ("Column(padding: draft.name) { Spacer }", "is a length"),
+        (
+            "Column(padding: if draft.on { 0 }) { Spacer }",
+            "needs an `else`",
+        ),
+        ("Column(animate: wobble) { Spacer }", "wobble"),
+    ] {
+        let message = errors(body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn shortcuts_are_normalized_and_checked() {
+    assert_eq!(
+        ir::spec::parse_shortcut("Shift+CMD+P").as_deref(),
+        Ok("cmd+shift+p")
+    );
+    assert_eq!(ir::spec::parse_shortcut("space").as_deref(), Ok("space"));
+    assert_eq!(ir::spec::parse_shortcut("cmd+,").as_deref(), Ok("cmd+,"));
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+            Button(id: go, label: tr! { "en" => "Go", "ja" => "行く" }, shortcut: "cmd+k") => app.add(1)
+            Switch(id: on, label: tr! { "en" => "On", "ja" => "オン" }, value: draft.on, style: button, shortcut: "escape")
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let mut shortcuts = Vec::new();
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node
+                && let Some(shortcut) = element.keyword("shortcut")
+            {
+                shortcuts.push(shortcut.to_string());
+            }
+        });
+    }
+    assert_eq!(shortcuts, ["cmd+k", "escape"]);
+    for (shortcut, expected) in [
+        ("hyper+k", "is not a modifier"),
+        ("cmd+enter", "is not a key"),
+        ("cmd+cmd+k", "written twice"),
+    ] {
+        let message = errors(&format!(
+            r#"Button(id: go, label: tr! {{ "en" => "Go", "ja" => "行く" }}, shortcut: "{shortcut}") => app.add(1)"#
+        ));
+        assert!(message.contains(expected), "{shortcut}: {message}");
+    }
+}
+
+#[test]
+fn accents_and_appearance_come_from_enums() {
+    let source = |props: &str, accents: &str| {
+        format!(
+            "{}\nstyle! {{ accents {{ {accents} }} }}\n",
+            wrap("Spacer").replace(
+                "WindowSet(handle: AppWindows, primary: main)",
+                &format!("WindowSet(handle: AppWindows, primary: main{props})"),
+            )
+        )
+    };
+    let compiled = compile_ui(&source(
+        ", accent: app.mode",
+        r##"fast: "#FF2E55", slow: color(light: "#2A51D4", dark: "#6E8BFF")"##,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    assert!(compiled.app.windows.accent.is_some());
+    assert_eq!(compiled.app.style.accents.len(), 2);
+    assert!(compiled.app.style.accent("Fast").is_some());
+
+    for (props, accents, expected) in [
+        (
+            ", accent: app.mode",
+            r##"fast: "#FF2E55""##,
+            "accent `Slow` is not declared",
+        ),
+        (
+            ", accent: app.title",
+            r##"fast: "#FF2E55""##,
+            "is an enum whose variants",
+        ),
+        (
+            ", appearance: app.mode",
+            "",
+            "an enum of `System`, `Light` and `Dark`",
+        ),
+        ("", "fast: accent", "an accent is"),
+    ] {
+        let message = match compile_ui(&source(props, accents)) {
+            Ok(_) => panic!("expected `{props}` / `{accents}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{props} {accents}: {message}");
+    }
+}
+
+#[test]
 fn navigation_items_may_come_and_go() {
     let sidebar = |props: &str, items: &str| {
         wrap(&format!(
@@ -1526,6 +2203,64 @@ fn canvas_and_text_marks_are_checked() {
 }
 
 #[test]
+fn buttons_show_content_and_reveal_on_hover() {
+    let compiled = compile_ui(&wrap(
+        r#"Stack(align: top_trailing) {
+            Button(id: card, label: tr! { "en" => "Open", "ja" => "開く" }) {
+                Column {
+                    Text(content: app.title)
+                    Spacer
+                }
+            } => app.add(1)
+            IconButton(id: star, icon: "star", label: tr! { "en" => "Star", "ja" => "星" }, reveal: hover) => app.add(2)
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let (mut content, mut revealed) = (None, None);
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node {
+                if element.id.as_deref() == Some("card") {
+                    content = Some(element.children.len());
+                }
+                if element.keyword("reveal") == Some("hover") {
+                    revealed = Some(element.kind.clone());
+                }
+            }
+        });
+    }
+    assert_eq!(content, Some(1));
+    assert_eq!(revealed.as_deref(), Some("IconButton"));
+
+    let label = r#"label: tr! { "en" => "Open", "ja" => "開く" }"#;
+    for (body, expected) in [
+        (
+            format!(
+                "Button(id: card, {label}) {{ Text(content: app.title) Spacer }} => app.add(1)"
+            ),
+            "shows one child",
+        ),
+        (
+            format!("Button(id: card, {label}, icon: \"star\") {{ Spacer }} => app.add(1)"),
+            "draws no label of its own",
+        ),
+        (
+            format!(
+                "Button(id: card, {label}) {{ Column {{ Button(id: inner, {label}) => app.add(2) }} }} => app.add(1)"
+            ),
+            "cannot hold `Button`",
+        ),
+        (
+            "Text(content: app.title, reveal: always)".to_string(),
+            "hover",
+        ),
+    ] {
+        let message = errors(&body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
 fn style_rules_are_lowered_and_checked() {
     let source = |body: &str| {
         let item: syn::ItemMacro = syn::parse_str(&format!("style! {{ {body} }}")).unwrap();
@@ -1554,7 +2289,31 @@ fn style_rules_are_lowered_and_checked() {
         [("Button".to_string(), "hero".to_string())]
     );
 
+    let (sheet, diagnostics) = lower(
+        "Button.card { shadow: 4, hover: shadow(12, y: 5, opacity: 0.3) + scale(1.03, snappy) }",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let card = &sheet.rules[0];
+    use ir::style::StyleEffect;
+    assert_eq!(
+        card.base[0],
+        StyleEffect::Shadow {
+            radius: 4.0,
+            y: 4.0 / 3.0,
+            opacity: 0.2
+        }
+    );
+    assert_eq!(
+        card.states[0].effects[0],
+        StyleEffect::Shadow {
+            radius: 12.0,
+            y: 5.0,
+            opacity: 0.3
+        }
+    );
+
     for (body, expected) in [
+        ("Button { hover: shadow(-2) }", "radius of 0 or more"),
         ("Slider { corner: 4 }", "does not take style overrides"),
         ("Button { background: brand }", "is not a color role"),
         (

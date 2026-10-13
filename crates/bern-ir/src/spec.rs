@@ -23,6 +23,23 @@ pub enum PropKind {
     ImageResource,
     /// Numeric literal in logical units.
     Number,
+    /// A keyboard shortcut literal such as `"cmd+k"`, `"space"` or
+    /// `"cmd+shift+p"`; see [`parse_shortcut`].
+    Shortcut,
+    /// A length in logical units: a literal, or a numeric expression the
+    /// length follows, such as `if window.idle { 0 } else { 24 }`.
+    Length,
+    /// The kinds of file a control accepts, a literal such as
+    /// `"video .ass .srt"`; see [`parse_file_kinds`].
+    FileKinds,
+    /// Writable session field holding a `MediaSource` (or an optional
+    /// one): the file the user chose or dropped.
+    FileField,
+    /// Writable session `i64` or `String` field holding the key of the
+    /// item a scroll view stands at.
+    PositionField,
+    /// A literal `true` or `false`, fixed when the application is built.
+    Flag,
     /// Numeric restricted expression (int or float), read only.
     NumberValue,
     /// Boolean restricted expression.
@@ -137,7 +154,12 @@ impl ComponentSpec {
             .find(|prop| prop.name == name)
             .or_else(|| {
                 self.moves()
-                    .then(|| MOTION_PROPS.iter().find(|prop| prop.name == name))
+                    .then(|| {
+                        MOTION_PROPS
+                            .iter()
+                            .chain(PLACEMENT_PROPS)
+                            .find(|prop| prop.name == name)
+                    })
                     .flatten()
             })
     }
@@ -163,6 +185,129 @@ impl ComponentSpec {
     }
 }
 
+/// Keys a shortcut may name besides a single printable character.
+pub const SHORTCUT_KEYS: &[&str] = &[
+    "space", "escape", "return", "tab", "delete", "up", "down", "left", "right", "home", "end",
+    "pageup", "pagedown",
+];
+
+/// File categories a control may accept besides `.ext` extensions.
+pub const FILE_KINDS: &[&str] = &["any", "video", "audio", "picture", "folder"];
+
+/// Extensions each file category takes besides the system's own types,
+/// since a system may not know some, such as Matroska. Every target uses
+/// this table.
+pub const FILE_KIND_EXTENSIONS: &[(&str, &[&str])] = &[
+    (
+        "video",
+        &[
+            "mp4", "m4v", "mov", "mkv", "webm", "flv", "f4v", "avi", "wmv", "rmvb", "rm", "ts",
+            "m2ts", "mts", "ogv", "3gp", "vob", "mpg", "mpeg",
+        ],
+    ),
+    (
+        "audio",
+        &[
+            "mp3", "m4a", "aac", "flac", "ape", "opus", "ogg", "oga", "wav", "aiff", "wma", "dsf",
+            "dff",
+        ],
+    ),
+    (
+        "picture",
+        &[
+            "png", "jpg", "jpeg", "heic", "heif", "webp", "avif", "gif", "bmp", "tif", "tiff",
+            "jxl",
+        ],
+    ),
+];
+
+/// The extensions of a file category from [`FILE_KIND_EXTENSIONS`].
+pub fn file_kind_extensions(kind: &str) -> &'static [&'static str] {
+    FILE_KIND_EXTENSIONS
+        .iter()
+        .find(|(name, _)| *name == kind)
+        .map_or(&[], |(_, extensions)| extensions)
+}
+
+/// Normalize the kinds of file a control accepts: categories from
+/// [`FILE_KINDS`] and extensions such as `.ass`, separated by spaces or
+/// commas, each once.
+pub fn parse_file_kinds(text: &str) -> Result<String, String> {
+    let mut kinds: Vec<String> = Vec::new();
+    for word in text
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|word| !word.is_empty())
+    {
+        let word = word.to_lowercase();
+        let known = match word.strip_prefix('.') {
+            Some(ext) => {
+                !ext.is_empty()
+                    && ext.len() <= 16
+                    && ext
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            }
+            None => FILE_KINDS.contains(&word.as_str()),
+        };
+        if !known {
+            return Err(format!(
+                "`{word}` is neither a kind ({}) nor an extension such as `.srt`",
+                FILE_KINDS.join(", ")
+            ));
+        }
+        if kinds.contains(&word) {
+            return Err(format!("`{word}` is written twice"));
+        }
+        kinds.push(word);
+    }
+    if kinds.is_empty() {
+        return Err("name at least one kind, such as \"video\"".into());
+    }
+    if kinds.len() > 1 && kinds.iter().any(|kind| kind == "any") {
+        return Err("`any` already takes every file".into());
+    }
+    Ok(kinds.join(" "))
+}
+
+/// Normalize a keyboard shortcut: modifiers `cmd` (the primary modifier:
+/// Command on Apple systems, Control elsewhere), `ctrl`, `alt` and
+/// `shift`, then one key, joined by `+`, such as `"cmd+k"` or `"space"`.
+pub fn parse_shortcut(text: &str) -> Result<String, String> {
+    let parts: Vec<String> = text
+        .split('+')
+        .map(|part| part.trim().to_lowercase())
+        .collect();
+    let (key, modifiers) = parts.split_last().ok_or("an empty shortcut")?;
+    let mut ordered = Vec::new();
+    for wanted in ["cmd", "ctrl", "alt", "shift"] {
+        match modifiers.iter().filter(|m| *m == wanted).count() {
+            0 => {}
+            1 => ordered.push(wanted.to_string()),
+            _ => return Err(format!("`{wanted}` is written twice")),
+        }
+    }
+    if let Some(other) = modifiers
+        .iter()
+        .find(|m| !["cmd", "ctrl", "alt", "shift"].contains(&m.as_str()))
+    {
+        return Err(format!(
+            "`{other}` is not a modifier; use cmd, ctrl, alt or shift"
+        ));
+    }
+    let printable = key.chars().count() == 1
+        && key
+            .chars()
+            .all(|c| c.is_ascii_graphic() && !c.is_ascii_uppercase());
+    if !printable && !SHORTCUT_KEYS.contains(&key.as_str()) {
+        return Err(format!(
+            "`{key}` is not a key; use one character or one of {}",
+            SHORTCUT_KEYS.join(", ")
+        ));
+    }
+    ordered.push(key.clone());
+    Ok(ordered.join("+"))
+}
+
 /// Properties every element shown in a layout takes: how it appears and
 /// disappears, how its children make room, and which shared element it is.
 /// Navigation containers whose items may sit in `if`, `if let`, `match`
@@ -178,7 +323,25 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("reflow", PropKind::MotionToken),
     opt("hero", PropKind::HeroName),
     opt("hero_key", PropKind::KeyValue),
+    opt("reveal", PropKind::Keyword(&["hover"])),
+    opt("animate", PropKind::MotionToken),
+    opt("appearance", PropKind::Keyword(&["light", "dark"])),
+    opt("scroll_scale", PropKind::Number),
+    opt("scroll_opacity", PropKind::Number),
+    opt("nudge", PropKind::Bool),
+    opt("stagger", PropKind::Number),
 ];
+
+/// Where an element sits on the `Rail` it stands in: at a fraction of its
+/// length, or between two.
+pub const PLACEMENT_PROPS: &[PropSpec] = &[
+    opt("at", PropKind::NumberValue),
+    opt("from", PropKind::NumberValue),
+    opt("to", PropKind::NumberValue),
+];
+
+/// Containers that may stagger the appearing of their children.
+pub const STAGGERING: &[&str] = &["Column", "Row", "Grid", "Stack", "ForEach", "List"];
 
 const fn req(name: &'static str, kind: PropKind) -> PropSpec {
     PropSpec {
@@ -213,7 +376,7 @@ pub const TEXT_STYLES: &[&str] = &[
 pub const EMPHASIS: &[&str] = &["primary", "secondary", "tertiary"];
 
 /// Layout sizes of `Adaptive`, as written in `Layout(size: …)`.
-pub const LAYOUT_SIZES: &[&str] = &["compact", "expanded"];
+pub const LAYOUT_SIZES: &[&str] = &["compact", "medium", "expanded", "large"];
 
 /// The feature an entry with a business action reaches.
 const FEATURE: PropSpec = opt("feature", PropKind::Feature);
@@ -264,6 +427,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("handle", PropKind::TypeName),
                 req("primary", PropKind::WindowId),
+                opt("accent", PropKind::KeyValue),
+                opt("appearance", PropKind::KeyValue),
             ],
             Children::Only(&["Window"]),
             "Window catalog of a session root",
@@ -282,7 +447,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                     "presentation",
                     PropKind::Keyword(&["auto", "virtual", "floating", "native_required"]),
                 ),
-                opt("role", PropKind::Keyword(&["standard", "settings"])),
+                opt(
+                    "role",
+                    PropKind::Keyword(&["standard", "settings", "dialog"]),
+                ),
                 opt("width", PropKind::Number),
                 opt("height", PropKind::Number),
                 opt("min_width", PropKind::Number),
@@ -300,8 +468,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     spec(
         "Column",
         &[
-            opt("gap", PropKind::Number),
-            opt("padding", PropKind::Number),
+            opt("gap", PropKind::Length),
+            opt("padding", PropKind::Length),
+            opt("width", PropKind::Length),
+            opt("height", PropKind::Length),
             opt(
                 "align",
                 PropKind::Keyword(&["leading", "center", "trailing"]),
@@ -313,8 +483,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     spec(
         "Row",
         &[
-            opt("gap", PropKind::Number),
-            opt("padding", PropKind::Number),
+            opt("gap", PropKind::Length),
+            opt("padding", PropKind::Length),
+            opt("width", PropKind::Length),
+            opt("height", PropKind::Length),
             opt("align", PropKind::Keyword(&["top", "center", "bottom"])),
         ],
         Children::Any,
@@ -323,26 +495,44 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     spec(
         "Grid",
         &[
-            req("min_width", PropKind::Number),
-            opt("gap", PropKind::Number),
-            opt("padding", PropKind::Number),
+            req("min_width", PropKind::Length),
+            opt("gap", PropKind::Length),
+            opt("padding", PropKind::Length),
         ],
         Children::Any,
         "Equal columns, as many as fit with each at least `min_width` wide; children fill them row by row",
     ),
     spec(
         "Stack",
-        &[opt("align", PropKind::Keyword(STACK_ALIGN))],
+        &[
+            opt("align", PropKind::Keyword(STACK_ALIGN)),
+            opt("width", PropKind::Length),
+            opt("height", PropKind::Length),
+        ],
         Children::Any,
-        "Layers on top of each other, later children above earlier ones; as large as the largest",
+        "Layers on top of each other, later children above earlier ones; as large as the largest unless `width` or `height` says",
+    ),
+    spec(
+        "Rail",
+        &[
+            opt("axis", PropKind::Keyword(&["horizontal", "vertical"])),
+            opt("anchor", PropKind::Keyword(&["start", "center", "end"])),
+        ],
+        Children::Any,
+        "A strip along `axis` that places each child at the fraction `at` of its length, or between the fractions `from` and `to`; the fractions may follow state",
     ),
     spec("Spacer", &[], Children::None, "Flexible space"),
     spec("Divider", &[], Children::None, "Separator line"),
     spec(
         "ScrollView",
-        &[opt("axis", PropKind::Keyword(&["vertical", "horizontal"]))],
+        &[
+            opt("axis", PropKind::Keyword(&["vertical", "horizontal"])),
+            opt("snap", PropKind::Keyword(&["start", "center"])),
+            opt("position", PropKind::PositionField),
+            opt("arrival", PropKind::Keyword(&["nudge"])),
+        ],
         Children::Any,
-        "Scrolling container",
+        "Scrolling container; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives",
     ),
     spec(
         "SplitView",
@@ -359,8 +549,17 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("id", PropKind::Id),
                 opt("fallback", PropKind::SelectionValue),
             ],
-            Children::Only(&["Search", "Section", "SidebarItem", "Pages"]),
+            Children::Only(&["Search", "Section", "SidebarItem", "Pages", "SidebarFooter"]),
             "Sidebar list selecting a destination",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Sidebar"]),
+        ..spec(
+            "SidebarFooter",
+            &[],
+            Children::Any,
+            "Content pinned to the bottom of the sidebar, below its list, top to bottom",
         )
     },
     ComponentSpec {
@@ -468,11 +667,126 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "One tab page",
         )
     },
+    ComponentSpec {
+        interactive: true,
+        ..spec(
+            "SplitButton",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("value", PropKind::BoolField),
+                opt("icon", PropKind::Icon),
+                opt("more_label", PropKind::DisplayText),
+                opt("shortcut", PropKind::Shortcut),
+            ],
+            Children::Any,
+            "A toggle with a second part beside it that shows its children in a popover, such as the settings of what it turns on",
+        )
+    },
+    ComponentSpec {
+        interactive: true,
+        ..spec(
+            "PopoverButton",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("icon", PropKind::Icon),
+                opt("presented", PropKind::BoolField),
+                opt("shortcut", PropKind::Shortcut),
+            ],
+            Children::Any,
+            "A button that shows its children in a popover, such as a volume slider; `presented` opens and closes it from a session field",
+        )
+    },
+    spec(
+        "Inspector",
+        &[
+            req("presented", PropKind::BoolField),
+            opt("width", PropKind::Number),
+        ],
+        Children::Any,
+        "A side panel at the trailing edge of the container it stands in, shown while `presented` is true; the container's other content makes room",
+    ),
+    spec(
+        "Toast",
+        &[
+            req("content", PropKind::DisplayText),
+            opt("icon", PropKind::Icon),
+            opt("key", PropKind::KeyValue),
+            opt("duration", PropKind::Number),
+        ],
+        Children::None,
+        "A short notice that shows when it appears or its `key` (else its content) changes, and hides itself after `duration` seconds (3 unless given)",
+    ),
+    ComponentSpec {
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "Pinch",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("value", PropKind::NumberField),
+                req("min", PropKind::Number),
+                req("max", PropKind::Number),
+                FEATURE,
+            ],
+            Children::One,
+            "Pinching its content scales `value` within `min` and `max`; the action runs when the fingers lift",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "Swipe",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("value", PropKind::NumberField),
+                req("min", PropKind::Number),
+                req("max", PropKind::Number),
+                opt("axis", PropKind::Keyword(&["vertical", "horizontal"])),
+                opt("distance", PropKind::Number),
+                FEATURE,
+            ],
+            Children::One,
+            "Dragging across its content moves `value` within `min` and `max`: up or right raises it, and `distance` points (300 unless given) cross the whole range; the action runs when the finger lifts",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "Drop",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("value", PropKind::FileField),
+                opt("files", PropKind::FileKinds),
+                opt("over", PropKind::BoolField),
+                opt("opens", PropKind::Flag),
+                FEATURE,
+            ],
+            Children::One,
+            "Its content accepts a file of `files` dragged onto it: `over` is true while one is held above it, and on dropping the file goes into `value` and the action runs. With `opens: true` it also takes the files the system opens with the application, which then registers for those kinds",
+        )
+    },
     spec(
         "Toolbar",
         &[],
-        Children::Only(&["Button", "IconButton", "Picker", "Menu"]),
-        "Window or page level actions",
+        Children::Only(&[
+            "Button",
+            "IconButton",
+            "Picker",
+            "Menu",
+            "Search",
+            "Switch",
+            "SplitButton",
+            "PopoverButton",
+            "Divider",
+        ]),
+        "Window or page level actions, and at most one search field; items between `Divider`s form one group",
     ),
     spec(
         "Adaptive",
@@ -515,9 +829,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("role", PropKind::Keyword(&["normal", "destructive"])),
                 opt("enabled", PropKind::Bool),
                 FEATURE,
+                opt("shortcut", PropKind::Shortcut),
+                opt("pick", PropKind::FileField),
+                opt("files", PropKind::FileKinds),
             ],
             Children::None,
-            "Menu command bound to a registered command",
+            "Menu command bound to a registered command; `pick` asks for a file as `Button` does",
         )
     },
     ComponentSpec {
@@ -567,8 +884,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     spec(
         "Canvas",
         &[
-            opt("width", PropKind::Number),
-            opt("height", PropKind::Number),
+            opt("width", PropKind::Length),
+            opt("height", PropKind::Length),
             opt("label", PropKind::DisplayText),
         ],
         Children::Only(&["Shape", "Series", "Pattern"]),
@@ -589,12 +906,14 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("height", PropKind::Number),
                 opt("corner", PropKind::Number),
                 opt("fill", PropKind::ColorRole),
+                opt("fill_from", PropKind::ImageResource),
+                opt("fade", PropKind::Keyword(&["up", "down", "left", "right"])),
                 opt("stroke", PropKind::ColorRole),
                 opt("stroke_width", PropKind::Number),
                 opt("opacity", PropKind::Number),
             ],
             Children::None,
-            "A shape in canvas units; without a size it fills the canvas",
+            "A shape in canvas units; without a size it fills the canvas. `fill_from` fills it with the average color of a picture; `fade` lets the fill fade out toward an edge",
         )
     },
     ComponentSpec {
@@ -641,8 +960,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         &[
             req("source", PropKind::ImageResource),
             opt("label", PropKind::DisplayText),
-            opt("width", PropKind::Number),
-            opt("height", PropKind::Number),
+            opt("width", PropKind::Length),
+            opt("height", PropKind::Length),
             opt("fit", PropKind::Keyword(VIDEO_FIT)),
         ],
         Children::None,
@@ -678,9 +997,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("enabled", PropKind::Bool),
                 opt("variant", PropKind::StyleVariant),
                 FEATURE,
+                opt("shortcut", PropKind::Shortcut),
+                opt("pick", PropKind::FileField),
+                opt("files", PropKind::FileKinds),
             ],
-            Children::None,
-            "Button bound to a registered command",
+            Children::Any,
+            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; with `pick`, it first asks for a file of `files` and runs the action once one is chosen",
         )
     },
     ComponentSpec {
@@ -695,9 +1017,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("enabled", PropKind::Bool),
                 opt("variant", PropKind::StyleVariant),
                 FEATURE,
+                opt("shortcut", PropKind::Shortcut),
+                opt("pick", PropKind::FileField),
+                opt("files", PropKind::FileKinds),
             ],
             Children::None,
-            "Icon-only button with an accessible name",
+            "Icon-only button with an accessible name; `pick` asks for a file as `Button` does",
         )
     },
     ComponentSpec {
@@ -727,9 +1052,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("value", PropKind::TextField),
                 opt("prompt", PropKind::DisplayText),
                 FEATURE,
+                opt("shortcut", PropKind::Shortcut),
             ],
-            Children::None,
-            "Search text bound to a session draft; the action runs on submit",
+            Children::Any,
+            "Search text bound to a session draft; the action runs on submit; children are the results shown below the field while it is in use",
         )
     },
     ComponentSpec {
@@ -740,10 +1066,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 req("value", PropKind::BoolField),
-                opt("style", PropKind::Keyword(&["switch", "checkbox"])),
+                opt(
+                    "style",
+                    PropKind::Keyword(&["switch", "checkbox", "button"]),
+                ),
+                opt("icon", PropKind::Icon),
+                opt("shortcut", PropKind::Shortcut),
             ],
             Children::None,
-            "Boolean state",
+            "Boolean state; `style: button` is a button that stays pressed while on",
         )
     },
     ComponentSpec {
@@ -777,9 +1108,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("label", PropKind::DisplayText),
                 opt("controls", PropKind::Keyword(&["standard", "none"])),
                 opt("fit", PropKind::Keyword(VIDEO_FIT)),
+                opt("corner", PropKind::Length),
             ],
             Children::None,
-            "Video of a player created from `source` or attached with `player`, with the standard command-driven controls",
+            "Video of a player created from `source` or attached with `player`, with the standard command-driven controls; `corner` rounds the picture",
         )
     },
     ComponentSpec {
@@ -918,6 +1250,46 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             message: "`Image` needs `width:`, `height:` or both; with one, the other follows the picture's aspect ratio".into(),
         });
     }
+    if spec.name == "Button" && shape.children.is_some() {
+        if shape.children.as_deref().unwrap_or(&[]).len() != 1 {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a `Button` shows one child; put several in a `Column`, `Row` or `Stack`"
+                    .into(),
+            });
+        }
+        for prop in ["icon", "prominence"] {
+            if shape.props.contains(&prop) {
+                errors.push(ShapeError {
+                    prop: Some(prop.into()),
+                    message: format!(
+                        "a `Button` with content draws no label of its own, so `{prop}:` has no effect; show it in the content"
+                    ),
+                });
+            }
+        }
+    }
+    if shape.props.contains(&"files")
+        && !shape.props.contains(&"pick")
+        && ["Button", "IconButton", "MenuItem"].contains(&spec.name)
+    {
+        errors.push(ShapeError {
+            prop: Some("files".into()),
+            message: format!(
+                "`files:` says which files `pick:` asks for; add `pick: draft.file` to the `{}`",
+                spec.name
+            ),
+        });
+    }
+    if spec.name == "ScrollView"
+        && shape.props.contains(&"arrival")
+        && !shape.props.contains(&"position")
+    {
+        errors.push(ShapeError {
+            prop: Some("arrival".into()),
+            message: "`arrival` nudges the item that setting `position` scrolls to; add `position: draft.x`".into(),
+        });
+    }
     if spec.name == "Progress" && shape.props.contains(&"total") && !shape.props.contains(&"value")
     {
         errors.push(ShapeError {
@@ -975,6 +1347,24 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             }
         }
         _ => {}
+    }
+    let count = |kind: &str| {
+        children
+            .iter()
+            .filter(|child| matches!(child, ChildShape::Element(name) if *name == kind))
+            .count()
+    };
+    if spec.name == "Sidebar" && count("SidebarFooter") > 1 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Sidebar` has at most one `SidebarFooter`".into(),
+        });
+    }
+    if spec.name == "Toolbar" && count("Search") > 1 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Toolbar` has at most one `Search`".into(),
+        });
     }
     if spec.name == "SplitView" {
         let names: Vec<_> = children

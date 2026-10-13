@@ -59,6 +59,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import androidx.compose.ui.draw.clip
 import java.io.File
 
 // MARK: - Merged player state
@@ -407,7 +408,14 @@ sealed class BernVideoBinding {
 enum class BernVideoFit { Contain, Cover, Fill }
 
 @Composable
-fun BernVideo(target: String, label: String?, binding: BernVideoBinding, controls: Boolean, fit: BernVideoFit) {
+fun BernVideo(
+    target: String,
+    label: String?,
+    binding: BernVideoBinding,
+    controls: Boolean,
+    fit: BernVideoFit,
+    corner: androidx.compose.ui.unit.Dp? = null,
+) {
     val window = LocalBernWindow.current
     val playerID = when (binding) {
         is BernVideoBinding.Player -> binding.id
@@ -435,6 +443,7 @@ fun BernVideo(target: String, label: String?, binding: BernVideoBinding, control
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
+                .then(if (corner != null) Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(corner)) else Modifier)
                 .background(Color.Black)
                 .semantics {
                     contentDescription = name
@@ -443,7 +452,7 @@ fun BernVideo(target: String, label: String?, binding: BernVideoBinding, control
             contentAlignment = Alignment.Center,
         ) {
             if (state != null && window.id.isNotEmpty()) {
-                BernVideoSurface(playerID, window.id, fit, showsVideo(state))
+                BernVideoSurface(playerID, window.id, fit, showsVideo(state), clipped = corner != null)
             }
             BernVideoStatus(state)
         }
@@ -472,11 +481,14 @@ fun bernTime(milliseconds: Long): String {
 /// The player's picture in a Media3 view without its own controls.
 @OptIn(UnstableApi::class)
 @Composable
-private fun BernVideoSurface(playerID: String, window: String, fit: BernVideoFit, visible: Boolean) {
+private fun BernVideoSurface(playerID: String, window: String, fit: BernVideoFit, visible: Boolean, clipped: Boolean = false) {
     val token = remember { java.util.UUID.randomUUID().toString() }
     val context = LocalContext.current
-    val view = remember {
-        PlayerView(context).apply {
+    val view = remember(clipped) {
+        // A rounded frame clips a TextureView only.
+        val layout = if (clipped) context.resources.getIdentifier("bern_player_texture", "layout", context.packageName) else 0
+        val inflated = if (layout != 0) android.view.LayoutInflater.from(context).inflate(layout, null) as? PlayerView else null
+        (inflated ?: PlayerView(context)).apply {
             useController = false
             setShutterBackgroundColor(android.graphics.Color.BLACK)
         }

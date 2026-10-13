@@ -10,13 +10,14 @@
 mod glue;
 mod rust;
 mod strings;
+mod style;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
-    dist_dir, files_below, icon, package_architecture,
+    dist_dir, feature, files_below, icon, package_architecture,
 };
 use std::path::PathBuf;
 
@@ -31,13 +32,84 @@ pub struct GtkLinux;
 
 fn component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| {
-        COMPONENTS
-            .iter()
-            .map(|spec| spec.name)
-            .filter(|name| !bern_ir::spec::DRAWING.contains(name))
-            .collect()
-    })
+    NAMES.get_or_init(|| COMPONENTS.iter().map(|spec| spec.name).collect())
+}
+
+/// The further parts of the IR this target builds.
+const FEATURES: &[&str] = &[
+    feature::BUTTON_CONTENT,
+    feature::REVEAL,
+    feature::TOOLBAR_SEARCH,
+    feature::SEARCH_RESULTS,
+    feature::SESSION_ACTIONS,
+    feature::TOGGLE_BUTTON,
+    feature::DIALOG_WINDOWS,
+    feature::BOUND_LENGTHS,
+    feature::APPEARANCE,
+    feature::SHORTCUTS,
+    feature::RUNTIME_THEME,
+    feature::RUNTIME_IMAGES,
+    feature::PICTURE_FILLS,
+    feature::FILE_PICK,
+    feature::SCROLL_SNAP,
+    feature::RAILS,
+    feature::POPOVER_BUTTON,
+    feature::SIZE_CLASSES,
+];
+
+/// `reflow` GTK cannot show: only the children of a column or row slide,
+/// so it warns elsewhere and the children move at once.
+fn reflow_warnings(app: &Application) -> Vec<Diagnostic> {
+    fn visit(nodes: &[Node], container: Option<&str>, out: &mut Vec<Diagnostic>) {
+        for node in nodes {
+            match node {
+                Node::Element(element) => {
+                    let slides = match element.kind.as_str() {
+                        "Column" | "Row" => true,
+                        "ForEach" => matches!(container, Some("Column" | "Row")),
+                        _ => false,
+                    };
+                    if element.keyword("reflow").is_some() && !slides {
+                        out.push(
+                            Diagnostic::warning(format!(
+                                "target `gtk-linux` slides only the children of a `Column` or `Row` with `reflow`; the items of this `{}` move at once",
+                                element.kind
+                            ))
+                            .at(element.source.clone()),
+                        );
+                    }
+                    // Conditions and repetition keep the container.
+                    let inner = if element.kind == "ForEach" {
+                        container
+                    } else {
+                        Some(element.kind.as_str())
+                    };
+                    visit(&element.children, inner, out);
+                }
+                Node::If(node) => {
+                    for (_, body) in &node.branches {
+                        visit(body, container, out);
+                    }
+                    visit(&node.otherwise, container, out);
+                }
+                Node::IfLet(node) => {
+                    visit(&node.then, container, out);
+                    visit(&node.otherwise, container, out);
+                }
+                Node::Match(node) => {
+                    for arm in &node.arms {
+                        visit(&arm.body, container, out);
+                    }
+                }
+                Node::Component(_) => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for component in &app.components {
+        visit(std::slice::from_ref(&component.body), None, &mut out);
+    }
+    out
 }
 
 /// Directory and executable name of the product, e.g. `Showcase` and
@@ -90,11 +162,22 @@ impl Target for GtkLinux {
 
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
-            styles: &[],
-            motion: &[],
-            window_chrome: false,
-            text_marks: false,
-            dynamic_items: false,
+            styles: style::SUPPORT,
+            motion: &[
+                "appear",
+                "disappear",
+                "reflow",
+                "hero",
+                "animate",
+                "scroll_scale",
+                "scroll_opacity",
+                "nudge",
+                "stagger",
+            ],
+            window_chrome: true,
+            text_marks: true,
+            dynamic_items: true,
+            features: FEATURES,
             id: "gtk-linux",
             ui: "gtk",
             platforms: &["linux"],
@@ -164,6 +247,7 @@ impl Target for GtkLinux {
         for window in &app.windows.windows {
             window.content.walk(&mut visit);
         }
+        diagnostics.extend(reflow_warnings(app));
         diagnostics
     }
 

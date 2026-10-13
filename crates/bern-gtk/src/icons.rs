@@ -46,6 +46,18 @@ const ICONS: &[(&str, &str)] = &[
     ("exclamationmark.triangle", "dialog-warning-symbolic"),
     ("tray", "folder-symbolic"),
     ("heart", "emblem-favorite-symbolic"),
+    ("square.grid.2x2", "view-grid-symbolic"),
+    ("square.grid.3x3", "view-app-grid-symbolic"),
+    ("archivebox", "user-bookmarks-symbolic"),
+    ("note.text", "accessories-text-editor-symbolic"),
+    ("person.crop.circle", "avatar-default-symbolic"),
+    ("info.circle", "dialog-information-symbolic"),
+    ("star.slash", "semi-starred-symbolic"),
+    ("folder", "folder-open-symbolic"),
+    ("paintpalette", "preferences-color-symbolic"),
+    ("sidebar.right", "sidebar-show-right-symbolic"),
+    ("captions.bubble", "media-view-subtitles-symbolic"),
+    ("textformat.size", "format-text-plaintext-symbolic"),
 ];
 
 /// The theme icon of a Bern icon name.

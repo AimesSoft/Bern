@@ -61,10 +61,11 @@ impl Target for SwiftUiIos {
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
             styles: crate::style::SUPPORT,
-            motion: &["appear", "disappear", "reflow", "hero"],
+            motion: crate::MOTION,
             window_chrome: true,
             text_marks: true,
             dynamic_items: true,
+            features: crate::FEATURES,
             id: "swiftui-ios",
             ui: "swiftui",
             platforms: &["ios"],
@@ -112,7 +113,7 @@ impl Target for SwiftUiIos {
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
         let mut files = vec![
-            GeneratedFile::text("Sources/BernRuntime.swift", RUNTIME),
+            GeneratedFile::text("Sources/BernRuntime.swift", crate::runtime_source(RUNTIME)),
             GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
             GeneratedFile::text("Sources/BernStyle.swift", STYLE),
             GeneratedFile::text("Sources/BernUIKit.swift", UIKIT),

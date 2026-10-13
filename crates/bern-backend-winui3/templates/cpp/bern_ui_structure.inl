@@ -1,4 +1,4 @@
-// Bern runtime for Windows, XAML part 3 of 4: conditional and repeated
+// Bern runtime for Windows, XAML part 5 of 7: conditional and repeated
 // content, the containers that navigate, page headers, queries and video.
 // Generated build input; do not edit.
 
@@ -44,7 +44,8 @@ struct Slot : std::enable_shared_from_this<Slot> {
 };
 
 /// Conditional content: `branch` picks an arm, or none. Only a change of
-/// arm rebuilds; the arm's own bindings update in place.
+/// arm rebuilds; the arm's own bindings update in place. What a change
+/// after the first display mounts plays its `appear` transition.
 inline void When(Parent const& p, Ctx const& ctx, Branch branch, std::vector<Build> arms) {
     auto slot = Slot::In(p.Sub());
     auto state = std::make_shared<std::pair<bool, std::optional<int>>>(false, std::nullopt);
@@ -52,8 +53,10 @@ inline void When(Parent const& p, Ctx const& ctx, Branch branch, std::vector<Bui
     Reactive::Run([slot, state, shared, branch, ctx] {
         auto next = branch(ctx);
         if (state->first && state->second == next) return;
+        bool animated = state->first;
         state->first = true;
         state->second = next;
+        Structure::Scope structural(animated);
         if (next && *next >= 0 && *next < static_cast<int>(shared->size())) {
             auto arm = (*shared)[*next];
             slot->Fill([&](Parent const& region) { arm(region, ctx); });
@@ -113,9 +116,29 @@ inline void Match(Parent const& p, Ctx const& ctx, Get value, std::vector<MatchA
     }, std::move(builders));
 }
 
+struct EachProps {
+    Get items;
+    int key = 0;
+    char const* variable = "item";
+    /// Rows added in one update appear one after another, this many
+    /// seconds apart.
+    std::optional<double> stagger;
+    /// The container's children slide to their new places.
+    Motion const* reflow = nullptr;
+};
+
 /// Keyed rows: a row keeps its elements, controls and state while its key
-/// stays; its value is a cell the row's bindings read.
-inline void Each(Parent const& p, Ctx const& ctx, Get items, int key, char const* variable, Build row) {
+/// stays; its value is a cell the row's bindings read. Rows added after the
+/// first display play their `appear` transition, in turn with `stagger`.
+inline void Each(Parent const& p, Ctx const& ctx, EachProps props, Build row) {
+    auto items = props.items;
+    int key = props.key;
+    char const* variable = props.variable;
+    if (props.reflow && p.panel) SetReflow(p.panel, props.reflow);
+    // Rows of one update take turns; a staggering list that appears in an
+    // update plays its rows in turn.
+    auto rowsCtx = props.stagger ? Staggered(ctx, *props.stagger) : ctx;
+    auto first = std::make_shared<bool>(true);
     struct Row {
         std::string key;
         Cell<Value> value;
@@ -129,9 +152,12 @@ inline void Each(Parent const& p, Ctx const& ctx, Get items, int key, char const
         rows->clear();
     });
     std::string name = variable;
-    Reactive::Run([region, rows, items, key, name, row, ctx] {
+    Reactive::Run([region, rows, items, key, name, row, ctx = rowsCtx, first] {
         auto list = R::AsList(items(ctx));
+        bool animated = !*first;
+        *first = false;
         Reactive::Untrack([&] {
+            Structure::Scope structural(animated);
             std::vector<std::string> orderBefore;
             std::unordered_map<std::string, std::shared_ptr<Row>> old;
             for (auto& existing : *rows) {
@@ -151,6 +177,13 @@ inline void Each(Parent const& p, Ctx const& ctx, Get items, int key, char const
                 auto cell = created->value;
                 auto rowCtx = ctx.WithKey([id] { return id; }).WithLocal(name, [cell] { return cell.Get(); });
                 created->owner->Run([&] { row(created->region, rowCtx); });
+                // The row's element, known by its key: scroll views find
+                // their items this way.
+                if (ctx.scroll) {
+                    std::vector<xaml::UIElement> elements;
+                    created->region.region->Elements(elements, false);
+                    if (!elements.empty()) ctx.scroll->items.emplace_back(id, winrt::make_weak(elements.front()));
+                }
                 next.push_back(created);
             }
             for (auto& [id, stale] : old) {
@@ -237,97 +270,242 @@ inline controls::Grid Header(std::shared_ptr<Page> page, TextFn fallback, bool s
             if (holder.Content() != title) holder.Content(title);
         }
         bool empty = !page->Back() && !page->TitleWidget() && page->tools.Children().Size() == 0 && title.Text().empty();
-        grid.Visibility(page->HeaderHidden() || empty ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
+        // An immersive window shows no title bar or toolbar.
+        bool immersive = page->win && page->win->immersive.Get();
+        grid.Visibility(page->HeaderHidden() || empty || immersive ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
     });
     return grid;
 }
 
-/// A destination in the sidebar.
-struct SidebarItem {
-    Get value;
-    char const* name = "";
-    Str label;
-    char const* icon = nullptr;
+/// The sidebar's destinations, which may come and go with `if`, `match`
+/// and `ForEach`: each item registers while it is mounted.
+struct SidebarRegistry {
+    struct Entry {
+        int64_t token = 0;
+        Value value;
+        std::string name;
+        TextFn label;
+        controls::NavigationViewItem item{nullptr};
+        std::shared_ptr<StyleState> state;
+        std::function<void()> restyle;
+    };
+    std::vector<Entry> entries;
+    controls::NavigationView view{nullptr};
+    Ctx ctx;
+    Field selection;
+    Get fallback;
+    bern::Version version;
+    int64_t next = 1;
+    bool updating = false;
+    bool settling = false;
+
+    /// Mounted items in the order they show.
+    std::vector<Entry const*> Ordered() const {
+        std::vector<std::pair<uint32_t, Entry const*>> found;
+        for (auto const& entry : entries) {
+            uint32_t index = 0;
+            if (view.MenuItems().IndexOf(entry.item, index)) found.emplace_back(index, &entry);
+        }
+        std::sort(found.begin(), found.end(), [](auto const& a, auto const& b) { return a.first < b.first; });
+        std::vector<Entry const*> ordered;
+        for (auto const& [index, entry] : found) ordered.push_back(entry);
+        return ordered;
+    }
+
+    Entry const* Selected(Value const& value) const {
+        for (auto const& entry : entries)
+            if (entry.value == value) return &entry;
+        return nullptr;
+    }
+
+    /// A selection without a mounted item moves on to `fallback` or the
+    /// first item left, once the update that removed it has mounted
+    /// whatever replaces it.
+    void Settle() {
+        settling = false;
+        if (entries.empty()) return;
+        auto current = ctx.Peek(selection);
+        if (Selected(current)) return;
+        std::optional<Value> back;
+        if (fallback) {
+            auto wanted = Reactive::Untrack([&] { return fallback(ctx); });
+            if (Selected(wanted)) back = wanted;
+        }
+        if (!back) {
+            auto ordered = Ordered();
+            if (!ordered.empty()) back = ordered.front()->value;
+        }
+        if (back) ctx.Write(selection, *back);
+    }
 };
 
-struct SidebarSection {
-    Str title;
-    std::vector<SidebarItem> items;
+struct SidebarItemProps {
+    Get value;
+    std::variant<char const*, std::function<std::string(Ctx const&)>> name = "";
+    Str label;
+    char const* icon = nullptr;
+    StyleDef const* style = nullptr;
+};
+
+/// The lightweight resources of a styled sidebar item, in every state.
+inline std::vector<std::pair<std::wstring, Paint>> SidebarResources(StyleDef const& style) {
+    std::vector<std::pair<std::wstring, Paint>> entries;
+    struct State {
+        wchar_t const* suffix;
+        bool selected, hover, pressed;
+    };
+    for (auto const& state : {State{L"", false, false, false}, State{L"PointerOver", false, true, false}, State{L"Pressed", false, true, true},
+             State{L"Selected", true, false, false}, State{L"SelectedPointerOver", true, true, false}, State{L"SelectedPressed", true, true, true}}) {
+        bool quiet = false, system = false;
+        auto look = Merged(style, state.selected, state.hover, state.pressed, false, false, quiet, system);
+        if (system && state.suffix[0] != 0) continue;
+        if (quiet) look = Merged(style, state.selected, false, false, false, false, quiet, system);
+        auto background = look.fill ? look.fill : look.background;
+        auto foreground = look.foreground ? look.foreground : PairOf(background);
+        if (background) entries.emplace_back(std::wstring(L"NavigationViewItemBackground") + state.suffix, *background);
+        if (foreground) entries.emplace_back(std::wstring(L"NavigationViewItemForeground") + state.suffix, *foreground);
+    }
+    // A filled selection needs no pill beside it.
+    if (style.selected && style.selected->fill) entries.emplace_back(L"NavigationViewSelectionIndicatorForeground", Paint{"transparent"});
+    return entries;
+}
+
+/// One sidebar destination; it is part of the selection while mounted.
+inline void SidebarItem(Parent const& p, Ctx const& ctx, SidebarItemProps props) {
+    auto registry = ctx.sidebar;
+    if (!registry || !props.value) return;
+    auto value = Reactive::Untrack([&] { return props.value(ctx); });
+    std::string name = std::holds_alternative<char const*>(props.name) ? std::string(std::get<char const*>(props.name))
+                                                                         : Reactive::Untrack([&] { return std::get<1>(props.name)(ctx); });
+    TextFn label = props.label ? Bound(ctx, props.label) : TextFn([] { return winrt::hstring(); });
+    controls::NavigationViewItem item;
+    if (props.icon) item.Icon(Icons::Icon(props.icon));
+    Reactive::Run([item, label] {
+        auto text = label();
+        item.Content(winrt::box_value(text));
+        xaml::Automation::AutomationProperties::SetName(item, text);
+    });
+    SidebarRegistry::Entry entry{registry->next++, value, name, label, item};
+    if (auto style = props.style) {
+        auto resources = SidebarResources(*style);
+        if (!resources.empty()) Styles::Restyle(item, ThemedXaml(resources));
+        if (style->corner) item.CornerRadius(xaml::CornerRadius{*style->corner, *style->corner, *style->corner, *style->corner});
+        if (style->padding) item.Padding(xaml::Thickness{*style->padding, *style->padding, *style->padding, *style->padding});
+        auto state = std::make_shared<StyleState>();
+        auto restyle = [weak = winrt::make_weak(item), style, state] {
+            if (auto element = weak.get()) MoveTo(element, *style, *state);
+        };
+        TrackState(item, state, restyle);
+        entry.state = state;
+        entry.restyle = restyle;
+    }
+    auto token = entry.token;
+    registry->entries.push_back(entry);
+    p.Add(item);
+    registry->version.Bump();
+    Reactive::OnCleanup([registry, token] {
+        std::erase_if(registry->entries, [token](auto const& one) { return one.token == token; });
+        registry->version.Bump();
+    });
+}
+
+/// A titled group of sidebar items.
+inline void SidebarSection(Parent const& p, Ctx const& ctx, Str title, Build const& children) {
+    if (title) {
+        controls::NavigationViewItemHeader heading;
+        auto text = Bound(ctx, title);
+        Reactive::Run([heading, text] { heading.Content(winrt::box_value(text())); });
+        p.Add(heading);
+    }
+    children(p.Sub(), ctx);
+}
+
+struct SplitViewProps {
+    char const* id = nullptr;
+    Field selection;
+    Get fallback;
+    std::optional<SearchProps> search;
 };
 
 /// The navigation view of Windows applications: a pane of destinations
-/// with optional search, and a detail page whose header shows the selected
-/// destination, the detail's tools and back. The pane collapses as the
-/// window narrows.
-inline void SplitView(Parent const& p, Ctx const& ctx, char const* id, Field selection, std::optional<SearchProps> search,
-    std::vector<SidebarSection> sections, Build const& detail) {
+/// with optional search and content at its foot, and a detail page whose
+/// header shows the selected destination, the detail's tools and back. The
+/// pane collapses as the window narrows.
+inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Build const& footer, Build const& sidebar, Build const& detail) {
     if (ctx.page) ctx.page->HideHeader();
     controls::NavigationView view;
     view.IsBackButtonVisible(controls::NavigationViewBackButtonVisible::Collapsed);
     view.IsSettingsVisible(false);
     view.PaneDisplayMode(controls::NavigationViewPaneDisplayMode::Auto);
-    // The pane stays open at the default window width.
-    view.ExpandedModeThresholdWidth(800);
+    // The pane stays open at the usual window widths.
+    view.ExpandedModeThresholdWidth(600);
+    view.CompactModeThresholdWidth(400);
     view.AlwaysShowHeader(false);
 #if BERN_WINUI
     view.IsTitleBarAutoPaddingEnabled(false);
 #endif
     MarkFill(view);
-    struct Entry {
-        Value value;
-        std::string name;
-        TextFn label;
-        controls::NavigationViewItem item;
-    };
-    auto entries = std::make_shared<std::vector<Entry>>();
-    for (auto const& section : sections) {
-        if (section.title) {
-            controls::NavigationViewItemHeader heading;
-            auto title = section.title;
-            Reactive::Run([heading, title, ctx] { heading.Content(winrt::box_value(title(ctx))); });
-            view.MenuItems().Append(heading);
-        }
-        for (auto const& entry : section.items) {
-            auto value = Reactive::Untrack([&] { return entry.value(ctx); });
-            TextFn label = entry.label ? Bound(ctx, entry.label) : TextFn([] { return winrt::hstring(); });
-            controls::NavigationViewItem item;
-            if (entry.icon) item.Icon(Icons::Icon(entry.icon));
-            Reactive::Run([item, label] {
-                auto name = label();
-                item.Content(winrt::box_value(name));
-                xaml::Automation::AutomationProperties::SetName(item, name);
-            });
-            view.MenuItems().Append(item);
-            entries->push_back(Entry{value, entry.name, label, item});
-        }
+    auto registry = std::make_shared<SidebarRegistry>();
+    registry->view = view;
+    registry->ctx = ctx;
+    registry->selection = props.selection;
+    registry->fallback = props.fallback;
+    auto selection = props.selection;
+    if (props.search && props.search->field) view.AutoSuggestBox(SearchBox(ctx, *props.search));
+    auto inner = ctx;
+    inner.sidebar = registry;
+    sidebar(Parent::Into(Children::OfVector<IInspectable>(view.MenuItems())), inner);
+    if (footer) {
+        auto foot = MakeFlex(false, 8, xaml::Thickness{12, 8, 12, 12});
+        footer(Parent::Aligned(foot, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
+        view.PaneFooter(foot);
     }
-    if (search && search->field) view.AutoSuggestBox(SearchBox(ctx, *search));
 
-    auto updating = std::make_shared<bool>(false);
-    Reactive::Run([view, entries, ctx, selection, updating] {
+    Reactive::Run([registry, ctx, selection] {
+        registry->version.Track();
         auto value = ctx.Read(selection);
-        IInspectable item{nullptr};
-        for (auto const& entry : *entries)
-            if (entry.value == value) item = entry.item;
-        if (view.SelectedItem() != item) {
-            *updating = true;
-            view.SelectedItem(item);
-            *updating = false;
-        }
+        Reactive::Untrack([&] {
+            auto view = registry->view;
+            auto entry = registry->Selected(value);
+            IInspectable item = entry ? IInspectable(entry->item) : nullptr;
+            if (view.SelectedItem() != item) {
+                registry->updating = true;
+                view.SelectedItem(item);
+                registry->updating = false;
+            }
+            for (auto const& one : registry->entries)
+                if (one.state) {
+                    bool selected = entry && one.token == entry->token;
+                    if (one.state->selected != selected) {
+                        one.state->selected = selected;
+                        one.restyle();
+                    }
+                }
+            if (!entry && !registry->settling) {
+                registry->settling = true;
+                std::weak_ptr<SidebarRegistry> weak = registry;
+                Host::Post([weak] {
+                    if (auto registry = weak.lock()) registry->Settle();
+                });
+            }
+            return 0;
+        });
     });
-    view.SelectionChanged([entries, ctx, selection, updating](auto&&, controls::NavigationViewSelectionChangedEventArgs const& args) {
-        if (*updating || !args.SelectedItem()) return;
-        for (auto const& entry : *entries)
+    view.SelectionChanged([weak = std::weak_ptr<SidebarRegistry>(registry), ctx, selection](auto&&, controls::NavigationViewSelectionChangedEventArgs const& args) {
+        auto registry = weak.lock();
+        if (!registry || registry->updating || !args.SelectedItem()) return;
+        for (auto const& entry : registry->entries)
             if (entry.item == args.SelectedItem()) ctx.Write(selection, entry.value);
     });
 
-    TextFn selectedLabel = [entries, ctx, selection] {
+    TextFn selectedLabel = [registry, ctx, selection] {
+        registry->version.Track();
         auto value = ctx.Read(selection);
-        for (auto const& entry : *entries)
-            if (entry.value == value) return entry.label();
+        if (auto entry = registry->Selected(value)) return entry->label();
         return winrt::hstring();
     };
     auto page = std::make_shared<Page>();
+    page->win = ctx.win;
     auto header = Header(page, selectedLabel, true);
     header.Margin(xaml::Thickness{24, 8, 24, 8});
     controls::Grid body;
@@ -344,17 +522,18 @@ inline void SplitView(Parent const& p, Ctx const& ctx, char const* id, Field sel
     view.Content(body);
     detail(Parent::Of(content), ctx.WithPage(page));
 
-    if (id)
-        Controls::Register(ctx, id, "sidebar", selectedLabel, nullptr,
-            Actions{.select = [entries, ctx, selection](std::string const& name) {
-                        for (auto const& entry : *entries)
-                            if (entry.name == name) { ctx.Write(selection, entry.value); return true; }
+    if (props.id)
+        Controls::Register(ctx, props.id, "sidebar", selectedLabel, nullptr,
+            Actions{.select = [registry, ctx, selection](std::string const& name) {
+                        for (auto const& entry : registry->entries)
+                            if (entry.name == name) {
+                                ctx.Write(selection, entry.value);
+                                return true;
+                            }
                         return false;
                     },
-                .value = [entries, ctx, selection]() -> std::optional<std::string> {
-                    auto value = ctx.Peek(selection);
-                    for (auto const& entry : *entries)
-                        if (entry.value == value) return entry.name;
+                .value = [registry, ctx, selection]() -> std::optional<std::string> {
+                    if (auto entry = registry->Selected(ctx.Peek(selection))) return entry->name;
                     return std::nullopt;
                 }});
     p.Add(view);
@@ -461,88 +640,243 @@ inline void NavLink(Parent const& p, Ctx const& ctx, char const* id, Get route, 
 /// A tab of `Tabs`.
 struct TabSpec {
     Get value;
-    char const* name = "";
+    std::variant<char const*, std::function<std::string(Ctx const&)>> name = "";
     Str label;
     char const* icon = nullptr;
     Build build;
 };
 
-/// Tabs as a selector in the page header, as Windows Settings pages show
-/// them. Only the selected tab is built.
-inline void Tabs(Parent const& p, Ctx const& ctx, char const* id, Field selection, std::vector<TabSpec> tabs) {
-    auto specs = std::make_shared<std::vector<TabSpec>>(std::move(tabs));
-    auto values = std::make_shared<Values>();
-    std::vector<Str> labels;
-    std::vector<char const*> icons;
-    for (auto const& tab : *specs) {
-        values->push_back(Reactive::Untrack([&] { return tab.value(ctx); }));
-        labels.push_back(tab.label);
-        icons.push_back(tab.icon);
+/// The tabs of a `Tabs`, which may come and go: each registers while it is
+/// mounted. Only the selected tab is built.
+struct TabsRegistry {
+    struct Entry {
+        int64_t token = 0;
+        Value value;
+        std::string name;
+        Str label;
+        Build build;
+        xaml::UIElement item{nullptr};
+    };
+    std::vector<Entry> entries;
+    Ctx ctx;
+    Field selection;
+    Get fallback;
+    bern::Version version;
+    int64_t next = 1;
+    bool updating = false;
+    bool settling = false;
+    std::function<std::optional<uint32_t>(xaml::UIElement const&)> position;
+    std::function<void(xaml::UIElement const&)> show;
+
+    Entry const* Selected(Value const& value) const {
+        for (auto const& entry : entries)
+            if (entry.value == value) return &entry;
+        return nullptr;
     }
-    auto segments = MakeSegments(ctx, labels, icons);
+
+    void Settle() {
+        settling = false;
+        if (entries.empty() || Selected(ctx.Peek(selection))) return;
+        std::optional<Value> back;
+        if (fallback) {
+            auto wanted = Reactive::Untrack([&] { return fallback(ctx); });
+            if (Selected(wanted)) back = wanted;
+        }
+        if (!back) {
+            Entry const* first = nullptr;
+            uint32_t best = UINT32_MAX;
+            for (auto const& entry : entries)
+                if (auto at = position(entry.item); at && *at < best) {
+                    best = *at;
+                    first = &entry;
+                }
+            if (first) back = first->value;
+        }
+        if (back) ctx.Write(selection, *back);
+    }
+};
+
+struct TabsProps {
+    char const* id = nullptr;
+    Field selection;
+    Get fallback;
+};
+
+/// Tabs as a selector in the page header, as Windows Settings pages show
+/// them: a selector bar in WinUI 3, a row of toggle buttons in the system
+/// XAML, which has none.
+inline void Tabs(Parent const& p, Ctx const& ctx, TabsProps props, Build const& tabs) {
+    auto registry = std::make_shared<TabsRegistry>();
+    registry->ctx = ctx;
+    registry->selection = props.selection;
+    registry->fallback = props.fallback;
+    auto selection = props.selection;
+    xaml::FrameworkElement selector{nullptr};
+    Parent items;
+#if BERN_WINUI
+    controls::SelectorBar bar;
+    selector = bar;
+    auto list = Children::OfVector<controls::SelectorBarItem>(bar.Items());
+    items = Parent::Into(list);
+    registry->position = list->find;
+    registry->show = [bar, registry](xaml::UIElement const& item) {
+        auto chosen = item ? item.as<controls::SelectorBarItem>() : nullptr;
+        if (bar.SelectedItem() == chosen) return;
+        registry->updating = true;
+        bar.SelectedItem(chosen);
+        registry->updating = false;
+    };
+    bar.SelectionChanged([weak = std::weak_ptr<TabsRegistry>(registry), ctx, selection](controls::SelectorBar const& sender, auto&&) {
+        auto registry = weak.lock();
+        if (!registry || registry->updating || !sender.SelectedItem()) return;
+        for (auto const& entry : registry->entries)
+            if (entry.item == sender.SelectedItem()) ctx.Write(selection, entry.value);
+    });
+#else
+    controls::StackPanel row;
+    row.Orientation(controls::Orientation::Horizontal);
+    row.Spacing(2);
+    selector = row;
+    items = Parent::Of(row);
+    auto list = Children::Of(row);
+    registry->position = list->find;
+    registry->show = [registry](xaml::UIElement const& item) {
+        for (auto const& entry : registry->entries)
+            entry.item.as<controls::Primitives::ToggleButton>().IsChecked(entry.item == item);
+    };
+#endif
     auto holder = MakeFlex();
     MarkFill(holder);
     auto slot = Slot::In(Parent::Of(holder));
-    if (ctx.page) ctx.page->PushTitleWidget(segments.element);
-    else p.Add(segments.element);
-    auto shown = std::make_shared<std::optional<int>>();
-    auto indexOf = [values](Value const& value) -> int {
-        for (size_t i = 0; i < values->size(); ++i)
-            if ((*values)[i] == value) return static_cast<int>(i);
-        return -1;
-    };
-    Reactive::Run([ctx, selection, indexOf, shown, specs, slot, segments] {
-        auto index = indexOf(ctx.Read(selection));
-        if (index < 0 || *shown == index) return;
-        *shown = index;
-        auto build = (*specs)[index].build;
-        slot->Fill([&](Parent const& region) { build(region, ctx); });
-        segments.select(index);
+    if (ctx.page) ctx.page->PushTitleWidget(selector);
+    else p.Add(selector);
+    auto inner = ctx;
+    inner.tabs = registry;
+    tabs(items, inner);
+    auto shown = std::make_shared<int64_t>(0);
+    Reactive::Run([registry, ctx, selection, slot, shown] {
+        registry->version.Track();
+        auto value = ctx.Read(selection);
+        Reactive::Untrack([&] {
+            auto entry = registry->Selected(value);
+            registry->show(entry ? entry->item : nullptr);
+            if (!entry) {
+                if (!registry->settling) {
+                    registry->settling = true;
+                    std::weak_ptr<TabsRegistry> weak = registry;
+                    Host::Post([weak] {
+                        if (auto registry = weak.lock()) registry->Settle();
+                    });
+                }
+                return 0;
+            }
+            if (*shown == entry->token) return 0;
+            *shown = entry->token;
+            auto build = entry->build;
+            slot->Fill([&](Parent const& region) { build(region, ctx); });
+            return 0;
+        });
     });
-    segments.onSelect([ctx, selection, values](int index) { ctx.Write(selection, (*values)[index]); });
-    if (id)
-        Controls::Register(ctx, id, "tabs",
-            [ctx, selection, indexOf, specs] {
-                auto index = indexOf(ctx.Read(selection));
-                return index < 0 ? winrt::hstring() : (*specs)[index].label(ctx);
+    if (props.id)
+        Controls::Register(ctx, props.id, "tabs",
+            [registry, ctx, selection] {
+                registry->version.Track();
+                auto entry = registry->Selected(ctx.Read(selection));
+                return entry && entry->label ? entry->label(ctx) : winrt::hstring();
             },
             nullptr,
-            Actions{.select = [ctx, selection, specs, values](std::string const& name) {
-                        for (size_t i = 0; i < specs->size(); ++i)
-                            if ((*specs)[i].name == name) { ctx.Write(selection, (*values)[i]); return true; }
+            Actions{.select = [registry, ctx, selection](std::string const& name) {
+                        for (auto const& entry : registry->entries)
+                            if (entry.name == name) {
+                                ctx.Write(selection, entry.value);
+                                return true;
+                            }
                         return false;
                     },
-                .value = [ctx, selection, indexOf, specs]() -> std::optional<std::string> {
-                    auto index = indexOf(ctx.Peek(selection));
-                    if (index < 0) return std::nullopt;
-                    return std::string((*specs)[index].name);
+                .value = [registry, ctx, selection]() -> std::optional<std::string> {
+                    if (auto entry = registry->Selected(ctx.Peek(selection))) return entry->name;
+                    return std::nullopt;
                 }});
     p.Add(holder);
 }
 
-/// Chooses one layout by the width available to it and the breakpoint from
-/// `[layouts]`. Engine state and drafts live outside the element tree, so
-/// switching keeps them; controls with the same id in both layouts are the
-/// same control.
-inline void Adaptive(Parent const& p, Ctx const& ctx, char const* id, Build compact, Build expanded) {
+/// One tab; part of its `Tabs` while mounted.
+inline void Tab(Parent const& p, Ctx const& ctx, TabSpec spec) {
+    auto registry = ctx.tabs;
+    if (!registry || !spec.value) return;
+    TabsRegistry::Entry entry;
+    entry.token = registry->next++;
+    entry.value = Reactive::Untrack([&] { return spec.value(ctx); });
+    entry.name = std::holds_alternative<char const*>(spec.name) ? std::string(std::get<char const*>(spec.name))
+                                                                  : Reactive::Untrack([&] { return std::get<1>(spec.name)(ctx); });
+    entry.label = spec.label;
+    entry.build = spec.build;
+    auto label = spec.label;
+#if BERN_WINUI
+    controls::SelectorBarItem item;
+    if (spec.icon) item.Icon(Icons::Icon(spec.icon));
+    if (label) Reactive::Run([item, label, ctx] { item.Text(label(ctx)); });
+#else
+    controls::Primitives::ToggleButton item;
+    if (label) Reactive::Run([item, label, ctx] { item.Content(winrt::box_value(label(ctx))); });
+    auto value = entry.value;
+    auto selection = registry->selection;
+    item.Click([ctx, selection, value](auto&&, auto&&) { ctx.Write(selection, value); });
+#endif
+    entry.item = item;
+    auto token = entry.token;
+    registry->entries.push_back(entry);
+    p.Add(item);
+    registry->version.Bump();
+    Reactive::OnCleanup([registry, token] {
+        std::erase_if(registry->entries, [token](auto const& one) { return one.token == token; });
+        registry->version.Bump();
+    });
+}
+
+/// Chooses one layout by the width available to it and the breakpoints of
+/// `[layouts]`: a size without a layout of its own shows the next larger
+/// one, else the next smaller. Engine state and drafts live outside the
+/// element tree, so switching keeps them; controls with the same id in
+/// every layout are the same control.
+inline void Adaptive(Parent const& p, Ctx const& ctx, char const* id, std::array<Build, 4> layouts) {
     auto holder = MakeFlex(false, p.isList ? (kWinUI ? 4 : 2) : 8);
     holder.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
-    Cell<std::string> size(std::string("expanded"));
-    double below = app->catalog.compactBelow.value_or(0);
-    holder.SizeChanged([size, below](auto&&, xaml::SizeChangedEventArgs const& args) mutable {
+    static char const* const kSizes[] = {"compact", "medium", "expanded", "large"};
+    Cell<int> size(2);
+    auto const& catalog = app->catalog;
+    holder.SizeChanged([size, &catalog](auto&&, xaml::SizeChangedEventArgs const& args) mutable {
         // A hidden layout has no width to judge by; it keeps its size.
-        if (args.NewSize().Width > 0) size.Set(args.NewSize().Width < below ? "compact" : "expanded");
+        double width = args.NewSize().Width;
+        if (width <= 0) return;
+        int next = width < catalog.compactBelow.value_or(0) ? 0
+            : catalog.mediumBelow && width < *catalog.mediumBelow ? 1
+            : !catalog.expandedBelow || width < *catalog.expandedBelow ? 2
+            : 3;
+        size.Set(next);
     });
+    auto shared = std::make_shared<std::array<Build, 4>>(std::move(layouts));
+    auto layoutFor = [shared](int wanted) -> int {
+        if ((*shared)[wanted]) return wanted;
+        for (int larger = wanted + 1; larger < 4; ++larger)
+            if ((*shared)[larger]) return larger;
+        for (int smaller = wanted - 1; smaller >= 0; --smaller)
+            if ((*shared)[smaller]) return smaller;
+        return -1;
+    };
     auto region = p.isList ? Parent::OfList(holder) : Parent::Of(holder);
     auto slot = Slot::In(region);
-    Reactive::Run([size, compact, expanded, slot, ctx] {
-        auto build = size.Get() == "compact" ? (compact ? compact : expanded) : (expanded ? expanded : compact);
-        if (!build) slot->Clear();
-        else slot->Fill([&](Parent const& target) { build(target, ctx); });
+    auto shown = std::make_shared<int>(-2);
+    Reactive::Run([size, shared, layoutFor, slot, ctx, shown] {
+        int layout = layoutFor(size.Get());
+        if (layout == *shown) return;
+        *shown = layout;
+        if (layout < 0) slot->Clear();
+        else slot->Fill([&](Parent const& target) { (*shared)[layout](target, ctx); });
     });
     if (id)
         Controls::Register(ctx, id, "adaptive", [] { return winrt::hstring(); }, nullptr,
-            Actions{.value = [size] { return std::optional<std::string>(size.Peek()); }});
+            Actions{.value = [size] { return std::optional<std::string>(kSizes[size.Peek()]); }});
     p.Add(holder);
 }
 
@@ -965,6 +1299,8 @@ struct VideoScreen {
     Media::Frames frames;
     HANDLE shown = nullptr;
     uint64_t token = 0;
+    /// Clipped by a rounded Composition clip instead of the frame's own.
+    bool rounded = false;
 
     void Show(Media::Frames const& next) {
         frames = next;
@@ -979,9 +1315,11 @@ struct VideoScreen {
     void Layout() {
         double w = frame.ActualWidth(), h = frame.ActualHeight();
         if (w <= 0 || h <= 0) return;
-        media::RectangleGeometry clip;
-        clip.Rect({0, 0, static_cast<float>(w), static_cast<float>(h)});
-        frame.Clip(clip);
+        if (!rounded) {
+            media::RectangleGeometry clip;
+            clip.Rect({0, 0, static_cast<float>(w), static_cast<float>(h)});
+            frame.Clip(clip);
+        }
         if (!frames.width || !frames.height) return;
         // The swap chain keeps the video's shape: the fitted rectangle for
         // `contain`, the covering one for `cover`, which the frame crops,
@@ -1006,6 +1344,37 @@ struct VideoScreen {
     }
 };
 
+/// A video's picture above its control bar: the picture takes the height
+/// it is given, or 16:9 of its width where the height is unbounded, and at
+/// least 120.
+struct VideoPanel : controls::PanelT<VideoPanel> {
+    static constexpr float kGap = 6;
+
+    float Bar(Size available) {
+        if (Children().Size() < 2) return 0;
+        auto bar = Children().GetAt(1);
+        bar.Measure(Size{available.Width, INFINITY});
+        return bar.DesiredSize().Height + kGap;
+    }
+
+    Size MeasureOverride(Size available) {
+        float width = std::isinf(available.Width) ? 640.0f : available.Width;
+        float bar = Bar(Size{width, available.Height});
+        float picture = std::isinf(available.Height) ? std::round(width * 9.0f / 16) : available.Height - bar;
+        picture = (std::max)(120.0f, picture);
+        if (Children().Size() > 0) Children().GetAt(0).Measure(Size{width, picture});
+        return Size{std::isinf(available.Width) ? width : 0.0f, picture + bar};
+    }
+
+    Size ArrangeOverride(Size final) {
+        float bar = Children().Size() > 1 ? Children().GetAt(1).DesiredSize().Height + kGap : 0;
+        float picture = (std::max)(120.0f, final.Height - bar);
+        if (Children().Size() > 0) Children().GetAt(0).Arrange(Rect{0, 0, final.Width, picture});
+        if (Children().Size() > 1) Children().GetAt(1).Arrange(Rect{0, picture + kGap, final.Width, (std::max)(0.0f, bar - kGap)});
+        return Size{final.Width, picture + bar};
+    }
+};
+
 struct VideoProps {
     char const* id = "";
     Get source;
@@ -1013,6 +1382,9 @@ struct VideoProps {
     Str label;
     bool controls = true;
     char const* fit = nullptr;
+    /// Rounds the picture, following its expression with `animate`.
+    Len corner;
+    Motion const* animate = nullptr;
 };
 
 /// A video of a declaration's own player (`source`) or of an application
@@ -1055,13 +1427,6 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
     status.VerticalAlignment(xaml::VerticalAlignment::Center);
     status.MaxWidth(420);
     frame.Children().Append(status);
-    // The picture area keeps 16:9 at the width it gets.
-    frame.SizeChanged([weak = winrt::make_weak(frame)](auto&&, xaml::SizeChangedEventArgs const& args) {
-        auto frame = weak.get();
-        if (!frame) return;
-        double height = (std::max)(120.0, std::round(args.NewSize().Width * 9.0 / 16));
-        if (std::isnan(frame.Height()) || std::abs(frame.Height() - height) > 0.5) frame.Height(height);
-    });
     std::weak_ptr<VideoScreen> weak = screen;
     frame.SizeChanged([weak](auto&&, auto&&) {
         if (auto screen = weak.lock()) screen->Layout();
@@ -1127,8 +1492,25 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
             if (auto state = Media::Peek(playerId)) return state->Describe();
             return std::nullopt;
         }});
-    controls::StackPanel container;
-    container.Spacing(6);
+    if (props.corner.Given()) {
+        // A rounded Composition clip, which also clips the swap chain.
+        screen->rounded = true;
+        auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(frame);
+        auto compositor = visual.Compositor();
+        auto geometry = compositor.CreateRoundedRectangleGeometry();
+        visual.Clip(compositor.CreateGeometricClip(geometry));
+        frame.SizeChanged([geometry](auto&&, xaml::SizeChangedEventArgs const& args) {
+            geometry.Size(float2{args.NewSize().Width, args.NewSize().Height});
+        });
+        BindLen(ctx, props.corner, props.animate, [geometry](double r) {
+            float radius = static_cast<float>((std::max)(0.0, r));
+            geometry.CornerRadius(float2{radius, radius});
+        });
+    }
+    // The picture takes the space it is given, or 16:9 of its width.
+    auto impl = winrt::make_self<VideoPanel>();
+    controls::Panel container = impl.as<controls::Panel>();
+    SetRole(container, L"bern-fill");
     container.Children().Append(frame);
     if (props.controls) container.Children().Append(ControlBar(ctx, props.id, playerId));
     if (p.isList) p.Add(Card(container));

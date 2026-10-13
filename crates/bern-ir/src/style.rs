@@ -59,6 +59,17 @@ pub struct StyleSheet {
     /// Patterns `Pattern(name:)` tiles over a canvas.
     #[serde(default)]
     pub patterns: Vec<PatternDef>,
+    /// Accent colors the application chooses among at run time with
+    /// `WindowSet(accent:)`.
+    #[serde(default)]
+    pub accents: Vec<AccentDef>,
+}
+
+/// A named accent color.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AccentDef {
+    pub name: String,
+    pub color: ColorRef,
 }
 
 /// A woven check: the bands, repeated across and down, colored where they
@@ -125,6 +136,15 @@ pub fn built_in_transitions() -> Vec<TransitionDef> {
 impl StyleSheet {
     pub fn token(&self, name: &str) -> Option<&MotionToken> {
         self.motion.iter().find(|token| token.name == name)
+    }
+
+    /// The accent named like an enum variant: `Crimson` and `crimson`
+    /// name the same accent.
+    pub fn accent(&self, name: &str) -> Option<&AccentDef> {
+        let wanted = name.replace('_', "").to_lowercase();
+        self.accents
+            .iter()
+            .find(|accent| accent.name.replace('_', "").to_lowercase() == wanted)
     }
 
     pub fn pattern(&self, name: &str) -> Option<&PatternDef> {
@@ -258,6 +278,13 @@ pub enum StyleEffect {
         value: f64,
         motion: String,
     },
+    /// A shadow below the control, as if lifted off the page: `radius` of
+    /// blur, `y` down, black at `opacity`.
+    Shadow {
+        radius: f64,
+        y: f64,
+        opacity: f64,
+    },
     /// The platform's own look for this state.
     System,
     /// No feedback in this state.
@@ -279,6 +306,7 @@ impl StyleEffect {
             StyleEffect::Scale { .. } => "scale",
             StyleEffect::Offset { .. } => "offset",
             StyleEffect::Opacity { .. } => "opacity",
+            StyleEffect::Shadow { .. } => "shadow",
             StyleEffect::System => "system",
             StyleEffect::Nothing => "none",
         }

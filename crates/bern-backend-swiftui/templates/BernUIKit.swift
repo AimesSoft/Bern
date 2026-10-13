@@ -13,6 +13,8 @@
 import AVKit
 import SwiftUI
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
+import UniformTypeIdentifiers
 
 // MARK: - Platform state
 
@@ -97,7 +99,8 @@ extension BernHost {
 
     /// Whether a window kind is a window of its own rather than virtual.
     func isNative(_ kindID: String) -> Bool {
-        platform.nativeWindows && !(kinds.first { $0.id == kindID }?.isSettings ?? false)
+        guard let kind = kinds.first(where: { $0.id == kindID }) else { return platform.nativeWindows }
+        return platform.nativeWindows && !kind.isSettings && !kind.isDialog
     }
 
     /// Open a window kind. A window of its own opens, or comes forward when
@@ -237,6 +240,12 @@ struct BernWindowPlatformModifier: ViewModifier {
             }
             .modifier(BernAppearsActiveReader(context: context))
             .interactiveDismissDisabled(confirms)
+            // Files another app opens with this one ("Open In"), where
+            // they are.
+            .onOpenURL { url in
+                if url.isFileURL { _ = url.startAccessingSecurityScopedResource() }
+                BernFiles.open([url])
+            }
             .onAppear {
                 BernHost.shared.registerActions(openWindow: openWindow, dismissWindow: dismissWindow)
             }
@@ -342,7 +351,7 @@ struct BernVirtualHost<Window: View>: View {
             }
         }
         .modifier(BernSheets(depth: 0, window: window))
-        .preferredColorScheme(BernSnapshot.colorScheme)
+        .modifier(BernSnapshotScheme())
         .task { host.openInitial(initial) }
         .onChange(of: platform.sheets) { host.refreshFacts() }
         .onChange(of: platform.primaryOpen) { host.refreshFacts() }
@@ -386,7 +395,25 @@ struct BernSheets<Window: View>: ViewModifier {
                     }
                 })
         ) { item in
-            window(item.id).modifier(BernSheets(depth: depth + 1, window: window))
+            window(item.id)
+                .modifier(BernSheets(depth: depth + 1, window: window))
+                .modifier(BernDialogHeight(kind: item.id))
+        }
+    }
+}
+
+/// A dialog window is as tall as its declared content and its title bar,
+/// not a full-height sheet.
+private struct BernDialogHeight: ViewModifier {
+    let kind: String
+
+    func body(content: Content) -> some View {
+        if let kind = BernHost.shared.kinds.first(where: { $0.id == kind }), kind.isDialog,
+            let size = kind.defaultSize
+        {
+            content.presentationDetents([.height(size.height + 64)])
+        } else {
+            content
         }
     }
 }
@@ -521,6 +548,8 @@ struct BernVideoSurface: UIViewRepresentable {
     let playerID: String
     let window: String
     let gravity: AVLayerVideoGravity
+    var corner: Double = 0
+    var cornerMotion: BernMotion? = nil
 
     final class Coordinator {
         var token: String?
@@ -533,12 +562,14 @@ struct BernVideoSurface: UIViewRepresentable {
     func makeUIView(context: Context) -> BernPlayerView {
         let view = BernPlayerView()
         view.videoGravity = gravity
+        bernRoundCorners(view.layer, corner, motion: nil)
         attach(view, context.coordinator)
         return view
     }
 
     func updateUIView(_ view: BernPlayerView, context: Context) {
         view.videoGravity = gravity
+        bernRoundCorners(view.layer, corner, motion: cornerMotion)
         if context.coordinator.playerID != playerID || context.coordinator.window != window {
             Self.detach(context.coordinator)
             attach(view, context.coordinator)
@@ -582,8 +613,10 @@ struct BernWindowBehavior: ViewModifier {
         content
             .statusBarHidden(immersive)
             .persistentSystemOverlays(immersive ? .hidden : .automatic)
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0).onChanged { _ in touched() })
+            // Touches are watched on the window, outside SwiftUI's gestures:
+            // a drag gesture here would keep the navigation bar's buttons
+            // from being tapped.
+            .background(BernTouchWatcher { touched() })
             .onContinuousHover { _ in touched() }
             .onAppear { touched() }
     }
@@ -606,5 +639,209 @@ final class BernIdleTimer {
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak context] _ in
             MainActor.assumeIsolated { context?.idle = true }
         }
+    }
+}
+
+// MARK: - Document picker
+
+extension BernFiles {
+    /// The picker on screen keeps its delegate here.
+    private static var delegate: BernPickDelegate?
+
+    /// Asks for one file of `kinds` with the system's document picker;
+    /// `give` runs once one is chosen. The file is opened where it is and
+    /// stays readable while the app runs.
+    static func pick(_ kinds: String, then give: @escaping @MainActor (URL) -> Void) {
+        let types = words(kinds).contains("any") ? [UTType.item] : types(kinds)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: false)
+        picker.allowsMultipleSelection = false
+        let delegate = BernPickDelegate(give: give)
+        Self.delegate = delegate
+        picker.delegate = delegate
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        var top = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+        while let presented = top?.presentedViewController { top = presented }
+        top?.present(picker, animated: true)
+    }
+}
+
+private final class BernPickDelegate: NSObject, UIDocumentPickerDelegate {
+    let give: @MainActor (URL) -> Void
+
+    init(give: @escaping @MainActor (URL) -> Void) { self.give = give }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        guard let url = urls.first else { return }
+        _ = url.startAccessingSecurityScopedResource()
+        MainActor.assumeIsolated { give(url) }
+    }
+}
+
+/// Files opened with the app arrive in a scene that is already showing.
+@MainActor
+func bernShowPrimaryWindow() {}
+
+/// The color scheme a snapshot run asks for. Outside one it leaves the
+/// scheme alone: even `preferredColorScheme(nil)` here would override the
+/// appearance the application chooses inside the window.
+private struct BernSnapshotScheme: ViewModifier {
+    func body(content: Content) -> some View {
+        if let scheme = BernSnapshot.colorScheme {
+            content.preferredColorScheme(scheme)
+        } else {
+            content
+        }
+    }
+}
+
+/// Calls `touched` whenever a touch begins anywhere in the window it is in,
+/// without taking part in any gesture.
+private struct BernTouchWatcher: UIViewRepresentable {
+    let touched: @MainActor () -> Void
+
+    func makeUIView(context: Context) -> BernTouchWatcherView {
+        let view = BernTouchWatcherView()
+        view.watcher.touched = { _ in touched() }
+        return view
+    }
+
+    func updateUIView(_ view: BernTouchWatcherView, context: Context) {
+        view.watcher.touched = { _ in touched() }
+    }
+
+    static func dismantleUIView(_ view: BernTouchWatcherView, coordinator: ()) {
+        view.watcher.view?.removeGestureRecognizer(view.watcher)
+    }
+}
+
+final class BernTouchWatcherView: UIView {
+    let watcher = BernTouchRecognizer()
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        watcher.view?.removeGestureRecognizer(watcher)
+        window?.addGestureRecognizer(watcher)
+    }
+}
+
+/// Sees each touch begin and then steps aside: it never recognizes, cancels
+/// or delays a touch, so every other gesture works as before.
+final class BernTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    var touched: (@MainActor (Set<UITouch>) -> Void)?
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        touched?(touches)
+        state = .failed
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool { true }
+}
+
+// MARK: - Menus in a part with its own appearance
+
+/// A part of a window with its own `appearance`. UIKit draws a menu with
+/// the appearance of the control it opens from, and SwiftUI leaves its menu
+/// buttons with the window's, so a touch that begins on a menu control in
+/// such a part gives the control the part's appearance before its menu
+/// opens: the innermost part around the touch and the control. A menu
+/// opened before any touch, from the keyboard or VoiceOver, keeps the
+/// window's.
+@MainActor
+final class BernAppearanceRegions {
+    static let shared = BernAppearanceRegions()
+    private var views: [BernAppearanceRegionView] = []
+    /// The windows that already report their touches here.
+    private let windows = NSHashTable<UIWindow>.weakObjects()
+    /// The controls given a part's appearance, so one that leaves its part
+    /// goes back to the window's.
+    private let controls = NSHashTable<UIView>.weakObjects()
+
+    func add(_ view: BernAppearanceRegionView) {
+        views.removeAll { $0.window == nil && $0 !== view }
+        if !views.contains(where: { $0 === view }) { views.append(view) }
+        guard let window = view.window, !windows.contains(window) else { return }
+        windows.add(window)
+        let watcher = BernTouchRecognizer()
+        watcher.touched = { touches in
+            for touch in touches { BernAppearanceRegions.shared.touched(touch) }
+        }
+        window.addGestureRecognizer(watcher)
+    }
+
+    func remove(_ view: BernAppearanceRegionView) {
+        views.removeAll { $0 === view }
+    }
+
+    /// Runs as the touch begins, before the control under it opens a menu.
+    private func touched(_ touch: UITouch) {
+        var control = touch.view
+        while let view = control,
+              !view.interactions.contains(where: { $0 is UIContextMenuInteraction }) {
+            control = view.superview
+        }
+        guard let control, let window = control.window else { return }
+        let frame = control.convert(control.bounds, to: nil)
+        let point = touch.location(in: nil)
+        var found: (area: CGFloat, dark: Bool)?
+        for view in views where view.window === window && !view.isDescendant(of: control) {
+            let part = view.convert(view.bounds, to: nil)
+            let area = part.width * part.height
+            if part.contains(point), part.contains(frame), area < (found?.area ?? .infinity) {
+                found = (area, view.dark)
+            }
+        }
+        if let found {
+            control.overrideUserInterfaceStyle = found.dark ? .dark : .light
+            controls.add(control)
+        } else if controls.contains(control) {
+            control.overrideUserInterfaceStyle = .unspecified
+            controls.remove(control)
+        } else {
+            return
+        }
+        // The menu copies the control's appearance as it opens, which may
+        // be before UIKit would bring the control's traits up to date.
+        control.updateTraitsIfNeeded()
+    }
+}
+
+/// Marks the part it is the background of; it takes no touches.
+final class BernAppearanceRegionView: UIView {
+    var dark = true
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            BernAppearanceRegions.shared.remove(self)
+        } else {
+            BernAppearanceRegions.shared.add(self)
+        }
+    }
+}
+
+struct BernAppearanceRegion: UIViewRepresentable {
+    let dark: Bool
+
+    func makeUIView(context: Context) -> BernAppearanceRegionView {
+        let view = BernAppearanceRegionView()
+        view.dark = dark
+        return view
+    }
+
+    func updateUIView(_ view: BernAppearanceRegionView, context: Context) {
+        view.dark = dark
     }
 }

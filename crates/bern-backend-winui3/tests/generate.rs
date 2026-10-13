@@ -196,11 +196,11 @@ fn showcase_generates_a_winui3_application() {
         );
     }
     for expected in [
-        "B::SplitView(p, c, \"pages\", Field{0, 0}",
+        "B::SplitView(p, c, {.id = \"pages\", .selection = Field{0, 0}",
         "B::Navigation(p, c, \"library\"",
         "B::Query(p, c, {.id = \"library_results\"",
         "B::Adaptive(p, c, \"clip_choice\",",
-        "B::Tabs(p, c, \"tabs\"",
+        "B::Tabs(p, c, {.id = \"tabs\"",
         "B::Video(p, c, {.id = \"preview\", .player = \"preview\"",
         "static CloseCheck close_settings(Ctx const& c) {",
         "static std::vector<WindowDef> Windows() {",
@@ -359,4 +359,130 @@ fn compile(output: &Path) {
 #[cfg(not(windows))]
 fn compile(_: &Path) {
     eprintln!("not on Windows; skipping the compile check");
+}
+
+/// Compile an example, check it for Windows and generate its sources into
+/// `target/bern-test/winui3-<name>`.
+fn generate_example(name: &str) -> (Application, PathBuf) {
+    let root = workspace();
+    let config =
+        bern_compiler::config::load(&root.join(format!("examples/{name}/Bern.toml"))).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    let target_config = windows_target(&config);
+    let problems: Vec<_> = WinUi3Windows
+        .check(&compiled.app, &target_config)
+        .into_iter()
+        .filter(|problem| problem.severity != bern_target_api::Severity::Note)
+        .collect();
+    assert!(problems.is_empty(), "{name}: {problems:#?}");
+    let output = root.join(format!("target/bern-test/winui3-{name}"));
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: target_config,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    (compiled.app, output)
+}
+
+/// The planner: sidebar items that come and go, styled buttons and sidebar
+/// items, a drawing with a pattern and series, a marked text, shared
+/// elements, transitions and an immersive window that rests.
+#[test]
+fn planner_generates_without_warnings() {
+    let (_, output) = generate_example("planner");
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(!ui.contains("unsupported"), "{ui}");
+    for expected in [
+        "static B::StyleDef const S_sidebarItem = [] {",
+        "static B::StyleDef const S_buttonHero = [] {",
+        "static B::PatternDef const P_gingham{",
+        "static B::Transition const X_pop_in{",
+        "B::SidebarItem(p, c, {",
+        ".style = &S_sidebarItem",
+        "B::Canvas(p, c, {",
+        "B::PatternOp{.pattern = &P_gingham",
+        "B::SeriesOp{.values = R::Numbers(",
+        ".mark = \"accent\"",
+        ".hero = \"title\"",
+        ".appear = &X_pop_in, .disappear = &X_fade",
+        "c.WindowFlag(\"idle\")",
+        "w.idleAfter = 3.0;",
+        "w.immersive = [](Ctx const& c)",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`");
+    }
+    compile(&output);
+}
+
+/// The gallery: every v0.29 feature and the four of v0.30.
+#[test]
+fn gallery_generates_without_warnings() {
+    let (_, output) = generate_example("gallery");
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(!ui.contains("unsupported"), "{ui}");
+    for expected in [
+        "B::Toast(p, c, {",
+        "B::Inspector(p, c, {.presented = Field{",
+        "B::SplitButton(p, c, {",
+        "B::PopoverButton(p, c, {",
+        "B::Drop(p, c, {",
+        "B::Pinch(p, c, {",
+        "B::Swipe(p, c, {",
+        "B::Rail(p, c, {",
+        "B::Place(p, c, {.at = B::Len(Get(",
+        "B::ContentButton(p, c, {",
+        "B::Shortcut(c, \"cmd+o\", \"open_file\", \"activate\");",
+        "B::Shortcut(c, \"cmd+k\", \"find\", \"focus\");",
+        ".pick = Field{",
+        ".files = \"video\"",
+        "B::ScrollView(p, c, {.axis = \"horizontal\", .snap = \"center\", .position = Field{",
+        ".scrollScale = 1.12, .scrollOpacity = 0.6",
+        ".stagger = 0.04",
+        "c.Write(Field{",
+        "B::Adaptive(p, c, \"film_controls\", std::array<Build, 4>{",
+        "w.dialog = true;",
+        "w.accent = ThemeAccent;",
+        "w.appearance = ThemeAppearance;",
+        ".reveal = true",
+        ".appearance = \"dark\"",
+        ".nudge = [](Ctx const& c)",
+        "R::Url(c.Engine(",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`");
+    }
+    let catalog = std::fs::read_to_string(output.join("app/app_catalog.cpp")).unwrap();
+    for expected in [
+        "c.mediumBelow = 1024.0;",
+        "c.fileKinds.push_back({\"video\", {\"mp4\"",
+        "wchar_t const* IconGlyph(",
+    ] {
+        assert!(catalog.contains(expected), "missing `{expected}`");
+    }
+    compile(&output);
 }

@@ -60,6 +60,15 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bern.split.more",
+        &[
+            ("zh-Hans", "更多选项"),
+            ("zh-Hant", "更多選項"),
+            ("en", "More Options"),
+            ("ja", "その他のオプション"),
+        ],
+    ),
+    (
         "bern.switch.on",
         &[
             ("zh-Hans", "开"),

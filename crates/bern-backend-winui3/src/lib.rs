@@ -14,8 +14,10 @@
 
 mod cpp;
 mod glue;
+mod icons;
 mod installer;
 mod strings;
+mod style;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node};
@@ -58,8 +60,20 @@ const RUNTIME: &[(&str, &str)] = &[
         include_str!("../templates/cpp/bern_ui_core.inl"),
     ),
     (
+        "bern_ui_motion.inl",
+        include_str!("../templates/cpp/bern_ui_motion.inl"),
+    ),
+    (
+        "bern_ui_drawing.inl",
+        include_str!("../templates/cpp/bern_ui_drawing.inl"),
+    ),
+    (
         "bern_ui_widgets.inl",
         include_str!("../templates/cpp/bern_ui_widgets.inl"),
+    ),
+    (
+        "bern_ui_features.inl",
+        include_str!("../templates/cpp/bern_ui_features.inl"),
     ),
     (
         "bern_ui_structure.inl",
@@ -89,15 +103,44 @@ fn precompiled_identity(release: bool, frontends: glue::Frontends) -> String {
 
 pub struct WinUi3Windows;
 
+/// IR features the target builds, in both front ends.
+const FEATURES: &[&str] = &[
+    bern_target_api::feature::BUTTON_CONTENT,
+    bern_target_api::feature::REVEAL,
+    bern_target_api::feature::TOOLBAR_SEARCH,
+    bern_target_api::feature::SEARCH_RESULTS,
+    bern_target_api::feature::SESSION_ACTIONS,
+    bern_target_api::feature::TOGGLE_BUTTON,
+    bern_target_api::feature::DIALOG_WINDOWS,
+    bern_target_api::feature::BOUND_LENGTHS,
+    bern_target_api::feature::APPEARANCE,
+    bern_target_api::feature::SHORTCUTS,
+    bern_target_api::feature::RUNTIME_THEME,
+    bern_target_api::feature::RUNTIME_IMAGES,
+    bern_target_api::feature::PICTURE_FILLS,
+    bern_target_api::feature::FILE_PICK,
+    bern_target_api::feature::SCROLL_SNAP,
+    bern_target_api::feature::RAILS,
+    bern_target_api::feature::POPOVER_BUTTON,
+    bern_target_api::feature::SIZE_CLASSES,
+];
+
+/// Motion properties the target shows.
+const MOTION: &[&str] = &[
+    "appear",
+    "disappear",
+    "reflow",
+    "hero",
+    "animate",
+    "scroll_scale",
+    "scroll_opacity",
+    "nudge",
+    "stagger",
+];
+
 fn component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| {
-        COMPONENTS
-            .iter()
-            .map(|spec| spec.name)
-            .filter(|name| !bern_ir::spec::DRAWING.contains(name))
-            .collect()
-    })
+    NAMES.get_or_init(|| COMPONENTS.iter().map(|spec| spec.name).collect())
 }
 
 /// Directory name of the product, e.g. `Showcase` for app id `showcase`.
@@ -131,11 +174,12 @@ impl Target for WinUi3Windows {
 
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
-            styles: &[],
-            motion: &[],
-            window_chrome: false,
-            text_marks: false,
-            dynamic_items: false,
+            styles: style::SUPPORT,
+            motion: MOTION,
+            window_chrome: true,
+            text_marks: true,
+            dynamic_items: true,
+            features: FEATURES,
             id: "winui3-windows",
             ui: "winui3",
             platforms: &["windows"],
@@ -184,6 +228,21 @@ impl Target for WinUi3Windows {
             }
         }
         let mut visit = |node: &Node| {
+            if let Node::Element(element) = node {
+                for (name, prop) in &element.props {
+                    if let bern_ir::Prop::Icon { name: icon } = prop
+                        && icons::glyph(icon).is_none()
+                    {
+                        diagnostics.push(
+                            Diagnostic::error(format!(
+                                "the Windows icon fonts have no `{icon}` (property `{name}` of `{}`)",
+                                element.kind
+                            ))
+                            .at(element.source.clone()),
+                        );
+                    }
+                }
+            }
             if let Node::Element(element) = node
                 && element.kind == "Picker"
                 && let Some(field) = element.field("value")

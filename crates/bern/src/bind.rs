@@ -56,6 +56,28 @@ impl<T> SessionField<T> {
             _marker: PhantomData,
         }
     }
+
+    /// An action that sets the draft: `=> draft.page.set(Page::Home)`. A
+    /// whole number sets a decimal field: `=> draft.size.set(12)`.
+    #[allow(unused_variables)]
+    pub fn set(&self, value: impl SessionValue<T>) -> CommandRef {
+        CommandRef::declared()
+    }
+}
+
+/// What an action can set a session field of type `T` to: a `T`, or a
+/// whole number for a decimal field.
+pub trait SessionValue<T> {}
+
+impl<T> SessionValue<T> for T {}
+
+impl SessionValue<f64> for i64 {}
+
+impl SessionField<bool> {
+    /// An action that flips the draft: `=> draft.panel.toggle()`.
+    pub fn toggle(&self) -> CommandRef {
+        CommandRef::declared()
+    }
 }
 
 impl<T> Clone for SessionField<T> {
@@ -243,6 +265,19 @@ impl SourceBinding for Binding<Option<crate::media::MediaSource>> {}
 impl SourceBinding for SessionField<crate::media::MediaSource> {}
 impl SourceBinding for SessionField<Option<crate::media::MediaSource>> {}
 impl SourceBinding for crate::media::MediaSourceRef {}
+
+/// A session value that can hold the key of the item a scroll view stands
+/// at.
+pub trait PositionValue {}
+
+impl PositionValue for i64 {}
+impl PositionValue for String {}
+
+/// A session value that can hold the file a user chose or dropped.
+pub trait FileValue {}
+
+impl FileValue for crate::media::MediaSource {}
+impl FileValue for Option<crate::media::MediaSource> {}
 
 macro_rules! scalar {
     ($ty:ty, $variant:ident, $name:literal) => {

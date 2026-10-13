@@ -128,14 +128,22 @@ pub enum Expr {
     /// `client.query(args)`: a typed query binding. It is only written as
     /// the `query:` property of `Query`; calls exist nowhere else.
     Query(Action),
+    /// `if cond { a } else { b }`: one of two values of the same type.
+    If {
+        cond: Box<Expr>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
+        span: Span,
+    },
 }
 
 impl Expr {
     pub fn span(&self) -> Span {
         match self {
-            Expr::Literal { span, .. } | Expr::Unary { span, .. } | Expr::Binary { span, .. } => {
-                *span
-            }
+            Expr::Literal { span, .. }
+            | Expr::Unary { span, .. }
+            | Expr::Binary { span, .. }
+            | Expr::If { span, .. } => *span,
             Expr::Tr(tr) => tr.span,
             Expr::Path(path) => path.span(),
             Expr::Variant(variant) => variant.ty.span(),

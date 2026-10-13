@@ -134,6 +134,11 @@ pub struct PageConfig {
 struct RawLayouts {
     /// Available width, in logical units, below which `compact` applies.
     compact_below: f64,
+    /// Below which `medium` applies; without it there is no `medium`.
+    medium_below: Option<f64>,
+    /// Below which `expanded` applies, `large` from it; without it there
+    /// is no `large`.
+    expanded_below: Option<f64>,
 }
 
 /// `[resources]`: files and directories, relative to `Bern.toml`, that ship
@@ -774,8 +779,27 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
     let layouts = match &raw.layouts {
         None => None,
         Some(layouts) if layouts.compact_below.is_finite() && layouts.compact_below > 0.0 => {
-            Some(LayoutConfig {
+            // Each breakpoint lies beyond the ones before it.
+            let mut previous = ("compact_below", layouts.compact_below);
+            let mut ordered = true;
+            for (name, value) in [
+                ("medium_below", layouts.medium_below),
+                ("expanded_below", layouts.expanded_below),
+            ] {
+                let Some(value) = value else { continue };
+                if !value.is_finite() || value <= previous.1 {
+                    errors.push(Diagnostic::error(format!(
+                        "[layouts].{name} must be wider than {} ({}), not {value}",
+                        previous.0, previous.1
+                    )));
+                    ordered = false;
+                }
+                previous = (name, value);
+            }
+            ordered.then_some(LayoutConfig {
                 compact_below: layouts.compact_below,
+                medium_below: layouts.medium_below,
+                expanded_below: layouts.expanded_below,
             })
         }
         Some(layouts) => {

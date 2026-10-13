@@ -33,11 +33,13 @@ pub enum SessionCommand {
     WindowResize,
     Language,
     SetLanguage,
+    Focus,
+    SetFile,
 }
 
 impl SessionCommand {
     /// Frontends address commands by position: new commands go last.
-    pub const ALL: [SessionCommand; 20] = [
+    pub const ALL: [SessionCommand; 22] = [
         SessionCommand::Inspect,
         SessionCommand::Activate,
         SessionCommand::Edit,
@@ -58,6 +60,8 @@ impl SessionCommand {
         SessionCommand::WindowResize,
         SessionCommand::Language,
         SessionCommand::SetLanguage,
+        SessionCommand::Focus,
+        SessionCommand::SetFile,
     ];
 
     pub fn id(self) -> &'static str {
@@ -82,6 +86,8 @@ impl SessionCommand {
             SessionCommand::WindowResize => "window.resize",
             SessionCommand::Language => "ui.language",
             SessionCommand::SetLanguage => "ui.set_language",
+            SessionCommand::Focus => "ui.focus",
+            SessionCommand::SetFile => "ui.set_file",
         }
     }
 
@@ -400,6 +406,32 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
             vec![target()],
             Type::Unit,
             Retry::Never,
+        ),
+        spec(
+            SessionCommand::Focus,
+            OperationKind::Command,
+            "Give a control the keyboard focus, such as a search field, whose results then show",
+            vec![target()],
+            Type::Unit,
+            Retry::Idempotent,
+        ),
+        with_errors(
+            spec(
+                SessionCommand::SetFile,
+                OperationKind::Command,
+                "Give a file to a control that asks for one or takes dropped files, as if the user chose or dropped it; its action then runs",
+                vec![
+                    target(),
+                    param(
+                        "url",
+                        Type::Text,
+                        "A `file://` or http(s) URL; it must be of a kind the control accepts",
+                    ),
+                ],
+                Type::Unit,
+                Retry::Never,
+            ),
+            &["invalid_url", "unsupported_file"],
         ),
         spec(
             SessionCommand::Language,

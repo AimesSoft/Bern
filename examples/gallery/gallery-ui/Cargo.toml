@@ -1,0 +1,12 @@
+[package]
+name = "gallery-ui"
+description = "The Bern gallery: ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+gallery-protocol = { path = "../gallery-protocol" }

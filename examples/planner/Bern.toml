@@ -38,3 +38,21 @@ channels = ["ipc"]
 [targets.android]
 platform = "android"
 channels = ["ipc"]
+
+[targets.linux]
+platform = "linux"
+channels = ["ipc"]
+
+[targets.windows]
+platform = "windows"
+channels = ["ipc"]
+
+# The WebUI build: the page connects to a separate engine host, which also
+# serves the CLI, JSON and MCP entries through its IPC channel.
+[targets.web_ui]
+ui = "web"
+platform = "browser"
+web_mode = "ui"
+application_transport = "websocket"
+application_codec = "json"
+channels = ["ipc"]

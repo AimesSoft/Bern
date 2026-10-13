@@ -7,6 +7,7 @@
 
 use crate::controls::{self, Actions};
 use crate::ctx::Field;
+use crate::motion::{Curve, Num, bind_number};
 use crate::protocol::Value;
 use crate::reactive::{effect, untrack};
 use crate::text::{self, tr};
@@ -17,26 +18,26 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 /// A text getter bound to a context.
-fn bound_text(ctx: &Ctx, text: &Str) -> Rc<dyn Fn() -> String> {
+pub(crate) fn bound_text(ctx: &Ctx, text: &Str) -> Rc<dyn Fn() -> String> {
     let ctx = ctx.clone();
     let text = Rc::clone(text);
     Rc::new(move || text(&ctx))
 }
 
-fn bound_enabled(ctx: &Ctx, enabled: &Option<Get>) -> Option<Rc<dyn Fn() -> bool>> {
+pub(crate) fn bound_enabled(ctx: &Ctx, enabled: &Option<Get>) -> Option<Rc<dyn Fn() -> bool>> {
     let enabled = enabled.clone()?;
     let ctx = ctx.clone();
     Some(Rc::new(move || crate::value::truthy(&enabled(&ctx))))
 }
 
-fn bound_action(ctx: &Ctx, action: &Option<Act>) -> Option<Rc<dyn Fn()>> {
+pub(crate) fn bound_action(ctx: &Ctx, action: &Option<Act>) -> Option<Rc<dyn Fn()>> {
     let action = action.clone()?;
     let ctx = ctx.clone();
     Some(Rc::new(move || action(&ctx)))
 }
 
 /// Keep a label's text in step with a getter.
-fn bind_label(label: &gtk::Label, text: Rc<dyn Fn() -> String>) {
+pub(crate) fn bind_label(label: &gtk::Label, text: Rc<dyn Fn() -> String>) {
     let label = label.clone();
     effect(move || label.set_label(&text()));
 }
@@ -98,7 +99,7 @@ pub(crate) fn plain_row(child: &impl IsA<gtk::Widget>) -> gtk::ListBoxRow {
 }
 
 /// Add a widget as it fits the parent: plainly, or in a row of a list.
-fn place(p: &Parent, widget: &impl IsA<gtk::Widget>) {
+pub(crate) fn place(p: &Parent, widget: &impl IsA<gtk::Widget>) {
     if p.is_list() {
         p.add(&plain_row(widget));
     } else {
@@ -123,6 +124,8 @@ pub struct TextProps {
     pub content: Option<Str>,
     pub style: Option<&'static str>,
     pub emphasis: Option<&'static str>,
+    /// A capsule of this color under each line.
+    pub mark: Option<crate::theme::Color>,
 }
 
 #[allow(non_snake_case)]
@@ -138,7 +141,10 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
     if let Some(content) = &props.content {
         bind_label(&label, bound_text(ctx, content));
     }
-    place(p, &label);
+    match props.mark {
+        Some(mark) => place(p, &crate::canvas::Marked::new(&label, mark)),
+        None => place(p, &label),
+    }
 }
 
 #[derive(Default)]
@@ -185,6 +191,9 @@ pub struct ButtonProps {
     pub role: Option<&'static str>,
     pub prominence: Option<&'static str>,
     pub enabled: Option<Get>,
+    pub style: Option<&'static crate::style::StyleDef>,
+    /// `pick:`: the open panel asks for a file before the action runs.
+    pub pick: Option<crate::features::Pick>,
 }
 
 fn register_button(
@@ -193,6 +202,7 @@ fn register_button(
     label: Option<Rc<dyn Fn() -> String>>,
     enabled: Option<Rc<dyn Fn() -> bool>>,
     action: Option<Rc<dyn Fn()>>,
+    set_file: Option<(crate::features::Give, &'static str)>,
 ) {
     controls::register(
         ctx,
@@ -202,9 +212,24 @@ fn register_button(
         enabled,
         Actions {
             activate: action,
+            file_kinds: set_file.as_ref().map(|(_, kinds)| *kinds),
+            set_file: set_file.map(|(give, _)| give),
             ..Actions::default()
         },
     );
+}
+
+/// The button as it goes into its container: in a motion box when a style
+/// moves it.
+fn styled(button: &gtk::Button, style: Option<&'static crate::style::StyleDef>) -> gtk::Widget {
+    match style {
+        Some(style) => {
+            let motion = crate::motion::MotionBox::wrap(button);
+            crate::style::apply(style, button.upcast_ref(), button.upcast_ref(), &motion);
+            motion.upcast()
+        }
+        None => button.clone().upcast(),
+    }
 }
 
 #[allow(non_snake_case)]
@@ -241,21 +266,28 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
         let shown = button.clone();
         effect(move || shown.set_sensitive(enabled()));
     }
-    let run = bound_action(ctx, &action);
+    let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
     if let Some(run) = run.clone() {
         button.connect_clicked(move |_| run());
     }
-    register_button(ctx, props.id, label, enabled, run);
+    register_button(
+        ctx,
+        props.id,
+        label,
+        enabled,
+        run,
+        set_file.zip(props.pick.map(|pick| pick.kinds)),
+    );
     if p.is_list() && !ctx.in_toolbar() {
         button.set_halign(gtk::Align::Start);
-        let row = plain_row(&button);
+        let row = plain_row(&styled(&button, props.style));
         row.child().inspect(|child| {
             child.set_margin_top(8);
             child.set_margin_bottom(8);
         });
         p.add(&row);
     } else {
-        p.add(&button);
+        p.add(&styled(&button, props.style));
     }
 }
 
@@ -265,6 +297,8 @@ pub struct IconButtonProps {
     pub icon: &'static str,
     pub label: Option<Str>,
     pub enabled: Option<Get>,
+    pub style: Option<&'static crate::style::StyleDef>,
+    pub pick: Option<crate::features::Pick>,
 }
 
 #[allow(non_snake_case)]
@@ -285,38 +319,46 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
         let shown = button.clone();
         effect(move || shown.set_sensitive(enabled()));
     }
-    let run = bound_action(ctx, &action);
+    let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
     if let Some(run) = run.clone() {
         button.connect_clicked(move |_| run());
     }
-    register_button(ctx, props.id, label, enabled, run);
-    place(p, &button);
+    register_button(
+        ctx,
+        props.id,
+        label,
+        enabled,
+        run,
+        set_file.zip(props.pick.map(|pick| pick.kinds)),
+    );
+    button.set_valign(gtk::Align::Center);
+    place(p, &styled(&button, props.style));
 }
 
 /// A draft field bound to a control.
 #[derive(Clone)]
-struct Bound {
+pub(crate) struct Bound {
     ctx: Ctx,
     field: Field,
 }
 
 impl Bound {
-    fn new(ctx: &Ctx, field: Field) -> Self {
+    pub(crate) fn new(ctx: &Ctx, field: Field) -> Self {
         Self {
             ctx: ctx.clone(),
             field,
         }
     }
 
-    fn get(&self) -> Value {
+    pub(crate) fn get(&self) -> Value {
         self.ctx.read(self.field)
     }
 
-    fn peek(&self) -> Value {
+    pub(crate) fn peek(&self) -> Value {
         self.ctx.peek(self.field)
     }
 
-    fn set(&self, value: Value) {
+    pub(crate) fn set(&self, value: Value) {
         if self.peek() != value {
             self.ctx.write(self.field, value);
         }
@@ -324,7 +366,10 @@ impl Bound {
 }
 
 /// A caption above a control outside forms.
-fn stacked(label: Option<Rc<dyn Fn() -> String>>, control: &impl IsA<gtk::Widget>) -> gtk::Box {
+pub(crate) fn stacked(
+    label: Option<Rc<dyn Fn() -> String>>,
+    control: &impl IsA<gtk::Widget>,
+) -> gtk::Box {
     let container = gtk::Box::new(gtk::Orientation::Vertical, 6);
     if let Some(label) = label {
         let caption = gtk::Label::new(None);
@@ -338,7 +383,10 @@ fn stacked(label: Option<Rc<dyn Fn() -> String>>, control: &impl IsA<gtk::Widget
 }
 
 /// A label beside a control outside forms.
-fn beside(label: Option<Rc<dyn Fn() -> String>>, control: &impl IsA<gtk::Widget>) -> gtk::Box {
+pub(crate) fn beside(
+    label: Option<Rc<dyn Fn() -> String>>,
+    control: &impl IsA<gtk::Widget>,
+) -> gtk::Box {
     let container = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     if let Some(label) = label {
         let caption = gtk::Label::new(None);
@@ -506,13 +554,28 @@ pub struct SearchProps {
     pub prompt: Option<Str>,
 }
 
+/// A search field. Its children are results shown below it while it has
+/// the focus and text, in a popover that keeps the focus in the field;
+/// choosing a result closes them.
 #[allow(non_snake_case)]
-pub fn Search(p: &Parent, ctx: &Ctx, props: SearchProps, submit: Option<Act>) {
+pub fn Search(
+    p: &Parent,
+    ctx: &Ctx,
+    props: SearchProps,
+    submit: Option<Act>,
+    results: Option<Build>,
+) {
     let Some(field) = props.field else { return };
     let bound = Bound::new(ctx, field);
     let prompt = props.prompt.as_ref().map(|prompt| bound_text(ctx, prompt));
     let entry = gtk::SearchEntry::new();
-    entry.set_hexpand(true);
+    if ctx.in_toolbar() {
+        entry.set_hexpand(false);
+        entry.set_width_chars(18);
+        entry.set_valign(gtk::Align::Center);
+    } else {
+        entry.set_hexpand(true);
+    }
     if let Some(prompt) = prompt.clone() {
         let shown = entry.clone();
         effect(move || {
@@ -540,9 +603,13 @@ pub fn Search(p: &Parent, ctx: &Ctx, props: SearchProps, submit: Option<Act>) {
     }
     let cleared = bound.clone();
     entry.connect_stop_search(move |_| cleared.set(Value::Text(String::new())));
+    if let Some(results) = results {
+        search_results(ctx, &entry, &bound, results);
+    }
     place(p, &entry);
     let set = bound.clone();
     let value = bound.clone();
+    let focused = entry.clone();
     controls::register(
         ctx,
         props.id,
@@ -553,9 +620,107 @@ pub fn Search(p: &Parent, ctx: &Ctx, props: SearchProps, submit: Option<Act>) {
             edit: Some(Rc::new(move |text| set.set(Value::Text(text)))),
             submit,
             value: Some(Rc::new(move || Some(as_text(&value.peek())))),
+            focus: Some(Rc::new(move || {
+                focused.grab_focus();
+            })),
             ..Actions::default()
         },
     );
+}
+
+fn search_results(ctx: &Ctx, entry: &gtk::SearchEntry, bound: &Bound, results: Build) {
+    let popover = gtk::Popover::new();
+    popover.set_autohide(false);
+    popover.set_has_arrow(false);
+    popover.set_position(gtk::PositionType::Bottom);
+    popover.set_can_focus(false);
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    column.set_margin_top(6);
+    column.set_margin_bottom(6);
+    column.set_margin_start(6);
+    column.set_margin_end(6);
+    let scrolled = gtk::ScrolledWindow::new();
+    scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    scrolled.set_propagate_natural_height(true);
+    scrolled.set_max_content_height(360);
+    scrolled.set_min_content_width(280);
+    scrolled.set_child(Some(&column));
+    popover.set_child(Some(&scrolled));
+    popover.set_parent(entry);
+    results(&Parent::of_box(&column), &ctx.outside_toolbar());
+    let focused = crate::reactive::Cell::new(false);
+    let focus = gtk::EventControllerFocus::new();
+    {
+        let focused = focused.clone();
+        focus.connect_enter(move |_| focused.set(true));
+    }
+    {
+        let focused = focused.clone();
+        let popover = popover.clone();
+        focus.connect_leave(move |_| {
+            let focused = focused.clone();
+            let popover = popover.clone();
+            // Focus moving into the results keeps them.
+            glib::idle_add_local_once(move || {
+                let inside = popover
+                    .root()
+                    .and_then(|root| gtk::prelude::RootExt::focus(&root))
+                    .is_some_and(|focus| focus.is_ancestor(&popover));
+                if !inside {
+                    focused.set(false);
+                }
+            });
+        });
+    }
+    entry.add_controller(focus);
+    // Choosing a result closes them, until the field takes the focus again.
+    // The raw release is seen before the result's own click, which then
+    // still runs.
+    let release = gtk::EventControllerLegacy::new();
+    release.set_propagation_phase(gtk::PropagationPhase::Capture);
+    {
+        let focused = focused.clone();
+        release.connect_event(move |_, event| {
+            if matches!(
+                event.event_type(),
+                gtk::gdk::EventType::ButtonRelease | gtk::gdk::EventType::TouchEnd
+            ) {
+                let focused = focused.clone();
+                glib::idle_add_local_once(move || focused.set(false));
+            }
+            glib::Propagation::Proceed
+        });
+    }
+    column.add_controller(release);
+    // Typing again in the field shows them again.
+    {
+        let focused = focused.clone();
+        entry.connect_search_changed(move |entry| {
+            let inside = entry
+                .root()
+                .and_then(|root| gtk::prelude::RootExt::focus(&root))
+                .is_some_and(|focus| {
+                    &focus == entry.upcast_ref::<gtk::Widget>() || focus.is_ancestor(entry)
+                });
+            if inside {
+                focused.set(true);
+            }
+        });
+    }
+    let read = bound.clone();
+    let shown = popover.clone();
+    effect(move || {
+        let open = focused.get() && !as_text(&read.get()).is_empty();
+        if open && !shown.is_visible() {
+            shown.popup();
+        } else if !open && shown.is_visible() {
+            shown.popdown();
+        }
+    });
+    crate::reactive::on_cleanup(move || {
+        popover.popdown();
+        popover.unparent();
+    });
 }
 
 #[derive(Default)]
@@ -564,11 +729,25 @@ pub struct SwitchProps {
     pub label: Option<Str>,
     pub field: Option<Field>,
     pub style: Option<&'static str>,
+    pub icon: Option<&'static str>,
 }
 
 #[allow(non_snake_case)]
 pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
     let Some(field) = props.field else { return };
+    if props.style == Some("button") || ctx.in_toolbar() {
+        crate::features::toggle_button(
+            p,
+            ctx,
+            crate::features::ToggleProps {
+                id: props.id,
+                label: props.label,
+                field,
+                icon: props.icon,
+            },
+        );
+        return;
+    }
     let bound = Bound::new(ctx, field);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     let checkbox = props.style == Some("checkbox");
@@ -974,9 +1153,57 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
 pub struct StackProps {
     /// `column` or `row`.
     pub axis: &'static str,
-    pub gap: Option<f64>,
-    pub padding: Option<f64>,
+    pub gap: Option<Num>,
+    pub padding: Option<Num>,
+    pub width: Option<Num>,
+    pub height: Option<Num>,
     pub align: Option<&'static str>,
+    /// The spring bound lengths change with.
+    pub animate: Option<Curve>,
+    /// Children slide to new places with this spring.
+    pub reflow: Option<Curve>,
+}
+
+/// Padding on every side of `widget`, as its margins.
+fn set_padding(widget: &gtk::Widget, padding: f64) {
+    let padding = padding.round().max(0.0) as i32;
+    widget.set_margin_top(padding);
+    widget.set_margin_bottom(padding);
+    widget.set_margin_start(padding);
+    widget.set_margin_end(padding);
+}
+
+/// `width` and `height` fix a side of `widget`: it neither shrinks below
+/// nor stretches past it.
+fn bind_size(
+    ctx: &Ctx,
+    widget: &gtk::Widget,
+    width: &Option<Num>,
+    height: &Option<Num>,
+    animate: Option<Curve>,
+) {
+    let size = Rc::new(Cell::new((-1, -1)));
+    if let Some(width) = width {
+        widget.set_hexpand(false);
+        let sized = widget.clone();
+        let size = Rc::clone(&size);
+        bind_number(ctx, width, animate, widget, move |value| {
+            let (_, height) = size.get();
+            let width = value.round().max(0.0) as i32;
+            size.set((width, height));
+            sized.set_size_request(width, height);
+        });
+    }
+    if let Some(height) = height {
+        widget.set_vexpand(false);
+        let sized = widget.clone();
+        bind_number(ctx, height, animate, widget, move |value| {
+            let (width, _) = size.get();
+            let height = value.round().max(0.0) as i32;
+            size.set((width, height));
+            sized.set_size_request(width, height);
+        });
+    }
 }
 
 #[allow(non_snake_case)]
@@ -987,14 +1214,6 @@ pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
     } else {
         gtk::Orientation::Horizontal
     };
-    let container = gtk::Box::new(orientation, props.gap.unwrap_or(8.0) as i32);
-    if let Some(padding) = props.padding {
-        let padding = padding as i32;
-        container.set_margin_top(padding);
-        container.set_margin_bottom(padding);
-        container.set_margin_start(padding);
-        container.set_margin_end(padding);
-    }
     let cross = match (props.align, column) {
         (Some("center"), _) => gtk::Align::Center,
         (Some("trailing") | Some("bottom"), _) => gtk::Align::End,
@@ -1004,19 +1223,54 @@ pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
         (None, false) => gtk::Align::Center,
         _ => gtk::Align::Fill,
     };
-    children(&Parent::of_aligned_box(&container, cross), ctx);
+    // A column or row whose children slide takes a container of its own;
+    // others are GTK boxes.
+    let (container, inner): (gtk::Widget, Parent) = match props.reflow {
+        Some(curve) => {
+            let reflow = crate::layout::ReflowBox::new(orientation, 8, curve);
+            if let Some(gap) = &props.gap {
+                let spaced = reflow.clone();
+                bind_number(ctx, gap, props.animate, &reflow, move |value| {
+                    spaced.set_spacing(value.round() as i32);
+                });
+            }
+            let inner = Parent::of_reflow(&reflow, cross);
+            (reflow.upcast(), inner)
+        }
+        None => {
+            let container = gtk::Box::new(orientation, 8);
+            if let Some(gap) = &props.gap {
+                let spaced = container.clone();
+                bind_number(ctx, gap, props.animate, &container, move |value| {
+                    spaced.set_spacing(value.round().max(0.0) as i32);
+                });
+            }
+            let inner = Parent::of_aligned_box(&container, cross);
+            (container.upcast(), inner)
+        }
+    };
+    if let Some(padding) = &props.padding {
+        let padded = container.clone();
+        bind_number(ctx, padding, props.animate, &container, move |value| {
+            set_padding(&padded, value);
+        });
+    }
+    bind_size(ctx, &container, &props.width, &props.height, props.animate);
+    children(&inner, ctx);
     place(p, &container);
 }
 
 #[derive(Default)]
 pub struct GridProps {
-    pub min_width: f64,
-    pub gap: Option<f64>,
-    pub padding: Option<f64>,
+    pub min_width: Option<Num>,
+    pub gap: Option<Num>,
+    pub padding: Option<Num>,
+    pub animate: Option<Curve>,
 }
 
 /// Equal columns, as many as fit at `min_width` or wider: a flow box whose
-/// cells share each line.
+/// cells share each line. A bound `min_width` springs with `animate`, and
+/// the cells move to their new places as the columns change.
 #[allow(non_snake_case)]
 pub fn Grid(p: &Parent, ctx: &Ctx, props: GridProps, children: Build) {
     let flow = gtk::FlowBox::new();
@@ -1026,26 +1280,48 @@ pub fn Grid(p: &Parent, ctx: &Ctx, props: GridProps, children: Build) {
     flow.set_min_children_per_line(1);
     flow.set_max_children_per_line(64);
     flow.set_valign(gtk::Align::Start);
-    let gap = props.gap.unwrap_or(8.0).max(0.0) as u32;
-    flow.set_row_spacing(gap);
-    flow.set_column_spacing(gap);
-    if let Some(padding) = props.padding {
-        let padding = padding as i32;
-        flow.set_margin_top(padding);
-        flow.set_margin_bottom(padding);
-        flow.set_margin_start(padding);
-        flow.set_margin_end(padding);
+    flow.set_row_spacing(8);
+    flow.set_column_spacing(8);
+    if let Some(gap) = &props.gap {
+        let spaced = flow.clone();
+        bind_number(ctx, gap, props.animate, &flow, move |value| {
+            let gap = value.round().max(0.0) as u32;
+            spaced.set_row_spacing(gap);
+            spaced.set_column_spacing(gap);
+        });
     }
-    children(&Parent::of_flow(&flow, props.min_width.round() as i32), ctx);
+    if let Some(padding) = &props.padding {
+        let padded = flow.clone().upcast::<gtk::Widget>();
+        bind_number(ctx, padding, props.animate, &flow, move |value| {
+            set_padding(&padded, value);
+        });
+    }
+    let first = props
+        .min_width
+        .as_ref()
+        .map(|width| width.peek(ctx))
+        .unwrap_or(120.0);
+    let cells = Parent::of_flow(&flow, Rc::new(Cell::new(first.round() as i32)));
+    if let Some(min_width) = &props.min_width {
+        let resized = cells.clone();
+        bind_number(ctx, min_width, props.animate, &flow, move |value| {
+            resized.set_cell_width(value.round().max(1.0) as i32);
+        });
+    }
+    children(&cells, ctx);
     place(p, &flow);
 }
 
 #[derive(Default)]
 pub struct LayersProps {
     pub align: Option<&'static str>,
+    pub width: Option<Num>,
+    pub height: Option<Num>,
+    pub animate: Option<Curve>,
 }
 
-/// `Stack`: layers in one grid cell, later ones above earlier ones.
+/// `Stack`: layers in one place, later ones above earlier ones, the stack
+/// as large as its largest layer.
 #[allow(non_snake_case)]
 pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
     use gtk::Align::{Center, End, Start};
@@ -1060,15 +1336,16 @@ pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
         "bottom_trailing" => (End, End),
         _ => (Center, Center),
     };
-    let grid = gtk::Grid::new();
-    grid.set_halign(Start);
-    grid.set_valign(Start);
-    children(&Parent::of_layers(&grid, halign, valign), ctx);
-    // The stack is as large as its largest layer; where a column would
-    // stretch it, it keeps that size at the leading edge.
-    let holder = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    holder.append(&grid);
-    place(p, &holder);
+    let layers = crate::layout::Layers::new();
+    bind_size(
+        ctx,
+        layers.upcast_ref(),
+        &props.width,
+        &props.height,
+        props.animate,
+    );
+    children(&Parent::of_layers(&layers, halign, valign), ctx);
+    place(p, &layers);
 }
 
 #[derive(Default)]
@@ -1076,9 +1353,10 @@ pub struct ImageProps {
     /// Name of the declared resource.
     pub source: &'static str,
     pub label: Option<Str>,
-    pub width: Option<f64>,
-    pub height: Option<f64>,
+    pub width: Option<Num>,
+    pub height: Option<Num>,
     pub fit: Option<&'static str>,
+    pub animate: Option<Curve>,
 }
 
 /// A picture from a declared resource. With one side given, the other
@@ -1105,8 +1383,6 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
     } else {
         1.0
     };
-    let width = props.width.or(props.height.map(|height| height * ratio));
-    let height = props.height.or(props.width.map(|width| width / ratio));
     match &props.label {
         Some(label) => {
             let text = bound_text(ctx, label);
@@ -1115,11 +1391,34 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         }
         None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
-    let frame = crate::picture::Frame::new(
-        &picture,
-        width.unwrap_or(0.0).round() as i32,
-        height.unwrap_or(0.0).round() as i32,
-    );
+    let frame = crate::picture::Frame::new(&picture, 0, 0);
+    let sides: Rc<Cell<(Option<f64>, Option<f64>)>> = Rc::new(Cell::new((None, None)));
+    let resize = {
+        let frame = frame.clone();
+        let sides = Rc::clone(&sides);
+        Rc::new(move || {
+            let (width, height) = sides.get();
+            let w = width.or(height.map(|height| height * ratio)).unwrap_or(0.0);
+            let h = height.or(width.map(|width| width / ratio)).unwrap_or(0.0);
+            frame.set_size(w.round() as i32, h.round() as i32);
+        })
+    };
+    if let Some(width) = &props.width {
+        let sides = Rc::clone(&sides);
+        let resize = Rc::clone(&resize);
+        bind_number(ctx, width, props.animate, &frame, move |value| {
+            sides.set((Some(value), sides.get().1));
+            resize();
+        });
+    }
+    if let Some(height) = &props.height {
+        let sides = Rc::clone(&sides);
+        let resize = Rc::clone(&resize);
+        bind_number(ctx, height, props.animate, &frame, move |value| {
+            sides.set((sides.get().0, Some(value)));
+            resize();
+        });
+    }
     place(p, &frame);
 }
 
@@ -1212,42 +1511,6 @@ pub fn Divider(p: &Parent) {
         gtk::Orientation::Horizontal
     };
     place(p, &gtk::Separator::new(orientation));
-}
-
-#[derive(Default)]
-pub struct ScrollProps {
-    pub axis: Option<&'static str>,
-}
-
-#[allow(non_snake_case)]
-pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
-    let horizontal = props.axis == Some("horizontal");
-    let scrolled = gtk::ScrolledWindow::new();
-    scrolled.set_policy(
-        if horizontal {
-            gtk::PolicyType::Automatic
-        } else {
-            gtk::PolicyType::Never
-        },
-        if horizontal {
-            gtk::PolicyType::Never
-        } else {
-            gtk::PolicyType::Automatic
-        },
-    );
-    scrolled.set_vexpand(!horizontal);
-    scrolled.set_hexpand(true);
-    let content = gtk::Box::new(
-        if horizontal {
-            gtk::Orientation::Horizontal
-        } else {
-            gtk::Orientation::Vertical
-        },
-        8,
-    );
-    scrolled.set_child(Some(&content));
-    children(&Parent::of_box(&content), ctx);
-    p.add(&scrolled);
 }
 
 #[derive(Default)]
@@ -1411,6 +1674,7 @@ pub struct MenuItem {
     pub role: Option<&'static str>,
     pub enabled: Option<Get>,
     pub action: Option<Act>,
+    pub pick: Option<crate::features::Pick>,
 }
 
 #[derive(Default)]
@@ -1451,7 +1715,8 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
         };
         let name = format!("i{index}");
         let action = gio::SimpleAction::new(&name, None);
-        let run = bound_action(ctx, &item.action);
+        let (run, set_file) =
+            crate::features::picking(ctx, item.pick, bound_action(ctx, &item.action));
         if let Some(run) = run.clone() {
             action.connect_activate(move |_, _| run());
         }
@@ -1474,6 +1739,8 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
             enabled,
             Actions {
                 activate: run,
+                set_file,
+                file_kinds: item.pick.map(|pick| pick.kinds),
                 ..Actions::default()
             },
         );

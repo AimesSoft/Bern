@@ -1,0 +1,465 @@
+/* Bern Web: drawing, motion, styles and the controls media applications
+   need. Appended to bern.css. */
+
+/* MARK: - Drawing */
+
+.bern-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bern-canvas.bern-fill-width {
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+.bern-canvas.bern-fill-height {
+  flex: 1 1 auto;
+  align-self: stretch;
+}
+
+.bern-layers > .bern-canvas.bern-fill-height {
+  height: 100%;
+}
+
+/* In a `Stack`, a layer that holds a drawing without a size fills the
+   stack in that direction, as a flexible view does; other layers keep
+   their own size and the stack's alignment. */
+.bern-layers > :is(.bern-fill-width, :has(.bern-fill-width)):not(.bern-sized-width) {
+  justify-self: stretch;
+  width: auto;
+}
+
+.bern-layers > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-sized-height) {
+  align-self: stretch;
+}
+
+/* In a column a child that holds such a drawing, a scroll view, a grid or
+   a video is as wide as the column; in a row it takes the room left. */
+:is(.bern-vstack, .bern-detail-body, .bern-window-content, .bern-drop, .bern-gesture, .bern-inspector, .bern-popover-panel, .bern-search-results) > :is(.bern-fill-width, :has(.bern-fill-width)):not(.bern-inspector, .bern-sized-width) {
+  align-self: stretch;
+  width: auto;
+}
+
+:is(.bern-detail-body, .bern-window-content, .bern-drop, .bern-gesture) > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-inspector, .bern-sized-height) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.bern-vstack > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-sized-height) {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.bern-hstack > :is(.bern-fill-width, :has(.bern-fill-width)):not(.bern-sized-width) {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+.bern-hstack > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-sized-height) {
+  align-self: stretch;
+}
+
+.bern-canvas-surface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* MARK: - Text marks */
+
+.bern-marked {
+  position: relative;
+  isolation: isolate;
+}
+
+.bern-marks {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.bern-mark {
+  position: absolute;
+}
+
+/* MARK: - Theme roles the page derives */
+
+:root,
+.bern-appearance-light,
+.bern-appearance-dark {
+  --bern-fill-subtle: var(--bern-hover-overlay);
+  --bern-fill-strong: var(--bern-pressed-overlay);
+  --bern-selection-background: var(--bern-accent);
+  --bern-selection-foreground: var(--bern-on-accent);
+}
+
+/* MARK: - Styles */
+
+.bern-styled {
+  transition: background-color 0.15s ease-out, color 0.15s ease-out, border-color 0.15s ease-out, box-shadow 0.2s ease-out;
+}
+
+.bern-styled.bern-styled-foreground .bern-icon {
+  color: inherit;
+}
+
+.bern-styled.bern-styled-quiet:hover,
+.bern-styled.bern-styled-quiet:active {
+  background-color: transparent !important;
+}
+
+.bern-button.bern-size-small,
+.bern-icon-button.bern-size-small {
+  height: 24px;
+  min-width: 24px;
+  font-size: calc(12px + var(--bern-text-up));
+}
+
+.bern-button.bern-size-large,
+.bern-icon-button.bern-size-large {
+  height: 42px;
+  min-width: 42px;
+  padding-inline: 18px;
+  font-size: calc(15px + var(--bern-text-up));
+}
+
+.bern-button.bern-size-extra_large,
+.bern-icon-button.bern-size-extra_large {
+  height: 52px;
+  min-width: 52px;
+  padding-inline: 22px;
+  font-size: calc(17px + var(--bern-text-up));
+}
+
+/* MARK: - Sidebar */
+
+.bern-sidebar-footer {
+  flex: none;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--bern-separator);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* MARK: - Reveal on hover */
+
+.bern-reveal {
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+
+.bern-reveal-host:hover > .bern-reveal,
+.bern-reveal-host:focus-within > .bern-reveal,
+.bern-reveal:focus-within {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .bern-reveal {
+    opacity: 1;
+  }
+}
+
+/* MARK: - Immersive windows */
+
+.bern-immersive .bern-page-header {
+  display: none;
+}
+
+.bern-immersive.bern-idle,
+.bern-immersive.bern-idle * {
+  cursor: none !important;
+}
+
+/* MARK: - Buttons with content and toggle buttons */
+
+.bern-content-button {
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.bern-content-button:not(.bern-styled-look):active {
+  filter: brightness(0.92);
+}
+
+.bern-content-button:focus-visible {
+  outline: 2px solid var(--bern-focus-indicator);
+  outline-offset: 2px;
+}
+
+.bern-toggle-button[aria-pressed="true"] {
+  background: var(--bern-accent);
+  color: var(--bern-on-accent);
+}
+
+.bern-toggle-button[aria-pressed="true"] .bern-icon {
+  color: inherit;
+}
+
+/* MARK: - Split buttons and popover panels */
+
+.bern-split-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.bern-split-more {
+  width: 24px;
+  min-width: 24px;
+}
+
+.bern-popover-panel,
+.bern-search-results {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 12px;
+  min-width: 240px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--bern-separator);
+  border-radius: var(--bern-radius-card);
+  background: var(--bern-surface-raised);
+  color: var(--bern-text-primary);
+  box-shadow: 0 12px 32px -12px var(--bern-scrim);
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.bern-popover-panel:popover-open,
+.bern-search-results:popover-open {
+  display: flex;
+  animation: bern-fade 120ms ease-out;
+}
+
+.bern-search-results {
+  padding: 4px;
+  gap: 0;
+}
+
+.bern-search {
+  position: relative;
+}
+
+/* MARK: - Notices */
+
+.bern-toasts {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 24px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.bern-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--bern-separator);
+  background: var(--bern-surface-raised);
+  color: var(--bern-text-primary);
+  box-shadow: 0 10px 28px -10px var(--bern-scrim);
+  font-size: calc(13px + var(--bern-text-up));
+}
+
+/* MARK: - Inspector */
+
+.bern-detail {
+  position: relative;
+  /* The inspector slides out past the trailing edge; nothing scrolls to it. */
+  overflow: clip;
+}
+
+.bern-detail .bern-detail-body {
+  transition: margin-inline-end 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+.bern-detail.bern-inspecting .bern-detail-body {
+  margin-inline-end: var(--bern-inspector-width);
+}
+
+.bern-inspector {
+  position: absolute;
+  top: 64px;
+  bottom: 0;
+  right: 0;
+  width: var(--bern-inspector-width);
+  overflow: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--bern-surface-panel);
+  border-left: 1px solid var(--bern-separator);
+  z-index: 5;
+}
+
+@container (max-width: 767px) {
+  .bern-detail.bern-inspecting .bern-detail-body {
+    margin-inline-end: 0;
+  }
+  .bern-inspector {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    width: auto;
+    max-height: 60%;
+    border-left: 0;
+    border-top: 1px solid var(--bern-separator);
+    border-radius: var(--bern-radius-card) var(--bern-radius-card) 0 0;
+    box-shadow: 0 -12px 32px -12px var(--bern-scrim);
+  }
+}
+
+/* MARK: - Drop areas and gestures */
+
+.bern-drop,
+.bern-gesture {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bern-drop > *,
+.bern-gesture > * {
+  flex: 1 1 auto;
+}
+
+.bern-pinch {
+  touch-action: pan-x pan-y;
+}
+
+.bern-swipe-vertical {
+  touch-action: pan-x;
+  user-select: none;
+}
+
+.bern-swipe-horizontal {
+  touch-action: pan-y;
+  user-select: none;
+}
+
+/* MARK: - Snapping scroll views */
+
+.bern-snap.bern-scroll-horizontal {
+  scroll-snap-type: x mandatory;
+}
+
+.bern-snap.bern-scroll-vertical {
+  scroll-snap-type: y mandatory;
+}
+
+.bern-snap-center [data-bern-item] {
+  scroll-snap-align: center;
+}
+
+.bern-snap-start [data-bern-item] {
+  scroll-snap-align: start;
+}
+
+/* MARK: - Rounded video */
+
+.bern-video-surface.bern-video-rounded {
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.bern-video:has(> .bern-video-rounded) {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  overflow: visible;
+}
+
+/* Layers of a `Stack` paint in the order they are written, also while one
+   of them is scaled or moved, which would otherwise lift it above the
+   layers after it. */
+.bern-layers > * {
+  position: relative;
+}
+
+/* A horizontal scroll view's content is as wide as it needs to be, and an
+   element with a size of its own keeps it in a row or column. */
+.bern-scroll-horizontal > * {
+  width: max-content;
+  min-width: 100%;
+}
+
+.bern-hstack > .bern-sized-width,
+.bern-vstack > .bern-sized-height {
+  flex-shrink: 0;
+}
+
+/* MARK: - Rails */
+
+.bern-rail {
+  position: relative;
+  min-width: 0;
+  pointer-events: none;
+}
+
+.bern-rail > * {
+  pointer-events: auto;
+}
+
+/* Across a horizontal rail the children share one cell: the rail is as
+   thick as the thickest, and each sits at its fraction of the width. */
+.bern-rail-horizontal {
+  display: grid;
+  grid-template-columns: 100%;
+}
+
+.bern-rail-horizontal > .bern-rail-item {
+  grid-area: 1 / 1;
+  justify-self: start;
+  margin-inline-start: var(--bern-rail-left, 0%);
+}
+
+.bern-rail-horizontal > .bern-rail-span {
+  width: var(--bern-rail-width, 0%);
+}
+
+.bern-rail-vertical > .bern-rail-item {
+  position: absolute;
+  inset-inline-start: 0;
+  top: var(--bern-rail-top, 0%);
+}
+
+.bern-rail-vertical > .bern-rail-span {
+  height: var(--bern-rail-height, 0%);
+  inset-inline-end: 0;
+}
+
+.bern-popover-wrap {
+  display: inline-flex;
+}
+
+/* Content wider than the detail column, such as a rail's last label, does
+   not make the column scroll sideways, as on the native targets. */
+.bern-detail-body {
+  overflow-x: hidden;
+}

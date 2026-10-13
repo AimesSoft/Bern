@@ -9,6 +9,7 @@
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfmediaengine.h>
+#include <shellapi.h>
 #include <shlwapi.h>
 
 #include <winrt/Windows.Globalization.h>
@@ -212,6 +213,32 @@ double AsDouble(Value const& value) {
     if (value.kind == Value::Kind::Float) return value.f;
     if (value.kind == Value::Kind::Int) return static_cast<double>(value.i);
     return 0;
+}
+
+std::vector<double> Numbers(Value const& value) {
+    std::vector<double> numbers;
+    if (value.kind != Value::Kind::List) return numbers;
+    for (auto const& item : value.Items()) numbers.push_back(AsDouble(item));
+    return numbers;
+}
+
+std::optional<std::string> Url(Value const& value) {
+    Value inner = value;
+    if (inner.kind == Value::Kind::Optional) {
+        if (!inner.IsSome()) return std::nullopt;
+        Value some = inner.Items()[0];
+        inner = std::move(some);
+    }
+    if (inner.kind == Value::Kind::Record && !inner.Items().empty() && inner.Items()[0].kind == Value::Kind::Text && !inner.Items()[0].Str().empty())
+        return inner.Items()[0].Str();
+    return std::nullopt;
+}
+
+std::string VariantName(Value const& value, char const* enumName) {
+    if (value.kind != Value::Kind::Enum || !Host::catalog) return {};
+    auto found = Host::catalog->types.enums.find(enumName);
+    if (found == Host::catalog->types.enums.end() || value.variant >= found->second.size()) return {};
+    return found->second[value.variant].name;
 }
 
 std::string AsText(Value const& value) { return value.kind == Value::Kind::Text ? value.Str() : std::string(); }
@@ -470,6 +497,8 @@ namespace Host {
 
 constexpr UINT kRun = WM_APP + 1;
 constexpr UINT kActivate = WM_APP + 2;
+/// `WM_COPYDATA` of a later launch: the files it was opened with.
+constexpr ULONG_PTR kOpenFiles = 0x4245524E;
 
 static HWND window = nullptr;
 static std::mutex lock;
@@ -504,6 +533,23 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     case kActivate:
         Post([] { if (onActivate) onActivate(); });
         return 0;
+    case WM_COPYDATA: {
+        auto data = reinterpret_cast<COPYDATASTRUCT const*>(lparam);
+        if (!data || data->dwData != kOpenFiles || !data->lpData) return FALSE;
+        std::string text(static_cast<char const*>(data->lpData), data->cbData);
+        std::vector<std::string> urls;
+        for (size_t start = 0; start < text.size();) {
+            auto end = text.find('\n', start);
+            if (end == std::string::npos) end = text.size();
+            if (end > start) urls.push_back(text.substr(start, end - start));
+            start = end + 1;
+        }
+        Post([urls] {
+            for (auto const& url : urls) openedFiles.push_back(url);
+            if (onOpen) onOpen(urls);
+        });
+        return TRUE;
+    }
     case WM_TIMER: {
         KillTimer(hwnd, wparam);
         auto found = timers.find(wparam);
@@ -518,7 +564,45 @@ static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARA
     return DefWindowProcW(hwnd, message, wparam, lparam);
 }
 
+std::string FileUrl(std::wstring const& path) {
+    std::wstring url(4096, L'\0');
+    DWORD length = static_cast<DWORD>(url.size());
+    if (FAILED(UrlCreateFromPathW(path.c_str(), url.data(), &length, 0))) return {};
+    url.resize(length);
+    return Utf8(winrt::hstring(url));
+}
+
+std::optional<std::wstring> FilePath(std::string const& url) {
+    if (url.rfind("file:", 0) != 0) return std::nullopt;
+    std::wstring path(MAX_PATH * 4, L'\0');
+    DWORD length = static_cast<DWORD>(path.size());
+    if (FAILED(PathCreateFromUrlW(std::wstring(Wide(url)).c_str(), path.data(), &length, 0))) return std::nullopt;
+    path.resize(length);
+    return path;
+}
+
+/// The files on this process's command line, as `file:` URLs.
+static std::vector<std::string> CommandLineFiles() {
+    std::vector<std::string> urls;
+    int count = 0;
+    LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (!arguments) return urls;
+    for (int i = 1; i < count; ++i) {
+        std::wstring argument = arguments[i];
+        if (argument.empty() || argument[0] == L'-' || argument[0] == L'/') continue;
+        wchar_t full[MAX_PATH * 4];
+        DWORD length = GetFullPathNameW(argument.c_str(), MAX_PATH * 4, full, nullptr);
+        if (length == 0 || length >= MAX_PATH * 4) continue;
+        auto attributes = GetFileAttributesW(full);
+        if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (auto url = FileUrl(full); !url.empty()) urls.push_back(url);
+    }
+    LocalFree(arguments);
+    return urls;
+}
+
 bool Claim(std::string const& bundleId) {
+    openedFiles = CommandLineFiles();
     auto className = L"BernHost." + std::wstring(Wide(bundleId));
     auto mutexName = L"Local\\Bern." + std::wstring(Wide(bundleId));
     CreateMutexW(nullptr, TRUE, mutexName.c_str());
@@ -529,6 +613,12 @@ bool Claim(std::string const& bundleId) {
                 DWORD process = 0;
                 GetWindowThreadProcessId(other, &process);
                 AllowSetForegroundWindow(process);
+                if (!openedFiles.empty()) {
+                    std::string text;
+                    for (auto const& url : openedFiles) text += url + "\n";
+                    COPYDATASTRUCT data{kOpenFiles, static_cast<DWORD>(text.size()), text.data()};
+                    SendMessageTimeoutW(other, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&data), SMTO_ABORTIFHUNG, 2000, nullptr);
+                }
                 PostMessageW(other, kActivate, 0, 0);
                 break;
             }
@@ -701,6 +791,8 @@ void Dispatch(int command, Values const& args, Done done, std::function<void(Fai
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "oleaut32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "shlwapi.lib")
 
 std::string PlayerState::Describe() const {
     static char const* const names[] = {"Idle", "Loading", "Ready", "Playing", "Paused", "Buffering", "Ended", "Failed", "Unavailable"};

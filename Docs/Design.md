@@ -1,8 +1,8 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.28
+- 版本：v0.30
 - 状态：架构设计草案
-- 更新日期：2026-10-12
+- 更新日期：2026-10-14
 - 项目名称：Bern UI
 - 计划仓库名称：bern-ui
 - 主要开发语言：Rust
@@ -443,10 +443,13 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | 自适应布局 | `Adaptive` 节点及选择规则 | 根据环境切换布局 |
 | 用户事件 | 类型化语义动作与命令绑定 | 提取事件参数并派发引擎或会话命令 |
 | 展示计算 | 受限表达式或显式查询结果绑定 | 求值已知运算或订阅派生值 |
+| 长度随状态改变 | 长度属性绑定的数值表达式 | 重新计算长度，按元素的 `animate` 动效过渡 |
 
 导航容器的项同样可以是动态的：`Sidebar`、`Tabs`、`Toolbar` 以及侧边栏中 `Section` 的项可以写在 `if`、`match` 与 `ForEach` 中，各分支与模板只能产生该容器允许的子元素。当前选中项所在的分支消失时，选中回到容器声明的 `fallback` 值；没有声明时回到第一个可见项，并以 `changed_by: System` 的事实报告。项的增删可以使用元素的出现、消失与重排过渡（见“样式覆盖、动效与自绘”）。
 
-实现进度：形式检查按分支与模板中的元素检查这些容器的项；SwiftUI 生成条件、`match` 与列表中的项，`fallback` 与回到第一个可见项，可访问控件的可选项只包含当前可见的项，已在 macOS 上用 `examples/planner` 验证侧栏，并用生成代码的类型检查覆盖 `Tabs` 与 `Toolbar`。尚未实现：`changed_by: System` 的报告，以及 `SidebarItem` 与 `Tab` 的出现、消失过渡（它们目前不接受动效属性）。GTK、WinUI 3 与 Web 在能力描述中声明不支持，构建检查时报错，不会静默丢掉这些项。
+实现进度：形式检查按分支与模板中的元素检查这些容器的项；SwiftUI 生成条件、`match` 与列表中的项，`fallback` 与回到第一个可见项，可访问控件的可选项只包含当前可见的项，已在 macOS 上用 `examples/planner` 验证侧栏，并用生成代码的类型检查覆盖 `Tabs` 与 `Toolbar`。尚未实现：`changed_by: System` 的报告，以及 `SidebarItem` 与 `Tab` 的出现、消失过渡（它们目前不接受动效属性）。Web 已实现：侧栏的内容生成为普通的构建函数，`if`、`match` 与 `ForEach` 照常工作，侧栏项挂载时登记、卸载时注销，选中项消失时回到 `fallback` 或第一个可见项；浏览器中用 `examples/planner` 验证关闭“笔记”模块时它的侧栏项消失、选中回到“概览”，重新开启后又出现。GTK 与 WinUI 3 已实现（WinUI 3 的侧栏项是 `NavigationView` 的菜单项，页签是 `SelectorBar` 的项，Islands 为按钮组），Linux 虚拟机与 Windows PC 上用 `examples/planner` 验证“归档”项出现与消失、选中回到 `fallback`，“笔记”页经可选模块出现。
+
+受限表达式可以用 `if 条件 { 值 } else { 值 }` 在两个同类型的值中选一个，`else if` 可以接着写；整数与小数并列时结果是小数。长度属性——容器的 `padding`、`gap`、`width`、`height`，`Grid` 的 `min_width`，`Image` 与 `Canvas` 的尺寸，`Video` 的 `corner`——可以写字面量，也可以绑定数值表达式，例如 `padding: if window.idle { 0 } else { 24 }`、`min_width: draft.card_size`。显示的文字不接受 `if`，两种文字用元素级的 `if` 分别写。实现进度：表达式的 `if` 五个目标都生成；绑定的长度 SwiftUI 与 Compose 已实现（Compose 不接受负的内边距与尺寸，绑定的值与回弹越过零的弹簧都停在零），Web 已实现（长度由页面的弹簧驱动并写进样式，同样不低于零）。GTK 与 WinUI 3 已实现，`animate` 时随弹簧变化，Linux 虚拟机与 Windows PC 上验证画框页静置后边距收为 0、视频圆角 20 收为直角。
 
 标题、进度或条件可以来自受限表达式和类型化查询结果，但不能通过任意函数调用暗中执行业务操作，也不能返回无法分析的组件树。动态列表使用已知元素模板；不能靠运行时回调选择未声明的组件类型。
 
@@ -476,32 +479,40 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | --- | --- | --- |
 | WindowSet 和 Window | 窗口目录、内容、实例策略、原生或虚拟呈现与生命周期 | 初期，macOS 使用原生窗口，Web 使用页面宿主与应用内虚拟窗口 |
 | SplitView 和 Sidebar | 侧边栏与详情分栏、侧边栏分组和选中项；Sidebar 可带 `id` 供外部入口切换；项可按条件出现（设计中） | 初期 |
+| SidebarFooter | 固定在侧边栏底部、列表下方的内容，自上而下排列，例如小播放器、账号与设置入口；列表在它上方滚动；一个侧边栏最多一个 | 媒体类应用；SwiftUI 已实现（安全区内嵌）；Compose 与 Web 已实现（侧栏底部的一栏），Web 浏览器中已验证；GTK 与 WinUI 3 已实现（WinUI 3 为 `NavigationView.PaneFooter`），Linux 虚拟机与 Windows PC 上已验证 |
 | Navigation、Destination 和 NavLink | 推入导航与返回，绑定类型化路由；Navigation 可带 `id` 供外部入口返回 | 初期 |
 | Tabs 和 Tab | 同级页面的页签切换；Tabs 可带 `id` 供外部入口切换 | 初期 |
-| Toolbar | 窗口或页面级操作区 | 初期 |
-| Column 和 Row | 单轴排列、间距、对齐、约束 | 初期 |
+| Toolbar | 窗口或页面级操作区；可以放一个 `Search`，直接写在工具栏中，不放在条件或重复里。相邻的项是一组，`Divider` 把它们分成几组：按功能分组，一组的项在平台上共享一块底（Liquid Glass 的同一个胶囊），组与组之间留固定间隔；`Divider` 只能直接写在两项之间，平台建议不超过三组 | 初期；工具栏中的搜索框 SwiftUI 已实现。分组：SwiftUI 生成 `ToolbarItemGroup`，macOS 26 与 iOS 26 起组间插 `ToolbarSpacer(.fixed)`；组里的图标按钮交给工具栏绘制，和别的项同组的菜单不显示下拉箭头（带箭头的菜单会自成一块），macOS 上已验证。GTK 与 WinUI 3 在组间画一条竖线，Linux 虚拟机与 Windows PC 上已验证（WinUI 3 两种前端相同）；Web 同样画一条竖线，浏览器中已验证；Compose 在组间留 12dp，Android 上已验证 |
+| Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸 | 初期；尺寸 SwiftUI 已实现 |
 | Grid | 等宽的列，列宽不小于 `min_width`，放得下几列就排几列，子元素逐行填入；`gap` 默认 8 | 阶段六 |
-| Stack | 叠放：后写的一层在上面，先接收输入；整体与最大的一层一样大，较小的层按 `align` 的九个方位之一对齐，默认居中 | 阶段六 |
+| Stack | 叠放：后写的一层在上面，先接收输入；整体与最大的一层一样大（写了 `width`、`height` 时按它们），较小的层按 `align` 的九个方位之一对齐，默认居中 | 阶段六 |
 | Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题 | 初期 |
 | Label | 图标与标题组合 | 初期 |
 | Spacer 和 Divider | 弹性空白与分隔线 | 初期 |
 | Text | 本地化或动态文本、文字层级、换行及截断；`mark` 标注底纹 | 初期；`mark` 见“画布与标注文字” |
-| Button | 可访问名称、语义角色、强调程度、启用状态及激活事件 | 初期 |
+| Button | 可访问名称、语义角色、强调程度、启用状态及激活事件；可以带一个子元素作为它显示的内容，见“带内容的按钮与悬停显示”。`pick: draft.file` 让按下先弹出系统的打开面板，选中一个文件后存进这个会话字段（`MediaSource` 或 `Option<MediaSource>`）再执行动作，取消则什么都不做；`files` 写接受的种类：`any`（默认）、`video`、`audio`、`picture`、`folder` 与 `.ass` 这样的扩展名，用空格或逗号分开。`IconButton` 与 `MenuItem` 同样可以写 | 初期；带内容见该节的实现进度。`pick` SwiftUI 已实现（`file_pick`）：macOS 是挂在窗口上的打开面板，不接受的文件变灰，已验证；iOS 是文档选择器，选中的文件就地打开并保持可读，iOS 26.5 模拟器已验证。Compose 用系统的文档选择器（`OpenDocument`），按种类过滤并保留读取授权，Android 模拟器上验证了只列出视频或图片、选中后播放或显示。`video` 除系统的影片类型外还收 mkv、webm、flv、rmvb 等系统未必认识的容器。Web 用浏览器的文件选择框（`<input type=file>`），按种类过滤，选中的文件以页面的 `blob:` 地址交给动作；系统的选择框无法在自动化中操作，未实测，用 `ui.set_file` 验证了动作。GTK 用 `GtkFileDialog`，按种类过滤，虚拟机上没有桌面门户，选择未实测；WinUI 3 用 `FileOpenPicker` 与 `FolderPicker`，Windows PC 上验证 Ctrl+O 弹出打开面板 |
 | IconButton | 图标激活、点击区域与可访问名称 | 初期；原生目标默认使用平台的图标按钮样式 |
 | TextInput | 文本编辑、输入法与提交事件 | 初期 |
-| Search | 搜索文本编辑与提交 | 初期 |
-| Switch | 布尔状态与修改事件 | 初期 |
+| Search | 搜索文本编辑与提交；子元素是在搜索框使用时显示在它下方的结果，例如由 `Query` 驱动的结果列表，结果中的按钮直接打开或执行 | 初期；结果 SwiftUI 已实现（`searchSuggestions`），弹出结果尚未实测；Web 的结果是搜索框下方的浮层，有焦点且有文字时显示，选中结果后收起，浏览器中已验证；GTK 与 WinUI 3（`Flyout`，不用 `AutoSuggestBox` 的建议列表）同样是搜索框下方的浮层，Linux 虚拟机与 Windows PC 上验证 Ctrl+K 聚焦、输入后列出匹配项（GTK 点选“Tartan”后打开它并收起结果） |
+| Switch | 布尔状态与修改事件；`style: button` 是开着时保持按下的按钮，可带 `icon`，也可以放进 `Toolbar` | 初期；按钮样式 SwiftUI 已实现 |
+| SplitButton | 分体开关按钮：一侧是绑定 `bool` 草稿的开关，另一侧在浮层中显示它的子元素，例如所开功能的常用设置；`more_label` 是第二部分的可访问名称；外部入口用 `set_bool` 开关、`activate` 打开浮层 | 媒体类应用；SwiftUI 已实现（`ControlGroup` 与浮层），在 macOS 上验证开关、浮层与其中的控件，浮层跟随 `appearance`；iPhone 上浮层原本会被系统改成整页表单、背景按浅色解析，现在保持为浮层并在所在区域的明暗中绘制，iOS 26.5 模拟器已验证；Web 是开关按钮加弹出浮层的箭头按钮，浏览器中验证浮层与其中的滑块，浮层跟随 `appearance`；GTK 与 WinUI 3（`ToggleSplitButton`）已实现，Linux 虚拟机与 Windows PC 上验证开关与浮层，浮层跟随 `appearance` |
+| Inspector | 侧面板：`presented` 为真时显示在它所在容器的尾侧，容器的其余内容让出位置；直接写在容器中，不放在条件或重复里，一个容器最多一个 | 媒体类应用；SwiftUI 已实现（`.inspector`）；Web 是详情栏尾部滑入的面板，推开内容，窄窗口时是底部弹层，浏览器中验证宽窗口的推开与关闭；GTK（`AdwOverlaySplitView`）与 WinUI 3（右侧窗格的 `SplitView`）已实现，Linux 虚拟机与 Windows PC 上验证详情面板推开海报墙 |
+| Drop | 拖放区：它的内容接受拖到上面的文件，`files` 同 `pick`；拿着可接受的文件停在上面时 `over` 绑定的会话字段为真，其他文件被拒绝且不触发；松手后文件存进 `value` 再执行动作。只接一个文件。`opens: true` 让它也接收系统交给应用的文件：访达里的“打开方式”、拖到程序坞图标、iOS 的“用…打开”；应用为这些种类登记为可选的打开方式（不抢默认），屏幕上没有这样的拖放区时主窗口回来、文件等它出现 | 媒体类应用；SwiftUI 已实现：macOS 上从访达拖入视频时 `over` 变真、松手后播放，拖入 txt 被拒绝，已验证；`opens: true` 在 macOS 上验证了系统把应用列为 mp4 与 mkv 的打开方式（txt、png 不列），运行中与未运行时用它打开文件都交给拖放区并开始播放，拖放区不在屏幕上时文件等到它出现；iOS 26.5 模拟器验证了“用…打开”，从“文件”拖入未验证。Compose 已实现（`dragAndDropTarget`，`opens: true` 在清单里登记 `VIEW` 与 `SEND` 意图），Android 模拟器上验证：分屏时从“文件”长按拖入视频，经过时 `over` 变真、松手后播放；其他应用用 `VIEW` 意图交来的视频交给拖放区播放。Web 已实现：拿着可接受的文件经过时 `over` 变真，松手后以页面的 `blob:` 地址交给动作；浏览器中用页面里构造的真实视频文件模拟拖入，描边出现、画框晃一下，松手后播放，描边淡出；`opens: true` 只在页面作为应用安装后经浏览器的 `launchQueue` 收到文件，未验证。GTK（`GtkDropTarget`，`opens: true` 在桌面文件中登记 `MimeType` 与 `%U`）与 WinUI 3（`StorageItems` 拖放，不登记文件关联）已实现，真实拖放与系统交来的文件都未验证（Broadway 不支持从系统拖入文件），用 `ui.set_file` 验证了动作 |
+| PopoverButton | 浮层按钮：按下弹出一个浮层，里面放任意内容（滑块、开关、文字），例如音量键；`label` 是可访问名称，有 `icon` 时只显示图标；`presented` 可以绑定会话的 `bool` 字段，界面由它打开或关闭浮层；外部入口用 `ui.activate` 打开；内容里的控件随浮层挂载 | 媒体类应用；Web 已实现（弹出层），浏览器中验证画框页的音量浮层：关闭时只有按钮，`ui.activate` 打开后其中的滑块才出现在 `ui.inspect` 里，关闭后随之卸载；macOS 与 iOS 已实现（系统浮层，iPhone 上也保持气泡而不是底部面板），在 macOS 与 iPhone 17 Pro 模拟器上同样验证；Compose 已实现（Material 的 `DropdownMenu` 浮层；只有文字时是色调按钮），Android 模拟器上验证同样只在打开时挂载滑块，`presented` 的两个方向与 `shortcut` 在临时应用中验证；GTK 与 WinUI 3（`Flyout`）已实现，Linux 虚拟机上验证 `ui.activate` 打开后滑块出现在 `ui.inspect`，Windows PC 上验证打开时挂载、关闭后卸载 |
+| Toast | 轻提示：出现或 `key`（没写时是内容）变化时浮现，`duration` 秒后（默认 3）自己隐藏；放在哪里就显示在哪里，通常叠放在页面底部 | 媒体类应用；SwiftUI 已实现；Web 在窗口底部居中弹出、按时下沉淡出，浏览器中已验证；GTK（`AdwToast`）与 WinUI 3（带 `ThemeShadow` 的胶囊）已实现，Linux 虚拟机与 Windows PC 上验证收藏后的轻提示 |
 | Slider | 范围值、连续变化和提交事件 | 初期 |
 | Picker | 从有限选项中单选，按场景呈现为菜单或分段控件 | 初期 |
-| ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复 | 初期，虚拟化后续 |
-| Image | 随包的 PNG 或 JPEG 资源；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正。HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）在显示器能显示 HDR 时按高动态范围显示，SDR 白保持在系统的 SDR 亮度，高光按显示器峰值做色调映射；不能显示 HDR 时，带增益图的 JPEG 显示作者给的 SDR 图，PQ 与 HLG 做色调映射 | 阶段六；首版只显示随包资源。HDR 在 macOS 与 Web（Chrome）实测；Windows 自绘，只在 SDR 显示器上实测；Linux 的 HDR 输出要 GTK 4.16 起并由用户打开 GTK 的色彩管理，未实测；iOS 模拟器显示 SDR 版本，真机未实测 |
+| ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复；`ScrollView` 的 `snap` 与 `position` 见“联动” | 初期，虚拟化后续；`snap`、`position` SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动” |
+| Pinch 和 Swipe | 把双指缩放或拖动绑定到一个会话数值，见“联动” | 媒体类应用；SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动” |
+| Image | 随包的 PNG 或 JPEG 资源，或引擎状态中的 `MediaSource`（本地文件或 http(s) 地址，运行时读取，可以是 `Option`，为空时不显示）；`width`、`height` 至少写一个，只写一个时另一个按图片比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正。HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）在显示器能显示 HDR 时按高动态范围显示，SDR 白保持在系统的 SDR 亮度，高光按显示器峰值做色调映射；不能显示 HDR 时，带增益图的 JPEG 显示作者给的 SDR 图，PQ 与 HLG 做色调映射 | 阶段六；`MediaSource` 图片 SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现（`runtime_images`），只显示 SDR；WinUI 3 的 http(s) 图片未验证。HDR 在 macOS 与 Web（Chrome）实测；Windows 自绘，只在 SDR 显示器上实测；Linux 的 HDR 输出要 GTK 4.16 起并由用户打开 GTK 的色彩管理，未实测；iOS 模拟器显示 SDR 版本，真机未实测 |
 | Progress | 有 `value` 时是进度条，进度为 `value / total`（`total` 默认 1，超出范围按边界显示）；没有 `value` 时是不确定进度；`label` 同时是可访问名称 | 阶段六 |
 | Menu 和 MenuItem | 收纳操作入口的菜单；每个菜单项绑定命令，可绑定功能 | 阶段四 |
 | Adaptive 和 Layout | 按可用宽度在 `compact` 与 `expanded` 布局之间选择，保留状态 | 阶段四 |
 | LanguagePicker | 运行时切换界面语言 | 阶段四 |
-| Canvas | 不可交互的绘图区：形状、来自状态的数值序列与平铺图案，颜色只用语义角色 | SwiftUI 已实现，其他目标待补 |
-| Dialog | 应用内对话框、焦点及关闭行为 | 后续（窗口的对话框呈现见“声明式多窗口”） |
-| Video | 媒体源、受管理播放器、播放命令、状态与标准控件 | 早期验证 macOS 原生媒体适配及 Web video 映射。HDR 视频在 macOS 实测；Windows 由媒体引擎输出，只在 SDR 显示器上实测；Linux、Web 与 iOS 未实测 |
+| Rail | 按比例摆放：沿 `axis` 把子元素放在 `at` 比例处，或铺在 `from` 到 `to` 之间，比例可以绑定状态，见“按比例摆放” | 媒体类应用；实现进度见该节 |
+| Canvas | 不可交互的绘图区：形状、来自状态的数值序列与平铺图案，颜色只用语义角色 | SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“画布与标注文字” |
+| Dialog | 应用内对话框、焦点及关闭行为 | 用 `Window(role: dialog)` 表达，见“声明式多窗口”；SwiftUI 已实现 |
+| Video | 媒体源、受管理播放器、播放命令、状态与标准控件；`corner` 把画面裁成圆角 | 早期验证 macOS 原生媒体适配及 Web video 映射。HDR 视频在 macOS 实测；Windows 由媒体引擎输出，只在 SDR 显示器上实测；Linux、Web 与 iOS 未实测 |
 
 组件规范必须写清默认行为，避免由首个后端反向定义标准：
 
@@ -643,6 +654,21 @@ Image、Video 等组件的外壳、加载与错误提示及叠加操作仍参与
 
 首帧应在可行时使用已解析的外观或预生成快照，避免先显示错误模式。未能预知系统模式时使用确定的回退并及时更新。模式切换默认可直接提交，不要求动画；若实现过渡，仍需满足对比条件并尊重减少动态效果。
 
+应用也可以让用户在运行时选择强调色与明暗。`style!` 的 `accents` 块声明可选的强调色，`WindowSet` 用 `accent` 绑定一个枚举，枚举的每个值对应一个同名的强调色（不分大小写，忽略下划线），用 `appearance` 绑定一个由 `System`、`Light`、`Dark` 组成的枚举。这两个值通常是引擎状态，因为它们是用户的偏好，随设置保存。
+
+```rust
+style! {
+    accents {
+        crimson: "#FF2E55",
+        neon: color(light: "#00B86B", dark: "#07FF94"),
+    }
+}
+
+WindowSet(handle: AppWindows, primary: main, accent: app.accent, appearance: app.appearance) { … }
+```
+
+所选的强调色作为系统控件的着色，并替换 `accent` 角色，Bern 自绘的部分（标注、图案、填充）随之变化；所选的明暗作用于所有窗口，`System` 跟随系统。编译时检查枚举的每个值都有对应的强调色。实现进度：SwiftUI 已实现，在 macOS 上用 `examples/gallery` 验证三种强调色与浅色、深色的切换；系统绘制的侧栏选中高亮仍是系统强调色。Web 已实现：构建时为每个强调色各生成浅色、深色及更高对比的主题变量，运行时在根元素上切换 `data-bern-accent` 与 `data-bern-appearance`，画布随之重绘；浏览器中验证了绯红、群青与浅色、深色的切换。GTK 已实现：强调色以 `@define-color` 写入一份更高优先级的样式表，明暗由 `AdwStyleManager` 设置；WinUI 3 已实现：直接改主题字典中的强调色画刷并更新 `SystemAccentColor` 各档，明暗设在窗口根的 `RequestedTheme`；Linux 虚拟机与 Windows PC 上验证 gallery 由绯红换群青、浅色换深色，画布随之重绘（WinUI 3 两种前端都验证）。
+
 算法版本变化可能影响外观，需要受控升级和视觉回归。编译期可以验证配方并预生成已知模式的快照，但 `system` 和运行时品牌输入不能在构建时永久解析成一个模式。
 
 ### 主题验收
@@ -655,7 +681,7 @@ Image、Video 等组件的外壳、加载与错误提示及叠加操作仍参与
 
 ## 样式覆盖、动效与自绘
 
-实现进度：`style!` 的解析、校验与 IR，各目标的样式能力检查，以及 SwiftUI 上 `Button`、`IconButton`、`SidebarItem` 的样式覆盖与状态变换动效，已在 macOS 上用 `examples/planner` 验证；GTK、WinUI 3 与 Web 在能力描述中声明不支持，应用声明的覆盖在这些目标上构建失败，除非规则豁免该平台。SwiftUI 侧栏项一旦有样式，就由 Bern 绘制选中、悬停与按下，列表不再保留系统的选中；方向键在这种侧栏中切换选中尚未实现。结构过渡（`appear`、`disappear`、`reflow`）、共享元素（`hero`）、窗口的 `chrome`、`immersive` 与 `idle_after`、`Canvas` 与标注文字也已在 SwiftUI 上实现，并在 macOS 上验证：过渡与共享元素用逐帧截图确认在移动，沉浸窗口静置后隐藏标题栏、点击后恢复。悬停与按下的弹簧手感未验证。其他目标在能力描述中声明不支持，动效与窗口外观退回为直接变化并给出警告。尚未实现：其余控件的样式覆盖。各平台映射是依据平台文档的预期，实现时逐项实测，做不到的如实报告。
+实现进度：`style!` 的解析、校验与 IR，各目标的样式能力检查，以及 SwiftUI 上 `Button`、`IconButton`、`SidebarItem` 的样式覆盖与状态变换动效，已在 macOS 上用 `examples/planner` 验证；Web 已实现：基础外观写成样式，悬停、按下、焦点、禁用与选中的外观按顺序合并，颜色用短暂的 CSS 过渡，缩放、位移与透明度用状态的弹簧、回到普通状态用 `settle`；浏览器中用 `examples/planner` 验证侧栏项悬停放大到 1.03 并出现底色、按下 0.96、离开回 1，主要按钮的强调色底、10 圆角与大尺寸。GTK 已实现：每个样式写成一张样式表，状态取自 GTK 自己的状态标志，同优先级下后写的胜出，正是状态的合并顺序；WinUI 3 已实现：颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换，阴影由 Direct2D 画成位图垫在按钮下；两者的缩放、位移与透明度都用弹簧。Linux 虚拟机与 Windows PC 上用 `examples/planner` 与 `gallery` 验证侧栏项悬停放大到 1.03 与选中填色、卡片悬停放大并投影。WinUI 3 不支持选中侧栏项的 `indicator`（`NavigationView` 只画前缘的指示条），检查时报错。SwiftUI 侧栏项一旦有样式，就由 Bern 绘制选中、悬停与按下，列表不再保留系统的选中；方向键在这种侧栏中切换选中尚未实现。结构过渡（`appear`、`disappear`、`reflow`）、共享元素（`hero`）、窗口的 `chrome`、`immersive` 与 `idle_after`、`Canvas` 与标注文字也已在 SwiftUI 上实现，并在 macOS 上验证：过渡与共享元素用逐帧截图确认在移动，沉浸窗口静置后隐藏标题栏、点击后恢复。悬停与按下的弹簧手感未验证。Web 也已实现：弹簧由页面自己的逐帧积分驱动，可打断并保留速度；一个元素的变换分成几层（样式状态、出现与消失、共享元素、让位、晃一下、滚动联动）各自驱动后合成；共享元素在旧元素卸载时记下它的位置并留一份副本，新元素从那里长出、副本同时淡出；消失的元素等过渡播完才离开页面；`window.idle` 由窗口内的指针、触摸、滚轮与按键重新计时，沉浸时隐藏页头并在静置时隐藏指针。浏览器中逐帧采样确认 planner 的标题在两种字号间放大并交叉淡化、新标签从 0.4 倍弹出，拖放描边淡出后移除，沉浸窗口静置 3 秒后隐藏页头、移动指针后恢复。GTK 与 WinUI 3 也已实现全部动效用法与窗口外观，做法与验证见下面各节和它们的实现记录。尚未实现：其余控件的样式覆盖。各平台映射是依据平台文档的预期，实现时逐项实测，做不到的如实报告。
 
 ### 默认外观与覆盖层次
 
@@ -709,12 +735,31 @@ style! {
 
 - **选择器**：组件种类（`SidebarItem`），或种类加命名变体（`Button.hero`，实例写 `variant: hero` 选用；`style` 已是 `Text`、`Picker` 等组件的属性，不复用）。不按位置、层级或运行时条件选择。
 - **状态**：`hover`、`pressed`、`selected`、`focus`、`disabled`，与控件配方的状态相同；组合按配方规则合并，焦点反馈独立保留。写在状态中的变换用所带的动效进入该状态；`settle` 是回到普通状态时使用的动效。
-- **属性**：只接受 Bern 定义的集合。外观有 `background`、`foreground`、`border`、`corner`、`padding`、`size`（`small`、`regular`、`large`、`extra_large`，映射到平台的控件尺寸）；选中有 `fill(角色)` 与 `indicator(角色, edge, width)`；变换有 `scale`、`offset`、`opacity`；`system` 表示该项使用平台默认，`none` 表示该状态没有任何反馈。各组件可用的属性与状态写在组件规范中。
+- **属性**：只接受 Bern 定义的集合。外观有 `background`、`foreground`、`border`、`corner`、`padding`、`size`（`small`、`regular`、`large`、`extra_large`，映射到平台的控件尺寸）；选中有 `fill(角色)` 与 `indicator(角色, edge, width)`；变换有 `scale`、`offset`、`opacity`；阴影 `shadow(半径, y: 下移, opacity: 不透明度)` 像控件浮起，`y` 默认为半径的三分之一，不透明度默认 0.2，静止时写 `shadow: 4`；`system` 表示该项使用平台默认，`none` 表示该状态没有任何反馈。各组件可用的属性与状态写在组件规范中。
 - **颜色**：只写语义角色，例如 `accent`、`fill.subtle`、`text.primary`。前景自动与背景配对，`fill(accent)` 上的文字与图标使用 `on_accent`，由主题内核按模式与对比策略求解并检查，运行时改变品牌色时随之更新。确需固定颜色时写 `color(light: "#…", dark: "#…")`，两种模式都要给出并通过对比检查，否则构建失败。
 - **确定性**：样式在构建时确定。运行时只有交互状态与主题快照会改变结果，不能用状态绑定切换样式。
 - **目标例外**：`#[target(...)]` 块在指定目标上覆盖同名声明，用于平台差异或在某个目标上退回系统默认。
 
 样式覆盖同样适用于系统托管的控件：原生目标通过平台提供的样式接口实现，例如 SwiftUI 的修饰符与样式协议、WinUI 3 的轻量样式资源与模板、GTK 的样式表；Web 直接改变 Bern 配方。各平台实现同一项覆盖的代价差别很大，例如系统绘制的侧栏选中高亮，在一些平台上需要换掉系统的选中呈现并自行维护选中与键盘导航。
+
+### 带内容的按钮与悬停显示
+
+海报、卡片、列表行这类“点了就打开”的东西，显示的是图片与文字，而不是按钮标题。`Button` 可以带一个子元素作为它显示的内容，`label` 仍是必写的可访问名称，`icon` 与 `prominence` 不能再写；多个元素放进 `Column`、`Row` 或 `Stack`。内容里不能有其他控件，经过组件也一样，否则一次按下有两种含义，构建失败；需要第二个操作时，把它放在按钮旁边，例如叠放在同一个 `Stack` 中。
+
+```rust
+Stack(align: top_trailing) {
+    Button(id: open, label: item.name, variant: card) {
+        Canvas(height: 120, label: item.name) { Pattern(name: gingham) }
+    } => app.open(item.id)
+    IconButton(id: favorite, icon: "star", label: tr! { "zh-Hans" => "收藏", "en" => "Favorite" }, reveal: hover) => app.favorite(item.id)
+}
+```
+
+- 带内容的按钮没有平台的按钮外框，内容按原样显示；样式覆盖对它同样有效，`corner` 同时把内容裁成圆角，`shadow` 沿裁切后的形状投下。没有样式时，按下时内容变暗。
+- `reveal: hover` 可以写在任何元素上：指针在它所在的容器上时显示，离开时隐藏，切换使用 `snappy` 动效。元素获得键盘焦点时也显示，辅助技术始终能读到它；没有指针的设备上它一直显示。悬停显示只是捷径，不能是某个操作唯一的入口。
+- 预期实现：SwiftUI 用不带外框的 `ButtonStyle`、`.clipShape` 与 `.shadow`，悬停用 `.onHover` 与环境值传给内容；Compose 用 `Modifier.clickable` 与 `hoverable`；WinUI 3 用内容为任意元素的 `Button` 与轻量样式；GTK 用带子控件的 `.flat` 按钮与 `GtkEventControllerMotion`；Web 用内容为任意元素的 `<button>` 与 `:hover`、`:focus-within`。
+
+实现进度：SwiftUI 已实现，用 `examples/gallery` 在 macOS 上验证：悬停时卡片放大并投下阴影、星标出现，圆角裁住内容，卡片与星标都能经命令行按行的 key 触发。按下的弹簧手感、键盘焦点显示星标与 iOS 未实测。Compose 已实现（`clickable` 与 `hoverable`，阴影用 `shadow`），Android 模拟器上验证了卡片与星标的点按；触屏没有悬停，`reveal` 的内容一直显示。Web 已实现：带内容的按钮是没有外框的 `<button>`，`reveal` 的内容在所在容器悬停或获得焦点时显示，没有指针的设备上一直显示；浏览器中验证卡片悬停放大到 1.03 并投下阴影、星标出现，点星标收藏并弹出轻提示，点卡片打开图案。GTK 与 WinUI 3 已实现（WinUI 3 的圆角用 Composition 的圆角几何裁剪，`reveal` 在指针位于容器上或获得焦点时淡入），Linux 虚拟机与 Windows PC 上验证卡片悬停放大、投下阴影、星标出现。
 
 ### 动效
 
@@ -729,7 +774,7 @@ style! {
 | `jelly` | 0.42 | 0.42 | 明显回弹 |
 | `hero` | 0.48 | 0.86 | 几乎不回弹，用于共享元素 |
 
-动效有三种用法，不开放时间轴，也不开放逐帧回调：
+动效有以下几种用法，不开放时间轴，也不开放逐帧回调：
 
 1. **状态变换**：在样式中为状态声明缩放、位移与透明度，作用在控件的外层容器上，不改变控件本身的绘制，也不影响相邻元素的布局。
 2. **结构过渡**：任何元素可以声明 `appear` 与 `disappear`，在它因 `if`、`match` 或 `ForEach` 的变化而挂载或卸载时播放；首次显示不播放。过渡只有 `fade`、`pop(from: 比例)` 与 `slide(edge, 距离)` 几种，各带一个动效 token。容器可以声明 `reflow: 动效`，让相邻元素平滑让位。
@@ -740,21 +785,63 @@ style! {
    }
    ```
 
+   容器可以声明 `stagger: 秒`，让子元素错峰出现：这个容器本身出现时，或一次更新给它加入了几个子元素时，带 `appear` 的直接子元素依次播放各自的过渡，每个比前一个晚 `stagger` 秒。与平常不同，容器出现时它的这些子元素也播放 `appear`，这正是错峰的用途；首次显示仍不播放，系统减少动态效果时不错峰。`stagger` 写在 `Column`、`Row`、`Grid`、`Stack`、`ForEach` 与 `List` 上，取 0 到 1 秒；`ForEach` 的子元素是它的各行。实现进度：Web 已实现，在浏览器中用 `examples/gallery` 的海报墙（`ForEach(stagger: 0.04)`，卡片 `appear: rise`）逐帧确认切到“图案”页时 6 张卡片依次在约 0、47、97、130、164、214 毫秒开始升起；macOS 与 iOS 已实现，同一次更新中出现的子元素按阅读顺序（自上而下，同一行内按书写方向）排队，不依赖系统报告出现的先后（懒加载网格报告的先后不固定），在 macOS 窗口与 iPhone 17 Pro 模拟器上放慢 10 倍逐帧确认卡片从 Gingham 到 Windowpane 依次升起；Compose、GTK 与 WinUI 3 已实现，轮次在组合或构建各行时按书写与条目顺序分配：Android 模拟器上把动画倍率调为 100 逐张截图、Windows PC 上逐帧截取，6 张卡片同样依次升起；Linux 虚拟机上由动效日志量出 6 张卡片在约 3、44、84、123、164、204 毫秒开始。一次更新加入几个子元素的情形在 Compose 上未验证。
+
+   ```rust
+   Column(gap: 12, stagger: 0.03) {
+       Text(content: app.title, style: title, appear: fade)
+       Text(content: app.summary, appear: fade)
+       Row(gap: 8, appear: fade) { /* … */ }
+   }
+   ```
+
 3. **共享元素**：两个元素声明相同的 `hero` 键，例如 `hero: (poster, item.id)`，由一个静态名称与可选的受限表达式组成。在同一窗口中，一次更新让带某个键的元素出现、而更新前另一个带同一键的元素可见时，后端让新元素从旧元素的位置与尺寸以 `hero` 动效展开，内容交叉淡化；返回时反向。同一时刻同一窗口中最多一个可见元素带某个键，跨窗口不配对。
+4. **长度变化**：元素声明 `animate: 动效` 后，它绑定的长度变化时用这个动效过渡，例如画面在铺满与退后之间：`Column(padding: if window.idle { 0 } else { 40 }, animate: hero)`。`Video` 的 `corner` 同样过渡，画面图层的圆角由平台的图层动画驱动。
+
+另有两个与动效无关的通用属性：`appearance: dark` 或 `light` 让元素及其中的一切固定使用深色或浅色外观，不随窗口切换，例如始终是深色的播放层；`reveal: hover` 见“带内容的按钮与悬停显示”。实现进度：`animate`、`appearance` 与 `Video` 的圆角 SwiftUI 已实现，在 macOS 上用 `examples/gallery` 验证：画框静置后铺满、移动指针后退后，圆角裁在画面上，画框区域在浅色窗口中保持深色；过渡的中间帧未逐帧确认。从其中弹出的浮层跟随 `appearance`，已验证。AppKit 按窗口的外观画菜单，从这样的部分弹出的菜单原先是浅色的；现在部分的背后放一个不接收点按的标记视图，菜单开始跟踪时取指针下最内层部分的外观设给这个菜单，macOS 上验证浅色窗口里画框中的菜单是深色、菜单项照常生效。iOS 上 UIKit 按菜单所出自的控件的外观画菜单，而 SwiftUI 的菜单按钮（iOS 26 上是一个 UIKit 按钮）不随部分的外观，所以同样的菜单原先也是浅色；现在标记视图在窗口上旁观触摸，触摸在部分里的菜单控件上开始时，把最内层部分的外观设给这个控件，菜单弹出时照这个外观画。iOS 26.5 模拟器验证：浅色窗口里画框中的菜单是深色，录屏逐帧看展开动画从第一帧起就是深色，选「大」后字号为 18；临时把画框改成 `light`、窗口设为深色时，菜单是浅色；部分以外的工具栏菜单仍跟随窗口。没有触摸过、从键盘或 VoiceOver 打开的菜单，按实现仍是窗口的外观，未实测。iOS 上应用选择的明暗（`WindowSet(appearance:)`）原先被场景根上的快照设置覆盖而不生效，已修正，iOS 26.5 模拟器验证了切换深色与跟随系统。Compose 已实现，Android 模拟器上验证：画框区域在浅色窗口中保持深色，从其中弹出的分体按钮浮层与菜单也是深色；静置三秒后画框铺满、圆角收为直角，触摸后退回并恢复圆角（圆角的视频用 `TextureView` 才能被裁住）；切换深色时状态栏图标随之变色。Web 已实现：部分换用另一套主题变量，其中弹出的浮层与菜单在页面结构上仍在这部分里，随之是深色；浏览器中验证浅色窗口里画框保持深色，分体按钮的浮层与“字号”菜单都是深色，画框静置 3 秒后铺满、圆角收为直角、按钮隐藏。GTK 已实现：把 libadwaita 的样式规则限定在部分之下、换用另一种外观的命名颜色；WinUI 3 已实现：部分的 `RequestedTheme`，浮层另设同样的主题；Linux 虚拟机与 Windows PC 上验证画框页在浅色窗口中为深色，其中分体按钮的浮层也是深色。
 
 各目标的预期实现：
 
 | 目标 | 弹簧与变换 | 共享元素 |
 | --- | --- | --- |
 | SwiftUI | `.spring(response: T, dampingFraction: ζ)`，可打断并保留速度 | 同一视图层级用 `matchedGeometryEffect`；导航推入在 iOS 18 起用 `navigationTransition(.zoom)` |
-| WinUI 3 | Composition 的 NaturalMotion 弹簧（`Period`、`DampingRatio`） | `ConnectedAnimationService` |
-| GTK | libadwaita 的 `AdwSpringAnimation`；任意控件的变换在分配时应用 | 没有原生方案，退回交叉淡化 |
-| Web | Web Animations API，按弹簧方程采样关键帧或使用 CSS `linear()`；打断时从当前值开始 | View Transitions API |
+| WinUI 3 | 运行时自己的弹簧，每帧在 `CompositionTarget.Rendering` 中推进并保留速度，写到 `Translation`、`Scale`、`Opacity` | 离开的元素移到窗口覆盖层，新元素从旧位置与尺寸展开、旧元素同时淡出（`ConnectedAnimationService` 要求导航时成对准备，不用它） |
+| GTK | libadwaita 的 `AdwSpringAnimation`；任意控件的变换在分配时应用 | 没有原生方案：离开的元素留一张画面在窗口上方的层里，新元素从旧位置与尺寸展开、旧画面随之移动并淡出（视频与画布不留画面） |
+| Web | 页面自己的逐帧弹簧积分（`requestAnimationFrame`），打断时保留当前值与速度 | 新元素从旧元素的位置与尺寸长出（FLIP），旧元素的副本同时淡出 |
 
 - **打断**：弹簧接受新的目标值，从当前位置继续；平台能保留速度时保留速度。
-- **减少动态效果**：系统开启时，状态变换不再执行，结构过渡与共享元素改为 150 毫秒的淡入淡出。开发与测试可用 `BERN_MOTION=reduce` 强制这一设置，使截图与场景回放确定。
+- **减少动态效果**：系统开启时，状态变换不再执行，结构过渡与共享元素改为 150 毫秒的淡入淡出。开发与测试可用 `BERN_MOTION=reduce` 强制这一设置，使截图与场景回放确定；SwiftUI 目标还可用 `BERN_MOTION=slow` 把弹簧与错峰放慢 10 倍，便于逐帧截图检查动效。
 - **事实与语义树**：状态、窗口事实与 `ui.inspect` 报告更新后的目标状态，不报告动画中间值；命令不等待动画结束。
-- **做不到的映射**：目标在能力描述中声明支持的动效用法；不支持时按表中的退回方式呈现并在构建诊断中列出，例如 GTK 的共享元素。
+- **做不到的映射**：目标在能力描述中声明支持的动效用法；不支持时按表中的退回方式呈现并在构建诊断中列出。
+
+#### 联动
+
+随滚动位置或手势连续变化的效果不用弹簧，也不开放逐帧回调：界面只声明对应关系，由平台的渲染系统逐帧计算。
+
+- **随滚动变化**：元素写 `scroll_scale: 1.12` 时，在它所在滚动区的中心放大到 1.12 倍，离中心越远越接近原大，到边缘为 1；`scroll_opacity: 0.6` 让它在边缘时为 0.6、在中心时完全不透明。两者可以同时写，只改变绘制、不改变布局；不在滚动区里的元素不受影响。减少动态效果时不再变化。
+- **滚动对齐**：`ScrollView(snap: start | center)` 让滚动停下时有一项对齐到开头或正中；`center` 时首尾两项也能停到正中。
+- **滚动位置**：`ScrollView(position: draft.x)` 绑定一个与列表 key 同类型的会话字段（`i64` 或 `String`），表示停在锚点（`snap: center` 时为正中，否则为开头）的那一项。用户滚动时字段跟着变；字段被设成另一项的 key 时（例如 `=> draft.x.set(item.id)`）以 `smooth` 滚过去。剧集胶片的“下一集停在正中”、拼音索引的“点字母滚过去”都这样写：
+
+```rust
+ScrollView(axis: horizontal, snap: center, position: draft.episode) {
+    Row(gap: 30) {
+        ForEach(items: app.episodes, key: id) |episode| {
+            Column(width: 240, scroll_scale: 1.12) {
+                episode_cell(episode: episode)
+            }
+        }
+    }
+}
+```
+
+- **晃一下**：任何元素写 `nudge: 条件`，条件变真时它稍稍放大、再以 `jelly` 弹簧弹回，例如拖入文件时画框晃一下：`Stack(nudge: draft.dragging)`。`ScrollView(position:, arrival: nudge)` 让设置 `position` 滚到的那一项在停稳后晃一下，例如点拼音索引后那张海报；用户自己滚动不会触发。减少动态效果时不晃。
+- **手势绑定到值**：`Pinch` 与 `Swipe` 是包住内容的手势区。`Pinch(value:, min:, max:)` 用双指缩放的倍数乘到值上；`Swipe(value:, min:, max:, axis:, distance:)` 把拖动的距离换算成值的变化，向上或向右增大，`distance` 点（默认 300）走完整个范围。动作在手指离开时执行，与 `Slider` 一样；外部入口用 `ui.set_number`，辅助技术按十分之一范围调节。手势不能是唯一的入口：同一个值应另有滑块、按钮或菜单。
+
+各目标的预期实现：SwiftUI 的 `scrollTransition`、`scrollTargetBehavior`、`MagnifyGesture` 与 `DragGesture`；Compose 的 `graphicsLayer` 按每格的位置与滚动量计算、自己的 `FlingBehavior` 与多指指针事件的 `calculateZoom`；WinUI 3 的合成表达式动画（`ExpressionAnimation` 读 `ScrollViewer` 的位移）、`SnapPointsType` 与操作事件；GTK 在帧时钟中读取调整量，`GtkGestureZoom` 与 `GtkGestureDrag`；Web 的滚动驱动动画（`animation-timeline: view()`）、`scroll-snap` 与指针事件。
+
+实现进度：SwiftUI 已实现，用 `examples/gallery` 的“胶片”页验证。macOS：正中一格放大、两侧变小变淡；滚轮滚动后停在某一格正中，字段随之更新；按钮设置字段后滚到第一格或最后一格并停在正中；鼠标上下拖动改变值；`ui.set_number` 驱动 `Pinch` 改变海报墙的列数；按钮滚到第一格后，录屏逐帧确认那一格停稳后放大再弹回；从访达拖入视频时画框放大再弹回（逐帧量出回弹越过原位）。iOS 26.5 模拟器：手指快滑与慢拖都停在某一格正中，包括按钮滚动之后的第一次手势；双指捏合与张开把海报墙的卡片尺寸压到下限、撑到上限；手指上拖 90 点使值增加 0.3。iOS 18.6 模拟器：初始位置与按钮滚动都停在正中，手指操作未实测；macOS 触控板的双指缩放未实测。Compose 已实现：放大与变淡在 `graphicsLayer` 中按每格离视口中心的距离计算，停靠用自己的 `FlingBehavior`（按惯性算出落点后取最近的一格），每格的位置按它在滚动内容中的坐标记录，不随滚动变化；Android 模拟器上验证：初始位置停在设定的一格正中，手指快滑前进一格、短拖弹回原格，按钮滚到首尾，上下拖动改变值，双指张开把海报墙的卡片撑到上限、捏合缩小（经模拟器的 gRPC 触摸接口发送两指触摸）。Web 已实现：停靠用 CSS 的 `scroll-snap`，滚动停下后字段跟随停在锚点的一格，设置字段时平滑滚过去、到达后晃一下，首尾两格靠滚动视图两侧按最大一格留出的空白也能停到正中；放大与变淡在每次滚动的下一帧按离视口中心的距离计算；捏合接受两指触摸与触控板（浏览器报告为带 Control 的滚轮），`Swipe` 用指针拖动。浏览器中验证：初始位置停在设定的一格正中，滚轮滚动后吸附到某一格且字段随之更新，按钮滚到首尾并晃一下，上拖使值增加，带 Control 的滚轮把卡片撑到上限。GTK 已实现：滚动停下 160 毫秒后取最近的一项对齐到锚点，走过 24 点以上时取运动方向上的下一项；Linux 虚拟机上验证初始停在指定一格正中、正中一格放大到 1.12、按钮滚到末尾并停在正中，`ui.set_number` 设置 `Swipe` 与 `Pinch`，触摸板捏合与触摸拖动未验证。WinUI 3 已实现：在 `ViewChanged` 停下后以动画对齐最近一项，滚动联动是 `ExpressionAnimation`，捏合是触摸的 `ManipulationDelta` 与带 Ctrl 的滚轮；Windows PC 上验证初始停在正中、首尾居中、滚轮后吸附并写回字段，上拖使值由 0.5 变为 0.767，带 Ctrl 的滚轮放大卡片，触摸与触控板手势未验证。
+
+停靠的规则由 Bern 自己实现（自定义 `ScrollTargetBehavior`）：各项上报自己在内容中的位置，滚动停下时取离预计停点最近的一项对齐到锚点，所以快滑仍会走过几格，iOS 17 与 macOS 14 起都可用。平台自带的 `viewAligned(anchor: .center)` 只在 26 起有，并且在 iOS 上被程序滚动过之后的下一次手势会停偏，因此不用。平台的滚动位置在用户滚动时只会清空、不报告停在哪一项，Bern 由各项上报自己相对视口的位置，取离锚点最近的一项写回字段；一次设置位置引起的滚动停稳（约 150 毫秒不动）后，平台的位置绑定随即放开，以免影响用户接下来的手势。其他目标对 `snap`、`position` 构建失败，对 `scroll_scale`、`scroll_opacity` 给出警告并保持原样，`Pinch` 与 `Swipe` 不在其能力描述中。
 
 ### 画布与标注文字
 
@@ -763,6 +850,19 @@ style! {
 - `Shape`：矩形、圆角矩形、胶囊与椭圆，指定位置、尺寸、填充与描边；
 - `Series`：来自状态的一列数值，按 `area` 或 `line` 铺满画布宽度，`max` 可声明或按数据取最大值；
 - `Pattern`：由条带序列定义的平铺图案。每条带有颜色角色、宽度与不透明度，序列同时用于横纵两个方向即成格纹，`twill: true` 叠加 45° 斜纹。
+
+`Shape(fill_from: 图片)` 用一张图片的平均颜色填充，图片可以是随包资源或引擎状态中的 `MediaSource`；`fade: up | down | left | right` 让填充向该方向渐隐为透明。海报详情页的头部取海报的颜色铺满、向下融进页面，就是这样写的：
+
+```rust
+Stack(align: bottom_leading) {
+    Canvas(height: 180, label: tr! { "zh-Hans" => "海报的颜色", "en" => "The poster's color" }) {
+        Shape(kind: rect, fill_from: app.poster, fade: down)
+    }
+    Image(source: app.poster, height: 150, label: tr! { "zh-Hans" => "海报", "en" => "Poster" })
+}
+```
+
+平均颜色是装饰：图片未读到时用 `fill`（不写为默认的填充角色）代替，读到后重绘；叠在上面的文字仍用自身的表面配对，不按取到的颜色换色。
 
 坐标与尺寸以画布的点为单位，原点在左上角。`Shape` 不写尺寸时延伸到画布边缘；`Canvas` 不写 `width` 或 `height` 时在该方向上填满可用空间。绘图元素按书写顺序绘制，后写的在上面；画布只直接包含绘图元素，不写条件，需要时把整个画布放进条件。
 
@@ -788,15 +888,41 @@ Stack {
 - 画布的颜色只用语义角色，由主题内核随模式求解；画布属于 Bern 自绘，适用自绘部分的主题规则。图案与数据图形是装饰或展示，不能承载唯一的操作入口；表达信息时须提供 `label`。
 - 交互由叠放在上面的标准控件提供，例如上例中的 `Slider`，所以命令、键盘与可访问性不受影响。
 - 预期实现：SwiftUI 的 `Canvas` 与 `Shape`，WinUI 3 的 XAML 形状与平铺画刷，GTK 的 `GtkSnapshot`，Web 的 SVG 或 `<canvas>`。图案按主题生成平铺图并缓存，不随包携带位图。
-- 实现进度：SwiftUI 已实现，画布读取的状态在视图更新时取值，状态变化即重绘；图案目前每次绘制时直接画出条带，没有缓存平铺图。有 `label` 的画布是一个带名称的图像，没有的对辅助技术隐藏。GTK、WinUI 3 与 Web 在能力描述中不列出绘图元素，使用时构建失败。
+- 实现进度：SwiftUI 已实现，画布读取的状态在视图更新时取值，状态变化即重绘；`fill_from` 的图片在后台读取并缩成 1×1 像素取平均色，与 `Image` 共用缓存（`picture_fills`），macOS 上已验证；Compose 缩成 32×32 后取全图平均（单个像素只采到中间），Android 模拟器上验证了从系统选择器换海报后头部取到它的颜色；图案目前每次绘制时直接画出条带，没有缓存平铺图。有 `label` 的画布是一个带名称的图像，没有的对辅助技术隐藏。Web 已实现：画布是 2D `<canvas>`，按设备像素比绘制，状态、尺寸或颜色变化时重绘，`fill_from` 的图片缩成 32×32 后取平均色（跨域且没有 CORS 的图片读不到颜色，用 `fill`），浏览器中验证了 planner 的格纹、面积与折线，gallery 的海报墙、胶片与取色铺底。GTK 已实现（`GtkDrawingArea`，`fill_from` 在后台读取后缩到 32×32 取平均色）；WinUI 3 已实现（Direct2D 画进 WIC 位图交给 `Image`，两种前端同一套代码）；Linux 虚拟机与 Windows PC 上验证 planner 的格纹、面积与折线、胶囊，gallery 卡片的图案与详情的取色渐隐。
 
 `Text` 可以声明标注 `mark: 角色`：在每一行文字下方画一条胶囊形底纹，文字颜色不变。底纹默认覆盖行高的 74% 至 98%，右端比文字多出 0.4 个字宽且不占排版空间，这些参数可在 `style!` 的 `Text` 中覆盖。底纹颜色是纯色角色，因为文字颜色不变，可读性由文字自身的配对保证。预期实现：SwiftUI 在 macOS 15 与 iOS 18 起用 `TextRenderer` 取得行的位置，更早的系统退回下划线；Web 用行内元素的背景与 `box-decoration-break: clone`；GTK 用 Pango 的行范围在自绘中绘制；WinUI 3 的做法待验证。
 
-实现进度：SwiftUI 已按上述默认参数实现，macOS 上已验证；在 `style!` 中覆盖底纹参数尚未实现。GTK、WinUI 3 与 Web 在能力描述中声明不支持，构建时给出警告，文字照常显示、没有底纹。
+实现进度：SwiftUI 已按上述默认参数实现，macOS 上已验证；在 `style!` 中覆盖底纹参数尚未实现。Web 已实现：每行的位置由文字的行框（`Range.getClientRects`）取得，底纹画在文字后面，文字换行或字体载入后重画，浏览器中已验证。GTK 与 WinUI 3 已按默认参数实现（WinUI 3 由 `TextPointer` 取每行的矩形），Linux 虚拟机与 Windows PC 上验证 planner 的“最近的进度”。
 
+
+### 按比例摆放
+
+时间轴上按播出时间摆放的海报、进度条上的章节刻度与名称、弹幕高峰点、下载行按进度涨满的底色、按钮里的安装进度，都需要把元素放在一段长度的某个比例上，比例来自状态。`Rail` 是这样的一条轨道：沿 `axis`（默认横向）铺满它得到的长度，每个子元素写 `at: 比例` 放在那一点上，或写 `from: 比例, to: 比例` 铺在两点之间；比例是 0 到 1 的数，可以绑定状态，越界时夹到两端。
+
+```rust
+Stack(align: center) {
+    Slider(id: position, label: tr! { "zh-Hans" => "进度", "en" => "Position" }, value: draft.position, min: 0, max: 1)
+    Rail {
+        ForEach(items: app.chapters, key: id) |chapter| {
+            Canvas(width: 2, height: 10, at: chapter.start) { Shape(kind: capsule, fill: text.secondary) }
+        }
+    }
+}
+
+Stack(align: leading) {
+    Rail { Canvas(from: 0, to: row.progress) { Shape(kind: rect, fill: fill.subtle) } }
+    Row(gap: 8, padding: 12) { Text(content: row.name) }
+}
+```
+
+- 写 `at` 的子元素按自己的大小，默认以中心对准那一点；`Rail(anchor: start)` 或 `end` 让子元素的起点或终点对准它。写 `from` 与 `to` 的子元素沿轴从一点铺到另一点，没写交叉方向尺寸时铺满轨道的厚度。子元素必须写其中一种。
+- 轨道沿轴占满它得到的长度；交叉方向的厚度是最厚的子元素，或由父容器拉伸。在 `Stack` 中轨道不撑大 `Stack`：`Stack` 的大小由其他层决定，轨道铺满这个大小，例如面板里按数值涨满的底色与面板一样高。子元素可以超出轨道，不裁切；轨道本身不接收点按，叠在滑块上时滑块照常可拖。
+- 子元素变化时不重排兄弟元素：互相重叠由布局声明者避免，例如章节名用 `anchor: start` 并控制字数。`at`、`from`、`to` 绑定的状态变化时，元素随 `animate` 的弹簧移动；没有 `animate` 时直接移到新位置。
+- 目标在能力描述中列出 `rails` 才能构建 `Rail`；不支持的目标构建失败。
+- 实现进度：Web 已实现，横向轨道的子元素共用一格网格、按比例的起始边距定位，竖向轨道用绝对定位；在浏览器中用 `examples/gallery` 的胶片页验证一条时间轴（底线、6 个按引擎给出的比例摆放的刻度、`anchor: start` 的名字、绑定 `draft.level` 的“现在”竖线）与按数值涨满的底色，拖动时竖线随 `animate: smooth` 从 50% 平滑移到 80%。macOS 与 iOS 已实现（自定义布局；含轨道的 `Stack` 改用让轨道铺满其他层大小的布局），在 macOS 窗口与 iPhone 17 Pro 模拟器上验证同一条时间轴，`ui.set-number` 把数值改为 0.9 与 0.8 后竖线与底色移到对应比例，底色与面板等高。Compose 已实现（自定义布局，子元素以 `layoutId` 带上比例；`Stack` 中的轨道用 `matchParentSize()`），Android 模拟器上验证同一条时间轴，level 从 0.5 改为 0.8 后竖线平滑移动、底色铺满 120 dp 高的面板，竖向轨道与 `anchor: end` 也已验证。GTK 与 WinUI 3 已实现，轨道只沿轴扩展，在 `Stack` 中铺满其他层给出的尺寸；Linux 虚拟机与 Windows PC 上验证时间轴与竖线随数值移动，窗口有多余高度时底色仍与 120 点的面板等高。比例来自引擎：Bern 的表达式没有算术，例子里每一格的位置由引擎算好放进状态。
 ### 能力声明与构建检查
 
-每个目标在能力描述中列出：各组件支持覆盖的属性与状态、支持的动效用法及退回方式、`Canvas` 的绘图元素与 `Text` 标注。构建时逐项比对：
+每个目标在能力描述中列出：各组件支持覆盖的属性与状态、支持的动效用法及退回方式、`Canvas` 的绘图元素与 `Text` 标注，以及它能构建的其他 IR 功能（`features`，例如 `button_content`、`reveal`），新增的能力都按名称登记在这份清单里。构建时逐项比对：
 
 - 应用声明的覆盖在某个目标上无法实现时构建失败，并指出声明位置与目标；
 - 应用确认接受该目标的系统默认时，在 `style!` 中用 `#[target(...)]` 写 `system`，或用 `#[exempt(目标, "原因")]` 标注该声明块；
@@ -896,11 +1022,13 @@ Required languages: zh-Hans, en, ja
 
 切换布局保留应用状态。局部编辑内容、焦点、滚动位置等是否跨分支保留，必须通过稳定身份及迁移规则定义；不按组件在树中的位置自动推断为同一实例。
 
-首版的声明方式：
+声明方式：
 
 ```toml
 [layouts]
-compact_below = 600   # 逻辑单位：Adaptive 所在位置的可用宽度
+compact_below = 600     # 逻辑单位
+medium_below = 1024     # 可选：没有时没有 medium 档
+expanded_below = 1440   # 可选：没有时没有 large 档
 ```
 
 ```rust
@@ -910,8 +1038,9 @@ Adaptive(id: clip_choice) {
 }
 ```
 
-- 选择依据是 `Adaptive` 所在位置的可用宽度：小于 `compact_below` 为 `compact`，否则为 `expanded`。任何宽度都恰好落入一个尺寸，规则确定、可测试。输入方式与 TV 尺寸后续扩展，首版不声称检查了它们。
-- `Adaptive` 只能包含 `Layout`，并且必须为每个尺寸各提供一个；缺少或重复报 B401。使用 `Adaptive` 而没有配置 `[layouts]` 报 B402。
+- 尺寸档有四个：小于 `compact_below` 为 `compact`，小于 `medium_below` 为 `medium`，小于 `expanded_below` 为 `expanded`，其余为 `large`；没写的断点让对应的档不存在，宽度落入上一档。任何宽度都恰好落入一个尺寸，规则确定、可测试。输入方式与 TV 尺寸后续扩展，不声称检查了它们。
+- `Adaptive` 的选择依据是它所在位置的可用宽度。它只能包含 `Layout`，`compact` 与 `expanded` 各一个是必需的，`medium` 与 `large` 可选；某一档没有自己的 `Layout` 时用更大一档的，没有更大的就用更小一档的，因此只写 `compact` 与 `expanded` 的应用行为不变。缺少必需的、重复，或写了配置中不存在的档，报 B401。使用 `Adaptive` 而没有配置 `[layouts]` 报 B402。
+- 表达式可以读窗口宽度所在的档：`window.compact`、`window.medium`、`window.expanded`、`window.large`，恰有一个为真，例如页边距 `padding: if window.large { 48 } else if window.expanded { 32 } else if window.medium { 24 } else { 16 }`。它们按窗口宽度和同一组断点计算，需要 `[layouts]`。目标在能力描述中列出 `size_classes` 才支持 `medium`、`large` 与这些窗口字段；不支持的目标构建失败。实现进度：Web 已实现，浏览器中把视口设为 1024、800、1100 宽验证：海报墙页边距随窗口档位为 32、24、32；胶片页的 `Adaptive` 在可用宽度约 560 时为 `compact`（图标按钮），约 860 时为 `medium`（文字按钮）。macOS 与 iOS 已实现：macOS 窗口宽 880、1200 与 1440 以上时海报墙页边距为 24、32、48；胶片页的 `Adaptive` 在窗口宽 600、1100、1470 时为 `compact`、`medium`、`expanded`；iPhone 17 Pro 竖屏为 `compact`。Compose 已实现，Android 模拟器上把窗口设为 448、896、1344、1493 dp 宽：海报墙页边距为 16、24、32、约 48，胶片页的 `Adaptive` 依次为 `compact`、`medium`、`expanded`。GTK 已实现，窗口内容顶部一个高 0 的探针测量宽度，Linux 虚拟机上中号窗口时胶片页为 `medium`；WinUI 3 已实现，Windows PC 上验证海报墙页边距随档位变化、胶片页在 `compact`、`medium`、`expanded` 之间切换。功能契约的覆盖仍按 `compact` 与 `expanded` 检查。
 - 状态保留规则：引擎状态与会话草稿不在视图树中，切换布局不受影响；控件身份是“组件 + 控件 `id`”，两个布局中 `id` 相同的控件是同一控件，切换后焦点迁移到它（目标支持焦点迁移时）；滚动位置与未提交的局部编辑首版不迁移。
 - 带 `id` 的 `Adaptive` 出现在 `ui.inspect` 中，值为当前尺寸，外部入口可以确认布局切换。
 
@@ -1153,6 +1282,8 @@ JSON 是编码，不等于传输，也不等于 MCP。JSON 控制消息可以经
 
 应用状态通过只读快照或订阅提供给 UI。运行时记录依赖关系，仅更新受影响的绑定。多属性状态更新需要批次或版本边界，避免一次业务变化让界面短暂读到互相矛盾的状态。
 
+界面自己的状态写在会话草稿中（`#[bern::session]`），例如面板是否打开、流程走到第几步、选中哪一项。控件可以直接改草稿：开关、选择器、输入框改它们绑定的字段；按钮通过会话动作改，写作 `=> draft.panel.set(true)` 或 `=> draft.panel.toggle()`（只用于 `bool`）；小数字段可以写整数，例如 `=> draft.size.set(12)`。会话动作只改这个会话的草稿，不进入业务引擎，也不是业务命令，所以不属于任何功能；它们和其他动作一样经 `ui.activate` 由外部入口触发。实现进度：SwiftUI、Compose 与 Web 已实现，Web 上验证了菜单项把字号设为 18；GTK 与 WinUI 3 已实现，Windows PC 上验证菜单项把字号设为 18、分体按钮的浮层显示 18，GTK 上未单独验证。
+
 最小运行时必须处理：
 
 - 应用状态、组件局部状态及派生状态的归属。
@@ -1204,6 +1335,16 @@ Bern 发起的焦点操作由标准会话命令与焦点管理器执行，必须
 - 输入法组合与文本选择属于编辑会话，不能把中间组合状态误当成最终提交命令。
 
 平台存在多个输入方式时，尺寸布局与输入模式分别描述。TV 的方向导航需要独立验证，不能仅扩大桌面按钮后宣称适配完成。
+
+`ui.set_file` 把一个 `file://` 或 http(s) 地址交给带 `pick` 的按钮或 `Drop`，如同用户选中或拖入了它，随后执行动作；种类不符时答复 `unsupported_file`，地址不合法时答复 `invalid_url`。外部入口与测试用它代替系统面板和拖放。实现进度：SwiftUI 已实现并在 macOS 上验证；Compose 已实现；Web 已实现并在浏览器中验证：不是地址时答复 `invalid_url`，不是视频时答复 `unsupported_file`，页面能访问的视频地址交给“打开视频”后开始播放；GTK 与 WinUI 3 已实现，Linux 虚拟机与 Windows PC 上验证 `invalid_url`、`unsupported_file` 与视频地址交给拖放区后播放。
+
+`ui.focus` 是给控件键盘焦点的标准会话命令，外部入口用它聚焦搜索框，搜索框的结果随之出现。实现进度：SwiftUI 的搜索框支持，需要 macOS 15 或 iOS 18（`searchFocused`），已在 macOS 上验证结果出现并可经 `ui.activate` 打开；Web 的搜索框同样支持，浏览器中验证聚焦后输入即出现结果下拉，点结果打开图案。GTK 与 WinUI 3 的搜索框也支持，未单独验证。其他控件与其他目标对它答复 `target_unavailable` 或 `unknown_command`。
+
+### 快捷键
+
+按钮、图标按钮、菜单项、开关与搜索框可以声明 `shortcut`：修饰键 `cmd`、`ctrl`、`alt`、`shift` 加一个键，用 `+` 连接，例如 `"cmd+k"`、`"cmd+shift+p"`、`"space"`、`"escape"`。`cmd` 是主修饰键：苹果系统上是 Command，其他系统上是 Control。键是一个可打印字符，或 `space`、`escape`、`return`、`tab`、`delete`、方向键 `up`、`down`、`left`、`right`、`home`、`end`、`pageup`、`pagedown`；写法不分大小写，编译时规范化并检查。快捷键做的事与点击该控件相同：按钮执行它的动作，开关切换，搜索框获得焦点。控件被禁用或不在界面上时，它的快捷键不起作用。
+
+预期实现：SwiftUI 的 `keyboardShortcut`（菜单项同时显示按键）；Compose 在活动的 `dispatchKeyEvent` 中先查快捷键（Compose 只把按键交给有焦点的控件及其上层，没有控件获得焦点时根上的 `onPreviewKeyEvent` 收不到），`cmd` 在这里是 Ctrl；WinUI 3 的 `KeyboardAccelerator`；GTK 的 `GtkShortcutController`；Web 在页面上监听按键。实现进度：SwiftUI 已实现，macOS 上向前台的 `examples/gallery` 发送键盘事件验证：⌘O 弹出打开面板，⌘⌥I 开关详情面板，⌘K 聚焦搜索框，接着键入即出现结果下拉；Compose 已实现，Android 模拟器上用外接键盘的组合键验证 Ctrl+O 打开系统选择器、Ctrl+Alt+I 开关详情面板；只有当前屏幕上的控件登记快捷键，手机上停在侧栏时页面工具栏的快捷键不生效。Web 已实现：页面上监听按键，`cmd` 在苹果系统上是 ⌘、其他系统是 Ctrl，没有修饰键的快捷键不在输入文字时触发；浏览器中验证 ⌘⌥I 开关详情、⌘K 聚焦搜索框（⌘O 会弹出系统的文件对话框，没有在自动化中触发）。GTK 已实现：每个窗口一个捕获阶段的按键控制器，`cmd` 与 `ctrl` 都是 Control，Linux 虚拟机上验证 Ctrl+K 聚焦搜索框、Ctrl+Alt+I 开关详情；WinUI 3 已实现：窗口根元素上的 `KeyboardAccelerator`，Windows PC 上以真实按键验证 Ctrl+O 弹出打开面板、Ctrl+Alt+I 开关详情、Ctrl+K 聚焦搜索框，Islands 前端未验证。两者都不在编辑文字时触发没有 Ctrl 或 Alt 的快捷键。
 
 ### 路由与返回行为
 
@@ -1290,6 +1431,12 @@ auto 根据所选 UI 后端、平台和当前宿主能力决定呈现方式：
 
 虚拟窗口必须依附有效 UI 宿主；无界面引擎没有窗口宿主时返回 `requires_ui_session`，不能因为存在虚拟实现就自行启动 UI。宿主是承载窗口的应用表面，主窗口是启动时显示的逻辑实例，两者的生命周期不默认等同。Web 不把 `window.open()` 视为可靠的标准多窗口实现；独立浏览器窗口只能作为另行验证的扩展能力。
 
+### 对话框窗口
+
+`role: dialog` 的窗口是叠在主窗口上的模态窗口，例如首次启动的引导：它有窗口的一切——身份、草稿、关闭检查与保存、打开与关闭命令——只是呈现为主窗口上的表单（sheet），打开时主窗口不能操作。在对话框里再打开对话框，新的叠在上面；关闭一个对话框，它上面的也一起关闭。声明的 `width` 与 `height` 是它至少的尺寸。
+
+预期实现：macOS 与 iOS 用 `.sheet`，iPad 上也是表单而不是独立场景；Compose 用居中的 `Dialog`，宽高按声明；GTK 用模态的临时窗口；WinUI 3 用 `ContentDialog`；Web 与其他次级窗口一样用对话框。实现进度：SwiftUI 已实现，在 macOS 上用 `examples/gallery` 验证：按钮与 `window open`、`window close` 都能打开与关闭，声明的尺寸生效；iPhone 上是按声明高度（加标题栏）从底部弹出的表单，iOS 26.5 模拟器已验证。Compose 已实现，Android 模拟器上验证了从侧栏底部打开、按“好”关闭。Web 已实现，浏览器中验证对话框以声明的宽度显示在主窗口的遮罩上，按“好”关闭。GTK 已实现（主窗口的模态临时窗口，Esc 关闭），Linux 虚拟机上验证关于窗口以模态对话框打开、按“好”关闭，GNOME 中附着在主窗口上未验证（Broadway 没有窗口管理器）；WinUI 3 已实现（主窗口上的 `ContentDialog`，声明的宽度在对话框允许的范围内生效），Windows PC 上验证按钮与 `window open`、`window close` 打开与关闭（两种前端）。
+
 ### 窗口外框、沉浸与覆盖层
 
 本节是已定的设计，尚未实现。
@@ -1305,8 +1452,8 @@ Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, chrome
 }
 ```
 
-- **`chrome`**：`standard` 是平台默认的标题栏；`unified` 让内容延伸到标题栏下，标题栏透明，侧边栏到达窗口顶边，后端为系统窗口控件预留位置并保留拖动区域。预期实现：macOS 的全尺寸内容与透明标题栏，WinUI 3 的 `ExtendsContentIntoTitleBar`（窗口已使用 Mica 背景），GTK 的 `AdwToolbarView` 平铺顶栏。网页与 iPhone 没有窗口标题栏，不受影响。
-- **`immersive`**：布尔绑定。为真时窗口隐藏标题栏与工具栏，触屏平台同时隐藏状态栏与主屏幕指示条，指针停止移动后隐藏、移动时重新出现；为假时恢复。它不是全屏，窗口尺寸不变，全屏仍是窗口命令。预期实现：macOS 的工具栏可见性与 `NSCursor.setHiddenUntilMouseMoves`，GTK 的 `AdwToolbarView:reveal-top-bars` 与空指针，iOS 的 `statusBarHidden` 与 `persistentSystemOverlays`，Web 的 `cursor: none`；WinUI 3 的做法待验证。
+- **`chrome`**：`standard` 是平台默认的标题栏；`unified` 让内容延伸到标题栏下，标题栏透明，侧边栏到达窗口顶边，后端为系统窗口控件预留位置并保留拖动区域。预期实现：macOS 的全尺寸内容与透明标题栏，WinUI 3 的 `ExtendsContentIntoTitleBar`（窗口已使用 Mica 背景），GTK 的 `AdwToolbarView` 平铺顶栏。网页与 iPhone 没有窗口标题栏，不受影响。实现进度：WinUI 3 的内容本来就延伸到标题栏，`unified` 只去掉标题栏中的标题文字，已验证，Islands 保留系统标题栏；GTK 用平铺顶栏去掉分隔阴影，内容不延伸到标题栏下。
+- **`immersive`**：布尔绑定。为真时窗口隐藏标题栏与工具栏，触屏平台同时隐藏状态栏与主屏幕指示条，指针停止移动后隐藏、移动时重新出现；为假时恢复。它不是全屏，窗口尺寸不变，全屏仍是窗口命令。预期实现：macOS 的工具栏可见性与 `NSCursor.setHiddenUntilMouseMoves`，GTK 的 `AdwToolbarView:reveal-top-bars` 与空指针，iOS 的 `statusBarHidden` 与 `persistentSystemOverlays`，Web 的 `cursor: none`；WinUI 3 收起标题栏并去掉系统标题栏与标题按钮、静置时隐藏指针（Islands 去掉 `WS_CAPTION`）。实现进度：GTK 与 WinUI 3 已实现，Linux 虚拟机与 Windows PC 上验证 planner 的专注模式静置 3 秒后标题栏隐藏；WinUI 3 移动指针后恢复，Islands 的恢复未验证。
 - **`idle_after` 与 `window.idle`**：声明 `idle_after` 秒数后，窗口提供只读的会话状态 `window.idle`：指针、键盘与触摸在这段时间内都没有输入时为真，一有输入立即变为假。控制层的淡出与 `immersive` 都可以绑定它，应用不需要自己计时。它是 UI 会话状态，不进入业务引擎。
 - **覆盖层**：窗口内容可以是 `Stack`，在导航容器之上叠放其他层，例如全窗口的播放层或固定在侧边栏底部的小播放器。形式上现在就能这样写，后端能否正确叠放导航容器尚未验证。最上层先处理返回，规则同“路由与返回行为”。播放器与视图分离：两个位置的 `Video` 附着同一个播放器并带相同的 `hero` 键，切换时画面从一个位置展开到另一个位置；不支持多视图的媒体后端由最新附着的视图显示画面。
 
@@ -1340,7 +1487,7 @@ UI 控件、Bern 快捷键、虚拟标题栏及 CLI、JSON、MCP 都调用同一
 
 开发模式提供独立的检查接口，使 Agent 和测试工具可以读取：控件稳定身份、角色、可访问名称、状态、所属窗口与作用域、窗口的实际呈现方式、当前布局、主题、命令与 Feature 绑定，以及可用的源码位置。
 
-控件不可操作时应提供机器可读原因，例如未挂载、隐藏、禁用、被模态作用域阻挡或能力不可用。语义树快照带版本，列表节点身份包含稳定数据 key；遇到过时引用应明确失败，不能误操作后来占据同位置的另一个控件。
+控件不可操作时应提供机器可读原因，例如未挂载、隐藏、禁用、被模态作用域阻挡或能力不可用。语义树快照带版本，列表节点身份包含稳定数据 key；遇到过时引用应明确失败，不能误操作后来占据同位置的另一个控件。重复项中的控件在目标名后依次加上每一层重复的 key，由外到内，经过组件也一样，例如 `card.open[3]` 是第 3 项卡片中的 `open`。实现进度：SwiftUI 在运行时由每一层重复把 key 交给其中的控件，已在 macOS 上验证；其他目标目前只在同一个组件内加上最内层的 key。
 
 源码检查、详细布局诊断和测试驱动属于可选开发模块，不成为业务核心的必要依赖。生产会话仍保留命令调用所需的目标身份与动作描述；关闭开发检查器不能移除正常的命令可驱动性。
 
@@ -1619,6 +1766,8 @@ WebUI 的 JSON 控制通道必须使用浏览器可访问的传输，示例采�
 
 两种构建的标准 Video 节点都默认生成 HTML `<video>` 并绑定媒体协议，不经过 Canvas 逐帧复制或要求应用上传纹理。WebUI 连接独立引擎不意味着视频必须在服务端播放：浏览器播放器作为媒体执行端登记，命令路由到实际持有该播放器的执行端，结果与事件归并到引擎中的唯一播放器状态。控制通道不承担视频字节传输；媒体源、用户激活限制和控制条遵循下文的视频契约。
 
+用户在页面里选到或拖入的文件以页面的 `blob:` 地址交给动作，地址里没有文件名，也只在这个页面里有效：页面的播放器与图片能读，WebUI 中原生运行的引擎读不到。需要文件名或文件内容的引擎在 Web 上和 Android 一样还缺一条读取途径，做法待定。
+
 WindowSet 使用一个页面宿主，Window 默认按网页习惯虚拟呈现：主窗口就是页面，次级窗口呈现为对话框或侧边面板（设置窗口默认为对话框），声明 `presentation: floating` 的窗口呈现为可拖动、可调整大小的浮动窗口。后端处理层叠、焦点、模态及窄屏呈现，窗口实例不依赖浏览器弹窗。原生视频覆盖层与虚拟呈现的层叠需要共同验证。
 
 AOT 生成的是结构模板、静态资源和更新代码，不要求构建时知道动态列表的数据，也不保证所有节点都能写成最终静态 HTML。初始静态标记与运行时创建节点的具体分工由原型决定。
@@ -1676,9 +1825,13 @@ Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift 
 
 - 视频：Media3 的 ExoPlayer 是媒体执行端，`Video` 用不带自身控件的 `PlayerView` 显示画面，控制条由 Material 组件组成，所有播放变化都经 Bern 媒体命令。一个播放器同一时刻只在一个视图中显示；后台继续播放需要媒体服务，应用目前不声明，所以能力描述中声明不支持后台播放。
 - `bern package` 在 `target/bern/dist/` 生成发布版 APK（直接安装）与 Android App Bundle（上架商店）。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS` 读取发布密钥，密码不写进任何文件；没有这些变量时用调试密钥签名，并提示不能上架。
-- `chrome` 对手机不起作用，手机窗口没有标题栏；`immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；`idle_after` 由触摸、指针与按键重新计时。
+- `chrome` 对手机不起作用，手机窗口没有标题栏；`immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；`idle_after` 由触摸、指针与按键重新计时。iOS 上触摸由挂在窗口上、只观察不参与识别的 UIKit 手势识别器察觉：原先用 SwiftUI 的拖动手势察觉，会让导航栏的返回与工具栏按钮点不动，已在 iOS 26.5 模拟器上修正并验证。
 
 实现进度：已在小米 MIX 2S（LineageOS，Android 15）上运行 `examples/hello`、`examples/planner` 与 `examples/showcase`。验证了模块、侧栏与条件出现的项、开关、按钮、样式覆盖、`Canvas` 与图案、文字标注、控制通道，showcase 的各页（文字、按钮、开关与滑块、输入框、图片与布局、`Query` 查询列表、视频播放）与设置窗口；列表中后加入的项的弹出过渡与共享元素（标题在两种字号间放大）用录屏逐帧确认；沉浸模式静置后隐藏顶栏与系统栏、触摸后恢复；设置窗口叠在详情页上时，返回先关闭设置窗口。条件分支的切换用 `AnimatedContent`，新旧分支占同一位置；共享元素按自身尺寸布局后缩放到移动的边界，文字在过渡中不重新换行。HDR 图片在这台手机上按 SDR 显示，HDR 显示未验证。
+
+v0.29 的能力在 Compose 上全部实现，能力描述列出全部 `features` 与 `scroll_scale`、`scroll_opacity`、`nudge` 等动效属性；`examples/gallery` 在 Android 模拟器（Android 15）上逐项验证，各项结果写在对应小节。手指与多指操作经模拟器的 gRPC 触摸接口发送，`input` 命令只能模拟单指。实测中修了四个问题：胶片初始定位后，各格的位置按定位前的窗口坐标与定位后的滚动量合算，跟随把字段写回了第二格，改为按滚动内容中的坐标记录；绑定的内边距随弹簧收到零时越过零，Compose 拒绝负值而崩溃；没有控件获得焦点时快捷键收不到按键；取色只采到图片中间的一个像素。
+
+已知缺口：Android 交给应用的文件（选择器、拖放、“用…打开”）是 `content://` 地址，地址里没有文件名，引擎也不能当作路径读取，只有交给 Bern 的播放器与图片时能读。需要文件名或文件内容的引擎（例如按文件名与开头内容匹配资料）在 Android 上还缺一条读取途径，做法待定。
 
 iOS 目标（`swiftui + ios`）已确定以下做法：
 
@@ -1983,8 +2136,8 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 18. 各目标的原生窗口能力与虚拟宿主接口、窄屏切换规则、最后窗口策略，以及跨窗口媒体附着与资源恢复的验证范围。
 19. Web 双构建的配置与产物清单、WebUI 浏览器传输和会话注册、运行时连接配置，以及浏览器内引擎的外部控制中继与持久化策略。
 20. 样式属性的完整集合、各组件可覆盖的属性与状态，以及系统绘制选中态等覆盖在各平台的实现代价。
-21. 动效在 Web 与 GTK 上的打断与速度连续性、GTK 的共享元素替代方案，以及动画期间的命中与焦点规则。
-22. `Canvas` 绘图元素与图案描述的最终形式、`Text` 标注在 WinUI 3 上的实现，以及沉浸模式在各平台隐藏标题栏与指针的能力。
+21. 动画期间的命中与焦点规则；Web、GTK 与 WinUI 3 的弹簧都可打断并保留速度，共享元素在 GTK 与 WinUI 3 上用留下的画面替代，手感仍需在真实桌面会话中确认。
+22. `Canvas` 绘图元素与图案描述的最终形式；沉浸模式在 Islands 前端移动指针后的恢复。
 23. 模块事件的派发顺序与失败处理、插槽贡献组件的参数注入规则、页面插槽选择值的生成方式，以及可选模块开启状态的保存入口。
 
 原型应优先回答这些问题，再固定公开 API。受约束组件、强制命令化、统一引擎多入口、应用前后端分离、可替换目标模块、默认自动主题与原生或虚拟多窗口是架构基础，具体工具与语法可以在验证后调整。
@@ -2015,6 +2168,8 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
 | v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |
 | v0.23 | `swiftui + ios`：与 macOS 共用生成器与运行时，平台部分分为 AppKit 与 UIKit 两个运行时文件；一个场景中的虚拟窗口（主窗口铺满、其他窗口为 sheet）；模拟器构建与 `bern run` 安装启动，`BERN_IPC_DIR` 让 Mac 上的 CLI 与 MCP 连到模拟器中的应用；最低 iOS 17 |
+| v0.30 | 设计稿可行性审阅后补的四项：容器的 `stagger` 让子元素错峰出现；`Rail` 把子元素放在状态给出的比例处或铺在两点之间；`PopoverButton` 弹出放任意内容的浮层；尺寸档扩展为 `compact`、`medium`、`expanded`、`large` 四档，表达式可读 `window.compact` 等窗口档位 |
+| v0.29 | 媒体类应用需要的能力（逐项进行中）：带内容的按钮与 `reveal: hover`，样式的 `shadow`；侧边栏底部区域 `SidebarFooter`，工具栏中的 `Search` 与搜索结果；会话动作（`draft.x.set(…)`、`toggle()`），侧面板 `Inspector`，轻提示 `Toast`，`Switch(style: button)`，对话框窗口 `role: dialog`；表达式的 `if`，绑定状态的长度与 `animate`，容器尺寸，`Video` 的圆角，`appearance`；快捷键 `shortcut` 与会话命令 `ui.focus`；运行时选择的强调色与明暗（`accents`、`WindowSet(accent:, appearance:)`）；分体开关按钮 `SplitButton`；引擎给出的图片 `Image(source: app.x)`，形状取图片的平均色 `Shape(fill_from:)` 并向一侧渐隐 `fade`；按钮的 `pick` 与 `files` 弹出打开面板，拖放区 `Drop`，会话命令 `ui.set_file`；工具栏用 `Divider` 分组；联动：`scroll_scale`、`scroll_opacity`，`ScrollView(snap:, position:, arrival:)`，`nudge`，手势区 `Pinch` 与 `Swipe`；`Drop(opens: true)` 接收系统交给应用的文件并登记文档类型；目标能力描述增加 `features` 清单；重复项中的控件身份带上每一层的 key，经过组件也一样；新增示例 `examples/gallery`；以上能力 SwiftUI、Compose 与 Web 都已实现，Web 同时补上了样式覆盖、`Canvas` 与标注、结构过渡与共享元素、可增减的侧栏项与窗口静置 |
 | v0.28 | `compose + android` 第一版：生成 Kotlin、Compose 与 Gradle 工程，引擎经 NDK 编译后通过 JNI 在进程内运行；控制通道经 `adb forward` 接入；样式覆盖、`Canvas`、文字标注、条件出现的导航项，出现、消失、重排与共享元素动效，`Query`，基于 Media3 的 `Video`，沉浸与空闲，`bern package` 生成 APK 与 AAB；`bern run` 安装到连接的设备；框架自带文字与样式规则合并移入共享的目标接口 |
 | v0.27 | 实现 v0.25 与 v0.26 的 SwiftUI 部分并在 macOS 上验证：模块组合、插槽与可选模块，`style!` 的覆盖与动效 token，结构过渡、共享元素与窗口沉浸，`Canvas` 与图案（`style!` 中的 `pattern` 块，新增 `gap`），`Text` 标注，导航容器中按条件与列表出现的项及 `fallback`；目标能力描述增加标注与动态导航项，做不到的构建时报错或警告 |
 | v0.26 | 模块化应用的设计：应用由外壳与多个模块组成，每个模块有自己的协议、引擎、界面、翻译与资源；命令目录与状态按命名空间合并，模块间通过依赖模块的命令与事件交互；插槽与页面插槽让模块向外壳贡献界面；可选模块可在运行时开关并沿依赖级联；`sources` 可以写目录；`bern new --module` |

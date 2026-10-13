@@ -45,6 +45,10 @@ pub fn bool_field(_: &SessionField<bool>) {}
 
 pub fn number_field(_: &SessionField<f64>) {}
 
+pub fn file_field<T: FileValue>(_: &SessionField<T>) {}
+
+pub fn position_field<T: PositionValue>(_: &SessionField<T>) {}
+
 pub fn number_value<N: Numeric>(_: &N) {}
 
 pub fn picker_field<E: LabeledEnum>(_: &SessionField<E>) {}
@@ -89,10 +93,20 @@ pub fn features<F: crate::Features>() {}
 pub struct WindowState {
     /// Whether the window had no input for its `idle_after` seconds.
     pub idle: <bool as BernValue>::Ref,
+    /// The size of the window's width, by the breakpoints of `[layouts]`:
+    /// exactly one is true.
+    pub compact: <bool as BernValue>::Ref,
+    pub medium: <bool as BernValue>::Ref,
+    pub expanded: <bool as BernValue>::Ref,
+    pub large: <bool as BernValue>::Ref,
 }
 
 pub fn window() -> WindowState {
     WindowState {
         idle: bool::reference(),
+        compact: bool::reference(),
+        medium: bool::reference(),
+        expanded: bool::reference(),
+        large: bool::reference(),
     }
 }

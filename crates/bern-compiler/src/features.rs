@@ -56,7 +56,9 @@ pub fn lower(
         }
         let mut layouts = Vec::new();
         for size in &feature.layouts {
-            match LayoutSize::parse(&size.to_string()) {
+            match LayoutSize::parse(&size.to_string())
+                .filter(|size| LayoutSize::REQUIRED.contains(size))
+            {
                 Some(size) => layouts.push(size),
                 None => diagnostics.push(
                     Diagnostic::error(format!(
@@ -67,7 +69,7 @@ pub fn lower(
             }
         }
         if layouts.is_empty() {
-            layouts = LayoutSize::ALL.to_vec();
+            layouts = LayoutSize::REQUIRED.to_vec();
         }
         features.push(ir::FeatureDef {
             name: feature.name.to_string(),
@@ -209,7 +211,7 @@ fn business_command(element: &ir::Element, protocol: &ProtocolDescriptor) -> Opt
             protocol.commands.get(*command).map(|spec| spec.id.clone())
         }
         Some(ir::Action::Media { op, .. }) => Some(op.command().to_string()),
-        Some(ir::Action::Window { .. }) | None => None,
+        Some(ir::Action::Window { .. } | ir::Action::Session { .. }) | None => None,
     }
 }
 

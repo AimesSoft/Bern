@@ -1,7 +1,7 @@
 # Windows WinUI 3 实现记录
 
-- 日期：2026-10-11
-- 依据：[Bern 架构设计 v0.19](../Design.md)、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
+- 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”）
+- 依据：[Bern 架构设计 v0.30](../Design.md)（最初按 v0.19 实现）、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
 - 工具链：Rust 1.99.0；Visual Studio 2022 生成工具 17.14（MSVC 14.44，C++20）；Windows SDK 10.0.26100（含 `cppwinrt.exe`）；Windows App SDK 2.5.1 的组件包（只取头文件与元数据：Foundation 2.3.12、WinUI 2.3.9、InteractiveExperiences 2.1.9，以及 WebView2 1.0.3719.77 的元数据）
 - 验证环境：Windows 11 专业版 25H2（版本 26200，x64 实体机），显示缩放 150%
 
@@ -52,14 +52,20 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 原生多窗口、关闭确认、窗口事实 | 完成 | 两种模式均已实测 |
 | Video 原生呈现 | 完成 | Media Foundation 媒体引擎执行端，两种模式以 `SwapChainPanel` 显示引擎的交换链；HDR 视频在 SDR 显示器上经系统色调映射，HDR 显示器未实测 |
 | 阶段四：`Adaptive`、`Menu`、`LanguagePicker`、运行时切换语言 | 完成 | 两种模式均已实测 |
+| 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换；圆角、内边距、尺寸档直接设置；阴影由 Direct2D 画成位图垫在按钮下；缩放、位移与透明度用运行时的弹簧。选中侧栏项的 `indicator` 不列出。见“样式覆盖” |
+| 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 弹簧每帧在界面线程上推进，写到元素的 `Translation`、`Scale` 与 `Opacity`，不影响布局；滚动联动是 Composition 表达式动画。见“动效” |
+| 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | Direct2D 画进 WIC 位图后交给 `Image`，两种前端同一套代码；颜色按元素所在部分的主题解析 |
+| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；`chrome: unified` 在 WinUI 3 下只去掉标题栏里的标题文字，Islands 下保留系统标题栏。见“窗口外框、静置与对话框” |
+| 可增减的侧栏项与页签 | 完成 | 侧栏项是 `NavigationView.MenuItems` 中的项，随 `if`、`match`、`ForEach` 增减；选中项离开时选中移到 `fallback` 或剩下的第一项 |
+| v0.29 的 `features` 与媒体类组件 | 完成 | `SidebarFooter`（`PaneFooter`）、`Inspector`（右侧的 `SplitView` 窗格）、`Toast`、`SplitButton`（`ToggleSplitButton`）、`PopoverButton`（`Flyout`）、`Drop`、`Pinch`、`Swipe`、`Rail`；工具栏搜索与结果、会话动作、开关按钮、绑定长度、`appearance`、快捷键（`KeyboardAccelerator`）、运行时强调色与明暗、运行时图片、取色填充、`pick`（`FileOpenPicker`/`FolderPicker`）、滚动停靠与位置；会话命令 `ui.focus`、`ui.set_file`。描述中列出 `features` 的全部 18 项 |
 
 ## 工程结构
 
 | 组成 | 职责 |
 | --- | --- |
-| `bern-backend-winui3` | 目标描述、检查，从 IR 生成 C++，生成胶水 crate、构建脚本与构建计划 |
+| `bern-backend-winui3` | 目标描述、检查，从 IR 生成 C++，生成胶水 crate、构建脚本与构建计划；样式支持表（`style.rs`）与图标字形表（`icons.rs`） |
 | `templates/cpp/bern_base.h/.cpp` | 与 XAML 无关的部分：值与编解码、响应式单元与作用域、文案与语言、引擎宿主（消息窗口、定时器、单实例）、媒体执行端、开发快照的 PNG 编码 |
-| `templates/cpp/bern_ui_*.inl` | XAML 部分，每种前端各包含一次：上下文、父容器与区域、控件登记、`FlexPanel`、样式与图标（`core`）；标准控件（`widgets`）；条件、列表、导航、页签、自适应、查询与视频（`structure`）；窗口、关闭协议、会话命令、快照与应用生命周期（`windows`） |
+| `templates/cpp/bern_ui_*.inl` | XAML 部分，每种前端各包含一次，共七部分：上下文、父容器与区域、控件登记、`FlexPanel`、样式与图标（`core`）；弹簧与变换层、主题颜色与运行时强调色、样式覆盖、共享元素、滚动联动与轨道（`motion`）；绘图（`drawing`）；标准控件（`widgets`）；条件、列表、导航、页签、自适应、查询与视频（`structure`）；滚动停靠、浮层按钮、分体按钮、轻提示、详情面板、拖放、手势、打开面板与快捷键（`features`）；窗口、关闭协议、会话命令、快照与应用生命周期（`windows`） |
 | `templates/cpp/bern_pch.h/.cpp` | 预编译头：两个前端的 C++/WinRT 头文件，以及运行时在 `bern::winui` 与 `bern::islands` 两个命名空间中各一份 |
 | `bern_winui.cpp`、`bern_islands.cpp`、`bern_main.cpp` | 两个前端的编译单元，各自只把生成的 `app_ui.inl` 放进自己的命名空间；入口（引导、选择前端、单实例） |
 | 生成的胶水 crate | `target/bern/windows/glue/`：`bern_app.lib`、`cli.rs`、`mcp.rs`，以及静态链接 C 运行库的 `.cargo/config.toml` |
@@ -97,7 +103,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 
 `Image` 与 `Stack` 外面各有一层 `Grid`，所以在会拉伸子元素的列中保持自身尺寸并靠前缘。在展示应用的“图片与布局”页按两种前端验证：效果与 macOS 相同，`contain` 的图片在框内居中；网格三列；CLI 修改音量与亮度后两个进度条立即更新。
 
-图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。
+图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。字形表只有一份（`icons.rs`，码位从 PC 上的字体文件渲染比对确认），生成的目录把它交给运行时；表中没有的名称检查时报错，不在运行时显示空白。
 
 ## 运行结构
 
@@ -121,6 +127,62 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 一个引擎只有一个交换链，所以一个播放器同一时间只在一个视图中显示画面（`multi_view: false`）：最新附着的视图显示，它解除附着后交还给上一个仍在的视图，与 Web 的单视图一致。
 
 实测（2026-10-12，PC 为 2560×1440、150% 缩放的 SDR 显示器，由 CLI 读回状态；以下在 WinUI 3 前端全部测过，Islands 前端测了 HDR10 测试片与预览播放器在页面间转移，结果相同）：精选片段加载后 `Ready 0 / 8000`，播放、暂停、播完为 `Ended` 后再播放从头开始、跳转到 5000、静音与音量 0.4 都生效；换为色条后静音与音量保留，换为损坏文件后 `Failed`（“The file is damaged or its format is not supported (0xC00D36C4)”）。4:3 的测试片放进 16:9 的外框，三种 `fit` 都正确，最大化与改变窗口大小后重新排布；视频尺寸正确说明 150% 下的缩放校正生效。应用级预览播放器在项目详情页播放，回到视频页后画面出现在视频页的视图中。本机 HTTP 提供的 HLS 直播打开后为 `Ready`，播放后 `Playing`，`duration_ms` 为空，`media seek` 返回 `not_seekable`，画面正常。用 ffmpeg 编成 10 位 HEVC（BT.2020、PQ、HDR10 元数据）的测试片，左半为 SDR 白（203 尼特）、右半为它的 4 倍，在 SDR 模式下由系统做色调映射：左右分别为 237 与 252，渐变平滑，没有发灰。HDR 模式下的输出未验证：测试用的 PC 没有 HDR 显示器。开发快照的窗口截取（`PrintWindow`）里有视频画面。
+
+## 样式、动效、自绘与媒体类应用的能力（v0.29、v0.30）
+
+2026-10-14 补齐：Windows 的能力描述现在列出样式（`Button`、`IconButton`、`SidebarItem`）、动效（`appear`、`disappear`、`reflow`、`hero`、`animate`、`scroll_scale`、`scroll_opacity`、`nudge`、`stagger`）、`window_chrome`、`text_marks`、`dynamic_items`、全部组件（不再有未实现的组件），以及 `features` 中的全部 18 项。`examples/planner` 与 `examples/gallery` 在 Windows 上检查没有错误也没有警告（测试）。两种前端用同一份代码；只在控件或资源不同时分开写，差别在下面注明。
+
+### 样式覆盖
+
+- 每个用到的样式生成一个 `B::StyleDef`：基础外观与各状态（悬停、按下、焦点、禁用、选中）的 `Look`。
+- 按钮的底色、前景与边框写成按钮自己 `Resources` 中的轻量样式资源（`ButtonBackgroundPointerOver`、`ButtonForegroundPressed` 等，浅色与深色主题各一份），由控件模板自己的视觉状态切换；样式没写的状态保留系统的外观与反馈。`none` 让该状态与普通状态相同，`system` 保留系统的。`corner` 为 `CornerRadius`，`padding` 为内边距；尺寸档 `small`、`large`、`extra_large` 的最小高度为 24、42、52，并调整字号与左右内边距。
+- 缩放、位移与透明度放在“状态”层（见“动效”），以最上层会动的状态所带的弹簧进入，回到普通状态用 `settle`；状态来自指针进入、离开、按下、抬起、捕获丢失与焦点事件，禁用来自 `IsEnabled`。
+- `shadow`：Direct2D 的阴影效果按按钮的圆角与尺寸画成位图（只保留按钮形状以外的部分），垫在按钮下方，与按钮在同一个外层里一起缩放、移动；不同状态的阴影以透明度切换。
+- 带内容的按钮（`Button { … }`）去掉按钮自己的外框与底色，内容原样显示；`corner` 用 Composition 的圆角几何裁剪内容。内容铺满时按钮随之拉伸。
+- 侧栏项：底色与前景写成 `NavigationViewItem` 的轻量样式资源（`NavigationViewItemBackgroundPointerOver`、`…Selected` 等）；`selected: fill(…)` 时选中项整行填色，导航视图自己的选中指示条设为透明。缩放等变换作用在项上（导航视图会改写它的 Composition 视觉，所以变换写在 `UIElement` 的 `Translation`、`Scale` 上，而不是视觉上）。`indicator` 没有列出：`NavigationView` 只在前缘画自己的指示条，不能换成样式描述的形状。
+- 语义角色映射到各前端的主题资源：WinUI 3 用 `SolidBackgroundFillColorBaseBrush`、`CardBackgroundFillColorDefaultBrush`、`TextFillColorPrimaryBrush`、`AccentFillColorDefaultBrush` 等，系统 XAML 用 `SystemControl…` 一族；系统 XAML 没有的角色按浅色、深色各给一个取值。画布等需要具体颜色的地方，从窗口中隐藏的探针元素读出主题画刷当前的颜色，所以跟随所在部分的明暗与运行时强调色。
+
+### 动效
+
+- 弹簧：质量 1，刚度 (2π / T)²，阻尼比 ζ，与其他目标相同；所有在动的弹簧在 `CompositionTarget.Rendering` 中一起推进，每帧一次，换目标时从当前值与速度继续。系统关闭动画（“设置 → 辅助功能 → 视觉效果 → 动画效果”，`UISettings.AnimationsEnabled`）时，状态变换、错峰、晃动与滚动联动不执行，出现与消失只做短淡入淡出。
+- 变换层：元素的移动、缩放与透明度由几层（样式状态、出现、消失、共享元素、重排、晃动、显示、轨道）各自的弹簧合成，位移相加、缩放与透明度相乘，写到 `UIElement.Translation`、`Scale`（以元素中心为原点）与 `Opacity`，不改变布局。会动的元素外面包一层 `Grid`，变换写在这层上。
+- 出现与消失：`if`、`match`、`ForEach` 在首次显示之后挂载的元素播放 `appear`；元素内部的元素随它一起出现。卸载的带 `disappear` 的元素经它自己 `Resources` 中的离场钩子留在面板里播完再移除，期间不接收点击；它已经不在自己的区域中，新元素按它不存在时的位置插入。
+- `stagger`：容器构建直接子元素时带一个计数，带 `appear` 的子元素依次晚 `stagger` 秒，等待按渲染帧计，在起始姿态（隐藏）中等到自己的轮次；容器在一次更新中出现时子元素也播放出现；`ForEach` 的各行每次更新从 0 计起。
+- 共享元素 `hero`：元素卸载时记下它在窗口内容中的位置与尺寸（不含 Bern 自己的变换）。离开的元素本身移到窗口内容上方的覆盖层（一个 `Canvas`）里原来的位置；同一窗口中同键的新元素布置后，从旧位置与尺寸以 `hero` 的弹簧展开，旧元素随同一个弹簧移动并淡出。没有使用 `ConnectedAnimationService`：它要求在导航时成对准备与开始，不适合由条件与列表随时卸载与挂载的元素。
+- `reflow`：`Column`、`Row`、`Grid`、`ScrollView` 的面板，以及带 `reflow` 的 `ForEach` 所在的这些面板，在布置后比较每个子元素的新旧位置，被移动的子元素从旧位置以弹簧滑到新位置。表单、`Layers` 等其他容器中的 `reflow` 不起作用（没有警告）。
+- `animate`：绑定状态的长度（`padding`、`gap`、`width`、`height`、`Grid` 的 `min_width`、`Canvas` 与 `Image` 的尺寸、`Video` 的 `corner`、`Rail` 的比例）随这个弹簧变化。`Video` 的圆角是 Composition 的圆角几何裁剪。
+- `nudge`：条件变真时放大到 1.06 再以 `jelly` 弹回；`ScrollView(arrival: nudge)` 让设置 `position` 滚到的那一项停稳后晃一下。
+- `scroll_scale`、`scroll_opacity`：Composition 表达式动画，读 `ScrollViewer` 的滚动属性集（`GetScrollViewerManipulationPropertySet`），按元素中心离视口中心的距离算缩放与透明度，滚动时不经过界面线程。元素位置与视口尺寸在布局更新时写进表达式的参数。
+
+### 自绘与图片
+
+- `Canvas` 在界面线程上用 Direct2D 画进按显示缩放分配的 WIC 位图，再写进 `WriteableBitmap` 由 `Image` 显示；状态、尺寸、元素的明暗或运行时强调色变化时重画。两种前端同一套代码。`Shape` 的 `fade` 为向一侧渐隐为透明的线性渐变，描边向内收半个线宽；`Series` 为面积与折线；`Pattern` 按条带逐条绘制，`twill` 叠 45° 的细线（`text.primary`，不透明度 0.05）。
+- `fill_from` 的图片在后台读取（`file:` 从磁盘，http(s) 从网络），用 WIC 缩到 32×32 取平均色，按 URL 缓存；读到之前用 `fill`。
+- `Text(mark:)`：按 `TextBlock` 的 `TextPointer` 取每行文字的矩形，在文字下方画胶囊形的标注，高度为行高的 74% 到 98%，左右各延出 0.4 个字宽。
+- `Image(source: app.x)` 在后台读取后显示，`None` 时不显示；只写一边时另一边按图片比例。
+
+### 窗口外框、静置与对话框
+
+- `idle_after`：窗口根元素上（含已处理的事件）的指针移动、按下、滚轮与按键重新计时，到时 `window.idle` 为真。指针移动只在屏幕上的光标位置确实改变时才算：沉浸式窗口改变外框时，系统会在原位置再报告一次指针移动，否则会立即被自己唤醒。
+- `immersive`：为真时隐藏标题栏与详情页头。WinUI 3 下 `TitleBar` 收起，`OverlappedPresenter.SetBorderAndTitleBar(true, false)` 去掉系统标题栏与标题按钮；Islands 下去掉窗口样式中的 `WS_CAPTION`（保留可调整大小的边框）。同时静置时指针隐藏（`ShowCursor`）。
+- `chrome: unified`：WinUI 3 下内容本来就延伸到标题栏，`unified` 只去掉标题栏里的标题文字；Islands 下保留系统标题栏，没有可去掉的分隔。
+- `role: dialog`：没有自己的顶层窗口，是主窗口（或打开时第一个普通窗口）上的 `ContentDialog`，宽度按声明的尺寸在对话框允许的范围内设置；对话框的关闭（包括 Esc）都经关闭协议。对话框窗口报告所属窗口的位置，`minimize`、`maximize`、`move`、`resize` 返回 `target_unavailable`。
+- 窗口尺寸档：窗口根元素的宽度按 `[layouts]` 的三个断点得到 `compact`、`medium`、`expanded`、`large`，表达式中的 `window.compact` 等读取它；`Adaptive` 四档各自选择，没有自己布局的档位显示下一个更大的已声明布局，没有更大的取更小的。
+- 运行时强调色与明暗：`WindowSet(accent:, appearance:)` 的表达式在每个窗口中求值。控件模板经主题字典（含别名与合并的字典）中的强调色画刷取色，运行时找到这些画刷（浅色与深色两套，各自对应强调色的哪一档）直接改它们的颜色，并更新 `SystemAccentColor` 与 `…Light1–3`、`…Dark1–3`，所以已有的控件立即换色；各档按与白色、黑色混合近似生成。明暗设在窗口根元素的 `RequestedTheme` 上；WinUI 3 的标题按钮经 `AppWindowTitleBar.PreferredTheme` 跟随，Islands 的系统标题栏经 DWM 跟随。
+- `appearance: dark` / `light` 的部分：部分的根元素设 `RequestedTheme`，XAML 的主题资源本来就按子树解析，部分中的控件、画布与从中弹出的浮层（浮层的呈现元素另设同样的主题）因此按那种外观绘制。
+
+### 媒体类应用的组件与输入
+
+- 文件：`pick` 用 `FileOpenPicker`（按种类给出扩展名过滤）或 `FolderPicker`（`folder`），经 `IInitializeWithWindow` 交给所在窗口，选中后以 `file:` 地址存进字段再执行动作。`ui.set_file` 校验地址（`file`、`http`、`https`，否则 `invalid_url`）与种类（否则 `unsupported_file`）后交给带 `pick` 的按钮、菜单项或 `Drop`。
+- `Drop`：内容区接受拖入的文件（`StandardDataFormats.StorageItems`），种类相符时 `over` 为真，放下后取第一个相符的文件。`opens: true` 时，命令行上的文件与再次启动时交来的文件（第二个进程经 `WM_COPYDATA` 转给第一个）也交给它；构建不登记文件关联。
+- `Pinch`：触摸的捏合经 `ManipulationDelta` 的缩放；触控板捏合在 Windows 上以带 Ctrl 的滚轮到达，按每格 e^0.1 缩放。`Swipe`：按下后沿轴拖动，`distance`（默认 300）走完整个范围，向上与向右增大，捕获指针，抬起时执行动作。
+- 快捷键：每个快捷键是窗口根元素上的 `KeyboardAccelerator`，随控件挂载与卸载；`cmd` 与 `ctrl` 都是 Control。`Search` 的快捷键聚焦搜索框，开关与分体按钮切换，按钮、菜单项与浮层按钮激活；控件禁用时不起作用，没有 Control 或 Alt 的快捷键在文本框有焦点时不触发。菜单项的快捷键显示在菜单中。
+- 工具栏搜索与结果：搜索框是 `AutoSuggestBox`；结果是任意组件，所以不用它自己的建议列表，而是在搜索框下方的 `Flyout` 中显示，搜索框有焦点且有结果时打开，点选结果后收起。
+- `PopoverButton`：按钮的 `Flyout`，内容在浮层打开时挂载、关闭后卸载；`presented` 双向跟随。`SplitButton`：`ToggleSplitButton`，主体切换开关，旁边的部分打开同样的浮层；该部分的无障碍名称为 `more_label`，没有时为“更多选项”。
+- `Toast`：在所在位置显示一个胶囊（主题底色、描边与 `ThemeShadow`），从下方滑入，`duration` 秒后淡出；内容变化时重新显示，朗读为礼貌的实时区域。
+- `Inspector`：所在容器换成右侧窗格的 `SplitView`（`Inline` 模式），`presented` 为真时窗格滑出，其余内容让出位置。
+- `ScrollView(snap:, position:)`：滚动停下（`ViewChanged` 不再是中间状态）时取最近的一项，以动画对齐到锚点；`center` 时首尾按最大一项留出空白，位置按项在内容中的坐标加内容的边距计算。停稳的一项写回 `position`；字段被设成另一项时以动画滚过去；首次布局后直接停在字段的一项。
+- 重复项中的控件目标带上每一层的键，经过组件也一样（如 `card.open[3]`）。
 
 ## 构建与运行
 
@@ -156,6 +218,7 @@ target\bern\windows\Showcase\showcase.exe
 - `BERN_APP_RUNTIME=installed|inbox|none`：只用其他程序装的运行时、只用 Windows 自带的，或当作都没有（只编译 WinUI 3 时会出现提示框）。
 - WinUI 的未处理错误与控件样式加载失败写到标准错误，然后照常结束进程。
 - `BERN_DUMP_TREE`：把元素树和尺寸写到标准错误。
+- `BERN_SNAPSHOT_BURST`（与 `BERN_SNAPSHOT_DIR` 一起）：每次变化后，另把屏幕上的窗口每 40 毫秒截一张、共 800 毫秒，存为 `<窗口>-burst<次>-<帧>.png`，用来逐帧查看动效。
 - 调试构建在未处理的异常时，按 PDB 把调用栈（函数与行号）写到标准错误。PDB 留在 `app/obj/<配置>/`，不进入应用目录。
 
 ### 打包
@@ -203,6 +266,27 @@ target\bern\windows\Showcase\showcase.exe
 - **深色下内容区白底**：画刷原先按应用主题静态查找，元素主题与应用主题不同时就会出错。已改为 `ThemeResource` 样式。
 - **Defender 误报**：构建脚本模板里原本内嵌了 PowerShell 下载命令，被编进 `bern.exe` 后，Defender 以 `Trojan:Win32/Bearfoos.B!ml` 误报并隔离了它。已改用 Windows 自带的 `curl` 与 `tar`，之后没有再被拦截。
 
+2026-10-14，v0.29 与 v0.30 的能力，同一台 PC（Windows 11 25H2，150% 缩放），经 SSH 构建、以计划任务把应用启动到桌面会话，由生成的 CLI 驱动；静态画面来自开发快照，动效来自 `BERN_SNAPSHOT_BURST` 的逐帧截取，悬停、按下与真实快捷键由桌面会话中的输入脚本产生（指针与按键事件），截取范围只限应用窗口。“实测”指在这个环境里看到或量到。
+
+- **构建与测试**：planner、gallery 与 showcase 以 `bern build --target windows` 构建成功，检查没有错误与警告；`bern-backend-winui3` 的 16 项测试在 macOS 与 Windows 上都通过（Windows 上生成测试用 MSVC 编译两套前端；新增：planner 与 gallery 检查没有警告并生成预期的代码、图标表有序且都在私用区），`cargo clippy -p bern-backend-winui3 --all-targets -- -D warnings` 与 `cargo fmt --check` 通过。
+- **planner（WinUI 3 实测）**：画布的格纹、面积与折线、成功色胶囊；“最近的进度”的标注；`show_archive` 打开后侧栏多出“归档”，在归档页关闭它后选中回到 `fallback` 的“概览”；模块页“笔记”经可选模块的条件出现；切换大标题时新标题从小标题的位置展开、旧标题淡出（逐帧截取）；新标签以 `pop` 从自身中心弹出并带回弹；专注模式打开后静置 3 秒，标题栏、标题按钮与页头都隐藏，移动指针后恢复；`unified` 的标题栏没有标题文字；侧栏项悬停出现浅底并放大、按下缩小、选中填满强调色且文字为强调色上的前景色（真实指针）。
+- **gallery（WinUI 3 实测）**：运行时强调色由绯红换成群青、明暗换成深色，控件与画布随之变化；工具栏的图标按钮、菜单、分组竖线、开关按钮与搜索框；Ctrl+K 聚焦搜索框，输入后结果浮层列出匹配的图案；Ctrl+Alt+I 与 `ui.set_bool` 打开详情面板，海报墙从 3 列让到 2 列再到 1 列，取色铺底按海报平均色渐隐、运行时海报图片（`file:` 地址）显示；收藏后出现轻提示；卡片静止、悬停（放大到 1.03、投影、星标显现）、按下（0.97）三种状态（真实指针，屏幕截取）；切到“图案”页时卡片按 `stagger` 依次出现（逐帧截取）；Ctrl+O 打开系统的打开面板、Esc 取消；关于窗口以 `ContentDialog` 打开，按钮与 CLI 都能关闭它；改变窗口宽度后海报墙页边距随尺寸档变化。
+- **画框页（WinUI 3 实测）**：`appearance: dark` 的部分在浅色窗口中为深色，其中分体按钮的浮层也是深色并显示菜单刚设的字号 18；静置后视频铺满、圆角 20 收为直角，指针移动后恢复；`PopoverButton` 的滑块在浮层打开时挂载、关闭后卸载；关闭说明后文字原地淡出再离开；`ui.set_file` 给拖放区：非地址返回 `invalid_url`，种类不符返回 `unsupported_file`，视频的 `file:` 地址存入字段并播放。
+- **胶片页（WinUI 3 实测）**：初始停在字段指定的一格正中，正中一格放大、两侧变小变淡；“最后一个”“第一个”滚到首尾并停在正中；滚轮滚动后吸附到最近一格，字段随之更新；时间轴的刻度、名称与“现在”竖线；`Adaptive` 在 `compact`、`medium`、`expanded` 之间切换；上拖 80 个单位后 `Swipe` 的数值由 0.5 变为 0.7667（= 0.5 + 80/300）；三格带 Ctrl 的滚轮让 `Pinch` 的卡片宽度由 180 变为 242.97（= 180·e^0.3）。
+- **堆叠中的轨道与错峰顺序（WinUI 3 实测）**：“上下拖动”面板是 `Stack` 中的 `Canvas(height: 120)` 与一条轨道，轨道里的水位画布没有自己的高度。窗口高 900 时，量快照的像素：面板高 180 像素（150% 下为 120 点），水位底色同样从面板顶到底铺满 120 点，多出的高度留在面板下方，`Stack` 没有变高；水位宽度在 `level` 为 0.5 时是面板宽的 423/846，上拖到 0.7667 后是 649/846（0.767）。轨道的铺满角色只沿轴向外传，不让外面的 `Stack` 跟着撑开，在 `Stack` 中按其他层给出的尺寸铺满。错峰的轮次在构建各行时按条目顺序分配，与元素何时 `Loaded` 无关；逐帧截取中海报墙依次为 Gingham、Tartan、Madras、Glen、Houndstooth、Windowpane。
+- **系统 XAML（Islands）实测**：gallery 的 Windows 10 外观、运行时强调色（绯红、群青）、深色（标题栏经 DWM 变深）、详情面板、取色铺底与海报、轻提示、胶片页（滚到最后一格、轨道、自适应、拖动区）与 Windows 10 样式的关于对话框；planner 的归档项、大标题、标签、主要按钮、画布与标注；专注模式静置后标题栏（`WS_CAPTION`）与页头都隐藏。
+- 修正的问题：共享元素的新元素插到了错误位置（离场钩子同步完成时区域计数尚未提交，改为先提交再离场）；弹出动效的缩放中心取了整行的中点（改为按内容实际大小）；卡片中铺满的画布没有宽度（铺满角色改为按方向递归，内容铺满时按钮拉伸）；搜索结果浮层判断焦点用错了属性（`AutoSuggestBox` 的焦点在内部文本框，改为跟踪获得与失去焦点事件）；居中停靠漏算了内容的边距；对话框窗口没有自己的 `Window`，设置标题按钮主题时访问了空对象；Islands 下窗口外框变化时系统在原位置补发的指针移动把静置重置了（改为比较光标位置）。
+
+未验证（本轮）：
+
+- `reflow`：仓库中的示例没有用到，未实测。
+- 真实的文件拖放、触摸屏与触控板的原生捏合（只用带 Ctrl 的滚轮模拟了触控板捏合）、触摸拖动。
+- 经命令行或再次启动交来的文件（`opens`），http(s) 的运行时图片与取色。
+- 系统关闭动画时的退化、`focus: none` 与禁用状态的样式、键盘焦点的外观。
+- Islands：专注模式的恢复（测试时 PC 正被使用，停止了模拟输入）；真实指针下的悬停与按下、快捷键、搜索结果浮层、错峰与共享元素的逐帧画面。这些与 WinUI 3 是同一份代码，但没有在 Islands 下逐项实测。
+- showcase 只验证到构建通过，本轮没有重新运行。
+- 最后加入的三处只验证到编译通过：分体按钮旁边部分的无障碍名称、分体按钮的快捷键切换开关、禁用控件与文本框有焦点时快捷键不触发。
+
 未完成的验证：
 
 - 没有 Windows App Runtime 的干净 Windows 10 与 Windows 11。本机的 Islands 结果来自强制回退。
@@ -214,11 +298,20 @@ target\bern\windows\Showcase\showcase.exe
 - **使用 Windows 自带的运行时不是微软公开说明的用法。** 微软的部署指南只说明非打包应用要自己部署运行时；`CBS.2` 是 Windows 给自己组件用的副本，第三方程序能用是实测结果，以后的 Windows 更新可能改变它的名称、内容或可用性。所以其他程序装的 2.x 总是优先。哪些 Windows 11 版本自带 `CBS.2` 也只在 25H2（26200.9457）上确认过。
 - 只编译 WinUI 3 时，提示框的“是”只验证到会打开安装程序的地址，测试中没有实际下载安装。
 - 应用按 2.5.1 编译、接受 2.0 起的运行时：只在 2.2 与 2.5.1 上实测过，没有 2.0、2.1 的机器。
-- 未提供 MSIX 打包、安装程序、应用图标与代码签名。未签名的新程序可能被安全软件的启发式规则误判，正式分发需要签名。
+- 未提供 MSIX 打包。未签名的新程序可能被安全软件的启发式规则误判，正式分发需要签名。
 - 回退前端没有 `SelectorBar`、`InfoBar` 与 `TitleBar`，分别以按钮组、自绘错误条与系统标题栏代替。
 - HDR 图片只在 SDR 显示器上实测过：测试用的 PC 没有 HDR 显示器，HDR 模式下的亮度未验证。
 - HDR 视频只在 SDR 显示器上实测过：HDR 模式下由媒体引擎与系统输出 HDR，测试用的 PC 没有 HDR 显示器，未验证。
 - 同一个播放器同一时间只在最新附着的视图中显示画面，较早的视图只显示外框。
 - 页面工具放在页头，没有使用 `CommandBar`；`Menu` 的菜单项不呈现 `destructive` 角色。
 - 品牌色的浅色与深色档位按与白色、黑色混合近似生成。
+- `chrome: unified` 在 WinUI 3 下只去掉标题栏的标题文字（内容本来就延伸到标题栏）；Islands 下不变，仍是系统标题栏。
+- 选中侧栏项的 `indicator` 不支持：`NavigationView` 只画自己前缘的指示条；侧栏项的样式也没有 `shadow`（与其他目标相同，检查时报错）。
+- `reflow` 只在 `Column`、`Row`、`Grid` 与 `ScrollView` 的面板中生效，其他容器中写了不起作用，构建时没有警告。
+- 共享元素只在同一窗口内配对，用 Bern 自己的覆盖层实现，没有使用 `ConnectedAnimationService`。
+- 搜索结果显示在搜索框下方的 `Flyout` 中，不是 `AutoSuggestBox` 自己的建议列表（结果是任意组件）。
+- 运行时强调色通过修改主题字典中的强调色画刷实现，各档颜色按与白色、黑色混合近似生成，不是系统按强调色算出的调色板。
+- 对话框窗口是 `ContentDialog`，同一时间一个窗口上只能显示一个；不能移动、调整大小或最小化。
+- `Drop(opens: true)` 不登记文件关联：只有命令行与再次启动时交来的文件会到达。
+- 触控板捏合依赖系统把它转换为带 Ctrl 的滚轮（精确式触控板的默认行为）。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。

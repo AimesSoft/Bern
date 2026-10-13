@@ -215,52 +215,113 @@ fn showcase_generates_a_gtk_application() {
     );
 }
 
-/// GTK shows no style overrides yet: an application declaring them fails
-/// the GTK check at the rule, unless the rule exempts Linux.
-#[test]
-fn style_overrides_gtk_cannot_show_fail_the_check() {
+fn example(name: &str) -> (bern_compiler::Config, Application) {
     let root = workspace();
-    let config = bern_compiler::config::load(&root.join("examples/planner/Bern.toml")).unwrap();
-    let mut compiled = bern_compiler::compile(&config).unwrap();
-    let target = TargetConfig {
+    let config =
+        bern_compiler::config::load(&root.join("examples").join(name).join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    (config, compiled.app)
+}
+
+fn linux() -> TargetConfig {
+    TargetConfig {
         name: "linux".into(),
         platform: "linux".into(),
         ui: None,
         web_mode: None,
         channels: Vec::new(),
         frontends: Vec::new(),
-    };
-    let errors = GtkLinux.check(&compiled.app, &target);
+    }
+}
+
+/// The planner and the gallery use styles, drawing, motion, the media
+/// application components and the v0.29 and v0.30 features: GTK builds all
+/// of them, and draws them with generated tables.
+#[test]
+fn planner_and_gallery_build_for_gtk() {
+    for name in ["planner", "gallery"] {
+        let (_, app) = example(name);
+        let problems = GtkLinux.check(&app, &linux());
+        assert!(
+            problems.iter().all(|problem| !problem.is_error()),
+            "{name}: {problems:?}"
+        );
+        assert!(problems.is_empty(), "{name} warns on GTK: {problems:?}");
+        let ui = bern_backend_gtk::Generator::new(&app)
+            .generate(0, "bern_gtk::protocol::ProtocolDescriptor::default()");
+        assert!(!ui.contains("unsupported"), "{name}: {ui}");
+        for expected in [
+            "static STYLES: &[b::StyleDef] = &[",
+            "const M_JELLY: b::Curve",
+            "b::Canvas(p, c,",
+        ] {
+            assert!(ui.contains(expected), "{name} lacks `{expected}`");
+        }
+    }
+    let (_, gallery) = example("gallery");
+    let ui = bern_backend_gtk::Generator::new(&gallery).generate(0, "x");
+    for expected in [
+        // Cards: a style with a corner and a shadow, shown on a button that
+        // shows its content.
+        "b::StyleDef { name: \"buttonCard\"",
+        "b::ContentButton(p, c, b::ContentButtonProps { id: \"open_swatch\"",
+        "reveal: true",
+        "appearance: Some(\"dark\")",
+        "b::Inspector(p, c, b::InspectorProps",
+        "b::Rail(p, c, b::RailProps { vertical: false, anchor: Some(\"start\") }",
+        "b::Place(p, c, b::PlaceProps { at: Some(b::Num::Bound(",
+        "b::ScrollView(p, c, b::ScrollProps { axis: Some(\"horizontal\"), snap: Some(\"center\")",
+        "b::PopoverButton(p, c,",
+        "b::SplitButton(p, c,",
+        "b::Drop(p, c,",
+        "b::Pinch(p, c,",
+        "b::Swipe(p, c,",
+        "b::Toast(p, c,",
+        // Cards take turns appearing.
+        "\"swatch\", Some(0.04), ",
+        "b::shortcut(c, \"cmd+k\", b::act(|c| b::focus_target(c, \"find\")));",
+        "b::session_set(c, b::Field { session: 0, field: 2 }, V::Bool(false))",
+        "c.window(\"idle\")",
+        "c.window(\"large\")",
+        "dialog: true",
+        "idle_after: Some(3.0)",
+        "theme: Some(b::ThemeDef {",
+        "b::Source::Url(b::url(&c.engine(",
+    ] {
+        assert!(ui.contains(expected), "the gallery lacks `{expected}`");
+    }
+}
+
+/// Style effects GTK cannot show fail the check at the rule, unless the
+/// rule exempts Linux.
+#[test]
+fn style_effects_gtk_cannot_show_fail_the_check() {
+    let (_, mut app) = example("planner");
+    let rule = app
+        .style
+        .rules
+        .iter_mut()
+        .find(|rule| rule.component == "SidebarItem")
+        .expect("the planner styles its sidebar items");
+    // Sidebar rows take no shadow on any target.
+    rule.states[0]
+        .effects
+        .push(bern_ir::style::StyleEffect::Shadow {
+            radius: 4.0,
+            y: 1.0,
+            opacity: 0.2,
+        });
+    let errors = GtkLinux.check(&app, &linux());
     assert!(
         errors.iter().any(|error| error
             .message
-            .contains("cannot show `scale` on `SidebarItem`")),
+            .contains("cannot show `shadow` on `SidebarItem`")),
         "{errors:?}"
     );
-    // GTK has no canvas, shows marked text plain and keeps a sidebar's
-    // items fixed.
-    assert!(
-        errors.iter().any(|error| error
-            .message
-            .contains("cannot build `Sidebar` items that come and go")),
-        "{errors:?}"
-    );
-    assert!(
-        errors
-            .iter()
-            .any(|error| error.message.contains("does not support `Canvas`")),
-        "{errors:?}"
-    );
-    assert!(
-        errors
-            .iter()
-            .any(|error| error.message.contains("shows `Text(mark:)` as plain text")),
-        "{errors:?}"
-    );
-    for rule in &mut compiled.app.style.rules {
+    for rule in &mut app.style.rules {
         rule.exempt.push("linux".into());
     }
-    let errors = GtkLinux.check(&compiled.app, &target);
+    let errors = GtkLinux.check(&app, &linux());
     assert!(
         !errors
             .iter()

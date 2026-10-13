@@ -131,6 +131,15 @@ iPad 窗口化模式，同日，同一模拟器在“设置 > 多任务与手势
 
 展示应用随之调整：图片页的两行图片从 `Row` 改为 `Grid`，原来四张 120 宽的图片在 iPhone 上放不下、被两侧裁掉，现在窄屏时自动换行，宽窗口中仍是一行。
 
+## 错峰、比例轨道、浮层按钮与四档尺寸
+
+2026-10-14，v0.30，iPhone 17 Pro 模拟器（iOS 26.5），与 macOS 共用同一套 SwiftUI 实现，启动时用 `SIMCTL_CHILD_BERN_MOTION=slow` 放慢动效。
+
+- **错峰**：录下模拟器画面（`simctl io recordVideo`，只含模拟器）逐帧查看，从胶片页回到图案页时卡片按 Gingham、Tartan、Madras 的顺序依次淡入升起。
+- **比例轨道**：胶片页的时间轴、刻度与名字在窄屏上按比例排开；`film.level` 设为 0.8 后竖线与底色移到 80%，底色与面板等高。名字用 `anchor: start`，窄屏时最后两个名字会相互挤压，属于界面声明。
+- **浮层按钮**：画框页静置后控件隐藏；后台循环等待 `frame.volume` 挂载，再用模拟器点按画面唤醒，挂载后立即 `ui activate`：按钮值为 `open`，浮层中的音量滑块挂载、值为 0.7。截图中 iPhone 上显示的是指向按钮的气泡（`presentationCompactAdaptation(.popover)`），外观随画框页为深色。
+- **四档尺寸**：iPhone 竖屏时胶片页的 `Adaptive` 为 `compact`，显示两个图标按钮。iPad 与横屏未测。
+
 ## 未完成与已知限制
 
 - 只构建模拟器应用。真机需要开发者签名与描述文件，安装与 `bern package` 未实现。

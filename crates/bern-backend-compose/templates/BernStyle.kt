@@ -19,8 +19,12 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.AnimationVector
+import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.SpringSpec
+import androidx.compose.animation.core.TwoWayConverter
+import androidx.compose.animation.core.VectorizedFiniteAnimationSpec
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -161,7 +165,7 @@ class BernPalette(private val scheme: ColorScheme, private val dark: Boolean) {
 }
 
 @Composable
-fun bernPalette(): BernPalette = BernPalette(MaterialTheme.colorScheme, isSystemInDarkTheme())
+fun bernPalette(): BernPalette = BernPalette(MaterialTheme.colorScheme, bernDark())
 
 // MARK: - Styles
 
@@ -186,6 +190,10 @@ data class BernLook(
     val offsetX: Float? = null,
     val offsetY: Float? = null,
     val opacity: Float? = null,
+    /// A shadow below, as if lifted: blur radius, offset down, opacity.
+    val shadowRadius: Double? = null,
+    val shadowY: Double? = null,
+    val shadowOpacity: Double? = null,
     /// The spring entering this state.
     val motion: BernMotion? = null,
     /// `none`: this state shows nothing of its own.
@@ -208,6 +216,9 @@ data class BernLook(
             offsetX = other.offsetX ?: offsetX,
             offsetY = other.offsetY ?: offsetY,
             opacity = other.opacity ?: opacity,
+            shadowRadius = other.shadowRadius ?: shadowRadius,
+            shadowY = if (other.shadowRadius != null) other.shadowY else shadowY,
+            shadowOpacity = if (other.shadowRadius != null) other.shadowOpacity else shadowOpacity,
             motion = other.motion ?: motion,
         )
     }
@@ -301,18 +312,19 @@ fun BernStyledButton(
     val pressed by interaction.collectIsPressedAsState()
     val hovered by interaction.collectIsHoveredAsState()
     val (look, motion) = style.look(false, hovered, pressed, enabled)
+    val shape = RoundedCornerShape((style.corner ?: 6.0).dp)
     if (!style.drawsLook) {
-        material(modifier.bernTransform(look, motion), interaction)
+        material(modifier.bernTransform(look, motion).bernShadow(look, motion, shape), interaction)
         return
     }
     val palette = bernPalette()
-    val shape = RoundedCornerShape((style.corner ?: 6.0).dp)
     val foreground = look.foreground?.let(palette::color)
         ?: look.background?.let(palette::onTop)
         ?: MaterialTheme.colorScheme.onSurface
     Row(
         modifier
             .bernTransform(look, motion)
+            .bernShadow(look, motion, shape)
             .clip(shape)
             .background(look.background?.let(palette::color) ?: Color.Transparent)
             .border(look.borderWidth.dp, look.border?.let(palette::color) ?: Color.Transparent, shape)
@@ -395,6 +407,7 @@ object BernDraw {
         scope: DrawScope, palette: BernPalette, kind: String,
         x: Double, y: Double, width: Double?, height: Double?, corner: Double,
         fill: BernColor?, stroke: BernColor?, strokeWidth: Double, opacity: Double,
+        fade: String? = null,
     ) = with(scope) {
         val left = x.dp.toPx()
         val top = y.dp.toPx()
@@ -410,7 +423,21 @@ object BernDraw {
         }
         val alpha = opacity.toFloat()
         val paint = if (fill != null || stroke == null) palette.color(fill ?: BernColor.Role("fill.strong")) else null
-        if (paint != null) {
+        if (paint != null && fade != null) {
+            // The fill fades out toward the named edge.
+            val (start, end) = when (fade) {
+                "up" -> Offset(rect.center.x, rect.bottom) to Offset(rect.center.x, rect.top)
+                "left" -> Offset(rect.right, rect.center.y) to Offset(rect.left, rect.center.y)
+                "right" -> Offset(rect.left, rect.center.y) to Offset(rect.right, rect.center.y)
+                else -> Offset(rect.center.x, rect.top) to Offset(rect.center.x, rect.bottom)
+            }
+            val brush = androidx.compose.ui.graphics.Brush.linearGradient(listOf(paint, paint.copy(alpha = 0f)), start, end)
+            if (kind == "ellipse") {
+                drawOval(brush, rect.topLeft, rect.size, alpha)
+            } else {
+                drawRoundRect(brush, rect.topLeft, rect.size, CornerRadius(radius, radius), alpha = alpha)
+            }
+        } else if (paint != null) {
             if (kind == "ellipse") {
                 drawOval(paint, rect.topLeft, rect.size, alpha)
             } else {
@@ -553,19 +580,44 @@ sealed class BernTransition {
 }
 
 /// The transition into view, moved by its spring; a short fade when the
-/// system turned animations off.
+/// system turned animations off. After `delay` seconds: until then the
+/// element keeps its starting look, hidden, in its place.
 @Composable
-fun bernEnter(transition: BernTransition?, motion: BernMotion?): EnterTransition {
+fun bernEnter(transition: BernTransition?, motion: BernMotion?, delay: Double = 0.0): EnterTransition {
     if (transition == null) return EnterTransition.None
     if (bernReduceMotion() || motion == null) return fadeIn(tween(150))
     val density = LocalDensity.current
+    fun <T> spec(): FiniteAnimationSpec<T> = motion.spec<T>().let { if (delay > 0) BernDelayed(it, delay) else it }
     return when (transition) {
-        is BernTransition.Fade -> fadeIn(motion.spec())
-        is BernTransition.Pop -> scaleIn(motion.spec(), initialScale = transition.from) + fadeIn(motion.spec())
+        is BernTransition.Fade -> fadeIn(spec())
+        is BernTransition.Pop -> scaleIn(spec(), initialScale = transition.from) + fadeIn(spec())
         is BernTransition.Slide -> {
             val distance = with(density) { transition.distance.dp.roundToPx() }
-            slideIn(motion.spec()) { slideOffset(transition.edge, distance) } + fadeIn(motion.spec())
+            slideIn(spec()) { slideOffset(transition.edge, distance) } + fadeIn(spec())
         }
+    }
+}
+
+/// `inner` after `seconds`: the value stays at its start until then.
+/// Compose's springs take no delay of their own.
+private class BernDelayed<T>(val inner: FiniteAnimationSpec<T>, val seconds: Double) : FiniteAnimationSpec<T> {
+    override fun <V : AnimationVector> vectorize(converter: TwoWayConverter<T, V>): VectorizedFiniteAnimationSpec<V> =
+        Vectorized(inner.vectorize(converter), (seconds * 1_000_000_000).toLong())
+
+    private class Vectorized<V : AnimationVector>(
+        val inner: VectorizedFiniteAnimationSpec<V>,
+        val delay: Long,
+    ) : VectorizedFiniteAnimationSpec<V> {
+        override fun getValueFromNanos(playTimeNanos: Long, initialValue: V, targetValue: V, initialVelocity: V): V =
+            if (playTimeNanos < delay) initialValue
+            else inner.getValueFromNanos(playTimeNanos - delay, initialValue, targetValue, initialVelocity)
+
+        override fun getVelocityFromNanos(playTimeNanos: Long, initialValue: V, targetValue: V, initialVelocity: V): V =
+            if (playTimeNanos < delay) initialVelocity
+            else inner.getVelocityFromNanos(playTimeNanos - delay, initialValue, targetValue, initialVelocity)
+
+        override fun getDurationNanos(initialValue: V, targetValue: V, initialVelocity: V): Long =
+            delay + inner.getDurationNanos(initialValue, targetValue, initialVelocity)
     }
 }
 
@@ -597,12 +649,75 @@ private fun slideOffset(edge: BernEdge, distance: Int): IntOffset = when (edge) 
 val LocalBernSettled = staticCompositionLocalOf { mutableStateOf(true) }
 
 /// An element that plays its appearing transition when it is added after
-/// the window's first display, as an item added to a list.
+/// the window's first display, as an item added to a list. A `staggered`
+/// one is a direct child of a container that declares `stagger`: it waits
+/// for its turn on the container's clock, unless the system turned
+/// animations off.
 @Composable
-fun BernAppear(enter: EnterTransition, content: @Composable () -> Unit) {
+fun BernAppear(
+    transition: BernTransition?,
+    motion: BernMotion?,
+    staggered: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     val settled = LocalBernSettled.current.value
+    val clock = if (staggered) LocalBernStagger.current else null
+    val reduced = bernReduceMotion()
+    val delay = remember { if (settled && !reduced) clock?.turn() ?: 0.0 else 0.0 }
     val state = remember { MutableTransitionState(!settled).apply { targetState = true } }
-    AnimatedVisibility(visibleState = state, enter = enter) { content() }
+    AnimatedVisibility(visibleState = state, enter = bernEnter(transition, motion, delay)) {
+        // The clock is only for the container's direct children.
+        if (clock != null) BernUnstaggered(content) else content()
+    }
+}
+
+// MARK: - Stagger
+
+/// The clock of a container that declares `stagger`: its direct children
+/// that appear take turns, `step` seconds apart. The turns of one update
+/// are those composed before the main thread moves on; the count then
+/// starts over, so children added by a later update start at once.
+class BernStagger(private val step: Double) {
+    private var next = 0
+    private var resetting = false
+
+    /// The delay of the next child to appear, in seconds.
+    fun turn(): Double {
+        val delay = next * step
+        next += 1
+        if (!resetting) {
+            resetting = true
+            main.post {
+                next = 0
+                resetting = false
+            }
+        }
+        return delay
+    }
+
+    private companion object {
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+    }
+}
+
+/// The clock of the staggering container whose direct children are being
+/// composed, if any.
+val LocalBernStagger = staticCompositionLocalOf<BernStagger?> { null }
+
+@Composable
+fun rememberBernStagger(step: Double): BernStagger = remember { BernStagger(step) }
+
+/// The direct children of a container that declares `stagger`.
+@Composable
+fun BernStaggered(clock: BernStagger, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalBernStagger provides clock, content = content)
+}
+
+/// Content below a staggering container's direct children, which no
+/// longer takes turns.
+@Composable
+fun BernUnstaggered(content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalBernStagger provides null, content = content)
 }
 
 /// A container whose size follows its children with a spring.

@@ -17,6 +17,7 @@ mod glue;
 mod icons;
 mod js;
 mod strings;
+mod style;
 mod theme;
 
 use bern_ir::spec::COMPONENTS;
@@ -32,21 +33,40 @@ use std::path::PathBuf;
 pub use js::Generator;
 
 const RUNTIME: &str = include_str!("../templates/bern.js");
+const FEATURE_RUNTIME: &str = include_str!("../templates/features.js");
 const STYLES: &str = include_str!("../templates/bern.css");
+const FEATURE_STYLES: &str = include_str!("../templates/features.css");
 const WASM: &str = "app.wasm";
 const RUST_TARGET: &str = "wasm32-unknown-unknown";
 
 pub struct WebBrowser;
 
+/// Components this target does not build yet.
+/// IR features the Web builds.
+const FEATURES: &[&str] = &[
+    bern_target_api::feature::BUTTON_CONTENT,
+    bern_target_api::feature::REVEAL,
+    bern_target_api::feature::TOOLBAR_SEARCH,
+    bern_target_api::feature::SEARCH_RESULTS,
+    bern_target_api::feature::SESSION_ACTIONS,
+    bern_target_api::feature::TOGGLE_BUTTON,
+    bern_target_api::feature::DIALOG_WINDOWS,
+    bern_target_api::feature::BOUND_LENGTHS,
+    bern_target_api::feature::APPEARANCE,
+    bern_target_api::feature::SHORTCUTS,
+    bern_target_api::feature::RUNTIME_THEME,
+    bern_target_api::feature::RUNTIME_IMAGES,
+    bern_target_api::feature::PICTURE_FILLS,
+    bern_target_api::feature::FILE_PICK,
+    bern_target_api::feature::SCROLL_SNAP,
+    bern_target_api::feature::RAILS,
+    bern_target_api::feature::POPOVER_BUTTON,
+    bern_target_api::feature::SIZE_CLASSES,
+];
+
 fn component_names() -> &'static [&'static str] {
     static NAMES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| {
-        COMPONENTS
-            .iter()
-            .map(|spec| spec.name)
-            .filter(|name| !bern_ir::spec::DRAWING.contains(name))
-            .collect()
-    })
+    NAMES.get_or_init(|| COMPONENTS.iter().map(|spec| spec.name).collect())
 }
 
 fn html_escape(value: &str) -> String {
@@ -197,11 +217,22 @@ fn nested_optional(ty: &Type) -> bool {
 impl Target for WebBrowser {
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
-            styles: &[],
-            motion: &[],
-            window_chrome: false,
-            text_marks: false,
-            dynamic_items: false,
+            styles: style::SUPPORT,
+            motion: &[
+                "appear",
+                "disappear",
+                "reflow",
+                "hero",
+                "animate",
+                "scroll_scale",
+                "scroll_opacity",
+                "nudge",
+                "stagger",
+            ],
+            window_chrome: true,
+            text_marks: true,
+            dynamic_items: true,
+            features: FEATURES,
             id: "web-browser",
             ui: "web",
             platforms: &["browser"],
@@ -325,7 +356,13 @@ impl Target for WebBrowser {
         let mut files = vec![
             GeneratedFile::text("index.html", index_html(app, &version, &icon_links)),
             GeneratedFile::text("bern.js", RUNTIME),
-            GeneratedFile::text("bern.css", STYLES),
+            // It imports `bern.js` by the same versioned URL as the page, so
+            // both share one runtime.
+            GeneratedFile::text(
+                "features.js",
+                FEATURE_RUNTIME.replace("__BERN_VERSION__", &version),
+            ),
+            GeneratedFile::text("bern.css", format!("{STYLES}\n{FEATURE_STYLES}")),
             GeneratedFile::text("theme.css", theme::stylesheet(app)),
             GeneratedFile::text("THIRD_PARTY_NOTICES.txt", icons::NOTICES),
             GeneratedFile::text(

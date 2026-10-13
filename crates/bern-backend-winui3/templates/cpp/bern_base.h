@@ -269,6 +269,12 @@ std::optional<Value> Some(Value const& value);
 std::string Number(double value);
 winrt::hstring Plain(Value const& value);
 double AsDouble(Value const& value);
+/// The numbers of a list of `i64` or `f64`.
+std::vector<double> Numbers(Value const& value);
+/// The URL of a `MediaSource`, optional or not.
+std::optional<std::string> Url(Value const& value);
+/// The name of an enum variant, from the catalog's types.
+std::string VariantName(Value const& value, char const* enumName);
 std::string AsText(Value const& value);
 Values const& AsList(Value const& value);
 std::optional<uint32_t> Tag(Value const& value);
@@ -462,8 +468,17 @@ struct Catalog {
     std::string primary;
     std::vector<std::string> players;
     std::optional<double> compactBelow;
+    std::optional<double> mediumBelow;
+    std::optional<double> expandedBelow;
     std::optional<std::array<uint8_t, 3>> brandSeed;
+    /// Extensions of each file kind `files:` names, such as `video`.
+    std::vector<std::pair<std::string, std::vector<std::string>>> fileKinds;
 };
+
+/// The glyph of a Bern icon name (SF Symbols naming) in Segoe Fluent Icons
+/// and Segoe MDL2 Assets, which share these code points; empty when there
+/// is none. Generated with the catalog.
+wchar_t const* IconGlyph(std::string_view name);
 
 /// The generated application catalog (`app_catalog.cpp`).
 Catalog BernCatalog();
@@ -520,6 +535,14 @@ void After(std::chrono::milliseconds delay, std::function<void()> work);
 /// told to show itself and runs `onActivate`.
 bool Claim(std::string const& bundleId);
 inline std::function<void()> onActivate;
+/// Files the system opened with the application, as `file:` URLs: from this
+/// process's command line, then from later launches, which hand theirs to
+/// this instance.
+inline std::vector<std::string> openedFiles;
+inline std::function<void(std::vector<std::string> const&)> onOpen;
+/// The `file:` URL of a path, and the path of a `file:` URL.
+std::string FileUrl(std::wstring const& path);
+std::optional<std::wstring> FilePath(std::string const& url);
 
 /// Start the engine for this front end. Returns an error message or nothing.
 std::optional<std::string> Start(Catalog const& app, std::string const& resources);

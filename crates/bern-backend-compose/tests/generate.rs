@@ -123,7 +123,7 @@ fn planner_generates_styles_drawing_and_dynamic_items() {
     assert!(kotlin.contains("LaunchedEffect(bernVisible)"));
     assert!(kotlin.contains("if (bernPlannerDraft.page !in bernVisible)"));
     // Tags pop in when added.
-    assert!(kotlin.contains("BernAppear(bernEnter(BernTransition.Pop("));
+    assert!(kotlin.contains("BernAppear(BernTransition.Pop("));
     // The title grows from one style to the other; the window goes
     // immersive once idle.
     assert!(kotlin.contains("BernHero(\"title\", BernMotion("));
@@ -150,4 +150,51 @@ fn showcase_generates_video_queries_and_windows() {
     assert!(kotlin.contains("\"settings\" -> BernWindow"));
     let build = file(&files, "app/build.gradle.kts");
     assert!(build.contains("androidx.media3:media3-exoplayer"));
+}
+
+#[test]
+fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
+    let (config, compiled) = compile("gallery");
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(
+        problems
+            .iter()
+            .all(|problem| problem.severity == bern_target_api::Severity::Warning),
+        "{problems:?}"
+    );
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
+    // The wall's cards take turns rising; the card is a component, whose
+    // root takes its turn on the clock of the repetition it stands in.
+    assert!(
+        kotlin.contains("BernStaggered(rememberBernStagger(0.04)) {"),
+        "{kotlin}"
+    );
+    assert!(kotlin.contains(", staggered = true) {"));
+    // The film's timeline: ticks at fractions, names from their start, the
+    // level's fill as large as the stack it stands in.
+    assert!(kotlin.contains("BernRail(false, BernRailAnchor.Center) {"));
+    assert!(kotlin.contains("BernRail(false, BernRailAnchor.Start) {"));
+    assert!(
+        kotlin.contains("BernRail(false, BernRailAnchor.Center, Modifier.matchParentSize()) {")
+    );
+    assert!(kotlin.contains("BernPlace((swatch.at).toDouble(), null, null, null) {"));
+    assert!(
+        kotlin.contains(
+            "BernPlace(null, (0L).toDouble(), (bernGalleryDraft.level).toDouble(), null) {"
+        )
+    );
+    assert!(
+        kotlin.contains("BernPlace((bernGalleryDraft.level).toDouble(), null, null, BernMotion(")
+    );
+    // The frame's volume in a popover.
+    assert!(kotlin.contains("BernPopoverButton(\"frame.volume\""));
+    // Four sizes: the wall's padding reads the window's, and the film's
+    // controls choose among three layouts.
+    assert!(kotlin.contains("bernWindow.large"));
+    assert!(kotlin.contains("BernHost.layouts = BernLayouts(600.0, 1024.0, 1440.0)"));
+    assert!(kotlin.contains("medium = {"));
+    assert!(kotlin.contains("large = null,"));
 }

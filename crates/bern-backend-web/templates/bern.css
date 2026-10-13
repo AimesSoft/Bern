@@ -577,6 +577,15 @@ button:disabled {
   gap: 8px;
 }
 
+/* A divider parts two groups of tools. */
+.bern-tool-group > .bern-divider {
+  align-self: center;
+  height: 20px;
+  margin: 0 4px;
+  border-top: 0;
+  border-left: 1px solid var(--bern-separator);
+}
+
 .bern-tools .bern-button,
 .bern-tools .bern-dropdown,
 .bern-tools .bern-field {

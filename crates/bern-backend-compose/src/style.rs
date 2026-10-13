@@ -12,6 +12,7 @@ const BUTTON_STATES: &[&str] = &[
     "background",
     "foreground",
     "border",
+    "shadow",
     "scale",
     "offset",
     "opacity",
@@ -37,6 +38,7 @@ pub const SUPPORT: &[StyleSupport] = &[
             "background",
             "foreground",
             "border",
+            "shadow",
             "corner",
             "padding",
             "size",
@@ -54,6 +56,7 @@ pub const SUPPORT: &[StyleSupport] = &[
             "background",
             "foreground",
             "border",
+            "shadow",
             "corner",
             "padding",
             "size",
@@ -149,6 +152,11 @@ fn look(app: &Application, effects: &[StyleEffect]) -> String {
             StyleEffect::Opacity { value, motion } => {
                 args.push(format!("opacity = {}", float(*value)));
                 motion_of = Some(motion.clone());
+            }
+            StyleEffect::Shadow { radius, y, opacity } => {
+                args.push(format!("shadowRadius = {}", double(*radius)));
+                args.push(format!("shadowY = {}", double(*y)));
+                args.push(format!("shadowOpacity = {}", double(*opacity)));
             }
             // `system` keeps what lies below; `none` shows nothing of its own.
             StyleEffect::System | StyleEffect::Nothing => args.push("nothing = true".into()),

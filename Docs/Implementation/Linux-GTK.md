@@ -1,7 +1,7 @@
 # Linux GTK 实现记录
 
-- 日期：2026-10-11
-- 依据：[Bern 架构设计 v0.15](../Design.md)、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
+- 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”）
+- 依据：[Bern 架构设计 v0.30](../Design.md)（最初按 v0.15 实现）、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
 - 工具链：Rust 1.99.0；gtk4-rs 0.11（`gtk4`，启用 `v4_14`）、libadwaita-rs 0.9（启用 `v1_5`）、glib/gio 0.22
 - 验证环境：Ubuntu 24.04 LTS（aarch64，VMware Fusion 虚拟机），GNOME Shell 46.0，Wayland 会话；GTK 4.14.5、libadwaita 1.5.0、GStreamer 1.24.2
 
@@ -21,6 +21,12 @@
 | 原生多窗口、关闭确认、窗口事实 | 完成 | 每个窗口是 `AdwApplicationWindow`；关闭协议、最大化、恢复、调整尺寸由命令驱动并以平台事实答复；Wayland 的限制见“窗口” |
 | Video 原生呈现 | 完成 | `GtkMediaFile`（GStreamer）执行端与 `GtkPicture` 呈现、命令驱动的控制条；播放、暂停、跳转、静音、音量、播完与重播、换源、损坏文件、应用级播放器跨页面与跨窗口均已实测（见“验证记录”）；HLS 直播（时长未知、不可跳转）已实测 |
 | 阶段四：`Adaptive`、`Menu`、`LanguagePicker`、运行时切换语言 | 完成 | 窗口缩窄后布局切换为紧凑并挂载菜单，菜单未打开时也能执行菜单项；语言切换后界面全部更新，草稿保留 |
+| 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色、边框、圆角、内边距、尺寸档与阴影生成应用优先级的样式表，状态取 GTK 的状态标志；缩放、位移与透明度用 `AdwSpringAnimation`，回到普通状态用 `settle`。见“样式覆盖” |
+| 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 变换在分配子控件时施加，不影响布局；`reflow` 只在 `Column`、`Row` 里（含其中的 `ForEach`），其他容器构建时警告。见“动效” |
+| 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | cairo 绘制，颜色取 libadwaita 的命名颜色；标注按 Pango 的行位置画在文字下 |
+| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 见“窗口外框、静置与对话框” |
+| 可增减的侧栏项、页签与工具栏项 | 完成 | 侧栏项与页签在挂载期间登记；选中项离开时选中移到 `fallback` 或剩下的第一项 |
+| v0.29 的 `features` 与媒体类组件 | 完成 | `SidebarFooter`、`Inspector`（`AdwOverlaySplitView`）、`Toast`（`AdwToast`）、`SplitButton`、`PopoverButton`、`Drop`（`GtkDropTarget`）、`Pinch`（`GtkGestureZoom`）、`Swipe`（`GtkGestureDrag`）、`Rail`；工具栏搜索与结果、会话动作、开关按钮、绑定长度、`appearance`、快捷键、运行时强调色与明暗、运行时图片、取色填充、`pick`（`GtkFileDialog`）、滚动停靠与位置；会话命令 `ui.focus`、`ui.set_file` |
 
 ## 工程结构
 
@@ -60,8 +66,21 @@
 | `Video` | `GtkPicture` 显示播放器的 `GtkMediaFile`，下方为标准控制条（见“媒体”） |
 | `Image` | `GtkPicture`（`content-fit` 对应 `fit`，可缩小）放在固定尺寸的 `BernPictureFrame` 中：`GtkPicture` 本身要求原图大小，这个小部件把它限制为声明的宽高，得到更多空间时仍靠前缘；只写一边时另一边按图片比例。JPEG 经 gdk-pixbuf 解码并按 EXIF 方向转正（GTK 4.14 自己的加载器忽略方向），其他格式用 GTK 的加载器。HDR 图片（PQ、HLG 的 PNG，带增益图的 JPEG）由 `bern-image` 解码：GTK 4.16 起在 Wayland 上且打开了色彩管理（4.16 至 4.18.0 默认打开，4.18.1 起要用户设置 `GDK_DEBUG=color-mgmt`）时，以全部增益、线性 BT.2020 交给 GTK（`GdkMemoryTextureBuilder` 与 rec2100-linear，运行时查找，同一个程序也能在 4.14 上运行）；其他情况下先转成 SDR：增益图为作者给的 SDR 图，PQ 与 HLG 做色调映射。实测 GTK 4.14：PQ 图不再发灰，增益图显示 SDR 图。`label` 为替代文本，没有时对辅助技术隐藏 |
 | `Progress` | 有 `value` 时为标签下的 `GtkProgressBar`，由标签命名；没有时为 `GtkSpinner` 加 `dim-label` 文字（libadwaita 1.5 还没有 `AdwSpinner`） |
-| `Grid` | 同宽单元格的 `GtkFlowBox`：每格至少 `min_width` 宽，不可选择，单元格本身不获得焦点 |
-| `Stack` | `GtkGrid` 的同一个格子，子元素的顺序即叠放顺序，按 `align` 设 `halign` 与 `valign`；外面一层横向 `GtkBox` 让它保持自身尺寸 |
+| `Grid` | 同宽单元格的 `GtkFlowBox`：每格至少 `min_width` 宽，不可选择，单元格本身不获得焦点；绑定的 `min_width` 随 `animate` 的弹簧变化，列数随之改变 |
+| `Stack` | `BernLayers`：子元素叠在同一处，后写的在上面、先接收输入，按 `align` 对齐；整体与最大的一层一样大，得到更多空间时保持在前缘，除非某层要填满（没有尺寸的画布、轨道、视频等，GTK 的 expand 向上传递） |
+| `Canvas` | `GtkDrawingArea`，cairo 绘制；没写 `width`、`height` 的方向填满可用空间；有 `label` 时是带名称的图像，没有时对辅助技术隐藏 |
+| `Text(mark:)` | `BernMarkedText`：标签之下按 Pango 每一行的逻辑范围画胶囊形底纹（行高 74% 至 98%，右端多出 0.4 个字宽），文字变化或主题变化时重画 |
+| `Rail` | `BernRail`：沿轴取得到的长度，交叉方向为最厚的子元素；`at` 的子元素按 `anchor` 对准比例点，`from`/`to` 的子元素铺在两点之间、没有交叉尺寸时铺满厚度；比例变化随 `animate` 的弹簧移动。轨道只沿轴向外要空间：没有尺寸的子元素不让外面的容器在交叉方向变大。在 `Stack` 中轨道两个方向都铺满其他层给出的尺寸，自己只按有尺寸的子元素计入 |
+| `SidebarFooter` | 侧栏列表下方、分隔线之下的一栏，列表在它上方滚动 |
+| `Inspector` | `AdwOverlaySplitView` 的尾侧边栏：`presented` 双向绑定，宽窗口推开内容，窄于 640sp 时浮在内容上 |
+| `Toast` | 窗口的 `AdwToastOverlay` 中的 `AdwToast`，`key` 或内容变化时替换，`duration` 秒后消失；有 `icon` 时为图标加文字的标题 |
+| `SplitButton` | `linked` 的开关按钮加箭头菜单按钮，浮层中放子元素（始终挂载） |
+| `PopoverButton` | `GtkMenuButton` 与 `GtkPopover`：子元素在浮层显示时挂载、关闭时卸载；`presented` 双向绑定 |
+| `Drop` | `GtkDropTarget`（文件列表，预读值以便按种类拒绝）：可接受的文件经过时 `over` 为真，松手后存入字段并执行动作；`opens: true` 时应用接收系统交来的文件（`GApplication` 的 open），桌面文件登记 `MimeType` 与 `%U` |
+| `Pinch` / `Swipe` | `GtkGestureZoom`（另接受 Ctrl 加滚轮）/ `GtkGestureDrag`（10 点后开始，`distance` 默认 300） |
+| `Switch(style: button)`、工具栏中的 `Switch` | `GtkToggleButton`，工具栏中有图标时只显示图标 |
+| 带内容的 `Button` | 无外框的 `GtkButton`，内容按原样显示，`overflow: hidden` 让样式的圆角裁住内容；没有样式时按下变暗 |
+| 工具栏中的 `Search` | 页眉末端的 `GtkSearchEntry`；子元素是不抢焦点的 `GtkPopover`，有焦点且有文字时显示，点选结果后收起 |
 
 图标使用 Bern 的 SF Symbols 命名，映射到 freedesktop 符号图标名（例如 `magnifyingglass` → `system-search-symbolic`），由用户的图标主题绘制；GNOME 上即 Adwaita 图标。
 
@@ -94,7 +113,55 @@
 
 - 文案表（应用声明的文字、应用名与运行时自己的文字）生成到程序中；启动时按 `LANGUAGE`、`LC_ALL`、`LC_MESSAGES`、`LANG` 选择支持的语言（`zh_CN` 对应 `zh-Hans`），`ui.set_language` 与 `LanguagePicker` 在运行中切换，所有文本绑定在同一次更新中重新计算。运行时自己的文字内置 zh-Hans、zh-Hant、en、ja。
 - 构建生成 freedesktop 桌面文件（各语言的名称），可安装到 `~/.local/share/applications`。
-- 颜色全部来自 libadwaita：深浅色跟随系统，生成代码不设置颜色；声明了品牌色时映射为 libadwaita 的强调色。
+- 颜色全部来自 libadwaita：深浅色跟随系统；没有样式覆盖时生成代码不设置颜色。声明了品牌色时映射为 libadwaita 的强调色。样式覆盖与画布的语义角色映射到 libadwaita 的命名颜色（见“样式覆盖”）。
+
+## 样式、动效、自绘与媒体类应用的能力（v0.29、v0.30）
+
+2026-10-14 补齐：GTK 的能力描述现在列出样式（`Button`、`IconButton`、`SidebarItem`）、动效（`appear`、`disappear`、`reflow`、`hero`、`animate`、`scroll_scale`、`scroll_opacity`、`nudge`、`stagger`）、`window_chrome`、`text_marks`、`dynamic_items`、全部绘图组件与媒体类组件，以及 `features` 中的全部 18 项。`examples/planner` 与 `examples/gallery` 在 GTK 上检查没有错误也没有警告（测试）。
+
+### 样式覆盖
+
+- 每个用到的样式生成一个 `StyleDef` 表项；运行时把它们写成一张应用优先级的样式表：类 `bern-style-<名称>` 是基础外观，`bern-selected`、`bern-hover`、`bern-pressed`、`bern-focus`、`bern-disabled` 依次是各状态，同优先级下后写的胜出，正是“选中、悬停、按下、焦点、禁用”的合并顺序。样式没写的属性留给主题，所以只写变换的 `Button { pressed: scale(…) }` 保留 libadwaita 按钮的外观与反馈；写了底色的状态盖住主题的悬停底色。`none` 去掉该状态的反馈，`system` 保留主题的。颜色变化用 150 毫秒的 CSS 过渡。
+- 状态来自 GTK 自己的状态标志（`PRELIGHT`、`ACTIVE`、`FOCUS_VISIBLE`、`INSENSITIVE`、`SELECTED`/`CHECKED`），不另装事件控制器，键盘按下与指针按下都是 `ACTIVE`。
+- 缩放、位移与透明度作用在控件外层的 `BernMotion` 上（见“动效”），用状态所带的弹簧进入、`settle` 回到普通状态，可在动画中途换目标。
+- 侧栏项有样式时，行本身不再画底色，样式画在行内容上，内容在 `BernMotion` 里随状态缩放；没有写的状态沿用 libadwaita 侧栏的样子（悬停 7%、选中 10%、按下 16% 的前景色）。选中由行的 `SELECTED` 标志驱动；行仍是 `GtkListBox` 的行，键盘导航不变（未实测）。
+- 尺寸档：`small` 最小高 24、`large` 44、`extra_large` 52，并调整内边距与字号；`corner` 为 `border-radius`，带内容的按钮另有 `overflow: hidden` 裁住内容，`shadow` 为沿圆角的 `box-shadow`。
+- 语义角色映射到 libadwaita 的命名颜色：`surface.canvas` → `window_bg_color`，`surface.panel` → `card_bg_color`，`surface.raised` → `popover_bg_color`，`text.primary` → `window_fg_color`，`text.secondary` → 它的 55%，`accent` → `accent_bg_color`，`on_accent` → `accent_fg_color`，`status.*` → `success`/`warning`/`error_bg_color`，`fill.subtle` → 前景色 7%，`fill.strong`、`control.track`、`control.border` → 15%。固定的 `color(light:, dark:)` 按当前明暗取值，明暗变化时样式表重写。
+
+### 动效
+
+- 弹簧是 libadwaita 的 `AdwSpringAnimation`：质量 1，刚度 (2π / T)²，阻尼比 ζ；换目标时从当前值与速度继续。动画由控件的帧时钟驱动，控件未上屏时直接到终点，所以出现过渡等元素上屏后才开始。系统关闭动画（`gtk-enable-animations`）或 `BERN_MOTION=reduce` 时，状态变换、错峰、晃动与滚动联动不执行，出现与消失只做 0.15 秒的淡入淡出；系统关闭动画时 libadwaita 会把这次淡入淡出也直接跳到终点。
+- `BernMotion` 只有一个子控件，测量与子控件相同，分配时给子控件一个以其中心为原点的变换，所以动效不改变布局；变换由几层（样式状态、出现、消失、共享元素、晃动、滚动联动、显示）各自的弹簧合成：位移相加、缩放与透明度相乘。
+- 出现与消失：`if`、`match`、`ForEach` 在首次显示之后挂载的元素播放 `appear`；元素内部的元素随它一起出现，不再各自播放。卸载的带 `disappear` 的元素留在容器里播完再离开，此时它已不在自己的区域中，新元素按它不存在时的位置插入。列表行由列表布置，行本身不动，行的内容在行内移动。
+- `stagger`：容器构建直接子元素时带一个计数，带 `appear` 的子元素依次晚 `stagger` 秒；容器本身在一次更新中出现时，子元素也播放出现；`ForEach` 的各行即其子元素，每次更新从 0 计起。
+- 共享元素 `hero`：元素卸载时记下它在窗口中的位置并留一张画面（视频与画布不留，它们会自己变化）；同一窗口中同键的新元素布置后，从旧位置与尺寸以 `hero` 弹簧展开，旧画面在窗口上方的 `GtkFixed` 层里随之移动并淡出。
+- `reflow`：写了它的 `Column`、`Row`，或其中有带 `reflow` 的 `ForEach`，用 `BernReflowBox`：GTK 的盒子布局排好后，比较每个子元素的新旧位置，被移动的子元素从旧位置以弹簧滑到新位置（动画中再次移动时接着当前偏移）。`Grid`、`Stack`、表单行等其他容器中的 `reflow` 构建时警告，子元素直接到新位置。
+- `animate`：绑定状态的长度（`padding`、`gap`、`width`、`height`、`Grid` 的 `min_width`、`Canvas` 与 `Image` 的尺寸、`Video` 的 `corner`、`Rail` 的比例）随这个弹簧变化。`Video` 的圆角由 `BernClip` 在绘制时裁剪，变化只重绘。
+- `nudge`：条件变真时放大到 1.06 再以 `jelly` 弹回；`ScrollView(arrival: nudge)` 让设置 `position` 滚到的那一项停稳后晃一下。
+- `scroll_scale`、`scroll_opacity`：滚动区的调整量每次变化与元素每次分配时，按元素中心离视口中心的距离设置缩放与透明度。
+
+### 自绘与图片
+
+- `Canvas` 是 `GtkDrawingArea`，绘图元素在一个绑定中读取，状态、尺寸或颜色（系统明暗、对比度、应用的强调色与明暗）变化时重绘；颜色在绘制时按控件所在部分的外观解析。图案按条带逐条绘制，`twill` 叠 45° 细线，不缓存位图。
+- `fill_from` 的图片在后台读取（`GFile`，本地文件或 http(s)），按 EXIF 方向转正后缩到 32×32 取平均色，按 URL 缓存；读到之前用 `fill`。`fade` 是向一侧渐隐为透明的线性渐变。
+- `Image(source: app.x)` 在后台读取后显示，`None` 时不显示；只写一边时另一边按图片比例。
+
+### 窗口外框、静置与对话框
+
+- `idle_after`：窗口捕获阶段的指针移动、按键、滚轮与按下重新计时，到时 `window.idle` 为真。内容在静止的指针下移动时 GTK 会在原位置报告指针移动，位置没变的不算输入，否则画框铺满时会立即被自己的布局变化唤醒。
+- `immersive`：为真时窗口里所有标题栏（窗口自己的、侧栏与详情的）`reveal-top-bars` 关闭；同时静置时指针隐藏。
+- `chrome: unified`：标题栏用 `AdwToolbarView` 的平铺样式（`flat`），不再有分隔阴影；内容不延伸到标题栏下。
+- `role: dialog`：设为主窗口的临时窗口并模态，Esc 关闭；在 GNOME 上由 mutter 附着在主窗口上（未验证，测试环境 Broadway 没有窗口管理器，对话框出现在左上角）。
+- 窗口尺寸档：窗口内容顶部一个高 0 的探针测量宽度，按 `[layouts]` 的三个断点得到 `compact`、`medium`、`expanded`、`large`，表达式中的 `window.compact` 等读取它；`Adaptive` 四档各自选择，没有自己布局的档位显示下一个更大的已声明布局，没有更大的取更小的。
+- 运行时强调色与明暗：`WindowSet(accent:, appearance:)` 的表达式在每个窗口中求值；强调色以 `@define-color accent_bg_color`、`accent_color`（浅色窗口略暗、深色略亮，保证在窗口底色上可读）与 `accent_fg_color`（按亮度取黑或白）写入一份更高优先级的样式表，明暗切换时重写；明暗由 `AdwStyleManager` 的配色方案设置。libadwaita 1.5 没有设置强调色的接口，这是它支持的方式。
+- `appearance: dark` / `light` 的部分：第一次用到时，从 libadwaita 读取它自己的 `base.css` 与另一种外观的命名颜色，把每条规则限定在 `.bern-appearance-dark`（或 `light`）之下、命名颜色换成那种外观的取值（强调色保持跟随窗口），作为一份样式表加载；部分里的控件、从中弹出的浮层与菜单因此按那种外观绘制，画布的语义角色也按它解析。只在部分的子孙上生效，部分本身的底色由内容决定。
+
+### 媒体类应用的组件与输入
+
+- 文件：`pick` 用 `GtkFileDialog`（按种类加 MIME 与扩展名过滤，`folder` 选目录），选中后以 `file://` 地址存进字段再执行动作；种类与扩展名表随生成代码一起提供。`ui.set_file` 校验地址（`file`、`http`、`https`，否则 `invalid_url`）与种类（否则 `unsupported_file`）后交给带 `pick` 的按钮、菜单项或 `Drop`。
+- 快捷键：每个窗口一个捕获阶段的按键控制器，按控件挂载的先后取最新的；`cmd` 与 `ctrl` 都是 Control。没有 Control 或 Alt 的快捷键在编辑文字时不触发。`Search` 的快捷键聚焦搜索框，`Switch`、`SplitButton` 的开关，按钮、菜单项、`PopoverButton` 的激活。
+- `ScrollView(snap:, position:)`：滚动停下（160 毫秒不变）时取最近的一项对齐到锚点；离上次停下的位置走过 24 点以上而最近的一项在身后时，取运动方向上的下一项，所以一格滚轮也能前进。`center` 时首尾按最大一项留出空白；位置按项在内容中的坐标加内容的边距计算，与当前滚动无关。字段被设成另一项时以 `smooth` 滚过去；首次显示等边距生效后直接停在字段的一项。
+- 重复项中的控件目标带上每一层的键，经过组件也一样（`card.open_swatch[2]`）。
 
 ## 构建与运行
 
@@ -107,7 +174,7 @@ target/bern/linux/Showcase/showcase
 
 应用图标在 `Showcase/icons/dev.bern.showcase.png`（没有声明 `[app].icon` 时为 512 像素的 Bern 标志）。启动时这个目录加入图标主题的搜索路径，窗口的默认图标名为 `bundle_id`；找不到时在标准错误报告。生成的 `.desktop` 文件以绝对路径指向它。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标，把生成的文件复制到 `~/.local/share/applications/` 后程序坞显示标志；构建不会写入用户目录。
 
-开发时 `BERN_SNAPSHOT_DIR` 让程序在每次变化后把各窗口渲染为 `<目录>/<窗口>.png`（窗口最小化时不绘制），`BERN_APPEARANCE=light|dark` 覆盖系统外观；两者默认关闭。
+开发时 `BERN_SNAPSHOT_DIR` 让程序在每次变化后（包括 `window.idle` 变化）把各窗口渲染为 `<目录>/<窗口>.png`（窗口最小化时不绘制，浮层是独立的表面，不在其中），`BERN_APPEARANCE=light|dark` 覆盖系统外观，`BERN_MOTION=reduce` 按减少动态效果运行，`BERN_MOTION_LOG` 把每次变换、`reflow` 偏移与错峰延迟带毫秒时间写到标准错误；都默认关闭。
 
 ### 打包
 
@@ -142,11 +209,32 @@ target/bern/linux/Showcase/showcase
 - `bern-backend-gtk` 的测试（包括对生成的应用做类型检查）通过，`bern-gtk` 的 clippy 没有警告，应用日志没有 GTK 警告。
 - “图片与布局”页：三种 `fit` 在 120×90 的框中分别留白、裁掉两边、拉伸，只写宽度的标志保持比例；层叠中标志在右上角；网格在 680 宽的表单中为三列；不确定进度为转圈加灰色文字。CLI 执行 `showcase set-volume --value 90` 与 `ui set-number --target layout_page.layout_brightness --value 0.2` 后两个进度条立即变为 90% 与 20%。
 
+2026-10-14，v0.29 与 v0.30 的能力，同一虚拟机，应用经 Broadway 显示在内置浏览器中；“实测”指在这个环境里看到或量到，动效的逐帧数据来自开发用的 `BERN_MOTION_LOG`（每次变换带毫秒时间打印），静态画面来自 `BERN_SNAPSHOT_DIR`：
+
+- 测试：`bern-backend-gtk` 的测试在 macOS 与虚拟机上通过（虚拟机上对生成的 showcase 应用做类型检查）；新增测试确认 planner 与 gallery 在 GTK 上检查没有错误与警告、生成代码含样式表、绘图、装饰、轨道、滚动停靠等；侧栏项的阴影仍在检查时报错，豁免后通过；桌面文件为 `Drop(opens: true)` 登记 `MimeType` 与 `%U`。`bern-gtk` 与 `bern-backend-gtk` 的 clippy（`-D warnings`）通过。showcase 回归：各页面、设置窗口与页签切换正常。
+- **测试环境**：Broadway 下 GTK 读不到 `gtk-xft-dpi`（为 -1），libadwaita 以 sp 为单位的尺寸（侧栏最小宽 180sp、折叠断点）换算得很小，侧栏只有约 80 像素；在虚拟机用户的 `~/.config/gtk-4.0/settings.ini` 写入 `gtk-xft-dpi=98304`（96 DPI，GNOME 的默认）后正常。内置浏览器窗格隐藏时浏览器节流，Broadway 的帧约 1 秒一帧，动画按时间推进但逐帧采样只能拿到首尾几帧。
+- planner：画布的格纹（不透明度 0.8）、面积与折线、成功色胶囊；“最近的进度”的标注底纹；侧栏选中项填强调色、文字为强调色上的前景色；悬停时侧栏项从 1.0 弹到 1.03（约 15 毫秒一帧，0.15 秒内到位），离开后以 `settle` 回到 1（回弹的过冲因帧间隔未采到）；`show_archive` 打开后侧栏多出“归档”，在归档页关闭它后选中回到 `fallback` 的“概览”；模块页“笔记”经可选模块的条件出现；切换大标题时共享元素从小标题的位置与高度展开（首帧缩放 0.744、位移 −5，0.25 秒内到 1），旧画面淡出；新标签以 `pop(from: 0.4)` 出现（上屏后开始，首帧 0.463）；专注模式打开后静置 3 秒，侧栏与详情的标题栏都隐藏；主要按钮为强调色底、10 圆角、大尺寸。
+- `reflow`（只在虚拟机的临时副本中给 planner 的标签列表加上 `reflow: smooth` 实测，仓库中的示例未改）：加入标签后，下面的两个按钮与摘要文字被布局下移 34 点，先以 −34 的偏移留在原处再滑向新位置（首几帧 −34.0 → −33.9，之后的帧因浏览器节流未采到）。
+- gallery：侧栏底栏；工具栏（打开视频、外观菜单、分组竖线、详情开关、搜索框）；卡片为无外框的按钮、12 圆角裁住画布，悬停放大到 1.03 并投下阴影、星标出现（快照中看到）；按 `ForEach(stagger: 0.04)` 切到“图案”页时 6 张卡片的出现延迟为 0、0.04…0.2 秒（日志）；Ctrl+K 聚焦搜索框，输入后结果浮层列出匹配的图案，点选“Tartan”后打开它并收起结果；Ctrl+Alt+I 与 `ui.set_bool` 打开详情面板，内容让出位置，取色铺底按海报的平均色向下渐隐、海报叠在左下；收藏后底部出现 `AdwToast`；“外观”菜单把强调色换成群青、明暗换成深色，画布随之重绘；关于窗口以模态对话框打开（深色、强调色按钮），“好”关闭它。
+- 画框页：`appearance: dark` 的部分在浅色窗口中为深色，其中的分体按钮、字号菜单、音量按钮与说明文字按深色绘制，分体按钮与音量的浮层也是深色；视频铺满列宽、圆角 20；静置 3 秒后边距收为 0、圆角收为直角、控制条卸载（中途快照可见边距在变化）；`ui.activate` 打开音量浮层后其中的滑块出现在 `ui.inspect`，分体按钮的开关与浮层生效，关闭说明后文字淡出；`ui.set_file` 给拖放区：`/etc/hostname` 返回 `unsupported_file`，非地址返回 `invalid_url`，视频地址存入字段并播放。
+- 胶片页：初始停在字段指定的“Madras”正中，正中一格放大到 1.12、两侧变小变淡；“最后一个”滚到末尾那格并停在正中，右侧留出空白；时间轴的底线、6 个按比例的刻度、`anchor: start` 的名称、绑定 `level` 的竖线随 `animate: smooth` 移动；`ui.set_number` 设置 `Swipe` 与 `Pinch`（卡片宽 300）；中号窗口下 `Adaptive` 选中 `medium` 布局。
+- `BERN_MOTION=reduce` 下切换页面：卡片不再错峰、没有位移与缩放，只做短淡入。
+- 堆叠中的轨道：轨道原先会把其中没有高度的画布的 `vexpand` 传给外面的 `Stack`，窗口有多余高度时，“上下拖动”面板的水位会比 120 点的面板高。现已改为轨道只沿轴扩展、在 `Stack` 中铺满其他层给出的尺寸。只在虚拟机的临时副本里把窗口高度改成 900（Broadway 限为 768）实测：面板仍高 120（窗口坐标 470 至 590），水位底色正好铺满这 120 点，宽度为面板的 0.30（`level` 为 0.3），多余的高度留给 `Spacer`。
+- 错峰顺序：错峰的次序在构建各行时按条目顺序分配，与 GTK 映射的先后无关。切到“图案”页时，日志中 6 张卡片都在约 0 毫秒写入起始姿态，各自的上升从 Gingham 3、Tartan 44、Madras 84、Glen 123、Houndstooth 164、Windowpane 204 毫秒开始（这次没有连接 Broadway 客户端，帧不前进，只量到每张卡开始的时刻）。
+
+未验证：真实的拖放（Broadway 不支持从系统拖入文件）、`GtkFileDialog` 的选择（无桌面会话时门户超时）、系统交来文件（`opens`）、触摸板捏合与触摸拖动、对话框在 GNOME 中的附着位置、高对比、真实 Wayland/X11 会话中的帧率与手感。
+
 未完成的验证：真实声卡下的播放；完整的键盘遍历、屏幕阅读器；高对比与大字体；X11 会话与 KDE Plasma；分数缩放与多显示器。
 
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。
+- `reflow` 只在 `Column`、`Row` 中生效：`Grid` 是 `GtkFlowBox`，表单行由 `GtkListBox` 布置，它们的子元素不能在布局后另加偏移，写了会构建警告。
+- `hero` 只在同一窗口内配对；离开的元素若是视频或画布不留画面，只有新元素从旧位置展开。
+- 侧栏项的样式没有 `shadow`（与其他目标相同，检查时报错）。
+- `appearance` 的部分依赖 libadwaita 自带的 `base.css` 与 `defaults-*.css`（1.5 的资源路径）；Ubuntu 的 Yaru 强调色变体未单独处理，部分里使用 libadwaita 默认的取值。
+- 搜索结果浮层在结果变少时不一定缩小（GTK 浮层保持较大的尺寸），实测中出现过空白下方。
+- 强调色在深色部分里沿用窗口模式下的 `accent_color`。
 - 窗口位置与移动不可用（GTK 4 的限制）；Wayland 下最小化结果无法确认；虚拟窗口呈现未实现（GTK 目标总有原生窗口）。
 - `Menu` 的菜单项图标与 `destructive` 角色不呈现（GNOME 菜单通常只有文字）。
 - 多实例窗口、焦点迁移、Flatpak 等打包与图标安装尚未实现；桌面文件的 `Exec` 是构建机上的绝对路径。

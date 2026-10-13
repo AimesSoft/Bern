@@ -10,6 +10,6 @@ namespace bern::islands {
 }
 
 int BernRunIslands() {
-    static bern::islands::AppDef const definition{bern::BernCatalog(), bern::islands::Windows()};
+    static bern::islands::AppDef const definition{bern::BernCatalog(), bern::islands::Windows(), bern::islands::AccentColors()};
     return bern::islands::Run(definition);
 }

@@ -1,7 +1,7 @@
 # Android Compose 实现记录
 
-- 日期：2026-10-13
-- 依据：[Bern 架构设计 v0.28](../Design.md)，[Android 适配规范](../Adaptation/Android.md)
+- 日期：2026-10-14
+- 依据：[Bern 架构设计 v0.30](../Design.md)，[Android 适配规范](../Adaptation/Android.md)
 - 工具链：Rust 1.99.0（`aarch64-linux-android`）；Android NDK 29.0.14206865；Android Gradle 插件 9.3.3、Gradle 9.5.1、JDK 21（Android Studio 自带的运行时）；Kotlin 2.4.21 的 Compose 编译器插件；Compose BOM 2026.09.00（Compose 1.12.1、Material 3）；Media3 1.11.1；compileSdk 37、targetSdk 36、minSdk 26
 - 验证环境：小米 MIX 2S，LineageOS，Android 15（API 35），arm64-v8a，1080 × 2160、440 dpi（约 393 dp 宽），经 USB 调试连接 M4 Mac
 
@@ -37,6 +37,7 @@
 | `templates/BernViews.kt` | 标准组件的 Material 3 实现、图标映射、查询 |
 | `templates/BernStyle.kt` | 颜色角色、样式覆盖、弹簧、过渡、共享元素、`Canvas` 与标注 |
 | `templates/BernMedia.kt` | 媒体执行端与视频视图 |
+| `templates/BernFeatures.kt` | v0.29 与 v0.30 的能力：明暗与强调色、快捷键、绑定的长度、阴影、带内容的按钮、开关按钮、工具栏搜索、侧面板、轻提示、分体按钮、运行时图片与取色、文件选取与拖放、滚动联动与停靠、晃一下、手势区、按比例摆放的轨道、浮层按钮 |
 | `crates/bern-ffi/src/android.rs` | JNI 方法与回调 |
 
 生成的 Gradle 工程在 `target/bern/android/project/`。引擎库复制到 `app/src/main/jniLibs/arm64-v8a/`，随包资源镜像到 `assets/bern/resources/`，运行时首次启动（以及每次更新后）把它们解压到应用的文件目录，引擎按文件路径读取。生成的 Kotlin 在以包标识命名的包中，运行时在 `dev.bern.runtime` 中。
@@ -93,6 +94,32 @@ bern package --target android
 - `bern run --target android` 要求恰好连着一台设备（真机或模拟器），安装 APK、启动 Activity、转发控制通道并显示应用的日志，应用进程结束时返回。
 - `bern package` 在 `target/bern/dist/` 生成 `<应用>-<版本>-android.apk` 与 `.aab`。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，密码不写进任何文件；没有设置时用调试密钥签名，并提示不能上架。
 
+## 媒体类应用的能力（v0.29）
+
+能力描述列出全部 `features`（`session_actions`、`reveal`、`bound_lengths`、`appearance`、`shortcuts`、`runtime_theme`、`button_content`、`toolbar_search`、`search_results`、`toggle_button`、`dialog_windows`、`runtime_images`、`picture_fills`、`file_pick`、`scroll_snap`），动效属性加上 `animate`、`scroll_scale`、`scroll_opacity` 与 `nudge`。
+
+- **带内容的按钮与阴影**：`clickable` 加 `hoverable`，阴影随状态的弹簧变化；重复项中的控件经 `LocalBernItemKeys` 带上每一层的 key。触屏没有悬停，`reveal` 的内容一直显示。
+- **明暗与强调色**：`appearance` 在子树里换一套 Material 配色；`WindowSet(accent:, appearance:)` 改全局配色，状态栏图标随明暗变色。
+- **快捷键**：活动的 `dispatchKeyEvent` 先查当前屏幕上的控件登记的快捷键，`cmd` 是 Ctrl；按键也让 `window.idle` 重新计时。
+- **绑定的长度**：`animateDpAsState` 跟随，值与回弹都不低于零。
+- **视频圆角**：有 `corner` 时 `PlayerView` 改用 `TextureView` 才能被裁住。
+- **对话框窗口**：居中的 `Dialog`，宽高按声明。分体按钮的浮层是 `DropdownMenu`；侧面板在手机上是底部弹层。
+- **运行时图片与取色**：图片在后台读取，平均色由缩到 32×32 的整张图算出。
+- **文件**：`pick` 用系统的文档选择器，按种类过滤并保留读取授权；`Drop` 用 `dragAndDropTarget`，并向系统请求拖入内容的读取权限；`opens: true` 在清单里登记 `VIEW` 与 `SEND` 意图，活动为 `singleTask`，运行中交来的文件经 `onNewIntent` 送到拖放区。用到网络地址时清单加上 `INTERNET`。
+- **滚动联动与停靠**：带 `snap` 或 `position` 的 `ScrollView` 记录每一格在滚动内容中的位置（不随滚动变化），`graphicsLayer` 按每格离视口中心的距离缩放、变淡；停靠用自己的 `FlingBehavior`，按惯性算出落点后取最近的一格；首次显示时先定位到字段所指的一格，再开始跟随用户滚动。
+- **晃一下与手势区**：`nudge` 用 `graphicsLayer` 放大再弹回；`Pinch` 从多指指针事件累计缩放（`calculateZoom`），`Swipe` 用竖向拖动手势，松手执行动作。
+
+## v0.30 的四项扩展
+
+能力描述的 `features` 加上 `rails`、`popover_button` 与 `size_classes`，动效属性加上 `stagger`。
+
+- **错峰出现（`stagger`）**：声明了 `stagger` 的 `Column`、`Row`、`Grid`、`Stack`、`ForEach` 与 `List` 用 `BernStaggered` 给直接子元素提供一个时钟（`LocalBernStagger`）。带 `appear` 的直接子元素第一次组合时向时钟取一个轮次，延迟为轮次乘 `stagger`；同一次更新中组合的子元素（主线程空下来之前）按组合顺序依次取轮次，也就是子元素与各行的书写顺序（`Grid` 与非惰性的 `ForEach` 按顺序组合，惰性列表的首屏也按序号组合），之后计数归零，所以容器出现时、一次更新加入几个子元素时都从 0 开始依次排开。Compose 的弹簧没有延迟参数，出现过渡的动画规格由 `BernDelayed` 包一层：等待期间数值停在起点，元素透明地占着自己的位置，不让兄弟元素跳动。`ForEach` 不加布局，它的各行是所在容器的直接子元素；组件的根也可能是直接子元素（海报墙的卡片就是组件），所以应用中有 `stagger` 时，直接子元素中不出现的元素与组件的根在下面用 `BernUnstaggered` 清掉时钟，只有直接子元素取轮次。窗口首次显示不播放；系统关闭动画时不错峰，仍是 150 毫秒的淡入。
+- **按比例摆放（`Rail`）**：`BernRail` 是一个自定义 `Layout`。写了 `at`、`from` 或 `to` 的元素外面包一层 `BernPlace`，以 `layoutId` 把比例交给轨道；比例夹到 0 到 1，有 `animate` 时由 `animateFloatAsState` 按弹簧跟随。轨道沿轴取它得到的最大长度（没有上限时取 `at` 子元素中最长的）；交叉方向的厚度是 `at` 子元素的尺寸、`from`/`to` 子元素自身的固有厚度与父容器给的最小值中最大的。`at` 子元素按自身大小、按 `anchor` 以起点、中心或终点对准那一点；`from`/`to` 子元素沿轴量得两点之间的长度，交叉方向最多到轨道厚度，没写交叉尺寸的 `Canvas` 因此铺满厚度。子元素在交叉方向居中，可以超出轨道，不裁切；从右到左的语言中横向轨道从右边量起（`placeRelative`）。轨道没有指针输入，触摸落到下面的层。`Stack` 中直接作为一层、只放着没写交叉尺寸的 `from`/`to` 子元素的轨道加 `matchParentSize()`，随整个 `Stack` 的大小铺满（与 Web 中“含无尺寸绘图的层铺满 `Stack`”一致）。
+- **浮层按钮（`PopoverButton`）**：有图标时是 `IconButton`，只有文字时是色调按钮，在顶栏中是文字按钮；浮层是与分体按钮相同的 `DropdownMenu`，内容放在内边距 16、最小宽 240 的竖排中，只在打开时组合，所以其中的控件只在打开时出现在 `ui.inspect` 里。`presented` 绑定会话字段时，浮层跟随字段，点按按钮、点到外面关闭都写回字段；没有绑定时由按钮自己记住。控件角色是 `popover_button`，`ui.activate` 打开，值为 `open` 或 `closed`；`shortcut` 也打开它。
+- **四档尺寸**：`[layouts]` 的断点在活动启动时写入 `BernHost.layouts`。每个窗口在 `Scaffold` 上量自己的宽度（`onSizeChanged`），量到之前用屏幕宽度（对话框窗口用声明的宽度）估计，所以首帧就是正确的档位；`window.compact`、`window.medium`、`window.expanded`、`window.large` 是窗口上下文的属性，读它们的表达式随窗口宽度换档。`Adaptive` 仍按所在位置的可用宽度（`BoxWithConstraints`）选择，某档没有自己的 `Layout` 时用更大一档的，没有更大的就用更小一档的；`ui.inspect` 中的值是宽度所在的档。
+- **图标**：`chevron.left` 映射到 Material 的左箭头（胶片页紧凑布局的“第一个”之前显示为圆点）。
+- **构建**：输出目录 `target/bern/android` 被这里构建的每个应用共用，Gradle 前用 `Mirror` 只留下本应用的 Kotlin，另一个应用留下的生成文件不再被编进来（之前运行时接口变化后，留下的旧文件会让编译失败）。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：
@@ -103,10 +130,27 @@ bern package --target android
 - **showcase**：冷启动显示侧栏列表（搜索框、分组、图标）；文字、按钮（含工具栏按钮）、开关与滑块（工具栏的“全部”下拉）、输入框、图片与布局（适配方式与 `Grid`）、列表与详情（`Query` 结果 5 项、推入链接）各页正常；视频页从 CLI 播放精选片段，状态为 `Playing 0:02 / 0:08`，控制条同步；`window open --kind settings` 打开设置窗口（语言、开关、输入框、底部页签），`window list` 报告两个 `Virtual` 窗口；设置窗口叠在详情页上时，第一次系统返回只关闭设置窗口，第二次回到侧栏列表；`ui set-language --language en` 后界面全部变为英文。
 - **控制通道**：`ui inspect`、`ui select`、`ui set-bool`、`ui activate`、`window open`、`window list` 经 `adb forward` 正常。
 
+2026-10-13，Android 模拟器（Android 15，arm64），`examples/gallery`，由生成的 CLI、`adb` 截图与模拟器的 gRPC 触摸接口驱动（`input` 命令只能模拟单指）：
+
+- **图案页**：卡片点按打开图案、星标点按收藏并弹出轻提示；双指张开把卡片撑到上限 320、捏合缩小，`ui set-number` 也能设置。
+- **工具栏**：分组之间的空隙；外观菜单切换强调色与明暗；详情开关打开底部弹层，里面的海报与取色铺底；外接键盘的 Ctrl+O 打开系统选择器、Ctrl+Alt+I 开关详情。
+- **文件**：系统选择器只列出视频或图片，选中后播放或显示；分屏时从“文件”长按拖入视频，经过时 `over` 变真、松手后播放；`am start` 的 `VIEW` 意图交来的视频交给拖放区播放。
+- **画框页**：在浅色窗口中保持深色，其中的菜单也是深色；静置三秒后铺满、圆角收为直角、按钮隐藏，触摸后退回；分体按钮的浮层是深色。
+- **胶片页**：初始位置停在设定的一格正中；手指快滑前进一格、短拖弹回原格；按钮滚到首尾并停在正中；上下拖动改变值。
+- **关于对话框**：从侧栏底部打开，按“好”关闭。
+
+2026-10-14，Android 模拟器（Pixel 9 Pro XL 镜像，Android 15，arm64），v0.30 的四项扩展，`examples/gallery` 与一个只在本机临时目录中的探针应用（覆盖画廊没有用到的 `presented`、工具栏中的浮层按钮、只有文字的浮层按钮、竖向轨道与 `Column` 的错峰）。这台电脑同时有其他构建，模拟器用软件渲染时每帧约 0.7 秒，所以把显示改为 672 × 1496，用 `wm density` 改变逻辑宽度；需要看时序时把系统的动画时长倍率临时调为 100（测完还原为 1），在模拟器内连续截图并记下时间，逐张量每个元素与背景的差别：
+
+- **错峰**：从收藏页用 `ui select` 切到图案页，海报墙（`ForEach(stagger: 0.04)`，卡片组件的根 `appear: rise`）的 6 张卡片按阅读顺序（Gingham、Tartan、Madras、Glen、Houndstooth、Windowpane）依次开始升起，在倍率 100 下相邻约 4 秒开始（达到 30% 的时刻平均相隔 3.8 秒），即正常速度下约 40 毫秒；等待中的卡片占着自己的格子，其他卡片不移动。探针中打开开关让 `Column(stagger: 0.1)` 出现，其中 4 行文字依次在约 0、13、21、31 秒（倍率 100）开始，即约 0.1 秒一个。
+- **轨道**：胶片页 448 dp 宽时，6 个刻度落在 x = 36 + f × 600（像素，f = 0 到 1），“现在”竖线在 0.5 处，名字以起点对准刻度；`ui set-number` 把 level 从 0.5 改为 0.8 后，竖线按 `smooth` 弹簧从 336 平滑移到 516（倍率 100 下逐张截图看到 336、342、358、377、464、…、497），没有 `animate` 的底色立即涨到 0.8（538 / 672）；拖动区的底色铺满 120 dp 高、宽随 level，`Stack` 仍是 120 dp 高（轨道用 `matchParentSize()`：不参与 `Stack` 的尺寸，再按 `Stack` 的大小量）。窗口变为 896 dp 宽时轨道随宽度重排，竖线仍在 0.8 处。探针中竖向轨道 `anchor: end`：底色从顶端铺到 0.3 × 200 dp，文字的底端对准同一点，两者在轨道厚度内居中；`Stack` 中叠在滑块上的轨道，在它 0.25 处的竖条上点按，滑块照常收到（0.5 变为 0.247）。
+- **浮层按钮**：画框页的音量按钮只显示图标；`ui.inspect` 中为 `closed`、其中的滑块不在列表里，`ui activate` 后为 `open`，“音量”标题与 0.7 的滑块出现在按钮下方的深色浮层中（画框页固定深色），滑块也出现在 `ui.inspect` 中；点到浮层外关闭，滑块随之卸载；点按按钮打开。探针中工具栏的浮层按钮显示为文字按钮，`presented` 绑定会话字段：把绑定同一字段的开关设为真时浮层打开、设为假时关闭，`ui activate` 打开后开关变为真，点到外面关闭后变回假；`shortcut: "cmd+j"` 的 Ctrl+J 打开它；只有文字的浮层按钮是色调按钮。
+- **四档尺寸**：用 `wm density` 把窗口设为 448、896、1344、1493 dp 宽（断点 600 / 1024 / 1440），海报墙的页边距量得 16、24、32、约 48 dp（`window.compact`、`medium`、`expanded`、`large`）；896 dp 起侧栏与详情并排。胶片页的 `Adaptive(id: film_controls)` 在 `ui.inspect` 中依次为 `compact`（图标按钮）、`medium`（文字按钮）、`expanded`（文字按钮加提示文字），1493 dp 时详情约 1213 dp 宽，仍为 `expanded`。
+- **构建与测试**：`cargo test -p bern-backend-compose`（新增画廊的生成测试）、`cargo clippy -p bern-backend-compose --all-targets -- -D warnings` 通过；画廊与探针的 Kotlin 由 Gradle 编译通过。
+
 ## 未完成与已知限制
 
 - 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。
-- 宽度不小于 600 dp 的布局（平板、折叠屏展开、横屏）未实测；只在约 393 dp 宽的手机上验证。
+- 宽度不小于 600 dp 的布局只在模拟器上用 `wm density` 改变逻辑宽度验证过；真的平板、折叠屏展开与横屏未实测。
 - 屏幕旋转未实测。
 - 窗口事实不报告窗口的位置与尺寸（为 0）。
 - 后台继续播放未实现（需要媒体服务）；一个播放器同一时刻只在一个视图中显示。
@@ -115,3 +159,10 @@ bern package --target android
 - 列表项移除时没有消失过渡。
 - 带样式的侧栏项不支持方向键切换。
 - 图标只覆盖常用的名字，其余显示圆点。
+- 交给应用的文件是 `content://` 地址：没有文件名，引擎不能当作路径读取，只有交给 Bern 的播放器与图片时能读。引擎读取这类文件的途径待定。
+- 只有当前屏幕上的控件登记快捷键：手机上停在侧栏时，页面工具栏的快捷键不生效。
+- 胶片的放大与停靠在宽屏布局、`arrival: nudge` 的晃动在 Android 上未逐帧确认。
+- 错峰：一次更新加入几个子元素（而不是容器本身出现）时的错峰、系统关闭动画时不错峰，未验证；画廊与探针都没有一次加入几行的操作。时序是在动画放慢 100 倍时量的，正常速度下的间隔是按倍率换算的。
+- 出现过渡的规则比设计宽（按实现推断，未逐帧确认）：窗口首帧之后组合的带 `appear` 的元素都会播放，包括随所在的 `ForEach` 一起出现的各行（设计中只有错峰的容器才这样）。
+- 轨道：从右到左的语言中横向轨道从右边量起（`placeRelative`），未验证。`Stack` 中只在轨道直接放着没写交叉尺寸的 `from`/`to` 元素时才随 `Stack` 铺满；其中有组件、或轨道本身带出现过渡等包装时，厚度只来自子元素。
+- 浮层按钮：浮层是 Material 的 `DropdownMenu`，位置由它决定（锚在按钮下方，放不下时左移），没有箭头。画框页静置三秒后按钮行隐藏，打开的浮层随之卸载，这是声明的行为。

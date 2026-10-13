@@ -346,6 +346,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "gallery-core"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "gallery-protocol",
+]
+
+[[package]]
+name = "gallery-protocol"
+version = "0.1.0"
+dependencies = [
+ "bern",
+]
+
+[[package]]
+name = "gallery-ui"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "gallery-protocol",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -212,7 +212,7 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsAutomaticTermination</key>
-    <false/>
+    <false/>{documents}
 </dict>
 </plist>
 "#,
@@ -221,7 +221,148 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
         executable = xml(executable),
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
+        documents = document_types(app, false),
     )
+}
+
+/// The kinds of file the application opens: those of every `Drop` with
+/// `opens: true`, each once, in a stable order.
+fn opened_kinds(app: &Application) -> Vec<String> {
+    let mut kinds = std::collections::BTreeSet::new();
+    for component in &app.components {
+        component.body.walk(&mut |node| {
+            if let bern_ir::Node::Element(element) = node
+                && element.kind == "Drop"
+                && element.keyword("opens") == Some("true")
+            {
+                for word in element.keyword("files").unwrap_or("any").split(' ') {
+                    kinds.insert(word.to_string());
+                }
+            }
+        });
+    }
+    kinds.into_iter().collect()
+}
+
+/// `CFBundleDocumentTypes` for the kinds the application opens, so the
+/// system offers it under "Open With" without making it the default. On
+/// macOS extensions the system may not know are listed as extensions; iOS
+/// only takes types, so it imports one for each and opens files in place.
+fn document_types(app: &Application, ios: bool) -> String {
+    document_entries(&opened_kinds(app), &app.app.bundle_id, ios)
+}
+
+fn document_entries(kinds: &[String], bundle_id: &str, ios: bool) -> String {
+    if kinds.is_empty() {
+        return String::new();
+    }
+    let system_type = |kind: &str| match kind {
+        "video" => "public.movie",
+        "audio" => "public.audio",
+        "picture" => "public.image",
+        "folder" => "public.folder",
+        _ => "public.item",
+    };
+    let imported = |ext: &str| format!("{bundle_id}.file.{ext}");
+    // The names Finder shows in an app's document types.
+    let title = |kind: &str| match kind.strip_prefix('.') {
+        Some(ext) => format!("{} File", ext.to_uppercase()),
+        None => match kind {
+            "video" => "Video".into(),
+            "audio" => "Audio".into(),
+            "picture" => "Picture".into(),
+            "folder" => "Folder".into(),
+            _ => "File".into(),
+        },
+    };
+    let strings = |values: &[String]| -> String {
+        values
+            .iter()
+            .map(|value| format!("\n                <string>{}</string>", xml(value)))
+            .collect()
+    };
+    let mut entries = Vec::new();
+    let mut declarations = Vec::new();
+    let mut entry = |name: &str, key: &str, values: &[String]| {
+        entries.push(format!(
+            r#"
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>{name}</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>{key}</key>
+            <array>{}
+            </array>
+        </dict>"#,
+            strings(values)
+        ))
+    };
+    for kind in kinds {
+        let (extensions, conforms): (Vec<String>, &str) = match kind.strip_prefix('.') {
+            Some(ext) => (vec![ext.to_string()], "public.data"),
+            None => (
+                bern_ir::spec::file_kind_extensions(kind)
+                    .iter()
+                    .map(|ext| (*ext).to_string())
+                    .collect(),
+                system_type(kind),
+            ),
+        };
+        let mut types = Vec::new();
+        if !kind.starts_with('.') {
+            types.push(system_type(kind).to_string());
+        }
+        if ios {
+            for ext in &extensions {
+                types.push(imported(ext));
+                declarations.push(format!(
+                    r#"
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>{}</string>
+            <key>UTTypeDescription</key>
+            <string>{}</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>{conforms}</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>{}</string>
+                </array>
+            </dict>
+        </dict>"#,
+                    xml(&imported(ext)),
+                    xml(&ext.to_uppercase()),
+                    xml(ext)
+                ));
+            }
+            entry(&title(kind), "LSItemContentTypes", &types);
+        } else {
+            if !types.is_empty() {
+                entry(&title(kind), "LSItemContentTypes", &types);
+            }
+            if !extensions.is_empty() {
+                entry(&title(kind), "CFBundleTypeExtensions", &extensions);
+            }
+        }
+    }
+    let mut out = format!(
+        "\n    <key>CFBundleDocumentTypes</key>\n    <array>{}\n    </array>",
+        entries.concat()
+    );
+    if ios {
+        out.push_str(&format!(
+            "\n    <key>UTImportedTypeDeclarations</key>\n    <array>{}\n    </array>\n    <key>LSSupportsOpeningDocumentsInPlace</key>\n    <true/>",
+            declarations.concat()
+        ));
+    }
+    out
 }
 
 /// The Info.plist of an iOS app for the simulator: several scenes, which
@@ -312,7 +453,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>
+    </array>{documents}
 </dict>
 </plist>
 "#,
@@ -321,6 +462,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         executable = xml(executable),
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
+        documents = document_types(app, true),
     )
 }
 
@@ -337,5 +479,39 @@ mod tests {
         );
         assert_eq!(format_string("100% {{x}}", &[]), "100% {x}");
         assert_eq!(escape_strings("a\"b\n"), "a\\\"b\\n");
+    }
+
+    #[test]
+    fn opened_kinds_become_document_types() {
+        let kinds = vec!["video".to_string(), ".ass".to_string()];
+        let mac = document_entries(&kinds, "dev.example", false);
+        assert!(mac.contains("<string>public.movie</string>"), "{mac}");
+        assert!(mac.contains("<key>CFBundleTypeExtensions</key>"), "{mac}");
+        assert!(mac.contains("<string>mkv</string>"), "{mac}");
+        assert!(mac.contains("<string>ASS File</string>"), "{mac}");
+        assert!(mac.contains("<string>Alternate</string>"), "{mac}");
+        assert!(!mac.contains("UTImportedTypeDeclarations"), "{mac}");
+        let ios = document_entries(&kinds, "dev.example", true);
+        assert!(!ios.contains("CFBundleTypeExtensions"), "{ios}");
+        assert!(
+            ios.contains("<string>dev.example.file.mkv</string>"),
+            "{ios}"
+        );
+        assert!(
+            ios.contains("<key>LSSupportsOpeningDocumentsInPlace</key>"),
+            "{ios}"
+        );
+        assert_eq!(document_entries(&[], "dev.example", true), "");
+    }
+
+    #[test]
+    fn the_runtime_takes_the_shared_extensions() {
+        let runtime = crate::runtime_source(include_str!("../templates/BernRuntime.swift"));
+        assert!(!runtime.contains("bern:file-extensions"));
+        assert!(
+            runtime.contains(r#""video": ["mp4", "m4v", "mov", "mkv""#),
+            "{}",
+            &runtime[..0]
+        );
     }
 }

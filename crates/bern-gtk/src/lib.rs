@@ -11,12 +11,16 @@
 //! Widgets follow the GNOME platform: GTK 4 with libadwaita's standard
 //! containers, rows and styles, colors from the system style manager.
 
+mod canvas;
 mod controls;
 pub mod ctx;
+mod features;
 mod hdr;
 mod host;
 mod icons;
+mod layout;
 mod media;
+pub mod motion;
 mod parent;
 mod picture;
 mod query;
@@ -24,20 +28,34 @@ pub mod reactive;
 mod session;
 mod snapshot;
 mod structure;
+pub mod style;
 pub mod text;
+pub mod theme;
 pub mod value;
 mod widgets;
 mod windows;
 
 pub use bern_ffi;
 pub use bern_ffi::protocol;
-pub use ctx::{Ctx, Field};
+pub use canvas::{
+    Band, Canvas, CanvasProps, Op, PatternDef, SeriesOp, ShapeOp, Source, numbers, url,
+};
+pub use ctx::{Ctx, Field, session_set, session_toggle};
+pub use features::{
+    ContentButton, ContentButtonProps, Drop, DropProps, GestureProps, Inspector, InspectorProps,
+    Pick, Pinch, Place, PlaceProps, PopoverButton, PopoverButtonProps, Rail, RailProps,
+    RuntimeImage, RuntimeImageProps, ScrollProps, ScrollView, SplitButton, SplitButtonProps, Swipe,
+    Toast, ToastProps, activate_target, focus_target, shortcut,
+};
 pub use glib;
 pub use host::{dispatch, run};
 pub use media::{MediaOp, Video, VideoProps, media, media_open};
+pub use motion::{Curve, Decor, Decorate, Edge, Num, Transition, TransitionKind, staggered};
 pub use parent::Parent;
 pub use query::{Query, QueryProps};
 pub use structure::*;
+pub use style::{Look, StyleDef};
+pub use theme::Color;
 pub use widgets::*;
 pub use windows::{close_window, open_window};
 
@@ -127,6 +145,25 @@ pub struct WindowDef {
     pub sessions: Vec<usize>,
     pub render: fn(&Parent, &Ctx),
     pub close: Option<fn(&Ctx) -> CloseCheck>,
+    /// `role: dialog`: shown modally over the primary window.
+    pub dialog: bool,
+    /// `chrome: unified`: flat title bars over the content.
+    pub unified: bool,
+    /// Seconds without input after which `window.idle` turns true.
+    pub idle_after: Option<f64>,
+    /// While true, the window hides its title bars, and the pointer once it
+    /// rests.
+    pub immersive: Option<fn(&Ctx) -> bool>,
+}
+
+/// The accent and appearance of `WindowSet`, chosen at run time.
+pub struct ThemeDef {
+    /// The accent enum value; its variant names an accent of `style!`.
+    pub accent: Option<fn(&Ctx) -> protocol::Value>,
+    pub accents: theme::Accents,
+    /// The appearance enum value: `system`, `light` or `dark` by variant.
+    pub appearance: Option<fn(&Ctx) -> protocol::Value>,
+    pub appearances: &'static [(u32, &'static str)],
 }
 
 /// The engine of a generated application, started with the frontend's
@@ -155,6 +192,16 @@ pub struct AppDef {
     pub players: Vec<&'static str>,
     /// Available width below which `Adaptive` uses its compact layout.
     pub compact_below: Option<f64>,
+    /// Below which the `medium` size applies, if the application has it.
+    pub medium_below: Option<f64>,
+    /// Below which `expanded` applies and `large` from it, if the
+    /// application has `large`.
+    pub expanded_below: Option<f64>,
     /// Brand color, mapped to the accent color.
     pub brand_seed: Option<(u8, u8, u8)>,
+    /// Style overrides of `style!`.
+    pub styles: &'static [StyleDef],
+    pub theme: Option<ThemeDef>,
+    /// Extensions of the file kinds `files:` names.
+    pub file_kinds: &'static [(&'static str, &'static [&'static str])],
 }

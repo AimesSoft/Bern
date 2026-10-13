@@ -22,11 +22,14 @@ final class BernWindowPlatform {
     var restoreFrame: NSRect?
 }
 
-/// SwiftUI's window actions, which the host opens windows with.
+/// SwiftUI's window actions, which the host opens windows with, and the
+/// dialog windows shown as sheets over the primary window, bottom first.
 @MainActor
+@Observable
 final class BernHostPlatform {
-    var openWindow: OpenWindowAction?
-    var openSettings: OpenSettingsAction?
+    @ObservationIgnored var openWindow: OpenWindowAction?
+    @ObservationIgnored var openSettings: OpenSettingsAction?
+    var dialogs: [String] = []
 }
 
 extension BernWindowContext {
@@ -121,7 +124,9 @@ extension BernHost {
     /// Open a window kind, or bring its instance forward.
     func open(_ kindID: String) {
         guard let kind = kinds.first(where: { $0.id == kindID }) else { return }
-        if kind.isSettings {
+        if kind.isDialog {
+            if !platform.dialogs.contains(kindID) { platform.dialogs.append(kindID) }
+        } else if kind.isSettings {
             platform.openSettings?()
         } else {
             platform.openWindow?(id: kindID)
@@ -296,10 +301,49 @@ extension BernHost {
 
     func finishClose(_ context: BernWindowContext) {
         context.allowsClose = true
-        if let window = context.nsWindow {
+        if let index = platform.dialogs.firstIndex(of: context.kindID) {
+            // A dialog leaves with the dialogs it presented.
+            platform.dialogs.removeSubrange(index...)
+        } else if let window = context.nsWindow {
             window.close()
         } else {
             context.dismiss?()
+        }
+    }
+}
+
+// MARK: - Dialogs
+
+struct BernDialogItem: Identifiable {
+    let id: String
+}
+
+/// The dialog window at `depth` as a sheet over the one below it, the
+/// first over the primary window.
+struct BernDialogs<Window: View>: ViewModifier {
+    let depth: Int
+    let window: (String) -> Window
+
+    init(depth: Int, @ViewBuilder window: @escaping (String) -> Window) {
+        self.depth = depth
+        self.window = window
+    }
+
+    func body(content: Content) -> some View {
+        let platform = BernHost.shared.platform
+        content.sheet(
+            item: Binding(
+                get: { platform.dialogs.count > depth ? BernDialogItem(id: platform.dialogs[depth]) : nil },
+                set: { item in
+                    // The system dismissed it: the window is already gone.
+                    if item == nil, platform.dialogs.count > depth {
+                        platform.dialogs.removeSubrange(depth...)
+                    }
+                })
+        ) { item in
+            window(item.id)
+                .environment(BernEngine.shared)
+                .modifier(BernDialogs(depth: depth + 1, window: window))
         }
     }
 }
@@ -533,6 +577,17 @@ final class BernAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { BernHost.shared.stop() }
     }
+
+    /// Files opened with the app from Finder, the Dock or "Open With".
+    func application(_ application: NSApplication, open urls: [URL]) {
+        MainActor.assumeIsolated { BernFiles.open(urls) }
+    }
+}
+
+/// Bring the primary window back for files opened with the app.
+@MainActor
+func bernShowPrimaryWindow() {
+    BernHost.shared.reopenPrimary()
 }
 
 /// The window root's AppKit part: finds the NSWindow and keeps SwiftUI's
@@ -578,6 +633,8 @@ struct BernVideoSurface: NSViewRepresentable {
     let playerID: String
     let window: String
     let gravity: AVLayerVideoGravity
+    var corner: Double = 0
+    var cornerMotion: BernMotion? = nil
 
     final class Coordinator {
         var token: String?
@@ -593,12 +650,15 @@ struct BernVideoSurface: NSViewRepresentable {
         view.updatesNowPlayingInfoCenter = false
         view.showsFullScreenToggleButton = false
         view.videoGravity = gravity
+        view.wantsLayer = true
+        bernRoundCorners(view.layer, corner, motion: nil)
         attach(view, context.coordinator)
         return view
     }
 
     func updateNSView(_ view: BernPlayerView, context: Context) {
         view.videoGravity = gravity
+        bernRoundCorners(view.layer, corner, motion: cornerMotion)
         if context.coordinator.playerID != playerID || context.coordinator.window != window {
             Self.detach(context.coordinator)
             attach(view, context.coordinator)
@@ -844,5 +904,111 @@ final class BernEventMonitor {
         timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak context] _ in
             MainActor.assumeIsolated { context?.idle = true }
         }
+    }
+}
+
+// MARK: - Open panel
+
+extension BernFiles {
+    /// Asks for one file of `kinds` with the system's open panel, as a
+    /// sheet on the key window; `give` runs once one is chosen.
+    static func pick(_ kinds: String, then give: @escaping @MainActor (URL) -> Void) {
+        let words = words(kinds)
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = words.contains("folder")
+        panel.canChooseFiles = words != ["folder"]
+        if !words.contains("any") {
+            let types = types(kinds).filter { $0 != .folder }
+            if !types.isEmpty { panel.allowedContentTypes = types }
+        }
+        let done: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, let url = panel.url { give(url) }
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window) { response in MainActor.assumeIsolated { done(response) } }
+        } else {
+            panel.begin { response in MainActor.assumeIsolated { done(response) } }
+        }
+    }
+}
+
+// MARK: - Menus in a part with its own appearance
+
+/// A part of a window with its own `appearance`. AppKit draws a menu with
+/// the window's appearance, so a menu that starts over such a part takes
+/// the part's instead: the innermost part under the pointer.
+@MainActor
+final class BernAppearanceRegions {
+    static let shared = BernAppearanceRegions()
+    private var views: [BernAppearanceRegionView] = []
+    private var observer: Any?
+
+    func add(_ view: BernAppearanceRegionView) {
+        views.removeAll { $0.window == nil && $0 !== view }
+        if !views.contains(where: { $0 === view }) { views.append(view) }
+        guard observer == nil else { return }
+        // Delivered synchronously, before the menu is drawn.
+        observer = NotificationCenter.default.addObserver(
+            forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil
+        ) { note in
+            // Posted on the main thread, where menus track.
+            nonisolated(unsafe) let menu = note.object as? NSMenu
+            MainActor.assumeIsolated {
+                guard let menu, menu.supermenu == nil,
+                      let dark = BernAppearanceRegions.shared.dark(at: NSEvent.mouseLocation)
+                else { return }
+                menu.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            }
+        }
+    }
+
+    func remove(_ view: BernAppearanceRegionView) {
+        views.removeAll { $0 === view }
+    }
+
+    /// The appearance of the smallest part under `point`, in screen
+    /// coordinates.
+    private func dark(at point: NSPoint) -> Bool? {
+        var found: (area: CGFloat, dark: Bool)?
+        for view in views {
+            guard let window = view.window, window.isVisible else { continue }
+            let frame = window.convertToScreen(view.convert(view.bounds, to: nil))
+            let area = frame.width * frame.height
+            if frame.contains(point), area < (found?.area ?? .infinity) {
+                found = (area, view.dark)
+            }
+        }
+        return found?.dark
+    }
+}
+
+/// Marks the part it is the background of; it takes no clicks.
+final class BernAppearanceRegionView: NSView {
+    var dark = true
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            BernAppearanceRegions.shared.remove(self)
+        } else {
+            BernAppearanceRegions.shared.add(self)
+        }
+    }
+}
+
+struct BernAppearanceRegion: NSViewRepresentable {
+    let dark: Bool
+
+    func makeNSView(context: Context) -> BernAppearanceRegionView {
+        let view = BernAppearanceRegionView()
+        view.dark = dark
+        return view
+    }
+
+    func updateNSView(_ view: BernAppearanceRegionView, context: Context) {
+        view.dark = dark
     }
 }

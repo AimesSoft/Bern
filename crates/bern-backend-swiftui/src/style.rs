@@ -11,6 +11,7 @@ const BUTTON_STATES: &[&str] = &[
     "scale",
     "offset",
     "opacity",
+    "shadow",
     "system",
     "none",
 ];
@@ -24,8 +25,9 @@ const ROW_STATES: &[&str] = &[
     "none",
 ];
 
-/// What SwiftUI shows: buttons drawn by `BernStyledButton`, sidebar rows
-/// drawn by `BernStyledRow`.
+/// What SwiftUI shows: buttons drawn by `BernStyledButton` (or around
+/// their content by `BernContentButtonStyle`), sidebar rows drawn by
+/// `BernStyledRow`.
 pub const SUPPORT: &[StyleSupport] = &[
     StyleSupport {
         component: "Button",
@@ -36,6 +38,7 @@ pub const SUPPORT: &[StyleSupport] = &[
             "corner",
             "padding",
             "size",
+            "shadow",
         ],
         states: &[
             (Hover, BUTTON_STATES),
@@ -53,6 +56,7 @@ pub const SUPPORT: &[StyleSupport] = &[
             "corner",
             "padding",
             "size",
+            "shadow",
         ],
         states: &[
             (Hover, BUTTON_STATES),
@@ -176,13 +180,22 @@ fn look(app: &Application, effects: &[StyleEffect]) -> String {
                 motion_of = Some(motion.clone());
             }
             // `system` keeps what lies below; `none` shows nothing of its own.
-            StyleEffect::System | StyleEffect::Nothing => args.push((12, "nothing: true".into())),
+            StyleEffect::Shadow { radius, y, opacity } => args.push((
+                11,
+                format!(
+                    "shadow: BernShadow(radius: {}, y: {}, opacity: {})",
+                    number(*radius),
+                    number(*y),
+                    number(*opacity)
+                ),
+            )),
+            StyleEffect::System | StyleEffect::Nothing => args.push((13, "nothing: true".into())),
             StyleEffect::Corner { .. } | StyleEffect::Padding { .. } | StyleEffect::Size { .. } => {
             }
         }
     }
     if let Some(name) = motion_of {
-        args.push((11, format!("motion: {}", motion(app, &name))));
+        args.push((12, format!("motion: {}", motion(app, &name))));
     }
     args.sort_by_key(|(order, _)| *order);
     args.dedup_by_key(|(order, _)| *order);
@@ -234,6 +247,25 @@ pub fn control_size(size: ControlSize) -> &'static str {
 }
 
 /// A transition as a SwiftUI `AnyTransition` and the `BernMotion` moving it.
+/// A transition as a `BernAppear`, for a staggered entrance run by hand.
+pub fn appear(app: &Application, name: &str) -> Option<String> {
+    use bern_ir::style::TransitionKind;
+    let def = app.style.transition(name)?;
+    Some(match &def.kind {
+        TransitionKind::Fade => "BernAppear.fade".to_string(),
+        TransitionKind::Pop { from } => format!("BernAppear.pop({})", number(*from)),
+        TransitionKind::Slide { edge, distance } => {
+            let (x, y) = match edge {
+                Edge::Leading => (-distance, 0.0),
+                Edge::Trailing => (*distance, 0.0),
+                Edge::Top => (0.0, -distance),
+                Edge::Bottom => (0.0, *distance),
+            };
+            format!("BernAppear.slide(x: {}, y: {})", number(x), number(y))
+        }
+    })
+}
+
 pub fn transition(app: &Application, name: &str) -> Option<(String, String)> {
     use bern_ir::style::TransitionKind;
     let def = app.style.transition(name)?;

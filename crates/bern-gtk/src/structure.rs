@@ -9,7 +9,7 @@ use crate::reactive::{Cell, Scope, effect, on_cleanup, untrack};
 use crate::text::tr;
 use crate::value::{as_list, at, key_text, payload, some, tag};
 use crate::widgets::SearchProps;
-use crate::{Act, Branch, Build, Ctx, Get, Parent, Str, icons, windows};
+use crate::{Act, Branch, Build, Ctx, Get, Parent, Str, icons, motion, windows};
 use adw::prelude::*;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,6 +19,11 @@ use std::rc::Rc;
 struct Slot {
     region: Parent,
     owner: RefCell<Option<Scope>>,
+    /// Whether it showed content before: what comes later appears in an
+    /// update.
+    filled: std::cell::Cell<bool>,
+    /// The stagger clock of the container it stands in.
+    clock: Option<Rc<motion::Clock>>,
 }
 
 impl Slot {
@@ -26,6 +31,8 @@ impl Slot {
         let slot = Rc::new(Self {
             region,
             owner: RefCell::new(None),
+            filled: std::cell::Cell::new(false),
+            clock: motion::clock(),
         });
         let ended = Rc::clone(&slot);
         on_cleanup(move || ended.end());
@@ -40,12 +47,17 @@ impl Slot {
     }
 
     /// Replace the content with what `build` makes, outside any effect.
-    fn fill(&self, build: impl FnOnce(&Parent)) {
+    /// `structural` content (of `if`, `match` and `ForEach`) appears with
+    /// its transitions after the first time.
+    fn fill(&self, structural: bool, build: impl FnOnce(&Parent)) {
+        let entering = structural && (self.filled.replace(true) || motion::entering());
         untrack(|| {
             self.end();
             self.region.clear();
             let owner = Scope::detached();
-            owner.run(|| build(&self.region));
+            motion::with_entering(entering, || {
+                motion::with_clock(self.clock.clone(), || owner.run(|| build(&self.region)))
+            });
             *self.owner.borrow_mut() = Some(owner);
         });
     }
@@ -74,9 +86,12 @@ pub fn When(p: &Parent, ctx: &Ctx, branch: Branch, arms: Vec<Build>) {
         match next.and_then(|index| arms.get(index)) {
             Some(arm) => {
                 let arm = Rc::clone(arm);
-                slot.fill(|region| arm(region, &ctx));
+                slot.fill(true, |region| arm(region, &ctx));
             }
-            None => slot.clear(),
+            None => {
+                slot.filled.set(true);
+                slot.clear();
+            }
         }
     });
 }
@@ -161,9 +176,19 @@ struct Row {
 }
 
 /// Keyed rows: a row keeps its widgets, controls and state while its key
-/// stays; its value is a cell the row's bindings read.
+/// stays; its value is a cell the row's bindings read. Rows added after the
+/// first ones appear with their transitions; with `stagger` they take
+/// turns.
 #[allow(non_snake_case)]
-pub fn Each(p: &Parent, ctx: &Ctx, items: Get, key: usize, var: &'static str, row: Build) {
+pub fn Each(
+    p: &Parent,
+    ctx: &Ctx,
+    items: Get,
+    key: usize,
+    var: &'static str,
+    stagger: Option<f64>,
+    row: Build,
+) {
     let region = p.region();
     let rows: Rc<RefCell<Vec<Row>>> = Rc::new(RefCell::new(Vec::new()));
     let ended = Rc::clone(&rows);
@@ -173,8 +198,18 @@ pub fn Each(p: &Parent, ctx: &Ctx, items: Get, key: usize, var: &'static str, ro
         }
     });
     let ctx = ctx.clone();
+    let outer = motion::clock();
+    let started = std::cell::Cell::new(false);
+    let first_entering = motion::entering();
     effect(move || {
         let list = as_list(items(&ctx));
+        let entering = started.replace(true) || first_entering;
+        let clock = match stagger {
+            Some(step) if !motion::reduced() => {
+                Some(motion::with_entering(entering, || motion::new_clock(step)))
+            }
+            _ => outer.clone(),
+        };
         untrack(|| {
             let previous: Vec<Row> = rows.borrow_mut().drain(..).collect();
             let order_before: Vec<String> = previous.iter().map(|row| row.key.clone()).collect();
@@ -184,7 +219,8 @@ pub fn Each(p: &Parent, ctx: &Ctx, items: Get, key: usize, var: &'static str, ro
                 .collect();
             let mut next = Vec::new();
             for item in list {
-                let id = key_text(&at(item.clone(), &[key]));
+                let key_value = at(item.clone(), &[key]);
+                let id = key_text(&key_value);
                 if let Some(existing) = old.remove(&id) {
                     existing.value.set(item);
                     next.push(existing);
@@ -199,7 +235,16 @@ pub fn Each(p: &Parent, ctx: &Ctx, items: Get, key: usize, var: &'static str, ro
                     .with_key(Rc::new(move || shown_key.clone()))
                     .with_local(var, Rc::new(move || read.get()));
                 let build = Rc::clone(&row);
-                owner.run(|| build(&child, &row_ctx));
+                let scroll = ctx.scroll().cloned();
+                owner.run(|| {
+                    motion::with_entering(entering, || {
+                        motion::with_clock(clock.clone(), || build(&child, &row_ctx))
+                    });
+                    // Rows are the items a scroll view comes to rest on.
+                    if let (Some(scroll), Some(first)) = (scroll, child.widgets().first()) {
+                        scroll.add_item(key_value, first);
+                    }
+                });
                 next.push(Row {
                     key: id,
                     value,
@@ -239,152 +284,254 @@ pub fn List(p: &Parent, ctx: &Ctx, children: Build) {
     p.add(&list);
 }
 
-/// A destination in the sidebar.
-pub struct SidebarItem {
-    pub value: Get,
-    /// The variant name, for `ui.select`.
-    pub name: &'static str,
-    pub label: Option<Str>,
-    pub icon: Option<&'static str>,
+/// The name of an enum variant value of `enum_name`, for `ui.select`.
+fn variant_name(enum_name: &str, value: &Value) -> &'static str {
+    let Some(variant) = tag(value) else {
+        return "";
+    };
+    let def: &'static crate::AppDef = host().def;
+    def.types
+        .enum_def(enum_name)
+        .and_then(|def| def.variants.get(variant as usize))
+        .map(|variant| variant.name.as_str())
+        .unwrap_or("")
 }
 
-pub struct SidebarSection {
-    pub title: Option<Str>,
-    pub items: Vec<SidebarItem>,
+/// A sidebar item while it is mounted.
+pub(crate) struct Entry {
+    value: Value,
+    name: &'static str,
+    label: Rc<dyn Fn() -> String>,
+    row: gtk::ListBoxRow,
+}
+
+/// The items a sidebar shows now, as they mount and leave with `if`,
+/// `match` and `ForEach`.
+pub struct Registry {
+    entries: RefCell<Vec<Rc<Entry>>>,
+    version: crate::reactive::Version,
+    selection: Field,
+    ctx: Ctx,
+    showing_detail: RefCell<Option<adw::NavigationSplitView>>,
+}
+
+impl Registry {
+    fn add(self: &Rc<Self>, entry: Rc<Entry>) {
+        self.entries.borrow_mut().push(Rc::clone(&entry));
+        self.version.bump();
+        let registry = Rc::downgrade(self);
+        on_cleanup(move || {
+            if let Some(registry) = registry.upgrade() {
+                registry
+                    .entries
+                    .borrow_mut()
+                    .retain(|kept| !Rc::ptr_eq(kept, &entry));
+                registry.version.bump();
+            }
+        });
+    }
+
+    fn choose(&self, value: Value) {
+        self.ctx.write(self.selection, value);
+        if let Some(split) = self.showing_detail.borrow().as_ref() {
+            split.set_show_content(true);
+        }
+    }
+
+    /// Mounted items in the order they show.
+    fn ordered(&self) -> Vec<Rc<Entry>> {
+        let mut entries = self.entries.borrow().clone();
+        entries.sort_by_key(|entry| entry.row.index());
+        entries
+    }
+
+    fn selected(&self, value: &Value) -> Option<Rc<Entry>> {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|entry| entry.value == *value)
+            .cloned()
+    }
+}
+
+pub struct SidebarItemProps {
+    pub value: Get,
+    /// The enum of the selection, for the names `ui.select` takes.
+    pub enum_name: &'static str,
+    pub label: Option<Str>,
+    pub icon: Option<&'static str>,
+    pub style: Option<&'static crate::style::StyleDef>,
+}
+
+/// One sidebar destination; it is part of the selection while mounted.
+#[allow(non_snake_case)]
+pub fn SidebarItem(p: &Parent, ctx: &Ctx, props: SidebarItemProps) {
+    let Some(registry) = ctx.sidebar().cloned() else {
+        return;
+    };
+    let value = untrack(|| (props.value)(ctx));
+    let label: Rc<dyn Fn() -> String> = match props.label {
+        Some(label) => {
+            let at = ctx.clone();
+            Rc::new(move || label(&at))
+        }
+        None => Rc::new(String::new),
+    };
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    if let Some(icon) = props.icon {
+        content.append(&icons::image(icon));
+    }
+    let text = gtk::Label::new(None);
+    text.set_xalign(0.0);
+    text.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    let shown = text.clone();
+    let read = Rc::clone(&label);
+    effect(move || shown.set_label(&read()));
+    content.append(&text);
+    let row = gtk::ListBoxRow::new();
+    match props.style {
+        Some(style) => {
+            content.add_css_class("bern-sidebar-content");
+            let motion = crate::motion::MotionBox::wrap(&content);
+            row.add_css_class("bern-styled-row");
+            row.set_child(Some(&motion));
+            crate::style::apply(style, row.upcast_ref(), content.upcast_ref(), &motion);
+        }
+        None => row.set_child(Some(&content)),
+    }
+    p.add(&row);
+    registry.add(Rc::new(Entry {
+        name: variant_name(props.enum_name, &value),
+        value,
+        label,
+        row,
+    }));
+}
+
+/// A titled group of sidebar items.
+#[allow(non_snake_case)]
+pub fn SidebarSection(p: &Parent, ctx: &Ctx, title: Option<Str>, children: Build) {
+    if let Some(title) = title {
+        let heading = gtk::Label::new(None);
+        heading.set_xalign(0.0);
+        heading.add_css_class("caption-heading");
+        heading.add_css_class("dim-label");
+        heading.set_margin_top(12);
+        heading.set_margin_bottom(6);
+        heading.set_margin_start(6);
+        let at = ctx.clone();
+        let shown = heading.clone();
+        effect(move || shown.set_label(&title(&at)));
+        let row = gtk::ListBoxRow::new();
+        row.set_activatable(false);
+        row.set_selectable(false);
+        row.set_child(Some(&heading));
+        p.add(&row);
+    }
+    children(p, ctx);
 }
 
 pub struct SplitSpec {
     pub id: Option<&'static str>,
     pub selection: Field,
+    /// The item chosen when the selected one leaves.
+    pub fallback: Option<Get>,
     pub search: Option<(SearchProps, Option<Act>)>,
-    pub sections: Vec<SidebarSection>,
+    /// Content at the foot of the sidebar, below the list.
+    pub footer: Option<Build>,
 }
 
 /// The sidebar and detail split of GNOME applications: a navigation
-/// sidebar with optional search, and a detail page whose header shows the
-/// selected destination, the detail's tools and back.
+/// sidebar with optional search and footer, and a detail page whose header
+/// shows the selected destination, the detail's tools and back. Items may
+/// come and go; when the selected one leaves, the selection moves to the
+/// fallback or the first item left.
 #[allow(non_snake_case)]
-pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
+pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail: Build) {
     if let Some(page) = ctx.page() {
         page.hide_header();
     }
     let split = adw::NavigationSplitView::new();
     split.set_vexpand(true);
     split.set_hexpand(true);
+    let selection = spec.selection;
 
     // Sidebar
     let list = gtk::ListBox::new();
     list.add_css_class("navigation-sidebar");
     list.set_selection_mode(gtk::SelectionMode::Single);
-    struct Entry {
-        value: Value,
-        name: &'static str,
-        label: Rc<dyn Fn() -> String>,
-        row: gtk::ListBoxRow,
-    }
-    let mut entries: Vec<Entry> = Vec::new();
-    let mut headings: Vec<(gtk::ListBoxRow, Rc<dyn Fn() -> String>)> = Vec::new();
-    for section in spec.sections {
-        let mut first = true;
-        for item in section.items {
-            let value = untrack(|| (item.value)(ctx));
-            let label: Rc<dyn Fn() -> String> = match item.label {
-                Some(label) => {
-                    let at = ctx.clone();
-                    Rc::new(move || label(&at))
-                }
-                None => Rc::new(String::new),
-            };
-            let content = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-            if let Some(icon) = item.icon {
-                content.append(&icons::image(icon));
-            }
-            let text = gtk::Label::new(None);
-            text.set_xalign(0.0);
-            text.set_ellipsize(gtk::pango::EllipsizeMode::End);
-            let shown = text.clone();
-            let read = Rc::clone(&label);
-            effect(move || shown.set_label(&read()));
-            content.append(&text);
-            let row = gtk::ListBoxRow::new();
-            row.set_child(Some(&content));
-            list.append(&row);
-            if first && let Some(title) = &section.title {
-                let at = ctx.clone();
-                let title = Rc::clone(title);
-                headings.push((row.clone(), Rc::new(move || title(&at))));
-            }
-            first = false;
-            entries.push(Entry {
-                value,
-                name: item.name,
-                label,
-                row,
-            });
-        }
-    }
-    let headings = Rc::new(headings);
-    let header_titles = Rc::clone(&headings);
-    list.set_header_func(move |row, _| {
-        let title = header_titles
-            .iter()
-            .find(|(candidate, _)| candidate == row)
-            .map(|(_, title)| title());
-        match title {
-            Some(title) => {
-                let heading = gtk::Label::new(Some(&title));
-                heading.set_xalign(0.0);
-                heading.add_css_class("caption-heading");
-                heading.add_css_class("dim-label");
-                heading.set_margin_top(12);
-                heading.set_margin_bottom(6);
-                heading.set_margin_start(12);
-                row.set_header(Some(&heading));
-            }
-            None => row.set_header(None::<&gtk::Widget>),
-        }
+    let registry = Rc::new(Registry {
+        entries: RefCell::new(Vec::new()),
+        version: crate::reactive::Version::new(),
+        selection,
+        ctx: ctx.clone(),
+        showing_detail: RefCell::new(Some(split.clone())),
     });
-    let invalidated = list.clone();
-    let titles = Rc::clone(&headings);
-    effect(move || {
-        // Section titles follow the language.
-        for (_, title) in titles.iter() {
-            title();
-        }
-        invalidated.invalidate_headers();
-    });
-    let entries = Rc::new(entries);
-    let selection = spec.selection;
+    sidebar(
+        &Parent::of_list(&list),
+        &ctx.with_sidebar(Rc::clone(&registry)),
+    );
     let updating = Rc::new(std::cell::Cell::new(false));
-    let selected = Rc::clone(&entries);
-    let at = ctx.clone();
-    let guard = Rc::clone(&updating);
-    let shown = list.clone();
-    effect(move || {
-        let value = at.read(selection);
-        let row = selected
-            .iter()
-            .find(|entry| entry.value == value)
-            .map(|entry| entry.row.clone());
-        if shown.selected_row() != row {
-            guard.set(true);
-            shown.select_row(row.as_ref());
-            guard.set(false);
-        }
-    });
-    let chosen = Rc::clone(&entries);
-    let at = ctx.clone();
-    let revealed = split.clone();
-    list.connect_row_selected(move |_, row| {
-        if updating.get() {
-            return;
-        }
-        let Some(row) = row else { return };
-        if let Some(entry) = chosen.iter().find(|entry| &entry.row == row) {
-            at.write(selection, entry.value.clone());
-            revealed.set_show_content(true);
-        }
-    });
+    {
+        let registry = Rc::clone(&registry);
+        let guard = Rc::clone(&updating);
+        let shown = list.clone();
+        let at = ctx.clone();
+        effect(move || {
+            registry.version.track();
+            let value = at.read(selection);
+            let row = registry.selected(&value).map(|entry| entry.row.clone());
+            if shown.selected_row() != row {
+                guard.set(true);
+                shown.select_row(row.as_ref());
+                guard.set(false);
+            }
+        });
+    }
+    // A selection without a mounted item moves on, once the update that
+    // removed it has mounted whatever replaces it.
+    {
+        let registry = Rc::clone(&registry);
+        let at = ctx.clone();
+        let fallback = spec.fallback.clone();
+        effect(move || {
+            registry.version.track();
+            at.read(selection);
+            let registry = Rc::clone(&registry);
+            let at = at.clone();
+            let fallback = fallback.clone();
+            glib::idle_add_local_once(move || {
+                let current = at.peek(selection);
+                let entries = registry.ordered();
+                if entries.is_empty() || entries.iter().any(|entry| entry.value == current) {
+                    return;
+                }
+                let back = fallback
+                    .map(|fallback| untrack(|| fallback(&at)))
+                    .filter(|fallback| entries.iter().any(|entry| entry.value == *fallback));
+                let next = back.unwrap_or_else(|| entries[0].value.clone());
+                at.write(selection, next);
+            });
+        });
+    }
+    {
+        let registry = Rc::clone(&registry);
+        list.connect_row_selected(move |_, row| {
+            if updating.get() {
+                return;
+            }
+            let Some(row) = row else { return };
+            let chosen = registry
+                .entries
+                .borrow()
+                .iter()
+                .find(|entry| &entry.row == row)
+                .map(|entry| entry.value.clone());
+            if let Some(value) = chosen {
+                registry.choose(value);
+            }
+        });
+    }
     let activated = split.clone();
     list.connect_row_activated(move |_, _| activated.set_show_content(true));
 
@@ -395,7 +542,7 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
         holder.set_margin_bottom(6);
         holder.set_margin_start(12);
         holder.set_margin_end(12);
-        crate::widgets::Search(&Parent::of_box(&holder), ctx, search, submit);
+        crate::widgets::Search(&Parent::of_box(&holder), ctx, search, submit, None);
         sidebar_box.append(&holder);
     }
     let scrolled = gtk::ScrolledWindow::new();
@@ -403,12 +550,24 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
     scrolled.set_vexpand(true);
     scrolled.set_child(Some(&list));
     sidebar_box.append(&scrolled);
+    if let Some(footer) = spec.footer {
+        let holder = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        holder.add_css_class("bern-sidebar-footer");
+        holder.set_margin_top(6);
+        holder.set_margin_bottom(12);
+        holder.set_margin_start(12);
+        holder.set_margin_end(12);
+        footer(&Parent::of_box(&holder), ctx);
+        sidebar_box.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        sidebar_box.append(&holder);
+    }
     let sidebar_view = adw::ToolbarView::new();
     let sidebar_header = adw::HeaderBar::new();
     let app_title = adw::WindowTitle::new("", "");
     sidebar_header.set_title_widget(Some(&app_title));
     sidebar_view.add_top_bar(&sidebar_header);
     sidebar_view.set_content(Some(&sidebar_box));
+    ctx.win().chrome_view(&sidebar_view);
     let sidebar_page = adw::NavigationPage::new(&sidebar_view, "");
     let name_key = host().def.name;
     let titled = sidebar_page.clone();
@@ -421,13 +580,13 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
 
     // Detail
     let selected_label: Rc<dyn Fn() -> String> = {
-        let entries = Rc::clone(&entries);
+        let registry = Rc::clone(&registry);
         let at = ctx.clone();
         Rc::new(move || {
+            registry.version.track();
             let value = at.read(selection);
-            entries
-                .iter()
-                .find(|entry| entry.value == value)
+            registry
+                .selected(&value)
                 .map(|entry| (entry.label)())
                 .unwrap_or_default()
         })
@@ -439,6 +598,7 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
     let detail_view = adw::ToolbarView::new();
     detail_view.add_top_bar(&header);
     detail_view.set_content(Some(&content));
+    ctx.win().chrome_view(&detail_view);
     let detail_page = adw::NavigationPage::new(&detail_view, "");
     let titled = detail_page.clone();
     let shown_page = Rc::clone(&page);
@@ -460,10 +620,8 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
     ctx.win().window.add_breakpoint(breakpoint);
 
     if let Some(id) = spec.id {
-        let names = Rc::clone(&entries);
-        let at = ctx.clone();
-        let revealed = split.clone();
-        let current = Rc::clone(&entries);
+        let names = Rc::clone(&registry);
+        let current = Rc::clone(&registry);
         let read = ctx.clone();
         controls::register(
             ctx,
@@ -473,10 +631,15 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
             None,
             Actions {
                 select: Some(Rc::new(move |name: &str| {
-                    match names.iter().find(|entry| entry.name == name) {
-                        Some(entry) => {
-                            at.write(selection, entry.value.clone());
-                            revealed.set_show_content(true);
+                    let found = names
+                        .entries
+                        .borrow()
+                        .iter()
+                        .find(|entry| entry.name == name)
+                        .map(|entry| entry.value.clone());
+                    match found {
+                        Some(value) => {
+                            names.choose(value);
                             true
                         }
                         None => false,
@@ -484,10 +647,7 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, detail: Build) {
                 })),
                 value: Some(Rc::new(move || {
                     let value = read.peek(selection);
-                    current
-                        .iter()
-                        .find(|entry| entry.value == value)
-                        .map(|entry| entry.name.to_string())
+                    current.selected(&value).map(|entry| entry.name.to_string())
                 })),
                 ..Actions::default()
             },
@@ -569,7 +729,7 @@ pub fn Navigation(
         let pop = Rc::clone(&pop);
         let destination = Rc::clone(&destination);
         let inner = inner.with_local(var, Rc::new(move || route.clone()));
-        slot.fill(|region| {
+        slot.fill(false, |region| {
             if let Some(page) = &page {
                 page.push_back(Rc::new(move || {
                     pop();
@@ -655,37 +815,105 @@ pub fn NavLink(p: &Parent, ctx: &Ctx, id: &'static str, route: Get, label: Str, 
     }
 }
 
-/// A tab of `Tabs`.
-pub struct TabSpec {
+/// A tab while it is mounted.
+pub(crate) struct TabEntry {
+    value: Value,
+    name: &'static str,
+    label: Rc<dyn Fn() -> String>,
+    slot: Rc<Slot>,
+    build: Build,
+    ctx: Ctx,
+    page: String,
+}
+
+/// The tabs a tab view shows now, as they mount and leave.
+pub struct TabRegistry {
+    stack: adw::ViewStack,
+    entries: RefCell<Vec<Rc<TabEntry>>>,
+    version: crate::reactive::Version,
+    next: std::cell::Cell<u32>,
+}
+
+impl TabRegistry {
+    fn selected(&self, value: &Value) -> Option<Rc<TabEntry>> {
+        self.entries
+            .borrow()
+            .iter()
+            .find(|entry| entry.value == *value)
+            .cloned()
+    }
+}
+
+pub struct TabProps {
     pub value: Get,
-    pub name: &'static str,
+    /// The enum of the selection, for the names `ui.select` takes.
+    pub enum_name: &'static str,
     pub label: Str,
     pub icon: Option<&'static str>,
-    pub build: Build,
+}
+
+/// One tab; it is part of the tab view while mounted. Its content is built
+/// while it is selected.
+#[allow(non_snake_case)]
+pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
+    let Some(registry) = ctx.tabs().cloned() else {
+        return;
+    };
+    let value = untrack(|| (props.value)(ctx));
+    let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let index = registry.next.get();
+    registry.next.set(index + 1);
+    let name = format!("t{index}");
+    let page = registry.stack.add_titled(&holder, Some(&name), "");
+    if let Some(icon) = props.icon {
+        page.set_icon_name(Some(icons::name(icon)));
+    }
+    let label: Rc<dyn Fn() -> String> = {
+        let at = ctx.clone();
+        let label = Rc::clone(&props.label);
+        Rc::new(move || label(&at))
+    };
+    let titled = Rc::clone(&label);
+    effect(move || page.set_title(Some(&titled())));
+    let entry = Rc::new(TabEntry {
+        name: variant_name(props.enum_name, &value),
+        value,
+        label,
+        slot: Slot::new(Parent::of_box(&holder)),
+        build,
+        ctx: ctx.clone(),
+        page: name,
+    });
+    registry.entries.borrow_mut().push(Rc::clone(&entry));
+    registry.version.bump();
+    let weak = Rc::downgrade(&registry);
+    on_cleanup(move || {
+        if let Some(registry) = weak.upgrade() {
+            registry
+                .entries
+                .borrow_mut()
+                .retain(|kept| !Rc::ptr_eq(kept, &entry));
+            registry.stack.remove(&holder);
+            registry.version.bump();
+        }
+    });
 }
 
 /// Tabs as a view stack with a view switcher in the page header, as
-/// GNOME preference windows show them. Only the selected tab is built.
+/// GNOME preference windows show them. Tabs may come and go; only the
+/// selected tab is built.
 #[allow(non_snake_case)]
-pub fn Tabs(p: &Parent, ctx: &Ctx, id: Option<&'static str>, selection: Field, tabs: Vec<TabSpec>) {
+pub fn Tabs(p: &Parent, ctx: &Ctx, id: Option<&'static str>, selection: Field, tabs: Build) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
-    let values: Vec<Value> = tabs
-        .iter()
-        .map(|tab| untrack(|| (tab.value)(ctx)))
-        .collect();
-    let mut slots = Vec::new();
-    for (index, tab) in tabs.iter().enumerate() {
-        let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let page = stack.add_titled(&holder, Some(&format!("t{index}")), "");
-        if let Some(icon) = tab.icon {
-            page.set_icon_name(Some(icons::name(icon)));
-        }
-        let label = Rc::clone(&tab.label);
-        let at = ctx.clone();
-        effect(move || page.set_title(Some(&label(&at))));
-        slots.push(Slot::new(Parent::of_box(&holder)));
-    }
+    let registry = Rc::new(TabRegistry {
+        stack: stack.clone(),
+        entries: RefCell::new(Vec::new()),
+        version: crate::reactive::Version::new(),
+        next: std::cell::Cell::new(0),
+    });
+    let (declared, _) = Parent::capture(p);
+    tabs(&declared, &ctx.with_tabs(Rc::clone(&registry)));
     let switcher = adw::ViewSwitcher::new();
     switcher.set_stack(Some(&stack));
     switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
@@ -698,87 +926,97 @@ pub fn Tabs(p: &Parent, ctx: &Ctx, id: Option<&'static str>, selection: Field, t
             p.add(&bar);
         }
     }
-    let values = Rc::new(values);
-    let builders: Vec<Build> = tabs.iter().map(|tab| Rc::clone(&tab.build)).collect();
-    let shown: Rc<std::cell::Cell<Option<usize>>> = Rc::new(std::cell::Cell::new(None));
+    let shown: Rc<RefCell<Option<Rc<TabEntry>>>> = Rc::new(RefCell::new(None));
     let updating = Rc::new(std::cell::Cell::new(false));
-    let at = ctx.clone();
-    let guard = Rc::clone(&updating);
-    let visible = stack.clone();
-    let read = Rc::clone(&values);
-    effect(move || {
-        let value = at.read(selection);
-        let Some(index) = read.iter().position(|candidate| *candidate == value) else {
-            return;
-        };
-        if shown.get() == Some(index) {
-            return;
-        }
-        if let Some(previous) = shown.get() {
-            slots[previous].clear();
-        }
-        shown.set(Some(index));
-        let build = Rc::clone(&builders[index]);
-        let at = at.clone();
-        slots[index].fill(|region| build(region, &at));
-        guard.set(true);
-        visible.set_visible_child_name(&format!("t{index}"));
-        guard.set(false);
-    });
-    let at = ctx.clone();
-    let chosen = Rc::clone(&values);
-    stack.connect_visible_child_name_notify(move |stack| {
-        if updating.get() {
-            return;
-        }
-        let index = stack.visible_child_name().and_then(|name| {
-            name.strip_prefix('t')
-                .and_then(|index| index.parse::<usize>().ok())
-        });
-        if let Some(value) = index.and_then(|index| chosen.get(index)) {
-            at.write(selection, value.clone());
-        }
-    });
-    if let Some(id) = id {
-        let names: Rc<Vec<&'static str>> = Rc::new(tabs.iter().map(|tab| tab.name).collect());
-        let labels: Rc<Vec<Str>> = Rc::new(tabs.iter().map(|tab| Rc::clone(&tab.label)).collect());
-        let select_names = Rc::clone(&names);
-        let select_values = Rc::clone(&values);
+    {
+        let registry = Rc::clone(&registry);
         let at = ctx.clone();
-        let value_names = Rc::clone(&names);
-        let value_values = Rc::clone(&values);
+        let guard = Rc::clone(&updating);
+        effect(move || {
+            registry.version.track();
+            let value = at.read(selection);
+            let Some(entry) = registry.selected(&value) else {
+                return;
+            };
+            let previous = shown.borrow().clone();
+            if previous
+                .as_ref()
+                .is_some_and(|previous| Rc::ptr_eq(previous, &entry))
+            {
+                return;
+            }
+            if let Some(previous) = previous {
+                previous.slot.clear();
+            }
+            *shown.borrow_mut() = Some(Rc::clone(&entry));
+            let build = Rc::clone(&entry.build);
+            let inner = entry.ctx.clone();
+            entry.slot.fill(false, |region| build(region, &inner));
+            guard.set(true);
+            registry.stack.set_visible_child_name(&entry.page);
+            guard.set(false);
+        });
+    }
+    {
+        let registry = Rc::clone(&registry);
+        let at = ctx.clone();
+        stack.connect_visible_child_name_notify(move |stack| {
+            if updating.get() {
+                return;
+            }
+            let Some(name) = stack.visible_child_name() else {
+                return;
+            };
+            let chosen = registry
+                .entries
+                .borrow()
+                .iter()
+                .find(|entry| entry.page == name.as_str())
+                .map(|entry| entry.value.clone());
+            if let Some(value) = chosen {
+                at.write(selection, value);
+            }
+        });
+    }
+    if let Some(id) = id {
+        let names = Rc::clone(&registry);
+        let values = Rc::clone(&registry);
+        let labels = Rc::clone(&registry);
+        let at = ctx.clone();
         let read = ctx.clone();
-        let label_values = Rc::clone(&values);
         let label_at = ctx.clone();
         controls::register(
             ctx,
             id,
             "tabs",
             Some(Rc::new(move || {
-                let value = label_at.read(selection);
-                label_values
-                    .iter()
-                    .position(|candidate| *candidate == value)
-                    .map(|index| labels[index](&label_at))
+                labels.version.track();
+                labels
+                    .selected(&label_at.read(selection))
+                    .map(|entry| (entry.label)())
                     .unwrap_or_default()
             })),
             None,
             Actions {
                 select: Some(Rc::new(move |name: &str| {
-                    match select_names.iter().position(|candidate| *candidate == name) {
-                        Some(index) => {
-                            at.write(selection, select_values[index].clone());
+                    let found = names
+                        .entries
+                        .borrow()
+                        .iter()
+                        .find(|entry| entry.name == name)
+                        .map(|entry| entry.value.clone());
+                    match found {
+                        Some(value) => {
+                            at.write(selection, value);
                             true
                         }
                         None => false,
                     }
                 })),
                 value: Some(Rc::new(move || {
-                    let value = read.peek(selection);
-                    value_values
-                        .iter()
-                        .position(|candidate| *candidate == value)
-                        .map(|index| value_names[index].to_string())
+                    values
+                        .selected(&read.peek(selection))
+                        .map(|entry| entry.name.to_string())
                 })),
                 ..Actions::default()
             },
@@ -787,18 +1025,31 @@ pub fn Tabs(p: &Parent, ctx: &Ctx, id: Option<&'static str>, selection: Field, t
     p.add(&stack);
 }
 
-/// Chooses one layout by the width available to it and the breakpoint
-/// from `[layouts]`. Engine state and drafts live outside the widget tree,
-/// so switching keeps them; controls with the same id in both layouts are
-/// the same control.
+/// The layout size of an available width, by the breakpoints of
+/// `[layouts]`.
+pub(crate) fn size_of(width: f64) -> &'static str {
+    let def = host().def;
+    let compact = def.compact_below.unwrap_or(0.0);
+    if width < compact {
+        "compact"
+    } else if def.medium_below.is_some_and(|below| width < below) {
+        "medium"
+    } else if def.expanded_below.is_none_or(|below| width < below) {
+        "expanded"
+    } else {
+        "large"
+    }
+}
+
+const SIZES: [&str; 4] = ["compact", "medium", "expanded", "large"];
+
+/// Chooses one layout by the width available to it and the breakpoints
+/// from `[layouts]`; a size without a layout of its own shows the next
+/// larger declared one, else the next smaller. Engine state and drafts
+/// live outside the widget tree, so switching keeps them; controls with the
+/// same id in several layouts are the same control.
 #[allow(non_snake_case)]
-pub fn Adaptive(
-    p: &Parent,
-    ctx: &Ctx,
-    id: Option<&'static str>,
-    compact: Option<Build>,
-    expanded: Option<Build>,
-) {
+pub fn Adaptive(p: &Parent, ctx: &Ctx, id: Option<&'static str>, layouts: [Option<Build>; 4]) {
     // A probe with no height measures the width the layout gets.
     let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
     holder.set_hexpand(true);
@@ -809,30 +1060,31 @@ pub fn Adaptive(
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     holder.append(&content);
     let size = Cell::new("expanded");
-    let below = host().def.compact_below.unwrap_or(0.0);
     let measured = size.clone();
     probe.connect_resize(move |_, width, _| {
         // A hidden layout has no width to judge by; it keeps its size.
         if width > 0 {
-            measured.set(if (width as f64) < below {
-                "compact"
-            } else {
-                "expanded"
-            });
+            measured.set(size_of(f64::from(width)));
         }
     });
     let slot = Slot::new(Parent::of_box(&content));
     let at = ctx.clone();
     let read = size.clone();
+    let shown_size = Rc::new(std::cell::Cell::new(None::<usize>));
     effect(move || {
-        let current = read.get();
-        let build = if current == "compact" {
-            compact.clone().or_else(|| expanded.clone())
-        } else {
-            expanded.clone().or_else(|| compact.clone())
-        };
-        match build {
-            Some(build) => slot.fill(|region| build(region, &at)),
+        let current = SIZES
+            .iter()
+            .position(|size| *size == read.get())
+            .unwrap_or(2);
+        let larger = (current..SIZES.len()).find(|index| layouts[*index].is_some());
+        let smaller = (0..current).rev().find(|index| layouts[*index].is_some());
+        let chosen = larger.or(smaller);
+        if shown_size.get() == chosen && chosen.is_some() {
+            return;
+        }
+        shown_size.set(chosen);
+        match chosen.and_then(|index| layouts[index].clone()) {
+            Some(build) => slot.fill(false, |region| build(region, &at)),
             None => slot.clear(),
         }
     });

@@ -92,7 +92,42 @@ fn parse_unary(input: ParseStream<'_>, allow_braces: bool) -> syn::Result<Expr> 
     parse_primary(input, allow_braces)
 }
 
+/// `if cond { a } else { b }`, with `else if` for more cases; every case
+/// has a value, so `else` is required.
+fn parse_if(input: ParseStream<'_>) -> syn::Result<Expr> {
+    let span = input.parse::<Token![if]>()?.span;
+    let cond = parse_expr(input, false)?;
+    let branch = |input: ParseStream<'_>| -> syn::Result<Expr> {
+        let content;
+        braced!(content in input);
+        let value = parse_expr(&content, true)?;
+        if !content.is_empty() {
+            return Err(content.error("a branch holds one value"));
+        }
+        Ok(value)
+    };
+    let then = branch(input)?;
+    if !input.peek(Token![else]) {
+        return Err(input.error("a value `if` needs an `else`"));
+    }
+    input.parse::<Token![else]>()?;
+    let otherwise = if input.peek(Token![if]) {
+        parse_if(input)?
+    } else {
+        branch(input)?
+    };
+    Ok(Expr::If {
+        cond: Box::new(cond),
+        then: Box::new(then),
+        otherwise: Box::new(otherwise),
+        span,
+    })
+}
+
 fn parse_primary(input: ParseStream<'_>, allow_braces: bool) -> syn::Result<Expr> {
+    if input.peek(Token![if]) {
+        return parse_if(input);
+    }
     if input.peek(token::Paren) {
         let content;
         parenthesized!(content in input);

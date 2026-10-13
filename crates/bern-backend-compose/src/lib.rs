@@ -27,6 +27,7 @@ const RUNTIME: &str = include_str!("../templates/BernRuntime.kt");
 const VIEWS: &str = include_str!("../templates/BernViews.kt");
 const STYLE: &str = include_str!("../templates/BernStyle.kt");
 const MEDIA: &str = include_str!("../templates/BernMedia.kt");
+const FEATURES: &str = include_str!("../templates/BernFeatures.kt");
 
 /// The Rust target of the engine library: 64-bit ARM, which every phone
 /// of the supported Android versions runs.
@@ -34,6 +35,42 @@ pub const RUST_TARGET: &str = "aarch64-linux-android";
 
 /// Components not realized yet.
 const UNSUPPORTED: &[&str] = &[];
+
+/// IR features Compose builds.
+const FEATURES_BUILT: &[&str] = &[
+    bern_target_api::feature::SESSION_ACTIONS,
+    // Without a pointer, revealed content always shows.
+    bern_target_api::feature::REVEAL,
+    bern_target_api::feature::BOUND_LENGTHS,
+    bern_target_api::feature::APPEARANCE,
+    bern_target_api::feature::SHORTCUTS,
+    bern_target_api::feature::RUNTIME_THEME,
+    bern_target_api::feature::BUTTON_CONTENT,
+    bern_target_api::feature::TOOLBAR_SEARCH,
+    bern_target_api::feature::SEARCH_RESULTS,
+    bern_target_api::feature::TOGGLE_BUTTON,
+    bern_target_api::feature::DIALOG_WINDOWS,
+    bern_target_api::feature::RUNTIME_IMAGES,
+    bern_target_api::feature::PICTURE_FILLS,
+    bern_target_api::feature::FILE_PICK,
+    bern_target_api::feature::SCROLL_SNAP,
+    bern_target_api::feature::RAILS,
+    bern_target_api::feature::POPOVER_BUTTON,
+    bern_target_api::feature::SIZE_CLASSES,
+];
+
+/// The features template with the extensions of each file kind from the
+/// shared table, so pickers, drops and the manifest agree.
+fn features_source() -> String {
+    let table: Vec<String> = bern_ir::spec::FILE_KIND_EXTENSIONS
+        .iter()
+        .map(|(kind, extensions)| {
+            let list: Vec<String> = extensions.iter().map(|ext| format!("\"{ext}\"")).collect();
+            format!("\"{kind}\" to listOf({})", list.join(", "))
+        })
+        .collect();
+    FEATURES.replace("/*bern:file-extensions*/", &table.join(", "))
+}
 
 pub struct ComposeAndroid;
 
@@ -61,10 +98,21 @@ impl Target for ComposeAndroid {
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
             styles: style::SUPPORT,
-            motion: &["appear", "disappear", "reflow", "hero"],
+            motion: &[
+                "appear",
+                "disappear",
+                "reflow",
+                "hero",
+                "animate",
+                "scroll_scale",
+                "scroll_opacity",
+                "nudge",
+                "stagger",
+            ],
             window_chrome: true,
             text_marks: true,
             dynamic_items: true,
+            features: FEATURES_BUILT,
             id: "compose-android",
             ui: "compose",
             platforms: &["android"],
@@ -129,15 +177,32 @@ impl Target for ComposeAndroid {
             GeneratedFile::text("project/build.gradle.kts", project::root_build()),
             GeneratedFile::text("project/gradle.properties", project::GRADLE_PROPERTIES),
             GeneratedFile::text("project/app/build.gradle.kts", project::app_build(app)),
-            GeneratedFile::text(main.join("AndroidManifest.xml"), project::manifest()),
+            GeneratedFile::text(main.join("AndroidManifest.xml"), project::manifest(app)),
             GeneratedFile::text(main.join("res/values/themes.xml"), project::theme(false)),
             GeneratedFile::text(
                 main.join("res/values-night/themes.xml"),
                 project::theme(true),
             ),
+            // A Media3 view that draws into a TextureView, which a rounded
+            // frame can clip; the default SurfaceView cannot be clipped.
+            GeneratedFile::text(
+                main.join("res/layout/bern_player_texture.xml"),
+                r#"<?xml version="1.0" encoding="utf-8"?>
+<androidx.media3.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    app:surface_type="texture_view"
+    app:use_controller="false" />
+"#,
+            ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernRuntime.kt"), RUNTIME),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernViews.kt"), VIEWS),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernStyle.kt"), STYLE),
+            GeneratedFile::text(
+                sources.join("dev/bern/runtime/BernFeatures.kt"),
+                features_source(),
+            ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernMedia.kt"), MEDIA),
             GeneratedFile::text(
                 sources
@@ -273,6 +338,25 @@ impl Target for ComposeAndroid {
             .join(format!("app-{profile}.apk"));
         let product_apk = output.join(format!("{product}.apk"));
         let jni = gradle_project.join("app/src/main/jniLibs/arm64-v8a");
+        // Only this application's Kotlin: every application built here
+        // shares the output directory, and sources another one left behind
+        // would be compiled into this one.
+        let package = names::package(&app.app.bundle_id);
+        let kotlin = BuildStep::Mirror {
+            dir: gradle_project.join("app/src/main/kotlin"),
+            files: Vec::new(),
+            keep: [
+                "BernRuntime",
+                "BernViews",
+                "BernStyle",
+                "BernFeatures",
+                "BernMedia",
+            ]
+            .iter()
+            .map(|name| PathBuf::from(format!("dev/bern/runtime/{name}.kt")))
+            .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
+            .collect(),
+        };
         let assets = gradle_project.join("app/src/main/assets/bern/resources");
         let mut steps = vec![
             BuildStep::Run {
@@ -302,6 +386,7 @@ impl Target for ComposeAndroid {
                     .collect(),
                 keep: Vec::new(),
             },
+            kotlin,
             BuildStep::Run {
                 description: "Build the Compose frontend".into(),
                 program: path(&tools.gradle),

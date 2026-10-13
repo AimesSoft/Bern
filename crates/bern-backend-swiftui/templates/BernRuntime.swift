@@ -11,6 +11,7 @@
 
 import ImageIO
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Binary values
 
@@ -258,6 +259,18 @@ final class BernWindowContext {
     @ObservationIgnored var allowsClose = false
     /// Whether the window had no input for its `idle_after` seconds.
     var idle = false
+    /// The width of the window's content, for `window.compact` and its
+    /// siblings.
+    var width: CGFloat = 0
+    /// Whether the window has shown its first frame: elements appearing
+    /// after it move in, those of the first frame do not.
+    var settled = false
+
+    private var size: String { bernAppBreakpoints.size(of: width > 0 ? width : .infinity) }
+    var compact: Bool { size == "compact" }
+    var medium: Bool { size == "medium" }
+    var expanded: Bool { size == "expanded" }
+    var large: Bool { size == "large" }
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
 
@@ -307,6 +320,11 @@ struct BernControlActions {
     var select: (@MainActor (String) -> Bool)? = nil
     var back: (@MainActor () -> Bool)? = nil
     var value: (@MainActor () -> String?)? = nil
+    var focus: (@MainActor () -> Void)? = nil
+    /// Takes a file as if the user chose or dropped it.
+    var setFile: (@MainActor (URL) -> Void)? = nil
+    /// The kinds of file `setFile` takes, as `files:` names them.
+    var fileKinds = "any"
 }
 
 struct BernControlEntry {
@@ -355,14 +373,45 @@ final class BernControls {
     }
 }
 
+private struct BernItemKeysKey: EnvironmentKey {
+    static let defaultValue = ""
+}
+
+extension EnvironmentValues {
+    /// Keys of the rows around a view, outermost first, as `[a][b]`.
+    var bernItemKeys: String {
+        get { self[BernItemKeysKey.self] }
+        set { self[BernItemKeysKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// A row of a repetition: controls inside it, also in components it
+    /// places, add `[key]` to their targets.
+    func bernItemKey(_ key: some CustomStringConvertible) -> some View {
+        transformEnvironment(\.bernItemKeys) { $0 += "[\(key)]" }
+    }
+}
+
 private struct BernControl: ViewModifier {
-    let target: String
+    let name: String
     let role: String
     let label: String
     let enabled: Bool
     let actions: BernControlActions
     @Environment(BernWindowContext.self) private var window
+    @Environment(\.bernItemKeys) private var keys
     @State private var token = UUID()
+
+    init(target: String, role: String, label: String, enabled: Bool, actions: BernControlActions) {
+        self.name = target
+        self.role = role
+        self.label = label
+        self.enabled = enabled
+        self.actions = actions
+    }
+
+    private var target: String { name + keys }
 
     func body(content: Content) -> some View {
         content
@@ -381,7 +430,35 @@ private struct BernControl: ViewModifier {
 /// Chooses one layout by the available width. Engine state and session
 /// drafts live outside the view tree, so switching keeps them, and controls
 /// keep their identity through the same `id` in both layouts.
-struct BernAdaptive<Compact: View, Expanded: View>: View {
+/// The breakpoints of `[layouts]`: below `compact` the size is compact,
+/// below `medium` medium, below `expanded` expanded, and large beyond.
+struct BernBreakpoints: Sendable {
+    let compact: CGFloat
+    let medium: CGFloat?
+    let expanded: CGFloat?
+
+    static let sizes = ["compact", "medium", "expanded", "large"]
+
+    func size(of width: CGFloat) -> String {
+        if width < compact { return "compact" }
+        if let medium, width < medium { return "medium" }
+        if let expanded, width >= expanded { return "large" }
+        return "expanded"
+    }
+
+    /// The layout a size shows: its own, else the next larger declared
+    /// one, else the next smaller.
+    static func layout(for size: String, declared: [String]) -> String {
+        if declared.contains(size) { return size }
+        let at = sizes.firstIndex(of: size) ?? 2
+        let order = Array(sizes[(at + 1)...]) + Array(sizes[..<at].reversed())
+        return order.first(where: declared.contains) ?? "expanded"
+    }
+}
+
+/// One layout per size of the available width. The content builds the
+/// layout named; external entries read the size.
+struct BernAdaptive<Content: View>: View {
     /// The size external entries read; a reference, so the registered
     /// control always reports the current one.
     @MainActor
@@ -389,32 +466,30 @@ struct BernAdaptive<Compact: View, Expanded: View>: View {
         var size = "expanded"
     }
 
-    let breakpoint: CGFloat
+    let breakpoints: BernBreakpoints
+    let declared: [String]
     let target: String?
-    let compact: () -> Compact
-    let expanded: () -> Expanded
+    let content: (String) -> Content
     @State private var width: CGFloat?
     @State private var current = Current()
 
     init(
-        breakpoint: CGFloat, target: String?, @ViewBuilder compact: @escaping () -> Compact,
-        @ViewBuilder expanded: @escaping () -> Expanded
+        breakpoints: BernBreakpoints, declared: [String], target: String?,
+        @ViewBuilder content: @escaping (String) -> Content
     ) {
-        self.breakpoint = breakpoint
+        self.breakpoints = breakpoints
+        self.declared = declared
         self.target = target
-        self.compact = compact
-        self.expanded = expanded
+        self.content = content
     }
 
-    private var size: String { (width ?? .infinity) < breakpoint ? "compact" : "expanded" }
+    private var size: String { breakpoints.size(of: width ?? .infinity) }
 
     var body: some View {
-        let chosen = Group {
-            if size == "compact" { compact() } else { expanded() }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
-        .onChange(of: size, initial: true) { current.size = size }
+        let chosen = content(BernBreakpoints.layout(for: size, declared: declared))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
+            .onChange(of: size, initial: true) { current.size = size }
         if let target {
             let current = self.current
             chosen.bernControl(
@@ -456,6 +531,8 @@ struct BernWindowKind {
     /// The localization key of the window's title.
     let title: String
     let isSettings: Bool
+    /// Shown modally over the primary window.
+    var isDialog = false
     /// The declared content size, used when a window has no other size to
     /// return to.
     let defaultSize: CGSize?
@@ -1086,6 +1163,26 @@ final class BernHost {
                     message: "`\(language)` is not supported; supported: \(BernLanguage.shared.supported.joined(separator: ", "))")
             }
             complete(request, command: command) { _ in }
+        case 20:  // ui.focus
+            let entry = try controls.find(try reader.text())
+            guard let focus = entry.actions.focus else { throw unsupported(entry, "focus") }
+            focus()
+            complete(request, command: command) { _ in }
+        case 21:  // ui.set_file
+            let entry = try controls.find(try reader.text())
+            let text = try reader.text()
+            guard let give = entry.actions.setFile else { throw unsupported(entry, "set_file") }
+            guard let url = URL(string: text), ["file", "http", "https"].contains(url.scheme?.lowercased() ?? "")
+            else {
+                throw BernCommandFailure(code: "invalid_url", message: "`\(text)` is not a file:// or http(s) URL")
+            }
+            guard BernFiles.accepts(url, kinds: entry.actions.fileKinds) else {
+                throw BernCommandFailure(
+                    code: "unsupported_file",
+                    message: "`\(entry.target)` takes \(entry.actions.fileKinds), not `\(url.lastPathComponent)`")
+            }
+            give(url)
+            complete(request, command: command) { _ in }
         default:
             throw BernCommandFailure(code: "unknown_command", message: "unknown session command \(command)")
         }
@@ -1465,6 +1562,12 @@ struct BernWindowRoot<Content: View>: View {
             Text(verbatim: BernText.string(pending.canSave ? "bern.close.save_detail" : "bern.close.discard_detail"))
         }
         .modifier(BernWindowPlatformModifier(context: context))
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { context.width = $0 }
+        .task {
+            // After the first frame, appearing elements move in.
+            await Task.yield()
+            context.settled = true
+        }
         .environment(context)
         // The interface language, not the system's, picks localized symbol
         // variants (for example `textformat` is “Aa” in English and “格式”
@@ -1501,13 +1604,17 @@ enum BernImageFit {
 /// a JPEG or HEIC with a gain map decodes to HDR (macOS 15 and iOS 18 and
 /// later), a PQ or HLG PNG keeps its range; elsewhere they are tone mapped.
 struct BernImage: View {
-    let name: String
+    /// A declared resource, or
+    var name: String? = nil
+    /// a file or http(s) URL from a `MediaSource`.
+    var url: String? = nil
     let label: String?
     let width: CGFloat?
     let height: CGFloat?
     let fit: BernImageFit
+    @State private var fetched: Picture?
 
-    struct Picture {
+    struct Picture: @unchecked Sendable {
         let image: CGImage
         let orientation: SwiftUI.Image.Orientation
         /// Width over height as shown, after the orientation.
@@ -1519,7 +1626,15 @@ struct BernImage: View {
     @MainActor static func picture(_ name: String) -> Picture? {
         if let picture = loaded[name] { return picture }
         guard let url = Bundle.main.resourceURL?.appendingPathComponent(name),
-              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let picture = decode(source) else { return nil }
+        loaded[name] = picture
+        return picture
+    }
+
+    /// The first picture of `source`, in HDR where the system can show it,
+    /// with its EXIF orientation.
+    nonisolated static func decode(_ source: CGImageSource) -> Picture? {
         var decoded: CGImage?
         // The iOS simulator decodes gain maps to HDR as black, and cannot
         // show HDR anyway; it shows the SDR picture.
@@ -1545,13 +1660,11 @@ struct BernImage: View {
         }
         let turned = (5...8).contains(exif)
         let w = CGFloat(turned ? image.height : image.width), h = CGFloat(turned ? image.width : image.height)
-        let picture = Picture(image: image, orientation: orientation, ratio: w > 0 && h > 0 ? w / h : 1)
-        loaded[name] = picture
-        return picture
+        return Picture(image: image, orientation: orientation, ratio: w > 0 && h > 0 ? w / h : 1)
     }
 
     var body: some View {
-        let picture = Self.picture(name)
+        let picture = name.flatMap(Self.picture) ?? fetched ?? url.flatMap { BernPictures.shared.cached($0) }
         let ratio = picture?.ratio ?? 1
         let shown = Group {
             if let picture {
@@ -1568,10 +1681,260 @@ struct BernImage: View {
         .allowedDynamicRange(.high)
         .frame(width: width ?? height.map { $0 * ratio }, height: height ?? width.map { $0 / ratio })
         .clipped()
+        .task(id: url) {
+            guard let url else { return }
+            fetched = await BernPictures.shared.load(url)
+        }
         if let label {
             shown.accessibilityElement().accessibilityLabel(Text(verbatim: label)).accessibilityAddTraits(.isImage)
         } else {
             shown.accessibilityHidden(true)
+        }
+    }
+}
+
+/// Pictures loaded from files and http(s) URLs, kept while the app runs,
+/// with the average color of each for fills drawn from a picture.
+@MainActor
+@Observable
+final class BernPictures {
+    static let shared = BernPictures()
+    @ObservationIgnored private var pictures: [String: BernImage.Picture] = [:]
+    @ObservationIgnored private var loading: [String: Task<BernImage.Picture?, Never>] = [:]
+    /// Average colors as 0xRRGGBB, by URL; observed, so fills follow.
+    private(set) var averages: [String: UInt32] = [:]
+
+    func cached(_ url: String) -> BernImage.Picture? { pictures[url] }
+
+    func load(_ url: String) async -> BernImage.Picture? {
+        if let picture = pictures[url] { return picture }
+        let task = loading[url] ?? Task.detached(priority: .userInitiated) { () -> BernImage.Picture? in
+            guard let location = URL(string: url) else { return nil }
+            let data: Data?
+            if location.isFileURL {
+                data = try? Data(contentsOf: location)
+            } else {
+                data = try? await URLSession.shared.data(from: location).0
+            }
+            guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            return BernImage.decode(source)
+        }
+        loading[url] = task
+        let picture = await task.value
+        loading[url] = nil
+        if let picture {
+            pictures[url] = picture
+            averages[url] = Self.average(picture.image)
+        }
+        return picture
+    }
+
+    /// The average color of `url`'s picture, loading it when needed.
+    func average(_ url: String?) -> BernColor? {
+        guard let url else { return nil }
+        if let value = averages[url] { return .fixed(light: value, dark: value) }
+        if pictures[url] == nil, loading[url] == nil {
+            Task { _ = await load(url) }
+        }
+        return nil
+    }
+
+    /// The mean of the picture drawn down to one pixel.
+    private static func average(_ image: CGImage) -> UInt32 {
+        var pixel = [UInt8](repeating: 0, count: 4)
+        guard let context = CGContext(
+            data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return 0x808080 }
+        context.interpolationQuality = .medium
+        context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return (UInt32(pixel[0]) << 16) | (UInt32(pixel[1]) << 8) | UInt32(pixel[2])
+    }
+}
+
+// MARK: - Files
+
+/// The kinds of file a control takes (`files:`): categories and `.ext`
+/// extensions, separated by spaces.
+@MainActor
+enum BernFiles {
+    /// Containers a category takes besides the system's own types, since
+    /// the system may not know some, such as Matroska.
+    private static let extensions: [String: [String]] = [/*bern:file-extensions*/]
+    private static let categories: [String: [UTType]] = [
+        "any": [.item], "video": [.movie, .video], "audio": [.audio], "picture": [.image],
+        "folder": [.folder],
+    ]
+
+    static func words(_ kinds: String) -> [String] {
+        kinds.split(separator: " ").map(String.init)
+    }
+
+    /// The content types of `kinds`, for the open panel and for drags.
+    static func types(_ kinds: String) -> [UTType] {
+        var types: [UTType] = []
+        for word in words(kinds) {
+            let named = word.hasPrefix(".") ? [String(word.dropFirst())] : extensions[word] ?? []
+            for type in (word.hasPrefix(".") ? [] : categories[word] ?? [])
+                + named.compactMap({ UTType(filenameExtension: $0) })
+            where !types.contains(type) {
+                types.append(type)
+            }
+        }
+        return types
+    }
+
+    /// Drops that also take the files the system opens with the app, and
+    /// files that wait for one.
+    private static var openers: [UUID: (kinds: String, give: @MainActor (URL) -> Void)] = [:]
+    private static var waiting: [URL] = []
+
+    static func register(_ token: UUID, kinds: String, give: @escaping @MainActor (URL) -> Void) {
+        openers[token] = (kinds, give)
+        deliver()
+    }
+
+    static func unregister(_ token: UUID) {
+        openers[token] = nil
+    }
+
+    /// Files the system opens with the app: each goes to a drop that takes
+    /// its kind. With no such drop on screen the primary window comes back
+    /// and the files wait for one; files no drop takes are left alone.
+    static func open(_ urls: [URL]) {
+        waiting += urls
+        if openers.isEmpty { bernShowPrimaryWindow() }
+        deliver()
+    }
+
+    private static func deliver() {
+        guard !openers.isEmpty else { return }
+        let urls = waiting
+        waiting = []
+        for url in urls {
+            openers.values.first { accepts(url, kinds: $0.kinds) }?.give(url)
+        }
+    }
+
+    /// Whether `url` names a file of `kinds`: by its extension, or by the
+    /// type the system knows for it.
+    static func accepts(_ url: URL, kinds: String) -> Bool {
+        let words = words(kinds)
+        if words.contains("any") { return true }
+        let folder = url.isFileURL
+            && ((try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false)
+        if folder { return words.contains("folder") }
+        let ext = url.pathExtension.lowercased()
+        if ext.isEmpty { return false }
+        if words.contains("." + ext) { return true }
+        let type = UTType(filenameExtension: ext)
+        return words.contains { word in
+            extensions[word]?.contains(ext) == true
+                || (word != "folder" && type.map { type in
+                    (categories[word] ?? []).contains { type.conforms(to: $0) }
+                } ?? false)
+        }
+    }
+}
+
+/// Content that takes a file of `kinds` dropped onto it. `over` follows
+/// whether such a file is held above it; files of other kinds are refused.
+/// With `opens`, it also takes the files the system opens with the app.
+struct BernDrop: ViewModifier {
+    let kinds: String
+    let over: Binding<Bool>?
+    var opens = false
+    let give: @MainActor (URL) -> Void
+    @State private var inside = false
+    @State private var accepted = false
+    @State private var token = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { if opens { BernFiles.register(token, kinds: kinds, give: give) } }
+            .onDisappear { BernFiles.unregister(token) }
+            .onDrop(
+                of: [.fileURL] + BernFiles.types(kinds),
+                delegate: BernDropDelegate(
+                    kinds: kinds, inside: $inside, accepted: $accepted, give: give))
+            .onChange(of: accepted) { _, accepted in
+                if over?.wrappedValue != accepted { over?.wrappedValue = accepted }
+            }
+    }
+}
+
+@MainActor
+private struct BernDropDelegate: DropDelegate {
+    let kinds: String
+    let inside: Binding<Bool>
+    let accepted: Binding<Bool>
+    let give: @MainActor (URL) -> Void
+
+    func dropEntered(info: DropInfo) {
+        inside.wrappedValue = true
+        if !BernFiles.words(kinds).contains("folder"),
+            info.hasItemsConforming(to: BernFiles.types(kinds))
+        {
+            accepted.wrappedValue = true
+            return
+        }
+        // The kind of a dragged file URL is only known from the URL.
+        guard let provider = info.itemProviders(for: [.fileURL]).first else { return }
+        let kinds = kinds
+        let inside = inside
+        let accepted = accepted
+        Self.url(of: provider) { url in
+            if inside.wrappedValue {
+                accepted.wrappedValue = url.map { BernFiles.accepts($0, kinds: kinds) } ?? false
+            }
+        }
+    }
+
+    func dropExited(info: DropInfo) {
+        inside.wrappedValue = false
+        accepted.wrappedValue = false
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: accepted.wrappedValue ? .copy : .forbidden)
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [.fileURL] + BernFiles.types(kinds))
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        let wanted = accepted.wrappedValue
+        inside.wrappedValue = false
+        accepted.wrappedValue = false
+        guard wanted else { return false }
+        let kinds = kinds
+        let give = give
+        if let provider = info.itemProviders(for: [.fileURL]).first {
+            Self.url(of: provider) { url in
+                if let url, BernFiles.accepts(url, kinds: kinds) { give(url) }
+            }
+            return true
+        }
+        // A file from another app's storage, such as Files on iOS, is
+        // opened where it is.
+        guard let provider = info.itemProviders(for: BernFiles.types(kinds)).first,
+            let type = provider.registeredTypeIdentifiers.first
+        else { return false }
+        _ = provider.loadInPlaceFileRepresentation(forTypeIdentifier: type) { url, _, _ in
+            guard let url else { return }
+            Task { @MainActor in
+                _ = url.startAccessingSecurityScopedResource()
+                give(url)
+            }
+        }
+        return true
+    }
+
+    private static func url(of provider: NSItemProvider, then: @escaping @MainActor (URL?) -> Void) {
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            Task { @MainActor in then(url) }
         }
     }
 }

@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -53,10 +55,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
-import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -305,6 +309,18 @@ class BernWindowContext(
     var pendingClose by mutableStateOf<BernPendingClose?>(null)
     /// Whether the window had no input for its `idle_after` seconds.
     var idle by mutableStateOf(false)
+    /// The window's width in dp once laid out; before that, an estimate
+    /// from the screen or the declared size.
+    var measuredWidth by mutableStateOf<Double?>(null)
+    internal var estimatedWidth = 0.0
+    /// The size of the window's width by the breakpoints of `[layouts]`:
+    /// `compact`, `medium`, `expanded` or `large`.
+    val size: String
+        get() = BernHost.layouts.sizeOf(measuredWidth ?: estimatedWidth)
+    val compact: Boolean get() = size == "compact"
+    val medium: Boolean get() = size == "medium"
+    val expanded: Boolean get() = size == "expanded"
+    val large: Boolean get() = size == "large"
     val chrome = mutableStateListOf<BernChromeEntry>()
 
     /// The window's title in the interface language.
@@ -341,6 +357,11 @@ class BernControlActions(
     val select: ((String) -> Boolean)? = null,
     val back: (() -> Boolean)? = null,
     val value: (() -> String?)? = null,
+    val focus: (() -> Unit)? = null,
+    /// Takes a file as if the user chose or dropped it.
+    val setFile: ((String) -> Unit)? = null,
+    /// The kinds of file `setFile` takes, as `files:` names them.
+    val fileKinds: String = "any",
 )
 
 class BernControlEntry(
@@ -384,6 +405,10 @@ class BernControls {
     }
 }
 
+/// Keys of the rows around a view, outermost first, as `[a][b]`: controls
+/// inside a row, also in components it places, add them to their targets.
+val LocalBernItemKeys = androidx.compose.runtime.compositionLocalOf { "" }
+
 /// Registers a mounted control for external entries while it is composed.
 @Composable
 fun BernControl(
@@ -395,7 +420,7 @@ fun BernControl(
 ) {
     val window = LocalBernWindow.current
     val token = remember { Any() }
-    val entry = BernControlEntry(target, window.id, role, label, enabled, actions)
+    val entry = BernControlEntry(target + LocalBernItemKeys.current, window.id, role, label, enabled, actions)
     SideEffect { BernHost.controls.register(token, entry) }
     DisposableEffect(token) { onDispose { BernHost.controls.remove(token) } }
 }
@@ -433,7 +458,27 @@ class BernPendingReply(
 class BernFailure(val window: String?, val code: String, val message: String)
 
 /// Window kinds of the application, generated from the window catalog.
-class BernWindowKind(val id: String, val title: String, val isSettings: Boolean)
+/// The breakpoints of `[layouts]`, in dp: below `compact` a width is
+/// compact, below `medium` (when given) medium, below `expanded` (when
+/// given) expanded, and large from there.
+class BernLayouts(val compact: Double, val medium: Double?, val expanded: Double?) {
+    fun sizeOf(width: Double): String = when {
+        width < compact -> "compact"
+        medium != null && width < medium -> "medium"
+        expanded == null || width < expanded -> "expanded"
+        else -> "large"
+    }
+}
+
+class BernWindowKind(
+    val id: String,
+    val title: String,
+    val isSettings: Boolean,
+    /// Shown over the primary window at its declared size.
+    val isDialog: Boolean = false,
+    val width: Double? = null,
+    val height: Double? = null,
+)
 
 /// The functions of the Rust runtime, in `libbern_app.so`.
 object BernNative {
@@ -524,6 +569,8 @@ object BernHost {
     private val queries = HashMap<Long, (ByteArray) -> Unit>()
     private var openedInitial = false
     val controls = BernControls()
+    /// The application's breakpoints, set before the first window shows.
+    var layouts = BernLayouts(0.0, null, null)
 
     var failure by mutableStateOf<BernFailure?>(null)
     var startupError by mutableStateOf<String?>(null)
@@ -1038,6 +1085,29 @@ object BernHost {
                 }
                 complete(request, command) {}
             }
+            20 -> { // ui.focus
+                val entry = controls.find(reader.text())
+                val focus = entry.actions.focus ?: throw unsupported(entry, "focus")
+                focus()
+                complete(request, command) {}
+            }
+            21 -> { // ui.set_file
+                val entry = controls.find(reader.text())
+                val url = reader.text()
+                val give = entry.actions.setFile ?: throw unsupported(entry, "set_file")
+                val scheme = url.substringBefore(':', "").lowercase()
+                if (scheme !in listOf("file", "content", "http", "https")) {
+                    throw BernCommandFailure("invalid_url", "`$url` is not a file:// or http(s) URL")
+                }
+                if (!BernFiles.accepts(url, entry.actions.fileKinds)) {
+                    throw BernCommandFailure(
+                        "unsupported_file",
+                        "`${entry.target}` takes ${entry.actions.fileKinds}, not `${url.substringAfterLast('/')}`",
+                    )
+                }
+                give(url)
+                complete(request, command) {}
+            }
             else -> throw BernCommandFailure("unknown_command", "unknown session command $command")
         }
     }
@@ -1132,14 +1202,23 @@ object BernResources {
 /// wallpaper where the system has them, the default scheme otherwise.
 @Composable
 fun BernTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val context = LocalContext.current
-    val colors = if (android.os.Build.VERSION.SDK_INT >= 31) {
-        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else {
-        if (dark) darkColorScheme() else lightColorScheme()
+    val system = isSystemInDarkTheme()
+    val dark = when (BernThemeState.appearance?.lowercase()) {
+        "dark" -> true
+        "light" -> false
+        else -> system
     }
-    MaterialTheme(colorScheme = colors, content = content)
+    // The status and navigation bar icons follow the chosen appearance.
+    val view = LocalView.current
+    val activity = LocalContext.current as? android.app.Activity
+    SideEffect {
+        activity?.window?.let { window ->
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = !dark
+            controller.isAppearanceLightNavigationBars = !dark
+        }
+    }
+    BernScheme(dark, content)
 }
 
 /// Shows the primary window and the windows open over it. Each window
@@ -1154,7 +1233,25 @@ fun BernVirtualHost(window: @Composable (String) -> Unit) {
             BernClosedPrimary()
         }
         for (kind in BernHost.sheets) {
-            Box(Modifier.fillMaxSize()) { window(kind) }
+            val dialog = BernHost.kinds.firstOrNull { it.id == kind && it.isDialog }
+            if (dialog != null) {
+                // A dialog window floats over the primary window at its
+                // declared size, with its title bar.
+                androidx.compose.ui.window.Dialog(
+                    onDismissRequest = { BernHost.close(kind) },
+                    properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+                ) {
+                    androidx.compose.material3.Surface(
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+                        modifier = Modifier
+                            .padding(24.dp)
+                            .width((dialog.width ?: 360.0).dp)
+                            .height(((dialog.height ?: 240.0) + 64.0).dp),
+                    ) { window(kind) }
+                }
+            } else {
+                Box(Modifier.fillMaxSize()) { window(kind) }
+            }
         }
     }
     val top = BernHost.sheets.lastOrNull()
@@ -1186,7 +1283,7 @@ fun BernWindowRoot(
     // `window.idle`: no touch, pointer or key input for `idleAfter` seconds.
     var input by remember { mutableLongStateOf(0L) }
     if (idleAfter != null) {
-        LaunchedEffect(input) {
+        LaunchedEffect(input, BernShortcuts.keys) {
             context.idle = false
             delay((idleAfter * 1000).toLong())
             context.idle = true
@@ -1219,29 +1316,34 @@ fun BernWindowRoot(
         withFrameNanos {}
         settled.value = true
     }
+    // `window.compact` and its siblings follow the window's width: the
+    // screen's, or a dialog's declared one, until the window is laid out.
+    val density = LocalDensity.current
+    val dialogWidth = BernHost.kinds.firstOrNull { it.id == context.kindID && it.isDialog }?.width
+    context.estimatedWidth = dialogWidth ?: LocalConfiguration.current.screenWidthDp.toDouble()
     CompositionLocalProvider(LocalBernWindow provides context, LocalBernSettled provides settled) {
         val chrome = context.chrome
         val title = chrome.lastOrNull { it.title != null }?.title ?: context.title
         val back = chrome.lastOrNull { it.back != null }?.back
         val sheet = context.kindID != BernHost.primary
         Scaffold(
-            modifier = if (idleAfter == null) {
+            // The width for `window.compact` and its siblings, and touches
+            // for `window.idle`. Keyboard shortcuts and keys come from the
+            // activity, which sees them whether or not a control has focus.
+            modifier = Modifier.onSizeChanged { size ->
+                context.measuredWidth = with(density) { size.width.toDp().value.toDouble() }
+            }.then(if (idleAfter == null) {
                 Modifier
             } else {
-                Modifier
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                awaitPointerEvent(PointerEventPass.Initial)
-                                input += 1
-                            }
+                Modifier.pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            awaitPointerEvent(PointerEventPass.Initial)
+                            input += 1
                         }
                     }
-                    .onPreviewKeyEvent {
-                        input += 1
-                        false
-                    }
-            },
+                }
+            }),
             topBar = {
                 if (!hidden) TopAppBar(
                     title = { Text(title, maxLines = 1) },

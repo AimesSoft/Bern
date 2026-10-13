@@ -4,9 +4,9 @@
 
 use crate::check::location;
 use bern_ir::style::{
-    BUILT_IN_MOTION, Band, COLOR_ROLES, ColorRef, ControlSize, Edge, MotionToken, PatternDef,
-    StateStyle, StyleEffect, StyleRule, StyleSheet, StyleState, TransitionDef, TransitionKind,
-    built_in_transitions,
+    AccentDef, BUILT_IN_MOTION, Band, COLOR_ROLES, ColorRef, ControlSize, Edge, MotionToken,
+    PatternDef, StateStyle, StyleEffect, StyleRule, StyleSheet, StyleState, TransitionDef,
+    TransitionKind, built_in_transitions,
 };
 use bern_ir::{SourceLocation, Srgb};
 use bern_syntax::{StyleArg, StyleItem, StyleValue};
@@ -55,6 +55,7 @@ const BASE_EFFECTS: &[&str] = &[
     "corner",
     "padding",
     "size",
+    "shadow",
 ];
 const STATE_EFFECTS: &[&str] = &[
     "background",
@@ -63,6 +64,7 @@ const STATE_EFFECTS: &[&str] = &[
     "scale",
     "offset",
     "opacity",
+    "shadow",
     "system",
     "none",
 ];
@@ -276,6 +278,28 @@ impl Lowering<'_> {
                             motion: self.motion(args, sheet),
                         })
                     }
+                    "shadow" => {
+                        let Some(radius) = positional.first().copied() else {
+                            self.error(
+                                name.span(),
+                                "write `shadow(12)` or `shadow(12, y: 4, opacity: 0.2)`",
+                            );
+                            return None;
+                        };
+                        let opacity = get("opacity").unwrap_or(0.2);
+                        if radius < 0.0 || !(0.0..=1.0).contains(&opacity) {
+                            self.error(
+                                name.span(),
+                                "a shadow has a radius of 0 or more and an opacity from 0 to 1",
+                            );
+                            return None;
+                        }
+                        Some(StyleEffect::Shadow {
+                            radius,
+                            y: get("y").unwrap_or(radius / 3.0),
+                            opacity,
+                        })
+                    }
                     other => {
                         self.error(name.span(), format!("`{other}` is not a style effect"));
                         None
@@ -305,6 +329,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
         rules: Vec::new(),
         transitions: built_in_transitions(),
         patterns: Vec::new(),
+        accents: Vec::new(),
     };
     if items.len() > 1 {
         for (file, item) in &items[1..] {
@@ -521,6 +546,45 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             None => sheet.patterns.push(pattern),
         }
     }
+    for decl in &item.accents {
+        let color = match &decl.value {
+            StyleValue::Text(hex, span) => match Srgb::parse(hex) {
+                Some(color) => Some(ColorRef::Fixed {
+                    light: color,
+                    dark: color,
+                }),
+                None => {
+                    lowering.error(*span, format!("`{hex}` is not a `#RRGGBB` color"));
+                    None
+                }
+            },
+            value @ StyleValue::Call { .. } => lowering.color(value),
+            other => {
+                lowering.error(
+                    other.span(),
+                    "an accent is `\"#RRGGBB\"` or `color(light: \"#…\", dark: \"#…\")`",
+                );
+                None
+            }
+        };
+        let Some(color) = color else { continue };
+        if matches!(color, ColorRef::Role { .. }) {
+            lowering.error(decl.value.span(), "an accent is a color, not a role");
+            continue;
+        }
+        let accent = AccentDef {
+            name: decl.name.to_string(),
+            color,
+        };
+        match sheet
+            .accents
+            .iter_mut()
+            .find(|existing| existing.name == accent.name)
+        {
+            Some(existing) => *existing = accent,
+            None => sheet.accents.push(accent),
+        }
+    }
     for rule in &item.rules {
         let component = rule.component.to_string();
         let Some((_, states)) = STYLEABLE.iter().find(|(name, _)| *name == component) else {
@@ -611,57 +675,64 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                 });
                 continue;
             }
-            let effect =
-                match name.as_str() {
-                    "corner" => lowering
-                        .number(&prop.value, "`corner`")
-                        .map(|radius| StyleEffect::Corner { radius }),
-                    "padding" => lowering
-                        .number(&prop.value, "`padding`")
-                        .map(|length| StyleEffect::Padding { length }),
-                    "size" => match prop.value.dotted().as_deref() {
-                        Some("small") => Some(StyleEffect::Size {
-                            size: ControlSize::Small,
-                        }),
-                        Some("regular") => Some(StyleEffect::Size {
-                            size: ControlSize::Regular,
-                        }),
-                        Some("large") => Some(StyleEffect::Size {
-                            size: ControlSize::Large,
-                        }),
-                        Some("extra_large") => Some(StyleEffect::Size {
-                            size: ControlSize::ExtraLarge,
-                        }),
-                        _ => {
-                            lowering.error(
-                                prop.value.span(),
-                                "`size` is small, regular, large or extra_large",
-                            );
-                            None
-                        }
-                    },
-                    "background" | "foreground" | "border" => {
-                        let call = StyleValue::Call {
-                            name: prop.name.clone(),
-                            args: vec![StyleArg {
-                                name: None,
-                                value: prop.value.clone(),
-                            }],
-                        };
-                        lowering.effect(&call, &sheet)
-                    }
-                    other => {
+            let effect = match name.as_str() {
+                "corner" => lowering
+                    .number(&prop.value, "`corner`")
+                    .map(|radius| StyleEffect::Corner { radius }),
+                "padding" => lowering
+                    .number(&prop.value, "`padding`")
+                    .map(|length| StyleEffect::Padding { length }),
+                "size" => match prop.value.dotted().as_deref() {
+                    Some("small") => Some(StyleEffect::Size {
+                        size: ControlSize::Small,
+                    }),
+                    Some("regular") => Some(StyleEffect::Size {
+                        size: ControlSize::Regular,
+                    }),
+                    Some("large") => Some(StyleEffect::Size {
+                        size: ControlSize::Large,
+                    }),
+                    Some("extra_large") => Some(StyleEffect::Size {
+                        size: ControlSize::ExtraLarge,
+                    }),
+                    _ => {
                         lowering.error(
+                            prop.value.span(),
+                            "`size` is small, regular, large or extra_large",
+                        );
+                        None
+                    }
+                },
+                // `shadow: 12` at rest, or `shadow: shadow(12, y: 4)`.
+                "shadow" if matches!(&prop.value, StyleValue::Call { name, .. } if name == "shadow") => {
+                    lowering.effect(&prop.value, &sheet)
+                }
+                "background" | "foreground" | "border" | "shadow" => {
+                    let call = StyleValue::Call {
+                        name: prop.name.clone(),
+                        args: vec![StyleArg {
+                            name: None,
+                            value: prop.value.clone(),
+                        }],
+                    };
+                    lowering.effect(&call, &sheet)
+                }
+                other => {
+                    lowering.error(
                         prop.name.span(),
                         format!(
                             "`{other}` is not a style property; use {}, a state ({}) or `settle`",
                             BASE_EFFECTS.join(", "),
-                            states.iter().map(|state| state.name()).collect::<Vec<_>>().join(", ")
+                            states
+                                .iter()
+                                .map(|state| state.name())
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ),
                     );
-                        None
-                    }
-                };
+                    None
+                }
+            };
             lowered.base.extend(effect);
         }
         sheet.rules.push(lowered);

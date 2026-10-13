@@ -248,6 +248,71 @@ pub fn dispatch(ctx: &Ctx, command: usize, args: Vec<Value>, done: Option<Done>)
     });
 }
 
+/// A drop area that takes files the system hands the application: its
+/// token, the kinds it takes and what it does with a file.
+type Opener = (u64, &'static str, crate::features::Give);
+
+thread_local! {
+    /// Drop areas that take the files the system hands the application:
+    /// the kinds each takes and what it does with a file.
+    static OPENERS: RefCell<Vec<Opener>> = const { RefCell::new(Vec::new()) };
+    /// Files that arrived while no drop area took them.
+    static WAITING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static NEXT_OPENER: StdCell<u64> = const { StdCell::new(1) };
+}
+
+/// A drop area with `opens: true` takes the files the system hands the
+/// application while the current scope lasts; files that waited for one
+/// arrive now.
+pub(crate) fn add_opener(kinds: &'static str, give: Rc<dyn Fn(String)>) {
+    let token = NEXT_OPENER.with(|next| {
+        let token = next.get();
+        next.set(token + 1);
+        token
+    });
+    OPENERS.with(|openers| openers.borrow_mut().push((token, kinds, Rc::clone(&give))));
+    crate::reactive::on_cleanup(move || {
+        OPENERS.with(|openers| openers.borrow_mut().retain(|(id, _, _)| *id != token));
+    });
+    let waiting: Vec<String> = WAITING.with(|waiting| {
+        let mut waiting = waiting.borrow_mut();
+        let (taken, kept) = waiting
+            .drain(..)
+            .partition(|url| crate::features::accepts(url, kinds));
+        *waiting = kept;
+        taken
+    });
+    if !waiting.is_empty() {
+        glib::idle_add_local_once(move || {
+            for url in waiting {
+                give(url);
+            }
+        });
+    }
+}
+
+/// Files the system hands the application, as from a file manager's “Open
+/// With”: the newest drop area that takes the kind gets each; the primary
+/// window comes forward, and files wait for a drop area to appear.
+fn open_files(files: &[gio::File]) {
+    windows::reopen_primary();
+    for file in files {
+        let url = file.uri().to_string();
+        let taker = OPENERS.with(|openers| {
+            openers
+                .borrow()
+                .iter()
+                .rev()
+                .find(|(_, kinds, _)| crate::features::accepts(&url, kinds))
+                .map(|(_, _, give)| Rc::clone(give))
+        });
+        match taker {
+            Some(give) => give(url),
+            None => WAITING.with(|waiting| waiting.borrow_mut().push(url)),
+        }
+    }
+}
+
 /// The directory of the declared resources, next to the executable.
 pub(crate) fn resources_dir() -> String {
     std::env::current_exe()
@@ -346,6 +411,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     });
     let application = adw::Application::builder()
         .application_id(shared.def.bundle_id)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     let _ = shared.application.set(application.clone());
     let start = RefCell::new(Some(start));
@@ -355,6 +421,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     application.connect_startup(move |application| {
         snapshot::apply_appearance();
         install_icon(host().def.bundle_id);
+        crate::style::install(host().def.styles);
         if let Some((red, green, blue)) = host().def.brand_seed {
             let provider = gtk::CssProvider::new();
             provider.load_from_string(&brand_css(red, green, blue));
@@ -394,6 +461,12 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
             windows::open_initial();
         }
     });
+    let opened_files = Rc::clone(&failed);
+    application.connect_open(move |_, files, _| {
+        if !opened_files.get() {
+            open_files(files);
+        }
+    });
     application.connect_shutdown(|_| {
         let host = host();
         media::detach_executor();
@@ -403,5 +476,11 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
             unsafe { bern_ffi::bern_app_stop(app) };
         }
     });
-    application.run_with_args::<&str>(&[])
+    // Files given on the command line, as a desktop entry's `%U` passes
+    // them, open in the running instance; GTK's own options are not taken.
+    let args: Vec<String> = std::env::args()
+        .take(1)
+        .chain(std::env::args().skip(1).filter(|arg| !arg.starts_with('-')))
+        .collect();
+    application.run_with_args(&args)
 }

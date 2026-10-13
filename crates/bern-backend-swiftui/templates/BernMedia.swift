@@ -512,13 +512,39 @@ final class BernPlayerOwner: @unchecked Sendable {
     }
 }
 
+/// Round a presenter's layer: the picture is a layer of its own, which a
+/// SwiftUI clip does not reach. A change of radius moves with `motion`.
+@MainActor
+func bernRoundCorners(_ layer: CALayer?, _ radius: Double, motion: BernMotion?) {
+    guard let layer else { return }
+    layer.cornerCurve = .continuous
+    layer.masksToBounds = true
+    let from = Double(layer.presentation()?.cornerRadius ?? layer.cornerRadius)
+    guard abs(from - radius) > 0.01 else { return }
+    if let motion {
+        let spring = CASpringAnimation(keyPath: "cornerRadius")
+        spring.mass = 1
+        spring.stiffness = pow(2 * Double.pi / motion.period, 2)
+        spring.damping = 4 * Double.pi * motion.damping / motion.period
+        spring.fromValue = from
+        spring.toValue = radius
+        spring.duration = spring.settlingDuration
+        layer.add(spring, forKey: "bernCorner")
+    }
+    layer.cornerRadius = radius
+}
+
 struct BernVideo: View {
     let target: String
     let label: String?
     let binding: BernVideoBinding
     let controls: Bool
     let fit: BernVideoFit
+    /// Rounds the picture; a change moves with `cornerMotion`.
+    var corner: Double = 0
+    var cornerMotion: BernMotion? = nil
     @Environment(BernWindowContext.self) private var window
+    @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var owner = BernPlayerOwner()
 
     private var playerID: String {
@@ -540,11 +566,15 @@ struct BernVideo: View {
         VStack(spacing: 6) {
             ZStack {
                 if state != nil {
-                    BernVideoSurface(playerID: playerID, window: window.id, gravity: fit.gravity)
-                        .opacity(BernVideo.showsVideo(state) ? 1 : 0)
+                    BernVideoSurface(
+                        playerID: playerID, window: window.id, gravity: fit.gravity, corner: corner,
+                        cornerMotion: reduce || bernForcedReduceMotion ? nil : cornerMotion
+                    )
+                    .opacity(BernVideo.showsVideo(state) ? 1 : 0)
                 }
                 BernVideoStatus(state: state)
             }
+            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
             .aspectRatio(16.0 / 9.0, contentMode: .fit)
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .ignore)

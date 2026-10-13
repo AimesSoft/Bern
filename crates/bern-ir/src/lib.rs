@@ -83,6 +83,13 @@ impl Application {
 pub struct LayoutConfig {
     /// Available width, in logical units, below which `compact` applies.
     pub compact_below: f64,
+    /// Below which `medium` applies; without it there is no `medium`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub medium_below: Option<f64>,
+    /// Below which `expanded` applies, and `large` from it; without it
+    /// there is no `large`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded_below: Option<f64>,
 }
 
 impl LayoutConfig {
@@ -90,8 +97,21 @@ impl LayoutConfig {
     pub fn size(&self, width: f64) -> LayoutSize {
         if width < self.compact_below {
             LayoutSize::Compact
-        } else {
+        } else if self.medium_below.is_some_and(|below| width < below) {
+            LayoutSize::Medium
+        } else if self.expanded_below.is_none_or(|below| width < below) {
             LayoutSize::Expanded
+        } else {
+            LayoutSize::Large
+        }
+    }
+
+    /// Whether the breakpoints give `size` a range of widths.
+    pub fn has(&self, size: LayoutSize) -> bool {
+        match size {
+            LayoutSize::Compact | LayoutSize::Expanded => true,
+            LayoutSize::Medium => self.medium_below.is_some(),
+            LayoutSize::Large => self.expanded_below.is_some(),
         }
     }
 }
@@ -101,17 +121,42 @@ impl LayoutConfig {
 #[serde(rename_all = "snake_case")]
 pub enum LayoutSize {
     Compact,
+    Medium,
     Expanded,
+    Large,
 }
 
 impl LayoutSize {
-    pub const ALL: [LayoutSize; 2] = [LayoutSize::Compact, LayoutSize::Expanded];
+    /// Every size, narrowest first.
+    pub const ALL: [LayoutSize; 4] = [
+        LayoutSize::Compact,
+        LayoutSize::Medium,
+        LayoutSize::Expanded,
+        LayoutSize::Large,
+    ];
+
+    /// Sizes every `Adaptive` gives a layout of its own, and feature
+    /// contracts are checked in; the others borrow one.
+    pub const REQUIRED: [LayoutSize; 2] = [LayoutSize::Compact, LayoutSize::Expanded];
 
     pub fn name(self) -> &'static str {
         match self {
             LayoutSize::Compact => "compact",
+            LayoutSize::Medium => "medium",
             LayoutSize::Expanded => "expanded",
+            LayoutSize::Large => "large",
         }
+    }
+
+    /// The size whose layout this one shows when it has none of its own:
+    /// the next larger declared size, else the next smaller.
+    pub fn shown(self, declared: &[LayoutSize]) -> Option<LayoutSize> {
+        if declared.contains(&self) {
+            return Some(self);
+        }
+        let larger = Self::ALL.iter().copied().filter(|size| *size > self);
+        let smaller = Self::ALL.iter().rev().copied().filter(|size| *size < self);
+        larger.chain(smaller).find(|size| declared.contains(size))
     }
 
     pub fn parse(name: &str) -> Option<Self> {
@@ -379,6 +424,9 @@ pub enum WindowRole {
     Standard,
     /// Application preferences window.
     Settings,
+    /// A modal window over the primary window, such as a first-run flow:
+    /// a sheet where the platform has them.
+    Dialog,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -438,6 +486,14 @@ pub struct WindowCatalog {
     pub handle: String,
     pub primary: String,
     pub windows: Vec<WindowDef>,
+    /// The accent every window shows: an enum whose variants name accents
+    /// of `style!`.
+    #[serde(default)]
+    pub accent: Option<Expr>,
+    /// The appearance every window shows: an enum of `System`, `Light`
+    /// and `Dark`.
+    #[serde(default)]
+    pub appearance: Option<Expr>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -540,6 +596,12 @@ pub enum ExprKind {
         op: BinaryOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+    },
+    /// One of two values of the expression's type.
+    If {
+        cond: Box<Expr>,
+        then: Box<Expr>,
+        otherwise: Box<Expr>,
     },
 }
 
@@ -706,6 +768,18 @@ pub enum Action {
         op: MediaOp,
         args: Vec<Expr>,
     },
+    /// A change of a session draft: interface state such as an open panel
+    /// or a step of a flow, not engine state.
+    Session { field: FieldRef, op: SessionOp },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionOp {
+    /// `draft.field.set(value)`.
+    Set { value: Expr },
+    /// `draft.field.toggle()` on a `bool`.
+    Toggle,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -909,6 +983,15 @@ impl Expr {
             ExprKind::Binary { lhs, rhs, .. } => {
                 lhs.walk(visit);
                 rhs.walk(visit);
+            }
+            ExprKind::If {
+                cond,
+                then,
+                otherwise,
+            } => {
+                cond.walk(visit);
+                then.walk(visit);
+                otherwise.walk(visit);
             }
         }
     }

@@ -83,6 +83,60 @@ pub struct TargetDescriptor {
     /// Whether items of `Sidebar`, `Tabs` and `Toolbar` may come and go
     /// with `if`, `if let`, `match` and `ForEach`.
     pub dynamic_items: bool,
+    /// Further parts of the IR the target builds, named in [`feature`];
+    /// using one a target does not list fails the build or, where a plain
+    /// form is shown instead, warns.
+    pub features: &'static [&'static str],
+}
+
+/// Names of IR features a target lists in [`TargetDescriptor::features`].
+pub mod feature {
+    /// `Button` with a child that it shows instead of its label.
+    pub const BUTTON_CONTENT: &str = "button_content";
+    /// `reveal: hover`: content shown while the pointer is over its
+    /// container; without it the content always shows.
+    pub const REVEAL: &str = "reveal";
+    /// `Search` in a `Toolbar`.
+    pub const TOOLBAR_SEARCH: &str = "toolbar_search";
+    /// `Search` with children: results shown below the field.
+    pub const SEARCH_RESULTS: &str = "search_results";
+    /// Actions that change a session draft: `draft.panel.set(true)`.
+    pub const SESSION_ACTIONS: &str = "session_actions";
+    /// `Switch(style: button)`, and a `Switch` in a `Toolbar`.
+    pub const TOGGLE_BUTTON: &str = "toggle_button";
+    /// `Window(role: dialog)` shown modally over the primary window;
+    /// without it a dialog is a window of its own.
+    pub const DIALOG_WINDOWS: &str = "dialog_windows";
+    /// Lengths bound to expressions, such as `padding: if window.idle { 0 }
+    /// else { 24 }`, sizes of `Column`, `Row` and `Stack`, and the
+    /// `corner` of a `Video`.
+    pub const BOUND_LENGTHS: &str = "bound_lengths";
+    /// `appearance: dark` or `light` on a part of the interface; without it
+    /// the part follows the window's appearance.
+    pub const APPEARANCE: &str = "appearance";
+    /// Keyboard `shortcut`s of buttons, menu items, switches and search
+    /// fields; without them the controls work from the pointer only.
+    pub const SHORTCUTS: &str = "shortcuts";
+    /// `WindowSet(accent:, appearance:)` chosen at run time; without it the
+    /// windows keep the system's accent and appearance.
+    pub const RUNTIME_THEME: &str = "runtime_theme";
+    /// `Image(source:)` from a `MediaSource`: a file or an http(s) URL.
+    pub const RUNTIME_IMAGES: &str = "runtime_images";
+    /// `Shape(fill_from:)`, the average color of a picture, and `fade`.
+    pub const PICTURE_FILLS: &str = "picture_fills";
+    /// `pick:` on `Button`, `IconButton` and `MenuItem`: the system's open
+    /// panel asks for a file before the action runs.
+    pub const FILE_PICK: &str = "file_pick";
+    /// `ScrollView(snap:, position:)`: scrolling comes to rest on an item,
+    /// and a session field follows and sets the item it stands at.
+    pub const SCROLL_SNAP: &str = "scroll_snap";
+    /// `Rail`: elements placed at fractions of a strip's length.
+    pub const RAILS: &str = "rails";
+    /// `PopoverButton`: a button that shows its children in a popover.
+    pub const POPOVER_BUTTON: &str = "popover_button";
+    /// The `medium` and `large` layout sizes and `window.compact` and its
+    /// siblings in expressions.
+    pub const SIZE_CLASSES: &str = "size_classes";
 }
 
 /// The style effects a target shows for one control kind: outside any
@@ -744,6 +798,320 @@ fn has_dynamic_items(nodes: &[bern_ir::Node]) -> bool {
     })
 }
 
+/// The first element of the application `found` picks.
+fn first_element(
+    app: &Application,
+    found: impl Fn(&bern_ir::Element) -> bool,
+) -> Option<&bern_ir::Element> {
+    let mut first = None;
+    for component in &app.components {
+        component.body.walk(&mut |node| {
+            if let bern_ir::Node::Element(element) = node
+                && first.is_none()
+                && found(element)
+            {
+                first = Some(element);
+            }
+        });
+    }
+    first
+}
+
+/// Features the application uses that the target does not list.
+/// Whether an expression in `node` (a condition, or a prop of an element)
+/// reads one of the window's size fields.
+fn reads_window_size(node: &bern_ir::Node) -> bool {
+    let mut found = false;
+    let mut check = |expr: &bern_ir::Expr| {
+        expr.walk(&mut |part| {
+            if let bern_ir::ExprKind::Binding {
+                binding: bern_ir::Binding::Window { field },
+            } = &part.kind
+                && field != "idle"
+            {
+                found = true;
+            }
+        });
+    };
+    match node {
+        bern_ir::Node::Element(element) => {
+            for prop in element.props.values() {
+                if let bern_ir::Prop::Expr { expr } = prop {
+                    check(expr);
+                }
+            }
+        }
+        bern_ir::Node::If(node) => {
+            for (condition, _) in &node.branches {
+                check(condition);
+            }
+        }
+        _ => {}
+    }
+    found
+}
+
+fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnostic> {
+    let mut diagnostics = Vec::new();
+    let lacks = |name: &str| !descriptor.features.contains(&name);
+    if lacks(feature::RAILS)
+        && let Some(rail) = first_element(app, |element| element.kind == "Rail")
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot place elements on a `Rail`",
+                descriptor.id
+            ))
+            .at(rail.source.clone()),
+        );
+    }
+    if lacks(feature::POPOVER_BUTTON)
+        && let Some(button) = first_element(app, |element| element.kind == "PopoverButton")
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot build a `PopoverButton`",
+                descriptor.id
+            ))
+            .at(button.source.clone()),
+        );
+    }
+    if lacks(feature::SIZE_CLASSES) {
+        let layout = first_element(app, |element| {
+            element.kind == "Layout"
+                && matches!(element.keyword("size"), Some("medium") | Some("large"))
+        });
+        if let Some(layout) = layout {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "target `{}` has only the `compact` and `expanded` layout sizes",
+                    descriptor.id
+                ))
+                .at(layout.source.clone()),
+            );
+        }
+        let mut reading = false;
+        for component in &app.components {
+            component
+                .body
+                .walk(&mut |node| reading |= reads_window_size(node));
+        }
+        for window in &app.windows.windows {
+            window
+                .content
+                .walk(&mut |node| reading |= reads_window_size(node));
+        }
+        if reading {
+            diagnostics.push(Diagnostic::error(format!(
+                "target `{}` cannot read the window's size with `window.compact`, `window.medium`, `window.expanded` or `window.large`",
+                descriptor.id
+            )));
+        }
+    }
+    if lacks(feature::BUTTON_CONTENT)
+        && let Some(button) = first_element(app, |element| {
+            element.kind == "Button" && !element.children.is_empty()
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot build a `Button` that shows content instead of its label",
+                descriptor.id
+            ))
+            .at(button.source.clone()),
+        );
+    }
+    if lacks(feature::TOOLBAR_SEARCH)
+        && let Some(toolbar) = first_element(app, |element| {
+            element.kind == "Toolbar"
+                && element.children.iter().any(
+                    |child| matches!(child, bern_ir::Node::Element(search) if search.kind == "Search"),
+                )
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot build a `Search` in a `Toolbar`",
+                descriptor.id
+            ))
+            .at(toolbar.source.clone()),
+        );
+    }
+    if lacks(feature::SEARCH_RESULTS)
+        && let Some(search) = first_element(app, |element| {
+            element.kind == "Search" && !element.children.is_empty()
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot show results below a `Search`",
+                descriptor.id
+            ))
+            .at(search.source.clone()),
+        );
+    }
+    if lacks(feature::SESSION_ACTIONS)
+        && let Some(element) = first_element(app, |element| {
+            matches!(element.action, Some(bern_ir::Action::Session { .. }))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot build actions that change session drafts",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::TOGGLE_BUTTON)
+        && let Some(element) = first_element(app, |element| {
+            (element.kind == "Switch" && element.keyword("style") == Some("button"))
+                || (element.kind == "Toolbar"
+                    && element.children.iter().any(
+                        |child| matches!(child, bern_ir::Node::Element(switch) if switch.kind == "Switch"),
+                    ))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot build a `Switch` as a toggle button or in a `Toolbar`",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::DIALOG_WINDOWS)
+        && let Some(window) = app
+            .windows
+            .windows
+            .iter()
+            .find(|window| window.role == bern_ir::WindowRole::Dialog)
+    {
+        diagnostics.push(Diagnostic::warning(format!(
+            "target `{}` shows dialog window `{}` as a window of its own, not over the primary window",
+            descriptor.id, window.id
+        )));
+    }
+    if lacks(feature::BOUND_LENGTHS)
+        && let Some(element) = first_element(app, |element| {
+            let spec = bern_ir::spec::component(&element.kind);
+            element.props.iter().any(|(name, prop)| {
+                (matches!(prop, bern_ir::Prop::Expr { .. })
+                    && spec
+                        .and_then(|spec| spec.prop(name))
+                        .is_some_and(|prop| matches!(prop.kind, bern_ir::spec::PropKind::Length)))
+                    || (element.kind == "Video" && name == "corner")
+                    || (matches!(element.kind.as_str(), "Column" | "Row" | "Stack")
+                        && matches!(name.as_str(), "width" | "height"))
+            })
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot build lengths that follow state, sizes of `Column`, `Row` and `Stack`, nor round a `Video`",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::APPEARANCE)
+        && let Some(element) =
+            first_element(app, |element| element.props.contains_key("appearance"))
+    {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` shows `appearance` parts in the window's own appearance",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::SHORTCUTS)
+        && let Some(element) = first_element(app, |element| element.props.contains_key("shortcut"))
+    {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` ignores keyboard `shortcut`s",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::RUNTIME_THEME)
+        && (app.windows.accent.is_some() || app.windows.appearance.is_some())
+    {
+        diagnostics.push(Diagnostic::warning(format!(
+            "target `{}` keeps the system's accent and appearance; `accent` and `appearance` of the `WindowSet` have no effect there",
+            descriptor.id
+        )));
+    }
+    if lacks(feature::RUNTIME_IMAGES)
+        && let Some(image) = first_element(app, |element| {
+            element.kind == "Image"
+                && matches!(element.prop("source"), Some(bern_ir::Prop::Expr { .. }))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot show pictures from a `MediaSource`, only declared resources",
+                descriptor.id
+            ))
+            .at(image.source.clone()),
+        );
+    }
+    if lacks(feature::FILE_PICK)
+        && let Some(button) = first_element(app, |element| element.props.contains_key("pick"))
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot ask for a file with `pick:`",
+                descriptor.id
+            ))
+            .at(button.source.clone()),
+        );
+    }
+    if lacks(feature::SCROLL_SNAP)
+        && let Some(scroll) = first_element(app, |element| {
+            element.kind == "ScrollView"
+                && (element.props.contains_key("snap") || element.props.contains_key("position"))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot snap a scroll view to its items or follow its `position`",
+                descriptor.id
+            ))
+            .at(scroll.source.clone()),
+        );
+    }
+    if lacks(feature::PICTURE_FILLS)
+        && let Some(shape) = first_element(app, |element| {
+            element.kind == "Shape"
+                && (element.props.contains_key("fill_from") || element.props.contains_key("fade"))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot fill a shape from a picture or fade it",
+                descriptor.id
+            ))
+            .at(shape.source.clone()),
+        );
+    }
+    if lacks(feature::REVEAL)
+        && let Some(element) = first_element(app, |element| element.props.contains_key("reveal"))
+    {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` shows content with `reveal: hover` all the time",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    diagnostics
+}
+
 /// Check the parts of the IR every target must agree on: IR version,
 /// supported components and window presentation requirements.
 pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
@@ -778,6 +1146,8 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
             if let bern_ir::Node::Element(element) = node {
                 for prop in bern_ir::spec::MOTION_PROPS {
                     if prop.name != "hero_key"
+                        && prop.name != "reveal"
+                        && prop.name != "appearance"
                         && element.props.contains_key(prop.name)
                         && !descriptor.motion.contains(&prop.name)
                     {
@@ -810,6 +1180,7 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
             );
         }
     }
+    diagnostics.extend(check_features(&descriptor, app));
     if !descriptor.text_marks {
         let mut marked = false;
         for component in &app.components {
@@ -843,10 +1214,28 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
         }
     }
     for prop in still {
-        diagnostics.push(Diagnostic::warning(format!(
-            "target `{}` shows `{prop}` without motion: the change happens at once",
-            descriptor.id
-        )));
+        let message = if prop == "stagger" {
+            format!(
+                "target `{}` does not stagger: children appear together",
+                descriptor.id
+            )
+        } else if prop == "nudge" {
+            format!(
+                "target `{}` does not nudge: the element stays still",
+                descriptor.id
+            )
+        } else if prop.starts_with("scroll_") {
+            format!(
+                "target `{}` does not follow scrolling with `{prop}`: items keep their look",
+                descriptor.id
+            )
+        } else {
+            format!(
+                "target `{}` shows `{prop}` without motion: the change happens at once",
+                descriptor.id
+            )
+        };
+        diagnostics.push(Diagnostic::warning(message));
     }
     if app.uses_media() {
         let mut video = None;
@@ -991,6 +1380,7 @@ mod tests {
                 window_chrome: false,
                 text_marks: false,
                 dynamic_items: false,
+                features: &[],
                 id: "fake-macos",
                 ui: "swiftui",
                 platforms: &["macos"],

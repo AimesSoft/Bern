@@ -1,4 +1,4 @@
-// Bern runtime for Windows, XAML part 1 of 4: contexts, parents, the
+// Bern runtime for Windows, XAML part 1 of 7: contexts, parents, the
 // control registry, the flexible panel, styles and icons. Included once
 // per front end inside a namespace that defines `xaml` (Microsoft::UI::Xaml
 // for WinUI 3 or Windows::UI::Xaml for XAML Islands) and `kWinUI`.
@@ -49,12 +49,24 @@ struct WindowDef {
     std::vector<int> sessions;
     Build render;
     std::function<CloseCheck(Ctx const&)> close;
+    /// `role: dialog`: shown modally over the primary window.
+    bool dialog = false;
+    /// `chrome: unified`: content under the title bar.
+    bool unified = false;
+    std::optional<double> idleAfter;
+    std::function<bool(Ctx const&)> immersive;
+    /// `WindowSet(accent:)`: an index into the accents of `style!`.
+    std::function<int(Ctx const&)> accent;
+    /// `WindowSet(appearance:)`: "light", "dark" or "" for the system's.
+    std::function<char const*(Ctx const&)> appearance;
 };
 
 /// Everything the runtime needs to know about a generated application.
 struct AppDef {
     Catalog catalog;
     std::vector<WindowDef> windows;
+    /// The accents of `style!`, by index: light and dark sRGB.
+    std::vector<std::pair<uint32_t, uint32_t>> accents;
 };
 
 inline AppDef const* app = nullptr;
@@ -72,15 +84,47 @@ struct LocalVar {
 /// component name for control targets, the row key inside lists, local
 /// variables, the page whose header shows titles, back and tools, and the
 /// enclosing navigation.
+namespace B {
+struct SidebarRegistry;
+struct TabsRegistry;
+struct StaggerClock;
+struct ScrollInfo;
+struct RailPanel;
+}
+
+/// The keys of the repeated rows a control is in, outermost first.
+struct RowKeys {
+    std::function<std::string()> key;
+    std::shared_ptr<RowKeys const> outer;
+};
+
+/// Where elements on a `Rail` go: the rail's panel, along which axis, and
+/// which point of each sits at its fraction.
+struct RailInfo {
+    bool vertical = false;
+    std::string anchor = "center";
+    B::RailPanel* panel = nullptr;
+    controls::Panel element{nullptr};
+};
+
 struct Ctx {
     Win* win = nullptr;
     std::string comp;
-    std::shared_ptr<std::function<std::string()> const> key;
+    std::shared_ptr<RowKeys const> keys;
     std::shared_ptr<LocalVar const> locals;
     std::shared_ptr<Page> page;
     bool toolbar = false;
     std::optional<Field> nav;
     std::optional<Cell<bool>> shown;
+    /// `appearance:` of the part this content is in, for its popups.
+    std::string appearance;
+    std::shared_ptr<B::SidebarRegistry> sidebar;
+    std::shared_ptr<B::TabsRegistry> tabs;
+    std::shared_ptr<RailInfo const> rail;
+    /// The stagger of the container being built, for its direct children.
+    std::shared_ptr<B::StaggerClock> clock;
+    /// The scroll view this content is in.
+    std::shared_ptr<B::ScrollInfo> scroll;
 
     /// Engine state field, recording a dependency.
     Value Engine(int field) const { return Host::EngineValue(field); }
@@ -103,7 +147,6 @@ struct Ctx {
             next = std::make_shared<LocalVar const>(LocalVar{name, [parent, get] { return get(parent); }, next});
         auto child = *this;
         child.comp = std::move(component);
-        child.key = nullptr;
         child.locals = next;
         return child;
     }
@@ -115,7 +158,7 @@ struct Ctx {
     }
     Ctx WithKey(std::function<std::string()> rowKey) const {
         auto child = *this;
-        child.key = std::make_shared<std::function<std::string()> const>(std::move(rowKey));
+        child.keys = std::make_shared<RowKeys const>(RowKeys{std::move(rowKey), keys});
         return child;
     }
     Ctx WithPage(std::shared_ptr<Page> header) const { auto child = *this; child.page = std::move(header); return child; }
@@ -127,18 +170,109 @@ struct Ctx {
     /// is not.
     bool Shown() const { return shown ? shown->Get() : true; }
 
-    /// The control target of `id`: `component.id`, with the row key inside
-    /// lists.
+    /// The control target of `id`: `component.id`, with the key of every
+    /// repeated row it is in, outermost first, through components too.
     std::string Target(std::string_view id) const {
+        std::vector<std::string> rows;
+        for (auto row = keys.get(); row; row = row->outer.get()) rows.push_back(row->key());
         auto target = comp + "." + std::string(id);
-        if (key) target += "[" + (*key)() + "]";
+        for (auto row = rows.rbegin(); row != rows.rend(); ++row) target += "[" + *row + "]";
         return target;
     }
+
+    /// `window.idle`, `window.compact` and the window's other sizes.
+    Value WindowFlag(std::string_view name) const;
 
     Value Read(Field field) const;
     Value Peek(Field field) const;
     bool Write(Field field, Value const& value) const;
 };
+
+// ---------------------------------------------------------------------------
+// What `style!` declares, as the generated tables describe it
+
+namespace B {
+
+/// A spring of `style!`: undamped period in seconds and damping ratio.
+struct Motion {
+    double period = 0.45;
+    double damping = 1.0;
+};
+
+/// A color: a semantic role such as `accent`, or a pair of sRGB colors for
+/// the light and dark appearance. Neither is a gap of a pattern.
+struct Paint {
+    char const* role = nullptr;
+    uint32_t light = 0, dark = 0;
+    bool fixed = false;
+    Paint() = default;
+    Paint(char const* name) : role(name) {}
+    Paint(std::nullptr_t, uint32_t lightColor, uint32_t darkColor) : light(lightColor), dark(darkColor), fixed(true) {}
+    bool Given() const { return role || fixed; }
+};
+
+/// How an element appears or disappears.
+struct Transition {
+    enum Kind { Fade, Pop, Slide };
+    Kind kind = Fade;
+    double from = 0.8;
+    char const* edge = "bottom";
+    double distance = 16;
+    Motion const* motion = nullptr;
+};
+
+/// A band of a pattern: `width` units of `color` at `opacity`, or a gap.
+struct Band {
+    Paint color;
+    double width = 0;
+    double opacity = 1;
+};
+
+struct PatternDef {
+    std::vector<Band> bands;
+    bool twill = false;
+};
+
+/// The colors and transforms of one state of a styled control.
+struct Look {
+    std::optional<Paint> background, foreground, border, fill, indicator;
+    std::optional<double> borderWidth, indicatorWidth;
+    char const* indicatorEdge = nullptr;
+    std::optional<std::array<double, 3>> shadow;
+    std::optional<double> scaleX, scaleY, offsetX, offsetY, opacity;
+    Motion const* motion = nullptr;
+    bool system = false, quiet = false;
+};
+
+/// A control kind's (and variant's) style: the base look, each state's,
+/// the corner, padding and size, and the motion back to rest.
+struct StyleDef {
+    Look base;
+    std::optional<Look> hover, pressed, selected, focus, disabled;
+    std::optional<double> corner, padding;
+    char const* size = nullptr;
+    /// Whether the style draws the control's colors instead of the
+    /// platform's.
+    bool draws = false;
+    Motion const* settle = nullptr;
+};
+
+/// A length: a number, or an expression it follows.
+struct Len {
+    std::optional<double> fixed;
+    Get bound;
+    Len() = default;
+    explicit Len(double value) : fixed(value) {}
+    explicit Len(Get getter) : bound(std::move(getter)) {}
+    bool Given() const { return fixed.has_value() || static_cast<bool>(bound); }
+    double Now(Ctx const& ctx) const;
+};
+
+/// Children of a reflowing panel slide from where they were to where
+/// layout puts them now (in the motion part).
+inline void Reflow(xaml::UIElement const& child, float dx, float dy, Motion const* motion);
+
+}
 
 // ---------------------------------------------------------------------------
 // Pages
@@ -153,6 +287,8 @@ struct Page : std::enable_shared_from_this<Page> {
     int64_t next = 1;
     controls::StackPanel tools;
     bern::Version version;
+    /// The window, whose immersive state hides the header.
+    Win* win = nullptr;
 
     Page() {
         tools.Orientation(controls::Orientation::Horizontal);
@@ -226,23 +362,123 @@ inline winrt::hstring RoleOf(xaml::UIElement const& element) {
 inline void SetRole(xaml::FrameworkElement const& element, wchar_t const* role) { element.Tag(winrt::box_value(role)); }
 inline void MarkFill(xaml::FrameworkElement const& element) { SetRole(element, L"bern-fill"); }
 
-/// Whether `element` takes free height in a column.
+/// The element a wrapper (`bern-wrap`, made for motion, placement or
+/// styles) holds, or the element itself.
+inline xaml::UIElement Unwrapped(xaml::UIElement element) {
+    while (element && RoleOf(element) == L"bern-wrap") {
+        auto children = element.as<controls::Panel>().Children();
+        if (children.Size() == 0) break;
+        element = children.GetAt(children.Size() - 1);
+    }
+    return element;
+}
+
+/// A wrapper around `inner`: one cell that takes the inner element's size
+/// and its role in rows and columns.
+inline controls::Grid Wrap(xaml::UIElement const& inner) {
+    controls::Grid wrapper;
+    SetRole(wrapper, L"bern-wrap");
+    if (auto framework = inner.try_as<xaml::FrameworkElement>()) {
+        wrapper.HorizontalAlignment(framework.HorizontalAlignment());
+        wrapper.VerticalAlignment(framework.VerticalAlignment());
+    }
+    wrapper.Children().Append(inner);
+    return wrapper;
+}
+
+/// The role of an element that holds `inner` alone, such as a button with
+/// content: it fills the way the inner element does.
+inline void Mirror(xaml::FrameworkElement const& holder, xaml::UIElement const& inner);
+
+/// Whether `element` takes free height in a column: what fills, and rows
+/// and columns holding something that does (a spacer fills a row only
+/// along it).
 inline bool FillsColumn(xaml::UIElement const& element) {
+    if (RoleOf(element) == L"bern-wrap") return FillsColumn(Unwrapped(element));
     auto role = RoleOf(element);
-    if (role == L"bern-fill" || role == L"bern-spacer") return true;
-    if (role == L"bern-column")
-        for (auto child : element.as<controls::Panel>().Children())
-            if (child.Visibility() == xaml::Visibility::Visible && FillsColumn(child)) return true;
+    if (role == L"bern-fill" || role == L"bern-spacer" || role == L"bern-fill-height" || role == L"bern-layers-h" || role == L"bern-layers-wh" || role == L"bern-rail-wh")
+        return true;
+    if (role == L"bern-column" || role == L"bern-row")
+        for (auto child : element.as<controls::Panel>().Children()) {
+            if (child.Visibility() != xaml::Visibility::Visible) continue;
+            if (role == L"bern-row" && RoleOf(Unwrapped(child)) == L"bern-spacer") continue;
+            if (FillsColumn(child)) return true;
+        }
     return false;
+}
+
+/// Whether `element` takes free width in a row: spacers, what fills both
+/// ways or across, and rows and columns holding something that does.
+inline bool FillsRow(xaml::UIElement const& element) {
+    auto inner = Unwrapped(element);
+    auto role = RoleOf(inner);
+    if (role == L"bern-spacer" || role == L"bern-fill" || role == L"bern-fill-width" || role == L"bern-layers-w" || role == L"bern-layers-wh" ||
+        role == L"bern-rail-w" || role == L"bern-rail-wh")
+        return true;
+    if (role == L"bern-column" || role == L"bern-row")
+        for (auto child : inner.as<controls::Panel>().Children()) {
+            if (child.Visibility() != xaml::Visibility::Visible) continue;
+            if (role == L"bern-column" && RoleOf(Unwrapped(child)) == L"bern-spacer") continue;
+            if (FillsRow(child)) return true;
+        }
+    return false;
+}
+
+/// The role of an element that holds `inner` alone, such as a button with
+/// content: it fills the way the inner element does.
+inline void Mirror(xaml::FrameworkElement const& holder, xaml::UIElement const& inner) {
+    bool across = FillsRow(inner), down = FillsColumn(inner);
+    if (across && down) SetRole(holder, L"bern-fill");
+    else if (across) SetRole(holder, L"bern-fill-width");
+    else if (down) SetRole(holder, L"bern-fill-height");
+}
+
+/// Where a reflowing panel put its children last, to slide them from there.
+struct Places {
+    std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> last;
+
+    void Arranged(B::Motion const* motion, std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> now) {
+        if (motion) {
+            for (auto const& [child, at] : now) {
+                for (auto const& [before, was] : last) {
+                    if (before != child) continue;
+                    float dx = was.X - at.X, dy = was.Y - at.Y;
+                    if (std::abs(dx) >= 0.5f || std::abs(dy) >= 0.5f) B::Reflow(child, dx, dy, motion);
+                    break;
+                }
+            }
+        }
+        last = std::move(now);
+    }
+};
+
+/// How a panel of Bern's lets its children reflow, kept with the panel.
+struct ReflowHolder : winrt::implements<ReflowHolder, IInspectable> {
+    std::function<void(B::Motion const*)> set;
+};
+
+inline void KeepReflow(controls::Panel const& panel, std::function<void(B::Motion const*)> set) {
+    auto holder = winrt::make_self<ReflowHolder>();
+    holder->set = std::move(set);
+    panel.Resources().Insert(winrt::box_value(L"bern.reflow"), holder.as<IInspectable>());
+}
+
+/// Let the children of `panel`, a panel of Bern's, reflow with `motion`.
+inline void SetReflow(controls::Panel const& panel, B::Motion const* motion) {
+    auto key = winrt::box_value(L"bern.reflow");
+    auto resources = panel.Resources();
+    if (resources.HasKey(key)) winrt::get_self<ReflowHolder>(resources.Lookup(key))->set(motion);
 }
 
 struct FlexPanel : controls::PanelT<FlexPanel> {
     bool horizontal = false;
     double spacing = 8;
     xaml::Thickness padding{0, 0, 0, 0};
+    B::Motion const* reflow = nullptr;
+    Places places;
 
     bool Fills(xaml::UIElement const& child) const {
-        if (horizontal) return RoleOf(child) == L"bern-spacer";
+        if (horizontal) return FillsRow(child);
         return FillsColumn(child);
     }
 
@@ -290,6 +526,7 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
         float gaps = static_cast<float>(spacing) * (std::max)(0, visible - 1);
         float share = filling > 0 ? (std::max)(0.0f, space - used - gaps) / filling : 0;
         float position = 0;
+        std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> now;
         for (auto child : Children()) {
             if (child.Visibility() != xaml::Visibility::Visible) {
                 child.Arrange(Rect{0, 0, 0, 0});
@@ -297,9 +534,12 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             }
             float length = Fills(child) ? share : Main(child.DesiredSize());
             auto left = static_cast<float>(padding.Left), top = static_cast<float>(padding.Top);
-            child.Arrange(horizontal ? Rect{left + position, top, length, cross} : Rect{left, top + position, cross, length});
+            Rect rect = horizontal ? Rect{left + position, top, length, cross} : Rect{left, top + position, cross, length};
+            child.Arrange(rect);
+            if (reflow) now.emplace_back(child, winrt::Windows::Foundation::Point{rect.X, rect.Y});
             position += length + static_cast<float>(spacing);
         }
+        if (reflow) places.Arranged(reflow, std::move(now));
         return final;
     }
 };
@@ -312,6 +552,8 @@ inline controls::Panel MakeFlex(bool horizontal = false, double spacing = 8, xam
     impl->padding = padding;
     controls::Panel panel = impl.as<controls::Panel>();
     SetRole(panel, horizontal ? L"bern-row" : L"bern-column");
+    FlexPanel* flex = impl.get();
+    KeepReflow(panel, [flex](B::Motion const* motion) { flex->reflow = motion; });
     return panel;
 }
 
@@ -325,39 +567,112 @@ inline xaml::UIElement MakeSpacer() {
 // ---------------------------------------------------------------------------
 // Parents
 
-/// Where builders put elements: a panel and a region inside it.
+/// A collection elements go into: a panel's children, or another list of
+/// elements, such as the items of a navigation view.
+struct Children {
+    std::function<uint32_t()> size;
+    std::function<void(uint32_t, xaml::UIElement const&)> insert;
+    std::function<std::optional<uint32_t>(xaml::UIElement const&)> find;
+    std::function<void(uint32_t)> remove;
+
+    static std::shared_ptr<Children> Of(controls::Panel const& panel) {
+        auto made = std::make_shared<Children>();
+        auto weak = winrt::make_weak(panel);
+        made->size = [weak] { auto p = weak.get(); return p ? p.Children().Size() : 0u; };
+        made->insert = [weak](uint32_t at, xaml::UIElement const& element) {
+            if (auto p = weak.get()) p.Children().InsertAt((std::min)(at, p.Children().Size()), element);
+        };
+        made->find = [weak](xaml::UIElement const& element) -> std::optional<uint32_t> {
+            uint32_t index;
+            if (auto p = weak.get(); p && p.Children().IndexOf(element, index)) return index;
+            return std::nullopt;
+        };
+        made->remove = [weak](uint32_t at) {
+            if (auto p = weak.get(); p && at < p.Children().Size()) p.Children().RemoveAt(at);
+        };
+        return made;
+    }
+
+    /// A vector of items, such as `NavigationView.MenuItems`.
+    template <class T> static std::shared_ptr<Children> OfVector(winrt::Windows::Foundation::Collections::IVector<T> items) {
+        auto made = std::make_shared<Children>();
+        made->size = [items] { return items.Size(); };
+        made->insert = [items](uint32_t at, xaml::UIElement const& element) { items.InsertAt((std::min)(at, items.Size()), element.as<T>()); };
+        made->find = [items](xaml::UIElement const& element) -> std::optional<uint32_t> {
+            uint32_t index;
+            if (auto item = element.try_as<T>(); item && items.IndexOf(item, index)) return index;
+            return std::nullopt;
+        };
+        made->remove = [items](uint32_t at) { if (at < items.Size()) items.RemoveAt(at); };
+        return made;
+    }
+};
+
+/// What leaving takes for an element with a `disappear` transition: it
+/// stays in its place until `leave` calls `done`, then goes.
+struct LeaveHook : winrt::implements<LeaveHook, IInspectable> {
+    std::function<void(std::function<void()> done)> leave;
+};
+
+inline winrt::com_ptr<LeaveHook> LeaveHookOf(xaml::UIElement const& element) {
+    auto framework = element.try_as<xaml::FrameworkElement>();
+    if (!framework) return nullptr;
+    auto key = winrt::box_value(L"bern.leave");
+    auto resources = framework.Resources();
+    if (!resources.HasKey(key)) return nullptr;
+    return winrt::get_self<LeaveHook>(resources.Lookup(key))->get_strong();
+}
+
 /// Conditional and repeated content gets a region of its own: clearing or
 /// reordering a region touches only its elements, and new elements land at
-/// the region's place among its siblings.
+/// the region's place among its siblings. An element playing its
+/// `disappear` transition stays in its region, counted, until it is gone.
 struct Region {
-    std::vector<std::variant<xaml::UIElement, std::shared_ptr<Region>>> items;
+    struct Entry {
+        xaml::UIElement element{nullptr};
+        std::shared_ptr<Region> region;
+        bool leaving = false;
+    };
+    std::vector<Entry> items;
     /// The enclosing region, which outlives this one: the panel keeps the
     /// root, and each region keeps the regions in it.
     Region* up = nullptr;
 
-    void Elements(std::vector<xaml::UIElement>& output) const {
+    void Elements(std::vector<xaml::UIElement>& output, bool withLeaving = true) const {
         for (auto const& item : items) {
-            if (auto element = std::get_if<xaml::UIElement>(&item)) output.push_back(*element);
-            else std::get<std::shared_ptr<Region>>(item)->Elements(output);
+            if (item.region) item.region->Elements(output, withLeaving);
+            else if (withLeaving || !item.leaving) output.push_back(item.element);
         }
     }
     uint32_t Count() const {
         uint32_t count = 0;
-        for (auto const& item : items) count += std::holds_alternative<xaml::UIElement>(item) ? 1 : std::get<std::shared_ptr<Region>>(item)->Count();
+        for (auto const& item : items) count += item.region ? item.region->Count() : 1;
         return count;
     }
     uint32_t Offset() const {
         if (!up) return 0;
         auto before = up->Offset();
         for (auto const& item : up->items) {
-            if (auto region = std::get_if<std::shared_ptr<Region>>(&item)) {
-                if (region->get() == this) break;
-                before += (*region)->Count();
+            if (item.region) {
+                if (item.region.get() == this) break;
+                before += item.region->Count();
             } else {
                 before += 1;
             }
         }
         return before;
+    }
+    /// Remove the entry of `element`, wherever it is below this region.
+    bool Forget(xaml::UIElement const& element) {
+        for (auto it = items.begin(); it != items.end(); ++it) {
+            if (it->region) {
+                if (it->region->Forget(element)) return true;
+            } else if (it->element == element) {
+                items.erase(it);
+                return true;
+            }
+        }
+        return false;
     }
 };
 
@@ -385,74 +700,167 @@ struct Parent {
     bool isList = false;
     std::optional<xaml::HorizontalAlignment> crossH;
     std::optional<xaml::VerticalAlignment> crossV;
+    /// Where the elements go: the panel's children unless another list.
+    std::shared_ptr<Children> list;
+    /// The root region of a list that is not a panel's, kept by its
+    /// owner.
+    std::shared_ptr<Region> root;
 
     static Parent Of(controls::Panel const& panel) { return Parent{panel, RootRegion(panel)}; }
     static Parent OfList(controls::Panel const& panel) { return Parent{panel, RootRegion(panel), true}; }
     static Parent Aligned(controls::Panel const& panel, std::optional<xaml::HorizontalAlignment> h, std::optional<xaml::VerticalAlignment> v) {
         return Parent{panel, RootRegion(panel), false, h, v};
     }
+    /// A parent whose elements go into `items`, such as menu items.
+    static Parent Into(std::shared_ptr<Children> items) {
+        Parent parent;
+        parent.region = std::make_shared<Region>();
+        parent.root = parent.region;
+        parent.list = std::move(items);
+        return parent;
+    }
+
+    std::shared_ptr<Children> Items() const { return list ? list : Children::Of(panel); }
+    /// The region all this list's regions are in.
+    std::shared_ptr<Region> Top() const { return root ? root : RootRegion(panel); }
 
     bool IsHorizontal() const {
+        if (!panel) return false;
         if (auto stack = panel.try_as<controls::StackPanel>()) return stack.Orientation() == controls::Orientation::Horizontal;
         return RoleOf(panel) == L"bern-row";
     }
 
     /// Add an element at the end of this region.
     void Add(xaml::UIElement const& element) const {
+        // What fills stretches across its container; the rest takes the
+        // container's alignment.
+        bool across = FillsRow(element), down = FillsColumn(element);
+        // A stretching container leaves an element that keeps its own size
+        // (pictures, stacks) where it is.
         if (auto framework = element.try_as<xaml::FrameworkElement>()) {
-            if (crossH) framework.HorizontalAlignment(*crossH);
-            if (crossV) framework.VerticalAlignment(*crossV);
+            bool keepsH = crossH == xaml::HorizontalAlignment::Stretch && framework.HorizontalAlignment() != xaml::HorizontalAlignment::Stretch;
+            bool keepsV = crossV == xaml::VerticalAlignment::Stretch && framework.VerticalAlignment() != xaml::VerticalAlignment::Stretch;
+            if (crossH && (across || !keepsH)) framework.HorizontalAlignment(across ? xaml::HorizontalAlignment::Stretch : *crossH);
+            if (crossV && (down || !keepsV)) framework.VerticalAlignment(down ? xaml::VerticalAlignment::Stretch : *crossV);
+        }
+        // A horizontal rail holding something that fills its height fills
+        // the height it is given.
+        if (panel && down && RoleOf(panel) == L"bern-rail-w") {
+            SetRole(panel, L"bern-rail-wh");
+            panel.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        }
+        // Layers holding something that fills fill the same way in turn; a
+        // rail fills the height of its layers without making them fill.
+        bool downward = down && RoleOf(Unwrapped(element)) != L"bern-rail-wh";
+        if (panel && (across || downward)) {
+            auto role = std::wstring(RoleOf(panel));
+            if (role.starts_with(L"bern-layers")) {
+                bool w = across || role.ends_with(L"-w") || role.ends_with(L"-wh");
+                bool h = downward || role.ends_with(L"-h") || role.ends_with(L"-wh");
+                SetRole(panel, w && h ? L"bern-layers-wh" : w ? L"bern-layers-w" : L"bern-layers-h");
+                if (w) panel.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+                if (h) panel.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+            }
         }
         auto index = region->Offset() + region->Count();
-        region->items.emplace_back(element);
-        auto children = panel.Children();
-        children.InsertAt((std::min)(index, children.Size()), element);
+        region->items.push_back(Region::Entry{element});
+        Items()->insert(index, element);
     }
 
     /// A new empty region at the end of this one.
     Parent Sub() const {
         auto child = std::make_shared<Region>();
         child->up = region.get();
-        region->items.emplace_back(child);
-        return Parent{panel, child, isList, crossH, crossV};
+        region->items.push_back(Region::Entry{nullptr, child});
+        Parent sub = *this;
+        sub.region = child;
+        return sub;
     }
 
-    /// Remove every element of this region.
-    void Clear() const {
-        std::vector<xaml::UIElement> elements;
-        region->Elements(elements);
-        auto children = panel.Children();
-        for (auto const& element : elements) {
-            uint32_t index;
-            if (children.IndexOf(element, index)) children.RemoveAt(index);
+    /// Take `element` off its list now.
+    void Detach(xaml::UIElement const& element) const {
+        auto items = Items();
+        if (auto index = items->find(element)) items->remove(*index);
+    }
+
+    /// Let the elements of `entries` go: at once, or after their
+    /// `disappear` transition, staying counted in `kept` until then. The
+    /// transitions start in `leaves`, once the region holds `kept`.
+    void Let(std::vector<Region::Entry>& entries, std::vector<Region::Entry>& kept, std::vector<std::function<void()>>& leaves) const {
+        for (auto& entry : entries) {
+            if (entry.region) {
+                Let(entry.region->items, kept, leaves);
+                continue;
+            }
+            if (entry.leaving) {
+                kept.push_back(entry);
+                continue;
+            }
+            auto hook = LeaveHookOf(entry.element);
+            if (!hook || !hook->leave) {
+                Detach(entry.element);
+                continue;
+            }
+            entry.leaving = true;
+            kept.push_back(entry);
+            auto element = entry.element;
+            auto items = Items();
+            std::weak_ptr<Region> weak = Top();
+            // Leaving once: the hook goes with the element.
+            auto leave = std::move(hook->leave);
+            hook->leave = nullptr;
+            leaves.push_back([leave, element, items, weak] {
+                leave([element, items, weak] {
+                    if (auto index = items->find(element)) items->remove(*index);
+                    if (auto region = weak.lock()) region->Forget(element);
+                });
+            });
         }
-        region->items.clear();
     }
 
-    /// Put child regions in a new order, keeping their elements.
+    /// Remove every element of this region; elements with a `disappear`
+    /// transition stay until it has played.
+    void Clear() const {
+        std::vector<Region::Entry> kept;
+        std::vector<std::function<void()>> leaves;
+        Let(region->items, kept, leaves);
+        region->items = std::move(kept);
+        for (auto const& leave : leaves) leave();
+    }
+
+    /// Put child regions in a new order, keeping their elements; leaving
+    /// elements stay after them until they are gone.
     void Reorder(std::vector<Parent> const& order) const {
         std::vector<xaml::UIElement> elements;
         region->Elements(elements);
-        auto children = panel.Children();
-        for (auto const& element : elements) {
-            uint32_t index;
-            if (children.IndexOf(element, index)) children.RemoveAt(index);
-        }
+        auto items = Items();
+        for (auto const& element : elements)
+            if (auto index = items->find(element)) items->remove(*index);
+        std::vector<Region::Entry> leaving;
+        for (auto const& item : region->items)
+            if (!item.region && item.leaving) leaving.push_back(item);
         region->items.clear();
-        for (auto const& child : order) region->items.emplace_back(child.region);
+        for (auto const& child : order) region->items.push_back(Region::Entry{nullptr, child.region});
+        for (auto const& item : leaving) region->items.push_back(item);
         auto start = region->Offset();
         elements.clear();
         region->Elements(elements);
-        for (uint32_t i = 0; i < elements.size(); ++i) children.InsertAt((std::min)(start + i, children.Size()), elements[i]);
+        for (uint32_t i = 0; i < elements.size(); ++i) items->insert(start + i, elements[i]);
     }
 
-    /// Drop a child region and its elements.
+    /// Drop a child region and its elements; its leaving elements stay in
+    /// this region, where the child was, until they are gone.
     void Remove(Parent const& child) const {
         child.Clear();
-        std::erase_if(region->items, [&](auto const& item) {
-            auto found = std::get_if<std::shared_ptr<Region>>(&item);
-            return found && found->get() == child.region.get();
-        });
+        auto& entries = region->items;
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            if (it->region.get() != child.region.get()) continue;
+            auto leaving = std::move(child.region->items);
+            for (auto& entry : leaving) entry.region = nullptr;
+            it = entries.erase(it);
+            entries.insert(it, leaving.begin(), leaving.end());
+            break;
+        }
     }
 };
 
@@ -471,6 +879,12 @@ struct Actions {
     /// Go back; false when there is nothing to go back to.
     std::function<bool()> back;
     std::function<std::optional<std::string>()> value;
+    /// Take the keyboard focus, as `ui.focus` does.
+    std::function<void()> focus;
+    /// Take a file, as if the user chose or dropped it (`ui.set_file`), of
+    /// the kinds `files` names.
+    std::function<void(std::string const&)> setFile;
+    char const* files = nullptr;
 };
 
 struct ControlEntry {
@@ -631,29 +1045,10 @@ inline xaml::Style TextStyle(char const* style) {
 }
 
 /// Bern icon names (SF Symbols naming) as Segoe Fluent Icons / Segoe MDL2
-/// Assets glyphs, the system icon fonts of Windows 11 and Windows 10.
+/// Assets glyphs, the system icon fonts of Windows 11 and Windows 10. The
+/// table comes with the catalog.
 namespace Icons {
-inline wchar_t const* Glyph(std::string_view name) {
-    static std::unordered_map<std::string_view, wchar_t const*> const glyphs = {
-        {"plus", L""}, {"minus", L""}, {"xmark", L""}, {"checkmark", L""},
-        {"chevron.left", L""}, {"chevron.right", L""}, {"chevron.down", L""},
-        {"chevron.up.chevron.down", L""}, {"ellipsis", L""}, {"ellipsis.circle", L""},
-        {"square.on.square", L""}, {"magnifyingglass", L""}, {"xmark.circle.fill", L""},
-        {"doc", L""}, {"photo", L""}, {"film", L""}, {"music.note", L""},
-        {"arrow.down.circle", L""}, {"gearshape", L""}, {"gearshape.2", L""},
-        {"paintbrush", L""}, {"hand.tap", L""}, {"list.bullet.rectangle", L""},
-        {"play.rectangle", L""}, {"play.fill", L""}, {"pause.fill", L""},
-        {"speaker.fill", L""}, {"speaker.wave.3.fill", L""}, {"speaker.slash.fill", L""},
-        {"sun.min", L""}, {"sun.max.fill", L""}, {"textformat", L""},
-        {"textformat.size.smaller", L""}, {"textformat.size.larger", L""},
-        {"character.cursor.ibeam", L""}, {"switch.2", L""}, {"star", L""},
-        {"star.fill", L""}, {"square.and.arrow.up", L""}, {"trash", L""},
-        {"exclamationmark.triangle", L""}, {"tray", L""}, {"heart", L""},
-        {"arrow.left", L""},
-    };
-    auto found = glyphs.find(name);
-    return found == glyphs.end() ? L"" : found->second;
-}
+inline wchar_t const* Glyph(std::string_view name) { return bern::IconGlyph(name); }
 
 inline controls::FontIcon Icon(std::string_view name, double size = 16) {
     controls::FontIcon icon;
@@ -709,10 +1104,26 @@ struct Win {
     std::shared_ptr<bool> life = std::make_shared<bool>(true);
 #if BERN_WINUI
     xaml::Window window{nullptr};
+    controls::TitleBar titleBar{nullptr};
 #else
     xaml::Hosting::DesktopWindowXamlSource source{nullptr};
     HWND island = nullptr;
 #endif
+
+    /// `window.idle`: no input for the window's `idle_after` seconds.
+    Cell<bool> idle{false};
+    /// The window's layout size by its width: compact, medium, expanded
+    /// or large.
+    Cell<std::string> size{std::string("expanded")};
+    /// Whether the window is immersive now: no title bar or toolbar.
+    Cell<bool> immersive{false};
+    /// Above the content: copies of shared elements while they move.
+    controls::Canvas overlay{nullptr};
+    /// A dialog window's content dialog, and the window it shows over.
+    controls::ContentDialog sheet{nullptr};
+    Win* owner = nullptr;
+    /// Keyboard shortcuts of mounted controls, newest last.
+    std::vector<std::pair<int64_t, xaml::Input::KeyboardAccelerator>> shortcuts;
 
     WindowDef const& Def() const { return app->windows[kind]; }
     Cell<Value>& CellOf(Field field);
@@ -727,6 +1138,15 @@ struct Win {
 };
 
 inline Value Ctx::Session(int session, int field) const { return win->CellOf(Field{session, field}).Get(); }
+inline Value Ctx::WindowFlag(std::string_view name) const {
+    if (!win) return Value::Bool(false);
+    if (name == "idle") return Value::Bool(win->idle.Get());
+    return Value::Bool(win->size.Get() == name);
+}
+inline double B::Len::Now(Ctx const& ctx) const {
+    if (fixed) return *fixed;
+    return bound ? R::AsDouble(bound(ctx)) : 0.0;
+}
 inline Value Ctx::Read(Field field) const { return win->CellOf(field).Get(); }
 inline Value Ctx::Peek(Field field) const { return win->CellOf(field).Peek(); }
 inline bool Ctx::Write(Field field, Value const& value) const { return win->Write(field, value); }

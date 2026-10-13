@@ -516,6 +516,16 @@ open target/bern/macos/Showcase.app
 - **按条件出现的导航项**：“在侧栏显示归档”关闭时 `ui select --option Archive` 返回 `invalid_params`；打开后可选中；在归档页关闭开关后选中回到 `fallback` 指定的概览，详情标题随之更新。
 - 未实现：带样式的侧栏中用方向键切换选中。
 
+## 错峰、比例轨道、浮层按钮与四档尺寸
+
+2026-10-14，v0.30，本机 macOS 27.0，用 `examples/gallery`。窗口始终在后台，用窗口截图（`screencapture -l`）与 CLI 检查，不把应用调到前面；动效用 `BERN_MOTION=slow` 放慢 10 倍后逐帧截图。
+
+- **错峰**：`BernStaggerScope` 把一只时钟放进环境，带 `appear` 的子元素出现时先隐藏，向时钟要一个顺序。最初按 `onAppear` 的先后排队，`LazyVGrid` 报告的先后不固定，海报墙按 6、4、2、5、3、1 的顺序出现；改为同一次更新中先收集所有新出现的元素，下一轮主队列再按它们在窗口中的位置排队（自上而下，同一行内按书写方向）。从胶片页切到图案页，6 帧截图中卡片从 Gingham 到 Windowpane 依次淡入升起。窗口首次显示前出现的元素直接显示。
+- **比例轨道**：`BernRail` 是自定义 `Layout`，`at` 与 `from`/`to` 经 `LayoutValueKey` 传入，绑定值变化时随 `animate` 的弹簧移动。胶片页的时间轴、6 个刻度与名字位置正确；`ui set-number --target film.level --value 0.9` 后竖线与底色从 0.5 移到 0.9。拖动面板里的底色起初只有 10 pt 高：`ZStack` 中的层不能跟随其他层的大小，没写高度的画布在轨道里按理想高度测量。改为含轨道的 `Stack` 生成 `BernLayers`，轨道不参与决定大小，再按其他层给出的大小摆放；轨道把得到的厚度提供给 `from`/`to` 的子元素。之后底色与 120 pt 的面板等高。
+- **浮层按钮**：`BernPopoverButton` 用系统 `.popover`，内容只在打开时存在。画框页静置 3 秒后控件隐藏，因此在重新启动后的 3 秒内经 CLI 打开：打开前 `ui.inspect` 中没有 `frame.volume_level`，`ui activate --target frame.volume` 后按钮值为 `open`、滑块出现且值为 0.7，截图中浮层从按钮下方弹出。浮层是单独的窗口，可以伸出主窗口。
+- **四档尺寸**：`BernWindowContext` 记录窗口内容宽度，`window.compact` 等按 `[layouts]` 断点计算；`Adaptive` 按自己的可用宽度选档，没有对应 `Layout` 的档按“先大后小”借用。经“系统事件”改变窗口大小：宽 600 时胶片页为 `compact`（图标按钮），1100 时为 `medium`（文字按钮），1470 时为 `expanded`（多一行说明）。窗口宽度在 1470 封顶（屏幕宽度）；打开检查器时系统会加宽窗口。
+- 发给窗口的鼠标移动事件（`CGEventPostToPid`）不经过应用的本地事件监视器，不能用来唤醒静置的页面；本次没有移动真实指针。
+
 ## 未完成与已知限制
 
 - 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）、菜单栏命令生成均未实现。

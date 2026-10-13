@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -110,6 +111,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -144,6 +146,7 @@ object BernIcons {
         "xmark", "xmark.circle", "xmark.circle.fill" -> Icons.Filled.Close
         "checkmark" -> Icons.Filled.Check
         "checkmark.circle", "checkmark.circle.fill" -> Icons.Filled.CheckCircle
+        "chevron.left" -> Icons.AutoMirrored.Filled.KeyboardArrowLeft
         "chevron.right" -> Icons.AutoMirrored.Filled.KeyboardArrowRight
         "chevron.down", "chevron.up.chevron.down" -> Icons.Filled.KeyboardArrowDown
         "chevron.up" -> Icons.Filled.KeyboardArrowUp
@@ -201,6 +204,10 @@ object BernIcons {
         "arrow.down.circle", "arrow.down.to.line" -> download
         "slider.horizontal.3", "dial.low" -> tune
         "textformat", "textformat.size", "textformat.size.smaller", "textformat.size.larger" -> text
+        "sidebar.right", "sidebar.trailing" -> sidebarRight
+        "star.slash" -> starBorder
+        "captions.bubble", "text.bubble", "captions.bubble.fill", "text.bubble.fill" -> subtitles
+        "square.grid.3x3", "square.grid.3x3.fill" -> gridOn
         // Names without a counterpart show a neutral dot.
         else -> dot
     }
@@ -268,6 +275,18 @@ object BernIcons {
     }
     private val text by lazy {
         icon("Text", "M2.5,4v3h5v12h3V7h5V4H2.5zM21.5,9h-9v3h3v7h3v-7h3V9z")
+    }
+    private val sidebarRight by lazy {
+        icon("ViewSidebar", "M16,20H2V4h14V20zM18,8h4V4h-4V8zM18,20h4v-4h-4V20zM18,14h4v-4h-4V14z")
+    }
+    private val starBorder by lazy {
+        icon("StarBorder", "M22,9.24l-7.19,-0.62L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21 12,17.27 18.18,21l-1.63,-7.03L22,9.24zM12,15.4l-3.76,2.27 1,-4.28 -3.32,-2.88 4.38,-0.38L12,6.1l1.71,4.04 4.38,0.38 -3.32,2.88 1,4.28L12,15.4z")
+    }
+    private val subtitles by lazy {
+        icon("Subtitles", "M20,4H4c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V6c0,-1.1 -0.9,-2 -2,-2zM4,12h4v2H4v-2zM14,18H4v-2h10v2zM20,18h-4v-2h4v2zM20,14H10v-2h10v2z")
+    }
+    private val gridOn by lazy {
+        icon("GridOn", "M20,2H4c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM8,20H4v-4h4v4zM8,14H4v-4h4v4zM8,8H4V4h4v4zM14,20h-4v-4h4v4zM14,14h-4v-4h4v4zM14,8h-4V4h4v4zM20,20h-4v-4h4v4zM20,14h-4v-4h4v4zM20,8h-4V4h4v4z")
     }
     private val dot by lazy { icon("Dot", "M12,12m-4,0a4,4 0,1 0,8 0a4,4 0,1 0,-8 0") }
 
@@ -642,13 +661,24 @@ fun BernGrid(minWidth: Dp, gap: Dp, modifier: Modifier = Modifier, content: @Com
     }
 }
 
-/// One layout by the available width: `compact` below the breakpoint.
+/// One layout by the available width and the breakpoints of `[layouts]`.
+/// A size without a layout of its own shows the next larger declared one,
+/// else the next smaller.
 @Composable
-fun BernAdaptive(breakpoint: Dp, target: String?, compact: @Composable () -> Unit, expanded: @Composable () -> Unit) {
+fun BernAdaptive(
+    target: String?,
+    compact: (@Composable () -> Unit)?,
+    medium: (@Composable () -> Unit)?,
+    expanded: (@Composable () -> Unit)?,
+    large: (@Composable () -> Unit)?,
+) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val size = if (maxWidth < breakpoint) "compact" else "expanded"
+        val size = BernHost.layouts.sizeOf(maxWidth.value.toDouble())
         if (target != null) BernControl(target, "adaptive", "", actions = BernControlActions(value = { size }))
-        if (size == "compact") compact() else expanded()
+        val layouts = listOf("compact" to compact, "medium" to medium, "expanded" to expanded, "large" to large)
+        val at = layouts.indexOfFirst { it.first == size }
+        val shown = (layouts.drop(at) + layouts.take(at).reversed()).firstOrNull { it.second != null }
+        if (shown != null) key(shown.first) { shown.second?.invoke() }
     }
 }
 
@@ -706,16 +736,28 @@ fun BernSplitView(
     title: String,
     showingDetail: MutableState<Boolean>,
     sidebar: @Composable (showDetail: () -> Unit) -> Unit,
+    footer: (@Composable () -> Unit)? = null,
     detail: @Composable () -> Unit,
 ) {
     var showingDetail by showingDetail
+    // The sidebar's own bottom area, such as the account, stays put while
+    // the destinations scroll.
+    val list: @Composable (() -> Unit) -> Unit = { showDetail ->
+        Column(Modifier.fillMaxHeight()) {
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
+                sidebar(showDetail)
+            }
+            if (footer != null) {
+                HorizontalDivider()
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) { footer() }
+            }
+        }
+    }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         if (maxWidth >= 600.dp) {
             BernChrome(title = title)
             Row(Modifier.fillMaxSize()) {
-                Column(Modifier.width(280.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-                    sidebar {}
-                }
+                Box(Modifier.width(280.dp).fillMaxHeight()) { list {} }
                 VerticalDivider()
                 Box(Modifier.weight(1f).fillMaxHeight()) { detail() }
             }
@@ -723,9 +765,7 @@ fun BernSplitView(
             BernChrome(title = title, back = { showingDetail = false })
             Box(Modifier.fillMaxSize()) { detail() }
         } else {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
-                sidebar { showingDetail = true }
-            }
+            Box(Modifier.fillMaxSize()) { list { showingDetail = true } }
         }
     }
 }

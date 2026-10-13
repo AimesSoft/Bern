@@ -30,7 +30,55 @@ pub const MINIMUM_MACOS: &str = "14.0";
 /// The application icon in `Contents/Resources` (`CFBundleIconFile`).
 pub const ICON_FILE: &str = "AppIcon.icns";
 
+/// Motion SwiftUI shows, on macOS and iOS.
+pub(crate) const MOTION: &[&str] = &[
+    "appear",
+    "disappear",
+    "reflow",
+    "hero",
+    "animate",
+    "scroll_scale",
+    "scroll_opacity",
+    "nudge",
+    "stagger",
+];
+
+/// IR features SwiftUI builds, on macOS and iOS.
+pub(crate) const FEATURES: &[&str] = &[
+    bern_target_api::feature::BUTTON_CONTENT,
+    bern_target_api::feature::REVEAL,
+    bern_target_api::feature::TOOLBAR_SEARCH,
+    bern_target_api::feature::SEARCH_RESULTS,
+    bern_target_api::feature::SESSION_ACTIONS,
+    bern_target_api::feature::TOGGLE_BUTTON,
+    bern_target_api::feature::DIALOG_WINDOWS,
+    bern_target_api::feature::BOUND_LENGTHS,
+    bern_target_api::feature::APPEARANCE,
+    bern_target_api::feature::SHORTCUTS,
+    bern_target_api::feature::RUNTIME_THEME,
+    bern_target_api::feature::RUNTIME_IMAGES,
+    bern_target_api::feature::PICTURE_FILLS,
+    bern_target_api::feature::FILE_PICK,
+    bern_target_api::feature::SCROLL_SNAP,
+    bern_target_api::feature::RAILS,
+    bern_target_api::feature::POPOVER_BUTTON,
+    bern_target_api::feature::SIZE_CLASSES,
+];
+
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
+
+/// The runtime template with the extensions of each file kind from the
+/// shared table, so pickers, drops and the Info.plist agree.
+pub(crate) fn runtime_source(template: &str) -> String {
+    let table: Vec<String> = bern_ir::spec::FILE_KIND_EXTENSIONS
+        .iter()
+        .map(|(kind, extensions)| {
+            let list: Vec<String> = extensions.iter().map(|ext| format!("\"{ext}\"")).collect();
+            format!("\"{kind}\": [{}]", list.join(", "))
+        })
+        .collect();
+    template.replace("/*bern:file-extensions*/", &table.join(", "))
+}
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
 const STYLE: &str = include_str!("../templates/BernStyle.swift");
 const APPKIT: &str = include_str!("../templates/BernAppKit.swift");
@@ -72,10 +120,11 @@ impl Target for SwiftUiMacos {
     fn descriptor(&self) -> TargetDescriptor {
         TargetDescriptor {
             styles: style::SUPPORT,
-            motion: &["appear", "disappear", "reflow", "hero"],
+            motion: MOTION,
             window_chrome: true,
             text_marks: true,
             dynamic_items: true,
+            features: FEATURES,
             id: "swiftui-macos",
             ui: "swiftui",
             platforms: &["macos"],
@@ -129,7 +178,7 @@ impl Target for SwiftUiMacos {
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
         let mut files = vec![
-            GeneratedFile::text("Sources/BernRuntime.swift", RUNTIME),
+            GeneratedFile::text("Sources/BernRuntime.swift", crate::runtime_source(RUNTIME)),
             GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
             GeneratedFile::text("Sources/BernStyle.swift", STYLE),
             GeneratedFile::text("Sources/BernAppKit.swift", APPKIT),
@@ -638,10 +687,12 @@ pub(crate) fn check_swiftui(
     }
     let mut visit = |node: &Node, parent: Option<&str>| {
         if let Node::Element(element) = node {
-            if element.kind == "Search" && parent != Some("Sidebar") {
+            if element.kind == "Search" && !matches!(parent, Some("Sidebar" | "Toolbar")) {
                 diagnostics.push(
-                    Diagnostic::error("the SwiftUI target places `Search` in a `Sidebar` only")
-                        .at(element.source.clone()),
+                    Diagnostic::error(
+                        "the SwiftUI target places `Search` in a `Sidebar` or a `Toolbar` only",
+                    )
+                    .at(element.source.clone()),
                 );
             }
             if element.kind == "Picker"

@@ -1,0 +1,65 @@
+# A gallery of woven patterns: cards that open, lift under the pointer and
+# show their actions on hover. It exercises the newer parts of Bern, so
+# for now it lists the targets that build them.
+
+[app]
+id = "gallery"
+bundle_id = "dev.bern.gallery"
+version = "0.1.0"
+name = { "zh-Hans" = "图案集", "en" = "Gallery" }
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"
+
+[protocol]
+package = "gallery-protocol"
+source = "gallery-protocol/src/lib.rs"
+
+[engine]
+package = "gallery-core"
+type = "gallery_core::GalleryEngine"
+
+[ui]
+package = "gallery-ui"
+sources = ["gallery-ui/src/lib.rs"]
+root = "app"
+
+# Breakpoints of the window and layout sizes.
+[layouts]
+compact_below = 600
+medium_below = 1024
+expanded_below = 1440
+
+[resources]
+paths = ["media/tides.mp4", "media/poster.jpg"]
+
+[targets.macos]
+platform = "macos"
+channels = ["ipc"]
+
+[targets.ios]
+platform = "ios"
+channels = ["ipc"]
+
+[targets.android]
+platform = "android"
+channels = ["ipc"]
+
+[targets.linux]
+platform = "linux"
+channels = ["ipc"]
+
+[targets.windows]
+platform = "windows"
+channels = ["ipc"]
+
+# The WebUI build: the page connects to a separate engine host, which also
+# serves the CLI, JSON and MCP entries through its IPC channel.
+[targets.web_ui]
+ui = "web"
+platform = "browser"
+web_mode = "ui"
+application_transport = "websocket"
+application_codec = "json"
+channels = ["ipc"]

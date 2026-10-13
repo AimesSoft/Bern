@@ -171,6 +171,17 @@ impl<'a> Gen<'a> {
                 );
                 quote!(())
             }
+            Expr::If {
+                cond,
+                then,
+                otherwise,
+                ..
+            } => {
+                let cond = self.value(cond);
+                let then = self.value(then);
+                let otherwise = self.value(otherwise);
+                quote!(if #cond { #then } else { #otherwise })
+            }
         }
     }
 
@@ -595,8 +606,30 @@ impl<'a> Gen<'a> {
                 PropKind::Keyword(allowed) => {
                     self.keyword(&prop.value, allowed);
                 }
+                PropKind::Flag => {
+                    if !matches!(
+                        &prop.value,
+                        Expr::Literal {
+                            value: Literal::Bool(_),
+                            ..
+                        }
+                    ) {
+                        self.error(prop.value.span(), "expected `true` or `false`");
+                    }
+                }
                 PropKind::DisplayText => pre.push(self.display(&prop.value, false)),
                 PropKind::LocalizedText => pre.push(self.display(&prop.value, true)),
+                PropKind::Shortcut => match &prop.value {
+                    Expr::Literal {
+                        value: Literal::Text(text),
+                        span,
+                    } => {
+                        if let Err(message) = bern_ir::spec::parse_shortcut(text) {
+                            self.error(*span, format!("shortcut \"{text}\": {message}"));
+                        }
+                    }
+                    other => self.error(other.span(), "a shortcut is a literal such as \"cmd+k\""),
+                },
                 PropKind::Icon => match &prop.value {
                     Expr::Literal {
                         value: Literal::Text(icon),
@@ -633,12 +666,25 @@ impl<'a> Gen<'a> {
                             );
                         }
                     }
+                    Expr::Path(path) => {
+                        let tokens = self.path(path);
+                        pre.push(quote_spanned!(path.span()=> ::bern::__private::media_source(&#tokens);));
+                    }
                     other => self.error(
                         other.span(),
-                        "expected the name of a declared resource, e.g. \"images/cover.png\"",
+                        "expected the name of a declared resource, e.g. \"images/cover.png\", or a `MediaSource` binding",
                     ),
                 },
                 PropKind::Number => self.literal_number(&prop.value),
+                // A length is a literal or a numeric expression.
+                PropKind::Length => match &prop.value {
+                    Expr::Literal { .. } | Expr::Unary { .. } => self.literal_number(&prop.value),
+                    other => {
+                        let value = self.value(other);
+                        let span = other.span();
+                        pre.push(quote_spanned!(span=> ::bern::__private::number_value(&#value);));
+                    }
+                },
                 PropKind::NumberValue => {
                     let value = self.value(&prop.value);
                     let span = prop.value.span();
@@ -658,6 +704,26 @@ impl<'a> Gen<'a> {
                 PropKind::NumberField => {
                     pre.push(self.writable(&prop.value, quote!(::bern::__private::number_field)))
                 }
+                PropKind::FileField => {
+                    pre.push(self.writable(&prop.value, quote!(::bern::__private::file_field)))
+                }
+                PropKind::PositionField => pre.push(
+                    self.writable(&prop.value, quote!(::bern::__private::position_field)),
+                ),
+                PropKind::FileKinds => match &prop.value {
+                    Expr::Literal {
+                        value: Literal::Text(text),
+                        span,
+                    } => {
+                        if let Err(message) = bern_ir::spec::parse_file_kinds(text) {
+                            self.error(*span, format!("files \"{text}\": {message}"));
+                        }
+                    }
+                    other => self.error(
+                        other.span(),
+                        "the kinds of file are a literal such as \"video .srt\"",
+                    ),
+                },
                 PropKind::PickerField => {
                     pre.push(self.writable(&prop.value, quote!(::bern::__private::picker_field)))
                 }

@@ -27,7 +27,8 @@ struct Local {
 struct Inner {
     win: Rc<Win>,
     comp: &'static str,
-    key: Option<Rc<dyn Fn() -> String>>,
+    /// The key of every repeated row the content is in, outermost first.
+    keys: Vec<Rc<dyn Fn() -> String>>,
     locals: Option<Rc<Local>>,
     page: Option<Rc<Page>>,
     toolbar: bool,
@@ -35,6 +36,12 @@ struct Inner {
     nav: Option<Field>,
     /// Whether this content is showing, for its page tools.
     shown: Option<crate::reactive::Cell<bool>>,
+    /// The scroll view the content is in.
+    scroll: Option<Rc<crate::features::ScrollScope>>,
+    /// The sidebar whose items the content lists.
+    sidebar: Option<Rc<crate::structure::Registry>>,
+    /// The tab view whose tabs the content declares.
+    tabs: Option<Rc<crate::structure::TabRegistry>>,
 }
 
 /// The context generated code evaluates expressions in.
@@ -48,12 +55,15 @@ impl Ctx {
         Self(Rc::new(Inner {
             comp: win.kind_id(),
             win,
-            key: None,
+            keys: Vec::new(),
             locals: None,
             page,
             toolbar: false,
             nav: None,
             shown: None,
+            scroll: None,
+            sidebar: None,
+            tabs: None,
         }))
     }
 
@@ -61,12 +71,15 @@ impl Ctx {
         let mut inner = Inner {
             win: Rc::clone(&self.0.win),
             comp: self.0.comp,
-            key: self.0.key.clone(),
+            keys: self.0.keys.clone(),
             locals: self.0.locals.clone(),
             page: self.0.page.clone(),
             toolbar: self.0.toolbar,
             nav: self.0.nav,
             shown: self.0.shown.clone(),
+            scroll: self.0.scroll.clone(),
+            sidebar: self.0.sidebar.clone(),
+            tabs: self.0.tabs.clone(),
         };
         change(&mut inner);
         Self(Rc::new(inner))
@@ -92,6 +105,12 @@ impl Ctx {
     /// A field of the window's session drafts, recording a dependency.
     pub fn session(&self, session: usize, field: usize) -> Value {
         self.0.win.cell(Field { session, field }).get()
+    }
+
+    /// UI state of the window, such as `window.idle` and `window.compact`,
+    /// recording a dependency.
+    pub fn window(&self, field: &str) -> Value {
+        self.0.win.state(field)
     }
 
     /// A local variable: a component parameter, row variable or pattern
@@ -120,9 +139,9 @@ impl Ctx {
                 next: locals,
             }));
         }
+        // Row keys stay: a control in a component in a row is that row's.
         self.with(|inner| {
             inner.comp = comp;
-            inner.key = None;
             inner.locals = locals;
         })
     }
@@ -135,7 +154,31 @@ impl Ctx {
     }
 
     pub(crate) fn with_key(&self, key: Rc<dyn Fn() -> String>) -> Self {
-        self.with(|inner| inner.key = Some(key))
+        self.with(|inner| inner.keys.push(key))
+    }
+
+    pub(crate) fn with_scroll(&self, scroll: Rc<crate::features::ScrollScope>) -> Self {
+        self.with(|inner| inner.scroll = Some(scroll))
+    }
+
+    pub(crate) fn scroll(&self) -> Option<&Rc<crate::features::ScrollScope>> {
+        self.0.scroll.as_ref()
+    }
+
+    pub(crate) fn with_sidebar(&self, sidebar: Rc<crate::structure::Registry>) -> Self {
+        self.with(|inner| inner.sidebar = Some(sidebar))
+    }
+
+    pub(crate) fn sidebar(&self) -> Option<&Rc<crate::structure::Registry>> {
+        self.0.sidebar.as_ref()
+    }
+
+    pub(crate) fn with_tabs(&self, tabs: Rc<crate::structure::TabRegistry>) -> Self {
+        self.with(|inner| inner.tabs = Some(tabs))
+    }
+
+    pub(crate) fn tabs(&self) -> Option<&Rc<crate::structure::TabRegistry>> {
+        self.0.tabs.as_ref()
     }
 
     pub(crate) fn with_page(&self, page: Rc<Page>) -> Self {
@@ -164,13 +207,19 @@ impl Ctx {
         self.with(|inner| inner.toolbar = true)
     }
 
+    /// The context of content outside the toolbar, such as search results.
+    pub(crate) fn outside_toolbar(&self) -> Self {
+        self.with(|inner| inner.toolbar = false)
+    }
+
     /// The control target of `id` in this context: `component.id`, with the
     /// row key inside lists.
     pub(crate) fn target(&self, id: &str) -> String {
-        match &self.0.key {
-            Some(key) => format!("{}.{id}[{}]", self.0.comp, key()),
-            None => format!("{}.{id}", self.0.comp),
+        let mut target = format!("{}.{id}", self.0.comp);
+        for key in &self.0.keys {
+            target.push_str(&format!("[{}]", key()));
         }
+        target
     }
 
     /// Write a session field of this window: the session runtime first,
@@ -302,4 +351,27 @@ impl Page {
     pub(crate) fn header_hidden(&self) -> bool {
         !self.hidden.borrow().is_empty()
     }
+}
+
+/// `draft.field.set(value)`: an action that changes a session draft. A
+/// whole number set on a `f64` field is that number.
+pub fn session_set(ctx: &Ctx, field: Field, value: Value) {
+    let host = host::host();
+    let ty = host
+        .def
+        .sessions
+        .get(field.session)
+        .and_then(|session| session.fields.get(field.field))
+        .map(|(_, ty, _)| ty);
+    let value = match (ty, value) {
+        (Some(crate::protocol::Type::Float), Value::Int(number)) => Value::Float(number as f64),
+        (_, value) => value,
+    };
+    ctx.write(field, value);
+}
+
+/// `draft.field.toggle()` on a `bool`.
+pub fn session_toggle(ctx: &Ctx, field: Field) {
+    let on = ctx.peek(field) == Value::Bool(true);
+    ctx.write(field, Value::Bool(!on));
 }

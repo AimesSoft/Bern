@@ -1,0 +1,12 @@
+[package]
+name = "gallery-core"
+description = "The Bern gallery: core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+gallery-protocol = { path = "../gallery-protocol" }

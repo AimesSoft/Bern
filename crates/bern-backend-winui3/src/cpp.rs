@@ -12,10 +12,11 @@
 //! bindings) live in the context, so every lambda captures nothing, and
 //! each binding re-runs only when a cell it read changes.
 
+use bern_ir::style::{ColorRef, ControlSize, StyleEffect, TransitionKind};
 use bern_ir::{
     Action, Application, BinaryOp, Binding, ComponentArg, ComponentDef, Element, Expr, ExprKind,
-    IfLetNode, IfNode, MatchNode, MediaOp, Node, ParamKind, Prop, Text, WindowDef, WindowInitial,
-    WindowOp, WindowRole,
+    FieldRef, IfLetNode, IfNode, MatchNode, MediaOp, Node, ParamKind, Prop, SessionOp, Text,
+    WindowChrome, WindowDef, WindowInitial, WindowOp, WindowRole,
 };
 use bern_protocol::{
     EnumDef, OperationKind, SessionCommand, Type, TypeTable, Value, session_catalog,
@@ -208,13 +209,49 @@ fn merged_types(app: &Application) -> TypeTable {
 /// A children builder's opening.
 const BUILDER: &str = "[](Parent const& p, Ctx const& c) {";
 
+/// The platform `style!` rules and exemptions name for this target.
+pub const PLATFORM: &str = "windows";
+
+/// A C++ identifier for a name from `style!`: letters, digits and `_`.
+fn ident(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// A color of `style!` or a role keyword as a `B::Paint`.
+fn paint(color: &ColorRef) -> String {
+    match color {
+        ColorRef::Role { role } => format!("B::Paint{{{}}}", string(role)),
+        ColorRef::Fixed { light, dark } => format!(
+            "B::Paint{{nullptr, 0x{:02X}{:02X}{:02X}u, 0x{:02X}{:02X}{:02X}u}}",
+            light.red, light.green, light.blue, dark.red, dark.green, dark.blue
+        ),
+    }
+}
+
+fn role(element: &Element, name: &str) -> Option<String> {
+    element
+        .keyword(name)
+        .map(|role| format!("B::Paint{{{}}}", string(role)))
+}
+
+fn motion_ref(name: &str) -> String {
+    format!("&M_{}", ident(name))
+}
+
 pub struct Generator<'a> {
     app: &'a Application,
+    /// Whether the nodes being written are the items of a sidebar.
+    in_sidebar: std::cell::Cell<bool>,
 }
 
 impl<'a> Generator<'a> {
     pub fn new(app: &'a Application) -> Self {
-        Self { app }
+        Self {
+            app,
+            in_sidebar: std::cell::Cell::new(false),
+        }
     }
 
     fn types(&self) -> &TypeTable {
@@ -252,8 +289,8 @@ impl<'a> Generator<'a> {
             Binding::Local { name, path, .. } => {
                 Self::path(format!("c.Local({})", string(name)), path)
             }
-            // The WinUI runtime keeps no window idle state yet.
-            Binding::Window { .. } => literal(&bern_protocol::Value::Bool(false)),
+            // `window.idle` and the window's size, `window.compact` …
+            Binding::Window { field } => format!("c.WindowFlag({})", string(field)),
         }
     }
 
@@ -267,6 +304,16 @@ impl<'a> Generator<'a> {
                     .collect::<Vec<_>>();
                 format!("R::Variant({})", values.join(", "))
             }
+            ExprKind::If {
+                cond,
+                then,
+                otherwise,
+            } => format!(
+                "({} ? ({}) : ({}))",
+                self.condition(cond),
+                self.expr(then),
+                self.expr(otherwise)
+            ),
             ExprKind::Not { expr } => format!("R::Not({})", self.expr(expr)),
             ExprKind::Neg { expr } => format!("R::Neg({})", self.expr(expr)),
             ExprKind::Binary { op, lhs, rhs } => {
@@ -352,13 +399,16 @@ impl<'a> Generator<'a> {
         null(element.id.as_ref().map(|_| self.id(element)))
     }
 
-    fn field(&self, element: &Element, name: &str) -> Option<String> {
-        let field = element.field(name)?;
-        Some(format!(
+    fn field_ref(&self, field: &FieldRef) -> String {
+        format!(
             "Field{{{}, {}}}",
             self.session_index(&field.session),
             field.field
-        ))
+        )
+    }
+
+    fn field(&self, element: &Element, name: &str) -> Option<String> {
+        element.field(name).map(|field| self.field_ref(field))
     }
 
     fn values(&self, args: &[Expr]) -> String {
@@ -368,6 +418,17 @@ impl<'a> Generator<'a> {
 
     fn action_body(&self, action: &Action) -> String {
         match action {
+            Action::Session { field, op } => {
+                let target = self.field_ref(field);
+                match op {
+                    SessionOp::Set { value } => {
+                        format!("c.Write({target}, {})", self.expr(value))
+                    }
+                    SessionOp::Toggle => {
+                        format!("c.Write({target}, R::Not(c.Peek({target})))")
+                    }
+                }
+            }
             Action::Engine { command, args } => {
                 format!("Dispatch(c, {command}, {})", self.values(args))
             }
@@ -429,7 +490,64 @@ impl<'a> Generator<'a> {
         element.expr("enabled").map(|expr| self.getter(expr))
     }
 
+    /// A length: a number, or an expression the length follows.
+    fn len(&self, element: &Element, name: &str) -> Option<String> {
+        match element.prop(name)? {
+            Prop::Number { value } => Some(format!("B::Len({})", float(*value))),
+            Prop::Expr { expr } => Some(format!("B::Len(Get({}))", self.getter(expr))),
+            _ => None,
+        }
+    }
+
+    /// `animate`'s spring, for the bound lengths of an element.
+    fn animate(element: &Element) -> Option<String> {
+        element.keyword("animate").map(motion_ref)
+    }
+
+    fn reflow(element: &Element) -> Option<String> {
+        element.keyword("reflow").map(motion_ref)
+    }
+
+    /// The style an element of `kind` (and `variant`) uses, `&S_name`.
+    fn style(&self, kind: &str, variant: Option<&str>) -> Option<String> {
+        bern_target_api::style::resolve(self.app, PLATFORM, kind, variant)
+            .map(|style| format!("&S_{}", style.name))
+    }
+
+    /// The kinds of file `pick:` asks for, or a drop area takes.
+    fn files(element: &Element) -> Option<String> {
+        element
+            .keyword("files")
+            .map(string)
+            .or_else(|| element.field("pick").map(|_| string("any")))
+    }
+
     fn nodes(&self, out: &mut Out, nodes: &[Node]) {
+        // An inspector stands beside the other content of its container.
+        let inspector = nodes.iter().find_map(|node| match node {
+            Node::Element(element) if element.kind == "Inspector" => Some(element),
+            _ => None,
+        });
+        if let Some(inspector) = inspector {
+            let others: Vec<Node> = nodes
+                .iter()
+                .filter(
+                    |node| !matches!(node, Node::Element(element) if element.kind == "Inspector"),
+                )
+                .cloned()
+                .collect();
+            out.open(format!(
+                "B::Inspector(p, c, {},",
+                designated(&[
+                    ("presented", self.field(inspector, "presented")),
+                    ("width", Self::number(inspector, "width")),
+                ])
+            ));
+            self.children(out, "", &others, ",");
+            self.children(out, "", &inspector.children, ");");
+            out.indent -= 1;
+            return;
+        }
         for node in nodes {
             self.node(out, node);
         }
@@ -448,9 +566,93 @@ impl<'a> Generator<'a> {
         self.children(out, head, nodes, ");");
     }
 
+    /// A container's call: with `stagger`, its children take turns
+    /// appearing.
+    fn container(&self, out: &mut Out, element: &Element, head: &str) {
+        match element.number("stagger") {
+            Some(step) => {
+                out.open(format!("{head}[](Parent const& p, Ctx const& outer) {{"));
+                out.line(format!(
+                    "auto const c = B::Staggered(outer, {});",
+                    float(step)
+                ));
+                self.nodes(out, &element.children);
+                out.close("});");
+            }
+            None => self.call(out, head, &element.children),
+        }
+    }
+
+    /// Where an element sits on its `Rail`, for `B::Place`.
+    fn placement(&self, element: &Element) -> Option<String> {
+        let fraction = |name: &str| self.len(element, name);
+        let (at, from, to) = (fraction("at"), fraction("from"), fraction("to"));
+        (at.is_some() || from.is_some()).then(|| {
+            designated(&[
+                ("at", at),
+                ("from", from),
+                ("to", to),
+                ("animate", Self::animate(element)),
+            ])
+        })
+    }
+
+    /// The motion and appearance props of an element, for `B::Decorate`.
+    fn decoration(&self, element: &Element) -> Option<String> {
+        let transition = |name: &str| {
+            element
+                .keyword(name)
+                .map(|transition| format!("&X_{}", ident(transition)))
+        };
+        let hero = element.keyword("hero").map(string);
+        let hero_key = hero
+            .as_ref()
+            .and(element.expr("hero_key"))
+            .map(|key| self.getter(key));
+        let fields = [
+            ("appear", transition("appear")),
+            ("disappear", transition("disappear")),
+            ("hero", hero.clone()),
+            ("heroKey", hero_key),
+            ("heroMotion", hero.as_ref().map(|_| motion_ref("hero"))),
+            (
+                "reveal",
+                (element.keyword("reveal") == Some("hover")).then(|| "true".to_string()),
+            ),
+            ("appearance", Self::keyword(element, "appearance")),
+            ("nudge", element.expr("nudge").map(|when| self.getter(when))),
+            (
+                "nudgeMotion",
+                element.expr("nudge").map(|_| motion_ref("jelly")),
+            ),
+            ("scrollScale", Self::number(element, "scroll_scale")),
+            ("scrollOpacity", Self::number(element, "scroll_opacity")),
+        ];
+        fields
+            .iter()
+            .any(|(_, value)| value.is_some())
+            .then(|| designated(&fields))
+    }
+
     fn node(&self, out: &mut Out, node: &Node) {
         match node {
-            Node::Element(element) => self.element(out, element),
+            Node::Element(element) => {
+                let placement = self.placement(element);
+                if let Some(spec) = &placement {
+                    out.open(format!("B::Place(p, c, {spec}, {BUILDER}"));
+                }
+                match self.decoration(element) {
+                    Some(spec) => {
+                        out.open(format!("B::Decorate(p, c, {spec}, {BUILDER}"));
+                        self.element(out, element);
+                        out.close("});");
+                    }
+                    None => self.element(out, element),
+                }
+                if placement.is_some() {
+                    out.close("});");
+                }
+            }
             Node::Component(reference) => {
                 let component = self.app.component(&reference.component).expect("component");
                 let args: Vec<_> = component
@@ -588,7 +790,8 @@ impl<'a> Generator<'a> {
         })
     }
 
-    /// Name of an enum variant value, for selections.
+    /// Name of an enum variant value, for selections: the literal's, or
+    /// looked up when the value is computed.
     fn variant_name(&self, expr: &Expr) -> String {
         match (&expr.kind, &expr.ty) {
             (ExprKind::Variant { variant, .. }, Type::Enum { name }) => self
@@ -596,6 +799,11 @@ impl<'a> Generator<'a> {
                 .enum_def(name)
                 .map(|def| string(&def.variants[*variant as usize].name))
                 .unwrap_or_else(|| "\"\"".into()),
+            (_, Type::Enum { name }) => format!(
+                "[](Ctx const& c) {{ return R::VariantName({}, {}); }}",
+                self.expr(expr),
+                string(name)
+            ),
             _ => "\"\"".into(),
         }
     }
@@ -616,6 +824,19 @@ impl<'a> Generator<'a> {
         }
     }
 
+    /// `B::Shortcut(…)` for an element with `shortcut:`, running the
+    /// control's `activate` (or `focus` for search fields) while mounted.
+    fn shortcut(&self, out: &mut Out, element: &Element, action: &str) {
+        if let Some(keys) = element.keyword("shortcut") {
+            out.line(format!(
+                "B::Shortcut(c, {}, {}, {});",
+                string(keys),
+                self.id(element),
+                string(action)
+            ));
+        }
+    }
+
     fn element(&self, out: &mut Out, element: &Element) {
         match element.kind.as_str() {
             "Text" => out.line(format!(
@@ -624,6 +845,7 @@ impl<'a> Generator<'a> {
                     ("content", self.text_prop(element, "content")),
                     ("style", Self::keyword(element, "style")),
                     ("emphasis", Self::keyword(element, "emphasis")),
+                    ("mark", Self::keyword(element, "mark")),
                 ])
             )),
             "Label" => out.line(format!(
@@ -634,31 +856,38 @@ impl<'a> Generator<'a> {
                     ("style", Self::keyword(element, "style")),
                 ])
             )),
-            "Button" => out.line(format!(
-                "B::Button(p, c, {});",
-                designated(&[
+            "Button" | "IconButton" => {
+                let kind = element.kind.as_str();
+                let props = designated(&[
                     ("id", Some(self.id(element))),
                     ("label", self.text_prop(element, "label")),
-                    ("icon", Self::icon(element, "icon")),
+                    (
+                        "icon",
+                        if kind == "IconButton" {
+                            Some(string(element.icon("icon").unwrap_or("circle")))
+                        } else {
+                            Self::icon(element, "icon")
+                        },
+                    ),
                     ("role", Self::keyword(element, "role")),
                     ("prominence", Self::keyword(element, "prominence")),
                     ("enabled", self.enabled(element)),
                     ("action", self.action(element)),
-                ])
-            )),
-            "IconButton" => out.line(format!(
-                "B::IconButton(p, c, {});",
-                designated(&[
-                    ("id", Some(self.id(element))),
-                    (
-                        "icon",
-                        Some(string(element.icon("icon").unwrap_or("circle")))
-                    ),
-                    ("label", self.text_prop(element, "label")),
-                    ("enabled", self.enabled(element)),
-                    ("action", self.action(element)),
-                ])
-            )),
+                    ("style", self.style(kind, element.keyword("variant"))),
+                    ("pick", self.field(element, "pick")),
+                    ("files", Self::files(element)),
+                ]);
+                if kind == "Button" && !element.children.is_empty() {
+                    self.call(
+                        out,
+                        &format!("B::ContentButton(p, c, {props}, "),
+                        &element.children,
+                    );
+                } else {
+                    out.line(format!("B::{kind}(p, c, {props});"));
+                }
+                self.shortcut(out, element, "activate");
+            }
             "TextInput" => out.line(format!(
                 "B::TextInput(p, c, {});",
                 designated(&[
@@ -670,16 +899,32 @@ impl<'a> Generator<'a> {
                     ("submit", self.action(element)),
                 ])
             )),
-            "Search" => out.line(format!("B::Search(p, c, {});", self.search_props(element))),
-            "Switch" => out.line(format!(
-                "B::Switch(p, c, {});",
-                designated(&[
-                    ("id", Some(self.id(element))),
-                    ("label", self.text_prop(element, "label")),
-                    ("field", self.field(element, "value")),
-                    ("style", Self::keyword(element, "style")),
-                ])
-            )),
+            "Search" => {
+                let props = self.search_props(element);
+                if element.children.is_empty() {
+                    out.line(format!("B::Search(p, c, {props}, nullptr);"));
+                } else {
+                    self.call(
+                        out,
+                        &format!("B::Search(p, c, {props}, "),
+                        &element.children,
+                    );
+                }
+                self.shortcut(out, element, "focus");
+            }
+            "Switch" => {
+                out.line(format!(
+                    "B::Switch(p, c, {});",
+                    designated(&[
+                        ("id", Some(self.id(element))),
+                        ("label", self.text_prop(element, "label")),
+                        ("field", self.field(element, "value")),
+                        ("style", Self::keyword(element, "style")),
+                        ("icon", Self::icon(element, "icon")),
+                    ])
+                ));
+                self.shortcut(out, element, "activate");
+            }
             "Slider" => out.line(format!(
                 "B::Slider(p, c, {});",
                 designated(&[
@@ -707,6 +952,14 @@ impl<'a> Generator<'a> {
                 &format!("B::Form(p, c, {}, ", null(self.text_prop(element, "title"))),
                 &element.children,
             ),
+            "Section" if self.in_sidebar.get() => self.call(
+                out,
+                &format!(
+                    "B::SidebarSection(p, c, {}, ",
+                    null(self.text_prop(element, "title"))
+                ),
+                &element.children,
+            ),
             "Section" => self.call(
                 out,
                 &format!(
@@ -716,8 +969,27 @@ impl<'a> Generator<'a> {
                 ),
                 &element.children,
             ),
-            "Column" | "Row" => self.call(
+            "SidebarItem" => {
+                let Some(value) = element.expr("value") else {
+                    return;
+                };
+                out.line(format!(
+                    "B::SidebarItem(p, c, {});",
+                    designated(&[
+                        ("value", Some(self.getter(value))),
+                        ("name", Some(self.variant_name(value))),
+                        ("label", self.text_prop(element, "label")),
+                        ("icon", Self::icon(element, "icon")),
+                        (
+                            "style",
+                            self.style("SidebarItem", element.keyword("variant"))
+                        ),
+                    ])
+                ));
+            }
+            "Column" | "Row" => self.container(
                 out,
+                element,
                 &format!(
                     "B::Stack(p, c, {}, ",
                     designated(&[
@@ -729,43 +1001,70 @@ impl<'a> Generator<'a> {
                                 "row"
                             }))
                         ),
-                        ("gap", Self::number(element, "gap")),
-                        ("padding", Self::number(element, "padding")),
+                        ("gap", self.len(element, "gap")),
+                        ("padding", self.len(element, "padding")),
+                        ("width", self.len(element, "width")),
+                        ("height", self.len(element, "height")),
                         ("align", Self::keyword(element, "align")),
+                        ("animate", Self::animate(element)),
+                        ("reflow", Self::reflow(element)),
                     ])
                 ),
-                &element.children,
             ),
-            "Grid" => self.call(
+            "Grid" => self.container(
                 out,
+                element,
                 &format!(
                     "B::Grid(p, c, {}, ",
                     designated(&[
-                        ("minWidth", Self::number(element, "min_width")),
-                        ("gap", Self::number(element, "gap")),
-                        ("padding", Self::number(element, "padding")),
+                        ("minWidth", self.len(element, "min_width")),
+                        ("gap", self.len(element, "gap")),
+                        ("padding", self.len(element, "padding")),
+                        ("animate", Self::animate(element)),
+                        ("reflow", Self::reflow(element)),
+                    ])
+                ),
+            ),
+            "Stack" => self.container(
+                out,
+                element,
+                &format!(
+                    "B::Layers(p, c, {}, ",
+                    designated(&[
+                        ("align", Self::keyword(element, "align")),
+                        ("width", self.len(element, "width")),
+                        ("height", self.len(element, "height")),
+                        ("animate", Self::animate(element)),
+                        ("reflow", Self::reflow(element)),
+                    ])
+                ),
+            ),
+            "Rail" => self.call(
+                out,
+                &format!(
+                    "B::Rail(p, c, {}, ",
+                    designated(&[
+                        ("axis", Self::keyword(element, "axis")),
+                        ("anchor", Self::keyword(element, "anchor")),
                     ])
                 ),
                 &element.children,
             ),
-            "Stack" => self.call(
-                out,
-                &format!(
-                    "B::Layers(p, c, {}, ",
-                    designated(&[("align", Self::keyword(element, "align"))])
-                ),
-                &element.children,
-            ),
-            "Image" => out.line(format!(
-                "B::Image(p, c, {});",
-                designated(&[
-                    ("source", element.resource("source").map(string)),
-                    ("label", self.text_prop(element, "label")),
-                    ("width", Self::number(element, "width")),
-                    ("height", Self::number(element, "height")),
-                    ("fit", Self::keyword(element, "fit")),
-                ])
-            )),
+            "Image" => {
+                let url = element.expr("source").map(|expr| self.getter(expr));
+                out.line(format!(
+                    "B::Image(p, c, {});",
+                    designated(&[
+                        ("source", element.resource("source").map(string)),
+                        ("url", url),
+                        ("label", self.text_prop(element, "label")),
+                        ("width", self.len(element, "width")),
+                        ("height", self.len(element, "height")),
+                        ("fit", Self::keyword(element, "fit")),
+                        ("animate", Self::animate(element)),
+                    ])
+                ))
+            }
             "Progress" => out.line(format!(
                 "B::Progress(p, c, {});",
                 designated(&[
@@ -777,13 +1076,21 @@ impl<'a> Generator<'a> {
                     ("label", self.text_prop(element, "label")),
                 ])
             )),
+            "Canvas" => self.canvas(out, element),
             "Spacer" => out.line("B::Spacer(p);"),
-            "Divider" => out.line("B::Divider(p);"),
+            "Divider" => out.line("B::Divider(p, c);"),
             "ScrollView" => self.call(
                 out,
                 &format!(
                     "B::ScrollView(p, c, {}, ",
-                    null(Self::keyword(element, "axis"))
+                    designated(&[
+                        ("axis", Self::keyword(element, "axis")),
+                        ("snap", Self::keyword(element, "snap")),
+                        ("position", self.field(element, "position")),
+                        ("arrival", Self::keyword(element, "arrival")),
+                        ("nudgeMotion", Some(motion_ref("jelly"))),
+                        ("reflow", Self::reflow(element)),
+                    ])
                 ),
                 &element.children,
             ),
@@ -807,13 +1114,111 @@ impl<'a> Generator<'a> {
                     &element.children,
                 );
             }
-            "List" => self.call(out, "B::List(p, c, ", &element.children),
+            "List" => {
+                if element.expr("items").is_some() {
+                    out.open(format!("B::List(p, c, {BUILDER}"));
+                    self.for_each(out, element);
+                    out.close("});");
+                } else {
+                    self.call(out, "B::List(p, c, ", &element.children);
+                }
+            }
             "ForEach" => self.for_each(out, element),
             "Tabs" => self.tabs(out, element),
             "Adaptive" => self.adaptive(out, element),
             "Menu" => self.menu(out, element),
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "WindowSet"
-            | "Window" | "Layout" | "MenuItem" => {
+            "PopoverButton" => {
+                self.call(
+                    out,
+                    &format!(
+                        "B::PopoverButton(p, c, {}, ",
+                        designated(&[
+                            ("id", Some(self.id(element))),
+                            ("label", self.text_prop(element, "label")),
+                            ("icon", Self::icon(element, "icon")),
+                            ("presented", self.field(element, "presented")),
+                        ])
+                    ),
+                    &element.children,
+                );
+                self.shortcut(out, element, "activate");
+            }
+            "SplitButton" => {
+                self.call(
+                    out,
+                    &format!(
+                        "B::SplitButton(p, c, {}, ",
+                        designated(&[
+                            ("id", Some(self.id(element))),
+                            ("label", self.text_prop(element, "label")),
+                            ("icon", Self::icon(element, "icon")),
+                            ("field", self.field(element, "value")),
+                            ("more", self.text_prop(element, "more_label")),
+                        ])
+                    ),
+                    &element.children,
+                );
+                self.shortcut(out, element, "activate");
+            }
+            "Toast" => {
+                let key = element.expr("key").map(|key| self.getter(key)).or_else(|| {
+                    element.text("content").map(|text| {
+                        format!(
+                            "[](Ctx const& c) {{ return Value::Text(Utf8({})); }}",
+                            self.text(text)
+                        )
+                    })
+                });
+                out.line(format!(
+                    "B::Toast(p, c, {});",
+                    designated(&[
+                        ("content", self.text_prop(element, "content")),
+                        ("icon", Self::icon(element, "icon")),
+                        ("key", key),
+                        ("duration", Self::number(element, "duration")),
+                        ("motion", Some(motion_ref("bouncy"))),
+                    ])
+                ));
+            }
+            "Drop" => self.call(
+                out,
+                &format!(
+                    "B::Drop(p, c, {}, ",
+                    designated(&[
+                        ("id", Some(self.id(element))),
+                        ("label", self.text_prop(element, "label")),
+                        ("field", self.field(element, "value")),
+                        ("files", Self::keyword(element, "files")),
+                        ("over", self.field(element, "over")),
+                        (
+                            "opens",
+                            (element.keyword("opens") == Some("true")).then(|| "true".to_string())
+                        ),
+                        ("action", self.action(element)),
+                    ])
+                ),
+                &element.children,
+            ),
+            "Pinch" | "Swipe" => self.call(
+                out,
+                &format!(
+                    "B::{}(p, c, {}, ",
+                    element.kind,
+                    designated(&[
+                        ("id", Some(self.id(element))),
+                        ("label", self.text_prop(element, "label")),
+                        ("field", self.field(element, "value")),
+                        ("min", Self::number(element, "min")),
+                        ("max", Self::number(element, "max")),
+                        ("axis", Self::keyword(element, "axis")),
+                        ("distance", Self::number(element, "distance")),
+                        ("action", self.action(element)),
+                    ])
+                ),
+                &element.children,
+            ),
+            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarFooter" | "WindowSet"
+            | "Window" | "Layout" | "MenuItem" | "Inspector" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),
@@ -870,9 +1275,14 @@ impl<'a> Generator<'a> {
             (Some(items), Some(template), Some(Prop::Key { field, .. })) => self.call(
                 out,
                 &format!(
-                    "B::Each(p, c, {}, {field}, {}, ",
-                    self.getter(items),
-                    string(&template.var)
+                    "B::Each(p, c, {}, ",
+                    designated(&[
+                        ("items", Some(self.getter(items))),
+                        ("key", Some(field.to_string())),
+                        ("variable", Some(string(&template.var))),
+                        ("stagger", Self::number(element, "stagger")),
+                        ("reflow", Self::reflow(element)),
+                    ])
                 ),
                 &element.children,
             ),
@@ -896,6 +1306,8 @@ impl<'a> Generator<'a> {
                 ("label", self.text_prop(element, "label")),
                 ("controls", (!controls).then(|| "false".to_string())),
                 ("fit", Self::keyword(element, "fit")),
+                ("corner", self.len(element, "corner")),
+                ("animate", Self::animate(element)),
             ])
         ));
     }
@@ -921,6 +1333,8 @@ impl<'a> Generator<'a> {
         self.call(out, &format!("B::Query(p, c, {props}, "), &element.children);
     }
 
+    /// The navigation view: its sidebar's items may come and go with `if`,
+    /// `match` and `ForEach`, each registering while it is mounted.
     fn split_view(&self, out: &mut Out, element: &Element) {
         let child = |kind: &str| {
             element.children.iter().find_map(|node| match node {
@@ -934,59 +1348,38 @@ impl<'a> Generator<'a> {
         let Some(selection) = self.field(sidebar, "selection") else {
             return;
         };
-        // Sidebar groups: titled sections, and untitled runs of items.
-        let mut sections: Vec<(Option<String>, Vec<&Element>)> = Vec::new();
         let mut search = None;
+        let mut footer = None;
+        let mut content = Vec::new();
         for node in &sidebar.children {
-            let Node::Element(child) = node else { continue };
-            match child.kind.as_str() {
-                "Search" => search = Some(child),
-                "Section" => {
-                    let items = child
-                        .children
-                        .iter()
-                        .filter_map(|node| match node {
-                            Node::Element(item) if item.kind == "SidebarItem" => Some(item),
-                            _ => None,
-                        })
-                        .collect();
-                    sections.push((self.text_prop(child, "title"), items));
-                }
-                "SidebarItem" => match sections.last_mut() {
-                    Some((None, items)) => items.push(child),
-                    _ => sections.push((None, vec![child])),
-                },
-                _ => {}
+            match node {
+                Node::Element(child) if child.kind == "Search" => search = Some(child),
+                Node::Element(child) if child.kind == "SidebarFooter" => footer = Some(child),
+                other => content.push(other.clone()),
             }
         }
-        let search = match search.filter(|search| search.field("value").is_some()) {
-            Some(search) => format!("B::SearchProps{}", self.search_props(search)),
-            None => "std::nullopt".into(),
-        };
+        let search = search
+            .filter(|search| search.field("value").is_some())
+            .map(|search| format!("B::SearchProps{}", self.search_props(search)));
         out.open(format!(
-            "B::SplitView(p, c, {}, {selection}, {search}, std::vector<B::SidebarSection>{{",
-            self.optional_id(sidebar)
+            "B::SplitView(p, c, {},",
+            designated(&[
+                ("id", sidebar.id.as_ref().map(|_| self.id(sidebar))),
+                ("selection", Some(selection)),
+                (
+                    "fallback",
+                    sidebar.expr("fallback").map(|value| self.getter(value))
+                ),
+                ("search", search),
+            ])
         ));
-        for (title, items) in &sections {
-            out.open(format!("B::SidebarSection{{{}, {{", null(title.clone())));
-            for item in items {
-                let Some(value) = item.expr("value") else {
-                    continue;
-                };
-                out.line(format!(
-                    "B::SidebarItem{},",
-                    designated(&[
-                        ("value", Some(self.getter(value))),
-                        ("name", Some(self.variant_name(value))),
-                        ("label", self.text_prop(item, "label")),
-                        ("icon", Self::icon(item, "icon")),
-                    ])
-                ));
-            }
-            out.close("}},");
+        match footer {
+            Some(footer) => self.children(out, "", &footer.children, ","),
+            None => out.line("nullptr,"),
         }
-        out.close("},");
-        out.indent += 1;
+        self.in_sidebar.set(true);
+        self.children(out, "", &content, ",");
+        self.in_sidebar.set(false);
         self.children(out, "", &detail.children, ");");
         out.indent -= 1;
     }
@@ -1022,8 +1415,9 @@ impl<'a> Generator<'a> {
         out.indent -= 1;
     }
 
-    /// One builder per layout size; the runtime picks one by the width
-    /// available to it and the breakpoint from `[layouts]`.
+    /// One builder per layout size; the runtime picks the size by the width
+    /// available and the breakpoints of `[layouts]`, and shows the layout of
+    /// a size without one of its own as the next larger, else smaller.
     fn adaptive(&self, out: &mut Out, element: &Element) {
         let layout = |size: &str| {
             element.children.iter().find_map(|node| match node {
@@ -1031,14 +1425,17 @@ impl<'a> Generator<'a> {
                 _ => None,
             })
         };
-        out.open(format!("B::Adaptive(p, c, {},", self.optional_id(element)));
-        for (size, suffix) in [("compact", ","), ("expanded", ");")] {
+        out.open(format!(
+            "B::Adaptive(p, c, {}, std::array<Build, 4>{{",
+            self.optional_id(element)
+        ));
+        for size in ["compact", "medium", "expanded", "large"] {
             match layout(size) {
-                Some(layout) => self.children(out, "", &layout.children, suffix),
-                None => out.line(format!("nullptr{suffix}")),
+                Some(layout) => self.children(out, "", &layout.children, ","),
+                None => out.line("nullptr,"),
             }
         }
-        out.indent -= 1;
+        out.close("});");
     }
 
     /// A menu button and its items; dividers are empty items.
@@ -1049,11 +1446,15 @@ impl<'a> Generator<'a> {
             null(self.text_prop(element, "label")),
             null(Self::icon(element, "icon")),
         ));
+        let mut shortcuts = Vec::new();
         for node in &element.children {
             let Node::Element(item) = node else { continue };
             if item.kind == "Divider" {
                 out.line("std::nullopt,");
                 continue;
+            }
+            if item.keyword("shortcut").is_some() {
+                shortcuts.push(item);
             }
             out.line(format!(
                 "B::MenuItemDef{},",
@@ -1064,45 +1465,244 @@ impl<'a> Generator<'a> {
                     ("role", Self::keyword(item, "role")),
                     ("enabled", self.enabled(item)),
                     ("action", self.action(item)),
+                    ("pick", self.field(item, "pick")),
+                    ("files", Self::files(item)),
+                    ("shortcut", Self::keyword(item, "shortcut")),
                 ])
             ));
         }
         out.close("});");
+        for item in shortcuts {
+            self.shortcut(out, item, "activate");
+        }
     }
 
+    /// Tabs whose items may come and go: each `Tab` registers while it is
+    /// mounted.
     fn tabs(&self, out: &mut Out, element: &Element) {
         let Some(selection) = self.field(element, "selection") else {
             return;
         };
-        let tabs: Vec<(&Element, &Expr)> = element
-            .children
-            .iter()
-            .filter_map(|node| match node {
-                Node::Element(tab) => tab.expr("value").map(|value| (tab, value)),
-                _ => None,
-            })
-            .collect();
         out.open(format!(
-            "B::Tabs(p, c, {}, {selection}, std::vector<B::TabSpec>{{",
-            self.optional_id(element),
+            "B::Tabs(p, c, {}, {BUILDER}",
+            designated(&[
+                ("id", element.id.as_ref().map(|_| self.id(element))),
+                ("selection", Some(selection)),
+                (
+                    "fallback",
+                    element.expr("fallback").map(|value| self.getter(value))
+                ),
+            ])
         ));
-        for (tab, value) in &tabs {
-            let head = designated(&[
-                ("value", Some(self.getter(value))),
-                ("name", Some(self.variant_name(value))),
-                ("label", self.text_prop(tab, "label")),
-                ("icon", Self::icon(tab, "icon")),
-            ]);
-            // The builder is the last field: leave the braces open.
-            let head = &head[..head.len() - 1];
-            let separator = if head.ends_with('{') { "" } else { ", " };
-            self.children(
-                out,
-                &format!("B::TabSpec{head}{separator}.build = "),
-                &tab.children,
-                "},",
-            );
+        self.tab_items(out, &element.children);
+        out.close("});");
+    }
+
+    fn tab_items(&self, out: &mut Out, nodes: &[Node]) {
+        for node in nodes {
+            match node {
+                Node::Element(tab) if tab.kind == "Tab" => {
+                    let Some(value) = tab.expr("value") else {
+                        continue;
+                    };
+                    let head = designated(&[
+                        ("value", Some(self.getter(value))),
+                        ("name", Some(self.variant_name(value))),
+                        ("label", self.text_prop(tab, "label")),
+                        ("icon", Self::icon(tab, "icon")),
+                    ]);
+                    // The builder is the last field: leave the braces open.
+                    let head = &head[..head.len() - 1];
+                    let separator = if head.ends_with('{') { "" } else { ", " };
+                    self.children(
+                        out,
+                        &format!("B::Tab(p, c, B::TabSpec{head}{separator}.build = "),
+                        &tab.children,
+                        "});",
+                    );
+                }
+                Node::Element(other) if other.kind == "ForEach" => {
+                    if let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
+                        (other.expr("items"), &other.template, other.prop("key"))
+                    {
+                        out.open(format!(
+                            "B::Each(p, c, {}, {BUILDER}",
+                            designated(&[
+                                ("items", Some(self.getter(items))),
+                                ("key", Some(field.to_string())),
+                                ("variable", Some(string(&template.var))),
+                            ])
+                        ));
+                        self.tab_items(out, &other.children);
+                        out.close("});");
+                    }
+                }
+                Node::If(branch) => {
+                    let mut cases = String::from("[](Ctx const& c) -> std::optional<int> { ");
+                    for (index, (condition, _)) in branch.branches.iter().enumerate() {
+                        cases.push_str(&format!(
+                            "if ({}) return {index}; ",
+                            self.condition(condition)
+                        ));
+                    }
+                    if branch.otherwise.is_empty() {
+                        cases.push_str("return std::nullopt; }");
+                    } else {
+                        cases.push_str(&format!("return {}; }}", branch.branches.len()));
+                    }
+                    out.open(format!("B::When(p, c, {cases}, std::vector<Build>{{"));
+                    for body in branch
+                        .branches
+                        .iter()
+                        .map(|(_, body)| body)
+                        .chain((!branch.otherwise.is_empty()).then_some(&branch.otherwise))
+                    {
+                        out.open(BUILDER);
+                        self.tab_items(out, body);
+                        out.close("},");
+                    }
+                    out.close("});");
+                }
+                Node::IfLet(branch) => {
+                    out.open(format!(
+                        "B::IfLet(p, c, {}, {}, {BUILDER}",
+                        string(&branch.var),
+                        self.getter(&branch.value)
+                    ));
+                    self.tab_items(out, &branch.then);
+                    if branch.otherwise.is_empty() {
+                        out.close("});");
+                    } else {
+                        out.close(format!("}}, {BUILDER}"));
+                        out.indent += 1;
+                        self.tab_items(out, &branch.otherwise);
+                        out.close("});");
+                    }
+                }
+                Node::Match(branch) => {
+                    out.open(format!(
+                        "B::Match(p, c, {}, std::vector<B::MatchArm>{{",
+                        self.getter(&branch.value)
+                    ));
+                    for arm in &branch.arms {
+                        let bindings: Vec<String> = arm
+                            .bindings
+                            .iter()
+                            .map(|binding| {
+                                format!("{{{}, {}}}", string(&binding.name), binding.field)
+                            })
+                            .collect();
+                        out.open(format!(
+                            "B::Arm({}, {BUILDER}",
+                            arm.variant
+                                .map(|variant| format!("{variant}u"))
+                                .unwrap_or_else(|| "std::nullopt".into())
+                        ));
+                        self.tab_items(out, &arm.body);
+                        if bindings.is_empty() {
+                            out.close("}),");
+                        } else {
+                            out.close(format!("}}, {{{}}}),", bindings.join(", ")));
+                        }
+                    }
+                    out.close("});");
+                }
+                _ => {}
+            }
         }
+    }
+
+    /// A `Canvas`: its drawing elements in order, read in one getter so the
+    /// canvas redraws when the state they show changes.
+    fn canvas(&self, out: &mut Out, element: &Element) {
+        let mut ops = Vec::new();
+        for node in &element.children {
+            let Node::Element(child) = node else { continue };
+            let number = |name: &str| Self::number(child, name);
+            match child.kind.as_str() {
+                "Shape" => {
+                    let fill_from = match (child.expr("fill_from"), child.resource("fill_from")) {
+                        (Some(expr), _) => Some(format!("R::Url({})", self.expr(expr))),
+                        (None, Some(name)) => Some(format!("B::ResourceUrl({})", string(name))),
+                        (None, None) => None,
+                    };
+                    ops.push(format!(
+                        "B::ShapeOp{}",
+                        designated(&[
+                            (
+                                "kind",
+                                Some(string(child.keyword("kind").unwrap_or("rect")))
+                            ),
+                            ("x", number("x")),
+                            ("y", number("y")),
+                            ("width", number("width")),
+                            ("height", number("height")),
+                            ("corner", number("corner")),
+                            ("fill", role(child, "fill")),
+                            ("fillFrom", fill_from),
+                            ("fade", Self::keyword(child, "fade")),
+                            ("stroke", role(child, "stroke")),
+                            ("strokeWidth", number("stroke_width")),
+                            ("opacity", number("opacity")),
+                        ])
+                    ));
+                }
+                "Series" => {
+                    let values = child
+                        .expr("values")
+                        .map(|list| format!("R::Numbers({})", self.expr(list)));
+                    let max = match child.prop("max") {
+                        Some(Prop::Expr { expr }) => {
+                            Some(format!("R::AsDouble({})", self.expr(expr)))
+                        }
+                        Some(Prop::Number { value }) => Some(float(*value)),
+                        _ => None,
+                    };
+                    ops.push(format!(
+                        "B::SeriesOp{}",
+                        designated(&[
+                            ("values", values),
+                            ("max", max),
+                            (
+                                "area",
+                                (child.keyword("kind") == Some("area")).then(|| "true".to_string())
+                            ),
+                            ("fill", role(child, "fill")),
+                            ("stroke", role(child, "stroke")),
+                            ("strokeWidth", number("stroke_width")),
+                            ("opacity", number("opacity")),
+                        ])
+                    ));
+                }
+                "Pattern" => ops.push(format!(
+                    "B::PatternOp{}",
+                    designated(&[
+                        (
+                            "pattern",
+                            child
+                                .keyword("name")
+                                .map(|name| format!("&P_{}", ident(name)))
+                        ),
+                        ("opacity", number("opacity")),
+                    ])
+                )),
+                _ => {}
+            }
+        }
+        out.open(format!(
+            "B::Canvas(p, c, {}, [](Ctx const& c) {{",
+            designated(&[
+                ("width", self.len(element, "width")),
+                ("height", self.len(element, "height")),
+                ("label", self.text_prop(element, "label")),
+                ("animate", Self::animate(element)),
+            ])
+        ));
+        out.line("std::vector<B::DrawOp> ops;");
+        for op in ops {
+            out.line(format!("ops.push_back({op});"));
+        }
+        out.line("return ops;");
         out.close("});");
     }
 
@@ -1155,6 +1755,212 @@ impl<'a> Generator<'a> {
         }
     }
 
+    /// One look of a style: a state's colors and transforms, assigned
+    /// through `target` (`s.base.` or `s.hover->`).
+    fn look(out: &mut Out, target: &str, effects: &[StyleEffect]) {
+        for effect in effects {
+            match effect {
+                StyleEffect::Background { color } => {
+                    out.line(format!("{target}background = {};", paint(color)))
+                }
+                StyleEffect::Foreground { color } => {
+                    out.line(format!("{target}foreground = {};", paint(color)))
+                }
+                StyleEffect::Border { color, width } => {
+                    out.line(format!("{target}border = {};", paint(color)));
+                    out.line(format!("{target}borderWidth = {};", float(*width)));
+                }
+                StyleEffect::Fill { color } => {
+                    out.line(format!("{target}fill = {};", paint(color)))
+                }
+                StyleEffect::Indicator { color, edge, width } => {
+                    out.line(format!("{target}indicator = {};", paint(color)));
+                    out.line(format!(
+                        "{target}indicatorEdge = {};",
+                        string(&format!("{edge:?}").to_lowercase())
+                    ));
+                    out.line(format!("{target}indicatorWidth = {};", float(*width)));
+                }
+                StyleEffect::Scale { x, y, motion } => {
+                    out.line(format!("{target}scaleX = {};", float(*x)));
+                    out.line(format!("{target}scaleY = {};", float(*y)));
+                    out.line(format!("{target}motion = {};", motion_ref(motion)));
+                }
+                StyleEffect::Offset { x, y, motion } => {
+                    out.line(format!("{target}offsetX = {};", float(*x)));
+                    out.line(format!("{target}offsetY = {};", float(*y)));
+                    out.line(format!("{target}motion = {};", motion_ref(motion)));
+                }
+                StyleEffect::Opacity { value, motion } => {
+                    out.line(format!("{target}opacity = {};", float(*value)));
+                    out.line(format!("{target}motion = {};", motion_ref(motion)));
+                }
+                StyleEffect::Shadow { radius, y, opacity } => out.line(format!(
+                    "{target}shadow = std::array<double, 3>{{{}, {}, {}}};",
+                    float(*radius),
+                    float(*y),
+                    float(*opacity)
+                )),
+                StyleEffect::System => out.line(format!("{target}system = true;")),
+                StyleEffect::Nothing => out.line(format!("{target}quiet = true;")),
+                StyleEffect::Corner { .. }
+                | StyleEffect::Padding { .. }
+                | StyleEffect::Size { .. } => {}
+            }
+        }
+    }
+
+    /// The motion tokens (`M_`), transitions (`X_`), patterns (`P_`) and
+    /// style overrides (`S_`) of `style!`.
+    fn style_tables(&self, out: &mut Out) {
+        let style = &self.app.style;
+        out.line("// Motion tokens: period and damping ratio of each spring.");
+        for token in &style.motion {
+            out.line(format!(
+                "[[maybe_unused]] static B::Motion const M_{}{{{}, {}}};",
+                ident(&token.name),
+                float(token.period),
+                float(token.damping)
+            ));
+        }
+        out.line("// Transitions of `appear` and `disappear`.");
+        for transition in &style.transitions {
+            let motion = motion_ref(&transition.motion);
+            let body = match &transition.kind {
+                TransitionKind::Fade => format!(".kind = B::Transition::Fade, .motion = {motion}"),
+                TransitionKind::Pop { from } => format!(
+                    ".kind = B::Transition::Pop, .from = {}, .motion = {motion}",
+                    float(*from)
+                ),
+                TransitionKind::Slide { edge, distance } => format!(
+                    ".kind = B::Transition::Slide, .edge = {}, .distance = {}, .motion = {motion}",
+                    string(&format!("{edge:?}").to_lowercase()),
+                    float(*distance)
+                ),
+            };
+            out.line(format!(
+                "[[maybe_unused]] static B::Transition const X_{}{{{body}}};",
+                ident(&transition.name)
+            ));
+        }
+        out.line("// Patterns of `style!`.");
+        for pattern in &style.patterns {
+            let bands: Vec<String> = pattern
+                .bands
+                .iter()
+                .map(|band| {
+                    format!(
+                        "B::Band{{{}, {}, {}}}",
+                        band.color
+                            .as_ref()
+                            .map(paint)
+                            .unwrap_or_else(|| "B::Paint{}".into()),
+                        float(band.width),
+                        float(band.opacity)
+                    )
+                })
+                .collect();
+            out.line(format!(
+                "[[maybe_unused]] static B::PatternDef const P_{}{{{{{}}}, {}}};",
+                ident(&pattern.name),
+                bands.join(", "),
+                pattern.twill
+            ));
+        }
+        out.line("// Style overrides of `style!`, as this target shows them.");
+        for style in bern_target_api::style::used(self.app, PLATFORM) {
+            out.open(format!(
+                "[[maybe_unused]] static B::StyleDef const S_{} = [] {{",
+                style.name
+            ));
+            out.line("B::StyleDef s;");
+            Self::look(out, "s.base.", &style.base);
+            for effect in &style.base {
+                match effect {
+                    StyleEffect::Corner { radius } => {
+                        out.line(format!("s.corner = {};", float(*radius)))
+                    }
+                    StyleEffect::Padding { length } => {
+                        out.line(format!("s.padding = {};", float(*length)))
+                    }
+                    _ => {}
+                }
+            }
+            if let Some(size) = style.size() {
+                let size = match size {
+                    ControlSize::Small => "small",
+                    ControlSize::Regular => "regular",
+                    ControlSize::Large => "large",
+                    ControlSize::ExtraLarge => "extra_large",
+                };
+                out.line(format!("s.size = {};", string(size)));
+            }
+            if style.draws_look() {
+                out.line("s.draws = true;");
+            }
+            for (state, effects) in &style.states {
+                let name = state.name();
+                out.line(format!("s.{name} = B::Look{{}};"));
+                Self::look(out, &format!("s.{name}->"), effects);
+            }
+            if let Some(settle) = &style.settle {
+                out.line(format!("s.settle = {};", motion_ref(settle)));
+            }
+            out.line("return s;");
+            out.close("}();");
+        }
+        out.line("");
+    }
+
+    /// The accent and appearance the `WindowSet` chooses at run time.
+    fn theme_functions(&self, out: &mut Out) {
+        let windows = &self.app.windows;
+        if let Some(accent) = &windows.accent {
+            out.line(
+                "/// The accent of `WindowSet(accent:)`: its index in the accents of `style!`.",
+            );
+            out.open("static int ThemeAccent(Ctx const& c) {");
+            out.line(format!("auto tag = R::Tag({});", self.expr(accent)));
+            if let Type::Enum { name } = &accent.ty
+                && let Some(def) = self.types().enum_def(name)
+            {
+                for (index, variant) in def.variants.iter().enumerate() {
+                    if let Some(position) = self
+                        .app
+                        .style
+                        .accents
+                        .iter()
+                        .position(|accent| Some(accent) == self.app.style.accent(&variant.name))
+                    {
+                        out.line(format!("if (tag == {index}u) return {position};"));
+                    }
+                }
+            }
+            out.line("return -1;");
+            out.close("}");
+        }
+        if let Some(appearance) = &windows.appearance {
+            out.line(
+                "/// The appearance of `WindowSet(appearance:)`: light, dark or the system's.",
+            );
+            out.open("static char const* ThemeAppearance(Ctx const& c) {");
+            out.line(format!("auto tag = R::Tag({});", self.expr(appearance)));
+            if let Type::Enum { name } = &appearance.ty
+                && let Some(def) = self.types().enum_def(name)
+            {
+                for (index, variant) in def.variants.iter().enumerate() {
+                    let mode = variant.name.to_lowercase();
+                    if mode == "light" || mode == "dark" {
+                        out.line(format!("if (tag == {index}u) return {};", string(&mode)));
+                    }
+                }
+            }
+            out.line("return \"\";");
+            out.close("}");
+        }
+        out.line("");
+    }
+
     /// The application's interface, `app_ui.inl`: its components, windows
     /// and their close checks, included once per front end.
     pub fn interface(&self) -> String {
@@ -1163,6 +1969,8 @@ impl<'a> Generator<'a> {
         out.line("// Generated by Bern from the Rust declarations. Do not edit.");
         out.line("// Included by the runtime once per front end.");
         out.line("");
+        self.style_tables(&mut out);
+        self.theme_functions(&mut out);
         out.line("// Components.");
         for component in &app.components {
             out.line(format!(
@@ -1199,6 +2007,7 @@ impl<'a> Generator<'a> {
                 "w.settings = {};",
                 window.role == WindowRole::Settings
             ));
+            out.line(format!("w.dialog = {};", window.role == WindowRole::Dialog));
             out.line(format!("w.width = {};", optional(window.width)));
             out.line(format!("w.height = {};", optional(window.height)));
             out.line(format!("w.minWidth = {};", optional(window.min_width)));
@@ -1212,10 +2021,44 @@ impl<'a> Generator<'a> {
             if window.close.is_some() {
                 out.line(format!("w.close = close_{};", window.id));
             }
+            out.line(format!(
+                "w.unified = {};",
+                window.chrome == WindowChrome::Unified
+            ));
+            out.line(format!("w.idleAfter = {};", optional(window.idle_after)));
+            if let Some(immersive) = &window.immersive {
+                out.line(format!(
+                    "w.immersive = [](Ctx const& c) {{ return {}; }};",
+                    self.condition(immersive)
+                ));
+            }
+            if app.windows.accent.is_some() {
+                out.line("w.accent = ThemeAccent;");
+            }
+            if app.windows.appearance.is_some() {
+                out.line("w.appearance = ThemeAppearance;");
+            }
             out.line("windows.push_back(std::move(w));");
             out.close("}");
         }
         out.line("return windows;");
+        out.close("}");
+        out.line("");
+        out.line("/// The accents of `style!`, for `WindowSet(accent:)`: light and dark sRGB.");
+        out.open("static std::vector<std::pair<uint32_t, uint32_t>> AccentColors() {");
+        let accents: Vec<String> = app
+            .style
+            .accents
+            .iter()
+            .map(|accent| match &accent.color {
+                ColorRef::Fixed { light, dark } => format!(
+                    "{{0x{:02X}{:02X}{:02X}u, 0x{:02X}{:02X}{:02X}u}}",
+                    light.red, light.green, light.blue, dark.red, dark.green, dark.blue
+                ),
+                ColorRef::Role { .. } => "{0u, 0u}".to_string(),
+            })
+            .collect();
+        out.line(format!("return {{{}}};", accents.join(", ")));
         out.close("}");
         out.finish()
     }
@@ -1376,6 +2219,21 @@ impl<'a> Generator<'a> {
                 "c.compactBelow = {};",
                 float(layouts.compact_below)
             ));
+            if let Some(below) = layouts.medium_below {
+                out.line(format!("c.mediumBelow = {};", float(below)));
+            }
+            if let Some(below) = layouts.expanded_below {
+                out.line(format!("c.expandedBelow = {};", float(below)));
+            }
+        }
+        out.line("// File kinds of `files:`, by extension.");
+        for (kind, extensions) in bern_ir::spec::FILE_KIND_EXTENSIONS {
+            let list: Vec<String> = extensions.iter().map(|ext| string(ext)).collect();
+            out.line(format!(
+                "c.fileKinds.push_back({{{}, {{{}}}}});",
+                string(kind),
+                list.join(", ")
+            ));
         }
         if let Some(seed) = app.theme.brand_seed {
             out.line(format!(
@@ -1384,6 +2242,17 @@ impl<'a> Generator<'a> {
             ));
         }
         out.line("return c;");
+        out.close("}");
+        out.line("");
+        out.line("/// The glyph of a Bern icon name in the system icon fonts.");
+        out.open("wchar_t const* IconGlyph(std::string_view name) {");
+        out.open("static std::unordered_map<std::string_view, wchar_t const*> const glyphs = {");
+        for (name, code) in crate::icons::GLYPHS {
+            out.line(format!("{{{}, L\"\\x{code:04X}\"}},", string(name)));
+        }
+        out.close("};");
+        out.line("auto found = glyphs.find(name);");
+        out.line("return found == glyphs.end() ? L\"\" : found->second;");
         out.close("}");
         out.line("");
         out.close("}");

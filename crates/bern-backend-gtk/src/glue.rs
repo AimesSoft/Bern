@@ -222,11 +222,96 @@ pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> Strin
         };
         entry.push_str(&format!("Name[{locale}]={name}\n"));
     }
-    entry.push_str(&format!("Exec={}\n", path(executable)));
+    let types = opened_types(app);
+    if types.is_empty() {
+        entry.push_str(&format!("Exec={}\n", path(executable)));
+    } else {
+        // A drop area with `opens: true` takes files the system hands the
+        // application: it is offered as a way to open them, not made the
+        // default.
+        entry.push_str(&format!("Exec={} %U\n", path(executable)));
+        entry.push_str(&format!("MimeType={};\n", types.join(";")));
+    }
     entry.push_str(&format!("Icon={}\n", path(icon)));
     entry.push_str("Terminal=false\nCategories=Utility;\n");
     entry.push_str("StartupNotify=true\nDBusActivatable=false\n");
     entry
+}
+
+/// MIME types of the file kinds `Drop(opens: true)` areas take. Extensions
+/// without a known type and `any` register nothing.
+fn opened_types(app: &Application) -> Vec<&'static str> {
+    const KINDS: &[(&str, &[&str])] = &[
+        (
+            "video",
+            &[
+                "video/mp4",
+                "video/x-matroska",
+                "video/webm",
+                "video/quicktime",
+                "video/x-msvideo",
+                "video/x-flv",
+                "video/mpeg",
+                "video/ogg",
+                "video/3gpp",
+                "video/mp2t",
+                "video/x-ms-wmv",
+            ],
+        ),
+        (
+            "audio",
+            &[
+                "audio/mpeg",
+                "audio/mp4",
+                "audio/aac",
+                "audio/flac",
+                "audio/ogg",
+                "audio/x-wav",
+                "audio/x-aiff",
+                "audio/x-ms-wma",
+                "audio/opus",
+            ],
+        ),
+        (
+            "picture",
+            &[
+                "image/png",
+                "image/jpeg",
+                "image/webp",
+                "image/gif",
+                "image/bmp",
+                "image/tiff",
+                "image/heif",
+                "image/avif",
+                "image/jxl",
+            ],
+        ),
+    ];
+    let mut types = Vec::new();
+    let mut visit = |node: &bern_ir::Node| {
+        if let bern_ir::Node::Element(element) = node
+            && element.kind == "Drop"
+            && element.keyword("opens") == Some("true")
+        {
+            for word in element
+                .keyword("files")
+                .unwrap_or("any")
+                .split(|c: char| c.is_whitespace() || c == ',')
+            {
+                if let Some((_, mimes)) = KINDS.iter().find(|(kind, _)| *kind == word) {
+                    for mime in *mimes {
+                        if !types.contains(mime) {
+                            types.push(*mime);
+                        }
+                    }
+                }
+            }
+        }
+    };
+    for component in &app.components {
+        component.body.walk(&mut visit);
+    }
+    types
 }
 
 #[cfg(test)]
@@ -260,6 +345,23 @@ mod tests {
             showcase.contains("libgtk-4-media-gstreamer, gstreamer1.0-plugins-good")
                 && showcase.contains("Recommends: gstreamer1.0-libav"),
             "{showcase}"
+        );
+        // The gallery's drop area opens videos the system hands it.
+        let gallery = desktop_entry(
+            &app("gallery"),
+            Path::new("/opt/gallery/gallery"),
+            Path::new("dev.bern.gallery"),
+        );
+        assert!(
+            gallery.contains("Exec=/opt/gallery/gallery %U\n"),
+            "{gallery}"
+        );
+        assert!(
+            gallery.contains("MimeType=video/mp4;video/x-matroska;"),
+            "{gallery}"
+        );
+        assert!(
+            !desktop_entry(&app("hello"), Path::new("/x"), Path::new("y")).contains("MimeType")
         );
         // The description's second line is indented, as Debian requires.
         assert!(

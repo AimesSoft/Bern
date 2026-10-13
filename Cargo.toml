@@ -42,6 +42,9 @@ members = [
     "examples/planner/modules/notes/ui",
     "examples/planner/modules/tags/protocol",
     "examples/planner/modules/tags/core",
+    "examples/gallery/gallery-protocol",
+    "examples/gallery/gallery-core",
+    "examples/gallery/gallery-ui",
 ]
 
 [workspace.package]

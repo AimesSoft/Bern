@@ -75,4 +75,14 @@ impl Frame {
         picture.set_parent(&frame);
         frame
     }
+
+    /// Change the declared size, as a bound length does.
+    pub fn set_size(&self, width: i32, height: i32) {
+        let (width, height) = (width.max(0), height.max(0));
+        if self.imp().width.get() != width || self.imp().height.get() != height {
+            self.imp().width.set(width);
+            self.imp().height.set(height);
+            self.queue_resize();
+        }
+    }
 }

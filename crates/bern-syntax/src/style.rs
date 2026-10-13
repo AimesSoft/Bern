@@ -32,6 +32,9 @@ pub struct StyleItem {
     pub transitions: Vec<MotionDecl>,
     /// `pattern { name: check(band(accent, 1, 0.28), gap(6), …) }`.
     pub patterns: Vec<MotionDecl>,
+    /// `accents { crimson: "#FF2E55" }`: accent colors the application
+    /// chooses among at run time.
+    pub accents: Vec<MotionDecl>,
     pub rules: Vec<StyleRuleItem>,
     pub span: Span,
 }
@@ -119,11 +122,15 @@ impl Parse for StyleItem {
         let mut motion = Vec::new();
         let mut transitions = Vec::new();
         let mut patterns = Vec::new();
+        let mut accents = Vec::new();
         let mut rules = Vec::new();
         while !input.is_empty() {
             let attrs = input.call(syn::Attribute::parse_outer)?;
             let component: Ident = input.parse()?;
-            if (component == "motion" || component == "transition" || component == "pattern")
+            if (component == "motion"
+                || component == "transition"
+                || component == "pattern"
+                || component == "accents")
                 && attrs.is_empty()
                 && input.peek(syn::token::Brace)
             {
@@ -133,6 +140,8 @@ impl Parse for StyleItem {
                     &mut motion
                 } else if component == "transition" {
                     &mut transitions
+                } else if component == "accents" {
+                    &mut accents
                 } else {
                     &mut patterns
                 };
@@ -201,6 +210,7 @@ impl Parse for StyleItem {
             motion,
             transitions,
             patterns,
+            accents,
             rules,
             span,
         })

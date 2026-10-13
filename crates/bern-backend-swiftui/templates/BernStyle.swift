@@ -23,13 +23,17 @@ struct BernMotion: Equatable, Sendable {
     let damping: Double
 
     var animation: Animation {
-        .spring(response: period, dampingFraction: damping)
+        .spring(response: period * bernMotionScale, dampingFraction: damping)
     }
 }
 
 /// Whether motion is reduced: by the system, or by `BERN_MOTION=reduce`
 /// for repeatable screenshots.
-private let bernForcedReduceMotion = ProcessInfo.processInfo.environment["BERN_MOTION"] == "reduce"
+let bernForcedReduceMotion = ProcessInfo.processInfo.environment["BERN_MOTION"] == "reduce"
+
+/// How much slower springs and staggering run: ten times with
+/// `BERN_MOTION=slow`, so motion can be checked frame by frame.
+let bernMotionScale: Double = ProcessInfo.processInfo.environment["BERN_MOTION"] == "slow" ? 10 : 1
 
 // MARK: - Colors
 
@@ -52,7 +56,7 @@ enum BernColor: Equatable, Sendable {
     var onTop: Color {
         switch self {
         case .role("accent"):
-            return Self.contrasting(Color.accentColor)
+            return Self.contrasting(MainActor.assumeIsolated { Self.accentColor })
         case .role("selection.background"):
             return Self.system("selection.foreground")
         case .role(let role) where role.hasPrefix("status."):
@@ -113,10 +117,16 @@ enum BernColor: Equatable, Sendable {
         return luminance(value) > 0.4 ? Color(red: 0.067, green: 0.067, blue: 0.078) : .white
     }
 
+    /// The accent: the one the application chose, or the system's.
+    @MainActor
+    static var accentColor: Color {
+        BernThemeState.shared.accent?.color ?? .accentColor
+    }
+
     private static func system(_ role: String) -> Color {
         switch role {
-        case "accent", "focus.indicator": return .accentColor
-        case "on_accent": return contrasting(.accentColor)
+        case "accent", "focus.indicator": return MainActor.assumeIsolated { accentColor }
+        case "on_accent": return contrasting(MainActor.assumeIsolated { accentColor })
         case "text.primary", "icon.primary": return .primary
         case "text.secondary", "icon.secondary": return .secondary
         case "status.success": return .green
@@ -172,6 +182,8 @@ struct BernLook: Sendable {
     var scale: CGSize?
     var offset: CGSize?
     var opacity: Double?
+    /// A shadow below the control, as if lifted.
+    var shadow: BernShadow?
     /// The spring entering this state.
     var motion: BernMotion?
     /// `none`: this state shows nothing of its own.
@@ -200,9 +212,17 @@ struct BernLook: Sendable {
         look.scale = other.scale ?? scale
         look.offset = other.offset ?? offset
         look.opacity = other.opacity ?? opacity
+        look.shadow = other.shadow ?? shadow
         look.motion = other.motion ?? motion
         return look
     }
+}
+
+/// A shadow of `radius` blur, `y` down, black at `opacity`.
+struct BernShadow: Sendable {
+    let radius: Double
+    let y: Double
+    let opacity: Double
 }
 
 /// A control's style overrides from `style!`.
@@ -265,10 +285,14 @@ extension View {
     /// changes; still and faded instead when motion is reduced.
     @ViewBuilder
     func bernTransform(_ look: BernLook, _ motion: BernMotion, key: Int, reduce: Bool) -> some View {
+        let shadow = look.shadow ?? BernShadow(radius: 0, y: 0, opacity: 0)
         if reduce || bernForcedReduceMotion {
-            self.animation(.easeInOut(duration: 0.15), value: key)
+            self
+                .shadow(color: .black.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
+                .animation(.easeInOut(duration: 0.15), value: key)
         } else {
             self
+                .shadow(color: .black.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
                 .scaleEffect(look.scale ?? CGSize(width: 1, height: 1))
                 .offset(look.offset ?? .zero)
                 .opacity(look.opacity ?? 1)
@@ -333,6 +357,313 @@ private struct BernStyledButton: View {
             .contentShape(shape)
             .bernTransform(look, motion, key: bernStateKey(false, hover, pressed, enabled), reduce: reduce)
             .onHover { hover = $0 }
+    }
+}
+
+/// A button that shows its content: nothing of the platform's bezel, the
+/// style's look and motion around it, or a dimmed press without a style.
+struct BernContentButtonStyle: ButtonStyle {
+    let style: BernStyle?
+
+    func makeBody(configuration: Configuration) -> some View {
+        BernContentButton(configuration: configuration, style: style)
+    }
+}
+
+private struct BernContentButton: View {
+    let configuration: ButtonStyle.Configuration
+    let style: BernStyle?
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var hover = false
+
+    var body: some View {
+        let pressed = configuration.isPressed
+        if let style {
+            let (look, motion) = style.look(selected: false, hover: hover, pressed: pressed, enabled: enabled)
+            let shape = RoundedRectangle(cornerRadius: style.corner ?? 0, style: .continuous)
+            // The corner clips the content, so a picture takes it too; the
+            // shadow then follows the clipped shape.
+            configuration.label
+                .padding(style.padding ?? 0)
+                .bernForeground(look.foreground?.color)
+                .background(look.background?.color ?? Color.clear)
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(look.border?.color ?? Color.clear, lineWidth: look.borderWidth))
+                .contentShape(shape)
+                .bernTransform(look, motion, key: bernStateKey(false, hover, pressed, enabled), reduce: reduce)
+                .onHover { hover = $0 }
+        } else {
+            configuration.label
+                .contentShape(Rectangle())
+                .opacity(pressed ? 0.75 : enabled ? 1 : 0.5)
+        }
+    }
+}
+
+extension View {
+    /// `color` for text and icons when there is one; what lies above
+    /// otherwise.
+    @ViewBuilder
+    func bernForeground(_ color: Color?) -> some View {
+        if let color {
+            self.foregroundStyle(color)
+        } else {
+            self
+        }
+    }
+}
+
+// MARK: - Theme
+
+/// The accent the application chose at run time, read by the `accent`
+/// role; views that draw with it follow its changes.
+@MainActor
+@Observable
+final class BernThemeState {
+    static let shared = BernThemeState()
+    var accent: BernColor?
+}
+
+/// The accent and appearance of `WindowSet`, applied to a window: controls
+/// take the accent as their tint, drawn parts through the `accent` role,
+/// and the appearance is the application's (`system`, `light`, `dark`).
+struct BernThemeChoice: ViewModifier {
+    let accent: BernColor?
+    let appearance: String?
+
+    func body(content: Content) -> some View {
+        content
+            .tint(accent?.color)
+            .onChange(of: accent, initial: true) { BernThemeState.shared.accent = accent }
+        #if os(macOS)
+            .onChange(of: appearance, initial: true) {
+                switch appearance?.lowercased() {
+                case "light": NSApplication.shared.appearance = NSAppearance(named: .aqua)
+                case "dark": NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+                case "system": NSApplication.shared.appearance = nil
+                default: break
+                }
+            }
+        #else
+            .preferredColorScheme(
+                appearance?.lowercased() == "light" ? .light : appearance?.lowercased() == "dark" ? .dark : nil)
+        #endif
+    }
+}
+
+// MARK: - Search
+
+/// A search field with its results below it. External entries edit,
+/// submit and focus it; `shortcut` focuses it from the keyboard. Focus
+/// needs macOS 15 or iOS 18; before them the field cannot be focused by
+/// command or shortcut.
+struct BernSearchable<Results: View>: ViewModifier {
+    let text: Binding<String>
+    let placement: SearchFieldPlacement
+    let prompt: String?
+    let target: String
+    var submit: (@MainActor () -> Void)? = nil
+    var shortcut: KeyboardShortcut? = nil
+    @ViewBuilder let results: () -> Results
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        let field = content
+            .searchable(text: text, placement: placement, prompt: prompt.map { Text(verbatim: $0) })
+            .searchSuggestions { results() }
+            .onSubmit(of: .search) { submit?() }
+        SwiftUI.Group {
+            if #available(macOS 15.0, iOS 18.0, *) {
+                field.searchFocused($focused)
+            } else {
+                field
+            }
+        }
+        .background {
+            if let shortcut {
+                Button("") { focused = true }
+                    .keyboardShortcut(shortcut)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+        }
+        .bernControl(
+            target, role: "search", label: prompt ?? "",
+            actions: BernControlActions(
+                edit: { text.wrappedValue = $0 }, submit: submit, value: { text.wrappedValue },
+                focus: { focused = true }))
+    }
+}
+
+// MARK: - Split buttons
+
+/// A toggle linked with a button that shows `content` in a popover; one
+/// control for external entries: `set_bool` turns it on or off,
+/// `activate` opens the popover.
+struct BernSplitButton<Content: View>: View {
+    let label: String
+    let systemImage: String?
+    let more: String
+    @Binding var isOn: Bool
+    let target: String
+    @ViewBuilder let content: Content
+    @Environment(\.colorScheme) private var scheme
+    @State private var showing = false
+
+    init(
+        label: String, systemImage: String?, more: String, isOn: Binding<Bool>, target: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.label = label
+        self.systemImage = systemImage
+        self.more = more
+        self._isOn = isOn
+        self.target = target
+        self.content = content()
+    }
+
+    var body: some View {
+        ControlGroup {
+            Toggle(isOn: $isOn) {
+                if let systemImage {
+                    Label(label, systemImage: systemImage)
+                } else {
+                    Text(verbatim: label)
+                }
+            }
+            .toggleStyle(.button)
+            Button {
+                showing = true
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .accessibilityLabel(Text(verbatim: more))
+            .help(more)
+        }
+        .fixedSize()
+        // A control group turns its buttons into segments of one control,
+        // which anchors the popover.
+        .popover(isPresented: $showing, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) { content }
+                .padding(16)
+                .frame(minWidth: 240, alignment: .leading)
+                // A popover also on iPhone, which would make it a sheet,
+                // drawn in the appearance of where it opens, as the
+                // content is.
+                .presentationCompactAdaptation(.popover)
+                .presentationBackground {
+                    Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
+                }
+                .environment(\.colorScheme, scheme)
+        }
+        .bernControl(
+            target, role: "split_button", label: label,
+            actions: BernControlActions(
+                activate: { showing = true }, setBool: { isOn = $0 }, value: { isOn ? "true" : "false" }))
+    }
+}
+
+// MARK: - Notices
+
+/// A short notice: it rises in when it appears or its key changes and sinks
+/// out after `duration` seconds; a newer notice restarts the time.
+struct BernToast: View {
+    let text: String
+    let systemImage: String?
+    let key: AnyHashable
+    let duration: Double
+    let motion: BernMotion
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var shown = false
+
+    var body: some View {
+        SwiftUI.Group {
+            if let systemImage {
+                SwiftUI.Label(text, systemImage: systemImage)
+            } else {
+                SwiftUI.Text(verbatim: text)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+        .opacity(shown ? 1 : 0)
+        .offset(y: shown || reduce || bernForcedReduceMotion ? 0 : 24)
+        .allowsHitTesting(false)
+        .accessibilityAddTraits(.updatesFrequently)
+        .task(id: key) {
+            withAnimation(reduce || bernForcedReduceMotion ? .easeInOut(duration: 0.15) : motion.animation) { shown = true }
+            try? await Task.sleep(for: .seconds(duration))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.25)) { shown = false }
+        }
+    }
+}
+
+// MARK: - Reveal on hover
+
+private struct BernHoverScopeKey: EnvironmentKey {
+    /// Without a pointer, revealed content always shows.
+    #if os(macOS)
+    static let defaultValue = false
+    #else
+    static let defaultValue = true
+    #endif
+}
+
+extension EnvironmentValues {
+    /// Whether the pointer is over the container of content marked
+    /// `reveal: hover`.
+    var bernHoverScope: Bool {
+        get { self[BernHoverScopeKey.self] }
+        set { self[BernHoverScopeKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// A container whose content marked `reveal: hover` shows while the
+    /// pointer is over it.
+    func bernHoverScope() -> some View {
+        modifier(BernHoverScope())
+    }
+
+    /// Shown while the pointer is over the enclosing container, or while
+    /// it has the keyboard focus; still there for assistive technologies.
+    func bernReveal(_ motion: BernMotion) -> some View {
+        modifier(BernReveal(motion: motion))
+    }
+}
+
+private struct BernHoverScope: ViewModifier {
+    @State private var hover = false
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content
+            .environment(\.bernHoverScope, hover)
+            .onHover { hover = $0 }
+        #else
+        content
+        #endif
+    }
+}
+
+private struct BernReveal: ViewModifier {
+    let motion: BernMotion
+    @Environment(\.bernHoverScope) private var hover
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        let shown = hover || focused
+        content
+            .focused($focused)
+            .opacity(shown ? 1 : 0)
+            .allowsHitTesting(shown)
+            .animation(reduce || bernForcedReduceMotion ? .easeInOut(duration: 0.15) : motion.animation, value: shown)
     }
 }
 
@@ -415,11 +746,11 @@ extension View {
     /// a short fade when motion is reduced.
     func bernTransition(
         insertion: AnyTransition?, insertionMotion: BernMotion?,
-        removal: AnyTransition?, removalMotion: BernMotion?
+        removal: AnyTransition?, removalMotion: BernMotion?, appear: BernAppear? = nil
     ) -> some View {
         modifier(BernTransitionModifier(
             insertion: insertion, insertionMotion: insertionMotion,
-            removal: removal, removalMotion: removalMotion))
+            removal: removal, removalMotion: removalMotion, appear: appear))
     }
 
     /// One of the elements sharing `id` in a window: when one replaces
@@ -439,10 +770,19 @@ private struct BernTransitionModifier: ViewModifier {
     let insertionMotion: BernMotion?
     let removal: AnyTransition?
     let removalMotion: BernMotion?
+    /// The appearing, for when a staggering container sets the turns.
+    let appear: BernAppear?
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @Environment(\.bernStagger) private var stagger
 
     func body(content: Content) -> some View {
-        if reduce || bernForcedReduceMotion {
+        if let stagger, let appear {
+            content
+                .modifier(BernStaggeredAppear(appear: appear, motion: insertionMotion, clock: stagger))
+                .transition(.asymmetric(
+                    insertion: .identity,
+                    removal: (removal ?? .identity).animation(removalMotion?.animation)))
+        } else if reduce || bernForcedReduceMotion {
             content.transition(.opacity.animation(.easeInOut(duration: 0.15)))
         } else {
             content.transition(.asymmetric(
@@ -506,7 +846,7 @@ struct BernPatternDef: Sendable {
 enum BernDraw {
     static func shape(
         _ context: inout GraphicsContext, _ kind: String, _ rect: CGRect, corner: Double,
-        fill: BernColor?, stroke: BernColor?, strokeWidth: Double, opacity: Double
+        fill: BernColor?, fade: String? = nil, stroke: BernColor?, strokeWidth: Double, opacity: Double
     ) {
         let path: Path
         switch kind {
@@ -524,7 +864,22 @@ enum BernDraw {
         var layer = context
         layer.opacity = opacity
         if fill != nil || stroke == nil {
-            layer.fill(path, with: .color((fill ?? .role("fill.strong")).color))
+            let color = (fill ?? .role("fill.strong")).color
+            if let fade {
+                // The fill fades out toward the named edge.
+                let (start, end): (CGPoint, CGPoint) = switch fade {
+                case "up": (CGPoint(x: rect.midX, y: rect.maxY), CGPoint(x: rect.midX, y: rect.minY))
+                case "left": (CGPoint(x: rect.maxX, y: rect.midY), CGPoint(x: rect.minX, y: rect.midY))
+                case "right": (CGPoint(x: rect.minX, y: rect.midY), CGPoint(x: rect.maxX, y: rect.midY))
+                default: (CGPoint(x: rect.midX, y: rect.minY), CGPoint(x: rect.midX, y: rect.maxY))
+                }
+                layer.fill(
+                    path,
+                    with: .linearGradient(
+                        Gradient(colors: [color, color.opacity(0)]), startPoint: start, endPoint: end))
+            } else {
+                layer.fill(path, with: .color(color))
+            }
         }
         if let stroke {
             layer.stroke(path, with: .color(stroke.color), lineWidth: strokeWidth)
@@ -643,5 +998,819 @@ private struct BernMarkRenderer: TextRenderer {
                 with: .color(color))
             context.draw(line)
         }
+    }
+}
+
+// MARK: - Linked to scrolling and gestures
+
+extension View {
+    /// Follows scrolling: `scale` at the center of the scroll view around
+    /// it, 1 at its edges; `opacity` at its edges, 1 at the center. The
+    /// platform computes every frame; with reduced motion nothing changes.
+    func bernScrollEffect(scale: Double, opacity: Double) -> some View {
+        modifier(BernScrollEffect(scale: scale, opacity: opacity))
+    }
+
+    /// Scrolling comes to rest with an item at the start or the center.
+    func bernSnap(center: Bool, axis: Axis) -> some View {
+        modifier(BernSnap(center: center, axis: axis))
+    }
+
+    /// An item of a scroll view that comes to rest at its center: its size
+    /// leaves room for the first and last item to reach the center.
+    func bernSnapItem() -> some View {
+        modifier(BernSnapItem())
+    }
+
+    /// `position` holds the key of the item the scroll view stands at:
+    /// scrolling updates it, and setting it scrolls there with `motion`;
+    /// with `arrival`, the item gives that nudge once it is there.
+    func bernScrollPosition<ID: Hashable & Sendable>(
+        _ position: Binding<ID>, anchor: UnitPoint, motion: BernMotion, arrival: BernMotion? = nil
+    ) -> some View {
+        modifier(BernScrollPosition(position: position, anchor: anchor, motion: motion, arrival: arrival))
+    }
+
+    /// A short nudge each time `when` turns true: the view swells a little
+    /// and springs back with `motion`.
+    func bernNudge(_ when: Bool, motion: BernMotion) -> some View {
+        modifier(BernNudge(when: when, motion: motion))
+    }
+
+    /// Pinching scales `value` within `range`; `commit` runs when the
+    /// fingers lift. Assistive technologies adjust it in tenths.
+    func bernPinch(
+        _ value: Binding<Double>, in range: ClosedRange<Double>, commit: @escaping @MainActor () -> Void
+    ) -> some View {
+        modifier(BernPinch(value: value, range: range, commit: commit))
+    }
+
+    /// Dragging along `axis` moves `value` within `range`: up or right
+    /// raises it, and `distance` points cross the whole range.
+    func bernSwipe(
+        _ value: Binding<Double>, in range: ClosedRange<Double>, axis: Axis, distance: Double,
+        commit: @escaping @MainActor () -> Void
+    ) -> some View {
+        modifier(BernSwipe(value: value, range: range, axis: axis, distance: distance, commit: commit))
+    }
+}
+
+private struct BernScrollEffect: ViewModifier {
+    let scale: Double
+    let opacity: Double
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    func body(content: Content) -> some View {
+        if reduce || bernForcedReduceMotion {
+            content
+        } else {
+            let (scale, opacity) = (scale, opacity)
+            content.scrollTransition(.interactive.threshold(.centered)) { effect, phase in
+                let near = 1 - min(abs(phase.value), 1)
+                return effect
+                    .scaleEffect(1 + (scale - 1) * near)
+                    .opacity(opacity + (1 - opacity) * near)
+            }
+        }
+    }
+}
+
+/// The items of a scroll view that comes to rest on them: their frames in
+/// the content, read while the platform picks where a scroll stops (which
+/// may be off the main thread), and the largest size, which sets the
+/// margins that let the first and last item reach the center.
+final class BernSnapItems: @unchecked Sendable {
+    /// The largest item, which views follow.
+    let largest: BernSnapLargest
+    private let lock = NSLock()
+    private var frames: [UUID: CGRect] = [:]
+
+    @MainActor
+    init() {
+        largest = BernSnapLargest()
+    }
+
+    func report(_ id: UUID, _ frame: CGRect) {
+        lock.withLock { frames[id] = frame }
+    }
+
+    func remove(_ id: UUID) {
+        lock.withLock { frames[id] = nil }
+    }
+
+    /// Where along `axis` a scroll stopping at `start` comes to rest: with
+    /// the item nearest the anchor at it.
+    func rest(_ start: CGFloat, length: CGFloat, axis: Axis, center: Bool) -> CGFloat? {
+        lock.withLock {
+            let horizontal = axis == .horizontal
+            // The target and the frames share the content's origin; the
+            // margins lie before it.
+            let point = { (frame: CGRect) -> CGFloat in
+                let from = horizontal ? frame.minX : frame.minY
+                let size = horizontal ? frame.width : frame.height
+                return from + (center ? size / 2 : 0)
+            }
+            let anchor = start + (center ? length / 2 : 0)
+            guard let nearest = frames.values.min(by: { abs(point($0) - anchor) < abs(point($1) - anchor) })
+            else { return nil }
+            return point(nearest) - (center ? length / 2 : 0)
+        }
+    }
+
+}
+
+@MainActor
+@Observable
+final class BernSnapLargest {
+    private(set) var size: CGSize = .zero
+
+    func grow(_ next: CGSize) {
+        let grown = CGSize(width: max(size.width, next.width), height: max(size.height, next.height))
+        if grown != size { size = grown }
+    }
+}
+
+private struct BernSnapItemsKey: EnvironmentKey {
+    static let defaultValue: BernSnapItems? = nil
+}
+
+extension EnvironmentValues {
+    var bernSnapItems: BernSnapItems? {
+        get { self[BernSnapItemsKey.self] }
+        set { self[BernSnapItemsKey.self] = newValue }
+    }
+}
+
+private let bernSnapSpace = "bern.snap"
+
+/// Stops a scroll with the item nearest the anchor at it, wherever the
+/// platform would have stopped it, so a fling still carries on to a later
+/// item.
+private struct BernSnapBehavior: ScrollTargetBehavior {
+    let items: BernSnapItems
+    let center: Bool
+    let axis: Axis
+
+    func updateTarget(_ target: inout ScrollTarget, context: TargetContext) {
+        let horizontal = axis == .horizontal
+        let start = horizontal ? target.rect.minX : target.rect.minY
+        let length = horizontal ? target.rect.width : target.rect.height
+        guard let rest = items.rest(start, length: length, axis: axis, center: center) else { return }
+        if horizontal { target.rect.origin.x = rest } else { target.rect.origin.y = rest }
+    }
+}
+
+private struct BernSnap: ViewModifier {
+    let center: Bool
+    let axis: Axis
+    @State private var items = BernSnapItems()
+    @State private var viewport: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        let horizontal = axis == .horizontal
+        let item = horizontal ? items.largest.size.width : items.largest.size.height
+        let margin = center ? max(0, (viewport - item) / 2) : 0
+        content
+            .environment(\.bernSnapItems, items)
+            .scrollTargetBehavior(BernSnapBehavior(items: items, center: center, axis: axis))
+            .contentMargins(horizontal ? .horizontal : .vertical, margin, for: .scrollContent)
+            .onGeometryChange(for: CGFloat.self) { horizontal ? $0.size.width : $0.size.height } action: {
+                viewport = $0
+            }
+    }
+}
+
+private struct BernSnapItem: ViewModifier {
+    @Environment(\.bernSnapItems) private var items
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(bernSnapSpace)) } action: { frame in
+                items?.report(id, frame)
+                items?.largest.grow(frame.size)
+            }
+            .onDisappear { items?.remove(id) }
+    }
+}
+
+extension View {
+    /// The content of a scroll view that comes to rest on its items: the
+    /// space their frames are measured in.
+    func bernSnapContent() -> some View {
+        coordinateSpace(.named(bernSnapSpace))
+    }
+}
+
+/// Where the keyed items of a scroll view are, in its visible area, and
+/// which one is nearest its anchor.
+@MainActor
+@Observable
+final class BernScrollItems {
+    @ObservationIgnored private var frames: [AnyHashable: CGRect] = [:]
+    @ObservationIgnored var anchor = UnitPoint.center
+    @ObservationIgnored var viewport = CGSize.zero
+    private(set) var nearest: AnyHashable?
+    /// The nudge an item gives when setting the position scrolled to it.
+    @ObservationIgnored var arrival: BernMotion?
+    /// The item the position last scrolled to, and how many arrivals there
+    /// have been.
+    private(set) var arrived: AnyHashable?
+    private(set) var arrivals = 0
+    /// How many scrolls to a set position have come to rest.
+    private(set) var stops = 0
+    /// The item being scrolled to; it arrives once it has stopped moving.
+    @ObservationIgnored private var coming: AnyHashable?
+    @ObservationIgnored private var nudges = false
+    @ObservationIgnored private var watch = 0
+
+    /// Setting the position scrolls to `key`: it arrives once it stops,
+    /// with a nudge unless it is where the view starts.
+    func expect(_ key: AnyHashable, nudge: Bool = true) {
+        coming = key
+        nudges = nudge
+        wait()
+    }
+
+    /// Set while the position clears itself to scroll again to the same
+    /// item, which is not the person scrolling.
+    @ObservationIgnored var clearing = false
+    /// The value the person's scrolling last wrote to the position; when it
+    /// comes back as a change, there is nothing to scroll to.
+    @ObservationIgnored var followed: AnyHashable?
+
+    /// The person took over the scrolling; nothing arrives.
+    func cancelArrival() {
+        if !clearing { coming = nil }
+    }
+
+    private func wait() {
+        watch += 1
+        let current = watch
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard let self, current == self.watch, let key = self.coming else { return }
+            self.coming = nil
+            self.stops += 1
+            if self.nudges {
+                self.arrived = key
+                self.arrivals += 1
+            }
+        }
+    }
+
+    func report(_ key: AnyHashable, _ frame: CGRect) {
+        frames[key] = frame
+        settle()
+        if key == coming { wait() }
+    }
+
+    func remove(_ key: AnyHashable) {
+        frames[key] = nil
+        settle()
+    }
+
+    func settle() {
+        let point = CGPoint(x: viewport.width * anchor.x, y: viewport.height * anchor.y)
+        let distance = { (frame: CGRect) -> CGFloat in
+            let x = frame.minX + frame.width * self.anchor.x - point.x
+            let y = frame.minY + frame.height * self.anchor.y - point.y
+            return x * x + y * y
+        }
+        let found = frames.min { distance($0.value) < distance($1.value) }?.key
+        if found != nearest { nearest = found }
+    }
+}
+
+private struct BernScrollItemsKey: EnvironmentKey {
+    static let defaultValue: BernScrollItems? = nil
+}
+
+extension EnvironmentValues {
+    var bernScrollItems: BernScrollItems? {
+        get { self[BernScrollItemsKey.self] }
+        set { self[BernScrollItemsKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// A keyed item of a scroll view whose `position` is bound: it reports
+    /// where it is.
+    func bernScrollItem(_ key: some Hashable & Sendable) -> some View {
+        modifier(BernScrollItem(key: AnyHashable(key)))
+    }
+}
+
+private struct BernScrollItem: ViewModifier {
+    let key: AnyHashable
+    @Environment(\.bernScrollItems) private var items
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(
+                BernNudgeEffect(
+                    count: items?.arrived == key ? items?.arrivals ?? 0 : 0,
+                    motion: items?.arrival))
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(bernScrollSpace)) } action: { frame in
+                items?.report(key, frame)
+            }
+            .onDisappear { items?.remove(key) }
+    }
+}
+
+private let bernScrollSpace = "bern.scroll"
+
+/// Scrolling sets `position` to the item nearest the anchor; setting
+/// `position` scrolls to that item. The platform's own scroll position
+/// moves the view, but does not tell which item the person scrolled to:
+/// it only clears itself once the person scrolls, which is when the item
+/// nearest the anchor starts to count.
+private struct BernScrollPosition<ID: Hashable & Sendable>: ViewModifier {
+    let position: Binding<ID>
+    let anchor: UnitPoint
+    let motion: BernMotion
+    let arrival: BernMotion?
+    @State private var target: ID?
+    /// Set once the view stands at the first position, after its first
+    /// layout has measured the margins.
+    @State private var placed = false
+    @State private var items = BernScrollItems()
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.bernScrollItems, items)
+            .coordinateSpace(.named(bernScrollSpace))
+            .scrollPosition(id: $target, anchor: anchor)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                items.anchor = anchor
+                items.arrival = arrival
+                items.viewport = size
+                items.settle()
+            }
+            .onAppear {
+                items.expect(AnyHashable(position.wrappedValue), nudge: false)
+                target = position.wrappedValue
+                placed = true
+            }
+            // Once there, the platform's position lets go, so that the
+            // person's next scroll comes to rest on an item as any other.
+            .onChange(of: items.stops) { _, _ in
+                items.clearing = true
+                target = nil
+                Task { @MainActor in items.clearing = false }
+            }
+            .onChange(of: position.wrappedValue) { _, wanted in
+                if AnyHashable(wanted) == items.followed {
+                    items.followed = nil
+                    return
+                }
+                guard wanted != target, target != nil || AnyHashable(wanted) != items.nearest else { return }
+                scroll(to: wanted)
+            }
+            .onChange(of: items.nearest) { _, _ in follow() }
+            .onChange(of: target) { _, current in
+                if current == nil { items.cancelArrival() }
+                follow()
+            }
+    }
+
+    /// While the person scrolls, `position` follows the item nearest the
+    /// anchor.
+    private func follow() {
+        guard placed, target == nil, let nearest = items.nearest?.base as? ID,
+            nearest != position.wrappedValue
+        else { return }
+        items.followed = AnyHashable(nearest)
+        position.wrappedValue = nearest
+    }
+
+    private func scroll(to wanted: ID) {
+        let animation = reduce || bernForcedReduceMotion ? nil : motion.animation
+        let items = items
+        let go = {
+            items.clearing = false
+            items.expect(AnyHashable(wanted))
+            withAnimation(animation) { target = wanted }
+        }
+        if target == wanted {
+            // The platform only scrolls when its position changes.
+            items.clearing = true
+            target = nil
+            Task { @MainActor in go() }
+        } else {
+            go()
+        }
+    }
+}
+
+private struct BernNudge: ViewModifier {
+    let when: Bool
+    let motion: BernMotion
+    @State private var count = 0
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(BernNudgeEffect(count: count, motion: motion))
+            .onChange(of: when) { _, now in
+                if now { count += 1 }
+            }
+    }
+}
+
+/// Swells a little and springs back with `motion` each time `count` grows;
+/// with reduced motion it stays still.
+private struct BernNudgeEffect: ViewModifier {
+    let count: Int
+    let motion: BernMotion?
+    @State private var scale = 1.0
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(scale)
+            .onChange(of: count) { old, new in
+                guard new > old, let motion, !(reduce || bernForcedReduceMotion) else { return }
+                withAnimation(.easeOut(duration: 0.08)) { scale = 1.06 } completion: {
+                    withAnimation(motion.animation) { scale = 1 }
+                }
+            }
+    }
+}
+
+private struct BernPinch: ViewModifier {
+    let value: Binding<Double>
+    let range: ClosedRange<Double>
+    let commit: @MainActor () -> Void
+    @State private var start: Double?
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                MagnifyGesture()
+                    .onChanged { gesture in
+                        let from = start ?? value.wrappedValue
+                        start = from
+                        value.wrappedValue = min(max(from * gesture.magnification, range.lowerBound), range.upperBound)
+                    }
+                    .onEnded { _ in
+                        start = nil
+                        commit()
+                    })
+            .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+    }
+}
+
+private struct BernSwipe: ViewModifier {
+    let value: Binding<Double>
+    let range: ClosedRange<Double>
+    let axis: Axis
+    let distance: Double
+    let commit: @MainActor () -> Void
+    @State private var start: Double?
+
+    func body(content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 10)
+                    .onChanged { drag in
+                        let from = start ?? value.wrappedValue
+                        start = from
+                        let moved = axis == .vertical ? -drag.translation.height : drag.translation.width
+                        let span = range.upperBound - range.lowerBound
+                        value.wrappedValue = min(max(from + moved / distance * span, range.lowerBound), range.upperBound)
+                    }
+                    .onEnded { _ in
+                        start = nil
+                        commit()
+                    })
+            .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+    }
+}
+
+/// One step of an adjustable value for assistive technologies: a tenth of
+/// its range.
+@MainActor
+private func bernAdjust(
+    _ value: Binding<Double>, _ range: ClosedRange<Double>, _ direction: AccessibilityAdjustmentDirection,
+    _ commit: @MainActor () -> Void
+) {
+    let step = (range.upperBound - range.lowerBound) / 10
+    switch direction {
+    case .increment: value.wrappedValue = min(value.wrappedValue + step, range.upperBound)
+    case .decrement: value.wrappedValue = max(value.wrappedValue - step, range.lowerBound)
+    @unknown default: return
+    }
+    commit()
+}
+
+// MARK: - Stagger
+
+/// How an element appears, for a staggered entrance that runs by hand: a
+/// container's own appearing takes its children with it, so their
+/// transitions would not play.
+enum BernAppear: Sendable {
+    case fade
+    case pop(Double)
+    case slide(x: Double, y: Double)
+
+    var scale: Double {
+        if case .pop(let from) = self { return from }
+        return 1
+    }
+
+    var offset: CGSize {
+        if case .slide(let x, let y) = self { return CGSize(width: x, height: y) }
+        return .zero
+    }
+}
+
+/// The turns of a staggering container's children: those that appear in
+/// one update take turns in reading order, top to bottom and along each
+/// line in the writing direction, each `step` seconds after the one
+/// before; the count starts over with the next update.
+@MainActor
+final class BernStaggerClock {
+    let step: Double
+    private var waiting: [(place: BernPlace, start: (Double) -> Void)] = []
+    private var rightToLeft = false
+
+    init(step: Double) {
+        self.step = step
+    }
+
+    /// Asks for a turn: `start` runs with its delay once every element
+    /// appearing in this update has asked and been laid out.
+    func take(place: BernPlace, rightToLeft: Bool, start: @escaping (Double) -> Void) {
+        waiting.append((place, start))
+        self.rightToLeft = rightToLeft
+        if waiting.count == 1 {
+            DispatchQueue.main.async { [self] in turn() }
+        }
+    }
+
+    private func turn() {
+        let rtl = rightToLeft
+        let frames = waiting.map(\.place.frame)
+        let order = waiting.indices.sorted { a, b in
+            let one = frames[a], other = frames[b]
+            // On one line when they overlap by half the shorter height.
+            let overlap = min(one.maxY, other.maxY) - max(one.minY, other.minY)
+            if overlap < min(one.height, other.height) / 2 {
+                return one.minY < other.minY
+            }
+            if one.minX != other.minX {
+                return rtl ? one.maxX > other.maxX : one.minX < other.minX
+            }
+            return a < b
+        }
+        let turns = waiting
+        waiting = []
+        for (place, index) in order.enumerated() {
+            turns[index].start(Double(place) * step * bernMotionScale)
+        }
+    }
+}
+
+private struct BernStaggerKey: EnvironmentKey {
+    static let defaultValue: BernStaggerClock? = nil
+}
+
+extension EnvironmentValues {
+    var bernStagger: BernStaggerClock? {
+        get { self[BernStaggerKey.self] }
+        set { self[BernStaggerKey.self] = newValue }
+    }
+}
+
+/// A container whose children take turns appearing.
+struct BernStaggerScope<Content: View>: View {
+    @State private var clock: BernStaggerClock
+    let content: Content
+
+    init(step: Double, @ViewBuilder content: () -> Content) {
+        _clock = State(initialValue: BernStaggerClock(step: step))
+        self.content = content()
+    }
+
+    var body: some View {
+        content.environment(\.bernStagger, clock)
+    }
+}
+
+/// An element with `appear` in a staggering container: it starts hidden and
+/// moves in on its turn, once the window has shown its first frame; before
+/// that it shows at once. Elements inside it do not stagger on their own.
+struct BernStaggeredAppear: ViewModifier {
+    let appear: BernAppear
+    let motion: BernMotion?
+    let clock: BernStaggerClock
+    @Environment(BernWindowContext.self) private var window
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @Environment(\.layoutDirection) private var direction
+    @State private var shown = false
+    @State private var place = BernPlace()
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.bernStagger, nil)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { place.frame = $0 }
+            .opacity(shown ? 1 : 0)
+            .scaleEffect(shown ? 1 : appear.scale)
+            .offset(shown ? .zero : appear.offset)
+            .onAppear {
+                guard window.settled, !reduce, !bernForcedReduceMotion, !shown else {
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { shown = true }
+                    return
+                }
+                let motion = motion
+                clock.take(place: place, rightToLeft: direction == .rightToLeft) { delay in
+                    withAnimation((motion?.animation ?? .default).delay(delay)) { shown = true }
+                }
+            }
+    }
+}
+
+/// Where an element stands, kept without redrawing it.
+@MainActor
+final class BernPlace {
+    var frame = CGRect.zero
+}
+
+// MARK: - Rails
+
+private struct BernRailAt: LayoutValueKey {
+    static let defaultValue: Double? = nil
+}
+
+private struct BernRailSpan: LayoutValueKey {
+    static let defaultValue: ClosedRange<Double>? = nil
+}
+
+/// A strip along an axis that places each child at a fraction of its
+/// length, or between two; across it, children are centered, and those
+/// between two fractions without a thickness of their own fill it. The
+/// rail is as thick as its thickest child.
+struct BernRail: Layout {
+    let vertical: Bool
+    /// Where a placed child's own extent meets its point: 0 its start, 0.5
+    /// its center, 1 its end.
+    let anchor: Double
+
+    /// A span is offered the thickness the rail is given; an item its own
+    /// size.
+    private func size(of subview: LayoutSubview, across: CGFloat?) -> CGSize {
+        guard subview[BernRailSpan.self] != nil, let across, across.isFinite else {
+            return subview.sizeThatFits(.unspecified)
+        }
+        return subview.sizeThatFits(
+            vertical ? ProposedViewSize(width: across, height: nil) : ProposedViewSize(width: nil, height: across))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let across = vertical ? proposal.width : proposal.height
+        var thickness: CGFloat = 0
+        for subview in subviews {
+            let size = size(of: subview, across: across)
+            thickness = max(thickness, vertical ? size.width : size.height)
+        }
+        let length = (vertical ? proposal.height : proposal.width) ?? 0
+        let finite = length.isFinite ? length : 0
+        return vertical ? CGSize(width: thickness, height: finite) : CGSize(width: finite, height: thickness)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let length = vertical ? bounds.height : bounds.width
+        let thickness = vertical ? bounds.width : bounds.height
+        let clamp = { (value: Double) in CGFloat(min(1, max(0, value))) }
+        for subview in subviews {
+            if let span = subview[BernRailSpan.self] {
+                let start = clamp(span.lowerBound) * length
+                let extent = (clamp(span.upperBound) - clamp(span.lowerBound)) * length
+                let offer = vertical ? CGSize(width: thickness, height: extent) : CGSize(width: extent, height: thickness)
+                let own = subview.sizeThatFits(ProposedViewSize(offer))
+                let across = (thickness - min(thickness, vertical ? own.width : own.height)) / 2
+                let size = vertical
+                    ? CGSize(width: min(thickness, own.width), height: extent)
+                    : CGSize(width: extent, height: min(thickness, own.height))
+                let origin = vertical
+                    ? CGPoint(x: bounds.minX + across, y: bounds.minY + start)
+                    : CGPoint(x: bounds.minX + start, y: bounds.minY + across)
+                subview.place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(size))
+            } else {
+                let size = subview.sizeThatFits(.unspecified)
+                let point = clamp(subview[BernRailAt.self] ?? 0) * length
+                let along = point - CGFloat(anchor) * (vertical ? size.height : size.width)
+                let across = (thickness - (vertical ? size.width : size.height)) / 2
+                let origin = vertical
+                    ? CGPoint(x: bounds.minX + across, y: bounds.minY + along)
+                    : CGPoint(x: bounds.minX + along, y: bounds.minY + across)
+                subview.place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(size))
+            }
+        }
+    }
+}
+
+private struct BernFillsLayers: LayoutValueKey {
+    static let defaultValue = false
+}
+
+/// A `Stack` holding a rail: its layers paint in order, as in a `ZStack`,
+/// but a rail takes the size the other layers give the stack instead of
+/// adding to it. With only rails, the stack is as large as the largest.
+struct BernLayers: Layout {
+    let alignment: UnitPoint
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sized = subviews.filter { !$0[BernFillsLayers.self] }
+        return (sized.isEmpty ? Array(subviews) : sized).reduce(.zero) { size, subview in
+            let own = subview.sizeThatFits(proposal)
+            return CGSize(width: max(size.width, own.width), height: max(size.height, own.height))
+        }
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for subview in subviews {
+            let size = subview.sizeThatFits(
+                subview[BernFillsLayers.self] ? ProposedViewSize(bounds.size) : proposal)
+            let origin = CGPoint(
+                x: bounds.minX + (bounds.width - size.width) * alignment.x,
+                y: bounds.minY + (bounds.height - size.height) * alignment.y)
+            subview.place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(size))
+        }
+    }
+}
+
+extension View {
+    /// In a `BernLayers`, takes the size of the other layers.
+    func bernFillsLayers() -> some View {
+        layoutValue(key: BernFillsLayers.self, value: true)
+    }
+
+    /// Sits at `fraction` of the rail it stands in, moving with `motion`.
+    func bernRailAt(_ fraction: Double, motion: BernMotion?) -> some View {
+        layoutValue(key: BernRailAt.self, value: fraction)
+            .animation(motion?.animation, value: fraction)
+    }
+
+    /// Spans the rail it stands in from one fraction to another.
+    func bernRailSpan(from: Double, to: Double, motion: BernMotion?) -> some View {
+        layoutValue(key: BernRailSpan.self, value: from...max(from, to))
+            .animation(motion?.animation, value: [from, to])
+    }
+}
+
+// MARK: - Popover buttons
+
+/// A button that shows its content in a popover, such as a volume slider.
+/// The content exists while the popover shows. `presented`, when given,
+/// opens and closes it and follows it; external entries open it with
+/// `activate`. With an icon only the icon shows.
+struct BernPopoverButton<Content: View>: View {
+    let label: String
+    let systemImage: String?
+    let presented: Binding<Bool>?
+    let target: String
+    @ViewBuilder let content: () -> Content
+    @Environment(\.colorScheme) private var scheme
+    @State private var local = false
+
+    private var isPresented: Binding<Bool> {
+        presented ?? $local
+    }
+
+    var body: some View {
+        let showing = isPresented
+        Button {
+            showing.wrappedValue.toggle()
+        } label: {
+            if let systemImage {
+                Label(label, systemImage: systemImage).labelStyle(.iconOnly)
+            } else {
+                Text(verbatim: label)
+            }
+        }
+        .help(label)
+        .popover(isPresented: showing, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 12) { content() }
+                .padding(16)
+                .frame(minWidth: 240, alignment: .leading)
+                // A popover also on iPhone, drawn in the appearance of
+                // where it opens.
+                .presentationCompactAdaptation(.popover)
+                .presentationBackground {
+                    Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
+                }
+                .environment(\.colorScheme, scheme)
+        }
+        .bernControl(
+            target, role: "popover_button", label: label,
+            actions: BernControlActions(
+                activate: { showing.wrappedValue = true },
+                value: { showing.wrappedValue ? "open" : "closed" }))
     }
 }

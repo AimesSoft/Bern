@@ -1,4 +1,4 @@
-// Bern runtime for Windows, XAML part 4 of 4: native windows, their drafts,
+// Bern runtime for Windows, XAML part 7 of 7: native windows, their drafts,
 // the close protocol, presentation facts, session commands of external
 // entries, development snapshots and the application's lifetime. Window
 // facts and commands go through Win32 in both front ends; WinUI 3 windows
@@ -45,9 +45,14 @@ inline Cell<Value>& Win::CellOf(Field field) {
 }
 
 /// Write a draft field: the session runtime first, then the cell.
-inline bool Win::Write(Field field, Value const& value) {
+inline bool Win::Write(Field field, Value const& written) {
     auto const& session = app->catalog.sessions[field.session];
-    auto bytes = Codec::ToBytes(value, session.fields[field.field].second, app->catalog.types);
+    auto const& type = session.fields[field.field].second;
+    // Literals of actions such as `draft.size.set(12)` may be integers.
+    Value value = written;
+    if (type.kind == BType::Kind::Float && value.kind == Value::Kind::Int) value = Value::Float(static_cast<double>(value.i));
+    else if (type.kind == BType::Kind::Int && value.kind == Value::Kind::Float) value = Value::Int(static_cast<int64_t>(std::llround(value.f)));
+    auto bytes = Codec::ToBytes(value, type, app->catalog.types);
     auto reply = Host::Take(bern_session_set(Host::handle, static_cast<uint32_t>(kind), generation, static_cast<uint32_t>(field.session),
         static_cast<uint32_t>(field.field), bytes.data(), bytes.size()));
     Reader reader(reply);
@@ -92,6 +97,31 @@ inline double Win::Scale() const {
 }
 
 inline Facts Win::CurrentFacts() {
+    if (owner) {
+        // A dialog window over its owner: where its dialog shows, and only
+        // activate and close.
+        Facts facts;
+        facts.actions = (1u << 0) | (1u << 1);
+        facts.focused = owner->focused;
+        RECT rect{};
+        GetWindowRect(owner->hwnd, &rect);
+        auto scale = Scale();
+        facts.x = rect.left / scale;
+        facts.y = rect.top / scale;
+        if (root) {
+            facts.width = root.ActualWidth();
+            facts.height = root.ActualHeight();
+            try {
+                if (owner->root) {
+                    auto at = root.TransformToVisual(owner->root).TransformPoint({0, 0});
+                    facts.x += at.X;
+                    facts.y += at.Y;
+                }
+            } catch (winrt::hresult_error const&) {
+            }
+        }
+        return facts;
+    }
     LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
     uint8_t visibility = !IsWindowVisible(hwnd) ? 2 : IsIconic(hwnd) ? 1 : 0;
     uint8_t size = IsZoomed(hwnd) ? 1 : 0;
@@ -423,6 +453,272 @@ inline xaml::FrameworkElement MakeFailures(Win& win) {
 #endif
 }
 
+/// The layout size of a width by the breakpoints of `[layouts]`.
+inline std::string SizeOf(double width) {
+    auto const& catalog = app->catalog;
+    if (width < catalog.compactBelow.value_or(0)) return "compact";
+    if (catalog.mediumBelow && width < *catalog.mediumBelow) return "medium";
+    if (!catalog.expandedBelow || width < *catalog.expandedBelow) return "expanded";
+    return "large";
+}
+
+/// Whether the cursor is hidden for an immersive, idle window.
+inline bool cursorHidden = false;
+
+inline void HideCursor(bool hide) {
+    if (hide == cursorHidden) return;
+    cursorHidden = hide;
+    if (hide) {
+        while (ShowCursor(FALSE) >= 0) {
+        }
+    } else {
+        while (ShowCursor(TRUE) < 0) {
+        }
+    }
+}
+
+/// `window.idle`: true after `seconds` without pointer, wheel or key input
+/// in the window, and false at the next input.
+inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds) {
+    auto generation = std::make_shared<int64_t>(0);
+    std::weak_ptr<Win> weak = win;
+    auto rest = [weak, generation, seconds] {
+        auto win = weak.lock();
+        if (!win) return;
+        if (win->idle.Peek()) {
+            win->idle.Set(false);
+            Snapshot::Schedule();
+        }
+        auto mine = ++*generation;
+        Host::After(std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000)), [weak, generation, mine] {
+            if (auto win = weak.lock(); win && *generation == mine) {
+                win->idle.Set(true);
+                Snapshot::Schedule();
+            }
+        });
+    };
+    auto root = win->root;
+    using PointerHandler = xaml::Input::PointerEventHandler;
+    // Only a pointer that really moved counts: a window whose frame changes,
+    // as an immersive one's does, gets moves where the pointer stayed.
+    auto last = std::make_shared<POINT>();
+    GetCursorPos(last.get());
+    root.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler([rest, last](auto&&, auto&&) {
+        POINT now{};
+        GetCursorPos(&now);
+        if (now.x == last->x && now.y == last->y) return;
+        *last = now;
+        rest();
+    })), true);
+    for (auto const& event : {xaml::UIElement::PointerPressedEvent(), xaml::UIElement::PointerWheelChangedEvent()})
+        root.AddHandler(event, winrt::box_value(PointerHandler([rest](auto&&, auto&&) { rest(); })), true);
+    root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest](auto&&, auto&&) { rest(); })), true);
+    rest();
+}
+
+/// Show or hide the window's title bar for `immersive`.
+inline void ShowChrome(Win& win, bool immersive) {
+#if BERN_WINUI
+    if (win.titleBar) win.titleBar.Visibility(immersive ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
+    try {
+        if (auto presenter = win.window.AppWindow().Presenter().try_as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>())
+            presenter.SetBorderAndTitleBar(true, !immersive);
+    } catch (winrt::hresult_error const&) {
+    }
+#else
+    LONG_PTR style = GetWindowLongPtrW(win.hwnd, GWL_STYLE);
+    LONG_PTR next = immersive ? (style & ~WS_CAPTION) | WS_THICKFRAME : style | WS_CAPTION;
+    if (next != style) {
+        SetWindowLongPtrW(win.hwnd, GWL_STYLE, next);
+        SetWindowPos(win.hwnd, nullptr, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+#endif
+}
+
+/// The accent last shown, to change the brushes only when it changes.
+inline int shownAccent = -1;
+
+/// `WindowSet(accent:, appearance:)` for one window: its appearance, and the
+/// application's accent.
+inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
+    auto const& def = win->Def();
+    if (def.appearance) {
+        auto appearance = def.appearance;
+        std::weak_ptr<Win> weak = win;
+        Reactive::Run([weak, appearance, ctx] {
+            std::string mode = appearance(ctx);
+            Reactive::Untrack([&] {
+                auto win = weak.lock();
+                if (!win || !win->root) return 0;
+                auto theme = B::ThemeNamed(mode);
+                win->root.RequestedTheme(theme);
+                if (win->sheet) win->sheet.RequestedTheme(theme);
+#if BERN_WINUI
+                // The caption buttons follow the window's appearance.
+                if (win->window) try {
+                    auto bar = win->window.AppWindow().TitleBar();
+                    bar.PreferredTheme(mode == "dark" ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Dark
+                            : mode == "light"         ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Light
+                                                      : winrt::Microsoft::UI::Windowing::TitleBarTheme::UseDefaultAppMode);
+                } catch (...) {
+                }
+#endif
+                Snapshot::Schedule();
+                return 0;
+            });
+        });
+    }
+    if (def.accent) {
+        auto accent = def.accent;
+        Reactive::Run([accent, ctx] {
+            int index = accent(ctx);
+            Reactive::Untrack([&] {
+                if (index < 0 || index >= static_cast<int>(app->accents.size()) || index == shownAccent) return 0;
+                shownAccent = index;
+                auto [light, dark] = app->accents[index];
+                B::ApplyAccent(light, dark);
+                Snapshot::Schedule();
+                return 0;
+            });
+        });
+    }
+}
+
+/// The window's content, title, failure bar and window-level behavior, in
+/// `root`; for every kind of window.
+inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, std::shared_ptr<Page> const& page) {
+    auto const& def = win->Def();
+    auto content = MakeFlex();
+    controls::Grid body;
+    controls::RowDefinition headerRow;
+    headerRow.Height(AutoLength());
+    controls::RowDefinition contentRow;
+    contentRow.Height(Star());
+    body.RowDefinitions().Append(headerRow);
+    body.RowDefinitions().Append(contentRow);
+    auto failures = MakeFailures(*win);
+    win->failures = failures;
+    host.Children().Append(body);
+    host.Children().Append(failures);
+    // Above the content: copies of shared elements while they move.
+    controls::Canvas overlay;
+    overlay.IsHitTestVisible(false);
+    if (win->root.RowDefinitions().Size() > 1) controls::Grid::SetRowSpan(overlay, static_cast<int32_t>(win->root.RowDefinitions().Size()));
+    win->root.Children().Append(overlay);
+    win->overlay = overlay;
+    Win* raw = win.get();
+    win->root.SizeChanged([raw](auto&&, xaml::SizeChangedEventArgs const& args) {
+        if (args.NewSize().Width > 0) raw->size.Set(SizeOf(args.NewSize().Width));
+    });
+    win->scope->Run([&] {
+        auto header = Header(page, nullptr, false);
+        header.Margin(xaml::Thickness{16, kWinUI || win->owner ? 0.0 : 12.0, 16, 8});
+        body.Children().Append(header);
+        controls::Grid holder;
+        controls::Grid::SetRow(holder, 1);
+        body.Children().Append(holder);
+        holder.Children().Append(content);
+        Ctx ctx;
+        ctx.win = raw;
+        // Controls written in the window itself are named after it.
+        ctx.comp = def.id;
+        ctx.page = page;
+        def.render(Parent::Of(content), ctx);
+        Reactive::Run([holder, raw] { holder.IsHitTestVisible(!raw->pending.Get().has_value()); });
+        if (def.idleAfter) TrackIdle(win, *def.idleAfter);
+        if (def.immersive) {
+            auto immersive = def.immersive;
+            Reactive::Run([raw, immersive, ctx] {
+                bool on = immersive(ctx);
+                bool idle = raw->idle.Get();
+                Reactive::Untrack([&] {
+                    if (raw->immersive.Peek() != on) {
+                        raw->immersive.Set(on);
+                        if (!raw->owner) ShowChrome(*raw, on);
+                    }
+                    HideCursor(on && idle);
+                    return 0;
+                });
+            });
+            Reactive::OnCleanup([] { HideCursor(false); });
+        }
+        FollowTheme(win, ctx);
+    });
+}
+
+/// Show a dialog window's content dialog; it stays until the window closes.
+inline winrt::fire_and_forget ShowSheet(std::shared_ptr<Win> win) {
+    auto dialog = win->sheet;
+    if (!dialog) co_return;
+    try {
+        co_await dialog.ShowAsync();
+    } catch (winrt::hresult_error const& error) {
+        Report("dialog window " + win->id + ": " + Utf8(error.message()));
+    }
+}
+
+/// A dialog window: a content dialog over the window it belongs to, the
+/// primary window when it is open.
+inline std::string OpenDialog(std::shared_ptr<Win> const& win) {
+    auto const& def = win->Def();
+    std::shared_ptr<Win> owner;
+    for (auto const& candidate : all)
+        if (!candidate->owner && candidate.get() != win.get() && (!owner || candidate->Def().id == app->catalog.primary)) owner = candidate;
+    if (!owner || !owner->root || !owner->root.XamlRoot()) {
+        std::erase(all, win);
+        throw Fault{"target_unavailable", "`" + def.id + "` shows over a window, and none is open"};
+    }
+    win->owner = owner.get();
+    win->hwnd = owner->hwnd;
+    controls::Grid root;
+    win->root = root;
+    controls::Grid host;
+    root.Children().Append(host);
+    auto page = std::make_shared<Page>();
+    page->win = win.get();
+    controls::ContentDialog dialog;
+    if (auto style = Styles::Named(L"DefaultContentDialogStyle")) dialog.Style(style);
+    // The declared size, within what a dialog allows.
+    auto resources = dialog.Resources();
+    if (def.width) {
+        resources.Insert(winrt::box_value(L"ContentDialogMinWidth"), winrt::box_value(*def.width));
+        resources.Insert(winrt::box_value(L"ContentDialogMaxWidth"), winrt::box_value((std::max)(*def.width, 320.0)));
+    }
+    if (def.height) resources.Insert(winrt::box_value(L"ContentDialogMinHeight"), winrt::box_value(*def.height));
+    resources.Insert(winrt::box_value(L"ContentDialogPadding"), winrt::box_value(xaml::Thickness{0, 0, 0, 0}));
+    dialog.Content(root);
+    dialog.XamlRoot(owner->root.XamlRoot());
+    dialog.RequestedTheme(owner->root.ActualTheme());
+    win->sheet = dialog;
+    auto titleKey = def.title;
+    win->scope->Run([&] {
+        Reactive::Run([dialog, titleKey] {
+            controls::TextBlock title;
+            title.Text(bern::Text::Tr(titleKey));
+            if (auto style = Styles::TextStyle("title2")) title.Style(style);
+            title.Margin(xaml::Thickness{24, 20, 24, 0});
+            dialog.Title(title);
+        });
+    });
+    Mount(win, host, page);
+    std::weak_ptr<Win> weak = win;
+    // Its frame is known once laid out.
+    root.SizeChanged([weak](auto&&, auto&&) {
+        if (auto win = weak.lock()) win->ScheduleReport();
+    });
+    // Escape and the system's close go through the close protocol.
+    dialog.Closing([weak](controls::ContentDialog const&, controls::ContentDialogClosingEventArgs const& args) {
+        auto win = weak.lock();
+        if (!win || win->allowClose) return;
+        args.Cancel(true);
+        RequestCloseSafely(win);
+    });
+    ShowSheet(win);
+    win->ScheduleReport();
+    Snapshot::Schedule();
+    return win->id;
+}
+
 /// Open a window of `kind`, or show the one already open. Returns the
 /// instance id.
 inline std::string Open(std::string const& kindId) {
@@ -444,6 +740,14 @@ inline std::string Open(std::string const& kindId) {
     win->id = instance.id;
     win->cells = std::move(instance.cells);
     all.push_back(win);
+    if (def.dialog) {
+        try {
+            return OpenDialog(win);
+        } catch (Fault const&) {
+            if (Host::handle) bern_window_closed(Host::handle, static_cast<uint32_t>(win->kind), win->generation);
+            throw;
+        }
+    }
 
     controls::Grid root;
     win->root = root;
@@ -459,6 +763,7 @@ inline std::string Open(std::string const& kindId) {
     window.SystemBackdrop(media::MicaBackdrop());
     window.ExtendsContentIntoTitleBar(true);
     controls::TitleBar titleBar;
+    win->titleBar = titleBar;
     controls::RowDefinition titleRow;
     titleRow.Height(AutoLength());
     controls::RowDefinition hostRow;
@@ -511,47 +816,24 @@ inline std::string Open(std::string const& kindId) {
 #endif
 
     auto page = std::make_shared<Page>();
-    auto content = MakeFlex();
-    controls::Grid body;
-    controls::RowDefinition headerRow;
-    headerRow.Height(AutoLength());
-    controls::RowDefinition contentRow;
-    contentRow.Height(Star());
-    body.RowDefinitions().Append(headerRow);
-    body.RowDefinitions().Append(contentRow);
-    auto failures = MakeFailures(*win);
-    win->failures = failures;
-    host.Children().Append(body);
-    host.Children().Append(failures);
-
-    Win* raw = win.get();
+    page->win = win.get();
+    auto titleKey = def.title;
     win->scope->Run([&] {
-        auto titleKey = def.title;
 #if BERN_WINUI
-        Reactive::Run([window, titleBar, titleKey] {
+        // A unified window shows no title of its own: the content under the
+        // title bar says where it is.
+        bool unified = def.unified;
+        Reactive::Run([window, titleBar, titleKey, unified] {
             auto title = bern::Text::Tr(titleKey);
             window.Title(title);
-            titleBar.Title(title);
+            titleBar.Title(unified ? winrt::hstring() : title);
         });
 #else
         HWND hwnd = win->hwnd;
         Reactive::Run([hwnd, titleKey] { SetWindowTextW(hwnd, bern::Text::Tr(titleKey).c_str()); });
 #endif
-        auto header = Header(page, nullptr, false);
-        header.Margin(xaml::Thickness{16, kWinUI ? 0.0 : 12.0, 16, 8});
-        body.Children().Append(header);
-        controls::Grid holder;
-        controls::Grid::SetRow(holder, 1);
-        body.Children().Append(holder);
-        holder.Children().Append(content);
-        Ctx ctx;
-        ctx.win = raw;
-        // Controls written in the window itself are named after it.
-        ctx.comp = def.id;
-        ctx.page = page;
-        def.render(Parent::Of(content), ctx);
-        Reactive::Run([holder, raw] { holder.IsHitTestVisible(!raw->pending.Get().has_value()); });
     });
+    Mount(win, host, page);
 
     double width = def.width.value_or(def.settings ? 640 : 960);
     double height = def.height.value_or(def.settings ? 560 : 680);
@@ -588,6 +870,10 @@ inline std::string Open(std::string const& kindId) {
 }
 
 inline void Show(Win& win) {
+    if (win.owner) {
+        Show(*win.owner);
+        return;
+    }
     if (IsIconic(win.hwnd)) ShowWindow(win.hwnd, SW_RESTORE);
 #if BERN_WINUI
     win.window.Activate();
@@ -613,7 +899,17 @@ inline void Ended(std::shared_ptr<Win> const& win) {
     if (win->closed) return;
     win->closed = true;
     std::erase(all, win);
+    // Dialog windows over this one end with it.
+    std::vector<std::shared_ptr<Win>> sheets;
+    for (auto const& other : all)
+        if (other->owner == win.get()) sheets.push_back(other);
+    for (auto const& sheet : sheets) {
+        sheet->allowClose = true;
+        if (sheet->sheet) sheet->sheet.Hide();
+        Ended(sheet);
+    }
     win->scope->Dispose();
+    B::AllProbes().erase(win.get());
     auto waits = std::move(win->waits);
     win->waits.clear();
     for (auto& wait : waits) wait.second(Failure{"stale_window", "`" + win->id + "` closed while the command ran"});
@@ -642,6 +938,12 @@ winrt::fire_and_forget ShowDialog(std::shared_ptr<Win> win, PendingClose pending
 inline void FinishClose(std::shared_ptr<Win> const& win) {
     win->allowClose = true;
     DismissDialog(*win);
+    if (win->owner) {
+        auto sheet = win->sheet;
+        Ended(win);
+        if (sheet) sheet.Hide();
+        return;
+    }
     Ended(win);
 #if BERN_WINUI
     win->window.Close();
@@ -768,7 +1070,7 @@ inline winrt::fire_and_forget ShowDialog(std::shared_ptr<Win> win, PendingClose 
     dialog.Content(winrt::box_value(bern::Text::Tr(pending.canSave ? "bern.close.save_detail" : "bern.close.discard_detail")));
     dialog.CloseButtonText(bern::Text::Tr("bern.close.cancel"));
     dialog.XamlRoot(win->root.XamlRoot());
-    dialog.RequestedTheme(win->root.RequestedTheme());
+    dialog.RequestedTheme(win->root.ActualTheme());
     if (pending.canSave) {
         dialog.PrimaryButtonText(bern::Text::Tr("bern.close.save"));
         dialog.SecondaryButtonText(bern::Text::Tr("bern.close.dont_save"));
@@ -960,6 +1262,8 @@ inline Value Inspect() {
 inline void Run(uint64_t request, uint32_t index, Reader& reader) {
     auto ok = [&](Value const& result) { Complete(request, index, result); };
     auto presentation = [request, index](std::shared_ptr<Win> const& win, auto perform) {
+        // A dialog window shows over its owner: it only activates and closes.
+        if (win->owner) throw Fault{"target_unavailable", "`" + win->id + "` is a dialog over another window; it can activate and close"};
         perform(*win, [request, index](std::optional<Failure> const& failure) {
             if (!failure) Complete(request, index, Value::Unit());
             else Fail(request, failure->code, failure->message);
@@ -1059,6 +1363,28 @@ inline void Run(uint64_t request, uint32_t index, Reader& reader) {
         ok(Value::Unit());
         break;
     }
+    case 20: {
+        auto entry = Find(reader.Text());
+        Need(entry, entry.actions.focus, "focus")();
+        ok(Value::Unit());
+        break;
+    }
+    case 21: {
+        auto entry = Find(reader.Text());
+        auto url = reader.Text();
+        auto give = Need(entry, entry.actions.setFile, "set_file");
+        auto scheme = url.find(':');
+        bool valid = scheme != std::string::npos && scheme > 0 && url.find_first_of(" \t\r\n") == std::string::npos;
+        std::string lower = url.substr(0, scheme == std::string::npos ? 0 : scheme);
+        for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (!valid || (lower != "file" && lower != "http" && lower != "https")) throw Fault{"invalid_url", "`" + url + "` is not a file or http(s) URL"};
+        if (!B::Accepts(url, entry.actions.files)) {
+            throw Fault{"unsupported_file", "`" + entry.target + "` takes " + std::string(entry.actions.files ? entry.actions.files : "any") + ", not `" + url + "`"};
+        }
+        give(url);
+        ok(Value::Unit());
+        break;
+    }
     default: throw Fault{"unknown_command", "unknown session command " + std::to_string(index)};
     }
 }
@@ -1141,7 +1467,7 @@ inline void CaptureWindow(HWND hwnd, std::wstring path, double dpi) {
 
 /// `BERN_DUMP_TREE`: the element tree with sizes, on standard error.
 inline void DumpTree(xaml::DependencyObject const& node, int depth) {
-    if (depth > 14 || !node) return;
+    if (depth > 60 || !node) return;
     std::string line(static_cast<size_t>(depth) * 2, ' ');
     line += Utf8(winrt::get_class_name(node));
     if (auto element = node.try_as<xaml::FrameworkElement>()) {
@@ -1182,8 +1508,34 @@ inline void CaptureAll() {
     }
 }
 
+/// `BERN_SNAPSHOT_BURST`: after a change, also the window as the screen
+/// shows it every 40 ms for 800 ms, as `<window>-burst<n>.png`, to see
+/// motion in development.
+inline bool burst = false;
+inline int burstRun = 0;
+
+inline void Burst() {
+    auto directory = Dev::SnapshotDirectory();
+    if (!directory || GetEnvironmentVariableW(L"BERN_SNAPSHOT_BURST", nullptr, 0) == 0 || burst) return;
+    burst = true;
+    int run = ++burstRun;
+    for (int frame = 0; frame < 20; ++frame) {
+        Host::After(std::chrono::milliseconds(20 + frame * 40), [frame, run, directory] {
+            if (frame == 19) burst = false;
+            for (auto const& win : WindowManager::all) {
+                if (!win->hwnd || win->owner) continue;
+                std::wstring name(Wide(win->id));
+                std::replace(name.begin(), name.end(), L'#', L'-');
+                CaptureWindow(win->hwnd, *directory + L"\\" + name + L"-burst" + std::to_wstring(run) + L"-" + std::to_wstring(frame) + L".png", win->Scale() * 96);
+            }
+        });
+    }
+}
+
 inline void Schedule() {
-    if (queued || !Dev::SnapshotDirectory()) return;
+    if (!Dev::SnapshotDirectory()) return;
+    Burst();
+    if (queued) return;
     queued = true;
     Host::After(std::chrono::milliseconds(700), [] {
         queued = false;

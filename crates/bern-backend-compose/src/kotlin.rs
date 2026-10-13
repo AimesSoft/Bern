@@ -4,8 +4,8 @@
 use crate::names::{double, float, member, pascal, string};
 use bern_ir::{
     Action, Application, Binding, ComponentArg, ComponentDef, Element, Expr, ExprKind, IfLetNode,
-    IfNode, MatchArm, MatchNode, MediaOp, Node, ParamKind, Prop, Text, WindowDef, WindowOp,
-    WindowRole,
+    IfNode, LayoutSize, MatchArm, MatchNode, MediaOp, Node, ParamKind, Prop, Text, WindowDef,
+    WindowOp, WindowRole,
 };
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -443,6 +443,15 @@ struct Ctx {
     /// Inside a branch whose condition animates its appearing and
     /// disappearing.
     animated: bool,
+    /// Inside a scroll view that rests on its items or follows a
+    /// position: the first repetition's items report where they are.
+    scroll_items: bool,
+    /// The nodes are direct children of a container that declares
+    /// `stagger`, or the root of a component, which may be one: those that
+    /// appear take turns on the clock in `LocalBernStagger`.
+    stagger: bool,
+    /// The nodes are layers of a `Stack`.
+    layer: bool,
 }
 
 impl Ctx {
@@ -456,11 +465,25 @@ impl Ctx {
 
 pub struct Generator<'a> {
     app: &'a Application,
+    /// Whether a container anywhere declares `stagger`. Only then do the
+    /// children of containers and the roots of components take part in
+    /// the turns.
+    staggers: bool,
 }
 
 impl<'a> Generator<'a> {
     pub fn new(app: &'a Application) -> Self {
-        Self { app }
+        let mut staggers = false;
+        let mut find = |node: &Node| {
+            staggers |= matches!(node, Node::Element(element) if element.prop("stagger").is_some())
+        };
+        for component in &app.components {
+            component.body.walk(&mut find);
+        }
+        for window in &app.windows.windows {
+            window.content.walk(&mut find);
+        }
+        Self { app, staggers }
     }
 
     fn types(&self) -> &TypeTable {
@@ -551,6 +574,16 @@ impl<'a> Generator<'a> {
                     format!("{name}.{}({})", variant_def.name, args.join(", "))
                 }
             }
+            ExprKind::If {
+                cond,
+                then,
+                otherwise,
+            } => format!(
+                "(if ({}) ({}) else ({}))",
+                self.expr(cond),
+                self.branch(then, &expr.ty),
+                self.branch(otherwise, &expr.ty)
+            ),
             ExprKind::Not { expr } => format!("!({})", self.expr(expr)),
             ExprKind::Neg { expr } => format!("-({})", self.expr(expr)),
             ExprKind::Binary { op, lhs, rhs } => {
@@ -566,6 +599,16 @@ impl<'a> Generator<'a> {
                 };
                 format!("({}) {op} ({})", self.expr(lhs), self.expr(rhs))
             }
+        }
+    }
+
+    /// A branch of a value `if`: a whole number where the `if` is a float
+    /// becomes one.
+    fn branch(&self, expr: &Expr, ty: &Type) -> String {
+        if *ty == Type::Float && expr.ty == Type::Int {
+            format!("({}).toDouble()", self.expr(expr))
+        } else {
+            self.expr(expr)
         }
     }
 
@@ -608,10 +651,8 @@ impl<'a> Generator<'a> {
             ctx.component,
             element.id.as_deref().unwrap_or(&element.path)
         ));
-        match &ctx.key {
-            Some(key) => format!("{}[${{{key}}}]\"", base.trim_end_matches('"')),
-            None => base,
-        }
+        // The keys of the rows around it are added where it registers.
+        base
     }
 
     /// The session field a control writes, readable and assignable.
@@ -627,6 +668,18 @@ impl<'a> Generator<'a> {
 
     fn action(&self, action: &Action) -> String {
         match action {
+            Action::Session { field, op } => {
+                let session = self.app.session(&field.session).expect("session");
+                let target = format!(
+                    "{}.{}",
+                    session_var(&field.session),
+                    member(&session.fields[field.field].name)
+                );
+                match op {
+                    bern_ir::SessionOp::Set { value } => format!("{target} = {}", self.expr(value)),
+                    bern_ir::SessionOp::Toggle => format!("{target} = !{target}"),
+                }
+            }
             Action::Engine { command, args } => {
                 let spec = &self.app.protocol.commands[*command];
                 let mut values: Vec<_> = args.iter().map(|arg| self.expr(arg)).collect();
@@ -691,12 +744,89 @@ impl<'a> Generator<'a> {
     fn node(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
         match node {
             Node::Element(element) => {
-                // Added later, as an item of a list, the element plays its
-                // appearing transition.
-                let appear = element.keyword("appear").filter(|_| !ctx.animated);
-                if let Some(name) = appear {
-                    out.open(format!("BernAppear({}) {{", self.enter(Some(name))));
+                // What the place the element stands in says about it ends
+                // here; its own children start afresh. A repetition adds no
+                // layout: its rows stand where it does.
+                let repeats = element.kind == "ForEach";
+                let own = if repeats {
+                    ctx.clone()
+                } else {
+                    Ctx {
+                        stagger: false,
+                        layer: false,
+                        ..ctx.clone()
+                    }
+                };
+                // On a rail, the element sits at its fraction or between
+                // two.
+                let placement = self.placement(element);
+                if let Some(place) = &placement {
+                    out.open(format!("BernPlace({place}) {{"));
                 }
+                // Added later, as an item of a list, the element plays its
+                // appearing transition; a direct child of a staggering
+                // container waits for its turn.
+                let appear = element.keyword("appear").filter(|_| !ctx.animated);
+                let turns = ctx.stagger && self.staggers;
+                let unstaggered =
+                    turns && !repeats && appear.is_none() && Self::appears_below(element);
+                if unstaggered {
+                    out.open("BernUnstaggered {");
+                }
+                if let Some(name) = appear {
+                    let staggered = if turns { ", staggered = true" } else { "" };
+                    out.open(format!(
+                        "BernAppear({}{staggered}) {{",
+                        self.transition_args(Some(name))
+                    ));
+                }
+                // Effects drawn on the element as a whole: a nudge and the
+                // look that follows scrolling.
+                let mut effects = String::new();
+                if let Some(when) = element.expr("nudge") {
+                    effects.push_str(&format!(
+                        ".bernNudge({}, {})",
+                        self.expr(when),
+                        crate::style::motion(self.app, "jelly")
+                    ));
+                }
+                let (scale, opacity) = (
+                    element.number("scroll_scale"),
+                    element.number("scroll_opacity"),
+                );
+                if scale.is_some() || opacity.is_some() {
+                    effects.push_str(&format!(
+                        ".bernScrollEffect({}, {})",
+                        float(scale.unwrap_or(1.0)),
+                        float(opacity.unwrap_or(1.0))
+                    ));
+                }
+                if !effects.is_empty() {
+                    out.open(format!("Box(Modifier{effects}) {{"));
+                }
+                // A part fixed to one appearance, with what opens from it.
+                let appearance = element.keyword("appearance");
+                if let Some(appearance) = appearance {
+                    out.open(format!(
+                        "BernAppearance(dark = {}) {{",
+                        appearance == "dark"
+                    ));
+                }
+                // A rail that is a layer of a stack, directly, and holds
+                // only spans without a thickness of their own takes the
+                // stack's size.
+                let direct = appear.is_none()
+                    && effects.is_empty()
+                    && appearance.is_none()
+                    && element.keyword("hero").is_none();
+                let own = Ctx {
+                    layer: if repeats {
+                        own.layer
+                    } else {
+                        ctx.layer && direct && element.kind == "Rail" && Self::rail_fills(element)
+                    },
+                    ..own
+                };
                 match element.keyword("hero") {
                     Some(hero) => {
                         let key = match element.expr("hero_key") {
@@ -707,12 +837,24 @@ impl<'a> Generator<'a> {
                             "BernHero({key}, {}) {{",
                             crate::style::motion(self.app, "hero")
                         ));
-                        self.element(out, element, ctx);
+                        self.element(out, element, &own);
                         out.close("}");
                     }
-                    None => self.element(out, element, ctx),
+                    None => self.element(out, element, &own),
+                }
+                if appearance.is_some() {
+                    out.close("}");
+                }
+                if !effects.is_empty() {
+                    out.close("}");
                 }
                 if appear.is_some() {
+                    out.close("}");
+                }
+                if unstaggered {
+                    out.close("}");
+                }
+                if placement.is_some() {
                     out.close("}");
                 }
             }
@@ -786,10 +928,102 @@ impl<'a> Generator<'a> {
 
     /// `bernEnter(…)` for a transition name.
     fn enter(&self, name: Option<&str>) -> String {
+        format!("bernEnter({})", self.transition_args(name))
+    }
+
+    /// The transition and its spring for a transition name, as arguments.
+    fn transition_args(&self, name: Option<&str>) -> String {
         match name.and_then(|name| crate::style::transition(self.app, name)) {
-            Some((transition, motion)) => format!("bernEnter({transition}, {motion})"),
-            None => "bernEnter(null, null)".into(),
+            Some((transition, motion)) => format!("{transition}, {motion}"),
+            None => "null, null".into(),
         }
+    }
+
+    /// Whether an element below this one, or a component, may appear and
+    /// so take a turn it should not: only direct children of a staggering
+    /// container take turns.
+    fn appears_below(element: &Element) -> bool {
+        let mut found = false;
+        for child in &element.children {
+            child.walk(&mut |node| {
+                found |= match node {
+                    Node::Component(_) => true,
+                    Node::Element(element) => element.keyword("appear").is_some(),
+                    _ => false,
+                }
+            });
+        }
+        found
+    }
+
+    /// The arguments of `BernPlace` for an element on a rail: its fraction
+    /// `at`, or `from` and `to`, and the spring it moves with.
+    fn placement(&self, element: &Element) -> Option<String> {
+        let fraction = |name: &str| match element.prop(name)? {
+            Prop::Expr { expr } => Some(format!("({}).toDouble()", self.expr(expr))),
+            Prop::Number { value } => Some(double(*value)),
+            _ => None,
+        };
+        let (at, from, to) = (fraction("at"), fraction("from"), fraction("to"));
+        if at.is_none() && from.is_none() && to.is_none() {
+            return None;
+        }
+        let motion = element
+            .keyword("animate")
+            .map(|token| crate::style::motion(self.app, token))
+            .unwrap_or_else(|| "null".into());
+        let or_null = |value: Option<String>| value.unwrap_or_else(|| "null".into());
+        Some(format!(
+            "{}, {}, {}, {motion}",
+            or_null(at),
+            or_null(from),
+            or_null(to)
+        ))
+    }
+
+    /// Whether every element a rail places spans between two fractions
+    /// without a size of its own across the rail, so that the rail has no
+    /// thickness but what its parent gives it.
+    fn rail_fills(rail: &Element) -> bool {
+        let across = if rail.keyword("axis") == Some("vertical") {
+            "width"
+        } else {
+            "height"
+        };
+        let mut placed = Vec::new();
+        Self::placed(&rail.children, &mut placed)
+            && !placed.is_empty()
+            && placed.iter().all(|element| {
+                element.prop("from").is_some()
+                    && element.prop("at").is_none()
+                    && element.prop(across).is_none()
+            })
+    }
+
+    /// The elements a rail places among `nodes`, through conditions and
+    /// repetitions, which add no layout of their own; false when one is a
+    /// component, whose size is not known here.
+    fn placed<'n>(nodes: &'n [Node], found: &mut Vec<&'n Element>) -> bool {
+        nodes.iter().all(|node| match node {
+            Node::Element(element) if element.kind == "ForEach" => {
+                Self::placed(&element.children, found)
+            }
+            Node::Element(element) => {
+                found.push(element);
+                true
+            }
+            Node::Component(_) => false,
+            Node::If(node) => {
+                node.branches
+                    .iter()
+                    .all(|(_, body)| Self::placed(body, found))
+                    && Self::placed(&node.otherwise, found)
+            }
+            Node::IfLet(node) => {
+                Self::placed(&node.then, found) && Self::placed(&node.otherwise, found)
+            }
+            Node::Match(node) => node.arms.iter().all(|arm| Self::placed(&arm.body, found)),
+        })
     }
 
     /// `bernExit(…)` for a transition name.
@@ -879,12 +1113,130 @@ impl<'a> Generator<'a> {
         out.close("}");
     }
 
+    /// The direct children of a container: with `stagger`, those that
+    /// appear take turns on the container's clock.
+    fn children(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        match element.number("stagger") {
+            Some(step) => {
+                out.open(format!(
+                    "BernStaggered(rememberBernStagger({})) {{",
+                    double(step)
+                ));
+                let turns = Ctx {
+                    stagger: true,
+                    ..ctx.clone()
+                };
+                self.nodes(out, &element.children, &turns);
+                out.close("}");
+            }
+            None => self.nodes(out, &element.children, ctx),
+        }
+    }
+
     /// `.bernReflow(…)` for a container that declares `reflow`.
     fn reflow(&self, element: &Element) -> String {
         element
             .keyword("reflow")
             .map(|token| format!(".bernReflow({})", crate::style::motion(self.app, token)))
             .unwrap_or_default()
+    }
+
+    /// A length in dp: a literal, or an expression it follows, moving with
+    /// the element's `animate` spring. Compose refuses negative padding and
+    /// sizes, so a value below zero, or a spring overshooting zero, stops at
+    /// zero.
+    fn length(&self, element: &Element, name: &str) -> Option<String> {
+        let value = match element.prop(name)? {
+            Prop::Number { value } => format!("{}.dp", float(*value)),
+            Prop::Expr { expr } => format!("({}).toFloat().coerceAtLeast(0f).dp", self.expr(expr)),
+            _ => return None,
+        };
+        Some(match element.keyword("animate") {
+            Some(token) => format!(
+                "bernLength({value}, {})",
+                crate::style::motion(self.app, token)
+            ),
+            None => value,
+        })
+    }
+
+    /// Whether an element below follows scrolling, also inside the
+    /// components it places.
+    fn scroll_effects(&self, nodes: &[Node]) -> bool {
+        let mut found = false;
+        let mut seen = std::collections::BTreeSet::new();
+        let mut pending: Vec<&Node> = nodes.iter().collect();
+        while let Some(node) = pending.pop() {
+            node.walk(&mut |node| match node {
+                Node::Element(element)
+                    if element.prop("scroll_scale").is_some()
+                        || element.prop("scroll_opacity").is_some() =>
+                {
+                    found = true;
+                }
+                Node::Component(reference) if seen.insert(reference.component.clone()) => {
+                    if let Some(component) = self.app.component(&reference.component) {
+                        pending.push(&component.body);
+                    }
+                }
+                _ => {}
+            });
+        }
+        found
+    }
+
+    /// `.width(…)` and `.height(…)` of a container that declares them.
+    fn size_modifiers(&self, element: &Element) -> String {
+        let mut modifiers = String::new();
+        if let Some(width) = self.length(element, "width") {
+            modifiers.push_str(&format!(".width({width})"));
+        }
+        if let Some(height) = self.length(element, "height") {
+            modifiers.push_str(&format!(".height({height})"));
+        }
+        modifiers
+    }
+
+    /// The file a control takes (`pick:`, or a `Drop`'s `value:`): the
+    /// lambda that stores it and runs `action`, and the control actions
+    /// that read it and take one from an external entry.
+    fn file_target(&self, element: &Element, name: &str, action: &str) -> Option<(String, String)> {
+        let field = self.field(element, name)?;
+        let optional = matches!(element.field(name)?.ty, Type::Optional { .. });
+        let kinds = string(element.keyword("files").unwrap_or("any"));
+        let give = format!("{{ url: String -> {field} = MediaSource(url); {action} }}");
+        let actions = format!(
+            "value = {{ {field}{}.url }}, setFile = {give}, fileKinds = {kinds}",
+            if optional { "?" } else { "" }
+        );
+        Some((give, actions))
+    }
+
+    /// A control's action, and with `pick:` first the document picker:
+    /// what pressing runs, and the extra control actions.
+    fn pressed(&self, element: &Element) -> (String, String) {
+        let action = element
+            .action
+            .as_ref()
+            .map(|a| self.action(a))
+            .unwrap_or_else(|| "Unit".into());
+        match self.file_target(element, "pick", &action) {
+            Some((give, actions)) => (
+                format!(
+                    "BernFiles.pick({}, {give})",
+                    string(element.keyword("files").unwrap_or("any"))
+                ),
+                format!(", {actions}"),
+            ),
+            None => (action, String::new()),
+        }
+    }
+
+    /// The element's keyboard shortcut running `action`.
+    fn shortcut(&self, out: &mut Out, element: &Element, action: &str) {
+        if let Some(shortcut) = element.keyword("shortcut") {
+            out.line(format!("BernShortcut({}) {{ {action} }}", string(shortcut)));
+        }
     }
 
     fn if_let(&self, out: &mut Out, node: &IfLetNode, body: &dyn Fn(&mut Out, &[Node])) {
@@ -985,6 +1337,79 @@ impl<'a> Generator<'a> {
                         .map(|action| format!("{{ {action} }}"))
                         .unwrap_or_else(|| "null".into())
                 ));
+                // Results show below the field while there is a search.
+                if !element.children.is_empty() {
+                    out.open(format!("if ({field}.isNotEmpty()) {{"));
+                    out.open("Column(Modifier.fillMaxWidth()) {");
+                    self.nodes(out, &element.children, &ctx.within(Scope::Column));
+                    out.close("}");
+                    out.close("}");
+                }
+            }
+            "Toast" => {
+                let content = self.text_prop(element, "content").unwrap_or_default();
+                let key = element
+                    .expr("key")
+                    .map(|key| self.expr(key))
+                    .unwrap_or_else(|| content.clone());
+                out.line(format!(
+                    "BernToast({content}, {}, {key}, {}, {})",
+                    Self::icon(element.icon("icon")),
+                    double(element.number("duration").unwrap_or(3.0)),
+                    crate::style::motion(self.app, "bouncy")
+                ));
+            }
+            "Inspector" => {
+                let field = self.field(element, "presented").expect("bool field");
+                out.open(format!(
+                    "BernInspector({field}, onDismiss = {{ {field} = false }}) {{"
+                ));
+                self.nodes(out, &element.children, &ctx.within(Scope::Column));
+                out.close("}");
+            }
+            "SplitButton" => {
+                let field = self.field(element, "value").expect("bool field");
+                let label = self.text_prop(element, "label").unwrap_or_default();
+                let more = self
+                    .text_prop(element, "more_label")
+                    .unwrap_or_else(|| "BernText.string(\"bern.split.more\")".into());
+                self.shortcut(out, element, &format!("{field} = !{field}"));
+                out.open(format!(
+                    "BernSplitButton({}, {label}, {}, {more}, {field}, {{ {field} = it }}) {{",
+                    self.target(element, ctx),
+                    Self::icon(element.icon("icon"))
+                ));
+                self.nodes(out, &element.children, &ctx.within(Scope::Column));
+                out.close("}");
+            }
+            "PopoverButton" => self.popover_button(out, element, ctx, false),
+            // Shown by its sidebar.
+            "SidebarFooter" => {}
+            "Drop" => {
+                let label = self.text_prop(element, "label").unwrap_or_default();
+                let action = element
+                    .action
+                    .as_ref()
+                    .map(|a| self.action(a))
+                    .unwrap_or_else(|| "Unit".into());
+                let (give, actions) = self
+                    .file_target(element, "value", &action)
+                    .expect("file field");
+                let over = self
+                    .field(element, "over")
+                    .map(|field| format!("{{ over: Boolean -> {field} = over }}"))
+                    .unwrap_or_else(|| "null".into());
+                out.line(format!(
+                    "BernControl({}, \"drop\", {label}, actions = BernControlActions({actions}))",
+                    self.target(element, ctx)
+                ));
+                out.open(format!(
+                    "BernDrop({}, {over}, {}, {give}) {{",
+                    string(element.keyword("files").unwrap_or("any")),
+                    element.keyword("opens") == Some("true")
+                ));
+                self.nodes(out, &element.children, &ctx.within(Scope::Other));
+                out.close("}");
             }
             "Switch" => {
                 let field = self.field(element, "value").expect("bool field");
@@ -993,10 +1418,18 @@ impl<'a> Generator<'a> {
                 out.line(format!(
                     "BernControl({target}, \"switch\", {label}, actions = BernControlActions(setBool = {{ {field} = it }}, value = {{ if ({field}) \"true\" else \"false\" }}))"
                 ));
-                out.line(format!(
-                    "BernSwitch({label}, {field}, {{ {field} = it }}, checkbox = {}, modifier = Modifier.testTag({target}))",
-                    element.keyword("style") == Some("checkbox")
-                ));
+                self.shortcut(out, element, &format!("{field} = !{field}"));
+                if element.keyword("style") == Some("button") {
+                    out.line(format!(
+                        "BernToggleButton({label}, {}, {field}, {{ {field} = it }}, Modifier.testTag({target}))",
+                        Self::icon(element.icon("icon"))
+                    ));
+                } else {
+                    out.line(format!(
+                        "BernSwitch({label}, {field}, {{ {field} = it }}, checkbox = {}, modifier = Modifier.testTag({target}))",
+                        element.keyword("style") == Some("checkbox")
+                    ));
+                }
             }
             "Slider" => self.slider(out, element, ctx),
             "Picker" => self.picker(out, element, ctx),
@@ -1034,13 +1467,17 @@ impl<'a> Generator<'a> {
             }
             "Column" | "Row" => {
                 let column = element.kind == "Column";
-                let gap = element
-                    .number("gap")
-                    .map(|gap| format!("Arrangement.spacedBy({}.dp)", float(gap)))
+                let gap = self
+                    .length(element, "gap")
+                    .map(|gap| format!("Arrangement.spacedBy({gap})"))
                     .unwrap_or_else(|| "Arrangement.spacedBy(8.dp)".into());
-                let mut modifier = format!("Modifier{}", self.reflow(element));
-                if let Some(padding) = element.number("padding") {
-                    modifier.push_str(&format!(".padding({}.dp)", float(padding)));
+                let mut modifier = format!(
+                    "Modifier{}{}",
+                    self.reflow(element),
+                    self.size_modifiers(element)
+                );
+                if let Some(padding) = self.length(element, "padding") {
+                    modifier.push_str(&format!(".padding({padding})"));
                 }
                 if column {
                     let alignment = match element.keyword("align") {
@@ -1051,7 +1488,7 @@ impl<'a> Generator<'a> {
                     out.open(format!(
                         "Column({modifier}, verticalArrangement = {gap}, horizontalAlignment = {alignment}) {{"
                     ));
-                    self.nodes(out, &element.children, &ctx.within(Scope::Column));
+                    self.children(out, element, &ctx.within(Scope::Column));
                 } else {
                     let alignment = match element.keyword("align") {
                         Some("top") => "Alignment.Top",
@@ -1061,24 +1498,21 @@ impl<'a> Generator<'a> {
                     out.open(format!(
                         "Row({modifier}, horizontalArrangement = {gap}, verticalAlignment = {alignment}) {{"
                     ));
-                    self.nodes(out, &element.children, &ctx.within(Scope::Row));
+                    self.children(out, element, &ctx.within(Scope::Row));
                 }
                 out.close("}");
             }
             "Grid" => {
                 out.open(format!(
-                    "BernGrid(minWidth = {}.dp, gap = {}.dp{}) {{",
-                    float(element.number("min_width").unwrap_or(120.0)),
-                    float(element.number("gap").unwrap_or(8.0)),
-                    element
-                        .number("padding")
-                        .map(|padding| format!(
-                            ", modifier = Modifier.padding({}.dp)",
-                            float(padding)
-                        ))
+                    "BernGrid(minWidth = {}, gap = {}{}) {{",
+                    self.length(element, "min_width")
+                        .unwrap_or_else(|| "120.dp".into()),
+                    self.length(element, "gap").unwrap_or_else(|| "8.dp".into()),
+                    self.length(element, "padding")
+                        .map(|padding| format!(", modifier = Modifier.padding({padding})"))
                         .unwrap_or_default()
                 ));
-                self.nodes(out, &element.children, &ctx.within(Scope::Other));
+                self.children(out, element, &ctx.within(Scope::Other));
                 out.close("}");
             }
             "Stack" => {
@@ -1094,24 +1528,64 @@ impl<'a> Generator<'a> {
                     _ => "Alignment.Center",
                 };
                 out.open(format!(
-                    "Box(Modifier{}, contentAlignment = {alignment}) {{",
-                    self.reflow(element)
+                    "Box(Modifier{}{}, contentAlignment = {alignment}) {{",
+                    self.reflow(element),
+                    self.size_modifiers(element)
                 ));
-                self.nodes(out, &element.children, &ctx.within(Scope::Other));
+                let layers = Ctx {
+                    layer: true,
+                    ..ctx.within(Scope::Other)
+                };
+                self.children(out, element, &layers);
+                out.close("}");
+            }
+            "Rail" => {
+                let anchor = match element.keyword("anchor") {
+                    Some("start") => "BernRailAnchor.Start",
+                    Some("end") => "BernRailAnchor.End",
+                    _ => "BernRailAnchor.Center",
+                };
+                // A layer of a stack holding only spans without a
+                // thickness of their own is as large as the stack.
+                let modifier = if ctx.layer {
+                    ", Modifier.matchParentSize()"
+                } else {
+                    ""
+                };
+                out.open(format!(
+                    "BernRail({}, {anchor}{modifier}) {{",
+                    element.keyword("axis") == Some("vertical")
+                ));
+                let placed = Ctx {
+                    layer: false,
+                    ..ctx.within(Scope::Other)
+                };
+                self.nodes(out, &element.children, &placed);
                 out.close("}");
             }
             "Image" => {
-                let length = |name| {
-                    element
-                        .number(name)
-                        .map(|value| format!("{}.dp", float(value)))
-                        .unwrap_or_else(|| "null".into())
-                };
+                let length = |name| self.length(element, name).unwrap_or_else(|| "null".into());
                 let fit = match element.keyword("fit") {
                     Some("cover") => "ContentScale.Crop",
                     Some("fill") => "ContentScale.FillBounds",
                     _ => "ContentScale.Fit",
                 };
+                // A picture the engine gives, read at run time.
+                if let Some(source) = element.expr("source") {
+                    let url = if matches!(source.ty, Type::Optional { .. }) {
+                        format!("({})?.url", self.expr(source))
+                    } else {
+                        format!("({}).url", self.expr(source))
+                    };
+                    out.line(format!(
+                        "BernImageURL({url}, {}, {}, {}, {fit})",
+                        self.text_prop(element, "label")
+                            .unwrap_or_else(|| "null".into()),
+                        length("width"),
+                        length("height"),
+                    ));
+                    return;
+                }
                 out.line(format!(
                     "BernImage({}, {}, {}, {}, {fit})",
                     string(element.resource("source").unwrap_or_default()),
@@ -1129,6 +1603,73 @@ impl<'a> Generator<'a> {
                 Scope::Row => out.line("VerticalDivider()"),
                 _ => out.line("HorizontalDivider()"),
             },
+            "ScrollView"
+                if element.prop("snap").is_some()
+                    || element.prop("position").is_some()
+                    || self.scroll_effects(&element.children) =>
+            {
+                let horizontal = element.keyword("axis") == Some("horizontal");
+                let snap = element
+                    .keyword("snap")
+                    .map(string)
+                    .unwrap_or_else(|| "null".into());
+                let (position, on_position) =
+                    match (self.field(element, "position"), element.field("position")) {
+                        (Some(field), Some(field_ref)) => (
+                            field.clone(),
+                            format!("{{ {field} = it as {} }}", kotlin_type(&field_ref.ty)),
+                        ),
+                        _ => ("null".into(), "null".into()),
+                    };
+                let arrival = if element.keyword("arrival").is_some() {
+                    crate::style::motion(self.app, "jelly")
+                } else {
+                    "null".into()
+                };
+                out.open(format!(
+                    "BernScroll({horizontal}, {snap}, {position}, {on_position}, {}, {arrival}, 0.dp) {{",
+                    crate::style::motion(self.app, "smooth")
+                ));
+                let inner = Ctx {
+                    scroll_items: true,
+                    ..ctx.within(if horizontal {
+                        Scope::Row
+                    } else {
+                        Scope::Column
+                    })
+                };
+                self.nodes(out, &element.children, &inner);
+                out.close("}");
+            }
+            "Pinch" | "Swipe" => {
+                let field = self.field(element, "value").expect("number field");
+                let label = self.text_prop(element, "label").unwrap_or_default();
+                let action = element
+                    .action
+                    .as_ref()
+                    .map(|a| self.action(a))
+                    .unwrap_or_else(|| "Unit".into());
+                let min = double(element.number("min").unwrap_or(0.0));
+                let max = double(element.number("max").unwrap_or(1.0));
+                out.line(format!(
+                    "BernControl({}, {}, {label}, actions = BernControlActions(setNumber = {{ {field} = it.coerceIn({min}, {max}); {action} }}, value = {{ {field}.toString() }}))",
+                    self.target(element, ctx),
+                    string(&element.kind.to_lowercase())
+                ));
+                if element.kind == "Pinch" {
+                    out.open(format!(
+                        "BernPinch({label}, {field}, {{ {field} = it }}, {min}, {max}, {{ {action} }}) {{"
+                    ));
+                } else {
+                    out.open(format!(
+                        "BernSwipe({label}, {field}, {{ {field} = it }}, {min}, {max}, {}, {}, {{ {action} }}) {{",
+                        element.keyword("axis") == Some("horizontal"),
+                        double(element.number("distance").unwrap_or(300.0))
+                    ));
+                }
+                self.nodes(out, &element.children, &ctx.within(Scope::Other));
+                out.close("}");
+            }
             "ScrollView" => {
                 if element.keyword("axis") == Some("horizontal") {
                     out.open("Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {");
@@ -1167,9 +1708,12 @@ impl<'a> Generator<'a> {
                     _ => "BernVideoFit.Contain",
                 };
                 out.line(format!(
-                    "BernVideo({}, {label}, {binding}, {}, {fit})",
+                    "BernVideo({}, {label}, {binding}, {}, {fit}{})",
                     self.target(element, ctx),
-                    element.keyword("controls") != Some("none")
+                    element.keyword("controls") != Some("none"),
+                    self.length(element, "corner")
+                        .map(|corner| format!(", corner = {corner}"))
+                        .unwrap_or_default()
                 ));
             }
             "SplitView" => self.split_view(out, element, ctx),
@@ -1227,12 +1771,7 @@ impl<'a> Generator<'a> {
         let number = |element: &Element, name: &str, default: f64| {
             double(element.number(name).unwrap_or(default))
         };
-        let length = |name| {
-            element
-                .number(name)
-                .map(|value| format!("{}.dp", float(value)))
-                .unwrap_or_else(|| "null".into())
-        };
+        let length = |name| self.length(element, name).unwrap_or_else(|| "null".into());
         let semantics = match self.text_prop(element, "label") {
             Some(label) => {
                 format!(".semantics {{ contentDescription = {label}; role = Role.Image }}")
@@ -1241,6 +1780,22 @@ impl<'a> Generator<'a> {
         };
         out.open("run {");
         out.line("val bernPalette = bernPalette()");
+        // The average colors of the pictures shapes are filled from, read
+        // while composing so the drawing follows them once known.
+        for (index, node) in element.children.iter().enumerate() {
+            let Node::Element(child) = node else { continue };
+            let url = match (child.expr("fill_from"), child.resource("fill_from")) {
+                (Some(expr), _) if matches!(expr.ty, Type::Optional { .. }) => {
+                    format!("({})?.url", self.expr(expr))
+                }
+                (Some(expr), _) => format!("({}).url", self.expr(expr)),
+                (None, Some(name)) => format!("BernPictures.resource({})", string(name)),
+                (None, None) => continue,
+            };
+            out.line(format!(
+                "val bernFill{index} = BernPictures.average(LocalContext.current, {url})"
+            ));
+        }
         let mut values = Vec::new();
         for node in &element.children {
             if let Node::Element(child) = node
@@ -1269,11 +1824,21 @@ impl<'a> Generator<'a> {
             length("height")
         ));
         let mut series = 0;
-        for node in &element.children {
+        for (index, node) in element.children.iter().enumerate() {
             // A canvas holds its drawing elements directly.
             let Node::Element(child) = node else { continue };
             match child.kind.as_str() {
                 "Shape" => {
+                    let filled = child.prop("fill_from").is_some();
+                    let fill = match (filled, color(child, "fill")) {
+                        (false, fill) => fill,
+                        (true, fallback) if fallback == "null" => format!("bernFill{index}"),
+                        (true, fallback) => format!("(bernFill{index} ?: {fallback})"),
+                    };
+                    let fade = child
+                        .keyword("fade")
+                        .map(|edge| format!(", fade = {}", string(edge)))
+                        .unwrap_or_default();
                     let optional = |name: &str| {
                         child
                             .number(name)
@@ -1281,14 +1846,13 @@ impl<'a> Generator<'a> {
                             .unwrap_or_else(|| "null".into())
                     };
                     out.line(format!(
-                        "BernDraw.shape(this, bernPalette, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})",
+                        "BernDraw.shape(this, bernPalette, {}, {}, {}, {}, {}, {}, {fill}, {}, {}, {}{fade})",
                         string(child.keyword("kind").unwrap_or("rect")),
                         number(child, "x", 0.0),
                         number(child, "y", 0.0),
                         optional("width"),
                         optional("height"),
                         number(child, "corner", 8.0),
-                        color(child, "fill"),
                         color(child, "stroke"),
                         number(child, "stroke_width", 1.0),
                         number(child, "opacity", 1.0),
@@ -1319,16 +1883,26 @@ impl<'a> Generator<'a> {
 
     fn button(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
-        let action = element
-            .action
-            .as_ref()
-            .map(|a| self.action(a))
-            .unwrap_or_else(|| "Unit".into());
+        let (action, file) = self.pressed(element);
         let enabled = self.enabled(element);
         let target = self.target(element, ctx);
         out.line(format!(
-            "BernControl({target}, \"button\", {label}, {enabled}, BernControlActions(activate = {{ {action} }}))"
+            "BernControl({target}, \"button\", {label}, {enabled}, BernControlActions(activate = {{ {action} }}{file}))"
         ));
+        self.shortcut(out, element, &action);
+        if element.kind == "Button" && !element.children.is_empty() {
+            // The content is what the button shows; the label names it.
+            let style = self
+                .style_of(element)
+                .map(|style| format!("BernStyles.{}", style.name))
+                .unwrap_or_else(|| "null".into());
+            out.open(format!(
+                "BernContentButton({label}, {enabled}, {style}, Modifier.testTag({target}), onClick = {{ {action} }}) {{"
+            ));
+            self.nodes(out, &element.children, &ctx.within(Scope::Other));
+            out.close("}");
+            return;
+        }
         let style = self.style_arg(element);
         if element.kind == "IconButton" {
             out.line(format!(
@@ -1450,6 +2024,9 @@ impl<'a> Generator<'a> {
 
     fn list(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let lazy = element.kind == "List";
+        // With `stagger`, the rows take turns appearing; without, rows of a
+        // repetition are direct children of the container it stands in.
+        let stagger = element.number("stagger");
         match (
             element.expr("items"),
             &element.template,
@@ -1460,14 +2037,29 @@ impl<'a> Generator<'a> {
                 let key = format!("{var}.{}", member(name));
                 let mut inner = ctx.clone();
                 inner.key = Some(key.clone());
+                if stagger.is_some() {
+                    inner.stagger = true;
+                }
+                // The clock reaches the rows of a lazy list too: they are
+                // composed with the list's locals.
+                if let Some(step) = stagger {
+                    out.open(format!(
+                        "BernStaggered(rememberBernStagger({})) {{",
+                        double(step)
+                    ));
+                }
                 if lazy {
                     out.open("LazyColumn(Modifier.fillMaxSize()) {");
                     out.open(format!(
                         "items({}, key = {{ {var} -> BernKey.of({key}) }}) {{ {var} ->",
                         self.expr(items)
                     ));
+                    out.open(format!(
+                        "CompositionLocalProvider(LocalBernItemKeys provides LocalBernItemKeys.current + \"[${{{key}}}]\") {{"
+                    ));
                     out.open("Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {");
                     self.nodes(out, &element.children, &inner.within(Scope::Column));
+                    out.close("}");
                     out.close("}");
                     out.line("HorizontalDivider()");
                     out.close("}");
@@ -1475,8 +2067,22 @@ impl<'a> Generator<'a> {
                 } else {
                     out.open(format!("for ({var} in {}) {{", self.expr(items)));
                     out.open(format!("key(BernKey.of({key})) {{"));
-                    self.nodes(out, &element.children, &inner);
+                    out.open(format!(
+                        "CompositionLocalProvider(LocalBernItemKeys provides LocalBernItemKeys.current + \"[${{{key}}}]\") {{"
+                    ));
+                    if ctx.scroll_items {
+                        inner.scroll_items = false;
+                        out.open(format!("Box(Modifier.bernScrollItem({key})) {{"));
+                        self.nodes(out, &element.children, &inner.within(Scope::Other));
+                        out.close("}");
+                    } else {
+                        self.nodes(out, &element.children, &inner);
+                    }
                     out.close("}");
+                    out.close("}");
+                    out.close("}");
+                }
+                if stagger.is_some() {
                     out.close("}");
                 }
             }
@@ -1485,10 +2091,10 @@ impl<'a> Generator<'a> {
                     out.open(
                         "Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {",
                     );
-                    self.nodes(out, &element.children, &ctx.within(Scope::Column));
+                    self.children(out, element, &ctx.within(Scope::Column));
                     out.close("}");
                 } else {
-                    self.nodes(out, &element.children, ctx);
+                    self.children(out, element, ctx);
                 }
             }
         }
@@ -1570,16 +2176,13 @@ impl<'a> Generator<'a> {
             .collect();
         for item in items.iter().filter(|item| item.kind == "MenuItem") {
             let item_label = self.text_prop(item, "label").unwrap_or_default();
-            let action = item
-                .action
-                .as_ref()
-                .map(|a| self.action(a))
-                .unwrap_or_else(|| "Unit".into());
+            let (action, file) = self.pressed(item);
             out.line(format!(
-                "BernControl({}, \"button\", {item_label}, {}, BernControlActions(activate = {{ {action} }}))",
+                "BernControl({}, \"button\", {item_label}, {}, BernControlActions(activate = {{ {action} }}{file}))",
                 self.target(item, ctx),
                 self.enabled(item)
             ));
+            self.shortcut(out, item, &action);
         }
         out.open(format!(
             "BernMenu({label}, {}, Modifier.testTag({})) {{ dismiss ->",
@@ -1592,11 +2195,7 @@ impl<'a> Generator<'a> {
                 continue;
             }
             let item_label = self.text_prop(item, "label").unwrap_or_default();
-            let action = item
-                .action
-                .as_ref()
-                .map(|a| self.action(a))
-                .unwrap_or_else(|| "Unit".into());
+            let (action, _) = self.pressed(item);
             out.line(format!(
                 "BernMenuItem({item_label}, {}, {}, destructive = {}) {{ dismiss(); {action} }}",
                 Self::icon(item.icon("icon")),
@@ -1607,20 +2206,41 @@ impl<'a> Generator<'a> {
         out.close("}");
     }
 
+    /// A button that shows its children in a popover; in a top bar a
+    /// label shows as a text button.
+    fn popover_button(&self, out: &mut Out, element: &Element, ctx: &Ctx, plain: bool) {
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let (presented, on_presented) = match self.field(element, "presented") {
+            Some(field) => (field.clone(), format!("{{ {field} = it }}")),
+            None => ("null".into(), "null".into()),
+        };
+        let shortcut = element
+            .keyword("shortcut")
+            .map(string)
+            .unwrap_or_else(|| "null".into());
+        out.open(format!(
+            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}) {{",
+            self.target(element, ctx),
+            Self::icon(element.icon("icon"))
+        ));
+        self.nodes(out, &element.children, &ctx.within(Scope::Column));
+        out.close("}");
+    }
+
     fn toolbar_item(&self, out: &mut Out, item: &Element, ctx: &Ctx) {
         match item.kind.as_str() {
+            "PopoverButton" => self.popover_button(out, item, ctx, true),
+            // A top app bar parts its groups of actions with space.
+            "Divider" => out.line("Spacer(Modifier.size(12.dp))"),
             "Button" => {
                 let label = self.text_prop(item, "label").unwrap_or_default();
-                let action = item
-                    .action
-                    .as_ref()
-                    .map(|a| self.action(a))
-                    .unwrap_or_else(|| "Unit".into());
+                let (action, file) = self.pressed(item);
                 let enabled = self.enabled(item);
                 let target = self.target(item, ctx);
                 out.line(format!(
-                    "BernControl({target}, \"button\", {label}, {enabled}, BernControlActions(activate = {{ {action} }}))"
+                    "BernControl({target}, \"button\", {label}, {enabled}, BernControlActions(activate = {{ {action} }}{file}))"
                 ));
+                self.shortcut(out, item, &action);
                 match item.icon("icon") {
                     Some(icon) => out.line(format!(
                         "BernIconButton({label}, {}, {enabled}, Modifier.testTag({target})) {{ {action} }}",
@@ -1655,40 +2275,53 @@ impl<'a> Generator<'a> {
                     "BernToolbarPicker({label}, {enum_type}.entries, {field}, {{ {option_label} }}, {{ {field} = it }}, Modifier.testTag({target}))"
                 ));
             }
+            "Search" => {
+                let field = self.field(item, "value").expect("search field");
+                let prompt = self
+                    .text_prop(item, "prompt")
+                    .unwrap_or_else(|| "\"\"".into());
+                let submit = item
+                    .action
+                    .as_ref()
+                    .map(|a| format!("{{ {} }}", self.action(a)))
+                    .unwrap_or_else(|| "null".into());
+                let target = self.target(item, ctx);
+                out.open(format!(
+                    "BernToolbarSearch({target}, {field}, {{ {field} = it }}, {prompt}, {submit}) {{"
+                ));
+                self.nodes(out, &item.children, &ctx.within(Scope::Column));
+                out.close("}");
+            }
             _ => self.element(out, item, ctx),
         }
     }
 
     fn adaptive(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let breakpoint = self
-            .app
-            .layouts
-            .map(|layouts| layouts.compact_below)
-            .unwrap_or(0.0);
         let target = if element.id.is_some() {
             self.target(element, ctx)
         } else {
             "null".into()
         };
-        let layout = |size: &str| {
-            element.children.iter().find_map(|node| match node {
-                Node::Element(layout) if layout.keyword("size") == Some(size) => Some(layout),
+        // The breakpoints are the application's, in `BernHost.layouts`; a
+        // size without its own layout shows another one.
+        out.open(format!("BernAdaptive({target},"));
+        for size in LayoutSize::ALL {
+            let layout = element.children.iter().find_map(|node| match node {
+                Node::Element(layout) if layout.keyword("size") == Some(size.name()) => {
+                    Some(layout)
+                }
                 _ => None,
-            })
-        };
-        out.open(format!(
-            "BernAdaptive({}.dp, {target}, compact = {{",
-            float(breakpoint)
-        ));
-        if let Some(compact) = layout("compact") {
-            self.nodes(out, &compact.children, &ctx.within(Scope::Other));
+            });
+            match layout {
+                Some(layout) => {
+                    out.open(format!("{} = {{", size.name()));
+                    self.nodes(out, &layout.children, &ctx.within(Scope::Other));
+                    out.close("},");
+                }
+                None => out.line(format!("{} = null,", size.name())),
+            }
         }
-        out.close("}, expanded = {");
-        out.indent += 1;
-        if let Some(expanded) = layout("expanded") {
-            self.nodes(out, &expanded.children, &ctx.within(Scope::Other));
-        }
-        out.close("})");
+        out.close(")");
     }
 
     // MARK: Navigation containers
@@ -1850,8 +2483,17 @@ impl<'a> Generator<'a> {
                 self.target(sidebar, ctx)
             ));
         }
+        let footer = sidebar.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "SidebarFooter" => Some(child),
+            _ => None,
+        });
         out.open("BernSplitView(bernSelected, bernShowing, sidebar = { bernShowDetail ->");
         self.sidebar_nodes(out, &sidebar.children, &selection, ctx);
+        if let Some(footer) = footer {
+            out.close("}, footer = {");
+            out.indent += 1;
+            self.nodes(out, &footer.children, &ctx.within(Scope::Column));
+        }
         out.close("}, detail = {");
         out.indent += 1;
         self.nodes(out, &detail.children, &ctx.within(Scope::Other));
@@ -2011,8 +2653,10 @@ impl<'a> Generator<'a> {
         out.open(format!("fun {name}({}) {{", params.join(", ")));
         out.line("val bernWindow = LocalBernWindow.current");
         self.locals(out, &sessions, "bernWindow");
+        // The component may be a direct child of a staggering container.
         let ctx = Ctx {
             component: component.name.clone(),
+            stagger: self.staggers,
             ..Ctx::default()
         };
         self.node(out, &component.body, &ctx);
@@ -2039,6 +2683,20 @@ impl<'a> Generator<'a> {
         self.locals(out, &window.sessions, "context");
         if let Some(close) = &window.close {
             self.close_check(out, close);
+        }
+        let windows = &self.app.windows;
+        if windows.accent.is_some() || windows.appearance.is_some() {
+            let accent = windows
+                .accent
+                .as_ref()
+                .map(|expr| format!("BernAccents.color(({}).bernName)", self.expr(expr)))
+                .unwrap_or_else(|| "null".into());
+            let appearance = windows
+                .appearance
+                .as_ref()
+                .map(|expr| format!("({}).bernName", self.expr(expr)))
+                .unwrap_or_else(|| "null".into());
+            out.line(format!("BernThemeChoice({accent}, {appearance})"));
         }
         // `chrome` has nothing to change on a phone, whose windows have no
         // title bar; immersion hides the top bar and the system bars.
@@ -2152,6 +2810,22 @@ impl<'a> Generator<'a> {
             out.close("}");
             out.line("");
         }
+        if !app.style.accents.is_empty() {
+            out.line("/// The accents of `style!`, by the enum variant that chooses one.");
+            out.open("object BernAccents {");
+            out.open("fun color(name: String): BernColor? = when (name.replace(\"_\", \"\").lowercase()) {");
+            for accent in &app.style.accents {
+                out.line(format!(
+                    "{} -> {}",
+                    string(&accent.name.replace('_', "").to_lowercase()),
+                    crate::style::color(&accent.color)
+                ));
+            }
+            out.line("else -> null");
+            out.close("}");
+            out.close("}");
+            out.line("");
+        }
         out.line("// MARK: - Engine state");
         out.line("");
         generate_engine(&mut out, app);
@@ -2173,8 +2847,17 @@ impl<'a> Generator<'a> {
             .windows
             .iter()
             .map(|window| {
+                let dialog = if window.role == WindowRole::Dialog {
+                    format!(
+                        ", isDialog = true, width = {}, height = {}",
+                        window.width.map(double).unwrap_or_else(|| "null".into()),
+                        window.height.map(double).unwrap_or_else(|| "null".into())
+                    )
+                } else {
+                    String::new()
+                };
                 format!(
-                    "BernWindowKind({}, {}, {})",
+                    "BernWindowKind({}, {}, {}{dialog})",
                     string(&window.id),
                     string(&window.title.key),
                     window.role == WindowRole::Settings
@@ -2207,6 +2890,16 @@ impl<'a> Generator<'a> {
         out.line(format!("listOf({}),", kinds.join(", ")));
         out.line(format!("{},", string(&app.windows.primary)));
         out.close(") { field, reader -> BernEngine.bernApply(field, reader) }");
+        out.line("BernFiles.register(this)");
+        if let Some(layouts) = &app.layouts {
+            let or_null = |value: Option<f64>| value.map(double).unwrap_or_else(|| "null".into());
+            out.line(format!(
+                "BernHost.layouts = BernLayouts({}, {}, {})",
+                double(layouts.compact_below),
+                or_null(layouts.medium_below),
+                or_null(layouts.expanded_below)
+            ));
+        }
         out.open("setContent {");
         out.open("BernTheme {");
         out.line(format!(
@@ -2222,6 +2915,19 @@ impl<'a> Generator<'a> {
         out.close("}");
         out.close("}");
         out.close("}");
+        out.close("}");
+        out.line("");
+        out.line("/// A file another app opens with this one while it runs.");
+        out.open("override fun onNewIntent(intent: android.content.Intent) {");
+        out.line("super.onNewIntent(intent)");
+        out.line("BernFiles.opened(intent)");
+        out.close("}");
+        out.line("");
+        out.line("/// Keyboard shortcuts come first, whether or not a control has focus:");
+        out.line("/// Compose sends keys only to the focused control and its parents.");
+        out.open("override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {");
+        out.line("BernShortcuts.pressed(event)");
+        out.line("return BernShortcuts.handle(androidx.compose.ui.input.key.KeyEvent(event)) || super.dispatchKeyEvent(event)");
         out.close("}");
         out.close("}");
         out.finish()
@@ -2257,6 +2963,8 @@ const IMPORTS: &[&str] = &[
     "androidx.compose.foundation.layout.fillMaxWidth",
     "androidx.compose.foundation.layout.padding",
     "androidx.compose.foundation.layout.size",
+    "androidx.compose.foundation.layout.width",
+    "androidx.compose.foundation.layout.height",
     "androidx.compose.foundation.lazy.LazyColumn",
     "androidx.compose.foundation.lazy.items",
     "androidx.compose.foundation.rememberScrollState",
@@ -2279,6 +2987,7 @@ const IMPORTS: &[&str] = &[
     "androidx.compose.ui.Modifier",
     "androidx.compose.ui.layout.ContentScale",
     "androidx.compose.ui.platform.testTag",
+    "androidx.compose.ui.platform.LocalContext",
     "androidx.compose.ui.unit.dp",
     "dev.bern.runtime.*",
 ];
