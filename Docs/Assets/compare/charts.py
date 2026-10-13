@@ -230,15 +230,17 @@ def badge(key, cx, cy, r):
     return "".join(out)
 
 
-def svg(width_, height, theme, body):
+def svg(width_, height, theme, body, bottom=None):
+    """The chart with no frame or background, cropped to the content between x 36 and 944."""
     t = THEMES[theme]
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width_} {height}" width="{width_}" height="{height}" '
+    left, top = 36, 28
+    w, h = width_ - 2 * left, (bottom or height) - top
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{left} {top} {w} {h}" width="{w}" height="{h}" '
             f'font-family="{FONT}">\n<defs>{bern_symbol()}'
             f'<marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse">'
             f'<path d="M0 0 L10 5 L0 10 z" fill="{t["line"]}"/></marker>'
             f'<marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto-start-reverse">'
             f'<path d="M0 0 L10 5 L0 10 z" fill="{t["accent"]}"/></marker></defs>\n'
-            f'<rect x="0.5" y="0.5" width="{width_ - 1}" height="{height - 1}" rx="20" fill="{t["bg"]}" stroke="{t["border"]}"/>\n'
             f'{body}\n</svg>\n')
 
 
@@ -281,7 +283,7 @@ def landscape(theme, lang):
         r = 18
         out.append(badge(key, cx, cy, r))
         out.append(f'<text x="{cx + r + 9:.1f}" y="{cy + 5:.1f}" font-size="15" font-weight="600" fill="{t["text"]}">{esc(name)}</text>')
-    return svg(W, H, theme, "\n".join(out))
+    return svg(W, H, theme, "\n".join(out), bottom=y0 + h + 56)
 
 
 def routes(theme, lang):
@@ -292,27 +294,24 @@ def routes(theme, lang):
         f'<text x="40" y="78" font-size="14" fill="{t["muted"]}">{esc(s["routes_note"])}</text>',
     ]
     # The source.
-    pill_w = width(s["source"], 16) + 48
-    out.append(f'<rect x="{480 - pill_w / 2:.1f}" y="100" width="{pill_w:.1f}" height="40" rx="20" fill="{t["text"]}"/>')
-    out.append(f'<text x="480" y="126" font-size="16" font-weight="600" text-anchor="middle" fill="{t["bg"]}">{esc(s["source"])}</text>')
+    out.append(f'<text x="480" y="126" font-size="17" font-weight="700" text-anchor="middle" fill="{t["text"]}">{esc(s["source"])}</text>')
     lanes = [["bern"], ["rn", "uniappx"], ["flutter", "gpui", "avalonia", "qt"], ["electron", "tauri", "dioxus", "uniapp"]]
-    card_w, gap, left, top, card_h = 210, 20, 40, 200, 300
+    card_w, gap, left, top, card_h = 204, 28, 40, 200, 300
     for index, (lane, (title1, title2, line1, line2)) in enumerate(zip(lanes, s["lanes"])):
         x = left + index * (card_w + gap)
         cx = x + card_w / 2
         bern = index == 0
         stroke = t["accent"] if bern else t["line"]
-        out.append(f'<path d="M480 140 C 480 170, {cx:.1f} 160, {cx:.1f} {top - 6}" fill="none" stroke="{stroke}" '
+        out.append(f'<path d="M480 138 C 480 170, {cx:.1f} 160, {cx:.1f} {top - 6}" fill="none" stroke="{stroke}" '
                    f'stroke-width="{2.5 if bern else 1.5}" marker-end="url(#{"arrow-accent" if bern else "arrow"})"/>')
-        out.append(f'<rect x="{x}" y="{top}" width="{card_w}" height="{card_h}" rx="16" fill="{t["soft"] if bern else t["panel"]}" '
-                   f'stroke="{t["accent"] if bern else t["border"]}" stroke-width="{2 if bern else 1}"/>')
-        out.append(f'<circle cx="{x + 28}" cy="{top + 30}" r="13" fill="{t["accent"] if bern else t["line"]}"/>')
-        out.append(f'<text x="{x + 28}" y="{top + 35}" font-size="13" font-weight="700" text-anchor="middle" fill="#FFFFFF">{index + 1}</text>')
-        out.append(f'<text x="{x + 50}" y="{top + 28}" font-size="16" font-weight="700" fill="{t["text"]}">{esc(title1)}</text>')
-        out.append(f'<text x="{x + 50}" y="{top + 49}" font-size="16" font-weight="700" fill="{t["text"]}">{esc(title2)}</text>')
+        if index:
+            out.append(f'<line x1="{x - gap / 2}" y1="{top + 4}" x2="{x - gap / 2}" y2="{top + card_h - 4}" stroke="{t["grid"]}"/>')
+        x -= 12
+        out.append(f'<text x="{x + 20}" y="{top + 30}" font-size="24" font-weight="700" fill="{t["accent"] if bern else t["line"]}">{index + 1}</text>')
+        out.append(f'<text x="{x + 46}" y="{top + 28}" font-size="16" font-weight="700" fill="{t["accent"] if bern else t["text"]}">{esc(title1)}</text>')
+        out.append(f'<text x="{x + 46}" y="{top + 49}" font-size="16" font-weight="700" fill="{t["accent"] if bern else t["text"]}">{esc(title2)}</text>')
         out.append(f'<text x="{x + 20}" y="{top + 82}" font-size="13.5" fill="{t["muted"]}">{esc(line1)}</text>')
         out.append(f'<text x="{x + 20}" y="{top + 102}" font-size="13.5" fill="{t["muted"]}">{esc(line2)}</text>')
-        out.append(f'<line x1="{x + 20}" y1="{top + 118}" x2="{x + card_w - 20}" y2="{top + 118}" stroke="{t["border"]}"/>')
         for row, key in enumerate(lane):
             ry = top + 150 + row * 38
             r = 22 if bern else 14
@@ -337,7 +336,7 @@ def routes(theme, lang):
         bw = 2 * card_w + gap
         out.append(f'<path d="M{bx + 6} {band_y - 10} v10 h{bw - 12} v-10" fill="none" stroke="{t[tone]}" stroke-width="1.5"/>')
         out.append(f'<text x="{bx + bw / 2}" y="{band_y + 24}" font-size="13.5" font-weight="600" text-anchor="middle" fill="{t["text"] if tone == "accent" else t["muted"]}">{esc(label)}</text>')
-    return svg(W, H, theme, "\n".join(out))
+    return svg(W, H, theme, "\n".join(out), bottom=band_y + 34)
 
 
 # Hello world on Apple Silicon, release builds: package (MB), start (s) and
@@ -421,8 +420,6 @@ def resources(theme, lang):
     units = [lambda v: f"{v:.1f} MB" if v < 10 else f"{v:.0f} MB", lambda v: f"{v:.2f} s", lambda v: f"{v:.0f} MB"]
     for index, (key, size, start, memory, measured) in enumerate(RESOURCES):
         cy = top + index * row_h + row_h / 2 - 6
-        if index % 2 == 0:
-            out.append(f'<rect x="28" y="{cy - row_h / 2 + 2}" width="{W - 56}" height="{row_h - 4}" rx="8" fill="{t["panel"]}"/>')
         out.append(badge(key, 56, cy, 13))
         out.append(f'<text x="78" y="{cy + 5}" font-size="14.5" font-weight="{700 if measured else 600}" fill="{t["text"]}">{esc(FRAMEWORKS[key]["name"])}</text>')
         if size is None:
@@ -437,7 +434,7 @@ def resources(theme, lang):
                        f'fill="{t["text"] if measured else t["muted"]}">{esc(label)}</text>')
     for line, text in enumerate(footer):
         out.append(f'<text x="40" y="{H - 28 - 20 * (len(footer) - 1) + line * 20}" font-size="12.5" fill="{t["muted"]}">{esc(text)}</text>')
-    return svg(W, H, theme, "\n".join(out))
+    return svg(W, H, theme, "\n".join(out), bottom=H - 16)
 
 
 # Interface layer, logic layer, how they talk, garbage collection. Tiers:
@@ -500,29 +497,24 @@ def languages(theme, lang):
     def chips(x, y, items):
         parts = []
         for label, tier in items:
-            w = width(label, 13.5) + 34
-            parts.append(f'<rect x="{x}" y="{y - 13}" width="{w:.1f}" height="26" rx="13" fill="{t["bg"]}" stroke="{TIER_COLORS[tier]}" stroke-width="1.5"/>')
-            parts.append(f'<circle cx="{x + 14}" cy="{y}" r="5" fill="{TIER_COLORS[tier]}"/>')
-            parts.append(f'<text x="{x + 25}" y="{y + 4.5}" font-size="13.5" font-weight="600" fill="{t["text"]}">{esc(label)}</text>')
-            x += w + 8
+            parts.append(f'<circle cx="{x + 5}" cy="{y}" r="5" fill="{TIER_COLORS[tier]}"/>')
+            parts.append(f'<text x="{x + 16}" y="{y + 4.5}" font-size="13.5" font-weight="600" fill="{t["text"]}">{esc(label)}</text>')
+            x += width(label, 13.5) + 34
         return parts
 
     for index, (key, ui, logic, bridge, gc) in enumerate(rows):
         cy = top + index * row_h + row_h / 2
         bern = key == "bern"
-        if bern:
-            out.append(f'<rect x="28" y="{cy - row_h / 2 + 3}" width="{W - 56}" height="{row_h - 6}" rx="10" fill="{t["soft"]}" stroke="{t["accent"]}"/>')
-        elif index % 2 == 0:
-            out.append(f'<rect x="28" y="{cy - row_h / 2 + 3}" width="{W - 56}" height="{row_h - 6}" rx="10" fill="{t["panel"]}"/>')
-        out.append(badge(key, 56, cy, 13))
-        out.append(f'<text x="78" y="{cy + 5}" font-size="14.5" font-weight="{700 if bern else 600}" fill="{t["text"]}">{esc(FRAMEWORKS[key]["name"])}</text>')
+        out.append(f'<line x1="40" y1="{cy - row_h / 2:.1f}" x2="920" y2="{cy - row_h / 2:.1f}" stroke="{t["border"] if index == 0 else t["grid"]}"/>')
+        out.append(badge(key, 53, cy, 13))
+        out.append(f'<text x="75" y="{cy + 5}" font-size="14.5" font-weight="{700 if bern else 600}" fill="{t["accent"] if bern else t["text"]}">{esc(FRAMEWORKS[key]["name"])}</text>')
         out.extend(chips(230, cy, ui))
         out.extend(chips(500, cy, logic))
         out.append(f'<text x="668" y="{cy + 5}" font-size="13.5" fill="{t["text"]}">{esc(bridge)}</text>')
         mark = {"no": (s["no"], TIER_COLORS[0]), "partial": (s["partial"], TIER_COLORS[2]), "yes": (s["yes"], t["muted"])}[gc]
         out.append(f'<text x="866" y="{cy + 5}" font-size="13.5" font-weight="600" fill="{mark[1]}">{esc(mark[0])}</text>')
     out.append(f'<text x="40" y="{H - 26}" font-size="12.5" fill="{t["muted"]}">{esc(s["languages_footer"])}</text>')
-    return svg(W, H, theme, "\n".join(out))
+    return svg(W, H, theme, "\n".join(out), bottom=H - 16)
 
 
 if __name__ == "__main__":

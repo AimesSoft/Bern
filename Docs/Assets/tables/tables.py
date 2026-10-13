@@ -17,7 +17,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "compare"))
 
-from charts import FRAMEWORKS, ICONS, THEMES, badge, esc, svg, width  # noqa: E402
+from charts import FONT, FRAMEWORKS, ICONS, THEMES, badge, bern_symbol, esc, width  # noqa: E402
 
 from text import ALT, TEXT  # noqa: E402
 
@@ -25,12 +25,10 @@ MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monosp
 W = 960
 LANGS = (("zh-Hans", ""), ("zh-Hant", "-zh-Hant"), ("en", "-en"), ("ja", "-ja"))
 
-# Status colors: (ink, fill).
+# Status colors.
 TONES = {
-    "light": dict(green=("#1A7F37", "#DAFBE1"), amber=("#9A6700", "#FFF3C4"), red=("#CF222E", "#FFEBE9"),
-                  gray=("#59636E", "#EFF2F5"), blue=("#0969DA", "#DDF4FF")),
-    "dark": dict(green=("#3FB950", "#12301E"), amber=("#D29922", "#33270F"), red=("#FF7B72", "#3B1C21"),
-                 gray=("#9198A1", "#21262D"), blue=("#58A6FF", "#12273F")),
+    "light": dict(green="#1A7F37", amber="#9A6700", red="#CF222E", gray="#59636E"),
+    "dark": dict(green="#3FB950", amber="#D29922", red="#FF7B72", gray="#9198A1"),
 }
 CODE_INK = {"light": "#0550AE", "dark": "#79C0FF"}
 
@@ -137,19 +135,6 @@ def para(text, x, top, size, maxw, fill, theme, lh=None, weight=None, anchor="st
     return out, len(lines) * lh
 
 
-def pill(x, y, label, tone, theme, size=12, h=22, mono=False, anchor="start"):
-    """A rounded status label; returns (svg, width)."""
-    ink, fill = TONES[theme][tone]
-    tw = sum(1.0 if cjk(c) else 0.6 for c in label) * size if mono else width(label, size) * 1.05
-    w = tw + 20
-    if anchor == "end":
-        x -= w
-    family = f' font-family="{MONO}"' if mono else ""
-    return (f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h}" rx="{h / 2}" fill="{fill}"/>'
-            f'<text x="{x + w / 2:.1f}" y="{y + h / 2 + size * 0.36:.1f}" font-size="{size}" font-weight="600" '
-            f'text-anchor="middle" fill="{ink}"{family}>{esc(label)}</text>'), w
-
-
 def group(parts, x, y):
     return f'<g transform="translate({x:.1f} {y:.1f})">' + "".join(parts) + "</g>"
 
@@ -178,66 +163,63 @@ def glyph(name, x, y, size, color, stroke=1.8):
             f'stroke-width="{stroke}" stroke-linecap="round" stroke-linejoin="round" color="{color}">{GLYPHS[name]}</g>')
 
 
-def icon_tile(name, x, y, theme, size=40):
-    t = THEMES[theme]
-    return (f'<rect x="{x}" y="{y}" width="{size}" height="{size}" rx="{size * 0.28:.1f}" fill="{t["soft"]}"/>'
-            + glyph(name, x + size * 0.22, y + size * 0.22, size * 0.56, t["accent"]))
+def icon(name, x, y, theme, size=28):
+    return glyph(name, x, y, size, THEMES[theme]["accent"], 1.9)
 
 
+# Platform marks in their own colors, light and dark.
 PLATFORMS = {
-    "apple": dict(color="#0A84FF", icon="apple"),
-    "windows": dict(color="#0078D4"),
-    "linux": dict(color="#4A86CF", icon="linux"),
-    "android": dict(color="#073042", icon="android", ink="#3DDC84"),
-    "wasm": dict(color="#654FF0", icon="webassembly"),
-    "globe": dict(color="#654FF0", glyph="globe"),
+    "apple": dict(icon="apple"),
+    "windows": dict(color=("#0078D4", "#3A96DD")),
+    "linux": dict(icon="linux"),
+    "android": dict(icon="android", color=("#2DA866", "#3DDC84")),
+    "wasm": dict(icon="webassembly", color=("#654FF0", "#8F7FF7")),
+    "globe": dict(glyph="globe", color=("#654FF0", "#8F7FF7")),
     "next": dict(glyph="arrow"),
 }
 
 
-def platform_tile(key, x, y, size, theme):
+def platform_mark(key, x, y, size, theme):
     t, p = THEMES[theme], PLATFORMS[key]
-    rx = size * 0.26
-    if "color" not in p:
-        return (f'<rect x="{x + 0.5:.1f}" y="{y + 0.5:.1f}" width="{size - 1}" height="{size - 1}" rx="{rx:.1f}" '
-                f'fill="{t["panel"]}" stroke="{t["border"]}"/>' + glyph(p["glyph"], x + size * 0.2, y + size * 0.2, size * 0.6, t["muted"], 2))
-    out = [f'<rect x="{x}" y="{y}" width="{size}" height="{size}" rx="{rx:.1f}" fill="{p["color"]}"/>']
-    inner = size * 0.58
-    ox, oy = x + (size - inner) / 2, y + (size - inner) / 2
+    color = p["color"][theme == "dark"] if "color" in p else (t["muted"] if key == "next" else t["text"])
     if key == "windows":
-        half, gap = inner / 2, inner * 0.06
-        for dx in (0, half + gap / 2):
-            for dy in (0, half + gap / 2):
-                out.append(f'<rect x="{ox + dx:.2f}" y="{oy + dy:.2f}" width="{half - gap / 2:.2f}" height="{half - gap / 2:.2f}" fill="#FFFFFF"/>')
-    elif "icon" in p:
-        for d in ICONS[p["icon"]]["paths"]:
-            out.append(f'<path d="{d}" fill="{p.get("ink", "#FFFFFF")}" transform="translate({ox:.2f} {oy:.2f}) scale({inner / 24:.4f})"/>')
-    else:
-        out.append(glyph(p["glyph"], ox, oy, inner, "#FFFFFF", 2))
-    return "".join(out)
+        half, gap = size / 2, size * 0.08
+        return "".join(f'<rect x="{x + dx:.2f}" y="{y + dy:.2f}" width="{half - gap / 2:.2f}" height="{half - gap / 2:.2f}" fill="{color}"/>'
+                       for dx in (0, half + gap / 2) for dy in (0, half + gap / 2))
+    if "icon" in p:
+        return "".join(f'<path d="{d}" fill="{color}" transform="translate({x:.2f} {y:.2f}) scale({size / 24:.4f})"/>'
+                       for d in ICONS[p["icon"]]["paths"])
+    return glyph(p["glyph"], x, y, size, color, 2)
 
 
-def card(x, y, w, h, theme, highlight=False):
+def page(height, theme, body):
+    """The SVG itself: no frame and no background, so it sits on the page."""
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {height:.0f}" width="{W}" height="{height:.0f}" '
+            f'font-family="{FONT}">\n<defs>{bern_symbol()}</defs>\n{body}\n</svg>\n')
+
+
+def rule(y, theme, strong=False, x1=0, x2=W):
     t = THEMES[theme]
-    if highlight:
-        return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="14" fill="{t["soft"]}" stroke="{t["accent"]}" stroke-width="1.5"/>'
-    return f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="14" fill="{t["panel"]}" stroke="{t["border"]}"/>'
+    return f'<line x1="{x1}" y1="{y:.1f}" x2="{x2}" y2="{y:.1f}" stroke="{t["border"] if strong else t["grid"]}"/>'
 
 
-def grid(cells, columns, theme, top=24, gap=16, margin=24, highlight=()):
-    """Lay out (parts, height) renderers as equal-width cards; returns (parts, bottom)."""
-    cw = (W - 2 * margin - (columns - 1) * gap) / columns
+def label(x, y, text, ink, size=12.5, anchor="start"):
+    """A colored word, standing on its own."""
+    end = f' text-anchor="{anchor}"' if anchor != "start" else ""
+    return f'<text x="{x:.1f}" y="{y:.1f}" font-size="{size}" font-weight="700" fill="{ink}"{end}>{esc(text)}</text>'
+
+
+def columns(cells, count, gap=48, row_gap=40):
+    """Lay out (parts, height) renderers in columns with only space between."""
+    cw = (W - (count - 1) * gap) / count
     rendered = [render(cw) for render in cells]
-    out, y = [], top
-    for start in range(0, len(rendered), columns):
-        row = rendered[start:start + columns]
-        h = max(height for _, height in row)
+    out, y = [], 0
+    for start in range(0, len(rendered), count):
+        row = rendered[start:start + count]
         for i, (parts, _) in enumerate(row):
-            x = margin + i * (cw + gap)
-            out.append(card(x, y, cw, h, theme, start + i in highlight))
-            out.append(group(parts, x, y))
-        y += h + gap
-    return out, y - gap
+            out.append(group(parts, i * (cw + gap), y))
+        y += max(h for _, h in row) + row_gap
+    return out, y - row_gap
 
 
 # 1. Why Bern.
@@ -245,110 +227,100 @@ def grid(cells, columns, theme, top=24, gap=16, margin=24, highlight=()):
 def why(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["why"]
 
-    def render_card(c):
+    def render_column(c):
         def render(cw):
-            pad, inner = 22, cw - 44
-            out = [icon_tile(c["icon"], pad, pad, theme)]
-            parts, h = para(c["title"], pad, pad + 54, 17.5, inner, t["text"], theme, lh=25, weight=700)
+            out = [icon(c["icon"], 1, 1, theme)]
+            parts, h = para(c["title"], 0, 42, 18, cw, t["text"], theme, lh=26, weight=700)
             out += parts
-            y = pad + 54 + h + 10
+            y = 42 + h + 10
             for kind, value in c["blocks"]:
                 if kind == "lead":
-                    parts, h = para(value, pad, y, 14.5, inner, t["text"], theme, lh=22)
+                    parts, h = para(value, 0, y, 14.5, cw, t["text"], theme, lh=22)
                 elif kind == "list":
                     parts, h = [], 0
                     for item in value:
-                        parts.append(glyph("tick", pad - 1, y + h + 3.5, 15, t["accent"], 2.4))
-                        p, ih = para(item, pad + 22, y + h, 14, inner - 22, t["text"], theme, lh=22)
+                        parts.append(glyph("tick", 0, y + h + 3.5, 15, t["accent"], 2.4))
+                        p, ih = para(item, 22, y + h, 14, cw - 22, t["text"], theme, lh=22)
                         parts += p
                         h += ih + 2
                 elif kind == "tag":
-                    p, _ = pill(pad, y, value, "blue", theme, size=12, h=22)
-                    parts, h = [p], 22
+                    parts, h = [label(0, y + 13, value, t["accent"])], 12
                 elif kind == "text":
-                    parts, h = para(value, pad, y, 14, inner, t["text"], theme, lh=22)
+                    parts, h = para(value, 0, y, 14, cw, t["text"], theme, lh=22)
                 elif kind == "note":
-                    parts, h = para(value, pad, y, 13, inner, t["muted"], theme, lh=19.5)
+                    parts, h = para(value, 0, y, 13, cw, t["muted"], theme, lh=19.5)
                 elif kind == "stats":
                     head, rows = value
                     name_w = 74
-                    col = (inner - name_w) / len(head)
-                    parts = [f'<text x="{pad + name_w + i * col:.1f}" y="{y + 14}" font-size="12" fill="{t["muted"]}">{esc(label)}</text>'
-                             for i, label in enumerate(head)]
+                    col = (cw - name_w) / len(head)
+                    parts = [f'<text x="{name_w + i * col:.1f}" y="{y + 14}" font-size="12" fill="{t["muted"]}">{esc(name)}</text>'
+                             for i, name in enumerate(head)]
                     h = 24
                     for name, values in rows:
-                        parts.append(f'<line x1="{pad}" y1="{y + h:.1f}" x2="{pad + inner}" y2="{y + h:.1f}" stroke="{t["grid"]}"/>')
-                        parts.append(f'<text x="{pad}" y="{y + h + 20:.1f}" font-size="13" fill="{t["muted"]}">{esc(name)}</text>')
+                        parts.append(rule(y + h, theme, x1=0, x2=cw))
+                        parts.append(f'<text x="0" y="{y + h + 20:.1f}" font-size="13" fill="{t["muted"]}">{esc(name)}</text>')
                         for i, v in enumerate(values):
-                            ink, weight = (t["muted"], 400) if v == "–" else (t["text"], 700)
-                            parts.append(f'<text x="{pad + name_w + i * col:.1f}" y="{y + h + 20:.1f}" font-size="14.5" '
+                            ink, weight = (t["line"], 400) if v == "–" else (t["text"], 700)
+                            parts.append(f'<text x="{name_w + i * col:.1f}" y="{y + h + 20:.1f}" font-size="14.5" '
                                          f'font-weight="{weight}" fill="{ink}">{esc(v)}</text>')
                         h += 30
                 out += parts
                 y += h + 10
-            return out, y + pad - 10
+            return out, y - 10
         return render
 
-    body, bottom = grid([render_card(c) for c in s], 3, theme)
-    return svg(W, bottom + 24, theme, "\n".join(body))
+    body, bottom = columns([render_column(c) for c in s], 3)
+    return page(bottom + 4, theme, "\n".join(body))
 
 
 # 2. What the AI forgets.
 
 def ai_checks(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["ai"]
-    left, left_w, right, right_w = 32, 290, 376, 552
-    out = [
-        f'<text x="{left}" y="40" font-size="13" font-weight="600" fill="{t["muted"]}">{esc(s["head"][0])}</text>',
-        f'<text x="{right}" y="40" font-size="13" font-weight="600" fill="{t["muted"]}">{esc(s["head"][1])}</text>',
-    ]
-    y = 56
+    left_w, right, right_w = 318, 364, 596
+    red = TONES[theme]["red"]
+    out = [label(0, 16, s["head"][0], t["muted"], 13), label(right, 16, s["head"][1], t["muted"], 13)]
+    y = 30
     for i, (problem, code, explain) in enumerate(s["rows"]):
-        out.append(f'<line x1="24" y1="{y}" x2="{W - 24}" y2="{y}" stroke="{t["border"] if i == 0 else t["grid"]}"/>')
+        out.append(rule(y, theme, strong=i == 0))
         top = y + 18
-        parts, ph = para(problem, left, top, 15, left_w, t["text"], theme, lh=23, weight=600)
+        parts, ph = para(problem, 0, top, 15, left_w, t["text"], theme, lh=23, weight=600)
         out += parts
-        out.append(glyph("arrow", 336, top + 2.5, 18, t["line"], 2))
+        out.append(glyph("arrow", 330, top + 2.5, 18, t["line"], 2))
         if code:
-            p, _ = pill(right, top, f"error[{code}]", "red", theme, size=12.5, h=23, mono=True)
+            out.append(f'<text x="{right}" y="{top + 17}" font-size="13.5" font-weight="700" font-family="{MONO}" fill="{red}">error[{code}]</text>')
         else:
-            p, _ = pill(right, top, s["impossible"], "blue", theme, size=12.5, h=23)
-        out.append(p)
-        parts, eh = para(explain, right, top + 31, 14, right_w, t["muted"], theme, lh=22)
+            out.append(label(right, top + 17, s["impossible"], t["accent"], 14))
+        parts, eh = para(explain, right, top + 28, 14, right_w, t["muted"], theme, lh=22)
         out += parts
-        y = top + max(ph, 31 + eh) + 18
-    return svg(W, y + 6, theme, "\n".join(out))
+        y = top + max(ph, 28 + eh) + 18
+    return page(y, theme, "\n".join(out))
 
 
 # 3. Measured.
 
 def measured(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["measured"]
-    cw = (W - 48 - 32) / 3
-    inner = cw - 44
-    notes = [para(p["note"], 0, 0, 12.5, inner, t["muted"], theme, lh=19)[1] for p in s["platforms"]]
-    note_h = max(notes)
-    h = 290 + note_h + 20
-    out = []
-    for i, (key, p) in enumerate(zip(("apple", "windows", "wasm"), s["platforms"])):
-        x, y = 24 + i * (cw + 16), 24
-        out.append(card(x, y, cw, h, theme))
-        g = [platform_tile(key, 22, 22, 34, theme),
-             f'<text x="68" y="36" font-size="16.5" font-weight="700" fill="{t["text"]}">{esc(p["name"])}</text>',
-             f'<text x="68" y="53" font-size="12.5" fill="{t["muted"]}">{esc(p["toolkit"])}</text>',
-             f'<line x1="22" y1="74" x2="{cw - 22:.1f}" y2="74" stroke="{t["border"]}"/>']
-        for row, (label, (value, unit)) in enumerate(zip(s["labels"], p["values"])):
-            top = 92 + row * 66
-            g.append(f'<text x="22" y="{top + 12}" font-size="12.5" fill="{t["muted"]}">{esc(label)}</text>')
-            if value == "–":
-                g.append(f'<text x="22" y="{top + 46}" font-size="28" fill="{t["line"]}">–</text>')
-            else:
-                g.append(f'<text x="22" y="{top + 46}" font-size="30" font-weight="700" fill="{t["text"]}">{esc(value)}'
-                         f'<tspan font-size="15" font-weight="500" fill="{t["muted"]}" dx="5">{esc(unit)}</tspan></text>')
-        parts, _ = para(p["note"], 22, 290, 12.5, inner, t["muted"], theme, lh=19)
-        g += parts
-        out.append(group(g, x, y))
-    return svg(W, h + 48, theme, "\n".join(out))
+
+    def render_column(key, p):
+        def render(cw):
+            g = [platform_mark(key, 1, 3, 26, theme),
+                 f'<text x="38" y="17" font-size="17" font-weight="700" fill="{t["text"]}">{esc(p["name"])}</text>',
+                 f'<text x="38" y="35" font-size="12.5" fill="{t["muted"]}">{esc(p["toolkit"])}</text>']
+            for row, (name, (value, unit)) in enumerate(zip(s["labels"], p["values"])):
+                top = 62 + row * 68
+                g.append(f'<text x="0" y="{top + 12}" font-size="12.5" fill="{t["muted"]}">{esc(name)}</text>')
+                if value == "–":
+                    g.append(f'<text x="0" y="{top + 46}" font-size="28" fill="{t["line"]}">–</text>')
+                else:
+                    g.append(f'<text x="0" y="{top + 46}" font-size="30" font-weight="700" fill="{t["text"]}">{esc(value)}'
+                             f'<tspan font-size="15" font-weight="500" fill="{t["muted"]}" dx="5">{esc(unit)}</tspan></text>')
+            parts, h = para(p["note"], 0, 258, 12.5, cw, t["muted"], theme, lh=19)
+            return g + parts, 258 + h
+        return render
+
+    body, bottom = columns([render_column(k, p) for k, p in zip(("apple", "windows", "wasm"), s["platforms"])], 3)
+    return page(bottom + 4, theme, "\n".join(body))
 
 
 # 4. More.
@@ -356,78 +328,73 @@ def measured(theme, lang):
 def more(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["more"]
 
-    def render_card(icon, title, text):
+    def render_cell(name, title, text):
         def render(cw):
-            inner = cw - 44
-            title_parts, th = para(title, 74, 0, 16.5, inner - 52, t["text"], theme, lh=23, weight=700)
-            ty = 22 + (40 - th) / 2
-            out = [icon_tile(icon, 22, 22, theme)] + [group(title_parts, 0, ty)]
-            parts, h = para(text, 22, 78, 14, inner, t["muted"], theme, lh=22)
-            return out + parts, 78 + h + 22
+            parts, th = para(title, 34, 0, 17, cw - 34, t["text"], theme, lh=26, weight=700)
+            out = [icon(name, 1, 2, theme, size=22)] + parts
+            body, h = para(text, 0, th + 8, 14, cw, t["muted"], theme, lh=22)
+            return out + body, th + 8 + h
         return render
 
     icons = ("terminal", "check", "code", "globe", "contrast", "windows")
-    body, bottom = grid([render_card(i, *c) for i, c in zip(icons, s)], 3, theme)
-    return svg(W, bottom + 24, theme, "\n".join(body))
+    body, bottom = columns([render_cell(i, *c) for i, c in zip(icons, s)], 3)
+    return page(bottom + 4, theme, "\n".join(body))
 
 
 # 5. Platforms.
 
 def platforms(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["platforms"]
-    cols = (32, 262, 650, 824)
-    out = [f'<text x="{x}" y="40" font-size="13" font-weight="600" fill="{t["muted"]}">{esc(label)}</text>'
-           for x, label in zip(cols, s["head"])]
+    cols = (0, 232, 636, 830)
+    out = [label(x, 16, name, t["muted"], 13) for x, name in zip(cols, s["head"])]
     tones = dict(ok="green", sim="amber", plan="gray")
-    y = 56
+    y = 30
     for i, (key, name, code, ui, req, engine, status) in enumerate(s["rows"]):
-        out.append(f'<line x1="24" y1="{y}" x2="{W - 24}" y2="{y}" stroke="{t["border"] if i == 0 else t["grid"]}"/>')
+        out.append(rule(y, theme, strong=i == 0))
         top = y + 16
-        out.append(platform_tile(key, cols[0], top, 34, theme))
-        name_top = top + (0 if code else 8)
-        parts, _ = para(name, cols[0] + 46, name_top, 15, 150, t["text"], theme, lh=20, weight=700)
+        out.append(platform_mark(key, 1, top + 3, 26, theme))
+        parts, _ = para(name, 40, top + (0 if code else 4), 15, 180, t["text"], theme, lh=20, weight=700)
         out += parts
         if code:
-            out.append(f'<text x="{cols[0] + 46}" y="{top + 35}" font-size="12" font-family="{MONO}" fill="{t["muted"]}">{esc(code)}</text>')
-        parts, uh = para(ui, cols[1], top, 14, 364, t["text"], theme, lh=21)
+            out.append(f'<text x="40" y="{top + 36}" font-size="12" font-family="{MONO}" fill="{t["muted"]}">{esc(code)}</text>')
+        parts, uh = para(ui, cols[1], top, 14, 380, t["text"], theme, lh=21)
         out += parts
         if req:
-            parts, rh = para(req, cols[1], top + uh + 3, 12.5, 364, t["muted"], theme, lh=19)
+            parts, rh = para(req, cols[1], top + uh + 3, 12.5, 380, t["muted"], theme, lh=19)
             out += parts
             uh += rh + 3
-        parts, eh = para(engine, cols[2], top, 13.5, 160, t["text"] if engine != "–" else t["line"], theme, lh=21)
+        parts, eh = para(engine, cols[2], top, 13.5, 174, t["text"] if engine != "–" else t["line"], theme, lh=21)
         out += parts
-        p, _ = pill(cols[3], top + 4, s["status"][status], tones[status], theme)
-        out.append(p)
-        y = top + max(38, uh, eh) + 16
-    return svg(W, y + 6, theme, "\n".join(out))
+        ink = TONES[theme][tones[status]]
+        out.append(f'<circle cx="{cols[3] + 4}" cy="{top + 10.5}" r="4" fill="{ink}"/>' + label(cols[3] + 14, top + 15, s["status"][status], ink, 13.5))
+        y = top + max(40, uh, eh) + 16
+    return page(y, theme, "\n".join(out))
 
 
 # 6. Technology.
 
+def framework_name(key, x, cy, theme, r=12):
+    t = THEMES[theme]
+    ink = t["accent"] if key == "bern" else t["text"]
+    return (badge(key, x + r, cy, r) +
+            f'<text x="{x + 2 * r + 8}" y="{cy + 5}" font-size="14.5" font-weight="700" fill="{ink}">{esc(FRAMEWORKS[key]["name"])}</text>')
+
+
 def technology(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["technology"]
-    cols = ((28, 128), (162, 130), (298, 116), (420, 236), (662, 154), (822, 114))
-    out = [para(label, x, 26, 12.5, w, t["muted"], theme, lh=18, weight=600)[0][0] for (x, w), label in zip(cols, s["head"])]
-    y = 58
-    out.append(f'<line x1="20" y1="{y}" x2="{W - 20}" y2="{y}" stroke="{t["border"]}"/>')
+    cols = ((0, 140), (148, 132), (290, 118), (418, 244), (672, 160), (842, 118))
+    out = [para(name, x, 2, 12.5, w, t["muted"], theme, lh=18, weight=600)[0][0] for (x, w), name in zip(cols, s["head"])]
+    y = 30
     for i, (key, cells) in enumerate(s["rows"]):
+        out.append(rule(y, theme, strong=i == 0))
         top = y + 14
         rendered = [para(cell, x, top, 13.5, w, t["text"] if c < 4 else t["muted"], theme, lh=20)
                     for c, (cell, (x, w)) in enumerate(zip(cells, cols[1:]))]
-        h = max(max(rh for _, rh in rendered), 28)
-        bottom = top + h + 14
-        if key == "bern":
-            out.append(f'<rect x="16" y="{y + 4}" width="{W - 32}" height="{bottom - y - 8}" rx="12" fill="{t["soft"]}"/>')
-            out.append(f'<rect x="16" y="{y + 4}" width="4" height="{bottom - y - 8}" rx="2" fill="{t["accent"]}"/>')
-        elif i > 0:
-            out.append(f'<line x1="20" y1="{y}" x2="{W - 20}" y2="{y}" stroke="{t["grid"]}"/>')
-        out.append(badge(key, cols[0][0] + 12, top + 11, 12))
-        out.append(f'<text x="{cols[0][0] + 32}" y="{top + 16}" font-size="14.5" font-weight="700" fill="{t["text"]}">{esc(FRAMEWORKS[key]["name"])}</text>')
+        out.append(framework_name(key, 0, top + 10, theme))
         for parts, _ in rendered:
             out += parts
-        y = bottom
-    return svg(W, y + 10, theme, "\n".join(out))
+        y = top + max(max(h for _, h in rendered), 26) + 14
+    return page(y, theme, "\n".join(out))
 
 
 # 7. Platforms and capabilities.
@@ -451,43 +418,35 @@ def mark(kind, cx, cy, theme, r=7):
 
 def capabilities(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["capabilities"]
-    x0, cw = 196, (W - 24 - 196) / 8
+    x0 = 176
+    cw = (W - x0) / 8
     out = []
-    # Legend.
-    lx = 28
-    for kind, label in zip("FPN", s["legend"]):
-        out.append(mark(kind, lx + 7, 30, theme))
-        out.append(f'<text x="{lx + 22}" y="35" font-size="13" fill="{t["muted"]}">{esc(label)}</text>')
-        lx += 22 + width(label, 13) + 26
-    # Groups and columns.
-    for start, span, label in ((0, 5, s["groups"][0]), (5, 3, s["groups"][1])):
+    lx = 0
+    for kind, name in zip("FPN", s["legend"]):
+        out.append(mark(kind, lx + 7, 10, theme))
+        out.append(f'<text x="{lx + 22}" y="15" font-size="13" fill="{t["muted"]}">{esc(name)}</text>')
+        lx += 22 + width(name, 13) + 26
+    for start, span, name in ((0, 5, s["groups"][0]), (5, 3, s["groups"][1])):
         gx = x0 + start * cw
-        out.append(f'<text x="{gx + span * cw / 2:.1f}" y="76" font-size="13" font-weight="700" text-anchor="middle" fill="{t["text"]}">{esc(label)}</text>')
-        out.append(f'<path d="M{gx + 8:.1f} 92 v-5 h{span * cw - 16:.1f} v5" fill="none" stroke="{t["line"]}" stroke-width="1.2"/>')
+        out.append(label(gx + span * cw / 2, 56, name, t["text"], 13, anchor="middle"))
+        out.append(f'<path d="M{gx + 8:.1f} 72 v-5 h{span * cw - 16:.1f} v5" fill="none" stroke="{t["line"]}" stroke-width="1.2"/>')
     head_h = 0
-    for i, label in enumerate(s["columns"]):
-        parts, h = para(label, x0 + i * cw + cw / 2, 100, 12.5, cw - 10, t["muted"], theme, lh=17, weight=600, anchor="middle")
+    for i, name in enumerate(s["columns"]):
+        parts, h = para(name, x0 + i * cw + cw / 2, 80, 12.5, cw - 10, t["muted"], theme, lh=17, weight=600, anchor="middle")
         out += parts
         head_h = max(head_h, h)
-    out.append(f'<text x="28" y="{100 + head_h - 5:.1f}" font-size="12.5" font-weight="600" fill="{t["muted"]}">{esc(s["name"])}</text>')
-    y = 100 + head_h + 10
-    out.append(f'<line x1="20" y1="{y}" x2="{W - 20}" y2="{y}" stroke="{t["border"]}"/>')
+    out.append(label(0, 80 + head_h - 5, s["name"], t["muted"]))
+    y = 80 + head_h + 10
     rows_top = y
     for i, (key, marks) in enumerate(MATRIX):
-        top = y + 4
-        if key == "bern":
-            out.append(f'<rect x="16" y="{top}" width="{W - 32}" height="38" rx="10" fill="{t["soft"]}"/>')
-            out.append(f'<rect x="16" y="{top}" width="4" height="38" rx="2" fill="{t["accent"]}"/>')
-        elif i > 1:
-            out.append(f'<line x1="20" y1="{y}" x2="{W - 20}" y2="{y}" stroke="{t["grid"]}"/>')
-        cy = top + 19
-        out.append(badge(key, 40, cy, 11))
-        out.append(f'<text x="60" y="{cy + 5}" font-size="14.5" font-weight="700" fill="{t["text"]}">{esc(FRAMEWORKS[key]["name"])}</text>')
+        out.append(rule(y, theme, strong=i == 0))
+        cy = y + 23
+        out.append(framework_name(key, 0, cy, theme, r=11))
         for c, kind in enumerate(marks):
             out.append(mark(kind, x0 + c * cw + cw / 2, cy, theme))
         y += 46
-    out.insert(0, f'<line x1="{x0 + 5 * cw:.1f}" y1="{rows_top + 6}" x2="{x0 + 5 * cw:.1f}" y2="{y - 6}" stroke="{t["grid"]}" stroke-width="1.5"/>')
-    return svg(W, y + 16, theme, "\n".join(out))
+    out.append(f'<line x1="{x0 + 5 * cw:.1f}" y1="{rows_top + 8}" x2="{x0 + 5 * cw:.1f}" y2="{y - 8}" stroke="{t["grid"]}" stroke-width="1.5"/>')
+    return page(y, theme, "\n".join(out))
 
 
 # 8. Which one to choose.
@@ -495,120 +454,107 @@ def capabilities(theme, lang):
 def choose(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["choose"]
     good, cost, not_yet = s["labels"]
-    green, amber = TONES[theme]["green"][0], TONES[theme]["amber"][0]
+    green, amber = TONES[theme]["green"], TONES[theme]["amber"]
 
-    def section(label, ink, text, x, y, w, fill):
-        parts = [f'<text x="{x}" y="{y + 13}" font-size="12.5" font-weight="700" fill="{ink}">{esc(label)}</text>']
-        p, h = para(text, x, y + 21, 13.5, w, fill, theme, lh=21)
-        return parts + p, 21 + h
+    def section(name, ink, text, x, y, w, fill):
+        p, h = para(text, x, y + 20, 13.5, w, fill, theme, lh=21)
+        return [label(x, y + 13, name, ink)] + p, 20 + h
 
-    def render_card(key, fit, price):
+    def render_cell(key, fit, price):
         def render(cw):
-            inner = cw - 40
-            out = [badge(key, 20 + 15, 20 + 15, 15),
-                   f'<text x="62" y="41" font-size="16.5" font-weight="700" fill="{t["text"]}">{esc(FRAMEWORKS[key]["name"])}</text>']
-            parts, h1 = section(good, green, fit, 20, 66, inner, t["text"])
-            parts2, h2 = section(cost, amber, price, 20, 66 + h1 + 12, inner, t["muted"])
-            return out + parts + parts2, 66 + h1 + 12 + h2 + 20
+            out = [framework_name(key, 0, 14, theme, r=14)]
+            parts, h1 = section(good, green, fit, 0, 42, cw, t["text"])
+            parts2, h2 = section(cost, amber, price, 0, 42 + h1 + 12, cw, t["muted"])
+            return out + parts + parts2, 42 + h1 + 12 + h2
         return render
 
-    body, bottom = grid([render_card(*c) for c in s["rows"]], 3, theme)
-    # Bern, across the width.
-    y, x, w = bottom + 16, 24, W - 48
-    half = (w - 40 - 32) / 2
-    parts, h1 = section(good, green, s["bern"][0], 20, 72, half, t["text"])
-    parts2, h2 = section(not_yet, amber, s["bern"][1], 20 + half + 32, 72, half, t["muted"])
-    h = 72 + max(h1, h2) + 22
-    body.append(card(x, y, w, h, theme, highlight=True))
-    body.append(group([badge("bern", 20 + 18, 20 + 18, 18),
-                       f'<text x="68" y="45" font-size="19" font-weight="700" fill="{t["text"]}">Bern</text>'] + parts + parts2, x, y))
-    return svg(W, y + h + 24, theme, "\n".join(body))
+    body, bottom = columns([render_cell(*c) for c in s["rows"]], 3)
+    # Bern, across the width, under a rule.
+    y = bottom + 32
+    body.append(rule(y, theme, strong=True))
+    half = (W - 48) / 2
+    top = y + 28
+    parts, h1 = section(good, green, s["bern"][0], 0, top + 42, half, t["text"])
+    parts2, h2 = section(not_yet, amber, s["bern"][1], half + 48, top + 42, half, t["muted"])
+    body += [framework_name("bern", 0, top + 16, theme, r=16)] + parts + parts2
+    return page(top + 42 + max(h1, h2) + 4, theme, "\n".join(body))
 
 
 # 9. Roadmap.
 
-def chip(x, y, label, kind, theme, suffix):
+def item(x, y, text, kind, theme, suffix):
+    """One piece of a stage: a mark and its words, no box."""
     t = THEMES[theme]
-    size, h = 12.5, 24
-    text = label + (f" · {suffix}" if suffix else "")
-    tw = sum(measure(p, st, size) for p, st in parse(text))
-    lead = 16 if kind == "done" else 0
-    w = tw + 20 + lead
+    size = 13
+    words = text + (f" · {suffix}" if suffix else "")
+    ink = {"done": TONES[theme]["green"], "next": t["accent"]}.get(kind, t["muted"])
     if kind == "done":
-        ink, fill = TONES[theme]["green"]
-        shape = f'<rect x="{x}" y="{y}" width="{w:.1f}" height="{h}" rx="{h / 2}" fill="{fill}"/>' + glyph("tick", x + 8, y + 5.5, 13, ink, 2.6)
+        mark_svg = glyph("tick", x, y - 11, 14, ink, 2.6)
     elif kind == "next":
-        ink, fill = TONES[theme]["blue"]
-        shape = f'<rect x="{x + 0.5}" y="{y + 0.5}" width="{w - 1:.1f}" height="{h - 1}" rx="{h / 2}" fill="{fill}" stroke="{ink}"/>'
+        mark_svg = glyph("arrow", x, y - 11, 14, ink, 2.4)
     else:
-        ink = t["muted"]
-        shape = f'<rect x="{x + 0.5}" y="{y + 0.5}" width="{w - 1:.1f}" height="{h - 1}" rx="{h / 2}" fill="none" stroke="{t["line"]}" stroke-dasharray="3 3"/>'
-    line = [[(p, st)] for p, st in parse(text)]
-    label_svg = (f'<text x="{x + 10 + lead:.1f}" y="{y + h / 2 + size * 0.36:.1f}" font-size="{size}" font-weight="500" fill="{ink}">'
-                 f'{spans(line, theme, size)}</text>')
-    # Code inside a chip keeps the chip's color.
-    return shape + label_svg.replace(f'fill="{CODE_INK[theme]}"', f'fill="{ink}"'), w
+        mark_svg = f'<circle cx="{x + 7}" cy="{y - 4.5}" r="4.5" fill="none" stroke="{ink}" stroke-width="1.5"/>'
+    line = [[(p, st)] for p, st in parse(words)]
+    words_svg = f'<text x="{x + 20}" y="{y}" font-size="{size}" font-weight="500" fill="{ink}">{spans(line, theme, size)}</text>'
+    w = 20 + sum(measure(p, st, size) for p, st in parse(words))
+    return mark_svg + words_svg.replace(f'fill="{CODE_INK[theme]}"', f'fill="{ink}"'), w
 
 
 def roadmap(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["roadmap"]
-    node_x, content_x, content_w = 104, 134, 640
+    node_x, content_x = 64, 92
+    content_w = W - content_x - 120
     out, nodes = [], []
-    y = 24
-    for stage, text, chips, status in s["stages"]:
-        top = y + 14
-        out.append(f'<text x="78" y="{top + 17}" font-size="15" font-weight="700" text-anchor="end" fill="{t["text"]}">{esc(stage)}</text>')
-        nodes.append((top + 11, status))
+    y = 0
+    for i, (stage, text, items, state) in enumerate(s["stages"]):
+        top = y + (2 if i == 0 else 16)
+        out.append(f'<text x="40" y="{top + 16}" font-size="15" font-weight="700" text-anchor="end" fill="{t["text"]}">{esc(stage)}</text>')
+        nodes.append((top + 11, state))
         parts, h = para(text, content_x, top, 14.5, content_w, t["text"], theme, lh=22)
         out += parts
-        if chips:
-            cx, cy = content_x, top + h + 10
-            for label, kind in chips:
+        if items:
+            ix, iy = content_x, top + h + 24
+            for words, kind in items:
                 suffix = {"next": s["next"], "todo": s["todo"]}.get(kind)
-                shape, w = chip(0, 0, label, kind, theme, suffix)
-                if cx + w > content_x + content_w:
-                    cx, cy = content_x, cy + 32
-                out.append(group([shape], cx, cy))
-                cx += w + 8
-            h = cy + 24 - top
-        tone = "green" if status == "done" else "amber"
-        p, _ = pill(W - 28, top, s["status"][status], tone, theme, anchor="end")
-        out.append(p)
-        y = top + max(h, 24) + 14
-        out.append(f'<line x1="{content_x}" y1="{y}" x2="{W - 28}" y2="{y}" stroke="{t["grid"]}"/>')
-    out.pop()
-    line = [f'<line x1="{node_x}" y1="{nodes[0][0]}" x2="{node_x}" y2="{nodes[-1][0]}" stroke="{t["border"]}" stroke-width="2"/>']
-    for cy, status in nodes:
-        if status == "done":
-            ink = TONES[theme]["green"][0]
-            line.append(f'<circle cx="{node_x}" cy="{cy}" r="11" fill="{ink}"/>' + glyph("tick", node_x - 7, cy - 7, 14, t["bg"], 3))
+                svg_item, w = item(0, 0, words, kind, theme, suffix)
+                if ix + w > content_x + content_w:
+                    ix, iy = content_x, iy + 26
+                out.append(group([svg_item], ix, iy))
+                ix += w + 22
+            h = iy + 6 - top
+        ink = TONES[theme]["green" if state == "done" else "amber"]
+        out.append(label(W, top + 16, s["status"][state], ink, 13.5, anchor="end"))
+        y = top + max(h, 22) + 16
+        if i < len(s["stages"]) - 1:
+            out.append(rule(y, theme, x1=content_x))
+    nodes_svg = [f'<line x1="{node_x}" y1="{nodes[0][0]}" x2="{node_x}" y2="{nodes[-1][0]}" stroke="{t["border"]}" stroke-width="2"/>']
+    for cy, state in nodes:
+        if state == "done":
+            nodes_svg.append(f'<circle cx="{node_x}" cy="{cy}" r="6" fill="{TONES[theme]["green"]}"/>')
         else:
-            ink = TONES[theme]["amber"][0]
-            line.append(f'<circle cx="{node_x}" cy="{cy}" r="10" fill="{t["bg"]}" stroke="{ink}" stroke-width="2.5"/>'
-                        f'<circle cx="{node_x}" cy="{cy}" r="4" fill="{ink}"/>')
-    return svg(W, y + 14, theme, "\n".join(line + out))
+            nodes_svg.append(f'<circle cx="{node_x}" cy="{cy}" r="5.5" fill="{t["bg"]}" stroke="{TONES[theme]["amber"]}" stroke-width="2.5"/>')
+    return page(y, theme, "\n".join(nodes_svg + out))
 
 
 # 10. Repository.
 
 def repository(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["repository"]
-    label_x, path_x, path_w, desc_x, desc_w = 32, 168, 360, 548, 384
-    out, y = [], 16
-    for gi, (label, rows) in enumerate(s):
+    path_x, path_w, desc_x, desc_w = 132, 364, 520, 440
+    out, y = [], 0
+    for gi, (name, rows) in enumerate(s):
         if gi:
-            out.append(f'<line x1="24" y1="{y}" x2="{W - 24}" y2="{y}" stroke="{t["border"]}"/>')
-        y += 12
-        parts, _ = para(label, label_x, y + 6, 13, path_x - label_x - 16, t["accent"], theme, lh=20, weight=700)
+            out.append(rule(y, theme, strong=True))
+        y += 14
+        parts, _ = para(name, 0, y, 13, path_x - 16, t["accent"], theme, lh=20, weight=700)
         out += parts
         for path, desc in rows:
-            top = y + 6
-            p1, h1 = para(path, path_x, top, 13.5, path_w, t["text"], theme, lh=20)
-            p2, h2 = para(desc, desc_x, top, 13.5, desc_w, t["muted"], theme, lh=20)
+            p1, h1 = para(path, path_x, y, 13.5, path_w, t["text"], theme, lh=20)
+            p2, h2 = para(desc, desc_x, y, 13.5, desc_w, t["muted"], theme, lh=20)
             out += p1 + p2
-            y = top + max(h1, h2) + 6
-        y += 12
-    return svg(W, y + 6, theme, "\n".join(out))
+            y += max(h1, h2) + 6
+        y += 8
+    return page(y, theme, "\n".join(out))
 
 
 CHARTS = dict(why=why, ai=ai_checks, measured=measured, more=more, platforms=platforms, technology=technology,
