@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 662" width="960" height="662" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Helvetica Neue', Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 642" width="960" height="642" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Helvetica Neue', Arial, sans-serif">
 <defs><symbol id="bern-logo" viewBox="0 0 1024 1024"><defs>
     <clipPath id="bern-symbol-disc"><circle cx="512" cy="512" r="512"/></clipPath>
   </defs>
@@ -12,7 +12,7 @@
     <ellipse rx="22" ry="36" fill="#E8F4FF" transform="translate(748 668) rotate(-20)"/>
   </g>
 </symbol><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#484F58"/></marker><marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#6EA2F5"/></marker></defs>
-<rect x="0.5" y="0.5" width="959" height="661" rx="20" fill="#0D1117" stroke="#30363D"/>
+<rect x="0.5" y="0.5" width="959" height="641" rx="20" fill="#0D1117" stroke="#30363D"/>
 <defs><pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#21262D"/><rect width="3" height="6" fill="#484F58" opacity="0.55"/></pattern></defs>
 <text x="40" y="52" font-size="22" font-weight="700" fill="#F0F6FC">Hello World 的資源占用</text>
 <text x="40" y="78" font-size="14" fill="#9198A1">同一台機器實測：Apple M1 (Virtual)，macOS 26.6.2，release 建置，10 次熱啟動的中位數</text>
@@ -31,8 +31,8 @@
 <text x="78" y="169.0" font-size="14.5" font-weight="700" fill="#F0F6FC">Bern</text>
 <rect x="251" y="157.0" width="17.6" height="14" rx="5" fill="#6EA2F5"/>
 <text x="275.6" y="169.0" font-size="12.5" font-weight="700" fill="#F0F6FC">2.1 MB</text>
-<rect x="486" y="157.0" width="15.2" height="14" rx="5" fill="#6EA2F5"/>
-<text x="508.2" y="169.0" font-size="12.5" font-weight="700" fill="#F0F6FC">0.20 s *</text>
+<rect x="486" y="157.0" width="19.9" height="14" rx="5" fill="#6EA2F5"/>
+<text x="512.9" y="169.0" font-size="12.5" font-weight="700" fill="#F0F6FC">0.26 s</text>
 <rect x="721" y="157.0" width="13.9" height="14" rx="5" fill="#6EA2F5"/>
 <text x="741.9" y="169.0" font-size="12.5" font-weight="700" fill="#F0F6FC">18 MB</text>
 <circle cx="56.0" cy="204.0" r="13.0" fill="#084CCF"/><path d="M2.25 1.5a.75.75 0 0 0-.75.75v16.5H0V2.25A2.25 2.25 0 0 1 2.25 0h20.095c1.002 0 1.504 1.212.795 1.92L10.764 14.298h3.486V12.75h1.5v1.922a1.125 1.125 0 0 1-1.125 1.125H9.264l-2.578 2.578h11.689V9h1.5v9.375a1.5 1.5 0 0 1-1.5 1.5H5.185L2.562 22.5H21.75a.75.75 0 0 0 .75-.75V5.25H24v16.5A2.25 2.25 0 0 1 21.75 24H1.655C.653 24 .151 22.788.86 22.08L13.19 9.75H9.75v1.5h-1.5V9.375A1.125 1.125 0 0 1 9.375 8.25h5.314l2.625-2.625H5.625V15h-1.5V5.625a1.5 1.5 0 0 1 1.5-1.5h13.19L21.438 1.5z" fill="#FFFFFF" transform="translate(48.85 196.85) scale(0.5958)"/>
@@ -108,5 +108,4 @@
 <text x="260" y="529.0" font-size="13" fill="#9198A1">沒有桌面應用程式目標</text>
 <text x="40" y="594" font-size="12.5" fill="#9198A1">套件大小為各框架自己的工具產生的結果：.app、自包含發佈目錄或 Rust 執行檔；啟動為從執行到視窗出現。</text>
 <text x="40" y="614" font-size="12.5" fill="#9198A1">記憶體為視窗出現 4 秒後的實體占用，含子行程與隨之啟動的 WebKit 行程。由 benchmarks/ 與 Benchmarks 工作流程產生。</text>
-<text x="40" y="634" font-size="12.5" fill="#9198A1">* Bern 的啟動時間為 Apple M4 本機實測（macOS 27.0.1，10 次中位數）；在上述 CI 虛擬機上為 0.26 s。</text>
 </svg>

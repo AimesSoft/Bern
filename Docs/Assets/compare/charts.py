@@ -56,7 +56,7 @@ TEXT = {
             ("自带渲染引擎", "自己绘制界面", "各平台画出一样的界面", "随应用携带渲染引擎"),
             ("网页技术", "WebView 或浏览器", "界面是网页", "沿用网页生态"),
         ],
-        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Web", "electron": "内嵌 Chromium",
+        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Compose · Web", "electron": "内嵌 Chromium",
                "tauri": "系统 WebView", "dioxus": "系统 WebView", "uniapp": "经典模式",
                "uniappx": "编译为原生语言", "rn": "JS 引擎驱动", "qt": "Widgets 与 Quick"},
         native_band="系统控件：系统外观、无障碍与输入法",
@@ -65,7 +65,6 @@ TEXT = {
         resources_note="Bern 为实测；其余为纸面估算，以后由 M4 上的 CI 实测替换",
         resources_note_measured="同一台机器实测：{machine}，macOS {macos}，release 构建，{runs} 次热启动的中位数",
         resources_note_partial="；斜线为未能构建的估算",
-        resources_footer_local="* {name} 的启动时间为 {machine} 本机实测（macOS {macos}，{runs} 次中位数）；在上述 CI 虚拟机上为 {ci:.2f} s。",
         resources_footer_measured=("包体为各框架自己的工具打出的结果：.app、自包含发布目录或 Rust 可执行文件；启动为从运行到窗口出现。",
                                    "内存为窗口出现 4 秒后的物理占用，含子进程与随之启动的 WebKit 进程。由 benchmarks/ 与 Benchmarks 工作流生成。"),
         panels=("包体大小（对数刻度）", "启动到窗口可见", "空闲内存"),
@@ -93,7 +92,7 @@ TEXT = {
             ("自帶繪製引擎", "自己繪製介面", "各平台畫出一樣的介面", "隨應用程式攜帶繪製引擎"),
             ("網頁技術", "WebView 或瀏覽器", "介面是網頁", "沿用網頁生態"),
         ],
-        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Web", "electron": "內嵌 Chromium",
+        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Compose · Web", "electron": "內嵌 Chromium",
                "tauri": "系統 WebView", "dioxus": "系統 WebView", "uniapp": "經典模式",
                "uniappx": "編譯為原生語言", "rn": "JS 引擎驅動", "qt": "Widgets 與 Quick"},
         native_band="系統控制項：系統外觀、無障礙與輸入法",
@@ -102,7 +101,6 @@ TEXT = {
         resources_note="Bern 為實測；其餘為紙面估算，之後由 M4 上的 CI 實測取代",
         resources_note_measured="同一台機器實測：{machine}，macOS {macos}，release 建置，{runs} 次熱啟動的中位數",
         resources_note_partial="；斜線為未能建置的估算",
-        resources_footer_local="* {name} 的啟動時間為 {machine} 本機實測（macOS {macos}，{runs} 次中位數）；在上述 CI 虛擬機上為 {ci:.2f} s。",
         resources_footer_measured=("套件大小為各框架自己的工具產生的結果：.app、自包含發佈目錄或 Rust 執行檔；啟動為從執行到視窗出現。",
                                    "記憶體為視窗出現 4 秒後的實體占用，含子行程與隨之啟動的 WebKit 行程。由 benchmarks/ 與 Benchmarks 工作流程產生。"),
         panels=("套件大小（對數刻度）", "啟動到視窗可見", "閒置記憶體"),
@@ -130,7 +128,7 @@ TEXT = {
             ("Own rendering", "engine", "Same UI everywhere", "Ships a renderer"),
             ("Web", "technology", "UI is a web page", "Reuses the web stack"),
         ],
-        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Web", "electron": "Bundles Chromium",
+        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Compose · Web", "electron": "Bundles Chromium",
                "tauri": "System WebView", "dioxus": "System WebView", "uniapp": "Classic mode",
                "uniappx": "Compiles to native", "rn": "Driven by JS", "qt": "Widgets and Quick"},
         native_band="System controls: native look, accessibility, input methods",
@@ -139,7 +137,6 @@ TEXT = {
         resources_note="Bern is measured; the rest are paper estimates, to be replaced by CI runs on an M4",
         resources_note_measured="Measured on {machine}, macOS {macos}: release builds, median of {runs} warm starts",
         resources_note_partial="; hatched bars are estimates",
-        resources_footer_local="* {name}'s launch time was measured locally on an {machine} (macOS {macos}, median of {runs}); on the CI virtual machine above it is {ci:.2f} s.",
         resources_footer_measured=("Package: what each framework's own tools produce (.app, self-contained folder or Rust binary). Launch: start to window on screen.",
                                    "Memory: physical footprint 4 s after the window appears, child and WebKit processes included. From benchmarks/ and its workflow."),
         panels=("Package size (log scale)", "Launch to window", "Idle memory"),
@@ -167,7 +164,7 @@ TEXT = {
             ("独自の", "描画エンジン", "どの OS でも同じ見た目", "描画エンジンを同梱"),
             ("Web 技術", "WebView など", "UI は Web ページ", "Web の資産を活用"),
         ],
-        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Web", "electron": "Chromium を同梱",
+        notes={"bern": "SwiftUI · WinUI 3\nGTK 4 · Compose · Web", "electron": "Chromium を同梱",
                "tauri": "システム WebView", "dioxus": "システム WebView", "uniapp": "クラシック",
                "uniappx": "ネイティブへコンパイル", "rn": "JS で駆動", "qt": "Widgets と Quick"},
         native_band="システムのコントロール：OS の外観・アクセシビリティ・入力",
@@ -176,7 +173,6 @@ TEXT = {
         resources_note="Bern は実測、ほかは机上の見積もり。M4 の CI 実測で置き換える予定",
         resources_note_measured="同一マシンで実測：{machine}、macOS {macos}、release ビルド、ウォームスタート {runs} 回の中央値",
         resources_note_partial="。斜線は見積もり",
-        resources_footer_local="* {name} の起動時間は {machine} での実測（macOS {macos}、{runs} 回の中央値）。上記の CI 仮想マシンでは {ci:.2f} s。",
         resources_footer_measured=("パッケージは各フレームワーク自身のツールが作るもの（.app、自己完結フォルダー、Rust 実行ファイル）。起動は開始から表示まで。",
                                    "メモリは表示 4 秒後の物理フットプリントで、子プロセスと同時に起動した WebKit プロセスを含む。benchmarks/ のワークフローで生成。"),
         panels=("パッケージサイズ（対数）", "起動からウィンドウ表示", "アイドル時のメモリ"),
@@ -378,19 +374,6 @@ if RESULTS.exists():
         key=lambda row: (row[1] is None, row[1] or 0),
     )
 
-# Launch times measured on a developer machine (`benchmarks/local.json`,
-# written by `benchmarks/run.sh` there) replace the CI ones and are marked
-# with an asterisk; the footer names the machine and keeps the CI value.
-LOCAL = {}
-if MEASURED and (HERE.parents[2] / "benchmarks" / "local.json").exists():
-    for result in json.loads((HERE.parents[2] / "benchmarks" / "local.json").read_text())["results"]:
-        key = "rn" if result["framework"] == "react-native" else result["framework"]
-        if key in MEASURED:
-            LOCAL[key] = result
-    RESOURCES = [(key, size, LOCAL[key]["launch_s"] if key in LOCAL else start, memory, measured)
-                 for key, size, start, memory, measured in RESOURCES]
-
-
 def hatch(theme):
     t = THEMES[theme]
     return (f'<pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">'
@@ -407,10 +390,6 @@ def resources(theme, lang):
         if len(MEASURED) < sum(1 for row in RESOURCES if row[1] is not None):
             note += s["resources_note_partial"]
         footer = list(s["resources_footer_measured"])
-        for key, result in LOCAL.items():
-            footer.append(s["resources_footer_local"].format(
-                name=FRAMEWORKS[key]["name"], machine=result["machine"], macos=result["macos"],
-                runs=len(result["launch_runs_s"]), ci=MEASURED[key]["launch_s"]))
     else:
         note, footer = s["resources_note"], s["resources_footer"]
     W = 960
@@ -454,8 +433,6 @@ def resources(theme, lang):
             fill = t["accent"] if measured else "url(#hatch)"
             out.append(f'<rect x="{px + 1}" y="{cy - 7}" width="{bar:.1f}" height="14" rx="5" fill="{fill}"/>')
             label = unit(value) if measured else "≈" + unit(value)
-            if panel == 1 and key in LOCAL:
-                label += " *"
             out.append(f'<text x="{px + bar + 8:.1f}" y="{cy + 5}" font-size="12.5" font-weight="{700 if measured else 500}" '
                        f'fill="{t["text"] if measured else t["muted"]}">{esc(label)}</text>')
     for line, text in enumerate(footer):

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 802" width="960" height="802" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Helvetica Neue', Arial, sans-serif">
+<defs><symbol id="bern-logo" viewBox="0 0 1024 1024"><defs>
+    <clipPath id="bern-symbol-disc"><circle cx="512" cy="512" r="512"/></clipPath>
+  </defs>
+  <g clip-path="url(#bern-symbol-disc)">
+    
+    <rect width="1024" height="1024" fill="#4A8BEF"/>
+    
+    <path fill="#24324D" d="M 290.4 372.1 C 270.7 579.3 309.8 827.6 392.0 1060.0 L 1100 1100 L 1060.0 880.0 C 1013.0 692.2 904.4 451.5 684.3 270.5 A 14 14 0 0 0 662.4 286.5 C 693.7 364.2 711.6 444.8 715.3 529.4 A 36 36 0 0 1 691.6 564.9 C 620.6 590.7 549.5 616.5 478.5 642.4 A 36 36 0 0 1 436.0 628.1 C 383.8 547.6 344.6 461.1 317.8 369.5 A 14 14 0 0 0 290.4 372.1 Z"/>
+    
+    <ellipse rx="22" ry="36" fill="#E8F4FF" transform="translate(520 760) rotate(-20)"/>
+    <ellipse rx="22" ry="36" fill="#E8F4FF" transform="translate(748 668) rotate(-20)"/>
+  </g>
+</symbol><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#AFB8C1"/></marker><marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#4A8BEF"/></marker></defs>
+<rect x="0.5" y="0.5" width="959" height="801" rx="20" fill="#FFFFFF" stroke="#D0D7DE"/>
+<text x="32.0" y="47.9" font-size="13" fill="#4A8BEF" font-weight="700">Core</text>
+<text x="168.0" y="48.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern</tspan></text>
+<text x="548.0" y="48.0" font-size="13.5" fill="#59636E">The facade crate applications use: macros, values,</text>
+<text x="548.0" y="68.0" font-size="13.5" fill="#59636E">media, resources</text>
+<text x="168.0" y="100.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-macros</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">bern-syntax</tspan></text>
+<text x="548.0" y="100.0" font-size="13.5" fill="#59636E"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">#[component]</tspan>, <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">ui!</tspan>, <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">tr!</tspan> and the restricted</text>
+<text x="548.0" y="120.0" font-size="13.5" fill="#59636E">declaration syntax</text>
+<text x="168.0" y="152.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-compiler</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">bern-ir</tspan></text>
+<text x="548.0" y="152.1" font-size="13.5" fill="#59636E">Reads declarations into the shared IR and runs the</text>
+<text x="548.0" y="172.1" font-size="13.5" fill="#59636E">checks</text>
+<line x1="24" y1="196" x2="936" y2="196" stroke="#D0D7DE"/>
+<text x="32.0" y="227.9" font-size="13" fill="#4A8BEF" font-weight="700">Runtime</text>
+<text x="168.0" y="228.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-protocol</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">bern-command</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">bern-runtime</tspan></text>
+<text x="548.0" y="228.1" font-size="13.5" fill="#59636E">Command catalog, engine host and UI session runtime</text>
+<text x="168.0" y="260.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-ffi</tspan></text>
+<text x="548.0" y="260.1" font-size="13.5" fill="#59636E">The in-process C interface native front ends call</text>
+<text x="168.0" y="292.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-transport-ipc</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-ws</tspan></text>
+<text x="548.0" y="292.1" font-size="13.5" fill="#59636E">Local control channel and WebSocket transport</text>
+<line x1="24" y1="316" x2="936" y2="316" stroke="#D0D7DE"/>
+<text x="32.0" y="347.9" font-size="13" fill="#4A8BEF" font-weight="700">Targets</text>
+<text x="168.0" y="348.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-backend-swiftui</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-winui3</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-gtk</tspan> ·</text>
+<text x="168.0" y="368.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-compose</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-web</tspan></text>
+<text x="548.0" y="348.1" font-size="13.5" fill="#59636E">Target modules: generators and their runtimes</text>
+<text x="168.0" y="400.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-gtk</tspan></text>
+<text x="548.0" y="400.1" font-size="13.5" fill="#59636E">GTK runtime, compiled only inside generated Linux</text>
+<text x="548.0" y="420.1" font-size="13.5" fill="#59636E">apps</text>
+<text x="168.0" y="452.1" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-theme</tspan></text>
+<text x="548.0" y="452.1" font-size="13.5" fill="#59636E">Bern's color algorithm for targets without a native</text>
+<text x="548.0" y="472.1" font-size="13.5" fill="#59636E">theme</text>
+<line x1="24" y1="496" x2="936" y2="496" stroke="#D0D7DE"/>
+<text x="32.0" y="527.9" font-size="13" fill="#4A8BEF" font-weight="700">Entries and</text>
+<text x="32.0" y="547.9" font-size="13" fill="#4A8BEF" font-weight="700">tools</text>
+<text x="168.0" y="528.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-adapter-cli</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-mcp</tspan> · <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">-json</tspan></text>
+<text x="548.0" y="528.0" font-size="13.5" fill="#59636E">Entries derived from the command catalog</text>
+<text x="168.0" y="560.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">crates/bern-cli</tspan></text>
+<text x="548.0" y="560.0" font-size="13.5" fill="#59636E">The build tool <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">bern</tspan>: create, check, build, run and</text>
+<text x="548.0" y="580.0" font-size="13.5" fill="#59636E">check the environment</text>
+<line x1="24" y1="604" x2="936" y2="604" stroke="#D0D7DE"/>
+<text x="32.0" y="635.9" font-size="13" fill="#4A8BEF" font-weight="700">Examples and</text>
+<text x="32.0" y="655.9" font-size="13" fill="#4A8BEF" font-weight="700">docs</text>
+<text x="168.0" y="636.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">examples/showcase</tspan></text>
+<text x="548.0" y="636.0" font-size="13.5" fill="#59636E">The control showcase used on every platform</text>
+<text x="168.0" y="668.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">examples/hello</tspan></text>
+<text x="548.0" y="668.0" font-size="13.5" fill="#59636E">The smallest app: one window, one line</text>
+<text x="168.0" y="700.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">examples/planner</tspan></text>
+<text x="548.0" y="700.0" font-size="13.5" fill="#59636E">A modular app: a shell and two modules, with style</text>
+<text x="548.0" y="720.0" font-size="13.5" fill="#59636E">overrides, motion and <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">Canvas</tspan></text>
+<text x="168.0" y="752.0" font-size="13.5" fill="#1F2328"><tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.4" fill="#0550AE">Docs/</tspan></text>
+<text x="548.0" y="752.0" font-size="13.5" fill="#59636E">Design document, platform adaptation specs and</text>
+<text x="548.0" y="772.0" font-size="13.5" fill="#59636E">implementation notes</text>
+</svg>

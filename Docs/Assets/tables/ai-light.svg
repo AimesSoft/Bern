@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 551" width="960" height="551" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Helvetica Neue', Arial, sans-serif">
+<defs><symbol id="bern-logo" viewBox="0 0 1024 1024"><defs>
+    <clipPath id="bern-symbol-disc"><circle cx="512" cy="512" r="512"/></clipPath>
+  </defs>
+  <g clip-path="url(#bern-symbol-disc)">
+    
+    <rect width="1024" height="1024" fill="#4A8BEF"/>
+    
+    <path fill="#24324D" d="M 290.4 372.1 C 270.7 579.3 309.8 827.6 392.0 1060.0 L 1100 1100 L 1060.0 880.0 C 1013.0 692.2 904.4 451.5 684.3 270.5 A 14 14 0 0 0 662.4 286.5 C 693.7 364.2 711.6 444.8 715.3 529.4 A 36 36 0 0 1 691.6 564.9 C 620.6 590.7 549.5 616.5 478.5 642.4 A 36 36 0 0 1 436.0 628.1 C 383.8 547.6 344.6 461.1 317.8 369.5 A 14 14 0 0 0 290.4 372.1 Z"/>
+    
+    <ellipse rx="22" ry="36" fill="#E8F4FF" transform="translate(520 760) rotate(-20)"/>
+    <ellipse rx="22" ry="36" fill="#E8F4FF" transform="translate(748 668) rotate(-20)"/>
+  </g>
+</symbol><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#AFB8C1"/></marker><marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#4A8BEF"/></marker></defs>
+<rect x="0.5" y="0.5" width="959" height="550" rx="20" fill="#FFFFFF" stroke="#D0D7DE"/>
+<text x="32" y="40" font-size="13" font-weight="600" fill="#59636E">漏掉了什么</text>
+<text x="376" y="40" font-size="13" font-weight="600" fill="#59636E">Bern 怎么处理</text>
+<line x1="24" y1="56" x2="936" y2="56" stroke="#D0D7DE"/>
+<text x="32.0" y="90.0" font-size="15" fill="#1F2328" font-weight="600">某段文案少写了一种语言</text>
+<g transform="translate(336.0 76.5) scale(0.7500)" fill="none" stroke="#AFB8C1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" color="#AFB8C1"><path d="M4.5 12h15M13.5 6l6 6-6 6"/></g>
+<rect x="376.0" y="74.0" width="102.5" height="23" rx="11.5" fill="#FFEBE9"/><text x="427.2" y="90.0" font-size="12.5" font-weight="600" text-anchor="middle" fill="#CF222E" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">error[B102]</text>
+<text x="376.0" y="120.2" font-size="14" fill="#59636E">各语言用 <tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.9" fill="#0550AE">tr!</tspan> 写在同一处、紧挨着界面，漏写一眼可见；直接写死的字面量报 B103（严</text>
+<text x="376.0" y="142.2" font-size="14" fill="#59636E">格模式，默认开启）。</text>
+<line x1="24" y1="167" x2="936" y2="167" stroke="#E6EAEF"/>
+<text x="32.0" y="201.0" font-size="15" fill="#1F2328" font-weight="600">功能在某个显示模式下没有界面入口</text>
+<g transform="translate(336.0 187.5) scale(0.7500)" fill="none" stroke="#AFB8C1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" color="#AFB8C1"><path d="M4.5 12h15M13.5 6l6 6-6 6"/></g>
+<rect x="376.0" y="185.0" width="102.5" height="23" rx="11.5" fill="#FFEBE9"/><text x="427.2" y="201.0" font-size="12.5" font-weight="600" text-anchor="middle" fill="#CF222E" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">error[B201]</text>
+<text x="376.0" y="231.2" font-size="14" fill="#59636E">页面用功能契约声明它必须提供哪些功能，编译器逐个布局（<tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.9" fill="#0550AE">compact</tspan>、<tspan font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="12.9" fill="#0550AE">expanded</tspan>）证明</text>
+<text x="376.0" y="253.2" font-size="14" fill="#59636E">每个功能都有入口，宽屏有、窄屏漏也不行。</text>
+<line x1="24" y1="278" x2="936" y2="278" stroke="#E6EAEF"/>
+<text x="32.0" y="312.0" font-size="15" fill="#1F2328" font-weight="600">契约范围内的界面入口没有登记到功能</text>
+<g transform="translate(336.0 298.5) scale(0.7500)" fill="none" stroke="#AFB8C1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" color="#AFB8C1"><path d="M4.5 12h15M13.5 6l6 6-6 6"/></g>
+<rect x="376.0" y="296.0" width="102.5" height="23" rx="11.5" fill="#FFEBE9"/><text x="427.2" y="312.0" font-size="12.5" font-weight="600" text-anchor="middle" fill="#CF222E" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">error[B202]</text>
+<text x="376.0" y="342.2" font-size="14" fill="#59636E">反过来同样不行：入口执行的命令不属于它绑定的功能，报 B204。</text>
+<line x1="24" y1="367" x2="936" y2="367" stroke="#E6EAEF"/>
+<text x="32.0" y="401.0" font-size="15" fill="#1F2328" font-weight="600">入口只出现在条件分支里，证明不了总能</text>
+<text x="32.0" y="424.0" font-size="15" fill="#1F2328" font-weight="600">用到</text>
+<g transform="translate(336.0 387.5) scale(0.7500)" fill="none" stroke="#AFB8C1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" color="#AFB8C1"><path d="M4.5 12h15M13.5 6l6 6-6 6"/></g>
+<rect x="376.0" y="385.0" width="102.5" height="23" rx="11.5" fill="#FFEBE9"/><text x="427.2" y="401.0" font-size="12.5" font-weight="600" text-anchor="middle" fill="#CF222E" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace">error[B203]</text>
+<text x="376.0" y="431.2" font-size="14" fill="#59636E">除非显式写明人工保证。</text>
+<line x1="24" y1="456" x2="936" y2="456" stroke="#E6EAEF"/>
+<text x="32.0" y="490.0" font-size="15" fill="#1F2328" font-weight="600">想给按钮挂一段任意代码</text>
+<g transform="translate(336.0 476.5) scale(0.7500)" fill="none" stroke="#AFB8C1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" color="#AFB8C1"><path d="M4.5 12h15M13.5 6l6 6-6 6"/></g>
+<rect x="376.0" y="474.0" width="72.5" height="23" rx="11.5" fill="#DDF4FF"/><text x="412.2" y="490.0" font-size="12.5" font-weight="600" text-anchor="middle" fill="#0969DA">写不出来</text>
+<text x="376.0" y="520.2" font-size="14" fill="#59636E">按钮只能绑定命令目录里的类型化命令，控件也不能直接改引擎状态。</text>
+</svg>

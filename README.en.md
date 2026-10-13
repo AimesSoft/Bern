@@ -6,13 +6,15 @@
 
 <p><b>One Rust declaration, compiled into each platform's own native UI.</b></p>
 
-<p>Born for the desktop, built for AI: SwiftUI, WinUI 3, GTK 4 and the Web.<br>
-No JS engine and no embedded browser on the desktop; every button is an MCP tool an AI can call.</p>
+<p>From the desktop to the phone, built for AI: SwiftUI, WinUI 3, GTK 4, Jetpack Compose and the Web.<br>
+No JS engine and no embedded browser on the desktop or the phone; every button is an MCP tool an AI can call.</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="iOS · SwiftUI" src="https://img.shields.io/badge/iOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="Windows · WinUI 3" src="https://img.shields.io/badge/Windows-WinUI%203-0078D4?style=for-the-badge&logo=windows11&logoColor=white">
 <img alt="Linux · GTK 4" src="https://img.shields.io/badge/Linux-GTK%204-4A86CF?style=for-the-badge&logo=gtk&logoColor=white">
+<img alt="Android · Jetpack Compose" src="https://img.shields.io/badge/Android-Jetpack%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white">
 <img alt="Web · WebAssembly" src="https://img.shields.io/badge/Web-WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white">
 </p>
 
@@ -56,29 +58,16 @@ No JS engine and no embedded browser on the desktop; every button is an MCP tool
 </tr>
 </table>
 
-<p align="center"><sub>One <code>controls_page</code> declaration, four UI toolkits. On the desktop Bern draws no pixels of its own:<br>every switch, slider and sidebar is the platform's standard control, in the platform's own colors.</sub></p>
+<p align="center"><img src="Docs/Assets/screenshots/android-en.png" width="270" alt="The showcase on Android with Jetpack Compose"><br><sub><b>Android</b> · Jetpack Compose (dark, following the system)</sub></p>
+
+<p align="center"><sub>One <code>controls_page</code> declaration, five UI toolkits. On the desktop and on Android Bern draws no pixels of its own:<br>every switch, slider and sidebar is the platform's standard control, in the platform's own colors.</sub></p>
 
 ## Why Bern
 
-<table>
-<tr>
-<td width="33%" valign="top">
-<h3>Compiled into native UI</h3>
-One Rust declaration compiles into SwiftUI, WinUI 3, GTK 4 and the Web.<br><br>
-The goal is close to React Native's: one codebase, native controls on every platform. The approach differs: React Native coordinates native views from a JS engine at runtime; Bern generates each platform's own UI code at build time, so there is no JS engine and no virtual DOM at runtime, and the interface is the system's controls themselves.
-</td>
-<td width="33%" valign="top">
-<h3>Built for AI: written right, ready to use</h3>
-Translations, UI entry points, unregistered buttons and actions without a command that an AI forgets are compile errors, pointing at the file and line.<br><br>
-When an AI uses the app, every button is an MCP tool: it reads what the controls mean and goes through the same code path as a mouse click, with no screenshots and no coordinates.
-</td>
-<td width="33%" valign="top">
-<h3>Too light to feel cross-platform</h3>
-No browser engine and no JS engine on the desktop; the business engine compiles to native code and runs in the app process.<br><br>
-Measured on the release showcase: on macOS <b>39 MB</b> of memory and a window in <b>0.4 s</b>, with a <b>2.7 MB</b> app bundle; on Windows <b>35 MB</b> and <b>0.3 s</b>, <b>4.2 MB</b> for the whole app, no .NET; the whole web app with its Rust engine is <b>189 KB</b> gzipped.
-</td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-en-dark.svg">
+<img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine at runtime; built for AI, where omissions are compile errors and every button is an MCP tool; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
+</picture>
 
 ## Built for AI
 
@@ -86,13 +75,10 @@ Measured on the release showcase: on macOS <b>39 MB</b> of memory and a window i
 
 AI rarely gets interface code wrong; it leaves things out. A feature is added without an entry in the compact layout, a new string is written in one language only, a callback sidesteps the commands. Elsewhere these wait for a user to find them; in Bern they do not compile. The stricter the rules, the harder it is for an AI to hand over half a job:
 
-| What was missed | What Bern does |
-| :-- | :-- |
-| A string misses a language | Compile error B102. Every language sits in one `tr!` next to the UI, so a gap shows at a glance; hard-coded literals are B103 (strict mode, on by default) |
-| A feature has no entry in some display mode | Compile error B201. A page declares the features it must offer in a feature contract, and the compiler proves an entry for each in every layout (`compact`, `expanded`); present on wide screens but missing on narrow ones fails too |
-| An entry inside a contract is not registered to a feature | Compile error B202. The other way round fails as well: an entry that runs a command outside its feature is B204 |
-| An entry appears only in a conditional branch and cannot be proven reachable | Compile error B203, unless a manual guarantee is written down |
-| Hanging arbitrary code on a button | Cannot be written. Buttons bind only typed commands from the catalog, and controls cannot write engine state |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/ai-en-dark.svg">
+<img alt="Five things an AI forgets and what Bern does: a missing language is B102, a feature without an entry in some layout is B201, an entry not registered to a feature is B202, an entry only inside a conditional branch is B203, and arbitrary code on a button cannot be written at all" src="Docs/Assets/tables/ai-en-light.svg" width="100%">
+</picture>
 
 Errors are written for people and for agents alike: a code, a reason and a location, so an agent can fix them and build again on its own. Two real runs on the showcase: the first with an English translation deleted, the second, after restoring it, with the compact layout's "Change Clip" menu removed:
 
@@ -135,11 +121,10 @@ The same operations are MCP tools for agents (`ui_inspect`, `ui_activate`, `wind
 
 ## Measured
 
-| | macOS · SwiftUI | Windows · WinUI 3 | Web · WebAssembly |
-| :-- | :-- | :-- | :-- |
-| Launch to visible window | 0.41 s | 0.32 s | – |
-| Memory | 39 MB | 35 MB | – |
-| Size | 2.7 MB app bundle (2.3 MB executable), no frameworks embedded | 4.2 MB app folder, engine inside the executable, UI framework from the system | 189 KB for all assets gzipped, Rust engine included |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/measured-en-dark.svg">
+<img alt="Measured: macOS (SwiftUI) launches in 0.41 s with 39 MB of memory and a 2.7 MB bundle; Windows (WinUI 3) in 0.32 s with 35 MB and a 4.2 MB folder; the web app is 189 KB gzipped" src="Docs/Assets/tables/measured-en-light.svg" width="100%">
+</picture>
 
 <details>
 <summary>How it was measured</summary>
@@ -155,48 +140,25 @@ The same operations are MCP tools for agents (`ui_inspect`, `ui_activate`, `wind
 
 ## More
 
-<table>
-<tr>
-<td width="33%" valign="top">
-<h3>Every action is a command</h3>
-A button cannot hold an arbitrary callback. It binds to a command in one typed catalog, with parameters, errors and retry policy shared by the UI, the command line, JSON and MCP.
-</td>
-<td width="33%" valign="top">
-<h3>Checked at compile time</h3>
-<code>rustc</code> type-checks every binding and command argument. Unbound buttons, callbacks, controls writing engine state and missing translations do not compile.
-</td>
-<td width="33%" valign="top">
-<h3>Your logic stays in Rust</h3>
-The engine is ordinary Rust with no UI dependency, tested without any window. It runs in the app process on the desktop and as WebAssembly in the browser.
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<h3>Localized from day one</h3>
-<code>tr!</code> keeps every language next to the UI it belongs to. Strict builds reject missing translations, and the interface language switches at runtime without losing drafts.
-</td>
-<td width="33%" valign="top">
-<h3>Dark mode, zero setup</h3>
-Colors come from the platform theme: dark mode, accent colors and high contrast follow the system, and a declared brand color becomes the system accent. On the web Bern's theme kernel generates the whole palette.
-</td>
-<td width="33%" valign="top">
-<h3>Declarative multi-window</h3>
-Each window has its own drafts, close check and save command; minimize, maximize, move and resize are commands answered with the platform's actual state.
-</td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/more-en-dark.svg">
+<img alt="More: every action is a command, checked at compile time, your logic stays in Rust, localized from day one, dark mode with zero setup, declarative multi-window" src="Docs/Assets/tables/more-en-light.svg" width="100%">
+</picture>
 
 <details>
-<summary><b>And more:</b> video, async queries, adaptive layouts, typed navigation…</summary>
+<summary><b>And more:</b> video, async queries, styles and motion, drawing, modular apps, adaptive layouts…</summary>
 <br>
 
-- **Video**: `Video` plays on AVFoundation, Windows Media Foundation, GStreamer or HTML media, with a command-driven control bar and players that outlive a page.
+- **Video**: `Video` plays on AVFoundation, Windows Media Foundation, GStreamer, Media3 on Android or HTML media, with a command-driven control bar and players that outlive a page.
 - **Async queries**: `Query` subscriptions with loading, empty, failure and refresh states; only the latest answer is shown.
 - **Adaptive layouts**: `compact` and `expanded` layouts chosen by the space a view actually gets.
 - **Typed navigation**: sidebars, push navigation with typed routes, tabs, toolbars and menus.
 - **Feature contracts**: declare which features a component must cover in each layout; the compiler proves the coverage.
 - **Bundled resources**: files declared in `Bern.toml`, checked at build time and located by name at runtime.
 - **Images and layout**: `Image` shows bundled pictures, HDR ones (PQ and HLG PNGs, JPEGs with a gain map) in HDR where the display can, and an undeclared one fails to compile; `Grid` adds and drops columns with the width, `Stack` layers views with nine alignments, `Progress` shows a bar or indeterminate progress.
+- **Style overrides and motion**: controls keep the platform look by default; for one design everywhere, `style!` declares app-wide overrides, spring motion, appear and disappear transitions and shared elements, and an override a target cannot show fails the build (SwiftUI and Compose so far).
+- **Drawing**: `Canvas` draws shapes, data curves and check patterns in semantic colors, and `Text` can carry a highlight mark.
+- **Modular apps**: an app is a shell and modules, each with its own protocol, engine, interface and translations, switchable at runtime; `bern new --module` adds one, so several people and AIs can work side by side (verified on macOS and Android).
 
 </details>
 
@@ -211,9 +173,10 @@ flowchart LR
     end
     P --> C{{"bern build<br/>compiler + IR"}}
     U --> C
-    C --> S["SwiftUI<br/>macOS"]
+    C --> S["SwiftUI<br/>macOS · iOS"]
     C --> W["WinUI 3<br/>Windows"]
     C --> G["GTK 4<br/>Linux"]
+    C --> A["Jetpack Compose<br/>Android"]
     C --> B["DOM + WASM<br/>Web"]
     E <--> K[["Command catalog"]]
     K <--> N["Native UI"]
@@ -227,10 +190,6 @@ flowchart LR
 3. **Interface** – `#[component]` functions whose body is a `ui!` declaration. The compiler reads them into a shared intermediate representation, and each target module generates native code from it. Adding a target never touches the parser, the IR or your business logic.
 
 ## A taste of Bern
-
-<table>
-<tr>
-<td width="50%" valign="top">
 
 **1 · Protocol**: types, state and commands
 
@@ -251,31 +210,6 @@ pub mod counter {
     }
 }
 ```
-
-**3 · Interface**: a `ui!` declaration
-
-```rust
-#[component]
-pub fn counter_view(app: counter::Client) -> impl View {
-    ui! {
-        Form {
-            Text(content: tr! {
-                "zh-Hans" => "已计数 {n} 次",
-                "en" => "Counted {n} times";
-                n: app.count
-            })
-            Button(
-                id: add,
-                label: tr! { "zh-Hans" => "加一", "en" => "Add one" },
-                prominence: prominent
-            ) => app.add(1)
-        }
-    }
-}
-```
-
-</td>
-<td width="50%" valign="top">
 
 **2 · Engine**: plain Rust, no UI
 
@@ -306,6 +240,28 @@ impl counter::Engine for Counter {
 }
 ```
 
+**3 · Interface**: a `ui!` declaration
+
+```rust
+#[component]
+pub fn counter_view(app: counter::Client) -> impl View {
+    ui! {
+        Form {
+            Text(content: tr! {
+                "zh-Hans" => "已计数 {n} 次",
+                "en" => "Counted {n} times";
+                n: app.count
+            })
+            Button(
+                id: add,
+                label: tr! { "zh-Hans" => "加一", "en" => "Add one" },
+                prominence: prominent
+            ) => app.add(1)
+        }
+    }
+}
+```
+
 **4 · Everyone drives the same engine**
 
 ```sh
@@ -315,64 +271,16 @@ counter counter add --by 5
 counter-mcp   # the same catalog for AI agents
 ```
 
-</td>
-</tr>
-</table>
-
-`Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation.
+`Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation. The [planner](examples/planner) is a modular app with style overrides, motion and `Canvas`.
 
 ## Platforms
 
-<table>
-<tr>
-<th align="left">Target</th>
-<th align="left">UI toolkit</th>
-<th align="left">Engine</th>
-<th align="left">Status</th>
-</tr>
-<tr>
-<td><b>macOS</b><br><code>swiftui + macos</code></td>
-<td>SwiftUI, standard components and system styles · macOS 14+</td>
-<td>In process</td>
-<td><img alt="available" src="https://img.shields.io/badge/-available-22C55E?style=flat-square"> <a href="Docs/Implementation/macOS-SwiftUI.md">notes</a></td>
-</tr>
-<tr>
-<td><b>iOS</b><br><code>swiftui + ios</code></td>
-<td>SwiftUI, the same generated code as on macOS; other windows are sheets on iPhone and windows of their own on iPad · iOS 17+</td>
-<td>In process</td>
-<td><img alt="simulator" src="https://img.shields.io/badge/-simulator-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">notes</a></td>
-</tr>
-<tr>
-<td><b>Windows</b><br><code>winui3 + windows</code></td>
-<td>C++/WinRT: WinUI 3 when a Windows App Runtime 2 is present (installed by another app or shipped with Windows 11), otherwise the system XAML; either can also be built alone · Windows 10 2004+</td>
-<td>In process (statically linked)</td>
-<td><img alt="available" src="https://img.shields.io/badge/-available-22C55E?style=flat-square"> <a href="Docs/Implementation/Windows-WinUI3.md">notes</a></td>
-</tr>
-<tr>
-<td><b>Linux</b><br><code>gtk + linux</code></td>
-<td>GTK 4.14 + libadwaita 1.5, following the GNOME HIG</td>
-<td>In process</td>
-<td><img alt="available" src="https://img.shields.io/badge/-available-22C55E?style=flat-square"> <a href="Docs/Implementation/Linux-GTK.md">notes</a></td>
-</tr>
-<tr>
-<td><b>Web app</b><br><code>web</code> · <code>app</code></td>
-<td>DOM with Bern's own visual spec and theme kernel</td>
-<td>WebAssembly in the page</td>
-<td><img alt="available" src="https://img.shields.io/badge/-available-22C55E?style=flat-square"> <a href="Docs/Implementation/Web.md">notes</a></td>
-</tr>
-<tr>
-<td><b>WebUI</b><br><code>web</code> · <code>ui</code></td>
-<td>The same page, as a UI for a separate engine</td>
-<td>Engine host over WebSocket</td>
-<td><img alt="available" src="https://img.shields.io/badge/-available-22C55E?style=flat-square"> <a href="Docs/Implementation/Web.md">notes</a></td>
-</tr>
-<tr>
-<td><b>Next</b></td>
-<td><code>flutter + macos</code> (backend replaceability), then iOS device packages, Android and HarmonyOS</td>
-<td>–</td>
-<td><img alt="planned" src="https://img.shields.io/badge/-planned-94A3B8?style=flat-square"> <a href="Docs/Adaptation/README.md">adaptation</a></td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-en-dark.svg">
+<img alt="Platforms: macOS, Windows, Linux, the web app, WebUI and Android are available, iOS builds simulator apps today; next are flutter + macos, iOS device packages and HarmonyOS" src="Docs/Assets/tables/platforms-en-light.svg" width="100%">
+</picture>
+
+Implementation notes: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web and WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md); the next platforms are in the [adaptation specs](Docs/Adaptation/README.md).
 
 Omitting the UI technology picks the platform default; an unavailable default fails loudly instead of silently switching to another stack.
 
@@ -409,37 +317,19 @@ The chart is a sketch by architecture, not a ranking: the horizontal axis is whe
 
 ### Technology
 
-| Framework | UI written in | Logic | How the UI is drawn | Ships with the app | License |
-| :-- | :-- | :-- | :-- | :-- | :-- |
-| **Bern** | Rust (`ui!` declarations) | Rust | Generates SwiftUI, WinUI 3, GTK 4 and Web code at build time; the UI is system controls | Nothing; WinUI 3 also comes from the system, with the system XAML as fallback | MIT |
-| **GPUI** | Rust | Rust | Its own GPU renderer (Metal, Vulkan, DirectX) | No extra runtime | Apache-2.0 |
-| **Dioxus** | Rust (RSX, React-like) | Rust | The system WebView on desktop and mobile, WebAssembly on the web; the native renderer Blitz is experimental | Relies on the system WebView | MIT / Apache-2.0 |
-| **Flutter** | Dart | Dart | Its own engine (Impeller, Skia) draws Material and Cupertino-style widgets | The Flutter engine | BSD-3-Clause |
-| **React Native** | JavaScript / TypeScript (React) | JavaScript / TypeScript | Native views, coordinated by JS at runtime | The Hermes JS engine | MIT |
-| **uni-app** | Vue | JavaScript / TypeScript; UTS in uni-app x | A WebView in classic mode; uni-app x compiles to Kotlin, Swift and other native languages and renders native views | The framework runtime | Apache-2.0 |
-| **Electron** | HTML / CSS / JavaScript | JavaScript / TypeScript (Node.js) | Embedded Chromium | Chromium and Node.js | MIT |
-| **Tauri** | Any web front end | Rust | The system WebView (WebView2, WKWebView, WebKitGTK) | No browser engine; relies on the system WebView | MIT / Apache-2.0 |
-| **Avalonia** | XAML and C# | C# / .NET | Its own Skia renderer | The .NET runtime (self-contained or Native AOT) | MIT |
-| **Qt** | C++ and QML (Python too) | C++ | Qt Widgets imitate each platform's style; Qt Quick draws its own scene graph | The Qt libraries | LGPLv3 / GPLv3 / commercial |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/technology-en-dark.svg">
+<img alt="How ten frameworks work: the languages for UI and logic, how the UI is drawn, what ships with the app, and the license" src="Docs/Assets/tables/technology-en-light.svg" width="100%">
+</picture>
 
 ### Platforms and capabilities
 
-● supported　◐ partly, or through the community　— not supported
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-en-dark.svg">
+<img alt="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, built-in MCP and compile-time checks; Bern's mobile support is partial and it has all three capabilities" src="Docs/Assets/tables/capabilities-en-light.svg" width="100%">
+</picture>
 
-| Framework | macOS | Windows | Linux | Mobile | Web | Native look | Built-in MCP | Compile-time checks |
-| :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| **Bern** | ● | ● | ● | ◐ | ● | ● | ● | ● |
-| **GPUI** | ● | ● | ● | — | — | — | — | — |
-| **Dioxus** | ● | ● | ● | ● | ● | — | — | — |
-| **Flutter** | ● | ● | ● | ● | ● | — | — | — |
-| **React Native** | ◐ | ◐ | — | ● | ◐ | ● | — | — |
-| **uni-app** | — | — | — | ● | ● | ◐ | — | — |
-| **Electron** | ● | ● | ● | — | — | — | — | — |
-| **Tauri** | ● | ● | ● | ● | — | — | — | — |
-| **Avalonia** | ● | ● | ● | ● | ● | — | — | — |
-| **Qt** | ● | ● | ● | ● | ● | ◐ | — | — |
-
-- **Mobile**: iOS and Android. React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern's iOS target builds simulator apps; device packages and Android are planned.
+- **Mobile**: iOS and Android. React Native's desktop versions are maintained by Microsoft; uni-app also covers mini programs and HarmonyOS; Bern's Android target runs on devices and makes packages, its iOS target builds simulator apps, and iOS device packages are planned.
 - **Native look**: the controls are the platform's own, with look, accessibility and input methods from the system. Qt Widgets and uni-app x come close and count as partly.
 - **Built-in MCP**: an MCP server and command line that come with the framework and act on the running interface. Other frameworks can be automated from outside through accessibility APIs or test tools such as Playwright and Flutter Driver.
 - **Compile-time checks**: a missing translation, a feature without an entry in some layout, or an entry not registered to a feature is a compiler error (see [Built for AI](#built-for-ai)). Other frameworks mostly find these with linters, translation tools or tests.
@@ -454,77 +344,19 @@ The languages of the UI and logic layers, and how they run, set the ceiling of r
 <img alt="Languages and execution: Bern's UI layer is each platform's native UI code (Swift, C++, Rust) and its logic layer is Rust, called in process through a C ABI, with no garbage collection" src="Docs/Assets/compare/languages-en-light.svg" width="100%">
 </picture>
 
-For the same window showing one line of text, package size, launch time and memory differ widely. The chart is measured on one CI virtual machine (a GitHub-hosted Apple M1): each framework's own tools build a release package, and the apps take turns starting, ten times each, median shown. Bern's launch time is also measured on an M4, as the chart's footnote says. The scripts are in [benchmarks/](benchmarks/); the Benchmarks workflow reruns them from the Actions tab.
+For the same window showing one line of text, package size, launch time and memory differ widely. The chart is measured on one CI virtual machine (a GitHub-hosted Apple M1): each framework's own tools build a release package, and the apps take turns starting, ten times each, median shown. The scripts are in [benchmarks/](benchmarks/); the Benchmarks workflow reruns them from the Actions tab.
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/resources-en-dark.svg">
-<img alt="Hello World footprint, measured: Bern 2.1 MB, 0.20 s (on an M4; 0.26 s on the CI machine), 18 MB; GPUI 4.2 MB, 0.28 s, 27 MB; Electron 301 MB, 1.07 s, 77 MB" src="Docs/Assets/compare/resources-en-light.svg" width="100%">
+<img alt="Hello World footprint, measured: Bern 2.1 MB, 0.26 s, 18 MB; GPUI 4.2 MB, 0.28 s, 27 MB; Electron 301 MB, 1.07 s, 77 MB" src="Docs/Assets/compare/resources-en-light.svg" width="100%">
 </picture>
 
 ### Which one to choose
 
-<table>
-<tr>
-<td width="50%" valign="top">
-<img alt="Electron" src="https://img.shields.io/badge/Electron-47848F?style=flat-square&logo=electron&logoColor=white"><br>
-<b>Best for</b>: web teams that want the most mature ecosystem and the most consistent behavior across platforms.<br>
-<b>Cost</b>: every app ships its own Chromium and Node.js, so size and memory run high.
-</td>
-<td width="50%" valign="top">
-<img alt="Tauri" src="https://img.shields.io/badge/Tauri-24C8D8?style=flat-square&logo=tauri&logoColor=white"><br>
-<b>Best for</b>: keeping a web front end while getting a small app and a Rust back end.<br>
-<b>Cost</b>: the UI is still a web page, and the system WebViews differ, so each platform needs testing.
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="Flutter" src="https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=flutter&logoColor=white"><br>
-<b>Best for</b>: mobile-first apps that must look pixel-identical everywhere.<br>
-<b>Cost</b>: the controls are drawn, so the desktop look and behavior are yours to keep up with; you write Dart.
-</td>
-<td valign="top">
-<img alt="React Native" src="https://img.shields.io/badge/React%20Native-20232A?style=flat-square&logo=react&logoColor=61DAFB"><br>
-<b>Best for</b>: React teams building mobile apps with native controls.<br>
-<b>Cost</b>: mobile first; the desktop relies on Microsoft's versions and has no Linux; a JS engine and bridge at runtime.
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="Avalonia" src="https://img.shields.io/badge/Avalonia-8B44AC?style=flat-square&logo=avaloniaui&logoColor=white"><br>
-<b>Best for</b>: .NET and XAML teams that want a consistent look across desktops.<br>
-<b>Cost</b>: a drawn UI rather than system controls; needs the .NET runtime or AOT compilation.
-</td>
-<td valign="top">
-<img alt="Qt" src="https://img.shields.io/badge/Qt-41CD52?style=flat-square&logo=qt&logoColor=white"><br>
-<b>Best for</b>: C++ projects, industry and embedded, decades of stability.<br>
-<b>Cost</b>: mind the license (LGPL or commercial); Qt Quick draws its own UI.
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="GPUI" src="https://img.shields.io/badge/GPUI-084CCF?style=flat-square&logo=zedindustries&logoColor=white"><br>
-<b>Best for</b>: Rust desktop apps that chase raw performance, such as editors.<br>
-<b>Cost</b>: a drawn UI; common controls and accessibility are up to you; desktop only.
-</td>
-<td valign="top">
-<img alt="Dioxus" src="https://img.shields.io/badge/Dioxus-4A5568?style=flat-square"><br>
-<b>Best for</b>: Rust full-stack projects that like React's style, one codebase for web, desktop and mobile.<br>
-<b>Cost</b>: desktop and mobile UIs are WebViews today; the native renderer is experimental.
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="uni-app" src="https://img.shields.io/badge/uni--app-4A5568?style=flat-square"><br>
-<b>Best for</b>: one codebase for China's many targets (mini programs, apps, H5, HarmonyOS).<br>
-<b>Cost</b>: no desktop app target; classic-mode apps render in a WebView.
-</td>
-<td valign="top">
-<img alt="Bern" src="https://img.shields.io/badge/Bern-4A8BEF?style=flat-square"><br>
-<b>Best for</b>: desktop apps that want each platform's system look, business logic in Rust, and AI that can both write and use them.<br>
-<b>Not yet for</b>: projects that need mobile today or rely on a mature third-party component ecosystem. Bern is an early preview.
-</td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/choose-en-dark.svg">
+<img alt="Which one to choose: what Electron, Tauri, Flutter, React Native, Avalonia, Qt, GPUI, Dioxus, uni-app and Bern are best for, and what each costs" src="Docs/Assets/tables/choose-en-light.svg" width="100%">
+</picture>
 
 ## Quick start
 
@@ -546,7 +378,7 @@ cd my_app
 bern run
 ```
 
-The new app is a window with a counter, with one crate each for the protocol, the engine and the interface, and all five targets declared in `Bern.toml`. `bern run` builds the target for this computer and starts it: SwiftUI on macOS, WinUI 3 on Windows, GTK on Linux; `bern run --target web_app` opens it in the browser, and `bern run --target ios` installs it in the running iOS simulator. Every build also produces the application CLI and MCP server in `target/bern/<target>/bin/`.
+The new app is a window with a counter, with one crate each for the protocol, the engine and the interface, and all six targets declared in `Bern.toml`. `bern run` builds the target for this computer and starts it: SwiftUI on macOS, WinUI 3 on Windows, GTK on Linux; `bern run --target web_app` opens it in the browser, `bern run --target ios` installs it in the running iOS simulator, and `bern run --target android` installs it on the Android phone connected with USB debugging (or an emulator) and starts it. Every build also produces the application CLI and MCP server in `target/bern/<target>/bin/`.
 
 `bern doctor` lists what this computer still needs for each target, and how to install it:
 
@@ -559,6 +391,7 @@ bern 0.1.0 on macOS (aarch64)
 [✓] iOS · SwiftUI: iOS simulator SDK 26.5, the aarch64-apple-ios-sim target
 [-] Windows · WinUI 3: builds on Windows
 [-] Linux · GTK 4: builds on Linux
+[✓] Android · Compose: Android SDK, NDK 29.0.14206865, gradle-9.5.1, the aarch64-linux-android target
 [✓] Web · WebAssembly: the wasm32-unknown-unknown target
 ```
 
@@ -570,6 +403,7 @@ bern 0.1.0 on macOS (aarch64)
 - **iOS**: Xcode's iOS platform and an iOS simulator, plus `rustup target add aarch64-apple-ios-sim`. Builds are for the simulator for now; device signing and packages are not done yet.
 - **Windows**: Visual Studio 2022 or later with “Desktop development with C++” (the Build Tools are enough) and a Windows 11 SDK; Rust on the MSVC toolchain. The first build generates the C++/WinRT headers with the Windows SDK's `cppwinrt` and precompiles them with the runtime (about 2.4 GB per profile, under `target`); later builds compile only the app's own code, about 5 s for a new app and 9 s for the showcase. The app folder holds only the executable, a 400 KB bootstrapper DLL and the resources: no .NET, no bundled Windows App SDK.
 - **Linux**: GTK 4.14 and libadwaita 1.5 development packages, for example `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`.
+- **Android**: Android Studio with the SDK and the NDK (SDK Manager → SDK Tools → NDK), Gradle 9.4 or newer, and `rustup target add aarch64-linux-android`. The first build has Gradle download the Android plugin and the Compose libraries.
 - **Web**: `rustup target add wasm32-unknown-unknown`. A `web_app` build compiles the engine to WebAssembly and runs it in the page; a `web_ui` build makes the page the UI of a separate engine host, which `bern run` starts before opening its address.
 
 </details>
@@ -580,7 +414,7 @@ bern 0.1.0 on macOS (aarch64)
 bern package
 ```
 
-Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, and an archive of the static site for the Web. Every package carries the app's CLI and MCP server. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`). Without them the packages are still made, with a note on what being unsigned means.
+Builds every target this computer can in release and writes packages to `target/bern/dist/`: a `.dmg` for macOS, an installer (per user, no administrator rights) and a `.zip` for Windows, a `.deb` and a `.tar.gz` for Linux, an `.apk` and an `.aab` for stores for Android, and an archive of the static site for the Web. Every package but Android's carries the app's CLI and MCP server. Signing comes from the environment, so certificates stay out of the repository: `BERN_MACOS_SIGNING_IDENTITY` and `BERN_MACOS_NOTARY_PROFILE` (sign and notarize), `BERN_WINDOWS_CERTIFICATE` (a certificate thumbprint or a `.pfx`), `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS` (the release key). Without them the packages are still made, with a note on what being unsigned means.
 
 ### Run the showcase
 
@@ -603,17 +437,14 @@ showcase window list                                         # actual window sta
 showcase-mcp                                                 # MCP server over stdio
 ```
 
-The control channel starts only when the target declares `channels = ["ipc"]`; without it the app listens on nothing.
+The control channel starts only when the target declares `channels = ["ipc"]`; without it the app listens on nothing. An Android app listens on the phone; `bern run` joins it to this computer with `adb forward`, so the CLI and MCP server work as usual.
 
 ## Roadmap
 
-| Phase | Scope | Status |
-| :-- | :-- | :-- |
-| 1 · 2 | Compile-time boundary; macOS SwiftUI with UI, CLI, JSON and MCP on one engine | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
-| 3 | Web visual spec, theme kernel, WebAssembly app and WebUI builds | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
-| 4 | Adaptive layouts, menus, feature contracts, runtime language switching | <img alt="done" src="https://img.shields.io/badge/-done-22C55E?style=flat-square"> |
-| 5 | Other native front ends: GTK 4 (done) · WinUI 3 (done) · iOS (simulator, done) · `flutter + macos` (next) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
-| 6 | Component library (first set done: `Image`, `Progress`, `Grid`, `Stack`), packaging, incremental builds, tooling (`bern new`, `run`, `doctor` and `package` done) | <img alt="in progress" src="https://img.shields.io/badge/-in%20progress-F59E0B?style=flat-square"> |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/roadmap-en-dark.svg">
+<img alt="Roadmap: phases 1 to 4 are done; phase 5 other native front ends, phase 6 components and tooling, and phase 7 style, motion and modular apps are in progress" src="Docs/Assets/tables/roadmap-en-light.svg" width="100%">
+</picture>
 
 ## Repository
 
@@ -621,22 +452,10 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 <summary>Crates and directories</summary>
 <br>
 
-| Path | What it is |
-| :-- | :-- |
-| `crates/bern` | The facade crate applications use: macros, values, media, resources |
-| `crates/bern-macros` · `bern-syntax` | `#[component]`, `ui!`, `tr!` and the restricted declaration syntax |
-| `crates/bern-compiler` · `bern-ir` | Reads declarations into the shared IR and runs the checks |
-| `crates/bern-protocol` · `bern-command` · `bern-runtime` | Command catalog, engine host and UI session runtime |
-| `crates/bern-ffi` | The in-process C interface native front ends call |
-| `crates/bern-backend-swiftui` · `-winui3` · `-gtk` · `-web` | Target modules: generators and their runtimes |
-| `crates/bern-gtk` | GTK runtime, compiled only inside generated Linux apps |
-| `crates/bern-adapter-cli` · `-mcp` · `-json` | Entries derived from the command catalog |
-| `crates/bern-transport-ipc` · `-ws` | Local control channel and WebSocket transport |
-| `crates/bern-theme` | Bern's color algorithm for targets without a native theme |
-| `crates/bern-cli` | The build tool `bern`: create, check, build, run and check the environment |
-| `examples/showcase` | The control showcase used on every platform |
-| `examples/hello` | The smallest app: one window, one line |
-| `Docs/` | Design document, platform adaptation specs and implementation notes |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/repository-en-dark.svg">
+<img alt="Repository: the crates and directories in core, runtime, targets, entries and tools, and examples and docs" src="Docs/Assets/tables/repository-en-light.svg" width="100%">
+</picture>
 
 </details>
 
@@ -648,13 +467,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Tests include declarations that must fail to compile, and type-check the generated apps where the toolkit is installed: Swift 6 with Xcode, GTK with its development packages, both generated front ends with MSVC on Windows.
+Tests include declarations that must fail to compile, and type-check the generated apps where the toolkit is installed: Swift 6 with Xcode, GTK with its development packages, both generated front ends with MSVC on Windows. Android's Kotlin is compiled by Gradle in `bern build --target android`.
 
 ## Documentation
 
 - [Design document](Docs/Design.md) – goals, architecture, components, theming, commands, windows, media
 - [Adaptation specs](Docs/Adaptation/README.md) – Apple, Windows and Linux, Web, Android, HarmonyOS
-- Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 The design and implementation documents are written in Chinese.
 

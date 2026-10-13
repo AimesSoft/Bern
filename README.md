@@ -6,13 +6,15 @@
 
 <p><b>一份 Rust 声明，编译成每个平台自己的原生界面。</b></p>
 
-<p>为桌面而生，为 AI 而建：SwiftUI、WinUI 3、GTK 4 与 Web。<br>
-桌面上没有 JS 引擎，没有内嵌浏览器；每个按钮，天生就是 AI 能调用的 MCP 工具。</p>
+<p>从桌面到手机，为 AI 而建：SwiftUI、WinUI 3、GTK 4、Jetpack Compose 与 Web。<br>
+桌面和手机上没有 JS 引擎，没有内嵌浏览器；每个按钮，天生就是 AI 能调用的 MCP 工具。</p>
 
 <p>
 <img alt="macOS · SwiftUI" src="https://img.shields.io/badge/macOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
+<img alt="iOS · SwiftUI" src="https://img.shields.io/badge/iOS-SwiftUI-0A84FF?style=for-the-badge&logo=apple&logoColor=white">
 <img alt="Windows · WinUI 3" src="https://img.shields.io/badge/Windows-WinUI%203-0078D4?style=for-the-badge&logo=windows11&logoColor=white">
 <img alt="Linux · GTK 4" src="https://img.shields.io/badge/Linux-GTK%204-4A86CF?style=for-the-badge&logo=gtk&logoColor=white">
+<img alt="Android · Jetpack Compose" src="https://img.shields.io/badge/Android-Jetpack%20Compose-3DDC84?style=for-the-badge&logo=android&logoColor=white">
 <img alt="Web · WebAssembly" src="https://img.shields.io/badge/Web-WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white">
 </p>
 
@@ -56,29 +58,16 @@
 </tr>
 </table>
 
-<p align="center"><sub>同一份 <code>controls_page</code> 声明，四套 UI 技术。桌面上 Bern 不自己画任何一个像素：<br>每个开关、滑块和侧边栏都是平台自己的标准控件，用的是平台自己的配色。</sub></p>
+<p align="center"><img src="Docs/Assets/screenshots/android-zh.png" width="270" alt="展示应用在 Android（Jetpack Compose）上"><br><sub><b>Android</b> · Jetpack Compose（跟随系统深色）</sub></p>
+
+<p align="center"><sub>同一份 <code>controls_page</code> 声明，五套 UI 技术。在桌面和 Android 上 Bern 不自己画任何一个像素：<br>每个开关、滑块和侧边栏都是平台自己的标准控件，用的是平台自己的配色。</sub></p>
 
 ## 为什么是 Bern
 
-<table>
-<tr>
-<td width="33%" valign="top">
-<h3>编译成原生界面</h3>
-一份 Rust 声明，编译成 SwiftUI、WinUI 3、GTK 4 与 Web。<br><br>
-目标和 React Native 相近：一份代码，各平台都是原生控件。做法不同：React Native 在运行时用 JS 引擎协调原生视图；Bern 在构建时直接生成各平台自己的 UI 代码，运行时没有 JS 引擎、没有虚拟 DOM，界面就是系统控件本身。
-</td>
-<td width="33%" valign="top">
-<h3>为 AI 而建：写得对，用得上</h3>
-AI 写代码时漏掉的翻译、漏掉的界面入口、没登记的按钮、没命令化的操作，都是编译错误，并指到具体的文件和行。<br><br>
-AI 用应用时，每个按钮都是 MCP 工具：读的是控件的语义，走和鼠标点击相同的代码路径，不靠截图，不靠坐标。
-</td>
-<td width="33%" valign="top">
-<h3>轻到不像跨平台</h3>
-桌面上不带浏览器内核和 JS 引擎，业务引擎编译成原生代码，运行在应用进程内。<br><br>
-实测 release 版展示应用：macOS 内存 <b>39 MB</b>、<b>0.4 秒</b>出窗口，整个应用包 <b>2.7 MB</b>；Windows 内存 <b>35 MB</b>、<b>0.3 秒</b>出窗口，整个应用 <b>4.2 MB</b>，不需要 .NET；整个 Web 应用连同 Rust 引擎 gzip 后 <b>189 KB</b>。
-</td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-dark.svg">
+<img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，运行时没有 JS 引擎；为 AI 而建，漏写是编译错误，每个按钮都是 MCP 工具；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
+</picture>
 
 ## 为 AI 而建
 
@@ -86,13 +75,10 @@ AI 用应用时，每个按钮都是 MCP 工具：读的是控件的语义，走
 
 AI 写界面最常见的问题不是写错，而是写漏：加了一个功能却忘了在窄屏布局放入口，新增一段文案只写了中文，随手挂一个回调绕过了命令。这些在别的框架里要等到用户发现，在 Bern 里都过不了编译。约束越严，AI 越不容易交出半成品：
 
-| 漏掉了什么 | Bern 怎么处理 |
-| :-- | :-- |
-| 某段文案少写了一种语言 | 编译错误 B102。各语言用 `tr!` 写在同一处、紧挨着界面，漏写一眼可见；直接写死的字面量报 B103（严格模式，默认开启） |
-| 功能在某个显示模式下没有界面入口 | 编译错误 B201。页面用功能契约声明它必须提供哪些功能，编译器逐个布局（`compact`、`expanded`）证明每个功能都有入口，宽屏有、窄屏漏也不行 |
-| 契约范围内的界面入口没有登记到功能 | 编译错误 B202。反过来同样不行：入口执行的命令不属于它绑定的功能报 B204 |
-| 入口只出现在条件分支里，证明不了总能用到 | 编译错误 B203，除非显式写明人工保证 |
-| 想给按钮挂一段任意代码 | 写不出来。按钮只能绑定命令目录里的类型化命令，控件也不能直接改引擎状态 |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/ai-dark.svg">
+<img alt="AI 漏掉的五类问题与 Bern 的处理：少写一种语言报 B102，某个布局缺功能入口报 B201，入口没有登记到功能报 B202，入口只在条件分支里报 B203，给按钮挂任意代码则根本写不出来" src="Docs/Assets/tables/ai-light.svg" width="100%">
+</picture>
 
 报错是给人看的，也是给 Agent 看的：编号、原因、位置都很明确，Agent 能自己改完再编译。下面是展示应用的两次真实输出，第一次故意删掉一个英文翻译，补上之后，第二次删掉窄屏布局里的“换片”菜单：
 
@@ -135,11 +121,10 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 
 ## 实测数据
 
-| | macOS · SwiftUI | Windows · WinUI 3 | Web · WebAssembly |
-| :-- | :-- | :-- | :-- |
-| 启动到窗口可见 | 0.41 秒 | 0.32 秒 | – |
-| 内存占用 | 39 MB | 35 MB | – |
-| 体积 | 应用包 2.7 MB（可执行文件 2.3 MB），不内嵌任何框架 | 应用目录 4.2 MB，引擎在可执行文件内，界面框架用系统的 | 全部资源 gzip 后 189 KB，含 Rust 引擎 |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/measured-dark.svg">
+<img alt="实测数据：macOS（SwiftUI）启动 0.41 秒、内存 39 MB、应用包 2.7 MB；Windows（WinUI 3）0.32 秒、35 MB、应用目录 4.2 MB；Web 全部资源 gzip 后 189 KB" src="Docs/Assets/tables/measured-light.svg" width="100%">
+</picture>
 
 <details>
 <summary>测量方法</summary>
@@ -155,48 +140,25 @@ $ showcase window confirm-close --window settings#1 --confirmation settings#1:c1
 
 ## 更多能力
 
-<table>
-<tr>
-<td width="33%" valign="top">
-<h3>每个操作都是命令</h3>
-按钮不能挂任意回调，只能绑定命令目录中的一条类型化命令；参数、错误与重试策略由界面、命令行、JSON 与 MCP 共用。
-</td>
-<td width="33%" valign="top">
-<h3>编译期就做检查</h3>
-<code>rustc</code> 检查每个绑定与命令参数的类型。没有绑定命令的按钮、任意回调、让控件直接写引擎状态、缺少翻译，都无法通过编译。
-</td>
-<td width="33%" valign="top">
-<h3>业务逻辑留在 Rust</h3>
-引擎是不依赖任何 UI 的普通 Rust 代码，不开窗口也能测试。在桌面上运行在应用进程内，在浏览器中编译为 WebAssembly。
-</td>
-</tr>
-<tr>
-<td width="33%" valign="top">
-<h3>从第一天起就本地化</h3>
-<code>tr!</code> 让各语言文案紧挨着它所属的界面。严格模式的构建会拒绝缺失的翻译；运行中切换界面语言不会丢失草稿。
-</td>
-<td width="33%" valign="top">
-<h3>深浅色零配置</h3>
-颜色来自平台主题：深浅色、强调色、高对比跟随系统，声明的品牌色映射为系统强调色。Web 由 Bern 的主题内核生成整套配色。
-</td>
-<td width="33%" valign="top">
-<h3>声明式多窗口</h3>
-每个窗口有自己的草稿、关闭检查与保存命令；最小化、最大化、移动、调整尺寸也是命令，以平台的实际状态答复。
-</td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/more-dark.svg">
+<img alt="更多能力：每个操作都是命令、编译期就做检查、业务逻辑留在 Rust、从第一天起就本地化、深浅色零配置、声明式多窗口" src="Docs/Assets/tables/more-light.svg" width="100%">
+</picture>
 
 <details>
-<summary><b>还有：</b>视频、异步查询、自适应布局、类型化导航…</summary>
+<summary><b>还有：</b>视频、异步查询、样式与动效、自绘、模块化应用、自适应布局…</summary>
 <br>
 
-- **视频**：`Video` 分别运行在 AVFoundation、Windows Media Foundation、GStreamer 与 HTML 媒体上，控制条由命令驱动，播放器可以跨页面继续播放。
+- **视频**：`Video` 分别运行在 AVFoundation、Windows Media Foundation、GStreamer、Android 的 Media3 与 HTML 媒体上，控制条由命令驱动，播放器可以跨页面继续播放。
 - **异步查询**：`Query` 订阅带有加载、空结果、失败与刷新状态，只显示最新的答复。
 - **自适应布局**：按视图实际获得的空间选择 `compact` 或 `expanded` 布局。
 - **类型化导航**：侧边栏、带类型化路由的推入导航、页签、工具栏与菜单。
 - **功能契约**：声明组件在每种布局中必须覆盖的功能，由编译器证明覆盖完整。
 - **随包资源**：在 `Bern.toml` 中声明文件，构建时检查，运行时按名称定位。
 - **图片与布局**：`Image` 显示随包图片，未声明的资源在编译时报错，HDR 图片（PQ、HLG 的 PNG 与带增益图的 JPEG）在能显示 HDR 的屏幕上按 HDR 显示；`Grid` 按可用宽度自动增减列数，`Stack` 叠放并按九个方位对齐，`Progress` 显示进度条或不确定进度。
+- **样式覆盖与动效**：控件默认是平台外观；需要统一设计时，用 `style!` 为全应用声明覆盖、弹簧动效、出现与消失过渡和共享元素，目标做不到的覆盖在构建时报错（目前 SwiftUI 与 Compose 已实现）。
+- **自绘**：`Canvas` 用语义颜色画形状、数据曲线与格纹图案，`Text` 可以加标注底纹。
+- **模块化应用**：应用由外壳和多个模块组成，每个模块有自己的协议、引擎、界面与翻译，可以在运行时开关；`bern new --module` 新建模块，适合多人和多个 AI 分头开发（已在 macOS 与 Android 上验证）。
 
 </details>
 
@@ -211,9 +173,10 @@ flowchart LR
     end
     P --> C{{"bern build<br/>编译器 + IR"}}
     U --> C
-    C --> S["SwiftUI<br/>macOS"]
+    C --> S["SwiftUI<br/>macOS · iOS"]
     C --> W["WinUI 3<br/>Windows"]
     C --> G["GTK 4<br/>Linux"]
+    C --> A["Jetpack Compose<br/>Android"]
     C --> B["DOM + WASM<br/>Web"]
     E <--> K[["命令目录"]]
     K <--> N["原生界面"]
@@ -227,10 +190,6 @@ flowchart LR
 3. **界面**：`#[component]` 函数，主体是一个 `ui!` 声明。编译器把它们读入共享的中间表示（IR），各目标模块从 IR 生成原生代码。增加新目标不需要改动解析器、IR 或你的业务逻辑。
 
 ## 代码一览
-
-<table>
-<tr>
-<td width="50%" valign="top">
 
 **1 · 协议**：类型、状态与命令
 
@@ -251,31 +210,6 @@ pub mod counter {
     }
 }
 ```
-
-**3 · 界面**：一个 `ui!` 声明
-
-```rust
-#[component]
-pub fn counter_view(app: counter::Client) -> impl View {
-    ui! {
-        Form {
-            Text(content: tr! {
-                "zh-Hans" => "已计数 {n} 次",
-                "en" => "Counted {n} times";
-                n: app.count
-            })
-            Button(
-                id: add,
-                label: tr! { "zh-Hans" => "加一", "en" => "Add one" },
-                prominence: prominent
-            ) => app.add(1)
-        }
-    }
-}
-```
-
-</td>
-<td width="50%" valign="top">
 
 **2 · 引擎**：普通 Rust，不依赖 UI
 
@@ -306,6 +240,28 @@ impl counter::Engine for Counter {
 }
 ```
 
+**3 · 界面**：一个 `ui!` 声明
+
+```rust
+#[component]
+pub fn counter_view(app: counter::Client) -> impl View {
+    ui! {
+        Form {
+            Text(content: tr! {
+                "zh-Hans" => "已计数 {n} 次",
+                "en" => "Counted {n} times";
+                n: app.count
+            })
+            Button(
+                id: add,
+                label: tr! { "zh-Hans" => "加一", "en" => "Add one" },
+                prominence: prominent
+            ) => app.add(1)
+        }
+    }
+}
+```
+
 **4 · 所有入口驱动同一个引擎**
 
 ```sh
@@ -315,64 +271,16 @@ counter counter add --by 5
 counter-mcp   # 同一份命令目录，提供给 AI Agent
 ```
 
-</td>
-</tr>
-</table>
-
-`Bern.toml` 声明语言、主题、源码、随包资源与构建目标。完整示例见[控件展示应用](examples/showcase)：侧边栏应用，包含文字层级、按钮、开关、滑块、输入框、由引擎查询驱动的搜索、列表到详情的导航、视频，以及带页签和关闭确认的设置窗口。
+`Bern.toml` 声明语言、主题、源码、随包资源与构建目标。完整示例见[控件展示应用](examples/showcase)：侧边栏应用，包含文字层级、按钮、开关、滑块、输入框、由引擎查询驱动的搜索、列表到详情的导航、视频，以及带页签和关闭确认的设置窗口。[计划应用](examples/planner)演示模块化应用、样式覆盖、动效与 `Canvas`。
 
 ## 支持的平台
 
-<table>
-<tr>
-<th align="left">目标</th>
-<th align="left">UI 技术</th>
-<th align="left">引擎</th>
-<th align="left">状态</th>
-</tr>
-<tr>
-<td><b>macOS</b><br><code>swiftui + macos</code></td>
-<td>SwiftUI，标准组件与系统样式 · macOS 14 及以上</td>
-<td>应用进程内</td>
-<td><img alt="可用" src="https://img.shields.io/badge/-%E5%8F%AF%E7%94%A8-22C55E?style=flat-square"> <a href="Docs/Implementation/macOS-SwiftUI.md">实现记录</a></td>
-</tr>
-<tr>
-<td><b>iOS</b><br><code>swiftui + ios</code></td>
-<td>SwiftUI，与 macOS 共用生成代码；iPhone 上其他窗口为 sheet，iPad 上是独立的窗口 · iOS 17 及以上</td>
-<td>应用进程内</td>
-<td><img alt="模拟器" src="https://img.shields.io/badge/-%E6%A8%A1%E6%8B%9F%E5%99%A8-F59E0B?style=flat-square"> <a href="Docs/Implementation/iOS-SwiftUI.md">实现记录</a></td>
-</tr>
-<tr>
-<td><b>Windows</b><br><code>winui3 + windows</code></td>
-<td>C++/WinRT：有 Windows App Runtime 2（其他程序装的或 Windows 11 自带的）时用 WinUI 3，没有时回退到系统 XAML，也可以只编译其中一个 · Windows 10 2004 及以上</td>
-<td>应用进程内（静态链接）</td>
-<td><img alt="可用" src="https://img.shields.io/badge/-%E5%8F%AF%E7%94%A8-22C55E?style=flat-square"> <a href="Docs/Implementation/Windows-WinUI3.md">实现记录</a></td>
-</tr>
-<tr>
-<td><b>Linux</b><br><code>gtk + linux</code></td>
-<td>GTK 4.14 与 libadwaita 1.5，遵循 GNOME HIG</td>
-<td>应用进程内</td>
-<td><img alt="可用" src="https://img.shields.io/badge/-%E5%8F%AF%E7%94%A8-22C55E?style=flat-square"> <a href="Docs/Implementation/Linux-GTK.md">实现记录</a></td>
-</tr>
-<tr>
-<td><b>Web 应用</b><br><code>web</code> · <code>app</code></td>
-<td>DOM，使用 Bern 自定的视觉规范与主题内核</td>
-<td>页面内的 WebAssembly</td>
-<td><img alt="可用" src="https://img.shields.io/badge/-%E5%8F%AF%E7%94%A8-22C55E?style=flat-square"> <a href="Docs/Implementation/Web.md">实现记录</a></td>
-</tr>
-<tr>
-<td><b>WebUI</b><br><code>web</code> · <code>ui</code></td>
-<td>同一个页面，作为独立引擎的界面</td>
-<td>经 WebSocket 连接的引擎宿主</td>
-<td><img alt="可用" src="https://img.shields.io/badge/-%E5%8F%AF%E7%94%A8-22C55E?style=flat-square"> <a href="Docs/Implementation/Web.md">实现记录</a></td>
-</tr>
-<tr>
-<td><b>下一步</b></td>
-<td><code>flutter + macos</code>（验证后端可替换），之后是 iOS 真机打包、Android 与 HarmonyOS</td>
-<td>–</td>
-<td><img alt="计划中" src="https://img.shields.io/badge/-%E8%AE%A1%E5%88%92%E4%B8%AD-94A3B8?style=flat-square"> <a href="Docs/Adaptation/README.md">适配规范</a></td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-dark.svg">
+<img alt="支持的平台：macOS、Windows、Linux、Web 应用、WebUI 与 Android 可用，iOS 目前构建模拟器应用；下一步是 flutter + macos、iOS 真机打包与 HarmonyOS" src="Docs/Assets/tables/platforms-light.svg" width="100%">
+</picture>
+
+实现记录：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web 与 WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)；下一步的平台见[适配规范](Docs/Adaptation/README.md)。
 
 不指定 UI 技术时使用平台的默认技术；默认技术不可用时直接报错，不会悄悄换成另一套技术。
 
@@ -409,37 +317,19 @@ counter-mcp   # 同一份命令目录，提供给 AI Agent
 
 ### 技术路线
 
-| 框架 | 写界面 | 业务逻辑 | 界面怎么画 | 随应用携带 | 许可证 |
-| :-- | :-- | :-- | :-- | :-- | :-- |
-| **Bern** | Rust（`ui!` 声明） | Rust | 构建时生成 SwiftUI、WinUI 3、GTK 4 与 Web 代码，界面是系统控件 | 无；WinUI 3 也取自系统，没有时回退到系统 XAML | MIT |
-| **GPUI** | Rust | Rust | 自带 GPU 渲染（Metal、Vulkan、DirectX） | 无额外运行时 | Apache-2.0 |
-| **Dioxus** | Rust（RSX，类 React） | Rust | 桌面与移动端默认用系统 WebView，Web 为 WebAssembly；原生渲染器 Blitz 仍在实验 | 依赖系统 WebView | MIT / Apache-2.0 |
-| **Flutter** | Dart | Dart | 自带引擎（Impeller、Skia）绘制 Material 与 Cupertino 风格控件 | Flutter 引擎 | BSD-3-Clause |
-| **React Native** | JavaScript / TypeScript（React） | JavaScript / TypeScript | 原生视图，运行时由 JS 协调 | Hermes JS 引擎 | MIT |
-| **uni-app** | Vue | JavaScript / TypeScript；uni-app x 用 UTS | 经典模式为 WebView；uni-app x 编译为 Kotlin、Swift 等原生语言，用原生视图渲染 | 框架运行时 | Apache-2.0 |
-| **Electron** | HTML / CSS / JavaScript | JavaScript / TypeScript（Node.js） | 内嵌 Chromium | Chromium 与 Node.js | MIT |
-| **Tauri** | 任意网页前端 | Rust | 系统 WebView（WebView2、WKWebView、WebKitGTK） | 不带浏览器内核，依赖系统 WebView | MIT / Apache-2.0 |
-| **Avalonia** | XAML 与 C# | C# / .NET | 自带 Skia 渲染 | .NET 运行时（可自包含或 Native AOT） | MIT |
-| **Qt** | C++ 与 QML（也可用 Python） | C++ | Qt Widgets 模拟各平台风格；Qt Quick 自绘场景图 | Qt 库 | LGPLv3 / GPLv3 / 商业许可 |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/technology-dark.svg">
+<img alt="十个框架的技术路线：写界面与业务逻辑的语言、界面怎么画、随应用携带什么、许可证" src="Docs/Assets/tables/technology-light.svg" width="100%">
+</picture>
 
 ### 平台与能力
 
-● 支持　◐ 部分支持或依赖社区　— 不支持
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/capabilities-dark.svg">
+<img alt="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、内置 MCP 与编译期检查；Bern 的移动端为部分支持，三项能力都具备" src="Docs/Assets/tables/capabilities-light.svg" width="100%">
+</picture>
 
-| 框架 | macOS | Windows | Linux | 移动端 | Web | 原生外观 | 内置 MCP | 编译期检查 |
-| :-- | :-: | :-: | :-: | :-: | :-: | :-: | :-: | :-: |
-| **Bern** | ● | ● | ● | ◐ | ● | ● | ● | ● |
-| **GPUI** | ● | ● | ● | — | — | — | — | — |
-| **Dioxus** | ● | ● | ● | ● | ● | — | — | — |
-| **Flutter** | ● | ● | ● | ● | ● | — | — | — |
-| **React Native** | ◐ | ◐ | — | ● | ◐ | ● | — | — |
-| **uni-app** | — | — | — | ● | ● | ◐ | — | — |
-| **Electron** | ● | ● | ● | — | — | — | — | — |
-| **Tauri** | ● | ● | ● | ● | — | — | — | — |
-| **Avalonia** | ● | ● | ● | ● | ● | — | — | — |
-| **Qt** | ● | ● | ● | ● | ● | ◐ | — | — |
-
-- **移动端**：iOS 与 Android。React Native 的桌面版本由微软维护，uni-app 另覆盖小程序与鸿蒙，Bern 的 iOS 目标已能构建模拟器应用，真机打包与 Android 在规划中。
+- **移动端**：iOS 与 Android。React Native 的桌面版本由微软维护，uni-app 另覆盖小程序与鸿蒙；Bern 的 Android 目标已能在真机运行并打包，iOS 目标目前构建模拟器应用，真机打包在规划中。
 - **原生外观**：控件就是平台自己的控件，外观、无障碍与输入法由系统提供。Qt Widgets 与 uni-app x 接近原生，记为部分。
 - **内置 MCP**：框架自带、面向运行中界面的 MCP 服务器与命令行。其他框架可以借助无障碍接口或 Playwright、Flutter Driver 等测试工具从外部自动化。
 - **编译期检查**：翻译缺失、功能在某个布局没有入口、入口没有登记功能，都由编译器直接报错（见[为 AI 而建](#为-ai-而建)）。其他框架多借助 lint、翻译工具或测试发现这类问题。
@@ -454,77 +344,19 @@ counter-mcp   # 同一份命令目录，提供给 AI Agent
 <img alt="前后端语言与执行方式：Bern 的界面层是各平台原生 UI 代码（Swift、C++、Rust），逻辑层是 Rust，同进程经 C ABI 调用，没有垃圾回收" src="Docs/Assets/compare/languages-light.svg" width="100%">
 </picture>
 
-同样一个只显示一行字的窗口，各框架的包体、启动时间与内存差别很大。下图在同一台 CI 虚拟机（GitHub 托管的 Apple M1）上实测：各框架用自己的工具打 release 包，测量时轮流启动，每个 10 次取中位数；Bern 的启动时间另用 M4 本机实测，图中有注明。脚本在 [benchmarks/](benchmarks/) 中，可以在 Actions 里重新运行 Benchmarks 工作流。
+同样一个只显示一行字的窗口，各框架的包体、启动时间与内存差别很大。下图在同一台 CI 虚拟机（GitHub 托管的 Apple M1）上实测：各框架用自己的工具打 release 包，测量时轮流启动，每个 10 次取中位数。脚本在 [benchmarks/](benchmarks/) 中，可以在 Actions 里重新运行 Benchmarks 工作流。
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/compare/resources-dark.svg">
-<img alt="Hello World 的资源占用（实测）：Bern 包体 2.1 MB、启动 0.20 秒（M4 本机；CI 虚拟机上 0.26 秒）、内存 18 MB；GPUI 4.2 MB、0.28 秒、27 MB；Electron 301 MB、1.07 秒、77 MB" src="Docs/Assets/compare/resources-light.svg" width="100%">
+<img alt="Hello World 的资源占用（实测）：Bern 包体 2.1 MB、启动 0.26 秒、内存 18 MB；GPUI 4.2 MB、0.28 秒、27 MB；Electron 301 MB、1.07 秒、77 MB" src="Docs/Assets/compare/resources-light.svg" width="100%">
 </picture>
 
 ### 怎么选
 
-<table>
-<tr>
-<td width="50%" valign="top">
-<img alt="Electron" src="https://img.shields.io/badge/Electron-47848F?style=flat-square&logo=electron&logoColor=white"><br>
-<b>适合</b>：Web 团队、需要最成熟的生态与最一致的跨平台表现。<br>
-<b>代价</b>：每个应用带一份 Chromium 与 Node.js，体积与内存都偏大。
-</td>
-<td width="50%" valign="top">
-<img alt="Tauri" src="https://img.shields.io/badge/Tauri-24C8D8?style=flat-square&logo=tauri&logoColor=white"><br>
-<b>适合</b>：想保留网页前端、又要小体积和 Rust 后端。<br>
-<b>代价</b>：界面仍是网页；各平台系统 WebView 的引擎不同，需要分别测试。
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="Flutter" src="https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=flutter&logoColor=white"><br>
-<b>适合</b>：移动优先、要求各平台像素级一致。<br>
-<b>代价</b>：控件是自绘的，桌面上的系统观感与行为要自己追随；需要使用 Dart。
-</td>
-<td valign="top">
-<img alt="React Native" src="https://img.shields.io/badge/React%20Native-20232A?style=flat-square&logo=react&logoColor=61DAFB"><br>
-<b>适合</b>：React 团队做移动应用，要原生控件。<br>
-<b>代价</b>：以移动端为主，桌面依赖微软维护的分支，没有 Linux；运行时有 JS 引擎与桥接。
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="Avalonia" src="https://img.shields.io/badge/Avalonia-8B44AC?style=flat-square&logo=avaloniaui&logoColor=white"><br>
-<b>适合</b>：.NET 与 XAML 团队，需要跨桌面一致的外观。<br>
-<b>代价</b>：自绘界面，不是系统控件；需要 .NET 运行时或 AOT 编译。
-</td>
-<td valign="top">
-<img alt="Qt" src="https://img.shields.io/badge/Qt-41CD52?style=flat-square&logo=qt&logoColor=white"><br>
-<b>适合</b>：C++ 项目、工业与嵌入式、需要几十年的稳定积累。<br>
-<b>代价</b>：许可证需要留意（LGPL 或商业）；Qt Quick 是自绘界面。
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="GPUI" src="https://img.shields.io/badge/GPUI-084CCF?style=flat-square&logo=zedindustries&logoColor=white"><br>
-<b>适合</b>：追求极致性能的 Rust 桌面应用，例如编辑器。<br>
-<b>代价</b>：自绘界面，常用控件与无障碍要自己补；只支持桌面。
-</td>
-<td valign="top">
-<img alt="Dioxus" src="https://img.shields.io/badge/Dioxus-4A5568?style=flat-square"><br>
-<b>适合</b>：喜欢 React 写法的 Rust 全栈项目，一套代码覆盖 Web、桌面与移动。<br>
-<b>代价</b>：桌面与移动端目前是 WebView 界面；原生渲染器仍在实验。
-</td>
-</tr>
-<tr>
-<td valign="top">
-<img alt="uni-app" src="https://img.shields.io/badge/uni--app-4A5568?style=flat-square"><br>
-<b>适合</b>：国内多端（小程序、App、H5、鸿蒙）一套代码。<br>
-<b>代价</b>：没有桌面应用目标；经典模式的 App 界面是 WebView。
-</td>
-<td valign="top">
-<img alt="Bern" src="https://img.shields.io/badge/Bern-4A8BEF?style=flat-square"><br>
-<b>适合</b>：桌面应用要每个平台的系统外观，业务写在 Rust 里，并希望 AI 既能写它、也能用它。<br>
-<b>暂不适合</b>：现在就需要移动端，或依赖成熟的第三方组件生态。Bern 仍是早期预览。
-</td>
-</tr>
-</table>
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/choose-dark.svg">
+<img alt="怎么选：Electron、Tauri、Flutter、React Native、Avalonia、Qt、GPUI、Dioxus、uni-app 与 Bern 各自适合的场景和代价" src="Docs/Assets/tables/choose-light.svg" width="100%">
+</picture>
 
 ## 快速开始
 
@@ -546,7 +378,7 @@ cd my_app
 bern run
 ```
 
-新应用是一个带计数的窗口，协议、引擎与界面各一个 crate，五个目标都已在 `Bern.toml` 中声明。`bern run` 构建本机的目标并启动它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在浏览器中打开，`bern run --target ios` 装进正在运行的 iOS 模拟器。每次构建还会在 `target/bern/<目标>/bin/` 中生成应用 CLI 与 MCP 服务器。
+新应用是一个带计数的窗口，协议、引擎与界面各一个 crate，六个目标都已在 `Bern.toml` 中声明。`bern run` 构建本机的目标并启动它：macOS 上是 SwiftUI，Windows 上是 WinUI 3，Linux 上是 GTK；`bern run --target web_app` 在浏览器中打开，`bern run --target ios` 装进正在运行的 iOS 模拟器，`bern run --target android` 装到用 USB 调试连接的 Android 手机（或模拟器）上并启动。每次构建还会在 `target/bern/<目标>/bin/` 中生成应用 CLI 与 MCP 服务器。
 
 `bern doctor` 列出本机构建每个目标还缺什么、怎么装：
 
@@ -559,6 +391,7 @@ bern 0.1.0 on macOS (aarch64)
 [✓] iOS · SwiftUI: iOS simulator SDK 26.5, the aarch64-apple-ios-sim target
 [-] Windows · WinUI 3: builds on Windows
 [-] Linux · GTK 4: builds on Linux
+[✓] Android · Compose: Android SDK, NDK 29.0.14206865, gradle-9.5.1, the aarch64-linux-android target
 [✓] Web · WebAssembly: the wasm32-unknown-unknown target
 ```
 
@@ -570,6 +403,7 @@ bern 0.1.0 on macOS (aarch64)
 - **iOS**：Xcode 的 iOS 平台与一个 iOS 模拟器，以及 `rustup target add aarch64-apple-ios-sim`。目前构建模拟器应用，真机的签名与打包还没有做。
 - **Windows**：Visual Studio 2022 或更新版本的“使用 C++ 的桌面开发”（只装生成工具也可以），含 Windows 11 SDK；Rust 使用 MSVC 工具链。首次构建时用 Windows SDK 的 `cppwinrt` 生成 C++/WinRT 头文件，并把它们与运行时预编译（每个配置约 2.4 GB，放在 `target` 中）；之后的构建只编译应用自己的代码，新项目约 5 秒，展示应用约 9 秒。应用目录只有可执行文件、400 KB 的引导 DLL 和资源，不需要 .NET，也不随附 Windows App SDK。
 - **Linux**：GTK 4.14 与 libadwaita 1.5 的开发包，例如 `sudo apt install libgtk-4-dev libadwaita-1-dev gstreamer1.0-libav`。
+- **Android**：Android Studio（带 SDK 与 NDK，在 SDK Manager 的 SDK Tools 里勾选 NDK）、Gradle 9.4 或更新版本，以及 `rustup target add aarch64-linux-android`。第一次构建时 Gradle 下载 Android 插件与 Compose 库。
 - **Web**：`rustup target add wasm32-unknown-unknown`。`web_app` 构建把引擎编译为 WebAssembly 在页面内运行；`web_ui` 构建让页面作为独立引擎宿主的界面，`bern run` 启动宿主并打开它的地址。
 
 </details>
@@ -580,7 +414,7 @@ bern 0.1.0 on macOS (aarch64)
 bern package
 ```
 
-按 release 构建本机能构建的目标，在 `target/bern/dist/` 中生成安装包：macOS 的 `.dmg`，Windows 的安装程序（按当前用户安装，不需要管理员权限）与免安装的 `.zip`，Linux 的 `.deb` 与 `.tar.gz`，Web 的静态站点压缩包。每个包都带应用 CLI 与 MCP 服务器。签名用环境变量配置，证书不进仓库：`BERN_MACOS_SIGNING_IDENTITY` 与 `BERN_MACOS_NOTARY_PROFILE`（签名并公证），`BERN_WINDOWS_CERTIFICATE`（证书指纹或 `.pfx`）。没有配置时照样生成，并提示未签名的后果。
+按 release 构建本机能构建的目标，在 `target/bern/dist/` 中生成安装包：macOS 的 `.dmg`，Windows 的安装程序（按当前用户安装，不需要管理员权限）与免安装的 `.zip`，Linux 的 `.deb` 与 `.tar.gz`，Android 的 `.apk` 与上架用的 `.aab`，Web 的静态站点压缩包。除 Android 外，每个包都带应用 CLI 与 MCP 服务器。签名用环境变量配置，证书不进仓库：`BERN_MACOS_SIGNING_IDENTITY` 与 `BERN_MACOS_NOTARY_PROFILE`（签名并公证），`BERN_WINDOWS_CERTIFICATE`（证书指纹或 `.pfx`），`BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD` 与 `BERN_ANDROID_KEY_ALIAS`（发布密钥）。没有配置时照样生成，并提示未签名的后果。
 
 ### 运行展示应用
 
@@ -603,17 +437,14 @@ showcase window list                                         # 窗口的实际�
 showcase-mcp                                                 # 经 stdio 的 MCP 服务器
 ```
 
-只有目标声明了 `channels = ["ipc"]` 时才会启动控制通道；不声明则应用不监听任何端口。
+只有目标声明了 `channels = ["ipc"]` 时才会启动控制通道；不声明则应用不监听任何端口。Android 应用在手机上监听，`bern run` 用 `adb forward` 把它接到这台电脑，命令行与 MCP 服务器照常使用。
 
 ## 路线图
 
-| 阶段 | 内容 | 状态 |
-| :-- | :-- | :-- |
-| 1 · 2 | 编译边界验证；macOS SwiftUI，界面、CLI、JSON 与 MCP 驱动同一引擎 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
-| 3 | Web 视觉规范、主题内核、WebAssembly 应用与 WebUI 两种构建 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
-| 4 | 自适应布局、菜单、功能契约、运行时切换语言 | <img alt="已完成" src="https://img.shields.io/badge/-%E5%B7%B2%E5%AE%8C%E6%88%90-22C55E?style=flat-square"> |
-| 5 | 其他原生前端：GTK 4（已完成）· WinUI 3（已完成）· iOS（模拟器，已完成）· `flutter + macos`（下一步） | <img alt="进行中" src="https://img.shields.io/badge/-%E8%BF%9B%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
-| 6 | 组件库（第一批 `Image`、`Progress`、`Grid`、`Stack` 已完成）、打包、增量构建、开发工具（`bern new`、`run`、`doctor`、`package` 已完成） | <img alt="进行中" src="https://img.shields.io/badge/-%E8%BF%9B%E8%A1%8C%E4%B8%AD-F59E0B?style=flat-square"> |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/roadmap-dark.svg">
+<img alt="路线图：阶段 1 到 4 已完成；阶段 5 其他原生前端、阶段 6 组件库与开发工具、阶段 7 样式动效与模块化应用正在进行" src="Docs/Assets/tables/roadmap-light.svg" width="100%">
+</picture>
 
 ## 仓库结构
 
@@ -621,22 +452,10 @@ showcase-mcp                                                 # 经 stdio 的 MCP
 <summary>crate 与目录</summary>
 <br>
 
-| 路径 | 说明 |
-| :-- | :-- |
-| `crates/bern` | 应用使用的门面 crate：宏、值、媒体、资源 |
-| `crates/bern-macros` · `bern-syntax` | `#[component]`、`ui!`、`tr!` 与受约束的声明语法 |
-| `crates/bern-compiler` · `bern-ir` | 把声明读入共享 IR 并执行检查 |
-| `crates/bern-protocol` · `bern-command` · `bern-runtime` | 命令目录、引擎宿主与 UI 会话运行时 |
-| `crates/bern-ffi` | 原生前端调用的进程内 C 接口 |
-| `crates/bern-backend-swiftui` · `-winui3` · `-gtk` · `-web` | 目标模块：生成器及其运行时 |
-| `crates/bern-gtk` | GTK 运行时，只在生成的 Linux 应用中编译 |
-| `crates/bern-adapter-cli` · `-mcp` · `-json` | 从命令目录派生的入口 |
-| `crates/bern-transport-ipc` · `-ws` | 本地控制通道与 WebSocket 传输 |
-| `crates/bern-theme` | 为没有原生主题的目标提供的 Bern 色彩算法 |
-| `crates/bern-cli` | 构建工具 `bern`：创建、检查、构建、运行与环境检查 |
-| `examples/showcase` | 在各平台上使用的控件展示应用 |
-| `examples/hello` | 最小的应用：一个窗口、一行字 |
-| `Docs/` | 设计文档、平台适配规范与实现记录 |
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/repository-dark.svg">
+<img alt="仓库结构：核心、运行时、目标模块、入口与工具、示例与文档各自包含的 crate 与目录" src="Docs/Assets/tables/repository-light.svg" width="100%">
+</picture>
 
 </details>
 
@@ -648,13 +467,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-测试中包含必须编译失败的声明，并在装有相应工具包的环境中对生成的应用做类型检查：用 Xcode 检查 Swift 6，用开发包检查 GTK，在 Windows 上用 MSVC 编译生成的两套前端。
+测试中包含必须编译失败的声明，并在装有相应工具包的环境中对生成的应用做类型检查：用 Xcode 检查 Swift 6，用开发包检查 GTK，在 Windows 上用 MSVC 编译生成的两套前端。Android 的 Kotlin 由 `bern build --target android` 经 Gradle 编译。
 
 ## 文档
 
 - [设计文档](Docs/Design.md)：目标、架构、组件、主题、命令、窗口与媒体
 - [适配规范](Docs/Adaptation/README.md)：Apple、Windows 与 Linux、Web、Android、HarmonyOS
-- 实现记录：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- 实现记录：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 ## 许可证
 

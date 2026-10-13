@@ -4,6 +4,7 @@
 - 文档性质：Bern 架构准备与后端验收依据；尚未实现的接口、布局策略与测试均为设计要求。
 - 范围：Android 手机、平板、折叠屏、可调整窗口与外接输入，以及 Android TV / Google TV。
 - 关联：[框架设计](../Design.md)。Android 默认前端技术沿用 Jetpack Compose；媒体后端单独选择。
+- 实现状态：`compose + android` 第一版已实现并在手机上验证（媒体后端为 Media3），见 [Android Compose 实现记录](../Implementation/Android-Compose.md)。平板、折叠屏、窗口化与 Android TV 的规则尚未实现或验证，本文这些部分仍是设计要求。
 - 证据边界：下文“官方依据”描述来源事实；“Bern 决策”是框架对这些事实的映射，不冒充 Google 规范。
 
 ## 1. 自适应的输入是当前窗口
