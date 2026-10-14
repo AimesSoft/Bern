@@ -18,7 +18,7 @@
 <circle cx="64" cy="121" r="6" fill="#1A7F37"/>
 <circle cx="64" cy="175" r="5.5" fill="#FFFFFF" stroke="#9A6700" stroke-width="2.5"/>
 <circle cx="64" cy="259" r="5.5" fill="#FFFFFF" stroke="#9A6700" stroke-width="2.5"/>
-<circle cx="64" cy="343" r="5.5" fill="#FFFFFF" stroke="#9A6700" stroke-width="2.5"/>
+<circle cx="64" cy="343" r="6" fill="#1A7F37"/>
 <text x="40" y="18" font-size="15" font-weight="700" text-anchor="end" fill="#1F2328">1 · 2</text>
 <text x="92.0" y="17.4" font-size="14.5" fill="#1F2328">Compile-time boundary; macOS SwiftUI with UI, CLI, JSON and MCP on one engine</text>
 <text x="960.0" y="18.0" font-size="13.5" font-weight="700" fill="#1A7F37" text-anchor="end">Done</text>
@@ -53,11 +53,11 @@
 <text x="960.0" y="264.0" font-size="13.5" font-weight="700" fill="#9A6700" text-anchor="end">In progress</text>
 <line x1="92" y1="316.0" x2="960" y2="316.0" stroke="#E6EAEF"/>
 <text x="40" y="348" font-size="15" font-weight="700" text-anchor="end" fill="#1F2328">7</text>
-<text x="92.0" y="347.4" font-size="14.5" fill="#1F2328">Style overrides, motion and drawing; modular apps</text>
+<text x="92.0" y="347.4" font-size="14.5" fill="#1F2328">Style overrides, motion and drawing; modular apps; components for media apps</text>
 <g transform="translate(92.0 378.0)"><g transform="translate(0.0 -11.0) scale(0.5833)" fill="none" stroke="#1A7F37" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" color="#1A7F37"><path d="m5 12.5 4.5 4.5L19 7.5"/></g><text x="20" y="0" font-size="13" font-weight="500" fill="#1A7F37">SwiftUI</text></g>
 <g transform="translate(188.6 378.0)"><g transform="translate(0.0 -11.0) scale(0.5833)" fill="none" stroke="#1A7F37" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" color="#1A7F37"><path d="m5 12.5 4.5 4.5L19 7.5"/></g><text x="20" y="0" font-size="13" font-weight="500" fill="#1A7F37">Compose</text></g>
-<g transform="translate(285.2 378.0)"><circle cx="7" cy="-4.5" r="4.5" fill="none" stroke="#59636E" stroke-width="1.5"/><text x="20" y="0" font-size="13" font-weight="500" fill="#59636E">GTK · to follow</text></g>
-<g transform="translate(429.6 378.0)"><circle cx="7" cy="-4.5" r="4.5" fill="none" stroke="#59636E" stroke-width="1.5"/><text x="20" y="0" font-size="13" font-weight="500" fill="#59636E">WinUI 3 · to follow</text></g>
-<g transform="translate(601.6 378.0)"><circle cx="7" cy="-4.5" r="4.5" fill="none" stroke="#59636E" stroke-width="1.5"/><text x="20" y="0" font-size="13" font-weight="500" fill="#59636E">Web · to follow</text></g>
-<text x="960.0" y="348.0" font-size="13.5" font-weight="700" fill="#9A6700" text-anchor="end">In progress</text>
+<g transform="translate(285.2 378.0)"><g transform="translate(0.0 -11.0) scale(0.5833)" fill="none" stroke="#1A7F37" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" color="#1A7F37"><path d="m5 12.5 4.5 4.5L19 7.5"/></g><text x="20" y="0" font-size="13" font-weight="500" fill="#1A7F37">GTK</text></g>
+<g transform="translate(350.6 378.0)"><g transform="translate(0.0 -11.0) scale(0.5833)" fill="none" stroke="#1A7F37" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" color="#1A7F37"><path d="m5 12.5 4.5 4.5L19 7.5"/></g><text x="20" y="0" font-size="13" font-weight="500" fill="#1A7F37">WinUI 3</text></g>
+<g transform="translate(443.6 378.0)"><g transform="translate(0.0 -11.0) scale(0.5833)" fill="none" stroke="#1A7F37" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" color="#1A7F37"><path d="m5 12.5 4.5 4.5L19 7.5"/></g><text x="20" y="0" font-size="13" font-weight="500" fill="#1A7F37">Web</text></g>
+<text x="960.0" y="348.0" font-size="13.5" font-weight="700" fill="#1A7F37" text-anchor="end">Done</text>
 </svg>

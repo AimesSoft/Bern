@@ -10,7 +10,7 @@ REPO_PATHS = [
     ("targets", ["`crates/bern-backend-swiftui` · `-winui3` · `-gtk` · `-compose` · `-web`", "`crates/bern-gtk`",
                  "`crates/bern-theme`"]),
     ("entries", ["`crates/bern-adapter-cli` · `-mcp` · `-json`", "`crates/bern-cli`"]),
-    ("examples", ["`examples/showcase`", "`examples/hello`", "`examples/planner`", "`Docs/`"]),
+    ("examples", ["`examples/showcase`", "`examples/hello`", "`examples/planner`", "`examples/gallery`", "`Docs/`"]),
 ]
 
 
@@ -165,8 +165,8 @@ TEXT = {
                 ("6", "组件库、打包、增量构建与开发工具；已完成：", [("`Image`", "done"), ("`Progress`", "done"), ("`Grid`", "done"),
                                                        ("`Stack`", "done"), ("`bern new`", "done"), ("`run`", "done"),
                                                        ("`doctor`", "done"), ("`package`", "done")], "wip"),
-                ("7", "样式覆盖、动效与自绘，模块化应用", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "todo"),
-                                            ("WinUI 3", "todo"), ("Web", "todo")], "wip"),
+                ("7", "样式覆盖、动效与自绘，模块化应用，媒体类应用的组件", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"),
+                                                       ("WinUI 3", "done"), ("Web", "done")], "done"),
             ],
         ),
         repository=repo(("核心", "运行时", "目标模块", "入口与工具", "示例与文档"), [
@@ -184,6 +184,7 @@ TEXT = {
             "在各平台上使用的控件展示应用",
             "最小的应用：一个窗口、一行字",
             "模块化应用：外壳与两个模块，演示样式覆盖、动效与 `Canvas`",
+            "图案集：媒体类应用的组件，错开入场、按比例摆放、弹出按钮与四档尺寸",
             "设计文档、平台适配规范与实现记录",
         ]),
     ),
@@ -304,8 +305,8 @@ TEXT = {
                 ("6", "元件庫、打包、增量建置與開發工具；已完成：", [("`Image`", "done"), ("`Progress`", "done"), ("`Grid`", "done"),
                                                        ("`Stack`", "done"), ("`bern new`", "done"), ("`run`", "done"),
                                                        ("`doctor`", "done"), ("`package`", "done")], "wip"),
-                ("7", "樣式覆寫、動效與自繪，模組化應用程式", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "todo"),
-                                              ("WinUI 3", "todo"), ("Web", "todo")], "wip"),
+                ("7", "樣式覆寫、動效與自繪，模組化應用程式，媒體類應用程式的元件", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"),
+                                                            ("WinUI 3", "done"), ("Web", "done")], "done"),
             ],
         ),
         repository=repo(("核心", "執行環境", "目標模組", "入口與工具", "範例與文件"), [
@@ -323,6 +324,7 @@ TEXT = {
             "在各平台上使用的控制項展示應用程式",
             "最小的應用程式：一個視窗、一行字",
             "模組化應用程式：外殼與兩個模組，示範樣式覆寫、動效與 `Canvas`",
+            "圖案集：媒體類應用程式的元件，錯開進場、按比例擺放、彈出按鈕與四檔尺寸",
             "設計文件、平台適配規範與實作紀錄",
         ]),
     ),
@@ -454,8 +456,8 @@ TEXT = {
                 ("6", "Component library, packaging, incremental builds and tooling; done so far:",
                  [("`Image`", "done"), ("`Progress`", "done"), ("`Grid`", "done"), ("`Stack`", "done"), ("`bern new`", "done"),
                   ("`run`", "done"), ("`doctor`", "done"), ("`package`", "done")], "wip"),
-                ("7", "Style overrides, motion and drawing; modular apps", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "todo"),
-                                                                         ("WinUI 3", "todo"), ("Web", "todo")], "wip"),
+                ("7", "Style overrides, motion and drawing; modular apps; components for media apps",
+                 [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"), ("WinUI 3", "done"), ("Web", "done")], "done"),
             ],
         ),
         repository=repo(("Core", "Runtime", "Targets", "Entries and tools", "Examples and docs"), [
@@ -473,6 +475,7 @@ TEXT = {
             "The control showcase used on every platform",
             "The smallest app: one window, one line",
             "A modular app: a shell and two modules, with style overrides, motion and `Canvas`",
+            "A pattern gallery: media app components, staggered entrances, rails, popover buttons and four sizes",
             "Design document, platform adaptation specs and implementation notes",
         ]),
     ),
@@ -602,8 +605,8 @@ TEXT = {
                 ("6", "コンポーネントライブラリ、パッケージング、インクリメンタルビルド、開発ツール。完了済み：",
                  [("`Image`", "done"), ("`Progress`", "done"), ("`Grid`", "done"), ("`Stack`", "done"), ("`bern new`", "done"),
                   ("`run`", "done"), ("`doctor`", "done"), ("`package`", "done")], "wip"),
-                ("7", "スタイルの上書き、モーション、描画、モジュール化アプリ", [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "todo"),
-                                                               ("WinUI 3", "todo"), ("Web", "todo")], "wip"),
+                ("7", "スタイルの上書き、モーション、描画、モジュール化アプリ、メディアアプリ向けのコンポーネント",
+                 [("SwiftUI", "done"), ("Compose", "done"), ("GTK", "done"), ("WinUI 3", "done"), ("Web", "done")], "done"),
             ],
         ),
         repository=repo(("コア", "ランタイム", "ターゲット", "入口とツール", "サンプルと文書"), [
@@ -621,6 +624,7 @@ TEXT = {
             "各プラットフォームで使うコントロールのショーケース",
             "最小のアプリ：ウィンドウ一つ、一行の文字",
             "モジュール化アプリ：シェルと 2 つのモジュール。スタイルの上書き、モーション、`Canvas` を使います",
+            "パターン集：メディアアプリ向けのコンポーネント。時間差の登場、比率での配置、ポップオーバーボタン、4 段階のサイズ",
             "設計ドキュメント、プラットフォーム適応仕様、実装記録",
         ]),
     ),
@@ -637,7 +641,7 @@ ALT = {
         technology="十个框架的技术路线：写界面与业务逻辑的语言、界面怎么画、随应用携带什么、许可证",
         capabilities="平台与能力：各框架对 macOS、Windows、Linux、移动端、Web 的支持，以及原生外观、内置 MCP 与编译期检查；Bern 的移动端为部分支持，三项能力都具备",
         choose="怎么选：Electron、Tauri、Flutter、React Native、Avalonia、Qt、GPUI、Dioxus、uni-app 与 Bern 各自适合的场景和代价",
-        roadmap="路线图：阶段 1 到 4 已完成；阶段 5 其他原生前端、阶段 6 组件库与开发工具、阶段 7 样式动效与模块化应用正在进行",
+        roadmap="路线图：阶段 1 到 4 与阶段 7 样式动效、模块化应用与媒体类组件已完成；阶段 5 其他原生前端、阶段 6 组件库与开发工具正在进行",
         repository="仓库结构：核心、运行时、目标模块、入口与工具、示例与文档各自包含的 crate 与目录",
     ),
     "zh-Hant": dict(
@@ -649,7 +653,7 @@ ALT = {
         technology="十個框架的技術路線：寫介面與商業邏輯的語言、介面怎麼畫、隨應用程式攜帶什麼、授權",
         capabilities="平台與能力：各框架對 macOS、Windows、Linux、行動端、Web 的支援，以及原生外觀、內建 MCP 與編譯期檢查；Bern 的行動端為部分支援，三項能力都具備",
         choose="怎麼選：Electron、Tauri、Flutter、React Native、Avalonia、Qt、GPUI、Dioxus、uni-app 與 Bern 各自適合的情境與代價",
-        roadmap="路線圖：階段 1 到 4 已完成；階段 5 其他原生前端、階段 6 元件庫與開發工具、階段 7 樣式動效與模組化應用程式正在進行",
+        roadmap="路線圖：階段 1 到 4 與階段 7 樣式動效、模組化應用程式與媒體類元件已完成；階段 5 其他原生前端、階段 6 元件庫與開發工具正在進行",
         repository="儲存庫結構：核心、執行環境、目標模組、入口與工具、範例與文件各自包含的 crate 與目錄",
     ),
     "en": dict(
@@ -661,7 +665,7 @@ ALT = {
         technology="How ten frameworks work: the languages for UI and logic, how the UI is drawn, what ships with the app, and the license",
         capabilities="Platforms and capabilities: support for macOS, Windows, Linux, mobile and the web, plus native look, built-in MCP and compile-time checks; Bern's mobile support is partial and it has all three capabilities",
         choose="Which one to choose: what Electron, Tauri, Flutter, React Native, Avalonia, Qt, GPUI, Dioxus, uni-app and Bern are best for, and what each costs",
-        roadmap="Roadmap: phases 1 to 4 are done; phase 5 other native front ends, phase 6 components and tooling, and phase 7 style, motion and modular apps are in progress",
+        roadmap="Roadmap: phases 1 to 4 and phase 7, style, motion, modular apps and media app components, are done; phase 5 other native front ends and phase 6 components and tooling are in progress",
         repository="Repository: the crates and directories in core, runtime, targets, entries and tools, and examples and docs",
     ),
     "ja": dict(
@@ -673,7 +677,7 @@ ALT = {
         technology="10 のフレームワークの技術：UI とロジックの言語、UI の描き方、アプリに同梱するもの、ライセンス",
         capabilities="プラットフォームと機能：macOS、Windows、Linux、モバイル、Web への対応と、ネイティブの外観、MCP 内蔵、コンパイル時チェック。Bern のモバイルは一部対応で、3 つの機能をすべて備える",
         choose="どれを選ぶか：Electron、Tauri、Flutter、React Native、Avalonia、Qt、GPUI、Dioxus、uni-app、Bern それぞれに向いている用途と代償",
-        roadmap="ロードマップ：フェーズ 1 から 4 は完了。フェーズ 5 のほかのネイティブフロントエンド、フェーズ 6 のコンポーネントと開発ツール、フェーズ 7 のスタイル・モーション・モジュール化アプリが進行中",
+        roadmap="ロードマップ：フェーズ 1 から 4 と、フェーズ 7 のスタイル・モーション・モジュール化アプリ・メディアアプリ向けコンポーネントは完了。フェーズ 5 のほかのネイティブフロントエンドとフェーズ 6 のコンポーネントと開発ツールが進行中",
         repository="リポジトリ構成：コア、ランタイム、ターゲット、入口とツール、サンプルと文書に含まれるクレートとディレクトリ",
     ),
 }

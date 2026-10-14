@@ -146,18 +146,20 @@ The same operations are MCP tools for agents (`ui_inspect`, `ui_activate`, `wind
 </picture>
 
 <details>
-<summary><b>And more:</b> video, async queries, styles and motion, drawing, modular apps, adaptive layouts…</summary>
+<summary><b>And more:</b> video, async queries, styles and motion, drawing, media app components, reading the files users hand you, modular apps, adaptive layouts…</summary>
 <br>
 
 - **Video**: `Video` plays on AVFoundation, Windows Media Foundation, GStreamer, Media3 on Android or HTML media, with a command-driven control bar and players that outlive a page.
 - **Async queries**: `Query` subscriptions with loading, empty, failure and refresh states; only the latest answer is shown.
-- **Adaptive layouts**: `compact` and `expanded` layouts chosen by the space a view actually gets.
+- **Adaptive layouts**: layouts for `compact`, `medium`, `expanded` and `large`, chosen by the space a view actually gets; expressions read the window's size too, for margins that grow with it.
 - **Typed navigation**: sidebars, push navigation with typed routes, tabs, toolbars and menus.
 - **Feature contracts**: declare which features a component must cover in each layout; the compiler proves the coverage.
 - **Bundled resources**: files declared in `Bern.toml`, checked at build time and located by name at runtime.
 - **Images and layout**: `Image` shows bundled pictures, HDR ones (PQ and HLG PNGs, JPEGs with a gain map) in HDR where the display can, and an undeclared one fails to compile; `Grid` adds and drops columns with the width, `Stack` layers views with nine alignments, `Progress` shows a bar or indeterminate progress.
-- **Style overrides and motion**: controls keep the platform look by default; for one design everywhere, `style!` declares app-wide overrides, spring motion, appear and disappear transitions and shared elements, and an override a target cannot show fails the build (SwiftUI and Compose so far).
-- **Drawing**: `Canvas` draws shapes, data curves and check patterns in semantic colors, and `Text` can carry a highlight mark.
+- **Style overrides and motion**: controls keep the platform look by default; for one design everywhere, `style!` declares app-wide overrides, spring motion, appear and disappear transitions, staggered entrances and shared elements, and an override a target cannot show fails the build (on all five front ends).
+- **Drawing and placing by fraction**: `Canvas` draws shapes, data curves and check patterns in semantic colors, and `Text` can carry a highlight mark; `Rail` puts elements at fractions that come from state, for timelines, ticks on a progress bar or a fill that grows.
+- **Media app components**: a sidebar footer, toolbar search with results, an inspector, toasts, split buttons and popover buttons holding any content, buttons with content that reveal more on hover, shortcuts, picking and dropping files, scroll snapping, pinch and drag to set a value, on all five front ends.
+- **Reading the files users hand you**: for a file the user picked, dropped or opened with the app, the engine gets its name and bytes with `MediaSource::file_name()` and `open()`, the same for a local path, an Android `content://` document or a page's `blob:` file.
 - **Modular apps**: an app is a shell and modules, each with its own protocol, engine, interface and translations, switchable at runtime; `bern new --module` adds one, so several people and AIs can work side by side (verified on macOS and Android).
 
 </details>
@@ -271,7 +273,7 @@ counter counter add --by 5
 counter-mcp   # the same catalog for AI agents
 ```
 
-`Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation. The [planner](examples/planner) is a modular app with style overrides, motion and `Canvas`.
+`Bern.toml` declares languages, theme, sources, bundled resources and targets. See the full [showcase](examples/showcase): a sidebar app with text styles, buttons, switches, sliders, text fields, an engine-backed search, list-to-detail navigation, video, and a settings window with tabs and a close confirmation. The [planner](examples/planner) is a modular app with style overrides, motion and `Canvas`. The [gallery](examples/gallery) shows the media app components: a poster wall that enters in turn, a timeline placed by fraction, a volume popover, margins and layouts that follow the four sizes, and a dropped video whose name, format and size the engine reads from the file.
 
 ## Platforms
 
@@ -443,7 +445,7 @@ The control channel starts only when the target declares `channels = ["ipc"]`; w
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/roadmap-en-dark.svg">
-<img alt="Roadmap: phases 1 to 4 are done; phase 5 other native front ends, phase 6 components and tooling, and phase 7 style, motion and modular apps are in progress" src="Docs/Assets/tables/roadmap-en-light.svg" width="100%">
+<img alt="Roadmap: phases 1 to 4 and phase 7, style, motion, modular apps and media app components, are done; phase 5 other native front ends and phase 6 components and tooling are in progress" src="Docs/Assets/tables/roadmap-en-light.svg" width="100%">
 </picture>
 
 ## Repository
