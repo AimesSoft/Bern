@@ -134,6 +134,25 @@ pub mod feature {
     pub const RAILS: &str = "rails";
     /// `PopoverButton`: a button that shows its children in a popover.
     pub const POPOVER_BUTTON: &str = "popover_button";
+    /// `text { large_title: heavy }` in `style!`: weights of text styles.
+    pub const TEXT_WEIGHTS: &str = "text_weights";
+    /// `Text(lines:)` and `Image(corner:)`.
+    pub const TEXT_LINES: &str = "text_lines";
+    pub const IMAGE_CORNERS: &str = "image_corners";
+    /// A `Spacer` in a `Toolbar`, parting leading items from trailing ones,
+    /// and `Text` in a toolbar.
+    pub const TOOLBAR_LEADING: &str = "toolbar_leading";
+    /// `padding_x` and `padding_y`: different padding across and along.
+    pub const AXIS_PADDING: &str = "axis_padding";
+    /// `Menu(style: icon)`: a menu shown as a round icon button.
+    pub const ICON_MENUS: &str = "icon_menus";
+    /// `Row(align: baseline)`.
+    pub const ROW_BASELINE: &str = "row_baseline";
+    /// `SidebarHeader`: content pinned above a sidebar's list.
+    pub const SIDEBAR_HEADER: &str = "sidebar_header";
+    /// `Detail(titled: false)`: a detail column that leaves its title bar
+    /// without the destination's name, for pages that show their own.
+    pub const UNTITLED_DETAIL: &str = "untitled_detail";
     /// The `medium` and `large` layout sizes and `window.compact` and its
     /// siblings in expressions.
     pub const SIZE_CLASSES: &str = "size_classes";
@@ -863,6 +882,97 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
                 descriptor.id
             ))
             .at(rail.source.clone()),
+        );
+    }
+    if lacks(feature::TEXT_WEIGHTS) && !app.style.text_weights.is_empty() {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` cannot give text styles their own weights (`text {{ … }}` in `style!`)",
+            descriptor.id
+        )));
+    }
+    if lacks(feature::TEXT_LINES)
+        && let Some(text) = first_element(app, |element| element.kind == "Text" && element.prop("lines").is_some())
+    {
+        diagnostics.push(
+            Diagnostic::error(format!("target `{}` cannot limit the lines of a `Text`", descriptor.id))
+                .at(text.source.clone()),
+        );
+    }
+    if lacks(feature::TOOLBAR_LEADING)
+        && let Some(toolbar) = first_element(app, |element| {
+            element.kind == "Toolbar"
+                && element.children.iter().any(|node| {
+                    matches!(node, bern_ir::Node::Element(child) if child.kind == "Spacer" || child.kind == "Text")
+                })
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot put toolbar items at the leading end or show text in a toolbar",
+                descriptor.id
+            ))
+            .at(toolbar.source.clone()),
+        );
+    }
+    if lacks(feature::AXIS_PADDING)
+        && let Some(element) = first_element(app, |element| {
+            element.prop("padding_x").is_some() || element.prop("padding_y").is_some()
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` pads every edge alike; it has no `padding_x` or `padding_y`",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::ICON_MENUS)
+        && let Some(menu) = first_element(app, |element| element.kind == "Menu" && element.keyword("style") == Some("icon"))
+    {
+        diagnostics.push(
+            Diagnostic::error(format!("target `{}` cannot show a `Menu` as an icon button", descriptor.id))
+                .at(menu.source.clone()),
+        );
+    }
+    if lacks(feature::ROW_BASELINE)
+        && let Some(row) = first_element(app, |element| element.kind == "Row" && element.keyword("align") == Some("baseline"))
+    {
+        diagnostics.push(
+            Diagnostic::error(format!("target `{}` cannot line a `Row` up on its baseline", descriptor.id))
+                .at(row.source.clone()),
+        );
+    }
+    if lacks(feature::IMAGE_CORNERS)
+        && let Some(image) = first_element(app, |element| element.kind == "Image" && element.prop("corner").is_some())
+    {
+        diagnostics.push(
+            Diagnostic::error(format!("target `{}` cannot round the corners of an `Image`", descriptor.id))
+                .at(image.source.clone()),
+        );
+    }
+    if lacks(feature::SIDEBAR_HEADER)
+        && let Some(header) = first_element(app, |element| element.kind == "SidebarHeader")
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot pin a `SidebarHeader` above the sidebar's list",
+                descriptor.id
+            ))
+            .at(header.source.clone()),
+        );
+    }
+    if lacks(feature::UNTITLED_DETAIL)
+        && let Some(detail) = first_element(app, |element| {
+            element.kind == "Detail" && element.prop("titled").is_some()
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` always titles the detail column with the selected destination",
+                descriptor.id
+            ))
+            .at(detail.source.clone()),
         );
     }
     if lacks(feature::POPOVER_BUTTON)

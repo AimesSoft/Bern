@@ -63,7 +63,30 @@ pub struct StyleSheet {
     /// `WindowSet(accent:)`.
     #[serde(default)]
     pub accents: Vec<AccentDef>,
+    /// The weights the application gives text styles, such as a heavy
+    /// `large_title`; the sizes stay the platform's.
+    #[serde(default)]
+    pub text_weights: Vec<TextWeight>,
 }
+
+/// The weight, and the size when the application's design gives one, of
+/// one text style.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TextWeight {
+    /// A text style, such as `large_title`.
+    pub style: String,
+    /// One of [`TEXT_WEIGHTS`].
+    pub weight: String,
+    /// The size in points on desktops; the platform's size of the style
+    /// when absent.
+    #[serde(default)]
+    pub size: Option<f64>,
+}
+
+/// The weights a text style can take.
+pub const TEXT_WEIGHTS: &[&str] = &[
+    "ultralight", "thin", "light", "regular", "medium", "semibold", "bold", "heavy", "black",
+];
 
 /// A named accent color.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -62,6 +62,15 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::SCROLL_SNAP,
     bern_target_api::feature::RAILS,
     bern_target_api::feature::POPOVER_BUTTON,
+    bern_target_api::feature::SIDEBAR_HEADER,
+    bern_target_api::feature::TEXT_WEIGHTS,
+    bern_target_api::feature::TEXT_LINES,
+    bern_target_api::feature::IMAGE_CORNERS,
+    bern_target_api::feature::ROW_BASELINE,
+    bern_target_api::feature::ICON_MENUS,
+    bern_target_api::feature::TOOLBAR_LEADING,
+    bern_target_api::feature::AXIS_PADDING,
+    bern_target_api::feature::UNTITLED_DETAIL,
     bern_target_api::feature::SIZE_CLASSES,
 ];
 

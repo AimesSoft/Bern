@@ -1188,11 +1188,38 @@ impl<'a> Generator<'a> {
         out.close("})");
     }
 
-    /// The items of one toolbar.
+    /// The items of one toolbar. Items before a `Spacer` stand at the
+    /// leading end, where the way back is; the rest at the trailing end.
     /// Items between `Divider`s form one group on a shared background,
     /// and a fixed space parts the groups, as the platform's toolbars group
     /// their sections; a picker stands in the center.
     fn toolbar_items(&self, out: &mut Out, children: &[Node], ctx: &Ctx) {
+        let split = children
+            .iter()
+            .position(|node| matches!(node, Node::Element(element) if element.kind == "Spacer"));
+        let (leading, trailing) = match split {
+            Some(index) => (&children[..index], &children[index + 1..]),
+            None => (&children[..0], children),
+        };
+        if !leading.is_empty() {
+            self.toolbar_groups(out, leading, ".navigation", ctx);
+        }
+        // The trailing end: on macOS `.primaryAction` is the leading one,
+        // and without a title the items follow the window's buttons unless
+        // a flexible space stands before them.
+        let placement = match self.platform {
+            Platform::Macos => {
+                out.open("if #available(macOS 26.0, *) {");
+                out.line("SwiftUI.ToolbarSpacer(.flexible, placement: .automatic)");
+                out.close("}");
+                ".automatic"
+            }
+            Platform::Ios => ".primaryAction",
+        };
+        self.toolbar_groups(out, trailing, placement, ctx);
+    }
+
+    fn toolbar_groups(&self, out: &mut Out, children: &[Node], placement: &str, ctx: &Ctx) {
         let mut groups: Vec<Vec<Node>> = vec![Vec::new()];
         for node in children {
             match node {
@@ -1202,16 +1229,32 @@ impl<'a> Generator<'a> {
                     self.element(out, element, ctx);
                     out.close("}");
                 }
+                // Words in a toolbar, such as the page a way back leads
+                // to: an item of their own, without a background.
+                Node::Element(element) if element.kind == "Text" => {
+                    groups.push(Vec::new());
+                    out.open("if #available(macOS 26.0, iOS 26.0, *) {");
+                    out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
+                    self.element(out, element, ctx);
+                    out.close("}");
+                    out.line(".sharedBackgroundVisibility(.hidden)");
+                    out.close("} else {");
+                    out.indent += 1;
+                    out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
+                    self.element(out, element, ctx);
+                    out.close("}");
+                    out.close("}");
+                }
                 node => groups.last_mut().expect("a group").push(node.clone()),
             }
         }
         for (index, group) in groups.iter().filter(|group| !group.is_empty()).enumerate() {
             if index > 0 {
                 out.open("if #available(macOS 26.0, iOS 26.0, *) {");
-                out.line("SwiftUI.ToolbarSpacer(.fixed, placement: .primaryAction)");
+                out.line(format!("SwiftUI.ToolbarSpacer(.fixed, placement: {placement})"));
                 out.close("}");
             }
-            out.open("SwiftUI.ToolbarItemGroup(placement: .primaryAction) {");
+            out.open(format!("SwiftUI.ToolbarItemGroup(placement: {placement}) {{"));
             let group_ctx = Ctx {
                 toolbar: true,
                 shared: group.len() > 1,
@@ -1554,7 +1597,43 @@ impl<'a> Generator<'a> {
                 "caption2" => "caption2",
                 _ => "body",
             };
-            out.line(format!(".font(.{font})"));
+            // The weight the application gives the style, if any.
+            match self
+                .app
+                .style
+                .text_weights
+                .iter()
+                .find(|entry| entry.style == style)
+            {
+                Some(entry) => match entry.size {
+                    Some(size) => out.line(format!(
+                        ".font(.system(size: {}, weight: .{}))",
+                        double(size),
+                        entry.weight
+                    )),
+                    None => out.line(format!(".font(.{font}.weight(.{}))", entry.weight)),
+                },
+                None => out.line(format!(".font(.{font})")),
+            }
+        }
+    }
+
+    /// `padding` on every edge; `padding_x` and `padding_y` on the
+    /// horizontal and vertical edges, in place of `padding` there.
+    fn padding(&self, out: &mut Out, element: &Element) {
+        let all = self.length(element, "padding");
+        let x = self.length(element, "padding_x");
+        let y = self.length(element, "padding_y");
+        match (all, x.as_ref(), y.as_ref()) {
+            (Some(all), None, None) => out.line(format!(".padding({all})")),
+            (all, x, y) => {
+                if let Some(x) = x.cloned().or(all.clone()) {
+                    out.line(format!(".padding(.horizontal, {x})"));
+                }
+                if let Some(y) = y.cloned().or(all) {
+                    out.line(format!(".padding(.vertical, {y})"));
+                }
+            }
         }
     }
 
@@ -1564,6 +1643,10 @@ impl<'a> Generator<'a> {
                 let content = self.text_prop(element, "content").unwrap_or_default();
                 out.line(format!("SwiftUI.Text(verbatim: {content})"));
                 self.font(out, element);
+                if let Some(lines) = element.number("lines") {
+                    out.line(format!(".lineLimit({})", lines.max(1.0) as i64));
+                    out.line(".truncationMode(.tail)");
+                }
                 match element.keyword("emphasis") {
                     Some("secondary") => out.line(".foregroundStyle(.secondary)"),
                     Some("tertiary") => out.line(".foregroundStyle(.tertiary)"),
@@ -1610,6 +1693,13 @@ impl<'a> Generator<'a> {
                 ));
                 self.nodes(out, &element.children, ctx);
                 out.close("}");
+                if !ctx.toolbar {
+                    out.line(if element.icon("icon").is_some() {
+                        ".bernButtonLook(.icon)"
+                    } else {
+                        ".bernButtonLook(.secondary)"
+                    });
+                }
                 if let Some(shortcut) = self.shortcut(element) {
                     out.line(format!(".keyboardShortcut({shortcut})"));
                 }
@@ -1705,6 +1795,7 @@ impl<'a> Generator<'a> {
                 }
                 out.close("}");
                 // iOS has no checkboxes; its toggles are switches.
+                out.line(".bernAccentTint()");
                 match (element.keyword("style"), self.platform) {
                     (Some("switch"), _) => out.line(".toggleStyle(.switch)"),
                     (Some("checkbox"), Platform::Macos) => out.line(".toggleStyle(.checkbox)"),
@@ -1808,6 +1899,7 @@ impl<'a> Generator<'a> {
                         match element.keyword("align") {
                             Some("top") => ".top",
                             Some("bottom") => ".bottom",
+                            Some("baseline") => ".firstTextBaseline",
                             _ => ".center",
                         },
                     )
@@ -1821,9 +1913,7 @@ impl<'a> Generator<'a> {
                 ));
                 self.nodes(out, &element.children, ctx);
                 out.close("}");
-                if let Some(padding) = self.length(element, "padding") {
-                    out.line(format!(".padding({padding})"));
-                }
+                self.padding(out, element);
                 self.frame(out, element);
                 self.toolbar(out, &element.children, ctx);
             }
@@ -1836,9 +1926,7 @@ impl<'a> Generator<'a> {
                 ));
                 self.nodes(out, &element.children, ctx);
                 out.close("}");
-                if let Some(padding) = self.length(element, "padding") {
-                    out.line(format!(".padding({padding})"));
-                }
+                self.padding(out, element);
             }
             "Stack" => {
                 let alignment = match element.keyword("align") {
@@ -1891,6 +1979,11 @@ impl<'a> Generator<'a> {
                     length("width"),
                     length("height"),
                 ));
+                if let Some(corner) = self.length(element, "corner") {
+                    out.line(format!(
+                        ".clipShape(SwiftUI.RoundedRectangle(cornerRadius: {corner}, style: .continuous))"
+                    ));
+                }
             }
             "Progress" => {
                 let label = self.text_prop(element, "label");
@@ -1912,6 +2005,7 @@ impl<'a> Generator<'a> {
                     }
                     None => out.line(head),
                 }
+                out.line(".bernAccentTint()");
             }
             "Spacer" => out.line("SwiftUI.Spacer()"),
             "Divider" => out.line("SwiftUI.Divider()"),
@@ -2196,16 +2290,34 @@ impl<'a> Generator<'a> {
         }
         out.close("} label: {");
         out.indent += 1;
+        let icon_only = element.keyword("style") == Some("icon");
         match element.icon("icon") {
-            Some(icon) => out.line(format!(
-                "SwiftUI.Label({label}, systemImage: {})",
-                string(icon)
-            )),
+            Some(icon) => {
+                out.line(format!(
+                    "SwiftUI.Label({label}, systemImage: {})",
+                    string(icon)
+                ));
+                if icon_only {
+                    out.line(".labelStyle(.iconOnly)");
+                }
+            }
             None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
         }
         out.close("}");
         if ctx.toolbar && ctx.shared {
             out.line(".menuIndicator(.hidden)");
+        }
+        // Outside a toolbar a menu is a pull-down button of the platform;
+        // an icon-only one is a round icon button without the arrow.
+        if !ctx.toolbar {
+            out.line(".menuStyle(.button)");
+            if icon_only {
+                out.line(".menuIndicator(.hidden)");
+                out.line(".bernButtonLook(.icon)");
+                out.line(format!(".help({label})"));
+            } else {
+                out.line(".bernButtonLook(.secondary)");
+            }
         }
         out.line(format!(
             ".bernControl({}, role: \"menu\", label: {label}, actions: BernControlActions())",
@@ -2273,10 +2385,17 @@ impl<'a> Generator<'a> {
                 ));
                 out.line(".labelStyle(.iconOnly)");
             }
-            (_, Some(icon)) => out.line(format!(
-                "SwiftUI.Label({label}, systemImage: {})",
-                string(icon)
-            )),
+            (_, Some(icon)) => {
+                out.line(format!(
+                    "SwiftUI.Label({label}, systemImage: {})",
+                    string(icon)
+                ));
+                // A toolbar shows only the icon of a label; a `Button`
+                // shows its words too, unlike an `IconButton`.
+                if ctx.toolbar {
+                    out.line(".labelStyle(.titleAndIcon)");
+                }
+            }
             _ => out.line(format!("SwiftUI.Text(verbatim: {label})")),
         }
         out.close("}");
@@ -2294,17 +2413,22 @@ impl<'a> Generator<'a> {
                 }
             }
             _ => {
+                // The platform's buttons (the design's chapter on controls):
+                // a toolbar draws its own.
                 if element.kind == "IconButton" {
-                    // In a toolbar the group draws the button.
                     if !ctx.toolbar {
-                        out.line(".buttonStyle(.borderless)");
+                        match element.keyword("prominence") {
+                            Some("plain") => out.line(".bernButtonLook(.flat)"),
+                            _ => out.line(".bernButtonLook(.icon)"),
+                        }
                     }
                     out.line(format!(".help({label})"));
-                } else {
+                } else if !ctx.toolbar {
                     match element.keyword("prominence") {
-                        Some("prominent") => out.line(".buttonStyle(.borderedProminent)"),
-                        Some("plain") => out.line(".buttonStyle(.borderless)"),
-                        _ => {}
+                        Some("prominent") => out.line(".bernButtonLook(.prominent)"),
+                        // Words without a border, in the secondary color.
+                        Some("plain") => out.line(".bernButtonLook(.flat)"),
+                        _ => out.line(".bernButtonLook(.secondary)"),
                     }
                 }
                 if let Some(style) = &style {
@@ -2434,6 +2558,7 @@ impl<'a> Generator<'a> {
             None => out.line("_ = editing"),
         }
         out.close("}");
+        out.line(".bernAccentTint()");
         let commit = action
             .map(|action| format!("; {action}"))
             .unwrap_or_default();
@@ -2493,6 +2618,22 @@ impl<'a> Generator<'a> {
         }) {
             self.searchable(out, search, ".sidebar", ctx);
         }
+        // The header stays at the top of the sidebar, below the window's
+        // buttons; the list scrolls below it.
+        if let Some(header) = sidebar.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "SidebarHeader" => Some(child),
+            _ => None,
+        }) {
+            out.open(".safeAreaInset(edge: .top, spacing: 0) {");
+            out.open("SwiftUI.VStack(alignment: .leading, spacing: 8) {");
+            self.nodes(out, &header.children, ctx);
+            out.close("}");
+            out.line(".frame(maxWidth: .infinity, alignment: .leading)");
+            out.line(".padding(.horizontal, 10)");
+            out.line(".padding(.vertical, 8)");
+            self.motion_modifiers(out, header);
+            out.close("}");
+        }
         // The footer stays at the bottom of the sidebar; the list scrolls
         // above it.
         if let Some(footer) = sidebar.children.iter().find_map(|node| match node {
@@ -2526,6 +2667,10 @@ impl<'a> Generator<'a> {
         // as macOS sidebar apps are.
         if let Some(title) = &title {
             out.line(format!(".navigationTitle({title})"));
+            // The page shows its own title: the title bar does not repeat it.
+            if detail.expr("titled").map(|titled| self.expr(titled)).as_deref() == Some("false") {
+                out.line(".bernToolbarTitleHidden()");
+            }
         }
         self.toolbar(out, &detail.children, ctx);
         self.inspector(out, &detail.children, ctx);
@@ -2732,7 +2877,9 @@ impl<'a> Generator<'a> {
                 format!("if {selection} == {value} {{ return {label} }}")
             })
         });
-        format!("{{ () -> String in {statements}; return \"\" }}()")
+        // Without a selected item the window's title stands in: an empty
+        // title on macOS leaves the toolbar without its title for good.
+        format!("{{ () -> String in {statements}; return bernWindow.title }}()")
     }
 
     /// When the selected item goes away, select the container's
@@ -2800,7 +2947,7 @@ impl<'a> Generator<'a> {
                     .unwrap_or_default();
                 match element.icon("icon") {
                     Some(icon) => out.line(format!(
-                        "SwiftUI.Label({label}, systemImage: {}).tag({value})",
+                        "BernSidebarLabel(title: {label}, systemImage: {}).tag({value})",
                         string(icon)
                     )),
                     None => out.line(format!("SwiftUI.Text(verbatim: {label}).tag({value})")),

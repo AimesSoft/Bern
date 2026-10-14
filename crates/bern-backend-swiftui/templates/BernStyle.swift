@@ -414,6 +414,98 @@ extension View {
     }
 }
 
+// MARK: - Accent and system controls
+
+private struct BernAccentKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
+extension EnvironmentValues {
+    /// The accent the application chose, for the controls that show one.
+    var bernAccent: Color? {
+        get { self[BernAccentKey.self] }
+        set { self[BernAccentKey.self] = newValue }
+    }
+}
+
+/// Tints a control with the application's accent; without one the system's
+/// accent stays.
+struct BernAccentTint: ViewModifier {
+    @Environment(\.bernAccent) private var accent
+
+    func body(content: Content) -> some View {
+        if let accent {
+            content.tint(accent)
+        } else {
+            content
+        }
+    }
+}
+
+/// Which system button a button is: the platform's own styles, Liquid Glass
+/// on macOS and iOS 26 and the bordered styles before.
+enum BernButtonLook {
+    case secondary, prominent, icon
+    /// An icon with no background, in the secondary color.
+    case flat
+}
+
+extension View {
+    /// Takes the application's accent: the main button, switches, sliders,
+    /// progress and sidebar icons.
+    func bernAccentTint() -> some View {
+        modifier(BernAccentTint())
+    }
+
+    @ViewBuilder
+    func bernButtonLook(_ look: BernButtonLook) -> some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            switch look {
+            case .secondary: buttonStyle(.glass)
+            case .prominent: buttonStyle(.glassProminent).bernAccentTint()
+            case .icon: buttonStyle(.glass).buttonBorderShape(.circle)
+            case .flat: buttonStyle(.borderless).foregroundStyle(.secondary)
+            }
+        } else {
+            switch look {
+            case .secondary: buttonStyle(.bordered)
+            case .prominent: buttonStyle(.borderedProminent).bernAccentTint()
+            case .icon: buttonStyle(.bordered).buttonBorderShape(.circle)
+            case .flat: buttonStyle(.borderless).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+extension View {
+    /// Keeps the title out of the title bar; the window keeps it for its
+    /// menus and the window list.
+    @ViewBuilder
+    func bernToolbarTitleHidden() -> some View {
+        if #available(macOS 15.0, iOS 18.0, *) {
+            toolbar(removing: .title)
+        } else {
+            self
+        }
+    }
+}
+
+/// A sidebar destination: its icon takes the application's accent, as the
+/// system's sidebars take the system's.
+struct BernSidebarLabel: View {
+    let title: String
+    let systemImage: String
+    @Environment(\.bernAccent) private var accent
+
+    var body: some View {
+        Label {
+            Text(verbatim: title)
+        } icon: {
+            Image(systemName: systemImage).foregroundStyle(accent ?? Color.accentColor)
+        }
+    }
+}
+
 // MARK: - Theme
 
 /// The accent the application chose at run time, read by the `accent`
@@ -425,16 +517,17 @@ final class BernThemeState {
     var accent: BernColor?
 }
 
-/// The accent and appearance of `WindowSet`, applied to a window: controls
-/// take the accent as their tint, drawn parts through the `accent` role,
-/// and the appearance is the application's (`system`, `light`, `dark`).
+/// The accent and appearance of `WindowSet`, applied to a window. The
+/// accent is not the window's tint: only the controls that show an accent
+/// take it (`bernAccentTint`), drawn parts through the `accent` role; the
+/// appearance is the application's (`system`, `light`, `dark`).
 struct BernThemeChoice: ViewModifier {
     let accent: BernColor?
     let appearance: String?
 
     func body(content: Content) -> some View {
         content
-            .tint(accent?.color)
+            .environment(\.bernAccent, accent?.color)
             .onChange(of: accent, initial: true) { BernThemeState.shared.accent = accent }
         #if os(macOS)
             .onChange(of: appearance, initial: true) {

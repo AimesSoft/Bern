@@ -1519,6 +1519,25 @@ struct BernQueryFailureRow: View {
 
 /// Root of every window: attaches the instance to the session runtime,
 /// provides environment objects and presents command failures.
+/// `BERN_RENDER=active` draws the controls of every window as in the key
+/// window, so window captures taken while another application is in front
+/// show what the user sees in the window they use.
+let bernRenderActive = ProcessInfo.processInfo.environment["BERN_RENDER"] == "active"
+
+struct BernRenderActive: ViewModifier {
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        if bernRenderActive {
+            content.environment(\.controlActiveState, .key)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
+}
+
 struct BernWindowRoot<Content: View>: View {
     let context: BernWindowContext
     let content: Content
@@ -1542,6 +1561,7 @@ struct BernWindowRoot<Content: View>: View {
                 content.bernHeroRoot()
             }
         }
+        .modifier(BernRenderActive())
         .alert(
             context.pendingClose?.message ?? "",
             isPresented: Binding(get: { context.pendingClose != nil }, set: { _ in }),

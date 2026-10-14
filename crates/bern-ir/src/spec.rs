@@ -470,6 +470,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         &[
             opt("gap", PropKind::Length),
             opt("padding", PropKind::Length),
+            opt("padding_x", PropKind::Length),
+            opt("padding_y", PropKind::Length),
             opt("width", PropKind::Length),
             opt("height", PropKind::Length),
             opt(
@@ -485,12 +487,17 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         &[
             opt("gap", PropKind::Length),
             opt("padding", PropKind::Length),
+            opt("padding_x", PropKind::Length),
+            opt("padding_y", PropKind::Length),
             opt("width", PropKind::Length),
             opt("height", PropKind::Length),
-            opt("align", PropKind::Keyword(&["top", "center", "bottom"])),
+            opt(
+                "align",
+                PropKind::Keyword(&["top", "center", "bottom", "baseline"]),
+            ),
         ],
         Children::Any,
-        "Horizontal arrangement",
+        "Horizontal arrangement; `align: baseline` lines the texts up on the baseline of their first line",
     ),
     spec(
         "Grid",
@@ -498,6 +505,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("min_width", PropKind::Length),
             opt("gap", PropKind::Length),
             opt("padding", PropKind::Length),
+            opt("padding_x", PropKind::Length),
+            opt("padding_y", PropKind::Length),
         ],
         Children::Any,
         "Equal columns, as many as fit with each at least `min_width` wide; children fill them row by row",
@@ -549,8 +558,17 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("id", PropKind::Id),
                 opt("fallback", PropKind::SelectionValue),
             ],
-            Children::Only(&["Search", "Section", "SidebarItem", "Pages", "SidebarFooter"]),
+            Children::Only(&["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]),
             "Sidebar list selecting a destination",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Sidebar"]),
+        ..spec(
+            "SidebarHeader",
+            &[],
+            Children::Any,
+            "Content pinned to the top of the sidebar, above its list, such as the application's name and icon",
         )
     },
     ComponentSpec {
@@ -564,7 +582,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     },
     ComponentSpec {
         placement: Placement::Within(&["SplitView"]),
-        ..spec("Detail", &[], Children::Any, "Detail column")
+        ..spec(
+            "Detail",
+            &[opt("titled", PropKind::Bool)],
+            Children::Any,
+            "Detail column; `titled: false` keeps the selected destination's name out of its title bar, for pages that show their own title",
+        )
     },
     ComponentSpec {
         placement: Placement::Within(&["Sidebar", "Section"]),
@@ -785,8 +808,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "SplitButton",
             "PopoverButton",
             "Divider",
+            "Spacer",
+            "Text",
         ]),
-        "Window or page level actions, and at most one search field; items between `Divider`s form one group",
+        "Window or page level actions, and at most one search field; items between `Divider`s form one group. Items before a `Spacer` stand at the leading end, where a page's way back is, and the rest at the trailing end",
     ),
     spec(
         "Adaptive",
@@ -811,9 +836,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
+                opt("style", PropKind::Keyword(&["button", "icon"])),
             ],
             Children::Only(&["MenuItem", "Divider"]),
-            "Button opening a menu of commands",
+            "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name",
         )
     },
     ComponentSpec {
@@ -877,9 +903,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("style", PropKind::Keyword(TEXT_STYLES)),
             opt("emphasis", PropKind::Keyword(EMPHASIS)),
             opt("mark", PropKind::ColorRole),
+            opt("lines", PropKind::Number),
         ],
         Children::None,
-        "Text with a semantic style; `mark` draws a band of the color under each line",
+        "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis",
     ),
     spec(
         "Canvas",
@@ -963,9 +990,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("width", PropKind::Length),
             opt("height", PropKind::Length),
             opt("fit", PropKind::Keyword(VIDEO_FIT)),
+            opt("corner", PropKind::Length),
         ],
         Children::None,
-        "Picture from a declared resource, sized by `width` and/or `height`; `label` describes it, without one it is decorative",
+        "Picture from a declared resource, sized by `width` and/or `height`, its corners rounded by `corner`; `label` describes it, without one it is decorative",
     ),
     spec(
         "Progress",
@@ -1014,6 +1042,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("icon", PropKind::Icon),
                 req("label", PropKind::DisplayText),
+                opt("prominence", PropKind::Keyword(&["standard", "plain"])),
                 opt("enabled", PropKind::Bool),
                 opt("variant", PropKind::StyleVariant),
                 FEATURE,
@@ -1022,7 +1051,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("files", PropKind::FileKinds),
             ],
             Children::None,
-            "Icon-only button with an accessible name; `pick` asks for a file as `Button` does",
+            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `pick` asks for a file as `Button` does",
         )
     },
     ComponentSpec {
@@ -1358,6 +1387,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: None,
             message: "a `Sidebar` has at most one `SidebarFooter`".into(),
+        });
+    }
+    if spec.name == "Sidebar" && count("SidebarHeader") > 1 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Sidebar` has at most one `SidebarHeader`".into(),
         });
     }
     if spec.name == "Toolbar" && count("Search") > 1 {

@@ -330,6 +330,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
         transitions: built_in_transitions(),
         patterns: Vec::new(),
         accents: Vec::new(),
+        text_weights: Vec::new(),
     };
     if items.len() > 1 {
         for (file, item) in &items[1..] {
@@ -583,6 +584,66 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
         {
             Some(existing) => *existing = accent,
             None => sheet.accents.push(accent),
+        }
+    }
+    for decl in &item.text {
+        let style = decl.name.to_string();
+        if !bern_ir::spec::TEXT_STYLES.contains(&style.as_str()) {
+            lowering.error(
+                decl.name.span(),
+                format!(
+                    "`{style}` is not a text style; text styles: {}",
+                    bern_ir::spec::TEXT_STYLES.join(", ")
+                ),
+            );
+            continue;
+        }
+        // `heavy`, or `font(size: 30, weight: heavy)`.
+        let (weight, size) = match &decl.value {
+            StyleValue::Name(path) if path.len() == 1 => (path[0].to_string(), None),
+            StyleValue::Call { name, args } if name == "font" => {
+                let mut weight = None;
+                let mut size = None;
+                for arg in args {
+                    match (arg.name.as_ref().map(|name| name.to_string()).as_deref(), &arg.value) {
+                        (Some("weight"), StyleValue::Name(path)) if path.len() == 1 => {
+                            weight = Some(path[0].to_string())
+                        }
+                        (Some("size"), StyleValue::Number(value, _)) => size = Some(*value),
+                        _ => lowering.error(
+                            arg.value.span(),
+                            "`font` takes `size: points` and `weight: name`",
+                        ),
+                    }
+                }
+                (weight.unwrap_or_else(|| "regular".into()), size)
+            }
+            other => {
+                lowering.error(
+                    other.span(),
+                    "a text style takes a weight, such as `heavy`, or `font(size: 30, weight: heavy)`",
+                );
+                continue;
+            }
+        };
+        if !bern_ir::style::TEXT_WEIGHTS.contains(&weight.as_str()) {
+            lowering.error(
+                decl.value.span(),
+                format!(
+                    "`{weight}` is not a weight; weights: {}",
+                    bern_ir::style::TEXT_WEIGHTS.join(", ")
+                ),
+            );
+            continue;
+        }
+        let entry = bern_ir::style::TextWeight { style, weight, size };
+        match sheet
+            .text_weights
+            .iter_mut()
+            .find(|existing| existing.style == entry.style)
+        {
+            Some(existing) => *existing = entry,
+            None => sheet.text_weights.push(entry),
         }
     }
     for rule in &item.rules {

@@ -35,6 +35,8 @@ pub struct StyleItem {
     /// `accents { crimson: "#FF2E55" }`: accent colors the application
     /// chooses among at run time.
     pub accents: Vec<MotionDecl>,
+    /// `text { large_title: heavy }`: the weight of a text style.
+    pub text: Vec<MotionDecl>,
     pub rules: Vec<StyleRuleItem>,
     pub span: Span,
 }
@@ -123,6 +125,7 @@ impl Parse for StyleItem {
         let mut transitions = Vec::new();
         let mut patterns = Vec::new();
         let mut accents = Vec::new();
+        let mut text = Vec::new();
         let mut rules = Vec::new();
         while !input.is_empty() {
             let attrs = input.call(syn::Attribute::parse_outer)?;
@@ -130,7 +133,8 @@ impl Parse for StyleItem {
             if (component == "motion"
                 || component == "transition"
                 || component == "pattern"
-                || component == "accents")
+                || component == "accents"
+                || component == "text")
                 && attrs.is_empty()
                 && input.peek(syn::token::Brace)
             {
@@ -142,6 +146,8 @@ impl Parse for StyleItem {
                     &mut transitions
                 } else if component == "accents" {
                     &mut accents
+                } else if component == "text" {
+                    &mut text
                 } else {
                     &mut patterns
                 };
@@ -211,6 +217,7 @@ impl Parse for StyleItem {
             transitions,
             patterns,
             accents,
+            text,
             rules,
             span,
         })
