@@ -1794,6 +1794,8 @@ impl<'a> Generator<'a> {
             let motion = format!("M.{}", member(&transition.motion));
             let kind = match &transition.kind {
                 bern_ir::style::TransitionKind::Fade => "{ kind: \"fade\"".to_string(),
+                // Rejected by the edge_grow capability check before generation.
+                bern_ir::style::TransitionKind::Grow { .. } => continue,
                 bern_ir::style::TransitionKind::Pop { from } => {
                     format!("{{ kind: \"pop\", from: {}", number(*from))
                 }

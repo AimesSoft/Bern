@@ -55,6 +55,7 @@ pub struct ContributedPage {
     pub variant: String,
     pub label: BTreeMap<String, String>,
     pub icon: Option<String>,
+    pub badge: Option<String>,
     pub component: String,
 }
 
@@ -378,10 +379,11 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .map(|icon| format!(", icon: {icon:?}"))
                             .unwrap_or_default();
+                        let badge = page.badge.as_ref().map(|field| format!(", badge: {}.{field}", slot_client(&page.module))).unwrap_or_default();
                         self.contributions.guarded(
                             &page.module,
                             format!(
-                                "SidebarItem(value: {}::{}, label: tr! {{ {} }}{icon})",
+                                "SidebarItem(value: {}::{}, label: tr! {{ {} }}{icon}{badge})",
                                 pages.enum_name,
                                 page.variant,
                                 label.join(", ")
@@ -933,6 +935,20 @@ impl<'a> Checker<'a> {
                         );
                         return None;
                     }
+                    if prop_name == "nudge_scale" && (!value.is_finite() || value <= 0.0) {
+                        self.error(
+                            prop.value.span(),
+                            "`nudge_scale` must be finite and greater than zero",
+                        );
+                        return None;
+                    }
+                    if prop_name == "appear_delay" && (!value.is_finite() || value < 0.0) {
+                        self.error(
+                            prop.value.span(),
+                            "`appear_delay` must be a finite, nonnegative number of seconds",
+                        );
+                        return None;
+                    }
                     if prop_name == "stagger" && !(0.0..=1.0).contains(&value) {
                         self.error(
                             prop.value.span(),
@@ -1172,6 +1188,16 @@ impl<'a> Checker<'a> {
             }
         }
 
+        if name == "Picker" {
+            if let Some(ir::Prop::Expr { expr }) = props.get("selected") {
+                if !is_labeled_enum(&expr.ty, self.types) {
+                    self.error(
+                        element.span,
+                        "`selected` must be an enum whose variants all have labels",
+                    );
+                }
+            }
+        }
         let children = match (&element.children, name.as_str()) {
             // The layouts of one `Adaptive` are alternatives: the same
             // control id in two of them names the same control.

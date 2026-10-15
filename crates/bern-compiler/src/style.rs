@@ -18,6 +18,7 @@ pub const PLATFORMS: [&str; 6] = ["macos", "ios", "windows", "linux", "android",
 
 /// Controls that take style overrides, with the states that apply to them.
 const STYLEABLE: &[(&str, &[StyleState])] = &[
+    ("Stack", &[]),
     (
         "Button",
         &[
@@ -403,7 +404,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             "pop" => TransitionKind::Pop {
                 from: get("from").or(positional.first().copied()).unwrap_or(0.8),
             },
-            "slide" => {
+            "slide" | "grow" => {
                 let edge = match args
                     .iter()
                     .find(|arg| arg.name.as_ref().is_some_and(|name| name == "edge"))
@@ -424,15 +425,19 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                         Edge::Bottom
                     }
                 };
-                TransitionKind::Slide {
-                    edge,
-                    distance: get("distance").unwrap_or(16.0),
+                if name == "grow" {
+                    TransitionKind::Grow { edge }
+                } else {
+                    TransitionKind::Slide {
+                        edge,
+                        distance: get("distance").unwrap_or(16.0),
+                    }
                 }
             }
             other => {
                 lowering.error(
                     name.span(),
-                    format!("`{other}` is not a transition; use fade, pop or slide"),
+                    format!("`{other}` is not a transition; use fade, pop, grow or slide"),
                 );
                 continue;
             }
@@ -605,7 +610,10 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                 let mut weight = None;
                 let mut size = None;
                 for arg in args {
-                    match (arg.name.as_ref().map(|name| name.to_string()).as_deref(), &arg.value) {
+                    match (
+                        arg.name.as_ref().map(|name| name.to_string()).as_deref(),
+                        &arg.value,
+                    ) {
                         (Some("weight"), StyleValue::Name(path)) if path.len() == 1 => {
                             weight = Some(path[0].to_string())
                         }
@@ -636,7 +644,11 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             );
             continue;
         }
-        let entry = bern_ir::style::TextWeight { style, weight, size };
+        let entry = bern_ir::style::TextWeight {
+            style,
+            weight,
+            size,
+        };
         match sheet
             .text_weights
             .iter_mut()

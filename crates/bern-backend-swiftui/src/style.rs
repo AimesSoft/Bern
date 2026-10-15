@@ -29,6 +29,7 @@ const ROW_STATES: &[&str] = &[
 /// their content by `BernContentButtonStyle`), sidebar rows drawn by
 /// `BernStyledRow`.
 pub const SUPPORT: &[StyleSupport] = &[
+    StyleSupport { component: "Stack", base: &["background", "foreground", "corner"], states: &[] },
     StyleSupport {
         component: "Button",
         base: &[
@@ -248,12 +249,22 @@ pub fn control_size(size: ControlSize) -> &'static str {
 
 /// A transition as a SwiftUI `AnyTransition` and the `BernMotion` moving it.
 /// A transition as a `BernAppear`, for a staggered entrance run by hand.
+fn transition_edge(edge: &Edge) -> &'static str {
+    match edge {
+        Edge::Leading => ".leading",
+        Edge::Trailing => ".trailing",
+        Edge::Top => ".top",
+        Edge::Bottom => ".bottom",
+    }
+}
+
 pub fn appear(app: &Application, name: &str) -> Option<String> {
     use bern_ir::style::TransitionKind;
     let def = app.style.transition(name)?;
     Some(match &def.kind {
         TransitionKind::Fade => "BernAppear.fade".to_string(),
         TransitionKind::Pop { from } => format!("BernAppear.pop({})", number(*from)),
+        TransitionKind::Grow { edge } => format!("BernAppear.grow({})", transition_edge(edge)),
         TransitionKind::Slide { edge, distance } => {
             let (x, y) = match edge {
                 Edge::Leading => (-distance, 0.0),
@@ -274,6 +285,7 @@ pub fn transition(app: &Application, name: &str) -> Option<(String, String)> {
         TransitionKind::Pop { from } => {
             format!(".scale(scale: {}).combined(with: .opacity)", number(*from))
         }
+        TransitionKind::Grow { edge } => format!(".bernGrow(edge: {})", transition_edge(edge)),
         TransitionKind::Slide { edge, distance } => {
             let (x, y) = match edge {
                 Edge::Leading => (-distance, 0.0),

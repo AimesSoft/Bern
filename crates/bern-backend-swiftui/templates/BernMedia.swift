@@ -544,7 +544,7 @@ struct BernVideo: View {
     var corner: Double = 0
     var cornerMotion: BernMotion? = nil
     @Environment(BernWindowContext.self) private var window
-    @Environment(\.accessibilityReduceMotion) private var reduce
+    @BernReducedMotion private var reduce
     @State private var owner = BernPlayerOwner()
 
     private var playerID: String {

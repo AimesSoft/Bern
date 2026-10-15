@@ -21,6 +21,7 @@ mod composite;
 pub mod files;
 pub mod outbox;
 pub mod resources;
+pub mod storage;
 
 pub use composite::{Composite, ModuleEngine};
 

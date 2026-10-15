@@ -486,8 +486,9 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸 | 初期；尺寸 SwiftUI 已实现 |
 | Grid | 等宽的列，列宽不小于 `min_width`，放得下几列就排几列，子元素逐行填入；`gap` 默认 8 | 阶段六 |
 | Stack | 叠放：后写的一层在上面，先接收输入；整体与最大的一层一样大（写了 `width`、`height` 时按它们），较小的层按 `align` 的九个方位之一对齐，默认居中 | 阶段六 |
+| Accordion | 横向手风琴；`count` 是列数，`selected` 是从 0 开始的展开列，其他列宽 `collapsed_width`，展开列填满余宽；`gap` 与 `height` 定义间距与高度，`corner` 定义每列的裁切圆角。`animate` 逐帧改变列宽，位置由当前列宽累加，内容裁切到各列；减弱动态效果时直接切换 | SwiftUI；其他目标使用 `accordion_layout` 能力检查拒绝 |
 | Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题 | 初期 |
-| Label | 图标与标题组合 | 初期 |
+| Label | 图标与标题组合；`display: icon` 只显示图标，保留 `title` 作为可访问名称，图标字号仍由 `style` 决定 | `display: icon` 已在 SwiftUI 实现（`icon_labels`）；其他目标未实现时构建报错 |
 | Spacer 和 Divider | 弹性空白与分隔线 | 初期 |
 | Text | 本地化或动态文本、文字层级、换行及截断；`mark` 标注底纹 | 初期；`mark` 见“画布与标注文字” |
 | Button | 可访问名称、语义角色、强调程度、启用状态及激活事件；可以带一个子元素作为它显示的内容，见“带内容的按钮与悬停显示”。`pick: draft.file` 让按下先弹出系统的打开面板，选中一个文件后存进这个会话字段（`MediaSource` 或 `Option<MediaSource>`）再执行动作，取消则什么都不做；`files` 写接受的种类：`any`（默认）、`video`、`audio`、`picture`、`folder` 与 `.ass` 这样的扩展名，用空格或逗号分开。`IconButton` 与 `MenuItem` 同样可以写 | 初期；带内容见该节的实现进度。`pick` SwiftUI 已实现（`file_pick`）：macOS 是挂在窗口上的打开面板，不接受的文件变灰，已验证；iOS 是文档选择器，选中的文件就地打开并保持可读，iOS 26.5 模拟器已验证。Compose 用系统的文档选择器（`OpenDocument`），按种类过滤并保留读取授权，Android 模拟器上验证了只列出视频或图片、选中后播放或显示。`video` 除系统的影片类型外还收 mkv、webm、flv、rmvb 等系统未必认识的容器。Web 用浏览器的文件选择框（`<input type=file>`），按种类过滤，选中的文件以页面的 `blob:` 地址交给动作；系统的选择框无法在自动化中操作，未实测，用 `ui.set_file` 验证了动作。GTK 用 `GtkFileDialog`，按种类过滤，虚拟机上没有桌面门户，选择未实测；WinUI 3 用 `FileOpenPicker` 与 `FolderPicker`，Windows PC 上验证 Ctrl+O 弹出打开面板 |
@@ -612,7 +613,7 @@ ControlStyle  = resolve(recipe, ThemeSnapshot, surface_context, interaction_stat
 
 每个控件配方列出支持的状态、组合规则和冲突处理，例如选中并悬停、错误且聚焦。禁用状态阻止相应操作，但不能丢掉必要的选择或错误语义。键盘焦点反馈必须独立保留，不能被普通悬停样式覆盖。
 
-图片、视频、封面和品牌图案默认保留原始颜色，不自动反色或施加全局滤镜。单色语义图标参与主题着色；完整彩色资源作为内容处理。文字或控件覆盖动态媒体时，由组件提供声明过的稳定承载表面或整体遮罩，不要求应用为每一帧选择文字颜色。使用半透明遮罩时，需要校验允许背景范围中的最坏情况；不能只取一帧的平均颜色就认为后续均可读。
+图片、视频、封面和品牌图案默认保留原始颜色，不自动反色或施加全局滤镜。单色语义图标参与主题着色；完整彩色资源作为内容处理。`Image(rendering: template)` 明确把图片的透明度作为单色图案，使用所在位置的文字前景色，随明暗外观变化；适用于已留出透明镂空的品牌标志，不是对彩色照片做灰度处理。省略或写 `rendering: original` 保留原色。SwiftUI 支持此能力（`image_template`），其他目标未实现时构建报错。文字或控件覆盖动态媒体时，由组件提供声明过的稳定承载表面或整体遮罩，不要求应用为每一帧选择文字颜色。使用半透明遮罩时，需要校验允许背景范围中的最坏情况；不能只取一帧的平均颜色就认为后续均可读。
 
 Image、Video 等组件的外壳、加载与错误提示及叠加操作仍参与自动主题；保留的是内容像素，不是免除整个组件的主题要求。
 
@@ -681,7 +682,7 @@ WindowSet(handle: AppWindows, primary: main, accent: app.accent, appearance: app
 
 ## 样式覆盖、动效与自绘
 
-实现进度：`style!` 的解析、校验与 IR，各目标的样式能力检查，以及 SwiftUI 上 `Button`、`IconButton`、`SidebarItem` 的样式覆盖与状态变换动效，已在 macOS 上用 `examples/planner` 验证；Web 已实现：基础外观写成样式，悬停、按下、焦点、禁用与选中的外观按顺序合并，颜色用短暂的 CSS 过渡，缩放、位移与透明度用状态的弹簧、回到普通状态用 `settle`；浏览器中用 `examples/planner` 验证侧栏项悬停放大到 1.03 并出现底色、按下 0.96、离开回 1，主要按钮的强调色底、10 圆角与大尺寸。GTK 已实现：每个样式写成一张样式表，状态取自 GTK 自己的状态标志，同优先级下后写的胜出，正是状态的合并顺序；WinUI 3 已实现：颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换，阴影由 Direct2D 画成位图垫在按钮下；两者的缩放、位移与透明度都用弹簧。Linux 虚拟机与 Windows PC 上用 `examples/planner` 与 `gallery` 验证侧栏项悬停放大到 1.03 与选中填色、卡片悬停放大并投影。WinUI 3 不支持选中侧栏项的 `indicator`（`NavigationView` 只画前缘的指示条），检查时报错。SwiftUI 侧栏项一旦有样式，就由 Bern 绘制选中、悬停与按下，列表不再保留系统的选中；方向键在这种侧栏中切换选中尚未实现。结构过渡（`appear`、`disappear`、`reflow`）、共享元素（`hero`）、窗口的 `chrome`、`immersive` 与 `idle_after`、`Canvas` 与标注文字也已在 SwiftUI 上实现，并在 macOS 上验证：过渡与共享元素用逐帧截图确认在移动，沉浸窗口静置后隐藏标题栏、点击后恢复。悬停与按下的弹簧手感未验证。Web 也已实现：弹簧由页面自己的逐帧积分驱动，可打断并保留速度；一个元素的变换分成几层（样式状态、出现与消失、共享元素、让位、晃一下、滚动联动）各自驱动后合成；共享元素在旧元素卸载时记下它的位置并留一份副本，新元素从那里长出、副本同时淡出；消失的元素等过渡播完才离开页面；`window.idle` 由窗口内的指针、触摸、滚轮与按键重新计时，沉浸时隐藏页头并在静置时隐藏指针。浏览器中逐帧采样确认 planner 的标题在两种字号间放大并交叉淡化、新标签从 0.4 倍弹出，拖放描边淡出后移除，沉浸窗口静置 3 秒后隐藏页头、移动指针后恢复。GTK 与 WinUI 3 也已实现全部动效用法与窗口外观，做法与验证见下面各节和它们的实现记录。尚未实现：其余控件的样式覆盖。各平台映射是依据平台文档的预期，实现时逐项实测，做不到的如实报告。
+实现进度：`style!` 的解析、校验与 IR，各目标的样式能力检查，以及 SwiftUI 上 `Button`、`IconButton`、`SidebarItem` 的样式覆盖与状态变换动效，已在 macOS 上用 `examples/planner` 验证；Web 已实现：基础外观写成样式，悬停、按下、焦点、禁用与选中的外观按顺序合并，颜色用短暂的 CSS 过渡，缩放、位移与透明度用状态的弹簧、回到普通状态用 `settle`；浏览器中用 `examples/planner` 验证侧栏项悬停放大到 1.03 并出现底色、按下 0.96、离开回 1，主要按钮的强调色底、10 圆角与大尺寸。GTK 已实现：每个样式写成一张样式表，状态取自 GTK 自己的状态标志，同优先级下后写的胜出，正是状态的合并顺序；WinUI 3 已实现：颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换，阴影由 Direct2D 画成位图垫在按钮下；两者的缩放、位移与透明度都用弹簧。Linux 虚拟机与 Windows PC 上用 `examples/planner` 与 `gallery` 验证侧栏项悬停放大到 1.03 与选中填色、卡片悬停放大并投影。WinUI 3 不支持选中侧栏项的 `indicator`（`NavigationView` 只画前缘的指示条），检查时报错。SwiftUI 侧栏项一旦有样式，就由 Bern 绘制选中、悬停与按下，列表不再保留系统的选中；这种侧栏获得焦点后，上下方向键按当前可见条目的顺序切换选中；隐藏的条件项和关闭模块的页面不参与导航。中性底色上的图标仍跟随应用强调色，显式前景色或有色选中填充保持原来的对比配色。结构过渡（`appear`、`disappear`、`reflow`）、共享元素（`hero`）、窗口的 `chrome`、`immersive` 与 `idle_after`、`Canvas` 与标注文字也已在 SwiftUI 上实现，并在 macOS 上验证：过渡与共享元素用逐帧截图确认在移动，沉浸窗口静置后隐藏标题栏、点击后恢复。悬停与按下的弹簧手感未验证。Web 也已实现：弹簧由页面自己的逐帧积分驱动，可打断并保留速度；一个元素的变换分成几层（样式状态、出现与消失、共享元素、让位、晃一下、滚动联动）各自驱动后合成；共享元素在旧元素卸载时记下它的位置并留一份副本，新元素从那里长出、副本同时淡出；消失的元素等过渡播完才离开页面；`window.idle` 由窗口内的指针、触摸、滚轮与按键重新计时，沉浸时隐藏页头并在静置时隐藏指针。浏览器中逐帧采样确认 planner 的标题在两种字号间放大并交叉淡化、新标签从 0.4 倍弹出，拖放描边淡出后移除，沉浸窗口静置 3 秒后隐藏页头、移动指针后恢复。GTK 与 WinUI 3 也已实现全部动效用法与窗口外观，做法与验证见下面各节和它们的实现记录。尚未实现：其余控件的样式覆盖。各平台映射是依据平台文档的预期，实现时逐项实测，做不到的如实报告。
 
 ### 默认外观与覆盖层次
 
@@ -779,13 +780,17 @@ Stack(align: top_trailing) {
 1. **状态变换**：在样式中为状态声明缩放、位移与透明度，作用在控件的外层容器上，不改变控件本身的绘制，也不影响相邻元素的布局。
 2. **结构过渡**：任何元素可以声明 `appear` 与 `disappear`，在它因 `if`、`match` 或 `ForEach` 的变化而挂载或卸载时播放；首次显示不播放。过渡只有 `fade`、`pop(from: 比例)` 与 `slide(edge, 距离)` 几种，各带一个动效 token。容器可以声明 `reflow: 动效`，让相邻元素平滑让位。
 
+   SwiftUI 的 `match` 与 `if` 一样，在分支直接子元素声明过渡时，为判别值变化建立动画事务；未声明过渡的 `match` 保持原来的行为。已用动态导航回归覆盖生成代码及 Swift 类型检查，并在 Erika 设置页慢放确认普通分类、相同组件的不同分支和独立布局之间的淡入与位移；修改当前页内的偏好不会重播入场。
+
    ```rust
    ForEach(items: app.sections, key: id, reflow: smooth) |section| {
        SidebarItem(value: section.id, label: section.title, appear: pop(from: 0.4, jelly))
    }
    ```
 
-   容器可以声明 `stagger: 秒`，让子元素错峰出现：这个容器本身出现时，或一次更新给它加入了几个子元素时，带 `appear` 的直接子元素依次播放各自的过渡，每个比前一个晚 `stagger` 秒。与平常不同，容器出现时它的这些子元素也播放 `appear`，这正是错峰的用途；首次显示仍不播放，系统减少动态效果时不错峰。`stagger` 写在 `Column`、`Row`、`Grid`、`Stack`、`ForEach` 与 `List` 上，取 0 到 1 秒；`ForEach` 的子元素是它的各行。实现进度：Web 已实现，在浏览器中用 `examples/gallery` 的海报墙（`ForEach(stagger: 0.04)`，卡片 `appear: rise`）逐帧确认切到“图案”页时 6 张卡片依次在约 0、47、97、130、164、214 毫秒开始升起；macOS 与 iOS 已实现，同一次更新中出现的子元素按阅读顺序（自上而下，同一行内按书写方向）排队，不依赖系统报告出现的先后（懒加载网格报告的先后不固定），在 macOS 窗口与 iPhone 17 Pro 模拟器上放慢 10 倍逐帧确认卡片从 Gingham 到 Windowpane 依次升起；Compose、GTK 与 WinUI 3 已实现，轮次在组合或构建各行时按书写与条目顺序分配：Android 模拟器上把动画倍率调为 100 逐张截图、Windows PC 上逐帧截取，6 张卡片同样依次升起；Linux 虚拟机上由动效日志量出 6 张卡片在约 3、44、84、123、164、204 毫秒开始。一次更新加入几个子元素的情形在 Compose 上未验证。
+   `grow(edge: bottom, bouncy)` 是固定某一边、沿垂直于该边的方向从零伸展到完整尺寸的过渡，不淡入，也不缩放另一轴。`appear_delay: 秒` 必须配合 `appear`，延迟非负，和 `stagger` 的轮次延迟相加；每次挂载（包括首次加载）在首帧布局就绪后开始计时，卸载取消等待，普通状态更新不重播。系统减少动态效果时立即显示，不等待、不伸展。SwiftUI 已实现（`edge_grow`、`delayed_appear`），其他目标用到时构建报错。
+
+   容器可以声明 `stagger: 秒`，让子元素错峰出现：这个容器本身出现时，或一次更新给它加入了几个子元素时，带 `appear` 的直接子元素依次播放各自的过渡，每个比前一个晚 `stagger` 秒。与平常不同，容器出现时它的这些子元素也播放 `appear`，这正是错峰的用途；首次显示默认不播放，显式写 `appear_delay` 时等待首帧布局完成再播放，系统减少动态效果时不错峰。`stagger` 写在 `Column`、`Row`、`Grid`、`Stack`、`ForEach` 与 `List` 上，取 0 到 1 秒；`ForEach` 的子元素是它的各行。实现进度：Web 已实现，在浏览器中用 `examples/gallery` 的海报墙（`ForEach(stagger: 0.04)`，卡片 `appear: rise`）逐帧确认切到“图案”页时 6 张卡片依次在约 0、47、97、130、164、214 毫秒开始升起；macOS 与 iOS 已实现，同一次更新中出现的子元素按阅读顺序（自上而下，同一行内按书写方向）排队，不依赖系统报告出现的先后（懒加载网格报告的先后不固定），在 macOS 窗口与 iPhone 17 Pro 模拟器上放慢 10 倍逐帧确认卡片从 Gingham 到 Windowpane 依次升起；Compose、GTK 与 WinUI 3 已实现，轮次在组合或构建各行时按书写与条目顺序分配：Android 模拟器上把动画倍率调为 100 逐张截图、Windows PC 上逐帧截取，6 张卡片同样依次升起；Linux 虚拟机上由动效日志量出 6 张卡片在约 3、44、84、123、164、204 毫秒开始。一次更新加入几个子元素的情形在 Compose 上未验证。
 
    ```rust
    Column(gap: 12, stagger: 0.03) {
@@ -835,6 +840,7 @@ ScrollView(axis: horizontal, snap: center, position: draft.episode) {
 ```
 
 - **晃一下**：任何元素写 `nudge: 条件`，条件变真时它稍稍放大、再以 `jelly` 弹簧弹回，例如拖入文件时画框晃一下：`Stack(nudge: draft.dragging)`。`ScrollView(position:, arrival: nudge)` 让设置 `position` 滚到的那一项在停稳后晃一下，例如点拼音索引后那张海报；用户自己滚动不会触发。减少动态效果时不晃。
+- **重复反馈**（SwiftUI）：`nudge_key: app.revision` 在键每次变化时播放一次反馈，首次挂载不播放；可配 `nudge_scale: 0.95`，先收缩、90 ms 后用 `jelly` 弹回。用于重复点选同一预设等不会改变选中值的操作；新事件取消上次等待，减少动态效果时保持静止。其他后端暂不播放并给出能力警告。
 - **手势绑定到值**：`Pinch` 与 `Swipe` 是包住内容的手势区。`Pinch(value:, min:, max:)` 用双指缩放的倍数乘到值上；`Swipe(value:, min:, max:, axis:, distance:)` 把拖动的距离换算成值的变化，向上或向右增大，`distance` 点（默认 300）走完整个范围。动作在手指离开时执行，与 `Slider` 一样；外部入口用 `ui.set_number`，辅助技术按十分之一范围调节。手势不能是唯一的入口：同一个值应另有滑块、按钮或菜单。
 
 各目标的预期实现：SwiftUI 的 `scrollTransition`、`scrollTargetBehavior`、`MagnifyGesture` 与 `DragGesture`；Compose 的 `graphicsLayer` 按每格的位置与滚动量计算、自己的 `FlingBehavior` 与多指指针事件的 `calculateZoom`；WinUI 3 的合成表达式动画（`ExpressionAnimation` 读 `ScrollViewer` 的位移）、`SnapPointsType` 与操作事件；GTK 在帧时钟中读取调整量，`GtkGestureZoom` 与 `GtkGestureDrag`；Web 的滚动驱动动画（`animation-timeline: view()`）、`scroll-snap` 与指针事件。
@@ -2192,3 +2198,51 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 | v0.26 | 模块化应用的设计：应用由外壳与多个模块组成，每个模块有自己的协议、引擎、界面、翻译与资源；命令目录与状态按命名空间合并，模块间通过依赖模块的命令与事件交互；插槽与页面插槽让模块向外壳贡献界面；可选模块可在运行时开关并沿依赖级联；`sources` 可以写目录；`bern new --module` |
 | v0.25 | 样式覆盖、动效与自绘的设计（尚未实现）：标准控件默认原生外观，应用用 `style!` 声明全应用的样式覆盖与动效 token，颜色只用语义角色并由主题内核检查，目标做不到的覆盖在构建时报出；元素可声明出现、消失、重排过渡与共享元素；导航容器的项可按条件出现；窗口增加 `chrome`、`immersive` 与 `idle_after`；`Canvas` 与 `Text` 标注；新增 `fill.subtle`、`fill.strong` 角色。删除图标按钮不画容器、不覆盖系统托管表面等外观限制；功能所需的较新系统接口可以按版本分支使用 |
 | v0.24 | iPad：同一个 iOS 应用包在 iPad 上使用原生多窗口（每种窗口一个 `WindowGroup`，以窗口种类为值保持单实例），设置仍为 sheet 并以 ⌘, 打开；呈现方式在启动时按设备决定并报告给引擎；声明的默认与最小尺寸用于可调整的 iPad 窗口；焦点按窗口是否显示为活动报告；IPC 客户端的握手有超时，被系统挂起的应用报告为不应答 |
+
+
+### 搜索面板（2026-10-14）
+
+`Toolbar` 中的 `Search(style: palette)` 是命令面板：点击搜索入口或快捷键后，从入口展开至内容区上方，遮罩覆盖窗口，自动聚焦输入；Esc、点击外部及激活结果都关闭。`panel_prompt` 是展开时的提示，`width`/`height` 是面板的理想宽度与最大高度（默认 640/480），随窗口缩小并随结果高度收缩。普通 `Search` 保留原生建议列表。
+
+`SearchItem` 是搜索结果的按钮，`id`、`label`、动作必需，`icon`、`detail`、`hint` 可选。行高 42；子元素可替换默认行，例如 70×105 海报。`navigation: false` 的海报仍可点击和 Tab 聚焦，不参加上下方向键选择。结果按声明顺序导航，Enter 激活，查询改变后重新选第一行；支持 `pick`/`files`。面板按窗口独立保存状态，关闭后结果卸载、焦点归还搜索入口；减少动态效果时不做几何变换。
+
+首个实现为 macOS SwiftUI 的原生视图，不嵌 WebView；其他目标声明 `search_palette` 不支持并在构建时失败。
+
+### 自适应海报（2026-10-14）
+
+`Button(shape: capsule, height: 32)` 和 `Menu(shape: capsule, height: 32)` 声明同高的胶囊形系统控件。SwiftUI 在 macOS / iOS 26 使用系统交互式 Liquid Glass；菜单保留系统弹出与键盘交互，移除旧式菜单按钮的矩形底板后再应用玻璃。旧系统使用系统材质胶囊。省略形状保持原有控件，其他目标通过 `capsule_controls` 能力检查明确拒绝尚未实现的用法。
+
+`Image(aspect: 0.6666666667, fit: cover)` 按父容器提供的宽度保持 2:3 比例，无需固定宽高；裁切在该比例内，加载前后布局不跳动。`Grid(row_gap:)` 可将行距与列距分别设置；省略时仍使用 `gap`。SwiftUI 支持，其他后端通过 `adaptive_images` 能力检查明确报错。
+
+`Stack` 中的 `Rail` 即使由条件分支或 `ForEach` 生成，也只覆盖其他层给出的区域，不参与撑大叠层尺寸。网格同一行的条目顶部对齐，标题换行不移动海报。`Slider(label_hidden: true)` 隐藏可见标签并保留可访问名称；`Text(font_size:)` 可细调索引字号，多行上限文字保留换行高度。查询参数变化时保留上一份结果及视图身份，避免筛选时整页重新入场；订阅所属窗口代次变化后清除旧结果。
+
+
+### 引擎驱动的设置控件（2026-10-14）
+
+`Switch(checked: app.enabled) => app.set_enabled(app.enabled)` 与
+`Picker(selected: app.appearance) => app.set_appearance(app.appearance)`
+读取引擎快照；动作参数中与 `checked` / `selected` **完全相同的表达式**代表用户刚选择的新值。只替换完整的参数表达式，不替换字符串或其他字段。控件不直接修改引擎快照。原有 `value: draft.field` 继续用于会话草稿，可选动作在写入后执行。
+
+两个来源必须且只能写一个；引擎来源必须声明提交动作，`selected` 必须是所有变体都有标签的枚举。`label_hidden: true` 隐藏可见标签，保留可访问名称。SwiftUI 的鼠标、键盘与 `ui.set-bool` / `ui.select` 使用同一个 setter。其他目标通过 `controlled_values` 能力检查拒绝尚未实现的用法。
+
+容器可写 `reduce_motion: app.preferences.reduce_motion`。SwiftUI 将应用偏好与系统辅助功能合并；应用关闭此选项不会抵消系统的减少动态效果。共享的 `BernReducedMotion` 属性包装器让按钮、转场、共享元素、滚动和搜索面板读取同一偏好。
+
+外壳引擎可调用 `bern::modules::set_enabled(id, enabled)`，命令结束后由 Composite 排队执行。依赖、引擎释放和 `modules_changed` 仍归 Composite 管理；应用用回调更新预览，不自行复制依赖算法。
+
+
+### 设置页布局表面（2026-10-15）
+
+`Sidebar(width: 220)` 声明固定列宽；SwiftUI 同时设置分栏最小/理想/最大宽度以及内容框宽度，避免系统按照搜索与列表的最小固有宽度压缩侧栏。省略时仍使用可调整的 180–320 pt 默认列宽。其他目标通过 `sidebar_width` 能力检查拒绝尚未实现的用法。
+
+`style!` 中的 `Stack.<variant>` 可配置背景、前景色和圆角。前景色传给原生子控件；圆角表面也裁切子层，格纹与图片不会越过边缘。SwiftUI 已实现，其他目标在样式能力检查时报错。
+
+
+### 同窗口引导与后台状态（2026-10-15）
+
+`Modal(width: 960, height: 600)` 在窗口根部呈现居中遮罩，尺寸不超过窗口减去 32 pt，不被背景内容的固有宽度撑大；与主界面共享元素命名空间，并将入场、退场和减少动画偏好应用到实际面板。小窗口避开 macOS 顶部工具栏。调用方通过 `Stack(enabled: false)` 禁用背景子树（点击、键盘及无障碍），正文可用 `ScrollView`，页脚放在滚动区域外。`Flow(gap: 8)` 按固有尺寸从左到右换行。
+
+`Timer(interval: 0.5, enabled: app.running) => app.tick()` 在启用且挂载期间定时提交命令，卸载和禁用取消任务，不是逐帧绘制 API。可通过模块贡献插入后台插槽，跨页面保持运行。`Picker` 可显式包含 `PickerOption(value:, label:)`，标签可插入状态计数。以上由 SwiftUI 的 `modal_flow_timer` 能力提供，其他目标明确拒绝。
+
+`SidebarItem(badge: app.count)` 显示正数计数；模块页面清单的 `badge = "active_count"` 自动绑定到该模块的数字状态字段。SwiftUI 通过 `page_badges` 提供，其余目标明确拒绝。
+
+`bern::storage::Store::host()` 读取 / 写入按应用 bundle ID 隔离的小文件，key 限简单文件名；写入使用同目录临时文件、同步与替换。FFI 宿主在构造引擎前安装存储，macOS/iOS 使用 Application Support，Windows 使用 APPDATA，Linux 使用 XDG_CONFIG_HOME / ~/.config；其他宿主暂不持久化。未安装宿主的引擎可用于纯内存测试，`Store::directory` 可指定测试目录。

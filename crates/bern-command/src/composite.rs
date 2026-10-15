@@ -211,6 +211,12 @@ impl Composite {
                 command,
                 params,
             } => {
+                if namespace == "modules" && command == 0 {
+                    return self
+                        .switch
+                        .map(|switch| vec![(switch, params)])
+                        .unwrap_or_default();
+                }
                 let part = if namespace == self.shell.descriptor().namespace {
                     Some(0)
                 } else {

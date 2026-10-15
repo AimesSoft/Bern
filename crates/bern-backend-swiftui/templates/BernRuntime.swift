@@ -1287,6 +1287,7 @@ final class BernQuery<Data: BernCodable> {
     private(set) var phase: BernQueryPhase<Data> = .idle
     @ObservationIgnored let index: UInt32
     @ObservationIgnored private var version: UInt64 = 0
+    @ObservationIgnored private var lastReady: Data?
     @ObservationIgnored private let owner = BernQueryOwner()
     @ObservationIgnored private var generation: UInt64 = 0
     @ObservationIgnored private var requested: [UInt8]?
@@ -1356,6 +1357,7 @@ final class BernQuery<Data: BernCodable> {
         owner.subscription = nil
         requested = nil
         version = 0
+        lastReady = nil
     }
 
     /// The query as a control: `ui.inspect` reports its state and
@@ -1380,8 +1382,11 @@ final class BernQuery<Data: BernCodable> {
             let phase: BernQueryPhase<Data>
             switch try reader.u8() {
             case 0: phase = .idle
-            case 1: phase = .loading
-            case 2: phase = .ready(try Data(bern: &reader))
+            case 1: phase = lastReady.map { .refreshing($0) } ?? .loading
+            case 2:
+                let data = try Data(bern: &reader)
+                lastReady = data
+                phase = .ready(data)
             case 3: phase = .refreshing(try Data(bern: &reader))
             case 4:
                 let previous = try reader.u8() == 1 ? try Data(bern: &reader) : nil
@@ -1448,11 +1453,15 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
         switch query.phase {
         case .idle, .loading:
             BernQueryProgress(text: loading)
-        case .ready(let data):
+        case .ready(let data), .refreshing(let data):
+            // Keep one structural identity while parameters refresh, so
+            // keyed grids retain their cells, scroll position and reflow.
             presented(data)
-        case .refreshing(let data):
-            BernQueryProgress(text: loading)
-            presented(data)
+                .overlay(alignment: .topTrailing) {
+                    if case .refreshing = query.phase {
+                        ProgressView().controlSize(.small).accessibilityLabel(Text(verbatim: loading))
+                    }
+                }
         case .failed(let previous, _, let message):
             if let previous {
                 BernQueryFailureRow(title: failed, message: message) { query.retry() }
@@ -1558,9 +1567,13 @@ struct BernWindowRoot<Content: View>: View {
                     Text(verbatim: error)
                 }
             } else {
-                content.bernHeroRoot()
+                content
             }
         }
+        .overlayPreferenceValue(BernModalContent.self) { modal in
+            modal
+        }
+        .bernHeroRoot()
         .modifier(BernRenderActive())
         .alert(
             context.pendingClose?.message ?? "",
@@ -1632,6 +1645,9 @@ struct BernImage: View {
     let width: CGFloat?
     let height: CGFloat?
     let fit: BernImageFit
+    var rendering: SwiftUI.Image.TemplateRenderingMode = .original
+    /// An explicit width/height ratio fills the proposed grid column.
+    var aspect: CGFloat? = nil
     @State private var fetched: Picture?
 
     struct Picture: @unchecked Sendable {
@@ -1686,9 +1702,10 @@ struct BernImage: View {
     var body: some View {
         let picture = name.flatMap(Self.picture) ?? fetched ?? url.flatMap { BernPictures.shared.cached($0) }
         let ratio = picture?.ratio ?? 1
-        let shown = Group {
+        let content = Group {
             if let picture {
                 let image = SwiftUI.Image(decorative: picture.image, scale: 1, orientation: picture.orientation)
+                    .renderingMode(rendering)
                 switch fit {
                 case .contain: image.resizable().aspectRatio(contentMode: .fit)
                 case .cover: image.resizable().aspectRatio(contentMode: .fill)
@@ -1699,8 +1716,20 @@ struct BernImage: View {
             }
         }
         .allowedDynamicRange(.high)
-        .frame(width: width ?? height.map { $0 * ratio }, height: height ?? width.map { $0 / ratio })
-        .clipped()
+        let shown = Group {
+            if let aspect {
+                Color.clear
+                    .aspectRatio(max(0.01, aspect), contentMode: .fit)
+                    // The overlay receives the aspect-fitted proposal directly.
+                    // Measuring it and feeding that size back adds a geometry
+                    // update for every image on every animated grid resize.
+                    .overlay { content }
+                    .clipped()
+                    .frame(width: width, height: height)
+            } else {
+                content.frame(width: width ?? height.map { $0 * ratio }, height: height ?? width.map { $0 / ratio }).clipped()
+            }
+        }
         .task(id: url) {
             guard let url else { return }
             fetched = await BernPictures.shared.load(url)

@@ -85,7 +85,15 @@ pub struct TextWeight {
 
 /// The weights a text style can take.
 pub const TEXT_WEIGHTS: &[&str] = &[
-    "ultralight", "thin", "light", "regular", "medium", "semibold", "bold", "heavy", "black",
+    "ultralight",
+    "thin",
+    "light",
+    "regular",
+    "medium",
+    "semibold",
+    "bold",
+    "heavy",
+    "black",
 ];
 
 /// A named accent color.
@@ -128,6 +136,8 @@ pub enum TransitionKind {
     Fade,
     /// Grows from (or shrinks to) `from` of its size while fading.
     Pop { from: f64 },
+    /// Extends from zero along one axis, keeping `edge` fixed, without fading.
+    Grow { edge: Edge },
     /// Slides from (or to) `distance` beyond `edge` while fading.
     Slide { edge: Edge, distance: f64 },
 }

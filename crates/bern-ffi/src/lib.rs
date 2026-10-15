@@ -441,6 +441,7 @@ pub unsafe fn start_app<E: EngineProtocol>(
                 .install()
                 .map_err(|message| format!("cannot install the app's resources: {message}"))?;
         }
+        bern_command::storage::Store::install_application(spec.bundle_id);
         let engine = make_engine();
         let actual = engine.descriptor().fingerprint();
         if actual != fingerprint {

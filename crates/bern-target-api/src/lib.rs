@@ -139,6 +139,20 @@ pub mod feature {
     /// `Text(lines:)` and `Image(corner:)`.
     pub const TEXT_LINES: &str = "text_lines";
     pub const IMAGE_CORNERS: &str = "image_corners";
+    /// `Image(rendering: template)`: the image's alpha takes the text color.
+    pub const SIDEBAR_WIDTH: &str = "sidebar_width";
+    pub const CONTROLLED_VALUES: &str = "controlled_values";
+    pub const SEARCH_PALETTE: &str = "search_palette";
+    pub const IMAGE_TEMPLATE: &str = "image_template";
+    pub const ADAPTIVE_IMAGES: &str = "adaptive_images";
+    pub const ACCORDION_LAYOUT: &str = "accordion_layout";
+    pub const CAPSULE_CONTROLS: &str = "capsule_controls";
+    pub const MODAL_FLOW_TIMER: &str = "modal_flow_timer";
+    pub const PAGE_BADGES: &str = "page_badges";
+    /// Transitions growing along one axis from a fixed edge.
+    pub const EDGE_GROW: &str = "edge_grow";
+    /// An entrance after a delay, including the first mounted frame.
+    pub const DELAYED_APPEAR: &str = "delayed_appear";
     /// A `Spacer` in a `Toolbar`, parting leading items from trailing ones,
     /// and `Text` in a toolbar.
     pub const TOOLBAR_LEADING: &str = "toolbar_leading";
@@ -146,6 +160,8 @@ pub mod feature {
     pub const AXIS_PADDING: &str = "axis_padding";
     /// `Menu(style: icon)`: a menu shown as a round icon button.
     pub const ICON_MENUS: &str = "icon_menus";
+    /// `Label(display: icon)`: an icon with a nonvisual accessible title.
+    pub const ICON_LABELS: &str = "icon_labels";
     /// `Row(align: baseline)`.
     pub const ROW_BASELINE: &str = "row_baseline";
     /// `SidebarHeader`: content pinned above a sidebar's list.
@@ -873,6 +889,19 @@ fn reads_window_size(node: &bern_ir::Node) -> bool {
 fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let lacks = |name: &str| !descriptor.features.contains(&name);
+    if lacks(feature::SEARCH_PALETTE)
+        && let Some(element) = first_element(app, |e| {
+            e.kind == "SearchItem" || (e.kind == "Search" && e.keyword("style") == Some("palette"))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot present a search palette",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
     if lacks(feature::RAILS)
         && let Some(rail) = first_element(app, |element| element.kind == "Rail")
     {
@@ -891,11 +920,16 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
         )));
     }
     if lacks(feature::TEXT_LINES)
-        && let Some(text) = first_element(app, |element| element.kind == "Text" && element.prop("lines").is_some())
+        && let Some(text) = first_element(app, |element| {
+            element.kind == "Text" && element.prop("lines").is_some()
+        })
     {
         diagnostics.push(
-            Diagnostic::error(format!("target `{}` cannot limit the lines of a `Text`", descriptor.id))
-                .at(text.source.clone()),
+            Diagnostic::error(format!(
+                "target `{}` cannot limit the lines of a `Text`",
+                descriptor.id
+            ))
+            .at(text.source.clone()),
         );
     }
     if lacks(feature::TOOLBAR_LEADING)
@@ -928,27 +962,146 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
         );
     }
     if lacks(feature::ICON_MENUS)
-        && let Some(menu) = first_element(app, |element| element.kind == "Menu" && element.keyword("style") == Some("icon"))
+        && let Some(menu) = first_element(app, |element| {
+            element.kind == "Menu" && element.keyword("style") == Some("icon")
+        })
     {
         diagnostics.push(
-            Diagnostic::error(format!("target `{}` cannot show a `Menu` as an icon button", descriptor.id))
-                .at(menu.source.clone()),
+            Diagnostic::error(format!(
+                "target `{}` cannot show a `Menu` as an icon button",
+                descriptor.id
+            ))
+            .at(menu.source.clone()),
+        );
+    }
+    if lacks(feature::ICON_LABELS)
+        && let Some(label) = first_element(app, |element| element.kind == "Label" && element.keyword("display") == Some("icon"))
+    {
+        diagnostics.push(
+            Diagnostic::error(format!("target `{}` cannot show a `Label` as an icon only", descriptor.id))
+                .at(label.source.clone()),
         );
     }
     if lacks(feature::ROW_BASELINE)
-        && let Some(row) = first_element(app, |element| element.kind == "Row" && element.keyword("align") == Some("baseline"))
+        && let Some(row) = first_element(app, |element| {
+            element.kind == "Row" && element.keyword("align") == Some("baseline")
+        })
     {
         diagnostics.push(
-            Diagnostic::error(format!("target `{}` cannot line a `Row` up on its baseline", descriptor.id))
-                .at(row.source.clone()),
+            Diagnostic::error(format!(
+                "target `{}` cannot line a `Row` up on its baseline",
+                descriptor.id
+            ))
+            .at(row.source.clone()),
         );
     }
     if lacks(feature::IMAGE_CORNERS)
-        && let Some(image) = first_element(app, |element| element.kind == "Image" && element.prop("corner").is_some())
+        && let Some(image) = first_element(app, |element| {
+            element.kind == "Image" && element.prop("corner").is_some()
+        })
     {
         diagnostics.push(
-            Diagnostic::error(format!("target `{}` cannot round the corners of an `Image`", descriptor.id))
-                .at(image.source.clone()),
+            Diagnostic::error(format!(
+                "target `{}` cannot round the corners of an `Image`",
+                descriptor.id
+            ))
+            .at(image.source.clone()),
+        );
+    }
+    if lacks(feature::EDGE_GROW)
+        && app.style.transitions.iter().any(|transition| {
+            matches!(transition.kind, bern_ir::style::TransitionKind::Grow { .. })
+        })
+    {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` cannot grow a transition from a fixed edge",
+            descriptor.id
+        )));
+    }
+    if lacks(feature::DELAYED_APPEAR)
+        && let Some(element) = first_element(app, |element| element.prop("appear_delay").is_some())
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot delay an entrance with `appear_delay`",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::ACCORDION_LAYOUT)
+        && let Some(element) = first_element(app, |element| element.kind == "Accordion")
+    {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` cannot animate accordion column widths", descriptor.id
+        )).at(element.source.clone()));
+    }
+    if lacks(feature::ADAPTIVE_IMAGES)
+        && let Some(element) = first_element(app, |element| {
+            (element.kind == "Image" && element.prop("aspect").is_some())
+                || (element.kind == "Grid" && element.prop("row_gap").is_some()) || (element.kind == "Slider" && element.prop("label_hidden").is_some()) || (matches!(element.kind.as_str(), "Text" | "Label") && element.prop("font_size").is_some())
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot lay out adaptive images or independent grid row spacing",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::PAGE_BADGES)
+        && let Some(element) = first_element(app, |e| e.kind == "SidebarItem" && e.prop("badge").is_some()) {
+        diagnostics.push(Diagnostic::error(format!("target `{}` cannot render live page badges", descriptor.id)).at(element.source.clone()));
+    }
+    if lacks(feature::MODAL_FLOW_TIMER)
+        && let Some(element) = first_element(app, |e| matches!(e.kind.as_str(), "Modal" | "Flow" | "Timer" | "PickerOption") || (e.kind == "Stack" && e.prop("enabled").is_some()))
+    {
+        diagnostics.push(Diagnostic::error(format!("target `{}` cannot render modal, flow, timer or explicit picker options", descriptor.id)).at(element.source.clone()));
+    }
+    if lacks(feature::CAPSULE_CONTROLS)
+        && let Some(element) = first_element(app, |element| {
+            matches!(element.kind.as_str(), "Button" | "Menu")
+                && (element.prop("shape").is_some() || element.prop("height").is_some())
+        })
+    {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` cannot render capsule system controls", descriptor.id
+        )).at(element.source.clone()));
+    }
+    if lacks(feature::SIDEBAR_WIDTH)
+        && let Some(sidebar) = first_element(app, |e| e.kind == "Sidebar" && e.prop("width").is_some())
+    {
+        diagnostics.push(Diagnostic::error(format!("target `{}` cannot fix a sidebar width", descriptor.id)).at(sidebar.source.clone()));
+    }
+    if lacks(feature::CONTROLLED_VALUES)
+        && let Some(control) = first_element(app, |e| {
+            matches!(e.kind.as_str(), "Switch" | "Picker")
+                && (e.prop("checked").is_some()
+                    || e.prop("selected").is_some()
+                    || e.prop("label_hidden").is_some()
+                    || e.action.is_some())
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot bind controls to engine commands",
+                descriptor.id
+            ))
+            .at(control.source.clone()),
+        );
+    }
+    if lacks(feature::IMAGE_TEMPLATE)
+        && let Some(image) = first_element(app, |element| {
+            element.kind == "Image" && element.keyword("rendering") == Some("template")
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot render an `Image` as a template",
+                descriptor.id
+            ))
+            .at(image.source.clone()),
         );
     }
     if lacks(feature::SIDEBAR_HEADER)

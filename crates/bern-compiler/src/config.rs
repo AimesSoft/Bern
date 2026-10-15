@@ -56,6 +56,7 @@ struct RawPage {
     id: String,
     label: BTreeMap<String, String>,
     icon: Option<String>,
+    badge: Option<String>,
     component: String,
 }
 
@@ -124,6 +125,8 @@ pub struct PageConfig {
     pub id: String,
     pub label: BTreeMap<String, String>,
     pub icon: Option<String>,
+    /// Numeric state field of this module shown as the page's live badge.
+    pub badge: Option<String>,
     /// The module component showing the page.
     pub component: String,
 }
@@ -1157,6 +1160,14 @@ fn load_module(dir: &Path, written: &str) -> Result<ModuleConfig, Vec<Diagnostic
     .map_err(|error| errors.push(error))
     .ok();
     for page in &raw.pages {
+        if let Some(badge) = &page.badge {
+            if !bern_protocol::valid_name(badge) {
+                errors.push(Diagnostic::error(format!(
+                    "{}: page badge `{badge}` must name a lower snake case state field",
+                    manifest.display()
+                )));
+            }
+        }
         for (what, name) in [("slot", &page.slot), ("page id", &page.id)] {
             if !bern_protocol::valid_name(name) {
                 errors.push(Diagnostic::error(format!(
@@ -1213,6 +1224,7 @@ fn load_module(dir: &Path, written: &str) -> Result<ModuleConfig, Vec<Diagnostic
                 id: page.id,
                 label: page.label,
                 icon: page.icon,
+                badge: page.badge,
                 component: page.component,
             })
             .collect(),

@@ -2,6 +2,24 @@ use super::*;
 use quote::quote;
 
 #[test]
+fn media_source_used_only_by_an_event_is_registered() {
+    let items = parse_source_file(r#"
+        #[bern::protocol(namespace = "downloads", version = 1)]
+        pub mod downloads {
+            #[state]
+            pub struct State { pub count: i64 }
+            #[commands]
+            pub trait Commands { fn play(&mut self) -> Result<(), CommandError>; }
+            #[events]
+            pub trait Events { fn playing(&self, source: MediaSource); }
+        }
+    "#).unwrap();
+    let descriptor = lower::protocol_descriptor(&items.protocols[0].1).unwrap();
+    assert!(descriptor.types.record_def("MediaSource").is_some());
+    assert_eq!(descriptor.events[0].params[0].ty, bern_protocol::Type::Record { name: "MediaSource".into() });
+}
+
+#[test]
 fn parses_elements_templates_conditions_and_actions() {
     let body = parse_ui(quote! {
         Column(gap: 12) {

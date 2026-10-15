@@ -1828,6 +1828,8 @@ impl<'a> Generator<'a> {
             let motion = motion_ref(&transition.motion);
             let body = match &transition.kind {
                 TransitionKind::Fade => format!(".kind = B::Transition::Fade, .motion = {motion}"),
+                // Rejected by the edge_grow capability check before generation.
+                TransitionKind::Grow { .. } => continue,
                 TransitionKind::Pop { from } => format!(
                     ".kind = B::Transition::Pop, .from = {}, .motion = {motion}",
                     float(*from)

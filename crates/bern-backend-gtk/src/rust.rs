@@ -1570,6 +1570,8 @@ impl<'a> Generator<'a> {
         for transition in &sheet.transitions {
             let kind = match &transition.kind {
                 TransitionKind::Fade => "b::TransitionKind::Fade".to_string(),
+                // Rejected by the edge_grow capability check before generation.
+                TransitionKind::Grow { .. } => continue,
                 TransitionKind::Pop { from } => format!("b::TransitionKind::Pop({})", float(*from)),
                 TransitionKind::Slide { edge, distance } => format!(
                     "b::TransitionKind::Slide(b::Edge::{edge:?}, {})",

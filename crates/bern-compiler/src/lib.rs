@@ -1279,6 +1279,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                     variant,
                     label: page.label.clone(),
                     icon: page.icon.clone(),
+                    badge: page.badge.clone(),
                     component: page.component.clone(),
                 });
         }

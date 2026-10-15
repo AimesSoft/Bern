@@ -7,9 +7,10 @@
 
 pub mod bind;
 pub mod media;
+pub mod modules;
 pub mod query;
 
-pub use bern_command::resources;
+pub use bern_command::{resources, storage};
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
 pub use bern_macros::{component, features, players, protocol, session, style, tr, ui, value};
 pub use bern_protocol::{

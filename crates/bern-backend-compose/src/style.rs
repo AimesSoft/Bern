@@ -224,6 +224,8 @@ pub fn transition(app: &Application, name: &str) -> Option<(String, String)> {
     let def = app.style.transition(name)?;
     let kotlin = match &def.kind {
         TransitionKind::Fade => "BernTransition.Fade".to_string(),
+        // Rejected by the edge_grow capability check before generation.
+        TransitionKind::Grow { .. } => return None,
         TransitionKind::Pop { from } => format!("BernTransition.Pop({})", float(*from)),
         TransitionKind::Slide { edge, distance } => {
             let edge = match edge {

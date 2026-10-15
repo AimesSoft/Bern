@@ -435,6 +435,8 @@ struct Ctx {
     /// Inside a scroll view whose `position` is bound: the first
     /// repetition's items report where they are.
     scroll_items: bool,
+    /// Each direct accordion child fills and clips to its allocated width.
+    accordion_corner: Option<String>,
 }
 
 /// The system the Swift is generated for. SwiftUI is shared; windows,
@@ -844,6 +846,35 @@ impl<'a> Generator<'a> {
         ))
     }
 
+    /// A controlled value commits through its action. References to the
+    /// selected/checked expression in that action denote the new value.
+    fn control_value(&self, element: &Element, controlled: &str) -> (String, String, String) {
+        if let Some(expr) = element.expr(controlled) {
+            let value = self.expr(expr);
+            let action = element.action.as_ref().expect("controlled action");
+            // Only replace complete argument expressions, never text within
+            // string literals or a neighbouring field's name.
+            let commit = match action {
+                Action::Engine { command, args } => {
+                    let spec = &self.app.protocol.commands[*command];
+                    let mut values: Vec<_> = args.iter().map(|arg| {
+                        if arg == expr { "newValue".into() } else { self.expr(arg) }
+                    }).collect();
+                    values.push("from: bernWindow".into());
+                    format!("bernEngine.{}({})", member(&self.app.protocol.command_symbol(spec)), values.join(", "))
+                }
+                _ => self.action(action),
+            };
+            let setter = format!("{{ newValue in {commit} }}");
+            (value.clone(), format!("SwiftUI.Binding(get: {{ {value} }}, set: {setter})"), setter)
+        } else {
+            let field = self.field(element, "value").expect("session field");
+            let action = element.action.as_ref().map(|a| self.action(a)).unwrap_or_default();
+            let setter = format!("{{ newValue in {field} = newValue; {action} }}");
+            (field.clone(), format!("SwiftUI.Binding(get: {{ {field} }}, set: {setter})"), setter)
+        }
+    }
+
     fn binding_of(&self, field: &str) -> String {
         format!("SwiftUI.Binding(get: {{ {field} }}, set: {{ {field} = $0 }})")
     }
@@ -1089,6 +1120,9 @@ impl<'a> Generator<'a> {
     }
 
     fn toolbar(&self, out: &mut Out, children: &[Node], ctx: &Ctx) {
+        if self.platform == Platform::Macos && children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Toolbar" && e.children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Search" && e.keyword("style") == Some("palette"))))) {
+            out.line(".modifier(BernPaletteDetail())");
+        }
         let toolbars: Vec<&Element> = children
             .iter()
             .filter_map(|node| match node {
@@ -1096,7 +1130,7 @@ impl<'a> Generator<'a> {
                 _ => None,
             })
             .collect();
-        let is_search = |node: &Node| matches!(node, Node::Element(item) if item.kind == "Search");
+        let is_search = |node: &Node| matches!(node, Node::Element(item) if item.kind == "Search" && item.keyword("style") != Some("palette"));
         let items: Vec<&Element> = toolbars
             .iter()
             .copied()
@@ -1119,6 +1153,7 @@ impl<'a> Generator<'a> {
             for node in &toolbar.children {
                 if let Node::Element(search) = node
                     && search.kind == "Search"
+                    && search.keyword("style") != Some("palette")
                 {
                     let placement = match self.platform {
                         Platform::Macos => ".toolbar",
@@ -1251,10 +1286,14 @@ impl<'a> Generator<'a> {
         for (index, group) in groups.iter().filter(|group| !group.is_empty()).enumerate() {
             if index > 0 {
                 out.open("if #available(macOS 26.0, iOS 26.0, *) {");
-                out.line(format!("SwiftUI.ToolbarSpacer(.fixed, placement: {placement})"));
+                out.line(format!(
+                    "SwiftUI.ToolbarSpacer(.fixed, placement: {placement})"
+                ));
                 out.close("}");
             }
-            out.open(format!("SwiftUI.ToolbarItemGroup(placement: {placement}) {{"));
+            out.open(format!(
+                "SwiftUI.ToolbarItemGroup(placement: {placement}) {{"
+            ));
             let group_ctx = Ctx {
                 toolbar: true,
                 shared: group.len() > 1,
@@ -1358,8 +1397,12 @@ impl<'a> Generator<'a> {
                 .and_then(|name| crate::style::appear(self.app, name))
                 .map(|appear| format!(", appear: {appear}"))
                 .unwrap_or_default();
+            let delay = element
+                .number("appear_delay")
+                .map(|delay| format!(", delay: {}", double(delay)))
+                .unwrap_or_default();
             out.line(format!(
-                ".bernTransition(insertion: {insertion}, insertionMotion: {insertion_motion}, removal: {removal}, removalMotion: {removal_motion}{manual})"
+                ".bernTransition(insertion: {insertion}, insertionMotion: {insertion_motion}, removal: {removal}, removalMotion: {removal_motion}{manual}{delay})"
             ));
         }
         if let Some(hero) = element.keyword("hero") {
@@ -1371,8 +1414,14 @@ impl<'a> Generator<'a> {
         if let Some(token) = element.keyword("animate") {
             let bound: Vec<String> = element
                 .props
-                .values()
-                .filter_map(|prop| match prop {
+                .iter()
+                // The grid animates its resolved column count and spacing.
+                // Other properties, such as padding, still animate here.
+                .filter(|(name, _)| {
+                    element.kind != "Accordion" && (element.kind != "Grid"
+                        || !matches!(name.as_str(), "min_width" | "gap" | "row_gap"))
+                })
+                .filter_map(|(_, prop)| match prop {
                     Prop::Expr { expr } if matches!(expr.ty, Type::Int | Type::Float) => {
                         Some(format!("AnyHashable({})", self.expr(expr)))
                     }
@@ -1387,6 +1436,9 @@ impl<'a> Generator<'a> {
                 ));
             }
         }
+        if let Some(reduce) = element.expr("reduce_motion") {
+            out.line(format!(".transformEnvironment(\\.bernReduceMotion) {{ $0 = $0 || ({}) }}", self.expr(reduce)));
+        }
         if let Some(appearance) = element.keyword("appearance") {
             out.line(format!(".environment(\\.colorScheme, .{appearance})"));
             // Menus opened over the part take its appearance too.
@@ -1399,6 +1451,14 @@ impl<'a> Generator<'a> {
             out.line(format!(
                 ".bernNudge({}, motion: {})",
                 self.expr(when),
+                crate::style::motion(self.app, "jelly")
+            ));
+        }
+        if let Some(key) = element.expr("nudge_key") {
+            out.line(format!(
+                ".bernNudge(key: {}, scale: {}, motion: {})",
+                self.expr(key),
+                double(element.number("nudge_scale").unwrap_or(1.06)),
                 crate::style::motion(self.app, "jelly")
             ));
         }
@@ -1436,6 +1496,15 @@ impl<'a> Generator<'a> {
     }
 
     fn node(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
+        if let Some(corner) = &ctx.accordion_corner
+            && (matches!(node, Node::Component(_))
+                || matches!(node, Node::Element(element) if element.kind != "ForEach"))
+        {
+            out.open(format!("BernAccordionCell(corner: {corner}) {{"));
+            self.node(out, node, &Ctx { accordion_corner: None, ..ctx.clone() });
+            out.close("}");
+            return;
+        }
         match node {
             Node::Element(element) => {
                 // A staggering container's children take turns appearing.
@@ -1444,7 +1513,9 @@ impl<'a> Generator<'a> {
                     out.open(format!("BernStaggerScope(step: {}) {{", double(step)));
                 }
                 self.element(out, element, ctx);
-                self.motion_modifiers(out, element);
+                if element.kind != "Modal" {
+                    self.motion_modifiers(out, element);
+                }
                 if element.kind != "SplitView" {
                     self.inspector(out, &element.children, ctx);
                 }
@@ -1542,6 +1613,15 @@ impl<'a> Generator<'a> {
 
     fn match_node(&self, out: &mut Out, node: &MatchNode, ctx: &Ctx) {
         let def = self.types().enum_def(&node.enum_name).expect("enum");
+        // Like an if branch, a matched page needs an animated transaction
+        // when its discriminator changes; a transition alone is inert.
+        let motion = node
+            .arms
+            .iter()
+            .find_map(|arm| self.children_motion(&arm.body));
+        if motion.is_some() {
+            out.open("SwiftUI.Group {");
+        }
         out.open(format!("switch {} {{", self.expr(&node.value)));
         for arm in &node.arms {
             out.open(format!("{}:", case_pattern(def, arm)));
@@ -1549,6 +1629,13 @@ impl<'a> Generator<'a> {
             out.indent -= 1;
         }
         out.close("}");
+        if let Some(motion) = motion {
+            out.close("}");
+            out.line(format!(
+                ".animation({motion}.animation, value: {})",
+                self.expr(&node.value)
+            ));
+        }
     }
 
     /// The text a row shows first, as a Swift `String` expression: the
@@ -1605,7 +1692,7 @@ impl<'a> Generator<'a> {
                 .iter()
                 .find(|entry| entry.style == style)
             {
-                Some(entry) => match entry.size {
+                Some(entry) => match element.number("font_size").or(entry.size) {
                     Some(size) => out.line(format!(
                         ".font(.system(size: {}, weight: .{}))",
                         double(size),
@@ -1613,7 +1700,10 @@ impl<'a> Generator<'a> {
                     )),
                     None => out.line(format!(".font(.{font}.weight(.{}))", entry.weight)),
                 },
-                None => out.line(format!(".font(.{font})")),
+                None => match element.number("font_size") {
+                    Some(size) => out.line(format!(".font(.system(size: {}))", double(size))),
+                    None => out.line(format!(".font(.{font})")),
+                },
             }
         }
     }
@@ -1646,6 +1736,7 @@ impl<'a> Generator<'a> {
                 if let Some(lines) = element.number("lines") {
                     out.line(format!(".lineLimit({})", lines.max(1.0) as i64));
                     out.line(".truncationMode(.tail)");
+                    if lines > 1.0 { out.line(".fixedSize(horizontal: false, vertical: true)"); }
                 }
                 match element.keyword("emphasis") {
                     Some("secondary") => out.line(".foregroundStyle(.secondary)"),
@@ -1748,7 +1839,35 @@ impl<'a> Generator<'a> {
                     "SwiftUI.Label({title}, systemImage: {})",
                     string(icon)
                 ));
+                if element.keyword("display") == Some("icon") {
+                    out.line(".labelStyle(.iconOnly)");
+                }
                 self.font(out, element);
+            }
+            "Search" if element.keyword("style") == Some("palette") => {
+                let field = self.field(element, "value").expect("search field");
+                let prompt = self.text_prop(element, "prompt").unwrap_or_else(|| "\"\"".into());
+                let panel_prompt = self.text_prop(element, "panel_prompt").unwrap_or_else(|| prompt.clone());
+                let shortcut = self.shortcut(element).map(|s| format!(", shortcut: {s}")).unwrap_or_default();
+                out.open(format!("BernSearchPalette(text: {}, prompt: {prompt}, panelPrompt: {panel_prompt}, target: {}, width: {}, height: {}{shortcut}) {{",
+                    self.binding_of(&field), self.target(element, ctx), double(element.number("width").unwrap_or(640.0)), double(element.number("height").unwrap_or(480.0))));
+                self.nodes(out, &element.children, &Ctx { toolbar: false, ..ctx.clone() });
+                out.close("}");
+            }
+            "SearchItem" => {
+                let label = self.text_prop(element, "label").unwrap_or_default();
+                let (action, file) = self.pressed(element);
+                let navigation = element.expr("navigation").map(|e| self.expr(e)).unwrap_or_else(|| "true".into());
+                out.open(format!("BernSearchItem(target: {}, label: {label}, navigation: {navigation}, actions: BernControlActions(activate: {{ {action} }}{file})) {{", self.target(element, ctx)));
+                if element.children.is_empty() {
+                    out.line(format!("BernSearchRow(label: {label}, icon: {}, detail: {}, hint: {})",
+                        element.icon("icon").map(string).unwrap_or_else(|| "nil".into()),
+                        self.text_prop(element, "detail").unwrap_or_else(|| "\"\"".into()),
+                        self.text_prop(element, "hint").unwrap_or_else(|| "\"\"".into())));
+                } else {
+                    self.nodes(out, &element.children, ctx);
+                }
+                out.close("}");
             }
             "Button" | "IconButton" => self.button(out, element, ctx),
             "Drop" => {
@@ -1780,11 +1899,10 @@ impl<'a> Generator<'a> {
             }
             "TextInput" => self.text_input(out, element, ctx),
             "Switch" => {
-                let field = self.field(element, "value").expect("bool field");
+                let (field, binding, setter) = self.control_value(element, "checked");
                 let label = self.text_prop(element, "label").unwrap_or_default();
                 out.open(format!(
-                    "SwiftUI.Toggle(isOn: {}) {{",
-                    self.binding_of(&field)
+                    "SwiftUI.Toggle(isOn: {binding}) {{"
                 ));
                 match element.icon("icon") {
                     Some(icon) => out.line(format!(
@@ -1794,6 +1912,7 @@ impl<'a> Generator<'a> {
                     None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
                 }
                 out.close("}");
+                if element.keyword("label_hidden") == Some("true") { out.line(".labelsHidden()"); }
                 // iOS has no checkboxes; its toggles are switches.
                 out.line(".bernAccentTint()");
                 match (element.keyword("style"), self.platform) {
@@ -1809,7 +1928,7 @@ impl<'a> Generator<'a> {
                     out.line(format!(".keyboardShortcut({shortcut})"));
                 }
                 out.line(format!(
-                    ".bernControl({}, role: \"switch\", label: {label}, actions: BernControlActions(setBool: {{ {field} = $0 }}, value: {{ {field} ? \"true\" : \"false\" }}))",
+                    ".bernControl({}, role: \"switch\", label: {label}, actions: BernControlActions(setBool: {setter}, value: {{ {field} ? \"true\" : \"false\" }}))",
                     self.target(element, ctx)
                 ));
             }
@@ -1817,23 +1936,33 @@ impl<'a> Generator<'a> {
             "Video" => self.video(out, element, ctx),
             "Query" => self.query(out, element, ctx),
             "Picker" => {
-                let field_ref = element.field("value").expect("picker field");
-                let field = self.field(element, "value").expect("picker field");
+                let ty = element.expr("selected").map(|e| &e.ty).unwrap_or_else(|| &element.field("value").expect("picker field").ty);
+                let (field, binding, setter) = self.control_value(element, "selected");
                 let label = self.text_prop(element, "label").unwrap_or_default();
-                let enum_type = swift_type(&field_ref.ty);
+                let enum_type = swift_type(ty);
                 out.open(format!(
-                    "SwiftUI.Picker(selection: {}) {{",
-                    self.binding_of(&field)
+                    "SwiftUI.Picker(selection: {binding}) {{"
                 ));
+                if element.children.is_empty() {
                 out.open(format!(
                     "SwiftUI.ForEach({enum_type}.allCases, id: \\.self) {{ option in"
                 ));
                 out.line("SwiftUI.Text(verbatim: option.bernLabel).tag(option)");
                 out.close("}");
+                } else {
+                    for node in &element.children {
+                        if let Node::Element(option) = node {
+                            let label = self.text_prop(option, "label").unwrap_or_default();
+                            let value = self.expr(option.expr("value").expect("picker option value"));
+                            out.line(format!("SwiftUI.Text(verbatim: {label}).tag({value})"));
+                        }
+                    }
+                }
                 out.close("} label: {");
                 out.indent += 1;
                 out.line(format!("SwiftUI.Text(verbatim: {label})"));
                 out.close("}");
+                if element.keyword("label_hidden") == Some("true") { out.line(".labelsHidden()"); }
                 match element.keyword("style") {
                     Some("menu") => out.line(".pickerStyle(.menu)"),
                     Some("segmented") => out.line(".pickerStyle(.segmented)"),
@@ -1846,8 +1975,9 @@ impl<'a> Generator<'a> {
                     Some("inline") => out.line(".pickerStyle(.inline)"),
                     _ => {}
                 }
+                if element.keyword("label_hidden") == Some("true") { out.line(".labelsHidden()"); }
                 out.line(format!(
-                    ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; {field} = value; return true }}, value: {{ {field}.bernName }}))",
+                    ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; ({setter})(value); return true }}, value: {{ {field}.bernName }}))",
                     self.target(element, ctx)
                 ));
             }
@@ -1917,16 +2047,60 @@ impl<'a> Generator<'a> {
                 self.frame(out, element);
                 self.toolbar(out, &element.children, ctx);
             }
+            "Accordion" => {
+                let motion = element.keyword("animate")
+                    .map(|token| crate::style::motion(self.app, token))
+                    .unwrap_or_else(|| "nil".into());
+                let number = |name| element.expr(name).map(|expr| self.expr(expr)).unwrap_or_else(|| "0".into());
+                out.open(format!(
+                    "BernAccordion(count: Int({}), selected: Int({}), collapsedWidth: {}, gap: {}, height: {}, motion: {motion}) {{",
+                    number("count"), number("selected"),
+                    self.length(element, "collapsed_width").unwrap_or_else(|| "86.0".into()),
+                    self.length(element, "gap").unwrap_or_else(|| "8.0".into()),
+                    self.length(element, "height").unwrap_or_else(|| "560.0".into()),
+                ));
+                self.nodes(out, &element.children, &Ctx {
+                    accordion_corner: Some(self.length(element, "corner").unwrap_or_else(|| "0.0".into())),
+                    ..ctx.clone()
+                });
+                out.close("}");
+            }
             "Grid" => {
                 let gap = self.length(element, "gap").unwrap_or_else(|| double(8.0));
+                let row_gap = self.length(element, "row_gap").unwrap_or_else(|| gap.clone());
+                let motion = element
+                    .keyword("animate")
+                    .map(|token| crate::style::motion(self.app, token))
+                    .unwrap_or_else(|| "nil".into());
                 out.open(format!(
-                    "SwiftUI.LazyVGrid(columns: [SwiftUI.GridItem(.adaptive(minimum: {}), spacing: {gap})], alignment: .leading, spacing: {gap}) {{",
+                    "BernAdaptiveGrid(minimum: {}, gap: {gap}, rowGap: {row_gap}, motion: {motion}) {{",
                     self.length(element, "min_width")
                         .unwrap_or_else(|| double(120.0))
                 ));
                 self.nodes(out, &element.children, ctx);
                 out.close("}");
+                out.line(".frame(maxWidth: .infinity, alignment: .leading)");
                 self.padding(out, element);
+            }
+            "Modal" => {
+                out.open(format!("BernModal(width: {}, height: {}) {{", self.length(element, "width").unwrap_or_else(|| "960.0".into()), self.length(element, "height").unwrap_or_else(|| "600.0".into())));
+                self.nodes(out, &element.children, ctx);
+                out.close("} presentation: { modal in");
+                out.indent += 1;
+                out.open("AnyView(modal");
+                self.motion_modifiers(out, element);
+                out.close(")");
+                out.close("}");
+            }
+            "Flow" => {
+                out.open(format!("BernFlow(gap: {}) {{", self.length(element, "gap").unwrap_or_else(|| "8.0".into())));
+                self.nodes(out, &element.children, ctx);
+                out.close("}");
+            }
+            "Timer" => {
+                let enabled = element.expr("enabled").map(|e| self.expr(e)).unwrap_or_else(|| "true".into());
+                let action = self.action(element.action.as_ref().expect("timer action"));
+                out.line(format!("BernTimer(interval: {}, enabled: {enabled}) {{ {action} }}", double(element.number("interval").unwrap_or(1.0))));
             }
             "Stack" => {
                 let alignment = match element.keyword("align") {
@@ -1941,10 +2115,7 @@ impl<'a> Generator<'a> {
                     _ => ".center",
                 };
                 // A rail among the layers takes the size of the others.
-                let rails = element
-                    .children
-                    .iter()
-                    .any(|node| matches!(node, Node::Element(child) if child.kind == "Rail"));
+                let rails = has_rail_layer(&element.children);
                 out.open(if rails {
                     format!("BernLayers(alignment: {alignment}) {{")
                 } else {
@@ -1953,6 +2124,13 @@ impl<'a> Generator<'a> {
                 self.nodes(out, &element.children, ctx);
                 out.close("}");
                 self.frame(out, element);
+                if let Some(enabled) = element.expr("enabled") {
+                    let enabled = self.expr(enabled);
+                    out.line(format!(".disabled(!({enabled})).allowsHitTesting({enabled}).accessibilityHidden(!({enabled}))"));
+                }
+                if let Some(style) = self.style_of(element) {
+                    out.line(format!(".modifier(BernSurface(style: BernStyles.{}))", style.name));
+                }
             }
             "Image" => {
                 let fit = match element.keyword("fit") {
@@ -1973,11 +2151,17 @@ impl<'a> Generator<'a> {
                     ),
                 };
                 out.line(format!(
-                    "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit})",
+                    "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {})",
                     self.text_prop(element, "label")
                         .unwrap_or_else(|| "nil".into()),
                     length("width"),
                     length("height"),
+                    if element.keyword("rendering") == Some("template") {
+                        ", rendering: .template"
+                    } else {
+                        ""
+                    },
+                    element.number("aspect").map(double).unwrap_or_else(|| "nil".into()),
                 ));
                 if let Some(corner) = self.length(element, "corner") {
                     out.line(format!(
@@ -2299,6 +2483,12 @@ impl<'a> Generator<'a> {
                 ));
                 if icon_only {
                     out.line(".labelStyle(.iconOnly)");
+                    // Size the label before the system draws its circular
+                    // button: short symbols such as ellipsis would otherwise
+                    // produce a smaller button than symbols such as star.
+                    if !ctx.toolbar {
+                        out.line(".frame(width: 16, height: 16)");
+                    }
                 }
             }
             None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
@@ -2310,12 +2500,21 @@ impl<'a> Generator<'a> {
         // Outside a toolbar a menu is a pull-down button of the platform;
         // an icon-only one is a round icon button without the arrow.
         if !ctx.toolbar {
-            out.line(".menuStyle(.button)");
-            if icon_only {
+            if element.keyword("shape") == Some("capsule") {
+                // A macOS pull-down's AppKit bezel ignores .buttonStyle(.glass).
+                // Keep the native menu, remove that bezel, and let the system
+                // glass surface provide the capsule around its label.
+                if self.platform == Platform::Macos {
+                    out.line(".menuStyle(.borderlessButton)");
+                }
+                out.line(format!(".bernCapsuleControl(height: {})", self.length(element, "height").unwrap_or_else(|| "32.0".into())));
+            } else if icon_only {
+                out.line(".menuStyle(.button)");
                 out.line(".menuIndicator(.hidden)");
                 out.line(".bernButtonLook(.icon)");
                 out.line(format!(".help({label})"));
             } else {
+                out.line(".menuStyle(.button)");
                 out.line(".bernButtonLook(.secondary)");
             }
         }
@@ -2424,12 +2623,14 @@ impl<'a> Generator<'a> {
                     }
                     out.line(format!(".help({label})"));
                 } else if !ctx.toolbar {
-                    match element.keyword("prominence") {
+                    if element.keyword("shape") == Some("capsule") {
+                        out.line(format!(".bernCapsuleControl(height: {}, prominent: {})", self.length(element, "height").unwrap_or_else(|| "32.0".into()), element.keyword("prominence") == Some("prominent")));
+                    } else { match element.keyword("prominence") {
                         Some("prominent") => out.line(".bernButtonLook(.prominent)"),
                         // Words without a border, in the secondary color.
                         Some("plain") => out.line(".bernButtonLook(.flat)"),
                         _ => out.line(".bernButtonLook(.secondary)"),
-                    }
+                    } }
                 }
                 if let Some(style) = &style {
                     if let Some(size) = style.size() {
@@ -2558,6 +2759,7 @@ impl<'a> Generator<'a> {
             None => out.line("_ = editing"),
         }
         out.close("}");
+        if element.keyword("label_hidden") == Some("true") { out.line(".labelsHidden()"); }
         out.line(".bernAccentTint()");
         let commit = action
             .map(|action| format!("; {action}"))
@@ -2605,7 +2807,22 @@ impl<'a> Generator<'a> {
         }
         self.sidebar_nodes(out, &sidebar.children, rows.as_deref());
         out.close("}");
-        out.line(".navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 320)");
+        if let Some(rows) = &rows {
+            let ty = sidebar
+                .field("selection")
+                .map(|field| swift_type(&field.ty))
+                .unwrap_or_default();
+            out.line(format!(
+                ".bernSidebarNavigation(selection: {rows}, values: {})",
+                self.nav_values(&sidebar.children, "SidebarItem", &ty)
+            ));
+        }
+        if let Some(width) = self.length(sidebar, "width") {
+            out.line(format!(".navigationSplitViewColumnWidth(min: {width}, ideal: {width}, max: {width})"));
+            out.line(format!(".frame(minWidth: {width}, maxWidth: {width})"));
+        } else {
+            out.line(".navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 320)");
+        }
         let mut labeled = false;
         for child in &sidebar.children {
             child.walk(&mut |node| {
@@ -2668,7 +2885,12 @@ impl<'a> Generator<'a> {
         if let Some(title) = &title {
             out.line(format!(".navigationTitle({title})"));
             // The page shows its own title: the title bar does not repeat it.
-            if detail.expr("titled").map(|titled| self.expr(titled)).as_deref() == Some("false") {
+            if detail
+                .expr("titled")
+                .map(|titled| self.expr(titled))
+                .as_deref()
+                == Some("false")
+            {
                 out.line(".bernToolbarTitleHidden()");
             }
         }
@@ -2777,6 +2999,7 @@ impl<'a> Generator<'a> {
         let mut statements = Vec::new();
         for node in nodes {
             match node {
+                Node::Element(element) if matches!(element.kind.as_str(), "Search" | "SidebarHeader" | "SidebarFooter" | "Toolbar") => {},
                 Node::Element(element) if element.kind == "ForEach" => {
                     let (Some(items), Some(template)) = (element.expr("items"), &element.template)
                     else {
@@ -2934,8 +3157,9 @@ impl<'a> Generator<'a> {
                         "BernStyle(selected: BernLook(fill: .role(\"selection.background\")))"
                             .into()
                     });
+                let badge = element.expr("badge").map(|e| format!("Int({})", self.expr(e))).unwrap_or_else(|| "0".into());
                 out.line(format!(
-                    "BernSidebarRow(label: {label}, systemImage: {icon}, value: {value}, selection: {}, style: {style})",
+                    "BernSidebarRow(label: {label}, systemImage: {icon}, value: {value}, selection: {}, style: {style}, badge: {badge})",
                     rows.unwrap_or_default()
                 ));
             }
@@ -2952,6 +3176,7 @@ impl<'a> Generator<'a> {
                     )),
                     None => out.line(format!("SwiftUI.Text(verbatim: {label}).tag({value})")),
                 }
+                if let Some(badge) = element.expr("badge") { out.line(format!(".badge(Int({}))", self.expr(badge))); }
             }
             _ => {}
         }
@@ -3134,7 +3359,13 @@ impl<'a> Generator<'a> {
             component: window.id.clone(),
             ..Ctx::default()
         };
+        if self.platform == Platform::Macos {
+            out.open("BernSearchPaletteHost {");
+        }
         self.node(out, &window.content, &ctx);
+        if self.platform == Platform::Macos {
+            out.close("}");
+        }
         out.close("}");
         if window.chrome == bern_ir::WindowChrome::Unified
             || window.immersive.is_some()
@@ -3712,6 +3943,24 @@ fn reveals(nodes: &[Node]) -> bool {
         }
         Node::IfLet(node) => reveals(&node.then) || reveals(&node.otherwise),
         Node::Match(node) => node.arms.iter().any(|arm| reveals(&arm.body)),
+        Node::Component(_) => false,
+    })
+}
+
+/// Conditions and repetitions do not introduce a layout container: their
+/// rails still overlay the other layers of the surrounding Stack.
+fn has_rail_layer(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(element) => {
+            element.kind == "Rail"
+                || (element.kind == "ForEach" && has_rail_layer(&element.children))
+        }
+        Node::If(node) => {
+            node.branches.iter().any(|(_, body)| has_rail_layer(body))
+                || has_rail_layer(&node.otherwise)
+        }
+        Node::IfLet(node) => has_rail_layer(&node.then) || has_rail_layer(&node.otherwise),
+        Node::Match(node) => node.arms.iter().any(|arm| has_rail_layer(&arm.body)),
         Node::Component(_) => false,
     })
 }

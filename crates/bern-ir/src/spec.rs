@@ -319,6 +319,7 @@ pub const DRAWING: &[&str] = &["Canvas", "Shape", "Series", "Pattern"];
 
 pub const MOTION_PROPS: &[PropSpec] = &[
     opt("appear", PropKind::Transition),
+    opt("appear_delay", PropKind::Number),
     opt("disappear", PropKind::Transition),
     opt("reflow", PropKind::MotionToken),
     opt("hero", PropKind::HeroName),
@@ -329,6 +330,9 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("scroll_scale", PropKind::Number),
     opt("scroll_opacity", PropKind::Number),
     opt("nudge", PropKind::Bool),
+    opt("nudge_key", PropKind::KeyValue),
+    opt("nudge_scale", PropKind::Number),
+    opt("reduce_motion", PropKind::Bool),
     opt("stagger", PropKind::Number),
 ];
 
@@ -500,10 +504,24 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Horizontal arrangement; `align: baseline` lines the texts up on the baseline of their first line",
     ),
     spec(
+        "Accordion",
+        &[
+            req("count", PropKind::NumberValue),
+            req("selected", PropKind::NumberValue),
+            req("collapsed_width", PropKind::Length),
+            req("height", PropKind::Length),
+            opt("gap", PropKind::Length),
+            opt("corner", PropKind::Length),
+        ],
+        Children::Any,
+        "Horizontal accordion: one column expands into the remaining width; animated widths share a layout and fixed gaps",
+    ),
+    spec(
         "Grid",
         &[
             req("min_width", PropKind::Length),
             opt("gap", PropKind::Length),
+            opt("row_gap", PropKind::Length),
             opt("padding", PropKind::Length),
             opt("padding_x", PropKind::Length),
             opt("padding_y", PropKind::Length),
@@ -514,6 +532,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     spec(
         "Stack",
         &[
+            opt("variant", PropKind::StyleVariant),
+            opt("enabled", PropKind::Bool),
             opt("align", PropKind::Keyword(STACK_ALIGN)),
             opt("width", PropKind::Length),
             opt("height", PropKind::Length),
@@ -521,6 +541,28 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         Children::Any,
         "Layers on top of each other, later children above earlier ones; as large as the largest unless `width` or `height` says",
     ),
+    spec(
+        "Modal",
+        &[opt("width", PropKind::Length), opt("height", PropKind::Length)],
+        Children::Any,
+        "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop",
+    ),
+    spec(
+        "Flow",
+        &[opt("gap", PropKind::Length)],
+        Children::Any,
+        "Leading-aligned items wrapping onto new rows at the available width",
+    ),
+    ComponentSpec {
+        action: ActionRule::Required,
+        ..spec("Timer", &[req("interval", PropKind::Number), opt("enabled", PropKind::Bool)], Children::None,
+            "Invoke a command at an interval in seconds while mounted and enabled; automatically cancels on removal")
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Picker"]),
+        ..spec("PickerOption", &[req("value", PropKind::KeyValue), req("label", PropKind::DisplayText)], Children::None,
+            "An explicitly labelled picker option, including live counts")
+    },
     spec(
         "Rail",
         &[
@@ -555,10 +597,18 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "Sidebar",
             &[
                 req("selection", PropKind::SelectionField),
+                opt("width", PropKind::Length),
                 opt("id", PropKind::Id),
                 opt("fallback", PropKind::SelectionValue),
             ],
-            Children::Only(&["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]),
+            Children::Only(&[
+                "Search",
+                "Section",
+                "SidebarItem",
+                "Pages",
+                "SidebarHeader",
+                "SidebarFooter",
+            ]),
             "Sidebar list selecting a destination",
         )
     },
@@ -597,6 +647,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("value", PropKind::SelectionValue),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
+                opt("badge", PropKind::NumberValue),
                 opt("variant", PropKind::StyleVariant),
             ],
             Children::None,
@@ -837,6 +888,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
                 opt("style", PropKind::Keyword(&["button", "icon"])),
+                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("height", PropKind::Length),
             ],
             Children::Only(&["MenuItem", "Divider"]),
             "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name",
@@ -904,6 +957,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("emphasis", PropKind::Keyword(EMPHASIS)),
             opt("mark", PropKind::ColorRole),
             opt("lines", PropKind::Number),
+            opt("font_size", PropKind::Number),
         ],
         Children::None,
         "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis",
@@ -978,9 +1032,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("title", PropKind::DisplayText),
             req("icon", PropKind::Icon),
             opt("style", PropKind::Keyword(TEXT_STYLES)),
+            opt("font_size", PropKind::Number),
+            opt("display", PropKind::Keyword(&["title_and_icon", "icon"])),
         ],
         Children::None,
-        "Icon and title",
+        "Icon and title; `display: icon` hides the title visually while preserving its accessible name",
     ),
     spec(
         "Image",
@@ -991,9 +1047,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("height", PropKind::Length),
             opt("fit", PropKind::Keyword(VIDEO_FIT)),
             opt("corner", PropKind::Length),
+            opt("rendering", PropKind::Keyword(&["original", "template"])),
+            opt("aspect", PropKind::Number),
         ],
         Children::None,
-        "Picture from a declared resource, sized by `width` and/or `height`, its corners rounded by `corner`; `label` describes it, without one it is decorative",
+        "Picture from a declared resource, sized by `width` and/or `height`, its corners rounded by `corner`; `rendering: template` uses its alpha as a mask for the inherited text color, otherwise it keeps its colors; `label` describes it, without one it is decorative",
     ),
     spec(
         "Progress",
@@ -1014,6 +1072,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
+                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("height", PropKind::Length),
                 opt(
                     "role",
                     PropKind::Keyword(&["normal", "destructive", "cancel"]),
@@ -1082,19 +1142,46 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("prompt", PropKind::DisplayText),
                 FEATURE,
                 opt("shortcut", PropKind::Shortcut),
+                opt("style", PropKind::Keyword(&["automatic", "palette"])),
+                opt("panel_prompt", PropKind::DisplayText),
+                opt("width", PropKind::Number),
+                opt("height", PropKind::Number),
             ],
             Children::Any,
             "Search text bound to a session draft; the action runs on submit; children are the results shown below the field while it is in use",
         )
     },
     ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "SearchItem",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("icon", PropKind::Icon),
+                opt("detail", PropKind::DisplayText),
+                opt("hint", PropKind::DisplayText),
+                opt("navigation", PropKind::Bool),
+                opt("pick", PropKind::FileField),
+                opt("files", PropKind::FileKinds),
+                FEATURE,
+            ],
+            Children::Any,
+            "A palette result; activates and dismisses the search; optional content replaces the row; navigation false excludes it from arrow navigation",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Optional,
         interactive: true,
         ..spec(
             "Switch",
             &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
-                req("value", PropKind::BoolField),
+                opt("value", PropKind::BoolField),
+                opt("checked", PropKind::Bool),
+                opt("label_hidden", PropKind::Flag),
                 opt(
                     "style",
                     PropKind::Keyword(&["switch", "checkbox", "button"]),
@@ -1114,6 +1201,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
                 req("value", PropKind::NumberField),
                 req("min", PropKind::Number),
                 req("max", PropKind::Number),
@@ -1161,20 +1249,23 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
+        action: ActionRule::Optional,
         interactive: true,
         ..spec(
             "Picker",
             &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
-                req("value", PropKind::PickerField),
+                opt("value", PropKind::PickerField),
+                opt("selected", PropKind::KeyValue),
+                opt("label_hidden", PropKind::Flag),
                 opt(
                     "style",
                     PropKind::Keyword(&["automatic", "menu", "segmented", "radio", "inline"]),
                 ),
             ],
-            Children::None,
-            "Single choice among the labelled variants of an enum",
+            Children::Only(&["PickerOption"]),
+            "Single choice among the labelled variants of an enum, with optional explicit labels",
         )
     },
 ];
@@ -1273,10 +1364,14 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             message: "`List` needs both `items:` and `key:` for data rows".into(),
         });
     }
-    if spec.name == "Image" && !shape.props.contains(&"width") && !shape.props.contains(&"height") {
+    if spec.name == "Image"
+        && !shape.props.contains(&"width")
+        && !shape.props.contains(&"height")
+        && !shape.props.contains(&"aspect")
+    {
         errors.push(ShapeError {
             prop: None,
-            message: "`Image` needs `width:`, `height:` or both; with one, the other follows the picture's aspect ratio".into(),
+            message: "`Image` needs `width:`, `height:` or `aspect:`; with one, the other follows the picture's aspect ratio".into(),
         });
     }
     if spec.name == "Button" && shape.children.is_some() {
@@ -1300,7 +1395,7 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
     }
     if shape.props.contains(&"files")
         && !shape.props.contains(&"pick")
-        && ["Button", "IconButton", "MenuItem"].contains(&spec.name)
+        && ["Button", "IconButton", "MenuItem", "SearchItem"].contains(&spec.name)
     {
         errors.push(ShapeError {
             prop: Some("files".into()),
@@ -1327,6 +1422,46 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
                 "`total:` needs a `value:`; without one, `Progress` is an indeterminate spinner"
                     .into(),
         });
+    }
+    if shape.props.contains(&"nudge_scale") && !shape.props.contains(&"nudge_key") {
+        errors.push(ShapeError {
+            prop: Some("nudge_scale".into()),
+            message: "`nudge_scale` needs a `nudge_key` event binding".into(),
+        });
+    }
+    if shape.props.contains(&"nudge") && shape.props.contains(&"nudge_key") {
+        errors.push(ShapeError {
+            prop: Some("nudge_key".into()),
+            message: "choose `nudge` for a condition or `nudge_key` for repeated events".into(),
+        });
+    }
+    if shape.props.contains(&"appear_delay") && !shape.props.contains(&"appear") {
+        errors.push(ShapeError {
+            prop: Some("appear_delay".into()),
+            message: "`appear_delay` needs an `appear` transition".into(),
+        });
+    }
+    if matches!(spec.name, "Switch" | "Picker") {
+        let controlled = if spec.name == "Switch" {
+            "checked"
+        } else {
+            "selected"
+        };
+        if shape.props.contains(&"value") == shape.props.contains(&controlled) {
+            errors.push(ShapeError {
+                prop: None,
+                message: format!(
+                    "`{}` needs exactly one of `value` or `{controlled}`",
+                    spec.name
+                ),
+            });
+        }
+        if shape.props.contains(&controlled) && !shape.has_action {
+            errors.push(ShapeError {
+                prop: None,
+                message: format!("`{controlled}` needs an action to commit the new value"),
+            });
+        }
     }
     match (spec.action, shape.has_action) {
         (ActionRule::Required, false) => errors.push(ShapeError {
@@ -1493,6 +1628,13 @@ mod tests {
             parent: Some("Column"),
             is_root: false,
         }
+    }
+
+    #[test]
+    fn adaptive_image_ratio_supplies_its_size() {
+        assert!(check_shape(&shape("Image", vec!["source", "aspect"], false)).is_empty());
+        assert!(!check_shape(&shape("Image", vec!["source"], false)).is_empty());
+        assert!(check_shape(&shape("Grid", vec!["min_width", "gap", "row_gap"], false)).is_empty());
     }
 
     #[test]

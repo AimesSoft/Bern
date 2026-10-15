@@ -33,6 +33,7 @@ pub const ICON_FILE: &str = "AppIcon.icns";
 /// Motion SwiftUI shows, on macOS and iOS.
 pub(crate) const MOTION: &[&str] = &[
     "appear",
+    "appear_delay",
     "disappear",
     "reflow",
     "hero",
@@ -40,11 +41,16 @@ pub(crate) const MOTION: &[&str] = &[
     "scroll_scale",
     "scroll_opacity",
     "nudge",
+    "nudge_key",
+    "nudge_scale",
+    "reduce_motion",
     "stagger",
 ];
 
 /// IR features SwiftUI builds, on macOS and iOS.
 pub(crate) const FEATURES: &[&str] = &[
+    bern_target_api::feature::CONTROLLED_VALUES,
+    bern_target_api::feature::SIDEBAR_WIDTH,
     bern_target_api::feature::BUTTON_CONTENT,
     bern_target_api::feature::REVEAL,
     bern_target_api::feature::TOOLBAR_SEARCH,
@@ -66,8 +72,17 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::TEXT_WEIGHTS,
     bern_target_api::feature::TEXT_LINES,
     bern_target_api::feature::IMAGE_CORNERS,
+    bern_target_api::feature::IMAGE_TEMPLATE,
+    bern_target_api::feature::ADAPTIVE_IMAGES,
+    bern_target_api::feature::ACCORDION_LAYOUT,
+    bern_target_api::feature::CAPSULE_CONTROLS,
+    bern_target_api::feature::MODAL_FLOW_TIMER,
+    bern_target_api::feature::PAGE_BADGES,
+    bern_target_api::feature::EDGE_GROW,
+    bern_target_api::feature::DELAYED_APPEAR,
     bern_target_api::feature::ROW_BASELINE,
     bern_target_api::feature::ICON_MENUS,
+    bern_target_api::feature::ICON_LABELS,
     bern_target_api::feature::TOOLBAR_LEADING,
     bern_target_api::feature::AXIS_PADDING,
     bern_target_api::feature::UNTITLED_DETAIL,
@@ -133,7 +148,10 @@ impl Target for SwiftUiMacos {
             window_chrome: true,
             text_marks: true,
             dynamic_items: true,
-            features: FEATURES,
+            features: {
+                static FEATURES_WITH_PALETTE: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+                FEATURES_WITH_PALETTE.get_or_init(|| FEATURES.iter().copied().chain([bern_target_api::feature::SEARCH_PALETTE]).collect())
+            },
             id: "swiftui-macos",
             ui: "swiftui",
             platforms: &["macos"],
@@ -703,6 +721,14 @@ pub(crate) fn check_swiftui(
                     )
                     .at(element.source.clone()),
                 );
+            }
+            if element.kind == "Search" && element.keyword("style") == Some("palette")
+                && (platform == Platform::Ios || parent != Some("Toolbar"))
+            {
+                diagnostics.push(Diagnostic::error("search palettes require a macOS Toolbar").at(element.source.clone()));
+            }
+            if element.kind == "SearchItem" && platform == Platform::Ios {
+                diagnostics.push(Diagnostic::error("SearchItem requires a macOS search palette").at(element.source.clone()));
             }
             if element.kind == "Picker"
                 && let Some(field) = element.field("value")

@@ -603,6 +603,30 @@ mod composite {
     }
 
     #[test]
+    fn shell_can_queue_optional_module_changes() {
+        struct Switching;
+        impl EngineProtocol for Switching {
+            fn descriptor(&self) -> &'static ProtocolDescriptor { descriptor() }
+            fn snapshot(&self) -> Vec<Value> { vec![Value::Int(0)] }
+            fn invoke(&mut self, invocation: &Invocation) -> Result<Value, CommandError> {
+                let enabled = matches!(invocation.params.first(), Some(Value::Int(n)) if *n > 0);
+                outbox::call("modules", 0, vec![Value::Text("tally".into()), Value::Bool(enabled)]);
+                Ok(Value::Unit)
+            }
+        }
+        let engine = Composite::new(Box::new(Switching), vec![tally(true, true)]).unwrap();
+        let host = Host::start(engine);
+        let change = host.resolve("counter.add").unwrap();
+        let bump = host.resolve("tally.bump").unwrap();
+        for enabled in [false, true] {
+            host.dispatch_blocking(Invocation { command: change, params: vec![Value::Int(i64::from(enabled))] }, context()).result.unwrap();
+            let result = host.dispatch_blocking(Invocation { command: bump, params: vec![] }, context()).result;
+            if enabled { assert_eq!(result, Ok(Value::Int(1))); }
+            else { assert_eq!(result.unwrap_err().code, "module_disabled"); }
+        }
+    }
+
+    #[test]
     fn optional_modules_switch_off_and_on() {
         let changes = std::sync::Arc::new(Mutex::new(Vec::new()));
         let shell = Remembering {

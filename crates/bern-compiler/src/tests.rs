@@ -1378,7 +1378,7 @@ fn image_and_progress_diagnostics() {
         ),
         (
             r#"Image(source: "pics/a.png")"#,
-            "`Image` needs `width:`, `height:` or both",
+            "`Image` needs `width:`, `height:` or `aspect:`",
         ),
         (
             r#"Image(source: "pics/a.png", width: 0)"#,
@@ -2353,4 +2353,17 @@ fn style_rules_are_lowered_and_checked() {
             "{body}: {diagnostics:?}"
         );
     }
+}
+
+#[test]
+fn controlled_settings_reject_ambiguous_sources_and_non_enum_selections() {
+    let label = r#"tr! { "en" => "Preference", "ja" => "設定" }"#;
+    for (body, message) in [
+        (format!("Switch(id: flag, label: {label}, checked: true)"), "needs an action"),
+        (format!("Switch(id: flag, label: {label}, checked: true, value: draft.on) => app.add(1)"), "exactly one"),
+        (format!("Picker(id: mode, label: {label}, selected: app.count) => app.add(1)"), "enum"),
+    ] {
+        assert!(errors(&body).contains(message), "{}", errors(&body));
+    }
+    compile_ui(&wrap(&format!("Column {{ Switch(id: flag, label: {label}, checked: true) => app.add(1) Picker(id: mode, label: {label}, selected: app.mode) => app.add(1) }}"))).unwrap();
 }

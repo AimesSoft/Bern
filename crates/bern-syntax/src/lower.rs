@@ -76,6 +76,9 @@ fn protocol_types(protocol: &ProtocolItem) -> Vec<&TypeRef> {
         types.extend(method.params.iter().map(|param| &param.ty));
         types.push(&method.result);
     }
+    for method in protocol.events.iter().flat_map(|events| &events.methods) {
+        types.extend(method.params.iter().map(|param| &param.ty));
+    }
     for method in protocol.queries.iter().flat_map(|queries| &queries.methods) {
         types.extend(method.params.iter().map(|param| &param.ty));
         types.push(&method.result);
