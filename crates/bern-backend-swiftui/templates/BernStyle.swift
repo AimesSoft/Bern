@@ -1030,9 +1030,43 @@ extension View {
         modifier(BernHero(id: id, motion: motion))
     }
 
+    /// A form's or scroll view's entrance: see `BernScrollEntrance`.
+    func bernScrollEntrance(motion: BernMotion, delay: Double) -> some View {
+        modifier(BernScrollEntrance(motion: motion, delay: delay))
+    }
+
     /// Where the shared elements of one window record their frames.
     func bernHeroRoot() -> some View {
         modifier(BernHeroRoot())
+    }
+}
+
+/// A scroll view draws the background of the bar above it, the title bar
+/// on macOS and the navigation bar elsewhere, in its own frame. It enters
+/// by fading in only what lies below the top safe area, so that background
+/// and the bar stay as they are. The scroll view itself never moves.
+private struct BernScrollEntrance: ViewModifier {
+    let motion: BernMotion
+    let delay: Double
+    @BernReducedMotion private var reduce
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        content
+            .mask {
+                GeometryReader { geometry in
+                    VStack(spacing: 0) {
+                        Color.black.frame(height: geometry.safeAreaInsets.top)
+                        Color.black.opacity(shown ? 1 : 0)
+                    }
+                    .ignoresSafeArea()
+                }
+            }
+            .onAppear {
+                let animation = reduce || bernForcedReduceMotion
+                    ? Animation.easeInOut(duration: 0.15) : motion.animation
+                withAnimation(animation.delay(delay)) { shown = true }
+            }
     }
 }
 

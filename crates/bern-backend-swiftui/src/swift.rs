@@ -1409,6 +1409,36 @@ impl<'a> Generator<'a> {
         let appear = element
             .keyword("appear")
             .and_then(|name| crate::style::transition(self.app, name));
+        // A scroll view draws the background of the bar above it (the
+        // title bar or navigation bar): moving or fading the scroll view
+        // drags that background along, and the bar flickers. A scroll view
+        // moves its content instead (in its own case of `element`); a form,
+        // whose rows cannot be wrapped, fades in what lies below the bar.
+        // Both leave at once.
+        if element.kind == "ScrollView" {
+            return self.later_motion(out, element);
+        }
+        if element.kind == "Form"
+            && let Some((_, motion)) = &appear
+        {
+            let delay = element.number("appear_delay").unwrap_or(0.0);
+            out.line(format!(
+                ".bernScrollEntrance(motion: {motion}, delay: {})",
+                double(delay)
+            ));
+        } else if let Some(line) = self.transition_line(element, false) {
+            out.line(line);
+        }
+        self.later_motion(out, element);
+    }
+
+    /// `.bernTransition(…)` for an element's `appear` and `disappear`;
+    /// with `on_appear`, the entrance runs when the element appears rather
+    /// than as an inserting transition.
+    fn transition_line(&self, element: &Element, on_appear: bool) -> Option<String> {
+        let appear = element
+            .keyword("appear")
+            .and_then(|name| crate::style::transition(self.app, name));
         let disappear = element
             .keyword("disappear")
             .and_then(|name| crate::style::transition(self.app, name));
@@ -1428,13 +1458,18 @@ impl<'a> Generator<'a> {
             // where a transition would see it come: it enters on appear.
             let delay = element
                 .number("appear_delay")
-                .or((element.kind == "Modal").then_some(0.0))
+                .or((on_appear || element.kind == "Modal").then_some(0.0))
                 .map(|delay| format!(", delay: {}", double(delay)))
                 .unwrap_or_default();
-            out.line(format!(
+            return Some(format!(
                 ".bernTransition(insertion: {insertion}, insertionMotion: {insertion_motion}, removal: {removal}, removalMotion: {removal_motion}{manual}{delay})"
             ));
         }
+        None
+    }
+
+    /// The motion properties other than `appear` and `disappear`.
+    fn later_motion(&self, out: &mut Out, element: &Element) {
         if let Some(hero) = element.keyword("hero").filter(|_| element.kind != "Image") {
             let motion = crate::style::motion(self.app, "hero");
             match element.expr("hero_key") {
@@ -2455,6 +2490,11 @@ impl<'a> Generator<'a> {
                 };
                 let snap = element.keyword("snap");
                 let position = self.field(element, "position");
+                // The scroll view's entrance moves what it scrolls, which
+                // mounts with it: it runs on appear.
+                let entrance = element
+                    .keyword("appear")
+                    .and_then(|_| self.transition_line(element, true));
                 out.open(format!("SwiftUI.ScrollView({axis}) {{"));
                 if snap.is_some() || position.is_some() {
                     // The items to rest on and to scroll to are those of
@@ -2471,6 +2511,14 @@ impl<'a> Generator<'a> {
                     if snap.is_some() {
                         out.line(".bernSnapContent()");
                     }
+                    if let Some(entrance) = &entrance {
+                        out.line(entrance);
+                    }
+                } else if let Some(entrance) = &entrance {
+                    out.open("SwiftUI.Group {");
+                    self.nodes(out, &element.children, ctx);
+                    out.close("}");
+                    out.line(entrance);
                 } else {
                     self.nodes(out, &element.children, ctx);
                 }

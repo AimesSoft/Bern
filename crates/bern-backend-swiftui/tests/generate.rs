@@ -867,7 +867,8 @@ pub fn screen(app: demo::Client, #[session] draft: Draft) -> impl View {
       }
      }
      Text(content: tr! { "en" => "Home" })
-     ScrollView(axis: horizontal, indicators: hidden) { Text(content: tr! { "en" => "Shelf" }) }
+     ScrollView(axis: horizontal, indicators: hidden, appear: fade) { Text(content: tr! { "en" => "Shelf" }) }
+     Form(appear: fade) { Section { Text(content: tr! { "en" => "Row" }) } }
     }
    }
   }
@@ -956,6 +957,12 @@ platform = "macos"
     assert!(generated.contains(".disabled(!("));
     assert!(!generated.contains(".allowsHitTesting("));
     assert!(generated.contains(".scrollIndicators(.never)"));
+    // Scroll views enter without moving themselves: a scroll view's
+    // content enters on appear inside it, and a form fades below the bar.
+    let shelf = generated.split("SwiftUI.ScrollView(.horizontal) {").nth(1).unwrap();
+    let shelf = &shelf[..shelf.find(".scrollIndicators").unwrap()];
+    assert!(shelf.contains("SwiftUI.Group {") && shelf.contains("appear: BernAppear.fade, delay: 0.0)"), "{shelf}");
+    assert!(generated.contains(".bernScrollEntrance(motion:"));
     let errors = SwiftUiIos.check(&compiled.app, &context.target);
     assert!(errors.iter().any(|e| e.message.contains("macOS Toolbar")));
     if !Command::new("xcrun")
