@@ -551,4 +551,4 @@ open target/bern/macos/Showcase.app
 
 `Image(hero:, hero_key:)` 在 macOS 使用窗口级像素覆盖层，绕过 SwiftUI 匹配几何无法跨 NavigationSplitView 列移动的限制。图片的布局、辅助功能和点击由原视图保留；临时画面插值窗口坐标、尺寸和圆角，使用声明的 hero 弹簧。反向切换沿用当前画面位置，窗口之间不配对，减少动态效果时不飞行。图片以外的 `hero` 以及 iOS 仍使用原有 matchedGeometryEffect。
 
-`tests/image_hero.rs` 将真实 AppKit 实现放在两个原生容器中，验证插值、快速反向、还原可见性、减少动态效果及目标卸载清理；Erika macOS 实测首页舞台展开、完整播放器缩到侧栏及恢复。范围为 Image，不代表 Video 已实现窗口级画面传递。
+`tests/image_hero.rs` 将真实 AppKit 实现放在两个原生容器中，验证插值、快速反向、还原可见性、减少动态效果及目标卸载清理；真实应用的 macOS 版实测首页舞台展开、完整播放器缩到侧栏及恢复。范围为 Image，不代表 Video 已实现窗口级画面传递。

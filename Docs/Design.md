@@ -787,7 +787,7 @@ Stack(align: top_trailing) {
 1. **状态变换**：在样式中为状态声明缩放、位移与透明度，作用在控件的外层容器上，不改变控件本身的绘制，也不影响相邻元素的布局。
 2. **结构过渡**：任何元素可以声明 `appear` 与 `disappear`，在它因 `if`、`match` 或 `ForEach` 的变化而挂载或卸载时播放；首次显示不播放。过渡只有 `fade`、`pop(from: 比例)` 与 `slide(edge, 距离)` 几种，各带一个动效 token。容器可以声明 `reflow: 动效`，让相邻元素平滑让位。
 
-   SwiftUI 的 `match` 与 `if` 一样，在分支直接子元素声明过渡时，为判别值变化建立动画事务；未声明过渡的 `match` 保持原来的行为。已用动态导航回归覆盖生成代码及 Swift 类型检查，并在 Erika 设置页慢放确认普通分类、相同组件的不同分支和独立布局之间的淡入与位移；修改当前页内的偏好不会重播入场。
+   SwiftUI 的 `match` 与 `if` 一样，在分支直接子元素声明过渡时，为判别值变化建立动画事务；未声明过渡的 `match` 保持原来的行为。已用动态导航回归覆盖生成代码及 Swift 类型检查，并在一个真实应用的设置页慢放确认普通分类、相同组件的不同分支和独立布局之间的淡入与位移；修改当前页内的偏好不会重播入场。
 
    ```rust
    ForEach(items: app.sections, key: id, reflow: smooth) |section| {
@@ -1452,7 +1452,7 @@ auto 根据所选 UI 后端、平台和当前宿主能力决定呈现方式：
 
 ### 窗口外框、沉浸与覆盖层
 
-窗口外框与空闲检测已有后端实现，以下分别说明语义与验证范围。macOS / Web 的全窗口播放器覆盖层已在 Erika 验证；图片 Hero 与 Video 画面传递的状态分开记录。
+窗口外框与空闲检测已有后端实现，以下分别说明语义与验证范围。macOS / Web 的全窗口播放器覆盖层已在真实应用中验证；图片 Hero 与 Video 画面传递的状态分开记录。
 
 ```rust
 Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, chrome: unified, idle_after: 3, immersive: draft.playing && window.idle) {

@@ -7,7 +7,7 @@ Svg(
     source: "assets/logo.svg",
     width: 104,
     height: 104,
-    label: tr! { "zh-Hans" => "Erika", "en" => "Erika" },
+    label: tr! { "zh-Hans" => "应用图标", "en" => "App icon" },
     playing: app.logo_playing,
     speed: app.logo_speed,
     restart: app.logo_revision
@@ -67,6 +67,6 @@ cd examples/svg-animation
 2026-10-17 验证：
 
 - Bern 编译器、呈现后端及 SVG 文档测试通过；共享动画运行时的 6 项 Node 测试通过。六目标生成测试另检查 Android 构建清理会保留 `BernSvg.kt`，资源从 `bern/resources/` 加载。
-- Erika 的 macOS 和 Web 整包构建通过，示例的 macOS、iOS 模拟器包、Android APK 和 Web 构建通过。iOS 与 Android 本轮未运行设备上的交互验收；Windows 与 Linux 未做原生编译或设备验收。
-- macOS 的 Erika 引导与关于页透明 Logo 显示正确，并实测双击动作。Web 实测 130／200 尺寸引导、104 尺寸关于页、入场以及眨眼／摸头／坏笑动作；退出引导后 iframe 数量归零。
+- 一个真实应用的 macOS 和 Web 整包构建通过，示例的 macOS、iOS 模拟器包、Android APK 和 Web 构建通过。iOS 与 Android 本轮未运行设备上的交互验收；Windows 与 Linux 未做原生编译或设备验收。
+- 该应用在 macOS 的引导与关于页透明 Logo 显示正确，并实测双击动作。Web 实测 130／200 尺寸引导、104 尺寸关于页、入场以及眨眼／摸头／坏笑动作；退出引导后 iframe 数量归零。
 - Web 示例实测暂停后旋转矩阵跨两次采样保持不变，暂停中重播回到单位矩阵；切换倍速并恢复后继续运动，没有控制台错误。倍率和 SMIL 时钟计算由 Node 测试覆盖。

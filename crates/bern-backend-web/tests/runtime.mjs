@@ -130,7 +130,7 @@ test("accordion keeps fixed collapsed columns and fits narrow and overshooting l
   }
 });
 
-async function storageHarness(storage, app = "erika", key = "settings") {
+async function storageHarness(storage, app = "media", key = "settings") {
   // Exercise the actual WASM imports without starting a browser or engine.
   const source = await readFile(new URL("../templates/bern.js", import.meta.url), "utf8");
   const memory = new WebAssembly.Memory({ initial: 1 });
@@ -161,7 +161,7 @@ test("WASM storage survives a fresh host and probes length before reading", asyn
   assert.equal(first.imports.storage_read(32, 5, 64, 8, 128, 0), -1);
   first.bytes.set([0, 128, 255, 42], 128);
   assert.equal(first.imports.storage_write(32, 5, 64, 8, 128, 4), 0);
-  assert.deepEqual(JSON.parse(values.get("bern:erika:settings")), [0, 128, 255, 42]);
+  assert.deepEqual(JSON.parse(values.get("bern:media:settings")), [0, 128, 255, 42]);
   const second = await storageHarness(storage);
   assert.equal(second.imports.storage_read(32, 5, 64, 8, 128, 0), 4);
   assert.deepEqual([...second.bytes.slice(128, 132)], [0, 0, 0, 0]);
@@ -180,16 +180,16 @@ test("WASM storage reports corrupt data and blocked/quota failures", async () =>
 test("WASM storage isolates application namespaces and value keys", async () => {
   const values = new Map([["other-page", "untouched"]]);
   const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
-  const erika = await storageHarness(storage, "com.aimessoft.erika", "welcome-v1");
+  const media = await storageHarness(storage, "com.example.media", "welcome-v1");
   const anotherApp = await storageHarness(storage, "com.example.player", "welcome-v1");
-  const anotherKey = await storageHarness(storage, "com.aimessoft.erika", "cache-v1");
-  erika.bytes.set([1, 2], 128);
-  assert.equal(erika.imports.storage_write(...erika.names, 128, 2), 0);
+  const anotherKey = await storageHarness(storage, "com.example.media", "cache-v1");
+  media.bytes.set([1, 2], 128);
+  assert.equal(media.imports.storage_write(...media.names, 128, 2), 0);
   assert.equal(anotherApp.imports.storage_read(...anotherApp.names, 128, 2), -1);
   assert.equal(anotherKey.imports.storage_read(...anotherKey.names, 128, 2), -1);
   anotherApp.bytes.set([3], 128);
   assert.equal(anotherApp.imports.storage_write(...anotherApp.names, 128, 1), 0);
-  const fresh = await storageHarness(storage, "com.aimessoft.erika", "welcome-v1");
+  const fresh = await storageHarness(storage, "com.example.media", "welcome-v1");
   assert.equal(fresh.imports.storage_read(...fresh.names, 128, 2), 2);
   assert.deepEqual([...fresh.bytes.slice(128, 130)], [1, 2]);
   assert.equal(values.get("bern:com.example.player:welcome-v1"), "[3]");
@@ -202,7 +202,7 @@ test("WASM storage preserves empty bytes separately from missing values", async 
   const first = await storageHarness(storage);
   assert.equal(first.imports.storage_read(...first.names, 0, 0), -1);
   assert.equal(first.imports.storage_write(...first.names, 0, 0), 0);
-  assert.equal(values.get("bern:erika:settings"), "[]");
+  assert.equal(values.get("bern:media:settings"), "[]");
   const fresh = await storageHarness(storage);
   assert.equal(fresh.imports.storage_read(...fresh.names, 0, 0), 0);
 });
