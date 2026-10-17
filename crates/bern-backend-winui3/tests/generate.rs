@@ -463,6 +463,7 @@ fn gallery_generates_without_warnings() {
         ".files = \"video\"",
         "B::ScrollView(p, c, {.axis = \"horizontal\", .snap = \"center\", .position = Field{",
         ".scrollScale = 1.12, .scrollOpacity = 0.6",
+        ".hideIndicators = true",
         ".stagger = 0.04",
         "c.Write(Field{",
         "B::Adaptive(p, c, \"film_controls\", std::array<Build, 4>{",

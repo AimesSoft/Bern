@@ -632,9 +632,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("snap", PropKind::Keyword(&["start", "center"])),
             opt("position", PropKind::PositionField),
             opt("arrival", PropKind::Keyword(&["nudge"])),
+            opt("indicators", PropKind::Keyword(&["automatic", "hidden"])),
         ],
         Children::Any,
-        "Scrolling container; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives",
+        "Scrolling container; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives; `indicators: hidden` scrolls without showing the scroll bar, for a shelf that has its own paging buttons",
     ),
     spec(
         "SplitView",

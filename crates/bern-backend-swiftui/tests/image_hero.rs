@@ -17,6 +17,7 @@ import SwiftUI
 struct BernMotion { let period: Double; let damping: Double }
 let bernMotionScale: Double = 1
 let bernForcedReduceMotion = false
+@propertyWrapper struct BernReducedMotion: DynamicProperty { var wrappedValue: Bool { false } }
 enum BernImageFit { case contain, cover, fill }
 enum BernImage {
     struct Picture { let image: CGImage; let orientation: SwiftUI.Image.Orientation; let ratio: CGFloat }
@@ -77,6 +78,28 @@ enum BernImage {
         closing.removeFromSuperview()
         spin(0.08)
         precondition(ghosts().isEmpty && !sourceHidden, "removing the destination cancels and cleans up")
+        // Other elements fly what the window draws where they are.
+        let tile = NSView(frame: CGRect(x: 0, y: 0, width: 220, height: 600))
+        tile.wantsLayer = true; tile.layer?.backgroundColor = NSColor.blue.cgColor
+        left.addSubview(tile, positioned: .below, relativeTo: nil)
+        func viewAnchor(_ parent: NSView, _ frame: CGRect) -> BernPictureHeroAnchor {
+            let view = BernPictureHeroAnchor(frame: frame)
+            view.key = "window"; view.capturesView = true
+            parent.addSubview(view)
+            return view
+        }
+        var previewHidden = false, shellHidden = false
+        let preview = viewAnchor(left, CGRect(x: 10, y: 30, width: 150, height: 94))
+        preview.visibility = { previewHidden = $0 }
+        spin(0.05)
+        precondition(ghosts().isEmpty, "a view's first mount must not fly")
+        let shell = viewAnchor(right, CGRect(x: 0, y: 0, width: 580, height: 600))
+        shell.visibility = { shellHidden = $0 }
+        spin(0.08)
+        precondition(ghosts().count == 1 && previewHidden && shellHidden, "a view flies as a picture of the window")
+        precondition(ghosts()[0].frame.width > 150 && ghosts()[0].frame.width < 580, "the picture grows")
+        spin(1.3)
+        precondition(ghosts().isEmpty && !previewHidden && !shellHidden, "the view flight settles")
         window.close()
         print("image hero lifecycle passed")
     }

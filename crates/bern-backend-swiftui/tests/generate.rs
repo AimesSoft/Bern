@@ -850,6 +850,7 @@ pub fn app(app: demo::Client) -> impl View {
 #[component]
 pub fn screen(app: demo::Client, #[session] draft: Draft) -> impl View {
  ui! {
+  Stack(enabled: draft.query == "") {
    SplitView {
     Sidebar(id: pages, selection: draft.page) {
      SidebarItem(value: Page::Home, label: tr! { "en" => "Home" })
@@ -866,8 +867,10 @@ pub fn screen(app: demo::Client, #[session] draft: Draft) -> impl View {
       }
      }
      Text(content: tr! { "en" => "Home" })
+     ScrollView(axis: horizontal, indicators: hidden) { Text(content: tr! { "en" => "Shelf" }) }
     }
    }
+  }
  }
 }
 "#;
@@ -949,6 +952,10 @@ platform = "macos"
     assert!(generated.contains("BernSearchItem(target:"));
     assert!(generated.contains("BernPaletteDetail()"));
     assert!(!generated.contains(".modifier(BernSearchable("));
+    // A disabled split view keeps its toolbar safe area on macOS.
+    assert!(generated.contains(".disabled(!("));
+    assert!(!generated.contains(".allowsHitTesting("));
+    assert!(generated.contains(".scrollIndicators(.never)"));
     let errors = SwiftUiIos.check(&compiled.app, &context.target);
     assert!(errors.iter().any(|e| e.message.contains("macOS Toolbar")));
     if !Command::new("xcrun")

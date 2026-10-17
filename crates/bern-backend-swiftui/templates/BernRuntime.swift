@@ -1571,7 +1571,14 @@ struct BernWindowRoot<Content: View>: View {
             }
         }
         .overlayPreferenceValue(BernModalContent.self) { modal in
-            modal
+            // The modal arrives as a preference, after the change that
+            // presents it. Its layer fades in and out here, so its coming
+            // and going animate without animating the rest of the window;
+            // its panel enters on appear.
+            ZStack {
+                if let modal { modal.transition(.opacity) }
+            }
+            .animation(BernMotion(period: 0.45, damping: 1.0).animation, value: modal != nil)
         }
         .bernHeroRoot()
         .modifier(BernRenderActive())

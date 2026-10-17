@@ -1491,6 +1491,10 @@ impl<'a> Generator<'a> {
                     ("position", position),
                     ("arrival", Self::keyword(element, "arrival")),
                     ("nudgeMotion", snapping.then(|| self.motion("jelly"))),
+                    (
+                        "hideIndicators",
+                        (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
+                    ),
                 ]);
                 let first = self.layout_lines(element, &[]);
                 self.children_with(

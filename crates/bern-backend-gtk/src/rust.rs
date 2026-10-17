@@ -995,11 +995,12 @@ impl<'a> Generator<'a> {
             "ScrollView" => self.children(
                 out,
                 &format!(
-                    "b::ScrollView(p, c, b::ScrollProps {{ axis: {}, snap: {}, position: {}, arrival_nudge: {}, nudge_motion: {}, smooth: {} }}, ",
+                    "b::ScrollView(p, c, b::ScrollProps {{ axis: {}, snap: {}, position: {}, arrival_nudge: {}, hide_indicators: {}, nudge_motion: {}, smooth: {} }}, ",
                     Self::keyword(element, "axis"),
                     Self::keyword(element, "snap"),
                     some(self.field(element, "position")),
                     element.keyword("arrival") == Some("nudge"),
+                    element.keyword("indicators") == Some("hidden"),
                     self.motion("jelly"),
                     self.motion("smooth"),
                 ),

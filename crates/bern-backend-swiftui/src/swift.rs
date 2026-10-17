@@ -1327,10 +1327,14 @@ impl<'a> Generator<'a> {
         }
     }
 
-    /// Whether an element moves when it appears, disappears or replaces a
-    /// shared element: its container then animates the change.
+    /// Whether an element moves when it appears or disappears: its
+    /// container then animates the change. Shared elements (`hero`) run
+    /// their own motion and need no animated change. Animating it would
+    /// also animate whatever else the change inserts, and a split view
+    /// inserted in an animation on macOS can keep its columns under the
+    /// title bar.
     fn moves(element: &Element) -> bool {
-        ["appear", "disappear", "hero"]
+        ["appear", "disappear"]
             .iter()
             .any(|prop| element.keyword(prop).is_some())
     }
@@ -1420,8 +1424,11 @@ impl<'a> Generator<'a> {
                 .and_then(|name| crate::style::appear(self.app, name))
                 .map(|appear| format!(", appear: {appear}"))
                 .unwrap_or_default();
+            // A modal's panel mounts with its layer at the window root, not
+            // where a transition would see it come: it enters on appear.
             let delay = element
                 .number("appear_delay")
+                .or((element.kind == "Modal").then_some(0.0))
                 .map(|delay| format!(", delay: {}", double(delay)))
                 .unwrap_or_default();
             out.line(format!(
@@ -1429,9 +1436,13 @@ impl<'a> Generator<'a> {
             ));
         }
         if let Some(hero) = element.keyword("hero").filter(|_| element.kind != "Image") {
+            let motion = crate::style::motion(self.app, "hero");
             match element.expr("hero_key") {
-                Some(key) => out.line(format!(".bernHero(\"{hero}-\\({})\")", self.expr(key))),
-                None => out.line(format!(".bernHero({})", string(hero))),
+                Some(key) => out.line(format!(
+                    ".bernHero(\"{hero}-\\({})\", motion: {motion})",
+                    self.expr(key)
+                )),
+                None => out.line(format!(".bernHero({}, motion: {motion})", string(hero))),
             }
         }
         if let Some(token) = element.keyword("animate") {
@@ -2329,7 +2340,11 @@ impl<'a> Generator<'a> {
                 self.frame(out, element);
                 if let Some(enabled) = element.expr("enabled") {
                     let enabled = self.expr(enabled);
-                    out.line(format!(".disabled(!({enabled})).allowsHitTesting({enabled}).accessibilityHidden(!({enabled}))"));
+                    // `disabled` already stops its controls and gestures.
+                    // Turning hit testing off as well takes a split view's
+                    // toolbar safe area away on macOS: its columns then
+                    // slide under the title bar.
+                    out.line(format!(".disabled(!({enabled})).accessibilityHidden(!({enabled}))"));
                 }
                 if let Some(style) = self.style_of(element) {
                     out.line(format!(
@@ -2483,6 +2498,11 @@ impl<'a> Generator<'a> {
                         self.binding_of(&position),
                         crate::style::motion(self.app, "smooth")
                     ));
+                }
+                // `.hidden` still shows the bar when macOS is set to show
+                // scroll bars always; `.never` does not.
+                if element.keyword("indicators") == Some("hidden") {
+                    out.line(".scrollIndicators(.never)");
                 }
                 self.toolbar(out, &element.children, ctx);
             }

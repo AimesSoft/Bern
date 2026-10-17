@@ -72,6 +72,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::AXIS_PADDING,
     bern_target_api::feature::SIDEBAR_HEADER,
     bern_target_api::feature::UNTITLED_DETAIL,
+    bern_target_api::feature::IDLE_CONTROL,
     bern_target_api::feature::TEXT_LINES,
     bern_target_api::feature::CONTROLLED_VALUES,
     bern_target_api::feature::SEARCH_PALETTE,

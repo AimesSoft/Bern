@@ -910,6 +910,15 @@ button:disabled {
   overflow-y: hidden;
 }
 
+/* Scrolls without showing the scroll bar. */
+.bern-scroll-indicators-hidden {
+  scrollbar-width: none;
+}
+
+.bern-scroll-indicators-hidden::-webkit-scrollbar {
+  display: none;
+}
+
 /* A standalone list is a bordered card; inside a section it is rows. */
 .bern-list {
   display: flex;

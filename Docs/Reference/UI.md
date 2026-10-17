@@ -101,7 +101,7 @@ macOS 的 Image 使用窗口上层像素覆盖层，Web 使用视口坐标的图
 - `appear` / `disappear` 控制结构变化；`animate` 控制支持的长度变化，`reflow` 让相邻元素让位。动效名称来自 `style!`。
 - `grow(edge: bottom, bouncy)` 固定某条边展开；`appear_delay` 必须配合 appear，延迟非负，可与 stagger 相加。普通状态更新不会重播入场，卸载取消等待。
 - `nudge` 响应布尔触发；`nudge_key` 让不同事件值触发提示，`nudge_scale` 指定幅度。容器的 `reduce_motion` 与系统减少动态效果偏好合并。
-- `Window(idle_after:, idle_enabled:, immersive:)` 控制空闲与沉浸。idle_after 单位为秒，`window.idle` 为只读会话状态。idle_enabled 默认 true；关闭后清除闲置并停用检测，开启后重新计时。SwiftUI 和 Web 已接入此开关，其他目标当前未消费该属性；它尚无独立 capability 检查，不能把接受声明视为行为已实现。
+- `Window(idle_after:, idle_enabled:, immersive:)` 控制空闲与沉浸。idle_after 单位为秒，`window.idle` 为只读会话状态。idle_enabled 默认 true；关闭后清除闲置并停用检测，开启后重新计时。SwiftUI 和 Web 已接入此开关（能力 `idle_control`）；其他目标当前未消费该属性，`bern check` 会对它们给出警告，空闲检测在那里始终开启。
 
 macOS 编辑文字、菜单或子窗口交互时保留控制层；Web 仅在启用状态变化时重启计时器，播放进度快照更新不会阻止空闲隐藏。UIKit 共享启停逻辑，播放器设备交互尚未验收。
 

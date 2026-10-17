@@ -1107,6 +1107,10 @@ impl<'a> Generator<'a> {
                         ("arrival", Self::keyword(element, "arrival")),
                         ("nudgeMotion", Some(motion_ref("jelly"))),
                         ("reflow", Self::reflow(element)),
+                        (
+                            "hideIndicators",
+                            (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
+                        ),
                     ])
                 ),
                 &element.children,

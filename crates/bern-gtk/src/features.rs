@@ -1064,6 +1064,8 @@ pub struct ScrollProps {
     pub snap: Option<&'static str>,
     pub position: Option<Field>,
     pub arrival_nudge: bool,
+    /// Scroll without showing the scroll bar.
+    pub hide_indicators: bool,
     pub nudge_motion: Curve,
     pub smooth: Curve,
 }
@@ -1072,16 +1074,22 @@ pub struct ScrollProps {
 pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
     let horizontal = props.axis == Some("horizontal");
     let view = gtk::ScrolledWindow::new();
+    // `External` still scrolls, without a scroll bar.
+    let scrolling = if props.hide_indicators {
+        gtk::PolicyType::External
+    } else {
+        gtk::PolicyType::Automatic
+    };
     view.set_policy(
         if horizontal {
-            gtk::PolicyType::Automatic
+            scrolling
         } else {
             gtk::PolicyType::Never
         },
         if horizontal {
             gtk::PolicyType::Never
         } else {
-            gtk::PolicyType::Automatic
+            scrolling
         },
     );
     view.set_vexpand(!horizontal);

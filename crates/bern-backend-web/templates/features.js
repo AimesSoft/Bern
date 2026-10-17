@@ -1795,9 +1795,10 @@ export function Swipe(p, ctx, { id, label, field, min, max, axis, distance }, co
 /// scrolls to the item it is set to, giving it a nudge on arrival with
 /// `arrival: "nudge"`. Items are the rows of the lists inside, each known
 /// by its key.
-export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion }, children) {
+export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion, hideIndicators }, children) {
   const horizontal = axis === "horizontal";
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
+  if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
   if (snap) node.classList.add("bern-snap", `bern-snap-${snap}`);
   children(node, ctx);
   p.append(node);

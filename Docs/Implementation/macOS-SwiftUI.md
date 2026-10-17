@@ -552,3 +552,17 @@ open target/bern/macos/Showcase.app
 `Image(hero:, hero_key:)` 在 macOS 使用窗口级像素覆盖层，绕过 SwiftUI 匹配几何无法跨 NavigationSplitView 列移动的限制。图片的布局、辅助功能和点击由原视图保留；临时画面插值窗口坐标、尺寸和圆角，使用声明的 hero 弹簧。反向切换沿用当前画面位置，窗口之间不配对，减少动态效果时不飞行。图片以外的 `hero` 以及 iOS 仍使用原有 matchedGeometryEffect。
 
 `tests/image_hero.rs` 将真实 AppKit 实现放在两个原生容器中，验证插值、快速反向、还原可见性、减少动态效果及目标卸载清理；真实应用的 macOS 版实测首页舞台展开、完整播放器缩到侧栏及恢复。范围为 Image，不代表 Video 已实现窗口级画面传递。
+
+### 分栏视图的工具栏安全区（2026-10-18）
+
+macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出问题时侧栏和详情栏的内容会压到标题栏和红绿灯下面，之后也不会恢复：
+
+- **关闭命中测试**：给分栏视图（或包着它的容器）加 `.allowsHitTesting(false)`，安全区当场消失。`Stack(enabled: false)` 因此只生成 `.disabled` 和 `.accessibilityHidden`；`.disabled` 已经让其中的控件和手势失效，全窗口的 `Modal` 遮罩也挡住了指针。
+- **共享元素改动布局**：原先非图片的 `hero` 用 `matchedGeometryEffect` 配对整个 frame，分栏视图在动画中按中间尺寸布局；只配对位置、或只在绘制上缩放，替换接连很快时仍会复现。macOS 上非图片的 `hero` 现在和图片一样在窗口上层飞快照（`BernViewHero`）：对旧、新元素所在区域各截一张图，从旧位置飞到新位置并交叉淡化，过渡期间真实元素只是透明，布局和变换都不动。iOS 改为只影响绘制的 `offset` 和 `scaleEffect`；两边都不再使用 `matchedGeometryEffect`。只有前一个同名元素还在、或刚离开不到半秒，新元素才算替换它；列表里滚回来的条目不会飞。
+- **分支切换带动画**：分支里有共享元素时，生成器原先给整个分支加 `.animation(_:value:)`，好让 `matchedGeometryEffect` 有动画可用；新插入的分栏视图因此在动画里布局，同样会让侧栏压到标题栏下。共享元素现在自己驱动动画，这个分支动画只为 `appear` / `disappear` 生成。
+- **弹窗**：`Modal` 的图层通过偏好值挂在窗口根部的覆盖层，原来出现和消失都没有过渡。现在覆盖层自己给弹窗图层做淡入淡出，面板按 `appear` 在出现时动画，不会连带窗口其余部分。
+- **图片离开的位置**：图片共享元素被移除时，若它的容器已脱离窗口，换算出的位置会落在原点附近，过渡就从窗口左上角起飞。现在已脱离时改用最后一次布局记下的位置。
+
+`tests/image_hero.rs` 增加了普通视图快照飞行的用例。以上都在一个真实应用上验证：首次引导快节奏连续完成 8 次、慢放（`BERN_MOTION=slow`）2 次，以及完成后切换模块、打开详情和播放器，侧栏位置都正确；慢放下引导窗口从小弹出，完成时小窗口从预览位置长成主窗口。生成器回归测试检查 `Stack(enabled:)` 不再输出 `.allowsHitTesting(`。这个回归测试在高负载时有 2/9 次在原有的图片计时断言处失败，改动前的版本连跑 4 次都通过，怀疑是计时抖动，未证实。
+
+`ScrollView(indicators: hidden)` 生成 `.scrollIndicators(.never)`：`.hidden` 在系统设为「始终显示滚动条」时仍会显示滚动条。

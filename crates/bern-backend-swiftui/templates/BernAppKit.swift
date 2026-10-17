@@ -1038,6 +1038,9 @@ struct BernPictureHeroProbe: NSViewRepresentable {
     let corner: CGFloat
     let motion: BernMotion
     let reduced: Bool
+    /// Fly what the window shows where the element is, for elements other
+    /// than images.
+    var capturesView = false
     let visibility: (Bool) -> Void
 
     func makeNSView(context: Context) -> BernPictureHeroAnchor { BernPictureHeroAnchor() }
@@ -1045,6 +1048,7 @@ struct BernPictureHeroProbe: NSViewRepresentable {
         if view.key != id { view.detach() }
         view.key = id
         view.picture = picture
+        view.capturesView = capturesView
         view.fit = fit
         view.corner = corner
         view.motion = motion
@@ -1063,9 +1067,13 @@ final class BernPictureHeroAnchor: NSView {
     var corner: CGFloat = 0
     var motion = BernMotion(period: 0.48, damping: 0.86)
     var reduced = false
+    var capturesView = false
     var visibility: ((Bool) -> Void)?
     weak var heroes: BernWindowImageHeroes?
     var attached = false
+    /// Where the element was at its last layout, in the overlay, for when
+    /// its container leaves the window before it does.
+    var lastRect: CGRect?
     private var scheduled = false
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -1083,9 +1091,10 @@ final class BernPictureHeroAnchor: NSView {
             guard let self else { return }
             self.scheduled = false
             guard let window = self.window, self.bounds.width > 0, self.bounds.height > 0,
-                  self.picture != nil else { return }
+                  self.picture != nil || self.capturesView else { return }
             let heroes = BernWindowImageHeroes.forWindow(window)
             self.heroes = heroes
+            self.lastRect = heroes.rect(of: self)
             if self.reduced { heroes.finish(self.key) }
             guard !self.attached else { return }
             self.attached = true
@@ -1100,6 +1109,7 @@ final class BernPictureHeroAnchor: NSView {
     }
 
     fileprivate func snapshot(in overlay: NSView) -> BernHeroPicture? {
+        if capturesView { return capture(in: overlay) }
         guard let picture, window != nil, bounds.width > 0, bounds.height > 0 else { return nil }
         let rect = convert(bounds, to: overlay)
         guard rect.width > 0, rect.height > 0 else { return nil }
@@ -1115,6 +1125,45 @@ final class BernPictureHeroAnchor: NSView {
         guard let pixels = renderer.cgImage else { return nil }
         return BernHeroPicture(rect: rect, image: NSImage(cgImage: pixels, size: bounds.size),
             corner: corner * rect.width / bounds.width)
+    }
+}
+
+extension BernPictureHeroAnchor {
+    /// What the window draws over the element's frame.
+    fileprivate func capture(in overlay: NSView) -> BernHeroPicture? {
+        guard let content = window?.contentView, bounds.width > 0, bounds.height > 0 else { return nil }
+        let rect = convert(bounds, to: content).intersection(content.bounds)
+        guard rect.width > 0, rect.height > 0,
+              let pixels = content.bitmapImageRepForCachingDisplay(in: rect) else { return nil }
+        content.cacheDisplay(in: rect, to: pixels)
+        let image = NSImage(size: rect.size)
+        image.addRepresentation(pixels)
+        return BernHeroPicture(rect: content.convert(rect, to: overlay), image: image, corner: corner)
+    }
+}
+
+/// A shared element other than an image on macOS: during the change the
+/// element is hidden and a picture of it flies above the window, from the
+/// element it replaces, cross-fading between the two. The element itself
+/// is never moved or scaled: a split view laid out or transformed on the
+/// way loses its toolbar safe area for good, its columns ending up under
+/// the title bar.
+struct BernViewHero: ViewModifier {
+    let id: String
+    let motion: BernMotion
+    @BernReducedMotion private var reduce
+    @State private var flying = false
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(flying ? 0 : 1)
+            .background(BernPictureHeroProbe(id: id, picture: nil, fit: .fill, corner: 0,
+                motion: motion, reduced: reduce || bernForcedReduceMotion, capturesView: true,
+                visibility: { hidden in
+                    var transaction = Transaction()
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) { flying = hidden }
+                }))
     }
 }
 
@@ -1238,9 +1287,21 @@ final class BernWindowImageHeroes {
         }
     }
 
+    /// Where `anchor` is in the overlay.
+    func rect(of anchor: BernPictureHeroAnchor) -> CGRect? {
+        guard prepareOverlay() else { return nil }
+        return anchor.convert(anchor.bounds, to: overlay)
+    }
+
     func leave(_ anchor: BernPictureHeroAnchor) {
         let key = anchor.key
-        if entries[key]?.last?.anchor === anchor, let picture = anchor.snapshot(in: overlay) {
+        // An element whose container has already left the window no longer
+        // converts to it; it departs from where it was last laid out.
+        let connected = anchor.window?.contentView.map { anchor.isDescendant(of: $0) } == true
+        if entries[key]?.last?.anchor === anchor,
+           let from = connected ? rect(of: anchor) : anchor.lastRect,
+           var picture = anchor.snapshot(in: overlay) {
+            picture.rect = from
             departed[key] = Departure(picture: picture, time: ProcessInfo.processInfo.systemUptime)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 guard let self, let record = self.departed[key],

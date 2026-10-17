@@ -1,6 +1,6 @@
 # 平台能力与验证范围
 
-更新：2026-10-17。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 在共用 SwiftUI 清单之外单独开放搜索面板；iOS 不开放。
+更新：2026-10-18。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 在共用 SwiftUI 清单之外单独开放搜索面板；iOS 不开放。
 
 ## 编译期功能支持
 
@@ -47,13 +47,14 @@
 | `row_baseline` | 行内文字基线对齐 | 支持 | 支持 | 支持 | — | — | — |
 | `sidebar_header` | 固定侧栏顶栏 | 支持 | 支持 | 支持 | — | — | — |
 | `untitled_detail` | 无标题详情 | 支持 | 支持 | 支持 | — | — | — |
+| `idle_control` | 按状态启停空闲检测（`Window(idle_enabled:)`） | 支持 | 支持 | 支持 | — | — | — |
 | `size_classes` | 四档尺寸适配 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 
 ## 不由上述功能标记完整表达的能力
 
 | 能力 | 当前范围 |
 | --- | --- |
-| `Window(idle_enabled:)` | SwiftUI / Web 消费启停状态；Compose / GTK / WinUI 3 尚未接入，也没有独立能力检查，不能依赖声明被接受来推断生效 |
+| `Window(idle_enabled:)` | SwiftUI / Web 消费启停状态（能力 `idle_control`）；Compose / GTK / WinUI 3 尚未接入，`bern check` 对这些目标给出警告：超过 `idle_after` 无输入时 `window.idle` 照常变为 true |
 | 图片跨分栏 Hero | macOS 使用窗口级覆盖层，Web 使用视口级副本；iOS 与 macOS 其他视图沿用匹配几何。Video 连续画面传递另行验证 |
 | 本地持久化 | 原生 FFI 宿主提供文件存储，Web app 使用同源 localStorage；未安装存储宿主时不持久化 |
 | 可选 Svg | 六目标有生成路径；专属依赖及验证见[动画 SVG](../Implementation/Animated-SVG.md)，不改变普通界面的默认实现 |

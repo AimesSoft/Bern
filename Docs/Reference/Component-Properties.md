@@ -70,7 +70,7 @@
 | `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end` | 可含子内容；无动作 |
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |
 | `Divider` | 无专有属性 | 不含子节点；无动作 |
-| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge` | 可含子内容；无动作 |
+| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden` | 可含子内容；无动作 |
 | `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |
 | `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"] |
 | `SidebarHeader` | 无专有属性 | 可含子内容；无动作；直接位于 ["Sidebar"] |

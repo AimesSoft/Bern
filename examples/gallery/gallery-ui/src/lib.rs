@@ -219,7 +219,7 @@ pub fn wall(
 pub fn film(app: gallery::Client, #[session] draft: GalleryDraft) -> impl View {
     ui! {
         Column(gap: 16) {
-            ScrollView(axis: horizontal, snap: center, position: draft.centered, arrival: nudge) {
+            ScrollView(axis: horizontal, snap: center, position: draft.centered, arrival: nudge, indicators: hidden) {
                 Row(gap: 30, padding: 24) {
                     ForEach(items: app.swatches, key: id) |swatch| {
                         Column(gap: 8, width: 240, scroll_scale: 1.12, scroll_opacity: 0.6) {

@@ -137,20 +137,36 @@ pub mod feature {
     pub const POPOVER_BUTTON: &str = "popover_button";
     /// `text { large_title: heavy }` in `style!`: weights of text styles.
     pub const TEXT_WEIGHTS: &str = "text_weights";
-    /// `Text(lines:)` and `Image(corner:)`.
+    /// `Text(lines:)`: text limited to a number of lines.
     pub const TEXT_LINES: &str = "text_lines";
+    /// `Image(corner:)`: an image with rounded corners.
     pub const IMAGE_CORNERS: &str = "image_corners";
-    /// `Image(rendering: template)`: the image's alpha takes the text color.
+    /// `Sidebar(width:)`: a sidebar of a fixed width.
     pub const SIDEBAR_WIDTH: &str = "sidebar_width";
+    /// `Switch(checked:)`, `Picker(selected:)` and `Slider(current:)`:
+    /// controls showing engine state and reporting changes as commands.
     pub const CONTROLLED_VALUES: &str = "controlled_values";
+    /// `Search(style: palette)` and its `SearchItem`s: a toolbar search
+    /// field that grows into a results panel.
     pub const SEARCH_PALETTE: &str = "search_palette";
+    /// `Image(rendering: template)`: the image's alpha takes the text color.
     pub const IMAGE_TEMPLATE: &str = "image_template";
+    /// `Image(aspect:)`, `Grid(row_gap:)` and `Slider(label_hidden:)`.
     pub const ADAPTIVE_IMAGES: &str = "adaptive_images";
+    /// `ScaleBox`, `Positioned` and `Marquee`: a fixed coordinate scene
+    /// scaled to its room.
     pub const SCALED_SCENE: &str = "scaled_scene";
+    /// `Accordion`: columns of which one is open at a time.
     pub const ACCORDION_LAYOUT: &str = "accordion_layout";
+    /// `ControlGroup` and capsule-shaped system controls.
     pub const CAPSULE_CONTROLS: &str = "capsule_controls";
+    /// `Modal`, `Flow`, `Timer`, `PickerOption` and `Stack(enabled:)`.
     pub const MODAL_FLOW_TIMER: &str = "modal_flow_timer";
+    /// `SidebarItem(badge:)`: a live count beside a page.
     pub const PAGE_BADGES: &str = "page_badges";
+    /// `Window(idle_enabled:)`: idle detection switched on and off by
+    /// state. Without it a target keeps detecting idleness all the time.
+    pub const IDLE_CONTROL: &str = "idle_control";
     /// Transitions growing along one axis from a fixed edge.
     pub const EDGE_GROW: &str = "edge_grow";
     /// An entrance after a delay, including the first mounted frame.
@@ -1185,6 +1201,14 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
             ))
             .at(header.source.clone()),
         );
+    }
+    if lacks(feature::IDLE_CONTROL)
+        && let Some(window) = app.windows.windows.iter().find(|w| w.idle_enabled.is_some())
+    {
+        diagnostics.push(Diagnostic::warning(format!(
+            "target `{}` ignores `idle_enabled` of window `{}`: once `idle_after` passes without input, `window.idle` turns on whatever the state",
+            descriptor.id, window.id
+        )));
     }
     if lacks(feature::UNTITLED_DETAIL)
         && let Some(detail) = first_element(app, |element| {

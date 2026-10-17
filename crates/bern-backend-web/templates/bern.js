@@ -2061,9 +2061,10 @@ export function Divider(p) {
   p.append(el("hr", { class: "bern-divider" }));
 }
 
-export function ScrollView(p, ctx, { axis }, children) {
+export function ScrollView(p, ctx, { axis, hideIndicators }, children) {
   // A scroll view takes the room it gets, as on the native targets.
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
+  if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
   children(node, ctx);
   p.append(node);
 }

@@ -19,6 +19,8 @@ struct ScrollProps {
     char const* arrival = nullptr;
     Motion const* nudgeMotion = nullptr;
     Motion const* reflow = nullptr;
+    /// Scroll without showing the scroll bar.
+    bool hideIndicators = false;
 };
 
 /// The scroll offset that puts `item` at the anchor of `scroll`.
@@ -63,8 +65,10 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     if (props.reflow) SetReflow(panel, props.reflow);
     controls::ScrollViewer scroller;
     scroller.Content(panel);
-    scroller.HorizontalScrollBarVisibility(horizontal ? controls::ScrollBarVisibility::Auto : controls::ScrollBarVisibility::Disabled);
-    scroller.VerticalScrollBarVisibility(horizontal ? controls::ScrollBarVisibility::Disabled : controls::ScrollBarVisibility::Auto);
+    // `Hidden` still scrolls, without a scroll bar.
+    auto scrolling = props.hideIndicators ? controls::ScrollBarVisibility::Hidden : controls::ScrollBarVisibility::Auto;
+    scroller.HorizontalScrollBarVisibility(horizontal ? scrolling : controls::ScrollBarVisibility::Disabled);
+    scroller.VerticalScrollBarVisibility(horizontal ? controls::ScrollBarVisibility::Disabled : scrolling);
     scroller.HorizontalScrollMode(horizontal ? controls::ScrollMode::Enabled : controls::ScrollMode::Disabled);
     scroller.VerticalScrollMode(horizontal ? controls::ScrollMode::Disabled : controls::ScrollMode::Enabled);
     SetRole(scroller, horizontal ? L"bern-fill-width" : L"bern-fill");

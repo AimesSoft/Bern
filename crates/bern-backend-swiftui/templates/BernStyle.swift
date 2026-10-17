@@ -1025,12 +1025,12 @@ extension View {
     }
 
     /// One of the elements sharing `id` in a window: when one replaces
-    /// another, it grows from where the other was.
-    func bernHero(_ id: String) -> some View {
-        modifier(BernHero(id: id))
+    /// another, it grows from where the other was, on `motion`.
+    func bernHero(_ id: String, motion: BernMotion = BernMotion(period: 0.48, damping: 0.86)) -> some View {
+        modifier(BernHero(id: id, motion: motion))
     }
 
-    /// The namespace shared elements of one window pair up in.
+    /// Where the shared elements of one window record their frames.
     func bernHeroRoot() -> some View {
         modifier(BernHeroRoot())
     }
@@ -1064,35 +1064,114 @@ private struct BernTransitionModifier: ViewModifier {
     }
 }
 
-private struct BernHeroKey: EnvironmentKey {
-    static let defaultValue: Namespace.ID? = nil
+/// Where each shared element of a window was last laid out, in window
+/// coordinates, so the one replacing it knows where to grow from.
+@MainActor
+final class BernHeroFrames {
+    var last: [String: CGRect] = [:]
+    /// How many elements of each id are on screen, and when the last one
+    /// of an id went away.
+    var mounted: [String: Int] = [:]
+    var departed: [String: Date] = [:]
+
+    /// The frame of the element an element of `id` appearing now replaces:
+    /// one still on screen or gone in the last half second. An element
+    /// that only comes back, such as a list row scrolled back into view,
+    /// replaces nothing.
+    func replaced(_ id: String) -> CGRect? {
+        let recent = mounted[id, default: 0] > 0
+            || departed[id].map { -$0.timeIntervalSinceNow < 0.5 } == true
+        return recent ? last[id] : nil
+    }
+}
+
+private struct BernHeroFramesKey: EnvironmentKey {
+    static let defaultValue: BernHeroFrames? = nil
 }
 
 extension EnvironmentValues {
-    var bernHero: Namespace.ID? {
-        get { self[BernHeroKey.self] }
-        set { self[BernHeroKey.self] = newValue }
+    var bernHeroFrames: BernHeroFrames? {
+        get { self[BernHeroFramesKey.self] }
+        set { self[BernHeroFramesKey.self] = newValue }
     }
 }
 
 private struct BernHeroRoot: ViewModifier {
-    @Namespace private var namespace
+    @State private var frames = BernHeroFrames()
 
     func body(content: Content) -> some View {
-        content.environment(\.bernHero, namespace)
+        content.environment(\.bernHeroFrames, frames)
     }
 }
 
+/// The element replacing another of the same id grows from where that one
+/// was. `matchedGeometryEffect` would change their layout on the way, and
+/// a split view laid out like that on macOS loses its toolbar safe area for
+/// good, its columns ending up under the title bar. On macOS a picture of
+/// the two flies above the window instead (`BernViewHero`). Elsewhere the
+/// replacing element is first laid out untouched and unseen, then drawn
+/// moved and scaled onto the other's frame, springing back to its own;
+/// its layout never changes.
 private struct BernHero: ViewModifier {
     let id: String
-    @Environment(\.bernHero) private var namespace
+    let motion: BernMotion
+    @Environment(\.bernHeroFrames) private var frames
     @BernReducedMotion private var reduce
+    @State private var scale = CGSize(width: 1, height: 1)
+    @State private var offset = CGSize.zero
+    @State private var measured = false
+    @State private var shown = false
 
     func body(content: Content) -> some View {
-        if let namespace, !(reduce || bernForcedReduceMotion) {
-            content.matchedGeometryEffect(id: id, in: namespace)
+        #if os(macOS)
+        content.modifier(BernViewHero(id: id, motion: motion))
+        #else
+        if let frames, !(reduce || bernForcedReduceMotion) {
+            // An element with one to replace waits for its first layout.
+            let waiting = !shown && (measured || frames.replaced(id) != nil)
+            content
+                .scaleEffect(x: scale.width, y: scale.height)
+                .offset(offset)
+                .opacity(waiting ? 0 : 1)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { grow(to: $0) }
+                .onDisappear {
+                    guard measured else { return }
+                    frames.mounted[id, default: 1] -= 1
+                    frames.departed[id] = Date()
+                }
         } else {
             content
+        }
+        #endif
+    }
+
+    /// After the first layout, start on the frame of the element it
+    /// replaces and spring to its own.
+    private func grow(to frame: CGRect) {
+        guard let frames else { return }
+        let previous = measured ? nil : frames.replaced(id)
+        frames.last[id] = frame
+        guard !measured else { return }
+        measured = true
+        frames.mounted[id, default: 0] += 1
+        guard let previous, frame.width > 0, frame.height > 0, previous != frame else {
+            shown = true
+            return
+        }
+        var still = Transaction()
+        still.disablesAnimations = true
+        DispatchQueue.main.async {
+            withTransaction(still) {
+                scale = CGSize(width: previous.width / frame.width, height: previous.height / frame.height)
+                offset = CGSize(width: previous.midX - frame.midX, height: previous.midY - frame.midY)
+                shown = true
+            }
+            DispatchQueue.main.async {
+                withAnimation(motion.animation) {
+                    scale = CGSize(width: 1, height: 1)
+                    offset = .zero
+                }
+            }
         }
     }
 }
@@ -2549,13 +2628,10 @@ struct BernSearchPaletteHost<Content: View>: View {
         }
         .opacity(palette.expanded ? 1 : 0)
         .frame(width: expanded ? panelWidth : max(1, source.width), height: expanded ? panelHeight : max(1, source.height), alignment: .top)
+        // The platform's overlay material, untinted.
         .background {
             RoundedRectangle(cornerRadius: expanded ? 22 : 17)
                 .fill(.regularMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: expanded ? 22 : 17)
-                        .fill(scheme == .dark ? Color(red: 44/255, green: 44/255, blue: 48/255).opacity(0.68) : Color(red: 250/255, green: 250/255, blue: 252/255).opacity(0.78))
-                }
         }
         .clipShape(RoundedRectangle(cornerRadius: expanded ? 22 : 17))
         .contentShape(RoundedRectangle(cornerRadius: expanded ? 22 : 17))
