@@ -473,6 +473,7 @@ cargo test --workspace
 
 ## ドキュメント
 
+- [ドキュメント索引](Docs/README.md) · [現在のコンポーネントガイド](Docs/Reference/UI.md) · [プロパティ一覧](Docs/Reference/Component-Properties.md) · [プラットフォーム対応と検証範囲](Docs/Reference/Platforms.md)（中国語）
 - [設計ドキュメント](Docs/Design.md)：目標、アーキテクチャ、コンポーネント、テーマ、コマンド、ウィンドウ、メディア
 - [適応仕様](Docs/Adaptation/README.md)：Apple、Windows と Linux、Web、Android、HarmonyOS
 - 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)

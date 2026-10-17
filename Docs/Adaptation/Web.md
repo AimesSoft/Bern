@@ -1,9 +1,10 @@
 # Bern Web 视觉规范
 
-- 版本：v0.5
+- 版本：v0.6
+- Bern 接口说明更新：2026-10-17（显式强调控件与共享胶囊）。
 - 官方资料核查日期：2026-10-10，Asia/Shanghai
 - 阶段：Web 后端的视觉与交互规范（[架构设计](../Design.md)“Web 应用与 WebUI”要求先单独成文）
-- 关联：[Bern 架构设计 v0.13](../Design.md)、[自适应适配规范](README.md)
+- 关联：[Bern 架构设计](../Design.md)、[自适应适配规范](README.md)
 
 Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的视觉语言：**Bern 自有的中性网页风格**。它提炼各家网页设计系统与成熟网页应用共有的做法，风格接近 Linear、Vercel、GitHub 这类网页应用，整体不复制 Material、Fluent 或任何一家公司的视觉语言，也不模仿桌面操作系统的窗口。个别控件按项目决定借用成熟的形态：开关与滑块采用类似 Fluent 2 的形态，视频进度条的滑块采用类似 macOS 26 的圆角胶囊滑块；借用的只是形状与尺寸，颜色全部来自 Bern 主题内核（`bern-theme`）。除“官方依据”一节引用的 W3C 规范外，文中规则都是 Bern 的设计决策。
 
@@ -181,7 +182,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 ### 5.9 Button 与 IconButton
 
 - Button：`<button>`，高 32 px，左右内边距 20 px，最小宽度 80 px，圆角 6 px，14 px 字重 500；有图标时图标 16 px 在文字前，间距 6 px。外观由 `prominence` 与 `role` 选择 4.3 的配方；`cancel` 角色用 standard。
-- IconButton：`<button aria-label>`，热区 32 × 32 px，只有图标，**任何状态都不出现可见底板、边框或波纹**；反馈只作用于图标颜色：悬停为 `accent`，按下与选中为 `accent.text`；焦点环属于焦点反馈。
+- IconButton：`<button aria-label>`，默认热区 32 × 32 px；默认及 plain 样式以图标颜色反馈悬停、按下与选中，焦点环保留。显式 prominent 或 ControlGroup 内的控件按声明提供强调容器或共享胶囊，不受默认无底板样式限制。`font_size` 调整图标字号；完整尺寸与分组用法见[当前组件参考](../Reference/UI.md)。
 - 禁用：`disabled` 属性与配方的禁用颜色；不用整体降低不透明度表示禁用。
 
 ### 5.10 TextInput 与 Search

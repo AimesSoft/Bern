@@ -1,5 +1,7 @@
 # Linux GTK 实现记录
 
+当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
+
 - 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”）
 - 依据：[Bern 架构设计 v0.30](../Design.md)（最初按 v0.15 实现）、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
 - 工具链：Rust 1.99.0；gtk4-rs 0.11（`gtk4`，启用 `v4_14`）、libadwaita-rs 0.9（启用 `v1_5`）、glib/gio 0.22

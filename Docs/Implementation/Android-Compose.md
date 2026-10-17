@@ -1,5 +1,7 @@
 # Android Compose 实现记录
 
+当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
+
 - 日期：2026-10-14
 - 依据：[Bern 架构设计 v0.30](../Design.md)，[Android 适配规范](../Adaptation/Android.md)
 - 工具链：Rust 1.99.0（`aarch64-linux-android`）；Android NDK 29.0.14206865；Android Gradle 插件 9.3.3、Gradle 9.5.1、JDK 21（Android Studio 自带的运行时）；Kotlin 2.4.21 的 Compose 编译器插件；Compose BOM 2026.09.00（Compose 1.12.1、Material 3）；Media3 1.11.1；compileSdk 37、targetSdk 36、minSdk 26

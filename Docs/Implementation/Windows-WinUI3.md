@@ -1,5 +1,7 @@
 # Windows WinUI 3 实现记录
 
+当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
+
 - 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”）
 - 依据：[Bern 架构设计 v0.30](../Design.md)（最初按 v0.19 实现）、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
 - 工具链：Rust 1.99.0；Visual Studio 2022 生成工具 17.14（MSVC 14.44，C++20）；Windows SDK 10.0.26100（含 `cppwinrt.exe`）；Windows App SDK 2.5.1 的组件包（只取头文件与元数据：Foundation 2.3.12、WinUI 2.3.9、InteractiveExperiences 2.1.9，以及 WebView2 1.0.3719.77 的元数据）

@@ -1,12 +1,13 @@
 # macOS SwiftUI 实现记录
 
-- 日期：2026-10-10
-- 依据：[Bern 架构设计 v0.14](../Design.md)、[Apple 平台适配](../Adaptation/Apple.md)
+- 首次记录：2026-10-10
+- 更新日期：2026-10-17
+- 最初依据：[Bern 架构设计 v0.14](../Design.md)、[Apple 平台适配](../Adaptation/Apple.md)
 - 工具链：Rust 1.99.0（Edition 2024）；Swift 6.3.2，以 Swift 6 语言模式编译；Xcode 26.5（SDK 26.5）
 - 部署：最低 macOS 14，构建本机架构，本地临时签名
 - 补记：2026-10-12，[架构设计 v0.25–v0.27](../Design.md) 的样式覆盖、动效、自绘与模块化应用（见“样式、动效、自绘与模块化”一节；工具链 Xcode 27.0，SDK 27.0，Swift 6.4）
 
-本文记录阶段一（编译边界验证）、阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）与阶段四（本地化与功能契约）在 macOS 上的实际完成情况。设计文档中的其余能力仍是设计目标；下文“未完成”一节逐项列出。
+本文记录阶段一（编译边界验证）、阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）与阶段四（本地化与功能契约）在 macOS 上的实际完成情况。当前声明接口见[组件参考](../Reference/UI.md)，后端覆盖见[平台能力表](../Reference/Platforms.md)；下文保留各阶段的验收记录与未完成项。
 
 ## 完成情况
 
@@ -258,7 +259,7 @@ let seed = resources.path("data/seed.json")?;                       // 包内文
 
 规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`；阶段四加入 `Adaptive`、`Layout`、`Menu`、`MenuItem` 与 `LanguagePicker`；阶段六加入 `Image`、`Progress`、`Grid` 与 `Stack`。IR 因加入查询绑定升为版本 2，加入随包资源清单后为版本 3，浮动窗口呈现为版本 4，布局断点与功能契约为版本 5，资源属性（`Image` 的 `source`）为版本 6。可操作控件必须有 `id`；同一 `Adaptive` 的不同布局中 `id` 相同的控件是同一控件。
 
-默认行为：`Column` 前缘对齐；`Row` 垂直居中；`Grid` 的 `gap` 为 8；`Stack` 居中；未写 `style` 时使用平台默认样式。`Image` 的 `source` 必须是声明过的 PNG 或 JPEG 资源，编译器在整个应用（包括组件库中的组件）范围内检查，`width`、`height` 至少写一个且大于零；`Progress` 的 `value` 是整数或浮点数的受限表达式，`total` 必须大于零且只能与 `value` 一起写。`Search` 在 SwiftUI 目标中只能放在 `Sidebar` 内；`Picker` 的枚举不能携带数据。
+默认行为：`Column` 前缘对齐；`Row` 垂直居中；`Grid` 的 `gap` 为 8；`Stack` 居中；未写 `style` 时使用平台默认样式。`Image` 的 `source` 必须是声明过的 PNG 或 JPEG 资源，编译器在整个应用（包括组件库中的组件）范围内检查，`width`、`height` 至少写一个且大于零；`Progress` 的 `value` 是整数或浮点数的受限表达式，`total` 必须大于零且只能与 `value` 一起写。`Search` 可以放在 Sidebar 或 Toolbar；`style: palette` 仅在 macOS 的 Toolbar 中开放；`Picker` 的枚举不能携带数据。
 
 ## 运行结构
 
@@ -542,6 +543,12 @@ open target/bern/macos/Showcase.app
 - 首版引擎命令同步完成，没有执行中句柄、取消与进度。
 - 组件库只支持展示型组件（值参数），不能持有会话状态或调用命令；库从源码现场生成描述，尚无预发布描述的分发与缓存。
 - 其他目标见各自的实现记录。
-- 控件目标 ID 为 `组件.控件id`；同一组件在一个窗口中出现多次时目标会冲突，需要指定上下文（返回 `target_ambiguous`）。
+- 控件目标 ID 以 `组件.控件id` 为基础；重复项会携带各层 key，例如 `card.open[3]`，经过组件仍保留上下文。同一窗口中重复使用相同 ID 且没有可区分上下文时，仍可能返回 `target_ambiguous`。
 - 设置窗口禁用了滚动以贴合内容高度，内容超出屏幕高度时无法滚动。
 - 随包资源只能由应用清单声明，组件库不能；资源只解析为本机文件路径与文件 URL，引擎与媒体执行端不在同一位置（WebUI 等）时的地址方案尚未实现；可执行代码、框架与插件不能作为资源发布；没有列出资源目录的接口。
+
+### 图片跨分栏 Hero（2026-10-17）
+
+`Image(hero:, hero_key:)` 在 macOS 使用窗口级像素覆盖层，绕过 SwiftUI 匹配几何无法跨 NavigationSplitView 列移动的限制。图片的布局、辅助功能和点击由原视图保留；临时画面插值窗口坐标、尺寸和圆角，使用声明的 hero 弹簧。反向切换沿用当前画面位置，窗口之间不配对，减少动态效果时不飞行。图片以外的 `hero` 以及 iOS 仍使用原有 matchedGeometryEffect。
+
+`tests/image_hero.rs` 将真实 AppKit 实现放在两个原生容器中，验证插值、快速反向、还原可见性、减少动态效果及目标卸载清理；Erika macOS 实测首页舞台展开、完整播放器缩到侧栏及恢复。范围为 Image，不代表 Video 已实现窗口级画面传递。

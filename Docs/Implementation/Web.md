@@ -1,11 +1,41 @@
 # Web 实现记录
 
-- 日期：2026-10-10
-- 依据：[Bern 架构设计 v0.29](../Design.md)（最初按 v0.14 实现）、[Web 视觉规范 v0.5](../Adaptation/Web.md)
+- 首次记录：2026-10-10
+- 更新日期：2026-10-17
+- 依据：[Bern 架构设计](../Design.md)（最初按 v0.14 实现）、[Web 视觉规范 v0.6](../Adaptation/Web.md)
 - 工具链：Rust 1.99.0（`wasm32-unknown-unknown`）；不依赖 wasm-bindgen，页面直接实例化 WebAssembly 模块
-- 验证浏览器：Claude 桌面应用的内置浏览器（Chromium 内核）
+- 验证浏览器：内置 Chromium，以及桌面 Safari 27.0.1 的指定场景；各轮范围见下文
 
 本文记录阶段三（Web 双构建）的实际完成情况：视觉规范、Bern 主题内核、`app` 构建（引擎在页面内）与 `ui` 构建（WebUI 连接独立引擎宿主）均已实现并在浏览器中验证。v0.2 视觉规范把 Web 呈现改为 Bern 自有的中性网页风格（主窗口即页面、次级窗口为对话框），实现与验证见“窗口呈现”和第三份验证记录；v0.3 调整控件（见“控件（v0.3）”与第四份验证记录）。
+
+## 2026-10-15：Erika Web app 适配
+
+Erika 继续使用同一套声明，以 `web_mode = "app"` 将引擎编译成 WASM。为现有界面补齐以下浏览器能力，再开放对应 capability 检查：
+
+- `Modal`、`Flow`、`Timer`、搜索面板及分组结果、显式 `PickerOption`、引擎受控 Switch/Picker。定时器随声明生命周期清理；搜索支持方向键、回车、Escape 和焦点恢复。
+- Stack 样式、文本字号/字重/行数、纯图标 Label/Menu、胶囊控件、分轴 padding、baseline、模板图及固有比例、图片圆角与响应式比例、独立 Grid 行距。
+- 固定侧栏宽度、顶栏、动态 badge、无标题 Detail、工具栏 leading 项、手风琴列宽动画、边缘 grow、延迟入场、事件触发 nudge、应用减少动态效果。
+- 布局的伸展意图在显式宽高处停止，Spacer 按主轴参与布局。`reflow` 在条件分支的 DocumentFragment 挂载后观察实际父元素，共享观察器并在最后一个声明卸载后清理。
+- 新增 Erika 使用的 SF 名称到 Lucide 的映射；SVG 随构建离线分发，授权保留。
+
+`bern-command::storage::Store` 在 WASM 中使用宿主导入 `storage_read/storage_write`，保存到同源 localStorage 的 `bern:<bundle_id>:<key>`。二进制值以字节数组编码；缺失与空值不同，权限、格式和容量错误返回 `CommandError`。原生文件存储路径保持原行为。
+
+`bern run --target web_app --port 4173` 可使用固定开发 origin，避免随机端口使浏览器读取到另一份站点配置。`--port` 仅适用于浏览器 app 目标；未传参数保留随机端口。
+
+首轮自动验证：Web 后端/CLI/存储 Rust 测试、浏览器运行时 Node 测试、Erika 引擎测试、Web WASM 构建与 macOS 声明检查通过。修改的 Rust 文件格式检查、Web 后端和存储的严格 clippy 通过。该轮包含 CLI 的严格 clippy 曾受 `bern-compiler` 三处 `collapsible_if` 警告阻断；2026-10-17 文档同步时已清理这些条件分支，并通过编译器 49 项回归。Erika 原始 UI crate 依赖 Bern 模块组合，直接 `cargo test --workspace` 会在未组合的 Pages/组件符号处失败，因此使用 Bern 构建检查 UI、单独测试各引擎。截至 2026-10-16 本轮复查，Bern Rust 测试 46 项、Node 运行时测试 27 项通过，已补充滚动、布局及颜色配对回归。重新构建 Bern CLI 后，最新 Web 构建及 macOS 声明检查（72 个组件）通过；这些检查不替代浏览器验收。
+
+首轮浏览器检查使用 Codex 内置 Chromium，覆盖 1280 × 800 与 390 × 844：四步引导、刷新恢复、主题切换、设置搜索、可选模块依赖、周历展开/详情返回、媒体库筛选排序、全局搜索和模拟播放、下载进度及暂停/继续。窄屏引导的滚动区收缩与固定底栏、设置窗口全高也在该轮检查。后续真实 Safari 27.0.1 暴露了这些检查和逻辑测试未发现的问题，因此不能把首轮记录视为完整 Web 验收。
+
+Safari 27.0.1 的修复与复查记录：
+
+- **普通滚动区**：未声明 `snap` 的 `ScrollView` 被运行时默认为 `center`，居中内边距又参与下一轮测量，最终产生 6793.7 px 内边距，媒体库列表移出可见区域。默认改为起始边对齐，仅显式 `snap: center` 使用居中停靠，并消除居中边距的累加反馈。
+- **高度与宽度约束**：`Query` 包装层中断 flex 高度链，深层图片的 `min-content` 宽度又传播到祖先布局，使页面超出视口。修复这些约束后，Safari 已确认媒体库列表恢复显示，首页工具栏与右栏位于视口内。
+- **侧栏选中色**：声明将选中背景改为 `fill.strong` 后，默认 `on_accent` 前景色没有随背景替换；朱红、霓虹深色主题的文字对比度只有 1.33:1。中性 `fill.*`、`surface.*` 背景现在配对 `text.primary`，`selection.background` 配对 `selection.foreground`；显式前景色仍优先，强调色背景继续使用自己的配对。选中图标继承文字前景色，该深色组合的对比度为 12.59:1，Safari 实测文字与图标清晰可见。回归覆盖主题配对、选中/悬停切换和显式前景色优先级。
+- **Rail 覆盖层**：Rail 不再参与放大含图片/文字的 Stack，覆盖范围由内容决定。2026-10-16，Safari 在 1470 CSS px 宽度下确认首页舞台图右侧圆角与 28 px 间距恢复，工具栏和右栏正常；Chromium 1470 × 754 的 DOM 测量中，舞台按钮与图片均为 528 × 297，画框一致。
+- **Safari 交互复查范围**：媒体库显示 16 张海报，筛选「未看」得到 8 张；深色侧栏选中白色文字与图标可读；周历从周一切换到周三、设置从通用切换到外观均目视正常。此次为桌面 Safari 27.0.1 验证，不包含 Safari 手机布局或所有页面。
+- **媒体库窄屏复查**：共享 UI 的 `compact` 布局改为三行头部、`Flow` 筛选项与较窄缩放控件。Chromium 390 × 844 和 360 × 780 下标题不换行，完整缩放控件两端均可见，海报网格正常，文档 `clientWidth` 与 `scrollWidth` 相等。结论限于这两个尺寸的媒体库布局，不扩展为所有窄屏页面通过；Safari 手机布局及 Firefox 尚未实测。
+
+应用仍为 UI 与状态模拟，没有接入实际播放、传输、更新或插件安装。
 
 ## 完成情况
 
@@ -89,9 +119,9 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 ## 控件（v0.3）
 
 - **按钮**：高 32 px，左右内边距 20 px，最小宽度 80 px；输入框与下拉菜单同为 32 px，同一行中的控件对齐。
-- **图标按钮**：悬停为 `accent`，按下与选中为 `accent.text`，仍不画底板。
+- **图标按钮**：默认及 plain 样式用图标颜色反馈悬停、按下与选中；显式 prominent 绘制强调容器，ControlGroup 提供组内共享胶囊。尺寸和样式以当前声明为准。
 - **页签**：选中项文字与图标为 `accent.text`，下划线为 `accent`。
-- **侧边栏与竖排导航**：选中项填满 `accent`，文字与图标为 `on_accent`，选中且悬停为 `button.prominent.hover`；不带左侧竖线。浮动窗口切换条的当前项同样填满强调色。
+- **侧边栏与竖排导航**：默认选中项填满 `accent`，文字与图标为 `on_accent`，选中且悬停为 `button.prominent.hover`；不带左侧竖线。声明覆盖背景时按对应语义角色重新配对前景色，显式前景色优先，选中图标继承文字颜色。浮动窗口切换条的当前项同样填满强调色。
 - **开关**：40 × 20 的轨道，关闭时为 `control.border` 边框加同色圆钮，开启时轨道填满 `accent`、圆钮为 `on_accent`；悬停时关闭态的边框与圆钮变为 `text.secondary`，开启态变为 `button.prominent.hover`。
 - **滑块**：仍是原生 `<input type="range">`，圆钮改为 4 px `control.thumb` 白环包住 `accent` 圆心并加 1 px 轮廓，悬停、拖动时圆心为 hover、pressed 变体。
 - **下拉菜单**：`automatic`、`menu` 样式不再用 `<select>`。触发器是 `role="combobox"` 的按钮，列表是 Popover API 的 `popover="auto"` 元素（顶层，不受卡片、对话框与滚动容器裁切；外部点按自动关闭），在 `beforetoggle` 中按触发器位置同步定位（下方不足 160 px 且上方更宽时向上），最高 328 px。焦点留在触发器上，活动项用 `aria-activedescendant`；键盘按 APG 只选组合框；Esc 在触发器上处理并阻止默认动作，所以对话框不会一起关闭；滚动页面或改变窗口大小时关闭。选择调用与外部入口相同的 `select` 闭包。
@@ -99,7 +129,7 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 
 ## 组件库第一批
 
-- **图片**：`<img>`，地址为 `resources/` 下的资源名称（两种构建都把资源复制到这里），`object-fit` 对应 `fit`；只写一边时另一边为 `auto`，按图片比例。`label` 写入 `alt`，没有时 `alt` 为空，即装饰图片。在表单分组中单独成行并靠前缘。含有图片的 `Row` 与 `Column` 不会缩到比内容还窄（`min-width: min-content`），否则窗口窄于内容时列会被压缩，固定尺寸的图片溢出到相邻的列上；其他布局仍可以缩小并让文字换行。HDR 由浏览器决定：Chrome 154 在 macOS 上按 HDR 显示带增益图的 JPEG 与 PQ 的 PNG（右半 1.69 与 1.85 倍 SDR 白），同一台 Mac 上默认配置的 WKWebView（macOS 27）显示 SDR 版本，`dynamic-range-limit: no-limit` 也不改变；Safari 未测。
+- **图片**：`<img>`，地址为 `resources/` 下的资源名称（两种构建都把资源复制到这里），`object-fit` 对应 `fit`；只写一边时另一边为 `auto`，按图片比例。`label` 写入 `alt`，没有时 `alt` 为空，即装饰图片。在表单分组中单独成行并靠前缘。图片通过 `flex: none` 和显式尺寸规则保留声明的画框，祖先 `Row` 与 `Column` 仍可收缩；2026-10-15 已移除因任意深层图片而设置祖先 `min-width: min-content` 的规则，避免整页被图片内容撑宽。HDR 由浏览器决定：Chrome 154 在 macOS 上按 HDR 显示带增益图的 JPEG 与 PQ 的 PNG（右半 1.69 与 1.85 倍 SDR 白），同一台 Mac 上默认配置的 WKWebView（macOS 27）显示 SDR 版本，`dynamic-range-limit: no-limit` 也不改变；Safari 的 HDR 尚未实测。
 - **进度**：有 `value` 时是轨道加填充的 `role="progressbar"`，带 `aria-valuenow` 与 `aria-valuemax`，标签在上；轨道与滑块同为 `control.track`，填充为 `accent`，宽度变化用 `--bern-motion` 过渡（减少动态效果时为 0）。没有 `value` 时为查询已在用的 `.bern-spinner` 加次要文字。
 - **网格**：CSS Grid，`grid-template-columns: repeat(auto-fill, minmax(min(100%, min_width), 1fr))`，`gap` 默认 8 px。
 - **层叠**：一个单元格的 CSS Grid，每层 `grid-area: 1 / 1`，`place-items` 对应 `align` 的九个方位；宽度为 `fit-content`，所以与最大的一层一样大，不会被分组撑满。
@@ -155,7 +185,7 @@ flowchart LR
 - **样式覆盖**：基础外观写成样式，各状态的外观按悬停、按下、焦点、禁用与选中依次合并；颜色经 CSS 过渡，变换经状态的弹簧。主题缺少的 `fill.subtle`、`fill.strong`、`selection.*` 由现有变量派生。
 - **画布与标注**：2D `<canvas>`，按设备像素比绘制，状态、尺寸与颜色变化时重绘；标注的行框来自 `Range.getClientRects`。
 - **可伸展的视图**：没有尺寸的画布、滚动视图、网格、视频与进度条标为可伸展，`Stack`、列、行与面板中含有它们的子元素随之拉伸（用 `:has()`）；写了尺寸的元素不参与。这对应原生目标上这些视图占满给它们的空间。
-- **侧栏**：内容生成为普通的构建函数，侧栏项挂载时登记，选中项消失时回到 `fallback` 或第一个可见项；`SidebarFooter` 在侧栏底部。
+- **侧栏**：内容生成为普通的构建函数，侧栏项挂载时登记，选中项消失时回到 `fallback` 或第一个可见项；`SidebarFooter` 在侧栏底部。`SidebarHeader` 固定在列表上方，子项纵向排列、间距 8 px，默认上下留白 8 px、左右留白 7 px；此前遗漏容器布局，导致品牌贴顶并偏左。该留白是平台默认值，不会自动调整任意 Header 内容的图标列或文字列。
 - **窗口**：`window.idle` 由窗口内的指针、触摸、滚轮与按键重新计时；沉浸时隐藏页头，静置时隐藏指针。`chrome` 在页面上没有效果。
 - **运行时主题**：构建时为每个强调色生成浅色、深色与更高对比的变量，运行时切换根元素的 `data-bern-accent` 与 `data-bern-appearance`；`appearance` 的部分换用另一套变量，其中的浮层与菜单随之。
 - **文件**：`pick` 用 `<input type=file>`，按种类的扩展名与 MIME 过滤；`Drop` 处理拖入的文件；交给动作的是页面的 `blob:` 地址。`opens: true` 只在页面作为应用安装后经 `launchQueue` 收到文件。会话命令 `ui.set_file` 与 `ui.focus` 已加入。
@@ -268,9 +298,9 @@ flowchart LR
 - WebAssembly 中 panic 会终止模块，`app` 构建没有 macOS 那样的“引擎拒绝后续命令”。
 - 运行时主题只在构建时生成快照；没有运行时更换品牌种子的接口。强制颜色模式、更高对比模式与键盘遍历的完整检查、VoiceOver/NVDA 未验证。
 - 视频：未验证真实的用户激活拒绝；没有全屏与画中画；单视图，一个播放器不能同时在两个视图中显示。
-- 调试版模块约 21 MB；发布构建（`--release`，`opt-level = "s"`、LTO）未测量。
-- Firefox、Safari 未测试；只在 Chromium 内核中验证。
-- 侧边栏宽度固定为 240 px，规范中的拖动调整（200–320 px，Window Splitter 模式）未实现。
+- 早期调试版模块约 21 MB。2026-10-11 release 展示应用的体积记录见 [README 测量方法](../../README.md#实测数据)；这些数字不代表当前 Erika 的体积或性能。
+- 桌面 Safari 27.0.1 已验证 Erika 的媒体库、筛选、主题可读性、导航和部分布局，范围见前文。Firefox、Safari 手机布局及未列出的交互仍未实测。
+- 侧栏默认宽度为 240 px，可用 `Sidebar(width:)` 指定固定宽度；用户拖动调整列宽的 Window Splitter 模式尚未实现。
 - 示例应用没有声明浮动窗口；浮动呈现只通过临时修改构建产物验证过。
 - 下拉菜单依赖 Popover API（Chromium 114、Safari 17、Firefox 125 起）；更旧的浏览器没有回退。
 - 媒体进度条没有显示缓冲范围。

@@ -1,5 +1,7 @@
 # iOS SwiftUI 实现记录
 
+当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
+
 - 日期：2026-10-12
 - 依据：[Bern 架构设计 v0.24](../Design.md)
 - 工具链：Rust 1.99.0（`aarch64-apple-ios-sim` 与 `aarch64-apple-ios`）；Xcode 26.5，iOS 26.5 SDK，Swift 6.3.2；iPad 窗口化模式的后半部分用 Xcode 27.0，iOS 27.0 模拟器 SDK，Swift 6.4

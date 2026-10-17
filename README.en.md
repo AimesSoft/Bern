@@ -473,6 +473,7 @@ Tests include declarations that must fail to compile, and type-check the generat
 
 ## Documentation
 
+- [Documentation index](Docs/README.md) · [Current component guide](Docs/Reference/UI.md) · [Property reference](Docs/Reference/Component-Properties.md) · [Platform capabilities and verification](Docs/Reference/Platforms.md) (Chinese)
 - [Design document](Docs/Design.md) – goals, architecture, components, theming, commands, windows, media
 - [Adaptation specs](Docs/Adaptation/README.md) – Apple, Windows and Linux, Web, Android, HarmonyOS
 - Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
