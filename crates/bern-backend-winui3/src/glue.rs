@@ -419,7 +419,7 @@ echo Generating C++/WinRT headers for Windows SDK %SDK%
 rem One directory per profile, so each keeps its precompiled header.
 set "OBJ=%APP%\obj\{profile}"
 if not exist "%OBJ%" mkdir "%OBJ%"
-set CFLAGS={options} /I"%WINRT%" /I"%FOUNDATION%\include" /I"%WINUI%\include" /I"%IX%\include" /I"%APP%" /I"%APP%\runtime" /Fo"%OBJ%\\"
+set CFLAGS={options} /I"%WINRT%" /I"%WEBVIEW2%\build\native\include" /I"%FOUNDATION%\include" /I"%WINUI%\include" /I"%IX%\include" /I"%APP%" /I"%APP%\runtime" /Fo"%OBJ%\\"
 set PCH=/Fp"%OBJ%\bern.pch"
 rem The precompiled header holds C++/WinRT and the runtime for both front
 rem ends, and takes most of a build's time. It is made again only when the
@@ -444,7 +444,7 @@ rem Symbols stay with the intermediate files, out of the application.
 del /q "%OUT%\%EXE%.pdb" 2>nul
 set "LINKOPT="
 if "%DEBUGINFO%"=="1" set LINKOPT=/DEBUG /PDB:"%OBJ%\%EXE%.pdb"
-link /nologo %LINKOPT% /OUT:"%OUT%\%EXE%.exe" /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /MANIFEST:EMBED /MANIFESTINPUT:"%APP%\app.manifest" {objects} "%OBJ%\app.res" "%ENGINE%"{bootstrap_lib} windowsapp.lib kernel32.lib user32.lib gdi32.lib ole32.lib oleaut32.lib advapi32.lib shell32.lib shlwapi.lib dwmapi.lib ntdll.lib userenv.lib ws2_32.lib bcrypt.lib dbghelp.lib secur32.lib crypt32.lib ncrypt.lib iphlpapi.lib synchronization.lib || goto failed
+link /nologo %LINKOPT% /LIBPATH:"%WEBVIEW2%\build\native\%ARCH%" /OUT:"%OUT%\%EXE%.exe" /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /MANIFEST:EMBED /MANIFESTINPUT:"%APP%\app.manifest" {objects} "%OBJ%\app.res" "%ENGINE%"{bootstrap_lib} windowsapp.lib kernel32.lib user32.lib gdi32.lib ole32.lib oleaut32.lib advapi32.lib shell32.lib shlwapi.lib dwmapi.lib ntdll.lib userenv.lib ws2_32.lib bcrypt.lib dbghelp.lib secur32.lib crypt32.lib ncrypt.lib iphlpapi.lib synchronization.lib || goto failed
 {bootstrap_dll}
 exit /b 0
 

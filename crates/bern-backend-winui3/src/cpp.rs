@@ -1050,6 +1050,23 @@ impl<'a> Generator<'a> {
                 ),
                 &element.children,
             ),
+            "Svg" => out.line(format!(
+                "B::Svg(p, c, {});",
+                designated(&[
+                    ("source", element.resource("source").map(string)),
+                    ("label", self.text_prop(element, "label")),
+                    ("width", self.len(element, "width")),
+                    ("height", self.len(element, "height")),
+                    ("fit", Self::keyword(element, "fit")),
+                    ("playing", element.expr("playing").map(|e| self.getter(e))),
+                    ("speed", element.expr("speed").map(|e| self.getter(e))),
+                    ("restart", element.expr("restart").map(|e| self.getter(e))),
+                    (
+                        "interactive",
+                        element.keyword("interactive").map(str::to_owned)
+                    ),
+                ])
+            )),
             "Image" => {
                 let url = element.expr("source").map(|expr| self.getter(expr));
                 out.line(format!(

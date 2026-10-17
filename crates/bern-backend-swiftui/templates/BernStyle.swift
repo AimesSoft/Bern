@@ -480,22 +480,87 @@ extension View {
         modifier(BernCapsuleControl(height: height, prominent: prominent))
     }
 
-    @ViewBuilder
     func bernButtonLook(_ look: BernButtonLook) -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
+        modifier(BernSystemButtonLook(look: look))
+    }
+
+}
+
+private struct BernControlGroupHeightKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+extension EnvironmentValues {
+    var bernControlGroupHeight: CGFloat? {
+        get { self[BernControlGroupHeightKey.self] }
+        set { self[BernControlGroupHeightKey.self] = newValue }
+    }
+}
+
+private struct BernGroupedButtonStyle: ButtonStyle {
+    let height: CGFloat
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(minWidth: height, minHeight: height)
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.55 : 1)
+    }
+}
+
+private struct BernSystemButtonLook: ViewModifier {
+    let look: BernButtonLook
+    @Environment(\.bernControlGroupHeight) private var groupHeight
+    @ViewBuilder func body(content: Content) -> some View {
+        if let groupHeight {
+            content.buttonStyle(BernGroupedButtonStyle(height: groupHeight)).foregroundStyle(.primary)
+        } else if #available(macOS 26.0, iOS 26.0, *) {
             switch look {
-            case .secondary: buttonStyle(.glass)
-            case .prominent: buttonStyle(.glassProminent).bernAccentTint()
-            case .icon: buttonStyle(.glass).buttonBorderShape(.circle)
-            case .flat: buttonStyle(.borderless).foregroundStyle(.secondary)
+            case .secondary: content.buttonStyle(.glass)
+            case .prominent: content.buttonStyle(.glassProminent).bernAccentTint()
+            case .icon: content.buttonStyle(.glass).buttonBorderShape(.circle)
+            case .flat: content.buttonStyle(.borderless).foregroundStyle(.secondary)
             }
         } else {
             switch look {
-            case .secondary: buttonStyle(.bordered)
-            case .prominent: buttonStyle(.borderedProminent).bernAccentTint()
-            case .icon: buttonStyle(.bordered).buttonBorderShape(.circle)
-            case .flat: buttonStyle(.borderless).foregroundStyle(.secondary)
+            case .secondary: content.buttonStyle(.bordered)
+            case .prominent: content.buttonStyle(.borderedProminent).bernAccentTint()
+            case .icon: content.buttonStyle(.bordered).buttonBorderShape(.circle)
+            case .flat: content.buttonStyle(.borderless).foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// One system glass surface for related buttons. The controls remain
+/// native Buttons, Menus and popovers, with independent hit targets.
+struct BernControlGroup<Content: View>: View {
+    let height: CGFloat
+    @ViewBuilder let content: Content
+    var body: some View {
+        HStack(spacing: 0) { content }
+            .font(.system(size: 18, weight: .regular))
+            .frame(height: height)
+            .environment(\.bernControlGroupHeight, height)
+            .modifier(BernGlassCapsule(prominent: false))
+            .accessibilityElement(children: .contain)
+    }
+}
+
+private struct BernGlassCapsule: ViewModifier {
+    var prominent = false
+    @Environment(\.bernAccent) private var accent
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(macOS 26.0, iOS 26.0, *) {
+            if prominent {
+                content.foregroundStyle(BernColor.role("on_accent").color)
+                    .background(accent ?? .accentColor, in: Capsule())
+                    .glassEffect(.regular.tint(accent ?? .accentColor).interactive(), in: Capsule())
+            } else {
+                content.foregroundStyle(.primary)
+                    .glassEffect(.regular.interactive(), in: Capsule())
+            }
+        } else {
+            content.foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
+                .background(prominent ? AnyShapeStyle(accent ?? .accentColor) : AnyShapeStyle(.regularMaterial), in: Capsule())
         }
     }
 }
@@ -623,41 +688,63 @@ struct BernSplitButton<Content: View>: View {
     let systemImage: String?
     let more: String
     @Binding var isOn: Bool
+    let capsule: Bool
+    let height: CGFloat
     let target: String
     @ViewBuilder let content: Content
     @Environment(\.colorScheme) private var scheme
     @State private var showing = false
 
     init(
-        label: String, systemImage: String?, more: String, isOn: Binding<Bool>, target: String,
+        label: String, systemImage: String?, more: String, isOn: Binding<Bool>, capsule: Bool = false, height: CGFloat = 34, target: String,
         @ViewBuilder content: () -> Content
     ) {
         self.label = label
         self.systemImage = systemImage
         self.more = more
         self._isOn = isOn
+        self.capsule = capsule
+        self.height = height
         self.target = target
         self.content = content()
     }
 
-    var body: some View {
-        ControlGroup {
-            Toggle(isOn: $isOn) {
-                if let systemImage {
-                    Label(label, systemImage: systemImage)
-                } else {
-                    Text(verbatim: label)
-                }
-            }
-            .toggleStyle(.button)
-            Button {
-                showing = true
-            } label: {
-                Image(systemName: "chevron.down")
-            }
-            .accessibilityLabel(Text(verbatim: more))
-            .help(more)
+    @ViewBuilder private var toggleLabel: some View {
+        if let systemImage {
+            Label(label, systemImage: systemImage).labelStyle(.titleAndIcon)
+        } else {
+            Text(verbatim: label)
         }
+    }
+
+    @ViewBuilder private var buttons: some View {
+        if capsule {
+            HStack(spacing: 0) {
+                Toggle(isOn: $isOn) { toggleLabel }
+                    .toggleStyle(BernSplitToggleStyle(height: height))
+                Rectangle().fill(.primary.opacity(0.18)).frame(width: 0.5, height: height - 14)
+                Button { showing = true } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 11, weight: .semibold))
+                        .frame(width: 30, height: height).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(verbatim: more))
+                .help(more)
+            }
+            .font(.system(size: 13, weight: .medium))
+            .modifier(BernGlassCapsule(prominent: isOn))
+        } else {
+            ControlGroup {
+                Toggle(isOn: $isOn) { toggleLabel }.toggleStyle(.button)
+                Button { showing = true } label: { Image(systemName: "chevron.down") }
+                    .accessibilityLabel(Text(verbatim: more)).help(more)
+            }
+        }
+    }
+
+    var body: some View {
+        buttons
+        .bernAccentTint()
         .fixedSize()
         // A control group turns its buttons into segments of one control,
         // which anchors the popover.
@@ -673,11 +760,23 @@ struct BernSplitButton<Content: View>: View {
                     Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
                 }
                 .environment(\.colorScheme, scheme)
+                .environment(\.bernControlGroupHeight, nil)
         }
         .bernControl(
             target, role: "split_button", label: label,
             actions: BernControlActions(
                 activate: { showing = true }, setBool: { isOn = $0 }, value: { isOn ? "true" : "false" }))
+    }
+}
+
+private struct BernSplitToggleStyle: ToggleStyle {
+    let height: CGFloat
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            configuration.label.padding(.horizontal, 14).frame(height: height).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
     }
 }
 
@@ -992,6 +1091,38 @@ private struct BernHero: ViewModifier {
     func body(content: Content) -> some View {
         if let namespace, !(reduce || bernForcedReduceMotion) {
             content.matchedGeometryEffect(id: id, in: namespace)
+        } else {
+            content
+        }
+    }
+}
+
+/// Images travel above the native split-view columns on macOS. Other
+/// Apple platforms retain SwiftUI's shared-element implementation.
+struct BernPictureHero: ViewModifier {
+    let id: String?
+    let picture: BernImage.Picture?
+    let fit: BernImageFit
+    let corner: CGFloat
+    let motion: BernMotion
+    @BernReducedMotion private var reduce
+    @State private var flying = false
+
+    func body(content: Content) -> some View {
+        if let id {
+            #if os(macOS)
+            content
+                .opacity(flying ? 0 : 1)
+                .background(BernPictureHeroProbe(id: id, picture: picture, fit: fit,
+                    corner: corner, motion: motion, reduced: reduce || bernForcedReduceMotion,
+                    visibility: { hidden in
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { flying = hidden }
+                    }))
+            #else
+            content.bernHero(id)
+            #endif
         } else {
             content
         }
@@ -2232,6 +2363,7 @@ struct BernPopoverButton<Content: View>: View {
                     Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
                 }
                 .environment(\.colorScheme, scheme)
+                .environment(\.bernControlGroupHeight, nil)
         }
         .bernControl(
             target, role: "popover_button", label: label,
@@ -2707,6 +2839,17 @@ struct BernSurface: ViewModifier {
     }
 }
 
+
+/// Keeps a chip's off state neutral and its selected label legible,
+/// using the same native glass surface as neighboring capsule controls.
+struct BernCapsuleToggleStyle: ToggleStyle {
+    let height: CGFloat
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: { configuration.label }
+            .bernCapsuleControl(height: height, prominent: configuration.isOn)
+            .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
+    }
+}
 
 private struct BernCapsuleControl: ViewModifier {
     @Environment(\.bernAccent) private var accent

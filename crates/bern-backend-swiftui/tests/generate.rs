@@ -69,32 +69,70 @@ fn conditional_progress_rails_keep_the_posters_overlay_layout() {
     use bern_ir::{Element, Expr, ExprKind, IfNode, Node, Prop};
     use bern_protocol::{Type, Value};
     let (config, mut compiled) = showcase();
-    let element = |kind: &str, props, children| Node::Element(Element {
-        kind: kind.into(), id: None, path: format!("test.{kind}"), props,
-        template: None, children, action: None,
-        source: SourceLocation { file: "poster.rs".into(), line: 1, column: 1 },
-    });
-    let image = element("Image", [
-        ("name".into(), Prop::Resource { name: "images/bern.png".into() }),
-        ("aspect".into(), Prop::Number { value: 2.0 / 3.0 }),
-    ].into(), vec![]);
-    let bar = element("Canvas", [
-        ("height".into(), Prop::Number { value: 4.0 }),
-    ].into(), vec![]);
+    let element = |kind: &str, props, children| {
+        Node::Element(Element {
+            kind: kind.into(),
+            id: None,
+            path: format!("test.{kind}"),
+            props,
+            template: None,
+            children,
+            action: None,
+            source: SourceLocation {
+                file: "poster.rs".into(),
+                line: 1,
+                column: 1,
+            },
+        })
+    };
+    let image = element(
+        "Image",
+        [
+            (
+                "name".into(),
+                Prop::Resource {
+                    name: "images/bern.png".into(),
+                },
+            ),
+            ("aspect".into(), Prop::Number { value: 2.0 / 3.0 }),
+        ]
+        .into(),
+        vec![],
+    );
+    let bar = element(
+        "Canvas",
+        [("height".into(), Prop::Number { value: 4.0 })].into(),
+        vec![],
+    );
     let rail = element("Rail", Default::default(), vec![bar]);
     let conditional = Node::If(IfNode {
-        branches: vec![(Expr { ty: Type::Bool, kind: ExprKind::Literal { value: Value::Bool(true) } }, vec![rail])],
+        branches: vec![(
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Literal {
+                    value: Value::Bool(true),
+                },
+            },
+            vec![rail],
+        )],
         otherwise: vec![],
     });
     // The same image and optional progress bar must still use the sizing
     // contract of overlay layers, even though the Rail is inside an if.
-    compiled.app.components[0].body = element("Stack", Default::default(), vec![image, conditional]);
+    compiled.app.components[0].body =
+        element("Stack", Default::default(), vec![image, conditional]);
     let output = workspace().join("target/bern-test/conditional-rail");
     let context = context(&config, &compiled, "macos", &output);
     let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
-    let generated = files.iter().find(|f| f.path == Path::new("Sources/BernGenerated.swift")).unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
+        .unwrap();
     let source = String::from_utf8_lossy(&generated.contents);
-    assert!(source.contains("BernLayers(alignment: .center) {"), "{source}");
+    assert!(
+        source.contains("BernLayers(alignment: .center) {"),
+        "{source}"
+    );
     assert!(source.contains(".bernFillsLayers()"), "{source}");
 }
 
@@ -733,8 +771,9 @@ platform = "macos"
     // A transition on a match arm must start when the discriminator changes,
     // including when no button/engine command supplies an animation transaction.
     assert!(
-        generated.lines().any(|line| line.contains(".animation(")
-            && line.contains("value: bernEngine.mode)")),
+        generated
+            .lines()
+            .any(|line| line.contains(".animation(") && line.contains("value: bernEngine.mode)")),
         "{generated}"
     );
     if styled {
@@ -794,7 +833,6 @@ platform = "macos"
         String::from_utf8_lossy(&result.stderr)
     );
 }
-
 
 const PALETTE_UI: &str = r#"
 use bern::prelude::*;

@@ -1648,6 +1648,9 @@ struct BernImage: View {
     var rendering: SwiftUI.Image.TemplateRenderingMode = .original
     /// An explicit width/height ratio fills the proposed grid column.
     var aspect: CGFloat? = nil
+    var hero: String? = nil
+    var heroMotion = BernMotion(period: 0.48, damping: 0.86)
+    var heroCorner: CGFloat = 0
     @State private var fetched: Picture?
 
     struct Picture: @unchecked Sendable {
@@ -1734,6 +1737,7 @@ struct BernImage: View {
             guard let url else { return }
             fetched = await BernPictures.shared.load(url)
         }
+        .modifier(BernPictureHero(id: hero, picture: picture, fit: fit, corner: heroCorner, motion: heroMotion))
         if let label {
             shown.accessibilityElement().accessibilityLabel(Text(verbatim: label)).accessibilityAddTraits(.isImage)
         } else {
@@ -1984,6 +1988,89 @@ private struct BernDropDelegate: DropDelegate {
     private static func url(of provider: NSItemProvider, then: @escaping @MainActor (URL?) -> Void) {
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             Task { @MainActor in then(url) }
+        }
+    }
+}
+
+// Fixed logical scenes use a single transform so images, type and hit targets
+// stay registered while fitting a smaller hosting window. No app frame clock.
+struct BernScaleBox<Content: View>: View {
+    let width: CGFloat
+    let height: CGFloat
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        GeometryReader { geometry in
+            let scale = min(geometry.size.width / max(1, width), geometry.size.height / max(1, height))
+            ZStack(alignment: .topLeading) { content() }
+                .frame(width: width, height: height)
+                .scaleEffect(scale, anchor: .topLeading)
+                .frame(width: width * scale, height: height * scale, alignment: .topLeading)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .clipped()
+    }
+}
+
+struct BernControlledSlider: View {
+    let value: Double
+    let minimum: Double
+    let maximum: Double
+    let step: Double?
+    let label: String
+    let labelHidden: Bool
+    let commit: (Double) -> Void
+    @State private var preview = 0.0
+    @State private var editing = false
+    var body: some View {
+        Group {
+            if let step {
+                Slider(value: $preview, in: minimum...maximum, step: step, onEditingChanged: edit) { Text(label) }
+            } else {
+                Slider(value: $preview, in: minimum...maximum, onEditingChanged: edit) { Text(label) }
+            }
+        }
+        .modifier(BernSliderLabelHidden(hidden: labelHidden))
+        .bernAccentTint()
+        .onAppear { preview = value }
+        .onChange(of: value) { _, newValue in if !editing { preview = newValue } }
+    }
+    private func edit(_ active: Bool) {
+        editing = active
+        if !active { commit(preview) }
+    }
+}
+struct BernSliderLabelHidden: ViewModifier {
+    let hidden: Bool
+    func body(content: Content) -> some View { if hidden { content.labelsHidden() } else { content } }
+}
+
+struct BernMarquee<Content: View>: View {
+    let duration: Double
+    let phase: Double
+    let paused: Bool
+    let opacity: Double
+    @ViewBuilder var content: () -> Content
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.bernReduceMotion) private var reduceMotion
+    @State private var start = Date()
+    @State private var elapsed = 0.0
+    @State private var textWidth: CGFloat = 240
+    var body: some View {
+        GeometryReader { geometry in
+            SwiftUI.TimelineView(.animation(paused: paused || reduceMotion || systemReduceMotion)) { clock in
+                let time = elapsed + (paused ? 0 : clock.date.timeIntervalSince(start))
+                let progress = (phase + time / max(1, duration)).truncatingRemainder(dividingBy: 1)
+                content().fixedSize()
+                    .background(GeometryReader { size in Color.clear.onAppear { textWidth = size.size.width }.onChange(of: size.size.width) { _, width in textWidth = width } })
+                    .shadow(color: .black, radius: 1, y: 1)
+                    .offset(x: (reduceMotion || systemReduceMotion) ? geometry.size.width * 0.28 : geometry.size.width - (geometry.size.width + textWidth) * progress)
+            }
+        }
+        .opacity(min(1, max(0, opacity)))
+        .clipped()
+        .onChange(of: paused) { _, nowPaused in
+            if nowPaused { elapsed += Date().timeIntervalSince(start) }
+            else { start = Date() }
         }
     }
 }

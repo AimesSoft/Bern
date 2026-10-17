@@ -110,10 +110,14 @@ impl Target for SwiftUiIos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
         let mut files = vec![
-            GeneratedFile::text("Sources/BernRuntime.swift", crate::runtime_source(RUNTIME)),
+            GeneratedFile::text(
+                "Sources/BernRuntime.swift",
+                crate::runtime_with_svg(app, RUNTIME),
+            ),
             GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
             GeneratedFile::text("Sources/BernStyle.swift", STYLE),
             GeneratedFile::text("Sources/BernUIKit.swift", UIKIT),

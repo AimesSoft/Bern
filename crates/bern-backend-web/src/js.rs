@@ -20,6 +20,10 @@ use bern_ir::{
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 use std::collections::BTreeSet;
 
+#[cfg(test)]
+#[path = "js_tests.rs"]
+mod tests;
+
 /// Indented line writer.
 #[derive(Default)]
 struct Out {
@@ -467,6 +471,53 @@ impl<'a> Generator<'a> {
         ))
     }
 
+    /// Controls with an engine-owned value commit the proposed value through
+    /// their command. Compare IR expressions, never generated source text: a
+    /// string argument may contain the same spelling as the controlled field.
+    fn control_field(&self, element: &Element, controlled: &str) -> Option<String> {
+        if let Some(expr) = element.expr(controlled) {
+            let value = self.expr(expr);
+            let action = element.action.as_ref()?;
+            let commit = match action {
+                Action::Engine { command, args } => {
+                    let spec = &self.app.protocol.commands[*command];
+                    let mut values = vec!["ctx".to_string()];
+                    values.extend(args.iter().map(|arg| {
+                        if arg == expr {
+                            "newValue".into()
+                        } else {
+                            self.expr(arg)
+                        }
+                    }));
+                    format!(
+                        "C.{}({})",
+                        self.app.protocol.command_symbol(spec),
+                        values.join(", ")
+                    )
+                }
+                _ => self.action(action),
+            };
+            Some(format!(
+                "{{ get: () => {value}, peek: () => {value}, set: (newValue) => {{ {commit}; }} }}"
+            ))
+        } else {
+            let field = self.field(element, "value")?;
+            Some(match &element.action {
+                Some(action) => format!(
+                    "{{ get: () => {field}.get(), peek: () => {field}.peek(), set: (newValue) => {{ {field}.set(newValue); {}; }} }}",
+                    self.action(action)
+                ),
+                None => field,
+            })
+        }
+    }
+
+    fn value_prop(&self, element: &Element, name: &str) -> Option<String> {
+        element
+            .expr(name)
+            .map(|expr| format!("() => {}", self.expr(expr)))
+    }
+
     fn action(&self, action: &Action) -> String {
         match action {
             Action::Session { field, op } => {
@@ -645,6 +696,7 @@ impl<'a> Generator<'a> {
                 .map(|transition| format!("X.{}", member(transition)))
         };
         entries.push(("appear", transition("appear")));
+        entries.push(("appearDelay", element.number("appear_delay").map(number)));
         entries.push(("disappear", transition("disappear")));
         if let Some(hero) = element.keyword("hero") {
             let key = match element.expr("hero_key") {
@@ -666,6 +718,12 @@ impl<'a> Generator<'a> {
             entries.push(("nudge", Some(format!("() => ({})", self.expr(when)))));
             entries.push(("nudgeMotion", Some(self.motion("jelly"))));
         }
+        if let Some(key) = self.value_prop(element, "nudge_key") {
+            entries.push(("nudgeKey", Some(key)));
+            entries.push(("nudgeMotion", Some(self.motion("jelly"))));
+        }
+        entries.push(("nudgeScale", element.number("nudge_scale").map(number)));
+        entries.push(("reduceMotion", self.value_prop(element, "reduce_motion")));
         entries.push(("scrollScale", element.number("scroll_scale").map(number)));
         entries.push((
             "scrollOpacity",
@@ -906,6 +964,8 @@ impl<'a> Generator<'a> {
                     ("style", Self::keyword(element, "style")),
                     ("emphasis", Self::keyword(element, "emphasis")),
                     ("mark", Self::keyword(element, "mark")),
+                    ("lines", element.number("lines").map(number)),
+                    ("fontSize", self.length(element, "font_size")),
                 ])
             )),
             "Canvas" => self.canvas(out, element),
@@ -915,6 +975,8 @@ impl<'a> Generator<'a> {
                     ("title", self.text_prop(element, "title")),
                     ("icon", element.icon("icon").map(string)),
                     ("style", Self::keyword(element, "style")),
+                    ("fontSize", element.number("font_size").map(number)),
+                    ("display", Self::keyword(element, "display")),
                 ])
             )),
             "Button" | "IconButton" => {
@@ -930,6 +992,8 @@ impl<'a> Generator<'a> {
                         ("label", self.text_prop(element, "label")),
                         ("enabled", enabled),
                         ("style", style),
+                        ("shape", Self::keyword(element, "shape")),
+                        ("height", self.length(element, "height")),
                         ("setFile", set_file),
                         ("fileKinds", kinds),
                     ]);
@@ -949,8 +1013,11 @@ impl<'a> Generator<'a> {
                             ("icon", element.icon("icon").map(string)),
                             ("role", Self::keyword(element, "role")),
                             ("prominence", Self::keyword(element, "prominence")),
+                            ("fontSize", element.number("font_size").map(number)),
                             ("enabled", enabled),
                             ("style", style),
+                            ("shape", Self::keyword(element, "shape")),
+                            ("height", self.length(element, "height")),
                             ("setFile", set_file),
                             ("fileKinds", kinds),
                         ]),
@@ -963,6 +1030,10 @@ impl<'a> Generator<'a> {
                 Self::props(vec![
                     ("id", Some(self.id(element))),
                     ("label", self.text_prop(element, "label")),
+                    (
+                        "labelHidden",
+                        Some((element.keyword("label_hidden") == Some("true")).to_string())
+                    ),
                     ("field", self.field(element, "value")),
                     ("prompt", self.text_prop(element, "prompt")),
                     ("kind", Self::keyword(element, "kind")),
@@ -970,18 +1041,27 @@ impl<'a> Generator<'a> {
                 self.action_fn(element)
             )),
             "Search" => {
+                let palette = element.keyword("style") == Some("palette");
                 let props = Self::props(vec![
                     ("id", Some(self.id(element))),
                     ("field", self.field(element, "value")),
                     ("prompt", self.text_prop(element, "prompt")),
+                    ("panelPrompt", self.text_prop(element, "panel_prompt")),
+                    ("width", element.number("width").map(number)),
+                    ("height", element.number("height").map(number)),
                 ]);
                 let submit = self.action_fn(element);
+                let function = if palette {
+                    "B.SearchPalette"
+                } else {
+                    "B.Search"
+                };
                 if element.children.is_empty() {
-                    out.line(format!("B.Search(p, ctx, {props}, {submit});"));
+                    out.line(format!("{function}(p, ctx, {props}, {submit});"));
                 } else {
                     self.children(
                         out,
-                        &format!("B.Search(p, ctx, {props}, {submit}, "),
+                        &format!("{function}(p, ctx, {props}, {submit}, "),
                         &element.children,
                         ");",
                     );
@@ -989,11 +1069,42 @@ impl<'a> Generator<'a> {
                 self.shortcut(
                     out,
                     element,
-                    &format!("() => F.focusTarget(ctx, {})", self.id(element)),
+                    &format!(
+                        "() => F.{}(ctx, {})",
+                        if palette {
+                            "activateTarget"
+                        } else {
+                            "focusTarget"
+                        },
+                        self.id(element)
+                    ),
                 );
             }
+            "SearchItem" => {
+                let (action, set_file, kinds) = self.file_actions(element);
+                let props = Self::props(vec![
+                    ("id", Some(self.id(element))),
+                    ("label", self.text_prop(element, "label")),
+                    ("icon", element.icon("icon").map(string)),
+                    ("detail", self.text_prop(element, "detail")),
+                    ("hint", self.text_prop(element, "hint")),
+                    ("navigation", self.value_prop(element, "navigation")),
+                    ("setFile", set_file),
+                    ("fileKinds", kinds),
+                ]);
+                if element.children.is_empty() {
+                    out.line(format!("B.SearchItem(p, ctx, {props}, {action});"));
+                } else {
+                    self.children(
+                        out,
+                        &format!("B.SearchItem(p, ctx, {props}, {action}, "),
+                        &element.children,
+                        ");",
+                    );
+                }
+            }
             "Switch" => {
-                let field = self.field(element, "value");
+                let field = self.control_field(element, "checked");
                 out.line(format!(
                     "F.Switch(p, ctx, {});",
                     Self::props(vec![
@@ -1001,11 +1112,21 @@ impl<'a> Generator<'a> {
                         ("label", self.text_prop(element, "label")),
                         ("field", field.clone()),
                         ("style", Self::keyword(element, "style")),
+                        ("shape", Self::keyword(element, "shape")),
+                        ("height", self.length(element, "height")),
                         ("icon", element.icon("icon").map(string)),
+                        (
+                            "labelHidden",
+                            Some((element.keyword("label_hidden") == Some("true")).to_string())
+                        ),
                     ])
                 ));
                 if let Some(field) = field {
-                    self.shortcut(out, element, &format!("() => {field}.set(!{field}.peek())"));
+                    self.shortcut(
+                        out,
+                        element,
+                        &format!("() => {{ const field = {field}; field.set(!field.peek()); }}"),
+                    );
                 }
             }
             "Slider" => out.line(format!(
@@ -1013,40 +1134,86 @@ impl<'a> Generator<'a> {
                 Self::props(vec![
                     ("id", Some(self.id(element))),
                     ("label", self.text_prop(element, "label")),
-                    ("field", self.field(element, "value")),
+                    (
+                        "field",
+                        if element.expr("current").is_some() {
+                            self.control_field(element, "current")
+                        } else {
+                            self.field(element, "value")
+                        }
+                    ),
+                    (
+                        "controlled",
+                        Some(element.expr("current").is_some().to_string())
+                    ),
                     ("min", element.number("min").map(number)),
                     ("max", element.number("max").map(number)),
                     ("step", element.number("step").map(number)),
                     ("minIcon", element.icon("min_icon").map(string)),
                     ("maxIcon", element.icon("max_icon").map(string)),
+                    (
+                        "labelHidden",
+                        Some((element.keyword("label_hidden") == Some("true")).to_string())
+                    ),
                 ]),
-                self.action_fn(element)
+                if element.expr("current").is_some() {
+                    "null".into()
+                } else {
+                    self.action_fn(element)
+                }
             )),
             "Picker" => {
-                let field_ref = element.field("value").expect("picker field");
-                let Type::Enum { name } = &field_ref.ty else {
+                let ty = element
+                    .expr("selected")
+                    .map(|expr| &expr.ty)
+                    .or_else(|| element.field("value").map(|field| &field.ty));
+                let Some(Type::Enum { name }) = ty else {
                     return;
                 };
                 let def = self.types().enum_def(name).expect("enum");
-                let options: Vec<_> = def
-                    .variants
-                    .iter()
-                    .enumerate()
-                    .map(|(index, variant)| {
-                        format!(
-                            "{{ value: {index}, name: {}, label: () => L.{name}({index}) }}",
-                            string(&variant.name)
-                        )
-                    })
-                    .collect();
+                let options: Vec<_> = if element.children.is_empty() {
+                    def.variants
+                        .iter()
+                        .enumerate()
+                        .map(|(index, variant)| {
+                            format!(
+                                "{{ value: {index}, name: {}, label: () => L.{name}({index}) }}",
+                                string(&variant.name)
+                            )
+                        })
+                        .collect()
+                } else {
+                    element
+                        .children
+                        .iter()
+                        .filter_map(|node| {
+                            let Node::Element(option) = node else {
+                                return None;
+                            };
+                            let value = option.expr("value")?;
+                            Some(format!(
+                                "{{ value: {}, name: {}, label: {} }}",
+                                self.expr(value),
+                                self.variant_name(value),
+                                self.text_prop(option, "label")?
+                            ))
+                        })
+                        .collect()
+                };
                 out.line(format!(
                     "B.Picker(p, ctx, {});",
                     Self::props(vec![
                         ("id", Some(self.id(element))),
                         ("label", self.text_prop(element, "label")),
-                        ("field", self.field(element, "value")),
+                        ("field", self.control_field(element, "selected")),
                         ("options", Some(format!("[{}]", options.join(", ")))),
                         ("style", Self::keyword(element, "style")),
+                        ("shape", Self::keyword(element, "shape")),
+                        ("height", self.length(element, "height")),
+                        (
+                            "labelHidden",
+                            Some((element.keyword("label_hidden") == Some("true")).to_string())
+                        ),
                     ])
                 ));
             }
@@ -1082,6 +1249,7 @@ impl<'a> Generator<'a> {
                         ("name", Some(self.variant_name(value))),
                         ("label", label.map(|label| format!("() => {label}"))),
                         ("icon", element.icon("icon").map(string)),
+                        ("badge", self.length(element, "badge")),
                         (
                             "style",
                             crate::style::reference(
@@ -1122,6 +1290,8 @@ impl<'a> Generator<'a> {
                     &[
                         ("gap", "gap"),
                         ("padding", "padding"),
+                        ("padding_x", "paddingInline"),
+                        ("padding_y", "paddingBlock"),
                         ("width", "width"),
                         ("height", "height"),
                     ],
@@ -1144,8 +1314,16 @@ impl<'a> Generator<'a> {
                             .unwrap_or("0".into()),
                     ),
                 )]);
-                let mut first =
-                    self.layout_lines(element, &[("gap", "gap"), ("padding", "padding")]);
+                let mut first = self.layout_lines(
+                    element,
+                    &[
+                        ("gap", "gap"),
+                        ("row_gap", "rowGap"),
+                        ("padding", "padding"),
+                        ("padding_x", "paddingInline"),
+                        ("padding_y", "paddingBlock"),
+                    ],
+                );
                 if let Some(Prop::Expr { .. }) = element.prop("min_width") {
                     first.push(format!(
                         "F.bindGridMinWidth(p, {}, {});",
@@ -1162,7 +1340,14 @@ impl<'a> Generator<'a> {
                 );
             }
             "Stack" => {
-                let props = Self::props(vec![("align", Self::keyword(element, "align"))]);
+                let props = Self::props(vec![
+                    ("align", Self::keyword(element, "align")),
+                    ("enabled", self.value_prop(element, "enabled")),
+                    (
+                        "style",
+                        crate::style::reference(self.app, "Stack", element.keyword("variant")),
+                    ),
+                ]);
                 let first = self.layout_lines(element, &[("width", "width"), ("height", "height")]);
                 self.container_children(
                     out,
@@ -1172,6 +1357,92 @@ impl<'a> Generator<'a> {
                     ");",
                 );
             }
+            "Marquee" => {
+                let props = Self::props(vec![
+                    ("duration", self.length(element, "duration")),
+                    ("phase", element.number("phase").map(number)),
+                    ("paused", self.value_prop(element, "paused")),
+                    ("opacity", self.value_prop(element, "opacity")),
+                ]);
+                self.children(
+                    out,
+                    &format!("B.Marquee(p, ctx, {props}, "),
+                    &element.children,
+                    ");",
+                );
+            }
+            "ScaleBox" | "Positioned" => {
+                let props = Self::props(vec![
+                    ("width", self.length(element, "width")),
+                    ("height", self.length(element, "height")),
+                ]);
+                let first = if element.kind == "Positioned" {
+                    {
+                        let mut lines =
+                            self.layout_lines(element, &[("width", "width"), ("height", "height")]);
+                        for (name, property) in [("x", "left"), ("y", "top")] {
+                            lines.push(format!(
+                                "F.bindPosition(p, \"{property}\", {}, {});",
+                                self.length(element, name).unwrap(),
+                                self.animate(element).unwrap_or_else(|| "null".into())
+                            ));
+                        }
+                        lines
+                    }
+                } else {
+                    vec![]
+                };
+                self.container_children(
+                    out,
+                    element,
+                    &format!("B.{}(p, ctx, {props}, ", element.kind),
+                    &first,
+                    ");",
+                );
+            }
+            "Modal" | "Flow" | "Accordion" => {
+                let props = Self::props(vec![
+                    ("width", self.length(element, "width")),
+                    ("height", self.length(element, "height")),
+                    ("gap", self.length(element, "gap")),
+                    ("count", self.length(element, "count")),
+                    ("selected", self.length(element, "selected")),
+                    ("collapsedWidth", self.length(element, "collapsed_width")),
+                    ("corner", self.length(element, "corner")),
+                    ("animate", self.animate(element)),
+                ]);
+                self.children(
+                    out,
+                    &format!("B.{}(p, ctx, {props}, ", element.kind),
+                    &element.children,
+                    ");",
+                );
+            }
+            "Timer" => out.line(format!(
+                "B.Timer(p, ctx, {}, {});",
+                Self::props(vec![
+                    ("interval", element.number("interval").map(number)),
+                    ("enabled", self.value_prop(element, "enabled")),
+                ]),
+                self.action_fn(element)
+            )),
+            "Svg" => out.line(format!(
+                "F.Svg(p, ctx, {});",
+                Self::props(vec![
+                    ("source", element.resource("source").map(string)),
+                    ("label", self.text_prop(element, "label")),
+                    ("width", self.length(element, "width")),
+                    ("height", self.length(element, "height")),
+                    ("fit", Self::keyword(element, "fit")),
+                    ("playing", self.value_prop(element, "playing")),
+                    ("speed", self.value_prop(element, "speed")),
+                    ("restart", self.value_prop(element, "restart")),
+                    (
+                        "interactive",
+                        element.keyword("interactive").map(str::to_owned)
+                    ),
+                ])
+            )),
             "Image" => {
                 let url = element.expr("source").map(|expr| {
                     if matches!(expr.ty, Type::Optional { .. }) {
@@ -1190,6 +1461,9 @@ impl<'a> Generator<'a> {
                         ("height", self.length(element, "height")),
                         ("fit", Self::keyword(element, "fit")),
                         ("animate", self.animate(element)),
+                        ("corner", self.length(element, "corner")),
+                        ("rendering", Self::keyword(element, "rendering")),
+                        ("aspect", element.number("aspect").map(number)),
                     ])
                 ));
             }
@@ -1295,10 +1569,24 @@ impl<'a> Generator<'a> {
                     ");",
                 );
             }
+            "ControlGroup" => {
+                let props = Self::props(vec![
+                    ("label", self.text_prop(element, "label")),
+                    ("height", self.length(element, "height")),
+                ]);
+                self.children(
+                    out,
+                    &format!("F.ControlGroup(p, ctx, {props}, "),
+                    &element.children,
+                    ");",
+                );
+            }
             "SplitButton" => {
                 let field = self.field(element, "value");
                 let props = Self::props(vec![
                     ("id", Some(self.id(element))),
+                    ("shape", Self::keyword(element, "shape")),
+                    ("height", self.length(element, "height")),
                     ("label", self.text_prop(element, "label")),
                     ("icon", element.icon("icon").map(string)),
                     ("field", field.clone()),
@@ -1356,7 +1644,7 @@ impl<'a> Generator<'a> {
                     ");",
                 );
             }
-            "Toolbar" => self.children(out, "B.tools(ctx, ", &element.children, ");"),
+            "Toolbar" => self.toolbar(out, element),
             "SplitView" => self.split_view(out, element),
             "Navigation" => self.navigation(out, element),
             "NavLink" => {
@@ -1389,8 +1677,8 @@ impl<'a> Generator<'a> {
                     ("label", self.text_prop(element, "label")),
                 ])
             )),
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarFooter" | "WindowSet"
-            | "Window" | "Layout" | "MenuItem" => {
+            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),
@@ -1529,11 +1817,13 @@ impl<'a> Generator<'a> {
         let selection = self.field(sidebar, "selection").expect("selection field");
         let mut search = None;
         let mut footer = None;
+        let mut header = None;
         let mut content = Vec::new();
         for node in &sidebar.children {
             match node {
                 Node::Element(child) if child.kind == "Search" => search = Some(child),
                 Node::Element(child) if child.kind == "SidebarFooter" => footer = Some(child),
+                Node::Element(child) if child.kind == "SidebarHeader" => header = Some(child),
                 other => content.push(other.clone()),
             }
         }
@@ -1542,19 +1832,22 @@ impl<'a> Generator<'a> {
             out.line(format!("id: {},", self.id(sidebar)));
         }
         out.line(format!("selection: {selection},"));
+        if let Some(width) = self.length(sidebar, "width") {
+            out.line(format!("width: {width},"));
+        }
+        if let Some(titled) = self.value_prop(detail, "titled") {
+            out.line(format!("titled: {titled},"));
+        }
         if let Some(fallback) = sidebar.expr("fallback") {
             out.line(format!("fallback: {},", self.expr(fallback)));
         }
         if let Some(search) = search {
-            out.line(format!(
-                "search: (p, ctx) => B.Search(p, ctx, {}, {}),",
-                Self::props(vec![
-                    ("id", Some(self.id(search))),
-                    ("field", self.field(search, "value")),
-                    ("prompt", self.text_prop(search, "prompt")),
-                ]),
-                self.action_fn(search)
-            ));
+            out.open("search: (p, ctx) => {");
+            self.element(out, search);
+            out.close("},");
+        }
+        if let Some(header) = header {
+            self.children(out, "header: ", &header.children, ",");
         }
         if let Some(footer) = footer {
             self.children(out, "footer: ", &footer.children, ",");
@@ -1568,6 +1861,26 @@ impl<'a> Generator<'a> {
         out.indent += 1;
         self.nodes(out, &detail.children);
         out.close("});");
+    }
+
+    /// Toolbar children before the spacer occupy the leading title-bar
+    /// slot; children after it occupy the ordinary trailing slot.
+    fn toolbar(&self, out: &mut Out, element: &Element) {
+        if let Some(index) = element
+            .children
+            .iter()
+            .position(|node| matches!(node, Node::Element(child) if child.kind == "Spacer"))
+        {
+            self.children(
+                out,
+                "B.tools(ctx, ",
+                &element.children[..index],
+                ", { placement: \"leading\" });",
+            );
+            self.children(out, "B.tools(ctx, ", &element.children[index + 1..], ");");
+        } else {
+            self.children(out, "B.tools(ctx, ", &element.children, ");");
+        }
     }
 
     fn navigation(&self, out: &mut Out, element: &Element) {
@@ -1650,6 +1963,9 @@ impl<'a> Generator<'a> {
                 ("id", Some(self.id(element))),
                 ("label", self.text_prop(element, "label")),
                 ("icon", element.icon("icon").map(string)),
+                ("style", Self::keyword(element, "style")),
+                ("shape", Self::keyword(element, "shape")),
+                ("height", self.length(element, "height")),
             ])
         ));
         for node in &element.children {
@@ -1794,8 +2110,10 @@ impl<'a> Generator<'a> {
             let motion = format!("M.{}", member(&transition.motion));
             let kind = match &transition.kind {
                 bern_ir::style::TransitionKind::Fade => "{ kind: \"fade\"".to_string(),
-                // Rejected by the edge_grow capability check before generation.
-                bern_ir::style::TransitionKind::Grow { .. } => continue,
+                bern_ir::style::TransitionKind::Grow { edge } => format!(
+                    "{{ kind: \"grow\", edge: {}",
+                    string(&format!("{edge:?}").to_lowercase())
+                ),
                 bern_ir::style::TransitionKind::Pop { from } => {
                     format!("{{ kind: \"pop\", from: {}", number(*from))
                 }
@@ -2085,8 +2403,9 @@ impl<'a> Generator<'a> {
                     .as_ref()
                     .map(|expr| format!("(ctx) => ({})", self.expr(expr)))
                     .unwrap_or_else(|| "null".into());
+                let idle_enabled = window.idle_enabled.as_ref().map(|e| format!("(ctx) => ({})", self.expr(e))).unwrap_or_else(|| "null".into());
                 format!(
-                    "{{ id: {}, title: {}, presentation: \"{presentation}\", settings: {settings}, resizable: {}, width: {}, height: {}, minWidth: {}, minHeight: {}, initial: {}, render: w_{}, closeCheck: {}, idleAfter: {}, immersive: {immersive} }}",
+                    "{{ id: {}, title: {}, presentation: \"{presentation}\", settings: {settings}, resizable: {}, width: {}, height: {}, minWidth: {}, minHeight: {}, initial: {}, render: w_{}, closeCheck: {}, idleAfter: {}, idleEnabled: {idle_enabled}, immersive: {immersive} }}",
                     string(&window.id),
                     string(&window.title.key),
                     !settings,

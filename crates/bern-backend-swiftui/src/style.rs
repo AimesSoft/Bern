@@ -29,7 +29,11 @@ const ROW_STATES: &[&str] = &[
 /// their content by `BernContentButtonStyle`), sidebar rows drawn by
 /// `BernStyledRow`.
 pub const SUPPORT: &[StyleSupport] = &[
-    StyleSupport { component: "Stack", base: &["background", "foreground", "corner"], states: &[] },
+    StyleSupport {
+        component: "Stack",
+        base: &["background", "foreground", "corner"],
+        states: &[],
+    },
     StyleSupport {
         component: "Button",
         base: &[

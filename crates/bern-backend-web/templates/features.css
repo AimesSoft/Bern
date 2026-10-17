@@ -3,6 +3,30 @@
 
 /* MARK: - Drawing */
 
+.bern-sidebar-header {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 7px;
+}
+.bern-sidebar { width: var(--bern-sidebar-width, 240px); }
+@container (max-width: 767px) {
+  .bern-sidebar { width: 100%; }
+}
+.bern-sidebar-label { flex: 1; min-width: 0; }
+.bern-sidebar-badge { font-size: 12px; font-variant-numeric: tabular-nums; opacity: .75; }
+.bern-image-template {
+  display: inline-block;
+  background: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  flex-shrink: 0;
+}
+
 .bern-canvas {
   position: relative;
   min-width: 0;
@@ -26,39 +50,43 @@
 /* In a `Stack`, a layer that holds a drawing without a size fills the
    stack in that direction, as a flexible view does; other layers keep
    their own size and the stack's alignment. */
-.bern-layers > :is(.bern-fill-width, :has(.bern-fill-width)):not(.bern-sized-width) {
+.bern-layers > :is(.bern-fill-width, .bern-layout-width):not(.bern-sized-width) {
   justify-self: stretch;
   width: auto;
+  min-width: 0;
 }
 
-.bern-layers > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-sized-height) {
+.bern-layers > :is(.bern-fill-height, .bern-layout-height):not(.bern-sized-height) {
   align-self: stretch;
+  /* Let a flexible layer fit a definite grid height; its own scroll view
+     absorbs overflow instead of pushing siblings such as a footer out. */
+  min-height: 0;
 }
 
 /* In a column a child that holds such a drawing, a scroll view, a grid or
    a video is as wide as the column; in a row it takes the room left. */
-:is(.bern-vstack, .bern-detail-body, .bern-window-content, .bern-drop, .bern-gesture, .bern-inspector, .bern-popover-panel, .bern-search-results) > :is(.bern-fill-width, :has(.bern-fill-width)):not(.bern-inspector, .bern-sized-width) {
+:is(.bern-vstack, .bern-detail-body, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture, .bern-inspector, .bern-popover-panel, .bern-search-results) > :is(.bern-fill-width, .bern-layout-width):not(.bern-inspector, .bern-sized-width) {
   align-self: stretch;
   width: auto;
 }
 
-:is(.bern-detail-body, .bern-window-content, .bern-drop, .bern-gesture) > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-inspector, .bern-sized-height) {
+:is(.bern-detail-body, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture) > :is(.bern-fill-height, .bern-layout-height):not(.bern-inspector, .bern-sized-height) {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.bern-vstack > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-sized-height) {
+.bern-vstack > :is(.bern-fill-height, .bern-layout-height):not(.bern-sized-height) {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.bern-hstack > :is(.bern-fill-width, :has(.bern-fill-width)):not(.bern-sized-width) {
+.bern-hstack > :is(.bern-fill-width, .bern-layout-width):not(.bern-sized-width) {
   flex: 1 1 0;
   min-width: 0;
   width: auto;
 }
 
-.bern-hstack > :is(.bern-fill-height, :has(.bern-fill-height)):not(.bern-sized-height) {
+.bern-hstack > :is(.bern-fill-height, .bern-layout-height):not(.bern-sized-height) {
   align-self: stretch;
 }
 
@@ -463,3 +491,56 @@
 .bern-detail-body {
   overflow-x: hidden;
 }
+
+.bern-scale-box { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
+.bern-scale-scene { position: absolute; transform-origin: top left; }
+.bern-positioned { position: absolute; display: grid; min-width: 0; min-height: 0; }
+.bern-positioned > * { grid-area: 1 / 1; min-width: 0; min-height: 0; }
+
+/* A positioned layer receives an explicit size from its coordinate space. */
+.bern-positioned > :not(.bern-sized-width) { width: 100%; justify-self: stretch; }
+.bern-positioned > :not(.bern-sized-height) { height: 100%; align-self: stretch; }
+body:has(.bern-window-page.bern-immersive) .bern-appbar { display: none; }
+
+.bern-sized-width > .bern-dropdown-wrap { min-width: 0; width: 100%; }
+.bern-sized-width > .bern-dropdown-wrap > .bern-dropdown { min-width: 0; width: 100%; }
+.bern-marquee { position: relative; overflow: hidden; }
+.bern-marquee-line { position: absolute; width: max-content; white-space: nowrap; animation: bern-marquee 12s linear infinite; text-shadow: 0 1px 3px #000, 0 0 2px #000; }
+@keyframes bern-marquee { from { transform: translateX(var(--marquee-width)); } to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { .bern-marquee-line { animation: none; left: 28%; } }
+
+.bern-split-main { width: auto; gap: 6px; padding-inline: 8px; }
+.bern-marquee-line.bern-marquee-reduced { animation: none; left: 28%; }
+
+/* Shared surfaces keep related controls together without nested buttons. */
+.bern-control-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: var(--bern-group-height, 40px);
+  border-radius: 999px;
+  background: var(--bern-surface-raised);
+  border: 1px solid var(--bern-separator);
+}
+.bern-control-group > .bern-icon-button,
+.bern-control-group > .bern-popover-wrap > .bern-icon-button {
+  width: var(--bern-group-height, 40px);
+  height: var(--bern-group-height, 40px);
+  background: transparent;
+  color: var(--bern-text-primary);
+}
+.bern-control-group .bern-icon { width: 18px; height: 18px; }
+.bern-split-capsule {
+  gap: 0;
+  border-radius: 999px;
+  background: var(--bern-surface-raised);
+  border: 1px solid var(--bern-separator);
+}
+.bern-split-capsule.bern-split-selected { background: var(--bern-accent); color: var(--bern-on-accent); }
+.bern-split-capsule > .bern-icon-button {
+  height: 100%;
+  background: transparent;
+  color: inherit;
+}
+.bern-split-capsule > .bern-split-main { padding-inline: 14px; border-radius: 999px 0 0 999px; }
+.bern-split-capsule > .bern-split-more { width: 30px; border-left: 1px solid currentColor; border-radius: 0 999px 999px 0; }

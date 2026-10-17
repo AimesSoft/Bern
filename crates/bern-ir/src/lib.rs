@@ -455,6 +455,9 @@ pub struct WindowDef {
     /// Seconds without input after which `window.idle` turns true.
     #[serde(default)]
     pub idle_after: Option<f64>,
+    /// Pause the idle timer while interacting with persistent controls.
+    #[serde(default)]
+    pub idle_enabled: Option<Expr>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

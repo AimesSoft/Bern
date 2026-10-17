@@ -379,7 +379,11 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .map(|icon| format!(", icon: {icon:?}"))
                             .unwrap_or_default();
-                        let badge = page.badge.as_ref().map(|field| format!(", badge: {}.{field}", slot_client(&page.module))).unwrap_or_default();
+                        let badge = page
+                            .badge
+                            .as_ref()
+                            .map(|field| format!(", badge: {}.{field}", slot_client(&page.module)))
+                            .unwrap_or_default();
                         self.contributions.guarded(
                             &page.module,
                             format!(
@@ -885,6 +889,7 @@ impl<'a> Checker<'a> {
                 },
                 // A picture is a declared resource, or a `MediaSource`
                 // the engine gives: a file or an http(s) URL.
+                PropKind::SvgResource => self.svg_resource(&prop.value),
                 PropKind::ImageResource => match &prop.value {
                     ast::Expr::Path(_) => self.media_source(&prop.value, scope),
                     _ => self.image_resource(&prop.value),
@@ -919,7 +924,7 @@ impl<'a> Checker<'a> {
                     // progress, are lengths and amounts above zero.
                     let positive = matches!(
                         (name.as_str(), prop_name.as_str()),
-                        ("Image", "width" | "height")
+                        ("Image" | "Svg", "width" | "height")
                             | ("Grid", "min_width")
                             | ("Progress", "total")
                     );
@@ -1188,15 +1193,14 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if name == "Picker" {
-            if let Some(ir::Prop::Expr { expr }) = props.get("selected") {
-                if !is_labeled_enum(&expr.ty, self.types) {
-                    self.error(
-                        element.span,
-                        "`selected` must be an enum whose variants all have labels",
-                    );
-                }
-            }
+        if name == "Picker"
+            && let Some(ir::Prop::Expr { expr }) = props.get("selected")
+            && !is_labeled_enum(&expr.ty, self.types)
+        {
+            self.error(
+                element.span,
+                "`selected` must be an enum whose variants all have labels",
+            );
         }
         let children = match (&element.children, name.as_str()) {
             // The layouts of one `Adaptive` are alternatives: the same
@@ -1401,6 +1405,26 @@ impl<'a> Checker<'a> {
     /// `"images/cover.png"`: the name of a PNG or JPEG resource. Whether
     /// `[resources]` declares it is checked for the whole application,
     /// library components included, once the components are lowered.
+    fn svg_resource(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
+        let ast::Expr::Literal {
+            value: Literal::Text(name),
+            span,
+        } = expr
+        else {
+            self.error(expr.span(), "expected a declared .svg resource");
+            return None;
+        };
+        if let Err(message) = bern_protocol::check_resource_name(name) {
+            self.error(*span, message);
+            return None;
+        }
+        if !name.to_ascii_lowercase().ends_with(".svg") {
+            self.error(*span, "Svg requires a .svg resource");
+            return None;
+        }
+        Some(ir::Prop::Resource { name: name.clone() })
+    }
+
     fn image_resource(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
         let ast::Expr::Literal {
             value: Literal::Text(name),

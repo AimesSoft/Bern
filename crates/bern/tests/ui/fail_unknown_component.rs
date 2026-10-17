@@ -37,7 +37,7 @@ use bern::prelude::*;
 
 #[component]
 fn page(app: demo::Client) -> impl View {
-    ui! { Marquee(content: tr! { "en" => "Hi" }) }
+    ui! { UnknownWidget(content: tr! { "en" => "Hi" }) }
 }
 
 fn main() {}

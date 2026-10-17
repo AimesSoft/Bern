@@ -33,6 +33,10 @@ pub mod text;
 pub mod theme;
 pub mod value;
 mod widgets;
+#[cfg(feature = "svg")]
+mod svg;
+#[cfg(feature = "svg")]
+pub use svg::{Svg, SvgProps};
 mod windows;
 
 pub use bern_ffi;

@@ -5,8 +5,13 @@ fn scroll_tracking_batches_geometry_and_ignores_unrelated_keys() {
     use std::{path::Path, process::Command};
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let style = include_str!("../templates/BernStyle.swift");
-    let start = style.find("@MainActor\n@Observable\nfinal class BernScrollItems").unwrap();
-    let end = style[start..].find("\nprivate struct BernScrollItemsKey").unwrap() + start;
+    let start = style
+        .find("@MainActor\n@Observable\nfinal class BernScrollItems")
+        .unwrap();
+    let end = style[start..]
+        .find("\nprivate struct BernScrollItemsKey")
+        .unwrap()
+        + start;
     let output = root.join("../../target/bern-test/scroll-tracking");
     std::fs::create_dir_all(&output).unwrap();
     let source = format!(
@@ -61,8 +66,20 @@ fn scroll_tracking_batches_geometry_and_ignores_unrelated_keys() {
     std::fs::write(&file, source).unwrap();
     let result = Command::new("xcrun")
         .args(["swiftc", "-swift-version", "6", "-parse-as-library"])
-        .arg(&file).arg("-o").arg(&executable).output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        .arg(&file)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let result = Command::new(executable).output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
 }

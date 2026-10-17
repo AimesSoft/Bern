@@ -1354,6 +1354,54 @@ fn images_progress_grids_and_stacks_lower_to_ir() {
 }
 
 #[test]
+fn animated_svg_resources_and_controls_are_checked() {
+    let compile_svg = |body: &str| {
+        let dir = write_project(
+            PROTOCOL,
+            &wrap(body),
+            "\n[resources]\npaths = [\"motion.svg\"]\n",
+        );
+        std::fs::write(
+            dir.join("motion.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg"/>"#,
+        )
+        .unwrap();
+        let result = config::load(&dir.join("Bern.toml")).and_then(|c| compile(&c));
+        let _ = std::fs::remove_dir_all(dir);
+        result
+    };
+    assert!(compile_svg(r#"Svg(source: "motion.svg", width: 104, height: 104, playing: true, speed: 2, restart: app.count, interactive: false)"#).is_ok());
+    for (body, expected) in [
+        (
+            r#"Svg(source: "motion.png", width: 104, height: 104)"#,
+            "Svg requires a .svg resource",
+        ),
+        (
+            r#"Svg(source: "missing.svg", width: 104, height: 104)"#,
+            "is not declared",
+        ),
+        (
+            r#"Svg(source: "motion.svg", width: 0, height: 104)"#,
+            "must be above zero",
+        ),
+        (
+            r#"Svg(source: "motion.svg", width: 104, height: 104, playing: 3)"#,
+            "bool",
+        ),
+        (
+            r#"Svg(source: app.title, width: 104, height: 104)"#,
+            "declared .svg resource",
+        ),
+    ] {
+        let errors = compile_svg(body).err().unwrap();
+        assert!(
+            errors.iter().any(|e| e.message.contains(expected)),
+            "{errors:?}"
+        );
+    }
+}
+
+#[test]
 fn image_and_progress_diagnostics() {
     let cases = [
         (
@@ -2359,11 +2407,50 @@ fn style_rules_are_lowered_and_checked() {
 fn controlled_settings_reject_ambiguous_sources_and_non_enum_selections() {
     let label = r#"tr! { "en" => "Preference", "ja" => "設定" }"#;
     for (body, message) in [
-        (format!("Switch(id: flag, label: {label}, checked: true)"), "needs an action"),
-        (format!("Switch(id: flag, label: {label}, checked: true, value: draft.on) => app.add(1)"), "exactly one"),
-        (format!("Picker(id: mode, label: {label}, selected: app.count) => app.add(1)"), "enum"),
+        (
+            format!("Switch(id: flag, label: {label}, checked: true)"),
+            "needs an action",
+        ),
+        (
+            format!(
+                "Switch(id: flag, label: {label}, checked: true, value: draft.on) => app.add(1)"
+            ),
+            "exactly one",
+        ),
+        (
+            format!("Picker(id: mode, label: {label}, selected: app.count) => app.add(1)"),
+            "enum",
+        ),
     ] {
         assert!(errors(&body).contains(message), "{}", errors(&body));
     }
     compile_ui(&wrap(&format!("Column {{ Switch(id: flag, label: {label}, checked: true) => app.add(1) Picker(id: mode, label: {label}, selected: app.mode) => app.add(1) }}"))).unwrap();
+}
+
+#[test]
+fn player_scene_and_controlled_slider_validate_sources() {
+    let label = r#"tr! { "en" => "Position", "ja" => "位置" }"#;
+    for (body, message) in [
+        (
+            format!("Slider(id: position, label: {label}, current: app.count, min: 0, max: 100)"),
+            "needs an action",
+        ),
+        (
+            format!(
+                "Slider(id: position, label: {label}, current: app.count, value: draft.size, min: 0, max: 100) => app.add(app.count)"
+            ),
+            "exactly one",
+        ),
+    ] {
+        assert!(errors(&body).contains(message), "{}", errors(&body));
+    }
+    let body = format!(
+        r#"ScaleBox(width: 1280, height: 800) {{
+        Positioned(x: -68, y: 14, width: 54, height: 16) {{
+            Text(content: app.title, style: caption, font_size: if draft.on {{ 20 }} else {{ 30 }})
+        }}
+        Slider(id: position, label: {label}, current: app.count, min: 0, max: 100) => app.add(app.count)
+    }}"#
+    );
+    compile_ui(&wrap(&body)).unwrap();
 }

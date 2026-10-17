@@ -256,6 +256,7 @@ impl Target for GtkLinux {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let executable = executable(app);
         let mut files = vec![

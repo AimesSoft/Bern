@@ -6,10 +6,13 @@ fn accordion_preserves_bounds_and_gaps_during_springs_and_interruptions() {
     let style = include_str!("../templates/BernStyle.swift");
     let start = style.find("struct BernAccordionWeights:").unwrap();
     let end = style.find("private struct BernAccordionLayout:").unwrap();
-    let output = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/bern-test/accordion-layout");
+    let output =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/bern-test/accordion-layout");
     std::fs::create_dir_all(&output).unwrap();
-    let source = format!("import SwiftUI\n{}\n{}", &style[start..end], r#"
+    let source = format!(
+        "import SwiftUI\n{}\n{}",
+        &style[start..end],
+        r#"
 func selected(_ day: Int) -> BernAccordionWeights {
     BernAccordionWeights(values: (0..<7).map { $0 == day ? 1 : 0 })
 }
@@ -49,14 +52,27 @@ func check(_ weights: BernAccordionWeights, total: Double) {
         precondition(BernAccordionGeometry.widths(total: 100, collapsedWidth: 86, gap: 8, weights: []).isEmpty)
     }
 }
-"#);
+"#
+    );
     let file = output.join("main.swift");
     let executable = output.join("accordion-layout");
     std::fs::write(&file, source).unwrap();
     let result = Command::new("xcrun")
         .args(["swiftc", "-swift-version", "6", "-parse-as-library"])
-        .arg(&file).arg("-o").arg(&executable).output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        .arg(&file)
+        .arg("-o")
+        .arg(&executable)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let result = Command::new(executable).output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
 }

@@ -1,0 +1,34 @@
+[app]
+id = "svg_demo"
+bundle_id = "dev.bern.svgdemo"
+version = "0.1.0"
+name = { "en" = "SVG Animation" }
+[languages]
+supported = ["en"]
+default = "en"
+[protocol]
+package = "svg-demo-protocol"
+source = "svg-demo-protocol/src/lib.rs"
+[engine]
+package = "svg-demo-core"
+type = "svg_demo_core::SvgEngine"
+[ui]
+package = "svg-demo-ui"
+sources = ["svg-demo-ui/src/lib.rs"]
+root = "app"
+[resources]
+paths = ["animation.svg"]
+[targets.macos]
+platform = "macos"
+[targets.ios]
+platform = "ios"
+[targets.windows]
+platform = "windows"
+[targets.linux]
+platform = "linux"
+[targets.android]
+platform = "android"
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"

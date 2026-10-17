@@ -24,7 +24,7 @@ bern: create, check, build and run Bern applications
 Usage:
   bern new <path> [--bundle-id ID] [--languages LIST] [--bern-path DIR]
   bern new --module <id> [--manifest PATH]
-  bern run    [--manifest PATH] [--target NAME] [--release]
+  bern run    [--manifest PATH] [--target NAME] [--release] [--port PORT]
   bern build  [--manifest PATH] [--target NAME] [--release]
   bern package [--manifest PATH] [--target NAME]
   bern check  [--manifest PATH] [--target NAME]
@@ -45,6 +45,8 @@ Options:
   --manifest   Path to Bern.toml (default: search from the current directory)
   --target     Target name from [targets.<name>]
   --release    Optimized build
+  --port       Local HTTP port, 1–65535, for browser app runs;
+               omitted: choose a free port (a fixed port preserves browser storage)
   --bundle-id  Reverse-DNS bundle id (default: com.example.<name>)
   --languages  Languages, comma-separated, the default first (default: en,zh-Hans;
                the template has text in en, zh-Hans, zh-Hant and ja)
@@ -66,6 +68,7 @@ struct Options {
     manifest: Option<PathBuf>,
     target: Option<String>,
     release: bool,
+    port: Option<u16>,
     bundle_id: Option<String>,
     languages: Option<Vec<String>>,
     bern_path: Option<PathBuf>,
@@ -90,7 +93,8 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
             "--module",
             "--manifest",
         ],
-        "run" | "build" => &["--manifest", "--target", "--release"],
+        "run" => &["--manifest", "--target", "--release", "--port"],
+        "build" => &["--manifest", "--target", "--release"],
         "package" => &["--manifest", "--target"],
         "check" => &["--manifest", "--target"],
         "doctor" | "ir" => &["--manifest"],
@@ -112,6 +116,15 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
             "--manifest" => options.manifest = Some(value()?.into()),
             "--target" => options.target = Some(value()?),
             "--release" => options.release = true,
+            "--port" => {
+                options.port = Some(
+                    value()?
+                        .parse::<u16>()
+                        .ok()
+                        .filter(|port| *port > 0)
+                        .ok_or("--port must be an integer from 1 to 65535")?,
+                );
+            }
             "--bundle-id" => options.bundle_id = Some(value()?),
             "--languages" => {
                 options.languages = Some(
@@ -862,6 +875,13 @@ fn build(options: &Options) -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
+        if options.command == "run"
+            && let Some(run) = &plan.run
+            && let Err(message) = run::validate_port(run, options.port)
+        {
+            eprintln!("error: {message}");
+            return ExitCode::FAILURE;
+        }
         if !run_steps(&plan.steps) {
             return ExitCode::FAILURE;
         }
@@ -890,7 +910,7 @@ fn build(options: &Options) -> ExitCode {
                 eprintln!("error: `{}` builds nothing to start", descriptor.id);
                 return ExitCode::FAILURE;
             };
-            return match run::start(run) {
+            return match run::start(run, options.port) {
                 Ok(code) => code,
                 Err(message) => {
                     eprintln!("error: {message}");
@@ -1034,5 +1054,32 @@ mod tests {
                 .contains("needs a value")
         );
         assert!(parsed(&["deploy"]).unwrap_err().contains("unknown command"));
+    }
+
+    #[test]
+    fn web_run_port_is_optional_nonzero_and_run_only() {
+        assert_eq!(parsed(&["run"]).unwrap().port, None);
+        for (value, port) in [("1", 1), ("4173", 4173), ("65535", 65535)] {
+            assert_eq!(parsed(&["run", "--port", value]).unwrap().port, Some(port));
+        }
+        for value in ["0", "-1", "65536", "abc", "4.2"] {
+            assert!(
+                parsed(&["run", "--port", value])
+                    .unwrap_err()
+                    .contains("1 to 65535")
+            );
+        }
+        assert!(
+            parsed(&["run", "--port"])
+                .unwrap_err()
+                .contains("needs a value")
+        );
+        for command in ["build", "check", "package", "doctor"] {
+            assert!(
+                parsed(&[command, "--port", "4173"])
+                    .unwrap_err()
+                    .contains("does not take `--port`")
+            );
+        }
     }
 }

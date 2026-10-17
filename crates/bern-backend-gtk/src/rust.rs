@@ -953,6 +953,17 @@ impl<'a> Generator<'a> {
                 element,
                 ");",
             ),
+            "Svg" => out.line(format!(
+                "b::Svg(p, c, b::SvgProps {{ source: {}, label: {}, width: {}, height: {}, fit: {}, playing: {}, speed: {}, restart: {}, interactive: {} }});",
+                string(element.resource("source").unwrap_or_default()),
+                some(self.text_prop(element, "label")),
+                some(self.num(element, "width")), some(self.num(element, "height")),
+                Self::keyword(element, "fit"),
+                some(element.expr("playing").map(|e| self.getter(e))),
+                some(element.expr("speed").map(|e| self.getter(e))),
+                some(element.expr("restart").map(|e| self.getter(e))),
+                element.keyword("interactive").unwrap_or("true"),
+            )),
             "Image" => match element.expr("source") {
                 Some(source) => out.line(format!(
                     "b::RuntimeImage(p, c, b::RuntimeImageProps {{ url: {}, label: {}, width: {}, height: {}, fit: {}, animate: {} }});",

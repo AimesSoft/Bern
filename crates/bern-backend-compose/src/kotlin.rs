@@ -1563,6 +1563,29 @@ impl<'a> Generator<'a> {
                 self.nodes(out, &element.children, &placed);
                 out.close("}");
             }
+            "Svg" => {
+                let value = |name, default: &str| {
+                    element
+                        .expr(name)
+                        .map(|e| self.expr(e))
+                        .unwrap_or_else(|| default.into())
+                };
+                out.line(format!(
+                    "BernSvg({}, {}, {}, {}, {}, {}, ({}).toDouble(), ({}).toDouble(), {})",
+                    string(element.resource("source").unwrap_or_default()),
+                    self.text_prop(element, "label")
+                        .unwrap_or_else(|| "null".into()),
+                    self.length(element, "width")
+                        .unwrap_or_else(|| "0.dp".into()),
+                    self.length(element, "height")
+                        .unwrap_or_else(|| "0.dp".into()),
+                    string(element.keyword("fit").unwrap_or("contain")),
+                    value("playing", "true"),
+                    value("speed", "1"),
+                    value("restart", "0"),
+                    element.keyword("interactive").unwrap_or("true"),
+                ));
+            }
             "Image" => {
                 let length = |name| self.length(element, name).unwrap_or_else(|| "null".into());
                 let fit = match element.keyword("fit") {

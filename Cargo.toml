@@ -9,6 +9,7 @@ members = [
     "crates/bern-command",
     "crates/bern-media",
     "crates/bern-image",
+    "crates/bern-svg",
     "crates/bern-runtime",
     "crates/bern-theme",
     "crates/bern-adapter-json",
@@ -34,6 +35,9 @@ members = [
     "examples/hello/hello-protocol",
     "examples/hello/hello-core",
     "examples/hello/hello-ui",
+    "examples/svg-animation/svg-demo-protocol",
+    "examples/svg-animation/svg-demo-core",
+    "examples/svg-animation/svg-demo-ui",
     "examples/planner/planner-protocol",
     "examples/planner/planner-core",
     "examples/planner/planner-ui",
@@ -62,6 +66,7 @@ bern-ir = { path = "crates/bern-ir" }
 bern-command = { path = "crates/bern-command" }
 bern-media = { path = "crates/bern-media" }
 bern-image = { path = "crates/bern-image" }
+bern-svg = { path = "crates/bern-svg" }
 bern-runtime = { path = "crates/bern-runtime" }
 bern-theme = { path = "crates/bern-theme" }
 bern-target-api = { path = "crates/bern-target-api" }

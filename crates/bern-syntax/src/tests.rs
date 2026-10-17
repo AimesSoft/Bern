@@ -3,7 +3,8 @@ use quote::quote;
 
 #[test]
 fn media_source_used_only_by_an_event_is_registered() {
-    let items = parse_source_file(r#"
+    let items = parse_source_file(
+        r#"
         #[bern::protocol(namespace = "downloads", version = 1)]
         pub mod downloads {
             #[state]
@@ -13,10 +14,17 @@ fn media_source_used_only_by_an_event_is_registered() {
             #[events]
             pub trait Events { fn playing(&self, source: MediaSource); }
         }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
     let descriptor = lower::protocol_descriptor(&items.protocols[0].1).unwrap();
     assert!(descriptor.types.record_def("MediaSource").is_some());
-    assert_eq!(descriptor.events[0].params[0].ty, bern_protocol::Type::Record { name: "MediaSource".into() });
+    assert_eq!(
+        descriptor.events[0].params[0].ty,
+        bern_protocol::Type::Record {
+            name: "MediaSource".into()
+        }
+    );
 }
 
 #[test]

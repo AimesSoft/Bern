@@ -8,6 +8,13 @@
 #pragma once
 
 #include "bern_base.h"
+#define BERN_WITH_SVG /*bern:svg-enabled*/
+#if BERN_WITH_SVG
+#include <WebView2.h>
+#include <wrl.h>
+#include <winrt/Microsoft.Web.WebView2.Core.h>
+#pragma comment(lib, "WebView2LoaderStatic.lib")
+#endif
 
 #include <d2d1_3.h>
 #include <d2d1effects_2.h>
@@ -109,6 +116,9 @@ constexpr bool kWinUI = true;
 #include "bern_ui_motion.inl"
 #include "bern_ui_drawing.inl"
 #include "bern_ui_widgets.inl"
+#if BERN_WITH_SVG
+#include "bern_ui_svg.inl"
+#endif
 #include "bern_ui_structure.inl"
 #include "bern_ui_features.inl"
 #include "bern_ui_windows.inl"
@@ -125,6 +135,9 @@ constexpr bool kWinUI = false;
 #include "bern_ui_motion.inl"
 #include "bern_ui_drawing.inl"
 #include "bern_ui_widgets.inl"
+#if BERN_WITH_SVG
+#include "bern_ui_svg.inl"
+#endif
 #include "bern_ui_structure.inl"
 #include "bern_ui_features.inl"
 #include "bern_ui_windows.inl"

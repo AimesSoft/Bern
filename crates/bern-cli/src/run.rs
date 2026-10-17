@@ -6,7 +6,8 @@ use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 
 /// Start the built application and wait until it ends.
-pub fn start(run: &Run) -> Result<ExitCode, String> {
+pub fn start(run: &Run, port: Option<u16>) -> Result<ExitCode, String> {
+    validate_port(run, port)?;
     match run {
         Run::Program(program) => {
             eprintln!("    \x1b[1;32mRunning\x1b[0m {}", program.display());
@@ -15,7 +16,7 @@ pub fn start(run: &Run) -> Result<ExitCode, String> {
                 .map_err(|error| format!("cannot start {}: {error}", program.display()))?;
             Ok(exit_code(status.code()))
         }
-        Run::Page(root) => serve(root),
+        Run::Page(root) => serve(root, port),
         Run::PageHost(program) => host(program),
         Run::Simulator { app, bundle_id } => simulator(app, bundle_id),
         Run::Android {
@@ -25,6 +26,14 @@ pub fn start(run: &Run) -> Result<ExitCode, String> {
             forward,
         } => android(apk, package, adb, forward.as_ref()),
     }
+}
+
+/// Reject a page-only option before building or starting a native host.
+pub fn validate_port(run: &Run, port: Option<u16>) -> Result<(), String> {
+    if port.is_some() && !matches!(run, Run::Page(_)) {
+        return Err("--port is only available for browser targets with web_mode = \"app\"".into());
+    }
+    Ok(())
 }
 
 /// Install the APK on the one Android device `adb` reaches, start it, and
@@ -142,8 +151,8 @@ fn exit_code(code: Option<i32>) -> ExitCode {
 }
 
 /// Serve a page whose engine runs in the page until Ctrl-C.
-fn serve(root: &Path) -> Result<ExitCode, String> {
-    let server = bern_transport_ws::FileServer::start(root.to_path_buf(), 0)
+fn serve(root: &Path, port: Option<u16>) -> Result<ExitCode, String> {
+    let server = bern_transport_ws::FileServer::start(root.to_path_buf(), port.unwrap_or(0))
         .map_err(|error| format!("cannot serve {}: {error}", root.display()))?;
     let url = server.url();
     eprintln!("    \x1b[1;32mServing\x1b[0m {} at {url}", root.display());
@@ -267,5 +276,25 @@ fn open_browser(url: &str) {
         .is_ok_and(|status| status.success());
     if !opened {
         eprintln!("             open {url} in a browser");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_port_only_applies_to_pages() {
+        assert!(validate_port(&Run::Page("page".into()), Some(4173)).is_ok());
+        for run in [Run::Program("app".into()), Run::PageHost("host".into())] {
+            assert!(validate_port(&run, None).is_ok());
+            assert!(
+                validate_port(&run, Some(4173))
+                    .unwrap_err()
+                    .contains("web_mode = \"app\"")
+            );
+            // Invalid options fail before the nonexistent program is started.
+            assert!(start(&run, Some(4173)).unwrap_err().contains("--port"));
+        }
     }
 }

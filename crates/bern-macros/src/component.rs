@@ -648,6 +648,16 @@ impl<'a> Gen<'a> {
                     }
                     other => self.error(other.span(), "expected an icon name literal"),
                 },
+                PropKind::SvgResource => match &prop.value {
+                    Expr::Literal { value: Literal::Text(name), span } => {
+                        if let Err(message) = bern_protocol::check_resource_name(name) {
+                            self.error(*span, message);
+                        } else if !name.to_ascii_lowercase().ends_with(".svg") {
+                            self.error(*span, "Svg requires a .svg resource");
+                        }
+                    }
+                    other => self.error(other.span(), "expected a declared .svg resource"),
+                },
                 PropKind::ImageResource => match &prop.value {
                     Expr::Literal {
                         value: Literal::Text(name),

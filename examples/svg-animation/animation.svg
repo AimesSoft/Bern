@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280">
+<style>
+.orbit { transform-origin: 140px 140px; animation: turn 4s linear infinite; }
+.ball { fill: #e94476; transition: fill .3s; }
+.alternate .ball { fill: #8065e8; }
+@keyframes turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .orbit { animation: none; } }
+</style>
+<defs><radialGradient id="g"><stop stop-color="#b1c5ff"/><stop offset="1" stop-color="#596bdc"/></radialGradient></defs>
+<circle cx="140" cy="140" r="95" fill="none" stroke="#8b96b1" stroke-width="2"/>
+<g class="orbit"><circle class="ball" cx="140" cy="45" r="18"/></g>
+<circle cx="140" cy="140" r="38" fill="url(#g)"><animate attributeName="r" values="30;50;30" dur="2s" repeatCount="indefinite"/></circle>
+<script><![CDATA[
+const svg = document.currentScript.ownerSVGElement;
+svg.addEventListener('dblclick', () => svg.classList.toggle('alternate'));
+]]></script>
+</svg>

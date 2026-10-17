@@ -36,6 +36,11 @@ const ROW_STATES: &[&str] = &[
 /// CSS, their transforms moved by springs.
 pub const SUPPORT: &[StyleSupport] = &[
     StyleSupport {
+        component: "Stack",
+        base: &["background", "foreground", "corner"],
+        states: &[],
+    },
+    StyleSupport {
         component: "Button",
         base: &[
             "background",

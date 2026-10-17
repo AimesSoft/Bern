@@ -168,6 +168,7 @@ impl Target for ComposeAndroid {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let package = names::package(&app.app.bundle_id);
         let main = PathBuf::from("project/app/src/main");
@@ -219,6 +220,12 @@ impl Target for ComposeAndroid {
                 GeneratedFile::text("tools/src/cli.rs", glue::cli_rs(context, app)),
                 GeneratedFile::text("tools/src/mcp.rs", glue::mcp_rs(context, app)),
             ]);
+        }
+        if bern_target_api::svg::used(app) {
+            files.push(GeneratedFile::text(
+                sources.join("dev/bern/runtime/BernSvg.kt"),
+                bern_target_api::svg::template(include_str!("../templates/BernSvg.kt"), true),
+            ));
         }
         let lock = context.workspace_dir.join("Cargo.lock");
         if let Ok(contents) = std::fs::read(&lock) {
@@ -354,6 +361,10 @@ impl Target for ComposeAndroid {
             ]
             .iter()
             .map(|name| PathBuf::from(format!("dev/bern/runtime/{name}.kt")))
+            .chain(
+                bern_target_api::svg::used(app)
+                    .then(|| PathBuf::from("dev/bern/runtime/BernSvg.kt")),
+            )
             .chain([PathBuf::from(package.replace('.', "/")).join("BernGenerated.kt")])
             .collect(),
         };

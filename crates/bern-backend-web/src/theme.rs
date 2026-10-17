@@ -145,6 +145,39 @@ pub fn stylesheet(app: &Application) -> String {
         let scope = format!(":root[data-bern-accent=\"{}\"]", accent.name.to_lowercase());
         Set::new(light, dark).rules(&mut css, &scope, app.theme.mode);
     }
+    css.push_str(&text_styles(&app.style.text_weights));
+    css
+}
+
+/// App typography wins over the default type scale in `bern.css`, even
+/// though the theme stylesheet loads first. Keep overrides scoped to the
+/// Bern host so embedded pages retain their own typography.
+fn text_styles(styles: &[bern_ir::style::TextWeight]) -> String {
+    let mut css = String::new();
+    for style in styles {
+        let weight = match style.weight.as_str() {
+            "ultralight" => 100,
+            "thin" => 200,
+            "light" => 300,
+            "regular" => 400,
+            "medium" => 500,
+            "semibold" => 600,
+            "bold" => 700,
+            "heavy" => 800,
+            "black" => 900,
+            _ => continue,
+        };
+        css.push_str(&format!(
+            ".bern-host .bern-{} {{\n  font-weight: {weight};\n",
+            style.style.replace('_', "-")
+        ));
+        if let Some(size) = style.size {
+            css.push_str(&format!(
+                "  font-size: calc({size}px + var(--bern-text-up));\n  line-height: 1.3;\n"
+            ));
+        }
+        css.push_str("}\n");
+    }
     css
 }
 
@@ -164,4 +197,73 @@ pub fn problems(app: &Application) -> Vec<String> {
         }
     }
     problems
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bern_ir::style::TextWeight;
+
+    #[test]
+    fn typography_uses_css_weights_and_preserves_optional_sizes() {
+        let css = text_styles(&[
+            TextWeight {
+                style: "large_title".into(),
+                weight: "bold".into(),
+                size: Some(30.0),
+            },
+            TextWeight {
+                style: "headline".into(),
+                weight: "semibold".into(),
+                size: None,
+            },
+            TextWeight {
+                style: "caption".into(),
+                weight: "medium".into(),
+                size: Some(11.5),
+            },
+        ]);
+        assert!(css.contains(".bern-host .bern-large-title {\n  font-weight: 700;"));
+        assert!(css.contains("font-size: calc(30px + var(--bern-text-up));"));
+        assert!(css.contains(".bern-host .bern-headline {\n  font-weight: 600;\n}"));
+        assert!(css.contains("font-size: calc(11.5px + var(--bern-text-up));"));
+    }
+
+    #[test]
+    fn neutral_sidebar_fills_keep_readable_text_across_accents_and_appearances() {
+        // Exercise the same tokens to which fill.subtle/strong map on the
+        // Web, not the accent pairing used by the default selected row.
+        for seed in [
+            None,
+            Some(Srgb::new(0xFF, 0x2E, 0x55)),
+            Some(Srgb::new(0x2A, 0x51, 0xD4)),
+            Some(Srgb::new(0x00, 0xB8, 0x6B)),
+            Some(Srgb::new(0x07, 0xFF, 0x94)),
+        ] {
+            for mode in [Mode::Light, Mode::Dark] {
+                for policy in [ContrastPolicy::Standard, ContrastPolicy::More] {
+                    let snapshot = generate(seed, mode, policy);
+                    let text = snapshot.token("text.primary").unwrap();
+                    let minimum = if policy == ContrastPolicy::More {
+                        7.0
+                    } else {
+                        4.5
+                    };
+                    for background in [
+                        "hover.overlay",
+                        "pressed.overlay",
+                        "surface.canvas",
+                        "surface.panel",
+                        "surface.raised",
+                    ] {
+                        let ratio = bern_theme::contrast(text, snapshot.token(background).unwrap());
+                        assert!(
+                            ratio >= minimum,
+                            "{seed:?} {mode:?} {policy:?}: text.primary on {background} = {ratio}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

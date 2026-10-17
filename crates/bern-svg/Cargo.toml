@@ -1,0 +1,10 @@
+[package]
+name = "bern-svg"
+description = "Bern's portable animated SVG document runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+roxmltree = "0.21"

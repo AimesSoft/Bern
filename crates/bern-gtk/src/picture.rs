@@ -67,7 +67,7 @@ glib::wrapper! {
 
 impl Frame {
     /// A frame of `width` by `height` holding `picture`.
-    pub fn new(picture: &gtk::Picture, width: i32, height: i32) -> Self {
+    pub fn new(picture: &impl IsA<gtk::Widget>, width: i32, height: i32) -> Self {
         let frame: Self = glib::Object::new();
         frame.imp().width.set(width.max(0));
         frame.imp().height.set(height.max(0));

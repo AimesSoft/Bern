@@ -1,0 +1,11 @@
+[package]
+name = "svg-demo-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+svg-demo-protocol = { path = "../svg-demo-protocol" }

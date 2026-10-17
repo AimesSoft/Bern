@@ -62,6 +62,28 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::RAILS,
     bern_target_api::feature::POPOVER_BUTTON,
     bern_target_api::feature::SIZE_CLASSES,
+    bern_target_api::feature::TEXT_WEIGHTS,
+    bern_target_api::feature::IMAGE_CORNERS,
+    bern_target_api::feature::SIDEBAR_WIDTH,
+    bern_target_api::feature::IMAGE_TEMPLATE,
+    bern_target_api::feature::PAGE_BADGES,
+    bern_target_api::feature::EDGE_GROW,
+    bern_target_api::feature::DELAYED_APPEAR,
+    bern_target_api::feature::AXIS_PADDING,
+    bern_target_api::feature::SIDEBAR_HEADER,
+    bern_target_api::feature::UNTITLED_DETAIL,
+    bern_target_api::feature::TEXT_LINES,
+    bern_target_api::feature::CONTROLLED_VALUES,
+    bern_target_api::feature::SEARCH_PALETTE,
+    bern_target_api::feature::ADAPTIVE_IMAGES,
+    bern_target_api::feature::ACCORDION_LAYOUT,
+    bern_target_api::feature::SCALED_SCENE,
+    bern_target_api::feature::CAPSULE_CONTROLS,
+    bern_target_api::feature::MODAL_FLOW_TIMER,
+    bern_target_api::feature::TOOLBAR_LEADING,
+    bern_target_api::feature::ICON_MENUS,
+    bern_target_api::feature::ICON_LABELS,
+    bern_target_api::feature::ROW_BASELINE,
 ];
 
 fn component_names() -> &'static [&'static str] {
@@ -228,6 +250,10 @@ impl Target for WebBrowser {
                 "scroll_opacity",
                 "nudge",
                 "stagger",
+                "appear_delay",
+                "nudge_key",
+                "nudge_scale",
+                "reduce_motion",
             ],
             window_chrome: true,
             text_marks: true,
@@ -349,6 +375,7 @@ impl Target for WebBrowser {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        bern_target_api::svg::validate(app, context)?;
         let strings = strings::tables(app);
         let remote = context.target.web_mode.as_deref() == Some("ui");
         let version = build_version();
@@ -360,7 +387,15 @@ impl Target for WebBrowser {
             // both share one runtime.
             GeneratedFile::text(
                 "features.js",
-                FEATURE_RUNTIME.replace("__BERN_VERSION__", &version),
+                format!(
+                    "{}{}",
+                    FEATURE_RUNTIME.replace("__BERN_VERSION__", &version),
+                    if bern_target_api::svg::used(app) {
+                        bern_target_api::svg::template(include_str!("../templates/svg.js"), false)
+                    } else {
+                        String::new()
+                    }
+                ),
             ),
             GeneratedFile::text("bern.css", format!("{STYLES}\n{FEATURE_STYLES}")),
             GeneratedFile::text("theme.css", theme::stylesheet(app)),

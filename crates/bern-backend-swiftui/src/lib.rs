@@ -75,6 +75,7 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::IMAGE_TEMPLATE,
     bern_target_api::feature::ADAPTIVE_IMAGES,
     bern_target_api::feature::ACCORDION_LAYOUT,
+    bern_target_api::feature::SCALED_SCENE,
     bern_target_api::feature::CAPSULE_CONTROLS,
     bern_target_api::feature::MODAL_FLOW_TIMER,
     bern_target_api::feature::PAGE_BADGES,
@@ -102,6 +103,16 @@ pub(crate) fn runtime_source(template: &str) -> String {
         })
         .collect();
     template.replace("/*bern:file-extensions*/", &table.join(", "))
+}
+pub(crate) fn runtime_with_svg(app: &Application, source: &str) -> String {
+    let mut source = runtime_source(source);
+    if bern_target_api::svg::used(app) {
+        source.push_str(&bern_target_api::svg::template(
+            include_str!("../templates/BernSvg.swift"),
+            false,
+        ));
+    }
+    source
 }
 const MEDIA: &str = include_str!("../templates/BernMedia.swift");
 const STYLE: &str = include_str!("../templates/BernStyle.swift");
@@ -149,8 +160,15 @@ impl Target for SwiftUiMacos {
             text_marks: true,
             dynamic_items: true,
             features: {
-                static FEATURES_WITH_PALETTE: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-                FEATURES_WITH_PALETTE.get_or_init(|| FEATURES.iter().copied().chain([bern_target_api::feature::SEARCH_PALETTE]).collect())
+                static FEATURES_WITH_PALETTE: std::sync::OnceLock<Vec<&'static str>> =
+                    std::sync::OnceLock::new();
+                FEATURES_WITH_PALETTE.get_or_init(|| {
+                    FEATURES
+                        .iter()
+                        .copied()
+                        .chain([bern_target_api::feature::SEARCH_PALETTE])
+                        .collect()
+                })
             },
             id: "swiftui-macos",
             ui: "swiftui",
@@ -202,10 +220,14 @@ impl Target for SwiftUiMacos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
         let mut files = vec![
-            GeneratedFile::text("Sources/BernRuntime.swift", crate::runtime_source(RUNTIME)),
+            GeneratedFile::text(
+                "Sources/BernRuntime.swift",
+                crate::runtime_with_svg(app, RUNTIME),
+            ),
             GeneratedFile::text("Sources/BernMedia.swift", MEDIA),
             GeneratedFile::text("Sources/BernStyle.swift", STYLE),
             GeneratedFile::text("Sources/BernAppKit.swift", APPKIT),
@@ -722,13 +744,20 @@ pub(crate) fn check_swiftui(
                     .at(element.source.clone()),
                 );
             }
-            if element.kind == "Search" && element.keyword("style") == Some("palette")
+            if element.kind == "Search"
+                && element.keyword("style") == Some("palette")
                 && (platform == Platform::Ios || parent != Some("Toolbar"))
             {
-                diagnostics.push(Diagnostic::error("search palettes require a macOS Toolbar").at(element.source.clone()));
+                diagnostics.push(
+                    Diagnostic::error("search palettes require a macOS Toolbar")
+                        .at(element.source.clone()),
+                );
             }
             if element.kind == "SearchItem" && platform == Platform::Ios {
-                diagnostics.push(Diagnostic::error("SearchItem requires a macOS search palette").at(element.source.clone()));
+                diagnostics.push(
+                    Diagnostic::error("SearchItem requires a macOS search palette")
+                        .at(element.source.clone()),
+                );
             }
             if element.kind == "Picker"
                 && let Some(field) = element.field("value")

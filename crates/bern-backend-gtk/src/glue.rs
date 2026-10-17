@@ -38,7 +38,7 @@ name = "{executable}-mcp"
 path = "src/mcp.rs"
 
 [dependencies]
-bern-gtk = {{ {gtk} }}
+bern-gtk = {{ {gtk}{svg} }}
 bern-ffi = {{ {ffi}{ipc} }}
 bern-adapter-cli = {{ {cli_adapter} }}
 bern-adapter-mcp = {{ {mcp_adapter} }}
@@ -52,6 +52,11 @@ panic = "unwind"
 "#,
         version = app.app.version,
         gtk = bern("bern-gtk"),
+        svg = if bern_target_api::svg::used(app) {
+            ", features = [\"svg\"]"
+        } else {
+            ""
+        },
         ffi = bern("bern-ffi"),
         ipc = if context
             .target
@@ -191,6 +196,9 @@ pub fn debian_control(
         .unwrap_or_else(|| format!("{name} maintainers"));
     let mut depends = vec!["libgtk-4-1 (>= 4.14)", "libadwaita-1-0 (>= 1.5)"];
     let mut extra = String::new();
+    if bern_target_api::svg::used(app) {
+        depends.push("libwebkitgtk-6.0-4");
+    }
     if app.uses_media() {
         depends.extend(["libgtk-4-media-gstreamer", "gstreamer1.0-plugins-good"]);
         extra.push_str("Recommends: gstreamer1.0-libav\n");

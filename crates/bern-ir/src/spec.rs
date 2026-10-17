@@ -21,6 +21,8 @@ pub enum PropKind {
     /// Name literal of a declared image resource (PNG or JPEG), such as
     /// `"images/cover.png"`.
     ImageResource,
+    /// A bundled SVG document, with CSS/SMIL and document-local scripts.
+    SvgResource,
     /// Numeric literal in logical units.
     Number,
     /// A keyboard shortcut literal such as `"cmd+k"`, `"space"` or
@@ -464,6 +466,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("chrome", PropKind::Keyword(&["standard", "unified"])),
                 opt("immersive", PropKind::Bool),
                 opt("idle_after", PropKind::Number),
+                opt("idle_enabled", PropKind::Bool),
             ],
             Children::One,
             "Logical window with its own identity and state; `confirm_close` asks before closing, and the action saves",
@@ -542,8 +545,42 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Layers on top of each other, later children above earlier ones; as large as the largest unless `width` or `height` says",
     ),
     spec(
+        "Marquee",
+        &[
+            req("duration", PropKind::Length),
+            opt("phase", PropKind::Number),
+            opt("paused", PropKind::Bool),
+            opt("opacity", PropKind::NumberValue),
+        ],
+        Children::Any,
+        "A clipped horizontal scrolling line; the renderer owns its clock and pause state",
+    ),
+    spec(
+        "ScaleBox",
+        &[
+            req("width", PropKind::Length),
+            req("height", PropKind::Length),
+        ],
+        Children::Any,
+        "A fixed logical coordinate space, uniformly fitted and centered in the available size",
+    ),
+    spec(
+        "Positioned",
+        &[
+            req("x", PropKind::Length),
+            req("y", PropKind::Length),
+            req("width", PropKind::Length),
+            req("height", PropKind::Length),
+        ],
+        Children::Any,
+        "A layer positioned from the top leading corner of its containing coordinate space",
+    ),
+    spec(
         "Modal",
-        &[opt("width", PropKind::Length), opt("height", PropKind::Length)],
+        &[
+            opt("width", PropKind::Length),
+            opt("height", PropKind::Length),
+        ],
         Children::Any,
         "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop",
     ),
@@ -555,13 +592,27 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ),
     ComponentSpec {
         action: ActionRule::Required,
-        ..spec("Timer", &[req("interval", PropKind::Number), opt("enabled", PropKind::Bool)], Children::None,
-            "Invoke a command at an interval in seconds while mounted and enabled; automatically cancels on removal")
+        ..spec(
+            "Timer",
+            &[
+                req("interval", PropKind::Number),
+                opt("enabled", PropKind::Bool),
+            ],
+            Children::None,
+            "Invoke a command at an interval in seconds while mounted and enabled; automatically cancels on removal",
+        )
     },
     ComponentSpec {
         placement: Placement::Within(&["Picker"]),
-        ..spec("PickerOption", &[req("value", PropKind::KeyValue), req("label", PropKind::DisplayText)], Children::None,
-            "An explicitly labelled picker option, including live counts")
+        ..spec(
+            "PickerOption",
+            &[
+                req("value", PropKind::KeyValue),
+                req("label", PropKind::DisplayText),
+            ],
+            Children::None,
+            "An explicitly labelled picker option, including live counts",
+        )
     },
     spec(
         "Rail",
@@ -719,6 +770,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     spec(
+        "ControlGroup",
+        &[
+            opt("label", PropKind::DisplayText),
+            opt("height", PropKind::Length),
+        ],
+        Children::Any,
+        "Related native controls sharing one capsule surface and equal-height hit targets",
+    ),
+    spec(
         "Tabs",
         &[
             req("selection", PropKind::SelectionField),
@@ -750,6 +810,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("label", PropKind::DisplayText),
                 req("value", PropKind::BoolField),
                 opt("icon", PropKind::Icon),
+                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("height", PropKind::Length),
                 opt("more_label", PropKind::DisplayText),
                 opt("shortcut", PropKind::Shortcut),
             ],
@@ -957,7 +1019,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("emphasis", PropKind::Keyword(EMPHASIS)),
             opt("mark", PropKind::ColorRole),
             opt("lines", PropKind::Number),
-            opt("font_size", PropKind::Number),
+            opt("font_size", PropKind::Length),
         ],
         Children::None,
         "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis",
@@ -1039,6 +1101,22 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Icon and title; `display: icon` hides the title visually while preserving its accessible name",
     ),
     spec(
+        "Svg",
+        &[
+            req("source", PropKind::SvgResource),
+            req("width", PropKind::Length),
+            req("height", PropKind::Length),
+            opt("label", PropKind::DisplayText),
+            opt("fit", PropKind::Keyword(VIDEO_FIT)),
+            opt("playing", PropKind::Bool),
+            opt("speed", PropKind::NumberValue),
+            opt("restart", PropKind::NumberValue),
+            opt("interactive", PropKind::Flag),
+        ],
+        Children::None,
+        "Bundled SVG document with CSS, SMIL and script animation; explicit viewport, playing/speed controls and restart revision; document-local interaction is enabled by default",
+    ),
+    spec(
         "Image",
         &[
             req("source", PropKind::ImageResource),
@@ -1101,8 +1179,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("id", PropKind::Id),
                 req("icon", PropKind::Icon),
+                opt("font_size", PropKind::Number),
                 req("label", PropKind::DisplayText),
-                opt("prominence", PropKind::Keyword(&["standard", "plain"])),
+                opt(
+                    "prominence",
+                    PropKind::Keyword(&["standard", "prominent", "plain"]),
+                ),
                 opt("enabled", PropKind::Bool),
                 opt("variant", PropKind::StyleVariant),
                 FEATURE,
@@ -1122,6 +1204,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
                 req("value", PropKind::TextField),
                 opt("prompt", PropKind::DisplayText),
                 opt("kind", PropKind::Keyword(&["plain", "secure", "multiline"])),
@@ -1182,6 +1265,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("value", PropKind::BoolField),
                 opt("checked", PropKind::Bool),
                 opt("label_hidden", PropKind::Flag),
+                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("height", PropKind::Length),
                 opt(
                     "style",
                     PropKind::Keyword(&["switch", "checkbox", "button"]),
@@ -1202,7 +1287,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 opt("label_hidden", PropKind::Flag),
-                req("value", PropKind::NumberField),
+                opt("value", PropKind::NumberField),
+                opt("current", PropKind::NumberValue),
                 req("min", PropKind::Number),
                 req("max", PropKind::Number),
                 opt("step", PropKind::Number),
@@ -1259,6 +1345,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("value", PropKind::PickerField),
                 opt("selected", PropKind::KeyValue),
                 opt("label_hidden", PropKind::Flag),
+                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("height", PropKind::Length),
                 opt(
                     "style",
                     PropKind::Keyword(&["automatic", "menu", "segmented", "radio", "inline"]),
@@ -1441,9 +1529,11 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             message: "`appear_delay` needs an `appear` transition".into(),
         });
     }
-    if matches!(spec.name, "Switch" | "Picker") {
+    if matches!(spec.name, "Switch" | "Picker" | "Slider") {
         let controlled = if spec.name == "Switch" {
             "checked"
+        } else if spec.name == "Slider" {
+            "current"
         } else {
             "selected"
         };

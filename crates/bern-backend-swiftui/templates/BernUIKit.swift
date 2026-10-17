@@ -607,6 +607,7 @@ struct BernWindowBehavior: ViewModifier {
     let unified: Bool
     let idleAfter: Double?
     let immersive: Bool
+    var idleEnabled: Bool = true
     @State private var timer = BernIdleTimer()
 
     func body(content: Content) -> some View {
@@ -619,10 +620,12 @@ struct BernWindowBehavior: ViewModifier {
             .background(BernTouchWatcher { touched() })
             .onContinuousHover { _ in touched() }
             .onAppear { touched() }
+            .onChange(of: idleEnabled) { _, _ in touched() }
+            .onDisappear { timer.stop(context) }
     }
 
     private func touched() {
-        guard let idleAfter else { return }
+        guard idleEnabled, let idleAfter else { timer.stop(context); return }
         timer.reset(context, after: idleAfter)
     }
 }
@@ -630,6 +633,12 @@ struct BernWindowBehavior: ViewModifier {
 @MainActor
 final class BernIdleTimer {
     private var timer: Timer?
+
+    func stop(_ context: BernWindowContext) {
+        timer?.invalidate()
+        timer = nil
+        context.idle = false
+    }
 
     func reset(_ context: BernWindowContext, after seconds: Double) {
         if context.idle {

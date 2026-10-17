@@ -11,9 +11,14 @@ const { cell, effect, onCleanup, el, untrack, eq } = B;
 /// Whether the system asks for less motion: springs then settle at once
 /// and transitions become a short fade.
 const reduceQuery = matchMedia("(prefers-reduced-motion: reduce)");
-let reduced = reduceQuery.matches || new URLSearchParams(location.search).get("motion") === "reduce";
+const forceReduced = new URLSearchParams(location.search).get("motion") === "reduce";
+const motionPreferences = new Map();
+let reduced = reduceQuery.matches || forceReduced;
+function updateReducedMotion() {
+  reduced = reduceQuery.matches || forceReduced || [...motionPreferences.values()].some(Boolean);
+}
 reduceQuery.addEventListener("change", (event) => {
-  reduced = event.matches;
+  updateReducedMotion();
 });
 
 export function reduceMotion() {
@@ -552,6 +557,14 @@ function pairOf(fill) {
   if (!fill?.role) return null;
   if (fill.role === "accent") return { role: "on_accent" };
   if (fill.role === "status.error") return { role: "on_error" };
+  if (fill.role === "selection.background") return { role: "selection.foreground" };
+  // Neutral surfaces and state fills use the theme's primary text. In
+  // particular, a styled sidebar may replace its accent background with
+  // fill.strong; retaining the default on_accent would make dark text sit
+  // on a dark neutral fill. These pairings are checked by the theme kernel.
+  if (["fill.subtle", "fill.strong", "surface.canvas", "surface.panel", "surface.raised"].includes(fill.role)) {
+    return { role: "text.primary" };
+  }
   return null;
 }
 
@@ -649,6 +662,8 @@ export function applyStyle(node, style, { selected } = {}) {
 B.hooks.style = applyStyle;
 B.hooks.length = (node, property, value, motion) => bindLength(node, property, value, motion);
 B.hooks.accepts = (url, kinds) => accepts(url, "", kinds);
+B.hooks.spring = (value, apply) => new Spring(value, apply);
+B.hooks.reduced = reduceMotion;
 
 // MARK: - Split view and sidebar
 
@@ -657,10 +672,16 @@ B.hooks.accepts = (url, kinds) => accepts(url, "", kinds);
 /// the selected item disappears, the selection moves to `fallback` or the
 /// first item left. On narrow windows the sidebar is the first page.
 export function SplitView(p, ctx, spec, sidebarContent, detail) {
-  const { selection, fallback, search, footer, id } = spec;
+  const { selection, fallback, search, footer, header: sidebarHeader, width, titled, id } = spec;
   const showingDetail = cell(false);
   const list = el("div", { class: "bern-sidebar-list", role: "listbox", tabindex: "0" });
   const sidebar = el("nav", { class: "bern-sidebar" });
+  if (width !== undefined) effect(() => sidebar.style.setProperty("--bern-sidebar-width", `${Number(typeof width === "function" ? width() : width)}px`));
+  if (sidebarHeader) {
+    const holder = el("div", { class: "bern-sidebar-header" });
+    sidebarHeader(holder, ctx);
+    sidebar.append(holder);
+  }
   if (search) {
     const holder = el("div", { class: "bern-sidebar-search" });
     search(holder, ctx);
@@ -724,7 +745,7 @@ export function SplitView(p, ctx, spec, sidebarContent, detail) {
     });
   }
   const inner = { ...ctx, page: B.page() };
-  const header = B.pageHeader(inner, selectedLabel, true);
+  const header = B.pageHeader(inner, () => titled && !titled() ? "" : selectedLabel(), true);
   const back = el("button", { class: "bern-icon-button bern-split-back", type: "button" }, B.icon("chevron.left", 18));
   B.bindAttr(back, "aria-label", () => B.tr("bern.navigation.back"));
   back.addEventListener("click", () => showingDetail.set(false));
@@ -751,11 +772,21 @@ export function SidebarSection(p, ctx, { title }, children) {
 }
 
 /// One sidebar destination; it is part of the selection while mounted.
-export function SidebarItem(p, ctx, { value, name, label, icon: glyph, style }) {
+export function SidebarItem(p, ctx, { value, name, label, icon: glyph, style, badge }) {
   const registry = ctx.sidebar;
   const text = el("span");
   if (label) B.bindText(text, label);
   const option = el("div", { class: "bern-sidebar-item", role: "option" }, glyph ? B.icon(glyph, 16) : null, text);
+  text.classList.add("bern-sidebar-label");
+  if (badge !== undefined) {
+    const counter = el("span", { class: "bern-sidebar-badge" });
+    effect(() => {
+      const value = typeof badge === "function" ? badge() : badge;
+      counter.textContent = String(value);
+      counter.hidden = Number(value) <= 0;
+    });
+    option.append(counter);
+  }
   option.addEventListener("click", () => registry.choose(value));
   const entry = { value, name, label, option };
   registry.items.set([...registry.items.peek(), entry]);
@@ -775,6 +806,13 @@ function transitionFrom(transition, node) {
   const from = { x: 0, y: 0, sx: 1, sy: 1, opacity: 0 };
   if (transition.kind === "pop") {
     from.sx = from.sy = transition.from;
+  } else if (transition.kind === "grow") {
+    from.opacity = 1;
+    const edge = transition.edge;
+    const rtl = getComputedStyle(node).direction === "rtl";
+    const vertical = edge === "top" || edge === "bottom";
+    node.style.transformOrigin = vertical ? `center ${edge}` : `${edge === "leading" ? (rtl ? "right" : "left") : (rtl ? "left" : "right")} center`;
+    from[vertical ? "sy" : "sx"] = transition.from ?? 0;
   } else if (transition.kind === "slide") {
     const distance = transition.distance;
     const rtl = getComputedStyle(node).direction === "rtl";
@@ -890,15 +928,20 @@ B.hooks.exit = (node, done) => {
 /// those that just left, for the next one with the same key to grow from.
 const heroes = new Map();
 const departed = new Map();
+const heroFlights = new Map();
 
 function heroLeave(key, node) {
-  if (heroes.get(key) === node) heroes.delete(key);
+  const active = heroes.get(key) ?? [];
+  const remaining = active.filter((item) => item !== node && item.isConnected);
+  if (remaining.length) heroes.set(key, remaining); else heroes.delete(key);
   if (!node.isConnected) return;
-  const rect = layoutRect(node);
+  const rect = node.getBoundingClientRect();
   if (!rect.width || !rect.height) return;
   departed.set(key, { rect, node, ghost: ghostOf(node) });
   setTimeout(() => {
     if (departed.get(key)?.node === node) departed.delete(key);
+    const flight = heroFlights.get(key);
+    if (flight?.node === node && !node.isConnected) flight.cancel();
   }, 0);
 }
 
@@ -911,23 +954,88 @@ function ghostOf(node) {
   ghost.style.font = style.font;
   ghost.style.color = style.color;
   ghost.style.letterSpacing = style.letterSpacing;
+  ghost.style.borderRadius = style.borderRadius;
   ghost.style.margin = "0";
   ghost.removeAttribute("data-bern-target");
+  ghost.setAttribute("aria-hidden", "true");
   for (const marked of ghost.querySelectorAll?.("[data-bern-target]") ?? []) marked.removeAttribute("data-bern-target");
   return ghost;
 }
 
 function heroEnter(key, node, motion) {
-  const previous = heroes.get(key);
-  heroes.set(key, node);
-  // Pair once this update has mounted and laid out everything.
+  const active = heroes.get(key) ?? [];
+  const previous = active.at(-1);
+  heroes.set(key, [...active.filter((item) => item !== node && item.isConnected), node]);
   queueMicrotask(() => {
-    const from = departed.get(key) ?? (previous && previous !== node && previous.isConnected
-      ? { rect: layoutRect(previous), node: previous, ghost: ghostOf(previous) } : null);
-    if (!from || !node.isConnected) return;
+    let from = departed.get(key) ?? (previous && previous !== node && previous.isConnected
+      ? { rect: previous.getBoundingClientRect(), node: previous, ghost: ghostOf(previous) } : null);
+    const flight = heroFlights.get(key);
+    if (flight) { from = flight.snapshot(); flight.cancel(); }
+    if (!from || !node.isConnected || reduced) return;
     departed.delete(key);
-    grow(node, from, motion);
+    // ScaleBox receives its first size from ResizeObserver, after the
+    // mounting microtask. Keep the destination hidden until it has a
+    // usable viewport rectangle; never discard a flight for a zero size.
+    const visibility = node.style.visibility;
+    node.style.visibility = "hidden";
+    let attempts = 0;
+    const ready = () => {
+      if (!node.isConnected || reduced) { node.style.visibility = visibility; return; }
+      const rect = node.getBoundingClientRect();
+      if ((!rect.width || !rect.height) && ++attempts < 8) { requestAnimationFrame(ready); return; }
+      node.style.visibility = visibility;
+      if (!rect.width || !rect.height) return;
+      if (node.matches("img") && from.ghost?.matches("img")) growPicture(key, node, from, motion);
+      else grow(node, from, motion);
+    };
+    ready();
   });
+}
+
+/// Images fly entirely in viewport space. Transforming the real image
+/// inside a clipped sidebar or a scaled scene clips/double-scales it.
+function growPicture(key, node, from, motion) {
+  const to = node.getBoundingClientRect();
+  const ghost = ghostOf(node);
+  const old = from.ghost;
+  const a = from.rect;
+  const radius = (element, rect) => (parseFloat(element.style.borderRadius) || 0)
+    * rect.width / (parseFloat(element.style.width) || rect.width);
+  const r0 = radius(old, a), r1 = radius(ghost, to);
+  for (const picture of [old, ghost]) {
+    Object.assign(picture.style, { position: "fixed", margin: "0", maxWidth: "none", maxHeight: "none",
+      minWidth: "0", minHeight: "0", transform: "none", visibility: "visible", pointerEvents: "none",
+      zIndex: "2147483000", boxSizing: "border-box" });
+    document.body.append(picture);
+  }
+  const sourceVisibility = from.node?.style.visibility;
+  const destinationVisibility = node.style.visibility;
+  if (from.node) from.node.style.visibility = "hidden";
+  node.style.visibility = "hidden";
+  let stopped = false;
+  const cleanup = () => {
+    if (stopped) return;
+    stopped = true;
+    old.remove(); ghost.remove();
+    if (from.node) from.node.style.visibility = sourceVisibility;
+    node.style.visibility = destinationVisibility;
+    if (heroFlights.get(key)?.node === node) heroFlights.delete(key);
+  };
+  const progress = new Spring(0, (t) => {
+    if (!node.isConnected || reduced) { running.delete(progress); progress.done = null; cleanup(); return; }
+    const mix = (start, end) => start + (end - start) * t;
+    for (const picture of [old, ghost]) Object.assign(picture.style, {
+      left: `${mix(a.left, to.left)}px`, top: `${mix(a.top, to.top)}px`,
+      width: `${Math.max(1, mix(a.width, to.width))}px`, height: `${Math.max(1, mix(a.height, to.height))}px`,
+      borderRadius: `${Math.max(0, mix(r0, r1))}px`,
+    });
+    old.style.opacity = "1";
+    ghost.style.opacity = String(Math.max(0, Math.min(1, t)));
+  });
+  heroFlights.set(key, { node, snapshot: () => ({ rect: ghost.getBoundingClientRect(), ghost: ghostOf(ghost), node }),
+    cancel: () => { running.delete(progress); progress.done = null; cleanup(); } });
+  progress.apply(0);
+  progress.to(1, motion, cleanup);
 }
 
 /// The new element grows from the old one's place and size while the old
@@ -973,6 +1081,17 @@ function grow(node, from, motion) {
 /// key, `reveal: hover`, `appearance`, `nudge`, and following scroll with
 /// `scrollScale` and `scrollOpacity`.
 export function Decorate(p, ctx, spec, build) {
+  if (spec.reduceMotion) {
+    const key = {};
+    effect(() => {
+      motionPreferences.set(key, Boolean(spec.reduceMotion()));
+      updateReducedMotion();
+    });
+    onCleanup(() => {
+      motionPreferences.delete(key);
+      updateReducedMotion();
+    });
+  }
   const fragment = document.createDocumentFragment();
   // Elements inside this one enter with it, not on their own; a staggering
   // container's clock is only for its direct children.
@@ -987,14 +1106,14 @@ export function Decorate(p, ctx, spec, build) {
       queueMicrotask(() => node.parentElement?.classList.add("bern-reveal-host"));
     }
     if (spec.disappear) node.bernDisappear = spec.disappear;
-    if (spec.appear && (animated || turns?.play)) {
-      playTransition(node, spec.appear, true, null, turns ? turn(turns) : 0);
+    if (spec.appear && (animated || turns?.play || spec.appearDelay !== undefined)) {
+      playTransition(node, spec.appear, true, null, (turns ? turn(turns) : 0) + (spec.appearDelay ?? 0));
     }
     if (spec.hero) {
       const key = spec.hero;
       let current = null;
       effect(() => {
-        const next = key();
+        const next = `${ctx?.win?.id ?? "root"}:${key()}`;
         untrack(() => {
           if (current !== null) heroLeave(current, node);
           current = next;
@@ -1006,6 +1125,7 @@ export function Decorate(p, ctx, spec, build) {
       });
     }
     if (spec.nudge) nudge(node, spec.nudge, spec.nudgeMotion);
+    if (spec.nudgeKey) nudge(node, spec.nudgeKey, spec.nudgeMotion, spec.nudgeScale ?? 1.06, true);
     if (spec.scrollScale !== undefined || spec.scrollOpacity !== undefined) {
       scrollEffect(node, spec.scrollScale ?? 1, spec.scrollOpacity ?? 1);
     }
@@ -1019,63 +1139,97 @@ export function Decorate(p, ctx, spec, build) {
 /// jumping there, whatever moved them: rows coming and going, a sibling
 /// growing.
 export function reflow(container, motion) {
-  if (container.bernReflow) return;
-  container.bernReflow = true;
-  const places = new Map();
-  const place = (child) => {
-    const rect = layoutRect(child);
-    const base = container.getBoundingClientRect();
-    return { left: rect.left - base.left, top: rect.top - base.top };
-  };
-  const measure = () => {
-    places.clear();
-    for (const child of container.children) places.set(child, place(child));
-  };
-  const sizes = new ResizeObserver(() => play());
-  const play = () => {
-    for (const child of container.children) {
-      if (child.bernExiting) continue;
-      const before = places.get(child);
-      if (!before) {
-        sizes.observe(child);
-        continue;
-      }
-      const now = place(child);
-      const dx = before.left - now.left;
-      const dy = before.top - now.top;
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-      const layer = layers(child).layer("reflow");
-      layer.x.set(layer.x.value + dx);
-      layer.y.set(layer.y.value + dy);
-      layer.x.to(0, motion);
-      layer.y.to(0, motion);
+  // Conditional branches and keyed rows build into a fragment. A comment
+  // travels with that fragment and identifies its real layout parent once
+  // the synchronous mounting pass has finished.
+  const anchor = container.nodeType === Node.ELEMENT_NODE ? null : document.createComment("bern-reflow");
+  if (anchor) container.append(anchor);
+  let disposed = false;
+  let release = null;
+  const attach = (parent) => {
+    if (disposed || !parent) return;
+    let controller = parent.bernReflow;
+    if (!controller) {
+      const places = new Map();
+      const observed = new Set();
+      let stopped = false;
+      const place = (child) => {
+        const rect = layoutRect(child);
+        const base = parent.getBoundingClientRect();
+        return { left: rect.left - base.left, top: rect.top - base.top };
+      };
+      const measure = () => {
+        places.clear();
+        for (const child of parent.children) places.set(child, place(child));
+      };
+      const sizes = new ResizeObserver(() => play());
+      const play = () => {
+        if (stopped) return;
+        const mounted = new Set(parent.children);
+        for (const child of observed) {
+          if (!mounted.has(child)) { sizes.unobserve(child); observed.delete(child); }
+        }
+        for (const child of mounted) {
+          if (!observed.has(child)) { sizes.observe(child); observed.add(child); }
+          if (child.bernExiting) continue;
+          const before = places.get(child);
+          if (!before) continue;
+          const now = place(child);
+          const dx = before.left - now.left;
+          const dy = before.top - now.top;
+          if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+          const layer = layers(child).layer("reflow");
+          layer.x.set(layer.x.value + dx);
+          layer.y.set(layer.y.value + dy);
+          layer.x.to(0, motion);
+          layer.y.to(0, motion);
+        }
+        measure();
+      };
+      const children = new MutationObserver(play);
+      children.observe(parent, { childList: true });
+      sizes.observe(parent);
+      for (const child of parent.children) { sizes.observe(child); observed.add(child); }
+      measure();
+      const frame = requestAnimationFrame(() => { if (!stopped) measure(); });
+      controller = parent.bernReflow = {
+        users: 0,
+        stop() {
+          stopped = true;
+          cancelAnimationFrame(frame);
+          children.disconnect();
+          sizes.disconnect();
+          places.clear();
+          observed.clear();
+          if (parent.bernReflow === this) delete parent.bernReflow;
+        },
+      };
     }
-    measure();
+    controller.users += 1;
+    release = () => { if (--controller.users === 0) controller.stop(); };
   };
-  const children = new MutationObserver(play);
-  children.observe(container, { childList: true });
-  sizes.observe(container);
-  for (const child of container.children) sizes.observe(child);
+  if (anchor) queueMicrotask(() => attach(anchor.parentElement));
+  else attach(container);
   onCleanup(() => {
-    children.disconnect();
-    sizes.disconnect();
+    disposed = true;
+    release?.();
+    anchor?.remove();
   });
-  requestAnimationFrame(measure);
 }
 
 // MARK: - Nudges
 
 /// A short nudge each time `when()` turns true: a little larger, then back
 /// with `motion`; still with reduced motion.
-export function nudge(node, when, motion) {
+export function nudge(node, when, motion, scale = 1.06, keyed = false) {
   let before = untrack(when);
   const layer = layers(node).layer("nudge");
   effect(() => {
     const now = when();
-    if (now && !before && !reduced) {
+    if ((keyed ? !eq(now, before) : now && !before) && !reduced) {
       untrack(() => {
-        layer.sx.to(1.06, [0.12, 1], () => layer.sx.to(1, motion));
-        layer.sy.to(1.06, [0.12, 1], () => layer.sy.to(1, motion));
+        layer.sx.to(scale, [0.12, 1], () => layer.sx.to(1, motion));
+        layer.sy.to(scale, [0.12, 1], () => layer.sy.to(1, motion));
       });
     }
     before = now;
@@ -1135,16 +1289,22 @@ function scrollEffect(node, scale, opacity) {
 
 /// `window.idle` turns true after `seconds` without pointer, touch, wheel
 /// or key input in the window, and false at the next input.
-B.hooks.idle = (win, seconds) => {
+B.hooks.idle = (win, seconds, enabled = () => true) => {
   let timer = 0;
   const rest = () => {
     clearTimeout(timer);
     if (win.idle.peek()) win.idle.set(false);
-    timer = setTimeout(() => win.idle.set(true), seconds * 1000);
+    if (enabled()) timer = setTimeout(() => {
+      const typing = document.activeElement?.matches("input:not([type=range]),textarea");
+      const popup = document.querySelector(".bern-popover:not([hidden]),.bern-menu-popover:not([hidden]),[popover]:popover-open");
+      if (typing || popup) rest(); else win.idle.set(true);
+    }, seconds * 1000);
   };
   const events = ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"];
   for (const name of events) win.element.addEventListener(name, rest, { capture: true, passive: true });
   effect(() => win.element.classList.toggle("bern-idle", win.idle.get()));
+  let previousEnabled;
+  effect(() => { const next = enabled(); if (next !== previousEnabled) { previousEnabled = next; rest(); } });
   onCleanup(() => {
     clearTimeout(timer);
     for (const name of events) win.element.removeEventListener(name, rest, { capture: true });
@@ -1244,7 +1404,7 @@ function listenForLaunches() {
 
 /// A button showing its content instead of a label: no frame of its own,
 /// the content as it is; a style's corner clips it.
-export function ContentButton(p, ctx, { id, label, enabled, style, setFile, fileKinds: kinds }, action, content) {
+export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds }, action, content) {
   const node = el("button", { class: "bern-content-button", type: "button" });
   B.bindAttr(node, "aria-label", label);
   content(node, ctx);
@@ -1259,6 +1419,11 @@ export function ContentButton(p, ctx, { id, label, enabled, style, setFile, file
     actions: { activate: () => action?.(), ...(setFile ? { setFile, fileKinds: kinds } : {}) },
   });
   if (style) applyStyle(node, style, {});
+  if (shape === "capsule") {
+    node.classList.add("bern-control-capsule");
+    node.style.borderRadius = "999px";
+  }
+  bindLength(node, "height", height);
   p.append(node);
 }
 
@@ -1281,6 +1446,8 @@ export function Switch(p, ctx, spec) {
     B.bindText(text, label);
     node.append(text);
   }
+  if (spec.shape === "capsule") node.classList.add("bern-control-capsule");
+  bindLength(node, "height", spec.height);
   B.bindAttr(node, "aria-label", label);
   B.bindAttr(node, "title", label);
   effect(() => node.setAttribute("aria-pressed", field.get() ? "true" : "false"));
@@ -1298,10 +1465,18 @@ export function Switch(p, ctx, spec) {
 /// A toggle linked with a button that shows `content` in a popover, such as
 /// the usual settings of what the toggle turns on. External entries turn
 /// it on or off with `set_bool` and open the popover with `activate`.
-export function SplitButton(p, ctx, { id, label, icon: glyph, field, more }, content) {
+export function ControlGroup(p, ctx, { label, height }, content) {
+  const node = el("div", { class: "bern-control-group", role: "group" });
+  if (label) B.bindAttr(node, "aria-label", label);
+  effect(() => node.style.setProperty("--bern-group-height", `${Math.max(24, Number((typeof height === "function" ? height() : height) ?? 40))}px`));
+  content(node, ctx);
+  p.append(node);
+}
+
+export function SplitButton(p, ctx, { id, label, icon: glyph, field, more, shape, height }, content) {
   const toggle = el("button", { class: "bern-icon-button bern-toggle-button bern-split-main", type: "button" },
     glyph ? B.icon(glyph, 16) : null);
-  if (!glyph) {
+  {
     const text = el("span");
     B.bindText(text, label);
     toggle.append(text);
@@ -1331,6 +1506,11 @@ export function SplitButton(p, ctx, { id, label, icon: glyph, field, more }, con
     if (panel.matches(":popover-open")) panel.hidePopover();
   });
   const node = el("div", { class: "bern-split-button", role: "group" }, toggle, chevron, panel);
+  if (shape === "capsule") {
+    node.classList.add("bern-split-capsule");
+    bindLength(node, "height", height);
+    effect(() => node.classList.toggle("bern-split-selected", Boolean(field.get())));
+  }
   B.mark(toggle, ctx, id);
   B.control(ctx, {
     target: () => B.target(ctx, id), role: "split_button", label,
@@ -1622,7 +1802,9 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion 
   children(node, ctx);
   p.append(node);
   if (!snap && !position) return;
-  const anchor = snap ?? "center";
+  // A position binding follows the leading item unless center snapping
+  // was explicitly requested (for example by a horizontal episode rail).
+  const anchor = snap ?? "start";
   /// Rows of this scroll view's lists, not of nested scroll views.
   const items = () => [...node.querySelectorAll("[data-bern-item]")]
     .filter((item) => item.closest(".bern-scroll") === node);
@@ -1653,10 +1835,16 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion 
   // the center too.
   const margins = () => {
     if (anchor !== "center") return;
-    const largest = Math.max(0, ...items().map((item) => extent(layoutRect(item))));
-    const room = Math.max(0, (extent(node.getBoundingClientRect()) - largest) / 2);
-    if (horizontal) node.style.paddingInline = `${room}px`;
-    else node.style.paddingBlock = `${room}px`;
+    const property = horizontal ? "paddingInline" : "paddingBlock";
+    // Measure without the centering space from the last pass. In an
+    // intrinsically sized flex child that space increases the viewport's
+    // own size; feeding it back into this calculation grows it forever.
+    node.style[property] = "0px";
+    const viewport = horizontal ? node.clientWidth : node.clientHeight;
+    const rows = items();
+    const largest = Math.max(0, ...rows.map((item) => extent(layoutRect(item))));
+    const room = rows.length ? Math.max(0, (viewport - largest) / 2) : 0;
+    node.style[property] = `${room}px`;
   };
   const resize = new ResizeObserver(margins);
   resize.observe(node);
@@ -1728,21 +1916,55 @@ function nudgeOnce(node, motion) {
 /// A picture from a declared resource or from a `MediaSource` the engine
 /// gives (a file the user chose, or an http(s) URL); with one side given,
 /// the other follows the picture.
-export function Image(p, ctx, { source, url, label, width, height, fit, animate }) {
-  const node = el("img", { class: "bern-image", alt: "", draggable: "false", decoding: "async" });
+export function Image(p, ctx, { source, url, label, width, height, fit, animate, corner, rendering, aspect, adaptive }) {
+  const template = rendering === "template";
+  const intrinsicRatio = cell(aspect ?? 1);
+  const probe = template && !aspect ? new globalThis.Image() : null;
+  if (probe) {
+    probe.onload = () => {
+      if (probe.naturalHeight) intrinsicRatio.set(probe.naturalWidth / probe.naturalHeight);
+    };
+    onCleanup(() => { probe.onload = null; });
+  }
+  const node = template ? el("span", { class: "bern-image bern-image-template" })
+    : el("img", { class: "bern-image", alt: "", draggable: "false", decoding: "async" });
   node.style.objectFit = fit ?? "contain";
-  if (source) node.src = resource(source);
+  const setSource = (value) => {
+    if (template) {
+      node.style.maskImage = value ? `url(${JSON.stringify(value)})` : "none";
+      node.style.webkitMaskImage = node.style.maskImage;
+      node.style.maskSize = fit === "cover" ? "cover" : fit === "fill" ? "100% 100%" : "contain";
+      if (probe && value) probe.src = value;
+    } else if (value) node.src = value;
+    else node.removeAttribute("src");
+  };
+  if (source) setSource(resource(source));
   if (url) {
     effect(() => {
       const value = url();
-      if (value) node.src = value;
-      else node.removeAttribute("src");
+      setSource(value);
       node.hidden = !value;
     });
   }
   bindLength(node, "width", width, animate);
   bindLength(node, "height", height, animate);
-  if (label) B.bindAttr(node, "alt", label);
+  if (template && width === undefined && height !== undefined) {
+    bindLength(node, "width", () => Number(typeof height === "function" ? height() : height) * intrinsicRatio.get(), animate);
+  } else if (template && height === undefined && width !== undefined) {
+    bindLength(node, "height", () => Number(typeof width === "function" ? width() : width) / intrinsicRatio.get(), animate);
+  }
+  bindLength(node, "borderRadius", corner, animate);
+  if (aspect) node.style.aspectRatio = String(aspect);
+  if (adaptive || (aspect && width === undefined)) {
+    node.classList.add("bern-fill-width");
+    node.style.width = "100%";
+    if (height === undefined) node.style.height = "auto";
+  }
+  if (template) {
+    node.setAttribute("role", "img");
+    if (label) B.bindAttr(node, "aria-label", label);
+    else node.setAttribute("aria-hidden", "true");
+  } else if (label) B.bindAttr(node, "alt", label);
   p.append(ctx.inGroup ? el("div", { class: "bern-row bern-row-media" }, node) : node);
 }
 
@@ -1958,4 +2180,8 @@ export function PopoverButton(p, ctx, { id, label, icon: glyph, presented }, con
 export function activateTarget(ctx, id) {
   const entry = B.controlEntries().find((one) => one.target() === B.target(ctx, id));
   entry?.actions.activate?.();
+}
+
+export function bindPosition(node, property, value, motion) {
+  bindNumber(value, motion, (v) => { node.style[property] = `${v}px`; });
 }

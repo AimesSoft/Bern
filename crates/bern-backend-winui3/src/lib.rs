@@ -274,6 +274,7 @@ impl Target for WinUi3Windows {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let executable = executable(app);
         let profile = if context.release { "release" } else { "debug" };
@@ -283,6 +284,17 @@ impl Target for WinUi3Windows {
         let bundle = context.output_dir.join(&product);
         let frontends = glue::Frontends::of(&context.target.frontends);
         let generator = Generator::new(app);
+        let svg_identity = format!(
+            "{}-{}-{:016x}",
+            precompiled_identity(context.release, frontends),
+            bern_target_api::svg::used(app),
+            bern_protocol::fingerprint_bytes(
+                bern_target_api::svg::cpp_template(include_str!(
+                    "../templates/cpp/bern_ui_svg.inl"
+                ))
+                .as_bytes()
+            )
+        );
         let mut files = vec![
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text("glue/.cargo/config.toml", glue::cargo_config()),
@@ -297,7 +309,7 @@ impl Target for WinUi3Windows {
                     engine: &engine,
                     cache: &cache,
                     release: context.release,
-                    precompiled: &precompiled_identity(context.release, frontends),
+                    precompiled: &svg_identity,
                     frontends,
                 }),
             ),
@@ -317,10 +329,23 @@ impl Target for WinUi3Windows {
             ),
             GeneratedFile::text("app/app_ui.inl", generator.interface()),
         ];
+        let svg = bern_target_api::svg::used(app);
+        files.push(GeneratedFile::text(
+            "app/runtime/bern_ui_svg.inl",
+            if svg {
+                bern_target_api::svg::cpp_template(include_str!("../templates/cpp/bern_ui_svg.inl"))
+            } else {
+                String::new()
+            },
+        ));
         for (name, contents) in RUNTIME {
             files.push(GeneratedFile::text(
                 format!("app/runtime/{name}"),
-                *contents,
+                if *name == "bern_pch.h" {
+                    contents.replace("/*bern:svg-enabled*/", if svg { "1" } else { "0" })
+                } else {
+                    contents.to_string()
+                },
             ));
         }
         let lock = context.workspace_dir.join("Cargo.lock");

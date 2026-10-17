@@ -673,6 +673,7 @@ fn window_catalog(
             },
             immersive: window.expr("immersive").cloned(),
             idle_after: window.number("idle_after"),
+            idle_enabled: window.expr("idle_enabled").cloned(),
         });
     }
     if windows

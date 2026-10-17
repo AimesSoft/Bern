@@ -446,6 +446,29 @@ class Host {
         on_query: (subscription, ptr, len) =>
           this.defer(this.copy(ptr, len), (bytes) => this.queries.get(subscription)?.(bytes)),
         random_u32: () => crypto.getRandomValues(new Uint32Array(1))[0],
+        storage_read: (appPtr, appLen, keyPtr, keyLen, out, capacity) => {
+          try {
+            const key = `bern:${this.text(appPtr, appLen)}:${this.text(keyPtr, keyLen)}`;
+            const stored = localStorage.getItem(key);
+            if (stored === null) return -1;
+            const values = JSON.parse(stored);
+            if (!Array.isArray(values) || !values.every((value) => Number.isInteger(value) && value >= 0 && value <= 255)) return -2;
+            const bytes = Uint8Array.from(values);
+            if (bytes.length <= capacity) new Uint8Array(this.exports.memory.buffer, out, bytes.length).set(bytes);
+            return bytes.length;
+          } catch {
+            return -2;
+          }
+        },
+        storage_write: (appPtr, appLen, keyPtr, keyLen, ptr, len) => {
+          try {
+            const key = `bern:${this.text(appPtr, appLen)}:${this.text(keyPtr, keyLen)}`;
+            localStorage.setItem(key, JSON.stringify(Array.from(this.copy(ptr, len))));
+            return 0;
+          } catch {
+            return -1;
+          }
+        },
         // Files the page was given, which the engine reads.
         file_name: (ptr, len, out, capacity) => {
           const file = pageFiles.get(this.text(ptr, len));
@@ -1098,6 +1121,7 @@ export function page() {
   return {
     titles: cell([]), backs: cell([]), toolCount: cell(0),
     tools: el("div", { class: "bern-tools", role: "toolbar" }),
+    leadingTools: el("div", { class: "bern-tools bern-tools-leading", role: "toolbar" }),
   };
 }
 
@@ -1112,10 +1136,10 @@ export function pageTitle(ctx, getter) {
 }
 
 /// Toolbar items for the enclosing page header.
-export function tools(ctx, build) {
+export function tools(ctx, build, { placement } = {}) {
   if (!ctx.page) return;
   const holder = el("div", { class: "bern-tool-group" });
-  ctx.page.tools.append(holder);
+  (placement === "leading" ? ctx.page.leadingTools : ctx.page.tools).append(holder);
   const count = ctx.page.toolCount;
   count.set(count.peek() + 1);
   onCleanup(() => {
@@ -1133,7 +1157,7 @@ export function pageHeader(ctx, fallback, always) {
     backs[backs.length - 1]?.();
   });
   const title = el("h2", { class: "bern-page-title" });
-  const header = el("header", { class: "bern-page-header" }, back, title, ctx.page.tools);
+  const header = el("header", { class: "bern-page-header" }, back, ctx.page.leadingTools, title, ctx.page.tools);
   effect(() => {
     const titles = ctx.page.titles.get();
     const text = titles.length ? titles[titles.length - 1]() : fallback ? fallback() : "";
@@ -1153,23 +1177,34 @@ export const STYLE_CLASS = {
   caption2: "caption2",
 };
 
-export function Text(p, ctx, { content, style, emphasis }) {
+export function Text(p, ctx, { content, style, emphasis, fontSize, lines }) {
   const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
   bindText(node, content);
+  length(node, "fontSize", fontSize);
+  if (lines !== undefined) {
+    node.classList.add("bern-text-clamp");
+    effect(() => node.style.setProperty("--bern-text-lines", String(Math.max(1, Number(readValue(lines))))));
+  }
   p.append(node);
 }
 
-export function Label(p, ctx, { title, icon: name, style }) {
+export function Label(p, ctx, { title, icon: name, style, fontSize, display }) {
   const text = el("span");
   bindText(text, title);
-  p.append(el("span", { class: `bern-label bern-${STYLE_CLASS[style] ?? "body"}` }, icon(name), text));
+  const node = el("span", { class: `bern-label bern-${STYLE_CLASS[style] ?? "body"}${display === "icon" ? " bern-label-icon-only" : ""}` }, icon(name), display === "icon" ? null : text);
+  length(node, "fontSize", fontSize);
+  if (display === "icon") {
+    node.setAttribute("role", "img");
+    bindAttr(node, "aria-label", title);
+  }
+  p.append(node);
 }
 
 function enabledOf(enabled) {
   return enabled ?? (() => true);
 }
 
-export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds }, action) {
+export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height }, action) {
   const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
@@ -1190,11 +1225,13 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
     actions: { activate: action, ...(setFile ? { setFile, fileKinds } : {}) },
   });
   if (style) hooks.style?.(node, style, {});
+  controlShape(node, shape, height);
   p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, node) : node);
 }
 
-export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds }, action) {
-  const node = el("button", { class: "bern-icon-button", type: "button" }, icon(name, 16));
+export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence }, action) {
+  const node = el("button", { class: `bern-icon-button${prominence === "prominent" ? " bern-icon-button-prominent" : ""}`, type: "button" }, icon(name, fontSize ?? 16));
+  if (fontSize != null) { node.firstElementChild.style.width = `${fontSize}px`; node.firstElementChild.style.height = `${fontSize}px`; }
   bindAttr(node, "aria-label", label);
   bindAttr(node, "title", label);
   const isEnabled = enabledOf(enabled);
@@ -1243,7 +1280,7 @@ function editable(input, field) {
   });
 }
 
-export function TextInput(p, ctx, { id, label, field, prompt, kind }, submit) {
+export function TextInput(p, ctx, { id, label, field, prompt, kind, labelHidden }, submit) {
   const input = kind === "multiline"
     ? el("textarea", { class: "bern-field", rows: 3 })
     : el("input", { class: "bern-field", type: kind === "secure" ? "password" : "text", autocomplete: "off" });
@@ -1259,7 +1296,8 @@ export function TextInput(p, ctx, { id, label, field, prompt, kind }, submit) {
     target: () => target(ctx, id), role: "text_input", label,
     actions: { edit: (value) => field.set(value), submit, value: kind === "secure" ? null : () => field.peek() },
   });
-  p.append(labelled(input, label, true));
+  if (labelHidden) { bindAttr(input, "aria-label", label); p.append(input); }
+  else p.append(labelled(input, label, true));
 }
 
 export function Search(p, ctx, { id, field, prompt }, submit, results) {
@@ -1341,7 +1379,156 @@ function searchResults(box, input, field, ctx, results) {
   });
 }
 
-export function Switch(p, ctx, { id, label, field, style }) {
+/// The search trigger and its keyboard-navigable, window-scoped palette.
+/// Results own their effects only while the palette is visible.
+export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, height }, submit, results) {
+  const caption = el("span", { class: "bern-search-palette-prompt" });
+  bindText(caption, prompt ?? (() => ""));
+  const trigger = el("button", { class: "bern-search-palette-trigger", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" }, icon("magnifyingglass", 16), caption);
+  const dialog = el("dialog", { class: "bern-search-palette" });
+  const input = el("input", { class: "bern-search-palette-input", type: "search", autocomplete: "off", "aria-autocomplete": "list" });
+  if (panelPrompt ?? prompt) {
+    bindAttr(input, "placeholder", panelPrompt ?? prompt);
+    bindAttr(input, "aria-label", panelPrompt ?? prompt);
+    bindAttr(dialog, "aria-label", panelPrompt ?? prompt);
+  }
+  editable(input, field);
+  const closeButton = el("button", { class: "bern-icon-button", type: "button" }, icon("xmark", 16));
+  bindAttr(closeButton, "aria-label", () => tr("bern.window.close"));
+  const list = el("div", { class: "bern-search-palette-results", id: `bern-search-results-${++fieldSequence}` });
+  input.setAttribute("aria-controls", list.id);
+  dialog.append(el("div", { class: "bern-search-palette-header" }, icon("magnifyingglass", 18), input, closeButton), list);
+  length(dialog, "width", width ?? 640);
+  length(dialog, "height", height ?? 480);
+  let owner = null;
+  let active = null;
+  let restoreFocus = null;
+  const entries = () => [...list.querySelectorAll('[data-bern-search-navigation="true"]')];
+  const select = (node) => {
+    active?.classList.remove("bern-search-item-active");
+    active = node;
+    if (node) {
+      node.classList.add("bern-search-item-active");
+      input.setAttribute("aria-activedescendant", node.id);
+      node.scrollIntoView({ block: "nearest" });
+    } else input.removeAttribute("aria-activedescendant");
+  };
+  const refresh = () => {
+    const available = entries();
+    if (!available.includes(active)) select(available[0] ?? null);
+  };
+  const mutations = new MutationObserver(refresh);
+  const release = () => {
+    mutations.disconnect();
+    owner?.dispose();
+    owner = null;
+    list.replaceChildren();
+    active = null;
+    input.removeAttribute("aria-activedescendant");
+    trigger.setAttribute("aria-expanded", "false");
+  };
+  const close = () => {
+    if (!dialog.open) return;
+    dialog.close();
+    release();
+    if (restoreFocus?.isConnected) restoreFocus.focus();
+  };
+  const open = () => {
+    if (dialog.open || !dialog.isConnected) return;
+    restoreFocus = document.activeElement;
+    field.set("");
+    owner = new Scope(null);
+    within(owner, () => results?.(list, { ...ctx, inToolbar: false, inGroup: false, searchPalette: { close } }));
+    dialog.showModal();
+    trigger.setAttribute("aria-expanded", "true");
+    mutations.observe(list, { childList: true, subtree: true });
+    refresh();
+    input.focus();
+  };
+  trigger.addEventListener("click", open);
+  closeButton.addEventListener("click", close);
+  dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
+  dialog.addEventListener("click", (event) => {
+    if (event.target !== dialog) return;
+    const rect = dialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close();
+  });
+  dialog.addEventListener("keydown", (event) => {
+    // Other window managers must not also close the window below a palette.
+    if (event.key === "Escape" && !event.isComposing) { event.preventDefault(); close(); }
+  });
+  const activate = () => {
+    refresh();
+    if (active) active.click();
+    else submit?.();
+  };
+  input.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    const available = entries();
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!available.length) return;
+      const at = available.indexOf(active);
+      const next = Math.min(available.length - 1, Math.max(0, at + (event.key === "ArrowDown" ? 1 : -1)));
+      select(available[next]);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      activate();
+    }
+  });
+  list.addEventListener("pointermove", (event) => {
+    const item = event.target.closest('[data-bern-search-navigation="true"]');
+    if (item && active !== item) select(item);
+  });
+  mark(trigger, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id), role: "search", label: prompt ?? (() => ""),
+    actions: { activate: open, edit: (value) => field.set(value), submit: activate, value: () => field.peek(), focus: open },
+  });
+  onCleanup(() => {
+    close();
+    release();
+    dialog.remove();
+  });
+  p.append(trigger, dialog);
+}
+
+export function SearchItem(p, ctx, { id, label, icon: name, detail, hint, navigation, setFile, fileKinds }, action, children) {
+  const node = el("button", { class: "bern-search-item", type: "button", id: `bern-search-item-${++fieldSequence}` });
+  bindAttr(node, "aria-label", label);
+  effect(() => {
+    const navigable = navigation === undefined || Boolean(readValue(navigation));
+    node.dataset.bernSearchNavigation = String(navigable);
+    node.classList.toggle("bern-search-item-card", !navigable);
+  });
+  if (children) children(node, { ...ctx, inGroup: false });
+  else {
+    if (name) node.append(el("span", { class: "bern-search-item-icon" }, icon(name, 16)));
+    const title = el("span", { class: "bern-search-item-title" });
+    bindText(title, label);
+    node.append(title);
+    if (detail) {
+      const caption = el("span", { class: "bern-search-item-detail" });
+      bindText(caption, detail);
+      node.append(caption);
+    }
+    if (hint) {
+      const shortcut = el("span", { class: "bern-search-item-hint" });
+      bindText(shortcut, hint);
+      node.append(shortcut);
+    }
+  }
+  const activate = () => { ctx.searchPalette?.close(); action?.(); };
+  node.addEventListener("click", activate);
+  mark(node, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id), role: "button", label,
+    actions: { activate, ...(setFile ? { setFile: (value) => { ctx.searchPalette?.close(); setFile(value); }, fileKinds } : {}) },
+  });
+  p.append(node);
+}
+
+export function Switch(p, ctx, { id, label, field, style, labelHidden }) {
   let node;
   if (style === "checkbox") {
     node = el("button", { class: "bern-checkbox", type: "button", role: "checkbox" }, icon("checkmark", 12));
@@ -1355,25 +1542,33 @@ export function Switch(p, ctx, { id, label, field, style }) {
     target: () => target(ctx, id), role: "switch", label,
     actions: { setBool: (value) => field.set(value), value: () => (field.peek() ? "true" : "false") },
   });
-  p.append(labelled(node, label, false));
+  if (labelHidden) {
+    bindAttr(node, "aria-label", label);
+    p.append(node);
+  } else p.append(labelled(node, label, false));
 }
 
-export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxIcon }, commit) {
+export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxIcon, labelHidden, controlled }, commit) {
   const input = el("input", { class: "bern-slider", type: "range", min, max, step: step ?? "any" });
   const fill = () => {
     const ratio = max > min ? (Number(input.value) - min) / (max - min) : 0;
     input.style.setProperty("--bern-fill", `${Math.min(1, Math.max(0, ratio)) * 100}%`);
   };
+  let editing = false;
+  input.addEventListener("pointerdown", () => editing = true);
+  input.addEventListener("pointercancel", () => { editing = false; input.value = field.peek(); fill(); });
   effect(() => {
     const value = field.get();
+    if (editing) return;
     if (Number(input.value) !== value) input.value = value;
     fill();
   });
   input.addEventListener("input", () => {
-    field.set(Number(input.value));
+    if (!controlled) field.set(Number(input.value));
     fill();
   });
-  input.addEventListener("change", () => commit?.());
+  input.addEventListener("change", () => { editing = false; if (controlled) field.set(Number(input.value)); commit?.(); });
+  input.addEventListener("pointerup", () => { editing = false; });
   mark(input, ctx, id);
   control(ctx, {
     target: () => target(ctx, id), role: "slider", label,
@@ -1385,8 +1580,11 @@ export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxI
       value: () => num(field.peek()),
     },
   });
-  const track = el("div", { class: "bern-slider-track" }, minIcon ? icon(minIcon, 14) : null, input, maxIcon ? icon(maxIcon, 14) : null);
-  p.append(labelled(track, label, true, input));
+  const track = el("div", { class: "bern-slider-track bern-fill-width" }, minIcon ? icon(minIcon, 14) : null, input, maxIcon ? icon(maxIcon, 14) : null);
+  if (labelHidden) {
+    bindAttr(input, "aria-label", label);
+    p.append(track);
+  } else p.append(labelled(track, label, true, input));
 }
 
 let typeaheadReset = 0;
@@ -1544,7 +1742,7 @@ function dropdown(options, field, select) {
   return node;
 }
 
-export function Picker(p, ctx, { id, label, field, options, style }) {
+export function Picker(p, ctx, { id, label, field, options, style, labelHidden, shape, height }) {
   let node;
   const select = (name) => {
     const option = options.find((candidate) => candidate.name === name);
@@ -1588,32 +1786,210 @@ export function Picker(p, ctx, { id, label, field, options, style }) {
     });
   } else {
     node = dropdown(options, field, select);
+    controlShape(node.control, shape, height);
   }
   mark(node.control ?? node, ctx, id);
   control(ctx, {
     target: () => target(ctx, id), role: "picker", label,
     actions: { select, value: () => options.find((option) => eq(option.value, field.peek()))?.name ?? null },
   });
-  if (ctx.inToolbar) p.append(node);
+  if (ctx.inToolbar || labelHidden) {
+    bindAttr(node.control ?? node, "aria-label", label);
+    p.append(node);
+  }
   else p.append(labelled(node, label, style === "radio" || style === "inline", node.control ?? node));
 }
 
-export function Stack(p, ctx, { axis, gap, padding, align }, children) {
+function readValue(value) {
+  return typeof value === "function" ? value() : value;
+}
+
+function length(node, property, value) {
+  if (value !== undefined) effect(() => node.style[property] = `${Math.max(0, Number(readValue(value)) || 0)}px`);
+}
+
+function paddingOf(node, { padding, paddingX, paddingY }) {
+  length(node, "padding", padding);
+  length(node, "paddingInline", paddingX);
+  length(node, "paddingBlock", paddingY);
+}
+
+function controlShape(node, shape, height) {
+  if (shape === "capsule") {
+    node.classList.add("bern-control-capsule");
+    node.style.borderRadius = "999px";
+  }
+  length(node, "height", height);
+}
+
+/// A flexible descendant may offer its parent's size only until an
+/// explicitly sized view stops that proposal. In particular, the Canvas
+/// inside a fixed-size icon must not stretch the row containing that icon.
+export function layoutIntent(node, dimension) {
+  if (node.nodeType !== 1 || node.tagName === "DIALOG" || node.classList.contains(`bern-sized-${dimension}`)) return false;
+  if (node.classList.contains(`bern-fill-${dimension}`)) return true;
+  let children = [...node.children];
+  if (node.bernLayoutAxis === "layers") {
+    // As in native BernLayers, rails cover the size established by other
+    // layers. A progress rail over a fixed image must not turn the image
+    // button into a flexible item. A stack made only of rails can fill.
+    const content = children.filter((child) => !child.classList.contains("bern-rail"));
+    if (content.length) children = content;
+  }
+  const axis = dimension === "width" ? "row" : "column";
+  if (node.bernLayoutAxis === axis && children.some((child) => child.classList.contains("bern-spacer"))) return true;
+  return children.some((child) => layoutIntent(child, dimension));
+}
+
+/// Annotate layout intent instead of using unrestricted CSS :has(), which
+/// cannot distinguish a flexible drawing from one behind a fixed frame.
+function trackLayout(node, axis) {
+  node.bernLayoutAxis = axis;
+  const update = () => {
+    const visit = (element) => {
+      for (const child of element.children) visit(child);
+      for (const dimension of ["width", "height"]) {
+        const className = `bern-layout-${dimension}`;
+        const flexible = layoutIntent(element, dimension);
+        if (element.classList.contains(className) !== flexible) element.classList.toggle(className, flexible);
+      }
+    };
+    visit(node);
+  };
+  update();
+  const observer = new MutationObserver((records) => {
+    if (records.some((record) => [...record.addedNodes, ...record.removedNodes].some((child) => child.nodeType === 1))) update();
+  });
+  observer.observe(node, { childList: true, subtree: true });
+  onCleanup(() => observer.disconnect());
+}
+
+export function Stack(p, ctx, { axis, gap, padding, paddingX, paddingY, align }, children) {
   const node = el("div", {
     class: `bern-stack bern-${axis === "column" ? "vstack" : "hstack"} bern-align-${align ?? (axis === "column" ? "leading" : "center")}`,
   });
-  if (gap !== undefined) node.style.gap = `${gap}px`;
-  if (padding !== undefined) node.style.padding = `${padding}px`;
+  length(node, "gap", gap);
+  paddingOf(node, { padding, paddingX, paddingY });
   children(node, { ...ctx, inGroup: false });
+  trackLayout(node, axis === "column" ? "column" : "row");
   p.append(node);
 }
 
 /// Equal columns, as many as fit at `minWidth` or wider.
-export function Grid(p, ctx, { minWidth, gap, padding }, children) {
+export function Grid(p, ctx, { minWidth, gap, rowGap, padding, paddingX, paddingY }, children) {
   const node = el("div", { class: "bern-grid bern-fill-width" });
-  node.style.gridTemplateColumns = `repeat(auto-fill, minmax(min(100%, ${minWidth}px), 1fr))`;
-  node.style.gap = `${gap ?? 8}px`;
-  if (padding !== undefined) node.style.padding = `${padding}px`;
+  effect(() => node.style.gridTemplateColumns = `repeat(auto-fill, minmax(min(100%, ${Math.max(1, Number(readValue(minWidth)) || 1)}px), 1fr))`);
+  length(node, "gap", gap ?? 8);
+  length(node, "rowGap", rowGap);
+  paddingOf(node, { padding, paddingX, paddingY });
+  children(node, { ...ctx, inGroup: false });
+  p.append(node);
+}
+
+export function Flow(p, ctx, { gap }, children) {
+  const node = el("div", { class: "bern-flow bern-fill-width" });
+  length(node, "gap", gap ?? 8);
+  children(node, { ...ctx, inGroup: false });
+  p.append(node);
+}
+
+/// Timers belong to their rendered scope. Disabling or removing one cancels
+/// its pending tick, including when navigation replaces the enclosing page.
+export function Timer(p, ctx, { interval, enabled }, action) {
+  effect(() => {
+    if (enabled !== undefined && !readValue(enabled)) return;
+    const delay = Math.max(50, (Number(readValue(interval)) || 1) * 1000);
+    let pending;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled) return;
+      untrack(action);
+      if (!cancelled) pending = setTimeout(tick, delay);
+    };
+    pending = setTimeout(tick, delay);
+    onCleanup(() => { cancelled = true; clearTimeout(pending); });
+  });
+}
+
+/// A view-owned blocking overlay, distinct from an application window.
+/// Its lifetime is controlled by the declarative branch containing it.
+export function Modal(p, ctx, { width, height }, children) {
+  const dialog = el("dialog", { class: "bern-modal", tabindex: "-1" });
+  bindAttr(dialog, "aria-label", () => tr("app.name"));
+  length(dialog, "width", width ?? 960);
+  length(dialog, "height", height ?? 600);
+  const content = el("div", { class: "bern-modal-content" });
+  children(content, { ...ctx, inToolbar: false, inGroup: false });
+  dialog.append(content);
+  dialog.addEventListener("cancel", (event) => event.preventDefault());
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") event.preventDefault();
+  });
+  p.append(dialog);
+  let disposed = false;
+  const returnFocus = document.activeElement;
+  const frame = requestAnimationFrame(() => {
+    if (disposed || !dialog.isConnected) return;
+    dialog.showModal();
+    (focusables(dialog)[0] ?? dialog).focus();
+  });
+  onCleanup(() => {
+    disposed = true;
+    cancelAnimationFrame(frame);
+    dialog.close();
+    if (returnFocus?.isConnected) returnFocus.focus();
+  });
+}
+
+/// Fixed collapsed columns share the available width with one expanded
+/// column. Interpolating weights keeps the total width stable throughout.
+export function accordionWidths(total, collapsedWidth, gap, weights) {
+  if (!weights.length) return [];
+  const available = Math.max(0, total - Math.max(0, gap) * (weights.length - 1));
+  const collapsed = Math.min(Math.max(0, collapsedWidth), available / weights.length);
+  const extra = Math.max(0, available - collapsed * weights.length);
+  const widths = weights.map((weight) => Math.max(0, collapsed + extra * weight));
+  const sum = widths.reduce((all, value) => all + value, 0);
+  return sum > 0 ? widths.map((value) => value * available / sum) : widths;
+}
+
+export function Accordion(p, ctx, { count, selected, collapsedWidth, gap, height, corner, animate }, children) {
+  const node = el("div", { class: "bern-accordion bern-fill-width" });
+  length(node, "height", height);
+  length(node, "gap", gap ?? 8);
+  if (corner !== undefined) effect(() => node.style.setProperty("--bern-accordion-corner", `${Math.max(0, Number(readValue(corner)) || 0)}px`));
+  let totalWidth = 0;
+  let weights = [];
+  let springs = [];
+  let lastCount = 0;
+  const write = () => {
+    const n = weights.length;
+    if (!n) return;
+    const widths = accordionWidths(totalWidth, Number(readValue(collapsedWidth)) || 0, Number(readValue(gap ?? 8)) || 0, weights);
+    node.style.gridTemplateColumns = widths.map((value) => `${value}px`).join(" ");
+  };
+  effect(() => {
+    const n = Math.max(0, Math.floor(Number(readValue(count)) || 0));
+    const selection = Math.min(Math.max(0, Number(readValue(selected)) || 0), Math.max(0, n - 1));
+    readValue(gap); readValue(collapsedWidth);
+    if (n !== lastCount) {
+      springs.forEach((spring) => spring?.set(spring.value));
+      weights = Array.from({ length: n }, (_, at) => at === selection ? 1 : 0);
+      springs = weights.map((value, at) => hooks.spring?.(value, (next) => { weights[at] = next; write(); }));
+      lastCount = n;
+    } else weights.forEach((value, at) => {
+      const target = at === selection ? 1 : 0;
+      if (springs[at]) springs[at].to(target, animate);
+      else weights[at] = target;
+    });
+    write();
+  });
+  const resize = new ResizeObserver((entries) => {
+    totalWidth = entries[0].contentRect.width;
+    write();
+  });
+  resize.observe(node);
+  onCleanup(() => { resize.disconnect(); springs.forEach((spring) => spring?.set(spring.value)); });
   children(node, { ...ctx, inGroup: false });
   p.append(node);
 }
@@ -1627,10 +2003,16 @@ const LAYER_PLACE = {
 
 /// `Stack`: children share one grid cell, later ones above earlier ones,
 /// and the stack is as large as its largest layer.
-export function Layers(p, ctx, { align }, children) {
+export function Layers(p, ctx, { align, style, enabled }, children) {
   const node = el("div", { class: "bern-layers" });
   node.style.placeItems = LAYER_PLACE[align ?? "center"];
   children(node, { ...ctx, inGroup: false });
+  trackLayout(node, "layers");
+  if (style) hooks.style?.(node, style, { enabled });
+  if (enabled) effect(() => {
+    node.inert = !enabled();
+    node.setAttribute("aria-disabled", node.inert ? "true" : "false");
+  });
   p.append(ctx.inGroup ? el("div", { class: "bern-row bern-row-media" }, node) : node);
 }
 
@@ -2126,12 +2508,12 @@ export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
 /// A menu button (WAI-ARIA APG Menu Button): the menu is a popover in the
 /// top layer and takes focus while open. Each item runs its command through
 /// the same closure external entries activate, open or not.
-export function Menu(p, ctx, { id, label, icon: name }, items) {
+export function Menu(p, ctx, { id, label, icon: name, style, shape, height }, items) {
   const menuId = `bern-menu-${++fieldSequence}`;
   const text = el("span");
   bindText(text, label);
   // In a toolbar a menu with an icon shows only the icon.
-  const iconOnly = Boolean(name) && ctx.inToolbar;
+  const iconOnly = Boolean(name) && (ctx.inToolbar || style === "icon");
   const trigger = el("button", {
     class: iconOnly ? "bern-icon-button bern-menu-button" : "bern-button bern-button-standard bern-menu-button", type: "button",
     "aria-haspopup": "menu", "aria-expanded": "false", "aria-controls": menuId, popovertarget: menuId,
@@ -2140,6 +2522,7 @@ export function Menu(p, ctx, { id, label, icon: name }, items) {
     bindAttr(trigger, "aria-label", label);
     bindAttr(trigger, "title", label);
   }
+  if (!iconOnly) controlShape(trigger, shape, height);
   const list = el("div", { class: "bern-menu", role: "menu", id: menuId, popover: "auto" });
   bindAttr(list, "aria-label", label);
   const buttons = [];
@@ -2364,6 +2747,11 @@ export function Query(p, ctx, spec, template) {
       return data === null ? null : shown(data);
     }),
   });
+  // Queries can replace a loading placeholder with a page containing a
+  // scroll view. Carry that page's layout intent through both wrappers,
+  // including subsequent result replacements, for this query's lifetime.
+  trackLayout(content, "column");
+  trackLayout(node, "column");
   if (id) {
     control(ctx, {
       target: () => target(ctx, id), role: "query", label: () => "",
@@ -3140,6 +3528,8 @@ class WindowManager {
   /// Escape closes the top dialog through the close protocol; Tab stays
   /// inside it. Its own confirmation or alert handles keys first.
   keydown(event) {
+    // Native view overlays manage their own Escape and focus boundaries.
+    if (event.target.closest?.("dialog[open]")) return;
     const top = this.topDialog();
     if (!top || event.defaultPrevented) return;
     if (top.pendingClose.peek() || top.failure.peek()) return;
@@ -3208,7 +3598,7 @@ class WindowManager {
       body.append(content);
       if (this.app.layouts) this.sizeWindow(win);
       kind.render(content, ctx);
-      if (kind.idleAfter) hooks.idle?.(win, kind.idleAfter);
+      if (kind.idleAfter) hooks.idle?.(win, kind.idleAfter, () => kind.idleEnabled ? kind.idleEnabled(ctx) : true);
       // Immersive: the page header and its toolbar hide, and the pointer
       // once the window is idle.
       if (kind.immersive) effect(() => win.element.classList.toggle("bern-immersive", kind.immersive(ctx) === true));
@@ -3255,7 +3645,7 @@ class WindowManager {
       "aria-labelledby": `bern-title-${kind.id}`, "data-bern-window": kind.id, tabindex: "-1",
     }, header, body);
     element.style.setProperty("--bern-dialog-width", `${kind.width ?? 560}px`);
-    if (kind.height) element.style.height = `${kind.height}px`;
+    if (kind.height) element.style.setProperty("--bern-dialog-height", `${kind.height}px`);
     const layer = el("div", { class: "bern-dialog-layer" }, element);
     // A click that starts and ends on the scrim requests closing.
     let fromScrim = false;
@@ -3696,4 +4086,40 @@ export async function start(app) {
 /// Dispatch an engine command for a control in `ctx`'s window.
 export function dispatch(ctx, command, encode, completion) {
   host.dispatch(command, encode, ctx?.win ?? null, completion);
+}
+
+
+export function ScaleBox(p, ctx, { width, height }, children) {
+  const host = el("div", { class: "bern-scale-box bern-fill-width bern-fill-height" });
+  const scene = el("div", { class: "bern-scale-scene" });
+  host.append(scene); p.append(host);
+  const size = cell({ width: 0, height: 0 });
+  const observer = new ResizeObserver(([entry]) => size.set(entry.contentRect));
+  observer.observe(host); onCleanup(() => observer.disconnect());
+  effect(() => {
+    const w = Math.max(1, Number(readValue(width))), h = Math.max(1, Number(readValue(height)));
+    const available = size.get(), scale = Math.min(available.width / w, available.height / h);
+    Object.assign(scene.style, { width: `${w}px`, height: `${h}px`, transform: `scale(${scale})`, left: `${(available.width-w*scale)/2}px`, top: `${(available.height-h*scale)/2}px` });
+  });
+  children(scene, ctx);
+}
+export function Positioned(p, ctx, props, children) {
+  const node = el("div", { class: "bern-positioned bern-sized-width bern-sized-height" });
+  p.append(node); children(node, ctx);
+}
+
+export function Marquee(p, ctx, { duration, phase = 0, paused, opacity }, children) {
+  const host = el("div", { class: "bern-marquee bern-fill-width bern-fill-height" });
+  const line = el("div", { class: "bern-marquee-line" });
+  host.append(line); p.append(host); children(line, ctx);
+  const observer = new ResizeObserver(([e]) => host.style.setProperty("--marquee-width", `${e.contentRect.width}px`));
+  observer.observe(host); onCleanup(() => observer.disconnect());
+  effect(() => {
+    const seconds = Math.max(1, Number(readValue(duration)) || 12);
+    line.style.animationDuration = `${seconds}s`;
+    line.style.animationDelay = `${-seconds * phase}s`;
+    line.style.animationPlayState = readValue(paused) ? "paused" : "running";
+    line.classList.toggle("bern-marquee-reduced", hooks.reduced?.() ?? false);
+    line.style.opacity = opacity === undefined ? 1 : Math.min(1, Math.max(0, Number(readValue(opacity))));
+  });
 }

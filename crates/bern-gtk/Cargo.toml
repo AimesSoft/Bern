@@ -12,7 +12,13 @@ publish = false
 # for building the other targets.
 [workspace]
 
+[features]
+svg = ["dep:bern-svg", "dep:webkit6", "dep:serde_json"]
+
 [dependencies]
+bern-svg = { path = "../bern-svg", optional = true }
+webkit6 = { version = "0.6.1", optional = true }
+serde_json = { version = "1", optional = true }
 bern-ffi = { path = "../bern-ffi" }
 bern-image = { path = "../bern-image" }
 libc = "0.2"

@@ -254,6 +254,7 @@ button:disabled {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -262,6 +263,7 @@ button:disabled {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   container-type: inline-size;
@@ -288,6 +290,7 @@ button:disabled {
 .bern-window-dialog {
   position: relative;
   width: min(var(--bern-dialog-width, 560px), 100%);
+  height: var(--bern-dialog-height, auto);
   max-height: 85%;
   border-radius: var(--bern-radius-dialog);
   background: var(--bern-surface-raised);
@@ -577,6 +580,10 @@ button:disabled {
   gap: 8px;
 }
 
+.bern-tools:empty {
+  display: none;
+}
+
 /* A divider parts two groups of tools. */
 .bern-tool-group > .bern-divider {
   align-self: center;
@@ -604,6 +611,16 @@ button:disabled {
 
 .bern-text {
   margin: 0;
+}
+
+.bern-text-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--bern-text-lines);
+  line-clamp: var(--bern-text-lines);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .bern-large-title,
@@ -681,6 +698,17 @@ button:disabled {
 
 .bern-label .bern-icon {
   color: var(--bern-icon-secondary);
+  width: 1em;
+  height: 1em;
+  flex: none;
+}
+
+.bern-label-icon-only {
+  display: inline-flex;
+  justify-content: center;
+  width: 1em;
+  height: 1em;
+  gap: 0;
 }
 
 /* MARK: Layout */
@@ -722,6 +750,10 @@ button:disabled {
   align-items: flex-end;
 }
 
+.bern-hstack.bern-align-baseline {
+  align-items: baseline;
+}
+
 .bern-spacer {
   flex: 1;
 }
@@ -731,6 +763,65 @@ button:disabled {
   min-width: 0;
 }
 
+.bern-flow {
+  display: flex;
+  flex-flow: row wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.bern-accordion {
+  display: grid;
+  min-width: 0;
+}
+
+.bern-accordion > *,
+.bern-accordion > .bern-layers {
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--bern-accordion-corner, 0);
+}
+
+.bern-modal {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--bern-separator);
+  border-radius: 24px;
+  background: var(--bern-surface-raised);
+  color: var(--bern-text-primary);
+  box-shadow: 0 16px 48px -12px var(--bern-scrim);
+  overflow: hidden;
+}
+
+.bern-modal::backdrop,
+.bern-search-palette::backdrop {
+  background: var(--bern-scrim);
+}
+
+.bern-modal[open] {
+  display: flex;
+  position: fixed;
+  inset: 0;
+}
+
+.bern-modal-content,
+.bern-modal-content > * {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.bern-modal-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* Stack: every layer in the same cell, later ones on top; as large as
    the largest layer. */
 .bern-layers {
@@ -738,6 +829,15 @@ button:disabled {
   width: fit-content;
   max-width: 100%;
   min-width: 0;
+  min-height: 0;
+}
+
+.bern-window-content > .bern-layers,
+.bern-modal-content > .bern-layers,
+.bern-layers:has(.bern-split) {
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
 }
 
 .bern-layers > * {
@@ -750,12 +850,9 @@ button:disabled {
   min-width: 0;
 }
 
-/* A picture keeps its declared size, so a stack holding one does not
-   shrink below its content: the picture never spills over its
-   neighbours. Other stacks may still shrink and wrap their text. */
-.bern-stack:has(.bern-image) {
-  min-width: min-content;
-}
+/* Declared image frames retain their size via flex:none and the
+   bern-sized-width rules. Ancestor stacks must still be shrinkable:
+   a distant image must not set the minimum width of the whole page. */
 
 .bern-progress {
   display: flex;
@@ -796,6 +893,11 @@ button:disabled {
   margin: 0;
   border: 0;
   border-top: 1px solid var(--bern-separator);
+}
+
+.bern-layers > .bern-divider {
+  justify-self: stretch;
+  align-self: auto;
 }
 
 .bern-scroll {
@@ -1084,6 +1186,206 @@ button:disabled {
 
 .bern-icon-button:disabled {
   color: var(--bern-disabled-foreground);
+}
+
+.bern-icon-button:focus-visible {
+  outline: none;
+  box-shadow: none;
+  color: var(--bern-accent-text);
+}
+
+.bern-icon-button:focus-visible .bern-icon {
+  filter: drop-shadow(0 0 2px var(--bern-accent));
+}
+
+.bern-icon-button.bern-icon-button-prominent {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--bern-accent);
+  color: var(--bern-on-accent);
+}
+.bern-icon-button.bern-icon-button-prominent:hover:not(:disabled) {
+  background: var(--bern-button-prominent-hover);
+  color: var(--bern-on-accent);
+}
+.bern-icon-button.bern-icon-button-prominent:focus-visible {
+  outline: 2px solid var(--bern-focus-indicator);
+  outline-offset: 3px;
+}
+.bern-dropdown.bern-control-capsule {
+  min-width: 0;
+  width: 100%;
+  padding-inline: 10px;
+  gap: 6px;
+  border-color: var(--bern-separator);
+  background: var(--bern-surface-canvas);
+  font-size: 13px;
+  font-weight: 500;
+}
+.bern-button.bern-control-capsule {
+  min-width: 0;
+  padding-inline: 10px;
+  gap: 6px;
+  font-size: 13px;
+}
+.bern-control-capsule > .bern-icon:last-child { width: 12px; height: 12px; }
+.bern-dropdown-wrap:has(> .bern-control-capsule) { width: 100%; }
+.bern-toggle-button.bern-control-capsule { min-width: 0; padding-inline: 13px; }
+
+.bern-control-capsule {
+  border-radius: 999px;
+}
+
+/* The palette is a browser modal so its focus and overlay follow the
+   document viewport, even when its trigger lives in a clipped toolbar. */
+.bern-search-palette-trigger {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  width: min(250px, 35vw);
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--bern-control-border);
+  border-radius: 999px;
+  background: var(--bern-surface-raised);
+  color: var(--bern-text-secondary);
+  text-align: start;
+}
+
+.bern-search-palette-prompt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bern-search-palette {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--bern-separator);
+  border-radius: 18px;
+  background: var(--bern-surface-raised);
+  color: var(--bern-text-primary);
+  box-shadow: 0 16px 48px -12px var(--bern-scrim);
+  overflow: hidden;
+}
+
+.bern-search-palette[open] {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  inset: 0;
+  animation: bern-dialog-in var(--bern-motion) ease-out;
+}
+
+.bern-search-palette-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  min-height: 58px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--bern-separator);
+}
+
+.bern-search-palette-input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 56px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.bern-search-palette-input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.bern-search-palette-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 6px 0;
+}
+
+.bern-search-palette-results > .bern-stack,
+.bern-search-palette-results .bern-vstack {
+  width: 100%;
+}
+
+.bern-search-palette-results .bern-scroll-horizontal {
+  flex: none;
+  height: auto;
+  min-height: 0;
+}
+
+.bern-search-item {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  width: calc(100% - 12px);
+  min-height: 42px;
+  margin: 0 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  text-align: start;
+}
+
+.bern-search-item-active,
+.bern-search-item:hover:not(.bern-search-item-card),
+.bern-search-item:focus-visible:not(.bern-search-item-card) {
+  background: var(--bern-hover-overlay);
+}
+
+.bern-search-item-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--bern-hover-overlay);
+  color: var(--bern-icon-secondary);
+}
+
+.bern-search-item-title,
+.bern-search-item-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bern-search-item-detail,
+.bern-search-item-hint {
+  font-size: 12px;
+  color: var(--bern-text-secondary);
+}
+
+.bern-search-item-hint {
+  margin-inline-start: auto;
+}
+
+.bern-search-item-card {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  align-items: flex-start;
+  border-radius: 0;
+}
+
+.bern-search-item-card:hover {
+  opacity: 0.8;
 }
 
 /* MARK: Fields */
@@ -1593,7 +1895,9 @@ button.bern-menu-item:disabled .bern-icon {
 
 .bern-sidebar-item[aria-selected="true"] .bern-icon,
 .bern-tabs-vertical .bern-tab[aria-selected="true"] .bern-icon {
-  color: var(--bern-on-accent);
+  /* Follow the selected row's actual foreground, including a style's
+     contrast pairing when it replaces the default accent fill. */
+  color: inherit;
 }
 
 @media (hover: hover) {
@@ -1608,6 +1912,7 @@ button.bern-menu-item:disabled .bern-icon {
 .bern-split {
   flex: 1;
   display: flex;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -1664,6 +1969,7 @@ button.bern-menu-item:disabled .bern-icon {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   overflow: auto;
 }
@@ -1895,7 +2201,17 @@ button.bern-menu-item:disabled .bern-icon {
 .bern-query {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   gap: 8px;
+}
+
+.bern-query-status {
+  flex: none;
+}
+
+.bern-query-status:empty {
+  display: none;
 }
 
 .bern-query-center {
@@ -1930,6 +2246,8 @@ button.bern-menu-item:disabled .bern-icon {
 .bern-query-content {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   gap: 32px;
 }
 

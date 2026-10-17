@@ -9,6 +9,7 @@
 pub mod glue;
 pub mod icon;
 pub mod style;
+pub mod svg;
 pub mod texts;
 
 use bern_ir::{Application, IR_VERSION, SourceLocation};
@@ -145,6 +146,7 @@ pub mod feature {
     pub const SEARCH_PALETTE: &str = "search_palette";
     pub const IMAGE_TEMPLATE: &str = "image_template";
     pub const ADAPTIVE_IMAGES: &str = "adaptive_images";
+    pub const SCALED_SCENE: &str = "scaled_scene";
     pub const ACCORDION_LAYOUT: &str = "accordion_layout";
     pub const CAPSULE_CONTROLS: &str = "capsule_controls";
     pub const MODAL_FLOW_TIMER: &str = "modal_flow_timer";
@@ -975,11 +977,16 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
         );
     }
     if lacks(feature::ICON_LABELS)
-        && let Some(label) = first_element(app, |element| element.kind == "Label" && element.keyword("display") == Some("icon"))
+        && let Some(label) = first_element(app, |element| {
+            element.kind == "Label" && element.keyword("display") == Some("icon")
+        })
     {
         diagnostics.push(
-            Diagnostic::error(format!("target `{}` cannot show a `Label` as an icon only", descriptor.id))
-                .at(label.source.clone()),
+            Diagnostic::error(format!(
+                "target `{}` cannot show a `Label` as an icon only",
+                descriptor.id
+            ))
+            .at(label.source.clone()),
         );
     }
     if lacks(feature::ROW_BASELINE)
@@ -1029,17 +1036,44 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
             .at(element.source.clone()),
         );
     }
+    if lacks(feature::SCALED_SCENE)
+        && let Some(element) = first_element(app, |e| {
+            matches!(e.kind.as_str(), "ScaleBox" | "Positioned" | "Marquee")
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error("this target does not support scaled coordinate scenes")
+                .at(element.source.clone()),
+        );
+    }
+    if lacks(feature::SCALED_SCENE)
+        && let Some(element) = first_element(app, |e| {
+            e.kind == "Text" && matches!(e.prop("font_size"), Some(bern_ir::Prop::Expr { .. }))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error("this target does not support dynamic text sizes")
+                .at(element.source.clone()),
+        );
+    }
     if lacks(feature::ACCORDION_LAYOUT)
         && let Some(element) = first_element(app, |element| element.kind == "Accordion")
     {
-        diagnostics.push(Diagnostic::error(format!(
-            "target `{}` cannot animate accordion column widths", descriptor.id
-        )).at(element.source.clone()));
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot animate accordion column widths",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
     }
     if lacks(feature::ADAPTIVE_IMAGES)
         && let Some(element) = first_element(app, |element| {
             (element.kind == "Image" && element.prop("aspect").is_some())
-                || (element.kind == "Grid" && element.prop("row_gap").is_some()) || (element.kind == "Slider" && element.prop("label_hidden").is_some()) || (matches!(element.kind.as_str(), "Text" | "Label") && element.prop("font_size").is_some())
+                || (element.kind == "Grid" && element.prop("row_gap").is_some())
+                || (element.kind == "Slider" && element.prop("label_hidden").is_some())
+                || (matches!(element.kind.as_str(), "Text" | "Label")
+                    && element.prop("font_size").is_some())
         })
     {
         diagnostics.push(
@@ -1051,36 +1085,73 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
         );
     }
     if lacks(feature::PAGE_BADGES)
-        && let Some(element) = first_element(app, |e| e.kind == "SidebarItem" && e.prop("badge").is_some()) {
-        diagnostics.push(Diagnostic::error(format!("target `{}` cannot render live page badges", descriptor.id)).at(element.source.clone()));
+        && let Some(element) = first_element(app, |e| {
+            e.kind == "SidebarItem" && e.prop("badge").is_some()
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot render live page badges",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
     }
     if lacks(feature::MODAL_FLOW_TIMER)
-        && let Some(element) = first_element(app, |e| matches!(e.kind.as_str(), "Modal" | "Flow" | "Timer" | "PickerOption") || (e.kind == "Stack" && e.prop("enabled").is_some()))
+        && let Some(element) = first_element(app, |e| {
+            matches!(e.kind.as_str(), "Modal" | "Flow" | "Timer" | "PickerOption")
+                || (e.kind == "Stack" && e.prop("enabled").is_some())
+        })
     {
-        diagnostics.push(Diagnostic::error(format!("target `{}` cannot render modal, flow, timer or explicit picker options", descriptor.id)).at(element.source.clone()));
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot render modal, flow, timer or explicit picker options",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
     }
     if lacks(feature::CAPSULE_CONTROLS)
         && let Some(element) = first_element(app, |element| {
-            matches!(element.kind.as_str(), "Button" | "Menu")
-                && (element.prop("shape").is_some() || element.prop("height").is_some())
+            element.kind == "ControlGroup"
+                || (matches!(
+                    element.kind.as_str(),
+                    "Button" | "Menu" | "Picker" | "Switch" | "SplitButton"
+                ) && (element.prop("shape").is_some() || element.prop("height").is_some()))
         })
     {
-        diagnostics.push(Diagnostic::error(format!(
-            "target `{}` cannot render capsule system controls", descriptor.id
-        )).at(element.source.clone()));
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot render capsule system controls",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
     }
     if lacks(feature::SIDEBAR_WIDTH)
-        && let Some(sidebar) = first_element(app, |e| e.kind == "Sidebar" && e.prop("width").is_some())
+        && let Some(sidebar) =
+            first_element(app, |e| e.kind == "Sidebar" && e.prop("width").is_some())
     {
-        diagnostics.push(Diagnostic::error(format!("target `{}` cannot fix a sidebar width", descriptor.id)).at(sidebar.source.clone()));
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot fix a sidebar width",
+                descriptor.id
+            ))
+            .at(sidebar.source.clone()),
+        );
     }
     if lacks(feature::CONTROLLED_VALUES)
         && let Some(control) = first_element(app, |e| {
-            matches!(e.kind.as_str(), "Switch" | "Picker")
-                && (e.prop("checked").is_some()
-                    || e.prop("selected").is_some()
-                    || e.prop("label_hidden").is_some()
-                    || e.action.is_some())
+            if e.kind == "Slider" {
+                // Draft-backed sliders already support commit actions on every target.
+                e.prop("current").is_some()
+            } else {
+                matches!(e.kind.as_str(), "Switch" | "Picker")
+                    && (e.prop("checked").is_some()
+                        || e.prop("selected").is_some()
+                        || e.prop("label_hidden").is_some()
+                        || e.action.is_some())
+            }
         })
     {
         diagnostics.push(

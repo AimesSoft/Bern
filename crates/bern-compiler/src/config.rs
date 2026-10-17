@@ -1160,13 +1160,13 @@ fn load_module(dir: &Path, written: &str) -> Result<ModuleConfig, Vec<Diagnostic
     .map_err(|error| errors.push(error))
     .ok();
     for page in &raw.pages {
-        if let Some(badge) = &page.badge {
-            if !bern_protocol::valid_name(badge) {
-                errors.push(Diagnostic::error(format!(
-                    "{}: page badge `{badge}` must name a lower snake case state field",
-                    manifest.display()
-                )));
-            }
+        if let Some(badge) = &page.badge
+            && !bern_protocol::valid_name(badge)
+        {
+            errors.push(Diagnostic::error(format!(
+                "{}: page badge `{badge}` must name a lower snake case state field",
+                manifest.display()
+            )));
         }
         for (what, name) in [("slot", &page.slot), ("page id", &page.id)] {
             if !bern_protocol::valid_name(name) {
