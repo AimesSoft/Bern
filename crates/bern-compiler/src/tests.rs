@@ -463,23 +463,32 @@ mod independent_target {
     fn targets_without_idle_control_warn_that_idleness_stays_on() {
         let compiled = compile_project(
             MEDIA_PROTOCOL,
-            &media_project(r#", idle_after: 3, idle_enabled: draft.name == """#, "", "Spacer"),
+            &media_project(
+                r#", idle_after: 3, idle_enabled: draft.name == """#,
+                "",
+                "Spacer",
+            ),
         )
         .unwrap_or_else(|errors| panic!("{errors:?}"));
         let messages: Vec<String> = Outline
-            .check(&compiled.app, &TargetConfig {
-                name: "outline".into(),
-                platform: "test".into(),
-                ui: None,
-                web_mode: None,
-                channels: vec![],
-                frontends: vec![],
-            })
+            .check(
+                &compiled.app,
+                &TargetConfig {
+                    name: "outline".into(),
+                    platform: "test".into(),
+                    ui: None,
+                    web_mode: None,
+                    channels: vec![],
+                    frontends: vec![],
+                },
+            )
             .iter()
             .map(ToString::to_string)
             .collect();
         assert!(
-            messages.iter().any(|m| m.contains("ignores `idle_enabled` of window `main`")),
+            messages
+                .iter()
+                .any(|m| m.contains("ignores `idle_enabled` of window `main`")),
             "{messages:?}"
         );
     }

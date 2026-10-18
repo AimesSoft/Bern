@@ -1203,7 +1203,11 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
         );
     }
     if lacks(feature::IDLE_CONTROL)
-        && let Some(window) = app.windows.windows.iter().find(|w| w.idle_enabled.is_some())
+        && let Some(window) = app
+            .windows
+            .windows
+            .iter()
+            .find(|w| w.idle_enabled.is_some())
     {
         diagnostics.push(Diagnostic::warning(format!(
             "target `{}` ignores `idle_enabled` of window `{}`: once `idle_after` passes without input, `window.idle` turns on whatever the state",

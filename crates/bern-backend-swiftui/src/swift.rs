@@ -2379,7 +2379,9 @@ impl<'a> Generator<'a> {
                     // Turning hit testing off as well takes a split view's
                     // toolbar safe area away on macOS: its columns then
                     // slide under the title bar.
-                    out.line(format!(".disabled(!({enabled})).accessibilityHidden(!({enabled}))"));
+                    out.line(format!(
+                        ".disabled(!({enabled})).accessibilityHidden(!({enabled}))"
+                    ));
                 }
                 if let Some(style) = self.style_of(element) {
                     out.line(format!(

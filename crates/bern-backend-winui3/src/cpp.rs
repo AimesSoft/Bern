@@ -1109,7 +1109,8 @@ impl<'a> Generator<'a> {
                         ("reflow", Self::reflow(element)),
                         (
                             "hideIndicators",
-                            (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
+                            (element.keyword("indicators") == Some("hidden"))
+                                .then(|| "true".into()),
                         ),
                     ])
                 ),

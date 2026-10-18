@@ -959,9 +959,15 @@ platform = "macos"
     assert!(generated.contains(".scrollIndicators(.never)"));
     // Scroll views enter without moving themselves: a scroll view's
     // content enters on appear inside it, and a form fades below the bar.
-    let shelf = generated.split("SwiftUI.ScrollView(.horizontal) {").nth(1).unwrap();
+    let shelf = generated
+        .split("SwiftUI.ScrollView(.horizontal) {")
+        .nth(1)
+        .unwrap();
     let shelf = &shelf[..shelf.find(".scrollIndicators").unwrap()];
-    assert!(shelf.contains("SwiftUI.Group {") && shelf.contains("appear: BernAppear.fade, delay: 0.0)"), "{shelf}");
+    assert!(
+        shelf.contains("SwiftUI.Group {") && shelf.contains("appear: BernAppear.fade, delay: 0.0)"),
+        "{shelf}"
+    );
     assert!(generated.contains(".bernScrollEntrance(motion:"));
     let errors = SwiftUiIos.check(&compiled.app, &context.target);
     assert!(errors.iter().any(|e| e.message.contains("macOS Toolbar")));
