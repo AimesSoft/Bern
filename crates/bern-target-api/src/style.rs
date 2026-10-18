@@ -1,6 +1,7 @@
 //! Style overrides of one platform: the rules of `style!` that apply to a
 //! control kind and variant, merged for a target to draw.
 
+use crate::names::pascal;
 use bern_ir::Application;
 use bern_ir::style::{ControlSize, StyleEffect, StyleRule, StyleState};
 
@@ -127,20 +128,5 @@ pub fn used(app: &Application, platform: &str) -> Vec<Resolved> {
     }
     keys.iter()
         .filter_map(|(kind, variant)| resolve(app, platform, kind, variant.as_deref()))
-        .collect()
-}
-
-/// `snake_case` as `PascalCase`.
-fn pascal(snake: &str) -> String {
-    snake
-        .split('_')
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                None => String::new(),
-            }
-        })
         .collect()
 }

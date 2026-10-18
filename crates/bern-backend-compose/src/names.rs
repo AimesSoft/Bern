@@ -42,37 +42,11 @@ fn escape(name: String) -> String {
 
 /// `snake_case` as a Kotlin member, `lowerCamelCase`.
 pub fn member(snake: &str) -> String {
-    let mut out = String::new();
-    let mut upper = false;
-    for (index, c) in snake.chars().enumerate() {
-        if c == '_' {
-            upper = index > 0;
-            continue;
-        }
-        if upper {
-            out.extend(c.to_uppercase());
-            upper = false;
-        } else {
-            out.push(c);
-        }
-    }
-    escape(out)
+    escape(bern_target_api::names::camel(snake))
 }
 
 /// `snake_case` as a Kotlin type, `UpperCamelCase`.
-pub fn pascal(snake: &str) -> String {
-    snake
-        .split(['_', '-'])
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                None => String::new(),
-            }
-        })
-        .collect()
-}
+pub use bern_target_api::names::pascal;
 
 /// A Kotlin string literal; `$` is escaped so nothing interpolates.
 pub fn string(value: &str) -> String {

@@ -8,6 +8,7 @@
 
 pub mod glue;
 pub mod icon;
+pub mod names;
 pub mod style;
 pub mod svg;
 pub mod texts;

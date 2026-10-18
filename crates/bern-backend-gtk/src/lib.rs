@@ -114,18 +114,7 @@ fn reflow_warnings(app: &Application) -> Vec<Diagnostic> {
 /// Directory and executable name of the product, e.g. `Showcase` and
 /// `showcase` for app id `showcase`.
 pub fn product_name(app: &Application) -> String {
-    app.app
-        .id
-        .split(['_', '-'])
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                None => String::new(),
-            }
-        })
-        .collect()
+    bern_target_api::names::pascal(&app.app.id)
 }
 
 /// The application icon beside the executable, named after the
