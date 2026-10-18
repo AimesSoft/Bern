@@ -28,7 +28,6 @@ impl Generator<'_> {
         }
     }
 
-    /// The label of the selected option, as a Swift `String` expression.
     fn font(&self, out: &mut Out, element: &Element) {
         if let Some(style) = element
             .keyword("style")

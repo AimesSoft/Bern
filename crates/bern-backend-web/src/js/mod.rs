@@ -65,7 +65,6 @@ impl Out {
     }
 }
 
-/// A JavaScript string literal.
 /// A color for the runtime: a role, or a fixed pair for light and dark.
 pub fn color_ref(color: &bern_ir::style::ColorRef) -> String {
     match color {
@@ -86,6 +85,7 @@ pub(crate) fn member(name: &str) -> String {
     out
 }
 
+/// A JavaScript string literal.
 pub fn string(value: &str) -> String {
     serde_json::to_string(value).expect("string")
 }
@@ -121,8 +121,6 @@ impl<'a> Generator<'a> {
         &self.app.types
     }
 
-    /// The page's `app.js`. `version` is appended to the URLs it loads, so
-    /// a rebuilt page never runs with a cached runtime or module.
     /// The motion tokens (`M`), transitions (`X`) and patterns (`P`) of
     /// `style!`.
     fn style_tables(&self, out: &mut Out) {
@@ -198,6 +196,8 @@ impl<'a> Generator<'a> {
         out.line("");
     }
 
+    /// The page's `app.js`. `version` is appended to the URLs it loads, so
+    /// a rebuilt page never runs with a cached runtime or module.
     pub fn generate(
         &self,
         fingerprint: u64,

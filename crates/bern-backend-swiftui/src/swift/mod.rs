@@ -361,7 +361,6 @@ impl<'a> Generator<'a> {
     }
 }
 
-/// `(value, label)` of every sidebar item, in declaration order.
 /// `case .variant(let a, _)` for one arm of a `match`, or `default`.
 fn case_pattern(def: &EnumDef, arm: &MatchArm) -> String {
     let Some(index) = arm.variant else {
