@@ -23,6 +23,7 @@ dependencies = [
  "bern-media",
  "bern-protocol",
  "bern-runtime",
+ "serde_json",
  "trybuild",
 ]
 

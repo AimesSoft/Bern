@@ -35,19 +35,10 @@ fn trybuild_project() -> PathBuf {
         .output()
         .unwrap();
     assert!(output.status.success(), "cargo metadata failed");
-    let metadata = String::from_utf8(output.stdout).unwrap();
-    let key = "\"target_directory\":\"";
-    let start = metadata.find(key).expect("the target directory") + key.len();
-    // A JSON string; in a path only `\` and `"` are escaped.
-    let mut target = String::new();
-    let mut chars = metadata[start..].chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '"' => break,
-            '\\' => target.extend(chars.next()),
-            c => target.push(c),
-        }
-    }
+    let metadata: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let target = metadata["target_directory"]
+        .as_str()
+        .expect("the target directory");
     PathBuf::from(target)
         .join("tests/trybuild")
         .join(env!("CARGO_PKG_NAME"))
