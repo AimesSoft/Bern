@@ -1,11 +1,11 @@
 use super::*;
 use bern_ir::{
-    AppInfo, FieldRef, Languages, SessionDef, SessionFieldDef, SourceLocation, Theme, ThemeMode,
-    WindowCatalog,
+    Action, AppInfo, Binding, Element, Expr, ExprKind, FieldRef, Languages, SessionDef,
+    SessionFieldDef, SourceLocation, Text, Theme, ThemeMode, WindowCatalog,
 };
 use bern_protocol::{
-    CommandPolicy, CommandSpec, ExternalNames, LocalizedText, OperationKind, ParamSpec,
-    ProtocolDescriptor, Scope, StateField, VariantDef,
+    CommandPolicy, CommandSpec, EnumDef, ExternalNames, LocalizedText, OperationKind, ParamSpec,
+    ProtocolDescriptor, Scope, StateField, Type, VariantDef,
 };
 use std::collections::BTreeMap;
 
