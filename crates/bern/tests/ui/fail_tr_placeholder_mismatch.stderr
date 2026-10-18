@@ -1,0 +1,5 @@
+error: error[B104]: every translation must use the same placeholders
+  --> tests/ui/fail_tr_placeholder_mismatch.rs:22:56
+   |
+22 |     ui! { Text(content: tr! { "en" => "{count} items", "ja" => "{total} 件"; count: app.count, total: app.count }) }
+   |                                                        ^^^^

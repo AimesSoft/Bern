@@ -1,0 +1,5 @@
+error: commands return `Result<T, CommandError>` so failures reach every entry
+  --> tests/ui/fail_command_without_result.rs:12:12
+   |
+12 |         fn add(&mut self, amount: i64);
+   |            ^^^

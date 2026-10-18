@@ -1,0 +1,5 @@
+error: a command takes `&mut self` as its first parameter
+  --> tests/ui/fail_command_shared_self.rs:12:12
+   |
+12 |         fn add(&self, amount: i64) -> Result<(), CommandError>;
+   |            ^^^

@@ -1,0 +1,5 @@
+error: enum labels cannot interpolate values
+ --> tests/ui/fail_label_interpolation.rs:7:17
+  |
+7 |         #[label(tr! { "en" => "{times}× faster"; times: 2 })]
+  |                 ^^

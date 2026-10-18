@@ -1,0 +1,5 @@
+error: an initial value is a literal or a unit enum variant
+ --> tests/ui/fail_session_initial_value.rs:3:15
+  |
+3 |     #[initial(other.name)]
+  |               ^^^^^

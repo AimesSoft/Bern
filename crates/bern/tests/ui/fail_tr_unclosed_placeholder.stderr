@@ -1,0 +1,5 @@
+error: error[B104]: unclosed `{` in "Hello, {name"
+  --> tests/ui/fail_tr_unclosed_placeholder.rs:22:31
+   |
+22 |     ui! { Text(content: tr! { "en" => "Hello, {name" }) }
+   |                               ^^^^

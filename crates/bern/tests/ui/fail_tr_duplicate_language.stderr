@@ -1,0 +1,5 @@
+error: error[B101]: language `en` is translated twice
+  --> tests/ui/fail_tr_duplicate_language.rs:22:48
+   |
+22 |     ui! { Text(content: tr! { "en" => "Hello", "en" => "Hi" }) }
+   |                                                ^^^^

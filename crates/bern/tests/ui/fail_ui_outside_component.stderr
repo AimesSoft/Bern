@@ -1,0 +1,7 @@
+error: `ui!` is only valid as the whole body of a `#[component]` function
+ --> tests/ui/fail_ui_outside_component.rs:4:17
+  |
+4 |     let _view = ui! { Spacer };
+  |                 ^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `ui` (in Nightly builds, run with -Z macro-backtrace for more info)

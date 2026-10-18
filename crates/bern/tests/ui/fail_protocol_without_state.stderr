@@ -1,0 +1,5 @@
+error: the protocol needs a `#[state] pub struct State { … }`
+ --> tests/ui/fail_protocol_without_state.rs:2:9
+  |
+2 | pub mod demo {
+  |         ^^^^

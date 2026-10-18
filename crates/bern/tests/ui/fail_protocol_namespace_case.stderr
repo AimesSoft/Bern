@@ -1,0 +1,7 @@
+error: invalid protocol namespace `DemoApp`; use lower snake case
+ --> tests/ui/fail_protocol_namespace_case.rs:1:1
+  |
+1 | #[bern::protocol(namespace = "DemoApp", version = 1)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `bern::protocol` (in Nightly builds, run with -Z macro-backtrace for more info)

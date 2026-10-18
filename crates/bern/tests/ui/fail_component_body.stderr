@@ -1,0 +1,9 @@
+error: a component body is exactly one `ui! { … }` declaration
+  --> tests/ui/fail_component_body.rs:21:41
+   |
+21 |   fn page(app: demo::Client) -> impl View {
+   |  _________________________________________^
+22 | |     let gap = 8;
+23 | |     ui! { Spacer }
+24 | | }
+   | |_^

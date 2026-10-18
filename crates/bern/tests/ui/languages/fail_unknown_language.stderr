@@ -1,0 +1,5 @@
+error: error[B101]: language tag `fr` is not in [languages].supported (en, ja); check the spelling
+  --> tests/ui/languages/fail_unknown_language.rs:23:67
+   |
+23 |         Button(id: add, label: tr! { "en" => "Add", "ja" => "追加", "fr" => "Ajouter" }) => app.add(1)
+   |                                                                     ^^^^

@@ -1,0 +1,7 @@
+error: protocol namespace `window` is reserved for framework commands
+ --> tests/ui/fail_protocol_reserved_namespace.rs:1:1
+  |
+1 | #[bern::protocol(namespace = "window", version = 1)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `bern::protocol` (in Nightly builds, run with -Z macro-backtrace for more info)

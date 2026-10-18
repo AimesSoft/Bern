@@ -1,0 +1,5 @@
+error: a component body has exactly one root node; wrap siblings in `Column { … }`
+  --> tests/ui/fail_component_two_roots.rs:21:4
+   |
+21 | fn page(app: demo::Client) -> impl View {
+   |    ^^^^

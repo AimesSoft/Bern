@@ -1,0 +1,5 @@
+error: primary window `main` is not declared in this WindowSet
+  --> tests/ui/fail_primary_window_missing.rs:23:48
+   |
+23 |         WindowSet(handle: AppWindows, primary: main) {
+   |                                                ^^^^

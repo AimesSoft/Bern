@@ -1,0 +1,7 @@
+error: `tr!` is only valid inside `ui!` declarations and `#[label(...)]` attributes
+ --> tests/ui/fail_tr_outside_ui.rs:4:21
+  |
+4 |     let _greeting = tr! { "en" => "Hello" };
+  |                     ^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `tr` (in Nightly builds, run with -Z macro-backtrace for more info)

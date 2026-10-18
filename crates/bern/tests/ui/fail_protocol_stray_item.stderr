@@ -1,0 +1,5 @@
+error: a protocol module contains `use` items, `#[value]` types, one `#[state]` struct, one `#[commands]` trait, an optional `#[queries]` trait and an optional `#[events]` trait
+ --> tests/ui/fail_protocol_stray_item.rs:5:5
+  |
+5 |     pub fn helper() -> i64 {
+  |     ^^^
