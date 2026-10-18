@@ -8,6 +8,7 @@
 mod check;
 pub mod config;
 mod features;
+mod placement;
 pub mod style;
 
 pub use check::{Signature, location};
@@ -352,145 +353,6 @@ fn component_refs(node: &ir::Node, out: &mut Vec<String>) {
             out.push(reference.component.clone());
         }
     });
-}
-
-/// Inspectors that do not stand directly in their container, and
-/// containers with more than one.
-fn inspectors<'a>(
-    nodes: &'a [ir::Node],
-    direct: bool,
-    out: &mut Vec<(&'a ir::Element, &'static str)>,
-) {
-    for node in nodes {
-        match node {
-            ir::Node::Element(element) => {
-                if element.kind == "Inspector" && !direct {
-                    out.push((
-                        element,
-                        "an `Inspector` stands directly in the container it attaches to, not inside `if`, `match` or `ForEach`; `presented` shows and hides it",
-                    ));
-                }
-                let panels = element
-                    .children
-                    .iter()
-                    .filter(|child| matches!(child, ir::Node::Element(e) if e.kind == "Inspector"))
-                    .collect::<Vec<_>>();
-                if let Some(ir::Node::Element(extra)) = panels.get(1) {
-                    out.push((extra, "a container has at most one `Inspector`"));
-                }
-                inspectors(&element.children, element.kind != "ForEach", out);
-            }
-            ir::Node::If(node) => {
-                for (_, body) in &node.branches {
-                    inspectors(body, false, out);
-                }
-                inspectors(&node.otherwise, false, out);
-            }
-            ir::Node::IfLet(node) => {
-                inspectors(&node.then, false, out);
-                inspectors(&node.otherwise, false, out);
-            }
-            ir::Node::Match(node) => {
-                for arm in &node.arms {
-                    inspectors(&arm.body, false, out);
-                }
-            }
-            ir::Node::Component(_) => {}
-        }
-    }
-}
-
-/// The items of a `Rail`: the elements standing in it, also inside `if`,
-/// `match` and the rows of `ForEach`; components placed there directly.
-fn rail_items<'a>(
-    nodes: &'a [ir::Node],
-    items: &mut Vec<&'a ir::Element>,
-    components: &mut Vec<&'a ir::ComponentRef>,
-) {
-    for node in nodes {
-        match node {
-            ir::Node::Element(element) if element.kind == "ForEach" => {
-                rail_items(&element.children, items, components);
-            }
-            ir::Node::Element(element) => items.push(element),
-            ir::Node::If(node) => {
-                for (_, body) in &node.branches {
-                    rail_items(body, items, components);
-                }
-                rail_items(&node.otherwise, items, components);
-            }
-            ir::Node::IfLet(node) => {
-                rail_items(&node.then, items, components);
-                rail_items(&node.otherwise, items, components);
-            }
-            ir::Node::Match(node) => {
-                for arm in &node.arms {
-                    rail_items(&arm.body, items, components);
-                }
-            }
-            ir::Node::Component(component) => components.push(component),
-        }
-    }
-}
-
-/// The first control in `nodes`, looking into the components they place;
-/// component cycles are reported elsewhere, so each is visited once.
-fn control_inside<'a>(
-    nodes: &'a [ir::Node],
-    bodies: &BTreeMap<&str, &'a ir::Node>,
-) -> Option<&'a ir::Element> {
-    let mut pending: Vec<&'a ir::Node> = nodes.iter().collect();
-    let mut seen = BTreeSet::new();
-    while let Some(node) = pending.pop() {
-        let mut found = None;
-        node.walk(&mut |node| match node {
-            ir::Node::Element(element)
-                if found.is_none()
-                    && ir::spec::component(&element.kind).is_some_and(|spec| spec.interactive) =>
-            {
-                found = Some(element);
-            }
-            ir::Node::Component(reference) if seen.insert(reference.component.clone()) => {
-                if let Some(body) = bodies.get(reference.component.as_str()) {
-                    pending.push(body);
-                }
-            }
-            _ => {}
-        });
-        if found.is_some() {
-            return found;
-        }
-    }
-    None
-}
-
-/// Dividers among the items a toolbar shows through its conditions and
-/// repetitions, not inside the items themselves.
-fn toolbar_dividers<'a>(nodes: &'a [ir::Node], found: &mut Vec<&'a ir::Element>) {
-    for node in nodes {
-        match node {
-            ir::Node::Element(element) if element.kind == "Divider" => found.push(element),
-            ir::Node::Element(element) if element.kind == "ForEach" => {
-                toolbar_dividers(&element.children, found);
-            }
-            ir::Node::Element(_) | ir::Node::Component(_) => {}
-            ir::Node::If(node) => {
-                for (_, body) in &node.branches {
-                    toolbar_dividers(body, found);
-                }
-                toolbar_dividers(&node.otherwise, found);
-            }
-            ir::Node::IfLet(node) => {
-                toolbar_dividers(&node.then, found);
-                toolbar_dividers(&node.otherwise, found);
-            }
-            ir::Node::Match(node) => {
-                for arm in &node.arms {
-                    toolbar_dividers(&arm.body, found);
-                }
-            }
-        }
-    }
 }
 
 fn find_cycle(components: &BTreeMap<String, Vec<String>>) -> Option<Vec<String>> {
@@ -917,65 +779,106 @@ pub fn check_library(library: &ir::ComponentLibrary, config: &Config) -> Vec<Dia
     diagnostics
 }
 
-/// Collect, check and lower a project to IR.
-pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
-    let mut diagnostics = Vec::new();
+/// One `#[bern::protocol]` module and its descriptor, lowered by the
+/// shared code.
+struct ProtocolSource {
+    /// Path of the protocol module inside its file.
+    path: Vec<String>,
+    item: ast::ProtocolItem,
+    descriptor: ProtocolDescriptor,
+}
 
-    // Protocol: exactly one module, lowered by the shared code.
-    let protocol_file = &config.protocol_source;
-    let protocol_items = read(protocol_file)?;
-    let [(protocol_path, protocol_item)] = protocol_items.protocols.as_slice() else {
+impl ProtocolSource {
+    /// Rust name of the protocol module.
+    fn name(&self) -> String {
+        self.item.module.ident.to_string()
+    }
+
+    /// Rust path of the protocol module, declared in `file` of `package`.
+    fn rust_path(&self, package: &config::Package, file: &SourceFile) -> String {
+        let mut path = vec![package.crate_name()];
+        path.extend(file.module.iter().cloned());
+        path.extend(self.path.iter().cloned());
+        path.push(self.name());
+        path.join("::")
+    }
+}
+
+/// Read a protocol source, which holds exactly one protocol module.
+fn read_protocol(file: &SourceFile) -> Result<ProtocolSource, Vec<Diagnostic>> {
+    let items = read(file)?;
+    let Ok([(path, item)]) = <[_; 1]>::try_from(items.protocols) else {
         return Err(vec![Diagnostic::error(format!(
             "{} must contain exactly one #[bern::protocol] module",
-            protocol_file.display
+            file.display
         ))]);
     };
-    let shell = bern_syntax::lower::protocol_descriptor(protocol_item)
-        .map_err(|error| syn_error(&protocol_file.display, error))?;
-    let protocol_module_name = protocol_item.module.ident.to_string();
-    let mut protocol_module = vec![config.protocol_package.crate_name()];
-    protocol_module.extend(protocol_file.module.iter().cloned());
-    protocol_module.extend(protocol_path.iter().cloned());
-    protocol_module.push(protocol_module_name.clone());
+    let descriptor = bern_syntax::lower::protocol_descriptor(&item)
+        .map_err(|error| syn_error(&file.display, error))?;
+    Ok(ProtocolSource {
+        path,
+        item,
+        descriptor,
+    })
+}
+
+/// Check the translations of the variant labels a protocol declares.
+fn check_protocol_labels(
+    item: &ast::ProtocolItem,
+    file: &str,
+    config: &Config,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let languages = Some((config.languages.as_slice(), config.strict));
-    let check_labels = |item: &ast::ProtocolItem, file: &str, diagnostics: &mut Vec<Diagnostic>| {
-        for value in &item.values {
-            if let ValueKind::Enum(variants) = &value.kind {
-                for tr in variants.iter().filter_map(|variant| variant.label.as_ref()) {
-                    for (span, message) in bern_syntax::lower::check_translations(tr, languages) {
-                        diagnostics.push(shared_diagnostic(file, span, &message));
-                    }
+    for value in &item.values {
+        if let ValueKind::Enum(variants) = &value.kind {
+            for tr in variants.iter().filter_map(|variant| variant.label.as_ref()) {
+                for (span, message) in bern_syntax::lower::check_translations(tr, languages) {
+                    diagnostics.push(shared_diagnostic(file, span, &message));
                 }
             }
         }
-    };
-    check_labels(protocol_item, &protocol_file.display, &mut diagnostics);
+    }
+}
 
-    // Module protocols, composed with the application's into one catalog.
+/// The application's protocol composed with its modules' into one
+/// catalog, and the Rust paths of their protocol modules.
+struct Protocols {
+    protocol: ProtocolDescriptor,
+    clients: Clients,
+    /// Rust path of the application's protocol module.
+    module: String,
+    /// Rust paths of the modules' protocol modules, in application order.
+    modules: Vec<String>,
+}
+
+/// Read the protocols of the application and its modules and compose
+/// them. A protocol source that cannot be read stops compilation with its
+/// own errors alone; a catalog that does not compose stops it with
+/// everything reported so far.
+fn compose_protocols(
+    config: &Config,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<Protocols, Vec<Diagnostic>> {
+    let protocol_file = &config.protocol_source;
+    let shell = read_protocol(protocol_file)?;
+    check_protocol_labels(&shell.item, &protocol_file.display, config, diagnostics);
     let mut clients = Clients {
-        protocols: vec![(protocol_module_name.clone(), shell.namespace.clone())],
+        protocols: vec![(shell.name(), shell.descriptor.namespace.clone())],
     };
     let mut module_descriptors = Vec::new();
     let mut module_protocols = Vec::new();
     for module in &config.modules {
         let file = &module.protocol_source;
-        let items = read(file)?;
-        let [(path, item)] = items.protocols.as_slice() else {
-            return Err(vec![Diagnostic::error(format!(
-                "{} must contain exactly one #[bern::protocol] module",
-                file.display
-            ))]);
-        };
-        let descriptor = bern_syntax::lower::protocol_descriptor(item)
-            .map_err(|error| syn_error(&file.display, error))?;
-        if descriptor.namespace != module.id {
+        let source = read_protocol(file)?;
+        if source.descriptor.namespace != module.id {
             diagnostics.push(Diagnostic::error(format!(
                 "{}: the protocol of module `{}` must use `namespace = \"{}\"`, not `{}`",
-                file.display, module.id, module.id, descriptor.namespace
+                file.display, module.id, module.id, source.descriptor.namespace
             )));
         }
-        check_labels(item, &file.display, &mut diagnostics);
-        let name = item.module.ident.to_string();
+        check_protocol_labels(&source.item, &file.display, config, diagnostics);
+        let name = source.name();
         if clients.protocols.iter().any(|(other, _)| *other == name) {
             diagnostics.push(Diagnostic::error(format!(
                 "{}: protocol module `{name}` has the name of another protocol module; name it after the module",
@@ -984,17 +887,48 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         }
         clients
             .protocols
-            .push((name.clone(), descriptor.namespace.clone()));
-        let mut rust_path = vec![module.protocol_package.crate_name()];
-        rust_path.extend(file.module.iter().cloned());
-        rust_path.extend(path.iter().cloned());
-        rust_path.push(name);
-        module_protocols.push(rust_path.join("::"));
-        module_descriptors.push(descriptor);
+            .push((name, source.descriptor.namespace.clone()));
+        module_protocols.push(source.rust_path(&module.protocol_package, file));
+        module_descriptors.push(source.descriptor);
     }
-    // A module answers only the events of modules it depends on; the
-    // application answers any module's events.
-    for (descriptor, module) in module_descriptors.iter().zip(&config.modules) {
+    check_event_routes(config, &shell.descriptor, &module_descriptors, diagnostics);
+    let module = shell.rust_path(&config.protocol_package, protocol_file);
+    let protocol = if module_descriptors.is_empty() {
+        shell.descriptor
+    } else {
+        let parts: Vec<bern_protocol::ModulePart<'_>> = module_descriptors
+            .iter()
+            .zip(&config.modules)
+            .map(|(descriptor, module)| bern_protocol::ModulePart {
+                descriptor,
+                optional: module.optional,
+            })
+            .collect();
+        match compose(&shell.descriptor, &parts) {
+            Ok(protocol) => protocol,
+            Err(error) => {
+                diagnostics.push(Diagnostic::error(error.0));
+                return Err(std::mem::take(diagnostics));
+            }
+        }
+    };
+    Ok(Protocols {
+        protocol,
+        clients,
+        module,
+        modules: module_protocols,
+    })
+}
+
+/// A module answers only the events of modules it depends on; the
+/// application answers any module's events, but not its own.
+fn check_event_routes(
+    config: &Config,
+    shell: &ProtocolDescriptor,
+    modules: &[ProtocolDescriptor],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for (descriptor, module) in modules.iter().zip(&config.modules) {
         for command in &descriptor.commands {
             let Some(on) = &command.on else { continue };
             let emitter = on.split('.').next().unwrap_or_default();
@@ -1016,48 +950,40 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         {
             diagnostics.push(Diagnostic::error(format!(
                 "{}: `{}` answers the application's own event `{on}`; events reach the modules and the application above the emitter",
-                protocol_file.display, command.id
+                config.protocol_source.display, command.id
             )));
         }
     }
-    let protocol = if module_descriptors.is_empty() {
-        shell
-    } else {
-        let parts: Vec<bern_protocol::ModulePart<'_>> = module_descriptors
-            .iter()
-            .zip(&config.modules)
-            .map(|(descriptor, module)| bern_protocol::ModulePart {
-                descriptor,
-                optional: module.optional,
-            })
-            .collect();
-        match compose(&shell, &parts) {
-            Ok(protocol) => protocol,
-            Err(error) => {
-                diagnostics.push(Diagnostic::error(error.0));
-                return Err(diagnostics);
-            }
-        }
-    };
+}
 
-    // UI sources.
-    let mut values = Vec::new();
-    let mut sessions_ast = Vec::new();
-    let mut players_ast = Vec::new();
-    let mut components = Vec::new();
-    let mut features_ast = Vec::new();
-    let mut styles = Vec::new();
-    let ui_sources = config
+/// Declarations of the UI sources of the application and its modules.
+#[derive(Default)]
+struct Sources {
+    values: Vec<Located<ast::ValueItem>>,
+    sessions: Vec<Located<ast::SessionItem>>,
+    players: Vec<Located<ast::PlayersItem>>,
+    components: Vec<Located<ast::ComponentItem>>,
+    features: Vec<Located<ast::FeaturesItem>>,
+    /// The application's `style!` items, with the file declaring each.
+    styles: Vec<(String, ast::StyleItem)>,
+}
+
+/// Collect the declarations of every UI source: the application's, whose
+/// namespace is `namespace`, then each module's. A source that cannot be
+/// read is reported and skipped.
+fn collect_sources(config: &Config, namespace: &str, diagnostics: &mut Vec<Diagnostic>) -> Sources {
+    let mut sources = Sources::default();
+    let files = config
         .ui_sources
         .iter()
-        .map(|file| (file, protocol.namespace.clone()))
+        .map(|file| (file, namespace.to_string()))
         .chain(config.modules.iter().flat_map(|module| {
             module
                 .ui_sources
                 .iter()
                 .map(move |file| (file, module.id.clone()))
         }));
-    for (file, home) in ui_sources {
+    for (file, home) in files {
         let items = match read(file) {
             Ok(items) => items,
             Err(errors) => {
@@ -1071,46 +997,15 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 file.display
             )));
         }
-        let module = |relative: &Vec<String>| {
-            let mut module = file.module.clone();
-            module.extend(relative.iter().cloned());
-            module
-        };
-        for (path, item) in items.values {
-            values.push(Located {
-                file: file.display.clone(),
-                module: module(&path),
-                home: home.clone(),
-                item,
-            });
-        }
-        for (path, item) in items.sessions {
-            sessions_ast.push(Located {
-                file: file.display.clone(),
-                module: module(&path),
-                home: home.clone(),
-                item,
-            });
-        }
-        for (path, item) in items.players {
-            players_ast.push(Located {
-                file: file.display.clone(),
-                module: module(&path),
-                home: home.clone(),
-                item,
-            });
-        }
-        for (path, item) in items.components {
-            components.push(Located {
-                file: file.display.clone(),
-                module: module(&path),
-                home: home.clone(),
-                item,
-            });
-        }
+        sources.values.extend(locate(file, &home, items.values));
+        sources.sessions.extend(locate(file, &home, items.sessions));
+        sources.players.extend(locate(file, &home, items.players));
+        sources
+            .components
+            .extend(locate(file, &home, items.components));
         for (_, item) in items.styles {
-            if home == protocol.namespace {
-                styles.push((file.display.clone(), item));
+            if home == namespace {
+                sources.styles.push((file.display.clone(), item));
             } else {
                 diagnostics.push(Diagnostic::error(format!(
                     "{}: modules cannot declare `style!`; the application's interface declares one for every module",
@@ -1118,16 +1013,37 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 )));
             }
         }
-        for (path, item) in items.features {
-            features_ast.push(Located {
-                file: file.display.clone(),
-                module: module(&path),
-                home: home.clone(),
-                item,
-            });
-        }
+        sources.features.extend(locate(file, &home, items.features));
     }
-    for extra in players_ast.iter().skip(1) {
+    sources
+}
+
+/// The `items` of `file`, a source of the application or module whose
+/// namespace is `home`, each with the Rust module declaring it.
+fn locate<T>(
+    file: &SourceFile,
+    home: &str,
+    items: Vec<(Vec<String>, T)>,
+) -> impl Iterator<Item = Located<T>> {
+    items.into_iter().map(move |(path, item)| {
+        let mut module = file.module.clone();
+        module.extend(path);
+        Located {
+            file: file.display.clone(),
+            module,
+            home: home.to_string(),
+            item,
+        }
+    })
+}
+
+/// The handle name and players of the `#[bern::players]` catalog; an
+/// application declares at most one.
+fn player_catalog(
+    declared: &[Located<ast::PlayersItem>],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> (Option<String>, Vec<ir::PlayerDef>) {
+    for extra in declared.iter().skip(1) {
         diagnostics.push(
             Diagnostic::error(
                 "an application declares at most one #[bern::players] catalog; add players as fields",
@@ -1135,27 +1051,24 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             .at(location(&extra.file, extra.item.span)),
         );
     }
-    let players_handle = players_ast
-        .first()
-        .map(|located| located.item.name.to_string());
-    let players: Vec<ir::PlayerDef> = players_ast
-        .first()
-        .map(|located| {
-            located
-                .item
-                .players
-                .iter()
-                .map(|player| ir::PlayerDef {
-                    id: player.name.to_string(),
-                    doc: player.doc.clone(),
-                })
-                .collect()
+    let Some(catalog) = declared.first() else {
+        return (None, Vec::new());
+    };
+    let players = catalog
+        .item
+        .players
+        .iter()
+        .map(|player| ir::PlayerDef {
+            id: player.name.to_string(),
+            doc: player.doc.clone(),
         })
-        .unwrap_or_default();
-    let player_ids: Vec<String> = players.iter().map(|player| player.id.clone()).collect();
+        .collect();
+    (Some(catalog.item.name.to_string()), players)
+}
 
-    // Component libraries: versioned descriptors generated from their
-    // sources and checked against this application's configuration.
+/// Component libraries: versioned descriptors generated from their
+/// sources and checked against this application's configuration.
+fn load_libraries(config: &Config, diagnostics: &mut Vec<Diagnostic>) -> Vec<ir::ComponentLibrary> {
     let mut libraries = Vec::new();
     for manifest in &config.libraries {
         match config::load_library(manifest).and_then(|library| compile_library(&library)) {
@@ -1166,8 +1079,20 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             Err(errors) => diagnostics.extend(errors),
         }
     }
+    libraries
+}
+
+/// The application's type table: the protocol's types, the libraries'
+/// and those the UI sources declare, with the framework types they use.
+fn application_types(
+    protocol: &ProtocolDescriptor,
+    libraries: &[ir::ComponentLibrary],
+    sources: &Sources,
+    config: &Config,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> TypeTable {
     let mut base_types = protocol.types.clone();
-    for library in &libraries {
+    for library in libraries {
         if let Err(error) = base_types.merge(&library.types) {
             diagnostics.push(Diagnostic::error(format!(
                 "library `{}`: {}",
@@ -1175,32 +1100,44 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             )));
         }
     }
-    let mentioned: Vec<&ast::TypeRef> = values
+    let mentioned: Vec<&ast::TypeRef> = sources
+        .values
         .iter()
         .flat_map(|value| value_types(&value.item))
         .chain(
-            sessions_ast
+            sources
+                .sessions
                 .iter()
                 .flat_map(|session| session.item.fields.iter().map(|field| &field.ty)),
         )
         .chain(
-            components
+            sources
+                .components
                 .iter()
                 .flat_map(|component| component.item.params.iter().map(|param| &param.ty)),
         )
         .collect();
     add_framework_types(&mut base_types, &mentioned);
-    let mut types = merge_ui_types(
+    merge_ui_types(
         &base_types,
-        &values,
+        &sources.values,
         (&config.languages, config.strict),
-        &mut diagnostics,
-    );
+        diagnostics,
+    )
+}
 
-    // Slots: the enums marked `pages = "slot"` gain a variant for every
-    // page the modules add to that slot.
+/// What the modules contribute to the application's slots. The enums
+/// marked `pages = "slot"` gain a variant for every page the modules add
+/// to that slot.
+fn module_contributions(
+    config: &Config,
+    namespace: &str,
+    values: &[Located<ast::ValueItem>],
+    types: &mut TypeTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Contributions {
     let mut page_enums: BTreeMap<String, String> = BTreeMap::new();
-    for value in &values {
+    for value in values {
         if let Some(slot) = &value.item.pages
             && let Some(other) = page_enums.insert(slot.clone(), value.item.name.to_string())
         {
@@ -1213,7 +1150,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         }
     }
     let mut contributions = Contributions {
-        namespaces: std::iter::once(protocol.namespace.clone())
+        namespaces: std::iter::once(namespace.to_string())
             .chain(config.modules.iter().map(|module| module.id.clone()))
             .collect(),
         optional: config
@@ -1294,10 +1231,17 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             }
         }
     }
+    contributions
+}
 
-    // Session state.
+/// Lower the `#[bern::session]` structs, with each field's initial value.
+fn lower_sessions(
+    declared: &[Located<ast::SessionItem>],
+    types: &TypeTable,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<ir::SessionDef> {
     let mut sessions = Vec::new();
-    for located in &sessions_ast {
+    for located in declared {
         let session = &located.item;
         let name = session.name.to_string();
         if sessions.iter().any(|def: &ir::SessionDef| def.name == name)
@@ -1312,7 +1256,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         }
         let mut fields = Vec::new();
         for field in &session.fields {
-            let ty = match resolve_type(&field.ty, &types) {
+            let ty = match resolve_type(&field.ty, types) {
                 Ok(ty) => ty,
                 Err(message) => {
                     diagnostics
@@ -1321,7 +1265,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 }
             };
             let initial = match &field.initial {
-                Some(expr) => match initial_value(expr, &ty, &types) {
+                Some(expr) => match initial_value(expr, &ty, types) {
                     Ok(value) => value,
                     Err(message) => {
                         diagnostics.push(
@@ -1330,7 +1274,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                         continue;
                     }
                 },
-                None => Value::default_for(&ty, &types).unwrap_or(Value::Unit),
+                None => Value::default_for(&ty, types).unwrap_or(Value::Unit),
             };
             fields.push(ir::SessionFieldDef {
                 name: field.name.to_string(),
@@ -1340,8 +1284,17 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         }
         sessions.push(ir::SessionDef { name, fields });
     }
+    sessions
+}
 
-    // Root component and window handle.
+/// The window handle name and window ids of the root component, whose
+/// body is a `WindowSet`. `None`, once reported, when the root is not
+/// declared or its body is something else.
+fn root_window_set(
+    config: &Config,
+    components: &[Located<ast::ComponentItem>],
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<(String, Vec<String>)> {
     let Some(root) = components
         .iter()
         .find(|component| component.item.name == config.root)
@@ -1350,19 +1303,29 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             "root component `{}` from [ui].root is not declared in the listed sources",
             config.root
         )));
-        return Err(diagnostics);
+        return None;
     };
-    let Some((handle, window_ids)) = root_windows(&root.item) else {
+    let Some(windows) = root_windows(&root.item) else {
         diagnostics.push(
             Diagnostic::error(
                 "the root component's body must be a `WindowSet(handle: …, primary: …)`",
             )
             .at(location(&root.file, root.item.span)),
         );
-        return Err(diagnostics);
+        return None;
     };
+    Some(windows)
+}
 
-    // Signatures, starting with library components.
+/// The signature of every component, the libraries' first. `kind`
+/// resolves a parameter, given the namespace of the application or
+/// module declaring the component.
+fn component_signatures(
+    libraries: &[ir::ComponentLibrary],
+    components: &[Located<ast::ComponentItem>],
+    kind: impl Fn(&ast::Param, &str) -> Result<ir::ParamKind, String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> BTreeMap<String, Signature> {
     let mut signatures = BTreeMap::new();
     for component in libraries.iter().flat_map(|library| &library.components) {
         signatures.insert(
@@ -1378,7 +1341,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             },
         );
     }
-    for component in &components {
+    for component in components {
         let name = component.item.name.to_string();
         if signatures.contains_key(&name) {
             diagnostics.push(
@@ -1391,14 +1354,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         }
         let mut params = Vec::new();
         for param in &component.item.params {
-            match param_kind(
-                param,
-                Some((&clients, &component.home)),
-                Some(&handle),
-                players_handle.as_deref(),
-                &sessions,
-                &types,
-            ) {
+            match kind(param, &component.home) {
                 Ok(kind) => params.push((param.name.to_string(), kind)),
                 Err(message) => diagnostics
                     .push(Diagnostic::error(message).at(location(&component.file, param.span))),
@@ -1413,8 +1369,16 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             },
         );
     }
+    signatures
+}
 
-    // Every contributed component is declared by the module contributing it.
+/// Every component a module places is declared by that module's UI
+/// sources.
+fn check_placed_components(
+    config: &Config,
+    components: &[Located<ast::ComponentItem>],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     for module in &config.modules {
         let placed = module
             .pages
@@ -1434,10 +1398,17 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             }
         }
     }
+}
 
-    // Feature contracts and the components scoping them.
+/// The feature names of each `#[bern::features]` contract, by contract.
+/// A contract's name is unique among contracts and components.
+fn declare_contracts(
+    declared: &[Located<ast::FeaturesItem>],
+    signatures: &BTreeMap<String, Signature>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> BTreeMap<String, Vec<String>> {
     let mut contract_features: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for located in &features_ast {
+    for located in declared {
         let name = located.item.name.to_string();
         if contract_features.contains_key(&name) || signatures.contains_key(&name) {
             diagnostics.push(
@@ -1456,8 +1427,18 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 .collect(),
         );
     }
+    contract_features
+}
+
+/// The component each contract scopes, by contract: every contract
+/// scopes exactly one component, which names it in `features =`.
+fn scope_contracts(
+    sources: &Sources,
+    contract_features: &BTreeMap<String, Vec<String>>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> BTreeMap<String, String> {
     let mut contract_scopes: BTreeMap<String, String> = BTreeMap::new();
-    for component in &components {
+    for component in &sources.components {
         let Some(path) = &component.item.features else {
             continue;
         };
@@ -1486,7 +1467,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             contract_scopes.insert(contract, component.item.name.to_string());
         }
     }
-    for located in &features_ast {
+    for located in &sources.features {
         let name = located.item.name.to_string();
         if !contract_scopes.contains_key(&name) {
             diagnostics.push(
@@ -1497,24 +1478,12 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             );
         }
     }
+    contract_scopes
+}
 
-    // Components.
-    let mut checker = Checker::new(
-        &types,
-        &protocol,
-        &sessions,
-        &signatures,
-        &window_ids,
-        &player_ids,
-        &config.languages,
-        &config.default_language,
-        config.strict,
-        &contract_features,
-        config.layouts,
-    );
-    checker.contributions = contributions;
-    let style = style::lower(&styles, &mut diagnostics);
-    checker.variants = style::variants(&style);
+/// Let `checker` check the names components take from `style!`.
+fn use_style(checker: &mut Checker<'_>, style: &ir::style::StyleSheet) {
+    checker.variants = style::variants(style);
     checker.transitions = style
         .transitions
         .iter()
@@ -1530,12 +1499,24 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         .iter()
         .map(|pattern| pattern.name.clone())
         .collect();
+}
+
+/// Check and lower the application's components, after the libraries'.
+/// The root's body comes back on its own: it becomes the window catalog,
+/// not a component.
+fn lower_components(
+    checker: &mut Checker<'_>,
+    config: &Config,
+    components: &[Located<ast::ComponentItem>],
+    libraries: &[ir::ComponentLibrary],
+) -> (Vec<ir::ComponentDef>, Option<ir::Element>) {
+    let signatures = checker.signatures;
     let mut lowered: Vec<ir::ComponentDef> = libraries
         .iter()
         .flat_map(|library| library.components.clone())
         .collect();
     let mut root_element = None;
-    for component in &components {
+    for component in components {
         let name = component.item.name.to_string();
         let Some(signature) = signatures.get(&name) else {
             continue;
@@ -1564,14 +1545,18 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             source: location(&component.file, component.item.span),
         });
     }
-    diagnostics.append(&mut checker.diagnostics);
-    let mut texts = std::mem::take(&mut checker.texts);
-    for library in &libraries {
-        texts.extend(library.texts.iter().cloned());
-    }
+    (lowered, root_element)
+}
 
+/// The components each lowered component places. Components cannot place
+/// each other recursively, and none places the root.
+fn component_graph(
+    components: &[ir::ComponentDef],
+    root: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> BTreeMap<String, Vec<String>> {
     let mut graph = BTreeMap::new();
-    for component in &lowered {
+    for component in components {
         let mut refs = Vec::new();
         component_refs(&component.body, &mut refs);
         graph.insert(component.name.clone(), refs);
@@ -1582,69 +1567,80 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             cycle.join(" → ")
         )));
     }
-    if lowered.iter().any(|component| {
+    if components.iter().any(|component| {
         let mut refs = Vec::new();
         component_refs(&component.body, &mut refs);
-        refs.contains(&config.root)
+        refs.iter().any(|name| name == root)
     }) {
         diagnostics.push(Diagnostic::error(
             "the root component cannot be referenced by another component",
         ));
     }
+    graph
+}
 
-    let windows = root_element
-        .as_ref()
-        .and_then(|root| window_catalog(root, handle, &graph, &signatures, &mut diagnostics));
-
-    // The accent and appearance the windows show come from enums whose
-    // variants name what they show.
-    if let (Some(catalog), Some(root)) = (&windows, &root_element) {
-        let variants = |expr: &ir::Expr| match &expr.ty {
-            Type::Enum { name } => types.enum_def(name).map(|def| {
-                def.variants
-                    .iter()
-                    .map(|v| v.name.clone())
-                    .collect::<Vec<_>>()
-            }),
-            _ => None,
-        };
-        if let Some(accent) = &catalog.accent {
-            match variants(accent) {
-                Some(names) => {
-                    for name in names.iter().filter(|name| style.accent(name).is_none()) {
-                        diagnostics.push(
-                            Diagnostic::error(format!(
-                                "accent `{name}` is not declared; add it to the `accents` block of `style!`"
-                            ))
-                            .at(root.source.clone()),
-                        );
-                    }
-                }
-                None => diagnostics.push(
-                    Diagnostic::error(
-                        "`accent` is an enum whose variants name accents of `style!`",
-                    )
-                    .at(root.source.clone()),
-                ),
-            }
-        }
-        if let Some(appearance) = &catalog.appearance {
-            let fits = variants(appearance).is_some_and(|names| {
-                names
-                    .iter()
-                    .all(|name| ["system", "light", "dark"].contains(&name.to_lowercase().as_str()))
-            });
-            if !fits {
-                diagnostics.push(
-                    Diagnostic::error("`appearance` is an enum of `System`, `Light` and `Dark`")
+/// The accent and appearance the windows show come from enums whose
+/// variants name what they show.
+fn check_accent_and_appearance(
+    catalog: &ir::WindowCatalog,
+    root: &ir::Element,
+    types: &TypeTable,
+    style: &ir::style::StyleSheet,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let variants = |expr: &ir::Expr| match &expr.ty {
+        Type::Enum { name } => types.enum_def(name).map(|def| {
+            def.variants
+                .iter()
+                .map(|v| v.name.clone())
+                .collect::<Vec<_>>()
+        }),
+        _ => None,
+    };
+    if let Some(accent) = &catalog.accent {
+        match variants(accent) {
+            Some(names) => {
+                for name in names.iter().filter(|name| style.accent(name).is_none()) {
+                    diagnostics.push(
+                        Diagnostic::error(format!(
+                            "accent `{name}` is not declared; add it to the `accents` block of `style!`"
+                        ))
                         .at(root.source.clone()),
-                );
+                    );
+                }
             }
+            None => diagnostics.push(
+                Diagnostic::error("`accent` is an enum whose variants name accents of `style!`")
+                    .at(root.source.clone()),
+            ),
         }
     }
+    if let Some(appearance) = &catalog.appearance {
+        let fits = variants(appearance).is_some_and(|names| {
+            names
+                .iter()
+                .all(|name| ["system", "light", "dark"].contains(&name.to_lowercase().as_str()))
+        });
+        if !fits {
+            diagnostics.push(
+                Diagnostic::error("`appearance` is an enum of `System`, `Light` and `Dark`")
+                    .at(root.source.clone()),
+            );
+        }
+    }
+}
 
-    // Feature contracts: what each scope proves it reaches.
-    let mut contracts: Vec<ir::FeatureContract> = features_ast
+/// Lower the feature contracts that scope a component and prove what each
+/// scope reaches.
+fn prove_contracts(
+    declared: &[Located<ast::FeaturesItem>],
+    contract_scopes: &BTreeMap<String, String>,
+    components: &[ir::ComponentDef],
+    windows: Option<&ir::WindowCatalog>,
+    protocol: &ProtocolDescriptor,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<ir::FeatureContract> {
+    let mut contracts: Vec<ir::FeatureContract> = declared
         .iter()
         .filter_map(|located| {
             let name = located.item.name.to_string();
@@ -1655,211 +1651,29 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                     item: &located.item,
                 },
                 component,
-                &protocol,
-                &mut diagnostics,
+                protocol,
+                diagnostics,
             ))
         })
         .collect();
-    features::prove(
-        &mut contracts,
-        &lowered,
-        windows.as_ref(),
-        &protocol,
-        &mut diagnostics,
-    );
+    features::prove(&mut contracts, components, windows, protocol, diagnostics);
+    contracts
+}
 
-    // A button's content is what it shows: no other control inside it,
-    // also through the components it places.
-    let bodies: BTreeMap<&str, &ir::Node> = lowered
-        .iter()
-        .map(|component| (component.name.as_str(), &component.body))
-        .collect();
-    let root_node = root_element.clone().map(ir::Node::Element);
-    for body in bodies.values().copied().chain(root_node.as_ref()) {
-        body.walk(&mut |node| {
-            let ir::Node::Element(button) = node else {
-                return;
-            };
-            if button.kind != "Button" || button.children.is_empty() {
-                return;
-            }
-            if let Some(control) = control_inside(&button.children, &bodies) {
-                diagnostics.push(
-                    Diagnostic::error(format!(
-                        "a `Button` cannot hold `{}`: one press would mean two things; put the `{}` beside the button, for example in a `Stack`",
-                        control.kind, control.kind
-                    ))
-                    .at(control.source.clone()),
-                );
-            }
-        });
-    }
-
-    // A toolbar's search field stands in the toolbar itself, not in its
-    // conditions or repetitions: a window shows one or none.
-    for body in bodies.values().copied().chain(root_node.as_ref()) {
-        body.walk(&mut |node| {
-            let ir::Node::Element(toolbar) = node else {
-                return;
-            };
-            if toolbar.kind != "Toolbar" {
-                return;
-            }
-            for child in &toolbar.children {
-                if matches!(child, ir::Node::Element(_)) {
-                    continue;
-                }
-                child.walk(&mut |node| {
-                    if let ir::Node::Element(search) = node
-                        && search.kind == "Search"
-                    {
-                        diagnostics.push(
-                            Diagnostic::error(
-                                "a `Search` stands directly in its `Toolbar`, not inside `if`, `match` or `ForEach`",
-                            )
-                            .at(search.source.clone()),
-                        );
-                    }
-                });
-            }
-        });
-    }
-
-    // A divider in a toolbar parts two groups of items: it stands directly
-    // in the toolbar, with an item before and after it.
-    for body in bodies.values().copied().chain(root_node.as_ref()) {
-        body.walk(&mut |node| {
-            let ir::Node::Element(toolbar) = node else {
-                return;
-            };
-            if toolbar.kind != "Toolbar" {
-                return;
-            }
-            let mut nested = Vec::new();
-            for child in &toolbar.children {
-                if !matches!(child, ir::Node::Element(_)) {
-                    toolbar_dividers(std::slice::from_ref(child), &mut nested);
-                }
-            }
-            for divider in nested {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "a `Divider` parts the groups of a `Toolbar` and stands directly in it, not inside `if`, `match` or `ForEach`",
-                    )
-                    .at(divider.source.clone()),
-                );
-            }
-            // Search fields have their own place; they part nothing.
-            let items: Vec<&ir::Node> = toolbar
-                .children
-                .iter()
-                .filter(|child| !matches!(child, ir::Node::Element(e) if e.kind == "Search"))
-                .collect();
-            for (index, child) in items.iter().enumerate() {
-                let ir::Node::Element(divider) = child else {
-                    continue;
-                };
-                if divider.kind != "Divider" {
-                    continue;
-                }
-                let is_divider = |node: Option<&&ir::Node>| {
-                    matches!(node, Some(ir::Node::Element(e)) if e.kind == "Divider")
-                };
-                if index == 0 || index + 1 == items.len() || is_divider(items.get(index + 1)) {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            "a `Divider` in a `Toolbar` parts two groups of items; put it between items",
-                        )
-                        .at(divider.source.clone()),
-                    );
-                }
-            }
-        });
-    }
-
-    // An element sits on a `Rail` at a fraction or between two; only
-    // there. Containers stagger their children.
-    for body in bodies.values().copied().chain(root_node.as_ref()) {
-        let mut items = Vec::new();
-        let mut components = Vec::new();
-        body.walk(&mut |node| {
-            if let ir::Node::Element(rail) = node
-                && rail.kind == "Rail"
-            {
-                rail_items(&rail.children, &mut items, &mut components);
-            }
-        });
-        for component in components {
-            diagnostics.push(
-                Diagnostic::error(format!(
-                    "a `Rail` places elements by their `at` or `from` and `to`; put `{}` inside one, such as a `Column` with `at:`",
-                    component.component
-                ))
-                .at(component.source.clone()),
-            );
-        }
-        body.walk(&mut |node| {
-            let ir::Node::Element(element) = node else {
-                return;
-            };
-            let on_rail = items.iter().any(|item| std::ptr::eq(*item, element));
-            let at = element.prop("at").is_some();
-            let from = element.prop("from").is_some();
-            let to = element.prop("to").is_some();
-            let message = if on_rail {
-                match (at, from, to) {
-                    (true, false, false) | (false, true, true) => None,
-                    (false, false, false) => Some(
-                        "an element on a `Rail` needs `at:` (a fraction of the rail) or `from:` and `to:`",
-                    ),
-                    (true, _, _) => Some("write either `at:` or `from:` and `to:`, not both"),
-                    _ => Some("`from:` and `to:` go together"),
-                }
-            } else if at || from || to {
-                Some("`at`, `from` and `to` place an element on the `Rail` it stands in")
-            } else {
-                None
-            };
-            if let Some(message) = message {
-                diagnostics.push(Diagnostic::error(message).at(element.source.clone()));
-            }
-            if element.prop("stagger").is_some()
-                && !bern_ir::spec::STAGGERING.contains(&element.kind.as_str())
-            {
-                diagnostics.push(
-                    Diagnostic::error(format!(
-                        "`stagger` spaces out the children of a container (`{}`); `{}` has none to space",
-                        bern_ir::spec::STAGGERING.join("`, `"),
-                        element.kind
-                    ))
-                    .at(element.source.clone()),
-                );
-            }
-        });
-    }
-
-    // A side panel attaches to the container it stands in: directly there,
-    // one per container, not inside a condition or repetition.
-    for body in bodies.values().copied().chain(root_node.as_ref()) {
-        let mut misplaced = Vec::new();
-        inspectors(std::slice::from_ref(body), true, &mut misplaced);
-        for (inspector, message) in misplaced {
-            diagnostics.push(Diagnostic::error(message).at(inspector.source.clone()));
-        }
-    }
-
-    // Pictures come from declared resources, in library components too.
-    for component in &lowered {
+/// Pictures come from declared resources, in library components too.
+fn check_resources(
+    components: &[ir::ComponentDef],
+    resources: &[ir::ResourceDef],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for component in components {
         component.body.walk(&mut |node| {
             let ir::Node::Element(element) = node else {
                 return;
             };
             for prop in element.props.values() {
                 if let ir::Prop::Resource { name } = prop
-                    && !config
-                        .resources
-                        .iter()
-                        .any(|resource| &resource.name == name)
+                    && !resources.iter().any(|resource| &resource.name == name)
                 {
                     diagnostics.push(
                         Diagnostic::error(format!(
@@ -1871,8 +1685,21 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             }
         });
     }
+}
 
-    // Every label is a resource; keys must be unique.
+/// Every text the application shows: the components', the libraries',
+/// every variant label and the application's `name`. Each key names one
+/// text, the first given.
+fn collect_texts(
+    mut texts: Vec<LocalizedText>,
+    libraries: &[ir::ComponentLibrary],
+    types: &TypeTable,
+    name: &LocalizedText,
+) -> Vec<LocalizedText> {
+    for library in libraries {
+        texts.extend(library.texts.iter().cloned());
+    }
+    // Every label is a resource.
     for def in &types.enums {
         for variant in &def.variants {
             if let Some(label) = &variant.label {
@@ -1880,15 +1707,106 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             }
         }
     }
+    texts.push(name.clone());
+    let mut keys = BTreeMap::new();
+    texts.retain(|text| keys.insert(text.key.clone(), text.clone()).is_none());
+    texts
+}
+
+/// Collect, check and lower a project to IR.
+pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
+    let mut diagnostics = Vec::new();
+
+    // Declarations: protocols, UI sources, libraries, types and state.
+    let Protocols {
+        protocol,
+        clients,
+        module: protocol_module,
+        modules: module_protocols,
+    } = compose_protocols(config, &mut diagnostics)?;
+    let sources = collect_sources(config, &protocol.namespace, &mut diagnostics);
+    let (players_handle, players) = player_catalog(&sources.players, &mut diagnostics);
+    let player_ids: Vec<String> = players.iter().map(|player| player.id.clone()).collect();
+    let libraries = load_libraries(config, &mut diagnostics);
+    let mut types = application_types(&protocol, &libraries, &sources, config, &mut diagnostics);
+    let contributions = module_contributions(
+        config,
+        &protocol.namespace,
+        &sources.values,
+        &mut types,
+        &mut diagnostics,
+    );
+    let sessions = lower_sessions(&sources.sessions, &types, &mut diagnostics);
+    let Some((handle, window_ids)) = root_window_set(config, &sources.components, &mut diagnostics)
+    else {
+        return Err(diagnostics);
+    };
+    let signatures = component_signatures(
+        &libraries,
+        &sources.components,
+        |param, home| {
+            param_kind(
+                param,
+                Some((&clients, home)),
+                Some(&handle),
+                players_handle.as_deref(),
+                &sessions,
+                &types,
+            )
+        },
+        &mut diagnostics,
+    );
+    check_placed_components(config, &sources.components, &mut diagnostics);
+    let contract_features = declare_contracts(&sources.features, &signatures, &mut diagnostics);
+    let contract_scopes = scope_contracts(&sources, &contract_features, &mut diagnostics);
+
+    // Components, checked against those declarations.
+    let style = style::lower(&sources.styles, &mut diagnostics);
+    let mut checker = Checker::new(
+        &types,
+        &protocol,
+        &sessions,
+        &signatures,
+        &window_ids,
+        &player_ids,
+        &config.languages,
+        &config.default_language,
+        config.strict,
+        &contract_features,
+        config.layouts,
+    );
+    checker.contributions = contributions;
+    use_style(&mut checker, &style);
+    let (lowered, root_element) =
+        lower_components(&mut checker, config, &sources.components, &libraries);
+    diagnostics.append(&mut checker.diagnostics);
+    let texts = std::mem::take(&mut checker.texts);
+
+    // Checks across the lowered components and the windows they fill.
+    let graph = component_graph(&lowered, &config.root, &mut diagnostics);
+    let windows = root_element
+        .as_ref()
+        .and_then(|root| window_catalog(root, handle, &graph, &signatures, &mut diagnostics));
+    if let (Some(catalog), Some(root)) = (&windows, &root_element) {
+        check_accent_and_appearance(catalog, root, &types, &style, &mut diagnostics);
+    }
+    let contracts = prove_contracts(
+        &sources.features,
+        &contract_scopes,
+        &lowered,
+        windows.as_ref(),
+        &protocol,
+        &mut diagnostics,
+    );
+    placement::check(&lowered, root_element.as_ref(), &mut diagnostics);
+    check_resources(&lowered, &config.resources, &mut diagnostics);
+
     let name = LocalizedText {
         key: "app.name".into(),
         translations: config.name.clone(),
         params: vec![],
     };
-    texts.push(name.clone());
-    let mut keys = BTreeMap::new();
-    texts.retain(|text| keys.insert(text.key.clone(), text.clone()).is_none());
-
+    let texts = collect_texts(texts, &libraries, &types, &name);
     if diagnostics.iter().any(Diagnostic::is_error) {
         return Err(diagnostics);
     }
@@ -1929,7 +1847,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             contracts,
             style,
         },
-        protocol_module: protocol_module.join("::"),
+        protocol_module,
         module_protocols,
         libraries,
         warnings: diagnostics,
