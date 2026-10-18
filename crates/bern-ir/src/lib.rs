@@ -44,6 +44,18 @@ pub struct Application {
 }
 
 impl Application {
+    /// Visit the nodes of every component and then of every window's
+    /// content, depth first, each with the kind of the nearest element
+    /// around it.
+    pub fn walk<'a>(&'a self, visit: &mut impl FnMut(&'a Node, Option<&'a str>)) {
+        for component in &self.components {
+            component.body.walk_in(None, visit);
+        }
+        for window in &self.windows.windows {
+            window.content.walk_in(None, visit);
+        }
+    }
+
     pub fn component(&self, name: &str) -> Option<&ComponentDef> {
         self.components
             .iter()
@@ -937,33 +949,48 @@ pub enum Node {
 impl Node {
     /// Visit this node and all descendants, depth first.
     pub fn walk<'a>(&'a self, visit: &mut impl FnMut(&'a Node)) {
-        visit(self);
+        self.walk_in(None, &mut |node, _| visit(node));
+    }
+
+    /// Visit this node and all descendants, depth first, each with the kind
+    /// of the nearest element around it; `parent` is the one around this
+    /// node.
+    pub fn walk_in<'a>(
+        &'a self,
+        parent: Option<&'a str>,
+        visit: &mut impl FnMut(&'a Node, Option<&'a str>),
+    ) {
+        visit(self, parent);
+        let parent = match self {
+            Node::Element(element) => Some(element.kind.as_str()),
+            _ => parent,
+        };
         match self {
             Node::Element(element) => {
                 for child in &element.children {
-                    child.walk(visit);
+                    child.walk_in(parent, visit);
                 }
             }
             Node::Component(_) => {}
             Node::If(node) => {
                 for (_, body) in &node.branches {
                     for child in body {
-                        child.walk(visit);
+                        child.walk_in(parent, visit);
                     }
                 }
                 for child in &node.otherwise {
-                    child.walk(visit);
+                    child.walk_in(parent, visit);
                 }
             }
             Node::IfLet(node) => {
                 for child in node.then.iter().chain(&node.otherwise) {
-                    child.walk(visit);
+                    child.walk_in(parent, visit);
                 }
             }
             Node::Match(node) => {
                 for arm in &node.arms {
                     for child in &arm.body {
-                        child.walk(visit);
+                        child.walk_in(parent, visit);
                     }
                 }
             }
@@ -1079,4 +1106,61 @@ pub struct ComponentLibrary {
 /// Resource key of a text declared on an element property.
 pub fn text_key(component: &str, node_path: &str, prop: &str) -> String {
     format!("{component}.{node_path}.{prop}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn element(kind: &str, children: Vec<Node>) -> Node {
+        Node::Element(Element {
+            kind: kind.into(),
+            id: None,
+            path: kind.into(),
+            props: BTreeMap::new(),
+            template: None,
+            children,
+            action: None,
+            source: SourceLocation::default(),
+        })
+    }
+
+    #[test]
+    fn walks_report_the_nearest_element_around_each_node() {
+        let condition = Expr {
+            kind: ExprKind::Literal {
+                value: Value::Bool(true),
+            },
+            ty: Type::Bool,
+        };
+        let tree = element(
+            "Sidebar",
+            vec![Node::If(IfNode {
+                branches: vec![(condition, vec![element("Search", vec![])])],
+                otherwise: vec![element("Column", vec![element("Text", vec![])])],
+            })],
+        );
+        let mut seen = Vec::new();
+        tree.walk_in(None, &mut |node, parent| {
+            let name = match node {
+                Node::Element(element) => element.kind.as_str(),
+                Node::If(_) => "if",
+                _ => "other",
+            };
+            seen.push((name, parent));
+        });
+        assert_eq!(
+            seen,
+            [
+                ("Sidebar", None),
+                ("if", Some("Sidebar")),
+                ("Search", Some("Sidebar")),
+                ("Column", Some("Sidebar")),
+                ("Text", Some("Column")),
+            ]
+        );
+        let mut count = 0;
+        tree.walk(&mut |_| count += 1);
+        assert_eq!(count, seen.len());
+    }
 }

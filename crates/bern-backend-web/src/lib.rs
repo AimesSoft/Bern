@@ -182,51 +182,6 @@ fn index_html(app: &Application, version: &str, icons: &str) -> String {
     )
 }
 
-/// Walk every node of the application with its parent component kind.
-fn walk(app: &Application, visit: &mut dyn FnMut(&Node, Option<&str>)) {
-    fn inner(node: &Node, parent: Option<&str>, visit: &mut dyn FnMut(&Node, Option<&str>)) {
-        visit(node, parent);
-        let name = match node {
-            Node::Element(element) => Some(element.kind.as_str()),
-            _ => parent,
-        };
-        match node {
-            Node::Element(element) => {
-                for child in &element.children {
-                    inner(child, name, visit);
-                }
-            }
-            Node::If(node) => {
-                for child in node
-                    .branches
-                    .iter()
-                    .flat_map(|(_, body)| body)
-                    .chain(&node.otherwise)
-                {
-                    inner(child, name, visit);
-                }
-            }
-            Node::IfLet(node) => {
-                for child in node.then.iter().chain(&node.otherwise) {
-                    inner(child, name, visit);
-                }
-            }
-            Node::Match(node) => {
-                for child in node.arms.iter().flat_map(|arm| &arm.body) {
-                    inner(child, name, visit);
-                }
-            }
-            Node::Component(_) => {}
-        }
-    }
-    for component in &app.components {
-        inner(&component.body, None, visit);
-    }
-    for window in &app.windows.windows {
-        inner(&window.content, None, visit);
-    }
-}
-
 fn nested_optional(ty: &Type) -> bool {
     match ty {
         Type::Optional { inner } => {
@@ -356,7 +311,7 @@ impl Target for WebBrowser {
                 }
             }
         };
-        walk(app, &mut visit);
+        app.walk(&mut visit);
         let mut types: Vec<&Type> = app.protocol.state.iter().map(|field| &field.ty).collect();
         types.extend(
             app.sessions
