@@ -927,26 +927,18 @@ mod tests {
     use super::*;
 
     fn files_below(dir: &Path) -> Vec<String> {
-        fn walk(dir: &Path, relative: &Path, out: &mut Vec<String>) {
-            for entry in std::fs::read_dir(dir.join(relative)).unwrap() {
-                let entry = entry.unwrap();
-                let path = relative.join(entry.file_name());
-                if entry.file_type().unwrap().is_dir() {
-                    walk(dir, &path, out);
-                } else {
-                    // `/`-separated on every platform, as resource names are.
-                    let parts: Vec<String> = path
-                        .components()
-                        .map(|part| part.as_os_str().to_string_lossy().into_owned())
-                        .collect();
-                    out.push(parts.join("/"));
-                }
-            }
-        }
-        let mut out = Vec::new();
-        walk(dir, Path::new(""), &mut out);
-        out.sort();
-        out
+        bern_target_api::files_below(dir)
+            .unwrap()
+            .into_iter()
+            .map(|(_, relative)| {
+                // `/`-separated on every platform, as resource names are.
+                let parts: Vec<String> = relative
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy().into_owned())
+                    .collect();
+                parts.join("/")
+            })
+            .collect()
     }
 
     #[test]
