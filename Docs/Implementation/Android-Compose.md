@@ -30,7 +30,7 @@
 | 位置 | 内容 |
 | --- | --- |
 | `crates/bern-backend-compose/src/lib.rs` | 目标：描述、检查、生成、构建与打包步骤 |
-| `src/kotlin.rs` | Kotlin 生成器：值类型、引擎状态、会话草稿、每个组件与窗口一个 composable、Activity |
+| `src/kotlin/` | Kotlin 生成器：值类型、引擎状态、会话草稿、每个组件与窗口一个 composable、Activity |
 | `src/style.rs` | `style!` 在 Compose 上的能力与 `BernStyle` 声明 |
 | `src/project.rs` | Gradle 脚本、清单、主题、应用名与字符串表 |
 | `src/glue.rs` | 引擎库（cdylib）与这台电脑上的 CLI、MCP 服务器 |

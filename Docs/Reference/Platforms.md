@@ -75,7 +75,7 @@ Firefox 与 Safari 手机布局尚未实测。用于验收的应用播放器仍�
 
 ## 来源与维护
 
-- 功能定义及拒绝规则：[bern-target-api](../../crates/bern-target-api/src/lib.rs)。
+- 功能定义及拒绝规则：[bern-target-api 的功能定义](../../crates/bern-target-api/src/lib.rs)与[功能检查](../../crates/bern-target-api/src/check/features.rs)。
 - [SwiftUI 清单](../../crates/bern-backend-swiftui/src/lib.rs)及 [iOS 描述](../../crates/bern-backend-swiftui/src/ios.rs)。
 - [Web](../../crates/bern-backend-web/src/lib.rs)、[Compose](../../crates/bern-backend-compose/src/lib.rs)、[GTK](../../crates/bern-backend-gtk/src/lib.rs)、[WinUI 3](../../crates/bern-backend-winui3/src/lib.rs) 清单。
 - 验收：[macOS](../Implementation/macOS-SwiftUI.md)、[iOS](../Implementation/iOS-SwiftUI.md)、[Android](../Implementation/Android-Compose.md)、[Web](../Implementation/Web.md)、[Linux](../Implementation/Linux-GTK.md)、[Windows](../Implementation/Windows-WinUI3.md)。
