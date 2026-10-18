@@ -1,8 +1,9 @@
 //! Style overrides on Windows: what the target shows. The generator
-//! describes each rule to the runtime as a `B::StyleDef` (see `cpp.rs`);
-//! buttons take it through their lightweight styling resources, corner,
-//! padding and size, sidebar items through the navigation view's, and
-//! scale, offset and opacity move on the runtime's springs.
+//! describes each rule to the runtime as a `B::StyleDef` (see
+//! `cpp/styles.rs`); buttons take it through their lightweight styling
+//! resources, corner, padding and size, sidebar items through the
+//! navigation view's, and scale, offset and opacity move on the runtime's
+//! springs.
 
 use bern_ir::style::StyleState::{Disabled, Focus, Hover, Pressed, Selected};
 use bern_target_api::StyleSupport;
