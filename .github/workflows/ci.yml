@@ -1,8 +1,10 @@
 # Checks every push to master and every pull request on Linux: formatting,
-# Clippy and the tests of the workspace, and of the GTK runtime, which is
-# not a workspace member because only generated Linux applications build it.
-# Apple, Windows and Android toolchains are not on these runners; tests
-# that need one of them pass without it or check what they can.
+# Clippy and the tests of the workspace, the JavaScript runtimes' tests, and
+# the GTK runtime, which is not a workspace member because only generated
+# Linux applications build it. With GTK installed, the GTK backend's tests
+# also type-check a generated application. Apple, Windows and Android
+# toolchains are not on these runners; tests that need one of them check
+# what they can without it.
 name: CI
 
 on:
@@ -27,6 +29,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+      - name: Install GTK 4 and libadwaita
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
       # rustup installs the toolchain rust-toolchain.toml names.
       - run: rustup toolchain install
       - uses: actions/cache@v4
@@ -41,6 +47,17 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
+  javascript:
+    name: JavaScript runtimes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - run: node --test crates/bern-svg/tests/*.test.mjs crates/bern-backend-web/tests/*.test.mjs
+
   gtk:
     name: bern-gtk
     runs-on: ubuntu-24.04
@@ -50,12 +67,10 @@ jobs:
         working-directory: crates/bern-gtk
     steps:
       - uses: actions/checkout@v5
-      - name: Install GTK 4, libadwaita, GStreamer and WebKitGTK
+      - name: Install GTK 4, libadwaita and WebKitGTK
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev \
-            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-            libwebkitgtk-6.0-dev
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev
       - run: rustup toolchain install
       - uses: actions/cache@v4
         with:
