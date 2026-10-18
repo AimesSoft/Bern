@@ -314,3 +314,189 @@ impl Default for Version {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the effects of a test saw, in order.
+    type Log = Rc<RefCell<Vec<String>>>;
+
+    fn log() -> Log {
+        Rc::new(RefCell::new(Vec::new()))
+    }
+
+    fn write(log: &Log, entry: impl Into<String>) {
+        log.borrow_mut().push(entry.into());
+    }
+
+    #[test]
+    fn effects_rerun_when_a_cell_they_read_changes() {
+        let scope = Scope::detached();
+        let count = Cell::new(1);
+        let seen = log();
+        let (read, written) = (count.clone(), Rc::clone(&seen));
+        scope.run(|| effect(move || write(&written, read.get().to_string())));
+        count.set(2);
+        // The same value again changes nothing.
+        count.set(2);
+        count.set(3);
+        assert_eq!(*seen.borrow(), ["1", "2", "3"]);
+        scope.dispose();
+    }
+
+    #[test]
+    fn peek_and_untrack_record_no_dependency() {
+        let scope = Scope::detached();
+        let (a, b) = (Cell::new(0), Cell::new(0));
+        let runs = Rc::new(StdCell::new(0));
+        let (ra, rb, counted) = (a.clone(), b.clone(), Rc::clone(&runs));
+        scope.run(|| {
+            effect(move || {
+                ra.peek();
+                untrack(|| rb.get());
+                counted.set(counted.get() + 1);
+            })
+        });
+        a.set(1);
+        b.set(1);
+        assert_eq!(runs.get(), 1);
+        scope.dispose();
+    }
+
+    #[test]
+    fn effects_follow_only_the_cells_their_last_run_read() {
+        let scope = Scope::detached();
+        let (which, left, right) = (Cell::new(true), Cell::new("l1"), Cell::new("r1"));
+        let seen = log();
+        let (w, l, r, written) = (which.clone(), left.clone(), right.clone(), seen.clone());
+        scope.run(|| {
+            effect(move || write(&written, if w.get() { l.get() } else { r.get() }));
+        });
+        right.set("r2");
+        which.set(false);
+        left.set("l2");
+        right.set("r3");
+        assert_eq!(*seen.borrow(), ["l1", "r2", "r3"]);
+        scope.dispose();
+    }
+
+    #[test]
+    fn batches_run_each_effect_once_after_every_change() {
+        let scope = Scope::detached();
+        let (a, b) = (Cell::new(0), Cell::new(0));
+        let seen = log();
+        let (ra, rb, written) = (a.clone(), b.clone(), seen.clone());
+        scope.run(|| effect(move || write(&written, format!("{} {}", ra.get(), rb.get()))));
+        let result = batch(|| {
+            a.set(1);
+            b.set(2);
+            // A nested batch waits for the outer one.
+            batch(|| a.set(3));
+            assert_eq!(seen.borrow().len(), 1);
+            "done"
+        });
+        assert_eq!(result, "done");
+        assert_eq!(*seen.borrow(), ["0 0", "3 2"]);
+        scope.dispose();
+    }
+
+    #[test]
+    fn update_reruns_readers_without_comparing() {
+        let scope = Scope::detached();
+        let items = Cell::new(vec![1]);
+        let seen = log();
+        let (read, written) = (items.clone(), seen.clone());
+        scope.run(|| effect(move || write(&written, read.with(Vec::len).to_string())));
+        items.update(|items| items.push(2));
+        items.update(|_| {});
+        assert_eq!(*seen.borrow(), ["1", "2", "2"]);
+        scope.dispose();
+    }
+
+    #[test]
+    fn disposing_a_scope_ends_its_effects_and_runs_cleanups_last_first() {
+        let scope = Scope::detached();
+        let cell = Cell::new(0);
+        let seen = log();
+        let (read, written) = (cell.clone(), seen.clone());
+        scope.run(|| {
+            let (first, second) = (seen.clone(), seen.clone());
+            effect(move || write(&written, format!("effect {}", read.get())));
+            on_cleanup(move || write(&first, "first"));
+            on_cleanup(move || write(&second, "second"));
+        });
+        scope.dispose();
+        cell.set(1);
+        // Disposing again does nothing; a cleanup added afterwards runs at
+        // once.
+        scope.dispose();
+        let late = seen.clone();
+        scope.on_dispose(move || write(&late, "late"));
+        assert!(scope.is_disposed());
+        assert_eq!(*seen.borrow(), ["effect 0", "second", "first", "late"]);
+    }
+
+    #[test]
+    fn effects_end_what_their_previous_run_made() {
+        let scope = Scope::detached();
+        let (outer, inner) = (Cell::new(0), Cell::new(0));
+        let seen = log();
+        let (round_of, inner_of, written) = (outer.clone(), inner.clone(), seen.clone());
+        scope.run(|| {
+            effect(move || {
+                let round = round_of.get();
+                let (inner, shown, ended) = (inner_of.clone(), written.clone(), written.clone());
+                effect(move || write(&shown, format!("inner {round}: {}", inner.get())));
+                on_cleanup(move || write(&ended, format!("cleanup {round}")));
+            })
+        });
+        inner.set(1);
+        outer.set(1);
+        inner.set(2);
+        assert_eq!(
+            *seen.borrow(),
+            [
+                "inner 0: 0",
+                "inner 0: 1",
+                "cleanup 0",
+                "inner 1: 1",
+                "inner 1: 2"
+            ]
+        );
+        scope.dispose();
+    }
+
+    #[test]
+    fn child_scopes_end_with_their_owner() {
+        let parent = Scope::detached();
+        let child = parent.run(Scope::new);
+        // Outside any scope, a new scope has no owner.
+        let free = Scope::new();
+        parent.dispose();
+        assert!(child.is_disposed());
+        assert!(!free.is_disposed());
+    }
+
+    #[test]
+    fn versions_rerun_their_trackers_on_every_bump() {
+        let scope = Scope::detached();
+        let version = Version::new();
+        let runs = Rc::new(StdCell::new(0));
+        let (tracked, counted) = (version.clone(), Rc::clone(&runs));
+        scope.run(|| {
+            effect(move || {
+                tracked.track();
+                counted.set(counted.get() + 1);
+            })
+        });
+        version.bump();
+        version.bump();
+        batch(|| {
+            version.bump();
+            version.bump();
+        });
+        assert_eq!(runs.get(), 4);
+        scope.dispose();
+    }
+}

@@ -18,6 +18,20 @@ pub struct SvgProps {
     pub interactive: bool,
 }
 
+/// The presenter's update for the bound values: a speed that is not
+/// positive plays at 1, and the picture fits `contain` unless declared.
+fn update_script(
+    playing: bool,
+    speed: f64,
+    restart: f64,
+    fit: Option<&str>,
+    interactive: bool,
+) -> String {
+    let update = serde_json::json!({"playing": playing, "speed": if speed > 0.0 { speed } else { 1.0 },
+        "restart": restart, "fit": fit.unwrap_or("contain"), "interactive": interactive});
+    format!("window.bernSvg?.update({update})")
+}
+
 fn evaluate(view: &webkit6::WebView, script: &str) {
     view.evaluate_javascript(script, None, None, None::<&gio::Cancellable>, |result| {
         if let Err(error) = result {
@@ -108,9 +122,8 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
             .as_ref()
             .is_none_or(|get| get(&ctx) == crate::protocol::Value::Bool(true));
         let speed = number(&props.speed, 1.0);
-        let update = serde_json::json!({"playing": playing, "speed": if speed > 0.0 { speed } else { 1.0 },
-            "restart": number(&props.restart, 0.0), "fit": props.fit.unwrap_or("contain"), "interactive": props.interactive});
-        *state.borrow_mut() = format!("window.bernSvg?.update({update})");
+        let restart = number(&props.restart, 0.0);
+        *state.borrow_mut() = update_script(playing, speed, restart, props.fit, props.interactive);
         if ready.get() {
             evaluate(&displayed, &state.borrow());
         }
@@ -131,4 +144,36 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
         closing.load_html("", None);
     });
     crate::widgets::place(p, &frame);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The values an update script passes to the presenter.
+    fn values(script: &str) -> serde_json::Value {
+        let json = script
+            .strip_prefix("window.bernSvg?.update(")
+            .and_then(|rest| rest.strip_suffix(')'))
+            .expect("an update call");
+        serde_json::from_str(json).expect("JSON")
+    }
+
+    #[test]
+    fn updates_pass_the_bound_values() {
+        assert_eq!(
+            values(&update_script(false, 2.0, 1.5, Some("cover"), true)),
+            serde_json::json!({"playing": false, "speed": 2.0, "restart": 1.5, "fit": "cover", "interactive": true})
+        );
+    }
+
+    #[test]
+    fn speeds_that_are_not_positive_play_at_one() {
+        for speed in [0.0, -1.0] {
+            let update = values(&update_script(true, speed, 0.0, None, false));
+            assert_eq!(update["speed"], 1.0);
+        }
+        let update = values(&update_script(true, 1.0, 0.0, None, false));
+        assert_eq!(update["fit"], "contain");
+    }
 }

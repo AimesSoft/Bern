@@ -532,3 +532,127 @@ pub(crate) fn use_part(dark: bool) {
     }
     PARTS.with(|parts| parts.borrow_mut().push((dark, provider)));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn roles_name_libadwaita_colors() {
+        assert_eq!(
+            css(&Color::Role("surface.canvas"), None),
+            "@window_bg_color"
+        );
+        assert_eq!(
+            css(&Color::Role("text.secondary"), None),
+            "alpha(@window_fg_color, 0.55)"
+        );
+        assert_eq!(
+            css(&Color::Role("selection.background"), None),
+            "alpha(@accent_bg_color, 0.25)"
+        );
+        // A role the runtime does not know is the window's text color.
+        assert_eq!(css(&Color::Role("brand.unknown"), None), "@window_fg_color");
+    }
+
+    #[test]
+    fn parts_take_neutral_colors_from_their_own_palette() {
+        let canvas = Color::Role("surface.canvas");
+        assert_eq!(css(&canvas, Some(false)), "rgba(250, 250, 250, 1.000)");
+        assert_eq!(css(&canvas, Some(true)), "rgba(36, 36, 36, 1.000)");
+        let secondary = Color::Role("text.secondary");
+        assert_eq!(css(&secondary, Some(false)), "rgba(0, 0, 0, 0.440)");
+        assert_eq!(css(&secondary, Some(true)), "rgba(255, 255, 255, 0.550)");
+        assert_eq!(
+            css(&Color::Role("surface.panel"), Some(true)),
+            "rgba(255, 255, 255, 0.080)"
+        );
+        // The accent keeps following the window.
+        assert_eq!(css(&Color::Role("accent"), Some(true)), "@accent_bg_color");
+        assert_eq!(
+            css(&Color::Role("focus.indicator"), Some(false)),
+            "alpha(@accent_color, 0.5)"
+        );
+    }
+
+    #[test]
+    fn fixed_colors_follow_the_part() {
+        let color = Color::Fixed((1, 2, 3), (250, 251, 252));
+        assert_eq!(css(&color, Some(false)), "rgb(1, 2, 3)");
+        assert_eq!(css(&color, Some(true)), "rgb(250, 251, 252)");
+    }
+
+    #[test]
+    fn accent_and_error_backgrounds_pair_with_their_text() {
+        assert_eq!(pair(&Color::Role("accent")), Some(Color::Role("on_accent")));
+        assert_eq!(
+            pair(&Color::Role("status.error")),
+            Some(Color::Role("on_error"))
+        );
+        assert_eq!(pair(&Color::Role("status.success")), None);
+        assert_eq!(pair(&Color::Fixed((0, 0, 0), (0, 0, 0))), None);
+    }
+
+    #[test]
+    fn luminance_and_mixing() {
+        assert_eq!(luminance((0, 0, 0)), 0.0);
+        assert!((luminance((255, 255, 255)) - 1.0).abs() < 1e-9);
+        assert!((luminance((255, 0, 0)) - 0.2126).abs() < 1e-9);
+        // sRGB's linear segment near black.
+        assert!((luminance((0, 10, 0)) - 0.7152 * (10.0 / 255.0) / 12.92).abs() < 1e-12);
+        assert_eq!(mix((0, 0, 0), 1.0, 0.5), (128, 128, 128));
+        assert_eq!(mix((200, 100, 50), 0.0, 0.2), (160, 80, 40));
+        assert_eq!(mix((12, 34, 56), 1.0, 0.0), (12, 34, 56));
+        assert_eq!(mix((12, 34, 56), 1.0, 1.0), (255, 255, 255));
+    }
+
+    #[test]
+    fn color_definitions_are_read_line_by_line() {
+        let mut names = HashMap::new();
+        definitions(
+            "@define-color accent_bg_color #3584e4;\n  @define-color window_fg_color   rgba(0, 0, 0, 0.8) ;\nbutton { color: red; }\n@define-color lonely\n",
+            &mut names,
+        );
+        assert_eq!(names.len(), 2);
+        assert_eq!(names["accent_bg_color"], "#3584e4");
+        assert_eq!(names["window_fg_color"], "rgba(0, 0, 0, 0.8)");
+        // Later sheets override earlier ones, as defaults-dark.css does.
+        definitions("@define-color accent_bg_color #78aeed;", &mut names);
+        assert_eq!(names["accent_bg_color"], "#78aeed");
+    }
+
+    #[test]
+    fn named_colors_resolve_but_for_the_accent() {
+        let names: HashMap<String, String> = [
+            ("a", "@b"),
+            ("b", "#fff"),
+            ("accent_bg_color", "#00f"),
+            ("loop", "@loop"),
+        ]
+        .into_iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
+        assert_eq!(
+            resolve(
+                "color: @a; background: @accent_bg_color; border-color: @unknown;",
+                &names,
+                0
+            ),
+            "color: #fff; background: @accent_bg_color; border-color: @unknown;"
+        );
+        assert_eq!(resolve("mix(@b,@b,0.5)", &names, 0), "mix(#fff,#fff,0.5)");
+        assert_eq!(resolve("a @ b — ü", &names, 0), "a @ b — ü");
+        // A definition naming itself stops instead of recursing for ever.
+        assert_eq!(resolve("@loop", &names, 0), "@loop");
+    }
+
+    #[test]
+    fn selector_lists_split_outside_parentheses() {
+        assert_eq!(
+            selectors("button, :is(.a, .b) > label,row "),
+            ["button", ":is(.a, .b) > label", "row"]
+        );
+        assert_eq!(selectors("window"), ["window"]);
+    }
+}

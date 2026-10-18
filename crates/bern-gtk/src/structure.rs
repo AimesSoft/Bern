@@ -1108,3 +1108,51 @@ pub fn Adaptive(p: &Parent, ctx: &Ctx, id: Option<&'static str>, layouts: [Optio
         p.add(&holder);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::tests::{app, start, unit_enum};
+
+    #[test]
+    fn widths_choose_a_layout_size_by_the_breakpoints() {
+        let mut def = app();
+        def.compact_below = Some(600.0);
+        def.medium_below = Some(840.0);
+        def.expanded_below = Some(1200.0);
+        start(def);
+        for (width, size) in [
+            (0.0, "compact"),
+            (599.0, "compact"),
+            (600.0, "medium"),
+            (839.5, "medium"),
+            (840.0, "expanded"),
+            (1199.0, "expanded"),
+            (1200.0, "large"),
+            (4000.0, "large"),
+        ] {
+            assert_eq!(size_of(width), size, "{width}");
+        }
+    }
+
+    #[test]
+    fn sizes_the_application_does_not_have_are_skipped() {
+        let mut def = app();
+        def.compact_below = Some(600.0);
+        start(def);
+        assert_eq!(size_of(599.0), "compact");
+        assert_eq!(size_of(600.0), "expanded");
+        assert_eq!(size_of(10_000.0), "expanded");
+    }
+
+    #[test]
+    fn enum_values_are_selected_by_variant_name() {
+        let mut def = app();
+        def.types.enums = vec![unit_enum("Section", &["Inbox", "Archive"])];
+        start(def);
+        assert_eq!(variant_name("Section", &Value::unit_variant(1)), "Archive");
+        assert_eq!(variant_name("Section", &Value::unit_variant(5)), "");
+        assert_eq!(variant_name("Other", &Value::unit_variant(0)), "");
+        assert_eq!(variant_name("Section", &Value::Int(1)), "");
+    }
+}

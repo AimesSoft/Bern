@@ -1307,3 +1307,181 @@ pub(crate) fn show_startup_error(application: &adw::Application, message: &str) 
     window.set_content(Some(&view));
     window.present();
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::tests::{app, start};
+    use crate::protocol::{Type, session_catalog};
+    use gtk::gdk::{Key, ModifierType};
+
+    #[test]
+    fn shortcuts_parse_into_modifiers_and_a_key() {
+        assert_eq!(
+            parse_keys("cmd+shift+k"),
+            Keys {
+                modifiers: ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK,
+                key: "k".into(),
+            }
+        );
+        assert_eq!(
+            parse_keys("ctrl+alt+delete"),
+            Keys {
+                modifiers: ModifierType::CONTROL_MASK | ModifierType::ALT_MASK,
+                key: "delete".into(),
+            }
+        );
+        assert_eq!(
+            parse_keys("space"),
+            Keys {
+                modifiers: ModifierType::empty(),
+                key: "space".into(),
+            }
+        );
+        // `cmd` is Control here.
+        assert_eq!(parse_keys("cmd+s"), parse_keys("ctrl+s"));
+    }
+
+    #[test]
+    fn pressed_keys_are_named_as_shortcuts_write_them() {
+        for (key, name) in [
+            (Key::A, "a"),
+            (Key::k, "k"),
+            (Key::_1, "1"),
+            (Key::slash, "/"),
+            (Key::space, "space"),
+            (Key::Escape, "escape"),
+            (Key::Return, "return"),
+            (Key::KP_Enter, "return"),
+            (Key::ISO_Left_Tab, "tab"),
+            (Key::BackSpace, "delete"),
+            (Key::Delete, "delete"),
+            (Key::Page_Down, "pagedown"),
+            (Key::End, "end"),
+        ] {
+            assert_eq!(key_name(key).as_deref(), Some(name), "{name}");
+        }
+        // Keys that type nothing have no name.
+        assert_eq!(key_name(Key::F1), None);
+        assert_eq!(key_name(Key::Shift_L), None);
+    }
+
+    #[test]
+    fn close_results_match_the_session_catalog() {
+        let (types, _) = session_catalog();
+        let ty = Type::Record {
+            name: "CloseResult".into(),
+        };
+        let outcomes = &types.enum_def("CloseOutcome").expect("outcomes").variants;
+        for (outcome, name) in [
+            (CLOSED, "Closed"),
+            (REJECTED, "Rejected"),
+            (CONFIRMATION_REQUIRED, "ConfirmationRequired"),
+        ] {
+            assert_eq!(outcomes[outcome as usize].name, name);
+        }
+        let rejected = CloseResult::rejected("main#1", 4, "busy".into()).to_value();
+        rejected.check(&ty, &types).expect("a CloseResult");
+        assert_eq!(
+            rejected,
+            Value::Record(vec![
+                Value::unit_variant(REJECTED),
+                Value::Text("main#1".into()),
+                Value::none(),
+                Value::Int(4),
+                Value::List(Vec::new()),
+                Value::none(),
+                Value::some(Value::Text("busy".into())),
+            ])
+        );
+        let waiting = CloseResult {
+            outcome: CONFIRMATION_REQUIRED,
+            confirmation: Some("close-1".into()),
+            decisions: vec![0, 1, 2],
+            message: Some("Save the draft?".into()),
+            ..CloseResult::closed("main#1", 5)
+        };
+        waiting
+            .to_value()
+            .check(&ty, &types)
+            .expect("a CloseResult");
+    }
+
+    #[test]
+    fn window_actions_match_the_session_catalog() {
+        let (types, _) = session_catalog();
+        let actions = &types.enum_def("WindowAction").expect("actions").variants;
+        for (action, name) in [
+            (Action::Activate, "Activate"),
+            (Action::Close, "Close"),
+            (Action::Minimize, "Minimize"),
+            (Action::Restore, "Restore"),
+            (Action::Maximize, "Maximize"),
+            (Action::Resize, "Resize"),
+        ] {
+            assert_eq!(actions[action as usize].name, name);
+        }
+    }
+
+    /// Start a host whose windows own one draft: a title and whether it is
+    /// done.
+    fn drafts() {
+        let mut def = app();
+        def.sessions = vec![crate::SessionDef {
+            name: "draft",
+            fields: vec![
+                ("title", Type::Text, Value::Text(String::new())),
+                ("done", Type::Bool, Value::Bool(false)),
+            ],
+        }];
+        start(def);
+    }
+
+    /// A registered instance: success, generation, id, then each session
+    /// slot and its values.
+    fn instance(session: u32) -> Writer {
+        let mut writer = Writer::new();
+        writer.u8(0);
+        writer.u64(2);
+        writer.text("editor#2");
+        writer.u32(1);
+        writer.u32(session);
+        writer.text("Notes");
+        writer.u8(1);
+        writer
+    }
+
+    #[test]
+    fn new_instances_decode_their_drafts() {
+        drafts();
+        let (generation, id, cells) = decode_instance(&instance(0).bytes).expect("an instance");
+        assert_eq!((generation, id.as_str()), (2, "editor#2"));
+        let values: Vec<Value> = cells[&0].iter().map(Cell::peek).collect();
+        assert_eq!(values, [Value::Text("Notes".into()), Value::Bool(true)]);
+    }
+
+    #[test]
+    fn malformed_instances_fail() {
+        drafts();
+        assert_eq!(
+            decode_instance(&instance(3).bytes).err(),
+            Some(Failure::new("invalid_reply", "unknown session type"))
+        );
+        let mut truncated = instance(0).bytes;
+        truncated.pop();
+        assert_eq!(
+            decode_instance(&truncated)
+                .err()
+                .map(|failure| failure.code),
+            Some("invalid_reply".to_string())
+        );
+        let mut refused = Writer::new();
+        refused.u8(1);
+        refused.text("window_limit");
+        refused.text("Only one editor can be open");
+        assert_eq!(
+            decode_instance(&refused.bytes).err(),
+            Some(Failure::new("window_limit", "Only one editor can be open"))
+        );
+    }
+}

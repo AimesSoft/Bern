@@ -174,3 +174,119 @@ pub fn key_text(value: &Value) -> String {
         other => format!("{other:?}"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_paths_reach_nested_fields() {
+        let item = Value::Record(vec![
+            Value::Text("a".into()),
+            Value::Record(vec![Value::Int(1), Value::Bool(true)]),
+        ]);
+        assert_eq!(at(item.clone(), &[1, 1]), Value::Bool(true));
+        assert_eq!(at(item.clone(), &[0]), Value::Text("a".into()));
+        assert_eq!(at(item.clone(), &[]), item);
+        assert_eq!(at(item.clone(), &[2]), Value::Unit);
+        assert_eq!(at(item, &[0, 0]), Value::Unit);
+    }
+
+    #[test]
+    fn logic_takes_only_true_as_true() {
+        assert!(truthy(&Value::Bool(true)));
+        assert!(!truthy(&Value::Int(1)));
+        assert_eq!(not(Value::Bool(true)), Value::Bool(false));
+        assert_eq!(not(Value::Unit), Value::Bool(true));
+        // The right side runs only when it decides the result.
+        let unused = || -> Value { panic!("evaluated") };
+        assert_eq!(and(Value::Bool(false), unused), Value::Bool(false));
+        assert_eq!(or(Value::Bool(true), unused), Value::Bool(true));
+        assert_eq!(and(bool(true), || bool(true)), Value::Bool(true));
+        assert_eq!(or(bool(false), || bool(false)), Value::Bool(false));
+    }
+
+    #[test]
+    fn numbers_and_texts_order() {
+        assert_eq!(lt(Value::Int(1), Value::Int(2)), Value::Bool(true));
+        assert_eq!(le(Value::Int(2), Value::Int(2)), Value::Bool(true));
+        assert_eq!(gt(Value::Float(2.5), Value::Float(2.0)), Value::Bool(true));
+        assert_eq!(ge(Value::Float(2.0), Value::Float(2.5)), Value::Bool(false));
+        assert_eq!(lt(text("apple"), text("banana")), Value::Bool(true));
+        // NaN and values without an order compare false every way.
+        for compare in [lt, le, gt, ge] {
+            assert_eq!(
+                compare(Value::Float(f64::NAN), Value::Float(1.0)),
+                Value::Bool(false)
+            );
+            assert_eq!(
+                compare(Value::Bool(true), Value::Int(1)),
+                Value::Bool(false)
+            );
+        }
+    }
+
+    #[test]
+    fn equality_is_structural() {
+        let list = |items: &[i64]| Value::List(items.iter().copied().map(Value::Int).collect());
+        assert_eq!(eq(list(&[1, 2]), list(&[1, 2])), Value::Bool(true));
+        assert_eq!(ne(list(&[1, 2]), list(&[2, 1])), Value::Bool(true));
+        assert_eq!(
+            eq(variant(1, vec![text("x")]), variant(1, vec![text("y")])),
+            Value::Bool(false)
+        );
+    }
+
+    #[test]
+    fn negation_wraps_and_keeps_other_values() {
+        assert_eq!(neg(Value::Int(5)), Value::Int(-5));
+        assert_eq!(neg(Value::Int(i64::MIN)), Value::Int(i64::MIN));
+        assert_eq!(neg(Value::Float(1.5)), Value::Float(-1.5));
+        assert_eq!(neg(text("a")), text("a"));
+    }
+
+    #[test]
+    fn numbers_print_without_needless_decimals() {
+        assert_eq!(number(3.0), "3");
+        assert_eq!(number(-2.0), "-2");
+        assert_eq!(number(-0.0), "0");
+        assert_eq!(number(2.5), "2.5");
+        assert_eq!(number(0.1), "0.1");
+        assert_eq!(number(1e20), "100000000000000000000");
+        assert_eq!(plain(&Value::Float(4.0)), "4");
+        assert_eq!(plain(&Value::Int(-7)), "-7");
+        assert_eq!(plain(&Value::Bool(true)), "true");
+        assert_eq!(plain(&text("é")), "é");
+        assert_eq!(plain(&Value::Unit), "");
+    }
+
+    #[test]
+    fn conversions_give_neutral_values_for_other_kinds() {
+        assert_eq!(as_f64(&Value::Int(2)), 2.0);
+        assert_eq!(as_f64(&Value::Float(0.5)), 0.5);
+        assert_eq!(as_f64(&text("2")), 0.0);
+        assert_eq!(as_text(&text("hi")), "hi");
+        assert_eq!(as_text(&Value::Int(1)), "");
+        assert_eq!(as_list(Value::List(vec![Value::Unit])), vec![Value::Unit]);
+        assert_eq!(as_list(Value::Unit), Vec::<Value>::new());
+        assert_eq!(some(Value::some(Value::Int(1))), Some(Value::Int(1)));
+        assert_eq!(some(Value::none()), None);
+        assert_eq!(some(Value::Int(1)), None);
+    }
+
+    #[test]
+    fn enum_values_give_their_variant_and_payload() {
+        let value = variant(2, vec![Value::Int(10), text("ten")]);
+        assert_eq!(tag(&value), Some(2));
+        assert_eq!(tag(&Value::Int(2)), None);
+        assert_eq!(payload(value.clone(), 1), text("ten"));
+        assert_eq!(payload(value, 2), Value::Unit);
+        assert_eq!(payload(Value::Int(1), 0), Value::Unit);
+    }
+
+    #[test]
+    fn list_keys_are_texts() {
+        assert_eq!(key_text(&Value::Int(42)), "42");
+        assert_eq!(key_text(&text("id-1")), "id-1");
+    }
+}

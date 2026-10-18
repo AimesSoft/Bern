@@ -1150,3 +1150,28 @@ pub(crate) fn bind_number(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn entering_and_clocks_hold_only_for_their_body() {
+        assert!(!entering() && clock().is_none());
+        let update = with_entering(true, || {
+            assert!(entering());
+            with_entering(false, || assert!(!entering()));
+            assert!(entering());
+            new_clock(0.05)
+        });
+        assert!(!entering());
+        // The children of a container built in an update appear with it.
+        assert!(update.play && !new_clock(0.05).play);
+        with_clock(Some(Rc::clone(&update)), || {
+            assert!(clock().is_some_and(|clock| Rc::ptr_eq(&clock, &update)));
+            with_clock(None, || assert!(clock().is_none()));
+            assert!(clock().is_some());
+        });
+        assert!(clock().is_none());
+    }
+}

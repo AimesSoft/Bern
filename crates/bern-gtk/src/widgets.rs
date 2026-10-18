@@ -1801,3 +1801,42 @@ pub fn label(enum_name: &str, variant: u32) -> String {
     };
     tr(&crate::protocol::label_key(enum_name, &variant.name))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::tests::{app, start, unit_enum};
+
+    #[test]
+    fn text_styles_map_to_libadwaita_classes() {
+        for (style, class) in [
+            (Some("large_title"), "title-1"),
+            (Some("title"), "title-2"),
+            (Some("title2"), "title-3"),
+            (Some("title3"), "title-4"),
+            (Some("headline"), "heading"),
+            (Some("subheadline"), "heading"),
+            (Some("footnote"), "caption"),
+            (Some("caption2"), "caption"),
+            (Some("body"), "body"),
+            (None, "body"),
+        ] {
+            assert_eq!(style_class(style), class, "{style:?}");
+        }
+    }
+
+    #[test]
+    fn values_show_as_text_or_by_their_enum_label() {
+        let mut def = app();
+        def.types.enums = vec![unit_enum("Mood", &["Calm", "Busy"])];
+        def.strings = &[("en", &[("Mood.Busy", "Busy now")])];
+        start(def);
+        assert_eq!(display(&Value::unit_variant(1), Some("Mood")), "Busy now");
+        // Without a translation, the label is its key.
+        assert_eq!(display(&Value::unit_variant(0), Some("Mood")), "Mood.Calm");
+        assert_eq!(display(&Value::Float(2.0), Some("Mood")), "2");
+        assert_eq!(display(&Value::unit_variant(1), None), "");
+        assert_eq!(label("Mood", 7), "");
+        assert_eq!(label("Weather", 0), "");
+    }
+}
