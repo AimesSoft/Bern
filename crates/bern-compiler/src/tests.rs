@@ -1320,6 +1320,250 @@ pub fn other(app: demo::Client) -> impl View {{
             "{output}"
         );
     }
+
+    const RESET: &str =
+        r#"Button(id: reset, label: tr! { "en" => "Reset", "ja" => "リセット" }) => app.reset()"#;
+
+    /// A second contract, `OtherFeature`, for `child` to be scoped by.
+    const OTHER: &str = r#"
+#[bern::features]
+pub enum OtherFeature {
+    #[commands(reset)]
+    Reset,
+}
+"#;
+
+    /// The contract project with `extra` declarations and one more
+    /// component, `child`, declared with `attribute` and placing `body`.
+    fn with_child(
+        page: &str,
+        attribute: &str,
+        body: &str,
+        extra: &str,
+    ) -> Result<Compiled, Vec<Diagnostic>> {
+        let source = format!(
+            "{}{extra}\n{attribute}\npub fn child(app: demo::Client) -> impl View {{\n    ui! {{ {body} }}\n}}\n",
+            project("", page)
+        );
+        compile_project_with(PROTOCOL, &source, LAYOUTS)
+    }
+
+    /// The diagnostics of a project that must fail, as text.
+    fn text(result: Result<Compiled, Vec<Diagnostic>>) -> String {
+        match result {
+            Ok(_) => panic!("expected the project to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+
+    /// The entries that reach a feature in one size.
+    fn entries(coverage: &ir::Coverage) -> &[String] {
+        match coverage {
+            ir::Coverage::Covered { entries } | ir::Coverage::Conditional { entries } => entries,
+            ir::Coverage::Missing => &[],
+        }
+    }
+
+    #[test]
+    fn a_feature_lowers_its_commands_sizes_and_reasons() {
+        let compiled = compiled(
+            r#"#[commands(reset, media.play)]
+    #[guaranteed("shown whenever the page is")]
+    #[exempt(linux, "no media keys")]"#,
+            ADD,
+        );
+        let contract = &compiled.app.contracts[0];
+        assert_eq!(contract.name, "PageFeature");
+        let feature = &contract.features[0];
+        assert_eq!(feature.name, "Add");
+        assert_eq!(feature.doc, "Add one.");
+        // Protocol commands by catalog id, media commands by their own.
+        assert_eq!(feature.commands, ["demo.add", "demo.reset", "media.play"]);
+        // Without `#[layouts]`, a feature is due in every required size.
+        assert_eq!(
+            feature.layouts,
+            [ir::LayoutSize::Compact, ir::LayoutSize::Expanded]
+        );
+        assert_eq!(
+            feature.guaranteed.as_deref(),
+            Some("shown whenever the page is")
+        );
+        assert_eq!(feature.exemptions.len(), 1);
+        assert_eq!(feature.exemptions[0].platform, "linux");
+        assert_eq!(feature.exemptions[0].reason, "no media keys");
+    }
+
+    #[test]
+    fn unknown_feature_commands_and_sizes_are_rejected() {
+        for (features, expected) in [
+            (
+                "#[commands(launch)]",
+                "`launch` is neither a command of the protocol nor a standard media command (`media.play`, …)",
+            ),
+            ("#[commands(media.fly)]", "`media.fly` is neither a command"),
+            (
+                "#[layouts(huge)]",
+                "unknown layout size `huge`; sizes are compact and expanded",
+            ),
+            // Contracts cover the required sizes only.
+            ("#[layouts(medium)]", "sizes are compact and expanded"),
+        ] {
+            let output = failure(features, ADD, LAYOUTS);
+            assert!(output.contains(expected), "{features}: {output}");
+            assert!(output.contains("--> demo-ui/src/lib.rs:"), "{output}");
+        }
+    }
+
+    #[test]
+    fn a_feature_for_one_size_is_proven_in_that_size_only() {
+        let compiled = compiled("#[layouts(expanded)]", &layouts("Spacer", ADD));
+        let feature = &compiled.app.contracts[0].features[0];
+        assert_eq!(feature.layouts, [ir::LayoutSize::Expanded]);
+        assert_eq!(feature.coverage.len(), 1);
+        assert_eq!(feature.coverage[0].size, ir::LayoutSize::Expanded);
+        assert!(matches!(
+            feature.coverage[0].coverage,
+            ir::Coverage::Covered { .. }
+        ));
+        assert!(report(&compiled, "macos").is_empty());
+    }
+
+    #[test]
+    fn a_feature_in_some_branches_only_stays_conditional() {
+        let compiled = compiled("", &format!("if draft.on {{ {ADD} }} else {{ Spacer }}"));
+        for size in &compiled.app.contracts[0].features[0].coverage {
+            assert_eq!(
+                size.coverage,
+                ir::Coverage::Conditional {
+                    entries: vec!["page.add".into()]
+                },
+                "{size:?}"
+            );
+        }
+        assert!(report(&compiled, "macos").contains("error[B203]"));
+    }
+
+    #[test]
+    fn components_a_scope_places_belong_to_it() {
+        let compiled = with_child("child(app: app)", "#[component]", ADD, "")
+            .unwrap_or_else(|errors| panic!("{errors:?}"));
+        for size in &compiled.app.contracts[0].features[0].coverage {
+            assert_eq!(
+                size.coverage,
+                ir::Coverage::Covered {
+                    entries: vec!["child.add".into()]
+                },
+                "{size:?}"
+            );
+        }
+        let output = text(with_child(
+            "child(app: app)",
+            "#[component]",
+            &format!("Column {{ {ADD} {RESET} }}"),
+            "",
+        ));
+        assert!(
+            output.contains(
+                "error[B202]: `child.reset` runs `demo.reset` inside the scope of contract `PageFeature`"
+            ),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn a_component_scoped_by_another_contract_answers_to_that_one() {
+        let reset = RESET.replace(") =>", ", feature: OtherFeature::Reset) =>");
+        let compiled = with_child(
+            &format!("Column {{ {ADD} child(app: app) }}"),
+            "#[component(features = OtherFeature)]",
+            &reset,
+            OTHER,
+        )
+        .unwrap_or_else(|errors| panic!("{errors:?}"));
+        let coverage = |contract: &str| {
+            let contract = compiled
+                .app
+                .contracts
+                .iter()
+                .find(|candidate| candidate.name == contract)
+                .unwrap();
+            assert_eq!(contract.features[0].coverage.len(), 2);
+            entries(&contract.features[0].coverage[0].coverage).to_vec()
+        };
+        // The child's entries prove its own contract, not the page's.
+        assert_eq!(coverage("PageFeature"), ["page.add"]);
+        assert_eq!(coverage("OtherFeature"), ["child.reset"]);
+
+        // A feature of the child's contract on the page is B204.
+        let page = format!(
+            "Column {{ {ADD} {} child(app: app) }}",
+            reset.replace("id: reset", "id: again")
+        );
+        let output = text(with_child(
+            &page,
+            "#[component(features = OtherFeature)]",
+            &reset,
+            OTHER,
+        ));
+        assert!(
+            output.contains(
+                "error[B204]: `OtherFeature::Reset` belongs to contract `OtherFeature`, but `page.again` is in the scope of `PageFeature`"
+            ),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn an_entry_shared_by_two_scopes_is_reported_once() {
+        let panel = r#"
+#[component(features = OtherFeature)]
+pub fn panel(app: demo::Client) -> impl View {
+    ui! { child(app: app) }
+}
+"#;
+        let output = text(with_child(
+            &format!("Column {{ {ADD} child(app: app) }}"),
+            "#[component]",
+            RESET,
+            &format!("{OTHER}{panel}"),
+        ));
+        assert_eq!(
+            output.matches("`child.reset` runs `demo.reset`").count(),
+            1,
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn a_feature_entry_runs_a_business_command_b204() {
+        let flip = r#"Button(id: flip, label: tr! { "en" => "Flip", "ja" => "反転" }, feature: PageFeature::Add) => draft.on.toggle()"#;
+        let output = failure("", &format!("Column {{ {ADD} {flip} }}"), LAYOUTS);
+        assert!(
+            output.contains(
+                "error[B204]: `page.flip` names `PageFeature::Add` but runs no business command"
+            ),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn features_in_a_window_are_outside_every_scope_b204() {
+        let source = project("", ADD).replace(
+            "other(app: app)",
+            &format!("other(app: app)\n{}", ADD.replace("id: add", "id: stray")),
+        );
+        let output = text(compile_project_with(PROTOCOL, &source, LAYOUTS));
+        assert!(
+            output.contains(
+                "error[B204]: `PageFeature::Add` is used outside the scope of contract `PageFeature`"
+            ),
+            "{output}"
+        );
+    }
 }
 
 /// Compile `body` in a project that declares the resource `pics/a.png`.
@@ -2342,18 +2586,31 @@ fn buttons_show_content_and_reveal_on_hover() {
     }
 }
 
+/// Parse the body of a `style!` invocation.
+fn style_item(body: &str) -> bern_syntax::StyleItem {
+    let item: syn::ItemMacro = syn::parse_str(&format!("style! {{ {body} }}")).unwrap();
+    bern_syntax::parse_style(item.mac.tokens).unwrap()
+}
+
+/// Lower the application's one `style!`, declared in `ui.rs`.
+fn lower_style(body: &str) -> (ir::style::StyleSheet, Vec<Diagnostic>) {
+    let mut diagnostics = Vec::new();
+    let sheet = style::lower(&[("ui.rs".into(), style_item(body))], &mut diagnostics);
+    (sheet, diagnostics)
+}
+
+/// Lowering `body` reports a diagnostic containing `expected`.
+fn assert_style_error(body: &str, expected: &str) {
+    let (_, diagnostics) = lower_style(body);
+    assert!(
+        diagnostics.iter().any(|d| d.message.contains(expected)),
+        "{body}: {diagnostics:?}"
+    );
+}
+
 #[test]
 fn style_rules_are_lowered_and_checked() {
-    let source = |body: &str| {
-        let item: syn::ItemMacro = syn::parse_str(&format!("style! {{ {body} }}")).unwrap();
-        bern_syntax::parse_style(item.mac.tokens).unwrap()
-    };
-    let lower = |body: &str| {
-        let mut diagnostics = Vec::new();
-        let sheet = style::lower(&[("ui.rs".into(), source(body))], &mut diagnostics);
-        (sheet, diagnostics)
-    };
-    let (sheet, diagnostics) = lower(
+    let (sheet, diagnostics) = lower_style(
         "motion { jelly: spring(period: 0.5, damping: 0.4) }
          SidebarItem { corner: 8, hover: background(fill.subtle) + scale(1.03, snappy), selected: indicator(accent, edge: leading, width: 4), settle: jelly }
          #[target(macos)] Button.hero { background: color(light: \"#FF2E55\", dark: \"#FF5577\"), size: large }",
@@ -2371,7 +2628,7 @@ fn style_rules_are_lowered_and_checked() {
         [("Button".to_string(), "hero".to_string())]
     );
 
-    let (sheet, diagnostics) = lower(
+    let (sheet, diagnostics) = lower_style(
         "Button.card { shadow: 4, hover: shadow(12, y: 5, opacity: 0.3) + scale(1.03, snappy) }",
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -2429,12 +2686,528 @@ fn style_rules_are_lowered_and_checked() {
             "is not a color role",
         ),
     ] {
-        let (_, diagnostics) = lower(body);
+        assert_style_error(body, expected);
+    }
+}
+
+#[test]
+fn an_application_lowers_at_most_one_style() {
+    let mut diagnostics = Vec::new();
+    let sheet = style::lower(&[], &mut diagnostics);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(sheet.motion.len(), ir::style::BUILT_IN_MOTION.len());
+    assert_eq!(sheet.transitions, ir::style::built_in_transitions());
+    assert!(sheet.rules.is_empty() && sheet.patterns.is_empty());
+    assert!(sheet.accents.is_empty() && sheet.text_weights.is_empty());
+
+    // Only the first is lowered; each further one is reported where it
+    // is declared.
+    let sheet = style::lower(
+        &[
+            ("a.rs".into(), style_item("Button { corner: 4 }")),
+            ("b.rs".into(), style_item("IconButton { corner: 8 }")),
+            ("c.rs".into(), style_item("Stack { padding: 2 }")),
+        ],
+        &mut diagnostics,
+    );
+    assert_eq!(sheet.rules.len(), 1);
+    assert_eq!(sheet.rules[0].component, "Button");
+    let files: Vec<&str> = diagnostics
+        .iter()
+        .map(|d| {
+            assert!(d.message.contains("at most one `style!`"), "{d:?}");
+            d.location.as_ref().unwrap().file.as_str()
+        })
+        .collect();
+    assert_eq!(files, ["b.rs", "c.rs"]);
+}
+
+#[test]
+fn motion_tokens_are_springs_that_replace_built_ins_by_name() {
+    let (sheet, diagnostics) = lower_style(
+        "motion { snappy: spring(period: 0.3, damping: 0.7), wobble: spring(period: 0.6, damping: 0.3) }",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(sheet.motion.len(), ir::style::BUILT_IN_MOTION.len() + 1);
+    let snappy = sheet.token("snappy").unwrap();
+    assert_eq!((snappy.period, snappy.damping), (0.3, 0.7));
+    assert_eq!(sheet.token("wobble").unwrap().period, 0.6);
+    assert!(sheet.token("smooth").is_some());
+
+    for (body, expected) in [
+        ("motion { wobble: 0.5 }", "a motion token is `spring("),
+        (
+            "motion { wobble: bounce(period: 0.5, damping: 0.5) }",
+            "a motion token is `spring(",
+        ),
+        (
+            "motion { wobble: spring(period: 0.5) }",
+            "a spring needs `period:` and `damping:`",
+        ),
+        (
+            "motion { wobble: spring(period: 0, damping: 0.5) }",
+            "a spring's period and damping are positive",
+        ),
+        (
+            "motion { wobble: spring(period: 0.5, damping: -1) }",
+            "a spring's period and damping are positive",
+        ),
+    ] {
+        let (sheet, diagnostics) = lower_style(body);
         assert!(
             diagnostics.iter().any(|d| d.message.contains(expected)),
             "{body}: {diagnostics:?}"
         );
+        assert!(sheet.token("wobble").is_none(), "{body}");
     }
+}
+
+#[test]
+fn transitions_name_a_kind_and_a_motion_token() {
+    use ir::style::{Edge, TransitionKind};
+    let (sheet, diagnostics) = lower_style(
+        "motion { wobble: spring(period: 0.6, damping: 0.3) }
+         transition {
+             appear: fade(wobble),
+             rise: slide(edge: top, distance: 24, snappy),
+             drop: slide(),
+             unfold: grow(edge: leading),
+             open: grow(),
+             zoom: pop(from: 0.5),
+             pop: pop(0.6, bouncy),
+         }",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let kind = |name: &str| {
+        let transition = sheet.transition(name).unwrap();
+        (transition.kind.clone(), transition.motion.as_str())
+    };
+    assert_eq!(kind("appear"), (TransitionKind::Fade, "wobble"));
+    assert_eq!(
+        kind("rise"),
+        (
+            TransitionKind::Slide {
+                edge: Edge::Top,
+                distance: 24.0
+            },
+            "snappy"
+        )
+    );
+    // Without arguments: from the bottom, 16 points, the smooth token.
+    assert_eq!(
+        kind("drop"),
+        (
+            TransitionKind::Slide {
+                edge: Edge::Bottom,
+                distance: 16.0
+            },
+            "smooth"
+        )
+    );
+    assert_eq!(
+        kind("unfold"),
+        (
+            TransitionKind::Grow {
+                edge: Edge::Leading
+            },
+            "smooth"
+        )
+    );
+    assert_eq!(
+        kind("open"),
+        (TransitionKind::Grow { edge: Edge::Bottom }, "smooth")
+    );
+    assert_eq!(kind("zoom"), (TransitionKind::Pop { from: 0.5 }, "smooth"));
+    // A built-in transition is replaced, not declared twice.
+    assert_eq!(kind("pop"), (TransitionKind::Pop { from: 0.6 }, "bouncy"));
+    assert_eq!(sheet.transitions.len(), 3 + 6);
+
+    for (body, expected) in [
+        ("transition { a: fade }", "a transition is `fade(token)`"),
+        (
+            "transition { a: spin(smooth) }",
+            "`spin` is not a transition; use fade, pop, grow or slide",
+        ),
+        (
+            "transition { a: slide(edge: left) }",
+            "`left` is not an edge; use leading, trailing, top or bottom",
+        ),
+        (
+            "transition { a: fade(wobbly) }",
+            "`wobbly` is not a motion token; declare it under `motion { … }`",
+        ),
+    ] {
+        assert_style_error(body, expected);
+    }
+    let (sheet, _) = lower_style("transition { a: spin(smooth) }");
+    assert!(sheet.transition("a").is_none());
+}
+
+#[test]
+fn patterns_weave_colored_bands_and_gaps() {
+    use ir::style::{Band, ColorRef};
+    let (sheet, diagnostics) = lower_style(
+        r##"pattern {
+            tartan: check(band(accent, 4), gap(2), band(color(light: "#102030", dark: "#405060"), 1, 0.5)),
+            plain: check(band(accent, 1)),
+            plain: check(band(accent, 2), twill: true),
+        }"##,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let tartan = sheet.pattern("tartan").unwrap();
+    assert_eq!(
+        tartan.bands,
+        [
+            // A band is opaque unless it says otherwise.
+            Band {
+                color: Some(ColorRef::Role {
+                    role: "accent".into()
+                }),
+                width: 4.0,
+                opacity: 1.0
+            },
+            Band {
+                color: None,
+                width: 2.0,
+                opacity: 0.0
+            },
+            Band {
+                color: Some(ColorRef::Fixed {
+                    light: ir::Srgb::parse("#102030").unwrap(),
+                    dark: ir::Srgb::parse("#405060").unwrap()
+                }),
+                width: 1.0,
+                opacity: 0.5
+            },
+        ]
+    );
+    assert!(!tartan.twill);
+    // A later pattern of the same name replaces the earlier one.
+    assert_eq!(sheet.patterns.len(), 2);
+    let plain = sheet.pattern("plain").unwrap();
+    assert_eq!(plain.bands[0].width, 2.0);
+    assert!(plain.twill);
+
+    for (body, expected) in [
+        (
+            "pattern { a: check(band(accent)) }",
+            "a band is `band(color, width, opacity)`",
+        ),
+        (
+            "pattern { a: check(band(accent, wide)) }",
+            "a band's width is a number",
+        ),
+        (
+            "pattern { a: check(band(accent, 2, half)) }",
+            "a band's opacity is a number",
+        ),
+        (
+            "pattern { a: check(band(accent, 2), gap(wide)) }",
+            "a gap's width is a number",
+        ),
+        (
+            "pattern { a: check(band(accent, 2), stripe(1)) }",
+            "a pattern holds `band(…)`, `gap(…)` and `twill: true`",
+        ),
+        ("pattern { a: plaid }", "a pattern is `check(band(color"),
+        (
+            "pattern { a: check(band(accent, 0)) }",
+            "a pattern needs a colored band wider than zero",
+        ),
+    ] {
+        assert_style_error(body, expected);
+    }
+}
+
+#[test]
+fn accents_are_colors_for_both_modes() {
+    use ir::style::ColorRef;
+    let red = ir::Srgb::parse("#FF0000").unwrap();
+    let (sheet, diagnostics) = lower_style(
+        r##"accents {
+            red: "#FF0000",
+            blue: color(light: "#0000FF", dark: "#8080FF"),
+            green: "#00FF00",
+            green: "#00AA00",
+        }"##,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    // One hex color serves both modes.
+    assert_eq!(
+        sheet.accent("red").unwrap().color,
+        ColorRef::Fixed {
+            light: red,
+            dark: red
+        }
+    );
+    assert_eq!(
+        sheet.accent("blue").unwrap().color,
+        ColorRef::Fixed {
+            light: ir::Srgb::parse("#0000FF").unwrap(),
+            dark: ir::Srgb::parse("#8080FF").unwrap()
+        }
+    );
+    // A later accent of the same name replaces the earlier one.
+    assert_eq!(sheet.accents.len(), 3);
+    let green = ir::Srgb::parse("#00AA00").unwrap();
+    assert_eq!(
+        sheet.accent("green").unwrap().color,
+        ColorRef::Fixed {
+            light: green,
+            dark: green
+        }
+    );
+
+    for (body, expected) in [
+        (
+            r##"accents { red: "#F00" }"##,
+            "`#F00` is not a `#RRGGBB` color",
+        ),
+        (
+            r##"accents { red: color(light: "#FF0000", dark: "red") }"##,
+            "`red` is not a `#RRGGBB` color",
+        ),
+        (
+            r##"accents { red: color(light: "#FF0000", dark: 3) }"##,
+            "a color is written `\"#RRGGBB\"`",
+        ),
+        (
+            r##"accents { red: color(light: "#FF0000", night: "#000000") }"##,
+            "write `color(light: \"#RRGGBB\", dark: \"#RRGGBB\")`",
+        ),
+        (
+            r##"accents { red: color(light: "#FF0000") }"##,
+            "a fixed color gives both modes",
+        ),
+    ] {
+        assert_style_error(body, expected);
+        assert!(lower_style(body).0.accents.is_empty(), "{body}");
+    }
+}
+
+#[test]
+fn text_styles_take_a_weight_and_a_size() {
+    use ir::style::TextWeight;
+    let (sheet, diagnostics) = lower_style(
+        "text {
+            large_title: heavy,
+            title: font(size: 30, weight: semibold),
+            body: font(size: 15),
+            caption: bold,
+            caption: light,
+        }",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let weight = |style: &str, weight: &str, size: Option<f64>| TextWeight {
+        style: style.into(),
+        weight: weight.into(),
+        size,
+    };
+    assert_eq!(
+        sheet.text_weights,
+        [
+            weight("large_title", "heavy", None),
+            weight("title", "semibold", Some(30.0)),
+            // A size alone keeps the regular weight.
+            weight("body", "regular", Some(15.0)),
+            // A later entry for a style replaces the earlier one.
+            weight("caption", "light", None),
+        ]
+    );
+
+    for (body, expected) in [
+        ("text { poster: heavy }", "`poster` is not a text style"),
+        ("text { title: chunky }", "`chunky` is not a weight"),
+        (
+            "text { title: font(weight: chunky) }",
+            "`chunky` is not a weight",
+        ),
+        (
+            "text { title: font(size: big) }",
+            "`font` takes `size: points` and `weight: name`",
+        ),
+        (
+            "text { title: 700 }",
+            "a text style takes a weight, such as `heavy`",
+        ),
+    ] {
+        assert_style_error(body, expected);
+    }
+}
+
+#[test]
+fn style_rules_take_base_properties_states_and_platforms() {
+    use ir::style::{ColorRef, ControlSize, Edge, StyleEffect, StyleState};
+    let role = |role: &str| ColorRef::Role { role: role.into() };
+    let (sheet, diagnostics) = lower_style(
+        r#"#[target(ios, android)]
+        #[exempt(browser, "no hover on touch")]
+        Button.pill {
+            corner: 12,
+            padding: 6,
+            size: small,
+            foreground: text.primary,
+            border: control.border,
+            hover: offset(y: -2, snappy) + opacity(0.8) + border(accent, width: 2),
+            pressed: scale(x: 0.97, y: 0.9, press),
+            focus: system,
+            disabled: none,
+        }
+        SidebarItem { selected: fill(accent) + indicator(accent) + indicator(accent, edge: bottom) }
+        IconButton.flat { size: extra_large }"#,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let pill = &sheet.rules[0];
+    assert_eq!(pill.variant.as_deref(), Some("pill"));
+    assert_eq!(pill.targets, ["ios", "android"]);
+    assert_eq!(pill.exempt, ["browser"]);
+    assert_eq!(
+        pill.base,
+        [
+            StyleEffect::Corner { radius: 12.0 },
+            StyleEffect::Padding { length: 6.0 },
+            StyleEffect::Size {
+                size: ControlSize::Small
+            },
+            StyleEffect::Foreground {
+                color: role("text.primary")
+            },
+            // A border is one point wide unless it says otherwise.
+            StyleEffect::Border {
+                color: role("control.border"),
+                width: 1.0
+            },
+        ]
+    );
+    let states: Vec<(StyleState, &[StyleEffect])> = pill
+        .states
+        .iter()
+        .map(|state| (state.state, state.effects.as_slice()))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            (
+                StyleState::Hover,
+                &[
+                    StyleEffect::Offset {
+                        x: 0.0,
+                        y: -2.0,
+                        motion: "snappy".into()
+                    },
+                    // Without a token, effects move with `smooth`.
+                    StyleEffect::Opacity {
+                        value: 0.8,
+                        motion: "smooth".into()
+                    },
+                    StyleEffect::Border {
+                        color: role("accent"),
+                        width: 2.0
+                    },
+                ][..]
+            ),
+            (
+                StyleState::Pressed,
+                &[StyleEffect::Scale {
+                    x: 0.97,
+                    y: 0.9,
+                    motion: "press".into()
+                }][..]
+            ),
+            (StyleState::Focus, &[StyleEffect::System][..]),
+            (StyleState::Disabled, &[StyleEffect::Nothing][..]),
+        ]
+    );
+    // An indicator marks the leading edge, three points wide, unless it
+    // says otherwise.
+    assert_eq!(
+        sheet.rules[1].states[0].effects,
+        [
+            StyleEffect::Fill {
+                color: role("accent")
+            },
+            StyleEffect::Indicator {
+                color: role("accent"),
+                edge: Edge::Leading,
+                width: 3.0
+            },
+            StyleEffect::Indicator {
+                color: role("accent"),
+                edge: Edge::Bottom,
+                width: 3.0
+            },
+        ]
+    );
+    assert_eq!(
+        sheet.rules[2].base,
+        [StyleEffect::Size {
+            size: ControlSize::ExtraLarge
+        }]
+    );
+    assert_eq!(
+        style::variants(&sheet),
+        [
+            ("Button".to_string(), "pill".to_string()),
+            ("IconButton".to_string(), "flat".to_string())
+        ]
+    );
+
+    for (body, expected) in [
+        (
+            "Stack { hover: scale(1.1) }",
+            "`Stack` has no `hover` state",
+        ),
+        ("Button { corner: round }", "`corner` is a number"),
+        ("Button { padding: wide }", "`padding` is a number"),
+        (
+            "Button { size: huge }",
+            "`size` is small, regular, large or extra_large",
+        ),
+        ("Button { settle: wobbly }", "`settle` names a motion token"),
+        (
+            "#[exempt(amiga, \"old\")] Button { corner: 4 }",
+            "`amiga` is not a platform",
+        ),
+        (
+            "Button { hover: glow(accent) }",
+            "`glow` is not a style effect",
+        ),
+        ("Button { hover: 3 }", "expected an effect such as"),
+        (
+            "Button { hover: scale(snappy) }",
+            "write `scale(1.03, token)` or `scale(x: 0.97, y: 0.9, token)`",
+        ),
+        (
+            "Button { hover: opacity(snappy) }",
+            "write `opacity(0.6, token)`",
+        ),
+        (
+            "Button { hover: shadow(opacity: 0.5) }",
+            "write `shadow(12)` or `shadow(12, y: 4, opacity: 0.2)`",
+        ),
+        (
+            "Button { hover: shadow(8, opacity: 1.5) }",
+            "an opacity from 0 to 1",
+        ),
+        (
+            "Button { hover: indicator(accent) }",
+            "`indicator` does not apply in the `hover` state",
+        ),
+        (
+            "SidebarItem { selected: indicator(accent, edge: left) }",
+            "`left` is not an edge",
+        ),
+        (
+            "Button { background: rgb(1, 2, 3) }",
+            "a color is a role such as `accent` or `color(light: …, dark: …)`",
+        ),
+    ] {
+        assert_style_error(body, expected);
+    }
+    // An effect that does not apply is left out; the others stay.
+    let (sheet, _) = lower_style("Button { hover: indicator(accent) + scale(1.1) }");
+    assert_eq!(sheet.rules[0].states[0].effects.len(), 1);
+    assert_eq!(sheet.rules[0].states[0].effects[0].name(), "scale");
 }
 
 #[test]
