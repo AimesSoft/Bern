@@ -116,9 +116,7 @@ impl Checker<'_> {
         }
     }
 
-    /// `"images/cover.png"`: the name of a PNG or JPEG resource. Whether
-    /// `[resources]` declares it is checked for the whole application,
-    /// library components included, once the components are lowered.
+    /// `"animation.svg"`: the name of the `.svg` resource an `Svg` shows.
     pub(super) fn svg_resource(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
         let ast::Expr::Literal {
             value: Literal::Text(name),
@@ -139,6 +137,9 @@ impl Checker<'_> {
         Some(ir::Prop::Resource { name: name.clone() })
     }
 
+    /// `"images/cover.png"`: the name of a PNG or JPEG resource. Whether
+    /// `[resources]` declares it is checked for the whole application,
+    /// library components included, once the components are lowered.
     pub(super) fn image_resource(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
         let ast::Expr::Literal {
             value: Literal::Text(name),
