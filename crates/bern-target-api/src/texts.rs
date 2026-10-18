@@ -411,7 +411,7 @@ pub fn framework_languages() -> Vec<&'static str> {
 /// unescaped.
 pub fn positional(text: &str, params: &[String], specifier: impl Fn(usize) -> String) -> String {
     if params.is_empty() {
-        return text.replace("{{", "{").replace("}}", "}");
+        return unescape_braces(text);
     }
     let mut out = String::new();
     let mut chars = text.chars().peekable();
@@ -465,10 +465,17 @@ pub fn framework(translations: &[(&str, &'static str)], language: &str) -> &'sta
         .unwrap_or("")
 }
 
+/// A text without parameters as it is shown: `{{` and `}}` stand for one
+/// brace, and nothing is filled in at run time.
+pub fn unescape_braces(text: &str) -> String {
+    text.replace("{{", "{").replace("}}", "}")
+}
+
 /// `(language, [(key, text)])` for every supported language, for the
 /// runtimes that fill Bern's `{name}` placeholders by name: the declared
 /// texts, the application's name as `app.name`, and the framework texts.
-/// Texts keep Bern's placeholders and escapes for the runtime.
+/// Texts with parameters keep their placeholders and escapes for the
+/// runtime; the others are stored as they are shown.
 pub fn tables(app: &Application) -> Vec<(String, Vec<(String, String)>)> {
     let default = &app.languages.default;
     app.languages
@@ -480,7 +487,12 @@ pub fn tables(app: &Application) -> Vec<(String, Vec<(String, String)>)> {
                 .iter()
                 .map(|text| {
                     let value = translation(text, language, default);
-                    (text.key.clone(), value.to_string())
+                    let value = if text.params.is_empty() {
+                        unescape_braces(value)
+                    } else {
+                        value.to_string()
+                    };
+                    (text.key.clone(), value)
                 })
                 .collect();
             let name = app
@@ -628,8 +640,11 @@ mod tests {
     }
 
     #[test]
-    fn tables_hold_declared_names_and_framework_texts() {
-        let app = app(vec![text("filled", "{n} of {{all}}", &["n"])]);
+    fn tables_store_texts_without_parameters_as_shown() {
+        let app = app(vec![
+            text("plain", "Use {{x}} and }}", &[]),
+            text("filled", "{n} of {{all}}", &["n"]),
+        ]);
         let tables = tables(&app);
         assert_eq!(tables.len(), 1);
         let (language, table) = &tables[0];
@@ -640,12 +655,13 @@ mod tests {
                 .find(|(candidate, _)| candidate == key)
                 .map(|(_, value)| value.as_str())
         };
+        assert_eq!(get("plain"), Some("Use {x} and }"));
         // The runtime fills the placeholders and resolves the escapes.
         assert_eq!(get("filled"), Some("{n} of {{all}}"));
         // Without a translated name, the application id stands in.
         assert_eq!(get("app.name"), Some("test"));
         assert_eq!(get("bern.media.empty"), Some("No Video"));
-        assert_eq!(table.len(), 2 + FRAMEWORK_TEXTS.len());
+        assert_eq!(table.len(), 3 + FRAMEWORK_TEXTS.len());
     }
 
     #[test]
