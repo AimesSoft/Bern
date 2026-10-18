@@ -30,7 +30,7 @@ pub fn format_string(text: &str, params: &[String]) -> String {
     bern_target_api::texts::positional(text, params, |position| format!("%{position}$@"))
 }
 
-use bern_target_api::texts::translation;
+use bern_target_api::texts::{framework, translation};
 
 /// `Localizable.strings` contents per language.
 pub fn string_tables(app: &Application) -> BTreeMap<String, String> {
@@ -48,16 +48,7 @@ pub fn string_tables(app: &Application) -> BTreeMap<String, String> {
             ));
         }
         for (key, translations) in FRAMEWORK_TEXTS {
-            let value = translations
-                .iter()
-                .find(|(candidate, _)| candidate == language)
-                .or_else(|| {
-                    translations
-                        .iter()
-                        .find(|(candidate, _)| *candidate == "en")
-                })
-                .map(|(_, value)| *value)
-                .unwrap_or("");
+            let value = framework(translations, language);
             lines.push(format!("\"{key}\" = \"{}\";", escape_strings(value)));
         }
         lines.push(String::new());

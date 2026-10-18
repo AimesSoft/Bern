@@ -312,7 +312,7 @@ impl Target for WebBrowser {
                 )));
             }
         }
-        let framework = strings::framework_languages();
+        let framework = bern_target_api::texts::framework_languages();
         for language in &app.languages.supported {
             if !framework.contains(&language.as_str()) {
                 diagnostics.push(Diagnostic::error(format!(

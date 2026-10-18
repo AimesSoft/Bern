@@ -2137,7 +2137,7 @@ impl<'a> Generator<'a> {
         out.line("");
         out.open("namespace bern {");
         out.line("");
-        let tables = crate::strings::tables(app);
+        let tables = bern_target_api::texts::tables(app);
         out.line("/// Strings of every supported language.");
         for (index, (language, table)) in tables.iter().enumerate() {
             out.line(format!("// {language}"));

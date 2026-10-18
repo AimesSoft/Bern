@@ -16,7 +16,6 @@ mod cpp;
 mod glue;
 mod icons;
 mod installer;
-mod strings;
 mod style;
 
 use bern_ir::spec::COMPONENTS;
@@ -210,7 +209,7 @@ impl Target for WinUi3Windows {
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
         let mut diagnostics = check_common(self, app);
-        let framework = strings::framework_languages();
+        let framework = bern_target_api::texts::framework_languages();
         for language in &app.languages.supported {
             if !framework.contains(&language.as_str()) {
                 diagnostics.push(Diagnostic::error(format!(

@@ -1729,7 +1729,7 @@ impl<'a> Generator<'a> {
 
         out.line("/// Strings of every supported language.");
         out.open("static STRINGS: b::text::StringTable = &[");
-        for (language, table) in crate::strings::tables(app) {
+        for (language, table) in bern_target_api::texts::tables(app) {
             out.open(format!("({}, &[", string(&language)));
             for (key, text) in table {
                 out.line(format!("({}, {}),", string(&key), string(&text)));
