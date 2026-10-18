@@ -112,6 +112,7 @@ fn rejects_callbacks_calls_assignment_and_loops() {
             quote! { Text(content: app.a == app.b == app.c) },
             "cannot be chained",
         ),
+        (quote! { Spacer(min: 1e999) }, "out of range for f64"),
     ] {
         let error = parse_ui(tokens).unwrap_err().to_string();
         assert!(error.contains(needle), "{error} should mention {needle}");

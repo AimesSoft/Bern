@@ -152,7 +152,7 @@ fn parse_primary(input: ParseStream<'_>, allow_braces: bool) -> syn::Result<Expr
                 if !value.suffix().is_empty() {
                     return Err(syn::Error::new(span, "numeric suffixes are not allowed"));
                 }
-                Literal::Float(value.base10_parse()?)
+                Literal::Float(crate::finite(value.base10_parse()?, span)?)
             }
             syn::Lit::Bool(value) => Literal::Bool(value.value),
             _ => {

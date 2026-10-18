@@ -35,6 +35,19 @@ pub fn parse_tr(tokens: proc_macro2::TokenStream) -> syn::Result<Tr> {
     syn::parse2::<expr::TrBody>(tokens).map(|body| body.0)
 }
 
+/// A number literal's value. One too large for `f64` is an error, as in
+/// Rust, so the IR holds no infinity a target would have to write.
+pub(crate) fn finite(value: f64, span: proc_macro2::Span) -> syn::Result<f64> {
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(syn::Error::new(
+            span,
+            "number literal is out of range for f64",
+        ))
+    }
+}
+
 /// Lower snake case identifiers used for ids: `preview`, `main_window`.
 pub fn valid_id(name: &str) -> bool {
     bern_protocol::valid_name(name)

@@ -244,13 +244,13 @@ fn number(input: ParseStream, negative: bool) -> syn::Result<StyleValue> {
     if input.peek(LitFloat) {
         let lit: LitFloat = input.parse()?;
         Ok(StyleValue::Number(
-            sign * lit.base10_parse::<f64>()?,
+            sign * crate::finite(lit.base10_parse()?, lit.span())?,
             lit.span(),
         ))
     } else {
         let lit: LitInt = input.parse()?;
         Ok(StyleValue::Number(
-            sign * lit.base10_parse::<f64>()?,
+            sign * crate::finite(lit.base10_parse()?, lit.span())?,
             lit.span(),
         ))
     }
@@ -346,5 +346,16 @@ mod tests {
         assert_eq!(args[0].name.as_ref().unwrap(), "x");
         assert!(matches!(args[2].value, StyleValue::Name(_)));
         assert!(parse_style(quote::quote! { Button { corner } }).is_err());
+    }
+
+    #[test]
+    fn numbers_out_of_range_for_f64_are_rejected() {
+        for tokens in [
+            quote::quote! { Button { corner: 1e999 } },
+            quote::quote! { Button { hover: scale(-1e999, snappy) } },
+        ] {
+            let error = parse_style(tokens).unwrap_err().to_string();
+            assert!(error.contains("out of range for f64"), "{error}");
+        }
     }
 }
