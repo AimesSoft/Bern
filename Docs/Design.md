@@ -800,7 +800,7 @@ Stack(align: top_trailing) {
    | `slide` | `slide(edge: bottom, distance: 12, smooth)` | `slide(bottom, 12, smooth)` | 从底边滑入 16 点 |
    | `grow` | `grow(edge: trailing, jelly)` | `grow(trailing, jelly)` | 固定底边 |
 
-   边只有 `leading`、`trailing`、`top`、`bottom` 四个，`left`、`right` 等其他名称构建报错。按位置写时，边是动效 token 之前的名称；只写一个名称时，它是边名就作边（`slide(leading)`），否则作 token（`slide(jelly)`），两者都不是则构建报错。`slide` 的距离是一个不小于 0 的数，单位为点；`grow` 没有距离。`slide` 与 `grow` 的同一参数写两次、多出名称或数字，同样构建报错，不会悄悄换成默认值。
+   边只有 `leading`、`trailing`、`top`、`bottom` 四个，`left`、`right` 等其他名称构建报错。按位置写时，边是动效 token 之前的名称；只写一个名称时，它是边名就作边（`slide(leading)`），否则作 token（`slide(jelly)`），两者都不是则构建报错。`slide` 的距离是一个不小于 0 的数，单位为点；`grow` 没有距离。`slide` 与 `grow` 的同一参数写两次、多出名称或数字，同样构建报错，不会悄悄换成默认值。在 macOS 窗口放慢 10 倍逐帧截取，一个真实应用以 `slide(trailing, 24, hero)` 出现的面板从右侧水平移入，没有竖直位移；以位置写法声明的换页过渡生成的位移也分别是声明的 12 点与 8 点，不再统一为 16 点。
 
    SwiftUI 的 `match` 与 `if` 一样，在分支直接子元素声明过渡时，为判别值变化建立动画事务；未声明过渡的 `match` 保持原来的行为。已用动态导航回归覆盖生成代码及 Swift 类型检查，并在一个真实应用的设置页慢放确认普通分类、相同组件的不同分支和独立布局之间的淡入与位移；修改当前页内的偏好不会重播入场。
 
