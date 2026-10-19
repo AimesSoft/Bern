@@ -749,6 +749,45 @@ mod independent_target {
             );
         }
     }
+
+    #[test]
+    fn elements_placed_directly_in_a_window_are_checked() {
+        let hi = r#"Text(content: tr! { "en" => "Hi", "ja" => "やあ" })"#;
+        let source = wrap(hi).replace(
+            "page(app: app, windows: windows)",
+            &format!(
+                r#"Column(stagger: 0.03) {{
+                    page(app: app, windows: windows)
+                    Rail {{ Spacer(at: 0.5) }}
+                    PopoverButton(id: more, label: tr! {{ "en" => "More", "ja" => "その他" }}) {{ {hi} }}
+                    Button(id: grow, label: tr! {{ "en" => "Grow", "ja" => "拡大" }}) {{ {hi} }} => app.add(1)
+                }}"#
+            ),
+        );
+        let app = compile_ui(&source)
+            .unwrap_or_else(|errors| panic!("{errors:?}"))
+            .app;
+        let problems = check_common(&Outline, &app);
+        for expected in [
+            "target `outline-test` does not support `Column`",
+            "target `outline-test` does not support `Rail`",
+            "target `outline-test` cannot place elements on a `Rail`",
+            "target `outline-test` cannot build a `PopoverButton`",
+            "target `outline-test` does not stagger: children appear together",
+            "target `outline-test` cannot build a `Button` that shows content instead of its label",
+        ] {
+            assert!(
+                problems.iter().any(|d| d.message.contains(expected)),
+                "{expected}: {problems:?}"
+            );
+        }
+        // Each points at the element in the window.
+        let column = problems
+            .iter()
+            .find(|d| d.message.contains("does not support `Column`"))
+            .unwrap();
+        assert!(column.location.is_some(), "{column:?}");
+    }
 }
 
 /// A library that lacks a language the application requires is rejected

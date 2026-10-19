@@ -29,7 +29,8 @@ pub fn check_common(target: &dyn Target, app: &Application) -> Vec<Diagnostic> {
     diagnostics
 }
 
-/// Elements, in the components, of kinds the target does not support.
+/// Elements, in the components and the windows, of kinds the target does
+/// not support.
 fn check_components(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut visit = |node: &bern_ir::Node| {
@@ -45,9 +46,7 @@ fn check_components(descriptor: &TargetDescriptor, app: &Application) -> Vec<Dia
             );
         }
     };
-    for component in &app.components {
-        component.body.walk(&mut visit);
-    }
+    app.walk(&mut |node, _| visit(node));
     diagnostics
 }
 
@@ -103,17 +102,15 @@ fn check_dynamic_items(descriptor: &TargetDescriptor, app: &Application) -> Vec<
     let mut diagnostics = Vec::new();
     if !descriptor.dynamic_items {
         let mut dynamic = None;
-        for component in &app.components {
-            component.body.walk(&mut |node| {
-                if let bern_ir::Node::Element(element) = node
-                    && bern_ir::spec::DYNAMIC_ITEMS.contains(&element.kind.as_str())
-                    && dynamic.is_none()
-                    && has_dynamic_items(&element.children)
-                {
-                    dynamic = Some(element);
-                }
-            });
-        }
+        app.walk(&mut |node, _| {
+            if let bern_ir::Node::Element(element) = node
+                && bern_ir::spec::DYNAMIC_ITEMS.contains(&element.kind.as_str())
+                && dynamic.is_none()
+                && has_dynamic_items(&element.children)
+            {
+                dynamic = Some(element);
+            }
+        });
         if let Some(element) = dynamic {
             diagnostics.push(
                 Diagnostic::error(format!(
@@ -145,16 +142,14 @@ fn check_text_marks(descriptor: &TargetDescriptor, app: &Application) -> Vec<Dia
     let mut diagnostics = Vec::new();
     if !descriptor.text_marks {
         let mut marked = false;
-        for component in &app.components {
-            component.body.walk(&mut |node| {
-                if let bern_ir::Node::Element(element) = node
-                    && element.kind == "Text"
-                    && element.props.contains_key("mark")
-                {
-                    marked = true;
-                }
-            });
-        }
+        app.walk(&mut |node, _| {
+            if let bern_ir::Node::Element(element) = node
+                && element.kind == "Text"
+                && element.props.contains_key("mark")
+            {
+                marked = true;
+            }
+        });
         if marked {
             diagnostics.push(Diagnostic::warning(format!(
                 "target `{}` shows `Text(mark:)` as plain text, without the highlight",
@@ -189,22 +184,20 @@ fn check_window_chrome(descriptor: &TargetDescriptor, app: &Application) -> Vec<
 fn check_motion(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut still = std::collections::BTreeSet::new();
-    for component in &app.components {
-        component.body.walk(&mut |node| {
-            if let bern_ir::Node::Element(element) = node {
-                for prop in bern_ir::spec::MOTION_PROPS {
-                    if prop.name != "hero_key"
-                        && prop.name != "reveal"
-                        && prop.name != "appearance"
-                        && element.props.contains_key(prop.name)
-                        && !descriptor.motion.contains(&prop.name)
-                    {
-                        still.insert(prop.name);
-                    }
+    app.walk(&mut |node, _| {
+        if let bern_ir::Node::Element(element) = node {
+            for prop in bern_ir::spec::MOTION_PROPS {
+                if prop.name != "hero_key"
+                    && prop.name != "reveal"
+                    && prop.name != "appearance"
+                    && element.props.contains_key(prop.name)
+                    && !descriptor.motion.contains(&prop.name)
+                {
+                    still.insert(prop.name);
                 }
             }
-        });
-    }
+        }
+    });
     for prop in still {
         let message = if prop == "stagger" {
             format!(
@@ -246,9 +239,7 @@ fn check_media(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnost
                 video = Some(element.source.clone());
             }
         };
-        for component in &app.components {
-            component.body.walk(&mut find);
-        }
+        app.walk(&mut |node, _| find(node));
         let at = |diagnostic: Diagnostic| match &video {
             Some(location) => diagnostic.at(location.clone()),
             None => diagnostic,

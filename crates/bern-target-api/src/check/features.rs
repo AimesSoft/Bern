@@ -84,16 +84,14 @@ fn first_element(
     found: impl Fn(&bern_ir::Element) -> bool,
 ) -> Option<&bern_ir::Element> {
     let mut first = None;
-    for component in &app.components {
-        component.body.walk(&mut |node| {
-            if let bern_ir::Node::Element(element) = node
-                && first.is_none()
-                && found(element)
-            {
-                first = Some(element);
-            }
-        });
-    }
+    app.walk(&mut |node, _| {
+        if let bern_ir::Node::Element(element) = node
+            && first.is_none()
+            && found(element)
+        {
+            first = Some(element);
+        }
+    });
     first
 }
 
@@ -134,21 +132,19 @@ fn reads_window_size(node: &bern_ir::Node) -> bool {
 /// theirs directly.
 fn first_page_search(app: &Application) -> Option<&bern_ir::Element> {
     let mut held = std::collections::HashSet::new();
-    for component in &app.components {
-        component.body.walk(&mut |node| {
-            if let bern_ir::Node::Element(bar) = node
-                && (bar.kind == "Toolbar" || bar.kind == "Sidebar")
-            {
-                for child in &bar.children {
-                    if let bern_ir::Node::Element(search) = child
-                        && search.kind == "Search"
-                    {
-                        held.insert(search as *const bern_ir::Element);
-                    }
+    app.walk(&mut |node, _| {
+        if let bern_ir::Node::Element(bar) = node
+            && (bar.kind == "Toolbar" || bar.kind == "Sidebar")
+        {
+            for child in &bar.children {
+                if let bern_ir::Node::Element(search) = child
+                    && search.kind == "Search"
+                {
+                    held.insert(search as *const bern_ir::Element);
                 }
             }
-        });
-    }
+        }
+    });
     first_element(app, |element| {
         element.kind == "Search" && !held.contains(&(element as *const bern_ir::Element))
     })
@@ -168,23 +164,21 @@ fn reads_window_field(app: &Application, wanted: &str) -> bool {
             }
         });
     };
-    for component in &app.components {
-        component.body.walk(&mut |node| match node {
-            bern_ir::Node::Element(element) => {
-                for prop in element.props.values() {
-                    if let bern_ir::Prop::Expr { expr } = prop {
-                        check(expr);
-                    }
+    app.walk(&mut |node, _| match node {
+        bern_ir::Node::Element(element) => {
+            for prop in element.props.values() {
+                if let bern_ir::Prop::Expr { expr } = prop {
+                    check(expr);
                 }
             }
-            bern_ir::Node::If(node) => {
-                for (condition, _) in &node.branches {
-                    check(condition);
-                }
+        }
+        bern_ir::Node::If(node) => {
+            for (condition, _) in &node.branches {
+                check(condition);
             }
-            _ => {}
-        });
-    }
+        }
+        _ => {}
+    });
     found
 }
 
@@ -800,16 +794,7 @@ fn size_classes(
         );
     }
     let mut reading = false;
-    for component in &app.components {
-        component
-            .body
-            .walk(&mut |node| reading |= reads_window_size(node));
-    }
-    for window in &app.windows.windows {
-        window
-            .content
-            .walk(&mut |node| reading |= reads_window_size(node));
-    }
+    app.walk(&mut |node, _| reading |= reads_window_size(node));
     if reading {
         diagnostics.push(Diagnostic::error(format!(
             "target `{}` cannot read the window's size with `window.compact`, `window.medium`, `window.expanded` or `window.large`",
