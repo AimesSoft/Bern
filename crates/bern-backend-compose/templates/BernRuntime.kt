@@ -38,6 +38,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -60,6 +61,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -538,6 +540,9 @@ class BernWindowContext(
         private set
     var id by mutableStateOf("")
         private set
+    /// How many `under_bars` layers are shown: while any is, the app bar
+    /// lets them show through.
+    var underBars by mutableStateOf(0)
     /// The window's declared close check, set by the generated window root.
     var closeCheck: BernCloseCheck? = null
     /// The close confirmation shown as this window's dialog. While it is
@@ -585,6 +590,30 @@ class BernWindowContext(
 }
 
 val LocalBernWindow = staticCompositionLocalOf<BernWindowContext> { error("no Bern window") }
+
+/// The room the app bar and the system bars take around a window's content.
+val LocalBernBarsPadding = staticCompositionLocalOf { androidx.compose.foundation.layout.PaddingValues() }
+
+/// `under_bars`: the layer fills the window to its edges while it is shown,
+/// reaching out over the room the app bar and the system bars take; the
+/// app bar lets it show through.
+@Composable
+fun Modifier.bernUnderBars(): Modifier {
+    val window = LocalBernWindow.current
+    val padding = LocalBernBarsPadding.current
+    DisposableEffect(window) {
+        window.underBars += 1
+        onDispose { window.underBars -= 1 }
+    }
+    val density = LocalDensity.current
+    val top = with(density) { padding.calculateTopPadding().roundToPx() }
+    val bottom = with(density) { padding.calculateBottomPadding().roundToPx() }
+    return this.fillMaxSize().layout { measurable, constraints ->
+        val height = if (constraints.hasBoundedHeight) constraints.maxHeight + top + bottom else constraints.maxHeight
+        val placeable = measurable.measure(constraints.copy(minHeight = height, maxHeight = height))
+        layout(constraints.maxWidth, constraints.maxHeight) { placeable.place(0, -top) }
+    }
+}
 
 // MARK: - Controls
 
@@ -1631,6 +1660,11 @@ fun BernWindowRoot(
             topBar = {
                 if (!hidden) TopAppBar(
                     title = { Text(title, maxLines = 1) },
+                    colors = if (context.underBars > 0) {
+                        TopAppBarDefaults.topAppBarColors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
+                    } else {
+                        TopAppBarDefaults.topAppBarColors()
+                    },
                     navigationIcon = {
                         // The way back, then the toolbar items at the
                         // leading end.
@@ -1651,6 +1685,7 @@ fun BernWindowRoot(
             },
         ) { padding ->
             Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+              CompositionLocalProvider(LocalBernBarsPadding provides padding) {
                 val error = BernHost.startupError
                 if (error != null) {
                     Column(Modifier.padding(24.dp)) {
@@ -1660,6 +1695,7 @@ fun BernWindowRoot(
                 } else {
                     BernHeroRoot(content)
                 }
+              }
             }
         }
         // Only the window on top goes back; the ones below it wait.

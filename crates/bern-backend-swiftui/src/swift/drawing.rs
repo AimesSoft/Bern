@@ -112,8 +112,17 @@ impl Generator<'_> {
                         .keyword("fade")
                         .map(string)
                         .unwrap_or_else(|| "nil".into());
+                    // Dashes and gaps of the stroke; none draws it whole.
+                    let dash = match element.number("dash") {
+                        Some(dash) => format!(
+                            ", dash: [{}, {}]",
+                            double(dash),
+                            double(element.number("dash_gap").unwrap_or(dash))
+                        ),
+                        None => String::new(),
+                    };
                     out.line(format!(
-                            "BernDraw.shape(&context, {}, CGRect(x: {x}, y: {y}, width: {}, height: {}), corner: {}, fill: {fill}, fade: {fade}, stroke: {}, strokeWidth: {}, opacity: {})",
+                            "BernDraw.shape(&context, {}, CGRect(x: {x}, y: {y}, width: {}, height: {}), corner: {}, fill: {fill}, fade: {fade}, stroke: {}, strokeWidth: {}{dash}, opacity: {})",
                             string(element.keyword("kind").unwrap_or("rect")),
                             at("width", "width", &x),
                             at("height", "height", &y),

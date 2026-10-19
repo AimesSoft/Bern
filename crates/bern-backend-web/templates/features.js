@@ -420,8 +420,11 @@ function drawShape(context, node, op, w, h) {
   if (op.stroke) {
     context.strokeStyle = color(node, op.stroke);
     context.lineWidth = op.strokeWidth ?? 1;
+    // Dashes `dash` long with gaps of `dashGap`, by default as long.
+    context.setLineDash(op.dash ? [op.dash, op.dashGap ?? op.dash] : []);
     path();
     context.stroke();
+    context.setLineDash([]);
   }
   context.globalAlpha = 1;
 }
@@ -1434,7 +1437,10 @@ function listenForLaunches() {
 /// A button showing its content instead of a label: no frame of its own,
 /// the content as it is; a style's corner clips it.
 export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds }, action, content) {
-  const node = el("button", { class: "bern-content-button", type: "button" });
+  // A capsule is the platform's button around the content, as it is around
+  // a label; otherwise the content is all there is.
+  const framed = shape === "capsule";
+  const node = el("button", { class: framed ? "bern-button bern-button-standard" : "bern-content-button", type: "button" });
   B.bindAttr(node, "aria-label", label);
   content(node, ctx);
   const isEnabled = enabled ?? (() => true);

@@ -2,7 +2,7 @@
 //! forms, repetitions, queries and adaptive layouts.
 
 use super::values::swift_type;
-use super::{Ctx, Generator, Out};
+use super::{Ctx, Generator, Out, Platform};
 use crate::names::{double, member, string};
 use bern_ir::{Application, Element, Node, Prop};
 use bern_protocol::Type;
@@ -126,6 +126,26 @@ impl Generator<'_> {
         self.nodes(out, &element.children, ctx);
         out.close("}");
         self.frame(out, element);
+        // The whole window to its edges, under its bars: the title bar and
+        // toolbar of a Mac window, a phone's status bar and home indicator.
+        if element.keyword("under_bars") == Some("true") {
+            out.line(format!(
+                ".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: {alignment})"
+            ));
+            out.line(match self.platform {
+                Platform::Macos => ".ignoresSafeArea(.container, edges: .top)",
+                Platform::Ios => ".ignoresSafeArea(.container)",
+            });
+            // Over the layer the title bar keeps its controls, not the
+            // window's title, also when the content before had a split
+            // view that titled it.
+            if self.platform == Platform::Macos {
+                out.line(".bernToolbarTitleHidden()");
+            }
+        }
+        // A toolbar among the layers belongs to the window, as a column's
+        // does.
+        self.toolbar(out, &element.children, ctx);
         if let Some(enabled) = element.expr("enabled") {
             let enabled = self.expr(enabled);
             // `disabled` already stops its controls and gestures.

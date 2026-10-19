@@ -484,10 +484,18 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     auto holder = MakeFlex();
     content(Parent::Of(holder), ctx);
     button.Content(holder);
-    button.Padding(xaml::Thickness{0, 0, 0, 0});
     button.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
     button.VerticalContentAlignment(xaml::VerticalAlignment::Stretch);
-    Styles::MakeSubtle(button);
+    // A capsule is the platform's button around the content, as it is
+    // around a label; otherwise the content is all there is.
+    bool framed = props.shape && props.shape->capsule;
+    if (framed) {
+        if (std::string_view(props.prominence ? props.prominence : "") == "prominent")
+            if (auto accent = Styles::Named(L"AccentButtonStyle")) button.Style(accent);
+    } else {
+        button.Padding(xaml::Thickness{0, 0, 0, 0});
+        Styles::MakeSubtle(button);
+    }
     // A button takes its content's size; content that fills stretches it.
     Mirror(button, holder);
     if (FillsRow(holder)) button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
@@ -1490,6 +1498,9 @@ struct LayersProps {
     StyleDef const* style = nullptr;
     /// `enabled: false`: the layers take no input.
     Get enabled;
+    /// `under_bars`: while shown, the layers fill the window up to its top
+    /// edge, under the title bar and the header.
+    bool underBars = false;
 };
 
 /// `Stack`: layers in the one cell of a grid, later ones above earlier
@@ -1510,6 +1521,13 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
     layers.VerticalAlignment(xaml::VerticalAlignment::Top);
     BindLen(ctx, props.width, props.animate, [layers](double w) { layers.Width((std::max)(0.0, w)); });
     BindLen(ctx, props.height, props.animate, [layers](double w) { layers.Height((std::max)(0.0, w)); });
+    if (props.underBars && ctx.win) {
+        layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        Win* win = ctx.win;
+        win->underBars.Set(win->underBars.Peek() + 1);
+        Reactive::OnCleanup([win] { win->underBars.Set(win->underBars.Peek() - 1); });
+    }
     children(Parent::Aligned(layers, h, v), ctx);
     // Layers that are all backdrops fill where they stand, as one alone
     // would.

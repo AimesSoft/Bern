@@ -170,8 +170,17 @@ pub fn visibility(item: &Item) -> syn::Visibility {
     }
 }
 
-pub fn expand_standalone(tokens: TokenStream) -> syn::Result<TokenStream> {
-    let item: Item = syn::parse2(tokens)?;
+/// `pages` is the page slot the enum selects, from `pages = "slot"`.
+pub fn expand_standalone(tokens: TokenStream, pages: Option<&str>) -> syn::Result<TokenStream> {
+    let mut item: Item = syn::parse2(tokens)?;
+    let mut track_modules = TokenStream::new();
+    if let (Some(slot), Item::Enum(item)) = (pages, &mut item) {
+        let (pages, manifests) = crate::config::module_pages(slot)
+            .map_err(|message| syn::Error::new(item.ident.span(), message))?;
+        add_pages(item, &pages);
+        let manifests = manifests.iter().map(|path| path.display().to_string());
+        track_modules = quote!(#(const _: &[u8] = ::core::include_bytes!(#manifests);)*);
+    }
     let value = bern_syntax::parse_value(&item)?;
     let languages =
         crate::config::languages().map_err(|message| syn::Error::new(value.span, message))?;
@@ -189,5 +198,26 @@ pub fn expand_standalone(tokens: TokenStream) -> syn::Result<TokenStream> {
         #cleaned
         #impls
         #track
+        #track_modules
     })
+}
+
+/// Add a labeled variant for every page a module adds to the enum's slot,
+/// named like the build tool names it: page `new_shows` is `NewShows`. A
+/// variant the enum already has stays; the build tool reports it.
+fn add_pages(item: &mut syn::ItemEnum, pages: &[crate::config::ModulePage]) {
+    for page in pages {
+        let name = format_ident!("{}", bern_syntax::pascal_case(&page.id));
+        if item.variants.iter().any(|variant| variant.ident == name) {
+            continue;
+        }
+        let languages = page.label.iter().map(|(language, _)| language);
+        let texts = page.label.iter().map(|(_, text)| text);
+        let variant: syn::Variant = if page.label.is_empty() {
+            syn::parse_quote!(#name)
+        } else {
+            syn::parse_quote!(#[label(tr! { #(#languages => #texts),* })] #name)
+        };
+        item.variants.push(variant);
+    }
 }

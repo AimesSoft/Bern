@@ -676,6 +676,28 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
         controls::Grid::SetRow(holder, 1);
         body.Children().Append(holder);
         holder.Children().Append(content);
+        raw->host = host;
+        raw->header = header;
+        raw->holder = holder;
+        // `under_bars`: while such a layer is shown the content spans the
+        // header's row and, under the title bar, the window's; the bars
+        // stay above it.
+        Reactive::Run([raw] {
+            bool under = raw->underBars.Get() > 0;
+            Reactive::Untrack([&] {
+                controls::Grid::SetRow(raw->holder, under ? 0 : 1);
+                controls::Grid::SetRowSpan(raw->holder, under ? 2 : 1);
+                controls::Canvas::SetZIndex(raw->header, under ? 1 : 0);
+                if (raw->root && raw->root.RowDefinitions().Size() > 1 && !raw->owner) {
+                    controls::Grid::SetRow(raw->host, under ? 0 : 1);
+                    controls::Grid::SetRowSpan(raw->host, under ? 2 : 1);
+#if BERN_WINUI
+                    if (raw->titleBar) controls::Canvas::SetZIndex(raw->titleBar, under ? 1 : 0);
+#endif
+                }
+                return 0;
+            });
+        });
         Ctx ctx;
         ctx.win = raw;
         // Controls written in the window itself are named after it.

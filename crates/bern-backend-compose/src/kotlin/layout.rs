@@ -120,9 +120,15 @@ impl Generator<'_> {
         let enabled = element
             .expr("enabled")
             .map(|enabled| format!(", enabled = {}", self.expr(enabled)));
+        // To the window's edges, under the app bar and the system bars.
+        let under_bars = if element.keyword("under_bars") == Some("true") {
+            ".bernUnderBars()"
+        } else {
+            ""
+        };
         if style.is_some() || enabled.is_some() {
             out.open(format!(
-                "BernStack(Modifier{}{}, {alignment}{}{}) {{",
+                "BernStack(Modifier{}{}{under_bars}, {alignment}{}{}) {{",
                 self.reflow(element),
                 self.size_modifiers(element),
                 style.unwrap_or_default(),
@@ -130,7 +136,7 @@ impl Generator<'_> {
             ));
         } else {
             out.open(format!(
-                "Box(Modifier{}{}, contentAlignment = {alignment}) {{",
+                "Box(Modifier{}{}{under_bars}, contentAlignment = {alignment}) {{",
                 self.reflow(element),
                 self.size_modifiers(element)
             ));

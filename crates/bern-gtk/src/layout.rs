@@ -192,12 +192,31 @@ mod layers {
                     continue;
                 }
                 // A layer that fills in a direction, such as a drawing
-                // without a size, fills the stack that way. A rail or a
-                // placed element takes the whole size the other layers give
-                // the stack, which it does not make larger: across its axis
-                // a rail counts only children with a size of their own.
-                let whole = is_rail(&child) || crate::scene::is_positioned(&child);
-                let fills = |orientation| whole || child.compute_expand(orientation);
+                // without a size, fills the stack that way. A placed element
+                // takes the whole size the other layers give the stack,
+                // which it does not make larger. A rail takes the stack's
+                // length along its axis; across it, it is as thick as its
+                // children with a size of their own and stands where the
+                // stack aligns its layers, as a progress bar at the foot of
+                // a picture, or without such children covers the stack.
+                let positioned = crate::scene::is_positioned(&child);
+                let rail = rail_of(&child);
+                let fills = |orientation: gtk::Orientation| {
+                    if positioned {
+                        return true;
+                    }
+                    match &rail {
+                        Some(rail) => {
+                            let along = if rail.vertical() {
+                                gtk::Orientation::Vertical
+                            } else {
+                                gtk::Orientation::Horizontal
+                            };
+                            orientation == along || child.measure(orientation, -1).1 <= 0
+                        }
+                        None => child.compute_expand(orientation),
+                    }
+                };
                 let along =
                     |fill: bool, align: gtk::Align| if fill { gtk::Align::Fill } else { align };
                 let h = along(fills(gtk::Orientation::Horizontal), halign);
@@ -455,9 +474,18 @@ glib::wrapper! {
 
 /// Whether `widget` is a rail, or an element wrapping one in its motion.
 pub(crate) fn is_rail(widget: &gtk::Widget) -> bool {
-    widget.is::<Rail>()
-        || (widget.is::<crate::motion::MotionBox>()
-            && widget.first_child().is_some_and(|child| child.is::<Rail>()))
+    rail_of(widget).is_some()
+}
+
+/// The rail `widget` is, or holds as the box that moves it.
+fn rail_of(widget: &gtk::Widget) -> Option<Rail> {
+    if let Ok(rail) = widget.clone().downcast::<Rail>() {
+        return Some(rail);
+    }
+    if widget.is::<crate::motion::MotionBox>() {
+        return widget.first_child().and_then(|child| child.downcast::<Rail>().ok());
+    }
+    None
 }
 
 impl Rail {

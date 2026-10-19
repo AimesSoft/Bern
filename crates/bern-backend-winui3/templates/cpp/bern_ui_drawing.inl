@@ -194,7 +194,11 @@ struct ShapeOp {
     std::optional<std::string> fillFrom;
     char const* fade = nullptr;
     std::optional<Paint> stroke;
-    std::optional<double> strokeWidth, opacity;
+    std::optional<double> strokeWidth;
+    /// Dashes of the stroke that long, with gaps of `dashGap`, by default
+    /// as long; none draws it whole.
+    std::optional<double> dash, dashGap;
+    std::optional<double> opacity;
 };
 
 /// Numbers across the canvas width as an area or a line.
@@ -287,7 +291,14 @@ inline void DrawShape(ID2D1RenderTarget* target, ShapeOp const& op, Colors const
         // Inside the bounds, as the stroke of a frame is.
         auto inset = D2D1::RectF(x + line / 2, y + line / 2, x + width - line / 2, y + height - line / 2);
         auto stroked = ShapeGeometry(op, inset);
-        target->DrawGeometry(stroked.get(), brush.get(), line);
+        winrt::com_ptr<ID2D1StrokeStyle> style;
+        if (op.dash && line > 0) {
+            // Direct2D counts dashes in stroke widths.
+            float dashes[2] = {static_cast<float>(*op.dash) / line, static_cast<float>(op.dashGap.value_or(*op.dash)) / line};
+            static_cast<ID2D1Factory*>(Factory().get())
+                ->CreateStrokeStyle(D2D1::StrokeStyleProperties(D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_CAP_STYLE_FLAT, D2D1_LINE_JOIN_MITER, 10.0f, D2D1_DASH_STYLE_CUSTOM, 0.0f), dashes, 2, style.put());
+        }
+        target->DrawGeometry(stroked.get(), brush.get(), line, style.get());
     }
 }
 

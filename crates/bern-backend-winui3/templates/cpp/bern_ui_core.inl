@@ -1275,6 +1275,14 @@ struct Win {
     Cell<bool> immersive{false};
     /// Above the content: copies of shared elements while they move.
     controls::Canvas overlay{nullptr};
+    /// The window's content host, its page header and the content holder
+    /// under the header, which `under_bars` layers reach over.
+    controls::Grid host{nullptr};
+    xaml::FrameworkElement header{nullptr};
+    controls::Grid holder{nullptr};
+    /// How many `under_bars` layers are shown: while any is, the content
+    /// reaches the window's top edge under the title bar and the header.
+    Cell<int> underBars{0};
     /// A dialog window's content dialog, and the window it shows over.
     controls::ContentDialog sheet{nullptr};
     Win* owner = nullptr;

@@ -203,8 +203,13 @@ pub fn ContentButton(
     content: Build,
 ) {
     let button = gtk::Button::new();
-    button.add_css_class("bern-content-button");
-    button.set_overflow(gtk::Overflow::Hidden);
+    // A capsule is the platform's button around the content, as it is
+    // around a label; otherwise the content is all there is.
+    let framed = props.shape.capsule;
+    if !framed {
+        button.add_css_class("bern-content-button");
+        button.set_overflow(gtk::Overflow::Hidden);
+    }
     let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content(&Parent::of_box(&holder), ctx);
     button.set_child(Some(&holder));
@@ -241,7 +246,8 @@ pub fn ContentButton(
         Some(style) => {
             crate::style::apply(style, button.upcast_ref(), button.upcast_ref(), &motion)
         }
-        None => button.add_css_class("bern-content-plain"),
+        None if !framed => button.add_css_class("bern-content-plain"),
+        None => {}
     }
     place(p, &motion);
 }

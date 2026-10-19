@@ -140,7 +140,7 @@ impl Generator<'_> {
                         (None, None) => None,
                     };
                     ops.push(format!(
-                        "b::Op::Shape(b::ShapeOp {{ kind: {}, x: {}, y: {}, width: {}, height: {}, corner: {}, fill: {}, fill_from: {}, fade: {}, stroke: {}, stroke_width: {}, opacity: {} }})",
+                        "b::Op::Shape(b::ShapeOp {{ kind: {}, x: {}, y: {}, width: {}, height: {}, corner: {}, fill: {}, fill_from: {}, fade: {}, stroke: {}, stroke_width: {}, dash: {}, dash_gap: {}, opacity: {} }})",
                         string(child.keyword("kind").unwrap_or("rect")),
                         Self::number(child, "x"),
                         Self::number(child, "y"),
@@ -152,6 +152,8 @@ impl Generator<'_> {
                         Self::keyword(child, "fade"),
                         role(child, "stroke"),
                         Self::number(child, "stroke_width"),
+                        Self::number(child, "dash"),
+                        Self::number(child, "dash_gap"),
                         Self::number(child, "opacity"),
                     ));
                 }

@@ -314,6 +314,7 @@ SplitView {
 - 生成的代码中，模块命令的名字带模块前缀，例如 Swift 的 `downloadsAddOne`，外壳与模块的同名命令不会冲突。
 - 模块的引擎测试只需要本模块与所依赖模块的协议，依赖模块可以用测试替身代替，不需要界面，也不需要其他模块。
 - 外部入口可以单独列出一个模块的命令，例如 `app downloads --help`。
+- 界面 crate 也能直接用 `cargo check` 与 `cargo test` 编译：宏读应用的 `Bern.toml`，给外壳协议的 `Client` 加上 `modules`（每个可选模块一个开关），给标了 `pages = "slot"` 的枚举加上各模块在该插槽登记的页面，名字与构建工具组合出的相同。Rust 里引用另一个文件或 crate 的组件时，要同时引入组件函数和它的属性结构 `<组件>_props`，例如 `use player::{player, player_props};`。
 
 ### 验收
 
@@ -767,6 +768,7 @@ Stack(align: top_trailing) {
 ```
 
 - 带内容的按钮没有平台的按钮外框，内容按原样显示；样式覆盖对它同样有效，`corner` 同时把内容裁成圆角，`shadow` 沿裁切后的形状投下。没有样式时，按下时内容变暗。
+- 写了 `shape: capsule` 的带内容按钮是平台自己的胶囊按钮包着这份内容，外框、高度（`height`）与 `prominence: prominent` 的强调色都和只有标题的胶囊按钮相同，例如带键位提示的「继续上次 [空格]」。SwiftUI 用系统胶囊控件（26 起为液态玻璃），GTK 保留按钮本来的外框，WinUI 3 用默认或强调按钮样式，Compose 用 `FilledTonalButton` 或 `Button`，Web 用标准按钮类。
 - `reveal: hover` 可以写在任何元素上：指针在它所在的容器上时显示，离开时隐藏，切换使用 `snappy` 动效。元素获得键盘焦点时也显示，辅助技术始终能读到它；没有指针的设备上它一直显示。悬停显示只是捷径，不能是某个操作唯一的入口。
 - 预期实现：SwiftUI 用不带外框的 `ButtonStyle`、`.clipShape` 与 `.shadow`，悬停用 `.onHover` 与环境值传给内容；Compose 用 `Modifier.clickable` 与 `hoverable`；WinUI 3 用内容为任意元素的 `Button` 与轻量样式；GTK 用带子控件的 `.flat` 按钮与 `GtkEventControllerMotion`；Web 用内容为任意元素的 `<button>` 与 `:hover`、`:focus-within`。
 
@@ -863,7 +865,7 @@ ScrollView(axis: horizontal, snap: center, position: draft.episode) {
 
 `Canvas` 是不可交互的绘图区，用于数据图形、装饰图案和组件外观的自绘部分。它的子元素只能是绘图元素：
 
-- `Shape`：矩形、圆角矩形、胶囊与椭圆，指定位置、尺寸、填充与描边；
+- `Shape`：矩形、圆角矩形、胶囊与椭圆，指定位置、尺寸、填充与描边；`dash` 把描边画成虚线，每段长 `dash`、间隔 `dash_gap`（省略时与 `dash` 等长），例如空画框里的虚线内框；
 - `Series`：来自状态的一列数值，按 `area` 或 `line` 铺满画布宽度，`max` 可声明或按数据取最大值；
 - `Pattern`：由条带序列定义的平铺图案。每条带有颜色角色、宽度与不透明度，序列同时用于横纵两个方向即成格纹，`twill: true` 叠加 45° 斜纹。
 
@@ -1482,6 +1484,7 @@ Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, chrome
 ```
 
 - **`chrome`**：`standard` 是平台默认的标题栏；`unified` 让内容延伸到标题栏下，标题栏透明，侧边栏到达窗口顶边，后端为系统窗口控件预留位置并保留拖动区域。预期实现：macOS 的全尺寸内容与透明标题栏，WinUI 3 的 `ExtendsContentIntoTitleBar`（窗口已使用 Mica 背景），GTK 的 `AdwToolbarView` 平铺顶栏。网页与 iPhone 没有窗口标题栏，不受影响。实现进度：WinUI 3 的内容本来就延伸到标题栏，标题栏照常在应用图标旁显示窗口标题（Fluent 窗口如此），Islands 保留系统标题栏；GTK 用平铺顶栏去掉分隔阴影，内容不延伸到标题栏下。
+- **`under_bars`**：`Stack(under_bars: true)` 显示期间铺满整个窗口直到边缘：桌面窗口里越过标题栏与工具栏（它们浮在这一层上方，标题栏不显示标题文字），手机上越过状态栏与主屏幕指示条。用于按窗口坐标画的场景，例如与沉浸播放器同一坐标系的空画框，打开播放器时两者的画框完全重合。实现：SwiftUI 在 macOS 上忽略顶部安全区、在 iOS 上忽略全部容器安全区；Web 让应用栏与页头浮在内容上方；GTK 打开窗口 `AdwToolbarView` 的 `extend-content-to-top-edge`；WinUI 3 让内容跨过标题栏行与页头行，标题栏与页头留在上层；Compose 让这一层按 `Scaffold` 的内边距向外扩，并在显示期间把顶栏改为透明。
 - **`immersive`**：布尔绑定。为真时窗口隐藏标题栏与工具栏，触屏平台同时隐藏状态栏与主屏幕指示条，指针停止移动后隐藏、移动时重新出现；为假时恢复。它不是全屏，窗口尺寸不变，全屏仍是窗口命令。预期实现：macOS 的工具栏可见性与 `NSCursor.setHiddenUntilMouseMoves`，GTK 的 `AdwToolbarView:reveal-top-bars` 与空指针，iOS 的 `statusBarHidden` 与 `persistentSystemOverlays`，Web 的 `cursor: none`；WinUI 3 收起标题栏并去掉系统标题栏与标题按钮、静置时隐藏指针（Islands 去掉 `WS_CAPTION`）。实现进度：GTK 与 WinUI 3 已实现，Linux 虚拟机与 Windows PC 上验证 planner 的专注模式静置 3 秒后标题栏隐藏；WinUI 3 移动指针后恢复，Islands 的恢复未验证。
 - **`idle_after` 与 `window.idle`**：声明 `idle_after` 秒数后，窗口提供只读的会话状态 `window.idle`：指针、键盘与触摸在这段时间内都没有输入时为真，一有输入立即变为假。控制层的淡出与 `immersive` 都可以绑定它，应用不需要自己计时。它是 UI 会话状态，不进入业务引擎。`idle_enabled` 默认 true，可绑定布尔状态；false 暂停检测并清除闲置状态，恢复后重新计时。该开关目前由 SwiftUI 与 Web 消费，其他后端尚未接入，不能依赖它停用计时。macOS 编辑文字、打开菜单或子窗口时会保留控制层。
 - **覆盖层**：窗口内容可以是 `Stack`，在导航容器之上叠放其他层，例如全窗口的播放层或固定在侧边栏底部的小播放器。macOS 与 Web 已验证在导航容器之上叠放播放器及切换侧栏迷你播放器。最上层先处理返回，规则同“路由与返回行为”。播放器与视图分离：两个位置可附着同一个播放器；不支持多视图的媒体后端由最新附着的视图显示画面。跨分栏动画当前验收的是 `Image`；`Video` 的连续画面转移仍需媒体后端专项实现与验证。

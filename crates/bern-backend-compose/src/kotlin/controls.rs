@@ -44,8 +44,13 @@ impl Generator<'_> {
                 .style_of(element)
                 .map(|style| format!("BernStyles.{}", style.name))
                 .unwrap_or_else(|| "null".into());
+            let prominent = if element.keyword("prominence") == Some("prominent") {
+                ", prominent = true"
+            } else {
+                ""
+            };
             out.open(format!(
-                "BernContentButton({label}, {enabled}, {style}, Modifier.testTag({target}){}, onClick = {{ {action} }}) {{",
+                "BernContentButton({label}, {enabled}, {style}, Modifier.testTag({target}){}{prominent}, onClick = {{ {action} }}) {{",
                 self.shape_arg(element)
             ));
             self.nodes(out, &element.children, &ctx.within(Scope::Other));

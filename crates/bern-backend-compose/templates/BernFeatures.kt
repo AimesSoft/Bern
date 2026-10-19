@@ -135,6 +135,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
@@ -346,9 +347,24 @@ fun BernContentButton(
     style: BernStyle?,
     modifier: Modifier = Modifier,
     shape: BernShape? = null,
+    prominent: Boolean = false,
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
+    if (shape?.capsule == true) {
+        // A capsule is the platform's button around the content, as it is
+        // around a label.
+        val height = shape.height
+        val sized = (if (height != null) modifier.height(height) else modifier)
+            .semantics(mergeDescendants = true) { contentDescription = label }
+        val padding = if (height != null) PaddingValues(horizontal = 16.dp, vertical = 0.dp) else ButtonDefaults.ContentPadding
+        if (prominent) {
+            androidx.compose.material3.Button(onClick, sized, enabled, shape = CircleShape, contentPadding = padding) { content() }
+        } else {
+            FilledTonalButton(onClick, sized, enabled, shape = CircleShape, contentPadding = padding) { content() }
+        }
+        return
+    }
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val hovered by interaction.collectIsHoveredAsState()

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
-import { Timer, Scope, within, cell, accordionWidths, layoutIntent } from "../templates/bern.js";
+import { Timer, Scope, within, cell, accordionWidths, layoutIntent, fixedSize } from "../templates/bern.js";
 
 function layoutNode(classes, children = [], axis = null, tagName = "DIV") {
   const names = new Set(classes.split(" "));
@@ -80,6 +80,27 @@ test("image and text layers determine their size while rails only cover them", (
   const railsOnly = layoutNode("bern-layers", [background], "layers");
   assert.equal(layoutIntent(railsOnly, "width"), true, "a layer made only of rails still takes the available size");
   assert.equal(layoutIntent(railsOnly, "height"), true);
+});
+
+test("buttons that fill make their row fill the column", () => {
+  const button = layoutNode("bern-button bern-button-fill", [], null, "BUTTON");
+  const row = layoutNode("bern-stack bern-hstack", [button, button], "row");
+  assert.equal(layoutIntent(button, "width"), true);
+  assert.equal(layoutIntent(button, "height"), false);
+  assert.equal(layoutIntent(row, "width"), true, "two buttons that fill share the whole row");
+  assert.equal(layoutIntent(layoutNode("bern-stack bern-hstack", [layoutNode("bern-button", [], null, "BUTTON")], "row"), "width"), false);
+});
+
+test("a stack of a fixed picture and rails keeps its size beside text that gives way", () => {
+  const image = layoutNode("bern-image bern-sized-width bern-sized-height", [], null, "IMG");
+  const rail = layoutNode("bern-rail bern-fill-width", [layoutNode("bern-canvas bern-fill-width bern-sized-height")]);
+  const thumbnail = layoutNode("bern-layers", [image, rail, rail], "layers");
+  assert.equal(fixedSize(thumbnail, "width"), true, "a thumbnail does not shrink under a long title");
+  assert.equal(fixedSize(thumbnail, "height"), true);
+  const words = layoutNode("bern-layers", [image, layoutNode("bern-text")], "layers");
+  assert.equal(fixedSize(words, "width"), false, "a layer with text keeps giving way");
+  assert.equal(fixedSize(layoutNode("bern-layers", [rail], "layers"), "width"), false, "rails alone fix nothing");
+  assert.equal(fixedSize(layoutNode("bern-layers", [thumbnail], "layers"), "width"), true);
 });
 
 test("timer follows enabled state and cancels when its owning view disappears", (t) => {

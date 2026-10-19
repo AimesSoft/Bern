@@ -43,6 +43,10 @@ pub struct ShapeOp {
     pub fade: Option<&'static str>,
     pub stroke: Option<Color>,
     pub stroke_width: Option<f64>,
+    /// Dashes of the stroke that long, with gaps of `dash_gap`, by default
+    /// as long; none draws it whole.
+    pub dash: Option<f64>,
+    pub dash_gap: Option<f64>,
     pub opacity: Option<f64>,
 }
 
@@ -59,6 +63,8 @@ impl ShapeOp {
         fade: None,
         stroke: None,
         stroke_width: None,
+        dash: None,
+        dash_gap: None,
         opacity: None,
     };
 }
@@ -301,7 +307,11 @@ fn draw_shape(
         path(cr);
         set_color(cr, &theme::rgba(stroke, widget), opacity);
         cr.set_line_width(op.stroke_width.unwrap_or(1.0));
+        if let Some(dash) = op.dash {
+            cr.set_dash(&[dash, op.dash_gap.unwrap_or(dash)], 0.0);
+        }
         cr.stroke().ok();
+        cr.set_dash(&[], 0.0);
     }
 }
 

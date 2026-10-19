@@ -191,6 +191,8 @@ impl Generator<'_> {
                         ("fade", Self::keyword(child, "fade")),
                         ("stroke", role(child, "stroke")),
                         ("strokeWidth", number_of("stroke_width")),
+                        ("dash", number_of("dash")),
+                        ("dashGap", number_of("dash_gap")),
                         ("opacity", number_of("opacity")),
                     ]));
                 }

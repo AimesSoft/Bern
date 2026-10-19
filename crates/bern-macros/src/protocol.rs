@@ -13,6 +13,8 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let args = parse_protocol_args(args, Span::call_site())?;
     let protocol = parse_protocol(args, module.clone())?;
     let languages = crate::config::languages().map_err(|message| syn::Error::new(span, message))?;
+    let optional =
+        crate::config::optional_modules().map_err(|message| syn::Error::new(span, message))?;
     for value in &protocol.values {
         if let bern_syntax::ValueKind::Enum(variants) = &value.kind {
             for variant in variants {
@@ -303,6 +305,43 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         .filter(|attr| !is_bern_attr(attr, "protocol"))
         .collect();
     let track = crate::component::track(languages.as_ref());
+    // The application composes a `modules` state field with a switch per
+    // optional module; the shell's client carries it for `app.modules.<id>`.
+    let module_manifests = optional
+        .manifests
+        .iter()
+        .map(|path| path.display().to_string());
+    let track_modules = quote!(#(const _: &[u8] = ::core::include_bytes!(#module_manifests);)*);
+    let (modules_field, modules_record) = if optional.ids.is_empty() {
+        (TokenStream::new(), TokenStream::new())
+    } else {
+        let ids = optional
+            .ids
+            .iter()
+            .map(|id| {
+                syn::parse_str::<syn::Ident>(id).map_err(|_| {
+                    syn::Error::new(span, format!("module id `{id}` is not a Rust name"))
+                })
+            })
+            .collect::<syn::Result<Vec<_>>>()?;
+        let docs = optional
+            .ids
+            .iter()
+            .map(|id| format!("Whether the `{id}` module runs."));
+        (
+            quote!(
+                /// Which optional modules run.
+                pub modules: Modules,
+            ),
+            quote! {
+                /// The application's optional modules, one switch each.
+                #[derive(Clone)]
+                pub struct Modules {
+                    #(#[doc = #docs] pub #ids: <bool as #b::BernValue>::Ref,)*
+                }
+            },
+        )
+    };
     Ok(quote! {
         #(#attrs)*
         #vis mod #ident {
@@ -377,7 +416,10 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             #[derive(Clone)]
             pub struct Client {
                 #(pub #state_fields: <#state_types as #b::BernValue>::Ref,)*
+                #modules_field
             }
+
+            #modules_record
 
             impl Client {
                 #(#client_methods)*
@@ -398,6 +440,7 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             #reach
 
             #track
+            #track_modules
         }
     })
 }

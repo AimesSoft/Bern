@@ -1641,6 +1641,9 @@ pub struct LayersProps {
     pub enabled: Option<Get>,
     /// Layers slide to new places with this spring.
     pub reflow: Option<Curve>,
+    /// `under_bars`: while shown, the stack fills the window up to its top
+    /// edge, under the header bar.
+    pub under_bars: bool,
 }
 
 /// `Stack`: layers in one place, later ones above earlier ones, the stack
@@ -1682,8 +1685,28 @@ pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
             shown.update_state(&[gtk::accessible::State::Hidden(!on)]);
         });
     }
+    if props.under_bars {
+        under_bars(layers.upcast_ref());
+    }
     children(&Parent::of_layers(&layers, halign, valign), ctx);
     place(p, &layers);
+}
+
+/// While `widget` is shown it fills the window, and the window's toolbar
+/// view lays the content up to its top edge, under the header bar.
+fn under_bars(widget: &gtk::Widget) {
+    widget.set_hexpand(true);
+    widget.set_vexpand(true);
+    let extend = |widget: &gtk::Widget, on: bool| {
+        if let Some(view) = widget
+            .ancestor(adw::ToolbarView::static_type())
+            .and_then(|view| view.downcast::<adw::ToolbarView>().ok())
+        {
+            view.set_extend_content_to_top_edge(on);
+        }
+    };
+    widget.connect_map(move |widget| extend(widget, true));
+    widget.connect_unmap(move |widget| extend(widget, false));
 }
 
 #[derive(Default)]

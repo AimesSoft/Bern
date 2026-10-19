@@ -96,6 +96,17 @@ impl Generator<'_> {
                         .keyword("fade")
                         .map(|edge| format!(", fade = {}", string(edge)))
                         .unwrap_or_default();
+                    // Dashes and gaps of the stroke; none draws it whole.
+                    let dash = child
+                        .number("dash")
+                        .map(|dash| {
+                            format!(
+                                ", dash = {}, dashGap = {}",
+                                double(dash),
+                                double(child.number("dash_gap").unwrap_or(dash))
+                            )
+                        })
+                        .unwrap_or_default();
                     let optional = |name: &str| {
                         child
                             .number(name)
@@ -103,7 +114,7 @@ impl Generator<'_> {
                             .unwrap_or_else(|| "null".into())
                     };
                     out.line(format!(
-                        "BernDraw.shape(this, bernPalette, {}, {}, {}, {}, {}, {}, {fill}, {}, {}, {}{fade})",
+                        "BernDraw.shape(this, bernPalette, {}, {}, {}, {}, {}, {}, {fill}, {}, {}, {}{fade}{dash})",
                         string(child.keyword("kind").unwrap_or("rect")),
                         number(child, "x", 0.0),
                         number(child, "y", 0.0),

@@ -59,7 +59,7 @@
 | `Row` | `gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: top / center / bottom / baseline` | 可含子内容；无动作 |
 | `Accordion` | **`count: NumberValue`**<br>**`selected: NumberValue`**<br>**`collapsed_width: Length`**<br>**`height: Length`**<br>`gap: Length`<br>`corner: Length` | 可含子内容；无动作 |
 | `Grid` | **`min_width: Length`**<br>`gap: Length`<br>`row_gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`cell_ratio: Number`<br>`cell_extra: Length` | 可含子内容；无动作 |
-| `Stack` | `variant: StyleVariant`<br>`enabled: Bool`<br>`align: top_leading / top / top_trailing / leading / center / trailing / bottom_leading / bottom / bottom_trailing`<br>`width: Length`<br>`height: Length` | 可含子内容；无动作 |
+| `Stack` | `variant: StyleVariant`<br>`enabled: Bool`<br>`align: top_leading / top / top_trailing / leading / center / trailing / bottom_leading / bottom / bottom_trailing`<br>`width: Length`<br>`height: Length`<br>`under_bars: Flag` | 可含子内容；无动作 |
 | `Marquee` | **`duration: Length`**<br>`phase: Number`<br>`paused: Bool`<br>`opacity: NumberValue` | 可含子内容；无动作 |
 | `ScaleBox` | **`width: Length`**<br>**`height: Length`** | 可含子内容；无动作 |
 | `Positioned` | **`x: Length`**<br>**`y: Length`**<br>**`width: Length`**<br>**`height: Length`** | 可含子内容；无动作 |
@@ -106,7 +106,7 @@
 | `ForEach` | **`items: Items`**<br>**`key: KeyField`** | 可含子内容；无动作 |
 | `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2`<br>`emphasis: primary / secondary / tertiary`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length` | 不含子节点；无动作 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
-| `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
+| `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Pattern` | **`name: PatternName`**<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2`<br>`font_size: Number`<br>`display: title_and_icon / icon` | 不含子节点；无动作 |

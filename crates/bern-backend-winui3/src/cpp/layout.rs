@@ -72,6 +72,10 @@ impl Generator<'_> {
                     ("reflow", Self::reflow(element)),
                     ("style", self.style("Stack", element.keyword("variant"))),
                     ("enabled", self.enabled(element)),
+                    (
+                        "underBars",
+                        (element.keyword("under_bars") == Some("true")).then(|| "true".into()),
+                    ),
                 ])
             ),
         );

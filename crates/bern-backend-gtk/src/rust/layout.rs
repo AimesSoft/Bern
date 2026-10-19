@@ -82,7 +82,7 @@ impl Generator<'_> {
         self.container_children(
             out,
             &format!(
-                "b::Layers(p, c, b::LayersProps {{ align: {}, width: {}, height: {}, animate: {}, style: {}, enabled: {}, reflow: {} }}, ",
+                "b::Layers(p, c, b::LayersProps {{ align: {}, width: {}, height: {}, animate: {}, style: {}, enabled: {}, reflow: {}, under_bars: {} }}, ",
                 Self::keyword(element, "align"),
                 some(self.num(element, "width")),
                 some(self.num(element, "height")),
@@ -90,6 +90,7 @@ impl Generator<'_> {
                 self.style("Stack", element),
                 self.enabled(element),
                 some(Self::reflow(element).map(|token| self.motion(token))),
+                element.keyword("under_bars") == Some("true"),
             ),
             element,
             ");",

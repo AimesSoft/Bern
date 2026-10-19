@@ -131,6 +131,7 @@ pub fn overview(
             Text(content: tr! { "zh-Hans" => "最近的进度", "en" => "Recent progress" }, style: headline, mark: accent)
             Canvas(height: 96, label: tr! { "zh-Hans" => "最近每天的进度", "en" => "Progress of recent days" }) {
                 Shape(kind: rounded, corner: 12, fill: surface.panel)
+                Shape(kind: rounded, x: 6, y: 6, width: 88, height: 84, corner: 8, stroke: control.border, stroke_width: 1.5, dash: 4.5, dash_gap: 3)
                 Pattern(name: gingham, opacity: 0.8)
                 Series(values: app.activity, kind: area, fill: accent, opacity: 0.25)
                 Series(values: app.activity, stroke: accent, stroke_width: 2.5)
@@ -140,10 +141,14 @@ pub fn overview(
             Switch(id: large_title, label: tr! { "zh-Hans" => "大标题", "en" => "Large title" }, value: draft.large_title)
             Switch(id: show_archive, label: tr! { "zh-Hans" => "在侧栏显示归档", "en" => "Show the archive in the sidebar" }, value: draft.show_archive)
             Switch(id: focus, label: tr! { "zh-Hans" => "专注模式：静置 3 秒后隐藏标题栏", "en" => "Focus: hide the title bar after 3 s at rest" }, value: draft.focus)
-            ForEach(items: tags.labels, key: name) |tag| {
-                Text(content: tag.name, appear: pop_in, disappear: fade)
+            // The tags module is optional: its labels and button only show
+            // while it runs.
+            if app.modules.tags {
+                ForEach(items: tags.labels, key: name) |tag| {
+                    Text(content: tag.name, appear: pop_in, disappear: fade)
+                }
+                Button(id: tag_work, label: tr! { "zh-Hans" => "加上“工作”标签", "en" => "Tag as Work" }) => tags.tag("work")
             }
-            Button(id: tag_work, label: tr! { "zh-Hans" => "加上“工作”标签", "en" => "Tag as Work" }) => tags.tag("work")
             Button(id: rename, label: tr! { "zh-Hans" => "改名为“本周”", "en" => "Rename to This Week" }, variant: hero) => app.rename("本周")
             Slot(id: summary)
         }

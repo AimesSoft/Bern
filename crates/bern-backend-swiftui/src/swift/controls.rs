@@ -60,13 +60,30 @@ impl Generator<'_> {
         if element.kind == "Button" && !element.children.is_empty() {
             // The content is what the button shows; the label names it.
             self.nodes(out, &element.children, ctx);
+            if element.keyword("width") == Some("fill") {
+                out.line(".frame(maxWidth: .infinity)");
+            }
             out.close("}");
-            out.line(format!(
-                ".buttonStyle(BernContentButtonStyle(style: {}))",
-                self.style_of(element)
-                    .map(|style| format!("BernStyles.{}", style.name))
-                    .unwrap_or_else(|| "nil".into())
-            ));
+            let style = self.style_of(element);
+            match &style {
+                // A capsule is the platform's button around the content,
+                // as it is around a label.
+                Some(style)
+                    if element.keyword("shape") == Some("capsule") && !style.draws_look() =>
+                {
+                    self.capsule_control(out, element);
+                    out.line(format!(".bernFeedback(BernStyles.{})", style.name));
+                }
+                None if element.keyword("shape") == Some("capsule") => {
+                    self.capsule_control(out, element);
+                }
+                _ => out.line(format!(
+                    ".buttonStyle(BernContentButtonStyle(style: {}))",
+                    style
+                        .map(|style| format!("BernStyles.{}", style.name))
+                        .unwrap_or_else(|| "nil".into())
+                )),
+            }
             out.line(format!(
                 ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
             ));
@@ -161,12 +178,7 @@ impl Generator<'_> {
                     out.line(format!(".help({label})"));
                 } else if !ctx.toolbar {
                     if element.keyword("shape") == Some("capsule") {
-                        out.line(format!(
-                            ".bernCapsuleControl(height: {}, prominent: {})",
-                            self.length(element, "height")
-                                .unwrap_or_else(|| "32.0".into()),
-                            element.keyword("prominence") == Some("prominent")
-                        ));
+                        self.capsule_control(out, element);
                     } else {
                         match element.keyword("prominence") {
                             Some("prominent") => out.line(".bernButtonLook(.prominent)"),
@@ -197,6 +209,16 @@ impl Generator<'_> {
             ".bernControl({}, role: \"button\", label: {label}, enabled: {}, actions: BernControlActions(activate: {{ {action} }}{file}))",
             self.target(element, ctx),
             enabled.unwrap_or_else(|| "true".into())
+        ));
+    }
+
+    /// The platform's capsule button, `height` tall.
+    fn capsule_control(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            ".bernCapsuleControl(height: {}, prominent: {})",
+            self.length(element, "height")
+                .unwrap_or_else(|| "32.0".into()),
+            element.keyword("prominence") == Some("prominent")
         ));
     }
 

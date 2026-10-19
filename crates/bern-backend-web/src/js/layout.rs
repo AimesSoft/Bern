@@ -154,6 +154,10 @@ impl Generator<'_> {
                 "style",
                 crate::style::reference(self.app, "Stack", element.keyword("variant")),
             ),
+            (
+                "underBars",
+                (element.keyword("under_bars") == Some("true")).then(|| "true".into()),
+            ),
         ]);
         let first = self.layout_lines(element, &[("width", "width"), ("height", "height")]);
         self.container_children(

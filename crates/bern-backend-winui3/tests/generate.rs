@@ -428,6 +428,8 @@ fn planner_generates_without_warnings() {
         "B::Canvas(p, c, {",
         "B::PatternOp{.pattern = &P_gingham",
         "B::SeriesOp{.values = R::Numbers(",
+        // A dashed outline.
+        ".dash = 4.5, .dashGap = 3.0",
         ".mark = \"accent\"",
         ".hero = \"title\"",
         ".appear = &X_pop_in, .disappear = &X_fade",
@@ -649,7 +651,8 @@ fn icon(name: &str) -> bern_ir::Prop {
 
 /// The showcase with a scene, an accordion, wrapping rows, a grid of
 /// cells, a modal, a form's layout, icon-only labels and menus, capsule
-/// controls and a search item at the end of its first component.
+/// controls, a search item, a layer under the window's bars and a capsule
+/// button around its content at the end of its first component.
 fn add_layout_features(app: &mut bern_ir::Application) {
     let text = || {
         node(
@@ -786,6 +789,18 @@ fn add_layout_features(app: &mut bern_ir::Application) {
                 ],
                 vec![text()],
             ),
+            // A scene under the window's bars, and a capsule button around
+            // its content.
+            node("Stack", vec![("under_bars", word("true"))], vec![text()]),
+            node(
+                "Button",
+                vec![
+                    ("label", words("Continue")),
+                    ("shape", word("capsule")),
+                    ("height", number(32.0)),
+                ],
+                vec![node("Row", vec![], vec![text()])],
+            ),
         ],
     );
     let component = app
@@ -857,6 +872,8 @@ fn layout_features_generate_for_winui3() {
         "B::Form(p, c, nullptr, {.gap = 12.0, .rowHeight = 44.0, .plainFirst = true}, ",
         "B::Section(p, c, nullptr, nullptr, {.plain = true, .paddingX = 8.0}, ",
         "B::Modal(p, c, {.width = B::Len(300.0), .height = B::Len(200.0), .cover = true}, ",
+        ".underBars = true}",
+        "B::ContentButton(p, c, {.id = \"test_button\"",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }

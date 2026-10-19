@@ -786,6 +786,14 @@ pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {
                             Switch(id: more, label: tr! { "en" => "More" }, value: draft.more)
                             Canvas(height: 40) {
                                 Series(values: app.levels, kind: area)
+                                Shape(kind: rounded, x: 1, y: 1, width: 60, height: 38, corner: 8, stroke: control.border, stroke_width: 1.5, dash: 4.5, dash_gap: 3)
+                            }
+                            Stack(align: top_leading, under_bars: true) {
+                                Button(id: resume, label: tr! { "en" => "Resume" }, shape: capsule, height: 32) {
+                                    Row(gap: 6) {
+                                        Text(content: tr! { "en" => "Resume" })
+                                    }
+                                } => app.add(1)
                             }
                             Text(content: tr! { "en" => "Marked" }, mark: accent)
                             Text(content: app.notice)

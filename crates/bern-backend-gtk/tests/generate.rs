@@ -258,6 +258,15 @@ fn planner_and_gallery_build_for_gtk() {
             assert!(ui.contains(expected), "{name} lacks `{expected}`");
         }
     }
+    let (_, planner) = example("planner");
+    let ui = bern_backend_gtk::Generator::new(&planner).generate(0, "x");
+    // A dashed outline.
+    for expected in [
+        "dash: Some(4.5), dash_gap: Some(3.0)",
+        "dash: None, dash_gap: None",
+    ] {
+        assert!(ui.contains(expected), "planner lacks `{expected}`");
+    }
     let (_, gallery) = example("gallery");
     let ui = bern_backend_gtk::Generator::new(&gallery).generate(0, "x");
     for expected in [

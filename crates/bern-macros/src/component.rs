@@ -37,6 +37,25 @@ pub fn check_translations(tr: &Tr, languages: Option<&Languages>) -> syn::Result
     )
 }
 
+/// Whether a branch of an `if` value is, or chains to, a fractional literal.
+fn float_leaf(expr: &Expr) -> bool {
+    match expr {
+        Expr::Literal {
+            value: Literal::Float(_),
+            ..
+        } => true,
+        Expr::Unary {
+            op: UnaryOp::Neg,
+            expr,
+            ..
+        } => float_leaf(expr),
+        Expr::If {
+            then, otherwise, ..
+        } => float_leaf(then) || float_leaf(otherwise),
+        _ => false,
+    }
+}
+
 fn combine(errors: Vec<syn::Error>) -> syn::Result<()> {
     let mut iter = errors.into_iter();
     match iter.next() {
@@ -162,7 +181,9 @@ impl<'a> Gen<'a> {
                     BinaryOp::And => quote!(&&),
                     BinaryOp::Or => quote!(||),
                 };
-                quote!((#lhs) #op (#rhs))
+                // Parenthesized whole, so a reference taken to it, as for a
+                // component argument, takes the result.
+                quote!(((#lhs) #op (#rhs)))
             }
             Expr::Query(call) => {
                 self.error(
@@ -177,11 +198,56 @@ impl<'a> Gen<'a> {
                 otherwise,
                 ..
             } => {
+                // `if a { 0 } else { 40.5 }` is a number like the build
+                // tool reads it: whole literals beside a fraction are f64.
+                let float = float_leaf(then) || float_leaf(otherwise);
                 let cond = self.value(cond);
-                let then = self.value(then);
-                let otherwise = self.value(otherwise);
+                let then = self.branch(then, float);
+                let otherwise = self.branch(otherwise, float);
                 quote!(if #cond { #then } else { #otherwise })
             }
+        }
+    }
+
+    /// A branch of an `if` value, its whole literals written as f64 when
+    /// `float`.
+    fn branch(&mut self, expr: &Expr, float: bool) -> TokenStream {
+        match expr {
+            Expr::Literal {
+                value: Literal::Int(value),
+                ..
+            } if float => {
+                let literal = proc_macro2::Literal::f64_suffixed(*value as f64);
+                quote!(#literal)
+            }
+            Expr::Unary {
+                op: UnaryOp::Neg,
+                expr,
+                ..
+            } if float
+                && matches!(
+                    **expr,
+                    Expr::Literal {
+                        value: Literal::Int(_),
+                        ..
+                    }
+                ) =>
+            {
+                let inner = self.branch(expr, float);
+                quote!(-(#inner))
+            }
+            Expr::If {
+                cond,
+                then,
+                otherwise,
+                ..
+            } => {
+                let cond = self.value(cond);
+                let then = self.branch(then, float);
+                let otherwise = self.branch(otherwise, float);
+                quote!(if #cond { #then } else { #otherwise })
+            }
+            other => self.value(other),
         }
     }
 

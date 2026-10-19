@@ -419,7 +419,7 @@ object BernDraw {
         scope: DrawScope, palette: BernPalette, kind: String,
         x: Double, y: Double, width: Double?, height: Double?, corner: Double,
         fill: BernColor?, stroke: BernColor?, strokeWidth: Double, opacity: Double,
-        fade: String? = null,
+        fade: String? = null, dash: Double? = null, dashGap: Double? = null,
     ) = with(scope) {
         val left = x.dp.toPx()
         val top = y.dp.toPx()
@@ -457,7 +457,12 @@ object BernDraw {
             }
         }
         if (stroke != null) {
-            val line = Stroke(strokeWidth.dp.toPx())
+            // Dashes `dash` long with gaps of `dashGap`.
+            val dashes = dash?.let {
+                androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                    floatArrayOf(it.dp.toPx(), (dashGap ?: it).dp.toPx()))
+            }
+            val line = Stroke(strokeWidth.dp.toPx(), pathEffect = dashes)
             if (kind == "ellipse") {
                 drawOval(palette.color(stroke), rect.topLeft, rect.size, alpha, line)
             } else {

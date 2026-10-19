@@ -1997,6 +1997,8 @@ function controlShape(node, shape, height) {
 export function layoutIntent(node, dimension) {
   if (node.nodeType !== 1 || node.tagName === "DIALOG" || node.classList.contains(`bern-sized-${dimension}`)) return false;
   if (node.classList.contains(`bern-fill-${dimension}`)) return true;
+  // `Button(width: fill)` takes the row's or column's width.
+  if (dimension === "width" && node.classList.contains("bern-button-fill")) return true;
   let children = [...node.children];
   if (node.bernLayoutAxis === "layers") {
     // As in native BernLayers, rails cover the size established by other
@@ -2010,6 +2012,17 @@ export function layoutIntent(node, dimension) {
   return children.some((child) => layoutIntent(child, dimension));
 }
 
+/// Whether a stack's layers, rails aside, all have a fixed size in
+/// `dimension`: a native stack then keeps that size in a row or column,
+/// where only its flexible neighbours give way.
+export function fixedSize(node, dimension) {
+  if (node.nodeType !== 1) return false;
+  if (node.classList.contains(`bern-sized-${dimension}`)) return true;
+  if (node.bernLayoutAxis !== "layers") return false;
+  const content = [...node.children].filter((child) => !child.classList.contains("bern-rail"));
+  return content.length > 0 && content.every((child) => fixedSize(child, dimension));
+}
+
 /// Annotate layout intent instead of using unrestricted CSS :has(), which
 /// cannot distinguish a flexible drawing from one behind a fixed frame.
 function trackLayout(node, axis) {
@@ -2021,6 +2034,11 @@ function trackLayout(node, axis) {
         const className = `bern-layout-${dimension}`;
         const flexible = layoutIntent(element, dimension);
         if (element.classList.contains(className) !== flexible) element.classList.toggle(className, flexible);
+        if (element.bernLayoutAxis === "layers") {
+          const fixedClass = `bern-fixed-${dimension}`;
+          const fixed = fixedSize(element, dimension);
+          if (element.classList.contains(fixedClass) !== fixed) element.classList.toggle(fixedClass, fixed);
+        }
       }
     };
     visit(node);
@@ -2174,8 +2192,9 @@ const LAYER_PLACE = {
 
 /// `Stack`: children share one grid cell, later ones above earlier ones,
 /// and the stack is as large as its largest layer.
-export function Layers(p, ctx, { align, style, enabled }, children) {
-  const node = el("div", { class: "bern-layers" });
+export function Layers(p, ctx, { align, style, enabled, underBars }, children) {
+  // `under_bars`: the layer fills the window to its top, under the header.
+  const node = el("div", { class: underBars ? "bern-layers bern-under-bars" : "bern-layers" });
   node.style.placeItems = LAYER_PLACE[align ?? "center"];
   children(node, { ...ctx, inGroup: false });
   trackLayout(node, "layers");
@@ -2265,7 +2284,9 @@ export function Form(p, ctx, { title, gap, rowHeight, paddingX, paddingY }, chil
   if (paddingX !== undefined) node.style.setProperty("--bern-row-padding-x", `${paddingX}px`);
   if (paddingY !== undefined) node.style.setProperty("--bern-row-padding-y", `${paddingY}px`);
   children(node, ctx);
-  p.append(el("div", { class: "bern-form-scroll" }, node));
+  // A form fills its column, as a scroll view does, whatever the column's
+  // alignment; the rows stay at the form's width.
+  p.append(el("div", { class: "bern-form-scroll bern-fill-width bern-fill-height" }, node));
 }
 
 export function Section(p, ctx, { title, footer, plain, paddingX, paddingY }, children) {

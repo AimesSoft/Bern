@@ -1320,7 +1320,8 @@ struct BernPatternDef: Sendable {
 enum BernDraw {
     static func shape(
         _ context: inout GraphicsContext, _ kind: String, _ rect: CGRect, corner: Double,
-        fill: BernColor?, fade: String? = nil, stroke: BernColor?, strokeWidth: Double, opacity: Double
+        fill: BernColor?, fade: String? = nil, stroke: BernColor?, strokeWidth: Double,
+        dash: [Double] = [], opacity: Double
     ) {
         let path: Path
         switch kind {
@@ -1356,7 +1357,9 @@ enum BernDraw {
             }
         }
         if let stroke {
-            layer.stroke(path, with: .color(stroke.color), lineWidth: strokeWidth)
+            layer.stroke(
+                path, with: .color(stroke.color),
+                style: StrokeStyle(lineWidth: strokeWidth, dash: dash.map { CGFloat($0) }))
         }
     }
 

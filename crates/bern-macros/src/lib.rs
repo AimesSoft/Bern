@@ -45,12 +45,13 @@ pub fn protocol(args: TokenStream, item: TokenStream) -> TokenStream {
 /// Declare an enum or record used by UI declarations outside a protocol.
 #[proc_macro_attribute]
 pub fn value(args: TokenStream, item: TokenStream) -> TokenStream {
-    // `pages = "slot"` only matters to the build tool, which reads it from
-    // the source.
-    if let Err(error) = bern_syntax::parse_value_args(args.into()) {
-        return error.into_compile_error().into();
-    }
-    values::expand_standalone(item.into())
+    // `pages = "slot"`: the enum gains a variant per page the modules add
+    // to the slot, as the build tool composes it.
+    let pages = match bern_syntax::parse_value_args(args.into()) {
+        Ok(pages) => pages,
+        Err(error) => return error.into_compile_error().into(),
+    };
+    values::expand_standalone(item.into(), pages.as_deref())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

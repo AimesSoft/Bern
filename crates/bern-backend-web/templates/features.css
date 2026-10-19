@@ -438,7 +438,9 @@
 }
 
 .bern-hstack > .bern-sized-width,
-.bern-vstack > .bern-sized-height {
+.bern-vstack > .bern-sized-height,
+.bern-hstack > .bern-fixed-width,
+.bern-vstack > .bern-fixed-height {
   flex-shrink: 0;
 }
 

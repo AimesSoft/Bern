@@ -118,6 +118,8 @@ fn planner_generates_styles_drawing_and_dynamic_items() {
     assert!(kotlin.contains("BernStyledSidebarItem("));
     assert!(kotlin.contains("object BernPatterns {"));
     assert!(kotlin.contains("BernDraw.series(this, bernPalette, bernValues0"));
+    // A dashed outline.
+    assert!(kotlin.contains(", dash = 4.5, dashGap = 3.0)"), "{kotlin}");
     assert!(kotlin.contains("BernMarkedText("));
     // The archive item comes and goes; the selection falls back.
     assert!(kotlin.contains("LaunchedEffect(bernVisible)"));

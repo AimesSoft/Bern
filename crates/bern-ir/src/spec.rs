@@ -545,9 +545,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("align", PropKind::Keyword(STACK_ALIGN)),
             opt("width", PropKind::Length),
             opt("height", PropKind::Length),
+            opt("under_bars", PropKind::Flag),
         ],
         Children::Any,
-        "Layers on top of each other, later children above earlier ones; as large as the largest unless `width` or `height` says",
+        "Layers on top of each other, later children above earlier ones; as large as the largest unless `width` or `height` says. With `under_bars: true` it fills the window to its edges while it is shown: under the title bar and toolbar of a desktop window, under a phone's status bar and home indicator, as a scene drawn in window coordinates does",
     ),
     spec(
         "Marquee",
@@ -1082,10 +1083,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("fade", PropKind::Keyword(&["up", "down", "left", "right"])),
                 opt("stroke", PropKind::ColorRole),
                 opt("stroke_width", PropKind::Number),
+                opt("dash", PropKind::Number),
+                opt("dash_gap", PropKind::Number),
                 opt("opacity", PropKind::Number),
             ],
             Children::None,
-            "A shape in canvas units; without a size it fills the canvas. `fill_from` fills it with the average color of a picture; `fade` lets the fill fade out toward an edge",
+            "A shape in canvas units; without a size it fills the canvas. `fill_from` fills it with the average color of a picture; `fade` lets the fill fade out toward an edge; `dash` dashes the stroke, dashes that long with gaps of `dash_gap`, by default as long",
         )
     },
     ComponentSpec {
