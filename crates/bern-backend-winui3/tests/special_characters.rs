@@ -17,8 +17,7 @@ const LABEL: &str = "Mode \"<fast>\" & \\slow\\ $mode";
 const JAPANESE: &str = "日本語「引用」\"";
 const LITERAL: &str = "raw \"q\" \\ \n $x ${x} \\(y) ` 50% </script> <&> é";
 const COMPARED: &str = "${x}\"</script>\\";
-// No `\`: the resource script does not escape it in the name yet.
-const NAME: &str = "Bern's \"Q\" <&> </script> $x 100% é";
+const NAME: &str = "Bern's \"Q\" C:\\Apps\\ <&> </script> $x 100% é";
 
 const PROTOCOL: &str = r#"
 #[bern::protocol(namespace = "special", version = 1)]
@@ -234,7 +233,7 @@ fn special_characters_are_escaped_in_cpp_and_the_resources() {
         r#"{"page.0.2.prompt", L"e.g. \"Ann\" & 'Bo'"},"#,
         r#"{"app.0.0.title", L"Window \"title\" </script> & <i>"},"#,
         r#"{"Mode.Fast", L"Mode \"<fast>\" & \\slow\\ $mode"},"#,
-        r#"{"app.name", L"Bern's \"Q\" <&> </script> $x 100% é"},"#,
+        r#"{"app.name", L"Bern's \"Q\" C:\\Apps\\ <&> </script> $x 100% é"},"#,
         r#"{"page.0.0.content", L"日本語「引用」\""},"#,
     ] {
         assert!(
@@ -256,14 +255,16 @@ fn special_characters_are_escaped_in_cpp_and_the_resources() {
     let build = read(output.join("app/build.bat"));
     assert!(build.contains(" /utf-8 "), "{build}");
 
-    // The version resource doubles quotes and reads UTF-8.
+    // The version resource doubles quotes, escapes backslashes and reads
+    // UTF-8.
     let resources = read(output.join("app/app.rc"));
     assert!(
         resources.contains("#pragma code_page(65001)"),
         "{resources}"
     );
     assert!(
-        resources.contains(r#"VALUE "ProductName", "Bern's ""Q"" <&> </script> $x 100% é""#),
+        resources
+            .contains(r#"VALUE "ProductName", "Bern's ""Q"" C:\\Apps\\ <&> </script> $x 100% é""#),
         "{resources}"
     );
 }

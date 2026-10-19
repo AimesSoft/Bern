@@ -453,9 +453,24 @@ exit /b 1
     .replace("\n", "\r\n")
 }
 
-/// Text in a resource script string.
+/// Text in a resource script string: quotes doubled, and backslashes,
+/// line breaks and tabs as the escapes the resource compiler reads.
+/// Other control characters have no place in a version string and are
+/// left out.
 fn rc_text(text: &str) -> String {
-    text.replace('"', "\"\"")
+    let mut escaped = String::new();
+    for c in text.chars() {
+        match c {
+            '"' => escaped.push_str("\"\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\t' => escaped.push_str("\\t"),
+            '\r' => escaped.push_str("\\r"),
+            c if c.is_control() => {}
+            c => escaped.push(c),
+        }
+    }
+    escaped
 }
 
 /// The version resource, with the name Windows shows for the process, and
@@ -534,6 +549,15 @@ pub fn manifest(app: &Application) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resource_strings_keep_their_characters() {
+        assert_eq!(rc_text(r#"say "hi""#), r#"say ""hi"""#);
+        assert_eq!(rc_text(r"C:\Apps\"), r"C:\\Apps\\");
+        // A line break would end the string before its closing quote.
+        assert_eq!(rc_text("one\ntwo\tthree\r"), r"one\ntwo\tthree\r");
+        assert_eq!(rc_text("bell\u{7}"), "bell");
+    }
 
     #[test]
     fn versions_are_numeric() {
