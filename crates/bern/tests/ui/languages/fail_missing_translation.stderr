@@ -1,0 +1,7 @@
+error: error[B102]: Missing translation
+       Missing language: ja
+       Required languages: en, ja
+  --> tests/ui/languages/fail_missing_translation.rs:22:25
+   |
+22 |     ui! { Text(content: tr! { "en" => "Hello" }) }
+   |                         ^^

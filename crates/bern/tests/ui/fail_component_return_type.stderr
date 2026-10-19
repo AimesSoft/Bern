@@ -1,0 +1,5 @@
+error: a component returns `impl View`
+  --> tests/ui/fail_component_return_type.rs:21:4
+   |
+21 | fn page(app: demo::Client) -> String {
+   |    ^^^^

@@ -1,0 +1,5 @@
+error: expected `features = FeaturesEnum`
+  --> tests/ui/fail_component_arguments.rs:26:13
+   |
+26 | #[component(feature = PageFeature)]
+   |             ^^^^^^^

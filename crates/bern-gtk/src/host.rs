@@ -381,11 +381,9 @@ fn brand_css(red: u8, green: u8, blue: u8) -> String {
     )
 }
 
-/// Run the application: start the engine, open the initial windows and
-/// keep running until the application quits.
-pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
-    // The definition lives as long as the process.
-    let def: &'static AppDef = Box::leak(Box::new(def));
+/// Install the host of `def` on this thread: the interface language, and
+/// one cell per engine state field at its type's default.
+fn install(def: &'static AppDef) -> Rc<Host> {
     text::install(def.strings, def.languages, def.default_language);
     let engine = def
         .descriptor
@@ -409,6 +407,15 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     HOST.with(|cell| {
         let _ = cell.set(Rc::clone(&shared));
     });
+    shared
+}
+
+/// Run the application: start the engine, open the initial windows and
+/// keep running until the application quits.
+pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
+    // The definition lives as long as the process.
+    let def: &'static AppDef = Box::leak(Box::new(def));
+    let shared = install(def);
     let application = adw::Application::builder()
         .application_id(shared.def.bundle_id)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
@@ -483,4 +490,232 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         .chain(std::env::args().skip(1).filter(|arg| !arg.starts_with('-')))
         .collect();
     application.run_with_args(&args)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::protocol::{EnumDef, ProtocolDescriptor, StateField, Type, TypeTable, VariantDef};
+    use crate::reactive::{Scope, effect};
+
+    /// An application that declares nothing, for a test to fill in.
+    pub(crate) fn app() -> AppDef {
+        AppDef {
+            id: "test",
+            bundle_id: "org.bern.Test",
+            name: "app.name",
+            version: "1.0",
+            fingerprint: 0,
+            languages: &["en"],
+            default_language: "en",
+            strings: &[],
+            descriptor: ProtocolDescriptor {
+                descriptor_version: 1,
+                namespace: "test".into(),
+                version: 1,
+                types: TypeTable::default(),
+                state: Vec::new(),
+                commands: Vec::new(),
+                events: Vec::new(),
+                modules: Vec::new(),
+            },
+            types: TypeTable::default(),
+            sessions: Vec::new(),
+            windows: Vec::new(),
+            primary: "main",
+            players: Vec::new(),
+            compact_below: None,
+            medium_below: None,
+            expanded_below: None,
+            brand_seed: None,
+            styles: &[],
+            text_styles: &[],
+            theme: None,
+            file_kinds: &[],
+        }
+    }
+
+    /// The host of `def` on this test's thread, without an engine or a
+    /// display.
+    pub(crate) fn start(def: AppDef) -> Rc<Host> {
+        install(Box::leak(Box::new(def)))
+    }
+
+    /// An enum whose variants have no payload.
+    pub(crate) fn unit_enum(name: &str, variants: &[&str]) -> EnumDef {
+        EnumDef {
+            name: name.into(),
+            variants: variants
+                .iter()
+                .map(|variant| VariantDef {
+                    name: variant.to_string(),
+                    fields: Vec::new(),
+                    label: None,
+                })
+                .collect(),
+        }
+    }
+
+    /// A host whose engine state is a count and a title.
+    fn counter() -> Rc<Host> {
+        let mut def = app();
+        def.descriptor.state = ["count", "title"]
+            .into_iter()
+            .zip([Type::Int, Type::Text])
+            .map(|(name, ty)| StateField {
+                name: name.into(),
+                ty,
+                doc: String::new(),
+                content: false,
+            })
+            .collect();
+        start(def)
+    }
+
+    /// A state update of `revision` changing `changes`, encoded with the
+    /// declared field types.
+    fn update(host: &Host, revision: u64, changes: &[(u32, Value)]) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.u64(revision);
+        writer.u32(changes.len() as u32);
+        for (field, value) in changes {
+            writer.u32(*field);
+            let ty = &host.def.descriptor.state[*field as usize].ty;
+            encode(value, ty, &host.def.descriptor.types, &mut writer);
+        }
+        writer.bytes
+    }
+
+    #[test]
+    fn engine_state_starts_at_the_defaults() {
+        counter();
+        assert_eq!(engine_value(0), Value::Int(0));
+        assert_eq!(engine_value(1), Value::Text(String::new()));
+        assert_eq!(engine_value(2), Value::Unit);
+    }
+
+    #[test]
+    fn state_updates_apply_in_one_batch() {
+        let host = counter();
+        let runs = Rc::new(StdCell::new(0));
+        let scope = Scope::detached();
+        let counted = Rc::clone(&runs);
+        scope.run(|| {
+            effect(move || {
+                engine_value(0);
+                engine_value(1);
+                counted.set(counted.get() + 1);
+            })
+        });
+        host.receive_state(&update(
+            &host,
+            1,
+            &[(0, Value::Int(3)), (1, Value::Text("Inbox".into()))],
+        ));
+        assert_eq!(engine_value(0), Value::Int(3));
+        assert_eq!(engine_value(1), Value::Text("Inbox".into()));
+        assert_eq!(runs.get(), 2);
+        scope.dispose();
+    }
+
+    #[test]
+    fn older_revisions_are_ignored() {
+        let host = counter();
+        host.receive_state(&update(&host, 5, &[(0, Value::Int(5))]));
+        host.receive_state(&update(&host, 4, &[(0, Value::Int(4))]));
+        assert_eq!(engine_value(0), Value::Int(5));
+        host.receive_state(&update(&host, 6, &[(1, Value::Text("Later".into()))]));
+        assert_eq!(engine_value(0), Value::Int(5));
+        assert_eq!(engine_value(1), Value::Text("Later".into()));
+    }
+
+    #[test]
+    fn malformed_updates_change_nothing() {
+        let host = counter();
+        host.receive_state(&update(&host, 1, &[(0, Value::Int(1))]));
+        // A valid change followed by a field the engine does not have.
+        let mut unknown = Writer::new();
+        unknown.u64(2);
+        unknown.u32(2);
+        unknown.u32(0);
+        unknown.i64(2);
+        unknown.u32(9);
+        unknown.i64(9);
+        host.receive_state(&unknown.bytes);
+        // A change without its value.
+        let mut truncated = Writer::new();
+        truncated.u64(3);
+        truncated.u32(1);
+        truncated.u32(0);
+        host.receive_state(&truncated.bytes);
+        host.receive_state(&[]);
+        assert_eq!(engine_value(0), Value::Int(1));
+    }
+
+    #[test]
+    fn status_reads_success_or_failure() {
+        let mut ok = Writer::new();
+        ok.u8(0);
+        ok.u32(42);
+        let mut reader = status(&ok.bytes).expect("success");
+        assert_eq!(reader.u32().ok(), Some(42));
+        let mut failed = Writer::new();
+        failed.u8(1);
+        failed.text("not_found");
+        failed.text("No such window");
+        assert_eq!(
+            status(&failed.bytes).err(),
+            Some(Failure::new("not_found", "No such window"))
+        );
+        // A failure without its code and message, and no status at all.
+        assert_eq!(status(&[1]).err(), Some(Failure::new("ui_failed", "")));
+        assert_eq!(
+            status(&[]).err().map(|failure| failure.code),
+            Some("invalid_reply".to_string())
+        );
+    }
+
+    #[test]
+    fn replies_complete_their_command_once() {
+        let host = start(app());
+        let results = Rc::new(RefCell::new(Vec::new()));
+        let token = || {
+            let results = Rc::clone(&results);
+            host.token(
+                None,
+                Some(Box::new(move |result| results.borrow_mut().push(result))),
+            )
+        };
+        let (first, second, third) = (token(), token(), token());
+        assert!(first != second && second != third);
+        let mut ok = Writer::new();
+        ok.u8(0);
+        ok.u64(7);
+        let mut failed = Writer::new();
+        failed.u8(1);
+        failed.u64(7);
+        failed.text("busy");
+        failed.text("Try again later");
+        host.receive_reply(first, &ok.bytes);
+        host.receive_reply(first, &failed.bytes);
+        host.receive_reply(second, &failed.bytes);
+        host.receive_reply(third, &[0]);
+        host.receive_reply(third + 1, &ok.bytes);
+        assert_eq!(
+            *results.borrow(),
+            vec![
+                Ok(()),
+                Err(Failure::new("busy", "Try again later")),
+                Err(Failure::new("invalid_reply", "malformed reply")),
+            ]
+        );
+    }
+
+    #[test]
+    fn brand_color_becomes_the_accent() {
+        assert_eq!(
+            brand_css(53, 132, 228),
+            "@define-color accent_bg_color rgb(53,132,228);\n@define-color accent_color rgb(53,132,228);\n"
+        );
+    }
 }

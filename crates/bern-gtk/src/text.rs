@@ -53,20 +53,27 @@ fn wanted() -> Vec<String> {
             break;
         }
     }
-    tags.into_iter()
-        .map(|tag| {
-            // zh_CN.UTF-8@variant → zh-CN
-            let tag = tag.split(['.', '@']).next().unwrap_or_default();
-            tag.replace('_', "-")
-        })
-        .filter(|tag| !tag.is_empty() && tag != "C" && tag != "POSIX")
-        .collect()
+    tags.iter().filter_map(|tag| locale_tag(tag)).collect()
+}
+
+/// The language tag of a locale variable's value; none for the C and
+/// POSIX locales.
+fn locale_tag(value: &str) -> Option<String> {
+    // zh_CN.UTF-8@variant → zh-CN
+    let tag = value.split(['.', '@']).next().unwrap_or_default();
+    let tag = tag.replace('_', "-");
+    (!tag.is_empty() && tag != "C" && tag != "POSIX").then_some(tag)
 }
 
 /// The supported language that best matches what the user asks for.
 pub(crate) fn choose(supported: &[String], fallback: &str) -> String {
-    let wanted = wanted();
-    for tag in &wanted {
+    best(supported, &wanted(), fallback)
+}
+
+/// The supported language that best matches `wanted`, most preferred
+/// first.
+fn best(supported: &[String], wanted: &[String], fallback: &str) -> String {
+    for tag in wanted {
         if let Some(exact) = supported
             .iter()
             .find(|candidate| candidate.eq_ignore_ascii_case(tag))
@@ -74,7 +81,7 @@ pub(crate) fn choose(supported: &[String], fallback: &str) -> String {
             return exact.clone();
         }
     }
-    for tag in &wanted {
+    for tag in wanted {
         let lower = tag.to_ascii_lowercase();
         // zh-CN, zh-SG → zh-Hans; zh-TW, zh-HK → zh-Hant.
         let script = if ["zh-tw", "zh-hk", "zh-mo", "zh-hant"]
@@ -239,11 +246,32 @@ pub fn autonym(tag: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reactive::{Scope, effect};
+    use std::cell::RefCell;
+
+    const STRINGS: StringTable = &[
+        ("en", &[("greeting", "Hello, {name}"), ("title", "Inbox")]),
+        (
+            "fr",
+            &[
+                ("greeting", "Bonjour, {name}"),
+                ("title", "Boîte de réception"),
+            ],
+        ),
+    ];
+
+    fn tags(list: &[&str]) -> Vec<String> {
+        list.iter().map(|tag| tag.to_string()).collect()
+    }
 
     #[test]
     fn values_become_arguments() {
         assert_eq!(
-            date(&Value::Record(vec![Value::Int(2026), Value::Int(10), Value::Int(12)])),
+            date(&Value::Record(vec![
+                Value::Int(2026),
+                Value::Int(10),
+                Value::Int(12)
+            ])),
             Arg::Date {
                 year: 2026,
                 month: 10,
@@ -257,5 +285,120 @@ mod tests {
                 text: "3".into()
             }
         );
+    }
+
+    #[test]
+    fn placeholders_repeat_and_values_stay_as_given() {
+        let args = [
+            ("name", Arg::Text("Ada".into())),
+            ("other", Arg::Text("{name}".into())),
+        ];
+        let fill = |text: &str| {
+            format::format(
+                &parsed(text),
+                "en",
+                &|name| {
+                    args.iter()
+                        .find(|(arg, _)| *arg == name)
+                        .map(|(_, value)| value.clone())
+                },
+                &|key| key.to_string(),
+            )
+        };
+        assert_eq!(fill("{name}, {name}!"), "Ada, Ada!");
+        // A value is not read as a template again.
+        assert_eq!(fill("<{other}>"), "<{name}>");
+        // A text that does not parse, such as one with a lone closing
+        // brace, is shown as it is.
+        assert_eq!(fill("a } b"), "a } b");
+        assert_eq!(fill(""), "");
+    }
+
+    #[test]
+    fn locale_variables_become_language_tags() {
+        assert_eq!(locale_tag("zh_CN.UTF-8@pinyin").as_deref(), Some("zh-CN"));
+        assert_eq!(locale_tag("en_US.UTF-8").as_deref(), Some("en-US"));
+        assert_eq!(locale_tag("fr").as_deref(), Some("fr"));
+        assert_eq!(locale_tag("C.UTF-8"), None);
+        assert_eq!(locale_tag("POSIX"), None);
+        assert_eq!(locale_tag(".UTF-8"), None);
+    }
+
+    #[test]
+    fn exact_languages_match_in_any_case() {
+        let supported = tags(&["en", "zh-Hans", "pt-BR"]);
+        assert_eq!(best(&supported, &tags(&["pt-br"]), "en"), "pt-BR");
+        assert_eq!(best(&supported, &tags(&["ZH-HANS"]), "en"), "zh-Hans");
+    }
+
+    #[test]
+    fn regions_fall_back_to_their_language() {
+        let supported = tags(&["en", "fr", "pt-BR"]);
+        assert_eq!(best(&supported, &tags(&["fr-CA"]), "en"), "fr");
+        assert_eq!(best(&supported, &tags(&["pt-PT"]), "en"), "pt-BR");
+        assert_eq!(best(&supported, &tags(&["de-DE", "fr-FR"]), "en"), "fr");
+        assert_eq!(best(&supported, &tags(&["ja-JP"]), "en"), "en");
+        assert_eq!(best(&supported, &[], "en"), "en");
+    }
+
+    #[test]
+    fn chinese_regions_choose_their_script() {
+        let supported = tags(&["en", "zh-Hans", "zh-Hant"]);
+        for (tag, script) in [
+            ("zh", "zh-Hans"),
+            ("zh-CN", "zh-Hans"),
+            ("zh-SG", "zh-Hans"),
+            ("zh-TW", "zh-Hant"),
+            ("zh-HK", "zh-Hant"),
+            ("zh-MO", "zh-Hant"),
+            ("zh-Hant-TW", "zh-Hant"),
+        ] {
+            assert_eq!(best(&supported, &tags(&[tag]), "en"), script, "{tag}");
+        }
+        // Readers of Traditional Chinese do not get Simplified text.
+        assert_eq!(
+            best(&tags(&["en", "zh-Hans"]), &tags(&["zh-TW"]), "en"),
+            "en"
+        );
+    }
+
+    #[test]
+    fn switching_language_shows_its_text_in_one_run() {
+        install(STRINGS, &["en", "fr"], "en");
+        assert!(set_language("en"));
+        let shown = Rc::new(RefCell::new(Vec::new()));
+        let scope = Scope::detached();
+        let seen = Rc::clone(&shown);
+        scope.run(|| {
+            effect(move || {
+                seen.borrow_mut()
+                    .push(format!("{}: {}", language(), tr("title")))
+            })
+        });
+        assert!(set_language("fr"));
+        assert!(!set_language("de"));
+        assert_eq!(*shown.borrow(), ["en: Inbox", "fr: Boîte de réception"]);
+        scope.dispose();
+    }
+
+    #[test]
+    fn translations_fill_placeholders_and_fall_back_to_the_key() {
+        install(STRINGS, &["en", "fr", "de"], "en");
+        assert!(set_language("fr"));
+        assert_eq!(
+            fmt("greeting", &[("name", Arg::Text("Ada".into()))]),
+            "Bonjour, Ada"
+        );
+        assert_eq!(tr("missing.key"), "missing.key");
+        // A supported language without strings shows the keys.
+        assert!(set_language("de"));
+        assert_eq!(tr("title"), "title");
+    }
+
+    #[test]
+    fn languages_name_themselves() {
+        assert_eq!(autonym("zh-Hant"), "繁體中文");
+        assert_eq!(autonym("de"), "Deutsch");
+        assert_eq!(autonym("x-klingon"), "x-klingon");
     }
 }

@@ -1,0 +1,5 @@
+error: ids use letters, digits, `_` and `-`
+  --> tests/ui/fail_invalid_id.rs:22:22
+   |
+22 |     ui! { Button(id: "add one", label: tr! { "en" => "Add" }) => app.add(1) }
+   |                      ^^^^^^^^^

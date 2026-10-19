@@ -23,6 +23,7 @@ dependencies = [
  "bern-media",
  "bern-protocol",
  "bern-runtime",
+ "serde_json",
  "trybuild",
 ]
 
@@ -100,6 +101,7 @@ dependencies = [
 name = "bern-backend-web"
 version = "0.1.0"
 dependencies = [
+ "bern-compiler",
  "bern-ir",
  "bern-media",
  "bern-protocol",

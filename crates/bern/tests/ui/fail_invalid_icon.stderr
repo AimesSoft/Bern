@@ -1,0 +1,5 @@
+error: icon names use the Bern icon set (SF Symbols naming), e.g. "gearshape"
+  --> tests/ui/fail_invalid_icon.rs:22:63
+   |
+22 |     ui! { Button(id: add, label: tr! { "en" => "Add" }, icon: "Plus Circle") => app.add(1) }
+   |                                                               ^^^^^^^^^^^^^

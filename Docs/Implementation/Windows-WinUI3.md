@@ -44,7 +44,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 设计要求 | 状态 | 说明 |
 | --- | --- | --- |
 | 生成代码可构建 | 完成 | `bern build --target windows` 先构建 `bern_app.lib`、CLI 与 MCP 服务器，再运行生成的 `build.bat`：生成 C++/WinRT 头文件（按版本缓存），用 MSVC 编译运行时与生成代码，链接为一个可执行文件。生成测试在装有 VS C++ 工具的 Windows 上编译两套前端 |
-| 新目标不改解析器、公共 IR 与业务核心 | 完成 | `bern-backend-winui3`：C++ 生成器（`cpp.rs`）、构建胶水（`glue.rs`）与 `templates/cpp/` 下的运行时 |
+| 新目标不改解析器、公共 IR 与业务核心 | 完成 | `bern-backend-winui3`：C++ 生成器（`cpp/`）、构建胶水（`glue.rs`）与 `templates/cpp/` 下的运行时 |
 | 具体框架 SDK 不是全局前置条件 | 完成 | C++ 运行时以模板随目标模块分发，只在生成的应用中编译；macOS 上 `cargo test --workspace` 与 clippy 不需要 Windows 工具链 |
 | 运行时只使用系统依赖 | 完成 | 不需要 .NET；不随附 Windows App SDK；C 运行库静态链接，不需要 VC++ 运行库。有任何 Windows App Runtime 2（其他程序装的，或 Windows 11 自带的）时用它，没有时用系统 XAML |
 | 省略 UI 技术时的默认解析 | 完成 | `platform = "windows"` 解析为 `winui3-windows`（测试） |

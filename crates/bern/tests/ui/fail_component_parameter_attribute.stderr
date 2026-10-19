@@ -1,0 +1,5 @@
+error: only `#[session]` and `#[content]` are allowed on component parameters
+  --> tests/ui/fail_component_parameter_attribute.rs:26:28
+   |
+26 | fn page(app: demo::Client, #[state] draft: Draft) -> impl View {
+   |                            ^

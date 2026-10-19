@@ -765,41 +765,35 @@ fn directory_files(
     Ok(())
 }
 
-/// Load and validate a project configuration.
-pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
-    let text = std::fs::read_to_string(path).map_err(|error| {
-        vec![Diagnostic::error(format!(
-            "cannot read {}: {error}",
-            path.display()
-        ))]
-    })?;
-    let raw: RawConfig = toml::from_str(&text)
-        .map_err(|error| vec![Diagnostic::error(format!("{}: {error}", path.display()))])?;
-    let dir = path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let dir = canonical(dir);
-    let mut errors = Vec::new();
-
-    if !bern_protocol::valid_name(&raw.app.id) {
+/// Check `[app].id` and `[app].bundle_id`.
+fn check_app(app: &RawApp, errors: &mut Vec<Diagnostic>) {
+    if !bern_protocol::valid_name(&app.id) {
         errors.push(Diagnostic::error(format!(
             "[app].id `{}` must be lower snake case",
-            raw.app.id
+            app.id
         )));
     }
-    let bundle_ok = raw.app.bundle_id.split('.').count() >= 2
-        && raw.app.bundle_id.split('.').all(|part| {
+    let bundle_ok = app.bundle_id.split('.').count() >= 2
+        && app.bundle_id.split('.').all(|part| {
             !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         });
     if !bundle_ok {
         errors.push(Diagnostic::error(format!(
             "[app].bundle_id `{}` must be reverse-DNS, e.g. `com.example.app`",
-            raw.app.bundle_id
+            app.bundle_id
         )));
     }
+}
+
+/// Check `[languages]` and that `[app].name` translates exactly them;
+/// with `strict`, a missing translation is B102.
+fn check_languages(
+    languages: &RawLanguages,
+    name: &BTreeMap<String, String>,
+    errors: &mut Vec<Diagnostic>,
+) {
     let mut seen = std::collections::BTreeSet::new();
-    for tag in &raw.languages.supported {
+    for tag in &languages.supported {
         if !valid_language(tag) {
             errors.push(Diagnostic::error(format!(
                 "language tag `{tag}` is not a standard tag such as `zh-Hans` or `en`"
@@ -811,25 +805,25 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             )));
         }
     }
-    if raw.languages.supported.is_empty() {
+    if languages.supported.is_empty() {
         errors.push(Diagnostic::error("[languages].supported is empty"));
     }
-    if !raw.languages.supported.contains(&raw.languages.default) {
+    if !languages.supported.contains(&languages.default) {
         errors.push(Diagnostic::error(format!(
             "default language `{}` is not in [languages].supported",
-            raw.languages.default
+            languages.default
         )));
     }
-    for language in raw.app.name.keys() {
-        if !raw.languages.supported.contains(language) {
+    for language in name.keys() {
+        if !languages.supported.contains(language) {
             errors.push(Diagnostic::error(format!(
                 "[app].name has language `{language}`, which is not supported"
             )));
         }
     }
-    if raw.languages.strict {
-        for language in &raw.languages.supported {
-            if !raw.app.name.contains_key(language) {
+    if languages.strict {
+        for language in &languages.supported {
+            if !name.contains_key(language) {
                 errors.push(
                     Diagnostic::error(format!(
                         "Missing translation\nProperty: [app].name\nMissing language: {language}"
@@ -839,7 +833,11 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             }
         }
     }
-    let theme_mode = match raw.theme.mode.as_deref().unwrap_or("system") {
+}
+
+/// `[theme].mode`, the system's by default.
+fn theme_mode(theme: &RawTheme, errors: &mut Vec<Diagnostic>) -> ThemeMode {
+    match theme.mode.as_deref().unwrap_or("system") {
         "system" => ThemeMode::System,
         "light" => ThemeMode::Light,
         "dark" => ThemeMode::Dark,
@@ -849,8 +847,15 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             )));
             ThemeMode::System
         }
-    };
-    let layouts = match &raw.layouts {
+    }
+}
+
+/// The breakpoints of `[layouts]`, each wider than the ones before it.
+fn layout_config(
+    layouts: Option<&RawLayouts>,
+    errors: &mut Vec<Diagnostic>,
+) -> Option<LayoutConfig> {
+    match layouts {
         None => None,
         Some(layouts) if layouts.compact_below.is_finite() && layouts.compact_below > 0.0 => {
             // Each breakpoint lies beyond the ones before it.
@@ -883,26 +888,46 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             )));
             None
         }
-    };
-    let brand_seed = match &raw.theme.brand_seed {
-        None => None,
-        Some(seed) => {
-            let parsed = Srgb::parse(seed);
-            if parsed.is_none() {
-                errors.push(Diagnostic::error(format!(
-                    "[theme].brand_seed `{seed}` must be a `#RRGGBB` color"
-                )));
-            }
-            parsed
-        }
-    };
+    }
+}
 
-    let ui_written = expand_sources(&dir, "", &raw.ui.sources).unwrap_or_else(|error| {
+/// `[theme].brand_seed`, a `#RRGGBB` color.
+fn brand_seed(theme: &RawTheme, errors: &mut Vec<Diagnostic>) -> Option<Srgb> {
+    let seed = theme.brand_seed.as_ref()?;
+    let parsed = Srgb::parse(seed);
+    if parsed.is_none() {
+        errors.push(Diagnostic::error(format!(
+            "[theme].brand_seed `{seed}` must be a `#RRGGBB` color"
+        )));
+    }
+    parsed
+}
+
+/// The application's protocol and UI sources and its protocol, UI and
+/// engine packages; a part is missing once its problem is reported.
+struct AppSources {
+    protocol_source: Option<SourceFile>,
+    protocol_package: Option<Package>,
+    ui_sources: Vec<SourceFile>,
+    ui_package: Option<Package>,
+    engine_package: Option<Package>,
+}
+
+/// Resolve the sources `[protocol]` and `[ui]` list, and check that each
+/// kind belongs to the package the manifest names, like the engine.
+fn app_sources(
+    dir: &Path,
+    protocol: &RawProtocol,
+    ui: &RawUi,
+    engine: &RawEngine,
+    errors: &mut Vec<Diagnostic>,
+) -> AppSources {
+    let ui_written = expand_sources(dir, "", &ui.sources).unwrap_or_else(|error| {
         errors.push(error);
         Vec::new()
     });
     let mut resolve = |written: &str| -> Option<SourceFile> {
-        match source_file(&dir, written) {
+        match source_file(dir, written) {
             Ok((_, module)) => Some(SourceFile {
                 display: written.to_string(),
                 path: dir.join(written),
@@ -914,14 +939,14 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             }
         }
     };
-    let protocol_source = resolve(&raw.protocol.source);
+    let protocol_source = resolve(&protocol.source);
     let ui_sources: Vec<SourceFile> = ui_written.iter().filter_map(|s| resolve(s)).collect();
 
     let protocol_package = protocol_source.as_ref().and_then(|source| {
-        let package_dir = source_file(&dir, &source.display).ok()?.0;
+        let package_dir = source_file(dir, &source.display).ok()?.0;
         package(
-            &dir,
-            &raw.protocol.package,
+            dir,
+            &protocol.package,
             &[(source.display.clone(), package_dir)],
             "protocol",
         )
@@ -931,19 +956,19 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
     let ui_dirs: Vec<(String, PathBuf)> = ui_sources
         .iter()
         .filter_map(|source| {
-            source_file(&dir, &source.display)
+            source_file(dir, &source.display)
                 .ok()
                 .map(|(package_dir, _)| (source.display.clone(), package_dir))
         })
         .collect();
-    let ui_package = package(&dir, &raw.ui.package, &ui_dirs, "UI")
+    let ui_package = package(dir, &ui.package, &ui_dirs, "UI")
         .map_err(|error| errors.push(error))
         .ok();
-    let engine_dir = dir.join(raw.engine.path.as_deref().unwrap_or(&raw.engine.package));
+    let engine_dir = dir.join(engine.path.as_deref().unwrap_or(&engine.package));
     let engine_package = package(
-        &dir,
-        &raw.engine.package,
-        &[(raw.engine.package.clone(), engine_dir)],
+        dir,
+        &engine.package,
+        &[(engine.package.clone(), engine_dir)],
         "engine",
     )
     .map_err(|error| errors.push(error))
@@ -951,99 +976,129 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
     if ui_written.is_empty() {
         errors.push(Diagnostic::error("[ui].sources lists no files"));
     }
+    AppSources {
+        protocol_source,
+        protocol_package,
+        ui_sources,
+        ui_package,
+        engine_package,
+    }
+}
 
-    let mut targets = Vec::new();
-    for (name, target) in raw.targets {
-        if target.platform == "browser" {
-            match target.web_mode.as_deref() {
-                None => errors.push(Diagnostic::error(format!(
-                    "target `{name}`: browser targets must set `web_mode = \"app\"` or `\"ui\"`"
-                ))),
-                Some("app") | Some("ui") => {}
-                Some(other) => errors.push(Diagnostic::error(format!(
-                    "target `{name}`: `web_mode = \"{other}\"` is unknown; use \"app\" or \"ui\""
-                ))),
-            }
-            // `app` runs the engine in the page; `ui` reaches a separate
-            // engine over a browser transport. Mismatches fail here
-            // instead of building a page that cannot reach its engine.
-            let (transport, codec) = match target.web_mode.as_deref() {
-                Some("ui") => ("websocket", Some("json")),
-                _ => ("in-process", None),
-            };
-            if let Some(declared) = &target.application_transport
-                && declared != transport
-            {
-                errors.push(Diagnostic::error(format!(
-                    "target `{name}`: `web_mode = \"{}\"` uses `application_transport = \"{transport}\"`, not `\"{declared}\"`",
-                    target.web_mode.as_deref().unwrap_or("app")
-                )));
-            }
-            if let Some(declared) = &target.application_codec
-                && Some(declared.as_str()) != codec
-            {
-                errors.push(Diagnostic::error(format!(
-                    "target `{name}`: `application_codec = \"{declared}\"` does not apply; {}",
-                    match codec {
-                        Some(codec) => format!("the WebUI channel uses `{codec}`"),
-                        None => "the in-page engine is called directly".into(),
-                    }
-                )));
-            }
-        } else if target.web_mode.is_some() {
+/// Check one `[targets.<name>]` table and turn it into its configuration.
+fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) -> TargetConfig {
+    check_web_mode(&name, &target, errors);
+    let frontends = windows_frontends(&name, &target.platform, target.frontends, errors);
+    for channel in &target.channels {
+        if channel != "ipc" {
             errors.push(Diagnostic::error(format!(
-                "target `{name}`: `web_mode` applies to browser targets only"
+                "target `{name}`: unknown channel `{channel}`; supported: ipc"
             )));
         }
-        // Windows builds both front ends unless the target names fewer.
-        let frontends = match (target.platform.as_str(), target.frontends) {
-            ("windows", None) => WINDOWS_FRONTENDS.map(str::to_string).to_vec(),
-            ("windows", Some(frontends)) => {
-                if frontends.is_empty() {
+    }
+    TargetConfig {
+        name,
+        platform: target.platform,
+        ui: target.ui,
+        web_mode: target.web_mode,
+        channels: target.channels,
+        frontends,
+    }
+}
+
+/// A browser target says whether the engine runs in the page, and the
+/// transport and codec it declares follow from that; other targets have
+/// no `web_mode`.
+fn check_web_mode(name: &str, target: &RawTarget, errors: &mut Vec<Diagnostic>) {
+    if target.platform == "browser" {
+        match target.web_mode.as_deref() {
+            None => errors.push(Diagnostic::error(format!(
+                "target `{name}`: browser targets must set `web_mode = \"app\"` or `\"ui\"`"
+            ))),
+            Some("app") | Some("ui") => {}
+            Some(other) => errors.push(Diagnostic::error(format!(
+                "target `{name}`: `web_mode = \"{other}\"` is unknown; use \"app\" or \"ui\""
+            ))),
+        }
+        // `app` runs the engine in the page; `ui` reaches a separate
+        // engine over a browser transport. Mismatches fail here
+        // instead of building a page that cannot reach its engine.
+        let (transport, codec) = match target.web_mode.as_deref() {
+            Some("ui") => ("websocket", Some("json")),
+            _ => ("in-process", None),
+        };
+        if let Some(declared) = &target.application_transport
+            && declared != transport
+        {
+            errors.push(Diagnostic::error(format!(
+                "target `{name}`: `web_mode = \"{}\"` uses `application_transport = \"{transport}\"`, not `\"{declared}\"`",
+                target.web_mode.as_deref().unwrap_or("app")
+            )));
+        }
+        if let Some(declared) = &target.application_codec
+            && Some(declared.as_str()) != codec
+        {
+            errors.push(Diagnostic::error(format!(
+                "target `{name}`: `application_codec = \"{declared}\"` does not apply; {}",
+                match codec {
+                    Some(codec) => format!("the WebUI channel uses `{codec}`"),
+                    None => "the in-page engine is called directly".into(),
+                }
+            )));
+        }
+    } else if target.web_mode.is_some() {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: `web_mode` applies to browser targets only"
+        )));
+    }
+}
+
+/// The front ends a target builds. Windows builds both unless the target
+/// names fewer; other platforms take none.
+fn windows_frontends(
+    name: &str,
+    platform: &str,
+    frontends: Option<Vec<String>>,
+    errors: &mut Vec<Diagnostic>,
+) -> Vec<String> {
+    match (platform, frontends) {
+        ("windows", None) => WINDOWS_FRONTENDS.map(str::to_string).to_vec(),
+        ("windows", Some(frontends)) => {
+            if frontends.is_empty() {
+                errors.push(Diagnostic::error(format!(
+                    "target `{name}`: `frontends` lists none; name \"winui3\", \"xaml-islands\" or both"
+                )));
+            }
+            for (index, frontend) in frontends.iter().enumerate() {
+                if !WINDOWS_FRONTENDS.contains(&frontend.as_str()) {
                     errors.push(Diagnostic::error(format!(
-                        "target `{name}`: `frontends` lists none; name \"winui3\", \"xaml-islands\" or both"
+                        "target `{name}`: unknown front end `{frontend}`; use \"winui3\" or \"xaml-islands\""
+                    )));
+                } else if frontends[..index].contains(frontend) {
+                    errors.push(Diagnostic::error(format!(
+                        "target `{name}`: `frontends` lists `{frontend}` twice"
                     )));
                 }
-                for (index, frontend) in frontends.iter().enumerate() {
-                    if !WINDOWS_FRONTENDS.contains(&frontend.as_str()) {
-                        errors.push(Diagnostic::error(format!(
-                            "target `{name}`: unknown front end `{frontend}`; use \"winui3\" or \"xaml-islands\""
-                        )));
-                    } else if frontends[..index].contains(frontend) {
-                        errors.push(Diagnostic::error(format!(
-                            "target `{name}`: `frontends` lists `{frontend}` twice"
-                        )));
-                    }
-                }
-                frontends
             }
-            (_, Some(_)) => {
-                errors.push(Diagnostic::error(format!(
-                    "target `{name}`: `frontends` applies to Windows targets only"
-                )));
-                Vec::new()
-            }
-            (_, None) => Vec::new(),
-        };
-        for channel in &target.channels {
-            if channel != "ipc" {
-                errors.push(Diagnostic::error(format!(
-                    "target `{name}`: unknown channel `{channel}`; supported: ipc"
-                )));
-            }
+            frontends
         }
-        targets.push(TargetConfig {
-            name,
-            platform: target.platform,
-            ui: target.ui,
-            web_mode: target.web_mode,
-            channels: target.channels,
-            frontends,
-        });
+        (_, Some(_)) => {
+            errors.push(Diagnostic::error(format!(
+                "target `{name}`: `frontends` applies to Windows targets only"
+            )));
+            Vec::new()
+        }
+        (_, None) => Vec::new(),
     }
+}
 
-    let libraries: Vec<PathBuf> = raw
-        .libraries
+/// The manifests `[[libraries]]` lists, which must exist.
+fn library_manifests(
+    dir: &Path,
+    libraries: &[RawLibraryRef],
+    errors: &mut Vec<Diagnostic>,
+) -> Vec<PathBuf> {
+    let libraries: Vec<PathBuf> = libraries
         .iter()
         .map(|library| dir.join(&library.manifest))
         .collect();
@@ -1055,9 +1110,20 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             )));
         }
     }
+    libraries
+}
+
+/// Load the modules `[[modules]]` lists. Each is listed once and
+/// translates every language the application supports.
+fn load_modules(
+    dir: &Path,
+    entries: &[RawModuleRef],
+    languages: &[String],
+    errors: &mut Vec<Diagnostic>,
+) -> Vec<ModuleConfig> {
     let mut modules: Vec<ModuleConfig> = Vec::new();
-    for entry in &raw.modules {
-        match load_module(&dir, &entry.path) {
+    for entry in entries {
+        match load_module(dir, &entry.path) {
             Ok(module) => {
                 if modules.iter().any(|other| other.id == module.id) {
                     errors.push(Diagnostic::error(format!(
@@ -1065,7 +1131,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
                         module.id
                     )));
                 }
-                for language in &raw.languages.supported {
+                for language in languages {
                     if !module.languages.contains(language) {
                         errors.push(Diagnostic::error(format!(
                             "module `{}` does not translate `{language}`, which the application supports; add it to {}",
@@ -1079,6 +1145,13 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             Err(module_errors) => errors.extend(module_errors),
         }
     }
+    check_module_order(&modules, errors);
+    modules
+}
+
+/// A module depends only on modules listed before it, and one that
+/// always runs never on an optional one.
+fn check_module_order(modules: &[ModuleConfig], errors: &mut Vec<Diagnostic>) {
     for (index, module) in modules.iter().enumerate() {
         for dependency in &module.depends {
             match modules.iter().position(|other| &other.id == dependency) {
@@ -1100,24 +1173,65 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             }
         }
     }
-    for slot in raw.contributes.keys() {
+}
+
+/// `[contributes]`: every slot named there is a lower snake case id.
+fn check_contributes(
+    contributes: &BTreeMap<String, Vec<String>>,
+    manifest: &str,
+    errors: &mut Vec<Diagnostic>,
+) {
+    for slot in contributes.keys() {
         if !bern_protocol::valid_name(slot) {
             errors.push(Diagnostic::error(format!(
-                "{}: slot `{slot}` must be lower snake case",
-                path.display()
+                "{manifest}: slot `{slot}` must be lower snake case"
             )));
         }
     }
+}
+
+/// Load and validate a project configuration.
+pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        vec![Diagnostic::error(format!(
+            "cannot read {}: {error}",
+            path.display()
+        ))]
+    })?;
+    let raw: RawConfig = toml::from_str(&text)
+        .map_err(|error| vec![Diagnostic::error(format!("{}: {error}", path.display()))])?;
+    let dir = path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let dir = canonical(dir);
+    let mut errors = Vec::new();
+
+    check_app(&raw.app, &mut errors);
+    check_languages(&raw.languages, &raw.app.name, &mut errors);
+    let theme_mode = theme_mode(&raw.theme, &mut errors);
+    let layouts = layout_config(raw.layouts.as_ref(), &mut errors);
+    let brand_seed = brand_seed(&raw.theme, &mut errors);
+    let sources = app_sources(&dir, &raw.protocol, &raw.ui, &raw.engine, &mut errors);
+    let targets: Vec<TargetConfig> = raw
+        .targets
+        .into_iter()
+        .map(|(name, target)| target_config(name, target, &mut errors))
+        .collect();
+    let libraries = library_manifests(&dir, &raw.libraries, &mut errors);
+    let modules = load_modules(&dir, &raw.modules, &raw.languages.supported, &mut errors);
+    let manifest = path.display().to_string();
+    check_contributes(&raw.contributes, &manifest, &mut errors);
     let resources = raw
         .resources
         .as_ref()
-        .map(|raw| resources(&dir, &path.display().to_string(), &text, raw, &mut errors))
+        .map(|raw| resources(&dir, &manifest, &text, raw, &mut errors))
         .unwrap_or_default();
     let (icon, platform_icons) = raw
         .app
         .icon
         .as_ref()
-        .map(|entry| app_icons(&dir, &path.display().to_string(), &text, entry, &mut errors))
+        .map(|entry| app_icons(&dir, &manifest, &text, entry, &mut errors))
         .unwrap_or_default();
 
     if !errors.is_empty() {
@@ -1141,12 +1255,12 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         strict: raw.languages.strict,
         theme_mode,
         brand_seed,
-        protocol_package: protocol_package.unwrap(),
-        protocol_source: protocol_source.unwrap(),
-        engine_package: engine_package.unwrap(),
+        protocol_package: sources.protocol_package.unwrap(),
+        protocol_source: sources.protocol_source.unwrap(),
+        engine_package: sources.engine_package.unwrap(),
         engine_type: raw.engine.type_path,
-        ui_package: ui_package.unwrap(),
-        ui_sources,
+        ui_package: sources.ui_package.unwrap(),
+        ui_sources: sources.ui_sources,
         root: raw.ui.root,
         targets,
         libraries,

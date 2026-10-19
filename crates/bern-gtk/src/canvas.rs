@@ -305,22 +305,18 @@ fn draw_shape(
     }
 }
 
-fn draw_series(cr: &gtk::cairo::Context, widget: &gtk::Widget, op: &SeriesOp, w: f64, h: f64) {
-    if op.values.is_empty() {
-        return;
-    }
-    let peak = op
-        .max
-        .unwrap_or_else(|| op.values.iter().copied().fold(f64::MIN, f64::max));
+/// The points of a series' values in `w` by `h`: spread across the width,
+/// and up from the bottom by their share of `max` or of the largest value.
+fn series_points(values: &[f64], max: Option<f64>, w: f64, h: f64) -> Vec<(f64, f64)> {
+    let peak = max.unwrap_or_else(|| values.iter().copied().fold(f64::MIN, f64::max));
     let scale = if peak > 0.0 { peak } else { 1.0 };
-    let count = op.values.len();
+    let count = values.len();
     let step = if count > 1 {
         w / (count - 1) as f64
     } else {
         0.0
     };
-    let points: Vec<(f64, f64)> = op
-        .values
+    values
         .iter()
         .enumerate()
         .map(|(index, value)| {
@@ -333,7 +329,15 @@ fn draw_series(cr: &gtk::cairo::Context, widget: &gtk::Widget, op: &SeriesOp, w:
                 h - h * (value / scale).clamp(0.0, 1.0),
             )
         })
-        .collect();
+        .collect()
+}
+
+fn draw_series(cr: &gtk::cairo::Context, widget: &gtk::Widget, op: &SeriesOp, w: f64, h: f64) {
+    if op.values.is_empty() {
+        return;
+    }
+    let count = op.values.len();
+    let points = series_points(&op.values, op.max, w, h);
     let line = |cr: &gtk::cairo::Context| {
         cr.new_path();
         cr.move_to(points[0].0, points[0].1);
@@ -621,5 +625,62 @@ impl Marked {
             }
         });
         marked
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::Value;
+    use gtk::cairo;
+
+    #[test]
+    fn series_values_read_as_numbers() {
+        let values = Value::List(vec![
+            Value::Int(1),
+            Value::Float(2.5),
+            Value::Text("x".into()),
+        ]);
+        assert_eq!(numbers(values), [1.0, 2.5, 0.0]);
+        assert!(numbers(Value::Int(1)).is_empty());
+    }
+
+    #[test]
+    fn series_rise_by_their_share_of_the_peak() {
+        assert_eq!(
+            series_points(&[0.0, 5.0, 10.0], None, 100.0, 50.0),
+            [(0.0, 50.0), (50.0, 25.0), (100.0, 0.0)]
+        );
+        // Against a declared maximum, values past it or below zero stay
+        // inside the area.
+        assert_eq!(
+            series_points(&[-1.0, 20.0, 40.0], Some(20.0), 10.0, 10.0),
+            [(0.0, 10.0), (5.0, 0.0), (10.0, 0.0)]
+        );
+        // One value stands in the middle.
+        assert_eq!(series_points(&[0.5], Some(1.0), 80.0, 10.0), [(40.0, 5.0)]);
+        // Without a positive peak, values are shares of 1.
+        assert_eq!(
+            series_points(&[-2.0, -1.0], None, 10.0, 10.0),
+            [(0.0, 10.0), (10.0, 10.0)]
+        );
+    }
+
+    #[test]
+    fn corners_round_at_most_to_half_the_shorter_side() {
+        let surface =
+            cairo::ImageSurface::create(cairo::Format::ARgb32, 100, 100).expect("a surface");
+        let cr = cairo::Context::new(&surface).expect("a context");
+        let inside = |x, y| cr.in_fill(x, y).expect("a path");
+        // 40 by 30 with a radius of 100: the ends are half circles of 15.
+        rounded(&cr, 10.0, 20.0, 40.0, 30.0, 100.0);
+        assert!(!inside(11.0, 21.0));
+        assert!(inside(30.0, 21.0));
+        assert!(inside(10.5, 35.0) && inside(49.5, 35.0));
+        assert!(!inside(51.0, 35.0));
+        // A negative radius draws square corners.
+        cr.new_path();
+        rounded(&cr, 10.0, 20.0, 40.0, 30.0, -4.0);
+        assert!(inside(10.5, 20.5) && inside(49.5, 49.5));
     }
 }

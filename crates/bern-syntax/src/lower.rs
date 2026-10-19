@@ -87,8 +87,8 @@ pub fn label(
 ) -> syn::Result<LocalizedText> {
     let mut params: Vec<String> = Vec::new();
     for entry in &tr.entries {
-        let pieces = format::parse(&entry.text)
-            .map_err(|message| syn::Error::new(entry.span, message))?;
+        let pieces =
+            format::parse(&entry.text).map_err(|message| syn::Error::new(entry.span, message))?;
         for (name, how) in format::uses(&pieces) {
             let Some(field) = fields.iter().find(|field| field.name == name) else {
                 return Err(syn::Error::new(

@@ -1,0 +1,5 @@
+error: expected `namespace = "…"` or `version = N`
+ --> tests/ui/fail_protocol_unknown_argument.rs:1:51
+  |
+1 | #[bern::protocol(namespace = "demo", version = 1, name = "Demo")]
+  |                                                   ^^^^

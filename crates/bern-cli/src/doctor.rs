@@ -383,10 +383,16 @@ mod tests {
                 "{platform}"
             );
         }
-        let elsewhere = checks
-            .iter()
-            .filter(|check| matches!(check.status, Status::Elsewhere(_)))
-            .count();
-        assert_eq!(elsewhere, 2, "two desktops build on other systems");
+        // Exactly the checks whose targets build on another system are
+        // reported as elsewhere, whichever system runs the tests.
+        for (check, (_, _, host, _)) in checks.iter().zip(SPECS) {
+            let elsewhere = host.is_some_and(|(os, _)| os != std::env::consts::OS);
+            assert_eq!(
+                matches!(check.status, Status::Elsewhere(_)),
+                elsewhere,
+                "{}",
+                check.title
+            );
+        }
     }
 }

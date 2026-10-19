@@ -28,7 +28,7 @@
 | 位置 | 内容 |
 | --- | --- |
 | `crates/bern-backend-swiftui/src/ios.rs` | iOS 目标：目标描述、检查、生成与构建步骤 |
-| `crates/bern-backend-swiftui/src/swift.rs` | 两个平台共用的生成器，`Platform` 决定差异 |
+| `crates/bern-backend-swiftui/src/swift/` | 两个平台共用的生成器，`Platform` 决定差异 |
 | `templates/BernUIKit.swift` | iOS 平台部分：虚拟窗口宿主、sheet、窗口事实、开发快照、视频视图 |
 | `templates/BernAppKit.swift` | macOS 平台部分，从原来的 `BernRuntime.swift` 分出，行为不变 |
 

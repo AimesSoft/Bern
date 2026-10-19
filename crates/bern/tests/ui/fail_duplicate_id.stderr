@@ -1,0 +1,5 @@
+error: control id `go` is used twice in this component
+  --> tests/ui/fail_duplicate_id.rs:24:20
+   |
+24 |         Button(id: go, label: tr! { "en" => "Add two" }) => app.add(2)
+   |                    ^^

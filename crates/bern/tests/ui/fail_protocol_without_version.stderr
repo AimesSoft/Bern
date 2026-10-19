@@ -1,0 +1,7 @@
+error: the protocol needs `version = N`
+ --> tests/ui/fail_protocol_without_version.rs:1:1
+  |
+1 | #[bern::protocol(namespace = "demo")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `bern::protocol` (in Nightly builds, run with -Z macro-backtrace for more info)

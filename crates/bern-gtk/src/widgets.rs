@@ -2347,14 +2347,21 @@ pub fn label_of(enum_name: &str, variant: u32, fields: &[Value]) -> String {
         return String::new();
     };
     let key = crate::protocol::label_key(enum_name, &variant.name);
-    let Some(label) = variant.label.as_ref().filter(|label| !label.params.is_empty()) else {
+    let Some(label) = variant
+        .label
+        .as_ref()
+        .filter(|label| !label.params.is_empty())
+    else {
         return tr(&key);
     };
     let args: Vec<(&str, crate::protocol::format::Arg)> = label
         .params
         .iter()
         .filter_map(|param| {
-            let at = variant.fields.iter().position(|field| field.name == *param)?;
+            let at = variant
+                .fields
+                .iter()
+                .position(|field| field.name == *param)?;
             let value = fields.get(at)?;
             let arg = match &variant.fields[at].ty {
                 crate::protocol::Type::Record { name }
@@ -2369,4 +2376,43 @@ pub fn label_of(enum_name: &str, variant: u32, fields: &[Value]) -> String {
         })
         .collect();
     text::fmt(&key, &args)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::tests::{app, start, unit_enum};
+
+    #[test]
+    fn text_styles_map_to_libadwaita_classes() {
+        for (style, class) in [
+            (Some("large_title"), "title-1"),
+            (Some("title"), "title-2"),
+            (Some("title2"), "title-3"),
+            (Some("title3"), "title-4"),
+            (Some("headline"), "heading"),
+            (Some("subheadline"), "heading"),
+            (Some("footnote"), "caption"),
+            (Some("caption2"), "caption"),
+            (Some("body"), "body"),
+            (None, "body"),
+        ] {
+            assert_eq!(style_class(style), class, "{style:?}");
+        }
+    }
+
+    #[test]
+    fn values_show_as_text_or_by_their_enum_label() {
+        let mut def = app();
+        def.types.enums = vec![unit_enum("Mood", &["Calm", "Busy"])];
+        def.strings = &[("en", &[("Mood.Busy", "Busy now")])];
+        start(def);
+        assert_eq!(display(&Value::unit_variant(1), Some("Mood")), "Busy now");
+        // Without a translation, the label is its key.
+        assert_eq!(display(&Value::unit_variant(0), Some("Mood")), "Mood.Calm");
+        assert_eq!(display(&Value::Float(2.0), Some("Mood")), "2");
+        assert_eq!(display(&Value::unit_variant(1), None), "");
+        assert_eq!(label("Mood", 7), "");
+        assert_eq!(label("Weather", 0), "");
+    }
 }

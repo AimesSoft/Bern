@@ -1,0 +1,5 @@
+error: translations are display text and cannot be used as values
+  --> tests/ui/fail_tr_as_value.rs:22:73
+   |
+22 |     ui! { Button(id: go, label: tr! { "en" => "Rename" }) => app.rename(tr! { "en" => "New" }) }
+   |                                                                         ^^

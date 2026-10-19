@@ -1,0 +1,5 @@
+error: a label shows its variant's fields by name, such as `{title}`; it takes no `; name: value` arguments
+ --> tests/ui/fail_label_interpolation.rs:7:17
+  |
+7 |         #[label(tr! { "en" => "{times}× faster"; times: 2 })]
+  |                 ^^

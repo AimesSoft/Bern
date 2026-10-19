@@ -774,46 +774,6 @@ pub(crate) fn check_swiftui(
             }
         }
     };
-    fn walk(node: &Node, parent: Option<&str>, visit: &mut dyn FnMut(&Node, Option<&str>)) {
-        visit(node, parent);
-        let name = match node {
-            Node::Element(element) => Some(element.kind.as_str()),
-            _ => parent,
-        };
-        match node {
-            Node::Element(element) => {
-                for child in &element.children {
-                    walk(child, name, visit);
-                }
-            }
-            Node::If(node) => {
-                for child in node
-                    .branches
-                    .iter()
-                    .flat_map(|(_, body)| body)
-                    .chain(&node.otherwise)
-                {
-                    walk(child, name, visit);
-                }
-            }
-            Node::IfLet(node) => {
-                for child in node.then.iter().chain(&node.otherwise) {
-                    walk(child, name, visit);
-                }
-            }
-            Node::Match(node) => {
-                for child in node.arms.iter().flat_map(|arm| &arm.body) {
-                    walk(child, name, visit);
-                }
-            }
-            Node::Component(_) => {}
-        }
-    }
-    for component in &app.components {
-        walk(&component.body, None, &mut visit);
-    }
-    for window in &app.windows.windows {
-        walk(&window.content, None, &mut visit);
-    }
+    app.walk(&mut visit);
     diagnostics
 }

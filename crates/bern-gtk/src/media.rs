@@ -1161,3 +1161,170 @@ fn control_bar(ctx: &Ctx, id: &str, player: &str) -> gtk::Box {
     bar.append(&volume);
     bar
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `MediaPlayer` record as the hub sends it, 1:05 into its source.
+    fn player(id: &str, phase: Phase, source: Option<&str>, duration_ms: Option<i64>) -> Value {
+        let source = source.map_or(Value::none(), |url| {
+            Value::some(Value::Record(vec![Value::Text(url.into())]))
+        });
+        let duration = duration_ms.map_or(Value::none(), |ms| Value::some(Value::Int(ms)));
+        Value::Record(vec![
+            Value::Text(id.into()),
+            Value::Text("application".into()),
+            Value::Bool(false),
+            source,
+            Value::Int(1),
+            Value::unit_variant(phase.index()),
+            Value::Int(65_000),
+            duration,
+            Value::Bool(true),
+            Value::Float(0.5),
+            Value::Bool(false),
+            Value::none(),
+            Value::Int(1),
+            Value::none(),
+        ])
+    }
+
+    fn state(value: &Value) -> PlayerState {
+        PlayerState::from_value(value).expect("a player").1
+    }
+
+    #[test]
+    fn times_show_minutes_and_hours() {
+        assert_eq!(time(0), "0:00");
+        assert_eq!(time(59_999), "0:59");
+        assert_eq!(time(61_000), "1:01");
+        assert_eq!(time(3_599_000), "59:59");
+        assert_eq!(time(3_661_000), "1:01:01");
+        assert_eq!(time(-5_000), "0:00");
+    }
+
+    #[test]
+    fn errors_keep_their_first_line_without_the_element() {
+        assert_eq!(
+            summary(
+                "Error from element /GstPlayBin:playbin0/GstURIDecodeBin:uridecodebin0: Resource not found.\n../gst/playback/gsturidecodebin.c(1431): debug"
+            ),
+            "Resource not found."
+        );
+        assert_eq!(
+            summary("\n  \n Could not open file \nmore detail"),
+            "Could not open file"
+        );
+        assert_eq!(summary(""), "");
+    }
+
+    #[test]
+    fn sources_give_their_url() {
+        let source = Value::Record(vec![Value::Text("file:///a.mp4".into())]);
+        assert_eq!(url_of(&source).as_deref(), Some("file:///a.mp4"));
+        assert_eq!(
+            url_of(&Value::some(source)).as_deref(),
+            Some("file:///a.mp4")
+        );
+        assert_eq!(url_of(&Value::none()), None);
+        assert_eq!(url_of(&Value::Text("file:///a.mp4".into())), None);
+        assert_eq!(url_of(&Value::Record(vec![Value::Int(1)])), None);
+    }
+
+    #[test]
+    fn player_records_decode_by_field() {
+        let record = player("main", Phase::Playing, Some("file:///a.mp4"), Some(180_000));
+        let (id, decoded) = PlayerState::from_value(&record).expect("a player");
+        assert_eq!(id, "main");
+        assert_eq!(
+            decoded,
+            PlayerState {
+                source: Some("file:///a.mp4".into()),
+                phase: Phase::Playing.index(),
+                position_ms: 65_000,
+                duration_ms: Some(180_000),
+                seekable: true,
+                volume: 0.5,
+                muted: false,
+                error: None,
+            }
+        );
+        // Missing fields read as neutral values, and no phase as
+        // unavailable.
+        let short = state(&Value::Record(vec![Value::Text("p".into())]));
+        assert!(short.is(Phase::Unavailable));
+        assert_eq!((short.source, short.volume), (None, 1.0));
+        assert_eq!(PlayerState::from_value(&Value::Text("p".into())), None);
+    }
+
+    #[test]
+    fn phases_decide_what_the_controls_offer() {
+        let source = Some("file:///a.mp4");
+        let playing = state(&player("p", Phase::Playing, source, Some(1000)));
+        assert!(playing.playing() && playing.playable() && playing.seekable());
+        assert!(playing.shows_frames());
+        assert!(state(&player("p", Phase::Buffering, source, Some(1000))).playing());
+        let paused = state(&player("p", Phase::Paused, source, Some(1000)));
+        assert!(!paused.playing() && paused.seekable());
+        // Without a duration, as for live media, there is nowhere to seek.
+        assert!(!state(&player("p", Phase::Playing, source, None)).seekable());
+        assert!(!state(&player("p", Phase::Ready, None, Some(1000))).playable());
+        for phase in [Phase::Idle, Phase::Failed, Phase::Unavailable] {
+            let shown = state(&player("p", phase, source, Some(1000)));
+            assert!(
+                !shown.playable() && !shown.seekable() && !shown.shows_frames(),
+                "{phase:?}"
+            );
+        }
+        assert!(state(&player("p", Phase::Loading, source, None)).controllable());
+        assert!(!state(&player("p", Phase::Unavailable, source, None)).controllable());
+    }
+
+    #[test]
+    fn players_describe_their_phase_and_time() {
+        assert_eq!(
+            state(&player("p", Phase::Playing, Some("x"), Some(10_800_000))).describe(),
+            "Playing 1:05 / 3:00:00"
+        );
+        assert_eq!(
+            state(&player("p", Phase::Paused, Some("x"), None)).describe(),
+            "Paused 1:05 / --:--"
+        );
+        let mut unknown = state(&player("p", Phase::Ready, None, None));
+        unknown.phase = 42;
+        assert_eq!(unknown.describe(), "Unavailable 1:05 / --:--");
+    }
+
+    #[test]
+    fn hub_states_replace_the_players_by_revision() {
+        let (types, _) = media_catalog();
+        let ty = Type::Record {
+            name: "MediaPlayer".into(),
+        };
+        let snapshot = |revision: u64, players: &[Value]| {
+            let mut writer = Writer::new();
+            writer.u64(revision);
+            writer.u32(players.len() as u32);
+            for player in players {
+                encode(player, &ty, &types, &mut writer);
+            }
+            writer.bytes
+        };
+        receive_state(&snapshot(
+            2,
+            &[
+                player("a", Phase::Playing, Some("x"), None),
+                player("b", Phase::Paused, Some("y"), None),
+            ],
+        ));
+        assert!(peek_state("a").is_some_and(|state| state.is(Phase::Playing)));
+        assert!(peek_state("b").is_some());
+        // An older revision is ignored; a newer one is the whole set.
+        receive_state(&snapshot(1, &[player("a", Phase::Ended, Some("x"), None)]));
+        assert!(peek_state("a").is_some_and(|state| state.is(Phase::Playing)));
+        receive_state(&snapshot(3, &[player("a", Phase::Ended, Some("x"), None)]));
+        assert!(peek_state("a").is_some_and(|state| state.is(Phase::Ended)));
+        assert_eq!(peek_state("b"), None);
+    }
+}

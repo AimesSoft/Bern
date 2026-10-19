@@ -1,0 +1,5 @@
+error: error[B104]: argument `name` is not used by any translation
+  --> tests/ui/fail_tr_unused_argument.rs:22:48
+   |
+22 |     ui! { Text(content: tr! { "en" => "Hello"; name: app.title }) }
+   |                                                ^^^^

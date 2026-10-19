@@ -1,6 +1,22 @@
 use bern_target_api::{BuildContext, Framework, Target};
 use std::path::{Path, PathBuf};
 
+/// Point the Android target at an empty SDK, NDK and Gradle below `dir`.
+/// Planning only names the tools' paths, so the build plan is the same
+/// with or without Android Studio on the computer running the tests.
+fn fake_android_tools(dir: &Path) {
+    let sdk = dir.join("sdk");
+    let ndk = sdk.join("ndk/29.0.0");
+    std::fs::create_dir_all(&ndk).unwrap();
+    // SAFETY: this file's only test sets these before planning, and no
+    // other thread reads the environment meanwhile.
+    unsafe {
+        std::env::set_var("ANDROID_HOME", &sdk);
+        std::env::set_var("ANDROID_NDK_HOME", &ndk);
+        std::env::set_var("BERN_GRADLE", dir.join("gradle"));
+    }
+}
+
 #[test]
 fn animated_svg_generates_for_every_presenter() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -85,6 +101,7 @@ fn animated_svg_generates_for_every_presenter() {
         );
         if name == "android" {
             assert!(source.contains("assets.open(\"bern/resources/$source\")"));
+            fake_android_tools(&root.join("target/svg-generation-test/android-tools"));
             let plan = target.plan(&compiled.app, &context).unwrap();
             assert!(
                 plan.steps.iter().any(|step| matches!(step,

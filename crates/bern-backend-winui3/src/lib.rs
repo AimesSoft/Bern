@@ -16,7 +16,6 @@ mod cpp;
 mod glue;
 mod icons;
 mod installer;
-mod strings;
 mod style;
 
 use bern_ir::spec::COMPONENTS;
@@ -186,18 +185,7 @@ fn component_names() -> &'static [&'static str] {
 
 /// Directory name of the product, e.g. `Showcase` for app id `showcase`.
 pub fn product_name(app: &Application) -> String {
-    app.app
-        .id
-        .split(['_', '-'])
-        .filter(|part| !part.is_empty())
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().chain(chars).collect::<String>(),
-                None => String::new(),
-            }
-        })
-        .collect()
+    bern_target_api::names::pascal(&app.app.id)
 }
 
 fn executable(app: &Application) -> String {
@@ -265,7 +253,7 @@ impl Target for WinUi3Windows {
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
         let mut diagnostics = check_common(self, app);
-        let framework = strings::framework_languages();
+        let framework = bern_target_api::texts::framework_languages();
         for language in &app.languages.supported {
             if !framework.contains(&language.as_str()) {
                 diagnostics.push(Diagnostic::error(format!(

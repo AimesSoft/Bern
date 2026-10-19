@@ -112,12 +112,7 @@ fn push_text(pieces: &mut Vec<Piece>, c: char) {
 }
 
 /// Pieces up to the end, or up to the `}` closing a plural branch.
-fn message(
-    chars: &[char],
-    at: &mut usize,
-    branch: bool,
-    text: &str,
-) -> Result<Vec<Piece>, String> {
+fn message(chars: &[char], at: &mut usize, branch: bool, text: &str) -> Result<Vec<Piece>, String> {
     let mut pieces = Vec::new();
     while *at < chars.len() {
         let c = chars[*at];
@@ -167,7 +162,11 @@ fn word(chars: &[char], at: &mut usize, stops: &[char]) -> String {
     while *at < chars.len() && !stops.contains(&chars[*at]) {
         *at += 1;
     }
-    chars[start..*at].iter().collect::<String>().trim().to_string()
+    chars[start..*at]
+        .iter()
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn valid_name(name: &str) -> bool {
@@ -209,7 +208,9 @@ fn placeholder(chars: &[char], at: &mut usize, text: &str) -> Result<Piece, Stri
                                 break;
                             }
                             None => {
-                                return Err(format!("unclosed `{{{name}, plural, …` in \"{text}\""));
+                                return Err(format!(
+                                    "unclosed `{{{name}, plural, …` in \"{text}\""
+                                ));
                             }
                             _ => {}
                         }
@@ -251,10 +252,13 @@ fn placeholder(chars: &[char], at: &mut usize, text: &str) -> Result<Piece, Stri
                     }
                     *at += 1;
                     if pattern.is_empty() {
-                        return Err(format!("`{{{name}, {kind}, …}}` needs a pattern in \"{text}\""));
+                        return Err(format!(
+                            "`{{{name}, {kind}, …}}` needs a pattern in \"{text}\""
+                        ));
                     }
                     if kind == "date" {
-                        check_date(&pattern).map_err(|problem| format!("{problem} in \"{text}\""))?;
+                        check_date(&pattern)
+                            .map_err(|problem| format!("{problem} in \"{text}\""))?;
                         Ok(Piece::Date { name, pattern })
                     } else {
                         check_duration(&pattern)
@@ -376,9 +380,16 @@ pub fn missing_plurals(pieces: &[Piece], language: &str) -> Vec<String> {
 pub enum Arg {
     Text(String),
     /// A number, and the way Bern writes it.
-    Number { value: f64, text: String },
+    Number {
+        value: f64,
+        text: String,
+    },
     /// A calendar date: year, month 1–12, day 1–31.
-    Date { year: i64, month: i64, day: i64 },
+    Date {
+        year: i64,
+        month: i64,
+        day: i64,
+    },
 }
 
 /// The day of the week of a date, 0 for Monday.
@@ -522,7 +533,10 @@ pub fn format(
                     }
                     None => {}
                 },
-                Piece::Plural { name: key, branches } => {
+                Piece::Plural {
+                    name: key,
+                    branches,
+                } => {
                     let (value, text) = number(arg(key));
                     let exact = format!("={value}");
                     let category = plural_category(language, value);
@@ -575,21 +589,39 @@ pub fn date_names() -> Vec<(String, Vec<(&'static str, String)>)> {
             "zh-Hans",
             ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
             [
-                "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日",
+                "星期一",
+                "星期二",
+                "星期三",
+                "星期四",
+                "星期五",
+                "星期六",
+                "星期日",
             ],
         ),
         (
             "zh-Hant",
             ["週一", "週二", "週三", "週四", "週五", "週六", "週日"],
             [
-                "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日",
+                "星期一",
+                "星期二",
+                "星期三",
+                "星期四",
+                "星期五",
+                "星期六",
+                "星期日",
             ],
         ),
         (
             "ja",
             ["月", "火", "水", "木", "金", "土", "日"],
             [
-                "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日", "日曜日",
+                "月曜日",
+                "火曜日",
+                "水曜日",
+                "木曜日",
+                "金曜日",
+                "土曜日",
+                "日曜日",
             ],
         ),
     ];
@@ -611,7 +643,17 @@ pub fn date_names() -> Vec<(String, Vec<(&'static str, String)>)> {
         "December",
     ];
     const MONTHS_ZH_LONG: [&str; 12] = [
-        "一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月",
+        "一月",
+        "二月",
+        "三月",
+        "四月",
+        "五月",
+        "六月",
+        "七月",
+        "八月",
+        "九月",
+        "十月",
+        "十一月",
         "十二月",
     ];
     let mut names = Vec::new();
@@ -735,7 +777,10 @@ mod tests {
         assert_eq!(show(text, "en", &[("n", n(1.0))]), "1 episode");
         assert_eq!(show(text, "en", &[("n", n(12.0))]), "12 episodes");
         assert_eq!(show(text, "en", &[("n", n(0.0))]), "no episodes");
-        assert_eq!(show("共 {n, plural, other {# 话}}", "zh-Hans", &[("n", n(1.0))]), "共 1 话");
+        assert_eq!(
+            show("共 {n, plural, other {# 话}}", "zh-Hans", &[("n", n(1.0))]),
+            "共 1 话"
+        );
         let pieces = parse("{n, plural, other {# episodes}}").unwrap();
         assert_eq!(missing_plurals(&pieces, "en"), vec!["`one` of `n`"]);
         assert!(missing_plurals(&pieces, "zh-Hans").is_empty());

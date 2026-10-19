@@ -1,0 +1,5 @@
+error: error[B104]: placeholder `{name}` has no argument; add `; name: value`
+  --> tests/ui/fail_tr_missing_argument.rs:22:31
+   |
+22 |     ui! { Text(content: tr! { "en" => "Hello, {name}" }) }
+   |                               ^^^^

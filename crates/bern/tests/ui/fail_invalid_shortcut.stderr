@@ -1,0 +1,5 @@
+error: shortcut "cmd+option+a": `option` is not a modifier; use cmd, ctrl, alt or shift
+  --> tests/ui/fail_invalid_shortcut.rs:22:67
+   |
+22 |     ui! { Button(id: add, label: tr! { "en" => "Add" }, shortcut: "cmd+option+a") => app.add(1) }
+   |                                                                   ^^^^^^^^^^^^^^

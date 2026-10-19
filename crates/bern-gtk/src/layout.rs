@@ -287,6 +287,40 @@ pub struct Placement {
     pub(crate) to: Cell<f64>,
 }
 
+/// The start and length along a rail of `length` of a child placed by
+/// `placement`, whose own length is `natural`; the scale runs `past` beyond
+/// both ends, and `anchor` is the point of an `at` child on its fraction. A
+/// child without a placement spans the rail.
+fn span(
+    placement: Option<&Placement>,
+    length: f64,
+    past: f64,
+    anchor: f64,
+    natural: i32,
+) -> (f64, f64) {
+    let fraction = |value: f64| {
+        if value.is_finite() {
+            value.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    };
+    let scale = length + 2.0 * past;
+    match placement {
+        Some(placement) => match placement.at.get() {
+            Some(at) => {
+                let size = natural.max(0) as f64;
+                (fraction(at) * scale - past - anchor * size, size)
+            }
+            None => {
+                let (a, b) = (fraction(placement.from.get()), fraction(placement.to.get()));
+                (a.min(b) * scale - past, (b - a).abs() * scale)
+            }
+        },
+        None => (0.0, length),
+    }
+}
+
 mod rail {
     use super::*;
 
@@ -364,20 +398,10 @@ mod rail {
             } else {
                 (width as f64, height_or(height))
             };
-            // The scale: the rail's length and the overhang past both ends.
-            let past = self.overhang.get();
-            let scale = length + 2.0 * past;
             let (along, across) = if vertical {
                 (gtk::Orientation::Vertical, gtk::Orientation::Horizontal)
             } else {
                 (gtk::Orientation::Horizontal, gtk::Orientation::Vertical)
-            };
-            let fraction = |value: f64| {
-                if value.is_finite() {
-                    value.clamp(0.0, 1.0)
-                } else {
-                    0.0
-                }
             };
             for child in children(self.obj().upcast_ref()) {
                 if !child.should_layout() {
@@ -393,20 +417,13 @@ mod rail {
                     natural_across as f64
                 };
                 let start_across = (thickness - size_across) / 2.0;
-                let (start, size) = match placement.as_deref() {
-                    Some(placement) => match placement.at.get() {
-                        Some(at) => {
-                            let size = natural_along.max(0) as f64;
-                            (fraction(at) * scale - past - self.anchor.get() * size, size)
-                        }
-                        None => {
-                            let (a, b) =
-                                (fraction(placement.from.get()), fraction(placement.to.get()));
-                            (a.min(b) * scale - past, (b - a).abs() * scale)
-                        }
-                    },
-                    None => (0.0, length),
-                };
+                let (start, size) = span(
+                    placement.as_deref(),
+                    length,
+                    self.overhang.get(),
+                    self.anchor.get(),
+                    natural_along,
+                );
                 let (x, y, w, h) = if vertical {
                     (start_across, start, size_across, size)
                 } else {
@@ -1051,5 +1068,74 @@ impl Words {
         let words: Self = glib::Object::new();
         child.as_ref().set_parent(&words);
         words
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(fraction: f64) -> Placement {
+        let placement = Placement::default();
+        placement.at.set(Some(fraction));
+        placement
+    }
+
+    fn between(from: f64, to: f64) -> Placement {
+        let placement = Placement::default();
+        placement.from.set(from);
+        placement.to.set(to);
+        placement
+    }
+
+    #[test]
+    fn children_without_a_placement_span_the_rail() {
+        assert_eq!(span(None, 300.0, 0.0, 0.5, 40), (0.0, 300.0));
+    }
+
+    #[test]
+    fn children_at_a_fraction_stand_on_the_anchor() {
+        assert_eq!(span(Some(&at(0.25)), 200.0, 0.0, 0.0, 20), (50.0, 20.0));
+        assert_eq!(span(Some(&at(0.25)), 200.0, 0.0, 0.5, 20), (40.0, 20.0));
+        assert_eq!(span(Some(&at(1.0)), 200.0, 0.0, 1.0, 20), (180.0, 20.0));
+        // Fractions past the ends clamp to them, one that is not a number
+        // is the start; the child may reach past the rail.
+        assert_eq!(span(Some(&at(1.5)), 200.0, 0.0, 0.5, 20), (190.0, 20.0));
+        assert_eq!(
+            span(Some(&at(f64::NAN)), 200.0, 0.0, 0.5, 20),
+            (-10.0, 20.0)
+        );
+        // A child that measures nothing has no length.
+        assert_eq!(span(Some(&at(0.5)), 200.0, 0.0, 0.5, -1), (100.0, 0.0));
+    }
+
+    #[test]
+    fn an_overhang_runs_the_scale_past_both_ends() {
+        // 0 stands 50 before the start and 1 50 past the end.
+        assert_eq!(span(Some(&at(0.0)), 200.0, 50.0, 0.0, 20), (-50.0, 20.0));
+        assert_eq!(span(Some(&at(0.5)), 200.0, 50.0, 0.5, 20), (90.0, 20.0));
+        assert_eq!(span(Some(&at(1.0)), 200.0, 50.0, 1.0, 20), (230.0, 20.0));
+        assert_eq!(
+            span(Some(&between(0.25, 0.75)), 200.0, 50.0, 0.5, 20),
+            (25.0, 150.0)
+        );
+        // A child without a placement still spans the rail itself.
+        assert_eq!(span(None, 200.0, 50.0, 0.5, 20), (0.0, 200.0));
+    }
+
+    #[test]
+    fn children_between_fractions_fill_the_range() {
+        assert_eq!(
+            span(Some(&between(0.25, 0.75)), 200.0, 0.0, 0.5, 20),
+            (50.0, 100.0)
+        );
+        assert_eq!(
+            span(Some(&between(0.75, 0.25)), 200.0, 0.0, 0.5, 20),
+            (50.0, 100.0)
+        );
+        assert_eq!(
+            span(Some(&between(-0.5, 2.0)), 200.0, 0.0, 0.5, 20),
+            (0.0, 200.0)
+        );
     }
 }

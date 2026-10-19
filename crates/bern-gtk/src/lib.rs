@@ -31,12 +31,12 @@ mod session;
 mod snapshot;
 mod structure;
 pub mod style;
+#[cfg(feature = "svg")]
+mod svg;
 pub mod text;
 pub mod theme;
 pub mod value;
 mod widgets;
-#[cfg(feature = "svg")]
-mod svg;
 #[cfg(feature = "svg")]
 pub use svg::{Svg, SvgProps};
 mod windows;

@@ -1649,3 +1649,45 @@ pub(crate) fn rounded(
     });
     clip
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::tests::{app, start};
+
+    #[test]
+    fn extensions_come_from_the_last_path_segment() {
+        assert_eq!(extension_of("file:///home/me/Movie.MP4"), "mp4");
+        assert_eq!(
+            extension_of("https://example.com/a/b.tar.gz?download=1#top"),
+            "gz"
+        );
+        assert_eq!(extension_of("file:///home/me.d/README"), "");
+        assert_eq!(extension_of("file:///home/me/notes."), "");
+    }
+
+    #[test]
+    fn files_are_taken_by_kind_or_extension() {
+        let mut def = app();
+        def.file_kinds = &[("video", &["mp4", "mkv"]), ("subtitles", &["srt", "vtt"])];
+        start(def);
+        assert!(accepts("file:///a/Film.MKV", "video"));
+        assert!(accepts("file:///a/film.vtt", "video, subtitles"));
+        assert!(accepts("file:///a/film.vtt", "video subtitles"));
+        assert!(accepts("file:///a/notes.txt", ".md .txt"));
+        assert!(accepts("file:///a/anything", "any"));
+        assert!(!accepts("file:///a/film.avi", "video subtitles"));
+        assert!(!accepts("file:///a/film.mp4", "audio"));
+        assert!(!accepts("file:///a/photos", "folder"));
+        assert!(!accepts("file:///a/film.mp4", ""));
+    }
+
+    #[test]
+    fn media_sources_hold_their_url() {
+        let source = media_source("file:///a/film.mp4".into());
+        assert_eq!(
+            crate::media::url_of(&source).as_deref(),
+            Some("file:///a/film.mp4")
+        );
+    }
+}

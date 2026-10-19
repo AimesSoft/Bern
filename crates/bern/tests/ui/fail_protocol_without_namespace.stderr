@@ -1,0 +1,7 @@
+error: the protocol needs `namespace = "…"`
+ --> tests/ui/fail_protocol_without_namespace.rs:1:1
+  |
+1 | #[bern::protocol(version = 1)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `bern::protocol` (in Nightly builds, run with -Z macro-backtrace for more info)

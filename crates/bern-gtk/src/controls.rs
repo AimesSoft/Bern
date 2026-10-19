@@ -57,19 +57,23 @@ pub(crate) fn register(
     enabled: Option<Rc<dyn Fn() -> bool>>,
     actions: Actions,
 ) {
-    let token = NEXT.with(|next| {
-        let token = next.get();
-        next.set(token + 1);
-        token
-    });
-    let entry = Entry {
+    mount(Entry {
         target: ctx.target(id),
         win: Rc::downgrade(ctx.win()),
         role,
         label,
         enabled,
         actions,
-    };
+    });
+}
+
+/// Mount `entry` until the current scope ends.
+pub(crate) fn mount(entry: Entry) {
+    let token = NEXT.with(|next| {
+        let token = next.get();
+        next.set(token + 1);
+        token
+    });
     CONTROLS.with(|controls| controls.borrow_mut().insert(token, entry));
     on_cleanup(move || {
         CONTROLS.with(|controls| controls.borrow_mut().remove(&token));
@@ -91,4 +95,39 @@ pub(crate) fn find(ctx: &Ctx, id: &str) -> Option<Entry> {
             .find(|entry| entry.target == target)
             .cloned()
     })
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::reactive::Scope;
+
+    /// A control of no window, with nothing to do yet.
+    pub(crate) fn entry(target: &str, role: &'static str) -> Entry {
+        Entry {
+            target: target.into(),
+            win: Weak::new(),
+            role,
+            label: None,
+            enabled: None,
+            actions: Actions::default(),
+        }
+    }
+
+    fn targets() -> Vec<String> {
+        entries().into_iter().map(|entry| entry.target).collect()
+    }
+
+    #[test]
+    fn controls_stay_mounted_while_their_scope_lasts() {
+        let (first, second) = (Scope::detached(), Scope::detached());
+        first.run(|| mount(entry("main/save", "button")));
+        second.run(|| mount(entry("main/quit", "button")));
+        first.run(|| mount(entry("main/undo", "button")));
+        assert_eq!(targets(), ["main/save", "main/quit", "main/undo"]);
+        first.dispose();
+        assert_eq!(targets(), ["main/quit"]);
+        second.dispose();
+        assert!(entries().is_empty());
+    }
 }

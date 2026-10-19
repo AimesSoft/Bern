@@ -1,0 +1,5 @@
+error: components cannot be generic or async
+  --> tests/ui/fail_component_generic.rs:21:4
+   |
+21 | fn page<T>(app: demo::Client) -> impl View {
+   |    ^^^^

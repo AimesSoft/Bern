@@ -386,3 +386,94 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::tests::{app, start};
+    use crate::protocol::TypeTable;
+
+    /// A query state: its version and phase, then what `rest` writes.
+    fn answer(version: u64, phase: u8, rest: impl FnOnce(&mut Writer)) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.u64(version);
+        writer.u8(phase);
+        rest(&mut writer);
+        writer.bytes
+    }
+
+    #[test]
+    fn query_states_carry_data_by_phase() {
+        start(app());
+        let list = Type::list(Type::Int);
+        let items = Value::List(vec![Value::Int(4), Value::Int(2)]);
+        let write_items = |writer: &mut Writer| {
+            encode(&items, &list, &TypeTable::default(), writer);
+        };
+        let loading = read_state(&answer(1, 1, |_| {}), &list).expect("loading");
+        assert_eq!(
+            (loading.version, loading.phase, loading.data, loading.error),
+            (1, 1, None, None)
+        );
+        let ready = read_state(&answer(2, 2, write_items), &list).expect("ready");
+        assert_eq!((ready.phase, ready.data), (2, Some(items.clone())));
+        let refreshing = read_state(&answer(3, 3, write_items), &list).expect("refreshing");
+        assert_eq!(refreshing.data, Some(items.clone()));
+        // A failure keeps the data it had, if any.
+        let failed = read_state(
+            &answer(4, 4, |writer| {
+                writer.u8(1);
+                write_items(writer);
+                writer.text("timeout");
+                writer.text("The server did not answer");
+            }),
+            &list,
+        )
+        .expect("failed");
+        assert_eq!(
+            (failed.data, failed.error),
+            (
+                Some(items.clone()),
+                Some(("timeout".into(), "The server did not answer".into()))
+            )
+        );
+        let offline = read_state(
+            &answer(5, 4, |writer| {
+                writer.u8(0);
+                writer.text("offline");
+                writer.text("No network");
+            }),
+            &list,
+        )
+        .expect("failed");
+        assert_eq!(offline.data, None);
+    }
+
+    #[test]
+    fn truncated_query_states_are_dropped() {
+        start(app());
+        let list = Type::list(Type::Int);
+        assert!(read_state(&answer(1, 2, |_| {}), &list).is_none());
+        assert!(read_state(&answer(1, 4, |writer| writer.u8(0)), &list).is_none());
+        assert!(read_state(&[], &list).is_none());
+    }
+
+    #[test]
+    fn empty_results_show_the_empty_state() {
+        let list = Type::list(Type::Int);
+        let empty = Value::List(Vec::new());
+        assert_eq!(shown(&empty, &list, true), None);
+        assert_eq!(shown(&empty, &list, false), Some(empty.clone()));
+        let optional = Type::optional(Type::Int);
+        assert_eq!(shown(&Value::none(), &optional, false), None);
+        assert_eq!(
+            shown(&Value::some(Value::Int(3)), &optional, true),
+            Some(Value::Int(3))
+        );
+        assert_eq!(shown(&Value::Int(0), &Type::Int, true), Some(Value::Int(0)));
+        assert_eq!(count(&Value::List(vec![Value::Unit; 3])), Some(3));
+        assert_eq!(count(&Value::none()), Some(0));
+        assert_eq!(count(&Value::some(Value::Unit)), Some(1));
+        assert_eq!(count(&Value::Int(3)), None);
+    }
+}

@@ -1,0 +1,7 @@
+error: `session` takes no arguments
+ --> tests/ui/fail_session_arguments.rs:1:1
+  |
+1 | #[bern::session(window = main)]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `bern::session` (in Nightly builds, run with -Z macro-backtrace for more info)

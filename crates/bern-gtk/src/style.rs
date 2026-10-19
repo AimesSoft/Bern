@@ -418,3 +418,187 @@ pub(crate) fn apply(
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ACCENT: Color = Color::Role("accent");
+
+    fn style(name: &'static str, base: Look) -> StyleDef {
+        StyleDef {
+            name,
+            base,
+            corner: None,
+            padding: None,
+            size: None,
+            draws: true,
+            hover: None,
+            pressed: None,
+            selected: None,
+            focus: None,
+            disabled: None,
+            settle: None,
+        }
+    }
+
+    #[test]
+    fn sizes_set_height_padding_and_font() {
+        assert_eq!(
+            size_declarations("small"),
+            "min-height: 24px; padding: 2px 10px; font-size: smaller; "
+        );
+        assert!(size_declarations("extra_large").starts_with("min-height: 52px; "));
+        assert_eq!(size_declarations("regular"), "");
+    }
+
+    #[test]
+    fn shadows_and_indicators_share_the_box_shadow() {
+        let shadow = Look {
+            shadow: Some((8.0, 2.0, 0.2)),
+            ..Look::NONE
+        };
+        assert_eq!(
+            shadows(&shadow, None).as_deref(),
+            Some("0 2px 8px rgba(0, 0, 0, 0.2)")
+        );
+        let bar = |edge| Look {
+            indicator: Some((ACCENT, edge, 3.0)),
+            ..Look::NONE
+        };
+        for (edge, offset) in [
+            (Edge::Leading, "3px 0"),
+            (Edge::Trailing, "-3px 0"),
+            (Edge::Top, "0 3px"),
+            (Edge::Bottom, "0 -3px"),
+        ] {
+            assert_eq!(
+                shadows(&bar(edge), None),
+                Some(format!("inset {offset} 0 0 @accent_bg_color"))
+            );
+        }
+        let both = Look {
+            shadow: shadow.shadow,
+            ..bar(Edge::Leading)
+        };
+        assert_eq!(
+            shadows(&both, None).as_deref(),
+            Some("0 2px 8px rgba(0, 0, 0, 0.2), inset 3px 0 0 0 @accent_bg_color")
+        );
+        assert_eq!(shadows(&Look::NONE, None), None);
+    }
+
+    #[test]
+    fn looks_declare_fill_text_and_border() {
+        let accent = Look {
+            background: Some(ACCENT),
+            border: Some((Color::Role("control.border"), 1.0)),
+            ..Look::NONE
+        };
+        assert_eq!(
+            declarations(&accent, &Look::NONE, None),
+            "background-color: @accent_bg_color; background-image: none; color: @accent_fg_color; border: 1px solid alpha(@window_fg_color, 0.15); "
+        );
+        // A selected fill covers the background; a foreground of its own
+        // wins over the fill's pair.
+        let selected = Look {
+            background: Some(Color::Role("surface.panel")),
+            fill: Some(Color::Role("status.error")),
+            foreground: Some(Color::Role("text.primary")),
+            ..Look::NONE
+        };
+        assert_eq!(
+            declarations(&selected, &Look::NONE, None),
+            "background-color: @error_bg_color; background-image: none; color: @window_fg_color; "
+        );
+        let panel = Look {
+            background: Some(Color::Role("surface.panel")),
+            ..Look::NONE
+        };
+        assert_eq!(
+            declarations(&panel, &Look::NONE, None),
+            "background-color: @card_bg_color; background-image: none; "
+        );
+    }
+
+    #[test]
+    fn system_and_quiet_states() {
+        let base = Look {
+            background: Some(Color::Role("surface.panel")),
+            ..Look::NONE
+        };
+        let system = Look {
+            system: true,
+            background: Some(ACCENT),
+            ..Look::NONE
+        };
+        assert_eq!(declarations(&system, &base, None), "");
+        // No feedback: the resting background, nothing drawn over it.
+        let quiet = Look {
+            quiet: true,
+            background: Some(ACCENT),
+            ..Look::NONE
+        };
+        assert_eq!(
+            declarations(&quiet, &base, None),
+            "background-color: @card_bg_color; background-image: none; box-shadow: none; "
+        );
+        assert_eq!(
+            declarations(&quiet, &Look::NONE, None),
+            "background-color: transparent; background-image: none; box-shadow: none; "
+        );
+    }
+
+    #[test]
+    fn the_sheet_has_a_rule_per_style_and_state() {
+        let mut pill = style(
+            "pill",
+            Look {
+                background: Some(ACCENT),
+                ..Look::NONE
+            },
+        );
+        pill.corner = Some(12.0);
+        pill.size = Some("small");
+        pill.padding = Some(4.0);
+        pill.hover = Some(Look {
+            background: Some(Color::Role("status.success")),
+            ..Look::NONE
+        });
+        pill.pressed = Some(Look {
+            system: true,
+            ..Look::NONE
+        });
+        let css = sheet(&[pill, style("plain", Look::NONE)], &[]);
+        let rule = |selector: &str| {
+            css.lines()
+                .find(|line| line.starts_with(&format!("{selector} {{")))
+                .map(str::to_string)
+        };
+        let base = rule(".bern-style-pill").expect("the pill's rule");
+        assert!(base.starts_with(
+            ".bern-style-pill { background-color: @accent_bg_color; background-image: none; color: @accent_fg_color; transition: "
+        ));
+        // The declared padding comes after the size's.
+        assert!(base.ends_with(
+            "border-radius: 12px; min-height: 24px; padding: 2px 10px; font-size: smaller; padding: 4px; }"
+        ));
+        assert_eq!(
+            rule(".bern-style-pill.bern-hover").as_deref(),
+            Some(
+                ".bern-style-pill.bern-hover { background-color: @success_bg_color; background-image: none; }"
+            )
+        );
+        // A state with the theme's own look adds no rule.
+        assert_eq!(rule(".bern-style-pill.bern-pressed"), None);
+        // Parts with an appearance of their own restate only the colors.
+        assert_eq!(
+            rule(".bern-appearance-dark .bern-style-pill").as_deref(),
+            Some(
+                ".bern-appearance-dark .bern-style-pill { background-color: @accent_bg_color; background-image: none; color: @accent_fg_color; }"
+            )
+        );
+        assert!(rule(".bern-style-plain").is_some_and(|rule| rule.contains("transition: ")));
+        assert_eq!(rule(".bern-appearance-light .bern-style-plain"), None);
+    }
+}

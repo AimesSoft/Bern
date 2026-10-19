@@ -886,7 +886,10 @@ impl<'a> Gen<'a> {
         // here to call.
         if action.receiver[0] == "pages" && !self.in_scope("pages") {
             if action.receiver.len() != 2 || action.method != "show" || !action.args.is_empty() {
-                self.error(action.method.span(), "page actions look like `pages.new.show()`");
+                self.error(
+                    action.method.span(),
+                    "page actions look like `pages.new.show()`",
+                );
             }
             return TokenStream::new();
         }

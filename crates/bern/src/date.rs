@@ -82,7 +82,9 @@ mod tests {
         let date = CalendarDate::new(2026, 10, 12);
         assert_eq!(date.weekday(), 0);
         let mut types = bern_protocol::TypeTable::default();
-        types.records.push(bern_protocol::format::calendar_date_def());
+        types
+            .records
+            .push(bern_protocol::format::calendar_date_def());
         date.to_value()
             .check(
                 &bern_protocol::Type::Record {

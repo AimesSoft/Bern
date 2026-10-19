@@ -1101,9 +1101,15 @@ platform = "ios"
     assert!(generated.contains(".scrollIndicators(.never)"));
     // Scroll views enter without moving themselves: a scroll view's
     // content enters on appear inside it, and a form fades below the bar.
-    let shelf = generated.split("SwiftUI.ScrollView(.horizontal) {").nth(1).unwrap();
+    let shelf = generated
+        .split("SwiftUI.ScrollView(.horizontal) {")
+        .nth(1)
+        .unwrap();
     let shelf = &shelf[..shelf.find(".scrollIndicators").unwrap()];
-    assert!(shelf.contains("SwiftUI.Group {") && shelf.contains("appear: BernAppear.fade, delay: 0.0)"), "{shelf}");
+    assert!(
+        shelf.contains("SwiftUI.Group {") && shelf.contains("appear: BernAppear.fade, delay: 0.0)"),
+        "{shelf}"
+    );
     assert!(generated.contains(".bernScrollEntrance(motion:"));
     // iOS shows the same palette: the system text field, a tap outside to
     // close.
@@ -1193,22 +1199,36 @@ fn add_tab_accessory(app: &mut bern_ir::Application) {
                         template: None,
                         children: vec![],
                         action: None,
-                        source: SourceLocation { file: "tabs.rs".into(), line: 1, column: 1 },
+                        source: SourceLocation {
+                            file: "tabs.rs".into(),
+                            line: 1,
+                            column: 1,
+                        },
                     })],
                     action: None,
-                    source: SourceLocation { file: "tabs.rs".into(), line: 1, column: 1 },
+                    source: SourceLocation {
+                        file: "tabs.rs".into(),
+                        line: 1,
+                        column: 1,
+                    },
                 }));
                 true
             }
             Node::Element(element) => element.children.iter_mut().any(into),
             Node::If(node) => {
-                node.branches.iter_mut().any(|(_, body)| body.iter_mut().any(into))
+                node.branches
+                    .iter_mut()
+                    .any(|(_, body)| body.iter_mut().any(into))
                     || node.otherwise.iter_mut().any(into)
             }
             _ => false,
         }
     }
-    assert!(app.components.iter_mut().any(|component| into(&mut component.body)));
+    assert!(
+        app.components
+            .iter_mut()
+            .any(|component| into(&mut component.body))
+    );
 }
 
 #[test]

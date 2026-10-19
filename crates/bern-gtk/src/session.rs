@@ -384,3 +384,77 @@ fn run(request: u64, index: u32, reader: &mut Reader<'_>) -> Result<(), Failure>
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::controls::mount;
+    use crate::controls::tests::entry;
+    use crate::protocol::Type;
+
+    #[test]
+    fn targets_are_found_once_and_enabled() {
+        let mut send = entry("main/send", "button");
+        send.enabled = Some(Rc::new(|| false));
+        for control in [
+            entry("main/save", "button"),
+            send,
+            entry("main/row", "row"),
+            entry("main/row", "row"),
+        ] {
+            mount(control);
+        }
+        assert_eq!(
+            find("main/save").ok().map(|entry| entry.role),
+            Some("button")
+        );
+        let code = |target| find(target).err().map(|failure| failure.code);
+        assert_eq!(code("main/missing").as_deref(), Some("target_not_found"));
+        assert_eq!(code("main/row").as_deref(), Some("target_ambiguous"));
+        assert_eq!(code("main/send").as_deref(), Some("target_unavailable"));
+    }
+
+    #[test]
+    fn inspection_lists_controls_as_the_catalog_describes_them() {
+        let mut save = entry("main/save", "button");
+        save.label = Some(Rc::new(|| "Save".to_string()));
+        let mut volume = entry("main/volume", "slider");
+        volume.enabled = Some(Rc::new(|| false));
+        volume.actions.value = Some(Rc::new(|| Some("0.5".to_string())));
+        mount(save);
+        mount(volume);
+        let (types, _) = session_catalog();
+        let rows = inspect();
+        rows.check(
+            &Type::list(Type::Record {
+                name: "ControlInfo".into(),
+            }),
+            &types,
+        )
+        .expect("ControlInfo rows");
+        let plain = |text: &str| Value::Text(text.into());
+        assert_eq!(
+            rows,
+            Value::List(vec![
+                Value::Record(vec![
+                    plain("main/save"),
+                    plain(""),
+                    plain("button"),
+                    plain("Save"),
+                    Value::Bool(true),
+                    Value::none(),
+                    Value::none(),
+                ]),
+                Value::Record(vec![
+                    plain("main/volume"),
+                    plain(""),
+                    plain("slider"),
+                    plain(""),
+                    Value::Bool(false),
+                    Value::some(plain("0.5")),
+                    Value::some(plain("disabled")),
+                ]),
+            ])
+        );
+    }
+}

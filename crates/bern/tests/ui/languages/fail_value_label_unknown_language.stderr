@@ -1,0 +1,13 @@
+error: error[B101]: language tag `jp` is not in [languages].supported (en, ja); check the spelling
+ --> tests/ui/languages/fail_value_label_unknown_language.rs:8:43
+  |
+8 |     #[label(tr! { "en" => "Oldest first", "jp" => "古い順" })]
+  |                                           ^^^^
+
+error: error[B102]: Missing translation
+       Missing language: ja
+       Required languages: en, ja
+ --> tests/ui/languages/fail_value_label_unknown_language.rs:8:13
+  |
+8 |     #[label(tr! { "en" => "Oldest first", "jp" => "古い順" })]
+  |             ^^

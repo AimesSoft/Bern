@@ -1,0 +1,7 @@
+error: error[B102]: Missing translation
+       Missing language: ja
+       Required languages: en, ja
+  --> tests/ui/languages/fail_label_missing_translation.rs:11:17
+   |
+11 |         #[label(tr! { "en" => "Slow" })]
+   |                 ^^

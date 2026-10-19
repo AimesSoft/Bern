@@ -72,3 +72,26 @@ pub(crate) fn name(icon: &str) -> &'static str {
 pub(crate) fn image(icon: &str) -> gtk::Image {
     gtk::Image::from_icon_name(name(icon))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bern_names_map_to_symbolic_theme_icons() {
+        assert_eq!(name("plus"), "list-add-symbolic");
+        assert_eq!(name("star.fill"), "starred-symbolic");
+        assert_eq!(name("no.such.icon"), "image-missing-symbolic");
+    }
+
+    #[test]
+    fn every_bern_name_is_listed_once() {
+        for (index, (bern, theme)) in ICONS.iter().enumerate() {
+            assert!(theme.ends_with("-symbolic"), "{bern}");
+            assert!(
+                !ICONS[..index].iter().any(|(earlier, _)| earlier == bern),
+                "{bern} is listed twice"
+            );
+        }
+    }
+}
