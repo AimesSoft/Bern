@@ -139,16 +139,17 @@ pub fn debian_control(
     architecture: &str,
     installed_kb: u64,
 ) -> String {
-    let name = app
-        .app
-        .name
-        .get(&app.languages.default)
-        .unwrap_or(&app.app.id)
-        .to_string();
+    let name = control_line(
+        app.app
+            .name
+            .get(&app.languages.default)
+            .unwrap_or(&app.app.id),
+    );
     let maintainer = app
         .app
         .publisher
-        .clone()
+        .as_deref()
+        .map(control_line)
         .unwrap_or_else(|| format!("{name} maintainers"));
     let mut depends = vec!["libgtk-4-1 (>= 4.14)", "libadwaita-1-0 (>= 1.5)"];
     let mut extra = String::new();
@@ -161,9 +162,32 @@ pub fn debian_control(
     }
     format!(
         "Package: {package}\nVersion: {version}\nArchitecture: {architecture}\nMaintainer: {maintainer}\nInstalled-Size: {installed_kb}\nDepends: {depends}\n{extra}Section: misc\nPriority: optional\nDescription: {name}\n Built with Bern.\n",
-        version = app.app.version,
+        version = control_line(&app.app.version),
         depends = depends.join(", "),
     )
+}
+
+/// A value for a control field that must stay on one line: `Version`,
+/// `Maintainer` and the synopsis after `Description:` cannot continue on
+/// further lines, and a line that does not start with a space starts
+/// another field. Each line break, with the white space around it, becomes
+/// one space, as a folded field reads; tabs become spaces, and other
+/// control characters are left out.
+fn control_line(text: &str) -> String {
+    text.split(['\n', '\r'])
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            line.chars()
+                .filter_map(|c| match c {
+                    '\t' => Some(' '),
+                    c if c.is_control() => None,
+                    c => Some(c),
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A file the Debian package carries besides the application, relative to
@@ -436,6 +460,53 @@ mod tests {
         // The description's second line is indented, as Debian requires.
         assert!(
             showcase.contains("\nDescription: ") && showcase.ends_with("\n Built with Bern.\n")
+        );
+    }
+
+    #[test]
+    fn debian_control_values_stay_on_their_line() {
+        let mut hello = app("hello");
+        hello
+            .app
+            .name
+            .translations
+            .insert("en".into(), "Hello\nDepends: evil\r\n\tWorld\u{7}".into());
+        hello.app.publisher = Some("Bern\n Pre-Depends: evil <bern@example.com>".into());
+        hello.app.version = "1.0\nConflicts: libc6".into();
+        let control = debian_control(&hello, "hello", "arm64", 1);
+        // Neither field may continue on another line, so line breaks are
+        // read as spaces.
+        assert!(
+            control.contains("\nDescription: Hello Depends: evil World\n Built with Bern.\n"),
+            "{control}"
+        );
+        assert!(
+            control.contains("\nMaintainer: Bern Pre-Depends: evil <bern@example.com>\n"),
+            "{control}"
+        );
+        assert!(
+            control.contains("\nVersion: 1.0 Conflicts: libc6\n"),
+            "{control}"
+        );
+        let fields: Vec<&str> = control
+            .lines()
+            .filter(|line| !line.starts_with(' '))
+            .map(|line| line.split(':').next().unwrap())
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                "Package",
+                "Version",
+                "Architecture",
+                "Maintainer",
+                "Installed-Size",
+                "Depends",
+                "Section",
+                "Priority",
+                "Description",
+            ],
+            "{control}"
         );
     }
 
