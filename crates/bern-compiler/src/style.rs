@@ -99,6 +99,16 @@ impl Lowering<'_> {
         }
     }
 
+    /// A length of 0 or more, such as a width or a radius.
+    fn length(&mut self, value: &StyleValue, what: &str) -> Option<f64> {
+        let length = self.number(value, what)?;
+        if length < 0.0 {
+            self.error(value.span(), format!("{what} is 0 or more"));
+            return None;
+        }
+        Some(length)
+    }
+
     fn color(&mut self, value: &StyleValue) -> Option<ColorRef> {
         match value {
             StyleValue::Name(_) => {
@@ -205,7 +215,22 @@ impl Lowering<'_> {
                 Some(StyleEffect::Nothing)
             }
             StyleValue::Call { name, args } => {
-                let first = args.first().map(|arg| &arg.value);
+                let kind = name.to_string();
+                // The color is the first argument without a name.
+                let first = args
+                    .iter()
+                    .find(|arg| arg.name.is_none())
+                    .map(|arg| &arg.value);
+                if first.is_none()
+                    && ["background", "foreground", "fill", "border", "indicator"]
+                        .contains(&kind.as_str())
+                {
+                    self.error(
+                        name.span(),
+                        format!("`{kind}` takes a color, such as `{kind}(accent)`"),
+                    );
+                    return None;
+                }
                 let (positional, named) = self.numbers(args);
                 let get = |key: &str| {
                     named
@@ -213,7 +238,15 @@ impl Lowering<'_> {
                         .find(|(name, _)| name == key)
                         .map(|(_, value)| *value)
                 };
-                match name.to_string().as_str() {
+                let width = |lowering: &mut Self, default: f64, what: &str| {
+                    let width = get("width").unwrap_or(default);
+                    if width < 0.0 {
+                        lowering.error(name.span(), format!("{what} is 0 or more"));
+                        return None;
+                    }
+                    Some(width)
+                };
+                match kind.as_str() {
                     "background" => Some(StyleEffect::Background {
                         color: self.color(first?)?,
                     }),
@@ -225,7 +258,7 @@ impl Lowering<'_> {
                     }),
                     "border" => Some(StyleEffect::Border {
                         color: self.color(first?)?,
-                        width: get("width").unwrap_or(1.0),
+                        width: width(self, 1.0, "a border's width")?,
                     }),
                     "indicator" => {
                         let edge = match args
@@ -246,7 +279,7 @@ impl Lowering<'_> {
                         Some(StyleEffect::Indicator {
                             color: self.color(first?)?,
                             edge,
-                            width: get("width").unwrap_or(3.0),
+                            width: width(self, 3.0, "an indicator's width")?,
                         })
                     }
                     "scale" => {
@@ -276,6 +309,10 @@ impl Lowering<'_> {
                             self.error(name.span(), "write `opacity(0.6, token)`");
                             return None;
                         };
+                        if !(0.0..=1.0).contains(&value) {
+                            self.error(name.span(), "an opacity is from 0 to 1");
+                            return None;
+                        }
                         Some(StyleEffect::Opacity {
                             value,
                             motion: self.motion(args, sheet),
@@ -494,13 +531,22 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                     let Some(color) = lowering.color(&color.value) else {
                         continue;
                     };
-                    let Some(width) = lowering.number(&width.value, "a band's width") else {
+                    let Some(width) = lowering.length(&width.value, "a band's width") else {
                         continue;
                     };
                     let opacity = match band.get(2) {
-                        Some(opacity) => lowering
-                            .number(&opacity.value, "a band's opacity")
-                            .unwrap_or(1.0),
+                        Some(opacity) => {
+                            match lowering.number(&opacity.value, "a band's opacity") {
+                                Some(value) if !(0.0..=1.0).contains(&value) => {
+                                    lowering.error(
+                                        opacity.value.span(),
+                                        "a band's opacity is from 0 to 1",
+                                    );
+                                    continue;
+                                }
+                                value => value.unwrap_or(1.0),
+                            }
+                        }
                         None => 1.0,
                     };
                     pattern.bands.push(Band {
@@ -516,10 +562,11 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                         args: gap,
                     },
                 ) if kind == "gap" => {
-                    let Some(width) = gap
-                        .first()
-                        .and_then(|width| lowering.number(&width.value, "a gap's width"))
-                    else {
+                    let Some(width) = gap.first() else {
+                        lowering.error(kind.span(), "a gap is `gap(width)`");
+                        continue;
+                    };
+                    let Some(width) = lowering.length(&width.value, "a gap's width") else {
                         continue;
                     };
                     pattern.bands.push(Band {
@@ -619,7 +666,13 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                         (Some("weight"), StyleValue::Name(path)) if path.len() == 1 => {
                             weight = Some(path[0].to_string())
                         }
-                        (Some("size"), StyleValue::Number(value, _)) => size = Some(*value),
+                        (Some("size"), StyleValue::Number(value, span)) => {
+                            if *value > 0.0 {
+                                size = Some(*value);
+                            } else {
+                                lowering.error(*span, "a text size is more than 0 points");
+                            }
+                        }
                         _ => lowering.error(
                             arg.value.span(),
                             "`font` takes `size: points` and `weight: name`",
@@ -752,10 +805,10 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             }
             let effect = match name.as_str() {
                 "corner" => lowering
-                    .number(&prop.value, "`corner`")
+                    .length(&prop.value, "`corner`")
                     .map(|radius| StyleEffect::Corner { radius }),
                 "padding" => lowering
-                    .number(&prop.value, "`padding`")
+                    .length(&prop.value, "`padding`")
                     .map(|length| StyleEffect::Padding { length }),
                 "size" => match prop.value.dotted().as_deref() {
                     Some("small") => Some(StyleEffect::Size {

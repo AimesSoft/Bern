@@ -2979,6 +2979,40 @@ fn style_rules_are_lowered_and_checked() {
             "pattern { plain: check(band(brand, 2)) }",
             "is not a color role",
         ),
+        // Effects that miss their color, and lengths and opacities out
+        // of range.
+        (
+            "Button { hover: background() }",
+            "`background` takes a color, such as `background(accent)`",
+        ),
+        (
+            "Button { hover: foreground() }",
+            "`foreground` takes a color",
+        ),
+        ("Button { hover: border() }", "`border` takes a color"),
+        ("SidebarItem { selected: fill() }", "`fill` takes a color"),
+        (
+            "SidebarItem { selected: indicator(edge: top) }",
+            "`indicator` takes a color",
+        ),
+        (
+            "Button { hover: border(accent, width: -1) }",
+            "a border's width is 0 or more",
+        ),
+        (
+            "SidebarItem { selected: indicator(accent, width: -3) }",
+            "an indicator's width is 0 or more",
+        ),
+        (
+            "Button { hover: opacity(1.5) }",
+            "an opacity is from 0 to 1",
+        ),
+        (
+            "Button { hover: opacity(-0.5) }",
+            "an opacity is from 0 to 1",
+        ),
+        ("Button { corner: -4 }", "`corner` is 0 or more"),
+        ("Button { padding: -2 }", "`padding` is 0 or more"),
     ] {
         assert_style_error(body, expected);
     }
@@ -3208,6 +3242,22 @@ fn patterns_weave_colored_bands_and_gaps() {
             "pattern { a: check(band(accent, 0)) }",
             "a pattern needs a colored band wider than zero",
         ),
+        (
+            "pattern { a: check(band(accent, 2), gap()) }",
+            "a gap is `gap(width)`",
+        ),
+        (
+            "pattern { a: check(band(accent, 2), band(accent, -2)) }",
+            "a band's width is 0 or more",
+        ),
+        (
+            "pattern { a: check(band(accent, 2), gap(-1)) }",
+            "a gap's width is 0 or more",
+        ),
+        (
+            "pattern { a: check(band(accent, 2, 1.5)) }",
+            "a band's opacity is from 0 to 1",
+        ),
     ] {
         assert_style_error(body, expected);
     }
@@ -3323,6 +3373,14 @@ fn text_styles_take_a_weight_and_a_size() {
         (
             "text { title: 700 }",
             "a text style takes a weight, such as `heavy`",
+        ),
+        (
+            "text { title: font(size: -3) }",
+            "a text size is more than 0 points",
+        ),
+        (
+            "text { title: font(size: 0, weight: bold) }",
+            "a text size is more than 0 points",
         ),
     ] {
         assert_style_error(body, expected);
