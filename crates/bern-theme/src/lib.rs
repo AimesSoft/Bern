@@ -24,7 +24,7 @@ pub use color::{Oklch, Srgb, contrast};
 pub use recipes::{RECIPES, Recipe, RecipeState};
 
 /// Version of the generation rules; a change may alter emitted colors.
-pub const ALGORITHM_VERSION: u32 = 5;
+pub const ALGORITHM_VERSION: u32 = 6;
 
 /// Version of the snapshot layout.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -147,6 +147,11 @@ const SURFACE_CHROMA: f64 = 0.005;
 const TEXT_CHROMA: f64 = 0.012;
 /// Brand roles never exceed this chroma, so a vivid seed stays legible.
 const MAX_BRAND_CHROMA: f64 = 0.20;
+/// How far (in OKLCH lightness) an accent fill may darken to carry white
+/// text, as the platforms put white on their accent fills, before a dark
+/// foreground is used instead; a light accent such as a bright green keeps
+/// its color with dark text.
+const WHITE_ON_SHIFT: f64 = 0.12;
 
 /// Status hues and chroma; the brand seed never changes them.
 const SUCCESS: (f64, f64) = (145.0, 0.15);
@@ -224,9 +229,11 @@ impl Builder {
     }
 
     /// Solve a background `name` together with the foreground `on` that
-    /// sits on it: white or a dark neutral, whichever lets the background
-    /// stay closest to `target`. `level` applies to the pair, `graphic` to
-    /// the background against `surfaces`.
+    /// sits on it: white, as the platforms put on their accent fills, when
+    /// the background reaches it within `WHITE_ON_SHIFT` of `target`'s
+    /// lightness; otherwise white or a dark neutral, whichever lets the
+    /// background stay closest to `target`. `level` applies to the pair,
+    /// `graphic` to the background against `surfaces`.
     fn solve_pair(
         &mut self,
         name: &'static str,
@@ -247,6 +254,10 @@ impl Builder {
             });
             if let Some(color) = found {
                 let distance = (color.oklch().l - target.l).abs();
+                if foreground == Srgb::WHITE && distance <= WHITE_ON_SHIFT {
+                    best = Some((distance, color, foreground));
+                    break;
+                }
                 if best.is_none_or(|(d, _, _)| distance < d - 1e-9) {
                     best = Some((distance, color, foreground));
                 }

@@ -243,3 +243,26 @@ fn print_default_palettes() {
         }
     }
 }
+
+#[test]
+fn accent_fills_carry_white_text_unless_the_accent_is_light() {
+    for mode in MODES {
+        // A red accent darkens a little to carry white text, as the
+        // platforms' accent fills do.
+        let red = generate(
+            Some(Srgb::new(0xff, 0x2e, 0x55)),
+            mode,
+            ContrastPolicy::Standard,
+        );
+        assert_eq!(red.token("on_accent"), Some(Srgb::WHITE), "{mode:?}");
+        assert!(contrast(Srgb::WHITE, red.token("accent").unwrap()) >= 4.5);
+    }
+    // In dark mode a bright green would have to turn dark to carry white:
+    // it keeps its color and takes dark text.
+    let green = generate(
+        Some(Srgb::new(0x07, 0xff, 0x94)),
+        Mode::Dark,
+        ContrastPolicy::Standard,
+    );
+    assert_ne!(green.token("on_accent"), Some(Srgb::WHITE));
+}
