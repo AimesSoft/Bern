@@ -3613,3 +3613,86 @@ fn player_scene_and_controlled_slider_validate_sources() {
     );
     compile_ui(&wrap(&body)).unwrap();
 }
+
+#[test]
+fn slide_and_grow_take_their_edge_and_distance_by_name_or_by_position() {
+    use ir::style::{Edge, TransitionKind};
+    let (sheet, diagnostics) = lower_style(
+        "transition {
+             page: slide(bottom, 12, smooth),
+             panel: slide(trailing, 24, hero),
+             named: slide(edge: trailing, distance: 24, hero),
+             mixed: slide(top, distance: 30, bouncy),
+             drop: slide(top, jelly),
+             lift: slide(leading),
+             near: slide(8, snappy),
+             unfold: grow(trailing, jelly),
+             rise: grow(top),
+         }",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let kind = |name: &str| {
+        let transition = sheet.transition(name).unwrap();
+        (transition.kind.clone(), transition.motion.as_str())
+    };
+    let slide = |edge, distance| TransitionKind::Slide { edge, distance };
+    assert_eq!(kind("page"), (slide(Edge::Bottom, 12.0), "smooth"));
+    assert_eq!(kind("panel"), (slide(Edge::Trailing, 24.0), "hero"));
+    assert_eq!(kind("named"), kind("panel"));
+    assert_eq!(kind("mixed"), (slide(Edge::Top, 30.0), "bouncy"));
+    assert_eq!(kind("drop"), (slide(Edge::Top, 16.0), "jelly"));
+    // A name alone is the edge when it is one, otherwise the token.
+    assert_eq!(kind("lift"), (slide(Edge::Leading, 16.0), "smooth"));
+    assert_eq!(kind("near"), (slide(Edge::Bottom, 8.0), "snappy"));
+    assert_eq!(
+        kind("unfold"),
+        (
+            TransitionKind::Grow {
+                edge: Edge::Trailing
+            },
+            "jelly"
+        )
+    );
+    assert_eq!(
+        kind("rise"),
+        (TransitionKind::Grow { edge: Edge::Top }, "smooth")
+    );
+
+    let not_an_edge = "is not an edge; use leading, trailing, top or bottom";
+    for (body, expected) in [
+        ("transition { a: slide(right, 24, hero) }", not_an_edge),
+        ("transition { a: slide(left, smooth) }", not_an_edge),
+        ("transition { a: grow(right, jelly) }", not_an_edge),
+        ("transition { a: grow(edge: left) }", not_an_edge),
+        (
+            "transition { a: slide(right) }",
+            "`right` is neither an edge nor a motion token",
+        ),
+        (
+            "transition { a: slide(top, 24, wobbly) }",
+            "`wobbly` is not a motion token",
+        ),
+        (
+            "transition { a: slide(bottom, -12, smooth) }",
+            "a slide's distance is 0 or more",
+        ),
+        (
+            "transition { a: slide(bottom, 12, 24, smooth) }",
+            "write `slide(bottom, 16, token)`",
+        ),
+        (
+            "transition { a: slide(edge: top, bottom, smooth) }",
+            "write `slide(bottom, 16, token)`",
+        ),
+        (
+            "transition { a: slide(top, 24, hero, jelly) }",
+            "write `slide(bottom, 16, token)`",
+        ),
+        (
+            "transition { a: grow(bottom, 12, smooth) }",
+            "write `grow(bottom, token)`",
+        ),
+    ] {
+        assert_style_error(body, expected);
+    }
+}

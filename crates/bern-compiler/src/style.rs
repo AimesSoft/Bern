@@ -11,7 +11,7 @@ use bern_ir::style::{
 use bern_ir::{SourceLocation, Srgb};
 use bern_syntax::{StyleArg, StyleItem, StyleValue};
 use bern_target_api::Diagnostic;
-use proc_macro2::Span;
+use proc_macro2::{Ident, Span};
 
 /// Platforms a rule may name in `#[target(…)]` and `#[exempt(…)]`.
 pub const PLATFORMS: [&str; 6] = ["macos", "ios", "windows", "linux", "android", "browser"];
@@ -107,6 +107,26 @@ impl Lowering<'_> {
             return None;
         }
         Some(length)
+    }
+
+    fn edge(&mut self, value: &StyleValue) -> Option<Edge> {
+        match value.dotted().as_deref() {
+            Some("leading") => Some(Edge::Leading),
+            Some("trailing") => Some(Edge::Trailing),
+            Some("top") => Some(Edge::Top),
+            Some("bottom") => Some(Edge::Bottom),
+            Some(other) => {
+                self.error(
+                    value.span(),
+                    format!("`{other}` is not an edge; use leading, trailing, top or bottom"),
+                );
+                None
+            }
+            None => {
+                self.error(value.span(), "an edge is leading, trailing, top or bottom");
+                None
+            }
+        }
     }
 
     fn color(&mut self, value: &StyleValue) -> Option<ColorRef> {
@@ -206,6 +226,92 @@ impl Lowering<'_> {
         (positional, named)
     }
 
+    /// `slide` or `grow`, with the argument that names its motion token.
+    /// The edge and a slide's distance are given by name,
+    /// `slide(edge: top, distance: 24, snappy)`, or by position,
+    /// `slide(top, 24, snappy)`: the edge is the name before the token, and
+    /// a name alone is the edge when it is one.
+    fn edge_transition<'a>(
+        &mut self,
+        name: &Ident,
+        args: &'a [StyleArg],
+        sheet: &StyleSheet,
+    ) -> (TransitionKind, Option<&'a StyleArg>) {
+        let slide = name == "slide";
+        let usage = if slide {
+            "write `slide(bottom, 16, token)` or `slide(edge: bottom, distance: 16, token)`"
+        } else {
+            "write `grow(bottom, token)` or `grow(edge: bottom, token)`"
+        };
+        let mut edge = None;
+        let mut distance = None;
+        let mut names = Vec::new();
+        for arg in args {
+            match (
+                arg.name.as_ref().map(ToString::to_string).as_deref(),
+                &arg.value,
+            ) {
+                (Some("edge"), StyleValue::Name(_)) if edge.is_none() => edge = Some(&arg.value),
+                (Some("distance") | None, StyleValue::Number(..))
+                    if slide && distance.is_none() =>
+                {
+                    distance = Some(&arg.value)
+                }
+                (None, StyleValue::Name(_)) => names.push(arg),
+                _ => self.error(arg.value.span(), usage),
+            }
+        }
+        let is_edge = |arg: &StyleArg| {
+            arg.value
+                .dotted()
+                .is_some_and(|word| ["leading", "trailing", "top", "bottom"].contains(&&*word))
+        };
+        let token = match names.as_slice() {
+            [] => None,
+            [only] if edge.is_none() && is_edge(only) => {
+                edge = Some(&only.value);
+                None
+            }
+            [token] if edge.is_none() => {
+                let word = token.value.dotted().unwrap_or_default();
+                if sheet.token(&word).is_some() {
+                    Some(*token)
+                } else {
+                    self.error(
+                        token.value.span(),
+                        format!(
+                            "`{word}` is neither an edge nor a motion token; an edge is leading, trailing, top or bottom"
+                        ),
+                    );
+                    None
+                }
+            }
+            [token] => Some(*token),
+            [first, token] if edge.is_none() => {
+                edge = Some(&first.value);
+                Some(*token)
+            }
+            _ => {
+                self.error(name.span(), usage);
+                None
+            }
+        };
+        let edge = edge
+            .and_then(|value| self.edge(value))
+            .unwrap_or(Edge::Bottom);
+        let kind = if slide {
+            TransitionKind::Slide {
+                edge,
+                distance: distance
+                    .and_then(|value| self.length(value, "a slide's distance"))
+                    .unwrap_or(16.0),
+            }
+        } else {
+            TransitionKind::Grow { edge }
+        };
+        (kind, token)
+    }
+
     fn effect(&mut self, value: &StyleValue, sheet: &StyleSheet) -> Option<StyleEffect> {
         match value {
             StyleValue::Name(path) if path.len() == 1 && path[0] == "system" => {
@@ -264,17 +370,9 @@ impl Lowering<'_> {
                         let edge = match args
                             .iter()
                             .find(|arg| arg.name.as_ref().is_some_and(|name| name == "edge"))
-                            .and_then(|arg| arg.value.dotted())
-                            .as_deref()
                         {
-                            None | Some("leading") => Edge::Leading,
-                            Some("trailing") => Edge::Trailing,
-                            Some("top") => Edge::Top,
-                            Some("bottom") => Edge::Bottom,
-                            Some(other) => {
-                                self.error(name.span(), format!("`{other}` is not an edge; use leading, trailing, top or bottom"));
-                                Edge::Leading
-                            }
+                            Some(arg) => self.edge(&arg.value).unwrap_or(Edge::Leading),
+                            None => Edge::Leading,
                         };
                         Some(StyleEffect::Indicator {
                             color: self.color(first?)?,
@@ -438,40 +536,16 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                 .find(|(name, _)| name == key)
                 .map(|(_, value)| *value)
         };
+        let mut motion = args.as_slice();
         let kind = match name.to_string().as_str() {
             "fade" => TransitionKind::Fade,
             "pop" => TransitionKind::Pop {
                 from: get("from").or(positional.first().copied()).unwrap_or(0.8),
             },
             "slide" | "grow" => {
-                let edge = match args
-                    .iter()
-                    .find(|arg| arg.name.as_ref().is_some_and(|name| name == "edge"))
-                    .and_then(|arg| arg.value.dotted())
-                    .as_deref()
-                {
-                    Some("leading") => Edge::Leading,
-                    Some("trailing") => Edge::Trailing,
-                    Some("top") => Edge::Top,
-                    None | Some("bottom") => Edge::Bottom,
-                    Some(other) => {
-                        lowering.error(
-                            name.span(),
-                            format!(
-                                "`{other}` is not an edge; use leading, trailing, top or bottom"
-                            ),
-                        );
-                        Edge::Bottom
-                    }
-                };
-                if name == "grow" {
-                    TransitionKind::Grow { edge }
-                } else {
-                    TransitionKind::Slide {
-                        edge,
-                        distance: get("distance").unwrap_or(16.0),
-                    }
-                }
+                let (kind, token) = lowering.edge_transition(name, args, &sheet);
+                motion = token.map(std::slice::from_ref).unwrap_or_default();
+                kind
             }
             other => {
                 lowering.error(
@@ -484,7 +558,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
         let transition = TransitionDef {
             name: decl.name.to_string(),
             kind,
-            motion: lowering.motion(args, &sheet),
+            motion: lowering.motion(motion, &sheet),
         };
         match sheet
             .transitions
