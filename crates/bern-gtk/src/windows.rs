@@ -211,6 +211,56 @@ fn key_name(keyval: gtk::gdk::Key) -> Option<String> {
     Some(named.to_string())
 }
 
+/// The shortcuts a key press stands for: the key it typed with the
+/// modifiers held and, when Shift changed what the key types, also the key
+/// Shift was held on, and the typed key without Shift. On a US layout
+/// Ctrl+Shift+/ types `?`: it is `cmd+shift+/` and `cmd+?`.
+fn pressed_keys(
+    typed: gtk::gdk::Key,
+    unshifted: Option<gtk::gdk::Key>,
+    state: gtk::gdk::ModifierType,
+) -> Vec<Keys> {
+    use gtk::gdk::ModifierType;
+    let Some(key) = key_name(typed) else {
+        return Vec::new();
+    };
+    let modifiers = state
+        & (ModifierType::CONTROL_MASK
+            | ModifierType::ALT_MASK
+            | ModifierType::SHIFT_MASK
+            | ModifierType::SUPER_MASK);
+    let mut pressed = Vec::new();
+    if modifiers.contains(ModifierType::SHIFT_MASK)
+        && let Some(base) = unshifted.and_then(key_name)
+        && base != key
+    {
+        pressed.push(Keys {
+            modifiers,
+            key: base,
+        });
+        pressed.push(Keys {
+            modifiers: modifiers - ModifierType::SHIFT_MASK,
+            key: key.clone(),
+        });
+    }
+    pressed.push(Keys { modifiers, key });
+    pressed
+}
+
+/// The key `keycode` types without Shift, in the keyboard layout of the
+/// event `keys` is handling.
+fn unshifted_key(
+    keys: &gtk::EventControllerKey,
+    keycode: u32,
+    state: gtk::gdk::ModifierType,
+) -> Option<gtk::gdk::Key> {
+    let display = keys.widget()?.display();
+    let group = i32::try_from(keys.group()).ok()?;
+    display
+        .translate_key(keycode, state - gtk::gdk::ModifierType::SHIFT_MASK, group)
+        .map(|(key, ..)| key)
+}
+
 impl Win {
     pub(crate) fn cell(&self, field: Field) -> Cell<Value> {
         self.cells
@@ -319,26 +369,14 @@ impl Win {
         });
     }
 
-    fn shortcut_for(
-        &self,
-        keyval: gtk::gdk::Key,
-        state: gtk::gdk::ModifierType,
-    ) -> Option<Rc<dyn Fn()>> {
-        let key = key_name(keyval)?;
-        let wanted = gtk::gdk::ModifierType::CONTROL_MASK
-            | gtk::gdk::ModifierType::ALT_MASK
-            | gtk::gdk::ModifierType::SHIFT_MASK
-            | gtk::gdk::ModifierType::SUPER_MASK;
-        let pressed = Keys {
-            modifiers: state & wanted,
-            key,
-        };
+    /// The shortcut for a key press, given as [`pressed_keys`].
+    fn shortcut_for(&self, pressed: &[Keys]) -> Option<Rc<dyn Fn()>> {
         let found = self
             .shortcuts
             .borrow()
             .iter()
             .rev()
-            .find(|(_, keys, _)| *keys == pressed)
+            .find(|(_, keys, _)| pressed.contains(keys))
             .map(|(_, keys, run)| (keys.clone(), Rc::clone(run)))?;
         // A key without a modifier does not fire while text is being edited.
         let plain = !found
@@ -805,10 +843,11 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let shortcuts = Rc::downgrade(&win);
-    keys.connect_key_pressed(move |_, keyval, _, state| {
+    keys.connect_key_pressed(move |keys, keyval, keycode, state| {
+        let pressed = pressed_keys(keyval, unshifted_key(keys, keycode, state), state);
         let run = shortcuts
             .upgrade()
-            .and_then(|win| win.shortcut_for(keyval, state));
+            .and_then(|win| win.shortcut_for(&pressed));
         match run {
             Some(run) => {
                 run();
@@ -1411,6 +1450,36 @@ mod tests {
         // Keys that type nothing have no name.
         assert_eq!(key_name(Key::F1), None);
         assert_eq!(key_name(Key::Shift_L), None);
+    }
+
+    #[test]
+    fn shifted_symbols_match_the_key_shift_is_held_on() {
+        let control_shift = ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK;
+        // Ctrl+Shift+/ types `?` on a US layout.
+        let pressed = pressed_keys(Key::question, Some(Key::slash), control_shift);
+        assert!(pressed.contains(&parse_keys("cmd+shift+/")), "{pressed:?}");
+        assert!(pressed.contains(&parse_keys("cmd+?")), "{pressed:?}");
+        assert!(!pressed.contains(&parse_keys("cmd+/")), "{pressed:?}");
+        // A letter is the same key with and without Shift.
+        assert_eq!(
+            pressed_keys(Key::K, Some(Key::k), control_shift),
+            [parse_keys("cmd+shift+k")]
+        );
+        // Without Shift, the typed key alone.
+        assert_eq!(
+            pressed_keys(Key::slash, Some(Key::slash), ModifierType::CONTROL_MASK),
+            [parse_keys("cmd+/")]
+        );
+        // Lock and pointer buttons do not change the shortcut.
+        assert_eq!(
+            pressed_keys(
+                Key::s,
+                Some(Key::s),
+                ModifierType::CONTROL_MASK | ModifierType::LOCK_MASK | ModifierType::BUTTON1_MASK
+            ),
+            [parse_keys("cmd+s")]
+        );
+        assert!(pressed_keys(Key::F1, None, ModifierType::empty()).is_empty());
     }
 
     #[test]
