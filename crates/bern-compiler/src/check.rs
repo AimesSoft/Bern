@@ -2,6 +2,7 @@
 
 use bern_ir::spec::{self, ChildShape, ElementShape, PropKind};
 use bern_ir::{self as ir, SourceLocation, text_key};
+use bern_protocol::format::Use;
 use bern_protocol::{LocalizedText, ProtocolDescriptor, Type, TypeTable, Value};
 use bern_syntax::{self as ast, BinaryOp, Literal, UnaryOp};
 use bern_target_api::Diagnostic;
@@ -14,6 +15,8 @@ pub struct Signature {
     pub name: String,
     pub module: Vec<String>,
     pub params: Vec<(String, ir::ParamKind)>,
+    /// Parameters marked `#[content]`: text the component shows as data.
+    pub content: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -23,7 +26,9 @@ enum Root {
     Windows,
     Players,
     Session(String),
-    Local(Type),
+    /// A template variable, pattern binding or parameter, and whether the
+    /// value itself is content: text that is data, shown as it is.
+    Local(Type, bool),
 }
 
 #[derive(Default)]
@@ -45,11 +50,13 @@ pub struct Contributions {
     pub optional: BTreeSet<String>,
 }
 
+#[derive(Clone)]
 pub struct PageSlot {
     pub enum_name: String,
     pub pages: Vec<ContributedPage>,
 }
 
+#[derive(Clone)]
 pub struct ContributedPage {
     pub module: String,
     pub variant: String,
@@ -60,6 +67,9 @@ pub struct ContributedPage {
 }
 
 /// Scope name under which an expansion passes the `namespace` client.
+/// The window handle a slot's expansion offers its contributed components.
+const SLOT_WINDOWS: &str = "bern_slot_windows";
+
 fn slot_client(namespace: &str) -> String {
     format!("__bern_client_{namespace}")
 }
@@ -146,7 +156,16 @@ pub fn shared_diagnostic(file: &str, span: Span, message: &str) -> Diagnostic {
 }
 
 /// Diagnostic codes the shared checks put in front of their messages.
-const CODES: [&str; 7] = ["B101", "B102", "B103", "B104", "B301", "B401", "B402"];
+const CODES: [&str; 8] = [
+    "B101", "B102", "B103", "B104", "B105", "B301", "B401", "B402",
+];
+
+/// B105 for text shown as it is that nothing declares as data.
+fn not_content(path: &str) -> String {
+    format!(
+        "error[B105]: `{path}` is shown as it is, but is not marked `#[content]`; mark the field or parameter `#[content]` if it is data such as a title or a file name, otherwise have the engine give a number, date or enum and write the sentence with `tr!`"
+    )
+}
 
 pub fn is_labeled_enum(ty: &Type, types: &TypeTable) -> bool {
     match ty {
@@ -188,6 +207,9 @@ pub struct Checker<'a> {
     pub transitions: Vec<String>,
     pub tokens: Vec<String>,
     pub patterns: Vec<String>,
+    /// `(component, session)`: components that show a page with
+    /// `pages.<id>.show()`, and the session holding the selection they set.
+    pub page_sessions: BTreeSet<(String, String)>,
     ids: BTreeSet<String>,
 }
 
@@ -227,6 +249,7 @@ impl<'a> Checker<'a> {
             transitions: Vec::new(),
             tokens: Vec::new(),
             patterns: Vec::new(),
+            page_sessions: BTreeSet::new(),
             ids: BTreeSet::new(),
         }
     }
@@ -257,7 +280,9 @@ impl<'a> Checker<'a> {
                 ir::ParamKind::Client { namespace } => Root::Client(namespace.clone()),
                 ir::ParamKind::Windows => Root::Windows,
                 ir::ParamKind::Players => Root::Players,
-                ir::ParamKind::Value { ty } => Root::Local(ty.clone()),
+                ir::ParamKind::Value { ty } => {
+                    Root::Local(ty.clone(), signature.content.contains(name))
+                }
                 ir::ParamKind::Session { session } => Root::Session(session.clone()),
             };
             scope.push(name.clone(), root);
@@ -362,13 +387,16 @@ impl<'a> Checker<'a> {
                 calls.join("\n")
             }
             "Pages" => {
-                let Some(pages) = self.contributions.pages.get(&slot) else {
+                let Some(pages) = self.contributions.pages.get(&slot).cloned() else {
                     return Vec::new();
                 };
-                pages
+                // In `Tabs`, every page is a tab showing its component.
+                let tabs = ctx.parent.as_deref() == Some("Tabs");
+                let mut failures = Vec::new();
+                let text = pages
                     .pages
                     .iter()
-                    .map(|page| {
+                    .filter_map(|page| {
                         let label: Vec<String> = page
                             .label
                             .iter()
@@ -379,12 +407,29 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .map(|icon| format!(", icon: {icon:?}"))
                             .unwrap_or_default();
+                        if tabs {
+                            return match self.slot_call(&page.component, scope) {
+                                Ok(call) => Some(self.contributions.guarded(
+                                    &page.module,
+                                    format!(
+                                        "Tab(value: {}::{}, label: tr! {{ {} }}{icon}) {{ {call} }}",
+                                        pages.enum_name,
+                                        page.variant,
+                                        label.join(", ")
+                                    ),
+                                )),
+                                Err(message) => {
+                                    failures.push(message);
+                                    None
+                                }
+                            };
+                        }
                         let badge = page
                             .badge
                             .as_ref()
                             .map(|field| format!(", badge: {}.{field}", slot_client(&page.module)))
                             .unwrap_or_default();
-                        self.contributions.guarded(
+                        Some(self.contributions.guarded(
                             &page.module,
                             format!(
                                 "SidebarItem(value: {}::{}, label: tr! {{ {} }}{icon}{badge})",
@@ -392,10 +437,14 @@ impl<'a> Checker<'a> {
                                 page.variant,
                                 label.join(", ")
                             ),
-                        )
+                        ))
                     })
                     .collect::<Vec<_>>()
-                    .join("\n")
+                    .join("\n");
+                for message in failures {
+                    self.error(element.span, message);
+                }
+                text
             }
             _ => {
                 let selected = match element.prop("selected").map(|prop| &prop.value) {
@@ -451,7 +500,11 @@ impl<'a> Checker<'a> {
         for namespace in &pushed {
             scope.push(slot_client(namespace), Root::Client(namespace.clone()));
         }
+        // Window handles name windows only, so a contributed component
+        // gets the application's whether or not the slot's component has it.
+        scope.push(SLOT_WINDOWS.to_string(), Root::Windows);
         let lowered = self.nodes(&parsed.nodes, &format!("{path}.{name}"), ctx, scope);
+        scope.pop();
         for _ in &pushed {
             scope.pop();
         }
@@ -475,7 +528,8 @@ impl<'a> Checker<'a> {
                 ir::ParamKind::Windows => {
                     let name = scope
                         .name_of(|root| matches!(root, Root::Windows))
-                        .ok_or_else(|| format!("contributed component `{component}` takes the window handle; give the component holding the slot a `windows` parameter"))?;
+                        .map(|name| name.to_string())
+                        .unwrap_or_else(|| SLOT_WINDOWS.to_string());
                     args.push(format!("{param}: {name}"));
                 }
                 ir::ParamKind::Players => {
@@ -542,7 +596,11 @@ impl<'a> Checker<'a> {
                     );
                     return None;
                 };
-                scope.push(node.binding.to_string(), Root::Local((*inner_ty).clone()));
+                let content = self.is_content(&value, scope);
+                scope.push(
+                    node.binding.to_string(),
+                    Root::Local((*inner_ty).clone(), content),
+                );
                 let then = self.nodes(&node.then, &format!("{path}.then"), &inner, scope);
                 scope.pop();
                 let otherwise = node
@@ -625,21 +683,25 @@ impl<'a> Checker<'a> {
                     }
                     let fields = &def.variants[index].fields;
                     let mut lowered = Vec::new();
+                    let mut contents = Vec::new();
                     for binding in bindings {
                         match fields.iter().position(|field| *binding == field.name) {
-                            Some(field) => lowered.push(ir::MatchBinding {
-                                name: binding.to_string(),
-                                field,
-                                ty: fields[field].ty.clone(),
-                            }),
+                            Some(field) => {
+                                contents.push(fields[field].content);
+                                lowered.push(ir::MatchBinding {
+                                    name: binding.to_string(),
+                                    field,
+                                    ty: fields[field].ty.clone(),
+                                })
+                            }
                             None => self.error(
                                 binding.span(),
                                 format!("`{name}::{variant}` has no field `{binding}`"),
                             ),
                         }
                     }
-                    for binding in &lowered {
-                        scope.push(binding.name.clone(), Root::Local(binding.ty.clone()));
+                    for (binding, content) in lowered.iter().zip(contents) {
+                        scope.push(binding.name.clone(), Root::Local(binding.ty.clone(), content));
                     }
                     let body = self.nodes(&arm.body, &arm_path, ctx, scope);
                     for _ in &lowered {
@@ -783,7 +845,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                     if let Some(var) = &element.template {
-                        scope.push(var.to_string(), Root::Local(shown.clone()));
+                        scope.push(var.to_string(), Root::Local(shown.clone(), false));
                         pushed += 1;
                         template = Some(ir::Template {
                             var: var.to_string(),
@@ -812,7 +874,7 @@ impl<'a> Checker<'a> {
                         }
                     };
                     if let Some(var) = &element.template {
-                        scope.push(var.to_string(), Root::Local(item_ty.clone()));
+                        scope.push(var.to_string(), Root::Local(item_ty.clone(), false));
                         pushed += 1;
                         template = Some(ir::Template {
                             var: var.to_string(),
@@ -829,7 +891,7 @@ impl<'a> Checker<'a> {
         {
             match &ctx.route {
                 Some(route) => {
-                    scope.push(var.to_string(), Root::Local(route.clone()));
+                    scope.push(var.to_string(), Root::Local(route.clone(), false));
                     pushed += 1;
                     template = Some(ir::Template {
                         var: var.to_string(),
@@ -925,7 +987,7 @@ impl<'a> Checker<'a> {
                     let positive = matches!(
                         (name.as_str(), prop_name.as_str()),
                         ("Image" | "Svg", "width" | "height")
-                            | ("Grid", "min_width")
+                            | ("Grid", "min_width" | "cell_ratio")
                             | ("Progress", "total")
                     );
                     let positive = positive
@@ -965,6 +1027,17 @@ impl<'a> Checker<'a> {
                         self.error(
                             prop.value.span(),
                             "`scroll_opacity` is an opacity from 0 to 1",
+                        );
+                        return None;
+                    }
+                    if (prop_name == "scroll_origin_x"
+                        || prop_name == "scroll_origin_y"
+                        || prop_name == "open_at")
+                        && !(0.0..=1.0).contains(&value)
+                    {
+                        self.error(
+                            prop.value.span(),
+                            format!("`{prop_name}` is a fraction of the element from 0 to 1"),
                         );
                         return None;
                     }
@@ -1221,6 +1294,9 @@ impl<'a> Checker<'a> {
             (Some(children), _) => self.nodes(children, path, &child_ctx, scope),
             (None, _) => Vec::new(),
         };
+        if name == "Tabs" {
+            self.tab_accessory(element, &children);
+        }
         if let (Some(ir::Prop::Number { value: min }), Some(ir::Prop::Number { value: max })) =
             (props.get("min"), props.get("max"))
             && min >= max
@@ -1244,6 +1320,44 @@ impl<'a> Checker<'a> {
             action,
             source: self.loc(element.span),
         })
+    }
+
+    /// A `Tabs` keeps at most one `TabAccessory`, written directly in it:
+    /// the bar is there for every page, and `shown:` hides it.
+    fn tab_accessory(&mut self, element: &ast::Element, children: &[ir::Node]) {
+        let direct = children
+            .iter()
+            .filter(|node| matches!(node, ir::Node::Element(child) if child.kind == "TabAccessory"))
+            .count();
+        // The tabs' own items: through conditions and `ForEach`, not into
+        // the pages, which may hold tabs of their own.
+        fn count(nodes: &[ir::Node]) -> usize {
+            nodes
+                .iter()
+                .map(|node| match node {
+                    ir::Node::Element(element) if element.kind == "TabAccessory" => 1,
+                    ir::Node::Element(element) if element.kind == "ForEach" => {
+                        count(&element.children)
+                    }
+                    ir::Node::Element(_) | ir::Node::Component(_) => 0,
+                    ir::Node::If(node) => {
+                        node.branches.iter().map(|(_, body)| count(body)).sum::<usize>()
+                            + count(&node.otherwise)
+                    }
+                    ir::Node::IfLet(node) => count(&node.then) + count(&node.otherwise),
+                    ir::Node::Match(node) => node.arms.iter().map(|arm| count(&arm.body)).sum(),
+                })
+                .sum()
+        }
+        let all = count(children);
+        if direct > 1 {
+            self.error(element.span, "`Tabs` keeps one `TabAccessory`");
+        } else if all > direct {
+            self.error(
+                element.span,
+                "write a `TabAccessory` directly in its `Tabs` and hide it with `shown:`, not inside `if` or `ForEach`",
+            );
+        }
     }
 
     fn id(&mut self, expr: &ast::Expr) -> Option<String> {
@@ -1679,6 +1793,84 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Whether a text value is content: data shown as it is, such as a
+    /// title or a file name, declared with `#[content]`. What the user
+    /// typed into session state is content too.
+    fn is_content(&self, expr: &ir::Expr, scope: &Scope) -> bool {
+        match &expr.kind {
+            ir::ExprKind::Binding { binding } => match binding {
+                ir::Binding::Engine { field, path } => {
+                    let state = &self.protocol.state[*field];
+                    self.path_content(&state.ty, path, state.content)
+                }
+                ir::Binding::Session { .. } => true,
+                ir::Binding::Local { name, path, root } => {
+                    let whole = matches!(scope.get(name), Some(Root::Local(_, true)));
+                    self.path_content(root, path, whole)
+                }
+                ir::Binding::Window { .. } => false,
+            },
+            ir::ExprKind::If {
+                then, otherwise, ..
+            } => self.is_content(then, scope) && self.is_content(otherwise, scope),
+            _ => false,
+        }
+    }
+
+    /// Whether the field at the end of `path` inside `ty` is content;
+    /// `whole` for an empty path.
+    fn path_content(&self, ty: &Type, path: &[usize], whole: bool) -> bool {
+        let mut content = whole;
+        let mut ty = ty.clone();
+        for index in path {
+            let Type::Record { name } = &ty else {
+                return false;
+            };
+            let Some(field) = self
+                .types
+                .record_def(name)
+                .and_then(|def| def.fields.get(*index))
+            else {
+                return false;
+            };
+            content = field.content;
+            ty = field.ty.clone();
+        }
+        content
+    }
+
+    /// What is wrong with interpolating a `ty` value as `how`, if anything.
+    fn argument_kind(&self, name: &str, how: Use, ty: &Type) -> Option<String> {
+        let number = matches!(ty, Type::Int | Type::Float);
+        let date = bern_syntax::lower::is_date(ty);
+        let fits = match how {
+            Use::Value => is_displayable(ty, self.types),
+            Use::Plural | Use::Duration => number,
+            Use::Date => date,
+        };
+        if fits {
+            return None;
+        }
+        Some(match how {
+            Use::Value if date => format!(
+                "error[B104]: `{{{name}}}` is a date; write it with a pattern, such as `{{{name}, date, MMM d}}`"
+            ),
+            Use::Value => format!(
+                "error[B104]: {} has no text presentation; interpolate text, numbers, dates or labelled enums",
+                ty.display()
+            ),
+            Use::Plural | Use::Duration => format!(
+                "error[B104]: `{{{name}, {}, …}}` needs a number, found {}",
+                how.name(),
+                ty.display()
+            ),
+            Use::Date => format!(
+                "error[B104]: `{{{name}, date, …}}` needs a `CalendarDate`, found {}",
+                ty.display()
+            ),
+        })
+    }
+
     fn record_path(&mut self, mut ty: Type, segments: &[syn::Ident]) -> Option<(Vec<usize>, Type)> {
         let mut path = Vec::new();
         for segment in segments {
@@ -1708,16 +1900,23 @@ impl<'a> Checker<'a> {
             let field = path.segments.get(1).map(ToString::to_string);
             let sizes = ir::LayoutSize::ALL.map(ir::LayoutSize::name);
             let known = field.as_deref() == Some("idle")
+                || field.as_deref() == Some("short")
                 || field.as_deref().is_some_and(|name| sizes.contains(&name));
             if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.idle` (no input for `idle_after` seconds) and its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`",
+                    "the hosting window offers `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, and `window.short` (shorter than the compact breakpoint, as a phone on its side)",
                 );
                 return None;
             }
             let field = field.unwrap_or_default();
-            if field != "idle" {
+            if field == "short" && self.layouts.is_none() {
+                self.error(
+                    path.span(),
+                    "error[B402]: `window.short` needs the breakpoints of `[layouts]` in Bern.toml, e.g. `compact_below = 600`",
+                );
+            }
+            if field != "idle" && field != "short" {
                 match self.layouts {
                     None => {
                         self.error(
@@ -1825,7 +2024,7 @@ impl<'a> Checker<'a> {
                     ty,
                 )
             }
-            Root::Local(root) => {
+            Root::Local(root, _) => {
                 let (sub, ty) = self.record_path(root.clone(), rest)?;
                 (
                     ir::Binding::Local {
@@ -2126,22 +2325,39 @@ impl<'a> Checker<'a> {
                 for (span, message) in problems {
                     self.error(span, message);
                 }
+                let mut uses: BTreeMap<String, BTreeSet<Use>> = BTreeMap::new();
+                for entry in &tr.entries {
+                    if let Ok(pieces) = bern_protocol::format::parse(&entry.text) {
+                        for (name, how) in bern_protocol::format::uses(&pieces) {
+                            uses.entry(name).or_default().insert(how);
+                        }
+                    }
+                }
                 let mut args = Vec::new();
+                let mut wrong = false;
                 for arg in &tr.args {
                     let lowered = self.expr(&arg.value, scope)?;
-                    if !is_displayable(&lowered.ty, self.types) {
-                        self.error(
-                            arg.value.span(),
-                            format!(
-                                "{} has no text presentation; interpolate text, numbers or labelled enums",
-                                lowered.ty.display()
-                            ),
-                        );
-                        return None;
+                    let name = arg.name.to_string();
+                    let span = arg.value.span();
+                    for how in uses.get(&name).into_iter().flatten() {
+                        if let Some(problem) = self.argument_kind(&name, *how, &lowered.ty) {
+                            self.error(span, problem);
+                            wrong = true;
+                        }
                     }
-                    args.push((arg.name.to_string(), lowered));
+                    if lowered.ty == Type::Text && !self.is_content(&lowered, scope) {
+                        self.error(
+                            span,
+                            match &arg.value {
+                                ast::Expr::Path(path) => not_content(&path.dotted()),
+                                _ => "error[B105]: fixed text belongs in the translations; an argument is a value, such as a number, a date or text marked `#[content]`".to_string(),
+                            },
+                        );
+                        wrong = true;
+                    }
+                    args.push((name, lowered));
                 }
-                if failed {
+                if failed || wrong {
                     return None;
                 }
                 let text = LocalizedText {
@@ -2180,6 +2396,16 @@ impl<'a> Checker<'a> {
             }
             ast::Expr::Path(path) if !localized_only => {
                 let lowered = self.binding(path, scope)?;
+                if bern_syntax::lower::is_date(&lowered.ty) {
+                    self.error(
+                        path.span(),
+                        format!(
+                            "a date is written in the reader's language with `tr!`, such as `tr! {{ \"en\" => \"{{day, date, EEE, MMM d}}\" ; day: {} }}`",
+                            path.dotted()
+                        ),
+                    );
+                    return None;
+                }
                 if !is_displayable(&lowered.ty, self.types) {
                     self.error(
                         path.span(),
@@ -2188,6 +2414,10 @@ impl<'a> Checker<'a> {
                             lowered.ty.display()
                         ),
                     );
+                    return None;
+                }
+                if lowered.ty == Type::Text && !self.is_content(&lowered, scope) {
+                    self.error(path.span(), not_content(&path.dotted()));
                     return None;
                 }
                 Some(ir::Text::Dynamic { expr: lowered })
@@ -2273,6 +2503,9 @@ impl<'a> Checker<'a> {
 
     fn action(&mut self, action: &ast::Action, scope: &Scope) -> Option<ir::Action> {
         let root = action.receiver[0].to_string();
+        if root == "pages" && scope.get(&root).is_none() {
+            return self.page_action(action);
+        }
         match scope.get(&root) {
             Some(Root::Client(namespace)) => {
                 if action.receiver.len() != 1 {
@@ -2458,6 +2691,82 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `pages.new.show()`: show a page of a page slot, wherever the
+    /// shell shows that slot. It sets the session field of the slot's enum,
+    /// which the shell's `Sidebar`, `Tabs` or `PageContent` select by, so a
+    /// module can link to its own pages without knowing the shell.
+    fn page_action(&mut self, action: &ast::Action) -> Option<ir::Action> {
+        if action.receiver.len() != 2 || action.method != "show" || !action.args.is_empty() {
+            self.error(action.span, "page actions look like `pages.new.show()`");
+            return None;
+        }
+        let id = action.receiver[1].to_string();
+        let variant = ast::pascal_case(&id);
+        let slots: Vec<(String, usize)> = self
+            .contributions
+            .pages
+            .values()
+            .filter_map(|slot| {
+                let def = self.types.enum_def(&slot.enum_name)?;
+                Some((slot.enum_name.clone(), def.variant_index(&variant)?))
+            })
+            .collect();
+        let [(enum_name, index)] = slots.as_slice() else {
+            self.error(
+                action.receiver[1].span(),
+                if slots.is_empty() {
+                    format!("no page slot has a page `{id}`")
+                } else {
+                    format!("several page slots have a page `{id}`")
+                },
+            );
+            return None;
+        };
+        let ty = Type::Enum {
+            name: enum_name.clone(),
+        };
+        let fields: Vec<ir::FieldRef> = self
+            .sessions
+            .iter()
+            .flat_map(|def| {
+                def.fields
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, field)| field.ty == ty)
+                    .map(|(field, _)| ir::FieldRef {
+                        session: def.name.clone(),
+                        field,
+                        ty: ty.clone(),
+                    })
+            })
+            .collect();
+        let [field] = fields.as_slice() else {
+            self.error(
+                action.span,
+                format!(
+                    "`pages.{id}.show()` sets the session field that selects `{enum_name}`; \
+                     declare exactly one such field, found {}",
+                    fields.len()
+                ),
+            );
+            return None;
+        };
+        self.page_sessions
+            .insert((self.component.clone(), field.session.clone()));
+        Some(ir::Action::Session {
+            field: field.clone(),
+            op: ir::SessionOp::Set {
+                value: ir::Expr {
+                    ty,
+                    kind: ir::ExprKind::Variant {
+                        variant: *index as u32,
+                        fields: Vec::new(),
+                    },
+                },
+            },
+        })
+    }
+
     fn component_call(
         &mut self,
         call: &ast::ComponentCall,
@@ -2557,9 +2866,22 @@ impl<'a> Checker<'a> {
                         None
                     }
                 },
-                ir::ParamKind::Value { ty } => self
-                    .expect(&arg.value, ty, scope, &format!("argument `{arg_name}`"))
-                    .map(|expr| ir::ComponentArg::Value { expr }),
+                ir::ParamKind::Value { ty } => {
+                    let expr =
+                        self.expect(&arg.value, ty, scope, &format!("argument `{arg_name}`"));
+                    if let Some(expr) = &expr
+                        && signature.content.contains(&arg_name)
+                        && !self.is_content(expr, scope)
+                    {
+                        self.error(
+                            arg.value.span(),
+                            format!(
+                                "error[B105]: `{arg_name}` of `{name}` is `#[content]`, text that is data; pass a field or parameter marked `#[content]`, and write fixed text inside the component with `tr!`"
+                            ),
+                        );
+                    }
+                    expr.map(|expr| ir::ComponentArg::Value { expr })
+                }
                 ir::ParamKind::Session { .. } => None,
             };
             if let Some(lowered) = lowered {

@@ -84,17 +84,14 @@ pub(crate) fn boxed_list() -> gtk::ListBox {
 }
 
 /// A row of a boxed list holding `child`, for content that is not a
-/// libadwaita row itself.
+/// libadwaita row itself. Its padding is the row's, so a form's layout
+/// can change it.
 pub(crate) fn plain_row(child: &impl IsA<gtk::Widget>) -> gtk::ListBoxRow {
     let row = gtk::ListBoxRow::new();
     row.set_activatable(false);
     row.set_selectable(false);
-    let child = child.as_ref();
-    child.set_margin_top(10);
-    child.set_margin_bottom(10);
-    child.set_margin_start(12);
-    child.set_margin_end(12);
-    row.set_child(Some(child));
+    row.add_css_class("bern-plain-row");
+    row.set_child(Some(child.as_ref()));
     row
 }
 
@@ -126,6 +123,60 @@ pub struct TextProps {
     pub emphasis: Option<&'static str>,
     /// A capsule of this color under each line.
     pub mark: Option<crate::theme::Color>,
+    /// At most this many lines, the last ending in an ellipsis.
+    pub lines: Option<f64>,
+    /// The size of the type in points, in place of the style's.
+    pub font_size: Option<Num>,
+    /// The height of each line, the extra split above and below it.
+    pub line_height: Option<Num>,
+}
+
+/// The size and line height of a label's text, as Pango attributes.
+fn text_attributes(label: &gtk::Label, size: Option<f64>, line_height: Option<f64>) {
+    let attributes = gtk::pango::AttrList::new();
+    let scale = f64::from(gtk::pango::SCALE);
+    if let Some(size) = size {
+        attributes.insert(gtk::pango::AttrSize::new_size_absolute(
+            (size.max(1.0) * scale).round() as i32,
+        ));
+    }
+    if let Some(height) = line_height {
+        attributes.insert(gtk::pango::AttrInt::new_line_height_absolute(
+            (height.max(0.0) * scale).round() as i32,
+        ));
+    }
+    label.set_attributes(Some(&attributes));
+}
+
+/// Keep a label's size and line height in step with bound lengths.
+fn bind_text_size(ctx: &Ctx, label: &gtk::Label, size: Option<Num>, line_height: Option<Num>) {
+    if size.is_none() && line_height.is_none() {
+        return;
+    }
+    let values = Rc::new(Cell::new((None::<f64>, None::<f64>)));
+    if let Some(size) = &size {
+        let (values, label_) = (Rc::clone(&values), label.clone());
+        bind_number(ctx, size, None, label, move |value| {
+            values.set((Some(value), values.get().1));
+            let (size, height) = values.get();
+            text_attributes(&label_, size, height);
+        });
+    }
+    if let Some(height) = &line_height {
+        let (values, label_) = (Rc::clone(&values), label.clone());
+        bind_number(ctx, height, None, label, move |value| {
+            values.set((values.get().0, Some(value)));
+            let (size, height) = values.get();
+            text_attributes(&label_, size, height);
+        });
+    }
+}
+
+/// The classes of a text style: libadwaita's for its size, and Bern's for
+/// the weights and sizes `text { … }` gives.
+fn text_style(widget: &impl IsA<gtk::Widget>, style: Option<&str>) {
+    widget.add_css_class(style_class(style));
+    widget.add_css_class(&crate::style::text_class(style.unwrap_or("body")));
 }
 
 #[allow(non_snake_case)]
@@ -134,16 +185,21 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
     label.set_wrap(true);
     label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
     label.set_xalign(0.0);
-    label.add_css_class(style_class(props.style));
+    text_style(&label, props.style);
     if matches!(props.emphasis, Some("secondary") | Some("tertiary")) {
         label.add_css_class("dim-label");
     }
+    if let Some(lines) = props.lines {
+        label.set_lines(lines.max(1.0) as i32);
+        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    }
+    bind_text_size(ctx, &label, props.font_size, props.line_height);
     if let Some(content) = &props.content {
         bind_label(&label, bound_text(ctx, content));
     }
     match props.mark {
         Some(mark) => place(p, &crate::canvas::Marked::new(&label, mark)),
-        None => place(p, &label),
+        None => place(p, &crate::layout::Words::wrap(&label)),
     }
 }
 
@@ -152,15 +208,40 @@ pub struct LabelProps {
     pub title: Option<Str>,
     pub icon: Option<&'static str>,
     pub style: Option<&'static str>,
+    /// The size of the title and icon in points.
+    pub font_size: Option<f64>,
+    /// Only the icon shows; the title names it for assistive technology.
+    pub icon_only: bool,
 }
 
 #[allow(non_snake_case)]
 pub fn Label(p: &Parent, ctx: &Ctx, props: LabelProps) {
     let title = props.title.as_ref().map(|title| bound_text(ctx, title));
+    let icon = |name: &str| {
+        let image = icons::image(name);
+        if let Some(size) = props.font_size {
+            image.set_pixel_size(size.round().max(1.0) as i32);
+        }
+        image
+    };
+    if props.icon_only {
+        // An image's role is already `img`.
+        let image = icon(props.icon.unwrap_or("circle"));
+        if let Some(title) = title {
+            let named = image.clone();
+            effect(move || {
+                let text = title();
+                named.set_tooltip_text(Some(&text));
+                named.update_property(&[gtk::accessible::Property::Label(&text)]);
+            });
+        }
+        place(p, &image);
+        return;
+    }
     if p.is_list() {
         let row = adw::ActionRow::new();
-        if let Some(icon) = props.icon {
-            row.add_prefix(&icons::image(icon));
+        if let Some(name) = props.icon {
+            row.add_prefix(&icon(name));
         }
         if let Some(title) = title {
             let shown = row.clone();
@@ -170,12 +251,15 @@ pub fn Label(p: &Parent, ctx: &Ctx, props: LabelProps) {
         return;
     }
     let container = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    if let Some(icon) = props.icon {
-        container.append(&icons::image(icon));
+    if let Some(name) = props.icon {
+        container.append(&icon(name));
     }
     let label = gtk::Label::new(None);
     label.set_xalign(0.0);
-    label.add_css_class(style_class(props.style));
+    text_style(&label, props.style);
+    if let Some(size) = props.font_size {
+        text_attributes(&label, Some(size), None);
+    }
     if let Some(title) = title {
         bind_label(&label, title);
     }
@@ -194,6 +278,9 @@ pub struct ButtonProps {
     pub style: Option<&'static crate::style::StyleDef>,
     /// `pick:`: the open panel asks for a file before the action runs.
     pub pick: Option<crate::features::Pick>,
+    pub shape: Shape,
+    /// `width: fill`: as wide as its container.
+    pub fill: bool,
 }
 
 fn register_button(
@@ -278,13 +365,17 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
         run,
         set_file.zip(props.pick.map(|pick| pick.kinds)),
     );
+    shape(ctx, button.upcast_ref(), &props.shape);
+    if props.fill {
+        button.set_hexpand(true);
+        button.set_halign(gtk::Align::Fill);
+    }
     if p.is_list() && !ctx.in_toolbar() {
-        button.set_halign(gtk::Align::Start);
+        if !props.fill {
+            button.set_halign(gtk::Align::Start);
+        }
         let row = plain_row(&styled(&button, props.style));
-        row.child().inspect(|child| {
-            child.set_margin_top(8);
-            child.set_margin_bottom(8);
-        });
+        row.add_css_class("bern-button-row");
         p.add(&row);
     } else {
         p.add(&styled(&button, props.style));
@@ -299,12 +390,36 @@ pub struct IconButtonProps {
     pub enabled: Option<Get>,
     pub style: Option<&'static crate::style::StyleDef>,
     pub pick: Option<crate::features::Pick>,
+    /// The size of the icon in points.
+    pub font_size: Option<f64>,
+    /// A round button of this diameter.
+    pub diameter: Option<Num>,
+    /// `prominent`: filled with the accent color.
+    pub prominence: Option<&'static str>,
 }
 
 #[allow(non_snake_case)]
 pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<Act>) {
     let button = gtk::Button::from_icon_name(icons::name(props.icon));
-    button.add_css_class("flat");
+    if props.prominence == Some("prominent") {
+        button.add_css_class("suggested-action");
+    } else {
+        button.add_css_class("flat");
+    }
+    if let Some(size) = props.font_size
+        && let Some(image) = button.child().and_downcast::<gtk::Image>()
+    {
+        image.set_pixel_size(size.round().max(1.0) as i32);
+    }
+    if let Some(diameter) = &props.diameter {
+        button.add_css_class("circular");
+        button.add_css_class("bern-sized-control");
+        let sized = button.clone();
+        bind_number(ctx, diameter, None, &button, move |value| {
+            let side = value.round().max(0.0) as i32;
+            sized.set_size_request(side, side);
+        });
+    }
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     if let Some(label) = label.clone() {
         let shown = button.clone();
@@ -335,33 +450,144 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
     place(p, &styled(&button, props.style));
 }
 
-/// A draft field bound to a control.
+/// What a control shows and changes.
+#[derive(Clone)]
+pub enum Model {
+    /// A draft field of the window; the action, if any, runs after each
+    /// change.
+    Field(Field, Option<Act>),
+    /// A value read from state; a change runs this with the new value, as
+    /// a command that sets it.
+    Controlled(Get, Commit),
+}
+
+/// Runs the command that changes a controlled value to the one given.
+pub type Commit = Rc<dyn Fn(&Ctx, Value)>;
+
+/// Turn a control bound to a `bool` on or off, as its shortcut does.
+pub fn toggle(ctx: &Ctx, model: &Model) {
+    let bound = Bound::model(ctx, model.clone());
+    bound.set(Value::Bool(bound.peek() != Value::Bool(true)));
+}
+
+/// The value a control is bound to.
 #[derive(Clone)]
 pub(crate) struct Bound {
     ctx: Ctx,
-    field: Field,
+    model: Model,
 }
 
 impl Bound {
     pub(crate) fn new(ctx: &Ctx, field: Field) -> Self {
+        Self::model(ctx, Model::Field(field, None))
+    }
+
+    pub(crate) fn model(ctx: &Ctx, model: Model) -> Self {
         Self {
             ctx: ctx.clone(),
-            field,
+            model,
         }
+    }
+
+    /// Whether the engine controls the value: the control previews its
+    /// own changes until they arrive.
+    pub(crate) fn controlled(&self) -> bool {
+        matches!(self.model, Model::Controlled(..))
     }
 
     pub(crate) fn get(&self) -> Value {
-        self.ctx.read(self.field)
+        match &self.model {
+            Model::Field(field, _) => self.ctx.read(*field),
+            Model::Controlled(get, _) => get(&self.ctx),
+        }
     }
 
     pub(crate) fn peek(&self) -> Value {
-        self.ctx.peek(self.field)
+        match &self.model {
+            Model::Field(field, _) => self.ctx.peek(*field),
+            Model::Controlled(get, _) => untrack(|| get(&self.ctx)),
+        }
     }
 
     pub(crate) fn set(&self, value: Value) {
-        if self.peek() != value {
-            self.ctx.write(self.field, value);
+        if self.peek() == value {
+            return;
         }
+        match &self.model {
+            Model::Field(field, then) => {
+                if self.ctx.write(*field, value)
+                    && let Some(then) = then
+                {
+                    then(&self.ctx);
+                }
+            }
+            Model::Controlled(_, commit) => commit(&self.ctx, value),
+        }
+    }
+}
+
+/// `shape: capsule` and `height` of a system control.
+#[derive(Clone, Default)]
+pub struct Shape {
+    pub capsule: bool,
+    pub height: Option<Num>,
+}
+
+/// Round a control's ends and give it its height: the theme's own
+/// minimum height and vertical padding give way to the declared height.
+pub(crate) fn shape(ctx: &Ctx, widget: &gtk::Widget, shape: &Shape) {
+    if shape.capsule {
+        widget.add_css_class("bern-capsule");
+    }
+    if let Some(height) = &shape.height {
+        widget.add_css_class("bern-sized-control");
+        let sized = widget.clone();
+        bind_number(ctx, height, None, widget, move |value| {
+            sized.set_size_request(sized.width_request(), value.round().max(0.0) as i32);
+        });
+        widget.set_valign(gtk::Align::Center);
+    }
+}
+
+/// `padding`, `padding_x` and `padding_y` of a container.
+#[derive(Clone, Default)]
+pub struct Padding {
+    pub all: Option<Num>,
+    pub x: Option<Num>,
+    pub y: Option<Num>,
+}
+
+/// Padding as the widget's margins: `all` on every side, then `x` across
+/// and `y` along the vertical, which win where given.
+pub(crate) fn pad(ctx: &Ctx, widget: &gtk::Widget, padding: &Padding, animate: Option<Curve>) {
+    let side = |value: f64| value.round().max(0.0) as i32;
+    if let Some(all) = &padding.all {
+        let padded = widget.clone();
+        let (x, y) = (padding.x.is_none(), padding.y.is_none());
+        bind_number(ctx, all, animate, widget, move |value| {
+            if x {
+                padded.set_margin_start(side(value));
+                padded.set_margin_end(side(value));
+            }
+            if y {
+                padded.set_margin_top(side(value));
+                padded.set_margin_bottom(side(value));
+            }
+        });
+    }
+    if let Some(across) = &padding.x {
+        let padded = widget.clone();
+        bind_number(ctx, across, animate, widget, move |value| {
+            padded.set_margin_start(side(value));
+            padded.set_margin_end(side(value));
+        });
+    }
+    if let Some(down) = &padding.y {
+        let padded = widget.clone();
+        bind_number(ctx, down, animate, widget, move |value| {
+            padded.set_margin_top(side(value));
+            padded.set_margin_bottom(side(value));
+        });
     }
 }
 
@@ -411,7 +637,11 @@ pub struct TextInputProps {
 
 /// Text editing: changes update the draft; draft changes from elsewhere
 /// update the text without echoing back.
-fn editable(text: Rc<dyn Fn() -> String>, set: Rc<dyn Fn(&str)>, bound: Bound) -> Rc<Cell<bool>> {
+pub(crate) fn editable(
+    text: Rc<dyn Fn() -> String>,
+    set: Rc<dyn Fn(&str)>,
+    bound: Bound,
+) -> Rc<Cell<bool>> {
     let updating = Rc::new(Cell::new(false));
     let guard = Rc::clone(&updating);
     effect(move || {
@@ -552,6 +782,13 @@ pub struct SearchProps {
     pub id: &'static str,
     pub field: Option<Field>,
     pub prompt: Option<Str>,
+    /// The prompt of a palette's own field.
+    pub panel_prompt: Option<Str>,
+    /// The field's size in the page, or a palette's.
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    /// The size of the field's text in points.
+    pub font_size: Option<f64>,
 }
 
 /// A search field. Its children are results shown below it while it has
@@ -574,7 +811,21 @@ pub fn Search(
         entry.set_width_chars(18);
         entry.set_valign(gtk::Align::Center);
     } else {
-        entry.set_hexpand(true);
+        // In a page: as wide as given, else as wide as its container.
+        entry.set_hexpand(props.width.is_none());
+        if props.width.is_some() || props.height.is_some() {
+            entry.add_css_class("bern-sized-control");
+            entry.set_size_request(
+                props.width.map(|width| width.round() as i32).unwrap_or(-1),
+                props
+                    .height
+                    .map(|height| height.round() as i32)
+                    .unwrap_or(-1),
+            );
+        }
+        if let Some(size) = props.font_size {
+            entry.add_css_class(&crate::style::class_for(&format!("font-size: {size}px;")));
+        }
     }
     if let Some(prompt) = prompt.clone() {
         let shown = entry.clone();
@@ -727,14 +978,17 @@ fn search_results(ctx: &Ctx, entry: &gtk::SearchEntry, bound: &Bound, results: B
 pub struct SwitchProps {
     pub id: &'static str,
     pub label: Option<Str>,
-    pub field: Option<Field>,
+    pub model: Option<Model>,
     pub style: Option<&'static str>,
     pub icon: Option<&'static str>,
+    /// The label names the switch for assistive technology only.
+    pub label_hidden: bool,
+    pub shape: Shape,
 }
 
 #[allow(non_snake_case)]
 pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
-    let Some(field) = props.field else { return };
+    let Some(model) = props.model else { return };
     if props.style == Some("button") || ctx.in_toolbar() {
         crate::features::toggle_button(
             p,
@@ -742,14 +996,16 @@ pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
             crate::features::ToggleProps {
                 id: props.id,
                 label: props.label,
-                field,
+                model,
                 icon: props.icon,
+                shape: props.shape,
             },
         );
         return;
     }
-    let bound = Bound::new(ctx, field);
+    let bound = Bound::model(ctx, model);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
+    let shown_label = label.clone().filter(|_| !props.label_hidden);
     let checkbox = props.style == Some("checkbox");
     // Every presentation exposes one boolean property, `active`.
     let control: gtk::Widget;
@@ -774,7 +1030,7 @@ pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
             }
             control = row.upcast();
         } else {
-            if let Some(label) = label.clone() {
+            if let Some(label) = shown_label.clone() {
                 let shown = check.clone();
                 effect(move || shown.set_label(Some(&label())));
             }
@@ -783,8 +1039,15 @@ pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
         active = check.upcast();
     } else {
         let switch = gtk::Switch::new();
-        control = beside(label.clone(), &switch).upcast();
+        shape(ctx, switch.upcast_ref(), &props.shape);
+        control = beside(shown_label.clone(), &switch).upcast();
         active = switch.upcast();
+    }
+    if props.label_hidden
+        && let Some(label) = label.clone()
+        && let Ok(widget) = active.clone().downcast::<gtk::Widget>()
+    {
+        effect(move || widget.update_property(&[gtk::accessible::Property::Label(&label())]));
     }
     let updating = Rc::new(Cell::new(false));
     let guard = Rc::clone(&updating);
@@ -827,20 +1090,25 @@ pub fn Switch(p: &Parent, ctx: &Ctx, props: SwitchProps) {
 pub struct SliderProps {
     pub id: &'static str,
     pub label: Option<Str>,
-    pub field: Option<Field>,
+    pub model: Option<Model>,
     pub min: Option<f64>,
     pub max: Option<f64>,
     pub step: Option<f64>,
     pub min_icon: Option<&'static str>,
     pub max_icon: Option<&'static str>,
+    /// The label names the slider for assistive technology only.
+    pub label_hidden: bool,
 }
 
-/// A slider: dragging only updates this window's draft as a preview, and
-/// releasing commits once; keyboard and scroll changes commit at once.
+/// A slider. Bound to a draft, dragging only updates this window's draft
+/// as a preview and releasing commits once; keyboard and scroll changes
+/// commit at once. Bound to a value the engine controls, dragging moves
+/// only the slider, and releasing sets the value.
 #[allow(non_snake_case)]
 pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
-    let Some(field) = props.field else { return };
-    let bound = Bound::new(ctx, field);
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
+    let controlled = bound.controlled();
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     let (min, max) = (props.min.unwrap_or(0.0), props.max.unwrap_or(1.0));
     let increment = props.step.unwrap_or((max - min) / 100.0).max(f64::EPSILON);
@@ -856,20 +1124,27 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
         _ => value.clamp(min, max),
     };
     let updating = Rc::new(Cell::new(false));
+    let dragging = Rc::new(Cell::new(false));
     let guard = Rc::clone(&updating);
     let shown = scale.clone();
     let read = bound.clone();
+    let held = Rc::clone(&dragging);
     effect(move || {
         let value = as_f64(&read.get());
+        // A drag in progress keeps the slider where the pointer has it.
+        if held.get() && controlled {
+            return;
+        }
         if (shown.value() - value).abs() > f64::EPSILON {
             guard.set(true);
             shown.set_value(value);
             guard.set(false);
         }
     });
-    let dragging = Rc::new(Cell::new(false));
     let pressed = Rc::clone(&dragging);
     let released_commit = commit.clone();
+    let released = bound.clone();
+    let released_scale = scale.clone();
     let legacy = gtk::EventControllerLegacy::new();
     legacy.set_propagation_phase(gtk::PropagationPhase::Capture);
     legacy.connect_event(move |_, event| {
@@ -878,11 +1153,18 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
             gtk::gdk::EventType::ButtonRelease | gtk::gdk::EventType::TouchEnd
                 if pressed.replace(false) =>
             {
-                if let Some(commit) = &released_commit {
-                    let commit = Rc::clone(commit);
-                    // After the scale handled the release.
-                    glib::idle_add_local_once(move || commit());
-                }
+                let commit = released_commit.clone();
+                let bound = released.clone();
+                let scale = released_scale.clone();
+                // After the scale handled the release.
+                glib::idle_add_local_once(move || {
+                    if controlled {
+                        bound.set(Value::Float(snap(scale.value())));
+                    }
+                    if let Some(commit) = commit {
+                        commit();
+                    }
+                });
             }
             _ => {}
         }
@@ -896,10 +1178,15 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
             return;
         }
         let value = snap(scale.value());
+        if dragging.get() {
+            // A preview: the draft follows, a controlled value waits.
+            if !controlled {
+                changed.set(Value::Float(value));
+            }
+            return;
+        }
         changed.set(Value::Float(value));
-        if !dragging.get()
-            && let Some(commit) = &keyed_commit
-        {
+        if let Some(commit) = &keyed_commit {
             commit();
         }
     });
@@ -921,7 +1208,7 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
             shown.update_property(&[gtk::accessible::Property::Label(&label())]);
         });
     }
-    let content = stacked(label.clone(), &track);
+    let content = stacked(label.clone().filter(|_| !props.label_hidden), &track);
     if p.is_list() {
         p.add(&plain_row(&content));
     } else {
@@ -948,14 +1235,15 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
     );
 }
 
-/// One option of a picker: variant index, variant name and label.
+/// One option of a picker: its value, the name of its variant and its
+/// label.
 pub struct PickOption {
-    pub value: u32,
+    pub value: Value,
     pub name: &'static str,
     pub label: Str,
 }
 
-pub fn option(value: u32, name: &'static str, label: Str) -> PickOption {
+pub fn option(value: Value, name: &'static str, label: Str) -> PickOption {
     PickOption { value, name, label }
 }
 
@@ -963,9 +1251,12 @@ pub fn option(value: u32, name: &'static str, label: Str) -> PickOption {
 pub struct PickerProps {
     pub id: &'static str,
     pub label: Option<Str>,
-    pub field: Option<Field>,
+    pub model: Option<Model>,
     pub options: Vec<PickOption>,
     pub style: Option<&'static str>,
+    /// The label names the picker for assistive technology only.
+    pub label_hidden: bool,
+    pub shape: Shape,
 }
 
 /// A list of strings that follows the options' labels.
@@ -979,10 +1270,16 @@ fn label_model(ctx: &Ctx, labels: Vec<Str>, apply: impl Fn(&[String]) + 'static)
 
 #[allow(non_snake_case)]
 pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
-    let Some(field) = props.field else { return };
-    let bound = Bound::new(ctx, field);
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
-    let values: Rc<Vec<u32>> = Rc::new(props.options.iter().map(|option| option.value).collect());
+    let values: Rc<Vec<Value>> = Rc::new(
+        props
+            .options
+            .iter()
+            .map(|option| option.value.clone())
+            .collect(),
+    );
     let names: Rc<Vec<&'static str>> =
         Rc::new(props.options.iter().map(|option| option.name).collect());
     let labels: Vec<Str> = props
@@ -992,17 +1289,14 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
         .collect();
     let index_of = {
         let values = Rc::clone(&values);
-        move |value: &Value| match value {
-            Value::Enum { variant, .. } => values.iter().position(|candidate| candidate == variant),
-            _ => None,
-        }
+        move |value: &Value| values.iter().position(|candidate| candidate == value)
     };
     let select_index: Rc<dyn Fn(usize)> = {
         let values = Rc::clone(&values);
         let bound = bound.clone();
         Rc::new(move |index| {
-            if let Some(variant) = values.get(index) {
-                bound.set(Value::unit_variant(*variant));
+            if let Some(value) = values.get(index) {
+                bound.set(value.clone());
             }
         })
     };
@@ -1014,6 +1308,7 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
         let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         group.add_css_class("linked");
         group.set_valign(gtk::Align::Center);
+        shape(ctx, group.upcast_ref(), &props.shape);
         let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
         for (index, _) in props.options.iter().enumerate() {
             let button = gtk::ToggleButton::new();
@@ -1065,6 +1360,7 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
             } else {
                 let dropdown = gtk::DropDown::new(Some(model.clone()), None::<gtk::Expression>);
                 dropdown.set_valign(gtk::Align::Center);
+                shape(ctx, dropdown.upcast_ref(), &props.shape);
                 (dropdown.clone().upcast(), dropdown.upcast())
             };
         let reselect = {
@@ -1104,8 +1400,18 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
         });
         widget
     };
-    if ctx.in_toolbar() {
-        p.add(&control);
+    if props.label_hidden
+        && let Some(label) = label.clone()
+    {
+        let named = control.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&label())]));
+    }
+    if ctx.in_toolbar() || props.label_hidden {
+        if p.is_list() {
+            p.add(&plain_row(&control));
+        } else {
+            p.add(&control);
+        }
     } else if segmented && p.is_list() {
         let row = adw::ActionRow::new();
         if let Some(label) = label.clone() {
@@ -1154,7 +1460,7 @@ pub struct StackProps {
     /// `column` or `row`.
     pub axis: &'static str,
     pub gap: Option<Num>,
-    pub padding: Option<Num>,
+    pub padding: Padding,
     pub width: Option<Num>,
     pub height: Option<Num>,
     pub align: Option<&'static str>,
@@ -1164,18 +1470,9 @@ pub struct StackProps {
     pub reflow: Option<Curve>,
 }
 
-/// Padding on every side of `widget`, as its margins.
-fn set_padding(widget: &gtk::Widget, padding: f64) {
-    let padding = padding.round().max(0.0) as i32;
-    widget.set_margin_top(padding);
-    widget.set_margin_bottom(padding);
-    widget.set_margin_start(padding);
-    widget.set_margin_end(padding);
-}
-
 /// `width` and `height` fix a side of `widget`: it neither shrinks below
 /// nor stretches past it.
-fn bind_size(
+pub(crate) fn bind_size(
     ctx: &Ctx,
     widget: &gtk::Widget,
     width: &Option<Num>,
@@ -1218,6 +1515,8 @@ pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
         (Some("center"), _) => gtk::Align::Center,
         (Some("trailing") | Some("bottom"), _) => gtk::Align::End,
         (Some("leading") | Some("top"), _) => gtk::Align::Start,
+        // A row's items share the baseline of their first lines.
+        (Some("baseline"), false) => gtk::Align::BaselineCenter,
         (Some("fill"), _) => gtk::Align::Fill,
         (None, true) => gtk::Align::Fill,
         (None, false) => gtk::Align::Center,
@@ -1249,30 +1548,44 @@ pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
             (container.upcast(), inner)
         }
     };
-    if let Some(padding) = &props.padding {
-        let padded = container.clone();
-        bind_number(ctx, padding, props.animate, &container, move |value| {
-            set_padding(&padded, value);
-        });
-    }
-    bind_size(ctx, &container, &props.width, &props.height, props.animate);
+    pad(ctx, &container, &props.padding, props.animate);
+    // A declared side is the size the column or row asks for, as wide as
+    // its content would like or not.
+    let outer: gtk::Widget = if props.width.is_some() || props.height.is_some() {
+        crate::layout::Sized::wrap(&container).upcast()
+    } else {
+        container
+    };
+    bind_size(ctx, &outer, &props.width, &props.height, props.animate);
     children(&inner, ctx);
-    place(p, &container);
+    place(p, &outer);
 }
 
 #[derive(Default)]
 pub struct GridProps {
     pub min_width: Option<Num>,
     pub gap: Option<Num>,
-    pub padding: Option<Num>,
+    /// The space between rows, where it differs from `gap`.
+    pub row_gap: Option<Num>,
+    pub padding: Padding,
     pub animate: Option<Curve>,
+    /// Rows as tall as the column width over the ratio, plus the extra.
+    pub cells: Option<(f64, Num)>,
+    /// Cells slide to new places with this spring.
+    pub reflow: Option<Curve>,
 }
 
 /// Equal columns, as many as fit at `min_width` or wider: a flow box whose
 /// cells share each line. A bound `min_width` springs with `animate`, and
-/// the cells move to their new places as the columns change.
+/// the cells move to their new places as the columns change. With
+/// `cells`, every row is as tall as the columns' width gives, its items
+/// from the top of their cells.
 #[allow(non_snake_case)]
 pub fn Grid(p: &Parent, ctx: &Ctx, props: GridProps, children: Build) {
+    if let Some((ratio, extra)) = props.cells.clone() {
+        crate::scene::cell_grid(p, ctx, props, ratio, extra, children);
+        return;
+    }
     let flow = gtk::FlowBox::new();
     flow.set_homogeneous(true);
     flow.set_selection_mode(gtk::SelectionMode::None);
@@ -1284,18 +1597,22 @@ pub fn Grid(p: &Parent, ctx: &Ctx, props: GridProps, children: Build) {
     flow.set_column_spacing(8);
     if let Some(gap) = &props.gap {
         let spaced = flow.clone();
+        let rows = props.row_gap.is_none();
         bind_number(ctx, gap, props.animate, &flow, move |value| {
             let gap = value.round().max(0.0) as u32;
-            spaced.set_row_spacing(gap);
+            if rows {
+                spaced.set_row_spacing(gap);
+            }
             spaced.set_column_spacing(gap);
         });
     }
-    if let Some(padding) = &props.padding {
-        let padded = flow.clone().upcast::<gtk::Widget>();
-        bind_number(ctx, padding, props.animate, &flow, move |value| {
-            set_padding(&padded, value);
+    if let Some(gap) = &props.row_gap {
+        let spaced = flow.clone();
+        bind_number(ctx, gap, props.animate, &flow, move |value| {
+            spaced.set_row_spacing(value.round().max(0.0) as u32);
         });
     }
+    pad(ctx, flow.upcast_ref(), &props.padding, props.animate);
     let first = props
         .min_width
         .as_ref()
@@ -1318,6 +1635,12 @@ pub struct LayersProps {
     pub width: Option<Num>,
     pub height: Option<Num>,
     pub animate: Option<Curve>,
+    /// The surface a style gives the stack.
+    pub style: Option<&'static crate::style::StyleDef>,
+    /// While false, nothing in the stack takes input.
+    pub enabled: Option<Get>,
+    /// Layers slide to new places with this spring.
+    pub reflow: Option<Curve>,
 }
 
 /// `Stack`: layers in one place, later ones above earlier ones, the stack
@@ -1337,6 +1660,7 @@ pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
         _ => (Center, Center),
     };
     let layers = crate::layout::Layers::new();
+    layers.set_reflow(props.reflow);
     bind_size(
         ctx,
         layers.upcast_ref(),
@@ -1344,6 +1668,20 @@ pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
         &props.height,
         props.animate,
     );
+    if let Some(style) = props.style {
+        crate::style::surface(style, layers.upcast_ref());
+    }
+    if let Some(enabled) = bound_enabled(ctx, &props.enabled) {
+        // Disabled content keeps its look: it only stops taking input and
+        // leaves the accessibility tree.
+        let shown = layers.clone();
+        effect(move || {
+            let on = enabled();
+            shown.set_can_target(on);
+            shown.set_can_focus(on);
+            shown.update_state(&[gtk::accessible::State::Hidden(!on)]);
+        });
+    }
     children(&Parent::of_layers(&layers, halign, valign), ctx);
     place(p, &layers);
 }
@@ -1357,6 +1695,90 @@ pub struct ImageProps {
     pub height: Option<Num>,
     pub fit: Option<&'static str>,
     pub animate: Option<Curve>,
+    /// Rounded corners of this radius.
+    pub corner: Option<Num>,
+    /// Drawn in the foreground color, as a symbol: only the picture's
+    /// shape shows.
+    pub template: bool,
+    /// Width over height, in place of the picture's own.
+    pub aspect: Option<f64>,
+}
+
+/// The content fit of `fit`.
+pub(crate) fn content_fit(fit: Option<&str>) -> gtk::ContentFit {
+    match fit {
+        Some("cover") => gtk::ContentFit::Cover,
+        Some("fill") => gtk::ContentFit::Fill,
+        _ => gtk::ContentFit::Contain,
+    }
+}
+
+/// How a picture is sized and shaped.
+pub(crate) struct Sizing<'a> {
+    pub(crate) width: &'a Option<Num>,
+    pub(crate) height: &'a Option<Num>,
+    pub(crate) animate: Option<Curve>,
+    pub(crate) corner: &'a Option<Num>,
+    pub(crate) aspect: Option<f64>,
+}
+
+/// A picture of a declared size and shape, holding `picture`: with one
+/// side given, the other follows `ratio`; with only `aspect`, as wide as
+/// its container and as tall as the aspect makes it. Returns the widget
+/// to place and what lays it out again when the ratio changes.
+pub(crate) fn framed(
+    ctx: &Ctx,
+    picture: &gtk::Widget,
+    sizing: Sizing<'_>,
+    ratio: Rc<Cell<f64>>,
+) -> (gtk::Widget, crate::picture::Frame, Rc<dyn Fn()>) {
+    let Sizing {
+        width,
+        height,
+        animate,
+        corner,
+        aspect,
+    } = sizing;
+    let frame = crate::picture::Frame::new(picture, 0, 0);
+    let sides: Rc<Cell<(Option<f64>, Option<f64>)>> = Rc::new(Cell::new((None, None)));
+    let resize: Rc<dyn Fn()> = {
+        let frame = frame.clone();
+        let sides = Rc::clone(&sides);
+        let ratio = Rc::clone(&ratio);
+        Rc::new(move || {
+            let ratio = ratio.get();
+            let (width, height) = sides.get();
+            let w = width.or(height.map(|height| height * ratio)).unwrap_or(0.0);
+            let h = height.or(width.map(|width| width / ratio)).unwrap_or(0.0);
+            frame.set_size(w.round() as i32, h.round() as i32);
+        })
+    };
+    match (width, height, aspect) {
+        (None, None, Some(aspect)) => frame.fill_width(aspect),
+        _ => {
+            if let Some(width) = width {
+                let sides = Rc::clone(&sides);
+                let resize = Rc::clone(&resize);
+                bind_number(ctx, width, animate, &frame, move |value| {
+                    sides.set((Some(value), sides.get().1));
+                    resize();
+                });
+            }
+            if let Some(height) = height {
+                let sides = Rc::clone(&sides);
+                let resize = Rc::clone(&resize);
+                bind_number(ctx, height, animate, &frame, move |value| {
+                    sides.set((sides.get().0, Some(value)));
+                    resize();
+                });
+            }
+        }
+    }
+    let outer: gtk::Widget = match corner {
+        Some(corner) => crate::features::rounded(ctx, &frame, corner, animate).upcast(),
+        None => frame.clone().upcast(),
+    };
+    (outer, frame, resize)
 }
 
 /// A picture from a declared resource. With one side given, the other
@@ -1364,62 +1786,63 @@ pub struct ImageProps {
 #[allow(non_snake_case)]
 pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
     let path = std::path::Path::new(&crate::host::resources_dir()).join(props.source);
-    let picture = match crate::hdr::texture(&path).or_else(|| oriented(&path)) {
-        Some(texture) => gtk::Picture::for_paintable(&texture),
-        None => gtk::Picture::for_filename(&path),
-    };
-    picture.set_can_shrink(true);
-    picture.set_content_fit(match props.fit {
-        Some("cover") => gtk::ContentFit::Cover,
-        Some("fill") => gtk::ContentFit::Fill,
-        _ => gtk::ContentFit::Contain,
-    });
-    let (natural_width, natural_height) = picture
-        .paintable()
+    let texture: Option<gtk::gdk::Paintable> = crate::hdr::texture(&path)
+        .or_else(|| oriented(&path))
+        .map(|texture| texture.upcast())
+        .or_else(|| {
+            gtk::gdk::Texture::from_filename(&path)
+                .ok()
+                .map(|texture| texture.upcast())
+        });
+    let (natural_width, natural_height) = texture
+        .as_ref()
         .map(|paintable| (paintable.intrinsic_width(), paintable.intrinsic_height()))
         .unwrap_or((0, 0));
-    let ratio = if natural_width > 0 && natural_height > 0 {
-        f64::from(natural_width) / f64::from(natural_height)
+    let ratio = props
+        .aspect
+        .unwrap_or(if natural_width > 0 && natural_height > 0 {
+            f64::from(natural_width) / f64::from(natural_height)
+        } else {
+            1.0
+        });
+    let fit = content_fit(props.fit);
+    let picture: gtk::Widget = if props.template {
+        let template = crate::picture::Template::new(fit);
+        template.set_paintable(texture.as_ref());
+        template.upcast()
     } else {
-        1.0
+        let picture = match &texture {
+            Some(texture) => gtk::Picture::for_paintable(texture),
+            None => gtk::Picture::for_filename(&path),
+        };
+        picture.set_can_shrink(true);
+        picture.set_content_fit(fit);
+        picture.upcast()
     };
     match &props.label {
         Some(label) => {
             let text = bound_text(ctx, label);
             let described = picture.clone();
-            effect(move || described.set_alternative_text(Some(&text())));
+            effect(move || match described.downcast_ref::<gtk::Picture>() {
+                Some(picture) => picture.set_alternative_text(Some(&text())),
+                None => described.update_property(&[gtk::accessible::Property::Label(&text())]),
+            });
         }
         None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
-    let frame = crate::picture::Frame::new(&picture, 0, 0);
-    let sides: Rc<Cell<(Option<f64>, Option<f64>)>> = Rc::new(Cell::new((None, None)));
-    let resize = {
-        let frame = frame.clone();
-        let sides = Rc::clone(&sides);
-        Rc::new(move || {
-            let (width, height) = sides.get();
-            let w = width.or(height.map(|height| height * ratio)).unwrap_or(0.0);
-            let h = height.or(width.map(|width| width / ratio)).unwrap_or(0.0);
-            frame.set_size(w.round() as i32, h.round() as i32);
-        })
-    };
-    if let Some(width) = &props.width {
-        let sides = Rc::clone(&sides);
-        let resize = Rc::clone(&resize);
-        bind_number(ctx, width, props.animate, &frame, move |value| {
-            sides.set((Some(value), sides.get().1));
-            resize();
-        });
-    }
-    if let Some(height) = &props.height {
-        let sides = Rc::clone(&sides);
-        let resize = Rc::clone(&resize);
-        bind_number(ctx, height, props.animate, &frame, move |value| {
-            sides.set((sides.get().0, Some(value)));
-            resize();
-        });
-    }
-    place(p, &frame);
+    let (outer, _, _) = framed(
+        ctx,
+        &picture,
+        Sizing {
+            width: &props.width,
+            height: &props.height,
+            animate: props.animate,
+            corner: &props.corner,
+            aspect: props.aspect,
+        },
+        Rc::new(Cell::new(ratio)),
+    );
+    place(p, &outer);
 }
 
 /// A JPEG turned upright by its EXIF orientation, which GTK's own loader
@@ -1516,16 +1939,68 @@ pub fn Divider(p: &Parent) {
 #[derive(Default)]
 pub struct FormProps {
     pub title: Option<Str>,
+    /// The space between sections.
+    pub gap: Option<f64>,
+    /// The least height of a row.
+    pub row_height: Option<f64>,
+    /// The padding of every row across and down, unless its section says.
+    pub padding_x: Option<f64>,
+    pub padding_y: Option<f64>,
+}
+
+/// The layout a form gives the rows of its sections.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct RowLayout {
+    pub row_height: Option<f64>,
+    pub padding_x: Option<f64>,
+    pub padding_y: Option<f64>,
+}
+
+impl RowLayout {
+    /// The rules that lay out the rows of a list carrying their class: a
+    /// plain row's padding, a libadwaita row's header, the least height.
+    fn class(&self) -> Option<String> {
+        if *self == RowLayout::default() {
+            return None;
+        }
+        let mut rules = String::new();
+        let padding = match (self.padding_y, self.padding_x) {
+            (None, None) => None,
+            (y, x) => Some(format!(
+                "padding: {}px {}px;",
+                y.unwrap_or(10.0),
+                x.unwrap_or(12.0)
+            )),
+        };
+        if let Some(padding) = padding {
+            rules.push_str(&format!(
+                "& > row.bern-plain-row {{ {padding} }} & > row > box.header {{ {padding} }} "
+            ));
+        }
+        if let Some(height) = self.row_height {
+            rules.push_str(&format!(
+                "& > row {{ min-height: {height}px; }} & > row > box.header {{ min-height: {height}px; }} "
+            ));
+        }
+        Some(crate::style::class_with(&rules))
+    }
 }
 
 /// A grouped form: sections of boxed lists in a clamped, scrolling page,
-/// as libadwaita preference pages lay them out.
+/// as libadwaita preference pages lay them out. `gap` spaces the sections;
+/// a form that opens with a plain section starts at the top of the page.
 #[allow(non_snake_case)]
 pub fn Form(p: &Parent, ctx: &Ctx, props: FormProps, children: Build) {
     if let (Some(title), Some(page)) = (&props.title, ctx.page()) {
         page.push_title(bound_text(ctx, title));
     }
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 24);
+    let content = gtk::Box::new(
+        gtk::Orientation::Vertical,
+        props
+            .gap
+            .map(|gap| gap.round().max(0.0) as i32)
+            .unwrap_or(24),
+    );
     content.set_margin_top(24);
     content.set_margin_bottom(24);
     content.set_margin_start(12);
@@ -1539,7 +2014,19 @@ pub fn Form(p: &Parent, ctx: &Ctx, props: FormProps, children: Build) {
     scrolled.set_vexpand(true);
     scrolled.set_propagate_natural_height(true);
     scrolled.set_child(Some(&clamp));
-    children(&Parent::of_box(&content), ctx);
+    crate::features::natural_scrolling(&scrolled, false);
+    let layout = RowLayout {
+        row_height: props.row_height,
+        padding_x: props.padding_x,
+        padding_y: props.padding_y,
+    };
+    children(&Parent::of_box(&content), &ctx.with_form(Rc::new(layout)));
+    if content
+        .first_child()
+        .is_some_and(|first| first.has_css_class("bern-plain-section"))
+    {
+        content.set_margin_top(0);
+    }
     p.add(&scrolled);
 }
 
@@ -1547,6 +2034,12 @@ pub fn Form(p: &Parent, ctx: &Ctx, props: FormProps, children: Build) {
 pub struct SectionProps {
     pub title: Option<Str>,
     pub footer: Option<Str>,
+    /// Rows without a background, padding or separators, as a heading
+    /// that scrolls with the form.
+    pub plain: bool,
+    /// The padding of the section's rows, in place of the form's.
+    pub padding_x: Option<f64>,
+    pub padding_y: Option<f64>,
 }
 
 /// A titled group of rows with an optional footnote.
@@ -1563,6 +2056,20 @@ pub fn Section(p: &Parent, ctx: &Ctx, props: SectionProps, children: Build) {
         group.append(&heading);
     }
     let list = boxed_list();
+    let form = ctx.form().map(|form| **form).unwrap_or_default();
+    let layout = RowLayout {
+        row_height: form.row_height,
+        padding_x: props.padding_x.or(form.padding_x),
+        padding_y: props.padding_y.or(form.padding_y),
+    };
+    if props.plain {
+        list.remove_css_class("boxed-list");
+        list.add_css_class("bern-plain-list");
+        group.add_css_class("bern-plain-section");
+    }
+    if let Some(class) = layout.class() {
+        list.add_css_class(&class);
+    }
     group.append(&list);
     if let Some(footer) = &props.footer {
         let note = gtk::Label::new(None);
@@ -1581,15 +2088,30 @@ pub fn Section(p: &Parent, ctx: &Ctx, props: SectionProps, children: Build) {
 
 /// Toolbar items for the enclosing page's header.
 #[allow(non_snake_case)]
-pub fn Toolbar(_p: &Parent, ctx: &Ctx, children: Build) {
+pub fn Toolbar(p: &Parent, ctx: &Ctx, children: Build) {
+    tools(p, ctx, children, false);
+}
+
+/// Toolbar items at the leading end of the page's header, after the way
+/// back: those before a toolbar's `Spacer`.
+#[allow(non_snake_case)]
+pub fn LeadingToolbar(p: &Parent, ctx: &Ctx, children: Build) {
+    tools(p, ctx, children, true);
+}
+
+fn tools(_p: &Parent, ctx: &Ctx, children: Build, leading: bool) {
     let Some(page) = ctx.page().cloned() else {
         return;
     };
-    let holder = page.add_tools();
+    let holder = page.add_tools(leading);
+    holder.set_valign(gtk::Align::Center);
     let shown = holder.clone();
     let at = ctx.clone();
     effect(move || shown.set_visible(at.shown()));
-    children(&Parent::of_box(&holder), &ctx.toolbar());
+    children(
+        &Parent::of_aligned_box(&holder, gtk::Align::Center),
+        &ctx.toolbar(),
+    );
 }
 
 #[derive(Default)]
@@ -1682,6 +2204,10 @@ pub struct MenuProps {
     pub id: &'static str,
     pub label: Option<Str>,
     pub icon: Option<&'static str>,
+    /// `style: icon`: a round button showing only the icon, the label as
+    /// its tooltip and accessible name.
+    pub icon_only: bool,
+    pub shape: Shape,
 }
 
 /// A menu button. Each item is registered on the button, so external
@@ -1690,21 +2216,36 @@ pub struct MenuProps {
 pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>>) {
     let button = gtk::MenuButton::new();
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
-    match (props.icon, label.clone()) {
-        (Some(icon), Some(label)) => {
-            let content = adw::ButtonContent::new();
-            content.set_icon_name(icons::name(icon));
-            let shown = content.clone();
-            effect(move || shown.set_label(&label()));
-            button.set_child(Some(&content));
+    if props.icon_only {
+        button.set_icon_name(icons::name(props.icon.unwrap_or("ellipsis")));
+        button.add_css_class("flat");
+        button.add_css_class("circular");
+        if let Some(label) = label.clone() {
+            let named = button.clone();
+            effect(move || {
+                let text = label();
+                named.set_tooltip_text(Some(&text));
+                named.update_property(&[gtk::accessible::Property::Label(&text)]);
+            });
         }
-        (Some(icon), None) => button.set_icon_name(icons::name(icon)),
-        (None, Some(label)) => {
-            let shown = button.clone();
-            effect(move || shown.set_label(&label()));
+    } else {
+        match (props.icon, label.clone()) {
+            (Some(icon), Some(label)) => {
+                let content = adw::ButtonContent::new();
+                content.set_icon_name(icons::name(icon));
+                let shown = content.clone();
+                effect(move || shown.set_label(&label()));
+                button.set_child(Some(&content));
+            }
+            (Some(icon), None) => button.set_icon_name(icons::name(icon)),
+            (None, Some(label)) => {
+                let shown = button.clone();
+                effect(move || shown.set_label(&label()));
+            }
+            (None, None) => {}
         }
-        (None, None) => {}
     }
+    shape(ctx, button.upcast_ref(), &props.shape);
     button.set_valign(gtk::Align::Center);
     let group = gio::SimpleActionGroup::new();
     let mut entries: Vec<Option<(String, crate::TextFn)>> = Vec::new();
@@ -1785,13 +2326,19 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
 /// floats and texts as Bern formats them, enums by their label.
 pub fn display(value: &Value, enum_name: Option<&str>) -> String {
     match (value, enum_name) {
-        (Value::Enum { variant, .. }, Some(name)) => label(name, *variant),
+        (Value::Enum { variant, fields }, Some(name)) => label_of(name, *variant, fields),
         (value, _) => crate::value::plain(value),
     }
 }
 
-/// The localized label of an enum variant.
+/// The localized label of a variant without fields.
 pub fn label(enum_name: &str, variant: u32) -> String {
+    label_of(enum_name, variant, &[])
+}
+
+/// The localized label of an enum value. A label that shows the
+/// variant's fields writes them as its text says.
+pub fn label_of(enum_name: &str, variant: u32, fields: &[Value]) -> String {
     let host = crate::host::host();
     let Some(def) = host.def.types.enum_def(enum_name) else {
         return String::new();
@@ -1799,5 +2346,27 @@ pub fn label(enum_name: &str, variant: u32) -> String {
     let Some(variant) = def.variants.get(variant as usize) else {
         return String::new();
     };
-    tr(&crate::protocol::label_key(enum_name, &variant.name))
+    let key = crate::protocol::label_key(enum_name, &variant.name);
+    let Some(label) = variant.label.as_ref().filter(|label| !label.params.is_empty()) else {
+        return tr(&key);
+    };
+    let args: Vec<(&str, crate::protocol::format::Arg)> = label
+        .params
+        .iter()
+        .filter_map(|param| {
+            let at = variant.fields.iter().position(|field| field.name == *param)?;
+            let value = fields.get(at)?;
+            let arg = match &variant.fields[at].ty {
+                crate::protocol::Type::Record { name }
+                    if name == crate::protocol::format::CALENDAR_DATE =>
+                {
+                    text::date(value)
+                }
+                crate::protocol::Type::Enum { name } => text::arg(value, Some(name)),
+                _ => text::arg(value, None),
+            };
+            Some((param.as_str(), arg))
+        })
+        .collect();
+    text::fmt(&key, &args)
 }

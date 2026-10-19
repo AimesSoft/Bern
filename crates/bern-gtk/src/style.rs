@@ -90,9 +90,64 @@ impl StyleDef {
     }
 }
 
+/// The weight and size `text { … }` gives a text style: its name, one of
+/// `ultralight` … `black`, and its size in points.
+pub type TextStyle = (&'static str, &'static str, Option<f64>);
+
 thread_local! {
     static STYLES: Cell<&'static [StyleDef]> = const { Cell::new(&[]) };
+    static TEXT: Cell<&'static [TextStyle]> = const { Cell::new(&[]) };
     static PROVIDER: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
+    /// Rules made at run time for values the declaration gives, such as a
+    /// row height: one class per distinct body.
+    static RULES: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The class of a rule with this body, made the first time it is asked
+/// for. Only for values written in the declaration: each new one writes
+/// the style sheet again.
+pub(crate) fn class_for(body: &str) -> String {
+    class_with(&format!("& {{ {body} }}"))
+}
+
+/// The class of rules where `&` stands for the class's selector.
+pub(crate) fn class_with(rules: &str) -> String {
+    let (class, added) = RULES.with(|existing| {
+        let mut existing = existing.borrow_mut();
+        match existing.iter().position(|kept| kept == rules) {
+            Some(index) => (format!("bern-rule-{index}"), false),
+            None => {
+                existing.push(rules.to_string());
+                (format!("bern-rule-{}", existing.len() - 1), true)
+            }
+        }
+    });
+    if added {
+        reload();
+    }
+    class
+}
+
+/// The CSS weight of a text style's weight.
+fn weight(name: &str) -> Option<u16> {
+    Some(match name {
+        "ultralight" => 100,
+        "thin" => 200,
+        "light" => 300,
+        "regular" => 400,
+        "medium" => 500,
+        "semibold" => 600,
+        "bold" => 700,
+        "heavy" => 800,
+        "black" => 900,
+        _ => return None,
+    })
+}
+
+/// The class a `Text` or `Label` of `style` carries for the weights of
+/// `text { … }`.
+pub(crate) fn text_class(style: &str) -> String {
+    format!("bern-text-{style}")
 }
 
 fn shadows(look: &Look, part: Option<bool>) -> Option<String> {
@@ -165,7 +220,7 @@ fn size_declarations(size: &str) -> &'static str {
 
 /// The style sheet of every style, for the current appearance and for
 /// parts with an appearance of their own.
-fn sheet(styles: &[StyleDef]) -> String {
+fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
     let mut css = String::from(
         // A styled sidebar row leaves its look to the content it holds.
         ".navigation-sidebar > row.bern-styled-row { padding: 0; background: none; box-shadow: none; }\n\
@@ -177,6 +232,24 @@ fn sheet(styles: &[StyleDef]) -> String {
          .bern-content-button { padding: 0; min-width: 0; min-height: 0; background: none; box-shadow: none; border-radius: 0; }\n\
          .bern-content-plain:active { filter: brightness(0.85); }\n",
     );
+    css.push_str(crate::scene::SHEET);
+    for (style, name, size) in text {
+        let Some(weight) = weight(name) else { continue };
+        css.push_str(&format!(
+            ".{} {{ font-weight: {weight}; ",
+            text_class(style)
+        ));
+        if let Some(size) = size {
+            css.push_str(&format!("font-size: {size}px; "));
+        }
+        css.push_str("}\n");
+    }
+    RULES.with(|rules| {
+        for (index, template) in rules.borrow().iter().enumerate() {
+            css.push_str(&template.replace('&', &format!(".bern-rule-{index}")));
+            css.push('\n');
+        }
+    });
     for (scope, part) in [
         ("", None),
         (".bern-appearance-dark ", Some(true)),
@@ -216,15 +289,16 @@ fn sheet(styles: &[StyleDef]) -> String {
 }
 
 /// Install the styles of the application; called once at startup.
-pub fn install(styles: &'static [StyleDef]) {
+pub fn install(styles: &'static [StyleDef], text: &'static [TextStyle]) {
     STYLES.with(|cell| cell.set(styles));
+    TEXT.with(|cell| cell.set(text));
     reload();
 }
 
 /// Write the style sheet again, as after the appearance changed.
 pub(crate) fn reload() {
     let styles = STYLES.with(Cell::get);
-    let css = sheet(styles);
+    let css = sheet(styles, TEXT.with(Cell::get));
     PROVIDER.with(|provider| {
         let mut provider = provider.borrow_mut();
         let provider = provider.get_or_insert_with(|| {
@@ -240,6 +314,15 @@ pub(crate) fn reload() {
         });
         provider.load_from_string(&css);
     });
+}
+
+/// Show `style` on a surface: a stack's background, foreground and
+/// corners. The corners clip what the layers draw.
+pub(crate) fn surface(style: &'static StyleDef, widget: &gtk::Widget) {
+    widget.add_css_class(&format!("bern-style-{}", style.name));
+    if style.corner.is_some() {
+        widget.set_overflow(gtk::Overflow::Hidden);
+    }
 }
 
 /// Show `style` on a control: `states` is the widget whose GTK state flags

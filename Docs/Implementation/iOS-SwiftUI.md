@@ -32,7 +32,7 @@
 | `templates/BernUIKit.swift` | iOS 平台部分：虚拟窗口宿主、sheet、窗口事实、开发快照、视频视图 |
 | `templates/BernAppKit.swift` | macOS 平台部分，从原来的 `BernRuntime.swift` 分出，行为不变 |
 
-生成的应用包是 iOS 的扁平结构：可执行文件、`Info.plist`、各语言的 `.lproj` 与随包资源都在包的顶层。图标由 `actool` 把 1024 像素的 PNG 编译进 `Assets.car`（未声明图标时是 Bern 标志的方形版本，声明的较小图标先用 `sips` 放大）。`Info.plist` 声明启动屏（否则应用以兼容模式显示，不铺满屏幕）、多场景（iPad 的多窗口；iPhone 始终只有一个场景）、iPhone 与 iPad、iPad 上的全部四个方向、最低 iOS 17.0。
+生成的应用包是 iOS 的扁平结构：可执行文件、`Info.plist`、各语言的 `.lproj` 与随包资源都在包的顶层。图标由 `actool` 把 1024 像素的 PNG 编译进 `Assets.car`（未声明图标时是 Bern 标志的方形版本，声明的较小图标先用 `sips` 放大；`[app.icon].ios` 为 `.appiconset` 文件夹时原样编译，其中的深色、着色版随之生效）。`Info.plist` 声明启动屏（否则应用以兼容模式显示，不铺满屏幕）、多场景（iPad 的多窗口；iPhone 始终只有一个场景）、iPhone 与 iPad、iPad 上的全部四个方向、最低 iOS 17.0。
 
 最低 iOS 17：与 macOS 14 同一代，运行时用到的 Observation、`ContentUnavailableView` 等从这一版起提供。
 
@@ -154,3 +154,24 @@ iPad 窗口化模式，同日，同一模拟器在“设置 > 多任务与手势
 - 屏幕旋转未实测。
 - 被 sheet 盖住的窗口不能单独激活或关闭，需要先关掉上面的窗口。
 - 窗口内容自带分栏或导航栈时，它作为 sheet 打开时没有“完成”按钮（嵌套的导航栈会出问题），只能下滑或用命令关闭。
+
+## 手机外壳与像素对照（2026-10-18）
+
+iPhone 17e 模拟器（iOS 26.5，390 × 844 点，截图 1170 × 2532）上，以一个真实应用的手机首页对照它的网页原型。原型用无界面 Chrome 按 3 倍渲染成同尺寸图片，两边用同一工具逐行、逐列找出内容边界比较；以下改动后，首页各元素的位置和尺寸与原型相差都在 1 点以内（中文字形见下文）。
+
+- **搜索面板**：`Search(style: palette)` 与 `SearchItem` 在 iOS 上也生成同一个面板（原先只有 macOS 接受）。输入框换成系统 `TextField`，点遮罩关闭，硬件键盘的方向键、回车、Esc 仍可用；macOS 保留 AppKit 输入框和窗口点击监视。生成器回归测试为 iOS 生成并类型检查同一夹具。
+- **`Tabs` 里的 `Pages`**：编译期把模块页面展开成 `Tab`，内容是页面组件，和侧栏里的 `Pages` 同源。选中的标签取应用强调色（`.bernAccentTint()` 加在 `TabView` 上）；普通玻璃按钮和圆形图标按钮在 iOS 上改用主文字色（`bernPrimaryLabel`），不被标签栏的强调色染色。
+- **`Adaptive` 量可用宽度**：原先测的是所选布局自己的宽度，`frame(maxWidth:)` 没有最小值时不小于内容，宽屏布局先被选中就一直量出宽屏。现在 `minWidth: 0`，量的是父视图给的宽度。
+- **固定尺寸的 `Stack` 按 `align` 摆放**：`Stack(align:, width:, height:)` 的 `.frame` 带上同一对齐，内容不再总在正中。
+- **无圆角的表面铺满安全区**：没有 `corner` 的 `Stack` 样式背景用 SwiftUI 的形状样式背景，延伸到状态栏和标签栏下面。
+- **`Button(width: fill)`**：系统按钮随标签撑满容器宽度（能力 `fill_buttons`，SwiftUI 与 Web）。
+- **`IconButton(height:)`**：指定直径的系统玻璃圆钮，和指定高度的胶囊控件同一做法；iOS 原生圆钮只有约 31 与 47 点两档。胶囊控件按设计尺寸档取字号：42 点及以上为 15 点半粗，其余 13 点中等。
+- **`Row` 按项目自己的宽度排**：`HStack` 把空间按弹性从小到大平分给各项，一行放得下时也会先给某个可截断的短文字不足它宽度的一份，把它截成省略号（实测一行三项、标签组只分到 81 点而需要 88 点）。现在 `Row` 生成 `BernRow`（`Layout`），规则与其他目标的行相同：放得下时每项取自己的宽度，剩余空间由会伸展的项（`Spacer`、撑满的框）尽量平分；放不下时其余项按各自宽度的比例收缩，不小于各自的最小宽度。行里的 `Spacer` 带上 `BernRowSpacer` 标记，只沿行伸展、不参与行高；行里的 `Divider` 包一层 `HStack`，保持竖线方向。
+- **定宽高的 `Column` / `Row` 从起始边排内容**：原先 `.frame(width:)` 把较窄的内容放在正中，`Column(width: 58)` 里的文字因而偏右。现在列从顶部开始、横向按 `align`（默认前缘），行从前缘开始、纵向按 `align`，与其他目标一致。
+- **手机下拉胶囊**：iOS 的 `Menu(shape: capsule)` 按设计 6.3 排列：符号在 16 点框内，箭头在 12 点框内、60 % 不透明度，间距 6，箭头一侧离边 11 点。`Picker(style: menu, shape: capsule)` 的按钮同样带这个箭头（iOS 的菜单按钮本身不画箭头）。
+- **胶囊分段按钮**：`SplitButton(shape: capsule)` 的开关部分不用系统 `Label`，符号在 16 点框内、与文字相隔 6，离胶囊端 14、离分隔线 10；下拉部分宽 30。macOS 与 iOS 同一做法。
+- **沉浸窗口铺满屏幕**：`immersive` 为真时，iOS 窗口内容伸到安全区下（`ignoresSafeArea`），横屏手机上 844 × 390 的画面按 1 倍铺满；为假时回到安全区内。
+- **标签栏附件**：`TabAccessory` 在 iOS 26.1 起生成 `tabViewBottomAccessory(isEnabled:)`，内容只构建一次（`AnyView`），`shown` 为假时系统收起附件；更早的 iOS 在每页底部的安全区内嵌一条材质胶囊。附件里的图标按钮是条上的符号（环境 `bernOnBar`）：不再各带玻璃，`IconButton(height:)` 只给出点按区域的大小。iPhone 17e 模拟器（iOS 26.5）上实测附件随播放出现在标签栏上方、关闭播放器后收起。
+- **胶囊按钮的内部排列**：`Button(shape: capsule)` 带图标时不再用系统 `Label`（两端平台间距不同），改为符号在 16 点框内（30 点高的标签胶囊为 14 点）、与文字相隔 6；左右内边距按尺寸档取：42 点及以上 22，30 点及以下 13，其余 14。macOS 与 iOS 同一做法。
+
+中文字形：同为 30 点系统字体，Chrome 渲染的苹方汉字前进宽度为 1 em，iOS 原生渲染约 0.947 em，所以中文标题看起来小约 5%。布局按点对齐，字形交给系统渲染，没有放大字号补偿。

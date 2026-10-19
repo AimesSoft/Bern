@@ -326,6 +326,7 @@ mod tests {
                 name: "position_ms".into(),
                 ty: Type::Int,
                 doc: String::new(),
+                content: false,
             }],
             commands: vec![
                 CommandSpec {

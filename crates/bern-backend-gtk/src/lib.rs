@@ -19,7 +19,7 @@ use bern_target_api::{
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
     dist_dir, feature, files_below, icon, package_architecture,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use rust::Generator;
 
@@ -38,6 +38,7 @@ fn component_names() -> &'static [&'static str] {
 /// The further parts of the IR this target builds.
 const FEATURES: &[&str] = &[
     feature::BUTTON_CONTENT,
+    feature::TAB_ACCESSORY,
     feature::REVEAL,
     feature::TOOLBAR_SEARCH,
     feature::SEARCH_RESULTS,
@@ -55,24 +56,62 @@ const FEATURES: &[&str] = &[
     feature::RAILS,
     feature::POPOVER_BUTTON,
     feature::SIZE_CLASSES,
+    feature::TEXT_FORMATS,
+    feature::TEXT_WEIGHTS,
+    feature::TEXT_LINES,
+    feature::IMAGE_CORNERS,
+    feature::SIDEBAR_WIDTH,
+    feature::CONTROLLED_VALUES,
+    feature::SEARCH_PALETTE,
+    feature::IMAGE_TEMPLATE,
+    feature::ADAPTIVE_IMAGES,
+    feature::SCALED_SCENE,
+    feature::ACCORDION_LAYOUT,
+    feature::CAPSULE_CONTROLS,
+    feature::MODAL_FLOW_TIMER,
+    feature::PAGE_BADGES,
+    feature::IDLE_CONTROL,
+    feature::FILL_BUTTONS,
+    feature::GRID_CELLS,
+    feature::PAGE_SEARCH,
+    feature::FORM_LAYOUT,
+    feature::MODAL_COVER,
+    feature::WINDOW_SHORT,
+    feature::EDGE_GROW,
+    feature::DELAYED_APPEAR,
+    feature::TOOLBAR_LEADING,
+    feature::AXIS_PADDING,
+    feature::ICON_MENUS,
+    feature::ICON_LABELS,
+    feature::ROW_BASELINE,
+    feature::SIDEBAR_HEADER,
+    feature::UNTITLED_DETAIL,
 ];
 
-/// `reflow` GTK cannot show: only the children of a column or row slide,
-/// so it warns elsewhere and the children move at once.
+/// `reflow` GTK cannot show: the children of a column, row or stack and
+/// the cells of a grid with `cell_ratio` slide; a flow box grid lays out
+/// its own cells, so it warns there and the cells move at once.
 fn reflow_warnings(app: &Application) -> Vec<Diagnostic> {
+    fn slides(kind: Option<&str>) -> bool {
+        matches!(kind, Some("Column" | "Row" | "Stack" | "CellGrid"))
+    }
     fn visit(nodes: &[Node], container: Option<&str>, out: &mut Vec<Diagnostic>) {
         for node in nodes {
             match node {
                 Node::Element(element) => {
-                    let slides = match element.kind.as_str() {
-                        "Column" | "Row" => true,
-                        "ForEach" => matches!(container, Some("Column" | "Row")),
-                        _ => false,
+                    let kind = match element.kind.as_str() {
+                        "Grid" if element.number("cell_ratio").is_some() => "CellGrid",
+                        other => other,
                     };
-                    if element.keyword("reflow").is_some() && !slides {
+                    let moves = if kind == "ForEach" {
+                        slides(container)
+                    } else {
+                        slides(Some(kind))
+                    };
+                    if element.keyword("reflow").is_some() && !moves {
                         out.push(
                             Diagnostic::warning(format!(
-                                "target `gtk-linux` slides only the children of a `Column` or `Row` with `reflow`; the items of this `{}` move at once",
+                                "target `gtk-linux` slides only the children of a `Column`, `Row` or `Stack` and the cells of a `Grid` with `cell_ratio` with `reflow`; the items of this `{}` move at once",
                                 element.kind
                             ))
                             .at(element.source.clone()),
@@ -82,7 +121,7 @@ fn reflow_warnings(app: &Application) -> Vec<Diagnostic> {
                     let inner = if element.kind == "ForEach" {
                         container
                     } else {
-                        Some(element.kind.as_str())
+                        Some(kind)
                     };
                     visit(&element.children, inner, out);
                 }
@@ -135,6 +174,28 @@ pub fn icon_file(app: &Application) -> PathBuf {
     PathBuf::from("icons").join(format!("{}.png", app.app.bundle_id))
 }
 
+/// Where a declared icon theme folder goes beside the executable, for the
+/// package to install: `icons/hicolor`.
+const THEME_DIR: &str = "icons/hicolor";
+
+/// The icons of a declared icon theme folder, each with its place in
+/// `hicolor`, named after the application (`48x48/apps/<bundle id>.png`).
+fn theme_files(app: &Application, dir: &Path) -> Result<Vec<(icon::ThemeIcon, PathBuf)>, String> {
+    let id = &app.app.bundle_id;
+    Ok(icon::theme_icons(dir)?
+        .into_iter()
+        .map(|one| {
+            let name = if one.symbolic {
+                format!("{id}-symbolic.{}", one.extension)
+            } else {
+                format!("{id}.{}", one.extension)
+            };
+            let place = one.folder.join(name);
+            (one, place)
+        })
+        .collect())
+}
+
 fn executable(app: &Application) -> String {
     app.app.id.replace('_', "-")
 }
@@ -171,7 +232,13 @@ impl Target for GtkLinux {
                 "animate",
                 "scroll_scale",
                 "scroll_opacity",
+                "scroll_origin_x",
+                "scroll_origin_y",
                 "nudge",
+                "nudge_key",
+                "nudge_scale",
+                "reduce_motion",
+                "appear_delay",
                 "stagger",
             ],
             window_chrome: true,
@@ -281,13 +348,46 @@ impl Target for GtkLinux {
             ),
         ];
         // The application icon next to the executable, which adds the
-        // directory to the icon theme and names it after the application.
-        let images = icon::images(app, &context.project_dir, icon::Shape::AsDrawn)
-            .map_err(|message| vec![Diagnostic::error(message)])?;
-        files.push(GeneratedFile {
-            path: PathBuf::from(&product).join(icon_file(app)),
-            contents: icon::largest(&images).png.to_vec(),
-        });
+        // directory to the icon theme and names it after the application:
+        // the declared PNG or the Bern logo, or the largest PNG of a
+        // declared icon theme, whose icons all go below it for the package.
+        let failed = |message: String| vec![Diagnostic::error(message)];
+        let read = |path: &Path| {
+            std::fs::read(path)
+                .map_err(|error| failed(format!("cannot read {}: {error}", path.display())))
+        };
+        match icon::source(app, "linux", &context.project_dir) {
+            icon::Source::Native(dir) => {
+                let icons = theme_files(app, &dir).map_err(|message| {
+                    failed(format!("the Linux icon {} {message}", dir.display()))
+                })?;
+                let largest = icons
+                    .iter()
+                    .filter(|(one, _)| !one.symbolic)
+                    .filter_map(|(one, _)| one.size.map(|size| (size, &one.path)))
+                    .max_by_key(|(size, _)| *size)
+                    .map(|(_, path)| path)
+                    .expect("an icon theme has a PNG");
+                files.push(GeneratedFile {
+                    path: PathBuf::from(&product).join(icon_file(app)),
+                    contents: read(&dir.join(largest))?,
+                });
+                for (one, place) in &icons {
+                    files.push(GeneratedFile {
+                        path: PathBuf::from(&product).join(THEME_DIR).join(place),
+                        contents: read(&dir.join(&one.path))?,
+                    });
+                }
+            }
+            _ => {
+                let images = icon::images(app, "linux", &context.project_dir, icon::Shape::AsDrawn)
+                    .map_err(failed)?;
+                files.push(GeneratedFile {
+                    path: PathBuf::from(&product).join(icon_file(app)),
+                    contents: icon::largest(&images).png.to_vec(),
+                });
+            }
+        }
         let lock = context.workspace_dir.join("Cargo.lock");
         if let Ok(contents) = std::fs::read(&lock)
             && !context.output_dir.join("app/Cargo.lock").exists()
@@ -420,7 +520,8 @@ impl Target for GtkLinux {
     /// installs into `/opt/<bundle id>` with a menu entry, an icon in the
     /// icon theme and a launcher in `/usr/bin`, and a `.tar.gz` of the same
     /// folder to run without installing. Both carry the command line and
-    /// the MCP server in `bin/`.
+    /// the MCP server in `bin/`. With `Svg`, the `.deb` also installs the
+    /// AppArmor profile WebKitGTK's sandbox needs (`glue::apparmor_files`).
     fn package(
         &self,
         app: &Application,
@@ -488,8 +589,30 @@ impl Target for GtkLinux {
         if dpkg {
             let root = stage.join("deb");
             let installed = PathBuf::from("/opt").join(id);
-            let icon_bytes = std::fs::read(bundle.join(icon_file(app))).map_err(read)?;
-            let size = icon::png_size(&icon_bytes).map_or(256, |(width, _)| width);
+            // Every icon of a declared icon theme, or the one PNG at its size.
+            let icons: Vec<(PathBuf, Vec<u8>)> =
+                match icon::source(app, "linux", &context.project_dir) {
+                    icon::Source::Native(dir) => {
+                        let mut icons = Vec::new();
+                        for (_, place) in theme_files(app, &dir)
+                            .map_err(|message| vec![Diagnostic::error(message)])?
+                        {
+                            let contents =
+                                std::fs::read(bundle.join(THEME_DIR).join(&place)).map_err(read)?;
+                            icons.push((place, contents));
+                        }
+                        icons
+                    }
+                    _ => {
+                        let icon_bytes =
+                            std::fs::read(bundle.join(icon_file(app))).map_err(read)?;
+                        let size = icon::png_size(&icon_bytes).map_or(256, |(width, _)| width);
+                        vec![(
+                            PathBuf::from(format!("{size}x{size}/apps/{id}.png")),
+                            icon_bytes,
+                        )]
+                    }
+                };
             let architecture = match std::env::consts::ARCH {
                 "aarch64" => "arm64",
                 "x86_64" => "amd64",
@@ -519,12 +642,6 @@ impl Target for GtkLinux {
                     )
                     .into_bytes(),
                 },
-                BuildStep::Write {
-                    path: root
-                        .join("usr/share/icons/hicolor")
-                        .join(format!("{size}x{size}/apps/{id}.png")),
-                    contents: icon_bytes,
-                },
                 BuildStep::CreateDir {
                     path: root.join("usr/bin"),
                 },
@@ -549,24 +666,57 @@ impl Target for GtkLinux {
                     )
                     .into_bytes(),
                 },
+            ]);
+            for (place, contents) in icons {
+                steps.push(BuildStep::Write {
+                    path: root.join("usr/share/icons/hicolor").join(place),
+                    contents,
+                });
+            }
+            let mut programs = Vec::new();
+            for file in glue::apparmor_files(app, &installed.join(&executable)) {
+                let path = root.join(&file.path);
+                if file.program {
+                    programs.push(path.display().to_string());
+                }
+                steps.push(BuildStep::Write {
+                    path,
+                    contents: file.contents.into_bytes(),
+                });
+            }
+            steps.extend([
                 BuildStep::RemoveIfExists { path: deb.clone() },
                 normalize_permissions(&root),
-                BuildStep::Run {
-                    description: "Make the Debian package".into(),
-                    program: "dpkg-deb".into(),
-                    args: vec![
-                        "--root-owner-group".into(),
-                        "--build".into(),
-                        root.display().to_string(),
-                        deb.display().to_string(),
-                    ],
+            ]);
+            if !programs.is_empty() {
+                steps.push(BuildStep::Run {
+                    description: "Make the maintainer scripts executable".into(),
+                    program: "chmod".into(),
+                    args: [vec!["755".to_string()], programs].concat(),
                     cwd: stage.clone(),
                     env: vec![],
-                },
-            ]);
+                });
+            }
+            steps.push(BuildStep::Run {
+                description: "Make the Debian package".into(),
+                program: "dpkg-deb".into(),
+                args: vec![
+                    "--root-owner-group".into(),
+                    "--build".into(),
+                    root.display().to_string(),
+                    deb.display().to_string(),
+                ],
+                cwd: stage.clone(),
+                env: vec![],
+            });
             products.insert(0, deb);
         } else {
             notes.push("dpkg-deb is not installed here, so there is no .deb; the .tar.gz runs on any Linux with GTK 4.14 and libadwaita 1.5".into());
+        }
+        if bern_target_api::svg::used(app) {
+            notes.push(format!(
+                "`Svg` uses WebKitGTK, whose sandbox stops the app on Ubuntu 24.04 and later unless an AppArmor profile grants it `userns`: the .deb installs one for /opt/{id}/{executable}; the .tar.gz does not, so give the unpacked {executable} one there"
+            ));
         }
         Ok(BuildPlan {
             steps,

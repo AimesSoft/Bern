@@ -21,9 +21,43 @@ pub mod gallery {
         Dark,
     }
 
+    /// What the latest notice is about.
+    #[value]
+    pub enum NoticeKind {
+        Favorite,
+        NoLongerFavorite,
+        Playing,
+        /// A clip the engine could read: its container and size are known.
+        PlayingFile,
+    }
+
+    /// The latest notice. The engine gives the facts; the interface
+    /// writes them in the reader's language.
+    #[value]
+    pub struct Notice {
+        pub kind: NoticeKind,
+        /// The pattern or the clip, by the name the user knows it by.
+        #[content]
+        pub name: String,
+        pub container: Container,
+        pub kilobytes: i64,
+    }
+
+    /// The kind of video file, as its first bytes say.
+    #[value]
+    pub enum Container {
+        #[label(tr! { "zh-Hans" => "MP4", "en" => "MP4" })]
+        Mp4,
+        #[label(tr! { "zh-Hans" => "Matroska", "en" => "Matroska" })]
+        Matroska,
+        #[label(tr! { "zh-Hans" => "视频", "en" => "Video" })]
+        Other,
+    }
+
     #[value]
     pub struct Swatch {
         pub id: i64,
+        #[content]
         pub name: String,
         pub favorite: bool,
         /// Where the pattern sits along all patterns, from 0 to 1.
@@ -38,9 +72,10 @@ pub mod gallery {
         /// The pattern last opened, or 0.
         pub opened: i64,
         /// Name of the pattern last opened, or empty.
+        #[content]
         pub opened_name: String,
         /// The latest notice and its number, which changes with each one.
-        pub notice: String,
+        pub notice: Option<Notice>,
         pub notice_id: i64,
         /// The clip the player page shows.
         pub clip: MediaSource,

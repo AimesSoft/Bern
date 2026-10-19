@@ -28,6 +28,7 @@ const VIEWS: &str = include_str!("../templates/BernViews.kt");
 const STYLE: &str = include_str!("../templates/BernStyle.kt");
 const MEDIA: &str = include_str!("../templates/BernMedia.kt");
 const FEATURES: &str = include_str!("../templates/BernFeatures.kt");
+const SCENE: &str = include_str!("../templates/BernScene.kt");
 
 /// The Rust target of the engine library: 64-bit ARM, which every phone
 /// of the supported Android versions runs.
@@ -39,6 +40,7 @@ const UNSUPPORTED: &[&str] = &[];
 /// IR features Compose builds.
 const FEATURES_BUILT: &[&str] = &[
     bern_target_api::feature::SESSION_ACTIONS,
+    bern_target_api::feature::TAB_ACCESSORY,
     // Without a pointer, revealed content always shows.
     bern_target_api::feature::REVEAL,
     bern_target_api::feature::BOUND_LENGTHS,
@@ -57,6 +59,38 @@ const FEATURES_BUILT: &[&str] = &[
     bern_target_api::feature::RAILS,
     bern_target_api::feature::POPOVER_BUTTON,
     bern_target_api::feature::SIZE_CLASSES,
+    bern_target_api::feature::TEXT_WEIGHTS,
+    bern_target_api::feature::TEXT_LINES,
+    bern_target_api::feature::IMAGE_CORNERS,
+    bern_target_api::feature::SIDEBAR_WIDTH,
+    bern_target_api::feature::CONTROLLED_VALUES,
+    bern_target_api::feature::SEARCH_PALETTE,
+    bern_target_api::feature::IMAGE_TEMPLATE,
+    bern_target_api::feature::ADAPTIVE_IMAGES,
+    bern_target_api::feature::SCALED_SCENE,
+    bern_target_api::feature::ACCORDION_LAYOUT,
+    bern_target_api::feature::CAPSULE_CONTROLS,
+    bern_target_api::feature::MODAL_FLOW_TIMER,
+    bern_target_api::feature::PAGE_BADGES,
+    bern_target_api::feature::IDLE_CONTROL,
+    bern_target_api::feature::FILL_BUTTONS,
+    bern_target_api::feature::GRID_CELLS,
+    bern_target_api::feature::PAGE_SEARCH,
+    bern_target_api::feature::FORM_LAYOUT,
+    bern_target_api::feature::MODAL_COVER,
+    // A phone turns to landscape while `landscape` holds.
+    bern_target_api::feature::WINDOW_LANDSCAPE,
+    bern_target_api::feature::TEXT_FORMATS,
+    bern_target_api::feature::WINDOW_SHORT,
+    bern_target_api::feature::EDGE_GROW,
+    bern_target_api::feature::DELAYED_APPEAR,
+    bern_target_api::feature::TOOLBAR_LEADING,
+    bern_target_api::feature::AXIS_PADDING,
+    bern_target_api::feature::ICON_MENUS,
+    bern_target_api::feature::ICON_LABELS,
+    bern_target_api::feature::ROW_BASELINE,
+    bern_target_api::feature::SIDEBAR_HEADER,
+    bern_target_api::feature::UNTITLED_DETAIL,
 ];
 
 /// The features template with the extensions of each file kind from the
@@ -106,7 +140,13 @@ impl Target for ComposeAndroid {
                 "animate",
                 "scroll_scale",
                 "scroll_opacity",
+                "scroll_origin_x",
+                "scroll_origin_y",
                 "nudge",
+                "nudge_key",
+                "nudge_scale",
+                "reduce_motion",
+                "appear_delay",
                 "stagger",
             ],
             window_chrome: true,
@@ -173,12 +213,47 @@ impl Target for ComposeAndroid {
         let package = names::package(&app.app.bundle_id);
         let main = PathBuf::from("project/app/src/main");
         let sources = main.join("kotlin");
+        // The launcher icon: a declared `res` folder as it is (with its
+        // adaptive, round and themed icons), or the declared PNG or the
+        // Bern logo as drawn.
+        let failed = |message: String| vec![Diagnostic::error(message)];
+        let (launcher, round) = match icon::source(app, "android", &context.project_dir) {
+            icon::Source::Native(dir) => {
+                let res = icon::android_res(&dir).map_err(|message| {
+                    failed(format!("the Android icon {} {message}", dir.display()))
+                })?;
+                let mut launcher = Vec::new();
+                for file in &res.files {
+                    let contents = std::fs::read(dir.join(file)).map_err(|error| {
+                        failed(format!("cannot read {}: {error}", dir.join(file).display()))
+                    })?;
+                    launcher.push(GeneratedFile {
+                        path: main.join("res").join(file),
+                        contents,
+                    });
+                }
+                (launcher, res.round)
+            }
+            _ => {
+                let images =
+                    icon::images(app, "android", &context.project_dir, icon::Shape::AsDrawn)
+                        .map_err(failed)?;
+                let launcher = GeneratedFile {
+                    path: main.join("res/mipmap-xxxhdpi/ic_launcher.png"),
+                    contents: icon::largest(&images).png.to_vec(),
+                };
+                (vec![launcher], false)
+            }
+        };
         let mut files = vec![
             GeneratedFile::text("project/settings.gradle.kts", project::settings(&product)),
             GeneratedFile::text("project/build.gradle.kts", project::root_build()),
             GeneratedFile::text("project/gradle.properties", project::GRADLE_PROPERTIES),
             GeneratedFile::text("project/app/build.gradle.kts", project::app_build(app)),
-            GeneratedFile::text(main.join("AndroidManifest.xml"), project::manifest(app)),
+            GeneratedFile::text(
+                main.join("AndroidManifest.xml"),
+                project::manifest(app, round),
+            ),
             GeneratedFile::text(main.join("res/values/themes.xml"), project::theme(false)),
             GeneratedFile::text(
                 main.join("res/values-night/themes.xml"),
@@ -205,6 +280,7 @@ impl Target for ComposeAndroid {
                 features_source(),
             ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernMedia.kt"), MEDIA),
+            GeneratedFile::text(sources.join("dev/bern/runtime/BernScene.kt"), SCENE),
             GeneratedFile::text(
                 sources
                     .join(package.replace('.', "/"))
@@ -255,13 +331,7 @@ impl Target for ComposeAndroid {
                 table,
             ));
         }
-        // The launcher icon: the declared one, or the Bern logo, as drawn.
-        let images = icon::images(app, &context.project_dir, icon::Shape::AsDrawn)
-            .map_err(|message| vec![Diagnostic::error(message)])?;
-        files.push(GeneratedFile {
-            path: main.join("res/mipmap-xxxhdpi/ic_launcher.png"),
-            contents: icon::largest(&images).png.to_vec(),
-        });
+        files.extend(launcher);
         let manifest = serde_json::json!({
             "target": self.descriptor().id,
             "ui": "compose",
@@ -358,6 +428,7 @@ impl Target for ComposeAndroid {
                 "BernStyle",
                 "BernFeatures",
                 "BernMedia",
+                "BernScene",
             ]
             .iter()
             .map(|name| PathBuf::from(format!("dev/bern/runtime/{name}.kt")))

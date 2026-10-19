@@ -19,6 +19,8 @@ pub const PLATFORMS: [&str; 6] = ["macos", "ios", "windows", "linux", "android",
 /// Controls that take style overrides, with the states that apply to them.
 const STYLEABLE: &[(&str, &[StyleState])] = &[
     ("Stack", &[]),
+    // A form's `background` is its rows'; the form itself shows the page.
+    ("Form", &[]),
     (
         "Button",
         &[
@@ -778,6 +780,10 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                 },
                 // `shadow: 12` at rest, or `shadow: shadow(12, y: 4)`.
                 "shadow" if matches!(&prop.value, StyleValue::Call { name, .. } if name == "shadow") => {
+                    lowering.effect(&prop.value, &sheet)
+                }
+                // `border: control.border`, or `border: border(fill.subtle, width: 0.5)`.
+                "border" if matches!(&prop.value, StyleValue::Call { name, .. } if name == "border") => {
                     lowering.effect(&prop.value, &sheet)
                 }
                 "background" | "foreground" | "border" | "shadow" => {

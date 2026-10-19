@@ -32,9 +32,17 @@ const ROW_STATES: &[&str] = &[
     "none",
 ];
 
-/// What GTK shows: a style sheet over the theme's buttons and over the
-/// content of sidebar rows, transforms on springs in a motion box.
+/// What GTK shows: a style sheet over the theme's buttons, over the
+/// content of sidebar rows and on the layers of a `Stack`, transforms on
+/// springs in a motion box.
 pub const SUPPORT: &[StyleSupport] = &[
+    // A stack's surface: its background, the color of the text and
+    // symbolic icons in it, and corners that clip its layers.
+    StyleSupport {
+        component: "Stack",
+        base: &["background", "foreground", "corner"],
+        states: &[],
+    },
     StyleSupport {
         component: "Button",
         base: &[

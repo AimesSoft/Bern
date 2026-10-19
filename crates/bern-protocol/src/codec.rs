@@ -211,11 +211,13 @@ mod tests {
                         name: "title".into(),
                         ty: Type::Text,
                         doc: String::new(),
+                        content: false,
                     },
                     FieldDef {
                         name: "score".into(),
                         ty: Type::optional(Type::Float),
                         doc: String::new(),
+                        content: false,
                     },
                 ],
             }],

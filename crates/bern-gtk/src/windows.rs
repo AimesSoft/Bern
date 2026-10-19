@@ -139,8 +139,18 @@ pub(crate) struct Win {
     pub(crate) ghosts: gtk::Fixed,
     /// `window.idle`: no input for `idle_after` seconds.
     idle: Cell<bool>,
+    /// Whether rest counts toward `window.idle` (`idle_enabled`).
+    idle_enabled: StdCell<bool>,
     /// The layout size of the window's width.
     size: Cell<&'static str>,
+    /// `window.short`: the window is less tall than the compact breakpoint.
+    short: Cell<bool>,
+    /// The layer above the window's content where modals and palettes
+    /// stand.
+    pub(crate) overlay: gtk::Overlay,
+    /// The window's content below that layer, kept from the focus while a
+    /// modal stands above it.
+    pub(crate) below: gtk::Widget,
     immersive: Cell<bool>,
     /// Toolbar views whose top bars follow `chrome` and `immersive`.
     views: RefCell<Vec<glib::WeakRef<adw::ToolbarView>>>,
@@ -276,6 +286,7 @@ impl Win {
     pub(crate) fn state(&self, field: &str) -> Value {
         match field {
             "idle" => Value::Bool(self.idle.get()),
+            "short" => Value::Bool(self.short.get()),
             size => Value::Bool(self.size.get() == size),
         }
     }
@@ -351,6 +362,10 @@ impl Win {
         }
         if let Some(source) = timer.borrow_mut().take() {
             source.remove();
+        }
+        // While idling is off, rest counts for nothing.
+        if !self.idle_enabled.get() {
+            return;
         }
         let win = Rc::downgrade(self);
         let done = Rc::clone(timer);
@@ -543,6 +558,7 @@ pub(crate) fn header(page: &Rc<Page>, fallback: Option<Rc<dyn Fn() -> String>>) 
     let back = gtk::Button::from_icon_name("go-previous-symbolic");
     back.add_css_class("flat");
     header.pack_start(&back);
+    header.pack_start(&page.leading_tools);
     let clicked = Rc::clone(page);
     back.connect_clicked(move |_| {
         if let Some(back) = clicked.back() {
@@ -658,6 +674,12 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     ghosts.set_can_target(false);
     overlay.add_overlay(&ghosts);
     overlay.set_clip_overlay(&ghosts, true);
+    // A probe over the whole content measures its height for
+    // `window.short`.
+    let tall = gtk::DrawingArea::new();
+    tall.set_can_target(false);
+    tall.set_can_focus(false);
+    overlay.add_overlay(&tall);
     window.set_content(Some(&overlay));
 
     let win = Rc::new(Win {
@@ -678,7 +700,11 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         closed: StdCell::new(false),
         ghosts,
         idle: Cell::new(false),
+        idle_enabled: StdCell::new(true),
         size: Cell::new("expanded"),
+        short: Cell::new(false),
+        overlay: overlay.clone(),
+        below: toasts.clone().upcast(),
         immersive: Cell::new(false),
         views: RefCell::new(Vec::new()),
         shortcuts: RefCell::new(Vec::new()),
@@ -704,6 +730,13 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         }
     });
     content.append(&probe);
+    let measured = Rc::downgrade(&win);
+    tall.connect_resize(move |_, _, height| {
+        let compact = crate::host::host().def.compact_below.unwrap_or(0.0);
+        if let Some(win) = measured.upgrade() {
+            win.short.set(height > 0 && f64::from(height) < compact);
+        }
+    });
     view.set_content(Some(&content));
     toasts.set_child(Some(&view));
     let render = def.render;
@@ -724,7 +757,20 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
             revealed.set_reveal_top_bars(!shown.header_hidden() && !immersed.immersive.get());
         });
         let ctx = Ctx::root(Rc::clone(&win), Some(Rc::clone(&page)));
-        watch_input(&win, def.idle_after);
+        let rest = watch_input(&win, def.idle_after);
+        if let (Some(enabled), Some(rest)) = (def.idle_enabled, rest) {
+            let at = ctx.clone();
+            let shown = Rc::clone(&win);
+            effect(move || {
+                let on = enabled(&at);
+                untrack(|| {
+                    shown.idle_enabled.set(on);
+                    // Turning idling on starts the count again; off, the
+                    // window is not idle.
+                    rest();
+                });
+            });
+        }
         if let Some(immersive) = def.immersive {
             let at = ctx.clone();
             let shown = Rc::clone(&win);
@@ -844,9 +890,9 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
 }
 
 /// `window.idle`: pointer, touch, wheel and key input in the window start
-/// the count of `seconds` again.
-fn watch_input(win: &Rc<Win>, seconds: Option<f64>) {
-    let Some(seconds) = seconds else { return };
+/// the count of `seconds` again. Returns what starts it again.
+fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
+    let seconds = seconds?;
     let timer: Rc<RefCell<Option<glib::SourceId>>> = Rc::new(RefCell::new(None));
     let rest = {
         let win = Rc::downgrade(win);
@@ -898,6 +944,7 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) {
         }
     });
     rest();
+    Some(rest)
 }
 
 /// `WindowSet(accent:, appearance:)`: the accent and appearance every

@@ -1,12 +1,53 @@
 # 当前组件用法
 
-更新：2026-10-17。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
+更新：2026-10-19。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
 
 ## 声明与数据来源
 
 在 `#[component]` 函数内用 `ui!` 声明树。静态用户可见文案使用 `tr!`，引擎状态只读，`draft` 会话字段可由标准控件更新，业务修改通过 `=>` 绑定的类型化命令执行。`id` 是控制入口的稳定身份，`label` 同时用于可访问名称。`label_hidden: true` 隐藏可见文字，仍须提供 label；当前支持它的控件包括 TextInput、Switch、Slider、Picker。
 
 长度通常使用逻辑单位，`Length` 接受数字或受限数值表达式。`Number` 只接受静态数字，`Flag` 只接受构建期布尔值。条件、列表和状态引用仍受编译器检查；目标不支持的组件特性由能力检查拒绝，不能只根据组件名称判断平台覆盖。
+
+## 文本、内容与格式化
+
+界面上的每段文字，要么是 `tr!` 声明的文案，要么是声明为内容的数据，编译期区分二者：
+
+- 协议与 UI 类型的文本字段、组件的文本参数写 `#[content]`，表示它是数据（标题、文件名、用户写的笔记）。只有它能直接显示（`Text(content: app.title)`），或作为 `tr!` 参数嵌进句子（`{title}`）。显示未标记的文本、给 `tr!` 参数写字面量，都报 B105：固定的字写进翻译。会话字段是用户输入的，算作内容。
+- 引擎不拼句子。它给出数字、`CalendarDate` 与枚举，由界面用 `tr!` 或带标签的枚举写成读者的语言。
+
+```rust
+#[value]
+pub enum Notice {
+    #[label(tr! { "zh-Hans" => "已收藏 {name}", "en" => "{name} is a favorite" })]
+    Favorite {
+        #[content]
+        name: String,
+    },
+    #[label(tr! { "zh-Hans" => "{n} 个文件", "en" => "{n, plural, one {# file} other {# files}}" })]
+    Files { n: i64 },
+}
+
+#[component]
+pub fn heading(#[content] title: String) -> impl View {
+    ui! { Text(content: title, style: headline) }
+}
+```
+
+`tr!` 与枚举标签用同一种消息格式（ICU MessageFormat 的子集），各后端按同一语义、随会话当前语言写出：
+
+| 写法 | 写出 | 参数 |
+| --- | --- | --- |
+| `{name}` | 文本原样，数字按 Bern 的写法，枚举写它的标签 | `#[content]` 文本、整数、小数、带标签的枚举 |
+| `{n, plural, =0 {…} one {# 项} other {# 项}}` | 按数字在该语言里的复数类别选分支，`=N` 精确匹配优先；分支里的 `#` 是这个数 | 整数、小数 |
+| `{d, date, EEE, MMM d}` | 日期：`y`/`yy` 年，`M`/`MM` 月，`MMM`/`MMMM` 月名，`d`/`dd` 日，`EEE`/`EEEE` 星期；其他字符原样 | `CalendarDate` |
+| `{t, duration, m:ss}` | 秒数：`h`、`m`、`s`，双写补零；写出的最大单位容纳更大的部分（`m:ss` 下 125 秒是 `2:05`，3725 秒是 `62:05`） | 整数、小数 |
+
+- `{{`、`}}` 是字面括号；复数分支里 `}` 总是结束分支。
+- 每种语言要写出自己用到的复数类别：中文、日文、韩文等只有 `other`，英文等需要 `one` 与 `other`；缺少分支报 B104。参数类型不符（复数给文本、日期给数字、`{d}` 直接写日期）也报 B104。
+- 枚举标签的占位符就是该变体的字段，不写 `; 名: 值`。文本字段须 `#[content]`；枚举字段的类型须每个变体都有标签。
+- 月名与星期名是框架文本，内置简体中文、繁体中文、英文、日文，其他语言用英文。
+- `CalendarDate { year, month, day }` 在 `bern::prelude` 中，只表示日期，不含时刻与时区。`Text(content: date)` 会被拒绝，须用 `tr!` 写出格式。
+- 这些格式与显示字段的标签由 SwiftUI、Web、GTK、Compose 与 WinUI 3 实现（目标功能 `text_formats`）：各后端的运行时按同一格式解析翻译文本，复数分支、日期与时长在当前语言下写出。
 
 ## 坐标场景与滚动内容
 
@@ -89,7 +130,7 @@ macOS 的 Image 使用窗口上层像素覆盖层，Web 使用视口坐标的图
 | `Flow(gap:)` | 按内容固有尺寸从左到右换行 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
 | `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置 |
-| `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方 |
+| `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示图标与标题的平台（Windows 的两种前端）不显示它，其他平台照常显示 |
 | `SidebarItem(badge:)` | 显示正数计数；模块页面清单的 badge 可绑定模块状态字段 |
 | `Search(style: palette)` | 从工具栏入口打开命令面板；`panel_prompt`、`width`、`height` 设置提示与面板尺寸 |
 | `SearchItem(id:, label:) => command()` | 面板结果，可带 icon、detail、hint 或自定义子内容；`navigation: false` 不参与方向键选择，仍可点击与 Tab 聚焦 |

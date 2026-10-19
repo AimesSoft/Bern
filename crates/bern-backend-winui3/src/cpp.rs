@@ -350,6 +350,23 @@ impl<'a> Generator<'a> {
         }
     }
 
+    /// A `bern::Text::Arg` for a `tr!` argument: dates stay dates for their
+    /// patterns, numbers keep their value for plural branches, enums show
+    /// their labels.
+    fn argument(&self, expr: &Expr) -> String {
+        let value = self.expr(expr);
+        match &expr.ty {
+            Type::Enum { name } => format!(
+                "bern::Text::Arg(bern::Text::Display({value}, {}))",
+                string(name)
+            ),
+            Type::Record { name } if name == bern_protocol::format::CALENDAR_DATE => {
+                format!("bern::Text::DateArg({value})")
+            }
+            _ => format!("bern::Text::ArgOf({value})"),
+        }
+    }
+
     fn text(&self, text: &Text) -> String {
         match text {
             Text::Localized { text, args } => {
@@ -363,8 +380,8 @@ impl<'a> Generator<'a> {
                             let value = args
                                 .iter()
                                 .find(|(name, _)| name == param)
-                                .map(|(_, expr)| self.display(expr))
-                                .unwrap_or_else(|| "winrt::hstring()".into());
+                                .map(|(_, expr)| self.argument(expr))
+                                .unwrap_or_else(|| "bern::Text::Arg()".into());
                             format!("{{{}, {value}}}", string(param))
                         })
                         .collect();
@@ -499,6 +516,66 @@ impl<'a> Generator<'a> {
         }
     }
 
+    /// `shape: capsule` and `height` of a system control.
+    fn shape(&self, element: &Element) -> Option<String> {
+        let capsule = element.keyword("shape") == Some("capsule");
+        let height = self.len(element, "height");
+        (capsule || height.is_some()).then(|| {
+            designated(&[
+                ("capsule", capsule.then(|| "true".to_string())),
+                ("height", height),
+            ])
+            .replacen('{', "B::ControlShape{", 1)
+        })
+    }
+
+    /// What a control shows and how it changes, as designated fields: the
+    /// value `controlled` reads (`checked`, `selected`, `current`), which a
+    /// change sets by running the action's command with the new value `v`
+    /// in place of that value; or its draft field, after which its action
+    /// runs.
+    fn model(&self, element: &Element, controlled: &str) -> Vec<(&'static str, Option<String>)> {
+        if let Some(expr) = element.expr(controlled) {
+            let change = match element.action.as_ref() {
+                Some(Action::Engine { command, args }) => {
+                    let values: Vec<_> = args
+                        .iter()
+                        .map(|arg| {
+                            if arg == expr {
+                                match arg.ty {
+                                    Type::Int => {
+                                        "Value::Int(std::llround(R::AsDouble(v)))".to_string()
+                                    }
+                                    Type::Float => "Value::Float(R::AsDouble(v))".to_string(),
+                                    _ => "v".to_string(),
+                                }
+                            } else {
+                                self.expr(arg)
+                            }
+                        })
+                        .collect();
+                    format!(
+                        "[](Ctx const& c, Value const& v) {{ Dispatch(c, {command}, Values{{{}}}); }}",
+                        values.join(", ")
+                    )
+                }
+                Some(other) => format!(
+                    "[](Ctx const& c, Value const&) {{ {}; }}",
+                    self.action_body(other)
+                ),
+                None => "nullptr".into(),
+            };
+            return vec![
+                ("current", Some(self.getter(expr))),
+                ("change", Some(change)),
+            ];
+        }
+        vec![
+            ("field", self.field(element, "value")),
+            ("then", self.action(element)),
+        ]
+    }
+
     /// `animate`'s spring, for the bound lengths of an element.
     fn animate(element: &Element) -> Option<String> {
         element.keyword("animate").map(motion_ref)
@@ -623,10 +700,25 @@ impl<'a> Generator<'a> {
             ("nudge", element.expr("nudge").map(|when| self.getter(when))),
             (
                 "nudgeMotion",
-                element.expr("nudge").map(|_| motion_ref("jelly")),
+                (element.expr("nudge").is_some() || element.expr("nudge_key").is_some())
+                    .then(|| motion_ref("jelly")),
+            ),
+            (
+                "nudgeKey",
+                element.expr("nudge_key").map(|key| self.getter(key)),
+            ),
+            ("nudgeScale", Self::number(element, "nudge_scale")),
+            ("appearDelay", Self::number(element, "appear_delay")),
+            (
+                "reduceMotion",
+                element
+                    .expr("reduce_motion")
+                    .map(|reduce| self.getter(reduce)),
             ),
             ("scrollScale", Self::number(element, "scroll_scale")),
             ("scrollOpacity", Self::number(element, "scroll_opacity")),
+            ("scrollOriginX", Self::number(element, "scroll_origin_x")),
+            ("scrollOriginY", Self::number(element, "scroll_origin_y")),
         ];
         fields
             .iter()
@@ -641,7 +733,13 @@ impl<'a> Generator<'a> {
                 if let Some(spec) = &placement {
                     out.open(format!("B::Place(p, c, {spec}, {BUILDER}"));
                 }
-                match self.decoration(element) {
+                // A modal's motion is its card's, above the window.
+                let decoration = if element.kind == "Modal" {
+                    None
+                } else {
+                    self.decoration(element)
+                };
+                match decoration {
                     Some(spec) => {
                         out.open(format!("B::Decorate(p, c, {spec}, {BUILDER}"));
                         self.element(out, element);
@@ -846,6 +944,9 @@ impl<'a> Generator<'a> {
                     ("style", Self::keyword(element, "style")),
                     ("emphasis", Self::keyword(element, "emphasis")),
                     ("mark", Self::keyword(element, "mark")),
+                    ("lines", Self::number(element, "lines")),
+                    ("fontSize", self.len(element, "font_size")),
+                    ("lineHeight", self.len(element, "line_height")),
                 ])
             )),
             "Label" => out.line(format!(
@@ -854,6 +955,11 @@ impl<'a> Generator<'a> {
                     ("title", self.text_prop(element, "title")),
                     ("icon", Self::icon(element, "icon")),
                     ("style", Self::keyword(element, "style")),
+                    ("fontSize", Self::number(element, "font_size")),
+                    (
+                        "iconOnly",
+                        (element.keyword("display") == Some("icon")).then(|| "true".to_string()),
+                    ),
                 ])
             )),
             "Button" | "IconButton" => {
@@ -876,6 +982,12 @@ impl<'a> Generator<'a> {
                     ("style", self.style(kind, element.keyword("variant"))),
                     ("pick", self.field(element, "pick")),
                     ("files", Self::files(element)),
+                    ("shape", self.shape(element)),
+                    (
+                        "fill",
+                        (element.keyword("width") == Some("fill")).then(|| "true".to_string()),
+                    ),
+                    ("iconSize", Self::number(element, "font_size")),
                 ]);
                 if kind == "Button" && !element.children.is_empty() {
                     self.call(
@@ -901,44 +1013,92 @@ impl<'a> Generator<'a> {
             )),
             "Search" => {
                 let props = self.search_props(element);
+                // A palette opens over the window; its shortcut opens it.
+                let (function, run) = if element.keyword("style") == Some("palette") {
+                    ("SearchPalette", "activate")
+                } else {
+                    ("Search", "focus")
+                };
                 if element.children.is_empty() {
-                    out.line(format!("B::Search(p, c, {props}, nullptr);"));
+                    out.line(format!("B::{function}(p, c, {props}, nullptr);"));
                 } else {
                     self.call(
                         out,
-                        &format!("B::Search(p, c, {props}, "),
+                        &format!("B::{function}(p, c, {props}, "),
                         &element.children,
                     );
                 }
-                self.shortcut(out, element, "focus");
+                self.shortcut(out, element, run);
             }
-            "Switch" => {
-                out.line(format!(
-                    "B::Switch(p, c, {});",
-                    designated(&[
-                        ("id", Some(self.id(element))),
-                        ("label", self.text_prop(element, "label")),
-                        ("field", self.field(element, "value")),
-                        ("style", Self::keyword(element, "style")),
-                        ("icon", Self::icon(element, "icon")),
-                    ])
-                ));
-                self.shortcut(out, element, "activate");
-            }
-            "Slider" => out.line(format!(
-                "B::Slider(p, c, {});",
-                designated(&[
+            "SearchItem" => {
+                let props = designated(&[
                     ("id", Some(self.id(element))),
                     ("label", self.text_prop(element, "label")),
-                    ("field", self.field(element, "value")),
+                    ("icon", Self::icon(element, "icon")),
+                    ("detail", self.text_prop(element, "detail")),
+                    ("hint", self.text_prop(element, "hint")),
+                    (
+                        "navigation",
+                        element.expr("navigation").map(|e| self.getter(e)),
+                    ),
+                    ("action", self.action(element)),
+                    ("pick", self.field(element, "pick")),
+                    ("files", Self::files(element)),
+                ]);
+                if element.children.is_empty() {
+                    out.line(format!("B::SearchItem(p, c, {props}, nullptr);"));
+                } else {
+                    self.call(
+                        out,
+                        &format!("B::SearchItem(p, c, {props}, "),
+                        &element.children,
+                    );
+                }
+            }
+            "Switch" => {
+                let mut fields = vec![
+                    ("id", Some(self.id(element))),
+                    ("label", self.text_prop(element, "label")),
+                ];
+                fields.extend(self.model(element, "checked"));
+                fields.extend([
+                    ("style", Self::keyword(element, "style")),
+                    ("icon", Self::icon(element, "icon")),
+                    (
+                        "labelHidden",
+                        (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+                    ),
+                    ("shape", self.shape(element)),
+                ]);
+                out.line(format!("B::Switch(p, c, {});", designated(&fields)));
+                self.shortcut(out, element, "activate");
+            }
+            "Slider" => {
+                let controlled = element.expr("current").is_some();
+                let mut fields = vec![
+                    ("id", Some(self.id(element))),
+                    ("label", self.text_prop(element, "label")),
+                ];
+                if controlled {
+                    fields.extend(self.model(element, "current"));
+                } else {
+                    fields.push(("field", self.field(element, "value")));
+                }
+                fields.extend([
                     ("min", Self::number(element, "min")),
                     ("max", Self::number(element, "max")),
                     ("step", Self::number(element, "step")),
                     ("minIcon", Self::icon(element, "min_icon")),
                     ("maxIcon", Self::icon(element, "max_icon")),
-                    ("commit", self.action(element)),
-                ])
-            )),
+                    // A controlled slider's action is its change.
+                    ("commit", if controlled { None } else { self.action(element) }),
+                    (
+                        "labelHidden",
+                        (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+                    ),
+                ]);
+                out.line(format!("B::Slider(p, c, {});", designated(&fields)));
+            }
             "Picker" => self.picker(out, element),
             "LanguagePicker" => out.line(format!(
                 "B::LanguagePicker(p, c, {}, {});",
@@ -949,7 +1109,24 @@ impl<'a> Generator<'a> {
             "Query" => self.query(out, element),
             "Form" => self.call(
                 out,
-                &format!("B::Form(p, c, {}, ", null(self.text_prop(element, "title"))),
+                &format!(
+                    "B::Form(p, c, {}, {}, ",
+                    null(self.text_prop(element, "title")),
+                    designated(&[
+                        ("gap", Self::number(element, "gap")),
+                        ("rowHeight", Self::number(element, "row_height")),
+                        ("paddingX", Self::number(element, "padding_x")),
+                        ("paddingY", Self::number(element, "padding_y")),
+                        (
+                            "plainFirst",
+                            matches!(
+                                element.children.first(),
+                                Some(Node::Element(first)) if first.kind == "Section" && first.keyword("style") == Some("plain")
+                            )
+                            .then(|| "true".to_string())
+                        ),
+                    ])
+                ),
                 &element.children,
             ),
             "Section" if self.in_sidebar.get() => self.call(
@@ -963,9 +1140,17 @@ impl<'a> Generator<'a> {
             "Section" => self.call(
                 out,
                 &format!(
-                    "B::Section(p, c, {}, {}, ",
+                    "B::Section(p, c, {}, {}, {}, ",
                     null(self.text_prop(element, "title")),
-                    null(self.text_prop(element, "footer"))
+                    null(self.text_prop(element, "footer")),
+                    designated(&[
+                        (
+                            "plain",
+                            (element.keyword("style") == Some("plain")).then(|| "true".to_string())
+                        ),
+                        ("paddingX", Self::number(element, "padding_x")),
+                        ("paddingY", Self::number(element, "padding_y")),
+                    ])
                 ),
                 &element.children,
             ),
@@ -984,6 +1169,7 @@ impl<'a> Generator<'a> {
                             "style",
                             self.style("SidebarItem", element.keyword("variant"))
                         ),
+                        ("badge", element.expr("badge").map(|badge| self.getter(badge))),
                     ])
                 ));
             }
@@ -1008,6 +1194,8 @@ impl<'a> Generator<'a> {
                         ("align", Self::keyword(element, "align")),
                         ("animate", Self::animate(element)),
                         ("reflow", Self::reflow(element)),
+                        ("paddingX", self.len(element, "padding_x")),
+                        ("paddingY", self.len(element, "padding_y")),
                     ])
                 ),
             ),
@@ -1022,6 +1210,11 @@ impl<'a> Generator<'a> {
                         ("padding", self.len(element, "padding")),
                         ("animate", Self::animate(element)),
                         ("reflow", Self::reflow(element)),
+                        ("rowGap", self.len(element, "row_gap")),
+                        ("paddingX", self.len(element, "padding_x")),
+                        ("paddingY", self.len(element, "padding_y")),
+                        ("cellRatio", Self::number(element, "cell_ratio")),
+                        ("cellExtra", self.len(element, "cell_extra")),
                     ])
                 ),
             ),
@@ -1036,8 +1229,117 @@ impl<'a> Generator<'a> {
                         ("height", self.len(element, "height")),
                         ("animate", Self::animate(element)),
                         ("reflow", Self::reflow(element)),
+                        ("style", self.style("Stack", element.keyword("variant"))),
+                        ("enabled", self.enabled(element)),
                     ])
                 ),
+            ),
+            "ScaleBox" => self.call(
+                out,
+                &format!(
+                    "B::ScaleBox(p, c, {}, ",
+                    designated(&[
+                        ("width", self.len(element, "width")),
+                        ("height", self.len(element, "height")),
+                    ])
+                ),
+                &element.children,
+            ),
+            "Positioned" => self.call(
+                out,
+                &format!(
+                    "B::Positioned(p, c, {}, ",
+                    designated(&[
+                        ("x", self.len(element, "x")),
+                        ("y", self.len(element, "y")),
+                        ("width", self.len(element, "width")),
+                        ("height", self.len(element, "height")),
+                        ("animate", Self::animate(element)),
+                    ])
+                ),
+                &element.children,
+            ),
+            "Marquee" => self.call(
+                out,
+                &format!(
+                    "B::Marquee(p, c, {}, ",
+                    designated(&[
+                        ("duration", self.len(element, "duration")),
+                        ("phase", Self::number(element, "phase")),
+                        ("paused", element.expr("paused").map(|e| self.getter(e))),
+                        ("opacity", self.len(element, "opacity")),
+                    ])
+                ),
+                &element.children,
+            ),
+            "Accordion" => self.call(
+                out,
+                &format!(
+                    "B::Accordion(p, c, {}, ",
+                    designated(&[
+                        ("count", self.len(element, "count")),
+                        ("selected", self.len(element, "selected")),
+                        ("collapsedWidth", self.len(element, "collapsed_width")),
+                        ("gap", self.len(element, "gap")),
+                        ("height", self.len(element, "height")),
+                        ("corner", self.len(element, "corner")),
+                        ("animate", Self::animate(element)),
+                    ])
+                ),
+                &element.children,
+            ),
+            "Flow" => self.container(
+                out,
+                element,
+                &format!(
+                    "B::Flow(p, c, {}, ",
+                    designated(&[("gap", self.len(element, "gap"))])
+                ),
+            ),
+            "Modal" => {
+                let transition = |name: &str| {
+                    element
+                        .keyword(name)
+                        .map(|transition| format!("&X_{}", ident(transition)))
+                };
+                self.call(
+                    out,
+                    &format!(
+                        "B::Modal(p, c, {}, ",
+                        designated(&[
+                            ("width", self.len(element, "width")),
+                            ("height", self.len(element, "height")),
+                            (
+                                "cover",
+                                (element.keyword("cover") == Some("compact"))
+                                    .then(|| "true".to_string())
+                            ),
+                            ("appear", transition("appear")),
+                            ("disappear", transition("disappear")),
+                            ("appearDelay", Self::number(element, "appear_delay")),
+                        ])
+                    ),
+                    &element.children,
+                )
+            }
+            "Timer" => out.line(format!(
+                "B::Timer(p, c, {});",
+                designated(&[
+                    ("interval", Self::number(element, "interval")),
+                    ("enabled", self.enabled(element)),
+                    ("action", self.action(element)),
+                ])
+            )),
+            "ControlGroup" => self.call(
+                out,
+                &format!(
+                    "B::ControlGroup(p, c, {}, ",
+                    designated(&[
+                        ("label", self.text_prop(element, "label")),
+                        ("height", self.len(element, "height")),
+                    ])
+                ),
+                &element.children,
             ),
             "Rail" => self.call(
                 out,
@@ -1046,6 +1348,7 @@ impl<'a> Generator<'a> {
                     designated(&[
                         ("axis", Self::keyword(element, "axis")),
                         ("anchor", Self::keyword(element, "anchor")),
+                        ("overhang", self.len(element, "overhang")),
                     ])
                 ),
                 &element.children,
@@ -1079,6 +1382,13 @@ impl<'a> Generator<'a> {
                         ("height", self.len(element, "height")),
                         ("fit", Self::keyword(element, "fit")),
                         ("animate", Self::animate(element)),
+                        ("corner", self.len(element, "corner")),
+                        (
+                            "templated",
+                            (element.keyword("rendering") == Some("template"))
+                                .then(|| "true".to_string())
+                        ),
+                        ("aspect", Self::number(element, "aspect")),
                     ])
                 ))
             }
@@ -1111,11 +1421,24 @@ impl<'a> Generator<'a> {
                             "hideIndicators",
                             (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
                         ),
+                        ("openAt", Self::number(element, "open_at")),
                     ])
                 ),
                 &element.children,
             ),
-            "Toolbar" => self.call(out, "B::Toolbar(p, c, ", &element.children),
+            // Items before a `Spacer` stand at the leading end of the
+            // header, after its way back; the rest at the trailing end.
+            "Toolbar" => match element
+                .children
+                .iter()
+                .position(|node| matches!(node, Node::Element(child) if child.kind == "Spacer"))
+            {
+                Some(index) => {
+                    self.call(out, "B::LeadingToolbar(p, c, ", &element.children[..index]);
+                    self.call(out, "B::Toolbar(p, c, ", &element.children[index + 1..]);
+                }
+                None => self.call(out, "B::Toolbar(p, c, ", &element.children),
+            },
             "SplitView" => self.split_view(out, element),
             "Navigation" => self.navigation(out, element),
             "NavLink" => {
@@ -1175,6 +1498,7 @@ impl<'a> Generator<'a> {
                             ("icon", Self::icon(element, "icon")),
                             ("field", self.field(element, "value")),
                             ("more", self.text_prop(element, "more_label")),
+                            ("shape", self.shape(element)),
                         ])
                     ),
                     &element.children,
@@ -1238,8 +1562,9 @@ impl<'a> Generator<'a> {
                 ),
                 &element.children,
             ),
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarFooter" | "WindowSet"
-            | "Window" | "Layout" | "MenuItem" | "Inspector" => {
+            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "TabAccessory"
+            | "PickerOption" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),
@@ -1252,39 +1577,73 @@ impl<'a> Generator<'a> {
             ("field", self.field(element, "value")),
             ("prompt", self.text_prop(element, "prompt")),
             ("submit", self.action(element)),
+            ("panelPrompt", self.text_prop(element, "panel_prompt")),
+            ("width", Self::number(element, "width")),
+            ("height", Self::number(element, "height")),
+            ("fontSize", Self::number(element, "font_size")),
         ])
     }
 
     fn picker(&self, out: &mut Out, element: &Element) {
-        let Some(field) = element.field("value") else {
-            return;
-        };
-        let Type::Enum { name } = &field.ty else {
+        let ty = element
+            .expr("selected")
+            .map(|expr| &expr.ty)
+            .or_else(|| element.field("value").map(|field| &field.ty));
+        let Some(Type::Enum { name }) = ty else {
             return;
         };
         let def = self.types().enum_def(name).expect("enum");
-        let options: Vec<_> = def
-            .variants
+        // `PickerOption`s list their own values and labels; without them
+        // every variant is an option.
+        let explicit: Vec<_> = element
+            .children
             .iter()
-            .enumerate()
-            .map(|(index, variant)| {
-                format!(
-                    "B::PickOption{{{index}, {}, {}}}",
-                    string(&variant.name),
-                    self.variant_label(def, index)
-                )
+            .filter_map(|node| match node {
+                Node::Element(option) if option.kind == "PickerOption" => Some(option),
+                _ => None,
+            })
+            .filter_map(|option| {
+                let value = option.expr("value")?;
+                let ExprKind::Variant { variant, .. } = &value.kind else {
+                    return None;
+                };
+                Some(format!(
+                    "B::PickOption{{{variant}, {}, {}}}",
+                    self.variant_name(value),
+                    self.text_prop(option, "label")?
+                ))
             })
             .collect();
-        out.line(format!(
-            "B::Picker(p, c, {});",
-            designated(&[
-                ("id", Some(self.id(element))),
-                ("label", self.text_prop(element, "label")),
-                ("field", self.field(element, "value")),
-                ("options", Some(format!("{{{}}}", options.join(", ")))),
-                ("style", Self::keyword(element, "style")),
-            ])
-        ));
+        let options: Vec<_> = if explicit.is_empty() {
+            def.variants
+                .iter()
+                .enumerate()
+                .map(|(index, variant)| {
+                    format!(
+                        "B::PickOption{{{index}, {}, {}}}",
+                        string(&variant.name),
+                        self.variant_label(def, index)
+                    )
+                })
+                .collect()
+        } else {
+            explicit
+        };
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+        ];
+        fields.extend(self.model(element, "selected"));
+        fields.extend([
+            ("options", Some(format!("{{{}}}", options.join(", ")))),
+            ("style", Self::keyword(element, "style")),
+            (
+                "labelHidden",
+                (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+            ),
+            ("shape", self.shape(element)),
+        ]);
+        out.line(format!("B::Picker(p, c, {});", designated(&fields)));
     }
 
     fn for_each(&self, out: &mut Out, element: &Element) {
@@ -1370,11 +1729,13 @@ impl<'a> Generator<'a> {
             return;
         };
         let mut search = None;
+        let mut header = None;
         let mut footer = None;
         let mut content = Vec::new();
         for node in &sidebar.children {
             match node {
                 Node::Element(child) if child.kind == "Search" => search = Some(child),
+                Node::Element(child) if child.kind == "SidebarHeader" => header = Some(child),
                 Node::Element(child) if child.kind == "SidebarFooter" => footer = Some(child),
                 other => content.push(other.clone()),
             }
@@ -1392,8 +1753,19 @@ impl<'a> Generator<'a> {
                     sidebar.expr("fallback").map(|value| self.getter(value))
                 ),
                 ("search", search),
+                ("width", Self::number(sidebar, "width")),
+                (
+                    "titled",
+                    detail.expr("titled").map(|titled| self.getter(titled))
+                ),
             ])
         ));
+        // A header that only names the window is left out: the title bar
+        // shows the application's icon and name.
+        match header.filter(|header| header.keyword("role") != Some("title")) {
+            Some(header) => self.children(out, "", &header.children, ","),
+            None => out.line("nullptr,"),
+        }
         match footer {
             Some(footer) => self.children(out, "", &footer.children, ","),
             None => out.line("nullptr,"),
@@ -1462,10 +1834,18 @@ impl<'a> Generator<'a> {
     /// A menu button and its items; dividers are empty items.
     fn menu(&self, out: &mut Out, element: &Element) {
         out.open(format!(
-            "B::Menu(p, c, {}, {}, {}, std::vector<std::optional<B::MenuItemDef>>{{",
+            "B::Menu(p, c, {}, {}, {}, {}, std::vector<std::optional<B::MenuItemDef>>{{",
             self.id(element),
             null(self.text_prop(element, "label")),
             null(Self::icon(element, "icon")),
+            designated(&[
+                (
+                    "iconOnly",
+                    (element.keyword("style") == Some("icon")).then(|| "true".to_string())
+                ),
+                ("shape", self.shape(element)),
+            ])
+            .replacen('{', "B::MenuLook{", 1),
         ));
         let mut shortcuts = Vec::new();
         for node in &element.children {
@@ -1516,7 +1896,30 @@ impl<'a> Generator<'a> {
             ])
         ));
         self.tab_items(out, &element.children);
-        out.close("});");
+        let accessory = element.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "TabAccessory" => Some(child),
+            _ => None,
+        });
+        match accessory {
+            Some(accessory) => {
+                out.close("},");
+                out.indent += 1;
+                self.children(
+                    out,
+                    &format!(
+                        "B::TabAccessory{{.shown = {}, .build = ",
+                        accessory
+                            .expr("shown")
+                            .map(|shown| self.getter(shown))
+                            .unwrap_or_else(|| "nullptr".into())
+                    ),
+                    &accessory.children,
+                    "});",
+                );
+                out.indent -= 1;
+            }
+            None => out.close("});"),
+        }
     }
 
     fn tab_items(&self, out: &mut Out, nodes: &[Node]) {
@@ -1849,8 +2252,10 @@ impl<'a> Generator<'a> {
             let motion = motion_ref(&transition.motion);
             let body = match &transition.kind {
                 TransitionKind::Fade => format!(".kind = B::Transition::Fade, .motion = {motion}"),
-                // Rejected by the edge_grow capability check before generation.
-                TransitionKind::Grow { .. } => continue,
+                TransitionKind::Grow { edge } => format!(
+                    ".kind = B::Transition::Grow, .edge = {}, .motion = {motion}",
+                    string(&format!("{edge:?}").to_lowercase())
+                ),
                 TransitionKind::Pop { from } => format!(
                     ".kind = B::Transition::Pop, .from = {}, .motion = {motion}",
                     float(*from)
@@ -2049,6 +2454,12 @@ impl<'a> Generator<'a> {
                 window.chrome == WindowChrome::Unified
             ));
             out.line(format!("w.idleAfter = {};", optional(window.idle_after)));
+            if let Some(enabled) = &window.idle_enabled {
+                out.line(format!(
+                    "w.idleEnabled = [](Ctx const& c) {{ return {}; }};",
+                    self.condition(enabled)
+                ));
+            }
             if let Some(immersive) = &window.immersive {
                 out.line(format!(
                     "w.immersive = [](Ctx const& c) {{ return {}; }};",
@@ -2097,11 +2508,33 @@ impl<'a> Generator<'a> {
                         .iter()
                         .map(|field| field.ty.clone())
                         .collect();
-                    format!(
-                        "VariantDef{{{}, {}}}",
-                        string(&variant.name),
-                        types_list(&fields)
-                    )
+                    // The fields its label shows, by placeholder name.
+                    let shown: Vec<_> = variant
+                        .label
+                        .iter()
+                        .flat_map(|label| &label.params)
+                        .filter_map(|param| {
+                            let index = variant
+                                .fields
+                                .iter()
+                                .position(|field| field.name == *param)?;
+                            Some(format!("{{{}, {index}}}", string(param)))
+                        })
+                        .collect();
+                    if shown.is_empty() {
+                        format!(
+                            "VariantDef{{{}, {}}}",
+                            string(&variant.name),
+                            types_list(&fields)
+                        )
+                    } else {
+                        format!(
+                            "VariantDef{{{}, {}, {{{}}}}}",
+                            string(&variant.name),
+                            types_list(&fields),
+                            shown.join(", ")
+                        )
+                    }
                 })
                 .collect();
             out.line(format!(
@@ -2248,6 +2681,18 @@ impl<'a> Generator<'a> {
             if let Some(below) = layouts.expanded_below {
                 out.line(format!("c.expandedBelow = {};", float(below)));
             }
+        }
+        // The weights and sizes `text { … }` gives text styles.
+        for entry in &app.style.text_weights {
+            out.line(format!(
+                "c.textStyles.push_back({{{}, {}, {}}});",
+                string(&entry.style),
+                string(&entry.weight),
+                entry
+                    .size
+                    .map(|size| format!("std::optional<double>({})", float(size)))
+                    .unwrap_or_else(|| "std::nullopt".into())
+            ));
         }
         out.line("// File kinds of `files:`, by extension.");
         for (kind, extensions) in bern_ir::spec::FILE_KIND_EXTENSIONS {

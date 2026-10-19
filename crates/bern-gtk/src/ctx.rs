@@ -42,6 +42,10 @@ struct Inner {
     sidebar: Option<Rc<crate::structure::Registry>>,
     /// The tab view whose tabs the content declares.
     tabs: Option<Rc<crate::structure::TabRegistry>>,
+    /// The row layout of the form the content is in.
+    form: Option<Rc<crate::widgets::RowLayout>>,
+    /// The search palette whose results the content lists.
+    palette: Option<Rc<crate::palette::Palette>>,
 }
 
 /// The context generated code evaluates expressions in.
@@ -64,6 +68,8 @@ impl Ctx {
             scroll: None,
             sidebar: None,
             tabs: None,
+            form: None,
+            palette: None,
         }))
     }
 
@@ -80,6 +86,8 @@ impl Ctx {
             scroll: self.0.scroll.clone(),
             sidebar: self.0.sidebar.clone(),
             tabs: self.0.tabs.clone(),
+            form: self.0.form.clone(),
+            palette: self.0.palette.clone(),
         };
         change(&mut inner);
         Self(Rc::new(inner))
@@ -181,6 +189,22 @@ impl Ctx {
         self.0.tabs.as_ref()
     }
 
+    pub(crate) fn with_form(&self, form: Rc<crate::widgets::RowLayout>) -> Self {
+        self.with(|inner| inner.form = Some(form))
+    }
+
+    pub(crate) fn form(&self) -> Option<&Rc<crate::widgets::RowLayout>> {
+        self.0.form.as_ref()
+    }
+
+    pub(crate) fn with_palette(&self, palette: Rc<crate::palette::Palette>) -> Self {
+        self.with(|inner| inner.palette = Some(palette))
+    }
+
+    pub(crate) fn palette(&self) -> Option<&Rc<crate::palette::Palette>> {
+        self.0.palette.as_ref()
+    }
+
     pub(crate) fn with_page(&self, page: Rc<Page>) -> Self {
         self.with(|inner| inner.page = Some(page))
     }
@@ -245,6 +269,8 @@ pub struct Page {
     title_widgets: RefCell<Vec<(u64, gtk::Widget)>>,
     hidden: RefCell<Vec<u64>>,
     pub(crate) tools: gtk::Box,
+    /// Toolbar items at the leading end, after the way back.
+    pub(crate) leading_tools: gtk::Box,
     tool_count: StdCell<usize>,
     pub(crate) version: Version,
     next: StdCell<u64>,
@@ -253,12 +279,14 @@ pub struct Page {
 impl Page {
     pub(crate) fn new() -> Rc<Self> {
         let tools = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let leading_tools = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         Rc::new(Self {
             titles: RefCell::new(Vec::new()),
             backs: RefCell::new(Vec::new()),
             title_widgets: RefCell::new(Vec::new()),
             hidden: RefCell::new(Vec::new()),
             tools,
+            leading_tools,
             tool_count: StdCell::new(0),
             version: Version::new(),
             next: StdCell::new(1),
@@ -312,16 +340,22 @@ impl Page {
         });
     }
 
-    /// A holder for toolbar items, removed when the current scope ends.
-    pub(crate) fn add_tools(self: &Rc<Self>) -> gtk::Box {
+    /// A holder for toolbar items, removed when the current scope ends;
+    /// `leading` ones stand after the way back.
+    pub(crate) fn add_tools(self: &Rc<Self>, leading: bool) -> gtk::Box {
         let holder = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        self.tools.append(&holder);
+        let area = if leading {
+            self.leading_tools.clone()
+        } else {
+            self.tools.clone()
+        };
+        area.append(&holder);
         self.tool_count.set(self.tool_count.get() + 1);
         self.version.bump();
         let page = Rc::clone(self);
         let removed = holder.clone();
         on_cleanup(move || {
-            page.tools.remove(&removed);
+            area.remove(&removed);
             page.tool_count.set(page.tool_count.get() - 1);
             page.version.bump();
         });

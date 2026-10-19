@@ -161,6 +161,12 @@ fn add_framework_types(types: &mut TypeTable, mentioned: &[&ast::TypeRef]) {
     {
         types.records.push(bern_media::media_source_def());
     }
+    let date = bern_protocol::format::CALENDAR_DATE;
+    if types.record_def(date).is_none()
+        && mentioned.iter().any(|ty| bern_syntax::mentions(ty, date))
+    {
+        types.records.push(bern_protocol::format::calendar_date_def());
+    }
 }
 
 fn merge_ui_types(
@@ -179,11 +185,11 @@ fn merge_ui_types(
     let mut seen = BTreeSet::new();
     for value in values {
         let name = value.item.name.to_string();
-        if name == bern_media::MEDIA_SOURCE {
+        if name == bern_media::MEDIA_SOURCE || name == bern_protocol::format::CALENDAR_DATE {
             diagnostics.push(
-                Diagnostic::error(
-                    "`MediaSource` is a framework type; use it from `bern::prelude` instead of declaring it",
-                )
+                Diagnostic::error(format!(
+                    "`{name}` is a framework type; use it from `bern::prelude` instead of declaring it",
+                ))
                 .at(location(&value.file, value.item.span)),
             );
             continue;
@@ -215,11 +221,18 @@ fn merge_ui_types(
         let field = |field: &ast::FieldItem, diagnostics: &mut Vec<Diagnostic>| match resolve_type(
             &field.ty, &lookup,
         ) {
-            Ok(ty) => Some(FieldDef {
-                name: field.name.to_string(),
-                ty,
-                doc: field.doc.clone(),
-            }),
+            Ok(ty) => {
+                let content = bern_syntax::lower::content(field, &ty).unwrap_or_else(|error| {
+                    diagnostics.extend(syn_error(&value.file, error));
+                    false
+                });
+                Some(FieldDef {
+                    name: field.name.to_string(),
+                    ty,
+                    doc: field.doc.clone(),
+                    content,
+                })
+            }
             Err(message) => {
                 diagnostics.push(Diagnostic::error(message).at(location(&value.file, field.span)));
                 None
@@ -229,28 +242,22 @@ fn merge_ui_types(
             ValueKind::Enum(variants) => {
                 let mut defs = Vec::new();
                 for variant in variants {
-                    let label = variant.label.as_ref().map(|tr| {
-                        for (span, message) in bern_syntax::lower::check_translations(tr, languages)
-                        {
+                    let fields: Vec<FieldDef> = variant
+                        .fields
+                        .iter()
+                        .filter_map(|f| field(f, diagnostics))
+                        .collect();
+                    let label = variant.label.as_ref().and_then(|tr| {
+                        for (span, message) in bern_syntax::lower::check_languages(tr, languages) {
                             diagnostics.push(shared_diagnostic(&value.file, span, &message));
                         }
-                        LocalizedText {
-                            key: bern_protocol::label_key(&name, &variant.name.to_string()),
-                            translations: tr
-                                .entries
-                                .iter()
-                                .map(|entry| (entry.language.clone(), entry.text.clone()))
-                                .collect(),
-                            params: vec![],
-                        }
+                        bern_syntax::lower::label(&name, &variant.name.to_string(), tr, &fields)
+                            .map_err(|error| diagnostics.extend(syn_error(&value.file, error)))
+                            .ok()
                     });
                     defs.push(VariantDef {
                         name: variant.name.to_string(),
-                        fields: variant
-                            .fields
-                            .iter()
-                            .filter_map(|f| field(f, diagnostics))
-                            .collect(),
+                        fields,
                         label,
                     });
                 }
@@ -317,6 +324,38 @@ fn param_kind(
             other => resolve_type(other, types).map(|ty| ir::ParamKind::Value { ty }),
         },
     }
+}
+
+/// `#[content]` is for text parameters.
+fn check_content_param(
+    param: &ast::Param,
+    kind: &ir::ParamKind,
+    file: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if !param.content {
+        return;
+    }
+    match kind {
+        ir::ParamKind::Value { ty } if bern_syntax::lower::is_text(ty) => {}
+        _ => diagnostics.push(
+            Diagnostic::error(format!(
+                "`#[content]` marks text that is data, such as a title; `{}` is not text",
+                param.name
+            ))
+            .at(location(file, param.span)),
+        ),
+    }
+}
+
+/// Names of a component's `#[content]` parameters.
+fn content_params(component: &ast::ComponentItem) -> BTreeSet<String> {
+    component
+        .params
+        .iter()
+        .filter(|param| param.content)
+        .map(|param| param.name.to_string())
+        .collect()
 }
 
 /// Window handle name and window ids declared by the root component.
@@ -674,6 +713,7 @@ fn window_catalog(
             immersive: window.expr("immersive").cloned(),
             idle_after: window.number("idle_after"),
             idle_enabled: window.expr("idle_enabled").cloned(),
+            landscape: window.expr("landscape").cloned(),
         });
     }
     if windows
@@ -784,7 +824,10 @@ pub fn compile_library(
         let mut params = Vec::new();
         for param in &component.item.params {
             match param_kind(param, None, None, None, &[], &types) {
-                Ok(kind) => params.push((param.name.to_string(), kind)),
+                Ok(kind) => {
+                    check_content_param(param, &kind, &component.file, &mut diagnostics);
+                    params.push((param.name.to_string(), kind));
+                }
                 Err(message) => diagnostics.push(
                     Diagnostic::error(format!(
                         "{message}; library components take value parameters only"
@@ -800,6 +843,7 @@ pub fn compile_library(
                 name,
                 module: component.module.clone(),
                 params,
+                content: content_params(&component.item),
             },
         );
     }
@@ -841,6 +885,7 @@ pub fn compile_library(
                     .map(|(name, kind)| ir::ParamDef {
                         name: name.clone(),
                         kind: kind.clone(),
+                        content: signature.content.contains(name),
                     })
                     .collect(),
                 body,
@@ -942,7 +987,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         for value in &item.values {
             if let ValueKind::Enum(variants) = &value.kind {
                 for tr in variants.iter().filter_map(|variant| variant.label.as_ref()) {
-                    for (span, message) in bern_syntax::lower::check_translations(tr, languages) {
+                    for (span, message) in bern_syntax::lower::check_languages(tr, languages) {
                         diagnostics.push(shared_diagnostic(file, span, &message));
                     }
                 }
@@ -1294,6 +1339,13 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
             }
         }
     }
+    // The application's own contributions come first, and always show.
+    for (slot, placed) in config.contributes.iter().rev() {
+        let entries = contributions.slots.entry(slot.clone()).or_default();
+        for component in placed.iter().rev() {
+            entries.insert(0, (protocol.namespace.clone(), component.clone()));
+        }
+    }
 
     // Session state.
     let mut sessions = Vec::new();
@@ -1375,6 +1427,12 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                     .iter()
                     .map(|param| (param.name.clone(), param.kind.clone()))
                     .collect(),
+                content: component
+                    .params
+                    .iter()
+                    .filter(|param| param.content)
+                    .map(|param| param.name.clone())
+                    .collect(),
             },
         );
     }
@@ -1399,7 +1457,10 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 &sessions,
                 &types,
             ) {
-                Ok(kind) => params.push((param.name.to_string(), kind)),
+                Ok(kind) => {
+                    check_content_param(param, &kind, &component.file, &mut diagnostics);
+                    params.push((param.name.to_string(), kind));
+                }
                 Err(message) => diagnostics
                     .push(Diagnostic::error(message).at(location(&component.file, param.span))),
             }
@@ -1410,11 +1471,24 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 name,
                 module: component.module.clone(),
                 params,
+                content: content_params(&component.item),
             },
         );
     }
 
-    // Every contributed component is declared by the module contributing it.
+    // Every contributed component is declared by the module contributing it,
+    // or, for the application's, by the application's own sources.
+    for component in config.contributes.values().flatten() {
+        let home = components
+            .iter()
+            .find(|located| located.item.name == component.as_str())
+            .map(|located| located.home.as_str());
+        if home != Some(protocol.namespace.as_str()) {
+            diagnostics.push(Diagnostic::error(format!(
+                "the application places component `{component}`, which its UI sources do not declare"
+            )));
+        }
+    }
     for module in &config.modules {
         let placed = module
             .pages
@@ -1558,6 +1632,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 .map(|(name, kind)| ir::ParamDef {
                     name: name.clone(),
                     kind: kind.clone(),
+                    content: signature.content.contains(name),
                 })
                 .collect(),
             body,
@@ -1568,6 +1643,26 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     let mut texts = std::mem::take(&mut checker.texts);
     for library in &libraries {
         texts.extend(library.texts.iter().cloned());
+    }
+    // A component that shows a page reads the session holding the
+    // selection, as if it declared it.
+    let page_sessions = std::mem::take(&mut checker.page_sessions);
+    for (name, session) in page_sessions {
+        let kind = ir::ParamKind::Session { session };
+        if let Some(component) = lowered.iter_mut().find(|component| component.name == name)
+            && !component.params.iter().any(|param| param.kind == kind)
+        {
+            component.params.push(ir::ParamDef {
+                name: "bern_pages".into(),
+                kind: kind.clone(),
+                content: false,
+            });
+        }
+        if let Some(signature) = signatures.get_mut(&name)
+            && !signature.params.iter().any(|(_, declared)| *declared == kind)
+        {
+            signature.params.push(("bern_pages".into(), kind));
+        }
     }
 
     let mut graph = BTreeMap::new();
@@ -1906,6 +2001,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 name,
                 version: config.version.clone(),
                 icon: config.icon.clone(),
+                platform_icons: config.platform_icons.clone(),
                 publisher: config.publisher.clone(),
             },
             languages: ir::Languages {

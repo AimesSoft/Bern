@@ -39,11 +39,47 @@ pub(crate) fn log_motion() -> bool {
     LOG.with(|log| *log)
 }
 
-/// Whether motion is reduced: `BERN_MOTION=reduce`, or animations are off
-/// in the GTK settings (libadwaita then skips every animation).
+thread_local! {
+    /// `reduce_motion` of the elements showing now: any that is on
+    /// reduces motion everywhere.
+    static PREFERENCES: RefCell<Vec<(u64, bool)>> = const { RefCell::new(Vec::new()) };
+    static NEXT_PREFERENCE: Cell<u64> = const { Cell::new(1) };
+}
+
+/// Whether motion is reduced: `BERN_MOTION=reduce`, animations off in the
+/// GTK settings (libadwaita then skips every animation), or an element's
+/// `reduce_motion` on.
 pub fn reduced() -> bool {
     std::env::var("BERN_MOTION").as_deref() == Ok("reduce")
         || gtk::Settings::default().is_some_and(|settings| !settings.is_gtk_enable_animations())
+        || PREFERENCES.with(|preferences| preferences.borrow().iter().any(|(_, on)| *on))
+}
+
+/// `reduce_motion`: while `when` holds, motion is reduced, until the
+/// current scope ends.
+fn prefer_reduced(ctx: &Ctx, when: Get) {
+    let token = NEXT_PREFERENCE.with(|next| {
+        let token = next.get();
+        next.set(token + 1);
+        token
+    });
+    PREFERENCES.with(|preferences| preferences.borrow_mut().push((token, false)));
+    let at = ctx.clone();
+    effect(move || {
+        let on = crate::value::truthy(&when(&at));
+        PREFERENCES.with(|preferences| {
+            if let Some(entry) = preferences
+                .borrow_mut()
+                .iter_mut()
+                .find(|(id, _)| *id == token)
+            {
+                entry.1 = on;
+            }
+        });
+    });
+    on_cleanup(move || {
+        PREFERENCES.with(|preferences| preferences.borrow_mut().retain(|(id, _)| *id != token));
+    });
 }
 
 struct SpringInner {
@@ -181,7 +217,9 @@ impl Spring {
     }
 }
 
-/// The five springs of one layer of an element's transform.
+/// The five springs of one layer of an element's transform, and the
+/// point of the element its scale keeps in place, as fractions of its
+/// size: the center unless a transition grows from an edge.
 #[derive(Clone)]
 pub struct Layer {
     pub(crate) x: Spring,
@@ -189,6 +227,7 @@ pub struct Layer {
     pub(crate) sx: Spring,
     pub(crate) sy: Spring,
     pub(crate) opacity: Spring,
+    pub(crate) pivot: Rc<Cell<(f64, f64)>>,
 }
 
 impl Layer {
@@ -301,7 +340,8 @@ mod imp {
             if !child.should_layout() {
                 return;
             }
-            let (x, y, sx, sy) = self.transform.get();
+            let (x, y, sx, sy) = self.obj().transform_at(f64::from(width), f64::from(height));
+            self.transform.set((x, y, sx, sy));
             let (w, h) = (width as f32 / 2.0, height as f32 / 2.0);
             let transform = if x == 0.0 && y == 0.0 && sx == 1.0 && sy == 1.0 {
                 None
@@ -365,20 +405,33 @@ impl MotionBox {
             sx: spring(1.0),
             sy: spring(1.0),
             opacity: spring(1.0),
+            pivot: Rc::new(Cell::new((0.5, 0.5))),
         };
         self.imp().layers.borrow_mut().push((name, layer.clone()));
         layer
     }
 
-    fn write(&self) {
-        let (mut x, mut y, mut sx, mut sy, mut opacity) = (0.0, 0.0, 1.0, 1.0, 1.0);
+    /// The move and scale of the child at this size: each layer's scale
+    /// keeps its pivot in place.
+    fn transform_at(&self, width: f64, height: f64) -> (f64, f64, f64, f64) {
+        let (mut x, mut y, mut sx, mut sy) = (0.0, 0.0, 1.0, 1.0);
         for (_, layer) in self.imp().layers.borrow().iter() {
-            x += layer.x.value();
-            y += layer.y.value();
-            sx *= layer.sx.value();
-            sy *= layer.sy.value();
+            let (lsx, lsy) = (layer.sx.value(), layer.sy.value());
+            let (px, py) = layer.pivot.get();
+            x += layer.x.value() + (1.0 - lsx) * (px - 0.5) * width;
+            y += layer.y.value() + (1.0 - lsy) * (py - 0.5) * height;
+            sx *= lsx;
+            sy *= lsy;
+        }
+        (x, y, sx, sy)
+    }
+
+    fn write(&self) {
+        let mut opacity = 1.0;
+        for (_, layer) in self.imp().layers.borrow().iter() {
             opacity *= layer.opacity.value();
         }
+        let (x, y, sx, sy) = self.transform_at(f64::from(self.width()), f64::from(self.height()));
         self.imp().transform.set((x, y, sx, sy));
         self.set_opacity(opacity.clamp(0.0, 1.0));
         if log_motion() {
@@ -517,6 +570,9 @@ pub enum TransitionKind {
     Pop(f64),
     /// Slides from this far beyond the edge.
     Slide(Edge, f64),
+    /// Extends from nothing along one axis, the edge staying in place,
+    /// without fading.
+    Grow(Edge),
 }
 
 /// How an element appears or disappears, moved by a spring.
@@ -546,8 +602,30 @@ fn start_of(transition: &Transition, widget: &gtk::Widget) -> Pose {
                 Edge::Trailing => from.x = if rtl { -distance } else { distance },
             }
         }
+        TransitionKind::Grow(edge) => {
+            from.opacity = 1.0;
+            match edge {
+                Edge::Top | Edge::Bottom => from.sy = 0.0,
+                Edge::Leading | Edge::Trailing => from.sx = 0.0,
+            }
+        }
     }
     from
+}
+
+/// The point a transition's scale keeps in place: the edge it grows from,
+/// else the center.
+fn pivot_of(transition: &Transition, widget: &gtk::Widget) -> (f64, f64) {
+    let TransitionKind::Grow(edge) = transition.kind else {
+        return (0.5, 0.5);
+    };
+    let rtl = widget.direction() == gtk::TextDirection::Rtl;
+    match edge {
+        Edge::Top => (0.5, 0.0),
+        Edge::Bottom => (0.5, 1.0),
+        Edge::Leading => (if rtl { 1.0 } else { 0.0 }, 0.5),
+        Edge::Trailing => (if rtl { 0.0 } else { 1.0 }, 0.5),
+    }
 }
 
 /// Play `transition` on `motion`, in or out; `done` runs once it ends.
@@ -570,6 +648,7 @@ fn play(
     };
     let (start, end) = if entering { (away, REST) } else { (REST, away) };
     let curve = if quick { QUICK_FADE } else { transition.motion };
+    layer.pivot.set(pivot_of(transition, motion.upcast_ref()));
     layer.set(start);
     let left = Rc::new(Cell::new(5));
     let done = Rc::new(RefCell::new(done));
@@ -805,6 +884,18 @@ pub struct Decor {
     pub nudge: Option<(Get, Curve)>,
     pub scroll_scale: Option<f64>,
     pub scroll_opacity: Option<f64>,
+    /// The point of the element the scroll scale grows from, as
+    /// fractions of its size; the center when not given.
+    pub scroll_origin: Option<(f64, f64)>,
+    /// Seconds before `appear` plays; with a delay it plays also when the
+    /// element shows first.
+    pub appear_delay: Option<f64>,
+    /// A nudge each time this value changes, back with the spring.
+    pub nudge_key: Option<(Get, Curve)>,
+    /// How large a nudge makes the element.
+    pub nudge_scale: Option<f64>,
+    /// While true, motion is reduced everywhere.
+    pub reduce_motion: Option<Get>,
 }
 
 /// Wrap a widget an element made in a motion box: inside a list row the
@@ -827,6 +918,9 @@ fn wrap(widget: &gtk::Widget) -> (gtk::Widget, MotionBox) {
 pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
     // Elements inside this one enter with it, not on their own; a
     // staggering container's clock is only for its direct children.
+    if let Some(when) = &decor.reduce_motion {
+        prefer_reduced(ctx, Rc::clone(when));
+    }
     let animated = entering();
     let turns = clock();
     let (capture, made) = Parent::capture(p);
@@ -850,8 +944,9 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
         }
         if let Some(appear) = decor.appear {
             let staggered = turns.as_ref().filter(|turns| turns.play || animated);
-            if animated || staggered.is_some() {
-                let delay = staggered.map(Clock::turn).unwrap_or(0.0);
+            if animated || staggered.is_some() || decor.appear_delay.is_some() {
+                let delay = staggered.map(Clock::turn).unwrap_or(0.0)
+                    + decor.appear_delay.unwrap_or(0.0).max(0.0);
                 if log_motion() {
                     eprintln!(
                         "bern-motion appear delay {delay} {:?}",
@@ -870,8 +965,12 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
         if decor.reveal {
             reveal(&outer, &motion);
         }
+        let scale = decor.nudge_scale.unwrap_or(1.06);
         if let Some((when, curve)) = &decor.nudge {
-            nudge(ctx, &motion, Rc::clone(when), *curve);
+            nudge(ctx, &motion, Rc::clone(when), *curve, scale, false);
+        }
+        if let Some((key, curve)) = &decor.nudge_key {
+            nudge(ctx, &motion, Rc::clone(key), *curve, scale, true);
         }
         if decor.scroll_scale.is_some() || decor.scroll_opacity.is_some() {
             follow_scroll(
@@ -879,6 +978,7 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
                 &motion,
                 decor.scroll_scale.unwrap_or(1.0),
                 decor.scroll_opacity.unwrap_or(1.0),
+                decor.scroll_origin.unwrap_or((0.5, 0.5)),
             );
         }
         p.add(&outer);
@@ -1011,23 +1111,29 @@ fn reveal(outer: &gtk::Widget, motion: &MotionBox) {
     });
 }
 
-/// A short nudge each time `when` turns true.
-fn nudge(ctx: &Ctx, motion: &MotionBox, when: Get, curve: Curve) {
+/// A short nudge each time `when` turns true, or with `keyed` each time
+/// it changes.
+fn nudge(ctx: &Ctx, motion: &MotionBox, when: Get, curve: Curve, scale: f64, keyed: bool) {
     let at = ctx.clone();
-    let before = Rc::new(Cell::new(untrack(|| crate::value::truthy(&when(&at)))));
+    let before = RefCell::new(untrack(|| when(&at)));
     let layer = motion.layer("nudge");
     effect(move || {
-        let now = crate::value::truthy(&when(&at));
-        if now && !before.get() && !reduced() {
-            untrack(|| nudge_layer(&layer, curve));
+        let now = when(&at);
+        let fires = if keyed {
+            now != *before.borrow()
+        } else {
+            crate::value::truthy(&now) && !crate::value::truthy(&before.borrow())
+        };
+        if fires && !reduced() {
+            untrack(|| nudge_layer(&layer, curve, scale));
         }
-        before.set(now);
+        *before.borrow_mut() = now;
     });
 }
 
-fn nudge_layer(layer: &Layer, curve: Curve) {
-    layer.sx.bump(1.06, curve);
-    layer.sy.bump(1.06, curve);
+fn nudge_layer(layer: &Layer, curve: Curve, scale: f64) {
+    layer.sx.bump(scale, curve);
+    layer.sy.bump(scale, curve);
 }
 
 /// Give `widget` a nudge, when it moves.
@@ -1040,14 +1146,14 @@ pub(crate) fn nudge_widget(widget: &gtk::Widget, curve: Curve) {
         .cloned()
         .or_else(|| widget.first_child().and_then(|child| child.downcast().ok()));
     if let Some(motion) = motion {
-        nudge_layer(&motion.layer("nudge"), curve);
+        nudge_layer(&motion.layer("nudge"), curve, 1.06);
     }
 }
 
 /// Scale and opacity by the distance of the element's center from the
 /// middle of its scroll view: `scale` and full opacity at the middle, plain
 /// size and `opacity` half a view plus half its size away.
-fn follow_scroll(ctx: &Ctx, motion: &MotionBox, scale: f64, opacity: f64) {
+fn follow_scroll(ctx: &Ctx, motion: &MotionBox, scale: f64, opacity: f64, origin: (f64, f64)) {
     if reduced() {
         return;
     }
@@ -1056,6 +1162,8 @@ fn follow_scroll(ctx: &Ctx, motion: &MotionBox, scale: f64, opacity: f64) {
     };
     let horizontal = view.hscrollbar_policy() != gtk::PolicyType::Never;
     let layer = motion.layer("scroll");
+    // The scale keeps the origin in place.
+    layer.pivot.set(origin);
     let update: Rc<dyn Fn()> = {
         let motion = motion.downgrade();
         let view = view.downgrade();

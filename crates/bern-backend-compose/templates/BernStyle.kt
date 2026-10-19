@@ -29,8 +29,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideOut
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -105,14 +110,16 @@ data class BernMotion(val period: Double, val damping: Double) {
     }
 }
 
-/// Whether the system turned animations off (developer options or
-/// accessibility).
+/// Whether motion is reduced: the system turned animations off
+/// (developer options or accessibility), or the application asks for it
+/// (`reduce_motion`).
 @Composable
 fun bernReduceMotion(): Boolean {
     val context = LocalContext.current
-    return remember {
+    val system = remember {
         Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
     }
+    return system || BernMotionState.reduced
 }
 
 // MARK: - Colors
@@ -345,6 +352,7 @@ fun BernStyledSidebarItem(
     icon: ImageVector?,
     selected: Boolean,
     style: BernStyle,
+    badge: Long? = null,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -387,7 +395,11 @@ fun BernStyledSidebarItem(
             Icon(icon, contentDescription = null, tint = foreground)
             Spacer(Modifier.width(12.dp))
         }
-        Text(label, color = foreground, style = MaterialTheme.typography.labelLarge)
+        Text(label, color = foreground, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+        // A live count beside the page, hidden at zero.
+        if (badge != null && badge > 0) {
+            Text("$badge", color = foreground, style = MaterialTheme.typography.labelLarge)
+        }
     }
 }
 
@@ -534,7 +546,7 @@ object BernDraw {
 /// of the line's height and 0.4 of a character past its end, behind the
 /// glyphs and outside the layout.
 @Composable
-fun BernMarkedText(text: String, style: TextStyle, color: Color, mark: BernColor) {
+fun BernMarkedText(text: String, style: TextStyle, color: Color, mark: BernColor, lines: Int? = null) {
     val palette = bernPalette()
     val band = palette.color(mark)
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
@@ -542,6 +554,8 @@ fun BernMarkedText(text: String, style: TextStyle, color: Color, mark: BernColor
         text,
         style = style,
         color = color,
+        maxLines = lines ?: Int.MAX_VALUE,
+        overflow = if (lines != null) androidx.compose.ui.text.style.TextOverflow.Ellipsis else androidx.compose.ui.text.style.TextOverflow.Clip,
         onTextLayout = { layout = it },
         modifier = Modifier.drawBehind {
             val result = layout ?: return@drawBehind
@@ -577,6 +591,17 @@ sealed class BernTransition {
     data object Fade : BernTransition()
     data class Pop(val from: Float) : BernTransition()
     data class Slide(val edge: BernEdge, val distance: Float) : BernTransition()
+    /// Grows along one axis from nothing, `edge` holding still, without
+    /// fading.
+    data class Grow(val edge: BernEdge) : BernTransition()
+}
+
+/// Where a growing element holds still.
+fun BernEdge.origin(): androidx.compose.ui.graphics.TransformOrigin = when (this) {
+    BernEdge.Leading -> androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+    BernEdge.Trailing -> androidx.compose.ui.graphics.TransformOrigin(1f, 0.5f)
+    BernEdge.Top -> androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+    BernEdge.Bottom -> androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f)
 }
 
 /// The transition into view, moved by its spring; a short fade when the
@@ -594,6 +619,14 @@ fun bernEnter(transition: BernTransition?, motion: BernMotion?, delay: Double = 
         is BernTransition.Slide -> {
             val distance = with(density) { transition.distance.dp.roundToPx() }
             slideIn(spec()) { slideOffset(transition.edge, distance) } + fadeIn(spec())
+        }
+        // Where a branch changes, the room grows from the edge; an element
+        // that appears on its own scales instead (`BernAppear`).
+        is BernTransition.Grow -> when (transition.edge) {
+            BernEdge.Leading -> expandHorizontally(spec(), Alignment.Start)
+            BernEdge.Trailing -> expandHorizontally(spec(), Alignment.End)
+            BernEdge.Top -> expandVertically(spec(), Alignment.Top)
+            BernEdge.Bottom -> expandVertically(spec(), Alignment.Bottom)
         }
     }
 }
@@ -634,6 +667,12 @@ fun bernExit(transition: BernTransition?, motion: BernMotion?): ExitTransition {
             val distance = with(density) { transition.distance.dp.roundToPx() }
             slideOut(motion.spec()) { slideOffset(transition.edge, distance) } + fadeOut(motion.spec())
         }
+        is BernTransition.Grow -> when (transition.edge) {
+            BernEdge.Leading -> shrinkHorizontally(motion.spec(), Alignment.Start)
+            BernEdge.Trailing -> shrinkHorizontally(motion.spec(), Alignment.End)
+            BernEdge.Top -> shrinkVertically(motion.spec(), Alignment.Top)
+            BernEdge.Bottom -> shrinkVertically(motion.spec(), Alignment.Bottom)
+        }
     }
 }
 
@@ -652,23 +691,44 @@ val LocalBernSettled = staticCompositionLocalOf { mutableStateOf(true) }
 /// the window's first display, as an item added to a list. A `staggered`
 /// one is a direct child of a container that declares `stagger`: it waits
 /// for its turn on the container's clock, unless the system turned
-/// animations off.
+/// animations off. With a `delay` (`appear_delay`) it waits that much more,
+/// and plays on the window's first display too.
 @Composable
 fun BernAppear(
     transition: BernTransition?,
     motion: BernMotion?,
     staggered: Boolean = false,
+    delay: Double? = null,
     content: @Composable () -> Unit,
 ) {
     val settled = LocalBernSettled.current.value
     val clock = if (staggered) LocalBernStagger.current else null
     val reduced = bernReduceMotion()
-    val delay = remember { if (settled && !reduced) clock?.turn() ?: 0.0 else 0.0 }
-    val state = remember { MutableTransitionState(!settled).apply { targetState = true } }
-    AnimatedVisibility(visibleState = state, enter = bernEnter(transition, motion, delay)) {
+    val plays = remember { settled || delay != null }
+    val wait = remember { if (plays && !reduced) (if (settled) clock?.turn() ?: 0.0 else 0.0) + (delay ?: 0.0) else 0.0 }
+    val inner: @Composable () -> Unit = {
         // The clock is only for the container's direct children.
         if (clock != null) BernUnstaggered(content) else content()
     }
+    // Growing scales along one axis from the edge that holds still.
+    if (transition is BernTransition.Grow && motion != null && !reduced) {
+        val progress = remember { androidx.compose.animation.core.Animatable(if (plays) 0f else 1f) }
+        LaunchedEffect(Unit) {
+            if (!plays) return@LaunchedEffect
+            if (wait > 0) kotlinx.coroutines.delay((wait * 1000).toLong())
+            progress.animateTo(1f, motion.spec())
+        }
+        val horizontal = transition.edge == BernEdge.Leading || transition.edge == BernEdge.Trailing
+        Box(
+            Modifier.graphicsLayer {
+                transformOrigin = transition.edge.origin()
+                if (horizontal) scaleX = progress.value.coerceAtLeast(0f) else scaleY = progress.value.coerceAtLeast(0f)
+            },
+        ) { inner() }
+        return
+    }
+    val state = remember { MutableTransitionState(!plays).apply { targetState = true } }
+    AnimatedVisibility(visibleState = state, enter = bernEnter(transition, motion, wait)) { inner() }
 }
 
 // MARK: - Stagger

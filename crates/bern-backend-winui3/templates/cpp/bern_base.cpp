@@ -12,6 +12,8 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 
+#include <cwctype>
+
 #include <winrt/Windows.Globalization.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Storage.h>
@@ -440,29 +442,255 @@ winrt::hstring Tr(std::string_view key) {
     return Wide(key);
 }
 
-static winrt::hstring Fill(std::wstring_view source, std::initializer_list<std::pair<std::string_view, winrt::hstring>> args) {
-    std::wstring output;
-    output.reserve(source.size());
-    for (size_t i = 0; i < source.size(); ++i) {
-        auto c = source[i];
-        if (c == L'{' && i + 1 < source.size() && source[i + 1] == L'{') { output.push_back(L'{'); ++i; continue; }
-        if (c == L'}' && i + 1 < source.size() && source[i + 1] == L'}') { output.push_back(L'}'); ++i; continue; }
-        if (c == L'{') {
-            auto end = source.find(L'}', i + 1);
-            if (end == std::wstring_view::npos) { output.append(source.substr(i)); break; }
-            auto name = winrt::to_string(source.substr(i + 1, end - i - 1));
-            for (auto const& [argName, value] : args)
-                if (argName == name) { output.append(value); break; }
-            i = end;
-            continue;
-        }
-        output.push_back(c);
+using Args = std::vector<std::pair<std::string, Arg>>;
+
+/// One part of a parsed text.
+struct Piece {
+    enum class Kind : uint8_t { Text, Value, Hash, Plural, Date, Duration };
+    Kind kind = Kind::Text;
+    /// The text, or the name of the argument.
+    std::wstring text;
+    std::wstring pattern;
+    std::vector<std::pair<std::wstring, std::vector<Piece>>> branches;
+};
+
+/// Parses a translated text. The compiler checked the format, so the
+/// parser trusts its shape.
+struct Parser {
+    std::wstring_view chars;
+    size_t at = 0;
+
+    static std::wstring Trim(std::wstring_view text) {
+        auto start = text.find_first_not_of(L" \t\r\n");
+        if (start == std::wstring_view::npos) return {};
+        auto end = text.find_last_not_of(L" \t\r\n");
+        return std::wstring(text.substr(start, end - start + 1));
     }
-    return winrt::hstring(output);
+
+    std::wstring Word(std::wstring_view stops) {
+        auto start = at;
+        while (at < chars.size() && stops.find(chars[at]) == std::wstring_view::npos) ++at;
+        return Trim(chars.substr(start, at - start));
+    }
+
+    /// Pieces up to the end, or up to the `}` that closes a plural branch.
+    std::vector<Piece> Message(bool branch) {
+        std::vector<Piece> pieces;
+        auto push = [&](wchar_t c) {
+            if (!pieces.empty() && pieces.back().kind == Piece::Kind::Text) pieces.back().text.push_back(c);
+            else pieces.push_back({Piece::Kind::Text, std::wstring(1, c)});
+        };
+        while (at < chars.size()) {
+            auto c = chars[at];
+            wchar_t next = at + 1 < chars.size() ? chars[at + 1] : 0;
+            if (c == L'{' && next == L'{') { push(L'{'); at += 2; }
+            else if (c == L'}' && branch) return pieces;
+            else if (c == L'}' && next == L'}') { push(L'}'); at += 2; }
+            else if (c == L'#' && branch) { pieces.push_back({Piece::Kind::Hash}); ++at; }
+            else if (c == L'{') { ++at; pieces.push_back(Placeholder()); }
+            else { push(c); ++at; }
+        }
+        return pieces;
+    }
+
+    Piece Placeholder() {
+        auto name = Word(L",{}");
+        if (at >= chars.size() || chars[at] != L',') {
+            ++at;
+            return {Piece::Kind::Value, name};
+        }
+        ++at;
+        auto kind = Word(L",{}");
+        ++at;
+        if (kind != L"plural") {
+            auto pattern = Word(L"{}");
+            ++at;
+            return {kind == L"date" ? Piece::Kind::Date : Piece::Kind::Duration, name, pattern};
+        }
+        Piece plural{Piece::Kind::Plural, name};
+        while (true) {
+            while (at < chars.size() && std::iswspace(chars[at])) ++at;
+            if (at >= chars.size() || chars[at] == L'}') {
+                ++at;
+                return plural;
+            }
+            auto selector = Word(L"{}");
+            ++at;
+            auto branch = Message(true);
+            plural.branches.emplace_back(std::move(selector), std::move(branch));
+            ++at;
+        }
+    }
+};
+
+static Arg const* Find(Args const& args, std::wstring const& name) {
+    auto key = winrt::to_string(name);
+    for (auto const& [argName, value] : args)
+        if (argName == key) return &value;
+    return nullptr;
 }
 
-winrt::hstring Fmt(std::string_view key, std::initializer_list<std::pair<std::string_view, winrt::hstring>> args) {
-    return Fill(Tr(key), args);
+static std::wstring Pad2(int64_t value) {
+    auto text = std::to_wstring(value);
+    return value >= 0 && value < 10 ? L"0" + text : text;
+}
+
+static int64_t FloorDiv(int64_t a, int64_t b) {
+    auto quotient = a / b;
+    return a % b != 0 && (a < 0) != (b < 0) ? quotient - 1 : quotient;
+}
+
+/// The day of the week, 0 for Monday.
+static int64_t Weekday(int64_t year, int64_t month, int64_t day) {
+    static constexpr int64_t offsets[] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+    auto m = std::clamp<int64_t>(month, 1, 12);
+    auto y = m < 3 ? year - 1 : year;
+    auto sundayFirst = ((y + FloorDiv(y, 4) - FloorDiv(y, 100) + FloorDiv(y, 400) + offsets[m - 1] + day) % 7 + 7) % 7;
+    return (sundayFirst + 6) % 7;
+}
+
+/// Runs of one pattern letter, and the characters between them.
+static std::vector<std::pair<wchar_t, int>> Runs(std::wstring_view pattern) {
+    std::vector<std::pair<wchar_t, int>> out;
+    for (auto c : pattern) {
+        bool letter = (c >= L'a' && c <= L'z') || (c >= L'A' && c <= L'Z');
+        if (!out.empty() && out.back().first == c && letter) ++out.back().second;
+        else out.emplace_back(c, 1);
+    }
+    return out;
+}
+
+static std::wstring Name(std::string const& key) { return std::wstring(Tr(key)); }
+
+static std::wstring FormatDate(std::wstring_view pattern, int64_t year, int64_t month, int64_t day) {
+    std::wstring out;
+    for (auto [c, count] : Runs(pattern)) {
+        if (c == L'y') out += count == 2 ? Pad2((year % 100 + 100) % 100) : std::to_wstring(year);
+        else if (c == L'M' && count == 1) out += std::to_wstring(month);
+        else if (c == L'M' && count == 2) out += Pad2(month);
+        else if (c == L'M' && count == 3) out += Name("bern.date.month." + std::to_string(month));
+        else if (c == L'M') out += Name("bern.date.month_long." + std::to_string(month));
+        else if (c == L'd') out += count == 1 ? std::to_wstring(day) : Pad2(day);
+        else if (c == L'E' && count == 3) out += Name("bern.date.weekday." + std::to_string(Weekday(year, month, day) + 1));
+        else if (c == L'E') out += Name("bern.date.weekday_long." + std::to_string(Weekday(year, month, day) + 1));
+        else out.append(count, c);
+    }
+    return out;
+}
+
+/// Seconds as `h`, `m` and `s` fields; the largest field written takes
+/// what the larger ones would hold.
+static std::wstring FormatDuration(std::wstring_view pattern, double seconds) {
+    int64_t total = std::isfinite(seconds) ? static_cast<int64_t>(std::floor(std::max(0.0, seconds))) : 0;
+    bool hours = pattern.find(L'h') != std::wstring_view::npos;
+    bool minutes = pattern.find(L'm') != std::wstring_view::npos;
+    std::wstring out;
+    for (auto [c, count] : Runs(pattern)) {
+        std::optional<int64_t> value;
+        if (c == L'h') value = total / 3600;
+        else if (c == L'm') value = hours ? total % 3600 / 60 : total / 60;
+        else if (c == L's') value = hours || minutes ? total % 60 : total;
+        if (value) out += count == 2 ? Pad2(*value) : std::to_wstring(*value);
+        else out.append(count, c);
+    }
+    return out;
+}
+
+static std::pair<double, std::wstring> NumberOf(Arg const* arg) {
+    if (!arg) return {0, L""};
+    if (arg->kind == Arg::Kind::Number) return {arg->number, std::wstring(arg->text)};
+    if (arg->kind == Arg::Kind::Text) {
+        auto text = winrt::to_string(arg->text);
+        double value = 0;
+        auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+        if (result.ec != std::errc() || result.ptr != text.data() + text.size()) value = 0;
+        return {value, std::wstring(arg->text)};
+    }
+    return {0, L""};
+}
+
+static char const* PluralCategory(std::string const& language, double number) {
+    auto base = language.substr(0, language.find_first_of("-_"));
+    static constexpr char const* oneForm[] = {"zh", "ja", "ko", "vi", "th", "id", "ms"};
+    bool single = std::any_of(std::begin(oneForm), std::end(oneForm), [&](char const* tag) { return base == tag; });
+    return !single && number == 1 ? "one" : "other";
+}
+
+static void Write(std::wstring& out, std::vector<Piece> const& pieces, std::string const& language, Args const& args, std::wstring const* hash) {
+    for (auto const& piece : pieces) {
+        switch (piece.kind) {
+        case Piece::Kind::Text: out += piece.text; break;
+        case Piece::Kind::Hash: if (hash) out += *hash; break;
+        case Piece::Kind::Value:
+            if (auto arg = Find(args, piece.text)) {
+                if (arg->kind == Arg::Kind::Date)
+                    out += std::to_wstring(arg->year) + L"-" + Pad2(arg->month) + L"-" + Pad2(arg->day);
+                else
+                    out += arg->text;
+            }
+            break;
+        case Piece::Kind::Plural: {
+            auto [value, shown] = NumberOf(Find(args, piece.text));
+            std::wstring exact = L"=" + std::wstring(Wide(R::Number(value)));
+            std::wstring category(Wide(PluralCategory(language, value)));
+            std::vector<Piece> const* chosen = nullptr;
+            for (std::wstring const& wanted : {exact, category, std::wstring(L"other")})
+                for (auto const& [selector, branch] : piece.branches)
+                    if (!chosen && selector == wanted) chosen = &branch;
+            if (chosen) Write(out, *chosen, language, args, &shown);
+            break;
+        }
+        case Piece::Kind::Date:
+            if (auto arg = Find(args, piece.text); arg && arg->kind == Arg::Kind::Date)
+                out += FormatDate(piece.pattern, arg->year, arg->month, arg->day);
+            break;
+        case Piece::Kind::Duration:
+            out += FormatDuration(piece.pattern, NumberOf(Find(args, piece.text)).first);
+            break;
+        }
+    }
+}
+
+static winrt::hstring Format(winrt::hstring const& source, Args const& args) {
+    Parser parser{std::wstring_view(source)};
+    auto pieces = parser.Message(false);
+    std::wstring out;
+    Write(out, pieces, Language(), args, nullptr);
+    return winrt::hstring(out);
+}
+
+Arg ArgOf(Value const& value) {
+    Arg arg(R::Plain(value));
+    if (value.kind == Value::Kind::Int || value.kind == Value::Kind::Float) {
+        arg.kind = Arg::Kind::Number;
+        arg.number = R::AsDouble(value);
+    }
+    return arg;
+}
+
+Arg DateArg(Value const& value) {
+    Arg arg;
+    arg.kind = Arg::Kind::Date;
+    if (value.kind == Value::Kind::Record && value.Items().size() >= 3) {
+        arg.year = value.Items()[0].i;
+        arg.month = value.Items()[1].i;
+        arg.day = value.Items()[2].i;
+    }
+    return arg;
+}
+
+/// An argument of a field a label shows, by the field's type.
+static Arg FieldArg(Value const& value, BType const& type) {
+    if (type.kind == BType::Kind::Enum) return Arg(Display(value, type.name.c_str()));
+    if (type.kind == BType::Kind::Record && type.name == "CalendarDate") return DateArg(value);
+    return ArgOf(value);
+}
+
+winrt::hstring Fmt(std::string_view key, std::initializer_list<std::pair<std::string_view, Arg>> args) {
+    Args named;
+    named.reserve(args.size());
+    for (auto const& [name, value] : args) named.emplace_back(std::string(name), value);
+    return Format(Tr(key), named);
 }
 
 winrt::hstring Autonym(std::string const& tag) {
@@ -480,12 +708,26 @@ winrt::hstring Label(char const* enumName, uint32_t variant) {
     if (!Host::catalog) return L"";
     auto found = Host::catalog->types.enums.find(enumName);
     if (found == Host::catalog->types.enums.end() || variant >= found->second.size()) return L"";
-    return Tr(std::string(enumName) + "." + found->second[variant].name);
+    auto const& def = found->second[variant];
+    auto text = Tr(std::string(enumName) + "." + def.name);
+    // Without a value the fields a label shows stay empty.
+    return def.shown.empty() ? text : Format(text, {});
 }
 
 winrt::hstring Display(Value const& value, char const* enumName) {
-    if (value.kind == Value::Kind::Enum && enumName) return Label(enumName, value.variant);
-    return R::Plain(value);
+    if (value.kind != Value::Kind::Enum || !enumName) return R::Plain(value);
+    if (!Host::catalog) return L"";
+    auto found = Host::catalog->types.enums.find(enumName);
+    if (found == Host::catalog->types.enums.end() || value.variant >= found->second.size()) return L"";
+    auto const& def = found->second[value.variant];
+    auto text = Tr(std::string(enumName) + "." + def.name);
+    if (def.shown.empty()) return text;
+    // A label that shows the variant's fields fills them in.
+    Args args;
+    auto const& fields = value.Items();
+    for (auto const& [name, index] : def.shown)
+        if (index < fields.size() && index < def.fields.size()) args.emplace_back(name, FieldArg(fields[index], def.fields[index]));
+    return Format(text, args);
 }
 
 }

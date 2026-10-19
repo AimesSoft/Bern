@@ -59,6 +59,7 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             {
                 let mut cleaned = item_struct.clone();
                 cleaned.attrs.retain(|attr| !is_bern_attr(attr, "state"));
+                values::strip_content(&mut cleaned.fields);
                 kept.push(quote! {
                     #[derive(Clone, Debug, PartialEq)]
                     #cleaned

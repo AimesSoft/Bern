@@ -40,6 +40,8 @@ pub(crate) const MOTION: &[&str] = &[
     "animate",
     "scroll_scale",
     "scroll_opacity",
+    "scroll_origin_x",
+    "scroll_origin_y",
     "nudge",
     "nudge_key",
     "nudge_scale",
@@ -88,7 +90,17 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::AXIS_PADDING,
     bern_target_api::feature::UNTITLED_DETAIL,
     bern_target_api::feature::IDLE_CONTROL,
+    bern_target_api::feature::FILL_BUTTONS,
+    bern_target_api::feature::GRID_CELLS,
+    bern_target_api::feature::TAB_ACCESSORY,
+    bern_target_api::feature::PAGE_SEARCH,
+    bern_target_api::feature::FORM_LAYOUT,
+    bern_target_api::feature::MODAL_COVER,
+    bern_target_api::feature::WINDOW_SHORT,
+    bern_target_api::feature::WINDOW_LANDSCAPE,
+    bern_target_api::feature::SEARCH_PALETTE,
     bern_target_api::feature::SIZE_CLASSES,
+    bern_target_api::feature::TEXT_FORMATS,
 ];
 
 const RUNTIME: &str = include_str!("../templates/BernRuntime.swift");
@@ -160,17 +172,7 @@ impl Target for SwiftUiMacos {
             window_chrome: true,
             text_marks: true,
             dynamic_items: true,
-            features: {
-                static FEATURES_WITH_PALETTE: std::sync::OnceLock<Vec<&'static str>> =
-                    std::sync::OnceLock::new();
-                FEATURES_WITH_PALETTE.get_or_init(|| {
-                    FEATURES
-                        .iter()
-                        .copied()
-                        .chain([bern_target_api::feature::SEARCH_PALETTE])
-                        .collect()
-                })
-            },
+            features: FEATURES,
             id: "swiftui-macos",
             ui: "swiftui",
             platforms: &["macos"],
@@ -264,13 +266,22 @@ impl Target for SwiftUiMacos {
                 table,
             ));
         }
-        // The application icon: the declared one, or the Bern logo on a
-        // full square that macOS cuts to its rounded shape.
-        let icon = icon::images(app, &context.project_dir, icon::Shape::Masked)
-            .map_err(|message| vec![Diagnostic::error(message)])?;
+        // The application icon: a declared `.icns` as it is, a declared PNG,
+        // or the Bern logo on a full square that macOS cuts to its rounded
+        // shape.
+        let failed = |message: String| vec![Diagnostic::error(message)];
+        let contents = match icon::source(app, "macos", &context.project_dir) {
+            icon::Source::Native(path) => std::fs::read(&path).map_err(|error| {
+                failed(format!("cannot read the icon {}: {error}", path.display()))
+            })?,
+            _ => icon::icns(
+                &icon::images(app, "macos", &context.project_dir, icon::Shape::Masked)
+                    .map_err(failed)?,
+            ),
+        };
         files.push(GeneratedFile {
             path: bundle.join("Contents/Resources").join(ICON_FILE),
-            contents: icon::icns(&icon),
+            contents,
         });
         let (architecture, _) = architecture();
         let media = self
@@ -737,26 +748,12 @@ pub(crate) fn check_swiftui(
     }
     let mut visit = |node: &Node, parent: Option<&str>| {
         if let Node::Element(element) = node {
-            if element.kind == "Search" && !matches!(parent, Some("Sidebar" | "Toolbar")) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        "the SwiftUI target places `Search` in a `Sidebar` or a `Toolbar` only",
-                    )
-                    .at(element.source.clone()),
-                );
-            }
             if element.kind == "Search"
                 && element.keyword("style") == Some("palette")
-                && (platform == Platform::Ios || parent != Some("Toolbar"))
+                && parent != Some("Toolbar")
             {
                 diagnostics.push(
-                    Diagnostic::error("search palettes require a macOS Toolbar")
-                        .at(element.source.clone()),
-                );
-            }
-            if element.kind == "SearchItem" && platform == Platform::Ios {
-                diagnostics.push(
-                    Diagnostic::error("SearchItem requires a macOS search palette")
+                    Diagnostic::error("a search palette goes in a Toolbar")
                         .at(element.source.clone()),
                 );
             }

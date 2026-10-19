@@ -80,6 +80,10 @@ const RUNTIME: &[(&str, &str)] = &[
         include_str!("../templates/cpp/bern_ui_structure.inl"),
     ),
     (
+        "bern_ui_scene.inl",
+        include_str!("../templates/cpp/bern_ui_scene.inl"),
+    ),
+    (
         "bern_ui_windows.inl",
         include_str!("../templates/cpp/bern_ui_windows.inl"),
     ),
@@ -106,6 +110,7 @@ pub struct WinUi3Windows;
 /// IR features the target builds, in both front ends.
 const FEATURES: &[&str] = &[
     bern_target_api::feature::BUTTON_CONTENT,
+    bern_target_api::feature::TAB_ACCESSORY,
     bern_target_api::feature::REVEAL,
     bern_target_api::feature::TOOLBAR_SEARCH,
     bern_target_api::feature::SEARCH_RESULTS,
@@ -123,6 +128,36 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::RAILS,
     bern_target_api::feature::POPOVER_BUTTON,
     bern_target_api::feature::SIZE_CLASSES,
+    bern_target_api::feature::TEXT_WEIGHTS,
+    bern_target_api::feature::TEXT_LINES,
+    bern_target_api::feature::IMAGE_CORNERS,
+    bern_target_api::feature::SIDEBAR_WIDTH,
+    bern_target_api::feature::CONTROLLED_VALUES,
+    bern_target_api::feature::SEARCH_PALETTE,
+    bern_target_api::feature::IMAGE_TEMPLATE,
+    bern_target_api::feature::ADAPTIVE_IMAGES,
+    bern_target_api::feature::SCALED_SCENE,
+    bern_target_api::feature::ACCORDION_LAYOUT,
+    bern_target_api::feature::CAPSULE_CONTROLS,
+    bern_target_api::feature::MODAL_FLOW_TIMER,
+    bern_target_api::feature::PAGE_BADGES,
+    bern_target_api::feature::IDLE_CONTROL,
+    bern_target_api::feature::FILL_BUTTONS,
+    bern_target_api::feature::GRID_CELLS,
+    bern_target_api::feature::PAGE_SEARCH,
+    bern_target_api::feature::FORM_LAYOUT,
+    bern_target_api::feature::MODAL_COVER,
+    bern_target_api::feature::WINDOW_SHORT,
+    bern_target_api::feature::TEXT_FORMATS,
+    bern_target_api::feature::EDGE_GROW,
+    bern_target_api::feature::DELAYED_APPEAR,
+    bern_target_api::feature::TOOLBAR_LEADING,
+    bern_target_api::feature::AXIS_PADDING,
+    bern_target_api::feature::ICON_MENUS,
+    bern_target_api::feature::ICON_LABELS,
+    bern_target_api::feature::ROW_BASELINE,
+    bern_target_api::feature::SIDEBAR_HEADER,
+    bern_target_api::feature::UNTITLED_DETAIL,
 ];
 
 /// Motion properties the target shows.
@@ -134,7 +169,13 @@ const MOTION: &[&str] = &[
     "animate",
     "scroll_scale",
     "scroll_opacity",
+    "scroll_origin_x",
+    "scroll_origin_y",
     "nudge",
+    "nudge_key",
+    "nudge_scale",
+    "reduce_motion",
+    "appear_delay",
     "stagger",
 ];
 
@@ -161,6 +202,20 @@ pub fn product_name(app: &Application) -> String {
 
 fn executable(app: &Application) -> String {
     app.app.id.replace('_', "-")
+}
+
+/// The application icon: a declared `.ico` as it is, or the declared PNG
+/// or the Bern logo packed into one.
+fn app_ico(app: &Application, context: &BuildContext) -> Result<Vec<u8>, Vec<Diagnostic>> {
+    let failed = |message: String| vec![Diagnostic::error(message)];
+    match icon::source(app, "windows", &context.project_dir) {
+        icon::Source::Native(path) => std::fs::read(&path)
+            .map_err(|error| failed(format!("cannot read the icon {}: {error}", path.display()))),
+        _ => Ok(icon::ico(
+            &icon::images(app, "windows", &context.project_dir, icon::Shape::AsDrawn)
+                .map_err(failed)?,
+        )),
+    }
 }
 
 fn exe(name: &str) -> String {
@@ -317,10 +372,7 @@ impl Target for WinUi3Windows {
             GeneratedFile::text("app/app.rc", glue::resource_script(app, &executable)),
             GeneratedFile {
                 path: "app/app.ico".into(),
-                contents: icon::ico(
-                    &icon::images(app, &context.project_dir, icon::Shape::AsDrawn)
-                        .map_err(|message| vec![Diagnostic::error(message)])?,
-                ),
+                contents: app_ico(app, context)?,
             },
             GeneratedFile::text("app/app_id.h", generator.identity()),
             GeneratedFile::text(

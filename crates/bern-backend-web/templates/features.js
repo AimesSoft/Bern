@@ -224,7 +224,25 @@ export function bindLength(node, property, value, motion) {
 export function bindGridMinWidth(node, value, motion) {
   bindNumber(value, motion, (v) => {
     node.style.gridTemplateColumns = `repeat(auto-fill, minmax(min(100%, ${Math.max(0, v)}px), 1fr))`;
+    node.bernFitCells?.();
   });
+}
+
+/// Rows of a `Grid` as tall as the column width ÷ `ratio` + `extra`, its
+/// items at their tops; content taller than that runs into the gap below.
+export function bindGridCells(node, ratio, extra, motion) {
+  node.classList.add("bern-grid-cells");
+  let add = 0;
+  const fit = () => {
+    const column = parseFloat(getComputedStyle(node).gridTemplateColumns.split(" ")[0]) || 0;
+    node.style.gridAutoRows = `${Math.max(0, column / ratio + add)}px`;
+  };
+  node.bernFitCells = fit;
+  bindNumber(extra, motion, (v) => {
+    add = v;
+    fit();
+  });
+  new ResizeObserver(fit).observe(node);
 }
 
 // MARK: - Theme
@@ -578,6 +596,13 @@ const INDICATOR = {
   leading: (w) => `inset ${w}px 0 0 0`, trailing: (w) => `inset -${w}px 0 0 0`,
   top: (w) => `inset 0 ${w}px 0 0`, bottom: (w) => `inset 0 -${w}px 0 0`,
 };
+
+/// A form style's background is its rows': the form itself shows the
+/// page around it.
+export function formRows(node, style) {
+  const row = style?.base?.background;
+  if (row) node.style.setProperty("--bern-form-row", cssColor(row));
+}
 
 /// A `style!` override on a control: its base look, and the looks of its
 /// states — hover, pressed, focus, disabled, selected — merged in that
@@ -1127,7 +1152,7 @@ export function Decorate(p, ctx, spec, build) {
     if (spec.nudge) nudge(node, spec.nudge, spec.nudgeMotion);
     if (spec.nudgeKey) nudge(node, spec.nudgeKey, spec.nudgeMotion, spec.nudgeScale ?? 1.06, true);
     if (spec.scrollScale !== undefined || spec.scrollOpacity !== undefined) {
-      scrollEffect(node, spec.scrollScale ?? 1, spec.scrollOpacity ?? 1);
+      scrollEffect(node, spec.scrollScale ?? 1, spec.scrollOpacity ?? 1, spec.scrollOriginX ?? 0.5, spec.scrollOriginY ?? 0.5);
     }
   }
   p.append(fragment);
@@ -1242,7 +1267,7 @@ export function nudge(node, when, motion, scale = 1.06, keyed = false) {
 /// middle of the scroll view it is in: at the middle `scale` and full
 /// opacity; a half viewport plus half its size away, plain size and
 /// `opacity`. Computed each frame the view scrolls or resizes.
-function scrollEffect(node, scale, opacity) {
+function scrollEffect(node, scale, opacity, originX = 0.5, originY = 0.5) {
   if (reduced) return;
   const layer = layers(node).layer("scroll");
   let view = null;
@@ -1259,6 +1284,10 @@ function scrollEffect(node, scale, opacity) {
     const factor = 1 + (scale - 1) * near;
     layer.sx.set(factor);
     layer.sy.set(factor);
+    // Elements scale about their center: a scale about another point is
+    // that, moved by (1 − factor) × (point − center).
+    layer.x.set((1 - factor) * (originX - 0.5) * rect.width);
+    layer.y.set((1 - factor) * (originY - 0.5) * rect.height);
     layer.opacity.set(opacity + (1 - opacity) * near);
   };
   let pending = false;
@@ -1795,13 +1824,14 @@ export function Swipe(p, ctx, { id, label, field, min, max, axis, distance }, co
 /// scrolls to the item it is set to, giving it a nudge on arrival with
 /// `arrival: "nudge"`. Items are the rows of the lists inside, each known
 /// by its key.
-export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion, hideIndicators }, children) {
+export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion, hideIndicators, openAt }, children) {
   const horizontal = axis === "horizontal";
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
   if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
   if (snap) node.classList.add("bern-snap", `bern-snap-${snap}`);
   children(node, ctx);
   p.append(node);
+  if (openAt !== undefined) B.openScroll(node, horizontal, openAt);
   if (!snap && !position) return;
   // A position binding follows the leading item unless center snapping
   // was explicitly requested (for example by a horizontal episode rail).
@@ -2052,10 +2082,12 @@ export function focusTarget(ctx, id) {
 /// children share one row, so the rail is as thick as the thickest; a
 /// vertical rail takes the height it is given. The rail takes no clicks;
 /// its children do.
-export function Rail(p, ctx, { axis, anchor }, children) {
+export function Rail(p, ctx, { axis, anchor, overhang }, children) {
   const vertical = axis === "vertical";
   const node = el("div", { class: `bern-rail bern-rail-${vertical ? "vertical" : "horizontal"} bern-fill-width` });
   if (vertical) node.classList.add("bern-fill-height");
+  // The scale runs this far past both ends (the stylesheet's calc).
+  bindNumber(overhang, null, (value) => node.style.setProperty("--bern-rail-overhang", `${value}px`));
   children(node, { ...ctx, rail: { vertical, anchor: anchor ?? "center" } });
   p.append(node);
 }
@@ -2069,8 +2101,6 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
   const fragment = document.createDocumentFragment();
   build(fragment, ctx);
   const rail = ctx.rail ?? { vertical: false, anchor: "center" };
-  const start = rail.vertical ? "top" : "left";
-  const size = rail.vertical ? "height" : "width";
   const clampFraction = (value) => Math.min(1, Math.max(0, Number(value) || 0));
   for (const node of fragment.children) {
     node.classList.add("bern-rail-item");
@@ -2078,7 +2108,7 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
       const shift = ANCHOR_SHIFT[rail.anchor] ?? "-50%";
       node.style.translate = rail.vertical ? `0 ${shift}` : `${shift} 0`;
       bindNumber(at, motion, (value) => {
-        node.style.setProperty(`--bern-rail-${start}`, `${clampFraction(value) * 100}%`);
+        node.style.setProperty("--bern-rail-at", String(clampFraction(value)));
       });
     } else {
       node.classList.add("bern-rail-span");
@@ -2086,8 +2116,8 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
       const write = () => {
         const a = clampFraction(ends.from);
         const b = clampFraction(ends.to);
-        node.style.setProperty(`--bern-rail-${start}`, `${Math.min(a, b) * 100}%`);
-        node.style.setProperty(`--bern-rail-${size}`, `${Math.abs(b - a) * 100}%`);
+        node.style.setProperty("--bern-rail-at", String(Math.min(a, b)));
+        node.style.setProperty("--bern-rail-span", String(Math.abs(b - a)));
       };
       bindNumber(from, motion, (value) => {
         ends.from = value;

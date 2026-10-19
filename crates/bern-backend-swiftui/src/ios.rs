@@ -148,27 +148,45 @@ impl Target for SwiftUiIos {
         for (path, table) in resources::localization_files(app) {
             files.push(GeneratedFile::text(bundle.join(path), table));
         }
-        // The icon: the declared one, or the Bern logo on a full square,
+        // The icon: a declared `.appiconset` as it is (with its dark and
+        // tinted images), a declared PNG, or the Bern logo on a full square,
         // which iOS cuts to its rounded shape. `actool` compiles it into
         // the bundle's asset catalog.
-        let images = icon::images(app, &context.project_dir, icon::Shape::Masked)
-            .map_err(|message| vec![Diagnostic::error(message)])?;
-        let largest = icon::largest(&images);
+        let failed = |message: String| vec![Diagnostic::error(message)];
         let set = PathBuf::from(ASSETS).join(format!("{ICON_NAME}.appiconset"));
         files.push(GeneratedFile::text(
             PathBuf::from(ASSETS).join("Contents.json"),
             "{\n  \"info\" : {\n    \"author\" : \"bern\",\n    \"version\" : 1\n  }\n}\n",
         ));
-        files.push(GeneratedFile::text(
-            set.join("Contents.json"),
-            format!(
-                "{{\n  \"images\" : [\n    {{\n      \"filename\" : \"{ICON_NAME}.png\",\n      \"idiom\" : \"universal\",\n      \"platform\" : \"ios\",\n      \"size\" : \"1024x1024\"\n    }}\n  ],\n  \"info\" : {{\n    \"author\" : \"bern\",\n    \"version\" : 1\n  }}\n}}\n"
-            ),
-        ));
-        files.push(GeneratedFile {
-            path: set.join(format!("{ICON_NAME}.png")),
-            contents: largest.png.to_vec(),
-        });
+        if let icon::Source::Native(dir) = icon::source(app, "ios", &context.project_dir) {
+            for file in icon::app_icon_set(&dir)
+                .map_err(|message| failed(format!("the iOS icon {} {message}", dir.display())))?
+            {
+                let contents = std::fs::read(dir.join(&file)).map_err(|error| {
+                    failed(format!(
+                        "cannot read {}: {error}",
+                        dir.join(&file).display()
+                    ))
+                })?;
+                files.push(GeneratedFile {
+                    path: set.join(file),
+                    contents,
+                });
+            }
+        } else {
+            let images = icon::images(app, "ios", &context.project_dir, icon::Shape::Masked)
+                .map_err(failed)?;
+            files.push(GeneratedFile::text(
+                set.join("Contents.json"),
+                format!(
+                    "{{\n  \"images\" : [\n    {{\n      \"filename\" : \"{ICON_NAME}.png\",\n      \"idiom\" : \"universal\",\n      \"platform\" : \"ios\",\n      \"size\" : \"1024x1024\"\n    }}\n  ],\n  \"info\" : {{\n    \"author\" : \"bern\",\n    \"version\" : 1\n  }}\n}}\n"
+                ),
+            ));
+            files.push(GeneratedFile {
+                path: set.join(format!("{ICON_NAME}.png")),
+                contents: icon::largest(&images).png.to_vec(),
+            });
+        }
         let (architecture, _, _) = architectures();
         let media = self
             .descriptor()
@@ -348,10 +366,17 @@ impl Target for SwiftUiIos {
                     .collect(),
             },
         ];
-        // The asset catalog takes a 1024-pixel icon.
-        let images = icon::images(app, &context.project_dir, icon::Shape::Masked)
-            .map_err(|message| vec![Diagnostic::error(message)])?;
-        if icon::largest(&images).size != 1024 {
+        // The asset catalog takes a 1024-pixel icon; a declared
+        // `.appiconset` has its own sizes.
+        let scale = match icon::source(app, "ios", &context.project_dir) {
+            icon::Source::Native(_) => false,
+            _ => {
+                let images = icon::images(app, "ios", &context.project_dir, icon::Shape::Masked)
+                    .map_err(|message| vec![Diagnostic::error(message)])?;
+                icon::largest(&images).size != 1024
+            }
+        };
+        if scale {
             steps.push(run(
                 "Scale the icon to 1024 pixels",
                 "sips",

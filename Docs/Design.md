@@ -286,7 +286,9 @@ SplitView {
 ```
 
 - **普通插槽**：`Slot` 按模块登记顺序依次放入各模块贡献的组件。插槽可以声明传给贡献组件的参数，例如 `Slot(id: player_controls, player: players.main)`；贡献组件按参数名接收这些值，所需的模块客户端与会话草稿由 Bern 注入。
+- **应用的贡献**：应用自己的 `Bern.toml` 也可以写 `[contributes]`，把外壳的组件放进插槽，包括模块页面里声明的插槽（例如模块页面在滚动内容顶部留一个 `Slot(id: page_header)`，外壳放进手机的顶栏）。应用的贡献排在各模块之前，不随可选模块开关。贡献组件需要窗口句柄时由 Bern 提供，插槽所在的组件不必有 `windows` 参数。
 - **页面插槽**：`Pages` 在导航容器中为每个贡献的页面生成导航项；`PageContent` 显示选中的页面。选择值的类型由插槽生成，其中的取值来自构建时登记的全部页面，所以仍是类型化、可检查的。
+- **打开页面**：组件里的动作写 `=> pages.downloads.show()`，切到某个页面插槽中 ID 为 `downloads` 的页面，例如首页上“全部 ›”跳到模块自己的页面。模块不需要知道外壳怎样显示页面：编译器找到选择这个插槽的枚举，再找到持有该枚举的会话字段（外壳的 `Sidebar`、`Tabs` 或 `PageContent` 按它选择），把动作落成对这个字段的赋值，并让组件读取那份会话草稿。没有这样的页面、有两个插槽都有这个 ID、或者持有该枚举的会话字段不是恰好一个时构建失败。它只是会话赋值，各目标都支持。
 - **容器规则**：插槽所在的容器只接受它允许的子元素。例如工具栏插槽的贡献组件，根元素必须是工具栏允许的子元素。不符合时构建失败，并指出贡献组件的声明位置。
 
 ### 可选模块
@@ -484,6 +486,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | SidebarFooter | 固定在侧边栏底部、列表下方的内容，自上而下排列，例如小播放器、账号与设置入口；列表在它上方滚动；一个侧边栏最多一个 | 媒体类应用；SwiftUI 已实现（安全区内嵌）；Compose 与 Web 已实现（侧栏底部的一栏），Web 浏览器中已验证；GTK 与 WinUI 3 已实现（WinUI 3 为 `NavigationView.PaneFooter`），Linux 虚拟机与 Windows PC 上已验证 |
 | Navigation、Destination 和 NavLink | 推入导航与返回，绑定类型化路由；Navigation 可带 `id` 供外部入口返回 | 基础组件 |
 | Tabs 和 Tab | 同级页面的页签切换；Tabs 可带 `id` 供外部入口切换 | 基础组件 |
+| TabAccessory | 随页签常驻、在每一页上都显示的一条，例如正在播放的小播放器；直接写在 `Tabs` 里，最多一个，用 `shown:` 收起而不是写在 `if` 里。条是系统画的底，里面的图标按钮是条上的符号，不再各带一层玻璃 | 能力 `tab_accessory`。SwiftUI：iOS 26.1 起为标签视图的 `tabViewBottomAccessory`（标签栏上方的系统玻璃条，iPhone 模拟器 iOS 26.5 上已验证），更早的 iOS 与 macOS 在每页底部的安全区内嵌一条材质胶囊；Compose 为导航栏上方的一块抬高表面；GTK 为页面下方滑出的 Adwaita 卡片（`GtkRevealer`）；WinUI 3 为页面下方的卡片；Web 为页面下方的一条。Compose、GTK、WinUI 3 与 Web 未验证 |
 | Toolbar | 窗口或页面级操作区；可以放一个 `Search`，直接写在工具栏中，不放在条件或重复里。相邻的项是一组，`Divider` 把它们分成几组：按功能分组，一组的项在平台上共享一块底（Liquid Glass 的同一个胶囊），组与组之间留固定间隔；`Divider` 只能直接写在两项之间，平台建议不超过三组 | 基础组件；工具栏中的搜索框 SwiftUI 已实现。分组：SwiftUI 生成 `ToolbarItemGroup`，macOS 26 与 iOS 26 起组间插 `ToolbarSpacer(.fixed)`；组里的图标按钮交给工具栏绘制，和别的项同组的菜单不显示下拉箭头（带箭头的菜单会自成一块），macOS 上已验证。GTK 与 WinUI 3 在组间画一条竖线，Linux 虚拟机与 Windows PC 上已验证（WinUI 3 两种前端相同）；Web 同样画一条竖线，浏览器中已验证；Compose 在组间留 12dp，Android 上已验证 |
 | Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸 | 基础组件；尺寸 SwiftUI 已实现 |
 | Grid | 等宽的列，列宽不小于 `min_width`，放得下几列就排几列，子元素逐行填入；`gap` 默认 8 | 已实现 |
@@ -492,7 +495,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | ScaleBox / Positioned | 固定逻辑画布等比适配父容器；图层用逻辑坐标声明位置、尺寸与状态动画 | SwiftUI 与 Web；见[播放器布局](Reference/UI.md#坐标场景与滚动内容) |
 | Marquee | 渲染端计时的水平循环内容，支持暂停、相位、透明度和减少动态效果 | SwiftUI 与 Web；不提供逐帧业务回调 |
 | ControlGroup | 按功能将控件放入共享胶囊，保留各自的命中区域、菜单和动作 | SwiftUI 与 Web；见[控件容器](Reference/UI.md#控件容器与尺寸) |
-| SidebarHeader | 固定在侧栏顶部、列表上方的内容 | SwiftUI 与 Web，`sidebar_header` |
+| SidebarHeader | 固定在侧栏顶部、列表上方的内容；`role: title` 表示它只给窗口命名（应用图标与名称），标题栏已显示图标与标题的 Windows 不显示它 | SwiftUI 与 Web，`sidebar_header` |
 | Svg | 按需呈现打包的动画与交互 SVG 文档 | 见[专项接口与依赖](Implementation/Animated-SVG.md) |
 | Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题 | 基础组件 |
 | Label | 图标与标题组合；`display: icon` 只显示图标，保留 `title` 作为可访问名称，图标字号仍由 `style` 决定 | `display: icon` 已在 SwiftUI 与 Web 实现（`icon_labels`）；其他目标未实现时构建报错 |
@@ -743,7 +746,7 @@ style! {
 
 - **选择器**：组件种类（`SidebarItem`），或种类加命名变体（`Button.hero`，实例写 `variant: hero` 选用；`style` 已是 `Text`、`Picker` 等组件的属性，不复用）。不按位置、层级或运行时条件选择。
 - **状态**：`hover`、`pressed`、`selected`、`focus`、`disabled`，与控件配方的状态相同；组合按配方规则合并，焦点反馈独立保留。写在状态中的变换用所带的动效进入该状态；`settle` 是回到普通状态时使用的动效。
-- **属性**：只接受 Bern 定义的集合。外观有 `background`、`foreground`、`border`、`corner`、`padding`、`size`（`small`、`regular`、`large`、`extra_large`，映射到平台的控件尺寸）；选中有 `fill(角色)` 与 `indicator(角色, edge, width)`；变换有 `scale`、`offset`、`opacity`；阴影 `shadow(半径, y: 下移, opacity: 不透明度)` 像控件浮起，`y` 默认为半径的三分之一，不透明度默认 0.2，静止时写 `shadow: 4`；`system` 表示该项使用平台默认，`none` 表示该状态没有任何反馈。各组件可用的属性与状态写在组件规范中。
+- **属性**：只接受 Bern 定义的集合。外观有 `background`、`foreground`、`border`（`border: 角色`，或 `border: border(角色, width: 0.5)` 指定线宽，默认 1）、`corner`、`padding`、`size`（`small`、`regular`、`large`、`extra_large`，映射到平台的控件尺寸）；选中有 `fill(角色)` 与 `indicator(角色, edge, width)`；变换有 `scale`、`offset`、`opacity`；阴影 `shadow(半径, y: 下移, opacity: 不透明度)` 像控件浮起，`y` 默认为半径的三分之一，不透明度默认 0.2，静止时写 `shadow: 4`；`system` 表示该项使用平台默认，`none` 表示该状态没有任何反馈。各组件可用的属性与状态写在组件规范中。
 - **颜色**：只写语义角色，例如 `accent`、`fill.subtle`、`text.primary`。前景自动与背景配对，`fill(accent)` 上的文字与图标使用 `on_accent`，由主题内核按模式与对比策略求解并检查，运行时改变品牌色时随之更新。确需固定颜色时写 `color(light: "#…", dark: "#…")`，两种模式都要给出并通过对比检查，否则构建失败。
 - **确定性**：样式在构建时确定。运行时只有交互状态与主题快照会改变结果，不能用状态绑定切换样式。
 - **目标例外**：`#[target(...)]` 块在指定目标上覆盖同名声明，用于平台差异或在某个目标上退回系统默认。
@@ -968,7 +971,7 @@ tr! {
 
 类型系统应区分本地化文本、运行时文本以及普通字符串。窗口标题、按钮标签、提示、错误信息、菜单项和可访问名称等展示属性必须接受合适的展示文本类型；路径、命令 ID、资源标识等内部字符串不受翻译规则约束。
 
-运行时文本适用于媒体标题、用户输入等数据，不能作为静态文案绕过翻译的常规通道。编译器能够检查声明中的静态文本及可见字面量，但不能普遍证明任意应用函数返回的字符串来源。
+运行时文本适用于媒体标题、用户输入等数据，不能作为静态文案绕过翻译的常规通道。编译器不追踪任意应用函数返回的字符串来源，而是要求来源声明自己：协议与 UI 类型的文本字段、组件的文本参数写 `#[content]` 才是内容（标题、文件名、用户写的笔记），只有内容能直接显示或作为 `tr!` 参数，否则报 B105；会话字段是用户输入，算作内容。引擎因此不拼句子：它给出数字、`CalendarDate` 与枚举，界面用 `tr!` 或带标签的枚举（标签可显示变体字段）写成读者的语言。
 
 ### 项目配置与完整性检查
 
@@ -986,7 +989,8 @@ strict = true
 - 每条本地化声明包含所有必需语言，默认语言也在支持列表中。
 - 语言标签没有重复或拼写错误；外部组件附带的额外语言可以保留，不算遗漏。
 - 直接写入展示属性的静态文本没有绕过本地化声明。
-- 插值变量已声明，各语言引用一致的参数集合，参数类型可格式化。
+- 插值变量已声明，各语言引用一致的参数集合，参数类型与用法相符（复数与时长是数字，日期是 `CalendarDate`），每种语言写出它用到的复数类别。
+- 显示的运行时文本与 `tr!` 的文本参数来自 `#[content]` 字段或参数。
 - 引用的共享文本存在，生成资源 ID 无冲突且可追溯到源码。
 
 示例诊断：
@@ -1006,9 +1010,20 @@ Required languages: zh-Hans, en, ja
 | B101 | 语言标签重复，或不在 `[languages].supported` 中（拼写错误） |
 | B102 | 缺少必需语言的翻译 |
 | B103 | 展示属性直接写字面量，绕过本地化声明 |
-| B104 | 插值不合法：占位符没有对应参数、参数未被任何翻译使用、各语言的占位符集合不一致，或占位符写法错误 |
+| B104 | 插值不合法：占位符没有对应参数、参数未被任何翻译使用、各语言的占位符集合不一致、占位符写法错误、缺少语言所需的复数分支，或参数类型与用法不符 |
+| B105 | 显示的文本不是内容：未标 `#[content]` 的文本字段或参数被直接显示或作为 `tr!` 参数，或 `tr!` 参数写了字面量 |
 
-首次版本支持基础插值；复数、日期、数字、货币和 RTL 需要明确的格式化及布局规则，后续独立扩展。英文复数不能通过简单插值自动保证语法正确，翻译语义质量也不属于完整性检查的保证。
+### 消息格式
+
+`tr!` 与枚举标签共用 ICU MessageFormat 的一个子集，由 `bern-protocol` 解析与检查，各后端按同一语义在运行时随当前语言写出：
+
+- `{name}`：文本原样，数字按 Bern 的写法，枚举写它的标签。
+- `{n, plural, =0 {…} one {# 项} other {# 项}}`：按数字在该语言中的复数类别选分支，`=N` 精确匹配优先，`#` 是这个数。中文、日文、韩文、越南文、泰文、印尼文、马来文只有 `other`，其余语言区分 `one` 与 `other`。
+- `{d, date, 模式}`：`CalendarDate` 按 `y`、`yy`、`M`、`MM`、`MMM`、`MMMM`、`d`、`dd`、`EEE`、`EEEE` 写出，月名与星期名是框架文本。
+- `{t, duration, 模式}`：秒数按 `h`、`m`、`s`（双写补零）写出，写出的最大单位容纳更大的部分。
+- `{{`、`}}` 是字面括号；复数分支里 `}` 总是结束分支。
+
+数字的本地写法（千分位、小数点）、货币、相对时间与 RTL 仍需明确的格式化及布局规则，后续独立扩展。翻译语义质量不属于完整性检查的保证。
 
 ### 运行时切换语言
 
@@ -1054,6 +1069,7 @@ Adaptive(id: clip_choice) {
 - 尺寸档有四个：小于 `compact_below` 为 `compact`，小于 `medium_below` 为 `medium`，小于 `expanded_below` 为 `expanded`，其余为 `large`；没写的断点让对应的档不存在，宽度落入上一档。任何宽度都恰好落入一个尺寸，规则确定、可测试。输入方式与 TV 尺寸后续扩展，不声称检查了它们。
 - `Adaptive` 的选择依据是它所在位置的可用宽度。它只能包含 `Layout`，`compact` 与 `expanded` 各一个是必需的，`medium` 与 `large` 可选；某一档没有自己的 `Layout` 时用更大一档的，没有更大的就用更小一档的，因此只写 `compact` 与 `expanded` 的应用行为不变。缺少必需的、重复，或写了配置中不存在的档，报 B401。使用 `Adaptive` 而没有配置 `[layouts]` 报 B402。
 - 表达式可以读窗口宽度所在的档：`window.compact`、`window.medium`、`window.expanded`、`window.large`，恰有一个为真，例如页边距 `padding: if window.large { 48 } else if window.expanded { 32 } else if window.medium { 24 } else { 16 }`。它们按窗口宽度和同一组断点计算，需要 `[layouts]`。目标在能力描述中列出 `size_classes` 才支持 `medium`、`large` 与这些窗口字段；不支持的目标构建失败。实现进度：Web 已实现，浏览器中把视口设为 1024、800、1100 宽验证：海报墙页边距随窗口档位为 32、24、32；胶片页的 `Adaptive` 在可用宽度约 560 时为 `compact`（图标按钮），约 860 时为 `medium`（文字按钮）。macOS 与 iOS 已实现：macOS 窗口宽 880、1200 与 1440 以上时海报墙页边距为 24、32、48；胶片页的 `Adaptive` 在窗口宽 600、1100、1470 时为 `compact`、`medium`、`expanded`；iPhone 17 Pro 竖屏为 `compact`。Compose 已实现，Android 模拟器上把窗口设为 448、896、1344、1493 dp 宽：海报墙页边距为 16、24、32、约 48，胶片页的 `Adaptive` 依次为 `compact`、`medium`、`expanded`。GTK 已实现，窗口内容顶部一个高 0 的探针测量宽度，Linux 虚拟机上中号窗口时胶片页为 `medium`；WinUI 3 已实现，Windows PC 上验证海报墙页边距随档位变化、胶片页在 `compact`、`medium`、`expanded` 之间切换。功能契约的覆盖仍按 `compact` 与 `expanded` 检查。
+- `window.short`：窗口高度低于 `compact_below` 断点，例如手机横过来时（iPhone 横屏高 390），与宽度档位无关，需要 `[layouts]`。能力 `window_short`：SwiftUI 与 Web 已实现，其他目标构建失败。窗口的 `landscape` 是另一回事：手机上条件成立时请求横屏、不成立时回到竖屏（能力 `window_landscape`，iOS 实现；macOS 没有方向可转，不支持的目标给出警告并保持设备方向）。
 - 状态保留规则：引擎状态与会话草稿不在视图树中，切换布局不受影响；控件身份是“组件 + 控件 `id`”，两个布局中 `id` 相同的控件是同一控件，切换后焦点迁移到它（目标支持焦点迁移时）；滚动位置与未提交的局部编辑首版不迁移。
 - 带 `id` 的 `Adaptive` 出现在 `ui.inspect` 中，值为当前尺寸，外部入口可以确认布局切换。
 
@@ -1465,7 +1481,7 @@ Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, chrome
 }
 ```
 
-- **`chrome`**：`standard` 是平台默认的标题栏；`unified` 让内容延伸到标题栏下，标题栏透明，侧边栏到达窗口顶边，后端为系统窗口控件预留位置并保留拖动区域。预期实现：macOS 的全尺寸内容与透明标题栏，WinUI 3 的 `ExtendsContentIntoTitleBar`（窗口已使用 Mica 背景），GTK 的 `AdwToolbarView` 平铺顶栏。网页与 iPhone 没有窗口标题栏，不受影响。实现进度：WinUI 3 的内容本来就延伸到标题栏，`unified` 只去掉标题栏中的标题文字，已验证，Islands 保留系统标题栏；GTK 用平铺顶栏去掉分隔阴影，内容不延伸到标题栏下。
+- **`chrome`**：`standard` 是平台默认的标题栏；`unified` 让内容延伸到标题栏下，标题栏透明，侧边栏到达窗口顶边，后端为系统窗口控件预留位置并保留拖动区域。预期实现：macOS 的全尺寸内容与透明标题栏，WinUI 3 的 `ExtendsContentIntoTitleBar`（窗口已使用 Mica 背景），GTK 的 `AdwToolbarView` 平铺顶栏。网页与 iPhone 没有窗口标题栏，不受影响。实现进度：WinUI 3 的内容本来就延伸到标题栏，标题栏照常在应用图标旁显示窗口标题（Fluent 窗口如此），Islands 保留系统标题栏；GTK 用平铺顶栏去掉分隔阴影，内容不延伸到标题栏下。
 - **`immersive`**：布尔绑定。为真时窗口隐藏标题栏与工具栏，触屏平台同时隐藏状态栏与主屏幕指示条，指针停止移动后隐藏、移动时重新出现；为假时恢复。它不是全屏，窗口尺寸不变，全屏仍是窗口命令。预期实现：macOS 的工具栏可见性与 `NSCursor.setHiddenUntilMouseMoves`，GTK 的 `AdwToolbarView:reveal-top-bars` 与空指针，iOS 的 `statusBarHidden` 与 `persistentSystemOverlays`，Web 的 `cursor: none`；WinUI 3 收起标题栏并去掉系统标题栏与标题按钮、静置时隐藏指针（Islands 去掉 `WS_CAPTION`）。实现进度：GTK 与 WinUI 3 已实现，Linux 虚拟机与 Windows PC 上验证 planner 的专注模式静置 3 秒后标题栏隐藏；WinUI 3 移动指针后恢复，Islands 的恢复未验证。
 - **`idle_after` 与 `window.idle`**：声明 `idle_after` 秒数后，窗口提供只读的会话状态 `window.idle`：指针、键盘与触摸在这段时间内都没有输入时为真，一有输入立即变为假。控制层的淡出与 `immersive` 都可以绑定它，应用不需要自己计时。它是 UI 会话状态，不进入业务引擎。`idle_enabled` 默认 true，可绑定布尔状态；false 暂停检测并清除闲置状态，恢复后重新计时。该开关目前由 SwiftUI 与 Web 消费，其他后端尚未接入，不能依赖它停用计时。macOS 编辑文字、打开菜单或子窗口时会保留控制层。
 - **覆盖层**：窗口内容可以是 `Stack`，在导航容器之上叠放其他层，例如全窗口的播放层或固定在侧边栏底部的小播放器。macOS 与 Web 已验证在导航容器之上叠放播放器及切换侧栏迷你播放器。最上层先处理返回，规则同“路由与返回行为”。播放器与视图分离：两个位置可附着同一个播放器；不支持多视图的媒体后端由最新附着的视图显示画面。跨分栏动画当前验收的是 `Image`；`Video` 的连续画面转移仍需媒体后端专项实现与验证。
@@ -1655,16 +1671,42 @@ icon = "art/icon.png"
 
 `icon` 是相对 `Bern.toml` 的方形 PNG，边长为 256、512 或 1024 像素（建议 1024），路径规则与随包资源相同。不存在、经过符号链接、不是 PNG、不是方形或尺寸不符都是指向该条目的构建错误。IR 只记录相对路径，目标模块在生成时读取文件。
 
+各平台也可以有自己的图标。设计工具通常按平台导出原生格式，写成表即可原样使用：
+
+```toml
+[app.icon]
+default = "art/icon.png"                    # 没有单独声明的平台都用它，可省略
+macos = "art/macos/App.icns"                # .icns，或方形 PNG
+ios = "art/ios/AppIcon.appiconset"          # .appiconset 文件夹（可含深色、着色版），或方形 PNG
+windows = "art/windows/app.ico"             # .ico，或方形 PNG
+linux = "art/linux/hicolor"                 # 按 hicolor 排布的图标主题文件夹，或方形 PNG
+android = "art/android/res"                 # 含 mipmap-*/ic_launcher 的 res 文件夹，或方形 PNG
+browser = "art/web"                         # 页面图标文件夹、SVG，或方形 PNG
+```
+
+键是 `[targets]` 中的平台名，另有 `default`。每一项都可以是方形 PNG（规则同上）；原生格式在配置阶段按平台检查，问题都是指向 `icon` 条目的构建错误：
+
+| 平台 | 原生格式 | 检查 | 生成 |
+| --- | --- | --- | --- |
+| `macos` | `.icns` 文件 | 文件头与各项长度 | 原样作为 `AppIcon.icns` |
+| `ios` | `.appiconset` 文件夹 | `Contents.json` 可解析，列出的图片都在文件夹顶层 | 文件夹内容原样放进资源目录的 `AppIcon.appiconset`，由 `actool` 编译；深色与着色版随之生效 |
+| `windows` | `.ico` 文件 | 文件头与各图片位置 | 原样作为 `app.ico`；其中的 PNG 与位图项都可用 |
+| `linux` | 图标主题文件夹 | 只含 `<尺寸>/apps/<名称>.png`（尺寸目录如 `48x48`、`48x48@2`，PNG 尺寸须与目录相符）、`scalable/apps/<名称>.svg`、`symbolic/apps/<名称>-symbolic.svg`，同一个名称，至少一个 PNG | 名称换成 `bundle_id`；最大的 PNG 放在可执行文件旁供运行时使用，全部图标放在 `icons/hicolor` 下，`.deb` 装进 `/usr/share/icons/hicolor` |
+| `android` | `res` 文件夹 | 只含 `mipmap*`、`drawable*`、`values*` 资源目录，有 `mipmap*/ic_launcher`，不含 Bern 自己写的 `strings.xml`、`themes.xml` | 原样并入应用的 `res`：自适应图标、主题图标（单色层）随之生效；有 `ic_launcher_round` 时清单加 `android:roundIcon` |
+| `browser` | 页面图标文件夹或 SVG | 文件夹只在顶层放 `.svg`、`.ico`、`.png` 与 `.webmanifest`（或 `manifest.json`），文件名可作 URL，至少一张图 | 文件夹复制到 `icons/`，按种类生成 `<link>`：`.ico`、SVG、`apple-touch-icon*.png` 与清单，没有 SVG 和 `.ico` 时链接非 maskable 的 PNG；单个 SVG 是 `favicon.svg` |
+
 没有声明时，所有目标使用 Bern 的标志，应用启动后在系统各处显示的就是它。标志按各平台的显示方式随目标模块分发，并预先渲染成各平台需要的尺寸：
 
 | 目标 | 图标 | 显示位置 |
 | --- | --- | --- |
 | macOS | `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`），标志铺满方形画布，由系统裁成圆角方形 | 程序坞、访达、切换器 |
+| iOS | 资源目录中的 `AppIcon.appiconset`（1024 像素），由系统裁成圆角方形 | 主屏幕、设置、切换器 |
 | Windows | `app.ico` 编入可执行文件的图标资源；运行时设为每个窗口的大小图标，WinUI 3 标题栏也显示它 | 资源管理器、任务栏、Alt+Tab、标题栏 |
 | Linux | 可执行文件旁的 `icons/<bundle_id>.png`，加入图标主题的搜索路径并设为窗口的默认图标；生成的 `.desktop` 文件指向它 | 窗口与桌面项。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标 |
+| Android | `mipmap-xxxhdpi/ic_launcher.png` | 启动器 |
 | Web | `favicon.svg`、`icon.png` 与 `apple-touch-icon.png` | 浏览器标签页与主屏幕 |
 
-圆形标志以透明背景用于 Windows、Linux 与 Web；macOS 会把非圆角方形的图标放进灰色底板，因此使用同一画面铺满方形的版本。声明的图标按原样使用，不缩放；macOS 上应提供铺满方形的画面。
+圆形标志以透明背景用于 Windows、Linux、Android 与 Web；macOS 会把非圆角方形的图标放进灰色底板，因此使用同一画面铺满方形的版本。声明的 PNG 按原样使用，不缩放；macOS 上应提供铺满方形的画面，或按苹果模板画好底板的图标（824 方块、圆角 185.4 的连续圆角矩形；底板形状不符时 macOS 26 起会把图标放进灰色底板）。需要各平台各自的形状（圆角底板、自适应分层、单色主题图标）时用上表的原生格式。
 
 ### 构建产物与增量更新
 
@@ -1840,7 +1882,7 @@ Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift 
 
 - 视频：Media3 的 ExoPlayer 是媒体执行端，`Video` 用不带自身控件的 `PlayerView` 显示画面，控制条由 Material 组件组成，所有播放变化都经 Bern 媒体命令。一个播放器同一时刻只在一个视图中显示；后台继续播放需要媒体服务，应用目前不声明，所以能力描述中声明不支持后台播放。
 - `bern package` 在 `target/bern/dist/` 生成发布版 APK（直接安装）与 Android App Bundle（上架商店）。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS` 读取发布密钥，密码不写进任何文件；没有这些变量时用调试密钥签名，并提示不能上架。
-- `chrome` 对手机不起作用，手机窗口没有标题栏；`immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；`idle_after` 由触摸、指针与按键重新计时。iOS 上触摸由挂在窗口上、只观察不参与识别的 UIKit 手势识别器察觉：原先用 SwiftUI 的拖动手势察觉，会让导航栏的返回与工具栏按钮点不动，已在 iOS 26.5 模拟器上修正并验证。
+- `chrome` 对手机不起作用，手机窗口没有标题栏；`immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；iOS 上窗口内容同时铺满整个屏幕、伸到安全区下（刘海、圆角与主屏幕指示条的区域），像视频播放器那样，由应用自己避开这些区域；`idle_after` 由触摸、指针与按键重新计时。iOS 上触摸由挂在窗口上、只观察不参与识别的 UIKit 手势识别器察觉：原先用 SwiftUI 的拖动手势察觉，会让导航栏的返回与工具栏按钮点不动，已在 iOS 26.5 模拟器上修正并验证。
 
 实现进度：已在小米 MIX 2S（LineageOS，Android 15）上运行 `examples/hello`、`examples/planner` 与 `examples/showcase`。验证了模块、侧栏与条件出现的项、开关、按钮、样式覆盖、`Canvas` 与图案、文字标注、控制通道，showcase 的各页（文字、按钮、开关与滑块、输入框、图片与布局、`Query` 查询列表、视频播放）与设置窗口；列表中后加入的项的弹出过渡与共享元素（标题在两种字号间放大）用录屏逐帧确认；沉浸模式静置后隐藏顶栏与系统栏、触摸后恢复；设置窗口叠在详情页上时，返回先关闭设置窗口。条件分支的切换用 `AnimatedContent`，新旧分支占同一位置；共享元素按自身尺寸布局后缩放到移动的边界，文字在过渡中不重新换行。HDR 图片在这台手机上按 SDR 显示，HDR 显示未验证。
 
@@ -2179,7 +2221,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 | 版本 | 主要内容 |
 | --- | --- |
-| v0.32 | 文档与当前接口同步：新增组件与属性参考、目标能力矩阵；播放器坐标场景与滚动内容、共享胶囊和受控滑块、空闲检测开关、图片跨分栏 Hero；同步 Web 搜索、引导、布局与存储支持。历史验证记录保留各自的范围，后续设计单独标注 |
+| v0.32 | 文档与当前接口同步：新增组件与属性参考、目标能力矩阵；播放器坐标场景与滚动内容、共享胶囊和受控滑块、空闲检测开关、图片跨分栏 Hero；同步 Web 搜索、引导、布局与存储支持。历史验证记录保留各自的范围，后续设计单独标注；`[app.icon]` 让各平台使用自己的图标（方形 PNG 或平台原生格式：`.icns`、`.appiconset`、`.ico`、hicolor 图标主题、Android `res`、页面图标文件夹）；`SidebarHeader(role: title)` 在标题栏已显示应用图标与标题的 Windows 上不显示 |
 | v0.2 | 提出 Rust 宏 UI、多语言、自适应功能契约和多后端编译目标 |
 | v0.3 | 明确受约束的可导出组件，补充动态 IR、编译职责、状态与跨语言绑定、本地化类型、条件覆盖及分阶段验收 |
 | v0.4 | 将应用前后端分离、目标扩展协议及 UI 技术与平台独立选择确立为架构要求，增加 Flutter 与 macOS 原生 UI 路线及模块化验收 |

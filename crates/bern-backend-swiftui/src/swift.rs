@@ -242,11 +242,46 @@ fn generate_enum(out: &mut Out, def: &EnumDef) {
         out.open("var bernLabel: String {");
         out.open("switch self {");
         for variant in &def.variants {
-            let key = &variant.label.as_ref().unwrap().key;
+            let label = variant.label.as_ref().unwrap();
+            if label.params.is_empty() {
+                out.line(format!(
+                    "case .{}: BernText.string({})",
+                    case(&variant.name),
+                    string(&label.key)
+                ));
+                continue;
+            }
+            // A label that shows the variant's fields fills them in.
+            let bindings: Vec<_> = variant
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(index, field)| {
+                    if label.params.contains(&field.name) {
+                        format!("let v{index}")
+                    } else {
+                        "_".to_string()
+                    }
+                })
+                .collect();
+            let args: Vec<_> = label
+                .params
+                .iter()
+                .filter_map(|param| {
+                    let at = variant.fields.iter().position(|field| field.name == *param)?;
+                    Some(format!(
+                        "{}: {}",
+                        string(param),
+                        argument(&format!("v{at}"), &variant.fields[at].ty)
+                    ))
+                })
+                .collect();
             out.line(format!(
-                "case .{}: BernText.string({})",
+                "case .{}({}): BernText.format({}, [{}])",
                 case(&variant.name),
-                string(key)
+                bindings.join(", "),
+                string(&label.key),
+                args.join(", ")
             ));
         }
         out.close("}");
@@ -254,6 +289,17 @@ fn generate_enum(out: &mut Out, def: &EnumDef) {
         out.close("}");
     }
     out.line("");
+}
+
+/// A Swift `BernArg` for a `tr!` argument: dates stay dates for their
+/// patterns, numbers keep their value for plural branches.
+fn argument(value: &str, ty: &Type) -> String {
+    match ty {
+        Type::Record { name } if name == bern_protocol::format::CALENDAR_DATE => {
+            format!("({value}).bernArg")
+        }
+        _ => format!("BernText.arg({value})"),
+    }
 }
 
 fn generate_record(out: &mut Out, def: &RecordDef) {
@@ -291,6 +337,13 @@ fn generate_record(out: &mut Out, def: &RecordDef) {
     out.close("}");
     out.close("}");
     out.line("");
+    if *name == bern_protocol::format::CALENDAR_DATE {
+        out.open(format!("extension {name} {{"));
+        out.line("/// The date as an argument of a translated text.");
+        out.line("var bernArg: BernArg { .date(year: year, month: month, day: day) }");
+        out.close("}");
+        out.line("");
+    }
 }
 
 fn generate_engine(out: &mut Out, app: &Application) {
@@ -437,6 +490,9 @@ struct Ctx {
     scroll_items: bool,
     /// Each direct accordion child fills and clips to its allocated width.
     accordion_corner: Option<String>,
+    /// An item of a row, directly or through a condition or repetition: a
+    /// spacer there grows only along the row, a divider stands upright.
+    row: bool,
 }
 
 /// The system the Swift is generated for. SwiftUI is shared; windows,
@@ -514,8 +570,34 @@ impl<'a> Generator<'a> {
         if width.is_none() && height.is_none() {
             return;
         }
+        // A stack of a given size places its layers by its alignment in
+        // that size too, not only against each other. A column or a row
+        // larger than its items starts them at its top and its leading
+        // edge, as on the other targets, its alignment placing them across.
+        let alignment = match (element.kind.as_str(), element.keyword("align")) {
+            ("Stack", Some(align)) if align != "center" => {
+                format!(", alignment: {}", stack_alignment(Some(align)))
+            }
+            ("Column", align) => format!(
+                ", alignment: {}",
+                match align {
+                    Some("center") => ".top",
+                    Some("trailing") => ".topTrailing",
+                    _ => ".topLeading",
+                }
+            ),
+            ("Row", align) => format!(
+                ", alignment: {}",
+                match align {
+                    Some("top") => ".topLeading",
+                    Some("bottom") => ".bottomLeading",
+                    _ => ".leading",
+                }
+            ),
+            _ => String::new(),
+        };
         out.line(format!(
-            ".frame(width: {}, height: {})",
+            ".frame(width: {}, height: {}{alignment})",
             width.unwrap_or_else(|| "nil".into()),
             height.unwrap_or_else(|| "nil".into())
         ));
@@ -656,10 +738,12 @@ impl<'a> Generator<'a> {
                         .params
                         .iter()
                         .map(|param| {
-                            args.iter()
+                            let value = args
+                                .iter()
                                 .find(|(name, _)| name == param)
-                                .map(|(_, expr)| format!("BernText.text({})", self.expr(expr)))
-                                .unwrap_or_else(|| "\"\"".into())
+                                .map(|(_, expr)| argument(&self.expr(expr), &expr.ty))
+                                .unwrap_or_else(|| "BernText.arg(\"\")".into());
+                            format!("{}: {value}", string(param))
                         })
                         .collect();
                     format!(
@@ -1143,7 +1227,7 @@ impl<'a> Generator<'a> {
     }
 
     fn toolbar(&self, out: &mut Out, children: &[Node], ctx: &Ctx) {
-        if self.platform == Platform::Macos && children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Toolbar" && e.children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Search" && e.keyword("style") == Some("palette"))))) {
+        if children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Toolbar" && e.children.iter().any(|n| matches!(n, Node::Element(e) if e.kind == "Search" && e.keyword("style") == Some("palette"))))) {
             out.line(".modifier(BernPaletteDetail())");
         }
         let toolbars: Vec<&Element> = children
@@ -1541,9 +1625,11 @@ impl<'a> Generator<'a> {
         );
         if scale.is_some() || opacity.is_some() {
             out.line(format!(
-                ".bernScrollEffect(scale: {}, opacity: {})",
+                ".bernScrollEffect(scale: {}, opacity: {}, anchor: UnitPoint(x: {}, y: {}))",
                 double(scale.unwrap_or(1.0)),
-                double(opacity.unwrap_or(1.0))
+                double(opacity.unwrap_or(1.0)),
+                double(element.number("scroll_origin_x").unwrap_or(0.5)),
+                double(element.number("scroll_origin_y").unwrap_or(0.5))
             ));
         }
         if element.keyword("reveal") == Some("hover") {
@@ -1587,6 +1673,13 @@ impl<'a> Generator<'a> {
         }
         match node {
             Node::Element(element) => {
+                let inside;
+                let ctx = if ctx.row && element.kind != "ForEach" && element.kind != "Spacer" && element.kind != "Divider" {
+                    inside = Ctx { row: false, ..ctx.clone() };
+                    &inside
+                } else {
+                    ctx
+                };
                 // A staggering container's children take turns appearing.
                 let stagger = element.number("stagger");
                 if let Some(step) = stagger {
@@ -1749,10 +1842,38 @@ impl<'a> Generator<'a> {
     }
 
     /// The label of the selected option, as a Swift `String` expression.
+    /// The point size a text is set in: its own, its style's, or the
+    /// platform's body size.
+    fn text_size(&self, element: &Element) -> String {
+        let style = element.keyword("style").unwrap_or("body");
+        self.length(element, "font_size")
+            .or_else(|| {
+                self.app
+                    .style
+                    .text_weights
+                    .iter()
+                    .find(|entry| entry.style == style)
+                    .and_then(|entry| entry.size.map(double))
+            })
+            .unwrap_or_else(|| match self.platform {
+                Platform::Macos => "13.0".into(),
+                Platform::Ios => "17.0".into(),
+            })
+    }
+
     fn font(&self, out: &mut Out, element: &Element) {
+        // A text's style is the body unless it says; the application's own
+        // body, when it declares one, then applies to it too.
+        let body_declared = self
+            .app
+            .style
+            .text_weights
+            .iter()
+            .any(|entry| entry.style == "body");
         if let Some(style) = element
             .keyword("style")
             .or_else(|| element.prop("font_size").map(|_| "body"))
+            .or_else(|| (element.kind == "Text" && body_declared).then_some("body"))
         {
             let font = match style {
                 "large_title" => "largeTitle",
@@ -1818,6 +1939,12 @@ impl<'a> Generator<'a> {
                 let content = self.text_prop(element, "content").unwrap_or_default();
                 out.line(format!("SwiftUI.Text(verbatim: {content})"));
                 self.font(out, element);
+                if let Some(height) = self.length(element, "line_height") {
+                    out.line(format!(
+                        ".bernLineHeight({height}, size: {})",
+                        self.text_size(element)
+                    ));
+                }
                 if let Some(lines) = element.number("lines") {
                     out.line(format!(".lineLimit({})", lines.max(1.0) as i64));
                     out.line(".truncationMode(.tail)");
@@ -1842,8 +1969,12 @@ impl<'a> Generator<'a> {
                     Some("end") => "1",
                     _ => "0.5",
                 };
+                let overhang = self
+                    .length(element, "overhang")
+                    .map(|overhang| format!(", overhang: {overhang}"))
+                    .unwrap_or_default();
                 out.open(format!(
-                    "BernRail(vertical: {vertical}, anchor: {anchor}) {{"
+                    "BernRail(vertical: {vertical}, anchor: {anchor}{overhang}) {{"
                 ));
                 self.nodes(out, &element.children, ctx);
                 out.close("}");
@@ -1969,6 +2100,36 @@ impl<'a> Generator<'a> {
                         ..ctx.clone()
                     },
                 );
+                out.close("}");
+            }
+            // A search field in the page: toolbars and sidebars realize
+            // their own.
+            "Search" => {
+                let field = self.field(element, "value").expect("search field");
+                let prompt = self
+                    .text_prop(element, "prompt")
+                    .unwrap_or_else(|| "\"\"".into());
+                let submit = element
+                    .action
+                    .as_ref()
+                    .map(|action| format!(", submit: {{ {} }}", self.action(action)))
+                    .unwrap_or_default();
+                let size = [("height", "height"), ("font_size", "fontSize"), ("width", "width")]
+                    .iter()
+                    .filter_map(|(prop, name)| {
+                        element.number(prop).map(|value| format!(", {name}: {}", double(value)))
+                    })
+                    .collect::<String>();
+                out.open(format!(
+                    "BernSearchField(text: {}, prompt: {prompt}, target: {}{size}{submit}) {{",
+                    self.binding_of(&field),
+                    self.target(element, ctx)
+                ));
+                if element.children.is_empty() {
+                    out.line("SwiftUI.EmptyView()");
+                } else {
+                    self.nodes(out, &element.children, &Ctx { toolbar: false, ..ctx.clone() });
+                }
                 out.close("}");
             }
             "SearchItem" => {
@@ -2125,6 +2286,13 @@ impl<'a> Generator<'a> {
                 if capsule {
                     out.close("} label: {");
                     out.indent += 1;
+                    // iOS draws no arrow on the menu's button; the capsule
+                    // shows the design's pull-down arrow, as a capsule `Menu`
+                    // does.
+                    let arrow = self.platform == Platform::Ios;
+                    if arrow {
+                        out.open("SwiftUI.HStack(spacing: 6) {");
+                    }
                     if element.children.is_empty() {
                         out.line(format!("SwiftUI.Text(verbatim: {field}.bernLabel)"));
                     } else {
@@ -2141,6 +2309,11 @@ impl<'a> Generator<'a> {
                             "default: SwiftUI.Text(verbatim: {field}.bernLabel)"
                         ));
                         out.close("}");
+                    }
+                    if arrow {
+                        out.line("SwiftUI.Image(systemName: \"chevron.down\").font(.system(size: 10, weight: .semibold)).frame(width: 12, height: 12).opacity(0.6)");
+                        out.close("}");
+                        out.line(".padding(.trailing, -3)");
                     }
                     out.close("}");
                     if self.platform == Platform::Macos {
@@ -2165,6 +2338,46 @@ impl<'a> Generator<'a> {
                 self.nodes(out, &element.children, ctx);
                 out.close("}");
                 out.line(".formStyle(.grouped)");
+                if let Some(style) = self.style_of(element) {
+                    out.line(format!(".bernFormStyle(BernStyles.{})", style.name));
+                }
+                // The room between sections, and none above a plain one
+                // that opens the form, which is then the page's heading.
+                // The heading may come from a slot: a component, inside a
+                // condition.
+                fn opens_plain(app: &Application, nodes: &[Node]) -> bool {
+                    match nodes.first() {
+                        Some(Node::Element(child)) => {
+                            child.kind == "Section" && child.keyword("style") == Some("plain")
+                        }
+                        Some(Node::If(node)) => node
+                            .branches
+                            .first()
+                            .is_some_and(|(_, nodes)| opens_plain(app, nodes)),
+                        Some(Node::Component(reference)) => app
+                            .component(&reference.component)
+                            .is_some_and(|component| {
+                                opens_plain(app, std::slice::from_ref(&component.body))
+                            }),
+                        _ => false,
+                    }
+                }
+                let opens_plain = opens_plain(self.app, &element.children);
+                let (x, y) = (self.length(element, "padding_x"), self.length(element, "padding_y"));
+                if x.is_some() || y.is_some() {
+                    out.line(format!(
+                        ".environment(\\.bernFormInsets, BernFormInsets(x: {}, y: {}))",
+                        x.unwrap_or_else(|| "nil".into()),
+                        y.unwrap_or_else(|| "nil".into())
+                    ));
+                }
+                if element.prop("gap").is_some() || element.prop("row_height").is_some() || opens_plain {
+                    out.line(format!(
+                        ".bernFormLayout(gap: {}, rowHeight: {}, heading: {opens_plain})",
+                        self.length(element, "gap").unwrap_or_else(|| "nil".into()),
+                        self.length(element, "row_height").unwrap_or_else(|| "nil".into())
+                    ));
+                }
                 if let Some(title) = self.text_prop(element, "title") {
                     out.line(format!(".navigationTitle({title})"));
                 }
@@ -2190,6 +2403,19 @@ impl<'a> Generator<'a> {
                         }
                         out.close("}");
                     }
+                }
+                out.line(if element.keyword("style") == Some("plain") {
+                    ".bernPlainRows()"
+                } else {
+                    ".modifier(BernFormRows())"
+                });
+                let (x, y) = (self.length(element, "padding_x"), self.length(element, "padding_y"));
+                if x.is_some() || y.is_some() {
+                    out.line(format!(
+                        ".bernRowInsets(x: {}, y: {})",
+                        x.unwrap_or_else(|| "nil".into()),
+                        y.unwrap_or_else(|| "nil".into())
+                    ));
                 }
             }
             "Column" | "Row" => {
@@ -2217,10 +2443,15 @@ impl<'a> Generator<'a> {
                     .length(element, "gap")
                     .map(|gap| format!(", spacing: {gap}"))
                     .unwrap_or_default();
-                out.open(format!(
-                    "SwiftUI.{stack}(alignment: {alignment}{spacing}) {{"
-                ));
-                self.nodes(out, &element.children, ctx);
+                if element.kind == "Row" {
+                    out.open(format!("BernRow(alignment: {alignment}{spacing}) {{"));
+                    self.nodes(out, &element.children, &Ctx { row: true, ..ctx.clone() });
+                } else {
+                    out.open(format!(
+                        "SwiftUI.{stack}(alignment: {alignment}{spacing}) {{"
+                    ));
+                    self.nodes(out, &element.children, ctx);
+                }
                 out.close("}");
                 self.padding(out, element);
                 self.frame(out, element);
@@ -2266,12 +2497,32 @@ impl<'a> Generator<'a> {
                     .keyword("animate")
                     .map(|token| crate::style::motion(self.app, token))
                     .unwrap_or_else(|| "nil".into());
+                let cells = element
+                    .number("cell_ratio")
+                    .map(|ratio| {
+                        format!(
+                            ", cellRatio: {}, cellExtra: {}",
+                            double(ratio),
+                            self.length(element, "cell_extra")
+                                .unwrap_or_else(|| double(0.0))
+                        )
+                    })
+                    .unwrap_or_default();
                 out.open(format!(
-                    "BernAdaptiveGrid(minimum: {}, gap: {gap}, rowGap: {row_gap}, motion: {motion}) {{",
+                    "BernAdaptiveGrid(minimum: {}, gap: {gap}, rowGap: {row_gap}, motion: {motion}{cells}) {{",
                     self.length(element, "min_width")
                         .unwrap_or_else(|| double(120.0))
                 ));
-                self.nodes(out, &element.children, ctx);
+                if cells.is_empty() {
+                    self.nodes(out, &element.children, ctx);
+                } else {
+                    // A group's modifier applies to each of its views: every
+                    // item takes the cell's height.
+                    out.open("SwiftUI.Group {");
+                    self.nodes(out, &element.children, ctx);
+                    out.close("}");
+                    out.line(".bernGridCell()");
+                }
                 out.close("}");
                 out.line(".frame(maxWidth: .infinity, alignment: .leading)");
                 self.padding(out, element);
@@ -2318,11 +2569,16 @@ impl<'a> Generator<'a> {
             }
             "Modal" => {
                 out.open(format!(
-                    "BernModal(width: {}, height: {}) {{",
+                    "BernModal(width: {}, height: {}{}) {{",
                     self.length(element, "width")
                         .unwrap_or_else(|| "960.0".into()),
                     self.length(element, "height")
-                        .unwrap_or_else(|| "600.0".into())
+                        .unwrap_or_else(|| "600.0".into()),
+                    if element.keyword("cover") == Some("compact") {
+                        ", cover: true"
+                    } else {
+                        ""
+                    }
                 ));
                 self.nodes(out, &element.children, ctx);
                 out.close("} presentation: { modal in");
@@ -2352,17 +2608,7 @@ impl<'a> Generator<'a> {
                 ));
             }
             "Stack" => {
-                let alignment = match element.keyword("align") {
-                    Some("top_leading") => ".topLeading",
-                    Some("top") => ".top",
-                    Some("top_trailing") => ".topTrailing",
-                    Some("leading") => ".leading",
-                    Some("trailing") => ".trailing",
-                    Some("bottom_leading") => ".bottomLeading",
-                    Some("bottom") => ".bottom",
-                    Some("bottom_trailing") => ".bottomTrailing",
-                    _ => ".center",
-                };
+                let alignment = stack_alignment(element.keyword("align"));
                 // A rail among the layers takes the size of the others.
                 let rails = has_rail_layer(&element.children);
                 out.open(if rails {
@@ -2479,7 +2725,17 @@ impl<'a> Generator<'a> {
                 }
                 out.line(".bernAccentTint()");
             }
+            "Spacer" if ctx.row => {
+                out.line("SwiftUI.Spacer()");
+                out.line(".layoutValue(key: BernRowSpacer.self, value: true)");
+            }
             "Spacer" => out.line("SwiftUI.Spacer()"),
+            // Only a stack along the row sets a divider upright.
+            "Divider" if ctx.row => {
+                out.open("SwiftUI.HStack(spacing: 0) {");
+                out.line("SwiftUI.Divider()");
+                out.close("}");
+            }
             "Divider" => out.line("SwiftUI.Divider()"),
             "ScrollView" => {
                 let horizontal = element.keyword("axis") == Some("horizontal");
@@ -2551,6 +2807,15 @@ impl<'a> Generator<'a> {
                 // scroll bars always; `.never` does not.
                 if element.keyword("indicators") == Some("hidden") {
                     out.line(".scrollIndicators(.never)");
+                }
+                // Where it opens: that fraction of the content at the same
+                // fraction of the view.
+                if let Some(at) = element.number("open_at") {
+                    out.line(if horizontal {
+                        format!(".defaultScrollAnchor(UnitPoint(x: {}, y: 0))", double(at))
+                    } else {
+                        format!(".defaultScrollAnchor(UnitPoint(x: 0, y: {}))", double(at))
+                    });
                 }
                 self.toolbar(out, &element.children, ctx);
             }
@@ -2686,7 +2951,7 @@ impl<'a> Generator<'a> {
                     self.target(element, ctx)
                 ));
             }
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Search" | "Toolbar"
+            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" => {
                 // Realized by their parents.
             }
@@ -2781,7 +3046,25 @@ impl<'a> Generator<'a> {
         out.close("} label: {");
         out.indent += 1;
         let icon_only = element.keyword("style") == Some("icon");
+        let diameter = self.length(element, "height").filter(|_| icon_only && !ctx.toolbar);
+        let capsule = element.keyword("shape") == Some("capsule") && !ctx.toolbar;
+        // iOS draws no arrow on a menu's button; the capsule shows one, as
+        // macOS's pull-down does.
+        let arrow = capsule && self.platform == Platform::Ios;
+        if arrow {
+            // The design's pull-down (6.3): the symbol in a 16-point box, the
+            // arrow in a 12-point one at 60 %, 6 apart, and the arrow's side
+            // 11 points from the edge instead of 14.
+            out.open("SwiftUI.HStack(spacing: 6) {");
+        }
         match element.icon("icon") {
+            Some(icon) if arrow => {
+                out.line(format!(
+                    "SwiftUI.Image(systemName: {}).frame(width: 16, height: 16).accessibilityHidden(true)",
+                    string(icon)
+                ));
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+            }
             Some(icon) => {
                 out.line(format!(
                     "SwiftUI.Label({label}, systemImage: {})",
@@ -2792,12 +3075,19 @@ impl<'a> Generator<'a> {
                     // Size the label before the system draws its circular
                     // button: short symbols such as ellipsis would otherwise
                     // produce a smaller button than symbols such as star.
-                    if !ctx.toolbar {
+                    if diameter.is_some() {
+                        out.line(".font(.system(size: 17)).frame(width: 18, height: 18)");
+                    } else if !ctx.toolbar {
                         out.line(".frame(width: 16, height: 16)");
                     }
                 }
             }
             None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
+        }
+        if arrow {
+            out.line("SwiftUI.Image(systemName: \"chevron.down\").font(.system(size: 10, weight: .semibold)).frame(width: 12, height: 12).opacity(0.6)");
+            out.close("}");
+            out.line(".padding(.trailing, -3)");
         }
         out.close("}");
         if ctx.toolbar && ctx.shared {
@@ -2818,6 +3108,11 @@ impl<'a> Generator<'a> {
                     self.length(element, "height")
                         .unwrap_or_else(|| "32.0".into())
                 ));
+            } else if let Some(diameter) = &diameter {
+                out.line(".menuStyle(.button)");
+                out.line(".menuIndicator(.hidden)");
+                out.line(format!(".bernCircleControl(diameter: {diameter}, prominent: false)"));
+                out.line(format!(".help({label})"));
             } else if icon_only {
                 out.line(".menuStyle(.button)");
                 out.line(".menuIndicator(.hidden)");
@@ -2897,6 +3192,19 @@ impl<'a> Generator<'a> {
                     out.line(format!(".font(.system(size: {}))", double(size)));
                 }
             }
+            // The design's capsule (6.3): the symbol in a 16-point box,
+            // 14 on a 30-point chip, 6 before the words.
+            (_, Some(icon)) if element.keyword("shape") == Some("capsule") && !ctx.toolbar => {
+                let chip = element.number("height").is_some_and(|height| height <= 30.0);
+                out.open("SwiftUI.HStack(spacing: 6) {");
+                out.line(format!(
+                    "SwiftUI.Image(systemName: {}).frame(width: {box}, height: {box}).accessibilityHidden(true)",
+                    string(icon),
+                    box = if chip { "14" } else { "16" }
+                ));
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                out.close("}");
+            }
             (_, Some(icon)) => {
                 out.line(format!(
                     "SwiftUI.Label({label}, systemImage: {})",
@@ -2909,6 +3217,10 @@ impl<'a> Generator<'a> {
                 }
             }
             _ => out.line(format!("SwiftUI.Text(verbatim: {label})")),
+        }
+        // The system button grows with its label.
+        if element.keyword("width") == Some("fill") {
+            out.line(".frame(maxWidth: .infinity)");
         }
         out.close("}");
         let style = self.style_of(element);
@@ -2928,7 +3240,12 @@ impl<'a> Generator<'a> {
                 // The platform's buttons (the design's chapter on controls):
                 // a toolbar draws its own.
                 if element.kind == "IconButton" {
-                    if !ctx.toolbar {
+                    if let Some(diameter) = self.length(element, "height").filter(|_| !ctx.toolbar) {
+                        out.line(format!(
+                            ".bernCircleControl(diameter: {diameter}, prominent: {})",
+                            element.keyword("prominence") == Some("prominent")
+                        ));
+                    } else if !ctx.toolbar {
                         match element.keyword("prominence") {
                             Some("plain") => out.line(".bernButtonLook(.flat)"),
                             Some("prominent") => out.line(".bernButtonLook(.prominent).buttonBorderShape(.roundedRectangle(radius: 12))"),
@@ -3572,11 +3889,34 @@ impl<'a> Generator<'a> {
 
     fn tabs(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let selection = self.field(element, "selection").expect("selection field");
+        // A `TabAccessory` is built once and shown by the tab view (iOS
+        // 26.1's bottom accessory) or, before that and on macOS, at the
+        // bottom of every page.
+        let accessory = element.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "TabAccessory" => Some(child),
+            _ => None,
+        });
+        if let Some(accessory) = accessory {
+            out.open("SwiftUI.Group {");
+            out.open("let bernAccessory = SwiftUI.AnyView(SwiftUI.Group {");
+            self.nodes(out, &accessory.children, ctx);
+            out.close("})");
+            out.line(format!(
+                "let bernAccessoryShown: Bool = {}",
+                accessory
+                    .expr("shown")
+                    .map(|shown| self.expr(shown))
+                    .unwrap_or_else(|| "true".into())
+            ));
+        }
         out.open(format!(
             "SwiftUI.TabView(selection: {}) {{",
             self.binding_of(&selection)
         ));
         self.nav_walk(out, &element.children, &|out, tab| {
+            if tab.kind != "Tab" {
+                return;
+            }
             let label = self.text_prop(tab, "label").unwrap_or_default();
             let value = tab.expr("value").map(|v| self.expr(v)).unwrap_or_default();
             out.open("SwiftUI.Group {");
@@ -3592,9 +3932,18 @@ impl<'a> Generator<'a> {
             }
             out.close("}");
             out.line(format!(".tag({value})"));
+            if accessory.is_some() {
+                out.line(".bernTabAccessoryInset(bernAccessoryShown, bernAccessory)");
+            }
             self.toolbar(out, &tab.children, ctx);
         });
         out.close("}");
+        if accessory.is_some() {
+            out.line(".bernTabAccessory(bernAccessoryShown, bernAccessory)");
+        }
+        // The selected tab is one of the system parts the application's
+        // accent colors (design 8.1).
+        out.line(".bernAccentTint()");
         if element.id.is_some() {
             let ty = swift_type(&element.field("selection").expect("selection field").ty);
             out.line(format!(
@@ -3605,6 +3954,9 @@ impl<'a> Generator<'a> {
             ));
         }
         self.nav_fallback(out, element, &selection, "Tab");
+        if accessory.is_some() {
+            out.close("}");
+        }
     }
 
     fn uses_engine(&self, nodes: &[&Node]) -> bool {
@@ -3700,20 +4052,17 @@ impl<'a> Generator<'a> {
             component: window.id.clone(),
             ..Ctx::default()
         };
-        if self.platform == Platform::Macos {
-            out.open("BernSearchPaletteHost {");
-        }
+        out.open("BernSearchPaletteHost {");
         self.node(out, &window.content, &ctx);
-        if self.platform == Platform::Macos {
-            out.close("}");
-        }
+        out.close("}");
         out.close("}");
         if window.chrome == bern_ir::WindowChrome::Unified
             || window.immersive.is_some()
             || window.idle_after.is_some()
+            || window.landscape.is_some()
         {
             out.line(format!(
-                ".modifier(BernWindowBehavior(context: context, unified: {}, idleAfter: {}, immersive: {}, idleEnabled: {}))",
+                ".modifier(BernWindowBehavior(context: context, unified: {}, idleAfter: {}, immersive: {}, idleEnabled: {}, landscape: {}))",
                 window.chrome == bern_ir::WindowChrome::Unified,
                 window
                     .idle_after
@@ -3724,7 +4073,8 @@ impl<'a> Generator<'a> {
                     .as_ref()
                     .map(|expr| self.expr(expr))
                     .unwrap_or_else(|| "false".into()),
-                window.idle_enabled.as_ref().map(|e| self.expr(e)).unwrap_or_else(|| "true".into())
+                window.idle_enabled.as_ref().map(|e| self.expr(e)).unwrap_or_else(|| "true".into()),
+                window.landscape.as_ref().map(|e| self.expr(e)).unwrap_or_else(|| "nil".into())
             ));
         }
         // The application's accent and appearance, chosen at run time.
@@ -4011,9 +4361,16 @@ impl<'a> Generator<'a> {
             .collect();
         out.line("@main");
         out.open("struct BernApplication: App {");
-        if self.platform == Platform::Macos {
-            out.line("@NSApplicationDelegateAdaptor(BernAppDelegate.self) private var delegate");
-            out.line("");
+        match self.platform {
+            Platform::Macos => {
+                out.line("@NSApplicationDelegateAdaptor(BernAppDelegate.self) private var delegate");
+                out.line("");
+            }
+            // The orientations a window asks of the phone.
+            Platform::Ios => {
+                out.line("@UIApplicationDelegateAdaptor(BernOrientationDelegate.self) private var delegate");
+                out.line("");
+            }
         }
         out.open("init() {");
         out.open(format!(
@@ -4314,4 +4671,19 @@ fn dynamic_items(nodes: &[Node]) -> bool {
         Node::Element(_) | Node::Component(_) => false,
         Node::If(_) | Node::IfLet(_) | Node::Match(_) => true,
     })
+}
+
+/// SwiftUI's alignment for a `Stack`'s `align`.
+fn stack_alignment(align: Option<&str>) -> &'static str {
+    match align {
+        Some("top_leading") => ".topLeading",
+        Some("top") => ".top",
+        Some("top_trailing") => ".topTrailing",
+        Some("leading") => ".leading",
+        Some("trailing") => ".trailing",
+        Some("bottom_leading") => ".bottomLeading",
+        Some("bottom") => ".bottom",
+        Some("bottom_trailing") => ".bottomTrailing",
+        _ => ".center",
+    }
 }

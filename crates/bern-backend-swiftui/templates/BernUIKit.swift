@@ -596,22 +596,63 @@ struct BernVideoSurface: UIViewRepresentable {
     }
 }
 
+// MARK: - Tab accessory
+
+extension View {
+    /// `TabAccessory` on iOS 26.1 and later: the tab view's bottom
+    /// accessory, the system's glass bar above the tab bar, as a music
+    /// app shows what is playing.
+    @ViewBuilder func bernTabAccessory(_ shown: Bool, _ accessory: AnyView) -> some View {
+        if #available(iOS 26.1, *) {
+            tabViewBottomAccessory(isEnabled: shown) { accessory.environment(\.bernOnBar, true) }
+        } else {
+            self
+        }
+    }
+
+    /// Before iOS 26.1, each page keeps the bar at its bottom, above the
+    /// tab bar, on a material capsule.
+    @ViewBuilder func bernTabAccessoryInset(_ shown: Bool, _ accessory: AnyView) -> some View {
+        if #available(iOS 26.1, *) {
+            self
+        } else {
+            safeAreaInset(edge: .bottom) {
+                if shown {
+                    accessory
+                        .environment(\.bernOnBar, true)
+                        .frame(height: 48)
+                        .frame(maxWidth: .infinity)
+                        .background(.regularMaterial, in: Capsule())
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 8)
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Chrome, immersion and idleness
 
 /// A window's immersion and idleness on iOS: `immersive` hides the status
-/// bar and the home indicator; `idleAfter` turns `idle` on after that many
-/// seconds without a touch or pointer movement. iOS scenes have no title
-/// bar, so `unified` changes nothing.
+/// bar and the home indicator and lays the content over the whole screen,
+/// under the safe areas, as a video player does; `idleAfter` turns `idle`
+/// on after that many seconds without a touch or pointer movement. iOS
+/// scenes have no title bar, so `unified` changes nothing.
 struct BernWindowBehavior: ViewModifier {
     let context: BernWindowContext
     let unified: Bool
     let idleAfter: Double?
     let immersive: Bool
     var idleEnabled: Bool = true
+    /// On a phone: landscape while true, portrait while false; `nil` lets
+    /// the window follow the device.
+    var landscape: Bool? = nil
     @State private var timer = BernIdleTimer()
 
     func body(content: Content) -> some View {
         content
+            .ignoresSafeArea(.container, edges: immersive ? .all : [])
+            .onChange(of: landscape, initial: true) { _, wanted in BernOrientation.turn(landscape: wanted) }
             .statusBarHidden(immersive)
             .persistentSystemOverlays(immersive ? .hidden : .automatic)
             // Touches are watched on the window, outside SwiftUI's gestures:
@@ -852,5 +893,105 @@ struct BernAppearanceRegion: UIViewRepresentable {
 
     func updateUIView(_ view: BernAppearanceRegionView, context: Context) {
         view.dark = dark
+    }
+}
+
+// MARK: - Search field
+
+/// The platform's search field for a `Search` in the page: UIKit's own,
+/// without a search bar's margins. Chinese input is passed on only once
+/// it is composed.
+struct BernSearchInput: UIViewRepresentable {
+    let text: Binding<String>
+    let prompt: String
+    var fontSize: CGFloat? = nil
+    let editing: Binding<Bool>
+    let focusRequest: Int
+    let up: () -> Void
+    let down: () -> Void
+    let submit: () -> Void
+    let cancel: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UISearchTextField {
+        let field = UISearchTextField()
+        if let fontSize { field.font = .systemFont(ofSize: fontSize) }
+        // On iOS 26 the field stands on the system's glass capsule.
+        if #available(iOS 26.0, *) {
+            field.borderStyle = .none
+            field.backgroundColor = .clear
+        }
+        field.placeholder = prompt
+        field.text = text.wrappedValue
+        field.returnKeyType = .search
+        field.delegate = context.coordinator
+        field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.accessibilityLabel = prompt
+        return field
+    }
+
+    func updateUIView(_ field: UISearchTextField, context: Context) {
+        context.coordinator.owner = self
+        field.placeholder = prompt
+        if field.text != text.wrappedValue && field.markedTextRange == nil { field.text = text.wrappedValue }
+        if context.coordinator.focusRequest != focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            DispatchQueue.main.async { field.becomeFirstResponder() }
+        }
+    }
+
+    @MainActor final class Coordinator: NSObject, UITextFieldDelegate {
+        var owner: BernSearchInput
+        var focusRequest: Int
+        init(_ owner: BernSearchInput) {
+            self.owner = owner
+            focusRequest = owner.focusRequest
+        }
+        @objc func changed(_ field: UITextField) {
+            guard field.markedTextRange == nil else { return }
+            owner.text.wrappedValue = field.text ?? ""
+        }
+        func textFieldDidBeginEditing(_ field: UITextField) { owner.editing.wrappedValue = true }
+        func textFieldDidEndEditing(_ field: UITextField) { owner.editing.wrappedValue = false }
+        func textFieldShouldReturn(_ field: UITextField) -> Bool {
+            owner.submit()
+            field.resignFirstResponder()
+            return false
+        }
+        func textFieldShouldClear(_ field: UITextField) -> Bool {
+            owner.cancel()
+            return true
+        }
+    }
+}
+
+// MARK: - Orientation
+
+/// The orientations the phone may show the application in: all of them,
+/// until a window asks for landscape or portrait.
+@MainActor enum BernOrientation {
+    static var allowed: UIInterfaceOrientationMask = .all
+
+    /// Turn the phone's windows to landscape or portrait; iPads and a
+    /// window that asks nothing keep the device's orientation.
+    static func turn(landscape: Bool?) {
+        guard let landscape, UIDevice.current.userInterfaceIdiom == .phone else { return }
+        allowed = landscape ? .landscape : .portrait
+        for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+            for window in scene.windows {
+                window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: allowed)) { _ in }
+        }
+    }
+}
+
+/// Answers the system with the orientations the windows allow now.
+final class BernOrientationDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
+        MainActor.assumeIsolated { BernOrientation.allowed }
     }
 }

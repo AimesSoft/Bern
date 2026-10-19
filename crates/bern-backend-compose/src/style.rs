@@ -30,8 +30,15 @@ const ROW_STATES: &[&str] = &[
 ];
 
 /// What Compose shows: buttons drawn by `BernStyledButton`, sidebar items
-/// by `BernStyledSidebarItem`.
+/// by `BernStyledSidebarItem`, and a stack's surface by `bernSurface`.
 pub const SUPPORT: &[StyleSupport] = &[
+    // A stack's surface: its background, the color of the text and icons
+    // in it, and corners that clip its layers.
+    StyleSupport {
+        component: "Stack",
+        base: &["background", "foreground", "corner"],
+        states: &[],
+    },
     StyleSupport {
         component: "Button",
         base: &[
@@ -130,13 +137,7 @@ fn look(app: &Application, effects: &[StyleEffect]) -> String {
                 width,
             } => {
                 args.push(format!("indicator = {}", color(c)));
-                let edge = match edge {
-                    Edge::Leading => "BernEdge.Leading",
-                    Edge::Trailing => "BernEdge.Trailing",
-                    Edge::Top => "BernEdge.Top",
-                    Edge::Bottom => "BernEdge.Bottom",
-                };
-                args.push(format!("indicatorEdge = {edge}"));
+                args.push(format!("indicatorEdge = {}", edge_name(*edge)));
                 args.push(format!("indicatorWidth = {}", double(*width)));
             }
             StyleEffect::Scale { x, y, motion } => {
@@ -224,18 +225,24 @@ pub fn transition(app: &Application, name: &str) -> Option<(String, String)> {
     let def = app.style.transition(name)?;
     let kotlin = match &def.kind {
         TransitionKind::Fade => "BernTransition.Fade".to_string(),
-        // Rejected by the edge_grow capability check before generation.
-        TransitionKind::Grow { .. } => return None,
+        TransitionKind::Grow { edge } => format!("BernTransition.Grow({})", edge_name(*edge)),
         TransitionKind::Pop { from } => format!("BernTransition.Pop({})", float(*from)),
         TransitionKind::Slide { edge, distance } => {
-            let edge = match edge {
-                Edge::Leading => "BernEdge.Leading",
-                Edge::Trailing => "BernEdge.Trailing",
-                Edge::Top => "BernEdge.Top",
-                Edge::Bottom => "BernEdge.Bottom",
-            };
-            format!("BernTransition.Slide({edge}, {})", float(*distance))
+            format!(
+                "BernTransition.Slide({}, {})",
+                edge_name(*edge),
+                float(*distance)
+            )
         }
     };
     Some((kotlin, motion(app, &def.motion)))
+}
+
+fn edge_name(edge: Edge) -> &'static str {
+    match edge {
+        Edge::Leading => "BernEdge.Leading",
+        Edge::Trailing => "BernEdge.Trailing",
+        Edge::Top => "BernEdge.Top",
+        Edge::Bottom => "BernEdge.Bottom",
+    }
 }

@@ -159,6 +159,103 @@ protocol BernLabeled {
     var bernLabel: String { get }
 }
 
+/// A value a translated text shows.
+enum BernArg {
+    case text(String)
+    /// A number, and the way Bern writes it.
+    case number(Double, String)
+    case date(year: Int64, month: Int64, day: Int64)
+}
+
+/// One part of a parsed text.
+enum BernPiece {
+    case text(String)
+    case value(String)
+    /// `#` in a plural branch: the number.
+    case number
+    case plural(String, [(String, [BernPiece])])
+    case date(String, String)
+    case duration(String, String)
+}
+
+/// Parses a translated text. The compiler checked the format, so the
+/// parser trusts its shape.
+struct BernTextParser {
+    private let chars: [Character]
+    private var at = 0
+
+    init(_ text: String) { chars = Array(text) }
+
+    private mutating func word(_ stops: Set<Character>) -> String {
+        let start = at
+        while at < chars.count, !stops.contains(chars[at]) { at += 1 }
+        return String(chars[start..<at]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Pieces up to the end, or up to the `}` that closes a plural branch.
+    mutating func message(branch: Bool) -> [BernPiece] {
+        var pieces: [BernPiece] = []
+        func push(_ c: Character) {
+            if case .text(let text)? = pieces.last {
+                pieces[pieces.count - 1] = .text(text + String(c))
+            } else {
+                pieces.append(.text(String(c)))
+            }
+        }
+        while at < chars.count {
+            let c = chars[at]
+            let next: Character? = at + 1 < chars.count ? chars[at + 1] : nil
+            if c == "{" && next == "{" {
+                push("{")
+                at += 2
+            } else if c == "}" && branch {
+                return pieces
+            } else if c == "}" && next == "}" {
+                push("}")
+                at += 2
+            } else if c == "#" && branch {
+                pieces.append(.number)
+                at += 1
+            } else if c == "{" {
+                at += 1
+                pieces.append(placeholder())
+            } else {
+                push(c)
+                at += 1
+            }
+        }
+        return pieces
+    }
+
+    private mutating func placeholder() -> BernPiece {
+        let name = word([",", "{", "}"])
+        guard at < chars.count, chars[at] == "," else {
+            at += 1
+            return .value(name)
+        }
+        at += 1
+        let kind = word([",", "{", "}"])
+        at += 1
+        if kind != "plural" {
+            let pattern = word(["{", "}"])
+            at += 1
+            return kind == "date" ? .date(name, pattern) : .duration(name, pattern)
+        }
+        var branches: [(String, [BernPiece])] = []
+        while true {
+            while at < chars.count, chars[at].isWhitespace { at += 1 }
+            if at >= chars.count || chars[at] == "}" {
+                at += 1
+                return .plural(name, branches)
+            }
+            let selector = word(["{", "}"])
+            at += 1
+            branches.append((selector, message(branch: true)))
+            at += 1
+        }
+    }
+}
+
 /// The session's interface language. Every localized text reads its
 /// strings through it, so switching re-renders them in one update while
 /// drafts, navigation and windows stay. Changed on the main actor only.
@@ -208,8 +305,151 @@ enum BernText {
         BernLanguage.shared.bundle.localizedString(forKey: key, value: nil, table: nil)
     }
 
+    /// A framework text with positional `%@` arguments.
     static func format(_ key: String, _ arguments: [String]) -> String {
         String(format: string(key), arguments: arguments.map { $0 as CVarArg })
+    }
+
+    /// A translated text with its arguments, in the current language:
+    /// text and numbers as they are, plural branches by the number's
+    /// category, dates and durations by their patterns. The format is the
+    /// one the compiler checks (`bern_protocol::format`).
+    static func format(_ key: String, _ arguments: [String: BernArg]) -> String {
+        var parser = BernTextParser(string(key))
+        let pieces = parser.message(branch: false)
+        return write(pieces, BernLanguage.shared.current, arguments, hash: nil)
+    }
+
+    static func arg(_ value: String) -> BernArg { .text(value) }
+
+    static func arg(_ value: Int64) -> BernArg { .number(Double(value), String(value)) }
+
+    static func arg(_ value: Double) -> BernArg { .number(value, text(value)) }
+
+    static func arg(_ value: some BernLabeled) -> BernArg { .text(value.bernLabel) }
+
+    private static func write(
+        _ pieces: [BernPiece], _ language: String, _ arguments: [String: BernArg], hash: String?
+    ) -> String {
+        var out = ""
+        for piece in pieces {
+            switch piece {
+            case .text(let text):
+                out += text
+            case .number:
+                out += hash ?? ""
+            case .value(let name):
+                switch arguments[name] {
+                case .text(let text)?: out += text
+                case .number(_, let text)?: out += text
+                case .date(let year, let month, let day)?:
+                    out += "\(year)-\(pad2(month))-\(pad2(day))"
+                case nil: break
+                }
+            case .plural(let name, let branches):
+                let (value, shown) = number(arguments[name])
+                let exact = "=" + (value.rounded() == value && abs(value) < 1e15 ? String(Int64(value)) : String(value))
+                let category = pluralCategory(language, value)
+                let chosen = branches.first { $0.0 == exact }
+                    ?? branches.first { $0.0 == category }
+                    ?? branches.first { $0.0 == "other" }
+                if let chosen { out += write(chosen.1, language, arguments, hash: shown) }
+            case .date(let name, let pattern):
+                if case .date(let year, let month, let day)? = arguments[name] {
+                    out += formatDate(pattern, year, month, day)
+                }
+            case .duration(let name, let pattern):
+                out += formatDuration(pattern, number(arguments[name]).0)
+            }
+        }
+        return out
+    }
+
+    private static func number(_ arg: BernArg?) -> (Double, String) {
+        switch arg {
+        case .number(let value, let text)?: return (value, text)
+        case .text(let text)?: return (Double(text) ?? 0, text)
+        default: return (0, "")
+        }
+    }
+
+    private static func pluralCategory(_ language: String, _ number: Double) -> String {
+        let base = language.split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init) ?? language
+        let oneForm = ["zh", "ja", "ko", "vi", "th", "id", "ms"].contains(base)
+        return !oneForm && number == 1 ? "one" : "other"
+    }
+
+    private static func pad2(_ value: Int64) -> String {
+        value >= 0 && value < 10 ? "0\(value)" : String(value)
+    }
+
+    /// Runs of one pattern letter, and the characters between them.
+    private static func runs(_ pattern: String) -> [(Character, Int)] {
+        var out: [(Character, Int)] = []
+        for c in pattern {
+            if let last = out.last, last.0 == c, c.isASCII, c.isLetter {
+                out[out.count - 1].1 += 1
+            } else {
+                out.append((c, 1))
+            }
+        }
+        return out
+    }
+
+    /// The day of the week, 0 for Monday.
+    private static func weekday(_ year: Int64, _ month: Int64, _ day: Int64) -> Int64 {
+        func div(_ a: Int64, _ b: Int64) -> Int64 {
+            let quotient = a / b
+            return a % b != 0 && (a < 0) != (b < 0) ? quotient - 1 : quotient
+        }
+        let offsets: [Int64] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+        let m = min(12, max(1, month))
+        let y = m < 3 ? year - 1 : year
+        let sundayFirst = ((y + div(y, 4) - div(y, 100) + div(y, 400) + offsets[Int(m - 1)] + day) % 7 + 7) % 7
+        return (sundayFirst + 6) % 7
+    }
+
+    private static func formatDate(_ pattern: String, _ year: Int64, _ month: Int64, _ day: Int64) -> String {
+        var out = ""
+        for (c, count) in runs(pattern) {
+            switch (c, count) {
+            case ("y", 2): out += pad2((year % 100 + 100) % 100)
+            case ("y", _): out += String(year)
+            case ("M", 1): out += String(month)
+            case ("M", 2): out += pad2(month)
+            case ("M", 3): out += string("bern.date.month.\(month)")
+            case ("M", _): out += string("bern.date.month_long.\(month)")
+            case ("d", 1): out += String(day)
+            case ("d", _): out += pad2(day)
+            case ("E", 3): out += string("bern.date.weekday.\(weekday(year, month, day) + 1)")
+            case ("E", _): out += string("bern.date.weekday_long.\(weekday(year, month, day) + 1)")
+            default: out += String(repeating: c, count: count)
+            }
+        }
+        return out
+    }
+
+    /// Seconds as `h`, `m` and `s` fields; the largest field written takes
+    /// what the larger ones would hold.
+    private static func formatDuration(_ pattern: String, _ seconds: Double) -> String {
+        let total = seconds.isFinite ? Int64(max(0, seconds).rounded(.down)) : 0
+        let hours = pattern.contains("h")
+        let minutes = pattern.contains("m")
+        var out = ""
+        for (c, count) in runs(pattern) {
+            let value: Int64? = switch c {
+            case "h": total / 3600
+            case "m": hours ? total % 3600 / 60 : total / 60
+            case "s": hours || minutes ? total % 60 : total
+            default: nil
+            }
+            if let value {
+                out += count == 2 ? pad2(value) : String(value)
+            } else {
+                out += String(repeating: c, count: count)
+            }
+        }
+        return out
     }
 
     static func text(_ value: String) -> String { value }
@@ -262,6 +502,8 @@ final class BernWindowContext {
     /// The width of the window's content, for `window.compact` and its
     /// siblings.
     var width: CGFloat = 0
+    /// The height of the window's content, for `window.short`.
+    var height: CGFloat = 0
     /// Whether the window has shown its first frame: elements appearing
     /// after it move in, those of the first frame do not.
     var settled = false
@@ -271,6 +513,8 @@ final class BernWindowContext {
     var medium: Bool { size == "medium" }
     var expanded: Bool { size == "expanded" }
     var large: Bool { size == "large" }
+    /// Shorter than the compact breakpoint, as a phone on its side.
+    var short: Bool { height > 0 && height < bernAppBreakpoints.compact }
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
 
@@ -486,8 +730,11 @@ struct BernAdaptive<Content: View>: View {
     private var size: String { breakpoints.size(of: width ?? .infinity) }
 
     var body: some View {
+        // The width measured is the room given, not the layout's own: a
+        // frame without a minimum is at least as wide as its content, so a
+        // wide layout chosen first would keep measuring itself wide.
         let chosen = content(BernBreakpoints.layout(for: size, declared: declared))
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .onChange(of: size, initial: true) { current.size = size }
         if let target {
@@ -1602,7 +1849,10 @@ struct BernWindowRoot<Content: View>: View {
             Text(verbatim: BernText.string(pending.canSave ? "bern.close.save_detail" : "bern.close.discard_detail"))
         }
         .modifier(BernWindowPlatformModifier(context: context))
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { context.width = $0 }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: {
+            context.width = $0.width
+            context.height = $0.height
+        }
         .task {
             // After the first frame, appearing elements move in.
             await Task.yield()

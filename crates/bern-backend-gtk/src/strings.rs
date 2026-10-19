@@ -232,7 +232,8 @@ pub fn framework_languages() -> Vec<&'static str> {
 }
 
 /// `(language, [(key, text)])` for every supported language. Texts keep
-/// Bern's `{name}` placeholders; the runtime fills them by name.
+/// Bern's placeholders; the runtime fills them by name. Weekday and month
+/// names fall back to English in a language Bern has none for.
 pub fn tables(app: &Application) -> Vec<(String, Vec<(String, String)>)> {
     app.languages
         .supported
@@ -263,6 +264,15 @@ pub fn tables(app: &Application) -> Vec<(String, Vec<(String, String)>)> {
                     .map(|(_, value)| *value)
                     .unwrap_or("");
                 table.push(((*key).into(), value.into()));
+            }
+            for (key, translations) in bern_protocol::format::date_names() {
+                let value = translations
+                    .iter()
+                    .find(|(candidate, _)| candidate == language)
+                    .or_else(|| translations.iter().find(|(candidate, _)| *candidate == "en"))
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or_default();
+                table.push((key, value));
             }
             (language.clone(), table)
         })

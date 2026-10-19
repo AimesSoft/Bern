@@ -811,6 +811,29 @@ struct BernScrubberShape: View {
     }
 }
 
+// MARK: - Tab accessory
+
+extension View {
+    /// `TabAccessory` on macOS: the tabs are at the top of the window, so
+    /// the bar stays at the bottom of every page, on a material capsule.
+    /// The tab view has no accessory of its own here.
+    func bernTabAccessory(_ shown: Bool, _ accessory: AnyView) -> some View { self }
+
+    func bernTabAccessoryInset(_ shown: Bool, _ accessory: AnyView) -> some View {
+        safeAreaInset(edge: .bottom) {
+            if shown {
+                accessory
+                    .environment(\.bernOnBar, true)
+                    .frame(height: 48)
+                    .frame(maxWidth: .infinity)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+            }
+        }
+    }
+}
+
 // MARK: - Chrome, immersion and idleness
 
 /// A window's chrome, immersion and idleness: `unified` lays the content
@@ -823,6 +846,8 @@ struct BernWindowBehavior: ViewModifier {
     let idleAfter: Double?
     let immersive: Bool
     var idleEnabled: Bool = true
+    /// A phone's orientation; a Mac's window has none to turn.
+    var landscape: Bool? = nil
     @State private var monitor = BernEventMonitor()
 
     func body(content: Content) -> some View {
@@ -1359,6 +1384,74 @@ final class BernWindowImageHeroes {
             let settled = abs(p - 1) < 0.0001 && abs(p - flight.progress) < 0.0001
             flight.progress = p
             if (t > flight.motion.period && settled) || t > 5 { finish(key) }
+        }
+    }
+}
+
+// MARK: - Search field
+
+/// The platform's search field for a `Search` in the page: AppKit's own,
+/// whose field editor keeps Chinese input composing until it is done.
+struct BernSearchInput: NSViewRepresentable {
+    let text: Binding<String>
+    let prompt: String
+    var fontSize: CGFloat? = nil
+    let editing: Binding<Bool>
+    let focusRequest: Int
+    let up: () -> Void
+    let down: () -> Void
+    let submit: () -> Void
+    let cancel: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        if let fontSize { field.font = .systemFont(ofSize: fontSize) }
+        field.placeholderString = prompt
+        field.stringValue = text.wrappedValue
+        field.delegate = context.coordinator
+        field.sendsSearchStringImmediately = true
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.setAccessibilityLabel(prompt)
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.owner = self
+        field.placeholderString = prompt
+        if field.stringValue != text.wrappedValue && !((field.currentEditor() as? NSTextView)?.hasMarkedText() ?? false) {
+            field.stringValue = text.wrappedValue
+        }
+        if context.coordinator.focusRequest != focusRequest {
+            context.coordinator.focusRequest = focusRequest
+            DispatchQueue.main.async { field.window?.makeFirstResponder(field) }
+        }
+    }
+
+    @MainActor final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var owner: BernSearchInput
+        var focusRequest: Int
+        init(_ owner: BernSearchInput) {
+            self.owner = owner
+            focusRequest = owner.focusRequest
+        }
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            owner.text.wrappedValue = field.stringValue
+        }
+        func controlTextDidBeginEditing(_ notification: Notification) { owner.editing.wrappedValue = true }
+        func controlTextDidEndEditing(_ notification: Notification) { owner.editing.wrappedValue = false }
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard !textView.hasMarkedText() else { return false }
+            switch selector {
+            case #selector(NSResponder.moveUp(_:)): owner.up(); return true
+            case #selector(NSResponder.moveDown(_:)): owner.down(); return true
+            case #selector(NSResponder.insertNewline(_:)): owner.submit(); return true
+            case #selector(NSResponder.cancelOperation(_:)): owner.cancel(); return true
+            default: return false
+            }
         }
     }
 }

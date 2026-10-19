@@ -32,6 +32,7 @@ fn field(name: &str, ty: Type, doc: &str) -> FieldDef {
         name: name.into(),
         ty,
         doc: doc.into(),
+        content: false,
     }
 }
 

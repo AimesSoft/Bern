@@ -72,7 +72,7 @@ Safari 27.0.1 的修复与复查记录：
 
 ## `app` 构建
 
-页面图标：没有声明 `[app].icon` 时生成 Bern 标志的 `favicon.svg`、512 像素的 `icon.png` 与铺满方形的 `apple-touch-icon.png`（主屏幕图标），声明时三处都用该 PNG；`index.html` 以带构建版本的地址引用它们。`ui` 构建使用同一页面。
+页面图标：没有声明 `[app].icon` 时生成 Bern 标志的 `favicon.svg`、512 像素的 `icon.png` 与铺满方形的 `apple-touch-icon.png`（主屏幕图标），声明时三处都用该 PNG；`[app.icon].browser` 为 SVG 时只生成 `favicon.svg`，为页面图标文件夹时整个复制到 `icons/`，`.ico`、SVG、`apple-touch-icon*.png` 与 `.webmanifest` 各自生成 `<link>`（没有 SVG 与 `.ico` 时链接非 maskable 的 PNG）。`index.html` 以带构建版本的地址引用它们。`ui` 构建使用同一页面。
 
 ```mermaid
 flowchart LR
@@ -142,6 +142,7 @@ v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方�
 - **`Menu` / `MenuItem`**：菜单按钮加 Popover API 弹出菜单，键盘按 APG Menu Button；与下拉菜单共用定位（`placePopover`）。每个菜单项按 `id` 登记，外部入口可在菜单关闭时执行。
 - **语言**：当前语言与字符串表是响应式单元，`tr()` 读取它们，所有文本绑定在切换时一次更新；`<html lang>` 与页面标题由同一效果更新。`ui.language`、`ui.set_language` 在会话请求中处理（命令序号 18、19）。`LanguagePicker` 复用自绘下拉菜单，选项名用 `Intl.DisplayNames` 取语言自称。
 - **功能契约报告**：`bern build` 为每个目标把报告写入产物目录的 `features.json`。
+- **消息格式**（2026-10-18）：`B.fmt` 按[消息格式](../Reference/UI.md#文本内容与格式化)解析译文（每条译文解析一次后缓存），写出 `{name}`、复数分支、日期与时长；日期参数以记录传入，其余按显示形式传入。显示变体字段的枚举标签生成为按变体分支的 `L.枚举`，字段按类型写出（嵌套枚举用它自己的标签）。月名与星期名随字符串表生成。浏览器面板中实测 `=0`、`one`、`other`、复数分支内嵌枚举标签、日期、时长与语言切换。
 
 ## `ui` 构建
 

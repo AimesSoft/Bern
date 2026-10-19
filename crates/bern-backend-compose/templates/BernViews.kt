@@ -23,9 +23,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
@@ -87,6 +89,19 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -102,6 +117,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -310,11 +326,18 @@ object BernKey {
 
 // MARK: - Text and labels
 
+/// An icon and a title; with `fontSize` the icon is set at that size too.
+/// `iconOnly` shows the icon alone, the title its accessible name.
 @Composable
-fun BernLabel(title: String, icon: ImageVector?, style: TextStyle) {
+fun BernLabel(title: String, icon: ImageVector?, style: TextStyle, fontSize: Float? = null, iconOnly: Boolean = false) {
+    val iconModifier = if (fontSize != null) Modifier.size(bernIconSize(fontSize)) else Modifier
+    if (iconOnly && icon != null) {
+        Icon(icon, contentDescription = title, modifier = iconModifier)
+        return
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (icon != null) Icon(icon, contentDescription = null)
-        Text(title, style = style)
+        if (icon != null) Icon(icon, contentDescription = null, modifier = iconModifier)
+        Text(title, style = if (fontSize != null) style.copy(fontSize = fontSize.sp) else style)
     }
 }
 
@@ -322,6 +345,8 @@ fun BernLabel(title: String, icon: ImageVector?, style: TextStyle) {
 
 enum class BernProminence { Standard, Prominent, Plain }
 
+/// A Material button; `shape` a capsule of its own height, `fill` across
+/// its container.
 @Composable
 fun BernButton(
     label: String,
@@ -330,6 +355,8 @@ fun BernButton(
     destructive: Boolean = false,
     enabled: Boolean = true,
     style: BernStyle? = null,
+    shape: BernShape? = null,
+    fill: Boolean = false,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -347,11 +374,18 @@ fun BernButton(
         Text(label, style = textStyle)
     }
     val error = MaterialTheme.colorScheme.error
-    val padding = if (style?.size != null) style.insets else ButtonDefaults.ContentPadding
+    var padding = if (style?.size != null) style.insets else ButtonDefaults.ContentPadding
+    val height = shape?.height
+    if (height != null) padding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
+    val form = if (shape?.capsule == true) CircleShape else ButtonDefaults.shape
+    var sized = modifier
+    if (fill) sized = sized.fillMaxWidth()
+    if (height != null) sized = sized.height(height)
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { modifier, interaction ->
         when (prominence) {
             BernProminence.Prominent -> Button(
                 onClick, modifier, enabled,
+                shape = form,
                 colors = if (destructive) ButtonDefaults.buttonColors(containerColor = error) else ButtonDefaults.buttonColors(),
                 contentPadding = padding,
                 interactionSource = interaction,
@@ -359,6 +393,7 @@ fun BernButton(
             )
             BernProminence.Plain -> TextButton(
                 onClick, modifier, enabled,
+                shape = form,
                 colors = if (destructive) ButtonDefaults.textButtonColors(contentColor = error) else ButtonDefaults.textButtonColors(),
                 contentPadding = padding,
                 interactionSource = interaction,
@@ -366,6 +401,7 @@ fun BernButton(
             )
             BernProminence.Standard -> FilledTonalButton(
                 onClick, modifier, enabled,
+                shape = form,
                 colors = if (destructive) ButtonDefaults.filledTonalButtonColors(contentColor = error) else ButtonDefaults.filledTonalButtonColors(),
                 contentPadding = padding,
                 interactionSource = interaction,
@@ -374,12 +410,15 @@ fun BernButton(
         }
     }
     if (style == null) {
-        material(modifier, null)
+        material(sized, null)
     } else {
-        BernStyledButton(style, enabled, modifier, onClick, material, content)
+        BernStyledButton(style, enabled, sized, onClick, material, content)
     }
 }
 
+/// An icon button named by `label`. With a `diameter` it is a round tonal
+/// button of that size, `prominent` a filled one, `plain` has no
+/// container; `iconSize` sets its icon at that many points.
 @Composable
 fun BernIconButton(
     label: String,
@@ -387,14 +426,24 @@ fun BernIconButton(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     style: BernStyle? = null,
+    iconSize: Float? = null,
+    diameter: Dp? = null,
+    prominence: BernProminence = BernProminence.Standard,
     onClick: () -> Unit,
 ) {
+    val iconModifier = if (iconSize != null) Modifier.size(bernIconSize(iconSize)) else Modifier
     val content: @Composable RowScope.() -> Unit = {
-        Icon(icon ?: BernIcons.get(""), contentDescription = label)
+        Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier)
     }
     val material: @Composable (Modifier, MutableInteractionSource?) -> Unit = { modifier, interaction ->
-        IconButton(onClick = onClick, enabled = enabled, modifier = modifier, interactionSource = interaction) {
-            Icon(icon ?: BernIcons.get(""), contentDescription = label)
+        val sized = if (diameter != null) modifier.size(diameter) else modifier
+        val glyph: @Composable () -> Unit = { Icon(icon ?: BernIcons.get(""), contentDescription = label, modifier = iconModifier) }
+        when {
+            prominence == BernProminence.Prominent ->
+                FilledIconButton(onClick = onClick, enabled = enabled, modifier = sized, interactionSource = interaction, content = glyph)
+            diameter != null && prominence == BernProminence.Standard ->
+                FilledTonalIconButton(onClick = onClick, enabled = enabled, modifier = sized, interactionSource = interaction, content = glyph)
+            else -> IconButton(onClick = onClick, enabled = enabled, modifier = sized, interactionSource = interaction, content = glyph)
         }
     }
     if (style == null) {
@@ -441,7 +490,15 @@ fun BernSearchField(
     prompt: String,
     submit: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    width: Dp? = null,
+    height: Dp? = null,
+    fontSize: Float? = null,
 ) {
+    // A field of its own size stands in the page as it is.
+    if (width != null || height != null || fontSize != null) {
+        BernSizedSearchField(value, onChange, prompt, submit, modifier, width, height, fontSize)
+        return
+    }
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
@@ -460,8 +517,16 @@ fun BernSwitch(
     value: Boolean,
     onChange: (Boolean) -> Unit,
     checkbox: Boolean,
+    labelHidden: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
+    // Without its label shown, the control alone, named by it.
+    if (labelHidden) {
+        val named = modifier.semantics { contentDescription = label }
+        if (checkbox) Checkbox(checked = value, onCheckedChange = onChange, modifier = named)
+        else Switch(checked = value, onCheckedChange = onChange, modifier = named)
+        return
+    }
     Row(
         modifier
             .fillMaxWidth()
@@ -491,11 +556,12 @@ fun BernSlider(
     onCommit: (() -> Unit)?,
     minIcon: ImageVector?,
     maxIcon: ImageVector?,
+    labelHidden: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val steps = if (step != null && step > 0) maxOf(0, Math.round((max - min) / step).toInt() - 1) else 0
-    Column(modifier.fillMaxWidth()) {
-        Text(label, style = MaterialTheme.typography.bodyMedium)
+    Column(modifier.fillMaxWidth().semantics { if (labelHidden) contentDescription = label }) {
+        if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (minIcon != null) Icon(minIcon, contentDescription = null)
             Slider(
@@ -511,6 +577,30 @@ fun BernSlider(
     }
 }
 
+/// A slider showing engine state: dragging moves only the slider, letting
+/// go runs `commit` with the new value; keys and accessibility actions
+/// commit at once.
+@Composable
+fun BernControlledSlider(
+    label: String,
+    value: Double,
+    commit: (Double) -> Unit,
+    min: Double,
+    max: Double,
+    step: Double?,
+    minIcon: ImageVector?,
+    maxIcon: ImageVector?,
+    labelHidden: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    var preview by remember { mutableStateOf<Double?>(null) }
+    BernSlider(
+        label, preview ?: value, { preview = it }, min, max, step,
+        { preview?.let(commit); preview = null },
+        minIcon, maxIcon, labelHidden, modifier,
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun <T> BernPicker(
@@ -521,10 +611,46 @@ fun <T> BernPicker(
     onSelect: (T) -> Unit,
     style: String,
     modifier: Modifier = Modifier,
+    labelHidden: Boolean = false,
+    shape: BernShape? = null,
 ) {
+    // A capsule of its own height: the chosen option on a tonal button,
+    // opening a menu of the others.
+    if (shape != null && style != "segmented" && style != "radio" && style != "inline") {
+        var expanded by remember { mutableStateOf(false) }
+        Box(modifier) {
+            FilledTonalButton(
+                onClick = { expanded = true },
+                shape = CircleShape,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                modifier = (if (shape.height != null) Modifier.height(shape.height) else Modifier)
+                    .semantics { contentDescription = label },
+            ) {
+                Text(optionLabel(selected), maxLines = 1)
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                for (option in options) {
+                    DropdownMenuItem(
+                        text = { Text(optionLabel(option)) },
+                        leadingIcon = if (option == selected) {
+                            { Icon(Icons.Filled.Check, contentDescription = null) }
+                        } else {
+                            null
+                        },
+                        onClick = {
+                            onSelect(option)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+        return
+    }
     when (style) {
-        "segmented" -> Column(modifier) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
+        "segmented" -> Column(modifier.semantics { if (labelHidden) contentDescription = label }) {
+            if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, option ->
                     SegmentedButton(
@@ -535,8 +661,8 @@ fun <T> BernPicker(
                 }
             }
         }
-        "radio", "inline" -> Column(modifier) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
+        "radio", "inline" -> Column(modifier.semantics { if (labelHidden) contentDescription = label }) {
+            if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
             for (option in options) {
                 Row(
                     Modifier
@@ -558,7 +684,7 @@ fun <T> BernPicker(
                     value = optionLabel(selected),
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text(label) },
+                    label = if (labelHidden) null else { { Text(label) } },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
                     modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                 )
@@ -606,56 +732,83 @@ fun BernProgress(value: Double?, total: Double, label: String?) {
 }
 
 /// A picture from a declared resource. With one side given, the other
-/// follows the picture's aspect ratio. A label makes it an image for
-/// assistive technologies; without one it is decorative.
+/// follows the picture's aspect ratio, or `aspect` when given; with only
+/// `aspect` it takes its container's width. `corner` rounds it; a
+/// `template` takes the color of the text around it through its alpha. A
+/// label makes it an image for assistive technologies; without one it is
+/// decorative.
 @Composable
-fun BernImage(name: String, label: String?, width: Dp?, height: Dp?, fit: ContentScale) {
+fun BernImage(
+    name: String,
+    label: String?,
+    width: Dp?,
+    height: Dp?,
+    fit: ContentScale,
+    corner: Dp? = null,
+    template: Boolean = false,
+    aspect: Float? = null,
+) {
     val bitmap = remember(name) {
         BitmapFactory.decodeFile(File(BernResources.root, name).absolutePath)?.asImageBitmap()
     } ?: return
-    val ratio = bitmap.width.toFloat() / maxOf(1, bitmap.height)
-    val modifier = when {
+    val ratio = aspect ?: (bitmap.width.toFloat() / maxOf(1, bitmap.height))
+    Image(
+        bitmap,
+        contentDescription = label,
+        modifier = bernPictureFrame(width, height, ratio, aspect != null, corner),
+        contentScale = fit,
+        colorFilter = if (template) ColorFilter.tint(LocalContentColor.current, BlendMode.SrcIn) else null,
+    )
+}
+
+/// The frame of a picture: its declared sizes, the other side by `ratio`,
+/// the container's width with only a proportion, and its rounded corners.
+fun bernPictureFrame(width: Dp?, height: Dp?, ratio: Float, proportioned: Boolean, corner: Dp?): Modifier {
+    val frame = when {
         width != null && height != null -> Modifier.size(width, height)
         width != null -> Modifier.width(width).height(width / ratio)
         height != null -> Modifier.height(height).width(height * ratio)
+        proportioned -> Modifier.fillMaxWidth().aspectRatio(ratio)
         else -> Modifier.fillMaxWidth()
     }
-    Image(bitmap, contentDescription = label, modifier = modifier, contentScale = fit)
+    return if (corner != null) frame.clip(RoundedCornerShape(corner)) else frame
 }
 
 // MARK: - Groups and layout
 
+/// Equal columns no narrower than `minWidth`, as many as fit, `gap`
+/// apart and rows `rowGap` apart (`gap` unless given); children fill them
+/// row by row. With `cellRatio` every row is the column width ÷ `cellRatio`
+/// \+ `cellExtra` tall, its children at the top; taller content runs into
+/// the gap below.
 @Composable
-fun BernSection(title: String?, footer: String?, content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (title != null) {
-            Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        }
-        content()
-        if (footer != null) {
-            Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
-}
-
-/// Equal columns no narrower than `minWidth`, as many as fit; children
-/// fill them row by row.
-@Composable
-fun BernGrid(minWidth: Dp, gap: Dp, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+fun BernGrid(
+    minWidth: Dp,
+    gap: Dp,
+    rowGap: Dp? = null,
+    cellRatio: Float? = null,
+    cellExtra: Dp = 0.dp,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
     Layout(content, modifier.fillMaxWidth()) { measurables, constraints ->
         val spacing = gap.roundToPx()
+        val rowSpacing = rowGap?.roundToPx() ?: spacing
         val width = constraints.maxWidth
         val columns = maxOf(1, (width + spacing) / (minWidth.roundToPx() + spacing))
         val cell = maxOf(0, (width - spacing * (columns - 1)) / columns)
-        val placeables = measurables.map { it.measure(constraints.copy(minWidth = cell, maxWidth = cell, minHeight = 0)) }
+        val placeables = measurables.map {
+            it.measure(Constraints(minWidth = cell, maxWidth = cell, minHeight = 0, maxHeight = Constraints.Infinity))
+        }
         val rows = placeables.chunked(columns)
-        val heights = rows.map { row -> row.maxOf { it.height } }
-        val total = heights.sum() + spacing * maxOf(0, rows.size - 1)
+        val fixed = cellRatio?.takeIf { it > 0f }?.let { (cell / it + cellExtra.toPx()).toInt() }
+        val heights = rows.map { row -> fixed ?: row.maxOf { it.height } }
+        val total = heights.sum() + rowSpacing * maxOf(0, rows.size - 1)
         layout(width, total) {
             var y = 0
             rows.forEachIndexed { index, row ->
                 row.forEachIndexed { column, placeable -> placeable.place(column * (cell + spacing), y) }
-                y += heights[index] + spacing
+                y += heights[index] + rowSpacing
             }
         }
     }
@@ -684,12 +837,42 @@ fun BernAdaptive(
 
 // MARK: - Menus
 
+/// A button opening a menu of commands. With an icon only the icon shows
+/// (`iconOnly`, or an icon in a top bar); with a `shape` height it is a
+/// round tonal button of that diameter, or a tonal capsule with its label.
 @Composable
-fun BernMenu(label: String, icon: ImageVector?, modifier: Modifier = Modifier, items: @Composable (dismiss: () -> Unit) -> Unit) {
+fun BernMenu(
+    label: String,
+    icon: ImageVector?,
+    modifier: Modifier = Modifier,
+    iconOnly: Boolean = false,
+    shape: BernShape? = null,
+    items: @Composable (dismiss: () -> Unit) -> Unit,
+) {
     var expanded by remember { mutableStateOf(false) }
     Box(modifier) {
-        if (icon != null) {
-            IconButton(onClick = { expanded = true }) { Icon(icon, contentDescription = label) }
+        val height = shape?.height
+        if (icon != null && (iconOnly || shape == null)) {
+            if (height != null) {
+                FilledTonalIconButton(onClick = { expanded = true }, modifier = Modifier.size(height)) {
+                    Icon(icon, contentDescription = label)
+                }
+            } else {
+                IconButton(onClick = { expanded = true }) { Icon(icon, contentDescription = label) }
+            }
+        } else if (shape != null) {
+            FilledTonalButton(
+                onClick = { expanded = true },
+                shape = CircleShape,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                modifier = if (height != null) Modifier.height(height) else Modifier,
+            ) {
+                if (icon != null) {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(label, maxLines = 1)
+            }
         } else {
             TextButton(onClick = { expanded = true }) {
                 Text(label)
@@ -735,15 +918,20 @@ fun BernNavLink(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Co
 fun BernSplitView(
     title: String,
     showingDetail: MutableState<Boolean>,
+    sidebarWidth: Dp = 280.dp,
+    header: (@Composable () -> Unit)? = null,
     sidebar: @Composable (showDetail: () -> Unit) -> Unit,
     footer: (@Composable () -> Unit)? = null,
     detail: @Composable () -> Unit,
 ) {
     var showingDetail by showingDetail
-    // The sidebar's own bottom area, such as the account, stays put while
-    // the destinations scroll.
+    // The sidebar's own top and bottom areas, such as the application's
+    // name and the account, stay put while the destinations scroll.
     val list: @Composable (() -> Unit) -> Unit = { showDetail ->
         Column(Modifier.fillMaxHeight()) {
+            if (header != null) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) { header() }
+            }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 12.dp)) {
                 sidebar(showDetail)
             }
@@ -757,7 +945,7 @@ fun BernSplitView(
         if (maxWidth >= 600.dp) {
             BernChrome(title = title)
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.width(280.dp).fillMaxHeight()) { list {} }
+                Box(Modifier.width(sidebarWidth).fillMaxHeight()) { list {} }
                 VerticalDivider()
                 Box(Modifier.weight(1f).fillMaxHeight()) { detail() }
             }
@@ -784,10 +972,16 @@ fun BernSidebarSection(title: String?, content: @Composable () -> Unit) {
 }
 
 @Composable
-fun BernSidebarItem(label: String, icon: ImageVector?, selected: Boolean, onClick: () -> Unit) {
+fun BernSidebarItem(label: String, icon: ImageVector?, selected: Boolean, badge: Long? = null, onClick: () -> Unit) {
     NavigationDrawerItem(
         label = { Text(label) },
         icon = icon?.let { { Icon(it, contentDescription = null) } },
+        // A live count beside the page, hidden at zero.
+        badge = if (badge != null && badge > 0) {
+            { Text("$badge") }
+        } else {
+            null
+        },
         selected = selected,
         onClick = onClick,
     )
@@ -795,10 +989,29 @@ fun BernSidebarItem(label: String, icon: ImageVector?, selected: Boolean, onClic
 
 /// Tab pages above a navigation bar.
 @Composable
-fun BernTabs(content: @Composable () -> Unit, bar: @Composable RowScope.() -> Unit) {
+fun BernTabs(
+    content: @Composable () -> Unit,
+    accessory: (@Composable () -> Unit)? = null,
+    bar: @Composable RowScope.() -> Unit,
+) {
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+        accessory?.invoke()
         NavigationBar(content = bar)
+    }
+}
+
+/// `TabAccessory`: a bar on a raised surface above the navigation bar,
+/// as a player shows what is playing over every page.
+@Composable
+fun BernTabAccessory(content: @Composable () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 3.dp,
+        shadowElevation = 2.dp,
+    ) {
+        Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) { content() }
     }
 }
 

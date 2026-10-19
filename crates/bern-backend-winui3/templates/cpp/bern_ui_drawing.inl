@@ -387,13 +387,20 @@ inline double ScaleOf(xaml::UIElement const& element) {
 /// reads the state the drawing shows, so it redraws when that changes, as
 /// it does when the canvas resizes or its colors change.
 inline void Canvas(Parent const& p, Ctx const& ctx, CanvasProps props, std::function<std::vector<DrawOp>(Ctx const&)> ops) {
+    // The drawing has no size of its own: the image sits in a XAML canvas,
+    // which asks for none, and takes the frame's size.
     controls::Grid frame;
+    controls::Canvas surface;
     controls::Image image;
     image.Stretch(media::Stretch::Fill);
     image.IsHitTestVisible(false);
-    frame.Children().Append(image);
+    surface.IsHitTestVisible(false);
+    surface.Children().Append(image);
+    frame.Children().Append(surface);
     bool sizedWidth = props.width.Given(), sizedHeight = props.height.Given();
-    if (!sizedWidth && !sizedHeight) SetRole(frame, L"bern-fill");
+    // Without a size it fills where it stands; among a stack's layers it
+    // takes the size of the others, as their backdrop.
+    if (!sizedWidth && !sizedHeight) SetRole(frame, L"bern-canvas");
     else if (!sizedWidth) SetRole(frame, L"bern-fill-width");
     else if (!sizedHeight) SetRole(frame, L"bern-fill-height");
     if (!sizedWidth) frame.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
@@ -409,8 +416,10 @@ inline void Canvas(Parent const& p, Ctx const& ctx, CanvasProps props, std::func
     // What the drawing depends on besides the state it shows.
     Cell<std::array<double, 3>> size(std::array<double, 3>{0, 0, 1});
     Cell<bool> dark(false);
-    frame.SizeChanged([size, weak = winrt::make_weak(frame)](auto&&, xaml::SizeChangedEventArgs const& args) mutable {
+    frame.SizeChanged([size, image, weak = winrt::make_weak(frame)](auto&&, xaml::SizeChangedEventArgs const& args) mutable {
         auto element = weak.get();
+        image.Width(args.NewSize().Width);
+        image.Height(args.NewSize().Height);
         size.Set({args.NewSize().Width, args.NewSize().Height, element ? ScaleOf(element) : 1.0});
     });
     frame.ActualThemeChanged([dark](xaml::FrameworkElement const& element, auto&&) mutable { dark.Set(IsDark(element)); });

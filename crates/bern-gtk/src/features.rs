@@ -188,6 +188,7 @@ pub struct ContentButtonProps {
     pub enabled: Option<Get>,
     pub style: Option<&'static StyleDef>,
     pub pick: Option<Pick>,
+    pub shape: crate::widgets::Shape,
 }
 
 /// A button showing its content instead of a label: no frame of its own,
@@ -234,6 +235,7 @@ pub fn ContentButton(
             ..Actions::default()
         },
     );
+    crate::widgets::shape(ctx, button.upcast_ref(), &props.shape);
     let motion = MotionBox::wrap(&button);
     match props.style {
         Some(style) => {
@@ -249,19 +251,18 @@ pub fn ContentButton(
 pub struct ToggleProps {
     pub id: &'static str,
     pub label: Option<Str>,
-    pub field: Field,
+    pub model: crate::widgets::Model,
     pub icon: Option<&'static str>,
+    pub shape: crate::widgets::Shape,
 }
 
-/// A button that stays pressed while `field` is on.
+/// A button that stays pressed while `bound` is on.
 fn toggle_widget(
-    ctx: &Ctx,
     label: Option<Rc<dyn Fn() -> String>>,
-    field: Field,
+    bound: Bound,
     icon: Option<&'static str>,
     icon_only: bool,
 ) -> gtk::ToggleButton {
-    let bound = Bound::new(ctx, field);
     let button = gtk::ToggleButton::new();
     match (icon, label.clone()) {
         (Some(icon), _) if icon_only => button.set_icon_name(icons::name(icon)),
@@ -308,9 +309,8 @@ fn toggle_widget(
     button
 }
 
-/// The actions of a control bound to a `bool` field.
-fn switch_actions(ctx: &Ctx, field: Field) -> Actions {
-    let bound = Bound::new(ctx, field);
+/// The actions of a control bound to a `bool`.
+fn switch_actions(bound: Bound) -> Actions {
     let set = bound.clone();
     let toggle = bound.clone();
     Actions {
@@ -330,19 +330,14 @@ fn switch_actions(ctx: &Ctx, field: Field) -> Actions {
 pub(crate) fn toggle_button(p: &Parent, ctx: &Ctx, props: ToggleProps) {
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     let icon_only = props.icon.is_some() && ctx.in_toolbar();
-    let button = toggle_widget(ctx, label.clone(), props.field, props.icon, icon_only);
+    let bound = Bound::model(ctx, props.model);
+    let button = toggle_widget(label.clone(), bound.clone(), props.icon, icon_only);
     if ctx.in_toolbar() {
         button.add_css_class("flat");
     }
+    crate::widgets::shape(ctx, button.upcast_ref(), &props.shape);
     place(p, &button);
-    controls::register(
-        ctx,
-        props.id,
-        "switch",
-        label,
-        None,
-        switch_actions(ctx, props.field),
-    );
+    controls::register(ctx, props.id, "switch", label, None, switch_actions(bound));
 }
 
 // MARK: - Split and popover buttons
@@ -366,6 +361,7 @@ pub struct SplitButtonProps {
     pub icon: Option<&'static str>,
     pub field: Field,
     pub more: Option<Str>,
+    pub shape: crate::widgets::Shape,
 }
 
 /// A toggle linked with a button that shows its children in a popover,
@@ -376,10 +372,10 @@ pub fn SplitButton(p: &Parent, ctx: &Ctx, props: SplitButtonProps, content: Buil
     group.add_css_class("linked");
     group.set_valign(gtk::Align::Center);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
+    let bound = Bound::new(ctx, props.field);
     let toggle = toggle_widget(
-        ctx,
         label.clone(),
-        props.field,
+        bound.clone(),
         props.icon,
         props.icon.is_some(),
     );
@@ -400,6 +396,7 @@ pub fn SplitButton(p: &Parent, ctx: &Ctx, props: SplitButtonProps, content: Buil
     content(&Parent::of_box(&column), &ctx.outside_toolbar());
     more.set_popover(Some(&popover));
     group.append(&more);
+    crate::widgets::shape(ctx, group.upcast_ref(), &props.shape);
     place(p, &group);
     let opened = more.clone();
     controls::register(
@@ -410,7 +407,7 @@ pub fn SplitButton(p: &Parent, ctx: &Ctx, props: SplitButtonProps, content: Buil
         None,
         Actions {
             activate: Some(Rc::new(move || opened.popup())),
-            ..switch_actions(ctx, props.field)
+            ..switch_actions(bound)
         },
     );
 }
@@ -572,6 +569,9 @@ pub fn Toast(_p: &Parent, ctx: &Ctx, props: ToastProps) {
                 title.append(&icons::image(icon));
                 let label = gtk::Label::new(Some(&text));
                 label.add_css_class("heading");
+                // As libadwaita's own title: one line, cut short in a
+                // narrow window.
+                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
                 title.append(&label);
                 toast.set_custom_title(Some(&title));
             }
@@ -942,6 +942,8 @@ pub struct RailProps {
     pub vertical: bool,
     /// `start`, `center` or `end`.
     pub anchor: Option<&'static str>,
+    /// How far the scale runs past each end.
+    pub overhang: Option<Num>,
 }
 
 /// A strip that places each child at a fraction of its length or between
@@ -955,6 +957,14 @@ pub fn Rail(p: &Parent, ctx: &Ctx, props: RailProps, children: Build) {
     };
     let rail = RailBox::new(props.vertical, anchor);
     rail.set_can_target(true);
+    if let Some(overhang) = &props.overhang {
+        let target = rail.downgrade();
+        crate::motion::bind_number(ctx, overhang, None, &rail, move |value| {
+            if let Some(rail) = target.upgrade() {
+                rail.set_overhang(value);
+            }
+        });
+    }
     children(&Parent::of_rail(&rail), ctx);
     place(p, &rail);
 }
@@ -1068,6 +1078,9 @@ pub struct ScrollProps {
     pub hide_indicators: bool,
     pub nudge_motion: Curve,
     pub smooth: Curve,
+    /// Where it opens: the point at this fraction of the content at the
+    /// same fraction of the view.
+    pub open_at: Option<f64>,
 }
 
 #[allow(non_snake_case)]
@@ -1094,6 +1107,10 @@ pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
     );
     view.set_vexpand(!horizontal);
     view.set_hexpand(true);
+    // Across its axis a scroll view is as large as its content.
+    if horizontal {
+        view.set_propagate_natural_height(true);
+    }
     let content = gtk::Box::new(
         if horizontal {
             gtk::Orientation::Horizontal
@@ -1103,6 +1120,7 @@ pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
         8,
     );
     view.set_child(Some(&content));
+    natural_scrolling(&view, horizontal);
     let scope = Rc::new(ScrollScope {
         view: view.clone(),
         items: RefCell::new(Vec::new()),
@@ -1113,9 +1131,49 @@ pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
         &ctx.with_scroll(Rc::clone(&scope)),
     );
     place(p, &view);
+    if let Some(at) = props.open_at {
+        open_at(&view, horizontal, at);
+    }
     if props.snap.is_some() || props.position.is_some() {
         snapping(ctx, &scope, &content, horizontal, &props);
     }
+}
+
+/// Content scrolls at its natural length, not its least: a picture whose
+/// height follows its width keeps its height in a scroll view. Across, it
+/// takes the view's size.
+pub(crate) fn natural_scrolling(view: &gtk::ScrolledWindow, horizontal: bool) {
+    if let Some(viewport) = view.child().and_downcast::<gtk::Viewport>() {
+        if horizontal {
+            viewport.set_hscroll_policy(gtk::ScrollablePolicy::Natural);
+        } else {
+            viewport.set_vscroll_policy(gtk::ScrollablePolicy::Natural);
+        }
+    }
+}
+
+/// Once the scroll view first knows how far it scrolls, stand at `at` of
+/// that: the point at that fraction of the content at the same fraction
+/// of the view.
+fn open_at(view: &gtk::ScrolledWindow, horizontal: bool, at: f64) {
+    let adjustment = if horizontal {
+        view.hadjustment()
+    } else {
+        view.vadjustment()
+    };
+    let handler: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
+    let held = Rc::clone(&handler);
+    let id = adjustment.connect_changed(move |adjustment| {
+        let room = adjustment.upper() - adjustment.page_size();
+        if room <= 0.0 {
+            return;
+        }
+        adjustment.set_value(adjustment.lower() + at.clamp(0.0, 1.0) * room);
+        if let Some(id) = held.borrow_mut().take() {
+            adjustment.disconnect(id);
+        }
+    });
+    handler.replace(Some(id));
 }
 
 /// Scrolling comes to rest with an item at the anchor; `position` follows
@@ -1467,6 +1525,9 @@ fn load_texture(url: &str, done: impl FnOnce(Option<gtk::gdk::Texture>) + 'stati
     });
 }
 
+/// Shows a texture read in the background, or none.
+type ShowTexture = Rc<dyn Fn(Option<&gtk::gdk::Texture>)>;
+
 pub struct RuntimeImageProps {
     pub url: Get,
     pub label: Option<Str>,
@@ -1474,6 +1535,9 @@ pub struct RuntimeImageProps {
     pub height: Option<Num>,
     pub fit: Option<&'static str>,
     pub animate: Option<Curve>,
+    pub corner: Option<Num>,
+    pub template: bool,
+    pub aspect: Option<f64>,
 }
 
 /// A picture from a `MediaSource` in state: a file the user chose or an
@@ -1481,56 +1545,56 @@ pub struct RuntimeImageProps {
 /// With one side given, the other follows the picture.
 #[allow(non_snake_case)]
 pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
-    let picture = gtk::Picture::new();
-    picture.set_can_shrink(true);
-    picture.set_content_fit(match props.fit {
-        Some("cover") => gtk::ContentFit::Cover,
-        Some("fill") => gtk::ContentFit::Fill,
-        _ => gtk::ContentFit::Contain,
-    });
-    let frame = crate::picture::Frame::new(&picture, 0, 0);
-    let ratio = Rc::new(Cell::new(1.0));
-    let sides: Rc<RefCell<(Option<f64>, Option<f64>)>> = Rc::new(RefCell::new((None, None)));
-    let resize = {
-        let frame = frame.clone();
-        let ratio = Rc::clone(&ratio);
-        let sides = Rc::clone(&sides);
-        Rc::new(move || {
-            let (width, height) = *sides.borrow();
-            let ratio = ratio.get();
-            let w = width.or(height.map(|height| height * ratio)).unwrap_or(0.0);
-            let h = height.or(width.map(|width| width / ratio)).unwrap_or(0.0);
-            frame.set_size(w.round() as i32, h.round() as i32);
-        })
+    let fit = crate::widgets::content_fit(props.fit);
+    // What shows the texture: a picture, or a template drawn in the
+    // foreground color.
+    let (picture, show): (gtk::Widget, ShowTexture) = if props.template {
+        let template = crate::picture::Template::new(fit);
+        let shown = template.clone();
+        (
+            template.upcast(),
+            Rc::new(move |texture| {
+                shown.set_paintable(texture.map(|texture| texture.upcast_ref()))
+            }),
+        )
+    } else {
+        let picture = gtk::Picture::new();
+        picture.set_can_shrink(true);
+        picture.set_content_fit(fit);
+        let shown = picture.clone();
+        (
+            picture.upcast(),
+            Rc::new(move |texture| shown.set_paintable(texture)),
+        )
     };
-    if let Some(width) = &props.width {
-        let sides = Rc::clone(&sides);
-        let resize = Rc::clone(&resize);
-        bind_number(ctx, width, props.animate, &frame, move |value| {
-            sides.borrow_mut().0 = Some(value);
-            resize();
-        });
-    }
-    if let Some(height) = &props.height {
-        let sides = Rc::clone(&sides);
-        let resize = Rc::clone(&resize);
-        bind_number(ctx, height, props.animate, &frame, move |value| {
-            sides.borrow_mut().1 = Some(value);
-            resize();
-        });
-    }
+    let ratio = Rc::new(Cell::new(props.aspect.unwrap_or(1.0)));
+    let (outer, _, resize) = crate::widgets::framed(
+        ctx,
+        &picture,
+        crate::widgets::Sizing {
+            width: &props.width,
+            height: &props.height,
+            animate: props.animate,
+            corner: &props.corner,
+            aspect: props.aspect,
+        },
+        Rc::clone(&ratio),
+    );
     match &props.label {
         Some(label) => {
             let text = bound_text(ctx, label);
             let described = picture.clone();
-            effect(move || described.set_alternative_text(Some(&text())));
+            effect(move || match described.downcast_ref::<gtk::Picture>() {
+                Some(picture) => picture.set_alternative_text(Some(&text())),
+                None => described.update_property(&[gtk::accessible::Property::Label(&text())]),
+            });
         }
         None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
     let at = ctx.clone();
-    let shown = picture.clone();
-    let hidden = frame.clone();
+    let hidden = outer.clone();
     let current: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+    let fixed_ratio = props.aspect.is_some();
     effect(move || {
         let url = crate::media::url_of(&(props.url)(&at));
         untrack(|| {
@@ -1540,10 +1604,10 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
             *current.borrow_mut() = url.clone();
             hidden.set_visible(url.is_some());
             let Some(url) = url else {
-                shown.set_paintable(None::<&gtk::gdk::Paintable>);
+                show(None);
                 return;
             };
-            let shown = shown.clone();
+            let show = Rc::clone(&show);
             let ratio = Rc::clone(&ratio);
             let resize = Rc::clone(&resize);
             let wanted = Rc::clone(&current);
@@ -1553,18 +1617,19 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
                 if wanted.borrow().as_deref() != Some(requested.as_str()) {
                     return;
                 }
-                if let Some(texture) = &texture
+                if !fixed_ratio
+                    && let Some(texture) = &texture
                     && texture.width() > 0
                     && texture.height() > 0
                 {
                     ratio.set(f64::from(texture.width()) / f64::from(texture.height()));
                 }
-                shown.set_paintable(texture.as_ref());
+                show(texture.as_ref());
                 resize();
             });
         });
     });
-    place(p, &frame);
+    place(p, &outer);
 }
 
 // MARK: - Rounded corners

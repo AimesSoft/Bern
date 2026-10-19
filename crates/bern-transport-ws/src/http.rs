@@ -104,6 +104,8 @@ fn content_type(path: &Path) -> &'static str {
         Some("wasm") => "application/wasm",
         Some("svg") => "image/svg+xml",
         Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("webmanifest") => "application/manifest+json",
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("mp4" | "m4v") => "video/mp4",
         Some("webm") => "video/webm",

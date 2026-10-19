@@ -37,8 +37,7 @@ Svg(
 | --- | --- | --- |
 | macOS / iOS | 透明 `WKWebView`，封装成 SwiftUI 视图 | 系统 WebKit，非持久数据存储 |
 | Android | Compose `AndroidView` 中的透明 `WebView` | 系统 Android System WebView |
-| Windows / WinUI 3 | `WebView2` 控件 | Microsoft Edge WebView2 Runtime |
-| Windows / XAML Islands | WebView2 Win32 呈现器跟随 XAML 占位区域 | 同上；原生子窗口有 HWND airspace 限制 |
+| Windows（WinUI 3 与 XAML Islands） | WebView2 Win32 呈现器（子窗口）跟随 XAML 占位区域 | Microsoft Edge WebView2 Runtime；原生子窗口有 HWND airspace 限制 |
 | Linux / GTK 4 | WebKitGTK 6 `WebView` | 使用 `Svg` 才启用 `bern-gtk/svg`；开发包 `libwebkitgtk-6.0-dev`，Debian 运行依赖 `libwebkitgtk-6.0-4` |
 | Web | 透明、独立源的 sandbox iframe | 宿主浏览器 |
 
@@ -48,7 +47,7 @@ Svg(
 
 SVG 是打包的、自包含的应用资源：图片／字体请嵌入为 data URI，样式和脚本放在文件内。文档不暴露 Bern 引擎、原生命令或宿主 DOM；CSP 限制外部子资源和网络请求，运行时阻止链接点击，原生宿主限制导航和弹窗。Web 的 iframe 使用独立源的 `sandbox="allow-scripts"`，但这不能禁止脚本导航其自身文档，因此只接受应用自己提供的 SVG，不作为不可信脚本的通用沙箱。
 
-Android、Windows 和 Linux 需要表中对应的 WebView 运行环境。当前不提供运行环境缺失时的静态图片回退；Linux 的 WebKitGTK 是启用 `svg` 特性后的动态链接依赖，需要随系统安装。XAML Islands 的子 HWND 不支持任意祖先裁切或与其他 XAML 图层交错。
+Android、Windows 和 Linux 需要表中对应的 WebView 运行环境。当前不提供运行环境缺失时的静态图片回退；Linux 的 WebKitGTK 是启用 `svg` 特性后的动态链接依赖，需要随系统安装。WebKitGTK 的网页进程沙箱（bwrap）需要建立用户命名空间：Ubuntu 24.04 起默认只允许带 AppArmor 配置的程序这样做，没有配置时 WebKitGTK 中止整个应用。用到 `Svg` 时，Bern 的 `.deb` 附带这份配置（`/etc/apparmor.d/<bundle_id>`，与 Ubuntu 为 epiphany 等 WebKitGTK 应用提供的相同：不另加限制，只允许 `userns`），并在 AppArmor 启用时安装后立即载入；`.tar.gz` 与开发构建需要手动添加，见 [Linux GTK 实现记录](Linux-GTK.md)“打包”。Windows 两种前端都用 WebView2 的 Win32 呈现器：WinUI 3 的 `WebView2` 控件在透明页面下面垫一层主题底色（浅色主题下是白色，微软文档也写明它不支持透明背景），所以不用它。呈现器是窗口之上的子 HWND，按占位区域在布局后逐帧跟随位置与缩放（直到半秒不动），按外层滚动视图裁剪；它不随祖先的其他裁剪、透明度变化，也总在其他 XAML 图层（如浮层菜单）之上。WebView2 的缓存在用户临时目录（`BernSvgWebView2`），不在可执行文件旁边。
 
 ## 验证
 
@@ -70,3 +69,7 @@ cd examples/svg-animation
 - 一个真实应用的 macOS 和 Web 整包构建通过，示例的 macOS、iOS 模拟器包、Android APK 和 Web 构建通过。iOS 与 Android 本轮未运行设备上的交互验收；Windows 与 Linux 未做原生编译或设备验收。
 - 该应用在 macOS 的引导与关于页透明 Logo 显示正确，并实测双击动作。Web 实测 130／200 尺寸引导、104 尺寸关于页、入场以及眨眼／摸头／坏笑动作；退出引导后 iframe 数量归零。
 - Web 示例实测暂停后旋转矩阵跨两次采样保持不变，暂停中重播回到单位矩阵；切换倍速并恢复后继续运动，没有控制台错误。倍率和 SMIL 时钟计算由 Node 测试覆盖。
+
+2026-10-18 补充（Linux）：同一真实应用在 Ubuntu 24.04 虚拟机上原生构建通过（GTK 运行时启用 `svg`；虚拟机只有 WebKitGTK 6 运行库，构建时用手写的 pkg-config 文件链接）。修正了 GTK 呈现器中 `settings()` 在 `WidgetExt` 与 `WebViewExt` 间的歧义调用（此前从未在 Linux 编译）。经 Broadway 实测引导页的 200 尺寸 Logo 居中显示在格纹插画上；虚拟机限制非特权用户命名空间，需以 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` 运行，否则应用在启动时中止。同日为 `.deb` 加入 AppArmor 配置：`examples/svg-animation` 的包含配置与维护脚本，配置在虚拟机的 AppArmor 4.0 上解析通过；在系统自带、形式相同的配置下，同一程序的 WebKitGTK 沙箱建立成功并正常显示 SVG。载入这份配置本身需要 root，未实测安装。双击等交互与暂停、倍速未实测。
+
+2026-10-19 补充（Windows）：同一真实应用在 Windows 11 的 PC 上原生构建通过。修正了 Windows 呈现器此前未编译过的问题：运行时没有放进 `B` 命名空间（`Len`、`BindLen` 等找不到）；WinUI 3 一侧只放行地址为 `about:blank` 的导航，`NavigateToString` 的导航被拦下，文档没有载入（显示为白块）；改用 Win32 呈现器后背景才透明。引导页 200 尺寸的 Logo 在 WinUI 3 与 XAML Islands 下都透明地居中显示在格纹插画上（应用自己的窗口快照）；弹出动画中的位置偏差由逐帧跟随修正。双击等交互、暂停与倍速、关于页（滚动视图中的裁剪）未实测。

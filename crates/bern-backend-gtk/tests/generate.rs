@@ -268,7 +268,7 @@ fn planner_and_gallery_build_for_gtk() {
         "reveal: true",
         "appearance: Some(\"dark\")",
         "b::Inspector(p, c, b::InspectorProps",
-        "b::Rail(p, c, b::RailProps { vertical: false, anchor: Some(\"start\") }",
+        "b::Rail(p, c, b::RailProps { vertical: false, anchor: Some(\"start\"), overhang: None }",
         "b::Place(p, c, b::PlaceProps { at: Some(b::Num::Bound(",
         "b::ScrollView(p, c, b::ScrollProps { axis: Some(\"horizontal\"), snap: Some(\"center\")",
         "b::PopoverButton(p, c,",
@@ -328,4 +328,490 @@ fn style_effects_gtk_cannot_show_fail_the_check() {
             .any(|error| error.message.contains("cannot show")),
         "{errors:?}"
     );
+}
+
+/// The showcase with a `TabAccessory` in its first `Tabs`, shown while a
+/// literal holds.
+fn add_tab_accessory(app: &mut bern_ir::Application) {
+    use bern_ir::{Element, Expr, ExprKind, Node, Prop, SourceLocation};
+    fn into(node: &mut Node) -> bool {
+        match node {
+            Node::Element(element) if element.kind == "Tabs" => {
+                element.children.push(Node::Element(Element {
+                    kind: "TabAccessory".into(),
+                    id: None,
+                    path: "test.accessory".into(),
+                    props: [(
+                        "shown".into(),
+                        Prop::Expr {
+                            expr: Expr {
+                                ty: bern_protocol::Type::Bool,
+                                kind: ExprKind::Literal {
+                                    value: bern_protocol::Value::Bool(true),
+                                },
+                            },
+                        },
+                    )]
+                    .into(),
+                    template: None,
+                    children: vec![Node::Element(Element {
+                        kind: "Spacer".into(),
+                        id: None,
+                        path: "test.accessory.0".into(),
+                        props: Default::default(),
+                        template: None,
+                        children: vec![],
+                        action: None,
+                        source: SourceLocation {
+                            file: "tabs.rs".into(),
+                            line: 1,
+                            column: 1,
+                        },
+                    })],
+                    action: None,
+                    source: SourceLocation {
+                        file: "tabs.rs".into(),
+                        line: 1,
+                        column: 1,
+                    },
+                }));
+                true
+            }
+            Node::Element(element) => element.children.iter_mut().any(into),
+            Node::If(node) => {
+                node.branches
+                    .iter_mut()
+                    .any(|(_, body)| body.iter_mut().any(into))
+                    || node.otherwise.iter_mut().any(into)
+            }
+            _ => false,
+        }
+    }
+    assert!(
+        app.components
+            .iter_mut()
+            .any(|component| into(&mut component.body))
+    );
+}
+
+#[test]
+fn tab_accessory_slides_up_under_the_pages() {
+    let (config, mut compiled) = showcase();
+    add_tab_accessory(&mut compiled.app);
+    let root = workspace();
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/gtk-tab-accessory"),
+        target: linux_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = GtkLinux.generate(&compiled.app, &context).unwrap();
+    let source = files
+        .iter()
+        .filter(|f| f.path.extension().is_some_and(|e| e == "rs"))
+        .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+        .collect::<String>();
+    assert!(
+        source.contains("Some(b::TabAccessory { shown: Some(b::get(|c| "),
+        "{source}"
+    );
+    // Type-check it against the runtime where GTK is installed.
+    let gtk = Command::new("pkg-config")
+        .args(["--exists", "gtk4 >= 4.14", "libadwaita-1 >= 1.5"])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !gtk {
+        eprintln!("GTK 4.14 and libadwaita 1.5 not installed; skipping the type check");
+        return;
+    }
+    let output = &context.output_dir;
+    let _ = std::fs::remove_dir_all(output);
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let result = Command::new("cargo")
+        .arg("check")
+        .arg("--manifest-path")
+        .arg(output.join("app/Cargo.toml"))
+        .arg("--target-dir")
+        .arg(root.join("target/bern-glue-linux"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "rustc rejected the generated application:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+/// An element of a test declaration.
+fn node(
+    kind: &str,
+    props: Vec<(&str, bern_ir::Prop)>,
+    children: Vec<bern_ir::Node>,
+) -> bern_ir::Node {
+    bern_ir::Node::Element(bern_ir::Element {
+        kind: kind.into(),
+        id: matches!(kind, "Menu" | "SearchItem" | "Button")
+            .then(|| format!("test_{}", kind.to_lowercase())),
+        path: format!("test.{kind}"),
+        props: props
+            .into_iter()
+            .map(|(name, prop)| (name.to_string(), prop))
+            .collect(),
+        template: None,
+        children,
+        action: None,
+        source: bern_ir::SourceLocation {
+            file: "features.rs".into(),
+            line: 1,
+            column: 1,
+        },
+    })
+}
+
+fn number(value: f64) -> bern_ir::Prop {
+    bern_ir::Prop::Number { value }
+}
+
+fn word(value: &str) -> bern_ir::Prop {
+    bern_ir::Prop::Keyword {
+        value: value.into(),
+    }
+}
+
+fn words(value: &str) -> bern_ir::Prop {
+    bern_ir::Prop::Text {
+        text: bern_ir::Text::Dynamic {
+            expr: bern_ir::Expr {
+                ty: bern_protocol::Type::Text,
+                kind: bern_ir::ExprKind::Literal {
+                    value: bern_protocol::Value::Text(value.into()),
+                },
+            },
+        },
+    }
+}
+
+fn icon(name: &str) -> bern_ir::Prop {
+    bern_ir::Prop::Icon { name: name.into() }
+}
+
+/// The showcase with a scene, an accordion, wrapping rows, a grid of
+/// cells, a modal, a form's layout, icon-only labels and menus, capsule
+/// controls and a search item at the end of its first component.
+fn add_layout_features(app: &mut Application) {
+    let text = || {
+        node(
+            "Text",
+            vec![
+                ("content", words("Text")),
+                ("lines", number(2.0)),
+                ("font_size", number(12.0)),
+                ("line_height", number(16.0)),
+            ],
+            vec![],
+        )
+    };
+    let features = node(
+        "Column",
+        vec![("padding_x", number(12.0)), ("padding_y", number(4.0))],
+        vec![
+            node(
+                "ScaleBox",
+                vec![("width", number(400.0)), ("height", number(300.0))],
+                vec![node(
+                    "Positioned",
+                    vec![
+                        ("x", number(10.0)),
+                        ("y", number(20.0)),
+                        ("width", number(100.0)),
+                        ("height", number(40.0)),
+                        ("animate", word("smooth")),
+                    ],
+                    vec![node(
+                        "Marquee",
+                        vec![("duration", number(8.0)), ("phase", number(0.2))],
+                        vec![text()],
+                    )],
+                )],
+            ),
+            node(
+                "Accordion",
+                vec![
+                    ("count", number(3.0)),
+                    ("selected", number(1.0)),
+                    ("collapsed_width", number(40.0)),
+                    ("height", number(120.0)),
+                    ("corner", number(12.0)),
+                    ("animate", word("bouncy")),
+                ],
+                vec![text(), text(), text()],
+            ),
+            node(
+                "Flow",
+                vec![("gap", number(4.0))],
+                vec![node(
+                    "Label",
+                    vec![
+                        ("title", words("Star")),
+                        ("icon", icon("star")),
+                        ("display", word("icon")),
+                    ],
+                    vec![],
+                )],
+            ),
+            node(
+                "Grid",
+                vec![
+                    ("min_width", number(80.0)),
+                    ("row_gap", number(6.0)),
+                    ("cell_ratio", number(0.667)),
+                    ("cell_extra", number(20.0)),
+                ],
+                vec![node(
+                    "Image",
+                    vec![
+                        (
+                            "source",
+                            bern_ir::Prop::Resource {
+                                name: "images/bern.png".into(),
+                            },
+                        ),
+                        ("corner", number(8.0)),
+                        ("rendering", word("template")),
+                        ("aspect", number(1.5)),
+                    ],
+                    vec![],
+                )],
+            ),
+            node(
+                "Row",
+                vec![("align", word("baseline"))],
+                vec![
+                    text(),
+                    node("Spacer", vec![], vec![]),
+                    node(
+                        "Menu",
+                        vec![
+                            ("label", words("More")),
+                            ("icon", icon("ellipsis")),
+                            ("style", word("icon")),
+                            ("shape", word("capsule")),
+                            ("height", number(30.0)),
+                        ],
+                        vec![],
+                    ),
+                    node(
+                        "ControlGroup",
+                        vec![("height", number(32.0))],
+                        vec![node(
+                            "SearchItem",
+                            vec![
+                                ("label", words("Open")),
+                                ("icon", icon("folder")),
+                                ("detail", words("File")),
+                                ("hint", words("⌘O")),
+                            ],
+                            vec![],
+                        )],
+                    ),
+                ],
+            ),
+            node(
+                "Form",
+                vec![("gap", number(12.0)), ("row_height", number(44.0))],
+                vec![node(
+                    "Section",
+                    vec![("style", word("plain")), ("padding_x", number(8.0))],
+                    vec![text()],
+                )],
+            ),
+            node(
+                "Modal",
+                vec![
+                    ("width", number(300.0)),
+                    ("height", number(200.0)),
+                    ("cover", word("compact")),
+                ],
+                vec![text()],
+            ),
+        ],
+    );
+    let component = app
+        .components
+        .iter_mut()
+        .find(|component| {
+            matches!(&component.body, bern_ir::Node::Element(body) if body.kind == "Form")
+        })
+        .expect("a component whose body is a form");
+    let bern_ir::Node::Element(body) = &mut component.body else {
+        unreachable!()
+    };
+    body.children.push(features);
+}
+
+/// The layout features of the scaled scenes, accordions, flows, cell
+/// grids, modals and form layouts generate the runtime's elements, and
+/// the application type-checks against the runtime where GTK is installed.
+#[test]
+fn layout_features_generate_for_gtk() {
+    let (config, mut compiled) = showcase();
+    add_layout_features(&mut compiled.app);
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(
+        problems.iter().all(|problem| !problem.is_error()),
+        "{problems:?}"
+    );
+    let ui = bern_backend_gtk::Generator::new(&compiled.app).generate(0, "x");
+    assert!(!ui.contains("unsupported"), "{ui}");
+    for expected in [
+        "b::Stack(p, c, b::StackProps { axis: \"column\", gap: None, padding: b::Padding { all: None, x: Some(b::Num::Fixed(12.0)), y: Some(b::Num::Fixed(4.0)) }",
+        "b::ScaleBox(p, c, b::ScaleBoxProps { width: Some(b::Num::Fixed(400.0)), height: Some(b::Num::Fixed(300.0)) }",
+        "b::Positioned(p, c, b::PositionedProps { x: Some(b::Num::Fixed(10.0)), y: Some(b::Num::Fixed(20.0)), width: Some(b::Num::Fixed(100.0)), height: Some(b::Num::Fixed(40.0)), animate: Some(M_SMOOTH) }",
+        "b::Marquee(p, c, b::MarqueeProps { duration: Some(b::Num::Fixed(8.0)), phase: 0.2, paused: None, opacity: None }",
+        "lines: Some(2.0), font_size: Some(b::Num::Fixed(12.0)), line_height: Some(b::Num::Fixed(16.0))",
+        "b::Accordion(p, c, b::AccordionProps { count: Some(b::Num::Fixed(3.0)), selected: Some(b::Num::Fixed(1.0))",
+        "b::Flow(p, c, b::FlowProps { gap: Some(b::Num::Fixed(4.0)) }",
+        "icon_only: true",
+        "cells: Some((0.667, b::Num::Fixed(20.0)))",
+        "corner: Some(b::Num::Fixed(8.0)), template: true, aspect: Some(1.5)",
+        "align: Some(\"baseline\")",
+        "icon_only: true, shape: b::Shape { capsule: true, height: Some(b::Num::Fixed(30.0)) }",
+        "b::ControlGroup(p, c, b::ControlGroupProps { label: None, height: Some(b::Num::Fixed(32.0)) }",
+        "b::SearchItem(p, c, b::SearchItemProps { id: \"test_searchitem\"",
+        "b::Form(p, c, b::FormProps { title: None, gap: Some(12.0), row_height: Some(44.0)",
+        "plain: true, padding_x: Some(8.0)",
+        "b::Modal(p, c, b::ModalProps { width: Some(b::Num::Fixed(300.0)), height: Some(b::Num::Fixed(200.0)), cover: true, decor: None }",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`");
+    }
+    // Type-check it against the runtime where GTK is installed.
+    let gtk = Command::new("pkg-config")
+        .args(["--exists", "gtk4 >= 4.14", "libadwaita-1 >= 1.5"])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !gtk {
+        eprintln!("GTK 4.14 and libadwaita 1.5 not installed; skipping the type check");
+        return;
+    }
+    let root = workspace();
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/gtk-layout-features"),
+        target: linux_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = GtkLinux.generate(&compiled.app, &context).unwrap();
+    let output = &context.output_dir;
+    let _ = std::fs::remove_dir_all(output);
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let result = Command::new("cargo")
+        .arg("check")
+        .arg("--manifest-path")
+        .arg(output.join("app/Cargo.toml"))
+        .arg("--target-dir")
+        .arg(root.join("target/bern-glue-linux"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "rustc rejected the generated application:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}
+
+/// The first bytes of a PNG of `size` × `size` pixels.
+fn png(size: u32) -> Vec<u8> {
+    let mut bytes = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    bytes.extend_from_slice(&size.to_be_bytes());
+    bytes.extend_from_slice(&size.to_be_bytes());
+    bytes
+}
+
+#[test]
+fn a_declared_icon_theme_ships_under_the_application_name() {
+    let root = workspace();
+    let (config, mut compiled) = showcase();
+    let theme = root.join("target/bern-test/gtk-icon-theme");
+    let _ = std::fs::remove_dir_all(&theme);
+    for (path, contents) in [
+        ("48x48/apps/art.png", png(48)),
+        ("256x256/apps/art.png", png(256)),
+        ("scalable/apps/art.svg", b"<svg/>".to_vec()),
+        ("symbolic/apps/art-symbolic.svg", b"<svg/>".to_vec()),
+    ] {
+        let path = theme.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+    // An absolute path stays itself when joined to the project directory.
+    compiled
+        .app
+        .app
+        .platform_icons
+        .insert("linux".into(), theme.display().to_string());
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/gtk-icon"),
+        target: linux_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = GtkLinux.generate(&compiled.app, &context).unwrap();
+    let file = |path: &str| {
+        files
+            .iter()
+            .find(|file| file.path == Path::new("Showcase").join(path))
+            .map(|file| file.contents.clone())
+            .unwrap_or_else(|| panic!("no generated {path}"))
+    };
+    // The largest PNG beside the executable; every icon in the theme,
+    // named after the application.
+    assert_eq!(file("icons/dev.bern.showcase.png"), png(256));
+    assert_eq!(
+        file("icons/hicolor/48x48/apps/dev.bern.showcase.png"),
+        png(48)
+    );
+    assert_eq!(
+        file("icons/hicolor/scalable/apps/dev.bern.showcase.svg"),
+        b"<svg/>"
+    );
+    assert_eq!(
+        file("icons/hicolor/symbolic/apps/dev.bern.showcase-symbolic.svg"),
+        b"<svg/>"
+    );
+    let _ = std::fs::remove_dir_all(&theme);
 }

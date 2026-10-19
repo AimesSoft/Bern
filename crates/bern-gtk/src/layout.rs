@@ -22,11 +22,91 @@ fn translate(x: f32, y: f32) -> Option<gtk::gsk::Transform> {
     Some(gtk::gsk::Transform::new().translate(&gtk::graphene::Point::new(x, y)))
 }
 
+/// Where the children of a container were laid out, and the springs of
+/// their way to new places: a child the layout moves slides there from
+/// where it was, carrying on from where a slide in progress has it.
+#[derive(Default)]
+pub(crate) struct Slides {
+    places: RefCell<Vec<SlidePlace>>,
+}
+
+struct SlidePlace {
+    widget: glib::WeakRef<gtk::Widget>,
+    at: (f64, f64),
+    moving: Option<(crate::motion::Spring, crate::motion::Spring)>,
+}
+
+impl Slides {
+    /// Forget children that left `container`.
+    pub(crate) fn forget_gone(&self, container: &gtk::Widget) {
+        self.places.borrow_mut().retain(|place| {
+            place
+                .widget
+                .upgrade()
+                .is_some_and(|widget| widget.parent().as_ref() == Some(container))
+        });
+    }
+
+    /// The offset of `child`, laid out now at `now`, on its way there.
+    pub(crate) fn offset(
+        &self,
+        container: &gtk::Widget,
+        child: &gtk::Widget,
+        now: (f64, f64),
+        curve: crate::motion::Curve,
+    ) -> (f64, f64) {
+        let mut places = self.places.borrow_mut();
+        let index = places
+            .iter()
+            .position(|place| place.widget.upgrade().as_ref() == Some(child));
+        let Some(index) = index else {
+            places.push(SlidePlace {
+                widget: child.downgrade(),
+                at: now,
+                moving: None,
+            });
+            return (0.0, 0.0);
+        };
+        let place = &mut places[index];
+        let (dx, dy) = (place.at.0 - now.0, place.at.1 - now.1);
+        place.at = now;
+        if (dx.abs() > 0.5 || dy.abs() > 0.5) && !crate::motion::reduced() {
+            let weak = container.downgrade();
+            let relayout = move |_| {
+                if let Some(container) = weak.upgrade() {
+                    container.queue_allocate();
+                }
+            };
+            let (x, y) = place.moving.get_or_insert_with(|| {
+                (
+                    crate::motion::Spring::new(0.0, container, relayout.clone()),
+                    crate::motion::Spring::new(0.0, container, relayout),
+                )
+            });
+            x.set_quietly(x.value() + dx);
+            y.set_quietly(y.value() + dy);
+            x.to(0.0, Some(curve), None);
+            y.to(0.0, Some(curve), None);
+        }
+        place
+            .moving
+            .as_ref()
+            .map(|(x, y)| (x.value(), y.value()))
+            .unwrap_or((0.0, 0.0))
+    }
+}
+
 mod layers {
     use super::*;
 
     #[derive(Default)]
-    pub struct Layers;
+    pub struct Layers {
+        /// With `reflow`, the spring layers slide to new places with.
+        pub curve: Cell<Option<crate::motion::Curve>>,
+        pub(crate) slides: Slides,
+        /// Where layers that do not fill the stack stand in it.
+        pub alignment: Cell<Option<(gtk::Align, gtk::Align)>>,
+    }
 
     #[glib::object_subclass]
     impl ObjectSubclass for Layers {
@@ -58,11 +138,25 @@ mod layers {
                 minimum = minimum.max(child_minimum);
                 natural = natural.max(child_natural);
             }
-            (minimum, natural, -1, -1)
+            declared(
+                self.obj().upcast_ref(),
+                orientation,
+                (minimum, natural, -1, -1),
+            )
         }
 
+        /// A stack fills where a layer fills, except a rail: it covers the
+        /// size the other layers give the stack and makes it no larger. A
+        /// stack of rails alone fills along them.
         fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
-            for child in children(self.obj().upcast_ref()) {
+            let all = children(self.obj().upcast_ref());
+            let content: Vec<&gtk::Widget> = all.iter().filter(|child| !is_rail(child)).collect();
+            let counted: Vec<&gtk::Widget> = if content.is_empty() {
+                all.iter().collect()
+            } else {
+                content
+            };
+            for child in counted {
                 *hexpand |= child.compute_expand(gtk::Orientation::Horizontal);
                 *vexpand |= child.compute_expand(gtk::Orientation::Vertical);
             }
@@ -70,27 +164,70 @@ mod layers {
 
         fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
             let widget = self.obj();
-            // A stack is as large as its largest layer; given more room than
-            // that, it keeps its size at the leading edge unless a layer
-            // fills it.
+            // A stack is as large as its largest layer, or its declared
+            // size; given more room than that, it keeps its size at the
+            // leading edge unless a layer fills it.
             let (_, natural_width, _, _) = self.measure(gtk::Orientation::Horizontal, -1);
             let area_width = if widget.compute_expand(gtk::Orientation::Horizontal) {
                 width
             } else {
-                width.min(natural_width.max(0))
+                width.min(natural_width.max(widget.width_request()).max(0))
             };
             let (_, natural_height, _, _) = self.measure(gtk::Orientation::Vertical, area_width);
             let area_height = if widget.compute_expand(gtk::Orientation::Vertical) {
                 height
             } else {
-                height.min(natural_height.max(0))
+                height.min(natural_height.max(widget.height_request()).max(0))
             };
+            let curve = self.curve.get();
+            if curve.is_some() {
+                self.slides.forget_gone(widget.upcast_ref());
+            }
+            let (halign, valign) = self
+                .alignment
+                .get()
+                .unwrap_or((gtk::Align::Center, gtk::Align::Center));
             for child in children(widget.upcast_ref()) {
                 if !child.should_layout() {
                     continue;
                 }
+                // A layer that fills in a direction, such as a drawing
+                // without a size, fills the stack that way. A rail or a
+                // placed element takes the whole size the other layers give
+                // the stack, which it does not make larger: across its axis
+                // a rail counts only children with a size of their own.
+                let whole = is_rail(&child) || crate::scene::is_positioned(&child);
+                let fills = |orientation| whole || child.compute_expand(orientation);
+                let along =
+                    |fill: bool, align: gtk::Align| if fill { gtk::Align::Fill } else { align };
+                let h = along(fills(gtk::Orientation::Horizontal), halign);
+                let v = along(fills(gtk::Orientation::Vertical), valign);
+                if child.halign() != h {
+                    child.set_halign(h);
+                }
+                if child.valign() != v {
+                    child.set_valign(v);
+                }
                 child.measure(gtk::Orientation::Horizontal, -1);
                 child.allocate(area_width, area_height, -1, None);
+                // A layer the layout moved slides from where it was.
+                if let Some(curve) = curve
+                    && let Some(point) =
+                        child.compute_point(&*widget, &gtk::graphene::Point::zero())
+                {
+                    let (x, y) = (f64::from(point.x()), f64::from(point.y()));
+                    let (dx, dy) = self
+                        .slides
+                        .offset(widget.upcast_ref(), &child, (x, y), curve);
+                    if dx != 0.0 || dy != 0.0 {
+                        child.allocate(
+                            area_width,
+                            area_height,
+                            -1,
+                            translate(dx as f32, dy as f32),
+                        );
+                    }
+                }
             }
         }
     }
@@ -107,6 +244,18 @@ glib::wrapper! {
 impl Layers {
     pub fn new() -> Self {
         glib::Object::new()
+    }
+
+    /// Layers the layout moves slide to their new places with `curve`.
+    pub(crate) fn set_reflow(&self, curve: Option<crate::motion::Curve>) {
+        self.imp().curve.set(curve);
+    }
+
+    /// Where layers that do not fill the stack stand in it.
+    pub(crate) fn set_alignment(&self, halign: gtk::Align, valign: gtk::Align) {
+        if self.imp().alignment.replace(Some((halign, valign))) != Some((halign, valign)) {
+            self.queue_allocate();
+        }
     }
 
     pub(crate) fn insert_after(&self, widget: &gtk::Widget, previous: Option<&gtk::Widget>) {
@@ -147,6 +296,8 @@ mod rail {
         /// The point of an `at` child on its fraction: 0 its start, 0.5 its
         /// center, 1 its end.
         pub anchor: Cell<f64>,
+        /// How far the scale runs past each end.
+        pub overhang: Cell<f64>,
         pub placements: RefCell<Vec<(glib::WeakRef<gtk::Widget>, Rc<Placement>)>>,
     }
 
@@ -213,6 +364,9 @@ mod rail {
             } else {
                 (width as f64, height_or(height))
             };
+            // The scale: the rail's length and the overhang past both ends.
+            let past = self.overhang.get();
+            let scale = length + 2.0 * past;
             let (along, across) = if vertical {
                 (gtk::Orientation::Vertical, gtk::Orientation::Horizontal)
             } else {
@@ -243,12 +397,12 @@ mod rail {
                     Some(placement) => match placement.at.get() {
                         Some(at) => {
                             let size = natural_along.max(0) as f64;
-                            (fraction(at) * length - self.anchor.get() * size, size)
+                            (fraction(at) * scale - past - self.anchor.get() * size, size)
                         }
                         None => {
                             let (a, b) =
                                 (fraction(placement.from.get()), fraction(placement.to.get()));
-                            (a.min(b) * length, (b - a).abs() * length)
+                            (a.min(b) * scale - past, (b - a).abs() * scale)
                         }
                     },
                     None => (0.0, length),
@@ -304,6 +458,13 @@ impl Rail {
 
     pub(crate) fn vertical(&self) -> bool {
         self.imp().vertical.get()
+    }
+
+    /// How far the scale runs past each end.
+    pub(crate) fn set_overhang(&self, overhang: f64) {
+        if self.imp().overhang.replace(overhang) != overhang {
+            self.queue_allocate();
+        }
     }
 
     pub(crate) fn insert_after(&self, widget: &gtk::Widget, previous: Option<&gtk::Widget>) {
@@ -482,7 +643,11 @@ mod reflow {
         }
 
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
-            self.layout().measure(&*self.obj(), orientation, for_size)
+            declared(
+                self.obj().upcast_ref(),
+                orientation,
+                self.layout().measure(&*self.obj(), orientation, for_size),
+            )
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
@@ -613,5 +778,278 @@ impl ReflowBox {
         if widget.parent().as_ref() == Some(self.upcast_ref()) {
             widget.unparent();
         }
+    }
+}
+
+mod offered {
+    use super::*;
+
+    /// What learns the width offered.
+    pub type Changed = Rc<dyn Fn(i32)>;
+
+    #[derive(Default)]
+    pub struct Offered {
+        pub width: Cell<i32>,
+        pub changed: RefCell<Option<Changed>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Offered {
+        const NAME: &'static str = "BernOffered";
+        type Type = super::Offered;
+        type ParentType = gtk::Widget;
+    }
+
+    impl ObjectImpl for Offered {
+        fn dispose(&self) {
+            while let Some(child) = self.obj().first_child() {
+                child.unparent();
+            }
+        }
+    }
+
+    impl WidgetImpl for Offered {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::HeightForWidth
+        }
+
+        /// Across, it asks for nothing: the width it gets is what its
+        /// container offers, not what the layout it shows needs.
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let Some(child) = self
+                .obj()
+                .first_child()
+                .filter(|child| child.should_layout())
+            else {
+                return (0, 0, -1, -1);
+            };
+            match orientation {
+                gtk::Orientation::Horizontal => {
+                    let (_, natural, _, _) = child.measure(orientation, -1);
+                    (0, natural, -1, -1)
+                }
+                _ => {
+                    let (least, _, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
+                    let width = if for_size < 0 {
+                        -1
+                    } else {
+                        for_size.max(least)
+                    };
+                    let (minimum, natural, _, _) = child.measure(orientation, width);
+                    (minimum, natural, -1, -1)
+                }
+            }
+        }
+
+        fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
+            *hexpand = true;
+            if let Some(child) = self.obj().first_child() {
+                *vexpand = child.compute_expand(gtk::Orientation::Vertical);
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = self.obj().first_child()
+                && child.should_layout()
+            {
+                // A layout wider than the room it gets overflows, clipped,
+                // until the width chooses another.
+                let (least, _, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
+                child.allocate(width.max(least), height, baseline, None);
+            }
+            if width > 0 && self.width.replace(width) != width {
+                let changed = self.changed.borrow().clone();
+                if let Some(changed) = changed {
+                    // After this layout pass, which the change may redo.
+                    glib::idle_add_local_once(move || changed(width));
+                }
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    /// One child, laid out in the width its container offers: it tells
+    /// that width, which layouts choose by, and never asks for the width
+    /// its child needs.
+    pub struct Offered(ObjectSubclass<offered::Offered>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl Offered {
+    pub fn new(child: &impl IsA<gtk::Widget>, changed: impl Fn(i32) + 'static) -> Self {
+        let offered: Self = glib::Object::new();
+        offered.set_overflow(gtk::Overflow::Hidden);
+        child.as_ref().set_parent(&offered);
+        *offered.imp().changed.borrow_mut() = Some(Rc::new(changed));
+        offered
+    }
+}
+
+/// A measurement of a container with a declared side: it never asks for
+/// more than that side, though what it holds may need more.
+pub(crate) fn declared(
+    widget: &gtk::Widget,
+    orientation: gtk::Orientation,
+    (minimum, natural, minimum_baseline, natural_baseline): (i32, i32, i32, i32),
+) -> (i32, i32, i32, i32) {
+    let side = match orientation {
+        gtk::Orientation::Horizontal => widget.width_request(),
+        _ => widget.height_request(),
+    };
+    if side < 0 {
+        return (minimum, natural, minimum_baseline, natural_baseline);
+    }
+    (
+        minimum,
+        natural.min(side).max(minimum),
+        minimum_baseline,
+        natural_baseline,
+    )
+}
+
+mod sized {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct Sized;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Sized {
+        const NAME: &'static str = "BernSized";
+        type Type = super::Sized;
+        type ParentType = gtk::Widget;
+    }
+
+    impl ObjectImpl for Sized {
+        fn dispose(&self) {
+            while let Some(child) = self.obj().first_child() {
+                child.unparent();
+            }
+        }
+    }
+
+    impl WidgetImpl for Sized {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            self.obj()
+                .first_child()
+                .map(|child| child.request_mode())
+                .unwrap_or(gtk::SizeRequestMode::ConstantSize)
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            let measured = match self.obj().first_child() {
+                Some(child) if child.should_layout() => child.measure(orientation, for_size),
+                _ => (0, 0, -1, -1),
+            };
+            declared(self.obj().upcast_ref(), orientation, measured)
+        }
+
+        fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
+            if let Some(child) = self.obj().first_child() {
+                *hexpand = child.compute_expand(gtk::Orientation::Horizontal);
+                *vexpand = child.compute_expand(gtk::Orientation::Vertical);
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = self.obj().first_child()
+                && child.should_layout()
+            {
+                child.allocate(width, height, baseline, None);
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    /// One child at a declared width or height: what it asks for is that
+    /// side, not only the least it takes, whatever the child would like.
+    pub struct Sized(ObjectSubclass<sized::Sized>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl Sized {
+    pub fn wrap(child: &impl IsA<gtk::Widget>) -> Self {
+        let sized: Self = glib::Object::new();
+        child.as_ref().set_parent(&sized);
+        sized
+    }
+}
+
+mod words {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct Words;
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for Words {
+        const NAME: &'static str = "BernWords";
+        type Type = super::Words;
+        type ParentType = gtk::Widget;
+
+        fn class_init(class: &mut Self::Class) {
+            class.set_accessible_role(gtk::AccessibleRole::Generic);
+        }
+    }
+
+    impl ObjectImpl for Words {
+        fn dispose(&self) {
+            while let Some(child) = self.obj().first_child() {
+                child.unparent();
+            }
+        }
+    }
+
+    impl WidgetImpl for Words {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::HeightForWidth
+        }
+
+        /// The width text would like is that of its lines unwrapped,
+        /// whatever height a row beside it offers; it wraps only where
+        /// the width it gets is less.
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            match self.obj().first_child() {
+                Some(child) if child.should_layout() => match orientation {
+                    gtk::Orientation::Horizontal => child.measure(orientation, -1),
+                    _ => child.measure(orientation, for_size),
+                },
+                _ => (0, 0, -1, -1),
+            }
+        }
+
+        fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
+            if let Some(child) = self.obj().first_child() {
+                *hexpand = child.compute_expand(gtk::Orientation::Horizontal);
+                *vexpand = child.compute_expand(gtk::Orientation::Vertical);
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            if let Some(child) = self.obj().first_child()
+                && child.should_layout()
+            {
+                child.allocate(width, height, baseline, None);
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    /// Text that takes the width of its lines before it wraps.
+    pub struct Words(ObjectSubclass<words::Words>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl Words {
+    pub fn wrap(child: &impl IsA<gtk::Widget>) -> Self {
+        let words: Self = glib::Object::new();
+        child.as_ref().set_parent(&words);
+        words
     }
 }

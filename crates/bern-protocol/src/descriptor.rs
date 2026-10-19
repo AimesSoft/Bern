@@ -134,6 +134,14 @@ pub struct StateField {
     pub ty: Type,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
+    /// `#[content]`: text that is data, shown as it is (see
+    /// [`crate::FieldDef::content`]).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub content: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// The complete, versioned description of one application protocol:
@@ -413,6 +421,7 @@ mod tests {
             name: "position_ms".into(),
             ty: Type::Int,
             doc: String::new(),
+            content: false,
         });
         with_state.validate().unwrap();
         // Unknown field.

@@ -137,6 +137,110 @@ fn conditional_progress_rails_keep_the_posters_overlay_layout() {
 }
 
 #[test]
+fn rows_give_items_their_widths_and_sized_stacks_start_them() {
+    use bern_ir::{Element, Expr, ExprKind, IfNode, Node, Prop};
+    use bern_protocol::{Type, Value};
+    let (config, mut compiled) = showcase();
+    let element = |kind: &str, props, children| {
+        Node::Element(Element {
+            kind: kind.into(),
+            id: None,
+            path: format!("test.{kind}"),
+            props,
+            template: None,
+            children,
+            action: None,
+            source: SourceLocation {
+                file: "row.rs".into(),
+                line: 1,
+                column: 1,
+            },
+        })
+    };
+    let text = || {
+        element(
+            "Text",
+            [(
+                "content".into(),
+                Prop::Text {
+                    text: bern_ir::Text::Dynamic {
+                        expr: Expr {
+                            ty: Type::Text,
+                            kind: ExprKind::Literal {
+                                value: Value::Text("Tag".into()),
+                            },
+                        },
+                    },
+                },
+            )]
+            .into(),
+            vec![],
+        )
+    };
+    let spacer = || element("Spacer", Default::default(), vec![]);
+    // A spacer of the row inside a condition, and one of a column inside it.
+    let conditional = Node::If(IfNode {
+        branches: vec![(
+            Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Literal {
+                    value: Value::Bool(true),
+                },
+            },
+            vec![spacer()],
+        )],
+        otherwise: vec![],
+    });
+    let column = element(
+        "Column",
+        [("width".into(), Prop::Number { value: 58.0 })].into(),
+        vec![text(), spacer()],
+    );
+    let divider = element("Divider", Default::default(), vec![]);
+    compiled.app.components[0].body = element(
+        "Row",
+        [
+            ("gap".into(), Prop::Number { value: 10.0 }),
+            ("width".into(), Prop::Number { value: 224.0 }),
+        ]
+        .into(),
+        vec![text(), conditional, divider, column],
+    );
+    let output = workspace().join("target/bern-test/row-widths");
+    let context = context(&config, &compiled, "macos", &output);
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
+        .unwrap();
+    let source = String::from_utf8_lossy(&generated.contents);
+    assert!(
+        source.contains("BernRow(alignment: .center, spacing: 10.0) {"),
+        "{source}"
+    );
+    let start = source
+        .find("BernRow(alignment: .center, spacing: 10.0) {")
+        .unwrap();
+    let row = &source[start..start + source[start..].find(".frame(width: 224.0").unwrap()];
+    // Only the row's own spacer grows along it alone.
+    assert_eq!(
+        row.matches(".layoutValue(key: BernRowSpacer.self, value: true)")
+            .count(),
+        1,
+        "{row}"
+    );
+    assert!(row.contains("SwiftUI.HStack(spacing: 0) {"), "{row}");
+    assert!(
+        source.contains(".frame(width: 58.0, height: nil, alignment: .topLeading)"),
+        "{source}"
+    );
+    assert!(
+        source.contains(".frame(width: 224.0, height: nil, alignment: .leading)"),
+        "{source}"
+    );
+}
+
+#[test]
 fn showcase_generates_swift_that_type_checks() {
     let root = workspace();
     let (config, compiled) = showcase();
@@ -518,6 +622,12 @@ fn showcase_generates_ios_swift_that_type_checks() {
             "generated iOS Swift without style overrides uses `{forbidden}`"
         );
     }
+    typecheck_ios(&root, &output);
+}
+
+/// Type-check generated iOS Swift against the simulator SDK, when it is
+/// installed.
+fn typecheck_ios(root: &Path, output: &Path) {
     let Some(sdk) = Command::new("xcrun")
         .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
         .output()
@@ -578,8 +688,31 @@ pub mod demo {
 
     #[value]
     pub struct Entry {
+        #[content]
         pub name: String,
         pub dest: Dest,
+    }
+
+    #[value]
+    pub enum Size {
+        #[label(tr! { "en" => "small" })]
+        Small,
+        #[label(tr! { "en" => "large" })]
+        Large,
+    }
+
+    #[value]
+    pub enum Notice {
+        #[label(tr! { "en" => "Saved {name} on {day, date, EEE, MMM d}" })]
+        Saved {
+            #[content]
+            name: String,
+            day: CalendarDate,
+        },
+        #[label(tr! { "en" => "{n, plural, one {# {size} entry} other {# {size} entries}}" })]
+        Counted { n: i64, size: Size, weight: f64 },
+        #[label(tr! { "en" => "Idle" })]
+        Idle,
     }
 
     #[state]
@@ -588,6 +721,10 @@ pub mod demo {
         pub levels: Vec<i64>,
         pub mode: Dest,
         pub picked: Option<Dest>,
+        pub notice: Notice,
+        pub due: CalendarDate,
+        pub seconds: f64,
+        pub count: i64,
     }
 
     #[commands]
@@ -651,6 +788,8 @@ pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {
                                 Series(values: app.levels, kind: area)
                             }
                             Text(content: tr! { "en" => "Marked" }, mark: accent)
+                            Text(content: app.notice)
+                            Text(content: tr! { "en" => "{n, plural, =0 {none} one {# level} other {# levels}} by {day, date, MMMM d, y}, {t, duration, h:mm:ss} left"; n: app.count, day: app.due, t: app.seconds })
                             Toolbar {
                                 if draft.more {
                                     Button(id: add, label: tr! { "en" => "Add" }) => app.add(1)
@@ -922,6 +1061,9 @@ root = "app"
 
 [targets.macos]
 platform = "macos"
+
+[targets.ios]
+platform = "ios"
 "#,
     )
     .unwrap();
@@ -963,8 +1105,24 @@ platform = "macos"
     let shelf = &shelf[..shelf.find(".scrollIndicators").unwrap()];
     assert!(shelf.contains("SwiftUI.Group {") && shelf.contains("appear: BernAppear.fade, delay: 0.0)"), "{shelf}");
     assert!(generated.contains(".bernScrollEntrance(motion:"));
-    let errors = SwiftUiIos.check(&compiled.app, &context.target);
-    assert!(errors.iter().any(|e| e.message.contains("macOS Toolbar")));
+    // iOS shows the same palette: the system text field, a tap outside to
+    // close.
+    let ios_output = root.join("target/bern-test/swiftui-search-palette-ios");
+    let _ = std::fs::remove_dir_all(&ios_output);
+    let mut ios = crate::context(&config, &compiled, "ios", &ios_output);
+    ios.project_dir = dir.clone();
+    let problems = SwiftUiIos.check(&compiled.app, &ios.target);
+    assert!(problems.is_empty(), "{problems:?}");
+    for file in SwiftUiIos.generate(&compiled.app, &ios).unwrap() {
+        let path = ios_output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ios_generated =
+        std::fs::read_to_string(ios_output.join("Sources/BernGenerated.swift")).unwrap();
+    assert!(ios_generated.contains("BernSearchPaletteHost {"));
+    assert!(ios_generated.contains("BernSearchPalette(text:"));
+    typecheck_ios(&root, &ios_output);
     if !Command::new("xcrun")
         .arg("--find")
         .arg("swiftc")
@@ -1001,4 +1159,159 @@ platform = "macos"
         "swiftc rejected the generated code:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+/// The showcase with a `TabAccessory` in its first `Tabs`, shown while a
+/// literal holds.
+fn add_tab_accessory(app: &mut bern_ir::Application) {
+    use bern_ir::{Element, Expr, ExprKind, Node, Prop, SourceLocation};
+    fn into(node: &mut Node) -> bool {
+        match node {
+            Node::Element(element) if element.kind == "Tabs" => {
+                element.children.push(Node::Element(Element {
+                    kind: "TabAccessory".into(),
+                    id: None,
+                    path: "test.accessory".into(),
+                    props: [(
+                        "shown".into(),
+                        Prop::Expr {
+                            expr: Expr {
+                                ty: bern_protocol::Type::Bool,
+                                kind: ExprKind::Literal {
+                                    value: bern_protocol::Value::Bool(true),
+                                },
+                            },
+                        },
+                    )]
+                    .into(),
+                    template: None,
+                    children: vec![Node::Element(Element {
+                        kind: "Spacer".into(),
+                        id: None,
+                        path: "test.accessory.0".into(),
+                        props: Default::default(),
+                        template: None,
+                        children: vec![],
+                        action: None,
+                        source: SourceLocation { file: "tabs.rs".into(), line: 1, column: 1 },
+                    })],
+                    action: None,
+                    source: SourceLocation { file: "tabs.rs".into(), line: 1, column: 1 },
+                }));
+                true
+            }
+            Node::Element(element) => element.children.iter_mut().any(into),
+            Node::If(node) => {
+                node.branches.iter_mut().any(|(_, body)| body.iter_mut().any(into))
+                    || node.otherwise.iter_mut().any(into)
+            }
+            _ => false,
+        }
+    }
+    assert!(app.components.iter_mut().any(|component| into(&mut component.body)));
+}
+
+#[test]
+fn tab_accessory_is_the_tab_views_bottom_accessory() {
+    let (config, mut compiled) = showcase();
+    add_tab_accessory(&mut compiled.app);
+    for (platform, files) in [
+        ("ios", {
+            let output = workspace().join("target/bern-test/tab-accessory-ios");
+            let context = context(&config, &compiled, "ios", &output);
+            SwiftUiIos.generate(&compiled.app, &context).unwrap()
+        }),
+        ("macos", {
+            let output = workspace().join("target/bern-test/tab-accessory-macos");
+            let context = context(&config, &compiled, "macos", &output);
+            SwiftUiMacos.generate(&compiled.app, &context).unwrap()
+        }),
+    ] {
+        let source = files
+            .iter()
+            .filter(|f| f.path.extension().is_some_and(|e| e == "swift"))
+            .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+            .collect::<String>();
+        for expected in [
+            "let bernAccessory = SwiftUI.AnyView(SwiftUI.Group {",
+            "let bernAccessoryShown: Bool = true",
+            ".bernTabAccessoryInset(bernAccessoryShown, bernAccessory)",
+            ".bernTabAccessory(bernAccessoryShown, bernAccessory)",
+        ] {
+            assert!(source.contains(expected), "{platform}: {expected}");
+        }
+    }
+}
+
+#[test]
+fn declared_apple_icons_are_used_as_they_are() {
+    let root = workspace();
+    let (config, mut compiled) = showcase();
+    let art = root.join("target/bern-test/swiftui-icons");
+    let _ = std::fs::remove_dir_all(&art);
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+    png.extend_from_slice(&1024u32.to_be_bytes());
+    png.extend_from_slice(&1024u32.to_be_bytes());
+    let mut icns = b"icns".to_vec();
+    icns.extend_from_slice(&(16 + png.len() as u32).to_be_bytes());
+    icns.extend_from_slice(b"ic10");
+    icns.extend_from_slice(&(8 + png.len() as u32).to_be_bytes());
+    icns.extend_from_slice(&png);
+    let contents = r#"{"images":[{"filename":"Icon.png","idiom":"universal","platform":"ios","size":"1024x1024"},{"appearances":[{"appearance":"luminosity","value":"tinted"}],"filename":"Icon-tinted.png","idiom":"universal","platform":"ios","size":"1024x1024"}]}"#;
+    for (path, bytes) in [
+        ("App.icns", icns.clone()),
+        (
+            "AppIcon.appiconset/Contents.json",
+            contents.as_bytes().to_vec(),
+        ),
+        ("AppIcon.appiconset/Icon.png", png.clone()),
+        ("AppIcon.appiconset/Icon-tinted.png", png.clone()),
+    ] {
+        let path = art.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    // Absolute paths stay themselves when joined to the project directory.
+    let icons = &mut compiled.app.app.platform_icons;
+    icons.insert("macos".into(), art.join("App.icns").display().to_string());
+    icons.insert(
+        "ios".into(),
+        art.join("AppIcon.appiconset").display().to_string(),
+    );
+    let output = root.join("target/bern-test/swiftui-icons-out");
+    let file = |files: &[bern_target_api::GeneratedFile], path: &str| {
+        files
+            .iter()
+            .find(|file| file.path == Path::new(path))
+            .map(|file| file.contents.clone())
+            .unwrap_or_else(|| panic!("no generated {path}"))
+    };
+    let mac = SwiftUiMacos
+        .generate(
+            &compiled.app,
+            &context(&config, &compiled, "macos", &output),
+        )
+        .unwrap();
+    assert_eq!(
+        file(&mac, "Showcase.app/Contents/Resources/AppIcon.icns"),
+        icns
+    );
+    let ios = SwiftUiIos
+        .generate(&compiled.app, &context(&config, &compiled, "ios", &output))
+        .unwrap();
+    let set = "Assets.xcassets/AppIcon.appiconset";
+    assert_eq!(
+        file(&ios, &format!("{set}/Contents.json")),
+        contents.as_bytes()
+    );
+    assert_eq!(file(&ios, &format!("{set}/Icon-tinted.png")), png);
+    // The set has its own sizes: nothing scales it.
+    let plan = SwiftUiIos
+        .plan(&compiled.app, &context(&config, &compiled, "ios", &output))
+        .unwrap();
+    assert!(!plan.steps.iter().any(|step| matches!(
+        step,
+        BuildStep::Run { program, .. } if program == "sips"
+    )));
+    let _ = std::fs::remove_dir_all(&art);
 }

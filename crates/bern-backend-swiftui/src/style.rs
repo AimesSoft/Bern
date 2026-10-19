@@ -34,6 +34,12 @@ pub const SUPPORT: &[StyleSupport] = &[
         base: &["background", "foreground", "corner"],
         states: &[],
     },
+    // A form's background is its rows'.
+    StyleSupport {
+        component: "Form",
+        base: &["background"],
+        states: &[],
+    },
     StyleSupport {
         component: "Button",
         base: &[

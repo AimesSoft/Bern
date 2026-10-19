@@ -532,8 +532,13 @@ mod marked {
             gtk::SizeRequestMode::HeightForWidth
         }
 
+        /// As unmarked text: the width of its lines before it wraps,
+        /// whatever height a row beside it offers.
         fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
             match self.obj().first_child() {
+                Some(child) if orientation == gtk::Orientation::Horizontal => {
+                    child.measure(orientation, -1)
+                }
                 Some(child) => child.measure(orientation, for_size),
                 None => (0, 0, -1, -1),
             }

@@ -22,6 +22,8 @@ pub struct FieldItem {
     pub syn_ty: syn::Type,
     pub doc: String,
     pub initial: Option<Expr>,
+    /// `#[content]`: text that is data, shown as it is.
+    pub content: bool,
     pub span: Span,
 }
 
@@ -182,6 +184,8 @@ pub struct Param {
     pub ty: TypeRef,
     pub syn_ty: syn::Type,
     pub kind: ParamKind,
+    /// `#[content]`: text the component shows as data.
+    pub content: bool,
     pub span: Span,
 }
 
@@ -448,7 +452,13 @@ fn parse_named_fields(
     let mut result = Vec::new();
     for field in &named.named {
         let name = field.ident.clone().unwrap();
-        let allowed: &[&str] = if allow_initial { &["initial"] } else { &[] };
+        // Drafts are what the user typed, shown as it is; engine text says
+        // with `#[content]` when it is data rather than a sentence.
+        let allowed: &[&str] = if allow_initial {
+            &["initial"]
+        } else {
+            &["content"]
+        };
         check_known_attrs(&field.attrs, allowed, "fields")?;
         if require_pub && !matches!(field.vis, syn::Visibility::Public(_)) {
             return Err(error(
@@ -465,6 +475,7 @@ fn parse_named_fields(
             } else {
                 None
             },
+            content: !allow_initial && find_attr(&field.attrs, "content").is_some(),
             span: name.span(),
             name,
         });
@@ -1198,21 +1209,31 @@ pub fn parse_component_with(
             return Err(error(typed.pat.span(), "parameters must be simple names"));
         };
         let mut kind = ParamKind::Prop;
+        let mut content = false;
         for attr in &typed.attrs {
             if is_bern_attr(attr, "session") {
                 kind = ParamKind::Session;
+            } else if is_bern_attr(attr, "content") {
+                content = true;
             } else {
                 return Err(error(
                     attr.span(),
-                    "only `#[session]` is allowed on component parameters",
+                    "only `#[session]` and `#[content]` are allowed on component parameters",
                 ));
             }
+        }
+        if content && kind == ParamKind::Session {
+            return Err(error(
+                pat.ident.span(),
+                "`#[content]` marks a text parameter; session state is not one",
+            ));
         }
         params.push(Param {
             name: pat.ident.clone(),
             ty: type_ref(&typed.ty)?,
             syn_ty: (*typed.ty).clone(),
             kind,
+            content,
             span: pat.ident.span(),
         });
     }

@@ -2,7 +2,7 @@
 
 当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
 
-- 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”）
+- 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”；页面级布局、场景与控件形态的能力于 2026-10-19 补齐，见同名一节）
 - 依据：[Bern 架构设计 v0.30](../Design.md)（最初按 v0.19 实现）、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
 - 工具链：Rust 1.99.0；Visual Studio 2022 生成工具 17.14（MSVC 14.44，C++20）；Windows SDK 10.0.26100（含 `cppwinrt.exe`）；Windows App SDK 2.5.1 的组件包（只取头文件与元数据：Foundation 2.3.12、WinUI 2.3.9、InteractiveExperiences 2.1.9，以及 WebView2 1.0.3719.77 的元数据）
 - 验证环境：Windows 11 专业版 25H2（版本 26200，x64 实体机），显示缩放 150%
@@ -57,7 +57,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换；圆角、内边距、尺寸档直接设置；阴影由 Direct2D 画成位图垫在按钮下；缩放、位移与透明度用运行时的弹簧。选中侧栏项的 `indicator` 不列出。见“样式覆盖” |
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 弹簧每帧在界面线程上推进，写到元素的 `Translation`、`Scale` 与 `Opacity`，不影响布局；滚动联动是 Composition 表达式动画。见“动效” |
 | 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | Direct2D 画进 WIC 位图后交给 `Image`，两种前端同一套代码；颜色按元素所在部分的主题解析 |
-| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；`chrome: unified` 在 WinUI 3 下只去掉标题栏里的标题文字，Islands 下保留系统标题栏。见“窗口外框、静置与对话框” |
+| 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；标题栏显示窗口标题（`chrome: unified` 不改变它），Islands 下保留系统标题栏。见“窗口外框、静置与对话框” |
 | 可增减的侧栏项与页签 | 完成 | 侧栏项是 `NavigationView.MenuItems` 中的项，随 `if`、`match`、`ForEach` 增减；选中项离开时选中移到 `fallback` 或剩下的第一项 |
 | v0.29 的 `features` 与媒体类组件 | 完成 | `SidebarFooter`（`PaneFooter`）、`Inspector`（右侧的 `SplitView` 窗格）、`Toast`、`SplitButton`（`ToggleSplitButton`）、`PopoverButton`（`Flyout`）、`Drop`、`Pinch`、`Swipe`、`Rail`；工具栏搜索与结果、会话动作、开关按钮、绑定长度、`appearance`、快捷键（`KeyboardAccelerator`）、运行时强调色与明暗、运行时图片、取色填充、`pick`（`FileOpenPicker`/`FolderPicker`）、滚动停靠与位置；会话命令 `ui.focus`、`ui.set_file`。描述中列出 `features` 的全部 18 项 |
 
@@ -167,7 +167,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 
 - `idle_after`：窗口根元素上（含已处理的事件）的指针移动、按下、滚轮与按键重新计时，到时 `window.idle` 为真。指针移动只在屏幕上的光标位置确实改变时才算：沉浸式窗口改变外框时，系统会在原位置再报告一次指针移动，否则会立即被自己唤醒。
 - `immersive`：为真时隐藏标题栏与详情页头。WinUI 3 下 `TitleBar` 收起，`OverlappedPresenter.SetBorderAndTitleBar(true, false)` 去掉系统标题栏与标题按钮；Islands 下去掉窗口样式中的 `WS_CAPTION`（保留可调整大小的边框）。同时静置时指针隐藏（`ShowCursor`）。
-- `chrome: unified`：WinUI 3 下内容本来就延伸到标题栏，`unified` 只去掉标题栏里的标题文字；Islands 下保留系统标题栏，没有可去掉的分隔。
+- `chrome: unified`：WinUI 3 下内容本来就延伸到标题栏，标题栏在图标旁显示窗口标题（设计稿的 Fluent 窗口如此），`unified` 不改变它；Islands 下保留系统标题栏。
 - `role: dialog`：没有自己的顶层窗口，是主窗口（或打开时第一个普通窗口）上的 `ContentDialog`，宽度按声明的尺寸在对话框允许的范围内设置；对话框的关闭（包括 Esc）都经关闭协议。对话框窗口报告所属窗口的位置，`minimize`、`maximize`、`move`、`resize` 返回 `target_unavailable`。
 - 窗口尺寸档：窗口根元素的宽度按 `[layouts]` 的三个断点得到 `compact`、`medium`、`expanded`、`large`，表达式中的 `window.compact` 等读取它；`Adaptive` 四档各自选择，没有自己布局的档位显示下一个更大的已声明布局，没有更大的取更小的。
 - 运行时强调色与明暗：`WindowSet(accent:, appearance:)` 的表达式在每个窗口中求值。控件模板经主题字典（含别名与合并的字典）中的强调色画刷取色，运行时找到这些画刷（浅色与深色两套，各自对应强调色的哪一档）直接改它们的颜色，并更新 `SystemAccentColor` 与 `…Light1–3`、`…Dark1–3`，所以已有的控件立即换色；各档按与白色、黑色混合近似生成。明暗设在窗口根元素的 `RequestedTheme` 上；WinUI 3 的标题按钮经 `AppWindowTitleBar.PreferredTheme` 跟随，Islands 的系统标题栏经 DWM 跟随。
@@ -181,10 +181,74 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - 快捷键：每个快捷键是窗口根元素上的 `KeyboardAccelerator`，随控件挂载与卸载；`cmd` 与 `ctrl` 都是 Control。`Search` 的快捷键聚焦搜索框，开关与分体按钮切换，按钮、菜单项与浮层按钮激活；控件禁用时不起作用，没有 Control 或 Alt 的快捷键在文本框有焦点时不触发。菜单项的快捷键显示在菜单中。
 - 工具栏搜索与结果：搜索框是 `AutoSuggestBox`；结果是任意组件，所以不用它自己的建议列表，而是在搜索框下方的 `Flyout` 中显示，搜索框有焦点且有结果时打开，点选结果后收起。
 - `PopoverButton`：按钮的 `Flyout`，内容在浮层打开时挂载、关闭后卸载；`presented` 双向跟随。`SplitButton`：`ToggleSplitButton`，主体切换开关，旁边的部分打开同样的浮层；该部分的无障碍名称为 `more_label`，没有时为“更多选项”。
-- `Toast`：在所在位置显示一个胶囊（主题底色、描边与 `ThemeShadow`），从下方滑入，`duration` 秒后淡出；内容变化时重新显示，朗读为礼貌的实时区域。
+- `Toast`：在所在位置显示系统的 `InfoBar`（信息级别、不可关闭，`icon` 为它的图标），从下方滑入，`duration` 秒后淡出；内容变化时重新显示，朗读为礼貌的实时区域。系统 XAML 没有 `InfoBar`，Islands 下是同形的 4 圆角条。
 - `Inspector`：所在容器换成右侧窗格的 `SplitView`（`Inline` 模式），`presented` 为真时窗格滑出，其余内容让出位置。
 - `ScrollView(snap:, position:)`：滚动停下（`ViewChanged` 不再是中间状态）时取最近的一项，以动画对齐到锚点；`center` 时首尾按最大一项留出空白，位置按项在内容中的坐标加内容的边距计算。停稳的一项写回 `position`；字段被设成另一项时以动画滚过去；首次布局后直接停在字段的一项。
 - 重复项中的控件目标带上每一层的键，经过组件也一样（如 `card.open[3]`）。
+
+## 页面级布局、场景与控件形态的能力（2026-10-19）
+
+能力描述补上此前只有 SwiftUI、Web 与 GTK 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。`window_landscape` 仍未声明：桌面窗口没有设备方向，检查给出警告。两种前端用同一份代码（新代码在 `bern_ui_scene.inl` 与原有各部分中），只有侧栏计数在系统 XAML 中改为跟在名称后的数字（它的导航项没有 `InfoBadge`）。图标表补上 33 个名称（如 `house` → Home、`calendar` → Calendar、`text.bubble` → Message、`server.rack` → MediaStorageTower、`gobackward.10` → SkipBack10、`goforward.10` → FastForward、`sparkles` → SearchSparkle），码位取自 Segoe Fluent Icons 的官方列表。
+
+### 外观与文字
+
+- `Stack` 的样式：层叠外包一个 `ContentControl`，它的 `Foreground` 向下继承给文字与 `FontIcon`；底色画在层叠的 `Grid` 上（角色经 `ThemeResource` 样式随主题，固定色按元素主题），`corner` 是 `Grid.CornerRadius` 加一个 Composition 圆角裁剪，各层按圆角裁住。`Stack(enabled: false)` 用同一个外包的 `IsEnabled`：其中的控件全部禁用、不接收输入。
+- `text { … }`：目录带上各文字样式的字重与字号，`Text` 与 `Label` 在系统的文字样式之上设置 `FontWeight` 与 `FontSize`。`Text(lines:)` 是 `MaxLines` 加末尾省略号；`font_size`（可绑定）与 `line_height`（`LineHeight` 与 `BlockLineHeight`）。`Label(font_size:)` 同时是图标的字号；`display: icon` 只显示图标，标题作提示与无障碍名称。
+- `Image(corner:)` 是可绑定、随 `animate` 弹簧的 Composition 圆角裁剪；`rendering: template` 用 `BitmapIcon`（`ShowAsMonochrome`，颜色随所在处的前景色）；`aspect` 取代图片自身比例，只给 `aspect` 时由一个面板按容器宽度与比例定高。
+
+### 控件形态与受控值
+
+- Fluent 2 没有胶囊形按钮（设计稿的 Fluent 一栏中主要与次要按钮都是 4 圆角的 `Button`），所以 `shape: capsule` 保留控件样式自己的圆角，只取 `height`：设置控件高度，去掉最小高度与上下内边距（左右内边距在控件进入可视树、样式生效后保留）；带内容的胶囊按钮把内容按按钮的圆角裁剪。`IconButton` 是 Fluent 的应用栏按钮样子：没有底色、指针移入才有，系统圆角，图标四周各 10（`height` 或样式的 `size` 给出正方形边长）；`prominence: prominent` 为强调色按钮，有边长时是圆形（设计稿的播放键）；`font_size` 是图标字号。图标菜单同样无底色。`Button(width: fill)` 横向撑满。`ControlGroup` 像命令栏那样把按钮并排放（默认高 40），按钮没有底色，组本身也不画底板（Fluent 用位置表达分组）。
+- `Menu(style: icon)` 是只显示图标的按钮加 `MenuFlyout`，有 `height` 时是圆形标准按钮，否则无底色。胶囊形的下拉 `Picker` 是 `DropDownButton` 与 `ToggleMenuFlyoutItem`。
+- 受控值：`Switch(checked:)`、`Picker(selected:)`、`Slider(current:)` 显示表达式的值，改动时执行动作的命令，参数中与该表达式相同的一项换成新值（整数参数四舍五入）；受控滑块拖动时只移动自己，松开时执行命令，键盘改动立即执行。`PickerOption` 给出自己的值与标签。`label_hidden` 不显示标签，只作无障碍名称。
+
+### 布局与页面结构
+
+- `padding_x`、`padding_y` 在 `padding` 之上分别覆盖左右与上下。`Row(align: baseline)`：各子元素先顶对齐排布，再按各自第一个文字块的 `BaselineOffset`（经 `TransformToVisual` 换算到子元素内）下移到同一条基线，多占的高度在下一轮测量中计入。
+- `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从格子顶部排，内容更高时伸进下面的行距。`Flow` 是换行面板。
+- `ScaleBox`：子元素在声明的逻辑尺寸中层叠，整体以一个 `CompositeTransform`（缩放加居中平移）适配所得空间，超出部分裁掉；图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Marquee`：内容按自然宽度每帧（`CompositionTarget.Rendering`）从右缘外跑到左缘外，`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字由 Composition 的 `DropShadow`（以文字自己的 `GetAlphaMask` 为蒙版）带 1 点黑色阴影。
+- `Accordion`：每列一个 0 到 1 的权重弹簧，列宽由权重分配，总宽不变，每列按 `corner` 圆角裁剪（裁剪在每次排布时按列的大小设置）。
+- 页头：工具栏中 `Spacer` 之前的项放在返回按钮之后的前缘，之后的放在后缘；`Text` 可以放在工具栏里。`SidebarHeader` 是 `NavigationView.PaneHeader`，`role: title` 时不显示（两种前端的标题栏都已在应用图标旁显示窗口标题）；`Sidebar(width:)` 是 `OpenPaneLength`；`Detail(titled: false)` 时页头不显示所选目的地的名称；`SidebarItem(badge:)` 在 WinUI 3 中是 `InfoBadge`（为 0 时隐藏）。
+- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分节间距、卡片行的最小高度与内边距（`Section` 自己的优先），后来加入的行也照此设置；plain 分节的行直接放在页面上（没有卡片），表单以它开头时从页面顶部开始。页面中的 `Search` 用 `width`、`height`、`font_size` 设置搜索框自身。
+
+### 模态、搜索面板与计时
+
+- `Modal` 是系统的 `ContentDialog`（设计稿 Fluent 一栏的模态面板）：系统的遮罩、圆角与出入场动画，内容为声明尺寸（离窗口边缘至少 16），没有标题与按钮区；`cover: compact` 时在紧凑窗口中铺满。它在元素挂载期间一直显示，Esc 不关闭。窗口的 XAML 根就绪后才显示，跟随窗口的明暗。元素的 `appear`、`disappear` 由对话框自己的出入场代替。同一窗口同一时间只能有一个 `ContentDialog`。
+- `Search(style: palette)`：所在位置是系统的 `AutoSuggestBox`（`prompt` 为占位文字，工具栏中 240 宽）；点按、在其中打字或快捷键打开面板。面板是系统的 `Flyout`，盖在搜索框上、与它右缘对齐向下展开（设计稿 10.8 的“搜索框就地展开”），`width` 宽、按结果的高度、最高 `height`（默认 640、480）；上方是面板自己的搜索框（已打的字带过去），下面是结果，结果只在面板打开时构建、关闭即释放。上下方向键在 `navigation` 不为假的 `SearchItem` 之间移动（按屏幕上的先后），回车选中当前项，没有当前项时执行提交动作；Esc 或点在面板外关闭；指针移入某项时它成为当前项。`SearchItem` 选中后先关闭面板再执行动作（包括 `pick`）；不在面板中时是普通的结果行。
+- `Timer`：启用且挂载时每 `interval` 秒（不少于 0.05）执行动作，关掉或卸载时取消下一次。`Window(idle_enabled:)` 为假时 `window.idle` 保持为假且不计时，变真时重新计时。`window.short` 是窗口高度低于紧凑断点。
+
+### 动效补充
+
+- `appear_delay` 在错峰延迟之上再等待，有延迟时首次显示也播放 `appear`；`nudge_key` 的值每次变化晃动一次，`nudge_scale` 是晃动的倍数（默认 1.06）；`reduce_motion` 为真时整个应用按减少动态效果运行，与系统关闭动画相同。
+- `grow(edge:)` 过渡：沿一个轴从 0 伸展、该边保持不动、不淡入淡出。动效层的缩放可以带一个不动点，按缩放补上平移。
+
+### 文本格式（`text_formats`）
+
+- 目录中的字符串表：带参数的翻译文本保留 Bern 的格式原文；不带参数的把 `{{`、`}}` 还原为花括号；月名与星期名（`bern.date.*`）随表写入，没有该语言时用英文。
+- `bern::Text::Fmt(key, {{"名", 参数}, …})` 在运行时解析当前语言的文本再写出。`bern::Text::Arg` 是文本、数字（值与 Bern 的写法）或日期；生成器对 `CalendarDate` 传 `DateArg`，对枚举传它的标签，其余传 `ArgOf`（整数与小数保留数值）。复数分支先找 `=N`、再找当前语言的类别（中日韩越泰印尼马来只有 `other`，其余语言 1 为 `one`），最后 `other`，`#` 写出数字；日期按 `y`、`M`、`d`、`E` 的连写取字段或月名、星期名；时长中写出的最大字段吸收更大的单位。文字绑定读取语言单元，切换语言时重新写出。
+- 枚举标签显示变体字段：目录的 `VariantDef` 带上标签显示的字段（占位符名与字段序号），`Text::Display` 按字段类型把它们作为参数填入（枚举字段用自己的标签，可以嵌套；`CalendarDate` 是日期）。只有变体、没有值的 `Text::Label`（选项列表）写出时这些字段为空。
+
+### 顺带的修正
+
+- 行与列分配空余空间时，给了高（宽）的元素不再在该方向撑满，即使其中有撑满的内容：此前给了高度、里面铺着 `Canvas` 的 `Stack` 与同列中另一个撑满的元素平分剩余高度。
+- `height` 去掉上下内边距时，此前在控件进入可视树之前读取内边距（样式尚未生效，读到 0），把左右内边距也一并清零，带文字的按钮被压成高度那么宽；现在在 `Loaded` 后读取并保留左右。
+- `ScrollView` 的指定初始化器顺序与 `ScrollProps` 的声明顺序不一致（`open_at` 与 `indicators: hidden` 同时出现时 MSVC 报 C7560）。
+- 对照设计稿（Fluent 2 桌面版）修正的控件与布局：
+  - 设计稿的强调色填充在浅色与深色下都是品牌色本身，配白字（亮的强调色配近黑字）；此前浅色用加深一档、深色用混白两档（深色区域里显得发粉）。`AccentFillColor*` 现在都取品牌色，`TextOnAccentFillColor*` 按亮度取白或近黑。
+  - 深色区域（如播放器）弹出的菜单与浮层：只设 `RequestedTheme` 时字变白、底仍是窗口主题的浅色，看不清；现在样式里同时放入该主题字典中系统自己的 `MenuFlyoutPresenterBackground`、`FlyoutPresenterBackground` 与边框画刷。
+  - `ToggleSwitch` 旁不再显示“开/关”，与设计稿一致。导航窗格展开时不显示折叠按钮（窄的模式保留）。
+  - 分段控件（`SelectorBar`）靠前缘按自身宽度，不再在给定宽度中居中。分体按钮显示图标与标题（工具栏中只有图标）。
+  - 条件分支里后来出现的、要撑满的内容（如引导每一步的 `ScrollView`），会让外层已放好的列、层叠与容器跟着撑满；此前外层的拉伸只在放入时判断一次，引导页的底栏因此悬在中间。
+  - 横向的 `Divider` 横向撑满（此前在层叠中被设为居中而宽度为 0）；`Slider` 横向撑满给它的宽度（此前在 `Positioned` 中缩成 80）；`Rail` 只取所在层叠的尺寸，不再让层叠横向撑满（此前缩略图层叠与 `Spacer` 平分剩余宽度，旁边的标题错位）。
+  - 只给 `position`、没给 `snap` 的 `ScrollView` 以起点停靠，与其他目标相同；此前按居中在内容前后留出半个视口，海报墙上方多出约 140 的空白。
+  - 不给尺寸的 `Canvas` 在层叠中是其他层的底板：取它们的尺寸，不让层叠撑满（与 `Rail` 相同；层叠里只有底板时仍然撑满）。画布自身不报告期望尺寸（位图在 XAML `Canvas` 里按外框大小显示），否则上次画出的大小会撑住层叠。此前可选功能预览里选中项的底色被拉成一大块。
+  - 行太窄时文字让位：文字与含文字的行列按比例收窄（换行或截断），控件与给了宽度的元素保持原尺寸，与其他目标一致；此前设置卡片里较长的说明把开关挤出卡片。
+  - 每个窗口与模态的根元素设置界面语言（`Language`，随切换更新），系统按语言选择中文的界面字体；此前半粗的小字回落成宋体的点阵。
+  - `Label` 的图标随文字字号缩放（字号的 1.15 倍），与文字的间距为字号的 0.6 倍（4 到 12）；此前图标固定 16。
+  - 语义色 `control.border` 是 Fluent 的控件描边 `ControlStrokeColorDefault`（设计稿的 `rgba(0,0,0,.0578)`），此前是未勾选复选框那种深描边。
+  - 工具栏前缘（返回一侧）的按钮没有底色，与窗口自己的返回一致；`play.fill`、`pause.fill` 用实心的 PlaySolid、PauseBold。
+  - `BERN_DUMP_TREE` 输出的元素树带上每个元素在窗口中的位置、显式高度、文字及其字体、字号与字重，用来对照设计稿定位布局问题。
+- 动画 SVG 的运行时（见 [Animated-SVG](Animated-SVG.md)）此前没有在 Windows 上编译过：补上 `B` 命名空间、放行文档自己的导航、两种前端都改用 WebView2 的 Win32 呈现器以得到透明背景，缓存放到临时目录；新增生成测试 `svg_animation_generates_and_compiles` 在 Windows 上编译示例。
 
 ## 构建与运行
 
@@ -210,7 +274,7 @@ target\bern\windows\Showcase\showcase.exe
 
 产物位于 `target/bern/windows/`：`Showcase/`（`showcase.exe`、`Microsoft.WindowsAppRuntime.Bootstrap.dll` 与 `resources/`）、`bin/showcase.exe` 与 `bin/showcase-mcp.exe`，以及构建清单 `build.json`（记录前端、组件包版本与最低 Windows 版本）。
 
-应用图标 `app.ico`（没有声明 `[app].icon` 时为 Bern 标志的圆形版，16 到 256 像素各一张 PNG）编入可执行文件的图标资源 1：资源管理器显示它。运行时按窗口所在显示器的 DPI 把它设为每个窗口的大小图标（任务栏、Alt+Tab、Islands 的系统标题栏），WinUI 3 的 `TitleBar` 另以 `ImageIconSource` 显示其中最接近标题栏尺寸的一张。
+应用图标 `app.ico`（没有声明 `[app].icon` 时为 Bern 标志的圆形版，16 到 256 像素各一张 PNG）编入可执行文件的图标资源 1：资源管理器显示它。运行时按窗口所在显示器的 DPI 把它设为每个窗口的大小图标（任务栏、Alt+Tab、Islands 的系统标题栏），WinUI 3 的 `TitleBar` 另以 `ImageIconSource` 显示其中最接近标题栏尺寸的一张。`[app.icon].windows` 可以给出 `.ico` 文件，原样编入；其中的位图项（不是 PNG 的）由标题栏包成单张的 `.ico` 再解码。
 
 **开发辅助**（默认全部关闭）：
 
@@ -295,6 +359,18 @@ target\bern\windows\Showcase\showcase.exe
 - 只装有系统组件版运行时（`Microsoft.WindowsAppRuntime.CBS`）时，非打包应用能否经引导程序使用它。
 - 键盘与手动操作（Ctrl+W、Esc、Alt+←、输入法）、讲述人与完整的键盘遍历、高对比主题、多显示器、ARM64、远程网络源（HLS 只经本机 HTTP 测过）。
 
+2026-10-19，页面级布局、场景与控件形态，同一台 PC（Windows 11 25H2，150% 缩放），经 SSH 构建、以计划任务把应用启动到桌面会话，由生成的 CLI 驱动，画面来自应用自己的窗口快照：
+
+- **测试**：`bern-backend-winui3` 的测试在 macOS 上通过，Windows 上新增的 `layout_features_generate_for_winui3`（给 showcase 加上场景、手风琴、换行、格子网格、模态、表单版式、纯图标标签与菜单、胶囊控件与搜索项）用 MSVC 编译两套前端通过；`cargo clippy -p bern-backend-winui3 --all-targets -- -D warnings`（另外忽略 `bern-target-api` 中已有的 `for_kv_map`）与 `cargo fmt --check` 通过。
+- **巡览应用**：一个只在本机临时目录中的巡览应用覆盖除 `window_landscape` 外的全部 29 项与 `Stack` 样式，`bern check --target windows` 没有错误与警告，`bern build --target windows` 构建成功。
+- **真实应用**：加入 `text_formats` 与上面的修正后，用于验收的媒体类应用 `bern check --target windows` 只剩 `landscape` 的警告，`bern build --target windows` 在 PC 上构建成功并启动（WinUI 3 与强制回退的 Islands）。对照设计稿实测引导页：960 × 600 的模态卡片中插画区 480 × 528、底栏 72 高贴底；“跳过”是标准按钮、“开始”是强调色按钮，都是 Fluent 的 4 圆角（设计稿 Fluent 一栏的按钮不是胶囊）；200 尺寸的动画 Logo 透明地居中在格纹插画上。其余页面未逐页对照。
+- **对照设计稿**：用无头浏览器把设计稿原型切到 Fluent 2 桌面、逐屏截图，与应用自己的窗口快照对照，并用元素树核对位置。改动后实测：引导四步（模态为系统 `ContentDialog`，底栏贴底且有分隔线，“明暗”分段靠前缘，Logo 透明居中）；首页（顶栏为系统搜索框与“打开”，“继续播放”为品牌色白字，“也在看”三行对齐）；搜索面板（系统 `Flyout` 盖在搜索框上向下展开，列出番剧与继续播放）；播放页（无底色的图标按钮、铺满的品牌色进度条、带标题的“弹幕”分体按钮、品牌色圆形播放键、五个控制按钮）；播放中的字幕菜单（弹出层快照为深色底白字）；通知为系统 `InfoBar`；媒体库海报墙紧接筛选行。随后对照了新番（结构一致；展开列的描边改为 Fluent 的细描边）、番剧详情（前缘返回为无底色按钮）、迷你播放器、下载、设置窗口（通用、可选功能及其预览、插件）。剩下的差别属于应用的声明（写死的苹果圆角、侧栏宽度、个别控件的选择），已交给应用一侧。屏幕上的菜单底色以快照为准，没有屏幕截取。
+- **文本格式**：一个本机临时测试应用（复数、日期、时长、显示字段的枚举标签）在 WinUI 3 与 Islands 下经 CLI 驱动，0／1／3 次添加后依次为“no files”“1 file”“3 files”，“Today is Monday, October 12, 2026”，3 次后“3:04 used (0:03:04)”与“3 large files”，保存后“Saved Tides #1.mp4 on Mon, Oct 12”；切到简体中文后为“3 个文件”“今天是 2026年10月12日 星期一”“已用 3:04（0:03:04）”“3 个大文件”“已保存 Tides #1.mp4，10月12日 周一”，与 SwiftUI、Web、GTK 相同。生成测试 `text_formats_generate_for_winui3` 在 Windows 上编译两套前端。
+- **WinUI 3 实测**：侧栏顶栏的模板图标与标题、“场景”项的 `InfoBadge` 计数 3、无标题的详情页头（前缘为返回按钮，后缘为工具栏文字与搜索面板入口）、`text { title: heavy 30 }` 的大标题；缩放场景（640×360 的卡片中 1280×720 的场景缩为一半，`Positioned` 的图片带 32 圆角）、跑马灯随时间移动；开关“铺满”后图片按 `smooth` 移到铺满、圆角收为直角，“大字”后跑马灯的绑定字号变大，`Timer` 每秒计数加一；`window resize` 到 1100×500 后出现“窗口很矮”（`window.short`）；关掉引擎开关（`idle_enabled: app.on`）后静置 4 秒 `window.idle` 仍为假，打开后静置 5 秒变为真。布局页：标题与说明按基线对齐；手风琴第二列展开、其余各 60 宽加 8 间距，点“四”后展开列移到第四列（收起列仍为 60 + 8，截图量得）；胶囊按钮换行；格子网格；只给 `aspect` 的图片铺满宽度并带 20 圆角。控件页：控件组胶囊中按钮无底色、44 的圆形图标按钮、36 的圆形图标菜单、纯图标标签、`nudge_key` 卡片、横向撑满的胶囊主按钮、受控的开关、滑块与分段选择、显式选项的胶囊下拉（按内容宽度）；当时 `shape: capsule` 还画成胶囊，之后按设计稿改为 Fluent 自己的圆角，见下一条。搜索面板：`ui activate` 打开，背景变暗，560×420 的卡片，输入“布”后列出带图标、说明与提示的结果；`ui activate` 结果“表单”后面板关闭、页面切到表单。表单页：plain 分节从页面顶部开始，带 `padding_x: 20, padding_y: 4` 的分节行高 48。模态：菜单项打开后背景变暗、卡片 520×320 居中，“关闭”关掉。
+- **系统 XAML（Islands）实测**：同一应用强制回退后，上述侧栏（计数显示为“场景 3”）、场景、手风琴（展开列与收起列）、控件页与 `window.short` 相同。
+- 修正的问题（实测中发现）：手风琴的列一开始不可见（圆角裁剪的几何在第一次排布时尺寸为 0，改为每次排布时按列的大小设置，通用的圆角裁剪也先用元素已有的大小）；胶囊下拉被拉满整行（改为靠前缘按内容宽度）。
+- 未验证：方向键与回车在搜索面板中的选择、指针悬停高亮（没有向桌面发送输入）；跑马灯文字阴影、`grow` 过渡与 `appear_delay`、`nudge_key` 晃动、`reduce_motion` 的逐帧画面；真实应用在 Windows 上的构建与运行。
+
 ## 未完成与已知限制
 
 - **使用 Windows 自带的运行时不是微软公开说明的用法。** 微软的部署指南只说明非打包应用要自己部署运行时；`CBS.2` 是 Windows 给自己组件用的副本，第三方程序能用是实测结果，以后的 Windows 更新可能改变它的名称、内容或可用性。所以其他程序装的 2.x 总是优先。哪些 Windows 11 版本自带 `CBS.2` 也只在 25H2（26200.9457）上确认过。
@@ -307,9 +383,15 @@ target\bern\windows\Showcase\showcase.exe
 - 同一个播放器同一时间只在最新附着的视图中显示画面，较早的视图只显示外框。
 - 页面工具放在页头，没有使用 `CommandBar`；`Menu` 的菜单项不呈现 `destructive` 角色。
 - 品牌色的浅色与深色档位按与白色、黑色混合近似生成。
-- `chrome: unified` 在 WinUI 3 下只去掉标题栏的标题文字（内容本来就延伸到标题栏）；Islands 下不变，仍是系统标题栏。
+- `chrome: unified` 在 WinUI 3 下不改变标题栏（标题照常显示）；Islands 下仍是系统标题栏。
 - 选中侧栏项的 `indicator` 不支持：`NavigationView` 只画自己前缘的指示条；侧栏项的样式也没有 `shadow`（与其他目标相同，检查时报错）。
 - `reflow` 只在 `Column`、`Row`、`Grid` 与 `ScrollView` 的面板中生效，其他容器中写了不起作用，构建时没有警告。
+- 系统 XAML 的导航项没有 `InfoBadge`，侧栏计数是名称后面的数字。
+- `Row(align: baseline)` 按第一个文字块对齐；没有文字的子元素保持顶对齐。基线变化后要多一轮布局才计入多占的高度。
+- `window_landscape` 未声明：桌面窗口没有设备方向，`Window(landscape:)` 检查时给出警告。
+- `shape: capsule` 在 Windows 上不画成胶囊，保留 Fluent 控件自己的圆角（设计稿如此）；只有强调色的定尺寸 `IconButton` 是圆形。
+- 动画 SVG 是窗口之上的子 HWND：不随祖先的透明度与滚动以外的裁剪变化，浮层菜单等 XAML 图层会被它挡住；弹出动画中只跟随位置与大小。
+- 只有变体、没有值的枚举标签（如选项列表）写出时，标签显示的字段为空。
 - 共享元素只在同一窗口内配对，用 Bern 自己的覆盖层实现，没有使用 `ConnectedAnimationService`。
 - 搜索结果显示在搜索框下方的 `Flyout` 中，不是 `AutoSuggestBox` 自己的建议列表（结果是任意组件）。
 - 运行时强调色通过修改主题字典中的强调色画刷实现，各档颜色按与白色、黑色混合近似生成，不是系统按强调色算出的调色板。

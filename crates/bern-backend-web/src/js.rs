@@ -269,11 +269,51 @@ fn generate_enum(out: &mut Out, def: &EnumDef) {
             .iter()
             .map(|variant| string(&variant.label.as_ref().expect("label").key))
             .collect();
-        let index = if def.is_unit_only() { "v" } else { "v.tag" };
-        out.line(format!(
-            "L.{name} = (v) => B.tr([{}][{index}]);",
-            keys.join(", ")
-        ));
+        if def
+            .variants
+            .iter()
+            .all(|variant| variant.label.as_ref().is_some_and(|label| label.params.is_empty()))
+        {
+            let index = if def.is_unit_only() { "v" } else { "v.tag" };
+            out.line(format!(
+                "L.{name} = (v) => B.tr([{}][{index}]);",
+                keys.join(", ")
+            ));
+        } else {
+            // Labels that show the variant's fields fill them in.
+            out.open(format!("L.{name} = (v) => {{"));
+            out.open("switch (v.tag) {");
+            for (index, variant) in def.variants.iter().enumerate() {
+                let label = variant.label.as_ref().expect("label");
+                if label.params.is_empty() {
+                    out.line(format!("case {index}: return B.tr({});", string(&label.key)));
+                    continue;
+                }
+                let args: Vec<_> = label
+                    .params
+                    .iter()
+                    .filter_map(|param| {
+                        let at = variant.fields.iter().position(|field| field.name == *param)?;
+                        let value = format!("v.fields[{at}]");
+                        let shown = match &variant.fields[at].ty {
+                            Type::Int => format!("B.int({value})"),
+                            Type::Float => format!("B.num({value})"),
+                            Type::Enum { name } => format!("L.{name}({value})"),
+                            _ => value,
+                        };
+                        Some(format!("{}: {shown}", string(param)))
+                    })
+                    .collect();
+                out.line(format!(
+                    "case {index}: return B.fmt({}, {{ {} }});",
+                    string(&label.key),
+                    args.join(", ")
+                ));
+            }
+            out.close("}");
+            out.line("return \"\";");
+            out.close("};");
+        }
     }
     out.line("");
 }
@@ -435,10 +475,18 @@ impl<'a> Generator<'a> {
                         .params
                         .iter()
                         .map(|param| {
+                            // A date stays a record for its pattern.
                             let value = args
                                 .iter()
                                 .find(|(name, _)| name == param)
-                                .map(|(_, expr)| self.display(expr))
+                                .map(|(_, expr)| match &expr.ty {
+                                    Type::Record { name }
+                                        if name == bern_protocol::format::CALENDAR_DATE =>
+                                    {
+                                        self.expr(expr)
+                                    }
+                                    _ => self.display(expr),
+                                })
                                 .unwrap_or_else(|| "\"\"".into());
                             format!("{}: {value}", string(param))
                         })
@@ -729,6 +777,14 @@ impl<'a> Generator<'a> {
             "scrollOpacity",
             element.number("scroll_opacity").map(number),
         ));
+        entries.push((
+            "scrollOriginX",
+            element.number("scroll_origin_x").map(number),
+        ));
+        entries.push((
+            "scrollOriginY",
+            element.number("scroll_origin_y").map(number),
+        ));
         entries
             .iter()
             .any(|(_, value)| value.is_some())
@@ -966,6 +1022,7 @@ impl<'a> Generator<'a> {
                     ("mark", Self::keyword(element, "mark")),
                     ("lines", element.number("lines").map(number)),
                     ("fontSize", self.length(element, "font_size")),
+                    ("lineHeight", self.length(element, "line_height")),
                 ])
             )),
             "Canvas" => self.canvas(out, element),
@@ -1014,10 +1071,12 @@ impl<'a> Generator<'a> {
                             ("role", Self::keyword(element, "role")),
                             ("prominence", Self::keyword(element, "prominence")),
                             ("fontSize", element.number("font_size").map(number)),
+                            ("diameter", (element.kind == "IconButton").then(|| self.length(element, "height")).flatten()),
                             ("enabled", enabled),
                             ("style", style),
                             ("shape", Self::keyword(element, "shape")),
                             ("height", self.length(element, "height")),
+                            ("fill", (element.keyword("width") == Some("fill")).then(|| "true".into())),
                             ("setFile", set_file),
                             ("fileKinds", kinds),
                         ]),
@@ -1049,6 +1108,7 @@ impl<'a> Generator<'a> {
                     ("panelPrompt", self.text_prop(element, "panel_prompt")),
                     ("width", element.number("width").map(number)),
                     ("height", element.number("height").map(number)),
+                    ("fontSize", element.number("font_size").map(number)),
                 ]);
                 let submit = self.action_fn(element);
                 let function = if palette {
@@ -1220,10 +1280,23 @@ impl<'a> Generator<'a> {
             "Video" => self.video(out, element),
             "Query" => self.query(out, element),
             "Form" => {
-                let props = Self::props(vec![("title", self.text_prop(element, "title"))]);
-                self.children(
+                let props = Self::props(vec![
+                    ("title", self.text_prop(element, "title")),
+                    ("gap", element.number("gap").map(number)),
+                    ("rowHeight", element.number("row_height").map(number)),
+                    ("paddingX", element.number("padding_x").map(number)),
+                    ("paddingY", element.number("padding_y").map(number)),
+                ]);
+                // A form style's background is its rows'.
+                let first: Vec<String> =
+                    crate::style::reference(self.app, "Form", element.keyword("variant"))
+                        .map(|style| format!("F.formRows(p, {style});"))
+                        .into_iter()
+                        .collect();
+                self.children_with(
                     out,
                     &format!("B.Form(p, ctx, {props}, "),
+                    &first,
                     &element.children,
                     ");",
                 );
@@ -1265,6 +1338,12 @@ impl<'a> Generator<'a> {
                 let props = Self::props(vec![
                     ("title", self.text_prop(element, "title")),
                     ("footer", self.text_prop(element, "footer")),
+                    (
+                        "plain",
+                        (element.keyword("style") == Some("plain")).then(|| "true".into()),
+                    ),
+                    ("paddingX", element.number("padding_x").map(number)),
+                    ("paddingY", element.number("padding_y").map(number)),
                 ]);
                 self.children(
                     out,
@@ -1328,6 +1407,14 @@ impl<'a> Generator<'a> {
                     first.push(format!(
                         "F.bindGridMinWidth(p, {}, {});",
                         self.length(element, "min_width").expect("min width"),
+                        self.animate(element).unwrap_or_else(|| "null".into())
+                    ));
+                }
+                if let Some(ratio) = element.number("cell_ratio") {
+                    first.push(format!(
+                        "F.bindGridCells(p, {}, {}, {});",
+                        number(ratio),
+                        self.length(element, "cell_extra").unwrap_or_else(|| "0".into()),
                         self.animate(element).unwrap_or_else(|| "null".into())
                     ));
                 }
@@ -1410,6 +1497,7 @@ impl<'a> Generator<'a> {
                     ("collapsedWidth", self.length(element, "collapsed_width")),
                     ("corner", self.length(element, "corner")),
                     ("animate", self.animate(element)),
+                    ("cover", Self::keyword(element, "cover")),
                 ]);
                 self.children(
                     out,
@@ -1495,6 +1583,7 @@ impl<'a> Generator<'a> {
                         "hideIndicators",
                         (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
                     ),
+                    ("openAt", element.number("open_at").map(number)),
                 ]);
                 let first = self.layout_lines(element, &[]);
                 self.children_with(
@@ -1516,6 +1605,7 @@ impl<'a> Generator<'a> {
                 let props = Self::props(vec![
                     ("axis", Self::keyword(element, "axis")),
                     ("anchor", Self::keyword(element, "anchor")),
+                    ("overhang", self.length(element, "overhang")),
                 ]);
                 self.children(
                     out,
@@ -2036,6 +2126,21 @@ impl<'a> Generator<'a> {
             out.close("} },");
         }
         out.close("],");
+        let accessory = element.children.iter().find_map(|node| match node {
+            Node::Element(child) if child.kind == "TabAccessory" => Some(child),
+            _ => None,
+        });
+        if let Some(accessory) = accessory {
+            out.open(format!(
+                "accessory: {{ shown: {}, build: (p, ctx) => {{",
+                accessory
+                    .expr("shown")
+                    .map(|shown| format!("() => {}", self.expr(shown)))
+                    .unwrap_or_else(|| "null".into())
+            ));
+            self.nodes(out, &accessory.children);
+            out.close("} },");
+        }
         out.line(format!(
             "selectedLabel: {},",
             self.selected_label(&selection, &options)

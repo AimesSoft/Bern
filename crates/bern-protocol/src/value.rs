@@ -179,6 +179,7 @@ mod tests {
                             name: "id".into(),
                             ty: Type::Int,
                             doc: String::new(),
+                            content: false,
                         }],
                         label: None,
                     },
@@ -191,6 +192,7 @@ mod tests {
                         name: "id".into(),
                         ty: Type::Int,
                         doc: String::new(),
+                        content: false,
                     },
                     FieldDef {
                         name: "kind".into(),
@@ -198,6 +200,7 @@ mod tests {
                             name: "Kind".into(),
                         },
                         doc: String::new(),
+                        content: false,
                     },
                 ],
             }],
@@ -240,6 +243,7 @@ mod tests {
                         name: "Node".into(),
                     }),
                     doc: String::new(),
+                    content: false,
                 }],
             }],
         };

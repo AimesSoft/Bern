@@ -20,11 +20,12 @@ fn text_tokens(text: &LocalizedText) -> TokenStream {
         let value = string(value);
         quote!((#language, #value))
     });
+    let params = text.params.iter().map(|param| string(param));
     quote! {
         #p::LocalizedText {
             key: #key,
             translations: ::std::collections::BTreeMap::from([#(#entries),*]),
-            params: ::std::vec::Vec::new(),
+            params: ::std::vec![#(#params),*],
         }
     }
 }
@@ -34,7 +35,8 @@ fn field_tokens(field: &FieldDef) -> TokenStream {
     let name = string(&field.name);
     let ty = type_tokens(&field.ty);
     let doc = string(&field.doc);
-    quote!(#p::FieldDef { name: #name, ty: #ty, doc: #doc })
+    let content = field.content;
+    quote!(#p::FieldDef { name: #name, ty: #ty, doc: #doc, content: #content })
 }
 
 /// Emit an expression constructing `descriptor`.
@@ -65,7 +67,8 @@ pub fn tokens(descriptor: &ProtocolDescriptor) -> TokenStream {
         let name = string(&field.name);
         let ty = type_tokens(&field.ty);
         let doc = string(&field.doc);
-        quote!(#p::StateField { name: #name, ty: #ty, doc: #doc })
+        let content = field.content;
+        quote!(#p::StateField { name: #name, ty: #ty, doc: #doc, content: #content })
     });
     let commands = descriptor.commands.iter().map(|command| {
         let id = string(&command.id);

@@ -8,10 +8,14 @@ pub fn notes_page(notes: notes::Client) -> impl View {
     }
 }
 
-/// One line about the notes, for the shell's overview.
+/// One line about the notes, for the shell's overview, with a link to
+/// the notes page wherever the shell shows it.
 #[component]
 pub fn notes_summary(notes: notes::Client) -> impl View {
     ui! {
-        Text(content: tr! { "zh-Hans" => "{count} 条笔记", "en" => "{count} notes"; count: notes.count })
+        Row(gap: 8, align: center) {
+            Text(content: tr! { "zh-Hans" => "{count} 条笔记", "en" => "{count} notes"; count: notes.count })
+            Button(id: all_notes, label: tr! { "zh-Hans" => "全部笔记 ›", "en" => "All notes ›" }, prominence: plain) => pages.notes.show()
+        }
     }
 }

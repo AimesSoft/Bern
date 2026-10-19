@@ -116,6 +116,7 @@ pub fn compose(
                     name: field.name.clone(),
                     ty: field.ty.clone(),
                     doc: field.doc.clone(),
+                    content: field.content,
                 })
                 .collect(),
         });
@@ -123,6 +124,7 @@ pub fn compose(
             name: namespace.clone(),
             ty: Type::Record { name: record },
             doc: format!("State of the `{namespace}` module."),
+            content: false,
         });
         if !module.modules.is_empty() {
             return Err(DescriptorError(format!(
@@ -187,6 +189,7 @@ pub fn compose(
                     name: (*namespace).into(),
                     ty: Type::Bool,
                     doc: format!("Whether the `{namespace}` module runs."),
+                    content: false,
                 })
                 .collect(),
         });
@@ -196,6 +199,7 @@ pub fn compose(
                 name: MODULES_STATE_TYPE.into(),
             },
             doc: "Which optional modules run.".into(),
+            content: false,
         });
         composed.commands.push(CommandSpec {
             id: format!("{MODULES_NAMESPACE}.{SET_ENABLED}"),
@@ -288,6 +292,7 @@ mod tests {
                     name: (*name).into(),
                     ty: Type::Int,
                     doc: String::new(),
+                    content: false,
                 })
                 .collect(),
             commands: commands
@@ -364,6 +369,7 @@ mod tests {
                 name: "id".into(),
                 ty: Type::Int,
                 doc: String::new(),
+                content: false,
             }],
         });
         assert!(compose(&shell, &[part(&a), part(&b)]).is_err());

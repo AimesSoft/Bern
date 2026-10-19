@@ -55,6 +55,8 @@ struct WindowDef {
     bool unified = false;
     std::optional<double> idleAfter;
     std::function<bool(Ctx const&)> immersive;
+    /// `idle_enabled`: idle detection switched on and off by state.
+    std::function<bool(Ctx const&)> idleEnabled;
     /// `WindowSet(accent:)`: an index into the accents of `style!`.
     std::function<int(Ctx const&)> accent;
     /// `WindowSet(appearance:)`: "light", "dark" or "" for the system's.
@@ -213,7 +215,8 @@ struct Paint {
 
 /// How an element appears or disappears.
 struct Transition {
-    enum Kind { Fade, Pop, Slide };
+    /// `Grow` scales along one axis from nothing, `edge` holding still.
+    enum Kind { Fade, Pop, Slide, Grow };
     Kind kind = Fade;
     double from = 0.8;
     char const* edge = "bottom";
@@ -286,6 +289,8 @@ struct Page : std::enable_shared_from_this<Page> {
     std::vector<int64_t> hidden;
     int64_t next = 1;
     controls::StackPanel tools;
+    /// Toolbar items at the leading end, after the way back.
+    controls::StackPanel leadingTools;
     bern::Version version;
     /// The window, whose immersive state hides the header.
     Win* win = nullptr;
@@ -293,6 +298,8 @@ struct Page : std::enable_shared_from_this<Page> {
     Page() {
         tools.Orientation(controls::Orientation::Horizontal);
         tools.Spacing(4);
+        leadingTools.Orientation(controls::Orientation::Horizontal);
+        leadingTools.Spacing(4);
     }
 
     template <class T> void Register(std::vector<std::pair<int64_t, T>> Page::*member, T item) {
@@ -321,16 +328,18 @@ struct Page : std::enable_shared_from_this<Page> {
         });
     }
 
-    /// A holder for toolbar items, removed when the current scope ends.
-    controls::StackPanel AddTools() {
+    /// A holder for toolbar items, at the trailing end or after the way
+    /// back (`leading`), removed when the current scope ends.
+    controls::StackPanel AddTools(bool leading = false) {
         controls::StackPanel holder;
         holder.Orientation(controls::Orientation::Horizontal);
         holder.Spacing(4);
-        tools.Children().Append(holder);
+        auto into = leading ? leadingTools : tools;
+        into.Children().Append(holder);
         version.Bump();
-        Reactive::OnCleanup([self = shared_from_this(), holder] {
+        Reactive::OnCleanup([self = shared_from_this(), holder, into] {
             uint32_t index;
-            if (self->tools.Children().IndexOf(holder, index)) self->tools.Children().RemoveAt(index);
+            if (into.Children().IndexOf(holder, index)) into.Children().RemoveAt(index);
             self->version.Bump();
         });
         return holder;
@@ -390,13 +399,30 @@ inline controls::Grid Wrap(xaml::UIElement const& inner) {
 /// content: it fills the way the inner element does.
 inline void Mirror(xaml::FrameworkElement const& holder, xaml::UIElement const& inner);
 
+/// Whether `element` is a backdrop among a stack's layers: a rail or a
+/// canvas without a size, which take the size of the other layers and do
+/// not make the stack fill.
+inline bool Backdrop(xaml::UIElement const& element) {
+    auto role = std::wstring_view(RoleOf(Unwrapped(element)));
+    return role.starts_with(L"bern-rail") || role == L"bern-canvas";
+}
+
+/// Whether `element` was given its height (or width): then it keeps it,
+/// whatever it holds.
+inline bool Sized(xaml::UIElement const& element, bool height) {
+    auto framework = Unwrapped(element).try_as<xaml::FrameworkElement>();
+    return framework && !std::isnan(height ? framework.Height() : framework.Width());
+}
+
 /// Whether `element` takes free height in a column: what fills, and rows
 /// and columns holding something that does (a spacer fills a row only
-/// along it).
+/// along it), unless it was given its height.
 inline bool FillsColumn(xaml::UIElement const& element) {
+    if (Sized(element, true)) return false;
     if (RoleOf(element) == L"bern-wrap") return FillsColumn(Unwrapped(element));
     auto role = RoleOf(element);
-    if (role == L"bern-fill" || role == L"bern-spacer" || role == L"bern-fill-height" || role == L"bern-layers-h" || role == L"bern-layers-wh" || role == L"bern-rail-wh")
+    if (role == L"bern-fill" || role == L"bern-canvas" || role == L"bern-spacer" || role == L"bern-fill-height" || role == L"bern-layers-h" || role == L"bern-layers-wh" ||
+        role == L"bern-rail-wh")
         return true;
     if (role == L"bern-column" || role == L"bern-row")
         for (auto child : element.as<controls::Panel>().Children()) {
@@ -408,11 +434,13 @@ inline bool FillsColumn(xaml::UIElement const& element) {
 }
 
 /// Whether `element` takes free width in a row: spacers, what fills both
-/// ways or across, and rows and columns holding something that does.
+/// ways or across, and rows and columns holding something that does,
+/// unless it was given its width.
 inline bool FillsRow(xaml::UIElement const& element) {
+    if (Sized(element, false)) return false;
     auto inner = Unwrapped(element);
     auto role = RoleOf(inner);
-    if (role == L"bern-spacer" || role == L"bern-fill" || role == L"bern-fill-width" || role == L"bern-layers-w" || role == L"bern-layers-wh" ||
+    if (role == L"bern-spacer" || role == L"bern-fill" || role == L"bern-canvas" || role == L"bern-fill-width" || role == L"bern-layers-w" || role == L"bern-layers-wh" ||
         role == L"bern-rail-w" || role == L"bern-rail-wh")
         return true;
     if (role == L"bern-column" || role == L"bern-row")
@@ -470,12 +498,46 @@ inline void SetReflow(controls::Panel const& panel, B::Motion const* motion) {
     if (resources.HasKey(key)) winrt::get_self<ReflowHolder>(resources.Lookup(key))->set(motion);
 }
 
+/// Where the first line of text in `element` sits, from its top: the
+/// first text block below it, through containers; nothing without text.
+inline std::optional<float> BaselineOf(xaml::UIElement const& element) {
+    if (auto text = element.try_as<controls::TextBlock>()) return static_cast<float>(text.BaselineOffset());
+    int32_t count = media::VisualTreeHelper::GetChildrenCount(element);
+    for (int32_t i = 0; i < count; ++i) {
+        auto child = media::VisualTreeHelper::GetChild(element, i).try_as<xaml::UIElement>();
+        if (!child || child.Visibility() != xaml::Visibility::Visible) continue;
+        if (auto below = BaselineOf(child)) {
+            try {
+                auto at = child.TransformToVisual(element).TransformPoint(winrt::Windows::Foundation::Point{0, 0});
+                return at.Y + *below;
+            } catch (winrt::hresult_error const&) {
+                return *below;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+/// Whether `element` gives up width when its row is too narrow: text and
+/// stacks holding it, but not controls or what was given its width.
+inline bool Yields(xaml::UIElement const& element) {
+    if (Sized(element, false)) return false;
+    auto inner = Unwrapped(element);
+    if (inner.try_as<controls::TextBlock>()) return true;
+    auto role = std::wstring(RoleOf(inner));
+    return role == L"bern-column" || role == L"bern-row" || role.starts_with(L"bern-layers");
+}
+
 struct FlexPanel : controls::PanelT<FlexPanel> {
     bool horizontal = false;
     double spacing = 8;
     xaml::Thickness padding{0, 0, 0, 0};
     B::Motion const* reflow = nullptr;
     Places places;
+    /// A row on the baseline: children move down so their first lines of
+    /// text share one baseline; `extra` is the height that takes.
+    bool baseline = false;
+    float extra = 0;
 
     bool Fills(xaml::UIElement const& child) const {
         if (horizontal) return FillsRow(child);
@@ -500,6 +562,26 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             thickness = (std::max)(thickness, Cross(child.DesiredSize()));
         }
         float gaps = static_cast<float>(spacing) * (std::max)(0, visible - 1);
+        // Too wide for its room: text gives way, as a stack's text wraps or
+        // truncates on the other targets, so controls keep their size.
+        if (horizontal && !std::isinf(space) && used + gaps > space) {
+            float yielding = 0;
+            for (auto child : Children())
+                if (child.Visibility() == xaml::Visibility::Visible && !Fills(child) && Yields(child)) yielding += Main(child.DesiredSize());
+            float over = used + gaps - space;
+            if (yielding > 0) {
+                used = 0;
+                for (auto child : Children()) {
+                    if (child.Visibility() != xaml::Visibility::Visible || Fills(child)) continue;
+                    if (Yields(child)) {
+                        float own = Main(child.DesiredSize());
+                        child.Measure(Make((std::max)(0.0f, own - over * own / yielding), cross));
+                    }
+                    used += Main(child.DesiredSize());
+                    thickness = (std::max)(thickness, Cross(child.DesiredSize()));
+                }
+            }
+        }
         float free = std::isinf(space) ? INFINITY : (std::max)(0.0f, space - used - gaps);
         for (auto child : Children()) {
             if (child.Visibility() != xaml::Visibility::Visible || !Fills(child)) continue;
@@ -508,6 +590,7 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             thickness = (std::max)(thickness, Cross(child.DesiredSize()));
         }
         float main = filling > 0 && !std::isinf(space) ? space : used + gaps + filled;
+        if (baseline && horizontal) thickness += extra;
         auto size = Make(main, thickness);
         return Size{size.Width + static_cast<float>(padding.Left + padding.Right), size.Height + static_cast<float>(padding.Top + padding.Bottom)};
     }
@@ -527,6 +610,7 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
         float share = filling > 0 ? (std::max)(0.0f, space - used - gaps) / filling : 0;
         float position = 0;
         std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> now;
+        std::vector<std::pair<xaml::UIElement, Rect>> placed;
         for (auto child : Children()) {
             if (child.Visibility() != xaml::Visibility::Visible) {
                 child.Arrange(Rect{0, 0, 0, 0});
@@ -536,8 +620,34 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             auto left = static_cast<float>(padding.Left), top = static_cast<float>(padding.Top);
             Rect rect = horizontal ? Rect{left + position, top, length, cross} : Rect{left, top + position, cross, length};
             child.Arrange(rect);
+            placed.emplace_back(child, rect);
             if (reflow) now.emplace_back(child, winrt::Windows::Foundation::Point{rect.X, rect.Y});
             position += length + static_cast<float>(spacing);
+        }
+        if (baseline && horizontal) {
+            // Once arranged, each child's first baseline is known: move the
+            // others down to the lowest.
+            std::vector<std::optional<float>> lines;
+            float lowest = 0;
+            for (auto const& [child, rect] : placed) {
+                lines.push_back(BaselineOf(child));
+                if (lines.back()) lowest = (std::max)(lowest, *lines.back());
+            }
+            float needed = 0;
+            for (size_t i = 0; i < placed.size(); ++i) {
+                auto [child, rect] = placed[i];
+                float shift = lines[i] ? lowest - *lines[i] : 0;
+                if (shift > 0.5f) {
+                    rect.Y += shift;
+                    child.Arrange(rect);
+                }
+                needed = (std::max)(needed, shift + child.DesiredSize().Height);
+            }
+            float more = (std::max)(0.0f, needed - (cross - extra));
+            if (std::abs(more - extra) > 0.5f) {
+                extra = more;
+                InvalidateMeasure();
+            }
         }
         if (reflow) places.Arranged(reflow, std::move(now));
         return final;
@@ -693,6 +803,45 @@ inline std::shared_ptr<Region> RootRegion(controls::Panel const& panel) {
     return holder->region;
 }
 
+/// Stretch `element` and the containers around it that hold something
+/// filling, as placing them would have: rows and columns lay out what
+/// fills at measure, but their own place in a stack or holder is set when
+/// they are placed.
+inline void Refill(xaml::FrameworkElement element) {
+    for (int depth = 0; element && depth < 32; ++depth) {
+        auto parent = element.Parent().try_as<xaml::FrameworkElement>();
+        if (!parent) return;
+        bool across = FillsRow(element), down = FillsColumn(element);
+        auto role = std::wstring(RoleOf(parent));
+        if (role.starts_with(L"bern-layers")) {
+            if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (down) element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+            bool rail = Backdrop(element);
+            bool w = (across && !rail) || role.ends_with(L"-w") || role.ends_with(L"-wh");
+            bool h = (down && !rail) || role.ends_with(L"-h") || role.ends_with(L"-wh");
+            if (w || h) {
+                SetRole(parent, w && h ? L"bern-layers-wh" : w ? L"bern-layers-w" : L"bern-layers-h");
+                if (w) parent.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+                if (h) parent.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+            }
+        } else if (role == L"bern-column") {
+            if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        } else if (role == L"bern-row") {
+            if (down) element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        } else if (parent.try_as<controls::ContentControl>() || parent.try_as<controls::Border>()) {
+            // A holder fills the way what it holds does.
+            if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (down) element.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+            if (!RoleOf(parent).empty() || across || down) Mirror(parent, element);
+            if (across) parent.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (down) parent.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        } else {
+            return;
+        }
+        element = parent;
+    }
+}
+
 struct Parent {
     controls::Panel panel{nullptr};
     std::shared_ptr<Region> region;
@@ -750,12 +899,14 @@ struct Parent {
             panel.VerticalAlignment(xaml::VerticalAlignment::Stretch);
         }
         // Layers holding something that fills fill the same way in turn; a
-        // rail fills the height of its layers without making them fill.
-        bool downward = down && RoleOf(Unwrapped(element)) != L"bern-rail-wh";
-        if (panel && (across || downward)) {
+        // rail takes the size of its layers without making them fill.
+        bool rail = Backdrop(element);
+        bool downward = down && !rail;
+        bool acrossward = across && !rail;
+        if (panel && (acrossward || downward)) {
             auto role = std::wstring(RoleOf(panel));
             if (role.starts_with(L"bern-layers")) {
-                bool w = across || role.ends_with(L"-w") || role.ends_with(L"-wh");
+                bool w = acrossward || role.ends_with(L"-w") || role.ends_with(L"-wh");
                 bool h = downward || role.ends_with(L"-h") || role.ends_with(L"-wh");
                 SetRole(panel, w && h ? L"bern-layers-wh" : w ? L"bern-layers-w" : L"bern-layers-h");
                 if (w) panel.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
@@ -765,6 +916,9 @@ struct Parent {
         auto index = region->Offset() + region->Count();
         region->items.push_back(Region::Entry{element});
         Items()->insert(index, element);
+        // Content that arrives after its containers were placed, such as a
+        // branch of a condition, makes them fill in turn.
+        if (panel && (across || down)) Refill(panel);
     }
 
     /// A new empty region at the end of this one.
@@ -1115,6 +1269,8 @@ struct Win {
     /// The window's layout size by its width: compact, medium, expanded
     /// or large.
     Cell<std::string> size{std::string("expanded")};
+    /// `window.short`: shorter than the compact breakpoint.
+    Cell<bool> isShort{false};
     /// Whether the window is immersive now: no title bar or toolbar.
     Cell<bool> immersive{false};
     /// Above the content: copies of shared elements while they move.
@@ -1141,6 +1297,7 @@ inline Value Ctx::Session(int session, int field) const { return win->CellOf(Fie
 inline Value Ctx::WindowFlag(std::string_view name) const {
     if (!win) return Value::Bool(false);
     if (name == "idle") return Value::Bool(win->idle.Get());
+    if (name == "short") return Value::Bool(win->isShort.Get());
     return Value::Bool(win->size.Get() == name);
 }
 inline double B::Len::Now(Ctx const& ctx) const {

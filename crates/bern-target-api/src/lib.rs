@@ -137,7 +137,8 @@ pub mod feature {
     pub const POPOVER_BUTTON: &str = "popover_button";
     /// `text { large_title: heavy }` in `style!`: weights of text styles.
     pub const TEXT_WEIGHTS: &str = "text_weights";
-    /// `Text(lines:)`: text limited to a number of lines.
+    /// `Text(lines:)` and `Text(line_height:)`: text limited to a number of
+    /// lines, or with lines of a given height.
     pub const TEXT_LINES: &str = "text_lines";
     /// `Image(corner:)`: an image with rounded corners.
     pub const IMAGE_CORNERS: &str = "image_corners";
@@ -167,6 +168,29 @@ pub mod feature {
     /// `Window(idle_enabled:)`: idle detection switched on and off by
     /// state. Without it a target keeps detecting idleness all the time.
     pub const IDLE_CONTROL: &str = "idle_control";
+    /// `Button(width: fill)`: a system button stretched across its
+    /// container, as a phone's main action.
+    pub const FILL_BUTTONS: &str = "fill_buttons";
+    /// `Grid(cell_ratio:, cell_extra:)`: rows as tall as the column width
+    /// gives, whatever their content.
+    pub const GRID_CELLS: &str = "grid_cells";
+    /// A `Search` standing in the page, not in a `Toolbar` or `Sidebar`:
+    /// the platform's search field with its results below it.
+    pub const PAGE_SEARCH: &str = "page_search";
+    /// `Section(style: plain)`: rows on the page itself, as a heading that
+    /// scrolls with its form; `Section(padding_x:, padding_y:)` its rows'
+    /// insets and `Form(gap:)` the room between its sections.
+    pub const FORM_LAYOUT: &str = "form_layout";
+    /// `Modal(cover: compact)`: the modal covers the whole window where it
+    /// is compact.
+    pub const MODAL_COVER: &str = "modal_cover";
+    /// `Window(landscape:)`: a phone turns the window to landscape while
+    /// it holds, and back to portrait.
+    pub const WINDOW_LANDSCAPE: &str = "window_landscape";
+    /// `window.short`: the window is shorter than the compact breakpoint.
+    pub const WINDOW_SHORT: &str = "window_short";
+    /// `TabAccessory`: a bar kept with the tabs over every page.
+    pub const TAB_ACCESSORY: &str = "tab_accessory";
     /// Transitions growing along one axis from a fixed edge.
     pub const EDGE_GROW: &str = "edge_grow";
     /// An entrance after a delay, including the first mounted frame.
@@ -190,6 +214,34 @@ pub mod feature {
     /// The `medium` and `large` layout sizes and `window.compact` and its
     /// siblings in expressions.
     pub const SIZE_CLASSES: &str = "size_classes";
+    /// Plural branches, dates and durations in translated texts, and enum
+    /// labels that show their variant's fields.
+    pub const TEXT_FORMATS: &str = "text_formats";
+}
+
+/// Whether the application writes numbers, dates or durations in its
+/// texts, or shows enum fields in labels: what [`feature::TEXT_FORMATS`]
+/// names.
+pub fn uses_text_formats(app: &Application) -> bool {
+    use bern_protocol::format::{Piece, parse};
+    let formatted = app.texts.iter().any(|text| {
+        text.translations.values().any(|translation| {
+            parse(translation).is_ok_and(|pieces| {
+                pieces
+                    .iter()
+                    .any(|piece| !matches!(piece, Piece::Text(_) | Piece::Value(_)))
+            })
+        })
+    });
+    let labels_show_fields = app.types.enums.iter().any(|def| {
+        def.variants.iter().any(|variant| {
+            variant
+                .label
+                .as_ref()
+                .is_some_and(|label| !label.params.is_empty())
+        })
+    });
+    formatted || labels_show_fields
 }
 
 /// The style effects a target shows for one control kind: outside any
@@ -870,6 +922,64 @@ fn first_element(
     first
 }
 
+/// The first `Search` standing in the page: toolbars and sidebars hold
+/// theirs directly.
+fn page_search(app: &Application) -> Option<&bern_ir::Element> {
+    let mut held = std::collections::HashSet::new();
+    for component in &app.components {
+        component.body.walk(&mut |node| {
+            if let bern_ir::Node::Element(bar) = node
+                && (bar.kind == "Toolbar" || bar.kind == "Sidebar")
+            {
+                for child in &bar.children {
+                    if let bern_ir::Node::Element(search) = child
+                        && search.kind == "Search"
+                    {
+                        held.insert(search as *const bern_ir::Element);
+                    }
+                }
+            }
+        });
+    }
+    first_element(app, |element| {
+        element.kind == "Search" && !held.contains(&(element as *const bern_ir::Element))
+    })
+}
+
+/// Whether any expression of the application reads `window.<field>`.
+fn reads_window_field(app: &Application, wanted: &str) -> bool {
+    let mut found = false;
+    let mut check = |expr: &bern_ir::Expr| {
+        expr.walk(&mut |part| {
+            if let bern_ir::ExprKind::Binding {
+                binding: bern_ir::Binding::Window { field },
+            } = &part.kind
+                && field == wanted
+            {
+                found = true;
+            }
+        });
+    };
+    for component in &app.components {
+        component.body.walk(&mut |node| match node {
+            bern_ir::Node::Element(element) => {
+                for (_, prop) in &element.props {
+                    if let bern_ir::Prop::Expr { expr } = prop {
+                        check(expr);
+                    }
+                }
+            }
+            bern_ir::Node::If(node) => {
+                for (condition, _) in &node.branches {
+                    check(condition);
+                }
+            }
+            _ => {}
+        });
+    }
+    found
+}
+
 /// Features the application uses that the target does not list.
 /// Whether an expression in `node` (a condition, or a prop of an element)
 /// reads one of the window's size fields.
@@ -907,6 +1017,12 @@ fn reads_window_size(node: &bern_ir::Node) -> bool {
 fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let lacks = |name: &str| !descriptor.features.contains(&name);
+    if lacks(feature::TEXT_FORMATS) && uses_text_formats(app) {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` cannot yet write plural branches, dates or durations in texts, or show a variant's fields in its label",
+            descriptor.id
+        )));
+    }
     if lacks(feature::SEARCH_PALETTE)
         && let Some(element) = first_element(app, |e| {
             e.kind == "SearchItem" || (e.kind == "Search" && e.keyword("style") == Some("palette"))
@@ -939,12 +1055,13 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
     }
     if lacks(feature::TEXT_LINES)
         && let Some(text) = first_element(app, |element| {
-            element.kind == "Text" && element.prop("lines").is_some()
+            element.kind == "Text"
+                && (element.prop("lines").is_some() || element.prop("line_height").is_some())
         })
     {
         diagnostics.push(
             Diagnostic::error(format!(
-                "target `{}` cannot limit the lines of a `Text`",
+                "target `{}` cannot limit the lines or set the line height of a `Text`",
                 descriptor.id
             ))
             .at(text.source.clone()),
@@ -1132,7 +1249,7 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
             element.kind == "ControlGroup"
                 || (matches!(
                     element.kind.as_str(),
-                    "Button" | "Menu" | "Picker" | "Switch" | "SplitButton"
+                    "Button" | "IconButton" | "Menu" | "Picker" | "Switch" | "SplitButton"
                 ) && (element.prop("shape").is_some() || element.prop("height").is_some()))
         })
     {
@@ -1201,6 +1318,95 @@ fn check_features(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagn
             ))
             .at(header.source.clone()),
         );
+    }
+    if lacks(feature::FILL_BUTTONS)
+        && let Some(button) = first_element(app, |e| e.kind == "Button" && e.keyword("width").is_some())
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot stretch a `Button` across its container (`width: fill`)",
+                descriptor.id
+            ))
+            .at(button.source.clone()),
+        );
+    }
+    if lacks(feature::MODAL_COVER)
+        && let Some(modal) = first_element(app, |e| e.kind == "Modal" && e.keyword("cover").is_some())
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot let a `Modal` cover the window (`cover: compact`)",
+                descriptor.id
+            ))
+            .at(modal.source.clone()),
+        );
+    }
+    if lacks(feature::FORM_LAYOUT)
+        && let Some(section) = first_element(app, |e| {
+            (e.kind == "Section"
+                && (e.keyword("style") == Some("plain")
+                    || e.prop("padding_x").is_some()
+                    || e.prop("padding_y").is_some()))
+                || (e.kind == "Form"
+                    && ["gap", "row_height", "padding_x", "padding_y"]
+                        .iter()
+                        .any(|prop| e.prop(prop).is_some()))
+        })
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot lay out a form's sections (`Section(style: plain)`, their `padding_x` / `padding_y`, `Form(gap:)`)",
+                descriptor.id
+            ))
+            .at(section.source.clone()),
+        );
+    }
+    if lacks(feature::PAGE_SEARCH)
+        && let Some(search) = page_search(app)
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot place a `Search` in the page; put it in a `Toolbar` or `Sidebar`",
+                descriptor.id
+            ))
+            .at(search.source.clone()),
+        );
+    }
+    if lacks(feature::TAB_ACCESSORY)
+        && let Some(accessory) = first_element(app, |e| e.kind == "TabAccessory")
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot keep a `TabAccessory` with its tabs",
+                descriptor.id
+            ))
+            .at(accessory.source.clone()),
+        );
+    }
+    if lacks(feature::GRID_CELLS)
+        && let Some(grid) = first_element(app, |e| e.kind == "Grid" && e.prop("cell_ratio").is_some())
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot size the rows of a `Grid` by its column width (`cell_ratio`)",
+                descriptor.id
+            ))
+            .at(grid.source.clone()),
+        );
+    }
+    if lacks(feature::WINDOW_SHORT) && reads_window_field(app, "short") {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` cannot tell how tall the window is (`window.short`)",
+            descriptor.id
+        )));
+    }
+    if lacks(feature::WINDOW_LANDSCAPE)
+        && let Some(window) = app.windows.windows.iter().find(|w| w.landscape.is_some())
+    {
+        diagnostics.push(Diagnostic::warning(format!(
+            "target `{}` keeps window `{}` in the device's orientation: `landscape` has no effect there",
+            descriptor.id, window.id
+        )));
     }
     if lacks(feature::IDLE_CONTROL)
         && let Some(window) = app.windows.windows.iter().find(|w| w.idle_enabled.is_some())

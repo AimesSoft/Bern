@@ -331,6 +331,8 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("appearance", PropKind::Keyword(&["light", "dark"])),
     opt("scroll_scale", PropKind::Number),
     opt("scroll_opacity", PropKind::Number),
+    opt("scroll_origin_x", PropKind::Number),
+    opt("scroll_origin_y", PropKind::Number),
     opt("nudge", PropKind::Bool),
     opt("nudge_key", PropKind::KeyValue),
     opt("nudge_scale", PropKind::Number),
@@ -465,6 +467,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("close_message", PropKind::LocalizedText),
                 opt("chrome", PropKind::Keyword(&["standard", "unified"])),
                 opt("immersive", PropKind::Bool),
+                opt("landscape", PropKind::Bool),
                 opt("idle_after", PropKind::Number),
                 opt("idle_enabled", PropKind::Bool),
             ],
@@ -528,9 +531,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("padding", PropKind::Length),
             opt("padding_x", PropKind::Length),
             opt("padding_y", PropKind::Length),
+            opt("cell_ratio", PropKind::Number),
+            opt("cell_extra", PropKind::Length),
         ],
         Children::Any,
-        "Equal columns, as many as fit with each at least `min_width` wide; children fill them row by row",
+        "Equal columns, as many as fit with each at least `min_width` wide; children fill them row by row; with `cell_ratio` every row is the column width ÷ `cell_ratio` + `cell_extra` tall, its children at the top, and taller content runs into the gap below",
     ),
     spec(
         "Stack",
@@ -580,9 +585,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         &[
             opt("width", PropKind::Length),
             opt("height", PropKind::Length),
+            opt("cover", PropKind::Keyword(&["compact"])),
         ],
         Children::Any,
-        "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop",
+        "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop; with `cover: compact` it covers the whole window where the window is compact, as a phone's full-screen flow",
     ),
     spec(
         "Flow",
@@ -619,9 +625,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         &[
             opt("axis", PropKind::Keyword(&["horizontal", "vertical"])),
             opt("anchor", PropKind::Keyword(&["start", "center", "end"])),
+            opt("overhang", PropKind::Length),
         ],
         Children::Any,
-        "A strip along `axis` that places each child at the fraction `at` of its length, or between the fractions `from` and `to`; the fractions may follow state",
+        "A strip along `axis` that places each child at the fraction `at` of its length, or between the fractions `from` and `to`; the fractions may follow state; with `overhang` the scale runs that far past both ends, fraction 0 standing before the rail's start",
     ),
     spec("Spacer", &[], Children::None, "Flexible space"),
     spec("Divider", &[], Children::None, "Separator line"),
@@ -633,9 +640,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("position", PropKind::PositionField),
             opt("arrival", PropKind::Keyword(&["nudge"])),
             opt("indicators", PropKind::Keyword(&["automatic", "hidden"])),
+            opt("open_at", PropKind::Number),
         ],
         Children::Any,
-        "Scrolling container; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives; `indicators: hidden` scrolls without showing the scroll bar, for a shelf that has its own paging buttons",
+        "Scrolling container; `open_at` is where it opens: the point at that fraction of the content at the same fraction of the view, 0 the start, 0.5 the middle at the middle, 1 the end; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives; `indicators: hidden` scrolls without showing the scroll bar, for a shelf that has its own paging buttons",
     ),
     spec(
         "SplitView",
@@ -668,9 +676,9 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         placement: Placement::Within(&["Sidebar"]),
         ..spec(
             "SidebarHeader",
-            &[],
+            &[opt("role", PropKind::Keyword(&["content", "title"]))],
             Children::Any,
-            "Content pinned to the top of the sidebar, above its list, such as the application's name and icon",
+            "Content pinned to the top of the sidebar, above its list, such as the application's name and icon; `role: title` says it only names the window with the application's icon and name, so platforms whose title bar already shows both (Windows) leave it out",
         )
     },
     ComponentSpec {
@@ -711,9 +719,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         &[
             opt("title", PropKind::DisplayText),
             opt("footer", PropKind::DisplayText),
+            opt("style", PropKind::Keyword(&["grouped", "plain"])),
+            opt("padding_x", PropKind::Length),
+            opt("padding_y", PropKind::Length),
         ],
         Children::Any,
-        "Titled group inside a form, list or sidebar",
+        "Titled group inside a form, list or sidebar; `style: plain` sets its rows on the page itself, without the group's background, margins or separators, as a heading that scrolls with the form; `padding_x` and `padding_y` are its rows' insets",
     ),
     spec(
         "Slot",
@@ -722,12 +733,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Where the application's modules contribute components, in the order Bern.toml lists the modules",
     ),
     ComponentSpec {
-        placement: Placement::Within(&["Sidebar", "Section"]),
+        placement: Placement::Within(&["Sidebar", "Section", "Tabs"]),
         ..spec(
             "Pages",
             &[req("slot", PropKind::SlotName)],
             Children::None,
-            "One sidebar item for every page the modules contribute to a page slot",
+            "One sidebar item, or in `Tabs` one tab showing the page, for every page the modules contribute to a page slot",
         )
     },
     spec(
@@ -741,9 +752,16 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ),
     spec(
         "Form",
-        &[opt("title", PropKind::DisplayText)],
+        &[
+            opt("title", PropKind::DisplayText),
+            opt("variant", PropKind::StyleVariant),
+            opt("gap", PropKind::Length),
+            opt("row_height", PropKind::Length),
+            opt("padding_x", PropKind::Length),
+            opt("padding_y", PropKind::Length),
+        ],
         Children::Any,
-        "Grouped form of labelled controls, optionally titling its page",
+        "Grouped form of labelled controls, optionally titling its page; `gap` is the room between its sections, `row_height` the least height of a row, and `padding_x` / `padding_y` the rows' insets in every section; a form opening with a plain section starts at the top of its page",
     ),
     spec(
         "Navigation",
@@ -786,9 +804,18 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("id", PropKind::Id),
             opt("fallback", PropKind::SelectionValue),
         ],
-        Children::Only(&["Tab"]),
+        Children::Only(&["Tab", "Pages", "TabAccessory"]),
         "Sibling pages switched by tabs",
     ),
+    ComponentSpec {
+        placement: Placement::Within(&["Tabs"]),
+        ..spec(
+            "TabAccessory",
+            &[opt("shown", PropKind::Bool)],
+            Children::Any,
+            "A bar kept with the tabs over every page, such as what is playing",
+        )
+    },
     ComponentSpec {
         placement: Placement::Within(&["Tabs"]),
         ..spec(
@@ -955,7 +982,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("height", PropKind::Length),
             ],
             Children::Only(&["MenuItem", "Divider"]),
-            "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name",
+            "Button opening a menu of commands; `style: icon` shows only the icon, as an `IconButton`, with `label` as its accessible name, and with `height` is a round button of that diameter",
         )
     },
     ComponentSpec {
@@ -1021,9 +1048,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("mark", PropKind::ColorRole),
             opt("lines", PropKind::Number),
             opt("font_size", PropKind::Length),
+            opt("line_height", PropKind::Length),
         ],
         Children::None,
-        "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis",
+        "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS",
     ),
     spec(
         "Canvas",
@@ -1153,6 +1181,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("icon", PropKind::Icon),
                 opt("shape", PropKind::Keyword(&["capsule"])),
                 opt("height", PropKind::Length),
+                opt("width", PropKind::Keyword(&["fill"])),
                 opt(
                     "role",
                     PropKind::Keyword(&["normal", "destructive", "cancel"]),
@@ -1169,7 +1198,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("files", PropKind::FileKinds),
             ],
             Children::Any,
-            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; with `pick`, it first asks for a file of `files` and runs the action once one is chosen",
+            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen",
         )
     },
     ComponentSpec {
@@ -1181,6 +1210,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("icon", PropKind::Icon),
                 opt("font_size", PropKind::Number),
+                opt("height", PropKind::Length),
                 req("label", PropKind::DisplayText),
                 opt(
                     "prominence",
@@ -1194,7 +1224,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("files", PropKind::FileKinds),
             ],
             Children::None,
-            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `pick` asks for a file as `Button` does",
+            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file as `Button` does",
         )
     },
     ComponentSpec {
@@ -1230,9 +1260,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("panel_prompt", PropKind::DisplayText),
                 opt("width", PropKind::Number),
                 opt("height", PropKind::Number),
+                opt("font_size", PropKind::Number),
             ],
             Children::Any,
-            "Search text bound to a session draft; the action runs on submit; children are the results shown below the field while it is in use",
+            "Search text bound to a session draft; the action runs on submit; children are the results shown below the field while it is in use; a palette's `width` and `height` size its panel, a field in the page's its field, and `font_size` its text",
         )
     },
     ComponentSpec {

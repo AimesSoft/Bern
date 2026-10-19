@@ -361,6 +361,8 @@ pub struct SidebarItemProps {
     pub label: Option<Str>,
     pub icon: Option<&'static str>,
     pub style: Option<&'static crate::style::StyleDef>,
+    /// A count at the trailing end, hidden while it is zero.
+    pub badge: Option<crate::motion::Num>,
 }
 
 /// One sidebar destination; it is part of the selection while mounted.
@@ -387,7 +389,21 @@ pub fn SidebarItem(p: &Parent, ctx: &Ctx, props: SidebarItemProps) {
     let shown = text.clone();
     let read = Rc::clone(&label);
     effect(move || shown.set_label(&read()));
+    text.set_hexpand(true);
     content.append(&text);
+    if let Some(badge) = &props.badge {
+        let count = gtk::Label::new(None);
+        count.add_css_class("bern-badge");
+        count.add_css_class("numeric");
+        count.set_valign(gtk::Align::Center);
+        let shown = count.clone();
+        crate::motion::bind_number(ctx, badge, None, &count, move |value| {
+            let value = value.round().max(0.0) as i64;
+            shown.set_visible(value > 0);
+            shown.set_label(&value.to_string());
+        });
+        content.append(&count);
+    }
     let row = gtk::ListBoxRow::new();
     match props.style {
         Some(style) => {
@@ -437,8 +453,15 @@ pub struct SplitSpec {
     /// The item chosen when the selected one leaves.
     pub fallback: Option<Get>,
     pub search: Option<(SearchProps, Option<Act>)>,
+    /// Content pinned above the sidebar's list.
+    pub header: Option<Build>,
     /// Content at the foot of the sidebar, below the list.
     pub footer: Option<Build>,
+    /// The sidebar's width, fixed.
+    pub width: Option<f64>,
+    /// While false, the detail's title bar leaves out the destination's
+    /// name, for pages that show their own.
+    pub titled: Option<Get>,
 }
 
 /// The sidebar and detail split of GNOME applications: a navigation
@@ -545,6 +568,16 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
         crate::widgets::Search(&Parent::of_box(&holder), ctx, search, submit, None);
         sidebar_box.append(&holder);
     }
+    if let Some(header) = spec.header {
+        let holder = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        holder.add_css_class("bern-sidebar-header");
+        holder.set_margin_top(6);
+        holder.set_margin_bottom(6);
+        holder.set_margin_start(12);
+        holder.set_margin_end(12);
+        header(&Parent::of_box(&holder), ctx);
+        sidebar_box.append(&holder);
+    }
     let scrolled = gtk::ScrolledWindow::new();
     scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     scrolled.set_vexpand(true);
@@ -577,6 +610,11 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
         titled.set_title(&name);
     });
     split.set_sidebar(Some(&sidebar_page));
+    if let Some(width) = spec.width {
+        split.set_sidebar_width_unit(adw::LengthUnit::Px);
+        split.set_min_sidebar_width(width);
+        split.set_max_sidebar_width(width);
+    }
 
     // Detail
     let selected_label: Rc<dyn Fn() -> String> = {
@@ -592,7 +630,19 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
         })
     };
     let page = Page::new();
-    let header = windows::header(&page, Some(Rc::clone(&selected_label)));
+    let titled: Rc<dyn Fn() -> bool> = match spec.titled.clone() {
+        Some(titled) => {
+            let at = ctx.clone();
+            Rc::new(move || crate::value::truthy(&titled(&at)))
+        }
+        None => Rc::new(|| true),
+    };
+    let header_label: Rc<dyn Fn() -> String> = {
+        let label = Rc::clone(&selected_label);
+        let titled = Rc::clone(&titled);
+        Rc::new(move || if titled() { label() } else { String::new() })
+    };
+    let header = windows::header(&page, Some(header_label));
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.set_vexpand(true);
     let detail_view = adw::ToolbarView::new();
@@ -899,11 +949,24 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
     });
 }
 
+/// `TabAccessory`: a bar kept under the pages while `shown` holds.
+pub struct TabAccessory {
+    pub shown: Option<Get>,
+    pub build: Build,
+}
+
 /// Tabs as a view stack with a view switcher in the page header, as
 /// GNOME preference windows show them. Tabs may come and go; only the
 /// selected tab is built.
 #[allow(non_snake_case)]
-pub fn Tabs(p: &Parent, ctx: &Ctx, id: Option<&'static str>, selection: Field, tabs: Build) {
+pub fn Tabs(
+    p: &Parent,
+    ctx: &Ctx,
+    id: Option<&'static str>,
+    selection: Field,
+    tabs: Build,
+    accessory: Option<TabAccessory>,
+) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
     let registry = Rc::new(TabRegistry {
@@ -918,13 +981,26 @@ pub fn Tabs(p: &Parent, ctx: &Ctx, id: Option<&'static str>, selection: Field, t
     switcher.set_stack(Some(&stack));
     switcher.set_policy(adw::ViewSwitcherPolicy::Wide);
     match ctx.page() {
-        Some(page) => page.push_title_widget(switcher.upcast()),
+        Some(page) => page.push_title_widget(switcher.clone().upcast()),
         None => {
             let bar = gtk::Box::new(gtk::Orientation::Vertical, 0);
             switcher.set_halign(gtk::Align::Center);
             bar.append(&switcher);
             p.add(&bar);
         }
+    }
+    // A compact window switches tabs from a bar under the pages, as
+    // GNOME's adaptive applications do; wider ones from the header.
+    let switcher_bar = adw::ViewSwitcherBar::new();
+    switcher_bar.set_stack(Some(&stack));
+    {
+        let at = ctx.clone();
+        let (header, bottom) = (switcher.clone(), switcher_bar.clone());
+        effect(move || {
+            let compact = crate::value::truthy(&at.window("compact"));
+            header.set_visible(!compact);
+            bottom.set_reveal(compact);
+        });
     }
     let shown: Rc<RefCell<Option<Rc<TabEntry>>>> = Rc::new(RefCell::new(None));
     let updating = Rc::new(std::cell::Cell::new(false));
@@ -1023,6 +1099,31 @@ pub fn Tabs(p: &Parent, ctx: &Ctx, id: Option<&'static str>, selection: Field, t
         );
     }
     p.add(&stack);
+    // The accessory slides up from under the pages, on a card as
+    // Adwaita sets a raised bar.
+    if let Some(accessory) = accessory {
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        bar.add_css_class("card");
+        bar.set_margin_start(12);
+        bar.set_margin_end(12);
+        bar.set_margin_top(6);
+        bar.set_margin_bottom(6);
+        bar.set_size_request(-1, 48);
+        let revealer = gtk::Revealer::new();
+        revealer.set_transition_type(gtk::RevealerTransitionType::SlideUp);
+        revealer.set_child(Some(&bar));
+        (accessory.build)(&Parent::of_box(&bar), ctx);
+        match accessory.shown {
+            Some(shown) => {
+                let at = ctx.clone();
+                let shown_in = revealer.clone();
+                effect(move || shown_in.set_reveal_child(crate::value::truthy(&shown(&at))));
+            }
+            None => revealer.set_reveal_child(true),
+        }
+        p.add(&revealer);
+    }
+    p.add(&switcher_bar);
 }
 
 /// The layout size of an available width, by the breakpoints of
@@ -1050,22 +1151,14 @@ const SIZES: [&str; 4] = ["compact", "medium", "expanded", "large"];
 /// same id in several layouts are the same control.
 #[allow(non_snake_case)]
 pub fn Adaptive(p: &Parent, ctx: &Ctx, id: Option<&'static str>, layouts: [Option<Build>; 4]) {
-    // A probe with no height measures the width the layout gets.
-    let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    holder.set_hexpand(true);
-    let probe = gtk::DrawingArea::new();
-    probe.set_content_height(0);
-    probe.set_hexpand(true);
-    holder.append(&probe);
+    // The layout is chosen by the width the container offers, which the
+    // layout shown does not widen.
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    holder.append(&content);
     let size = Cell::new("expanded");
     let measured = size.clone();
-    probe.connect_resize(move |_, width, _| {
-        // A hidden layout has no width to judge by; it keeps its size.
-        if width > 0 {
-            measured.set(size_of(f64::from(width)));
-        }
+    // A hidden layout has no width to judge by; it keeps its size.
+    let holder = crate::layout::Offered::new(&content, move |width| {
+        measured.set(size_of(f64::from(width)));
     });
     let slot = Slot::new(Parent::of_box(&content));
     let at = ctx.clone();

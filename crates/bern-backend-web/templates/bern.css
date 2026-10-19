@@ -763,6 +763,10 @@ button:disabled {
   min-width: 0;
 }
 
+.bern-grid-cells {
+  align-items: start;
+}
+
 .bern-flow {
   display: flex;
   flex-flow: row wrap;
@@ -795,6 +799,17 @@ button:disabled {
   color: var(--bern-text-primary);
   box-shadow: 0 16px 48px -12px var(--bern-scrim);
   overflow: hidden;
+}
+
+.bern-modal-cover {
+  width: 100vw !important;
+  height: 100dvh !important;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .bern-modal::backdrop,
@@ -911,6 +926,13 @@ button:disabled {
 }
 
 /* Scrolls without showing the scroll bar. */
+/* `Button(width: fill)`: the button stretches across its container. */
+.bern-button-fill {
+  align-self: stretch;
+  justify-content: center;
+  width: 100%;
+}
+
 .bern-scroll-indicators-hidden {
   scrollbar-width: none;
 }
@@ -994,15 +1016,39 @@ button:disabled {
 .bern-group {
   display: flex;
   flex-direction: column;
-  background: var(--bern-surface-canvas);
+  background: var(--bern-form-row, var(--bern-surface-canvas));
   border: 1px solid var(--bern-separator);
   border-radius: var(--bern-radius-card);
   overflow: hidden;
 }
 
+/* A plain section's rows stand on the page. */
+.bern-group-plain {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
 .bern-group > * {
   min-height: var(--bern-row-height);
-  padding: 12px 16px;
+  padding: var(--bern-row-padding-y, 12px) var(--bern-row-padding-x, 16px);
+}
+
+/* A plain section's rows keep the page's own layout, whatever insets the
+   form gives its groups; its own insets still apply. */
+.bern-group-plain {
+  --bern-row-padding-x: 0px;
+  --bern-row-padding-y: 0px;
+}
+
+.bern-group-plain > * {
+  min-height: 0;
+  padding: var(--bern-row-padding-y) var(--bern-row-padding-x);
+}
+
+.bern-group-plain > * + * {
+  border-top: 0;
 }
 
 .bern-group > * + * {
@@ -2167,6 +2213,24 @@ button.bern-menu-item:disabled .bern-icon {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+/* `TabAccessory`: a raised bar under the pages, as a player shows what is
+   playing over every page. */
+.bern-tab-accessory {
+  flex: none;
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  margin: 6px 12px;
+  padding: 0 6px;
+  border-radius: 24px;
+  background: var(--bern-surface-raised);
+  box-shadow: 0 0 0 1px var(--bern-separator), 0 8px 24px -12px var(--bern-scrim);
+}
+
+.bern-tab-accessory[hidden] {
+  display: none;
 }
 
 /* Tabs at a wide dialog's root are a vertical navigation. */

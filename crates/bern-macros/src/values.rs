@@ -16,26 +16,48 @@ pub fn clean_item(item: &Item) -> Item {
             item.attrs.insert(0, derive);
             for variant in &mut item.variants {
                 variant.attrs.retain(|attr| !is_bern_attr(attr, "label"));
+                strip_content(&mut variant.fields);
             }
         }
         Item::Struct(item) => {
             item.attrs.retain(|attr| !is_bern_attr(attr, "value"));
             item.attrs.insert(0, derive);
+            strip_content(&mut item.fields);
         }
         _ => {}
     }
     item
 }
 
-/// Check that a label translates every configured language.
+/// Remove `#[content]`, which only the schema reads, from fields.
+pub fn strip_content(fields: &mut syn::Fields) {
+    for field in fields.iter_mut() {
+        field.attrs.retain(|attr| !is_bern_attr(attr, "content"));
+    }
+}
+
+/// Check that a label translates every configured language. Its
+/// placeholders are the variant's fields, checked with the schema.
 pub fn check_label(tr: &bern_syntax::Tr, languages: Option<&Languages>) -> syn::Result<()> {
     if !tr.args.is_empty() {
         return Err(syn::Error::new(
             tr.span,
-            "enum labels cannot interpolate values",
+            "a label shows its variant's fields by name, such as `{title}`; it takes no `; name: value` arguments",
         ));
     }
-    crate::component::check_translations(tr, languages)
+    let config = languages.map(|languages| (languages.supported.as_slice(), languages.strict));
+    let mut errors = bern_syntax::lower::check_languages(tr, config)
+        .into_iter()
+        .map(|(span, message)| syn::Error::new(span, message));
+    match errors.next() {
+        None => Ok(()),
+        Some(mut first) => {
+            for error in errors {
+                first.combine(error);
+            }
+            Err(first)
+        }
+    }
 }
 
 /// Trait implementations shared by standalone and protocol value types.

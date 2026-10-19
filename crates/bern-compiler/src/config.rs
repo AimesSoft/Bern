@@ -25,6 +25,10 @@ struct RawConfig {
     modules: Vec<RawModuleRef>,
     resources: Option<RawResources>,
     layouts: Option<RawLayouts>,
+    /// Slot id to the application's own components placed there, before
+    /// the modules': a module may leave room in its pages for the shell.
+    #[serde(default)]
+    contributes: BTreeMap<String, Vec<String>>,
 }
 
 /// `[[modules]]`: a module directory holding its own `Bern.toml`.
@@ -192,10 +196,20 @@ struct RawApp {
     bundle_id: String,
     version: String,
     name: BTreeMap<String, String>,
-    /// A square PNG, relative to `Bern.toml`; the Bern logo without it.
-    icon: Option<toml::Spanned<String>>,
+    /// A square PNG, relative to `Bern.toml`, or a table giving platforms
+    /// their own icons; the Bern logo without it.
+    icon: Option<toml::Spanned<RawIcon>>,
     /// Who publishes the application, for installers and packages.
     publisher: Option<String>,
+}
+
+/// `[app].icon`: one square PNG for every platform, or `[app.icon]` with
+/// `default` for every platform and an entry per platform name.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum RawIcon {
+    One(String),
+    Platforms(BTreeMap<String, String>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -287,8 +301,12 @@ pub struct Config {
     pub bundle_id: String,
     pub version: String,
     pub name: BTreeMap<String, String>,
-    /// `[app].icon`: a checked square PNG relative to `dir`.
+    /// `[app].icon`, or `default` in `[app.icon]`: a checked square PNG
+    /// relative to `dir`.
     pub icon: Option<String>,
+    /// The other entries of `[app.icon]`: platform name to a checked square
+    /// PNG, or a file or folder in the platform's own form, relative to `dir`.
+    pub platform_icons: BTreeMap<String, String>,
     /// `[app].publisher`, trimmed; `None` when absent or blank.
     pub publisher: Option<String>,
     pub languages: Vec<String>,
@@ -308,6 +326,9 @@ pub struct Config {
     pub libraries: Vec<PathBuf>,
     /// The application's modules, in the order `Bern.toml` lists them.
     pub modules: Vec<ModuleConfig>,
+    /// Slot id to the application's own components placed there, before
+    /// the modules'.
+    pub contributes: BTreeMap<String, Vec<String>>,
     /// Files shipped with the application, directories expanded, sorted by
     /// name.
     pub resources: Vec<ResourceDef>,
@@ -506,20 +527,64 @@ fn manifest_location(file: &str, text: &str, offset: usize) -> SourceLocation {
     }
 }
 
-/// Check `[app].icon`: a file inside the project, reached without symbolic
-/// links, holding a square PNG of a size every platform scales down from.
-fn app_icon(
+/// Check `[app].icon`: one square PNG for every platform, or `[app.icon]`
+/// with `default` for every platform and an icon per platform name. Returns
+/// the one for every platform and the platforms' own.
+fn app_icons(
     dir: &Path,
     manifest: &str,
     text: &str,
-    entry: &toml::Spanned<String>,
+    entry: &toml::Spanned<RawIcon>,
+    errors: &mut Vec<Diagnostic>,
+) -> (Option<String>, BTreeMap<String, String>) {
+    let declared = manifest_location(manifest, text, entry.span().start);
+    let mut platforms = BTreeMap::new();
+    match entry.get_ref() {
+        RawIcon::One(written) => (
+            app_icon(dir, "[app].icon", None, written, &declared, errors),
+            platforms,
+        ),
+        RawIcon::Platforms(table) => {
+            let mut every = None;
+            for (key, written) in table {
+                let name = format!("[app.icon].{key}");
+                if key == "default" {
+                    every = app_icon(dir, &name, None, written, &declared, errors);
+                } else if bern_target_api::icon::PLATFORMS.contains(&key.as_str()) {
+                    if let Some(icon) = app_icon(dir, &name, Some(key), written, &declared, errors)
+                    {
+                        platforms.insert(key.clone(), icon);
+                    }
+                } else {
+                    errors.push(
+                        Diagnostic::error(format!(
+                            "{name}: `{key}` is not a platform; use `default` or one of {}",
+                            bern_target_api::icon::PLATFORMS.join(", ")
+                        ))
+                        .at(declared.clone()),
+                    );
+                }
+            }
+            (every, platforms)
+        }
+    }
+}
+
+/// Check one icon: a file or folder inside the project, reached without
+/// symbolic links. For every platform (`platform` is `None`) it is a square
+/// PNG of a size every platform scales down from; for one platform it can
+/// also be in that platform's own form.
+fn app_icon(
+    dir: &Path,
+    name: &str,
+    platform: Option<&str>,
+    written: &str,
+    declared: &SourceLocation,
     errors: &mut Vec<Diagnostic>,
 ) -> Option<String> {
-    let written = entry.get_ref().as_str();
-    let declared = manifest_location(manifest, text, entry.span().start);
     let error = |message: String| Diagnostic::error(message).at(declared.clone());
     if let Err(message) = bern_protocol::check_resource_name(written) {
-        errors.push(error(format!("[app].icon: {message}")));
+        errors.push(error(format!("{name}: {message}")));
         return None;
     }
     let mut path = dir.to_path_buf();
@@ -528,7 +593,7 @@ fn app_icon(
         match std::fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.file_type().is_symlink() => {
                 errors.push(error(format!(
-                    "[app].icon `{written}`: {} is a symbolic link; name the file it points to",
+                    "{name} `{written}`: {} is a symbolic link; name the file it points to",
                     path.display()
                 )));
                 return None;
@@ -536,24 +601,30 @@ fn app_icon(
             Ok(_) => {}
             Err(_) => {
                 errors.push(error(format!(
-                    "[app].icon `{written}` does not exist: {}",
+                    "{name} `{written}` does not exist: {}",
                     dir.join(written).display()
                 )));
                 return None;
             }
         }
     }
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(failure) => {
-            errors.push(error(format!(
-                "[app].icon `{written}` cannot be read: {failure}"
-            )));
-            return None;
+    let checked = match platform {
+        Some(platform) if !bern_target_api::icon::is_png_name(written) => {
+            bern_target_api::icon::check_native(platform, &path)
         }
+        _ if path.is_dir() => Err(format!(
+            "is a folder; {}",
+            match platform {
+                Some(platform) => format!("give {}", bern_target_api::icon::accepted(platform)),
+                None => "give a square PNG".to_string(),
+            }
+        )),
+        _ => std::fs::read(&path)
+            .map_err(|failure| format!("cannot be read: {failure}"))
+            .and_then(|bytes| bern_target_api::icon::check(&bytes).map(drop)),
     };
-    if let Err(message) = bern_target_api::icon::check(&bytes) {
-        errors.push(error(format!("[app].icon `{written}` {message}")));
+    if let Err(message) = checked {
+        errors.push(error(format!("{name} `{written}` {message}")));
         return None;
     }
     Some(written.to_string())
@@ -1029,15 +1100,25 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
             }
         }
     }
+    for slot in raw.contributes.keys() {
+        if !bern_protocol::valid_name(slot) {
+            errors.push(Diagnostic::error(format!(
+                "{}: slot `{slot}` must be lower snake case",
+                path.display()
+            )));
+        }
+    }
     let resources = raw
         .resources
         .as_ref()
         .map(|raw| resources(&dir, &path.display().to_string(), &text, raw, &mut errors))
         .unwrap_or_default();
-    let icon =
-        raw.app.icon.as_ref().and_then(|entry| {
-            app_icon(&dir, &path.display().to_string(), &text, entry, &mut errors)
-        });
+    let (icon, platform_icons) = raw
+        .app
+        .icon
+        .as_ref()
+        .map(|entry| app_icons(&dir, &path.display().to_string(), &text, entry, &mut errors))
+        .unwrap_or_default();
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1049,6 +1130,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         version: raw.app.version,
         name: raw.app.name,
         icon,
+        platform_icons,
         publisher: raw
             .app
             .publisher
@@ -1069,6 +1151,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         targets,
         libraries,
         modules,
+        contributes: raw.contributes,
         resources,
         layouts,
     })
@@ -1481,8 +1564,11 @@ mod tests {
         assert!(source_file(dir, "ui/pages.rs").is_err());
     }
 
-    /// Check `[app].icon = entry` in a project holding `files`.
-    fn check_icon(files: &[(&str, Vec<u8>)], entry: &str) -> (Option<String>, Vec<Diagnostic>) {
+    /// Check `icon = <value>` (TOML) in a project holding `files`.
+    fn check_icons(
+        files: &[(&str, Vec<u8>)],
+        value: &str,
+    ) -> (Option<String>, BTreeMap<String, String>, Vec<Diagnostic>) {
         static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let dir = std::env::temp_dir().join(format!(
             "bern-icon-test-{}-{}",
@@ -1498,14 +1584,20 @@ mod tests {
         }
         #[derive(Deserialize)]
         struct Manifest {
-            icon: toml::Spanned<String>,
+            icon: toml::Spanned<RawIcon>,
         }
-        let text = format!("# Bern.toml\nicon = \"{entry}\"\n");
+        let text = format!("# Bern.toml\nicon = {value}\n");
         let raw: Manifest = toml::from_str(&text).unwrap();
         let mut errors = Vec::new();
-        let found = app_icon(&dir, "Bern.toml", &text, &raw.icon, &mut errors);
+        let (every, platforms) = app_icons(&dir, "Bern.toml", &text, &raw.icon, &mut errors);
         let _ = std::fs::remove_dir_all(&dir);
-        (found, errors)
+        (every, platforms, errors)
+    }
+
+    /// Check `[app].icon = entry` in a project holding `files`.
+    fn check_icon(files: &[(&str, Vec<u8>)], entry: &str) -> (Option<String>, Vec<Diagnostic>) {
+        let (every, _, errors) = check_icons(files, &format!("\"{entry}\""));
+        (every, errors)
     }
 
     /// The first bytes of a PNG of `width` × `height` pixels.
@@ -1541,6 +1633,113 @@ mod tests {
                 errors[0].message
             );
             assert_eq!(errors[0].location.as_ref().map(|at| at.line), Some(2));
+        }
+    }
+
+    #[test]
+    fn platforms_take_their_own_icons() {
+        let icns = {
+            let mut bytes = b"icns\0\0\0\x18ic10\0\0\0\x10".to_vec();
+            bytes.extend_from_slice(&png(1024, 1024)[..8]);
+            bytes
+        };
+        let ico = {
+            let mut bytes = vec![0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 32, 0];
+            bytes.extend_from_slice(&24u32.to_le_bytes());
+            bytes.extend_from_slice(&22u32.to_le_bytes());
+            bytes.extend_from_slice(&png(256, 256));
+            bytes
+        };
+        let files = vec![
+            ("icon.png", png(1024, 1024)),
+            ("mac/App.icns", icns),
+            ("win/app.ico", ico),
+            (
+                "ios/AppIcon.appiconset/Contents.json",
+                br#"{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}]}"#.to_vec(),
+            ),
+            ("ios/AppIcon.appiconset/AppIcon.png", png(1024, 1024)),
+            ("android/res/mipmap-anydpi-v26/ic_launcher.xml", b"<adaptive-icon/>".to_vec()),
+            ("android/res/mipmap-hdpi/ic_launcher_foreground.png", png(162, 162)),
+            ("android/res/mipmap-hdpi/ic_launcher_round.png", png(72, 72)),
+            ("android/res/values/ic_launcher_background.xml", b"<resources/>".to_vec()),
+            ("linux/hicolor/48x48/apps/app.png", png(48, 48)),
+            ("linux/hicolor/256x256/apps/app.png", png(256, 256)),
+            ("linux/hicolor/scalable/apps/app.svg", b"<svg/>".to_vec()),
+            ("linux/hicolor/symbolic/apps/app-symbolic.svg", b"<svg/>".to_vec()),
+            ("web/favicon.svg", b"<svg/>".to_vec()),
+            ("web/apple-touch-icon.png", png(180, 180)),
+            ("web/site.webmanifest", b"{}".to_vec()),
+        ];
+        let (every, platforms, errors) = check_icons(
+            &files,
+            r#"{ default = "icon.png", macos = "mac/App.icns", windows = "win/app.ico", ios = "ios/AppIcon.appiconset", android = "android/res", linux = "linux/hicolor", browser = "web" }"#,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(every.as_deref(), Some("icon.png"));
+        assert_eq!(platforms.len(), 6);
+        assert_eq!(platforms["linux"], "linux/hicolor");
+        // A platform can also take another PNG, and needs no `default`.
+        let (every, platforms, errors) = check_icons(&files, r#"{ android = "icon.png" }"#);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(every, None);
+        assert_eq!(platforms["android"], "icon.png");
+
+        for (extra, value, expected) in [
+            (vec![], r#"{ tvos = "icon.png" }"#, "not a platform"),
+            (vec![], r#"{ macos = "win/app.ico" }"#, "`.icns`"),
+            (vec![], r#"{ default = "mac/App.icns" }"#, "not a PNG"),
+            (vec![], r#"{ windows = "web" }"#, "`.ico`"),
+            (
+                vec![("bad.icns", b"icns\0\0\0\x40".to_vec())],
+                r#"{ macos = "bad.icns" }"#,
+                "bytes long",
+            ),
+            (
+                vec![("android/res/values/strings.xml", b"<resources/>".to_vec())],
+                r#"{ android = "android/res" }"#,
+                "Bern writes itself",
+            ),
+            (
+                vec![("other/res/mipmap-hdpi/ic_foo.png", png(72, 72))],
+                r#"{ android = "other/res" }"#,
+                "ic_launcher",
+            ),
+            (
+                vec![("linux/hicolor/64x64/apps/app.png", png(48, 48))],
+                r#"{ linux = "linux/hicolor" }"#,
+                "48 × 48 pixels, not 64 × 64",
+            ),
+            (
+                vec![("linux/hicolor/32x32/apps/other.png", png(32, 32))],
+                r#"{ linux = "linux/hicolor" }"#,
+                "one icon",
+            ),
+            (
+                vec![(
+                    "ios/AppIcon.appiconset/Contents.json",
+                    br#"{"images":[{"filename":"Gone.png"}]}"#.to_vec(),
+                )],
+                r#"{ ios = "ios/AppIcon.appiconset" }"#,
+                "Gone.png",
+            ),
+            (
+                vec![("web/notes.txt", b"x".to_vec())],
+                r#"{ browser = "web" }"#,
+                "notes.txt",
+            ),
+        ] {
+            let mut all = files.clone();
+            all.retain(|(path, _)| !extra.iter().any(|(other, _)| other == path));
+            all.extend(extra);
+            let (_, platforms, errors) = check_icons(&all, value);
+            assert_eq!(errors.len(), 1, "{value}: {errors:?}");
+            assert!(platforms.is_empty(), "{value}");
+            assert!(
+                errors[0].message.contains(expected),
+                "{value}: {}",
+                errors[0].message
+            );
         }
     }
 }

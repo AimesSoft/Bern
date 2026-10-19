@@ -92,6 +92,7 @@ pub mod demo {
     #[state]
     pub struct State {
         pub count: i64,
+        #[content]
         pub title: String,
         pub mode: Mode,
     }
@@ -312,6 +313,34 @@ fn valid_declarations_compile() {
 }
 
 #[test]
+fn tab_accessory_stands_directly_in_its_tabs() {
+    let tabs = |accessory: &str| {
+        format!(
+            r#"Tabs(selection: draft.mode) {{
+                Tab(value: Mode::Fast, label: tr! {{ "en" => "Fast", "ja" => "速い" }}) {{ Spacer }}
+                {accessory}
+            }}"#
+        )
+    };
+    compile_ui(&wrap(&tabs("TabAccessory(shown: app.count > 0) { Spacer }"))).unwrap_or_else(
+        |errors| {
+            panic!(
+                "{}",
+                errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
+            )
+        },
+    );
+    assert!(
+        errors(&tabs("if app.count > 0 { TabAccessory { Spacer } }"))
+            .contains("directly in its `Tabs`")
+    );
+    assert!(
+        errors(&tabs("TabAccessory { Spacer } TabAccessory { Spacer }"))
+            .contains("keeps one `TabAccessory`")
+    );
+}
+
+#[test]
 fn diagnostics_cover_the_documented_failures() {
     let cases = [
         (
@@ -376,6 +405,138 @@ fn diagnostics_cover_the_documented_failures() {
     ];
     for (body, expected) in cases {
         let output = errors(body);
+        assert!(
+            output.contains(expected),
+            "`{body}` should report `{expected}`, got:\n{output}"
+        );
+    }
+}
+
+const CONTENT_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "demo", version = 1)]
+pub mod demo {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Notice {
+        #[label(tr! { "en" => "Saved {title}", "ja" => "{title} を保存しました" })]
+        Saved {
+            #[content]
+            title: String,
+        },
+        #[label(tr! { "en" => "{n, plural, one {# file} other {# files}} due {day, date, MMM d}", "ja" => "{n} 件、{day, date, M月d日}まで" })]
+        Due { n: i64, day: CalendarDate },
+    }
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+        #[content]
+        pub title: String,
+        pub status: String,
+        pub due: CalendarDate,
+        pub notice: Notice,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self, amount: i64) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+fn content_ui(body: &str) -> String {
+    format!(
+        r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {{
+    pub name: String,
+}}
+
+#[component]
+pub fn app(app: demo::Client) -> impl View {{
+    ui! {{
+        WindowSet(handle: AppWindows, primary: main) {{
+            Window(id: main, title: tr! {{ "en" => "Main", "ja" => "メイン" }}, initial: open) {{
+                page(app: app)
+            }}
+        }}
+    }}
+}}
+
+#[component]
+pub fn heading(#[content] title: String, note: String) -> impl View {{
+    ui! {{ Text(content: title) }}
+}}
+
+#[component]
+pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {{
+    ui! {{
+        {body}
+    }}
+}}
+"#
+    )
+}
+
+#[test]
+fn shown_text_is_declared_content_and_arguments_fit_their_format() {
+    let valid = r#"Column {
+        Text(content: app.title)
+        Text(content: draft.name)
+        Text(content: app.notice)
+        heading(title: app.title, note: app.status)
+        Text(content: tr! { "en" => "{n, plural, =0 {no files} one {# file} other {# files}}", "ja" => "{n} 件"; n: app.count })
+        Text(content: tr! { "en" => "Due {day, date, EEE, MMM d}", "ja" => "{day, date, M月d日}まで"; day: app.due })
+        Text(content: tr! { "en" => "{t, duration, m:ss} left", "ja" => "残り {t, duration, m:ss}"; t: app.count })
+        Text(content: tr! { "en" => "Saved {title}", "ja" => "{title} を保存"; title: app.title })
+    }"#;
+    compile_project(CONTENT_PROTOCOL, &content_ui(valid)).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
+        )
+    });
+    let cases = [
+        (r#"Text(content: app.status)"#, "error[B105]: `app.status` is shown as it is"),
+        (
+            r#"Text(content: tr! { "en" => "Now {s}", "ja" => "今 {s}"; s: app.status })"#,
+            "error[B105]: `app.status`",
+        ),
+        (
+            r#"Text(content: tr! { "en" => "Now {s}", "ja" => "今 {s}"; s: "busy" })"#,
+            "error[B105]: fixed text belongs in the translations",
+        ),
+        (r#"heading(title: app.status, note: app.status)"#, "error[B105]: `title` of `heading`"),
+        (
+            r#"Text(content: tr! { "en" => "{n, plural, other {# files}}", "ja" => "{n} 件"; n: app.count })"#,
+            "error[B104]: the `en` text needs the plural branch `one` of `n`",
+        ),
+        (
+            r#"Text(content: tr! { "en" => "{n, plural, one {# x} other {# xs}}", "ja" => "{n}"; n: app.title })"#,
+            "error[B104]: `{n, plural, …}` needs a number, found text",
+        ),
+        (
+            r#"Text(content: tr! { "en" => "{d, date, MMM d}", "ja" => "{d, date, M月d日}"; d: app.count })"#,
+            "error[B104]: `{d, date, …}` needs a `CalendarDate`, found int",
+        ),
+        (
+            r#"Text(content: tr! { "en" => "{d}", "ja" => "{d}"; d: app.due })"#,
+            "error[B104]: `{d}` is a date",
+        ),
+        (r#"Text(content: app.due)"#, "a date is written in the reader's language with `tr!`"),
+    ];
+    for (body, expected) in cases {
+        let output = match compile_project(CONTENT_PROTOCOL, &content_ui(body)) {
+            Ok(_) => panic!("expected `{body}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
         assert!(
             output.contains(expected),
             "`{body}` should report `{expected}`, got:\n{output}"
@@ -878,12 +1039,14 @@ pub mod demo {
     #[value]
     pub struct Hit {
         pub id: i64,
+        #[content]
         pub title: String,
     }
 
     #[state]
     pub struct State {
         pub count: i64,
+        #[content]
         pub title: String,
         pub mode: Mode,
     }
@@ -1661,6 +1824,33 @@ fn modules_compose_into_one_catalog_and_bind_by_namespace() {
     }
     assert!(calls.contains(&("overview".into(), "notes_summary".into())));
     assert!(calls.contains(&("main_window".into(), "notes_page".into())));
+
+    // `pages.notes.show()` in the module sets the shell's page selection,
+    // and the summary reads the session that holds it.
+    let summary = compiled
+        .app
+        .components
+        .iter()
+        .find(|component| component.name == "notes_summary")
+        .unwrap();
+    let mut shows = None;
+    summary.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node
+            && let Some(ir::Action::Session { field, op: ir::SessionOp::Set { value } }) =
+                &element.action
+        {
+            shows = Some((field.ty.clone(), value.kind.clone()));
+        }
+    });
+    let (ty, value) = shows.expect("the link sets a session field");
+    assert_eq!(ty, Type::Enum { name: "MainPage".into() });
+    assert!(matches!(value, ir::ExprKind::Variant { variant: 2, .. }), "{value:?}");
+    assert!(
+        summary
+            .params
+            .iter()
+            .any(|param| matches!(&param.kind, ir::ParamKind::Session { .. }))
+    );
 }
 
 #[test]
@@ -2384,6 +2574,19 @@ fn style_rules_are_lowered_and_checked() {
             opacity: 0.3
         }
     );
+
+    // A border at rest takes a width as the states' does.
+    let (sheet, diagnostics) =
+        lower("Button.day { border: border(fill.subtle, width: 0.5), hover: border(accent) }");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(matches!(
+        &sheet.rules[0].base[0],
+        StyleEffect::Border { width, .. } if *width == 0.5
+    ));
+    assert!(matches!(
+        &sheet.rules[0].states[0].effects[0],
+        StyleEffect::Border { width, .. } if *width == 1.0
+    ));
 
     for (body, expected) in [
         ("Button { hover: shadow(-2) }", "radius of 0 or more"),

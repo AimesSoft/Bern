@@ -21,6 +21,9 @@ struct ScrollProps {
     Motion const* reflow = nullptr;
     /// Scroll without showing the scroll bar.
     bool hideIndicators = false;
+    /// Where it opens: the point at this fraction of the content at the
+    /// same fraction of the view.
+    std::optional<double> openAt;
 };
 
 /// The scroll offset that puts `item` at the anchor of `scroll`.
@@ -79,8 +82,25 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     inner.scroll = scroll;
     children(Parent::Of(panel), inner);
     p.Add(scroller);
+    if (props.openAt) {
+        // Once it first knows how far it scrolls, it stands at that
+        // fraction of it.
+        double at = (std::clamp)(*props.openAt, 0.0, 1.0);
+        auto opened = std::make_shared<bool>(false);
+        scroller.LayoutUpdated([weak = winrt::make_weak(scroller), at, opened, horizontal](auto&&, auto&&) {
+            auto viewer = weak.get();
+            if (!viewer || *opened) return;
+            double room = horizontal ? viewer.ScrollableWidth() : viewer.ScrollableHeight();
+            if (room <= 0) return;
+            *opened = true;
+            if (horizontal) viewer.ChangeView(at * room, nullptr, nullptr, true);
+            else viewer.ChangeView(nullptr, at * room, nullptr, true);
+        });
+    }
     if (!props.snap && !props.position) return;
-    bool center = !props.snap || std::string_view(props.snap) == "center";
+    // Items come to rest at the center only with `snap: center`; a position
+    // alone is kept at the start, as on the other targets.
+    bool center = props.snap && std::string_view(props.snap) == "center";
     auto padding = [scroll, panel, center, horizontal] {
         // Room before the first and after the last item, so they can come
         // to the center too.
@@ -448,6 +468,7 @@ struct SplitButtonProps {
     char const* icon = nullptr;
     std::optional<Field> field;
     Str more;
+    std::optional<ControlShape> shape;
 };
 
 /// A toggle linked with a part that shows `content` in a popover, such as
@@ -459,7 +480,9 @@ inline void SplitButton(Parent const& p, Ctx const& ctx, SplitButtonProps props,
     auto field = *props.field;
     controls::ToggleSplitButton button;
     auto text = Bound(ctx, props.label);
-    button.Content(props.icon ? xaml::UIElement(Icons::Icon(props.icon)) : xaml::UIElement(TextOf(text)));
+    // Its icon and label, as the design shows it; a toolbar's icon alone.
+    if (props.icon && ctx.toolbar) button.Content(Icons::Icon(props.icon));
+    else button.Content(Content(text, props.icon));
     if (text)
         Reactive::Run([button, text] {
             auto name = text();
@@ -478,6 +501,7 @@ inline void SplitButton(Parent const& p, Ctx const& ctx, SplitButtonProps props,
     button.IsCheckedChanged([updating, ctx, field](controls::ToggleSplitButton const& sender, auto&&) {
         if (!*updating) SetDraft(ctx, field, Value::Bool(sender.IsChecked()));
     });
+    ShapeControl(ctx, button, props.shape);
     auto popover = MakePopover(ctx, content);
     button.Flyout(popover->flyout);
     // The part that opens the popover is named for screen readers.
@@ -512,8 +536,8 @@ struct ToastProps {
 };
 
 /// A short notice that shows when it appears or `key` changes and hides
-/// itself after `duration` seconds, read out politely: a capsule where it
-/// stands.
+/// itself after `duration` seconds, read out politely: the system's
+/// InfoBar where it stands.
 inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
     controls::Grid place;
     place.HorizontalAlignment(xaml::HorizontalAlignment::Center);
@@ -543,32 +567,45 @@ inline void Toast(Parent const& p, Ctx const& ctx, ToastProps props) {
                 uint32_t index;
                 if (place.Children().IndexOf(*shown, index)) place.Children().RemoveAt(index);
             }
-            controls::Border capsule;
-            capsule.CornerRadius(xaml::CornerRadius{999, 999, 999, 999});
-            capsule.Padding(xaml::Thickness{16, 10, 16, 10});
-            capsule.BorderThickness(xaml::Thickness{1, 1, 1, 1});
-            if (auto style = Styles::Themed(L"Border", {{L"Background", kWinUI ? L"SolidBackgroundFillColorTertiaryBrush" : L"SystemControlBackgroundChromeMediumLowBrush"},
-                                                          {L"BorderBrush", Keys::Divider}}))
-                capsule.Style(style);
-            capsule.Shadow(xaml::Media::ThemeShadow());
-            capsule.Translation(float3{0, 0, 16});
+#if BERN_WINUI
+            // The system's notice bar.
+            controls::InfoBar notice;
+            notice.Severity(controls::InfoBarSeverity::Informational);
+            notice.IsClosable(false);
+            notice.Message(text);
+            if (!icon.empty()) {
+                controls::FontIconSource glyph;
+                glyph.Glyph(Icons::Glyph(icon));
+                notice.IconSource(glyph);
+            }
+            notice.IsOpen(true);
+#else
+            // The system XAML has no InfoBar: a bar of its shape.
+            controls::Border notice;
+            notice.CornerRadius(xaml::CornerRadius{4, 4, 4, 4});
+            notice.Padding(xaml::Thickness{12, 10, 12, 10});
+            notice.BorderThickness(xaml::Thickness{1, 1, 1, 1});
+            if (auto style = Styles::Themed(L"Border", {{L"Background", L"SystemControlBackgroundChromeMediumLowBrush"}, {L"BorderBrush", Keys::Divider}}))
+                notice.Style(style);
             controls::StackPanel row;
             row.Orientation(controls::Orientation::Horizontal);
-            row.Spacing(8);
+            row.Spacing(10);
             if (!icon.empty()) row.Children().Append(Icons::Icon(icon));
             controls::TextBlock label;
             label.Text(text);
+            label.TextWrapping(xaml::TextWrapping::Wrap);
             label.VerticalAlignment(xaml::VerticalAlignment::Center);
             row.Children().Append(label);
-            capsule.Child(row);
-            xaml::Automation::AutomationProperties::SetLiveSetting(capsule, xaml::Automation::Peers::AutomationLiveSetting::Polite);
-            xaml::Automation::AutomationProperties::SetName(capsule, text);
-            auto wrapper = Wrap(capsule);
+            notice.Child(row);
+#endif
+            xaml::Automation::AutomationProperties::SetLiveSetting(notice, xaml::Automation::Peers::AutomationLiveSetting::Polite);
+            xaml::Automation::AutomationProperties::SetName(notice, text);
+            auto wrapper = Wrap(notice);
             place.Children().Append(wrapper);
             *shown = wrapper;
             LayerSet(wrapper, "enter", 0, 24, 1, 1, 0);
             LayerTo(wrapper, "enter", 0, 0, 1, 1, 1, motion);
-            if (auto peer = xaml::Automation::Peers::FrameworkElementAutomationPeer::FromElement(capsule))
+            if (auto peer = xaml::Automation::Peers::FrameworkElementAutomationPeer::FromElement(notice))
                 peer.RaiseAutomationEvent(xaml::Automation::Peers::AutomationEvents::LiveRegionChanged);
             auto mine = ++*generation;
             Host::After(std::chrono::milliseconds(static_cast<int64_t>(duration * 1000)), [generation, mine, hide] {

@@ -727,6 +727,7 @@ mod tests {
                             name: "id".into(),
                             ty: Type::Int,
                             doc: String::new(),
+                            content: false,
                         }],
                         label: None,
                     },
@@ -740,6 +741,7 @@ mod tests {
                         name: "Route".into(),
                     },
                     doc: String::new(),
+                    content: false,
                 }],
             }],
         }

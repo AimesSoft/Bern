@@ -41,6 +41,13 @@ const BUTTON_BASE: &[&str] = &[
 /// `indicator` is not listed: the navigation view draws its own pill on the
 /// leading edge only.
 pub const SUPPORT: &[StyleSupport] = &[
+    // A stack's surface: its background, the color of text and icons in
+    // it, and corners that clip its layers.
+    StyleSupport {
+        component: "Stack",
+        base: &["background", "foreground", "corner"],
+        states: &[],
+    },
     StyleSupport {
         component: "Button",
         base: BUTTON_BASE,

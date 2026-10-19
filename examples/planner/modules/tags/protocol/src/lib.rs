@@ -8,6 +8,7 @@ pub mod tags {
     #[value]
     pub struct Tag {
         /// The label's text, unique among the tags.
+        #[content]
         pub name: String,
     }
 

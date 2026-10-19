@@ -18,6 +18,7 @@ fn app() -> Application {
             name: LocalizedText::default(),
             version: "1".into(),
             icon: None,
+            platform_icons: BTreeMap::new(),
             publisher: None,
         },
         languages: Languages {
@@ -122,6 +123,7 @@ fn controlled_switch_commits_new_value_without_rewriting_string_arguments() {
         name: "enabled".into(),
         ty: Type::Bool,
         doc: String::new(),
+        content: false,
     });
     app.protocol
         .commands
@@ -179,11 +181,13 @@ fn explicit_picker_options_keep_live_labels_and_controlled_values() {
         name: "tab".into(),
         ty: ty.clone(),
         doc: String::new(),
+        content: false,
     });
     app.protocol.state.push(StateField {
         name: "count".into(),
         ty: Type::Int,
         doc: String::new(),
+        content: false,
     });
     app.protocol
         .commands

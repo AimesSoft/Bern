@@ -121,6 +121,7 @@ constexpr bool kWinUI = true;
 #endif
 #include "bern_ui_structure.inl"
 #include "bern_ui_features.inl"
+#include "bern_ui_scene.inl"
 #include "bern_ui_windows.inl"
 #undef BERN_WINUI
 }
@@ -140,6 +141,7 @@ constexpr bool kWinUI = false;
 #endif
 #include "bern_ui_structure.inl"
 #include "bern_ui_features.inl"
+#include "bern_ui_scene.inl"
 #include "bern_ui_windows.inl"
 #undef BERN_WINUI
 }

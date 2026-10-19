@@ -4,7 +4,9 @@ use bern::CommandError;
 use bern::media::MediaSource;
 use bern::query::Answer;
 use bern::resources::Resources;
-use gallery_protocol::gallery::{self, Accent, Appearance, State, Swatch};
+use gallery_protocol::gallery::{
+    self, Accent, Appearance, Container, Notice, NoticeKind, State, Swatch,
+};
 use std::io::Read;
 
 pub struct GalleryEngine {
@@ -36,7 +38,7 @@ impl Default for GalleryEngine {
                 favorites: Vec::new(),
                 opened: 0,
                 opened_name: String::new(),
-                notice: String::new(),
+                notice: None,
                 notice_id: 0,
                 clip: MediaSource::resource(&Resources::host(), "media/tides.mp4")
                     .expect("the gallery bundles media/tides.mp4"),
@@ -58,8 +60,8 @@ impl GalleryEngine {
             .ok_or_else(|| CommandError::new("unknown_swatch", format!("no pattern {id}")))
     }
 
-    fn notify(&mut self, notice: String) {
-        self.state.notice = notice;
+    fn notify(&mut self, notice: Notice) {
+        self.state.notice = Some(notice);
         self.state.notice_id += 1;
     }
 
@@ -85,10 +87,15 @@ impl gallery::Commands for GalleryEngine {
     fn toggle_favorite(&mut self, id: i64) -> Result<(), CommandError> {
         let swatch = self.swatch(id)?;
         swatch.favorite = !swatch.favorite;
-        let notice = if swatch.favorite {
-            format!("★ {}", swatch.name)
-        } else {
-            format!("☆ {}", swatch.name)
+        let notice = Notice {
+            kind: if swatch.favorite {
+                NoticeKind::Favorite
+            } else {
+                NoticeKind::NoLongerFavorite
+            },
+            name: swatch.name.clone(),
+            container: Container::Other,
+            kilobytes: 0,
         };
         self.collect_favorites();
         self.notify(notice);
@@ -106,7 +113,7 @@ impl gallery::Commands for GalleryEngine {
     }
 
     fn play(&mut self, source: MediaSource) -> Result<(), CommandError> {
-        let notice = format!("▶ {}", describe(&source));
+        let notice = describe(&source);
         self.state.clip = source;
         self.notify(notice);
         Ok(())
@@ -152,25 +159,27 @@ impl gallery::Engine for GalleryEngine {
 /// when the engine can read the file, its container and size, taken from
 /// the file itself as an engine that recognizes a video by its first bytes
 /// would.
-fn describe(source: &MediaSource) -> String {
+fn describe(source: &MediaSource) -> Notice {
     let name = source.file_name().unwrap_or_else(|| source.url.clone());
     let Ok(mut file) = source.open() else {
-        return name;
+        return Notice {
+            kind: NoticeKind::Playing,
+            name,
+            container: Container::Other,
+            kilobytes: 0,
+        };
     };
     let mut head = [0u8; 12];
-    let kind = match file.read_exact(&mut head) {
-        Ok(()) if &head[4..8] == b"ftyp" => "MP4 · ",
-        Ok(()) if head[..4] == [0x1a, 0x45, 0xdf, 0xa3] => "Matroska · ",
-        _ => "",
+    let container = match file.read_exact(&mut head) {
+        Ok(()) if &head[4..8] == b"ftyp" => Container::Mp4,
+        Ok(()) if head[..4] == [0x1a, 0x45, 0xdf, 0xa3] => Container::Matroska,
+        _ => Container::Other,
     };
-    format!("{name} · {kind}{}", size(file.len()))
-}
-
-fn size(bytes: u64) -> String {
-    match bytes {
-        0..1_000 => format!("{bytes} B"),
-        1_000..1_000_000 => format!("{:.0} KB", bytes as f64 / 1e3),
-        _ => format!("{:.1} MB", bytes as f64 / 1e6),
+    Notice {
+        kind: NoticeKind::PlayingFile,
+        name,
+        container,
+        kilobytes: (file.len() as i64 + 999) / 1000,
     }
 }
 
@@ -188,11 +197,21 @@ mod tests {
         std::fs::write(&path, bytes).unwrap();
         assert_eq!(
             describe(&MediaSource::file(&path)),
-            "Tides #1.mp4 · MP4 · 2.5 MB"
+            Notice {
+                kind: NoticeKind::PlayingFile,
+                name: "Tides #1.mp4".into(),
+                container: Container::Mp4,
+                kilobytes: 2_500,
+            }
         );
         assert_eq!(
             describe(&MediaSource::new("https://example.com/a%20b.mkv")),
-            "a b.mkv"
+            Notice {
+                kind: NoticeKind::Playing,
+                name: "a b.mkv".into(),
+                container: Container::Other,
+                kilobytes: 0,
+            }
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

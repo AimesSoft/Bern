@@ -421,7 +421,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     application.connect_startup(move |application| {
         snapshot::apply_appearance();
         install_icon(host().def.bundle_id);
-        crate::style::install(host().def.styles);
+        crate::style::install(host().def.styles, host().def.text_styles);
         if let Some((red, green, blue)) = host().def.brand_seed {
             let provider = gtk::CssProvider::new();
             provider.load_from_string(&brand_css(red, green, blue));

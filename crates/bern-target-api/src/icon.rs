@@ -1,12 +1,56 @@
 //! Application icons. Without `[app].icon` every target uses the Bern logo;
-//! with it, the declared square PNG. The platform containers (`.ico` on
-//! Windows, `.icns` on macOS) hold PNG images as they are, so nothing here
-//! decodes or scales pixels: the logo ships pre-rendered at every size the
-//! platforms ask for, and a declared icon is used at its own size.
+//! with it, the declared square PNG. `[app.icon]` can also give a platform
+//! its own icon: another square PNG, or the icon in the platform's own form
+//! (an `.icns` file, an `.ico` file, an `.appiconset` folder, an Android
+//! `res` folder, an icon theme folder, a folder of page icons), which is
+//! shipped as it is. The platform containers (`.ico` on Windows, `.icns` on
+//! macOS) hold PNG images as they are, so nothing here decodes or scales
+//! pixels: the logo ships pre-rendered at every size the platforms ask for,
+//! and a declared PNG is used at its own size.
 
 use bern_ir::Application;
 use std::borrow::Cow;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// Platforms that can have an icon of their own under `[app.icon]`, named
+/// as `[targets]` names them.
+pub const PLATFORMS: [&str; 6] = ["macos", "ios", "windows", "linux", "android", "browser"];
+
+/// Where one platform's icon comes from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// The Bern logo.
+    Logo,
+    /// A square PNG, used at its own size.
+    Png(PathBuf),
+    /// The icon in the platform's own form, shipped as it is; see
+    /// [`check_native`].
+    Native(PathBuf),
+}
+
+/// The icon written for `platform`: its own entry under `[app.icon]`, else
+/// the one for every platform. Paths are relative to `Bern.toml`.
+pub fn declared<'a>(app: &'a Application, platform: &str) -> Option<&'a str> {
+    app.app
+        .platform_icons
+        .get(platform)
+        .or(app.app.icon.as_ref())
+        .map(String::as_str)
+}
+
+/// Where `platform`'s icon comes from.
+pub fn source(app: &Application, platform: &str, project_dir: &Path) -> Source {
+    match declared(app, platform) {
+        None => Source::Logo,
+        Some(name) if is_png_name(name) => Source::Png(project_dir.join(name)),
+        Some(name) => Source::Native(project_dir.join(name)),
+    }
+}
+
+/// Whether a declared icon is a PNG by its name.
+pub fn is_png_name(name: &str) -> bool {
+    name.to_ascii_lowercase().ends_with(".png")
+}
 
 /// How a platform shows application icons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,9 +102,9 @@ const SQUARE: &[(u32, &[u8])] = &[
 /// down from.
 pub const DECLARED_SIZES: [u32; 3] = [256, 512, 1024];
 
-/// Whether the application uses the Bern logo.
-pub fn is_default(app: &Application) -> bool {
-    app.app.icon.is_none()
+/// Whether `platform` uses the Bern logo.
+pub fn is_default(app: &Application, platform: &str) -> bool {
+    declared(app, platform).is_none()
 }
 
 /// The logo in `shape`, smallest first.
@@ -77,20 +121,33 @@ pub fn default_images(shape: Shape) -> Vec<Image> {
         .collect()
 }
 
-/// The application's icon, smallest first: the logo in `shape`, or the
-/// declared PNG (relative to the project directory) at its own size.
-pub fn images(app: &Application, project_dir: &Path, shape: Shape) -> Result<Vec<Image>, String> {
-    let Some(name) = &app.app.icon else {
-        return Ok(default_images(shape));
-    };
-    let path = project_dir.join(name);
-    let png = std::fs::read(&path)
-        .map_err(|error| format!("cannot read the icon {}: {error}", path.display()))?;
-    let size = check(&png).map_err(|message| format!("icon `{name}`: {message}"))?;
-    Ok(vec![Image {
-        size,
-        png: Cow::Owned(png),
-    }])
+/// `platform`'s icon as PNG images, smallest first: the logo in `shape`, or
+/// the declared PNG (relative to the project directory) at its own size. A
+/// platform whose icon is in its own form has no images here; read it with
+/// [`source`].
+pub fn images(
+    app: &Application,
+    platform: &str,
+    project_dir: &Path,
+    shape: Shape,
+) -> Result<Vec<Image>, String> {
+    match source(app, platform, project_dir) {
+        Source::Logo => Ok(default_images(shape)),
+        Source::Png(path) => {
+            let png = std::fs::read(&path)
+                .map_err(|error| format!("cannot read the icon {}: {error}", path.display()))?;
+            let size =
+                check(&png).map_err(|message| format!("icon {}: {message}", path.display()))?;
+            Ok(vec![Image {
+                size,
+                png: Cow::Owned(png),
+            }])
+        }
+        Source::Native(path) => Err(format!(
+            "the {platform} icon {} is not a PNG",
+            path.display()
+        )),
+    }
 }
 
 /// The largest image.
@@ -192,6 +249,385 @@ pub fn icns(images: &[Image]) -> Vec<u8> {
     out.extend_from_slice(&(8 + body.len() as u32).to_be_bytes());
     out.extend_from_slice(&body);
     out
+}
+
+/// What `platform` takes under `[app.icon]`, for messages.
+pub fn accepted(platform: &str) -> &'static str {
+    match platform {
+        "macos" => "a square PNG or an `.icns` file",
+        "ios" => "a square PNG or an `.appiconset` folder",
+        "windows" => "a square PNG or an `.ico` file",
+        "linux" => "a square PNG or an icon theme folder laid out like `hicolor`",
+        "android" => "a square PNG or a `res` folder with `mipmap-*/ic_launcher`",
+        "browser" => "a square PNG, an SVG or a folder of page icons",
+        _ => "a square PNG",
+    }
+}
+
+/// Check an icon in `platform`'s own form at `path`, a file or a folder:
+/// an `.icns` file (macOS), an `.ico` file (Windows), an `.appiconset`
+/// folder (iOS), a `res` folder (Android), an icon theme folder (Linux), or
+/// an SVG or a folder of page icons (browser).
+pub fn check_native(platform: &str, path: &Path) -> Result<(), String> {
+    let extension = path
+        .extension()
+        .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let folder = path.is_dir();
+    let read = || std::fs::read(path).map_err(|error| format!("cannot be read: {error}"));
+    match (platform, folder, extension.as_str()) {
+        ("macos", false, "icns") => check_icns(&read()?),
+        ("windows", false, "ico") => check_ico(&read()?),
+        ("browser", false, "svg") => {
+            if String::from_utf8_lossy(&read()?).contains("<svg") {
+                Ok(())
+            } else {
+                Err("is not an SVG image".into())
+            }
+        }
+        ("ios", true, _) => app_icon_set(path).map(drop),
+        ("android", true, _) => android_res(path).map(drop),
+        ("linux", true, _) => theme_icons(path).map(drop),
+        ("browser", true, _) => page_icons(path).map(drop),
+        _ => Err(format!("is not {}", accepted(platform))),
+    }
+}
+
+/// Check a macOS icon file: entries that add up to the length it states.
+pub fn check_icns(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 8 || &bytes[..4] != b"icns" {
+        return Err("is not an .icns file".into());
+    }
+    let length = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+    if length != bytes.len() {
+        return Err(format!(
+            "says it is {length} bytes long but is {}",
+            bytes.len()
+        ));
+    }
+    let mut at = 8;
+    let mut entries = 0;
+    while at < bytes.len() {
+        let entry = bytes
+            .get(at + 4..at + 8)
+            .map(|size| u32::from_be_bytes([size[0], size[1], size[2], size[3]]) as usize)
+            .filter(|size| *size >= 8 && at + size <= bytes.len())
+            .ok_or_else(|| format!("has a broken entry at byte {at}"))?;
+        at += entry;
+        entries += 1;
+    }
+    if entries == 0 {
+        return Err("holds no images".into());
+    }
+    Ok(())
+}
+
+/// Check a Windows icon file: images inside the file.
+pub fn check_ico(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() < 6 || bytes[..4] != [0, 0, 1, 0] {
+        return Err("is not an .ico file".into());
+    }
+    let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    if count == 0 {
+        return Err("holds no images".into());
+    }
+    for index in 0..count {
+        let entry = bytes
+            .get(6 + 16 * index..6 + 16 * (index + 1))
+            .ok_or_else(|| "is cut short".to_string())?;
+        let size = u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]) as usize;
+        let offset = u32::from_le_bytes([entry[12], entry[13], entry[14], entry[15]]) as usize;
+        if size == 0 || offset + size > bytes.len() {
+            return Err(format!("has a broken image {}", index + 1));
+        }
+    }
+    Ok(())
+}
+
+/// The files below `dir`, relative to it and sorted. A symbolic link is an
+/// error: an icon names the files it ships.
+pub fn files_in(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    fn walk(dir: &Path, relative: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+        let entries = std::fs::read_dir(dir)
+            .map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|error| format!("cannot read {}: {error}", dir.display()))?;
+            let kind = entry
+                .file_type()
+                .map_err(|error| format!("cannot read {}: {error}", entry.path().display()))?;
+            let name = entry.file_name();
+            // Hidden files, and Explorer's own.
+            if name.to_string_lossy().starts_with('.')
+                || name == "Thumbs.db"
+                || name == "desktop.ini"
+            {
+                continue;
+            }
+            let inside = relative.join(&name);
+            if kind.is_symlink() {
+                return Err(format!(
+                    "{} is a symbolic link; put the file itself there",
+                    entry.path().display()
+                ));
+            } else if kind.is_dir() {
+                walk(&entry.path(), &inside, out)?;
+            } else {
+                out.push(inside);
+            }
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(dir, Path::new(""), &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+/// The `/`-separated form of a relative path, for messages and matching.
+fn slashed(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// The files of an iOS `.appiconset` folder: `Contents.json` and the images
+/// it names, all at the top of the folder.
+pub fn app_icon_set(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let files = files_in(dir)?;
+    if let Some(nested) = files.iter().find(|file| file.components().count() > 1) {
+        return Err(format!(
+            "has {}; an .appiconset holds its files at its top",
+            slashed(nested)
+        ));
+    }
+    let contents = std::fs::read(dir.join("Contents.json"))
+        .map_err(|_| "has no Contents.json; an .appiconset names its images there".to_string())?;
+    let contents: serde_json::Value = serde_json::from_slice(&contents)
+        .map_err(|error| format!("has a Contents.json that is not JSON: {error}"))?;
+    let images = contents
+        .get("images")
+        .and_then(|images| images.as_array())
+        .ok_or_else(|| "has a Contents.json without an `images` list".to_string())?;
+    let mut named = 0;
+    for image in images {
+        let Some(name) = image.get("filename").and_then(|name| name.as_str()) else {
+            continue;
+        };
+        if !files.iter().any(|file| file == Path::new(name)) {
+            return Err(format!("names {name} in Contents.json, which is not there"));
+        }
+        named += 1;
+    }
+    if named == 0 {
+        return Err("names no image in Contents.json".into());
+    }
+    Ok(files)
+}
+
+/// The files of an Android `res` folder with a launcher icon.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AndroidRes {
+    /// Relative to the folder, as `mipmap-hdpi/ic_launcher.png`.
+    pub files: Vec<PathBuf>,
+    /// Whether it has a round icon, `ic_launcher_round`.
+    pub round: bool,
+}
+
+/// Read an Android `res` folder: resource folders (`mipmap*`, `drawable*`,
+/// `values*`) whose files make the launcher icon `@mipmap/ic_launcher`.
+/// Files Bern writes itself (`values*/strings.xml`, `values*/themes.xml`)
+/// cannot be in it.
+pub fn android_res(dir: &Path) -> Result<AndroidRes, String> {
+    let files = files_in(dir)?;
+    let mut launcher = false;
+    let mut round = false;
+    for file in &files {
+        let parts: Vec<String> = file
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        let [folder, name] = parts.as_slice() else {
+            return Err(format!(
+                "has {}; a res folder holds resource folders such as mipmap-hdpi",
+                slashed(file)
+            ));
+        };
+        let kind = folder.split('-').next().unwrap_or_default();
+        if !matches!(kind, "mipmap" | "drawable" | "values") {
+            return Err(format!(
+                "has {folder}; an icon's res folder holds mipmap, drawable and values folders"
+            ));
+        }
+        if kind == "values" && matches!(name.as_str(), "strings.xml" | "themes.xml") {
+            return Err(format!(
+                "has {folder}/{name}, which Bern writes itself; keep only the icon's resources"
+            ));
+        }
+        let stem = name
+            .rsplit_once('.')
+            .map_or(name.as_str(), |(stem, _)| stem);
+        if kind == "mipmap" && stem == "ic_launcher" {
+            launcher = true;
+        }
+        if kind == "mipmap" && stem == "ic_launcher_round" {
+            round = true;
+        }
+    }
+    if !launcher {
+        return Err("has no mipmap-*/ic_launcher; the launcher icon is @mipmap/ic_launcher".into());
+    }
+    Ok(AndroidRes { files, round })
+}
+
+/// One application icon in an icon theme folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThemeIcon {
+    /// Relative to the folder, as `48x48/apps/name.png`.
+    pub path: PathBuf,
+    /// The folder it goes in, as `48x48/apps`.
+    pub folder: PathBuf,
+    /// Width and height for a PNG; `None` for SVG.
+    pub size: Option<u32>,
+    /// Whether it is the symbolic (single-colour) form, `name-symbolic.svg`.
+    pub symbolic: bool,
+    /// `png` or `svg`.
+    pub extension: String,
+}
+
+/// Read an icon theme folder laid out like `hicolor`: `<size>/apps/<name>`
+/// files, with `<size>` such as `48x48`, `48x48@2`, `scalable` or
+/// `symbolic`, all of one name (the symbolic one ends in `-symbolic.svg`).
+/// At least one PNG of a size. The name is replaced by the application's.
+pub fn theme_icons(dir: &Path) -> Result<Vec<ThemeIcon>, String> {
+    let mut icons = Vec::new();
+    let mut name: Option<String> = None;
+    for file in files_in(dir)? {
+        let shown = slashed(&file);
+        let parts: Vec<String> = file
+            .components()
+            .map(|part| part.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        if parts.len() == 1 && parts[0] == "index.theme" {
+            continue;
+        }
+        let [size, context, file_name] = parts.as_slice() else {
+            return Err(format!(
+                "has {shown}; an icon theme holds <size>/apps/<name>.png files"
+            ));
+        };
+        if context != "apps" {
+            return Err(format!(
+                "has {shown}; an application icon goes in an apps folder"
+            ));
+        }
+        let pixels = size
+            .split('@')
+            .next()
+            .and_then(|side| side.split_once('x'))
+            .and_then(|(width, height)| {
+                let width: u32 = width.parse().ok()?;
+                (height.parse::<u32>().ok()? == width).then_some(width)
+            });
+        let (stem, extension) = file_name
+            .rsplit_once('.')
+            .map(|(stem, extension)| (stem, extension.to_ascii_lowercase()))
+            .unwrap_or((file_name.as_str(), String::new()));
+        let symbolic = stem.ends_with("-symbolic");
+        match (pixels, size.as_str(), extension.as_str()) {
+            (Some(_), _, "png") | (None, "scalable", "svg") | (None, "symbolic", "svg") => {}
+            _ => {
+                return Err(format!(
+                    "has {shown}; sized folders hold PNG files, scalable and symbolic hold SVG"
+                ));
+            }
+        }
+        if symbolic != (size == "symbolic") {
+            return Err(format!(
+                "has {shown}; symbolic/apps holds the one <name>-symbolic.svg"
+            ));
+        }
+        let base = stem.strip_suffix("-symbolic").unwrap_or(stem);
+        match &name {
+            None => name = Some(base.to_string()),
+            Some(name) if name != base => {
+                return Err(format!(
+                    "has icons named both {name} and {base}; an application has one icon"
+                ));
+            }
+            Some(_) => {}
+        }
+        let size = match pixels {
+            Some(pixels) => {
+                let scale: u32 = size
+                    .split_once('@')
+                    .map_or(Some(1), |(_, scale)| scale.parse().ok())
+                    .ok_or_else(|| format!("has {shown}; a scaled folder is named like 48x48@2"))?;
+                let bytes = std::fs::read(dir.join(&file))
+                    .map_err(|error| format!("cannot read {shown}: {error}"))?;
+                match png_size(&bytes) {
+                    Some((width, height)) if width == height && width == pixels * scale => {
+                        Some(width)
+                    }
+                    Some((width, height)) => {
+                        return Err(format!(
+                            "has {shown}, which is {width} × {height} pixels, not {0} × {0}",
+                            pixels * scale
+                        ));
+                    }
+                    None => return Err(format!("has {shown}, which is not a PNG")),
+                }
+            }
+            None => None,
+        };
+        icons.push(ThemeIcon {
+            folder: file.parent().map(Path::to_path_buf).unwrap_or_default(),
+            path: file,
+            size,
+            symbolic,
+            extension,
+        });
+    }
+    if !icons.iter().any(|icon| icon.size.is_some()) {
+        return Err("has no PNG icon of a size, such as 256x256/apps/<name>.png".into());
+    }
+    Ok(icons)
+}
+
+/// Read a folder of page icons: files at its top, of the kinds a page
+/// links (`.svg`, `.ico`, `.png`, and a `.webmanifest` or `manifest.json`
+/// naming the icons beside it). At least one image.
+pub fn page_icons(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let files = files_in(dir)?;
+    let mut images = 0;
+    for file in &files {
+        let shown = slashed(file);
+        if file.components().count() > 1 {
+            return Err(format!(
+                "has {shown}; page icons sit at the top of their folder"
+            ));
+        }
+        // The page links them by name.
+        bern_protocol::check_resource_name(&shown)?;
+        let extension = file
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        match extension.as_str() {
+            "svg" | "ico" | "png" => images += 1,
+            "webmanifest" => {}
+            "json" if shown == "manifest.json" => {}
+            _ => {
+                return Err(format!(
+                    "has {shown}; page icons are .svg, .ico and .png files and a .webmanifest"
+                ));
+            }
+        }
+    }
+    if images == 0 {
+        return Err("has no .svg, .ico or .png icon".into());
+    }
+    Ok(files)
 }
 
 #[cfg(test)]

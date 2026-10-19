@@ -9,6 +9,7 @@ pub mod notes {
     pub struct Note {
         /// Stable identity, used as the list key.
         pub id: i64,
+        #[content]
         pub text: String,
     }
 

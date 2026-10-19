@@ -21,6 +21,7 @@ fn descriptor() -> &'static ProtocolDescriptor {
             name: "value".into(),
             ty: Type::Int,
             doc: String::new(),
+            content: false,
         }],
         commands: vec![
             CommandSpec {

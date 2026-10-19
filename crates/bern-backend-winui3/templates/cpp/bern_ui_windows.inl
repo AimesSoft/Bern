@@ -378,7 +378,8 @@ inline void SetWindowIcons(HWND hwnd) {
 
 #if BERN_WINUI
 /// The application icon in the XAML title bar: the image of icon resource 1
-/// closest to the title bar's size, which the icon holds as PNG.
+/// closest to the title bar's size. A PNG image is decoded as it is; a
+/// bitmap image is wrapped in a one-image `.ico`, which XAML also decodes.
 inline winrt::fire_and_forget ShowTitleIcon(controls::TitleBar titleBar, int side) {
     auto instance = GetModuleHandleW(nullptr);
     HRSRC group = FindResourceW(instance, MAKEINTRESOURCEW(1), RT_GROUP_ICON);
@@ -390,10 +391,36 @@ inline winrt::fire_and_forget ShowTitleIcon(controls::TitleBar titleBar, int sid
     auto data = static_cast<uint8_t const*>(LockResource(LoadResource(instance, entry)));
     auto size = SizeofResource(instance, entry);
     if (!data || size == 0) co_return;
+    std::vector<uint8_t> bytes;
+    static uint8_t const png[] = {0x89, 'P', 'N', 'G'};
+    if (size >= 4 && std::equal(png, png + 4, data)) {
+        bytes.assign(data, data + size);
+    } else {
+        // The group's entry for the image (14 bytes: width, height, colours,
+        // reserved, planes, bit count, length, resource id) gives the
+        // `.ico` entry its first 8 bytes.
+        int count = directory[4] | (directory[5] << 8);
+        PBYTE found = nullptr;
+        for (int i = 0; i < count && !found; ++i) {
+            PBYTE one = directory + 6 + 14 * i;
+            if ((one[12] | (one[13] << 8)) == id) found = one;
+        }
+        if (!found) co_return;
+        auto put = [&bytes](uint32_t value, int length) {
+            for (int k = 0; k < length; ++k) bytes.push_back(static_cast<uint8_t>(value >> (8 * k)));
+        };
+        put(0, 2);    // reserved
+        put(1, 2);    // icon
+        put(1, 2);    // one image
+        bytes.insert(bytes.end(), found, found + 8);
+        put(size, 4);
+        put(22, 4);   // the image follows the 6-byte header and the entry
+        bytes.insert(bytes.end(), data, data + size);
+    }
     try {
         winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
         winrt::Windows::Storage::Streams::DataWriter writer(stream);
-        writer.WriteBytes(winrt::array_view<uint8_t const>(data, data + size));
+        writer.WriteBytes(bytes);
         co_await writer.StoreAsync();
         writer.DetachStream();
         stream.Seek(0);
@@ -479,10 +506,11 @@ inline void HideCursor(bool hide) {
 
 /// `window.idle`: true after `seconds` without pointer, wheel or key input
 /// in the window, and false at the next input.
-inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds) {
+inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::function<bool()> enabled = nullptr) {
     auto generation = std::make_shared<int64_t>(0);
+    auto on = std::make_shared<bool>(true);
     std::weak_ptr<Win> weak = win;
-    auto rest = [weak, generation, seconds] {
+    auto rest = [weak, generation, seconds, on] {
         auto win = weak.lock();
         if (!win) return;
         if (win->idle.Peek()) {
@@ -490,6 +518,8 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds) {
             Snapshot::Schedule();
         }
         auto mine = ++*generation;
+        // Switched off (`idle_enabled`), the window stays awake.
+        if (!*on) return;
         Host::After(std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000)), [weak, generation, mine] {
             if (auto win = weak.lock(); win && *generation == mine) {
                 win->idle.Set(true);
@@ -513,6 +543,17 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds) {
     for (auto const& event : {xaml::UIElement::PointerPressedEvent(), xaml::UIElement::PointerWheelChangedEvent()})
         root.AddHandler(event, winrt::box_value(PointerHandler([rest](auto&&, auto&&) { rest(); })), true);
     root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest](auto&&, auto&&) { rest(); })), true);
+    if (enabled) {
+        // Switched on again, the count starts over.
+        Reactive::Run([enabled, on, rest] {
+            bool now = enabled();
+            Reactive::Untrack([&] {
+                *on = now;
+                rest();
+                return 0;
+            });
+        });
+    }
     rest();
 }
 
@@ -542,6 +583,21 @@ inline int shownAccent = -1;
 /// application's accent.
 inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
     auto const& def = win->Def();
+    // The interface language, for the system's choice of fonts (Chinese in
+    // its UI face, not a fallback such as SimSun) and its typography.
+    {
+        std::weak_ptr<Win> weak = win;
+        Reactive::Run([weak] {
+            auto tag = Wide(bern::Text::Language());
+            Reactive::Untrack([&] {
+                if (auto win = weak.lock(); win && win->root) {
+                    win->root.Language(tag);
+                    if (win->sheet) win->sheet.Language(tag);
+                }
+                return 0;
+            });
+        });
+    }
     if (def.appearance) {
         auto appearance = def.appearance;
         std::weak_ptr<Win> weak = win;
@@ -609,6 +665,8 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
     Win* raw = win.get();
     win->root.SizeChanged([raw](auto&&, xaml::SizeChangedEventArgs const& args) {
         if (args.NewSize().Width > 0) raw->size.Set(SizeOf(args.NewSize().Width));
+        // `window.short`: shorter than the compact breakpoint.
+        if (args.NewSize().Height > 0) raw->isShort.Set(args.NewSize().Height < app->catalog.compactBelow.value_or(0));
     });
     win->scope->Run([&] {
         auto header = Header(page, nullptr, false);
@@ -625,7 +683,7 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
         ctx.page = page;
         def.render(Parent::Of(content), ctx);
         Reactive::Run([holder, raw] { holder.IsHitTestVisible(!raw->pending.Get().has_value()); });
-        if (def.idleAfter) TrackIdle(win, *def.idleAfter);
+        if (def.idleAfter) TrackIdle(win, *def.idleAfter, def.idleEnabled ? std::function<bool()>([enabled = def.idleEnabled, ctx] { return enabled(ctx); }) : nullptr);
         if (def.immersive) {
             auto immersive = def.immersive;
             Reactive::Run([raw, immersive, ctx] {
@@ -820,13 +878,12 @@ inline std::string Open(std::string const& kindId) {
     auto titleKey = def.title;
     win->scope->Run([&] {
 #if BERN_WINUI
-        // A unified window shows no title of its own: the content under the
-        // title bar says where it is.
-        bool unified = def.unified;
-        Reactive::Run([window, titleBar, titleKey, unified] {
+        // The title bar names the window beside its icon, as Fluent
+        // windows do, unified or not.
+        Reactive::Run([window, titleBar, titleKey] {
             auto title = bern::Text::Tr(titleKey);
             window.Title(title);
-            titleBar.Title(unified ? winrt::hstring() : title);
+            titleBar.Title(title);
         });
 #else
         HWND hwnd = win->hwnd;
@@ -1465,21 +1522,33 @@ inline void CaptureWindow(HWND hwnd, std::wstring path, double dpi) {
     ReleaseDC(nullptr, screen);
 }
 
-/// `BERN_DUMP_TREE`: the element tree with sizes, on standard error.
-inline void DumpTree(xaml::DependencyObject const& node, int depth) {
-    if (depth > 60 || !node) return;
+/// `BERN_DUMP_TREE`: the element tree with each element's place in the
+/// window and size, on standard error.
+inline void DumpTree(xaml::DependencyObject const& node, int depth, xaml::UIElement const& root = nullptr) {
+    if (depth > 80 || !node) return;
     std::string line(static_cast<size_t>(depth) * 2, ' ');
     line += Utf8(winrt::get_class_name(node));
     if (auto element = node.try_as<xaml::FrameworkElement>()) {
-        char size[96];
-        std::snprintf(size, sizeof size, " %.0fx%.0f%s", element.ActualWidth(), element.ActualHeight(),
+        winrt::Windows::Foundation::Point at{};
+        try {
+            if (root) at = element.TransformToVisual(root).TransformPoint({0, 0});
+        } catch (winrt::hresult_error const&) {
+        }
+        char size[160];
+        std::snprintf(size, sizeof size, " @%.0f,%.0f %.0fx%.0f%s", at.X, at.Y, element.ActualWidth(), element.ActualHeight(),
             element.Visibility() == xaml::Visibility::Visible ? "" : " hidden");
         line += size;
         if (auto tag = element.Tag()) line += " " + Utf8(winrt::unbox_value_or<winrt::hstring>(tag, L""));
+        if (!std::isnan(element.Height())) line += " h=" + std::to_string(static_cast<int>(element.Height()));
+        if (auto text = element.try_as<controls::TextBlock>()) {
+            char font[64];
+            std::snprintf(font, sizeof font, " %.1f/%d", text.FontSize(), static_cast<int>(text.FontWeight().Weight));
+            line += " \"" + Utf8(text.Text()).substr(0, 24) + "\" " + Utf8(text.FontFamily().Source()) + font;
+        }
     }
     bern::Report(line);
     auto count = media::VisualTreeHelper::GetChildrenCount(node);
-    for (int32_t i = 0; i < count; ++i) DumpTree(media::VisualTreeHelper::GetChild(node, i), depth + 1);
+    for (int32_t i = 0; i < count; ++i) DumpTree(media::VisualTreeHelper::GetChild(node, i), depth + 1, root ? root : node.try_as<xaml::UIElement>());
 }
 
 inline void CaptureAll() {

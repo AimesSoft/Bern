@@ -23,9 +23,17 @@ namespace B {
 // ---------------------------------------------------------------------------
 // Springs
 
-/// Whether the system asks for less motion: springs then settle at once and
+/// Elements holding `reduce_motion: true` while shown, by token: the whole
+/// application then runs with reduced motion.
+inline std::map<int64_t, bool> reduceHolders;
+inline int64_t nextReduceHolder = 1;
+
+/// Whether motion is reduced: the system asks for less motion, or the
+/// application does (`reduce_motion`). Springs then settle at once and
 /// transitions become a short fade.
 inline bool Reduced() {
+    for (auto const& [token, on] : reduceHolders)
+        if (on) return true;
     static winrt::Windows::UI::ViewManagement::UISettings settings;
     try {
         return !settings.AnimationsEnabled();
@@ -159,9 +167,12 @@ inline void Frames::Start(std::shared_ptr<Spring> const& spring) {
 // ---------------------------------------------------------------------------
 // Layers of an element's transform
 
-/// One layer: a move, a scale and an opacity, each its own spring.
+/// One layer: a move, a scale and an opacity, each its own spring. With a
+/// `pivot` (fractions of the element's size) its scale holds that point
+/// still, as a transition growing from an edge does.
 struct Layer {
     std::shared_ptr<Spring> x, y, sx, sy, opacity;
+    std::optional<float2> pivot;
 };
 
 /// The layers of one element, combined into its Translation, Scale (about
@@ -194,22 +205,30 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
         auto element = node.get();
         if (!element) return;
         double x = 0, y = 0, sx = 1, sy = 1, opacity = baseOpacity;
+        // Scale about the middle of what the element shows: a text stretched
+        // across a column shows only as wide as its lines.
+        float3 center{0, 0, 0};
+        float w = 0, h = 0;
+        if (auto framework = element.try_as<xaml::FrameworkElement>()) {
+            auto shown = Unwrapped(element).DesiredSize();
+            w = static_cast<float>(framework.ActualWidth());
+            h = static_cast<float>(framework.ActualHeight());
+            if (shown.Width > 0) w = (std::min)(w, shown.Width);
+            if (shown.Height > 0) h = (std::min)(h, shown.Height);
+            center = float3{w / 2, h / 2, 0};
+        }
         for (auto const& [name, layer] : layers) {
             x += layer->x->value;
             y += layer->y->value;
             sx *= layer->sx->value;
             sy *= layer->sy->value;
             opacity *= layer->opacity->value;
-        }
-        // Scale about the middle of what the element shows: a text stretched
-        // across a column shows only as wide as its lines.
-        float3 center{0, 0, 0};
-        if (auto framework = element.try_as<xaml::FrameworkElement>()) {
-            auto shown = Unwrapped(element).DesiredSize();
-            float w = static_cast<float>(framework.ActualWidth()), h = static_cast<float>(framework.ActualHeight());
-            if (shown.Width > 0) w = (std::min)(w, shown.Width);
-            if (shown.Height > 0) h = (std::min)(h, shown.Height);
-            center = float3{w / 2, h / 2, 0};
+            // A pivoted scale is the scale about the center moved so the
+            // pivot stays where it is.
+            if (layer->pivot) {
+                x += (layer->pivot->x * w - center.x) * (1 - layer->sx->value);
+                y += (layer->pivot->y * h - center.y) * (1 - layer->sy->value);
+            }
         }
         float3 move{static_cast<float>(x), static_cast<float>(y), 0};
         float3 scale{static_cast<float>(sx), static_cast<float>(sy), 1};
@@ -358,9 +377,17 @@ inline double Turn(std::shared_ptr<StaggerClock> const& clock) {
     return delay;
 }
 
-/// Where a transition starts (or ends): a move, a scale and no opacity.
+/// Where a transition starts (or ends): a move, a scale and no opacity; a
+/// growing one has no size along its axis and stays opaque.
 inline std::array<double, 5> TransitionFrom(Transition const& transition) {
     std::array<double, 5> from{0, 0, 1, 1, 0};
+    if (transition.kind == Transition::Grow) {
+        std::string_view edge = transition.edge ? transition.edge : "leading";
+        if (edge == "leading" || edge == "trailing") from[2] = 0;
+        else from[3] = 0;
+        from[4] = 1;
+        return from;
+    }
     if (transition.kind == Transition::Pop) {
         from[2] = from[3] = transition.from;
     } else if (transition.kind == Transition::Slide) {
@@ -383,6 +410,14 @@ inline void PlayTransition(xaml::UIElement const& element, Transition const& tra
     auto start = entering ? from : rest;
     auto end = entering ? rest : from;
     std::string name = entering ? "enter" : "exit";
+    // Growing holds its edge still.
+    auto layer = LayersOf(element)->Get(name);
+    if (transition.kind == Transition::Grow && !reduced) {
+        std::string_view edge = transition.edge ? transition.edge : "leading";
+        layer->pivot = edge == "leading" ? float2{0, 0.5f} : edge == "trailing" ? float2{1, 0.5f} : edge == "top" ? float2{0.5f, 0} : float2{0.5f, 1};
+    } else {
+        layer->pivot.reset();
+    }
     LayerSet(element, name, start[0], start[1], start[2], start[3], start[4]);
     Motion const* motion = reduced ? &kQuickFade : transition.motion;
     // A staggered element waits at its start, hidden, for its turn, counted
@@ -390,10 +425,10 @@ inline void PlayTransition(xaml::UIElement const& element, Transition const& tra
     LayerTo(element, name, end[0], end[1], end[2], end[3], end[4], motion, done, reduced ? 0 : delay);
 }
 
-/// A short nudge: a little larger, then back with `motion`.
-inline void NudgeOnce(xaml::UIElement const& element, Motion const* motion) {
+/// A short nudge: to `scale` of its size, then back with `motion`.
+inline void NudgeOnce(xaml::UIElement const& element, Motion const* motion, double scale = 1.06) {
     if (Reduced()) return;
-    LayerTo(element, "nudge", 0, 0, 1.06, 1.06, 1, &kNudgeUp, [element, motion] { LayerTo(element, "nudge", 0, 0, 1, 1, 1, motion); });
+    LayerTo(element, "nudge", 0, 0, scale, scale, 1, &kNudgeUp, [element, motion] { LayerTo(element, "nudge", 0, 0, 1, 1, 1, motion); });
 }
 
 inline void Reflow(xaml::UIElement const& child, float dx, float dy, Motion const* motion) {
@@ -466,7 +501,9 @@ inline wchar_t const* RoleKey(std::string_view role) {
         {"status.success", L"SystemFillColorSuccessBrush", nullptr},
         {"status.warning", L"SystemFillColorCautionBrush", nullptr},
         {"status.error", L"SystemFillColorCriticalBrush", L"SystemControlErrorTextForegroundBrush"},
-        {"control.border", L"ControlStrongStrokeColorDefaultBrush", L"SystemControlForegroundBaseMediumLowBrush"},
+        // The hairline of controls and cards (the design's Fluent stroke),
+        // not the strong outline of an unchecked box.
+        {"control.border", L"ControlStrokeColorDefaultBrush", L"SystemControlForegroundBaseLowBrush"},
         {"control.track", L"ControlStrongFillColorDefaultBrush", L"SystemControlForegroundBaseMediumLowBrush"},
         {"control.thumb", L"ControlSolidFillColorDefaultBrush", L"SystemControlBackgroundChromeWhiteBrush"},
         {"focus.indicator", L"FocusStrokeColorOuterBrush", L"SystemControlFocusVisualPrimaryBrush"},
@@ -607,19 +644,25 @@ inline void FillShape(xaml::Shapes::Rectangle const& shape, B::Paint const& pain
 
 /// The accent brushes and which shade of the accent each shows, in the
 /// light (0) and dark (1) appearance: 0 the accent, -1…-3 darker, 1…3
-/// lighter, with an opacity.
+/// lighter, with an opacity. `on` brushes are the text on an accent fill:
+/// white or black, whichever reads on the accent.
 struct AccentBrush {
     wchar_t const* key;
     int light;
     int dark;
     double opacity = 1;
+    bool on = false;
 };
 
 inline std::vector<AccentBrush> const& AccentBrushes() {
     static std::vector<AccentBrush> const winui{
-        {L"AccentFillColorDefaultBrush", -1, 2},
-        {L"AccentFillColorSecondaryBrush", -1, 2, 0.9},
-        {L"AccentFillColorTertiaryBrush", -1, 2, 0.8},
+        // Fills show the accent itself in both appearances, as the design
+        // does, with the text that reads on it.
+        {L"AccentFillColorDefaultBrush", 0, 0},
+        {L"AccentFillColorSecondaryBrush", 0, 0, 0.9},
+        {L"AccentFillColorTertiaryBrush", 0, 0, 0.8},
+        {L"TextOnAccentFillColorPrimaryBrush", 0, 0, 1, true},
+        {L"TextOnAccentFillColorSecondaryBrush", 0, 0, 0.7, true},
         {L"AccentFillColorSelectedTextBackgroundBrush", 0, 0},
         {L"AccentTextFillColorPrimaryBrush", -2, 3},
         {L"AccentTextFillColorSecondaryBrush", -3, 3},
@@ -656,6 +699,17 @@ inline winrt::Windows::UI::Color Shade(uint32_t rgb, int step) {
     return winrt::Windows::UI::Color{255, mix(r, to, amount), mix(g, to, amount), mix(b, to, amount)};
 }
 
+/// The text on an accent fill: white, or near black on a light accent
+/// (relative luminance above one half), as the design pairs them.
+inline winrt::Windows::UI::Color OnAccent(uint32_t rgb) {
+    auto linear = [](uint8_t c) {
+        double v = c / 255.0;
+        return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+    };
+    double l = 0.2126 * linear(uint8_t(rgb >> 16)) + 0.7152 * linear(uint8_t(rgb >> 8)) + 0.0722 * linear(uint8_t(rgb));
+    return l > 0.5 ? winrt::Windows::UI::Color{255, 11, 11, 13} : winrt::Windows::UI::Color{255, 255, 255, 255};
+}
+
 /// Every solid brush stored under `key` for `theme` in `dictionary`, its
 /// theme dictionaries and merged dictionaries.
 inline void FindThemeBrushes(xaml::ResourceDictionary const& dictionary, std::wstring const& theme, wchar_t const* key,
@@ -685,7 +739,7 @@ inline void ApplyAccent(uint32_t light, uint32_t dark) {
             std::vector<media::SolidColorBrush> brushes;
             std::vector<std::wstring> names = theme ? std::vector<std::wstring>{L"Dark", L"Default"} : std::vector<std::wstring>{L"Light"};
             for (auto const& name : names) FindThemeBrushes(resources, name, entry.key, brushes);
-            auto color = Shade(theme ? dark : light, theme ? entry.dark : entry.light);
+            auto color = entry.on ? OnAccent(theme ? dark : light) : Shade(theme ? dark : light, theme ? entry.dark : entry.light);
             for (auto& brush : brushes) {
                 try {
                     brush.Color(color);
@@ -700,7 +754,7 @@ inline void ApplyAccent(uint32_t light, uint32_t dark) {
             if (resources.HasKey(boxed) || !kWinUI)
                 if (auto brush = resources.Lookup(boxed).try_as<media::SolidColorBrush>()) {
                     bool night = xaml::Application::Current().RequestedTheme() == xaml::ApplicationTheme::Dark;
-                    brush.Color(Shade(night ? dark : light, 0));
+                    brush.Color(entry.on ? OnAccent(night ? dark : light) : Shade(night ? dark : light, 0));
                 }
         } catch (winrt::hresult_error const&) {
         }
@@ -1025,7 +1079,7 @@ struct ScrollInfo {
 /// middle of its scroll view: at the middle `scale` and full opacity; half
 /// a viewport plus half its size away, plain size and `opacity`. A
 /// Composition expression follows the scrolling.
-inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollInfo> const& scroll, double scale, double opacity) {
+inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollInfo> const& scroll, double scale, double opacity, double originX = 0.5, double originY = 0.5) {
     if (!scroll || !scroll->viewer || Reduced()) return;
     auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(wrapper);
     auto compositor = visual.Compositor();
@@ -1047,7 +1101,7 @@ inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollIn
     visual.StartAnimation(L"Opacity", fading);
     auto viewer = scroll->viewer;
     bool horizontal = scroll->horizontal;
-    auto update = [weak = winrt::make_weak(wrapper), viewer = winrt::make_weak(viewer), props, visual, horizontal] {
+    auto update = [weak = winrt::make_weak(wrapper), viewer = winrt::make_weak(viewer), props, visual, horizontal, originX, originY] {
         auto element = weak.get();
         auto scroller = viewer.get();
         if (!element || !scroller || !scroller.Content()) return;
@@ -1059,7 +1113,7 @@ inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollIn
             props.InsertScalar(L"center", horizontal ? at.X : at.Y);
             props.InsertScalar(L"port", port);
             props.InsertScalar(L"reach", (port + (horizontal ? w : h)) / 2);
-            visual.CenterPoint(float3{w / 2, h / 2, 0});
+            visual.CenterPoint(float3{w * static_cast<float>(originX), h * static_cast<float>(originY), 0});
         } catch (winrt::hresult_error const&) {
         }
     };
@@ -1076,8 +1130,22 @@ struct DecorateProps {
     char const* appearance = nullptr;
     Get nudge;
     Motion const* nudgeMotion = nullptr;
+    /// `nudge_key`: a nudge each time the value changes; `nudge_scale` how
+    /// large it grows.
+    Get nudgeKey;
+    std::optional<double> nudgeScale;
+    /// `appear_delay`: the entrance waits this much more, and plays on the
+    /// first display too.
+    std::optional<double> appearDelay;
+    /// `reduce_motion`: the whole application runs with reduced motion
+    /// while this holds and the element is shown.
+    Get reduceMotion;
     std::optional<double> scrollScale;
     std::optional<double> scrollOpacity;
+    /// The point of the element the scroll scale grows from, as fractions
+    /// of its size; the center when not given.
+    std::optional<double> scrollOriginX;
+    std::optional<double> scrollOriginY;
 };
 
 inline xaml::ElementTheme ThemeNamed(std::string_view name) {
@@ -1091,6 +1159,12 @@ inline xaml::ElementTheme ThemeNamed(std::string_view name) {
 /// key, `reveal: hover`, `appearance`, `nudge`, and following scroll with
 /// `scroll_scale` and `scroll_opacity`.
 inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build const& build) {
+    if (props.reduceMotion) {
+        auto token = nextReduceHolder++;
+        auto reduce = props.reduceMotion;
+        Reactive::Run([ctx, reduce, token] { reduceHolders[token] = R::Truthy(reduce(ctx)); });
+        Reactive::OnCleanup([token] { reduceHolders.erase(token); });
+    }
     // Elements inside this one enter with it, not on their own; a
     // staggering container's clock is only for its direct children.
     bool animated = Structure::entering;
@@ -1114,16 +1188,19 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
         xaml::UIElement shown = element;
         if ((props.scrollScale || props.scrollOpacity) && ctx.scroll) {
             auto wrapper = Wrap(shown);
-            ScrollEffect(wrapper, ctx.scroll, props.scrollScale.value_or(1), props.scrollOpacity.value_or(1));
+            ScrollEffect(wrapper, ctx.scroll, props.scrollScale.value_or(1), props.scrollOpacity.value_or(1),
+                props.scrollOriginX.value_or(0.5), props.scrollOriginY.value_or(0.5));
             shown = wrapper;
         }
         // What moves goes on a wrapper of its own: the one that follows
         // scrolling belongs to its Composition expressions.
-        bool moves = props.appear || props.disappear || props.hero || props.nudge || props.reveal || props.scrollScale || props.scrollOpacity;
+        bool moves = props.appear || props.disappear || props.hero || props.nudge || props.nudgeKey || props.reveal || props.scrollScale ||
+            props.scrollOpacity;
         if (moves) shown = Wrap(shown);
         p.Add(shown);
-        if (props.appear && (animated || (clock && clock->play)))
-            PlayTransition(shown, *props.appear, true, nullptr, clock ? Turn(clock) : 0);
+        // With a delay the entrance plays on the first display too.
+        if (props.appear && (animated || (clock && clock->play) || props.appearDelay))
+            PlayTransition(shown, *props.appear, true, nullptr, (clock && clock->play ? Turn(clock) : 0) + props.appearDelay.value_or(0));
         if (props.disappear) {
             auto hook = winrt::make_self<LeaveHook>();
             auto transition = *props.disappear;
@@ -1143,15 +1220,31 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
                 if (auto element = weak.get()) Hero::Leave(key, element, win);
             });
         }
+        if (props.nudgeKey) {
+            auto key = props.nudgeKey;
+            auto motion = props.nudgeMotion;
+            double scale = props.nudgeScale.value_or(1.06);
+            auto before = std::make_shared<Value>(Reactive::Untrack([&] { return key(ctx); }));
+            Reactive::Run([key, ctx, before, motion, scale, weak = winrt::make_weak(shown)] {
+                auto now = key(ctx);
+                if (!(now == *before))
+                    if (auto element = weak.get()) Reactive::Untrack([&] {
+                        NudgeOnce(element, motion, scale);
+                        return 0;
+                    });
+                *before = now;
+            });
+        }
         if (props.nudge) {
             auto when = props.nudge;
             auto motion = props.nudgeMotion;
+            double scale = props.nudgeScale.value_or(1.06);
             auto before = std::make_shared<bool>(Reactive::Untrack([&] { return R::Truthy(when(ctx)); }));
-            Reactive::Run([when, ctx, before, motion, weak = winrt::make_weak(shown)] {
+            Reactive::Run([when, ctx, before, motion, scale, weak = winrt::make_weak(shown)] {
                 bool now = R::Truthy(when(ctx));
                 if (now && !*before)
                     if (auto element = weak.get()) Reactive::Untrack([&] {
-                        NudgeOnce(element, motion);
+                        NudgeOnce(element, motion, scale);
                         return 0;
                     });
                 *before = now;
@@ -1200,6 +1293,8 @@ struct RailPanel : controls::PanelT<RailPanel> {
     /// Which point of an element sits at its fraction: 0 its start, 0.5
     /// its center, 1 its end.
     double anchor = 0.5;
+    /// How far the scale runs past each end.
+    double overhang = 0;
     struct Spot {
         winrt::weak_ref<xaml::UIElement> element;
         bool span = false;
@@ -1222,7 +1317,7 @@ struct RailPanel : controls::PanelT<RailPanel> {
         for (auto child : Children()) {
             auto spot = SpotOf(child);
             float along = INFINITY;
-            if (spot && spot->span && !std::isinf(length)) along = static_cast<float>(std::abs(Fraction(spot->to) - Fraction(spot->from)) * length);
+            if (spot && spot->span && !std::isinf(length)) along = static_cast<float>(std::abs(Fraction(spot->to) - Fraction(spot->from)) * (length + 2 * overhang));
             child.Measure(vertical ? Size{across, along} : Size{along, across});
             auto desired = child.DesiredSize();
             thickest = (std::max)(thickest, vertical ? desired.Width : desired.Height);
@@ -1233,7 +1328,9 @@ struct RailPanel : controls::PanelT<RailPanel> {
     }
 
     Size ArrangeOverride(Size final) {
-        float length = vertical ? final.Height : final.Width;
+        // The scale: the rail's length and the overhang past both ends.
+        float past = static_cast<float>(overhang);
+        float length = (vertical ? final.Height : final.Width) + 2 * past;
         float across = vertical ? final.Width : final.Height;
         for (auto child : Children()) {
             auto spot = SpotOf(child);
@@ -1242,10 +1339,10 @@ struct RailPanel : controls::PanelT<RailPanel> {
             float start = 0;
             if (spot && spot->span) {
                 double a = Fraction(spot->from), b = Fraction(spot->to);
-                start = static_cast<float>((std::min)(a, b) * length);
+                start = static_cast<float>((std::min)(a, b) * length) - past;
                 size = static_cast<float>(std::abs(b - a) * length);
             } else if (spot) {
-                start = static_cast<float>(Fraction(spot->at) * length - anchor * size);
+                start = static_cast<float>(Fraction(spot->at) * length - anchor * size) - past;
             }
             child.Arrange(vertical ? Rect{0, start, across, size} : Rect{start, 0, size, across});
         }
@@ -1256,6 +1353,7 @@ struct RailPanel : controls::PanelT<RailPanel> {
 struct RailProps {
     char const* axis = nullptr;
     char const* anchor = nullptr;
+    Len overhang;
 };
 
 inline void Rail(Parent const& p, Ctx const& ctx, RailProps props, Build const& children) {
@@ -1264,6 +1362,13 @@ inline void Rail(Parent const& p, Ctx const& ctx, RailProps props, Build const& 
     std::string_view anchor = props.anchor ? props.anchor : "center";
     impl->anchor = anchor == "start" ? 0.0 : anchor == "end" ? 1.0 : 0.5;
     controls::Panel panel = impl.as<controls::Panel>();
+    if (props.overhang.Given()) {
+        auto rail = impl.get();
+        BindLen(ctx, props.overhang, nullptr, [rail, weak = winrt::make_weak(panel)](double value) {
+            rail->overhang = value;
+            if (auto panel = weak.get()) panel.InvalidateArrange();
+        });
+    }
     SetRole(panel, impl->vertical ? L"bern-fill" : L"bern-rail-w");
     auto inner = ctx;
     inner.rail = std::make_shared<RailInfo const>(RailInfo{impl->vertical, std::string(anchor), impl.get(), panel});

@@ -2,7 +2,7 @@
 
 当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
 
-- 日期：2026-10-14
+- 日期：2026-10-14（页面级布局、场景与控件形态的能力于 2026-10-19 补齐，见同名一节）
 - 依据：[Bern 架构设计 v0.30](../Design.md)，[Android 适配规范](../Adaptation/Android.md)
 - 工具链：Rust 1.99.0（`aarch64-linux-android`）；Android NDK 29.0.14206865；Android Gradle 插件 9.3.3、Gradle 9.5.1、JDK 21（Android Studio 自带的运行时）；Kotlin 2.4.21 的 Compose 编译器插件；Compose BOM 2026.09.00（Compose 1.12.1、Material 3）；Media3 1.11.1；compileSdk 37、targetSdk 36、minSdk 26
 - 验证环境：小米 MIX 2S，LineageOS，Android 15（API 35），arm64-v8a，1080 × 2160、440 dpi（约 393 dp 宽），经 USB 调试连接 M4 Mac
@@ -56,6 +56,7 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 - **分栏**：宽度不小于 600 dp 时侧边栏（280 dp）与详情并排；更窄时先显示侧边栏列表，选中后进入详情，系统返回与顶栏的返回箭头回到列表。外部入口选择侧栏项时同样进入详情。
 - **页签**：底部 `NavigationBar`；工具栏中的选择器显示为顶栏里的下拉菜单，因为顶栏只有一行高。
 - **控件**：`Button` 默认是色调按钮，`prominent` 为实心按钮，`plain` 为文字按钮；`Switch` 是整行可点按的开关或复选框；`Picker` 按样式是下拉框、分段按钮或单选列表；`TextInput` 是带标签的描边输入框；`Slider` 可带两端图标。
+- **启动器图标**：没有声明或声明 PNG 时是 `mipmap-xxxhdpi/ic_launcher.png`；`[app.icon].android` 为 `res` 文件夹时原样并入应用的 `res`，自适应图标与主题图标（单色层）随之生效，有 `ic_launcher_round` 时清单加 `android:roundIcon`。
 - **图标**：Bern 的图标名（SF Symbols 命名）映射到 Material 图标：Material 核心图标集里有的直接用，常用而核心集没有的（暂停、音量、亮度、网格、归档、文件夹、调色板等）由运行时按 Material 图标的路径数据绘制，没有对应的显示一个中性圆点。
 - **导航项按条件出现**：`if`、`match` 与 `ForEach` 中的侧栏项与页签照常生成，选中项消失时回到 `fallback` 或第一个可见项。
 
@@ -122,6 +123,60 @@ bern package --target android
 - **图标**：`chevron.left` 映射到 Material 的左箭头（胶片页紧凑布局的“第一个”之前显示为圆点）。
 - **构建**：输出目录 `target/bern/android` 被这里构建的每个应用共用，Gradle 前用 `Mirror` 只留下本应用的 Kotlin，另一个应用留下的生成文件不再被编进来（之前运行时接口变化后，留下的旧文件会让编译失败）。
 
+## 页面级布局、场景与控件形态的能力（2026-10-19）
+
+能力描述补上此前只有 SwiftUI、Web 与 GTK 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），另加 `window_landscape`（手机转为横屏），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。新的运行时在 `BernScene.kt`。
+
+### 外观与文字
+
+- `Stack` 的样式：`BernStack` 先按圆角裁剪（`clip`），再画底色，`foreground` 作为 `LocalContentColor` 向下传给文字与图标。`Stack(enabled: false)` 在各层之上盖一层吃掉全部指针事件的透明层，各层原样显示。
+- `text { … }`：活动启动时把各文字样式的字重与字号写入 `BernTypography`；`bernTextStyle` 取 Material 的对应样式，换上字重，给了字号时用该字号（sp）与字体自身的行高。`Text(lines:)` 是 `maxLines` 加末尾省略号；`font_size`（可绑定）与 `line_height` 是 sp，行高按 CSS 把多出的空间均分在上下（`LineHeightStyle.Alignment.Center`、`Trim.None`）。`Label(font_size:)` 同时设置文字与图标的大小，`display: icon` 只显示图标，标题作无障碍描述。
+- `Image(corner:)` 是（可绑定、可弹簧的）圆角裁剪；`rendering: template` 用 `ColorFilter.tint(LocalContentColor, SrcIn)`；`aspect` 取代图片自身比例，只给 `aspect` 时铺满宽度、高度按比例（`aspectRatio`）。
+
+### 控件形态与受控值
+
+- `shape: capsule` 是 `CircleShape`（Material 3 的按钮本来就是胶囊），`height` 设置控件高度并去掉上下内边距。`IconButton(height:)` 是该直径的 `FilledTonalIconButton`，`prominence: prominent` 为 `FilledIconButton`，`plain` 与没有 `height` 时仍是无底色的 `IconButton`；`font_size` 是图标大小。`Button(width: fill)` 横向撑满。`ControlGroup` 是 `surfaceContainerHigh` 的胶囊 `Surface`（默认高 40），控件排在其中。
+- `Menu(style: icon)`：只显示图标，有 `height` 时是该直径的色调圆形按钮；`Menu(shape:, height:)` 是色调胶囊按钮。胶囊形的下拉 `Picker` 是色调胶囊按钮加 `DropdownMenu`，当前项前有对勾。
+- 受控值：`Switch(checked:)`、`Picker(selected:)`、`Slider(current:)` 显示表达式的值，改动时执行动作的命令，参数中与该表达式相同的一项换成新值（整数参数四舍五入）；受控滑块拖动时只移动自己，松开时执行命令。绑定草稿并带动作的 `Switch`、`Picker` 先写草稿再执行动作。`PickerOption` 给出自己的值与标签。`label_hidden` 不显示标签，只作无障碍描述。
+
+### 布局与页面结构
+
+- `padding_x`、`padding_y` 在 `padding` 之上分别覆盖左右与上下。`Row(align: baseline)` 的每个直接子元素（`Spacer` 除外）外包一层 `Box(Modifier.alignByBaseline())`，组件也一样。
+- `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从顶部排，内容更高时伸进行距。`Flow` 是 `FlowRow`。
+- `ScaleBox`：子元素在声明的逻辑尺寸中层叠（左上对齐），整体在 `placeWithLayer` 中缩放到能放下并居中，超出部分裁掉；Compose 的命中测试经过同一个变换，点击区域与画面对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Marquee`：内容按自然宽度从右缘外跑到左缘外，位置在图层中按帧时钟写入，不重新组合；`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字带 1 dp 的黑色阴影（`LocalBernTextShadow`）。
+- `Accordion`：每列一个 0 到 1 的权重（`Animatable`），列宽由权重分配，总宽不变，每列在图层中按 `corner` 圆角裁剪。
+- 顶栏：工具栏中 `Spacer` 之前的项放在返回按钮之后（`TopAppBar` 的导航位置），之后的放在末端；`Text` 可以放在工具栏里。`SidebarHeader` 固定在侧栏列表上方，`Sidebar(width:)` 是宽窗口中侧栏的宽度，`Detail(titled: false)` 时顶栏不显示所选目的地的名称，`SidebarItem(badge:)` 是 `NavigationDrawerItem` 的 `badge`（为 0 时隐藏）。
+- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分节间距；有行高或内边距时，分节的每个直接子元素是一行，按内边距缩进、至少为该行高、内容竖向居中（`Section` 自己的内边距优先）；表单以 plain 分节开头时从页面顶部开始。页面中的 `Search` 给了 `width`、`height` 或 `font_size` 时是 Material 搜索框样式的胶囊（`surfaceContainerHigh`、搜索图标、清除按钮），按这些尺寸。
+
+### 模态、搜索面板与计时
+
+- `Modal` 是 Material 的 `Dialog`：背景按 0.24 变暗并吸收输入，卡片是对话框的形状与底色，为声明尺寸且离窗口边缘至少 16；`cover: compact` 时在紧凑窗口中铺满整个屏幕，避开系统栏。元素的 `appear`、`disappear` 作用在卡片上：在带过渡的条件分支中，卡片随分支的进出（`animateEnterExit`）播放，播完消失过渡后对话框才关闭。系统返回不关闭模态。
+- `Search(style: palette)`：一个搜索图标按钮；打开时是一个对话框，紧凑窗口铺满屏幕，较宽时是 `width` × `height`（默认 640×480）的卡片：上方是搜索框与关闭按钮，下面是结果，结果只在打开时组合。方向键在 `navigation` 不为假的 `SearchItem` 之间移动（按屏幕上的先后），回车选中当前项，没有当前项时执行提交动作；系统返回、Esc 或关闭按钮关闭。`SearchItem` 是 Material 的 `ListItem`，选中后先关闭面板再执行动作；不在面板中时是普通的结果行。
+- `Timer`：启用且组合中时每 `interval` 秒（不少于 0.05）执行动作，关掉或离开时取消。`Window(idle_enabled:)` 为假时 `window.idle` 保持为假且不计时，变真时重新计时。`window.short` 是窗口高度低于紧凑断点。`Window(landscape:)` 为真时活动请求横屏（`SCREEN_ORIENTATION_SENSOR_LANDSCAPE`），变假后交还系统决定方向。
+
+### 动效补充
+
+- `appear_delay` 在错峰延迟之上再等待，有延迟时窗口首次显示也播放 `appear`；`nudge_key` 的值每次变化晃动一次，`nudge_scale` 是晃动的倍数（默认 1.06）；`reduce_motion` 为真时整个应用按减少动态效果运行，与系统关闭动画相同。
+- `grow(edge:)` 过渡：单独出现的元素在图层中沿一个轴从 0 伸展、该边不动、不淡入淡出；条件分支切换时用 `expandHorizontally`/`expandVertically` 从该边展开。
+
+### 文本格式（`text_formats`）
+
+- 带参数的翻译文本在字符串表（`assets/bern/texts/<语言>.json`）中保留 Bern 的格式原文，不再转成 `%1$s`；不带参数的文本把 `{{`、`}}` 还原为花括号后原样显示。月名与星期名（`bern.date.*`）随表写入，没有该语言时用英文。
+- `BernText.format(key, mapOf("名" to 参数))` 在运行时按 `BernTextParser` 解析当前语言的文本再写出：`BernArg` 是文本、数字（值与 Bern 的写法）或日期；复数分支先找 `=N`、再找当前语言的类别（中日韩越泰印尼马来只有 `other`，其余语言 1 为 `one`），最后 `other`，`#` 写出数字；日期按 `y`、`M`、`d`、`E` 的连写取字段或月名、星期名；时长中写出的最大字段吸收更大的单位。语言切换时文字随 `BernLanguage.current` 重新组合。
+- 生成器给每个参数传带类型的值：`CalendarDate` 是 `(值).bernArg`（生成的记录类带这个属性），整数与小数是数字，枚举是它的标签，其余是文本。枚举标签显示变体字段时，`bernLabel` 对该变体调用 `BernText.format`，字段按同样的规则传入（枚举字段用自己的标签，可以嵌套）。
+
+### 对照设计稿（Material 3 手机版）的修正
+
+- 滚动视图在所在的列或行中占剩余空间，与 SwiftUI 的 `ScrollView` 一致：直接在列中的用 `Modifier.weight(1f)`；在组件里的，组件在列或行中被调用时由 `LocalBernFlex` 带入那一列或行的作用域，`Modifier.bernFlexible()` 据此占剩余空间（组件函数体不在 `ColumnScope` 中，不能直接写 `weight`）。带 `snap`/`position` 的 `BernScroll` 同样占剩余空间，并把自己的列或行作用域提供给内容。此前引导页（铺满手机屏幕）的底栏悬在内容下面，没有贴底。
+- 动画 SVG 的 `WebView` 设为 `MATCH_PARENT` 布局参数：`AndroidView` 默认的 `WRAP_CONTENT` 让页面的布局视口按内容定高，`height: 100%` 解析为 0，SVG 高度为 0 而不显示（经 WebView 的 DevTools 查得）。
+- 不给尺寸的 `Canvas` 在层叠中是其他层的底板（`Modifier.matchParentSize()`），层叠只有底板时仍按原样铺满。
+- 语言的自称：`zh-Hans`、`zh-Hant` 写作“简体中文”“繁體中文”，与其他目标相同（此前为系统给出的“中文 (简体中文)”）。
+
+### 顺带的修正
+
+- `BernRail` 的参数顺序：`overhang` 加入后，在 `Stack` 中铺满的轨道把 `Modifier.matchParentSize()` 传给了 `overhang`（Kotlin 编译失败）；`modifier` 现在在 `overhang` 之前。
+- 侧栏与页签收集选项时会进入搜索框的结果，结果中的查询模板变量在那里不存在（Kotlin 编译失败）；现在只进入 `Section`。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：
@@ -153,6 +208,12 @@ bern package --target android
 
 - 把 `tides.mp4` 以“海浪 Tides #2.mp4”放进模拟器的 `Movies` 并让媒体库建索引，用 `am start -a android.intent.action.VIEW --grant-read-uri-permission` 把 `content://media/external/video/media/29` 交给应用；切到画框页后拖放区收下它并播放，引擎状态中的提示为“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”：名字来自系统的显示名，MP4 由文件开头的 `ftyp` 认出，大小来自描述符。
 - 经 CLI 播放不存在的 `content://media/external/video/media/9999`：取不到名字、打不开，提示只显示地址。
+
+2026-10-19，页面级布局、场景、控件形态与文本格式：
+
+- **测试与构建**：`cargo test -p bern-backend-compose`（新增 `layout_features_generate_for_compose` 与 `text_formats_generate_for_compose`）、`cargo clippy -p bern-backend-compose --all-targets -- -D warnings`（另外忽略 `bern-target-api` 中已有的 `for_kv_map`）与 `cargo fmt --check` 通过；gallery、showcase、planner、一个覆盖 29 项与 `Stack` 样式的临时巡览应用、文本格式的临时测试应用与用于验收的媒体类应用 `bern build --target android` 由 Gradle 编译成 APK。
+- **文本格式**：把运行时中的解析与写出代码（`BernArg`、`BernPiece`、`BernTextParser` 与 `BernText.format`）原样取出，用 Gradle 缓存中的 Kotlin 编译器在 JVM 上运行，读取为测试应用生成的字符串表：英文依次为“no files”“1 file”“3 files”“Today is Monday, October 12, 2026”“3:04 used (0:03:04)”“3 large files”“Saved Tides #1.mp4 on Mon, Oct 12”，简体中文为“0 个文件”“3 个文件”“今天是 2026年10月12日 星期一”“已用 3:04（0:03:04）”“3 个大文件”“已保存 Tides #1.mp4，10月12日 周一”，与 SwiftUI、Web、GTK 相同；`{{`、`}}` 写出花括号，`#` 只在复数分支中写出数字。这是 JVM 上的结果，不是设备上的。
+- **设备**：手机解锁后实测（MIX 2S，`adb` 截图与生成的 CLI，没有发送按键）：文本格式测试应用英文与简体中文的全部输出与上面相同；用于验收的媒体类应用的引导页与设计稿 Material 手机版对照，修正后动画 Logo 显示在格纹插画上、底栏贴底、“跳过”为 Tonal、“开始”为品牌色 Filled。其余 29 项、`Stack` 样式与动效补充在设备上的显示与交互仍**未验证**（应用的其他页面没有逐屏对照）。
 
 ## 未完成与已知限制
 

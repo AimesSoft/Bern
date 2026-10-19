@@ -1,6 +1,6 @@
 # Bern 文档
 
-更新：2026-10-17。入门使用根目录 [README 的快速开始](../README.md#快速开始)，可构建示例在 [examples](../examples/)。当前接口与平台状态从下面的参考文档查起。
+更新：2026-10-19。入门使用根目录 [README 的快速开始](../README.md#快速开始)，可构建示例在 [examples](../examples/)。当前接口与平台状态从下面的参考文档查起。
 
 ## 当前接口
 
@@ -10,7 +10,7 @@
 
 ## 架构与设计
 
-- [架构与语义规范](Design.md)：组件声明、模块、主题、命令、窗口、媒体和明确标注的后续设计。
+- [架构与语义规范](Design.md)：组件声明、模块、主题、命令、窗口、媒体、应用图标和明确标注的后续设计。
 - [平台适配规范](Adaptation/README.md)：Apple、Android、Windows / Linux、Web 以及研究中的平台；适配目标不代表当前已实现。
 - [React Native 研究](Research/ReactNative.md)：运行时桥接与构建期生成的架构比较。
 

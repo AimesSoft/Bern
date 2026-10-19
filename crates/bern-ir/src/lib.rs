@@ -325,6 +325,11 @@ pub struct AppInfo {
     /// the Bern logo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Platform name to the icon that platform uses instead, from
+    /// `[app.icon]`: a square PNG, or a file or folder in the platform's own
+    /// form, as a `/`-separated path relative to `Bern.toml`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub platform_icons: BTreeMap<String, String>,
     /// Who publishes the application, from `[app].publisher`: shown by
     /// installers and package managers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -458,6 +463,10 @@ pub struct WindowDef {
     /// Pause the idle timer while interacting with persistent controls.
     #[serde(default)]
     pub idle_enabled: Option<Expr>,
+    /// On a phone, the window stands in landscape while this is true and
+    /// in portrait otherwise; elsewhere it follows the device.
+    #[serde(default)]
+    pub landscape: Option<Expr>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -529,6 +538,14 @@ pub enum ParamKind {
 pub struct ParamDef {
     pub name: String,
     pub kind: ParamKind,
+    /// `#[content]`: text the component shows as data, so callers pass
+    /// data and never a literal.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub content: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

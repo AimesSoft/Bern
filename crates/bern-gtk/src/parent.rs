@@ -60,6 +60,8 @@ enum Sink {
     Rail(Rail),
     /// A column or row whose children slide to new places.
     Reflow(ReflowBox),
+    /// A container of Bern's own that lays out its direct children.
+    Children(gtk::Widget),
     /// Widgets an element made, for a wrapper to take: decorations and
     /// placements put them in their container themselves.
     Capture(Rc<RefCell<Vec<gtk::Widget>>>, bool),
@@ -75,6 +77,7 @@ impl Sink {
             Sink::Layers(layers, _, _) => layers.clone().upcast(),
             Sink::Rail(rail) => rail.clone().upcast(),
             Sink::Reflow(reflow) => reflow.clone().upcast(),
+            Sink::Children(container) => container.clone(),
             Sink::Capture(..) => return Vec::new(),
         };
         let mut children = Vec::new();
@@ -103,6 +106,12 @@ impl Sink {
             Sink::Layers(layers, _, _) => layers.remove(widget),
             Sink::Rail(rail) => rail.remove(widget),
             Sink::Reflow(reflow) => reflow.remove(widget),
+            Sink::Children(container) => {
+                if widget.parent().as_ref() == Some(container) {
+                    widget.unparent();
+                    container.queue_resize();
+                }
+            }
             Sink::Box(container) => container.remove(widget),
             Sink::Capture(widgets, _) => widgets.borrow_mut().retain(|kept| kept != widget),
         }
@@ -242,6 +251,17 @@ impl Parent {
         }
     }
 
+    /// The direct children of a container of Bern's own.
+    pub(crate) fn of_children(container: &impl IsA<gtk::Widget>, horizontal: bool) -> Self {
+        Self {
+            horizontal,
+            sink: Sink::Children(container.as_ref().clone()),
+            region: Region::new(None),
+            _above: None,
+            cross: None,
+        }
+    }
+
     pub(crate) fn of_rail(rail: &Rail) -> Self {
         Self {
             horizontal: !rail.vertical(),
@@ -355,26 +375,9 @@ impl Parent {
                 }
             }
             Sink::Layers(layers, halign, valign) => {
-                // A layer that fills in a direction, such as a drawing
-                // without a size, fills the stack that way. A rail takes the
-                // whole size the other layers give the stack, which it does
-                // not make larger: across its axis it counts only children
-                // with a size of their own.
-                let rail = crate::layout::is_rail(widget);
-                widget.set_halign(
-                    if rail || widget.compute_expand(gtk::Orientation::Horizontal) {
-                        gtk::Align::Fill
-                    } else {
-                        *halign
-                    },
-                );
-                widget.set_valign(
-                    if rail || widget.compute_expand(gtk::Orientation::Vertical) {
-                        gtk::Align::Fill
-                    } else {
-                        *valign
-                    },
-                );
+                // The stack aligns its layers each time it lays them out,
+                // as what they hold may come to fill it later.
+                layers.set_alignment(*halign, *valign);
                 let previous = self.previous_at(index);
                 layers.insert_after(widget, previous.as_ref());
             }
@@ -385,6 +388,14 @@ impl Parent {
             Sink::Reflow(reflow) => {
                 let previous = self.previous_at(index);
                 reflow.insert_after(widget, previous.as_ref());
+            }
+            Sink::Children(container) => {
+                let previous = self.previous_at(index);
+                if widget.parent().as_ref() == Some(container) {
+                    widget.unparent();
+                }
+                widget.insert_after(container, previous.as_ref());
+                container.queue_resize();
             }
             Sink::Box(container) => {
                 let previous = self.previous_at(index);

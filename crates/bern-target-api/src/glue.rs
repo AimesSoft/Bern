@@ -45,9 +45,10 @@ pub fn value_expr(value: &Value) -> String {
 
 fn field_expr(field: &FieldDef) -> String {
     format!(
-        "{P}::FieldDef {{ name: {:?}.into(), ty: {}, doc: String::new() }}",
+        "{P}::FieldDef {{ name: {:?}.into(), ty: {}, doc: String::new(), content: {} }}",
         field.name,
-        type_expr(&field.ty)
+        type_expr(&field.ty),
+        field.content
     )
 }
 
@@ -60,8 +61,23 @@ fn enum_expr(def: &EnumDef) -> String {
         .variants
         .iter()
         .map(|variant| {
+            // A label keeps its key and the fields it shows; its words
+            // come from the string tables.
+            let label = match &variant.label {
+                Some(label) => format!(
+                    "Some({P}::LocalizedText {{ key: {:?}.into(), translations: ::std::default::Default::default(), params: vec![{}] }})",
+                    label.key,
+                    label
+                        .params
+                        .iter()
+                        .map(|param| format!("{param:?}.into()"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+                None => "None".into(),
+            };
             format!(
-                "{P}::VariantDef {{ name: {:?}.into(), fields: vec![{}], label: None }}",
+                "{P}::VariantDef {{ name: {:?}.into(), fields: vec![{}], label: {label} }}",
                 variant.name,
                 fields_expr(&variant.fields)
             )

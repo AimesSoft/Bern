@@ -379,7 +379,7 @@ target/bern/macos/bin/showcase window confirm-close --window settings#1 --confir
 - 运行时语言：`BernLanguage`（`@Observable`）持有当前语言与对应的 `.lproj` 资源包，`BernText.string` 都经它查找，因此切换语言后读取文本的视图在同一次更新中重新计算。支持的语言取自应用包的本地化列表，启动时取系统为本应用选择的首选语言。`ui.language` 返回当前语言，`ui.set_language` 切换，不支持的标签返回 `unsupported_language`。每个窗口根视图的 `locale` 环境值取当前语言，因此 SF Symbols 的本地化变体（例如 `textformat` 在英文中为“Aa”、在中文中为“格式”）与数字、日期格式随应用语言而不是系统语言。系统托管的文案（菜单栏中由系统提供的项目等）仍随系统语言。
 - `LanguagePicker` 生成系统 `Picker`，选项用 `Locale` 给出的语言自称。
 
-- 资源键可追溯到源码：元素文案为 `组件.节点路径.属性`，枚举标签为 `枚举.变体`，应用名为 `app.name`。生成各语言的 `Localizable.strings` 与 `InfoPlist.strings`；`{name}` 按参数顺序转为 `%1$@`。Info.plist 声明 `CFBundleDevelopmentRegion` 与 `CFBundleLocalizations`。
+- 资源键可追溯到源码：元素文案为 `组件.节点路径.属性`，枚举标签为 `枚举.变体`，应用名为 `app.name`。生成各语言的 `Localizable.strings` 与 `InfoPlist.strings`。不带参数的文本原样写入（`{{`、`}}` 还原为括号）；带参数的文本保留 Bern 的[消息格式](../Reference/UI.md#文本内容与格式化)，由 `BernText.format(键, [名: BernArg])` 在运行时随当前语言写出复数分支、日期与时长，月名与星期名作为框架文本写入。显示变体字段的枚举标签在 `bernLabel` 中按变体取字段；`CalendarDate` 生成 `bernArg`。2026-10-18 以临时工程经 `BERN_SNAPSHOT_DIR` 快照实测中英文结果。Info.plist 声明 `CFBundleDevelopmentRegion` 与 `CFBundleLocalizations`。
 - 框架自身文案（失败提示、视频控制条、关闭确认按钮等）内置 zh-Hans、zh-Hant、en、ja；应用要求其他语言时构建失败。
 - 颜色全部来自系统：生成代码不设置颜色、背景或材质。未声明品牌色时使用用户的系统强调色。
 - 设置窗口按内容定高、切换页签时自动调整；侧边栏详情列以选中项名称为标题，`Form(title:)` 可为推入页面命名。
@@ -393,7 +393,7 @@ open target/bern/macos/Showcase.app
 
 产物位于 `target/bern/macos/`：`Showcase.app`、调试符号 `Showcase.app.dSYM`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
 
-应用图标为 `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`）。没有声明 `[app].icon` 时是 Bern 标志铺满方形画布的版本，16 到 1024 像素各一张 PNG，由系统裁成圆角方形；圆形图标会被 macOS 放进灰色底板，所以 macOS 不用圆形版。资源同步保留这个文件，随包资源不能与它同名。
+应用图标为 `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`）。没有声明 `[app].icon` 时是 Bern 标志铺满方形画布的版本，16 到 1024 像素各一张 PNG，由系统裁成圆角方形；圆形图标会被 macOS 放进灰色底板，所以 macOS 不用圆形版。资源同步保留这个文件，随包资源不能与它同名。`[app.icon].macos` 为 `.icns` 时原样使用。macOS 26 起，自带底板的旧式图标只有在底板正是苹果模板的形状时才按原样显示：1024 画布中 (100, 100) 起的 824 方块、圆角 185.4 的连续圆角矩形（与 `RoundedRectangle(style: .continuous)` 同一条路径）。底板是别的形状（例如指数 5 的超椭圆，轮廓相差约 4000 像素）或根本没有底板时，系统把整个图标缩小放进灰色底板；铺满方形的画面被裁成系统形状。以上为 macOS 27.0.1 实测：以 `NSWorkspace.icon(forFile:)` 渲染访达图标，比较本机多个只带 `.icns` 的应用，并交换图标排除构建所用 SDK 的影响。
 
 调试符号不随应用包发布：debug 与 release 都以 `-g` 编译，swiftc 写在 `Contents/MacOS/` 中的 dSYM 在签名前移到包旁边的 `Showcase.app.dSYM`（lldb 与崩溃报告符号化在这里查找），上次构建留下的 dSYM 先删除。release 还以 `-dead_strip` 链接，并在签名前用 `strip -S -x` 去掉可执行文件中由 dSYM 保留的调试与本地符号：展示应用的包为 2.6 MB，可执行文件 2.2 MB（此前 5.7 MB），dSYM 约 9 MB。
 

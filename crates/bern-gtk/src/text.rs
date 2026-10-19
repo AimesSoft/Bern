@@ -4,6 +4,8 @@
 //! every binding that shows text, in one update, while drafts, navigation
 //! and windows stay.
 
+use crate::protocol::Value;
+use crate::protocol::format::{self, Arg, Piece};
 use crate::reactive::{Cell, batch};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -146,40 +148,73 @@ pub fn tr(key: &str) -> String {
     })
 }
 
-/// A translation with `{name}` placeholders filled from `args`.
-pub fn fmt(key: &str, args: &[(&str, String)]) -> String {
-    fill(&tr(key), args)
+/// A translation with its arguments, in the current language: text and
+/// numbers as they are, plural branches by the number's category, dates
+/// and durations by their patterns (`bern_protocol::format`).
+pub fn fmt(key: &str, args: &[(&str, Arg)]) -> String {
+    let pieces = parsed(&tr(key));
+    format::format(
+        &pieces,
+        &language(),
+        &|name| {
+            args.iter()
+                .find(|(arg, _)| *arg == name)
+                .map(|(_, value)| value.clone())
+        },
+        &|key| tr(key),
+    )
 }
 
-pub(crate) fn fill(template: &str, args: &[(&str, String)]) -> String {
-    let mut out = String::with_capacity(template.len());
-    let mut chars = template.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '{' if chars.peek() == Some(&'{') => {
-                chars.next();
-                out.push('{');
-            }
-            '}' if chars.peek() == Some(&'}') => {
-                chars.next();
-                out.push('}');
-            }
-            '{' => {
-                let mut name = String::new();
-                for next in chars.by_ref() {
-                    if next == '}' {
-                        break;
-                    }
-                    name.push(next);
-                }
-                if let Some((_, value)) = args.iter().find(|(arg, _)| *arg == name) {
-                    out.push_str(value);
-                }
-            }
-            other => out.push(other),
-        }
+thread_local! {
+    static PARSED: std::cell::RefCell<HashMap<String, Rc<Vec<Piece>>>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+/// A translation's pieces, parsed once. The compiler checked the format,
+/// so a text that does not parse is shown as it is.
+fn parsed(text: &str) -> Rc<Vec<Piece>> {
+    PARSED.with(|cache| {
+        Rc::clone(
+            cache
+                .borrow_mut()
+                .entry(text.to_string())
+                .or_insert_with(|| {
+                    Rc::new(format::parse(text).unwrap_or_else(|_| vec![Piece::Text(text.into())]))
+                }),
+        )
+    })
+}
+
+/// A value as a text argument: numbers keep their value for plural
+/// branches, enums are their labels.
+pub fn arg(value: &Value, enum_name: Option<&str>) -> Arg {
+    match value {
+        Value::Int(number) => Arg::Number {
+            value: *number as f64,
+            text: number.to_string(),
+        },
+        Value::Float(number) => Arg::Number {
+            value: *number,
+            text: crate::value::number(*number),
+        },
+        value => Arg::Text(crate::widgets::display(value, enum_name)),
     }
-    out
+}
+
+/// A `CalendarDate` as a text argument.
+pub fn date(value: &Value) -> Arg {
+    let part = |fields: &[Value], at: usize| match fields.get(at) {
+        Some(Value::Int(number)) => *number,
+        _ => 0,
+    };
+    match value {
+        Value::Record(fields) => Arg::Date {
+            year: part(fields, 0),
+            month: part(fields, 1),
+            day: part(fields, 2),
+        },
+        _ => Arg::Text(String::new()),
+    }
 }
 
 /// A language's own name for itself, such as “简体中文” or “English”.
@@ -206,12 +241,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn placeholders_fill_and_escape() {
+    fn values_become_arguments() {
         assert_eq!(
-            fill("按钮共按下 {count} 次", &[("count", "3".into())]),
-            "按钮共按下 3 次"
+            date(&Value::Record(vec![Value::Int(2026), Value::Int(10), Value::Int(12)])),
+            Arg::Date {
+                year: 2026,
+                month: 10,
+                day: 12
+            }
         );
-        assert_eq!(fill("{{x}} {y}", &[("y", "1".into())]), "{x} 1");
-        assert_eq!(fill("{missing}!", &[]), "!");
+        assert_eq!(
+            arg(&Value::Int(3), None),
+            Arg::Number {
+                value: 3.0,
+                text: "3".into()
+            }
+        );
     }
 }

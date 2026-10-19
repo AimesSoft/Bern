@@ -7,6 +7,7 @@ pub mod planner {
     #[state]
     pub struct State {
         /// Title of the plan, shown above the notes.
+        #[content]
         pub title: String,
         /// Work done on each recent day, oldest first.
         pub activity: Vec<i64>,

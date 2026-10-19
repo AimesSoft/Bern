@@ -78,6 +78,7 @@ pub mod showcase {
         /// Source of the featured clip; the media page's video follows it.
         pub featured_source: MediaSource,
         /// Saved display name, edited in the settings window.
+        #[content]
         pub display_name: String,
     }
 

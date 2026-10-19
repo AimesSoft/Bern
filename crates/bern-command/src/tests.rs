@@ -33,6 +33,7 @@ fn descriptor() -> &'static ProtocolDescriptor {
                 name: "value".into(),
                 ty: Type::Int,
                 doc: String::new(),
+                content: false,
             }],
             commands: vec![
                 command(
@@ -273,6 +274,7 @@ mod queries {
                     name: "value".into(),
                     ty: Type::Int,
                     doc: String::new(),
+                    content: false,
                 }],
                 commands: vec![
                     spec("add", OperationKind::Command, amount()),
@@ -475,6 +477,7 @@ mod composite {
                 name: "count".into(),
                 ty: Type::Int,
                 doc: String::new(),
+                content: false,
             }],
             commands: vec![CommandSpec {
                 id: "tally.bump".into(),

@@ -448,6 +448,9 @@
   position: relative;
   min-width: 0;
   pointer-events: none;
+  /* How far the scale runs past each end; a child at fraction f stands at
+     f × (length + 2 × overhang) − overhang. */
+  --bern-rail-overhang: 0px;
 }
 
 .bern-rail > * {
@@ -464,21 +467,21 @@
 .bern-rail-horizontal > .bern-rail-item {
   grid-area: 1 / 1;
   justify-self: start;
-  margin-inline-start: var(--bern-rail-left, 0%);
+  margin-inline-start: calc(var(--bern-rail-at, 0) * (100% + 2 * var(--bern-rail-overhang)) - var(--bern-rail-overhang));
 }
 
 .bern-rail-horizontal > .bern-rail-span {
-  width: var(--bern-rail-width, 0%);
+  width: calc(var(--bern-rail-span, 0) * (100% + 2 * var(--bern-rail-overhang)));
 }
 
 .bern-rail-vertical > .bern-rail-item {
   position: absolute;
   inset-inline-start: 0;
-  top: var(--bern-rail-top, 0%);
+  top: calc(var(--bern-rail-at, 0) * (100% + 2 * var(--bern-rail-overhang)) - var(--bern-rail-overhang));
 }
 
 .bern-rail-vertical > .bern-rail-span {
-  height: var(--bern-rail-height, 0%);
+  height: calc(var(--bern-rail-span, 0) * (100% + 2 * var(--bern-rail-overhang)));
   inset-inline-end: 0;
 }
 

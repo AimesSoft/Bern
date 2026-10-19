@@ -212,7 +212,7 @@ impl<'a> Gen<'a> {
                     .map(|arg| {
                         let value = self.display_arg(&arg.value);
                         let span = arg.value.span();
-                        quote_spanned!(span=> ::bern::__private::display(#value);)
+                        quote_spanned!(span=> ::bern::__private::interpolate(#value);)
                     })
                     .collect();
                 quote!(#(#args)* ::bern::__private::display(&::bern::__private::localized());)
@@ -881,6 +881,15 @@ impl<'a> Gen<'a> {
     }
 
     fn action(&mut self, action: &Action) -> TokenStream {
+        // `pages.new.show()` names a page of a slot, which the compiler
+        // resolves against what the modules contribute; there is no value
+        // here to call.
+        if action.receiver[0] == "pages" && !self.in_scope("pages") {
+            if action.receiver.len() != 2 || action.method != "show" || !action.args.is_empty() {
+                self.error(action.method.span(), "page actions look like `pages.new.show()`");
+            }
+            return TokenStream::new();
+        }
         let call = self.call(action, "actions");
         let span = action.method.span();
         quote_spanned!(span=> ::bern::__private::command(#call);)

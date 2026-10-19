@@ -2,6 +2,7 @@
 //! the build tool so both derive identical descriptors.
 
 use crate::{ProtocolItem, TypeRef, ValueKind};
+use bern_protocol::format::{self, Use};
 use bern_protocol::{
     CommandPolicy, CommandSpec, Concurrency, DESCRIPTOR_VERSION, EnumDef, EventSpec, ExternalNames,
     FieldDef, LocalizedText, OperationKind, ParamSpec, ProtocolDescriptor, RecordDef, Retry, Scope,
@@ -46,16 +47,103 @@ pub fn resolve(ty: &TypeRef, types: &TypeTable, span: Span) -> syn::Result<Type>
     })
 }
 
-fn label(enum_name: &str, variant: &str, tr: &crate::Tr) -> LocalizedText {
-    LocalizedText {
+/// Whether text is the whole of a type: text, or optional or listed text.
+pub fn is_text(ty: &Type) -> bool {
+    match ty {
+        Type::Text => true,
+        Type::Optional { inner } | Type::List { inner } => is_text(inner),
+        _ => false,
+    }
+}
+
+/// `#[content]` of a field, which only text takes.
+pub fn content(field: &crate::FieldItem, ty: &Type) -> syn::Result<bool> {
+    if field.content && !is_text(ty) {
+        return Err(syn::Error::new(
+            field.span,
+            format!(
+                "`#[content]` marks text that is data, such as a title; `{}` is {}",
+                field.name,
+                ty.display()
+            ),
+        ));
+    }
+    Ok(field.content)
+}
+
+/// Whether `ty` is the framework's calendar date.
+pub fn is_date(ty: &Type) -> bool {
+    matches!(ty, Type::Record { name } if name == format::CALENDAR_DATE)
+}
+
+/// A variant's label. Its placeholders are the variant's fields, shown as
+/// the label's text says: text that is data (`#[content]`), numbers, enums
+/// by their labels, dates with `{field, date, …}`.
+pub fn label(
+    enum_name: &str,
+    variant: &str,
+    tr: &crate::Tr,
+    fields: &[FieldDef],
+) -> syn::Result<LocalizedText> {
+    let mut params: Vec<String> = Vec::new();
+    for entry in &tr.entries {
+        let pieces = format::parse(&entry.text)
+            .map_err(|message| syn::Error::new(entry.span, message))?;
+        for (name, how) in format::uses(&pieces) {
+            let Some(field) = fields.iter().find(|field| field.name == name) else {
+                return Err(syn::Error::new(
+                    entry.span,
+                    format!(
+                        "`{{{name}}}` is not a field of `{enum_name}::{variant}`; a label shows the variant's own fields"
+                    ),
+                ));
+            };
+            let fits = match how {
+                Use::Value => match &field.ty {
+                    Type::Text => {
+                        if !field.content {
+                            return Err(syn::Error::new(
+                                entry.span,
+                                format!(
+                                    "the label of `{enum_name}::{variant}` shows `{name}`, text without translations; mark the field `#[content]` if it is data such as a title, or make it a labelled enum"
+                                ),
+                            ));
+                        }
+                        true
+                    }
+                    Type::Int | Type::Float | Type::Enum { .. } => true,
+                    _ => false,
+                },
+                Use::Plural | Use::Duration => matches!(field.ty, Type::Int | Type::Float),
+                Use::Date => is_date(&field.ty),
+            };
+            if !fits {
+                return Err(syn::Error::new(
+                    entry.span,
+                    format!(
+                        "`{name}` of `{enum_name}::{variant}` is {}, which `{{{name}{}}}` cannot show",
+                        field.ty.display(),
+                        match how {
+                            Use::Value => String::new(),
+                            other => format!(", {}, …", other.name()),
+                        }
+                    ),
+                ));
+            }
+            if !params.contains(&name) {
+                params.push(name);
+            }
+        }
+    }
+    Ok(LocalizedText {
         key: bern_protocol::label_key(enum_name, variant),
         translations: tr
             .entries
             .iter()
             .map(|entry| (entry.language.clone(), entry.text.clone()))
             .collect(),
-        params: Vec::new(),
-    }
+        params,
+    })
 }
 
 /// Every type written in a protocol: value fields, state and parameters.
@@ -91,19 +179,30 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
     // Names first, so field types can refer to any declared value.
     let mut types = TypeTable::default();
     for value in &protocol.values {
-        if value.name == bern_media::MEDIA_SOURCE {
-            return Err(syn::Error::new(
-                value.span,
-                "`MediaSource` is a framework type; use it from `bern::prelude` instead of declaring it",
-            ));
+        for framework in [bern_media::MEDIA_SOURCE, format::CALENDAR_DATE] {
+            if value.name == framework {
+                return Err(syn::Error::new(
+                    value.span,
+                    format!(
+                        "`{framework}` is a framework type; use it from `bern::prelude` instead of declaring it"
+                    ),
+                ));
+            }
         }
     }
     // Framework value types join the table when the protocol uses them.
-    if protocol_types(protocol)
-        .into_iter()
+    let used = protocol_types(protocol);
+    if used
+        .iter()
         .any(|ty| crate::mentions(ty, bern_media::MEDIA_SOURCE))
     {
         types.records.push(bern_media::media_source_def());
+    }
+    if used
+        .iter()
+        .any(|ty| crate::mentions(ty, format::CALENDAR_DATE))
+    {
+        types.records.push(format::calendar_date_def());
     }
     for value in &protocol.values {
         match &value.kind {
@@ -126,16 +225,18 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
                 for variant in variants {
                     let mut fields = Vec::new();
                     for field in &variant.fields {
+                        let ty = resolve(&field.ty, &lookup, field.span)?;
                         fields.push(FieldDef {
                             name: field.name.to_string(),
-                            ty: resolve(&field.ty, &lookup, field.span)?,
+                            content: content(field, &ty)?,
+                            ty,
                             doc: field.doc.clone(),
                         });
                     }
-                    let text = variant
-                        .label
-                        .as_ref()
-                        .map(|tr| label(&name, &variant.name.to_string(), tr));
+                    let text = match &variant.label {
+                        Some(tr) => Some(label(&name, &variant.name.to_string(), tr, &fields)?),
+                        None => None,
+                    };
                     defs.push(VariantDef {
                         name: variant.name.to_string(),
                         fields,
@@ -152,9 +253,11 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
             ValueKind::Record(fields) => {
                 let mut defs = Vec::new();
                 for field in fields {
+                    let ty = resolve(&field.ty, &lookup, field.span)?;
                     defs.push(FieldDef {
                         name: field.name.to_string(),
-                        ty: resolve(&field.ty, &lookup, field.span)?,
+                        content: content(field, &ty)?,
+                        ty,
                         doc: field.doc.clone(),
                     });
                 }
@@ -169,9 +272,11 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
     }
     let mut state = Vec::new();
     for field in &protocol.state.fields {
+        let ty = resolve(&field.ty, &types, field.span)?;
         state.push(StateField {
             name: field.name.to_string(),
-            ty: resolve(&field.ty, &types, field.span)?,
+            content: content(field, &ty)?,
+            ty,
             doc: field.doc.clone(),
         });
     }
@@ -291,9 +396,22 @@ pub fn protocol_descriptor(protocol: &ProtocolItem) -> syn::Result<ProtocolDescr
 }
 
 /// Problems with one `tr!`: duplicate or unknown language tags, missing
-/// translations in strict mode, and placeholder/argument mismatches.
-/// `languages` is `(supported, strict)` when a project configuration exists.
+/// translations in strict mode, plural forms a language lacks, and
+/// placeholder/argument mismatches. `languages` is `(supported, strict)`
+/// when a project configuration exists.
 pub fn check_translations(
+    tr: &crate::Tr,
+    languages: Option<(&[String], bool)>,
+) -> Vec<(Span, String)> {
+    let mut problems = check_languages(tr, languages);
+    problems.extend(check_arguments(tr));
+    problems
+}
+
+/// The language side of [`check_translations`]: tags, missing languages
+/// and the plural forms each language needs. Enum labels, whose
+/// placeholders are their variant's fields, take only these checks.
+pub fn check_languages(
     tr: &crate::Tr,
     languages: Option<(&[String], bool)>,
 ) -> Vec<(Span, String)> {
@@ -340,6 +458,29 @@ pub fn check_translations(
             ));
         }
     }
+    for entry in &tr.entries {
+        if let Ok(pieces) = format::parse(&entry.text) {
+            let missing = format::missing_plurals(&pieces, &entry.language);
+            if !missing.is_empty() {
+                problems.push((
+                    entry.span,
+                    format!(
+                        "error[B104]: the `{}` text needs the plural branch {}, a form every number in the language takes",
+                        entry.language,
+                        missing.join(", ")
+                    ),
+                ));
+            }
+        }
+    }
+    problems
+}
+
+/// The argument side of [`check_translations`]: every placeholder has an
+/// argument, every translation uses the same ones, every argument is used.
+fn check_arguments(tr: &crate::Tr) -> Vec<(Span, String)> {
+    use std::collections::BTreeSet;
+    let mut problems = Vec::new();
     let declared: BTreeSet<String> = tr.args.iter().map(|arg| arg.name.to_string()).collect();
     let mut used = BTreeSet::new();
     let mut reference: Option<BTreeSet<String>> = None;

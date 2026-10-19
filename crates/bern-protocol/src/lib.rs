@@ -9,6 +9,7 @@ mod codec;
 mod compose;
 mod descriptor;
 mod error;
+pub mod format;
 mod message;
 mod resource;
 mod session;

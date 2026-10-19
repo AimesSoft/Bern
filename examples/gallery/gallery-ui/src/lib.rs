@@ -4,7 +4,7 @@
 //! beside it shows while the pointer is over the card.
 
 use bern::prelude::*;
-use gallery_protocol::gallery::{self, Accent, Appearance};
+use gallery_protocol::gallery::{self, Accent, Appearance, NoticeKind};
 
 style! {
     accents {
@@ -152,9 +152,22 @@ pub fn main_window(
                         Page::Frame => { frame(app: app) }
                         Page::Film => { film(app: app) }
                     }
-                    if app.notice_id > 0 {
+                    if let Some(notice) = app.notice {
                         Column(padding: 24) {
-                            Toast(content: app.notice, key: app.notice_id)
+                            match notice.kind {
+                                NoticeKind::Favorite => {
+                                    Toast(content: tr! { "zh-Hans" => "★ 已收藏 {name}", "en" => "★ {name} is a favorite"; name: notice.name }, key: app.notice_id)
+                                }
+                                NoticeKind::NoLongerFavorite => {
+                                    Toast(content: tr! { "zh-Hans" => "☆ 已取消收藏 {name}", "en" => "☆ {name} is no longer a favorite"; name: notice.name }, key: app.notice_id)
+                                }
+                                NoticeKind::Playing => {
+                                    Toast(content: tr! { "zh-Hans" => "▶ {name}", "en" => "▶ {name}"; name: notice.name }, key: app.notice_id)
+                                }
+                                NoticeKind::PlayingFile => {
+                                    Toast(content: tr! { "zh-Hans" => "▶ {name} · {container} · {kilobytes} KB", "en" => "▶ {name} · {container} · {kilobytes} KB"; name: notice.name, container: notice.container, kilobytes: notice.kilobytes }, key: app.notice_id)
+                                }
+                            }
                         }
                     }
                 }

@@ -246,11 +246,19 @@ inline controls::Grid Header(std::shared_ptr<Page> page, TextFn fallback, bool s
     controls::ContentControl holder;
     holder.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
     holder.VerticalAlignment(xaml::VerticalAlignment::Center);
+    // The way back and the leading tools share the first column.
+    controls::StackPanel leading;
+    leading.Orientation(controls::Orientation::Horizontal);
+    leading.VerticalAlignment(xaml::VerticalAlignment::Center);
+    leading.Children().Append(back);
+    page->leadingTools.VerticalAlignment(xaml::VerticalAlignment::Center);
+    page->leadingTools.Margin(xaml::Thickness{0, 0, 8, 0});
+    leading.Children().Append(page->leadingTools);
     controls::Grid::SetColumn(holder, 1);
     controls::Grid::SetColumn(page->tools, 2);
     page->tools.VerticalAlignment(xaml::VerticalAlignment::Center);
     page->tools.Margin(xaml::Thickness{8, 0, 0, 0});
-    grid.Children().Append(back);
+    grid.Children().Append(leading);
     grid.Children().Append(holder);
     grid.Children().Append(page->tools);
     Reactive::Run([grid, back, title, holder, weak, fallback, showTitle] {
@@ -269,7 +277,8 @@ inline controls::Grid Header(std::shared_ptr<Page> page, TextFn fallback, bool s
             title.Text(text.value_or(L""));
             if (holder.Content() != title) holder.Content(title);
         }
-        bool empty = !page->Back() && !page->TitleWidget() && page->tools.Children().Size() == 0 && title.Text().empty();
+        bool empty = !page->Back() && !page->TitleWidget() && page->tools.Children().Size() == 0 && page->leadingTools.Children().Size() == 0 &&
+            title.Text().empty();
         // An immersive window shows no title bar or toolbar.
         bool immersive = page->win && page->win->immersive.Get();
         grid.Visibility(page->HeaderHidden() || empty || immersive ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
@@ -345,6 +354,8 @@ struct SidebarItemProps {
     Str label;
     char const* icon = nullptr;
     StyleDef const* style = nullptr;
+    /// A live count beside the page, hidden at zero.
+    Get badge;
 };
 
 /// The lightweight resources of a styled sidebar item, in every state.
@@ -385,6 +396,26 @@ inline void SidebarItem(Parent const& p, Ctx const& ctx, SidebarItemProps props)
         item.Content(winrt::box_value(text));
         xaml::Automation::AutomationProperties::SetName(item, text);
     });
+    if (props.badge) {
+        auto badge = props.badge;
+#if BERN_WINUI
+        controls::InfoBadge info;
+        item.InfoBadge(info);
+        Reactive::Run([info, badge, ctx] {
+            auto count = static_cast<int32_t>(std::llround(R::AsDouble(badge(ctx))));
+            info.Value(count);
+            info.Visibility(count > 0 ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        });
+#else
+        // The system XAML's navigation items have no badge: the count
+        // stands after the label.
+        Reactive::Run([item, label, badge, ctx] {
+            auto count = static_cast<int64_t>(std::llround(R::AsDouble(badge(ctx))));
+            auto text = label();
+            item.Content(winrt::box_value(count > 0 ? text + L"  " + winrt::to_hstring(count) : text));
+        });
+#endif
+    }
     SidebarRegistry::Entry entry{registry->next++, value, name, label, item};
     if (auto style = props.style) {
         auto resources = SidebarResources(*style);
@@ -425,13 +456,74 @@ struct SplitViewProps {
     Field selection;
     Get fallback;
     std::optional<SearchProps> search;
+    /// `Sidebar(width:)`: the pane's width.
+    std::optional<double> width;
+    /// `Detail(titled:)`: whether the detail's header names the selected
+    /// destination.
+    Get titled;
 };
+
+/// The first element under `node` (itself included) that `pick` accepts,
+/// depth first, without looking inside icons.
+inline xaml::FrameworkElement FirstUnder(xaml::DependencyObject const& node, std::function<bool(xaml::DependencyObject const&)> const& pick, int depth = 0) {
+    if (!node || depth > 40) return nullptr;
+    if (pick(node)) return node.try_as<xaml::FrameworkElement>();
+    if (node.try_as<controls::IconElement>()) return nullptr;
+    int32_t count = media::VisualTreeHelper::GetChildrenCount(node);
+    for (int32_t i = 0; i < count; ++i)
+        if (auto found = FirstUnder(media::VisualTreeHelper::GetChild(node, i), pick, depth + 1)) return found;
+    return nullptr;
+}
+
+/// Line the sidebar header's icon and title up with the destinations':
+/// its first picture or icon centered on their icon column, its first text
+/// at their title column, as the header of a sidebar does elsewhere.
+inline void AlignWithItems(controls::NavigationView const& view, xaml::FrameworkElement const& header) {
+    auto icon = [](xaml::DependencyObject const& node) { return node.try_as<controls::IconElement>() || node.try_as<controls::Image>(); };
+    auto text = [](xaml::DependencyObject const& node) { return static_cast<bool>(node.try_as<controls::TextBlock>()); };
+    auto align = [weakView = winrt::make_weak(view), weakHeader = winrt::make_weak(header), icon, text](auto&&, auto&&) {
+        auto view = weakView.get();
+        auto header = weakHeader.get();
+        if (!view || !header || !view.XamlRoot() || !view.XamlRoot().Content()) return;
+        controls::NavigationViewItem item{nullptr};
+        for (auto entry : view.MenuItems())
+            if ((item = entry.try_as<controls::NavigationViewItem>())) break;
+        if (!item || !item.IsLoaded()) return;
+        auto itemIcon = item.Icon().try_as<xaml::FrameworkElement>();
+        auto itemText = FirstUnder(item, text);
+        auto headerIcon = FirstUnder(header, icon);
+        auto headerText = FirstUnder(header, text);
+        if (!itemIcon || !itemText || !headerIcon || !headerText) return;
+        auto root = view.XamlRoot().Content();
+        try {
+            auto x = [&](xaml::FrameworkElement const& e, double within) {
+                return e.TransformToVisual(root).TransformPoint({static_cast<float>(within), 0}).X;
+            };
+            double move = x(itemIcon, itemIcon.ActualWidth() / 2) - x(headerIcon, headerIcon.ActualWidth() / 2);
+            if (std::abs(move) > 0.5) {
+                auto margin = header.Margin();
+                margin.Left += move;
+                header.Margin(margin);
+                return;
+            }
+            double shift = x(itemText, 0) - x(headerText, 0);
+            if (std::abs(shift) > 0.5) {
+                auto margin = headerText.Margin();
+                margin.Left = (std::max)(0.0, margin.Left + shift);
+                headerText.Margin(margin);
+            }
+        } catch (winrt::hresult_error const&) {
+        }
+    };
+    header.LayoutUpdated(align);
+}
 
 /// The navigation view of Windows applications: a pane of destinations
 /// with optional search and content at its foot, and a detail page whose
 /// header shows the selected destination, the detail's tools and back. The
 /// pane collapses as the window narrows.
-inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Build const& footer, Build const& sidebar, Build const& detail) {
+inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Build const& header, Build const& footer, Build const& sidebar,
+    Build const& detail) {
     if (ctx.page) ctx.page->HideHeader();
     controls::NavigationView view;
     view.IsBackButtonVisible(controls::NavigationViewBackButtonVisible::Collapsed);
@@ -444,6 +536,13 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
 #if BERN_WINUI
     view.IsTitleBarAutoPaddingEnabled(false);
 #endif
+    // An open pane stays open, without the button that folds it; the
+    // narrower modes keep it.
+    auto toggle = [](controls::NavigationView const& view) {
+        view.IsPaneToggleButtonVisible(view.DisplayMode() != controls::NavigationViewDisplayMode::Expanded);
+    };
+    view.DisplayModeChanged([toggle](controls::NavigationView const& sender, auto&&) { toggle(sender); });
+    view.Loaded([toggle](IInspectable const& sender, auto&&) { toggle(sender.as<controls::NavigationView>()); });
     MarkFill(view);
     auto registry = std::make_shared<SidebarRegistry>();
     registry->view = view;
@@ -452,6 +551,15 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
     registry->fallback = props.fallback;
     auto selection = props.selection;
     if (props.search && props.search->field) view.AutoSuggestBox(SearchBox(ctx, *props.search));
+    if (props.width) view.OpenPaneLength(*props.width);
+    // Content pinned above the pane's list, lined up with the
+    // destinations. The title bar above names the window.
+    if (header) {
+        auto top = MakeFlex(false, 8, xaml::Thickness{0, 8, 12, 8});
+        header(Parent::Aligned(top, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
+        view.PaneHeader(top);
+        AlignWithItems(view, top);
+    }
     auto inner = ctx;
     inner.sidebar = registry;
     sidebar(Parent::Into(Children::OfVector<IInspectable>(view.MenuItems())), inner);
@@ -506,8 +614,10 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
     };
     auto page = std::make_shared<Page>();
     page->win = ctx.win;
-    auto header = Header(page, selectedLabel, true);
-    header.Margin(xaml::Thickness{24, 8, 24, 8});
+    // Untitled, the detail's pages show their own titles.
+    bool titled = !props.titled || Reactive::Untrack([&] { return R::Truthy(props.titled(ctx)); });
+    auto bar = Header(page, selectedLabel, titled);
+    bar.Margin(xaml::Thickness{24, 8, 24, 8});
     controls::Grid body;
     controls::RowDefinition top;
     top.Height(AutoLength());
@@ -515,7 +625,7 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
     rest.Height(Star());
     body.RowDefinitions().Append(top);
     body.RowDefinitions().Append(rest);
-    body.Children().Append(header);
+    body.Children().Append(bar);
     auto content = MakeFlex();
     controls::Grid::SetRow(content.as<xaml::FrameworkElement>(), 1);
     body.Children().Append(content);
@@ -702,10 +812,16 @@ struct TabsProps {
     Get fallback;
 };
 
+/// `TabAccessory`: a bar kept under the pages while `shown` holds.
+struct TabAccessory {
+    Get shown;
+    Build build;
+};
+
 /// Tabs as a selector in the page header, as Windows Settings pages show
 /// them: a selector bar in WinUI 3, a row of toggle buttons in the system
 /// XAML, which has none.
-inline void Tabs(Parent const& p, Ctx const& ctx, TabsProps props, Build const& tabs) {
+inline void Tabs(Parent const& p, Ctx const& ctx, TabsProps props, Build const& tabs, TabAccessory const& accessory = {}) {
     auto registry = std::make_shared<TabsRegistry>();
     registry->ctx = ctx;
     registry->selection = props.selection;
@@ -798,6 +914,20 @@ inline void Tabs(Parent const& p, Ctx const& ctx, TabsProps props, Build const& 
                     return std::nullopt;
                 }});
     p.Add(holder);
+    // The accessory below the pages, on a card as a raised bar.
+    if (accessory.build) {
+        controls::Grid row;
+        auto card = Card(row);
+        card.Margin(xaml::Thickness{12, 6, 12, 6});
+        card.Padding(xaml::Thickness{8, 0, 8, 0});
+        card.MinHeight(48);
+        accessory.build(Parent::Of(row), ctx);
+        if (auto shown = accessory.shown)
+            Reactive::Run([card, shown, ctx] {
+                card.Visibility(R::Truthy(shown(ctx)) ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+            });
+        p.Add(card);
+    }
 }
 
 /// One tab; part of its `Tabs` while mounted.

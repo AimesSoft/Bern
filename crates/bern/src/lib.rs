@@ -6,6 +6,7 @@
 //! into native UI for each target.
 
 pub mod bind;
+pub mod date;
 pub mod media;
 pub mod modules;
 pub mod query;
@@ -27,6 +28,7 @@ pub trait Features: Copy + 'static {}
 
 pub mod prelude {
     pub use crate::bind::{Binding, SessionField};
+    pub use crate::date::CalendarDate;
     pub use crate::media::{MediaSource, Player};
     pub use crate::query::Answer;
     pub use crate::{CommandError, Features, View, component, style, tr, ui};

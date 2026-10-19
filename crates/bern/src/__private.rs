@@ -39,6 +39,16 @@ pub fn to_ref<R: ToRef>(reference: &R) -> R::Ref {
 
 pub fn display<D: Displayable + ?Sized>(_: &D) {}
 
+/// Values a `tr!` argument can be: what `Text` shows, and dates, which
+/// only a translation writes out.
+pub trait Interpolated {}
+
+impl<D: Displayable + ?Sized> Interpolated for D {}
+impl Interpolated for crate::date::CalendarDateRef {}
+impl Interpolated for crate::date::CalendarDate {}
+
+pub fn interpolate<D: Interpolated + ?Sized>(_: &D) {}
+
 pub fn text_field(_: &SessionField<String>) {}
 
 pub fn bool_field(_: &SessionField<bool>) {}

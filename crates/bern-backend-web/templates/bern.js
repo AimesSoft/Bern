@@ -363,12 +363,175 @@ function autonym(tag) {
 }
 
 /// A translation with `{name}` placeholders filled from `args`.
+/// A translated text with its arguments, in the session's language: text,
+/// numbers and labels as they are, plural branches by the number's
+/// category, dates and durations by their patterns. The format is the one
+/// the compiler checks (`bern_protocol::format`).
 export function fmt(key, args) {
-  return tr(key).replace(/\{\{|\}\}|\{([^{}]*)\}/g, (match, name) => {
-    if (match === "{{") return "{";
-    if (match === "}}") return "}";
-    return name in args ? args[name] : "";
-  });
+  return writeText(parseText(tr(key)), languageCell.get(), args, null);
+}
+
+// Parsed texts by their translation. Texts are checked at compile time, so
+// parsing trusts their shape.
+const parsedTexts = new Map();
+
+function parseText(text) {
+  const cached = parsedTexts.get(text);
+  if (cached) return cached;
+  let at = 0;
+  const word = (stops) => {
+    const start = at;
+    while (at < text.length && !stops.includes(text[at])) at++;
+    return text.slice(start, at).trim();
+  };
+  const placeholder = () => {
+    const name = word(",{}");
+    if (text[at] !== ",") {
+      at++;
+      return { name };
+    }
+    at++;
+    const kind = word(",{}");
+    at++;
+    if (kind !== "plural") {
+      const pattern = word("{}");
+      at++;
+      return kind === "date" ? { name, date: pattern } : { name, duration: pattern };
+    }
+    const branches = {};
+    for (;;) {
+      while (at < text.length && /\s/.test(text[at])) at++;
+      if (at >= text.length || text[at] === "}") {
+        at++;
+        return { name, plural: branches };
+      }
+      const selector = word("{}");
+      at++;
+      branches[selector] = message(true);
+      at++;
+    }
+  };
+  // Pieces up to the end, or up to the `}` that closes a plural branch.
+  const message = (branch) => {
+    const pieces = [];
+    const push = (c) => {
+      if (typeof pieces[pieces.length - 1] === "string") pieces[pieces.length - 1] += c;
+      else pieces.push(c);
+    };
+    while (at < text.length) {
+      const c = text[at];
+      const next = text[at + 1];
+      if (c === "{" && next === "{") { push("{"); at += 2; }
+      else if (c === "}" && branch) return pieces;
+      else if (c === "}" && next === "}") { push("}"); at += 2; }
+      else if (c === "#" && branch) { pieces.push({ hash: true }); at++; }
+      else if (c === "{") { at++; pieces.push(placeholder()); }
+      else { push(c); at++; }
+    }
+    return pieces;
+  };
+  const pieces = message(false);
+  parsedTexts.set(text, pieces);
+  return pieces;
+}
+
+function pluralCategory(language, number) {
+  const base = language.split(/[-_]/)[0];
+  const oneForm = ["zh", "ja", "ko", "vi", "th", "id", "ms"].includes(base);
+  return !oneForm && number === 1 ? "one" : "other";
+}
+
+const pad2 = (value) => String(value).padStart(2, "0");
+
+/// An argument as text: text as it is, numbers as Bern writes them.
+function showArg(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "bigint") return int(value);
+  if (typeof value === "number") return num(value);
+  if (value && typeof value === "object") {
+    return `${String(value.year).padStart(4, "0")}-${pad2(value.month)}-${pad2(value.day)}`;
+  }
+  return "";
+}
+
+function writeText(pieces, language, args, hash) {
+  let out = "";
+  for (const piece of pieces) {
+    if (typeof piece === "string") out += piece;
+    else if (piece.hash) out += hash ?? "";
+    else if (piece.plural) {
+      const raw = args[piece.name];
+      const value = Number(raw ?? 0);
+      const body = piece.plural[`=${value}`]
+        ?? piece.plural[pluralCategory(language, value)]
+        ?? piece.plural.other;
+      if (body) out += writeText(body, language, args, showArg(raw));
+    } else if (piece.date !== undefined) {
+      const value = args[piece.name];
+      if (value && typeof value === "object") out += formatDate(piece.date, value);
+    } else if (piece.duration !== undefined) {
+      out += formatDuration(piece.duration, Number(args[piece.name] ?? 0));
+    } else if (piece.name in args) {
+      out += showArg(args[piece.name]);
+    }
+  }
+  return out;
+}
+
+/// Runs of one pattern letter, and the characters between them.
+function patternRuns(pattern) {
+  const runs = [];
+  for (const c of pattern) {
+    const last = runs[runs.length - 1];
+    if (last && last[0] === c && /[A-Za-z]/.test(c)) last[1]++;
+    else runs.push([c, 1]);
+  }
+  return runs;
+}
+
+/// The day of the week, 0 for Monday.
+function weekday(year, month, day) {
+  const offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+  const m = Math.min(12, Math.max(1, month));
+  const y = m < 3 ? year - 1 : year;
+  const div = (a, b) => Math.floor(a / b);
+  const sundayFirst = (((y + div(y, 4) - div(y, 100) + div(y, 400) + offsets[m - 1] + day) % 7) + 7) % 7;
+  return (sundayFirst + 6) % 7;
+}
+
+function formatDate(pattern, date) {
+  const year = Number(date.year);
+  const month = Number(date.month);
+  const day = Number(date.day);
+  let out = "";
+  for (const [c, count] of patternRuns(pattern)) {
+    if (c === "y") out += count === 2 ? pad2(((year % 100) + 100) % 100) : String(year);
+    else if (c === "M" && count <= 2) out += count === 2 ? pad2(month) : String(month);
+    else if (c === "M") out += tr(`bern.date.${count === 3 ? "month" : "month_long"}.${month}`);
+    else if (c === "d") out += count === 2 ? pad2(day) : String(day);
+    else if (c === "E") out += tr(`bern.date.${count === 3 ? "weekday" : "weekday_long"}.${weekday(year, month, day) + 1}`);
+    else out += c.repeat(count);
+  }
+  return out;
+}
+
+/// Seconds as `h`, `m` and `s` fields; the largest field written takes
+/// what the larger ones would hold.
+function formatDuration(pattern, seconds) {
+  const total = Number.isFinite(seconds) ? Math.floor(Math.max(0, seconds)) : 0;
+  const hours = pattern.includes("h");
+  const minutes = pattern.includes("m");
+  const fields = {
+    h: Math.floor(total / 3600),
+    m: hours ? Math.floor((total % 3600) / 60) : Math.floor(total / 60),
+    s: hours || minutes ? total % 60 : total,
+  };
+  let out = "";
+  for (const [c, count] of patternRuns(pattern)) {
+    if (c === "h" || c === "m" || c === "s") out += count === 2 ? pad2(fields[c]) : String(fields[c]);
+    else out += c.repeat(count);
+  }
+  return out;
 }
 
 /// Bern's basic, locale-independent number text.
@@ -1177,10 +1340,11 @@ export const STYLE_CLASS = {
   caption2: "caption2",
 };
 
-export function Text(p, ctx, { content, style, emphasis, fontSize, lines }) {
+export function Text(p, ctx, { content, style, emphasis, fontSize, lines, lineHeight }) {
   const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
   bindText(node, content);
   length(node, "fontSize", fontSize);
+  length(node, "lineHeight", lineHeight);
   if (lines !== undefined) {
     node.classList.add("bern-text-clamp");
     effect(() => node.style.setProperty("--bern-text-lines", String(Math.max(1, Number(readValue(lines))))));
@@ -1204,13 +1368,13 @@ function enabledOf(enabled) {
   return enabled ?? (() => true);
 }
 
-export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height }, action) {
+export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill }, action) {
   const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
   const node = el(
     "button",
-    { class: `bern-button bern-button-${kind}${role === "destructive" ? " bern-destructive" : ""}`, type: "button" },
+    { class: `bern-button bern-button-${kind}${role === "destructive" ? " bern-destructive" : ""}${fill ? " bern-button-fill" : ""}`, type: "button" },
     name ? icon(name, 14) : null,
     text,
   );
@@ -1229,9 +1393,11 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
   p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, node) : node);
 }
 
-export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence }, action) {
+export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter }, action) {
   const node = el("button", { class: `bern-icon-button${prominence === "prominent" ? " bern-icon-button-prominent" : ""}`, type: "button" }, icon(name, fontSize ?? 16));
   if (fontSize != null) { node.firstElementChild.style.width = `${fontSize}px`; node.firstElementChild.style.height = `${fontSize}px`; }
+  // A round button of an exact diameter.
+  if (diameter != null) { Object.assign(node.style, { width: `${diameter}px`, height: `${diameter}px`, minWidth: `${diameter}px`, borderRadius: "50%", padding: "0" }); }
   bindAttr(node, "aria-label", label);
   bindAttr(node, "title", label);
   const isEnabled = enabledOf(enabled);
@@ -1300,7 +1466,7 @@ export function TextInput(p, ctx, { id, label, field, prompt, kind, labelHidden 
   else p.append(labelled(input, label, true));
 }
 
-export function Search(p, ctx, { id, field, prompt }, submit, results) {
+export function Search(p, ctx, { id, field, prompt, width, height, fontSize }, submit, results) {
   const input = el("input", { class: "bern-search-input", type: "search", autocomplete: "off" });
   if (prompt) {
     bindAttr(input, "placeholder", prompt);
@@ -1329,6 +1495,9 @@ export function Search(p, ctx, { id, field, prompt }, submit, results) {
     actions: { edit: (value) => field.set(value), submit, value: () => field.peek(), focus: () => input.focus() },
   });
   const box = el("div", { class: "bern-search" }, icon("magnifyingglass", 14), input, clear);
+  if (width !== undefined) box.style.width = `${width}px`;
+  if (height !== undefined) box.style.height = `${height}px`;
+  if (fontSize !== undefined) input.style.fontSize = `${fontSize}px`;
   if (results) searchResults(box, input, field, ctx, results);
   p.append(box);
 }
@@ -1913,11 +2082,13 @@ export function Timer(p, ctx, { interval, enabled }, action) {
 
 /// A view-owned blocking overlay, distinct from an application window.
 /// Its lifetime is controlled by the declarative branch containing it.
-export function Modal(p, ctx, { width, height }, children) {
+export function Modal(p, ctx, { width, height, cover }, children) {
   const dialog = el("dialog", { class: "bern-modal", tabindex: "-1" });
   bindAttr(dialog, "aria-label", () => tr("app.name"));
   length(dialog, "width", width ?? 960);
   length(dialog, "height", height ?? 600);
+  // `cover: compact`: the whole window where the window is compact.
+  if (cover === "compact" && ctx.win) effect(() => dialog.classList.toggle("bern-modal-cover", ctx.win.compact.get()));
   const content = el("div", { class: "bern-modal-content" });
   children(content, { ...ctx, inToolbar: false, inGroup: false });
   dialog.append(content);
@@ -2061,23 +2232,46 @@ export function Divider(p) {
   p.append(el("hr", { class: "bern-divider" }));
 }
 
-export function ScrollView(p, ctx, { axis, hideIndicators }, children) {
+export function ScrollView(p, ctx, { axis, hideIndicators, openAt }, children) {
   // A scroll view takes the room it gets, as on the native targets.
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
   if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
   children(node, ctx);
   p.append(node);
+  if (openAt !== undefined) openScroll(node, axis === "horizontal", openAt);
 }
 
-export function Form(p, ctx, { title }, children) {
+/// Once the scroll view first knows how far it scrolls, it stands at
+/// `at` of that: the point at that fraction of the content at the same
+/// fraction of the view.
+export function openScroll(node, horizontal, at) {
+  const observer = new ResizeObserver(() => {
+    const room = horizontal ? node.scrollWidth - node.clientWidth : node.scrollHeight - node.clientHeight;
+    if (room <= 0) return;
+    observer.disconnect();
+    const value = Math.min(1, Math.max(0, at)) * room;
+    if (horizontal) node.scrollLeft = value;
+    else node.scrollTop = value;
+  });
+  observer.observe(node);
+  for (const child of node.children) observer.observe(child);
+}
+
+export function Form(p, ctx, { title, gap, rowHeight, paddingX, paddingY }, children) {
   if (title) pageTitle(ctx, title);
   const node = el("div", { class: "bern-form" });
+  if (gap !== undefined) node.style.gap = `${gap}px`;
+  if (rowHeight !== undefined) node.style.setProperty("--bern-row-height", `${rowHeight}px`);
+  if (paddingX !== undefined) node.style.setProperty("--bern-row-padding-x", `${paddingX}px`);
+  if (paddingY !== undefined) node.style.setProperty("--bern-row-padding-y", `${paddingY}px`);
   children(node, ctx);
   p.append(el("div", { class: "bern-form-scroll" }, node));
 }
 
-export function Section(p, ctx, { title, footer }, children) {
-  const group = el("div", { class: "bern-group" });
+export function Section(p, ctx, { title, footer, plain, paddingX, paddingY }, children) {
+  const group = el("div", { class: plain ? "bern-group bern-group-plain" : "bern-group" });
+  if (paddingX !== undefined) group.style.setProperty("--bern-row-padding-x", `${paddingX}px`);
+  if (paddingY !== undefined) group.style.setProperty("--bern-row-padding-y", `${paddingY}px`);
   const node = el("section", { class: "bern-section" });
   if (title) {
     const heading = el("h3", { class: "bern-section-title" });
@@ -2370,10 +2564,17 @@ export function NavLink(p, ctx, { id, route, label }, children) {
 
 /// Underline tabs. At a wide dialog's root they become a vertical
 /// navigation beside the content.
-export function Tabs(p, ctx, { id, selection, tabs, selectedLabel }) {
+export function Tabs(p, ctx, { id, selection, tabs, accessory, selectedLabel }) {
   const bar = el("div", { class: "bern-tabbar", role: "tablist" });
   const panels = el("div", { class: "bern-tabpanels", role: "tabpanel" });
   const node = el("div", { class: "bern-tabs" }, bar, panels);
+  // `TabAccessory`: a raised bar under the pages, kept while it is shown.
+  if (accessory) {
+    const strip = el("div", { class: "bern-tab-accessory" });
+    node.append(strip);
+    accessory.build(strip, ctx);
+    if (accessory.shown) effect(() => { strip.hidden = !accessory.shown(); });
+  }
   const entries = tabs.map((tab) => {
     const text = el("span");
     bindText(text, tab.label);
@@ -3338,6 +3539,8 @@ class Win {
     this.medium = cell(false);
     this.expanded = cell(true);
     this.large = cell(false);
+    /// `window.short`: shorter than the compact breakpoint.
+    this.short = cell(false);
   }
 
   get floating() {
@@ -3619,8 +3822,10 @@ class WindowManager {
       const width = win.element.clientWidth;
       if (!width) return;
       const size = sizeOf(width, this.app.layouts);
+      const height = win.element.clientHeight;
       batch(() => {
         for (const name of SIZES) win[name].set(name === size);
+        win.short.set(height > 0 && height < this.app.layouts.compact);
       });
     };
     const observer = new ResizeObserver(update);

@@ -35,43 +35,14 @@ impl LocalizedText {
         self.translations.get(language).map(String::as_str)
     }
 
-    /// Interpolation names referenced by one translation, in order of first use.
+    /// Interpolation names referenced by one translation, in order of first
+    /// use. The text is checked as a whole: see [`crate::format`].
     pub fn placeholders(text: &str) -> Result<Vec<String>, String> {
-        let mut names = Vec::new();
-        let mut chars = text.char_indices().peekable();
-        while let Some((index, c)) = chars.next() {
-            match c {
-                '{' if matches!(chars.peek(), Some((_, '{'))) => {
-                    chars.next();
-                }
-                '}' if matches!(chars.peek(), Some((_, '}'))) => {
-                    chars.next();
-                }
-                '{' => {
-                    let start = index + 1;
-                    let mut end = None;
-                    for (position, next) in chars.by_ref() {
-                        if next == '}' {
-                            end = Some(position);
-                            break;
-                        }
-                    }
-                    let end = end.ok_or_else(|| format!("unclosed `{{` in \"{text}\""))?;
-                    let name = &text[start..end];
-                    if name.is_empty()
-                        || !name
-                            .chars()
-                            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                        || name.starts_with(|c: char| c.is_ascii_digit())
-                    {
-                        return Err(format!("invalid placeholder `{{{name}}}` in \"{text}\""));
-                    }
-                    if !names.iter().any(|existing| existing == name) {
-                        names.push(name.to_string());
-                    }
-                }
-                '}' => return Err(format!("unmatched `}}` in \"{text}\"")),
-                _ => {}
+        let pieces = crate::format::parse(text)?;
+        let mut names: Vec<String> = Vec::new();
+        for (name, _) in crate::format::uses(&pieces) {
+            if !names.contains(&name) {
+                names.push(name);
             }
         }
         Ok(names)

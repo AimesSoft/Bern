@@ -167,6 +167,7 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
         name: name.into(),
         ty,
         doc: doc.into(),
+        content: false,
     };
     let unit_enum = |name: &str, variants: &[&str]| EnumDef {
         name: name.into(),

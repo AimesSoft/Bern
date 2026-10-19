@@ -2,7 +2,7 @@
 
 当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
 
-- 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”）
+- 日期：2026-10-11（v0.29、v0.30 的能力于 2026-10-14 补齐，见“样式、动效、自绘与媒体类应用的能力”；页面级布局、场景与控件形态的能力于 2026-10-18 补齐，见同名一节）
 - 依据：[Bern 架构设计 v0.30](../Design.md)（最初按 v0.15 实现）、[Windows 与 Linux 适配](../Adaptation/WindowsLinux.md)
 - 工具链：Rust 1.99.0；gtk4-rs 0.11（`gtk4`，启用 `v4_14`）、libadwaita-rs 0.9（启用 `v1_5`）、glib/gio 0.22
 - 验证环境：Ubuntu 24.04 LTS（aarch64，VMware Fusion 虚拟机），GNOME Shell 46.0，Wayland 会话；GTK 4.14.5、libadwaita 1.5.0、GStreamer 1.24.2
@@ -114,6 +114,7 @@
 ## 本地化与主题
 
 - 文案表（应用声明的文字、应用名与运行时自己的文字）生成到程序中；启动时按 `LANGUAGE`、`LC_ALL`、`LC_MESSAGES`、`LANG` 选择支持的语言（`zh_CN` 对应 `zh-Hans`），`ui.set_language` 与 `LanguagePicker` 在运行中切换，所有文本绑定在同一次更新中重新计算。运行时自己的文字内置 zh-Hans、zh-Hant、en、ja。
+- 带参数的文本与显示变体字段的枚举标签按[消息格式](../Reference/UI.md#文本内容与格式化)写出：运行时直接复用 `bern_protocol::format`（与编译器同一份解析与格式化），参数按类型传入（文本、带数值的数字、`CalendarDate`、枚举标签），复数类别取当前语言。月名与星期名随文案表生成，内置语言之外用英文。生成的类型表带上标签的键与参数，标签的文字仍来自文案表。2026-10-19 在 bern-ubuntu（Broadway）上以临时工程实测中英文的 `=0` 分支、复数分支内嵌枚举标签、日期、时长与带字段的标签，并确认一个实际应用的英文界面只剩标题等数据为原文。
 - 构建生成 freedesktop 桌面文件（各语言的名称），可安装到 `~/.local/share/applications`。
 - 颜色全部来自 libadwaita：深浅色跟随系统；没有样式覆盖时生成代码不设置颜色。声明了品牌色时映射为 libadwaita 的强调色。样式覆盖与画布的语义角色映射到 libadwaita 的命名颜色（见“样式覆盖”）。
 
@@ -137,7 +138,7 @@
 - 出现与消失：`if`、`match`、`ForEach` 在首次显示之后挂载的元素播放 `appear`；元素内部的元素随它一起出现，不再各自播放。卸载的带 `disappear` 的元素留在容器里播完再离开，此时它已不在自己的区域中，新元素按它不存在时的位置插入。列表行由列表布置，行本身不动，行的内容在行内移动。
 - `stagger`：容器构建直接子元素时带一个计数，带 `appear` 的子元素依次晚 `stagger` 秒；容器本身在一次更新中出现时，子元素也播放出现；`ForEach` 的各行即其子元素，每次更新从 0 计起。
 - 共享元素 `hero`：元素卸载时记下它在窗口中的位置并留一张画面（视频与画布不留，它们会自己变化）；同一窗口中同键的新元素布置后，从旧位置与尺寸以 `hero` 弹簧展开，旧画面在窗口上方的 `GtkFixed` 层里随之移动并淡出。
-- `reflow`：写了它的 `Column`、`Row`，或其中有带 `reflow` 的 `ForEach`，用 `BernReflowBox`：GTK 的盒子布局排好后，比较每个子元素的新旧位置，被移动的子元素从旧位置以弹簧滑到新位置（动画中再次移动时接着当前偏移）。`Grid`、`Stack`、表单行等其他容器中的 `reflow` 构建时警告，子元素直接到新位置。
+- `reflow`：写了它的 `Column`、`Row`，或其中有带 `reflow` 的 `ForEach`，用 `BernReflowBox`：GTK 的盒子布局排好后，比较每个子元素的新旧位置，被移动的子元素从旧位置以弹簧滑到新位置（动画中再次移动时接着当前偏移）。`Stack` 与 `cell_ratio` 网格见下文“页面级布局”；`GtkFlowBox` 网格、表单行等其他容器中的 `reflow` 构建时警告，子元素直接到新位置。
 - `animate`：绑定状态的长度（`padding`、`gap`、`width`、`height`、`Grid` 的 `min_width`、`Canvas` 与 `Image` 的尺寸、`Video` 的 `corner`、`Rail` 的比例）随这个弹簧变化。`Video` 的圆角由 `BernClip` 在绘制时裁剪，变化只重绘。
 - `nudge`：条件变真时放大到 1.06 再以 `jelly` 弹回；`ScrollView(arrival: nudge)` 让设置 `position` 滚到的那一项停稳后晃一下。
 - `scroll_scale`、`scroll_opacity`：滚动区的调整量每次变化与元素每次分配时，按元素中心离视口中心的距离设置缩放与透明度。
@@ -154,7 +155,7 @@
 - `immersive`：为真时窗口里所有标题栏（窗口自己的、侧栏与详情的）`reveal-top-bars` 关闭；同时静置时指针隐藏。
 - `chrome: unified`：标题栏用 `AdwToolbarView` 的平铺样式（`flat`），不再有分隔阴影；内容不延伸到标题栏下。
 - `role: dialog`：设为主窗口的临时窗口并模态，Esc 关闭；在 GNOME 上由 mutter 附着在主窗口上（未验证，测试环境 Broadway 没有窗口管理器，对话框出现在左上角）。
-- 窗口尺寸档：窗口内容顶部一个高 0 的探针测量宽度，按 `[layouts]` 的三个断点得到 `compact`、`medium`、`expanded`、`large`，表达式中的 `window.compact` 等读取它；`Adaptive` 四档各自选择，没有自己布局的档位显示下一个更大的已声明布局，没有更大的取更小的。
+- 窗口尺寸档：窗口内容顶部一个高 0 的探针测量宽度，按 `[layouts]` 的三个断点得到 `compact`、`medium`、`expanded`、`large`，表达式中的 `window.compact` 等读取它；窗口内容之上铺满的另一个探针测量高度，低于 `compact_below` 时 `window.short` 为真。`Adaptive` 四档各自选择，没有自己布局的档位显示下一个更大的已声明布局，没有更大的取更小的。`Adaptive` 按容器“提供”的宽度选择：它的容器 `BernOffered` 在横向不要求最小宽度，所以当前显示的宽布局不会把窗口或探针撑宽（否则会一直停在宽布局）；比提供的宽度更宽的布局被裁剪，直到宽度选出另一档。
 - 运行时强调色与明暗：`WindowSet(accent:, appearance:)` 的表达式在每个窗口中求值；强调色以 `@define-color accent_bg_color`、`accent_color`（浅色窗口略暗、深色略亮，保证在窗口底色上可读）与 `accent_fg_color`（按亮度取黑或白）写入一份更高优先级的样式表，明暗切换时重写；明暗由 `AdwStyleManager` 的配色方案设置。libadwaita 1.5 没有设置强调色的接口，这是它支持的方式。
 - `appearance: dark` / `light` 的部分：第一次用到时，从 libadwaita 读取它自己的 `base.css` 与另一种外观的命名颜色，把每条规则限定在 `.bern-appearance-dark`（或 `light`）之下、命名颜色换成那种外观的取值（强调色保持跟随窗口），作为一份样式表加载；部分里的控件、从中弹出的浮层与菜单因此按那种外观绘制，画布的语义角色也按它解析。只在部分的子孙上生效，部分本身的底色由内容决定。
 
@@ -165,6 +166,58 @@
 - `ScrollView(snap:, position:)`：滚动停下（160 毫秒不变）时取最近的一项对齐到锚点；离上次停下的位置走过 24 点以上而最近的一项在身后时，取运动方向上的下一项，所以一格滚轮也能前进。`center` 时首尾按最大一项留出空白；位置按项在内容中的坐标加内容的边距计算，与当前滚动无关。字段被设成另一项时以 `smooth` 滚过去；首次显示等边距生效后直接停在字段的一项。
 - 重复项中的控件目标带上每一层的键，经过组件也一样（`card.open_swatch[2]`）。
 
+## 页面级布局、场景与控件形态的能力（2026-10-18）
+
+GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。`window_landscape` 仍未声明：桌面 GTK 没有设备方向，检查给出警告。一个真实的媒体类应用在 GTK 上的检查从 67 个错误变为 0 个错误，构建并运行（见“验证记录”）。
+
+### 外观与文字
+
+- `Stack` 的样式画在层叠本身上：`bern-style-<名称>` 的底色、文字与符号图标的颜色（CSS `color` 向下继承）、圆角；有圆角时 `overflow: hidden` 按圆角裁住各层。
+- `text { … }`：每个文字样式另带类 `bern-text-<样式>`，样式表按 `style!` 写入字重与字号，应用优先级高于主题的 `title-1` 等类。
+- `Text(lines:)` 用 `GtkLabel` 的 `lines` 与末尾省略号；`font_size`（可绑定）与 `line_height` 是 Pango 的绝对字号与绝对行高属性。`Label(font_size:)` 同时设置图标的像素尺寸，`display: icon` 只显示图标，标题作为提示与无障碍名称。
+- 文字先取一行的宽度，放不下才换行：GTK 的横向盒子按行高去量换行标签的宽度（width-for-height），旁边有更高的元素时文字会被压成多行窄条；`Text` 外包一层 `BernWords`，量宽度时不看给定的高度，加了标注的文字同理。
+- `Image(corner:)` 由 `BernClip` 按（可绑定、可弹簧的）半径裁剪；`rendering: template` 用 `BernTemplatePicture`：图片的 alpha 作蒙版填前景色（GSK 的 `push_mask`）；`aspect` 取代图片自身比例，只给 `aspect` 时铺满容器宽度、高度按比例（高度随宽度变化，最小高度为 0，在滚动视图中按自然高度排布）。
+
+### 控件形态与受控值
+
+- `shape: capsule` 是类 `bern-capsule`（9999 圆角，分组控件的首尾按钮同理），`height` 用尺寸请求并去掉主题的最小高度与上下内边距（类 `bern-sized-control`）。`IconButton(height:)` 是该直径的圆形按钮，`font_size` 是图标像素尺寸，`prominence: prominent` 为强调色底。`Button(width: fill)` 横向撑满。`ControlGroup` 是 libadwaita 的 `linked` 分组，整体为胶囊、默认高 40。
+- `Menu(style: icon)`：只显示图标的圆形扁平菜单按钮，标签为提示与无障碍名称。
+- 受控值：`Switch(checked:)`、`Picker(selected:)`、`Slider(current:)` 显示表达式的值，改动时执行动作的命令，参数中与该表达式相同的一项换成新值；绑定草稿并带动作的 `Switch`、`Picker` 先写草稿再执行动作。受控的滑块拖动时只移动滑块，松开时提交；键盘与滚轮立即提交。`PickerOption` 给出自己的值与标签。`label_hidden` 不显示标签，只作无障碍名称。
+
+### 布局
+
+- `padding_x`、`padding_y`：在 `padding` 之上分别覆盖左右与上下的外边距。`Row(align: baseline)` 用 GTK 的 `BaselineCenter` 对齐。
+- 声明的宽高就是请求的尺寸：`Column`、`Row` 给出 `width` 或 `height` 时外包 `BernSized`，`Stack` 自己测量，它们都不再因内容（如未截断的长标题）要求更宽。
+- `Grid(row_gap:)` 单独设置行距。`Grid(cell_ratio:, cell_extra:)` 用 `BernCellGrid`：按最小宽度算出列数，每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各项从格子顶部排，内容更高时伸进下面的行距。
+- `Flow` 是 `BernFlow`：子项各取自然宽度，放不下时换到下一行，行高取该行最高者。
+- `ScaleBox` 是 `BernScaleBox`：子项在声明的逻辑尺寸中层叠（左上对齐），整体以一个变换缩放到能放下并居中、超出部分裁掉，所以图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，按（可弹簧的）`x`、`y`、`width`、`height` 放置内容。
+- `Marquee`：内容按自然宽度从右缘外跑到左缘外，每 `duration` 秒一次，`phase` 为起始进度；`paused` 时停在原处，减少动态效果时静止在宽度 28% 处；文字带 1 点黑色阴影；`opacity` 可绑定。
+- `Accordion`：列宽由每列一个 0 到 1 的权重弹簧决定，收起列为固定宽度，总宽保持不变；每列按 `corner` 圆角裁剪。
+- `reflow` 现在也作用于 `Stack` 的各层和 `cell_ratio` 网格的格子（共用 `Slides`：布局后比较新旧位置，以弹簧从旧位置滑到新位置）；`GtkFlowBox` 网格与表单行仍然只警告。
+- 滚动视图：内容沿滚动方向按自然尺寸排布（视口在该方向用 `Natural` 策略），横向滚动视图的高度取内容的自然高度。
+
+### 页面结构
+
+- `SidebarHeader` 固定在侧栏列表上方；`Sidebar(width:)` 以像素固定 `AdwNavigationSplitView` 的侧栏宽度；`Detail(titled: false)` 时详情标题栏不再显示选中项的名称；`SidebarItem(badge:)` 在行尾显示计数（为 0 时隐藏）。
+- 工具栏中 `Spacer` 之前的项放在页面标题栏的前缘（返回按钮之后），之后的放在后缘；`Text` 可以放在工具栏里。
+- 标签页：宽窗口的切换器在页面标题栏，紧凑窗口（`window.compact`）改为页面下方的 `AdwViewSwitcherBar`，与 GNOME 自适应应用相同；`TabAccessory` 在页面与底部标签栏之间。
+- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分组间距为盒子间距；行高与行内边距写成一条按值生成的规则（plain 行与 libadwaita 行的 `box.header`），`Section` 自己的边距优先；plain 分组去掉列表的底色、边框、内边距与分隔，表单以它开头时从页面顶部开始。非 libadwaita 行的内边距改由行的 CSS 给出，才能被这些规则覆盖。
+- 页面中的 `Search` 是 `GtkSearchEntry`，`width`、`height`、`font_size` 为框自身的尺寸与字号，结果列在框下的浮层中（已有实现）。
+
+### 模态、搜索面板与计时
+
+- `Modal` 在窗口之内：窗口的覆盖层里放一个 `BernModal`，它自己是铺满窗口、吸收输入的半透明背景（0.24 黑，200 毫秒淡入），卡片居中，为声明尺寸且离窗口边缘至少 16 点，24 圆角、阴影与细边；`cover: compact` 时在紧凑窗口中铺满整个窗口、没有圆角与边。元素的 `appear`、`disappear` 作用在卡片上。模态存在时下面的内容不取得焦点；卡片离开（播完消失过渡）后背景层随之移除。
+- `Search(style: palette)`：一个扁平的触发按钮（图标与提示）；打开时在窗口之内显示同样的模态卡片（默认 640×480），上方是搜索框与关闭按钮，下面是结果。结果只在面板打开时构建，关闭即释放。上下方向键在 `navigation` 为真的 `SearchItem` 之间移动（按屏幕上的先后），回车选中当前项，没有当前项时执行提交动作；Esc、关闭按钮或点在卡片外关闭；指针停在某项上时选中它。快捷键激活目标即打开面板。`SearchItem` 选中后先关闭面板再执行动作（包括 `pick` 选文件）。
+- `Timer`：启用且在显示时每 `interval` 秒执行动作（不少于 0.05 秒）；关掉或离开时取消下一次。
+- `Window(idle_enabled:)`：为假时 `window.idle` 保持为假且不计时，变真时重新开始计时。
+
+### 动效补充
+
+- `appear_delay`：在错峰延迟之上再等待；有延迟时首次显示也播放 `appear`。
+- `nudge_key`：值每次变化时晃动一次；`nudge_scale` 为晃动的放大倍数（默认 1.06）。
+- `reduce_motion`：为真时整个应用按减少动态效果运行（与 `BERN_MOTION=reduce`、系统关闭动画同等）。
+- `grow(edge:)` 过渡：沿一个轴从 0 伸展、该边保持不动、不淡入淡出。动效层的缩放现在可以指定不动的点（`pivot`），`scroll_origin_x`、`scroll_origin_y` 也改用它。
+
 ## 构建与运行
 
 ```sh
@@ -174,7 +227,7 @@ target/bern/linux/Showcase/showcase
 
 需要 GTK 4.14 与 libadwaita 1.5 的开发包（Ubuntu：`libgtk-4-dev`、`libadwaita-1-dev`）。产物位于 `target/bern/linux/`：`Showcase/showcase`（界面程序）、`Showcase/resources/`（随包资源，程序按自身位置查找）、`Showcase/dev.bern.showcase.desktop`、`bin/showcase` 与 `bin/showcase-mcp`、应用 crate `app/`、构建清单 `build.json`（记录 GTK 与 libadwaita 最低版本、媒体后端与呈现、资源名称）。Rust 编译目录为 `target/bern-glue-linux/`。
 
-应用图标在 `Showcase/icons/dev.bern.showcase.png`（没有声明 `[app].icon` 时为 512 像素的 Bern 标志）。启动时这个目录加入图标主题的搜索路径，窗口的默认图标名为 `bundle_id`；找不到时在标准错误报告。生成的 `.desktop` 文件以绝对路径指向它。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标，把生成的文件复制到 `~/.local/share/applications/` 后程序坞显示标志；构建不会写入用户目录。
+应用图标在 `Showcase/icons/dev.bern.showcase.png`（没有声明 `[app].icon` 时为 512 像素的 Bern 标志）。启动时这个目录加入图标主题的搜索路径，窗口的默认图标名为 `bundle_id`；找不到时在标准错误报告。生成的 `.desktop` 文件以绝对路径指向它。`[app.icon].linux` 为图标主题文件夹时，其中最大的 PNG 作为这个文件，全部图标改名为 `bundle_id` 后放在 `Showcase/icons/hicolor/` 下，`.deb` 把它们装进 `/usr/share/icons/hicolor`。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标，把生成的文件复制到 `~/.local/share/applications/` 后程序坞显示标志；构建不会写入用户目录。
 
 开发时 `BERN_SNAPSHOT_DIR` 让程序在每次变化后（包括 `window.idle` 变化）把各窗口渲染为 `<目录>/<窗口>.png`（窗口最小化时不绘制，浮层是独立的表面，不在其中），`BERN_APPEARANCE=light|dark` 覆盖系统外观，`BERN_MOTION=reduce` 按减少动态效果运行，`BERN_MOTION_LOG` 把每次变换、`reflow` 偏移与错峰延迟带毫秒时间写到标准错误；都默认关闭。
 
@@ -183,8 +236,24 @@ target/bern/linux/Showcase/showcase
 `bern package --target linux` 按 release 构建，生成 `<程序>_<版本>_<架构>.deb`（系统有 `dpkg-deb` 时）与 `<产品>-<版本>-linux-<架构>.tar.gz`：
 
 - `.deb` 把应用、图标与 `bin/` 中的 CLI、MCP 服务器装到 `/opt/<bundle_id>`，另有 `/usr/share/applications/<bundle_id>.desktop`、`hicolor` 图标主题中的图标与 `/usr/bin/<程序>` 启动器；依赖 `libgtk-4-1 (>= 4.14)` 与 `libadwaita-1-0 (>= 1.5)`，使用媒体时另加 `libgtk-4-media-gstreamer` 与 `gstreamer1.0-plugins-good`，并推荐 `gstreamer1.0-libav`。维护者取自 `[app].publisher`。
-- 暂存时保留可执行权限，打包前把文件统一为 644、程序与目录为 755。
+- 用到 `Svg` 时，`.deb` 另带 AppArmor 配置 `/etc/apparmor.d/<bundle_id>`。WebKitGTK 用 bubblewrap 为网页进程建沙箱，需要建立用户命名空间；Ubuntu 24.04 起（`kernel.apparmor_restrict_unprivileged_userns = 1`）只有 AppArmor 配置里有 `userns` 的程序能建立，沙箱失败时 WebKitGTK 中止整个应用。配置与 Ubuntu 为自带的 WebKitGTK 应用（epiphany、devhelp 等）提供的相同：`flags=(unconfined)`，只给程序一个名字和 `userns` 权限，不另加限制，并包含可选的 `local/<bundle_id>` 供管理员补充；附着路径是 `/opt/<bundle_id>/<程序>`（`/usr/bin/<程序>` 是指向它的链接，AppArmor 按解析后的路径匹配）。配置列为 conffile，`dpkg` 保留管理员的修改，卸载（remove）后保留、彻底卸载（purge）时删除。`postinst` 只在 AppArmor 启用时（`aa-enabled`）以 `apparmor_parser -r -T -W` 立即载入，载入失败不影响安装；`postrm` 在 purge 时删去编译缓存。配置使用 AppArmor 4 的语法（`abi <abi/4.0>`、`userns`），更早的 AppArmor 不能解析它（载入失败，安装照常完成）。没有 `Svg` 的应用不带配置，也没有维护脚本。
+- `.tar.gz` 与开发构建不带配置。在限制用户命名空间的系统上运行用到 `Svg` 的应用，需要为解开后的界面程序添加同样的配置（需要 root；路径含空格时加引号），`bern package` 会提示这一点：
+
+  ```sh
+  sudo tee /etc/apparmor.d/<bundle_id> >/dev/null <<EOF
+  abi <abi/4.0>,
+  include <tunables/global>
+  profile <bundle_id> /解开的目录/<产品>/<程序> flags=(unconfined) {
+    userns,
+  }
+  EOF
+  sudo apparmor_parser -r /etc/apparmor.d/<bundle_id>
+  ```
+
+  只为测试时也可以用 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` 运行，这会关闭 WebKitGTK 的网页进程沙箱。
+- 暂存时保留可执行权限，打包前把文件统一为 644、程序与目录为 755，维护脚本另设为 755。
 - 实测（2026-10-12，Ubuntu 24.04 ARM64）：`.deb` 1.06 MB，`.tar.gz` 1.9 MB；`desktop-file-validate` 通过，`apt-get -s install` 能解析全部依赖；解开 `.deb` 后从 `/opt` 位置启动并经包内 CLI 驱动正常。虚拟机的 sudo 需要密码，没有实际安装。没有桌面会话时，GTK 启动会等约 25 秒的 D-Bus 门户超时，引擎与控制通道随后才就绪。
+- 实测（2026-10-18，同一虚拟机，AppArmor 4.0.0~beta3、WebKitGTK 2.52.3、bubblewrap 0.9.0，`examples/svg-animation`）：`.deb` 1.2 MB，含 `etc/apparmor.d/dev.bern.svgdemo`、`DEBIAN/conffiles` 与权限为 755 的 `postinst`、`postrm`；两个脚本 `sh -n` 通过；`apparmor_parser -Q -K`（不载入内核、不用缓存）解析配置通过，结果为 `Mode: unconfined` 与 `userns`；`apt-get -s install` 只新装这一个包。解开的程序不带配置运行时，约 26 秒后报 `bwrap: setting up uid map: Permission denied` 与 `Failed to fully launch dbus-proxy` 并中止。载入新配置需要 root，而虚拟机的 sudo 需要密码，所以没有安装 `.deb`，也没有用这份配置本身运行；改用系统自带、形式相同的 `busybox` 配置（`profile busybox /usr/bin/busybox flags=(unconfined) { userns, … }`），经 `busybox env` 启动同一程序：程序、WebKitNetworkProcess、两层 bwrap、xdg-dbus-proxy 与 WebKitWebProcess 都带 `busybox (unconfined)` 标签，沙箱建立成功，应用不中止，Broadway 中 SVG 正常显示。没有桌面会话时，带沙箱的网页视图在窗口出现约 44 秒后才创建（关闭沙箱时不到 1 秒），原因未查。
 
 ## 验证记录
 
@@ -224,6 +293,21 @@ target/bern/linux/Showcase/showcase
 - 堆叠中的轨道：轨道原先会把其中没有高度的画布的 `vexpand` 传给外面的 `Stack`，窗口有多余高度时，“上下拖动”面板的水位会比 120 点的面板高。现已改为轨道只沿轴扩展、在 `Stack` 中铺满其他层给出的尺寸。只在虚拟机的临时副本里把窗口高度改成 900（Broadway 限为 768）实测：面板仍高 120（窗口坐标 470 至 590），水位底色正好铺满这 120 点，宽度为面板的 0.30（`level` 为 0.3），多余的高度留给 `Spacer`。
 - 错峰顺序：错峰的次序在构建各行时按条目顺序分配，与 GTK 映射的先后无关。切到“图案”页时，日志中 6 张卡片都在约 0 毫秒写入起始姿态，各自的上升从 Gingham 3、Tartan 44、Madras 84、Glen 123、Houndstooth 164、Windowpane 204 毫秒开始（这次没有连接 Broadway 客户端，帧不前进，只量到每张卡开始的时刻）。
 
+2026-10-18，页面级布局、场景与控件形态（上一节），同一虚拟机，GTK 4.14.5、libadwaita 1.5.0，应用经 Broadway 显示在内置浏览器中；目标是一个真实的媒体类应用，它的桌面与手机布局用到了上述大部分能力：
+
+- 测试：`bern-backend-gtk` 的测试在 macOS 与虚拟机上通过；新增测试给 showcase 加上场景、手风琴、换行行、格子网格、模态、表单版式、纯图标标签与菜单、胶囊控件与搜索项，检查生成代码，并在虚拟机上对生成的应用做类型检查。`bern-gtk` 带与不带 `svg` 特性都能编译。
+- 构建：该应用 `bern check --target linux` 由 67 个错误变为 0；`bern build --target linux` 构建出界面程序、CLI 与 MCP 服务器。
+- **测试环境**：虚拟机装有 WebKitGTK 6 的运行库但没有开发包（sudo 需要密码）；构建时用 `PKG_CONFIG_PATH` 指向手写的 `webkitgtk-6.0`、`javascriptcoregtk-6.0`、`libsoup-3.0` pkg-config 文件，链接已装的库。Ubuntu 24.04 默认限制非特权用户命名空间（`kernel.apparmor_restrict_unprivileged_userns = 1`），WebKitGTK 的沙箱（bwrap）因此失败并中止整个应用（`Failed to fully launch dbus-proxy`）；测试时以 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` 运行；安装包为此附带 AppArmor 配置，见“打包”。Broadway 下，被点击的控件随即在指针下被替换后，GTK 报 “Broken accounting of active state”，此后的点击都丢失；一个纯 PyGObject 的 GTK 4 程序同样如此，所以这是 GTK/Broadway 与合成点击的问题，在窗口外的页面空白处点一下即可恢复。部分操作改用应用 CLI 的 `ui activate`（与点击执行同一个控件闭包）。
+- 修正（实测中发现并已改）：层叠在子层第一次插入时按当时是否扩展定下对齐，之后内容变为撑满（如换成滚动视图）时不再更新，现在每次排布时决定；有声明尺寸的层叠以声明尺寸为排布区域；带声明尺寸的图片框与 WebView 不再把扩展传给外面；轨道不再让所在层叠横向扩展；Toast 自定义标题省略过长文字，不再把窗口撑宽。
+- 引导模态（实测）：960×600 的卡片居中、圆角与阴影，背景变暗；格纹插画与居中的动画标志；“跳过”到最后一步时内容居中、底栏在底部。
+- 桌面布局（1024×768，Broadway 的屏幕上限，实测）：`SidebarHeader` 的模板图标（前景色）与标题、侧栏计数、工具栏前缘的返回与后缘的搜索面板入口；时间轴的 `Rail(overhang: 8)`：轨道宽 704，第 0 小时刻度（宽 30、中心锚点）在 x = −23，即 0 × 720 − 8 − 15，最后一格 697；海报列 `Column(width: 88)` 宽 88（修正前被标题撑到 118）。播放器：1280×800 的场景缩放进窗口、`Positioned` 的画面按“后退一步”带圆角、带章节与标记的进度条、胶囊按钮与下拉；播放时 `immersive` 隐藏标题栏。
+- 手机布局（只在虚拟机的临时副本中把主窗口改为 390×844、最小宽 360；声明的最小宽 720 让桌面窗口到不了紧凑档，实测）：`Adaptive` 选中 `compact`，底部 `AdwViewSwitcherBar` 标签栏；首页 16:9 圆角舞台、整宽胶囊按钮、横向卡片；页面没有超出 390 的宽度。
+  - `TabAccessory`：播放后收起，小播放器（64×36 缩略图带进度、标题、集数与时间、暂停与关闭）出现在页面与底部标签栏之间；关闭播放后它收起（快照与画面）。
+  - `ScrollView(open_at: 0.4852…)`：时间轴横向滚动视图打开时的调整量为 263 / 上限 916 / 页宽 374，即 0.4852 × (916 − 374)。
+  - `scroll_scale: 1.12` 与 `scroll_origin_y: 0.6`（详情页的影片条）：居中一格的图片高 79 点、旁边一格 71 点（≈1.12 倍），居中一格的顶边比旁边上移约 4.8 点、底边下移约 3.2 点，即 60% 向上、40% 向下。`scroll_origin_x` 走同一条代码，未单独实测。
+  - `pages.new.show()`：首页“新番表 ›”经 `ui activate`（与点击同一个闭包）执行后，标签页切到“新番”。
+- 未验证：`Marquee` 的弹幕滚动（场景中未出现弹幕行）、`Accordion` 的宽度弹簧（只看到窄窗口的纵向布局）、搜索面板的键盘导航、`Flow`、`Timer` 的计时以外的部分、`grow` 过渡与 `appear_delay` 的逐帧数据、`reduce_motion` 的切换、`Form` 的行高与内边距规则；真实触屏与 Linux 手机外壳（Phosh）。
+
 未验证：真实的拖放（Broadway 不支持从系统拖入文件）、`GtkFileDialog` 的选择（无桌面会话时门户超时）、系统交来文件（`opens`）、触摸板捏合与触摸拖动、对话框在 GNOME 中的附着位置、高对比、真实 Wayland/X11 会话中的帧率与手感。
 
 未完成的验证：真实声卡下的播放；完整的键盘遍历、屏幕阅读器；高对比与大字体；X11 会话与 KDE Plasma；分数缩放与多显示器。
@@ -231,7 +315,10 @@ target/bern/linux/Showcase/showcase
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。
-- `reflow` 只在 `Column`、`Row` 中生效：`Grid` 是 `GtkFlowBox`，表单行由 `GtkListBox` 布置，它们的子元素不能在布局后另加偏移，写了会构建警告。
+- `reflow` 在 `Column`、`Row`、`Stack` 与 `cell_ratio` 网格中生效；没有 `cell_ratio` 的 `Grid` 是 `GtkFlowBox`，表单行由 `GtkListBox` 布置，它们的子元素不能在布局后另加偏移，写了会构建警告。
+- 用到 `Svg` 的应用依赖 WebKitGTK 的沙箱，`.deb` 为此附带 AppArmor 配置（见“打包”）。实际安装未实测（需要 root）：`postinst` 载入配置、安装后从菜单或 `/usr/bin` 启动、remove 与 purge 后的情形都没有验证，只验证了包的内容、配置的解析和同形配置下的运行。`.tar.gz` 与开发构建仍需手动添加配置，或只为测试以 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` 运行。
+- `Adaptive` 在第一次排布之前按 `expanded` 构建，窄窗口启动时先构建宽布局，排布后才换成窄布局。
+- 部分 SF Symbols 名称在 GNOME 图标主题中没有对应，显示为缺失图标（如播放器的快退 10 秒、字幕气泡）。
 - `hero` 只在同一窗口内配对；离开的元素若是视频或画布不留画面，只有新元素从旧位置展开。
 - 侧栏项的样式没有 `shadow`（与其他目标相同，检查时报错）。
 - `appearance` 的部分依赖 libadwaita 自带的 `base.css` 与 `defaults-*.css`（1.5 的资源路径）；Ubuntu 的 Yaru 强调色变体未单独处理，部分里使用 libadwaita 默认的取值。
@@ -240,7 +327,7 @@ target/bern/linux/Showcase/showcase
 - 窗口位置与移动不可用（GTK 4 的限制）；Wayland 下最小化结果无法确认；虚拟窗口呈现未实现（GTK 目标总有原生窗口）。
 - `Menu` 的菜单项图标与 `destructive` 角色不呈现（GNOME 菜单通常只有文字）。
 - 多实例窗口、焦点迁移、Flatpak 等打包与图标安装尚未实现；桌面文件的 `Exec` 是构建机上的绝对路径。
-- 设置窗口切换页签只构建选中的页签；窄窗口下没有底部视图切换栏。
+- 设置窗口切换页签只构建选中的页签。
 - HDR 图片的 HDR 输出（GTK 4.16 起、Wayland、打开色彩管理）没有实测：测试用的虚拟机是 GTK 4.14，也不能输出 HDR。GTK 的 JPEG 加载器不读增益图，所以增益图由 Bern 应用；GTK 的色彩空间转换只截断不做色调映射，所以 GTK 不输出 HDR 时由 Bern 先转成 SDR。
 - `Video` 的 HDR 视频依赖 GTK：GTK 4.16 起 GStreamer 的帧带有色彩空间，HDR 输出同样需要打开色彩管理；未实测。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。

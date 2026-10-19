@@ -441,6 +441,18 @@ fn planner_generates_without_warnings() {
 }
 
 /// The gallery: every v0.29 feature and the four of v0.30.
+/// The animated SVG example: its runtime is generated only for
+/// applications declaring `Svg`, so no other test compiles it.
+#[test]
+fn svg_animation_generates_and_compiles() {
+    let (_, output) = generate_example("svg-animation");
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(ui.contains("B::Svg(p, c, {"), "{ui}");
+    let svg = std::fs::read_to_string(output.join("app/runtime/bern_ui_svg.inl")).unwrap();
+    assert!(svg.contains("namespace B {"));
+    compile(&output);
+}
+
 #[test]
 fn gallery_generates_without_warnings() {
     let (_, output) = generate_example("gallery");
@@ -486,4 +498,594 @@ fn gallery_generates_without_warnings() {
         assert!(catalog.contains(expected), "missing `{expected}`");
     }
     compile(&output);
+}
+
+/// The showcase with a `TabAccessory` in its first `Tabs`, shown while a
+/// literal holds.
+fn add_tab_accessory(app: &mut bern_ir::Application) {
+    use bern_ir::{Element, Expr, ExprKind, Node, Prop, SourceLocation};
+    fn into(node: &mut Node) -> bool {
+        match node {
+            Node::Element(element) if element.kind == "Tabs" => {
+                element.children.push(Node::Element(Element {
+                    kind: "TabAccessory".into(),
+                    id: None,
+                    path: "test.accessory".into(),
+                    props: [(
+                        "shown".into(),
+                        Prop::Expr {
+                            expr: Expr {
+                                ty: bern_protocol::Type::Bool,
+                                kind: ExprKind::Literal {
+                                    value: bern_protocol::Value::Bool(true),
+                                },
+                            },
+                        },
+                    )]
+                    .into(),
+                    template: None,
+                    children: vec![Node::Element(Element {
+                        kind: "Spacer".into(),
+                        id: None,
+                        path: "test.accessory.0".into(),
+                        props: Default::default(),
+                        template: None,
+                        children: vec![],
+                        action: None,
+                        source: SourceLocation {
+                            file: "tabs.rs".into(),
+                            line: 1,
+                            column: 1,
+                        },
+                    })],
+                    action: None,
+                    source: SourceLocation {
+                        file: "tabs.rs".into(),
+                        line: 1,
+                        column: 1,
+                    },
+                }));
+                true
+            }
+            Node::Element(element) => element.children.iter_mut().any(into),
+            Node::If(node) => {
+                node.branches
+                    .iter_mut()
+                    .any(|(_, body)| body.iter_mut().any(into))
+                    || node.otherwise.iter_mut().any(into)
+            }
+            _ => false,
+        }
+    }
+    assert!(
+        app.components
+            .iter_mut()
+            .any(|component| into(&mut component.body))
+    );
+}
+
+#[test]
+fn tab_accessory_is_a_card_under_the_pages() {
+    let (config, mut compiled) = showcase();
+    add_tab_accessory(&mut compiled.app);
+    let root = workspace();
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/winui3-tab-accessory"),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    let source = files
+        .iter()
+        .map(|f| String::from_utf8_lossy(&f.contents).into_owned())
+        .collect::<String>();
+    assert!(
+        source.contains("B::TabAccessory{.shown = [](Ctx const& c) { return "),
+        "{source}"
+    );
+}
+
+fn node(
+    kind: &str,
+    props: Vec<(&str, bern_ir::Prop)>,
+    children: Vec<bern_ir::Node>,
+) -> bern_ir::Node {
+    bern_ir::Node::Element(bern_ir::Element {
+        kind: kind.into(),
+        id: matches!(kind, "Menu" | "SearchItem" | "Button")
+            .then(|| format!("test_{}", kind.to_lowercase())),
+        path: format!("test.{kind}"),
+        props: props
+            .into_iter()
+            .map(|(name, prop)| (name.to_string(), prop))
+            .collect(),
+        template: None,
+        children,
+        action: None,
+        source: bern_ir::SourceLocation {
+            file: "features.rs".into(),
+            line: 1,
+            column: 1,
+        },
+    })
+}
+
+fn number(value: f64) -> bern_ir::Prop {
+    bern_ir::Prop::Number { value }
+}
+
+fn word(value: &str) -> bern_ir::Prop {
+    bern_ir::Prop::Keyword {
+        value: value.into(),
+    }
+}
+
+fn words(value: &str) -> bern_ir::Prop {
+    bern_ir::Prop::Text {
+        text: bern_ir::Text::Dynamic {
+            expr: bern_ir::Expr {
+                ty: bern_protocol::Type::Text,
+                kind: bern_ir::ExprKind::Literal {
+                    value: bern_protocol::Value::Text(value.into()),
+                },
+            },
+        },
+    }
+}
+
+fn icon(name: &str) -> bern_ir::Prop {
+    bern_ir::Prop::Icon { name: name.into() }
+}
+
+/// The showcase with a scene, an accordion, wrapping rows, a grid of
+/// cells, a modal, a form's layout, icon-only labels and menus, capsule
+/// controls and a search item at the end of its first component.
+fn add_layout_features(app: &mut bern_ir::Application) {
+    let text = || {
+        node(
+            "Text",
+            vec![
+                ("content", words("Text")),
+                ("lines", number(2.0)),
+                ("font_size", number(12.0)),
+                ("line_height", number(16.0)),
+            ],
+            vec![],
+        )
+    };
+    let features = node(
+        "Column",
+        vec![("padding_x", number(12.0)), ("padding_y", number(4.0))],
+        vec![
+            node(
+                "ScaleBox",
+                vec![("width", number(400.0)), ("height", number(300.0))],
+                vec![node(
+                    "Positioned",
+                    vec![
+                        ("x", number(10.0)),
+                        ("y", number(20.0)),
+                        ("width", number(100.0)),
+                        ("height", number(40.0)),
+                        ("animate", word("smooth")),
+                    ],
+                    vec![node(
+                        "Marquee",
+                        vec![("duration", number(8.0)), ("phase", number(0.2))],
+                        vec![text()],
+                    )],
+                )],
+            ),
+            node(
+                "Accordion",
+                vec![
+                    ("count", number(3.0)),
+                    ("selected", number(1.0)),
+                    ("collapsed_width", number(40.0)),
+                    ("height", number(120.0)),
+                    ("corner", number(12.0)),
+                    ("animate", word("bouncy")),
+                ],
+                vec![text(), text(), text()],
+            ),
+            node(
+                "Flow",
+                vec![("gap", number(4.0))],
+                vec![node(
+                    "Label",
+                    vec![
+                        ("title", words("Star")),
+                        ("icon", icon("star")),
+                        ("display", word("icon")),
+                    ],
+                    vec![],
+                )],
+            ),
+            node(
+                "Grid",
+                vec![
+                    ("min_width", number(80.0)),
+                    ("row_gap", number(6.0)),
+                    ("cell_ratio", number(0.667)),
+                    ("cell_extra", number(20.0)),
+                ],
+                vec![node(
+                    "Image",
+                    vec![
+                        (
+                            "source",
+                            bern_ir::Prop::Resource {
+                                name: "images/bern.png".into(),
+                            },
+                        ),
+                        ("corner", number(8.0)),
+                        ("rendering", word("template")),
+                        ("aspect", number(1.5)),
+                    ],
+                    vec![],
+                )],
+            ),
+            node(
+                "Row",
+                vec![("align", word("baseline"))],
+                vec![
+                    text(),
+                    node("Spacer", vec![], vec![]),
+                    node(
+                        "Menu",
+                        vec![
+                            ("label", words("More")),
+                            ("icon", icon("ellipsis")),
+                            ("style", word("icon")),
+                            ("shape", word("capsule")),
+                            ("height", number(30.0)),
+                        ],
+                        vec![],
+                    ),
+                    node(
+                        "ControlGroup",
+                        vec![("height", number(32.0))],
+                        vec![node(
+                            "SearchItem",
+                            vec![
+                                ("label", words("Open")),
+                                ("icon", icon("folder")),
+                                ("detail", words("File")),
+                                ("hint", words("⌘O")),
+                            ],
+                            vec![],
+                        )],
+                    ),
+                ],
+            ),
+            node(
+                "Form",
+                vec![("gap", number(12.0)), ("row_height", number(44.0))],
+                vec![node(
+                    "Section",
+                    vec![("style", word("plain")), ("padding_x", number(8.0))],
+                    vec![text()],
+                )],
+            ),
+            node(
+                "Modal",
+                vec![
+                    ("width", number(300.0)),
+                    ("height", number(200.0)),
+                    ("cover", word("compact")),
+                ],
+                vec![text()],
+            ),
+        ],
+    );
+    let component = app
+        .components
+        .iter_mut()
+        .find(|component| {
+            matches!(&component.body, bern_ir::Node::Element(body) if body.kind == "Form")
+        })
+        .expect("a component whose body is a form");
+    let bern_ir::Node::Element(body) = &mut component.body else {
+        unreachable!()
+    };
+    body.children.push(features);
+}
+
+/// The layout features of the scaled scenes, accordions, flows, cell
+/// grids, modals and form layouts generate the runtime's calls; on Windows
+/// with the C++ tools both front ends compile them.
+#[test]
+fn layout_features_generate_for_winui3() {
+    let (config, mut compiled) = showcase();
+    add_layout_features(&mut compiled.app);
+    let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
+    assert!(
+        problems.iter().all(|problem| !problem.is_error()),
+        "{problems:?}"
+    );
+    let root = workspace();
+    let output = root.join("target/bern-test/winui3-layout-features");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(!ui.contains("unsupported"), "{ui}");
+    for expected in [
+        "B::Stack(p, c, {.axis = \"column\", .paddingX = B::Len(12.0), .paddingY = B::Len(4.0)}, ",
+        "B::ScaleBox(p, c, {.width = B::Len(400.0), .height = B::Len(300.0)}, ",
+        "B::Positioned(p, c, {.x = B::Len(10.0), .y = B::Len(20.0), .width = B::Len(100.0), .height = B::Len(40.0), .animate = &M_smooth}, ",
+        "B::Marquee(p, c, {.duration = B::Len(8.0), .phase = 0.2}, ",
+        ".lines = 2.0, .fontSize = B::Len(12.0), .lineHeight = B::Len(16.0)}",
+        "B::Accordion(p, c, {.count = B::Len(3.0), .selected = B::Len(1.0), .collapsedWidth = B::Len(40.0), .height = B::Len(120.0), .corner = B::Len(12.0), .animate = &M_bouncy}, ",
+        "B::Flow(p, c, {.gap = B::Len(4.0)}, ",
+        ".iconOnly = true}",
+        ".rowGap = B::Len(6.0), .cellRatio = 0.667, .cellExtra = B::Len(20.0)}",
+        ".corner = B::Len(8.0), .templated = true, .aspect = 1.5}",
+        ".align = \"baseline\"",
+        "B::MenuLook{.iconOnly = true, .shape = B::ControlShape{.capsule = true, .height = B::Len(30.0)}}",
+        "B::ControlGroup(p, c, {.height = B::Len(32.0)}, ",
+        "B::SearchItem(p, c, {.id = \"test_searchitem\"",
+        "B::Form(p, c, nullptr, {.gap = 12.0, .rowHeight = 44.0, .plainFirst = true}, ",
+        "B::Section(p, c, nullptr, nullptr, {.plain = true, .paddingX = 8.0}, ",
+        "B::Modal(p, c, {.width = B::Len(300.0), .height = B::Len(200.0), .cover = true}, ",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`");
+    }
+    compile(&output);
+}
+
+const FORMATS_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "formats", version = 1)]
+pub mod formats {
+    use bern::prelude::*;
+
+    #[value]
+    pub enum Size {
+        #[label(tr! { "en" => "small", "zh-Hans" => "小" })]
+        Small,
+        #[label(tr! { "en" => "large", "zh-Hans" => "大" })]
+        Large,
+    }
+
+    #[value]
+    pub enum Notice {
+        #[label(tr! { "en" => "No notice", "zh-Hans" => "没有通知" })]
+        Nothing,
+        #[label(tr! { "en" => "Saved {name} on {day, date, EEE, MMM d}", "zh-Hans" => "已保存 {name}，{day, date, M月d日 EEE}" })]
+        Saved {
+            #[content]
+            name: String,
+            day: CalendarDate,
+        },
+        #[label(tr! { "en" => "{n, plural, one {# {size} file} other {# {size} files}}", "zh-Hans" => "{n} 个{size}文件" })]
+        Files { n: i64, size: Size },
+    }
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+        pub seconds: f64,
+        pub today: CalendarDate,
+        pub notice: Notice,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+const FORMATS_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: formats::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Formats", "zh-Hans" => "格式" }, initial: open) {
+                Column {
+                    Text(content: tr! { "en" => "{n, plural, =0 {no files} one {# file} other {# files}}", "zh-Hans" => "{n} 个文件"; n: app.count })
+                    Text(content: tr! { "en" => "Today is {d, date, EEEE, MMMM d, y}", "zh-Hans" => "今天是 {d, date, y年M月d日 EEEE}"; d: app.today })
+                    Text(content: tr! { "en" => "{t, duration, m:ss} used", "zh-Hans" => "已用 {t, duration, m:ss}"; t: app.seconds })
+                    Text(content: tr! { "en" => "Braces {{stay}}", "zh-Hans" => "括号 {{保留}}" })
+                    Text(content: app.notice)
+                }
+            }
+        }
+    }
+}
+"#;
+
+/// A project with plural branches, dates, durations and labels that show
+/// their variant's fields, compiled from sources written under `dir`.
+fn formats_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+    let _ = std::fs::remove_dir_all(dir);
+    for (package, source) in [
+        ("formats-protocol", FORMATS_PROTOCOL),
+        ("formats-ui", FORMATS_UI),
+        ("formats-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "formats"
+bundle_id = "dev.bern.formats"
+version = "0.1.0"
+name = { "en" = "Formats", "zh-Hans" = "格式" }
+
+[languages]
+supported = ["en", "zh-Hans"]
+default = "en"
+
+[protocol]
+package = "formats-protocol"
+source = "formats-protocol/src/lib.rs"
+
+[engine]
+package = "formats-core"
+type = "formats_core::Engine"
+
+[ui]
+package = "formats-ui"
+sources = ["formats-ui/src/lib.rs"]
+root = "app"
+
+[targets.android]
+platform = "android"
+
+[targets.windows]
+platform = "windows"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    (config, compiled)
+}
+
+/// Texts with plural branches, dates and durations pass typed arguments;
+/// the catalog says which fields a label shows; the string tables keep
+/// Bern's format for texts with arguments and carry the date names.
+#[test]
+fn text_formats_generate_for_winui3() {
+    let root = workspace();
+    let (config, compiled) = formats_project(&root.join("target/bern-test/winui3-formats-project"));
+    let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
+    assert!(
+        problems.iter().all(|problem| !problem.is_error()),
+        "{problems:?}"
+    );
+    let output = root.join("target/bern-test/winui3-formats");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    for expected in [
+        "{\"n\", bern::Text::ArgOf(",
+        "{\"d\", bern::Text::DateArg(",
+        "{\"t\", bern::Text::ArgOf(",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`");
+    }
+    let catalog = std::fs::read_to_string(output.join("app/app_catalog.cpp")).unwrap();
+    for expected in [
+        "{{\"name\", 0}, {\"day\", 1}}}",
+        "{{\"n\", 0}, {\"size\", 1}}}",
+        "{n, plural, =0 {no files} one {# file} other {# files}}",
+        "Braces {stay}",
+        "bern.date.weekday_long.1",
+        "Monday",
+    ] {
+        assert!(catalog.contains(expected), "missing `{expected}`");
+    }
+    compile(&output);
+}
+
+#[test]
+fn a_declared_ico_is_used_as_it_is() {
+    let root = workspace();
+    let (config, mut compiled) = showcase();
+    let ico = root.join("target/bern-test/winui3-icon.ico");
+    std::fs::create_dir_all(ico.parent().unwrap()).unwrap();
+    // One 16-pixel bitmap image, as icon editors write the small sizes.
+    let mut bytes = vec![0, 0, 1, 0, 1, 0, 16, 16, 0, 0, 1, 0, 32, 0];
+    bytes.extend_from_slice(&40u32.to_le_bytes());
+    bytes.extend_from_slice(&22u32.to_le_bytes());
+    bytes.extend_from_slice(&[0; 40]);
+    std::fs::write(&ico, &bytes).unwrap();
+    // An absolute path stays itself when joined to the project directory.
+    compiled
+        .app
+        .app
+        .platform_icons
+        .insert("windows".into(), ico.display().to_string());
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/winui3-icon"),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    let app_ico = files
+        .iter()
+        .find(|file| file.path == Path::new("app/app.ico"))
+        .expect("the icon");
+    assert_eq!(app_ico.contents, bytes);
+    let _ = std::fs::remove_file(&ico);
 }

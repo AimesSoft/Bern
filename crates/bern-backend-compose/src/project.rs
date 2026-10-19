@@ -204,7 +204,14 @@ fn extension_type(ext: &str) -> Option<&'static str> {
     })
 }
 
-pub fn manifest(app: &bern_ir::Application) -> String {
+/// The application manifest; `round_icon` when the launcher icon has a
+/// round form, `@mipmap/ic_launcher_round`.
+pub fn manifest(app: &bern_ir::Application, round_icon: bool) -> String {
+    let round = if round_icon {
+        "\n        android:roundIcon=\"@mipmap/ic_launcher_round\""
+    } else {
+        ""
+    };
     let internet = if uses_network(app) {
         "\n    <uses-permission android:name=\"android.permission.INTERNET\" />"
     } else {
@@ -266,7 +273,7 @@ pub fn manifest(app: &bern_ir::Application) -> String {
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">{internet}
     <application
         android:label="@string/app_name"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@mipmap/ic_launcher"{round}
         android:theme="@style/BernTheme"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true">
@@ -359,11 +366,28 @@ pub fn text_tables(app: &Application) -> BTreeMap<String, String> {
     for language in &app.languages.supported {
         let mut table = serde_json::Map::new();
         for text in &app.texts {
+            // A text with arguments keeps Bern's format, which the runtime
+            // writes out; one without is shown as it is.
             let value = translation(text, language, &app.languages.default);
-            table.insert(
-                text.key.clone(),
-                positional(value, &text.params, |position| format!("%{position}$s")).into(),
-            );
+            let value = if text.params.is_empty() {
+                positional(value, &[], |position| format!("%{position}$s"))
+            } else {
+                value.to_string()
+            };
+            table.insert(text.key.clone(), value.into());
+        }
+        for (key, translations) in bern_protocol::format::date_names() {
+            let value = translations
+                .iter()
+                .find(|(candidate, _)| candidate == language)
+                .or_else(|| {
+                    translations
+                        .iter()
+                        .find(|(candidate, _)| *candidate == "en")
+                })
+                .map(|(_, value)| value.clone())
+                .unwrap_or_default();
+            table.insert(key, value.into());
         }
         for (key, translations) in FRAMEWORK_TEXTS {
             let value = framework(translations, language)

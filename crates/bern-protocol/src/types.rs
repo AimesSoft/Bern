@@ -53,6 +53,14 @@ pub struct FieldDef {
     pub ty: Type,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc: String,
+    /// `#[content]`: text that is data, such as a title or a name, shown
+    /// as it is; other text the engine gives is not shown untranslated.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub content: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +184,26 @@ impl TypeTable {
                 }
                 for field in &variant.fields {
                     self.check_type(&field.ty, &mut Vec::new())?;
+                }
+                // A label shows an enum field by that enum's labels.
+                for param in variant.label.iter().flat_map(|label| &label.params) {
+                    let Some(Type::Enum { name }) = variant
+                        .fields
+                        .iter()
+                        .find(|field| field.name == *param)
+                        .map(|field| &field.ty)
+                    else {
+                        continue;
+                    };
+                    if self
+                        .enum_def(name)
+                        .is_some_and(|shown| shown.variants.iter().any(|v| v.label.is_none()))
+                    {
+                        return Err(SchemaError::new(format!(
+                            "the label of `{}::{}` shows `{{{param}}}`, a `{name}`; give every variant of `{name}` a label",
+                            def.name, variant.name
+                        )));
+                    }
                 }
             }
         }

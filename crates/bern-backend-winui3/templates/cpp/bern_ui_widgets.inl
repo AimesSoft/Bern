@@ -5,6 +5,80 @@
 
 namespace B {
 
+/// `shape: capsule` and `height` of a system control. Fluent 2 has no
+/// capsule buttons, so a capsule keeps the control's own corners and
+/// takes the height.
+struct ControlShape {
+    bool capsule = false;
+    Len height;
+};
+
+/// A rounded Composition clip on `element`, its radius from `radius` for
+/// the element's size each time that changes; returns the geometry, whose
+/// radius may also be set later.
+inline composition::CompositionRoundedRectangleGeometry RoundedClip(xaml::FrameworkElement const& element, std::function<float(float, float)> radius) {
+    auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(element);
+    auto compositor = visual.Compositor();
+    auto geometry = compositor.CreateRoundedRectangleGeometry();
+    visual.Clip(compositor.CreateGeometricClip(geometry));
+    // The size it has already, until it changes.
+    float w0 = static_cast<float>(element.ActualWidth()), h0 = static_cast<float>(element.ActualHeight());
+    geometry.Size(float2{w0, h0});
+    if (radius) {
+        float r = (std::max)(0.0f, (std::min)({radius(w0, h0), w0 / 2, h0 / 2}));
+        geometry.CornerRadius(float2{r, r});
+    }
+    element.SizeChanged([geometry, radius](auto&&, xaml::SizeChangedEventArgs const& args) {
+        float w = args.NewSize().Width, h = args.NewSize().Height;
+        geometry.Size(float2{w, h});
+        if (radius) {
+            float r = (std::max)(0.0f, (std::min)({radius(w, h), w / 2, h / 2}));
+            geometry.CornerRadius(float2{r, r});
+        }
+    });
+    return geometry;
+}
+
+/// A control of `shape`: its own height, with the corners of its style.
+inline void ShapeControl(Ctx const& ctx, controls::Control const& control, std::optional<ControlShape> const& shape) {
+    if (!shape) return;
+    if (shape->height.Given()) {
+        BindLen(ctx, shape->height, nullptr, [control](double h) {
+            control.Height((std::max)(0.0, h));
+            control.MinHeight(0);
+        });
+        // The style's padding is known once the control is in the tree:
+        // keep its sides, drop the top and bottom.
+        auto weak = winrt::make_weak(control);
+        auto token = std::make_shared<winrt::event_token>();
+        *token = control.Loaded([weak, token](auto&&, auto&&) {
+            auto control = weak.get();
+            if (!control) return;
+            control.Loaded(*token);
+            auto padding = control.Padding();
+            control.Padding(xaml::Thickness{padding.Left, 0, padding.Right, 0});
+        });
+    }
+}
+
+/// A weight of `text { … }`, as XAML's.
+inline winrt::Windows::UI::Text::FontWeight WeightNamed(std::string_view name) {
+    uint16_t weight = name == "ultralight" ? 100 : name == "thin" ? 200 : name == "light" ? 300 : name == "medium" ? 500
+        : name == "semibold" ? 600 : name == "bold" ? 700 : name == "heavy" ? 800 : name == "black" ? 900 : 400;
+    return winrt::Windows::UI::Text::FontWeight{weight};
+}
+
+/// A text style by Bern's name, with the weight and size `style!` gives it.
+inline void ApplyTextStyle(controls::TextBlock const& block, char const* style) {
+    if (auto named = Styles::TextStyle(style)) block.Style(named);
+    std::string name = style ? style : "body";
+    for (auto const& [entry, weight, size] : app->catalog.textStyles) {
+        if (entry != name) continue;
+        block.FontWeight(WeightNamed(weight));
+        if (size) block.FontSize(*size);
+    }
+}
+
 inline TextFn Bound(Ctx const& ctx, Str const& text) {
     if (!text) return nullptr;
     return [ctx, text] { return text(ctx); };
@@ -96,11 +170,25 @@ struct TextProps {
     char const* emphasis = nullptr;
     /// `mark:`: a role whose color bands each line.
     char const* mark = nullptr;
+    /// At most this many lines, the last ending with an ellipsis.
+    std::optional<double> lines;
+    Len fontSize;
+    /// The height of each line.
+    Len lineHeight;
 };
 
 inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
     auto block = TextOf(Bound(ctx, props.content));
-    if (auto style = Styles::TextStyle(props.style)) block.Style(style);
+    ApplyTextStyle(block, props.style);
+    if (props.lines) {
+        block.MaxLines(static_cast<int32_t>((std::max)(1.0, *props.lines)));
+        block.TextTrimming(xaml::TextTrimming::CharacterEllipsis);
+    }
+    BindLen(ctx, props.fontSize, nullptr, [block](double size) { block.FontSize((std::max)(1.0, size)); });
+    if (props.lineHeight.Given()) {
+        block.LineStackingStrategy(xaml::LineStackingStrategy::BlockLineHeight);
+        BindLen(ctx, props.lineHeight, nullptr, [block](double height) { block.LineHeight((std::max)(0.0, height)); });
+    }
     if (props.emphasis && (std::string_view(props.emphasis) == "secondary" || std::string_view(props.emphasis) == "tertiary")) Secondary(block);
     if (!props.mark) {
         Place(p, block);
@@ -136,16 +224,40 @@ struct LabelProps {
     Str title;
     char const* icon = nullptr;
     char const* style = nullptr;
+    /// The size of the title and the icon.
+    std::optional<double> fontSize;
+    /// `display: icon`: the icon alone, the title its accessible name.
+    bool iconOnly = false;
 };
 
 inline void Label(Parent const& p, Ctx const& ctx, LabelProps props) {
+    auto title = Bound(ctx, props.title);
+    if (props.iconOnly && props.icon) {
+        auto icon = Icons::Icon(props.icon, props.fontSize.value_or(16));
+        if (title)
+            Reactive::Run([icon, title] {
+                auto name = title();
+                xaml::Automation::AutomationProperties::SetName(icon, name);
+                controls::ToolTipService::SetToolTip(icon, winrt::box_value(name));
+            });
+        Place(p, icon);
+        return;
+    }
+    // The icon scales with the text, as a symbol in a label does, and
+    // stands a little more than half the text's size before it.
+    auto block = TextOf(title);
+    block.VerticalAlignment(xaml::VerticalAlignment::Center);
+    ApplyTextStyle(block, props.style);
+    if (props.fontSize) block.FontSize(*props.fontSize);
+    double size = block.FontSize();
     controls::StackPanel row;
     row.Orientation(controls::Orientation::Horizontal);
-    row.Spacing(12);
-    if (props.icon) row.Children().Append(Icons::Icon(props.icon));
-    auto block = TextOf(Bound(ctx, props.title));
-    block.VerticalAlignment(xaml::VerticalAlignment::Center);
-    if (auto style = Styles::TextStyle(props.style)) block.Style(style);
+    row.Spacing((std::clamp)(std::round(size * 0.6), 4.0, 12.0));
+    if (props.icon) {
+        auto icon = Icons::Icon(props.icon, std::round(size * 1.15));
+        icon.VerticalAlignment(xaml::VerticalAlignment::Center);
+        row.Children().Append(icon);
+    }
     row.Children().Append(block);
     Place(p, row);
 }
@@ -232,6 +344,10 @@ struct ButtonProps {
     /// action runs.
     std::optional<Field> pick;
     char const* files = nullptr;
+    std::optional<ControlShape> shape;
+    /// `width: fill`: across its container.
+    bool fill = false;
+    std::optional<double> iconSize;
 };
 
 /// What a button does: its action, after asking for a file with `pick`.
@@ -346,6 +462,11 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
+    ShapeControl(ctx, button, props.shape);
+    if (props.fill) {
+        button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        SetRole(button, L"bern-fill-width");
+    }
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
         auto wrapper = Shadowed(button, props.style, shadow);
@@ -379,6 +500,13 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
+    // A capsule clips its content to the button's corners.
+    ShapeControl(ctx, button, props.shape);
+    if (props.shape && props.shape->capsule)
+        RoundedClip(holder.as<xaml::FrameworkElement>(), [weak = winrt::make_weak(button)](float, float) {
+            auto button = weak.get();
+            return button ? static_cast<float>(button.CornerRadius().TopLeft) : 0.0f;
+        });
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
         auto wrapper = Shadowed(button, props.style, shadow);
@@ -412,12 +540,47 @@ struct IconButtonProps {
     StyleDef const* style = nullptr;
     std::optional<Field> pick;
     char const* files = nullptr;
+    /// `height`: a button of that size, round when prominent.
+    std::optional<ControlShape> shape;
+    bool fill = false;
+    /// `font_size`: the size of the icon.
+    std::optional<double> iconSize;
 };
 
+/// An icon button named by its label, as a Fluent app bar button: no
+/// background until pointed at, the control's own corners; with `height`
+/// that size. `prominent` takes the accent, and with `height` is a round
+/// button of that diameter (the design's play button).
 inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     controls::Button button;
-    button.Content(Icons::Icon(props.icon));
-    if (!props.style || !props.style->draws) Styles::MakeSubtle(button);
+    button.Content(Icons::Icon(props.icon, props.iconSize.value_or(16)));
+    std::string_view prominence = props.prominence ? props.prominence : "";
+    bool sized = props.shape && props.shape->height.Given();
+    bool accent = prominence == "prominent";
+    if (accent) {
+        if (auto style = Styles::Named(L"AccentButtonStyle")) button.Style(style);
+    } else if (!props.style || !props.style->draws) {
+        Styles::MakeSubtle(button);
+    }
+    // A square around the icon: `height`, a style's control size, or the
+    // icon with 10 on each side, as an app bar button.
+    auto square = [button, accent](double d) {
+        double size = (std::max)(0.0, d);
+        button.Width(size);
+        button.Height(size);
+        button.MinWidth(0);
+        button.MinHeight(0);
+        button.Padding(xaml::Thickness{0, 0, 0, 0});
+        if (accent) button.CornerRadius(xaml::CornerRadius{size / 2, size / 2, size / 2, size / 2});
+    };
+    if (sized) {
+        BindLen(ctx, props.shape->height, nullptr, square);
+    } else if (props.style && props.style->size) {
+        std::string_view size = props.style->size;
+        square(size == "small" ? 24 : size == "large" ? 42 : size == "extra_large" ? 52 : 32);
+    } else {
+        square(props.iconSize.value_or(16) + 20);
+    }
     auto text = Bound(ctx, props.label);
     if (text)
         Reactive::Run([button, text] {
@@ -435,6 +598,8 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
         std::shared_ptr<ShadowImage> shadow;
         auto wrapper = Shadowed(button, props.style, shadow);
         StyleButton(button, wrapper, props.style, shadow);
+        // The style's size is the square's, not a text button's padding.
+        if (!sized && props.style->size && !props.style->padding) button.Padding(xaml::Thickness{0, 0, 0, 0});
         shown = wrapper;
     }
     Place(p, shown);
@@ -527,6 +692,12 @@ struct SearchProps {
     std::optional<Field> field;
     Str prompt;
     Act submit;
+    /// A palette's prompt inside its panel.
+    Str panelPrompt;
+    /// A palette's panel size; a field in the page its own size.
+    std::optional<double> width;
+    std::optional<double> height;
+    std::optional<double> fontSize;
 };
 
 inline controls::AutoSuggestBox SearchBox(Ctx const& ctx, SearchProps const& props) {
@@ -557,16 +728,51 @@ inline controls::AutoSuggestBox SearchBox(Ctx const& ctx, SearchProps const& pro
 }
 
 /// A flyout presenter style for content in an `appearance:` part.
+/// A resource of one theme (`Dark`/`Default` or `Light`) in the
+/// application's theme dictionaries, through merged dictionaries.
+inline winrt::Windows::Foundation::IInspectable ThemeValue(xaml::ResourceDictionary const& dictionary, wchar_t const* theme, wchar_t const* key, int depth = 0) {
+    if (!dictionary || depth > 8) return nullptr;
+    try {
+        auto themes = dictionary.ThemeDictionaries();
+        if (auto boxed = winrt::box_value(theme); themes.HasKey(boxed))
+            if (auto inner = themes.Lookup(boxed).try_as<xaml::ResourceDictionary>()) {
+                if (auto boxedKey = winrt::box_value(key); inner.HasKey(boxedKey)) return inner.Lookup(boxedKey);
+                if (auto value = ThemeValue(inner, theme, key, depth + 1)) return value;
+            }
+        for (auto merged : dictionary.MergedDictionaries())
+            if (auto value = ThemeValue(merged, theme, key, depth + 1)) return value;
+    } catch (winrt::hresult_error const&) {
+    }
+    return nullptr;
+}
+
+/// The look of a flyout opened from a surface of a fixed appearance, such
+/// as a dark player in a light window. The theme alone turns the items'
+/// text over but leaves the presenter's surface in the window's theme, so
+/// the style also takes that theme's own surface and border brushes.
 inline xaml::Style PresenterTheme(wchar_t const* target, std::string const& appearance) {
     if (appearance.empty()) return nullptr;
     static auto* cache = new std::map<std::wstring, xaml::Style>();
     std::wstring key = std::wstring(target) + L"|" + std::wstring(Wide(appearance));
     if (auto found = cache->find(key); found != cache->end()) return found->second;
+    bool dark = appearance == "dark";
     xaml::Style style{nullptr};
     try {
         style = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType=")" + std::wstring(target) +
-            LR"("><Setter Property="RequestedTheme" Value=")" + std::wstring(appearance == "dark" ? L"Dark" : L"Light") + L"\" /></Style>")
+            LR"("><Setter Property="RequestedTheme" Value=")" + std::wstring(dark ? L"Dark" : L"Light") + L"\" /></Style>")
                     .as<xaml::Style>();
+        std::wstring_view kind(target);
+        wchar_t const* background = kind == L"MenuFlyoutPresenter" ? L"MenuFlyoutPresenterBackground" : kind == L"FlyoutPresenter" ? L"FlyoutPresenterBackground" : nullptr;
+        wchar_t const* border = kind == L"MenuFlyoutPresenter" ? L"MenuFlyoutPresenterBorderBrush" : kind == L"FlyoutPresenter" ? L"FlyoutBorderThemeBrush" : nullptr;
+        auto resources = xaml::Application::Current().Resources();
+        auto lookup = [&](wchar_t const* name) -> winrt::Windows::Foundation::IInspectable {
+            if (!name) return nullptr;
+            for (auto theme : dark ? std::initializer_list<wchar_t const*>{L"Dark", L"Default"} : std::initializer_list<wchar_t const*>{L"Light"})
+                if (auto value = ThemeValue(resources, theme, name)) return value;
+            return nullptr;
+        };
+        if (auto value = lookup(background)) style.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), value));
+        if (auto value = lookup(border)) style.Setters().Append(xaml::Setter(controls::Control::BorderBrushProperty(), value));
     } catch (winrt::hresult_error const& error) {
         Report("styles: " + Utf8(error.message()));
     }
@@ -579,6 +785,10 @@ inline void Search(Parent const& p, Ctx const& ctx, SearchProps props, Build con
     if (!props.field) return;
     auto box = SearchBox(ctx, props);
     if (ctx.toolbar) box.Width(240);
+    // A field standing in the page at its own size.
+    if (props.width) box.Width(*props.width);
+    if (props.height) box.Height(*props.height);
+    if (props.fontSize) box.FontSize(*props.fontSize);
     if (results) {
         auto content = MakeFlex(false, 4, xaml::Thickness{4, 4, 4, 4});
         results(Parent::Of(content), ctx);
@@ -634,17 +844,58 @@ struct SwitchProps {
     char const* id = "";
     Str label;
     std::optional<Field> field;
+    /// Runs after the draft changed.
+    Act then;
+    /// `checked:`: engine state the switch shows; a change runs `change`
+    /// with the new value.
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
     char const* style = nullptr;
     char const* icon = nullptr;
+    bool labelHidden = false;
+    std::optional<ControlShape> shape;
 };
 
+/// What a control shows and how a change is made: a draft field, after
+/// which an action runs, or a value read from state whose change runs a
+/// command.
+struct Model {
+    std::function<Value()> read;
+    std::function<Value()> peek;
+    std::function<void(Value const&)> write;
+};
+
+inline Model ModelOf(Ctx const& ctx, std::optional<Field> field, Act then, Get current, std::function<void(Ctx const&, Value const&)> change) {
+    Model model;
+    if (current) {
+        model.read = [ctx, current] { return current(ctx); };
+        model.peek = [ctx, current] { return Reactive::Untrack([&] { return current(ctx); }); };
+        model.write = [ctx, change](Value const& value) {
+            if (change) change(ctx, value);
+        };
+    } else if (field) {
+        auto f = *field;
+        model.read = [ctx, f] { return ctx.Read(f); };
+        model.peek = [ctx, f] { return ctx.Peek(f); };
+        model.write = [ctx, f, then](Value const& value) {
+            SetDraft(ctx, f, value);
+            if (then) then(ctx);
+        };
+    }
+    return model;
+}
+
 inline void Switch(Parent const& p, Ctx const& ctx, SwitchProps props) {
-    if (!props.field) return;
-    auto field = *props.field;
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    if (!model.read) return;
     auto text = Bound(ctx, props.label);
     auto updating = std::make_shared<bool>(false);
-    auto on = [ctx, field] { return ctx.Read(field) == Value::Bool(true); };
-    std::function<void()> flip = [ctx, field] { SetDraft(ctx, field, Value::Bool(!(ctx.Peek(field) == Value::Bool(true)))); };
+    auto on = [model] { return model.read() == Value::Bool(true); };
+    auto set = [model](bool value) { model.write(Value::Bool(value)); };
+    std::function<void()> flip = [model] { model.write(Value::Bool(!(model.peek() == Value::Bool(true)))); };
+    Actions actions{.activate = flip,
+        .setBool = set,
+        .value = [model] { return std::optional<std::string>(model.peek() == Value::Bool(true) ? "true" : "false"); }};
     if ((props.style && std::string_view(props.style) == "button") || ctx.toolbar) {
         // A button that stays pressed while on; in a toolbar its icon alone.
         controls::Primitives::ToggleButton toggle;
@@ -666,19 +917,18 @@ inline void Switch(Parent const& p, Ctx const& ctx, SwitchProps props) {
                 *updating = false;
             }
         });
-        toggle.Checked([updating, ctx, field](auto&&, auto&&) { if (!*updating) SetDraft(ctx, field, Value::Bool(true)); });
-        toggle.Unchecked([updating, ctx, field](auto&&, auto&&) { if (!*updating) SetDraft(ctx, field, Value::Bool(false)); });
-        if (p.isList && !ctx.toolbar) p.Add(LabeledCard(text, toggle));
+        toggle.Checked([updating, set](auto&&, auto&&) { if (!*updating) set(true); });
+        toggle.Unchecked([updating, set](auto&&, auto&&) { if (!*updating) set(false); });
+        ShapeControl(ctx, toggle, props.shape);
+        if (p.isList && !ctx.toolbar) p.Add(props.labelHidden ? xaml::UIElement(Card(toggle)) : xaml::UIElement(LabeledCard(text, toggle)));
         else p.Add(toggle);
-        Controls::Register(ctx, props.id, "switch", text, nullptr,
-            Actions{.activate = flip,
-                .setBool = [ctx, field](bool value) { SetDraft(ctx, field, Value::Bool(value)); },
-                .value = [ctx, field] { return std::optional<std::string>(ctx.Peek(field) == Value::Bool(true) ? "true" : "false"); }});
+        Controls::Register(ctx, props.id, "switch", text, nullptr, std::move(actions));
         return;
     }
     if (props.style && std::string_view(props.style) == "checkbox") {
         controls::CheckBox check;
-        if (text) check.Content(TextOf(text));
+        if (text && !props.labelHidden) check.Content(TextOf(text));
+        if (props.labelHidden) check.MinWidth(0);
         BindName(check, text);
         Reactive::Run([check, on, updating] {
             bool value = on();
@@ -689,16 +939,16 @@ inline void Switch(Parent const& p, Ctx const& ctx, SwitchProps props) {
                 *updating = false;
             }
         });
-        check.Checked([updating, ctx, field](auto&&, auto&&) { if (!*updating) SetDraft(ctx, field, Value::Bool(true)); });
-        check.Unchecked([updating, ctx, field](auto&&, auto&&) { if (!*updating) SetDraft(ctx, field, Value::Bool(false)); });
+        check.Checked([updating, set](auto&&, auto&&) { if (!*updating) set(true); });
+        check.Unchecked([updating, set](auto&&, auto&&) { if (!*updating) set(false); });
         Place(p, check);
     } else {
         controls::ToggleSwitch toggle;
-        // The state text follows the app's language, not the system's.
-        Reactive::Run([toggle] {
-            toggle.OnContent(winrt::box_value(bern::Text::Tr("bern.switch.on")));
-            toggle.OffContent(winrt::box_value(bern::Text::Tr("bern.switch.off")));
-        });
+        // The switch alone, as the design draws it: its label says what it
+        // turns on, so no “On”/“Off” beside it.
+        toggle.OnContent(nullptr);
+        toggle.OffContent(nullptr);
+        toggle.MinWidth(0);
         BindName(toggle, text);
         Reactive::Run([toggle, on, updating] {
             bool value = on();
@@ -708,38 +958,41 @@ inline void Switch(Parent const& p, Ctx const& ctx, SwitchProps props) {
                 *updating = false;
             }
         });
-        toggle.Toggled([weak = winrt::make_weak(toggle), updating, ctx, field](auto&&, auto&&) {
-            if (auto toggle = weak.get(); toggle && !*updating) SetDraft(ctx, field, Value::Bool(toggle.IsOn()));
+        toggle.Toggled([weak = winrt::make_weak(toggle), updating, set](auto&&, auto&&) {
+            if (auto toggle = weak.get(); toggle && !*updating) set(toggle.IsOn());
         });
         if (p.isList) {
             toggle.MinWidth(0);
-            p.Add(LabeledCard(text, toggle));
+            p.Add(props.labelHidden ? xaml::UIElement(Card(toggle)) : xaml::UIElement(LabeledCard(text, toggle)));
         } else {
-            if (text) toggle.Header(TextOf(text));
+            if (text && !props.labelHidden) toggle.Header(TextOf(text));
             p.Add(toggle);
         }
     }
-    Controls::Register(ctx, props.id, "switch", text, nullptr,
-        Actions{.activate = flip,
-            .setBool = [ctx, field](bool value) { SetDraft(ctx, field, Value::Bool(value)); },
-            .value = [ctx, field] { return std::optional<std::string>(ctx.Peek(field) == Value::Bool(true) ? "true" : "false"); }});
+    Controls::Register(ctx, props.id, "switch", text, nullptr, std::move(actions));
 }
 
 struct SliderProps {
     char const* id = "";
     Str label;
     std::optional<Field> field;
+    /// `current:`: engine state the slider shows; letting go runs
+    /// `change` with the new value.
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
     std::optional<double> min, max, step;
     char const* minIcon = nullptr;
     char const* maxIcon = nullptr;
     Act commit;
+    bool labelHidden = false;
 };
 
 /// A slider: dragging only updates this window's draft as a preview, and
-/// releasing commits once; keyboard changes commit at once.
+/// releasing commits once; keyboard changes commit at once. A slider
+/// showing engine state moves only itself while dragged and runs its
+/// command on release.
 inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
-    if (!props.field) return;
-    auto field = *props.field;
+    if (!props.field && !props.current) return;
     auto text = Bound(ctx, props.label);
     double low = props.min.value_or(0), high = props.max.value_or(1);
     double step = props.step.value_or((high - low) / 100);
@@ -749,7 +1002,7 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
     slider.StepFrequency(step);
     slider.SmallChange(step);
     slider.LargeChange((high - low) / 10);
-    slider.MinWidth(200);
+    slider.MinWidth(props.labelHidden ? 80 : 200);
     slider.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
     auto run = Run(ctx, props.commit);
     auto snap = [low, high, explicitStep = props.step](double value) {
@@ -758,8 +1011,23 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
     };
     auto updating = std::make_shared<bool>(false);
     auto dragging = std::make_shared<bool>(false);
-    Reactive::Run([slider, ctx, field, updating] {
-        double value = R::AsDouble(ctx.Read(field));
+    auto field = props.field;
+    auto current = props.current;
+    auto change = props.change;
+    auto read = [ctx, field, current] { return field ? ctx.Read(*field) : current(ctx); };
+    auto peek = [ctx, field, current] { return field ? ctx.Peek(*field) : Reactive::Untrack([&] { return current(ctx); }); };
+    // Where the value goes: the draft, then the action; or the command.
+    auto give = [ctx, field, change, run](double value, bool done) {
+        if (field) {
+            SetDraft(ctx, *field, Value::Float(value));
+            if (done && run) run();
+        } else if (done && change) {
+            change(ctx, Value::Float(value));
+        }
+    };
+    Reactive::Run([slider, read, updating, dragging] {
+        double value = R::AsDouble(read());
+        if (*dragging) return;
         if (std::abs(slider.Value() - value) > 1e-12) {
             *updating = true;
             slider.Value(value);
@@ -767,17 +1035,16 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
         }
     });
     slider.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(xaml::Input::PointerEventHandler([dragging](auto&&, auto&&) { *dragging = true; })), true);
-    auto release = [dragging, run](auto&&, auto&&) {
+    auto release = [dragging, give, weak = winrt::make_weak(slider), snap](auto&&, auto&&) {
         if (!*dragging) return;
         *dragging = false;
-        if (run) run();
+        if (auto slider = weak.get()) give(snap(slider.Value()), true);
     };
     slider.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(xaml::Input::PointerEventHandler(release)), true);
     slider.AddHandler(xaml::UIElement::PointerCaptureLostEvent(), winrt::box_value(xaml::Input::PointerEventHandler(release)), true);
-    slider.ValueChanged([updating, dragging, ctx, field, snap, run](auto&&, controls::Primitives::RangeBaseValueChangedEventArgs const& args) {
+    slider.ValueChanged([updating, dragging, give, snap](auto&&, controls::Primitives::RangeBaseValueChangedEventArgs const& args) {
         if (*updating) return;
-        SetDraft(ctx, field, Value::Float(snap(args.NewValue())));
-        if (!*dragging && run) run();
+        give(snap(args.NewValue()), !*dragging);
     });
     BindName(slider, text);
     controls::Grid track;
@@ -798,15 +1065,14 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
         controls::Grid::SetColumn(icon, 2);
         track.Children().Append(icon);
     }
-    auto content = Stacked(text, track);
+    xaml::UIElement content = props.labelHidden ? xaml::UIElement(track) : xaml::UIElement(Stacked(text, track));
+    // A slider takes the width it is given, as on the other targets.
+    SetRole(content.as<xaml::FrameworkElement>(), L"bern-fill-width");
     if (p.isList) p.Add(Card(content));
     else p.Add(content);
     Controls::Register(ctx, props.id, "slider", text, nullptr,
-        Actions{.setNumber = [ctx, field, snap, run](double number) {
-                    SetDraft(ctx, field, Value::Float(snap(number)));
-                    if (run) run();
-                },
-            .value = [ctx, field] { return std::optional<std::string>(R::Number(R::AsDouble(ctx.Peek(field)))); }});
+        Actions{.setNumber = [give, snap](double number) { give(snap(number), true); },
+            .value = [peek] { return std::optional<std::string>(R::Number(R::AsDouble(peek()))); }});
 }
 
 /// One option of a picker: variant index, variant name and label.
@@ -839,6 +1105,8 @@ inline Segments MakeSegments(Ctx const& ctx, std::vector<Str> const& labels, std
             items->push_back(item);
         }
         auto updating = std::make_shared<bool>(false);
+        // At its own width from the leading edge, as the design draws it.
+        bar.HorizontalAlignment(xaml::HorizontalAlignment::Left);
         segments.element = bar;
         segments.select = [bar, items, updating](int index) {
             if (index < 0 || index >= static_cast<int>(items->size()) || bar.SelectedItem() == (*items)[index]) return;
@@ -892,13 +1160,21 @@ struct PickerProps {
     char const* id = "";
     Str label;
     std::optional<Field> field;
+    /// Runs after the draft changed.
+    Act then;
+    /// `selected:`: engine state the picker shows; a choice runs `change`
+    /// with the chosen value.
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
     std::vector<PickOption> options;
     char const* style = nullptr;
+    bool labelHidden = false;
+    std::optional<ControlShape> shape;
 };
 
 inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
-    if (!props.field || props.options.empty()) return;
-    auto field = *props.field;
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    if (!model.read || props.options.empty()) return;
     auto text = Bound(ctx, props.label);
     auto options = std::make_shared<std::vector<PickOption>>(std::move(props.options));
     auto indexOf = [options](Value const& value) -> std::optional<int> {
@@ -907,34 +1183,63 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
             if ((*options)[i].value == value.variant) return static_cast<int>(i);
         return std::nullopt;
     };
-    auto choose = [ctx, field, options](int index) { SetDraft(ctx, field, Value::Enum((*options)[index].value)); };
+    auto choose = [model, options](int index) {
+        auto value = Value::Enum((*options)[index].value);
+        if (!(model.peek() == value)) model.write(value);
+    };
     std::string_view style = props.style ? props.style : "";
     xaml::FrameworkElement control{nullptr};
     if (style == "segmented" || style == "radio" || style == "inline") {
         std::vector<Str> labels;
         for (auto const& option : *options) labels.push_back(option.label);
         auto segments = MakeSegments(ctx, labels);
-        Reactive::Run([segments, ctx, field, indexOf] {
-            if (auto index = indexOf(ctx.Read(field))) segments.select(*index);
+        Reactive::Run([segments, model, indexOf] {
+            if (auto index = indexOf(model.read())) segments.select(*index);
         });
         segments.onSelect(choose);
         control = segments.element;
+    } else if (props.shape) {
+        // A capsule: the chosen option on a drop-down button of its own
+        // height, opening a menu of the options.
+        controls::DropDownButton button;
+        button.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+        controls::TextBlock chosen;
+        button.Content(chosen);
+        controls::MenuFlyout flyout;
+        for (size_t i = 0; i < options->size(); ++i) {
+            controls::ToggleMenuFlyoutItem item;
+            auto label = (*options)[i].label;
+            Reactive::Run([item, label, ctx] { item.Text(label(ctx)); });
+            int index = static_cast<int>(i);
+            item.Click([choose, index](auto&&, auto&&) { choose(index); });
+            flyout.Items().Append(item);
+        }
+        if (auto style = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(style);
+        button.Flyout(flyout);
+        Reactive::Run([chosen, flyout, options, model, indexOf, ctx] {
+            auto index = indexOf(model.read());
+            chosen.Text(index ? (*options)[*index].label(ctx) : winrt::hstring());
+            for (uint32_t i = 0; i < flyout.Items().Size(); ++i)
+                if (auto item = flyout.Items().GetAt(i).try_as<controls::ToggleMenuFlyoutItem>()) item.IsChecked(index && *index == static_cast<int>(i));
+        });
+        ShapeControl(ctx, button, props.shape);
+        control = button;
     } else {
         controls::ComboBox combo;
         combo.MinWidth(160);
         auto updating = std::make_shared<bool>(false);
-        Reactive::Run([combo, options, ctx, field, indexOf, updating] {
+        Reactive::Run([combo, options, ctx, model, indexOf, updating] {
             std::vector<winrt::hstring> labels;
             for (auto const& option : *options) labels.push_back(option.label(ctx));
             *updating = true;
             auto selected = combo.SelectedIndex();
             combo.Items().Clear();
             for (auto const& label : labels) combo.Items().Append(winrt::box_value(label));
-            combo.SelectedIndex(indexOf(ctx.Peek(field)).value_or(selected));
+            combo.SelectedIndex(indexOf(model.peek()).value_or(selected));
             *updating = false;
         });
-        Reactive::Run([combo, ctx, field, indexOf, updating] {
-            if (auto index = indexOf(ctx.Read(field)); index && combo.SelectedIndex() != *index) {
+        Reactive::Run([combo, model, indexOf, updating] {
+            if (auto index = indexOf(model.read()); index && combo.SelectedIndex() != *index) {
                 *updating = true;
                 combo.SelectedIndex(*index);
                 *updating = false;
@@ -946,7 +1251,7 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
         control = combo;
     }
     BindName(control, text);
-    if (ctx.toolbar) p.Add(control);
+    if (ctx.toolbar || props.labelHidden) p.isList && !ctx.toolbar ? p.Add(Card(control)) : p.Add(control);
     else if (p.isList) p.Add(LabeledCard(text, control));
     else p.Add(Stacked(text, control));
     Controls::Register(ctx, props.id, "picker", text, nullptr,
@@ -955,8 +1260,8 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
                         if ((*options)[i].name == name) { choose(static_cast<int>(i)); return true; }
                     return false;
                 },
-            .value = [ctx, field, options, indexOf]() -> std::optional<std::string> {
-                if (auto index = indexOf(ctx.Peek(field))) return std::string((*options)[*index].name);
+            .value = [model, options, indexOf]() -> std::optional<std::string> {
+                if (auto index = indexOf(model.peek())) return std::string((*options)[*index].name);
                 return std::nullopt;
             }});
 }
@@ -970,7 +1275,29 @@ struct StackProps {
     char const* align = nullptr;
     Motion const* animate = nullptr;
     Motion const* reflow = nullptr;
+    /// Padding across and along, in place of `padding` there.
+    Len paddingX;
+    Len paddingY;
 };
+
+/// Bind `padding`, `padding_x` and `padding_y` to `apply`, which takes
+/// the horizontal and vertical padding.
+inline void BindPadding(Ctx const& ctx, Len const& all, Len const& x, Len const& y, Motion const* motion, std::function<void(double, double)> apply) {
+    auto now = std::make_shared<std::array<double, 2>>(std::array<double, 2>{0, 0});
+    BindLen(ctx, all, motion, [now, apply, x = x.Given(), y = y.Given()](double v) {
+        if (!x) (*now)[0] = (std::max)(0.0, v);
+        if (!y) (*now)[1] = (std::max)(0.0, v);
+        apply((*now)[0], (*now)[1]);
+    });
+    BindLen(ctx, x, motion, [now, apply](double v) {
+        (*now)[0] = (std::max)(0.0, v);
+        apply((*now)[0], (*now)[1]);
+    });
+    BindLen(ctx, y, motion, [now, apply](double v) {
+        (*now)[1] = (std::max)(0.0, v);
+        apply((*now)[0], (*now)[1]);
+    });
+}
 
 inline void Stack(Parent const& p, Ctx const& ctx, StackProps props, Build const& children) {
     bool column = std::string_view(props.axis) == "column";
@@ -989,10 +1316,9 @@ inline void Stack(Parent const& p, Ctx const& ctx, StackProps props, Build const
         flex->spacing = (std::max)(0.0, v);
         keep.get().InvalidateMeasure();
     });
-    BindLen(ctx, props.padding, props.animate, [flex, keep](double v) {
+    BindPadding(ctx, props.padding, props.paddingX, props.paddingY, props.animate, [flex, keep](double x, double y) {
         if (!keep.get()) return;
-        double pad = (std::max)(0.0, v);
-        flex->padding = xaml::Thickness{pad, pad, pad, pad};
+        flex->padding = xaml::Thickness{x, y, x, y};
         keep.get().InvalidateMeasure();
     });
     BindLen(ctx, props.width, props.animate, [panel](double v) { panel.Width((std::max)(0.0, v)); });
@@ -1005,7 +1331,10 @@ inline void Stack(Parent const& p, Ctx const& ctx, StackProps props, Build const
             : xaml::HorizontalAlignment::Stretch;
         children(Parent::Aligned(panel, h, std::nullopt), ctx);
     } else {
-        auto v = align == "top" ? xaml::VerticalAlignment::Top
+        // On the baseline: each child at its top, then moved down so the
+        // first lines of text share one baseline.
+        flex->baseline = align == "baseline";
+        auto v = align == "top" || align == "baseline" ? xaml::VerticalAlignment::Top
             : align == "bottom" ? xaml::VerticalAlignment::Bottom
             : align == "fill" ? xaml::VerticalAlignment::Stretch
             : xaml::VerticalAlignment::Center;
@@ -1019,6 +1348,12 @@ inline void Stack(Parent const& p, Ctx const& ctx, StackProps props, Build const
 struct GridPanel : controls::PanelT<GridPanel> {
     double minWidth = 120;
     double spacing = 8;
+    /// Between rows; `spacing` when not given.
+    std::optional<double> rowSpacing;
+    /// `cell_ratio` and `cell_extra`: every row the column width ÷ ratio
+    /// \+ extra tall, its cells at the top.
+    std::optional<double> cellRatio;
+    double cellExtra = 0;
     xaml::Thickness padding{0, 0, 0, 0};
     B::Motion const* reflow = nullptr;
     Places places;
@@ -1042,18 +1377,26 @@ struct GridPanel : controls::PanelT<GridPanel> {
     float Horizontal() const { return static_cast<float>(padding.Left + padding.Right); }
     float Vertical() const { return static_cast<float>(padding.Top + padding.Bottom); }
 
+    float RowGap() const { return static_cast<float>(rowSpacing.value_or(spacing)); }
+    std::optional<float> CellHeight(float cell) const {
+        if (!cellRatio || *cellRatio <= 0) return std::nullopt;
+        return static_cast<float>(cell / *cellRatio + cellExtra);
+    }
+
     Size MeasureOverride(Size available) {
         float inner = std::isinf(available.Width) ? INFINITY : (std::max)(0.0f, available.Width - Horizontal());
         auto shown = Shown();
         auto [columns, cell] = Columns(inner, shown.size());
         float height = 0;
+        auto fixed = CellHeight(cell);
         for (size_t start = 0; start < shown.size(); start += columns) {
             float row = 0;
             for (size_t i = start; i < (std::min)(start + columns, shown.size()); ++i) {
                 shown[i].Measure(Size{cell, INFINITY});
                 row = (std::max)(row, shown[i].DesiredSize().Height);
             }
-            height += row + (start > 0 ? static_cast<float>(spacing) : 0.0f);
+            if (fixed) row = *fixed;
+            height += row + (start > 0 ? RowGap() : 0.0f);
         }
         float width = std::isinf(inner) ? (cell + static_cast<float>(spacing)) * static_cast<float>(shown.size()) - static_cast<float>(spacing) : inner;
         return Size{(std::max)(0.0f, width) + Horizontal(), height + Vertical()};
@@ -1064,17 +1407,20 @@ struct GridPanel : controls::PanelT<GridPanel> {
         auto [columns, cell] = Columns((std::max)(0.0f, final.Width - Horizontal()), shown.size());
         auto gap = static_cast<float>(spacing);
         float top = static_cast<float>(padding.Top);
+        auto fixed = CellHeight(cell);
         std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> now;
         for (size_t start = 0; start < shown.size(); start += columns) {
             auto end = (std::min)(start + columns, shown.size());
             float row = 0;
             for (size_t i = start; i < end; ++i) row = (std::max)(row, shown[i].DesiredSize().Height);
             for (size_t i = start; i < end; ++i) {
-                Rect rect{static_cast<float>(padding.Left) + static_cast<float>(i - start) * (cell + gap), top, cell, row};
+                // In a row of cells, taller content runs into the gap below.
+                float height = fixed ? (std::max)(*fixed, shown[i].DesiredSize().Height) : row;
+                Rect rect{static_cast<float>(padding.Left) + static_cast<float>(i - start) * (cell + gap), top, cell, height};
                 shown[i].Arrange(rect);
                 if (reflow) now.emplace_back(shown[i], winrt::Windows::Foundation::Point{rect.X, rect.Y});
             }
-            top += row + gap;
+            top += (fixed ? *fixed : row) + RowGap();
         }
         for (auto child : Children())
             if (child.Visibility() != xaml::Visibility::Visible) child.Arrange(Rect{0, 0, 0, 0});
@@ -1089,6 +1435,11 @@ struct GridProps {
     Len padding;
     Motion const* animate = nullptr;
     Motion const* reflow = nullptr;
+    Len rowGap;
+    Len paddingX;
+    Len paddingY;
+    std::optional<double> cellRatio;
+    Len cellExtra;
 };
 
 inline void Grid(Parent const& p, Ctx const& ctx, GridProps props, Build const& children) {
@@ -1111,9 +1462,17 @@ inline void Grid(Parent const& p, Ctx const& ctx, GridProps props, Build const& 
         grid->spacing = (std::max)(0.0, v);
         relayout();
     });
-    BindLen(ctx, props.padding, props.animate, [grid, relayout](double v) {
-        double pad = (std::max)(0.0, v);
-        grid->padding = xaml::Thickness{pad, pad, pad, pad};
+    BindPadding(ctx, props.padding, props.paddingX, props.paddingY, props.animate, [grid, relayout](double x, double y) {
+        grid->padding = xaml::Thickness{x, y, x, y};
+        relayout();
+    });
+    BindLen(ctx, props.rowGap, props.animate, [grid, relayout](double v) {
+        grid->rowSpacing = (std::max)(0.0, v);
+        relayout();
+    });
+    grid->cellRatio = props.cellRatio;
+    BindLen(ctx, props.cellExtra, props.animate, [grid, relayout](double v) {
+        grid->cellExtra = v;
         relayout();
     });
     children(Parent::Of(panel), ctx);
@@ -1126,6 +1485,11 @@ struct LayersProps {
     Len height;
     Motion const* animate = nullptr;
     Motion const* reflow = nullptr;
+    /// A style's surface: background, the color of text and icons, and
+    /// corners that clip the layers.
+    StyleDef const* style = nullptr;
+    /// `enabled: false`: the layers take no input.
+    Get enabled;
 };
 
 /// `Stack`: layers in the one cell of a grid, later ones above earlier
@@ -1147,7 +1511,45 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
     BindLen(ctx, props.width, props.animate, [layers](double w) { layers.Width((std::max)(0.0, w)); });
     BindLen(ctx, props.height, props.animate, [layers](double w) { layers.Height((std::max)(0.0, w)); });
     children(Parent::Aligned(layers, h, v), ctx);
-    Place(p, layers);
+    // Layers that are all backdrops fill where they stand, as one alone
+    // would.
+    if (layers.Children().Size() > 0 && !props.width.Given() && !props.height.Given()) {
+        bool backdrops = true;
+        for (auto child : layers.Children()) backdrops = backdrops && Backdrop(child);
+        if (backdrops) {
+            SetRole(layers, L"bern-layers-wh");
+            layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        }
+    }
+    if (!props.style && !props.enabled) {
+        Place(p, layers);
+        return;
+    }
+    // The text and icons take the style's color, and controls are disabled
+    // with their holder.
+    controls::ContentControl holder;
+    holder.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
+    holder.VerticalContentAlignment(xaml::VerticalAlignment::Stretch);
+    holder.IsTabStop(false);
+    holder.Content(layers);
+    holder.HorizontalAlignment(layers.HorizontalAlignment());
+    holder.VerticalAlignment(layers.VerticalAlignment());
+    Mirror(holder, layers);
+    if (auto style = props.style) {
+        if (auto const& background = style->base.background)
+            PaintWith<controls::Grid>(layers, L"Grid", L"Background", *background, [](controls::Grid const& e, media::Brush const& b) { e.Background(b); });
+        if (auto const& foreground = style->base.foreground)
+            PaintWith<controls::ContentControl>(holder, L"ContentControl", L"Foreground", *foreground,
+                [](controls::ContentControl const& e, media::Brush const& b) { e.Foreground(b); });
+        if (style->corner) {
+            double r = *style->corner;
+            layers.CornerRadius(xaml::CornerRadius{r, r, r, r});
+            RoundedClip(layers, [r](float, float) { return static_cast<float>(r); });
+        }
+    }
+    if (auto isEnabled = Enabled(ctx, props.enabled)) Reactive::Run([holder, isEnabled] { holder.IsEnabled(isEnabled()); });
+    Place(p, holder);
 }
 
 /// The bytes of a declared resource, from `resources` next to the
@@ -1201,6 +1603,9 @@ struct PictureProps {
     std::optional<double> width;
     std::optional<double> height;
     char const* fit = nullptr;
+    /// The picture fills a frame its container sizes, as one with only an
+    /// `aspect` does.
+    bool fills = false;
 };
 
 /// The XAML picture: SDR pictures, and HDR ones where they cannot be drawn
@@ -1208,7 +1613,7 @@ struct PictureProps {
 inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> bytes, TextFn const& name, std::optional<std::string> uri = std::nullopt) {
     controls::Image image;
     std::string_view fit = props.fit ? props.fit : "contain";
-    bool framed = props.width && props.height;
+    bool framed = props.fills || (props.width && props.height);
     image.Stretch(!framed || fit == "contain" ? media::Stretch::Uniform
         : fit == "cover" ? media::Stretch::UniformToFill
         : media::Stretch::Fill);
@@ -1620,7 +2025,46 @@ struct ImageProps {
     Len height;
     char const* fit = nullptr;
     Motion const* animate = nullptr;
+    /// Rounded corners, following state with `animate`.
+    Len corner;
+    /// `rendering: template`: the picture's alpha in the color of the text
+    /// around it.
+    bool templated = false;
+    /// The picture's proportion in place of its own; alone, the picture
+    /// takes its container's width.
+    std::optional<double> aspect;
 };
+
+/// A frame as wide as its container and `aspect` as tall.
+struct AspectPanel : controls::PanelT<AspectPanel> {
+    double aspect = 1;
+    Size MeasureOverride(Size available) {
+        float width = std::isinf(available.Width) ? 0 : available.Width;
+        float height = static_cast<float>(width / (std::max)(0.01, aspect));
+        for (auto child : Children()) child.Measure(Size{width, height});
+        return Size{width, height};
+    }
+    Size ArrangeOverride(Size final) {
+        for (auto child : Children()) child.Arrange(Rect{0, 0, final.Width, final.Height});
+        return final;
+    }
+};
+
+/// The full path of a declared resource next to the executable.
+inline std::wstring ResourcePath(std::string_view name) {
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;) {
+        auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (length < path.size()) {
+            path.resize(length);
+            break;
+        }
+        path.resize(path.size() * 2);
+    }
+    std::wstring file = path.substr(0, path.find_last_of(L'\\')) + L"\\resources\\" + std::wstring(Wide(name));
+    std::replace(file.begin(), file.end(), L'/', L'\\');
+    return file;
+}
 
 /// Show encoded picture bytes in `frame`: HDR where the display shows it.
 inline void ShowPicture(controls::Grid const& frame, Ctx const& ctx, std::shared_ptr<std::vector<uint8_t>> bytes, PictureProps const& picture, TextFn name) {
@@ -1640,6 +2084,36 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     picture.fit = props.fit;
     if (props.width.Given()) picture.width = Reactive::Untrack([&] { return props.width.Now(ctx); });
     if (props.height.Given()) picture.height = Reactive::Untrack([&] { return props.height.Now(ctx); });
+    // A proportion of its own sets the side not given.
+    Len width = props.width, height = props.height;
+    if (props.aspect && *props.aspect > 0) {
+        double aspect = *props.aspect;
+        if (picture.width && !picture.height) {
+            picture.height = *picture.width / aspect;
+            height = Len(*picture.height);
+        } else if (picture.height && !picture.width) {
+            picture.width = *picture.height * aspect;
+            width = Len(*picture.width);
+        } else if (!picture.width && !picture.height) {
+            picture.fills = true;
+        }
+    }
+    props.width = width;
+    props.height = height;
+    // A template: the alpha of a declared picture in the text's color.
+    if (props.templated && props.source) {
+        controls::BitmapIcon icon;
+        icon.ShowAsMonochrome(true);
+        icon.UriSource(winrt::Windows::Foundation::Uri(winrt::hstring(L"file:///" + ResourcePath(props.source))));
+        BindLen(ctx, props.width, props.animate, [icon](double v) { icon.Width((std::max)(0.0, v)); });
+        BindLen(ctx, props.height, props.animate, [icon](double v) { icon.Height((std::max)(0.0, v)); });
+        icon.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+        icon.VerticalAlignment(xaml::VerticalAlignment::Top);
+        if (auto name = props.label ? Bound(ctx, props.label) : nullptr) BindName(icon, name);
+        else xaml::Automation::AutomationProperties::SetAccessibilityView(icon, xaml::Automation::Peers::AccessibilityView::Raw);
+        Place(p, icon);
+        return;
+    }
     // The declared frame. With both sides, the picture fits inside it and
     // is centered when it keeps its aspect ratio; with one, the picture
     // sets the other.
@@ -1649,6 +2123,19 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     if (picture.width && picture.height) {
         BindLen(ctx, props.width, props.animate, [frame](double v) { frame.Width((std::max)(0.0, v)); });
         BindLen(ctx, props.height, props.animate, [frame](double v) { frame.Height((std::max)(0.0, v)); });
+    }
+    if (picture.fills) {
+        frame.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        frame.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    }
+    // Rounded corners clip the picture, following state.
+    if (props.corner.Given()) {
+        auto radius = std::make_shared<float>(0.0f);
+        auto geometry = RoundedClip(frame, [radius](float, float) { return *radius; });
+        BindLen(ctx, props.corner, props.animate, [geometry, radius](double r) {
+            *radius = static_cast<float>((std::max)(0.0, r));
+            geometry.CornerRadius(float2{*radius, *radius});
+        });
     }
     TextFn name = props.label ? Bound(ctx, props.label) : nullptr;
     if (props.source) {
@@ -1676,6 +2163,16 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                 return 0;
             });
         });
+    }
+    // A picture with only a proportion takes its container's width.
+    if (picture.fills) {
+        auto impl = winrt::make_self<AspectPanel>();
+        impl->aspect = *props.aspect;
+        controls::Panel panel = impl.as<controls::Panel>();
+        SetRole(panel, L"bern-fill-width");
+        panel.Children().Append(frame);
+        Place(p, panel);
+        return;
     }
     // Where a column would stretch the picture, it keeps its size at the
     // leading edge.
@@ -1741,31 +2238,71 @@ inline void Divider(Parent const& p, Ctx const& ctx) {
         return;
     }
     if (p.IsHorizontal()) line.Width(1);
-    else line.Height(1);
+    else {
+        // A line across what holds it, in a column or a stack alike.
+        line.Height(1);
+        SetRole(line, L"bern-fill-width");
+    }
     line.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
     if (auto style = Styles::Themed(L"Border", {{L"Background", Keys::Divider}})) line.Style(style);
     Place(p, line);
 }
 
+/// The layout of a form's sections: the room between them, and the least
+/// height and insets of their rows.
+struct FormProps {
+    std::optional<double> gap;
+    std::optional<double> rowHeight;
+    std::optional<double> paddingX;
+    std::optional<double> paddingY;
+    /// It opens with a plain section, which starts at the top of the page.
+    bool plainFirst = false;
+};
+
+/// What rows of the sections in a form take from it.
+inline std::shared_ptr<FormProps> currentForm;
+
 /// A grouped form: sections of card rows in a scrolling page with a
 /// readable maximum width, as Windows Settings pages lay them out.
-inline void Form(Parent const& p, Ctx const& ctx, Str const& title, Build const& children) {
+inline void Form(Parent const& p, Ctx const& ctx, Str const& title, FormProps form, Build const& children) {
     if (title && ctx.page) ctx.page->PushTitle(Bound(ctx, title));
     controls::StackPanel content;
-    content.Spacing(24);
+    content.Spacing(form.gap.value_or(24));
     content.MaxWidth(1000);
-    content.Padding(xaml::Thickness{24, 8, 24, 24});
+    content.Padding(xaml::Thickness{24, form.plainFirst ? 0.0 : 8.0, 24, 24});
+    auto saved = currentForm;
+    currentForm = std::make_shared<FormProps>(form);
     controls::ScrollViewer scroller;
     scroller.Content(content);
     scroller.HorizontalScrollBarVisibility(controls::ScrollBarVisibility::Disabled);
     scroller.VerticalScrollBarVisibility(controls::ScrollBarVisibility::Auto);
     MarkFill(scroller);
     children(Parent::Of(content), ctx);
+    currentForm = saved;
     p.Add(scroller);
 }
 
-/// A titled group of card rows with an optional footnote.
-inline void Section(Parent const& p, Ctx const& ctx, Str const& title, Str const& footer, Build const& children) {
+struct SectionProps {
+    /// Rows on the page itself, without cards: a heading that scrolls with
+    /// its form.
+    bool plain = false;
+    std::optional<double> paddingX;
+    std::optional<double> paddingY;
+};
+
+/// A titled group of card rows with an optional footnote; the rows take
+/// the section's (else the form's) insets and the form's least height.
+inline void Section(Parent const& p, Ctx const& ctx, Str const& title, Str const& footer, SectionProps section, Build const& children) {
+    auto form = currentForm;
+    auto x = section.paddingX ? section.paddingX : form ? form->paddingX : std::nullopt;
+    auto y = section.paddingY ? section.paddingY : form ? form->paddingY : std::nullopt;
+    auto least = form ? form->rowHeight : std::nullopt;
+    if (section.plain) {
+        auto rows = MakeFlex(false, 0, xaml::Thickness{x.value_or(0), y.value_or(0), x.value_or(0), y.value_or(0)});
+        children(Parent::Aligned(rows, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
+        p.Add(rows);
+        return;
+    }
     controls::StackPanel group;
     group.Spacing(4);
     if (title) {
@@ -1785,6 +2322,23 @@ inline void Section(Parent const& p, Ctx const& ctx, Str const& title, Str const
         group.Children().Append(note);
     }
     children(Parent::OfList(rows), ctx);
+    // The rows' insets and least height, from the section or its form,
+    // also for rows that come later.
+    if (x || y || least) {
+        auto apply = [weak = winrt::make_weak(rows), x, y, least] {
+            auto panel = weak.get();
+            if (!panel) return;
+            for (auto child : panel.Children())
+                if (auto card = child.try_as<controls::Border>()) {
+                    xaml::Thickness padding{x.value_or(16), y.value_or(12), x.value_or(16), y.value_or(12)};
+                    if (card.Padding() != padding) card.Padding(padding);
+                    double minimum = least ? *least : y ? 0.0 : 56.0;
+                    if (card.MinHeight() != minimum) card.MinHeight(minimum);
+                }
+        };
+        apply();
+        rows.SizeChanged([apply](auto&&, auto&&) { apply(); });
+    }
     p.Add(group);
 }
 
@@ -1792,6 +2346,17 @@ inline void Section(Parent const& p, Ctx const& ctx, Str const& title, Str const
 inline void Toolbar(Parent const&, Ctx const& ctx, Build const& children) {
     if (!ctx.page) return;
     auto holder = ctx.page->AddTools();
+    Reactive::Run([holder, ctx] { holder.Visibility(ctx.Shown() ? xaml::Visibility::Visible : xaml::Visibility::Collapsed); });
+    children(Parent::Of(holder), ctx.Toolbar());
+}
+
+/// Toolbar items before a `Spacer`: at the leading end of the header,
+/// after its way back. Buttons there go back or up, as the window's own
+/// back does: no background until pointed at.
+inline void LeadingToolbar(Parent const&, Ctx const& ctx, Build const& children) {
+    if (!ctx.page) return;
+    auto holder = ctx.page->AddTools(true);
+    if (auto framework = holder.try_as<xaml::FrameworkElement>()) Styles::Restyle(framework, Styles::SubtleXaml());
     Reactive::Run([holder, ctx] { holder.Visibility(ctx.Shown() ? xaml::Visibility::Visible : xaml::Visibility::Collapsed); });
     children(Parent::Of(holder), ctx.Toolbar());
 }
@@ -1866,18 +2431,46 @@ inline winrt::hstring ShortcutText(char const* keys) {
     return Wide(text);
 }
 
+/// How a menu's button looks: its icon alone, and its height.
+struct MenuLook {
+    bool iconOnly = false;
+    std::optional<ControlShape> shape;
+};
+
 /// A menu button. Each item is registered on its own, so external entries
-/// reach the items while the menu is closed.
-inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& label, char const* icon, std::vector<std::optional<MenuItemDef>> items) {
-    controls::DropDownButton button;
+/// reach the items while the menu is closed. With `iconOnly` it is an icon
+/// button without a background until pointed at, as an app bar button.
+inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& label, char const* icon, MenuLook look, std::vector<std::optional<MenuItemDef>> items) {
+    controls::Button button{nullptr};
     auto text = Bound(ctx, label);
-    controls::StackPanel content;
-    content.Orientation(controls::Orientation::Horizontal);
-    content.Spacing(8);
-    if (icon) content.Children().Append(Icons::Icon(icon));
-    if (text) content.Children().Append(TextOf(text));
+    if (look.iconOnly && icon) {
+        // An app bar button: no background until pointed at.
+        controls::Button plain;
+        plain.Content(Icons::Icon(icon));
+        Styles::MakeSubtle(plain);
+        if (look.shape && look.shape->height.Given())
+            BindLen(ctx, look.shape->height, nullptr, [plain](double d) {
+                double size = (std::max)(0.0, d);
+                plain.Width(size);
+                plain.Height(size);
+                plain.MinWidth(0);
+                plain.MinHeight(0);
+                plain.Padding(xaml::Thickness{0, 0, 0, 0});
+            });
+        if (text) Reactive::Run([plain, text] { controls::ToolTipService::SetToolTip(plain, winrt::box_value(text())); });
+        button = plain;
+    } else {
+        controls::DropDownButton drop;
+        controls::StackPanel content;
+        content.Orientation(controls::Orientation::Horizontal);
+        content.Spacing(8);
+        if (icon) content.Children().Append(Icons::Icon(icon));
+        if (text) content.Children().Append(TextOf(text));
+        drop.Content(content);
+        ShapeControl(ctx, drop, look.shape);
+        button = drop;
+    }
     BindName(button, text);
-    button.Content(content);
     controls::MenuFlyout flyout;
     for (auto const& item : items) {
         if (!item) {

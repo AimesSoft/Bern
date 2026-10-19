@@ -36,6 +36,13 @@ fun BernSvg(source: String, label: String?, width: Dp, height: Dp, fit: String =
     val currentState by rememberUpdatedState(state)
     val view = remember(source) {
         WebView(context).apply {
+            // AndroidView's default WRAP_CONTENT makes the page's viewport
+            // as tall as its content, so `height: 100%` is 0; the view is
+            // as large as its modifier says.
+            layoutParams = android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            )
             setBackgroundColor(Color.TRANSPARENT)
             settings.javaScriptEnabled = true
             settings.allowFileAccess = false

@@ -28,7 +28,7 @@ use bern_target_api::{
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
     dist_dir, files_below, icon, package_architecture,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use js::Generator;
 
@@ -62,6 +62,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::RAILS,
     bern_target_api::feature::POPOVER_BUTTON,
     bern_target_api::feature::SIZE_CLASSES,
+    bern_target_api::feature::TEXT_FORMATS,
     bern_target_api::feature::TEXT_WEIGHTS,
     bern_target_api::feature::IMAGE_CORNERS,
     bern_target_api::feature::SIDEBAR_WIDTH,
@@ -73,6 +74,13 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::SIDEBAR_HEADER,
     bern_target_api::feature::UNTITLED_DETAIL,
     bern_target_api::feature::IDLE_CONTROL,
+    bern_target_api::feature::FILL_BUTTONS,
+    bern_target_api::feature::TAB_ACCESSORY,
+    bern_target_api::feature::GRID_CELLS,
+    bern_target_api::feature::PAGE_SEARCH,
+    bern_target_api::feature::FORM_LAYOUT,
+    bern_target_api::feature::MODAL_COVER,
+    bern_target_api::feature::WINDOW_SHORT,
     bern_target_api::feature::TEXT_LINES,
     bern_target_api::feature::CONTROLLED_VALUES,
     bern_target_api::feature::SEARCH_PALETTE,
@@ -110,18 +118,35 @@ fn build_version() -> String {
     format!("{:x}", nanos as u64)
 }
 
-/// The page icons: the Bern logo as SVG with a PNG beside it and a square
-/// one for home screens, or the declared PNG for all three uses. Returns
-/// the files and their `<link>` elements.
+/// The page icons, and their `<link>` elements: the Bern logo as SVG with a
+/// PNG beside it and a square one for home screens; or the declared PNG for
+/// all three uses; or a declared SVG; or a declared folder of page icons.
 fn page_icons(
     app: &Application,
     context: &BuildContext,
     version: &str,
 ) -> Result<(Vec<GeneratedFile>, String), Vec<Diagnostic>> {
     let failed = |message: String| vec![Diagnostic::error(message)];
-    let round = icon::images(app, &context.project_dir, icon::Shape::AsDrawn).map_err(failed)?;
-    let largest = icon::largest(&round);
     let version = html_escape(version);
+    if let icon::Source::Native(path) = icon::source(app, "browser", &context.project_dir) {
+        if path.is_dir() {
+            return folder_icons(&path, &version).map_err(failed);
+        }
+        let svg = std::fs::read(&path)
+            .map_err(|error| failed(format!("cannot read the icon {}: {error}", path.display())))?;
+        return Ok((
+            vec![GeneratedFile {
+                path: "favicon.svg".into(),
+                contents: svg,
+            }],
+            format!(
+                "<link rel=\"icon\" type=\"image/svg+xml\" href=\"favicon.svg?v={version}\">\n"
+            ),
+        ));
+    }
+    let round =
+        icon::images(app, "browser", &context.project_dir, icon::Shape::AsDrawn).map_err(failed)?;
+    let largest = icon::largest(&round);
     let png = format!(
         "<link rel=\"icon\" type=\"image/png\" sizes=\"{size}x{size}\" href=\"icon.png?v={version}\">\n",
         size = largest.size
@@ -130,7 +155,7 @@ fn page_icons(
         path: "icon.png".into(),
         contents: largest.png.to_vec(),
     }];
-    if !icon::is_default(app) {
+    if !icon::is_default(app, "browser") {
         return Ok((
             files,
             format!("{png}<link rel=\"apple-touch-icon\" href=\"icon.png?v={version}\">\n"),
@@ -152,6 +177,74 @@ fn page_icons(
             "<link rel=\"icon\" type=\"image/svg+xml\" href=\"favicon.svg?v={version}\">\n{png}<link rel=\"apple-touch-icon\" href=\"apple-touch-icon.png?v={version}\">\n"
         ),
     ))
+}
+
+/// A declared folder of page icons, copied to `icons/` and linked by kind:
+/// `favicon.ico` for browsers without SVG icons, then SVG icons, PNG icons
+/// only when there is neither (the maskable ones belong to the manifest),
+/// `apple-touch-icon*.png` for home screens, and the web app manifest.
+fn folder_icons(dir: &Path, version: &str) -> Result<(Vec<GeneratedFile>, String), String> {
+    let names = icon::page_icons(dir)
+        .map_err(|message| format!("the browser icon {} {message}", dir.display()))?;
+    let mut files = Vec::new();
+    let mut found: Vec<(String, String, Vec<u8>)> = Vec::new();
+    for name in names {
+        let shown = name.to_string_lossy().into_owned();
+        let contents = std::fs::read(dir.join(&name))
+            .map_err(|error| format!("cannot read {}: {error}", dir.join(&name).display()))?;
+        let extension = name
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        found.push((shown, extension, contents));
+    }
+    let href = |name: &str| format!("icons/{name}?v={version}");
+    let vector = found
+        .iter()
+        .any(|(_, extension, _)| extension == "svg" || extension == "ico");
+    let mut ico = String::new();
+    let mut svg = String::new();
+    let mut png = String::new();
+    let mut touch = String::new();
+    let mut manifest = String::new();
+    for (name, extension, contents) in &found {
+        let lower = name.to_ascii_lowercase();
+        match extension.as_str() {
+            "ico" => ico.push_str(&format!(
+                "<link rel=\"icon\" href=\"{}\" sizes=\"32x32\">\n",
+                href(name)
+            )),
+            "svg" => svg.push_str(&format!(
+                "<link rel=\"icon\" type=\"image/svg+xml\" href=\"{}\">\n",
+                href(name)
+            )),
+            "png" if lower.starts_with("apple-touch-icon") => touch.push_str(&format!(
+                "<link rel=\"apple-touch-icon\" href=\"{}\">\n",
+                href(name)
+            )),
+            "png" if !vector && !lower.contains("maskable") => {
+                let sizes = icon::png_size(contents)
+                    .map(|(width, height)| format!(" sizes=\"{width}x{height}\""))
+                    .unwrap_or_default();
+                png.push_str(&format!(
+                    "<link rel=\"icon\" type=\"image/png\"{sizes} href=\"{}\">\n",
+                    href(name)
+                ));
+            }
+            "webmanifest" | "json" => manifest.push_str(&format!(
+                "<link rel=\"manifest\" href=\"{}\">\n",
+                href(name)
+            )),
+            _ => {}
+        }
+    }
+    for (name, _, contents) in found {
+        files.push(GeneratedFile {
+            path: PathBuf::from("icons").join(name),
+            contents,
+        });
+    }
+    Ok((files, format!("{ico}{svg}{png}{touch}{manifest}")))
 }
 
 fn index_html(app: &Application, version: &str, icons: &str) -> String {
@@ -249,6 +342,8 @@ impl Target for WebBrowser {
                 "animate",
                 "scroll_scale",
                 "scroll_opacity",
+                "scroll_origin_x",
+                "scroll_origin_y",
                 "nudge",
                 "stagger",
                 "appear_delay",
@@ -658,5 +753,50 @@ impl Target for WebBrowser {
             run: None,
             notes: Vec::new(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_of_page_icons_is_linked_by_kind() {
+        let dir = std::env::temp_dir().join(format!("bern-page-icons-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend_from_slice(&512u32.to_be_bytes());
+        png.extend_from_slice(&512u32.to_be_bytes());
+        for (name, contents) in [
+            ("favicon.ico", vec![0, 0, 1, 0]),
+            ("favicon.svg", b"<svg/>".to_vec()),
+            ("apple-touch-icon.png", png.clone()),
+            ("icon-512.png", png.clone()),
+            ("icon-maskable-512.png", png.clone()),
+            ("site.webmanifest", b"{}".to_vec()),
+        ] {
+            std::fs::write(dir.join(name), contents).unwrap();
+        }
+        let (files, links) = folder_icons(&dir, "7").unwrap();
+        assert_eq!(files.len(), 6);
+        assert!(files.iter().all(|file| file.path.starts_with("icons")));
+        assert_eq!(
+            links,
+            "<link rel=\"icon\" href=\"icons/favicon.ico?v=7\" sizes=\"32x32\">\n\
+             <link rel=\"icon\" type=\"image/svg+xml\" href=\"icons/favicon.svg?v=7\">\n\
+             <link rel=\"apple-touch-icon\" href=\"icons/apple-touch-icon.png?v=7\">\n\
+             <link rel=\"manifest\" href=\"icons/site.webmanifest?v=7\">\n"
+        );
+        // Without an SVG or an .ico, the PNG icons are the page icons; the
+        // maskable one stays the manifest's.
+        std::fs::remove_file(dir.join("favicon.ico")).unwrap();
+        std::fs::remove_file(dir.join("favicon.svg")).unwrap();
+        let (_, links) = folder_icons(&dir, "7").unwrap();
+        assert!(links.contains(
+            "<link rel=\"icon\" type=\"image/png\" sizes=\"512x512\" href=\"icons/icon-512.png?v=7\">"
+        ));
+        assert!(!links.contains("maskable"), "{links}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

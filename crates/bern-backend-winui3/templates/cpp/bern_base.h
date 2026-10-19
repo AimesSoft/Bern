@@ -177,6 +177,8 @@ struct BType {
 struct VariantDef {
     std::string name;
     std::vector<BType> fields;
+    /// The fields its label shows: each placeholder name and field index.
+    std::vector<std::pair<std::string, uint32_t>> shown;
 };
 
 /// Enum and record definitions by name.
@@ -473,6 +475,9 @@ struct Catalog {
     std::optional<std::array<uint8_t, 3>> brandSeed;
     /// Extensions of each file kind `files:` names, such as `video`.
     std::vector<std::pair<std::string, std::vector<std::string>>> fileKinds;
+    /// `text { … }` of `style!`: a text style, its weight and its size in
+    /// points when the design gives one.
+    std::vector<std::tuple<std::string, std::string, std::optional<double>>> textStyles;
 };
 
 /// The glyph of a Bern icon name (SF Symbols naming) in Segoe Fluent Icons
@@ -498,12 +503,32 @@ std::vector<std::string> const& Supported();
 bool SetLanguage(std::string const& tag);
 /// The translation of `key` in the current language.
 winrt::hstring Tr(std::string_view key);
-/// A translation with `{name}` placeholders filled from `args`.
-winrt::hstring Fmt(std::string_view key, std::initializer_list<std::pair<std::string_view, winrt::hstring>> args);
+/// A value a translated text shows: text, a number and the way Bern
+/// writes it, or a calendar date.
+struct Arg {
+    enum class Kind : uint8_t { Text, Number, Date };
+    Kind kind = Kind::Text;
+    winrt::hstring text;
+    double number = 0;
+    int64_t year = 0, month = 0, day = 0;
+
+    Arg() = default;
+    Arg(winrt::hstring value) : text(std::move(value)) {}
+    Arg(wchar_t const* value) : text(value) {}
+};
+/// An argument from a runtime value: numbers keep their value for plural
+/// branches, everything else shows as Bern formats it.
+Arg ArgOf(Value const& value);
+/// A `CalendarDate` record (year, month, day) as a date argument.
+Arg DateArg(Value const& value);
+/// A translation in Bern's format filled from `args`: plain values, plural
+/// branches by the number's category, dates and durations by their
+/// patterns (`bern_protocol::format`).
+winrt::hstring Fmt(std::string_view key, std::initializer_list<std::pair<std::string_view, Arg>> args);
 /// A language's own name for itself, such as “简体中文” or “English”.
 winrt::hstring Autonym(std::string const& tag);
 /// Text of a value for runtime data: numbers and texts as Bern formats
-/// them, enums by their label.
+/// them, enums by their label, with the fields it shows.
 winrt::hstring Display(Value const& value, char const* enumName);
 /// The localized label of an enum variant.
 winrt::hstring Label(char const* enumName, uint32_t variant);

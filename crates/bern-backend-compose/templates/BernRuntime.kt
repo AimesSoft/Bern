@@ -18,6 +18,7 @@ import androidx.annotation.Keep
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -234,9 +235,102 @@ object BernLanguage {
     val locale: Locale get() = Locale.forLanguageTag(current)
 
     /// A language's own name for itself, such as “简体中文” or “English”.
+    /// Chinese is named by its script, as the other targets name it.
     fun autonym(language: String): String {
+        when (language) {
+            "zh-Hans" -> return "简体中文"
+            "zh-Hant" -> return "繁體中文"
+        }
         val locale = Locale.forLanguageTag(language)
         return locale.getDisplayName(locale).replaceFirstChar { it.titlecase(locale) }
+    }
+}
+
+/// A value a translated text shows.
+sealed class BernArg {
+    data class Text(val text: String) : BernArg()
+
+    /// A number, and the way Bern writes it.
+    data class Number(val value: Double, val text: String) : BernArg()
+
+    data class Date(val year: Long, val month: Long, val day: Long) : BernArg()
+}
+
+/// One part of a parsed text.
+sealed class BernPiece {
+    data class Text(val text: String) : BernPiece()
+    data class Value(val name: String) : BernPiece()
+
+    /// `#` in a plural branch: the number.
+    data object Hash : BernPiece()
+    data class Plural(val name: String, val branches: List<Pair<String, List<BernPiece>>>) : BernPiece()
+    data class Date(val name: String, val pattern: String) : BernPiece()
+    data class Duration(val name: String, val pattern: String) : BernPiece()
+}
+
+/// Parses a translated text. The compiler checked the format, so the
+/// parser trusts its shape.
+class BernTextParser(private val chars: String) {
+    private var at = 0
+
+    private fun word(stops: String): String {
+        val start = at
+        while (at < chars.length && chars[at] !in stops) at += 1
+        return chars.substring(start, at).trim()
+    }
+
+    /// Pieces up to the end, or up to the `}` that closes a plural branch.
+    fun message(branch: Boolean): List<BernPiece> {
+        val pieces = mutableListOf<BernPiece>()
+        fun push(c: Char) {
+            val last = pieces.lastOrNull()
+            if (last is BernPiece.Text) {
+                pieces[pieces.size - 1] = BernPiece.Text(last.text + c)
+            } else {
+                pieces.add(BernPiece.Text(c.toString()))
+            }
+        }
+        while (at < chars.length) {
+            val c = chars[at]
+            val next = chars.getOrNull(at + 1)
+            when {
+                c == '{' && next == '{' -> { push('{'); at += 2 }
+                c == '}' && branch -> return pieces
+                c == '}' && next == '}' -> { push('}'); at += 2 }
+                c == '#' && branch -> { pieces.add(BernPiece.Hash); at += 1 }
+                c == '{' -> { at += 1; pieces.add(placeholder()) }
+                else -> { push(c); at += 1 }
+            }
+        }
+        return pieces
+    }
+
+    private fun placeholder(): BernPiece {
+        val name = word(",{}")
+        if (at >= chars.length || chars[at] != ',') {
+            at += 1
+            return BernPiece.Value(name)
+        }
+        at += 1
+        val kind = word(",{}")
+        at += 1
+        if (kind != "plural") {
+            val pattern = word("{}")
+            at += 1
+            return if (kind == "date") BernPiece.Date(name, pattern) else BernPiece.Duration(name, pattern)
+        }
+        val branches = mutableListOf<Pair<String, List<BernPiece>>>()
+        while (true) {
+            while (at < chars.length && chars[at].isWhitespace()) at += 1
+            if (at >= chars.length || chars[at] == '}') {
+                at += 1
+                return BernPiece.Plural(name, branches)
+            }
+            val selector = word("{}")
+            at += 1
+            branches.add(selector to message(branch = true))
+            at += 1
+        }
     }
 }
 
@@ -257,8 +351,146 @@ object BernText {
 
     fun string(key: String): String = tables[BernLanguage.current]?.get(key) ?: key
 
+    /// A framework text with positional `%s` arguments.
     fun format(key: String, arguments: List<String>): String =
         String.format(BernLanguage.locale, string(key), *arguments.toTypedArray())
+
+    /// A translated text with its arguments, in the current language:
+    /// text and numbers as they are, plural branches by the number's
+    /// category, dates and durations by their patterns. The format is the
+    /// one the compiler checks (`bern_protocol::format`).
+    fun format(key: String, arguments: Map<String, BernArg>): String {
+        val pieces = BernTextParser(string(key)).message(branch = false)
+        return write(pieces, BernLanguage.current, arguments, hash = null)
+    }
+
+    fun arg(value: String): BernArg = BernArg.Text(value)
+
+    fun arg(value: Long): BernArg = BernArg.Number(value.toDouble(), value.toString())
+
+    fun arg(value: Int): BernArg = BernArg.Number(value.toDouble(), value.toString())
+
+    fun arg(value: Double): BernArg = BernArg.Number(value, text(value))
+
+    fun arg(value: Boolean): BernArg = BernArg.Text(value.toString())
+
+    fun arg(value: BernLabeled): BernArg = BernArg.Text(value.bernLabel)
+
+    private fun write(
+        pieces: List<BernPiece>, language: String, arguments: Map<String, BernArg>, hash: String?,
+    ): String {
+        val out = StringBuilder()
+        for (piece in pieces) {
+            when (piece) {
+                is BernPiece.Text -> out.append(piece.text)
+                BernPiece.Hash -> out.append(hash ?: "")
+                is BernPiece.Value -> when (val arg = arguments[piece.name]) {
+                    is BernArg.Text -> out.append(arg.text)
+                    is BernArg.Number -> out.append(arg.text)
+                    is BernArg.Date -> out.append("${arg.year}-${pad2(arg.month)}-${pad2(arg.day)}")
+                    null -> {}
+                }
+                is BernPiece.Plural -> {
+                    val (value, shown) = number(arguments[piece.name])
+                    val exact = "=" + text(value)
+                    val category = pluralCategory(language, value)
+                    val chosen = piece.branches.firstOrNull { it.first == exact }
+                        ?: piece.branches.firstOrNull { it.first == category }
+                        ?: piece.branches.firstOrNull { it.first == "other" }
+                    if (chosen != null) out.append(write(chosen.second, language, arguments, shown))
+                }
+                is BernPiece.Date -> (arguments[piece.name] as? BernArg.Date)?.let {
+                    out.append(formatDate(piece.pattern, it.year, it.month, it.day))
+                }
+                is BernPiece.Duration ->
+                    out.append(formatDuration(piece.pattern, number(arguments[piece.name]).first))
+            }
+        }
+        return out.toString()
+    }
+
+    private fun number(arg: BernArg?): Pair<Double, String> = when (arg) {
+        is BernArg.Number -> arg.value to arg.text
+        is BernArg.Text -> (arg.text.toDoubleOrNull() ?: 0.0) to arg.text
+        else -> 0.0 to ""
+    }
+
+    private fun pluralCategory(language: String, number: Double): String {
+        val base = language.split('-', '_').first()
+        val oneForm = base in listOf("zh", "ja", "ko", "vi", "th", "id", "ms")
+        return if (!oneForm && number == 1.0) "one" else "other"
+    }
+
+    private fun pad2(value: Long): String = if (value in 0..9) "0$value" else value.toString()
+
+    /// Runs of one pattern letter, and the characters between them.
+    private fun runs(pattern: String): List<Pair<Char, Int>> {
+        val out = mutableListOf<Pair<Char, Int>>()
+        for (c in pattern) {
+            val last = out.lastOrNull()
+            if (last != null && last.first == c && (c in 'a'..'z' || c in 'A'..'Z')) {
+                out[out.size - 1] = c to last.second + 1
+            } else {
+                out.add(c to 1)
+            }
+        }
+        return out
+    }
+
+    /// The day of the week, 0 for Monday.
+    private fun weekday(year: Long, month: Long, day: Long): Long {
+        val offsets = longArrayOf(0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4)
+        val m = month.coerceIn(1, 12)
+        val y = if (m < 3) year - 1 else year
+        val sundayFirst = Math.floorMod(
+            y + Math.floorDiv(y, 4L) - Math.floorDiv(y, 100L) + Math.floorDiv(y, 400L) + offsets[(m - 1).toInt()] + day,
+            7L,
+        )
+        return (sundayFirst + 6) % 7
+    }
+
+    private fun formatDate(pattern: String, year: Long, month: Long, day: Long): String {
+        val out = StringBuilder()
+        for ((c, count) in runs(pattern)) {
+            when {
+                c == 'y' && count == 2 -> out.append(pad2(Math.floorMod(year, 100L)))
+                c == 'y' -> out.append(year)
+                c == 'M' && count == 1 -> out.append(month)
+                c == 'M' && count == 2 -> out.append(pad2(month))
+                c == 'M' && count == 3 -> out.append(string("bern.date.month.$month"))
+                c == 'M' -> out.append(string("bern.date.month_long.$month"))
+                c == 'd' && count == 1 -> out.append(day)
+                c == 'd' -> out.append(pad2(day))
+                c == 'E' && count == 3 -> out.append(string("bern.date.weekday.${weekday(year, month, day) + 1}"))
+                c == 'E' -> out.append(string("bern.date.weekday_long.${weekday(year, month, day) + 1}"))
+                else -> repeat(count) { out.append(c) }
+            }
+        }
+        return out.toString()
+    }
+
+    /// Seconds as `h`, `m` and `s` fields; the largest field written takes
+    /// what the larger ones would hold.
+    private fun formatDuration(pattern: String, seconds: Double): String {
+        val total = if (seconds.isFinite()) Math.floor(maxOf(0.0, seconds)).toLong() else 0L
+        val hours = 'h' in pattern
+        val minutes = 'm' in pattern
+        val out = StringBuilder()
+        for ((c, count) in runs(pattern)) {
+            val value = when (c) {
+                'h' -> total / 3600
+                'm' -> if (hours) total % 3600 / 60 else total / 60
+                's' -> if (hours || minutes) total % 60 else total
+                else -> null
+            }
+            if (value != null) {
+                out.append(if (count == 2) pad2(value) else value.toString())
+            } else {
+                repeat(count) { out.append(c) }
+            }
+        }
+        return out.toString()
+    }
 
     fun text(value: String): String = value
 
@@ -286,6 +518,8 @@ abstract class BernSessionState(val index: Int) {
 class BernChromeEntry {
     var title by mutableStateOf<String?>(null)
     var back by mutableStateOf<(() -> Unit)?>(null)
+    /// Items at the leading end, after the way back.
+    var leading by mutableStateOf<(@Composable RowScope.() -> Unit)?>(null)
     var actions by mutableStateOf<(@Composable RowScope.() -> Unit)?>(null)
 }
 
@@ -315,6 +549,12 @@ class BernWindowContext(
     /// from the screen or the declared size.
     var measuredWidth by mutableStateOf<Double?>(null)
     internal var estimatedWidth = 0.0
+    /// The window's height in dp once laid out; before that, the screen's.
+    var measuredHeight by mutableStateOf<Double?>(null)
+    internal var estimatedHeight = 0.0
+    /// `window.short`: shorter than the compact breakpoint, as a phone on
+    /// its side.
+    val short: Boolean get() = (measuredHeight ?: estimatedHeight) < BernHost.layouts.compact
     /// The size of the window's width by the breakpoints of `[layouts]`:
     /// `compact`, `medium`, `expanded` or `large`.
     val size: String
@@ -433,6 +673,7 @@ fun BernControl(
 fun BernChrome(
     title: String? = null,
     back: (() -> Unit)? = null,
+    leading: (@Composable RowScope.() -> Unit)? = null,
     actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val window = LocalBernWindow.current
@@ -440,6 +681,7 @@ fun BernChrome(
     SideEffect {
         entry.title = title
         entry.back = back
+        entry.leading = leading
         entry.actions = actions
     }
     DisposableEffect(entry) {
@@ -1299,15 +1541,19 @@ fun BernWindowRoot(
     context: BernWindowContext,
     idleAfter: Double? = null,
     immersive: Boolean = false,
+    idleEnabled: Boolean = true,
+    landscape: Boolean? = null,
     content: @Composable () -> Unit,
 ) {
     val top = BernHost.sheets.lastOrNull() ?: BernHost.primary
     val onTop = top == context.kindID
-    // `window.idle`: no touch, pointer or key input for `idleAfter` seconds.
+    // `window.idle`: no touch, pointer or key input for `idleAfter` seconds,
+    // while `idleEnabled` holds; switched off, the window is not idle.
     var input by remember { mutableLongStateOf(0L) }
     if (idleAfter != null) {
-        LaunchedEffect(input, BernShortcuts.keys) {
+        LaunchedEffect(input, BernShortcuts.keys, idleEnabled) {
             context.idle = false
+            if (!idleEnabled) return@LaunchedEffect
             delay((idleAfter * 1000).toLong())
             context.idle = true
         }
@@ -1330,6 +1576,19 @@ fun BernWindowRoot(
         }
         onDispose {}
     }
+    // `landscape`: the phone turns the window to landscape while it holds,
+    // and leaves the orientation to the system again after.
+    if (landscape != null) {
+        val turned = landscape && onTop
+        DisposableEffect(turned, activity) {
+            activity?.requestedOrientation = if (turned) {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+            onDispose {}
+        }
+    }
     DisposableEffect(context) {
         BernHost.attach(context)
         onDispose { BernHost.detach(context) }
@@ -1344,6 +1603,7 @@ fun BernWindowRoot(
     val density = LocalDensity.current
     val dialogWidth = BernHost.kinds.firstOrNull { it.id == context.kindID && it.isDialog }?.width
     context.estimatedWidth = dialogWidth ?: LocalConfiguration.current.screenWidthDp.toDouble()
+    context.estimatedHeight = LocalConfiguration.current.screenHeightDp.toDouble()
     CompositionLocalProvider(LocalBernWindow provides context, LocalBernSettled provides settled) {
         val chrome = context.chrome
         val title = chrome.lastOrNull { it.title != null }?.title ?: context.title
@@ -1355,6 +1615,7 @@ fun BernWindowRoot(
             // activity, which sees them whether or not a control has focus.
             modifier = Modifier.onSizeChanged { size ->
                 context.measuredWidth = with(density) { size.width.toDp().value.toDouble() }
+                context.measuredHeight = with(density) { size.height.toDp().value.toDouble() }
             }.then(if (idleAfter == null) {
                 Modifier
             } else {
@@ -1371,13 +1632,18 @@ fun BernWindowRoot(
                 if (!hidden) TopAppBar(
                     title = { Text(title, maxLines = 1) },
                     navigationIcon = {
-                        when {
-                            back != null -> IconButton(onClick = back) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        // The way back, then the toolbar items at the
+                        // leading end.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            when {
+                                back != null -> IconButton(onClick = back) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                                }
+                                sheet -> IconButton(onClick = { BernHost.close(context.kindID) }) {
+                                    Icon(Icons.Filled.Close, contentDescription = BernText.string("bern.window.done"))
+                                }
                             }
-                            sheet -> IconButton(onClick = { BernHost.close(context.kindID) }) {
-                                Icon(Icons.Filled.Close, contentDescription = BernText.string("bern.window.done"))
-                            }
+                            chrome.forEach { entry -> entry.leading?.invoke(this) }
                         }
                     },
                     actions = { chrome.forEach { entry -> entry.actions?.invoke(this) } },

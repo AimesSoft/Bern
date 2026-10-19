@@ -69,24 +69,6 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
-        "bern.switch.on",
-        &[
-            ("zh-Hans", "开"),
-            ("zh-Hant", "開"),
-            ("en", "On"),
-            ("ja", "オン"),
-        ],
-    ),
-    (
-        "bern.switch.off",
-        &[
-            ("zh-Hans", "关"),
-            ("zh-Hant", "關"),
-            ("en", "Off"),
-            ("ja", "オフ"),
-        ],
-    ),
-    (
         "bern.media.video",
         &[
             ("zh-Hans", "视频"),
@@ -281,11 +263,18 @@ pub fn tables(app: &Application) -> Vec<(String, Vec<(String, String)>)> {
                 .texts
                 .iter()
                 .map(|text| {
+                    // A text with arguments keeps Bern's format, which the
+                    // runtime writes out; one without is shown as it is.
                     let value = text
                         .get(language)
                         .or_else(|| text.get(&app.languages.default))
                         .unwrap_or("");
-                    (text.key.clone(), value.to_string())
+                    let value = if text.params.is_empty() {
+                        bern_target_api::texts::positional(value, &[], |_| String::new())
+                    } else {
+                        value.to_string()
+                    };
+                    (text.key.clone(), value)
                 })
                 .collect();
             let name = app
@@ -302,6 +291,19 @@ pub fn tables(app: &Application) -> Vec<(String, Vec<(String, String)>)> {
                     .map(|(_, value)| *value)
                     .unwrap_or("");
                 table.push(((*key).into(), value.into()));
+            }
+            for (key, translations) in bern_protocol::format::date_names() {
+                let value = translations
+                    .iter()
+                    .find(|(candidate, _)| candidate == language)
+                    .or_else(|| {
+                        translations
+                            .iter()
+                            .find(|(candidate, _)| *candidate == "en")
+                    })
+                    .map(|(_, value)| value.clone())
+                    .unwrap_or_default();
+                table.push((key, value));
             }
             (language.clone(), table)
         })

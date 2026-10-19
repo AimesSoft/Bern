@@ -496,6 +496,19 @@ extension EnvironmentValues {
     }
 }
 
+/// Controls on a bar the system draws, such as a `TabAccessory`: the bar
+/// is the surface, so icon buttons are glyphs on it, without glass of
+/// their own.
+private struct BernOnBarKey: EnvironmentKey {
+    static let defaultValue = false
+}
+extension EnvironmentValues {
+    var bernOnBar: Bool {
+        get { self[BernOnBarKey.self] }
+        set { self[BernOnBarKey.self] = newValue }
+    }
+}
+
 private struct BernGroupedButtonStyle: ButtonStyle {
     let height: CGFloat
     func makeBody(configuration: Configuration) -> some View {
@@ -509,24 +522,40 @@ private struct BernGroupedButtonStyle: ButtonStyle {
 private struct BernSystemButtonLook: ViewModifier {
     let look: BernButtonLook
     @Environment(\.bernControlGroupHeight) private var groupHeight
+    @Environment(\.bernOnBar) private var onBar
     @ViewBuilder func body(content: Content) -> some View {
         if let groupHeight {
             content.buttonStyle(BernGroupedButtonStyle(height: groupHeight)).foregroundStyle(.primary)
+        } else if onBar && (look == .icon || look == .flat) {
+            content.buttonStyle(BernGroupedButtonStyle(height: 0)).foregroundStyle(.primary)
         } else if #available(macOS 26.0, iOS 26.0, *) {
             switch look {
-            case .secondary: content.buttonStyle(.glass)
+            case .secondary: content.buttonStyle(.glass).bernPrimaryLabel()
             case .prominent: content.buttonStyle(.glassProminent).bernAccentTint()
-            case .icon: content.buttonStyle(.glass).buttonBorderShape(.circle)
+            case .icon: content.buttonStyle(.glass).buttonBorderShape(.circle).bernPrimaryLabel()
             case .flat: content.buttonStyle(.borderless).foregroundStyle(.secondary)
             }
         } else {
             switch look {
-            case .secondary: content.buttonStyle(.bordered)
+            case .secondary: content.buttonStyle(.bordered).bernPrimaryLabel()
             case .prominent: content.buttonStyle(.borderedProminent).bernAccentTint()
-            case .icon: content.buttonStyle(.bordered).buttonBorderShape(.circle)
+            case .icon: content.buttonStyle(.bordered).buttonBorderShape(.circle).bernPrimaryLabel()
             case .flat: content.buttonStyle(.borderless).foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+extension View {
+    /// iOS colors a plain button's label with the surrounding tint, the
+    /// application's accent under a tab bar; the design keeps the accent
+    /// to the main button (8.1), so it is the primary color, as on macOS.
+    @ViewBuilder func bernPrimaryLabel() -> some View {
+        #if os(iOS)
+        tint(.primary)
+        #else
+        self
+        #endif
     }
 }
 
@@ -717,10 +746,23 @@ struct BernSplitButton<Content: View>: View {
         }
     }
 
+    /// The design's split button (6.3): the symbol in a 16-point box, 6
+    /// before the words.
+    @ViewBuilder private var capsuleLabel: some View {
+        if let systemImage {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage).frame(width: 16, height: 16).accessibilityHidden(true)
+                Text(verbatim: label)
+            }
+        } else {
+            Text(verbatim: label)
+        }
+    }
+
     @ViewBuilder private var buttons: some View {
         if capsule {
             HStack(spacing: 0) {
-                Toggle(isOn: $isOn) { toggleLabel }
+                Toggle(isOn: $isOn) { capsuleLabel }
                     .toggleStyle(BernSplitToggleStyle(height: height))
                 Rectangle().fill(.primary.opacity(0.18)).frame(width: 0.5, height: height - 14)
                 Button { showing = true } label: {
@@ -773,7 +815,8 @@ private struct BernSplitToggleStyle: ToggleStyle {
     let height: CGFloat
     func makeBody(configuration: Configuration) -> some View {
         Button { configuration.isOn.toggle() } label: {
-            configuration.label.padding(.horizontal, 14).frame(height: height).contentShape(Rectangle())
+            // 14 from the capsule's end, 10 before the divider.
+            configuration.label.padding(.leading, 14).padding(.trailing, 10).frame(height: height).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(configuration.isOn ? [.isSelected] : [])
@@ -1028,6 +1071,20 @@ extension View {
     /// another, it grows from where the other was, on `motion`.
     func bernHero(_ id: String, motion: BernMotion = BernMotion(period: 0.48, damping: 0.86)) -> some View {
         modifier(BernHero(id: id, motion: motion))
+    }
+
+    /// Lines of `height` points for text set at `size`: the extra over the
+    /// font's own line goes between the lines and, halved, above the first
+    /// and below the last, as CSS's line-height.
+    func bernLineHeight(_ height: CGFloat, size: CGFloat) -> some View {
+        #if os(macOS)
+        let font = NSFont.systemFont(ofSize: size)
+        let natural = font.ascender - font.descender + font.leading
+        #else
+        let natural = UIFont.systemFont(ofSize: size).lineHeight
+        #endif
+        let extra = max(0, height - natural)
+        return lineSpacing(extra).padding(.vertical, extra / 2)
     }
 
     /// A form's or scroll view's entrance: see `BernScrollEntrance`.
@@ -1424,8 +1481,9 @@ extension View {
     /// Follows scrolling: `scale` at the center of the scroll view around
     /// it, 1 at its edges; `opacity` at its edges, 1 at the center. The
     /// platform computes every frame; with reduced motion nothing changes.
-    func bernScrollEffect(scale: Double, opacity: Double) -> some View {
-        modifier(BernScrollEffect(scale: scale, opacity: opacity))
+    /// `anchor` is the point of the view the scale grows from.
+    func bernScrollEffect(scale: Double, opacity: Double, anchor: UnitPoint = .center) -> some View {
+        modifier(BernScrollEffect(scale: scale, opacity: opacity, anchor: anchor))
     }
 
     /// Scrolling comes to rest with an item at the start or the center.
@@ -1481,17 +1539,18 @@ extension View {
 private struct BernScrollEffect: ViewModifier {
     let scale: Double
     let opacity: Double
+    let anchor: UnitPoint
     @BernReducedMotion private var reduce
 
     func body(content: Content) -> some View {
         if reduce || bernForcedReduceMotion {
             content
         } else {
-            let (scale, opacity) = (scale, opacity)
+            let (scale, opacity, anchor) = (scale, opacity, anchor)
             content.scrollTransition(.interactive.threshold(.centered)) { effect, phase in
                 let near = 1 - min(abs(phase.value), 1)
                 return effect
-                    .scaleEffect(1 + (scale - 1) * near)
+                    .scaleEffect(1 + (scale - 1) * near, anchor: anchor)
                     .opacity(opacity + (1 - opacity) * near)
             }
         }
@@ -2283,18 +2342,24 @@ struct BernAdaptiveGrid<Content: View>: View {
     let gap: CGFloat
     let rowGap: CGFloat
     let motion: BernMotion?
+    /// With a ratio, every row is the column width ÷ the ratio + `cellExtra`
+    /// tall, whatever its items.
+    var cellRatio: Double? = nil
+    var cellExtra: Double = 0
     @ViewBuilder let content: Content
     @State private var width: CGFloat = 0
     @BernReducedMotion private var reduce
 
     var body: some View {
         let columns = max(1, Int((width + gap) / max(1, minimum + gap)))
+        let column = max(0, (width - gap * CGFloat(columns - 1)) / CGFloat(columns))
         LazyVGrid(
             columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: gap, alignment: .top), count: columns),
             alignment: .leading, spacing: rowGap
         ) {
             content
         }
+        .environment(\.bernGridCell, cellRatio.map { column / CGFloat($0) + CGFloat(cellExtra) })
         .frame(maxWidth: .infinity, alignment: .leading)
         .animation(reduce || bernForcedReduceMotion ? nil : motion?.animation,
                    value: [CGFloat(columns), gap, rowGap])
@@ -2309,6 +2374,37 @@ struct BernAdaptiveGrid<Content: View>: View {
             }
         }
     }
+}
+
+private struct BernGridCellKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+extension EnvironmentValues {
+    /// The height of a cell of the grid around, when its rows are fixed.
+    var bernGridCell: CGFloat? {
+        get { self[BernGridCellKey.self] }
+        set { self[BernGridCellKey.self] = newValue }
+    }
+}
+
+private struct BernGridCell: ViewModifier {
+    @Environment(\.bernGridCell) private var height
+    func body(content: Content) -> some View {
+        if let height {
+            // The item keeps its own height, the cell its: taller content
+            // runs into the gap instead of being squeezed.
+            content.fixedSize(horizontal: false, vertical: true)
+                .frame(height: height, alignment: .top)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// An item of a grid whose rows are fixed: as tall as the cell, at its top.
+    func bernGridCell() -> some View { modifier(BernGridCell()) }
 }
 
 // MARK: - Rails
@@ -2330,6 +2426,8 @@ struct BernRail: Layout {
     /// Where a placed child's own extent meets its point: 0 its start, 0.5
     /// its center, 1 its end.
     let anchor: Double
+    /// How far the scale runs past each end of the rail.
+    var overhang: Double = 0
 
     /// A span is offered the thickness the rail is given; an item its own
     /// size.
@@ -2354,12 +2452,14 @@ struct BernRail: Layout {
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let length = vertical ? bounds.height : bounds.width
+        // The scale: the rail's length and the overhang past both ends.
+        let past = CGFloat(overhang)
+        let length = (vertical ? bounds.height : bounds.width) + 2 * past
         let thickness = vertical ? bounds.width : bounds.height
         let clamp = { (value: Double) in CGFloat(min(1, max(0, value))) }
         for subview in subviews {
             if let span = subview[BernRailSpan.self] {
-                let start = clamp(span.lowerBound) * length
+                let start = clamp(span.lowerBound) * length - past
                 let extent = (clamp(span.upperBound) - clamp(span.lowerBound)) * length
                 let offer = vertical ? CGSize(width: thickness, height: extent) : CGSize(width: extent, height: thickness)
                 let own = subview.sizeThatFits(ProposedViewSize(offer))
@@ -2373,7 +2473,7 @@ struct BernRail: Layout {
                 subview.place(at: origin, anchor: .topLeading, proposal: ProposedViewSize(size))
             } else {
                 let size = subview.sizeThatFits(.unspecified)
-                let point = clamp(subview[BernRailAt.self] ?? 0) * length
+                let point = clamp(subview[BernRailAt.self] ?? 0) * length - past
                 let along = point - CGFloat(anchor) * (vertical ? size.height : size.width)
                 let across = (thickness - (vertical ? size.width : size.height)) / 2
                 let origin = vertical
@@ -2487,7 +2587,6 @@ struct BernPopoverButton<Content: View>: View {
 }
 
 // MARK: - Window search palette
-#if os(macOS)
 /// One model per window, shared by the toolbar trigger and the overlay.
 @MainActor @Observable final class BernPaletteState {
     var presented = false
@@ -2507,6 +2606,11 @@ struct BernPopoverButton<Content: View>: View {
     var restoreFocus: (() -> Void)?
     var reduceMotion = false
     var closing = false
+    /// The results of a search field in the page, not an overlay: choosing
+    /// one runs it at once.
+    var inline = false
+
+    init(inline: Bool = false) { self.inline = inline }
 
     func open() {
         guard !presented else { return }
@@ -2525,6 +2629,10 @@ struct BernPopoverButton<Content: View>: View {
     }
 
     func close(then action: (() -> Void)? = nil) {
+        if inline {
+            action?()
+            return
+        }
         guard presented, !closing else { return }
         closing = true
         withAnimation(reduceMotion ? .easeOut(duration: 0.1) : .spring(response: 0.22, dampingFraction: 0.85)) {
@@ -2588,10 +2696,16 @@ struct BernSearchPaletteHost<Content: View>: View {
                         ZStack(alignment: .topLeading) {
                             Color.black.opacity(palette.expanded ? (scheme == .dark ? 0.32 : 0.2) : 0)
                                 .accessibilityHidden(true)
+                                #if !os(macOS)
+                                .contentShape(Rectangle())
+                                .onTapGesture { palette.close() }
+                                #endif
                             panel(in: geometry)
                         }
                         .frame(width: geometry.size.width, height: geometry.size.height)
+                        #if os(macOS)
                         .background(BernPaletteOutsideClicks(panel: panelBounds(in: geometry)) { palette.close() })
+                        #endif
                     }
                 }
                 .ignoresSafeArea()
@@ -2681,10 +2795,13 @@ struct BernSearchPaletteHost<Content: View>: View {
             if !entries.contains(where: { $0.id == palette.selection }) { palette.selection = entries.first?.id }
         }
         .onChange(of: palette.text.wrappedValue) { palette.selection = palette.entries.first?.id }
+        #if os(macOS)
         .onExitCommand { palette.close() }
+        #endif
     }
 }
 
+#if os(macOS)
 /// Watch the native window so clicks over disabled split-view content still
 /// dismiss the overlay. The observer never takes focus or handles panel input.
 private struct BernPaletteOutsideClicks: NSViewRepresentable {
@@ -2725,6 +2842,8 @@ private struct BernPaletteOutsideClicks: NSViewRepresentable {
         }
     }
 }
+
+#endif
 
 struct BernSearchPalette<Results: View>: View {
     let text: Binding<String>
@@ -2820,8 +2939,12 @@ struct BernSearchItem<Content: View>: View {
             .focused($focused)
             .background {
                 if navigation {
+                    // In the page the rows run to the list's edges and the
+                    // choice stands 6 points inside them, as in the panel,
+                    // whose list is inset by those 6 points.
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Color(red: 120/255, green: 120/255, blue: 128/255).opacity(palette.selection == id || hovered || focused ? (scheme == .dark ? 0.24 : 0.14) : 0))
+                        .padding(.horizontal, palette.inline ? 6 : 0)
                 }
             }
             .scaleEffect(!navigation && hovered ? 1.03 : 1)
@@ -2838,6 +2961,73 @@ struct BernSearchItem<Content: View>: View {
 private struct BernPaletteButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+// MARK: - Search field in the page
+
+/// A search field standing in the page, the platform's own
+/// (`BernSearchInput`); its results are listed below it while it is in
+/// use, focused or holding text. As in the palette the first result is
+/// chosen, the arrow keys move the choice and return runs it.
+struct BernSearchField<Results: View>: View {
+    let text: Binding<String>
+    let prompt: String
+    let target: String
+    /// The field's own height, width and text size; the platform's when
+    /// not given.
+    var height: CGFloat? = nil
+    var fontSize: CGFloat? = nil
+    var width: CGFloat? = nil
+    var submit: (() -> Void)? = nil
+    @ViewBuilder let results: () -> Results
+    @State private var palette = BernPaletteState(inline: true)
+    @State private var editing = false
+    @State private var focusRequest = 0
+
+    private func choose() {
+        if palette.selection != nil { palette.activate() } else { submit?() }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            BernSearchInput(
+                text: text, prompt: prompt, fontSize: fontSize, editing: $editing, focusRequest: focusRequest,
+                up: { palette.move(-1) }, down: { palette.move(1) }, submit: choose,
+                cancel: { text.wrappedValue = "" })
+                .bernSearchSurface(height: height)
+                .frame(width: width)
+            if editing || !text.wrappedValue.isEmpty {
+                results()
+                    .onPreferenceChange(BernPaletteEntries.self) { entries in
+                        palette.entries = entries
+                        if !entries.contains(where: { $0.id == palette.selection }) { palette.selection = entries.first?.id }
+                    }
+                    .onChange(of: text.wrappedValue) { palette.selection = palette.entries.first?.id }
+            }
+        }
+        .environment(palette)
+        .bernControl(target, role: "search", label: prompt,
+                     actions: BernControlActions(edit: { text.wrappedValue = $0 }, submit: choose,
+                                                 value: { text.wrappedValue }, focus: { focusRequest += 1 }))
+    }
+}
+
+extension View {
+    /// The search field's surface: on iOS 26 the system's glass in a
+    /// capsule, as the other capsule controls; elsewhere the field's own.
+    @ViewBuilder func bernSearchSurface(height: CGFloat?) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            // The field insets its own symbol and text.
+            self.frame(height: height ?? 36)
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            self.frame(height: height)
+        }
+        #else
+        self.frame(height: height)
+        #endif
     }
 }
 
@@ -2866,6 +3056,7 @@ struct BernSearchRow: View {
     }
 }
 
+#if os(macOS)
 /// AppKit's field editor preserves Chinese IME composition and dispatches
 /// navigation commands only after composition has finished.
 private final class BernPaletteTextField: NSTextField {
@@ -2931,6 +3122,33 @@ struct BernPaletteInput: NSViewRepresentable {
         }
     }
 }
+#else
+/// The panel's field: the system text field, focused once the panel opens;
+/// a hardware keyboard's arrows move the selection and Escape closes.
+struct BernPaletteInput: View {
+    let text: Binding<String>
+    let prompt: String
+    let up: () -> Void
+    let down: () -> Void
+    let submit: () -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+    var body: some View {
+        TextField(text: text, prompt: Text(verbatim: prompt)) { Text(verbatim: prompt) }
+            .textFieldStyle(.plain)
+            .font(.system(size: 16))
+            .submitLabel(.search)
+            .autocorrectionDisabled()
+            .focused($focused)
+            .onSubmit(submit)
+            .onKeyPress(.upArrow) { up(); return .handled }
+            .onKeyPress(.downArrow) { down(); return .handled }
+            .onKeyPress(.escape) { cancel(); return .handled }
+            .onAppear {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { focused = true }
+            }
+    }
+}
 #endif
 
 /// A decorative surface keeps its children as native controls.
@@ -2938,13 +3156,17 @@ struct BernSurface: ViewModifier {
     let style: BernStyle
     @ViewBuilder
     func body(content: Content) -> some View {
-        let surface = content
-            .bernForeground(style.base.foreground?.color)
-            .background(RoundedRectangle(cornerRadius: style.corner ?? 0, style: .continuous).fill(style.base.background?.color ?? Color.clear))
         if let corner = style.corner {
-            surface.clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            content
+                .bernForeground(style.base.foreground?.color)
+                .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(style.base.background?.color ?? Color.clear))
+                .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
         } else {
-            surface
+            // A square surface, such as a page's, also fills the safe areas
+            // around it: under the status bar and the bars of the window.
+            content
+                .bernForeground(style.base.foreground?.color)
+                .background(style.base.background?.color ?? Color.clear)
         }
     }
 }
@@ -2961,15 +3183,55 @@ struct BernCapsuleToggleStyle: ToggleStyle {
     }
 }
 
+extension View {
+    /// A round system button of an exact diameter: the system's glass (or
+    /// material before 26) in a circle, as the capsule controls.
+    func bernCircleControl(diameter: CGFloat, prominent: Bool) -> some View {
+        modifier(BernCircleControl(diameter: diameter, prominent: prominent))
+    }
+}
+
+private struct BernCircleControl: ViewModifier {
+    @Environment(\.bernAccent) private var accent
+    @Environment(\.bernOnBar) private var onBar
+    let diameter: CGFloat
+    let prominent: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        let control = content.buttonStyle(.plain)
+            .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
+            .frame(width: diameter, height: diameter)
+            .contentShape(Circle())
+        if onBar && !prominent {
+            // The bar is the glass; the button is a target of its size.
+            control
+        } else if #available(macOS 26.0, iOS 26.0, *) {
+            if prominent {
+                control
+                    .background(accent ?? .accentColor, in: Circle())
+                    .glassEffect(.regular.tint(accent ?? .accentColor).interactive(), in: Circle())
+            } else {
+                control.glassEffect(.regular.interactive(), in: Circle())
+            }
+        } else if prominent {
+            control.background(accent ?? .accentColor, in: Circle())
+        } else {
+            control.background(.regularMaterial, in: Circle())
+        }
+    }
+}
+
 private struct BernCapsuleControl: ViewModifier {
     @Environment(\.bernAccent) private var accent
     let height: CGFloat
     let prominent: Bool
     @ViewBuilder func body(content: Content) -> some View {
+        // The design's button sizes (6.3): a main action of 42 points or
+        // more is set in 15-point semibold, 22 from its ends; the others in
+        // 13-point medium, 14 from their ends, or 13 on a 30-point chip.
         let control = content.buttonStyle(.plain)
-            .font(.system(size: 13, weight: .medium))
+            .font(height >= 40 ? .system(size: 15, weight: .semibold) : .system(size: 13, weight: .medium))
             .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
-            .padding(.horizontal, 14).frame(height: height)
+            .padding(.horizontal, height >= 40 ? 22 : height <= 30 ? 13 : 14).frame(height: height)
             .contentShape(Capsule())
         if #available(macOS 26.0, iOS 26.0, *) {
             if prominent {
@@ -2993,14 +3255,18 @@ private struct BernCapsuleControl: ViewModifier {
 /// content at small window sizes. The caller disables the background tree.
 struct BernModal<Content: View>: View {
     @BernReducedMotion private var reduce
+    @Environment(BernWindowContext.self) private var window: BernWindowContext?
     let width: CGFloat
     let height: CGFloat
+    /// Covers the whole window where the window is compact.
+    var cover = false
     @ViewBuilder var content: Content
     var presentation: (AnyView) -> AnyView = { $0 }
     var body: some View {
         Color.clear.frame(width: 0, height: 0)
             .preference(key: BernModalContent.self, value: AnyView(
-                BernModalLayer(width: width, height: height, content: content, presentation: presentation)
+                BernModalLayer(width: width, height: height, covers: cover && window?.compact == true,
+                               content: content, presentation: presentation)
                     .environment(\.bernReduceMotion, reduce)))
     }
 }
@@ -3017,9 +3283,24 @@ struct BernModalContent: PreferenceKey {
 private struct BernModalLayer<Content: View>: View {
     let width: CGFloat
     let height: CGFloat
+    /// The whole window, edge to edge, as a phone's full-screen flow.
+    var covers = false
     let content: Content
     let presentation: (AnyView) -> AnyView
     var body: some View {
+        if covers {
+            GeometryReader { proxy in
+                presentation(AnyView(content
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .background(.background)
+                    .accessibilityAddTraits(.isModal)))
+            }.ignoresSafeArea()
+        } else {
+            floating
+        }
+    }
+
+    private var floating: some View {
         GeometryReader { proxy in
             #if os(macOS)
             let topInset: CGFloat = proxy.size.height < height + 32 ? 52 : 0
@@ -3039,6 +3320,136 @@ private struct BernModalLayer<Content: View>: View {
                     .accessibilityAddTraits(.isModal)))
             }.frame(width: proxy.size.width, height: proxy.size.height - topInset).offset(y: topInset)
         }.ignoresSafeArea()
+    }
+}
+
+/// Marks a `Spacer` in a `Row`: it takes room along the row, never the
+/// row's height.
+struct BernRowSpacer: LayoutValueKey {
+    static let defaultValue = false
+}
+
+/// A `Row`, laid out as rows are on the other targets: while the items
+/// fit, each is as wide as it wants and the room left over is shared
+/// equally by those that grow, spacers and filling frames. Only a row too
+/// narrow for them shrinks its items, each by its part of their width and
+/// never below its least. (`HStack` offers its items equal parts in order
+/// of flexibility, which cuts a short text off though the row has room.)
+struct BernRow: Layout {
+    var alignment: VerticalAlignment = .center
+    var spacing: CGFloat? = nil
+
+    private struct Item {
+        var ideal: CGFloat
+        var least: CGFloat
+        var most: CGFloat
+        var grows: Bool
+        var spacer: Bool
+    }
+
+    private func gaps(_ subviews: Subviews) -> [CGFloat] {
+        guard subviews.count > 1 else { return [] }
+        return (0..<(subviews.count - 1)).map { index in
+            spacing ?? subviews[index].spacing.distance(to: subviews[index + 1].spacing, along: .horizontal)
+        }
+    }
+
+    /// The width each item is offered.
+    private func widths(_ width: CGFloat?, _ height: CGFloat?, _ subviews: Subviews) -> [CGFloat] {
+        let items = subviews.map { subview -> Item in
+            let least = subview.sizeThatFits(ProposedViewSize(width: 0, height: height)).width
+            if subview[BernRowSpacer.self] {
+                return Item(ideal: least, least: least, most: .infinity, grows: true, spacer: true)
+            }
+            let ideal = subview.sizeThatFits(ProposedViewSize(width: nil, height: height)).width
+            let most = subview.sizeThatFits(ProposedViewSize(width: .infinity, height: height)).width
+            return Item(ideal: ideal, least: min(least, ideal), most: max(most, ideal), grows: most > ideal + 0.5, spacer: false)
+        }
+        guard let width else { return items.map(\.ideal) }
+        var offered = items.map { $0.grows ? $0.least : $0.ideal }
+        let room = width - gaps(subviews).reduce(0, +)
+        let used = offered.reduce(0, +)
+        if !width.isFinite {
+            return items.map { $0.grows ? $0.most : $0.ideal }
+        }
+        if used <= room {
+            // What is left over goes to the items that grow, as equally as
+            // their least and most widths allow.
+            var open = items.indices.filter { items[$0].grows }
+            var left = room - items.indices.filter { !items[$0].grows }.reduce(0) { $0 + offered[$1] }
+            while !open.isEmpty {
+                let share = left / CGFloat(open.count)
+                if let index = open.first(where: { items[$0].least > share || items[$0].most < share }) {
+                    offered[index] = items[index].least > share ? items[index].least : items[index].most
+                    left -= offered[index]
+                    open.removeAll { $0 == index }
+                    continue
+                }
+                for index in open { offered[index] = share }
+                break
+            }
+        } else {
+            // Too narrow: the others shrink by their part of what is
+            // missing, weighed by their width, never below their least.
+            var missing = used - room
+            var open = items.indices.filter { !items[$0].grows && items[$0].ideal > items[$0].least }
+            while missing > 0.01, !open.isEmpty {
+                let total = open.reduce(0) { $0 + items[$1].ideal }
+                guard total > 0 else { break }
+                if let index = open.first(where: { offered[$0] - missing * items[$0].ideal / total < items[$0].least }) {
+                    missing -= offered[index] - items[index].least
+                    offered[index] = items[index].least
+                    open.removeAll { $0 == index }
+                    continue
+                }
+                for index in open { offered[index] -= missing * items[index].ideal / total }
+                missing = 0
+            }
+        }
+        return offered
+    }
+
+    private func arrange(_ width: CGFloat?, _ height: CGFloat?, _ subviews: Subviews)
+        -> (size: CGSize, widths: [CGFloat], tops: [CGFloat], extents: [CGFloat])
+    {
+        let offered = widths(width, height, subviews)
+        let gaps = gaps(subviews)
+        var above: CGFloat = 0, below: CGFloat = 0
+        var extents: [CGFloat] = [], guides: [CGFloat] = []
+        for (subview, offer) in zip(subviews, offered) {
+            if subview[BernRowSpacer.self] {
+                extents.append(offer)
+                guides.append(0)
+                continue
+            }
+            let dimensions = subview.dimensions(in: ProposedViewSize(width: offer, height: height))
+            let guide = dimensions[alignment]
+            above = max(above, guide)
+            below = max(below, dimensions.height - guide)
+            extents.append(dimensions.width)
+            guides.append(guide)
+        }
+        let tops = zip(subviews, guides).map { subview, guide in subview[BernRowSpacer.self] ? 0 : above - guide }
+        let length = extents.reduce(0, +) + gaps.reduce(0, +)
+        return (CGSize(width: length, height: above + below), offered, tops, extents)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(proposal.width, proposal.height, subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let layout = arrange(bounds.width, proposal.height, subviews)
+        let gaps = gaps(subviews)
+        var x = bounds.minX
+        for index in subviews.indices {
+            let spacer = subviews[index][BernRowSpacer.self]
+            subviews[index].place(
+                at: CGPoint(x: x, y: bounds.minY + layout.tops[index]),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: layout.widths[index], height: spacer ? bounds.height : proposal.height))
+            x += layout.extents[index] + (index < gaps.count ? gaps[index] : 0)
+        }
     }
 }
 
@@ -3084,5 +3495,113 @@ struct BernTimer: View {
                     tick()
                 }
             }
+    }
+}
+
+// MARK: - Forms on their page
+
+private struct BernFormRowKey: EnvironmentKey {
+    static let defaultValue: Color? = nil
+}
+
+extension EnvironmentValues {
+    /// The rows' background of the form around, when its style gives one.
+    var bernFormRow: Color? {
+        get { self[BernFormRowKey.self] }
+        set { self[BernFormRowKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// A form standing on its page: with a background in its style, its
+    /// rows take that and the form's own grouped background gives way to
+    /// the page's.
+    @ViewBuilder func bernFormStyle(_ style: BernStyle) -> some View {
+        if let row = style.base.background?.color {
+            self.scrollContentBackground(.hidden).environment(\.bernFormRow, row)
+        } else {
+            self
+        }
+    }
+
+    /// The room between a form's sections; with a heading, none above it,
+    /// so that it stands at the top of the page.
+    @ViewBuilder func bernFormLayout(gap: Double?, rowHeight: Double?, heading: Bool) -> some View {
+        #if os(iOS)
+        self.bernSectionSpacing(gap).bernMinRowHeight(rowHeight).bernHeadingMargin(heading)
+        #else
+        self.bernMinRowHeight(rowHeight)
+        #endif
+    }
+
+    #if os(iOS)
+    @ViewBuilder private func bernSectionSpacing(_ gap: Double?) -> some View {
+        if let gap { self.listSectionSpacing(CGFloat(gap)) } else { self }
+    }
+
+    @ViewBuilder private func bernHeadingMargin(_ heading: Bool) -> some View {
+        if heading { self.contentMargins(.top, 0, for: .scrollContent) } else { self }
+    }
+    #endif
+
+    @ViewBuilder private func bernMinRowHeight(_ height: Double?) -> some View {
+        if let height { self.environment(\.defaultMinListRowHeight, CGFloat(height)) } else { self }
+    }
+
+    /// A section's rows inset by `x` along their sides and `y` above and
+    /// below, the platform's where not given.
+    @ViewBuilder func bernRowInsets(x: Double?, y: Double?) -> some View {
+        #if os(iOS)
+        let side = CGFloat(x ?? 16), edge = CGFloat(y ?? 11)
+        self.listRowInsets(EdgeInsets(top: edge, leading: side, bottom: edge, trailing: side))
+        #else
+        if x != nil || y != nil {
+            self.listRowInsets(EdgeInsets(top: CGFloat(y ?? 6), leading: CGFloat(x ?? 10), bottom: CGFloat(y ?? 6), trailing: CGFloat(x ?? 10)))
+        } else {
+            self
+        }
+        #endif
+    }
+
+    /// The rows of a plain section stand on the page: no background, no
+    /// margins, no separators.
+    func bernPlainRows() -> some View {
+        self.listRowBackground(Color.clear)
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+    }
+}
+
+/// The rows' insets a form gives all its sections.
+struct BernFormInsets: Equatable {
+    var x: Double?
+    var y: Double?
+}
+
+private struct BernFormInsetsKey: EnvironmentKey {
+    static let defaultValue: BernFormInsets? = nil
+}
+
+extension EnvironmentValues {
+    var bernFormInsets: BernFormInsets? {
+        get { self[BernFormInsetsKey.self] }
+        set { self[BernFormInsetsKey.self] = newValue }
+    }
+}
+
+/// The rows of a section take the form's row background and insets, when
+/// it gives them.
+struct BernFormRows: ViewModifier {
+    @Environment(\.bernFormRow) private var row
+    @Environment(\.bernFormInsets) private var insets
+    @ViewBuilder func body(content: Content) -> some View {
+        let filled = Group {
+            if let row { content.listRowBackground(row) } else { content }
+        }
+        if let insets {
+            filled.bernRowInsets(x: insets.x, y: insets.y)
+        } else {
+            filled
+        }
     }
 }

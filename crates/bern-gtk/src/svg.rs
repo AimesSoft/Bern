@@ -28,7 +28,7 @@ fn evaluate(view: &webkit6::WebView, script: &str) {
 pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
     let view = webkit6::WebView::new();
     view.set_background_color(&gtk::gdk::RGBA::TRANSPARENT);
-    if let Some(settings) = view.settings() {
+    if let Some(settings) = WebViewExt::settings(&view) {
         settings.set_enable_javascript(true);
         settings.set_javascript_can_open_windows_automatically(false);
         settings.set_enable_html5_local_storage(false);
@@ -45,13 +45,12 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
         }
     });
     view.connect_decide_policy(|_, decision, kind| {
-        if kind == webkit6::PolicyDecisionType::NavigationAction
-            || kind == webkit6::PolicyDecisionType::NewWindowAction
+        if (kind == webkit6::PolicyDecisionType::NavigationAction
+            || kind == webkit6::PolicyDecisionType::NewWindowAction)
+            && let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>()
         {
-            if let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>() {
-                let uri = nav.navigation_action().and_then(|action| action.request()).and_then(|req| req.uri());
-                if uri.as_deref() != Some("about:blank") { decision.ignore(); return true; }
-            }
+            let uri = nav.navigation_action().and_then(|action| action.request()).and_then(|req| req.uri());
+            if uri.as_deref() != Some("about:blank") { decision.ignore(); return true; }
         }
         false
     });

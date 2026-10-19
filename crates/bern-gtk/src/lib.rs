@@ -21,10 +21,12 @@ mod icons;
 mod layout;
 mod media;
 pub mod motion;
+mod palette;
 mod parent;
 mod picture;
 mod query;
 pub mod reactive;
+mod scene;
 mod session;
 mod snapshot;
 mod structure;
@@ -55,8 +57,14 @@ pub use glib;
 pub use host::{dispatch, run};
 pub use media::{MediaOp, Video, VideoProps, media, media_open};
 pub use motion::{Curve, Decor, Decorate, Edge, Num, Transition, TransitionKind, staggered};
+pub use palette::{SearchItem, SearchItemProps, SearchPalette};
 pub use parent::Parent;
 pub use query::{Query, QueryProps};
+pub use scene::{
+    Accordion, AccordionProps, ControlGroup, ControlGroupProps, Flow, FlowProps, Marquee,
+    MarqueeProps, Modal, ModalProps, Positioned, PositionedProps, ScaleBox, ScaleBoxProps, Timer,
+    TimerProps,
+};
 pub use structure::*;
 pub use style::{Look, StyleDef};
 pub use theme::Color;
@@ -158,6 +166,8 @@ pub struct WindowDef {
     /// While true, the window hides its title bars, and the pointer once it
     /// rests.
     pub immersive: Option<fn(&Ctx) -> bool>,
+    /// While false, `window.idle` stays false and no rest is counted.
+    pub idle_enabled: Option<fn(&Ctx) -> bool>,
 }
 
 /// The accent and appearance of `WindowSet`, chosen at run time.
@@ -205,6 +215,8 @@ pub struct AppDef {
     pub brand_seed: Option<(u8, u8, u8)>,
     /// Style overrides of `style!`.
     pub styles: &'static [StyleDef],
+    /// The weights and sizes of text styles from `text { … }`.
+    pub text_styles: &'static [style::TextStyle],
     pub theme: Option<ThemeDef>,
     /// Extensions of the file kinds `files:` names.
     pub file_kinds: &'static [(&'static str, &'static [&'static str])],

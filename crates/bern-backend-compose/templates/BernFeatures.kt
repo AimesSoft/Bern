@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
@@ -113,6 +114,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -342,6 +345,7 @@ fun BernContentButton(
     enabled: Boolean,
     style: BernStyle?,
     modifier: Modifier = Modifier,
+    shape: BernShape? = null,
     onClick: () -> Unit,
     content: @Composable () -> Unit,
 ) {
@@ -350,12 +354,14 @@ fun BernContentButton(
     val hovered by interaction.collectIsHoveredAsState()
     val (look, motion) = (style ?: BernStyle()).look(false, hovered, pressed, enabled)
     val palette = bernPalette()
-    val shape = RoundedCornerShape((style?.corner ?: 0.0).dp)
+    // A capsule's ends are half its height; a height of its own sizes it.
+    val outline = if (shape?.capsule == true) CircleShape else RoundedCornerShape((style?.corner ?: 0.0).dp)
+    val sized = shape?.height?.let { modifier.height(it) } ?: modifier
     Box(
-        modifier
+        sized
             .bernTransform(look, motion)
-            .bernShadow(look, motion, shape)
-            .clip(shape)
+            .bernShadow(look, motion, outline)
+            .clip(outline)
             .background(look.background?.let(palette::color) ?: Color.Transparent)
             .clickable(interaction, ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = label },
@@ -372,13 +378,23 @@ fun BernToggleButton(
     checked: Boolean,
     onChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    shape: BernShape? = null,
 ) {
+    val height = shape?.height
     if (icon != null) {
-        FilledTonalIconToggleButton(checked, onChange, modifier.semantics { contentDescription = label }) {
+        val sized = if (height != null) modifier.size(height) else modifier
+        FilledTonalIconToggleButton(checked, onChange, sized.semantics { contentDescription = label }) {
             Icon(icon, contentDescription = null)
         }
     } else {
-        FilterChip(selected = checked, onClick = { onChange(!checked) }, label = { Text(label) }, modifier = modifier)
+        val sized = if (height != null) modifier.height(height) else modifier
+        FilterChip(
+            selected = checked,
+            onClick = { onChange(!checked) },
+            label = { Text(label) },
+            shape = if (shape?.capsule == true) CircleShape else FilterChipDefaults.shape,
+            modifier = sized,
+        )
     }
 }
 
@@ -497,6 +513,7 @@ fun BernSplitButton(
     more: String,
     checked: Boolean,
     onChange: (Boolean) -> Unit,
+    shape: BernShape? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var showing by remember { mutableStateOf(false) }
@@ -505,9 +522,9 @@ fun BernSplitButton(
         actions = BernControlActions(activate = { showing = true }, setBool = onChange, value = { if (checked) "true" else "false" }),
     )
     Row(Modifier.testTag(target), verticalAlignment = Alignment.CenterVertically) {
-        BernToggleButton(label, icon, checked, onChange)
+        BernToggleButton(label, icon, checked, onChange, shape = shape)
         Box {
-            IconButton(onClick = { showing = true }) {
+            IconButton(onClick = { showing = true }, modifier = shape?.height?.let { Modifier.size(it) } ?: Modifier) {
                 Icon(Icons.Filled.ArrowDropDown, contentDescription = more)
             }
             DropdownMenu(expanded = showing, onDismissRequest = { showing = false }) {
@@ -592,17 +609,27 @@ object BernPictures {
 /// A picture from a `MediaSource`; until it is read, its frame keeps the
 /// declared size.
 @Composable
-fun BernImageURL(url: String?, label: String?, width: Dp?, height: Dp?, fit: ContentScale) {
+fun BernImageURL(
+    url: String?,
+    label: String?,
+    width: Dp?,
+    height: Dp?,
+    fit: ContentScale,
+    corner: Dp? = null,
+    template: Boolean = false,
+    aspect: Float? = null,
+) {
     val bitmap = BernPictures.bitmap(LocalContext.current, url)
-    val ratio = bitmap?.let { it.width.toFloat() / maxOf(1, it.height) } ?: (2f / 3f)
-    val modifier = when {
-        width != null && height != null -> Modifier.size(width, height)
-        width != null -> Modifier.width(width).height(width / ratio)
-        height != null -> Modifier.height(height).width(height * ratio)
-        else -> Modifier.fillMaxWidth()
-    }
+    val ratio = aspect ?: bitmap?.let { it.width.toFloat() / maxOf(1, it.height) } ?: (2f / 3f)
+    val modifier = bernPictureFrame(width, height, ratio, aspect != null, corner)
     if (bitmap != null) {
-        Image(bitmap, contentDescription = label, modifier = modifier, contentScale = fit)
+        Image(
+            bitmap,
+            contentDescription = label,
+            modifier = modifier,
+            contentScale = fit,
+            colorFilter = if (template) androidx.compose.ui.graphics.ColorFilter.tint(LocalContentColor.current, androidx.compose.ui.graphics.BlendMode.SrcIn) else null,
+        )
     } else {
         Box(modifier.semantics { if (label != null) contentDescription = label })
     }
@@ -884,6 +911,7 @@ fun BernScroll(
     motion: BernMotion,
     arrival: BernMotion?,
     gap: Dp,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val state = remember(horizontal) { BernScrollState(horizontal, snap == "center") }
@@ -931,7 +959,7 @@ fun BernScroll(
         if (state.center) ((if (horizontal) state.viewport.width else state.viewport.height) - state.largest).coerceAtLeast(0f).toDp() / 2 else 0.dp
     }
     CompositionLocalProvider(LocalBernScroll provides state, LocalBernArrival provides arrival) {
-        Box(Modifier.onGloballyPositioned { state.viewport = it.boundsInRoot() }) {
+        Box(modifier.onGloballyPositioned { state.viewport = it.boundsInRoot() }) {
             val flinging = if (snap != null) fling else null
             if (horizontal) {
                 Row(
@@ -941,7 +969,7 @@ fun BernScroll(
                         .padding(PaddingValues(horizontal = margin)),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                     verticalAlignment = Alignment.CenterVertically,
-                ) { content() }
+                ) { CompositionLocalProvider(LocalBernFlex provides this) { content() } }
             } else {
                 Column(
                     Modifier
@@ -950,7 +978,7 @@ fun BernScroll(
                         .onGloballyPositioned { state.content = it }
                         .padding(PaddingValues(vertical = margin)),
                     verticalArrangement = Arrangement.spacedBy(gap),
-                ) { content() }
+                ) { CompositionLocalProvider(LocalBernFlex provides this) { content() } }
             }
         }
     }
@@ -983,10 +1011,11 @@ fun Modifier.bernScrollItem(key: Any): Modifier {
 }
 
 /// Follows scrolling: `scale` at the center of the scroll view around it,
-/// 1 at its edges; `opacity` at its edges, 1 at the center. Drawn each
-/// frame without composing again; still with reduced motion.
+/// 1 at its edges, growing from the point `originX`, `originY` of the
+/// element; `opacity` at its edges, 1 at the center. Drawn each frame
+/// without composing again; still with reduced motion.
 @Composable
-fun Modifier.bernScrollEffect(scale: Float, opacity: Float): Modifier {
+fun Modifier.bernScrollEffect(scale: Float, opacity: Float, originX: Float = 0.5f, originY: Float = 0.5f): Modifier {
     val state = LocalBernScroll.current ?: return this
     if (bernReduceMotion()) return this
     var bounds by remember { mutableStateOf(Rect.Zero) }
@@ -998,6 +1027,7 @@ fun Modifier.bernScrollEffect(scale: Float, opacity: Float): Modifier {
             val distance = if (horizontal) bounds.center.x - viewport.center.x else bounds.center.y - viewport.center.y
             val near = if (reach > 0f) 1f - (kotlin.math.abs(distance) / reach).coerceIn(0f, 1f) else 1f
             val factor = 1f + (scale - 1f) * near
+            transformOrigin = TransformOrigin(originX, originY)
             scaleX = factor
             scaleY = factor
             alpha = opacity + (1f - opacity) * near
@@ -1006,19 +1036,38 @@ fun Modifier.bernScrollEffect(scale: Float, opacity: Float): Modifier {
 
 // MARK: - Nudges
 
-/// A short nudge each time `on` turns true: a little larger, then back
-/// with `motion`; still with reduced motion.
+/// A short nudge each time `on` turns true: to `size` of its size, then
+/// back with `motion`; still with reduced motion.
 @Composable
-fun Modifier.bernNudge(on: Boolean, motion: BernMotion): Modifier {
+fun Modifier.bernNudge(on: Boolean, motion: BernMotion, size: Float = 1.06f): Modifier {
     val scale = remember { Animatable(1f) }
     val reduce = bernReduceMotion()
     var before by remember { mutableStateOf(on) }
     LaunchedEffect(on) {
         if (on && !before && !reduce) {
-            scale.animateTo(1.06f, tween(80))
+            scale.animateTo(size, tween(80))
             scale.animateTo(1f, motion.spec())
         }
         before = on
+    }
+    return graphicsLayer {
+        scaleX = scale.value
+        scaleY = scale.value
+    }
+}
+
+/// A nudge each time `key` changes (`nudge_key`), as [bernNudge].
+@Composable
+fun Modifier.bernNudgeKey(key: Any?, motion: BernMotion, size: Float = 1.06f): Modifier {
+    val scale = remember { Animatable(1f) }
+    val reduce = bernReduceMotion()
+    var before by remember { mutableStateOf(key) }
+    LaunchedEffect(key) {
+        if (key != before && !reduce) {
+            scale.animateTo(size, tween(80))
+            scale.animateTo(1f, motion.spec())
+        }
+        before = key
     }
     return graphicsLayer {
         scaleX = scale.value
@@ -1141,10 +1190,12 @@ enum class BernRailAnchor { Start, Center, End }
 /// as thick as the thickest child, or as its parent makes it, and a child
 /// between two fractions without a size of its own across fills that
 /// thickness. Children are centered across, may stand past the ends and
-/// are not clipped; the rail itself takes no touches.
+/// are not clipped; the rail itself takes no touches. With `overhang` the
+/// scale runs that far past both ends.
 @Composable
-fun BernRail(vertical: Boolean, anchor: BernRailAnchor, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+fun BernRail(vertical: Boolean, anchor: BernRailAnchor, modifier: Modifier = Modifier, overhang: Dp = 0.dp, content: @Composable () -> Unit) {
     Layout(content, modifier) { measurables, constraints ->
+        val past = overhang.roundToPx()
         // Sizes along the axis and across it, whichever the axis is.
         fun along(width: Int, height: Int) = if (vertical) height else width
         fun across(width: Int, height: Int) = if (vertical) width else height
@@ -1162,7 +1213,8 @@ fun BernRail(vertical: Boolean, anchor: BernRailAnchor, modifier: Modifier = Mod
             else -> points.maxOfOrNull { it?.let { placed -> along(placed.width, placed.height) } ?: 0 } ?: 0
         }
         fun fraction(value: Float) = value.coerceIn(0f, 1f)
-        val spans = spots.map { spot -> (abs(fraction(spot.to) - fraction(spot.from)) * length).roundToInt() }
+        val scale = length + 2 * past
+        val spans = spots.map { spot -> (abs(fraction(spot.to) - fraction(spot.from)) * scale).roundToInt() }
         var thickness = minAcross
         points.forEach { placed -> if (placed != null) thickness = maxOf(thickness, across(placed.width, placed.height)) }
         measurables.forEachIndexed { index, measurable ->
@@ -1193,9 +1245,9 @@ fun BernRail(vertical: Boolean, anchor: BernRailAnchor, modifier: Modifier = Mod
                         BernRailAnchor.Center -> size / 2
                         BernRailAnchor.End -> size
                     }
-                    (fraction(spot.at) * length).roundToInt() - shift
+                    (fraction(spot.at) * scale).roundToInt() - past - shift
                 } else {
-                    (minOf(fraction(spot.from), fraction(spot.to)) * length).roundToInt()
+                    (minOf(fraction(spot.from), fraction(spot.to)) * scale).roundToInt() - past
                 }
                 val cross = (thickness - across(placeable.width, placeable.height)) / 2
                 if (vertical) placeable.placeRelative(cross, start) else placeable.placeRelative(start, cross)
@@ -1264,4 +1316,19 @@ fun BernPopoverButton(
             )
         }
     }
+}
+
+// MARK: - Where a scroll view opens
+
+/// A scroll state that opens with the point at `at` of the content at the
+/// same fraction of the view: once the first layout knows how far it can
+/// scroll, it stands at `at` of that.
+@Composable
+fun rememberBernScroll(at: Float): ScrollState {
+    val state = rememberScrollState()
+    LaunchedEffect(Unit) {
+        val most = snapshotFlow { state.maxValue }.first { it in 1 until Int.MAX_VALUE }
+        state.scrollTo((at.coerceIn(0f, 1f) * most).roundToInt())
+    }
+    return state
 }
