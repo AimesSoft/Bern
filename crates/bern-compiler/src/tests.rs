@@ -373,6 +373,11 @@ fn diagnostics_cover_the_documented_failures() {
             r#"match draft.mode { Mode::Fast => { Spacer } }"#,
             "non-exhaustive match; missing Mode::Slow",
         ),
+        // Swift's `default` and Kotlin's `else` come last.
+        (
+            r#"match draft.mode { _ => { Spacer } Mode::Fast => { Spacer } }"#,
+            "`_` must be the last arm of a `match`",
+        ),
         (
             r#"Button(id: go, label: tr! { "en" => "Go", "ja" => "行く" }) => windows.help.open()"#,
             "window `help` is not declared",

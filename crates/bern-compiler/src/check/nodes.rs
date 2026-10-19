@@ -122,6 +122,21 @@ impl Checker<'_> {
             return None;
         };
         let def = self.types.enum_def(&name)?.clone();
+        // Swift's `default` and Kotlin's `else` come last, and an arm
+        // after `_` would never be reached.
+        let before_last = node.arms.len().saturating_sub(1);
+        if let Some(span) = node.arms[..before_last]
+            .iter()
+            .find_map(|arm| match arm.pattern {
+                ast::Pattern::Wildcard(span) => Some(span),
+                ast::Pattern::Variant { .. } => None,
+            })
+        {
+            self.error(
+                span,
+                "`_` must be the last arm of a `match`; the arms after it are never reached",
+            );
+        }
         let mut covered = BTreeSet::new();
         let mut wildcard = false;
         let mut arms = Vec::new();
