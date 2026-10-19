@@ -1572,6 +1572,7 @@ fun BernWindowRoot(
     immersive: Boolean = false,
     idleEnabled: Boolean = true,
     landscape: Boolean? = null,
+    unified: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val top = BernHost.sheets.lastOrNull() ?: BernHost.primary
@@ -1635,7 +1636,8 @@ fun BernWindowRoot(
     context.estimatedHeight = LocalConfiguration.current.screenHeightDp.toDouble()
     CompositionLocalProvider(LocalBernWindow provides context, LocalBernSettled provides settled) {
         val chrome = context.chrome
-        val title = chrome.lastOrNull { it.title != null }?.title ?: context.title
+        val titled = chrome.lastOrNull { it.title != null }?.title
+        val title = titled ?: context.title
         val back = chrome.lastOrNull { it.back != null }?.back
         val sheet = context.kindID != BernHost.primary
         Scaffold(
@@ -1658,8 +1660,13 @@ fun BernWindowRoot(
                 }
             }),
             topBar = {
-                if (!hidden) TopAppBar(
-                    title = { Text(title, maxLines = 1) },
+                // A unified window has no bar of its own: it shows one only
+                // for what the content puts there, a title, the way back or
+                // toolbar items, and never repeats the window's name.
+                val bar = !unified || sheet || titled != null || back != null ||
+                    chrome.any { it.leading != null || it.actions != null }
+                if (!hidden && bar) TopAppBar(
+                    title = { if (!unified || titled != null) Text(title, maxLines = 1) },
                     colors = if (context.underBars > 0) {
                         TopAppBarDefaults.topAppBarColors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
                     } else {

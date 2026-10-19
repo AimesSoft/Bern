@@ -152,6 +152,7 @@ impl Generator<'_> {
         };
         let layers = Ctx {
             layer: true,
+            layer_align: alignment,
             sized_layers: element.children.iter().any(|node| !backdrop(node)),
             ..ctx.within(Scope::Other)
         };
@@ -323,13 +324,31 @@ impl Generator<'_> {
             Some("end") => "BernRailAnchor.End",
             _ => "BernRailAnchor.Center",
         };
-        // A layer of a stack holding only spans without a
-        // thickness of their own is as large as the stack.
-        let modifier = if ctx.layer {
+        // A rail among the layers of a stack never makes the stack larger.
+        // Holding only spans without a thickness of their own it is as
+        // large as the stack; otherwise, beside layers that give the stack
+        // its size, it takes the stack's length along its axis, its own
+        // thickness across, and stands where the stack aligns its layers,
+        // as a progress bar at the foot of a picture. A stack of rails
+        // alone takes their size.
+        let vertical = element.keyword("axis") == Some("vertical");
+        let fills = Self::rail_fills(element);
+        let aligned = ctx.layer && !fills && ctx.sized_layers;
+        let modifier = if ctx.layer && fills {
             ", Modifier.matchParentSize()"
+        } else if aligned && vertical {
+            ", Modifier.fillMaxHeight()"
+        } else if aligned {
+            ", Modifier.fillMaxWidth()"
         } else {
             ""
         };
+        if aligned {
+            out.open(format!(
+                "Box(Modifier.matchParentSize(), contentAlignment = {}) {{",
+                ctx.layer_align
+            ));
+        }
         let overhang = self
             .length(element, "overhang")
             .map(|overhang| format!(", overhang = {overhang}"))
@@ -344,6 +363,9 @@ impl Generator<'_> {
         };
         self.nodes(out, &element.children, &placed);
         out.close("}");
+        if aligned {
+            out.close("}");
+        }
     }
 
     /// The arguments of `BernPlace` for an element on a rail: its fraction

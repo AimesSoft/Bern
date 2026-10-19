@@ -38,6 +38,14 @@ impl Generator<'_> {
             "BernControl({target}, \"button\", {label}, {enabled}, BernControlActions(activate = {{ {action} }}{file}))"
         ));
         self.shortcut(out, element, &action);
+        // `width: fill`: in a row the buttons that fill share its width;
+        // elsewhere one takes the whole width. Content that stretches,
+        // such as a row with a spacer, takes the room its neighbours in a
+        // row leave, as it does in a SwiftUI stack.
+        let fills = element.keyword("width") == Some("fill");
+        let widens = element.kind == "Button" && widens(&element.children);
+        let in_row = (fills || widens) && ctx.scope == Scope::Row;
+        let weight = if in_row { ".weight(1f)" } else { "" };
         if element.kind == "Button" && !element.children.is_empty() {
             // The content is what the button shows; the label names it.
             let style = self
@@ -49,8 +57,13 @@ impl Generator<'_> {
             } else {
                 ""
             };
+            let width = match (in_row, fills) {
+                (true, _) => weight,
+                (false, true) => ".fillMaxWidth()",
+                _ => "",
+            };
             out.open(format!(
-                "BernContentButton({label}, {enabled}, {style}, Modifier.testTag({target}){}{prominent}, onClick = {{ {action} }}) {{",
+                "BernContentButton({label}, {enabled}, {style}, Modifier{width}.testTag({target}){}{prominent}, onClick = {{ {action} }}) {{",
                 self.shape_arg(element)
             ));
             self.nodes(out, &element.children, &ctx.within(Scope::Other));
@@ -82,13 +95,13 @@ impl Generator<'_> {
             ));
             return;
         }
-        let fill = if element.keyword("width") == Some("fill") {
+        let fill = if fills && !in_row {
             ", fill = true"
         } else {
             ""
         };
         out.line(format!(
-            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier.testTag({target})) {{ {action} }}",
+            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{weight}.testTag({target})) {{ {action} }}",
             Self::icon(element.icon("icon")),
             element.keyword("role") == Some("destructive"),
             self.shape_arg(element)
@@ -406,4 +419,28 @@ impl Generator<'_> {
         self.nodes(out, &element.children, &ctx.within(Scope::Other));
         out.close("}");
     }
+}
+
+/// Whether content stretches across the width it is given: a row with a
+/// spacer, something that fills the width, or a column or stack holding
+/// such content, also through conditions.
+fn widens(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(element) => {
+            element.keyword("width") == Some("fill")
+                || match element.kind.as_str() {
+                    "Row" => {
+                        element.children.iter().any(
+                            |child| matches!(child, Node::Element(child) if child.kind == "Spacer"),
+                        ) || widens(&element.children)
+                    }
+                    "Column" | "Stack" | "ForEach" => widens(&element.children),
+                    _ => false,
+                }
+        }
+        Node::If(branch) => {
+            branch.branches.iter().any(|(_, nodes)| widens(nodes)) || widens(&branch.otherwise)
+        }
+        _ => false,
+    })
 }

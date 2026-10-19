@@ -83,8 +83,9 @@ struct Ctx {
     /// `stagger`, or the root of a component, which may be one: those that
     /// appear take turns on the clock in `LocalBernStagger`.
     stagger: bool,
-    /// The nodes are layers of a `Stack`.
+    /// The nodes are layers of a `Stack`, which aligns them this way.
     layer: bool,
+    layer_align: &'static str,
     /// Among the layers, some besides unsized canvases and rails give the
     /// stack its size, so those backdrops can take it.
     sized_layers: bool,
@@ -264,7 +265,7 @@ impl<'a> Generator<'a> {
                     layer: if repeats {
                         own.layer
                     } else {
-                        ctx.layer && direct && element.kind == "Rail" && Self::rail_fills(element)
+                        ctx.layer && direct && element.kind == "Rail"
                     },
                     ..own
                 };

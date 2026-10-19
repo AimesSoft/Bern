@@ -377,6 +377,28 @@ inline void SetWindowIcons(HWND hwnd) {
 }
 
 #if BERN_WINUI
+/// The title bar keeps the room of the system menu and the caption buttons
+/// in the first and last columns of its template. WinUI sizes them with the
+/// insets in pixels as if they were units, which at other scales than 100 %
+/// moves what stands in the title bar away from the caption buttons; they
+/// are set again in units after each layout that changes them.
+inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window const& window) {
+    if (!titleBar.XamlRoot() || media::VisualTreeHelper::GetChildrenCount(titleBar) == 0) return;
+    auto grid = media::VisualTreeHelper::GetChild(titleBar, 0).try_as<controls::Grid>();
+    if (!grid || grid.ColumnDefinitions().Size() < 2) return;
+    double scale = titleBar.XamlRoot().RasterizationScale();
+    if (scale <= 0) return;
+    auto bar = window.AppWindow().TitleBar();
+    auto columns = grid.ColumnDefinitions();
+    auto fit = [](controls::ColumnDefinition const& column, double width) {
+        auto current = column.Width();
+        if (current.GridUnitType == xaml::GridUnitType::Pixel && std::abs(current.Value - width) > 0.5)
+            column.Width(xaml::GridLength{width, xaml::GridUnitType::Pixel});
+    };
+    fit(columns.GetAt(0), bar.LeftInset() / scale);
+    fit(columns.GetAt(columns.Size() - 1), bar.RightInset() / scale);
+}
+
 /// The application icon in the XAML title bar: the image of icon resource 1
 /// closest to the title bar's size. A PNG image is decoded as it is; a
 /// bitmap image is wrapped in a one-image `.ico`, which XAML also decodes.
@@ -682,7 +704,7 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
         // `under_bars`: while such a layer is shown the content spans the
         // header's row and, under the title bar, the window's; the bars
         // stay above it.
-        Reactive::Run([raw] {
+        Reactive::Run([raw, page] {
             bool under = raw->underBars.Get() > 0;
             Reactive::Untrack([&] {
                 controls::Grid::SetRow(raw->holder, under ? 0 : 1);
@@ -693,6 +715,27 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
                     controls::Grid::SetRowSpan(raw->host, under ? 2 : 1);
 #if BERN_WINUI
                     if (raw->titleBar) controls::Canvas::SetZIndex(raw->titleBar, under ? 1 : 0);
+                    if (auto header = raw->header.try_as<controls::Panel>(); header && raw->titleBar) {
+                        // The header shares the title bar's row: its tools
+                        // stand in the title bar, before the caption
+                        // buttons, which take clicks there.
+                        auto tools = page->tools;
+                        auto headerChildren = header.Children();
+                        uint32_t index = 0;
+                        bool inHeader = headerChildren.IndexOf(tools, index);
+                        if (under && inHeader) {
+                            headerChildren.RemoveAt(index);
+                            raw->titleBar.RightHeader(tools);
+                        } else if (!under && !inHeader) {
+                            raw->titleBar.RightHeader(nullptr);
+                            headerChildren.Append(tools);
+                        }
+                        // A title bar with tools is the tall one, and the
+                        // caption buttons are as tall.
+                        if (raw->window)
+                            raw->window.AppWindow().TitleBar().PreferredHeightOption(
+                                under ? winrt::Microsoft::UI::Windowing::TitleBarHeightOption::Tall : winrt::Microsoft::UI::Windowing::TitleBarHeightOption::Standard);
+                    }
 #endif
                 }
                 return 0;
@@ -855,6 +898,11 @@ inline std::string Open(std::string const& kindId) {
     root.Children().Append(host);
     window.Content(root);
     window.SetTitleBar(titleBar);
+    titleBar.LayoutUpdated([weakBar = winrt::make_weak(titleBar), weakWindow = winrt::make_weak(window)](auto&&, auto&&) {
+        auto titleBar = weakBar.get();
+        auto window = weakWindow.get();
+        if (titleBar && window) FitTitleBarInsets(titleBar, window);
+    });
     originals[win->hwnd] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(win->hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Subclass)));
     if (def.settings) {
         auto presenter = window.AppWindow().Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>();
@@ -1562,6 +1610,21 @@ inline void DumpTree(xaml::DependencyObject const& node, int depth, xaml::UIElem
         line += size;
         if (auto tag = element.Tag()) line += " " + Utf8(winrt::unbox_value_or<winrt::hstring>(tag, L""));
         if (!std::isnan(element.Height())) line += " h=" + std::to_string(static_cast<int>(element.Height()));
+        // Its own clip, and the slot layout gave it when that is smaller
+        // than it asked for, which clips it too.
+        if (auto clip = element.Clip()) {
+            auto r = clip.Rect();
+            char text[96];
+            std::snprintf(text, sizeof text, " clip=%.1f,%.1f %.1fx%.1f", r.X, r.Y, r.Width, r.Height);
+            line += text;
+        }
+        auto slot = controls::Primitives::LayoutInformation::GetLayoutSlot(element);
+        auto wanted = element.DesiredSize();
+        if (wanted.Width > slot.Width + 0.5f || wanted.Height > slot.Height + 0.5f) {
+            char text[96];
+            std::snprintf(text, sizeof text, " slot=%.1fx%.1f<%.1fx%.1f", slot.Width, slot.Height, wanted.Width, wanted.Height);
+            line += text;
+        }
         if (auto text = element.try_as<controls::TextBlock>()) {
             char font[64];
             std::snprintf(font, sizeof font, " %.1f/%d", text.FontSize(), static_cast<int>(text.FontWeight().Weight));

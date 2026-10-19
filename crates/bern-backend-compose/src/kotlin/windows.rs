@@ -90,8 +90,8 @@ impl Generator<'_> {
                 .unwrap_or_else(|| "null".into());
             out.line(format!("BernThemeChoice({accent}, {appearance})"));
         }
-        // `chrome` has nothing to change on a phone, whose windows have no
-        // title bar; immersion hides the top bar and the system bars.
+        // `chrome: unified`: the top bar shows only for what the content
+        // puts there; immersion hides the top bar and the system bars.
         let mut args = Vec::new();
         if let Some(idle) = window.idle_after {
             args.push(format!("idleAfter = {}", double(idle)));
@@ -106,6 +106,9 @@ impl Generator<'_> {
         // A phone turns the window to landscape while this holds.
         if let Some(landscape) = &window.landscape {
             args.push(format!("landscape = {}", self.expr(landscape)));
+        }
+        if window.chrome == bern_ir::WindowChrome::Unified {
+            args.push("unified = true".to_string());
         }
         let args = if args.is_empty() {
             String::new()

@@ -171,6 +171,10 @@ bern package --target android
 - 动画 SVG 的 `WebView` 设为 `MATCH_PARENT` 布局参数：`AndroidView` 默认的 `WRAP_CONTENT` 让页面的布局视口按内容定高，`height: 100%` 解析为 0，SVG 高度为 0 而不显示（经 WebView 的 DevTools 查得）。
 - 不给尺寸的 `Canvas` 在层叠中是其他层的底板（`Modifier.matchParentSize()`），层叠只有底板时仍按原样铺满。
 - 语言的自称：`zh-Hans`、`zh-Hant` 写作“简体中文”“繁體中文”，与其他目标相同（此前为系统给出的“中文 (简体中文)”）。
+- `chrome: unified`：手机没有窗口标题栏，只有窗口标题可显示时不出现顶栏；内容给出标题、返回、前缘或后缘工具时照常显示（此前没有页面的空画框上方多出一条写着应用名的 `TopAppBar`）。
+- 行里撑满的按钮（`width: fill`，或内容里有直接的 `Spacer`、`width: fill` 而撑开的带内容按钮）在行中用 `Modifier.weight(1f)` 分剩余宽度；此前用 `fillMaxWidth()`，第一个按钮占满整行，“打开文件夹”旁的“打开链接”被挤出，迷你播放器的暂停与关闭也被挤出屏幕。
+- `Stack` 里有自身厚度的 `Rail`，在给了尺寸的层旁按 `Stack` 的对齐摆放（外面套一层 `matchParentSize()` 的 `Box`），缩略图底部的进度条贴底；此前轨道撑满层叠，缩略图被拉高。只在层叠里有给了尺寸的层时这样做，画廊中只有轨道与不定尺寸的层时保持原样。
+- 模态（`Dialog`）里的内容不参与共享元素（`LocalBernShared` 设为空）：对话框是另一个窗口，与页面中的同名元素不在同一个布局层级，引导结束时 `SharedTransitionLayout` 抛出“layouts are not part of the same hierarchy”而崩溃。
 
 ### 顺带的修正
 
@@ -214,6 +218,12 @@ bern package --target android
 - **测试与构建**：`cargo test -p bern-backend-compose`（新增 `layout_features_generate_for_compose` 与 `text_formats_generate_for_compose`）、`cargo clippy -p bern-backend-compose --all-targets -- -D warnings`（另外忽略 `bern-target-api` 中已有的 `for_kv_map`）与 `cargo fmt --check` 通过；gallery、showcase、planner、一个覆盖 29 项与 `Stack` 样式的临时巡览应用、文本格式的临时测试应用与用于验收的媒体类应用 `bern build --target android` 由 Gradle 编译成 APK。
 - **文本格式**：把运行时中的解析与写出代码（`BernArg`、`BernPiece`、`BernTextParser` 与 `BernText.format`）原样取出，用 Gradle 缓存中的 Kotlin 编译器在 JVM 上运行，读取为测试应用生成的字符串表：英文依次为“no files”“1 file”“3 files”“Today is Monday, October 12, 2026”“3:04 used (0:03:04)”“3 large files”“Saved Tides #1.mp4 on Mon, Oct 12”，简体中文为“0 个文件”“3 个文件”“今天是 2026年10月12日 星期一”“已用 3:04（0:03:04）”“3 个大文件”“已保存 Tides #1.mp4，10月12日 周一”，与 SwiftUI、Web、GTK 相同；`{{`、`}}` 写出花括号，`#` 只在复数分支中写出数字。这是 JVM 上的结果，不是设备上的。
 - **设备**：手机解锁后实测（MIX 2S，`adb` 截图与生成的 CLI，没有发送按键）：文本格式测试应用英文与简体中文的全部输出与上面相同；用于验收的媒体类应用的引导页与设计稿 Material 手机版对照，修正后动画 Logo 显示在格纹插画上、底栏贴底、“跳过”为 Tonal、“开始”为品牌色 Filled。其余 29 项、`Stack` 样式与动效补充在设备上的显示与交互仍**未验证**（应用的其他页面没有逐屏对照）。
+
+2026-10-19（续），没有页面时的空画框（纯粹模式），MIX 2S（Android 15），`adb` 截图与生成的 CLI，没有发送按键，滚动用一次 `input swipe`：
+
+- 引导选“纯粹播放”并完成，不再崩溃；顶栏不出现，空画框（虚线描边）、“打开文件”、并排的“打开文件夹”与“打开链接”、“继续上次”、说明文字与“最近播放”在设计稿 Material 手机版的位置；最近播放的缩略图底部是进度条。
+- 从“继续上次”播放后收起：迷你播放器显示缩略图、标题、暂停与关闭；列表滚到底时最后一行完整地停在迷你播放器上方（应用在播放时给列表底部留出空间）。
+- 测试：`cargo test -p bern-backend-compose`、`cargo clippy --workspace --all-targets`、`cargo fmt --check` 通过。
 
 ## 未完成与已知限制
 

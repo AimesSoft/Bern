@@ -477,6 +477,14 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     else p.Add(shown);
 }
 
+/// The widest border a style draws in any state; 0 when it draws none.
+inline double BorderWidth(StyleDef const& style) {
+    double width = 0;
+    for (auto look : {std::optional<Look>(style.base), style.hover, style.pressed, style.selected, style.focus, style.disabled})
+        if (look && look->border) width = (std::max)(width, look->borderWidth.value_or(1.0));
+    return width;
+}
+
 /// A button showing its content instead of a label: no frame of its own,
 /// the content as it is; a style's corner clips it.
 inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Build const& content) {
@@ -493,7 +501,10 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
         if (std::string_view(props.prominence ? props.prominence : "") == "prominent")
             if (auto accent = Styles::Named(L"AccentButtonStyle")) button.Style(accent);
     } else {
+        // No frame: no border either, so the content and a style's padding
+        // give its size, as on the other platforms.
         button.Padding(xaml::Thickness{0, 0, 0, 0});
+        button.BorderThickness(xaml::Thickness{0, 0, 0, 0});
         Styles::MakeSubtle(button);
     }
     // A button takes its content's size; content that fills stretches it.
@@ -519,7 +530,15 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
         std::shared_ptr<ShadowImage> shadow;
         auto wrapper = Shadowed(button, props.style, shadow);
         StyleButton(button, wrapper, props.style, shadow);
-        // The corner clips the content: a rounded Composition clip.
+        // A border the style draws stands inside its padding.
+        if (!framed)
+            if (double width = BorderWidth(*props.style); width > 0) {
+                double inside = (std::max)(0.0, props.style->padding.value_or(0) - width);
+                button.BorderThickness(xaml::Thickness{width, width, width, width});
+                button.Padding(xaml::Thickness{inside, inside, inside, inside});
+            }
+        // The corner clips the content where the button's shape is, padding
+        // included: a rounded Composition clip around the content.
         if (props.style->corner) {
             float r = static_cast<float>(*props.style->corner);
             button.CornerRadius(xaml::CornerRadius{r, r, r, r});
@@ -528,8 +547,14 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
             auto geometry = compositor.CreateRoundedRectangleGeometry();
             geometry.CornerRadius(float2{r, r});
             visual.Clip(compositor.CreateGeometricClip(geometry));
-            holder.as<xaml::FrameworkElement>().SizeChanged([geometry](auto&&, xaml::SizeChangedEventArgs const& args) {
-                geometry.Size(float2{args.NewSize().Width, args.NewSize().Height});
+            holder.as<xaml::FrameworkElement>().SizeChanged([geometry, weak = winrt::make_weak(button)](auto&&, xaml::SizeChangedEventArgs const& args) {
+                auto button = weak.get();
+                auto padding = button ? button.Padding() : xaml::Thickness{};
+                auto border = button ? button.BorderThickness() : xaml::Thickness{};
+                float left = static_cast<float>(padding.Left + border.Left), top = static_cast<float>(padding.Top + border.Top);
+                float right = static_cast<float>(padding.Right + border.Right), bottom = static_cast<float>(padding.Bottom + border.Bottom);
+                geometry.Offset(float2{-left, -top});
+                geometry.Size(float2{args.NewSize().Width + left + right, args.NewSize().Height + top + bottom});
             });
         }
         shown = wrapper;
@@ -1522,6 +1547,9 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
     BindLen(ctx, props.width, props.animate, [layers](double w) { layers.Width((std::max)(0.0, w)); });
     BindLen(ctx, props.height, props.animate, [layers](double w) { layers.Height((std::max)(0.0, w)); });
     if (props.underBars && ctx.win) {
+        // It fills the window both ways, so its containers give it all
+        // their room.
+        SetRole(layers, L"bern-layers-wh");
         layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
         Win* win = ctx.win;

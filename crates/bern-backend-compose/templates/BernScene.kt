@@ -460,6 +460,7 @@ fun BernFlow(gap: Dp, content: @Composable () -> Unit) {
 /// it is compact. The element's `appear` and `disappear` play on the card;
 /// inside an animated branch the branch's clock drives them, so the card
 /// leaves with its transition before the dialog closes.
+@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 fun BernModal(
     width: Dp,
@@ -496,7 +497,12 @@ fun BernModal(
                     tonalElevation = AlertDialogDefaults.TonalElevation,
                     shadowElevation = if (covering) 0.dp else 8.dp,
                 ) {
-                    Box(if (covering) Modifier.statusBarsPadding().navigationBarsPadding() else Modifier) { content() }
+                    // The dialog is a window of its own: its elements cannot
+                    // pair with the shared elements of the window below,
+                    // whose layout is another hierarchy.
+                    Box(if (covering) Modifier.statusBarsPadding().navigationBarsPadding() else Modifier) {
+                        CompositionLocalProvider(LocalBernShared provides null) { content() }
+                    }
                 }
             }
             if (visibility != null) {
