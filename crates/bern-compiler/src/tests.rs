@@ -1720,6 +1720,24 @@ pub fn panel(app: demo::Client) -> impl View {
     }
 
     #[test]
+    fn a_scope_that_places_itself_is_reported_not_searched_forever() {
+        // The page places itself, and so does a component it places.
+        for (page, child) in [
+            (format!("Column {{ {ADD} page(app: app) }}"), "Spacer"),
+            (
+                "child(app: app)".to_string(),
+                &*format!("Column {{ {ADD} child(app: app) }}"),
+            ),
+        ] {
+            let output = text(with_child(&page, "#[component]", child, ""));
+            assert!(
+                output.contains("components reference each other recursively"),
+                "{output}"
+            );
+        }
+    }
+
+    #[test]
     fn a_feature_entry_runs_a_business_command_b204() {
         let flip = r#"Button(id: flip, label: tr! { "en" => "Flip", "ja" => "反転" }, feature: PageFeature::Add) => draft.on.toggle()"#;
         let output = failure("", &format!("Column {{ {ADD} {flip} }}"), LAYOUTS);

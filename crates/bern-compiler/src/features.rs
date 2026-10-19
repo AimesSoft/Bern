@@ -115,6 +115,10 @@ struct Search<'a> {
     feature: &'a str,
     size: LayoutSize,
     entries: BTreeSet<String>,
+    /// The components being searched, the scope's root first: one that
+    /// places itself reaches nothing more the second time, and is
+    /// reported as recursive elsewhere.
+    placing: Vec<String>,
 }
 
 impl Search<'_> {
@@ -167,10 +171,16 @@ impl Search<'_> {
                 {
                     return Level::None;
                 }
-                match self.components.get(name) {
-                    Some(def) => self.node(name, &def.body),
-                    None => Level::None,
+                if self.placing.iter().any(|placing| placing == name) {
+                    return Level::None;
                 }
+                let Some(def) = self.components.get(name) else {
+                    return Level::None;
+                };
+                self.placing.push(name.to_string());
+                let level = self.node(name, &def.body);
+                self.placing.pop();
+                level
             }
             Node::If(node) => {
                 let mut bodies: Vec<&[Node]> = node
@@ -293,6 +303,7 @@ pub fn prove(
                         feature: &feature.name,
                         size: *size,
                         entries: BTreeSet::new(),
+                        placing: vec![root.clone()],
                     };
                     let level = match by_name.get(root.as_str()) {
                         Some(component) => search.node(&root, &component.body),
