@@ -259,7 +259,7 @@ pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> Strin
         .name
         .get(&app.languages.default)
         .unwrap_or(&app.app.id);
-    entry.push_str(&format!("Name={default}\n"));
+    entry.push_str(&format!("Name={}\n", desktop_value(default)));
     for language in &app.languages.supported {
         let Some(name) = app.app.name.get(language) else {
             continue;
@@ -270,7 +270,7 @@ pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> Strin
             "zh-Hant" => "zh_TW".to_string(),
             other => other.replace('-', "_"),
         };
-        entry.push_str(&format!("Name[{locale}]={name}\n"));
+        entry.push_str(&format!("Name[{locale}]={}\n", desktop_value(name)));
     }
     let types = opened_types(app);
     if types.is_empty() {
@@ -286,6 +286,26 @@ pub fn desktop_entry(app: &Application, executable: &Path, icon: &Path) -> Strin
     entry.push_str("Terminal=false\nCategories=Utility;\n");
     entry.push_str("StartupNotify=true\nDBusActivatable=false\n");
     entry
+}
+
+/// A desktop entry string value: line breaks, tabs and backslashes as the
+/// specification's escapes, so the value stays on its line, and a leading
+/// space as `\s`, which would otherwise be read as the space after `=`.
+/// Other control characters cannot be written and are left out.
+fn desktop_value(text: &str) -> String {
+    let mut value = String::new();
+    for (index, c) in text.chars().enumerate() {
+        match c {
+            '\\' => value.push_str("\\\\"),
+            '\n' => value.push_str("\\n"),
+            '\t' => value.push_str("\\t"),
+            '\r' => value.push_str("\\r"),
+            ' ' if index == 0 => value.push_str("\\s"),
+            c if c.is_control() => {}
+            c => value.push(c),
+        }
+    }
+    value
 }
 
 /// MIME types of the file kinds `Drop(opens: true)` areas take. Extensions
@@ -417,6 +437,26 @@ mod tests {
         assert!(
             showcase.contains("\nDescription: ") && showcase.ends_with("\n Built with Bern.\n")
         );
+    }
+
+    #[test]
+    fn desktop_entry_names_stay_on_their_line() {
+        let mut hello = app("hello");
+        let names = &mut hello.app.name.translations;
+        names.insert("en".into(), "Hello\nExec=/bin/sh\\x".into());
+        names.insert("zh-Hans".into(), " 你好\t\r".into());
+        let entry = desktop_entry(&hello, Path::new("/opt/hello/hello"), Path::new("hello"));
+        assert!(
+            entry.contains("\nName=Hello\\nExec=/bin/sh\\\\x\n"),
+            "{entry}"
+        );
+        // A leading space would be dropped as the space after `=`.
+        assert!(entry.contains("\nName[zh_CN]=\\s你好\\t\\r\n"), "{entry}");
+        let execs: Vec<&str> = entry
+            .lines()
+            .filter(|line| line.starts_with("Exec="))
+            .collect();
+        assert_eq!(execs, ["Exec=/opt/hello/hello"], "{entry}");
     }
 
     #[test]
