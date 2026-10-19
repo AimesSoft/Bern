@@ -71,42 +71,45 @@ pub(crate) fn choose(supported: &[String], fallback: &str) -> String {
 }
 
 /// The supported language that best matches `wanted`, most preferred
-/// first.
+/// first: an earlier tag wins over a closer match of a later one, so
+/// `LANGUAGE=de_DE:en` chooses `de` over `en`.
 fn best(supported: &[String], wanted: &[String], fallback: &str) -> String {
-    for tag in wanted {
-        if let Some(exact) = supported
-            .iter()
-            .find(|candidate| candidate.eq_ignore_ascii_case(tag))
-        {
-            return exact.clone();
-        }
+    wanted
+        .iter()
+        .find_map(|tag| matching(supported, tag))
+        .cloned()
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// The supported language for one wanted tag: the tag itself in any case,
+/// else one of its language, Chinese by its script.
+fn matching<'a>(supported: &'a [String], tag: &str) -> Option<&'a String> {
+    if let Some(exact) = supported
+        .iter()
+        .find(|candidate| candidate.eq_ignore_ascii_case(tag))
+    {
+        return Some(exact);
     }
-    for tag in wanted {
-        let lower = tag.to_ascii_lowercase();
-        // zh-CN, zh-SG → zh-Hans; zh-TW, zh-HK → zh-Hant.
-        let script = if ["zh-tw", "zh-hk", "zh-mo", "zh-hant"]
-            .iter()
-            .any(|prefix| lower.starts_with(prefix))
-        {
-            "zh-hant".to_string()
-        } else if lower.starts_with("zh") {
-            "zh-hans".to_string()
-        } else {
-            lower.split('-').next().unwrap_or_default().to_string()
-        };
-        let found = supported
-            .iter()
-            .find(|candidate| candidate.to_ascii_lowercase() == script)
-            .or_else(|| {
-                supported.iter().find(|candidate| {
-                    candidate.to_ascii_lowercase().split('-').next() == Some(script.as_str())
-                })
-            });
-        if let Some(found) = found {
-            return found.clone();
-        }
-    }
-    fallback.to_string()
+    let lower = tag.to_ascii_lowercase();
+    // zh-CN, zh-SG → zh-Hans; zh-TW, zh-HK → zh-Hant.
+    let script = if ["zh-tw", "zh-hk", "zh-mo", "zh-hant"]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+    {
+        "zh-hant".to_string()
+    } else if lower.starts_with("zh") {
+        "zh-hans".to_string()
+    } else {
+        lower.split('-').next().unwrap_or_default().to_string()
+    };
+    supported
+        .iter()
+        .find(|candidate| candidate.to_ascii_lowercase() == script)
+        .or_else(|| {
+            supported.iter().find(|candidate| {
+                candidate.to_ascii_lowercase().split('-').next() == Some(script.as_str())
+            })
+        })
 }
 
 pub(crate) fn install(table: StringTable, supported: &[&str], fallback: &str) {
@@ -329,6 +332,22 @@ mod tests {
         let supported = tags(&["en", "zh-Hans", "pt-BR"]);
         assert_eq!(best(&supported, &tags(&["pt-br"]), "en"), "pt-BR");
         assert_eq!(best(&supported, &tags(&["ZH-HANS"]), "en"), "zh-Hans");
+    }
+
+    #[test]
+    fn earlier_languages_win_over_later_exact_matches() {
+        // LANGUAGE=de_DE:en
+        let supported = tags(&["en", "de"]);
+        assert_eq!(best(&supported, &tags(&["de-DE", "en"]), "en"), "de");
+        assert_eq!(
+            best(&tags(&["en", "zh-Hans"]), &tags(&["zh-CN", "en"]), "en"),
+            "zh-Hans"
+        );
+        // An exact match still wins within one tag.
+        assert_eq!(
+            best(&tags(&["pt", "pt-BR"]), &tags(&["pt-BR", "en"]), "en"),
+            "pt-BR"
+        );
     }
 
     #[test]
