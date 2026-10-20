@@ -157,8 +157,9 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::Tabs(p, c, {}, {selection}, ",
-                some(element.id.as_ref().map(|_| self.id(element)))
+                "b::Tabs(p, c, {}, {selection}, {}, ",
+                some(element.id.as_ref().map(|_| self.id(element))),
+                some(element.expr("fallback").map(|value| self.getter(value)))
             ),
             &element.children,
             ",",

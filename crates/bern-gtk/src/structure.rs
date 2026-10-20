@@ -447,6 +447,21 @@ pub fn SidebarSection(p: &Parent, ctx: &Ctx, title: Option<Str>, children: Build
     children(p, ctx);
 }
 
+/// Where a selection goes when no mounted item holds it: to the fallback
+/// while that is mounted, else to the first item. `None` while an item
+/// holds it or none is mounted.
+fn settled(
+    current: &Value,
+    mounted: &[Value],
+    fallback: impl FnOnce() -> Option<Value>,
+) -> Option<Value> {
+    if mounted.is_empty() || mounted.contains(current) {
+        return None;
+    }
+    let back = fallback().filter(|fallback| mounted.contains(fallback));
+    Some(back.unwrap_or_else(|| mounted[0].clone()))
+}
+
 pub struct SplitSpec {
     pub id: Option<&'static str>,
     pub selection: Field,
@@ -524,16 +539,17 @@ pub fn SplitView(p: &Parent, ctx: &Ctx, spec: SplitSpec, sidebar: Build, detail:
             let at = at.clone();
             let fallback = fallback.clone();
             glib::idle_add_local_once(move || {
-                let current = at.peek(selection);
-                let entries = registry.ordered();
-                if entries.is_empty() || entries.iter().any(|entry| entry.value == current) {
-                    return;
+                let mounted: Vec<Value> = registry
+                    .ordered()
+                    .iter()
+                    .map(|entry| entry.value.clone())
+                    .collect();
+                let next = settled(&at.peek(selection), &mounted, || {
+                    fallback.map(|fallback| untrack(|| fallback(&at)))
+                });
+                if let Some(next) = next {
+                    at.write(selection, next);
                 }
-                let back = fallback
-                    .map(|fallback| untrack(|| fallback(&at)))
-                    .filter(|fallback| entries.iter().any(|entry| entry.value == *fallback));
-                let next = back.unwrap_or_else(|| entries[0].value.clone());
-                at.write(selection, next);
             });
         });
     }
@@ -876,12 +892,14 @@ pub(crate) struct TabEntry {
     page: String,
 }
 
-/// The tabs a tab view shows now, as they mount and leave.
+/// The tabs a tab view shows now, as they mount and leave, in the order of
+/// the stack's pages, which the switcher shows.
 pub struct TabRegistry {
     stack: adw::ViewStack,
     entries: RefCell<Vec<Rc<TabEntry>>>,
     version: crate::reactive::Version,
     next: std::cell::Cell<u32>,
+    updating: std::cell::Cell<bool>,
 }
 
 impl TabRegistry {
@@ -891,6 +909,17 @@ impl TabRegistry {
             .iter()
             .find(|entry| entry.value == *value)
             .cloned()
+    }
+
+    /// Change the stack's pages, or the page it shows, without the stack's
+    /// own pick counting as a choice: it shows the first page added to it,
+    /// and none once the page shown leaves. The selection decides, through
+    /// `settled`.
+    fn quietly<T>(&self, change: impl FnOnce() -> T) -> T {
+        let was = self.updating.replace(true);
+        let result = change();
+        self.updating.set(was);
+        result
     }
 }
 
@@ -914,7 +943,7 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
     let index = registry.next.get();
     registry.next.set(index + 1);
     let name = format!("t{index}");
-    let page = registry.stack.add_titled(&holder, Some(&name), "");
+    let page = registry.quietly(|| registry.stack.add_titled(&holder, Some(&name), ""));
     if let Some(icon) = props.icon {
         page.set_icon_name(Some(icons::name(icon)));
     }
@@ -943,7 +972,7 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
                 .entries
                 .borrow_mut()
                 .retain(|kept| !Rc::ptr_eq(kept, &entry));
-            registry.stack.remove(&holder);
+            registry.quietly(|| registry.stack.remove(&holder));
             registry.version.bump();
         }
     });
@@ -956,14 +985,16 @@ pub struct TabAccessory {
 }
 
 /// Tabs as a view stack with a view switcher in the page header, as
-/// GNOME preference windows show them. Tabs may come and go; only the
-/// selected tab is built.
+/// GNOME preference windows show them. Tabs may come and go; when the
+/// selected one leaves, the selection moves to `fallback` or the first tab
+/// left. Only the selected tab is built.
 #[allow(non_snake_case)]
 pub fn Tabs(
     p: &Parent,
     ctx: &Ctx,
     id: Option<&'static str>,
     selection: Field,
+    fallback: Option<Get>,
     tabs: Build,
     accessory: Option<TabAccessory>,
 ) {
@@ -974,6 +1005,7 @@ pub fn Tabs(
         entries: RefCell::new(Vec::new()),
         version: crate::reactive::Version::new(),
         next: std::cell::Cell::new(0),
+        updating: std::cell::Cell::new(false),
     });
     let (declared, _) = Parent::capture(p);
     tabs(&declared, &ctx.with_tabs(Rc::clone(&registry)));
@@ -1003,11 +1035,9 @@ pub fn Tabs(
         });
     }
     let shown: Rc<RefCell<Option<Rc<TabEntry>>>> = Rc::new(RefCell::new(None));
-    let updating = Rc::new(std::cell::Cell::new(false));
     {
         let registry = Rc::clone(&registry);
         let at = ctx.clone();
-        let guard = Rc::clone(&updating);
         effect(move || {
             registry.version.track();
             let value = at.read(selection);
@@ -1028,16 +1058,41 @@ pub fn Tabs(
             let build = Rc::clone(&entry.build);
             let inner = entry.ctx.clone();
             entry.slot.fill(false, |region| build(region, &inner));
-            guard.set(true);
-            registry.stack.set_visible_child_name(&entry.page);
-            guard.set(false);
+            registry.quietly(|| registry.stack.set_visible_child_name(&entry.page));
+        });
+    }
+    // A selection without a mounted tab moves on, once the update that
+    // removed it has mounted whatever replaces it.
+    {
+        let registry = Rc::clone(&registry);
+        let at = ctx.clone();
+        effect(move || {
+            registry.version.track();
+            at.read(selection);
+            let registry = Rc::clone(&registry);
+            let at = at.clone();
+            let fallback = fallback.clone();
+            glib::idle_add_local_once(move || {
+                let mounted: Vec<Value> = registry
+                    .entries
+                    .borrow()
+                    .iter()
+                    .map(|entry| entry.value.clone())
+                    .collect();
+                let next = settled(&at.peek(selection), &mounted, || {
+                    fallback.map(|fallback| untrack(|| fallback(&at)))
+                });
+                if let Some(next) = next {
+                    at.write(selection, next);
+                }
+            });
         });
     }
     {
         let registry = Rc::clone(&registry);
         let at = ctx.clone();
         stack.connect_visible_child_name_notify(move |stack| {
-            if updating.get() {
+            if registry.updating.get() {
                 return;
             }
             let Some(name) = stack.visible_child_name() else {
@@ -1239,6 +1294,22 @@ mod tests {
         assert_eq!(size_of(599.0), "compact");
         assert_eq!(size_of(600.0), "expanded");
         assert_eq!(size_of(10_000.0), "expanded");
+    }
+
+    /// When the selected item leaves, sidebars and tabs go to the fallback
+    /// while it is mounted, else to the first item, as on the other
+    /// targets.
+    #[test]
+    fn a_selection_without_its_item_moves_to_the_fallback_or_the_first() {
+        let [a, b, c, d] = [0, 1, 2, 3].map(Value::unit_variant);
+        let mounted = [a.clone(), c.clone(), d.clone()];
+        let unused = || -> Option<Value> { panic!("the fallback is not read") };
+        assert_eq!(settled(&c, &mounted, unused), None);
+        assert_eq!(settled(&b, &[], unused), None);
+        assert_eq!(settled(&b, &mounted, || Some(d.clone())), Some(d.clone()));
+        assert_eq!(settled(&b, &mounted, || None), Some(a.clone()));
+        // A fallback that is not mounted either is passed over.
+        assert_eq!(settled(&d, &mounted[..2], || Some(b.clone())), Some(a));
     }
 
     #[test]
