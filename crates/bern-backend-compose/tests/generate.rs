@@ -1235,3 +1235,66 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     let component = &component[..component.find("\n}\n").unwrap()];
     assert!(!component.contains("fillMaxWidth"), "{component}");
 }
+
+/// A canvas with nothing to draw, which an application writes to keep
+/// room, is a spacer: no drawing node and no semantics of its own; one
+/// with shapes stays a canvas.
+#[test]
+fn a_canvas_with_nothing_to_draw_is_a_spacer() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/compose-room-project"), ROOM_UI);
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
+    let window = &kotlin[kotlin.find("fun BernWindow0()").unwrap()..];
+    assert!(
+        window.contains("Spacer(Modifier.bernFrame(null, 12f.dp))"),
+        "{window}"
+    );
+    assert_eq!(window.matches("Canvas(").count(), 1, "{window}");
+    assert!(window.contains("BernDraw.shape("), "{window}");
+}
+
+/// The Gradle project carries a baseline profile naming the Bern runtime
+/// and the generated interface, so that they are compiled ahead of time.
+#[test]
+fn the_runtime_and_the_interface_are_in_the_baseline_profile() {
+    let (config, compiled) = compile("hello");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let profile = file(&files, "app/src/main/baseline-prof.txt");
+    for rule in [
+        "HSPLdev/bern/runtime/**->**(**)**",
+        "HSPLdev/bern/hello/**->**(**)**",
+    ] {
+        assert!(profile.contains(rule), "missing `{rule}`:\n{profile}");
+    }
+}
+
+/// Room kept by an empty canvas between two buttons, and a drawn bar.
+const ROOM_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Column {
+                    Button(id: first, label: tr! { "en" => "First" }) => app.add()
+                    Canvas(height: 12)
+                    Canvas(width: 40, height: 4) {
+                        Shape(kind: rect, fill: accent)
+                    }
+                    Button(id: second, label: tr! { "en" => "Second" }) => app.add()
+                }
+            }
+        }
+    }
+}
+"#;

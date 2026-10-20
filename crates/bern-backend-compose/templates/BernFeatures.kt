@@ -86,8 +86,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -199,19 +197,45 @@ fun bernDark(): Boolean = LocalBernDark.current ?: isSystemInDarkTheme()
 /// Material colors for `dark`, with the application's accent as primary.
 @Composable
 fun BernScheme(dark: Boolean, content: @Composable () -> Unit) {
-    val context = LocalContext.current
-    var colors = if (Build.VERSION.SDK_INT >= 31) {
-        if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-    } else {
-        if (dark) darkColorScheme() else lightColorScheme()
-    }
-    BernThemeState.accent?.let { accent ->
-        val color = BernPalette(colors, dark).color(accent)
-        val on = if (color.luminance() > 0.4f) Color(0xFF111114) else Color.White
-        colors = colors.copy(primary = color, onPrimary = on, inversePrimary = color, surfaceTint = color)
-    }
+    val colors = BernSchemes.get(
+        LocalContext.current, androidx.compose.ui.platform.LocalConfiguration.current, dark, BernThemeState.accent,
+    )
     CompositionLocalProvider(LocalBernDark provides dark) {
         MaterialTheme(colorScheme = colors, content = content)
+    }
+}
+
+/// The schemes made for the current configuration, by appearance and
+/// accent: every part drawn in one appearance shares one, and they are
+/// made again when the configuration (and with it the wallpaper's colors)
+/// changes.
+private object BernSchemes {
+    private var configuration: android.content.res.Configuration? = null
+    private val made = HashMap<Pair<Boolean, BernColor?>, androidx.compose.material3.ColorScheme>()
+
+    fun get(
+        context: Context,
+        configuration: android.content.res.Configuration,
+        dark: Boolean,
+        accent: BernColor?,
+    ): androidx.compose.material3.ColorScheme {
+        if (configuration != this.configuration) {
+            made.clear()
+            this.configuration = android.content.res.Configuration(configuration)
+        }
+        return made.getOrPut(dark to accent) {
+            var colors = if (Build.VERSION.SDK_INT >= 31) {
+                if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            } else {
+                if (dark) darkColorScheme() else lightColorScheme()
+            }
+            if (accent != null) {
+                val color = BernPalette(colors, dark).color(accent)
+                val on = if (color.luminance() > 0.4f) Color(0xFF111114) else Color.White
+                colors = colors.copy(primary = color, onPrimary = on, inversePrimary = color, surfaceTint = color)
+            }
+            colors
+        }
     }
 }
 
@@ -365,15 +389,17 @@ fun bernLength(value: Dp, motion: BernMotion): Dp {
 // MARK: - Shadows
 
 /// The look's shadow, as if lifted off the page, growing and settling with
-/// the state's spring.
+/// the state's spring; the spring runs only while the shadow changes, as
+/// in `bernTransform`.
 @Composable
 fun Modifier.bernShadow(look: BernLook, motion: BernMotion, shape: Shape): Modifier {
-    val radius = look.shadowRadius ?: 0.0
-    val elevation by animateDpAsState(
-        radius.dp,
-        if (bernReduceMotion()) snap() else motion.spec(),
-        label = "shadow",
-    )
+    val radius = (look.shadowRadius ?: 0.0).toFloat()
+    val lifting = remember { androidx.compose.animation.core.Animatable(radius) }
+    if (lifting.isRunning || lifting.targetValue != radius) {
+        val reduced = bernReduceMotion()
+        LaunchedEffect(radius) { if (reduced) lifting.snapTo(radius) else lifting.animateTo(radius, motion.spec()) }
+    }
+    val elevation = lifting.value.dp
     if (elevation.value <= 0f) return this
     val shade = Color.Black.copy(alpha = (look.shadowOpacity ?: 0.2).toFloat())
     return shadow(elevation, shape, clip = false, ambientColor = shade, spotColor = shade)
@@ -409,9 +435,9 @@ fun BernContentButton(
         }
         return
     }
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val hovered by interaction.collectIsHoveredAsState()
+    val interaction = remember { BernInteractions() }
+    val pressed = interaction.pressed
+    val hovered = interaction.hovered
     val (look, motion) = (style ?: BernStyle()).look(false, hovered, pressed, enabled)
     val palette = bernPalette()
     // A capsule's ends are half its height; a height of its own sizes it.

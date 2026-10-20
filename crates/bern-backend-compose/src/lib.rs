@@ -266,6 +266,10 @@ impl Target for ComposeAndroid {
                 main.join("AndroidManifest.xml"),
                 project::manifest(app, round),
             ),
+            GeneratedFile::text(
+                main.join("baseline-prof.txt"),
+                project::baseline_profile(app),
+            ),
             GeneratedFile::text(main.join("res/values/themes.xml"), project::theme(false)),
             GeneratedFile::text(
                 main.join("res/values-night/themes.xml"),
@@ -502,6 +506,24 @@ impl Target for ComposeAndroid {
                 to: product_apk.clone(),
             },
         ];
+        // A release build's baseline profile beside the APK, in the form
+        // Android 12 and later take at install (Gradle's metadata lists it
+        // for API 31 and up): `bern run` installs the two together, so the
+        // runtime and the interface are compiled ahead of time from the
+        // first start. A debug build is never compiled; an earlier
+        // release's profile must not go with it.
+        let product_profile = product_apk.with_extension("dm");
+        steps.push(if context.release {
+            BuildStep::Copy {
+                from: gradle_project
+                    .join("app/build/outputs/apk/release/baselineProfiles/0/app-release.dm"),
+                to: product_profile,
+            }
+        } else {
+            BuildStep::RemoveIfExists {
+                path: product_profile,
+            }
+        });
         let mut products = vec![product_apk.clone()];
         let mut forward = None;
         if glue::ipc(context) {

@@ -10,8 +10,6 @@
 
 package dev.bern.runtime
 
-import android.provider.Settings
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -21,7 +19,6 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.AnimationVector
 import androidx.compose.animation.core.FiniteAnimationSpec
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.TwoWayConverter
 import androidx.compose.animation.core.VectorizedFiniteAnimationSpec
@@ -36,7 +33,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideIn
 import androidx.compose.animation.slideOut
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -44,8 +40,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -91,7 +85,6 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextLayoutResult
@@ -114,13 +107,7 @@ data class BernMotion(val period: Double, val damping: Double) {
 /// (developer options or accessibility), or the application asks for it
 /// (`reduce_motion`).
 @Composable
-fun bernReduceMotion(): Boolean {
-    val context = LocalContext.current
-    val system = remember {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-    }
-    return system || BernMotionState.reduced
-}
+fun bernReduceMotion(): Boolean = BernMotionState.system || BernMotionState.reduced
 
 // MARK: - Colors
 
@@ -285,22 +272,78 @@ data class BernStyle(
 }
 
 /// The look's scale, offset and opacity, moved by the state's spring;
-/// still when the system turned animations off.
+/// still when the system turned animations off. An animation runs only
+/// while the look changes: a control at rest keeps no coroutine waiting,
+/// which a page of many controls would start and cancel each time it
+/// shows and leaves.
 @Composable
 fun Modifier.bernTransform(look: BernLook, motion: BernMotion): Modifier {
     if (bernReduceMotion()) return this
-    val spec = motion.spec<Float>()
-    val scaleX by animateFloatAsState(look.scaleX ?: 1f, spec, label = "scaleX")
-    val scaleY by animateFloatAsState(look.scaleY ?: 1f, spec, label = "scaleY")
-    val offsetX by animateFloatAsState(look.offsetX ?: 0f, spec, label = "offsetX")
-    val offsetY by animateFloatAsState(look.offsetY ?: 0f, spec, label = "offsetY")
-    val alpha by animateFloatAsState(look.opacity ?: 1f, tween(150), label = "alpha")
+    val move = BernMove(look.scaleX ?: 1f, look.scaleY ?: 1f, look.offsetX ?: 0f, look.offsetY ?: 0f)
+    val opacity = look.opacity ?: 1f
+    val moving = remember { androidx.compose.animation.core.Animatable(move, BernMove.converter) }
+    val fading = remember { androidx.compose.animation.core.Animatable(opacity) }
+    if (moving.isRunning || moving.targetValue != move) {
+        LaunchedEffect(move) { moving.animateTo(move, motion.spec()) }
+    }
+    if (fading.isRunning || fading.targetValue != opacity) {
+        LaunchedEffect(opacity) { fading.animateTo(opacity, tween(150)) }
+    }
     return graphicsLayer {
-        this.scaleX = scaleX
-        this.scaleY = scaleY
-        translationX = offsetX * density
-        translationY = offsetY * density
-        this.alpha = alpha
+        val moved = moving.value
+        scaleX = moved.scaleX
+        scaleY = moved.scaleY
+        translationX = moved.offsetX * density
+        translationY = moved.offsetY * density
+        alpha = fading.value
+    }
+}
+
+/// Scale and offset of a look, moved together by one spring.
+data class BernMove(val scaleX: Float, val scaleY: Float, val offsetX: Float, val offsetY: Float) {
+    companion object {
+        val converter = TwoWayConverter<BernMove, androidx.compose.animation.core.AnimationVector4D>(
+            { androidx.compose.animation.core.AnimationVector4D(it.scaleX, it.scaleY, it.offsetX, it.offsetY) },
+            { BernMove(it.v1, it.v2, it.v3, it.v4) },
+        )
+    }
+}
+
+/// A control's interactions that keep whether it is pressed and whether
+/// the pointer is over it as they are sent, rather than in a coroutine
+/// collecting them for as long as the control is shown.
+class BernInteractions : MutableInteractionSource {
+    private val source = MutableInteractionSource()
+    private val presses = ArrayList<androidx.compose.foundation.interaction.PressInteraction.Press>()
+    private val hovers = ArrayList<androidx.compose.foundation.interaction.HoverInteraction.Enter>()
+    var pressed by mutableStateOf(false)
+        private set
+    var hovered by mutableStateOf(false)
+        private set
+
+    override val interactions get() = source.interactions
+
+    override suspend fun emit(interaction: androidx.compose.foundation.interaction.Interaction) {
+        track(interaction)
+        source.emit(interaction)
+    }
+
+    override fun tryEmit(interaction: androidx.compose.foundation.interaction.Interaction): Boolean {
+        track(interaction)
+        return source.tryEmit(interaction)
+    }
+
+    private fun track(interaction: androidx.compose.foundation.interaction.Interaction) {
+        when (interaction) {
+            is androidx.compose.foundation.interaction.PressInteraction.Press -> presses.add(interaction)
+            is androidx.compose.foundation.interaction.PressInteraction.Release -> presses.remove(interaction.press)
+            is androidx.compose.foundation.interaction.PressInteraction.Cancel -> presses.remove(interaction.press)
+            is androidx.compose.foundation.interaction.HoverInteraction.Enter -> hovers.add(interaction)
+            is androidx.compose.foundation.interaction.HoverInteraction.Exit -> hovers.remove(interaction.enter)
+            else -> return
+        }
+        if (pressed != presses.isNotEmpty()) pressed = presses.isNotEmpty()
+        if (hovered != hovers.isNotEmpty()) hovered = hovers.isNotEmpty()
     }
 }
 
@@ -315,9 +358,9 @@ fun BernStyledButton(
     material: @Composable (Modifier, MutableInteractionSource?) -> Unit,
     content: @Composable RowScope.() -> Unit,
 ) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val hovered by interaction.collectIsHoveredAsState()
+    val interaction = remember { BernInteractions() }
+    val pressed = interaction.pressed
+    val hovered = interaction.hovered
     val (look, motion) = style.look(false, hovered, pressed, enabled)
     val shape = RoundedCornerShape((style.corner ?: 6.0).dp)
     if (!style.drawsLook) {
@@ -356,9 +399,9 @@ fun BernStyledSidebarItem(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
-    val hovered by interaction.collectIsHoveredAsState()
+    val interaction = remember { BernInteractions() }
+    val pressed = interaction.pressed
+    val hovered = interaction.hovered
     val (look, motion) = style.look(selected, hovered, pressed, true)
     val palette = bernPalette()
     val fill = if (selected) look.fill else null
@@ -732,8 +775,48 @@ fun BernAppear(
         ) { inner() }
         return
     }
-    val state = remember { MutableTransitionState(!plays).apply { targetState = true } }
-    AnimatedVisibility(visibleState = state, enter = bernEnter(transition, motion, wait)) { inner() }
+    // Fading, popping and sliding: one value from 0 to 1 on a layer, as
+    // `AnimatedVisibility` would move each property with the same spring,
+    // without its transition and the coroutines it keeps until the element
+    // leaves. Each element of a page that appears has one.
+    val animates = plays && transition != null
+    val progress = remember { androidx.compose.animation.core.Animatable(if (animates) 0f else 1f) }
+    if (animates) {
+        LaunchedEffect(Unit) {
+            if (reduced || motion == null) {
+                progress.animateTo(1f, tween(150))
+            } else {
+                if (wait > 0) kotlinx.coroutines.delay((wait * 1000).toLong())
+                progress.animateTo(1f, motion.spec())
+            }
+        }
+    }
+    val density = LocalDensity.current
+    val layer = if (!animates) Modifier else Modifier.graphicsLayer {
+        val shown = progress.value
+        alpha = shown.coerceIn(0f, 1f)
+        if (reduced || motion == null) return@graphicsLayer
+        when (transition) {
+            is BernTransition.Pop -> {
+                scaleX = transition.from + (1 - transition.from) * shown
+                scaleY = scaleX
+            }
+            is BernTransition.Slide -> {
+                val offset = slideOffset(transition.edge, with(density) { transition.distance.dp.roundToPx() })
+                translationX = offset.x * (1 - shown)
+                translationY = offset.y * (1 - shown)
+            }
+            else -> {}
+        }
+    }
+    // Laid out as `AnimatedVisibility` lays out its content: the same
+    // constraints, as large as the largest child, each at the top left.
+    androidx.compose.ui.layout.Layout(inner, layer) { measurables, constraints ->
+        val placeables = measurables.map { it.measure(constraints) }
+        layout(placeables.maxOfOrNull { it.width } ?: 0, placeables.maxOfOrNull { it.height } ?: 0) {
+            placeables.forEach { it.place(0, 0) }
+        }
+    }
 }
 
 // MARK: - Stagger

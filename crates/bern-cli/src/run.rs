@@ -79,7 +79,38 @@ fn android(
         "    \x1b[1;32mInstalling\x1b[0m {} on {device}",
         apk.display()
     );
-    let installed = run(&["install", "-r", &apk.display().to_string()])?;
+    // A release build's baseline profile goes with it where the system
+    // takes its form (Android 12 and later): the app is then compiled
+    // ahead of time at install, instead of running in the JIT until the
+    // system compiles it in the background.
+    let apk_path = apk.display().to_string();
+    let profile = apk.with_extension("dm");
+    let sdk = run(&["shell", "getprop", "ro.build.version.sdk"])
+        .ok()
+        .and_then(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u32>()
+                .ok()
+        })
+        .unwrap_or(0);
+    let mut installed = None;
+    if sdk >= 31 && profile.is_file() {
+        let profile_path = profile.display().to_string();
+        let together = run(&["install-multiple", "-r", &apk_path, &profile_path])?;
+        if together.status.success() {
+            installed = Some(together);
+        } else {
+            eprintln!(
+                "warning: the device did not take the baseline profile ({}); installing the APK alone",
+                String::from_utf8_lossy(&together.stdout).trim()
+            );
+        }
+    }
+    let installed = match installed {
+        Some(installed) => installed,
+        None => run(&["install", "-r", &apk_path])?,
+    };
     if !installed.status.success() {
         return Err(format!(
             "cannot install {}: {}",

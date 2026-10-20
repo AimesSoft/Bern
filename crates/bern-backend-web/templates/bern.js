@@ -1537,8 +1537,17 @@ export function Search(p, ctx, { id, field, prompt, width, height, fontSize, sug
     target: () => target(ctx, id), role: "search", label: prompt ?? (() => ""),
     actions: { edit: (value) => field.set(value), submit, value: () => field.peek(), focus: () => input.focus() },
   });
-  const box = el("div", { class: "bern-search" }, icon("magnifyingglass", 14), input, clear);
-  if (width !== undefined) box.style.width = `${width}px`;
+  // The box always keeps its own height. In a page it keeps its width when
+  // it has one and is otherwise as wide as its column and takes the room
+  // left in a row, as the native fields are; in a toolbar it keeps the
+  // toolbar's width. Flexible results in its popover change neither.
+  const box = el("div", { class: "bern-search bern-sized-height" }, icon("magnifyingglass", 14), input, clear);
+  if (width !== undefined) {
+    box.style.width = `${width}px`;
+    box.classList.add("bern-sized-width");
+  } else if (!ctx.inToolbar) {
+    box.classList.add("bern-fill-width");
+  }
   if (height !== undefined) box.style.height = `${height}px`;
   if (fontSize !== undefined) input.style.fontSize = `${fontSize}px`;
   if (results) searchResults(box, input, field, ctx, results, suggest);

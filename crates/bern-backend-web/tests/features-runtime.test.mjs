@@ -71,6 +71,7 @@ function runtime(search = "") {
       }
     }
     prepend(child) { this.childNodes.unshift(child); child.parentElement = this; }
+    matches() { return false; }
     setPointerCapture(id) { this.captured = id; }
     focus() { this.focused = true; }
     /// Runs this element's listeners for `name`; returns whether one
@@ -477,6 +478,46 @@ test("a stack holding a form or a scroll view fills a page's room as it fills a 
     assert.ok(across.includes(host), `${host} stretches a flexible child across`);
     assert.ok(down.includes(host), `${host} grows a flexible child down`);
   }
+});
+
+test("a search field without a width is as wide as its column, and a toolbar's keeps its width", () => {
+  const { B, Element } = runtime();
+  const root = new Element("root");
+  const scope = new B.Scope();
+  // Results whose list stretches across and down their popover.
+  const results = (panel) => {
+    const list = new Element("div");
+    list.classList.add("bern-fill-width", "bern-fill-height");
+    panel.append(list);
+  };
+  B.within(scope, () => B.Stack(root, { comp: "demo" }, { axis: "column" }, (column, ctx) => {
+    B.Search(column, ctx, { id: "plain", field: B.cell(""), prompt: () => "Search", height: 34 }, null, results);
+    B.Search(column, ctx, { id: "sized", field: B.cell(""), width: 240 }, null, results);
+  }));
+  B.within(scope, () => B.Search(root, { comp: "demo", inToolbar: true }, { id: "tool", field: B.cell("") }));
+  const [column, tool] = root.childNodes;
+  const [plain, sized] = column.childNodes;
+  // In a page: as wide as its column, and in a row the room left.
+  assert.ok(plain.classes.has("bern-fill-width"));
+  assert.ok(plain.classes.has("bern-layout-width"));
+  assert.equal(plain.style.width, undefined);
+  assert.equal(plain.style.height, "34px");
+  // A width of its own stays, however its results stretch.
+  assert.ok(sized.classes.has("bern-sized-width"));
+  assert.ok(!sized.classes.has("bern-fill-width"));
+  assert.ok(!sized.classes.has("bern-layout-width"));
+  assert.equal(sized.style.width, "240px");
+  // Neither grows down its column.
+  for (const box of [plain, sized]) {
+    assert.ok(box.classes.has("bern-sized-height"));
+    assert.ok(!box.classes.has("bern-layout-height"));
+  }
+  // In a toolbar: the toolbar's width.
+  assert.ok(!tool.classes.has("bern-fill-width"));
+  assert.ok(!tool.classes.has("bern-sized-width"));
+  scope.dispose();
+  const css = readFileSync(new URL("../templates/bern.css", import.meta.url), "utf8");
+  assert.doesNotMatch(css.match(/\n\.bern-search \{[^}]*\}/)[0], /width/, "the box takes its width from its place");
 });
 
 test("edge grow keeps its opacity and anchors the scaling edge", () => {
