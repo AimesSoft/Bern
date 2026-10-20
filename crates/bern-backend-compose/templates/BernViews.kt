@@ -278,12 +278,6 @@ object BernIcons {
             "M9,2L7.17,4L4,4c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2L22,6c0,-1.1 -0.9,-2 -2,-2h-3.17L15,2L9,2zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5z",
         )
     }
-    private val textFields by lazy {
-        icon(
-            "TextFields",
-            "M2.5,4v3h5v12h3V7h5V4H2.5zM21.5,9h-9v3h3v7h3v-7h3V9z",
-        )
-    }
     private val radioUnchecked by lazy {
         icon(
             "RadioButtonUnchecked",

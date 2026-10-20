@@ -26,7 +26,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("captions.bubble", "subtitles"),
     ("captions.bubble.fill", "subtitles"),
     ("cart", "Icons.Filled.ShoppingCart"),
-    ("character.cursor.ibeam", "textFields"),
+    ("character.cursor.ibeam", "text"),
     ("checkmark", "Icons.Filled.Check"),
     ("checkmark.circle", "Icons.Filled.CheckCircle"),
     ("checkmark.circle.fill", "Icons.Filled.CheckCircle"),
