@@ -1487,7 +1487,8 @@ export function Switch(p, ctx, spec) {
     B.bindText(text, label);
     node.append(text);
   }
-  if (spec.shape === "capsule") node.classList.add("bern-control-capsule");
+  // A switch shown as a capsule or chip button is the web's pill chip.
+  if (spec.shape === "capsule" || spec.shape === "chip") node.classList.add("bern-control-capsule");
   bindLength(node, "height", spec.height);
   B.bindAttr(node, "aria-label", label);
   B.bindAttr(node, "title", label);

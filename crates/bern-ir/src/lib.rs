@@ -977,6 +977,37 @@ impl Node {
         self.walk_in(None, &mut |node, _| visit(node));
     }
 
+    /// Visit every element at or under this node, depth first, to change
+    /// it.
+    pub fn elements_mut(&mut self, visit: &mut impl FnMut(&mut Element)) {
+        let children: Vec<&mut Node> = match self {
+            Node::Element(element) => {
+                visit(element);
+                element.children.iter_mut().collect()
+            }
+            Node::Component(_) => Vec::new(),
+            Node::If(node) => node
+                .branches
+                .iter_mut()
+                .flat_map(|(_, body)| body.iter_mut())
+                .chain(node.otherwise.iter_mut())
+                .collect(),
+            Node::IfLet(node) => node
+                .then
+                .iter_mut()
+                .chain(node.otherwise.iter_mut())
+                .collect(),
+            Node::Match(node) => node
+                .arms
+                .iter_mut()
+                .flat_map(|arm| arm.body.iter_mut())
+                .collect(),
+        };
+        for child in children {
+            child.elements_mut(visit);
+        }
+    }
+
     /// Visit this node and all descendants, depth first, each with the kind
     /// of the nearest element around it; `parent` is the one around this
     /// node.

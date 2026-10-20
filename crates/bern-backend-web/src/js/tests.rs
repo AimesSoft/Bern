@@ -495,3 +495,91 @@ fn scene_layers_bleed_and_window_buttons_take_no_room() {
     assert!(!generated.contains("WindowButtons"), "{generated}");
     assert!(!generated.contains("unsupported"), "{generated}");
 }
+
+#[test]
+fn styles_set_a_rows_lengths_for_their_platforms_only() {
+    use bern_ir::style::{Metric, StyleEffect, StyleRule};
+    let mut app = app();
+    let rule = |targets: &[&str], base| StyleRule {
+        component: "Row".into(),
+        variant: Some("brand".into()),
+        targets: targets.iter().map(|target| target.to_string()).collect(),
+        exempt: vec![],
+        base,
+        states: vec![],
+        settle: None,
+        source: SourceLocation::default(),
+    };
+    let metric = |metric, value| StyleEffect::Metric { metric, value };
+    app.style.rules.push(rule(
+        &[],
+        vec![
+            metric(Metric::Gap, Some(5.0)),
+            metric(Metric::PaddingX, Some(12.0)),
+        ],
+    ));
+    app.style.rules.push(rule(
+        &["browser"],
+        vec![metric(Metric::Gap, Some(10.0)), metric(Metric::Width, None)],
+    ));
+    let mut row = element("Row");
+    row.props.insert("variant".into(), keyword("brand"));
+    row.props
+        .insert("width".into(), Prop::Number { value: 92.0 });
+    app.components.push(bern_ir::ComponentDef {
+        name: "brand".into(),
+        module: vec![],
+        params: vec![],
+        body: Node::Element(row),
+        source: SourceLocation::default(),
+    });
+    let generate = |platforms: &[&str]| {
+        let app = bern_target_api::style::for_platforms(&app, platforms);
+        let Node::Element(row) = &app.components[0].body else {
+            unreachable!()
+        };
+        let mut out = Out::default();
+        Generator::new(&app).element(&mut out, row);
+        out.finish()
+    };
+    // The browser's rule after the one for every platform: its gap, the
+    // shared padding, and no width of its own.
+    let web = generate(&["browser"]);
+    assert!(
+        web.contains(r#""gap", 10"#) && web.contains(r#""paddingInline", 12"#),
+        "{web}"
+    );
+    assert!(!web.contains("92"), "{web}");
+    // Elsewhere the shared rule, and the width the row writes.
+    let mac = generate(&["macos"]);
+    assert!(
+        mac.contains(r#""gap", 5"#) && mac.contains(r#""width", 92"#),
+        "{mac}"
+    );
+}
+
+#[test]
+fn a_chip_is_the_webs_pill_and_elsewhere_the_capsule_at_thirty_points() {
+    let mut app = app();
+    let mut chip = element("Button");
+    chip.props.insert("shape".into(), keyword("chip"));
+    app.components.push(bern_ir::ComponentDef {
+        name: "chips".into(),
+        module: vec![],
+        params: vec![],
+        body: Node::Element(chip),
+        source: SourceLocation::default(),
+    });
+    let button = |platforms: &[&str]| {
+        let app = bern_target_api::style::for_platforms(&app, platforms);
+        let Node::Element(button) = &app.components[0].body else {
+            unreachable!()
+        };
+        (
+            button.keyword("shape").map(str::to_string),
+            button.number("height"),
+        )
+    };
+    assert_eq!(button(&["browser"]), (Some("chip".into()), None));
+    assert_eq!(button(&["macos"]), (Some("capsule".into()), Some(30.0)));
+}

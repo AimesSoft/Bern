@@ -4,9 +4,9 @@
 
 use crate::check::location;
 use bern_ir::style::{
-    AccentDef, BUILT_IN_MOTION, Band, COLOR_ROLES, ColorRef, ControlSize, Edge, MotionToken,
-    PatternDef, StateStyle, StyleEffect, StyleRule, StyleSheet, StyleState, TransitionDef,
-    TransitionKind, built_in_transitions,
+    AccentDef, BUILT_IN_MOTION, Band, COLOR_ROLES, ColorRef, ControlSize, Edge, Metric,
+    MotionToken, PatternDef, StateStyle, StyleEffect, StyleRule, StyleSheet, StyleState,
+    TransitionDef, TransitionKind, built_in_transitions,
 };
 use bern_ir::{SourceLocation, Srgb};
 use bern_syntax::{StyleArg, StyleItem, StyleValue};
@@ -21,6 +21,9 @@ pub const PLATFORMS: [&str; 7] = [
 /// Controls that take style overrides, with the states that apply to them.
 const STYLEABLE: &[(&str, &[StyleState])] = &[
     ("Stack", &[]),
+    // A row's or column's lengths, per platform.
+    ("Row", &[]),
+    ("Column", &[]),
     // A form's `background` is its rows'; the form itself shows the page.
     ("Form", &[]),
     (
@@ -61,7 +64,25 @@ const BASE_EFFECTS: &[&str] = &[
     "padding",
     "size",
     "shadow",
+    "gap",
+    "padding_x",
+    "padding_y",
+    "width",
+    "height",
+    "font_size",
+    "row_height",
 ];
+
+/// The elements that write each length a style may set in their place.
+fn writes(metric: Metric) -> &'static [&'static str] {
+    match metric {
+        Metric::Gap | Metric::PaddingX | Metric::PaddingY => &["Row", "Column", "Form"],
+        Metric::RowHeight => &["Form"],
+        Metric::Width => &["Row", "Column", "Stack"],
+        Metric::Height => &["Row", "Column", "Stack", "IconButton"],
+        Metric::FontSize => &["IconButton"],
+    }
+}
 const STATE_EFFECTS: &[&str] = &[
     "background",
     "foreground",
@@ -926,6 +947,50 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                 // `border: control.border`, or `border: border(fill.subtle, width: 0.5)`.
                 "border" if matches!(&prop.value, StyleValue::Call { name, .. } if name == "border") => {
                     lowering.effect(&prop.value, &sheet)
+                }
+                name if Metric::ALL.iter().any(|metric| metric.name() == name) => {
+                    let metric = *Metric::ALL
+                        .iter()
+                        .find(|metric| metric.name() == name)
+                        .unwrap();
+                    let fits = matches!(metric, Metric::Width | Metric::Height);
+                    if !writes(metric).contains(&component.as_str()) {
+                        lowering.error(
+                            prop.name.span(),
+                            format!(
+                                "`{component}` writes no `{name}`; a style sets it on {}",
+                                writes(metric).join(", ")
+                            ),
+                        );
+                        None
+                    } else if fits && prop.value.dotted().as_deref() == Some("fit") {
+                        Some(StyleEffect::Metric {
+                            metric,
+                            value: None,
+                        })
+                    } else if metric == Metric::FontSize {
+                        match lowering.number(&prop.value, "`font_size`") {
+                            Some(size) if size > 0.0 => Some(StyleEffect::Metric {
+                                metric,
+                                value: Some(size),
+                            }),
+                            Some(_) => {
+                                lowering.error(prop.value.span(), "`font_size` is more than 0");
+                                None
+                            }
+                            None => None,
+                        }
+                    } else if fits && !matches!(prop.value, StyleValue::Number(..)) {
+                        lowering.error(prop.value.span(), format!("`{name}` is a length or `fit`"));
+                        None
+                    } else {
+                        lowering
+                            .length(&prop.value, &format!("`{name}`"))
+                            .map(|length| StyleEffect::Metric {
+                                metric,
+                                value: Some(length),
+                            })
+                    }
                 }
                 "background" | "foreground" | "border" | "shadow" => {
                     let call = StyleValue::Call {

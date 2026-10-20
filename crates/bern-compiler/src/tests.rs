@@ -2981,7 +2981,11 @@ fn style_rules_are_lowered_and_checked() {
             "gives both modes",
         ),
         ("#[target(amiga)] Button { corner: 4 }", "is not a platform"),
-        ("Button { width: 4 }", "is not a style property"),
+        ("Button { margin: 4 }", "is not a style property"),
+        (
+            "Button { width: 4 }",
+            "`Button` writes no `width`; a style sets it on Row, Column, Stack",
+        ),
         (
             "pattern { plain: check(gap(4)) }",
             "needs a colored band wider than zero",
@@ -3731,6 +3735,59 @@ fn slide_and_grow_take_their_edge_and_distance_by_name_or_by_position() {
             "transition { a: grow(bottom, 12, smooth) }",
             "write `grow(bottom, token)`",
         ),
+    ] {
+        assert_style_error(body, expected);
+    }
+}
+
+#[test]
+fn styles_set_the_lengths_elements_write_for_their_platforms() {
+    use ir::style::{Metric, StyleEffect};
+    let (sheet, diagnostics) = lower_style(
+        "Row.brand { gap: 5, padding_x: 12 }
+         #[target(browser)] Row.brand { gap: 10, padding_x: 0, width: fit }
+         Form.settings { gap: 10, row_height: 44, padding_y: 6 }
+         IconButton.transport { font_size: 20, height: 14 }",
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let metric = |metric, value| StyleEffect::Metric { metric, value };
+    assert_eq!(
+        sheet.rules[1].base,
+        vec![
+            metric(Metric::Gap, Some(10.0)),
+            metric(Metric::PaddingX, Some(0.0)),
+            metric(Metric::Width, None),
+        ]
+    );
+    assert!(
+        sheet.rules[2]
+            .base
+            .contains(&metric(Metric::RowHeight, Some(44.0)))
+    );
+    assert_eq!(
+        sheet.rules[3].base,
+        vec![
+            metric(Metric::FontSize, Some(20.0)),
+            metric(Metric::Height, Some(14.0)),
+        ]
+    );
+    for (body, expected) in [
+        (
+            "Button.x { gap: 4 }",
+            "`Button` writes no `gap`; a style sets it on Row, Column, Form",
+        ),
+        (
+            "Row.x { font_size: 13 }",
+            "`Row` writes no `font_size`; a style sets it on IconButton",
+        ),
+        ("Row.x { width: wide }", "`width` is a length or `fit`"),
+        ("Row.x { gap: -1 }", "`gap` is 0 or more"),
+        ("Row.x { gap: fit }", "`gap` is a number"),
+        (
+            "IconButton.x { font_size: 0 }",
+            "`font_size` is more than 0",
+        ),
+        ("Row.x { hover: scale(1.1) }", "`Row` has no `hover` state"),
     ] {
         assert_style_error(body, expected);
     }

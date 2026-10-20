@@ -178,6 +178,8 @@ fn look(app: &Application, effects: &[StyleEffect]) -> String {
             ),
             StyleEffect::System => set("system", "true".into()),
             StyleEffect::Nothing => set("quiet", "true".into()),
+            // Lengths in place of written ones are laid out before generation.
+            StyleEffect::Metric { .. } => {}
             StyleEffect::Corner { .. } | StyleEffect::Padding { .. } | StyleEffect::Size { .. } => {
             }
         }
