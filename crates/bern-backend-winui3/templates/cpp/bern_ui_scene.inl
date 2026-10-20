@@ -11,11 +11,53 @@ namespace B {
 // ---------------------------------------------------------------------------
 // Scenes
 
+/// A `ScaleBox` scene's size and the room the box has around it on each
+/// side, in scene points.
+struct Room {
+    double width = 0, height = 0, x = 0, y = 0;
+    bool operator==(Room const&) const = default;
+
+    /// How far each side of a layer at `x`, `y`, `w`, `h` reaches past the
+    /// scene when it bleeds — left, right, top, bottom: a side at an edge
+    /// of the scene reaches the edge of the room, with half a point of
+    /// slack so a layer laid out to the edge reaches it.
+    std::array<double, 4> Reach(double lx, double ly, double lw, double lh) const {
+        return {lx <= 0.5 ? x : 0, lx + lw >= width - 0.5 ? x : 0, ly <= 0.5 ? y : 0, ly + lh >= height - 0.5 ? y : 0};
+    }
+};
+
+/// The room around a scene, shared with the layers that bleed into it.
+struct SceneRoom {
+    Room room;
+    /// The layers that bleed, laid out again when the room changes.
+    std::vector<winrt::weak_ref<controls::Panel>> layers;
+
+    /// Take the room around a `w` × `h` scene scaled by `scale` and
+    /// centered in `area`. A box of a new shape keeps its scene's size,
+    /// which XAML does not lay out again, so the layers that bleed are.
+    void Fit(double w, double h, Size area, float scale) {
+        bool fits = scale > 0 && std::isfinite(scale);
+        auto around = [&](float side, double scene) {
+            return fits && !std::isinf(side) ? (std::max)(0.0, (side / scale - scene) / 2) : 0.0;
+        };
+        Room next{w, h, around(area.Width, w), around(area.Height, h)};
+        if (next == room) return;
+        room = next;
+        std::erase_if(layers, [](winrt::weak_ref<controls::Panel> const& weak) {
+            auto layer = weak.get();
+            if (layer) layer.InvalidateMeasure();
+            return !layer;
+        });
+    }
+};
+
 /// `ScaleBox`: its children stacked from the top leading corner in a space
 /// of `width` × `height`, scaled as a whole to fit the room it is given and
-/// centered there; what stands outside is clipped.
+/// centered there; what stands outside is clipped. The scene's layers
+/// learn the room around it, which a layer that bleeds reaches into.
 struct ScalePanel : controls::PanelT<ScalePanel> {
     double width = 1, height = 1;
+    std::shared_ptr<SceneRoom> scene = std::make_shared<SceneRoom>();
 
     float Fit(Size room) const {
         float w = static_cast<float>((std::max)(1.0, width)), h = static_cast<float>((std::max)(1.0, height));
@@ -35,6 +77,9 @@ struct ScalePanel : controls::PanelT<ScalePanel> {
 
     Size ArrangeOverride(Size final) {
         float scale = Fit(final);
+        // The room follows the size the box is given; a layer that bleeds
+        // measures again for a new one.
+        scene->Fit(width, height, final, scale);
         float w = static_cast<float>(width), h = static_cast<float>(height);
         for (auto child : Children()) {
             child.Arrange(Rect{0, 0, w, h});
@@ -75,25 +120,75 @@ inline void ScaleBox(Parent const& p, Ctx const& ctx, ScaleBoxProps props, Build
     controls::Grid space;
     space.HorizontalAlignment(xaml::HorizontalAlignment::Left);
     space.VerticalAlignment(xaml::VerticalAlignment::Top);
-    children(Parent::Aligned(space, xaml::HorizontalAlignment::Left, xaml::VerticalAlignment::Top), ctx);
+    auto inner = ctx;
+    inner.scene = impl->scene;
+    children(Parent::Aligned(space, xaml::HorizontalAlignment::Left, xaml::VerticalAlignment::Top), inner);
     panel.Children().Append(space);
     p.Add(panel);
 }
 
+/// The sides of a layer that bleeds: whether it bleeds, where it is going
+/// (its place before any motion), the room of its scene as it last laid
+/// out, and how far each side reaches past the scene — left, right, top,
+/// bottom — on the layer's motion.
+struct Bleed {
+    bool on = false;
+    std::array<double, 4> target{};
+    std::optional<Room> seen;
+    std::array<std::shared_ptr<Spring>, 4> sides;
+    Motion const* motion = nullptr;
+
+    /// Move the sides to where they reach at the layer's target: on the
+    /// layer's motion, or with `jump` at once, for a box of a new shape.
+    void Follow(bool jump) {
+        std::array<double, 4> reach{};
+        if (on && seen) reach = seen->Reach(target[0], target[1], target[2], target[3]);
+        for (size_t i = 0; i < sides.size(); ++i) {
+            auto& side = *sides[i];
+            if (jump) {
+                Frames::Stop(&side);
+                side.value = side.target = reach[i];
+                side.velocity = 0;
+            } else if (side.target != reach[i]) {
+                side.To(reach[i], motion);
+            }
+        }
+    }
+};
+
 /// `Positioned`: its content in the rectangle `x`, `y`, `width`, `height`
 /// of the space it stands in, centered there. It takes all the room its
-/// stack offers, as a layer does.
+/// stack offers, as a layer does. With `bleed`, each side that reaches its
+/// scene's edge continues to the edge of the room around the scene.
 struct PositionedPanel : controls::PanelT<PositionedPanel> {
     double x = 0, y = 0, width = 0, height = 0;
+    std::shared_ptr<SceneRoom> scene;
+    std::shared_ptr<Bleed> bleed;
+
+    /// How far each side reaches past the scene now.
+    std::array<double, 4> Sides() {
+        if (!bleed) return {};
+        if (scene && bleed->seen != scene->room) {
+            bleed->seen = scene->room;
+            bleed->Follow(true);
+        }
+        std::array<double, 4> sides{};
+        for (size_t i = 0; i < sides.size(); ++i) sides[i] = (std::max)(0.0, bleed->sides[i]->value);
+        return sides;
+    }
 
     Size MeasureOverride(Size available) {
-        for (auto child : Children()) child.Measure(Size{static_cast<float>(width), static_cast<float>(height)});
+        auto [left, right, top, bottom] = Sides();
+        Size content{static_cast<float>((std::max)(0.0, width + left + right)), static_cast<float>((std::max)(0.0, height + top + bottom))};
+        for (auto child : Children()) child.Measure(content);
         return Size{std::isinf(available.Width) ? static_cast<float>(x + width) : available.Width,
             std::isinf(available.Height) ? static_cast<float>(y + height) : available.Height};
     }
 
     Size ArrangeOverride(Size final) {
-        for (auto child : Children()) child.Arrange(Rect{static_cast<float>(x), static_cast<float>(y), static_cast<float>((std::max)(0.0, width)), static_cast<float>((std::max)(0.0, height))});
+        auto [left, right, top, bottom] = Sides();
+        Rect frame{static_cast<float>(x - left), static_cast<float>(y - top), static_cast<float>((std::max)(0.0, width + left + right)), static_cast<float>((std::max)(0.0, height + top + bottom))};
+        for (auto child : Children()) child.Arrange(frame);
         return final;
     }
 };
@@ -104,6 +199,9 @@ struct PositionedProps {
     Len width;
     Len height;
     Motion const* animate = nullptr;
+    /// Whether the layer continues past each edge of its scene it
+    /// reaches, to the edge of the `ScaleBox`.
+    Get bleed;
 };
 
 inline void Positioned(Parent const& p, Ctx const& ctx, PositionedProps props, Build const& children) {
@@ -119,8 +217,36 @@ inline void Positioned(Parent const& p, Ctx const& ctx, PositionedProps props, B
     BindLen(ctx, props.y, props.animate, [place, relayout](double v) { place->y = v; relayout(); });
     BindLen(ctx, props.width, props.animate, [place, relayout](double v) { place->width = v; relayout(); });
     BindLen(ctx, props.height, props.animate, [place, relayout](double v) { place->height = v; relayout(); });
+    if (props.bleed && ctx.scene) {
+        // The sides follow where the layer is going, on its motion.
+        auto bleed = std::make_shared<Bleed>();
+        bleed->motion = props.animate;
+        for (auto& side : bleed->sides) side = Spring::Make(0, [relayout](double) { relayout(); });
+        place->bleed = bleed;
+        place->scene = ctx.scene;
+        ctx.scene->layers.push_back(keep);
+        auto on = props.bleed;
+        std::array<Len, 4> frame{props.x, props.y, props.width, props.height};
+        Reactive::Run([ctx, on, frame, bleed] {
+            bool bleeds = R::Truthy(on(ctx));
+            std::array<double, 4> target{};
+            for (size_t i = 0; i < frame.size(); ++i) target[i] = frame[i].Now(ctx);
+            Reactive::Untrack([&] {
+                bleed->on = bleeds;
+                bleed->target = target;
+                bleed->Follow(false);
+                return 0;
+            });
+        });
+        Reactive::OnCleanup([bleed] {
+            for (auto const& side : bleed->sides) Frames::Stop(side.get());
+        });
+    }
+    // The layer's own layers are placed in its space.
+    auto inner = ctx;
+    inner.scene = nullptr;
     controls::Grid content;
-    children(Parent::Aligned(content, xaml::HorizontalAlignment::Center, xaml::VerticalAlignment::Center), ctx);
+    children(Parent::Aligned(content, xaml::HorizontalAlignment::Center, xaml::VerticalAlignment::Center), inner);
     panel.Children().Append(content);
     p.Add(panel);
 }

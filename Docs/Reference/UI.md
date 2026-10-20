@@ -53,7 +53,7 @@ pub fn heading(#[content] title: String) -> impl View {
 
 `ScaleBox(width:, height:)` 定义固定逻辑画布，在父容器给出的可用区域内等比缩放并居中，保留整个画布。父容器需要提供可用宽高。`Positioned(x:, y:, width:, height:)` 从场景左上角定位图层，坐标允许为负；位置和尺寸可绑定状态，配合 `animate` 平滑变化。`ScaleBox` 之外的内容会被裁切。
 
-区域与画布的比例不同时，画布两侧（或上下）会留出空白。`Positioned(bleed: true)` 的图层在它到达的每条画布边上继续延伸，铺满到 `ScaleBox` 的边缘：背景、铺满窗口的画面都写成到达画布边的图层并带 `bleed`，就不会在宽窗口里留出黑边；画布按设计尺寸显示时空白为零，与不写 `bleed` 完全相同。`bleed` 可绑定布尔表达式（例如只在画面铺满时延伸），延伸的边随图层的 `animate` 动效移入移出，窗口尺寸变化时立即跟随。它只对 `ScaleBox` 场景里的图层生效；图层里面的 `Positioned` 用它自己的坐标，不再延伸。实现：Web、SwiftUI（macOS、iOS、tvOS）与 Compose；GTK 与 WinUI 3 尚未实现，那里的场景照常等比缩放、两侧留白。
+区域与画布的比例不同时，画布两侧（或上下）会留出空白。`Positioned(bleed: true)` 的图层在它到达的每条画布边上继续延伸，铺满到 `ScaleBox` 的边缘：背景、铺满窗口的画面都写成到达画布边的图层并带 `bleed`，就不会在宽窗口里留出黑边；画布按设计尺寸显示时空白为零，与不写 `bleed` 完全相同。`bleed` 可绑定布尔表达式（例如只在画面铺满时延伸），延伸的边随图层的 `animate` 动效移入移出，窗口尺寸变化时立即跟随。它只对 `ScaleBox` 场景里的图层生效；图层里面的 `Positioned` 用它自己的坐标，不再延伸。实现：Web、SwiftUI（macOS、iOS、tvOS）、Compose、GTK 与 WinUI 3。
 
 `WindowButtons` 占出窗口自己的按钮在内容前端所占的位置：内容铺到标题栏下面时，macOS 的红绿灯与其后的间距共 84 点；网页、手机、平板、电视、Windows、Linux 的窗口在那里没有按钮，它不占位置，也不在所在行里产生间距。
 

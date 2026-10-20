@@ -107,6 +107,7 @@ impl Generator<'_> {
                     ("width", self.len(element, "width")),
                     ("height", self.len(element, "height")),
                     ("animate", Self::animate(element)),
+                    ("bleed", element.expr("bleed").map(|e| self.getter(e))),
                 ])
             ),
             &element.children,
