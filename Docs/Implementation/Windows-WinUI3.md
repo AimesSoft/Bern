@@ -440,8 +440,8 @@ target\bern\windows\Showcase\showcase.exe
 - 改后：按钮与叠层 `208x117`，轨道 `208x3`，画布 `179x3`（0.86 × 208）；不在按钮里的满进度为 `208x3`；竖向的叠层 `40x120`，轨道 `3x120 bern-rail-h` 在前缘，画布 `3x103`（0.86 × 120）。窗口快照里两条进度都与图片同宽。
 - 用于验收的媒体类应用（另起副本，换了自己的 `bundle_id`）经 CLI 继续播放并缩回侧栏：迷你播放器的按钮、叠层与轨道都是 208 宽，进度画布 `139x3`，快照里进度条从画面左缘起、停在画面以内；展开播放器后，时间轴上放在 `Positioned` 里的刻度与章节名两条轨道仍是声明的 1074 宽，页面里列中的轨道仍铺满列宽。
 - 生成器测试 `a_rail_in_a_stack_takes_the_size_of_its_other_layers` 生成这两种结构（带内容按钮、叠层、图片、轨道与按比例的画布；竖向轨道），检查运行时的上述规则，并在 PC 上用 MSVC 编译。
-- 其他目标的同一结构：macOS 窗口与浏览器（Chromium）中测试应用的进度条与图片同宽、竖向轨道在前缘；SwiftUI 的 `BernLayers`、Compose 的 `matchParentSize()`、GTK 的 `Layers`（轨道沿轴的自然长度为 0，展开时不计轨道）与 Web 的叠层都不让轨道撑大叠层。
-- 未验证：Islands 前端；Linux 与 Android 设备上未看（虚拟机与手机当时由别的会话使用）。
+- 其他目标的同一结构：macOS 窗口与浏览器（Chromium）中测试应用的进度条与图片同宽、竖向轨道在前缘；Linux 虚拟机（GTK）上媒体类应用的迷你播放器进度到 86% 时，进度条止于画面宽的 0.86，没有超出 208 宽的画面；SwiftUI 的 `BernLayers`、Compose 的 `matchParentSize()`、GTK 的 `Layers`（轨道沿轴的自然长度为 0，展开时不计轨道）与 Web 的叠层都不让轨道撑大叠层。
+- 未验证：Islands 前端；Android 设备上未看（要在用户手机上重新安装测试版）。
 
 ## 未完成与已知限制
 
