@@ -530,10 +530,118 @@ inline void AlignWithItems(controls::NavigationView const& view, xaml::Framework
     header.LayoutUpdated(align);
 }
 
+#if BERN_WINUI
+/// The button that folds the pane is the title bar's, beside the window's
+/// icon, as in Windows 11 applications. With several split views in a
+/// window, the one shown last has it.
+inline int64_t paneToggleOwner = 0;
+
+inline void PaneToggle(controls::TitleBar const& bar, controls::NavigationView const& view) {
+    auto key = winrt::box_value(L"bern.paneToggle");
+    int64_t token = ++paneToggleOwner;
+    bar.Resources().Insert(key, winrt::box_value(token));
+    bar.IsPaneToggleButtonVisible(true);
+    auto owns = [key, token](controls::TitleBar const& bar) {
+        return bar.Resources().HasKey(key) && winrt::unbox_value<int64_t>(bar.Resources().Lookup(key)) == token;
+    };
+    auto revoker = bar.PaneToggleRequested(winrt::auto_revoke, [owns, weakView = winrt::make_weak(view)](controls::TitleBar const& sender, auto&&) {
+        if (!owns(sender)) return;
+        if (auto view = weakView.get()) view.IsPaneOpen(!view.IsPaneOpen());
+    });
+    auto requested = std::make_shared<decltype(revoker)>(std::move(revoker));
+    Reactive::OnCleanup([requested, owns, key, weakBar = winrt::make_weak(bar)] {
+        requested->revoke();
+        auto bar = weakBar.get();
+        if (!bar || !owns(bar)) return;
+        bar.Resources().Remove(key);
+        bar.IsPaneToggleButtonVisible(false);
+    });
+}
+#endif
+
+/// A pane of no declared width takes the width its edge is dragged to, as
+/// a sidebar's divider does elsewhere: at least as wide as on macOS, at
+/// most half as wide again as the view's own 320.
+inline constexpr double kPaneNarrowest = 180, kPaneWidest = 480;
+
+/// The view has no divider of its own: an invisible strip over the open
+/// pane's edge takes the pointer and shows the system's resize cursor.
+inline xaml::FrameworkElement PaneSizer(controls::NavigationView const& view) {
+    controls::Grid strip;
+    strip.Width(8);
+    strip.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+    strip.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    strip.Background(media::SolidColorBrush(winrt::Windows::UI::Color{0, 0, 0, 0}));
+    xaml::Automation::AutomationProperties::SetAccessibilityView(strip, xaml::Automation::Peers::AccessibilityView::Raw);
+#if BERN_WINUI
+    strip.as<xaml::IUIElementProtected>().ProtectedCursor(
+        winrt::Microsoft::UI::Input::InputSystemCursor::Create(winrt::Microsoft::UI::Input::InputSystemCursorShape::SizeWestEast));
+#else
+    // System XAML has no cursor for an element: the island takes the
+    // pointer's cursor as it moves.
+    auto resize = [](auto&&, auto&&) { SetCursor(LoadCursorW(nullptr, IDC_SIZEWE)); };
+    strip.PointerEntered(resize);
+    strip.PointerMoved(resize);
+#endif
+    auto weakView = winrt::make_weak(view);
+    auto weakStrip = winrt::make_weak(strip);
+    // Only an open pane beside the content has an edge to drag.
+    auto place = [weakView, weakStrip](bool closing = false) {
+        auto view = weakView.get();
+        auto strip = weakStrip.get();
+        if (!view || !strip) return;
+        bool shown = !closing && view.IsPaneOpen() && view.DisplayMode() == controls::NavigationViewDisplayMode::Expanded;
+        strip.Visibility(shown ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        strip.Margin(xaml::Thickness{view.OpenPaneLength() - 4, 0, 0, 0});
+    };
+    place();
+    view.DisplayModeChanged([place](auto&&, auto&&) { place(); });
+    view.PaneOpened([place](auto&&, auto&&) { place(); });
+    view.PaneClosing([place](auto&&, auto&&) { place(true); });
+    view.PaneClosed([place](auto&&, auto&&) { place(true); });
+    view.RegisterPropertyChangedCallback(controls::NavigationView::OpenPaneLengthProperty(), [place](auto&&, auto&&) { place(); });
+
+    struct Drag {
+        bool down = false;
+        double x = 0, from = 0;
+    };
+    auto drag = std::make_shared<Drag>();
+    using PointerHandler = xaml::Input::PointerEventHandler;
+    // Positions are taken in the view, which mirrors them right to left
+    // as it mirrors the pane.
+    strip.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(PointerHandler([drag, weakView](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+        auto view = weakView.get();
+        if (!view) return;
+        auto point = args.GetCurrentPoint(view);
+        if (!point.Properties().IsLeftButtonPressed()) return;
+        *drag = Drag{true, point.Position().X, view.OpenPaneLength()};
+        sender.as<xaml::UIElement>().CapturePointer(args.Pointer());
+        args.Handled(true);
+    })), true);
+    strip.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler([drag, weakView](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        auto view = weakView.get();
+        if (!drag->down || !view) return;
+        double width = drag->from + args.GetCurrentPoint(view).Position().X - drag->x;
+        view.OpenPaneLength(std::round((std::clamp)(width, kPaneNarrowest, kPaneWidest)));
+        args.Handled(true);
+    })), true);
+    auto end = [drag](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (!drag->down) return;
+        drag->down = false;
+        sender.as<xaml::UIElement>().ReleasePointerCapture(args.Pointer());
+    };
+    strip.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(PointerHandler(end)), true);
+    strip.AddHandler(xaml::UIElement::PointerCanceledEvent(), winrt::box_value(PointerHandler(end)), true);
+    strip.AddHandler(xaml::UIElement::PointerCaptureLostEvent(), winrt::box_value(PointerHandler([drag](auto&&, auto&&) { drag->down = false; })), true);
+    return strip;
+}
+
 /// The navigation view of Windows applications: a pane of destinations
 /// with optional search and content at its foot, and a detail page whose
 /// header shows the selected destination, the detail's tools and back. The
-/// pane collapses as the window narrows.
+/// pane collapses as the window narrows, and its button folds it to the
+/// view's strip of icons; a pane of no declared width takes the width its
+/// edge is dragged to.
 inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Build const& header, Build const& footer, Build const& sidebar,
     Build const& detail) {
     if (ctx.page) ctx.page->HideHeader();
@@ -547,14 +655,14 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
     view.AlwaysShowHeader(false);
 #if BERN_WINUI
     view.IsTitleBarAutoPaddingEnabled(false);
+    // The button that folds the pane is in the title bar, in every mode.
+    view.IsPaneToggleButtonVisible(false);
+    if (ctx.win && ctx.win->titleBar) PaneToggle(ctx.win->titleBar, view);
+#else
+    // Windows 10's: the button at the top of the pane, in every mode (the
+    // system's title bar takes none).
+    view.IsPaneToggleButtonVisible(true);
 #endif
-    // An open pane stays open, without the button that folds it; the
-    // narrower modes keep it.
-    auto toggle = [](controls::NavigationView const& view) {
-        view.IsPaneToggleButtonVisible(view.DisplayMode() != controls::NavigationViewDisplayMode::Expanded);
-    };
-    view.DisplayModeChanged([toggle](controls::NavigationView const& sender, auto&&) { toggle(sender); });
-    view.Loaded([toggle](IInspectable const& sender, auto&&) { toggle(sender.as<controls::NavigationView>()); });
     MarkFill(view);
     auto registry = std::make_shared<SidebarRegistry>();
     registry->view = view;
@@ -580,6 +688,19 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
         footer(Parent::Aligned(foot, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
         view.PaneFooter(foot);
     }
+    // The header and footer belong to the open pane: folded to its strip of
+    // icons, the pane shows only the destinations, as a sidebar folded away
+    // elsewhere takes its header and footer with it.
+    auto parts = [weakView = winrt::make_weak(view)](bool open) {
+        auto view = weakView.get();
+        if (!view) return;
+        auto shown = open ? xaml::Visibility::Visible : xaml::Visibility::Collapsed;
+        for (auto part : {view.PaneHeader(), view.PaneFooter()})
+            if (auto element = part.try_as<xaml::UIElement>()) element.Visibility(shown);
+    };
+    view.PaneOpening([parts](auto&&, auto&&) { parts(true); });
+    view.PaneClosing([parts](auto&&, auto&&) { parts(false); });
+    view.Loaded([parts](IInspectable const& sender, auto&&) { parts(sender.as<controls::NavigationView>().IsPaneOpen()); });
 
     Reactive::Run([registry, ctx, selection] {
         registry->version.Track();
@@ -675,7 +796,15 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
                     if (auto entry = registry->Selected(ctx.Peek(selection))) return entry->name;
                     return std::nullopt;
                 }});
-    p.Add(view);
+    if (props.width) {
+        p.Add(view);
+        return;
+    }
+    controls::Grid frame;
+    MarkFill(frame);
+    frame.Children().Append(view);
+    frame.Children().Append(PaneSizer(view));
+    p.Add(frame);
 }
 
 /// Push navigation over a typed route path. The root content stays mounted

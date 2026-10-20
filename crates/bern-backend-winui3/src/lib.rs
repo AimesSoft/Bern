@@ -705,4 +705,34 @@ mod tests {
         assert!(item.contains("made->alongPill = true;"), "{item}");
         assert!(motion.contains("if (resting) x = y = 0, sx = sy = 1;"));
     }
+
+    /// The pane folds by the title bar's button in WinUI 3 and by its own in
+    /// the system XAML; a pane of no declared width takes the width its
+    /// edge is dragged to, and a declared width stays.
+    #[test]
+    fn sidebar_folds_and_takes_the_dragged_width() {
+        let structure = runtime("bern_ui_structure.inl");
+        let split = structure
+            .split_once("inline void SplitView(")
+            .unwrap()
+            .1
+            .split_once("\n}\n")
+            .unwrap()
+            .0;
+        let (winui, islands) = split
+            .split_once("#if BERN_WINUI")
+            .unwrap()
+            .1
+            .split_once("#else")
+            .unwrap();
+        assert!(winui.contains("view.IsPaneToggleButtonVisible(false);"));
+        assert!(winui.contains("PaneToggle(ctx.win->titleBar, view);"));
+        let islands = islands.split_once("#endif").unwrap().0;
+        assert!(islands.contains("view.IsPaneToggleButtonVisible(true);"));
+        let declared = split.split_once("if (props.width) {").unwrap().1;
+        let (fixed, sized) = declared.split_once("return;").unwrap();
+        assert!(fixed.contains("p.Add(view);") && !fixed.contains("PaneSizer"));
+        assert!(sized.contains("frame.Children().Append(PaneSizer(view));"));
+        assert!(structure.contains("kPaneNarrowest = 180, kPaneWidest = 480;"));
+    }
 }
