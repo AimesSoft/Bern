@@ -142,9 +142,11 @@ impl Snapshot {
 }
 
 /// Hue and chroma of neutral surfaces and text, independent of the brand.
-const NEUTRAL_HUE: f64 = 260.0;
+/// The cool grey of neutral web interfaces (zinc): #09090B, #18181B and
+/// #27272A in the dark, #F4F4F5 and #E4E4E7 in the light.
+const NEUTRAL_HUE: f64 = 286.0;
 const SURFACE_CHROMA: f64 = 0.005;
-const TEXT_CHROMA: f64 = 0.012;
+const TEXT_CHROMA: f64 = 0.013;
 /// Brand roles never exceed this chroma, so a vivid seed stays legible.
 const MAX_BRAND_CHROMA: f64 = 0.20;
 /// How far (in OKLCH lightness) an accent fill may darken to carry white
@@ -385,40 +387,31 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     let brand_at = |l: f64, c: f64| Oklch::new(l, c, brand.h);
 
     // Surfaces. Light: a white page and cards, a faint grey for the
-    // sidebar and secondary areas, and white raised layers set apart by
-    // border and shadow. Dark: layers grow lighter as they rise.
-    b.fixed("surface.host", neutral(b.pick(0.965, 0.13), SURFACE_CHROMA));
-    let canvas = b.pick(1.0, 0.175);
+    // sidebar, and white raised layers set apart by border and shadow.
+    // Dark: a near-black page, the sidebar a step above it, and raised
+    // layers on the page colour set apart by border and shadow too.
+    b.fixed("surface.host", neutral(b.pick(0.967, 0.11), SURFACE_CHROMA));
+    let canvas = b.pick(1.0, 0.141);
     b.fixed("surface.canvas", neutral(canvas, SURFACE_CHROMA));
-    b.fixed("surface.panel", neutral(b.pick(0.982, 0.2), SURFACE_CHROMA));
     b.fixed(
-        "surface.raised",
-        neutral(b.pick(1.0, 0.225), SURFACE_CHROMA),
+        "surface.panel",
+        neutral(b.pick(0.985, 0.169), SURFACE_CHROMA),
     );
-    b.fixed(
-        "hover.overlay",
-        neutral(b.pick(0.955, 0.25), SURFACE_CHROMA),
-    );
-    b.fixed(
-        "pressed.overlay",
-        neutral(b.pick(0.925, 0.29), SURFACE_CHROMA),
-    );
-    b.fixed(
-        "disabled.surface",
-        neutral(b.pick(0.955, 0.24), SURFACE_CHROMA),
-    );
-    // Decorative: card borders and dividers between content that is
-    // already identified by its text.
-    b.fixed("separator", neutral(b.pick(0.915, 0.29), SURFACE_CHROMA));
-    // Standard buttons sit on the page colour.
-    let step = b.pick(0.03, 0.04);
-    b.fixed(
-        "button.standard.hover",
-        neutral(canvas - b.pick(step, -step), SURFACE_CHROMA),
-    );
+    b.fixed("surface.raised", neutral(canvas, SURFACE_CHROMA));
+    // The lightest fill under the pointer, and the next one while pressed.
+    let fill = b.pick(0.967, 0.21);
+    let fill_strong = b.pick(0.92, 0.274);
+    b.fixed("hover.overlay", neutral(fill, SURFACE_CHROMA));
+    b.fixed("pressed.overlay", neutral(fill_strong, SURFACE_CHROMA));
+    b.fixed("disabled.surface", neutral(fill, SURFACE_CHROMA));
+    // Decorative: card borders, the outline of standard buttons and fields,
+    // and dividers between content that is already identified by its text.
+    b.fixed("separator", neutral(fill_strong, SURFACE_CHROMA));
+    // Standard buttons sit on the page colour and take the fills.
+    b.fixed("button.standard.hover", neutral(fill, SURFACE_CHROMA));
     b.fixed(
         "button.standard.pressed",
-        neutral(canvas - b.pick(2.0 * step, -2.0 * step), SURFACE_CHROMA),
+        neutral(fill_strong, SURFACE_CHROMA),
     );
 
     // Text and icons must read on every surface and row state.
@@ -433,13 +426,13 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     ];
     b.solve(
         "text.primary",
-        neutral(b.pick(0.21, 0.96), TEXT_CHROMA),
+        neutral(b.pick(0.141, 0.985), TEXT_CHROMA),
         levels.text,
         READS_ON,
     );
     b.solve(
         "text.secondary",
-        neutral(b.pick(0.47, 0.76), TEXT_CHROMA),
+        neutral(b.pick(0.552, 0.712), TEXT_CHROMA),
         levels.text,
         READS_ON,
     );
@@ -451,13 +444,13 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     );
     b.solve(
         "icon.primary",
-        neutral(b.pick(0.25, 0.93), TEXT_CHROMA),
+        neutral(b.pick(0.141, 0.985), TEXT_CHROMA),
         levels.graphic,
         READS_ON,
     );
     b.solve(
         "icon.secondary",
-        neutral(b.pick(0.56, 0.70), TEXT_CHROMA),
+        neutral(b.pick(0.552, 0.712), TEXT_CHROMA),
         levels.graphic,
         READS_ON,
     );

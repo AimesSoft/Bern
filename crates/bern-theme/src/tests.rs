@@ -79,25 +79,25 @@ fn surfaces_layer_the_web_way_and_dark_is_not_inverted_light() {
     let lum = |snapshot: &Snapshot, name: &str| snapshot.token(name).unwrap().luminance();
     let dark = generate(None, Mode::Dark, ContrastPolicy::Standard);
     let light = generate(None, Mode::Light, ContrastPolicy::Standard);
-    // Dark: layers grow lighter as they rise.
-    let order = [
-        "surface.host",
-        "surface.canvas",
-        "surface.panel",
-        "surface.raised",
-    ];
-    for pair in order.windows(2) {
+    // Dark: the host below the page and the sidebar a step above it;
+    // raised layers sit on the page colour, set apart by border and shadow
+    // as in the light.
+    for pair in [
+        ["surface.host", "surface.canvas"],
+        ["surface.canvas", "surface.panel"],
+    ] {
         assert!(lum(&dark, pair[0]) < lum(&dark, pair[1]), "dark {pair:?}");
     }
+    assert_eq!(dark.token("surface.raised"), dark.token("surface.canvas"));
     // Light: a white page and raised layers, a faint grey sidebar.
     assert_eq!(light.token("surface.canvas"), Some(Srgb::WHITE));
     assert_eq!(light.token("surface.raised"), Some(Srgb::WHITE));
     assert!(lum(&light, "surface.panel") < lum(&light, "surface.canvas"));
     assert!(lum(&light, "surface.host") < lum(&light, "surface.panel"));
-    // Inverting the white page would give black; dark mode uses a dark
-    // grey with room for text and raised layers.
+    // Inverting the white page would give black; dark mode uses a near
+    // black with a trace of the neutral hue, below the sidebar and fills.
     let canvas = dark.token("surface.canvas").unwrap();
-    assert!(canvas.luminance() > 0.003 && canvas.luminance() < 0.05);
+    assert!(canvas != Srgb::BLACK && canvas.luminance() < 0.05);
 }
 
 #[test]
