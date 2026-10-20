@@ -580,4 +580,25 @@ mod tests {
         );
         assert_eq!(files.len(), 4);
     }
+
+    #[test]
+    fn drop_areas_placed_directly_in_a_window_open_files() {
+        let gallery = app("gallery");
+        let mut drop = None;
+        gallery.walk(&mut |node, _| {
+            if let bern_ir::Node::Element(element) = node
+                && element.kind == "Drop"
+            {
+                drop = Some(node.clone());
+            }
+        });
+        let mut hello = app("hello");
+        hello.windows.windows[0].content = drop.unwrap();
+        let entry = desktop_entry(&hello, Path::new("/opt/hello/hello"), Path::new("hello"));
+        assert!(entry.contains("Exec=/opt/hello/hello %U\n"), "{entry}");
+        assert!(
+            entry.contains("MimeType=video/mp4;video/x-matroska;"),
+            "{entry}"
+        );
+    }
 }

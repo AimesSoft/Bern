@@ -747,3 +747,40 @@ impl Target for GtkLinux {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reflow_placed_directly_in_a_window_warns() {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hello/Bern.toml");
+        let config = bern_compiler::config::load(&manifest).unwrap();
+        let mut hello = bern_compiler::compile(&config).unwrap().app;
+        assert!(reflow_warnings(&hello).is_empty());
+        // A flow box grid around the window's text, sliding its cells.
+        let content = &mut hello.windows.windows[0].content;
+        let Node::Element(text) = content.clone() else {
+            panic!("{content:?}");
+        };
+        let mut grid = text.clone();
+        grid.kind = "Grid".into();
+        grid.props = [(
+            "reflow".to_string(),
+            bern_ir::Prop::Keyword {
+                value: "snappy".into(),
+            },
+        )]
+        .into();
+        grid.children = vec![Node::Element(text)];
+        *content = Node::Element(grid);
+        let warnings = reflow_warnings(&hello);
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0]
+                .message
+                .contains("the items of this `Grid` move at once"),
+            "{warnings:?}"
+        );
+    }
+}

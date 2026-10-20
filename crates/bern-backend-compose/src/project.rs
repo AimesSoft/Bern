@@ -434,4 +434,61 @@ mod tests {
         assert_eq!(values_dir("zh-Hans", "en"), "values-b+zh+Hans");
         assert_eq!(xml_text("A & B's"), "A &amp; B\\'s");
     }
+
+    fn app(example: &str) -> Application {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(example)
+            .join("Bern.toml");
+        let config = bern_compiler::config::load(&manifest).unwrap();
+        bern_compiler::compile(&config).unwrap().app
+    }
+
+    /// The hello world with the first element of `example` that `pick`
+    /// accepts as its window's content, outside any component.
+    fn in_window(example: &str, pick: impl Fn(&bern_ir::Element) -> bool) -> Application {
+        let source = app(example);
+        let mut found = None;
+        source.walk(&mut |node, _| {
+            if let bern_ir::Node::Element(element) = node
+                && found.is_none()
+                && pick(element)
+            {
+                found = Some(node.clone());
+            }
+        });
+        let mut hello = app("hello");
+        hello.windows.windows[0].content = found.unwrap();
+        hello
+    }
+
+    #[test]
+    fn drop_areas_placed_directly_in_a_window_open_files() {
+        let hello = manifest(&app("hello"), false);
+        assert!(!hello.contains("android.intent.action.VIEW"), "{hello}");
+        let drop = manifest(
+            &in_window("gallery", |element| element.kind == "Drop"),
+            false,
+        );
+        assert!(drop.contains("android:launchMode=\"singleTask\""), "{drop}");
+        assert!(
+            drop.contains("<data android:mimeType=\"video/*\" />"),
+            "{drop}"
+        );
+    }
+
+    #[test]
+    fn pictures_placed_directly_in_a_window_read_the_network() {
+        const INTERNET: &str = "android.permission.INTERNET";
+        let hello = manifest(&app("hello"), false);
+        assert!(!hello.contains(INTERNET), "{hello}");
+        let image = in_window("gallery", |element| {
+            element.kind == "Image" && element.expr("source").is_some()
+        });
+        let image = manifest(&image, false);
+        assert!(image.contains(INTERNET), "{image}");
+        let shape = in_window("gallery", |element| element.expr("fill_from").is_some());
+        let shape = manifest(&shape, false);
+        assert!(shape.contains(INTERNET), "{shape}");
+    }
 }

@@ -613,4 +613,36 @@ mod tests {
             &runtime[..0]
         );
     }
+
+    fn app(example: &str) -> Application {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(example)
+            .join("Bern.toml");
+        let config = bern_compiler::config::load(&manifest).unwrap();
+        bern_compiler::compile(&config).unwrap().app
+    }
+
+    #[test]
+    fn drop_areas_placed_directly_in_a_window_open_files() {
+        let gallery = app("gallery");
+        let mut drop = None;
+        gallery.walk(&mut |node, _| {
+            if let bern_ir::Node::Element(element) = node
+                && element.kind == "Drop"
+            {
+                drop = Some(node.clone());
+            }
+        });
+        let mut hello = app("hello");
+        let plist = info_plist(&hello, "Hello", "14.0");
+        assert!(!plist.contains("CFBundleDocumentTypes"), "{plist}");
+        hello.windows.windows[0].content = drop.unwrap();
+        let mac = info_plist(&hello, "Hello", "14.0");
+        assert!(mac.contains("<key>CFBundleDocumentTypes</key>"), "{mac}");
+        assert!(mac.contains("<string>public.movie</string>"), "{mac}");
+        let ios = info_plist_ios(&hello, "Hello", "17.0");
+        assert!(ios.contains("<key>CFBundleDocumentTypes</key>"), "{ios}");
+        assert!(ios.contains("<string>public.movie</string>"), "{ios}");
+    }
 }
