@@ -26,6 +26,7 @@ function runtime(search = "") {
     get className() { return [...this.classes].join(" "); }
     setAttribute(name, value) { this.attributes[name] = String(value); }
     removeAttribute(name) { delete this.attributes[name]; }
+    hasAttribute(name) { return name in this.attributes; }
     addEventListener(name, callback) { (this.events[name] ??= []).push(callback); }
     removeEventListener(name, callback) { this.events[name] = (this.events[name] ?? []).filter(one => one !== callback); }
     get children() { return this.childNodes.filter((child) => child.nodeType === 1); }
@@ -480,6 +481,41 @@ test("a search field without a width is as wide as its column, and a toolbar's k
   scope.dispose();
   const css = readFileSync(new URL("../templates/bern.css", import.meta.url), "utf8");
   assert.doesNotMatch(css.match(/\n\.bern-search \{[^}]*\}/)[0], /width/, "the box takes its width from its place");
+});
+
+test("a scroll view in a split button's or popover button's panel leaves the button its size", () => {
+  const { B, F, Element, mutationObservers } = runtime();
+  const root = new Element("root");
+  const scope = new B.Scope();
+  // A scroll view across and down its panel.
+  const scrolled = (panel) => {
+    const view = new Element("div");
+    view.classList.add("bern-scroll", "bern-fill-width", "bern-fill-height");
+    panel.append(view);
+  };
+  B.within(scope, () => B.Stack(root, { comp: "demo" }, { axis: "row" }, (row, ctx) => {
+    F.SplitButton(row, ctx, { id: "caption", label: () => "Caption", field: B.cell(true) }, scrolled);
+    F.PopoverButton(row, ctx, { id: "listed", label: () => "Listed" }, scrolled);
+  }));
+  const [row] = root.children;
+  const [split, wrap] = row.children;
+  const panelOf = (node) => node.children.find((child) => child.hasAttribute("popover"));
+  const flexible = (node) => ["width", "height"].filter((dimension) => node.classes.has(`bern-layout-${dimension}`));
+  // The split button's panel holds its content from the start.
+  assert.equal(panelOf(split).children.length, 1);
+  assert.deepEqual(flexible(split), []);
+  assert.deepEqual(flexible(row), []);
+  // The popover button's content mounts as its panel opens, and the row
+  // looks at its children again.
+  const panel = panelOf(wrap);
+  panel.dispatch("beforetoggle", { newState: "open" });
+  assert.equal(panel.children.length, 1);
+  mutationObservers.find((observer) => observer.targets.has(row)).callback([{ addedNodes: panel.children, removedNodes: [] }]);
+  assert.deepEqual(flexible(wrap), []);
+  assert.deepEqual(flexible(row), []);
+  // In its panel the scroll view still fills the panel.
+  for (const holder of [panelOf(split), panel]) assert.deepEqual(flexible(holder.children[0]), ["width", "height"]);
+  scope.dispose();
 });
 
 test("edge grow keeps its opacity and anchors the scaling edge", () => {

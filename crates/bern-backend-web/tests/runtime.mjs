@@ -5,12 +5,12 @@ import test from "node:test";
 import vm from "node:vm";
 import { Timer, Scope, within, cell, accordionWidths, layoutIntent, fixedSize } from "../templates/bern.js";
 
-function layoutNode(classes, children = [], axis = null, tagName = "DIV") {
+function layoutNode(classes, children = [], axis = null, tagName = "DIV", attributes = []) {
   const names = new Set(classes.split(" "));
   return { nodeType: 1, tagName, classList: {
     contains: (name) => names.has(name),
     toggle: (name, value) => { if (value) names.add(name); else names.delete(name); },
-  }, children, bernLayoutAxis: axis };
+  }, children, bernLayoutAxis: axis, hasAttribute: (name) => attributes.includes(name) };
 }
 
 test("query wrappers gain and release scroll layout intent as asynchronous content changes", async () => {
@@ -62,6 +62,9 @@ test("spacers expand only their stack axis while fixed drawing frames stop propa
   const fixed = layoutNode("bern-layers bern-sized-width", [row], "layers");
   assert.equal(layoutIntent(fixed, "width"), false);
   assert.equal(layoutIntent(layoutNode("", [row], null, "DIALOG"), "width"), false, "top-layer dialogs never size their source layout");
+  const panel = layoutNode("bern-popover-panel", [row], null, "DIV", ["popover"]);
+  const split = layoutNode("bern-split-button", [layoutNode("bern-split-main"), panel]);
+  assert.equal(layoutIntent(split, "width"), false, "nor do popover panels size their trigger");
 });
 
 test("image and text layers determine their size while rails only cover them", () => {

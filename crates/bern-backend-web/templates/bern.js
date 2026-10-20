@@ -2139,8 +2139,11 @@ function backdropLayer(child) {
 /// A flexible descendant may offer its parent's size only until an
 /// explicitly sized view stops that proposal. In particular, the Canvas
 /// inside a fixed-size icon must not stretch the row containing that icon.
+/// A dialog or a popover panel shows in the top layer, as the native
+/// popovers show outside the window's layout: a scroll view or slider in
+/// a split button's or popover button's panel leaves the button its size.
 export function layoutIntent(node, dimension) {
-  if (node.nodeType !== 1 || node.tagName === "DIALOG" || node.classList.contains(`bern-sized-${dimension}`)) return false;
+  if (node.nodeType !== 1 || node.tagName === "DIALOG" || node.hasAttribute("popover") || node.classList.contains(`bern-sized-${dimension}`)) return false;
   if (node.classList.contains(`bern-fill-${dimension}`)) return true;
   // `Button(width: fill)` takes the row's or column's width.
   if (dimension === "width" && node.classList.contains("bern-button-fill")) return true;
