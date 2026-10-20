@@ -316,25 +316,32 @@ const stringsCell = cell({});
 let supportedLanguages = [];
 let allStrings = {};
 
+/// The supported language that best matches the browser's, most preferred
+/// first: an earlier tag wins over a closer match of a later one, so
+/// `de-DE, en` chooses `de` over `en`.
 function chooseLanguage(supported, fallback) {
   const wanted = [...(navigator.languages || []), navigator.language].filter(Boolean);
   for (const tag of wanted) {
-    const exact = supported.find((candidate) => candidate.toLowerCase() === tag.toLowerCase());
-    if (exact) return exact;
-  }
-  for (const tag of wanted) {
-    const lower = tag.toLowerCase();
-    // zh-CN, zh-SG → zh-Hans; zh-TW, zh-HK → zh-Hant.
-    const script = /^zh-(tw|hk|mo)|^zh-hant/.test(lower)
-      ? "zh-hant"
-      : lower.startsWith("zh")
-        ? "zh-hans"
-        : lower.split("-")[0];
-    const match = supported.find((candidate) => candidate.toLowerCase() === script)
-      || supported.find((candidate) => candidate.toLowerCase().split("-")[0] === script);
+    const match = matchingLanguage(supported, tag);
     if (match) return match;
   }
   return fallback;
+}
+
+/// The supported language for one wanted tag: the tag itself in any case,
+/// else one of its language, Chinese by its script.
+function matchingLanguage(supported, tag) {
+  const lower = tag.toLowerCase();
+  const exact = supported.find((candidate) => candidate.toLowerCase() === lower);
+  if (exact) return exact;
+  // zh-CN, zh-SG → zh-Hans; zh-TW, zh-HK → zh-Hant.
+  const script = /^zh-(tw|hk|mo)|^zh-hant/.test(lower)
+    ? "zh-hant"
+    : lower.startsWith("zh")
+      ? "zh-hans"
+      : lower.split("-")[0];
+  return supported.find((candidate) => candidate.toLowerCase() === script)
+    || supported.find((candidate) => candidate.toLowerCase().split("-")[0] === script);
 }
 
 export function tr(key) {

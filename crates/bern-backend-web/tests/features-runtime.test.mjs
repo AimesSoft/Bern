@@ -139,15 +139,29 @@ function runtime(search = "") {
     reportError(error) { throw error; },
   };
   const context = vm.createContext(globals);
-  for (const [name, extra] of [["bern", []], ["features", ["transitionFrom"]]]) {
+  for (const [name, extra] of [["bern", ["chooseLanguage"]], ["features", ["transitionFrom"]]]) {
     const source = readFileSync(new URL(`../templates/${name}.js`, import.meta.url), "utf8");
     const exported = [...source.matchAll(/^export (?:async )?(?:class|function|const) (\w+)/gm)].map((match) => match[1]);
     const plain = source.replace(/^import .+;$/gm, "").replace(/^export /gm, "");
     vm.runInContext(`globalThis.${name === "bern" ? "B" : "F"} = (() => { ${plain}\nreturn { ${[...exported, ...extra].join(", ")} }; })();`, context, { filename: `${name}.js` });
   }
   const flushMicrotasks = () => { while (microtasks.length) microtasks.shift()(); };
-  return { B: context.B, F: context.F, Element, document: globals.document, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
+  return { B: context.B, F: context.F, Element, document: globals.document, navigator: globals.navigator, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
 }
+
+test("the interface language follows the browser's preferences in order", () => {
+  const { B, navigator } = runtime();
+  const choose = (languages, supported) => {
+    Object.assign(navigator, { languages, language: languages[0] });
+    return B.chooseLanguage(supported, "en");
+  };
+  assert.equal(choose(["de-DE", "en"], ["en", "de"]), "de", "an earlier language wins over a later exact match");
+  assert.equal(choose(["zh-CN", "en"], ["en", "zh-Hans"]), "zh-Hans");
+  assert.equal(choose(["zh-TW", "en"], ["en", "zh-Hans", "zh-Hant"]), "zh-Hant");
+  assert.equal(choose(["pt-BR", "en"], ["pt", "pt-BR"]), "pt-BR", "an exact match still wins within one language");
+  assert.equal(choose(["EN-us"], ["fr", "en-US"]), "en-US");
+  assert.equal(choose(["ja"], ["de", "fr"]), "en");
+});
 
 test("neutral sidebar selection pairs text with its replacement fill through hover and selection changes", () => {
   const { B, F, Element } = runtime();
