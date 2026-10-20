@@ -1039,27 +1039,4 @@ fn a_style_variant_in_a_window_is_defined() {
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
-
-    // Type-check the generated application where GTK is installed.
-    let gtk = Command::new("pkg-config")
-        .args(["--exists", "gtk4 >= 4.14", "libadwaita-1 >= 1.5"])
-        .status()
-        .is_ok_and(|status| status.success());
-    if !gtk {
-        eprintln!("GTK 4.14 and libadwaita 1.5 not installed; skipping the type check");
-        return;
-    }
-    let result = Command::new("cargo")
-        .arg("check")
-        .arg("--manifest-path")
-        .arg(output.join("app/Cargo.toml"))
-        .arg("--target-dir")
-        .arg(root.join("target/bern-glue-linux"))
-        .output()
-        .unwrap();
-    assert!(
-        result.status.success(),
-        "rustc rejected the generated application:\n{}",
-        String::from_utf8_lossy(&result.stderr)
-    );
 }

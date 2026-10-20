@@ -448,7 +448,7 @@ target\bern\windows\Showcase\showcase.exe
 - 现象：`style!` 有 `Button.stage`，`Window(...) { Button(id: mini, label: …, variant: stage) }` 直接写在窗口里时，生成的 `app_ui.inl` 引用 `&S_buttonStage` 却没有定义，MSVC 报 C2065；同样的内容挪进 `#[component]` 就正常。
 - 原因不在后端：`bern_target_api::style::used` 只遍历组件的正文来收集用到的种类与变体，不看窗口的正文，六个目标都用它生成样式表。改为走 `Application::walk`，组件与窗口的正文都算。
 - 验证：生成器测试 `a_style_variant_in_a_window_is_defined` 在 PC 上用 MSVC 编译生成的程序，通过；测试应用（窗口正文里写 `variant: stage`，组件里写 `variant: card`，各自只在一处用到）`bern build --target windows` 完成编译与链接，`app_ui.inl` 里 `S_buttonStage` 与 `S_buttonCard` 都有定义，两个按钮各自引用。
-- 未验证：窗口快照。启动窗口要注册计划任务，这次的权限设置不允许，没有运行。
+- 窗口快照：窗口正文里的按钮是强调色底、圆角 12，组件里的是浅色底、圆角 4；经 CLI 的 `ui activate --target main.in_window` 按下后计数为 1。
 
 ## 未完成与已知限制
 

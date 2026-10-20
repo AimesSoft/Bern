@@ -342,7 +342,7 @@ target/bern/linux/Showcase/showcase
 - 所在位置比窗口窄一档：在这个 751 宽的窗口里切到胶片页，`Adaptive` 先按窗口宽填 `medium`，量到自己的 552 后换成 `compact`。用窗口宽代替的估计不小于它的可用宽度，侧栏占去宽度时就会这样多构建一次，与规则相符。
 - 未验证：真实 Wayland/X11 会话与手机外壳（Phosh）中窗口是否被限在屏幕内；多显示器。
 
-2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文（原因见 WinUI 3 实现记录的同日条目），`STYLES` 里没有窗口正文里用到的变体；`style::resolve` 找得到规则，在表里却找不到位置，按钮按没有样式生成，构建不报错。生成器测试 `a_style_variant_in_a_window_is_defined` 断言表里有 `buttonStage`、按钮引用 `&STYLES[0]`，并在装有 GTK 4 的机器上类型检查生成的程序；Mac 上没有 GTK，类型检查跳过，未在虚拟机上运行。
+2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文（原因见 WinUI 3 实现记录的同日条目），`STYLES` 里没有窗口正文里用到的变体；`style::resolve` 找得到规则，在表里却找不到位置，按钮按没有样式生成，构建不报错。生成器测试 `a_style_variant_in_a_window_is_defined` 断言表里有 `buttonStage`、按钮引用 `&STYLES[0]`；它的小工程没有引擎，不对生成的程序做类型检查（最初做了，装有 GTK 的机器上因此编译失败）。Ubuntu 虚拟机（Broadway）：GTK 的生成器测试全部通过；测试应用的窗口里，窗口正文中的 `Button.stage` 是强调色底、圆角 12，组件里的 `Button.card` 是浅色底、圆角 4，经 CLI 按下窗口里的按钮后计数加一。
 
 ## 未完成与已知限制
 
