@@ -723,3 +723,32 @@ test("a window is sized for the room it gets before it is laid out", () => {
   assert.deepEqual(room(floating, { frame: { width: 700, height: 500 }, maximized: false }, desktop, false), [700, 500]);
   assert.deepEqual(room(floating, { frame: { width: 700, height: 500 }, maximized: true }, desktop, false), [1440, 900]);
 });
+
+test("a canvas with nothing to draw keeps no bitmap however it resizes, and draws once it has something", () => {
+  const { B, F, Element, resizeObservers } = runtime();
+  // The fixture's window, reached through a function made in it.
+  F.Canvas.constructor("return globalThis")().devicePixelRatio = 2;
+  const root = new Element("root");
+  const ops = B.cell([]);
+  const scope = new B.Scope();
+  B.within(scope, () => F.Canvas(root, {}, {}, () => ops.get()));
+  const node = root.childNodes[0];
+  const canvas = node.childNodes[0];
+  const cleared = [];
+  canvas.getContext = () => ({ setTransform() {}, clearRect(...rect) { cleared.push(rect); } });
+  const observer = resizeObservers.find((one) => one.targets.has(node));
+  for (const width of [86, 120, 300]) {
+    node.rect = { left: 0, top: 0, width, height: 15 };
+    observer.callback([]);
+  }
+  assert.equal(canvas.width ?? 0, 0);
+  assert.deepEqual(cleared, []);
+  ops.set([{}]);
+  assert.equal(canvas.width, 600);
+  assert.equal(canvas.height, 30);
+  assert.equal(cleared.length, 1);
+  ops.set([]);
+  assert.equal(canvas.width, 0);
+  assert.equal(canvas.height, 0);
+  scope.dispose();
+});

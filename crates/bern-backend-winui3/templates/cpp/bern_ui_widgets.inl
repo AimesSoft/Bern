@@ -2223,6 +2223,69 @@ inline void ShowPicture(controls::Grid const& frame, Ctx const& ctx, std::shared
     else frame.Children().Append(SdrImage(picture, *bytes, name));
 }
 
+/// A scope that ends with the current one, for what shows later.
+inline std::shared_ptr<Scope> LaterScope() {
+    auto scope = std::make_shared<Scope>();
+    Reactive::OnCleanup([scope] { scope->Dispose(); });
+    return scope;
+}
+
+/// Pictures read lately, by file or resource, so that a page showing them
+/// again shows them at once; at most 64 MB are kept, the least lately
+/// used going first.
+namespace Recent {
+inline std::vector<std::pair<std::wstring, std::shared_ptr<std::vector<uint8_t>>>> kept;
+inline size_t size = 0;
+inline std::shared_ptr<std::vector<uint8_t>> Find(std::wstring const& key) {
+    for (size_t at = 0; at < kept.size(); ++at)
+        if (kept[at].first == key) {
+            auto found = kept[at];
+            kept.erase(kept.begin() + static_cast<ptrdiff_t>(at));
+            kept.push_back(found);
+            return found.second;
+        }
+    return nullptr;
+}
+inline void Keep(std::wstring const& key, std::shared_ptr<std::vector<uint8_t>> const& bytes) {
+    if (bytes->empty() || bytes->size() > (16u << 20) || Find(key)) return;
+    kept.emplace_back(key, bytes);
+    size += bytes->size();
+    while (size > (64u << 20) && !kept.empty()) {
+        size -= kept.front().second->size();
+        kept.erase(kept.begin());
+    }
+}
+}
+
+/// Read a picture's bytes away from the UI thread, then show it in the
+/// frame within `owner`, unless that has ended meanwhile (the frame went
+/// away or now shows another picture). Reading a file can wait on the disk
+/// or on a virus scanner, which must not hold the window still while a
+/// page builds.
+inline winrt::fire_and_forget ShowLater(winrt::weak_ref<controls::Grid> weak, Ctx ctx, std::wstring key, std::function<std::vector<uint8_t>()> read,
+    std::string label, PictureProps picture, TextFn name, std::shared_ptr<Scope> owner) {
+    winrt::apartment_context ui;
+    co_await winrt::resume_background();
+    auto bytes = std::make_shared<std::vector<uint8_t>>(read());
+    co_await ui;
+    Recent::Keep(key, bytes);
+    auto frame = weak.get();
+    if (!frame || owner->disposed) co_return;
+    if (bytes->empty()) Report("image " + label + ": the picture cannot be read");
+    owner->Run([&] { ShowPicture(frame, ctx, bytes, picture, name); });
+}
+
+/// Show the picture `key` names: at once when it was read lately, else once
+/// it has been read.
+inline void ShowRead(controls::Grid const& frame, Ctx const& ctx, std::wstring key, std::function<std::vector<uint8_t>()> read, std::string label,
+    PictureProps const& picture, TextFn const& name) {
+    if (auto bytes = Recent::Find(key)) {
+        ShowPicture(frame, ctx, bytes, picture, name);
+        return;
+    }
+    ShowLater(winrt::make_weak(frame), ctx, std::move(key), std::move(read), std::move(label), picture, name, LaterScope());
+}
+
 /// A picture from a declared resource, or from a `MediaSource` the engine
 /// gives. With one side given, the other follows the picture's aspect
 /// ratio. Without a label it is decorative. HDR pictures are drawn in HDR
@@ -2289,9 +2352,8 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     }
     TextFn name = props.label ? Bound(ctx, props.label) : nullptr;
     if (props.source) {
-        auto bytes = std::make_shared<std::vector<uint8_t>>(ResourceBytes(props.source));
-        if (bytes->empty()) Report(std::string("image ") + props.source + ": the resource cannot be read");
-        ShowPicture(frame, ctx, bytes, picture, name);
+        std::string source = props.source;
+        ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, picture, name);
     } else if (props.url) {
         auto url = props.url;
         auto shown = std::make_shared<std::optional<std::string>>();
@@ -2304,9 +2366,8 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
                 frame.Visibility(next ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
                 if (!next) return 0;
                 if (auto path = Host::FilePath(*next)) {
-                    auto bytes = std::make_shared<std::vector<uint8_t>>(FileBytes(*path));
-                    if (bytes->empty()) Report("image " + *next + ": the file cannot be read");
-                    ShowPicture(frame, ctx, bytes, picture, name);
+                    std::wstring file = *path;
+                    ShowRead(frame, ctx, file, [file] { return FileBytes(file); }, *next, picture, name);
                 } else {
                     frame.Children().Append(SdrImage(picture, {}, name, *next));
                 }

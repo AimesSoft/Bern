@@ -762,9 +762,11 @@ static void Drain() {
         std::lock_guard guard(lock);
         work.swap(pending);
     }
+    auto began = std::chrono::steady_clock::now();
     for (auto& item : work) {
         try { item(); } catch (...) { ReportCurrent("posted work"); }
     }
+    working += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
 }
 
 static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {

@@ -381,22 +381,31 @@ inline void SetWindowIcons(HWND hwnd) {
 /// in the first and last columns of its template. WinUI sizes them with the
 /// insets in pixels as if they were units, which at other scales than 100 %
 /// moves what stands in the title bar away from the caption buttons; they
-/// are set again in units after each layout that changes them.
-inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window const& window) {
+/// are set again in units after each layout that changes them. `fitted` is
+/// what they were set to, and at which scale: every layout of the window
+/// comes here, a resizing column every frame, and only when the title bar
+/// has set its own widths or the scale has changed are the insets asked
+/// for again.
+inline void FitTitleBarInsets(controls::TitleBar const& titleBar, xaml::Window const& window, std::array<double, 3>& fitted) {
     if (!titleBar.XamlRoot() || media::VisualTreeHelper::GetChildrenCount(titleBar) == 0) return;
     auto grid = media::VisualTreeHelper::GetChild(titleBar, 0).try_as<controls::Grid>();
-    if (!grid || grid.ColumnDefinitions().Size() < 2) return;
+    if (!grid) return;
+    auto columns = grid.ColumnDefinitions();
+    uint32_t count = columns.Size();
+    if (count < 2) return;
     double scale = titleBar.XamlRoot().RasterizationScale();
     if (scale <= 0) return;
+    auto first = columns.GetAt(0), last = columns.GetAt(count - 1);
+    if (first.Width().Value == fitted[0] && last.Width().Value == fitted[1] && scale == fitted[2]) return;
     auto bar = window.AppWindow().TitleBar();
-    auto columns = grid.ColumnDefinitions();
     auto fit = [](controls::ColumnDefinition const& column, double width) {
         auto current = column.Width();
         if (current.GridUnitType == xaml::GridUnitType::Pixel && std::abs(current.Value - width) > 0.5)
             column.Width(xaml::GridLength{width, xaml::GridUnitType::Pixel});
     };
-    fit(columns.GetAt(0), bar.LeftInset() / scale);
-    fit(columns.GetAt(columns.Size() - 1), bar.RightInset() / scale);
+    fit(first, bar.LeftInset() / scale);
+    fit(last, bar.RightInset() / scale);
+    fitted = {first.Width().Value, last.Width().Value, scale};
 }
 
 /// The application icon in the XAML title bar: the image of icon resource 1
@@ -913,10 +922,11 @@ inline std::string Open(std::string const& kindId) {
     root.Children().Append(host);
     window.Content(root);
     window.SetTitleBar(titleBar);
-    titleBar.LayoutUpdated([weakBar = winrt::make_weak(titleBar), weakWindow = winrt::make_weak(window)](auto&&, auto&&) {
+    titleBar.LayoutUpdated([weakBar = winrt::make_weak(titleBar), weakWindow = winrt::make_weak(window),
+                               fitted = std::array<double, 3>{-1, -1, 0}](auto&&, auto&&) mutable {
         auto titleBar = weakBar.get();
         auto window = weakWindow.get();
-        if (titleBar && window) FitTitleBarInsets(titleBar, window);
+        if (titleBar && window) FitTitleBarInsets(titleBar, window, fitted);
     });
     titleBar.SizeChanged([raw = win.get()](auto&&, auto&&) { PlaceHeader(*raw); });
     originals[win->hwnd] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(win->hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Subclass)));

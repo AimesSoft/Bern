@@ -564,6 +564,9 @@ uint64_t Token(Done done, std::function<void(Failure const&)> failed);
 
 /// Run `work` on the UI thread after the current call returns.
 void Post(std::function<void()> work);
+/// Milliseconds the UI thread spent on posted work so far: engine state
+/// and replies applied, and what that built. For `BERN_FRAME_LOG`.
+inline double working = 0;
 /// Run `work` on the UI thread once `delay` has passed.
 void After(std::chrono::milliseconds delay, std::function<void()> work);
 /// Create the UI thread's message window; `bundleId` names it so a second

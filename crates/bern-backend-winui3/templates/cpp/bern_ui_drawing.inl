@@ -444,6 +444,16 @@ inline void Canvas(Parent const& p, Ctx const& ctx, CanvasProps props, std::func
     auto bitmap = std::make_shared<media::Imaging::WriteableBitmap>(nullptr);
     Reactive::Run([ctx, ops, size, dark, image, bitmap] {
         auto list = ops(ctx);
+        // Nothing to draw, nothing drawn: a canvas that only holds a place
+        // (a spacer, a button's backdrop) makes no bitmap when it appears
+        // or resizes, which a resizing column does every frame.
+        if (list.empty()) {
+            if (*bitmap) {
+                *bitmap = nullptr;
+                image.Source(nullptr);
+            }
+            return;
+        }
         auto [w, h, scale] = size.Get();
         bool night = dark.Get();
         themeTick.Get();

@@ -52,6 +52,88 @@ inline bool subscribed = false;
 inline winrt::event_token token;
 inline void Start(std::shared_ptr<Spring> const& spring);
 inline void Stop(Spring const* spring);
+/// True while the frame's springs step: what they move is written once
+/// after all have stepped, not once per spring.
+inline bool stepping = false;
+inline std::vector<std::function<void()>> pending;
+/// Run `write` after this frame's springs have stepped, or now outside a
+/// frame.
+inline void AfterStep(std::function<void()> write) {
+    if (stepping) pending.push_back(std::move(write));
+    else write();
+}
+
+/// `BERN_FRAME_LOG`: how each run of springs went, on stderr — how long
+/// the first frame took to come, the frames' spacing, the slow ones and
+/// the time the springs themselves took.
+inline bool Logging() {
+    static bool const on = [] {
+        char* value = nullptr;
+        size_t size = 0;
+        bool set = _dupenv_s(&value, &size, "BERN_FRAME_LOG") == 0 && value && *value;
+        std::free(value);
+        return set;
+    }();
+    return on;
+}
+struct Run {
+    std::chrono::steady_clock::time_point started, previous;
+    int64_t frames = 0;
+    int slow = 0;
+    double first = 0, total = 0, worst = 0, stepping = 0;
+    size_t most = 0;
+    /// The UI thread's own CPU cycles in the run, and in its busiest
+    /// frame, in millions: what the window did, whatever else ran.
+    double cycles = 0, busiest = 0;
+};
+inline Run run;
+inline double Since(std::chrono::steady_clock::time_point at) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - at).count();
+}
+inline std::chrono::steady_clock::time_point const origin = std::chrono::steady_clock::now();
+/// The UI thread's CPU cycles so far, in millions.
+inline double Cycles() {
+    ULONG64 cycles = 0;
+    QueryThreadCycleTime(GetCurrentThread(), &cycles);
+    return static_cast<double>(cycles) / 1e6;
+}
+/// While logging, every frame is watched: a frame that comes more than 50
+/// ms after the one before says how long the window stood still, such as
+/// while a page was built.
+inline void Watch() {
+    static bool watching = false;
+    if (watching || !Logging()) return;
+    watching = true;
+    static auto previous = std::chrono::steady_clock::now();
+    static double spent = Cycles();
+    media::CompositionTarget::Rendering([](auto&&, auto&&) {
+        double gap = Since(previous);
+        previous = std::chrono::steady_clock::now();
+        double now = Cycles(), used = now - spent;
+        spent = now;
+        if (subscribed) {
+            run.cycles += used;
+            run.busiest = (std::max)(run.busiest, used);
+        }
+        static int64_t parsed = 0;
+        static double parsing = 0, working = 0;
+        double worked = Host::working - working;
+        working = Host::working;
+        if (gap <= 50) {
+            parsed = Styles::parsed;
+            parsing = Styles::parsing;
+            return;
+        }
+        // What is not posted work is the framework's: layout, text and the
+        // frame itself.
+        char line[288];
+        std::snprintf(line, sizeof line, "stall: %.0f ms, until %.2f s, UI thread %.0f Mcycles; %.0f ms posted work, %lld dictionaries parsed in %.0f ms meanwhile", gap,
+            Since(origin) / 1000, used, worked, static_cast<long long>(Styles::parsed - parsed), Styles::parsing - parsing);
+        parsed = Styles::parsed;
+        parsing = Styles::parsing;
+        Report(line);
+    });
+}
 }
 
 /// A value that moves to its target as a spring of period `T` and damping
@@ -146,20 +228,53 @@ inline void Frames::Start(std::shared_ptr<Spring> const& spring) {
     if (subscribed) return;
     subscribed = true;
     last.reset();
+    if (Logging()) {
+        Watch();
+        run = Run{std::chrono::steady_clock::now(), std::chrono::steady_clock::now()};
+    }
     token = media::CompositionTarget::Rendering([](auto&&, IInspectable const& args) {
         int64_t now = 0;
         if (auto rendering = args.try_as<media::RenderingEventArgs>()) now = rendering.RenderingTime().count();
         double elapsed = last ? (std::min)(0.064, (now - *last) / 1e7) : 1.0 / 60;
         if (elapsed <= 0) elapsed = 1.0 / 60;
         last = now;
+        bool logging = Logging();
+        auto began = std::chrono::steady_clock::now();
+        if (logging) {
+            double gap = Since(run.previous);
+            if (run.frames == 0) run.first = gap;
+            else {
+                run.total += gap;
+                run.worst = (std::max)(run.worst, gap);
+                if (gap > 25) ++run.slow;
+            }
+            run.previous = began;
+            ++run.frames;
+            run.most = (std::max)(run.most, running.size());
+        }
         auto current = running;
+        stepping = true;
         for (auto const& spring : current) {
             // Settled springs land on their target and say they are done.
             if (!spring->Step(elapsed)) spring->Set(spring->target);
         }
+        stepping = false;
+        // Then each thing they move is written once.
+        auto writes = std::move(pending);
+        pending.clear();
+        for (auto const& write : writes) write();
+        if (logging) run.stepping += Since(began);
         if (running.empty() && subscribed) {
             subscribed = false;
             media::CompositionTarget::Rendering(token);
+            if (logging) {
+                char line[384];
+                std::snprintf(line, sizeof line,
+                    "frames: %lld in %.0f ms until %.2f s, first after %.0f ms, spacing %.1f ms on average, worst %.0f ms, %d over 25 ms; %zu springs at most, %.1f ms stepping them; UI thread %.0f Mcycles, %.1f in the busiest frame",
+                    static_cast<long long>(run.frames), Since(run.started), Since(origin) / 1000, run.first, run.frames > 1 ? run.total / (run.frames - 1) : 0.0,
+                    run.worst, run.slow, run.most, run.stepping, run.cycles, run.busiest);
+                Report(line);
+            }
         }
     });
 }
@@ -193,12 +308,30 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
     /// say: see `Rest`.
     bool resting = false;
 
+    /// Whether a write waits for the end of the frame's stepping.
+    bool queued = false;
+    /// What was written last, so an unchanged value is not set again.
+    std::optional<std::array<float, 8>> written;
+
+    /// Write once the frame's springs have all stepped: a layer's five
+    /// springs, and every layer, move the element in one write.
+    void Touch() {
+        if (queued) return;
+        queued = true;
+        Frames::AfterStep([weak = get_weak()] {
+            if (auto self = weak.get()) {
+                self->queued = false;
+                self->Write();
+            }
+        });
+    }
+
     std::shared_ptr<Layer> Get(std::string const& name) {
         for (auto const& [existing, layer] : layers)
             if (existing == name) return layer;
         auto layer = std::make_shared<Layer>();
         auto write = [weak = get_weak()] {
-            if (auto self = weak.get()) self->Write();
+            if (auto self = weak.get()) self->Touch();
         };
         layer->x = Spring::Make(0, [write](double) { write(); });
         layer->y = Spring::Make(0, [write](double) { write(); });
@@ -243,6 +376,9 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
         if (resting) x = y = 0, sx = sy = 1;
         float3 move{static_cast<float>(x), static_cast<float>(y), 0};
         float3 scale{static_cast<float>(sx), static_cast<float>(sy), 1};
+        std::array<float, 8> now{move.x, move.y, scale.x, scale.y, center.x, center.y, static_cast<float>((std::clamp)(opacity, 0.0, 1.0)), handoff ? 1.0f : 0.0f};
+        if (written == now) return;
+        written = now;
         element.Opacity((std::clamp)(opacity, 0.0, 1.0));
         if (!handoff) {
             try {

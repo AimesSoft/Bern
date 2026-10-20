@@ -364,6 +364,12 @@ export function Canvas(p, ctx, { width, height, label, animate }, ops) {
   onCleanup(() => observer.disconnect());
   effect(() => {
     const list = ops();
+    // Nothing to draw, nothing drawn: a canvas that only holds a place
+    // keeps no bitmap, however often it resizes.
+    if (!list.length) {
+      if (canvas.width || canvas.height) canvas.width = canvas.height = 0;
+      return;
+    }
     const { width: w, height: h, ratio } = size.get();
     themeTick.get();
     if (!w || !h) return;

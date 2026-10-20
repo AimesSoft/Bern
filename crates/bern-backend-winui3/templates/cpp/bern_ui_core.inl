@@ -1185,9 +1185,35 @@ inline media::Brush Brush(wchar_t const* key) {
     return nullptr;
 }
 
+/// How many lightweight dictionaries were parsed and how long that took,
+/// for `BERN_FRAME_LOG`.
+inline int64_t parsed = 0;
+inline double parsing = 0;
+
+/// The dictionary of `xaml`, parsed once and kept for the process: parsing
+/// markup is the slow part of building a page, and every element with the
+/// same look takes the same dictionary.
+inline xaml::ResourceDictionary Dictionary(std::wstring const& xaml, bool fresh = false) {
+    static auto* cache = new std::unordered_map<std::wstring, xaml::ResourceDictionary>();
+    if (!fresh)
+        if (auto found = cache->find(xaml); found != cache->end()) return found->second;
+    auto began = std::chrono::steady_clock::now();
+    auto dictionary = xaml::Markup::XamlReader::Load(xaml).as<xaml::ResourceDictionary>();
+    ++parsed;
+    parsing += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();
+    if (!fresh) cache->emplace(xaml, dictionary);
+    return dictionary;
+}
+
 inline void Restyle(xaml::FrameworkElement const& element, std::wstring const& xaml) {
     try {
-        element.Resources().MergedDictionaries().Append(xaml::Markup::XamlReader::Load(xaml).as<xaml::ResourceDictionary>());
+        auto merged = element.Resources().MergedDictionaries();
+        try {
+            merged.Append(Dictionary(xaml));
+        } catch (winrt::hresult_error const&) {
+            // A dictionary that will not be shared: one of its own.
+            merged.Append(Dictionary(xaml, true));
+        }
     } catch (winrt::hresult_error const& error) {
         Report("styles: " + Utf8(error.message()));
     }
