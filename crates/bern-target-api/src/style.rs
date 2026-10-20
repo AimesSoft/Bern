@@ -110,23 +110,19 @@ pub fn resolve(
 }
 
 /// Every style the application's controls use on `platform`: the kinds,
-/// and each variant instances select.
+/// and each variant instances select, in components and in the content
+/// written directly in a window.
 pub fn used(app: &Application, platform: &str) -> Vec<Resolved> {
-    let mut keys: Vec<(String, Option<String>)> = Vec::new();
-    for component in &app.components {
-        component.body.walk(&mut |node| {
-            if let bern_ir::Node::Element(element) = node {
-                let key = (
-                    element.kind.clone(),
-                    element.keyword("variant").map(str::to_string),
-                );
-                if !keys.contains(&key) {
-                    keys.push(key);
-                }
+    let mut keys: Vec<(&str, Option<&str>)> = Vec::new();
+    app.walk(&mut |node, _| {
+        if let bern_ir::Node::Element(element) = node {
+            let key = (element.kind.as_str(), element.keyword("variant"));
+            if !keys.contains(&key) {
+                keys.push(key);
             }
-        });
-    }
-    keys.iter()
-        .filter_map(|(kind, variant)| resolve(app, platform, kind, variant.as_deref()))
+        }
+    });
+    keys.into_iter()
+        .filter_map(|(kind, variant)| resolve(app, platform, kind, variant))
         .collect()
 }

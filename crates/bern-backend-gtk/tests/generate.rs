@@ -898,3 +898,168 @@ fn icons_the_table_lacks_fail_the_check() {
         .generate(0, "bern_gtk::protocol::ProtocolDescriptor::default()");
     assert!(ui.contains("\"film.stack\""));
 }
+
+const STAGE_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "stage", version = 1)]
+pub mod stage {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+const STAGE_UI: &str = r#"
+use bern::prelude::*;
+
+style! {
+    Button.stage {
+        background: accent,
+        corner: 10,
+    }
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Button(id: mini, label: tr! { "en" => "Add" }, variant: stage) => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// A project whose only styled control is written directly in its window,
+/// compiled from sources written under `dir`.
+fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+    let _ = std::fs::remove_dir_all(dir);
+    for (package, source) in [
+        ("stage-protocol", STAGE_PROTOCOL),
+        ("stage-ui", STAGE_UI),
+        ("stage-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "stage"
+bundle_id = "dev.bern.stage"
+version = "0.1.0"
+name = { "en" = "Stage" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "stage-protocol"
+source = "stage-protocol/src/lib.rs"
+
+[engine]
+package = "stage-core"
+type = "stage_core::Engine"
+
+[ui]
+package = "stage-ui"
+sources = ["stage-ui/src/lib.rs"]
+root = "app"
+
+[targets.linux]
+platform = "linux"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    (config, compiled)
+}
+
+/// A variant of a control written directly in a window, not in a
+/// component, has its style in the table as one in a component has.
+#[test]
+fn a_style_variant_in_a_window_is_defined() {
+    let root = workspace();
+    let (config, compiled) = stage_project(&root.join("target/bern-test/gtk-stage-project"));
+    let target = linux_target(&config);
+    let problems = GtkLinux.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-stage");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    for expected in [
+        "static STYLES: &[b::StyleDef] = &[\n    b::StyleDef { name: \"buttonStage\", ",
+        "b::Button(p, c, b::ButtonProps { id: \"mini\", ",
+        "style: Some(&STYLES[0])",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+
+    // Type-check the generated application where GTK is installed.
+    let gtk = Command::new("pkg-config")
+        .args(["--exists", "gtk4 >= 4.14", "libadwaita-1 >= 1.5"])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !gtk {
+        eprintln!("GTK 4.14 and libadwaita 1.5 not installed; skipping the type check");
+        return;
+    }
+    let result = Command::new("cargo")
+        .arg("check")
+        .arg("--manifest-path")
+        .arg(output.join("app/Cargo.toml"))
+        .arg("--target-dir")
+        .arg(root.join("target/bern-glue-linux"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "rustc rejected the generated application:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

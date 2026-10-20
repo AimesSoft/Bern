@@ -745,7 +745,7 @@ style! {
 }
 ```
 
-- **选择器**：组件种类（`SidebarItem`），或种类加命名变体（`Button.hero`，实例写 `variant: hero` 选用；`style` 已是 `Text`、`Picker` 等组件的属性，不复用）。不按位置、层级或运行时条件选择。
+- **选择器**：组件种类（`SidebarItem`），或种类加命名变体（`Button.hero`，实例写 `variant: hero` 选用；`style` 已是 `Text`、`Picker` 等组件的属性，不复用）。不按位置、层级或运行时条件选择；实例写在组件里或直接写在 `Window` 的正文里都一样。
 - **状态**：`hover`、`pressed`、`selected`、`focus`、`disabled`，与控件配方的状态相同；组合按配方规则合并，焦点反馈独立保留。写在状态中的变换用所带的动效进入该状态；`settle` 是回到普通状态时使用的动效。
 - **属性**：只接受 Bern 定义的集合。外观有 `background`、`foreground`、`border`（`border: 角色`，或 `border: border(角色, width: 0.5)` 指定线宽，默认 1）、`corner`、`padding`、`size`（`small`、`regular`、`large`、`extra_large`，映射到平台的控件尺寸）；选中有 `fill(角色)` 与 `indicator(角色, edge, width)`；变换有 `scale`、`offset`、`opacity`；阴影 `shadow(半径, y: 下移, opacity: 不透明度)` 像控件浮起，`y` 默认为半径的三分之一，不透明度默认 0.2，静止时写 `shadow: 4`；`system` 表示该项使用平台默认，`none` 表示该状态没有任何反馈。各组件可用的属性与状态写在组件规范中。
 - **颜色**：只写语义角色，例如 `accent`、`fill.subtle`、`text.primary`。前景自动与背景配对，`fill(accent)` 上的文字与图标使用 `on_accent`，由主题内核按模式与对比策略求解并检查，运行时改变品牌色时随之更新。确需固定颜色时写 `color(light: "#…", dark: "#…")`，两种模式都要给出并通过对比检查，否则构建失败。

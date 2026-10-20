@@ -505,6 +505,8 @@ open target/bern/macos/Showcase.app
 - 设置窗口的显示名称草稿写入“Ada”后执行 `ui.set_language --language en`：侧边栏、页面标题、菜单、设置页签与表单全部变为英文（截图），`ui.language` 返回 `en`，草稿仍是“Ada”，两个窗口都保持打开；`--language fr` 返回 `unsupported_language`。
 - 新增测试：编译器 9 项（覆盖、B201、B202、B203 与 B206、条件分支全覆盖、B204、B205 只对所列平台、B401 与 B402、同 `id` 跨布局），`rustc` 侧 2 项（声明能编译、未知功能报错）；生成的 Swift 在 Swift 6 模式下类型检查通过。
 
+2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文，`Window` 正文里直接写的 `variant:` 不生成 `BernStyles` 的条目，Swift 编译失败（原因见 WinUI 3 实现记录的同日条目）。生成器测试 `a_style_variant_in_a_window_is_defined` 为 macOS 与 iOS 生成并做 Swift 6 类型检查，通过。测试应用的 macOS 窗口（只截该窗口）：窗口正文里的 `Button.stage` 是强调色底、圆角 12，组件里的 `Button.card` 是 `fill.subtle` 底、圆角 4。
+
 ## 样式、动效、自绘与模块化
 
 2026-10-12 补记，在 macOS 上用 `examples/planner`（外壳加“笔记”“标签”两个模块）与新建的应用验证。

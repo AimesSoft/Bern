@@ -964,3 +964,125 @@ fn a_text_input_takes_the_room_of_its_row_and_can_hide_its_label() {
     assert!(name.ends_with("), labelHidden = false)"), "{name}");
     assert!(!name.contains(".weight(1f)"), "{name}");
 }
+
+const STAGE_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "stage", version = 1)]
+pub mod stage {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+const STAGE_UI: &str = r#"
+use bern::prelude::*;
+
+style! {
+    Button.stage {
+        background: accent,
+        corner: 10,
+    }
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Button(id: mini, label: tr! { "en" => "Add" }, variant: stage) => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// A project whose only styled control is written directly in its window,
+/// compiled from sources written under `dir`.
+fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+    let _ = std::fs::remove_dir_all(dir);
+    for (package, source) in [
+        ("stage-protocol", STAGE_PROTOCOL),
+        ("stage-ui", STAGE_UI),
+        ("stage-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "stage"
+bundle_id = "dev.bern.stage"
+version = "0.1.0"
+name = { "en" = "Stage" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "stage-protocol"
+source = "stage-protocol/src/lib.rs"
+
+[engine]
+package = "stage-core"
+type = "stage_core::Engine"
+
+[ui]
+package = "stage-ui"
+sources = ["stage-ui/src/lib.rs"]
+root = "app"
+
+[targets.android]
+platform = "android"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    (config, compiled)
+}
+
+/// A variant of a control written directly in a window, not in a
+/// component, has its style in `BernStyles` as one in a component has.
+#[test]
+fn a_style_variant_in_a_window_is_defined() {
+    let root = workspace();
+    let (config, compiled) = stage_project(&root.join("target/bern-test/compose-stage-project"));
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
+    let defined = kotlin
+        .find("object BernStyles {\n    val buttonStage = BernStyle(")
+        .unwrap_or_else(|| panic!("`buttonStage` is not defined:\n{kotlin}"));
+    let used = kotlin
+        .find("style = BernStyles.buttonStage, modifier = Modifier.testTag(\"main.mini\")")
+        .unwrap_or_else(|| panic!("the button does not use its style:\n{kotlin}"));
+    assert!(defined < used, "{kotlin}");
+}

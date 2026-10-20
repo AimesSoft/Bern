@@ -1469,3 +1469,177 @@ fn scene_layers_bleed_and_window_buttons_keep_the_traffic_lights_room() {
         "{source}"
     );
 }
+
+const STAGE_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "stage", version = 1)]
+pub mod stage {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+const STAGE_UI: &str = r#"
+use bern::prelude::*;
+
+style! {
+    Button.stage {
+        background: accent,
+        corner: 10,
+    }
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Button(id: mini, label: tr! { "en" => "Add" }, variant: stage) => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// A project whose only styled control is written directly in its window,
+/// compiled from sources written under `dir`.
+fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+    let _ = std::fs::remove_dir_all(dir);
+    for (package, source) in [
+        ("stage-protocol", STAGE_PROTOCOL),
+        ("stage-ui", STAGE_UI),
+        ("stage-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "stage"
+bundle_id = "dev.bern.stage"
+version = "0.1.0"
+name = { "en" = "Stage" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "stage-protocol"
+source = "stage-protocol/src/lib.rs"
+
+[engine]
+package = "stage-core"
+type = "stage_core::Engine"
+
+[ui]
+package = "stage-ui"
+sources = ["stage-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+
+[targets.ios]
+platform = "ios"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    (config, compiled)
+}
+
+/// A variant of a control written directly in a window, not in a
+/// component, has its style in `BernStyles` as one in a component has, on
+/// macOS and iOS; the Swift type-checks.
+#[test]
+fn a_style_variant_in_a_window_is_defined() {
+    let root = workspace();
+    let (config, compiled) = stage_project(&root.join("target/bern-test/swiftui-stage-project"));
+    for (name, target) in [
+        ("macos", &SwiftUiMacos as &dyn Target),
+        ("ios", &SwiftUiIos),
+    ] {
+        let output = root.join(format!("target/bern-test/swiftui-stage-{name}"));
+        let _ = std::fs::remove_dir_all(&output);
+        let context = context(&config, &compiled, name, &output);
+        let problems = target.check(&compiled.app, &context.target);
+        assert!(problems.is_empty(), "{name}: {problems:?}");
+        for file in target.generate(&compiled.app, &context).unwrap() {
+            let path = output.join(&file.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, &file.contents).unwrap();
+        }
+        let generated =
+            std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+        let defined = generated
+            .find("enum BernStyles {\n    static let buttonStage = BernStyle(")
+            .unwrap_or_else(|| panic!("{name}: `buttonStage` is not defined:\n{generated}"));
+        let used = generated
+            .find(".buttonStyle(BernButtonStyle(style: BernStyles.buttonStage))")
+            .unwrap_or_else(|| panic!("{name}: the button does not use its style:\n{generated}"));
+        assert!(defined < used, "{generated}");
+    }
+    typecheck_ios(&root, &root.join("target/bern-test/swiftui-stage-ios"));
+    if !Command::new("xcrun")
+        .arg("--find")
+        .arg("swiftc")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("swiftc not available; skipping type check");
+        return;
+    }
+    let sources = root.join("target/bern-test/swiftui-stage-macos/Sources");
+    let result = Command::new("xcrun")
+        .args([
+            "swiftc",
+            "-typecheck",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+        ])
+        .arg("-target")
+        .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+        .arg("-module-cache-path")
+        .arg(root.join("target/bern-swift-module-cache"))
+        .arg("-import-objc-header")
+        .arg(sources.join("bern.h"))
+        .arg(sources.join("BernRuntime.swift"))
+        .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernStyle.swift"))
+        .arg(sources.join("BernAppKit.swift"))
+        .arg(sources.join("BernGenerated.swift"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "swiftc rejected the generated code:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+}

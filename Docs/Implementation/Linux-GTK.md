@@ -342,6 +342,8 @@ target/bern/linux/Showcase/showcase
 - 所在位置比窗口窄一档：在这个 751 宽的窗口里切到胶片页，`Adaptive` 先按窗口宽填 `medium`，量到自己的 552 后换成 `compact`。用窗口宽代替的估计不小于它的可用宽度，侧栏占去宽度时就会这样多构建一次，与规则相符。
 - 未验证：真实 Wayland/X11 会话与手机外壳（Phosh）中窗口是否被限在屏幕内；多显示器。
 
+2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文（原因见 WinUI 3 实现记录的同日条目），`STYLES` 里没有窗口正文里用到的变体；`style::resolve` 找得到规则，在表里却找不到位置，按钮按没有样式生成，构建不报错。生成器测试 `a_style_variant_in_a_window_is_defined` 断言表里有 `buttonStage`、按钮引用 `&STYLES[0]`，并在装有 GTK 4 的机器上类型检查生成的程序；Mac 上没有 GTK，类型检查跳过，未在虚拟机上运行。
+
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。

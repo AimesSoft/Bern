@@ -443,6 +443,13 @@ target\bern\windows\Showcase\showcase.exe
 - 其他目标的同一结构：macOS 窗口与浏览器（Chromium）中测试应用的进度条与图片同宽、竖向轨道在前缘；Linux 虚拟机（GTK）上媒体类应用的迷你播放器进度到 86% 时，进度条止于画面宽的 0.86，没有超出 208 宽的画面；SwiftUI 的 `BernLayers`、Compose 的 `matchParentSize()`、GTK 的 `Layers`（轨道沿轴的自然长度为 0，展开时不计轨道）与 Web 的叠层都不让轨道撑大叠层。
 - 未验证：Islands 前端；Android 设备上未看（要在用户手机上重新安装测试版）。
 
+2026-10-20，直接写在窗口正文里的样式变体（Windows PC，WinUI 3；Bern 的 HEAD 加上本次改动导出到独立镜像 `Bern-wstyle`）：
+
+- 现象：`style!` 有 `Button.stage`，`Window(...) { Button(id: mini, label: …, variant: stage) }` 直接写在窗口里时，生成的 `app_ui.inl` 引用 `&S_buttonStage` 却没有定义，MSVC 报 C2065；同样的内容挪进 `#[component]` 就正常。
+- 原因不在后端：`bern_target_api::style::used` 只遍历组件的正文来收集用到的种类与变体，不看窗口的正文，六个目标都用它生成样式表。改为走 `Application::walk`，组件与窗口的正文都算。
+- 验证：生成器测试 `a_style_variant_in_a_window_is_defined` 在 PC 上用 MSVC 编译生成的程序，通过；测试应用（窗口正文里写 `variant: stage`，组件里写 `variant: card`，各自只在一处用到）`bern build --target windows` 完成编译与链接，`app_ui.inl` 里 `S_buttonStage` 与 `S_buttonCard` 都有定义，两个按钮各自引用。
+- 未验证：窗口快照。启动窗口要注册计划任务，这次的权限设置不允许，没有运行。
+
 ## 未完成与已知限制
 
 - **使用 Windows 自带的运行时不是微软公开说明的用法。** 微软的部署指南只说明非打包应用要自己部署运行时；`CBS.2` 是 Windows 给自己组件用的副本，第三方程序能用是实测结果，以后的 Windows 更新可能改变它的名称、内容或可用性。所以其他程序装的 2.x 总是优先。哪些 Windows 11 版本自带 `CBS.2` 也只在 25H2（26200.9457）上确认过。

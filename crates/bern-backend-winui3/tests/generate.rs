@@ -1377,3 +1377,149 @@ fn a_text_input_can_hide_its_label() {
     assert!(field("beside_name").contains(".labelHidden = true, .field = "));
     assert!(!field("name").contains(".labelHidden"));
 }
+
+const STAGE_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "stage", version = 1)]
+pub mod stage {
+    use bern::prelude::*;
+
+    #[state]
+    pub struct State {
+        pub count: i64,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn add(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+const STAGE_UI: &str = r#"
+use bern::prelude::*;
+
+style! {
+    Button.stage {
+        background: accent,
+        corner: 10,
+    }
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Button(id: mini, label: tr! { "en" => "Add" }, variant: stage) => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// A project whose only styled control is written directly in its window,
+/// compiled from sources written under `dir`.
+fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+    let _ = std::fs::remove_dir_all(dir);
+    for (package, source) in [
+        ("stage-protocol", STAGE_PROTOCOL),
+        ("stage-ui", STAGE_UI),
+        ("stage-core", ""),
+    ] {
+        std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
+        std::fs::write(
+            dir.join(package).join("Cargo.toml"),
+            format!("[package]\nname = \"{package}\"\n"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
+    }
+    std::fs::write(
+        dir.join("Bern.toml"),
+        r#"
+[app]
+id = "stage"
+bundle_id = "dev.bern.stage"
+version = "0.1.0"
+name = { "en" = "Stage" }
+
+[languages]
+supported = ["en"]
+default = "en"
+
+[protocol]
+package = "stage-protocol"
+source = "stage-protocol/src/lib.rs"
+
+[engine]
+package = "stage-core"
+type = "stage_core::Engine"
+
+[ui]
+package = "stage-ui"
+sources = ["stage-ui/src/lib.rs"]
+root = "app"
+
+[targets.windows]
+platform = "windows"
+"#,
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap_or_else(|errors| {
+        panic!(
+            "{}",
+            errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    });
+    (config, compiled)
+}
+
+/// A variant of a control written directly in a window, not in a
+/// component, has its style defined as one in a component has.
+#[test]
+fn a_style_variant_in_a_window_is_defined() {
+    let root = workspace();
+    let (config, compiled) = stage_project(&root.join("target/bern-test/winui3-stage-project"));
+    let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
+    assert!(
+        problems.iter().all(|problem| !problem.is_error()),
+        "{problems:?}"
+    );
+    let output = root.join("target/bern-test/winui3-stage");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    for file in WinUi3Windows.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    let definition = "static B::StyleDef const S_buttonStage = ";
+    let defined = ui
+        .find(definition)
+        .unwrap_or_else(|| panic!("missing `{definition}`:\n{ui}"));
+    let used = ui
+        .find("&S_buttonStage")
+        .unwrap_or_else(|| panic!("the button does not use its style:\n{ui}"));
+    assert!(defined < used, "{ui}");
+    compile(&output);
+}

@@ -253,6 +253,8 @@ bern package --target android
 - 原型（Material，手机）第一行放得下三个 chip：它的分段控件 123 宽、chip 54 宽（13 px 字）。Compose 的 `SegmentedButton` 各段等宽，且总为对勾留出 18 + 8 dp（不显示对勾时也留），`FilterChip` 为 14 sp 字、60 dp 宽，这一行在 361 dp 里放不下第三个。这是系统控件自己的尺寸，没有改画。
 - 发现并修正：分段按钮按各段的最小固有宽度排，文字的最小固有宽度是最长的一个词，带计数的标签「已安装 3」原来被截成「已安装」；现在标签按整行宽度量。
 
+2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文，窗口正文里写的 `variant:` 不生成 `BernStyles` 的条目，生成的 Kotlin 引用不存在的 `BernStyles.buttonStage`（原因见 WinUI 3 实现记录的同日条目）。生成器测试 `a_style_variant_in_a_window_is_defined` 断言定义与引用；测试应用 `bern build --target android` 完成 Kotlin 编译并打出 APK。未装到手机上看：当时手机正被使用。
+
 ## 未完成与已知限制
 
 - 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。

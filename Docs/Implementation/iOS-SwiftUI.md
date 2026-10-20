@@ -157,6 +157,10 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
   - 改后：启动时窗口宽度还是 0，按场景宽 402 估计，`start` 第一次构建就是 `compact`，模态第一次构建就铺满；插入的 `inserted` 第一次构建就是 `compact`（自身宽度未知，窗口宽 402）。整个过程没有构建过 `expanded`，`ui inspect` 里两个 adaptive 一开始就是 `compact`。
   - 示例 gallery 在手机上切到胶片页（`ui select --target main_window.pages --option Film`），`film.film_controls` 同样只构建 `compact`。
 
+### 直接写在窗口正文里的样式变体（2026-10-20）
+
+生成器测试 `a_style_variant_in_a_window_is_defined` 为 iOS 生成窗口正文里的 `variant: stage`，`BernStyles` 有 `buttonStage`，按模拟器 SDK 做类型检查通过（原因见 WinUI 3 实现记录的同日条目）。模拟器当时没有启动 iOS 设备，没有看画面。
+
 ## 错峰、比例轨道、浮层按钮与四档尺寸
 
 2026-10-14，v0.30，iPhone 17 Pro 模拟器（iOS 26.5），与 macOS 共用同一套 SwiftUI 实现，启动时用 `SIMCTL_CHILD_BERN_MOTION=slow` 放慢动效。
