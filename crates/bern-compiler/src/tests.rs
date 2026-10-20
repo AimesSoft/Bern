@@ -3851,6 +3851,26 @@ fn style_rules_take_base_properties_states_and_platforms() {
 }
 
 #[test]
+fn controls_placed_directly_in_a_window_use_their_style() {
+    let source = format!(
+        "{}\nstyle! {{ Button.hero {{ corner: 8 }} IconButton {{ corner: 4 }} }}\n",
+        wrap("Spacer").replace(
+            "page(app: app, windows: windows)",
+            r#"Button(id: grow, label: tr! { "en" => "Grow", "ja" => "拡大" }, variant: hero) => app.add(1)"#,
+        )
+    );
+    let app = compile_ui(&source)
+        .unwrap_or_else(|errors| panic!("{errors:?}"))
+        .app;
+    let names: Vec<String> = bern_target_api::style::used(&app, "macos")
+        .into_iter()
+        .map(|style| style.name)
+        .collect();
+    // No `IconButton` is placed anywhere, so its rule is not used.
+    assert_eq!(names, ["buttonHero"]);
+}
+
+#[test]
 fn controlled_settings_reject_ambiguous_sources_and_non_enum_selections() {
     let label = r#"tr! { "en" => "Preference", "ja" => "設定" }"#;
     for (body, message) in [
