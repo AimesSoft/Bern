@@ -2774,6 +2774,20 @@ export function sizeOf(width, breakpoints) {
   return "large";
 }
 
+/// The width and height a window of `kind` gets in the desktop's `room`
+/// before it is laid out: the page fills the room, a dialog takes its
+/// declared size within it and a floating window its frame or declared
+/// size; on a narrow desktop both fill it, as their styles do.
+export function windowRoom(kind, { frame, maximized }, room, narrow) {
+  if (narrow || kind.presentation === "page" || (kind.presentation === "floating" && maximized)) {
+    return [room.width, room.height];
+  }
+  const [width, height] = kind.presentation === "dialog"
+    ? [kind.width ?? 560, kind.height ?? room.height]
+    : [frame?.width ?? kind.width ?? 640, frame?.height ?? kind.height ?? 480];
+  return [Math.min(width, room.width), Math.min(height, room.height)];
+}
+
 /// The layout a size shows: its own, else the next larger declared one,
 /// else the next smaller.
 function layoutFor(size, layouts) {
@@ -2784,7 +2798,10 @@ function layoutFor(size, layouts) {
 
 export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
   const node = el("div", { class: "bern-adaptive" });
-  const size = cell(null);
+  // Until it has measured the room it is given, the window's width stands
+  // in: the room is no wider, so a layout built as a phone's window opens,
+  // or inserted into it later, is the phone's from its first build.
+  const size = cell(sizeOf(ctx.win?.width || globalThis.innerWidth || Infinity, breakpoints));
   const observer = new ResizeObserver(() => {
     // A hidden container has no width to judge by; keep the last size.
     if (!node.getClientRects().length) return;
@@ -2796,7 +2813,7 @@ export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
   let owner = null;
   let shown = null;
   effect(() => {
-    const current = television && layouts.tv ? "tv" : layoutFor(size.get() ?? "expanded", layouts);
+    const current = television && layouts.tv ? "tv" : layoutFor(size.get(), layouts);
     if (current === shown) return;
     shown = current;
     untrack(() => {
@@ -2819,7 +2836,7 @@ export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
   if (id) {
     control(ctx, {
       target: () => target(ctx, id), role: "adaptive", label: () => "",
-      actions: { value: () => (television && layouts.tv ? "tv" : size.peek() ?? "expanded") },
+      actions: { value: () => (television && layouts.tv ? "tv" : size.peek()) },
     });
   }
   p.append(node);
@@ -3661,6 +3678,10 @@ class Win {
     this.short = cell(false);
     /// `window.tv`: the page is on a television.
     this.tv = cell(television);
+    /// The width of the window's content: measured, or before the window
+    /// is laid out the room it gets. Layouts chosen by width go by it until
+    /// they measure themselves.
+    this.width = Infinity;
   }
 
   get floating() {
@@ -3941,21 +3962,34 @@ class WindowManager {
   }
 
   /// Keeps `window.compact` and its siblings to the width of the window.
+  /// Before the window is laid out they follow the room it gets, so its
+  /// first content is already built for that size.
   sizeWindow(win) {
-    const update = () => {
-      const width = win.element.clientWidth;
-      if (!width) return;
+    const apply = (width, height) => {
+      win.width = width;
       const size = sizeOf(width, this.app.layouts);
-      const height = win.element.clientHeight;
       batch(() => {
         for (const name of SIZES) win[name].set(name === size);
         win.short.set(height > 0 && height < this.app.layouts.compact);
       });
     };
+    const update = () => {
+      const width = win.element.clientWidth;
+      if (width) apply(width, win.element.clientHeight);
+    };
     const observer = new ResizeObserver(update);
     observer.observe(win.element);
     onCleanup(() => observer.disconnect());
-    update();
+    if (win.element.clientWidth) update();
+    else {
+      const desktop = this.desktop.getBoundingClientRect();
+      // A page not laid out yet has no size to go by: the widest then.
+      const room = {
+        width: desktop.width || globalThis.innerWidth || Infinity,
+        height: desktop.height || globalThis.innerHeight || Infinity,
+      };
+      apply(...windowRoom(win.spec, win.state.peek(), room, this.narrow.peek()));
+    }
   }
 
   /// A modal dialog over a scrim: the title and toolbar in its header with

@@ -1282,6 +1282,10 @@ struct Win {
     /// The window's layout size by its width: compact, medium, expanded
     /// or large.
     Cell<std::string> size{std::string("expanded")};
+    /// The width of the window's content: measured, or before the window
+    /// is laid out the width it opens at. Layouts chosen by width go by it
+    /// until they measure themselves.
+    double width = INFINITY;
     /// `window.short`: shorter than the compact breakpoint.
     Cell<bool> isShort{false};
     /// Whether the window is immersive now: no title bar or toolbar.

@@ -143,6 +143,10 @@ pub(crate) struct Win {
     idle_enabled: StdCell<bool>,
     /// The layout size of the window's width.
     size: Cell<&'static str>,
+    /// The width of the window's content: measured, or before the window
+    /// is laid out the width it opens at. Layouts chosen by width go by it
+    /// until they measure themselves.
+    pub(crate) width: StdCell<f64>,
     /// `window.short`: the window is less tall than the compact breakpoint.
     short: Cell<bool>,
     /// The layer above the window's content where modals and palettes
@@ -643,6 +647,46 @@ pub(crate) fn header(page: &Rc<Page>, fallback: Option<Rc<dyn Fn() -> String>>) 
     header
 }
 
+/// The size a window opens at, before it is laid out: its declared size
+/// within the largest monitor, unbounded where neither says.
+pub(crate) fn opening_size(
+    declared: (Option<f64>, Option<f64>),
+    monitors: &[(f64, f64)],
+) -> (f64, f64) {
+    let largest = |side: fn(&(f64, f64)) -> f64| {
+        monitors
+            .iter()
+            .map(side)
+            .reduce(f64::max)
+            .unwrap_or(f64::INFINITY)
+    };
+    (
+        declared
+            .0
+            .unwrap_or(f64::INFINITY)
+            .min(largest(|monitor| monitor.0)),
+        declared
+            .1
+            .unwrap_or(f64::INFINITY)
+            .min(largest(|monitor| monitor.1)),
+    )
+}
+
+/// The sizes of the display's monitors.
+fn monitor_sizes() -> Vec<(f64, f64)> {
+    let Some(display) = gtk::gdk::Display::default() else {
+        return Vec::new();
+    };
+    let monitors = display.monitors();
+    (0..monitors.n_items())
+        .filter_map(|index| monitors.item(index).and_downcast::<gtk::gdk::Monitor>())
+        .map(|monitor| {
+            let geometry = monitor.geometry();
+            (f64::from(geometry.width()), f64::from(geometry.height()))
+        })
+        .collect()
+}
+
 /// Generation, id and draft cells of a new window instance.
 type Instance = (u64, String, HashMap<usize, Vec<Cell<Value>>>);
 
@@ -719,6 +763,11 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     let toasts = adw::ToastOverlay::new();
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&toasts));
+    // Until the window is laid out, `window.compact` and its siblings
+    // follow the size it opens at, so its first content is already built
+    // for that size.
+    let (opening_width, opening_height) = opening_size((def.width, def.height), &monitor_sizes());
+    let compact = host.def.compact_below.unwrap_or(0.0);
     let ghosts = gtk::Fixed::new();
     ghosts.set_can_target(false);
     overlay.add_overlay(&ghosts);
@@ -750,8 +799,9 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         ghosts,
         idle: Cell::new(false),
         idle_enabled: StdCell::new(true),
-        size: Cell::new("expanded"),
-        short: Cell::new(false),
+        size: Cell::new(crate::structure::size_of(opening_width)),
+        width: StdCell::new(opening_width),
+        short: Cell::new(opening_height < compact),
         overlay: overlay.clone(),
         below: toasts.clone().upcast(),
         immersive: Cell::new(false),
@@ -775,6 +825,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         if width > 0
             && let Some(win) = sized.upgrade()
         {
+            win.width.set(f64::from(width));
             win.size.set(crate::structure::size_of(f64::from(width)));
         }
     });
@@ -1411,6 +1462,25 @@ mod tests {
     use crate::host::tests::{app, start};
     use crate::protocol::{Type, session_catalog};
     use gtk::gdk::{Key, ModifierType};
+
+    #[test]
+    fn windows_open_at_their_declared_size_within_the_largest_monitor() {
+        let phone = [(360.0, 720.0)];
+        assert_eq!(
+            opening_size((Some(960.0), Some(680.0)), &phone),
+            (360.0, 680.0)
+        );
+        let desktops = [(1280.0, 800.0), (2560.0, 1440.0)];
+        assert_eq!(
+            opening_size((Some(960.0), Some(680.0)), &desktops),
+            (960.0, 680.0)
+        );
+        assert_eq!(opening_size((None, None), &desktops), (2560.0, 1440.0));
+        assert_eq!(
+            opening_size((Some(960.0), None), &[]),
+            (960.0, f64::INFINITY)
+        );
+    }
 
     #[test]
     fn shortcuts_parse_into_modifiers_and_a_key() {

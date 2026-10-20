@@ -43,6 +43,21 @@ function runtime(search = "") {
       if (options.left !== undefined) this.scrollLeft = options.left;
     }
     getBoundingClientRect() { return this.rect ?? { left: 0, top: 0, width: 100, height: 40 }; }
+    getClientRects() { return [this.getBoundingClientRect()]; }
+    get nextSibling() {
+      const siblings = this.parentNode?.childNodes ?? [];
+      return siblings[siblings.indexOf(this) + 1] ?? null;
+    }
+    before(...nodes) {
+      const parent = this.parentNode;
+      const placed = nodes.flatMap((node) => node.nodeType === 11 ? node.childNodes.splice(0) : [node]);
+      parent.childNodes.splice(parent.childNodes.indexOf(this), 0, ...placed);
+      for (const node of placed) { node.parentNode = parent; node.parentElement = parent.nodeType === 1 ? parent : null; }
+    }
+    contains(other) {
+      for (let node = other; node; node = node.parentNode) if (node === this) return true;
+      return false;
+    }
     remove() {
       if (this.parentNode) this.parentNode.childNodes = this.parentNode.childNodes.filter((child) => child !== this);
       this.parentNode = this.parentElement = null;
@@ -540,4 +555,60 @@ test("chip pickers in a flow are its items and mark the chosen option", () => {
   assert.match(css, /\.bern-flow > \.bern-chips\s*\{\s*display:\s*contents;/);
   assert.match(css, /\.bern-flow\s*\{[^}]*flex-flow:\s*row wrap;[^}]*align-items:\s*center;/);
   assert.match(css, /\.bern-spacer\s*\{\s*flex:\s*1;/);
+});
+
+test("a layout chosen by width is built for its window's width before it measures itself", () => {
+  const { B, Element, resizeObservers } = runtime();
+  const breakpoints = { compact: 600, medium: null, expanded: null };
+  const built = [];
+  const layouts = {
+    compact: (p) => { built.push("compact"); p.append(new Element("div")); },
+    expanded: (p) => { built.push("expanded"); p.append(new Element("div")); },
+  };
+  const mount = (width) => {
+    const root = new Element("root");
+    const scope = new B.Scope();
+    B.within(scope, () => B.Adaptive(root, { win: { width }, comp: "demo" }, { id: "layout", breakpoints, layouts }));
+    return { node: root.childNodes[0], scope, observer: resizeObservers.at(-1) };
+  };
+  const size = () => B.controlEntries().find((entry) => entry.target() === "demo.layout").actions.value();
+  // A phone's window: only the phone's layout is ever built.
+  const phone = mount(390);
+  assert.deepEqual(built, ["compact"]);
+  assert.equal(size(), "compact");
+  phone.node.rect = { left: 0, top: 0, width: 390, height: 300 };
+  phone.observer.callback([]);
+  assert.deepEqual(built, ["compact"]);
+  phone.scope.dispose();
+  // A wide window never builds the narrow layout first; measured narrower
+  // than the window, as beside a sidebar, the layout follows its room.
+  built.length = 0;
+  const wide = mount(1000);
+  assert.deepEqual(built, ["expanded"]);
+  assert.equal(size(), "expanded");
+  wide.node.rect = { left: 0, top: 0, width: 500, height: 300 };
+  wide.observer.callback([]);
+  assert.deepEqual(built, ["expanded", "compact"]);
+  assert.equal(size(), "compact");
+  wide.scope.dispose();
+});
+
+test("a window is sized for the room it gets before it is laid out", () => {
+  const { B } = runtime();
+  // Arrays from the runtime's realm, compared as plain ones.
+  const room = (...args) => Array.from(B.windowRoom(...args));
+  const state = { frame: null, maximized: false };
+  const phone = { width: 390, height: 844 };
+  const desktop = { width: 1440, height: 900 };
+  const page = { presentation: "page", width: 1100, height: 720 };
+  assert.deepEqual(room(page, state, phone, true), [390, 844]);
+  assert.deepEqual(room(page, state, desktop, false), [1440, 900]);
+  const dialog = { presentation: "dialog", width: 480, height: 360 };
+  assert.deepEqual(room(dialog, state, desktop, false), [480, 360]);
+  assert.deepEqual(room({ presentation: "dialog", width: null, height: null }, state, desktop, false), [560, 900]);
+  assert.deepEqual(room(dialog, state, phone, true), [390, 844], "a narrow desktop's dialog fills it");
+  const floating = { presentation: "floating", width: 900, height: 600 };
+  assert.deepEqual(room(floating, state, { width: 800, height: 700 }, false), [800, 600]);
+  assert.deepEqual(room(floating, { frame: { width: 700, height: 500 }, maximized: false }, desktop, false), [700, 500]);
+  assert.deepEqual(room(floating, { frame: { width: 700, height: 500 }, maximized: true }, desktop, false), [1440, 900]);
 });

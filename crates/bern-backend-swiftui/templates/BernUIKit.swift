@@ -65,6 +65,27 @@ extension BernWindowContext {
         platform.hasCloseCheck = closeCheck != nil
     }
 
+    /// The room the window has before its first layout measures it. Where
+    /// every window is in the one scene, the scene's size: the primary
+    /// window fills it, and nothing over it is larger. Windows of their
+    /// own (iPad) may open at any size, so the largest screen's. Never
+    /// less than the window gets, so a wide window never builds a narrow
+    /// layout first.
+    var unmeasuredSize: CGSize {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .filter { $0.session.role == .windowApplication }
+        if !BernHost.shared.platform.nativeWindows, scenes.count == 1 {
+            let size = scenes[0].coordinateSpace.bounds.size
+            if size.width > 0, size.height > 0 { return size }
+        }
+        let screens = scenes.map(\.screen.bounds.size)
+        guard let width = screens.map(\.width).max(), let height = screens.map(\.height).max(), width > 0 else {
+            return CGSize(width: CGFloat.infinity, height: CGFloat.infinity)
+        }
+        return CGSize(width: width, height: height)
+    }
+
     /// The system window the root is in; its key status is the window's
     /// focus.
     func found(_ window: UIWindow?) {

@@ -143,9 +143,19 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 - **现象**：`ui inspect` 把引导脚部的 `skip`、`start` 各列两次，`ui activate --target onboarding_footer.skip` 报 `target_ambiguous`；被引导盖住的首页也有许多控件重复 2～5 次，窗口里共 125 项。走完引导后 `skip`、`start` 仍在列表里，纯播放页上还列着只有宽屏才显示的桌面版按钮；启动后再打开引导，桌面版的那些按钮又多一份。Mac 与 Android 上每个目标只列一次。
 - **原因**：首个布局时还不知道宽度。窗口宽度为 0 时不算 compact，`Adaptive` 的宽度为 `nil` 时按无限宽取布局，所以先挂上宽屏布局（模态先排成浮动面板），量到 402 后再换成手机布局。控件原来在 `.task(id:)` 里登记、在 `onDisappear` 里注销；iOS 26.1 上任务在这次更新之后才开始，这些一闪而过的控件先被注销、后被登记，从此留在列表里。macOS 27 上任务随视图出现立即执行，所以 Mac 上看不到：在屏幕外窗口里打印出现、任务与消失的顺序，任务总在出现之前，按 macOS 15 的部署目标编译也一样。
-- **修复**：`BernControl` 在 `onAppear` 登记，窗口、目标、标签或可用状态变化时重新登记，在 `onDisappear` 注销，全部同步。Compose（`SideEffect` 与 `DisposableEffect`）、Web（`onCleanup`）、GTK 与 WinUI 3（作用域清理）本来就同步配对，没有这个问题。首个布局仍会先构建一次宽屏布局再换掉，只是不再留下登记。
+- **修复**：`BernControl` 在 `onAppear` 登记，窗口、目标、标签或可用状态变化时重新登记，在 `onDisappear` 注销，全部同步。Compose（`SideEffect` 与 `DisposableEffect`）、Web（`onCleanup`）、GTK 与 WinUI 3（作用域清理）本来就同步配对，没有这个问题。首个布局仍会先构建一次宽屏布局再换掉，只是不再留下登记（已修复，见下一节）。
 - **测试**：`tests/control_registry.rs` 在屏幕外窗口里运行真实的 SwiftUI 修饰符：模态式的先浮动后铺满、`Adaptive` 式的先宽后窄，每个目标只列一次、`find` 能找到，移除后清空，再插入后恢复；另一项检查登记不在任务里，因为 macOS 27 无法在运行时重现晚开始的任务。
 - **验证**：修复后首次启动，`ui inspect` 共 32 项，`onboarding_footer.skip` 与 `.start` 各一次，桌面版的 `stage.*`、`timeline.schedule` 不再出现；`ui activate --target onboarding_footer.skip` 跳到最后一步，`ui activate --target onboarding_footer.finish` 关闭引导，之后只剩手机纯播放页的 9 个控件和 `main_shell.shell`，引导的目标全部消失；启动后再打开引导，每个目标一次，桌面版控件不再出现。
+
+### 首个布局就是手机布局（2026-10-20）
+
+- **问题**：上一节的修复之后，手机上每挂一棵新的子树——应用启动时，或条件切换时新建的 `Adaptive`——仍先构建一次宽屏布局，`Modal(cover: compact)` 仍先排成浮动面板，量到宽度后才换。白做的构建会带出入场动画、共享元素计数、播放器绑定等副作用。
+- **修复**：窗口量到宽度之前，`window.compact` 等档位与 `window.short` 按平台给出的尺寸计算（`BernWindowContext.layoutWidth`、`layoutHeight`）：只有一个场景时取场景的尺寸；能开独立窗口时（iPad）取屏幕的尺寸，因为新窗口可能开成任意大小。两者都不小于窗口实际得到的尺寸，宽窗口不会先构建窄布局。`Adaptive` 在量到自己的可用宽度之前取所在窗口的宽度，可用宽度不会比窗口更宽。macOS 在首次布局前不知道窗口尺寸，仍从最宽的档开始。
+- **测试**：`tests/adaptive_first_layout.rs` 在屏幕外窗口里运行真实的 `BernAdaptive`，记录每个布局的构建次数：390 宽、平台尺寸为手机的窗口，启动时与之后插入的 `Adaptive` 都只构建 `compact`，盖满式模态只构建铺满的一种；1000 宽的窗口，平台尺寸为平板屏幕或未知（macOS）时都只构建 `expanded`。同一测试换成改前的运行时会失败：启动时 `expanded` 与浮动面板各构建一次。
+- **验证**：iPhone 17 模拟器（iOS 26.1），一个首屏有 `Adaptive(id: start)` 与 `Modal(cover: compact)`、打开开关后插入 `Adaptive(id: inserted)` 的最小应用，在布局与模态的构建处临时打印选中的尺寸（验证后删除）：
+  - 改前：启动时 `start` 先构建 `expanded`，模态先构建浮动面板，量到宽度后再分别换成 `compact` 与铺满；`ui set-bool --target home.more --value true` 插入的 `inserted` 也先构建 `expanded`。
+  - 改后：启动时窗口宽度还是 0，按场景宽 402 估计，`start` 第一次构建就是 `compact`，模态第一次构建就铺满；插入的 `inserted` 第一次构建就是 `compact`（自身宽度未知，窗口宽 402）。整个过程没有构建过 `expanded`，`ui inspect` 里两个 adaptive 一开始就是 `compact`。
+  - 示例 gallery 在手机上切到胶片页（`ui select --target main_window.pages --option Film`），`film.film_controls` 同样只构建 `compact`。
 
 ## 错峰、比例轨道、浮层按钮与四档尺寸
 

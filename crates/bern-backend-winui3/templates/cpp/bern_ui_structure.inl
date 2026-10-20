@@ -1002,17 +1002,21 @@ inline void Adaptive(Parent const& p, Ctx const& ctx, char const* id, std::array
     auto holder = MakeFlex(false, p.isList ? (kWinUI ? 4 : 2) : 8);
     holder.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
     static char const* const kSizes[] = {"compact", "medium", "expanded", "large"};
-    Cell<int> size(2);
     auto const& catalog = app->catalog;
-    holder.SizeChanged([size, &catalog](auto&&, xaml::SizeChangedEventArgs const& args) mutable {
-        // A hidden layout has no width to judge by; it keeps its size.
-        double width = args.NewSize().Width;
-        if (width <= 0) return;
-        int next = width < catalog.compactBelow.value_or(0) ? 0
+    auto sizeOf = [&catalog](double width) {
+        return width < catalog.compactBelow.value_or(0) ? 0
             : catalog.mediumBelow && width < *catalog.mediumBelow ? 1
             : !catalog.expandedBelow || width < *catalog.expandedBelow ? 2
             : 3;
-        size.Set(next);
+    };
+    // Until it has measured the room it is given, the window's width
+    // stands in: the room is no wider, so a layout built as a narrow window
+    // opens, or inserted into it later, is right from its first build.
+    Cell<int> size(sizeOf(ctx.win ? ctx.win->width : INFINITY));
+    holder.SizeChanged([size, sizeOf](auto&&, xaml::SizeChangedEventArgs const& args) mutable {
+        // A hidden layout has no width to judge by; it keeps its size.
+        double width = args.NewSize().Width;
+        if (width > 0) size.Set(sizeOf(width));
     });
     auto shared = std::make_shared<std::array<Build, 4>>(std::move(layouts));
     auto layoutFor = [shared](int wanted) -> int {

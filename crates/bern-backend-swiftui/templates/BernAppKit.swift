@@ -35,6 +35,11 @@ final class BernHostPlatform {
 extension BernWindowContext {
     var nsWindow: NSWindow? { platform.nsWindow }
 
+    /// Before its first layout a window's size is not known here: SwiftUI
+    /// may restore its frame rather than use the declared size. Layouts
+    /// take the widest size until it is measured.
+    var unmeasuredSize: CGSize { CGSize(width: CGFloat.infinity, height: CGFloat.infinity) }
+
     func found(_ window: NSWindow?) {
         guard let window, window !== platform.nsWindow else { return }
         platform.nsWindow = window

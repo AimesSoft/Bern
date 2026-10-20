@@ -1152,9 +1152,12 @@ const SIZES: [&str; 4] = ["compact", "medium", "expanded", "large"];
 #[allow(non_snake_case)]
 pub fn Adaptive(p: &Parent, ctx: &Ctx, id: Option<&'static str>, layouts: [Option<Build>; 4]) {
     // The layout is chosen by the width the container offers, which the
-    // layout shown does not widen.
+    // layout shown does not widen. Until that is measured the window's
+    // width stands in: the room is no wider, so a layout built as a narrow
+    // window opens, or inserted into it later, is right from its first
+    // build.
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let size = Cell::new("expanded");
+    let size = Cell::new(size_of(ctx.win().width.get()));
     let measured = size.clone();
     // A hidden layout has no width to judge by; it keeps its size.
     let holder = crate::layout::Offered::new(&content, move |width| {

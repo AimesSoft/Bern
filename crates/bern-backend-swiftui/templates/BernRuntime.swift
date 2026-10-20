@@ -500,21 +500,22 @@ final class BernWindowContext {
     /// Whether the window had no input for its `idle_after` seconds.
     var idle = false
     /// The width of the window's content, for `window.compact` and its
-    /// siblings.
+    /// siblings; 0 until its first layout measures it.
     var width: CGFloat = 0
-    /// The height of the window's content, for `window.short`.
+    /// The height of the window's content, for `window.short`; 0 until
+    /// measured.
     var height: CGFloat = 0
     /// Whether the window has shown its first frame: elements appearing
     /// after it move in, those of the first frame do not.
     var settled = false
 
-    private var size: String { bernAppBreakpoints.size(of: width > 0 ? width : .infinity) }
+    private var size: String { bernAppBreakpoints.size(of: layoutWidth) }
     var compact: Bool { size == "compact" }
     var medium: Bool { size == "medium" }
     var expanded: Bool { size == "expanded" }
     var large: Bool { size == "large" }
     /// Shorter than the compact breakpoint, as a phone on its side.
-    var short: Bool { height > 0 && height < bernAppBreakpoints.compact }
+    var short: Bool { layoutHeight < bernAppBreakpoints.compact }
     /// On a television: `window.tv`.
     var tv: Bool { bernTelevision }
     private(set) var generation: UInt64 = 0
@@ -736,6 +737,16 @@ struct BernBreakpoints: Sendable {
     }
 }
 
+extension BernWindowContext {
+    /// The width the window's layouts go by: the measured one, else the
+    /// width the platform says the window gets, so a phone's first layout
+    /// is already the phone's. Where nothing is known it is unbounded and
+    /// the widest layout comes first.
+    var layoutWidth: CGFloat { width > 0 ? width : unmeasuredSize.width }
+    /// The height `window.short` goes by, the same way.
+    var layoutHeight: CGFloat { height > 0 ? height : unmeasuredSize.height }
+}
+
 /// One layout per size of the available width. The content builds the
 /// layout named; external entries read the size.
 struct BernAdaptive<Content: View>: View {
@@ -752,6 +763,7 @@ struct BernAdaptive<Content: View>: View {
     let content: (String) -> Content
     @State private var width: CGFloat?
     @State private var current = Current()
+    @Environment(BernWindowContext.self) private var window: BernWindowContext?
 
     init(
         breakpoints: BernBreakpoints, declared: [String], target: String?,
@@ -764,9 +776,13 @@ struct BernAdaptive<Content: View>: View {
     }
 
     /// A television shows the `tv` layout where there is one; elsewhere
-    /// the width chooses.
+    /// the width chooses. Until the layout has measured the room it is
+    /// given, the window's width stands in: the room is no wider, so a
+    /// layout inserted into a phone's window, or built as the app starts
+    /// there, is the phone's from its first build.
     private var size: String {
-        bernTelevision && declared.contains("tv") ? "tv" : breakpoints.size(of: width ?? .infinity)
+        if bernTelevision && declared.contains("tv") { return "tv" }
+        return breakpoints.size(of: width ?? window?.layoutWidth ?? .infinity)
     }
 
     var body: some View {

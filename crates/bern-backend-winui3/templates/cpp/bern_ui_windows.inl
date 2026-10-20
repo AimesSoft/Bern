@@ -511,6 +511,15 @@ inline std::string SizeOf(double width) {
     return "large";
 }
 
+/// Until a window is laid out, `window.compact` and its siblings follow
+/// the size it opens at, so its first content is already built for that
+/// size.
+inline void SizeBeforeLayout(Win& win, double width, double height) {
+    win.width = width;
+    win.size.Set(SizeOf(width));
+    win.isShort.Set(height < app->catalog.compactBelow.value_or(0));
+}
+
 /// Whether the cursor is hidden for an immersive, idle window.
 inline bool cursorHidden = false;
 
@@ -705,7 +714,10 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
     Win* raw = win.get();
     win->root.SizeChanged([raw](auto&&, xaml::SizeChangedEventArgs const& args) {
         PlaceHeader(*raw);
-        if (args.NewSize().Width > 0) raw->size.Set(SizeOf(args.NewSize().Width));
+        if (args.NewSize().Width > 0) {
+            raw->width = args.NewSize().Width;
+            raw->size.Set(SizeOf(raw->width));
+        }
         // `window.short`: shorter than the compact breakpoint.
         if (args.NewSize().Height > 0) raw->isShort.Set(args.NewSize().Height < app->catalog.compactBelow.value_or(0));
     });
@@ -822,6 +834,10 @@ inline std::string OpenDialog(std::shared_ptr<Win> const& win) {
             dialog.Title(title);
         });
     });
+    // A content dialog is as wide as declared, else at most 548, within
+    // the window it shows over.
+    SizeBeforeLayout(*win, (std::min)(def.width ? (std::max)(*def.width, 320.0) : 548.0, owner->width),
+        def.height.value_or(INFINITY));
     Mount(win, host, page);
     std::weak_ptr<Win> weak = win;
     // Its frame is known once laid out.
@@ -960,10 +976,10 @@ inline std::string Open(std::string const& kindId) {
         Reactive::Run([hwnd, titleKey] { SetWindowTextW(hwnd, bern::Text::Tr(titleKey).c_str()); });
 #endif
     });
-    Mount(win, host, page);
-
     double width = def.width.value_or(def.settings ? 640 : 960);
     double height = def.height.value_or(def.settings ? 560 : 680);
+    SizeBeforeLayout(*win, width, height);
+    Mount(win, host, page);
     SetOuterSize(*win, width, height);
 
     std::weak_ptr<Win> weak = win;
