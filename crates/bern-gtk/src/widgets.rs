@@ -175,6 +175,11 @@ fn bind_text_size(ctx: &Ctx, label: &gtk::Label, size: Option<Num>, line_height:
 /// The classes of a text style: libadwaita's for its size, and Bern's for
 /// the weights and sizes `text { … }` gives.
 fn text_style(widget: &impl IsA<gtk::Widget>, style: Option<&str>) {
+    // `control`: the font of the control it stands in, which the label
+    // inherits, as a button's title does.
+    if style == Some("control") {
+        return;
+    }
     widget.add_css_class(style_class(style));
     widget.add_css_class(&crate::style::text_class(style.unwrap_or("body")));
 }
@@ -2034,6 +2039,9 @@ pub fn Form(p: &Parent, ctx: &Ctx, props: FormProps, children: Build) {
     clamp.set_child(Some(&content));
     let scrolled = gtk::ScrolledWindow::new();
     scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
+    // A form takes the room it is given both ways, as on the other
+    // targets; the clamp keeps its rows readable.
+    scrolled.set_hexpand(true);
     scrolled.set_vexpand(true);
     scrolled.set_propagate_natural_height(true);
     scrolled.set_child(Some(&clamp));

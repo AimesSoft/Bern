@@ -2492,18 +2492,27 @@ private struct BernFillsLayers: LayoutValueKey {
     static let defaultValue = false
 }
 
-/// A `Stack` holding a rail: its layers paint in order, as in a `ZStack`,
-/// but a rail takes the size the other layers give the stack instead of
-/// adding to it. With only rails, the stack is as large as the largest.
+/// A `Stack` holding a rail or a canvas without a size: its layers paint in
+/// order, as in a `ZStack`, but such a layer takes the size the other
+/// layers give the stack instead of adding to it, a backdrop. With only
+/// such layers, the stack is as large as the largest.
 struct BernLayers: Layout {
     let alignment: UnitPoint
+    /// The stack's own size, where it gives one: its backdrops take it.
+    var width: Double? = nil
+    var height: Double? = nil
+    /// With a backdrop, the stack fills the width it is offered, as a block
+    /// does across a column, and keeps the height its other layers give.
+    var fillsWidth = false
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let sized = subviews.filter { !$0[BernFillsLayers.self] }
-        return (sized.isEmpty ? Array(subviews) : sized).reduce(.zero) { size, subview in
+        let fits = (sized.isEmpty ? Array(subviews) : sized).reduce(CGSize.zero) { (size: CGSize, subview: LayoutSubview) -> CGSize in
             let own = subview.sizeThatFits(proposal)
             return CGSize(width: max(size.width, own.width), height: max(size.height, own.height))
         }
+        let offered = fillsWidth ? proposal.width.flatMap { $0.isFinite ? $0 : nil } : nil
+        return CGSize(width: width.map { CGFloat($0) } ?? offered ?? fits.width, height: height.map { CGFloat($0) } ?? fits.height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {

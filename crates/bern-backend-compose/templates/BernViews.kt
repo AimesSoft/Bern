@@ -330,12 +330,16 @@ object BernKey {
 /// `iconOnly` shows the icon alone, the title its accessible name.
 @Composable
 fun BernLabel(title: String, icon: ImageVector?, style: TextStyle, fontSize: Float? = null, iconOnly: Boolean = false) {
-    val iconModifier = if (fontSize != null) Modifier.size(bernIconSize(fontSize)) else Modifier
+    // The icon follows the text's size, as a symbol does, and so does the
+    // room between them (0.6 of it, 4 to 12).
+    val points = fontSize ?: style.fontSize.takeIf { it.isSp }?.value
+    val iconModifier = if (points != null) Modifier.size(bernIconSize(points)) else Modifier
     if (iconOnly && icon != null) {
         Icon(icon, contentDescription = title, modifier = iconModifier)
         return
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val gap = points?.let { (it * 0.6f).coerceIn(4f, 12f).dp } ?: 8.dp
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
         if (icon != null) Icon(icon, contentDescription = null, modifier = iconModifier)
         Text(title, style = if (fontSize != null) style.copy(fontSize = fontSize.sp) else style)
     }

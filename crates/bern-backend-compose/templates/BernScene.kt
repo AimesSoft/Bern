@@ -177,6 +177,8 @@ fun bernTextStyle(style: String, size: Float? = null, lineHeight: Float? = null)
         "footnote" -> typography.bodySmall
         "caption" -> typography.labelMedium
         "caption2" -> typography.labelSmall
+        // `control`: a Material button's title.
+        "control" -> typography.labelLarge
         else -> typography.bodyLarge
     }
     BernTypography.styles[style]?.let { (weight, points) ->

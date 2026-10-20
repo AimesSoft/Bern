@@ -379,6 +379,9 @@ pub const TEXT_STYLES: &[&str] = &[
     "footnote",
     "caption",
     "caption2",
+    // The platform's control font, as a button's title has it: the text
+    // of a capsule button's content matches the platform's own buttons.
+    "control",
 ];
 
 pub const EMPHASIS: &[&str] = &["primary", "secondary", "tertiary"];

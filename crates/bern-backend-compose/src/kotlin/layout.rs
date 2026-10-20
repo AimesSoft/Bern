@@ -66,8 +66,23 @@ impl Generator<'_> {
             .length(element, "gap")
             .map(|gap| format!("Arrangement.spacedBy({gap})"))
             .unwrap_or_else(|| "Arrangement.spacedBy(8.dp)".into());
+        // A column in a column (a row in a row) holding a spacer takes the
+        // room its siblings leave, as on the other targets, instead of all
+        // of it: a foot after it stays on screen.
+        let along = element
+            .prop(if column { "height" } else { "width" })
+            .is_none()
+            && !ctx.scroll_content
+            && match (column, ctx.scope) {
+                (true, Scope::Column) | (false, Scope::Row) => element
+                    .children
+                    .iter()
+                    .any(|node| matches!(node, Node::Element(child) if child.kind == "Spacer")),
+                _ => false,
+            };
         let modifier = format!(
-            "Modifier{}{}{}",
+            "Modifier{}{}{}{}",
+            if along { ".weight(1f)" } else { "" },
             self.reflow(element),
             self.size_modifiers(element),
             self.padding(element)
@@ -93,6 +108,7 @@ impl Generator<'_> {
             ));
             let row = Ctx {
                 baseline: element.keyword("align") == Some("baseline"),
+                overflow: element.prop("height").map(|_| alignment),
                 ..ctx.within(Scope::Row)
             };
             self.children(out, element, &row);
@@ -121,10 +137,20 @@ impl Generator<'_> {
             .expr("enabled")
             .map(|enabled| format!(", enabled = {}", self.expr(enabled)));
         // To the window's edges, under the app bar and the system bars.
-        let under_bars = if element.keyword("under_bars") == Some("true") {
-            ".bernUnderBars()"
-        } else {
-            ""
+        // With a backdrop (a canvas without a size) and no width of its
+        // own, a stack in a column fills across it, as a block does, and
+        // keeps the height its other layers give.
+        let across = ctx.scope == Scope::Column
+            && element.prop("width").is_none()
+            && element.children.iter().any(|node| {
+                matches!(node, Node::Element(child) if child.kind == "Canvas"
+                    && child.prop("width").is_none()
+                    && child.prop("height").is_none())
+            });
+        let under_bars = match (element.keyword("under_bars") == Some("true"), across) {
+            (true, _) => ".bernUnderBars()",
+            (false, true) => ".fillMaxWidth()",
+            (false, false) => "",
         };
         if style.is_some() || enabled.is_some() {
             out.open(format!(
@@ -334,12 +360,19 @@ impl Generator<'_> {
         let vertical = element.keyword("axis") == Some("vertical");
         let fills = Self::rail_fills(element);
         let aligned = ctx.layer && !fills && ctx.sized_layers;
+        // In a row (a column, for a vertical rail) it takes the room the
+        // others leave, after them, as a flexible view does.
         let modifier = if ctx.layer && fills {
             ", Modifier.matchParentSize()"
         } else if aligned && vertical {
             ", Modifier.fillMaxHeight()"
         } else if aligned {
             ", Modifier.fillMaxWidth()"
+        } else if matches!(
+            (ctx.scope, vertical),
+            (Scope::Row, false) | (Scope::Column, true)
+        ) {
+            ", Modifier.weight(1f)"
         } else {
             ""
         };
@@ -485,7 +518,12 @@ impl Generator<'_> {
             or_null("padding_x"),
             or_null("padding_y"),
         ));
-        self.nodes(out, &element.children, &ctx.within(Scope::Column));
+        // The form scrolls: its rows cannot share its height by weight.
+        let rows = Ctx {
+            scroll_content: true,
+            ..ctx.within(Scope::Column)
+        };
+        self.nodes(out, &element.children, &rows);
         out.close("}");
     }
 
@@ -576,7 +614,11 @@ impl Generator<'_> {
             out.open(format!(
                 "Column({flexible}.fillMaxWidth().verticalScroll({state})) {{",
             ));
-            self.nodes(out, &element.children, &ctx.within(Scope::Column));
+            let content = Ctx {
+                scroll_content: true,
+                ..ctx.within(Scope::Column)
+            };
+            self.nodes(out, &element.children, &content);
         }
         out.close("}");
     }
@@ -650,7 +692,11 @@ impl Generator<'_> {
                     out.open(
                         "Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {",
                     );
-                    self.children(out, element, &ctx.within(Scope::Column));
+                    let content = Ctx {
+                        scroll_content: true,
+                        ..ctx.within(Scope::Column)
+                    };
+                    self.children(out, element, &content);
                     out.close("}");
                 } else {
                     self.children(out, element, ctx);

@@ -82,6 +82,20 @@ test("image and text layers determine their size while rails only cover them", (
   assert.equal(layoutIntent(railsOnly, "height"), true);
 });
 
+test("a canvas without a size is the backdrop of its stack's other layers", () => {
+  const backdrop = layoutNode("bern-canvas bern-fill-width bern-fill-height");
+  const row = layoutNode("bern-stack bern-hstack bern-sized-height", [layoutNode("bern-label"), layoutNode("bern-spacer")], "row");
+  const selected = layoutNode("bern-layers", [backdrop, row], "layers");
+  assert.equal(layoutIntent(selected, "height"), false, "a selected row's backdrop must not stretch it over the column's height");
+  assert.equal(layoutIntent(selected, "width"), true, "the row's spacer still takes the width");
+  const column = layoutNode("bern-stack bern-vstack", [selected, layoutNode("bern-label")], "column");
+  assert.equal(layoutIntent(column, "height"), false);
+  const card = layoutNode("bern-layers bern-sized-width bern-sized-height", [backdrop, column], "layers");
+  assert.equal(fixedSize(card, "height"), true);
+  const plain = layoutNode("bern-layers", [backdrop], "layers");
+  assert.equal(layoutIntent(plain, "height"), true, "a stack with only a backdrop still fills");
+});
+
 test("buttons that fill make their row fill the column", () => {
   const button = layoutNode("bern-button bern-button-fill", [], null, "BUTTON");
   const row = layoutNode("bern-stack bern-hstack", [button, button], "row");

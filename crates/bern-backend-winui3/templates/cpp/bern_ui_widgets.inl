@@ -70,6 +70,9 @@ inline winrt::Windows::UI::Text::FontWeight WeightNamed(std::string_view name) {
 
 /// A text style by Bern's name, with the weight and size `style!` gives it.
 inline void ApplyTextStyle(controls::TextBlock const& block, char const* style) {
+    // `control`: the font of the control it stands in, which the text
+    // inherits, as a button's title does.
+    if (style && std::string_view(style) == "control") return;
     if (auto named = Styles::TextStyle(style)) block.Style(named);
     std::string name = style ? style : "body";
     for (auto const& [entry, weight, size] : app->catalog.textStyles) {
@@ -510,7 +513,10 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     // A button takes its content's size; content that fills stretches it.
     Mirror(button, holder);
     if (FillsRow(holder)) button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    // Content that does not fill the height stands in the middle of a
+    // taller button, as a label does.
     if (FillsColumn(holder)) button.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+    else button.VerticalContentAlignment(xaml::VerticalAlignment::Center);
     auto text = Bound(ctx, props.label);
     BindName(button, text);
     auto isEnabled = Enabled(ctx, props.enabled);
@@ -547,15 +553,22 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
             auto geometry = compositor.CreateRoundedRectangleGeometry();
             geometry.CornerRadius(float2{r, r});
             visual.Clip(compositor.CreateGeometricClip(geometry));
-            holder.as<xaml::FrameworkElement>().SizeChanged([geometry, weak = winrt::make_weak(button)](auto&&, xaml::SizeChangedEventArgs const& args) {
-                auto button = weak.get();
-                auto padding = button ? button.Padding() : xaml::Thickness{};
-                auto border = button ? button.BorderThickness() : xaml::Thickness{};
-                float left = static_cast<float>(padding.Left + border.Left), top = static_cast<float>(padding.Top + border.Top);
-                float right = static_cast<float>(padding.Right + border.Right), bottom = static_cast<float>(padding.Bottom + border.Bottom);
-                geometry.Offset(float2{-left, -top});
-                geometry.Size(float2{args.NewSize().Width + left + right, args.NewSize().Height + top + bottom});
-            });
+            // The button's bounds, in the content's coordinates.
+            auto fit = [geometry, weakButton = winrt::make_weak(button), weakHolder = winrt::make_weak(holder.as<xaml::FrameworkElement>())] {
+                auto button = weakButton.get();
+                auto content = weakHolder.get();
+                if (!button || !content) return;
+                winrt::Windows::Foundation::Point at{};
+                try {
+                    at = content.TransformToVisual(button).TransformPoint({0, 0});
+                } catch (winrt::hresult_error const&) {
+                    return;
+                }
+                geometry.Offset(float2{-at.X, -at.Y});
+                geometry.Size(float2{static_cast<float>(button.ActualWidth()), static_cast<float>(button.ActualHeight())});
+            };
+            holder.as<xaml::FrameworkElement>().SizeChanged([fit](auto&&, auto&&) { fit(); });
+            button.SizeChanged([fit](auto&&, auto&&) { fit(); });
         }
         shown = wrapper;
     }
@@ -1567,6 +1580,17 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
             layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
             layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
         }
+    }
+    // With a backdrop beside other layers and no width of its own, the
+    // stack fills across a column, as a block does, and keeps the height
+    // the other layers give: a row shares its room by roles, not by this.
+    if (!props.width.Given()) {
+        bool backdrop = false, others = false;
+        for (auto child : layers.Children()) {
+            bool canvas = RoleOf(Unwrapped(child)) == L"bern-canvas";
+            (canvas ? backdrop : others) = true;
+        }
+        if (backdrop && others) layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
     }
     if (!props.style && !props.enabled) {
         Place(p, layers);

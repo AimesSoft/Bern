@@ -312,6 +312,14 @@ target/bern/linux/Showcase/showcase
 
 未完成的验证：真实声卡下的播放；完整的键盘遍历、屏幕阅读器；高对比与大字体；X11 会话与 KDE Plasma；分数缩放与多显示器。
 
+2026-10-20，Ubuntu 24.04 虚拟机经 Broadway，用于验收的媒体类应用的设置窗口“可选功能”（窗口快照与生成的 CLI）：
+
+- `Stack` 里两个方向都不给尺寸的绘图（`DrawingArea`）是其他层的底板，和轨道一样不让 `Stack` 撑开：此前预览里选中项的 `Stack` 因底板而纵向撑开。
+- `Form` 横向也占满给它的空间，与其他目标相同：此前它的横向撑开是借每行图标底的 `Stack` 撑开得来的，底板的规则改正后表单被挤成一列窄条。
+- 写了 `reflow` 的行与列（`ReflowBox`）像 GTK 的盒子一样汇总子元素的撑开：此前预览播放条那一行只有自然宽度，其中的轨道分到 0 宽，进度条不显示。
+- 带底板的 `Stack` 横向占满分给它的宽度、底板随之铺满：此前层叠按其他层的自然宽度分配，设置页插件横幅的底图只有文字那么宽。
+- 实测：选中项一行高；表单与预览并排、文字不再逐字换行；播放条显示进度；插件横幅与正文同宽，卡片两列对齐。`crates/bern-gtk` 的 `cargo clippy --all-features --all-targets -- -D warnings` 与 `cargo test --all-features`、`cargo test -p bern-backend-gtk` 通过。图标主题中没有的名字仍显示缺图占位（见下）。
+
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。

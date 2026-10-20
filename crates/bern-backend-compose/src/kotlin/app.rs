@@ -240,6 +240,7 @@ const IMPORTS: &[&str] = &[
     "androidx.compose.foundation.layout.size",
     "androidx.compose.foundation.layout.width",
     "androidx.compose.foundation.layout.height",
+    "androidx.compose.foundation.layout.wrapContentHeight",
     "androidx.compose.foundation.lazy.LazyColumn",
     "androidx.compose.foundation.lazy.items",
     "androidx.compose.foundation.rememberScrollState",

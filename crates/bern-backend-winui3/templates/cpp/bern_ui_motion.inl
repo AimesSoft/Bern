@@ -512,7 +512,10 @@ inline wchar_t const* RoleKey(std::string_view role) {
         {"disabled.foreground", L"TextFillColorDisabledBrush", L"SystemControlDisabledBaseMediumLowBrush"},
         {"disabled.surface", L"ControlFillColorDisabledBrush", L"SystemControlDisabledBaseLowBrush"},
         {"fill.subtle", L"SubtleFillColorSecondaryBrush", L"SystemControlBackgroundListLowBrush"},
-        {"fill.strong", L"ControlStrongFillColorDefaultBrush", L"SystemControlBackgroundBaseMediumLowBrush"},
+        // A step above `fill.subtle` in both appearances, as light as the
+        // other targets' (about 10 %); the control's strong fill is the
+        // dark one of slider tracks.
+        {"fill.strong", L"ControlAltFillColorQuarternaryBrush", L"SystemControlBackgroundListMediumBrush"},
     };
     for (auto const& entry : table)
         if (entry.role == role) return kWinUI ? entry.winui : entry.system;

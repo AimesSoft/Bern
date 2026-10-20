@@ -1334,10 +1334,34 @@ export function pageHeader(ctx, fallback, always) {
 
 // MARK: - Components
 
+function prefersReducedMotion() {
+  return matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/// A spring of `period` seconds and `damping` ratio from 0 to 1 as a CSS
+/// easing, sampled every 1/60 s until it settles, and how long that takes.
+function springEasing(period, damping) {
+  const stiffness = (2 * Math.PI / period) ** 2;
+  const friction = (4 * Math.PI * damping) / period;
+  const step = 1 / 240;
+  const points = [0];
+  let value = 0, velocity = 0, time = 0;
+  for (let tick = 1; tick <= 240 * 3; tick++) {
+    velocity += (stiffness * (1 - value) - friction * velocity) * step;
+    value += velocity * step;
+    time = tick * step;
+    if (tick % 4 === 0) points.push(Math.round(value * 10000) / 10000);
+    // Settled once it moves less than half a pixel over a few hundred.
+    if (time > period / 2 && Math.abs(1 - value) < 0.002 && Math.abs(velocity) < 0.05) break;
+  }
+  points.push(1);
+  return { easing: `linear(${points.join(", ")})`, duration: Math.round(time * 1000) };
+}
+
 export const STYLE_CLASS = {
   large_title: "large-title", title: "title", title2: "title2", title3: "title3", headline: "headline",
   subheadline: "subheadline", body: "body", callout: "callout", footnote: "footnote", caption: "caption",
-  caption2: "caption2",
+  caption2: "caption2", control: "control-font",
 };
 
 export function Text(p, ctx, { content, style, emphasis, fontSize, lines, lineHeight }) {
@@ -1596,11 +1620,48 @@ export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, h
     input.removeAttribute("aria-activedescendant");
     trigger.setAttribute("aria-expanded", "false");
   };
+  // The palette grows out of its field and goes back into it, on the
+  // hero spring, the field hidden meanwhile; the page dims under it.
+  let growth = null;
+  const grow = (opening) => {
+    growth?.cancel();
+    growth = null;
+    const from = trigger.getBoundingClientRect();
+    const to = dialog.getBoundingClientRect();
+    if (prefersReducedMotion() || !from.width || !to.width) return null;
+    const radius = parseFloat(getComputedStyle(dialog).borderTopLeftRadius) || 0;
+    const fieldRadius = parseFloat(getComputedStyle(trigger).borderTopLeftRadius) || 0;
+    const folded = {
+      transform: `translate(${from.left - to.left}px, ${from.top - to.top}px)`,
+      clipPath: `inset(0 ${Math.max(0, to.width - from.width)}px ${Math.max(0, to.height - from.height)}px 0 round ${fieldRadius}px)`,
+    };
+    const open = { transform: "translate(0, 0)", clipPath: `inset(0 0 0 0 round ${radius}px)` };
+    const { easing, duration } = springEasing(0.48, 0.86);
+    growth = dialog.animate(opening ? [folded, open] : [open, folded], { duration, easing, fill: "both" });
+    return growth;
+  };
   const close = () => {
     if (!dialog.open) return;
-    dialog.close();
-    release();
-    if (restoreFocus?.isConnected) restoreFocus.focus();
+    const finish = () => {
+      growth?.cancel();
+      growth = null;
+      trigger.style.visibility = "";
+      if (!dialog.open) return;
+      dialog.close();
+      release();
+      if (restoreFocus?.isConnected) restoreFocus.focus();
+    };
+    dialog.classList.add("bern-search-palette-closing");
+    const shrinking = grow(false);
+    if (!shrinking) {
+      dialog.classList.remove("bern-search-palette-closing");
+      finish();
+      return;
+    }
+    shrinking.finished.then(() => {
+      dialog.classList.remove("bern-search-palette-closing");
+      finish();
+    }, () => {});
   };
   const open = () => {
     if (dialog.open || !dialog.isConnected) return;
@@ -1612,6 +1673,7 @@ export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, h
     trigger.setAttribute("aria-expanded", "true");
     mutations.observe(list, { childList: true, subtree: true });
     refresh();
+    if (grow(true)) trigger.style.visibility = "hidden";
     input.focus();
   };
   trigger.addEventListener("click", open);
@@ -1991,6 +2053,13 @@ function controlShape(node, shape, height) {
   length(node, "height", height);
 }
 
+/// A layer that takes the size the other layers of its stack give: a rail,
+/// or a canvas without a size, the stack's backdrop.
+function backdropLayer(child) {
+  return child.classList.contains("bern-rail") ||
+    (child.classList.contains("bern-canvas") && child.classList.contains("bern-fill-width") && child.classList.contains("bern-fill-height"));
+}
+
 /// A flexible descendant may offer its parent's size only until an
 /// explicitly sized view stops that proposal. In particular, the Canvas
 /// inside a fixed-size icon must not stretch the row containing that icon.
@@ -2001,10 +2070,12 @@ export function layoutIntent(node, dimension) {
   if (dimension === "width" && node.classList.contains("bern-button-fill")) return true;
   let children = [...node.children];
   if (node.bernLayoutAxis === "layers") {
-    // As in native BernLayers, rails cover the size established by other
-    // layers. A progress rail over a fixed image must not turn the image
-    // button into a flexible item. A stack made only of rails can fill.
-    const content = children.filter((child) => !child.classList.contains("bern-rail"));
+    // As in native BernLayers, rails and canvases without a size cover the
+    // size established by other layers. A progress rail over a fixed image
+    // must not turn the image button into a flexible item, nor a backdrop
+    // a sidebar row into a column's whole height. A stack made only of
+    // such layers can fill.
+    const content = children.filter((child) => !backdropLayer(child));
     if (content.length) children = content;
   }
   const axis = dimension === "width" ? "row" : "column";
@@ -2012,14 +2083,14 @@ export function layoutIntent(node, dimension) {
   return children.some((child) => layoutIntent(child, dimension));
 }
 
-/// Whether a stack's layers, rails aside, all have a fixed size in
-/// `dimension`: a native stack then keeps that size in a row or column,
-/// where only its flexible neighbours give way.
+/// Whether a stack's layers, rails and backdrops aside, all have a fixed
+/// size in `dimension`: a native stack then keeps that size in a row or
+/// column, where only its flexible neighbours give way.
 export function fixedSize(node, dimension) {
   if (node.nodeType !== 1) return false;
   if (node.classList.contains(`bern-sized-${dimension}`)) return true;
   if (node.bernLayoutAxis !== "layers") return false;
-  const content = [...node.children].filter((child) => !child.classList.contains("bern-rail"));
+  const content = [...node.children].filter((child) => !backdropLayer(child));
   return content.length > 0 && content.every((child) => fixedSize(child, dimension));
 }
 
@@ -3694,7 +3765,11 @@ class WindowManager {
       });
     }
     bar.append(trailing);
-    root.append(bar, this.desktop);
+    // With nothing to switch to or open, the bar would only repeat the
+    // name the tab already shows: the page starts at the window's content,
+    // as an application's window does under its own title bar.
+    if (this.switcher || settings) root.append(bar);
+    root.append(this.desktop);
     // Closing the main window by a command leaves the page with a way back.
     const main = app.windows.find((kind) => kind.presentation === "page");
     if (main) {

@@ -662,6 +662,24 @@ inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
     }
 }
 
+/// The page header's margins. While content is under the bars, the header
+/// stays below the title bar and its trailing end keeps clear of the
+/// caption buttons' column and 12 more, as a Fluent toolbar does over
+/// content that reaches the window's top.
+inline void PlaceHeader(Win& win) {
+    if (!win.header) return;
+    double top = kWinUI || win.owner ? 0.0 : 12.0, trailing = 16;
+#if BERN_WINUI
+    if (win.underBars.Peek() > 0 && !win.owner && win.titleBar && win.window && win.titleBar.XamlRoot()) {
+        double scale = win.titleBar.XamlRoot().RasterizationScale();
+        top = win.titleBar.ActualHeight();
+        if (scale > 0) trailing = win.window.AppWindow().TitleBar().RightInset() / scale + 12;
+    }
+#endif
+    auto margin = win.header.Margin();
+    if (margin.Top != top || margin.Right != trailing) win.header.Margin(xaml::Thickness{16, top, trailing, 8});
+}
+
 /// The window's content, title, failure bar and window-level behavior, in
 /// `root`; for every kind of window.
 inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, std::shared_ptr<Page> const& page) {
@@ -686,6 +704,7 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
     win->overlay = overlay;
     Win* raw = win.get();
     win->root.SizeChanged([raw](auto&&, xaml::SizeChangedEventArgs const& args) {
+        PlaceHeader(*raw);
         if (args.NewSize().Width > 0) raw->size.Set(SizeOf(args.NewSize().Width));
         // `window.short`: shorter than the compact breakpoint.
         if (args.NewSize().Height > 0) raw->isShort.Set(args.NewSize().Height < app->catalog.compactBelow.value_or(0));
@@ -704,7 +723,7 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
         // `under_bars`: while such a layer is shown the content spans the
         // header's row and, under the title bar, the window's; the bars
         // stay above it.
-        Reactive::Run([raw, page] {
+        Reactive::Run([raw] {
             bool under = raw->underBars.Get() > 0;
             Reactive::Untrack([&] {
                 controls::Grid::SetRow(raw->holder, under ? 0 : 1);
@@ -715,29 +734,9 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
                     controls::Grid::SetRowSpan(raw->host, under ? 2 : 1);
 #if BERN_WINUI
                     if (raw->titleBar) controls::Canvas::SetZIndex(raw->titleBar, under ? 1 : 0);
-                    if (auto header = raw->header.try_as<controls::Panel>(); header && raw->titleBar) {
-                        // The header shares the title bar's row: its tools
-                        // stand in the title bar, before the caption
-                        // buttons, which take clicks there.
-                        auto tools = page->tools;
-                        auto headerChildren = header.Children();
-                        uint32_t index = 0;
-                        bool inHeader = headerChildren.IndexOf(tools, index);
-                        if (under && inHeader) {
-                            headerChildren.RemoveAt(index);
-                            raw->titleBar.RightHeader(tools);
-                        } else if (!under && !inHeader) {
-                            raw->titleBar.RightHeader(nullptr);
-                            headerChildren.Append(tools);
-                        }
-                        // A title bar with tools is the tall one, and the
-                        // caption buttons are as tall.
-                        if (raw->window)
-                            raw->window.AppWindow().TitleBar().PreferredHeightOption(
-                                under ? winrt::Microsoft::UI::Windowing::TitleBarHeightOption::Tall : winrt::Microsoft::UI::Windowing::TitleBarHeightOption::Standard);
-                    }
 #endif
                 }
+                PlaceHeader(*raw);
                 return 0;
             });
         });
@@ -903,6 +902,7 @@ inline std::string Open(std::string const& kindId) {
         auto window = weakWindow.get();
         if (titleBar && window) FitTitleBarInsets(titleBar, window);
     });
+    titleBar.SizeChanged([raw = win.get()](auto&&, auto&&) { PlaceHeader(*raw); });
     originals[win->hwnd] = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(win->hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(Subclass)));
     if (def.settings) {
         auto presenter = window.AppWindow().Presenter().as<winrt::Microsoft::UI::Windowing::OverlappedPresenter>();

@@ -116,10 +116,30 @@ impl Generator<'_> {
 
     pub(super) fn stack(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let alignment = stack_alignment(element.keyword("align"));
-        // A rail among the layers takes the size of the others.
+        // A rail or a canvas without a size among the layers takes the size
+        // of the others.
         let rails = has_rail_layer(&element.children);
         out.open(if rails {
-            format!("BernLayers(alignment: {alignment}) {{")
+            // A stack of a given size gives that size to its backdrops.
+            let size = ["width", "height"]
+                .into_iter()
+                .filter_map(|name| {
+                    self.length(element, name)
+                        .map(|length| format!(", {name}: {length}"))
+                })
+                .collect::<String>();
+            // With a backdrop it fills across what it stands in, as a block
+            // does, and keeps the length its other layers give it; in a row
+            // it keeps its size.
+            let across = if !ctx.row
+                && element.prop("width").is_none()
+                && has_backdrop_layer(&element.children)
+            {
+                ", fillsWidth: true"
+            } else {
+                ""
+            };
+            format!("BernLayers(alignment: {alignment}{size}{across}) {{")
         } else {
             format!("SwiftUI.ZStack(alignment: {alignment}) {{")
         });
@@ -691,12 +711,39 @@ impl Generator<'_> {
     }
 }
 
-/// Conditions and repetitions do not introduce a layout container: their
-/// rails still overlay the other layers of the surrounding Stack.
+/// Whether a layer is a canvas without a size, the stack's backdrop,
+/// directly or through a condition or repetition.
+fn has_backdrop_layer(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(element) => {
+            (element.kind == "Canvas"
+                && element.prop("width").is_none()
+                && element.prop("height").is_none())
+                || (element.kind == "ForEach" && has_backdrop_layer(&element.children))
+        }
+        Node::If(node) => {
+            node.branches
+                .iter()
+                .any(|(_, body)| has_backdrop_layer(body))
+                || has_backdrop_layer(&node.otherwise)
+        }
+        Node::IfLet(node) => has_backdrop_layer(&node.then) || has_backdrop_layer(&node.otherwise),
+        Node::Match(node) => node.arms.iter().any(|arm| has_backdrop_layer(&arm.body)),
+        Node::Component(_) => false,
+    })
+}
+
+/// Whether a layer is a rail or a canvas without a size, which take the
+/// size of the other layers. Conditions and repetitions do not introduce a
+/// layout container: such layers in them still overlay the other layers of
+/// the surrounding Stack.
 fn has_rail_layer(nodes: &[Node]) -> bool {
     nodes.iter().any(|node| match node {
         Node::Element(element) => {
             element.kind == "Rail"
+                || (element.kind == "Canvas"
+                    && element.prop("width").is_none()
+                    && element.prop("height").is_none())
                 || (element.kind == "ForEach" && has_rail_layer(&element.children))
         }
         Node::If(node) => {

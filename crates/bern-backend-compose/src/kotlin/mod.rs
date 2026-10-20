@@ -92,12 +92,20 @@ struct Ctx {
     /// The nodes are direct children of `Row(align: baseline)`: each
     /// lines up on its first baseline.
     baseline: bool,
+    /// The nodes are direct children of a row of a given height, aligned
+    /// this way: text taller than the row keeps its height and overflows
+    /// by that alignment, as on the other targets.
+    overflow: Option<&'static str>,
+    /// The nodes are the content of a vertical scroll view, whose height
+    /// has no end: none of them can share it by weight.
+    scroll_content: bool,
 }
 
 impl Ctx {
     fn within(&self, scope: Scope) -> Ctx {
         Ctx {
             scope,
+            scroll_content: false,
             ..self.clone()
         }
     }
@@ -167,6 +175,7 @@ impl<'a> Generator<'a> {
                         stagger: false,
                         layer: false,
                         baseline: false,
+                        overflow: None,
                         ..ctx.clone()
                     }
                 };
@@ -175,6 +184,17 @@ impl<'a> Generator<'a> {
                 let baseline = ctx.baseline && !repeats && element.kind != "Spacer";
                 if baseline {
                     out.open("Box(Modifier.alignByBaseline()) {");
+                }
+                // Text cannot be shorter than its line: in a row of a given
+                // height it keeps its own and stands out of the row by the
+                // row's alignment instead of being cut.
+                let overflow = ctx
+                    .overflow
+                    .filter(|_| matches!(element.kind.as_str(), "Text" | "Label"));
+                if let Some(align) = overflow {
+                    out.open(format!(
+                        "Box(Modifier.wrapContentHeight({align}, unbounded = true)) {{"
+                    ));
                 }
                 // The whole application runs with reduced motion while
                 // this holds.
@@ -254,9 +274,10 @@ impl<'a> Generator<'a> {
                         appearance == "dark"
                     ));
                 }
-                // A rail that is a layer of a stack, directly, and holds
-                // only spans without a thickness of their own takes the
-                // stack's size.
+                // A rail or a canvas that is a layer of a stack, directly,
+                // takes the size the other layers give the stack: a rail
+                // holding only spans without a thickness of their own, a
+                // canvas without a size, its backdrop.
                 let direct = appear.is_none()
                     && effects.is_empty()
                     && appearance.is_none()
@@ -265,7 +286,7 @@ impl<'a> Generator<'a> {
                     layer: if repeats {
                         own.layer
                     } else {
-                        ctx.layer && direct && element.kind == "Rail"
+                        ctx.layer && direct && matches!(element.kind.as_str(), "Rail" | "Canvas")
                     },
                     ..own
                 };
@@ -297,6 +318,9 @@ impl<'a> Generator<'a> {
                     out.close("}");
                 }
                 if placement.is_some() {
+                    out.close("}");
+                }
+                if overflow.is_some() {
                     out.close("}");
                 }
                 if baseline {

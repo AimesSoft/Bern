@@ -52,6 +52,11 @@ impl Generator<'_> {
             }
             None => out.line(".accessibilityHidden(true)"),
         }
+        // Without a size, a layer of a stack is its backdrop: as large as
+        // the other layers, without making the stack larger.
+        if element.prop("width").is_none() && element.prop("height").is_none() {
+            out.line(".bernFillsLayers()");
+        }
     }
 
     fn drawing(&self, out: &mut Out, nodes: &[Node], captures: &mut Vec<String>) {

@@ -24,7 +24,7 @@ pub use color::{Oklch, Srgb, contrast};
 pub use recipes::{RECIPES, Recipe, RecipeState};
 
 /// Version of the generation rules; a change may alter emitted colors.
-pub const ALGORITHM_VERSION: u32 = 6;
+pub const ALGORITHM_VERSION: u32 = 7;
 
 /// Version of the snapshot layout.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -240,8 +240,12 @@ impl Builder {
         on: &'static str,
         target: Oklch,
         surfaces: &[&'static str],
+        level: f64,
     ) {
-        let levels = self.levels;
+        let levels = Levels {
+            text: level,
+            ..self.levels
+        };
         let surface_colors: Vec<Srgb> = surfaces.iter().map(|s| self.get(s)).collect();
         let dark = Oklch::new(0.18, TEXT_CHROMA, NEUTRAL_HUE).to_srgb();
         let mut best: Option<(f64, Srgb, Srgb)> = None;
@@ -288,8 +292,16 @@ impl Builder {
     }
 
     /// A state variant of `base` moved `step` in lightness away from the
-    /// foreground `on`, so the pair only gains contrast.
-    fn variant(&mut self, name: &'static str, base: &str, on: &'static str, step: f64) -> Srgb {
+    /// foreground `on`, so the pair only gains contrast; it keeps the
+    /// pair's `level`.
+    fn variant(
+        &mut self,
+        name: &'static str,
+        base: &str,
+        on: &'static str,
+        step: f64,
+        level: f64,
+    ) -> Srgb {
         let base_color = self.get(base);
         let foreground = self.get(on);
         let lch = base_color.oklch();
@@ -300,7 +312,7 @@ impl Builder {
         };
         let color = Oklch::new(lch.l + direction * step, lch.c, lch.h).to_srgb();
         self.put(name, color);
-        self.check(on, name, self.levels.text);
+        self.check(on, name, level);
         color
     }
 
@@ -454,14 +466,13 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
     // pair; text in the brand color must also read on every surface.
     const SURFACES: &[&str] = &["surface.canvas", "surface.panel", "surface.raised"];
     let accent_l = brand.l.clamp(b.pick(0.45, 0.55), b.pick(0.62, 0.72));
-    // The accent also colors icons on every surface as hover feedback, and
-    // fills selected navigation items on the sidebar's panel.
-    b.solve_pair(
-        "accent",
-        "on_accent",
-        brand_at(accent_l, brand_chroma),
-        SURFACES,
-    );
+    // The accent fill is the chosen color itself, as the platforms fill
+    // their buttons with the system accent: it starts from the seed and
+    // moves only as far as its title needs to read as a control's does
+    // (the graphic level, 3:1 by default, as white on a system red), and
+    // as far as it needs to stand out from every surface, where it also
+    // colors icons as hover feedback and fills selected navigation items.
+    b.solve_pair("accent", "on_accent", brand, SURFACES, levels.graphic);
     // Text in the brand colour starts from the accent itself and moves
     // only as far as reading on every surface requires, so plain buttons,
     // links and selected tabs stay as vivid as the accent allows.
@@ -482,12 +493,14 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
         "accent",
         "on_accent",
         b.pick(0.04, 0.04),
+        levels.graphic,
     );
     b.variant(
         "button.prominent.pressed",
         "accent",
         "on_accent",
         b.pick(0.08, 0.08),
+        levels.graphic,
     );
 
     // Control graphics.
@@ -549,18 +562,21 @@ pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy)
         "on_error",
         Oklch::new(b.pick(0.55, 0.62), ERROR.1, ERROR.0),
         &["surface.canvas", "surface.panel"],
+        levels.text,
     );
     b.variant(
         "button.destructive.hover",
         "status.error.surface",
         "on_error",
         0.04,
+        levels.text,
     );
     b.variant(
         "button.destructive.pressed",
         "status.error.surface",
         "on_error",
         0.08,
+        levels.text,
     );
 
     // Disabled controls stay recognizable on their own surface and on the

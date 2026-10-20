@@ -3361,6 +3361,10 @@ fn text_styles_take_a_weight_and_a_size() {
 
     for (body, expected) in [
         ("text { poster: heavy }", "`poster` is not a text style"),
+        (
+            "text { control: font(size: 14) }",
+            "`control` is the platform's control font",
+        ),
         ("text { title: chunky }", "`chunky` is not a weight"),
         (
             "text { title: font(weight: chunky) }",

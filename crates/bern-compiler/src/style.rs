@@ -716,6 +716,13 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
     }
     for decl in &item.text {
         let style = decl.name.to_string();
+        if style == "control" {
+            lowering.error(
+                decl.name.span(),
+                "`control` is the platform's control font, as its buttons have it; it takes no size or weight of the application's",
+            );
+            continue;
+        }
         if !bern_ir::spec::TEXT_STYLES.contains(&style.as_str()) {
             lowering.error(
                 decl.name.span(),

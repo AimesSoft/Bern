@@ -47,6 +47,27 @@
   height: 100%;
 }
 
+/* A stack of a given size keeps its layers' cell that size: a larger layer
+   stands out of it by the stack's alignment, centered by default, as on
+   the other targets, instead of widening the cell from its leading edge. */
+.bern-layers.bern-sized-width {
+  grid-template-columns: minmax(0, 100%);
+}
+
+.bern-layers.bern-sized-height {
+  grid-template-rows: minmax(0, 100%);
+}
+
+/* A stack with a backdrop (a drawing without a size) fills across the
+   column or grid cell it stands in, as a block does, and keeps the height
+   its other layers give. */
+:is(.bern-vstack, .bern-detail-body, .bern-window-content, .bern-modal-content, .bern-grid) > .bern-layers:has(> .bern-canvas.bern-fill-width.bern-fill-height):not(.bern-sized-width) {
+  align-self: stretch;
+  justify-self: stretch;
+  width: auto;
+  max-width: none;
+}
+
 /* In a `Stack`, a layer that holds a drawing without a size fills the
    stack in that direction, as a flexible view does; other layers keep
    their own size and the stack's alignment. */
@@ -125,6 +146,18 @@
   --bern-fill-strong: var(--bern-pressed-overlay);
   --bern-selection-background: var(--bern-accent);
   --bern-selection-foreground: var(--bern-on-accent);
+}
+
+/* A part in a fixed appearance takes that appearance's text color: the
+   color inherited from outside was resolved in the page's appearance. */
+.bern-appearance-light {
+  color: var(--bern-text-primary);
+  color-scheme: light;
+}
+
+.bern-appearance-dark {
+  color: var(--bern-text-primary);
+  color-scheme: dark;
 }
 
 /* MARK: - Styles */
@@ -218,7 +251,6 @@
   font: inherit;
   text-align: inherit;
   cursor: pointer;
-  overflow: hidden;
 }
 
 .bern-content-button:not(.bern-styled-look):active {

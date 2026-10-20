@@ -531,6 +531,8 @@ open target/bern/macos/Showcase.app
 
 2026-10-14：`file://` 地址由引擎直接打开，不经宿主。`examples/gallery` 经 `ui.set_file` 收到本地的“海浪 Tides #2.mp4”后，引擎状态中的提示为“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”。地址与路径的互相转换（含 Windows 的盘符与共享路径）由 `bern-command` 的单元测试覆盖。
 
+2026-10-20，macOS 27.0.1，用于验收的媒体类应用的设置窗口“可选功能”（窗口截图与生成的 CLI）：两个方向都不给尺寸的 `Canvas` 作为 `Stack` 的一层时标记为 `bernFillsLayers()`，`Stack` 改用 `BernLayers`，底板取其他层的尺寸；`Stack` 写了尺寸时 `BernLayers` 按写的尺寸算，底板铺满它。此前预览里选中项的底色被拉成整列高的一块。实测选中项一行高，72 宽的侧栏底板铺满 188 高。iOS 走同一生成路径，模拟器本轮未实看。
+
 ## 未完成与已知限制
 
 - 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）、菜单栏命令生成均未实现。

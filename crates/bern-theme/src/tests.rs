@@ -246,16 +246,20 @@ fn print_default_palettes() {
 
 #[test]
 fn accent_fills_carry_white_text_unless_the_accent_is_light() {
+    let seed = Srgb::new(0xff, 0x2e, 0x55);
     for mode in MODES {
-        // A red accent darkens a little to carry white text, as the
-        // platforms' accent fills do.
-        let red = generate(
-            Some(Srgb::new(0xff, 0x2e, 0x55)),
-            mode,
-            ContrastPolicy::Standard,
-        );
+        // A red accent fills as it was chosen, with white text, as the
+        // platforms fill their buttons with the system accent.
+        let red = generate(Some(seed), mode, ContrastPolicy::Standard);
+        assert_eq!(red.token("accent"), Some(seed), "{mode:?}");
         assert_eq!(red.token("on_accent"), Some(Srgb::WHITE), "{mode:?}");
-        assert!(contrast(Srgb::WHITE, red.token("accent").unwrap()) >= 4.5);
+        // With more contrast its title reads as text does.
+        let more = generate(Some(seed), mode, ContrastPolicy::More);
+        let (fill, title) = (
+            more.token("accent").unwrap(),
+            more.token("on_accent").unwrap(),
+        );
+        assert!(contrast(title, fill) >= 4.5, "{mode:?}");
     }
     // In dark mode a bright green would have to turn dark to carry white:
     // it keeps its color and takes dark text.

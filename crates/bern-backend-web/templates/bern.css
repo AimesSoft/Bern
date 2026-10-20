@@ -681,6 +681,12 @@ button:disabled {
   font-weight: 500;
 }
 
+/* `control`: the font of the control the text stands in, as a button's
+   title has it. */
+.bern-control-font {
+  font: inherit;
+}
+
 .bern-emphasis-secondary {
   color: var(--bern-text-secondary);
 }
@@ -815,6 +821,30 @@ button:disabled {
 .bern-modal::backdrop,
 .bern-search-palette::backdrop {
   background: var(--bern-scrim);
+  animation: bern-scrim-in 300ms ease-out;
+}
+
+.bern-search-palette.bern-search-palette-closing::backdrop {
+  animation: bern-scrim-out 300ms ease-in forwards;
+}
+
+@keyframes bern-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes bern-scrim-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bern-search-palette::backdrop,
+  .bern-search-palette.bern-search-palette-closing::backdrop {
+    animation: none;
+  }
 }
 
 .bern-modal[open] {
@@ -971,6 +1001,21 @@ button:disabled {
 
 .bern-scroll-horizontal {
   overflow-y: hidden;
+}
+
+/* Vertical scroll areas keep the scroll bar's room whether it shows or not,
+   so content does not move when it becomes long enough to scroll. Overlay
+   scroll bars take no room either way. */
+.bern-window-content,
+.bern-scroll:not(.bern-scroll-horizontal),
+.bern-form-scroll,
+.bern-search-palette-results,
+.bern-sidebar-list,
+.bern-detail-body,
+.bern-tabs-vertical .bern-tabpanels,
+.bern-search-results,
+.bern-inspector {
+  scrollbar-gutter: stable;
 }
 
 /* Scrolls without showing the scroll bar. */
@@ -1376,12 +1421,20 @@ button:disabled {
   overflow: hidden;
 }
 
+/* It grows out of its field on a spring (in the runtime), not in place,
+   and stands near the top of the page, under its toolbar. */
 .bern-search-palette[open] {
   display: flex;
   flex-direction: column;
   position: fixed;
   inset: 0;
-  animation: bern-dialog-in var(--bern-motion) ease-out;
+  margin: 70px auto auto;
+}
+
+@media (max-height: 560px) {
+  .bern-search-palette[open] {
+    margin: auto;
+  }
 }
 
 .bern-search-palette-header {

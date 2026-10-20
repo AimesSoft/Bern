@@ -54,6 +54,14 @@ impl Generator<'_> {
     }
 
     fn font(&self, out: &mut Out, element: &Element) {
+        // `control`: the font of the control it stands in, as a button's
+        // title has it; only a size of its own changes it.
+        if element.keyword("style") == Some("control") {
+            if let Some(size) = self.length(element, "font_size") {
+                out.line(format!(".font(.system(size: {size}))"));
+            }
+            return;
+        }
         // A text's style is the body unless it says; the application's own
         // body, when it declares one, then applies to it too.
         let body_declared = self

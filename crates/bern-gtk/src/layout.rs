@@ -145,12 +145,16 @@ mod layers {
             )
         }
 
-        /// A stack fills where a layer fills, except a rail: it covers the
-        /// size the other layers give the stack and makes it no larger. A
-        /// stack of rails alone fills along them.
+        /// A stack fills where a layer fills, except a rail or a drawing
+        /// without a size, its backdrop: they cover the size the other
+        /// layers give the stack and make it no larger. A stack of those
+        /// alone fills along them.
         fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
             let all = children(self.obj().upcast_ref());
-            let content: Vec<&gtk::Widget> = all.iter().filter(|child| !is_rail(child)).collect();
+            let content: Vec<&gtk::Widget> = all
+                .iter()
+                .filter(|child| !is_rail(child) && !is_backdrop(child))
+                .collect();
             let counted: Vec<&gtk::Widget> = if content.is_empty() {
                 all.iter().collect()
             } else {
@@ -168,7 +172,13 @@ mod layers {
             // size; given more room than that, it keeps its size at the
             // leading edge unless a layer fills it.
             let (_, natural_width, _, _) = self.measure(gtk::Orientation::Horizontal, -1);
-            let area_width = if widget.compute_expand(gtk::Orientation::Horizontal) {
+            // With a backdrop it fills the width it is given, as a block
+            // does across a column, and keeps the height its other layers
+            // give.
+            let backdrop = children(widget.upcast_ref())
+                .iter()
+                .any(|child| child.should_layout() && is_backdrop(child));
+            let area_width = if backdrop || widget.compute_expand(gtk::Orientation::Horizontal) {
                 width
             } else {
                 width.min(natural_width.max(widget.width_request()).max(0))
@@ -472,6 +482,16 @@ glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
+/// Whether `widget` is a drawing without a size, which fills both ways:
+/// among the layers of a stack, their backdrop.
+fn is_backdrop(widget: &gtk::Widget) -> bool {
+    widget.is::<gtk::DrawingArea>()
+        && widget.is_hexpand_set()
+        && widget.hexpands()
+        && widget.is_vexpand_set()
+        && widget.vexpands()
+}
+
 /// Whether `widget` is a rail, or an element wrapping one in its motion.
 pub(crate) fn is_rail(widget: &gtk::Widget) -> bool {
     rail_of(widget).is_some()
@@ -693,6 +713,18 @@ mod reflow {
                 orientation,
                 self.layout().measure(&*self.obj(), orientation, for_size),
             )
+        }
+
+        /// It fills where a child fills, as a GTK box does: a rail or a
+        /// spacer in a row makes the row take the width it is offered.
+        fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
+            for child in children(self.obj().upcast_ref()) {
+                if !child.should_layout() {
+                    continue;
+                }
+                *hexpand |= child.compute_expand(gtk::Orientation::Horizontal);
+                *vexpand |= child.compute_expand(gtk::Orientation::Vertical);
+            }
         }
 
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {

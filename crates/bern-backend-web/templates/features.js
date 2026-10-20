@@ -616,7 +616,12 @@ export function applyStyle(node, style, { selected } = {}) {
   node.classList.add("bern-styled");
   if (style.draws) node.classList.add("bern-styled-look");
   if (style.size) node.classList.add(`bern-size-${style.size}`);
-  if (style.corner !== undefined) node.style.borderRadius = `${style.corner}px`;
+  if (style.corner !== undefined) {
+    node.style.borderRadius = `${style.corner}px`;
+    // A stack's or a content button's corner clips what it holds, as on the
+    // other targets: a picture, a progress bar, a person's shoulders.
+    if (node.classList.contains("bern-layers") || node.classList.contains("bern-content-button")) node.style.overflow = "clip";
+  }
   if (style.padding !== undefined) node.style.padding = `${style.padding}px`;
   const state = { hover: false, pressed: false, focus: false, disabled: false, selected: false };
   const layer = layers(node).layer("state");
