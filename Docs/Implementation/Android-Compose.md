@@ -64,11 +64,12 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 ## 样式与动效
 
 - **样式覆盖**：`Button`、`IconButton` 与 `SidebarItem` 支持与 SwiftUI 相同的属性与状态。只有变换的样式套在 Material 控件上，由控件自己的交互状态驱动；改变外观的样式由 Bern 绘制。颜色角色映射到 Material 配色。
-- **出现与消失**：条件分支用 `AnimatedContent` 切换，新旧分支在同一位置交替，进入与离开各用分支第一个元素声明的过渡；列表中在窗口第一次显示之后加入的元素播放出现过渡。列表项移除时没有消失过渡。
+- **出现与消失**：条件分支用 `AnimatedContent` 切换，新旧分支在同一位置交替，进入与离开各用分支第一个元素声明的过渡；列表中在窗口第一次显示之后加入的元素播放出现过渡。列表项移除时没有消失过渡。单个元素的出现过渡（`BernAppear`）不用 `AnimatedVisibility`：一个从 0 到 1 的进度按声明的弹簧（及错峰、`appear_delay` 的等待）推进，所在层的透明度、位移与缩放由它算出，与 `AnimatedVisibility` 用同一弹簧分别推进各属性的效果相同；布局与 `AnimatedVisibility` 一样（同样的约束，取最大的子元素，放在左上角）。进度走完协程就结束，元素留在页面上时不再有等待的协程。
+- **样式的状态变换**：缩放与位移合成一个四维值、透明度一个值，只在外观变化时启动弹簧，走完即结束；按下与悬停由按钮自己的交互源在发出时记下（`BernInteractions`），不再各开一个收集协程。阴影同样只在半径变化时运行。
 - **重排**：声明了 `reflow` 的容器以弹簧动画改变尺寸。
 - **共享元素**：窗口根是共享过渡布局，带相同 `hero` 键的元素在分支切换时从原位置移到新位置；元素按自身尺寸布局、再缩放到移动的边界，所以文字在过渡中不重新换行，两者交叉淡化。
-- **系统关闭动画时**（开发者选项或无障碍中的“移除动画”），变换保持静止，过渡改为 150 毫秒的淡入淡出。
-- **`Canvas` 与标注**：Compose 的 `Canvas` 绘制形状、数值序列与图案；`Text(mark:)` 从文字的行布局取得每行位置，在文字后面画底纹。
+- **系统关闭动画时**（开发者选项或无障碍中的“移除动画”），变换保持静止，过渡改为 150 毫秒的淡入淡出。这个设置在应用启动时与每次回到前台时读一次，存为一个状态；`reduce_motion` 的持有者也合成一个状态，各元素组合时只读这两个值。
+- **`Canvas` 与标注**：Compose 的 `Canvas` 绘制形状、数值序列与图案；里面什么也不画、只用来占位置的 `Canvas` 生成为同样大小的 `Spacer`（没有绘制节点，也不带清空的语义节点；有 `label` 时保留它的语义）。`Text(mark:)` 从文字的行布局取得每行位置，在文字后面画底纹。
 
 ## 窗口外观
 
@@ -104,6 +105,7 @@ bern package --target android
 - `bern doctor` 检查 Android SDK、NDK、Gradle 与 Rust 的 Android 目标。工具的位置：`ANDROID_HOME`（或 Android Studio 的默认位置）、`ANDROID_NDK_HOME`（或 SDK 中最新的 NDK）、`BERN_GRADLE`（或 `PATH` 中的 `gradle`、Gradle 包装器下载的 9.4 以上版本）、`BERN_JAVA_HOME`（或 Android Studio 自带的运行时、`JAVA_HOME`）。缺少时 `bern build` 跳过 Android 并说明要装什么。
 - 构建步骤：用 NDK 的 clang 为 `aarch64-linux-android` 构建引擎库；复制到 `jniLibs`；镜像随包资源；Gradle 构建 APK；为这台电脑构建 CLI 与 MCP 服务器。第一次构建时 Gradle 从 Google 与 Maven Central 下载插件与库。
 - `bern run --target android` 要求恰好连着一台设备（真机或模拟器），安装 APK、启动 Activity、转发控制通道并显示应用的日志，应用进程结束时返回。
+- **基线配置文件**：生成的工程带 `app/src/main/baseline-prof.txt`，列出 Bern 运行时（`dev/bern/runtime`）与生成的界面代码（应用的包）的全部类与方法；Gradle 把它与 Compose 等库自带的规则一起编进 APK 与 AAB。商店安装时系统按它预先编译；发布版构建另把 Gradle 为 Android 12 及以上生成的 `.dm` 复制为 APK 旁的 `<应用>.dm`，`bern run` 在 Android 12 及以上的设备上用 `adb install-multiple` 把两者一起装上，装完即为 `speed-profile`（设备不接受时只装 APK 并提示）；调试版不编译，构建时删掉旧的 `.dm`。直接装 APK 时由 Compose 带的 ProfileInstaller 在首次启动后写入配置文件，系统在下次后台编译时才用上，在那之前这些代码由解释器与 JIT 运行。
 - `bern package` 在 `target/bern/dist/` 生成 `<应用>-<版本>-android.apk` 与 `.aab`。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，密码不写进任何文件；没有设置时用调试密钥签名，并提示不能上架。
 
 ## 媒体类应用的能力（v0.29）
@@ -281,6 +283,35 @@ bern package --target android
 - 测试：`content_in_a_window_starts_at_its_top_leading_corner` 断言内容区与这几层 `Box`，组件自己的正文不加；撤掉修正时失败。探针应用的 Kotlin 编译通过。
 - 实机（MIX 2S，Android 15，探针应用经 CLI 切换正文，`screencap` 截屏，用完卸载）：改前默认列与写在组件里的 `Column(align: center)` 都整体水平居中、靠顶，`Stack` 的小层水平居中、靠顶；改后默认列从左上排起、按钮保持自身宽度，居中列水平居中、靠顶，`Stack` 的小层在内容区正中。图标按钮、菜单、浮层按钮那一种正文没有在手机上看。
 
+2026-10-21，切页时的长帧（上面图片一条最后说的 60–130 ms）。测法同那一条：独立包名的 release 测试包，只经控制通道切页，每次切换前清零、切换后取 `framestats`，记这次切换里最长的 UI 线程时间，取中位数；另用 `atrace`（带应用自己的段）看每帧的阶段，在加了 `profileable` 的同一个包上用 `simpleperf`（DWARF 调用栈）看长帧里的调用。
+
+长帧从哪里来：
+
+- **代码没有预先编译**：`adb install` 装上的 release 包是 `status=verify`，APK 里只有 Compose 等库自带的基线规则，Bern 运行时与生成的界面代码都在解释器与 JIT 里跑。同一个包用 `cmd package compile -m speed` 全编译后，打开“关于”80 → 47 ms、返回 74 → 30、首页 121 → 84、媒体库 112 → 63、新番切日 55 → 43。
+- **全编译后剩下的**：切到首页那一帧约 86 ms，组合几乎都发生在测量阶段（`Adaptive` 的 `BoxWithConstraints` 在测量时子组合；窗口根是共享元素的 `SharedTransitionLayout`，所以先做前瞻测量），`measureAndLayout` 约 50 ms；应用节点变更约 17 ms、释放旧页约 8 ms、绘制约 5 ms。长帧里的采样按调用归类：组合 22%、协程的启动与取消 18%、测量与布局 16%、快照读写 14%、节点增删 9%、文字布局 6%、绘制 4%。
+- **协程那一份是每个元素各自带的**：`BernAppear` 的 `AnimatedVisibility`（过渡对象，加一个一直等着的 `snapshotFlow` 收集）；带样式按钮的 5 个 `animateFloatAsState` 与阴影的 `animateDpAsState`，每个都有一个一直等着的协程；按下与悬停各一个收集协程；Material 按钮自己的水波纹。页面离开时这些挂起的协程逐个取消，每次取消在协程里抛一次异常，ART 为它回溯一遍栈。
+- **其余属于运行时的**：`bernReduceMotion` 在每个新元素里读一次 `Settings.Global`，每次组合还遍历一个状态表；`BernScheme` 每次组合重算壁纸取色（`dynamicDarkColorScheme`，`appearance:` 固定明暗的每个元素各算一次）；`BernText.format` 每次逐字重新解析模板；只用来占位置的空 `Canvas` 每个都是带绘制与清空语义的节点（测试应用生成的代码里有 153 处）。
+- 打开“关于”页的那一帧里，动画 SVG 的 `WebView` 创建（`WebViewChromium.init`）占 10–15 ms。
+- 切换后约 1 秒内超过 16.7 ms 的帧大多由 RenderThread 决定（每帧 12–20 ms），UI 线程每帧只有 3–8 ms；其中很多帧只超出一点（17–18 ms）。按超过 33 ms 计，每次切换 4–24 帧，同一个包两轮之间就差到一倍，改前改后看不出差别，这次没有处理。
+
+修正（“样式与动效”“`Canvas` 与标注”“构建、运行与打包”各条已改）：基线配置文件列出运行时与生成代码的全部方法，`bern run` 连同 `.dm` 一起安装；`BernAppear` 用一个进度驱动所在层，不再用 `AnimatedVisibility`；样式变换与阴影只在外观变化时启动弹簧，按下与悬停由 `BernInteractions` 在发出时记下；动画开关的系统设置在启动与回到前台时读一次，`reduce_motion` 的持有者合成一个状态；配色按当前配置、明暗与强调色缓存，同一配置只算一次；文字模板解析一次后缓存；空 `Canvas` 生成为 `Spacer`。
+
+结果（MIX 2S，Android 15，电池温度 35.0–36.0 ℃；每次切换里最长的 UI 线程时间的中位数，ms。“改前，装后即测”是与改后交替测的一轮；“带配置文件安装”是 `bern run --release` 的装法，装完即为 `status=speed-profile`；“全编译”是 `cmd package compile -m speed`。测试脚本没有关掉首次启动的引导页，它盖在主窗口上，切页仍在下面的主窗口里组合、布局与绘制，两版条件相同；关掉引导页后另录了屏，见下）：
+
+| 切换 | 改前，装后即测 | 改后，装后即测 | 改后，带配置文件安装 | 改前，全编译 | 改后，全编译 |
+| --- | --- | --- | --- | --- | --- |
+| 打开“关于” | 78.5 | 73.1 | 54.0 | 47.1 | 46.9 |
+| 从“关于”返回 | 75.8 | 69.4 | 34.1 | 30.0 | 28.7 |
+| 新番切日 | 58.5 | 52.0 | 36.9 | 43.2 | 35.6 |
+| 切到首页 | 123.4 | 106.2 | 75.9 | 83.6 | 69.0 |
+| 切到媒体库 | 106.2 | 91.8 | 61.6 | 62.5 | 53.5 |
+
+- 改前用户拿到的是第一列；改后按 `bern run` 的方式安装是第三列，长帧短了 31–55%。直接装 APK（第二列）只有代码改动的 7–14%（另一轮 4–23%），配置文件要等系统下次后台编译才用上。
+- 全编译的两列只差代码：首页、媒体库与切日短了 14–18%；“关于”与返回没有变，那一帧主要是 `WebView` 的创建与页面本身的组合。
+- 带配置文件安装仍比全编译慢一些（首页 75.9 / 69.0）：库里不在它们自带配置文件中的代码仍由 JIT 跑，系统后台编译时会把运行中热起来的方法补上。没有把整个 Compose 与协程库加进规则（安装时间与编译产物会大很多）。
+- 关掉引导页、套用全部功能后录屏（`screenrecord`，按 30 帧抽图）：切到媒体库时先是“正在载入…”，随后整页淡入上移，海报按错峰逐个淡入上移，约半秒排齐；新番切日时周一收成胶囊、周四展开，最后的画面与改前一致。带样式按钮的按下反馈没有在真机上点按确认（测试不发输入事件）。
+- 生成器测试 `a_canvas_with_nothing_to_draw_is_a_spacer`、`the_runtime_and_the_interface_are_in_the_baseline_profile`；`cargo test -p bern-backend-compose` 通过。
+
 ## 未完成与已知限制
 
 - 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。
@@ -299,3 +330,5 @@ bern package --target android
 - 出现过渡的规则比设计宽（按实现推断，未逐帧确认）：窗口首帧之后组合的带 `appear` 的元素都会播放，包括随所在的 `ForEach` 一起出现的各行（设计中只有错峰的容器才这样）。
 - 轨道：从右到左的语言中横向轨道从右边量起（`placeRelative`），未验证。`Stack` 中只在轨道直接放着没写交叉尺寸的 `from`/`to` 元素时才随 `Stack` 铺满；其中有组件、或轨道本身带出现过渡等包装时，厚度只来自子元素。
 - 浮层按钮：浮层是 Material 的 `DropdownMenu`，位置由它决定（锚在按钮下方，放不下时左移），没有箭头。画框页静置三秒后按钮行隐藏，打开的浮层随之卸载，这是声明的行为。
+- 动画 SVG 每次显示都新建一个 `WebView`，在主线程占 10–15 ms（打开“关于”页的那一帧）。复用离开屏幕的 `WebView` 会把文档里脚本的状态与动画进度带到下一次显示，与现在每次重新开始不同，没有做。
+- 切页后约 1 秒内的帧多数由 RenderThread 决定（每帧 12–20 ms），没有分析。

@@ -18,12 +18,43 @@ impl Generator<'_> {
             double(element.number(name).unwrap_or(default))
         };
         let length = |name| self.length(element, name).unwrap_or_else(|| "null".into());
-        let semantics = match self.text_prop(element, "label") {
+        let label = self.text_prop(element, "label");
+        let semantics = match &label {
             Some(label) => {
                 format!(".semantics {{ contentDescription = {label}; role = Role.Image }}")
             }
             None => ".clearAndSetSemantics {}".into(),
         };
+        // Without a size, a layer of a stack is its backdrop: as large as
+        // the other layers, without making the stack larger.
+        let frame = if ctx.layer
+            && ctx.sized_layers
+            && element.prop("width").is_none()
+            && element.prop("height").is_none()
+        {
+            "Modifier.matchParentSize()".to_string()
+        } else {
+            format!(
+                "Modifier.bernFrame({}, {})",
+                length("width"),
+                length("height")
+            )
+        };
+        // Nothing to draw, as a canvas that only keeps room: a spacer, which
+        // a page composes and lays out at a fraction of a canvas's cost.
+        if !element
+            .children
+            .iter()
+            .any(|node| matches!(node, Node::Element(_)))
+        {
+            let semantics = if label.is_some() {
+                semantics.as_str()
+            } else {
+                ""
+            };
+            out.line(format!("Spacer({frame}{semantics})"));
+            return;
+        }
         out.open("run {");
         out.line("val bernPalette = bernPalette()");
         // The average colors of the pictures shapes are filled from, read
@@ -64,21 +95,6 @@ impl Generator<'_> {
                 values.push(index);
             }
         }
-        // Without a size, a layer of a stack is its backdrop: as large as
-        // the other layers, without making the stack larger.
-        let frame = if ctx.layer
-            && ctx.sized_layers
-            && element.prop("width").is_none()
-            && element.prop("height").is_none()
-        {
-            "Modifier.matchParentSize()".to_string()
-        } else {
-            format!(
-                "Modifier.bernFrame({}, {})",
-                length("width"),
-                length("height")
-            )
-        };
         out.open(format!("Canvas({frame}{semantics}) {{"));
         let mut series = 0;
         for (index, node) in element.children.iter().enumerate() {

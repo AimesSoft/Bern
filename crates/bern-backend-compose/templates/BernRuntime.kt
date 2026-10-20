@@ -364,9 +364,14 @@ object BernText {
     /// category, dates and durations by their patterns. The format is the
     /// one the compiler checks (`bern_protocol::format`).
     fun format(key: String, arguments: Map<String, BernArg>): String {
-        val pieces = BernTextParser(string(key)).message(branch = false)
+        val template = string(key)
+        val pieces = messages.getOrPut(template) { BernTextParser(template).message(branch = false) }
         return write(pieces, BernLanguage.current, arguments, hash = null)
     }
+
+    /// Each template read once: a page formats its texts again every time
+    /// it is composed.
+    private val messages = HashMap<String, List<BernPiece>>()
 
     fun arg(value: String): BernArg = BernArg.Text(value)
 
@@ -900,6 +905,7 @@ object BernHost {
         primary: String,
         apply: (Int, BernReader) -> Unit,
     ) {
+        BernMotionState.readSystem(context)
         if (handle != 0L) return
         television = (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
             Configuration.UI_MODE_TYPE_TELEVISION ||
@@ -1522,6 +1528,16 @@ fun BernTheme(content: @Composable () -> Unit) {
             controller.isAppearanceLightStatusBars = !dark
             controller.isAppearanceLightNavigationBars = !dark
         }
+    }
+    // Animations turned off in the system's settings while the app was
+    // away apply when it comes back.
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) activity?.let(BernMotionState::readSystem)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
     }
     BernScheme(dark, content)
 }

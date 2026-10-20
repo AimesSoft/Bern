@@ -238,17 +238,30 @@ fun bernOptionName(value: Any?): String = when (value) {
 
 /// `reduce_motion`: while an element holding it is shown and it is true,
 /// the whole application runs with reduced motion, as when the system
-/// turns animations off.
+/// turns animations off. Each is one state: every animated element reads
+/// them as it is composed.
 object BernMotionState {
-    private val holders = mutableStateMapOf<Any, Boolean>()
-    val reduced: Boolean get() = holders.values.any { it }
+    private val holders = HashMap<Any, Boolean>()
+    var reduced by mutableStateOf(false)
+        private set
+    /// The system turned animations off, read when the app starts and
+    /// each time it comes back to the front.
+    var system by mutableStateOf(false)
+        private set
 
     fun set(token: Any, on: Boolean) {
-        if (holders[token] != on) holders[token] = on
+        if (holders.put(token, on) != on) reduced = holders.values.any { it }
     }
 
     fun remove(token: Any) {
-        holders.remove(token)
+        if (holders.remove(token) != null) reduced = holders.values.any { it }
+    }
+
+    fun readSystem(context: android.content.Context) {
+        val off = android.provider.Settings.Global.getFloat(
+            context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f,
+        ) == 0f
+        if (off != system) system = off
     }
 }
 
