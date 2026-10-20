@@ -355,6 +355,11 @@ impl Generator<'_> {
         if self.platform == Platform::Tvos {
             out.line(".bernFieldLook()");
         }
+        // `label_hidden`: the label names the field without showing, also
+        // in a macOS form.
+        if element.keyword("label_hidden") == Some("true") {
+            out.line(".labelsHidden()");
+        }
         if ios {
             if kind == "multiline" {
                 out.close("}");

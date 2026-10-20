@@ -886,3 +886,81 @@ fn icons_come_from_the_table_and_others_fail_the_check() {
         assert_eq!(rejected, name == "no.such.symbol", "{name}: {problems:?}");
     }
 }
+
+/// Puts a copy of the showcase's name field in a row after it, its label
+/// hidden.
+fn add_field_in_row(app: &mut bern_ir::Application) {
+    use bern_ir::{Element, Node, Prop};
+    fn into(node: &mut Node) -> bool {
+        match node {
+            Node::Element(element) => {
+                let field = element.children.iter().find_map(|child| match child {
+                    Node::Element(child)
+                        if child.kind == "TextInput" && child.id.as_deref() == Some("name") =>
+                    {
+                        Some(child.clone())
+                    }
+                    _ => None,
+                });
+                let Some(mut beside) = field else {
+                    return element.children.iter_mut().any(into);
+                };
+                beside.id = Some("beside_name".into());
+                beside.path = format!("{}.beside", beside.path);
+                beside.props.insert(
+                    "label_hidden".into(),
+                    Prop::Keyword {
+                        value: "true".into(),
+                    },
+                );
+                element.children.push(Node::Element(Element {
+                    kind: "Row".into(),
+                    id: None,
+                    path: format!("{}.row", element.path),
+                    props: Default::default(),
+                    template: None,
+                    children: vec![Node::Element(beside)],
+                    action: None,
+                    source: element.source.clone(),
+                }));
+                true
+            }
+            Node::If(node) => {
+                node.branches
+                    .iter_mut()
+                    .any(|(_, body)| body.iter_mut().any(into))
+                    || node.otherwise.iter_mut().any(into)
+            }
+            _ => false,
+        }
+    }
+    assert!(
+        app.components
+            .iter_mut()
+            .any(|component| into(&mut component.body))
+    );
+}
+
+#[test]
+fn a_text_input_takes_the_room_of_its_row_and_can_hide_its_label() {
+    let (config, mut compiled) = compile("showcase");
+    add_field_in_row(&mut compiled.app);
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
+    let beside = kotlin
+        .lines()
+        .find(|line| line.contains("BernTextInput(") && line.contains("beside_name"))
+        .expect("the field in the row");
+    assert!(
+        beside.ends_with(".weight(1f), labelHidden = true)"),
+        "{beside}"
+    );
+    let name = kotlin
+        .lines()
+        .find(|line| line.contains("BernTextInput(") && line.contains(".name\")"))
+        .expect("the field in its column");
+    assert!(name.ends_with("), labelHidden = false)"), "{name}");
+    assert!(!name.contains(".weight(1f)"), "{name}");
+}

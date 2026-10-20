@@ -704,6 +704,8 @@ inline bool IsEnter(xaml::Input::KeyRoutedEventArgs const& args) {
 struct TextInputProps {
     char const* id = "";
     Str label;
+    /// `label_hidden`: the label names the field without showing.
+    bool labelHidden = false;
     std::optional<Field> field;
     Str prompt;
     char const* kind = nullptr;
@@ -719,9 +721,12 @@ inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
     std::string_view kind = props.kind ? props.kind : "";
     bool secure = kind == "secure", multiline = kind == "multiline";
     xaml::FrameworkElement control{nullptr};
+    // A field takes the free width of its row and gives way when the row
+    // is narrow, as a text field does in a SwiftUI stack; in a column it
+    // spans the column.
     if (secure) {
         controls::PasswordBox box;
-        box.MinWidth(240);
+        box.MinWidth(64);
         if (placeholder) Reactive::Run([box, placeholder] { box.PlaceholderText(placeholder()); });
         auto updating = Editable([box] { return box.Password(); }, [box](auto const& v) { box.Password(v); }, ctx, field);
         box.PasswordChanged([weak = winrt::make_weak(box), updating, ctx, field](auto&&, auto&&) {
@@ -731,7 +736,7 @@ inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
         control = box;
     } else {
         controls::TextBox box;
-        box.MinWidth(240);
+        box.MinWidth(64);
         box.AcceptsReturn(multiline);
         box.TextWrapping(multiline ? xaml::TextWrapping::Wrap : xaml::TextWrapping::NoWrap);
         if (multiline) box.MinHeight(80);
@@ -744,15 +749,20 @@ inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
         control = box;
     }
     BindName(control, text);
+    SetRole(control, L"bern-fill-width");
     if (p.isList) {
-        if (multiline) {
+        if (multiline || props.labelHidden) {
             control.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
-            p.Add(Card(Stacked(text, control)));
+            p.Add(Card(props.labelHidden ? xaml::UIElement(control) : xaml::UIElement(Stacked(text, control))));
         } else {
             p.Add(LabeledCard(text, control));
         }
+    } else if (props.labelHidden) {
+        p.Add(control);
     } else {
-        p.Add(Stacked(text, control));
+        auto stacked = Stacked(text, control);
+        Mirror(stacked, control);
+        p.Add(stacked);
     }
     Actions actions{.edit = [ctx, field](std::string const& value) { SetDraft(ctx, field, Value::Text(value)); }, .submit = run};
     if (!secure) actions.value = [ctx, field] { return std::optional<std::string>(R::AsText(ctx.Peek(field))); };

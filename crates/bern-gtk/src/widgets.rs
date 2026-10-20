@@ -617,6 +617,14 @@ pub(crate) fn stacked(
     container
 }
 
+/// Names `widget` for assistive technologies where no label shows.
+fn accessible_name(widget: &impl IsA<gtk::Widget>, label: Option<Rc<dyn Fn() -> String>>) {
+    if let Some(label) = label {
+        let named = widget.clone().upcast::<gtk::Widget>();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&label())]));
+    }
+}
+
 /// A label beside a control outside forms.
 pub(crate) fn beside(
     label: Option<Rc<dyn Fn() -> String>>,
@@ -639,6 +647,8 @@ pub(crate) fn beside(
 pub struct TextInputProps {
     pub id: &'static str,
     pub label: Option<Str>,
+    /// `label_hidden`: the label names the field without showing.
+    pub label_hidden: bool,
     pub field: Option<Field>,
     pub prompt: Option<Str>,
     pub kind: Option<&'static str>,
@@ -669,6 +679,8 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
     let Some(field) = props.field else { return };
     let bound = Bound::new(ctx, field);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
+    // The label shown above or in the field; a hidden one only names it.
+    let shown = label.clone().filter(|_| !props.label_hidden);
     let prompt = props.prompt.as_ref().map(|prompt| bound_text(ctx, prompt));
     let submit = bound_action(ctx, &submit);
     let kind = props.kind.unwrap_or("text");
@@ -706,10 +718,11 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
         });
         let frame = gtk::Frame::new(None);
         frame.set_child(Some(&view));
+        accessible_name(&view, label.clone());
         if p.is_list() {
-            p.add(&plain_row(&stacked(label.clone(), &frame)));
+            p.add(&plain_row(&stacked(shown, &frame)));
         } else {
-            p.add(&stacked(label.clone(), &frame));
+            p.add(&stacked(shown, &frame));
         }
     } else if p.is_list() {
         let row: adw::EntryRow = if secure {
@@ -717,9 +730,11 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
         } else {
             adw::EntryRow::new()
         };
-        if let Some(label) = label.clone() {
-            let shown = row.clone();
-            effect(move || shown.set_title(&label()));
+        if let Some(title) = shown {
+            let titled = row.clone();
+            effect(move || titled.set_title(&title()));
+        } else {
+            accessible_name(&row, label.clone());
         }
         let read = row.clone();
         let write = row.clone();
@@ -764,7 +779,15 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
         if let Some(submit) = submit.clone() {
             entry.connect_activate(move |_| submit());
         }
-        p.add(&stacked(label.clone(), &entry));
+        // A field takes the free width of its row, as a text field does in
+        // a SwiftUI stack.
+        entry.set_hexpand(true);
+        if shown.is_none() {
+            accessible_name(&entry, label.clone());
+            p.add(&entry);
+        } else {
+            p.add(&stacked(shown, &entry));
+        }
     }
     let set = bound.clone();
     let edit: Rc<dyn Fn(String)> = Rc::new(move |value| set.set(Value::Text(value)));

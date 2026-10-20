@@ -591,11 +591,13 @@ fun BernTextInput(
     kind: String,
     submit: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    labelHidden: Boolean = false,
 ) {
+    // `label_hidden`: the label names the field without showing.
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
-        label = { Text(label) },
+        label = if (labelHidden) null else ({ Text(label) }),
         placeholder = prompt?.let { { Text(it) } },
         singleLine = kind != "multiline",
         minLines = if (kind == "multiline") 3 else 1,
@@ -606,7 +608,9 @@ fun BernTextInput(
             imeAction = if (submit != null && kind != "multiline") ImeAction.Done else ImeAction.Default,
         ),
         keyboardActions = KeyboardActions(onDone = { submit?.invoke() }),
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().then(
+            if (labelHidden) Modifier.semantics { contentDescription = label } else Modifier
+        ),
     )
 }
 

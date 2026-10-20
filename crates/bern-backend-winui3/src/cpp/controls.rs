@@ -69,6 +69,10 @@ impl Generator<'_> {
             designated(&[
                 ("id", Some(self.id(element))),
                 ("label", self.text_prop(element, "label")),
+                (
+                    "labelHidden",
+                    (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+                ),
                 ("field", self.field(element, "value")),
                 ("prompt", self.text_prop(element, "prompt")),
                 ("kind", Self::keyword(element, "kind")),

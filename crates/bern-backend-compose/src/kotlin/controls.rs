@@ -174,12 +174,20 @@ impl Generator<'_> {
         out.line(format!(
             "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {field} = it }}{submit}{value}))"
         ));
+        // In a row the field takes the room its neighbours leave, as a
+        // text field does in a SwiftUI stack.
+        let weight = if ctx.scope == Scope::Row {
+            ".weight(1f)"
+        } else {
+            ""
+        };
         out.line(format!(
-            "BernTextInput({field}, {{ {field} = it }}, {label}, {prompt}, {}, {}, Modifier.testTag({target}))",
+            "BernTextInput({field}, {{ {field} = it }}, {label}, {prompt}, {}, {}, Modifier.testTag({target}){weight}, labelHidden = {})",
             string(kind),
             action
                 .map(|action| format!("{{ {action} }}"))
-                .unwrap_or_else(|| "null".into())
+                .unwrap_or_else(|| "null".into()),
+            element.keyword("label_hidden") == Some("true")
         ));
     }
 

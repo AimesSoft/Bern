@@ -489,7 +489,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Tabs 和 Tab | 同级页面的页签切换；Tabs 可带 `id` 供外部入口切换 | 基础组件 |
 | TabAccessory | 随页签常驻、在每一页上都显示的一条，例如正在播放的小播放器；直接写在 `Tabs` 里，最多一个，用 `shown:` 收起而不是写在 `if` 里。条是系统画的底，里面的图标按钮是条上的符号，不再各带一层玻璃 | 能力 `tab_accessory`。SwiftUI：iOS 26.1 起为标签视图的 `tabViewBottomAccessory`（标签栏上方的系统玻璃条，iPhone 模拟器 iOS 26.5 上已验证），更早的 iOS 与 macOS 在每页底部的安全区内嵌一条材质胶囊；Compose 为导航栏上方的一块抬高表面；GTK 为页面下方滑出的 Adwaita 卡片（`GtkRevealer`）；WinUI 3 为页面下方的卡片；Web 为页面下方的一条。Compose、GTK、WinUI 3 与 Web 未验证 |
 | Toolbar | 窗口或页面级操作区；可以放一个 `Search`，直接写在工具栏中，不放在条件或重复里。相邻的项是一组，`Divider` 把它们分成几组：按功能分组，一组的项在平台上共享一块底（Liquid Glass 的同一个胶囊），组与组之间留固定间隔；`Divider` 只能直接写在两项之间，平台建议不超过三组 | 基础组件；工具栏中的搜索框 SwiftUI 已实现。分组：SwiftUI 生成 `ToolbarItemGroup`，macOS 26 与 iOS 26 起组间插 `ToolbarSpacer(.fixed)`；组里的图标按钮交给工具栏绘制，和别的项同组的菜单不显示下拉箭头（带箭头的菜单会自成一块），macOS 上已验证。GTK 与 WinUI 3 在组间画一条竖线，Linux 虚拟机与 Windows PC 上已验证（WinUI 3 两种前端相同）；Web 同样画一条竖线，浏览器中已验证；Compose 在组间留 12dp，Android 上已验证 |
-| Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸 | 基础组件；尺寸 SwiftUI 已实现 |
+| Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸，声明了更大尺寸的子元素保持自己的尺寸、按对齐方式越出（居中时两边均分），不被裁剪 | 基础组件；尺寸 SwiftUI 已实现 |
 | Grid | 等宽的列，列宽不小于 `min_width`，放得下几列就排几列，子元素逐行填入；`gap` 默认 8 | 已实现 |
 | Stack | 叠放：后写的一层在上面，先接收输入；整体与最大的一层一样大（写了 `width`、`height` 时按它们），较小的层按 `align` 的九个方位之一对齐，默认居中 | 已实现 |
 | Accordion | 横向手风琴；`count` 是列数，`selected` 是从 0 开始的展开列，其他列宽 `collapsed_width`，展开列填满余宽；`gap` 与 `height` 定义间距与高度，`corner` 定义每列的裁切圆角。`animate` 逐帧改变列宽，位置由当前列宽累加，内容裁切到各列；减弱动态效果时直接切换 | SwiftUI 与 Web；其他目标使用 `accordion_layout` 能力检查拒绝 |
@@ -504,7 +504,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Text | 本地化或动态文本、文字层级、换行及截断；`mark` 标注底纹 | 基础组件；`mark` 见“画布与标注文字” |
 | Button | 可访问名称、语义角色、强调程度、启用状态及激活事件；可以带一个子元素作为它显示的内容，见“带内容的按钮与悬停显示”。`pick: draft.file` 让按下先弹出系统的打开面板，选中一个文件后存进这个会话字段（`MediaSource` 或 `Option<MediaSource>`）再执行动作，取消则什么都不做；`files` 写接受的种类：`any`（默认）、`video`、`audio`、`picture`、`folder` 与 `.ass` 这样的扩展名，用空格或逗号分开。`IconButton` 与 `MenuItem` 同样可以写 | 基础组件；带内容见该节的实现进度。`pick` SwiftUI 已实现（`file_pick`）：macOS 是挂在窗口上的打开面板，不接受的文件变灰，已验证；iOS 是文档选择器，选中的文件就地打开并保持可读，iOS 26.5 模拟器已验证。Compose 用系统的文档选择器（`OpenDocument`），按种类过滤并保留读取授权，Android 模拟器上验证了只列出视频或图片、选中后播放或显示。`video` 除系统的影片类型外还收 mkv、webm、flv、rmvb 等系统未必认识的容器。Web 用浏览器的文件选择框（`<input type=file>`），按种类过滤，选中的文件以页面的 `blob:` 地址交给动作；系统的选择框无法在自动化中操作，未实测，用 `ui.set_file` 验证了动作。GTK 用 `GtkFileDialog`，按种类过滤，虚拟机上没有桌面门户，选择未实测；WinUI 3 用 `FileOpenPicker` 与 `FolderPicker`，Windows PC 上验证 Ctrl+O 弹出打开面板 |
 | IconButton | 图标激活、点击区域与可访问名称 | 基础组件；原生目标默认使用平台的图标按钮样式 |
-| TextInput | 文本编辑、输入法与提交事件 | 基础组件 |
+| TextInput | 文本编辑、输入法与提交事件；在行里占行内剩余的宽度、行窄时让出，在列里横跨整列；`label_hidden: true` 时标签只作可访问名称、不显示 | 基础组件 |
 | Search | 搜索文本编辑与提交；子元素是在搜索框使用时显示在它下方的结果，例如由 `Query` 驱动的结果列表，结果中的按钮直接打开或执行 | 基础组件；结果 SwiftUI 已实现（`searchSuggestions`），弹出结果尚未实测；Web 的结果是搜索框下方的浮层，有焦点且有文字时显示，选中结果后收起，浏览器中已验证；GTK 与 WinUI 3（`Flyout`，不用 `AutoSuggestBox` 的建议列表）同样是搜索框下方的浮层，Linux 虚拟机与 Windows PC 上验证 Ctrl+K 聚焦、输入后列出匹配项（GTK 点选“Tartan”后打开它并收起结果） |
 | Switch | 布尔状态与修改事件；`style: button` 是开着时保持按下的按钮，可带 `icon`，也可以放进 `Toolbar` | 基础组件；按钮样式 SwiftUI 已实现 |
 | SplitButton | 分体开关按钮：一侧是绑定 `bool` 草稿的开关，另一侧在浮层中显示它的子元素，例如所开功能的常用设置；`more_label` 是第二部分的可访问名称；外部入口用 `set_bool` 开关、`activate` 打开浮层 | 媒体类应用；SwiftUI 已实现（`ControlGroup` 与浮层），在 macOS 上验证开关、浮层与其中的控件，浮层跟随 `appearance`；iPhone 上浮层原本会被系统改成整页表单、背景按浅色解析，现在保持为浮层并在所在区域的明暗中绘制，iOS 26.5 模拟器已验证；Web 是开关按钮加弹出浮层的箭头按钮，浏览器中验证浮层与其中的滑块，浮层跟随 `appearance`；GTK 与 WinUI 3（`ToggleSplitButton`）已实现，Linux 虚拟机与 Windows PC 上验证开关与浮层，浮层跟随 `appearance` |

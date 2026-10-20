@@ -1122,3 +1122,93 @@ fn a_declared_ico_is_used_as_it_is() {
     assert_eq!(app_ico.contents, bytes);
     let _ = std::fs::remove_file(&ico);
 }
+
+/// Puts a copy of the showcase's name field in a row after it, its label
+/// hidden.
+fn add_field_in_row(app: &mut bern_ir::Application) {
+    use bern_ir::{Element, Node, Prop};
+    fn into(node: &mut Node) -> bool {
+        match node {
+            Node::Element(element) => {
+                let field = element.children.iter().find_map(|child| match child {
+                    Node::Element(child)
+                        if child.kind == "TextInput" && child.id.as_deref() == Some("name") =>
+                    {
+                        Some(child.clone())
+                    }
+                    _ => None,
+                });
+                let Some(mut beside) = field else {
+                    return element.children.iter_mut().any(into);
+                };
+                beside.id = Some("beside_name".into());
+                beside.path = format!("{}.beside", beside.path);
+                beside.props.insert(
+                    "label_hidden".into(),
+                    Prop::Keyword {
+                        value: "true".into(),
+                    },
+                );
+                element.children.push(Node::Element(Element {
+                    kind: "Row".into(),
+                    id: None,
+                    path: format!("{}.row", element.path),
+                    props: Default::default(),
+                    template: None,
+                    children: vec![Node::Element(beside)],
+                    action: None,
+                    source: element.source.clone(),
+                }));
+                true
+            }
+            Node::If(node) => {
+                node.branches
+                    .iter_mut()
+                    .any(|(_, body)| body.iter_mut().any(into))
+                    || node.otherwise.iter_mut().any(into)
+            }
+            _ => false,
+        }
+    }
+    assert!(
+        app.components
+            .iter_mut()
+            .any(|component| into(&mut component.body))
+    );
+}
+
+#[test]
+fn a_text_input_can_hide_its_label() {
+    let (config, mut compiled) = showcase();
+    add_field_in_row(&mut compiled.app);
+    let root = workspace();
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/winui3-text-input"),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    let ui = files
+        .iter()
+        .find(|file| file.path.ends_with("app_ui.inl"))
+        .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+        .unwrap();
+    let field = |id: &str| {
+        ui.lines()
+            .find(|line| line.contains(&format!("B::TextInput(p, c, {{.id = \"{id}\"")))
+            .unwrap_or_else(|| panic!("`{id}` in {ui}"))
+            .to_string()
+    };
+    assert!(field("beside_name").contains(".labelHidden = true, .field = "));
+    assert!(!field("name").contains(".labelHidden"));
+}

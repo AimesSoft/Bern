@@ -559,6 +559,26 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
     float Cross(Size s) const { return horizontal ? s.Height : s.Width; }
     Size Make(float main, float cross) const { return horizontal ? Size{main, cross} : Size{cross, main}; }
 
+    /// Where a child given a side across larger than the room goes: it is
+    /// measured and placed with that side, overflowing as its alignment
+    /// says (evenly when centered), as on the other targets, rather than
+    /// being clipped to the room; the panel does not grow for it. Returns
+    /// the offset and the side.
+    std::pair<float, float> Across(xaml::UIElement const& child, float room) const {
+        auto framework = Unwrapped(child).try_as<xaml::FrameworkElement>();
+        double given = framework ? (horizontal ? framework.Height() : framework.Width()) : NAN;
+        if (std::isnan(given) || given <= room) return {0.0f, room};
+        float side = static_cast<float>(given), over = side - room;
+        auto placed = child.try_as<xaml::FrameworkElement>();
+        if (!placed) return {-over / 2, side};
+        if (horizontal) {
+            auto align = placed.VerticalAlignment();
+            return {align == xaml::VerticalAlignment::Top ? 0.0f : align == xaml::VerticalAlignment::Bottom ? -over : -over / 2, side};
+        }
+        auto align = placed.HorizontalAlignment();
+        return {align == xaml::HorizontalAlignment::Left ? 0.0f : align == xaml::HorizontalAlignment::Right ? -over : -over / 2, side};
+    }
+
     Size MeasureOverride(Size available) {
         Size inner{(std::max)(0.0f, available.Width - static_cast<float>(padding.Left + padding.Right)),
             (std::max)(0.0f, available.Height - static_cast<float>(padding.Top + padding.Bottom))};
@@ -568,9 +588,9 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             if (child.Visibility() != xaml::Visibility::Visible) continue;
             ++visible;
             if (Fills(child)) { ++filling; continue; }
-            child.Measure(Make(INFINITY, cross));
+            child.Measure(Make(INFINITY, Across(child, cross).second));
             used += Main(child.DesiredSize());
-            thickness = (std::max)(thickness, Cross(child.DesiredSize()));
+            thickness = (std::max)(thickness, (std::min)(Cross(child.DesiredSize()), cross));
         }
         float gaps = static_cast<float>(spacing) * (std::max)(0, visible - 1);
         // Too wide for its room: text gives way, as a stack's text wraps or
@@ -586,19 +606,19 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
                     if (child.Visibility() != xaml::Visibility::Visible || Fills(child)) continue;
                     if (Yields(child)) {
                         float own = Main(child.DesiredSize());
-                        child.Measure(Make((std::max)(0.0f, own - over * own / yielding), cross));
+                        child.Measure(Make((std::max)(0.0f, own - over * own / yielding), Across(child, cross).second));
                     }
                     used += Main(child.DesiredSize());
-                    thickness = (std::max)(thickness, Cross(child.DesiredSize()));
+                    thickness = (std::max)(thickness, (std::min)(Cross(child.DesiredSize()), cross));
                 }
             }
         }
         float free = std::isinf(space) ? INFINITY : (std::max)(0.0f, space - used - gaps);
         for (auto child : Children()) {
             if (child.Visibility() != xaml::Visibility::Visible || !Fills(child)) continue;
-            child.Measure(Make(std::isinf(free) ? INFINITY : free / filling, cross));
+            child.Measure(Make(std::isinf(free) ? INFINITY : free / filling, Across(child, cross).second));
             filled += Main(child.DesiredSize());
-            thickness = (std::max)(thickness, Cross(child.DesiredSize()));
+            thickness = (std::max)(thickness, (std::min)(Cross(child.DesiredSize()), cross));
         }
         float main = filling > 0 && !std::isinf(space) ? space : used + gaps + filled;
         if (baseline && horizontal) thickness += extra;
@@ -629,7 +649,8 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             }
             float length = Fills(child) ? share : Main(child.DesiredSize());
             auto left = static_cast<float>(padding.Left), top = static_cast<float>(padding.Top);
-            Rect rect = horizontal ? Rect{left + position, top, length, cross} : Rect{left, top + position, cross, length};
+            auto [offset, side] = Across(child, cross);
+            Rect rect = horizontal ? Rect{left + position, top + offset, length, side} : Rect{left + offset, top + position, side, length};
             child.Arrange(rect);
             placed.emplace_back(child, rect);
             if (reflow) now.emplace_back(child, winrt::Windows::Foundation::Point{rect.X, rect.Y});
@@ -652,7 +673,7 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
                     rect.Y += shift;
                     child.Arrange(rect);
                 }
-                needed = (std::max)(needed, shift + child.DesiredSize().Height);
+                needed = (std::max)(needed, shift + (std::min)(child.DesiredSize().Height, cross));
             }
             float more = (std::max)(0.0f, needed - (cross - extra));
             if (std::abs(more - extra) > 0.5f) {

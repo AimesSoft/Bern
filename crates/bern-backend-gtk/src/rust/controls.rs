@@ -77,9 +77,10 @@ impl Generator<'_> {
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::TextInput(p, c, b::TextInputProps {{ id: {}, label: {}, field: {}, prompt: {}, kind: {} }}, {});",
+            "b::TextInput(p, c, b::TextInputProps {{ id: {}, label: {}, label_hidden: {}, field: {}, prompt: {}, kind: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
+            element.keyword("label_hidden") == Some("true"),
             some(self.field(element, "value")),
             some(self.text_prop(element, "prompt")),
             Self::keyword(element, "kind"),
