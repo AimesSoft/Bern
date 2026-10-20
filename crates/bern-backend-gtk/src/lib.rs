@@ -88,9 +88,10 @@ const FEATURES: &[&str] = &[
     feature::UNTITLED_DETAIL,
 ];
 
-/// `reflow` GTK cannot show: the children of a column, row or stack and
-/// the cells of a grid with `cell_ratio` slide; a flow box grid lays out
-/// its own cells, so it warns there and the cells move at once.
+/// `reflow` GTK cannot show, in components and in the content written
+/// directly in a window: the children of a column, row or stack and the
+/// cells of a grid with `cell_ratio` slide; a flow box grid lays out its
+/// own cells, so it warns there and the cells move at once.
 fn reflow_warnings(app: &Application) -> Vec<Diagnostic> {
     fn slides(kind: Option<&str>) -> bool {
         matches!(kind, Some("Column" | "Row" | "Stack" | "CellGrid"))
@@ -147,6 +148,9 @@ fn reflow_warnings(app: &Application) -> Vec<Diagnostic> {
     let mut out = Vec::new();
     for component in &app.components {
         visit(std::slice::from_ref(&component.body), None, &mut out);
+    }
+    for window in &app.windows.windows {
+        visit(std::slice::from_ref(&window.content), None, &mut out);
     }
     out
 }

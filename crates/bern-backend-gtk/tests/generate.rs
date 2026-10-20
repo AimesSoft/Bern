@@ -938,13 +938,39 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
-/// A project whose only styled control is written directly in its window,
-/// compiled from sources written under `dir`.
-fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+/// A drop area that opens videos, around a grid that asks to `reflow`,
+/// written directly in the window.
+const DROP_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {
+    pub file: MediaSource,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Drop(id: clip, label: tr! { "en" => "Drop a Video" }, value: draft.file, files: "video", opens: true) {
+                    Grid(min_width: 120, reflow: smooth) {
+                        Text(content: tr! { "en" => "Clip" })
+                    }
+                } => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// A project of the interface `ui` over a small protocol, compiled from
+/// sources written under `dir`.
+fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
     let _ = std::fs::remove_dir_all(dir);
     for (package, source) in [
         ("stage-protocol", STAGE_PROTOCOL),
-        ("stage-ui", STAGE_UI),
+        ("stage-ui", ui),
         ("stage-core", ""),
     ] {
         std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
@@ -1000,22 +1026,18 @@ platform = "linux"
     (config, compiled)
 }
 
-/// A variant of a control written directly in a window, not in a
-/// component, has its style in the table as one in a component has.
-#[test]
-fn a_style_variant_in_a_window_is_defined() {
+/// The context building a stage project into `output`.
+fn stage_context(
+    config: &bern_compiler::Config,
+    compiled: &bern_compiler::Compiled,
+    output: &Path,
+) -> BuildContext {
     let root = workspace();
-    let (config, compiled) = stage_project(&root.join("target/bern-test/gtk-stage-project"));
-    let target = linux_target(&config);
-    let problems = GtkLinux.check(&compiled.app, &target);
-    assert!(problems.is_empty(), "{problems:?}");
-    let output = root.join("target/bern-test/gtk-stage");
-    let _ = std::fs::remove_dir_all(&output);
-    let context = BuildContext {
+    BuildContext {
         project_dir: config.dir.clone(),
         workspace_dir: root.clone(),
-        output_dir: output.clone(),
-        target,
+        output_dir: output.to_path_buf(),
+        target: linux_target(config),
         protocol_package: config.protocol_package.name.clone(),
         protocol_path: config.protocol_package.dir.clone(),
         protocol_module: compiled.protocol_module.clone(),
@@ -1025,7 +1047,22 @@ fn a_style_variant_in_a_window_is_defined() {
         modules: Vec::new(),
         framework: Framework::Path(root.join("crates")),
         release: false,
-    };
+    }
+}
+
+/// A variant of a control written directly in a window, not in a
+/// component, has its style in the table as one in a component has.
+#[test]
+fn a_style_variant_in_a_window_is_defined() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/gtk-stage-project"), STAGE_UI);
+    let target = linux_target(&config);
+    let problems = GtkLinux.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-stage");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
     for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
         let path = output.join(&file.path);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1039,4 +1076,42 @@ fn a_style_variant_in_a_window_is_defined() {
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
+}
+
+/// A drop area that opens files, written directly in a window rather than
+/// in a component, still has the desktop entry offer the application for
+/// its kinds.
+#[test]
+fn a_drop_in_a_window_registers_its_kinds() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/gtk-drop-project"), DROP_UI);
+    let output = root.join("target/bern-test/gtk-drop");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let entry = std::fs::read_to_string(output.join("Stage/dev.bern.stage.desktop")).unwrap();
+    for expected in ["/stage %U\n", "MimeType=video/mp4;video/x-matroska;"] {
+        assert!(entry.contains(expected), "missing `{expected}`:\n{entry}");
+    }
+}
+
+/// `reflow` GTK cannot show warns in a window's own content as it does in
+/// a component.
+#[test]
+fn reflow_in_a_window_is_checked() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/gtk-reflow-project"), DROP_UI);
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(
+        problems.iter().any(|problem| problem
+            .message
+            .ends_with("the items of this `Grid` move at once")),
+        "{problems:?}"
+    );
 }

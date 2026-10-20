@@ -255,6 +255,8 @@ bern package --target android
 
 2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文，窗口正文里写的 `variant:` 不生成 `BernStyles` 的条目，生成的 Kotlin 引用不存在的 `BernStyles.buttonStage`（原因见 WinUI 3 实现记录的同日条目）。生成器测试 `a_style_variant_in_a_window_is_defined` 断言定义与引用；测试应用 `bern build --target android` 完成 Kotlin 编译并打出 APK。MIX 2S（Android 15）上装包后截屏（不发按键，看完切回原来的应用并卸载测试包）：窗口正文里的按钮是强调色底、圆角 12，组件里的是 `fill.subtle` 底、圆角 4。
 
+2026-10-20，直接写在窗口正文里的 `Drop(opens: true)` 与网络图片：清单的 `VIEW`、`SEND` 意图与 `INTERNET` 权限此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类、活动不是 `singleTask`，那里取自网络的图片不给清单加 `INTERNET`。改为连同窗口正文一起看；生成器测试 `a_drop_and_a_network_picture_in_a_window_reach_the_manifest` 改前失败、改后通过。没有装到手机上。
+
 ## 未完成与已知限制
 
 - 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。

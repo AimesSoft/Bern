@@ -148,40 +148,36 @@ dependencies {{
     )
 }
 
-/// The manifest: one activity that handles its own configuration changes,
-/// so turning the phone or resizing keeps the windows and their drafts.
 /// The kinds of file the application opens: those of every `Drop` with
-/// `opens: true`.
+/// `opens: true`, in components and in the content written directly in a
+/// window.
 fn opened_kinds(app: &bern_ir::Application) -> Vec<String> {
     let mut kinds = std::collections::BTreeSet::new();
-    for component in &app.components {
-        component.body.walk(&mut |node| {
-            if let bern_ir::Node::Element(element) = node
-                && element.kind == "Drop"
-                && element.keyword("opens") == Some("true")
-            {
-                for word in element.keyword("files").unwrap_or("any").split(' ') {
-                    kinds.insert(word.to_string());
-                }
+    app.walk(&mut |node, _| {
+        if let bern_ir::Node::Element(element) = node
+            && element.kind == "Drop"
+            && element.keyword("opens") == Some("true")
+        {
+            for word in element.keyword("files").unwrap_or("any").split(' ') {
+                kinds.insert(word.to_string());
             }
-        });
-    }
+        }
+    });
     kinds.into_iter().collect()
 }
 
-/// Whether the application reads pictures or media from the network.
+/// Whether the application reads pictures or media from the network,
+/// anywhere in its components or windows.
 fn uses_network(app: &bern_ir::Application) -> bool {
     let mut uses = app.uses_media();
-    for component in &app.components {
-        component.body.walk(&mut |node| {
-            if let bern_ir::Node::Element(element) = node
-                && ((element.kind == "Image" && element.expr("source").is_some())
-                    || element.expr("fill_from").is_some())
-            {
-                uses = true;
-            }
-        });
-    }
+    app.walk(&mut |node, _| {
+        if let bern_ir::Node::Element(element) = node
+            && ((element.kind == "Image" && element.expr("source").is_some())
+                || element.expr("fill_from").is_some())
+        {
+            uses = true;
+        }
+    });
     uses
 }
 
@@ -204,7 +200,9 @@ fn extension_type(ext: &str) -> Option<&'static str> {
     })
 }
 
-/// The application manifest; `round_icon` when the launcher icon has a
+/// The application manifest: one activity that handles its own
+/// configuration changes, so turning the phone or resizing keeps the
+/// windows and their drafts; `round_icon` when the launcher icon has a
 /// round form, `@mipmap/ic_launcher_round`.
 pub fn manifest(app: &bern_ir::Application, round_icon: bool) -> String {
     let round = if round_icon {

@@ -161,6 +161,8 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 生成器测试 `a_style_variant_in_a_window_is_defined` 为 iOS 生成窗口正文里的 `variant: stage`，`BernStyles` 有 `buttonStage`，按模拟器 SDK 做类型检查通过（原因见 WinUI 3 实现记录的同日条目）。模拟器当时没有启动 iOS 设备，没有看画面。
 
+直接写在窗口正文里的 `Drop(opens: true)` 此前不进 Info.plist 的文档类型与导入类型，原因与修正见 macOS 实现记录的同日条目；生成器测试 `a_drop_in_a_window_lists_its_document_types` 也为 iOS 断言导入类型。
+
 ## 错峰、比例轨道、浮层按钮与四档尺寸
 
 2026-10-14，v0.30，iPhone 17 Pro 模拟器（iOS 26.5），与 macOS 共用同一套 SwiftUI 实现，启动时用 `SIMCTL_CHILD_BERN_MOTION=slow` 放慢动效。

@@ -344,6 +344,8 @@ target/bern/linux/Showcase/showcase
 
 2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文（原因见 WinUI 3 实现记录的同日条目），`STYLES` 里没有窗口正文里用到的变体；`style::resolve` 找得到规则，在表里却找不到位置，按钮按没有样式生成，构建不报错。生成器测试 `a_style_variant_in_a_window_is_defined` 断言表里有 `buttonStage`、按钮引用 `&STYLES[0]`；它的小工程没有引擎，不对生成的程序做类型检查（最初做了，装有 GTK 的机器上因此编译失败）。Ubuntu 虚拟机（Broadway）：GTK 的生成器测试全部通过；测试应用的窗口里，窗口正文中的 `Button.stage` 是强调色底、圆角 12，组件里的 `Button.card` 是浅色底、圆角 4，经 CLI 按下窗口里的按钮后计数加一。
 
+2026-10-20，直接写在窗口正文里的 `Drop(opens: true)` 与 `reflow`：桌面文件的 `MimeType` 与 `reflow` 的构建警告此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类，`Exec` 也没有 `%U`；写在那里的无 `cell_ratio` 网格上的 `reflow` 不警告。两处都改为连同窗口正文一起看。生成器测试 `a_drop_in_a_window_registers_its_kinds` 与 `reflow_in_a_window_is_checked` 改前失败、改后通过。Ubuntu 虚拟机上，测试生成的桌面文件（`Exec` 换成已有的程序）`desktop-file-validate` 无误；放进临时的 `XDG_DATA_HOME` 后，`gio mime video/mp4` 与 `video/x-matroska` 把它列为已登记与推荐的程序（这个环境没有设默认程序，它也显示为默认），`text/plain` 不列。没有运行应用、没有经它打开文件。
+
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。

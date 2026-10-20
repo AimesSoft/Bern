@@ -236,21 +236,20 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
 }
 
 /// The kinds of file the application opens: those of every `Drop` with
-/// `opens: true`, each once, in a stable order.
+/// `opens: true`, in components and in the content written directly in a
+/// window, each once, in a stable order.
 fn opened_kinds(app: &Application) -> Vec<String> {
     let mut kinds = std::collections::BTreeSet::new();
-    for component in &app.components {
-        component.body.walk(&mut |node| {
-            if let bern_ir::Node::Element(element) = node
-                && element.kind == "Drop"
-                && element.keyword("opens") == Some("true")
-            {
-                for word in element.keyword("files").unwrap_or("any").split(' ') {
-                    kinds.insert(word.to_string());
-                }
+    app.walk(&mut |node, _| {
+        if let bern_ir::Node::Element(element) = node
+            && element.kind == "Drop"
+            && element.keyword("opens") == Some("true")
+        {
+            for word in element.keyword("files").unwrap_or("any").split(' ') {
+                kinds.insert(word.to_string());
             }
-        });
-    }
+        }
+    });
     kinds.into_iter().collect()
 }
 

@@ -308,7 +308,8 @@ fn desktop_value(text: &str) -> String {
     value
 }
 
-/// MIME types of the file kinds `Drop(opens: true)` areas take. Extensions
+/// MIME types of the file kinds `Drop(opens: true)` areas take, in
+/// components and in the content written directly in a window. Extensions
 /// without a known type and `any` register nothing.
 fn opened_types(app: &Application) -> Vec<&'static str> {
     const KINDS: &[(&str, &[&str])] = &[
@@ -378,9 +379,7 @@ fn opened_types(app: &Application) -> Vec<&'static str> {
             }
         }
     };
-    for component in &app.components {
-        component.body.walk(&mut visit);
-    }
+    app.walk(&mut |node, _| visit(node));
     types
 }
 

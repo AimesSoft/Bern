@@ -1004,13 +1004,37 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
-/// A project whose only styled control is written directly in its window,
-/// compiled from sources written under `dir`.
-fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+/// A drop area that opens videos, around a picture from the network,
+/// written directly in the window.
+const DROP_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {
+    pub file: MediaSource,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Drop(id: clip, label: tr! { "en" => "Drop a Video" }, value: draft.file, files: "video", opens: true) {
+                    Image(source: draft.file, height: 120, label: tr! { "en" => "Clip" })
+                } => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// A project of the interface `ui` over a small protocol, compiled from
+/// sources written under `dir`.
+fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
     let _ = std::fs::remove_dir_all(dir);
     for (package, source) in [
         ("stage-protocol", STAGE_PROTOCOL),
-        ("stage-ui", STAGE_UI),
+        ("stage-ui", ui),
         ("stage-core", ""),
     ] {
         std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
@@ -1071,7 +1095,10 @@ platform = "android"
 #[test]
 fn a_style_variant_in_a_window_is_defined() {
     let root = workspace();
-    let (config, compiled) = stage_project(&root.join("target/bern-test/compose-stage-project"));
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/compose-stage-project"),
+        STAGE_UI,
+    );
     let problems = ComposeAndroid.check(&compiled.app, &android(&config));
     assert!(problems.is_empty(), "{problems:?}");
     let files = ComposeAndroid
@@ -1085,4 +1112,32 @@ fn a_style_variant_in_a_window_is_defined() {
         .find("style = BernStyles.buttonStage, modifier = Modifier.testTag(\"main.mini\")")
         .unwrap_or_else(|| panic!("the button does not use its style:\n{kotlin}"));
     assert!(defined < used, "{kotlin}");
+}
+
+/// A drop area that opens files and a picture from the network, written
+/// directly in a window rather than in a component, still reach the
+/// manifest: the activity takes the kinds other apps hand over, and the
+/// application may use the network.
+#[test]
+fn a_drop_and_a_network_picture_in_a_window_reach_the_manifest() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/compose-drop-project"), DROP_UI);
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let manifest = file(&files, "AndroidManifest.xml");
+    for expected in [
+        "<uses-permission android:name=\"android.permission.INTERNET\" />",
+        "android:launchMode=\"singleTask\"",
+        "<action android:name=\"android.intent.action.VIEW\" />",
+        "<data android:mimeType=\"video/*\" />",
+    ] {
+        assert!(
+            manifest.contains(expected),
+            "missing `{expected}`:\n{manifest}"
+        );
+    }
 }

@@ -507,6 +507,8 @@ open target/bern/macos/Showcase.app
 
 2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文，`Window` 正文里直接写的 `variant:` 不生成 `BernStyles` 的条目，Swift 编译失败（原因见 WinUI 3 实现记录的同日条目）。生成器测试 `a_style_variant_in_a_window_is_defined` 为 macOS 与 iOS 生成并做 Swift 6 类型检查，通过。测试应用的 macOS 窗口（只截该窗口）：窗口正文里的 `Button.stage` 是强调色底、圆角 12，组件里的 `Button.card` 是 `fill.subtle` 底、圆角 4。
 
+2026-10-20，直接写在窗口正文里的 `Drop(opens: true)`：Info.plist 的 `CFBundleDocumentTypes` 此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类；macOS 与 iOS 共用这份收集，改为连同窗口正文一起看。生成器测试 `a_drop_in_a_window_lists_its_document_types` 为 macOS 与 iOS 生成，改前失败、改后通过。未在系统的“打开方式”里查看。
+
 ## 样式、动效、自绘与模块化
 
 2026-10-12 补记，在 macOS 上用 `examples/planner`（外壳加“笔记”“标签”两个模块）与新建的应用验证。

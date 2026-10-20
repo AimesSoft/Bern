@@ -1509,13 +1509,36 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
-/// A project whose only styled control is written directly in its window,
-/// compiled from sources written under `dir`.
-fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+/// A drop area that opens videos, written directly in the window.
+const DROP_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {
+    pub file: MediaSource,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Drop(id: clip, label: tr! { "en" => "Drop a Video" }, value: draft.file, files: "video", opens: true) {
+                    Text(content: tr! { "en" => "Clip" })
+                } => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// A project of the interface `ui` over a small protocol, compiled from
+/// sources written under `dir`.
+fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
     let _ = std::fs::remove_dir_all(dir);
     for (package, source) in [
         ("stage-protocol", STAGE_PROTOCOL),
-        ("stage-ui", STAGE_UI),
+        ("stage-ui", ui),
         ("stage-core", ""),
     ] {
         std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
@@ -1580,7 +1603,10 @@ platform = "ios"
 #[test]
 fn a_style_variant_in_a_window_is_defined() {
     let root = workspace();
-    let (config, compiled) = stage_project(&root.join("target/bern-test/swiftui-stage-project"));
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/swiftui-stage-project"),
+        STAGE_UI,
+    );
     for (name, target) in [
         ("macos", &SwiftUiMacos as &dyn Target),
         ("ios", &SwiftUiIos),
@@ -1642,4 +1668,48 @@ fn a_style_variant_in_a_window_is_defined() {
         "swiftc rejected the generated code:\n{}",
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+/// A drop area that opens files, written directly in a window rather than
+/// in a component, still has the Info.plist list its kinds as document
+/// types, on macOS and iOS.
+#[test]
+fn a_drop_in_a_window_lists_its_document_types() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/swiftui-drop-project"), DROP_UI);
+    for (name, target, own) in [
+        (
+            "macos",
+            &SwiftUiMacos as &dyn Target,
+            "<key>CFBundleTypeExtensions</key>",
+        ),
+        (
+            "ios",
+            &SwiftUiIos,
+            "<string>dev.bern.stage.file.mkv</string>",
+        ),
+    ] {
+        let output = root.join(format!("target/bern-test/swiftui-drop-{name}"));
+        let context = context(&config, &compiled, name, &output);
+        let problems = target.check(&compiled.app, &context.target);
+        assert!(problems.is_empty(), "{name}: {problems:?}");
+        let files = target.generate(&compiled.app, &context).unwrap();
+        let plist = files
+            .iter()
+            .find(|file| file.path.ends_with("Info.plist"))
+            .unwrap_or_else(|| panic!("{name}: no Info.plist"));
+        let plist = String::from_utf8_lossy(&plist.contents);
+        for expected in [
+            "<key>CFBundleDocumentTypes</key>",
+            "<string>Video</string>",
+            "<string>public.movie</string>",
+            own,
+        ] {
+            assert!(
+                plist.contains(expected),
+                "{name}: missing `{expected}`:\n{plist}"
+            );
+        }
+    }
 }
