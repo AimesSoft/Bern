@@ -3784,10 +3784,13 @@ struct BernRow: Layout {
     /// The width each item is offered.
     private func widths(_ width: CGFloat?, _ height: CGFloat?, _ subviews: Subviews) -> [CGFloat] {
         let items = subviews.map { subview -> Item in
-            let least = subview.sizeThatFits(ProposedViewSize(width: 0, height: height)).width
+            // A spacer has no least width, as on the other targets; the
+            // system's own is a gap of its idiom (60 points on tvOS), which
+            // took the room of the texts beside it in a narrow row.
             if subview[BernRowSpacer.self] {
-                return Item(ideal: least, least: least, most: .infinity, grows: true, spacer: true)
+                return Item(ideal: 0, least: 0, most: .infinity, grows: true, spacer: true)
             }
+            let least = subview.sizeThatFits(ProposedViewSize(width: 0, height: height)).width
             let ideal = subview.sizeThatFits(ProposedViewSize(width: nil, height: height)).width
             let most = subview.sizeThatFits(ProposedViewSize(width: .infinity, height: height)).width
             return Item(ideal: ideal, least: min(least, ideal), most: max(most, ideal), grows: most > ideal + 0.5, spacer: false)

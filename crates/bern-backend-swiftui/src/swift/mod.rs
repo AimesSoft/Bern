@@ -378,11 +378,13 @@ impl<'a> Generator<'a> {
             "Svg" => self.svg(out, element),
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
+            // A spacer shrinks to nothing, as on the other targets, not to
+            // the system's gap (8 points on macOS, 60 on tvOS).
             "Spacer" if ctx.row => {
-                out.line("SwiftUI.Spacer()");
+                out.line("SwiftUI.Spacer(minLength: 0)");
                 out.line(".layoutValue(key: BernRowSpacer.self, value: true)");
             }
-            "Spacer" => out.line("SwiftUI.Spacer()"),
+            "Spacer" => out.line("SwiftUI.Spacer(minLength: 0)"),
             // Only a stack along the row sets a divider upright.
             "Divider" if ctx.row => {
                 out.open("SwiftUI.HStack(spacing: 0) {");
