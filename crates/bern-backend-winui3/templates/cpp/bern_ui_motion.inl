@@ -310,7 +310,9 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
 
     /// Whether a write waits for the end of the frame's stepping.
     bool queued = false;
-    /// What was written last, so an unchanged value is not set again.
+    /// What was written last, so an unchanged value is not set again. Code
+    /// that sets the element's (or its visual's) transform or opacity
+    /// itself, outside `Write`, resets it, or the next write may be skipped.
     std::optional<std::array<float, 8>> written;
 
     /// Write once the frame's springs have all stepped: a layer's five
