@@ -1800,7 +1800,7 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
         let lines: Vec<&str> = window.lines().map(str::trim).collect();
         let call = lines
             .iter()
-            .position(|line| *line == "CenteredView()")
+            .position(|line| *line == "AppView_centered()")
             .unwrap();
         assert_eq!(
             lines[call + 1],
@@ -1819,7 +1819,7 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
             !window.contains(".frame(maxWidth: .infinity, alignment: .trailing)"),
             "{name}:\n{window}"
         );
-        let component = &generated[generated.find("struct CenteredView").unwrap()..];
+        let component = &generated[generated.find("struct AppView_centered").unwrap()..];
         let component = &component[..component
             .find("struct BernWindow0")
             .unwrap_or(component.len())];

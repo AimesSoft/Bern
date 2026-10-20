@@ -207,10 +207,10 @@ fn special_characters_are_escaped_in_swift_and_the_bundle() {
     for expected in [
         // Texts come from the string tables and are shown verbatim.
         r#"SwiftUI.Text(verbatim: BernText.string("page.0.0.content"))"#,
-        r#"SwiftUI.Text(verbatim: BernText.format("page.0.1.content", ["price": BernText.arg(bernDraft.name)]))"#,
+        r#"SwiftUI.Text(verbatim: BernText.format("page.0.1.content", ["price": BernText.arg(session_Draft.name)]))"#,
         // Literals in actions and conditions: `\(` is no interpolation.
         r#"bernEngine.rename("raw \"q\" \\ \n $x ${x} \\(y) ` 50% </script> <&> é", from: bernWindow)"#,
-        r#"if (bernDraft.name) == ("${x}\"</script>\\") {"#,
+        r#"if (session_Draft.name) == ("${x}\"</script>\\") {"#,
         // Ids name the controls.
         r#".bernControl("page.name-field", role: "text_input","#,
         r#".bernControl("page.save-as", role: "button","#,

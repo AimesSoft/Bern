@@ -596,3 +596,13 @@ macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出
 会遮住框架或运行时类型的常见名字：SwiftUI 的 `Layout`、`View`、`Text`、`Image`、`Color`、`Button`、`Toggle`、`Picker`、`List`、`Font`、`Animation`、`Scene`、`Window`、`Shape`、`Path`、`Alignment`；Swift 与 Foundation 的 `Error`（运行时的 `BernDecodeError: Error`）、`Task`、`Data`、`Date`、`Locale`、`Timer`、`Notification`、`Bundle`。
 
 示例 `examples/framework-names` 用这些名字声明协议类型，另有 UI 类型 `Shape` 与变体名同为类型名的 `Content`。`tests/framework_names.rs` 为 macOS、iOS、tvOS 生成并按各自 SDK 做 swiftc 类型检查。实测（macOS 27.0.1，Xcode 27.0，Swift 6.4）：三个平台都通过；去掉前缀生成同一示例时，macOS 的 swiftc 报 `inheritance from non-protocol type 'View'`、`thrown expression type 'BernDecodeError' does not conform to 'Error'`，运行时模板中 `type 'Content' constrained to non-protocol, non-class type 'View'`。
+
+### 与框架类型同名的组件与会话（2026-10-21）
+
+组件原先生成 `struct` 大驼峰名加 `View`、会话类为声明的名字加 `Session`、视图里读会话的变量为 `bern` 加声明的名字，都在模块顶层或视图内与框架、运行时的名字相遇：组件 `empty`、`any`、`progress`、`scroll`、`tab`、`navigation`、`timeline`、`content_unavailable` 生成 SwiftUI 的同名视图，`bern_player`、`bern_query` 生成运行时的 `BernPlayerView`、`BernQueryView`；会话 `URL` 生成 Foundation 的 `URLSession`；会话 `Window`、`Engine` 的变量就是视图自己的 `bernWindow`、`bernEngine`。现在 `BernGenerated.swift` 写 `struct AppView_empty: View`、`final class App_URL: BernSessionState`、`@Environment(App_Window.self) private var session_Window`，名字由 `bern_target_api::names` 的 `component`、`session_type`、`session_variable` 给出（规则见设计文档“跨语言绑定”）。
+
+示例 `examples/framework-names` 加了上述组件和会话 `URL`、`Window`、`Engine`（协议里的值类型 `Window` 改为 UI 的会话，Bern 的类型名在应用内唯一）。实测（macOS 27.0.1，Xcode 27.0，Swift 6.4，macOS 27.0 SDK）：
+
+- 改前的生成器生成这个示例，swiftc 报 `invalid redeclaration of 'BernPlayerView'`、`'BernQueryView'`、`'bernWindow'`、`'bernEngine'`。
+- 改后的生成里每次只把一个组件换回旧名：`any` 让 `BernAppKit.swift` 报 3 处 `argument passed to call that takes no arguments`，`scroll` 让 `BernStyle.swift` 报 `extra trailing closure passed in call`，`content_unavailable` 让 `BernMedia.swift` 报 `argument passed to call that takes no arguments`，`bern_player`、`bern_query` 报重复声明；`empty`、`progress`、`tab`、`navigation`、`timeline` 单独换回时类型检查通过（它们同样遮住 SwiftUI 的同名类型，只是运行时现有的写法没有因此报错）。会话没有逐个换回测量，`URLSession` 单独的影响未测。
+- 改后 macOS、iOS、tvOS 的 swiftc 类型检查都通过；之后补进 `tests/framework_names.rs` 的写法断言只对照生成文件逐条核对过，没有再运行测试。

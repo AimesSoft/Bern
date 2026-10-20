@@ -210,10 +210,10 @@ fn special_characters_are_escaped_in_kotlin_and_the_resources() {
     for expected in [
         // Texts come from the string tables.
         r#"BernText(BernText.string("page.0.0.content"), bernTextStyle("#,
-        r#"BernText(BernText.format("page.0.1.content", mapOf("price" to BernText.arg(bernDraft.name))),"#,
+        r#"BernText(BernText.format("page.0.1.content", mapOf("price" to BernText.arg(session_Draft.name))),"#,
         // Literals in actions and conditions: `$` starts no template.
         r#"BernEngine.rename("raw \"q\" \\ \n \$x \${x} \\(y) ` 50% </script> <&> é", bernWindow)"#,
-        r#"if ((bernDraft.name) == ("\${x}\"</script>\\")) {"#,
+        r#"if ((session_Draft.name) == ("\${x}\"</script>\\")) {"#,
         // Ids name the controls.
         r#"BernControl("page.name-field", "text_input","#,
         r#"Modifier.testTag("page.save-as")"#,

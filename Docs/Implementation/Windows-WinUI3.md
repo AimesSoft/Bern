@@ -279,6 +279,10 @@ release 版里，切换列表的筛选（一列海报行收起、另一列展开
 
 生成的 C++ 不为应用的值类型声明 C++ 类型：`app_catalog.cpp` 按名字向运行时描述它们（`BType::Enum("Layout")`、`BType::Record("Text")`），值在运行时是 `bern::Value`，所以应用类型与 WinUI、WinRT 的类型（`Window`、`Button`、`Image`、`Color`、`Orientation`）不会相遇（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 生成示例 `examples/framework-names`，核对目录中的写法，在 Windows 上用 MSVC 编译两套前端。实测（2026-10-21，Windows PC，x64）：通过，126 秒（含首次的预编译头）。这次在一个新的镜像目录里编译，`build.bat` 自己生成 C++/WinRT 头文件时 cppwinrt 报 `create_directories` 的路径语法错误（输出路径为 `\\?\C:\…\winrt/impl`），原因未查明；复制已有镜像中生成好的头文件后编译。
 
+## 与框架类型同名的组件与会话（2026-10-21）
+
+生成的 `app_ui.inl` 把组件写成 `static void c_` 加声明的名字（`c_empty`、`c_bern_player`），`app_catalog.cpp` 以名字字符串描述会话（`SessionDef{"URL", {…}}`），运行时模板里以 `c_` 开头的只有成员函数 `c_str()`，不与自由函数相撞，所以 SwiftUI 与 Compose 这次改名的组件与会话在 WinUI 3 上不会相撞，生成器不变（规则见设计文档“跨语言绑定”）。示例里的 `Window` 从协议的值类型改成了 UI 的会话，`tests/framework_names.rs` 改为核对 `BType::Enum("Button")`，并加了组件函数与会话的断言；这次没有运行，也没有在 Windows PC 上用 MSVC 编译，未验证。
+
 ## 构建与运行
 
 ```powershell

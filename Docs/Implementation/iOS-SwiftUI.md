@@ -171,6 +171,10 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 值类型在生成的 Swift 中写成 `App_` 加声明的名字，原因与写法见 macOS 实现记录的同日条目（iOS 共用同一段生成）。`tests/framework_names.rs` 为 iOS 生成示例 `examples/framework-names`，按 iOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；UIKit 运行时 `BernUIKit.swift` 也在检查之内。没有在模拟器上运行。
 
+### 与框架类型同名的组件与会话（2026-10-21）
+
+组件写成 `AppView_` 加声明的名字、会话类写成 `App_` 加声明的名字、视图读会话的变量写成 `session_` 加声明的名字，原因与实测见 macOS 实现记录的同日条目（iOS 共用同一段生成）。加入这些组件与会话的示例 `examples/framework-names` 按 iOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
+
 ## 错峰、比例轨道、浮层按钮与四档尺寸
 
 2026-10-14，v0.30，iPhone 17 Pro 模拟器（iOS 26.5），与 macOS 共用同一套 SwiftUI 实现，启动时用 `SIMCTL_CHILD_BERN_MOTION=slow` 放慢动效。

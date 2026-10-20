@@ -207,6 +207,12 @@ bern package --target android
 
 `tests/framework_names.rs` 生成示例 `examples/framework-names` 并核对这些写法；设 `BERN_TEST_KOTLIN=1` 时用 Gradle 的 `:app:compileDebugKotlin` 编译生成的工程。实测（2026-10-21，macOS 27.0.1，Gradle 9.5.1）：编译通过（约 30 秒）；把生成文件换回原名后 kotlinc 报 73 个错误（期望 `androidx.compose.ui.graphics.Color`、实际 `dev.bern.names.Color` 一类的类型不符，`Content.String` 与 `String` 互不相容等）；只加前缀、不写全名时还有 16 个，都来自变体类的遮挡。没有在手机上运行。
 
+## 与框架类型同名的组件与会话（2026-10-21）
+
+组件原先生成大驼峰名加 `View` 的函数、会话类为声明的名字加 `Session`、组件函数里读会话的局部变量为 `bern` 加声明的名字。名为 `Window` 的会话因此与组件函数开头的 `val bernWindow = LocalBernWindow.current` 同名，在同一作用域重复声明；组件函数与生成的代码同在应用的包里，同包的声明优先于通配导入的 `dev.bern.runtime.*`，名为 `bern_query` 的组件生成的 `BernQueryView` 与运行时的同名函数争同一个调用名。现在与 Swift 一致：组件写成 `fun AppView_empty()`，会话类写成 `class App_URL : BernSessionState(1)`，局部变量写成 `val session_Window = bernWindow.session(App_Window::class.java)`（规则见设计文档“跨语言绑定”）。
+
+`tests/framework_names.rs` 核对这些写法（示例新增的组件与会话见 macOS 实现记录的同日条目）。这次没有设 `BERN_TEST_KOTLIN=1` 编译生成的工程，上面两处冲突也没有在 kotlinc 上实测，未验证；新的断言没有运行。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：

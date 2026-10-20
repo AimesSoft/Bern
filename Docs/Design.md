@@ -2040,6 +2040,8 @@ Rust 借用引用、泛型实例、任意闭包、trait object 和平台对象�
 
 应用的值类型（协议与 UI 中 `#[value]` 的枚举和记录）可以与平台框架的类型同名，例如 `Layout`、`View`、`Text`、`Color`、`Modifier`、`List`、`Error`。生成代码与框架、Bern 运行时同在一个模块里，目标必须保证应用类型既不遮住框架类型，也不被框架类型遮住；不能要求应用改名，`bern check` 也不因此报错。在生成代码中把值类型声明为本语言类型的目标（SwiftUI 的 Swift、Compose 的 Kotlin）一律写成 `App_` 加声明的名字（`App_Layout`），框架与 Bern 运行时（`Bern…`）都没有以 `App_` 开头的类型；Kotlin 把带字段的变体写成枚举类内部的类，变体名会遮住同名的 Kotlin 类型，这些类里的 Kotlin 标准类型写全名（`kotlin.String`、`kotlin.collections.List`）。按名字向运行时描述类型的目标不产生类型名：WinUI 3 的 C++ 与 GTK 的 Rust 以字符串描述，Web 的 JavaScript 把编解码、变体名和标签存为 `T`、`N`、`L` 对象的属性。字符串表的键、外部入口与错误信息仍用声明的名字。示例 `examples/framework-names` 的类型与六个平台的常见框架类型同名，每个后端的生成器测试生成它，并在装有相应工具链时编译或解析（Kotlin 需设 `BERN_TEST_KOTLIN=1`）。
 
+组件与会话的名字同样由应用决定，生成名也不能与框架和运行时的名字相撞。由声明的名字加后缀得出的名字会撞：组件名转成大驼峰加 `View`，`empty`、`any`、`scroll`、`content_unavailable` 成了 SwiftUI 的 `EmptyView`、`AnyView`、`ScrollView`、`ContentUnavailableView`，`bern_player` 成了运行时的 `BernPlayerView`；会话名加 `Session`，`URL` 成了 Foundation 的 `URLSession`；视图里读会话的变量是 `bern` 加会话名，`Window`、`Engine` 成了视图自己的 `bernWindow`、`bernEngine`。Swift 与 Kotlin 的生成代码因此把会话类写成 `App_` 加声明的名字（`App_URL`；Bern 的类型名在一个应用内唯一，会话与值类型共用这个前缀），组件写成 `AppView_` 加声明的名字（`AppView_empty`、`AppView_content_unavailable`），视图读会话的变量写成 `session_` 加声明的名字（`session_Window`），三者统一由 `bern_target_api::names` 给出。框架与 Bern 运行时没有以这些前缀开头的名字，参数与绑定的生成名不含下划线，前缀之后原样保留声明的名字，所以不同的组件、会话仍然得到不同的名字。WinUI 3 的 C++、GTK 的 Rust 与 Web 的 JavaScript 已经把组件写成 `c_` 加声明的名字的函数，以名字字符串和序号描述会话，运行时没有以 `c_` 开头的函数，无需改动。示例 `examples/framework-names` 含这些名字的组件与会话，各后端的 `tests/framework_names.rs` 核对生成的写法。
+
 两组协议分别定义自己的身份、版本与生命周期：
 
 | 协议 | 需要定义的内容 |

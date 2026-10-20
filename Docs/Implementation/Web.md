@@ -217,6 +217,10 @@ flowchart LR
 
 生成的 `app.js` 把值类型的编解码、变体名与标签存为 `T`、`N`、`L` 对象的属性（`T.Layout`、`N.Layout`、`L.Layout`），不产生模块级的绑定，所以应用类型与浏览器的全局（`Text`、`Image`、`Event`、`Map`、`Error`）不会相遇（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 生成示例 `examples/framework-names`，核对没有以类型名声明的 `const`、`let`、`function` 或 `class`，并用 Node.js 解析模块。实测（2026-10-21，Node.js 25.2.1）：通过；没有在浏览器里打开。
 
+## 与框架类型同名的组件与会话（2026-10-21）
+
+生成的 `app.js` 把组件写成 `function c_` 加声明的名字（`function c_empty(p, ctx, a)`），以名字字符串描述会话（`{ name: "URL", fields: [...] }`），运行时以 `B` 引用，模块里没有别的以 `c_` 开头的绑定，所以 SwiftUI 与 Compose 这次改名的组件与会话在 Web 上不会相撞，生成器不变（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 加了这些写法的断言；这次没有运行，未验证。
+
 ## 验证记录
 
 2026-10-10，v0.1 视觉规范（窗口呈现已由 v0.2 取代），内置浏览器，`python3 -m http.server` 提供 `target/bern/web_app`：

@@ -417,8 +417,8 @@ fn a_television_keeps_its_layout_and_the_remote_stands_for_keys() {
         // suggests, and tvOS's drawn switch, segments and labelled menu.
         "let bernSceneBodySize: CGFloat = 16.0",
         ".font(.system(size: 16.0, weight: .regular))",
-        "bernDraft.query += \"A\"",
-        "_ = bernDraft.query.popLast()",
+        "session_Draft.query += \"A\"",
+        "_ = session_Draft.query.popLast()",
         "suggest: true",
         ".toggleStyle(BernFocusSwitchStyle())",
         "BernSegments(selection:",

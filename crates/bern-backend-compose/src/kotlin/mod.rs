@@ -366,11 +366,7 @@ impl<'a> Generator<'a> {
                         _ => None,
                     })
                     .collect();
-                let call = format!(
-                    "{}({})",
-                    names::component(&component.name),
-                    args.join(", ")
-                );
+                let call = format!("{}({})", names::component(&component.name), args.join(", "));
                 // In a column or row the component's layout can take the
                 // free room there, as it would written in place.
                 let call = match ctx.scope {

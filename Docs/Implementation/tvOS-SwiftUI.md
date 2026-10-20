@@ -146,6 +146,8 @@ bern run --target tvos
 
 2026-10-21，与框架类型同名的值类型：生成的 Swift 把值类型写成 `App_` 加声明的名字（原因与写法见 macOS 实现记录的同日条目，tvOS 共用同一段生成）。`tests/framework_names.rs` 为 tvOS 生成示例 `examples/framework-names`，按 tvOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
 
+2026-10-21，与框架类型同名的组件与会话：组件写成 `AppView_` 加声明的名字、会话类写成 `App_` 加声明的名字、视图读会话的变量写成 `session_` 加声明的名字（原因与实测见 macOS 实现记录的同日条目，tvOS 共用同一段生成）。加入这些组件与会话的示例按 tvOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
+
 ## 未完成与已知限制
 
 - 只构建模拟器应用；真机需要签名与描述文件，安装与 `bern package` 未实现。

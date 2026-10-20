@@ -1,7 +1,10 @@
 # An application whose value types are named like types of the platforms'
 # frameworks: SwiftUI's `Layout`, `View`, `Text` and `Color`, Compose's
-# `Modifier`, Kotlin's `List`, Swift's `Error`. Every target generates and
-# compiles it as it is; the backend tests build it.
+# `Modifier`, Kotlin's `List`, Swift's `Error`. Its components (`empty`,
+# `any`, `scroll`, `bern_player`…) and sessions (`URL`, `Window`, `Engine`)
+# gave framework and runtime names once `View` or `Session` was appended or
+# `bern` prepended. Every target generates and compiles it as it is; the
+# backend tests build it.
 
 [app]
 id = "names"

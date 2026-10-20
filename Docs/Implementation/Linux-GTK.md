@@ -222,6 +222,10 @@ GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `featu
 
 生成的 GTK 应用以 `bern_gtk` 的值承载应用的值类型，只在字符串里写类型名（`b::label("Layout", 0)`、`b::display(&c.engine(1), Some("Color"))`），不声明对应的 Rust 类型，所以应用类型与 GTK、libadwaita 的类型（`Window`、`Button`、`Image`、`Orientation`、`Align`、`Widget`）不会相遇（规则见设计文档“跨语言绑定”）。协议模块里名为 `Error`、`Text`、`Window` 的类型只遮住该模块对 prelude 的通配导入，宏生成的代码与生成的胶水都按全路径引用协议（`names_protocol::names::Adapter`），照常编译。`tests/framework_names.rs` 生成示例 `examples/framework-names`，核对这些写法；装有 GTK 4.14 与 libadwaita 1.5 时用 rustc 类型检查生成的应用。实测（2026-10-21，Ubuntu 24.04 虚拟机，aarch64，rustc 1.99.0）：在 Mac 上生成，复制到虚拟机后 `cargo check` 通过（32.8 秒，复用共享的 `bern-glue-linux` 缓存，检查后删去本次新增的文件）。
 
+## 与框架类型同名的组件与会话（2026-10-21）
+
+生成的 `ui.rs` 把组件写成 `fn c_` 加声明的名字（`fn c_empty`、`fn c_bern_player`），以名字字符串和序号描述会话（`b::SessionDef { name: "URL", … }`），生成代码只导入 `b`、`V`、`rt` 与 `Rc`，`bern_gtk` 也没有以 `c_` 开头的函数，所以 SwiftUI 与 Compose 这次改名的组件与会话（`empty`、`scroll`、`bern_player`，`URL`、`Window`）在 GTK 上不会相撞，生成器不变（规则见设计文档“跨语言绑定”）。示例里的 `Window` 从协议的值类型改成了 UI 的会话。`tests/framework_names.rs` 加了组件函数与会话的写法断言；这次没有运行，也没有在虚拟机上类型检查，未验证。
+
 ## 构建与运行
 
 ```sh

@@ -123,7 +123,7 @@ fn planner_generates_styles_drawing_and_dynamic_items() {
     assert!(kotlin.contains("BernMarkedText("));
     // The archive item comes and goes; the selection falls back.
     assert!(kotlin.contains("LaunchedEffect(bernVisible)"));
-    assert!(kotlin.contains("if (bernPlannerDraft.page !in bernVisible)"));
+    assert!(kotlin.contains("if (session_PlannerDraft.page !in bernVisible)"));
     // Tags pop in when added.
     assert!(kotlin.contains("BernAppear(BernTransition.Pop("));
     // The title grows from one style to the other; the window goes
@@ -215,13 +215,12 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
         kotlin.contains("BernRail(false, BernRailAnchor.Center, Modifier.matchParentSize()) {")
     );
     assert!(kotlin.contains("BernPlace((swatch.at).toDouble(), null, null, null) {"));
+    assert!(kotlin.contains(
+        "BernPlace(null, (0L).toDouble(), (session_GalleryDraft.level).toDouble(), null) {"
+    ));
     assert!(
-        kotlin.contains(
-            "BernPlace(null, (0L).toDouble(), (bernGalleryDraft.level).toDouble(), null) {"
-        )
-    );
-    assert!(
-        kotlin.contains("BernPlace((bernGalleryDraft.level).toDouble(), null, null, BernMotion(")
+        kotlin
+            .contains("BernPlace((session_GalleryDraft.level).toDouble(), null, null, BernMotion(")
     );
     // The frame's volume in a popover.
     assert!(kotlin.contains("BernPopoverButton(\"frame.volume\""));
@@ -241,7 +240,7 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
         "{kotlin}"
     );
     // Keys that type, a search that suggests, a television's caption.
-    assert!(kotlin.contains("bernGalleryDraft.query = bernGalleryDraft.query + \"check\""));
+    assert!(kotlin.contains("session_GalleryDraft.query = session_GalleryDraft.query + \"check\""));
     assert!(kotlin.contains("offsetByCodePoints"));
     assert!(
         kotlin
@@ -1213,7 +1212,7 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
             "the stack fills the window",
         ),
         (
-            "Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) { CenteredView() }",
+            "Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) { AppView_centered() }",
             "the component's column spans the window",
         ),
         (
@@ -1225,7 +1224,7 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     }
     // The inner column and the component's own body keep their width.
     assert!(!window.contains("Alignment.TopEnd"), "{window}");
-    let component = &kotlin[kotlin.find("fun CenteredView(").unwrap()..];
+    let component = &kotlin[kotlin.find("fun AppView_centered(").unwrap()..];
     let component = &component[..component.find("\n}\n").unwrap()];
     assert!(!component.contains("fillMaxWidth"), "{component}");
 }

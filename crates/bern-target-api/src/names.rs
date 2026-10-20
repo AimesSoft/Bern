@@ -97,6 +97,9 @@ mod tests {
         assert_eq!(value_type("Layout"), "App_Layout");
         assert_eq!(session_type("URL"), "App_URL");
         assert_eq!(session_variable("Window"), "session_Window");
-        assert_eq!(component("content_unavailable"), "AppView_content_unavailable");
+        assert_eq!(
+            component("content_unavailable"),
+            "AppView_content_unavailable"
+        );
     }
 }
