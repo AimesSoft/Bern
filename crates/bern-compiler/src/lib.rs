@@ -1575,6 +1575,12 @@ fn use_style(checker: &mut Checker<'_>, style: &ir::style::StyleSheet) {
         .iter()
         .map(|pattern| pattern.name.clone())
         .collect();
+    checker.corners = style
+        .corners
+        .iter()
+        .filter(|corner| corner.targets.is_empty())
+        .map(|corner| (corner.name.clone(), corner.radius))
+        .collect();
 }
 
 /// Check and lower the application's components, after the libraries'.

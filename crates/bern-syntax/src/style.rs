@@ -37,6 +37,9 @@ pub struct StyleItem {
     pub accents: Vec<MotionDecl>,
     /// `text { large_title: heavy }`: the weight of a text style.
     pub text: Vec<MotionDecl>,
+    /// `corner { card: 22 }`: named corner radii; a block with
+    /// `#[target(…)]` gives other values on those platforms.
+    pub corners: Vec<CornerBlock>,
     pub rules: Vec<StyleRuleItem>,
     pub span: Span,
 }
@@ -46,6 +49,15 @@ pub struct StyleItem {
 pub struct MotionDecl {
     pub name: Ident,
     pub value: StyleValue,
+}
+
+/// A `corner { name: radius }` block, for every platform or, with
+/// `#[target(…)]`, for those named.
+#[derive(Clone, Debug)]
+pub struct CornerBlock {
+    pub targets: Vec<Ident>,
+    pub corners: Vec<MotionDecl>,
+    pub span: Span,
 }
 
 /// `Component` or `Component.variant`, with its properties.
@@ -126,10 +138,44 @@ impl Parse for StyleItem {
         let mut patterns = Vec::new();
         let mut accents = Vec::new();
         let mut text = Vec::new();
+        let mut corners = Vec::new();
         let mut rules = Vec::new();
         while !input.is_empty() {
             let attrs = input.call(syn::Attribute::parse_outer)?;
             let component: Ident = input.parse()?;
+            if component == "corner" && input.peek(syn::token::Brace) {
+                let mut targets = Vec::new();
+                for attr in &attrs {
+                    if !attr.path().is_ident("target") {
+                        return Err(syn::Error::new(
+                            attr.span(),
+                            "a `corner` block takes only `#[target(…)]`",
+                        ));
+                    }
+                    let list = attr.parse_args_with(
+                        syn::punctuated::Punctuated::<Ident, Token![,]>::parse_terminated,
+                    )?;
+                    targets.extend(list);
+                }
+                let content;
+                braced!(content in input);
+                let mut list = Vec::new();
+                while !content.is_empty() {
+                    let name: Ident = content.parse()?;
+                    content.parse::<Token![:]>()?;
+                    let value: StyleValue = content.parse()?;
+                    list.push(MotionDecl { name, value });
+                    if !content.is_empty() {
+                        content.parse::<Token![,]>()?;
+                    }
+                }
+                corners.push(CornerBlock {
+                    targets,
+                    corners: list,
+                    span: component.span(),
+                });
+                continue;
+            }
             if (component == "motion"
                 || component == "transition"
                 || component == "pattern"
@@ -218,6 +264,7 @@ impl Parse for StyleItem {
             patterns,
             accents,
             text,
+            corners,
             rules,
             span,
         })

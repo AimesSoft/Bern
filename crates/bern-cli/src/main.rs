@@ -768,8 +768,11 @@ fn build(options: &Options) -> ExitCode {
     };
     for (target_config, target) in targets {
         let descriptor = target.descriptor();
-        let mut problems = target.check(&compiled.app, target_config);
-        let features = bern_target_api::feature_report(&compiled.app, &target_config.platform);
+        // The application as this platform shows it: named corners at
+        // their radii here.
+        let app = compiled.app.on_platform(&target_config.platform);
+        let mut problems = target.check(&app, target_config);
+        let features = bern_target_api::feature_report(&app, &target_config.platform);
         problems.extend(features.diagnostics.iter().cloned());
         report(&problems);
         if !features.rows.is_empty() {
@@ -829,7 +832,7 @@ fn build(options: &Options) -> ExitCode {
             framework,
             options.release || options.command == "package",
         );
-        let files = match target.generate(&compiled.app, &context) {
+        let files = match target.generate(&app, &context) {
             Ok(files) => files,
             Err(errors) => {
                 report(&errors);
@@ -870,7 +873,7 @@ fn build(options: &Options) -> ExitCode {
             files.len(),
             context.output_dir.display()
         );
-        let plan = match target.plan(&compiled.app, &context) {
+        let plan = match target.plan(&app, &context) {
             Ok(plan) => plan,
             Err(errors) => {
                 report(&errors);
@@ -892,7 +895,7 @@ fn build(options: &Options) -> ExitCode {
         }
         print_notes(&plan.notes);
         if options.command == "package" {
-            let packages = match target.package(&compiled.app, &context, &signing) {
+            let packages = match target.package(&app, &context, &signing) {
                 Ok(packages) => packages,
                 Err(errors) => {
                     report(&errors);

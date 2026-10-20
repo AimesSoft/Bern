@@ -751,6 +751,22 @@ style! {
 - **颜色**：只写语义角色，例如 `accent`、`fill.subtle`、`text.primary`。前景自动与背景配对，`fill(accent)` 上的文字与图标使用 `on_accent`，由主题内核按模式与对比策略求解并检查，运行时改变品牌色时随之更新。确需固定颜色时写 `color(light: "#…", dark: "#…")`，两种模式都要给出并通过对比检查，否则构建失败。
 - **确定性**：样式在构建时确定。运行时只有交互状态与主题快照会改变结果，不能用状态绑定切换样式。
 - **目标例外**：`#[target(...)]` 块在指定目标上覆盖同名声明，用于平台差异或在某个目标上退回系统默认。
+- **具名圆角**：各平台的设计语言圆角不同（例如卡片在苹果上 22、Fluent 上 8），应用在 `corner` 块里给圆角起名，`#[target(...)]` 的 `corner` 块给这些平台另定取值，样式规则与元素都写名字：
+
+  ```rust
+  style! {
+      corner { card: 22, poster: 10 }
+      #[target(windows)]
+      corner { card: 8, poster: 6 }
+
+      Button.stage { corner: card }
+  }
+
+  Image(source: show.poster, width: 220, height: 330, corner: poster)
+  Image(source: app.still, corner: if shown { card } else { 0 }, animate: hero)
+  ```
+
+  名字先要在不带 `#[target]` 的块里给出所有平台的取值，目标块只能覆盖已有的名字；同一个名字在所有平台的块里只能出现一次，平台块无论写在前后都覆盖它。凡是 `corner` 属性（`Image`、`Video`、`Shape`、`Accordion` 与样式规则）都可以写名字，绑定的 `corner` 表达式里也可以；在 `corner` 里，`style!` 声明过的名字先于同名的变量。名字在构建时换成该目标平台的数值，各目标拿到的仍是数字：`bern build` 对每个目标先求值再检查与生成，样式规则展开为全平台的取值加上取值不同的平台各一条只含圆角的目标规则。实现进度：编译器与 `bern` 命令行实现，六个目标的生成器都只看到数字，不需要各自实现；Windows 实体机上验证，见 WinUI 3 实现记录。
 
 样式覆盖同样适用于系统托管的控件：原生目标通过平台提供的样式接口实现，例如 SwiftUI 的修饰符与样式协议、WinUI 3 的轻量样式资源与模板、GTK 的样式表；Web 直接改变 Bern 配方。各平台实现同一项覆盖的代价差别很大，例如系统绘制的侧栏选中高亮，在一些平台上需要换掉系统的选中呈现并自行维护选中与键盘导航。
 

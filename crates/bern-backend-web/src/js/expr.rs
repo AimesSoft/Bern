@@ -3,7 +3,7 @@
 use super::codecs::{is_scalar, literal};
 use super::{Generator, Out, local, number, string};
 use bern_ir::{Action, Binding, Element, Expr, ExprKind, MediaOp, Prop, Text, WindowOp};
-use bern_protocol::{EnumDef, Type};
+use bern_protocol::{EnumDef, Type, Value};
 
 impl Generator<'_> {
     fn path(&self, mut ty: Type, path: &[usize]) -> String {
@@ -53,6 +53,11 @@ impl Generator<'_> {
     pub(super) fn expr(&self, expr: &Expr) -> String {
         match &expr.kind {
             ExprKind::Literal { value } => literal(value, &expr.ty, self.types()),
+            // A named corner a build for a platform has not resolved:
+            // its radius on every platform.
+            ExprKind::Corner { radius, .. } => {
+                literal(&Value::Float(*radius), &expr.ty, self.types())
+            }
             ExprKind::Binding { binding } => self.binding(binding),
             ExprKind::Variant { variant, fields } => {
                 let Type::Enum { name } = &expr.ty else {

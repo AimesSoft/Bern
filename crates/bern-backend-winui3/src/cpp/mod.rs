@@ -238,6 +238,9 @@ impl<'a> Generator<'a> {
     fn expr(&self, expr: &Expr) -> String {
         match &expr.kind {
             ExprKind::Literal { value } => literal(value),
+            // A named corner a build for a platform has not resolved:
+            // its radius on every platform.
+            ExprKind::Corner { radius, .. } => literal(&Value::Float(*radius)),
             ExprKind::Binding { binding } => self.binding(binding),
             ExprKind::Variant { variant, fields } => {
                 let values = std::iter::once(format!("{variant}u"))

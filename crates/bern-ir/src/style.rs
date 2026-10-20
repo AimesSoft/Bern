@@ -67,6 +67,20 @@ pub struct StyleSheet {
     /// `large_title`; the sizes stay the platform's.
     #[serde(default)]
     pub text_weights: Vec<TextWeight>,
+    /// Named corner radii (`corner { card: 22 }`) in declaration order:
+    /// the values for every platform, then those of `#[target(…)]` blocks.
+    #[serde(default)]
+    pub corners: Vec<CornerDef>,
+}
+
+/// A named corner radius, for every platform when `targets` is empty and
+/// for the platforms it names otherwise.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CornerDef {
+    pub name: String,
+    pub radius: f64,
+    #[serde(default)]
+    pub targets: Vec<String>,
 }
 
 /// The weight, and the size when the application's design gives one, of
@@ -192,6 +206,19 @@ impl StyleSheet {
         self.transitions
             .iter()
             .find(|transition| transition.name == name)
+    }
+
+    /// The radius the corner `name` has on `platform`: the last
+    /// declaration that applies there.
+    pub fn corner(&self, name: &str, platform: &str) -> Option<f64> {
+        self.corners
+            .iter()
+            .rev()
+            .find(|corner| {
+                corner.name == name
+                    && (corner.targets.is_empty() || corner.targets.iter().any(|t| t == platform))
+            })
+            .map(|corner| corner.radius)
     }
 
     /// The rules for `platform`, in declaration order: later rules override

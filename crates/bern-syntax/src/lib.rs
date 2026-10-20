@@ -22,7 +22,7 @@ pub use items::{
     parse_session, parse_source_file, parse_value, parse_value_args, type_ref,
 };
 pub use style::{
-    MotionDecl, StyleArg, StyleItem, StyleProp, StyleRuleItem, StyleValue, parse_style,
+    CornerBlock, MotionDecl, StyleArg, StyleItem, StyleProp, StyleRuleItem, StyleValue, parse_style,
 };
 
 /// Parse the body of a `ui!` invocation.

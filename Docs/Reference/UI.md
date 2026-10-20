@@ -125,7 +125,7 @@ Flow(gap: 10) {
 | 声明 | 用途与边界 |
 | --- | --- |
 | `Image(aspect: 0.6666666667, fit: cover)` | 随容器宽度保持 2:3，避免加载前后画框跳动；比例必须为正 |
-| `Image(corner:)` | 裁切图片圆角，可绑定长度 |
+| `Image(corner:)` | 裁切图片圆角，可绑定长度；也可以写 `style!` 的具名圆角，例如 `corner: poster` |
 | `Image(rendering: template)` | 按当前前景色渲染模板图片；原始彩色图片使用 original |
 | `Grid(row_gap:)` | 独立设置行距；省略时沿用 gap |
 | `Text(font_size:, lines:)` | 字号可绑定长度，lines 指定行数上限；动态字号要求 scaled_scene |
@@ -154,6 +154,7 @@ macOS 的 Image 使用窗口上层像素覆盖层，Web 使用视口坐标的图
 ## 动效与空闲状态
 
 - `appear` / `disappear` 控制结构变化；`animate` 控制支持的长度变化，`reflow` 让相邻元素让位。动效名称来自 `style!`。
+- `style!` 的 `corner { card: 22 }` 给圆角起名，`#[target(windows)] corner { card: 8 }` 给该平台另定取值；样式规则、`Image` / `Video` / `Shape` / `Accordion` 的 `corner` 与其中的 `if` 表达式都可写名字，构建时换成目标平台的数值。
 - `grow(edge: bottom, bouncy)` 固定某条边展开；`appear_delay` 必须配合 appear，延迟非负，可与 stagger 相加。普通状态更新不会重播入场，卸载取消等待。
 - `nudge` 响应布尔触发；`nudge_key` 让不同事件值触发提示，`nudge_scale` 指定幅度。容器的 `reduce_motion` 与系统减少动态效果偏好合并。
 - `Window(idle_after:, idle_enabled:, immersive:)` 控制空闲与沉浸。idle_after 单位为秒，`window.idle` 为只读会话状态。idle_enabled 默认 true；关闭后清除闲置并停用检测，开启后重新计时。SwiftUI 和 Web 已接入此开关（能力 `idle_control`）；其他目标当前未消费该属性，`bern check` 会对它们给出警告，空闲检测在那里始终开启。

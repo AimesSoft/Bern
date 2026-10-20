@@ -2823,6 +2823,137 @@ fn canvas_and_text_marks_are_checked() {
     }
 }
 
+/// Corners `style!` names, with Windows' own values.
+const CORNERS: &str = "corner { card: 22, poster: 10 }
+    #[target(windows)] corner { card: 8, poster: 6 }
+    Button.stage { corner: card }";
+
+/// Compile `body` with [`CORNERS`] in a project that has a picture.
+fn with_corners(body: &str) -> Result<Compiled, Vec<Diagnostic>> {
+    let dir = write_project(
+        PROTOCOL,
+        &format!("{}\nstyle! {{ {CORNERS} }}\n", wrap(body)),
+        "\n[resources]\npaths = [\"pics/a.png\"]\n",
+    );
+    std::fs::create_dir_all(dir.join("pics")).unwrap();
+    std::fs::write(dir.join("pics/a.png"), b"\x89PNG").unwrap();
+    let config = config::load(&dir.join("Bern.toml"));
+    let result = config.and_then(|config| compile(&config));
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+#[test]
+fn named_corners_take_each_platform_radius() {
+    let compiled = with_corners(
+        r#"Column {
+            Button(id: stage, label: app.title, variant: stage) {
+                Image(source: "pics/a.png", width: 528, height: 297, corner: card)
+            } => app.add(1)
+            Image(source: "pics/a.png", width: 100, height: 150, corner: if draft.on { poster } else { 0 })
+            Canvas(height: 40, label: tr! { "en" => "Frame", "ja" => "枠" }) {
+                Shape(kind: rounded, corner: card, fill: fill.subtle)
+            }
+        }"#,
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let style = &compiled.app.style;
+    assert_eq!(style.corner("card", "macos"), Some(22.0));
+    assert_eq!(style.corner("card", "windows"), Some(8.0));
+    assert_eq!(style.corner("poster", "linux"), Some(10.0));
+    // The rule takes the radius everywhere, then Windows' own after it.
+    use ir::style::StyleEffect;
+    let stage: Vec<_> = style
+        .rules
+        .iter()
+        .filter(|rule| rule.variant.as_deref() == Some("stage"))
+        .collect();
+    assert_eq!(stage.len(), 2);
+    assert_eq!(stage[0].base, [StyleEffect::Corner { radius: 22.0 }]);
+    assert_eq!(stage[1].targets, ["windows"]);
+    assert_eq!(stage[1].base, [StyleEffect::Corner { radius: 8.0 }]);
+    let corners = |platform: &str| {
+        let app = compiled.app.on_platform(platform);
+        let mut found = Vec::new();
+        app.walk(&mut |node, _| {
+            if let ir::Node::Element(element) = node
+                && let Some(corner) = element.prop("corner")
+            {
+                found.push(match corner {
+                    ir::Prop::Number { value } => format!("{} {value}", element.kind),
+                    ir::Prop::Expr { expr } => match &expr.kind {
+                        ir::ExprKind::If { then, .. } => {
+                            format!("{} if {:?}", element.kind, then.kind)
+                        }
+                        other => format!("{} {other:?}", element.kind),
+                    },
+                    other => format!("{} {other:?}", element.kind),
+                });
+            }
+        });
+        found
+    };
+    assert_eq!(
+        corners("macos"),
+        [
+            "Image 22",
+            "Image if Literal { value: Float(10.0) }",
+            "Shape 22"
+        ]
+    );
+    assert_eq!(
+        corners("windows"),
+        [
+            "Image 8",
+            "Image if Literal { value: Float(6.0) }",
+            "Shape 8"
+        ]
+    );
+
+    for (body, expected) in [
+        (
+            r#"Image(source: "pics/a.png", width: 10, height: 10, corner: tile)"#,
+            "corner `tile` is not declared; `style!` names card, poster",
+        ),
+        (
+            r#"Image(source: "pics/a.png", width: 10, height: 10, corner: if draft.on { tile } else { 0 })"#,
+            "corner `tile` is not declared",
+        ),
+    ] {
+        let message = match with_corners(body) {
+            Ok(_) => panic!("expected `{body}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+    for (body, expected) in [
+        (
+            "#[target(windows)] corner { card: 8 }",
+            "needs a radius for every platform first",
+        ),
+        (
+            "corner { card: 22 } corner { card: 20 }",
+            "already has a radius for every platform",
+        ),
+        ("corner { card: 22, card: 20 }", "is named twice"),
+        (
+            "corner { card: 22 } #[target(amiga)] corner { card: 8 }",
+            "is not a platform",
+        ),
+        ("corner { card: -2 }", "0 or more"),
+        (
+            "Button.stage { corner: card }",
+            "corner `card` is not declared",
+        ),
+    ] {
+        assert_style_error(body, expected);
+    }
+}
+
 #[test]
 fn buttons_show_content_and_reveal_on_hover() {
     let compiled = compile_ui(&wrap(
@@ -3530,7 +3661,8 @@ fn style_rules_take_base_properties_states_and_platforms() {
             "Stack { hover: scale(1.1) }",
             "`Stack` has no `hover` state",
         ),
-        ("Button { corner: round }", "`corner` is a number"),
+        ("Button { corner: round }", "corner `round` is not declared"),
+        ("Button { corner: \"8\" }", "`corner` is a number"),
         ("Button { padding: wide }", "`padding` is a number"),
         (
             "Button { size: huge }",

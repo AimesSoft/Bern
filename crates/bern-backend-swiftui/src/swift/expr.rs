@@ -4,7 +4,7 @@ use super::values::{argument, session_var, value_literal};
 use super::{Ctx, Generator};
 use crate::names::{case, double, member, string};
 use bern_ir::{Action, Binding, Element, Expr, ExprKind, MediaOp, Prop, SessionOp, Text, WindowOp};
-use bern_protocol::Type;
+use bern_protocol::{Type, Value};
 
 impl Generator<'_> {
     /// A length as a Swift `Double`: the literal, or the expression it is
@@ -64,6 +64,11 @@ impl Generator<'_> {
     pub(super) fn expr(&self, expr: &Expr) -> String {
         match &expr.kind {
             ExprKind::Literal { value } => value_literal(value, &expr.ty, self.types()),
+            // A named corner a build for a platform has not resolved:
+            // its radius on every platform.
+            ExprKind::Corner { radius, .. } => {
+                value_literal(&Value::Float(*radius), &expr.ty, self.types())
+            }
             ExprKind::Binding { binding } => self.binding(binding),
             ExprKind::Variant { variant, fields } => {
                 let Type::Enum { name } = &expr.ty else {

@@ -4,9 +4,9 @@
 
 use crate::check::location;
 use bern_ir::style::{
-    AccentDef, BUILT_IN_MOTION, Band, COLOR_ROLES, ColorRef, ControlSize, Edge, MotionToken,
-    PatternDef, StateStyle, StyleEffect, StyleRule, StyleSheet, StyleState, TransitionDef,
-    TransitionKind, built_in_transitions,
+    AccentDef, BUILT_IN_MOTION, Band, COLOR_ROLES, ColorRef, ControlSize, CornerDef, Edge,
+    MotionToken, PatternDef, StateStyle, StyleEffect, StyleRule, StyleSheet, StyleState,
+    TransitionDef, TransitionKind, built_in_transitions,
 };
 use bern_ir::{SourceLocation, Srgb};
 use bern_syntax::{StyleArg, StyleItem, StyleValue};
@@ -471,6 +471,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
         patterns: Vec::new(),
         accents: Vec::new(),
         text_weights: Vec::new(),
+        corners: Vec::new(),
     };
     if items.len() > 1 {
         for (file, item) in &items[1..] {
@@ -482,6 +483,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
         return sheet;
     };
     let mut lowering = Lowering { file, diagnostics };
+    lower_corners(&mut lowering, item, &mut sheet);
     for decl in &item.motion {
         let StyleValue::Call { name, args } = &decl.value else {
             lowering.error(
@@ -851,6 +853,8 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             settle: None,
             source: lowering.location(rule.span),
         };
+        // Named corners the rule takes, by the platforms where they differ.
+        let mut corner_names: Vec<String> = Vec::new();
         for prop in &rule.props {
             let name = prop.name.to_string();
             if name == "settle" {
@@ -892,6 +896,27 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                 continue;
             }
             let effect = match name.as_str() {
+                // A named corner takes its radius on every platform here;
+                // the platforms where it differs get it from the rules
+                // added after this one.
+                "corner" if prop.value.dotted().is_some() => {
+                    let name = prop.value.dotted().unwrap_or_default();
+                    match sheet.corner(&name, "") {
+                        Some(radius) => {
+                            corner_names.push(name);
+                            Some(StyleEffect::Corner { radius })
+                        }
+                        None => {
+                            let declared = sheet
+                                .corners
+                                .iter()
+                                .filter(|corner| corner.targets.is_empty())
+                                .map(|corner| corner.name.as_str());
+                            lowering.error(prop.value.span(), unknown_corner(&name, declared));
+                            None
+                        }
+                    }
+                }
                 "corner" => lowering
                     .length(&prop.value, "`corner`")
                     .map(|radius| StyleEffect::Corner { radius }),
@@ -955,9 +980,128 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             };
             lowered.base.extend(effect);
         }
+        let platforms: Vec<String> = if lowered.targets.is_empty() {
+            PLATFORMS
+                .iter()
+                .map(|platform| (*platform).to_string())
+                .collect()
+        } else {
+            lowered.targets.clone()
+        };
+        let mut overrides = Vec::new();
+        for name in &corner_names {
+            let everywhere = sheet.corner(name, "");
+            for platform in &platforms {
+                let Some(radius) = sheet.corner(name, platform) else {
+                    continue;
+                };
+                if Some(radius) == everywhere {
+                    continue;
+                }
+                overrides.push(StyleRule {
+                    component: lowered.component.clone(),
+                    variant: lowered.variant.clone(),
+                    targets: vec![platform.clone()],
+                    exempt: Vec::new(),
+                    base: vec![StyleEffect::Corner { radius }],
+                    states: Vec::new(),
+                    settle: None,
+                    source: lowered.source.clone(),
+                });
+            }
+        }
         sheet.rules.push(lowered);
+        sheet.rules.extend(overrides);
     }
     sheet
+}
+
+/// Lower the `corner` blocks: the names with their radii for every
+/// platform, then the values `#[target(…)]` blocks give, which may only
+/// name corners declared for every platform.
+fn lower_corners(lowering: &mut Lowering<'_>, item: &StyleItem, sheet: &mut StyleSheet) {
+    let blocks = item
+        .corners
+        .iter()
+        .filter(|block| block.targets.is_empty())
+        .chain(
+            item.corners
+                .iter()
+                .filter(|block| !block.targets.is_empty()),
+        );
+    for block in blocks {
+        let mut targets = Vec::new();
+        for target in &block.targets {
+            let name = target.to_string();
+            if PLATFORMS.contains(&name.as_str()) {
+                targets.push(name);
+            } else {
+                lowering.error(
+                    target.span(),
+                    format!("`{name}` is not a platform; use {}", PLATFORMS.join(", ")),
+                );
+            }
+        }
+        if !block.targets.is_empty() && targets.is_empty() {
+            continue;
+        }
+        let mut seen = Vec::new();
+        for decl in &block.corners {
+            let name = decl.name.to_string();
+            if seen.contains(&name) {
+                lowering.error(
+                    decl.name.span(),
+                    format!("corner `{name}` is named twice in this block"),
+                );
+                continue;
+            }
+            seen.push(name.clone());
+            let everywhere = sheet
+                .corners
+                .iter()
+                .any(|corner| corner.name == name && corner.targets.is_empty());
+            if targets.is_empty() && everywhere {
+                lowering.error(
+                    decl.name.span(),
+                    format!("corner `{name}` already has a radius for every platform"),
+                );
+                continue;
+            }
+            if !targets.is_empty() && !everywhere {
+                lowering.error(
+                    decl.name.span(),
+                    format!(
+                        "corner `{name}` needs a radius for every platform first, in a `corner` block without `#[target(…)]`"
+                    ),
+                );
+                continue;
+            }
+            let Some(radius) = lowering.length(&decl.value, "a corner radius") else {
+                continue;
+            };
+            sheet.corners.push(CornerDef {
+                name,
+                radius,
+                targets: targets.clone(),
+            });
+        }
+    }
+}
+
+/// The error for a corner name `style!` does not declare; `declared` are
+/// the names it does.
+pub fn unknown_corner<'a>(name: &str, declared: impl Iterator<Item = &'a str>) -> String {
+    let names: Vec<&str> = declared.collect();
+    if names.is_empty() {
+        format!(
+            "corner `{name}` is not declared; name it in a `corner` block of `style!`, such as `corner {{ {name}: 12 }}`"
+        )
+    } else {
+        format!(
+            "corner `{name}` is not declared; `style!` names {}",
+            names.join(", ")
+        )
+    }
 }
 
 /// The variants each control kind declares, for checking `variant:`.

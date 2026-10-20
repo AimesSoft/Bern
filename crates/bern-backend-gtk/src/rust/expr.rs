@@ -5,7 +5,7 @@ use crate::style;
 use bern_ir::{
     Action, BinaryOp, Binding, Element, Expr, ExprKind, MediaOp, Prop, SessionOp, Text, WindowOp,
 };
-use bern_protocol::{EnumDef, Type};
+use bern_protocol::{EnumDef, Type, Value};
 
 impl Generator<'_> {
     fn path(expr: String, path: &[usize]) -> String {
@@ -39,6 +39,9 @@ impl Generator<'_> {
     pub(super) fn expr(&self, expr: &Expr) -> String {
         match &expr.kind {
             ExprKind::Literal { value } => literal(value),
+            // A named corner a build for a platform has not resolved:
+            // its radius on every platform.
+            ExprKind::Corner { radius, .. } => literal(&Value::Float(*radius)),
             ExprKind::Binding { binding } => self.binding(binding),
             ExprKind::Variant { variant, fields } => {
                 let values: Vec<_> = fields.iter().map(|field| self.expr(field)).collect();

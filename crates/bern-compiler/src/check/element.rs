@@ -314,6 +314,32 @@ impl Checker<'_> {
         let name = parts.kind.as_str();
         let prop_name = prop.name.to_string();
         let value = &prop.value;
+        // A corner may name a radius of `style!`, alone or in its
+        // expression; the platform's radius takes its place at build time.
+        if prop_name == "corner" && matches!(kind, PropKind::Number | PropKind::Length) {
+            if let Some(corner) = self.corner_name(value) {
+                return Some(ir::Prop::Expr { expr: corner });
+            }
+            if let ast::Expr::Path(path) = value
+                && let [name] = path.segments.as_slice()
+                && scope.get(&name.to_string()).is_none()
+            {
+                let message = crate::style::unknown_corner(
+                    &name.to_string(),
+                    self.corners.iter().map(|(name, _)| name.as_str()),
+                );
+                self.error(path.span(), message);
+                return None;
+            }
+            if matches!(kind, PropKind::Length)
+                && !matches!(value, ast::Expr::Literal { .. } | ast::Expr::Unary { .. })
+            {
+                self.corner_names = true;
+                let lowered = self.length(&prop_name, value, scope);
+                self.corner_names = false;
+                return lowered;
+            }
+        }
         match kind {
             PropKind::Id => self.id(value).map(|value| ir::Prop::Id { value }),
             PropKind::Keyword(allowed) => self.keyword(value, allowed),

@@ -47,6 +47,27 @@ impl Checker<'_> {
         Some(lowered)
     }
 
+    /// The corner of `style!` that `expr` names. In a `corner` the names
+    /// `style!` declares stand for the corners, before any variable of the
+    /// same name.
+    pub(super) fn corner_name(&self, expr: &ast::Expr) -> Option<ir::Expr> {
+        let ast::Expr::Path(path) = expr else {
+            return None;
+        };
+        let [name] = path.segments.as_slice() else {
+            return None;
+        };
+        let name = name.to_string();
+        let (_, radius) = self.corners.iter().find(|(corner, _)| *corner == name)?;
+        Some(ir::Expr {
+            kind: ir::ExprKind::Corner {
+                name,
+                radius: *radius,
+            },
+            ty: Type::Float,
+        })
+    }
+
     pub fn literal(value: &Literal) -> (Value, Type) {
         match value {
             Literal::Text(text) => (Value::Text(text.clone()), Type::Text),
@@ -72,7 +93,24 @@ impl Checker<'_> {
                 );
                 None
             }
-            ast::Expr::Path(path) => self.binding(path, scope),
+            ast::Expr::Path(path) => {
+                if self.corner_names {
+                    if let Some(corner) = self.corner_name(expr) {
+                        return Some(corner);
+                    }
+                    if let [name] = path.segments.as_slice()
+                        && scope.get(&name.to_string()).is_none()
+                    {
+                        let message = crate::style::unknown_corner(
+                            &name.to_string(),
+                            self.corners.iter().map(|(name, _)| name.as_str()),
+                        );
+                        self.error(path.span(), message);
+                        return None;
+                    }
+                }
+                self.binding(path, scope)
+            }
             ast::Expr::Variant(variant) => {
                 let ty_name = variant.ty.to_string();
                 let Some(def) = self.types.enum_def(&ty_name).cloned() else {

@@ -9,6 +9,7 @@ pub mod style;
 
 use bern_protocol::{LocalizedText, ProtocolDescriptor, Type, TypeTable, Value};
 
+mod corners;
 mod television;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -637,6 +638,13 @@ pub enum ExprKind {
         then: Box<Expr>,
         otherwise: Box<Expr>,
     },
+    /// A named corner radius of `style!` (`corner { card: 22 }`), a float.
+    /// `radius` is its value on every platform; [`Application::on_platform`]
+    /// puts the platform's value in its place before a target generates.
+    Corner {
+        name: String,
+        radius: f64,
+    },
 }
 
 /// A type-checked restricted expression.
@@ -1028,7 +1036,7 @@ impl Expr {
     pub fn walk<'a>(&'a self, visit: &mut impl FnMut(&'a Expr)) {
         visit(self);
         match &self.kind {
-            ExprKind::Literal { .. } | ExprKind::Binding { .. } => {}
+            ExprKind::Literal { .. } | ExprKind::Binding { .. } | ExprKind::Corner { .. } => {}
             ExprKind::Variant { fields, .. } => {
                 for field in fields {
                     field.walk(visit);

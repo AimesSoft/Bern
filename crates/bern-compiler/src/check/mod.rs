@@ -215,6 +215,11 @@ pub struct Checker<'a> {
     pub transitions: Vec<String>,
     pub tokens: Vec<String>,
     pub patterns: Vec<String>,
+    /// Corner names `style!` declares, with their radius on every platform.
+    pub corners: Vec<(String, f64)>,
+    /// Whether the expression being lowered is a `corner`, where those
+    /// names stand for their radii.
+    corner_names: bool,
     /// `(component, session)`: components that show a page with
     /// `pages.<id>.show()`, and the session holding the selection they set.
     pub page_sessions: BTreeSet<(String, String)>,
@@ -257,6 +262,8 @@ impl<'a> Checker<'a> {
             transitions: Vec::new(),
             tokens: Vec::new(),
             patterns: Vec::new(),
+            corners: Vec::new(),
+            corner_names: false,
             page_sessions: BTreeSet::new(),
             ids: BTreeSet::new(),
         }
