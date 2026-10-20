@@ -489,7 +489,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Tabs 和 Tab | 同级页面的页签切换；Tabs 可带 `id` 供外部入口切换 | 基础组件 |
 | TabAccessory | 随页签常驻、在每一页上都显示的一条，例如正在播放的小播放器；直接写在 `Tabs` 里，最多一个，用 `shown:` 收起而不是写在 `if` 里。条是系统画的底，里面的图标按钮是条上的符号，不再各带一层玻璃 | 能力 `tab_accessory`。SwiftUI：iOS 26.1 起为标签视图的 `tabViewBottomAccessory`（标签栏上方的系统玻璃条，iPhone 模拟器 iOS 26.5 上已验证），更早的 iOS 与 macOS 在每页底部的安全区内嵌一条材质胶囊；Compose 为导航栏上方的一块抬高表面；GTK 为页面下方滑出的 Adwaita 卡片（`GtkRevealer`）；WinUI 3 为页面下方的卡片；Web 为页面下方的一条。Compose、GTK、WinUI 3 与 Web 未验证 |
 | Toolbar | 窗口或页面级操作区；可以放一个 `Search`，直接写在工具栏中，不放在条件或重复里。相邻的项是一组，`Divider` 把它们分成几组：按功能分组，一组的项在平台上共享一块底（Liquid Glass 的同一个胶囊），组与组之间留固定间隔；`Divider` 只能直接写在两项之间，平台建议不超过三组 | 基础组件；工具栏中的搜索框 SwiftUI 已实现。分组：SwiftUI 生成 `ToolbarItemGroup`，macOS 26 与 iOS 26 起组间插 `ToolbarSpacer(.fixed)`；组里的图标按钮交给工具栏绘制，和别的项同组的菜单不显示下拉箭头（带箭头的菜单会自成一块），macOS 上已验证。GTK 与 WinUI 3 在组间画一条竖线，Linux 虚拟机与 Windows PC 上已验证（WinUI 3 两种前端相同）；Web 同样画一条竖线，浏览器中已验证；Compose 在组间留 12dp，Android 上已验证 |
-| Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸。子元素合起来比它长时从开头排起、越出末端；声明了比它更宽（更高）的子元素保持自己的尺寸、按对齐方式越出（居中时两边均分）；两种越出都不裁剪 | 基础组件；尺寸 SwiftUI 已实现 |
+| Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸。子元素合起来比它长时从开头排起、越出末端；声明了比它更宽（更高）的子元素保持自己的尺寸、按对齐方式越出（居中时两边均分）；两种越出都不裁剪。`Column` 不写 `align` 时与 `leading` 相同：列里的按钮、图标按钮、菜单与浮层按钮保持自己的宽度、站在 `align` 指定的位置，不被拉宽，要横跨整列写 `Button(width: fill)`；直接写在窗口里时见“一套窗口声明” | 基础组件；尺寸 SwiftUI 已实现 |
 | Grid | 等宽的列，列宽不小于 `min_width`，放得下几列就排几列，子元素逐行填入；`gap` 默认 8 | 已实现 |
 | Stack | 叠放：后写的一层在上面，先接收输入；整体与最大的一层一样大（写了 `width`、`height` 时按它们），较小的层按 `align` 的九个方位之一对齐，默认居中 | 已实现 |
 | Accordion | 横向手风琴；`count` 是列数，`selected` 是从 0 开始的展开列，其他列宽 `collapsed_width`，展开列填满余宽；`gap` 与 `height` 定义间距与高度，`corner` 定义每列的裁切圆角。`animate` 逐帧改变列宽，位置由当前列宽累加，内容裁切到各列；减弱动态效果时直接切换 | SwiftUI 与 Web；其他目标使用 `accordion_layout` 能力检查拒绝 |
@@ -1485,6 +1485,8 @@ fn application(windows: WindowManagerHandle) -> impl View {
 示例中的 `settings_screen` 是已登记的普通 Bern 组件。`WindowManagerHandle` 是类型化会话客户端，`windows.settings.open()` 由窗口目录生成，是命令引用。`id` 定义静态窗口种类，不是平台句柄；每个会话根 WindowSet 的 primary 必须引用唯一的单实例主窗口，不能指向按 key 创建多个实例的种类，也不通过名称或打开顺序猜测。主窗口角色与初始状态分别声明，允许多个窗口初始打开。`presentation: auto` 为默认值；初始状态默认为 closed，示例显式打开主窗口。
 
 窗口正文也可以不经组件直接写元素，编译器像检查组件正文一样检查它们：引用的随包资源必须在 `[resources]` 中声明；它们读写的会话草稿与窗口所放组件的 `#[session]` 一样，归这个窗口的每个实例所有；窗口和组件都不能放置根组件。窗口自己的关闭检查与 `immersive`、`idle_enabled`、`landscape` 表达式只能读这个窗口拥有的会话草稿，即所放组件的 `#[session]` 与正文直接读写的那些；运行时只为窗口实例建它拥有的会话，读别的草稿在编译时报错。
+
+窗口正文占窗口的内容区：桌面窗口的标题栏与工具栏之下，手机上顶栏之下、安全区之内。比内容区小的正文从内容区的左上角（前缘与顶部）排起，不居中。直接写在窗口里、没写宽度的 `Column` 与内容区同宽，子元素按它的 `align`（默认 `leading`）横向摆放：`Window { Column(gap: 12, padding: 24) { Text …; Button … } }` 的标题与按钮从左上角排起，按钮保持自己的宽度；`Column(align: center)` 让它们在窗口里水平居中。直接写在窗口里、没写尺寸的 `Stack` 铺满内容区，较小的层按它的 `align` 对齐（默认居中）。经过条件或组件写在窗口里的正文一样。六个目标按此实现（2026-10-21），在 macOS、iOS 与 tvOS 模拟器、Android 手机、Windows PC、Linux 虚拟机与 Chromium 上看过；改前各平台分别是居中、水平居中靠顶、靠左上与横向铺满，见各实现记录。
 
 窗口声明只登记内容、参数与策略，不在每次求值或重绘时创建窗口。`initial: open` 在会话初始化时生成一次打开命令，窗口关闭后不会因重绘重新打开。窗口目录的条件必须能在构建配置中确定；运行时条件影响可用性，不动态创造未知窗口种类，也不因按钮或页面卸载而撤销已打开窗口。
 

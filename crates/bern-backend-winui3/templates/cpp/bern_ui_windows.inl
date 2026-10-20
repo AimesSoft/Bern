@@ -766,7 +766,7 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
         // Controls written in the window itself are named after it.
         ctx.comp = def.id;
         ctx.page = page;
-        def.render(Parent::Of(content), ctx);
+        def.render(Parent::Window(content), ctx);
         Reactive::Run([holder, raw] { holder.IsHitTestVisible(!raw->pending.Get().has_value()); });
         if (def.idleAfter) TrackIdle(win, *def.idleAfter, def.idleEnabled ? std::function<bool()>([enabled = def.idleEnabled, ctx] { return enabled(ctx); }) : nullptr);
         if (def.immersive) {

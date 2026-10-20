@@ -274,6 +274,13 @@ bern package --target android
 
 生成的调用没有变化，生成器测试不用改；`cargo test -p bern-backend-compose` 通过。
 
+2026-10-21，窗口正文的摆放（设计文档“一套窗口声明”）：
+
+- 改前：窗口内容区是 `Box(contentAlignment = Alignment.TopCenter)`，比窗口小的正文整体水平居中、靠顶；直接写在窗口里的 `Stack` 也只是水平居中、靠顶。
+- 修正：内容区改为 `Alignment.TopStart`。生成器把直接写在窗口里（经条件或组件也算）、没写宽度的 `Column` 放进 `Box(Modifier.fillMaxWidth(), contentAlignment = …)`，对齐按它的 `align` 取 `TopStart`、`TopCenter` 或 `TopEnd`；没写尺寸的 `Stack` 放进 `Box(Modifier.fillMaxSize(), contentAlignment = …)`，对齐取它的 `align`（`under_bars` 本来就铺满）。列里的 Material 按钮本来就保持自身宽度。
+- 测试：`content_in_a_window_starts_at_its_top_leading_corner` 断言内容区与这几层 `Box`，组件自己的正文不加；撤掉修正时失败。探针应用的 Kotlin 编译通过。
+- 实机（MIX 2S，Android 15，探针应用经 CLI 切换正文，`screencap` 截屏，用完卸载）：改前默认列与写在组件里的 `Column(align: center)` 都整体水平居中、靠顶，`Stack` 的小层水平居中、靠顶；改后默认列从左上排起、按钮保持自身宽度，居中列水平居中、靠顶，`Stack` 的小层在内容区正中。图标按钮、菜单、浮层按钮那一种正文没有在手机上看。
+
 ## 未完成与已知限制
 
 - 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。

@@ -44,6 +44,39 @@ fn take_exit(widget: &gtk::Widget) -> Option<Exit> {
 
 const LEAVING: &str = "bern-leaving";
 
+/// Marks a control that keeps its own width, such as a button.
+const OWN_WIDTH: &str = "bern-own-width";
+
+/// Marks `widget` as a control that keeps its own width, such as a button:
+/// a column that stretches its children leaves it at its leading edge.
+pub(crate) fn keeps_width(widget: &impl IsA<gtk::Widget>) {
+    widget.as_ref().add_css_class(OWN_WIDTH);
+}
+
+/// The alignment a box gives a new child across its axis, or `None` to
+/// leave the child's own: the box's `cross`, except that content that fills,
+/// such as a video, a drawing without a size or a scroll view, fills across
+/// the box whatever its alignment, and that a control that keeps its own
+/// width, such as a button, stays at the leading edge of a column or a
+/// window that stretches the rest, as on the other targets.
+fn cross_alignment(
+    cross: Option<gtk::Align>,
+    window: bool,
+    horizontal: bool,
+    keeps_width: bool,
+    fills: bool,
+) -> Option<gtk::Align> {
+    if fills {
+        return None;
+    }
+    let stretching = !horizontal && cross.map_or(window, |cross| cross == gtk::Align::Fill);
+    if stretching && keeps_width {
+        Some(gtk::Align::Start)
+    } else {
+        cross
+    }
+}
+
 fn leaving(widget: &gtk::Widget) -> bool {
     widget.has_css_class(LEAVING)
 }
@@ -185,6 +218,9 @@ pub struct Parent {
     horizontal: bool,
     /// Alignment across the box's axis for every child, from `align`.
     cross: Option<gtk::Align>,
+    /// The window's content, directly or through a condition or a
+    /// component: a stack there fills the window.
+    window: bool,
 }
 
 impl Parent {
@@ -195,6 +231,15 @@ impl Parent {
             region: Region::new(None),
             _above: None,
             cross: None,
+            window: false,
+        }
+    }
+
+    /// The content of a window.
+    pub(crate) fn of_window(container: &gtk::Box) -> Self {
+        Self {
+            window: true,
+            ..Self::of_box(container)
         }
     }
 
@@ -213,6 +258,7 @@ impl Parent {
             _above: None,
             horizontal: false,
             cross: None,
+            window: false,
         }
     }
 
@@ -225,6 +271,7 @@ impl Parent {
             _above: None,
             horizontal: false,
             cross: None,
+            window: false,
         }
     }
 
@@ -236,6 +283,7 @@ impl Parent {
             _above: None,
             horizontal: false,
             cross: None,
+            window: false,
         }
     }
 
@@ -248,6 +296,7 @@ impl Parent {
             region: Region::new(None),
             _above: None,
             cross: Some(cross),
+            window: false,
         }
     }
 
@@ -259,6 +308,7 @@ impl Parent {
             region: Region::new(None),
             _above: None,
             cross: None,
+            window: false,
         }
     }
 
@@ -269,6 +319,7 @@ impl Parent {
             region: Region::new(None),
             _above: None,
             cross: None,
+            window: false,
         }
     }
 
@@ -283,6 +334,7 @@ impl Parent {
                 _above: None,
                 horizontal: like.horizontal,
                 cross: None,
+                window: false,
             },
             widgets,
         )
@@ -295,6 +347,11 @@ impl Parent {
 
     pub fn is_horizontal(&self) -> bool {
         self.horizontal
+    }
+
+    /// Whether children are written directly in a window.
+    pub(crate) fn is_window(&self) -> bool {
+        self.window
     }
 
     /// Whether children are items of a `Flow`.
@@ -432,15 +489,18 @@ impl Parent {
     /// Add a widget at the end of this region.
     pub fn add(&self, widget: &impl IsA<gtk::Widget>) {
         let widget = widget.clone().upcast::<gtk::Widget>();
-        // Content that fills, such as a video, a drawing without a size or a
-        // scroll view, fills across the box whatever its alignment.
-        if let Some(cross) = self.cross {
-            if self.horizontal {
-                if !widget.compute_expand(gtk::Orientation::Vertical) {
-                    widget.set_valign(cross);
-                }
-            } else if !widget.compute_expand(gtk::Orientation::Horizontal) {
-                widget.set_halign(cross);
+        let keeps_width = widget.has_css_class(OWN_WIDTH);
+        if self.cross.is_some() || (self.window && keeps_width) {
+            let across = if self.horizontal {
+                gtk::Orientation::Vertical
+            } else {
+                gtk::Orientation::Horizontal
+            };
+            let fills = widget.compute_expand(across);
+            match cross_alignment(self.cross, self.window, self.horizontal, keeps_width, fills) {
+                Some(align) if self.horizontal => widget.set_valign(align),
+                Some(align) => widget.set_halign(align),
+                None => {}
             }
         }
         let index = self.region.offset() + self.region.count();
@@ -464,6 +524,7 @@ impl Parent {
             _above: Some(Rc::clone(&self.region)),
             horizontal: self.horizontal,
             cross: self.cross,
+            window: self.window,
         }
     }
 
@@ -512,5 +573,48 @@ impl Parent {
         self.region.items.borrow_mut().retain(
             |item| !matches!(item, Item::Region(region) if Rc::ptr_eq(region, &child.region)),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cross_alignment;
+    use gtk::Align::{Center, Fill, Start};
+
+    #[test]
+    fn a_button_keeps_its_width_where_the_rest_stretches() {
+        // A column without `align`: the rest fills its width, a button
+        // stands at its leading edge, a filling button fills.
+        assert_eq!(
+            cross_alignment(Some(Fill), false, false, true, false),
+            Some(Start)
+        );
+        assert_eq!(
+            cross_alignment(Some(Fill), false, false, false, false),
+            Some(Fill)
+        );
+        assert_eq!(cross_alignment(Some(Fill), false, false, true, true), None);
+        // Written directly in a window, the same.
+        assert_eq!(cross_alignment(None, true, false, true, false), Some(Start));
+        assert_eq!(cross_alignment(None, true, false, false, false), None);
+    }
+
+    #[test]
+    fn an_alignment_places_buttons_too() {
+        assert_eq!(
+            cross_alignment(Some(Center), false, false, true, false),
+            Some(Center)
+        );
+        assert_eq!(
+            cross_alignment(Some(Start), false, false, false, false),
+            Some(Start)
+        );
+        // A row aligns its items vertically; a button's width is its own.
+        assert_eq!(
+            cross_alignment(Some(Center), false, true, true, false),
+            Some(Center)
+        );
+        // Any other box leaves its children as they are.
+        assert_eq!(cross_alignment(None, false, false, true, false), None);
     }
 }

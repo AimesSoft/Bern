@@ -1,5 +1,6 @@
-//! A styled control written directly in a window, not in a component: the
-//! page defines its style as it does for one in a component.
+//! Content written directly in a window, not in a component: the page
+//! defines a styled control's style as it does for one in a component, and
+//! places what is smaller than the window at its top leading corner.
 
 use bern_backend_web::WebBrowser;
 use bern_target_api::{BuildContext, Framework, Target};
@@ -51,13 +52,52 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
-/// A project whose only styled control is written directly in its window,
-/// compiled from sources written under `dir`.
-fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+/// Content smaller than the window, written directly in it: a column, a
+/// component's centered column and a stack, through a condition.
+const PLACE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                if app.count > 1 {
+                    Stack(align: bottom) {
+                        Button(id: layer, label: tr! { "en" => "Layer" }) => app.add()
+                    }
+                } else if app.count > 0 {
+                    centered(app: app)
+                } else {
+                    Column(gap: 12, padding: 24) {
+                        Column(align: trailing) {
+                            Text(content: tr! { "en" => "Inner" })
+                        }
+                        Button(id: add, label: tr! { "en" => "Add" }) => app.add()
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn centered(app: stage::Client) -> impl View {
+    ui! {
+        Column(gap: 12, align: center) {
+            Button(id: centered, label: tr! { "en" => "Centered" }) => app.add()
+        }
+    }
+}
+"#;
+
+/// A project whose window holds `ui` directly, compiled from sources
+/// written under `dir`.
+fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
     let _ = std::fs::remove_dir_all(dir);
     for (package, source) in [
         ("stage-protocol", STAGE_PROTOCOL),
-        ("stage-ui", STAGE_UI),
+        ("stage-ui", ui),
         ("stage-core", ""),
     ] {
         std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
@@ -120,7 +160,8 @@ web_mode = "app"
 #[test]
 fn a_style_variant_in_a_window_is_defined() {
     let root = workspace();
-    let (config, compiled) = stage_project(&root.join("target/bern-test/web-stage-project"));
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/web-stage-project"), STAGE_UI);
     let target = config.targets[0].clone();
     let problems = WebBrowser.check(&compiled.app, &target);
     assert!(problems.is_empty(), "{problems:?}");
@@ -156,5 +197,65 @@ fn a_style_variant_in_a_window_is_defined() {
     assert!(
         script[used..].contains("style: S.buttonStage }"),
         "{script}"
+    );
+}
+
+/// Content smaller than the window starts at its top leading corner, as on
+/// the other targets: the window's content, also through a condition or a
+/// component, goes into the window's own element, a column there spans its
+/// width with its items at its alignment, a button keeps its own width, and
+/// a stack without a size fills the window.
+#[test]
+fn content_in_a_window_starts_at_its_top_leading_corner() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/web-place-project"), PLACE_UI);
+    let target = config.targets[0].clone();
+    let problems = WebBrowser.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/web-place"),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WebBrowser.generate(&compiled.app, &context).unwrap();
+    let text = |name: &str| {
+        files
+            .iter()
+            .find(|file| file.path.as_os_str() == name)
+            .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+            .unwrap_or_else(|| panic!("no `{name}`"))
+    };
+    let script = text("app.js");
+    for expected in [
+        "B.When(p, ctx, ",
+        "B.Layers(p, ctx, { align: \"bottom\" }, ",
+        "c_centered(p, B.child(ctx, \"centered\"), ",
+    ] {
+        assert!(script.contains(expected), "missing `{expected}`:\n{script}");
+    }
+    // The window's content is a column whose children stretch across it:
+    // a column there is as wide as the window. A column places its items
+    // by its alignment, leading by default, so a button keeps its width.
+    let style = text("bern.css");
+    let content = &style[style.find("\n.bern-window-content {\n").unwrap()..];
+    let content = &content[..content.find('}').unwrap()];
+    assert!(content.contains("flex-direction: column;"), "{content}");
+    assert!(!content.contains("align-items"), "{content}");
+    assert!(style.contains(".bern-window-content > .bern-layers,\n.bern-modal-content > .bern-layers,\n.bern-layers:has(.bern-split) {\n  width: 100%;\n  height: 100%;"));
+    assert!(style.contains(".bern-vstack.bern-align-leading {\n  align-items: flex-start;\n}"));
+    let runtime = text("bern.js");
+    assert!(
+        runtime.contains("bern-align-${align ?? (axis === \"column\" ? \"leading\" : \"center\")}")
     );
 }

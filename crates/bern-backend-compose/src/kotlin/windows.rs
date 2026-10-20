@@ -118,6 +118,7 @@ impl Generator<'_> {
         out.open(format!("BernWindowRoot(context{args}) {{"));
         let ctx = Ctx {
             component: window.id.clone(),
+            window: true,
             ..Ctx::default()
         };
         self.node(out, &window.content, &ctx);

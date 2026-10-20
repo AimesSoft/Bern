@@ -116,18 +116,20 @@ impl Generator<'_> {
         out.close("}");
     }
 
+    /// The window room of a component's body, through the components it is
+    /// made of.
+    pub(super) fn window_body(&self, body: &Node) -> Option<String> {
+        match body {
+            Node::Element(element) => window_box(element),
+            Node::Component(reference) => {
+                self.window_body(&self.app.component(&reference.component)?.body)
+            }
+            _ => None,
+        }
+    }
+
     pub(super) fn stack(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let alignment = match element.keyword("align") {
-            Some("top_leading") => "Alignment.TopStart",
-            Some("top") => "Alignment.TopCenter",
-            Some("top_trailing") => "Alignment.TopEnd",
-            Some("leading") => "Alignment.CenterStart",
-            Some("trailing") => "Alignment.CenterEnd",
-            Some("bottom_leading") => "Alignment.BottomStart",
-            Some("bottom") => "Alignment.BottomCenter",
-            Some("bottom_trailing") => "Alignment.BottomEnd",
-            _ => "Alignment.Center",
-        };
+        let alignment = stack_alignment(element.keyword("align"));
         // A styled stack draws its surface; a disabled one takes no
         // input.
         let style = self
@@ -836,5 +838,49 @@ impl Generator<'_> {
             out.close("},");
         }
         out.close(")");
+    }
+}
+
+/// Where a stack aligns its layers.
+fn stack_alignment(align: Option<&str>) -> &'static str {
+    match align {
+        Some("top_leading") => "Alignment.TopStart",
+        Some("top") => "Alignment.TopCenter",
+        Some("top_trailing") => "Alignment.TopEnd",
+        Some("leading") => "Alignment.CenterStart",
+        Some("trailing") => "Alignment.CenterEnd",
+        Some("bottom_leading") => "Alignment.BottomStart",
+        Some("bottom") => "Alignment.BottomCenter",
+        Some("bottom_trailing") => "Alignment.BottomEnd",
+        _ => "Alignment.Center",
+    }
+}
+
+/// The box around an element written directly in a window, which starts
+/// at the window's top leading corner: a column without a width spans the
+/// window's width, its alignment placing its items across it, and a stack
+/// without a size fills the window, its alignment placing its layers there.
+pub(super) fn window_box(element: &Element) -> Option<String> {
+    match element.kind.as_str() {
+        "Column" if element.prop("width").is_none() => Some(format!(
+            "Box(Modifier.fillMaxWidth(), contentAlignment = {}) {{",
+            match element.keyword("align") {
+                Some("center") => "Alignment.TopCenter",
+                Some("trailing") => "Alignment.TopEnd",
+                _ => "Alignment.TopStart",
+            }
+        )),
+        // `under_bars` fills the window already.
+        "Stack"
+            if element.prop("width").is_none()
+                && element.prop("height").is_none()
+                && element.keyword("under_bars") != Some("true") =>
+        {
+            Some(format!(
+                "Box(Modifier.fillMaxSize(), contentAlignment = {}) {{",
+                stack_alignment(element.keyword("align"))
+            ))
+        }
+        _ => None,
     }
 }

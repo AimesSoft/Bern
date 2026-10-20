@@ -495,6 +495,8 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     if (props.fill) {
         button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         SetRole(button, L"bern-fill-width");
+    } else {
+        KeepWidth(button);
     }
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
@@ -539,6 +541,7 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     // A button takes its content's size; content that fills stretches it.
     Mirror(button, holder);
     if (FillsRow(holder)) button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    else KeepWidth(button);
     // Content that does not fill the height stands in the middle of a
     // taller button, as a label does.
     if (FillsColumn(holder)) button.VerticalAlignment(xaml::VerticalAlignment::Stretch);
@@ -674,6 +677,7 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
         if (!sized && props.style->size && !props.style->padding) button.Padding(xaml::Thickness{0, 0, 0, 0});
         shown = wrapper;
     }
+    KeepWidth(button);
     Place(p, shown);
 }
 
@@ -1010,6 +1014,7 @@ inline void Switch(Parent const& p, Ctx const& ctx, SwitchProps props) {
         toggle.Checked([updating, set](auto&&, auto&&) { if (!*updating) set(true); });
         toggle.Unchecked([updating, set](auto&&, auto&&) { if (!*updating) set(false); });
         ShapeControl(ctx, toggle, props.shape);
+        KeepWidth(toggle);
         if (p.isList && !ctx.toolbar) p.Add(props.labelHidden ? xaml::UIElement(Card(toggle)) : xaml::UIElement(LabeledCard(text, toggle)));
         else p.Add(toggle);
         Controls::Register(ctx, props.id, "switch", text, nullptr, std::move(actions));
@@ -1648,6 +1653,12 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
         Win* win = ctx.win;
         win->underBars.Set(win->underBars.Peek() + 1);
         Reactive::OnCleanup([win] { win->underBars.Set(win->underBars.Peek() - 1); });
+    } else if (p.window && !props.width.Given() && !props.height.Given()) {
+        // Written directly in a window, a stack without a size fills it and
+        // places its smaller layers there by its alignment.
+        SetRole(layers, L"bern-layers-wh");
+        layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        layers.VerticalAlignment(xaml::VerticalAlignment::Stretch);
     }
     children(Parent::Aligned(layers, h, v), ctx);
     // Layers that are all backdrops fill where they stand, as one alone
@@ -2728,6 +2739,7 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
                     if (auto button = weak.get()) button.Flyout().ShowAt(button);
                 },
             .value = [open] { return std::optional<std::string>(*open ? "open" : "closed"); }});
+    KeepWidth(button);
     if (p.isList && !ctx.toolbar) p.Add(Card(button));
     else p.Add(button);
 }

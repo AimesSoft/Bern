@@ -1702,7 +1702,9 @@ fun BernWindowRoot(
                 )
             },
         ) { padding ->
-            Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            // What is smaller than the window starts at its top leading
+            // corner, as on the other targets.
+            Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize(), contentAlignment = Alignment.TopStart) {
               CompositionLocalProvider(LocalBernBarsPadding provides padding) {
                 val error = BernHost.startupError
                 if (error != null) {

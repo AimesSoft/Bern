@@ -370,6 +370,11 @@ inline winrt::hstring RoleOf(xaml::UIElement const& element) {
 
 inline void SetRole(xaml::FrameworkElement const& element, wchar_t const* role) { element.Tag(winrt::box_value(role)); }
 inline void MarkFill(xaml::FrameworkElement const& element) { SetRole(element, L"bern-fill"); }
+/// Marks a control that keeps its own width, such as a button: a column
+/// that stretches its children leaves it at its leading edge.
+inline void KeepWidth(xaml::FrameworkElement const& element) {
+    if (RoleOf(element).empty()) SetRole(element, L"bern-own-width");
+}
 
 /// The element a wrapper (`bern-wrap`, made for motion, placement or
 /// styles) holds, or the element itself.
@@ -892,8 +897,16 @@ struct Parent {
     std::shared_ptr<Region> root;
     /// Items of a `Flow`: a chip picker's chips are items of it too.
     bool flow = false;
+    /// The window's content, directly or through a condition or a
+    /// component: a stack there fills the window.
+    bool window = false;
 
     static Parent Of(controls::Panel const& panel) { return Parent{panel, RootRegion(panel)}; }
+    static Parent Window(controls::Panel const& panel) {
+        Parent parent = Of(panel);
+        parent.window = true;
+        return parent;
+    }
     static Parent OfList(controls::Panel const& panel) { return Parent{panel, RootRegion(panel), true}; }
     static Parent Aligned(controls::Panel const& panel, std::optional<xaml::HorizontalAlignment> h, std::optional<xaml::VerticalAlignment> v) {
         return Parent{panel, RootRegion(panel), false, h, v};
@@ -923,11 +936,16 @@ struct Parent {
         // container's alignment.
         bool across = FillsRow(element), down = FillsColumn(element);
         // A stretching container leaves an element that keeps its own size
-        // (pictures, stacks) where it is.
+        // (pictures, stacks) where it is, and a control that keeps its own
+        // width (a button) at its leading edge, as on the other targets:
+        // the control's style gives it that alignment only once it is on
+        // screen. So does a window for its content.
         if (auto framework = element.try_as<xaml::FrameworkElement>()) {
+            bool stretching = crossH ? *crossH == xaml::HorizontalAlignment::Stretch : window;
             bool keepsH = crossH == xaml::HorizontalAlignment::Stretch && framework.HorizontalAlignment() != xaml::HorizontalAlignment::Stretch;
             bool keepsV = crossV == xaml::VerticalAlignment::Stretch && framework.VerticalAlignment() != xaml::VerticalAlignment::Stretch;
-            if (crossH && (across || !keepsH)) framework.HorizontalAlignment(across ? xaml::HorizontalAlignment::Stretch : *crossH);
+            if (stretching && !across && RoleOf(Unwrapped(element)) == L"bern-own-width") framework.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+            else if (crossH && (across || !keepsH)) framework.HorizontalAlignment(across ? xaml::HorizontalAlignment::Stretch : *crossH);
             if (crossV && (down || !keepsV)) framework.VerticalAlignment(down ? xaml::VerticalAlignment::Stretch : *crossV);
         }
         // A horizontal rail holding something that fills its height fills

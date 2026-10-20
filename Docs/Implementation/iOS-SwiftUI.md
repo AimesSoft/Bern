@@ -163,6 +163,10 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 直接写在窗口正文里的 `Drop(opens: true)` 此前不进 Info.plist 的文档类型与导入类型，原因与修正见 macOS 实现记录的同日条目；生成器测试 `a_drop_in_a_window_lists_its_document_types` 也为 iOS 断言导入类型。
 
+### 窗口正文的摆放（2026-10-21）
+
+窗口正文比窗口小时从内容区的左上角排起（规则与修正见 macOS 实现记录的同日条目，iOS 共用同一段生成）。iPhone 17 Pro 模拟器（iOS 26.5），探针应用经 CLI 切换正文，`simctl io screenshot` 截屏：改前默认列整体在屏幕正中（水平、竖直都居中）；改后默认列从安全区左上角排起、按钮保持自身宽度，写在组件里的 `Column(align: center)` 水平居中、靠顶，只有一个小层的 `Stack` 在内容区正中；图标按钮、菜单、浮层按钮在默认列里保持自身宽度。生成器测试 `content_in_a_window_starts_at_its_top_leading_corner` 按模拟器 SDK 类型检查 iOS 的生成。
+
 ## 错峰、比例轨道、浮层按钮与四档尺寸
 
 2026-10-14，v0.30，iPhone 17 Pro 模拟器（iOS 26.5），与 macOS 共用同一套 SwiftUI 实现，启动时用 `SIMCTL_CHILD_BERN_MOTION=slow` 放慢动效。

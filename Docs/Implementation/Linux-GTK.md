@@ -346,6 +346,14 @@ target/bern/linux/Showcase/showcase
 
 2026-10-20，直接写在窗口正文里的 `Drop(opens: true)` 与 `reflow`：桌面文件的 `MimeType` 与 `reflow` 的构建警告此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类，`Exec` 也没有 `%U`；写在那里的无 `cell_ratio` 网格上的 `reflow` 不警告。两处都改为连同窗口正文一起看。生成器测试 `a_drop_in_a_window_registers_its_kinds` 与 `reflow_in_a_window_is_checked` 改前失败、改后通过。Ubuntu 虚拟机上，测试生成的桌面文件（`Exec` 换成已有的程序）`desktop-file-validate` 无误；放进临时的 `XDG_DATA_HOME` 后，`gio mime video/mp4` 与 `video/x-matroska` 把它列为已登记与推荐的程序（这个环境没有设默认程序，它也显示为默认），`text/plain` 不列。没有运行应用、没有经它打开文件。
 
+2026-10-21，窗口正文的摆放与列里的按钮（设计文档“一套窗口声明”与 `Column` 一行）：
+
+- 改前（2026-10-20 实测）：直接写在窗口里的列横向铺满窗口、靠顶，列里的按钮被拉成整列宽。原因：`Column` 不写 `align` 时 GtkBox 交叉轴是 `Fill`（文字、行、滚动区靠它横跨），按钮也跟着拉伸；设计文档里不写 `align` 与 `leading` 相同，按钮保持自身宽度。直接写在窗口里的 `Stack` 保持自身大小、靠左上。
+- 修正：按钮类控件（不是 `width: fill` 的 `Button`、`IconButton`、带内容的按钮、`Switch(style: button)`、`PopoverButton`、`Menu`、`SplitButton`、不显示标签的 `Picker`）带 `bern-own-width` 标记；拉伸子元素的列或窗口正文里，带标记且不横向填满的控件对齐到前缘（`Start`），其他照旧。窗口正文的 `Parent` 由 `Parent::of_window` 建立，经条件与组件也是它；其中没写尺寸的 `Stack` 两个方向都 `expand`，铺满内容区、按它的 `align` 摆放小层。
+- 测试：bern-gtk 的 `parent::tests` 两项（拉伸列与窗口里按钮靠前缘、横向填满的照旧填满；写了 `align` 时按钮也按它摆放）；生成器测试 `content_in_a_window_starts_at_its_top_leading_corner` 断言窗口正文经条件与组件直接写进窗口的 `Parent`。
+- Ubuntu 24.04 虚拟机：bern-gtk 的 `cargo test --all-features`（95 项）与 `cargo clippy --all-features --all-targets -- -D warnings` 通过；`cargo test -p bern-backend-gtk` 的生成应用类型检查（showcase、gallery 等）通过。探针应用经 Broadway 实测（用 CLI 切换正文）：默认列从左上排起，按钮保持自身宽度；写在组件里的 `Column(align: center)` 水平居中、靠顶；只有一个小层的 `Stack` 在内容区正中；图标按钮、菜单、浮层按钮在默认列里保持自身宽度、站在前缘。
+- 仍与 `align: leading` 不同的地方：默认列仍把按钮类以外的子元素拉满（文字看上去一样）；嵌在默认列里、写了 `align: center` 或带底色的列会横跨外层列，SwiftUI、Compose 与 Web 上它只与自己的内容同宽。WinUI 3 相同。这一条按代码推断，没有实测。
+
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。

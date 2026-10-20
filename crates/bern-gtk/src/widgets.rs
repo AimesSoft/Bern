@@ -8,6 +8,7 @@
 use crate::controls::{self, Actions};
 use crate::ctx::Field;
 use crate::motion::{Curve, Num, bind_number};
+use crate::parent::keeps_width;
 use crate::protocol::Value;
 use crate::reactive::{effect, untrack};
 use crate::text::{self, tr};
@@ -386,7 +387,11 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
         row.add_css_class("bern-button-row");
         p.add(&row);
     } else {
-        p.add(&styled(&button, props.style));
+        let widget = styled(&button, props.style);
+        if !props.fill {
+            keeps_width(&widget);
+        }
+        p.add(&widget);
     }
 }
 
@@ -456,7 +461,9 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
         set_file.zip(props.pick.map(|pick| pick.kinds)),
     );
     button.set_valign(gtk::Align::Center);
-    place(p, &styled(&button, props.style));
+    let widget = styled(&button, props.style);
+    keeps_width(&widget);
+    place(p, &widget);
 }
 
 /// What a control shows and changes.
@@ -1504,6 +1511,7 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
             if p.is_list() {
                 p.add(&plain_row(&control));
             } else {
+                keeps_width(&control);
                 p.add(&control);
             }
         } else if (segmented || props.style == Some("chips")) && p.is_list() {
@@ -1782,6 +1790,11 @@ pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
     }
     if props.under_bars {
         under_bars(layers.upcast_ref());
+    } else if p.is_window() && props.width.is_none() && props.height.is_none() {
+        // Written directly in a window, a stack without a size fills it and
+        // places its smaller layers there by its alignment.
+        layers.set_hexpand(true);
+        layers.set_vexpand(true);
     }
     children(&Parent::of_layers(&layers, halign, valign), ctx);
     place(p, &layers);
@@ -2444,6 +2457,7 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
             ..Actions::default()
         },
     );
+    keeps_width(&button);
     place(p, &button);
 }
 

@@ -97,6 +97,7 @@ impl Generator<'_> {
         out.open("BernWindowRoot(context: context) {");
         let ctx = Ctx {
             component: window.id.clone(),
+            window: true,
             ..Ctx::default()
         };
         out.open("BernSearchPaletteHost {");

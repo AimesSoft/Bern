@@ -787,6 +787,49 @@ fn has_rail_layer(nodes: &[Node]) -> bool {
 }
 
 /// SwiftUI's alignment for a `Stack`'s `align`.
+/// The frame of an element written directly in a window, which starts at
+/// the window's top leading corner: a column without a width spans the
+/// window's width, its alignment placing its items across it, and a stack
+/// without a size fills the window, its alignment placing its layers there.
+pub(super) fn window_frame(element: &Element) -> Option<String> {
+    match element.kind.as_str() {
+        "Column" if element.prop("width").is_none() => Some(format!(
+            ".frame(maxWidth: .infinity, alignment: {})",
+            match element.keyword("align") {
+                Some("center") => ".center",
+                Some("trailing") => ".trailing",
+                _ => ".leading",
+            }
+        )),
+        // `under_bars` fills the window already.
+        "Stack"
+            if element.prop("width").is_none()
+                && element.prop("height").is_none()
+                && element.keyword("under_bars") != Some("true") =>
+        {
+            Some(format!(
+                ".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: {})",
+                stack_alignment(element.keyword("align"))
+            ))
+        }
+        _ => None,
+    }
+}
+
+impl Generator<'_> {
+    /// The window frame of a component's body, through the components it
+    /// is made of.
+    pub(super) fn window_body(&self, body: &Node) -> Option<String> {
+        match body {
+            Node::Element(element) => window_frame(element),
+            Node::Component(reference) => {
+                self.window_body(&self.app.component(&reference.component)?.body)
+            }
+            _ => None,
+        }
+    }
+}
+
 fn stack_alignment(align: Option<&str>) -> &'static str {
     match align {
         Some("top_leading") => ".topLeading",

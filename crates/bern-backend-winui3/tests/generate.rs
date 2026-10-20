@@ -1417,13 +1417,52 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
+/// Content smaller than the window, written directly in it: a column, a
+/// component's centered column and a stack, through a condition.
+const PLACE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                if app.count > 1 {
+                    Stack(align: bottom) {
+                        Button(id: layer, label: tr! { "en" => "Layer" }) => app.add()
+                    }
+                } else if app.count > 0 {
+                    centered(app: app)
+                } else {
+                    Column(gap: 12, padding: 24) {
+                        Column(align: trailing) {
+                            Text(content: tr! { "en" => "Inner" })
+                        }
+                        Button(id: add, label: tr! { "en" => "Add" }) => app.add()
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn centered(app: stage::Client) -> impl View {
+    ui! {
+        Column(gap: 12, align: center) {
+            Button(id: centered, label: tr! { "en" => "Centered" }) => app.add()
+        }
+    }
+}
+"#;
+
 /// A project whose only styled control is written directly in its window,
 /// compiled from sources written under `dir`.
-fn stage_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compiled) {
+fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
     let _ = std::fs::remove_dir_all(dir);
     for (package, source) in [
         ("stage-protocol", STAGE_PROTOCOL),
-        ("stage-ui", STAGE_UI),
+        ("stage-ui", ui),
         ("stage-core", ""),
     ] {
         std::fs::create_dir_all(dir.join(package).join("src")).unwrap();
@@ -1484,7 +1523,10 @@ platform = "windows"
 #[test]
 fn a_style_variant_in_a_window_is_defined() {
     let root = workspace();
-    let (config, compiled) = stage_project(&root.join("target/bern-test/winui3-stage-project"));
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/winui3-stage-project"),
+        STAGE_UI,
+    );
     let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
     assert!(
         problems.iter().all(|problem| !problem.is_error()),
@@ -1521,5 +1563,80 @@ fn a_style_variant_in_a_window_is_defined() {
         .find("&S_buttonStage")
         .unwrap_or_else(|| panic!("the button does not use its style:\n{ui}"));
     assert!(defined < used, "{ui}");
+    compile(&output);
+}
+
+/// Content smaller than the window starts at its top leading corner, as on
+/// the other targets: a column spans the window's width and its buttons
+/// keep their own (a plain button was stretched across it), and the
+/// window's content, also through a condition or a
+/// component, goes into the window's own parent, where a stack without a
+/// size fills the window.
+#[test]
+fn content_in_a_window_starts_at_its_top_leading_corner() {
+    let root = workspace();
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/winui3-place-project"),
+        PLACE_UI,
+    );
+    let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
+    assert!(
+        problems.iter().all(|problem| !problem.is_error()),
+        "{problems:?}"
+    );
+    let output = root.join("target/bern-test/winui3-place");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let text = |name: &str| {
+        files
+            .iter()
+            .find(|file| file.path.ends_with(name))
+            .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+            .unwrap_or_else(|| panic!("no `{name}`"))
+    };
+    assert!(text("bern_ui_windows.inl").contains("def.render(Parent::Window(content), ctx);"));
+    let widgets = text("bern_ui_widgets.inl");
+    assert!(
+        widgets.contains(
+            "} else if (p.window && !props.width.Given() && !props.height.Given()) {\n        // Written directly in a window, a stack without a size fills it"
+        ),
+        "a stack in the window fills it"
+    );
+    // A column without `align` stretches the rest and leaves a button at
+    // its leading edge: before it is on screen a button's alignment is
+    // still `Stretch`, so it is marked; so does the window.
+    assert!(widgets.contains(": xaml::HorizontalAlignment::Stretch;\n        children(Parent::Aligned(panel, h, std::nullopt), ctx);"));
+    assert!(widgets.contains("        SetRole(button, L\"bern-fill-width\");\n    } else {\n        KeepWidth(button);\n    }"));
+    let core = text("bern_ui_core.inl");
+    for expected in [
+        "bool stretching = crossH ? *crossH == xaml::HorizontalAlignment::Stretch : window;",
+        "if (stretching && !across && RoleOf(Unwrapped(element)) == L\"bern-own-width\") framework.HorizontalAlignment(xaml::HorizontalAlignment::Left);",
+    ] {
+        assert!(core.contains(expected), "missing `{expected}`");
+    }
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    for expected in ["B::When(p, c, ", "B::Layers(p, c, {.align = \"bottom\"}, "] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
     compile(&output);
 }

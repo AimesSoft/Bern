@@ -896,7 +896,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         if let Some(theme) = &app.theme {
             follow_theme(&ctx, theme);
         }
-        render(&Parent::of_box(&content), &ctx);
+        render(&Parent::of_window(&content), &ctx);
         let blocked = Rc::clone(&win);
         let guarded = content.clone();
         effect(move || guarded.set_sensitive(blocked.pending.get().is_none()));

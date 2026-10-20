@@ -3041,8 +3041,10 @@ struct BernSearchPaletteHost<Content: View>: View {
 
     var body: some View {
         GeometryReader { bounds in
+          // The window's content: what is smaller than the window starts at
+          // its top leading corner, as on the other targets.
           content()
-            .frame(width: bounds.size.width, height: bounds.size.height)
+            .frame(width: bounds.size.width, height: bounds.size.height, alignment: .topLeading)
             .disabled(palette.presented)
             .accessibilityHidden(palette.presented)
             .overlay {

@@ -472,6 +472,7 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
                     if (auto button = weak.get()) popover->flyout.ShowAt(button);
                 },
             .value = [popover] { return std::optional<std::string>(popover->open ? "open" : "closed"); }});
+    KeepWidth(button);
     if (p.isList && !ctx.toolbar) p.Add(Card(button));
     else p.Add(button);
 }
@@ -534,6 +535,7 @@ inline void SplitButton(Parent const& p, Ctx const& ctx, SplitButtonProps props,
                 },
             .setBool = [ctx, field](bool on) { SetDraft(ctx, field, Value::Bool(on)); },
             .value = [ctx, field] { return std::optional<std::string>(ctx.Peek(field) == Value::Bool(true) ? "true" : "false"); }});
+    KeepWidth(button);
     if (p.isList && !ctx.toolbar) p.Add(Card(button));
     else p.Add(button);
 }

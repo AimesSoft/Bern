@@ -1509,6 +1509,45 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
+/// Content smaller than the window, written directly in it: a column, a
+/// component's centered column and a stack, through a condition.
+const PLACE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                if app.count > 1 {
+                    Stack(align: bottom) {
+                        Button(id: layer, label: tr! { "en" => "Layer" }) => app.add()
+                    }
+                } else if app.count > 0 {
+                    centered(app: app)
+                } else {
+                    Column(gap: 12, padding: 24) {
+                        Column(align: trailing) {
+                            Text(content: tr! { "en" => "Inner" })
+                        }
+                        Button(id: add, label: tr! { "en" => "Add" }) => app.add()
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn centered(app: stage::Client) -> impl View {
+    ui! {
+        Column(gap: 12, align: center) {
+            Button(id: centered, label: tr! { "en" => "Centered" }) => app.add()
+        }
+    }
+}
+"#;
+
 /// A drop area that opens videos, written directly in the window.
 const DROP_UI: &str = r#"
 use bern::prelude::*;
@@ -1712,4 +1751,118 @@ fn a_drop_in_a_window_lists_its_document_types() {
             );
         }
     }
+}
+
+/// Content smaller than the window starts at its top leading corner, as on
+/// the other targets: a column written directly in the window spans its
+/// width, its alignment placing its items across it, also through a
+/// component; a stack without a size fills the window. A column inside
+/// them keeps its own width. The Swift type-checks.
+#[test]
+fn content_in_a_window_starts_at_its_top_leading_corner() {
+    let root = workspace();
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/swiftui-place-project"),
+        PLACE_UI,
+    );
+    for (name, target) in [
+        ("macos", &SwiftUiMacos as &dyn Target),
+        ("ios", &SwiftUiIos),
+    ] {
+        let output = root.join(format!("target/bern-test/swiftui-place-{name}"));
+        let _ = std::fs::remove_dir_all(&output);
+        let context = context(&config, &compiled, name, &output);
+        let problems = target.check(&compiled.app, &context.target);
+        assert!(problems.is_empty(), "{name}: {problems:?}");
+        for file in target.generate(&compiled.app, &context).unwrap() {
+            let path = output.join(&file.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, &file.contents).unwrap();
+        }
+        let generated =
+            std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+        let style = std::fs::read_to_string(output.join("Sources/BernStyle.swift")).unwrap();
+        // The window places its content at its top leading corner.
+        assert!(
+            style.contains(
+                ".frame(width: bounds.size.width, height: bounds.size.height, alignment: .topLeading)"
+            ),
+            "{name}"
+        );
+        let window = &generated[generated.find("struct BernWindow0").unwrap()..];
+        assert_eq!(
+            window
+                .matches(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)")
+                .count(),
+            1,
+            "{name}: the stack fills the window:\n{window}"
+        );
+        let lines: Vec<&str> = window.lines().map(str::trim).collect();
+        let call = lines
+            .iter()
+            .position(|line| *line == "CenteredView()")
+            .unwrap();
+        assert_eq!(
+            lines[call + 1],
+            ".frame(maxWidth: .infinity, alignment: .center)",
+            "{name}: the component's column spans the window:\n{window}"
+        );
+        assert_eq!(
+            window
+                .matches(".frame(maxWidth: .infinity, alignment: .leading)")
+                .count(),
+            1,
+            "{name}: the column spans the window:\n{window}"
+        );
+        // The inner column and the component's own body keep their width.
+        assert!(
+            !window.contains(".frame(maxWidth: .infinity, alignment: .trailing)"),
+            "{name}:\n{window}"
+        );
+        let component = &generated[generated.find("struct CenteredView").unwrap()..];
+        let component = &component[..component
+            .find("struct BernWindow0")
+            .unwrap_or(component.len())];
+        assert!(
+            !component.contains("maxWidth: .infinity"),
+            "{name}:\n{component}"
+        );
+    }
+    typecheck_ios(&root, &root.join("target/bern-test/swiftui-place-ios"));
+    if !Command::new("xcrun")
+        .arg("--find")
+        .arg("swiftc")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("swiftc not available; skipping type check");
+        return;
+    }
+    let sources = root.join("target/bern-test/swiftui-place-macos/Sources");
+    let result = Command::new("xcrun")
+        .args([
+            "swiftc",
+            "-typecheck",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+        ])
+        .arg("-target")
+        .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+        .arg("-module-cache-path")
+        .arg(root.join("target/bern-swift-module-cache"))
+        .arg("-import-objc-header")
+        .arg(sources.join("bern.h"))
+        .arg(sources.join("BernRuntime.swift"))
+        .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernStyle.swift"))
+        .arg(sources.join("BernAppKit.swift"))
+        .arg(sources.join("BernGenerated.swift"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "swiftc rejected the generated code:\n{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
 }

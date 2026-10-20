@@ -7,6 +7,7 @@ use crate::controls::{self, Actions};
 use crate::ctx::Field;
 use crate::layout::{Clip, Placement, Rail as RailBox};
 use crate::motion::{self, Curve, MotionBox, Num, Spring, bind_number};
+use crate::parent::keeps_width;
 use crate::protocol::Value;
 use crate::reactive::{Scope, effect, on_cleanup, untrack};
 use crate::style::StyleDef;
@@ -301,6 +302,7 @@ pub fn ContentButton(
         None if !framed => button.add_css_class("bern-content-plain"),
         None => {}
     }
+    keeps_width(&motion);
     place(p, &motion);
 }
 
@@ -394,6 +396,7 @@ pub(crate) fn toggle_button(p: &Parent, ctx: &Ctx, props: ToggleProps) {
         button.add_css_class("flat");
     }
     crate::widgets::shape(ctx, button.upcast_ref(), &props.shape);
+    keeps_width(&button);
     place(p, &button);
     controls::register(ctx, props.id, "switch", label, None, switch_actions(bound));
 }
@@ -455,6 +458,7 @@ pub fn SplitButton(p: &Parent, ctx: &Ctx, props: SplitButtonProps, content: Buil
     more.set_popover(Some(&popover));
     group.append(&more);
     crate::widgets::shape(ctx, group.upcast_ref(), &props.shape);
+    keeps_width(&group);
     place(p, &group);
     let opened = more.clone();
     controls::register(
@@ -575,6 +579,7 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
             }
         });
     }
+    keeps_width(&button);
     place(p, &button);
     let opened = button.clone();
     controls::register(

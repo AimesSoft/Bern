@@ -468,6 +468,14 @@ target\bern\windows\Showcase\showcase.exe
 - 验证：生成器测试 `a_style_variant_in_a_window_is_defined` 在 PC 上用 MSVC 编译生成的程序，通过；测试应用（窗口正文里写 `variant: stage`，组件里写 `variant: card`，各自只在一处用到）`bern build --target windows` 完成编译与链接，`app_ui.inl` 里 `S_buttonStage` 与 `S_buttonCard` 都有定义，两个按钮各自引用。
 - 窗口快照：窗口正文里的按钮是强调色底、圆角 12，组件里的是浅色底、圆角 4；经 CLI 的 `ui activate --target main.in_window` 按下后计数为 1。
 
+2026-10-21，窗口正文的摆放与列里的按钮（Windows PC，WinUI 3，自己的镜像与 `bundle_id`，计划任务启动，`BERN_SNAPSHOT_DIR` 取窗口快照，150% 缩放下窗口快照 630 px 宽）：
+
+- 改前：直接写在窗口里的列靠左上、横跨窗口，符合规则；但默认列（不写 `align`）把不带样式的按钮拉成整列宽，快照里“下一种”从 48 px 到 582 px。原因：按钮刚创建时 `HorizontalAlignment` 还是依赖属性的默认值 `Stretch`，系统样式里的 `Left` 要等它进入可视树才生效，`Parent::Add` 的“保持自身对齐”判断于是把它设成了 `Stretch`；带样式的按钮外面有包装层，不受影响（2026-10-20 的测试应用两个按钮都带样式，所以没看到）。直接写在窗口里的 `Stack` 保持自身大小、靠左上。
+- 修正：按钮类控件（不是 `width: fill` 的 `Button`、`IconButton`、内容不横向填满的带内容按钮、`Switch(style: button)`、`Menu`、`PopoverButton`、`SplitButton`）标记 `bern-own-width`；拉伸子元素的列或窗口正文里，带标记且不横向填满的控件设为 `Left`，其他照旧（`NavLink` 等自己要求铺满的不受影响）。窗口正文的 `Parent` 改为 `Parent::Window`，经条件与组件也是它；其中没写尺寸的 `Stack` 铺满（`bern-layers-wh`），按它的 `align` 摆放小层。
+- 测试：`content_in_a_window_starts_at_its_top_leading_corner` 断言这些规则与生成代码；撤掉修正时失败。PC 上 `cargo test -p bern-backend-winui3 -- --test-threads=1` 通过（生成器测试 15 项，MSVC 编译生成的程序）。
+- 窗口快照：改后“下一种”从 48 px 到 146 px，与带样式的按钮一样保持自身宽度；写在组件里的 `Column(align: center)` 在窗口里水平居中、靠顶；只有一个小层的 `Stack` 在内容区正中；图标按钮、菜单、浮层按钮在默认列里保持自身宽度、站在前缘（这一种正文改前没有截图）。
+- 仍与 `align: leading` 不同的地方与 GTK 相同，见 Linux 实现记录的同日条目。
+
 ## 未完成与已知限制
 
 - **使用 Windows 自带的运行时不是微软公开说明的用法。** 微软的部署指南只说明非打包应用要自己部署运行时；`CBS.2` 是 Windows 给自己组件用的副本，第三方程序能用是实测结果，以后的 Windows 更新可能改变它的名称、内容或可用性。所以其他程序装的 2.x 总是优先。哪些 Windows 11 版本自带 `CBS.2` 也只在 25H2（26200.9457）上确认过。

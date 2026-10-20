@@ -18,6 +18,7 @@ use bern_ir::{
     Application, ComponentArg, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node, ParamKind,
 };
 use bern_protocol::{EnumDef, TypeTable};
+use layout::window_box;
 
 /// Indented line writer.
 #[derive(Default)]
@@ -102,6 +103,9 @@ struct Ctx {
     /// The nodes are the content of a vertical scroll view, whose height
     /// has no end: none of them can share it by weight.
     scroll_content: bool,
+    /// The nodes are written directly in a window, or through a condition
+    /// there: a column spans the window's width and a stack fills it.
+    window: bool,
 }
 
 impl Ctx {
@@ -167,18 +171,28 @@ impl<'a> Generator<'a> {
     fn node(&self, out: &mut Out, node: &Node, ctx: &Ctx) {
         match node {
             Node::Element(element) => {
+                // Written in the window itself, the element takes the
+                // window's room; what it holds does not.
+                let window = ctx.window.then(|| window_box(element)).flatten();
+                if let Some(open) = &window {
+                    out.open(open);
+                }
                 // What the place the element stands in says about it ends
                 // here; its own children start afresh. A repetition adds no
                 // layout: its rows stand where it does.
                 let repeats = element.kind == "ForEach";
                 let own = if repeats {
-                    ctx.clone()
+                    Ctx {
+                        window: false,
+                        ..ctx.clone()
+                    }
                 } else {
                     Ctx {
                         stagger: false,
                         layer: false,
                         baseline: false,
                         overflow: None,
+                        window: false,
                         ..ctx.clone()
                     }
                 };
@@ -329,6 +343,9 @@ impl<'a> Generator<'a> {
                 if baseline {
                     out.close("}");
                 }
+                if window.is_some() {
+                    out.close("}");
+                }
             }
             Node::Component(reference) => {
                 let component = self.app.component(&reference.component).expect("component");
@@ -360,8 +377,16 @@ impl<'a> Generator<'a> {
                     }
                     Scope::Other | Scope::Flow => call,
                 };
+                // A component written in the window takes the window's room
+                // as its body would.
+                let window = ctx
+                    .window
+                    .then(|| self.window_body(&component.body))
+                    .flatten();
                 if ctx.baseline {
                     out.line(format!("Box(Modifier.alignByBaseline()) {{ {call} }}"));
+                } else if let Some(open) = window {
+                    out.line(format!("{open} {call} }}"));
                 } else {
                     out.line(call);
                 }

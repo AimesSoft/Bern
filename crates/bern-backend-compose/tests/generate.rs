@@ -1004,6 +1004,45 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
+/// Content smaller than the window, written directly in it: a column, a
+/// component's centered column and a stack, through a condition.
+const PLACE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                if app.count > 1 {
+                    Stack(align: bottom) {
+                        Button(id: layer, label: tr! { "en" => "Layer" }) => app.add()
+                    }
+                } else if app.count > 0 {
+                    centered(app: app)
+                } else {
+                    Column(gap: 12, padding: 24) {
+                        Column(align: trailing) {
+                            Text(content: tr! { "en" => "Inner" })
+                        }
+                        Button(id: add, label: tr! { "en" => "Add" }) => app.add()
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn centered(app: stage::Client) -> impl View {
+    ui! {
+        Column(gap: 12, align: center) {
+            Button(id: centered, label: tr! { "en" => "Centered" }) => app.add()
+        }
+    }
+}
+"#;
+
 /// A drop area that opens videos, around a picture from the network,
 /// written directly in the window.
 const DROP_UI: &str = r#"
@@ -1140,4 +1179,53 @@ fn a_drop_and_a_network_picture_in_a_window_reach_the_manifest() {
             "missing `{expected}`:\n{manifest}"
         );
     }
+}
+
+/// Content smaller than the window starts at its top leading corner, as on
+/// the other targets: a column written directly in the window spans its
+/// width, its alignment placing its items across it, also through a
+/// component; a stack without a size fills the window. A column inside
+/// them keeps its own width.
+#[test]
+fn content_in_a_window_starts_at_its_top_leading_corner() {
+    let root = workspace();
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/compose-place-project"),
+        PLACE_UI,
+    );
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let runtime = file(&files, "BernRuntime.kt");
+    assert!(
+        runtime.contains(
+            "Box(Modifier.padding(padding).consumeWindowInsets(padding).imePadding().fillMaxSize(), contentAlignment = Alignment.TopStart) {"
+        ),
+        "the window places its content at its top leading corner"
+    );
+    let kotlin = file(&files, "BernGenerated.kt");
+    let window = &kotlin[kotlin.find("fun BernWindow0()").unwrap()..];
+    for (expected, what) in [
+        (
+            "Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {",
+            "the stack fills the window",
+        ),
+        (
+            "Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) { CenteredView() }",
+            "the component's column spans the window",
+        ),
+        (
+            "Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopStart) {",
+            "the column spans the window",
+        ),
+    ] {
+        assert_eq!(window.matches(expected).count(), 1, "{what}:\n{window}");
+    }
+    // The inner column and the component's own body keep their width.
+    assert!(!window.contains("Alignment.TopEnd"), "{window}");
+    let component = &kotlin[kotlin.find("fun CenteredView(").unwrap()..];
+    let component = &component[..component.find("\n}\n").unwrap()];
+    assert!(!component.contains("fillMaxWidth"), "{component}");
 }

@@ -21,6 +21,7 @@ use bern_ir::{
     Application, ComponentArg, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node, ParamKind,
 };
 use bern_protocol::{EnumDef, TypeTable};
+use layout::window_frame;
 
 /// Indented line writer.
 #[derive(Default)]
@@ -82,6 +83,9 @@ struct Ctx {
     /// An item of a `Flow`, as `row` is: a chip picker's chips are items
     /// of the flow.
     flow: bool,
+    /// Written directly in a window, or through a condition there: a
+    /// column spans the window's width and a stack fills it.
+    window: bool,
 }
 
 /// The system the Swift is generated for. SwiftUI is shared; windows,
@@ -197,6 +201,19 @@ impl<'a> Generator<'a> {
         }
         match node {
             Node::Element(element) => {
+                // Written in the window itself, the element takes the
+                // window's room; what it holds does not.
+                let window = ctx.window.then(|| window_frame(element)).flatten();
+                let outer;
+                let ctx = if ctx.window {
+                    outer = Ctx {
+                        window: false,
+                        ..ctx.clone()
+                    };
+                    &outer
+                } else {
+                    ctx
+                };
                 let inside;
                 let ctx = if ctx.row
                     && element.kind != "ForEach"
@@ -228,6 +245,9 @@ impl<'a> Generator<'a> {
                     out.close("}");
                 }
                 self.placement(out, element);
+                if let Some(frame) = window {
+                    out.line(frame);
+                }
             }
             Node::Component(reference) => {
                 let component = self.app.component(&reference.component).expect("component");
@@ -253,6 +273,13 @@ impl<'a> Generator<'a> {
                     pascal(&component.name),
                     args.join(", ")
                 ));
+                // A component written in the window takes the window's room
+                // as its body would.
+                if ctx.window
+                    && let Some(frame) = self.window_body(&component.body)
+                {
+                    out.line(frame);
+                }
             }
             Node::If(node) => self.if_node(out, node, ctx),
             Node::IfLet(node) => self.if_let(out, node, ctx),

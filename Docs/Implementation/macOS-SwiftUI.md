@@ -509,6 +509,13 @@ open target/bern/macos/Showcase.app
 
 2026-10-20，直接写在窗口正文里的 `Drop(opens: true)`：Info.plist 的 `CFBundleDocumentTypes` 此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类；macOS 与 iOS 共用这份收集，改为连同窗口正文一起看。生成器测试 `a_drop_in_a_window_lists_its_document_types` 为 macOS 与 iOS 生成，改前失败、改后通过。未在系统的“打开方式”里查看。
 
+2026-10-21，窗口正文的摆放（设计文档“一套窗口声明”）：
+
+- 改前：窗口正文由 `BernSearchPaletteHost` 用窗口大小的 `frame` 包住，没写对齐，SwiftUI 默认居中，比窗口小的正文整体在窗口里水平、竖直都居中。同一份正文在 Windows 与 Web 上靠左上，Android 上水平居中、靠顶，GTK 上横向铺满。
+- 修正：这层 `frame` 改为 `alignment: .topLeading`。生成器给直接写在窗口里（经条件或组件也算）、没写宽度的 `Column` 加 `.frame(maxWidth: .infinity, alignment:)`，对齐取它的 `align`，于是它与窗口同宽、子元素按 `align` 摆放；没写尺寸的 `Stack` 加铺满窗口、按它的 `align` 对齐的 `frame`（`under_bars` 本来就铺满）。列里的按钮本来就保持自身宽度。iOS 与 tvOS 共用这段生成。
+- 测试：`content_in_a_window_starts_at_its_top_leading_corner` 为 macOS 与 iOS 生成并做 Swift 6 类型检查；撤掉修正时失败。
+- 实机（macOS 27，探针应用的 420 × 300 窗口，只截应用窗口，用 CLI 切换正文）：改前默认列、写在组件里的 `Column(align: center)` 与只有一个小层的 `Stack` 都在窗口正中；改后默认列从内容区的 (24, 24) 排起，按钮保持自身宽度，居中列在窗口里水平居中、靠顶，`Stack` 的小层仍在正中。图标按钮、菜单、浮层按钮在默认列里同样保持自身宽度、站在前缘。
+
 ## 样式、动效、自绘与模块化
 
 2026-10-12 补记，在 macOS 上用 `examples/planner`（外壳加“笔记”“标签”两个模块）与新建的应用验证。
