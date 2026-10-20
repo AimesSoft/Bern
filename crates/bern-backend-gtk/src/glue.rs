@@ -46,7 +46,7 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
 
 [profile.release]
 panic = "unwind"
-"#,
+{release}"#,
         version = app.app.version,
         gtk = bern("bern-gtk"),
         svg = if bern_target_api::svg::used(app) {
@@ -72,6 +72,7 @@ panic = "unwind"
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
         modules = module_dependencies(context, true),
+        release = bern_target_api::glue::RELEASE_PROFILE,
     )
 }
 
