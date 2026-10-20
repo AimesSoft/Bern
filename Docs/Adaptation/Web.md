@@ -118,6 +118,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 | `slider` | rest、hover、active、focus、disabled | 未选轨道 control.track，已选范围 accent；圆钮为 control.thumb 外环、1 px control.border 轮廓、accent 圆心，悬停与拖动时圆心为 button.prominent.hover / pressed |
 | `media_scrubber` | rest、hover、active、focus、disabled | 已播放 media.played，未播放 media.track；滑块 control.thumb 加 0.5 px control.border 轮廓与投影 |
 | `segmented` | rest、selected、hover、focus、disabled | 外槽 panel；选中段 canvas + text.primary + separator；未选中 text.secondary |
+| `chip` | rest、selected、hover、focus、disabled | 透明 / text.secondary / 1 px control.border 内描边；悬停 hover.overlay + text.primary；选中反色：text.primary 底、surface.canvas 字、无描边 |
 | `nav_item` | rest、hover、selected、focus | 透明 / text.secondary；悬停 hover.overlay + text.primary；选中 accent + on_accent（文字与图标），选中且悬停 button.prominent.hover；没有指示条 |
 | `row` | rest、hover、pressed、focus | 透明 / text.primary；悬停 hover.overlay |
 | `tab` | rest、selected、hover、focus | 透明 / text.secondary；选中 accent.text + 2 px accent 下划线；竖排时选中同 `nav_item` |
@@ -210,6 +211,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
   - 键盘：Enter、Space、↓、Alt + ↓ 打开并把活动项放在当前选项；↑ ↓ 移动活动项，Home / End 到首尾，输入字符跳到以其开头的选项；Enter 或 Space 选择并关闭；Esc 关闭且不改变值；Tab 选择活动项后关闭并移走焦点。点按弹出层外部关闭。
   - 选择只经过与触屏、外部入口相同的选择闭包；弹出层的打开与关闭不写入会话。
 - `segmented`：Radio Group 模式的分段控件，`segmented` 配方，选中段带细微投影。
+- `chips`：Radio Group 模式的一排药丸按钮（高 30 px、左右 12 px、13 px 字重 500），`chip` 配方，组内换行、间距 8 px。直接放在 `Flow` 里且 `label_hidden` 时，组容器为 `display: contents`，每枚标签都是 Flow 的子项。
 - `radio`、`inline`：纵向单选列表，每项 16 px 圆形指示。
 
 ### 5.14 Video
@@ -268,7 +270,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 ## 9. 可访问性与本地化
 
 - 根元素 `lang` 为解析后的语言。
-- 角色映射：Menu → `button`（`aria-haspopup="menu"`）+ `menu` / `menuitem`；LanguagePicker → `combobox` + `listbox`；Button → `button`；IconButton → `button` + `aria-label`；Switch → `switch` / `checkbox`；Slider → 原生 range；媒体进度条 → `slider`；Picker automatic / menu → `combobox` + `listbox` / `option`；Picker segmented / radio → `radiogroup` + `radio`；Tabs → `tablist` / `tab` / `tabpanel`；Sidebar → `listbox` / `option`（`aria-selected`）；NavLink → `link`；对话框 → `dialog`（`aria-modal`、`aria-labelledby`）；浮动窗口 → `dialog`（非模态）；关闭确认 → `alertdialog`；Query 的进度与错误行 → `status` / `alert`。
+- 角色映射：Menu → `button`（`aria-haspopup="menu"`）+ `menu` / `menuitem`；LanguagePicker → `combobox` + `listbox`；Button → `button`；IconButton → `button` + `aria-label`；Switch → `switch` / `checkbox`；Slider → 原生 range；媒体进度条 → `slider`；Picker automatic / menu → `combobox` + `listbox` / `option`；Picker segmented / radio / chips → `radiogroup` + `radio`；Tabs → `tablist` / `tab` / `tabpanel`；Sidebar → `listbox` / `option`（`aria-selected`）；NavLink → `link`；对话框 → `dialog`（`aria-modal`、`aria-labelledby`）；浮动窗口 → `dialog`（非模态）；关闭确认 → `alertdialog`；Query 的进度与错误行 → `status` / `alert`。
 - 控件身份写入 `data-bern-target`，与 `ui.inspect` 的目标 ID 一致。
 
 ## 10. Bern 验收

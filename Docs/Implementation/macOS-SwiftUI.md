@@ -569,3 +569,11 @@ macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出
 `tests/image_hero.rs` 增加了普通视图快照飞行的用例。以上都在一个真实应用上验证：首次引导快节奏连续完成 8 次、慢放（`BERN_MOTION=slow`）2 次，以及完成后切换模块、打开详情和播放器，侧栏位置都正确；慢放下引导窗口从小弹出，完成时小窗口从预览位置长成主窗口。生成器回归测试检查 `Stack(enabled:)` 不再输出 `.allowsHitTesting(`。这个回归测试在高负载时有 2/9 次在原有的图片计时断言处失败，改动前的版本连跑 4 次都通过，怀疑是计时抖动，未证实。
 
 `ScrollView(indicators: hidden)` 生成 `.scrollIndicators(.never)`：`.hidden` 在系统设为「始终显示滚动条」时仍会显示滚动条。
+
+### 标签选择器与换行工具条（2026-10-20）
+
+`Picker(style: chips)` 生成 `BernChips`：每个选项一个系统 `Button`，用 `bernCapsuleControl(height: 30, prominent:)` 画成设计 6.3 的 30 点 chip（13 点中等字重，两端 13 点）；macOS / iOS 26 是系统可交互的 Liquid Glass，选中项染主题色，26 之前是材质胶囊与主题色胶囊；tvOS 上高 40 点、按 tvOS 的焦点样式。选中项带 `.isSelected` 无障碍特征。不显示标签且直接放在 `Flow` 里时，`BernChips` 的主体是一个 `ForEach`，每个按钮都是 `BernFlow` 的子视图，控件登记挂在第一个按钮上；其他位置它们放进自己的 `BernFlow(gap: 8)`，整组带标签作为无障碍名称。
+
+`BernFlow` 先按宽度断行（`Spacer` 带 `BernRowSpacer` 布局值，断行时不占宽度），再把每行余下的宽度平分给这一行的 `Spacer`，子项在行高内竖直居中，与 Web 的 `flex-wrap` 加 `flex: 1` 一致。生成器在 `Flow` 的子项上设 `row` 与 `flow`，所以其中的 `Spacer` 生成 `BernRowSpacer`、分隔线竖立。
+
+验证（2026-10-20，macOS 26，窗口截图）：应用的设置 › 插件页，1000 点宽的设置窗口中分段控件「市场 / 已安装 3」靠左，五个 chip 靠右，chip 52 × 30 点、间距 10，与原型苹果版（52 × 30、间距 10）一致，选中的「全部」为主题色玻璃胶囊，两者竖直居中。设置窗口最小宽 1000，macOS 上看不到换行；换行在 Web、Android 与 iOS 的手机宽度下验证。`showcase_generates_swift_that_type_checks` 与 iOS 版类型检查通过。

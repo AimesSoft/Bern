@@ -64,7 +64,7 @@
 | `ScaleBox` | **`width: Length`**<br>**`height: Length`** | 可含子内容；无动作 |
 | `Positioned` | **`x: Length`**<br>**`y: Length`**<br>**`width: Length`**<br>**`height: Length`** | 可含子内容；无动作 |
 | `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | 可含子内容；无动作 |
-| `Flow` | `gap: Length` | 可含子内容；无动作 |
+| `Flow` | `gap: Length` | 可含子内容；无动作；每行的子项竖直居中，`Spacer` 占满所在行余下的宽度 |
 | `Timer` | **`interval: Number`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
 | `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
 | `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | 不含子节点；无动作；直接位于 ["Picker"] |
@@ -123,7 +123,7 @@
 | `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |
 | `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`corner: Length` | 不含子节点；无动作 |
 | `Query` | **`id: Id`**<br>**`query: Query`**<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 可含子内容；无动作 |
-| `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline` | 仅含 ["PickerOption"]；动作可选 |
+| `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | 仅含 ["PickerOption"]；动作可选；`chips` 不接受 `shape` / `height` |
 
 `Grid` 给出 `cell_ratio` 时每行一样高：列宽 ÷ `cell_ratio` + `cell_extra`（如海报 2 : 3 加两行字的高度：`cell_ratio: 0.6667, cell_extra: 54`），各项从格子顶部排，内容更高时伸进下方的行间距，与按最高一项定行高的默认方式不同。
 

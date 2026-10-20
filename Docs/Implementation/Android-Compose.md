@@ -56,7 +56,7 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 - **窗口根**：每个窗口一个 `Scaffold`，顶栏显示窗口标题，或里面的页面声明的标题（`Form` 的标题、分栏的选中项）、返回与工具栏操作。被叠在上面的窗口不响应系统返回。叠在主窗口上的窗口左上角是关闭按钮，经关闭协议请求关闭。
 - **分栏**：宽度不小于 600 dp 时侧边栏（280 dp）与详情并排；更窄时先显示侧边栏列表，选中后进入详情，系统返回与顶栏的返回箭头回到列表。外部入口选择侧栏项时同样进入详情。
 - **页签**：底部 `NavigationBar`；工具栏中的选择器显示为顶栏里的下拉菜单，因为顶栏只有一行高。
-- **控件**：`Button` 默认是色调按钮，`prominent` 为实心按钮，`plain` 为文字按钮；`Switch` 是整行可点按的开关或复选框；`Picker` 按样式是下拉框、分段按钮或单选列表；`TextInput` 是带标签的描边输入框；`Slider` 可带两端图标。
+- **控件**：`Button` 默认是色调按钮，`prominent` 为实心按钮，`plain` 为文字按钮；`Switch` 是整行可点按的开关或复选框；`Picker` 按样式是下拉框、分段按钮、单选列表或一排 `FilterChip`（`chips`）；分段按钮不带对勾（设计的 `.c-seg` 只以底色标出选中段），标签按整行宽度量，计数等后缀不会被截掉；`TextInput` 是带标签的描边输入框；`Slider` 可带两端图标。
 - **启动器图标**：没有声明或声明 PNG 时是 `mipmap-xxxhdpi/ic_launcher.png`；`[app.icon].android` 为 `res` 文件夹时原样并入应用的 `res`，自适应图标与主题图标（单色层）随之生效，有 `ic_launcher_round` 时清单加 `android:roundIcon`。
 - **图标**：Bern 的图标名（SF Symbols 命名）映射到 Material 图标：Material 核心图标集里有的直接用，核心集没有的（暂停、音量、亮度、网格、归档、文件夹、调色板、媒体库、同步、插件、键盘、无线网络等）由运行时按 Material 图标（baseline 样式）的路径数据绘制。对照表只有一份（`src/icons.rs`），生成时写进 `BernIcons.get`；应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示中性圆点（圆点只留给没有图标的位置）。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字，测试逐个核对。
 - **导航项按条件出现**：`if`、`match` 与 `ForEach` 中的侧栏项与页签照常生成，选中项消失时回到 `fallback` 或第一个可见项。
@@ -143,7 +143,7 @@ bern package --target android
 ### 布局与页面结构
 
 - `padding_x`、`padding_y` 在 `padding` 之上分别覆盖左右与上下。`Row(align: baseline)` 的每个直接子元素（`Spacer` 除外）外包一层 `Box(Modifier.alignByBaseline())`，组件也一样。
-- `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从顶部排，内容更高时伸进行距。`Flow` 是 `FlowRow`。
+- `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从顶部排，内容更高时伸进行距。`Flow` 是 `FlowRow`：子项竖直居中（`itemVerticalAlignment`），`Spacer` 是 `weight(1f)`，占满所在行余下的宽度；其中的分段 `Picker` 取自身宽度，不显示标签的 `chips` 把每个 `FilterChip` 直接放进这个 `FlowRow`。
 - `ScaleBox`：子元素在声明的逻辑尺寸中层叠（左上对齐），整体在 `placeWithLayer` 中缩放到能放下并居中，超出部分裁掉；Compose 的命中测试经过同一个变换，点击区域与画面对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Marquee`：内容按自然宽度从右缘外跑到左缘外，位置在图层中按帧时钟写入，不重新组合；`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字带 1 dp 的黑色阴影（`LocalBernTextShadow`）。
 - `Accordion`：每列一个 0 到 1 的权重（`Animatable`），列宽由权重分配，总宽不变，每列在图层中按 `corner` 圆角裁剪。
 - 顶栏：工具栏中 `Spacer` 之前的项放在返回按钮之后（`TopAppBar` 的导航位置），之后的放在末端；`Text` 可以放在工具栏里。`SidebarHeader` 固定在侧栏列表上方，`Sidebar(width:)` 是宽窗口中侧栏的宽度，`Detail(titled: false)` 时顶栏不显示所选目的地的名称，`SidebarItem(badge:)` 是 `NavigationDrawerItem` 的 `badge`（为 0 时隐藏）。
@@ -246,6 +246,12 @@ bern package --target android
 - 列里的列（行里的行）直接含 `Spacer` 且没写这个方向的尺寸时用 `Modifier.weight(1f)` 占满剩余空间，`Spacer` 才有空间可分，与其他目标相同；滚动内容、列表与 `Form` 的行不分（它们的高度不定）。此前引导最后一步的列只有内容高，`Spacer` 为零，底部的“上一步 / 开始使用”被挤出屏幕。实测引导最后一步底栏在屏幕底部，纯净模式首页、设置列表与设置子页没有变化。
 
 2026-10-20，图标补齐，MIX 2S（Android 15），只用 `adb` 截屏，不发送按键、不操作界面（当时另有会话在用这台手机，手机上是它用当前 Bern 工作树构建的包，含本次改动）：底部标签的首页、新番、媒体库（Video Library）与搜索，设置列表的播放、可选功能、插件（Extension）、快捷键（Keyboard）、关于，插件市场卡片的防剧透（Visibility Off）、正则弹幕过滤（Filter List）、敏感词屏蔽（Shield）、片段导出（Content Cut）、外部播放器（Open In New）都显示 Material 图标，没有圆点。之后手机空出来，用生成的 CLI（`ui activate`，不发按键）打开“可选功能”页：弹幕（Chat）、画质增强（Auto Awesome）、媒体库、追番、账号同步（Sync）、网络媒体源（Dns）、局域网与远程（Wifi）、下载八行的图标都正常，看完回到原来的插件页。另外把 `BernViews.kt` 的 58 条路径用 rsvg 渲染核对过图形（`character.cursor.ibeam` 因此改用已有的 `text`，两者路径相同）。
+
+2026-10-20，标签选择器与换行工具条，MIX 2S（Android 15，393 dp 宽），装包后经 CLI 打开设置 › 插件，用 `adb` 截屏与 `uiautomator` 读位置，不发送按键：
+
+- 插件页的 `Flow(gap: 10)` 里是分段 `Picker`、`Spacer` 与 `Picker(style: chips)`。第一行是分段控件与靠右的「全部」「弹幕」，其余三个 chip 换到第二行靠左；`FilterChip` 32 dp 高，选中的「全部」为色调底色，不带对勾。经 CLI 选「工具」后它变为选中，列表只剩工具类插件。
+- 原型（Material，手机）第一行放得下三个 chip：它的分段控件 123 宽、chip 54 宽（13 px 字）。Compose 的 `SegmentedButton` 各段等宽，且总为对勾留出 18 + 8 dp（不显示对勾时也留），`FilterChip` 为 14 sp 字、60 dp 宽，这一行在 361 dp 里放不下第三个。这是系统控件自己的尺寸，没有改画。
+- 发现并修正：分段按钮按各段的最小固有宽度排，文字的最小固有宽度是最长的一个词，带计数的标签「已安装 3」原来被截成「已安装」；现在标签按整行宽度量。
 
 ## 未完成与已知限制
 

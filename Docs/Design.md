@@ -513,7 +513,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | PopoverButton | 浮层按钮：按下弹出一个浮层，里面放任意内容（滑块、开关、文字），例如音量键；`label` 是可访问名称，有 `icon` 时只显示图标；`presented` 可以绑定会话的 `bool` 字段，界面由它打开或关闭浮层；外部入口用 `ui.activate` 打开；内容里的控件随浮层挂载 | 媒体类应用；Web 已实现（弹出层），浏览器中验证画框页的音量浮层：关闭时只有按钮，`ui.activate` 打开后其中的滑块才出现在 `ui.inspect` 里，关闭后随之卸载；macOS 与 iOS 已实现（系统浮层，iPhone 上也保持气泡而不是底部面板），在 macOS 与 iPhone 17 Pro 模拟器上同样验证；Compose 已实现（Material 的 `DropdownMenu` 浮层；只有文字时是色调按钮），Android 模拟器上验证同样只在打开时挂载滑块，`presented` 的两个方向与 `shortcut` 在临时应用中验证；GTK 与 WinUI 3（`Flyout`）已实现，Linux 虚拟机上验证 `ui.activate` 打开后滑块出现在 `ui.inspect`，Windows PC 上验证打开时挂载、关闭后卸载 |
 | Toast | 轻提示：出现或 `key`（没写时是内容）变化时浮现，`duration` 秒后（默认 3）自己隐藏；放在哪里就显示在哪里，通常叠放在页面底部 | 媒体类应用；SwiftUI 已实现；Web 在窗口底部居中弹出、按时下沉淡出，浏览器中已验证；GTK（`AdwToast`）与 WinUI 3（带 `ThemeShadow` 的胶囊）已实现，Linux 虚拟机与 Windows PC 上验证收藏后的轻提示 |
 | Slider | 范围值、连续变化和提交事件 | 基础组件 |
-| Picker | 从有限选项中单选，按场景呈现为菜单或分段控件 | 基础组件 |
+| Picker | 从有限选项中单选，按场景呈现为菜单、分段控件、单选列表或一排标签（`style: chips`，每个选项一枚系统的开关按钮或 chip；直接放在 `Flow` 里且不显示标签时，每枚都是 Flow 的子项） | 基础组件；`chips` 六个目标都已实现（2026-10-20） |
 | ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复；`ScrollView` 的 `snap` 与 `position` 见“联动” | 基础组件，虚拟化后续；`snap`、`position` SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动” |
 | Pinch 和 Swipe | 把双指缩放或拖动绑定到一个会话数值，见“联动” | 媒体类应用；SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动” |
 | Image | 随包的 PNG 或 JPEG 资源，或引擎状态中的 `MediaSource`（本地文件或 http(s) 地址，运行时读取，可以是 `Option`，为空时不显示）；`width`、`height`、`aspect` 至少写一个；只写宽或高时另一边按图片比例，仅写 aspect 时随父容器宽度保持该比例；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正。HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）在显示器能显示 HDR 时按高动态范围显示，SDR 白保持在系统的 SDR 亮度，高光按显示器峰值做色调映射；不能显示 HDR 时，带增益图的 JPEG 显示作者给的 SDR 图，PQ 与 HLG 做色调映射 | 已实现；`MediaSource` 图片 SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现（`runtime_images`），只显示 SDR；WinUI 3 的 http(s) 图片未验证。HDR 在 macOS 与 Web（Chrome）实测；Windows 自绘，只在 SDR 显示器上实测；Linux 的 HDR 输出要 GTK 4.16 起并由用户打开 GTK 的色彩管理，未实测；iOS 模拟器显示 SDR 版本，真机未实测 |
@@ -2342,7 +2342,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 ### 同窗口引导与后台状态（2026-10-15）
 
-`Modal(width: 960, height: 600)` 在窗口根部呈现居中遮罩，尺寸不超过窗口减去 32 pt，不被背景内容的固有宽度撑大；与主界面共享元素命名空间，并将入场、退场和减少动画偏好应用到实际面板。小窗口避开 macOS 顶部工具栏。调用方通过 `Stack(enabled: false)` 禁用背景子树（点击、键盘及无障碍），正文可用 `ScrollView`，页脚放在滚动区域外。`Flow(gap: 8)` 按固有尺寸从左到右换行。
+`Modal(width: 960, height: 600)` 在窗口根部呈现居中遮罩，尺寸不超过窗口减去 32 pt，不被背景内容的固有宽度撑大；与主界面共享元素命名空间，并将入场、退场和减少动画偏好应用到实际面板。小窗口避开 macOS 顶部工具栏。调用方通过 `Stack(enabled: false)` 禁用背景子树（点击、键盘及无障碍），正文可用 `ScrollView`，页脚放在滚动区域外。`Flow(gap: 8)` 按固有尺寸从左到右换行，每行的子项竖直居中；`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度（与 CSS 的 `flex-wrap` 加 `flex: 1` 相同），六个目标一致（2026-10-20）。
 
 `Timer(interval: 0.5, enabled: app.running) => app.tick()` 在启用且挂载期间定时提交命令，卸载和禁用取消任务，不是逐帧绘制 API。可通过模块贡献插入后台插槽，跨页面保持运行。`Picker` 可显式包含 `PickerOption(value:, label:)`，标签可插入状态计数。以上由 SwiftUI 与 Web 的 `modal_flow_timer` 能力提供，其他目标明确拒绝。
 

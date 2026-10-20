@@ -85,7 +85,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | `SplitView` / `Sidebar` / `Detail` | `NavigationView`：分节标题、窗格中的 `AutoSuggestBox`；详情页头显示所选目的地、工具与返回。宽度不足 800 时窗格收为图标栏 | 同左，Windows 10 样式 |
 | `Navigation` / `NavLink` | 根内容与顶层目的地叠放，推入时根内容保持挂载；页头出现返回按钮，Esc、Alt+← 返回 | 同左 |
 | `Tabs` / `Tab` | 页头中带图标的 `SelectorBar` | 页头中的一组 `ToggleButton`（系统 XAML 没有 `SelectorBar`） |
-| `Picker` | `segmented` 为 `SelectorBar`，其他为 `ComboBox` | `segmented` 为 `ToggleButton` 组，其他为 `ComboBox` |
+| `Picker` | `segmented` 为 `SelectorBar`；`chips` 为一组 `ToggleButton`（选中项为强调色），在 `Flow` 中且不显示标签时每个按钮都是 Flow 的子项，否则放进自己的换行面板；其他为 `ComboBox` | `segmented` 与 `chips` 都是 `ToggleButton` 组，其他为 `ComboBox` |
 | `Form` / `Section` | 滚动页面，卡片行（`CardBackgroundFillColorDefaultBrush` 与描边、圆角） | 卡片为 Windows 10 的列表底色，无圆角 |
 | `Text` / `Label` | WinUI 字体样式（`TitleLargeTextBlockStyle` 等）；次要文字为 0.65 不透明度 | 系统字体样式（`HeaderTextBlockStyle` 等） |
 | `Button` / `IconButton` | `prominent` 为 `AccentButtonStyle`；`plain` 与图标按钮以轻量样式资源设为透明；`destructive` 为危险色 | 同左，取 Windows 10 的对应资源 |
@@ -205,7 +205,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 ### 布局与页面结构
 
 - `padding_x`、`padding_y` 在 `padding` 之上分别覆盖左右与上下。`Row(align: baseline)`：各子元素先顶对齐排布，再按各自第一个文字块的 `BaselineOffset`（经 `TransformToVisual` 换算到子元素内）下移到同一条基线，多占的高度在下一轮测量中计入。
-- `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从格子顶部排，内容更高时伸进下面的行距。`Flow` 是换行面板。
+- `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从格子顶部排，内容更高时伸进下面的行距。`Flow` 是换行面板（`FlowPanel`）：子项在行内竖直居中，`Spacer`（角色 `bern-spacer`）换行时不占宽度，排好后分得所在行余下的宽度。
 - `ScaleBox`：子元素在声明的逻辑尺寸中层叠，整体以一个 `CompositeTransform`（缩放加居中平移）适配所得空间，超出部分裁掉；图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Marquee`：内容按自然宽度每帧（`CompositionTarget.Rendering`）从右缘外跑到左缘外，`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字由 Composition 的 `DropShadow`（以文字自己的 `GetAlphaMask` 为蒙版）带 1 点黑色阴影。
 - `Accordion`：每列一个 0 到 1 的权重弹簧，列宽由权重分配，总宽不变，每列按 `corner` 圆角裁剪（裁剪在每次排布时按列的大小设置）。
 - 页头：工具栏中 `Spacer` 之前的项放在返回按钮之后的前缘，之后的放在后缘；`Text` 可以放在工具栏里。`SidebarHeader` 是 `NavigationView.PaneHeader`，`role: title` 时不显示（两种前端的标题栏都已在应用图标旁显示窗口标题）；`Sidebar(width:)` 是 `OpenPaneLength`；`Detail(titled: false)` 时页头不显示所选目的地的名称；`SidebarItem(badge:)` 在 WinUI 3 中是 `InfoBadge`（为 0 时隐藏）。
@@ -383,6 +383,11 @@ target\bern\windows\Showcase\showcase.exe
 - 齿轮在标准高度的标题按钮下方，中心约在 (1097, 51)，右缘离窗口右边 150（设计稿为 (1112, 76)，右缘 150）；`apply-preset --preset Anime` 回到有侧栏的首页后页头回到原位，首页舞台与“也在看”的缩略图进度条正常。侧栏底部的头像为浅灰圆底（实测 226，背景 243）、中灰人形（122），肩部被圆裁住；「继续上次」的键帽为浅灰底（228，按钮底 251），图标、文字与键帽在按钮里垂直居中。
 - 测试：`cargo test -p bern-backend-winui3 -- --test-threads=1` 在 Windows 上用 MSVC 编译两套前端通过（生成测试 11 项）。
 - 与设计稿的差别：页头在所有页面都比设计稿高约 17 到 25（设计稿的标题区 48 高、工具栏 56 高，WinUI 的标题栏 32 高，页头紧接其下），纯粹模式的齿轮因此在设计稿位置上方约 25；`fill.strong` 在浅色下是 9.4%，设计稿的键帽与头像底是 6%。未验证：齿轮的点击（没有向桌面发送输入）；Islands 下没有 `TitleBar`，页头位置不变。
+
+2026-10-20，标签选择器与换行工具条（Windows PC，WinUI 3，窗口快照与元素树转储）：
+
+- 应用的设置 › 插件（设置窗口 1000 宽）：分段控件是 `SelectorBar`「市场 / 已安装 3」，靠左；五个 chip 是 `ToggleButton`，靠右，选中的「全部」为强调色填充，4 px 圆角，与原型 Fluent 版一致；两者竖直居中。
+- 换行：应用的窗口到不了手机宽度，改用展示应用的「工具条」一节（窗口 720 宽）。`BERN_DUMP_TREE` 的元素树中 `FlowPanel` 宽 336：第一行是 `SelectorBar`（156 × 47）、`Spacer` 与靠右的「全部」「常用」（末端 681，正是行尾），「最近」换到第二行行首；chip 32 高，在 47 高的行里竖直居中。转储同时发现 `Spacer` 的竖直位置按零高度算了偏移，已改正（SwiftUI 的 `BernFlow` 同样改正）。
 
 ## 未完成与已知限制
 

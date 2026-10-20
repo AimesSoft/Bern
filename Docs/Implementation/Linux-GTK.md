@@ -60,7 +60,7 @@
 | `Search` | `GtkSearchEntry`；Esc 清空 |
 | `Switch` | 表单中为 `AdwSwitchRow`，`checkbox` 样式为带 `GtkCheckButton` 的行 |
 | `Slider` | 行内为标题与带两端图标的 `GtkScale`；拖动只改本窗口预览，松开提交一次，键盘与滚轮立即提交 |
-| `Picker` | `segmented` 为 `linked` 的切换按钮组；其他为 `AdwComboRow` 或 `GtkDropDown` |
+| `Picker` | `segmented` 为 `linked` 的切换按钮组；`chips` 为同组（`set_group`）、不相连的 `GtkToggleButton`，在 `Flow` 中且不显示标签时每个按钮都是 Flow 的子项，否则放进自己的 `BernFlow`（间距 8）；其他为 `AdwComboRow` 或 `GtkDropDown` |
 | `Menu` / `MenuItem` | `GtkMenuButton` 与 `GMenu`；菜单项是动作，可用性来自声明 |
 | `LanguagePicker` | `AdwComboRow`，选项为语言的自称 |
 | `Query` | 加载：转圈与文案；空结果与无数据失败：紧凑的 `AdwStatusPage`（失败带“重试”）；刷新与有数据的失败：数据上方的状态行 |
@@ -189,7 +189,7 @@ GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `featu
 - `padding_x`、`padding_y`：在 `padding` 之上分别覆盖左右与上下的外边距。`Row(align: baseline)` 用 GTK 的 `BaselineCenter` 对齐。
 - 声明的宽高就是请求的尺寸：`Column`、`Row` 给出 `width` 或 `height` 时外包 `BernSized`，`Stack` 自己测量，它们都不再因内容（如未截断的长标题）要求更宽。
 - `Grid(row_gap:)` 单独设置行距。`Grid(cell_ratio:, cell_extra:)` 用 `BernCellGrid`：按最小宽度算出列数，每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各项从格子顶部排，内容更高时伸进下面的行距。
-- `Flow` 是 `BernFlow`：子项各取自然宽度，放不下时换到下一行，行高取该行最高者。
+- `Flow` 是 `BernFlow`：子项各取自然宽度，放不下时换到下一行，行高取该行最高者，子项在行内竖直居中；`Spacer`（带 `bern-spacer` 样式类）换行时不占宽度，排好后分得所在行余下的宽度。
 - `ScaleBox` 是 `BernScaleBox`：子项在声明的逻辑尺寸中层叠（左上对齐），整体以一个变换缩放到能放下并居中、超出部分裁掉，所以图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，按（可弹簧的）`x`、`y`、`width`、`height` 放置内容。
 - `Marquee`：内容按自然宽度从右缘外跑到左缘外，每 `duration` 秒一次，`phase` 为起始进度；`paused` 时停在原处，减少动态效果时静止在宽度 28% 处；文字带 1 点黑色阴影；`opacity` 可绑定。
 - `Accordion`：列宽由每列一个 0 到 1 的权重弹簧决定，收起列为固定宽度，总宽保持不变；每列按 `corner` 圆角裁剪。
@@ -327,6 +327,12 @@ target/bern/linux/Showcase/showcase
 - 新增 38 个名字，都取 Adwaita 46 中的图标（只有一个取自 libadwaita）：`house` → `go-home`、`calendar` → `x-office-calendar`、`film.stack` → `applications-multimedia`、`server.rack` → `network-server`、`wifi` → `network-wireless`、`keyboard` → `input-keyboard`、`puzzlepiece.extension` → `application-x-addon`、`arrow.triangle.2.circlepath` → `emblem-synchronizing`、`arrow.up.arrow.down` → `view-sort-descending`、`arrow.up.left.and.arrow.down.right` → `view-fullscreen`、`backward.end.fill` / `forward.end.fill` → `media-skip-backward` / `media-skip-forward`、`gobackward.10` / `goforward.10` → `media-seek-backward` / `media-seek-forward`、`play` / `pause` → `media-playback-start` / `media-playback-pause`、`speaker.wave.2` → `audio-volume-medium`、`camera` → `camera-photo`、`link` → `insert-link`、`paperplane` → `mail-send`、`moon` → `weather-clear-night`、`eye.slash` → `view-conceal`、`scissors` → `edit-cut`、`shield` → `security-high`、`tv` → `tv`、`checkmark.circle` → `selection-mode`、`circle` / `circle.fill` → `radio` / `media-record`、`square` → `checkbox`、`chevron.up` → `pan-up`、`arrow.left` → `go-previous`、`arrow.down` → `document-save`，以及上一段列出的代替图标（名字都省略了 `-symbolic` 后缀）。选择时把虚拟机上 Adwaita 46 的全部符号图标渲染成图表对照。
 - 测试：`bern-backend-gtk` 的单元测试核对表已排序并覆盖 Bern 图标集；生成测试把画廊的第一个图标换成新名字（检查通过）和不存在的名字（检查报错）；`bern-gtk` 的测试在装有 Adwaita 的机器上核对表中每个图标都在 Adwaita 里（`adw-` 开头的除外）。
 - 实测（Ubuntu 24.04 虚拟机，GTK 4.14.5、libadwaita 1.5.0、Adwaita 46，经 Broadway）：该应用 `bern check --target linux` 没有错误；主侧栏的首页、新番、媒体库，设置侧栏全部 15 项（经 CLI 打开 5 个可选模块后），“可选功能”页的各行与右侧预览（含播放条），插件市场的 6 张卡片都显示主题图标，没有缺失图标；`adw-external-link-symbolic` 在 libadwaita 1.5 下解析成功。虚拟机上 `crates/bern-gtk` 的 `cargo test --all-features icons` 与 `cargo clippy --all-features --all-targets -- -D warnings` 通过。
+
+2026-10-20，标签选择器与换行工具条（Ubuntu 24.04 虚拟机，经 Broadway，无头 Chromium 截图）：
+
+- 应用的设置 › 插件（设置窗口 1000 宽）：分段控件为 `linked` 的切换按钮「市场 / 已安装 3」，靠左；五个 chip 为同组的 `GtkToggleButton`，靠右，选中的「全部」底色更深，与原型 Adwaita 版（6 px 圆角、粗体、选中更深的中性底）一致；两者竖直居中。
+- 未验证：窄宽度下的换行。该应用的主窗口最小 720、设置窗口最小 1000，到不了手机布局；Broadway 下 `window resize` 不生效。`BernFlow` 的断行与分配抽成 `flow_lines`，单元测试用原型手机版的实测尺寸（分段 123、chip 54、宽 358、间距 10）算出第一行 chip 在 176、240、304，第二行在 0、64，与原型一致。
+- `cargo clippy --all-features --all-targets -- -D warnings` 与 `cargo test --all-features`（92 项）通过；`cargo test -p bern-backend-gtk` 对生成的展示应用做类型检查通过。
 
 ## 未完成与已知限制
 

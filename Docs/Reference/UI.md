@@ -106,6 +106,16 @@ Slider(id: volume,
 
 受控 Slider 拖动中显示本地预览，拖动结束提交；引擎快照不会在编辑中抢回滑块位置。`PickerOption(value:, label:)` 可显式声明选项并把实时计数插入 label。受控值由 SwiftUI 与 Web 的 `controlled_values` 支持，显式选项另由 `modal_flow_timer` 检查。
 
+`Picker(style: chips)` 每个选项一枚标签（chip），选中的一枚突出：Apple 平台是系统玻璃胶囊按钮（设计的 30 点 chip，选中项为主题色，26 之前是材质胶囊），Compose 是 Material `FilterChip`，WinUI 3 是 `ToggleButton`，GTK 是同组的 `GtkToggleButton`，Web 是描边药丸按钮（选中项反色）。没有可见标签（`label_hidden: true`）而直接放在 `Flow` 里时，每枚标签都是这个 Flow 的子项，窄的时候逐枚换行；其他位置它们在自己的一行里换行。下面是一条工具栏：分段控件靠左，标签靠右，放不下的标签换到下一行。
+
+```rust
+Flow(gap: 10) {
+    Picker(id: tab, label: tr! { "zh-Hans" => "插件", "en" => "Plugins" }, selected: app.tab, style: segmented, label_hidden: true) => app.set_tab(app.tab)
+    Spacer
+    Picker(id: category, label: tr! { "zh-Hans" => "分类", "en" => "Category" }, selected: app.category, style: chips, label_hidden: true) => app.set_category(app.category)
+}
+```
+
 ## 图片、排版与共享元素
 
 | 声明 | 用途与边界 |
@@ -127,7 +137,7 @@ macOS 的 Image 使用窗口上层像素覆盖层，Web 使用视口坐标的图
 | 接口 | 当前语义 |
 | --- | --- |
 | `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。背景子树使用 `Stack(enabled: false)` 禁用 |
-| `Flow(gap:)` | 按内容固有尺寸从左到右换行 |
+| `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
 | `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置 |
 | `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示图标与标题的平台（Windows 的两种前端）不显示它，其他平台照常显示 |
