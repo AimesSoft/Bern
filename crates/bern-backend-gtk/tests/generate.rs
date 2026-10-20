@@ -1034,6 +1034,63 @@ pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> 
 }
 "#;
 
+/// Two tab views whose middle tab is under a condition, one with a
+/// fallback and one without.
+const TABS_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::value]
+pub enum Pick {
+    A,
+    B,
+    C,
+}
+
+#[bern::session]
+pub struct Draft {
+    pub plain: Pick,
+    pub backed: Pick,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Tabs(id: plain, selection: draft.plain) {
+                    Tab(value: Pick::A, label: tr! { "en" => "A" }) {
+                        Text(content: tr! { "en" => "A" })
+                    }
+                    if app.count > 0 {
+                        Tab(value: Pick::B, label: tr! { "en" => "B" }) {
+                            Text(content: tr! { "en" => "B" })
+                        }
+                    }
+                    Tab(value: Pick::C, label: tr! { "en" => "C" }) {
+                        Text(content: tr! { "en" => "C" })
+                    }
+                }
+            }
+            Window(id: other, title: tr! { "en" => "Other" }, initial: open) {
+                Tabs(id: backed, selection: draft.backed, fallback: Pick::C) {
+                    Tab(value: Pick::A, label: tr! { "en" => "A" }) {
+                        Text(content: tr! { "en" => "A" })
+                    }
+                    if app.count > 0 {
+                        Tab(value: Pick::B, label: tr! { "en" => "B" }) {
+                            Text(content: tr! { "en" => "B" })
+                        }
+                    }
+                    Tab(value: Pick::C, label: tr! { "en" => "C" }) {
+                        Text(content: tr! { "en" => "C" })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+
 /// A project of the interface `ui` over a small protocol, compiled from
 /// sources written under `dir`.
 fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
@@ -1214,6 +1271,34 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
         "c_centered(p, &c.child(\"centered\", vec![]));",
         "b::StackProps { axis: \"column\", gap: Some(b::Num::Fixed(12.0)), padding: b::Padding { all: Some(b::Num::Fixed(24.0)), x: None, y: None }, width: None, height: None, align: None, ",
         "b::ButtonProps { id: \"add\", ",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+}
+
+/// `Tabs` hands its `fallback` to the runtime, which moves the selection
+/// there when the selected tab's branch goes, and to the first tab left
+/// without one, as on the other targets (the runtime's own tests check the
+/// choice).
+#[test]
+fn tabs_hand_their_fallback_to_the_runtime() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/gtk-tabs-project"), TABS_UI);
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-tabs");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    for expected in [
+        "b::Tabs(p, c, Some(\"plain\"), b::Field { session: 0, field: 0 }, None, b::build(|p, c| {",
+        "b::Tabs(p, c, Some(\"backed\"), b::Field { session: 0, field: 1 }, Some(b::get(|c| rt::variant(2, vec![]))), b::build(|p, c| {",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }

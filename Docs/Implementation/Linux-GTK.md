@@ -359,6 +359,14 @@ target/bern/linux/Showcase/showcase
 - Ubuntu 24.04 虚拟机：bern-gtk 的 `cargo test --all-features`（95 项）与 `cargo clippy --all-features --all-targets -- -D warnings` 通过；`cargo test -p bern-backend-gtk` 的生成应用类型检查（showcase、gallery 等）通过。探针应用经 Broadway 实测（用 CLI 切换正文）：默认列从左上排起，按钮保持自身宽度；写在组件里的 `Column(align: center)` 水平居中、靠顶；只有一个小层的 `Stack` 在内容区正中；图标按钮、菜单、浮层按钮在默认列里保持自身宽度、站在前缘。
 - 仍与 `align: leading` 不同的地方：默认列仍把按钮类以外的子元素拉满（文字看上去一样）；嵌在默认列里、写了 `align: center` 或带底色的列会横跨外层列，SwiftUI、Compose 与 Web 上它只与自己的内容同宽。WinUI 3 相同。这一条按代码推断，没有实测。
 
+2026-10-21，页签的 `fallback`（设计文档“导航容器的项同样可以是动态的”）：
+
+- 改前（Ubuntu 24.04 虚拟机经 Broadway 实测）：探针应用有两个窗口，各一个 `Tabs`，页签甲、写在 `if` 里的乙、丙、丁，一个不写 `fallback`，一个写 `fallback: 丁`。经 CLI 选中乙后让条件变假，两个窗口的选中都停在已经卸载的乙上（`ui inspect` 的 `value` 为空），页面空白，切换器里没有一项高亮；既不回到 `fallback`，也不回到第一个页签。原因：生成器没有把 `Tabs` 的 `fallback` 传给运行时，运行时只在选中项挂载时显示它；`AdwViewStack` 移除正在显示的页后不再显示任何页。侧栏（`SplitView`）早已按 `fallback` 处理，此前的“完成”只对侧栏成立。
+- 修正：生成器把 `fallback` 传给 `b::Tabs`；选中值没有挂载的页签时，等这次更新挂载完替换的页签后，选中移到 `fallback`（它也挂载着时），否则移到切换器里的第一个页签，与 WinUI 3、Web 相同。侧栏与页签共用这一选择（`settled`）。页签增减、运行时切换显示的页时，视图栈自己显示的页不当作选择写回。
+- 测试：bern-gtk 的 `a_selection_without_its_item_moves_to_the_fallback_or_the_first`；生成器测试 `tabs_hand_their_fallback_to_the_runtime` 断言有 `fallback` 的 `Tabs` 传 `Some(b::get(…))`、没有的传 `None`。
+- 改后（同一探针）：不写 `fallback` 的窗口回到甲，页面是甲页、切换器高亮甲；写了 `fallback: 丁` 的回到丁，切换器为“甲 丙 丁”、高亮丁。在切换器上点丙后选中为丙；选中丙时乙出现、消失，选中都留在丙。
+- 同时看到、尚未修正：后挂载的页签排在切换器末尾，而不是声明的位置（乙重新出现后为“甲 丙 丁 乙”）。`Tab` 挂载时把页加到 `AdwViewStack` 末尾，视图栈没有插入到指定位置的接口。
+
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。
@@ -375,6 +383,7 @@ target/bern/linux/Showcase/showcase
 - `Menu` 的菜单项图标与 `destructive` 角色不呈现（GNOME 菜单通常只有文字）。
 - 多实例窗口、焦点迁移、Flatpak 等打包与图标安装尚未实现；桌面文件的 `Exec` 是构建机上的绝对路径。
 - 设置窗口切换页签只构建选中的页签。
+- 写在 `if`、`match` 或 `ForEach` 里、晚于其他页签挂载的页签排在切换器末尾，不在声明的位置（2026-10-21 实测，见验证记录同日条目）；其他目标按声明的顺序排（按代码，未逐一实测）。
 - HDR 图片的 HDR 输出（GTK 4.16 起、Wayland、打开色彩管理）没有实测：测试用的虚拟机是 GTK 4.14，也不能输出 HDR。GTK 的 JPEG 加载器不读增益图，所以增益图由 Bern 应用；GTK 的色彩空间转换只截断不做色调映射，所以 GTK 不输出 HDR 时由 Bern 先转成 SDR。
 - `Video` 的 HDR 视频依赖 GTK：GTK 4.16 起 GStreamer 的帧带有色彩空间，HDR 输出同样需要打开色彩管理；未实测。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。
