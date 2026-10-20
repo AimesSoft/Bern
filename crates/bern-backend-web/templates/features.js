@@ -702,16 +702,33 @@ B.hooks.reduced = reduceMotion;
 
 // MARK: - Split view and sidebar
 
+/// The widths a person drags a sidebar of no declared width between, as
+/// the Web design gives them: 240 to start, 200 to 320, in steps of 10
+/// from the keyboard.
+export const SIDEBAR_WIDTHS = { initial: 240, min: 200, max: 320, step: 10 };
+/// How long the sidebar takes to slide away or back.
+const SIDEBAR_FOLD = 0.25;
+let sidebarSequence = 0;
+
 /// A sidebar and detail split whose items may come and go with `if`,
 /// `match` and `ForEach`: each item registers while it is mounted. When
 /// the selected item disappears, the selection moves to `fallback` or the
 /// first item left. On narrow windows the sidebar is the first page.
+///
+/// On wide windows a button leading the detail's page header hides the
+/// whole sidebar and shows it again, as the toolbar's button does on
+/// macOS; the button stays where it is, so focus stays on it. A sidebar
+/// of no declared width has a Window Splitter over its edge that drags or
+/// steps it between `SIDEBAR_WIDTHS`; a declared width stays fixed.
 export function SplitView(p, ctx, spec, sidebarContent, detail) {
   const { selection, fallback, search, footer, header: sidebarHeader, width, titled, id } = spec;
   const showingDetail = cell(false);
+  const collapsed = cell(false);
   const list = el("div", { class: "bern-sidebar-list", role: "listbox", tabindex: "0" });
-  const sidebar = el("nav", { class: "bern-sidebar" });
-  if (width !== undefined) effect(() => sidebar.style.setProperty("--bern-sidebar-width", `${Number(typeof width === "function" ? width() : width)}px`));
+  const sidebarId = `bern-sidebar-${++sidebarSequence}`;
+  const sidebar = el("nav", { class: "bern-sidebar", id: sidebarId });
+  const dragged = cell(SIDEBAR_WIDTHS.initial);
+  effect(() => sidebar.style.setProperty("--bern-sidebar-width", `${width === undefined ? dragged.get() : Number(typeof width === "function" ? width() : width)}px`));
   if (sidebarHeader) {
     const holder = el("div", { class: "bern-sidebar-header" });
     sidebarHeader(holder, ctx);
@@ -784,13 +801,70 @@ export function SplitView(p, ctx, spec, sidebarContent, detail) {
   const back = el("button", { class: "bern-icon-button bern-split-back", type: "button" }, B.icon("chevron.left", 18));
   B.bindAttr(back, "aria-label", () => B.tr("bern.navigation.back"));
   back.addEventListener("click", () => showingDetail.set(false));
+  const toggle = el("button", { class: "bern-icon-button bern-split-toggle", type: "button", "aria-controls": sidebarId }, B.icon("sidebar.left", 18));
+  const toggleLabel = () => B.tr(collapsed.get() ? "bern.navigation.show_sidebar" : "bern.navigation.hide_sidebar");
+  B.bindAttr(toggle, "aria-label", toggleLabel);
+  B.bindAttr(toggle, "title", toggleLabel);
+  toggle.addEventListener("click", () => {
+    node.style.setProperty("--bern-sidebar-fold", `${reduceMotion() ? 0 : SIDEBAR_FOLD}s`);
+    collapsed.set(!collapsed.peek());
+  });
+  header.prepend(toggle);
   header.prepend(back);
   const body = el("div", { class: "bern-detail-body" });
   const column = el("div", { class: "bern-detail" }, header, body);
   detail(body, inner);
-  const node = el("div", { class: "bern-split" }, sidebar, column);
+  const node = el("div", { class: "bern-split" }, sidebar);
+  if (width === undefined) node.append(splitter(node, sidebarId, dragged));
+  node.append(column);
   effect(() => node.classList.toggle("bern-split-detail", showingDetail.get()));
+  effect(() => node.classList.toggle("bern-split-collapsed", collapsed.get()));
   p.append(node);
+}
+
+/// The Window Splitter over a sidebar's trailing edge: an invisible strip
+/// with the resize cursor that a pointer drags and the arrow keys step,
+/// Home and End taking it to the narrowest and widest. Its value is the
+/// sidebar's width; right to left, the sidebar grows to the left.
+function splitter(split, sidebarId, dragged) {
+  const { min, max, step } = SIDEBAR_WIDTHS;
+  const handle = el("div", {
+    class: "bern-split-handle", role: "separator", tabindex: "0", "aria-orientation": "vertical",
+    "aria-controls": sidebarId, "aria-valuemin": String(min), "aria-valuemax": String(max),
+  });
+  B.bindAttr(handle, "aria-label", () => B.tr("bern.navigation.sidebar"));
+  effect(() => handle.setAttribute("aria-valuenow", String(dragged.get())));
+  const resize = (to) => dragged.set(Math.round(Math.min(max, Math.max(min, to))));
+  const outward = () => getComputedStyle(split).direction === "rtl" ? -1 : 1;
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    handle.focus?.({ preventScroll: true });
+    const from = event.clientX;
+    const start = dragged.peek();
+    const sign = outward();
+    handle.setPointerCapture(event.pointerId);
+    split.classList.add("bern-split-resizing");
+    const move = (moved) => resize(start + sign * (moved.clientX - from));
+    const end = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("lostpointercapture", end);
+      split.classList.remove("bern-split-resizing");
+    };
+    handle.addEventListener("pointermove", move);
+    // Capture ends with the button's release or a cancelled pointer.
+    handle.addEventListener("lostpointercapture", end);
+  });
+  handle.addEventListener("keydown", (event) => {
+    const width = dragged.peek();
+    const to = {
+      ArrowLeft: width - outward() * step, ArrowRight: width + outward() * step, Home: min, End: max,
+    }[event.key];
+    if (to === undefined) return;
+    event.preventDefault();
+    resize(to);
+  });
+  return handle;
 }
 
 

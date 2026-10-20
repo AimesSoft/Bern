@@ -608,6 +608,19 @@ button:disabled {
   display: none;
 }
 
+/* The sidebar's button leads the detail's page header, before its back. */
+.bern-page-header > .bern-split-toggle {
+  margin-inline-start: -8px;
+}
+
+.bern-page-header > .bern-split-toggle ~ .bern-back {
+  margin-inline-start: 0;
+}
+
+.bern-split-toggle .bern-icon:dir(rtl) {
+  transform: scaleX(-1);
+}
+
 /* MARK: Text */
 
 .bern-text {
@@ -2141,17 +2154,63 @@ button.bern-menu-item:disabled .bern-icon {
   display: flex;
   min-width: 0;
   min-height: 0;
+  /* A hidden sidebar slides out past the leading edge. */
+  overflow: clip;
 }
 
+/* A declared width is exact; dragging keeps an undeclared one within the
+   design's 200–320. */
 .bern-sidebar {
   flex: none;
   display: flex;
   flex-direction: column;
   width: 240px;
-  min-width: 200px;
-  max-width: 320px;
   background: var(--bern-surface-panel);
-  border-right: 1px solid var(--bern-separator);
+  border-inline-end: 1px solid var(--bern-separator);
+}
+
+/* The Window Splitter: an invisible strip over the sidebar's edge, half
+   on each side of its rule. */
+.bern-split-handle {
+  flex: none;
+  position: relative;
+  z-index: 1;
+  width: 8px;
+  margin-inline: -4px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.bern-split-handle:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 3px;
+  width: 2px;
+  background: var(--bern-focus-indicator);
+}
+
+.bern-split-resizing,
+.bern-split-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+@container (min-width: 768px) {
+  .bern-split > .bern-sidebar {
+    transition: margin-inline-start var(--bern-sidebar-fold, 0s) cubic-bezier(0.2, 0, 0, 1), visibility 0s;
+  }
+  /* Hidden, the sidebar slides away whole, header, search and footer with
+     it, and leaves the tab order once it is gone. */
+  .bern-split.bern-split-collapsed > .bern-sidebar {
+    margin-inline-start: calc(-1 * var(--bern-sidebar-width, 240px));
+    visibility: hidden;
+    transition: margin-inline-start var(--bern-sidebar-fold, 0s) cubic-bezier(0.2, 0, 0, 1), visibility 0s var(--bern-sidebar-fold, 0s);
+  }
+  .bern-split.bern-split-collapsed > .bern-split-handle {
+    display: none;
+  }
 }
 
 .bern-sidebar-search {
@@ -2205,7 +2264,7 @@ button.bern-menu-item:disabled .bern-icon {
   .bern-sidebar {
     width: 100%;
     max-width: none;
-    border-right: 0;
+    border-inline-end: 0;
   }
   .bern-split .bern-detail {
     display: none;
@@ -2218,6 +2277,10 @@ button.bern-menu-item:disabled .bern-icon {
   }
   .bern-icon-button.bern-split-back {
     display: inline-flex;
+  }
+  .bern-split-handle,
+  .bern-icon-button.bern-split-toggle {
+    display: none;
   }
   .bern-page-header {
     height: 56px;

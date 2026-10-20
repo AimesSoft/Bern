@@ -320,6 +320,33 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "bern.navigation.sidebar",
+        &[
+            ("zh-Hans", "边栏"),
+            ("zh-Hant", "側邊欄"),
+            ("en", "Sidebar"),
+            ("ja", "サイドバー"),
+        ],
+    ),
+    (
+        "bern.navigation.hide_sidebar",
+        &[
+            ("zh-Hans", "隐藏边栏"),
+            ("zh-Hant", "隱藏側邊欄"),
+            ("en", "Hide Sidebar"),
+            ("ja", "サイドバーを非表示"),
+        ],
+    ),
+    (
+        "bern.navigation.show_sidebar",
+        &[
+            ("zh-Hans", "显示边栏"),
+            ("zh-Hant", "顯示側邊欄"),
+            ("en", "Show Sidebar"),
+            ("ja", "サイドバーを表示"),
+        ],
+    ),
+    (
         "bern.runtime.missing",
         &[
             (

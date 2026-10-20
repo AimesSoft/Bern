@@ -17,6 +17,7 @@ function runtime(search = "") {
       this.classes = new Set();
       this.classList = {
         add: (...names) => names.forEach((name) => this.classes.add(name)),
+        remove: (...names) => names.forEach((name) => this.classes.delete(name)),
         toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name),
       };
     }
@@ -69,6 +70,15 @@ function runtime(search = "") {
       }
     }
     prepend(child) { this.childNodes.unshift(child); child.parentElement = this; }
+    setPointerCapture(id) { this.captured = id; }
+    focus() { this.focused = true; }
+    /// Runs this element's listeners for `name`; returns whether one
+    /// prevented the default.
+    dispatch(name, init = {}) {
+      let prevented = false;
+      for (const callback of [...(this.events[name] ?? [])]) callback({ ...init, preventDefault() { prevented = true; } });
+      return prevented;
+    }
   }
   const probes = [];
   class Probe {
@@ -119,7 +129,7 @@ function runtime(search = "") {
       });
       return queries.get(query);
     },
-    getComputedStyle: (node) => ({ direction: "ltr", paddingTop: node.style.paddingBlock ?? "0px", paddingLeft: node.style.paddingInline ?? "0px" }),
+    getComputedStyle: (node) => ({ direction: node.style.direction ?? "ltr", paddingTop: node.style.paddingBlock ?? "0px", paddingLeft: node.style.paddingInline ?? "0px" }),
     requestAnimationFrame: (callback) => { frames.push(callback); return frames.length; },
     cancelAnimationFrame() {},
     setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
@@ -259,6 +269,101 @@ test("declared sidebar widths stay overridable by compact layout CSS", () => {
   const css = readFileSync(new URL("../templates/bern.css", import.meta.url), "utf8") + readFileSync(new URL("../templates/features.css", import.meta.url), "utf8");
   assert.match(css, /width:\s*var\(--bern-sidebar-width/);
   assert.match(css, /@container\s*\(max-width:\s*767px\)\s*\{\s*\.bern-sidebar\s*\{\s*width:\s*100%/);
+  // A declared width is exact and has nothing to drag.
+  assert.deepEqual(root.childNodes[0].children.map((child) => child.className), ["bern-sidebar", "bern-detail"]);
+  assert.doesNotMatch(css.match(/\n\.bern-sidebar \{[^}]*\}/)[0], /min-width|max-width/);
+});
+
+test("a sidebar of no declared width drags and steps between 200 and 320", () => {
+  const { B, F, Element } = runtime();
+  const root = new Element("root");
+  F.SplitView(root, {}, { selection: B.cell(0), titled: () => false }, () => {}, () => {});
+  const split = root.childNodes[0];
+  const [sidebar, handle] = split.children;
+  assert.equal(handle.className, "bern-split-handle");
+  assert.equal(handle.attributes.role, "separator");
+  assert.equal(handle.attributes.tabindex, "0");
+  assert.equal(handle.attributes["aria-orientation"], "vertical");
+  assert.equal(handle.attributes["aria-label"], "bern.navigation.sidebar");
+  assert.equal(handle.attributes["aria-controls"], sidebar.attributes.id);
+  assert.deepEqual([handle.attributes["aria-valuemin"], handle.attributes["aria-valuenow"], handle.attributes["aria-valuemax"]], ["200", "240", "320"]);
+  assert.equal(sidebar.style["--bern-sidebar-width"], "240px");
+
+  // A pointer drags it from where it was pressed, held to the range.
+  assert.equal(handle.dispatch("pointerdown", { button: 2, clientX: 240, pointerId: 1 }), false, "only the main button drags");
+  assert.equal(handle.dispatch("pointerdown", { button: 0, clientX: 240, pointerId: 7 }), true);
+  assert.equal(handle.captured, 7);
+  assert.equal(split.classes.has("bern-split-resizing"), true);
+  handle.dispatch("pointermove", { clientX: 290.4 });
+  assert.equal(sidebar.style["--bern-sidebar-width"], "290px");
+  assert.equal(handle.attributes["aria-valuenow"], "290");
+  handle.dispatch("pointermove", { clientX: 900 });
+  assert.equal(sidebar.style["--bern-sidebar-width"], "320px");
+  handle.dispatch("pointermove", { clientX: -50 });
+  assert.equal(sidebar.style["--bern-sidebar-width"], "200px");
+  handle.dispatch("pointermove", { clientX: 270 });
+  handle.dispatch("lostpointercapture");
+  assert.equal(split.classes.has("bern-split-resizing"), false);
+  handle.dispatch("pointermove", { clientX: 300 });
+  assert.equal(sidebar.style["--bern-sidebar-width"], "270px", "released, it no longer follows the pointer");
+
+  // The arrow keys step it by 10, Home and End take it to either end.
+  const key = (name) => handle.dispatch("keydown", { key: name });
+  assert.equal(key("ArrowRight"), true);
+  assert.equal(handle.attributes["aria-valuenow"], "280");
+  key("ArrowLeft");
+  key("ArrowLeft");
+  assert.equal(handle.attributes["aria-valuenow"], "260");
+  key("End");
+  key("ArrowRight");
+  assert.equal(handle.attributes["aria-valuenow"], "320");
+  key("Home");
+  key("ArrowLeft");
+  assert.equal(handle.attributes["aria-valuenow"], "200");
+  assert.equal(key("Tab"), false, "other keys pass through");
+
+  // Right to left, the sidebar is on the right and grows to the left.
+  split.style.direction = "rtl";
+  key("ArrowLeft");
+  assert.equal(handle.attributes["aria-valuenow"], "210");
+  handle.dispatch("pointerdown", { button: 0, clientX: 500, pointerId: 2 });
+  handle.dispatch("pointermove", { clientX: 450 });
+  assert.equal(sidebar.style["--bern-sidebar-width"], "260px");
+
+  const css = readFileSync(new URL("../templates/bern.css", import.meta.url), "utf8");
+  assert.match(css, /\.bern-split-handle \{[^}]*cursor:\s*col-resize/);
+  assert.match(css, /\.bern-split-handle:focus-visible::after \{[^}]*background:\s*var\(--bern-focus-indicator\)/);
+});
+
+test("the sidebar button hides the whole sidebar and shows it again from the page header", () => {
+  for (const [search, fold] of [["", "0.25s"], ["?motion=reduce", "0s"]]) {
+    const { B, F, Element } = runtime(search);
+    const root = new Element("root");
+    F.SplitView(root, {}, { selection: B.cell(0), titled: () => false }, () => {}, () => {});
+    const split = root.childNodes[0];
+    const [sidebar, , detail] = split.children;
+    const header = detail.children[0];
+    const [back, toggle] = header.children;
+    assert.equal(back.className, "bern-icon-button bern-split-back");
+    assert.equal(toggle.className, "bern-icon-button bern-split-toggle");
+    assert.equal(toggle.attributes["aria-controls"], sidebar.attributes.id);
+    assert.equal(toggle.attributes["aria-label"], "bern.navigation.hide_sidebar");
+    assert.equal(toggle.attributes.title, "bern.navigation.hide_sidebar");
+    toggle.dispatch("click");
+    assert.equal(split.classes.has("bern-split-collapsed"), true);
+    assert.equal(split.style["--bern-sidebar-fold"], fold, "reduced motion hides it at once");
+    assert.equal(toggle.attributes["aria-label"], "bern.navigation.show_sidebar");
+    assert.equal(header.children[1], toggle, "the button keeps its place, and focus with it");
+    toggle.dispatch("click");
+    assert.equal(split.classes.has("bern-split-collapsed"), false);
+    assert.equal(toggle.attributes.title, "bern.navigation.hide_sidebar");
+  }
+  const css = readFileSync(new URL("../templates/bern.css", import.meta.url), "utf8");
+  const wide = css.match(/@container \(min-width: 768px\) \{[\s\S]*?\n\}/)[0];
+  assert.match(wide, /\.bern-split-collapsed > \.bern-sidebar \{[^}]*margin-inline-start:\s*calc\(-1 \* var\(--bern-sidebar-width[^}]*visibility:\s*hidden/);
+  assert.match(wide, /\.bern-split-collapsed > \.bern-split-handle \{\s*display:\s*none/);
+  // On narrow windows the sidebar is a page of its own: no button, no splitter.
+  assert.match(css, /@container \(max-width: 767px\) \{[\s\S]*?\.bern-split-handle,\s*\.bern-icon-button\.bern-split-toggle \{\s*display:\s*none/);
 });
 
 test("edge grow keeps its opacity and anchors the scaling edge", () => {

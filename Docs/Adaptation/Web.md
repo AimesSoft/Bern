@@ -147,7 +147,8 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ### 5.2 SplitView、Sidebar、Detail
 
-- 侧边栏宽 240 px（可拖动 200–320 px，Window Splitter 模式），`surface.panel`，右边框 `separator`；详情栏 `surface.canvas`。
+- 侧边栏宽 240 px（可拖动 200–320 px，Window Splitter 模式），`surface.panel`，右边框 `separator`；详情栏 `surface.canvas`。应用声明了宽度时宽度固定，不能拖动。
+- 宽屏时详情页面头的最前端是边栏按钮（`sidebar.left` 图标按钮，名称“隐藏边栏 / 显示边栏”）：侧边栏连同其中的搜索、页眉与页脚整个向前缘滑出隐藏，再按滑回；按钮留在原处。窄屏不显示。
 - 侧边栏顶部为 Search（高 32 px）；Section 标题 `caption2`、`text.secondary`，上方留 16 px。
 - SidebarItem 用 `nav_item` 配方：高 32 px、左右内边距 10 px、6 px 圆角；图标 16 px；选中项填满强调色，文字与图标为 `on_accent`，字重 500，不带左侧竖线。Listbox 模式：上下方向键移动并选中，Home / End 到首尾。
 - 详情栏顶部是页面头：高 64 px，标题为所选项的文字（`title2`），工具栏项在尾端；窄屏为 56 px、`title3`。
