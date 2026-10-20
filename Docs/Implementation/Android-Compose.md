@@ -35,6 +35,7 @@
 | `src/project.rs` | Gradle 脚本、清单、主题、应用名与字符串表 |
 | `src/glue.rs` | 引擎库（cdylib）与这台电脑上的 CLI、MCP 服务器 |
 | `src/toolchain.rs` | 查找 SDK、NDK、Gradle 与 JDK |
+| `src/icons.rs` | 图标表：每个图标名对应的 Material 图标，生成 `BernIcons.get` 的分支，检查据此拒绝表中没有的名字 |
 | `templates/BernRuntime.kt` | 编解码、宿主、窗口、控件登记、外部会话命令、窗口根 |
 | `templates/BernViews.kt` | 标准组件的 Material 3 实现、图标映射、查询 |
 | `templates/BernStyle.kt` | 颜色角色、样式覆盖、弹簧、过渡、共享元素、`Canvas` 与标注 |
@@ -57,7 +58,7 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 - **页签**：底部 `NavigationBar`；工具栏中的选择器显示为顶栏里的下拉菜单，因为顶栏只有一行高。
 - **控件**：`Button` 默认是色调按钮，`prominent` 为实心按钮，`plain` 为文字按钮；`Switch` 是整行可点按的开关或复选框；`Picker` 按样式是下拉框、分段按钮或单选列表；`TextInput` 是带标签的描边输入框；`Slider` 可带两端图标。
 - **启动器图标**：没有声明或声明 PNG 时是 `mipmap-xxxhdpi/ic_launcher.png`；`[app.icon].android` 为 `res` 文件夹时原样并入应用的 `res`，自适应图标与主题图标（单色层）随之生效，有 `ic_launcher_round` 时清单加 `android:roundIcon`。
-- **图标**：Bern 的图标名（SF Symbols 命名）映射到 Material 图标：Material 核心图标集里有的直接用，常用而核心集没有的（暂停、音量、亮度、网格、归档、文件夹、调色板等）由运行时按 Material 图标的路径数据绘制，没有对应的显示一个中性圆点。
+- **图标**：Bern 的图标名（SF Symbols 命名）映射到 Material 图标：Material 核心图标集里有的直接用，核心集没有的（暂停、音量、亮度、网格、归档、文件夹、调色板、媒体库、同步、插件、键盘、无线网络等）由运行时按 Material 图标（baseline 样式）的路径数据绘制。对照表只有一份（`src/icons.rs`），生成时写进 `BernIcons.get`；应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示中性圆点（圆点只留给没有图标的位置）。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字，测试逐个核对。
 - **导航项按条件出现**：`if`、`match` 与 `ForEach` 中的侧栏项与页签照常生成，选中项消失时回到 `fallback` 或第一个可见项。
 
 ## 样式与动效
@@ -181,6 +182,15 @@ bern package --target android
 - `BernRail` 的参数顺序：`overhang` 加入后，在 `Stack` 中铺满的轨道把 `Modifier.matchParentSize()` 传给了 `overhang`（Kotlin 编译失败）；`modifier` 现在在 `overhang` 之前。
 - 侧栏与页签收集选项时会进入搜索框的结果，结果中的查询模板变量在那里不存在（Kotlin 编译失败）；现在只进入 `Section`。
 
+## 图标补齐（2026-10-20）
+
+- 此前 Material 对照表写在 `BernViews.kt` 的 `when` 里，表中没有的名字显示中性圆点，检查不知道。用于验收的媒体类应用在手机上的“媒体库”标签、设置“可选功能”里的插件、快捷键、画质增强、账号同步、网络媒体源、局域网与远程等行以及插件卡片上都是圆点。
+- 对照表移到 `src/icons.rs`（按名字排序），生成 `BernViews.kt` 时替换 `/*bern:icon-branches*/` 写成 `when` 的分支；检查对表中没有的图标名报错（“the Material icon set has no `…`”），与 Web、Windows 相同。
+- 新增的名字与 Material 图标：`film.stack` → Video Library、`server.rack` → Dns、`sparkles` → Auto Awesome、`puzzlepiece.extension` → Extension、`keyboard` → Keyboard、`wifi` → Wifi、`arrow.triangle.2.circlepath` → Sync、`arrow.up.arrow.down` → Swap Vert、`arrow.up.left.and.arrow.down.right` → Open In Full、`arrow.up.right.square` → Open In New、`backward.end.fill` / `forward.end.fill` → Skip Previous / Skip Next、`gobackward.10` / `goforward.10` → Replay 10 / Forward 10、`pip.enter` → Picture In Picture Alt、`camera` → Photo Camera、`eye.slash` → Visibility Off、`line.3.horizontal.decrease` → Filter List、`link` → Link、`scissors` → Content Cut、`shield` → Shield、`tv` → Tv、`arrow.down` → Arrow Downward、`arrow.left` → 自动镜像的 Arrow Back（核心集）、`circle` / `circle.fill` → Radio Button Unchecked / Circle、`square` → Crop Square、`square.on.square` → Filter None、`switch.2` → Toggle On、`hand.tap` → Touch App、`character.cursor.ibeam` → Text Fields。路径取自 Android Studio 自带的 Material Icons 矢量资源（与 `material-icons-extended` 同源）；有几条路径的图标（Photo Camera、Replay 10、Forward 10）逐条加入，不合并成一条路径。
+- 顺带改正：`minus` 原为叉号（Clear），改为 Remove；`moon` 原为调色板，改为 Dark Mode；`text.bubble` 原与字幕共用 Subtitles，改为带文字的对话气泡 Chat。
+- 测试：`icons.rs` 的单元测试核对表已排序、覆盖 Bern 图标集、每个表达式在 `BernViews.kt` 中有定义或导入；生成测试核对生成的 `BernViews.kt` 对图标集中每个名字都有分支、新名字落到预期的图标，并把画廊的第一个图标换成新名字（检查通过）和不存在的名字（检查报错）。
+
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：
@@ -246,7 +256,6 @@ bern package --target android
 - 发布版没有开启 R8 缩减，hello 的发布版 APK 约 12 MB。
 - 列表项移除时没有消失过渡。
 - 带样式的侧栏项不支持方向键切换。
-- 图标只覆盖常用的名字，其余显示圆点。
 - 交给应用的文件是 `content://` 地址。引擎经 `MediaSource::file_name()` 与 `open()` 读取：Rust 一侧经 JNI 调 `BernBridge.fileName` 与 `openFile`，前者查 `OpenableColumns.DISPLAY_NAME`，后者用内容解析器打开文档并交出文件描述符（`detachFd`），引擎当普通文件读取。经管道提供内容的文档提供方给出的描述符不能跳转、长度为 0。
 - 只有当前屏幕上的控件登记快捷键：手机上停在侧栏时，页面工具栏的快捷键不生效。
 - 胶片的放大与停靠在宽屏布局、`arrival: nudge` 的晃动在 Android 上未逐帧确认。

@@ -123,4 +123,11 @@ mod tests {
         assert_eq!(glyph("folder"), Some(0xE8B7));
         assert_eq!(glyph("no.such.symbol"), None);
     }
+
+    #[test]
+    fn every_name_of_the_bern_icon_set_has_a_glyph() {
+        for name in bern_target_api::icon_set::NAMES {
+            assert!(glyph(name).is_some(), "the Windows icon fonts lack {name}");
+        }
+    }
 }

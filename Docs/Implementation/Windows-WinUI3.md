@@ -105,7 +105,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 
 `Image` 与 `Stack` 外面各有一层 `Grid`，所以在会拉伸子元素的列中保持自身尺寸并靠前缘。在展示应用的“图片与布局”页按两种前端验证：效果与 macOS 相同，`contain` 的图片在框内居中；网格三列；CLI 修改音量与亮度后两个进度条立即更新。
 
-图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。字形表只有一份（`icons.rs`，码位从 PC 上的字体文件渲染比对确认），生成的目录把它交给运行时；表中没有的名称检查时报错，不在运行时显示空白。
+图标沿用 Bern 的 SF Symbols 命名，映射到 Segoe Fluent Icons（Windows 11）与 Segoe MDL2 Assets（Windows 10）中码位相同的字形。字形表只有一份（`icons.rs`，码位从 PC 上的字体文件渲染比对确认），生成的目录把它交给运行时；表中没有的名称检查时报错，不在运行时显示空白；这项检查与 Web、Compose、GTK 共用 `bern_target_api::icon_set::check`，测试核对字形表包含 Bern 图标集（`icon_set::NAMES`）的全部名字。
 
 ## 运行结构
 

@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -153,82 +154,16 @@ import java.io.File
 
 // MARK: - Icons
 
-/// Bern icon names (SF Symbols naming) as Material icons. Names without a
-/// counterpart show a neutral dot.
+/// Bern icon names (SF Symbols naming) as Material icons. The branches are
+/// generated from the backend's table (`icons.rs`), whose names the check
+/// requires; only an absent icon (`""`) shows the neutral dot.
 object BernIcons {
     fun get(name: String): ImageVector = when (name) {
-        "plus", "plus.circle" -> Icons.Filled.Add
-        "minus" -> Icons.Filled.Clear
-        "xmark", "xmark.circle", "xmark.circle.fill" -> Icons.Filled.Close
-        "checkmark" -> Icons.Filled.Check
-        "checkmark.circle", "checkmark.circle.fill" -> Icons.Filled.CheckCircle
-        "chevron.left" -> Icons.AutoMirrored.Filled.KeyboardArrowLeft
-        "chevron.right" -> Icons.AutoMirrored.Filled.KeyboardArrowRight
-        "chevron.down", "chevron.up.chevron.down" -> Icons.Filled.KeyboardArrowDown
-        "chevron.up" -> Icons.Filled.KeyboardArrowUp
-        "arrow.right" -> Icons.AutoMirrored.Filled.ArrowForward
-        "ellipsis", "ellipsis.circle" -> Icons.Filled.MoreVert
-        "magnifyingglass" -> Icons.Filled.Search
-        "gearshape", "gearshape.2", "gear" -> Icons.Filled.Settings
-        "house", "house.fill" -> Icons.Filled.Home
-        "person", "person.fill", "person.crop.circle" -> Icons.Filled.Person
-        "trash", "trash.fill" -> Icons.Filled.Delete
-        "pencil", "square.and.pencil" -> Icons.Filled.Edit
-        "square.and.arrow.up" -> Icons.Filled.Share
-        "star", "star.fill" -> Icons.Filled.Star
-        "heart" -> Icons.Filled.FavoriteBorder
-        "heart.fill" -> Icons.Filled.Favorite
-        "info.circle", "info" -> Icons.Filled.Info
-        "exclamationmark.triangle" -> Icons.Filled.Warning
-        "bell", "bell.fill" -> Icons.Filled.Notifications
-        "lock", "lock.fill" -> Icons.Filled.Lock
-        "envelope" -> Icons.Filled.Email
-        "phone" -> Icons.Filled.Phone
-        "calendar" -> Icons.Filled.DateRange
-        "mappin", "location" -> Icons.Filled.LocationOn
-        "map" -> Icons.Filled.Place
-        "cart" -> Icons.Filled.ShoppingCart
-        "hand.thumbsup" -> Icons.Filled.ThumbUp
-        "play.fill", "play", "play.rectangle", "play.circle" -> Icons.Filled.PlayArrow
-        "arrow.clockwise" -> Icons.Filled.Refresh
-        "paperplane" -> Icons.AutoMirrored.Filled.Send
-        "wrench", "hammer" -> Icons.Filled.Build
-        "face.smiling" -> Icons.Filled.Face
-        "line.3.horizontal", "sidebar.left" -> Icons.Filled.Menu
-        "list.bullet", "list.bullet.rectangle", "doc", "doc.text", "note.text" -> Icons.AutoMirrored.Filled.List
-        "person.circle" -> Icons.Filled.AccountCircle
-        "phone.fill" -> Icons.Filled.Call
-        "pencil.line" -> Icons.Filled.Create
-        "checkmark.seal" -> Icons.Filled.Done
-        "pause", "pause.fill" -> pause
-        "speaker.wave.2.fill", "speaker.wave.2", "speaker.wave.3.fill", "speaker.wave.3" -> volumeUp
-        "speaker.wave.1.fill", "speaker.wave.1" -> volumeDown
-        "speaker.fill", "speaker" -> volumeMute
-        "sun.min", "sun.min.fill" -> brightnessLow
-        "sun.max", "sun.max.fill" -> brightnessHigh
-        "speaker.slash.fill", "speaker.slash" -> volumeOff
-        "square.grid.2x2", "square.grid.2x2.fill", "rectangle.grid.2x2" -> grid
-        "archivebox", "archivebox.fill" -> archive
-        "tray", "tray.fill", "tray.full" -> inbox
-        "photo", "photo.fill", "photo.on.rectangle" -> photo
-        "film", "film.fill", "video", "video.fill", "play.rectangle.fill" -> movie
-        "music.note", "music.note.list" -> music
-        "folder", "folder.fill" -> folder
-        "tag", "tag.fill" -> tag
-        "globe" -> language
-        "moon", "circle.lefthalf.filled", "paintbrush", "paintpalette" -> palette
-        "arrow.down.circle", "arrow.down.to.line" -> download
-        "slider.horizontal.3", "dial.low" -> tune
-        "textformat", "textformat.size", "textformat.size.smaller", "textformat.size.larger" -> text
-        "sidebar.right", "sidebar.trailing" -> sidebarRight
-        "star.slash" -> starBorder
-        "captions.bubble", "text.bubble", "captions.bubble.fill", "text.bubble.fill" -> subtitles
-        "square.grid.3x3", "square.grid.3x3.fill" -> gridOn
-        // Names without a counterpart show a neutral dot.
+        /*bern:icon-branches*/
         else -> dot
     }
 
-    // Media icons the core set lacks, from the Material icon paths.
+    // Icons the core set lacks, from the Material icon paths (baseline).
     private val pause by lazy { icon("Pause", "M6,19h4L10,5L6,5v14zM14,5v14h4L18,5h-4z") }
     private val volumeUp by lazy {
         icon(
@@ -304,11 +239,203 @@ object BernIcons {
     private val gridOn by lazy {
         icon("GridOn", "M20,2H4c-1.1,0 -2,0.9 -2,2v16c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V4c0,-1.1 -0.9,-2 -2,-2zM8,20H4v-4h4v4zM8,14H4v-4h4v4zM8,8H4V4h4v4zM14,20h-4v-4h4v4zM14,14h-4v-4h4v4zM14,8h-4V4h4v4zM20,20h-4v-4h4v4zM20,14h-4v-4h4v4zM20,8h-4V4h4v4z")
     }
+    private val arrowDownward by lazy {
+        icon(
+            "ArrowDownward",
+            "M20,12l-1.41,-1.41L13,16.17V4h-2v12.17l-5.58,-5.59L4,12l8,8 8,-8z",
+        )
+    }
+    private val sync by lazy {
+        icon(
+            "Sync",
+            "M12,4L12,1L8,5l4,4L12,6c3.31,0 6,2.69 6,6 0,1.01 -0.25,1.97 -0.7,2.8l1.46,1.46C19.54,15.03 20,13.57 20,12c0,-4.42 -3.58,-8 -8,-8zM12,18c-3.31,0 -6,-2.69 -6,-6 0,-1.01 0.25,-1.97 0.7,-2.8L5.24,7.74C4.46,8.97 4,10.43 4,12c0,4.42 3.58,8 8,8v3l4,-4 -4,-4v3z",
+        )
+    }
+    private val swapVert by lazy {
+        icon(
+            "SwapVert",
+            "M16,17.01V10h-2v7.01h-3L15,21l4,-3.99h-3zM9,3L5,6.99h3V14h2V6.99h3L9,3z",
+        )
+    }
+    private val openInFull by lazy {
+        icon(
+            "OpenInFull",
+            "M21,11l0,-8l-8,0l3.29,3.29l-10,10l-3.29,-3.29l0,8l8,0l-3.29,-3.29l10,-10z",
+        )
+    }
+    private val openInNew by lazy {
+        icon(
+            "OpenInNew",
+            "M19,19H5V5h7V3H5c-1.11,0 -2,0.9 -2,2v14c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2v-7h-2v7zM14,3v2h3.59l-9.83,9.83 1.41,1.41L19,6.41V10h2V3h-7z",
+        )
+    }
+    private val skipPrevious by lazy { icon("SkipPrevious", "M6,6h2v12L6,18zM9.5,12l8.5,6L18,6z") }
+    private val skipNext by lazy { icon("SkipNext", "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z") }
+    private val photoCamera by lazy {
+        icon(
+            "PhotoCamera",
+            "M12,12m-3.2,0a3.2,3.2 0,1 1,6.4 0a3.2,3.2 0,1 1,-6.4 0",
+            "M9,2L7.17,4L4,4c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2L22,6c0,-1.1 -0.9,-2 -2,-2h-3.17L15,2L9,2zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5z",
+        )
+    }
+    private val textFields by lazy {
+        icon(
+            "TextFields",
+            "M2.5,4v3h5v12h3V7h5V4H2.5zM21.5,9h-9v3h3v7h3v-7h3V9z",
+        )
+    }
+    private val radioUnchecked by lazy {
+        icon(
+            "RadioButtonUnchecked",
+            "M12,2C6.48,2 2,6.48 2,12s4.48,10 10,10 10,-4.48 10,-10S17.52,2 12,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8z",
+        )
+    }
+    private val circle by lazy {
+        icon(
+            "Circle",
+            "M12,2C6.47,2 2,6.47 2,12s4.47,10 10,10 10,-4.47 10,-10S17.53,2 12,2z",
+        )
+    }
+    private val visibilityOff by lazy {
+        icon(
+            "VisibilityOff",
+            "M12,7c2.76,0 5,2.24 5,5 0,0.65 -0.13,1.26 -0.36,1.83l2.92,2.92c1.51,-1.26 2.7,-2.89 3.43,-4.75 -1.73,-4.39 -6,-7.5 -11,-7.5 -1.4,0 -2.74,0.25 -3.98,0.7l2.16,2.16C10.74,7.13 11.35,7 12,7zM2,4.27l2.28,2.28 0.46,0.46C3.08,8.3 1.78,10.02 1,12c1.73,4.39 6,7.5 11,7.5 1.55,0 3.03,-0.3 4.38,-0.84l0.42,0.42L19.73,22 21,20.73 3.27,3 2,4.27zM7.53,9.8l1.55,1.55c-0.05,0.21 -0.08,0.43 -0.08,0.65 0,1.66 1.34,3 3,3 0.22,0 0.44,-0.03 0.65,-0.08l1.55,1.55c-0.67,0.33 -1.41,0.53 -2.2,0.53 -2.76,0 -5,-2.24 -5,-5 0,-0.79 0.2,-1.53 0.53,-2.2zM11.84,9.02l3.15,3.15 0.02,-0.16c0,-1.66 -1.34,-3 -3,-3l-0.17,0.01z",
+        )
+    }
+    private val videoLibrary by lazy {
+        icon(
+            "VideoLibrary",
+            "M4,6L2,6v14c0,1.1 0.9,2 2,2h14v-2L4,20L4,6zM20,2L8,2c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2L22,4c0,-1.1 -0.9,-2 -2,-2zM12,14.5v-9l6,4.5 -6,4.5z",
+        )
+    }
+    private val replay10 by lazy {
+        icon(
+            "Replay10",
+            "M11.99,5V1l-5,5l5,5V7c3.31,0 6,2.69 6,6s-2.69,6 -6,6s-6,-2.69 -6,-6h-2c0,4.42 3.58,8 8,8s8,-3.58 8,-8S16.41,5 11.99,5z",
+            "M10.89,16h-0.85v-3.26l-1.01,0.31v-0.69l1.77,-0.63h0.09V16z",
+            "M15.17,14.24c0,0.32 -0.03,0.6 -0.1,0.82s-0.17,0.42 -0.29,0.57s-0.28,0.26 -0.45,0.33s-0.37,0.1 -0.59,0.1s-0.41,-0.03 -0.59,-0.1s-0.33,-0.18 -0.46,-0.33s-0.23,-0.34 -0.3,-0.57s-0.11,-0.5 -0.11,-0.82V13.5c0,-0.32 0.03,-0.6 0.1,-0.82s0.17,-0.42 0.29,-0.57s0.28,-0.26 0.45,-0.33s0.37,-0.1 0.59,-0.1s0.41,0.03 0.59,0.1c0.18,0.07 0.33,0.18 0.46,0.33s0.23,0.34 0.3,0.57s0.11,0.5 0.11,0.82V14.24zM14.32,13.38c0,-0.19 -0.01,-0.35 -0.04,-0.48s-0.07,-0.23 -0.12,-0.31s-0.11,-0.14 -0.19,-0.17s-0.16,-0.05 -0.25,-0.05s-0.18,0.02 -0.25,0.05s-0.14,0.09 -0.19,0.17s-0.09,0.18 -0.12,0.31s-0.04,0.29 -0.04,0.48v0.97c0,0.19 0.01,0.35 0.04,0.48s0.07,0.24 0.12,0.32s0.11,0.14 0.19,0.17s0.16,0.05 0.25,0.05s0.18,-0.02 0.25,-0.05s0.14,-0.09 0.19,-0.17s0.09,-0.19 0.11,-0.32s0.04,-0.29 0.04,-0.48V13.38z",
+        )
+    }
+    private val forward10 by lazy {
+        icon(
+            "Forward10",
+            "M18,13c0,3.31 -2.69,6 -6,6s-6,-2.69 -6,-6s2.69,-6 6,-6v4l5,-5l-5,-5v4c-4.42,0 -8,3.58 -8,8c0,4.42 3.58,8 8,8s8,-3.58 8,-8H18z",
+            "M10.86,15.94l0,-4.27l-0.09,0l-1.77,0.63l0,0.69l1.01,-0.31l0,3.26z",
+            "M12.25,13.44v0.74c0,1.9 1.31,1.82 1.44,1.82c0.14,0 1.44,0.09 1.44,-1.82v-0.74c0,-1.9 -1.31,-1.82 -1.44,-1.82C13.55,11.62 12.25,11.53 12.25,13.44zM14.29,13.32v0.97c0,0.77 -0.21,1.03 -0.59,1.03c-0.38,0 -0.6,-0.26 -0.6,-1.03v-0.97c0,-0.75 0.22,-1.01 0.59,-1.01C14.07,12.3 14.29,12.57 14.29,13.32z",
+        )
+    }
+    private val touchApp by lazy {
+        icon(
+            "TouchApp",
+            "M9,11.24V7.5C9,6.12 10.12,5 11.5,5S14,6.12 14,7.5v3.74c1.21,-0.81 2,-2.18 2,-3.74C16,5.01 13.99,3 11.5,3S7,5.01 7,7.5C7,9.06 7.79,10.43 9,11.24zM18.84,15.87l-4.54,-2.26c-0.17,-0.07 -0.35,-0.11 -0.54,-0.11H13v-6C13,6.67 12.33,6 11.5,6S10,6.67 10,7.5v10.74c-3.6,-0.76 -3.54,-0.75 -3.67,-0.75c-0.31,0 -0.59,0.13 -0.79,0.33l-0.79,0.8l4.94,4.94C9.96,23.83 10.34,24 10.75,24h6.79c0.75,0 1.33,-0.55 1.44,-1.28l0.75,-5.27c0.01,-0.07 0.02,-0.14 0.02,-0.2C19.75,16.63 19.37,16.09 18.84,15.87z",
+        )
+    }
+    private val keyboard by lazy {
+        icon(
+            "Keyboard",
+            "M20,5L4,5c-1.1,0 -1.99,0.9 -1.99,2L2,17c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2L22,7c0,-1.1 -0.9,-2 -2,-2zM11,8h2v2h-2L11,8zM11,11h2v2h-2v-2zM8,8h2v2L8,10L8,8zM8,11h2v2L8,13v-2zM7,13L5,13v-2h2v2zM7,10L5,10L5,8h2v2zM16,17L8,17v-2h8v2zM16,13h-2v-2h2v2zM16,10h-2L14,8h2v2zM19,13h-2v-2h2v2zM19,10h-2L17,8h2v2z",
+        )
+    }
+    private val filterList by lazy {
+        icon(
+            "FilterList",
+            "M10,18h4v-2h-4v2zM3,6v2h18L21,6L3,6zM6,13h12v-2L6,11v2z",
+        )
+    }
+    private val link by lazy {
+        icon(
+            "Link",
+            "M3.9,12c0,-1.71 1.39,-3.1 3.1,-3.1h4L11,7L7,7c-2.76,0 -5,2.24 -5,5s2.24,5 5,5h4v-1.9L7,15.1c-1.71,0 -3.1,-1.39 -3.1,-3.1zM8,13h8v-2L8,11v2zM17,7h-4v1.9h4c1.71,0 3.1,1.39 3.1,3.1s-1.39,3.1 -3.1,3.1h-4L13,17h4c2.76,0 5,-2.24 5,-5s-2.24,-5 -5,-5z",
+        )
+    }
+    private val pictureInPicture by lazy {
+        icon(
+            "PictureInPictureAlt",
+            "M19,11h-8v6h8v-6zM23,19L23,4.98C23,3.88 22.1,3 21,3L3,3c-1.1,0 -2,0.88 -2,1.98L1,19c0,1.1 0.9,2 2,2h18c1.1,0 2,-0.9 2,-2zM21,19.02L3,19.02L3,4.97h18v14.05z",
+        )
+    }
+    private val extension by lazy {
+        icon(
+            "Extension",
+            "M20.5,11H19V7c0,-1.1 -0.9,-2 -2,-2h-4V3.5C13,2.12 11.88,1 10.5,1S8,2.12 8,3.5V5H4c-1.1,0 -1.99,0.9 -1.99,2v3.8H3.5c1.49,0 2.7,1.21 2.7,2.7s-1.21,2.7 -2.7,2.7H2V20c0,1.1 0.9,2 2,2h3.8v-1.5c0,-1.49 1.21,-2.7 2.7,-2.7 1.49,0 2.7,1.21 2.7,2.7V22H17c1.1,0 2,-0.9 2,-2v-4h1.5c1.38,0 2.5,-1.12 2.5,-2.5S21.88,11 20.5,11z",
+        )
+    }
+    private val contentCut by lazy {
+        icon(
+            "ContentCut",
+            "M9.64,7.64c0.23,-0.5 0.36,-1.05 0.36,-1.64 0,-2.21 -1.79,-4 -4,-4S2,3.79 2,6s1.79,4 4,4c0.59,0 1.14,-0.13 1.64,-0.36L10,12l-2.36,2.36C7.14,14.13 6.59,14 6,14c-2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4c0,-0.59 -0.13,-1.14 -0.36,-1.64L12,14l7,7h3v-1L9.64,7.64zM6,8c-1.1,0 -2,-0.89 -2,-2s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zM6,20c-1.1,0 -2,-0.89 -2,-2s0.9,-2 2,-2 2,0.89 2,2 -0.9,2 -2,2zM12,12.5c-0.28,0 -0.5,-0.22 -0.5,-0.5s0.22,-0.5 0.5,-0.5 0.5,0.22 0.5,0.5 -0.22,0.5 -0.5,0.5zM19,3l-6,6 2,2 7,-7L22,3z",
+        )
+    }
+    private val dns by lazy {
+        icon(
+            "Dns",
+            "M20,13H4c-0.55,0 -1,0.45 -1,1v6c0,0.55 0.45,1 1,1h16c0.55,0 1,-0.45 1,-1v-6c0,-0.55 -0.45,-1 -1,-1zM7,19c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM20,3H4c-0.55,0 -1,0.45 -1,1v6c0,0.55 0.45,1 1,1h16c0.55,0 1,-0.45 1,-1V4c0,-0.55 -0.45,-1 -1,-1zM7,9c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2z",
+        )
+    }
+    private val shield by lazy {
+        icon(
+            "Shield",
+            "M12,1L3,5v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V5l-9,-4z",
+        )
+    }
+    private val autoAwesome by lazy {
+        icon(
+            "AutoAwesome",
+            "M19,9l1.25,-2.75L23,5l-2.75,-1.25L19,1l-1.25,2.75L15,5l2.75,1.25L19,9zM11.5,9.5L9,4 6.5,9.5 1,12l5.5,2.5L9,20l2.5,-5.5L17,12l-5.5,-2.5zM19,15l-1.25,2.75L15,19l2.75,1.25L19,23l1.25,-2.75L23,19l-2.75,-1.25L19,15z",
+        )
+    }
+    private val cropSquare by lazy {
+        icon(
+            "CropSquare",
+            "M18,4L6,4c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2L20,6c0,-1.1 -0.9,-2 -2,-2zM18,18L6,18L6,6h12v12z",
+        )
+    }
+    private val filterNone by lazy {
+        icon(
+            "FilterNone",
+            "M3,5L1,5v16c0,1.1 0.9,2 2,2h16v-2L3,21L3,5zM21,1L7,1c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h14c1.1,0 2,-0.9 2,-2L23,3c0,-1.1 -0.9,-2 -2,-2zM21,17L7,17L7,3h14v14z",
+        )
+    }
+    private val toggleOn by lazy {
+        icon(
+            "ToggleOn",
+            "M17,7L7,7c-2.76,0 -5,2.24 -5,5s2.24,5 5,5h10c2.76,0 5,-2.24 5,-5s-2.24,-5 -5,-5zM17,15c-1.66,0 -3,-1.34 -3,-3s1.34,-3 3,-3 3,1.34 3,3 -1.34,3 -3,3z",
+        )
+    }
+    private val tv by lazy {
+        icon(
+            "Tv",
+            "M21,3L3,3c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h5v2h8v-2h5c1.1,0 1.99,-0.9 1.99,-2L23,5c0,-1.1 -0.9,-2 -2,-2zM21,17L3,17L3,5h18v12z",
+        )
+    }
+    private val wifi by lazy {
+        icon(
+            "Wifi",
+            "M1,9l2,2c4.97,-4.97 13.03,-4.97 18,0l2,-2C16.93,2.93 7.08,2.93 1,9zM9,17l3,3 3,-3c-1.65,-1.66 -4.34,-1.66 -6,0zM5,13l2,2c2.76,-2.76 7.24,-2.76 10,0l2,-2C15.14,9.14 8.87,9.14 5,13z",
+        )
+    }
+    private val remove by lazy { icon("Remove", "M19,13H5v-2h14v2z") }
+    private val darkMode by lazy {
+        icon(
+            "DarkMode",
+            "M12,3c-4.97,0 -9,4.03 -9,9s4.03,9 9,9s9,-4.03 9,-9c0,-0.46 -0.04,-0.92 -0.1,-1.36c-0.98,1.37 -2.58,2.26 -4.4,2.26c-2.98,0 -5.4,-2.42 -5.4,-5.4c0,-1.81 0.89,-3.42 2.26,-4.4C12.92,3.04 12.46,3 12,3L12,3z",
+        )
+    }
+    private val chat by lazy {
+        icon(
+            "Chat",
+            "M20,2L4,2c-1.1,0 -1.99,0.9 -1.99,2L2,22l4,-4h14c1.1,0 2,-0.9 2,-2L22,4c0,-1.1 -0.9,-2 -2,-2zM6,9h12v2L6,11L6,9zM14,14L6,14v-2h8v2zM18,8L6,8L6,6h12v2z",
+        )
+    }
     private val dot by lazy { icon("Dot", "M12,12m-4,0a4,4 0,1 0,8 0a4,4 0,1 0,-8 0") }
 
-    private fun icon(name: String, path: String): ImageVector =
+    private fun icon(name: String, vararg paths: String): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f)
-            .addPath(PathParser().parsePathString(path).toNodes(), fill = SolidColor(Color.Black))
+            .apply {
+                for (path in paths) {
+                    addPath(PathParser().parsePathString(path).toNodes(), fill = SolidColor(Color.Black))
+                }
+            }
             .build()
 }
 

@@ -9,7 +9,7 @@
 | `Id` | 稳定标识符或字符串 |
 | `DisplayText` | tr! 文案或可显示的状态表达式 |
 | `LocalizedText` | tr! 静态本地化文案 |
-| `Icon` | 图标名称字符串（SF Symbols 命名） |
+| `Icon` | 图标名称字符串（SF Symbols 命名）。Apple 目标可用任何 SF Symbol；其他目标把名字映射到平台自己的图标，至少都画 Bern 图标集（`bern_target_api::icon_set::NAMES`）中的名字，用到该目标没有的名字时检查报错 |
 | `ImageResource` | 图片资源；Image 也支持引擎图片状态 |
 | `SvgResource` | 已声明的随包 SVG 资源 |
 | `Number` | 构建期数字 |

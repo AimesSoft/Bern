@@ -769,3 +769,63 @@ fn a_declared_res_folder_is_the_launcher_icon() {
     );
     let _ = std::fs::remove_dir_all(&res);
 }
+
+/// `app` with its first icon replaced by `name`.
+fn with_icon(app: &bern_ir::Application, name: &str) -> bern_ir::Application {
+    fn replace(value: &mut serde_json::Value, name: &str) -> bool {
+        match value {
+            serde_json::Value::Object(map) => {
+                if map.get("kind").and_then(|kind| kind.as_str()) == Some("icon") {
+                    map.insert("name".into(), name.into());
+                    return true;
+                }
+                map.values_mut().any(|child| replace(child, name))
+            }
+            serde_json::Value::Array(items) => items.iter_mut().any(|child| replace(child, name)),
+            _ => false,
+        }
+    }
+    let mut value = serde_json::to_value(app).unwrap();
+    assert!(replace(&mut value, name), "the application has no icon");
+    serde_json::from_value(value).unwrap()
+}
+
+/// `BernIcons.get` has a branch for every name of the Bern icon set, each
+/// a Material icon; a name the table lacks fails the check at the element
+/// instead of showing the neutral dot when the application runs.
+#[test]
+fn icons_come_from_the_table_and_others_fail_the_check() {
+    let (config, compiled) = compile("gallery");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let views = file(&files, "dev/bern/runtime/BernViews.kt");
+    assert!(!views.contains("/*bern:icon-branches*/"));
+    for name in bern_target_api::icon_set::NAMES {
+        assert!(views.contains(&format!("        \"{name}\" -> ")), "{name}");
+    }
+    for branch in [
+        "\"film.stack\" -> videoLibrary",
+        "\"server.rack\" -> dns",
+        "\"sparkles\" -> autoAwesome",
+        "\"puzzlepiece.extension\" -> extension",
+        "\"arrow.triangle.2.circlepath\" -> sync",
+        "\"wifi\" -> wifi",
+        "\"keyboard\" -> keyboard",
+        "\"minus\" -> remove",
+        "\"arrow.left\" -> Icons.AutoMirrored.Filled.ArrowBack",
+    ] {
+        assert!(views.contains(branch), "{branch}");
+    }
+    assert!(views.contains("private val videoLibrary by lazy"));
+    for name in ["film.stack", "server.rack", "no.such.symbol"] {
+        let problems = ComposeAndroid.check(&with_icon(&compiled.app, name), &android(&config));
+        let rejected = problems.iter().any(|problem| {
+            problem.is_error()
+                && problem
+                    .message
+                    .starts_with(&format!("the Material icon set has no `{name}`"))
+        });
+        assert_eq!(rejected, name == "no.such.symbol", "{name}: {problems:?}");
+    }
+}

@@ -6,6 +6,7 @@
 //! `libbern_app.so`, which the Kotlin runtime loads through JNI.
 
 mod glue;
+pub mod icons;
 mod kotlin;
 mod names;
 mod project;
@@ -106,6 +107,11 @@ fn features_source() -> String {
     FEATURES.replace("/*bern:file-extensions*/", &table.join(", "))
 }
 
+/// The views template with the icon branches from the icon table.
+fn views_source() -> String {
+    VIEWS.replace("/*bern:icon-branches*/", &icons::branches())
+}
+
 pub struct ComposeAndroid;
 
 fn component_names() -> &'static [&'static str] {
@@ -200,6 +206,11 @@ impl Target for ComposeAndroid {
                 )));
             }
         }
+        diagnostics.extend(bern_target_api::icon_set::check(
+            app,
+            "the Material icon set",
+            icons::has,
+        ));
         diagnostics
     }
 
@@ -273,7 +284,10 @@ impl Target for ComposeAndroid {
 "#,
             ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernRuntime.kt"), RUNTIME),
-            GeneratedFile::text(sources.join("dev/bern/runtime/BernViews.kt"), VIEWS),
+            GeneratedFile::text(
+                sources.join("dev/bern/runtime/BernViews.kt"),
+                views_source(),
+            ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernStyle.kt"), STYLE),
             GeneratedFile::text(
                 sources.join("dev/bern/runtime/BernFeatures.kt"),

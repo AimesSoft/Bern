@@ -8,6 +8,7 @@
 //! requirement of this target's build only.
 
 mod glue;
+pub mod icons;
 mod rust;
 mod style;
 
@@ -278,6 +279,11 @@ impl Target for GtkLinux {
                 )));
             }
         }
+        diagnostics.extend(bern_target_api::icon_set::check(
+            app,
+            "the GTK icon set",
+            icons::has,
+        ));
         let mut visit = |node: &Node| {
             if let Node::Element(element) = node
                 && element.kind == "Picker"

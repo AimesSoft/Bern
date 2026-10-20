@@ -374,36 +374,27 @@ impl Target for WebBrowser {
         for problem in theme::problems(app) {
             diagnostics.push(Diagnostic::error(problem));
         }
+        diagnostics.extend(bern_target_api::icon_set::check(
+            app,
+            "the Web icon set",
+            |icon| icons::svg(icon).is_some(),
+        ));
         let mut visit = |node: &Node, _: Option<&str>| {
-            if let Node::Element(element) = node {
-                for (name, prop) in &element.props {
-                    if let bern_ir::Prop::Icon { name: icon } = prop
-                        && icons::svg(icon).is_none()
-                    {
-                        diagnostics.push(
-                            Diagnostic::error(format!(
-                                "the Web icon set has no `{icon}` (property `{name}` of `{}`)",
-                                element.kind
-                            ))
-                            .at(element.source.clone()),
-                        );
-                    }
-                }
-                if element.kind == "Picker"
-                    && let Some(field) = element.field("value")
-                    && let Type::Enum { name } = &field.ty
-                    && app
-                        .types
-                        .enum_def(name)
-                        .is_some_and(|def| !def.is_unit_only())
-                {
-                    diagnostics.push(
-                        Diagnostic::error(format!(
-                            "`Picker` lists the variants of `{name}`, which must not carry data"
-                        ))
-                        .at(element.source.clone()),
-                    );
-                }
+            if let Node::Element(element) = node
+                && element.kind == "Picker"
+                && let Some(field) = element.field("value")
+                && let Type::Enum { name } = &field.ty
+                && app
+                    .types
+                    .enum_def(name)
+                    .is_some_and(|def| !def.is_unit_only())
+            {
+                diagnostics.push(
+                    Diagnostic::error(format!(
+                        "`Picker` lists the variants of `{name}`, which must not carry data"
+                    ))
+                    .at(element.source.clone()),
+                );
             }
         };
         app.walk(&mut visit);

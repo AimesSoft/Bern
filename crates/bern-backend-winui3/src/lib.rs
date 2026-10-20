@@ -270,22 +270,12 @@ impl Target for WinUi3Windows {
                 )));
             }
         }
+        diagnostics.extend(bern_target_api::icon_set::check(
+            app,
+            "the Windows icon set",
+            |icon| icons::glyph(icon).is_some(),
+        ));
         let mut visit = |node: &Node| {
-            if let Node::Element(element) = node {
-                for (name, prop) in &element.props {
-                    if let bern_ir::Prop::Icon { name: icon } = prop
-                        && icons::glyph(icon).is_none()
-                    {
-                        diagnostics.push(
-                            Diagnostic::error(format!(
-                                "the Windows icon fonts have no `{icon}` (property `{name}` of `{}`)",
-                                element.kind
-                            ))
-                            .at(element.source.clone()),
-                        );
-                    }
-                }
-            }
             if let Node::Element(element) = node
                 && element.kind == "Picker"
                 && let Some(field) = element.field("value")

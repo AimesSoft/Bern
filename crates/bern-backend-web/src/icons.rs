@@ -37,6 +37,7 @@ const ICONS: &[(&str, &str, Fill)] = &[
     ("checkmark", lucide!("check"), Fill::None),
     ("chevron.left", lucide!("chevron-left"), Fill::None),
     ("chevron.right", lucide!("chevron-right"), Fill::None),
+    ("chevron.up", lucide!("chevron-up"), Fill::None),
     ("chevron.down", lucide!("chevron-down"), Fill::None),
     (
         "chevron.up.chevron.down",
@@ -125,6 +126,7 @@ const ICONS: &[(&str, &str, Fill)] = &[
     ("arrow.up.arrow.down", lucide!("arrow-down-up"), Fill::None),
     ("checkmark.circle", lucide!("circle-check"), Fill::None),
     ("arrow.down", lucide!("arrow-down"), Fill::None),
+    ("arrow.left", lucide!("arrow-left"), Fill::None),
     ("music.note", lucide!("music"), Fill::None),
     (
         "arrow.down.circle",
@@ -153,6 +155,7 @@ const ICONS: &[(&str, &str, Fill)] = &[
     ),
     ("square.and.arrow.up", lucide!("share"), Fill::None),
     ("star", lucide!("star"), Fill::None),
+    ("star.fill", lucide!("star"), Fill::All),
     ("star.slash", lucide!("star-off"), Fill::None),
     ("folder", lucide!("folder"), Fill::None),
     ("paintpalette", lucide!("palette"), Fill::None),
@@ -346,6 +349,13 @@ mod tests {
         assert!(clear.contains(&format!(r#"<mask id="{ID_PLACEHOLDER}""#)));
         assert!(clear.contains(&format!(r#"mask="url(#{ID_PLACEHOLDER})""#)));
         assert!(!svg("star").unwrap().contains("fill="));
+    }
+
+    #[test]
+    fn every_name_of_the_bern_icon_set_is_drawn() {
+        for name in bern_target_api::icon_set::NAMES {
+            assert!(svg(name).is_some(), "the Web icon set lacks {name}");
+        }
     }
 
     #[test]

@@ -84,7 +84,7 @@
 | 带内容的 `Button` | 无外框的 `GtkButton`，内容按原样显示，`overflow: hidden` 让样式的圆角裁住内容；没有样式时按下变暗 |
 | 工具栏中的 `Search` | 页眉末端的 `GtkSearchEntry`；子元素是不抢焦点的 `GtkPopover`，有焦点且有文字时显示，点选结果后收起 |
 
-图标使用 Bern 的 SF Symbols 命名，映射到 freedesktop 符号图标名（例如 `magnifyingglass` → `system-search-symbolic`），由用户的图标主题绘制；GNOME 上即 Adwaita 图标。
+图标使用 Bern 的 SF Symbols 命名，映射到 freedesktop 符号图标名（例如 `magnifyingglass` → `system-search-symbolic`），由用户的图标主题绘制；GNOME 上即 Adwaita 图标。对照表只有一份（`crates/bern-gtk/src/icon_table.rs`，按名字排序）：运行时读它，`bern-backend-gtk` 也以 `include!` 读它，应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示缺失图标。表中的图标都在 Adwaita 46 里（Yaru 等主题经 `Inherits` 最终回落到 Adwaita），只有 `arrow.up.right.square` 用 libadwaita 自带资源中的 `adw-external-link-symbolic`。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字。
 
 ## 运行结构
 
@@ -320,13 +320,21 @@ target/bern/linux/Showcase/showcase
 - 带底板的 `Stack` 横向占满分给它的宽度、底板随之铺满：此前层叠按其他层的自然宽度分配，设置页插件横幅的底图只有文字那么宽。
 - 实测：选中项一行高；表单与预览并排、文字不再逐字换行；播放条显示进度；插件横幅与正文同宽，卡片两列对齐。`crates/bern-gtk` 的 `cargo clippy --all-features --all-targets -- -D warnings` 与 `cargo test --all-features`、`cargo test -p bern-backend-gtk` 通过。图标主题中没有的名字仍显示缺图占位（见下）。
 
+2026-10-20，图标补齐：
+
+- 此前对照表只有 55 个名字，表中没有的显示缺失图标（`image-missing-symbolic`），检查不知道。用于验收的媒体类应用的主侧栏（首页、新番、媒体库）、设置侧栏的若干项与插件卡片都是缺失图标。
+- 对照表移到 `bern-gtk/src/icon_table.rs`，与检查共用（见“控件映射”后的图标一段）；检查报“the GTK icon set has no `…`”。
+- 新增 38 个名字，都取 Adwaita 46 中的图标（只有一个取自 libadwaita）：`house` → `go-home`、`calendar` → `x-office-calendar`、`film.stack` → `applications-multimedia`、`server.rack` → `network-server`、`wifi` → `network-wireless`、`keyboard` → `input-keyboard`、`puzzlepiece.extension` → `application-x-addon`、`arrow.triangle.2.circlepath` → `emblem-synchronizing`、`arrow.up.arrow.down` → `view-sort-descending`、`arrow.up.left.and.arrow.down.right` → `view-fullscreen`、`backward.end.fill` / `forward.end.fill` → `media-skip-backward` / `media-skip-forward`、`gobackward.10` / `goforward.10` → `media-seek-backward` / `media-seek-forward`、`play` / `pause` → `media-playback-start` / `media-playback-pause`、`speaker.wave.2` → `audio-volume-medium`、`camera` → `camera-photo`、`link` → `insert-link`、`paperplane` → `mail-send`、`moon` → `weather-clear-night`、`eye.slash` → `view-conceal`、`scissors` → `edit-cut`、`shield` → `security-high`、`tv` → `tv`、`checkmark.circle` → `selection-mode`、`circle` / `circle.fill` → `radio` / `media-record`、`square` → `checkbox`、`chevron.up` → `pan-up`、`arrow.left` → `go-previous`、`arrow.down` → `document-save`，以及上一段列出的代替图标（名字都省略了 `-symbolic` 后缀）。选择时把虚拟机上 Adwaita 46 的全部符号图标渲染成图表对照。
+- 测试：`bern-backend-gtk` 的单元测试核对表已排序并覆盖 Bern 图标集；生成测试把画廊的第一个图标换成新名字（检查通过）和不存在的名字（检查报错）；`bern-gtk` 的测试在装有 Adwaita 的机器上核对表中每个图标都在 Adwaita 里（`adw-` 开头的除外）。
+- 实测（Ubuntu 24.04 虚拟机，GTK 4.14.5、libadwaita 1.5.0、Adwaita 46，经 Broadway）：该应用 `bern check --target linux` 没有错误；主侧栏的首页、新番、媒体库，设置侧栏全部 15 项（经 CLI 打开 5 个可选模块后），“可选功能”页的各行与右侧预览（含播放条），插件市场的 6 张卡片都显示主题图标，没有缺失图标；`adw-external-link-symbolic` 在 libadwaita 1.5 下解析成功。虚拟机上 `crates/bern-gtk` 的 `cargo test --all-features icons` 与 `cargo clippy --all-features --all-targets -- -D warnings` 通过。
+
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。
 - `reflow` 在 `Column`、`Row`、`Stack` 与 `cell_ratio` 网格中生效；没有 `cell_ratio` 的 `Grid` 是 `GtkFlowBox`，表单行由 `GtkListBox` 布置，它们的子元素不能在布局后另加偏移，写了会构建警告。
 - 用到 `Svg` 的应用依赖 WebKitGTK 的沙箱，`.deb` 为此附带 AppArmor 配置（见“打包”）。实际安装未实测（需要 root）：`postinst` 载入配置、安装后从菜单或 `/usr/bin` 启动、remove 与 purge 后的情形都没有验证，只验证了包的内容、配置的解析和同形配置下的运行。`.tar.gz` 与开发构建仍需手动添加配置，或只为测试以 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` 运行。
 - `Adaptive` 在第一次排布之前按 `expanded` 构建，窄窗口启动时先构建宽布局，排布后才换成窄布局。
-- 部分 SF Symbols 名称在 GNOME 图标主题中没有对应，显示为缺失图标（如播放器的快退 10 秒、字幕气泡）。
+- Adwaita 46 没有气泡、筛选、滑杆、闪光、画中画这几类图标，对应名字用最接近的图标代替：`text.bubble` → `chat-message-new-symbolic`（带加号的气泡）、`line.3.horizontal.decrease` → `format-justify-center-symbolic`、`slider.horizontal.3` → `preferences-system-symbolic`、`sparkles` → `star-new-symbolic`、`pip.enter` → `focus-windows-symbolic`。`note.text`、`paintbrush`、`paintpalette` 用的是 Adwaita 46 `legacy` 目录中的图标，更新的 Adwaita 若移除它们会显示缺失图标（未验证）。
 - `hero` 只在同一窗口内配对；离开的元素若是视频或画布不留画面，只有新元素从旧位置展开。
 - 侧栏项的样式没有 `shadow`（与其他目标相同，检查时报错）。
 - `appearance` 的部分依赖 libadwaita 自带的 `base.css` 与 `defaults-*.css`（1.5 的资源路径）；Ubuntu 的 Yaru 强调色变体未单独处理，部分里使用 libadwaita 默认的取值。

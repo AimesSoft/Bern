@@ -9,6 +9,7 @@
 pub mod brand_assets;
 pub mod glue;
 pub mod icon;
+pub mod icon_set;
 pub mod names;
 pub mod style;
 pub mod svg;

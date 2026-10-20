@@ -834,3 +834,55 @@ fn a_declared_icon_theme_ships_under_the_application_name() {
     );
     let _ = std::fs::remove_dir_all(&theme);
 }
+
+/// `app` with its first icon replaced by `name`.
+fn with_icon(app: &Application, name: &str) -> Application {
+    fn replace(value: &mut serde_json::Value, name: &str) -> bool {
+        match value {
+            serde_json::Value::Object(map) => {
+                if map.get("kind").and_then(|kind| kind.as_str()) == Some("icon") {
+                    map.insert("name".into(), name.into());
+                    return true;
+                }
+                map.values_mut().any(|child| replace(child, name))
+            }
+            serde_json::Value::Array(items) => items.iter_mut().any(|child| replace(child, name)),
+            _ => false,
+        }
+    }
+    let mut value = serde_json::to_value(app).unwrap();
+    assert!(replace(&mut value, name), "the application has no icon");
+    serde_json::from_value(value).unwrap()
+}
+
+/// The runtime draws every name of the Bern icon set from the theme; a
+/// name its table lacks fails the check at the element instead of showing
+/// `image-missing` when the application runs.
+#[test]
+fn icons_the_table_lacks_fail_the_check() {
+    for name in bern_target_api::icon_set::NAMES {
+        assert!(bern_backend_gtk::icons::has(name), "{name}");
+    }
+    let (_, gallery) = example("gallery");
+    for name in [
+        "film.stack",
+        "server.rack",
+        "sparkles",
+        "puzzlepiece.extension",
+        "arrow.triangle.2.circlepath",
+        "wifi",
+        "no.such.symbol",
+    ] {
+        let problems = GtkLinux.check(&with_icon(&gallery, name), &linux());
+        let rejected = problems.iter().any(|problem| {
+            problem.is_error()
+                && problem
+                    .message
+                    .starts_with(&format!("the GTK icon set has no `{name}`"))
+        });
+        assert_eq!(rejected, name == "no.such.symbol", "{name}: {problems:?}");
+    }
+    let ui = bern_backend_gtk::Generator::new(&with_icon(&gallery, "film.stack"))
+        .generate(0, "bern_gtk::protocol::ProtocolDescriptor::default()");
+    assert!(ui.contains("\"film.stack\""));
+}
