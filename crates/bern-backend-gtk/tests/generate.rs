@@ -200,6 +200,7 @@ fn showcase_generates_a_gtk_application() {
             output.join("Showcase/showcase"),
             output.join("bin/showcase"),
             output.join("bin/showcase-mcp"),
+            output.join("skills/showcase/SKILL.md"),
         ]
     );
 
@@ -897,6 +898,88 @@ fn icons_the_table_lacks_fail_the_check() {
     let ui = bern_backend_gtk::Generator::new(&with_icon(&gallery, "film.stack"))
         .generate(0, "bern_gtk::protocol::ProtocolDescriptor::default()");
     assert!(ui.contains("\"film.stack\""));
+}
+
+/// Where the planner listens, its build carries an agent skill beside
+/// `bin/` listing the shell's and the modules' commands, and the packages
+/// carry it too; without the channel there is none, and an earlier one is
+/// removed.
+#[test]
+fn the_build_carries_an_agent_skill_where_the_app_listens() {
+    let root = workspace();
+    let (config, app) = example("planner");
+    let target = config
+        .targets
+        .iter()
+        .find(|target| target.platform == "linux")
+        .unwrap()
+        .clone();
+    assert_eq!(target.channels, ["ipc"]);
+    let output = root.join("target/bern-test/gtk-skill");
+    let context = |target: TargetConfig| BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: String::new(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let skill = output.join("skills/planner/SKILL.md");
+    let plan = GtkLinux.plan(&app, &context(target.clone())).unwrap();
+    assert!(plan.products.contains(&skill));
+    let written = plan
+        .steps
+        .iter()
+        .find_map(|step| match step {
+            BuildStep::Write { path, contents } if *path == skill => {
+                Some(String::from_utf8(contents.clone()).unwrap())
+            }
+            _ => None,
+        })
+        .expect("the plan writes the skill");
+    for expected in [
+        "---\nname: planner\ndescription: \"Operate 计划 / Planner (dev.bern.planner)",
+        "| `planner` | `../../bin/planner` |",
+        "at `/opt/dev.bern.planner/bin/planner`",
+        "### `planner planner rename`\n\nRename the plan.\n\n- `--title <text>`",
+        "Errors: `empty_title`.",
+        "### `planner notes add`\n\nAdd a note and return its id.",
+        "MCP tool: `notes_add`.",
+        "### `planner modules set-enabled`",
+        "| `title` | `text` | Title of the plan, shown above the notes. |",
+        "### `planner ui activate`",
+        "Interface languages, for `ui set-language`: `zh-Hans`, `en`.",
+    ] {
+        assert!(
+            written.contains(expected),
+            "the skill lacks `{expected}`:\n{written}"
+        );
+    }
+    // Without the channel the programs cannot reach the app: no skill, and
+    // the folder of an earlier build goes.
+    let quiet = TargetConfig {
+        channels: Vec::new(),
+        ..target
+    };
+    let plan = GtkLinux.plan(&app, &context(quiet)).unwrap();
+    assert!(!plan.products.contains(&skill));
+    assert!(plan.steps.iter().any(|step| matches!(
+        step,
+        BuildStep::RemoveIfExists { path } if *path == output.join("skills")
+    )));
+    assert!(
+        !plan
+            .steps
+            .iter()
+            .any(|step| matches!(step, BuildStep::Write { path, .. } if *path == skill))
+    );
 }
 
 const STAGE_PROTOCOL: &str = r#"

@@ -613,6 +613,11 @@ impl EngineLink for RemoteEngine {
         self.0.descriptor
     }
 
+    /// The engine host traces its jobs; the page only the UI's side.
+    fn local(&self) -> bool {
+        false
+    }
+
     fn engine_id(&self) -> String {
         self.0.lock().engine_id.clone()
     }

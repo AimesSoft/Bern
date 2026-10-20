@@ -890,14 +890,16 @@ inline winrt::Windows::UI::Color Shade(uint32_t rgb, int step) {
 }
 
 /// The text on an accent fill: white, or near black on a light accent
-/// (relative luminance above one half), as the design pairs them.
+/// (relative luminance above 0.4, `bern_theme::DARK_ON_ACCENT_ABOVE`, as
+/// on the other native targets; the compiler moves an accent until the
+/// one chosen here reads on it).
 inline winrt::Windows::UI::Color OnAccent(uint32_t rgb) {
     auto linear = [](uint8_t c) {
         double v = c / 255.0;
         return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
     };
     double l = 0.2126 * linear(uint8_t(rgb >> 16)) + 0.7152 * linear(uint8_t(rgb >> 8)) + 0.0722 * linear(uint8_t(rgb));
-    return l > 0.5 ? winrt::Windows::UI::Color{255, 11, 11, 13} : winrt::Windows::UI::Color{255, 255, 255, 255};
+    return l > 0.4 ? winrt::Windows::UI::Color{255, 11, 11, 13} : winrt::Windows::UI::Color{255, 255, 255, 255};
 }
 
 /// Every solid brush stored under `key` for `theme` in `dictionary`, its

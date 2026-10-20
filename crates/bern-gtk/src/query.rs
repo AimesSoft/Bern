@@ -292,6 +292,8 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                 let page = adw::StatusPage::new();
                 page.set_icon_name(Some("dialog-warning-symbolic"));
                 page.add_css_class("compact");
+                // A status fills across what it stands in, centered there.
+                page.set_hexpand(true);
                 let shown = page.clone();
                 let failed = Rc::clone(&failed);
                 effect(move || shown.set_title(&failed()));
@@ -305,6 +307,7 @@ pub fn Query(p: &Parent, ctx: &Ctx, props: QueryProps, template: Build) {
                 let page = adw::StatusPage::new();
                 page.set_icon_name(Some(icons::name(empty_icon)));
                 page.add_css_class("compact");
+                page.set_hexpand(true);
                 if let Some(empty) = empty.clone() {
                     let shown = page.clone();
                     effect(move || shown.set_title(&empty()));

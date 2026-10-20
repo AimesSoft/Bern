@@ -9,7 +9,7 @@
 //! state field a query declares in `#[reads(…)]`, its live subscriptions
 //! ask again with the same parameters.
 
-use super::{BernApp, BernBuffer, BernCallbacks, error_bytes, slice, with_app};
+use super::{BernApp, BernBuffer, BernCallbacks, error_bytes, slice, trace, with_app};
 use crate::link::EngineLink;
 use bern_command::{CallContext, Entry};
 use bern_protocol::{
@@ -88,29 +88,45 @@ pub(crate) fn send(
     let descriptor = host.descriptor();
     let answers = Arc::clone(subscriptions);
     let cancellation = ticket.cancellation.clone();
-    host.dispatch(
-        Invocation {
-            command: query,
-            params,
-        },
-        CallContext {
-            entry: Entry::Ui,
-            request_id: format!("query-{id}-{}", ticket.version),
-        },
-        cancellation,
-        Box::new(move |outcome| {
-            let bytes = {
-                let mut subscriptions = answers.lock().expect("query lock");
-                match subscriptions.resolve(id, &ticket, outcome.result) {
-                    Resolution::Applied => current(&subscriptions, descriptor, id),
-                    Resolution::Discarded => None,
+    let version = ticket.version;
+    let origin = trace::Origin::Query {
+        subscription: id,
+        version,
+    };
+    trace::with_origin(origin, || {
+        host.dispatch(
+            Invocation {
+                command: query,
+                params,
+            },
+            CallContext {
+                entry: Entry::Ui,
+                request_id: format!("query-{id}-{version}"),
+            },
+            cancellation,
+            Box::new(move |outcome| {
+                let bytes = {
+                    let mut subscriptions = answers.lock().expect("query lock");
+                    match subscriptions.resolve(id, &ticket, outcome.result) {
+                        Resolution::Applied => current(&subscriptions, descriptor, id),
+                        Resolution::Discarded => None,
+                    }
+                };
+                if trace::on(trace::ENGINE) {
+                    let which = if bytes.is_some() {
+                        trace::CALLBACK_QUERY
+                    } else {
+                        trace::CALLBACK_DISCARDED
+                    };
+                    let len = bytes.as_ref().map(Vec::len).unwrap_or(0);
+                    trace::callback(which, id, version, len);
                 }
-            };
-            if let Some(bytes) = bytes {
-                callbacks.query(id, &bytes);
-            }
-        }),
-    );
+                if let Some(bytes) = bytes {
+                    callbacks.query(id, &bytes);
+                }
+            }),
+        )
+    });
 }
 
 /// Engine state fields changed: ask again for every subscription whose

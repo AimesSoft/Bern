@@ -42,6 +42,11 @@ pub trait EngineLink: Send + Sync + 'static {
     fn windows_changed(&self, windows: Vec<String>) {
         let _ = windows;
     }
+    /// Whether the engine runs in this process, so its jobs are traced
+    /// here.
+    fn local(&self) -> bool {
+        true
+    }
 }
 
 impl EngineLink for Host {

@@ -26,7 +26,7 @@ use bern_protocol::Type;
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
-    dist_dir, files_below, icon, package_architecture,
+    dist_dir, files_below, icon, package_architecture, skill,
 };
 use std::path::{Path, PathBuf};
 
@@ -619,6 +619,20 @@ impl Target for WebBrowser {
                 products.push(output.join("bin").join(&name));
             }
         }
+        // The agent skill beside `bin/`, where the engine host listens; an
+        // `app` build has no programs to describe.
+        let listens = remote && skill::listens(&context.target.channels);
+        let place = listens.then(|| {
+            skill::Place::beside_bin(app, cfg!(windows)).connect(format!(
+                "The programs reach the engine host `{program}-host` beside them, which serves the page: start it (`bern run --target {target}` does) before calling them. The `ui` and `window` commands act on the page while a browser has it open.",
+                program = glue::program(app),
+                target = context.target.name,
+            ))
+        });
+        steps.extend(skill::steps(app, output, place.as_ref()));
+        if listens {
+            products.push(output.join(skill::path(app)));
+        }
         let run = if remote {
             let host = format!(
                 "{}-host{}",
@@ -639,7 +653,8 @@ impl Target for WebBrowser {
 
     /// The files a server needs, in one archive: the page and its assets
     /// for an `app` build; with a `ui` build also the engine host and its
-    /// command line and MCP server, for this machine.
+    /// command line and MCP server, for this machine, and the agent skill
+    /// listing their commands.
     fn package(
         &self,
         app: &Application,

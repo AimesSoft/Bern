@@ -2,7 +2,7 @@
 //! session state that holds them.
 
 use super::Out;
-use crate::names::{case, double, member, string, value_type};
+use crate::names::{self, case, double, member, string, value_type};
 use bern_ir::Application;
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -381,11 +381,11 @@ pub(super) fn generate_engine(out: &mut Out, app: &Application) {
 }
 
 pub(super) fn session_class(name: &str) -> String {
-    format!("{name}Session")
+    names::session_type(name)
 }
 
 pub(super) fn session_var(name: &str) -> String {
-    format!("bern{name}")
+    names::session_variable(name)
 }
 
 pub(super) fn generate_sessions(out: &mut Out, app: &Application) {

@@ -1,8 +1,13 @@
 //! The `framework-names` example names its value types like types of
 //! SwiftUI, Foundation and Swift (`Layout`, `View`, `Text`, `Color`,
-//! `Error`, `Task`…). Generated Swift spells them `App_…`, so they hide
-//! none of the frameworks' types; swiftc type-checks the result for
-//! macOS, iOS and tvOS where the SDKs are installed.
+//! `Error`, `Task`…), and its components and sessions so that `View` or
+//! `Session` appended gave SwiftUI's, Foundation's and the runtime's
+//! types (`EmptyView`, `AnyView`, `URLSession`, `BernPlayerView`) and
+//! `bern` prepended the views' own `bernWindow` and `bernEngine`.
+//! Generated Swift spells types and sessions `App_…`, components
+//! `AppView_…` and the variables of sessions `session_…`, so they hide
+//! none of the frameworks' or the runtime's names; swiftc type-checks the
+//! result for macOS, iOS and tvOS where the SDKs are installed.
 
 use bern_backend_swiftui::{
     MINIMUM_IOS, MINIMUM_MACOS, MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos,
@@ -67,7 +72,8 @@ fn generate(platform: &str, target: &dyn Target) -> PathBuf {
     output
 }
 
-/// The value types are declared and used under their `App_` names only.
+/// The value types and sessions are declared and used under their `App_`
+/// names only, components under their `AppView_` names.
 fn check_names(output: &Path) {
     let swift = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
     for expected in [
@@ -88,11 +94,38 @@ fn check_names(output: &Path) {
         "let text: App_Text",
         // Errors name the declared type.
         r#"throw BernDecodeError(message: "invalid Layout")"#,
+        // Components and sessions.
+        "struct AppView_page: View {",
+        "struct AppView_empty: View {",
+        "struct AppView_any: View {",
+        "struct AppView_scroll: View {",
+        "struct AppView_content_unavailable: View {",
+        "struct AppView_bern_player: View {",
+        "AppView_caption(text: bernEngine.text)",
+        "AppView_empty()",
+        "final class App_Draft: BernSessionState {",
+        "final class App_URL: BernSessionState {",
+        "final class App_Window: BernSessionState {",
+        "@Environment(App_Draft.self) private var session_Draft",
+        "@Environment(App_Window.self) private var session_Window",
+        "@Environment(App_Engine.self) private var session_Engine",
+        "private var session_Window: App_Window { context.session(App_Window.self) }",
+        "if session_Window.pinned {",
     ] {
         assert!(swift.contains(expected), "BernGenerated.swift lacks `{expected}`");
     }
     for bare in [
-        "enum Layout", "enum View", "enum Color", "enum Error", "struct Text", "struct List",
+        "enum Layout",
+        "enum View",
+        "enum Color",
+        "enum Error",
+        "struct Text",
+        "struct List",
+        "struct EmptyView",
+        "struct AnyView",
+        "struct BernPlayerView",
+        "final class URLSession",
+        "final class WindowSession",
     ] {
         assert!(
             !swift.contains(&format!("\n{bare}")),

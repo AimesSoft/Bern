@@ -1,9 +1,12 @@
 //! The `framework-names` example names its value types like types of
 //! Compose, Kotlin and Android (`Modifier`, `Color`, `Text`, `List`,
 //! `Bundle`, `Role`…) and the variants of one enum like Kotlin's types
-//! (`String`, `List`, `Boolean`). Generated Kotlin spells the types
-//! `App_…` and writes Kotlin's own types in full inside a sealed class,
-//! where its variant classes would hide them.
+//! (`String`, `List`, `Boolean`). Its components and sessions are named
+//! so that `View` appended gave the runtime's `BernQueryView` and `bern`
+//! prepended a view's own `bernWindow`. Generated Kotlin spells the types
+//! and sessions `App_…`, components `AppView_…` and the variables of
+//! sessions `session_…`, and writes Kotlin's own types in full inside a
+//! sealed class, where its variant classes would hide them.
 //!
 //! With `BERN_TEST_KOTLIN=1`, Gradle compiles the generated Kotlin (about
 //! a minute with its caches warm); `bern build --target android` does the
@@ -103,6 +106,19 @@ fn value_types_named_like_framework_types_compile() {
         "text: App_Text",
         // Errors name the declared type.
         r#"else -> throw BernDecodeError("invalid Layout")"#,
+        // Components and sessions.
+        "fun AppView_page() {",
+        "fun AppView_empty() {",
+        "fun AppView_bern_query() {",
+        "fun AppView_caption(text: App_Text) {",
+        "AppView_empty()",
+        "class App_Draft : BernSessionState(0) {",
+        "class App_URL : BernSessionState(1) {",
+        "class App_Window : BernSessionState(2) {",
+        "val session_Draft = context.session(App_Draft::class.java)",
+        "val session_Window = bernWindow.session(App_Window::class.java)",
+        "val session_Engine = bernWindow.session(App_Engine::class.java)",
+        "if (session_Window.pinned) {",
     ] {
         assert!(kotlin.contains(expected), "BernGenerated.kt lacks `{expected}`");
     }
@@ -112,6 +128,10 @@ fn value_types_named_like_framework_types_compile() {
         "class Color",
         "class Text(",
         "class List(",
+        "class URLSession",
+        "class WindowSession",
+        "fun EmptyView(",
+        "fun BernQueryView(",
     ] {
         assert!(
             !kotlin.contains(&format!("\n{bare}")),

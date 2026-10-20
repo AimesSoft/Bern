@@ -11,6 +11,7 @@ name = "bern"
 path = "src/main.rs"
 
 [dependencies]
+bern-command.workspace = true
 bern-compiler.workspace = true
 bern-protocol.workspace = true
 bern-syntax.workspace = true

@@ -19,7 +19,7 @@ use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, dist_dir,
-    icon, package_architecture,
+    icon, package_architecture, skill,
 };
 use std::path::PathBuf;
 
@@ -511,25 +511,34 @@ impl Target for SwiftUiMacos {
                 env: vec![],
             },
         ]);
+        // The agent skill beside `bin/`, where the app listens.
+        let listens = skill::listens(&context.target.channels);
+        let place = listens.then(|| skill::Place::beside_bin(app, false));
+        steps.extend(skill::steps(app, output, place.as_ref()));
+        let mut products = vec![
+            bundle.clone(),
+            output.join("bin").join(&cli),
+            output.join("bin").join(format!("{cli}-mcp")),
+            symbols,
+        ];
+        if listens {
+            products.push(output.join(skill::path(app)));
+        }
         Ok(BuildPlan {
             steps,
             notes: Vec::new(),
             run: Some(Run::Program(bundle.join("Contents/MacOS").join(&product))),
-            products: vec![
-                bundle,
-                output.join("bin").join(&cli),
-                output.join("bin").join(format!("{cli}-mcp")),
-                symbols,
-            ],
+            products,
         })
     }
 
     /// A disk image with the app and a link to Applications. The command
-    /// line and MCP server go into `Contents/Helpers`, so the installed app
-    /// carries its entries for agents. Signed with the identity from
-    /// [`Signing`] (hardened runtime and a secure timestamp, as notarization
-    /// requires) and notarized when a notary profile is given; otherwise
-    /// signed for this Mac only.
+    /// line and MCP server go into `Contents/Helpers`, and the agent skill
+    /// listing their commands into `Contents/Resources/skills`, so the
+    /// installed app carries its entries for agents. Signed with the
+    /// identity from [`Signing`] (hardened runtime and a secure timestamp,
+    /// as notarization requires) and notarized when a notary profile is
+    /// given; otherwise signed for this Mac only.
     fn package(
         &self,
         app: &Application,
@@ -614,6 +623,22 @@ impl Target for SwiftUiMacos {
                 "codesign",
                 sign(&helpers.join(&program)),
             ));
+        }
+        // The agent skill goes with the resources, which the signature
+        // seals; it finds the programs in `Helpers`.
+        if skill::listens(&context.target.channels) {
+            let place = skill::Place {
+                cli: format!("../../../Helpers/{cli}"),
+                mcp: format!("../../../Helpers/{cli}-mcp"),
+                installed: Some(format!(
+                    "/Applications/{product}.app/Contents/Helpers/{cli}"
+                )),
+                connect: None,
+            };
+            steps.push(BuildStep::Write {
+                path: staged.join("Contents/Resources").join(skill::path(app)),
+                contents: skill::markdown(app, &place).into_bytes(),
+            });
         }
         steps.push(run("Sign the app", "codesign", sign(&staged)));
         steps.push(run(

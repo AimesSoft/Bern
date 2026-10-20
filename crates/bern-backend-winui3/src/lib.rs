@@ -23,7 +23,7 @@ use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
-    dist_dir, files_below, icon,
+    dist_dir, files_below, icon, skill,
 };
 use std::path::PathBuf;
 
@@ -457,7 +457,7 @@ impl Target for WinUi3Windows {
         if context.release {
             cargo.push("--release".into());
         }
-        let steps = vec![
+        let mut steps = vec![
             BuildStep::Run {
                 description: "Build the engine library and the entries".into(),
                 program: "cargo".into(),
@@ -504,22 +504,37 @@ impl Target for WinUi3Windows {
                 to: output.join("bin").join(exe(&format!("{executable}-mcp"))),
             },
         ];
+        // The agent skill beside `bin\`, where the app listens: in the
+        // build, the `.zip` and the folder the installer fills.
+        let listens = skill::listens(&context.target.channels);
+        let place = listens.then(|| {
+            skill::Place::beside_bin(app, true).installed(format!(
+                "%LOCALAPPDATA%\\Programs\\{product}\\bin\\{}",
+                exe(&executable)
+            ))
+        });
+        steps.extend(skill::steps(app, output, place.as_ref()));
+        let mut products = vec![
+            bundle.join(exe(&executable)),
+            output.join("bin").join(exe(&executable)),
+            output.join("bin").join(exe(&format!("{executable}-mcp"))),
+        ];
+        if listens {
+            products.push(output.join(skill::path(app)));
+        }
         Ok(BuildPlan {
             steps,
             notes: Vec::new(),
             run: Some(Run::Program(bundle.join(exe(&executable)))),
-            products: vec![
-                bundle.join(exe(&executable)),
-                output.join("bin").join(exe(&executable)),
-                output.join("bin").join(exe(&format!("{executable}-mcp"))),
-            ],
+            products,
         })
     }
 
     /// An installer (`setup.exe`) that installs for the current user
     /// without administrator rights, and a `.zip` of the same folder for
     /// people who do not install. Both carry the command line and the MCP
-    /// server in `bin\`. Signed with the certificate from [`Signing`].
+    /// server in `bin\`, and the agent skill listing their commands in
+    /// `skills\`. Signed with the certificate from [`Signing`].
     fn package(
         &self,
         app: &Application,
@@ -546,6 +561,9 @@ impl Target for WinUi3Windows {
                 output.join("bin").join(&name),
                 PathBuf::from("bin").join(&name),
             ));
+        }
+        if skill::listens(&context.target.channels) {
+            files.push((output.join(skill::path(app)), skill::path(app)));
         }
         // The installer carries the staged copies, which are the signed ones.
         let payload: Vec<installer::Payload> = installer::payload(&files)

@@ -2,8 +2,9 @@
 //! GTK, the other platforms' frameworks and Rust's (`Window`, `Button`,
 //! `Image`, `Orientation`, `Align`, `Widget`, `Text`, `Error`…). The
 //! generated GTK application carries values as `bern_gtk` values and
-//! names the types only in strings; where GTK 4 and libadwaita are
-//! installed, rustc type-checks it.
+//! names the types and sessions only in strings, and writes components
+//! as functions `c_` and the declared name; where GTK 4 and libadwaita
+//! are installed, rustc type-checks it.
 
 use bern_backend_gtk::GtkLinux;
 use bern_target_api::{BuildContext, Framework, Target};
@@ -66,6 +67,10 @@ fn value_types_named_like_framework_types_compile() {
     for expected in [
         r#"b::display(&c.engine(1), Some("Color"))"#,
         r#"b::label("Layout", 0)"#,
+        "fn c_empty(p: &b::Parent, c: &b::Ctx) {",
+        "fn c_bern_player(p: &b::Parent, c: &b::Ctx) {",
+        r#"b::SessionDef { name: "URL", fields: vec!["#,
+        r#"b::SessionDef { name: "Window", fields: vec!["#,
     ] {
         assert!(ui.contains(expected), "ui.rs lacks `{expected}`");
     }

@@ -343,6 +343,8 @@ flowchart LR
 
 2026-10-21，窗口正文的摆放（内置浏览器，Chromium，420 × 300 视口；设计文档“一套窗口声明”）：Web 没有改动，改前就符合这条规则。`.bern-window-content` 是纵向 flex、子元素横向拉伸，所以直接写在窗口里的 `Column` 与窗口同宽（420），子元素按它的 `align` 排（默认 `flex-start`）。探针应用量得：默认列的按钮在 x = 24，宽 123 与 77；写在组件里的 `Column(align: center)` 的标题在 154–266（窗口中线 210）；只有一个小层的 `Stack` 铺满 420 × 300，卡片在 (154, 98)，正中；图标按钮、菜单、浮层按钮在 x = 24，宽 44、87、61。新增测试 `content_in_a_window_starts_at_its_top_leading_corner`（`tests/window_styles.rs`）断言这些样式与生成代码。
 
+2026-10-21，不写 `align` 的列（内置浏览器，Chromium，480 × 600 视口，探针应用 `fillcheck`；设计文档组件表 `Column` 一行）：Web 的默认列本来就是 `align-items: flex-start`，嵌在里面的 `Column(align: center)` 只与标题同宽、短按钮在标题下居中，带样式的小 `Stack` 只与文字同宽，与 macOS、tvOS 相同。同时看到、尚未修正：默认列里的 `TextInput` 只有约 200 px 宽（24–227），macOS、GTK、WinUI 3 上横跨整列；卡片（`Stack(variant: card) { Column { … } }`）里后到的 `Divider` 不让卡片变宽（24–208 不变），后到的 `TextInput` 只把卡片撑到输入框自身的宽度（24–251），macOS、tvOS、GTK、WinUI 3 上卡片横跨整列。原因：`layoutIntent` 不把分隔线与输入框算作横向填满。
+
 2026-10-21，页面里的搜索框按所在的列定宽（无头 Chromium 390 × 844 与 1280 × 800；用于验收的媒体类应用与 gallery 的 `web_app` 构建）：
 
 - **原因**：`B.Search` 的框是 `display: flex` 的块，列默认 `align-items: flex-start`，没写 `width:` 时只有内容宽：手机设置列表的搜索框 186 × 34，所在的列 358。手机搜索页的框原本就是 358，只因为结果浮层里有可伸展的视图，`layoutIntent` 把浮层里的伸展算到了框上；结果里没有可伸展视图时就只剩内容宽。其他目标没写宽度时都撑满：GTK `set_hexpand(true)`，Compose `fillMaxWidth()`，WinUI 3 的 `AutoSuggestBox` 横向拉伸；SwiftUI 的 `BernSearchInput`（macOS 的 `NSSearchField`、iOS 的 `UISearchTextField`）横向 hugging 为 `defaultLow`，按给它的宽度铺开，tvOS 是 `TextField`，同样可伸展（按代码看，本次未在 Apple 平台上实测）。工具栏里的搜索框各自定宽：GTK 18 个字符，WinUI 3 240，Web 按内容。
@@ -361,6 +363,7 @@ flowchart LR
 
 ## 未完成与已知限制
 
+- 不写 `align` 的列里，`TextInput` 只有自身的宽度（约 200 px），不横跨整列；`layoutIntent` 不把分隔线与输入框算作横向填满，所以装着后到的分隔线的卡片不变宽、装着后到的输入框的卡片只撑到输入框的宽度。macOS、tvOS、GTK、WinUI 3 上它们横跨整列（2026-10-21 实测，见验证记录同日条目）。
 - 选到或拖入的文件是页面的 `blob:` 地址。引擎在页面中时，页面记住每个地址对应的文件，经导入 `file_name`、`file_size`、`file_read` 把名字、大小与一段内容交给引擎（同步请求读取文件的一段，读取期间页面不响应）；WebUI 中原生运行的引擎读不到页面的文件。
 - 系统的文件选择框与从桌面拖入文件无法在自动化中操作，分别用 `ui.set_file` 与页面内构造的文件验证；`opens: true` 的 `launchQueue` 未验证。
 - 触控板捏合只在 Chromium 中验证（带 Control 的滚轮）；两指触摸、Safari 的手势事件未实测。

@@ -9,7 +9,9 @@ use bern_protocol::{
 use bern_protocol::{Concurrency, Retry};
 use bern_runtime::query::ManualClock;
 use query::{bern_query_open, bern_query_request};
+use std::collections::BTreeMap;
 use std::sync::{Condvar, OnceLock};
+use trace::{bern_trace_mask, bern_trace_now, bern_trace_ui};
 
 fn descriptor() -> &'static ProtocolDescriptor {
     static DESCRIPTOR: OnceLock<ProtocolDescriptor> = OnceLock::new();
@@ -806,6 +808,147 @@ fn query_subscriptions_show_only_current_answers() {
             .unwrap()
             .iter()
             .any(|(kind, _, _)| kind == "query")
+    );
+    unsafe { bern_app_stop(app) };
+}
+
+/// The `TraceSegment`s of a `TraceInteraction` value, by name.
+fn segments(interaction: &Value) -> BTreeMap<String, i64> {
+    let Value::Record(fields) = interaction else {
+        panic!("not a record")
+    };
+    let Value::List(segments) = &fields[6] else {
+        panic!("no segments")
+    };
+    segments
+        .iter()
+        .map(|segment| match segment {
+            Value::Record(parts) => match (&parts[0], &parts[1]) {
+                (Value::Text(name), Value::Int(us)) => (name.clone(), *us),
+                _ => panic!("bad segment"),
+            },
+            _ => panic!("bad segment"),
+        })
+        .collect()
+}
+
+#[test]
+fn trace_commands_answer_from_the_runtime_and_join_the_ui_side() {
+    let frontend = Box::new(Frontend::default());
+    let app = start(&frontend, descriptor().fingerprint()).unwrap();
+    // Revisions other tests' engines will not reach, as the trace matches
+    // the UI's records by revision.
+    for token in 0..40 {
+        let mut params = Writer::new();
+        params.i64(1);
+        // SAFETY: valid buffer.
+        unsafe { bern_app_dispatch(app, 0, params.bytes.as_ptr(), params.bytes.len(), token) };
+        frontend.wait_for("reply");
+        frontend.wait_for("state");
+    }
+    // SAFETY: the handle stays valid until `bern_app_stop` below.
+    let sessions = unsafe { &*app }.sessions.clone();
+    let started = sessions
+        .handle(
+            None,
+            SessionCommand::TraceStart,
+            vec![Value::Text("all,control:Counter.plus,quiet,file:none".into())],
+        )
+        .unwrap();
+    assert_eq!(
+        started,
+        Value::Record(vec![
+            Value::Text("all,control:Counter.plus,file:none,quiet".into()),
+            Value::Optional(None),
+        ])
+    );
+    let invalid = sessions
+        .handle(None, SessionCommand::TraceStart, vec![Value::Text("fast".into())])
+        .unwrap_err();
+    assert_eq!(invalid.code, "invalid_rules");
+    assert_ne!(bern_trace_mask() & trace::UI, 0, "a failed start keeps the trace");
+
+    // The frontend's side of one press of `Counter.plus`.
+    let name = "Counter.plus";
+    let pressed = bern_trace_now();
+    let mut params = Writer::new();
+    params.i64(2);
+    // SAFETY: valid buffer.
+    unsafe { bern_app_dispatch(app, 0, params.bytes.as_ptr(), params.bytes.len(), 9001) };
+    let released = bern_trace_now();
+    let ui = |kind: u16, key: u64, a: u64, b: u64, t0: u64, t1: u64, name: &str| {
+        // SAFETY: `name` is a live string.
+        unsafe { bern_trace_ui(kind as u32, key, a, b, t0, t1, name.as_ptr(), name.len()) }
+    };
+    ui(trace::kind::ACT, 5, 0, 0, pressed, released, name);
+    ui(trace::kind::DISPATCH, 9001, 0, 5, pressed, released, "");
+    let (_, state) = frontend.wait_for("state");
+    let revision = Reader::new(&state).u64().unwrap();
+    assert!(revision > 40);
+    let applying = bern_trace_now();
+    ui(trace::kind::APPLY_FIELD, revision, 0, 8, applying, bern_trace_now(), "");
+    ui(trace::kind::RECEIVE_STATE, revision, state.len() as u64, 0, applying, bern_trace_now(), "");
+    frontend.wait_for("reply");
+    let replied = bern_trace_now();
+    ui(trace::kind::RECEIVE_REPLY, 9001, 0, 0, replied, bern_trace_now(), "");
+    let tick = bern_trace_now() + 1;
+    ui(trace::kind::FRAME, 1, 16_666_667, 0, tick, tick + 1_000_000, "");
+
+    let report = sessions
+        .handle(
+            None,
+            SessionCommand::TraceReport,
+            vec![Value::Optional(Some(Box::new(Value::Int(5)))), Value::Optional(None)],
+        )
+        .unwrap();
+    let Value::Record(fields) = &report else {
+        panic!("not a report")
+    };
+    assert_eq!(fields[0], Value::Bool(true), "still running");
+    let Value::List(interactions) = &fields[7] else {
+        panic!("no interactions")
+    };
+    let pressed = interactions
+        .iter()
+        .find(|interaction| match interaction {
+            Value::Record(fields) => {
+                fields[0] == Value::Optional(Some(Box::new(Value::Text(name.into()))))
+            }
+            _ => false,
+        })
+        .expect("the press is reported");
+    let segments = segments(pressed);
+    for segment in ["act", "dispatch", "queue", "exec", "publish", "to_ui", "apply", "to_frame"] {
+        assert!(segments.contains_key(segment), "{segment} in {segments:?}");
+    }
+    let Value::List(fields_sent) = &fields[6] else {
+        panic!("no fields")
+    };
+    assert!(
+        fields_sent.iter().any(|field| matches!(field, Value::Record(parts) if parts[0] == Value::Text("value".into()) && parts[2] == Value::Int(8))),
+        "the encoded size of `value`: {fields_sent:?}"
+    );
+
+    let stopped = sessions
+        .handle(
+            None,
+            SessionCommand::TraceStop,
+            vec![Value::Optional(Some(Box::new(Value::Bool(true))))],
+        )
+        .unwrap();
+    assert_eq!(bern_trace_mask(), 0);
+    let Value::Record(stopped) = stopped else {
+        panic!("not a stop result")
+    };
+    assert_eq!(stopped[0], Value::List(vec![]), "file:none writes no file");
+    // No frontend saw any of the trace commands.
+    assert!(
+        frontend
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|(kind, _, _)| kind != "session")
     );
     unsafe { bern_app_stop(app) };
 }

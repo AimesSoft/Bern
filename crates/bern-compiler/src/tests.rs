@@ -3504,11 +3504,12 @@ fn accents_are_colors_for_both_modes() {
             red: "#FF0000",
             blue: color(light: "#0000FF", dark: "#8080FF"),
             green: "#00FF00",
-            green: "#00AA00",
+            green: "#008800",
+            pink: "#F48BA6",
         }"##,
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    // One hex color serves both modes.
+    // One hex color that reads in both modes serves both as chosen.
     assert_eq!(
         sheet.accent("red").unwrap().color,
         ColorRef::Fixed {
@@ -3524,8 +3525,8 @@ fn accents_are_colors_for_both_modes() {
         }
     );
     // A later accent of the same name replaces the earlier one.
-    assert_eq!(sheet.accents.len(), 3);
-    let green = ir::Srgb::parse("#00AA00").unwrap();
+    assert_eq!(sheet.accents.len(), 4);
+    let green = ir::Srgb::parse("#008800").unwrap();
     assert_eq!(
         sheet.accent("green").unwrap().color,
         ColorRef::Fixed {
@@ -3533,6 +3534,14 @@ fn accents_are_colors_for_both_modes() {
             dark: green
         }
     );
+    // A pale one darkens on light surfaces until it and the text on it
+    // read, and stays as chosen on dark ones.
+    let pink = ir::Srgb::parse("#F48BA6").unwrap();
+    let ColorRef::Fixed { light, dark } = sheet.accent("pink").unwrap().color.clone() else {
+        panic!("an accent is a fixed color");
+    };
+    assert_eq!(dark, pink);
+    assert_ne!(light, pink);
 
     for (body, expected) in [
         (

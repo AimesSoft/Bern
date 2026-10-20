@@ -270,3 +270,58 @@ fn accent_fills_carry_white_text_unless_the_accent_is_light() {
     );
     assert_ne!(green.token("on_accent"), Some(Srgb::WHITE));
 }
+
+#[test]
+fn native_accents_read_on_every_surface_and_carry_a_readable_foreground() {
+    for seed in seeds() {
+        for mode in MODES {
+            let accent = native_accent(seed, mode);
+            let neutral = generate(None, mode, ContrastPolicy::Standard);
+            for surface in ["surface.canvas", "surface.panel", "surface.raised"] {
+                let ratio = contrast(accent, neutral.token(surface).unwrap());
+                assert!(
+                    ratio >= 3.0,
+                    "{seed} {mode:?}: {accent} on {surface} is {ratio:.2}:1"
+                );
+            }
+            let on = if accent.luminance() > DARK_ON_ACCENT_ABOVE {
+                Srgb::new(0x11, 0x11, 0x14)
+            } else {
+                Srgb::WHITE
+            };
+            assert!(
+                contrast(on, accent) >= 3.0,
+                "{seed} {mode:?}: {on} on {accent}"
+            );
+            // The hue is kept; only the lightness moves.
+            if accent != seed && seed.oklch().c > 0.04 {
+                let (from, to) = (seed.oklch().h, accent.oklch().h);
+                let turn = (from - to).abs().min(360.0 - (from - to).abs());
+                assert!(turn < 6.0, "{seed} {mode:?}: hue {from:.1} became {to:.1}");
+            }
+        }
+    }
+}
+
+#[test]
+fn native_accents_keep_colors_that_already_read() {
+    // Red and blue read in both modes and stay as chosen.
+    for seed in [Srgb::new(0xff, 0x2e, 0x55), Srgb::new(0x2a, 0x51, 0xd4)] {
+        assert_eq!(native_accent(seed, Mode::Light), seed);
+    }
+    assert_eq!(
+        native_accent(Srgb::new(0xff, 0x2e, 0x55), Mode::Dark),
+        Srgb::new(0xff, 0x2e, 0x55)
+    );
+    // A bright green and a pale pink darken on light surfaces and stay as
+    // chosen on dark ones, with dark text.
+    for seed in [Srgb::new(0x07, 0xff, 0x94), Srgb::new(0xf4, 0x8b, 0xa6)] {
+        let light = native_accent(seed, Mode::Light);
+        assert!(
+            light.luminance() < seed.luminance(),
+            "{seed} became {light}"
+        );
+        assert_eq!(native_accent(seed, Mode::Dark), seed);
+        assert!(seed.luminance() > DARK_ON_ACCENT_ABOVE);
+    }
+}

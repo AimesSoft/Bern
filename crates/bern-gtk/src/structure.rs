@@ -280,6 +280,8 @@ pub fn List(p: &Parent, ctx: &Ctx, children: Build) {
         return;
     }
     let list = crate::widgets::boxed_list();
+    // Its rows span the width it is given, in a column of any alignment.
+    list.set_hexpand(true);
     children(&Parent::of_list(&list), ctx);
     p.add(&list);
 }
@@ -738,6 +740,9 @@ pub fn Navigation(
 ) {
     let stack = gtk::Stack::new();
     stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
+    // The pages take the room they are given both ways, as on the other
+    // targets.
+    stack.set_hexpand(true);
     stack.set_vexpand(true);
     stack.set_hhomogeneous(false);
     stack.set_vhomogeneous(false);
@@ -1115,6 +1120,9 @@ pub fn Tabs(
     accessory: Option<TabAccessory>,
 ) {
     let stack = adw::ViewStack::new();
+    // The pages take the room they are given both ways, as on the other
+    // targets.
+    stack.set_hexpand(true);
     stack.set_vexpand(true);
     // The tabs mark their places in a box that is never shown.
     let declared = Parent::of_box(&gtk::Box::new(gtk::Orientation::Vertical, 0));
@@ -1135,6 +1143,7 @@ pub fn Tabs(
         Some(page) => page.push_title_widget(switcher.clone().upcast()),
         None => {
             let bar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            bar.set_hexpand(true);
             switcher.set_halign(gtk::Align::Center);
             bar.append(&switcher);
             p.add(&bar);
@@ -1143,6 +1152,7 @@ pub fn Tabs(
     // A compact window switches tabs from a bar under the pages, as
     // GNOME's adaptive applications do; wider ones from the header.
     let switcher_bar = adw::ViewSwitcherBar::new();
+    switcher_bar.set_hexpand(true);
     switcher_bar.set_stack(Some(&stack));
     {
         let at = ctx.clone();
@@ -1284,6 +1294,7 @@ pub fn Tabs(
         bar.set_margin_bottom(6);
         bar.set_size_request(-1, 48);
         let revealer = gtk::Revealer::new();
+        revealer.set_hexpand(true);
         revealer.set_transition_type(gtk::RevealerTransitionType::SlideUp);
         revealer.set_child(Some(&bar));
         (accessory.build)(&Parent::of_box(&bar), ctx);

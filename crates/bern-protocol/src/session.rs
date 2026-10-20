@@ -35,11 +35,14 @@ pub enum SessionCommand {
     SetLanguage,
     Focus,
     SetFile,
+    TraceStart,
+    TraceStop,
+    TraceReport,
 }
 
 impl SessionCommand {
     /// Frontends address commands by position: new commands go last.
-    pub const ALL: [SessionCommand; 22] = [
+    pub const ALL: [SessionCommand; 25] = [
         SessionCommand::Inspect,
         SessionCommand::Activate,
         SessionCommand::Edit,
@@ -62,6 +65,9 @@ impl SessionCommand {
         SessionCommand::SetLanguage,
         SessionCommand::Focus,
         SessionCommand::SetFile,
+        SessionCommand::TraceStart,
+        SessionCommand::TraceStop,
+        SessionCommand::TraceReport,
     ];
 
     pub fn id(self) -> &'static str {
@@ -88,11 +94,23 @@ impl SessionCommand {
             SessionCommand::SetLanguage => "ui.set_language",
             SessionCommand::Focus => "ui.focus",
             SessionCommand::SetFile => "ui.set_file",
+            SessionCommand::TraceStart => "trace.start",
+            SessionCommand::TraceStop => "trace.stop",
+            SessionCommand::TraceReport => "trace.report",
         }
     }
 
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|command| command.id() == id)
+    }
+
+    /// Commands of the performance trace, which the session runtime
+    /// answers itself; the frontend only records.
+    pub fn is_trace(self) -> bool {
+        matches!(
+            self,
+            SessionCommand::TraceStart | SessionCommand::TraceStop | SessionCommand::TraceReport
+        )
     }
 
     /// Commands that act on a window's presentation. The target performs
@@ -156,6 +174,33 @@ fn with_errors(mut spec: CommandSpec, errors: &[&str]) -> CommandSpec {
     spec.errors
         .extend(errors.iter().map(|error| (*error).to_string()));
     spec
+}
+
+fn named(name: &str) -> Type {
+    Type::Record { name: name.into() }
+}
+
+fn distribution() -> Type {
+    named("TraceDistribution")
+}
+
+fn segment() -> Type {
+    named("TraceSegment")
+}
+
+fn trace_record(name: &str, fields: &[(&str, Type, &str)]) -> RecordDef {
+    RecordDef {
+        name: name.into(),
+        fields: fields
+            .iter()
+            .map(|(name, ty, doc)| FieldDef {
+                name: (*name).into(),
+                ty: ty.clone(),
+                doc: (*doc).into(),
+                content: false,
+            })
+            .collect(),
+    }
 }
 
 /// Type table and command specs for the framework session catalog.
@@ -285,6 +330,164 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                     field("height", Type::Float, "Outer height in points"),
                 ],
             },
+            trace_record(
+                "TraceStarted",
+                &[
+                    ("rules", Type::Text, "The rules in their normal spelling"),
+                    (
+                        "file",
+                        Type::optional(Type::Text),
+                        "Where the timeline goes, when it is written to a file",
+                    ),
+                ],
+            ),
+            trace_record(
+                "TraceStopped",
+                &[
+                    (
+                        "files",
+                        Type::list(Type::Text),
+                        "The timeline files written, for ui.perfetto.dev",
+                    ),
+                    ("events", Type::Int, "Records read"),
+                    (
+                        "dropped",
+                        Type::Int,
+                        "Records lost because a ring was full; raise `buffer:`",
+                    ),
+                    (
+                        "timeline",
+                        Type::optional(Type::Text),
+                        "The timeline itself, when asked for",
+                    ),
+                ],
+            ),
+            trace_record(
+                "TraceDistribution",
+                &[
+                    ("count", Type::Int, "Samples in all"),
+                    ("p50", Type::Int, "Median of the recent samples"),
+                    ("p95", Type::Int, "95th percentile of the recent samples"),
+                    ("max", Type::Int, "Largest sample"),
+                ],
+            ),
+            trace_record(
+                "TraceCommand",
+                &[
+                    ("id", Type::Text, "Command id"),
+                    ("entry", Type::Text, "ui, cli, json, mcp or test"),
+                    ("total_us", distribution(), "From dispatch to on screen, or to the engine's answer"),
+                    ("queue_us", distribution(), "Waiting for the engine"),
+                    ("exec_us", distribution(), "Running the command"),
+                    ("publish_us", distribution(), "Snapshot, comparison and encoding of the state"),
+                    ("apply_us", distribution(), "Decoding and writing the state on the UI thread"),
+                    ("bytes", distribution(), "State bytes sent to the UI"),
+                ],
+            ),
+            trace_record(
+                "TraceQuery",
+                &[
+                    ("id", Type::Text, "Query id"),
+                    ("cancelled", Type::Int, "Answers no one waited for any more"),
+                    ("queue_us", distribution(), "Waiting for the engine"),
+                    ("provider_us", distribution(), "From the provider's start to its answer"),
+                    ("round_trip_us", distribution(), "From the request to the UI showing the answer"),
+                ],
+            ),
+            trace_record(
+                "TraceField",
+                &[
+                    ("name", Type::Text, "State field"),
+                    ("sent", Type::Int, "Times it changed, and was sent to a UI if one runs"),
+                    ("bytes_max", Type::Int, "Largest encoding sent"),
+                    (
+                        "items_max",
+                        Type::optional(Type::Int),
+                        "Most items, for a list",
+                    ),
+                    ("snapshot_us", distribution(), "Taking it from the engine"),
+                    ("compare_us", distribution(), "Comparing it with the last state"),
+                    ("encode_us", distribution(), "Encoding it for the UI"),
+                    ("apply_us", distribution(), "Decoding and writing it on the UI thread"),
+                ],
+            ),
+            trace_record(
+                "TraceSegment",
+                &[
+                    ("name", Type::Text, "Part of the work"),
+                    ("us", Type::Int, "Microseconds"),
+                ],
+            ),
+            trace_record(
+                "TraceInteraction",
+                &[
+                    (
+                        "control",
+                        Type::optional(Type::Text),
+                        "The control operated; absent for commands from other entries",
+                    ),
+                    ("entry", Type::Text, "Where it came from"),
+                    ("commands", Type::list(Type::Text), "Commands it ran"),
+                    ("at_ms", Type::Int, "Milliseconds after tracing started"),
+                    ("total_us", Type::Int, "From the action to the frame showing its result"),
+                    (
+                        "revision",
+                        Type::optional(Type::Int),
+                        "The state revision it produced",
+                    ),
+                    ("segments", Type::list(segment()), "Where the time went"),
+                ],
+            ),
+            trace_record(
+                "TraceFrames",
+                &[
+                    ("spacing_us", distribution(), "Time between frame ticks"),
+                    ("long", Type::Int, "Frames over the long-frame threshold"),
+                ],
+            ),
+            trace_record(
+                "TraceFrame",
+                &[
+                    ("at_ms", Type::Int, "Milliseconds after tracing started"),
+                    ("us", Type::Int, "Time since the frame before"),
+                    ("refresh_us", Type::Int, "The display's refresh interval, 0 when unknown"),
+                    ("bern_us", Type::Int, "Bern's own work on the UI thread"),
+                    (
+                        "outside_us",
+                        Type::Int,
+                        "The rest: generated views and the platform's layout and drawing",
+                    ),
+                    ("segments", Type::list(segment()), "Bern's longest work on the UI thread"),
+                    ("engine", Type::list(segment()), "What the engine did meanwhile"),
+                ],
+            ),
+            trace_record(
+                "TraceSpan",
+                &[
+                    ("name", Type::Text, "Span name"),
+                    ("us", distribution(), "Durations"),
+                ],
+            ),
+            trace_record(
+                "TraceReport",
+                &[
+                    ("running", Type::Bool, "Whether tracing is still on"),
+                    ("window_ms", Type::Int, "Milliseconds the statistics cover"),
+                    ("events", Type::Int, "Records read"),
+                    ("dropped", Type::Int, "Records lost because a ring was full"),
+                    ("commands", Type::list(named("TraceCommand")), "Per command, slowest first"),
+                    ("queries", Type::list(named("TraceQuery")), "Per query"),
+                    ("fields", Type::list(named("TraceField")), "State fields sent, largest first"),
+                    (
+                        "interactions",
+                        Type::list(named("TraceInteraction")),
+                        "The slowest interactions and commands",
+                    ),
+                    ("frames", named("TraceFrames"), "Frame ticks"),
+                    ("long_frames", Type::list(named("TraceFrame")), "The latest long frames"),
+                    ("spans", Type::list(named("TraceSpan")), "Spans by name"),
+                ],
+            ),
             RecordDef {
                 name: "WindowInfo".into(),
                 fields: vec![
@@ -456,6 +659,52 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                 Retry::Idempotent,
             ),
             &["unsupported_language"],
+        ),
+        with_errors(
+            spec(
+                SessionCommand::TraceStart,
+                OperationKind::Command,
+                "Start the performance trace with rules such as `engine,ui,slow:16ms` or `command:library.*`; a running trace ends first",
+                vec![param(
+                    "rules",
+                    Type::Text,
+                    "Categories (engine, ui, frame, span, motion, style, all), filters (command:, query:, control:, field:, feature:), slow:, long:, file:, quiet, buffer:",
+                )],
+                named("TraceStarted"),
+                Retry::Idempotent,
+            ),
+            &["invalid_rules"],
+        ),
+        spec(
+            SessionCommand::TraceStop,
+            OperationKind::Command,
+            "Stop the performance trace and write its timeline",
+            vec![param(
+                "timeline",
+                Type::optional(Type::Bool),
+                "Also return the timeline itself, for an app whose files are on another device",
+            )],
+            named("TraceStopped"),
+            Retry::Idempotent,
+        ),
+        spec(
+            SessionCommand::TraceReport,
+            OperationKind::Query,
+            "What the performance trace measured: p50, p95 and maximum per command, the slowest interactions and the long frames",
+            vec![
+                param(
+                    "top",
+                    Type::optional(Type::Int),
+                    "How many of the slowest interactions to list (10)",
+                ),
+                param(
+                    "reset",
+                    Type::optional(Type::Bool),
+                    "Start the statistics over after this report",
+                ),
+            ],
+            named("TraceReport"),
+            Retry::Idempotent,
         ),
         spec(
             SessionCommand::WindowOpen,

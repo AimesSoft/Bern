@@ -1456,10 +1456,12 @@ inline void Stack(Parent const& p, Ctx const& ctx, StackProps props, Build const
     BindLen(ctx, props.height, props.animate, [panel](double v) { panel.Height((std::max)(0.0, v)); });
     std::string_view align = props.align ? props.align : "";
     if (column) {
+        // Without `align` a column is a leading one: what fills across,
+        // such as a field, a divider or a grid, fills it, and the rest keeps
+        // its own width.
         auto h = align == "center" ? xaml::HorizontalAlignment::Center
             : align == "trailing" ? xaml::HorizontalAlignment::Right
-            : align == "leading" ? xaml::HorizontalAlignment::Left
-            : xaml::HorizontalAlignment::Stretch;
+            : xaml::HorizontalAlignment::Left;
         children(Parent::Aligned(panel, h, std::nullopt), ctx);
     } else {
         // On the baseline: each child at its top, then moved down so the
@@ -1674,14 +1676,21 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
     }
     // With a backdrop beside other layers and no width of its own, the
     // stack fills across a column, as a block does, and keeps the height
-    // the other layers give: a row shares its room by roles, not by this.
+    // the other layers give; in a row it keeps its width.
     if (!props.width.Given()) {
         bool backdrop = false, others = false;
         for (auto child : layers.Children()) {
             bool canvas = RoleOf(Unwrapped(child)) == L"bern-canvas";
             (canvas ? backdrop : others) = true;
         }
-        if (backdrop && others) layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+        if (backdrop && others) {
+            layers.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            if (!p.IsHorizontal()) {
+                auto role = std::wstring(RoleOf(layers));
+                bool h = role.ends_with(L"-h") || role.ends_with(L"-wh");
+                SetRole(layers, h ? L"bern-layers-wh" : L"bern-layers-w");
+            }
+        }
     }
     if (!props.style && !props.enabled) {
         Place(p, layers);
@@ -2424,7 +2433,10 @@ inline void Progress(Parent const& p, Ctx const& ctx, ProgressProps props) {
             bar.Value(current > 0 ? (std::min)(current, total) : 0);
         });
         BindName(bar, label);
-        Place(p, Stacked(label, bar));
+        // A bar spans what holds it, as a field does.
+        auto panel = Stacked(label, bar);
+        SetRole(panel, L"bern-fill-width");
+        Place(p, panel);
         return;
     }
     controls::ProgressRing ring;

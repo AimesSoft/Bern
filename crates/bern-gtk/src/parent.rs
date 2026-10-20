@@ -53,12 +53,93 @@ pub(crate) fn keeps_width(widget: &impl IsA<gtk::Widget>) {
     widget.as_ref().add_css_class(OWN_WIDTH);
 }
 
+/// The classes that carry a box's alignment across its axis, so that
+/// content arriving or leaving later can place the children it is in.
+const CROSS: [(gtk::Align, &str); 4] = [
+    (gtk::Align::Start, "bern-cross-start"),
+    (gtk::Align::Center, "bern-cross-center"),
+    (gtk::Align::End, "bern-cross-end"),
+    (gtk::Align::BaselineCenter, "bern-cross-baseline"),
+];
+
+/// Marks `container` as aligning its children `cross` across its axis.
+fn mark_cross(container: &impl IsA<gtk::Widget>, cross: gtk::Align) {
+    if let Some((_, class)) = CROSS.iter().find(|(align, _)| *align == cross) {
+        container.as_ref().add_css_class(class);
+    }
+}
+
+/// Whether `container` lays its children along a row, and how it aligns
+/// them across, if it is a box that aligns them all one way.
+fn cross_of(container: &gtk::Widget) -> Option<(bool, gtk::Align)> {
+    let (cross, _) = CROSS
+        .iter()
+        .find(|(_, class)| container.has_css_class(class))?;
+    let horizontal = match container.downcast_ref::<gtk::Box>() {
+        Some(container) => container.orientation() == gtk::Orientation::Horizontal,
+        None => container.downcast_ref::<ReflowBox>()?.horizontal(),
+    };
+    Some((horizontal, *cross))
+}
+
+/// Content came or went after its containers were placed, such as a branch
+/// of a condition or a query's result: each container on the way up that
+/// stands in a box aligning its children fills the box across while it
+/// holds something that fills, and otherwise stands where the box aligns
+/// its children, as `Parent::add` would have placed it.
+fn refit(from: &gtk::Widget) {
+    let mut widget = from.clone();
+    for _ in 0..32 {
+        let Some(container) = widget.parent() else {
+            return;
+        };
+        if let Some((horizontal, cross)) = cross_of(&container)
+            && !leaving(&widget)
+        {
+            let across = if horizontal {
+                gtk::Orientation::Vertical
+            } else {
+                gtk::Orientation::Horizontal
+            };
+            let now = if horizontal {
+                widget.valign()
+            } else {
+                widget.halign()
+            };
+            match refitted(widget.compute_expand(across), now, cross) {
+                Some(align) if horizontal => widget.set_valign(align),
+                Some(align) => widget.set_halign(align),
+                None => {}
+            }
+        }
+        widget = container;
+    }
+}
+
+/// Where a child of a box that aligns its children `cross` stands once
+/// content in it came or went, or `None` to leave it at `now`: across the
+/// box while it `fills`, else at `cross`.
+fn refitted(fills: bool, now: gtk::Align, cross: gtk::Align) -> Option<gtk::Align> {
+    match (fills, now) {
+        (true, now) if now == cross => Some(gtk::Align::Fill),
+        (false, gtk::Align::Fill) => Some(cross),
+        _ => None,
+    }
+}
+
+/// Whether `widget` fills either way, so that it coming or going may change
+/// how the containers around it fill.
+fn fills_any(widget: &gtk::Widget) -> bool {
+    widget.compute_expand(gtk::Orientation::Horizontal)
+        || widget.compute_expand(gtk::Orientation::Vertical)
+}
+
 /// The alignment a box gives a new child across its axis, or `None` to
 /// leave the child's own: the box's `cross`, except that content that fills,
 /// such as a video, a drawing without a size or a scroll view, fills across
 /// the box whatever its alignment, and that a control that keeps its own
-/// width, such as a button, stays at the leading edge of a column or a
-/// window that stretches the rest, as on the other targets.
+/// width, such as a button, stays at the leading edge of a window that
+/// stretches the rest, as on the other targets.
 fn cross_alignment(
     cross: Option<gtk::Align>,
     window: bool,
@@ -101,9 +182,9 @@ enum Sink {
 }
 
 impl Sink {
-    /// The widgets of the container, without those leaving it.
-    fn children(&self) -> Vec<gtk::Widget> {
-        let container: gtk::Widget = match self {
+    /// The container widget, unless an element keeps what it adds.
+    fn container(&self) -> Option<gtk::Widget> {
+        Some(match self {
             Sink::Box(container) => container.clone().upcast(),
             Sink::List(list) => list.clone().upcast(),
             Sink::Flow(flow, _) => flow.clone().upcast(),
@@ -111,7 +192,14 @@ impl Sink {
             Sink::Rail(rail) => rail.clone().upcast(),
             Sink::Reflow(reflow) => reflow.clone().upcast(),
             Sink::Children(container) => container.clone(),
-            Sink::Capture(..) => return Vec::new(),
+            Sink::Capture(..) => return None,
+        })
+    }
+
+    /// The widgets of the container, without those leaving it.
+    fn children(&self) -> Vec<gtk::Widget> {
+        let Some(container) = self.container() else {
+            return Vec::new();
         };
         let mut children = Vec::new();
         let mut child = container.first_child();
@@ -245,6 +333,7 @@ impl Parent {
 
     /// A box whose children all align the same way across its axis.
     pub(crate) fn of_aligned_box(container: &gtk::Box, cross: gtk::Align) -> Self {
+        mark_cross(container, cross);
         Self {
             cross: Some(cross),
             ..Self::of_box(container)
@@ -290,6 +379,7 @@ impl Parent {
     /// A column or row whose children slide, all aligned the same way
     /// across its axis.
     pub(crate) fn of_reflow(reflow: &ReflowBox, cross: gtk::Align) -> Self {
+        mark_cross(reflow, cross);
         Self {
             horizontal: reflow.horizontal(),
             sink: Sink::Reflow(reflow.clone()),
@@ -480,7 +570,13 @@ impl Parent {
                 widget.set_can_target(false);
                 let sink = self.sink.clone();
                 let gone = widget.clone();
-                exit(Box::new(move || sink.remove(&gone)));
+                let filled = fills_any(widget);
+                exit(Box::new(move || {
+                    sink.remove(&gone);
+                    if filled && let Some(container) = sink.container() {
+                        refit(&container);
+                    }
+                }));
             }
             None => self.sink.remove(widget),
         }
@@ -509,6 +605,13 @@ impl Parent {
             .borrow_mut()
             .push(Item::Widget(widget.clone()));
         self.insert_at(&widget, index);
+        // Content that arrives after its containers were placed, such as a
+        // branch of a condition, makes them fill in turn.
+        if fills_any(&widget)
+            && let Some(container) = self.sink.container()
+        {
+            refit(&container);
+        }
     }
 
     /// A new empty region at the end of this one.
@@ -540,8 +643,13 @@ impl Parent {
         let mut widgets = Vec::new();
         self.region.widgets(&mut widgets);
         self.region.items.borrow_mut().clear();
+        // Content that filled leaves its containers to their own size.
+        let filled = widgets.iter().any(fills_any);
         for widget in &widgets {
             self.remove_widget(widget);
+        }
+        if filled && let Some(container) = self.sink.container() {
+            refit(&container);
         }
     }
 
@@ -578,13 +686,50 @@ impl Parent {
 
 #[cfg(test)]
 mod tests {
-    use super::cross_alignment;
-    use gtk::Align::{Center, Fill, Start};
+    use super::{cross_alignment, refitted};
+    use gtk::Align::{Center, End, Fill, Start};
+
+    #[test]
+    fn a_leading_column_fills_only_with_what_fills() {
+        // A column without `align` is a leading one: a column, a stack or a
+        // button inside keeps its own width at the leading edge; a field, a
+        // divider or a filling button fills it.
+        assert_eq!(
+            cross_alignment(Some(Start), false, false, false, false),
+            Some(Start)
+        );
+        assert_eq!(
+            cross_alignment(Some(Start), false, false, true, false),
+            Some(Start)
+        );
+        assert_eq!(
+            cross_alignment(Some(Start), false, false, false, true),
+            None
+        );
+        assert_eq!(cross_alignment(Some(Start), false, false, true, true), None);
+    }
+
+    #[test]
+    fn content_that_comes_or_goes_refits_its_containers() {
+        // Something that fills arrived: a container standing at the
+        // column's alignment fills it.
+        assert_eq!(refitted(true, Start, Start), Some(Fill));
+        assert_eq!(refitted(true, Center, Center), Some(Fill));
+        assert_eq!(refitted(true, Fill, Start), None);
+        // It left: the container goes back to the column's alignment.
+        assert_eq!(refitted(false, Fill, Start), Some(Start));
+        assert_eq!(refitted(false, Fill, End), Some(End));
+        assert_eq!(refitted(false, Start, Start), None);
+        // A child placed its own way stays there.
+        assert_eq!(refitted(true, Center, Start), None);
+        assert_eq!(refitted(false, Center, Start), None);
+    }
 
     #[test]
     fn a_button_keeps_its_width_where_the_rest_stretches() {
-        // A column without `align`: the rest fills its width, a button
-        // stands at its leading edge, a filling button fills.
+        // A box that stretches its children, such as a control group: the
+        // rest fills its width, a button stands at its leading edge, a
+        // filling button fills.
         assert_eq!(
             cross_alignment(Some(Fill), false, false, true, false),
             Some(Start)

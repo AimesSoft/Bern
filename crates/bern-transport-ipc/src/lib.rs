@@ -408,6 +408,13 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) ->
                 continue;
             }
         };
+        // The request on the timeline, from handling it to its answer.
+        let _request = bern_command::trace::Span::entry(|| match &message {
+            ClientMessage::Command { command, .. } | ClientMessage::SessionCommand { command, .. } => {
+                format!("{} {command}", entry.name())
+            }
+            _ => format!("{} request", entry.name()),
+        });
         let reply = match message {
             ClientMessage::Hello { .. } => error(None, "invalid_message", "already connected"),
             ClientMessage::Command {

@@ -294,6 +294,25 @@ fn app(handle: jlong) -> *mut BernApp {
     handle as usize as *mut BernApp
 }
 
+/// Write a trace line to logcat under the tag `bern-trace`.
+fn logcat(line: &str) {
+    #[link(name = "log")]
+    unsafe extern "C" {
+        fn __android_log_write(
+            priority: std::os::raw::c_int,
+            tag: *const std::os::raw::c_char,
+            text: *const std::os::raw::c_char,
+        ) -> std::os::raw::c_int;
+    }
+    const INFO: std::os::raw::c_int = 4;
+    let line = line.strip_prefix("bern-trace: ").unwrap_or(line);
+    let Ok(text) = std::ffi::CString::new(line.replace('\0', " ")) else {
+        return;
+    };
+    // SAFETY: both strings are NUL-terminated and live for the call.
+    unsafe { __android_log_write(INFO, c"bern-trace".as_ptr(), text.as_ptr()) };
+}
+
 /// Start the engine for the Kotlin frontend: `BernNative.start`, defined by
 /// the generated glue, calls this. Answers `0, handle` or `1, message`.
 ///
@@ -353,6 +372,8 @@ pub unsafe fn start<E: EngineProtocol>(
             open_file: methods[7],
         }));
         bern_command::files::install("content", Documents(context));
+        // Trace summaries go to logcat: an app has no terminal.
+        bern_command::trace::set_sink(std::sync::Arc::new(logcat));
         let callbacks = BernCallbacks {
             context: context.cast(),
             on_state,

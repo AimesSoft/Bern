@@ -17,7 +17,7 @@ use bern_ir::{Application, IR_VERSION, Node};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, archive, check_common,
-    dist_dir, feature, files_below, icon, package_architecture,
+    dist_dir, feature, files_below, icon, package_architecture, skill,
 };
 use std::path::{Path, PathBuf};
 
@@ -159,6 +159,16 @@ fn reflow_warnings(app: &Application) -> Vec<Diagnostic> {
 /// `showcase` for app id `showcase`.
 pub fn product_name(app: &Application) -> String {
     bern_target_api::names::pascal(&app.app.id)
+}
+
+/// Where the agent skill finds the programs: in `bin/` beside it, in the
+/// build, the `.tar.gz` and the folder the `.deb` installs.
+fn skill_place(app: &Application) -> skill::Place {
+    skill::Place::beside_bin(app, false).installed(format!(
+        "/opt/{}/bin/{}",
+        app.app.bundle_id,
+        executable(app)
+    ))
 }
 
 /// The application icon beside the executable, named after the
@@ -459,7 +469,7 @@ impl Target for GtkLinux {
         if context.release {
             cargo.push("--release".into());
         }
-        let steps = vec![
+        let mut steps = vec![
             BuildStep::Run {
                 description: "Build the GTK application, the engine and the entries".into(),
                 program: "cargo".into(),
@@ -502,15 +512,23 @@ impl Target for GtkLinux {
                 to: output.join("bin").join(format!("{executable}-mcp")),
             },
         ];
+        // The agent skill beside `bin/`, where the app listens.
+        let listens = skill::listens(&context.target.channels);
+        let place = listens.then(|| skill_place(app));
+        steps.extend(skill::steps(app, output, place.as_ref()));
+        let mut products = vec![
+            bundle.join(&executable),
+            output.join("bin").join(&executable),
+            output.join("bin").join(format!("{executable}-mcp")),
+        ];
+        if listens {
+            products.push(output.join(skill::path(app)));
+        }
         Ok(BuildPlan {
             steps,
             notes: Vec::new(),
             run: Some(Run::Program(bundle.join(&executable))),
-            products: vec![
-                bundle.join(&executable),
-                output.join("bin").join(&executable),
-                output.join("bin").join(format!("{executable}-mcp")),
-            ],
+            products,
         })
     }
 
@@ -518,7 +536,8 @@ impl Target for GtkLinux {
     /// installs into `/opt/<bundle id>` with a menu entry, an icon in the
     /// icon theme and a launcher in `/usr/bin`, and a `.tar.gz` of the same
     /// folder to run without installing. Both carry the command line and
-    /// the MCP server in `bin/`. With `Svg`, the `.deb` also installs the
+    /// the MCP server in `bin/`, and the agent skill listing their commands
+    /// in `skills/`. With `Svg`, the `.deb` also installs the
     /// AppArmor profile WebKitGTK's sandbox needs (`glue::apparmor_files`).
     fn package(
         &self,
@@ -552,6 +571,9 @@ impl Target for GtkLinux {
                 output.join("bin").join(&program),
                 PathBuf::from("bin").join(&program),
             ));
+        }
+        if skill::listens(&context.target.channels) {
+            files.push((output.join(skill::path(app)), skill::path(app)));
         }
         let portable = stage.join(&product);
         let (archive_step, archive_file) = archive(

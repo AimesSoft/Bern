@@ -376,6 +376,17 @@ inline void KeepWidth(xaml::FrameworkElement const& element) {
     if (RoleOf(element).empty()) SetRole(element, L"bern-own-width");
 }
 
+/// Marks a column that takes the whole width it is given, whatever it
+/// holds: an adaptive layout, which judges the layout size by it.
+inline void MarkFullWidth(controls::Panel const& column) {
+    column.Resources().Insert(winrt::box_value(L"bern.wide"), winrt::box_value(true));
+}
+
+inline bool FullWidth(xaml::UIElement const& column) {
+    auto panel = column.try_as<controls::Panel>();
+    return panel && panel.Resources().HasKey(winrt::box_value(L"bern.wide"));
+}
+
 /// The element a wrapper (`bern-wrap`, made for motion, placement or
 /// styles) holds, or the element itself.
 inline xaml::UIElement Unwrapped(xaml::UIElement element) {
@@ -459,6 +470,7 @@ inline bool FillsRow(xaml::UIElement const& element) {
     if (role == L"bern-spacer" || role == L"bern-fill" || role == L"bern-canvas" || role == L"bern-fill-width" || role == L"bern-layers-w" || role == L"bern-layers-wh" ||
         role == L"bern-rail-w" || role == L"bern-rail-wh")
         return true;
+    if (role == L"bern-column" && FullWidth(inner)) return true;
     if (role == L"bern-column" || role == L"bern-row")
         for (auto child : inner.as<controls::Panel>().Children()) {
             if (child.Visibility() != xaml::Visibility::Visible) continue;

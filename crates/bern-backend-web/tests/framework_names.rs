@@ -1,8 +1,10 @@
 //! The `framework-names` example names its value types like types of
 //! the platforms' frameworks and of the browser (`Text`, `Image`, `Event`,
 //! `Map`, `Error`…). Generated JavaScript keeps the codecs, variant names
-//! and labels of the types as properties of `T`, `N` and `L`, so the names
-//! meet no global; Node.js parses the module where it is installed.
+//! and labels of the types as properties of `T`, `N` and `L`, describes
+//! sessions by name in strings and writes components as functions `c_`
+//! and the declared name, so the names meet no global; Node.js parses the
+//! module where it is installed.
 
 use bern_backend_web::WebBrowser;
 use bern_target_api::{BuildContext, Framework, Target};
@@ -79,6 +81,10 @@ fn value_types_named_like_framework_types_stay_properties() {
         "T.Error = {",
         "T.Content = {",
         "T.Shape = {",
+        "function c_empty(p, ctx, a) {",
+        "function c_bern_player(p, ctx, a) {",
+        r#"{ name: "URL", fields: ["#,
+        r#"{ name: "Window", fields: ["#,
     ] {
         assert!(js.contains(expected), "app.js lacks `{expected}`");
     }

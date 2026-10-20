@@ -366,7 +366,8 @@ impl EngineProtocol for Composite {
                     );
                     return result;
                 }
-                let (outcome, more) = self.run(command, &params);
+                let (outcome, more) =
+                    crate::trace::module_call(command, || self.run(command, &params));
                 if let Err(error) = outcome {
                     eprintln!(
                         "bern: `{}`, set off by `{}`, failed: {}: {}",
@@ -403,10 +404,12 @@ impl EngineProtocol for Composite {
     fn snapshot(&self) -> Vec<Value> {
         let mut state = self.shell.snapshot();
         for module in &self.modules {
-            state.push(match &module.engine {
+            // A module's state is one field of the application's.
+            let field = state.len();
+            state.push(crate::trace::snapshot_field(field, || match &module.engine {
                 Some(engine) => Value::Record(engine.snapshot()),
                 None => module.idle.clone(),
-            });
+            }));
         }
         if self.switch.is_some() {
             state.push(Value::Record(

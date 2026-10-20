@@ -681,11 +681,26 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
     }
     for decl in &item.accents {
         let color = match &decl.value {
+            // One color: each mode takes it as far as it reads there
+            // (`bern_theme::native_accent`), so a pale accent darkens on
+            // light surfaces by itself. `color(light:, dark:)` is kept as
+            // written.
             StyleValue::Text(hex, span) => match Srgb::parse(hex) {
-                Some(color) => Some(ColorRef::Fixed {
-                    light: color,
-                    dark: color,
-                }),
+                Some(color) => {
+                    let readable = |mode| {
+                        let theme = bern_theme::Srgb::new(color.red, color.green, color.blue);
+                        let adjusted = bern_theme::native_accent(theme, mode);
+                        Srgb {
+                            red: adjusted.r,
+                            green: adjusted.g,
+                            blue: adjusted.b,
+                        }
+                    };
+                    Some(ColorRef::Fixed {
+                        light: readable(bern_theme::Mode::Light),
+                        dark: readable(bern_theme::Mode::Dark),
+                    })
+                }
                 None => {
                     lowering.error(*span, format!("`{hex}` is not a `#RRGGBB` color"));
                     None

@@ -29,6 +29,40 @@ pub fn value_type(name: &str) -> String {
     format!("App_{name}")
 }
 
+/// The class of an application session (a `#[session]` struct) in
+/// generated Swift and Kotlin: `URL` → `App_URL`.
+///
+/// The declared name with `Session` appended was Foundation's
+/// `URLSession` for a session named `URL`. Bern type names are unique
+/// per application, so sessions share the prefix of value types.
+pub fn session_type(name: &str) -> String {
+    value_type(name)
+}
+
+/// The variable through which a view of generated Swift and Kotlin reads
+/// a session: `Window` → `session_Window`.
+///
+/// `bern` and the declared name gave the views' own `bernWindow` and
+/// `bernEngine` for sessions named `Window` and `Engine`. The names
+/// generated for parameters and bindings have no underscore.
+pub fn session_variable(name: &str) -> String {
+    format!("session_{name}")
+}
+
+/// The view of a component in generated Swift and Kotlin: `empty` →
+/// `AppView_empty`.
+///
+/// The name in Pascal case with `View` appended was SwiftUI's
+/// `EmptyView`, `AnyView` or `ScrollView`, or a runtime's
+/// `BernPlayerView`, for components named `empty`, `any`, `scroll` or
+/// `bern_player`. No type or function of those frameworks or of the
+/// runtimes begins with `AppView_`, none of the types' `App_` names
+/// does, and the declared name follows unchanged, so distinct components
+/// keep distinct names.
+pub fn component(name: &str) -> String {
+    format!("AppView_{name}")
+}
+
 /// `last_action` → `lastAction`.
 pub fn camel(snake: &str) -> String {
     let mut out = String::new();
@@ -61,5 +95,8 @@ mod tests {
         assert_eq!(camel("_private"), "private");
         assert_eq!(camel("volume_2"), "volume2");
         assert_eq!(value_type("Layout"), "App_Layout");
+        assert_eq!(session_type("URL"), "App_URL");
+        assert_eq!(session_variable("Window"), "session_Window");
+        assert_eq!(component("content_unavailable"), "AppView_content_unavailable");
     }
 }

@@ -478,10 +478,20 @@ target\bern\windows\Showcase\showcase.exe
 - 修正：按钮类控件（不是 `width: fill` 的 `Button`、`IconButton`、内容不横向填满的带内容按钮、`Switch(style: button)`、`Menu`、`PopoverButton`、`SplitButton`）标记 `bern-own-width`；拉伸子元素的列或窗口正文里，带标记且不横向填满的控件设为 `Left`，其他照旧（`NavLink` 等自己要求铺满的不受影响）。窗口正文的 `Parent` 改为 `Parent::Window`，经条件与组件也是它；其中没写尺寸的 `Stack` 铺满（`bern-layers-wh`），按它的 `align` 摆放小层。
 - 测试：`content_in_a_window_starts_at_its_top_leading_corner` 断言这些规则与生成代码；撤掉修正时失败。PC 上 `cargo test -p bern-backend-winui3 -- --test-threads=1` 通过（生成器测试 15 项，MSVC 编译生成的程序）。
 - 窗口快照：改后“下一种”从 48 px 到 146 px，与带样式的按钮一样保持自身宽度；写在组件里的 `Column(align: center)` 在窗口里水平居中、靠顶；只有一个小层的 `Stack` 在内容区正中；图标按钮、菜单、浮层按钮在默认列里保持自身宽度、站在前缘（这一种正文改前没有截图）。
-- 仍与 `align: leading` 不同的地方与 GTK 相同，见 Linux 实现记录的同日条目。
+- 仍与 `align: leading` 不同的地方与 GTK 相同，见 Linux 实现记录的同日条目；同日实测确认并修正，见下一条。
+
+2026-10-21，不写 `align` 的列完全等同 `align: leading`（Windows PC，自己的镜像 `Bern-fill` 与 `bundle_id` `dev.bern.fillcheck`，计划任务启动，窗口快照 150% 缩放，以下按逻辑像素）：
+
+- 改前：默认列把子元素设为 `Stretch`。嵌在默认列里的 `Column(align: center) { 长标题; 短按钮 }` 横跨外层列，标题被居中到 69–409、短按钮的中线在 239（窗口中线）；小 `Stack` 本来就只与内容同宽（`Layers` 自己是 `Left`，`Parent::Add` 在拉伸列里保留它）。
+- 修正：默认列改为 `Left`，与 `align: leading` 相同；`Parent::Add` 让横向填满的（`FillsRow`）设为 `Stretch`，其余按列的对齐。原本靠列拉伸才横跨、自己却没有填满角色的元素补上：有数值的进度条与 `List` 标 `bern-fill-width`；查询的空与失败状态标 `bern-fill-width`、`Stretch`（内容各自居中），失败时显示在旧数据上方的一行也标 `bern-fill-width`；`Adaptive` 的容器保留列的角色，另用 `MarkFullWidth` 标记占满给它的宽度（`FillsRow` 认这个标记），以免它按自己内容的宽度选布局；带底板、不在行里、没写宽度的 `Stack` 标 `bern-layers-w`。之后才到的内容照旧由 `Refill` 让外层横跨。
+- 测试：生成器测试 `a_column_without_align_is_a_leading_one` 断言这些规则与生成代码，在 Windows 上用 MSVC 编译生成的程序；`content_in_a_window_starts_at_its_top_leading_corner` 里关于默认列的断言改为 `Left`。PC 上 `cargo test -p bern-backend-winui3 -- --test-threads=1` 通过（生成器测试 16 项）。
+- 改后（同一探针）：标题 31–372、短按钮的中线 203（标题中线 202）；小 `Stack` 31–139；分隔线、输入框、滑块、进度条、网格、含 `Spacer` 的行、带底板的 `Stack`、`Button(width: fill)`、没写宽度的画布都横跨整列；卡片里后到的分隔线与输入框让卡片横跨；开关、勾选框、选择器与长文字和 macOS 一样只与内容同宽、长文字在列宽处换行。
+- 仍未一致：后到的内容离开后，外层不缩回（卡片里的分隔线消失后，第一张卡片仍横跨 31–448；macOS、tvOS、GTK 上缩回只与文字同宽）。原因：`Parent::Add` 与 `Refill` 只把角色和对齐往“填满”改，`Stack` 的 `bern-layers-w`、容器镜像来的角色不会撤回；改前就是这样。
 
 ## 未完成与已知限制
 
+- 后到的填满内容离开后，外层不缩回：条件或查询给列、`Stack` 加进横向（或纵向）填满的内容时外层随之横跨，内容离开后外层仍保持横跨（`Parent::Add` 与 `Refill` 只把角色与对齐往“填满”改，`Stack` 的 `bern-layers-w/-h`、容器镜像来的角色、子元素的 `Stretch` 都不撤回）。macOS、tvOS、GTK 上外层缩回到自身尺寸（2026-10-21 实测，见验证记录同日条目）。
+- `Picker(style: menu)` 绑定的值是枚举第一项时，组合框不显示选中项（空白）；macOS、tvOS、GTK 上显示该项的标签（2026-10-21 在探针里看到，原因未查）。
 - **使用 Windows 自带的运行时不是微软公开说明的用法。** 微软的部署指南只说明非打包应用要自己部署运行时；`CBS.2` 是 Windows 给自己组件用的副本，第三方程序能用是实测结果，以后的 Windows 更新可能改变它的名称、内容或可用性。所以其他程序装的 2.x 总是优先。哪些 Windows 11 版本自带 `CBS.2` 也只在 25H2（26200.9457）上确认过。
 - 只编译 WinUI 3 时，提示框的“是”只验证到会打开安装程序的地址，测试中没有实际下载安装。
 - 应用按 2.5.1 编译、接受 2.0 起的运行时：只在 2.2 与 2.5.1 上实测过，没有 2.0、2.1 的机器。

@@ -1606,6 +1606,23 @@ pub(crate) fn bind_size(
     }
 }
 
+/// How a column or row aligns its children across its axis. A column
+/// without `align` is a leading one: what fills across, such as a field, a
+/// divider or a grid, fills it, and the rest keeps its own width.
+fn stack_cross(align: Option<&str>, column: bool) -> gtk::Align {
+    match (align, column) {
+        (Some("center"), _) => gtk::Align::Center,
+        (Some("trailing") | Some("bottom"), _) => gtk::Align::End,
+        (Some("leading") | Some("top"), _) => gtk::Align::Start,
+        // A row's items share the baseline of their first lines.
+        (Some("baseline"), false) => gtk::Align::BaselineCenter,
+        (Some("fill"), _) => gtk::Align::Fill,
+        (None, true) => gtk::Align::Start,
+        (None, false) => gtk::Align::Center,
+        _ => gtk::Align::Fill,
+    }
+}
+
 #[allow(non_snake_case)]
 pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
     let column = props.axis == "column";
@@ -1614,17 +1631,7 @@ pub fn Stack(p: &Parent, ctx: &Ctx, props: StackProps, children: Build) {
     } else {
         gtk::Orientation::Horizontal
     };
-    let cross = match (props.align, column) {
-        (Some("center"), _) => gtk::Align::Center,
-        (Some("trailing") | Some("bottom"), _) => gtk::Align::End,
-        (Some("leading") | Some("top"), _) => gtk::Align::Start,
-        // A row's items share the baseline of their first lines.
-        (Some("baseline"), false) => gtk::Align::BaselineCenter,
-        (Some("fill"), _) => gtk::Align::Fill,
-        (None, true) => gtk::Align::Fill,
-        (None, false) => gtk::Align::Center,
-        _ => gtk::Align::Fill,
-    };
+    let cross = stack_cross(props.align, column);
     // A column or row whose children slide takes a container of its own;
     // others are GTK boxes.
     let (container, inner): (gtk::Widget, Parent) = match props.reflow {
@@ -1695,6 +1702,8 @@ pub fn Grid(p: &Parent, ctx: &Ctx, props: GridProps, children: Build) {
     flow.set_activate_on_single_click(false);
     flow.set_min_children_per_line(1);
     flow.set_max_children_per_line(64);
+    // The columns share the width it is given, as many as fit.
+    flow.set_hexpand(true);
     flow.set_valign(gtk::Align::Start);
     flow.set_row_spacing(8);
     flow.set_column_spacing(8);
@@ -1767,6 +1776,7 @@ pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
     };
     let layers = crate::layout::Layers::new();
     layers.set_reflow(props.reflow);
+    layers.set_block(!p.is_horizontal() && props.width.is_none());
     bind_size(
         ctx,
         layers.upcast_ref(),
@@ -2065,7 +2075,12 @@ pub fn Divider(p: &Parent) {
     } else {
         gtk::Orientation::Horizontal
     };
-    place(p, &gtk::Separator::new(orientation));
+    let line = gtk::Separator::new(orientation);
+    // A line across what holds it, in a column or a stack alike.
+    if !p.is_horizontal() {
+        line.set_hexpand(true);
+    }
+    place(p, &line);
 }
 
 #[derive(Default)]
@@ -2521,6 +2536,20 @@ pub fn label_of(enum_name: &str, variant: u32, fields: &[Value]) -> String {
 mod tests {
     use super::*;
     use crate::host::tests::{app, start, unit_enum};
+
+    #[test]
+    fn a_column_without_align_is_a_leading_one() {
+        assert_eq!(stack_cross(None, true), gtk::Align::Start);
+        assert_eq!(stack_cross(Some("leading"), true), stack_cross(None, true));
+        assert_eq!(stack_cross(Some("center"), true), gtk::Align::Center);
+        assert_eq!(stack_cross(Some("trailing"), true), gtk::Align::End);
+        // A row without `align` centers its items vertically.
+        assert_eq!(stack_cross(None, false), gtk::Align::Center);
+        assert_eq!(
+            stack_cross(Some("baseline"), false),
+            gtk::Align::BaselineCenter
+        );
+    }
 
     #[test]
     fn text_styles_map_to_libadwaita_classes() {

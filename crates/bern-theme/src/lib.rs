@@ -369,6 +369,43 @@ fn neutral_extreme(against: &[Srgb]) -> Srgb {
     }
 }
 
+/// Luminance above which the native targets put near-black instead of
+/// white on an accent fill (SwiftUI, GTK, Compose and WinUI 3 alike).
+pub const DARK_ON_ACCENT_ABOVE: f64 = 0.4;
+
+/// An accent of `style!` as the native targets show it in `mode`, whose
+/// controls take it as their tint and put the foreground of
+/// `DARK_ON_ACCENT_ABOVE` on its fills. The chosen color is kept when it
+/// stands out from every surface of the mode at the graphic level and
+/// that foreground reads on it at the same level; otherwise it moves to
+/// the nearest lightness of its hue that does. A bright green or a pale
+/// pink darkens in light mode and stays as chosen in dark mode, carrying
+/// dark text; a red or a blue that already reads is never changed.
+pub fn native_accent(color: Srgb, mode: Mode) -> Srgb {
+    let level = ContrastPolicy::Standard.levels().graphic;
+    let neutral = generate(None, mode, ContrastPolicy::Standard);
+    let surfaces: Vec<Srgb> = ["surface.canvas", "surface.panel", "surface.raised"]
+        .into_iter()
+        .filter_map(|name| neutral.token(name))
+        .collect();
+    let near_black = Srgb::new(0x11, 0x11, 0x14);
+    let reads = |fill: Srgb| {
+        let on = if fill.luminance() > DARK_ON_ACCENT_ABOVE {
+            near_black
+        } else {
+            Srgb::WHITE
+        };
+        contrast(on, fill) >= level
+            && surfaces
+                .iter()
+                .all(|surface| contrast(fill, *surface) >= level)
+    };
+    if reads(color) {
+        return color;
+    }
+    nearest(color.oklch(), reads).unwrap_or(color)
+}
+
 /// Generate the snapshot for a brand seed (Bern's default when `None`), a
 /// resolved mode and a contrast policy.
 pub fn generate(seed: Option<Srgb>, mode: Mode, contrast_policy: ContrastPolicy) -> Snapshot {

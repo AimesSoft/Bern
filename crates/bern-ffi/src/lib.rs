@@ -18,6 +18,7 @@ pub mod picture;
 pub mod query;
 #[cfg(feature = "remote")]
 pub mod remote;
+pub mod trace;
 
 use bern_command::resources::Resources;
 use bern_command::{CallContext, EngineProtocol, Entry, Host};
@@ -200,6 +201,11 @@ impl UiBridge {
         params: Vec<Value>,
         reply: SessionReply,
     ) -> Option<u64> {
+        // The trace is the runtime's own; the frontend only records.
+        if command.is_trace() {
+            reply(trace::run(command, &params));
+            return None;
+        }
         let (types, specs) = session_catalog();
         let index = SessionCommand::ALL
             .iter()
@@ -373,17 +379,38 @@ pub struct BernApp {
 
 fn encode_changes(host: &dyn EngineLink, revision: u64, changes: &[(usize, Value)]) -> Vec<u8> {
     let descriptor = host.descriptor();
+    // Inside a traced job, each field's encoding is recorded with its size.
+    let traced = trace::current_job().is_some();
     let mut writer = Writer::new();
     writer.u64(revision);
     writer.u32(changes.len() as u32);
     for (field, value) in changes {
         writer.u32(*field as u32);
+        let (started, before) = if traced {
+            (trace::now_ns(), writer.bytes.len())
+        } else {
+            (0, 0)
+        };
         encode(
             value,
             &descriptor.state[*field].ty,
             &descriptor.types,
             &mut writer,
         );
+        if traced {
+            let items = match value {
+                Value::List(items) => items.len() as u32 + 1,
+                _ => 0,
+            };
+            trace::job_record(
+                trace::kind::ENCODE_FIELD,
+                started,
+                *field as u32,
+                revision,
+                (writer.bytes.len() - before) as u64,
+                items,
+            );
+        }
     }
     writer.bytes
 }
@@ -508,6 +535,9 @@ pub(crate) fn assemble(
     let stale = Arc::clone(&queries);
     let subscription = host.subscribe(Box::new(move |update| {
         let bytes = encode_changes(updates.as_ref(), update.revision, &update.changes);
+        if trace::on(trace::ENGINE) {
+            trace::callback(trace::CALLBACK_STATE, update.revision, 0, bytes.len());
+        }
         callbacks.state(&bytes);
         // Answers of queries that read a changed field are stale.
         let changed: Vec<usize> = update.changes.iter().map(|(field, _)| *field).collect();
@@ -668,6 +698,11 @@ pub unsafe extern "C" fn bern_app_dispatch(
     len: usize,
     token: u64,
 ) {
+    let started = if trace::on(trace::UI | trace::ENGINE) {
+        trace::now_ns()
+    } else {
+        0
+    };
     // SAFETY: guaranteed by the caller.
     let bytes = unsafe { slice(params, len) }.to_vec();
     with_app(app, (), |app| {
@@ -691,20 +726,44 @@ pub unsafe extern "C" fn bern_app_dispatch(
                 }
                 Ok(params)
             });
+        if started != 0 {
+            // Whether a job of it is traced here, so an interaction knows
+            // whether to wait for one.
+            let catalog = trace::register_catalog(descriptor);
+            let traced = decoded.is_ok()
+                && app.host.local()
+                && trace::on(trace::ENGINE)
+                && trace::traces_command(catalog, command);
+            trace::record(trace::Record {
+                t0: started,
+                t1: trace::now_ns(),
+                key: token,
+                a: command as u64,
+                b: traced as u64,
+                kind: trace::kind::DECODE,
+                catalog,
+                ..trace::Record::default()
+            });
+        }
         match decoded {
             Ok(params) => {
-                app.host.dispatch(
-                    Invocation { command, params },
-                    CallContext {
-                        entry: Entry::Ui,
-                        request_id: token.to_string(),
-                    },
-                    bern_protocol::Cancellation::new(),
-                    Box::new(move |outcome| {
-                        let bytes = outcome_bytes(descriptor, command, &outcome);
-                        callbacks.reply(token, &bytes);
-                    }),
-                );
+                trace::with_origin(trace::Origin::Token(token), || {
+                    app.host.dispatch(
+                        Invocation { command, params },
+                        CallContext {
+                            entry: Entry::Ui,
+                            request_id: token.to_string(),
+                        },
+                        bern_protocol::Cancellation::new(),
+                        Box::new(move |outcome| {
+                            let bytes = outcome_bytes(descriptor, command, &outcome);
+                            if trace::on(trace::ENGINE) {
+                                trace::callback(trace::CALLBACK_REPLY, token, 0, bytes.len());
+                            }
+                            callbacks.reply(token, &bytes);
+                        }),
+                    )
+                });
             }
             Err(error) => {
                 let mut writer = Writer::new();

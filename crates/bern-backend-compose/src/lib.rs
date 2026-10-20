@@ -17,7 +17,7 @@ use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon,
+    Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, icon, skill,
 };
 use std::path::PathBuf;
 
@@ -562,7 +562,13 @@ impl Target for ComposeAndroid {
                     .join(bern_transport_ipc::ANDROID_FORWARD),
                 bern_transport_ipc::android_socket(&app.app.bundle_id),
             ));
+            products.push(context.output_dir.join(skill::path(app)));
         }
+        // The agent skill beside `bin/`, where the app listens.
+        let place = glue::ipc(context).then(|| {
+            skill::Place::beside_bin(app, cfg!(windows)).connect(skill::android_connect(app))
+        });
+        steps.extend(skill::steps(app, &context.output_dir, place.as_ref()));
         Ok(BuildPlan {
             steps,
             notes: Vec::new(),

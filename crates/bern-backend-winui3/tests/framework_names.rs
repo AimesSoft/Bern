@@ -1,9 +1,10 @@
 //! The `framework-names` example names its value types like types of
 //! WinUI, WinRT and the other platforms' frameworks (`Window`, `Button`,
 //! `Image`, `Color`, `Orientation`, `Text`, `Error`…). The generated C++
-//! describes the types to the runtime by name, as strings, and declares
-//! no C++ type for them; on Windows with the Visual Studio C++ tools, the
-//! compiler builds both front ends.
+//! describes the types and sessions to the runtime by name, as strings,
+//! and declares no C++ type for them, and writes components as functions
+//! `c_` and the declared name; on Windows with the Visual Studio C++
+//! tools, the compiler builds both front ends.
 
 use bern_backend_winui3::WinUi3Windows;
 use bern_target_api::{BuildContext, Framework, Severity, Target};
@@ -104,11 +105,21 @@ fn value_types_named_like_framework_types_compile() {
     let catalog = std::fs::read_to_string(output.join("app/app_catalog.cpp")).unwrap();
     for expected in [
         r#"BType::Enum("Layout")"#,
-        r#"BType::Enum("Window")"#,
+        r#"BType::Enum("Button")"#,
         r#"BType::Record("Text")"#,
         r#"BType::Record("Image")"#,
     ] {
         assert!(catalog.contains(expected), "app_catalog.cpp lacks `{expected}`");
+    }
+    for expected in [r#"SessionDef{"URL", {"#, r#"SessionDef{"Window", {"#] {
+        assert!(catalog.contains(expected), "app_catalog.cpp lacks `{expected}`");
+    }
+    let interface = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    for expected in [
+        "static void c_empty(Parent const& p, Ctx const& c) {",
+        "static void c_bern_player(Parent const& p, Ctx const& c) {",
+    ] {
+        assert!(interface.contains(expected), "app_ui.inl lacks `{expected}`");
     }
     compile(&output);
 }

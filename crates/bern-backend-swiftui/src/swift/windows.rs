@@ -2,7 +2,7 @@
 
 use super::values::{session_class, session_var, swift_type};
 use super::{Ctx, Generator, Out, Platform};
-use crate::names::{double, member, pascal, string};
+use crate::names::{self, double, member, string};
 use bern_ir::{Action, ComponentDef, Expr, Node, ParamKind, WindowDef, WindowRole};
 
 impl Generator<'_> {
@@ -21,7 +21,7 @@ impl Generator<'_> {
     }
 
     pub(super) fn component(&self, out: &mut Out, component: &ComponentDef) {
-        let name = format!("{}View", pascal(&component.name));
+        let name = names::component(&component.name);
         out.line(format!(
             "/// Generated from the `{}` component.",
             component.name

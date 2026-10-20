@@ -16,7 +16,7 @@ mod toolbar;
 mod values;
 mod windows;
 
-use crate::names::{case, double, member, pascal};
+use crate::names::{self, case, double, member};
 use bern_ir::{
     Application, ComponentArg, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node, ParamKind,
 };
@@ -269,8 +269,8 @@ impl<'a> Generator<'a> {
                     })
                     .collect();
                 out.line(format!(
-                    "{}View({})",
-                    pascal(&component.name),
+                    "{}({})",
+                    names::component(&component.name),
                     args.join(", ")
                 ));
                 // A component written in the window takes the window's room

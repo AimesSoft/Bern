@@ -22,6 +22,7 @@ pub mod files;
 pub mod outbox;
 pub mod resources;
 pub mod storage;
+pub mod trace;
 
 pub use composite::{Composite, ModuleEngine};
 
@@ -105,6 +106,7 @@ enum Job {
         context: CallContext,
         cancellation: Cancellation,
         reply: Reply,
+        trace: Option<trace::JobTrace>,
     },
     Stop,
 }
@@ -117,6 +119,8 @@ pub struct QueryAnswer {
     shared: Arc<Shared>,
     command: usize,
     cancellation: Cancellation,
+    /// The traced job's sequence number and catalog.
+    trace: Option<(u64, u16)>,
 }
 
 impl QueryAnswer {
@@ -157,6 +161,23 @@ impl QueryAnswer {
                 Ok(value)
             })
         };
+        if let Some((seq, catalog)) = self.trace {
+            let at = trace::now_ns();
+            trace::record(trace::Record {
+                t0: at,
+                t1: at,
+                key: seq,
+                a: match &result {
+                    Ok(_) => 0,
+                    Err(error) if error.code == "cancelled" => 2,
+                    Err(_) => 1,
+                },
+                kind: trace::kind::QUERY_ANSWER,
+                catalog,
+                name: self.command as u32,
+                ..trace::Record::default()
+            });
+        }
         let revision = self.shared.state.lock().map(|state| state.0).unwrap_or(0);
         reply(CommandOutcome {
             status: CommandStatus::Completed,
@@ -198,6 +219,8 @@ fn cancelled() -> CommandError {
 struct Shared {
     engine_id: String,
     descriptor: &'static ProtocolDescriptor,
+    /// The id trace records name the catalog by.
+    catalog: u16,
     state: Mutex<(u64, Vec<Value>)>,
     listeners: Mutex<Vec<(u64, Listener)>>,
     next_listener: AtomicU64,
@@ -315,9 +338,12 @@ impl Host {
         let descriptor = engine.descriptor();
         let initial = engine.snapshot();
         debug_assert_eq!(initial.len(), descriptor.state.len());
+        let catalog = trace::register_catalog(descriptor);
+        trace::auto_start();
         Arc::new(Shared {
             engine_id: new_engine_id(),
             descriptor,
+            catalog,
             state: Mutex::new((0, initial)),
             listeners: Mutex::new(Vec::new()),
             next_listener: AtomicU64::new(1),
@@ -352,7 +378,7 @@ impl Host {
         let shared = Self::shared(&engine);
         let mut worker = Worker::new(engine, Arc::clone(&shared));
         let local = LocalJobs {
-            worker: Mutex::new(Box::new(move |job| worker.handle(job))),
+            worker: Mutex::new(Box::new(move |job| trace::local_engine(|| worker.handle(job)))),
             pending: Mutex::new(VecDeque::new()),
             draining: AtomicBool::new(false),
             stopped: AtomicBool::new(false),
@@ -426,11 +452,17 @@ impl Host {
         reply: impl FnOnce(CommandOutcome) + Send + 'static,
     ) {
         let reply: Reply = Box::new(reply);
+        let trace = if trace::on(trace::ENGINE) {
+            trace::job(self.shared.catalog, invocation.command, &context)
+        } else {
+            None
+        };
         if let Err(Job::Invoke { reply, .. }) = self.send(Job::Invoke {
             invocation,
             context,
             cancellation,
             reply,
+            trace,
         }) {
             reply(stopped_outcome(self.snapshot().0));
         }
@@ -551,10 +583,13 @@ impl<E: EngineProtocol> Worker<E> {
             context: _context,
             cancellation,
             reply,
+            trace: traced,
         } = job
         else {
             return false;
         };
+        let _scope = traced.as_ref().map(trace::JobScope::enter);
+        let job_trace = traced.map(|job| (job.seq, job.catalog));
         let (engine, shared) = (&mut self.engine, &self.shared);
         let descriptor = shared.descriptor;
         let is_query = descriptor
@@ -567,20 +602,36 @@ impl<E: EngineProtocol> Worker<E> {
                 shared: Arc::clone(shared),
                 command: invocation.command,
                 cancellation,
+                trace: job_trace,
             };
             if let Err(error) = validate(descriptor, &invocation) {
                 answer.send(Err(error));
             } else if answer.is_cancelled() {
                 // Superseded while queued: the provider never starts.
                 drop(answer);
-            } else if catch_unwind(AssertUnwindSafe(|| engine.query(&invocation, answer))).is_err()
-            {
-                // The answer was dropped while unwinding and reported the failure.
-                self.poisoned = true;
+            } else {
+                let started = job_trace.map(|_| trace::now_ns());
+                let panicked =
+                    catch_unwind(AssertUnwindSafe(|| engine.query(&invocation, answer))).is_err();
+                if let Some(started) = started {
+                    trace::job_record(
+                        trace::kind::QUERY_START,
+                        started,
+                        invocation.command as u32,
+                        0,
+                        0,
+                        0,
+                    );
+                }
+                if panicked {
+                    // The answer was dropped while unwinding and reported the failure.
+                    self.poisoned = true;
+                }
             }
             return true;
         }
         let poisoned = &mut self.poisoned;
+        let started = job_trace.map(|_| trace::now_ns());
         let result = if *poisoned {
             Err(CommandError::new(
                 "engine_failed",
@@ -609,8 +660,20 @@ impl<E: EngineProtocol> Worker<E> {
                 },
             }
         };
+        if let Some(started) = started {
+            trace::job_record(
+                trace::kind::EXEC,
+                started,
+                invocation.command as u32,
+                result.is_ok() as u64,
+                0,
+                0,
+            );
+        }
         let revision = if *poisoned {
             shared.state.lock().expect("state lock").0
+        } else if job_trace.is_some() {
+            publish_traced(shared, &*engine)
         } else {
             publish(shared, engine.snapshot())
         };
@@ -625,16 +688,49 @@ impl<E: EngineProtocol> Worker<E> {
 
 /// Diff the new snapshot, bump the revision and notify listeners once.
 fn publish(shared: &Shared, next: Vec<Value>) -> u64 {
+    publish_with(shared, next, |_, previous, value| previous != Some(value)).0
+}
+
+/// `publish` for a traced job: the snapshot, each field's comparison and
+/// the whole publication, listeners included, are recorded.
+fn publish_traced(shared: &Shared, engine: &impl EngineProtocol) -> u64 {
+    let started = trace::now_ns();
+    let next = engine.snapshot();
+    trace::job_record(trace::kind::SNAPSHOT, started, 0, 0, 0, 0);
+    let (revision, changed) = publish_with(shared, next, |index, previous, value| {
+        let compared = trace::now_ns();
+        let differs = previous != Some(value);
+        trace::job_record(
+            trace::kind::COMPARE_FIELD,
+            compared,
+            index as u32,
+            differs as u64,
+            0,
+            0,
+        );
+        differs
+    });
+    let created = if changed { revision } else { 0 };
+    trace::job_record(trace::kind::PUBLISH, started, 0, created, 0, 0);
+    revision
+}
+
+/// Publish `next`: the revision afterwards, and whether it is new.
+fn publish_with(
+    shared: &Shared,
+    next: Vec<Value>,
+    mut differs: impl FnMut(usize, Option<&Value>, &Value) -> bool,
+) -> (u64, bool) {
     let update = {
         let mut state = shared.state.lock().expect("state lock");
         let changes: Vec<(usize, Value)> = next
             .iter()
             .enumerate()
-            .filter(|(index, value)| state.1.get(*index) != Some(*value))
+            .filter(|(index, value)| differs(*index, state.1.get(*index), value))
             .map(|(index, value)| (index, value.clone()))
             .collect();
         if changes.is_empty() {
-            return state.0;
+            return (state.0, false);
         }
         state.0 += 1;
         state.1 = next;
@@ -653,7 +749,7 @@ fn publish(shared: &Shared, next: Vec<Value>) -> u64 {
     for listener in listeners {
         listener(&update);
     }
-    update.revision
+    (update.revision, true)
 }
 
 #[cfg(test)]

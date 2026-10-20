@@ -144,6 +144,103 @@ impl SessionHandler for WebSession {
     }
 
     fn handle(&self, command: SessionCommand, params: Vec<Value>) -> Result<Value, CommandError> {
+        if command.is_trace() {
+            return self.trace(command, params);
+        }
+        self.forward(command, params)
+    }
+}
+
+impl WebSession {
+    /// The trace runs on both sides: the engine host records the engine,
+    /// the page the UI. The host answers with both.
+    fn trace(&self, command: SessionCommand, params: Vec<Value>) -> Result<Value, CommandError> {
+        use bern_command::trace;
+        let field = |value: &Value, index: usize| match value {
+            Value::Record(fields) => fields.get(index).cloned(),
+            _ => None,
+        };
+        match command {
+            SessionCommand::TraceStart => {
+                let Some(Value::Text(rules)) = params.first() else {
+                    return Err(CommandError::invalid_params("`rules` must be text"));
+                };
+                let started = trace::start(rules)
+                    .map_err(|message| CommandError::new("invalid_rules", message))?;
+                // The page records its side with the same rules.
+                let _ = self.forward(command, params);
+                Ok(started.to_value())
+            }
+            SessionCommand::TraceStop => {
+                let inline = matches!(params.first(), Some(Value::Optional(Some(value))) if **value == Value::Bool(true));
+                let mut stopped = trace::stop(inline);
+                // The page keeps its timeline in memory; the host writes it
+                // next to its own.
+                let page = self.forward(
+                    command,
+                    vec![Value::Optional(Some(Box::new(Value::Bool(true))))],
+                );
+                if let Ok(page) = page {
+                    if let Some(Value::Int(events)) = field(&page, 1) {
+                        stopped.events += events.max(0) as u64;
+                    }
+                    if let Some(Value::Int(dropped)) = field(&page, 2) {
+                        stopped.dropped += dropped.max(0) as u64;
+                    }
+                    if let Some(Value::Optional(Some(timeline))) = field(&page, 3)
+                        && let Value::Text(timeline) = *timeline
+                    {
+                        let path = match stopped.files.first() {
+                            Some(file) => std::path::PathBuf::from(file.trim_end_matches(".json").to_string() + "-page.json"),
+                            None => std::env::temp_dir()
+                                .join(format!("bern-trace-page-{}.json", std::process::id())),
+                        };
+                        if std::fs::write(&path, timeline).is_ok() {
+                            stopped.files.push(path.display().to_string());
+                        }
+                    }
+                }
+                Ok(stopped.to_value())
+            }
+            SessionCommand::TraceReport => {
+                let top = match params.first() {
+                    Some(Value::Optional(Some(value))) => match **value {
+                        Value::Int(top) => top.clamp(0, 1000) as usize,
+                        _ => 10,
+                    },
+                    _ => 10,
+                };
+                let reset = matches!(params.get(1), Some(Value::Optional(Some(value))) if **value == Value::Bool(true));
+                let host = trace::report(top, reset).to_value();
+                let Ok(Value::Record(page)) = self.forward(command, params) else {
+                    return Ok(host);
+                };
+                let Value::Record(mut merged) = host else {
+                    return Ok(host);
+                };
+                // Commands, queries and fields are the engine's; interactions
+                // and frames the page's; spans and counts from both.
+                for index in [2, 3] {
+                    if let (Value::Int(host), Some(Value::Int(page))) = (&merged[index], page.get(index)) {
+                        merged[index] = Value::Int(host + page);
+                    }
+                }
+                for index in [7, 8, 9] {
+                    if let Some(value) = page.get(index) {
+                        merged[index] = value.clone();
+                    }
+                }
+                if let (Value::List(host), Some(Value::List(page))) = (&mut merged[10], page.get(10)) {
+                    host.extend(page.iter().cloned());
+                }
+                Ok(Value::Record(merged))
+            }
+            _ => self.forward(command, params),
+        }
+    }
+
+    /// Run a session command on the page and wait for its answer.
+    fn forward(&self, command: SessionCommand, params: Vec<Value>) -> Result<Value, CommandError> {
         let (types, specs) = session_catalog();
         let spec = specs
             .iter()
@@ -172,9 +269,7 @@ impl SessionHandler for WebSession {
             ))
         })
     }
-}
 
-impl WebSession {
     fn answer(&self, request_id: &str, result: Result<Option<serde_json::Value>, CommandError>) {
         let Some((command, sender)) = self
             .waiting
@@ -563,6 +658,16 @@ impl Connection {
                     request_id,
                     session_id,
                 });
+                // A trace the host started records the page's side too. The
+                // page answers on this connection, so it is asked from
+                // another thread.
+                if let Some(rules) = bern_command::trace::rules()
+                    && let Some(session) = self.lock().session.clone()
+                {
+                    std::thread::spawn(move || {
+                        let _ = session.forward(SessionCommand::TraceStart, vec![Value::Text(rules)]);
+                    });
+                }
             }
             ClientMessage::SessionWindows { windows } => {
                 let mut state = self.lock();

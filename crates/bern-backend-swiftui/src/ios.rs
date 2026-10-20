@@ -13,7 +13,7 @@ use bern_ir::IR_VERSION;
 use bern_ir::{Application, WindowInitial};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    SimulatedSystem, Target, TargetConfig, TargetDescriptor, WindowCapabilities, icon,
+    SimulatedSystem, Target, TargetConfig, TargetDescriptor, WindowCapabilities, icon, skill,
 };
 use std::path::PathBuf;
 
@@ -457,20 +457,29 @@ impl Target for SwiftUiIos {
                 vec![],
             ),
         ]);
+        // The agent skill beside `bin/`, where the app listens.
+        let listens = skill::listens(&context.target.channels);
+        let place = listens
+            .then(|| skill::Place::beside_bin(app, false).connect(skill::simulator_connect(app)));
+        steps.extend(skill::steps(app, output, place.as_ref()));
+        let mut products = vec![
+            bundle.clone(),
+            output.join("bin").join(&cli),
+            output.join("bin").join(format!("{cli}-mcp")),
+            symbols,
+        ];
+        if listens {
+            products.push(output.join(skill::path(app)));
+        }
         Ok(BuildPlan {
             steps,
             notes: Vec::new(),
             run: Some(Run::Simulator {
-                app: bundle.clone(),
+                app: bundle,
                 bundle_id: app.app.bundle_id.clone(),
                 system: SimulatedSystem::Ios,
             }),
-            products: vec![
-                bundle,
-                output.join("bin").join(&cli),
-                output.join("bin").join(format!("{cli}-mcp")),
-                symbols,
-            ],
+            products,
         })
     }
 }

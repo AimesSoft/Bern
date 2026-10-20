@@ -5,31 +5,56 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 
-/// Start the built application and wait until it ends.
-pub fn start(run: &Run, port: Option<u16>) -> Result<ExitCode, String> {
+/// Start the built application and wait until it ends. `trace` carries
+/// performance trace rules to the app: as `BERN_TRACE` for programs and
+/// simulators, as an intent extra on Android, in the address of a page.
+pub fn start(run: &Run, port: Option<u16>, trace: Option<&str>) -> Result<ExitCode, String> {
     validate_port(run, port)?;
     match run {
         Run::Program(program) => {
             eprintln!("    \x1b[1;32mRunning\x1b[0m {}", program.display());
-            let status = Command::new(program)
+            let mut command = Command::new(program);
+            if let Some(rules) = trace {
+                command.env("BERN_TRACE", rules);
+            }
+            let status = command
                 .status()
                 .map_err(|error| format!("cannot start {}: {error}", program.display()))?;
             Ok(exit_code(status.code()))
         }
-        Run::Page(root) => serve(root, port),
-        Run::PageHost(program) => host(program),
+        Run::Page(root) => serve(root, port, trace),
+        Run::PageHost(program) => host(program, trace),
         Run::Simulator {
             app,
             bundle_id,
             system,
-        } => simulator(app, bundle_id, *system),
+        } => simulator(app, bundle_id, *system, trace),
         Run::Android {
             apk,
             package,
             adb,
             forward,
-        } => android(apk, package, adb, forward.as_ref()),
+        } => android(apk, package, adb, forward.as_ref(), trace),
     }
+}
+
+/// The address fragment that turns on tracing in a page.
+fn page_trace(rules: &str) -> String {
+    let mut fragment = String::from("#bern-trace=");
+    for byte in rules.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~:,*/".contains(&byte) {
+            fragment.push(byte as char);
+        } else {
+            fragment.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    fragment
+}
+
+/// `text` quoted for the device's shell, which `adb shell` hands a single
+/// command line.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 /// Reject a page-only option before building or starting a native host.
@@ -47,6 +72,7 @@ fn android(
     package: &str,
     adb: &Path,
     forward: Option<&(std::path::PathBuf, String)>,
+    trace: Option<&str>,
 ) -> Result<ExitCode, String> {
     let run = |args: &[&str]| {
         Command::new(adb)
@@ -120,14 +146,15 @@ fn android(
     }
     eprintln!("    \x1b[1;32mRunning\x1b[0m {package} on {device}");
     run(&["shell", "am", "force-stop", package])?;
-    let started = run(&[
-        "shell",
-        "am",
-        "start",
-        "-W",
-        "-n",
-        &format!("{package}/.MainActivity"),
-    ])?;
+    let activity = format!("{package}/.MainActivity");
+    let mut start = vec!["shell", "am", "start", "-W", "-n", &activity];
+    // Android apps have no environment to set; the activity hands the
+    // extra to the runtime.
+    let quoted = trace.map(shell_quote);
+    if let Some(rules) = &quoted {
+        start.extend(["--es", "bern.trace", rules.as_str()]);
+    }
+    let started = run(&start)?;
     if !started.status.success() {
         return Err(format!("cannot start {package}"));
     }
@@ -186,10 +213,10 @@ fn exit_code(code: Option<i32>) -> ExitCode {
 }
 
 /// Serve a page whose engine runs in the page until Ctrl-C.
-fn serve(root: &Path, port: Option<u16>) -> Result<ExitCode, String> {
+fn serve(root: &Path, port: Option<u16>, trace: Option<&str>) -> Result<ExitCode, String> {
     let server = bern_transport_ws::FileServer::start(root.to_path_buf(), port.unwrap_or(0))
         .map_err(|error| format!("cannot serve {}: {error}", root.display()))?;
-    let url = server.url();
+    let url = server.url() + &trace.map(page_trace).unwrap_or_default();
     eprintln!("    \x1b[1;32mServing\x1b[0m {} at {url}", root.display());
     eprintln!("             press Ctrl-C to stop");
     open_browser(&url);
@@ -198,10 +225,15 @@ fn serve(root: &Path, port: Option<u16>) -> Result<ExitCode, String> {
     }
 }
 
-/// Start an engine host, open the page it serves, and wait for it.
-fn host(program: &Path) -> Result<ExitCode, String> {
+/// Start an engine host, open the page it serves, and wait for it. A
+/// trace runs in the host, which starts the page's side when it connects.
+fn host(program: &Path, trace: Option<&str>) -> Result<ExitCode, String> {
     eprintln!("    \x1b[1;32mRunning\x1b[0m {}", program.display());
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    if let Some(rules) = trace {
+        command.env("BERN_TRACE", rules);
+    }
+    let mut child = command
         .stdout(Stdio::piped())
         .spawn()
         .map_err(|error| format!("cannot start {}: {error}", program.display()))?;
@@ -225,7 +257,12 @@ fn host(program: &Path) -> Result<ExitCode, String> {
 /// app's IPC channel keeps its socket in this Mac's temporary directory,
 /// where the application's command line tools on the Mac look; `BERN_*`
 /// variables reach the app as well.
-fn simulator(app: &Path, bundle_id: &str, system: SimulatedSystem) -> Result<ExitCode, String> {
+fn simulator(
+    app: &Path,
+    bundle_id: &str,
+    system: SimulatedSystem,
+    trace: Option<&str>,
+) -> Result<ExitCode, String> {
     let (udid, name) = booted_simulator(system)?;
     eprintln!(
         "    \x1b[1;32mInstalling\x1b[0m {} on {name}",
@@ -260,6 +297,9 @@ fn simulator(app: &Path, bundle_id: &str, system: SimulatedSystem) -> Result<Exi
             child.push(&key);
             launch.env(child, value);
         }
+    }
+    if let Some(rules) = trace {
+        launch.env("SIMCTL_CHILD_BERN_TRACE", rules);
     }
     let status = launch
         .status()
@@ -323,6 +363,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn trace_rules_reach_pages_and_device_shells_intact() {
+        assert_eq!(
+            page_trace("engine,command:library.*,file:/tmp/a b.json"),
+            "#bern-trace=engine,command:library.*,file:/tmp/a%20b.json"
+        );
+        assert_eq!(shell_quote("engine,ui"), "'engine,ui'");
+        assert_eq!(shell_quote("file:/tmp/it's"), "'file:/tmp/it'\\''s'");
+    }
+
+    #[test]
     fn fixed_port_only_applies_to_pages() {
         assert!(validate_port(&Run::Page("page".into()), Some(4173)).is_ok());
         for run in [Run::Program("app".into()), Run::PageHost("host".into())] {
@@ -333,7 +383,7 @@ mod tests {
                     .contains("web_mode = \"app\"")
             );
             // Invalid options fail before the nonexistent program is started.
-            assert!(start(&run, Some(4173)).unwrap_err().contains("--port"));
+            assert!(start(&run, Some(4173), None).unwrap_err().contains("--port"));
         }
     }
 }

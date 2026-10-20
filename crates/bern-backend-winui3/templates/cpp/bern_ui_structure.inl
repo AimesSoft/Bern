@@ -216,6 +216,8 @@ inline void List(Parent const& p, Ctx const& ctx, Build const& children) {
     }
     controls::StackPanel rows;
     rows.Spacing(kWinUI ? 4 : 2);
+    // Its rows span the width it is given, in a column of any alignment.
+    SetRole(rows, L"bern-fill-width");
     children(Parent::OfList(rows), ctx);
     p.Add(rows);
 }
@@ -1130,6 +1132,8 @@ inline void Tab(Parent const& p, Ctx const& ctx, TabSpec spec) {
 inline void Adaptive(Parent const& p, Ctx const& ctx, char const* id, std::array<Build, 4> layouts) {
     auto holder = MakeFlex(false, p.isList ? (kWinUI ? 4 : 2) : 8);
     holder.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+    // It takes the width it is given, which it judges the layout size by.
+    MarkFullWidth(holder);
     static char const* const kSizes[] = {"compact", "medium", "expanded", "large"};
     auto const& catalog = app->catalog;
     auto sizeOf = [&catalog](double width) {
@@ -1319,9 +1323,11 @@ inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const
         return ring;
     };
     auto status = [](std::string const& glyph, TextFn const& title, xaml::FrameworkElement const& action) {
+        // A status fills across what it stands in, centered there.
         controls::StackPanel column;
         column.Spacing(8);
-        column.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+        SetRole(column, L"bern-fill-width");
+        column.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         column.Margin(xaml::Thickness{0, 24, 0, 24});
         auto symbol = Icons::Icon(glyph, 32);
         symbol.HorizontalAlignment(xaml::HorizontalAlignment::Center);
@@ -1366,6 +1372,7 @@ inline void Query(Parent const& p, Ctx const& ctx, QueryProps props, Build const
         },
         [=](Parent const& target, Ctx const&) {
             controls::Grid line;
+            SetRole(line, L"bern-fill-width");
             line.ColumnSpacing(8);
             line.ColumnDefinitions().Append(Column(AutoLength()));
             line.ColumnDefinitions().Append(Column(Star()));

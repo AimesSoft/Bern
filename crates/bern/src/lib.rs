@@ -11,6 +11,15 @@ pub mod media;
 pub mod modules;
 pub mod query;
 
+/// Performance tracing: `let _span = bern::trace::span!("reindex");`
+/// measures application code on the trace timeline while tracing is on
+/// (`BERN_TRACE`, `trace.start`), and costs one check while it is off.
+pub mod trace {
+    pub use bern_command::trace::{Span, mask, on};
+    pub use bern_command::trace::{ALL, DEFAULT, ENGINE, SPAN, UI};
+    pub use bern_command::trace_span as span;
+}
+
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
 pub use bern_command::{resources, storage};
 pub use bern_macros::{component, features, players, protocol, session, style, tr, ui, value};

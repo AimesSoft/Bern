@@ -4,7 +4,7 @@ use bern::CommandError;
 use names_protocol::names::{
     self, Align, Alignment, Animation, Arrangement, Bundle, Button, Color, Content, Data, Date,
     Error, Event, Font, Image, Layout, List, Locale, Map, Modifier, Notification, Orientation,
-    Pair, Path, Role, Scene, Size, State, Task, Text, Timer, Toggle, View, Widget, Window,
+    Pair, Path, Role, Scene, Size, State, Task, Text, Timer, Toggle, View, Widget,
 };
 
 pub struct NamesEngine {
@@ -24,7 +24,6 @@ impl Default for NamesEngine {
                 font: Font::Body,
                 animation: Animation::Spring,
                 task: Task::Pending,
-                window: Window::Main,
                 button: Button::Primary,
                 toggle: Toggle::On,
                 scene: Scene::Day,

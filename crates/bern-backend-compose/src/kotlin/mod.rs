@@ -13,7 +13,7 @@ mod toolbar;
 mod values;
 mod windows;
 
-use crate::names::{double, float, member, pascal, string, value_type};
+use crate::names::{self, double, float, member, string, value_type};
 use bern_ir::{
     Application, ComponentArg, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node, ParamKind,
 };
@@ -366,7 +366,11 @@ impl<'a> Generator<'a> {
                         _ => None,
                     })
                     .collect();
-                let call = format!("{}View({})", pascal(&component.name), args.join(", "));
+                let call = format!(
+                    "{}({})",
+                    names::component(&component.name),
+                    args.join(", ")
+                );
                 // In a column or row the component's layout can take the
                 // free room there, as it would written in place.
                 let call = match ctx.scope {

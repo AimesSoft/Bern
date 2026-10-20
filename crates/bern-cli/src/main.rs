@@ -24,7 +24,7 @@ bern: create, check, build and run Bern applications
 Usage:
   bern new <path> [--bundle-id ID] [--languages LIST] [--bern-path DIR]
   bern new --module <id> [--manifest PATH]
-  bern run    [--manifest PATH] [--target NAME] [--release] [--port PORT]
+  bern run    [--manifest PATH] [--target NAME] [--release] [--port PORT] [--trace RULES]
   bern build  [--manifest PATH] [--target NAME] [--release]
   bern package [--manifest PATH] [--target NAME]
   bern check  [--manifest PATH] [--target NAME]
@@ -47,6 +47,8 @@ Options:
   --release    Optimized build
   --port       Local HTTP port, 1–65535, for browser app runs;
                omitted: choose a free port (a fixed port preserves browser storage)
+  --trace      Start the app with performance tracing, such as engine,ui,slow:16ms
+               or command:library.*; the same rules as BERN_TRACE and trace.start
   --bundle-id  Reverse-DNS bundle id (default: com.example.<name>)
   --languages  Languages, comma-separated, the default first (default: en,zh-Hans;
                the template has text in en, zh-Hans, zh-Hant and ja)
@@ -69,6 +71,8 @@ struct Options {
     target: Option<String>,
     release: bool,
     port: Option<u16>,
+    /// `bern run --trace`: trace rules for the started app.
+    trace: Option<String>,
     bundle_id: Option<String>,
     languages: Option<Vec<String>>,
     bern_path: Option<PathBuf>,
@@ -93,7 +97,7 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
             "--module",
             "--manifest",
         ],
-        "run" => &["--manifest", "--target", "--release", "--port"],
+        "run" => &["--manifest", "--target", "--release", "--port", "--trace"],
         "build" => &["--manifest", "--target", "--release"],
         "package" => &["--manifest", "--target"],
         "check" => &["--manifest", "--target"],
@@ -124,6 +128,13 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
                         .filter(|port| *port > 0)
                         .ok_or("--port must be an integer from 1 to 65535")?,
                 );
+            }
+            "--trace" => {
+                let rules = value()?;
+                // Wrong rules fail before anything is built.
+                bern_command::trace::Rules::parse(&rules)
+                    .map_err(|error| format!("--trace: {error}"))?;
+                options.trace = Some(rules);
             }
             "--bundle-id" => options.bundle_id = Some(value()?),
             "--languages" => {
@@ -915,7 +926,7 @@ fn build(options: &Options) -> ExitCode {
                 eprintln!("error: `{}` builds nothing to start", descriptor.id);
                 return ExitCode::FAILURE;
             };
-            return match run::start(run, options.port) {
+            return match run::start(run, options.port, options.trace.as_deref()) {
                 Ok(code) => code,
                 Err(message) => {
                     eprintln!("error: {message}");
@@ -1078,5 +1089,26 @@ mod tests {
                     .contains("does not take `--port`")
             );
         }
+    }
+
+    #[test]
+    fn run_trace_rules_are_checked_before_building() {
+        assert_eq!(
+            parsed(&["run", "--trace", "engine,ui,slow:16ms"])
+                .unwrap()
+                .trace
+                .as_deref(),
+            Some("engine,ui,slow:16ms")
+        );
+        assert!(
+            parsed(&["run", "--trace", "engin"])
+                .unwrap_err()
+                .contains("--trace: unknown trace rule `engin`")
+        );
+        assert!(
+            parsed(&["build", "--trace", "engine"])
+                .unwrap_err()
+                .contains("does not take `--trace`")
+        );
     }
 }

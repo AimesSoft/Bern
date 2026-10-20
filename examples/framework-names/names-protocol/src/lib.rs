@@ -84,13 +84,6 @@ pub mod names {
         Done,
     }
 
-    /// SwiftUI's `Window`, WinUI's `Window`, GTK's `Window`.
-    #[value]
-    pub enum Window {
-        Main,
-        Settings,
-    }
-
     /// SwiftUI's `Button` and `Toggle`, WinUI's and GTK's `Button`.
     #[value]
     pub enum Button {
@@ -262,7 +255,6 @@ pub mod names {
         pub font: Font,
         pub animation: Animation,
         pub task: Task,
-        pub window: Window,
         pub button: Button,
         pub toggle: Toggle,
         pub scene: Scene,

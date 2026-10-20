@@ -3,7 +3,7 @@
 
 use super::values::{kotlin_type, session_class, session_var};
 use super::{Ctx, Generator, Out};
-use crate::names::{double, member, pascal, string};
+use crate::names::{self, double, member, string};
 use bern_ir::{Action, ComponentDef, ParamKind, WindowDef, WindowRole};
 
 impl Generator<'_> {
@@ -21,7 +21,7 @@ impl Generator<'_> {
     }
 
     pub(super) fn component(&self, out: &mut Out, component: &ComponentDef) {
-        let name = format!("{}View", pascal(&component.name));
+        let name = names::component(&component.name);
         let mut sessions = Vec::new();
         let mut params = Vec::new();
         for param in &component.params {

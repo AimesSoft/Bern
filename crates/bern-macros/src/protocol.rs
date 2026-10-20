@@ -399,7 +399,16 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 
                 fn snapshot(&self) -> ::std::vec::Vec<#p::Value> {
                     let state = Engine::state(&self.0);
-                    ::std::vec![#(#b::BernValue::to_value(&state.#state_fields)),*]
+                    // A traced engine times each field; untraced, the one
+                    // check is all it costs.
+                    if ::bern::__private::command::trace::on(::bern::__private::command::trace::ENGINE) {
+                        ::std::vec![#(::bern::__private::command::trace::snapshot_field(
+                            #state_positions,
+                            || #b::BernValue::to_value(&state.#state_fields),
+                        )),*]
+                    } else {
+                        ::std::vec![#(#b::BernValue::to_value(&state.#state_fields)),*]
+                    }
                 }
 
                 fn initial_modules(&self) -> ::std::option::Option<::std::vec::Vec<::std::string::String>> {

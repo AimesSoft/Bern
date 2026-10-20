@@ -7,6 +7,7 @@
 - [组件用法](Reference/UI.md)：播放器坐标场景、控件分组与尺寸、受控输入、图片 Hero、引导、搜索、空闲状态及存储。
 - [完整组件属性表](Reference/Component-Properties.md)：从当前 `bern-ir::spec` 导出的全部内置组件、属性类型、必填项、子节点和动作规则。
 - [平台能力与验证范围](Reference/Platforms.md)：按后端功能标记列出支持情况，将声明支持、构建与交互验证分开。
+- [性能追踪](Reference/Tracing.md)：`BERN_TRACE` 与 `trace.*` 的规则、各段的含义、终端汇总、`trace.report` 与时间线文件。
 
 ## 架构与设计
 

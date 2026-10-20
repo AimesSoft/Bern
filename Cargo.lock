@@ -131,6 +131,7 @@ dependencies = [
  "bern-backend-swiftui",
  "bern-backend-web",
  "bern-backend-winui3",
+ "bern-command",
  "bern-compiler",
  "bern-protocol",
  "bern-syntax",
@@ -145,6 +146,7 @@ name = "bern-command"
 version = "0.1.0"
 dependencies = [
  "bern-protocol",
+ "serde_json",
 ]
 
 [[package]]
@@ -156,6 +158,7 @@ dependencies = [
  "bern-protocol",
  "bern-syntax",
  "bern-target-api",
+ "bern-theme",
  "proc-macro2",
  "serde",
  "serde_json",

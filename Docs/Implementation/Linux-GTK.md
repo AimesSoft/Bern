@@ -356,7 +356,14 @@ target/bern/linux/Showcase/showcase
 - 修正：按钮类控件（不是 `width: fill` 的 `Button`、`IconButton`、带内容的按钮、`Switch(style: button)`、`PopoverButton`、`Menu`、`SplitButton`、不显示标签的 `Picker`）带 `bern-own-width` 标记；拉伸子元素的列或窗口正文里，带标记且不横向填满的控件对齐到前缘（`Start`），其他照旧。窗口正文的 `Parent` 由 `Parent::of_window` 建立，经条件与组件也是它；其中没写尺寸的 `Stack` 两个方向都 `expand`，铺满内容区、按它的 `align` 摆放小层。
 - 测试：bern-gtk 的 `parent::tests` 两项（拉伸列与窗口里按钮靠前缘、横向填满的照旧填满；写了 `align` 时按钮也按它摆放）；生成器测试 `content_in_a_window_starts_at_its_top_leading_corner` 断言窗口正文经条件与组件直接写进窗口的 `Parent`。
 - Ubuntu 24.04 虚拟机：bern-gtk 的 `cargo test --all-features`（95 项）与 `cargo clippy --all-features --all-targets -- -D warnings` 通过；`cargo test -p bern-backend-gtk` 的生成应用类型检查（showcase、gallery 等）通过。探针应用经 Broadway 实测（用 CLI 切换正文）：默认列从左上排起，按钮保持自身宽度；写在组件里的 `Column(align: center)` 水平居中、靠顶；只有一个小层的 `Stack` 在内容区正中；图标按钮、菜单、浮层按钮在默认列里保持自身宽度、站在前缘。
-- 仍与 `align: leading` 不同的地方：默认列仍把按钮类以外的子元素拉满（文字看上去一样）；嵌在默认列里、写了 `align: center` 或带底色的列会横跨外层列，SwiftUI、Compose 与 Web 上它只与自己的内容同宽。WinUI 3 相同。这一条按代码推断，没有实测。
+- 仍与 `align: leading` 不同的地方：默认列仍把按钮类以外的子元素拉满（文字看上去一样）；嵌在默认列里、写了 `align: center` 或带底色的列会横跨外层列，SwiftUI、Compose 与 Web 上它只与自己的内容同宽。WinUI 3 相同。这一条按代码推断，没有实测；同日实测确认并修正，见下一条。
+
+2026-10-21，不写 `align` 的列完全等同 `align: leading`（设计文档组件表 `Column` 一行）：
+
+- 改前（虚拟机经 Broadway 实测，探针应用 480 × 600，用 CLI 切换正文，窗口快照量横向范围）：默认列的交叉轴是 `Fill`，按钮类以外的子元素都被拉满。嵌在默认列里的 `Column(align: center) { 长标题; 短按钮 }` 横跨外层列，标题被居中到 120–359、短按钮 215–264（都以窗口中线 240 为中）；带样式的小 `Stack` 的底色横跨 24–455；卡片里后到的分隔线只有文字那么宽。同一探针在 macOS、tvOS 模拟器与 Web 上：居中列只与标题同宽，短按钮在标题下居中，小 `Stack` 只与文字同宽，后到的分隔线让卡片横跨、离开后卡片缩回。
+- 修正：默认列的交叉轴改为 `Start`，与 `align: leading` 相同（`widgets.rs` 的 `stack_cross`）；`Parent::add` 照旧让 `compute_expand` 横向为真的子元素保持自己的 `Fill`。原本靠列拉伸才横跨、自己却不 `expand` 的元素补上 `hexpand`：列里的分隔线、`Grid` 的 FlowBox、`List`、`Navigation` 与 `Tabs` 的页面栈和切换条、查询的空与失败状态页；带底板（没写尺寸的 `Canvas`）、不在行里、没写宽度的 `Stack` 在 `compute_expand` 里横向为真（`Layers::set_block`），像列里的块一样横跨。之后才到或离开的内容（条件分支、查询结果，含播完消失过渡后）从所在容器往上重新判定：每个站在对齐的列或行（带 `bern-cross-*` 标记的 GtkBox 或 ReflowBox）里的容器，装着横向填满的内容时 `Fill`，否则回到列的对齐（`parent.rs` 的 `refit`）。
+- 测试：bern-gtk 新增 `a_leading_column_fills_only_with_what_fills`、`content_that_comes_or_goes_refits_its_containers`（`parent::tests`）与 `a_column_without_align_is_a_leading_one`（`widgets::tests`）。Ubuntu 24.04 虚拟机上 bern-gtk 的 `cargo test --all-features`（98 项）与 `cargo clippy --all-features --all-targets -- -D warnings` 通过，`cargo test -p bern-backend-gtk`（含示例应用的类型检查）通过。
+- 改后（同一探针）：标题 24–263、短按钮 119–168（以标题中线 144 为中）；小 `Stack` 24–137；分隔线、输入框、滑块、进度条、网格、含 `Spacer` 的行、带底板的 `Stack`、`Button(width: fill)`、没写宽度的画布都横跨 24–455；卡片里出现分隔线时卡片横跨 24–455，分隔线消失、另一张卡片里出现输入框时第一张缩回 24–197、第二张横跨，输入框也消失后两张都缩回，与 macOS、tvOS 相同。长文字在列宽处换行。带标签的 `Switch`、`Picker` 照旧是标签在前、控件在行尾的整行（GNOME 的写法；tvOS 上也是整行，macOS 上只与内容同宽），写 `align: leading` 时也是这样。
 
 2026-10-21，页签的 `fallback`（设计文档“导航容器的项同样可以是动态的”）：
 

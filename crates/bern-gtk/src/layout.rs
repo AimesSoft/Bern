@@ -106,6 +106,9 @@ mod layers {
         pub(crate) slides: Slides,
         /// Where layers that do not fill the stack stand in it.
         pub alignment: Cell<Option<(gtk::Align, gtk::Align)>>,
+        /// With a backdrop beside other layers, the stack fills across the
+        /// column or grid cell it stands in, as a block does.
+        pub block: Cell<bool>,
     }
 
     #[glib::object_subclass]
@@ -148,13 +151,17 @@ mod layers {
         /// A stack fills where a layer fills, except a rail or a drawing
         /// without a size, its backdrop: they cover the size the other
         /// layers give the stack and make it no larger. A stack of those
-        /// alone fills along them.
+        /// alone fills along them. A stack with a backdrop that stands in a
+        /// column fills it across, as a block does.
         fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
             let all = children(self.obj().upcast_ref());
             let content: Vec<&gtk::Widget> = all
                 .iter()
                 .filter(|child| !is_rail(child) && !is_backdrop(child))
                 .collect();
+            if self.block.get() && !content.is_empty() && all.iter().any(is_backdrop) {
+                *hexpand = true;
+            }
             let counted: Vec<&gtk::Widget> = if content.is_empty() {
                 all.iter().collect()
             } else {
@@ -278,6 +285,12 @@ impl Layers {
     /// Layers the layout moves slide to their new places with `curve`.
     pub(crate) fn set_reflow(&self, curve: Option<crate::motion::Curve>) {
         self.imp().curve.set(curve);
+    }
+
+    /// With a backdrop, the stack fills across the column or grid cell it
+    /// stands in, as a block does; not in a row, or with a width of its own.
+    pub(crate) fn set_block(&self, block: bool) {
+        self.imp().block.set(block);
     }
 
     /// Where layers that do not fill the stack stand in it.

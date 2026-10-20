@@ -257,8 +257,25 @@ fn showcase_generates_a_winui3_application() {
             output.join("Showcase/showcase.exe"),
             output.join("bin/showcase.exe"),
             output.join("bin/showcase-mcp.exe"),
+            output.join("skills/showcase/SKILL.md"),
         ]
     );
+    // The agent skill spells the programs' paths as Windows does.
+    let skill = plan
+        .steps
+        .iter()
+        .find_map(|step| match step {
+            BuildStep::Write { path, contents } if path.ends_with("skills/showcase/SKILL.md") => {
+                Some(String::from_utf8(contents.clone()).unwrap())
+            }
+            _ => None,
+        })
+        .expect("the plan writes the skill");
+    assert!(
+        skill.contains("| `showcase` | `..\\..\\bin\\showcase.exe` |"),
+        "{skill}"
+    );
+    assert!(skill.contains("at `%LOCALAPPDATA%\\Programs\\Showcase\\bin\\showcase.exe`"));
 
     compile(&output);
 }
@@ -1456,6 +1473,59 @@ pub fn centered(app: stage::Client) -> impl View {
 }
 "#;
 
+/// A column without `align` holding a centered column, a styled stack that
+/// a condition may give a divider, and what fills across a column.
+const FILL_UI: &str = r#"
+use bern::prelude::*;
+
+style! {
+    Stack.card { background: fill.subtle, corner: 8 }
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Column(gap: 12, padding: 24) {
+                    Column(align: center) {
+                        Text(content: tr! { "en" => "A longer title" })
+                        Button(id: short, label: tr! { "en" => "Short" }) => app.add()
+                    }
+                    Stack(variant: card) {
+                        Column(padding: 12) {
+                            Text(content: tr! { "en" => "A card" })
+                            if app.count > 0 {
+                                Divider
+                            }
+                        }
+                    }
+                    Divider
+                    Progress(value: app.count, total: 10, label: tr! { "en" => "Progress" })
+                    Grid(min_width: 80) {
+                        Text(content: tr! { "en" => "Cell" })
+                    }
+                    List {
+                        Text(content: tr! { "en" => "Row" })
+                    }
+                    Row {
+                        Text(content: tr! { "en" => "Left" })
+                        Spacer
+                    }
+                    Stack {
+                        Canvas(label: tr! { "en" => "Backdrop" }) {
+                            Shape(kind: rect, fill: fill.subtle)
+                        }
+                        Text(content: tr! { "en" => "On a backdrop" })
+                    }
+                    Button(id: wide, label: tr! { "en" => "Wide" }, width: fill) => app.add()
+                }
+            }
+        }
+    }
+}
+"#;
+
 /// A project whose only styled control is written directly in its window,
 /// compiled from sources written under `dir`.
 fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
@@ -1622,10 +1692,10 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
         ),
         "a stack in the window fills it"
     );
-    // A column without `align` stretches the rest and leaves a button at
-    // its leading edge: before it is on screen a button's alignment is
-    // still `Stretch`, so it is marked; so does the window.
-    assert!(widgets.contains(": xaml::HorizontalAlignment::Stretch;\n        children(Parent::Aligned(panel, h, std::nullopt), ctx);"));
+    // A column without `align` is a leading one; the window stretches its
+    // content and leaves a button at its leading edge: before it is on
+    // screen a button's alignment is still `Stretch`, so it is marked.
+    assert!(widgets.contains(": xaml::HorizontalAlignment::Left;\n        children(Parent::Aligned(panel, h, std::nullopt), ctx);"));
     assert!(widgets.contains("        SetRole(button, L\"bern-fill-width\");\n    } else {\n        KeepWidth(button);\n    }"));
     let core = text("bern_ui_core.inl");
     for expected in [
@@ -1636,6 +1706,94 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     }
     let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
     for expected in ["B::When(p, c, ", "B::Layers(p, c, {.align = \"bottom\"}, "] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+    compile(&output);
+}
+
+#[test]
+fn a_column_without_align_is_a_leading_one() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/winui3-fill-project"), FILL_UI);
+    let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
+    assert!(
+        problems.iter().all(|problem| !problem.is_error()),
+        "{problems:?}"
+    );
+    let output = root.join("target/bern-test/winui3-fill");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let text = |name: &str| {
+        files
+            .iter()
+            .find(|file| file.path.ends_with(name))
+            .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+            .unwrap_or_else(|| panic!("no `{name}`"))
+    };
+    // Without `align` a column leaves its children at its leading edge,
+    // with their own width; what fills across fills it, and content a
+    // condition adds later makes its containers fill in turn.
+    let widgets = text("bern_ui_widgets.inl");
+    for expected in [
+        ": xaml::HorizontalAlignment::Left;\n        children(Parent::Aligned(panel, h, std::nullopt), ctx);",
+        // A stack with a backdrop fills across a column, not a row.
+        "            if (!p.IsHorizontal()) {\n                auto role = std::wstring(RoleOf(layers));",
+        "SetRole(layers, h ? L\"bern-layers-wh\" : L\"bern-layers-w\");",
+        // A progress bar spans the column.
+        "        auto panel = Stacked(label, bar);\n        SetRole(panel, L\"bern-fill-width\");",
+        // A divider, a grid and a filling button already fill.
+        "        line.Height(1);\n        SetRole(line, L\"bern-fill-width\");",
+        "    SetRole(panel, L\"bern-fill-width\");",
+        "        SetRole(button, L\"bern-fill-width\");",
+    ] {
+        assert!(widgets.contains(expected), "missing `{expected}`");
+    }
+    let structure = text("bern_ui_structure.inl");
+    for expected in [
+        "    SetRole(rows, L\"bern-fill-width\");\n    children(Parent::OfList(rows), ctx);",
+        "    MarkFullWidth(holder);",
+        "        SetRole(column, L\"bern-fill-width\");",
+        "            SetRole(line, L\"bern-fill-width\");\n            line.ColumnSpacing(8);",
+    ] {
+        assert!(structure.contains(expected), "missing `{expected}`");
+    }
+    let core = text("bern_ui_core.inl");
+    for expected in [
+        "if (role == L\"bern-column\" && FullWidth(inner)) return true;",
+        "else if (crossH && (across || !keepsH)) framework.HorizontalAlignment(across ? xaml::HorizontalAlignment::Stretch : *crossH);",
+        "        if (panel && (across || down)) Refill(panel);",
+        "        } else if (role == L\"bern-column\") {\n            if (across) element.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);",
+    ] {
+        assert!(core.contains(expected), "missing `{expected}`");
+    }
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    for expected in [
+        "B::Stack(p, c, {.axis = \"column\", .gap = B::Len(12.0), .padding = B::Len(24.0)}, ",
+        "B::Stack(p, c, {.axis = \"column\", .align = \"center\"}, ",
+        "B::Divider(p, c);",
+        "B::List(p, c, ",
+    ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
     compile(&output);

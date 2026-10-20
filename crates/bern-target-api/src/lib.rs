@@ -11,6 +11,7 @@ pub mod glue;
 pub mod icon;
 pub mod icon_set;
 pub mod names;
+pub mod skill;
 pub mod style;
 pub mod svg;
 pub mod texts;
