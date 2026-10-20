@@ -60,6 +60,51 @@ fn side(value: f64) -> i32 {
 
 // MARK: - ScaleBox
 
+/// A `ScaleBox` scene's size and the room the box has around it on each
+/// side, in scene points.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Room {
+    pub width: f64,
+    pub height: f64,
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Room {
+    /// The room around a `scene` scaled by `scale` and centered in a box
+    /// of `area`.
+    pub(crate) fn around(scene: (f64, f64), area: (f64, f64), scale: f64) -> Self {
+        let fits = scale > 0.0 && scale.is_finite();
+        let room = |area: f64, scene: f64| {
+            if fits {
+                (area / scale - scene).max(0.0) / 2.0
+            } else {
+                0.0
+            }
+        };
+        Self {
+            width: scene.0,
+            height: scene.1,
+            x: room(area.0, scene.0),
+            y: room(area.1, scene.1),
+        }
+    }
+
+    /// How far each side of a layer at `frame` (x, y, width, height)
+    /// reaches past the scene when it bleeds — left, right, top, bottom:
+    /// a side at an edge of the scene reaches the edge of the room, with
+    /// half a point of slack so a layer laid out to the edge reaches it.
+    pub(crate) fn reach(&self, (x, y, width, height): (f64, f64, f64, f64)) -> [f64; 4] {
+        let at = |reached: bool, room: f64| if reached { room } else { 0.0 };
+        [
+            at(x <= 0.5, self.x),
+            at(x + width >= self.width - 0.5, self.x),
+            at(y <= 0.5, self.y),
+            at(y + height >= self.height - 0.5, self.y),
+        ]
+    }
+}
+
 mod scale_box {
     use super::*;
 
@@ -67,6 +112,8 @@ mod scale_box {
     pub struct ScaleBox {
         /// The scene's logical size.
         pub size: Cell<(f64, f64)>,
+        /// The room around the scene as last laid out.
+        pub room: Cell<Room>,
     }
 
     #[glib::object_subclass]
@@ -105,6 +152,14 @@ mod scale_box {
             let scale = (f64::from(width) / w).min(f64::from(height) / h).max(0.0);
             let x = (f64::from(width) - w * scale) / 2.0;
             let y = (f64::from(height) - h * scale) / 2.0;
+            let room = Room::around((w, h), (f64::from(width), f64::from(height)), scale);
+            if self.room.replace(room) != room {
+                // A new shape of the box changes only the scene's
+                // transform, and GTK keeps the layout of a child given the
+                // same size: the layers that bleed lay out again for the
+                // new room.
+                bleeding_layers(self.obj().upcast_ref(), &mut |layer| layer.queue_allocate());
+            }
             for child in children(self.obj().upcast_ref()) {
                 if !child.should_layout() {
                     continue;
@@ -170,6 +225,68 @@ pub fn ScaleBox(p: &Parent, ctx: &Ctx, props: ScaleBoxProps, children: Build) {
 
 // MARK: - Positioned
 
+/// The sides of a layer that bleeds: whether it bleeds, where it is going
+/// (its place before any motion), the room of its scene as it last laid
+/// out, and how far each side reaches past the scene — left, right, top,
+/// bottom — on the layer's motion.
+pub struct Bleed {
+    on: Cell<bool>,
+    target: Cell<(f64, f64, f64, f64)>,
+    room: Cell<Option<Room>>,
+    sides: [Spring; 4],
+    curve: Option<Curve>,
+}
+
+impl Bleed {
+    /// Move the sides to where they reach at the layer's target: on the
+    /// layer's motion, or with `jump` at once, for a box of a new shape.
+    fn follow(&self, jump: bool) {
+        let reach = match (self.on.get(), self.room.get()) {
+            (true, Some(room)) => room.reach(self.target.get()),
+            _ => [0.0; 4],
+        };
+        for (spring, to) in self.sides.iter().zip(reach) {
+            if jump {
+                spring.set_quietly(to);
+            } else if spring.target() != to {
+                spring.to(to, self.curve, None);
+            }
+        }
+    }
+
+    fn reach(&self) -> [f64; 4] {
+        self.sides.each_ref().map(|side| side.value().max(0.0))
+    }
+}
+
+/// The room around the scene `widget` is a layer of; none for a layer of
+/// a layer, which is placed in that layer's space.
+fn scene_room(widget: &gtk::Widget) -> Option<Room> {
+    let mut parent = widget.parent();
+    while let Some(current) = parent {
+        if let Some(scene) = current.downcast_ref::<ScaleBoxWidget>() {
+            return Some(scene.imp().room.get());
+        }
+        if current.is::<PositionedWidget>() {
+            return None;
+        }
+        parent = current.parent();
+    }
+    None
+}
+
+/// Each layer of `widget`'s scene that bleeds, as `found` gets it.
+fn bleeding_layers(widget: &gtk::Widget, found: &mut impl FnMut(&PositionedWidget)) {
+    for child in children(widget) {
+        match child.downcast_ref::<PositionedWidget>() {
+            Some(layer) if layer.imp().bleed.borrow().is_some() => found(layer),
+            Some(_) => {}
+            None if child.is::<ScaleBoxWidget>() => {}
+            None => bleeding_layers(&child, found),
+        }
+    }
+}
+
 mod positioned {
     use super::*;
 
@@ -177,6 +294,8 @@ mod positioned {
     pub struct Positioned {
         /// Where the content stands in its container, and its size.
         pub frame: Cell<(f64, f64, f64, f64)>,
+        /// With `bleed`, the sides that reach past the scene.
+        pub bleed: RefCell<Option<Rc<Bleed>>>,
     }
 
     #[glib::object_subclass]
@@ -213,12 +332,27 @@ mod positioned {
 
         fn size_allocate(&self, _width: i32, _height: i32, _baseline: i32) {
             let (x, y, width, height) = self.frame.get();
+            let [left, right, top, bottom] = match self.bleed.borrow().as_ref() {
+                Some(bleed) => {
+                    let room = scene_room(self.obj().upcast_ref());
+                    if bleed.room.replace(room) != room {
+                        bleed.follow(true);
+                    }
+                    bleed.reach()
+                }
+                None => [0.0; 4],
+            };
             for child in children(self.obj().upcast_ref()) {
                 if !child.should_layout() {
                     continue;
                 }
                 child.measure(gtk::Orientation::Horizontal, -1);
-                child.allocate(side(width), side(height), -1, translate(x, y));
+                child.allocate(
+                    side(width + left + right),
+                    side(height + top + bottom),
+                    -1,
+                    translate(x - left, y - top),
+                );
             }
         }
     }
@@ -248,15 +382,48 @@ pub struct PositionedProps {
     pub width: Option<Num>,
     pub height: Option<Num>,
     pub animate: Option<Curve>,
+    /// Whether the layer continues past each edge of its scene it reaches,
+    /// to the edge of the `ScaleBox`.
+    pub bleed: Option<Get>,
 }
 
 #[allow(non_snake_case)]
 pub fn Positioned(p: &Parent, ctx: &Ctx, props: PositionedProps, children: Build) {
     let placed: PositionedWidget = glib::Object::new();
-    for (index, value) in [props.x, props.y, props.width, props.height]
-        .into_iter()
-        .enumerate()
-    {
+    let frame = [props.x, props.y, props.width, props.height];
+    if let Some(on) = props.bleed {
+        // The sides follow where the layer is going, on its motion.
+        let weak = placed.downgrade();
+        let sides = std::array::from_fn(|_| {
+            let weak = weak.clone();
+            Spring::new(0.0, &placed, move |_| {
+                if let Some(placed) = weak.upgrade() {
+                    placed.queue_allocate();
+                }
+            })
+        });
+        let bleed = Rc::new(Bleed {
+            on: Cell::new(false),
+            target: Cell::new((0.0, 0.0, 0.0, 0.0)),
+            room: Cell::new(None),
+            sides,
+            curve: props.animate,
+        });
+        *placed.imp().bleed.borrow_mut() = Some(Rc::clone(&bleed));
+        let at = ctx.clone();
+        let frame = frame.clone();
+        effect(move || {
+            let [x, y, width, height] = frame.each_ref().map(|value| match value {
+                Some(Num::Fixed(value)) => *value,
+                Some(Num::Bound(get)) => crate::value::as_f64(&get(&at)),
+                None => 0.0,
+            });
+            bleed.on.set(crate::value::truthy(&on(&at)));
+            bleed.target.set((x, y, width, height));
+            untrack(|| bleed.follow(false));
+        });
+    }
+    for (index, value) in frame.into_iter().enumerate() {
         let Some(value) = value else { continue };
         let moved = placed.clone();
         bind_number(ctx, &value, props.animate, &placed, move |value| {
@@ -1355,5 +1522,32 @@ mod tests {
         assert_eq!(frames[6].0, 123.0 + 10.0 + 10.0 + 4.0 * 64.0);
         assert_eq!(height, 32.0);
         assert_eq!(flow_lines(&[], Some(100.0), 10.0), (vec![], 0.0));
+    }
+
+    #[test]
+    fn a_scene_in_a_wider_box_has_room_at_its_sides() {
+        // 1280 × 800 in 1920 × 800: the scene stands at its size, 320 to
+        // each side; in 960 × 800 it shrinks to 0.75 and the room is above
+        // and below.
+        let wide = Room::around((1280.0, 800.0), (1920.0, 800.0), 1.0);
+        assert_eq!((wide.x, wide.y), (320.0, 0.0));
+        let tall = Room::around((1280.0, 800.0), (960.0, 800.0), 0.75);
+        assert_eq!((tall.x, tall.y), (0.0, (800.0 / 0.75 - 800.0) / 2.0));
+        let unscaled = Room::around((1280.0, 800.0), (0.0, 0.0), 0.0);
+        assert_eq!((unscaled.x, unscaled.y), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_layer_reaches_past_the_edges_it_touches() {
+        let room = Room::around((1280.0, 800.0), (1920.0, 800.0), 1.0);
+        // The whole scene reaches past both sides; the room above and
+        // below is none.
+        assert_eq!(room.reach((0.0, 0.0, 1280.0, 800.0)), [320.0, 320.0, 0.0, 0.0]);
+        // Half a point short of an edge still reaches it.
+        assert_eq!(room.reach((0.4, 0.0, 1279.2, 64.0)), [320.0, 320.0, 0.0, 0.0]);
+        // A panel inside the scene stays where it is.
+        assert_eq!(room.reach((24.0, 114.0, 896.0, 504.0)), [0.0; 4]);
+        // A bar along the trailing edge reaches past it alone.
+        assert_eq!(room.reach((1180.0, 0.0, 100.0, 800.0)), [0.0, 320.0, 0.0, 0.0]);
     }
 }

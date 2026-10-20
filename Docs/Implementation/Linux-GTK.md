@@ -191,6 +191,7 @@ GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `featu
 - `Grid(row_gap:)` 单独设置行距。`Grid(cell_ratio:, cell_extra:)` 用 `BernCellGrid`：按最小宽度算出列数，每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各项从格子顶部排，内容更高时伸进下面的行距。
 - `Flow` 是 `BernFlow`：子项各取自然宽度，放不下时换到下一行，行高取该行最高者，子项在行内竖直居中；`Spacer`（带 `bern-spacer` 样式类）换行时不占宽度，排好后分得所在行余下的宽度。
 - `ScaleBox` 是 `BernScaleBox`：子项在声明的逻辑尺寸中层叠（左上对齐），整体以一个变换缩放到能放下并居中、超出部分裁掉，所以图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，按（可弹簧的）`x`、`y`、`width`、`height` 放置内容。
+- `Positioned(bleed:)`：`BernScaleBox` 分配时算出画布四周的空白（场景点）；有 `bleed` 的图层分配内容时向上找到最近的 `BernScaleBox`（中间隔着另一个图层就不延伸），把到达的每条画布边延伸到空白的边缘。四条边各是一个随图层 `animate` 的弹簧，碰到哪条边按图层要去的位置判断。窗口改变比例时 GTK 只改场景的变换，同样大小的子部件不会重新分配（`gtk_widget_allocate` 走 `ensure_allocate_on_children`），所以空白一变，盒子先让场景里有 `bleed` 的图层 `queue_allocate`，延伸量随即跳到新值。
 - `Marquee`：内容按自然宽度从右缘外跑到左缘外，每 `duration` 秒一次，`phase` 为起始进度；`paused` 时停在原处，减少动态效果时静止在宽度 28% 处；文字带 1 点黑色阴影；`opacity` 可绑定。
 - `Accordion`：列宽由每列一个 0 到 1 的权重弹簧决定，收起列为固定宽度，总宽保持不变；每列按 `corner` 圆角裁剪。
 - `reflow` 现在也作用于 `Stack` 的各层和 `cell_ratio` 网格的格子（共用 `Slides`：布局后比较新旧位置，以弹簧从旧位置滑到新位置）；`GtkFlowBox` 网格与表单行仍然只警告。
