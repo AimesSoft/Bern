@@ -73,6 +73,8 @@ fn gallery_generates_television_layouts_shortcuts_and_first_focus() {
         "suggest: true",
         ".peek() + \"check\")",
         ".slice(0, -1).join(\"\"))",
+        // The about window's first tab shows only its symbol.
+        "icon: \"info.circle\", iconOnly: true, build: (p, ctx) => {",
     ] {
         assert!(
             script.contains(expected),

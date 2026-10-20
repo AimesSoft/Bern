@@ -92,6 +92,7 @@ struct TabsRegistry;
 struct StaggerClock;
 struct ScrollInfo;
 struct RailPanel;
+struct SceneRoom;
 }
 
 /// The keys of the repeated rows a control is in, outermost first.
@@ -127,6 +128,9 @@ struct Ctx {
     std::shared_ptr<B::StaggerClock> clock;
     /// The scroll view this content is in.
     std::shared_ptr<B::ScrollInfo> scroll;
+    /// The `ScaleBox` scene this content is a layer of, whose room a layer
+    /// that bleeds reaches into; none inside a layer.
+    std::shared_ptr<B::SceneRoom> scene;
 
     /// Engine state field, recording a dependency.
     Value Engine(int field) const { return Host::EngineValue(field); }

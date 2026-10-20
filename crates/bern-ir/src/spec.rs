@@ -493,9 +493,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 "align",
                 PropKind::Keyword(&["leading", "center", "trailing"]),
             ),
+            opt("variant", PropKind::StyleVariant),
         ],
         Children::Any,
-        "Vertical arrangement",
+        "Vertical arrangement; a `style!` variant may set its lengths per platform",
     ),
     spec(
         "Row",
@@ -510,9 +511,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 "align",
                 PropKind::Keyword(&["top", "center", "bottom", "baseline"]),
             ),
+            opt("variant", PropKind::StyleVariant),
         ],
         Children::Any,
-        "Horizontal arrangement; `align: baseline` lines the texts up on the baseline of their first line",
+        "Horizontal arrangement; `align: baseline` lines the texts up on the baseline of their first line; a `style!` variant may set its lengths per platform",
     ),
     spec(
         "Accordion",
@@ -849,9 +851,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("value", PropKind::SelectionValue),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
+                opt("display", PropKind::Keyword(&["title_and_icon", "icon"])),
             ],
             Children::Any,
-            "One tab page",
+            "One tab page; `display: icon` shows only its icon in the tab bar, the label staying its accessible name",
         )
     },
     ComponentSpec {
@@ -1206,7 +1209,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
-                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("shape", PropKind::Keyword(&["capsule", "chip"])),
                 opt("height", PropKind::Length),
                 opt("width", PropKind::Keyword(&["fill"])),
                 opt(
@@ -1327,7 +1330,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("value", PropKind::BoolField),
                 opt("checked", PropKind::Bool),
                 opt("label_hidden", PropKind::Flag),
-                opt("shape", PropKind::Keyword(&["capsule"])),
+                opt("shape", PropKind::Keyword(&["capsule", "chip"])),
                 opt("height", PropKind::Length),
                 opt(
                     "style",

@@ -92,6 +92,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::TOOLBAR_LEADING,
     bern_target_api::feature::ICON_MENUS,
     bern_target_api::feature::ICON_LABELS,
+    bern_target_api::feature::ICON_TABS,
     bern_target_api::feature::ROW_BASELINE,
 ];
 
@@ -283,6 +284,18 @@ fn nested_optional(ty: &Type) -> bool {
         Type::List { inner } => nested_optional(inner),
         _ => false,
     }
+}
+
+/// The engine host, the command line and the MCP server of a `ui` build,
+/// as their files in `bin/` are named on this machine.
+fn programs(app: &Application) -> [String; 3] {
+    let program = glue::program(app);
+    [
+        format!("{program}-host"),
+        program.clone(),
+        format!("{program}-mcp"),
+    ]
+    .map(|name| format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 impl Target for WebBrowser {
@@ -595,7 +608,6 @@ impl Target for WebBrowser {
         if remote {
             let host_target = context.workspace_dir.join("target/bern-web-glue/host");
             let built = host_target.join(profile);
-            let program = glue::program(app);
             steps.push(BuildStep::Run {
                 description: "Build the engine host, CLI and MCP server".into(),
                 program: "cargo".into(),
@@ -603,15 +615,17 @@ impl Target for WebBrowser {
                 cwd: output.join("glue/host"),
                 env: vec![],
             });
-            steps.push(BuildStep::CreateDir {
-                path: output.join("bin"),
+            // Every project built for this target shares its output
+            // directory, and a renamed application leaves its old programs
+            // there: `bin/` keeps this build's programs only. They are copied
+            // by replacing the files, as rebuilt programs must be, so the
+            // mirror only clears the rest.
+            steps.push(BuildStep::Mirror {
+                dir: output.join("bin"),
+                files: vec![],
+                keep: programs(app).map(PathBuf::from).to_vec(),
             });
-            for name in [
-                format!("{program}-host"),
-                program.clone(),
-                format!("{program}-mcp"),
-            ] {
-                let name = format!("{name}{}", std::env::consts::EXE_SUFFIX);
+            for name in programs(app) {
                 steps.push(BuildStep::Copy {
                     from: built.join(&name),
                     to: output.join("bin").join(&name),
@@ -666,23 +680,44 @@ impl Target for WebBrowser {
         let program = glue::program(app);
         let dist = dist_dir(context);
         let staged = output.join("package").join(&program);
-        // Generated sources and build reports stay behind.
-        let files: Vec<_> = files_below(output)
-            .map_err(|error| {
+        // This build's files by name: every project built for this target
+        // shares its output directory, which keeps what earlier builds left
+        // (other programs, icons, resources). Generated sources and build
+        // reports stay behind.
+        let mut paths: Vec<PathBuf> = self
+            .generate(app, context)?
+            .into_iter()
+            .map(|file| file.path)
+            .filter(|path| !path.starts_with("glue") && path != Path::new("build.json"))
+            .collect();
+        paths.push(WASM.into());
+        paths.extend(
+            app.resources
+                .iter()
+                .map(|resource| Path::new("resources").join(&resource.name)),
+        );
+        if remote {
+            paths.extend(programs(app).map(|name| Path::new("bin").join(name)));
+        }
+        let mut files: Vec<_> = paths
+            .into_iter()
+            .map(|path| (output.join(&path), path))
+            .collect();
+        // The agent skill, which each build writes afresh.
+        let skills = output.join("skills");
+        if skills.is_dir() {
+            let below = files_below(&skills).map_err(|error| {
                 vec![Diagnostic::error(format!(
                     "cannot read {}: {error}",
-                    output.display()
+                    skills.display()
                 ))]
-            })?
-            .into_iter()
-            .filter(|(_, path)| {
-                let top = path.components().next().map(|part| part.as_os_str());
-                !matches!(
-                    top.and_then(|top| top.to_str()),
-                    Some("glue" | "package" | "build.json" | "features.json")
-                )
-            })
-            .collect();
+            })?;
+            files.extend(
+                below
+                    .into_iter()
+                    .map(|(source, path)| (source, Path::new("skills").join(path))),
+            );
+        }
         let stem = if remote {
             format!(
                 "{program}-{}-webui-{}-{}",

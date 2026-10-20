@@ -89,6 +89,7 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::ROW_BASELINE,
     bern_target_api::feature::ICON_MENUS,
     bern_target_api::feature::ICON_LABELS,
+    bern_target_api::feature::ICON_TABS,
     bern_target_api::feature::TOOLBAR_LEADING,
     bern_target_api::feature::AXIS_PADDING,
     bern_target_api::feature::UNTITLED_DETAIL,

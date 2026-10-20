@@ -201,6 +201,8 @@ fn look(app: &Application, effects: &[StyleEffect]) -> String {
                 ),
             )),
             StyleEffect::System | StyleEffect::Nothing => args.push((13, "nothing: true".into())),
+            // Lengths in place of written ones are laid out before generation.
+            StyleEffect::Metric { .. } => {}
             StyleEffect::Corner { .. } | StyleEffect::Padding { .. } | StyleEffect::Size { .. } => {
             }
         }

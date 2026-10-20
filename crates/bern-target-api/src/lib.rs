@@ -220,6 +220,9 @@ pub mod feature {
     pub const ICON_MENUS: &str = "icon_menus";
     /// `Label(display: icon)`: an icon with a nonvisual accessible title.
     pub const ICON_LABELS: &str = "icon_labels";
+    /// `Tab(display: icon)`: a tab showing only its icon, its label the
+    /// accessible name.
+    pub const ICON_TABS: &str = "icon_tabs";
     /// `Row(align: baseline)`.
     pub const ROW_BASELINE: &str = "row_baseline";
     /// `SidebarHeader`: content pinned above a sidebar's list.

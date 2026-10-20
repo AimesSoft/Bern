@@ -521,6 +521,8 @@ fn gallery_generates_without_warnings() {
         "R::Append(c.Peek(",
         "R::DropLast(c.Peek(",
         ".suggest = true",
+        // The about window's first tab shows only its symbol.
+        ".icon = \"info.circle\", .iconOnly = true, .build = ",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }
@@ -659,6 +661,17 @@ fn number(value: f64) -> bern_ir::Prop {
     bern_ir::Prop::Number { value }
 }
 
+fn flag(value: bool) -> bern_ir::Prop {
+    bern_ir::Prop::Expr {
+        expr: bern_ir::Expr {
+            ty: bern_protocol::Type::Bool,
+            kind: bern_ir::ExprKind::Literal {
+                value: bern_protocol::Value::Bool(value),
+            },
+        },
+    }
+}
+
 fn word(value: &str) -> bern_ir::Prop {
     bern_ir::Prop::Keyword {
         value: value.into(),
@@ -682,8 +695,9 @@ fn icon(name: &str) -> bern_ir::Prop {
     bern_ir::Prop::Icon { name: name.into() }
 }
 
-/// The showcase with a scene, an accordion, wrapping rows, a grid of
-/// cells, a modal, a form's layout, icon-only labels and menus, capsule
+/// The showcase with a scene and a layer that bleeds out of it, an
+/// accordion, wrapping rows, a grid of cells, a modal, a form's layout,
+/// icon-only labels and menus, capsule
 /// controls, a search item, a layer under the window's bars and a capsule
 /// button around its content at the end of its first component.
 fn add_layout_features(app: &mut bern_ir::Application) {
@@ -706,21 +720,34 @@ fn add_layout_features(app: &mut bern_ir::Application) {
             node(
                 "ScaleBox",
                 vec![("width", number(400.0)), ("height", number(300.0))],
-                vec![node(
-                    "Positioned",
-                    vec![
-                        ("x", number(10.0)),
-                        ("y", number(20.0)),
-                        ("width", number(100.0)),
-                        ("height", number(40.0)),
-                        ("animate", word("smooth")),
-                    ],
-                    vec![node(
-                        "Marquee",
-                        vec![("duration", number(8.0)), ("phase", number(0.2))],
-                        vec![text()],
-                    )],
-                )],
+                vec![
+                    node(
+                        "Positioned",
+                        vec![
+                            ("x", number(0.0)),
+                            ("y", number(0.0)),
+                            ("width", number(400.0)),
+                            ("height", number(300.0)),
+                            ("bleed", flag(true)),
+                        ],
+                        vec![],
+                    ),
+                    node(
+                        "Positioned",
+                        vec![
+                            ("x", number(10.0)),
+                            ("y", number(20.0)),
+                            ("width", number(100.0)),
+                            ("height", number(40.0)),
+                            ("animate", word("smooth")),
+                        ],
+                        vec![node(
+                            "Marquee",
+                            vec![("duration", number(8.0)), ("phase", number(0.2))],
+                            vec![text()],
+                        )],
+                    ),
+                ],
             ),
             node(
                 "Accordion",
@@ -890,6 +917,9 @@ fn layout_features_generate_for_winui3() {
     for expected in [
         "B::Stack(p, c, {.axis = \"column\", .paddingX = B::Len(12.0), .paddingY = B::Len(4.0)}, ",
         "B::ScaleBox(p, c, {.width = B::Len(400.0), .height = B::Len(300.0)}, ",
+        // The background bleeds past the scene's edges; the other layer
+        // stays in the scene.
+        "B::Positioned(p, c, {.x = B::Len(0.0), .y = B::Len(0.0), .width = B::Len(400.0), .height = B::Len(300.0), .bleed = [](Ctx const& c) { return Value::Bool(true); }}, ",
         "B::Positioned(p, c, {.x = B::Len(10.0), .y = B::Len(20.0), .width = B::Len(100.0), .height = B::Len(40.0), .animate = &M_smooth}, ",
         "B::Marquee(p, c, {.duration = B::Len(8.0), .phase = 0.2}, ",
         ".lines = 2.0, .fontSize = B::Len(12.0), .lineHeight = B::Len(16.0)}",

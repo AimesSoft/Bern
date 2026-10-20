@@ -185,12 +185,13 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::Tab(p, c, b::TabProps {{ value: {}, enum_name: {}, label: {}, icon: {} }}, ",
+                "b::Tab(p, c, b::TabProps {{ value: {}, enum_name: {}, label: {}, icon: {}, icon_only: {} }}, ",
                 self.getter(value),
                 Self::enum_name(value),
                 self.text_prop(tab, "label")
                     .unwrap_or_else(|| "b::str(|_| String::new())".into()),
                 Self::icon(tab, "icon"),
+                tab.keyword("display") == Some("icon"),
             ),
             &tab.children,
             ");",

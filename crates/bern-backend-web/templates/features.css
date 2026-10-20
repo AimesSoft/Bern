@@ -9,9 +9,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 7px;
+  padding: 6px 8px 14px;
+  font-weight: 600;
 }
-.bern-sidebar { width: var(--bern-sidebar-width, 240px); }
+.bern-sidebar { width: var(--bern-sidebar-width, 232px); }
 @container (max-width: 767px) {
   .bern-sidebar { width: 100%; }
 }
@@ -202,12 +203,20 @@
   font-size: calc(17px + var(--bern-text-up));
 }
 
+/* A chip keeps the chip's size whatever size its style asks for. */
+.bern-button.bern-chip-button[class] {
+  height: 30px;
+  min-width: 0;
+  padding-inline: 12px;
+  font-size: calc(13px + var(--bern-text-up));
+  font-weight: 500;
+}
+
 /* MARK: - Sidebar */
 
 .bern-sidebar-footer {
   flex: none;
-  padding: 8px 12px 12px;
-  border-top: 1px solid var(--bern-separator);
+  padding: 10px 6px 0;
   display: flex;
   flex-direction: column;
   gap: 4px;

@@ -114,12 +114,13 @@ impl Generator<'_> {
         self.container_children(
             out,
             &format!(
-                "b::Positioned(p, c, b::PositionedProps {{ x: {}, y: {}, width: {}, height: {}, animate: {} }}, ",
+                "b::Positioned(p, c, b::PositionedProps {{ x: {}, y: {}, width: {}, height: {}, animate: {}, bleed: {} }}, ",
                 some(self.num(element, "x")),
                 some(self.num(element, "y")),
                 some(self.num(element, "width")),
                 some(self.num(element, "height")),
                 self.animate(element),
+                self.value(element, "bleed"),
             ),
             element,
             ");",

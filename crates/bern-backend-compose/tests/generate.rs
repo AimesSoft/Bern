@@ -248,6 +248,12 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     );
     // The remote's arrows move the focus before a shortcut takes them.
     assert!(kotlin.contains("if (BernHost.television && BernShortcuts.isArrow(event))"));
+    // The about window's first tab shows only its symbol.
+    assert_eq!(
+        kotlin.matches(", iconOnly = true) {").count(),
+        1,
+        "{kotlin}"
+    );
 }
 
 /// The showcase with a `TabAccessory` in its first `Tabs`, shown while a

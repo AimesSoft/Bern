@@ -164,6 +164,8 @@ fn look(effects: &[StyleEffect]) -> String {
             // `system` keeps the browser look below; `none` hides it.
             StyleEffect::System => set("system", "true".into()),
             StyleEffect::Nothing => set("quiet", "true".into()),
+            // Lengths in place of written ones are laid out before generation.
+            StyleEffect::Metric { .. } => {}
             StyleEffect::Corner { .. } | StyleEffect::Padding { .. } | StyleEffect::Size { .. } => {
             }
         }

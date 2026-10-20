@@ -32,7 +32,7 @@ bern-ffi = {{ {ffi}, default-features = false{ipc} }}
 
 [profile.release]
 panic = "unwind"
-"#,
+{release}"#,
         id = app.app.id.replace('_', "-"),
         version = app.app.version,
         ffi = context.framework.dependency("bern-ffi"),
@@ -46,6 +46,7 @@ panic = "unwind"
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
         modules = module_dependencies(context, true),
+        release = bern_target_api::glue::RELEASE_PROFILE,
     )
 }
 
@@ -135,7 +136,9 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {modules}
 [workspace]
-"#,
+
+[profile.release]
+{release}"#,
         id = app.app.id.replace('_', "-"),
         version = app.app.version,
         cli = app.app.id.replace('_', "-"),
@@ -144,5 +147,6 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         modules = module_dependencies(context, false),
+        release = bern_target_api::glue::RELEASE_PROFILE,
     )
 }

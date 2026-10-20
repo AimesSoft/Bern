@@ -57,13 +57,13 @@ path = "src/lib.rs"
 
 [profile.release]
 opt-level = "s"
-lto = true
-"#,
+{release}"#,
         id = app.app.id.replace('_', "-"),
         version = app.app.version,
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         modules = module_dependencies(context, !remote),
+        release = bern_target_api::glue::RELEASE_PROFILE,
     )
 }
 
@@ -247,7 +247,9 @@ bern-adapter-mcp = {{ {mcp} }}
 {engine} = {{ path = "{engine_path}" }}
 {modules}
 [workspace]
-"#,
+
+[profile.release]
+{release}"#,
         id = app.app.id.replace('_', "-"),
         version = app.app.version,
         command = bern("bern-command"),
@@ -262,6 +264,7 @@ bern-adapter-mcp = {{ {mcp} }}
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
         modules = module_dependencies(context, true),
+        release = bern_target_api::glue::RELEASE_PROFILE,
     )
 }
 

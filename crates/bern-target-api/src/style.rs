@@ -2,8 +2,9 @@
 //! control kind and variant, merged for a target to draw.
 
 use crate::names::pascal;
-use bern_ir::Application;
 use bern_ir::style::{ControlSize, StyleEffect, StyleRule, StyleState};
+use bern_ir::{Application, Element, Prop};
+use std::borrow::Cow;
 
 /// A control kind and variant's style on one platform: the rules for the
 /// kind, then those for the variant, merged in declaration order.
@@ -125,4 +126,78 @@ pub fn used(app: &Application, platform: &str) -> Vec<Resolved> {
     keys.into_iter()
         .filter_map(|(kind, variant)| resolve(app, platform, kind, variant))
         .collect()
+}
+
+/// The lengths the styles set on one of `platforms` in place of those the
+/// element writes: each length with a value replaces the written one, and
+/// a width or height styled `fit` drops it, so the element takes its
+/// content's.
+fn restyle(app: &Application, platforms: &[&str], element: &mut Element) {
+    let Some(style) = platforms
+        .iter()
+        .find_map(|platform| resolve(app, platform, &element.kind, element.keyword("variant")))
+    else {
+        return;
+    };
+    for effect in &style.base {
+        let (name, value) = match effect {
+            StyleEffect::Metric { metric, value } => (metric.name(), *value),
+            // A row's or column's padding is a length it writes too.
+            StyleEffect::Padding { length }
+                if matches!(element.kind.as_str(), "Row" | "Column") =>
+            {
+                ("padding", Some(*length))
+            }
+            _ => continue,
+        };
+        match value {
+            Some(value) => {
+                element.props.insert(name.into(), Prop::Number { value });
+            }
+            None => {
+                element.props.remove(name);
+            }
+        }
+    }
+}
+
+/// A chip outside the web: the platform's capsule at the chip's 30 points
+/// unless it says how tall.
+fn chip_as_capsule(element: &mut Element) {
+    if element.keyword("shape") == Some("chip") {
+        element.props.insert(
+            "shape".into(),
+            Prop::Keyword {
+                value: "capsule".into(),
+            },
+        );
+        element
+            .props
+            .entry("height".into())
+            .or_insert(Prop::Number { value: 30.0 });
+    }
+}
+
+/// `app` as `platforms` show it: the elements whose styles set lengths
+/// there take them, and outside the web a chip is the platform's capsule.
+pub fn for_platforms<'a>(app: &'a Application, platforms: &[&str]) -> Cow<'a, Application> {
+    let web = platforms.contains(&"browser");
+    let mut owned = app.clone();
+    let restyled = &mut |element: &mut Element| {
+        restyle(app, platforms, element);
+        if !web {
+            chip_as_capsule(element);
+        }
+    };
+    for component in &mut owned.components {
+        component.body.elements_mut(restyled);
+    }
+    for window in &mut owned.windows.windows {
+        window.content.elements_mut(restyled);
+    }
+    if owned == *app {
+        Cow::Borrowed(app)
+    } else {
+        Cow::Owned(owned)
+    }
 }

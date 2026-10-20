@@ -913,6 +913,9 @@ struct TabSpec {
     std::variant<char const*, std::function<std::string(Ctx const&)>> name = "";
     Str label;
     char const* icon = nullptr;
+    /// `display: icon`: the icon alone, the label its accessible name and
+    /// tooltip.
+    bool iconOnly = false;
     Build build;
 };
 
@@ -1102,17 +1105,25 @@ inline void Tab(Parent const& p, Ctx const& ctx, TabSpec spec) {
     entry.label = spec.label;
     entry.build = spec.build;
     auto label = spec.label;
+    bool iconOnly = spec.iconOnly && spec.icon;
 #if BERN_WINUI
     controls::SelectorBarItem item;
     if (spec.icon) item.Icon(Icons::Icon(spec.icon));
-    if (label) Reactive::Run([item, label, ctx] { item.Text(label(ctx)); });
+    if (label && !iconOnly) Reactive::Run([item, label, ctx] { item.Text(label(ctx)); });
 #else
     controls::Primitives::ToggleButton item;
-    if (label) Reactive::Run([item, label, ctx] { item.Content(winrt::box_value(label(ctx))); });
+    if (iconOnly) item.Content(Icons::Icon(spec.icon));
+    else if (label) Reactive::Run([item, label, ctx] { item.Content(winrt::box_value(label(ctx))); });
     auto value = entry.value;
     auto selection = registry->selection;
     item.Click([ctx, selection, value](auto&&, auto&&) { ctx.Write(selection, value); });
 #endif
+    if (iconOnly && label)
+        Reactive::Run([item, label, ctx] {
+            auto name = label(ctx);
+            xaml::Automation::AutomationProperties::SetName(item, name);
+            controls::ToolTipService::SetToolTip(item, winrt::box_value(name));
+        });
     entry.item = item;
     auto token = entry.token;
     registry->entries.push_back(entry);

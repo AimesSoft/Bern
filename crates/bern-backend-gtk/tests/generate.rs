@@ -319,6 +319,9 @@ fn planner_and_gallery_build_for_gtk() {
         "b::session_push_str(c, ",
         "b::session_pop(c, ",
         "suggest: true",
+        // The about window's first tab shows only its symbol.
+        "icon: Some(\"info.circle\"), icon_only: true }",
+        "icon: None, icon_only: false }",
     ] {
         assert!(ui.contains(expected), "the gallery lacks `{expected}`");
     }
@@ -540,9 +543,21 @@ fn icon(name: &str) -> bern_ir::Prop {
     bern_ir::Prop::Icon { name: name.into() }
 }
 
-/// The showcase with a scene, an accordion, wrapping rows, a grid of
-/// cells, a modal, a form's layout, icon-only labels and menus, capsule
-/// controls and a search item at the end of its first component.
+fn flag(value: bool) -> bern_ir::Prop {
+    bern_ir::Prop::Expr {
+        expr: bern_ir::Expr {
+            ty: bern_protocol::Type::Bool,
+            kind: bern_ir::ExprKind::Literal {
+                value: bern_protocol::Value::Bool(value),
+            },
+        },
+    }
+}
+
+/// The showcase with a scene and a layer that bleeds out of it, an
+/// accordion, wrapping rows, a grid of cells, a modal, a form's layout,
+/// icon-only labels and menus, capsule controls and a search item at the
+/// end of its first component.
 fn add_layout_features(app: &mut Application) {
     let text = || {
         node(
@@ -563,21 +578,34 @@ fn add_layout_features(app: &mut Application) {
             node(
                 "ScaleBox",
                 vec![("width", number(400.0)), ("height", number(300.0))],
-                vec![node(
-                    "Positioned",
-                    vec![
-                        ("x", number(10.0)),
-                        ("y", number(20.0)),
-                        ("width", number(100.0)),
-                        ("height", number(40.0)),
-                        ("animate", word("smooth")),
-                    ],
-                    vec![node(
-                        "Marquee",
-                        vec![("duration", number(8.0)), ("phase", number(0.2))],
-                        vec![text()],
-                    )],
-                )],
+                vec![
+                    node(
+                        "Positioned",
+                        vec![
+                            ("x", number(0.0)),
+                            ("y", number(0.0)),
+                            ("width", number(400.0)),
+                            ("height", number(300.0)),
+                            ("bleed", flag(true)),
+                        ],
+                        vec![],
+                    ),
+                    node(
+                        "Positioned",
+                        vec![
+                            ("x", number(10.0)),
+                            ("y", number(20.0)),
+                            ("width", number(100.0)),
+                            ("height", number(40.0)),
+                            ("animate", word("smooth")),
+                        ],
+                        vec![node(
+                            "Marquee",
+                            vec![("duration", number(8.0)), ("phase", number(0.2))],
+                            vec![text()],
+                        )],
+                    ),
+                ],
             ),
             node(
                 "Accordion",
@@ -711,7 +739,10 @@ fn layout_features_generate_for_gtk() {
     for expected in [
         "b::Stack(p, c, b::StackProps { axis: \"column\", gap: None, padding: b::Padding { all: None, x: Some(b::Num::Fixed(12.0)), y: Some(b::Num::Fixed(4.0)) }",
         "b::ScaleBox(p, c, b::ScaleBoxProps { width: Some(b::Num::Fixed(400.0)), height: Some(b::Num::Fixed(300.0)) }",
-        "b::Positioned(p, c, b::PositionedProps { x: Some(b::Num::Fixed(10.0)), y: Some(b::Num::Fixed(20.0)), width: Some(b::Num::Fixed(100.0)), height: Some(b::Num::Fixed(40.0)), animate: Some(M_SMOOTH) }",
+        // The background bleeds past the scene's edges; the other layer
+        // stays in the scene.
+        "b::Positioned(p, c, b::PositionedProps { x: Some(b::Num::Fixed(0.0)), y: Some(b::Num::Fixed(0.0)), width: Some(b::Num::Fixed(400.0)), height: Some(b::Num::Fixed(300.0)), animate: None, bleed: Some(b::get(|c| V::Bool(true))) }",
+        "b::Positioned(p, c, b::PositionedProps { x: Some(b::Num::Fixed(10.0)), y: Some(b::Num::Fixed(20.0)), width: Some(b::Num::Fixed(100.0)), height: Some(b::Num::Fixed(40.0)), animate: Some(M_SMOOTH), bleed: None }",
         "b::Marquee(p, c, b::MarqueeProps { duration: Some(b::Num::Fixed(8.0)), phase: 0.2, paused: None, opacity: None }",
         "lines: Some(2.0), font_size: Some(b::Num::Fixed(12.0)), line_height: Some(b::Num::Fixed(16.0))",
         "b::Accordion(p, c, b::AccordionProps { count: Some(b::Num::Fixed(3.0)), selected: Some(b::Num::Fixed(1.0))",

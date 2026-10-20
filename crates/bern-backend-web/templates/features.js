@@ -709,9 +709,9 @@ B.hooks.reduced = reduceMotion;
 // MARK: - Split view and sidebar
 
 /// The widths a person drags a sidebar of no declared width between, as
-/// the Web design gives them: 240 to start, 200 to 320, in steps of 10
+/// the Web design gives them: 232 to start, 200 to 320, in steps of 10
 /// from the keyboard.
-export const SIDEBAR_WIDTHS = { initial: 240, min: 200, max: 320, step: 10 };
+export const SIDEBAR_WIDTHS = { initial: 232, min: 200, max: 320, step: 10 };
 /// How long the sidebar takes to slide away or back.
 const SIDEBAR_FOLD = 0.25;
 let sidebarSequence = 0;
@@ -1567,7 +1567,8 @@ export function Switch(p, ctx, spec) {
     B.bindText(text, label);
     node.append(text);
   }
-  if (spec.shape === "capsule") node.classList.add("bern-control-capsule");
+  // A switch shown as a capsule or chip button is the web's pill chip.
+  if (spec.shape === "capsule" || spec.shape === "chip") node.classList.add("bern-control-capsule");
   bindLength(node, "height", spec.height);
   B.bindAttr(node, "aria-label", label);
   B.bindAttr(node, "title", label);

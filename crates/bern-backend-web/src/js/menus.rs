@@ -14,6 +14,13 @@ impl Generator<'_> {
             ("width", element.number("width").map(number)),
             ("height", element.number("height").map(number)),
             ("fontSize", element.number("font_size").map(number)),
+            // The palette's field shows the key that opens it.
+            (
+                "shortcut",
+                palette
+                    .then(|| element.keyword("shortcut").map(string))
+                    .flatten(),
+            ),
             (
                 "suggest",
                 (element.keyword("suggest") == Some("true")).then(|| "true".into()),

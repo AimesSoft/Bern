@@ -304,6 +304,13 @@ pub fn path(path: &Path) -> String {
     path.display().to_string().replace('\\', "/")
 }
 
+/// What the `[profile.release]` of every generated crate sets: link-time
+/// optimization across all crates in one code generation unit, and
+/// programs without a symbol table. Packages ship release builds, and
+/// this keeps the command line and the MCP server beside an app small;
+/// debug builds keep Cargo's defaults.
+pub const RELEASE_PROFILE: &str = "codegen-units = 1\nlto = true\nstrip = true\n";
+
 /// Name stem of the generated programs, for example `showcase`.
 pub fn program(app: &Application) -> String {
     app.app.id.replace('_', "-")

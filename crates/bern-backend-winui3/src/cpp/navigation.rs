@@ -284,6 +284,10 @@ impl Generator<'_> {
             ("name", Some(self.variant_name(value))),
             ("label", self.text_prop(tab, "label")),
             ("icon", Self::icon(tab, "icon")),
+            (
+                "iconOnly",
+                (tab.keyword("display") == Some("icon")).then(|| "true".to_string()),
+            ),
         ]);
         // The builder is the last field: leave the braces open.
         let head = &head[..head.len() - 1];
