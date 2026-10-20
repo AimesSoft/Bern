@@ -73,7 +73,7 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
 
 [profile.release]
 panic = "unwind"
-"#,
+{release}"#,
         version = app.app.version,
         ffi = bern("bern-ffi"),
         ipc = if context
@@ -93,6 +93,7 @@ panic = "unwind"
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
         modules = module_dependencies(context, true),
+        release = bern_target_api::glue::RELEASE_PROFILE,
     )
 }
 
