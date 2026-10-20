@@ -433,7 +433,7 @@ inline bool FillsColumn(xaml::UIElement const& element) {
     if (RoleOf(element) == L"bern-wrap") return FillsColumn(Unwrapped(element));
     auto role = RoleOf(element);
     if (role == L"bern-fill" || role == L"bern-canvas" || role == L"bern-spacer" || role == L"bern-fill-height" || role == L"bern-layers-h" || role == L"bern-layers-wh" ||
-        role == L"bern-rail-wh")
+        role == L"bern-rail-h" || role == L"bern-rail-wh")
         return true;
     if (role == L"bern-column" || role == L"bern-row")
         for (auto child : element.as<controls::Panel>().Children()) {
@@ -931,10 +931,15 @@ struct Parent {
             if (crossV && (down || !keepsV)) framework.VerticalAlignment(down ? xaml::VerticalAlignment::Stretch : *crossV);
         }
         // A horizontal rail holding something that fills its height fills
-        // the height it is given.
+        // the height it is given, and a vertical one holding something that
+        // fills its width the width.
         if (panel && down && RoleOf(panel) == L"bern-rail-w") {
             SetRole(panel, L"bern-rail-wh");
             panel.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        }
+        if (panel && across && RoleOf(panel) == L"bern-rail-h") {
+            SetRole(panel, L"bern-rail-wh");
+            panel.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
         }
         // Layers holding something that fills fill the same way in turn; a
         // rail takes the size of its layers without making them fill.

@@ -896,6 +896,171 @@ fn layout_features_generate_for_winui3() {
     compile(&output);
 }
 
+/// The showcase with a button around a picture whose progress runs along
+/// its foot, in a column wider than the picture, and a vertical rail beside
+/// a bar.
+fn add_rails_in_stacks(app: &mut bern_ir::Application) {
+    let bar = |size: &str, length: f64| {
+        node(
+            "Canvas",
+            vec![
+                ("from", number(0.0)),
+                ("to", number(0.86)),
+                (size, number(length)),
+            ],
+            vec![node(
+                "Shape",
+                vec![("kind", word("rect")), ("fill", word("accent"))],
+                vec![],
+            )],
+        )
+    };
+    let column = node(
+        "Column",
+        vec![("width", number(296.0))],
+        vec![
+            node(
+                "Button",
+                vec![("label", words("Playing"))],
+                vec![node(
+                    "Stack",
+                    vec![("align", word("bottom_leading"))],
+                    vec![
+                        node(
+                            "Image",
+                            vec![
+                                (
+                                    "source",
+                                    bern_ir::Prop::Resource {
+                                        name: "images/bern.png".into(),
+                                    },
+                                ),
+                                ("width", number(208.0)),
+                                ("height", number(117.0)),
+                                ("corner", number(8.0)),
+                            ],
+                            vec![],
+                        ),
+                        node("Rail", vec![], vec![bar("height", 3.0)]),
+                    ],
+                )],
+            ),
+            node(
+                "Stack",
+                vec![("align", word("top_leading"))],
+                vec![
+                    node(
+                        "Canvas",
+                        vec![("width", number(40.0)), ("height", number(120.0))],
+                        vec![node("Shape", vec![("kind", word("rect"))], vec![])],
+                    ),
+                    node(
+                        "Rail",
+                        vec![("axis", word("vertical"))],
+                        vec![bar("width", 3.0)],
+                    ),
+                ],
+            ),
+        ],
+    );
+    let component = app
+        .components
+        .iter_mut()
+        .find(|component| {
+            matches!(&component.body, bern_ir::Node::Element(body) if body.kind == "Form")
+        })
+        .expect("a component whose body is a form");
+    let bern_ir::Node::Element(body) = &mut component.body else {
+        unreachable!()
+    };
+    body.children.push(column);
+}
+
+/// A rail among a stack's layers is their backdrop: the stack takes the
+/// picture's size, not the column's width, and the rail along the
+/// picture's foot (or beside the bar) is as long as it. The rail asks for
+/// no length of its own where it is given one; a vertical rail fills only
+/// along its axis, as a horizontal one does.
+#[test]
+fn a_rail_in_a_stack_takes_the_size_of_its_other_layers() {
+    let (config, mut compiled) = showcase();
+    add_rails_in_stacks(&mut compiled.app);
+    let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
+    assert!(
+        problems.iter().all(|problem| !problem.is_error()),
+        "{problems:?}"
+    );
+    let root = workspace();
+    let output = root.join("target/bern-test/winui3-rails-in-stacks");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WinUi3Windows.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    assert!(!ui.contains("unsupported"), "{ui}");
+    let order = [
+        "B::Stack(p, c, {.axis = \"column\", .width = B::Len(296.0)}, ",
+        "B::ContentButton(p, c, {.id = \"test_button\"",
+        "B::Layers(p, c, {.align = \"bottom_leading\"}, ",
+        ".width = B::Len(208.0), .height = B::Len(117.0)",
+        "B::Rail(p, c, {}, ",
+        "B::Place(p, c, {.from = B::Len(0.0), .to = B::Len(0.86)}, ",
+        "B::Canvas(p, c, {.height = B::Len(3.0)}, ",
+        "B::Layers(p, c, {.align = \"top_leading\"}, ",
+        "B::Canvas(p, c, {.width = B::Len(40.0), .height = B::Len(120.0)}, ",
+        "B::Rail(p, c, {.axis = \"vertical\"}, ",
+        "B::Canvas(p, c, {.width = B::Len(3.0)}, ",
+    ];
+    let mut at = 0;
+    for expected in order {
+        let found = ui[at..]
+            .find(expected)
+            .unwrap_or_else(|| panic!("missing `{expected}` after the earlier parts"));
+        at += found + expected.len();
+    }
+    // The runtime the calls go to: a rail is a backdrop among layers, asks
+    // for no length where one is given, and a vertical one fills along its
+    // axis only.
+    let core = std::fs::read_to_string(output.join("app/runtime/bern_ui_core.inl")).unwrap();
+    let motion = std::fs::read_to_string(output.join("app/runtime/bern_ui_motion.inl")).unwrap();
+    for (runtime, expected) in [
+        (
+            &core,
+            "return role.starts_with(L\"bern-rail\") || role == L\"bern-canvas\";",
+        ),
+        (
+            &core,
+            "role == L\"bern-rail-h\" || role == L\"bern-rail-wh\")",
+        ),
+        (&motion, "float main = std::isinf(length) ? longest : 0;"),
+        (
+            &motion,
+            "impl->vertical ? L\"bern-rail-h\" : L\"bern-rail-w\"",
+        ),
+    ] {
+        assert!(runtime.contains(expected), "missing `{expected}`");
+    }
+    compile(&output);
+}
+
 const FORMATS_PROTOCOL: &str = r#"
 #[bern::protocol(namespace = "formats", version = 1)]
 pub mod formats {

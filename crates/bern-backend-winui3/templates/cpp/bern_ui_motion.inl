@@ -1337,9 +1337,11 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
 // Rails
 
 /// A strip that places each child at a fraction of its length, or between
-/// two. Across a horizontal rail the children share one row, so it is as
-/// thick as the thickest; a vertical rail takes the height it is given. The
-/// rail takes no clicks; its children do.
+/// two. Across the rail the children share one line, so it is as thick as
+/// the thickest. Along it the rail asks for no length where one is given:
+/// it takes the length it is placed with, which rows and columns give by
+/// its role and a stack by its other layers. The rail takes no clicks; its
+/// children do.
 struct RailPanel : controls::PanelT<RailPanel> {
     bool vertical = false;
     /// Which point of an element sits at its fraction: 0 its start, 0.5
@@ -1375,7 +1377,9 @@ struct RailPanel : controls::PanelT<RailPanel> {
             thickest = (std::max)(thickest, vertical ? desired.Width : desired.Height);
             longest = (std::max)(longest, vertical ? desired.Height : desired.Width);
         }
-        float main = std::isinf(length) ? longest : length;
+        // Asking for the room it was offered would make a stack as large
+        // as that room, a progress bar wider than the picture it is on.
+        float main = std::isinf(length) ? longest : 0;
         return vertical ? Size{thickest, main} : Size{main, thickest};
     }
 
@@ -1421,7 +1425,9 @@ inline void Rail(Parent const& p, Ctx const& ctx, RailProps props, Build const& 
             if (auto panel = weak.get()) panel.InvalidateArrange();
         });
     }
-    SetRole(panel, impl->vertical ? L"bern-fill" : L"bern-rail-w");
+    // It fills only along its axis; across, it is as thick as its children
+    // unless one of them fills that way.
+    SetRole(panel, impl->vertical ? L"bern-rail-h" : L"bern-rail-w");
     auto inner = ctx;
     inner.rail = std::make_shared<RailInfo const>(RailInfo{impl->vertical, std::string(anchor), impl.get(), panel});
     children(Parent::Of(panel), inner);
