@@ -275,6 +275,10 @@ release 版里，切换列表的筛选（一列海报行收起、另一列展开
   - `TitleBar` 按像素数设置模板里给系统菜单与标题按钮让位的首尾两列：150% 缩放下给标题按钮留 207（`RightInset` 的像素数）而不是 138，放在标题栏里的内容离标题按钮多出约 70、标题文字可用的宽度也少了这么多。现在每次布局后按缩放改回单位（只在不同时设置）。
 - 动画 SVG 的运行时（见 [Animated-SVG](Animated-SVG.md)）此前没有在 Windows 上编译过：补上 `B` 命名空间、放行文档自己的导航、两种前端都改用 WebView2 的 Win32 呈现器以得到透明背景，缓存放到临时目录；新增生成测试 `svg_animation_generates_and_compiles` 在 Windows 上编译示例。
 
+## 与框架类型同名的值类型（2026-10-21）
+
+生成的 C++ 不为应用的值类型声明 C++ 类型：`app_catalog.cpp` 按名字向运行时描述它们（`BType::Enum("Layout")`、`BType::Record("Text")`），值在运行时是 `bern::Value`，所以应用类型与 WinUI、WinRT 的类型（`Window`、`Button`、`Image`、`Color`、`Orientation`）不会相遇（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 生成示例 `examples/framework-names`，核对目录中的写法，在 Windows 上用 MSVC 编译两套前端。实测（2026-10-21，Windows PC，x64）：通过，126 秒（含首次的预编译头）。这次在一个新的镜像目录里编译，`build.bat` 自己生成 C++/WinRT 头文件时 cppwinrt 报 `create_directories` 的路径语法错误（输出路径为 `\\?\C:\…\winrt/impl`），原因未查明；复制已有镜像中生成好的头文件后编译。
+
 ## 构建与运行
 
 ```powershell

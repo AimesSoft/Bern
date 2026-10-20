@@ -49,6 +49,9 @@ members = [
     "examples/gallery/gallery-protocol",
     "examples/gallery/gallery-core",
     "examples/gallery/gallery-ui",
+    "examples/framework-names/names-protocol",
+    "examples/framework-names/names-core",
+    "examples/framework-names/names-ui",
 ]
 
 [workspace.package]

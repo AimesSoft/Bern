@@ -1,0 +1,12 @@
+[package]
+name = "names-ui"
+description = "Bern value types named like framework types: ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true
+names-protocol = { path = "../names-protocol" }

@@ -1,0 +1,11 @@
+[package]
+name = "names-protocol"
+description = "Bern value types named like framework types: protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+bern.workspace = true

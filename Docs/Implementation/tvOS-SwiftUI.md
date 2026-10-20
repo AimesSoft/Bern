@@ -148,6 +148,8 @@ bern run --target tvos
 
 同日补充：设计稿电视标签栏里的搜索只是放大镜，为此新增 `Tab(display: icon)`（六个目标）。另建一台同型号的临时模拟器（tvOS 26.5），实际应用的标签栏里搜索只显示放大镜，经 CLI `ui select` 选中后放大镜在选中底上，`ui inspect` 读到的选中名为“搜索”。读屏朗读未实测。
 
+2026-10-21，与框架类型同名的值类型：生成的 Swift 把值类型写成 `App_` 加声明的名字（原因与写法见 macOS 实现记录的同日条目，tvOS 共用同一段生成）。`tests/framework_names.rs` 为 tvOS 生成示例 `examples/framework-names`，按 tvOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
+
 ## 未完成与已知限制
 
 - 只构建模拟器应用；真机需要签名与描述文件，安装与 `bern package` 未实现。

@@ -974,7 +974,7 @@ platform = "macos"
             .find(|line| line.contains(".bernSidebarNavigation("))
             .unwrap();
         assert!(
-            navigation.contains("values: { () -> [Dest] in"),
+            navigation.contains("values: { () -> [App_Dest] in"),
             "{navigation}"
         );
         assert!(navigation.contains(".extra"), "{navigation}");
@@ -983,7 +983,7 @@ platform = "macos"
     }
     // The selection falls back when its item goes away.
     assert!(
-        generated.contains(".onChange(of: { () -> [Dest] in"),
+        generated.contains(".onChange(of: { () -> [App_Dest] in"),
         "{generated}"
     );
     if !Command::new("xcrun")

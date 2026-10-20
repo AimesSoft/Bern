@@ -46,7 +46,7 @@ pub fn member(snake: &str) -> String {
 }
 
 /// `snake_case` as a Kotlin type, `UpperCamelCase`.
-pub use bern_target_api::names::pascal;
+pub use bern_target_api::names::{pascal, value_type};
 
 /// A Kotlin string literal; `$` is escaped so nothing interpolates.
 pub fn string(value: &str) -> String {

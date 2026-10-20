@@ -588,3 +588,11 @@ macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出
 `BernFlow` 先按宽度断行（`Spacer` 带 `BernRowSpacer` 布局值，断行时不占宽度），再把每行余下的宽度平分给这一行的 `Spacer`，子项在行高内竖直居中，与 Web 的 `flex-wrap` 加 `flex: 1` 一致。生成器在 `Flow` 的子项上设 `row` 与 `flow`，所以其中的 `Spacer` 生成 `BernRowSpacer`、分隔线竖立。
 
 验证（2026-10-20，macOS 26，窗口截图）：应用的设置 › 插件页，1000 点宽的设置窗口中分段控件「市场 / 已安装 3」靠左，五个 chip 靠右，chip 52 × 30 点、间距 10，与原型苹果版（52 × 30、间距 10）一致，选中的「全部」为主题色玻璃胶囊，两者竖直居中。设置窗口最小宽 1000，macOS 上看不到换行；换行在 Web、Android 与 iOS 的手机宽度下验证。`showcase_generates_swift_that_type_checks` 与 iOS 版类型检查通过。
+
+### 与框架类型同名的值类型（2026-10-21）
+
+协议里名为 `Layout` 的 `#[value]` 枚举曾让 macOS 构建失败：生成的值类型与 SwiftUI、运行时同在一个模块的顶层，应用的 `Layout` 遮住了 SwiftUI 的 `Layout` 协议，`BernStyle.swift` 中的 `struct …: Layout` 报 `inheritance from non-protocol type 'Layout'` 与 `cannot find type 'Subviews' in scope`。现在 `BernGenerated.swift` 把每个值类型（协议与 UI 的 `#[value]`，以及 `MediaSource`、`CalendarDate` 等框架值类型）写成 `App_` 加声明的名字：`enum App_Layout`、`struct App_Text`、`[App_Text]`、`App_Color.green`，名字统一由 `bern_target_api::names::value_type` 给出（规则见设计文档“跨语言绑定”）。枚举的 case 是值，不会遮住类型，写法不变；字符串表的键（`Layout.Column`）、`bernName` 与解码错误（`invalid Layout`）仍用声明的名字。`pick:` 与 `Drop` 存文件时原先直接写 `MediaSource(url:)`，现在同样经 `value_type`。
+
+会遮住框架或运行时类型的常见名字：SwiftUI 的 `Layout`、`View`、`Text`、`Image`、`Color`、`Button`、`Toggle`、`Picker`、`List`、`Font`、`Animation`、`Scene`、`Window`、`Shape`、`Path`、`Alignment`；Swift 与 Foundation 的 `Error`（运行时的 `BernDecodeError: Error`）、`Task`、`Data`、`Date`、`Locale`、`Timer`、`Notification`、`Bundle`。
+
+示例 `examples/framework-names` 用这些名字声明协议类型，另有 UI 类型 `Shape` 与变体名同为类型名的 `Content`。`tests/framework_names.rs` 为 macOS、iOS、tvOS 生成并按各自 SDK 做 swiftc 类型检查。实测（macOS 27.0.1，Xcode 27.0，Swift 6.4）：三个平台都通过；去掉前缀生成同一示例时，macOS 的 swiftc 报 `inheritance from non-protocol type 'View'`、`thrown expression type 'BernDecodeError' does not conform to 'Error'`，运行时模板中 `type 'Content' constrained to non-protocol, non-class type 'View'`。

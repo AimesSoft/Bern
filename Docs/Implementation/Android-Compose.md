@@ -201,6 +201,12 @@ bern package --target android
 - 测试：`icons.rs` 的单元测试核对表已排序、覆盖 Bern 图标集、每个表达式在 `BernViews.kt` 中有定义或导入；生成测试核对生成的 `BernViews.kt` 对图标集中每个名字都有分支、新名字落到预期的图标，并把画廊的第一个图标换成新名字（检查通过）和不存在的名字（检查报错）。
 
 
+## 与框架类型同名的值类型（2026-10-21）
+
+生成的 Kotlin 在应用的包里声明值类型，原先直接用声明的名字，三处会撞：`BernGenerated.kt` 的显式导入优先于同包的声明，名为 `Color`、`Modifier`、`Alignment`、`Arrangement`、`Text`、`Role`、`Bundle`、`Canvas`、`Row`、`Column`、`Box`、`Spacer`、`Composable` 的应用类型在这个文件里被导入的框架类型顶替；同包的声明又遮住默认导入（`List`、`Map`、`Pair`）；带字段的变体是 sealed class 内部的类，名为 `String`、`List`、`Boolean`、`Long`、`Double` 或与某个记录同名（`Text { text: Text }`）的变体在类内遮住这些类型。现在值类型写成 `App_` 加声明的名字（`enum class App_Layout`、`data class App_Text`、`sealed class App_Content`），变体类字段里的 Kotlin 标准类型写全名（`data class String(val value: kotlin.String) : App_Content()`），sealed class 内的 `bernName`、`bernLabel` 为 `kotlin.String`；规则见设计文档“跨语言绑定”。变体名、字符串表的键与解码错误（`invalid Layout`）不变。`pick:` 与 `Drop` 存文件时原先直接写 `MediaSource(url)`，现在同样经 `value_type`。
+
+`tests/framework_names.rs` 生成示例 `examples/framework-names` 并核对这些写法；设 `BERN_TEST_KOTLIN=1` 时用 Gradle 的 `:app:compileDebugKotlin` 编译生成的工程。实测（2026-10-21，macOS 27.0.1，Gradle 9.5.1）：编译通过（约 30 秒）；把生成文件换回原名后 kotlinc 报 73 个错误（期望 `androidx.compose.ui.graphics.Color`、实际 `dev.bern.names.Color` 一类的类型不符，`Content.String` 与 `String` 互不相容等）；只加前缀、不写全名时还有 16 个，都来自变体类的遮挡。没有在手机上运行。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：

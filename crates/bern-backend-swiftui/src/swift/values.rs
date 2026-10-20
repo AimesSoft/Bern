@@ -2,7 +2,7 @@
 //! session state that holds them.
 
 use super::Out;
-use crate::names::{case, double, member, string};
+use crate::names::{case, double, member, string, value_type};
 use bern_ir::Application;
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -13,7 +13,7 @@ pub fn swift_type(ty: &Type) -> String {
         Type::Int => "Int64".into(),
         Type::Float => "Double".into(),
         Type::Text => "String".into(),
-        Type::Enum { name } | Type::Record { name } => name.clone(),
+        Type::Enum { name } | Type::Record { name } => value_type(name),
         Type::Optional { inner } => format!("Optional<{}>", swift_type(inner)),
         Type::List { inner } => format!("[{}]", swift_type(inner)),
     }
@@ -41,6 +41,7 @@ pub(super) fn value_literal(value: &Value, ty: &Type, types: &TypeTable) -> Stri
         (Value::Enum { variant, fields }, Type::Enum { name }) => {
             let def = types.enum_def(name).expect("known enum");
             let variant_def = &def.variants[*variant as usize];
+            let name = value_type(name);
             if variant_def.fields.is_empty() {
                 format!("{name}.{}", case(&variant_def.name))
             } else {
@@ -71,7 +72,7 @@ pub(super) fn value_literal(value: &Value, ty: &Type, types: &TypeTable) -> Stri
                     )
                 })
                 .collect();
-            format!("{name}({})", args.join(", "))
+            format!("{}({})", value_type(name), args.join(", "))
         }
         _ => "()".into(),
     }
@@ -83,7 +84,7 @@ fn default_literal(ty: &Type, types: &TypeTable) -> String {
 }
 
 pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
-    let name = &def.name;
+    let name = value_type(&def.name);
     let unit_only = def.is_unit_only();
     let mut conformances = vec!["Hashable", "Sendable", "BernCodable"];
     if unit_only {
@@ -133,7 +134,7 @@ pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
     }
     out.line(format!(
         "default: throw BernDecodeError(message: {})",
-        string(&format!("invalid {name}"))
+        string(&format!("invalid {}", def.name))
     ));
     out.close("}");
     out.close("}");
@@ -265,7 +266,7 @@ pub(super) fn argument(value: &str, ty: &Type) -> String {
 }
 
 pub(super) fn generate_record(out: &mut Out, def: &RecordDef) {
-    let name = &def.name;
+    let name = value_type(&def.name);
     out.open(format!("struct {name}: Hashable, Sendable {{"));
     for field in &def.fields {
         out.line(format!(
@@ -299,7 +300,7 @@ pub(super) fn generate_record(out: &mut Out, def: &RecordDef) {
     out.close("}");
     out.close("}");
     out.line("");
-    if *name == bern_protocol::format::CALENDAR_DATE {
+    if def.name == bern_protocol::format::CALENDAR_DATE {
         out.open(format!("extension {name} {{"));
         out.line("/// The date as an argument of a translated text.");
         out.line("var bernArg: BernArg { .date(year: year, month: month, day: day) }");

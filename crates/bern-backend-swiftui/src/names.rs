@@ -97,7 +97,7 @@ pub fn case(pascal: &str) -> String {
     escape(out)
 }
 
-pub use bern_target_api::names::pascal;
+pub use bern_target_api::names::{pascal, value_type};
 
 /// A Swift string literal.
 pub fn string(value: &str) -> String {

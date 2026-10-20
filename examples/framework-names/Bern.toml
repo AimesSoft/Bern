@@ -1,0 +1,50 @@
+# An application whose value types are named like types of the platforms'
+# frameworks: SwiftUI's `Layout`, `View`, `Text` and `Color`, Compose's
+# `Modifier`, Kotlin's `List`, Swift's `Error`. Every target generates and
+# compiles it as it is; the backend tests build it.
+
+[app]
+id = "names"
+bundle_id = "dev.bern.names"
+version = "0.1.0"
+name = { "zh-Hans" = "重名", "en" = "Names" }
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "en"
+
+[protocol]
+package = "names-protocol"
+source = "names-protocol/src/lib.rs"
+
+[engine]
+package = "names-core"
+type = "names_core::NamesEngine"
+
+[ui]
+package = "names-ui"
+sources = ["names-ui/src/lib.rs"]
+root = "app"
+
+[targets.macos]
+platform = "macos"
+
+[targets.ios]
+platform = "ios"
+
+[targets.tvos]
+platform = "tvos"
+
+[targets.linux]
+platform = "linux"
+
+[targets.windows]
+platform = "windows"
+
+[targets.android]
+platform = "android"
+
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"

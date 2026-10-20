@@ -13,7 +13,7 @@ mod toolbar;
 mod values;
 mod windows;
 
-use crate::names::{double, float, member, pascal, string};
+use crate::names::{double, float, member, pascal, string, value_type};
 use bern_ir::{
     Application, ComponentArg, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node, ParamKind,
 };
@@ -539,9 +539,9 @@ fn case_pattern(def: &EnumDef, arm: &MatchArm) -> String {
     let variant = &def.variants[index as usize];
     // Unit variants are values; variants with fields are classes.
     if variant.fields.is_empty() {
-        format!("{}.{}", def.name, variant.name)
+        format!("{}.{}", value_type(&def.name), variant.name)
     } else {
-        format!("is {}.{}", def.name, variant.name)
+        format!("is {}.{}", value_type(&def.name), variant.name)
     }
 }
 

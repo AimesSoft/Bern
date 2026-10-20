@@ -213,6 +213,10 @@ flowchart LR
 - **浮层按钮**：弹出层（Popover API），内容在打开时挂载、关闭时卸载；`presented` 双向跟随。浮层与原生的一样按内容定尺寸（至少 240 宽、至多到窗口边），高度只受所在一侧的空间限制，下方放不下而上方放得下时向上打开；下拉列表与菜单仍最高 328 px。
 - **四档尺寸**：`Adaptive` 按可用宽度和三条断点选档，没有自己布局的档用更大一档、否则更小一档的布局；每个窗口按自身宽度保持 `window.compact` 等四个值。
 
+## 与框架类型同名的值类型（2026-10-21）
+
+生成的 `app.js` 把值类型的编解码、变体名与标签存为 `T`、`N`、`L` 对象的属性（`T.Layout`、`N.Layout`、`L.Layout`），不产生模块级的绑定，所以应用类型与浏览器的全局（`Text`、`Image`、`Event`、`Map`、`Error`）不会相遇（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 生成示例 `examples/framework-names`，核对没有以类型名声明的 `const`、`let`、`function` 或 `class`，并用 Node.js 解析模块。实测（2026-10-21，Node.js 25.2.1）：通过；没有在浏览器里打开。
+
 ## 验证记录
 
 2026-10-10，v0.1 视觉规范（窗口呈现已由 v0.2 取代），内置浏览器，`python3 -m http.server` 提供 `target/bern/web_app`：
