@@ -74,7 +74,13 @@ fn check_styles(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
                             .map(move |effect| (Some(state.state), effect))
                     }));
             for (state, effect) in effects {
-                if support.is_some_and(|support| support.shows(state, effect.name())) {
+                // Lengths in place of written ones are laid out by every
+                // target alike.
+                if matches!(effect, bern_ir::style::StyleEffect::Metric { .. })
+                    || (matches!(effect, bern_ir::style::StyleEffect::Padding { .. })
+                        && matches!(rule.component.as_str(), "Row" | "Column"))
+                    || support.is_some_and(|support| support.shows(state, effect.name()))
+                {
                     continue;
                 }
                 let place = match state {

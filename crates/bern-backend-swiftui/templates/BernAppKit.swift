@@ -323,6 +323,17 @@ struct BernDialogItem: Identifiable {
     let id: String
 }
 
+/// Whether a tab with `display: icon` in `window` shows its symbol alone.
+/// On macOS 27 a window's tab picker stands in its toolbar, which shows an
+/// icon-only label's symbol; a dialog's sheet keeps the classic tab view,
+/// which shows titles only, so the tab shows its title there. Earlier
+/// systems, where the toolbar picker was not seen, show the title too.
+@MainActor
+func bernTabShowsIcon(_ window: BernWindowContext) -> Bool {
+    guard #available(macOS 27.0, *) else { return false }
+    return !(BernHost.shared.kinds.first { $0.id == window.kindID }?.isDialog ?? false)
+}
+
 /// The dialog window at `depth` as a sheet over the one below it, the
 /// first over the primary window.
 struct BernDialogs<Window: View>: ViewModifier {

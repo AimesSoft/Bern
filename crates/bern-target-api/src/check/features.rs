@@ -22,6 +22,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::AXIS_PADDING, axis_padding),
     (feature::ICON_MENUS, icon_menus),
     (feature::ICON_LABELS, icon_labels),
+    (feature::ICON_TABS, icon_tabs),
     (feature::ROW_BASELINE, row_baseline),
     (feature::IMAGE_CORNERS, image_corners),
     (feature::EDGE_GROW, edge_grow),
@@ -320,6 +321,21 @@ fn icon_labels(
                 descriptor.id
             ))
             .at(label.source.clone()),
+        );
+    }
+}
+
+fn icon_tabs(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(tab) = first_element(app, |element| {
+        element.kind == "Tab" && element.keyword("display") == Some("icon")
+    }) {
+        // The tab still shows, with its label beside the icon.
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` shows the label of a `Tab` with `display: icon` beside its icon",
+                descriptor.id
+            ))
+            .at(tab.source.clone()),
         );
     }
 }

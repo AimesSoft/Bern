@@ -504,6 +504,8 @@ fn gallery_generates_without_warnings() {
         "R::Append(c.Peek(",
         "R::DropLast(c.Peek(",
         ".suggest = true",
+        // The about window's first tab shows only its symbol.
+        ".icon = \"info.circle\", .iconOnly = true, .build = ",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }

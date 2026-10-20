@@ -353,6 +353,53 @@ pub enum StyleEffect {
     System,
     /// No feedback in this state.
     Nothing,
+    /// A length the element writes, replaced for the platforms the rule
+    /// applies to; `None` drops a written width or height, so the element
+    /// takes its content's.
+    Metric {
+        metric: Metric,
+        value: Option<f64>,
+    },
+}
+
+/// The lengths a style may set in place of those an element writes: a
+/// row's or column's spacing, a container's padding and size, a control's
+/// text or symbol size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Metric {
+    Gap,
+    PaddingX,
+    PaddingY,
+    Width,
+    Height,
+    FontSize,
+    RowHeight,
+}
+
+impl Metric {
+    pub const ALL: [Metric; 7] = [
+        Metric::Gap,
+        Metric::PaddingX,
+        Metric::PaddingY,
+        Metric::Width,
+        Metric::Height,
+        Metric::FontSize,
+        Metric::RowHeight,
+    ];
+
+    /// The property's name, in `style!` and on the element.
+    pub fn name(self) -> &'static str {
+        match self {
+            Metric::Gap => "gap",
+            Metric::PaddingX => "padding_x",
+            Metric::PaddingY => "padding_y",
+            Metric::Width => "width",
+            Metric::Height => "height",
+            Metric::FontSize => "font_size",
+            Metric::RowHeight => "row_height",
+        }
+    }
 }
 
 impl StyleEffect {
@@ -373,6 +420,7 @@ impl StyleEffect {
             StyleEffect::Shadow { .. } => "shadow",
             StyleEffect::System => "system",
             StyleEffect::Nothing => "none",
+            StyleEffect::Metric { metric, .. } => metric.name(),
         }
     }
 }

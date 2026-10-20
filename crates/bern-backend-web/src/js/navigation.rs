@@ -193,12 +193,17 @@ impl Generator<'_> {
             .map(|text| self.text(text))
             .unwrap_or_else(|| "\"\"".into());
         out.open(format!(
-            "B.Tab(p, ctx, {{ value: {}, name: {}, label: () => {label}, icon: {}, build: (p, ctx) => {{",
+            "B.Tab(p, ctx, {{ value: {}, name: {}, label: () => {label}, icon: {}, {}build: (p, ctx) => {{",
             self.expr(value),
             self.variant_name(value),
             tab.icon("icon")
                 .map(string)
-                .unwrap_or_else(|| "null".into())
+                .unwrap_or_else(|| "null".into()),
+            if tab.keyword("display") == Some("icon") {
+                "iconOnly: true, "
+            } else {
+                ""
+            }
         ));
         self.nodes(out, &tab.children);
         out.close("} });");

@@ -39,20 +39,20 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ### 3.2 字体与字号
 
-字体栈：`system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans", "Noto Sans CJK SC", sans-serif`；时间与计数用 `tabular-nums`。
+字体栈：`Inter, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans", "Noto Sans CJK SC", sans-serif`；中文页面（`<html lang>` 为 `zh-*`）改为 `Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif`，拉丁字母与汉字用同一种字体，混排的行不会被两种字体的度量撑高。Inter 在系统里装了才用，Bern 不随页面下载字体。时间与计数用 `tabular-nums`。
 
 | `Text.style` | 字号 / 行高（px） | 字重 |
 | --- | --- | --- |
-| `large_title` | 30 / 36 | 600 |
+| `large_title` | 28 / 34 | 700 |
 | `title` | 24 / 32 | 600 |
 | `title2` | 20 / 28 | 600 |
-| `title3` | 16 / 24 | 600 |
+| `title3` | 17 / 24 | 600 |
 | `headline` | 14 / 20 | 600 |
 | `body`（默认） | 14 / 20 | 400 |
 | `callout` | 13 / 20 | 400 |
 | `subheadline` | 13 / 18 | 400 |
 | `footnote` | 12 / 16 | 400 |
-| `caption` | 12 / 16 | 400 |
+| `caption` | 12 / 16 | 500 |
 | `caption2` | 11 / 16 | 500 |
 
 `pointer: coarse` 时正文及以下各级增加 2 px。标题各级的字距收紧 −0.01em。`emphasis: secondary` 用 `text.secondary`，`tertiary` 用 `text.placeholder`，两者都要通过 4.5:1。
@@ -137,7 +137,8 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 - **主窗口就是页面。** 主窗口的内容直接铺满应用栏下方的区域，没有标题栏、窗口按钮和投影。主窗口被命令关闭后，该区域显示居中的应用名与“打开 {窗口标题}”按钮，页面本身不关闭。
 - **对话框（次级窗口的默认呈现）。** 设置窗口与其他次级窗口呈现为居中的对话框：
   - 宽度取窗口声明的宽度（未声明时 560 px），不超过视口减 32 px；高度贴合内容，最高为视口的 85%，内容区滚动。
-  - 头部 56 px：标题（`title3`）在前端，关闭按钮（`xmark` 图标按钮）在尾端；没有最小化与最大化。
+  - 头部 56 px：标题（`title3`）在前端，关闭按钮（`xmark` 图标按钮）在尾端；没有最小化与最大化。内容带侧边栏（`SplitView`）的对话框没有这一行：侧边栏通到顶部，详情栏的页面头显示所选页面的标题（左 28 px），关闭按钮在它的尾端（右 14 px）。
+  - 用指针打开时焦点放在对话框本身，用键盘打开时放在第一个控件，开着时不会有一个输入框停在焦点上。
   - 遮罩为 `scrim`。点按遮罩、按 Esc 或点关闭按钮都会请求关闭，并经过关闭协议（有未存储内容时先显示确认）。打开时焦点进入对话框，关闭后回到打开它的元素。
   - 对话框内的根 `Tabs` 在宽度 ≥ 640 px 时呈现为左侧竖排导航（宽 180 px），否则为顶部下划线页签。
 - **浮动窗口（`presentation: floating`）。** 只在应用显式声明时出现：可拖动、可调整大小的面板（`surface.raised`、12 px 圆角、投影），标题栏 40 px，尾端有最小化、最大化 / 恢复、关闭；最小化的窗口在应用栏切换条中恢复；拖动与调整尺寸松开时提交一次 `window.move` 或 `window.resize`，键盘：聚焦标题栏后方向键移动、Shift + 方向键调整尺寸。
@@ -147,17 +148,17 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ### 5.2 SplitView、Sidebar、Detail
 
-- 侧边栏宽 240 px（可拖动 200–320 px，Window Splitter 模式），`surface.panel`，右边框 `separator`；详情栏 `surface.canvas`。应用声明了宽度时宽度固定，不能拖动。
+- 侧边栏宽 232 px（可拖动 200–320 px，Window Splitter 模式），`surface.panel`，右缘一条 1 px `separator`（不占内容的宽度）；四周留 10 px，顶部另留 40 px 的标题栏行（对话框里没有这一行）；详情栏 `surface.canvas`。应用声明了宽度时宽度固定，不能拖动。
 - 宽屏时详情页面头的最前端是边栏按钮（`sidebar.left` 图标按钮，名称“隐藏边栏 / 显示边栏”）：侧边栏连同其中的搜索、页眉与页脚整个向前缘滑出隐藏，再按滑回；按钮留在原处。窄屏不显示。
-- 侧边栏顶部为 Search（高 32 px）；Section 标题 `caption2`、`text.secondary`，上方留 16 px。
-- SidebarItem 用 `nav_item` 配方：高 32 px、左右内边距 10 px、6 px 圆角；图标 16 px；选中项填满强调色，文字与图标为 `on_accent`，字重 500，不带左侧竖线。Listbox 模式：上下方向键移动并选中，Home / End 到首尾。
-- 详情栏顶部是页面头：高 64 px，标题为所选项的文字（`title2`），工具栏项在尾端；窄屏为 56 px、`title3`。
+- 侧边栏头部（`SidebarHeader`）内边距上 6、左右 8、下 14，字重 600；Search 高 36 px；Section 标题 `caption2`、`text.secondary`，上方留 16 px；底部（`SidebarFooter`）内边距上 10、左右 6，没有分隔线。
+- SidebarItem 用 `nav_item` 配方：高 34 px、左右内边距 10 px、8 px 圆角，图标 18 px 与标题相隔 12 px，13.5 px 字重 500，项与项相隔 2 px；选中项填满强调色，文字与图标为 `on_accent`，不带左侧竖线。Listbox 模式：上下方向键移动并选中，Home / End 到首尾。
+- 详情栏顶部是页面头：高 56 px，没有下边框，左右内边距 24 / 16 px，标题为所选项的文字（17 px 字重 600），工具栏项在尾端。
 - 视口宽度 < 768 px 时，侧边栏成为第一页，选中项后显示详情，页面头前端出现返回按钮。
 
 ### 5.3 Form 与 Section
 
-- Form 内容最大宽 720 px，水平居中，页面边距 24 px；有 `title` 时它作为页面标题。
-- Section：标题在卡片上方（`title3`，与卡片间距 8 px）；内容在一张卡片里（`surface.canvas`、1 px `separator` 边框、8 px 圆角）；行之间以 `separator` 分隔；脚注在卡片下方（`footnote`、`text.secondary`）。卡片之间 32 px。
+- Form 内容最大宽 720 px，水平居中，页面边距 24 px；对话框里不限宽，内边距上 22、左右 28、下 32。有 `title` 时它作为页面标题。
+- Section：标题在卡片上方（13 px 字重 600，向内 2 px，与卡片间距 10 px）；内容在一张卡片里（`surface.canvas`、1 px `separator` 边框、12 px 圆角）；行之间以 `separator` 分隔；脚注在卡片下方（`footnote`、`text.secondary`）。卡片之间 32 px，对话框里 22 px。
 - 卡片中的行：开关、复选框、选择器、按钮是“标签在前、控件在尾”的横排，行内边距 16 px；文本输入、多行输入与滑块是“标签在上、控件占满宽度”的竖排。
 
 ### 5.4 Navigation、Destination、NavLink
@@ -195,6 +196,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 - TextInput：`<input>`（`secure` 为 `type="password"`，`multiline` 为至少 3 行的 `<textarea>`），`field` 配方，高 32 px，标签在上方（14 px 字重 500，与输入框间距 6 px）；提示文字用 `text.placeholder`。
 - 输入法组合期间只更新本地显示，组合结束后一次性写入会话。
 - Search：前置 `magnifyingglass` 图标，尾端清除按钮（有内容时出现）；Enter 运行声明的提交动作，Esc 清空。
+- `Search(style: palette)` 的入口是 36 px 高、8 px 圆角的描边框（`separator`、页面底色），提示 13.5 px；声明了 `shortcut` 时尾端显示这个键（Apple 系统上如 `⌘K`，其他系统如 `Ctrl K`，11 px 字重 500）。
 
 ### 5.11 Switch
 
@@ -209,7 +211,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 ### 5.13 Picker
 
 - `automatic`、`menu`：Bern 自绘的下拉菜单，遵循 WAI-ARIA APG 的“只选组合框”（Select-Only Combobox）模式。
-  - 触发器：`<button role="combobox" aria-haspopup="listbox" aria-expanded>`，`field` 配方，高 32 px，最小宽 160 px，显示当前选项与尾端 `chevron.down`。
+  - 触发器：`<button role="combobox" aria-haspopup="listbox" aria-expanded>`，外观同标准按钮：高 36 px，宽度随当前选项，左 12 右 10 的内边距，1 px `separator` 轮廓，透明底，13.5 px 字重 500，尾端 12 px 的 `chevron.down`（`icon.secondary`），悬停 `hover.overlay`。
   - 弹出层：`role="listbox"`，置于浏览器顶层（Popover API），不被卡片、对话框或滚动容器裁切；宽度不小于触发器，下方空间不足时向上弹出；`menu` 配方，8 px 圆角，内边距 4 px。
   - 选项：`role="option"`，高 32 px，左右内边距 8 px，6 px 圆角；选中项尾端对勾并有 `aria-selected="true"`。
   - 键盘：Enter、Space、↓、Alt + ↓ 打开并把活动项放在当前选项；↑ ↓ 移动活动项，Home / End 到首尾，输入字符跳到以其开头的选项；Enter 或 Space 选择并关闭；Esc 关闭且不改变值；Tab 选择活动项后关闭并移走焦点。点按弹出层外部关闭。

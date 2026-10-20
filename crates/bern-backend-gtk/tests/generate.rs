@@ -318,6 +318,9 @@ fn planner_and_gallery_build_for_gtk() {
         "b::session_push_str(c, ",
         "b::session_pop(c, ",
         "suggest: true",
+        // The about window's first tab shows only its symbol.
+        "icon: Some(\"info.circle\"), icon_only: true }",
+        "icon: None, icon_only: false }",
     ] {
         assert!(ui.contains(expected), "the gallery lacks `{expected}`");
     }

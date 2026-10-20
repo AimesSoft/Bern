@@ -66,6 +66,8 @@ impl Generator<'_> {
                 )),
                 StyleEffect::System => out.line(format!("{target}system = true;")),
                 StyleEffect::Nothing => out.line(format!("{target}quiet = true;")),
+                // Lengths in place of written ones are laid out before generation.
+                StyleEffect::Metric { .. } => {}
                 StyleEffect::Corner { .. }
                 | StyleEffect::Padding { .. }
                 | StyleEffect::Size { .. } => {}

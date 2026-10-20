@@ -832,6 +832,9 @@ fn build(options: &Options) -> ExitCode {
             framework,
             options.release || options.command == "package",
         );
+        // The lengths the styles set for this target's platforms, on the
+        // application with its named corners already at their radii.
+        let app = bern_target_api::style::for_platforms(&app, target.descriptor().platforms);
         let files = match target.generate(&app, &context) {
             Ok(files) => files,
             Err(errors) => {

@@ -6,7 +6,7 @@
  * contrast need no branches here. */
 
 :root {
-  --bern-font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+  --bern-font: Inter, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans", "Noto Sans CJK SC", sans-serif;
   --bern-control-height: 36px;
   --bern-compact-height: 32px;
@@ -29,6 +29,13 @@
   --bern-radius-icon: 8px;
   --bern-radius-card: 8px;
   --bern-radius-dialog: 12px;
+}
+
+/* Chinese pages set Latin and Han in one face, so lines of mixed text keep
+   one height: Inter where it is installed, else the system's Chinese face. */
+:root:lang(zh) {
+  --bern-font: Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei",
+    "Noto Sans CJK SC", system-ui, sans-serif;
 }
 
 @media (pointer: coarse) {
@@ -300,6 +307,33 @@ button:disabled {
   animation: bern-dialog-in 180ms ease-out;
 }
 
+/* A dialog with its own sidebar shows no header row: the sidebar runs to
+   the top, the page's title stands in its detail, and the close button at
+   the detail's top trailing corner. */
+.bern-window-dialog:has(.bern-split) {
+  position: relative;
+}
+.bern-window-dialog:has(.bern-split) > .bern-dialog-header {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  padding: 0 14px 0 0;
+  border-bottom: 0;
+  background: none;
+}
+/* The page's header in such a dialog: its title 28 in, the close button's
+   room at its end. */
+.bern-window-dialog .bern-split .bern-page-header {
+  padding: 0 64px 0 28px;
+}
+.bern-window-dialog:has(.bern-split) > .bern-dialog-header > .bern-page-title {
+  display: none;
+}
+.bern-window-dialog .bern-sidebar {
+  padding-top: 10px;
+}
+
 .bern-window-dialog:focus {
   outline: none;
 }
@@ -551,9 +585,8 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 64px;
-  padding: 0 var(--bern-page-margin);
-  border-bottom: 1px solid var(--bern-separator);
+  height: 56px;
+  padding: 0 16px 0 var(--bern-page-margin);
 }
 
 .bern-page-header > .bern-icon-button:first-child,
@@ -565,8 +598,8 @@ button:disabled {
   flex: 1;
   margin: 0;
   min-width: 0;
-  font-size: 20px;
-  line-height: 28px;
+  font-size: calc(17px + var(--bern-text-up));
+  line-height: 24px;
   font-weight: 600;
   letter-spacing: -0.01em;
   white-space: nowrap;
@@ -597,7 +630,7 @@ button:disabled {
 .bern-tools .bern-button,
 .bern-tools .bern-dropdown,
 .bern-tools .bern-field {
-  height: var(--bern-compact-height);
+  height: var(--bern-control-height);
 }
 
 .bern-tools .bern-segment {
@@ -646,8 +679,9 @@ button:disabled {
 }
 
 .bern-large-title {
-  font-size: 30px;
-  line-height: 36px;
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 700;
 }
 
 .bern-title {
@@ -661,7 +695,7 @@ button:disabled {
 }
 
 .bern-title3 {
-  font-size: 16px;
+  font-size: 17px;
   line-height: 24px;
 }
 
@@ -687,6 +721,10 @@ button:disabled {
 .bern-caption {
   font-size: calc(12px + var(--bern-text-up));
   line-height: 16px;
+}
+
+.bern-caption {
+  font-weight: 500;
 }
 
 .bern-caption2 {
@@ -1031,7 +1069,6 @@ button:disabled {
 .bern-scroll:not(.bern-scroll-horizontal),
 .bern-form-scroll,
 .bern-search-palette-results,
-.bern-sidebar-list,
 .bern-detail-body,
 .bern-tabs-vertical .bern-tabpanels,
 .bern-search-results,
@@ -1109,8 +1146,10 @@ button:disabled {
 }
 
 .bern-window-dialog .bern-form {
-  padding: 20px;
-  gap: 24px;
+  max-width: none;
+  margin: 0;
+  padding: 22px 28px 32px;
+  gap: 22px;
 }
 
 /* A form opening with a plain section starts at the top of its page, also
@@ -1122,15 +1161,14 @@ button:disabled {
 .bern-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .bern-section-title {
-  margin: 0;
-  font-size: 16px;
-  line-height: 24px;
+  margin: 0 2px;
+  font-size: calc(13px + var(--bern-text-up));
+  line-height: 1;
   font-weight: 600;
-  letter-spacing: -0.01em;
 }
 
 .bern-section-footer {
@@ -1145,7 +1183,7 @@ button:disabled {
   flex-direction: column;
   background: var(--bern-form-row, var(--bern-surface-canvas));
   border: 1px solid var(--bern-separator);
-  border-radius: var(--bern-radius-card);
+  border-radius: 12px;
   overflow: hidden;
 }
 
@@ -1254,9 +1292,10 @@ button:disabled {
     border-color var(--bern-motion) ease-out;
 }
 
+/* A button's symbol is a little smaller than an icon button's. */
 .bern-button .bern-icon {
-  width: var(--bern-glyph);
-  height: var(--bern-glyph);
+  width: 16px;
+  height: 16px;
 }
 
 .bern-button-standard {
@@ -1422,8 +1461,9 @@ button:disabled {
 .bern-menu-button.bern-control-capsule {
   padding: 0 10px 0 12px;
 }
-.bern-control-capsule > .bern-icon:last-child { width: 14px; height: 14px; color: var(--bern-text-secondary); }
+.bern-control-capsule > .bern-icon:last-child { width: 12px; height: 12px; color: var(--bern-text-secondary); }
 .bern-dropdown-wrap:has(> .bern-control-capsule) { width: 100%; }
+.bern-chip-button,
 .bern-toggle-button.bern-control-capsule {
   min-width: 0;
   height: 30px;
@@ -1433,11 +1473,19 @@ button:disabled {
   color: var(--bern-text-secondary);
   font-size: calc(13px + var(--bern-text-up));
 }
+.bern-chip-button.bern-button-prominent,
 .bern-toggle-button.bern-control-capsule[aria-pressed="true"] {
   border-color: transparent;
   background: var(--bern-text-primary);
   color: var(--bern-surface-canvas);
 }
+@media (hover: hover) {
+  .bern-chip-button.bern-button-prominent:hover:not(:disabled) {
+    background: var(--bern-text-primary);
+  }
+}
+.bern-chip-button .bern-icon { width: 14px; height: 14px; }
+.bern-chip-button.bern-button-standard { background: transparent; }
 
 /* The palette is a browser modal so its focus and overlay follow the
    document viewport, even when its trigger lives in a clipped toolbar. */
@@ -1447,19 +1495,29 @@ button:disabled {
   align-items: center;
   gap: 8px;
   width: min(250px, 35vw);
-  height: 34px;
+  height: var(--bern-control-height);
   padding: 0 12px;
-  border: 1px solid var(--bern-control-border);
-  border-radius: 999px;
-  background: var(--bern-surface-raised);
+  border: 1px solid var(--bern-separator);
+  border-radius: var(--bern-radius-control);
+  background: var(--bern-surface-canvas);
   color: var(--bern-text-secondary);
   text-align: start;
 }
 
 .bern-search-palette-prompt {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-size: calc(13.5px + var(--bern-text-up));
+}
+
+/* The key that opens the palette, at the field's end. */
+.bern-search-palette-key {
+  flex: none;
+  font: 500 calc(11px + var(--bern-text-up)) / 1 var(--bern-font);
+  color: var(--bern-text-secondary);
 }
 
 .bern-search-palette {
@@ -1868,24 +1926,36 @@ textarea.bern-field {
   display: inline-flex;
 }
 
+/* A dropdown is a standard button that names its choice, a chevron at its
+   end, as wide as its choice. */
 .bern-dropdown {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  min-width: 160px;
+  gap: 6px;
+  min-width: 0;
   height: var(--bern-control-height);
-  padding: 0 8px 0 12px;
-  border: 1px solid var(--bern-control-border);
+  padding: 0 10px 0 12px;
+  border: 1px solid var(--bern-separator);
   border-radius: var(--bern-radius-control);
-  background: var(--bern-surface-raised);
+  background: transparent;
   color: var(--bern-text-primary);
+  font-size: calc(13.5px + var(--bern-text-up));
+  font-weight: 500;
   text-align: start;
   white-space: nowrap;
-  transition: border-color var(--bern-motion) ease-out;
+  transition: border-color var(--bern-motion) ease-out, background-color var(--bern-motion) ease-out;
+}
+
+@media (hover: hover) {
+  .bern-dropdown:hover {
+    background: var(--bern-hover-overlay);
+  }
 }
 
 .bern-dropdown .bern-icon {
+  width: 12px;
+  height: 12px;
   color: var(--bern-icon-secondary);
   transition: transform var(--bern-motion) ease-out;
 }
@@ -2122,12 +2192,14 @@ button.bern-menu-item:disabled .bern-icon {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   height: var(--bern-nav-row);
   padding: 0 10px;
   border-radius: var(--bern-radius-control);
   background: transparent;
   color: var(--bern-text-secondary);
+  font-size: calc(13.5px + var(--bern-text-up));
+  font-weight: 500;
   transition: background var(--bern-motion) ease-out, color var(--bern-motion) ease-out;
 }
 
@@ -2180,14 +2252,21 @@ button.bern-menu-item:disabled .bern-icon {
 }
 
 /* A declared width is exact; dragging keeps an undeclared one within the
-   design's 200–320. */
+   design's 200–320. The sidebar keeps the window's title bar row (40)
+   above its content, 10 around it. */
 .bern-sidebar {
   flex: none;
   display: flex;
   flex-direction: column;
-  width: 240px;
+  width: 232px;
+  padding: 50px 10px 12px;
   background: var(--bern-surface-panel);
-  border-inline-end: 1px solid var(--bern-separator);
+  /* Its edge takes no room from its content. */
+  box-shadow: inset -1px 0 0 var(--bern-separator);
+}
+
+.bern-sidebar:dir(rtl) {
+  box-shadow: inset 1px 0 0 var(--bern-separator);
 }
 
 /* The Window Splitter: an invisible strip over the sidebar's edge, half
@@ -2225,7 +2304,7 @@ button.bern-menu-item:disabled .bern-icon {
   /* Hidden, the sidebar slides away whole, header, search and footer with
      it, and leaves the tab order once it is gone. */
   .bern-split.bern-split-collapsed > .bern-sidebar {
-    margin-inline-start: calc(-1 * var(--bern-sidebar-width, 240px));
+    margin-inline-start: calc(-1 * var(--bern-sidebar-width, 232px));
     visibility: hidden;
     transition: margin-inline-start var(--bern-sidebar-fold, 0s) cubic-bezier(0.2, 0, 0, 1), visibility 0s var(--bern-sidebar-fold, 0s);
   }
@@ -2241,7 +2320,6 @@ button.bern-menu-item:disabled .bern-icon {
 .bern-sidebar-list {
   flex: 1;
   overflow: auto;
-  padding: 4px 12px 16px;
   outline-offset: -2px;
 }
 
@@ -2285,7 +2363,8 @@ button.bern-menu-item:disabled .bern-icon {
   .bern-sidebar {
     width: 100%;
     max-width: none;
-    border-inline-end: 0;
+    padding: 0 12px 16px;
+    box-shadow: none;
   }
   .bern-split .bern-detail {
     display: none;
@@ -2462,6 +2541,17 @@ button.bern-menu-item:disabled .bern-icon {
 
 .bern-tab:focus-visible {
   outline-offset: -2px;
+}
+
+/* `Tab(display: icon)`: the icon alone, at least as wide as the bar is
+ * tall; in a dialog's vertical navigation it keeps the rows' leading edge. */
+.bern-tab-icon-only {
+  justify-content: center;
+  min-width: 44px;
+}
+
+.bern-tabs-vertical .bern-tab-icon-only {
+  justify-content: flex-start;
 }
 
 .bern-tabpanels {

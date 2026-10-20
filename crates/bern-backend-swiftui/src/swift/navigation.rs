@@ -529,6 +529,32 @@ impl Generator<'_> {
             }
             out.open(".tabItem {");
             match tab.icon("icon") {
+                // `display: icon`: the tab shows the symbol alone, as tvOS
+                // shows its search tab; the label names it. A Mac's tab
+                // picker shows a label's title only, and its symbol only for
+                // an icon-only label where it stands in the toolbar; an
+                // image alone leaves the tab blank (macOS 27).
+                Some(icon) if tab.keyword("display") == Some("icon") => {
+                    if self.platform == Platform::Macos {
+                        out.open("if bernTabShowsIcon(bernWindow) {");
+                        out.line(format!(
+                            "SwiftUI.Label({label}, systemImage: {}).labelStyle(.iconOnly)",
+                            string(icon)
+                        ));
+                        out.close("} else {");
+                        out.indent += 1;
+                        out.line(format!(
+                            "SwiftUI.Label({label}, systemImage: {})",
+                            string(icon)
+                        ));
+                        out.close("}");
+                    } else {
+                        out.line(format!(
+                            "SwiftUI.Image(systemName: {}).accessibilityLabel(SwiftUI.Text(verbatim: {label}))",
+                            string(icon)
+                        ));
+                    }
+                }
                 Some(icon) => out.line(format!(
                     "SwiftUI.Label({label}, systemImage: {})",
                     string(icon)

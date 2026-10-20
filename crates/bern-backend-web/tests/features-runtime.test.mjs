@@ -271,6 +271,30 @@ test("content capsules are the standard button and keep their children", () => {
   assert.equal(B.controlEntries().length, 0);
 });
 
+test("an icon-only tab shows its icon alone, named by its label", () => {
+  const { B, Element } = runtime();
+  const root = new Element("root");
+  const selection = B.cell("about");
+  const label = B.cell("About");
+  const scope = new B.Scope();
+  B.within(scope, () => B.Tabs(root, {}, { selection }, (p, ctx) => {
+    B.Tab(p, ctx, { value: "about", name: "about", label: () => label.get(), icon: "info.circle", iconOnly: true, build: () => {} });
+    B.Tab(p, ctx, { value: "keys", name: "keys", label: () => "Shortcuts", icon: null, build: () => {} });
+  }));
+  const [about, keys] = root.childNodes[0].childNodes[0].children;
+  assert.ok(about.classes.has("bern-tab-icon-only"));
+  assert.deepEqual(about.childNodes.map((child) => child.tagName), ["svg"]);
+  assert.equal(about.attributes["aria-label"], "About");
+  assert.equal(about.attributes.title, "About");
+  label.set("Info");
+  assert.equal(about.attributes["aria-label"], "Info");
+  assert.equal(about.attributes.title, "Info");
+  assert.ok(!keys.classes.has("bern-tab-icon-only"));
+  assert.equal(keys.attributes["aria-label"], undefined);
+  assert.deepEqual(keys.childNodes.map((child) => child.textContent), ["Shortcuts"]);
+  scope.dispose();
+});
+
 test("declared sidebar widths stay overridable by compact layout CSS", () => {
   const { B, F, Element } = runtime();
   const root = new Element("root");
@@ -301,12 +325,12 @@ test("a sidebar of no declared width drags and steps between 200 and 320", () =>
   assert.equal(handle.attributes["aria-orientation"], "vertical");
   assert.equal(handle.attributes["aria-label"], "bern.navigation.sidebar");
   assert.equal(handle.attributes["aria-controls"], sidebar.attributes.id);
-  assert.deepEqual([handle.attributes["aria-valuemin"], handle.attributes["aria-valuenow"], handle.attributes["aria-valuemax"]], ["200", "240", "320"]);
-  assert.equal(sidebar.style["--bern-sidebar-width"], "240px");
+  assert.deepEqual([handle.attributes["aria-valuemin"], handle.attributes["aria-valuenow"], handle.attributes["aria-valuemax"]], ["200", "232", "320"]);
+  assert.equal(sidebar.style["--bern-sidebar-width"], "232px");
 
   // A pointer drags it from where it was pressed, held to the range.
-  assert.equal(handle.dispatch("pointerdown", { button: 2, clientX: 240, pointerId: 1 }), false, "only the main button drags");
-  assert.equal(handle.dispatch("pointerdown", { button: 0, clientX: 240, pointerId: 7 }), true);
+  assert.equal(handle.dispatch("pointerdown", { button: 2, clientX: 232, pointerId: 1 }), false, "only the main button drags");
+  assert.equal(handle.dispatch("pointerdown", { button: 0, clientX: 232, pointerId: 7 }), true);
   assert.equal(handle.captured, 7);
   assert.equal(split.classes.has("bern-split-resizing"), true);
   handle.dispatch("pointermove", { clientX: 290.4 });

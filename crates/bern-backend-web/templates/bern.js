@@ -1594,10 +1594,11 @@ function searchResults(box, input, field, ctx, results, suggest) {
 
 /// The search trigger and its keyboard-navigable, window-scoped palette.
 /// Results own their effects only while the palette is visible.
-export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, height }, submit, results) {
+export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, height, shortcut }, submit, results) {
   const caption = el("span", { class: "bern-search-palette-prompt" });
   bindText(caption, prompt ?? (() => ""));
   const trigger = el("button", { class: "bern-search-palette-trigger", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" }, icon("magnifyingglass", 16), caption);
+  if (shortcut) trigger.append(el("kbd", { class: "bern-search-palette-key", "aria-hidden": "true" }, shortcutText(shortcut)));
   const dialog = el("dialog", { class: "bern-search-palette" });
   const input = el("input", { class: "bern-search-palette-input", type: "search", autocomplete: "off", "aria-autocomplete": "list" });
   if (panelPrompt ?? prompt) {
@@ -1874,6 +1875,20 @@ function naturalHeight(popover) {
   return height;
 }
 
+/// How a key shortcut such as `cmd+k` reads on this computer: `⌘K` on
+/// Apple's systems, `Ctrl K` elsewhere.
+export function shortcutText(spec) {
+  const apple = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "");
+  const parts = spec.split("+");
+  const key = parts.pop();
+  const names = apple
+    ? { cmd: "⌘", ctrl: "⌃", alt: "⌥", shift: "⇧" }
+    : { cmd: "Ctrl", ctrl: "Ctrl", alt: "Alt", shift: "Shift" };
+  const shown = key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1);
+  const mods = [...new Set(parts.map((part) => names[part] ?? part))];
+  return apple ? [...mods, shown].join("") : [...mods, shown].join(" ");
+}
+
 /// Menus and popovers open from their trigger: from 0.9 of their size to
 /// full on a bouncy spring, fading in meanwhile; with less motion, a short
 /// fade alone.
@@ -2124,6 +2139,9 @@ function controlShape(node, shape, height) {
     node.classList.add("bern-control-capsule");
     return;
   }
+  // A chip is the web's pill: outlined, filled with the text color when
+  // it stands for the choice made.
+  if (shape === "chip") node.classList.add("bern-chip-button");
   length(node, "height", height);
 }
 
@@ -2826,12 +2844,18 @@ export function Tabs(p, ctx, { id, selection, fallback, accessory }, children) {
 
 /// One tab of the `Tabs` around it: its button where it is written, part
 /// of the tabs while mounted. Its page is built while it is selected.
-export function Tab(p, ctx, { value, name, label, icon: glyph, build }) {
+export function Tab(p, ctx, { value, name, label, icon: glyph, iconOnly, build }) {
   const registry = ctx.tabs;
   if (!registry) return;
-  const text = el("span");
-  bindText(text, label);
-  const button = el("button", { class: "bern-tab", type: "button", role: "tab" }, glyph ? icon(glyph, 16) : null, text);
+  // `display: icon`: the icon alone, the label its name and tooltip.
+  const alone = iconOnly && glyph;
+  const text = alone ? null : el("span");
+  if (text) bindText(text, label);
+  const button = el("button", { class: `bern-tab${alone ? " bern-tab-icon-only" : ""}`, type: "button", role: "tab" }, glyph ? icon(glyph, 16) : null, text);
+  if (alone) {
+    bindAttr(button, "aria-label", label);
+    bindAttr(button, "title", label);
+  }
   button.addEventListener("click", () => registry.selection.set(value));
   effect(() => {
     const selected = eq(registry.selection.get(), value);
@@ -3843,6 +3867,11 @@ class Win {
 
 const FOCUSABLE = "button, [href], input, select, textarea, [tabindex]:not([tabindex=\"-1\"])";
 
+/// Whether the last input was a key rather than a pointer.
+let keyboardLast = false;
+globalThis.addEventListener?.("keydown", () => { keyboardLast = true; }, true);
+globalThis.addEventListener?.("pointerdown", () => { keyboardLast = false; }, true);
+
 function focusables(container) {
   return [...container.querySelectorAll(FOCUSABLE)].filter((node) => !node.disabled && node.getClientRects().length > 0);
 }
@@ -4012,10 +4041,12 @@ class WindowManager {
     this.order.set([...this.order.peek(), win]);
     this.activate(win);
     if (win.dialog) {
-      // Focus moves into the dialog: its first control, else the dialog.
+      // Focus moves into the dialog: from the keyboard to its first
+      // control, from a pointer to the dialog itself, so a field it opens
+      // with does not stand focused under the pointer.
       requestAnimationFrame(() => {
         const content = win.element.querySelector(".bern-window-content");
-        (focusables(content)[0] ?? win.element).focus();
+        ((keyboardLast && focusables(content)[0]) || win.element).focus();
       });
     }
     return win;

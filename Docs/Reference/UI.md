@@ -87,7 +87,7 @@ ControlGroup(height: 40) {
 }
 ```
 
-独立控件可用 `Button`、`Menu`、`Picker`、`Switch`、`SplitButton` 的 `shape: capsule` 和 `height` 声明容器及高度。相邻菜单使用一致的 shape / height，相关操作可共享 ControlGroup；形状本身不会改变命令语义。`IconButton(prominence: plain)` 用于需要普通图标的独立按钮，`font_size` 调整图标字号；它不代替容器高度。`prominence: prominent` 表达强调按钮。
+独立控件可用 `Button`、`Menu`、`Picker`、`Switch`、`SplitButton` 的 `shape: capsule` 和 `height` 声明容器及高度。网页没有胶囊形按钮：在网页上它们是标准控件，取标准高度与 8 点圆角。`Button` 与 `Switch(style: button)` 另有 `shape: chip`，表示一枚标签：网页上是描边药丸（30 高，选中或 `prominence: prominent` 时反色），其他平台是 30 点高的胶囊，写了 `height` 时取所写高度。相邻菜单使用一致的 shape / height，相关操作可共享 ControlGroup；形状本身不会改变命令语义。`IconButton(prominence: plain)` 用于需要普通图标的独立按钮，`font_size` 调整图标字号；它不代替容器高度。`prominence: prominent` 表达强调按钮。
 
 带图标与文字的返回入口使用一个 `Button(icon:, label:)`，将两者作为同一控件进行布局与命中。容器大小属于声明，不能通过移除容器来回避内容溢出。普通控件的默认外观仍由目标平台决定。
 
@@ -177,7 +177,22 @@ bern run --target web_app --port 4173
 - `Shortcut(key:, enabled:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。
 - `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
 - `style!` 的 `text` 块可以给电视另定字号：`body: font(size: 13, tv: 16)`。
+- 元素自己写的长度也可以交给样式按平台给出，元素用 `variant` 选择：`Row`、`Column` 的 `gap`、`padding`、`padding_x`、`padding_y`、`width`、`height`，`Stack` 的 `width`、`height`，`Form` 的 `gap`、`padding_x`、`padding_y`、`row_height`，`IconButton` 的 `font_size`、`height`。`width: fit` 与 `height: fit` 去掉写下的尺寸，元素取内容的大小。构建某个平台时，适用于它的规则（不带 `#[target]` 的在前，带的在后）替换元素写下的值，所以设计在各平台尺寸不同的地方不需要在界面里判断平台：
+
+```rust
+style! {
+    Row.brand { gap: 5, padding_x: 12 }
+    #[target(browser)]
+    Row.brand { gap: 10, padding_x: 0 }
+    Row.menu_box { width: 92 }
+    #[target(browser)]
+    Row.menu_box { width: fit }
+}
+```
+
+  元素没有这项长度时报错，例如 `Button.x { gap: 4 }`；长度不小于 0，`font_size` 大于 0。
 - 屏幕键盘一类的按键用文字会话动作：`=> draft.query.push_str("A")`、`=> draft.query.pop()`；搜索页想在输入前就列出结果时写 `Search(suggest: true)`。
+- `Tab(display: icon)` 让页签只显示图标，例如电视标签栏里只是放大镜的搜索页；必须写 `icon`，`label` 仍是读屏读出的名称（桌面上也是悬停提示）。关键词与 `Label(display:)` 相同，默认 `title_and_icon`。它不限于电视，六个目标都生成。
 
 ```rust
 Adaptive(id: shell) {
@@ -191,6 +206,11 @@ Stack {
     if app.details_open {
         Shortcut(key: "escape") => app.close_details()
     }
+}
+
+Tabs(id: tv_tabs, selection: draft.page) {
+    Tab(value: Page::Search, label: tr! { "zh-Hans" => "搜索", "en" => "Search" }, icon: "magnifyingglass", display: icon) { search(app: app) }
+    Tab(value: Page::Home, label: tr! { "zh-Hans" => "首页", "en" => "Home" }) { tv_home(app: app) }
 }
 ```
 
