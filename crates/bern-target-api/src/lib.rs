@@ -6,6 +6,7 @@
 //! imports a concrete target, and disabling one target leaves the others
 //! buildable.
 
+pub mod brand_assets;
 pub mod glue;
 pub mod icon;
 pub mod names;
@@ -18,7 +19,10 @@ mod plan;
 mod report;
 
 pub use check::check_common;
-pub use plan::{BuildPlan, BuildStep, Run, archive, dist_dir, files_below, package_architecture};
+pub use plan::{
+    BuildPlan, BuildStep, Run, SimulatedSystem, archive, dist_dir, files_below,
+    package_architecture,
+};
 pub use report::{FeatureReport, feature_report};
 
 use bern_ir::{Application, IR_VERSION, SourceLocation};
@@ -151,7 +155,8 @@ pub mod feature {
     pub const TEXT_LINES: &str = "text_lines";
     /// `Image(corner:)`: an image with rounded corners.
     pub const IMAGE_CORNERS: &str = "image_corners";
-    /// `Sidebar(width:)`: a sidebar of a fixed width.
+    /// `Sidebar(width:)`: a sidebar of a fixed width; without it the
+    /// sidebar keeps the platform's width.
     pub const SIDEBAR_WIDTH: &str = "sidebar_width";
     /// `Switch(checked:)`, `Picker(selected:)` and `Slider(current:)`:
     /// controls showing engine state and reporting changes as commands.
@@ -582,7 +587,7 @@ pub struct Registry {
 /// Default UI technology per platform.
 pub fn default_ui(platform: &str) -> Option<&'static str> {
     match platform {
-        "macos" | "ios" => Some("swiftui"),
+        "macos" | "ios" | "tvos" => Some("swiftui"),
         "linux" => Some("gtk"),
         "windows" => Some("winui3"),
         "android" => Some("compose"),

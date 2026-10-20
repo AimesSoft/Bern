@@ -14,7 +14,7 @@ impl Generator<'_> {
         out.line("");
         out.line(match self.platform {
             Platform::Macos => "import AppKit",
-            Platform::Ios => "import UIKit",
+            Platform::Ios | Platform::Tvos => "import UIKit",
         });
         out.line("import SwiftUI");
         out.line("");
@@ -155,10 +155,24 @@ impl Generator<'_> {
             .filter(|window| {
                 window.initial == bern_ir::WindowInitial::Open
                     && window.id != app.windows.primary
-                    && (self.platform == Platform::Ios || window.role != WindowRole::Settings)
+                    && (self.platform.uikit() || window.role != WindowRole::Settings)
             })
             .map(|window| string(&window.id))
             .collect();
+        if self.platform == Platform::Tvos {
+            // The body of a scene laid out at the design's size: the
+            // application's body for a television, or the design's 16.
+            let body = app
+                .style
+                .text_weights
+                .iter()
+                .find(|entry| entry.style == "body")
+                .and_then(|entry| entry.tv_size.or(entry.size))
+                .unwrap_or(16.0);
+            out.line("/// The body of a scene laid out at the design's size.");
+            out.line(format!("let bernSceneBodySize: CGFloat = {}", double(body)));
+            out.line("");
+        }
         out.line("@main");
         out.open("struct BernApplication: App {");
         match self.platform {
@@ -173,6 +187,8 @@ impl Generator<'_> {
                 out.line("@UIApplicationDelegateAdaptor(BernOrientationDelegate.self) private var delegate");
                 out.line("");
             }
+            // A television has no orientations to ask for.
+            Platform::Tvos => {}
         }
         out.open("init() {");
         out.open(format!(
@@ -188,6 +204,7 @@ impl Generator<'_> {
         match self.platform {
             Platform::Macos => self.macos_scenes(&mut out, &order, &initial),
             Platform::Ios => self.ios_scene(&mut out, &initial),
+            Platform::Tvos => self.tvos_scene(&mut out, &initial),
         }
         out.close("}");
         out.close("}");
@@ -379,6 +396,31 @@ impl Generator<'_> {
             out.line("    .environment(BernEngine.shared)");
             scene_modifiers(out, window);
         }
+    }
+
+    /// The scene of a tvOS app: one full-screen window group, the primary
+    /// window, with every other window over it, filling the screen, as
+    /// tvOS shows its own screens: without a title bar or a Done button,
+    /// the remote's Back closes it. A television shows one scene; there
+    /// are no window sizes, commands or keyboard shortcuts for it.
+    fn tvos_scene(&self, out: &mut Out, initial: &[String]) {
+        let app = self.app;
+        out.open("SwiftUI.WindowGroup {");
+        out.open(format!(
+            "BernVirtualHost(initial: [{}]) {{ kind in",
+            initial.join(", ")
+        ));
+        out.open("switch kind {");
+        for (index, window) in app.windows.windows.iter().enumerate() {
+            out.line(format!("case {}:", string(&window.id)));
+            out.line(format!("    BernWindow{index}()"));
+        }
+        out.line("default:");
+        out.line("    SwiftUI.EmptyView()");
+        out.close("}");
+        out.close("}");
+        out.line(".environment(BernEngine.shared)");
+        out.close("}");
     }
 
     /// Whether a window's content has a navigation container of its own,

@@ -156,11 +156,17 @@ impl Generator<'_> {
                 .text_weights
                 .iter()
                 .map(|entry| {
+                    let size = entry.size.map(double).unwrap_or_else(|| "null".into());
+                    // A television's size, chosen once the host knows the
+                    // device.
+                    let size = match entry.tv_size {
+                        Some(tv) => format!("if (BernHost.television) {} else {size}", double(tv)),
+                        None => size,
+                    };
                     format!(
-                        "{} to Pair({}, {})",
+                        "{} to Pair({}, {size})",
                         string(&entry.style),
                         string(&entry.weight),
-                        entry.size.map(double).unwrap_or_else(|| "null".into())
                     )
                 })
                 .collect();
@@ -203,9 +209,13 @@ impl Generator<'_> {
         out.line("");
         out.line("/// Keyboard shortcuts come first, whether or not a control has focus:");
         out.line("/// Compose sends keys only to the focused control and its parents.");
+        out.line("/// On a television the remote's arrows move the focus first, and a");
+        out.line("/// shortcut takes one only where the focus moves nowhere.");
         out.open("override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {");
         out.line("BernShortcuts.pressed(event)");
-        out.line("return BernShortcuts.handle(androidx.compose.ui.input.key.KeyEvent(event)) || super.dispatchKeyEvent(event)");
+        out.line("val key = androidx.compose.ui.input.key.KeyEvent(event)");
+        out.line("if (BernHost.television && BernShortcuts.isArrow(event)) return super.dispatchKeyEvent(event) || BernShortcuts.handle(key)");
+        out.line("return BernShortcuts.handle(key) || super.dispatchKeyEvent(event)");
         out.close("}");
         out.close("}");
         out.finish()

@@ -80,6 +80,21 @@ impl SessionField<bool> {
     }
 }
 
+impl SessionField<String> {
+    /// An action that adds text after the draft, as a key of an on-screen
+    /// keyboard types it: `=> draft.query.push_str("A")`.
+    #[allow(unused_variables)]
+    pub fn push_str(&self, text: impl SessionValue<String>) -> CommandRef {
+        CommandRef::declared()
+    }
+
+    /// An action that takes the last character off the draft, as a
+    /// keyboard's delete: `=> draft.query.pop()`.
+    pub fn pop(&self) -> CommandRef {
+        CommandRef::declared()
+    }
+}
+
 impl<T> Clone for SessionField<T> {
     fn clone(&self) -> Self {
         *self

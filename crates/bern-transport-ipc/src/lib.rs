@@ -109,7 +109,12 @@ mod platform {
     }
 
     fn peer_uid(stream: &UnixStream) -> io::Result<u32> {
-        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "freebsd"
+        ))]
         {
             let mut uid: libc::uid_t = 0;
             let mut gid: libc::gid_t = 0;

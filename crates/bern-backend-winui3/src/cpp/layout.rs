@@ -185,6 +185,19 @@ impl Generator<'_> {
         )
     }
 
+    /// `Shortcut`: its keys run the action while it is mounted and
+    /// enabled.
+    pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B::KeyShortcut(p, c, {});",
+            designated(&[
+                ("keys", Self::keyword(element, "key")),
+                ("enabled", self.enabled(element)),
+                ("action", self.action(element)),
+            ])
+        ));
+    }
+
     pub(super) fn timer(&self, out: &mut Out, element: &Element) {
         out.line(format!(
             "B::Timer(p, c, {});",

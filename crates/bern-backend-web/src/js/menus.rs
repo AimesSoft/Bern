@@ -14,6 +14,10 @@ impl Generator<'_> {
             ("width", element.number("width").map(number)),
             ("height", element.number("height").map(number)),
             ("fontSize", element.number("font_size").map(number)),
+            (
+                "suggest",
+                (element.keyword("suggest") == Some("true")).then(|| "true".into()),
+            ),
         ]);
         let submit = self.action_fn(element);
         let function = if palette {

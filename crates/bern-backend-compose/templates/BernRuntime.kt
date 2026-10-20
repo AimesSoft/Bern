@@ -9,6 +9,8 @@
 package dev.bern.runtime
 
 import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -568,6 +570,8 @@ class BernWindowContext(
     val medium: Boolean get() = size == "medium"
     val expanded: Boolean get() = size == "expanded"
     val large: Boolean get() = size == "large"
+    /// `window.tv`: the window is on a television.
+    val tv: Boolean get() = BernHost.television
     val chrome = mutableStateListOf<BernChromeEntry>()
 
     /// The window's title in the interface language.
@@ -865,6 +869,10 @@ object BernHost {
     val controls = BernControls()
     /// The application's breakpoints, set before the first window shows.
     var layouts = BernLayouts(0.0, null, null)
+    /// Whether the app runs on a television (Android TV, Google TV), which
+    /// shows an `Adaptive`'s `tv` layout whatever its width.
+    var television = false
+        private set
 
     var failure by mutableStateOf<BernFailure?>(null)
     var startupError by mutableStateOf<String?>(null)
@@ -893,6 +901,9 @@ object BernHost {
         apply: (Int, BernReader) -> Unit,
     ) {
         if (handle != 0L) return
+        television = (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
+            Configuration.UI_MODE_TYPE_TELEVISION ||
+            context.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
         BernText.load(context, languages)
         BernLanguage.setup(languages, defaultLanguage)
         this.kinds = kinds

@@ -154,7 +154,7 @@ impl Generator<'_> {
             ));
             out.line(match self.platform {
                 Platform::Macos => ".ignoresSafeArea(.container, edges: .top)",
-                Platform::Ios => ".ignoresSafeArea(.container)",
+                Platform::Ios | Platform::Tvos => ".ignoresSafeArea(.container)",
             });
             // Over the layer the title bar keeps its controls, not the
             // window's title, also when the content before had a split
@@ -439,12 +439,16 @@ impl Generator<'_> {
                 if let Some(title) = &title {
                     out.close("} header: {");
                     out.indent += 1;
-                    out.line(format!("SwiftUI.Text(verbatim: {title})"));
+                    out.line(format!(
+                        "SwiftUI.Text(verbatim: {title}).bernSectionTitle()"
+                    ));
                 }
                 if let Some(footer) = &footer {
                     out.close("} footer: {");
                     out.indent += 1;
-                    out.line(format!("SwiftUI.Text(verbatim: {footer})"));
+                    out.line(format!(
+                        "SwiftUI.Text(verbatim: {footer}).bernSectionFooter()"
+                    ));
                 }
                 out.close("}");
             }
@@ -700,10 +704,13 @@ impl Generator<'_> {
             self.nodes(out, &layout.children, ctx);
             out.indent -= 1;
         }
-        // The expanded layout is always declared.
+        // The expanded layout is always declared, but on a television only
+        // the `tv` layout is built.
         out.open("default:");
         if let Some((_, expanded)) = layouts.iter().find(|(size, _)| *size == "expanded") {
             self.nodes(out, &expanded.children, ctx);
+        } else {
+            out.line("SwiftUI.EmptyView()");
         }
         out.indent -= 1;
         out.close("}");

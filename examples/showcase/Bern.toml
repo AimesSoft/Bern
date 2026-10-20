@@ -58,6 +58,12 @@ channels = ["ipc"]
 platform = "ios"
 channels = ["ipc"]
 
+# Apple TV, built for the simulator; `bern run --target tvos` starts it in
+# the Apple TV simulator that is running.
+[targets.tvos]
+platform = "tvos"
+channels = ["ipc"]
+
 # The same app on Linux: GTK 4 with libadwaita, the engine in process.
 [targets.linux]
 platform = "linux"

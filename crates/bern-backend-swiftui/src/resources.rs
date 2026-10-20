@@ -115,17 +115,16 @@ const IOS_BUNDLE_FILES: &[&str] = &[
 ];
 
 pub fn check_declared(app: &Application, platform: Platform) -> Vec<Diagnostic> {
-    let system = match platform {
-        Platform::Macos => "macOS",
-        Platform::Ios => "iOS",
-    };
-    // An iOS bundle keeps its own files at the top, next to the resources.
+    let system = platform.system();
+    // An iOS or tvOS bundle keeps its own files at the top, next to the
+    // resources.
     let product = crate::product_name(app);
     let reserved = |first: &str| -> bool {
-        platform == Platform::Ios
+        platform.uikit()
             && (IOS_BUNDLE_FILES.contains(&first)
                 || first == product
-                || first.starts_with(crate::ios::ICON_NAME))
+                || first.starts_with(crate::ios::ICON_NAME)
+                || first.starts_with(crate::tvos::ICON_NAME))
     };
     let mut diagnostics = Vec::new();
     for resource in &app.resources {
@@ -136,7 +135,7 @@ pub fn check_declared(app: &Application, platform: Platform) -> Vec<Diagnostic> 
         } else if platform == Platform::Macos && resource.name == crate::ICON_FILE {
             format!("`{}` is the application icon", crate::ICON_FILE)
         } else if reserved(segments[0]) {
-            format!("`{}` is a file of the iOS bundle itself", segments[0])
+            format!("`{}` is a file of the {system} bundle itself", segments[0])
         } else if let Some(directory) = directories.iter().find(|part| part.contains('.')) {
             format!(
                 "the directory `{directory}` contains `.`, which code signing reads as a nested bundle"
@@ -474,6 +473,96 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
         documents = document_types(app, true),
+    )
+}
+
+/// The Info.plist of a tvOS app for the simulator. The icon and the Top
+/// Shelf images come from the brand assets that `actool` compiles; the
+/// interface follows the system's light or dark appearance. A television
+/// opens no documents, so no document types are declared.
+pub fn info_plist_tvos(app: &Application, executable: &str, minimum_tvos: &str) -> String {
+    let name = translation(
+        &app.app.name,
+        &app.languages.default,
+        &app.languages.default,
+    );
+    let localizations: String = app
+        .languages
+        .supported
+        .iter()
+        .map(|language| format!("\n        <string>{}</string>", xml(language)))
+        .collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>{region}</string>
+    <key>CFBundleDisplayName</key>
+    <string>{name}</string>
+    <key>CFBundleExecutable</key>
+    <string>{executable}</string>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <string>App Icon</string>
+    </dict>
+    <key>CFBundleIdentifier</key>
+    <string>{bundle}</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleLocalizations</key>
+    <array>{localizations}
+    </array>
+    <key>CFBundleName</key>
+    <string>{name}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{version}</string>
+    <key>CFBundleSupportedPlatforms</key>
+    <array>
+        <string>AppleTVSimulator</string>
+    </array>
+    <key>CFBundleVersion</key>
+    <string>{version}</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>MinimumOSVersion</key>
+    <string>{minimum_tvos}</string>
+    <key>TVTopShelfImage</key>
+    <dict>
+        <key>TVTopShelfPrimaryImage</key>
+        <string>Top Shelf Image</string>
+        <key>TVTopShelfPrimaryImageWide</key>
+        <string>Top Shelf Image Wide</string>
+    </dict>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+    <key>UIDeviceFamily</key>
+    <array>
+        <integer>3</integer>
+    </array>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+    </array>
+    <key>UIUserInterfaceStyle</key>
+    <string>Automatic</string>
+</dict>
+</plist>
+"#,
+        region = xml(&app.languages.default),
+        name = xml(name),
+        executable = xml(executable),
+        bundle = xml(&app.app.bundle_id),
+        version = xml(&app.app.version),
     )
 }
 

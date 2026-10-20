@@ -43,7 +43,7 @@ impl Generator<'_> {
                 {
                     let placement = match self.platform {
                         Platform::Macos => ".toolbar",
-                        Platform::Ios => ".automatic",
+                        Platform::Ios | Platform::Tvos => ".automatic",
                     };
                     self.searchable(out, search, placement, ctx);
                 }
@@ -135,7 +135,7 @@ impl Generator<'_> {
                 out.close("}");
                 ".automatic"
             }
-            Platform::Ios => ".primaryAction",
+            Platform::Ios | Platform::Tvos => ".primaryAction",
         };
         self.toolbar_groups(out, trailing, placement, ctx);
     }
@@ -154,7 +154,7 @@ impl Generator<'_> {
                 // to: an item of their own, without a background.
                 Node::Element(element) if element.kind == "Text" => {
                     groups.push(Vec::new());
-                    out.open("if #available(macOS 26.0, iOS 26.0, *) {");
+                    out.open("if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {");
                     out.open(format!("SwiftUI.ToolbarItem(placement: {placement}) {{"));
                     self.element(out, element, ctx);
                     out.close("}");
@@ -171,7 +171,7 @@ impl Generator<'_> {
         }
         for (index, group) in groups.iter().filter(|group| !group.is_empty()).enumerate() {
             if index > 0 {
-                out.open("if #available(macOS 26.0, iOS 26.0, *) {");
+                out.open("if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {");
                 out.line(format!(
                     "SwiftUI.ToolbarSpacer(.fixed, placement: {placement})"
                 ));
@@ -227,8 +227,8 @@ impl Generator<'_> {
                 None => out.line(format!("SwiftUI.Text(verbatim: {item_label})")),
             }
             out.close("}");
-            if let Some(shortcut) = self.shortcut(item) {
-                out.line(format!(".keyboardShortcut({shortcut})"));
+            if let Some(line) = self.shortcut_line(item, Some(&action)) {
+                out.line(line);
             }
             if let Some(enabled) = item.expr("enabled") {
                 out.line(format!(".disabled(!({}))", self.expr(enabled)));
@@ -243,7 +243,7 @@ impl Generator<'_> {
         let capsule = element.keyword("shape") == Some("capsule") && !ctx.toolbar;
         // iOS draws no arrow on a menu's button; the capsule shows one, as
         // macOS's pull-down does.
-        let arrow = capsule && self.platform == Platform::Ios;
+        let arrow = capsule && self.platform.uikit();
         if arrow {
             // The design's pull-down (6.3): the symbol in a 16-point box, the
             // arrow in a 12-point one at 60 %, 6 apart, and the arrow's side
@@ -385,8 +385,13 @@ impl Generator<'_> {
                 .map(|value| format!(", {name}: {}", double(value)))
         })
         .collect::<String>();
+        let suggest = if element.keyword("suggest") == Some("true") {
+            ", suggest: true"
+        } else {
+            ""
+        };
         out.open(format!(
-            "BernSearchField(text: {}, prompt: {prompt}, target: {}{size}{submit}) {{",
+            "BernSearchField(text: {}, prompt: {prompt}, target: {}{size}{suggest}{submit}) {{",
             self.binding_of(&field),
             self.target(element, ctx)
         ));

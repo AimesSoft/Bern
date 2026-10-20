@@ -275,11 +275,11 @@ inline std::optional<winrt::Windows::System::VirtualKey> KeyOf(std::string const
     return std::nullopt;
 }
 
-/// While mounted, `keys` (`cmd` is Control on Windows) runs the `action`
-/// (`activate` or `focus`) of the control `id` in this context, as the
-/// external entries do; a split button's flips its toggle. Shortcuts are
-/// keyboard accelerators of the window.
-inline void Shortcut(Ctx const& ctx, char const* keys, char const* id, char const* action) {
+/// While mounted, `keys` (`cmd` is Control on Windows) calls `invoked`,
+/// which says whether it handled them, as a keyboard accelerator of the
+/// window. Without Control or Alt the keys are text while a text field has
+/// the focus.
+inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> invoked) {
     if (!ctx.win || !ctx.win->root) return;
     using winrt::Windows::System::VirtualKeyModifiers;
     std::string all = keys ? keys : "";
@@ -305,29 +305,14 @@ inline void Shortcut(Ctx const& ctx, char const* keys, char const* id, char cons
     xaml::Input::KeyboardAccelerator accelerator;
     accelerator.Key(*key);
     accelerator.Modifiers(modifiers);
-    auto target = ctx.Target(id);
-    std::string kind = action ? action : "activate";
-    // Without Control or Alt, the keys are text while a text field has the
-    // focus.
     bool typed = (modifiers & (VirtualKeyModifiers::Control | VirtualKeyModifiers::Menu)) == VirtualKeyModifiers::None;
-    accelerator.Invoked([target, kind, typed, root = winrt::make_weak(ctx.win->root)](auto&&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args) {
+    accelerator.Invoked([invoked, typed, root = winrt::make_weak(ctx.win->root)](auto&&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args) {
         if (typed)
             if (auto element = root.get(); element && element.XamlRoot()) {
                 auto focused = xaml::Input::FocusManager::GetFocusedElement(element.XamlRoot());
                 if (focused && (focused.try_as<controls::TextBox>() || focused.try_as<controls::PasswordBox>())) return;
             }
-        for (auto const& [token, entry] : Controls::entries) {
-            if (entry.target != target) continue;
-            // A disabled control's shortcut does nothing.
-            if (entry.enabled && !Reactive::Untrack([&] { return entry.enabled(); })) return;
-            auto const& actions = entry.actions;
-            if (kind == "focus" && actions.focus) actions.focus();
-            // A split button's shortcut flips its toggle, as a switch's does.
-            else if (entry.role == "split_button" && actions.setBool && actions.value) actions.setBool(actions.value() != "true");
-            else if (actions.activate) actions.activate();
-            args.Handled(true);
-            return;
-        }
+        if (invoked()) args.Handled(true);
     });
     auto root = ctx.win->root;
     root.KeyboardAccelerators().Append(accelerator);
@@ -336,6 +321,46 @@ inline void Shortcut(Ctx const& ctx, char const* keys, char const* id, char cons
         if (!root) return;
         uint32_t index;
         if (root.KeyboardAccelerators().IndexOf(accelerator, index)) root.KeyboardAccelerators().RemoveAt(index);
+    });
+}
+
+/// While mounted, `keys` runs the `action` (`activate` or `focus`) of the
+/// control `id` in this context, as the external entries do; a split
+/// button's flips its toggle. A disabled control's shortcut does nothing.
+inline void Shortcut(Ctx const& ctx, char const* keys, char const* id, char const* action) {
+    auto target = ctx.Target(id);
+    std::string kind = action ? action : "activate";
+    Accelerator(ctx, keys, [target, kind] {
+        for (auto const& [token, entry] : Controls::entries) {
+            if (entry.target != target) continue;
+            if (entry.enabled && !Reactive::Untrack([&] { return entry.enabled(); })) return false;
+            auto const& actions = entry.actions;
+            if (kind == "focus" && actions.focus) actions.focus();
+            // A split button's shortcut flips its toggle, as a switch's does.
+            else if (entry.role == "split_button" && actions.setBool && actions.value) actions.setBool(actions.value() != "true");
+            else if (actions.activate) actions.activate();
+            return true;
+        }
+        return false;
+    });
+}
+
+struct KeyShortcutProps {
+    char const* keys = nullptr;
+    Get enabled;
+    Act action;
+};
+
+/// `Shortcut`: its keys run the action while it is mounted and enabled,
+/// without a control on screen.
+inline void KeyShortcut(Parent const&, Ctx const& ctx, KeyShortcutProps props) {
+    auto enabled = props.enabled;
+    auto action = props.action;
+    if (!action) return;
+    Accelerator(ctx, props.keys, [ctx, enabled, action] {
+        if (enabled && !Reactive::Untrack([&] { return R::Truthy(enabled(ctx)); })) return false;
+        action(ctx);
+        return true;
     });
 }
 

@@ -16,7 +16,7 @@
 
 ## 实现与专题
 
-- [macOS](Implementation/macOS-SwiftUI.md)、[iOS](Implementation/iOS-SwiftUI.md)、[Android](Implementation/Android-Compose.md)、[Windows](Implementation/Windows-WinUI3.md)、[Linux](Implementation/Linux-GTK.md)、[Web](Implementation/Web.md)：实现细节、历次验证与限制。
+- [macOS](Implementation/macOS-SwiftUI.md)、[iOS](Implementation/iOS-SwiftUI.md)、[tvOS](Implementation/tvOS-SwiftUI.md)、[Android](Implementation/Android-Compose.md)、[Windows](Implementation/Windows-WinUI3.md)、[Linux](Implementation/Linux-GTK.md)、[Web](Implementation/Web.md)：实现细节、历次验证与限制。
 - [动画 SVG](Implementation/Animated-SVG.md)：可选组件接口、资源、依赖和验证范围。
 
 ## 更新规则

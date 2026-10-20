@@ -156,6 +156,31 @@ bern run --target web_app --port 4173
 
 目标名由项目 Bern.toml 定义。`--port` 只用于浏览器 app，范围 1–65535；省略时使用空闲端口。固定端口保持相同 origin，避免开发时端口改变而读到另一份 localStorage。浏览器权限、容量与清理站点数据会影响持久化。
 
+## 电视、快捷键与起始焦点
+
+- `Layout(size: tv)` 是电视上的布局，`Adaptive` 里最多一个，不影响其他尺寸的必需与回退规则；表达式可读 `window.tv`。tvOS 在构建时只保留电视显示的部分，所以手机与桌面布局里电视没有的能力（如 `pick:`）不会让 tvOS 构建失败。
+- `Shortcut(key:, enabled:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。
+- `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
+- `style!` 的 `text` 块可以给电视另定字号：`body: font(size: 13, tv: 16)`。
+- 屏幕键盘一类的按键用文字会话动作：`=> draft.query.push_str("A")`、`=> draft.query.pop()`；搜索页想在输入前就列出结果时写 `Search(suggest: true)`。
+
+```rust
+Adaptive(id: shell) {
+    Layout(size: compact) { phone_home(app: app) }
+    Layout(size: expanded) { desktop_home(app: app) }
+    Layout(size: tv) { tv_home(app: app) }
+}
+
+Stack {
+    Button(id: resume, label: tr! { "zh-Hans" => "继续播放", "en" => "Resume" }, default_focus: true) => app.resume()
+    if app.details_open {
+        Shortcut(key: "escape") => app.close_details()
+    }
+}
+```
+
+各目标的范围见[平台能力表](Platforms.md)，tvOS 的焦点、遥控与缩放场景见 [tvOS 实现记录](../Implementation/tvOS-SwiftUI.md)。
+
 ## 其他接口
 
 动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[专项文档](../Implementation/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整语义继续见[设计文档](../Design.md)与对应实现记录。

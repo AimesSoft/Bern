@@ -1,12 +1,14 @@
 //! Application icons. Without `[app].icon` every target uses the Bern logo;
 //! with it, the declared square PNG. `[app.icon]` can also give a platform
 //! its own icon: another square PNG, or the icon in the platform's own form
-//! (an `.icns` file, an `.ico` file, an `.appiconset` folder, an Android
-//! `res` folder, an icon theme folder, a folder of page icons), which is
-//! shipped as it is. The platform containers (`.ico` on Windows, `.icns` on
-//! macOS) hold PNG images as they are, so nothing here decodes or scales
-//! pixels: the logo ships pre-rendered at every size the platforms ask for,
-//! and a declared PNG is used at its own size.
+//! (an `.icns` file, an `.ico` file, an `.appiconset` folder, a tvOS
+//! `.brandassets` folder, an Android `res` folder, an icon theme folder, a
+//! folder of page icons), which is shipped as it is. The platform
+//! containers (`.ico` on Windows, `.icns` on macOS) hold PNG images as they
+//! are, so nothing here decodes or scales pixels: the logo ships
+//! pre-rendered at every size the platforms ask for, and a declared PNG is
+//! used at its own size. Only tvOS's layered icon is drawn from the square
+//! one, in [`crate::brand_assets`].
 
 use bern_ir::Application;
 use std::borrow::Cow;
@@ -14,7 +16,9 @@ use std::path::{Path, PathBuf};
 
 /// Platforms that can have an icon of their own under `[app.icon]`, named
 /// as `[targets]` names them.
-pub const PLATFORMS: [&str; 6] = ["macos", "ios", "windows", "linux", "android", "browser"];
+pub const PLATFORMS: [&str; 7] = [
+    "macos", "ios", "tvos", "windows", "linux", "android", "browser",
+];
 
 /// Where one platform's icon comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -256,6 +260,7 @@ pub fn accepted(platform: &str) -> &'static str {
     match platform {
         "macos" => "a square PNG or an `.icns` file",
         "ios" => "a square PNG or an `.appiconset` folder",
+        "tvos" => "a square PNG or a `.brandassets` folder",
         "windows" => "a square PNG or an `.ico` file",
         "linux" => "a square PNG or an icon theme folder laid out like `hicolor`",
         "android" => "a square PNG or a `res` folder with `mipmap-*/ic_launcher`",
@@ -266,7 +271,7 @@ pub fn accepted(platform: &str) -> &'static str {
 
 /// Check an icon in `platform`'s own form at `path`, a file or a folder:
 /// an `.icns` file (macOS), an `.ico` file (Windows), an `.appiconset`
-/// folder (iOS), a `res` folder (Android), an icon theme folder (Linux), or
+/// folder (iOS), a `.brandassets` folder (tvOS), a `res` folder (Android), an icon theme folder (Linux), or
 /// an SVG or a folder of page icons (browser).
 pub fn check_native(platform: &str, path: &Path) -> Result<(), String> {
     let extension = path
@@ -286,6 +291,7 @@ pub fn check_native(platform: &str, path: &Path) -> Result<(), String> {
             }
         }
         ("ios", true, _) => app_icon_set(path).map(drop),
+        ("tvos", true, _) => crate::brand_assets::check(path).map(drop),
         ("android", true, _) => android_res(path).map(drop),
         ("linux", true, _) => theme_icons(path).map(drop),
         ("browser", true, _) => page_icons(path).map(drop),

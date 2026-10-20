@@ -1,4 +1,5 @@
-//! The `swiftui + macos` target.
+//! The `swiftui + macos` target, and with it the `swiftui + ios` and
+//! `swiftui + tvos` targets.
 //!
 //! Generates idiomatic SwiftUI from the shared IR: standard scenes,
 //! containers and controls, which keep the system styles and colors
@@ -11,6 +12,7 @@ mod names;
 mod resources;
 mod style;
 mod swift;
+pub mod tvos;
 
 use bern_ir::spec::COMPONENTS;
 use bern_ir::{Application, IR_VERSION, Node, WindowInitial, WindowRole};
@@ -23,6 +25,7 @@ use std::path::PathBuf;
 
 pub use ios::{MINIMUM_IOS, SwiftUiIos};
 pub use swift::{Generator, Platform};
+pub use tvos::{MINIMUM_TVOS, SwiftUiTvos};
 
 /// Minimum deployment target, chosen in the design document.
 pub const MINIMUM_MACOS: &str = "14.0";
@@ -723,10 +726,7 @@ pub(crate) fn check_swiftui(
     config: &TargetConfig,
     platform: Platform,
 ) -> Vec<Diagnostic> {
-    let system = match platform {
-        Platform::Macos => "macOS",
-        Platform::Ios => "iOS",
-    };
+    let system = platform.system();
     let mut diagnostics = check_common(target, app);
     diagnostics.extend(resources::check_declared(app, platform));
     let framework = resources::framework_languages();

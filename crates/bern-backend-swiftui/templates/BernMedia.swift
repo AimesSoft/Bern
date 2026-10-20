@@ -833,11 +833,18 @@ struct BernScrubber: View {
                     }
                 }
         }
+        #elseif os(tvOS)
+        // tvOS has no slider: the focused bar moves by its step for each
+        // press of the remote's left or right.
+        BernFocusSlider(
+            value: $value, minimum: range.lowerBound, maximum: range.upperBound, step: step,
+            label: label, labelHidden: true, onEditingChanged: onEditingChanged)
         #else
         slider
         #endif
     }
 
+    #if !os(tvOS)
     private var slider: some View {
         Slider(value: $value, in: range) {
             Text(verbatim: label)
@@ -847,4 +854,5 @@ struct BernScrubber: View {
         .labelsHidden()
         .tint(.primary)
     }
+    #endif
 }

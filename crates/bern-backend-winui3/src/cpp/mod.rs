@@ -385,6 +385,11 @@ impl<'a> Generator<'a> {
                     SessionOp::Toggle => {
                         format!("c.Write({target}, R::Not(c.Peek({target})))")
                     }
+                    SessionOp::PushStr { value } => format!(
+                        "c.Write({target}, R::Append(c.Peek({target}), {}))",
+                        self.expr(value)
+                    ),
+                    SessionOp::Pop => format!("c.Write({target}, R::DropLast(c.Peek({target})))"),
                 }
             }
             Action::Engine { command, args } => {

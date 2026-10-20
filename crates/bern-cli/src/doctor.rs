@@ -47,6 +47,7 @@ const SPECS: &[Spec] = &[
         macos,
     ),
     ("iOS · SwiftUI", &["ios"], Some(("macos", "macOS")), ios),
+    ("tvOS · SwiftUI", &["tvos"], Some(("macos", "macOS")), tvos),
     (
         "Windows · WinUI 3",
         &["windows"],
@@ -178,23 +179,37 @@ fn macos() -> Status {
 /// The iOS simulator SDK and the Rust target for the simulator. A
 /// simulator to run in is `bern run`'s concern, not the build's.
 fn ios() -> Status {
-    let fix = "install Xcode 26 or newer from the App Store with the iOS platform, then run\nsudo xcode-select --switch /Applications/Xcode.app";
-    let Some(sdk) = output("xcrun", &["--sdk", "iphonesimulator", "--show-sdk-version"]) else {
-        return Status::Missing("no iOS simulator SDK".into(), fix.into());
+    simulator("iOS", "iphonesimulator", "ios")
+}
+
+/// The tvOS simulator SDK and the Rust target for the Apple TV simulator,
+/// whose standard library rustup ships (tier 2).
+fn tvos() -> Status {
+    simulator("tvOS", "appletvsimulator", "tvos")
+}
+
+/// The simulator SDK `sdk` of `system` and the Rust target for its
+/// simulator on this Mac.
+fn simulator(system: &str, sdk: &str, os: &str) -> Status {
+    let fix = format!(
+        "install Xcode 26 or newer from the App Store with the {system} platform, then run\nsudo xcode-select --switch /Applications/Xcode.app"
+    );
+    let Some(version_found) = output("xcrun", &["--sdk", sdk, "--show-sdk-version"]) else {
+        return Status::Missing(format!("no {system} simulator SDK"), fix);
     };
-    if version(&sdk).is_none_or(|found| found < MACOS_SDK) {
+    if version(&version_found).is_none_or(|found| found < MACOS_SDK) {
         return Status::Missing(
             format!(
-                "iOS SDK {sdk}; SwiftUI needs SDK {}.{} or newer",
+                "{system} SDK {version_found}; SwiftUI needs SDK {}.{} or newer",
                 MACOS_SDK.0, MACOS_SDK.1
             ),
-            fix.into(),
+            fix,
         );
     }
     let simulator = if std::env::consts::ARCH == "x86_64" {
-        "x86_64-apple-ios"
+        format!("x86_64-apple-{os}")
     } else {
-        "aarch64-apple-ios-sim"
+        format!("aarch64-apple-{os}-sim")
     };
     let Some(sysroot) = output("rustc", &["--print", "sysroot"]) else {
         return Status::Missing(
@@ -204,7 +219,7 @@ fn ios() -> Status {
     };
     if !Path::new(&sysroot)
         .join("lib/rustlib")
-        .join(simulator)
+        .join(&simulator)
         .is_dir()
     {
         return Status::Missing(
@@ -212,7 +227,9 @@ fn ios() -> Status {
             format!("rustup target add {simulator}"),
         );
     }
-    Status::Ready(format!("iOS simulator SDK {sdk}, the {simulator} target"))
+    Status::Ready(format!(
+        "{system} simulator SDK {version_found}, the {simulator} target"
+    ))
 }
 
 /// The Android SDK, NDK and Gradle, and the Rust target for phones.
@@ -373,7 +390,7 @@ mod tests {
     #[test]
     fn checks_cover_every_platform_once() {
         let checks = checks();
-        for platform in ["macos", "windows", "linux", "browser"] {
+        for platform in ["macos", "ios", "tvos", "windows", "linux", "browser"] {
             assert_eq!(
                 checks
                     .iter()

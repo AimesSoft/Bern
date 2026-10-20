@@ -488,6 +488,12 @@ fn gallery_generates_without_warnings() {
         ".appearance = \"dark\"",
         ".nudge = [](Ctx const& c)",
         "R::Url(c.Engine(",
+        "B::KeyShortcut(p, c, {.keys = \"escape\"",
+        "B::DefaultFocus(c, ",
+        "c.WindowFlag(\"tv\")",
+        "R::Append(c.Peek(",
+        "R::DropLast(c.Peek(",
+        ".suggest = true",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }

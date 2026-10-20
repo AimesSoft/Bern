@@ -409,3 +409,25 @@ pub fn session_toggle(ctx: &Ctx, field: Field) {
     let on = ctx.peek(field) == Value::Bool(true);
     ctx.write(field, Value::Bool(!on));
 }
+
+/// `draft.field.push_str(text)`: the text after the field's.
+pub fn session_push_str(ctx: &Ctx, field: Field, text: Value) {
+    let mut value = match ctx.peek(field) {
+        Value::Text(value) => value,
+        _ => String::new(),
+    };
+    if let Value::Text(text) = text {
+        value.push_str(&text);
+    }
+    ctx.write(field, Value::Text(value));
+}
+
+/// `draft.field.pop()`: the field's text without its last character.
+pub fn session_pop(ctx: &Ctx, field: Field) {
+    let mut value = match ctx.peek(field) {
+        Value::Text(value) => value,
+        _ => String::new(),
+    };
+    value.pop();
+    ctx.write(field, Value::Text(value));
+}

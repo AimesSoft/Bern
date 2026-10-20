@@ -35,6 +35,10 @@ impl Store {
             Some(PathBuf::new())
         } else if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
             std::env::var_os("HOME").map(|p| PathBuf::from(p).join("Library/Application Support"))
+        } else if cfg!(target_os = "tvos") {
+            // A tvOS app may write only its caches, which the system
+            // clears when the television runs short of room.
+            std::env::var_os("HOME").map(|p| PathBuf::from(p).join("Library/Caches"))
         } else if cfg!(target_os = "windows") {
             std::env::var_os("APPDATA").map(PathBuf::from)
         } else if cfg!(target_os = "linux") {

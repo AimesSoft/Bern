@@ -245,6 +245,13 @@ pub fn declaration(app: &Application, style: &Resolved) -> String {
     if let Some(settle) = &style.settle {
         args.push(format!("settle: {}", motion(app, settle)));
     }
+    // `focus: none`: no focus effect of the platform's own, where it draws
+    // one around a control the style draws (tvOS's lift).
+    if style.states.iter().any(|(state, effects)| {
+        *state == StyleState::Focus && effects.iter().any(|e| matches!(e, StyleEffect::Nothing))
+    }) {
+        args.push("showsFocus: false".into());
+    }
     format!("static let {} = BernStyle({})", style.name, args.join(", "))
 }
 

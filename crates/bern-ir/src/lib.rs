@@ -8,6 +8,8 @@ pub mod spec;
 pub mod style;
 
 use bern_protocol::{LocalizedText, ProtocolDescriptor, Type, TypeTable, Value};
+
+mod television;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -812,6 +814,12 @@ pub enum SessionOp {
     Set { value: Expr },
     /// `draft.field.toggle()` on a `bool`.
     Toggle,
+    /// `draft.field.push_str(text)` on a `String`: the text after it, as
+    /// a key of an on-screen keyboard types.
+    PushStr { value: Expr },
+    /// `draft.field.pop()` on a `String`: without its last character, as
+    /// a keyboard's delete.
+    Pop,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

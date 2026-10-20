@@ -186,6 +186,17 @@ impl Generator<'_> {
         );
     }
 
+    /// `Shortcut`: its keys run the action while it is mounted and
+    /// enabled.
+    pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::KeyShortcut(p, c, b::KeyShortcutProps {{ keys: {}, enabled: {} }}, {});",
+            string(element.keyword("key").unwrap_or_default()),
+            self.enabled(element),
+            self.action(element),
+        ));
+    }
+
     pub(super) fn timer(&self, out: &mut Out, element: &Element) {
         out.line(format!(
             "b::Timer(p, c, b::TimerProps {{ interval: {}, enabled: {} }}, {});",
@@ -298,6 +309,7 @@ impl Generator<'_> {
             "b::Adaptive(p, c, {}, [",
             some(element.id.as_ref().map(|_| self.id(element)))
         ));
+        // A desktop is never a television: a `tv` layout is not built.
         for size in ["compact", "medium", "expanded", "large"] {
             match layout(size) {
                 Some(layout) => self.children(out, "Some(", &layout.children, "),"),

@@ -2276,6 +2276,8 @@ fn session_actions_panels_and_notices_are_checked() {
             Button(id: flip, label: tr! { "en" => "Flip", "ja" => "反転" }) => draft.on.toggle()
             Button(id: fast, label: tr! { "en" => "Fast", "ja" => "速い" }) => draft.mode.set(Mode::Fast)
             Button(id: large, label: tr! { "en" => "Large", "ja" => "大" }) => draft.size.set(18)
+            Button(id: key, label: tr! { "en" => "A", "ja" => "A" }) => draft.name.push_str("A")
+            Button(id: back, label: tr! { "en" => "Delete", "ja" => "削除" }) => draft.name.pop()
             Switch(id: panel, label: tr! { "en" => "Panel", "ja" => "パネル" }, value: draft.on, style: button, icon: "sidebar.right")
             Toast(content: app.title, key: app.count, duration: 2)
             Inspector(presented: draft.on, width: 300) {
@@ -2290,7 +2292,12 @@ fn session_actions_panels_and_notices_are_checked() {
             if let ir::Node::Element(element) = node
                 && let Some(ir::Action::Session { op, .. }) = &element.action
             {
-                ops.push(matches!(op, ir::SessionOp::Toggle));
+                ops.push(match op {
+                    ir::SessionOp::Toggle => "toggle",
+                    ir::SessionOp::PushStr { .. } => "push_str",
+                    ir::SessionOp::Pop => "pop",
+                    ir::SessionOp::Set { .. } => "set",
+                });
                 // A whole number set on a decimal field is that decimal.
                 if let ir::SessionOp::Set { value } = op
                     && value.ty == Type::Float
@@ -2305,7 +2312,7 @@ fn session_actions_panels_and_notices_are_checked() {
             }
         });
     }
-    assert_eq!(ops, [false, true, false, false]);
+    assert_eq!(ops, ["set", "toggle", "set", "set", "push_str", "pop"]);
     compile_ui(&wrap(
         r#"Toolbar {
             SplitButton(id: danmaku, label: tr! { "en" => "Comments", "ja" => "コメント" }, icon: "text.bubble", value: draft.on) {
@@ -2328,6 +2335,14 @@ fn session_actions_panels_and_notices_are_checked() {
         (
             format!("Button(id: go, {label}) => draft.on.clear()"),
             "support `set(value)`",
+        ),
+        (
+            format!("Button(id: go, {label}) => draft.on.push_str(\"x\")"),
+            "edit a `String`",
+        ),
+        (
+            format!("Button(id: go, {label}) => draft.name.push_str(3)"),
+            "the text to add",
         ),
         (
             "Column { if draft.on { Inspector(presented: draft.on) { Spacer } } }".to_string(),
@@ -3336,26 +3351,28 @@ fn text_styles_take_a_weight_and_a_size() {
         "text {
             large_title: heavy,
             title: font(size: 30, weight: semibold),
-            body: font(size: 15),
+            body: font(size: 15, tv: 18),
             caption: bold,
             caption: light,
         }",
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    let weight = |style: &str, weight: &str, size: Option<f64>| TextWeight {
+    let weight = |style: &str, weight: &str, size: Option<f64>, tv_size: Option<f64>| TextWeight {
         style: style.into(),
         weight: weight.into(),
         size,
+        tv_size,
     };
     assert_eq!(
         sheet.text_weights,
         [
-            weight("large_title", "heavy", None),
-            weight("title", "semibold", Some(30.0)),
-            // A size alone keeps the regular weight.
-            weight("body", "regular", Some(15.0)),
+            weight("large_title", "heavy", None, None),
+            weight("title", "semibold", Some(30.0), None),
+            // A size alone keeps the regular weight; `tv` is the size on a
+            // television.
+            weight("body", "regular", Some(15.0), Some(18.0)),
             // A later entry for a style replaces the earlier one.
-            weight("caption", "light", None),
+            weight("caption", "light", None, None),
         ]
     );
 
@@ -3372,7 +3389,7 @@ fn text_styles_take_a_weight_and_a_size() {
         ),
         (
             "text { title: font(size: big) }",
-            "`font` takes `size: points` and `weight: name`",
+            "`font` takes `size: points`, `tv: points` (the size on a television) and `weight: name`",
         ),
         (
             "text { title: 700 }",

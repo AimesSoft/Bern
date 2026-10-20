@@ -153,6 +153,7 @@ fn registry() -> Registry {
     let mut registry = Registry::new();
     registry.register(Box::new(bern_backend_swiftui::SwiftUiMacos));
     registry.register(Box::new(bern_backend_swiftui::SwiftUiIos));
+    registry.register(Box::new(bern_backend_swiftui::SwiftUiTvos));
     registry.register(Box::new(bern_backend_web::WebBrowser));
     registry.register(Box::new(bern_backend_gtk::GtkLinux));
     registry.register(Box::new(bern_backend_winui3::WinUi3Windows));
@@ -397,6 +398,7 @@ fn os_name(os: &str) -> &str {
     match os {
         "macos" => "macOS",
         "ios" => "iOS",
+        "tvos" => "tvOS",
         "android" => "Android",
         "windows" => "Windows",
         "linux" => "Linux",

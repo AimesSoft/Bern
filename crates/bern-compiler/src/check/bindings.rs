@@ -185,11 +185,12 @@ impl Checker<'_> {
             let sizes = ir::LayoutSize::ALL.map(ir::LayoutSize::name);
             let known = field.as_deref() == Some("idle")
                 || field.as_deref() == Some("short")
+                || field.as_deref() == Some("tv")
                 || field.as_deref().is_some_and(|name| sizes.contains(&name));
             if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, and `window.short` (shorter than the compact breakpoint, as a phone on its side)",
+                    "the hosting window offers `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), and `window.tv` (the window is on a television)",
                 );
                 return None;
             }
@@ -200,7 +201,8 @@ impl Checker<'_> {
                     "error[B402]: `window.short` needs the breakpoints of `[layouts]` in Bern.toml, e.g. `compact_below = 600`",
                 );
             }
-            if field != "idle" && field != "short" {
+            // A television is a television whatever the breakpoints.
+            if field != "idle" && field != "short" && field != "tv" {
                 match self.layouts {
                     None => {
                         self.error(

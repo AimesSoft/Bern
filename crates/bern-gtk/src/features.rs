@@ -163,7 +163,58 @@ fn pick_file(ctx: &Ctx, kinds: &'static str, give: Rc<dyn Fn(String)>) {
 /// current scope lasts.
 pub fn shortcut(ctx: &Ctx, keys: &'static str, run: Act) {
     let at = ctx.clone();
-    ctx.win().add_shortcut(keys, Rc::new(move || run(&at)));
+    ctx.win()
+        .add_shortcut(keys, Rc::new(move || run(&at)), None);
+}
+
+/// Props of `Shortcut`.
+pub struct KeyShortcutProps {
+    pub keys: &'static str,
+    pub enabled: Option<Get>,
+}
+
+/// `Shortcut`: `keys` runs the action while it is mounted and enabled,
+/// without a control on screen.
+#[allow(non_snake_case)]
+pub fn KeyShortcut(_p: &Parent, ctx: &Ctx, props: KeyShortcutProps, action: Option<Act>) {
+    let Some(action) = action else { return };
+    // A disabled shortcut leaves its keys to the one mounted before it.
+    let active = props.enabled.map(|enabled| {
+        let at = ctx.clone();
+        Rc::new(move || crate::value::truthy(&untrack(|| enabled(&at)))) as Rc<dyn Fn() -> bool>
+    });
+    let at = ctx.clone();
+    ctx.win()
+        .add_shortcut(props.keys, Rc::new(move || action(&at)), active);
+}
+
+/// Take the keyboard focus to `widget`, while it lives.
+pub(crate) fn focus_of(widget: &gtk::Widget) -> Rc<dyn Fn()> {
+    let weak = widget.downgrade();
+    Rc::new(move || {
+        if let Some(widget) = weak.upgrade() {
+            widget.grab_focus();
+        }
+    })
+}
+
+/// `default_focus`: the keyboard focus starts on the control `id` once its
+/// window shows it, unless a control there has it already.
+pub fn default_focus(ctx: &Ctx, id: &'static str) {
+    let at = ctx.clone();
+    glib::idle_add_local_once(move || {
+        let Some(entry) = controls::find(&at, id) else {
+            return;
+        };
+        let focused = entry
+            .win
+            .upgrade()
+            .and_then(|win| gtk::prelude::GtkWindowExt::focus(&win.window))
+            .is_some_and(|widget| widget.is_focusable() && !widget.is::<gtk::Window>());
+        if !focused && let Some(focus) = entry.actions.focus {
+            focus();
+        }
+    });
 }
 
 /// Give the keyboard focus to the control `id`, as `ui.focus` does.
@@ -237,6 +288,7 @@ pub fn ContentButton(
             activate: run,
             set_file,
             file_kinds: props.pick.map(|pick| pick.kinds),
+            focus: Some(focus_of(button.upcast_ref())),
             ..Actions::default()
         },
     );

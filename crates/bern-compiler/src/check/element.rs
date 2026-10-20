@@ -448,7 +448,8 @@ impl Checker<'_> {
         }
     }
 
-    /// An `Adaptive` has one `Layout` per size, and needs `[layouts]`.
+    /// An `Adaptive` has one `Layout` per size, and needs `[layouts]`; the
+    /// `tv` layout is optional.
     fn adaptive(&mut self, element: &ast::Element, layouts: &[ir::Node]) {
         if self.layouts.is_none() {
             self.error(
@@ -493,6 +494,15 @@ impl Checker<'_> {
                     ),
                 );
             }
+        }
+        // A television's layout is chosen by the device, not the width:
+        // optional, one at most, and without a breakpoint.
+        let tv = sizes.iter().filter(|name| **name == "tv").count();
+        if tv > 1 {
+            self.error(
+                element.span,
+                format!("error[B401]: `Adaptive` has at most one `Layout(size: tv)`, found {tv}"),
+            );
         }
     }
 }

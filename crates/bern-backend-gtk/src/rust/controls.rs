@@ -27,6 +27,7 @@ impl Generator<'_> {
             element,
             &format!("b::activate_target(c, {})", self.id(element)),
         );
+        self.default_focus(out, element);
     }
 
     pub(super) fn button(&self, out: &mut Out, element: &Element) {
@@ -49,6 +50,7 @@ impl Generator<'_> {
             element,
             &format!("b::activate_target(c, {})", self.id(element)),
         );
+        self.default_focus(out, element);
     }
 
     pub(super) fn icon_button(&self, out: &mut Out, element: &Element) {
@@ -70,6 +72,7 @@ impl Generator<'_> {
             element,
             &format!("b::activate_target(c, {})", self.id(element)),
         );
+        self.default_focus(out, element);
     }
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element) {
@@ -203,6 +206,7 @@ impl Generator<'_> {
             element,
             &format!("b::activate_target(c, {})", self.id(element)),
         );
+        self.default_focus(out, element);
     }
 
     pub(super) fn split_button(&self, out: &mut Out, element: &Element) {
@@ -265,5 +269,15 @@ impl Generator<'_> {
             &element.children,
             ");",
         );
+    }
+}
+
+impl Generator<'_> {
+    /// `default_focus`: the keyboard focus starts on the control once its
+    /// window shows it.
+    fn default_focus(&self, out: &mut Out, element: &Element) {
+        if element.keyword("default_focus") == Some("true") {
+            out.line(format!("b::default_focus(c, {});", self.id(element)));
+        }
     }
 }

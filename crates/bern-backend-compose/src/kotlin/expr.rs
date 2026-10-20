@@ -230,6 +230,13 @@ impl Generator<'_> {
                 match op {
                     bern_ir::SessionOp::Set { value } => format!("{target} = {}", self.expr(value)),
                     bern_ir::SessionOp::Toggle => format!("{target} = !{target}"),
+                    bern_ir::SessionOp::PushStr { value } => {
+                        format!("{target} = {target} + {}", self.expr(value))
+                    }
+                    // The last character, not half of a surrogate pair.
+                    bern_ir::SessionOp::Pop => format!(
+                        "{target} = {target}.let {{ text -> if (text.isEmpty()) text else text.substring(0, text.offsetByCodePoints(text.length, -1)) }}"
+                    ),
                 }
             }
             Action::Engine { command, args } => {

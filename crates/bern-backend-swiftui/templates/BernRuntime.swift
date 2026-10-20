@@ -515,6 +515,8 @@ final class BernWindowContext {
     var large: Bool { size == "large" }
     /// Shorter than the compact breakpoint, as a phone on its side.
     var short: Bool { height > 0 && height < bernAppBreakpoints.compact }
+    /// On a television: `window.tv`.
+    var tv: Bool { bernTelevision }
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
 
@@ -676,6 +678,16 @@ private struct BernControl: ViewModifier {
 /// keep their identity through the same `id` in both layouts.
 /// The breakpoints of `[layouts]`: below `compact` the size is compact,
 /// below `medium` medium, below `expanded` expanded, and large beyond.
+/// Whether the app runs on a television, which shows an `Adaptive`'s
+/// `tv` layout whatever its width.
+let bernTelevision: Bool = {
+    #if os(tvOS)
+    true
+    #else
+    false
+    #endif
+}()
+
 struct BernBreakpoints: Sendable {
     let compact: CGFloat
     let medium: CGFloat?
@@ -727,7 +739,11 @@ struct BernAdaptive<Content: View>: View {
         self.content = content
     }
 
-    private var size: String { breakpoints.size(of: width ?? .infinity) }
+    /// A television shows the `tv` layout where there is one; elsewhere
+    /// the width chooses.
+    private var size: String {
+        bernTelevision && declared.contains("tv") ? "tv" : breakpoints.size(of: width ?? .infinity)
+    }
 
     var body: some View {
         // The width measured is the room given, not the layout's own: a
@@ -1935,7 +1951,7 @@ struct BernImage: View {
         // The iOS simulator decodes gain maps to HDR as black, and cannot
         // show HDR anyway; it shows the SDR picture.
         #if !targetEnvironment(simulator)
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             decoded = CGImageSourceCreateImageAtIndex(
                 source, 0, [kCGImageSourceDecodeRequest: kCGImageSourceDecodeToHDR] as CFDictionary)
         }
@@ -2164,16 +2180,21 @@ struct BernDrop: ViewModifier {
         content
             .onAppear { if opens { BernFiles.register(token, kinds: kinds, give: give) } }
             .onDisappear { BernFiles.unregister(token) }
+            // A television has no drag and drop: there only the files the
+            // system opens with the app arrive.
+            #if !os(tvOS)
             .onDrop(
                 of: [.fileURL] + BernFiles.types(kinds),
                 delegate: BernDropDelegate(
                     kinds: kinds, inside: $inside, accepted: $accepted, give: give))
+            #endif
             .onChange(of: accepted) { _, accepted in
                 if over?.wrappedValue != accepted { over?.wrappedValue = accepted }
             }
     }
 }
 
+#if !os(tvOS)
 @MainActor
 private struct BernDropDelegate: DropDelegate {
     let kinds: String
@@ -2248,6 +2269,7 @@ private struct BernDropDelegate: DropDelegate {
         }
     }
 }
+#endif
 
 // Fixed logical scenes use a single transform so images, type and hit targets
 // stay registered while fitting a smaller hosting window. No app frame clock.
@@ -2255,10 +2277,19 @@ struct BernScaleBox<Content: View>: View {
     let width: CGFloat
     let height: CGFloat
     @ViewBuilder var content: () -> Content
+    /// The scale of a scene around this one.
+    @Environment(\.bernSceneScale) private var outer
     var body: some View {
         GeometryReader { geometry in
             let scale = min(geometry.size.width / max(1, width), geometry.size.height / max(1, height))
             ZStack(alignment: .topLeading) { content() }
+                #if os(tvOS)
+                // Text the scene leaves to the system reads at the design's
+                // body size, not at tvOS's, which the scale would enlarge.
+                .font(.system(size: bernSceneBodySize))
+                #endif
+                .environment(\.bernSceneScaled, true)
+                .environment(\.bernSceneScale, outer * scale)
                 .frame(width: width, height: height)
                 .scaleEffect(scale, anchor: .topLeading)
                 .frame(width: width * scale, height: height * scale, alignment: .topLeading)
@@ -2280,11 +2311,15 @@ struct BernControlledSlider: View {
     @State private var editing = false
     var body: some View {
         Group {
+            #if os(tvOS)
+            BernFocusSlider(value: $preview, minimum: minimum, maximum: maximum, step: step, label: label, labelHidden: labelHidden, onEditingChanged: edit)
+            #else
             if let step {
                 Slider(value: $preview, in: minimum...maximum, step: step, onEditingChanged: edit) { Text(label) }
             } else {
                 Slider(value: $preview, in: minimum...maximum, onEditingChanged: edit) { Text(label) }
             }
+            #endif
         }
         .modifier(BernSliderLabelHidden(hidden: labelHidden))
         .bernAccentTint()

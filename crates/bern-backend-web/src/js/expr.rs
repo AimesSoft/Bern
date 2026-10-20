@@ -229,6 +229,13 @@ impl Generator<'_> {
                         format!("{cell}.set({})", self.expr(value))
                     }
                     bern_ir::SessionOp::Toggle => format!("{cell}.set(!{cell}.peek())"),
+                    bern_ir::SessionOp::PushStr { value } => {
+                        format!("{cell}.set({cell}.peek() + {})", self.expr(value))
+                    }
+                    // The last character, not half of a surrogate pair.
+                    bern_ir::SessionOp::Pop => {
+                        format!("{cell}.set([...{cell}.peek()].slice(0, -1).join(\"\"))")
+                    }
                 }
             }
             Action::Engine { command, args } => {

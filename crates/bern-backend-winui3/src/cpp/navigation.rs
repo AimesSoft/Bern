@@ -206,6 +206,8 @@ impl Generator<'_> {
             "B::Adaptive(p, c, {}, std::array<Build, 4>{{",
             self.optional_id(element)
         ));
+        // A Windows desktop app never runs on a television: a `tv` layout
+        // is not built.
         for size in ["compact", "medium", "expanded", "large"] {
             match layout(size) {
                 Some(layout) => self.children(out, "", &layout.children, ","),

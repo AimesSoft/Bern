@@ -34,6 +34,12 @@ impl Generator<'_> {
         let (action, file) = self.pressed(element);
         let enabled = self.enabled(element);
         let target = self.target(element, ctx);
+        // `default_focus`: the focus starts on the button once it shows.
+        let start = if element.keyword("default_focus") == Some("true") {
+            ".then(bernDefaultFocus())"
+        } else {
+            ""
+        };
         out.line(format!(
             "BernControl({target}, \"button\", {label}, {enabled}, BernControlActions(activate = {{ {action} }}{file}))"
         ));
@@ -63,7 +69,7 @@ impl Generator<'_> {
                 _ => "",
             };
             out.open(format!(
-                "BernContentButton({label}, {enabled}, {style}, Modifier{width}.testTag({target}){}{prominent}, onClick = {{ {action} }}) {{",
+                "BernContentButton({label}, {enabled}, {style}, Modifier{start}{width}.testTag({target}){}{prominent}, onClick = {{ {action} }}) {{",
                 self.shape_arg(element)
             ));
             self.nodes(out, &element.children, &ctx.within(Scope::Other));
@@ -90,7 +96,7 @@ impl Generator<'_> {
                 extra.push_str(&format!(", prominence = {prominence}"));
             }
             out.line(format!(
-                "BernIconButton({label}, {}, {enabled}, Modifier.testTag({target}){style}{extra}) {{ {action} }}",
+                "BernIconButton({label}, {}, {enabled}, Modifier{start}.testTag({target}){style}{extra}) {{ {action} }}",
                 Self::icon(element.icon("icon"))
             ));
             return;
@@ -101,7 +107,7 @@ impl Generator<'_> {
             ""
         };
         out.line(format!(
-            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{weight}.testTag({target})) {{ {action} }}",
+            "BernButton({label}, {}, {prominence}, destructive = {}, enabled = {enabled}{style}{}{fill}, modifier = Modifier{start}{weight}.testTag({target})) {{ {action} }}",
             Self::icon(element.icon("icon")),
             element.keyword("role") == Some("destructive"),
             self.shape_arg(element)

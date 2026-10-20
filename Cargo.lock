@@ -257,6 +257,7 @@ dependencies = [
  "bern-media",
  "bern-protocol",
  "bern-svg",
+ "png",
  "serde",
  "serde_json",
 ]

@@ -8,40 +8,61 @@ use bern_ir::{Element, Node};
 
 impl Generator<'_> {
     /// `.keyboardShortcut(…)` arguments for an element's `shortcut`; `cmd`
-    /// is Command on Apple systems.
+    /// is Command on Apple systems. None on tvOS, which has no keyboard
+    /// shortcuts; see `shortcut_line`.
     pub(super) fn shortcut(&self, element: &Element) -> Option<String> {
-        let text = element.keyword("shortcut")?;
-        let mut parts: Vec<&str> = text.split('+').collect();
-        let key = parts.pop()?;
-        let key = match key {
-            "space" => ".space".to_string(),
-            "escape" => ".escape".into(),
-            "return" => ".return".into(),
-            "tab" => ".tab".into(),
-            "delete" => ".delete".into(),
-            "up" => ".upArrow".into(),
-            "down" => ".downArrow".into(),
-            "left" => ".leftArrow".into(),
-            "right" => ".rightArrow".into(),
-            "home" => ".home".into(),
-            "end" => ".end".into(),
-            "pageup" => ".pageUp".into(),
-            "pagedown" => ".pageDown".into(),
-            other => format!("SwiftUI.KeyEquivalent(Character({}))", string(other)),
-        };
-        let modifiers: Vec<&str> = parts
-            .iter()
-            .map(|modifier| match *modifier {
-                "cmd" => ".command",
-                "ctrl" => ".control",
-                "alt" => ".option",
-                _ => ".shift",
-            })
-            .collect();
+        if self.platform == Platform::Tvos {
+            return None;
+        }
+        keyboard_shortcut(element.keyword("shortcut")?)
+    }
+
+    /// The modifier that gives a control its `shortcut`: the keyboard
+    /// shortcut, or on tvOS the Siri Remote's button that stands for the
+    /// key (see `remote_key`), which runs `action` while the control is on
+    /// screen and enabled. Keys the remote has no button for, and controls
+    /// whose action is not a press, give nothing there.
+    pub(super) fn shortcut_line(&self, element: &Element, action: Option<&str>) -> Option<String> {
+        if self.platform != Platform::Tvos {
+            return self
+                .shortcut(element)
+                .map(|shortcut| format!(".keyboardShortcut({shortcut})"));
+        }
+        let key = remote_key(element.keyword("shortcut")?)?;
+        let enabled = element
+            .expr("enabled")
+            .map(|enabled| self.expr(enabled))
+            .unwrap_or_else(|| "true".into());
         Some(format!(
-            "SwiftUI.KeyboardShortcut({key}, modifiers: [{}])",
-            modifiers.join(", ")
+            ".bernRemoteShortcut({key}, enabled: {enabled}) {{ {} }}",
+            action?
         ))
+    }
+
+    /// `Shortcut`: its key runs the action while the shortcut is on screen
+    /// and enabled, without a control; on tvOS the remote's button that
+    /// stands for the key, where it has one.
+    pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
+        let action = element
+            .action
+            .as_ref()
+            .map(|action| self.action(action))
+            .unwrap_or_default();
+        let enabled = element
+            .expr("enabled")
+            .map(|enabled| self.expr(enabled))
+            .unwrap_or_else(|| "true".into());
+        let key = element.keyword("key").unwrap_or_default();
+        let source = if self.platform == Platform::Tvos {
+            remote_key(key).map(|remote| format!("remote: {remote}"))
+        } else {
+            keyboard_shortcut(key).map(|shortcut| format!("shortcut: {shortcut}"))
+        };
+        if let Some(source) = source {
+            out.line(format!(
+                "BernKeyShortcut({source}, enabled: {enabled}) {{ {action} }}"
+            ));
+        }
     }
 
     pub(super) fn button(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
@@ -87,8 +108,11 @@ impl Generator<'_> {
             out.line(format!(
                 ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
             ));
-            if let Some(shortcut) = self.shortcut(element) {
-                out.line(format!(".keyboardShortcut({shortcut})"));
+            if let Some(line) = self.shortcut_line(element, Some(&action)) {
+                out.line(line);
+            }
+            if element.keyword("default_focus") == Some("true") {
+                out.line(".bernDefaultFocus()");
             }
             if let Some(enabled) = &enabled {
                 out.line(format!(".disabled(!({enabled}))"));
@@ -199,8 +223,11 @@ impl Generator<'_> {
                 }
             }
         }
-        if let Some(shortcut) = self.shortcut(element) {
-            out.line(format!(".keyboardShortcut({shortcut})"));
+        if let Some(line) = self.shortcut_line(element, Some(&action)) {
+            out.line(line);
+        }
+        if element.keyword("default_focus") == Some("true") {
+            out.line(".bernDefaultFocus()");
         }
         if let Some(enabled) = &enabled {
             out.line(format!(".disabled(!({enabled}))"));
@@ -245,8 +272,8 @@ impl Generator<'_> {
                 ".bernButtonLook(.secondary)"
             });
         }
-        if let Some(shortcut) = self.shortcut(element) {
-            out.line(format!(".keyboardShortcut({shortcut})"));
+        if let Some(line) = self.shortcut_line(element, None) {
+            out.line(line);
         }
     }
 
@@ -269,8 +296,8 @@ impl Generator<'_> {
         ));
         self.nodes(out, &element.children, ctx);
         out.close("}");
-        if let Some(shortcut) = self.shortcut(element) {
-            out.line(format!(".keyboardShortcut({shortcut})"));
+        if let Some(line) = self.shortcut_line(element, None) {
+            out.line(line);
         }
     }
 
@@ -300,7 +327,7 @@ impl Generator<'_> {
         let kind = element.keyword("kind").unwrap_or("plain");
         // An iOS form shows a text field's prompt, not its label: the label
         // goes beside a single line, as in Settings, and above several.
-        let ios = self.platform == Platform::Ios && element.keyword("label_hidden") != Some("true");
+        let ios = self.platform.uikit() && element.keyword("label_hidden") != Some("true");
         if ios {
             if kind == "multiline" {
                 out.open("SwiftUI.VStack(alignment: .leading, spacing: 6) {");
@@ -324,6 +351,9 @@ impl Generator<'_> {
         out.close("}");
         if kind == "multiline" {
             out.line(".lineLimit(3...8)");
+        }
+        if self.platform == Platform::Tvos {
+            out.line(".bernFieldLook()");
         }
         if ios {
             if kind == "multiline" {
@@ -373,6 +403,12 @@ impl Generator<'_> {
         // iOS has no checkboxes; its toggles are switches.
         out.line(".bernAccentTint()");
         match (element.keyword("style"), self.platform) {
+            // tvOS has no switch, only a button that says On or Off: the
+            // switch of the other platforms, drawn, which the remote's
+            // select flips.
+            (Some("switch") | Some("checkbox") | None, Platform::Tvos) => {
+                out.line(".toggleStyle(BernFocusSwitchStyle())")
+            }
             (Some("switch"), _) => out.line(".toggleStyle(.switch)"),
             (Some("checkbox"), Platform::Macos) => out.line(".toggleStyle(.checkbox)"),
             (Some("button"), _) => {
@@ -382,15 +418,16 @@ impl Generator<'_> {
                         self.length(element, "height")
                             .unwrap_or_else(|| "30.0".into())
                     ));
-                } else {
+                } else if self.platform != Platform::Tvos {
+                    // tvOS's toggles are buttons already.
                     out.line(".toggleStyle(.button)");
                 }
                 out.line(format!(".help({label})"));
             }
             _ => {}
         }
-        if let Some(shortcut) = self.shortcut(element) {
-            out.line(format!(".keyboardShortcut({shortcut})"));
+        if let Some(line) = self.shortcut_line(element, None) {
+            out.line(line);
         }
         out.line(format!(
             ".bernControl({}, role: \"switch\", label: {label}, actions: BernControlActions(setBool: {setter}, value: {{ {field} ? \"true\" : \"false\" }}))",
@@ -415,6 +452,37 @@ impl Generator<'_> {
             .map(|step| format!(", step: {}", double(step)))
             .unwrap_or_default();
         let action = element.action.as_ref().map(|a| self.action(a));
+        // tvOS has no slider: the remote's left and right move a focused
+        // track by its step.
+        if self.platform == Platform::Tvos {
+            let icon = |name: &str| {
+                element
+                    .icon(name)
+                    .map(string)
+                    .unwrap_or_else(|| "nil".into())
+            };
+            out.open(format!(
+                "BernFocusSlider(value: {}, minimum: {min}, maximum: {max}, step: {}, label: {label}, minimumIcon: {}, maximumIcon: {}, labelHidden: {}) {{ editing in",
+                self.binding_of(&field),
+                element.number("step").map(double).unwrap_or_else(|| "nil".into()),
+                icon("min_icon"),
+                icon("max_icon"),
+                element.keyword("label_hidden") == Some("true")
+            ));
+            match &action {
+                Some(action) => out.line(format!("if !editing {{ {action} }}")),
+                None => out.line("_ = editing"),
+            }
+            out.close("}");
+            let commit = action
+                .map(|action| format!("; {action}"))
+                .unwrap_or_default();
+            out.line(format!(
+                ".bernControl({}, role: \"slider\", label: {label}, actions: BernControlActions(setNumber: {{ value in {field} = value{commit} }}, value: {{ BernText.text({field}) }}))",
+                self.target(element, ctx)
+            ));
+            return;
+        }
         out.open(format!(
             "SwiftUI.Slider(value: {}, in: {min}...{max}{step}) {{",
             self.binding_of(&field)
@@ -463,7 +531,51 @@ impl Generator<'_> {
         let (field, binding, setter) = self.control_value(element, "selected");
         let label = self.text_prop(element, "label").unwrap_or_default();
         let enum_type = swift_type(ty);
-        let capsule = element.keyword("shape") == Some("capsule");
+        // tvOS's segmented control takes a television's size, too large in
+        // a scene laid out at the design's: `BernSegments` draws it there.
+        if self.platform == Platform::Tvos && element.keyword("style") == Some("segmented") {
+            let options = if element.children.is_empty() {
+                format!("{enum_type}.allCases.map {{ ($0.bernLabel, $0) }}")
+            } else {
+                let pairs: Vec<String> = element
+                    .children
+                    .iter()
+                    .filter_map(|node| match node {
+                        Node::Element(option) => Some(format!(
+                            "({}, {})",
+                            self.text_prop(option, "label").unwrap_or_default(),
+                            self.expr(option.expr("value").expect("picker option value"))
+                        )),
+                        _ => None,
+                    })
+                    .collect();
+                format!("[{}]", pairs.join(", "))
+            };
+            out.line(format!(
+                "BernSegments(selection: {binding}, options: {options}).bernAccentTint()"
+            ));
+            out.line(format!(
+                ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
+            ));
+            out.line(format!(
+                ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; ({setter})(value); return true }}, value: {{ {field}.bernName }}))",
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        // tvOS's menu picker shows its value alone: there the row says what
+        // it chooses, and the choice is a capsule menu at its end, as a
+        // form's row reads on the other platforms.
+        let row = self.platform == Platform::Tvos
+            && element.keyword("style") == Some("menu")
+            && element.keyword("shape") != Some("capsule")
+            && element.keyword("label_hidden") != Some("true");
+        let capsule = row || element.keyword("shape") == Some("capsule");
+        if row {
+            out.open("SwiftUI.HStack(spacing: 12) {");
+            out.line(format!("SwiftUI.Text(verbatim: {label})"));
+            out.line("SwiftUI.Spacer(minLength: 12)");
+        }
         if capsule {
             out.open("SwiftUI.Menu {");
         }
@@ -496,7 +608,7 @@ impl Generator<'_> {
             Some("segmented") => out.line(".pickerStyle(.segmented).bernAccentTint()"),
             // iOS lists the options with a checkmark instead of
             // radio buttons.
-            Some("radio") if self.platform == Platform::Ios => out.line(".pickerStyle(.inline)"),
+            Some("radio") if self.platform.uikit() => out.line(".pickerStyle(.inline)"),
             Some("radio") => out.line(".pickerStyle(.radioGroup)"),
             Some("inline") => out.line(".pickerStyle(.inline)"),
             _ => {}
@@ -510,7 +622,7 @@ impl Generator<'_> {
             // iOS draws no arrow on the menu's button; the capsule
             // shows the design's pull-down arrow, as a capsule `Menu`
             // does.
-            let arrow = self.platform == Platform::Ios;
+            let arrow = self.platform.uikit();
             if arrow {
                 out.open("SwiftUI.HStack(spacing: 6) {");
             }
@@ -541,12 +653,18 @@ impl Generator<'_> {
             }
             out.line(format!(
                 ".bernCapsuleControl(height: {})",
-                self.length(element, "height")
-                    .unwrap_or_else(|| "32.0".into())
+                self.length(element, "height").unwrap_or_else(|| if row {
+                    "46.0".into()
+                } else {
+                    "32.0".into()
+                })
             ));
             out.line(format!(
                 ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
             ));
+        }
+        if row {
+            out.close("}");
         }
         out.line(format!(
             ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; ({setter})(value); return true }}, value: {{ {field}.bernName }}))",
@@ -650,4 +768,55 @@ impl Generator<'_> {
             double(element.number("interval").unwrap_or(1.0))
         ));
     }
+}
+
+/// `SwiftUI.KeyboardShortcut(…)` for a shortcut literal such as `cmd+o`.
+fn keyboard_shortcut(text: &str) -> Option<String> {
+    let mut parts: Vec<&str> = text.split('+').collect();
+    let key = parts.pop()?;
+    let key = match key {
+        "space" => ".space".to_string(),
+        "escape" => ".escape".into(),
+        "return" => ".return".into(),
+        "tab" => ".tab".into(),
+        "delete" => ".delete".into(),
+        "up" => ".upArrow".into(),
+        "down" => ".downArrow".into(),
+        "left" => ".leftArrow".into(),
+        "right" => ".rightArrow".into(),
+        "home" => ".home".into(),
+        "end" => ".end".into(),
+        "pageup" => ".pageUp".into(),
+        "pagedown" => ".pageDown".into(),
+        other => format!("SwiftUI.KeyEquivalent(Character({}))", string(other)),
+    };
+    let modifiers: Vec<&str> = parts
+        .iter()
+        .map(|modifier| match *modifier {
+            "cmd" => ".command",
+            "ctrl" => ".control",
+            "alt" => ".option",
+            _ => ".shift",
+        })
+        .collect();
+    Some(format!(
+        "SwiftUI.KeyboardShortcut({key}, modifiers: [{}])",
+        modifiers.join(", ")
+    ))
+}
+
+/// The Siri Remote's button that stands for a key on a television: Back
+/// for `escape`, Play/Pause for `space`, and the clickpad's edges for the
+/// arrows, when the press moves the focus nowhere. Other keys, and keys
+/// with modifiers, have none.
+fn remote_key(text: &str) -> Option<&'static str> {
+    Some(match text {
+        "escape" => ".back",
+        "space" => ".playPause",
+        "left" => ".left",
+        "right" => ".right",
+        "up" => ".up",
+        "down" => ".down",
+        _ => return None,
+    })
 }

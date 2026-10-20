@@ -455,6 +455,7 @@ impl<'a> Generator<'a> {
             "Flow" => self.flow(out, element, ctx),
             "Modal" => self.modal(out, element, ctx),
             "Timer" => self.timer(out, element),
+            "Shortcut" => self.key_shortcut(out, element),
             "ControlGroup" => self.control_group(out, element, ctx),
             "SearchItem" => self.search_item(out, element, ctx),
             "Rail" => self.rail(out, element, ctx),

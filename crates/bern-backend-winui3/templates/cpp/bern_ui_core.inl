@@ -1306,6 +1306,8 @@ inline Value Ctx::WindowFlag(std::string_view name) const {
     if (!win) return Value::Bool(false);
     if (name == "idle") return Value::Bool(win->idle.Get());
     if (name == "short") return Value::Bool(win->isShort.Get());
+    // A Windows desktop app never runs on a television.
+    if (name == "tv") return Value::Bool(false);
     return Value::Bool(win->size.Get() == name);
 }
 inline double B::Len::Now(Ctx const& ctx) const {

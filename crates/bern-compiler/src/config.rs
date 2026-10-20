@@ -1784,14 +1784,38 @@ mod tests {
             ("web/favicon.svg", b"<svg/>".to_vec()),
             ("web/apple-touch-icon.png", png(180, 180)),
             ("web/site.webmanifest", b"{}".to_vec()),
+            (
+                "tv/App.brandassets/Contents.json",
+                br#"{"assets":[{"filename":"App Icon.imagestack","idiom":"tv","role":"primary-app-icon","size":"400x240"}]}"#.to_vec(),
+            ),
+            (
+                "tv/App.brandassets/App Icon.imagestack/Contents.json",
+                br#"{"layers":[{"filename":"Front.imagestacklayer"},{"filename":"Back.imagestacklayer"}]}"#.to_vec(),
+            ),
+            (
+                "tv/App.brandassets/App Icon.imagestack/Front.imagestacklayer/Content.imageset/Contents.json",
+                br#"{"images":[{"filename":"front.png","idiom":"tv"}]}"#.to_vec(),
+            ),
+            (
+                "tv/App.brandassets/App Icon.imagestack/Front.imagestacklayer/Content.imageset/front.png",
+                png(400, 240),
+            ),
+            (
+                "tv/App.brandassets/App Icon.imagestack/Back.imagestacklayer/Content.imageset/Contents.json",
+                br#"{"images":[{"filename":"back.png","idiom":"tv"}]}"#.to_vec(),
+            ),
+            (
+                "tv/App.brandassets/App Icon.imagestack/Back.imagestacklayer/Content.imageset/back.png",
+                png(400, 240),
+            ),
         ];
         let (every, platforms, errors) = check_icons(
             &files,
-            r#"{ default = "icon.png", macos = "mac/App.icns", windows = "win/app.ico", ios = "ios/AppIcon.appiconset", android = "android/res", linux = "linux/hicolor", browser = "web" }"#,
+            r#"{ default = "icon.png", macos = "mac/App.icns", windows = "win/app.ico", ios = "ios/AppIcon.appiconset", tvos = "tv/App.brandassets", android = "android/res", linux = "linux/hicolor", browser = "web" }"#,
         );
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(every.as_deref(), Some("icon.png"));
-        assert_eq!(platforms.len(), 6);
+        assert_eq!(platforms.len(), 7);
         assert_eq!(platforms["linux"], "linux/hicolor");
         // A platform can also take another PNG, and needs no `default`.
         let (every, platforms, errors) = check_icons(&files, r#"{ android = "icon.png" }"#);
@@ -1800,7 +1824,16 @@ mod tests {
         assert_eq!(platforms["android"], "icon.png");
 
         for (extra, value, expected) in [
-            (vec![], r#"{ tvos = "icon.png" }"#, "not a platform"),
+            (vec![], r#"{ watchos = "icon.png" }"#, "not a platform"),
+            (vec![], r#"{ tvos = "win/app.ico" }"#, "`.brandassets`"),
+            (
+                vec![(
+                    "tv/App.brandassets/App Icon.imagestack/Contents.json",
+                    br#"{"layers":[{"filename":"Front.imagestacklayer"}]}"#.to_vec(),
+                )],
+                r#"{ tvos = "tv/App.brandassets" }"#,
+                "two to five",
+            ),
             (vec![], r#"{ macos = "win/app.ico" }"#, "`.icns`"),
             (vec![], r#"{ default = "mac/App.icns" }"#, "not a PNG"),
             (vec![], r#"{ windows = "web" }"#, "`.ico`"),

@@ -13,6 +13,8 @@ impl Generator<'_> {
             .map(|expr| format!("() => {}", self.expr(expr)));
         let (action, set_file, kinds) = self.file_actions(element);
         let style = crate::style::reference(self.app, &element.kind, element.keyword("variant"));
+        let default_focus =
+            (element.keyword("default_focus") == Some("true")).then(|| "true".to_string());
         if element.kind == "Button" && !element.children.is_empty() {
             let props = Self::props(vec![
                 ("id", Some(self.id(element))),
@@ -23,6 +25,7 @@ impl Generator<'_> {
                 ("height", self.length(element, "height")),
                 ("setFile", set_file),
                 ("fileKinds", kinds),
+                ("defaultFocus", default_focus.clone()),
             ]);
             self.children(
                 out,
@@ -57,6 +60,7 @@ impl Generator<'_> {
                     ),
                     ("setFile", set_file),
                     ("fileKinds", kinds),
+                    ("defaultFocus", default_focus),
                 ]),
             ));
         }
@@ -309,6 +313,18 @@ impl Generator<'_> {
             &element.children,
             ");",
         );
+    }
+
+    /// `Shortcut`: its key runs the action while it is mounted and enabled.
+    pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "F.KeyShortcut(p, ctx, {}, {});",
+            Self::props(vec![
+                ("key", Self::keyword(element, "key")),
+                ("enabled", self.value_prop(element, "enabled")),
+            ]),
+            self.action_fn(element)
+        ));
     }
 
     pub(super) fn timer(&self, out: &mut Out, element: &Element) {

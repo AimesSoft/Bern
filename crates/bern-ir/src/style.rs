@@ -81,6 +81,10 @@ pub struct TextWeight {
     /// when absent.
     #[serde(default)]
     pub size: Option<f64>,
+    /// The size in points on a television, read from across a room, where
+    /// the design gives one; `size` there otherwise.
+    #[serde(default)]
+    pub tv_size: Option<f64>,
 }
 
 /// The weights a text style can take.

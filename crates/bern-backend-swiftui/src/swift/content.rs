@@ -34,6 +34,15 @@ impl Generator<'_> {
         }
     }
 
+    /// The size the application gives a text style here: on tvOS, a
+    /// television, its television size where it gives one.
+    fn style_size(&self, entry: &bern_ir::style::TextWeight) -> Option<f64> {
+        match self.platform {
+            Platform::Tvos => entry.tv_size.or(entry.size),
+            _ => entry.size,
+        }
+    }
+
     /// The point size a text is set in: its own, its style's, or the
     /// platform's body size.
     fn text_size(&self, element: &Element) -> String {
@@ -45,11 +54,13 @@ impl Generator<'_> {
                     .text_weights
                     .iter()
                     .find(|entry| entry.style == style)
-                    .and_then(|entry| entry.size.map(double))
+                    .and_then(|entry| self.style_size(entry).map(double))
             })
             .unwrap_or_else(|| match self.platform {
                 Platform::Macos => "13.0".into(),
                 Platform::Ios => "17.0".into(),
+                // tvOS reads its body at ten feet.
+                Platform::Tvos => "29.0".into(),
             })
     }
 
@@ -98,7 +109,7 @@ impl Generator<'_> {
             {
                 Some(entry) => match self
                     .length(element, "font_size")
-                    .or_else(|| entry.size.map(double))
+                    .or_else(|| self.style_size(entry).map(double))
                 {
                     Some(size) => out.line(format!(
                         ".font(.system(size: {}, weight: .{}))",

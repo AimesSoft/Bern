@@ -199,6 +199,24 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     assert!(kotlin.contains("BernHost.layouts = BernLayouts(600.0, 1024.0, 1440.0)"));
     assert!(kotlin.contains("medium = {"));
     assert!(kotlin.contains("large = null,"));
+    // A television's layout and margins, the dialog's first focus, and
+    // Escape (a television's Back) closing the details while they show.
+    assert!(kotlin.contains("tv = {"));
+    assert!(kotlin.contains("bernWindow.tv"));
+    assert!(kotlin.contains("bernDefaultFocus()"));
+    assert!(
+        kotlin.contains("BernShortcut(\"escape\", { true }) {"),
+        "{kotlin}"
+    );
+    // Keys that type, a search that suggests, a television's caption.
+    assert!(kotlin.contains("bernGalleryDraft.query = bernGalleryDraft.query + \"check\""));
+    assert!(kotlin.contains("offsetByCodePoints"));
+    assert!(
+        kotlin
+            .contains("\"caption\" to Pair(\"regular\", if (BernHost.television) 14.0 else null)")
+    );
+    // The remote's arrows move the focus before a shortcut takes them.
+    assert!(kotlin.contains("if (BernHost.television && BernShortcuts.isArrow(event))"));
 }
 
 /// The showcase with a `TabAccessory` in its first `Tabs`, shown while a

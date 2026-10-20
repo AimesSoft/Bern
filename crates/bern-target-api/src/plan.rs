@@ -69,9 +69,13 @@ pub enum Run {
     /// on a line `open <address>`; open that address in the browser and
     /// wait until the program exits.
     PageHost(PathBuf),
-    /// Install the app bundle into the booted iOS simulator, start it there
-    /// and wait until it exits.
-    Simulator { app: PathBuf, bundle_id: String },
+    /// Install the app bundle into a booted simulator of `system`, start it
+    /// there and wait until it exits.
+    Simulator {
+        app: PathBuf,
+        bundle_id: String,
+        system: SimulatedSystem,
+    },
     /// Install the APK on the Android device `adb` reaches, start its
     /// activity and show its log until it exits.
     Android {
@@ -82,6 +86,24 @@ pub enum Run {
         /// `adb forward` joins, for the control channel.
         forward: Option<(PathBuf, String)>,
     },
+}
+
+/// The system a simulator runs, as its runtimes name it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SimulatedSystem {
+    Ios,
+    Tvos,
+}
+
+impl SimulatedSystem {
+    /// The system's name in simulator runtimes and in messages: `iOS`,
+    /// `tvOS`.
+    pub fn name(self) -> &'static str {
+        match self {
+            SimulatedSystem::Ios => "iOS",
+            SimulatedSystem::Tvos => "tvOS",
+        }
+    }
 }
 
 /// Where packages go: `target/bern/dist/` of the workspace.

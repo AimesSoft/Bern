@@ -112,6 +112,8 @@ pub struct WindowState {
     /// Whether the window is shorter than the compact breakpoint, as a
     /// phone on its side.
     pub short: <bool as BernValue>::Ref,
+    /// Whether the window is a television's.
+    pub tv: <bool as BernValue>::Ref,
 }
 
 pub fn window() -> WindowState {
@@ -122,5 +124,6 @@ pub fn window() -> WindowState {
         expanded: bool::reference(),
         large: bool::reference(),
         short: bool::reference(),
+        tv: bool::reference(),
     }
 }

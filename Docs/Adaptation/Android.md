@@ -155,6 +155,8 @@ Google TV / Android TV Live tab 合作接入有额外 direct-back 要求，且�
 
 进度定位、字幕、音轨与播放速度需要可聚焦的语义入口；直播或不可定位媒体明确禁用相应动作并报告原因。控件自动隐藏后保持确定的恢复位置，字幕不因控制条出现而落到安全区外。
 
+**Bern 实现（2026-10-20）。** Compose 后端按系统的电视模式（`UI_MODE_TYPE_TELEVISION`）或 leanback 特性判断电视：`window.tv` 为真，`Adaptive` 选 `Layout(size: tv)`；`Shortcut` 在电视上对应遥控器（返回键为 `escape`、播放/暂停键为 `space`），方向键先移动焦点、移不动时才交给快捷键；`default_focus` 用 `FocusRequester` 给出起始焦点。以上只有生成器测试，未在 Android TV 设备或模拟器上验证；电视的焦点作用域、返回恢复来源卡片等上述决策尚未实现。
+
 ## 9. 播放器、生命周期与系统入口
 
 **官方依据。** 配置变化后应用应维持上下文与状态，尤其不能丢失输入或中断连续的媒体体验。[Configuration and continuity](https://developer.android.com/guide/topics/large-screens/configuration-and-continuity)

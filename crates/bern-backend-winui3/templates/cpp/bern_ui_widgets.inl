@@ -445,6 +445,32 @@ inline controls::Grid Shadowed(controls::Button const& button, StyleDef const* s
     return wrapper;
 }
 
+/// Take the keyboard focus to `control`, while it lives.
+inline std::function<void()> FocusOf(controls::Control const& control) {
+    return [weak = winrt::make_weak(control)] {
+        if (auto control = weak.get()) control.Focus(xaml::FocusState::Programmatic);
+    };
+}
+
+/// `default_focus`: the keyboard focus starts on the control `id` once it
+/// is on screen, unless something in its window has it.
+inline void DefaultFocus(Ctx const& ctx, char const* id) {
+    if (!ctx.win || !ctx.win->root) return;
+    auto target = ctx.Target(id);
+    Host::After(std::chrono::milliseconds(0), [target, root = winrt::make_weak(ctx.win->root)] {
+        auto element = root.get();
+        if (!element || !element.XamlRoot()) return;
+        auto focused = xaml::Input::FocusManager::GetFocusedElement(element.XamlRoot());
+        if (focused && focused.try_as<controls::Control>()) return;
+        for (auto const& [token, entry] : Controls::entries) {
+            if (entry.target == target && entry.actions.focus) {
+                entry.actions.focus();
+                return;
+            }
+        }
+    });
+}
+
 inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     controls::Button button;
     auto text = Bound(ctx, props.label);
@@ -463,7 +489,7 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
     auto run = RunOf(ctx, props.pick, props.files, props.action);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
-    Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = props.files});
+    Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
     ShapeControl(ctx, button, props.shape);
     if (props.fill) {
@@ -523,7 +549,7 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
     auto run = RunOf(ctx, props.pick, props.files, props.action);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
-    Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = props.files});
+    Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
     // A capsule clips its content to the button's corners.
     ShapeControl(ctx, button, props.shape);
@@ -638,7 +664,7 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
     auto run = RunOf(ctx, props.pick, props.files, props.action);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
-    Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = props.files});
+    Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
@@ -744,6 +770,8 @@ struct SearchProps {
     std::optional<double> width;
     std::optional<double> height;
     std::optional<double> fontSize;
+    /// The results show on focus, before anything is typed.
+    bool suggest = false;
 };
 
 inline controls::AutoSuggestBox SearchBox(Ctx const& ctx, SearchProps const& props) {
@@ -849,10 +877,11 @@ inline void Search(Parent const& p, Ctx const& ctx, SearchProps props, Build con
         auto open = std::make_shared<bool>(false);
         // The field's text box inside the search box has the focus.
         auto focused = std::make_shared<bool>(false);
-        auto show = [weakBox, flyout, open, focused, ctx, field] {
+        bool suggest = props.suggest;
+        auto show = [weakBox, flyout, open, focused, ctx, field, suggest] {
             auto box = weakBox.get();
             if (!box) return;
-            bool typed = !R::AsText(ctx.Peek(field)).empty();
+            bool typed = suggest || !R::AsText(ctx.Peek(field)).empty();
             if (*focused && typed && !*open) {
                 controls::Primitives::FlyoutShowOptions options;
                 options.ShowMode(controls::Primitives::FlyoutShowMode::Transient);

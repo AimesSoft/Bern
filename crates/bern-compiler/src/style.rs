@@ -14,7 +14,9 @@ use bern_target_api::Diagnostic;
 use proc_macro2::{Ident, Span};
 
 /// Platforms a rule may name in `#[target(…)]` and `#[exempt(…)]`.
-pub const PLATFORMS: [&str; 6] = ["macos", "ios", "windows", "linux", "android", "browser"];
+pub const PLATFORMS: [&str; 7] = [
+    "macos", "ios", "tvos", "windows", "linux", "android", "browser",
+];
 
 /// Controls that take style overrides, with the states that apply to them.
 const STYLEABLE: &[(&str, &[StyleState])] = &[
@@ -733,12 +735,14 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             );
             continue;
         }
-        // `heavy`, or `font(size: 30, weight: heavy)`.
-        let (weight, size) = match &decl.value {
-            StyleValue::Name(path) if path.len() == 1 => (path[0].to_string(), None),
+        // `heavy`, or `font(size: 30, weight: heavy)`, with `tv: 34` for
+        // the size on a television.
+        let (weight, size, tv_size) = match &decl.value {
+            StyleValue::Name(path) if path.len() == 1 => (path[0].to_string(), None, None),
             StyleValue::Call { name, args } if name == "font" => {
                 let mut weight = None;
                 let mut size = None;
+                let mut tv_size = None;
                 for arg in args {
                     match (
                         arg.name.as_ref().map(|name| name.to_string()).as_deref(),
@@ -747,20 +751,22 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
                         (Some("weight"), StyleValue::Name(path)) if path.len() == 1 => {
                             weight = Some(path[0].to_string())
                         }
-                        (Some("size"), StyleValue::Number(value, span)) => {
-                            if *value > 0.0 {
-                                size = Some(*value);
-                            } else {
+                        (Some(name @ ("size" | "tv")), StyleValue::Number(value, span)) => {
+                            if *value <= 0.0 {
                                 lowering.error(*span, "a text size is more than 0 points");
+                            } else if name == "tv" {
+                                tv_size = Some(*value);
+                            } else {
+                                size = Some(*value);
                             }
                         }
                         _ => lowering.error(
                             arg.value.span(),
-                            "`font` takes `size: points` and `weight: name`",
+                            "`font` takes `size: points`, `tv: points` (the size on a television) and `weight: name`",
                         ),
                     }
                 }
-                (weight.unwrap_or_else(|| "regular".into()), size)
+                (weight.unwrap_or_else(|| "regular".into()), size, tv_size)
             }
             other => {
                 lowering.error(
@@ -784,6 +790,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             style,
             weight,
             size,
+            tv_size,
         };
         match sheet
             .text_weights

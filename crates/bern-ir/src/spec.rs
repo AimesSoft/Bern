@@ -386,8 +386,10 @@ pub const TEXT_STYLES: &[&str] = &[
 
 pub const EMPHASIS: &[&str] = &["primary", "secondary", "tertiary"];
 
-/// Layout sizes of `Adaptive`, as written in `Layout(size: …)`.
-pub const LAYOUT_SIZES: &[&str] = &["compact", "medium", "expanded", "large"];
+/// Layout sizes of `Adaptive`, as written in `Layout(size: …)`: the four
+/// sizes of the available width, and `tv`, the layout a television shows
+/// whatever its width.
+pub const LAYOUT_SIZES: &[&str] = &["compact", "medium", "expanded", "large", "tv"];
 
 /// The feature an entry with a business action reaches.
 const FEATURE: PropSpec = opt("feature", PropKind::Feature);
@@ -610,6 +612,18 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             ],
             Children::None,
             "Invoke a command at an interval in seconds while mounted and enabled; automatically cancels on removal",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        ..spec(
+            "Shortcut",
+            &[
+                req("key", PropKind::Shortcut),
+                opt("enabled", PropKind::Bool),
+            ],
+            Children::None,
+            "A keyboard shortcut without a control of its own: the key runs the action while the shortcut is mounted and enabled; on a television, the remote's button that stands for the key",
         )
     },
     ComponentSpec {
@@ -962,7 +976,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Adaptive",
         &[opt("id", PropKind::Id)],
         Children::Only(&["Layout"]),
-        "Chooses one `Layout` per size by the available width; state is kept across sizes",
+        "Chooses one `Layout` per size by the available width, or the `tv` layout on a television; state is kept across sizes",
     ),
     ComponentSpec {
         placement: Placement::Within(&["Adaptive"]),
@@ -1202,9 +1216,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
                 opt("files", PropKind::FileKinds),
+                opt("default_focus", PropKind::Flag),
             ],
             Children::Any,
-            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen",
+            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen; `default_focus: true` starts the focus on it when it appears (a television's remote, or a keyboard)",
         )
     },
     ComponentSpec {
@@ -1228,9 +1243,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
                 opt("files", PropKind::FileKinds),
+                opt("default_focus", PropKind::Flag),
             ],
             Children::None,
-            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file as `Button` does",
+            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
         )
     },
     ComponentSpec {
@@ -1267,9 +1283,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("width", PropKind::Number),
                 opt("height", PropKind::Number),
                 opt("font_size", PropKind::Number),
+                opt("suggest", PropKind::Flag),
             ],
             Children::Any,
-            "Search text bound to a session draft; the action runs on submit; children are the results shown below the field while it is in use; a palette's `width` and `height` size its panel, a field in the page's its field, and `font_size` its text",
+            "Search text bound to a session draft; the action runs on submit; children are the results shown below the field while it is in use; with `suggest: true` they show before anything is typed too (on a television, whose search page types with the remote, always); a palette's `width` and `height` size its panel, a field in the page's its field, and `font_size` its text",
         )
     },
     ComponentSpec {

@@ -177,6 +177,14 @@ fn text_styles(styles: &[bern_ir::style::TextWeight]) -> String {
             ));
         }
         css.push_str("}\n");
+        // A television (`bern-television` on the document) reads the
+        // design's sizes for it.
+        if let Some(size) = style.tv_size {
+            css.push_str(&format!(
+                ".bern-television .bern-host .bern-{} {{\n  font-size: calc({size}px + var(--bern-text-up));\n}}\n",
+                style.style.replace('_', "-")
+            ));
+        }
     }
     css
 }
@@ -211,22 +219,29 @@ mod tests {
                 style: "large_title".into(),
                 weight: "bold".into(),
                 size: Some(30.0),
+                tv_size: Some(34.0),
             },
             TextWeight {
                 style: "headline".into(),
                 weight: "semibold".into(),
                 size: None,
+                tv_size: None,
             },
             TextWeight {
                 style: "caption".into(),
                 weight: "medium".into(),
                 size: Some(11.5),
+                tv_size: None,
             },
         ]);
         assert!(css.contains(".bern-host .bern-large-title {\n  font-weight: 700;"));
         assert!(css.contains("font-size: calc(30px + var(--bern-text-up));"));
         assert!(css.contains(".bern-host .bern-headline {\n  font-weight: 600;\n}"));
         assert!(css.contains("font-size: calc(11.5px + var(--bern-text-up));"));
+        // On a television the page takes the television's sizes.
+        assert!(css.contains(
+            ".bern-television .bern-host .bern-large-title {\n  font-size: calc(34px + var(--bern-text-up));\n}"
+        ));
     }
 
     #[test]

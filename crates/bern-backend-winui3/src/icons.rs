@@ -55,6 +55,7 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("note.text", 0xE70B),
     ("paintbrush", 0xE790),
     ("paintpalette", 0xE790),
+    ("paperplane", 0xE724),
     ("pause", 0xE769),
     ("pause.fill", 0xF8AE),
     ("person.crop.circle", 0xE77B),

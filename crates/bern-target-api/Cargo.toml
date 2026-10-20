@@ -13,3 +13,4 @@ serde_json.workspace = true
 bern-ir.workspace = true
 bern-protocol.workspace = true
 serde.workspace = true
+png = "0.18"

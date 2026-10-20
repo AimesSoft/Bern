@@ -87,6 +87,24 @@ struct Ctx {
 pub enum Platform {
     Macos,
     Ios,
+    Tvos,
+}
+
+impl Platform {
+    /// Whether the app is a UIKit app: iOS and tvOS share the scene, the
+    /// sheets and the host of UIKit.
+    pub fn uikit(self) -> bool {
+        matches!(self, Platform::Ios | Platform::Tvos)
+    }
+
+    /// The system's name in messages.
+    pub fn system(self) -> &'static str {
+        match self {
+            Platform::Macos => "macOS",
+            Platform::Ios => "iOS",
+            Platform::Tvos => "tvOS",
+        }
+    }
 }
 
 pub struct Generator<'a> {
@@ -108,6 +126,7 @@ impl<'a> Generator<'a> {
         match self.platform {
             Platform::Macos => "macos",
             Platform::Ios => "ios",
+            Platform::Tvos => "tvos",
         }
     }
 
@@ -354,6 +373,7 @@ impl<'a> Generator<'a> {
             "Modal" => self.modal(out, element, ctx),
             "Flow" => self.flow(out, element, ctx),
             "Timer" => self.timer(out, element),
+            "Shortcut" => self.key_shortcut(out, element),
             "Stack" => self.stack(out, element, ctx),
             "Svg" => self.svg(out, element),
             "Image" => self.image(out, element),

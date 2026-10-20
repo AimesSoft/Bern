@@ -158,8 +158,9 @@ pub(crate) struct Win {
     next_shortcut: StdCell<u64>,
 }
 
-/// A mounted shortcut: its token, keys and action.
-type Shortcut = (u64, Keys, Rc<dyn Fn()>);
+/// A mounted shortcut: its token, keys and action, and whether it takes
+/// its keys now (always, without one).
+type Shortcut = (u64, Keys, Rc<dyn Fn()>, Option<Rc<dyn Fn() -> bool>>);
 
 /// A keyboard shortcut: the modifiers and the key, lowercase.
 #[derive(Clone, Debug, PartialEq)]
@@ -331,12 +332,14 @@ impl Win {
         self.toasts.add_toast(toast.clone());
     }
 
-    /// UI state of the window, recording a dependency: `idle`, and the
-    /// layout size `compact`, `medium`, `expanded` or `large`.
+    /// UI state of the window, recording a dependency: `idle`, the layout
+    /// size `compact`, `medium`, `expanded` or `large`, `short`, and `tv`,
+    /// never true: a GNOME desktop is not a television.
     pub(crate) fn state(&self, field: &str) -> Value {
         match field {
             "idle" => Value::Bool(self.idle.get()),
             "short" => Value::Bool(self.short.get()),
+            "tv" => Value::Bool(false),
             size => Value::Bool(self.size.get() == size),
         }
     }
@@ -353,31 +356,39 @@ impl Win {
 
     /// Run `run` on `keys` while the current scope lasts. The latest
     /// shortcut for keys wins.
-    pub(crate) fn add_shortcut(self: &Rc<Self>, keys: &str, run: Rc<dyn Fn()>) {
+    pub(crate) fn add_shortcut(
+        self: &Rc<Self>,
+        keys: &str,
+        run: Rc<dyn Fn()>,
+        active: Option<Rc<dyn Fn() -> bool>>,
+    ) {
         let token = self.next_shortcut.get();
         self.next_shortcut.set(token + 1);
         self.shortcuts
             .borrow_mut()
-            .push((token, parse_keys(keys), run));
+            .push((token, parse_keys(keys), run, active));
         let win = Rc::downgrade(self);
         crate::reactive::on_cleanup(move || {
             if let Some(win) = win.upgrade() {
                 win.shortcuts
                     .borrow_mut()
-                    .retain(|(candidate, _, _)| *candidate != token);
+                    .retain(|(candidate, _, _, _)| *candidate != token);
             }
         });
     }
 
-    /// The shortcut for a key press, given as [`pressed_keys`].
+    /// The shortcut for a key press, given as [`pressed_keys`]: of those
+    /// that take the keys now, the one mounted last.
     fn shortcut_for(&self, pressed: &[Keys]) -> Option<Rc<dyn Fn()>> {
         let found = self
             .shortcuts
             .borrow()
             .iter()
             .rev()
-            .find(|(_, keys, _)| pressed.contains(keys))
-            .map(|(_, keys, run)| (keys.clone(), Rc::clone(run)))?;
+            .find(|(_, keys, _, active)| {
+                pressed.contains(keys) && active.as_ref().is_none_or(|active| active())
+            })
+            .map(|(_, keys, run, _)| (keys.clone(), Rc::clone(run)))?;
         // A key without a modifier does not fire while text is being edited.
         let plain = !found
             .0

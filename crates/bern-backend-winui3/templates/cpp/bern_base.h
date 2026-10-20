@@ -255,6 +255,17 @@ namespace R {
 Value At(Value const& value, std::initializer_list<int> path);
 inline bool Truthy(Value const& value) { return value.kind == Value::Kind::Bool && value.b; }
 inline Value Not(Value const& value) { return Value::Bool(!Truthy(value)); }
+/// `text` with `more` after it (`push_str`).
+inline Value Append(Value const& text, Value const& more) { return Value::Text(text.Str() + more.Str()); }
+/// `text` without its last character, a whole UTF-8 sequence (`pop`).
+inline Value DropLast(Value const& value) {
+    std::string text = value.Str();
+    if (text.empty()) return Value::Text(std::move(text));
+    size_t end = text.size() - 1;
+    while (end > 0 && (static_cast<unsigned char>(text[end]) & 0xC0) == 0x80) --end;
+    text.resize(end);
+    return Value::Text(std::move(text));
+}
 Value Neg(Value const& value);
 inline Value Eq(Value const& a, Value const& b) { return Value::Bool(a == b); }
 inline Value Ne(Value const& a, Value const& b) { return Value::Bool(!(a == b)); }

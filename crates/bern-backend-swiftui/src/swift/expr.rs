@@ -298,6 +298,8 @@ impl Generator<'_> {
                 match op {
                     SessionOp::Set { value } => format!("{target} = {}", self.expr(value)),
                     SessionOp::Toggle => format!("{target}.toggle()"),
+                    SessionOp::PushStr { value } => format!("{target} += {}", self.expr(value)),
+                    SessionOp::Pop => format!("_ = {target}.popLast()"),
                 }
             }
             Action::Window { op, window } => match op {

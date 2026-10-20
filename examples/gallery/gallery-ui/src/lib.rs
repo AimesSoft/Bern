@@ -21,6 +21,11 @@ style! {
         rise: slide(bottom, 16, smooth),
     }
 
+    // Captions read from across a room on a television.
+    text {
+        caption: font(tv: 14),
+    }
+
     Button.card {
         corner: 12,
         hover: scale(1.03, snappy) + shadow(14, y: 6, opacity: 0.18),
@@ -83,7 +88,7 @@ pub fn app(app: gallery::Client, windows: AppWindows) -> impl View {
                 Column(gap: 12, padding: 24, align: center) {
                     Text(content: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, style: title)
                     Text(content: tr! { "zh-Hans" => "一面会浮起的图案墙。", "en" => "A wall of patterns that lift." }, emphasis: secondary)
-                    Button(id: done, label: tr! { "zh-Hans" => "好", "en" => "OK" }, prominence: prominent) => windows.about.close()
+                    Button(id: done, label: tr! { "zh-Hans" => "好", "en" => "OK" }, prominence: prominent, default_focus: true) => windows.about.close()
                 }
             }
         }
@@ -128,7 +133,8 @@ pub fn main_window(
                     }
                     Divider
                     Switch(id: show_details, label: tr! { "zh-Hans" => "详情", "en" => "Details" }, value: draft.details, style: button, icon: "sidebar.right", shortcut: "cmd+alt+i")
-                    Search(id: find, value: draft.query, prompt: tr! { "zh-Hans" => "搜索图案", "en" => "Search Patterns" }, shortcut: "cmd+k") {
+                    // The patterns show as soon as the field is in use.
+                    Search(id: find, value: draft.query, prompt: tr! { "zh-Hans" => "搜索图案", "en" => "Search Patterns" }, shortcut: "cmd+k", suggest: true) {
                         Query(
                             id: results,
                             query: app.find(draft.query),
@@ -151,6 +157,10 @@ pub fn main_window(
                         Page::Favorites => { wall(app: app, swatches: app.favorites) }
                         Page::Frame => { frame(app: app) }
                         Page::Film => { film(app: app) }
+                    }
+                    // Escape (a television's Back) closes the details.
+                    if draft.details {
+                        Shortcut(key: "escape") => draft.details.set(false)
                     }
                     if let Some(notice) = app.notice {
                         Column(padding: 24) {
@@ -183,6 +193,12 @@ pub fn main_window(
                         }
                         Image(source: app.poster, height: 150, label: tr! { "zh-Hans" => "海报", "en" => "Poster" })
                     }
+                    // Keys that type into the search, as an on-screen
+                    // keyboard's do.
+                    Row(gap: 8, align: center) {
+                        Button(id: search_check, label: tr! { "zh-Hans" => "搜索 check", "en" => "Search “check”" }) => draft.query.push_str("check")
+                        Button(id: search_delete, label: tr! { "zh-Hans" => "删去一个字", "en" => "Delete a Letter" }) => draft.query.pop()
+                    }
                     if app.opened > 0 {
                         Text(content: app.opened_name, style: title)
                         Canvas(height: 160, label: app.opened_name) {
@@ -214,7 +230,7 @@ pub fn wall(
             }
             Pinch(id: pinch_cards, label: tr! { "zh-Hans" => "缩放卡片", "en" => "Scale the cards" }, value: draft.card_size, min: 100, max: 320) {
             ScrollView {
-                Grid(min_width: draft.card_size, gap: 20, padding: if window.large { 48 } else if window.expanded { 32 } else if window.medium { 24 } else { 16 }, animate: smooth) {
+                Grid(min_width: draft.card_size, gap: 20, padding: if window.tv { 64 } else if window.large { 48 } else if window.expanded { 32 } else if window.medium { 24 } else { 16 }, animate: smooth) {
                     ForEach(items: swatches, key: id, stagger: 0.04) |swatch| {
                         card(app: app, swatch: swatch)
                     }
@@ -290,6 +306,14 @@ pub fn film(app: gallery::Client, #[session] draft: GalleryDraft) -> impl View {
                         Button(id: to_last, label: tr! { "zh-Hans" => "最后一个", "en" => "Last" }) => draft.centered.set(6)
                         Spacer
                         Text(content: tr! { "zh-Hans" => "滚动后停在最近的一格", "en" => "Scrolling comes to rest on the nearest one" }, emphasis: secondary)
+                    }
+                }
+                // On a television the remote's focus starts on 「第一个」.
+                Layout(size: tv) {
+                    Row(gap: 12, padding: 16, align: center) {
+                        Button(id: to_first, label: tr! { "zh-Hans" => "第一个", "en" => "First" }, default_focus: true) => draft.centered.set(1)
+                        Button(id: to_last, label: tr! { "zh-Hans" => "最后一个", "en" => "Last" }) => draft.centered.set(6)
+                        Spacer
                     }
                 }
             }

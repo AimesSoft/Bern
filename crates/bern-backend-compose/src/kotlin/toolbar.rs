@@ -213,9 +213,15 @@ impl Generator<'_> {
                 .map(|action| format!("{{ {action} }}"))
                 .unwrap_or_else(|| "null".into())
         ));
-        // Results show below the field while there is a search.
+        // Results show below the field while there is a search, or always
+        // with `suggest`.
         if !element.children.is_empty() {
-            out.open(format!("if ({field}.isNotEmpty()) {{"));
+            let shown = if element.keyword("suggest") == Some("true") {
+                "true".to_string()
+            } else {
+                format!("{field}.isNotEmpty()")
+            };
+            out.open(format!("if ({shown}) {{"));
             out.open("Column(Modifier.fillMaxWidth()) {");
             self.nodes(out, &element.children, &ctx.within(Scope::Column));
             out.close("}");

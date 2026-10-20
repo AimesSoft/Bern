@@ -228,12 +228,19 @@ fun BernThemeChoice(accent: BernColor?, appearance: String?) {
 // MARK: - Shortcuts
 
 /// Keyboard shortcuts of the controls on screen: `cmd` is Control here,
-/// the primary modifier off Apple systems.
+/// the primary modifier off Apple systems. On a television the remote's
+/// Back stands for `escape` and its Play/Pause for `space`, as on tvOS.
 object BernShortcuts {
-    private val entries = LinkedHashMap<Any, Pair<String, () -> Unit>>()
+    private class Entry(val shortcut: String, val action: () -> Unit, val active: () -> Boolean)
 
-    fun register(token: Any, shortcut: String, action: () -> Unit) {
-        entries[token] = shortcut to action
+    private val entries = LinkedHashMap<Any, Entry>()
+
+    /// Back pressed down that a shortcut took: its release is the
+    /// shortcut's too, so the system does not go back as well.
+    private var tookBack = false
+
+    fun register(token: Any, shortcut: String, action: () -> Unit, active: () -> Boolean = { true }) {
+        entries[token] = Entry(shortcut, action, active)
     }
 
     fun remove(token: Any) {
@@ -249,19 +256,36 @@ object BernShortcuts {
         if (event.action == android.view.KeyEvent.ACTION_DOWN) keys += 1
     }
 
+    /// Whether `event` is an arrow of the keyboard or a remote's pad.
+    fun isArrow(event: android.view.KeyEvent): Boolean =
+        event.keyCode in android.view.KeyEvent.KEYCODE_DPAD_UP..android.view.KeyEvent.KEYCODE_DPAD_RIGHT
+
     fun handle(event: KeyEvent): Boolean {
+        val code = event.nativeKeyEvent.keyCode
+        val back = code == android.view.KeyEvent.KEYCODE_BACK
+        if (back && event.type == KeyEventType.KeyUp && tookBack) {
+            tookBack = false
+            return true
+        }
         if (event.type != KeyEventType.KeyDown) return false
-        val key = keyName(event.nativeKeyEvent.keyCode) ?: return false
+        val remote = if (!BernHost.television) null else when (code) {
+            android.view.KeyEvent.KEYCODE_BACK -> "escape"
+            android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> "space"
+            else -> null
+        }
+        val key = remote ?: keyName(code) ?: return false
         val pressed = buildList {
             if (event.isCtrlPressed || event.isMetaPressed) add("cmd")
             if (event.isAltPressed) add("alt")
             if (event.isShiftPressed) add("shift")
             add(key)
         }.joinToString("+")
-        val action = entries.values.lastOrNull { (shortcut, _) ->
-            shortcut.replace("ctrl+", "cmd+").replace("cmd+cmd+", "cmd+") == pressed
-        }?.second ?: return false
-        action()
+        // Of the shortcuts that take the keys now, the one composed last.
+        val entry = entries.values.lastOrNull {
+            it.shortcut.replace("ctrl+", "cmd+").replace("cmd+cmd+", "cmd+") == pressed && it.active()
+        } ?: return false
+        if (back) tookBack = true
+        entry.action()
         return true
     }
 
@@ -298,12 +322,24 @@ object BernShortcuts {
     }
 }
 
-/// A control's keyboard shortcut while it is composed.
+/// A control's keyboard shortcut while it is composed; while `active` is
+/// false the keys go to the shortcuts composed before it.
 @Composable
-fun BernShortcut(shortcut: String, action: () -> Unit) {
+fun BernShortcut(shortcut: String, active: () -> Boolean = { true }, action: () -> Unit) {
     val token = remember { Any() }
-    SideEffect { BernShortcuts.register(token, shortcut, action) }
+    SideEffect { BernShortcuts.register(token, shortcut, action, active) }
     DisposableEffect(token) { onDispose { BernShortcuts.remove(token) } }
+}
+
+// MARK: - Default focus
+
+/// `default_focus`: the focus starts on the control once it is composed:
+/// a television's remote, or a keyboard, begins there.
+@Composable
+fun bernDefaultFocus(): Modifier {
+    val requester = remember { FocusRequester() }
+    LaunchedEffect(requester) { runCatching { requester.requestFocus() } }
+    return Modifier.focusRequester(requester)
 }
 
 // MARK: - Lengths

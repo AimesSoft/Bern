@@ -131,10 +131,24 @@ impl Checker<'_> {
                         );
                         return None;
                     }
+                    ("push_str", [value]) if field.ty == Type::Text => ir::SessionOp::PushStr {
+                        value: self.expect(value, &Type::Text, scope, "the text to add")?,
+                    },
+                    ("pop", []) if field.ty == Type::Text => ir::SessionOp::Pop,
+                    ("push_str" | "pop", _) if field.ty != Type::Text => {
+                        self.error(
+                            action.method.span(),
+                            format!(
+                                "`push_str(text)` and `pop()` edit a `String`; `{name}` is {}",
+                                field.ty.display()
+                            ),
+                        );
+                        return None;
+                    }
                     _ => {
                         self.error(
                             action.method.span(),
-                            "session fields support `set(value)` and, for a `bool`, `toggle()`",
+                            "session fields support `set(value)`, for a `bool` `toggle()`, and for a `String` `push_str(text)` and `pop()`",
                         );
                         return None;
                     }

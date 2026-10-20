@@ -1392,7 +1392,17 @@ function enabledOf(enabled) {
   return enabled ?? (() => true);
 }
 
-export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill }, action) {
+/// `default_focus`: the focus starts on `node` once it is on the page,
+/// unless something there has it.
+export function startFocus(node) {
+  requestAnimationFrame(() => {
+    const active = document.activeElement;
+    if (!node.isConnected || (active && active !== document.body)) return;
+    node.focus({ preventScroll: true });
+  });
+}
+
+export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill, defaultFocus }, action) {
   const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
@@ -1415,9 +1425,10 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
   if (style) hooks.style?.(node, style, {});
   controlShape(node, shape, height);
   p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, node) : node);
+  if (defaultFocus) startFocus(node);
 }
 
-export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter }, action) {
+export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter, defaultFocus }, action) {
   const node = el("button", { class: `bern-icon-button${prominence === "prominent" ? " bern-icon-button-prominent" : ""}`, type: "button" }, icon(name, fontSize ?? 16));
   if (fontSize != null) { node.firstElementChild.style.width = `${fontSize}px`; node.firstElementChild.style.height = `${fontSize}px`; }
   // A round button of an exact diameter.
@@ -1436,6 +1447,7 @@ export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setF
   });
   if (style) hooks.style?.(node, style, {});
   p.append(node);
+  if (defaultFocus) startFocus(node);
 }
 
 let fieldSequence = 0;
@@ -1490,7 +1502,7 @@ export function TextInput(p, ctx, { id, label, field, prompt, kind, labelHidden 
   else p.append(labelled(input, label, true));
 }
 
-export function Search(p, ctx, { id, field, prompt, width, height, fontSize }, submit, results) {
+export function Search(p, ctx, { id, field, prompt, width, height, fontSize, suggest }, submit, results) {
   const input = el("input", { class: "bern-search-input", type: "search", autocomplete: "off" });
   if (prompt) {
     bindAttr(input, "placeholder", prompt);
@@ -1522,14 +1534,14 @@ export function Search(p, ctx, { id, field, prompt, width, height, fontSize }, s
   if (width !== undefined) box.style.width = `${width}px`;
   if (height !== undefined) box.style.height = `${height}px`;
   if (fontSize !== undefined) input.style.fontSize = `${fontSize}px`;
-  if (results) searchResults(box, input, field, ctx, results);
+  if (results) searchResults(box, input, field, ctx, results, suggest);
   p.append(box);
 }
 
 /// Results of a search field in a popover below it, shown while the field
 /// has focus and text; choosing a result moves focus into the panel, which
 /// keeps it open until focus leaves both.
-function searchResults(box, input, field, ctx, results) {
+function searchResults(box, input, field, ctx, results, suggest) {
   const panel = el("div", { class: "bern-search-results", popover: "manual", role: "region" });
   results(panel, ctx);
   box.append(panel);
@@ -1539,7 +1551,8 @@ function searchResults(box, input, field, ctx, results) {
     if (event.target.closest("button, [role=button]")) open.set(false);
   });
   const inside = () => box.contains(document.activeElement);
-  const update = () => open.set(inside() && field.peek() !== "");
+  // With `suggest` the results show on focus, before anything is typed.
+  const update = () => open.set(inside() && (suggest || field.peek() !== ""));
   input.addEventListener("focus", update);
   input.addEventListener("input", update);
   box.addEventListener("focusout", () => setTimeout(update, 120));
@@ -2735,10 +2748,18 @@ export function Tabs(p, ctx, { id, selection, tabs, accessory, selectedLabel }) 
   p.append(node);
 }
 
-/// Chooses one layout by the available width. Engine state and session
-/// drafts live outside the view tree, so switching keeps them; focus moves
-/// to the control with the same identity in the new layout.
+/// Chooses one layout by the available width, or the `tv` layout on a
+/// television. Engine state and session drafts live outside the view tree,
+/// so switching keeps them; focus moves to the control with the same
+/// identity in the new layout.
 const SIZES = ["compact", "medium", "expanded", "large"];
+
+/// Whether the page runs on a television: the browsers of television
+/// platforms name them in their user agent.
+export const television = typeof navigator !== "undefined"
+  && /SMART-TV|SmartTV|Tizen|Web0S|webOS\.TV|HbbTV|CrKey|GoogleTV|Android TV|AFT[A-Z]|BRAVIA|Roku|AppleTV/i.test(navigator.userAgent ?? "");
+// The stylesheet gives text styles their television sizes under this class.
+if (television) globalThis.document?.documentElement?.classList.add("bern-television");
 
 /// The size of a width by the breakpoints of `[layouts]`.
 export function sizeOf(width, breakpoints) {
@@ -2770,7 +2791,7 @@ export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
   let owner = null;
   let shown = null;
   effect(() => {
-    const current = layoutFor(size.get() ?? "expanded", layouts);
+    const current = television && layouts.tv ? "tv" : layoutFor(size.get() ?? "expanded", layouts);
     if (current === shown) return;
     shown = current;
     untrack(() => {
@@ -2793,7 +2814,7 @@ export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
   if (id) {
     control(ctx, {
       target: () => target(ctx, id), role: "adaptive", label: () => "",
-      actions: { value: () => size.peek() ?? "expanded" },
+      actions: { value: () => (television && layouts.tv ? "tv" : size.peek() ?? "expanded") },
     });
   }
   p.append(node);
@@ -3633,6 +3654,8 @@ class Win {
     this.large = cell(false);
     /// `window.short`: shorter than the compact breakpoint.
     this.short = cell(false);
+    /// `window.tv`: the page is on a television.
+    this.tv = cell(television);
   }
 
   get floating() {

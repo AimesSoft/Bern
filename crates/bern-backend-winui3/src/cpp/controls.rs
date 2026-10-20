@@ -58,6 +58,9 @@ impl Generator<'_> {
             out.line(format!("B::{kind}(p, c, {props});"));
         }
         self.shortcut(out, element, "activate");
+        if element.keyword("default_focus") == Some("true") {
+            out.line(format!("B::DefaultFocus(c, {});", self.id(element)));
+        }
     }
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element) {
@@ -131,6 +134,10 @@ impl Generator<'_> {
             ("width", Self::number(element, "width")),
             ("height", Self::number(element, "height")),
             ("fontSize", Self::number(element, "font_size")),
+            (
+                "suggest",
+                (element.keyword("suggest") == Some("true")).then(|| "true".into()),
+            ),
         ])
     }
 

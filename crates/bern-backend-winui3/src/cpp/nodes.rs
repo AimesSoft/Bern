@@ -297,6 +297,7 @@ impl Generator<'_> {
             "Flow" => self.flow(out, element),
             "Modal" => self.modal(out, element),
             "Timer" => self.timer(out, element),
+            "Shortcut" => self.key_shortcut(out, element),
             "ControlGroup" => self.control_group(out, element),
             "Rail" => self.rail(out, element),
             "Svg" => self.svg(out, element),

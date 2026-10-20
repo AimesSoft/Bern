@@ -50,8 +50,10 @@ final class BernHostPlatform {
     var primaryOpen = true
     /// Window kinds shown as sheets over the primary window, bottom first.
     var sheets: [String] = []
+    #if !os(tvOS)
     @ObservationIgnored var openWindow: OpenWindowAction?
     @ObservationIgnored var dismissWindow: DismissWindowAction?
+    #endif
 }
 
 extension BernWindowContext {
@@ -92,10 +94,12 @@ extension BernHost {
 
     func platformDidStart() {}
 
+    #if !os(tvOS)
     func registerActions(openWindow: OpenWindowAction, dismissWindow: DismissWindowAction) {
         platform.openWindow = openWindow
         platform.dismissWindow = dismissWindow
     }
+    #endif
 
     /// Whether a window kind is a window of its own rather than virtual.
     func isNative(_ kindID: String) -> Bool {
@@ -110,7 +114,9 @@ extension BernHost {
         guard kinds.contains(where: { $0.id == kindID }) else { return }
         if isNative(kindID) {
             // The value identifies the window, so an open one comes forward.
+            #if !os(tvOS)
             platform.openWindow?(id: kindID, value: kindID)
+            #endif
         } else if kindID == primary {
             platform.primaryOpen = true
         } else if !platform.sheets.contains(kindID) {
@@ -137,9 +143,11 @@ extension BernHost {
     /// cannot bring it over the sheets above it.
     func activate(_ context: BernWindowContext) throws {
         guard !isCovered(context) else { throw covered(context) }
+        #if !os(tvOS)
         if isNative(context.kindID) {
             platform.openWindow?(id: context.kindID, value: context.kindID)
         }
+        #endif
     }
 
     /// Windows of their own and the primary can close; a covered sheet holds
@@ -153,7 +161,9 @@ extension BernHost {
     func finishClose(_ context: BernWindowContext) {
         context.allowsClose = true
         if isNative(context.kindID) {
+            #if !os(tvOS)
             platform.dismissWindow?(id: context.kindID, value: context.kindID)
+            #endif
         } else if context.kindID == primary {
             platform.primaryOpen = false
         } else if let index = platform.sheets.firstIndex(of: context.kindID) {
@@ -217,8 +227,10 @@ extension BernHost {
 /// from being swiped away; its close button asks instead.
 struct BernWindowPlatformModifier: ViewModifier {
     let context: BernWindowContext
+    #if !os(tvOS)
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismissWindow) private var dismissWindow
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
@@ -239,6 +251,10 @@ struct BernWindowPlatformModifier: ViewModifier {
                 context.reportFacts()
             }
             .modifier(BernAppearsActiveReader(context: context))
+            #if os(tvOS)
+            .modifier(BernRemoteCommands(context: context))
+            .modifier(BernFocusScope())
+            #endif
             .interactiveDismissDisabled(confirms)
             // Files another app opens with this one ("Open In"), where
             // they are.
@@ -246,9 +262,11 @@ struct BernWindowPlatformModifier: ViewModifier {
                 if url.isFileURL { _ = url.startAccessingSecurityScopedResource() }
                 BernFiles.open([url])
             }
+            #if !os(tvOS)
             .onAppear {
                 BernHost.shared.registerActions(openWindow: openWindow, dismissWindow: dismissWindow)
             }
+            #endif
     }
 }
 
@@ -258,14 +276,14 @@ private struct BernAppearsActiveReader: ViewModifier {
     let context: BernWindowContext
 
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
+        if #available(iOS 18.0, tvOS 18.0, *) {
             content.modifier(Reader(context: context))
         } else {
             content
         }
     }
 
-    @available(iOS 18.0, *)
+    @available(iOS 18.0, tvOS 18.0, *)
     private struct Reader: ViewModifier {
         let context: BernWindowContext
         @Environment(\.appearsActive) private var appearsActive
@@ -384,21 +402,31 @@ struct BernSheets<Window: View>: ViewModifier {
 
     func body(content: Content) -> some View {
         let platform = BernHost.shared.platform
-        content.sheet(
-            item: Binding(
-                get: { platform.sheets.count > depth ? BernSheetItem(id: platform.sheets[depth]) : nil },
-                set: { item in
-                    // The system dismissed it, for example by a swipe: that
-                    // is a fact, and the windows are already gone.
-                    if item == nil, platform.sheets.count > depth {
-                        platform.sheets.removeSubrange(depth...)
-                    }
-                })
-        ) { item in
+        let item = Binding(
+            get: { platform.sheets.count > depth ? BernSheetItem(id: platform.sheets[depth]) : nil },
+            set: { (item: BernSheetItem?) in
+                // The system dismissed it, for example by a swipe or the
+                // remote's Back: that is a fact, and the windows are
+                // already gone.
+                if item == nil, platform.sheets.count > depth {
+                    platform.sheets.removeSubrange(depth...)
+                }
+            })
+        #if os(tvOS)
+        // A television shows another window over the whole screen, as
+        // tvOS presents its own screens.
+        content.fullScreenCover(item: item) { item in
+            window(item.id)
+                .modifier(BernSheets(depth: depth + 1, window: window))
+                .background(.background)
+        }
+        #else
+        content.sheet(item: item) { item in
             window(item.id)
                 .modifier(BernSheets(depth: depth + 1, window: window))
                 .modifier(BernDialogHeight(kind: item.id))
         }
+        #endif
     }
 }
 
@@ -435,7 +463,9 @@ struct BernSheetChrome<Content: View>: View {
         NavigationStack {
             content
                 .navigationTitle(BernText.string(title))
+                #if !os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
+                #endif
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button(BernText.string("bern.window.done")) { BernHost.shared.close(kind) }
@@ -460,7 +490,9 @@ struct BernWindowChrome<Content: View>: View {
         NavigationStack {
             content
                 .navigationTitle(BernText.string(title))
+                #if !os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
+                #endif
         }
     }
 }
@@ -603,17 +635,22 @@ extension View {
     /// accessory, the system's glass bar above the tab bar, as a music
     /// app shows what is playing.
     @ViewBuilder func bernTabAccessory(_ shown: Bool, _ accessory: AnyView) -> some View {
-        if #available(iOS 26.1, *) {
+        #if os(tvOS)
+        self
+        #else
+        if #available(iOS 26.1, tvOS 26.1, *) {
             tabViewBottomAccessory(isEnabled: shown) { accessory.environment(\.bernOnBar, true) }
         } else {
             self
         }
+        #endif
     }
 
     /// Before iOS 26.1, each page keeps the bar at its bottom, above the
-    /// tab bar, on a material capsule.
+    /// tab bar, on a material capsule; tvOS, whose tabs are at the top,
+    /// always does.
     @ViewBuilder func bernTabAccessoryInset(_ shown: Bool, _ accessory: AnyView) -> some View {
-        if #available(iOS 26.1, *) {
+        if bernTabAccessoryIsSystem {
             self
         } else {
             safeAreaInset(edge: .bottom) {
@@ -631,13 +668,26 @@ extension View {
     }
 }
 
+/// Whether the system shows a tab view's bottom accessory: iOS 26.1 and
+/// later.
+private var bernTabAccessoryIsSystem: Bool {
+    #if os(tvOS)
+    false
+    #else
+    if #available(iOS 26.1, tvOS 26.1, *) { true } else { false }
+    #endif
+}
+
 // MARK: - Chrome, immersion and idleness
 
 /// A window's immersion and idleness on iOS: `immersive` hides the status
 /// bar and the home indicator and lays the content over the whole screen,
 /// under the safe areas, as a video player does; `idleAfter` turns `idle`
 /// on after that many seconds without a touch or pointer movement. iOS
-/// scenes have no title bar, so `unified` changes nothing.
+/// scenes have no title bar, so `unified` changes nothing. On tvOS a
+/// television has no bars to hide: `immersive` lays the content over the
+/// overscan margins, and a press of the remote or a touch of its clickpad
+/// is what keeps the window from going idle.
 struct BernWindowBehavior: ViewModifier {
     let context: BernWindowContext
     let unified: Bool
@@ -653,12 +703,19 @@ struct BernWindowBehavior: ViewModifier {
         content
             .ignoresSafeArea(.container, edges: immersive ? .all : [])
             .onChange(of: landscape, initial: true) { _, wanted in BernOrientation.turn(landscape: wanted) }
+            #if !os(tvOS)
             .statusBarHidden(immersive)
+            #endif
             .persistentSystemOverlays(immersive ? .hidden : .automatic)
             // Touches are watched on the window, outside SwiftUI's gestures:
             // a drag gesture here would keep the navigation bar's buttons
             // from being tapped.
             .background(BernTouchWatcher { touched() })
+            #if os(tvOS)
+            .onReceive(NotificationCenter.default.publisher(for: bernRemoteActivity)) { note in
+                if note.object as? String == context.kindID { touched() }
+            }
+            #endif
             .onContinuousHover { _ in touched() }
             .onAppear { touched() }
             .onChange(of: idleEnabled) { _, _ in touched() }
@@ -694,6 +751,13 @@ final class BernIdleTimer {
 
 // MARK: - Document picker
 
+#if os(tvOS)
+extension BernFiles {
+    /// tvOS has no document picker and no files to pick from; the target
+    /// does not list `file_pick`, so generated code never asks.
+    static func pick(_ kinds: String, then give: @escaping @MainActor (URL) -> Void) {}
+}
+#else
 extension BernFiles {
     /// The picker on screen keeps its delegate here.
     private static var delegate: BernPickDelegate?
@@ -726,6 +790,7 @@ private final class BernPickDelegate: NSObject, UIDocumentPickerDelegate {
         MainActor.assumeIsolated { give(url) }
     }
 }
+#endif
 
 /// Files opened with the app arrive in a scene that is already showing.
 @MainActor
@@ -791,6 +856,15 @@ final class BernTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegat
         touched?(touches)
         state = .failed
     }
+
+    #if os(tvOS)
+    /// A press of the remote's buttons counts as a touch: a television
+    /// has nothing else.
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent) {
+        touched?([])
+        super.pressesBegan(presses, with: event)
+    }
+    #endif
 
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
@@ -898,6 +972,33 @@ struct BernAppearanceRegion: UIViewRepresentable {
 
 // MARK: - Search field
 
+#if os(tvOS)
+/// tvOS's search field: a text field, which opens the system's keyboard
+/// screen when selected, as tvOS fields do.
+struct BernSearchInput: View {
+    let text: Binding<String>
+    let prompt: String
+    var fontSize: CGFloat? = nil
+    let editing: Binding<Bool>
+    let focusRequest: Int
+    let up: () -> Void
+    let down: () -> Void
+    let submit: () -> Void
+    let cancel: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField(prompt, text: text)
+            .font(fontSize.map { .system(size: $0) })
+            .submitLabel(.search)
+            .bernFieldLook()
+            .focused($focused)
+            .onSubmit(submit)
+            .onChange(of: focused) { _, now in editing.wrappedValue = now }
+            .onChange(of: focusRequest) { _, _ in focused = true }
+    }
+}
+#else
 /// The platform's search field for a `Search` in the page: UIKit's own,
 /// without a search bar's margins. Chinese input is passed on only once
 /// it is composed.
@@ -918,7 +1019,7 @@ struct BernSearchInput: UIViewRepresentable {
         let field = UISearchTextField()
         if let fontSize { field.font = .systemFont(ofSize: fontSize) }
         // On iOS 26 the field stands on the system's glass capsule.
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, tvOS 26.0, *) {
             field.borderStyle = .none
             field.backgroundColor = .clear
         }
@@ -968,8 +1069,16 @@ struct BernSearchInput: UIViewRepresentable {
     }
 }
 
+#endif
+
 // MARK: - Orientation
 
+#if os(tvOS)
+/// A television has no orientations to turn to.
+@MainActor enum BernOrientation {
+    static func turn(landscape: Bool?) {}
+}
+#else
 /// The orientations the phone may show the application in: all of them,
 /// until a window asks for landscape or portrait.
 @MainActor enum BernOrientation {
@@ -995,3 +1104,359 @@ final class BernOrientationDelegate: NSObject, UIApplicationDelegate {
         MainActor.assumeIsolated { BernOrientation.allowed }
     }
 }
+#endif
+
+#if os(tvOS)
+// MARK: - Television
+
+/// The Siri Remote's buttons that stand for keys of `shortcut`s.
+enum BernRemoteKey: Hashable {
+    case back, playPause, left, right, up, down
+}
+
+/// The remote shortcuts on screen, the latest shown last. The root of each
+/// window sends the remote's commands to its window's latest shortcut for
+/// the button: Back, Play/Pause, and the clickpad's edges when the press
+/// moves the focus nowhere. A window without a shortcut for Back leaves
+/// the button to the system, which closes sheets and leaves the app.
+@MainActor
+@Observable
+final class BernRemoteShortcuts {
+    static let shared = BernRemoteShortcuts()
+
+    final class Entry {
+        let key: BernRemoteKey
+        let window: String
+        var action: () -> Void
+        init(key: BernRemoteKey, window: String, action: @escaping () -> Void) {
+            self.key = key
+            self.window = window
+            self.action = action
+        }
+    }
+
+    private var entries: [Entry] = []
+
+    func add(_ entry: Entry) {
+        entries.append(entry)
+    }
+
+    func remove(_ entry: Entry) {
+        entries.removeAll { $0 === entry }
+    }
+
+    /// The action for the button in the window, if a shortcut on screen
+    /// has one.
+    func action(_ key: BernRemoteKey, window: String) -> (() -> Void)? {
+        guard let entry = entries.last(where: { $0.key == key && $0.window == window }) else { return nil }
+        return { entry.action() }
+    }
+}
+
+extension View {
+    /// While on screen and enabled, the remote's button for `key` runs
+    /// `action`.
+    func bernRemoteShortcut(_ key: BernRemoteKey, enabled: Bool, action: @escaping () -> Void) -> some View {
+        modifier(BernRemoteShortcut(key: key, enabled: enabled, action: action))
+    }
+}
+
+private struct BernRemoteShortcut: ViewModifier {
+    let key: BernRemoteKey
+    let enabled: Bool
+    let action: () -> Void
+    @Environment(BernWindowContext.self) private var window
+    @State private var entry: BernRemoteShortcuts.Entry?
+    @State private var shown = false
+
+    func body(content: Content) -> some View {
+        // The latest action, with the state it reads now.
+        let _ = entry?.action = action
+        content
+            .onAppear {
+                shown = true
+                update()
+            }
+            .onDisappear {
+                shown = false
+                update()
+            }
+            .onChange(of: enabled) { update() }
+    }
+
+    private func update() {
+        let wanted = shown && enabled
+        if wanted, entry == nil {
+            let made = BernRemoteShortcuts.Entry(key: key, window: window.kindID, action: action)
+            BernRemoteShortcuts.shared.add(made)
+            entry = made
+        } else if !wanted, let entry {
+            BernRemoteShortcuts.shared.remove(entry)
+            self.entry = nil
+        }
+    }
+}
+
+/// A press of the remote that no shortcut took: input that keeps the
+/// window from going idle. The notification's object is the window's id.
+let bernRemoteActivity = Notification.Name("BernRemoteActivity")
+
+/// The root of a window on tvOS: the remote's commands reach the window's
+/// shortcuts. The arrows act only where they move the focus nowhere, as
+/// SwiftUI sends a move command to the focused view's ancestors then; an
+/// arrow no shortcut takes is input that wakes an idle window.
+struct BernRemoteCommands: ViewModifier {
+    let context: BernWindowContext
+
+    func body(content: Content) -> some View {
+        let remote = BernRemoteShortcuts.shared
+        let window = context.kindID
+        content
+            .onExitCommand(perform: remote.action(.back, window: window))
+            .onPlayPauseCommand(perform: remote.action(.playPause, window: window))
+            .onMoveCommand { direction in
+                let key: BernRemoteKey
+                switch direction {
+                case .left: key = .left
+                case .right: key = .right
+                case .up: key = .up
+                case .down: key = .down
+                @unknown default: return
+                }
+                if let action = remote.action(key, window: window) {
+                    action()
+                } else {
+                    NotificationCenter.default.post(name: bernRemoteActivity, object: window)
+                }
+            }
+    }
+}
+
+/// tvOS has no switch, only a button that says On or Off. The switch of
+/// the other platforms, drawn: the label, and at the row's end a capsule
+/// filled with the accent while on, its white knob at the end it stands
+/// for. The remote's select flips it; under the focus a ring stands
+/// around the switch and it grows by a tenth. A scene laid out at the
+/// design's size takes it at that size (64 × 28), the screen's own layout
+/// half as large again.
+struct BernFocusSwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        BernFocusSwitch(configuration: configuration)
+    }
+}
+
+private struct BernFocusSwitch: View {
+    let configuration: ToggleStyle.Configuration
+    @Environment(\.bernSceneScaled) private var scaled
+    @Environment(\.bernAccent) private var accent
+    @Environment(\.labelsVisibility) private var labels
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let k: CGFloat = scaled ? 1 : 1.5
+        let on = configuration.isOn
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            HStack(spacing: 12 * k) {
+                if labels != .hidden {
+                    configuration.label.foregroundStyle(.primary)
+                    Spacer(minLength: 12 * k)
+                }
+                Capsule()
+                    .fill(on ? (accent ?? Color.accentColor) : Color(white: 0.47, opacity: 0.32))
+                    .overlay(alignment: on ? .trailing : .leading) {
+                        Circle().fill(Color.white)
+                            .padding(2 * k)
+                            .shadow(color: .black.opacity(0.25), radius: 2 * k, y: 1 * k)
+                    }
+                    .frame(width: 64 * k, height: 28 * k)
+                    .overlay {
+                        if focused {
+                            Capsule().strokeBorder(Color.primary, lineWidth: 3 * k).padding(-8 * k)
+                        }
+                    }
+                    .scaleEffect(focused ? 1.1 : 1)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(BernBareButtonStyle())
+        .focused($focused)
+        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: on)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focused)
+        .accessibilityValue(Text(verbatim: on ? "1" : "0"))
+    }
+}
+
+/// A segmented picker in a scene laid out at the design's size: tvOS's own
+/// takes a television's size, which the scene would enlarge again, so
+/// there the segments are drawn at the design's (40 points, 15-point
+/// words) on a capsule track; the chosen one stands raised, the focused
+/// one turns white and grows by a tenth. Elsewhere tvOS's own.
+struct BernSegments<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(String, Value)]
+    @Environment(\.bernSceneScaled) private var scaled
+
+    var body: some View {
+        if scaled {
+            HStack(spacing: 2) {
+                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                    BernSegment(label: option.0, selected: option.1 == selection) { selection = option.1 }
+                }
+            }
+            .padding(2)
+            .background(Capsule().fill(Color(white: 0.47, opacity: 0.24)))
+        } else {
+            Picker(selection: $selection) {
+                ForEach(Array(options.enumerated()), id: \.offset) { _, option in
+                    Text(verbatim: option.0).tag(option.1)
+                }
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+}
+
+private struct BernSegment: View {
+    let label: String
+    let selected: Bool
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Text(verbatim: label)
+                .font(.system(size: 15, weight: .medium))
+                .lineLimit(1)
+                .padding(.horizontal, 18)
+                .frame(height: 36)
+                .foregroundStyle(focused ? Color.black : Color.primary)
+                .background(Capsule().fill(focused ? Color.white : selected ? Color(white: 0.39) : Color.clear))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(BernBareButtonStyle())
+        .focused($focused)
+        .scaleEffect(focused ? 1.1 : 1)
+        .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 14 : 0, y: focused ? 8 : 0)
+        .zIndex(focused ? 1 : 0)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focused)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A button that shows its label and nothing of the platform's.
+struct BernBareButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.8 : 1)
+    }
+}
+
+/// tvOS has no slider control. The television's own form: a track that
+/// takes the focus like any control, lifts under it as focused controls
+/// do, and moves by one step for each press of the remote's left or right
+/// (a twentieth of its range without a step). A burst of presses is one
+/// edit: it ends half a second after the last.
+struct BernFocusSlider: View {
+    @Binding var value: Double
+    let minimum: Double
+    let maximum: Double
+    let step: Double?
+    let label: String
+    var minimumIcon: String? = nil
+    var maximumIcon: String? = nil
+    var labelHidden: Bool = false
+    var onEditingChanged: (Bool) -> Void = { _ in }
+    @FocusState private var focused: Bool
+    @State private var editing = false
+    @State private var settle: Task<Void, Never>?
+    @Environment(\.isEnabled) private var enabled
+    @Environment(\.bernSceneScaled) private var scaled
+    @Environment(\.bernAccent) private var accent
+
+    private var fraction: Double {
+        maximum > minimum ? min(1, max(0, (value - minimum) / (maximum - minimum))) : 0
+    }
+    private var increment: Double { step ?? (maximum - minimum) / 20 }
+
+    var body: some View {
+        // The slider of the system's other platforms: a thin track filled
+        // with the accent up to a white thumb. A scene laid out at the
+        // design's size takes it at that size; the screen's own layout at
+        // a television's (half as large again). Under the focus a ring
+        // stands around it; it keeps its size, as a long one would cover
+        // what stands beside it.
+        let k: CGFloat = scaled ? 1 : 1.5
+        HStack(spacing: 12 * k) {
+            if !labelHidden {
+                Text(label)
+            }
+            if let minimumIcon {
+                Image(systemName: minimumIcon).foregroundStyle(.secondary)
+            }
+            GeometryReader { geometry in
+                let thumb = CGSize(width: 40 * k, height: 24 * k)
+                let x = max(0, geometry.size.width - thumb.width) * fraction
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color(white: 0.47, opacity: 0.36)).frame(height: 7 * k)
+                    Capsule().fill(accent ?? Color.accentColor).frame(width: x + thumb.width / 2, height: 7 * k)
+                    Capsule().fill(Color.white)
+                        .frame(width: thumb.width, height: thumb.height)
+                        .shadow(color: .black.opacity(0.3), radius: 4 * k, y: 2 * k)
+                        .offset(x: x)
+                }
+                .frame(maxHeight: .infinity)
+            }
+            .frame(minWidth: 60 * k, maxWidth: .infinity)
+            .frame(height: 31 * k)
+            .contentShape(Rectangle())
+            if let maximumIcon {
+                Image(systemName: maximumIcon).foregroundStyle(.secondary)
+            }
+        }
+        .overlay {
+            if focused {
+                Capsule().strokeBorder(Color.primary, lineWidth: 3 * k).padding(-8 * k)
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: focused)
+        .focusable(enabled)
+        .focused($focused)
+        .onMoveCommand { direction in
+            switch direction {
+            case .left: nudge(-1)
+            case .right: nudge(1)
+            default: break
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(Text(verbatim: BernText.text(value)))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: nudge(1)
+            case .decrement: nudge(-1)
+            @unknown default: break
+            }
+        }
+    }
+
+    private func nudge(_ sign: Double) {
+        let next = min(maximum, max(minimum, value + sign * increment))
+        if !editing {
+            editing = true
+            onEditingChanged(true)
+        }
+        value = next
+        settle?.cancel()
+        settle = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            editing = false
+            onEditingChanged(false)
+        }
+    }
+}
+#endif

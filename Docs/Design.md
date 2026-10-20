@@ -1,14 +1,14 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.32
+- 版本：v0.33
 - 状态：架构与语义规范；当前接口、平台支持与待实现目标分别标注
-- 更新日期：2026-10-17
+- 更新日期：2026-10-20
 - 项目名称：Bern UI
 - 仓库：AimesSoft/Bern
 - 主要开发语言：Rust
 - 首个目标平台：macOS（SwiftUI）
 
-当前已提供 macOS / iOS SwiftUI、Android Compose、Windows WinUI 3、Linux GTK 和 Web 后端，以及命令、查询、会话、模块组合、资源、构建与打包工具。近期补齐了 Web 设置与引导、受控控件、搜索面板、播放器坐标布局、共享胶囊控件和图片跨分栏 Hero。各后端的功能覆盖与验证程度不同，以[平台能力表](Reference/Platforms.md)及各平台实现记录为准。
+当前已提供 macOS / iOS / tvOS SwiftUI、Android Compose、Windows WinUI 3、Linux GTK 和 Web 后端，以及命令、查询、会话、模块组合、资源、构建与打包工具。近期补齐了 Web 设置与引导、受控控件、搜索面板、播放器坐标布局、共享胶囊控件和图片跨分栏 Hero。各后端的功能覆盖与验证程度不同，以[平台能力表](Reference/Platforms.md)及各平台实现记录为准。
 
 编写界面时使用[组件参考](Reference/UI.md)和[完整属性表](Reference/Component-Properties.md)。本文保留架构决策、语义与后续目标；入口和专题索引见[文档目录](README.md)。
 
@@ -93,7 +93,7 @@ Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel。Bern 作�
 | UI 技术 | 目标运行平台 | 生成产物 | 定位与阶段 |
 | --- | --- | --- | --- |
 | Web DOM | 浏览器 | Web 应用或 WebUI；共用 HTML、CSS、绑定与前端 WASM，按模式决定是否包含业务引擎 | 第二个正式后端，需 Bern 自定视觉规范与主题算法，两种模式均需验收 |
-| SwiftUI | macOS、iOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS 与 iOS 默认；macOS 为首个正式后端，iOS 目标已构建模拟器应用，真机签名与打包后续实现 |
+| SwiftUI | macOS、iOS、tvOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS、iOS 与 tvOS 默认；macOS 为首个正式后端，iOS 与 tvOS 目标已构建模拟器应用，真机签名与打包后续实现 |
 | GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；阶段五第一批已实现 |
 | WinUI 3 | Windows | WinUI 3 界面（无运行时时回退到系统 XAML）、C++/WinRT 平台宿主与 Rust 桥接 | Windows 默认；阶段五第二批已实现 |
 | Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；第一版已实现 |
@@ -758,6 +758,8 @@ style! {
 
 海报、卡片、列表行这类“点了就打开”的东西，显示的是图片与文字，而不是按钮标题。`Button` 可以带一个子元素作为它显示的内容，`label` 仍是必写的可访问名称，`icon` 与 `prominence` 不能再写；多个元素放进 `Column`、`Row` 或 `Stack`。内容里不能有其他控件，经过组件也一样，否则一次按下有两种含义，构建失败；需要第二个操作时，把它放在按钮旁边，例如叠放在同一个 `Stack` 中。
 
+`style!` 的 `text` 块给文本样式定字重与字号，例如 `body: font(size: 13, weight: regular)`。设计稿给电视另一套字号时写 `tv:`，例如 `body: font(size: 13, tv: 16)`、`caption: font(tv: 14)`（只给电视定字号）：电视在远处看，tvOS 构建时就取电视的字号，Android 与 Web 在运行时判断为电视时取它（Web 在文档上加 `bern-television` 类），macOS、iOS、Windows、Linux 不受影响。tvOS 上按设计尺寸画的场景（`ScaleBox`）里，没有指定字体的系统文字取应用正文的电视字号，不取 tvOS 自己的 29 点。
+
 `shape: capsule` 的带内容按钮是平台自己的胶囊按钮包着内容。内容里的文字写 `style: control` 时取平台按钮标题的字体，与同一界面里其他按钮的标题一致：macOS 与 iOS 不另设字体，用控件所在环境的字体（macOS 13 点，iOS 17 点）；WinUI 3 继承按钮的字号（14）与字重；GTK 继承按钮标题的字体；Compose 用 Material 按钮的 `labelLarge`（14 sp，中等字重）；Web 继承按钮的字体。`control` 只表示平台的控件字体，`style!` 的 `text` 块不能给它另定字号或字重；写了 `font_size` 时只换字号。
 
 ```rust
@@ -1058,7 +1060,7 @@ Required languages: zh-Hans, en, ja
 
 ### 布局选择
 
-布局选择依据窗口可用尺寸、输入方式和设备能力，不能只按操作系统分类。首版优先提供 `compact` 与 `expanded` 两种尺寸布局，TV 和其他交互模式后续扩展。
+布局选择依据窗口可用尺寸、输入方式和设备能力，不能只按操作系统分类。首版优先提供 `compact` 与 `expanded` 两种尺寸布局；电视用 `Layout(size: tv)`（见下），其他交互模式后续扩展。
 
 选择规则必须确定、可测试，并保证任意受支持环境都有匹配分支。断点、优先级和兜底规则由项目明确配置。跨尺寸与输入模式的组合应显式枚举，不能声称检查了未声明的所有组合。
 
@@ -1080,10 +1082,11 @@ Adaptive(id: clip_choice) {
 }
 ```
 
-- 尺寸档有四个：小于 `compact_below` 为 `compact`，小于 `medium_below` 为 `medium`，小于 `expanded_below` 为 `expanded`，其余为 `large`；没写的断点让对应的档不存在，宽度落入上一档。任何宽度都恰好落入一个尺寸，规则确定、可测试。输入方式与 TV 尺寸后续扩展，不声称检查了它们。
+- 尺寸档有四个：小于 `compact_below` 为 `compact`，小于 `medium_below` 为 `medium`，小于 `expanded_below` 为 `expanded`，其余为 `large`；没写的断点让对应的档不存在，宽度落入上一档。任何宽度都恰好落入一个尺寸，规则确定、可测试。输入方式后续扩展，不声称检查了它们。
 - `Adaptive` 的选择依据是它所在位置的可用宽度。它只能包含 `Layout`，`compact` 与 `expanded` 各一个是必需的，`medium` 与 `large` 可选；某一档没有自己的 `Layout` 时用更大一档的，没有更大的就用更小一档的，因此只写 `compact` 与 `expanded` 的应用行为不变。缺少必需的、重复，或写了配置中不存在的档，报 B401。使用 `Adaptive` 而没有配置 `[layouts]` 报 B402。
 - 表达式可以读窗口宽度所在的档：`window.compact`、`window.medium`、`window.expanded`、`window.large`，恰有一个为真，例如页边距 `padding: if window.large { 48 } else if window.expanded { 32 } else if window.medium { 24 } else { 16 }`。它们按窗口宽度和同一组断点计算，需要 `[layouts]`。目标在能力描述中列出 `size_classes` 才支持 `medium`、`large` 与这些窗口字段；不支持的目标构建失败。实现进度：Web 已实现，浏览器中把视口设为 1024、800、1100 宽验证：海报墙页边距随窗口档位为 32、24、32；胶片页的 `Adaptive` 在可用宽度约 560 时为 `compact`（图标按钮），约 860 时为 `medium`（文字按钮）。macOS 与 iOS 已实现：macOS 窗口宽 880、1200 与 1440 以上时海报墙页边距为 24、32、48；胶片页的 `Adaptive` 在窗口宽 600、1100、1470 时为 `compact`、`medium`、`expanded`；iPhone 17 Pro 竖屏为 `compact`。Compose 已实现，Android 模拟器上把窗口设为 448、896、1344、1493 dp 宽：海报墙页边距为 16、24、32、约 48，胶片页的 `Adaptive` 依次为 `compact`、`medium`、`expanded`。GTK 已实现，窗口内容顶部一个高 0 的探针测量宽度，Linux 虚拟机上中号窗口时胶片页为 `medium`；WinUI 3 已实现，Windows PC 上验证海报墙页边距随档位变化、胶片页在 `compact`、`medium`、`expanded` 之间切换。功能契约的覆盖仍按 `compact` 与 `expanded` 检查。
 - `window.short`：窗口高度低于 `compact_below` 断点，例如手机横过来时（iPhone 横屏高 390），与宽度档位无关，需要 `[layouts]`。能力 `window_short`：SwiftUI 与 Web 已实现，其他目标构建失败。窗口的 `landscape` 是另一回事：手机上条件成立时请求横屏、不成立时回到竖屏（能力 `window_landscape`，iOS 实现；macOS 没有方向可转，不支持的目标给出警告并保持设备方向）。
+- **电视**：`Layout(size: tv)` 是电视上的布局，可选、最多一个，不受尺寸档的必需与回退规则约束：在电视上，有它的 `Adaptive` 只显示它；不是电视时它不被选中，其余布局照常按宽度选择。表达式可读 `window.tv`，电视上为真，不需要 `[layouts]`。电视的窗口永远是整个屏幕（1920 × 1080 点），所以只运行在电视上的目标（tvOS）构建时就知道这些条件：只保留 `tv` 布局，`window.tv`、尺寸档与 `window.short` 按屏幕求值，已知为假的分支与只被它们放置的组件不生成，能力检查只看电视显示的部分，手机布局里的选文件不会让 tvOS 构建失败。其他目标在运行时判断：Android 按系统的电视模式或 leanback 特性，Web 按电视浏览器的用户代理，macOS、iOS、Windows、Linux 恒为假。实现进度：tvOS 在模拟器上实测；Android 与 Web 的判断未在电视设备上验证。
 - 状态保留规则：引擎状态与会话草稿不在视图树中，切换布局不受影响；控件身份是“组件 + 控件 `id`”，两个布局中 `id` 相同的控件是同一控件，切换后焦点迁移到它（目标支持焦点迁移时）；滚动位置与未提交的局部编辑首版不迁移。
 - 带 `id` 的 `Adaptive` 出现在 `ui.inspect` 中，值为当前尺寸，外部入口可以确认布局切换。
 
@@ -1325,7 +1328,7 @@ JSON 是编码，不等于传输，也不等于 MCP。JSON 控制消息可以经
 
 应用状态通过只读快照或订阅提供给 UI。运行时记录依赖关系，仅更新受影响的绑定。多属性状态更新需要批次或版本边界，避免一次业务变化让界面短暂读到互相矛盾的状态。
 
-界面自己的状态写在会话草稿中（`#[bern::session]`），例如面板是否打开、流程走到第几步、选中哪一项。控件可以直接改草稿：开关、选择器、输入框改它们绑定的字段；按钮通过会话动作改，写作 `=> draft.panel.set(true)` 或 `=> draft.panel.toggle()`（只用于 `bool`）；小数字段可以写整数，例如 `=> draft.size.set(12)`。会话动作只改这个会话的草稿，不进入业务引擎，也不是业务命令，所以不属于任何功能；它们和其他动作一样经 `ui.activate` 由外部入口触发。实现进度：SwiftUI、Compose 与 Web 已实现，Web 上验证了菜单项把字号设为 18；GTK 与 WinUI 3 已实现，Windows PC 上验证菜单项把字号设为 18、分体按钮的浮层显示 18，GTK 上未单独验证。
+界面自己的状态写在会话草稿中（`#[bern::session]`），例如面板是否打开、流程走到第几步、选中哪一项。控件可以直接改草稿：开关、选择器、输入框改它们绑定的字段；按钮通过会话动作改，写作 `=> draft.panel.set(true)` 或 `=> draft.panel.toggle()`（只用于 `bool`）；小数字段可以写整数，例如 `=> draft.size.set(12)`。文字字段还有 `=> draft.query.push_str("A")`（在后面接上文字）与 `=> draft.query.pop()`（删去最后一个字符，按字符而不是字节或 UTF-16 单元），用于屏幕键盘一类的按键；名字取自 Rust 的 `String`，六个目标都实现（Web 运行时测试之外，SwiftUI 在 tvOS 与 macOS 上类型检查，GTK 与 WinUI 3 在各自系统上编译）。会话动作只改这个会话的草稿，不进入业务引擎，也不是业务命令，所以不属于任何功能；它们和其他动作一样经 `ui.activate` 由外部入口触发。实现进度：SwiftUI、Compose 与 Web 已实现，Web 上验证了菜单项把字号设为 18；GTK 与 WinUI 3 已实现，Windows PC 上验证菜单项把字号设为 18、分体按钮的浮层显示 18，GTK 上未单独验证。
 
 最小运行时必须处理：
 
@@ -1388,6 +1391,23 @@ Bern 发起的焦点操作由标准会话命令与焦点管理器执行，必须
 按钮、图标按钮、菜单项、开关与搜索框可以声明 `shortcut`：修饰键 `cmd`、`ctrl`、`alt`、`shift` 加一个键，用 `+` 连接，例如 `"cmd+k"`、`"cmd+shift+p"`、`"space"`、`"escape"`。`cmd` 是主修饰键：苹果系统上是 Command，其他系统上是 Control。键是一个可打印字符，或 `space`、`escape`、`return`、`tab`、`delete`、方向键 `up`、`down`、`left`、`right`、`home`、`end`、`pageup`、`pagedown`；写法不分大小写，编译时规范化并检查。快捷键做的事与点击该控件相同：按钮执行它的动作，开关切换，搜索框获得焦点。控件被禁用或不在界面上时，它的快捷键不起作用。
 
 预期实现：SwiftUI 的 `keyboardShortcut`（菜单项同时显示按键）；Compose 在活动的 `dispatchKeyEvent` 中先查快捷键（Compose 只把按键交给有焦点的控件及其上层，没有控件获得焦点时根上的 `onPreviewKeyEvent` 收不到），`cmd` 在这里是 Ctrl；WinUI 3 的 `KeyboardAccelerator`；GTK 的 `GtkShortcutController`；Web 在页面上监听按键。实现进度：SwiftUI 已实现，macOS 上向前台的 `examples/gallery` 发送键盘事件验证：⌘O 弹出打开面板，⌘⌥I 开关详情面板，⌘K 聚焦搜索框，接着键入即出现结果下拉；Compose 已实现，Android 模拟器上用外接键盘的组合键验证 Ctrl+O 打开系统选择器、Ctrl+Alt+I 开关详情面板；只有当前屏幕上的控件登记快捷键，手机上停在侧栏时页面工具栏的快捷键不生效。Web 已实现：页面上监听按键，`cmd` 在苹果系统上是 ⌘、其他系统是 Ctrl，没有修饰键的快捷键不在输入文字时触发；浏览器中验证 ⌘⌥I 开关详情、⌘K 聚焦搜索框（⌘O 会弹出系统的文件对话框，没有在自动化中触发）。GTK 已实现：每个窗口一个捕获阶段的按键控制器，`cmd` 与 `ctrl` 都是 Control，Linux 虚拟机上验证 Ctrl+K 聚焦搜索框、Ctrl+Alt+I 开关详情；WinUI 3 已实现：窗口根元素上的 `KeyboardAccelerator`，Windows PC 上以真实按键验证 Ctrl+O 弹出打开面板、Ctrl+Alt+I 开关详情、Ctrl+K 聚焦搜索框，Islands 前端未验证。两者都不在编辑文字时触发没有 Ctrl 或 Alt 的快捷键。
+
+没有对应控件的快捷键用 `Shortcut`：
+
+```rust
+if app.details_open {
+    Shortcut(key: "escape") => app.close_details()
+}
+Shortcut(key: "space", enabled: app.has_video) => app.toggle_pause()
+```
+
+它没有外观，在界面上且启用（`enabled` 可绑定，默认 true）时，按键执行动作，用于“Esc 关闭详情”“空格暂停”这类属于页面而不属于某个按钮的操作；键的写法与 `shortcut` 相同。六个目标都生成：SwiftUI 的隐藏按钮加 `keyboardShortcut`，Web 的页面按键监听，Compose 的活动快捷键表，GTK 的捕获阶段按键控制器，WinUI 3 的 `KeyboardAccelerator`。
+
+电视没有键盘，`Shortcut` 与控件的 `shortcut` 对应 Siri Remote 的按键：`escape` 是返回（菜单）键，`space` 是播放/暂停键，方向键是触控板的方向，只在焦点无处可移时到达快捷键（否则移动焦点）；带修饰键的组合在电视上没有对应按键。Android TV 同样如此：遥控器的返回键对应 `escape`、播放/暂停键对应 `space`，方向键先移动焦点，焦点移不动时才交给快捷键。同一个键有多个启用的快捷键时，最后显示的那个生效，停用的把键让给之前显示的（tvOS、Web、Compose、GTK 如此；macOS、iOS 与 WinUI 3 上同键的先后由系统决定，未验证）；没有返回键的快捷键时，返回交给系统（关闭全屏页、回到主屏幕）。实现进度：tvOS 模拟器上实测方向键；Web 运行时测试覆盖停用让键；返回与播放/暂停、Android TV、其他目标的 `Shortcut` 按键未实测。
+
+### 起始焦点
+
+`Button` 与 `IconButton` 可写 `default_focus: true`：界面出现时焦点从它开始。电视上焦点就是遥控器操作的位置，每个界面应给出起始焦点，例如引导的“继续”、播放器的暂停。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），标签页的每页各是一个焦点区域；其他平台上是键盘焦点：SwiftUI 的 `FocusState`，Web 的 `focus()`，Compose 的 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点。实现进度：tvOS 模拟器实测；其他目标未实测。
 
 ### 路由与返回行为
 
@@ -1693,6 +1713,7 @@ icon = "art/icon.png"
 default = "art/icon.png"                    # 没有单独声明的平台都用它，可省略
 macos = "art/macos/App.icns"                # .icns，或方形 PNG
 ios = "art/ios/AppIcon.appiconset"          # .appiconset 文件夹（可含深色、着色版），或方形 PNG
+tvos = "art/tvos/App.brandassets"           # .brandassets 文件夹（分层图标与顶部货架图），或方形 PNG
 windows = "art/windows/app.ico"             # .ico，或方形 PNG
 linux = "art/linux/hicolor"                 # 按 hicolor 排布的图标主题文件夹，或方形 PNG
 android = "art/android/res"                 # 含 mipmap-*/ic_launcher 的 res 文件夹，或方形 PNG
@@ -1705,6 +1726,7 @@ browser = "art/web"                         # 页面图标文件夹、SVG，或�
 | --- | --- | --- | --- |
 | `macos` | `.icns` 文件 | 文件头与各项长度 | 原样作为 `AppIcon.icns` |
 | `ios` | `.appiconset` 文件夹 | `Contents.json` 可解析，列出的图片都在文件夹顶层 | 文件夹内容原样放进资源目录的 `AppIcon.appiconset`，由 `actool` 编译；深色与着色版随之生效 |
+| `tvos` | `.brandassets` 文件夹 | `Contents.json` 列出的图像栈与图像集都在；图像栈 2 至 5 层，每层的图片都在；有 400 × 240 的主应用图标 | 文件夹内容原样放进资源目录的 `App Icon & Top Shelf Image.brandassets`，由 `actool` 编译；方形 PNG 则生成分层图标与顶部货架图（见下表） |
 | `windows` | `.ico` 文件 | 文件头与各图片位置 | 原样作为 `app.ico`；其中的 PNG 与位图项都可用 |
 | `linux` | 图标主题文件夹 | 只含 `<尺寸>/apps/<名称>.png`（尺寸目录如 `48x48`、`48x48@2`，PNG 尺寸须与目录相符）、`scalable/apps/<名称>.svg`、`symbolic/apps/<名称>-symbolic.svg`，同一个名称，至少一个 PNG | 名称换成 `bundle_id`；最大的 PNG 放在可执行文件旁供运行时使用，全部图标放在 `icons/hicolor` 下，`.deb` 装进 `/usr/share/icons/hicolor` |
 | `android` | `res` 文件夹 | 只含 `mipmap*`、`drawable*`、`values*` 资源目录，有 `mipmap*/ic_launcher`，不含 Bern 自己写的 `strings.xml`、`themes.xml` | 原样并入应用的 `res`：自适应图标、主题图标（单色层）随之生效；有 `ic_launcher_round` 时清单加 `android:roundIcon` |
@@ -1716,6 +1738,7 @@ browser = "art/web"                         # 页面图标文件夹、SVG，或�
 | --- | --- | --- |
 | macOS | `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`），标志铺满方形画布，由系统裁成圆角方形 | 程序坞、访达、切换器 |
 | iOS | 资源目录中的 `AppIcon.appiconset`（1024 像素），由系统裁成圆角方形 | 主屏幕、设置、切换器 |
+| tvOS | 资源目录中的 `App Icon & Top Shelf Image.brandassets`：两层的主屏幕图标（400 × 240，背景层是标志的主色，前景层是标志）、App Store 图标（1280 × 768）与顶部货架图（1920 × 720、2320 × 720）；声明的方形 PNG 同样这样生成 | 主屏幕、顶部货架 |
 | Windows | `app.ico` 编入可执行文件的图标资源；运行时设为每个窗口的大小图标，WinUI 3 标题栏也显示它 | 资源管理器、任务栏、Alt+Tab、标题栏 |
 | Linux | 可执行文件旁的 `icons/<bundle_id>.png`，加入图标主题的搜索路径并设为窗口的默认图标；生成的 `.desktop` 文件指向它 | 窗口与桌面项。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标 |
 | Android | `mipmap-xxxhdpi/ic_launcher.png` | 启动器 |
@@ -1912,6 +1935,13 @@ iOS 目标（`swiftui + ios`）已确定以下做法：
 - iPad 支持多个窗口（应用声明多场景），除设置外每种窗口是原生窗口：一个以窗口种类为值的 `WindowGroup`，再次打开时把已有窗口调到前面，保持每种窗口一个实例；声明的默认尺寸与最小尺寸用于可调整大小的 iPad 窗口。iPadOS 没有设置场景，设置窗口仍是主窗口上的 sheet，⌘, 打开。最小化、移动与调整尺寸没有公开接口，报告为不可用。窗口化模式下几个窗口的场景可以同时活动，焦点按窗口是否显示为活动（`appearsActive`）报告。
 - 前后台变化作为窗口事实报告（进入后台为隐藏、失去焦点）；媒体只报告 AVFoundation 的实际状态。
 - 先构建模拟器应用。模拟器中的应用经 IPC 通道接受 Mac 上的 CLI、JSON 与 MCP 入口：`bern run` 把 Mac 的目录经 `BERN_IPC_DIR` 交给应用，iOS 上只有设置了该目录时通道才监听。真机的签名、描述文件、安装与打包后续实现。
+
+tvOS 目标（`swiftui + tvos`）已确定以下做法：
+
+- 与 iOS 共用 SwiftUI 生成器、UIKit 运行时与 C ABI，平台差异用 `#if os(tvOS)` 区分。最低 tvOS 18，引擎用 rustup 预编译标准库的 `aarch64-apple-tvos-sim` 目标（不需要 nightly 的 `-Zbuild-std`）。
+- 一个铺满屏幕的场景，窗口都是虚拟窗口：主窗口铺满，其他窗口（含设置）以全屏页打开，返回键关闭。控件全部是 tvOS 系统控件与系统焦点效果；tvOS 没有的控件按系统做法替换：滑块是可聚焦、按方向步进的轨道，浮层按钮的内容以 sheet 显示，没有选文件、拖放与悬停。
+- 只构建电视显示的部分：`Layout(size: tv)` 与已知的窗口条件在构建时裁剪（见“自适应布局”）；`Shortcut` 与 `shortcut` 是遥控按键，`default_focus` 是首选焦点。
+- 图标为分层的 brand assets（`[app.icon].tvos`）。模拟器构建与 `bern run --target tvos`，CLI、JSON 与 MCP 经 IPC 连到模拟器里的应用。`Svg` 依赖 WebKit，tvOS 没有，不可用。详见 [tvOS 实现记录](Implementation/tvOS-SwiftUI.md)。
 
 ## 声明式视频与可扩展媒体后端
 
@@ -2236,6 +2266,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 | 版本 | 主要内容 |
 | --- | --- |
+| v0.33 | `swiftui + tvos`：Apple TV 模拟器构建与 `bern run --target tvos`，一个场景中的虚拟窗口、系统焦点与遥控器；电视布局 `Layout(size: tv)` 与 `window.tv`，只运行在电视上的目标在构建时裁剪电视不显示的部分；没有控件的快捷键 `Shortcut`，电视上对应遥控按键；按钮的起始焦点 `default_focus`；`[app.icon].tvos` 接受 `.brandassets`，未声明时由图标生成分层图标与顶部货架图；文本样式的电视字号 `font(tv:)`；文字会话动作 `push_str` 与 `pop`；`Search(suggest: true)` 未输入时就列出结果；以上 Bern 新能力六个目标都生成；tvOS 上按设计尺寸画的场景里控件按设计尺寸画（开关、分段、滑块、菜单行、分组标题、正文字号），自绘按钮按设计稿的电视焦点（行变白、图片抬起、按钮变白放大）；`Sidebar(width:)` 在保持系统侧栏宽度的目标上改为警告 |
 | v0.32 | 文档与当前接口同步：新增组件与属性参考、目标能力矩阵；播放器坐标场景与滚动内容、共享胶囊和受控滑块、空闲检测开关、图片跨分栏 Hero；同步 Web 搜索、引导、布局与存储支持。历史验证记录保留各自的范围，后续设计单独标注；`[app.icon]` 让各平台使用自己的图标（方形 PNG 或平台原生格式：`.icns`、`.appiconset`、`.ico`、hicolor 图标主题、Android `res`、页面图标文件夹）；`SidebarHeader(role: title)` 在标题栏已显示应用图标与标题的 Windows 上不显示 |
 | v0.2 | 提出 Rust 宏 UI、多语言、自适应功能契约和多后端编译目标 |
 | v0.3 | 明确受约束的可导出组件，补充动态 IR、编译职责、状态与跨语言绑定、本地化类型、条件覆盖及分阶段验收 |
@@ -2273,6 +2304,8 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 `Toolbar` 中的 `Search(style: palette)` 是命令面板：点击搜索入口或快捷键后，从入口展开至内容区上方，遮罩覆盖窗口，自动聚焦输入；Esc、点击外部及激活结果都关闭。`panel_prompt` 是展开时的提示，`width`/`height` 是面板的理想宽度与最大高度（默认 640/480），随窗口缩小并随结果高度收缩。普通 `Search` 保留原生建议列表。
 
+页面里的 `Search` 平时在使用中（获得焦点或有文字）才列出结果。写 `suggest: true` 时还没输入就列出，例如没有键盘、用遥控器的屏幕键盘输入首字母的电视搜索页：SwiftUI 与 Web 在获得焦点时列出，电视上一直列出，Compose 工具栏的搜索页本来打开就列出，GTK 与 WinUI 3 在获得焦点时弹出结果。
+
 `SearchItem` 是搜索结果的按钮，`id`、`label`、动作必需，`icon`、`detail`、`hint` 可选。行高 42；子元素可替换默认行，例如 70×105 海报。`navigation: false` 的海报仍可点击和 Tab 聚焦，不参加上下方向键选择。结果按声明顺序导航，Enter 激活，查询改变后重新选第一行；支持 `pick`/`files`。面板按窗口独立保存状态，关闭后结果卸载、焦点归还搜索入口；减少动态效果时不做几何变换。
 
 搜索面板已支持 macOS SwiftUI 与 Web；iOS、Compose、GTK 和 WinUI 3 未声明 `search_palette`，用到时构建失败。macOS 使用原生视图，Web 使用带键盘导航与焦点恢复的 dialog。
@@ -2302,7 +2335,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 ### 设置页布局表面（2026-10-15）
 
-`Sidebar(width: 220)` 声明固定列宽；SwiftUI 同时设置分栏最小/理想/最大宽度以及内容框宽度，避免系统按照搜索与列表的最小固有宽度压缩侧栏。省略时仍使用可调整的 180–320 pt 默认列宽。Web 同样支持固定侧栏宽度；其余目标通过 `sidebar_width` 能力检查拒绝尚未实现的用法。
+`Sidebar(width: 220)` 声明固定列宽；SwiftUI 同时设置分栏最小/理想/最大宽度以及内容框宽度，避免系统按照搜索与列表的最小固有宽度压缩侧栏。省略时仍使用可调整的 180–320 pt 默认列宽。Web 同样支持固定侧栏宽度。tvOS 的侧边栏是系统宽度的浮动面板，`width` 不起作用，检查给出警告，侧栏照常显示；没有列出 `sidebar_width` 的其他目标同样给出警告。
 
 `style!` 中的 `Stack.<variant>` 可配置背景、前景色和圆角。前景色传给原生子控件；圆角表面也裁切子层，格纹与图片不会越过边缘。SwiftUI 与 Web 已实现，其他目标按自身样式能力检查处理。
 

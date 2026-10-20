@@ -1,6 +1,6 @@
 # 内置组件属性表
 
-更新：2026-10-19。本表从 [bern-ir::spec](../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 69 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
+更新：2026-10-20。本表从 [bern-ir::spec](../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 70 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
 
 ## 属性类型
 
@@ -66,6 +66,7 @@
 | `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | 可含子内容；无动作 |
 | `Flow` | `gap: Length` | 可含子内容；无动作 |
 | `Timer` | **`interval: Number`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
+| `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
 | `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | 不含子节点；无动作；直接位于 ["Picker"] |
 | `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | 可含子内容；无动作 |
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |
@@ -98,7 +99,7 @@
 | `Drop` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: FileField`**<br>`files: FileKinds`<br>`over: BoolField`<br>`opens: Flag`<br>`feature: Feature` | 恰好一个子节点；必须绑定动作 |
 | `Toolbar` | 无专有属性 | 仅含 ["Button", "IconButton", "Picker", "Menu", "Search", "Switch", "SplitButton", "PopoverButton", "Divider", "Spacer", "Text"]；无动作 |
 | `Adaptive` | `id: Id` | 仅含 ["Layout"]；无动作 |
-| `Layout` | **`size: compact / medium / expanded / large`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
+| `Layout` | **`size: compact / medium / expanded / large / tv`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
 | `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
 | `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds` | 不含子节点；必须绑定动作；直接位于 ["Menu"] |
 | `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`** | 不含子节点；无动作 |
@@ -113,10 +114,10 @@
 | `Svg` | **`source: SvgResource`**<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag` | 不含子节点；无动作 |
 | `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`aspect: Number` | 不含子节点；无动作 |
 | `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText` | 不含子节点；无动作 |
-| `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds` | 可含子内容；必须绑定动作 |
-| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds` | 不含子节点；必须绑定动作 |
+| `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag` | 可含子内容；必须绑定动作 |
+| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag` | 不含子节点；必须绑定动作 |
 | `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`feature: Feature` | 不含子节点；动作可选 |
-| `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number` | 可含子内容；动作可选 |
+| `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | 可含子内容；动作可选 |
 | `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
 | `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut` | 不含子节点；动作可选 |
 | `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |

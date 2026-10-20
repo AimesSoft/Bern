@@ -15,6 +15,103 @@ import AppKit
 import UIKit
 #endif
 
+// MARK: - Pointer, keyboard and focus
+
+/// A keyboard shortcut. tvOS has none: the generated code gives its
+/// controls none there, and the Siri Remote's buttons stand for the keys
+/// they have (`bernRemoteShortcut`).
+#if os(tvOS)
+typealias BernKeyboardShortcut = Never
+#else
+typealias BernKeyboardShortcut = KeyboardShortcut
+#endif
+
+extension View {
+    /// Follows the pointer over the view. A television has no pointer:
+    /// there the focus is what stands over a control
+    /// (`bernTelevisionFocus`).
+    @ViewBuilder func bernHover(_ action: @escaping (Bool) -> Void) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        onHover(perform: action)
+        #endif
+    }
+
+    /// Follows a press anywhere on the view without taking part in its
+    /// gestures. On tvOS presses reach only buttons, which report their
+    /// own.
+    @ViewBuilder func bernPressWatch(_ action: @escaping (Bool) -> Void) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in action(true) }
+                .onEnded { _ in action(false) })
+        #endif
+    }
+
+    /// Content shown over the view from it: a popover, or on tvOS, which
+    /// has none, a sheet over the screen, as tvOS shows such content.
+    @ViewBuilder func bernPopover<Content: View>(
+        isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        #if os(tvOS)
+        sheet(isPresented: isPresented, content: content)
+        #else
+        popover(isPresented: isPresented, arrowEdge: .bottom, content: content)
+        #endif
+    }
+
+    /// A toggle shown as a button that stays down while on: the platform's
+    /// button toggle, or on tvOS, whose toggles are buttons already, its
+    /// own toggle.
+    @ViewBuilder func bernButtonToggle() -> some View {
+        #if os(tvOS)
+        self
+        #else
+        toggleStyle(.button)
+        #endif
+    }
+
+    /// A list row without the separator below it; tvOS lists have none.
+    @ViewBuilder func bernListRowSeparatorHidden() -> some View {
+        #if os(tvOS)
+        self
+        #else
+        listRowSeparator(.hidden)
+        #endif
+    }
+
+    /// A list or form whose own background gives way to what is behind
+    /// it; on tvOS lists and forms have none of their own.
+    @ViewBuilder func bernScrollContentBackgroundHidden() -> some View {
+        #if os(tvOS)
+        self
+        #else
+        scrollContentBackground(.hidden)
+        #endif
+    }
+
+    /// A keyboard shortcut on a hidden button that runs `action`.
+    @ViewBuilder func bernHiddenShortcut(_ shortcut: BernKeyboardShortcut?, action: @escaping () -> Void) -> some View {
+        #if os(tvOS)
+        self
+        #else
+        background {
+            if let shortcut {
+                Button("", action: action)
+                    .keyboardShortcut(shortcut)
+                    .opacity(0)
+                    .frame(width: 0, height: 0)
+                    .accessibilityHidden(true)
+            }
+        }
+        #endif
+    }
+}
+
 // MARK: - Motion
 
 /// A spring from `style!`: undamped period and damping ratio.
@@ -168,9 +265,17 @@ enum BernColor: Equatable, Sendable {
         #else
         switch role {
         case "text.placeholder": return Color(uiColor: .placeholderText)
+        #if os(tvOS)
+        // A television's surfaces are the screen and the system's
+        // materials, which have no named colors.
+        case "surface.canvas": return Color.clear
+        case "surface.panel": return Color.primary.opacity(0.06)
+        case "surface.raised": return Color.primary.opacity(0.1)
+        #else
         case "surface.canvas": return Color(uiColor: .systemBackground)
         case "surface.panel": return Color(uiColor: .secondarySystemBackground)
         case "surface.raised": return Color(uiColor: .tertiarySystemBackground)
+        #endif
         case "control.border": return Color(uiColor: .separator)
         case "selection.background": return .accentColor
         case "selection.foreground": return .white
@@ -253,6 +358,17 @@ struct BernStyle: Sendable {
     var disabled: BernLook?
     /// The spring back to rest.
     var settle = BernMotion(period: 0.45, damping: 1)
+    /// `focus: none`: no focus effect of the platform's own.
+    var showsFocus = true
+
+    /// What the control is under a television's focus: a row of a list,
+    /// which only the pointer lights (a background on hover); a control
+    /// drawn on a background of its own, as a key; or a picture.
+    var focusKind: BernFocusKind {
+        if base.background != nil { return .control }
+        if hover?.background != nil { return .row }
+        return .picture
+    }
 
     /// Whether the style draws the control itself instead of keeping the
     /// platform's look, which only moves.
@@ -336,11 +452,8 @@ private struct BernFeedback: ViewModifier {
         let (look, motion) = style.look(selected: false, hover: hover, pressed: pressed, enabled: enabled)
         content
             .bernTransform(look, motion, key: bernStateKey(false, hover, pressed, enabled), reduce: reduce)
-            .onHover { hover = $0 }
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in pressed = true }
-                    .onEnded { _ in pressed = false })
+            .bernHover { hover = $0 }
+            .bernPressWatch { pressed = $0 }
     }
 }
 
@@ -372,7 +485,8 @@ private struct BernStyledButton: View {
             .overlay(shape.strokeBorder(look.border?.color ?? Color.clear, lineWidth: look.borderWidth))
             .contentShape(shape)
             .bernTransform(look, motion, key: bernStateKey(false, hover, pressed, enabled), reduce: reduce)
-            .onHover { hover = $0 }
+            .bernHover { hover = $0 }
+            .bernTelevisionFocus(.control, corner: style.corner ?? 6, shown: style.showsFocus)
     }
 }
 
@@ -408,14 +522,94 @@ private struct BernContentButton: View {
                 .overlay(shape.strokeBorder(look.border?.color ?? Color.clear, lineWidth: look.borderWidth))
                 .contentShape(shape)
                 .bernTransform(look, motion, key: bernStateKey(false, hover, pressed, enabled), reduce: reduce)
-                .onHover { hover = $0 }
+                .bernHover { hover = $0 }
+                .bernTelevisionFocus(style.focusKind, corner: style.corner ?? 0, shown: style.showsFocus)
         } else {
             configuration.label
                 .contentShape(Rectangle())
                 .opacity(pressed ? 0.75 : enabled ? 1 : 0.5)
+                .bernTelevisionFocus(.picture, corner: 0)
         }
     }
 }
+
+/// What a control the style draws is, for the focus a television shows on
+/// it (the design's Apple TV focus, after tvOS's own).
+enum BernFocusKind {
+    /// A button the style draws: under the focus it turns white with a
+    /// dark label and grows by a tenth.
+    case control
+    /// A row of a list: it turns white, its content dark, and lifts.
+    case row
+    /// A picture, such as a poster or a frame: it lifts with a shadow.
+    case picture
+}
+
+extension View {
+    /// The focus a television shows on a control the style draws; nothing
+    /// elsewhere, where the platform's own focus ring stays, and nothing
+    /// while the control is not focused.
+    @ViewBuilder func bernTelevisionFocus(_ kind: BernFocusKind, corner: Double, shown: Bool = true) -> some View {
+        #if os(tvOS)
+        modifier(BernTelevisionFocus(kind: kind, corner: corner, shown: shown))
+        #else
+        self
+        #endif
+    }
+}
+
+#if os(tvOS)
+/// The focus of a button's content: the button tells it.
+private struct BernTelevisionFocus: ViewModifier {
+    let kind: BernFocusKind
+    let corner: Double
+    let shown: Bool
+    @Environment(\.isFocused) private var isFocused
+
+    func body(content: Content) -> some View {
+        content.modifier(BernTelevisionFocusLook(kind: kind, corner: corner, focused: isFocused && shown))
+    }
+}
+
+/// A row that takes the focus itself, as a sidebar's: it is focusable and
+/// shows its focus as a row.
+struct BernFocusableRow: ViewModifier {
+    let corner: Double
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .modifier(BernTelevisionFocusLook(kind: .row, corner: corner, focused: focused))
+            .focusable()
+            .focused($focused)
+    }
+}
+
+private struct BernTelevisionFocusLook: ViewModifier {
+    let kind: BernFocusKind
+    let corner: Double
+    let focused: Bool
+    @BernReducedMotion private var reduce
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+        content
+            // A row or a control turns white under the focus; what it
+            // shows reads dark on it, as on a light page.
+            .environment(\.colorScheme, focused && kind != .picture ? .light : .dark)
+            .background { if focused && kind != .picture { shape.fill(Color.white) } }
+            .scaleEffect(focused ? (kind == .picture ? 1.08 : kind == .row ? 1.03 : 1.1) : 1)
+            .shadow(color: .black.opacity(focused ? (kind == .picture ? 0.65 : 0.5) : 0),
+                    radius: focused ? (kind == .picture ? 22 : 17) : 0, y: focused ? (kind == .picture ? 13 : 8) : 0)
+            .zIndex(focused ? 1 : 0)
+            .animation(
+                reduce || bernForcedReduceMotion
+                    ? .easeInOut(duration: 0.15)
+                    : .spring(response: 0.3, dampingFraction: focused ? 0.6 : 1),
+                value: focused)
+    }
+}
+#endif
 
 extension View {
     /// `color` for text and icons when there is one; what lies above
@@ -512,10 +706,59 @@ extension EnvironmentValues {
 private struct BernGroupedButtonStyle: ButtonStyle {
     let height: CGFloat
     func makeBody(configuration: Configuration) -> some View {
+        #if os(tvOS)
+        BernFocusedGroupButton(configuration: configuration, height: height)
+        #else
         configuration.label
             .frame(minWidth: height, minHeight: height)
             .contentShape(Rectangle())
             .opacity(configuration.isPressed ? 0.55 : 1)
+        #endif
+    }
+}
+
+#if os(tvOS)
+/// A button of a group's shared glass on tvOS: under the focus its part
+/// of the glass turns white with a dark label and lifts, as the focus of
+/// tvOS's own buttons shows.
+private struct BernFocusedGroupButton: View {
+    let configuration: ButtonStyle.Configuration
+    let height: CGFloat
+    @Environment(\.isFocused) private var focused
+
+    var body: some View {
+        configuration.label
+            .frame(minWidth: height, minHeight: height)
+            .foregroundStyle(focused ? Color.black : Color.primary)
+            .background { Capsule().fill(Color.white).opacity(focused ? 1 : 0) }
+            .contentShape(Capsule())
+            .scaleEffect(configuration.isPressed ? 0.94 : focused ? 1.1 : 1)
+            .shadow(color: .black.opacity(focused ? 0.4 : 0), radius: focused ? 12 : 0, y: focused ? 6 : 0)
+            .animation(.spring(response: 0.35, dampingFraction: focused ? 0.6 : 1), value: focused)
+    }
+}
+#endif
+
+private struct BernSceneScaledKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private struct BernSceneScaleKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 1
+}
+
+extension EnvironmentValues {
+    /// Inside a `ScaleBox`: a scene laid out at fixed coordinates and
+    /// scaled to its room.
+    var bernSceneScaled: Bool {
+        get { self[BernSceneScaledKey.self] }
+        set { self[BernSceneScaledKey.self] = newValue }
+    }
+
+    /// How much a `ScaleBox` around enlarges its scene; 1 outside one.
+    var bernSceneScale: CGFloat {
+        get { self[BernSceneScaleKey.self] }
+        set { self[BernSceneScaleKey.self] = newValue }
     }
 }
 
@@ -523,12 +766,49 @@ private struct BernSystemButtonLook: ViewModifier {
     let look: BernButtonLook
     @Environment(\.bernControlGroupHeight) private var groupHeight
     @Environment(\.bernOnBar) private var onBar
+    @Environment(\.bernSceneScaled) private var scaled
+    @Environment(\.bernAccent) private var accent
+    @Environment(\.controlSize) private var controlSize
+
     @ViewBuilder func body(content: Content) -> some View {
+        #if os(tvOS)
+        // tvOS's own buttons take a television's sizes, which a scene that
+        // is scaled up as a whole would enlarge again: there a button keeps
+        // the design's sizes for a television (46 points, 52 for a large
+        // one, on 16 and 17-point type) and shows the focus as tvOS's own.
+        if scaled && groupHeight == nil && !onBar {
+            let large = controlSize == .large || controlSize == .extraLarge
+            switch look {
+            case .icon:
+                content.buttonStyle(BernFocusShapeStyle(
+                    prominent: false, accent: accent ?? .accentColor, circle: true, height: 46, padding: 0))
+                    .font(.system(size: 20))
+            case .prominent, .secondary:
+                content.buttonStyle(BernFocusShapeStyle(
+                    prominent: look == .prominent, accent: accent ?? .accentColor, circle: false,
+                    height: large ? 52 : 46, padding: large ? 28 : 22))
+                    .font(.system(size: large ? 17 : 16, weight: look == .prominent ? .semibold : .medium))
+            case .flat:
+                // A plain button is its label, as a link reads in the text.
+                content.buttonStyle(BernFocusShapeStyle(
+                    prominent: false, accent: accent ?? .accentColor, circle: false, height: 0, padding: 0,
+                    plain: true))
+                    .font(.system(size: 16))
+            }
+        } else {
+            standard(content)
+        }
+        #else
+        standard(content)
+        #endif
+    }
+
+    @ViewBuilder private func standard(_ content: Content) -> some View {
         if let groupHeight {
             content.buttonStyle(BernGroupedButtonStyle(height: groupHeight)).foregroundStyle(.primary)
         } else if onBar && (look == .icon || look == .flat) {
             content.buttonStyle(BernGroupedButtonStyle(height: 0)).foregroundStyle(.primary)
-        } else if #available(macOS 26.0, iOS 26.0, *) {
+        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
             switch look {
             case .secondary: content.buttonStyle(.glass).bernPrimaryLabel()
             case .prominent: content.buttonStyle(.glassProminent).bernAccentTint()
@@ -578,7 +858,7 @@ private struct BernGlassCapsule: ViewModifier {
     var prominent = false
     @Environment(\.bernAccent) private var accent
     @ViewBuilder func body(content: Content) -> some View {
-        if #available(macOS 26.0, iOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
             if prominent {
                 content.foregroundStyle(BernColor.role("on_accent").color)
                     .background(accent ?? .accentColor, in: Capsule())
@@ -599,11 +879,15 @@ extension View {
     /// menus and the window list.
     @ViewBuilder
     func bernToolbarTitleHidden() -> some View {
+        #if os(tvOS)
+        self
+        #else
         if #available(macOS 15.0, iOS 18.0, *) {
             toolbar(removing: .title)
         } else {
             self
         }
+        #endif
     }
 }
 
@@ -674,7 +958,7 @@ struct BernSearchable<Results: View>: ViewModifier {
     let prompt: String?
     let target: String
     var submit: (@MainActor () -> Void)? = nil
-    var shortcut: KeyboardShortcut? = nil
+    var shortcut: BernKeyboardShortcut? = nil
     @ViewBuilder let results: () -> Results
     @FocusState private var focused: Bool
 
@@ -684,21 +968,19 @@ struct BernSearchable<Results: View>: ViewModifier {
             .searchSuggestions { results() }
             .onSubmit(of: .search) { submit?() }
         SwiftUI.Group {
+            #if os(tvOS)
+            // tvOS searches on a screen of its own, which takes the focus
+            // when it opens.
+            field
+            #else
             if #available(macOS 15.0, iOS 18.0, *) {
                 field.searchFocused($focused)
             } else {
                 field
             }
+            #endif
         }
-        .background {
-            if let shortcut {
-                Button("") { focused = true }
-                    .keyboardShortcut(shortcut)
-                    .opacity(0)
-                    .frame(width: 0, height: 0)
-                    .accessibilityHidden(true)
-            }
-        }
+        .bernHiddenShortcut(shortcut) { focused = true }
         .bernControl(
             target, role: "search", label: prompt ?? "",
             actions: BernControlActions(
@@ -777,7 +1059,7 @@ struct BernSplitButton<Content: View>: View {
             .modifier(BernGlassCapsule(prominent: isOn))
         } else {
             ControlGroup {
-                Toggle(isOn: $isOn) { toggleLabel }.toggleStyle(.button)
+                Toggle(isOn: $isOn) { toggleLabel }.bernButtonToggle()
                 Button { showing = true } label: { Image(systemName: "chevron.down") }
                     .accessibilityLabel(Text(verbatim: more)).help(more)
             }
@@ -790,7 +1072,7 @@ struct BernSplitButton<Content: View>: View {
         .fixedSize()
         // A control group turns its buttons into segments of one control,
         // which anchors the popover.
-        .popover(isPresented: $showing, arrowEdge: .bottom) {
+        .bernPopover(isPresented: $showing) {
             VStack(alignment: .leading, spacing: 12) { content }
                 .padding(16)
                 .frame(minWidth: 240, alignment: .leading)
@@ -1009,14 +1291,16 @@ struct BernSidebarRow<Value: Hashable>: View {
         // them at this row's boundary so bernTransform's state animation
         // interpolates both the background and the scale on hover/press.
         .transaction { $0.disablesAnimations = false }
-        .onHover { updateInteraction(hover: $0, pressed: $0 && pressed) }
+        .bernHover { updateInteraction(hover: $0, pressed: $0 && pressed) }
+        #if os(tvOS)
+        // A row takes the focus, turns white under it, and the remote's
+        // select chooses it.
+        .modifier(BernFocusableRow(corner: style.corner ?? 6))
+        #endif
         .onTapGesture { selection = value }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in updateInteraction(hover: hover, pressed: true) }
-                .onEnded { _ in updateInteraction(hover: hover, pressed: false) })
+        .bernPressWatch { updateInteraction(hover: hover, pressed: $0) }
         .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
+        .bernListRowSeparatorHidden()
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { selection = value }
@@ -1449,7 +1733,7 @@ private struct BernMark: ViewModifier {
     let color: BernColor
 
     func body(content: Content) -> some View {
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, tvOS 18, *) {
             content.textRenderer(BernMarkRenderer(color: color.color))
         } else {
             // Before text renderers there are no line positions: underline.
@@ -1458,7 +1742,7 @@ private struct BernMark: ViewModifier {
     }
 }
 
-@available(macOS 15, iOS 18, *)
+@available(macOS 15, iOS 18, tvOS 18, *)
 private struct BernMarkRenderer: TextRenderer {
     let color: Color
 
@@ -1978,6 +2262,12 @@ private struct BernPinch: ViewModifier {
     @State private var start: Double?
 
     func body(content: Content) -> some View {
+        #if os(tvOS)
+        // A television has no touch screen to pinch: only the adjustment
+        // of assistive technologies.
+        content
+            .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+        #else
         content
             .contentShape(Rectangle())
             .simultaneousGesture(
@@ -1992,6 +2282,7 @@ private struct BernPinch: ViewModifier {
                         commit()
                     })
             .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+        #endif
     }
 }
 
@@ -2004,6 +2295,12 @@ private struct BernSwipe: ViewModifier {
     @State private var start: Double?
 
     func body(content: Content) -> some View {
+        #if os(tvOS)
+        // A television has no touch screen to swipe; the remote's swipes
+        // move the focus. Only the adjustment of assistive technologies.
+        content
+            .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+        #else
         content
             .contentShape(Rectangle())
             .gesture(
@@ -2020,6 +2317,7 @@ private struct BernSwipe: ViewModifier {
                         commit()
                     })
             .accessibilityAdjustableAction { direction in bernAdjust(value, range, direction, commit) }
+        #endif
     }
 }
 
@@ -2577,7 +2875,7 @@ struct BernPopoverButton<Content: View>: View {
             }
         }
         .help(label)
-        .popover(isPresented: showing, arrowEdge: .bottom) {
+        .bernPopover(isPresented: showing) {
             VStack(alignment: .leading, spacing: 12) { content() }
                 .padding(16)
                 .frame(minWidth: 240, alignment: .leading)
@@ -2864,7 +3162,7 @@ struct BernSearchPalette<Results: View>: View {
     let target: String
     let width: CGFloat
     let height: CGFloat
-    var shortcut: KeyboardShortcut? = nil
+    var shortcut: BernKeyboardShortcut? = nil
     @ViewBuilder let results: () -> Results
     @Environment(BernPaletteState.self) private var palette
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -2892,7 +3190,9 @@ struct BernSearchPalette<Results: View>: View {
                 Image(systemName: "magnifyingglass").font(.system(size: 14))
                 Text(verbatim: prompt).font(.system(size: 13)).lineLimit(1)
                 Spacer(minLength: 4)
+                #if !os(tvOS)
                 if let shortcut { Text(shortcut.key == "k" ? "⌘K" : "").font(.system(size: 11.5, weight: .medium)) }
+                #endif
             }
             .foregroundStyle(.secondary)
             .padding(.horizontal, 12)
@@ -2904,12 +3204,7 @@ struct BernSearchPalette<Results: View>: View {
         .background(GeometryReader { geometry in
             Color.clear.onChange(of: geometry.frame(in: .global), initial: true) { source = geometry.frame(in: .global) }
         })
-        .background {
-            if let shortcut {
-                Button("") { open() }.keyboardShortcut(shortcut)
-                    .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
-            }
-        }
+        .bernHiddenShortcut(shortcut, action: open)
         .bernControl(target, role: "search", label: prompt,
                      actions: BernControlActions(activate: open, edit: { text.wrappedValue = $0 },
                                                  submit: { palette.activate() }, value: { text.wrappedValue }, focus: open))
@@ -2961,7 +3256,11 @@ struct BernSearchItem<Content: View>: View {
             }
             .scaleEffect(!navigation && hovered ? 1.03 : 1)
             .animation(.spring(response: 0.22, dampingFraction: 0.85), value: hovered)
-            .onHover { hovered = $0 }
+            #if os(tvOS)
+            // A television's focus: a row turns white, a picture lifts.
+            .modifier(BernTelevisionFocusLook(kind: navigation ? .row : .picture, corner: 12, focused: focused))
+            #endif
+            .bernHover { hovered = $0 }
             .accessibilityLabel(Text(verbatim: label))
             .accessibilityAddTraits(palette.selection == id ? .isSelected : [])
             .bernControl(target, role: "button", label: label, actions: controlActions)
@@ -2991,6 +3290,10 @@ struct BernSearchField<Results: View>: View {
     var height: CGFloat? = nil
     var fontSize: CGFloat? = nil
     var width: CGFloat? = nil
+    /// The results show before anything is typed: while the field is in
+    /// use, and on a television, which types with the remote beside it,
+    /// always.
+    var suggest = false
     var submit: (() -> Void)? = nil
     @ViewBuilder let results: () -> Results
     @State private var palette = BernPaletteState(inline: true)
@@ -3009,7 +3312,7 @@ struct BernSearchField<Results: View>: View {
                 cancel: { text.wrappedValue = "" })
                 .bernSearchSurface(height: height)
                 .frame(width: width)
-            if editing || !text.wrappedValue.isEmpty {
+            if editing || !text.wrappedValue.isEmpty || (suggest && bernTelevision) {
                 results()
                     .onPreferenceChange(BernPaletteEntries.self) { entries in
                         palette.entries = entries
@@ -3030,7 +3333,7 @@ extension View {
     /// capsule, as the other capsule controls; elsewhere the field's own.
     @ViewBuilder func bernSearchSurface(height: CGFloat?) -> some View {
         #if os(iOS)
-        if #available(iOS 26.0, *) {
+        if #available(iOS 26.0, tvOS 26.0, *) {
             // The field insets its own symbol and text.
             self.frame(height: height ?? 36)
                 .glassEffect(.regular.interactive(), in: Capsule())
@@ -3048,19 +3351,23 @@ struct BernSearchRow: View {
     let icon: String?
     let detail: String
     let hint: String
+    /// A television reads the row from across the room: 16-point words,
+    /// 13.5-point details.
+    private var body_: CGFloat { bernTelevision ? 16 : 13 }
+    private var small: CGFloat { bernTelevision ? 13.5 : 11.5 }
     var body: some View {
         HStack(spacing: 12) {
             if let icon {
-                Image(systemName: icon).font(.system(size: 14)).foregroundStyle(.secondary)
-                    .frame(width: 26, height: 26)
+                Image(systemName: icon).font(.system(size: bernTelevision ? 16 : 14)).foregroundStyle(.secondary)
+                    .frame(width: bernTelevision ? 30 : 26, height: bernTelevision ? 30 : 26)
                     .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
             }
-            Text(verbatim: label).font(.system(size: 13)).lineLimit(1)
+            Text(verbatim: label).font(.system(size: body_)).lineLimit(1)
             if !detail.isEmpty {
-                Text(verbatim: detail).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
+                Text(verbatim: detail).font(.system(size: small, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
-            if !hint.isEmpty { Text(verbatim: hint).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.tertiary) }
+            if !hint.isEmpty { Text(verbatim: hint).font(.system(size: small, weight: .medium)).foregroundStyle(.tertiary) }
         }
         .padding(.horizontal, 12)
         .frame(height: 42)
@@ -3209,6 +3516,10 @@ private struct BernCircleControl: ViewModifier {
     let diameter: CGFloat
     let prominent: Bool
     @ViewBuilder func body(content: Content) -> some View {
+        #if os(tvOS)
+        content.buttonStyle(BernFocusShapeStyle(
+            prominent: prominent, accent: accent ?? .accentColor, circle: true, height: diameter, padding: 0))
+        #else
         let control = content.buttonStyle(.plain)
             .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
             .frame(width: diameter, height: diameter)
@@ -3216,7 +3527,7 @@ private struct BernCircleControl: ViewModifier {
         if onBar && !prominent {
             // The bar is the glass; the button is a target of its size.
             control
-        } else if #available(macOS 26.0, iOS 26.0, *) {
+        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
             if prominent {
                 control
                     .background(accent ?? .accentColor, in: Circle())
@@ -3229,14 +3540,108 @@ private struct BernCircleControl: ViewModifier {
         } else {
             control.background(.regularMaterial, in: Circle())
         }
+        #endif
     }
 }
+
+#if os(tvOS)
+/// A capsule or circle button of the design's size on tvOS. The system's
+/// bordered buttons take sizes of their own, larger than a scene the
+/// design lays out, so this one keeps the size and shows the focus as
+/// tvOS's own buttons do: under it the button turns white with a dark
+/// label, lifts by 1.08 with a shadow on a bouncy spring, and settles back
+/// smoothly.
+struct BernFocusShapeStyle: ButtonStyle {
+    let prominent: Bool
+    let accent: Color
+    let circle: Bool
+    let height: CGFloat
+    let padding: CGFloat
+    /// A plain button: its label alone, in the secondary color, until the
+    /// focus puts a white capsule around it.
+    var plain = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        BernFocusShape(configuration: configuration, style: self)
+    }
+}
+
+private struct BernFocusShape: View {
+    let configuration: ButtonStyle.Configuration
+    let style: BernFocusShapeStyle
+    @Environment(\.isFocused) private var focused
+    @Environment(\.isEnabled) private var enabled
+    @BernReducedMotion private var reduce
+
+    var body: some View {
+        if style.plain {
+            plain
+        } else {
+            shaped
+        }
+    }
+
+    private var plain: some View {
+        configuration.label
+            .foregroundStyle(focused ? Color.black : Color.secondary)
+            .background {
+                if focused {
+                    Capsule().fill(Color.white).padding(.horizontal, -14).padding(.vertical, -8)
+                }
+            }
+            .contentShape(Rectangle())
+            .scaleEffect(configuration.isPressed ? 0.96 : focused ? 1.1 : 1)
+            .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 14 : 0, y: focused ? 8 : 0)
+            .opacity(enabled ? 1 : 0.45)
+            .animation(
+                reduce || bernForcedReduceMotion
+                    ? .easeInOut(duration: 0.15)
+                    : .spring(response: 0.3, dampingFraction: focused ? 0.6 : 1),
+                value: focused)
+    }
+
+    private var shaped: some View {
+        let shape = style.circle ? AnyShape(Circle()) : AnyShape(Capsule())
+        return configuration.label
+            .padding(.horizontal, style.padding)
+            .frame(width: style.circle ? style.height : nil, height: style.height)
+            .foregroundStyle(focused ? Color.black : style.prominent ? BernColor.role("on_accent").color : Color.primary)
+            .background {
+                if focused {
+                    shape.fill(Color.white)
+                } else if style.prominent {
+                    shape.fill(style.accent)
+                } else if #available(tvOS 26.0, *) {
+                    Color.clear.glassEffect(.regular, in: shape)
+                } else {
+                    shape.fill(.regularMaterial)
+                }
+            }
+            .contentShape(shape)
+            .scaleEffect(configuration.isPressed ? 0.96 : focused ? 1.1 : 1)
+            .shadow(color: .black.opacity(focused ? 0.45 : 0), radius: focused ? 14 : 0, y: focused ? 8 : 0)
+            .opacity(enabled ? 1 : 0.45)
+            .animation(
+                reduce || bernForcedReduceMotion
+                    ? .easeInOut(duration: 0.15)
+                    : .spring(response: 0.3, dampingFraction: focused ? 0.6 : 1),
+                value: focused)
+    }
+}
+#endif
 
 private struct BernCapsuleControl: ViewModifier {
     @Environment(\.bernAccent) private var accent
     let height: CGFloat
     let prominent: Bool
     @ViewBuilder func body(content: Content) -> some View {
+        #if os(tvOS)
+        content
+            .buttonStyle(BernFocusShapeStyle(
+                prominent: prominent, accent: accent ?? .accentColor, circle: false, height: height,
+                padding: height >= 40 ? 22 : height <= 30 ? 13 : 14))
+            .font(height >= 40 ? .system(size: 15, weight: .semibold) : .system(size: 13, weight: .medium))
+        #else
         // The design's button sizes (6.3): a main action of 42 points or
         // more is set in 15-point semibold, 22 from its ends; the others in
         // 13-point medium, 14 from their ends, or 13 on a 30-point chip.
@@ -3245,7 +3650,7 @@ private struct BernCapsuleControl: ViewModifier {
             .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
             .padding(.horizontal, height >= 40 ? 22 : height <= 30 ? 13 : 14).frame(height: height)
             .contentShape(Capsule())
-        if #available(macOS 26.0, iOS 26.0, *) {
+        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
             if prominent {
                 // Keep the accent legible when the window's native glass
                 // desaturates; the glass still supplies the interactive surface.
@@ -3260,6 +3665,7 @@ private struct BernCapsuleControl: ViewModifier {
         } else {
             control.background(.regularMaterial, in: Capsule())
         }
+        #endif
     }
 }
 
@@ -3268,6 +3674,8 @@ private struct BernCapsuleControl: ViewModifier {
 struct BernModal<Content: View>: View {
     @BernReducedMotion private var reduce
     @Environment(BernWindowContext.self) private var window: BernWindowContext?
+    /// A modal declared in a scaled scene shows at the scene's scale.
+    @Environment(\.bernSceneScale) private var scale
     let width: CGFloat
     let height: CGFloat
     /// Covers the whole window where the window is compact.
@@ -3278,8 +3686,9 @@ struct BernModal<Content: View>: View {
         Color.clear.frame(width: 0, height: 0)
             .preference(key: BernModalContent.self, value: AnyView(
                 BernModalLayer(width: width, height: height, covers: cover && window?.compact == true,
-                               content: content, presentation: presentation)
-                    .environment(\.bernReduceMotion, reduce)))
+                               scale: scale, content: content, presentation: presentation)
+                    .environment(\.bernReduceMotion, reduce)
+                    .environment(\.bernSceneScaled, scale != 1)))
     }
 }
 
@@ -3297,6 +3706,8 @@ private struct BernModalLayer<Content: View>: View {
     let height: CGFloat
     /// The whole window, edge to edge, as a phone's full-screen flow.
     var covers = false
+    /// The scale of the scene the modal was declared in.
+    var scale: CGFloat = 1
     let content: Content
     let presentation: (AnyView) -> AnyView
     var body: some View {
@@ -3319,17 +3730,21 @@ private struct BernModalLayer<Content: View>: View {
             #else
             let topInset: CGFloat = 0
             #endif
+            let modalWidth = min(width, max(0, proxy.size.width / scale - 32))
+            let modalHeight = min(height, max(0, (proxy.size.height - topInset) / scale - 32))
             ZStack {
                 Color.black.opacity(0.24).contentShape(Rectangle()).onTapGesture { }
                 presentation(AnyView(content
-                    .frame(width: min(width, max(0, proxy.size.width - 32)), height: min(height, max(0, proxy.size.height - topInset - 32)))
+                    .frame(width: modalWidth, height: modalHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 24))
                     .background {
                         RoundedRectangle(cornerRadius: 24).fill(.background)
                             .shadow(color: .black.opacity(0.28), radius: 40, y: 20)
                     }
                     .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
-                    .accessibilityAddTraits(.isModal)))
+                    .accessibilityAddTraits(.isModal)
+                    .scaleEffect(scale)
+                    .frame(width: modalWidth * scale, height: modalHeight * scale)))
             }.frame(width: proxy.size.width, height: proxy.size.height - topInset).offset(y: topInset)
         }.ignoresSafeArea()
     }
@@ -3510,6 +3925,181 @@ struct BernTimer: View {
     }
 }
 
+extension View {
+    /// `default_focus`: the focus starts on the control when it appears,
+    /// the remote's on a television and the keyboard's elsewhere.
+    func bernDefaultFocus() -> some View {
+        modifier(BernDefaultFocus())
+    }
+}
+
+private struct BernDefaultFocus: ViewModifier {
+    @FocusState private var focused: Bool
+    #if os(tvOS)
+    @Environment(\.bernFocusScope) private var scope
+    #endif
+
+    func body(content: Content) -> some View {
+        content
+            #if os(tvOS)
+            // The focus engine starts here when it chooses the window's
+            // focus, at launch and when what had the focus leaves.
+            .modifier(BernPreferredFocus(scope: scope))
+            #endif
+            .focused($focused)
+            // Shown later, the control takes the focus once it is in the
+            // focus system.
+            .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { focused = true } }
+    }
+}
+
+#if os(tvOS)
+private struct BernPreferredFocus: ViewModifier {
+    let scope: Namespace.ID?
+
+    func body(content: Content) -> some View {
+        if let scope {
+            content.prefersDefaultFocus(true, in: scope)
+        } else {
+            content
+        }
+    }
+}
+
+private struct BernFocusScopeKey: EnvironmentKey {
+    static let defaultValue: Namespace.ID? = nil
+}
+
+extension EnvironmentValues {
+    /// The window's focus scope on tvOS, where `default_focus` prefers.
+    var bernFocusScope: Namespace.ID? {
+        get { self[BernFocusScopeKey.self] }
+        set { self[BernFocusScopeKey.self] = newValue }
+    }
+}
+
+/// The window root's focus scope on tvOS.
+struct BernFocusScope: ViewModifier {
+    @Namespace private var scope
+
+    func body(content: Content) -> some View {
+        content
+            .focusScope(scope)
+            .environment(\.bernFocusScope, scope)
+    }
+}
+#endif
+
+extension View {
+    /// A form section's title: in a scene laid out at the design's size on
+    /// tvOS, the design's small label (12.5 points, semibold, secondary)
+    /// instead of tvOS's large one; the platform's elsewhere.
+    @ViewBuilder func bernSectionTitle() -> some View {
+        #if os(tvOS)
+        modifier(BernSceneSectionText(size: 12.5, weight: .semibold))
+        #else
+        self
+        #endif
+    }
+
+    /// A form section's footer, as its title at the design's size.
+    @ViewBuilder func bernSectionFooter() -> some View {
+        #if os(tvOS)
+        modifier(BernSceneSectionText(size: 12.5, weight: .regular))
+        #else
+        self
+        #endif
+    }
+}
+
+#if os(tvOS)
+private struct BernSceneSectionText: ViewModifier {
+    let size: CGFloat
+    let weight: Font.Weight
+    @Environment(\.bernSceneScaled) private var scaled
+
+    func body(content: Content) -> some View {
+        if scaled {
+            content.font(.system(size: size, weight: weight)).foregroundStyle(.secondary).textCase(nil)
+        } else {
+            content
+        }
+    }
+}
+#endif
+
+extension View {
+    /// A text field in a scaled scene on tvOS: tvOS's own field at the
+    /// design's size for a television (46 points on 16-point type) instead
+    /// of tvOS's, which the scene would enlarge again. tvOS draws its
+    /// platter and focus, and selecting it opens the system's keyboard.
+    @ViewBuilder func bernFieldLook() -> some View {
+        #if os(tvOS)
+        modifier(BernTelevisionField())
+        #else
+        self
+        #endif
+    }
+}
+
+#if os(tvOS)
+private struct BernTelevisionField: ViewModifier {
+    @Environment(\.bernSceneScaled) private var scaled
+
+    func body(content: Content) -> some View {
+        if scaled {
+            // tvOS's own field, which draws its platter and its focus, at
+            // the design's size.
+            content
+                .font(.system(size: 16))
+                .frame(minHeight: 46)
+        } else {
+            content
+        }
+    }
+}
+#endif
+
+/// `Shortcut`: a keyboard shortcut without a control of its own; on tvOS
+/// the Siri Remote's button that stands for the key.
+struct BernKeyShortcut: View {
+    #if os(tvOS)
+    let remote: BernRemoteKey
+    #else
+    let shortcut: KeyboardShortcut
+    #endif
+    let enabled: Bool
+    let action: () -> Void
+
+    #if os(tvOS)
+    init(remote: BernRemoteKey, enabled: Bool, action: @escaping () -> Void) {
+        self.remote = remote
+        self.enabled = enabled
+        self.action = action
+    }
+    #else
+    init(shortcut: KeyboardShortcut, enabled: Bool, action: @escaping () -> Void) {
+        self.shortcut = shortcut
+        self.enabled = enabled
+        self.action = action
+    }
+    #endif
+
+    var body: some View {
+        #if os(tvOS)
+        Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+            .bernRemoteShortcut(remote, enabled: enabled, action: action)
+        #else
+        Button("", action: action)
+            .keyboardShortcut(shortcut)
+            .disabled(!enabled)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        #endif
+    }
+}
+
 // MARK: - Forms on their page
 
 private struct BernFormRowKey: EnvironmentKey {
@@ -3530,7 +4120,7 @@ extension View {
     /// the page's.
     @ViewBuilder func bernFormStyle(_ style: BernStyle) -> some View {
         if let row = style.base.background?.color {
-            self.scrollContentBackground(.hidden).environment(\.bernFormRow, row)
+            self.bernScrollContentBackgroundHidden().environment(\.bernFormRow, row)
         } else {
             self
         }
@@ -3580,7 +4170,7 @@ extension View {
     func bernPlainRows() -> some View {
         self.listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
-            .listRowSeparator(.hidden)
+            .bernListRowSeparatorHidden()
     }
 }
 

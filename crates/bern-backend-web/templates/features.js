@@ -1441,7 +1441,7 @@ function listenForLaunches() {
 
 /// A button showing its content instead of a label: no frame of its own,
 /// the content as it is; a style's corner clips it.
-export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds }, action, content) {
+export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds, defaultFocus }, action, content) {
   // A capsule is the platform's button around the content, as it is around
   // a label; otherwise the content is all there is.
   const framed = shape === "capsule";
@@ -1465,6 +1465,7 @@ export function ContentButton(p, ctx, { id, label, enabled, style, shape, height
   }
   bindLength(node, "height", height);
   p.append(node);
+  if (defaultFocus) B.startFocus(node);
 }
 
 // MARK: - Switches as buttons
@@ -2062,8 +2063,11 @@ function normalized(shortcut) {
 
 let listening = false;
 
-export function shortcut(spec, run) {
-  const entry = { keys: normalized(spec), run };
+/// `spec` runs `run` while it is mounted; `active`, when given, says
+/// whether it takes the key now. Of the shortcuts that take a key, the one
+/// mounted last runs.
+export function shortcut(spec, run, active) {
+  const entry = { keys: normalized(spec), run, active };
   shortcuts.push(entry);
   onCleanup(() => shortcuts.splice(shortcuts.indexOf(entry), 1));
   if (listening) return;
@@ -2071,13 +2075,22 @@ export function shortcut(spec, run) {
   document.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
     const keys = pressed(event);
-    const found = [...shortcuts].reverse().find((one) => one.keys === keys);
+    const found = [...shortcuts].reverse().find((one) => one.keys === keys && (!one.active || one.active()));
     if (!found) return;
     const editing = event.target.closest?.("input, textarea, [contenteditable]");
     if (editing && !/^(cmd|ctrl|alt)\+/.test(keys)) return;
     event.preventDefault();
     found.run();
   }, true);
+}
+
+/// `Shortcut`: `key` runs `action` while it is mounted and enabled, without
+/// a control on the page.
+export function KeyShortcut(p, ctx, { key, enabled }, action) {
+  if (!action) return;
+  const active = enabled === undefined ? undefined
+    : () => Boolean(typeof enabled === "function" ? untrack(enabled) : enabled);
+  shortcut(key, () => untrack(action), active);
 }
 
 /// Focus the control at `target`, as `ui.focus` does: search fields only.

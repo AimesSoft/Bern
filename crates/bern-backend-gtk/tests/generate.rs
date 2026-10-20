@@ -296,6 +296,16 @@ fn planner_and_gallery_build_for_gtk() {
         "idle_after: Some(3.0)",
         "theme: Some(b::ThemeDef {",
         "b::Source::Url(b::url(&c.engine(",
+        // Escape closes the details; the dialog's focus starts on its
+        // button; the margins ask whether the window is a television's
+        // (never, on a desktop).
+        "b::KeyShortcut(p, c, b::KeyShortcutProps { keys: \"escape\", enabled: None }",
+        "b::default_focus(c, ",
+        "c.window(\"tv\")",
+        // Keys that type into the search, which suggests.
+        "b::session_push_str(c, ",
+        "b::session_pop(c, ",
+        "suggest: true",
     ] {
         assert!(ui.contains(expected), "the gallery lacks `{expected}`");
     }

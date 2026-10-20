@@ -46,12 +46,13 @@ pub use bern_ffi::protocol;
 pub use canvas::{
     Band, Canvas, CanvasProps, Op, PatternDef, SeriesOp, ShapeOp, Source, numbers, url,
 };
-pub use ctx::{Ctx, Field, session_set, session_toggle};
+pub use ctx::{Ctx, Field, session_pop, session_push_str, session_set, session_toggle};
 pub use features::{
     ContentButton, ContentButtonProps, Drop, DropProps, GestureProps, Inspector, InspectorProps,
-    Pick, Pinch, Place, PlaceProps, PopoverButton, PopoverButtonProps, Rail, RailProps,
-    RuntimeImage, RuntimeImageProps, ScrollProps, ScrollView, SplitButton, SplitButtonProps, Swipe,
-    Toast, ToastProps, activate_target, focus_target, shortcut,
+    KeyShortcut, KeyShortcutProps, Pick, Pinch, Place, PlaceProps, PopoverButton,
+    PopoverButtonProps, Rail, RailProps, RuntimeImage, RuntimeImageProps, ScrollProps, ScrollView,
+    SplitButton, SplitButtonProps, Swipe, Toast, ToastProps, activate_target, default_focus,
+    focus_target, shortcut,
 };
 pub use glib;
 pub use host::{dispatch, run};

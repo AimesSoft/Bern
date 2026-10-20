@@ -13,7 +13,7 @@ use bern_ir::IR_VERSION;
 use bern_ir::{Application, WindowInitial};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    Target, TargetConfig, TargetDescriptor, WindowCapabilities, icon,
+    SimulatedSystem, Target, TargetConfig, TargetDescriptor, WindowCapabilities, icon,
 };
 use std::path::PathBuf;
 
@@ -463,6 +463,7 @@ impl Target for SwiftUiIos {
             run: Some(Run::Simulator {
                 app: bundle.clone(),
                 bundle_id: app.app.bundle_id.clone(),
+                system: SimulatedSystem::Ios,
             }),
             products: vec![
                 bundle,

@@ -828,14 +828,21 @@ fun BernAdaptive(
     medium: (@Composable () -> Unit)?,
     expanded: (@Composable () -> Unit)?,
     large: (@Composable () -> Unit)?,
+    tv: (@Composable () -> Unit)? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val size = BernHost.layouts.sizeOf(maxWidth.value.toDouble())
+        // A television shows the `tv` layout where there is one; elsewhere
+        // the width chooses.
+        val size = if (BernHost.television && tv != null) "tv" else BernHost.layouts.sizeOf(maxWidth.value.toDouble())
         if (target != null) BernControl(target, "adaptive", "", actions = BernControlActions(value = { size }))
-        val layouts = listOf("compact" to compact, "medium" to medium, "expanded" to expanded, "large" to large)
-        val at = layouts.indexOfFirst { it.first == size }
-        val shown = (layouts.drop(at) + layouts.take(at).reversed()).firstOrNull { it.second != null }
-        if (shown != null) key(shown.first) { shown.second?.invoke() }
+        if (size == "tv") {
+            key("tv") { tv?.invoke() }
+        } else {
+            val layouts = listOf("compact" to compact, "medium" to medium, "expanded" to expanded, "large" to large)
+            val at = layouts.indexOfFirst { it.first == size }
+            val shown = (layouts.drop(at) + layouts.take(at).reversed()).firstOrNull { it.second != null }
+            if (shown != null) key(shown.first) { shown.second?.invoke() }
+        }
     }
 }
 

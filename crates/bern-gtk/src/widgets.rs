@@ -290,6 +290,7 @@ pub struct ButtonProps {
 
 fn register_button(
     ctx: &Ctx,
+    button: &gtk::Button,
     id: &str,
     label: Option<Rc<dyn Fn() -> String>>,
     enabled: Option<Rc<dyn Fn() -> bool>>,
@@ -306,6 +307,7 @@ fn register_button(
             activate: action,
             file_kinds: set_file.as_ref().map(|(_, kinds)| *kinds),
             set_file: set_file.map(|(give, _)| give),
+            focus: Some(crate::features::focus_of(button.upcast_ref())),
             ..Actions::default()
         },
     );
@@ -364,6 +366,7 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
     }
     register_button(
         ctx,
+        &button,
         props.id,
         label,
         enabled,
@@ -445,6 +448,7 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
     }
     register_button(
         ctx,
+        &button,
         props.id,
         label,
         enabled,
@@ -794,6 +798,8 @@ pub struct SearchProps {
     pub height: Option<f64>,
     /// The size of the field's text in points.
     pub font_size: Option<f64>,
+    /// The results show on focus, before anything is typed.
+    pub suggest: bool,
 }
 
 /// A search field. Its children are results shown below it while it has
@@ -860,7 +866,7 @@ pub fn Search(
     let cleared = bound.clone();
     entry.connect_stop_search(move |_| cleared.set(Value::Text(String::new())));
     if let Some(results) = results {
-        search_results(ctx, &entry, &bound, results);
+        search_results(ctx, &entry, &bound, results, props.suggest);
     }
     place(p, &entry);
     let set = bound.clone();
@@ -884,7 +890,13 @@ pub fn Search(
     );
 }
 
-fn search_results(ctx: &Ctx, entry: &gtk::SearchEntry, bound: &Bound, results: Build) {
+fn search_results(
+    ctx: &Ctx,
+    entry: &gtk::SearchEntry,
+    bound: &Bound,
+    results: Build,
+    suggest: bool,
+) {
     let popover = gtk::Popover::new();
     popover.set_autohide(false);
     popover.set_has_arrow(false);
@@ -966,7 +978,7 @@ fn search_results(ctx: &Ctx, entry: &gtk::SearchEntry, bound: &Bound, results: B
     let read = bound.clone();
     let shown = popover.clone();
     effect(move || {
-        let open = focused.get() && !as_text(&read.get()).is_empty();
+        let open = focused.get() && (suggest || !as_text(&read.get()).is_empty());
         if open && !shown.is_visible() {
             shown.popup();
         } else if !open && shown.is_visible() {

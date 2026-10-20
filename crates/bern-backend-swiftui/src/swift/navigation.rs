@@ -55,7 +55,9 @@ impl Generator<'_> {
                 self.nav_values(&sidebar.children, "SidebarItem", &ty)
             ));
         }
-        if let Some(width) = self.length(sidebar, "width") {
+        // tvOS's sidebar is a floating panel of the system's width.
+        if self.platform == Platform::Tvos {
+        } else if let Some(width) = self.length(sidebar, "width") {
             out.line(format!(
                 ".navigationSplitViewColumnWidth(min: {width}, ideal: {width}, max: {width})"
             ));
@@ -73,7 +75,13 @@ impl Generator<'_> {
             Node::Element(child) if child.kind == "Search" => Some(child),
             _ => None,
         }) {
-            self.searchable(out, search, ".sidebar", ctx);
+            // tvOS has no sidebar placement; its search takes the screen.
+            let placement = if self.platform == Platform::Tvos {
+                ".automatic"
+            } else {
+                ".sidebar"
+            };
+            self.searchable(out, search, placement, ctx);
         }
         // The header stays at the top of the sidebar, below the window's
         // buttons; the list scrolls below it.
@@ -112,7 +120,7 @@ impl Generator<'_> {
         let title = labeled.then(|| self.nav_label(&selection, &sidebar.children, "SidebarItem"));
         // A compact iOS split view shows the sidebar as the first screen of
         // a stack, titled like the window.
-        if self.platform == Platform::Ios {
+        if self.platform.uikit() {
             out.line(".navigationTitle(bernWindow.title)");
         }
         out.close("} detail: {");
@@ -513,6 +521,12 @@ impl Generator<'_> {
             out.open("SwiftUI.Group {");
             self.nodes(out, &tab.children, ctx);
             out.close("}");
+            // A tab's page is a focus scope of its own on tvOS, where the
+            // page's `default_focus` takes the focus as it comes down from
+            // the tabs.
+            if self.platform == Platform::Tvos {
+                out.line(".modifier(BernFocusScope())");
+            }
             out.open(".tabItem {");
             match tab.icon("icon") {
                 Some(icon) => out.line(format!(

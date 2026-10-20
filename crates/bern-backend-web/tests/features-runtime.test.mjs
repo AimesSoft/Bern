@@ -81,6 +81,8 @@ function runtime(search = "") {
     navigator: { platform: "MacIntel" }, location: { search }, Image: Probe,
     Node: { ELEMENT_NODE: 1, DOCUMENT_POSITION_FOLLOWING: 4 },
     document: {
+      listeners: {},
+      addEventListener(name, callback) { (this.listeners[name] ??= []).push(callback); },
       querySelector: () => null,
       createElement: (tag) => new Element(tag),
       createElementNS: (_, tag) => new Element(tag),
@@ -118,7 +120,7 @@ function runtime(search = "") {
     vm.runInContext(`globalThis.${name === "bern" ? "B" : "F"} = (() => { ${plain}\nreturn { ${[...exported, ...extra].join(", ")} }; })();`, context, { filename: `${name}.js` });
   }
   const flushMicrotasks = () => { while (microtasks.length) microtasks.shift()(); };
-  return { B: context.B, F: context.F, Element, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
+  return { B: context.B, F: context.F, Element, document: globals.document, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
 }
 
 test("neutral sidebar selection pairs text with its replacement fill through hover and selection changes", () => {
@@ -471,4 +473,31 @@ test("idle timeout survives unrelated playback ticks, pauses and cleans up", () 
   scope.dispose();
   assert.ok(timers.at(-1).cancelled);
   assert.equal(win.element.events.pointermove.length, 0);
+});
+
+test("a disabled shortcut leaves its key to the one under it, and unmounting removes it", () => {
+  const { B, F, Element, document } = runtime();
+  const ran = [];
+  const outer = new B.Scope();
+  B.within(outer, () => F.KeyShortcut(null, {}, { key: "escape" }, () => ran.push("page")));
+  const open = B.cell(true);
+  const inner = new B.Scope();
+  B.within(inner, () => F.KeyShortcut(null, {}, { key: "escape", enabled: () => open.get() }, () => ran.push("details")));
+  const press = (key) => {
+    const event = { key, code: key, target: new Element("div"), prevented: false, preventDefault() { this.prevented = true; } };
+    for (const listener of document.listeners.keydown ?? []) listener(event);
+    return event.prevented;
+  };
+  assert.equal(document.listeners.keydown.length, 1, "one listener for every shortcut");
+  assert.equal(press("Escape"), true);
+  assert.deepEqual(ran, ["details"], "the shortcut mounted last takes the key");
+  open.set(false);
+  press("Escape");
+  assert.deepEqual(ran, ["details", "page"], "a disabled shortcut leaves the key to the one under it");
+  inner.dispose();
+  open.set(true);
+  press("Escape");
+  assert.deepEqual(ran, ["details", "page", "page"]);
+  outer.dispose();
+  assert.equal(press("Escape"), false, "no shortcut, no key taken");
 });

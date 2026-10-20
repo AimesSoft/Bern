@@ -246,6 +246,7 @@ impl Generator<'_> {
             "ScaleBox" | "Positioned" => self.scale_box(out, element),
             "Modal" | "Flow" | "Accordion" => self.sized_container(out, element),
             "Timer" => self.timer(out, element),
+            "Shortcut" => self.key_shortcut(out, element),
             "Svg" => self.svg(out, element),
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),

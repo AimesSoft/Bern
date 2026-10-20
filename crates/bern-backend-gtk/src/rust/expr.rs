@@ -200,6 +200,10 @@ impl Generator<'_> {
                         format!("b::session_set(c, {target}, {})", self.expr(value))
                     }
                     SessionOp::Toggle => format!("b::session_toggle(c, {target})"),
+                    SessionOp::PushStr { value } => {
+                        format!("b::session_push_str(c, {target}, {})", self.expr(value))
+                    }
+                    SessionOp::Pop => format!("b::session_pop(c, {target})"),
                 }
             }
             Action::Engine { command, args } => {

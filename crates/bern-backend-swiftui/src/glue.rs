@@ -92,7 +92,9 @@ pub fn lib_rs(context: &BuildContext, app: &Application, platform: Platform) -> 
             session_spec(app, WindowPresentation::Native),
             String::new(),
         ),
-        Platform::Ios => (
+        // A television runs one scene, so its windows stay virtual: the
+        // app never switches native windows on there.
+        Platform::Ios | Platform::Tvos => (
             if declared {
                 "::std::env::var_os(\"BERN_IPC_DIR\").is_some()".to_string()
             } else {

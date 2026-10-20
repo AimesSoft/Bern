@@ -104,7 +104,7 @@ fn reads_window_size(node: &bern_ir::Node) -> bool {
             if let bern_ir::ExprKind::Binding {
                 binding: bern_ir::Binding::Window { field },
             } = &part.kind
-                && field != "idle"
+                && bern_ir::LayoutSize::parse(field).is_some()
             {
                 found = true;
             }
@@ -524,9 +524,10 @@ fn sidebar_width(
 ) {
     if let Some(sidebar) = first_element(app, |e| e.kind == "Sidebar" && e.prop("width").is_some())
     {
+        // The sidebar still shows, at the platform's own width.
         diagnostics.push(
-            Diagnostic::error(format!(
-                "target `{}` cannot fix a sidebar width",
+            Diagnostic::warning(format!(
+                "target `{}` keeps the platform's sidebar width: `width` has no effect there",
                 descriptor.id
             ))
             .at(sidebar.source.clone()),

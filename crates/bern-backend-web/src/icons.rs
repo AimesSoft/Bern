@@ -66,6 +66,7 @@ const ICONS: &[(&str, &str, Fill)] = &[
     ("house", lucide!("house"), Fill::None),
     ("calendar", lucide!("calendar"), Fill::None),
     ("text.bubble", lucide!("message-square-text"), Fill::None),
+    ("paperplane", lucide!("send"), Fill::None),
     ("sparkles", lucide!("sparkles"), Fill::None),
     (
         "arrow.up.left.and.arrow.down.right",

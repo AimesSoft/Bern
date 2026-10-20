@@ -290,6 +290,21 @@ impl Generator<'_> {
         out.close("}");
     }
 
+    /// `Shortcut`: its key runs the action while it is composed and
+    /// enabled, without a control of its own.
+    pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
+        let enabled = self.enabled(element);
+        let action = element
+            .action
+            .as_ref()
+            .map(|a| self.action(a))
+            .unwrap_or_else(|| "Unit".into());
+        out.line(format!(
+            "BernShortcut({}, {{ {enabled} }}) {{ {action} }}",
+            string(element.keyword("key").unwrap_or_default())
+        ));
+    }
+
     pub(super) fn timer(&self, out: &mut Out, element: &Element) {
         let enabled = self.enabled(element);
         let action = element
@@ -789,6 +804,15 @@ impl Generator<'_> {
                 }
                 None => out.line(format!("{} = null,", size.name())),
             }
+        }
+        // The layout a television shows, chosen by the device.
+        if let Some(layout) = element.children.iter().find_map(|node| match node {
+            Node::Element(layout) if layout.keyword("size") == Some("tv") => Some(layout),
+            _ => None,
+        }) {
+            out.open("tv = {");
+            self.nodes(out, &layout.children, &ctx.within(Scope::Other));
+            out.close("},");
         }
         out.close(")");
     }
