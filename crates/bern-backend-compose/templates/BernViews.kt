@@ -6,9 +6,7 @@
 
 package dev.bern.runtime
 
-import android.graphics.BitmapFactory
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -94,13 +92,10 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.LocalContentColor
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
@@ -139,7 +134,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -152,7 +146,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.io.File
 
 // MARK: - Icons
 
@@ -897,11 +890,13 @@ fun BernProgress(value: Double?, total: Double, label: String?) {
 }
 
 /// A picture from a declared resource. With one side given, the other
-/// follows the picture's aspect ratio, or `aspect` when given; with only
-/// `aspect` it takes its container's width. `corner` rounds it; a
-/// `template` takes the color of the text around it through its alpha. A
-/// label makes it an image for assistive technologies; without one it is
-/// decorative.
+/// follows the picture's aspect ratio, or `aspect` when given; with neither
+/// it takes its container's width. `corner` rounds it; a `template` takes
+/// the color of the text around it through its alpha. A label makes it an
+/// image for assistive technologies; without one it is decorative. It is
+/// read like a picture from the engine, off the main thread; a frame that
+/// follows the picture's own proportion reads only its header right away,
+/// once, and a picture that cannot be read then takes no room.
 @Composable
 fun BernImage(
     name: String,
@@ -913,27 +908,24 @@ fun BernImage(
     template: Boolean = false,
     aspect: Float? = null,
 ) {
-    val bitmap = remember(name) {
-        BitmapFactory.decodeFile(File(BernResources.root, name).absolutePath)?.asImageBitmap()
-    } ?: return
-    val ratio = aspect ?: (bitmap.width.toFloat() / maxOf(1, bitmap.height))
-    Image(
-        bitmap,
-        contentDescription = label,
-        modifier = bernPictureFrame(width, height, ratio, aspect != null, corner),
-        contentScale = fit,
-        colorFilter = if (template) ColorFilter.tint(LocalContentColor.current, BlendMode.SrcIn) else null,
-    )
+    val url = remember(name) { BernPictures.resource(name) }
+    val ratio = if (aspect == null && (width == null || height == null)) {
+        BernPictures.ratio(url) ?: return
+    } else {
+        null
+    }
+    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio)
 }
 
-/// The frame of a picture: its declared sizes, the other side by `ratio`,
-/// the container's width with only a proportion, and its rounded corners.
-fun bernPictureFrame(width: Dp?, height: Dp?, ratio: Float, proportioned: Boolean, corner: Dp?): Modifier {
+/// The frame of a picture: its declared sizes, the other side by `ratio`
+/// (a poster's 2:3 until the picture is read), or the container's width
+/// and `ratio`, and its rounded corners.
+fun bernPictureFrame(width: Dp?, height: Dp?, ratio: Float?, corner: Dp?): Modifier {
     val frame = when {
         width != null && height != null -> Modifier.size(width, height)
-        width != null -> Modifier.width(width).height(width / ratio)
-        height != null -> Modifier.height(height).width(height * ratio)
-        proportioned -> Modifier.fillMaxWidth().aspectRatio(ratio)
+        width != null -> Modifier.width(width).height(width / (ratio ?: (2f / 3f)))
+        height != null -> Modifier.height(height).width(height * (ratio ?: (2f / 3f)))
+        ratio != null -> Modifier.fillMaxWidth().aspectRatio(ratio)
         else -> Modifier.fillMaxWidth()
     }
     return if (corner != null) frame.clip(RoundedCornerShape(corner)) else frame

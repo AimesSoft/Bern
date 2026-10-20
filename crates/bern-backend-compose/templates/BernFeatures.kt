@@ -69,6 +69,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.util.LruCache
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
@@ -592,42 +600,92 @@ fun BernSplitButton(
 
 // MARK: - Pictures from the engine
 
-/// Pictures read at run time from a `MediaSource` (a file, content or
-/// http(s) URL), and the average color of each, for shapes filled from a
-/// picture. Each is read once, off the main thread.
+/// Pictures read from a file, content or http(s) URL (the engine's
+/// `MediaSource`s and declared resources alike), and the average color of
+/// each, for shapes filled from a picture. They are read off the main
+/// thread at about the size they are drawn: their own pixels divided by
+/// the largest power of two that still covers it. The last 64 MB of
+/// pictures read are kept, so a picture shown again appears at once, and a
+/// read under way is shared.
 object BernPictures {
-    private val bitmaps = mutableStateMapOf<String, ImageBitmap>()
-    private val averages = mutableStateMapOf<String, Long>()
-    private val loading = HashSet<String>()
+    /// A picture of `width` × `height` pixels, read at 1/`sample` of that.
+    class Picture(val bitmap: ImageBitmap, val width: Int, val height: Int, val sample: Int) {
+        val ratio: Float get() = width.toFloat() / maxOf(1, height)
+    }
 
-    fun bitmap(context: Context, url: String?): ImageBitmap? {
-        if (url.isNullOrEmpty()) return null
-        bitmaps[url]?.let { return it }
-        load(context, url)
-        return null
+    private val kept = object : LruCache<String, Picture>(64 shl 20) {
+        override fun sizeOf(key: String, value: Picture) = value.bitmap.asAndroidBitmap().allocationByteCount
+    }
+    private val reading = ConcurrentHashMap<String, Deferred<Picture?>>()
+    /// Each picture's proportion once known; 0 for a file that cannot be read.
+    private val ratios = ConcurrentHashMap<String, Float>()
+    private val averages = mutableStateMapOf<String, Long>()
+    private val averaging = HashSet<String>()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /// The URL of a declared resource.
+    fun resource(name: String): String = Uri.fromFile(File(BernResources.root, name)).toString()
+
+    /// The picture at `url` kept from an earlier read.
+    fun cached(url: String): Picture? = kept.get(url)
+
+    /// The proportion of the picture at `url` from an earlier read.
+    fun known(url: String): Float? = ratios[url]?.takeIf { it > 0f }
+
+    /// The proportion of the picture in the file at `url`: from an earlier
+    /// read, or else from the file's header alone, read now.
+    fun ratio(url: String): Float? {
+        val ratio = ratios.getOrPut(url) {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            Uri.parse(url).path?.let { BitmapFactory.decodeFile(it, bounds) }
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) bounds.outWidth.toFloat() / bounds.outHeight else 0f
+        }
+        return ratio.takeIf { it > 0f }
+    }
+
+    /// Whether `picture` has the pixels to be drawn `wide` × `tall` (0 for
+    /// a side that follows the other).
+    fun enough(picture: Picture, wide: Int, tall: Int): Boolean =
+        picture.sample <= sample(picture.width, picture.height, wide, tall)
+
+    /// The picture at `url` to be drawn `wide` × `tall` pixels: the one kept
+    /// when it is enough, else the read under way when that is, else a new
+    /// read. A read goes on when its caller leaves, and keeps what it read.
+    suspend fun read(context: Context, url: String, wide: Int, tall: Int): Picture? {
+        kept.get(url)?.takeIf { enough(it, wide, tall) }?.let { return it }
+        reading[url]?.await()?.takeIf { enough(it, wide, tall) }?.let { return it }
+        val app = context.applicationContext
+        val read = scope.async { runCatching { decode(app, url, wide, tall, keep = true) }.getOrNull() }
+        reading[url] = read
+        read.invokeOnCompletion { reading.remove(url, read) }
+        return read.await()
     }
 
     fun average(context: Context, url: String?): BernColor? {
         if (url.isNullOrEmpty()) return null
         averages[url]?.let { return BernColor.Fixed(it, it) }
-        load(context, url)
+        if (averaging.add(url)) {
+            val app = context.applicationContext
+            scope.launch {
+                val picture = kept.get(url)
+                    ?: runCatching { decode(app, url, 32, 32, keep = false) }.getOrNull()
+                    ?: return@launch
+                val average = mean(picture.bitmap.asAndroidBitmap())
+                withContext(Dispatchers.Main) { averages[url] = average }
+            }
+        }
         return null
     }
 
-    /// The URL of a declared resource.
-    fun resource(name: String): String = Uri.fromFile(File(BernResources.root, name)).toString()
-
-    private fun load(context: Context, url: String) {
-        if (!loading.add(url)) return
-        val app = context.applicationContext
-        CoroutineScope(Dispatchers.IO).launch {
-            val bitmap = runCatching { decode(app, url) }.getOrNull() ?: return@launch
-            val average = mean(bitmap)
-            withContext(Dispatchers.Main) {
-                bitmaps[url] = bitmap.asImageBitmap()
-                averages[url] = average
-            }
+    /// The largest power of two `width` × `height` can be divided by and
+    /// still cover `wide` × `tall`.
+    private fun sample(width: Int, height: Int, wide: Int, tall: Int): Int {
+        if (wide <= 0 && tall <= 0) return 1
+        var sample = 1
+        while ((wide <= 0 || width / (sample * 2) >= wide) && (tall <= 0 || height / (sample * 2) >= tall)) {
+            sample *= 2
         }
+        return sample
     }
 
     /// The mean color over the whole picture: a single scaled pixel would
@@ -647,19 +705,45 @@ object BernPictures {
         return ((red / count) shl 16) or ((green / count) shl 8) or (blue / count)
     }
 
-    private fun decode(context: Context, url: String): Bitmap? {
+    /// Reads the size first, then the pixels at the sample that covers
+    /// `wide` × `tall`; a download is fetched once for both.
+    private fun decode(context: Context, url: String, wide: Int, tall: Int, keep: Boolean): Picture? {
         val uri = Uri.parse(url)
-        return when (uri.scheme?.lowercase()) {
-            "file" -> BitmapFactory.decodeFile(uri.path)
-            "content" -> context.contentResolver.openInputStream(uri)?.use(BitmapFactory::decodeStream)
-            "http", "https" -> java.net.URL(url).openStream().use(BitmapFactory::decodeStream)
-            else -> null
+        val scheme = uri.scheme?.lowercase()
+        val bytes = when (scheme) {
+            "http", "https" -> java.net.URL(url).openStream().use { it.readBytes() }
+            "file", "content" -> null
+            else -> return null
         }
+        fun pixels(options: BitmapFactory.Options): Bitmap? = when {
+            bytes != null -> BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+            scheme == "file" -> BitmapFactory.decodeFile(uri.path, options)
+            else -> context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, options) }
+        }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        pixels(bounds)
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width <= 0 || height <= 0) return null
+        ratios[url] = width.toFloat() / height
+        val sample = sample(width, height, wide, tall)
+        val bitmap = pixels(BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        // Hands it to the GPU before it is first drawn.
+        bitmap.prepareToDraw()
+        val picture = Picture(bitmap.asImageBitmap(), width, height, sample)
+        if (keep) {
+            synchronized(kept) {
+                if (kept.get(url)?.let { it.sample < sample } != true) kept.put(url, picture)
+            }
+        }
+        return picture
     }
 }
 
-/// A picture from a `MediaSource`; until it is read, its frame keeps the
-/// declared size.
+/// A picture from a `MediaSource`, or from a declared resource with its
+/// proportion `ratio` when its frame follows that. It is read at the size
+/// it is drawn and again when it grows past what was read; until it is
+/// read, its frame keeps the declared size.
 @Composable
 fun BernImageURL(
     url: String?,
@@ -670,13 +754,43 @@ fun BernImageURL(
     corner: Dp? = null,
     template: Boolean = false,
     aspect: Float? = null,
+    ratio: Float? = null,
 ) {
-    val bitmap = BernPictures.bitmap(LocalContext.current, url)
-    val ratio = aspect ?: bitmap?.let { it.width.toFloat() / maxOf(1, it.height) } ?: (2f / 3f)
-    val modifier = bernPictureFrame(width, height, ratio, aspect != null, corner)
-    if (bitmap != null) {
+    var picture by remember(url) { mutableStateOf(url?.let(BernPictures::cached)) }
+    val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
+    // A frame that fills its container's width is read at the width it
+    // was laid out at.
+    val fills = width == null && height == null
+    var laid by remember { mutableIntStateOf(0) }
+    val frame = bernPictureFrame(width, height, proportion, corner)
+    val modifier = if (fills) frame.onSizeChanged { laid = it.width } else frame
+    if (url != null) {
+        // The pixels it is drawn at; a side that follows the picture's own
+        // proportion does not count (0).
+        val density = LocalDensity.current
+        val px = { length: Dp -> with(density) { maxOf(1, length.roundToPx()) } }
+        val wide = when {
+            width != null -> px(width)
+            height == null -> laid
+            aspect != null -> px(height * aspect)
+            else -> 0
+        }
+        val tall = when {
+            height != null -> px(height)
+            aspect != null && wide > 0 -> maxOf(1, (wide / aspect).roundToInt())
+            else -> 0
+        }
+        val context = LocalContext.current
+        LaunchedEffect(url, wide, tall) {
+            if (fills && wide == 0) return@LaunchedEffect
+            if (picture?.let { BernPictures.enough(it, wide, tall) } == true) return@LaunchedEffect
+            BernPictures.read(context, url, wide, tall)?.let { picture = it }
+        }
+    }
+    val shown = picture
+    if (shown != null) {
         Image(
-            bitmap,
+            shown.bitmap,
             contentDescription = label,
             modifier = modifier,
             contentScale = fit,

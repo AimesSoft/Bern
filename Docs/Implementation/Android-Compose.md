@@ -84,6 +84,14 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 
 ExoPlayer 是执行端：每个播放器一个 ExoPlayer，按媒体契约执行载入、播放、暂停、跳转、音量与静音，并按源版本报告阶段、位置、时长与错误；静音由执行端记住，播放器音量设为 0。视频视图是不带控件的 `PlayerView`，所有播放变化都经 Bern 的媒体命令。能力描述声明：一个播放器同一时刻只在一个视图中显示；后台继续播放需要媒体服务（`MediaSessionService`），应用目前不声明，所以声明为不支持。
 
+## 图片的读取
+
+`Image(source:)` 的声明资源与引擎给出的图片（文件、`content://`、http(s)）都由 `BernPictures` 读取，不在主线程解码：
+
+- 在 `Dispatchers.IO` 上先只读尺寸（`inJustDecodeBounds`），再按显示大小取 `inSampleSize`：图片自身像素除以仍能盖住显示尺寸的最大 2 的幂。显示尺寸由声明的宽高与屏幕密度算出，跟随图片比例的一边不计；没有声明宽高、铺满容器宽度的图片按布局量出的宽度读取，量出之前不读（一帧）。显示变大、已读的像素不够时重新读取，期间仍显示已读的那张。解码后调用 `prepareToDraw()`，在第一次绘制前交给 GPU。
+- 最近读过的图片按位图字节保留 64 MB（`LruCache`，以 URL 为键），重新出现的图片立即显示；同一图片正在读取时共用那次读取。各图片的比例在进程内一直记住。
+- 读到之前，框保持声明的大小：两边都给出或给了 `aspect` 时与读到后相同；比例要跟随图片时，声明资源在组合时只读文件头（每个文件一次），框不跳动；引擎给出的图片在比例未知时按海报的 2:3 占位。读不出文件头的声明资源不占位置，与此前一样。
+
 ## 构建、运行与打包
 
 ```bash
@@ -108,7 +116,7 @@ bern package --target android
 - **绑定的长度**：`animateDpAsState` 跟随，值与回弹都不低于零。
 - **视频圆角**：有 `corner` 时 `PlayerView` 改用 `TextureView` 才能被裁住。
 - **对话框窗口**：居中的 `Dialog`，宽高按声明。分体按钮的浮层是 `DropdownMenu`；侧面板在手机上是底部弹层。
-- **运行时图片与取色**：图片在后台读取，平均色由缩到 32×32 的整张图算出。
+- **运行时图片与取色**：图片在后台读取，平均色由缩到 32×32 的整张图算出（取色只按 32 像素见方的大小解码，不进缓存）。图片的读法见下文“图片的读取”。
 - **文件**：`pick` 用系统的文档选择器，按种类过滤并保留读取授权；`Drop` 用 `dragAndDropTarget`，并向系统请求拖入内容的读取权限；`opens: true` 在清单里登记 `VIEW` 与 `SEND` 意图，活动为 `singleTask`，运行中交来的文件经 `onNewIntent` 送到拖放区。用到网络地址时清单加上 `INTERNET`。
 - **滚动联动与停靠**：带 `snap` 或 `position` 的 `ScrollView` 记录每一格在滚动内容中的位置（不随滚动变化），`graphicsLayer` 按每格离视口中心的距离缩放、变淡；停靠用自己的 `FlingBehavior`，按惯性算出落点后取最近的一格；首次显示时先定位到字段所指的一格，再开始跟随用户滚动。
 - **晃一下与手势区**：`nudge` 用 `graphicsLayer` 放大再弹回；`Pinch` 从多指指针事件累计缩放（`calculateZoom`），`Swipe` 用竖向拖动手势，松手执行动作。
@@ -132,7 +140,7 @@ bern package --target android
 
 - `Stack` 的样式：`BernStack` 先按圆角裁剪（`clip`），再画底色，`foreground` 作为 `LocalContentColor` 向下传给文字与图标。`Stack(enabled: false)` 在各层之上盖一层吃掉全部指针事件的透明层，各层原样显示。
 - `text { … }`：活动启动时把各文字样式的字重与字号写入 `BernTypography`；`bernTextStyle` 取 Material 的对应样式，换上字重，给了字号时用该字号（sp）与字体自身的行高。`Text(lines:)` 是 `maxLines` 加末尾省略号；`font_size`（可绑定）与 `line_height` 是 sp，行高按 CSS 把多出的空间均分在上下（`LineHeightStyle.Alignment.Center`、`Trim.None`）。`Label(font_size:)` 同时设置文字与图标的大小，`display: icon` 只显示图标，标题作无障碍描述。
-- `Image(corner:)` 是（可绑定、可弹簧的）圆角裁剪；`rendering: template` 用 `ColorFilter.tint(LocalContentColor, SrcIn)`；`aspect` 取代图片自身比例，只给 `aspect` 时铺满宽度、高度按比例（`aspectRatio`）。
+- `Image(corner:)` 是（可绑定、可弹簧的）圆角裁剪；`rendering: template` 用 `ColorFilter.tint(LocalContentColor, SrcIn)`；`aspect` 取代图片自身比例；两边都不给时铺满宽度、高度按 `aspect` 或图片自身的比例（`aspectRatio`，与 SwiftUI 的 `resizable().aspectRatio(contentMode: .fit)` 一致；此前没有 `aspect` 时高度取位图的像素高度）。
 
 ### 控件形态与受控值
 
@@ -256,6 +264,15 @@ bern package --target android
 2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文，窗口正文里写的 `variant:` 不生成 `BernStyles` 的条目，生成的 Kotlin 引用不存在的 `BernStyles.buttonStage`（原因见 WinUI 3 实现记录的同日条目）。生成器测试 `a_style_variant_in_a_window_is_defined` 断言定义与引用；测试应用 `bern build --target android` 完成 Kotlin 编译并打出 APK。MIX 2S（Android 15）上装包后截屏（不发按键，看完切回原来的应用并卸载测试包）：窗口正文里的按钮是强调色底、圆角 12，组件里的是 `fill.subtle` 底、圆角 4。
 
 2026-10-20，直接写在窗口正文里的 `Drop(opens: true)` 与网络图片：清单的 `VIEW`、`SEND` 意图与 `INTERNET` 权限此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类、活动不是 `singleTask`，那里取自网络的图片不给清单加 `INTERNET`。改为连同窗口正文一起看；生成器测试 `a_drop_and_a_network_picture_in_a_window_reach_the_manifest` 改前失败、改后通过。没有装到手机上。
+
+2026-10-21，图片不在主线程解码（见“图片的读取”）。此前声明资源的 `Image` 在组合时用 `BitmapFactory.decodeFile` 整张解码，页面每次重新出现都再解一次；引擎给出的图片已在后台读取，但按原尺寸解码、一直保留，而且共用一个状态表，每读到一张就让屏幕上所有图片重组。在小米 MIX 2S（Android 15）上用独立包名的 release 测试包对照，两版只差这两个 Kotlin 文件；经控制通道切页（不发输入事件），每次切换前清零、切换后取 `dumpsys gfxinfo framestats`，记下这次切换里最长的 UI 线程时间（`HandleInputStart` 到 `SyncQueued`），下面是中位数：
+
+- 应用自带的图片（字标 473×216、海报 240×344）：两版没有可测出的差别，打开“关于”页 81 / 80 ms，其余页面相同。
+- 把字标放大到 3784×1728、海报放大到 960×1376：打开“关于”页 190–194 ms → 73–81 ms（三轮，每轮 12 次），省下的就是字标在主线程的解码；媒体库、首页与新番切日两版相同（这些图片改前已在后台读取）。走一遍海报页、强制回收后，Native Heap 114–126 MB → 53 MB，Graphics 121 MB → 64 MB（各两轮）。第一版对只给 `aspect`、铺满网格格子的海报以窗口宽度为上限，结果仍按原尺寸解码，同一张海报在不同页面又各读一次，内存反而更高；改为按布局量出的宽度读取后才是上面的数字。
+- “关于”页的字标与媒体库海报网格的画面改前改后一致。
+- 两版切页本身都有 60–130 ms 的 UI 线程帧（打开“关于”页约 80 ms、首页约 125 ms、媒体库约 105 ms、切日约 58 ms），与图片无关，这次没有处理。
+
+生成的调用没有变化，生成器测试不用改；`cargo test -p bern-backend-compose` 通过。
 
 ## 未完成与已知限制
 
