@@ -274,7 +274,16 @@ impl Generator<'_> {
             "BernFlow(gap: {}) {{",
             self.length(element, "gap").unwrap_or_else(|| "8.0".into())
         ));
-        self.nodes(out, &element.children, ctx);
+        // A flow is a row that wraps: a spacer takes the rest of its line.
+        self.nodes(
+            out,
+            &element.children,
+            &Ctx {
+                row: true,
+                flow: true,
+                ..ctx.clone()
+            },
+        );
         out.close("}");
     }
 

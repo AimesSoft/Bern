@@ -854,6 +854,8 @@ struct Parent {
     /// The root region of a list that is not a panel's, kept by its
     /// owner.
     std::shared_ptr<Region> root;
+    /// Items of a `Flow`: a chip picker's chips are items of it too.
+    bool flow = false;
 
     static Parent Of(controls::Panel const& panel) { return Parent{panel, RootRegion(panel)}; }
     static Parent OfList(controls::Panel const& panel) { return Parent{panel, RootRegion(panel), true}; }

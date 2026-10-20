@@ -600,7 +600,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Flow",
         &[opt("gap", PropKind::Length)],
         Children::Any,
-        "Leading-aligned items wrapping onto new rows at the available width",
+        "Leading-aligned items wrapping onto new rows at the available width; each row centres its items, and a `Spacer` takes the room left at the end of its row",
     ),
     ComponentSpec {
         action: ActionRule::Required,
@@ -1404,11 +1404,18 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("height", PropKind::Length),
                 opt(
                     "style",
-                    PropKind::Keyword(&["automatic", "menu", "segmented", "radio", "inline"]),
+                    PropKind::Keyword(&[
+                        "automatic",
+                        "menu",
+                        "segmented",
+                        "radio",
+                        "inline",
+                        "chips",
+                    ]),
                 ),
             ],
             Children::Only(&["PickerOption"]),
-            "Single choice among the labelled variants of an enum, with optional explicit labels",
+            "Single choice among the labelled variants of an enum, with optional explicit labels; `style: chips` shows a chip per option, which in a `Flow` are items of the flow",
         )
     },
 ];

@@ -240,6 +240,40 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
     );
 }
 
+/// The showcase's tool strip: a segmented picker, a spacer and chips in a
+/// flow; the chips are items of the flow, the spacer takes the rest of its
+/// line. Labelled chips elsewhere wrap in a flow of their own.
+#[test]
+fn chip_pickers_are_items_of_their_flow() {
+    let (config, compiled) = showcase();
+    let output = workspace().join("target/bern-test/chips");
+    let context = context(&config, &compiled, "macos", &output);
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
+        .unwrap();
+    let source = String::from_utf8_lossy(&generated.contents);
+    let start = source
+        .find("BernFlow(gap: 10.0) {")
+        .expect("the tool strip");
+    let strip = &source[start..];
+    let segmented = strip.find(".pickerStyle(.segmented)").unwrap();
+    let spacer = strip
+        .find(".layoutValue(key: BernRowSpacer.self, value: true)")
+        .unwrap();
+    let chips = strip.find("BernChips(selection:").unwrap();
+    assert!(segmented < spacer && spacer < chips, "{strip}");
+    assert!(
+        strip[chips..].contains("flat: true, target: \"controls_page.strip_filter\""),
+        "{strip}"
+    );
+    assert!(
+        source.contains("flat: false, target: \"controls_page.density_chips\""),
+        "{source}"
+    );
+}
+
 #[test]
 fn showcase_generates_swift_that_type_checks() {
     let root = workspace();

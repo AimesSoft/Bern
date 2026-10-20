@@ -3882,28 +3882,100 @@ struct BernRow: Layout {
 
 struct BernFlow: Layout {
     var gap: CGFloat = 8
-    private func arrange(_ proposal: ProposedViewSize, _ subviews: Subviews) -> (CGSize, [CGPoint]) {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, used: CGFloat = 0
-        var positions: [CGPoint] = []
-        for view in subviews {
-            let size = view.sizeThatFits(.unspecified)
-            if x > 0 && x + size.width > width { x = 0; y += rowHeight + gap; rowHeight = 0 }
-            positions.append(CGPoint(x: x, y: y))
-            used = max(used, x + size.width)
-            x += size.width + gap
-            rowHeight = max(rowHeight, size.height)
+
+    /// Where each child stands: lines broken at the width, a spacer taking
+    /// no room there; then the spacers of a line share the room left on
+    /// it, and each child is centred in its line's height.
+    private func arrange(_ width: CGFloat?, _ subviews: Subviews) -> (CGSize, [CGRect]) {
+        let limit = width ?? .infinity
+        let spacers = subviews.map { $0[BernRowSpacer.self] }
+        let sizes = subviews.indices.map { spacers[$0] ? .zero : subviews[$0].sizeThatFits(.unspecified) }
+        var lines: [[Int]] = [[]]
+        var x: CGFloat = 0
+        for index in subviews.indices {
+            if !lines[lines.count - 1].isEmpty && x + sizes[index].width > limit {
+                lines.append([])
+                x = 0
+            }
+            lines[lines.count - 1].append(index)
+            x += sizes[index].width + gap
         }
-        return (CGSize(width: proposal.width ?? used, height: y + rowHeight), positions)
+        var frames = Array(repeating: CGRect.zero, count: subviews.count)
+        var y: CGFloat = 0, widest: CGFloat = 0
+        for (number, line) in lines.enumerated() where !line.isEmpty {
+            let used = line.reduce(0) { $0 + sizes[$1].width } + gap * CGFloat(line.count - 1)
+            let shares = line.filter { spacers[$0] }.count
+            let share = shares > 0 && limit.isFinite ? max(0, limit - used) / CGFloat(shares) : 0
+            let height = line.map { sizes[$0].height }.max() ?? 0
+            var x: CGFloat = 0
+            for index in line {
+                let width = spacers[index] ? share : sizes[index].width
+                let tall = spacers[index] ? height : sizes[index].height
+                frames[index] = CGRect(x: x, y: y + (height - tall) / 2, width: width, height: tall)
+                x += width + gap
+            }
+            widest = max(widest, x - gap)
+            y += height + (number < lines.count - 1 ? gap : 0)
+        }
+        return (CGSize(width: width ?? widest, height: y), frames)
     }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        arrange(proposal, subviews).0
+        arrange(proposal.width, subviews).0
     }
+
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        let (_, positions) = arrange(ProposedViewSize(width: bounds.width, height: nil), subviews)
-        for (view, position) in zip(subviews, positions) {
-            view.place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y), anchor: .topLeading, proposal: .unspecified)
+        let (_, frames) = arrange(bounds.width, subviews)
+        for (view, frame) in zip(subviews, frames) {
+            view.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), anchor: .topLeading,
+                proposal: view[BernRowSpacer.self] ? ProposedViewSize(frame.size) : .unspecified)
         }
+    }
+}
+
+/// `Picker(style: chips)`: a chip per option, the chosen one prominent, as
+/// system glass capsules at the design's chip size (6.3). In a `Flow` the
+/// chips are items of the flow; elsewhere they wrap in a flow of their own.
+struct BernChips<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(String, Value)]
+    /// Items of the enclosing flow.
+    let flat: Bool
+    let target: String
+    let label: String
+    let actions: BernControlActions
+
+    var body: some View {
+        if flat {
+            // The flow lays each chip out; the first carries the picker's
+            // identity for the control entry.
+            ForEach(Array(options.enumerated()), id: \.offset) { index, option in
+                if index == 0 {
+                    chip(option).bernControl(target, role: "picker", label: label, actions: actions)
+                } else {
+                    chip(option)
+                }
+            }
+        } else {
+            BernFlow(gap: 8) {
+                ForEach(Array(options.enumerated()), id: \.offset) { _, option in chip(option) }
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text(verbatim: label))
+            .bernControl(target, role: "picker", label: label, actions: actions)
+        }
+    }
+
+    private func chip(_ option: (String, Value)) -> some View {
+        let selected = option.1 == selection
+        return Button { selection = option.1 } label: { Text(verbatim: option.0).lineLimit(1) }
+            #if os(tvOS)
+            .bernCapsuleControl(height: 40, prominent: selected)
+            #else
+            .bernCapsuleControl(height: 30, prominent: selected)
+            #endif
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

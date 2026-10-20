@@ -394,6 +394,44 @@ pub const RECIPES: &[Recipe] = &[
         ],
     },
     Recipe {
+        name: "chip",
+        // A pill per option; the chosen one is inverted, as text on the
+        // page would be.
+        states: &[
+            state(
+                "rest",
+                &[
+                    ("background", "transparent"),
+                    ("foreground", "text.secondary"),
+                    ("border", "control.border"),
+                ],
+            ),
+            state(
+                "hover",
+                &[
+                    ("background", "hover.overlay"),
+                    ("foreground", "text.primary"),
+                ],
+            ),
+            state(
+                "selected",
+                &[
+                    ("background", "text.primary"),
+                    ("foreground", "surface.canvas"),
+                    ("border", "transparent"),
+                ],
+            ),
+            FOCUS,
+            state(
+                "disabled",
+                &[
+                    ("background", "transparent"),
+                    ("foreground", "disabled.foreground"),
+                ],
+            ),
+        ],
+    },
+    Recipe {
         name: "nav_item",
         // A selected item is filled with the accent, its text and icon in
         // `on_accent`; there is no indicator bar.

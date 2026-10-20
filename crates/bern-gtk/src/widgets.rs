@@ -1321,7 +1321,60 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
         props.style,
         Some("segmented") | Some("radio") | Some("inline")
     );
-    let control: gtk::Widget = if segmented {
+    // Chips without a label of their own in a flow are items of the flow;
+    // the picker then has no widget of its own.
+    let control: Option<gtk::Widget> = if props.style == Some("chips") {
+        // A toggle button per option, one of a group, the chosen one
+        // active; elsewhere than in a flow they wrap in a flow of their own.
+        let flat = p.is_flow() && props.label_hidden && !ctx.in_toolbar();
+        let holder = (!flat).then(|| crate::scene::flow_of(8.0));
+        let mut buttons: Vec<gtk::ToggleButton> = Vec::new();
+        for index in 0..props.options.len() {
+            let button = gtk::ToggleButton::new();
+            button.set_valign(gtk::Align::Center);
+            if let Some(first) = buttons.first() {
+                button.set_group(Some(first));
+            }
+            let select = Rc::clone(&select_index);
+            button.connect_toggled(move |button| {
+                if button.is_active() {
+                    select(index);
+                }
+            });
+            match &holder {
+                Some(flow) => button.set_parent(flow),
+                None => p.add(&button),
+            }
+            buttons.push(button);
+        }
+        let shown = buttons.clone();
+        label_model(ctx, labels, move |texts| {
+            for (button, text) in shown.iter().zip(texts) {
+                button.set_label(text);
+            }
+        });
+        let read = bound.clone();
+        let index_of = index_of.clone();
+        effect(move || {
+            if let Some(index) = index_of(&read.get())
+                && let Some(button) = buttons.get(index)
+                && !button.is_active()
+            {
+                button.set_active(true);
+            }
+        });
+        holder.map(|flow| {
+            if let Some(label) = label.clone()
+                && !props.label_hidden
+            {
+                let shown = flow.clone();
+                effect(move || {
+                    shown.update_property(&[gtk::accessible::Property::Label(&label())])
+                });
+            }
+            flow.upcast()
+        })
+    } else if segmented {
         let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         group.add_css_class("linked");
         group.set_valign(gtk::Align::Center);
@@ -1361,7 +1414,7 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
             let shown = group.clone();
             effect(move || shown.update_property(&[gtk::accessible::Property::Label(&label())]));
         }
-        group.upcast()
+        Some(group.upcast())
     } else {
         let model = gtk::StringList::new(&[]);
         let updating = Rc::new(Cell::new(false));
@@ -1415,32 +1468,34 @@ pub fn Picker(p: &Parent, ctx: &Ctx, props: PickerProps) {
                 select(owner.property::<u32>("selected") as usize);
             }
         });
-        widget
+        Some(widget)
     };
-    if props.label_hidden
-        && let Some(label) = label.clone()
-    {
-        let named = control.clone();
-        effect(move || named.update_property(&[gtk::accessible::Property::Label(&label())]));
-    }
-    if ctx.in_toolbar() || props.label_hidden {
-        if p.is_list() {
-            p.add(&plain_row(&control));
-        } else {
+    if let Some(control) = control {
+        if props.label_hidden
+            && let Some(label) = label.clone()
+        {
+            let named = control.clone();
+            effect(move || named.update_property(&[gtk::accessible::Property::Label(&label())]));
+        }
+        if ctx.in_toolbar() || props.label_hidden {
+            if p.is_list() {
+                p.add(&plain_row(&control));
+            } else {
+                p.add(&control);
+            }
+        } else if (segmented || props.style == Some("chips")) && p.is_list() {
+            let row = adw::ActionRow::new();
+            if let Some(label) = label.clone() {
+                let shown = row.clone();
+                effect(move || shown.set_title(&glib::markup_escape_text(&label())));
+            }
+            row.add_suffix(&control);
+            p.add(&row);
+        } else if p.is_list() {
             p.add(&control);
+        } else {
+            p.add(&beside(label.clone(), &control));
         }
-    } else if segmented && p.is_list() {
-        let row = adw::ActionRow::new();
-        if let Some(label) = label.clone() {
-            let shown = row.clone();
-            effect(move || shown.set_title(&glib::markup_escape_text(&label())));
-        }
-        row.add_suffix(&control);
-        p.add(&row);
-    } else if p.is_list() {
-        p.add(&control);
-    } else {
-        p.add(&beside(label.clone(), &control));
     }
     let select = {
         let names = Rc::clone(&names);
@@ -1958,6 +2013,7 @@ pub fn Progress(p: &Parent, ctx: &Ctx, props: ProgressProps) {
 #[allow(non_snake_case)]
 pub fn Spacer(p: &Parent) {
     let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    spacer.add_css_class(crate::scene::SPACER);
     if p.is_horizontal() {
         spacer.set_hexpand(true);
     } else {

@@ -531,10 +531,10 @@ impl Generator<'_> {
         let (field, binding, setter) = self.control_value(element, "selected");
         let label = self.text_prop(element, "label").unwrap_or_default();
         let enum_type = swift_type(ty);
-        // tvOS's segmented control takes a television's size, too large in
-        // a scene laid out at the design's: `BernSegments` draws it there.
-        if self.platform == Platform::Tvos && element.keyword("style") == Some("segmented") {
-            let options = if element.children.is_empty() {
+        // The options as `(label, value)` pairs, for the pickers Bern lays
+        // out itself.
+        let pairs = || {
+            if element.children.is_empty() {
                 format!("{enum_type}.allCases.map {{ ($0.bernLabel, $0) }}")
             } else {
                 let pairs: Vec<String> = element
@@ -550,7 +550,26 @@ impl Generator<'_> {
                     })
                     .collect();
                 format!("[{}]", pairs.join(", "))
-            };
+            }
+        };
+        let actions = format!(
+            "BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; ({setter})(value); return true }}, value: {{ {field}.bernName }})"
+        );
+        // A chip per option; in a flow the chips are the flow's items, so
+        // the picker has no view of its own to carry its label.
+        if element.keyword("style") == Some("chips") {
+            out.line(format!(
+                "BernChips(selection: {binding}, options: {}, flat: {}, target: {}, label: {label}, actions: {actions})",
+                pairs(),
+                ctx.flow && element.keyword("label_hidden") == Some("true"),
+                self.target(element, ctx)
+            ));
+            return;
+        }
+        // tvOS's segmented control takes a television's size, too large in
+        // a scene laid out at the design's: `BernSegments` draws it there.
+        if self.platform == Platform::Tvos && element.keyword("style") == Some("segmented") {
+            let options = pairs();
             out.line(format!(
                 "BernSegments(selection: {binding}, options: {options}).bernAccentTint()"
             ));
@@ -558,7 +577,7 @@ impl Generator<'_> {
                 ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
             ));
             out.line(format!(
-                ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; ({setter})(value); return true }}, value: {{ {field}.bernName }}))",
+                ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
                 self.target(element, ctx)
             ));
             return;
@@ -667,7 +686,7 @@ impl Generator<'_> {
             out.close("}");
         }
         out.line(format!(
-            ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ name in guard let value = {enum_type}(bernName: name) else {{ return false }}; ({setter})(value); return true }}, value: {{ {field}.bernName }}))",
+            ".bernControl({}, role: \"picker\", label: {label}, actions: {actions})",
             self.target(element, ctx)
         ));
     }

@@ -62,6 +62,9 @@ enum Scope {
     Other,
     Column,
     Row,
+    /// The items of a `Flow`: a `FlowRow`, where a spacer takes the rest
+    /// of its line and a chip picker's chips are items.
+    Flow,
 }
 
 /// What a composable body can refer to while generating.
@@ -355,7 +358,7 @@ impl<'a> Generator<'a> {
                             "CompositionLocalProvider(LocalBernFlex provides this) {{ {call} }}"
                         )
                     }
-                    Scope::Other => call,
+                    Scope::Other | Scope::Flow => call,
                 };
                 if ctx.baseline {
                     out.line(format!("Box(Modifier.alignByBaseline()) {{ {call} }}"));
@@ -462,7 +465,7 @@ impl<'a> Generator<'a> {
             "Svg" => self.svg(out, element),
             "Image" => self.image(out, element),
             "Spacer" => match ctx.scope {
-                Scope::Column | Scope::Row => out.line("Spacer(Modifier.weight(1f))"),
+                Scope::Column | Scope::Row | Scope::Flow => out.line("Spacer(Modifier.weight(1f))"),
                 Scope::Other => out.line("Spacer(Modifier.size(8.dp))"),
             },
             "Divider" => match ctx.scope {

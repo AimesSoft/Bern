@@ -378,27 +378,57 @@ inline void Accordion(Parent const& p, Ctx const& ctx, AccordionProps props, Bui
 // Flowing rows
 
 /// `Flow`: items at their own width from the leading edge, wrapping onto a
-/// new row where the width runs out; each row as tall as its tallest.
+/// new row where the width runs out; each row as tall as its tallest, its
+/// items centred in it, and a spacer taking the room left on its row.
 struct FlowPanel : controls::PanelT<FlowPanel> {
     double gap = 8;
 
+    /// Lines broken at the width, a spacer taking no room there; then the
+    /// spacers of a line share the room left on it.
     template <class F> Size Lay(float width, F&& place) {
-        float x = 0, y = 0, row = 0, widest = 0;
+        struct Item {
+            xaml::UIElement child;
+            float width, height;
+            bool spacer;
+        };
         auto spacing = static_cast<float>(gap);
+        std::vector<std::vector<Item>> lines(1);
+        float x = 0;
         for (auto child : Children()) {
             if (child.Visibility() != xaml::Visibility::Visible) continue;
+            bool spacer = RoleOf(Unwrapped(child)) == L"bern-spacer";
             auto size = child.DesiredSize();
-            if (x > 0 && x + size.Width > width) {
+            float w = spacer ? 0 : size.Width;
+            if (!lines.back().empty() && x + w > width) {
+                lines.emplace_back();
                 x = 0;
-                y += row + spacing;
-                row = 0;
             }
-            place(child, Rect{x, y, size.Width, size.Height});
-            x += size.Width + spacing;
-            widest = (std::max)(widest, x - spacing);
-            row = (std::max)(row, size.Height);
+            lines.back().push_back(Item{child, w, spacer ? 0 : size.Height, spacer});
+            x += w + spacing;
         }
-        return Size{widest, y + row};
+        float y = 0, widest = 0;
+        for (size_t n = 0; n < lines.size(); ++n) {
+            auto const& line = lines[n];
+            if (line.empty()) continue;
+            float used = spacing * static_cast<float>(line.size() - 1), tall = 0;
+            int spacers = 0;
+            for (auto const& item : line) {
+                used += item.width;
+                tall = (std::max)(tall, item.height);
+                spacers += item.spacer ? 1 : 0;
+            }
+            float share = spacers && std::isfinite(width) ? (std::max)(0.0f, width - used) / spacers : 0;
+            float at = 0;
+            for (auto const& item : line) {
+                float w = item.spacer ? share : item.width;
+                float h = item.spacer ? tall : item.height;
+                place(item.child, Rect{at, y + (tall - h) / 2, w, h});
+                at += w + spacing;
+            }
+            widest = (std::max)(widest, at - spacing);
+            y += tall + (n + 1 < lines.size() ? spacing : 0);
+        }
+        return Size{widest, y};
     }
 
     Size MeasureOverride(Size available) {
@@ -426,8 +456,16 @@ inline void Flow(Parent const& p, Ctx const& ctx, FlowProps props, Build const& 
         flow->gap = (std::max)(0.0, v);
         if (auto panel = keep.get()) panel.InvalidateMeasure();
     });
-    children(Parent::Of(panel), ctx);
+    auto items = Parent::Of(panel);
+    items.flow = true;
+    children(items, ctx);
     p.Add(panel);
+}
+
+inline controls::Panel MakeFlowPanel(double gap) {
+    auto impl = winrt::make_self<FlowPanel>();
+    impl->gap = gap;
+    return impl.as<controls::Panel>();
 }
 
 // ---------------------------------------------------------------------------
@@ -772,8 +810,11 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
         options.Position(winrt::Windows::Foundation::Point{static_cast<float>(entry.ActualWidth()), 0});
         flyout.ShowAt(entry, options);
     };
-    // Pointing at the box or typing in it opens the palette with the text.
-    entry.Tapped([show](auto&&, auto&&) { show(); });
+    // Pointing at the box, its search button or typing in it opens the
+    // palette with the text. The box's own text field marks the tap handled,
+    // so the handler asks for handled taps too.
+    entry.AddHandler(xaml::UIElement::TappedEvent(), winrt::box_value(xaml::Input::TappedEventHandler([show](auto&&, auto&&) { show(); })), true);
+    entry.QuerySubmitted([show](auto&&, auto&&) { show(); });
     entry.TextChanged([show, ctx, field](controls::AutoSuggestBox const& sender, controls::AutoSuggestBoxTextChangedEventArgs const& args) {
         if (args.Reason() != controls::AutoSuggestionBoxTextChangeReason::UserInput || sender.Text().empty()) return;
         SetDraft(ctx, field, Value::Text(Utf8(sender.Text())));

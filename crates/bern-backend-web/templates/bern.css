@@ -1980,6 +1980,47 @@ button.bern-menu-item:disabled .bern-icon {
   box-shadow: 0 1px 2px -1px var(--bern-scrim);
 }
 
+/* `Picker(style: chips)`: a pill per option, the chosen one inverted. */
+.bern-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Placed straight in a flow, the chips are items of the flow. */
+.bern-flow > .bern-chips {
+  display: contents;
+}
+
+.bern-chip {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--bern-control-border);
+  color: var(--bern-text-secondary);
+  font-size: calc(13px + var(--bern-text-up));
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--bern-motion) ease-out, color var(--bern-motion) ease-out;
+}
+
+@media (hover: hover) {
+  .bern-chip:hover:not([aria-checked="true"]) {
+    background: var(--bern-hover-overlay);
+    color: var(--bern-text-primary);
+  }
+}
+
+.bern-chip[aria-checked="true"] {
+  background: var(--bern-text-primary);
+  box-shadow: none;
+  color: var(--bern-surface-canvas);
+}
+
 .bern-radio-group {
   display: flex;
   flex-direction: column;

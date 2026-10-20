@@ -501,3 +501,43 @@ test("a disabled shortcut leaves its key to the one under it, and unmounting rem
   outer.dispose();
   assert.equal(press("Escape"), false, "no shortcut, no key taken");
 });
+
+test("chip pickers in a flow are its items and mark the chosen option", () => {
+  const { B, Element } = runtime();
+  const root = new Element("root");
+  const field = B.cell("all");
+  const options = [
+    { name: "all", value: "all", label: () => "All" },
+    { name: "tools", value: "tools", label: () => "Tools" },
+  ];
+  const scope = new B.Scope();
+  B.within(scope, () => B.Flow(root, { comp: "demo" }, { gap: 10 }, (flow, ctx) => {
+    B.Spacer(flow);
+    B.Picker(flow, ctx, { id: "category", label: () => "Category", field, options, style: "chips", labelHidden: true });
+  }));
+  const flow = root.childNodes[0];
+  const [spacer, chips] = flow.childNodes;
+  assert.ok(spacer.classes.has("bern-spacer"));
+  assert.ok(chips.classes.has("bern-chips"));
+  assert.equal(chips.attributes.role, "radiogroup");
+  assert.equal(chips.attributes["aria-label"], "Category");
+  const [all, tools] = chips.childNodes;
+  assert.ok(all.classes.has("bern-chip"));
+  assert.equal(all.attributes.role, "radio");
+  assert.equal(all.attributes["aria-checked"], "true");
+  tools.events.click[0]();
+  assert.equal(field.peek(), "tools");
+  assert.equal(all.attributes["aria-checked"], "false");
+  assert.equal(tools.attributes["aria-checked"], "true");
+  const control = B.controlEntries().find((entry) => entry.target() === "demo.category");
+  assert.equal(control.actions.value(), "tools");
+  assert.equal(control.actions.select("all"), true);
+  assert.equal(all.attributes["aria-checked"], "true");
+  scope.dispose();
+  const css = readFileSync(new URL("../templates/bern.css", import.meta.url), "utf8");
+  // In a flow the group takes no box, so each chip wraps on its own; a
+  // spacer takes the room left on its line, and items centre in it.
+  assert.match(css, /\.bern-flow > \.bern-chips\s*\{\s*display:\s*contents;/);
+  assert.match(css, /\.bern-flow\s*\{[^}]*flex-flow:\s*row wrap;[^}]*align-items:\s*center;/);
+  assert.match(css, /\.bern-spacer\s*\{\s*flex:\s*1;/);
+});

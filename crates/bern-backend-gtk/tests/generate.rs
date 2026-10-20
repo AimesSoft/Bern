@@ -144,6 +144,18 @@ fn showcase_generates_a_gtk_application() {
     // from the system style.
     let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
     assert!(!ui.contains("unsupported"), "{ui}");
+    // The tool strip: in the flow, a spacer takes the rest of its line and
+    // the chips are items (the runtime adds them to the flow).
+    let strip = &ui[ui
+        .find("b::Flow(p, c, b::FlowProps { gap: Some(b::Num::Fixed(10.0)) }")
+        .unwrap()..];
+    let spacer = strip.find("b::Spacer(p);").unwrap();
+    let chips = strip.find("id: \"strip_filter\"").unwrap();
+    assert!(spacer < chips, "{strip}");
+    assert!(
+        strip[chips..].contains("style: Some(\"chips\"), label_hidden: true"),
+        "{strip}"
+    );
     for forbidden in ["CssProvider", "rgb(", "@define-color", "gdk::RGBA"] {
         assert!(
             !ui.contains(forbidden),

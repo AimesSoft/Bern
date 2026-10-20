@@ -3608,6 +3608,24 @@ fn controlled_settings_reject_ambiguous_sources_and_non_enum_selections() {
 }
 
 #[test]
+fn chip_pickers_take_no_button_size() {
+    let label = r#"tr! { "en" => "Mode", "ja" => "モード" }"#;
+    for prop in ["shape: capsule", "height: 30"] {
+        let message = errors(&format!(
+            "Picker(id: mode, label: {label}, value: draft.mode, style: chips, {prop})"
+        ));
+        assert!(
+            message.contains("`style: chips` shows a chip per option"),
+            "{message}"
+        );
+    }
+    compile_ui(&wrap(&format!(
+        "Flow(gap: 10) {{ Spacer Picker(id: mode, label: {label}, value: draft.mode, style: chips, label_hidden: true) }}"
+    )))
+    .unwrap();
+}
+
+#[test]
 fn player_scene_and_controlled_slider_validate_sources() {
     let label = r#"tr! { "en" => "Position", "ja" => "位置" }"#;
     for (body, message) in [

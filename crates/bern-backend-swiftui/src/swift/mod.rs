@@ -79,6 +79,9 @@ struct Ctx {
     /// An item of a row, directly or through a condition or repetition: a
     /// spacer there grows only along the row, a divider stands upright.
     row: bool,
+    /// An item of a `Flow`, as `row` is: a chip picker's chips are items
+    /// of the flow.
+    flow: bool,
 }
 
 /// The system the Swift is generated for. SwiftUI is shared; windows,
@@ -202,6 +205,7 @@ impl<'a> Generator<'a> {
                 {
                     inside = Ctx {
                         row: false,
+                        flow: ctx.flow && element.kind == "Picker",
                         ..ctx.clone()
                     };
                     &inside

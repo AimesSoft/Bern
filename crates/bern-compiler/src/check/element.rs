@@ -85,6 +85,22 @@ impl Checker<'_> {
                 "`selected` must be an enum whose variants all have labels",
             );
         }
+        if parts.kind == "Picker"
+            && matches!(parts.props.get("style"), Some(ir::Prop::Keyword { value }) if value == "chips")
+        {
+            // Chips are one control per option; `shape` and `height` size
+            // the single button of a picker shown as a menu.
+            for prop in ["shape", "height"] {
+                if let Some(given) = element.prop(prop) {
+                    self.error(
+                        given.name.span(),
+                        format!(
+                            "`style: chips` shows a chip per option, so `{prop}:` has no button to size; leave it out"
+                        ),
+                    );
+                }
+            }
+        }
         let children = self.children(element, path, &parts.child_ctx, scope);
         if parts.kind == "Tabs" {
             self.tab_accessory(element, &children);

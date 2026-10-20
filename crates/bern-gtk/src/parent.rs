@@ -297,6 +297,11 @@ impl Parent {
         self.horizontal
     }
 
+    /// Whether children are items of a `Flow`.
+    pub(crate) fn is_flow(&self) -> bool {
+        matches!(&self.sink, Sink::Children(container) if container.is::<crate::scene::FlowWidget>())
+    }
+
     /// The rail this parent places on, if any.
     pub(crate) fn rail(&self) -> Option<&Rail> {
         match &self.sink {

@@ -353,8 +353,15 @@ impl Generator<'_> {
             return;
         }
         let style = element.keyword("style").unwrap_or("menu");
+        // In a flow the picker keeps its own width, and chips are items of
+        // the flow.
+        let flow = if ctx.scope == Scope::Flow {
+            ", inFlow = true"
+        } else {
+            ""
+        };
         out.line(format!(
-            "BernPicker({label}, {options}, {value}, {option_label}, {{ {change} }}, {}, Modifier.testTag({target}), labelHidden = {}{})",
+            "BernPicker({label}, {options}, {value}, {option_label}, {{ {change} }}, {}, Modifier.testTag({target}), labelHidden = {}{}{flow})",
             string(style),
             element.keyword("label_hidden") == Some("true"),
             self.shape_arg(element)

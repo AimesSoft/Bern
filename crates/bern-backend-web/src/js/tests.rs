@@ -383,3 +383,70 @@ fn session_control_runs_action_after_updating_its_draft() {
         "{generated}"
     );
 }
+
+#[test]
+fn chip_pickers_stand_in_their_flow_beside_a_spacer() {
+    let mut app = app();
+    let ty = Type::Enum {
+        name: "Category".into(),
+    };
+    app.types.enums.push(EnumDef {
+        name: "Category".into(),
+        variants: ["All", "Tools"]
+            .into_iter()
+            .map(|name| VariantDef {
+                name: name.into(),
+                fields: vec![],
+                label: None,
+            })
+            .collect(),
+    });
+    app.protocol.state.push(StateField {
+        name: "category".into(),
+        ty: ty.clone(),
+        doc: String::new(),
+        content: false,
+    });
+    app.protocol
+        .commands
+        .push(command("set_category", std::slice::from_ref(&ty)));
+    let selected = Expr {
+        ty,
+        kind: ExprKind::Binding {
+            binding: Binding::Engine {
+                field: 0,
+                path: vec![],
+            },
+        },
+    };
+    let mut picker = element("Picker");
+    picker.props.insert(
+        "selected".into(),
+        Prop::Expr {
+            expr: selected.clone(),
+        },
+    );
+    picker.props.insert("style".into(), keyword("chips"));
+    picker.props.insert("label_hidden".into(), keyword("true"));
+    picker.action = Some(Action::Engine {
+        command: 0,
+        args: vec![selected],
+    });
+    let mut flow = element("Flow");
+    flow.children = vec![Node::Element(element("Spacer")), Node::Element(picker)];
+    let mut out = Out::default();
+    Generator::new(&app).element(&mut out, &flow);
+    let generated = out.finish();
+    let start = generated.find("B.Flow(").expect("a flow");
+    let spacer = generated.find("B.Spacer(").expect("a spacer");
+    let chips = generated.find("B.Picker(").expect("a picker");
+    assert!(start < spacer && spacer < chips, "{generated}");
+    assert!(
+        generated[chips..].contains("style: \"chips\""),
+        "{generated}"
+    );
+    assert!(
+        generated[chips..].contains("labelHidden: true"),
+        "{generated}"
+    );
+}

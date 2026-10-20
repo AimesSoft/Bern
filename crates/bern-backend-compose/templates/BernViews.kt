@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -90,6 +91,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.LocalContentColor
@@ -738,10 +740,13 @@ fun <T> BernPicker(
     modifier: Modifier = Modifier,
     labelHidden: Boolean = false,
     shape: BernShape? = null,
+    /// An item of a `Flow`: at its own width, and chips without a label of
+    /// their own are items of the flow.
+    inFlow: Boolean = false,
 ) {
     // A capsule of its own height: the chosen option on a tonal button,
     // opening a menu of the others.
-    if (shape != null && style != "segmented" && style != "radio" && style != "inline") {
+    if (shape != null && style != "segmented" && style != "radio" && style != "inline" && style != "chips") {
         var expanded by remember { mutableStateOf(false) }
         Box(modifier) {
             FilledTonalButton(
@@ -776,13 +781,44 @@ fun <T> BernPicker(
     when (style) {
         "segmented" -> Column(modifier.semantics { if (labelHidden) contentDescription = label }) {
             if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SingleChoiceSegmentedButtonRow(if (inFlow) Modifier else Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, option ->
                     SegmentedButton(
                         selected = option == selected,
                         onClick = { onSelect(option) },
                         shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                    ) { Text(optionLabel(option), maxLines = 1) }
+                        // The design's segments (`.c-seg`) mark the chosen one
+                        // by its fill alone, without a check mark.
+                        icon = {},
+                    ) {
+                        // The row sizes its segments by their least widths; a
+                        // label's is its longest word, so "已安装 3" would lose
+                        // its count. Here it is the whole label.
+                        Text(optionLabel(option), Modifier.width(IntrinsicSize.Max), maxLines = 1)
+                    }
+                }
+            }
+        }
+        // A Material filter chip per option. In a flow the chips are items
+        // of the flow; elsewhere they wrap in a flow of their own.
+        "chips" -> {
+            val flat = inFlow && labelHidden
+            val chips = @Composable {
+                options.forEachIndexed { index, option ->
+                    FilterChip(
+                        selected = option == selected,
+                        onClick = { onSelect(option) },
+                        label = { Text(optionLabel(option), maxLines = 1) },
+                        modifier = if (flat && index == 0) modifier else Modifier,
+                    )
+                }
+            }
+            if (flat) {
+                chips()
+            } else {
+                Column(modifier.semantics { if (labelHidden) contentDescription = label }) {
+                    if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
+                    BernFlow(8.dp) { chips() }
                 }
             }
         }

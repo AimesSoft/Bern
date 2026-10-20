@@ -189,6 +189,16 @@ fn showcase_generates_a_winui3_application() {
     // from the system theme.
     let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
     assert!(!ui.contains("unsupported"), "{ui}");
+    // The tool strip: in the flow, a spacer takes the rest of its line and
+    // the chips are items (the runtime adds them to the flow's parent).
+    let strip = &ui[ui.find("B::Flow(p, c, {.gap = B::Len(10.0)}").unwrap()..];
+    let spacer = strip.find("B::Spacer(p);").unwrap();
+    let chips = strip.find("{.id = \"strip_filter\"").unwrap();
+    assert!(spacer < chips, "{strip}");
+    assert!(
+        strip[chips..].contains(".style = \"chips\", .labelHidden = true"),
+        "{strip}"
+    );
     for forbidden in ["ColorHelper", "Colors::", "SolidColorBrush"] {
         assert!(
             !ui.contains(forbidden),

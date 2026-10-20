@@ -264,7 +264,7 @@ impl Generator<'_> {
             "BernFlow({}) {{",
             self.length(element, "gap").unwrap_or_else(|| "8.dp".into())
         ));
-        self.children(out, element, &ctx.within(Scope::Other));
+        self.children(out, element, &ctx.within(Scope::Flow));
         out.close("}");
     }
 
@@ -588,8 +588,8 @@ impl Generator<'_> {
         let flexible = match (ctx.scope, horizontal) {
             (Scope::Row, _) | (Scope::Column, false) => "Modifier.weight(1f)",
             (Scope::Column, true) => "Modifier",
-            (Scope::Other, true) => "Modifier.bernFlexible(column = false)",
-            (Scope::Other, false) => "Modifier.bernFlexible()",
+            (Scope::Other | Scope::Flow, true) => "Modifier.bernFlexible(column = false)",
+            (Scope::Other | Scope::Flow, false) => "Modifier.bernFlexible()",
         };
         out.open(format!(
             "BernScroll({horizontal}, {snap}, {position}, {on_position}, {}, {arrival}, 0.dp, {flexible}) {{",
@@ -617,14 +617,14 @@ impl Generator<'_> {
             let flexible = match ctx.scope {
                 Scope::Row => "Modifier.weight(1f)",
                 Scope::Column => "Modifier",
-                Scope::Other => "Modifier.bernFlexible(column = false)",
+                Scope::Other | Scope::Flow => "Modifier.bernFlexible(column = false)",
             };
             out.open(format!("Row({flexible}.horizontalScroll({state}), horizontalArrangement = Arrangement.spacedBy(8.dp)) {{"));
             self.nodes(out, &element.children, &ctx.within(Scope::Row));
         } else {
             let flexible = match ctx.scope {
                 Scope::Column | Scope::Row => "Modifier.weight(1f)",
-                Scope::Other => "Modifier.bernFlexible()",
+                Scope::Other | Scope::Flow => "Modifier.bernFlexible()",
             };
             out.open(format!(
                 "Column({flexible}.fillMaxWidth().verticalScroll({state})) {{",

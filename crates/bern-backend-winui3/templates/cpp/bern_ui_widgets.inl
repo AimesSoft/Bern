@@ -1231,6 +1231,9 @@ inline Segments MakeSegments(Ctx const& ctx, std::vector<Str> const& labels, std
     return segments;
 }
 
+/// A `FlowPanel` (defined with `Flow`) whose items are `gap` apart.
+inline controls::Panel MakeFlowPanel(double gap);
+
 struct PickerProps {
     char const* id = "";
     Str label;
@@ -1264,7 +1267,37 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
     };
     std::string_view style = props.style ? props.style : "";
     xaml::FrameworkElement control{nullptr};
-    if (style == "segmented" || style == "radio" || style == "inline") {
+    if (style == "chips") {
+        // A toggle button per option, the chosen one checked. In a flow the
+        // buttons are items of the flow; elsewhere they wrap in a flow of
+        // their own.
+        using Buttons = std::vector<controls::Primitives::ToggleButton>;
+        auto buttons = std::make_shared<Buttons>();
+        auto check = [](Buttons const& buttons, std::optional<int> chosen) {
+            for (size_t j = 0; j < buttons.size(); ++j) buttons[j].IsChecked(chosen && *chosen == static_cast<int>(j));
+        };
+        for (size_t i = 0; i < options->size(); ++i) {
+            controls::Primitives::ToggleButton button;
+            auto label = (*options)[i].label;
+            Reactive::Run([button, label, ctx] { button.Content(winrt::box_value(label(ctx))); });
+            int index = static_cast<int>(i);
+            // A click toggles the button itself: the picker's value says
+            // which is checked, also when the chosen chip is clicked again.
+            button.Click([choose, check, model, indexOf, index, weak = std::weak_ptr<Buttons>(buttons)](auto&&, auto&&) {
+                choose(index);
+                if (auto buttons = weak.lock()) check(*buttons, indexOf(model.peek()));
+            });
+            buttons->push_back(button);
+        }
+        Reactive::Run([buttons, check, model, indexOf] { check(*buttons, indexOf(model.read())); });
+        if (p.flow && props.labelHidden && !ctx.toolbar) {
+            for (auto const& button : *buttons) p.Add(button);
+        } else {
+            auto panel = MakeFlowPanel(8);
+            for (auto const& button : *buttons) panel.Children().Append(button);
+            control = panel;
+        }
+    } else if (style == "segmented" || style == "radio" || style == "inline") {
         std::vector<Str> labels;
         for (auto const& option : *options) labels.push_back(option.label);
         auto segments = MakeSegments(ctx, labels);
@@ -1325,10 +1358,13 @@ inline void Picker(Parent const& p, Ctx const& ctx, PickerProps props) {
         });
         control = combo;
     }
-    BindName(control, text);
-    if (ctx.toolbar || props.labelHidden) p.isList && !ctx.toolbar ? p.Add(Card(control)) : p.Add(control);
-    else if (p.isList) p.Add(LabeledCard(text, control));
-    else p.Add(Stacked(text, control));
+    // Chips that are items of a flow have no control of their own.
+    if (control) {
+        BindName(control, text);
+        if (ctx.toolbar || props.labelHidden) p.isList && !ctx.toolbar ? p.Add(Card(control)) : p.Add(control);
+        else if (p.isList) p.Add(LabeledCard(text, control));
+        else p.Add(Stacked(text, control));
+    }
     Controls::Register(ctx, props.id, "picker", text, nullptr,
         Actions{.select = [options, choose](std::string const& name) {
                     for (size_t i = 0; i < options->size(); ++i)

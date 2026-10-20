@@ -100,6 +100,17 @@ pub fn controls_page(app: showcase::Client, #[session] draft: MainDraft) -> impl
             Section(title: tr! { "zh-Hans" => "选择", "en" => "Choices" }) {
                 Picker(id: filter, label: tr! { "zh-Hans" => "显示", "en" => "Show" }, value: draft.filter, style: segmented)
                 Picker(id: density, label: tr! { "zh-Hans" => "密度", "en" => "Density" }, value: draft.density, style: menu)
+                Picker(id: density_chips, label: tr! { "zh-Hans" => "密度", "en" => "Density" }, value: draft.density, style: chips)
+            }
+            Section(
+                title: tr! { "zh-Hans" => "工具条", "en" => "Tool Strip" },
+                footer: tr! { "zh-Hans" => "分段控件靠左，选项标签靠右；窄的时候标签换到下一行。", "en" => "The segmented control on the left, the chips on the right; when narrow, the chips wrap onto the next line." }
+            ) {
+                Flow(gap: 10) {
+                    Picker(id: strip_density, label: tr! { "zh-Hans" => "密度", "en" => "Density" }, value: draft.density, style: segmented, label_hidden: true)
+                    Spacer
+                    Picker(id: strip_filter, label: tr! { "zh-Hans" => "显示", "en" => "Show" }, value: draft.filter, style: chips, label_hidden: true)
+                }
             }
             Toolbar {
                 Picker(id: toolbar_filter, label: tr! { "zh-Hans" => "显示", "en" => "Show" }, value: draft.filter, style: segmented)

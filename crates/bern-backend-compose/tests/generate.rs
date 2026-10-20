@@ -154,6 +154,38 @@ fn showcase_generates_video_queries_and_windows() {
     assert!(build.contains("androidx.media3:media3-exoplayer"));
 }
 
+/// The showcase's tool strip: a segmented picker at its own width, a
+/// spacer taking the rest of its line, and chips that are items of the
+/// `FlowRow`; labelled chips elsewhere wrap in a flow of their own.
+#[test]
+fn chip_pickers_are_items_of_their_flow() {
+    let (config, compiled) = compile("showcase");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
+    let start = kotlin.find("BernFlow(10f.dp) {").expect("the tool strip");
+    let strip = &kotlin[start..];
+    let segmented = strip.find("\"segmented\", Modifier.testTag(").unwrap();
+    let spacer = strip.find("Spacer(Modifier.weight(1f))").unwrap();
+    let chips = strip.find("\"chips\", Modifier.testTag(").unwrap();
+    assert!(segmented < spacer && spacer < chips, "{strip}");
+    assert!(
+        strip[segmented..spacer].contains("labelHidden = true, inFlow = true)"),
+        "{strip}"
+    );
+    assert!(
+        strip[chips..].starts_with("\"chips\", Modifier.testTag(\"controls_page.strip_filter\"), labelHidden = true, inFlow = true)"),
+        "{strip}"
+    );
+    assert!(
+        kotlin.contains(
+            "\"chips\", Modifier.testTag(\"controls_page.density_chips\"), labelHidden = false)"
+        ),
+        "{kotlin}"
+    );
+}
+
 #[test]
 fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     let (config, compiled) = compile("gallery");

@@ -682,33 +682,38 @@ mod flow {
         /// Where each child stands in lines `width` wide, and the height of
         /// them all.
         fn lines(&self, width: Option<f64>) -> (Vec<Placed>, f64) {
-            let gap = self.gap.get();
-            let mut placed = Vec::new();
-            let (mut x, mut y, mut line) = (0.0, 0.0, 0.0_f64);
+            let mut widgets = Vec::new();
+            let mut items = Vec::new();
             for child in children(self.obj().upcast_ref()) {
                 if !child.should_layout() {
                     continue;
                 }
-                let (_, natural, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
-                let w = match width {
-                    Some(width) => f64::from(natural).min(width),
-                    None => f64::from(natural),
+                let spacer = child.has_css_class(SPACER);
+                let (w, h) = if spacer {
+                    (0.0, 0.0)
+                } else {
+                    let (_, natural, _, _) = child.measure(gtk::Orientation::Horizontal, -1);
+                    let w = match width {
+                        Some(width) => f64::from(natural).min(width),
+                        None => f64::from(natural),
+                    };
+                    let (_, tall, _, _) = child.measure(gtk::Orientation::Vertical, side(w));
+                    (w, f64::from(tall))
                 };
-                let (_, tall, _, _) = child.measure(gtk::Orientation::Vertical, side(w));
-                let h = f64::from(tall);
-                if let Some(width) = width
-                    && x > 0.0
-                    && x + w > width
-                {
-                    x = 0.0;
-                    y += line + gap;
-                    line = 0.0;
-                }
-                placed.push((child, x, y, w, h));
-                x += w + gap;
-                line = line.max(h);
+                widgets.push(child);
+                items.push(FlowItem {
+                    width: w,
+                    height: h,
+                    spacer,
+                });
             }
-            (placed, if x > 0.0 || y > 0.0 { y + line } else { 0.0 })
+            let (frames, height) = flow_lines(&items, width, self.gap.get());
+            let placed = widgets
+                .into_iter()
+                .zip(frames)
+                .map(|(child, (x, y, w, h))| (child, x, y, w, h))
+                .collect();
+            (placed, height)
         }
     }
 
@@ -751,6 +756,76 @@ mod flow {
     }
 }
 
+/// The style class of a `Spacer`, which takes the room left on its line of
+/// a `Flow`.
+pub(crate) const SPACER: &str = "bern-spacer";
+
+/// One child of a `Flow`: its size, or a spacer.
+#[derive(Clone, Copy)]
+struct FlowItem {
+    width: f64,
+    height: f64,
+    spacer: bool,
+}
+
+/// Each item's frame (x, y, width, height) in lines `width` wide, and the
+/// height of them all: lines broken at the width, a spacer taking no room
+/// there; then the spacers of a line share the room left on it, and each
+/// item is centred in its line's height.
+fn flow_lines(
+    items: &[FlowItem],
+    width: Option<f64>,
+    gap: f64,
+) -> (Vec<(f64, f64, f64, f64)>, f64) {
+    let mut lines: Vec<Vec<usize>> = vec![Vec::new()];
+    let mut x = 0.0;
+    for (index, item) in items.iter().enumerate() {
+        if let Some(width) = width
+            && lines.last().is_some_and(|line| !line.is_empty())
+            && x + item.width > width
+        {
+            lines.push(Vec::new());
+            x = 0.0;
+        }
+        if let Some(line) = lines.last_mut() {
+            line.push(index);
+        }
+        x += item.width + gap;
+    }
+    let mut frames = vec![(0.0, 0.0, 0.0, 0.0); items.len()];
+    let mut y = 0.0;
+    let count = lines.len();
+    for (number, line) in lines.iter().enumerate() {
+        if line.is_empty() {
+            continue;
+        }
+        let used = line.iter().map(|&index| items[index].width).sum::<f64>()
+            + gap * (line.len() - 1) as f64;
+        let tall = line
+            .iter()
+            .map(|&index| items[index].height)
+            .fold(0.0, f64::max);
+        let spacers = line.iter().filter(|&&index| items[index].spacer).count();
+        let share = match width {
+            Some(width) if spacers > 0 => (width - used).max(0.0) / spacers as f64,
+            _ => 0.0,
+        };
+        let mut at = 0.0;
+        for &index in line {
+            let item = items[index];
+            let (w, h) = if item.spacer {
+                (share, tall)
+            } else {
+                (item.width, item.height)
+            };
+            frames[index] = (at, y + (tall - h) / 2.0, w, h);
+            at += w + gap;
+        }
+        y += tall + if number + 1 < count { gap } else { 0.0 };
+    }
+    (frames, y)
+}
+
 glib::wrapper! {
     /// Children in lines, each at its own width, wrapping onto the next
     /// line when the room ends.
@@ -764,11 +839,17 @@ pub struct FlowProps {
     pub gap: Option<Num>,
 }
 
-#[allow(non_snake_case)]
-pub fn Flow(p: &Parent, ctx: &Ctx, props: FlowProps, children: Build) {
+/// A flow whose items are `gap` apart, filling the width it is given.
+pub(crate) fn flow_of(gap: f64) -> FlowWidget {
     let flow: FlowWidget = glib::Object::new();
     flow.set_hexpand(true);
-    flow.imp().gap.set(8.0);
+    flow.imp().gap.set(gap);
+    flow
+}
+
+#[allow(non_snake_case)]
+pub fn Flow(p: &Parent, ctx: &Ctx, props: FlowProps, children: Build) {
+    let flow = flow_of(8.0);
     if let Some(gap) = &props.gap {
         let spaced = flow.clone();
         bind_number(ctx, gap, None, &flow, move |value| {
@@ -1210,4 +1291,68 @@ pub fn ControlGroup(p: &Parent, ctx: &Ctx, props: ControlGroupProps, children: B
     );
     children(&Parent::of_aligned_box(&group, gtk::Align::Fill), ctx);
     place(p, &group);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(width: f64, height: f64) -> FlowItem {
+        FlowItem {
+            width,
+            height,
+            spacer: false,
+        }
+    }
+
+    const SPACER_ITEM: FlowItem = FlowItem {
+        width: 0.0,
+        height: 0.0,
+        spacer: true,
+    };
+
+    /// The plugin market's tool strip on a phone: a 123-wide segmented
+    /// control, a spacer and five 54-wide chips in 358, 10 apart.
+    fn strip() -> Vec<FlowItem> {
+        let mut items = vec![item(123.0, 32.0), SPACER_ITEM];
+        items.extend(std::iter::repeat_n(item(54.0, 30.0), 5));
+        items
+    }
+
+    #[test]
+    fn a_spacer_takes_the_rest_of_its_line_and_the_others_wrap() {
+        let (frames, height) = flow_lines(&strip(), Some(358.0), 10.0);
+        // The first line ends with three chips at its end, the spacer
+        // taking the room before them; the other two start the next line.
+        assert_eq!(frames[1], (133.0, 0.0, 33.0, 32.0));
+        let chips: Vec<(f64, f64)> = frames[2..].iter().map(|f| (f.0, f.1)).collect();
+        assert_eq!(
+            chips,
+            [
+                (176.0, 1.0),
+                (240.0, 1.0),
+                (304.0, 1.0),
+                (0.0, 42.0),
+                (64.0, 42.0)
+            ]
+        );
+        assert_eq!(height, 72.0);
+    }
+
+    #[test]
+    fn a_wide_line_keeps_everything_on_it() {
+        let (frames, height) = flow_lines(&strip(), Some(705.0), 10.0);
+        assert_eq!(frames[1].2, 705.0 - 123.0 - 5.0 * 54.0 - 6.0 * 10.0);
+        assert_eq!(frames[6].0 + frames[6].2, 705.0);
+        assert_eq!(height, 32.0);
+    }
+
+    #[test]
+    fn without_a_width_a_spacer_takes_nothing() {
+        let (frames, height) = flow_lines(&strip(), None, 10.0);
+        assert_eq!(frames[1].2, 0.0);
+        assert_eq!(frames[6].0, 123.0 + 10.0 + 10.0 + 4.0 * 64.0);
+        assert_eq!(height, 32.0);
+        assert_eq!(flow_lines(&[], Some(100.0), 10.0), (vec![], 0.0));
+    }
 }

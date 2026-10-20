@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -444,13 +445,15 @@ fun BernAccordion(
 }
 
 /// `Flow`: items at their own width from the leading edge, wrapping onto
-/// a new row where the width runs out.
+/// a new row where the width runs out; each row centres its items, and a
+/// spacer (`weight`) takes the room left on its row.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun BernFlow(gap: Dp, content: @Composable () -> Unit) {
+fun BernFlow(gap: Dp, content: @Composable FlowRowScope.() -> Unit) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(gap),
         verticalArrangement = Arrangement.spacedBy(gap),
+        itemVerticalAlignment = Alignment.CenterVertically,
     ) { content() }
 }
 

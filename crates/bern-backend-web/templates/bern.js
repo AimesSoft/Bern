@@ -1994,16 +1994,21 @@ export function Picker(p, ctx, { id, label, field, options, style, labelHidden, 
     field.set(option.value);
     return true;
   };
-  if (style === "segmented" || style === "radio" || style === "inline") {
-    node = el("div", { class: style === "segmented" ? "bern-segmented" : "bern-radio-group", role: "radiogroup" });
+  if (style === "segmented" || style === "radio" || style === "inline" || style === "chips") {
+    // Chips placed straight in a flow are items of the flow (bern.css).
+    const [group, item] = {
+      segmented: ["bern-segmented", "bern-segment"],
+      chips: ["bern-chips", "bern-chip"],
+    }[style] ?? ["bern-radio-group", "bern-radio"];
+    node = el("div", { class: group, role: "radiogroup" });
     bindAttr(node, "aria-label", label);
     const buttons = options.map((option) => {
       const text = el("span");
       bindText(text, option.label);
       const button = el(
         "button",
-        { class: style === "segmented" ? "bern-segment" : "bern-radio", type: "button", role: "radio" },
-        style === "segmented" ? null : el("span", { class: "bern-radio-mark" }),
+        { class: item, type: "button", role: "radio" },
+        item === "bern-radio" ? el("span", { class: "bern-radio-mark" }) : null,
         text,
       );
       button.addEventListener("click", () => field.set(option.value));
