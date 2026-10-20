@@ -1004,6 +1004,95 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Run the steps of a plan that place files. What its `cargo` runs and
+    /// archive would make is faked: a source a copy lacks becomes a file.
+    fn place_files(steps: &[BuildStep]) {
+        for step in steps {
+            match step {
+                BuildStep::Run { .. } => continue,
+                BuildStep::Copy { from, .. } if !from.exists() => {
+                    std::fs::create_dir_all(from.parent().unwrap()).unwrap();
+                    std::fs::write(from, b"built").unwrap();
+                }
+                _ => {}
+            }
+            run_step(step).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_web_ui_package_carries_only_its_own_project() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let workspace = std::env::temp_dir().join(format!("bern-web-ui-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&workspace);
+        let framework = Framework::Path(root.join("crates"));
+        let web = bern_backend_web::WebBrowser;
+        // Both projects build into the same output directory, the gallery
+        // first, with a folder of page icons left by yet another one.
+        let mut built = None;
+        for example in ["gallery", "planner"] {
+            let config =
+                bern_compiler::config::load(&root.join("examples").join(example).join("Bern.toml"))
+                    .unwrap();
+            let compiled = bern_compiler::compile(&config).unwrap();
+            let target = config
+                .targets
+                .iter()
+                .find(|target| target.name == "web_ui")
+                .unwrap();
+            let context = context(&config, &compiled, &workspace, target, &framework, false);
+            for file in web.generate(&compiled.app, &context).unwrap() {
+                write_if_changed(&context.output_dir.join(&file.path), &file.contents).unwrap();
+            }
+            write_if_changed(&context.output_dir.join("icons/site.webmanifest"), b"{}").unwrap();
+            place_files(&web.plan(&compiled.app, &context).unwrap().steps);
+            built = Some((compiled, context));
+        }
+        let (compiled, context) = built.unwrap();
+        let programs: Vec<String> = ["planner", "planner-host", "planner-mcp"]
+            .iter()
+            .map(|name| format!("{name}{}", std::env::consts::EXE_SUFFIX))
+            .collect();
+        assert_eq!(files_below(&context.output_dir.join("bin")), programs);
+
+        let package = web
+            .package(
+                &compiled.app,
+                &context,
+                &bern_target_api::Signing::default(),
+            )
+            .unwrap();
+        place_files(&package.steps);
+        let staged = files_below(&context.output_dir.join("package/planner"));
+        for expected in [
+            "index.html",
+            "app.js",
+            "app.wasm",
+            "bern.css",
+            "favicon.svg",
+        ] {
+            assert!(staged.iter().any(|path| path == expected), "{staged:?}");
+        }
+        let shipped: Vec<&str> = staged
+            .iter()
+            .filter_map(|path| path.strip_prefix("bin/"))
+            .collect();
+        assert_eq!(shipped, programs);
+        assert!(
+            staged.iter().all(|path| !path.contains("gallery")
+                && !path.starts_with("resources/")
+                && !path.starts_with("icons/")
+                && !path.starts_with("glue/")
+                && path != "build.json"
+                && path != "features.json"),
+            "{staged:?}"
+        );
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
     fn parsed(args: &[&str]) -> Result<Options, String> {
         parse_args(args.iter().map(|arg| arg.to_string()))
     }
