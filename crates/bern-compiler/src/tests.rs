@@ -2027,6 +2027,32 @@ fn sessions_read_directly_in_a_window_belong_to_it() {
 }
 
 #[test]
+fn window_expressions_read_only_sessions_the_window_owns() {
+    for props in [
+        ", immersive: draft.on",
+        ", idle_after: 3, idle_enabled: draft.on",
+        ", landscape: draft.on",
+    ] {
+        let source = wrap("Spacer")
+            .replace(
+                "pub fn app(app: demo::Client, windows: AppWindows)",
+                "pub fn app(app: demo::Client, windows: AppWindows, #[session] draft: Draft)",
+            )
+            .replace(r#""情報" })"#, &format!(r#""情報" }}{props})"#));
+        assert!(source.contains(props));
+        let Err(errors) = compile_ui(&source) else {
+            panic!("`{props}` read a session the window does not own");
+        };
+        let error = errors
+            .iter()
+            .find(|e| e.message.contains("reads `Draft`, which this window does not own"))
+            .unwrap_or_else(|| panic!("{errors:?}"));
+        assert!(error.message.starts_with("window `about`"), "{error:?}");
+        assert!(error.location.is_some(), "{error:?}");
+    }
+}
+
+#[test]
 fn windows_cannot_place_the_root() {
     let source = wrap("Spacer").replacen("about_page()", "app(app: app, windows: windows)", 1);
     let Err(errors) = compile_ui(&source) else {

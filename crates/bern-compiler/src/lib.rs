@@ -568,18 +568,29 @@ fn window_catalog(
                     .at(window.source.clone()),
                 );
             }
-            // The check reads the closing window's own drafts.
-            for exprs in check.exprs() {
-                for session in exprs.sessions() {
-                    if !sessions.contains(&session) {
-                        diagnostics.push(
-                            Diagnostic::error(format!(
-                                "window `{id}`'s close check reads `{session}`, which this window does not own; its components own: {}",
-                                if sessions.is_empty() { "none".to_string() } else { sessions.join(", ") }
-                            ))
-                            .at(window.source.clone()),
-                        );
-                    }
+        }
+        // The close check and the window's own expressions read that
+        // window instance's drafts.
+        let mut reads: Vec<(String, &ir::Expr)> = close
+            .iter()
+            .flat_map(ir::CloseCheck::exprs)
+            .map(|expr| ("close check".to_string(), expr))
+            .collect();
+        for name in ["immersive", "idle_enabled", "landscape"] {
+            if let Some(expr) = window.expr(name) {
+                reads.push((format!("`{name}`"), expr));
+            }
+        }
+        for (what, expr) in reads {
+            for session in expr.sessions() {
+                if !sessions.contains(&session) {
+                    diagnostics.push(
+                        Diagnostic::error(format!(
+                            "window `{id}`'s {what} reads `{session}`, which this window does not own; its components own: {}",
+                            if sessions.is_empty() { "none".to_string() } else { sessions.join(", ") }
+                        ))
+                        .at(window.source.clone()),
+                    );
                 }
             }
         }
