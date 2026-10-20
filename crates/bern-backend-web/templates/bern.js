@@ -2740,9 +2740,15 @@ export function Tabs(p, ctx, { id, selection, tabs, accessory, selectedLabel }) 
     if (accessory.shown) effect(() => { strip.hidden = !accessory.shown(); });
   }
   const entries = tabs.map((tab) => {
-    const text = el("span");
-    bindText(text, tab.label);
-    const button = el("button", { class: "bern-tab", type: "button", role: "tab" }, tab.icon ? icon(tab.icon, 16) : null, text);
+    // `display: icon`: the icon alone, the label its name and tooltip.
+    const iconOnly = tab.iconOnly && tab.icon;
+    const text = iconOnly ? null : el("span");
+    if (text) bindText(text, tab.label);
+    const button = el("button", { class: `bern-tab${iconOnly ? " bern-tab-icon-only" : ""}`, type: "button", role: "tab" }, tab.icon ? icon(tab.icon, 16) : null, text);
+    if (iconOnly) {
+      bindAttr(button, "aria-label", tab.label);
+      bindAttr(button, "title", tab.label);
+    }
     button.addEventListener("click", () => selection.set(tab.value));
     button.addEventListener("keydown", (event) => {
       const vertical = node.classList.contains("bern-tabs-vertical");

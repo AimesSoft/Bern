@@ -2456,6 +2456,17 @@ button.bern-menu-item:disabled .bern-icon {
   outline-offset: -2px;
 }
 
+/* `Tab(display: icon)`: the icon alone, at least as wide as the bar is
+ * tall; in a dialog's vertical navigation it keeps the rows' leading edge. */
+.bern-tab-icon-only {
+  justify-content: center;
+  min-width: 44px;
+}
+
+.bern-tabs-vertical .bern-tab-icon-only {
+  justify-content: flex-start;
+}
+
 .bern-tabpanels {
   flex: 1;
   display: flex;

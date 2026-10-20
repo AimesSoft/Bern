@@ -342,8 +342,13 @@ impl Generator<'_> {
             }
             let value = tab.expr("value").map(|v| self.expr(v)).unwrap_or_default();
             let label = self.text_prop(tab, "label").unwrap_or_default();
+            let icon_only = if tab.keyword("display") == Some("icon") {
+                ", iconOnly = true"
+            } else {
+                ""
+            };
             out.line(format!(
-                "BernTabItem({label}, {}, {selection} == {value}) {{ {selection} = {value} }}",
+                "BernTabItem({label}, {}, {selection} == {value}{icon_only}) {{ {selection} = {value} }}",
                 Self::icon(tab.icon("icon"))
             ));
         });

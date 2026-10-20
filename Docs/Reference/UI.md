@@ -191,6 +191,7 @@ style! {
 
   元素没有这项长度时报错，例如 `Button.x { gap: 4 }`；长度不小于 0，`font_size` 大于 0。
 - 屏幕键盘一类的按键用文字会话动作：`=> draft.query.push_str("A")`、`=> draft.query.pop()`；搜索页想在输入前就列出结果时写 `Search(suggest: true)`。
+- `Tab(display: icon)` 让页签只显示图标，例如电视标签栏里只是放大镜的搜索页；必须写 `icon`，`label` 仍是读屏读出的名称（桌面上也是悬停提示）。关键词与 `Label(display:)` 相同，默认 `title_and_icon`。它不限于电视，六个目标都生成。
 
 ```rust
 Adaptive(id: shell) {
@@ -204,6 +205,11 @@ Stack {
     if app.details_open {
         Shortcut(key: "escape") => app.close_details()
     }
+}
+
+Tabs(id: tv_tabs, selection: draft.page) {
+    Tab(value: Page::Search, label: tr! { "zh-Hans" => "搜索", "en" => "Search" }, icon: "magnifyingglass", display: icon) { search(app: app) }
+    Tab(value: Page::Home, label: tr! { "zh-Hans" => "首页", "en" => "Home" }) { tv_home(app: app) }
 }
 ```
 

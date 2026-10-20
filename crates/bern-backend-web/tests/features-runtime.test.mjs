@@ -69,6 +69,12 @@ function runtime(search = "") {
       }
     }
     prepend(child) { this.childNodes.unshift(child); child.parentElement = this; }
+    before(...nodes) {
+      const siblings = this.parentNode.childNodes;
+      const placed = nodes.flatMap((node) => node.nodeType === 11 ? node.childNodes.splice(0) : [node]);
+      siblings.splice(siblings.indexOf(this), 0, ...placed);
+      for (const node of placed) { node.parentNode = this.parentNode; node.parentElement = this.parentElement; }
+    }
   }
   const probes = [];
   class Probe {
@@ -244,6 +250,34 @@ test("content capsules are the standard button and keep their children", () => {
   assert.equal(activations, 1);
   scope.dispose();
   assert.equal(B.controlEntries().length, 0);
+});
+
+test("an icon-only tab shows its icon alone, named by its label", () => {
+  const { B, Element } = runtime();
+  const root = new Element("root");
+  const selection = B.cell("about");
+  const label = B.cell("About");
+  const scope = new B.Scope();
+  B.within(scope, () => B.Tabs(root, {}, {
+    selection,
+    tabs: [
+      { value: "about", name: "about", label: () => label.get(), icon: "info.circle", iconOnly: true, build: () => {} },
+      { value: "keys", name: "keys", label: () => "Shortcuts", icon: null, build: () => {} },
+    ],
+    selectedLabel: () => "",
+  }));
+  const [about, keys] = root.childNodes[0].childNodes[0].childNodes;
+  assert.ok(about.classes.has("bern-tab-icon-only"));
+  assert.deepEqual(about.childNodes.map((child) => child.tagName), ["svg"]);
+  assert.equal(about.attributes["aria-label"], "About");
+  assert.equal(about.attributes.title, "About");
+  label.set("Info");
+  assert.equal(about.attributes["aria-label"], "Info");
+  assert.equal(about.attributes.title, "Info");
+  assert.ok(!keys.classes.has("bern-tab-icon-only"));
+  assert.equal(keys.attributes["aria-label"], undefined);
+  assert.deepEqual(keys.childNodes.map((child) => child.textContent), ["Shortcuts"]);
+  scope.dispose();
 });
 
 test("declared sidebar widths stay overridable by compact layout CSS", () => {

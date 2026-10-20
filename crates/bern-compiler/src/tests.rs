@@ -346,6 +346,42 @@ fn tab_accessory_stands_directly_in_its_tabs() {
 }
 
 #[test]
+fn an_icon_only_tab_has_an_icon() {
+    let tab = |props: &str| {
+        format!(
+            r#"Tabs(selection: draft.mode) {{
+                Tab(value: Mode::Fast, label: tr! {{ "en" => "Fast", "ja" => "速い" }}{props}) {{ Spacer }}
+            }}"#
+        )
+    };
+    let compiled =
+        compile_ui(&wrap(&tab(r#", icon: "hare", display: icon"#))).unwrap_or_else(|errors| {
+            panic!(
+                "{}",
+                errors
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        });
+    let mut displays = Vec::new();
+    compiled.app.walk(&mut |node, _| {
+        if let ir::Node::Element(element) = node
+            && element.kind == "Tab"
+        {
+            displays.push(element.keyword("display"));
+        }
+    });
+    assert_eq!(displays, [Some("icon")]);
+    assert!(errors(&tab(", display: icon")).contains("needs an `icon`"));
+    assert!(
+        errors(&tab(r#", icon: "hare", display: title"#))
+            .contains("expected one of: title_and_icon, icon")
+    );
+}
+
+#[test]
 fn diagnostics_cover_the_documented_failures() {
     let cases = [
         (

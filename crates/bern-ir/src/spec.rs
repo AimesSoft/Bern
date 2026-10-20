@@ -851,9 +851,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("value", PropKind::SelectionValue),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
+                opt("display", PropKind::Keyword(&["title_and_icon", "icon"])),
             ],
             Children::Any,
-            "One tab page",
+            "One tab page; `display: icon` shows only its icon in the tab bar, the label staying its accessible name",
         )
     },
     ComponentSpec {

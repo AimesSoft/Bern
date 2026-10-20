@@ -91,6 +91,7 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::ROW_BASELINE,
     feature::ICON_MENUS,
     feature::ICON_LABELS,
+    feature::ICON_TABS,
     feature::TOOLBAR_LEADING,
     feature::AXIS_PADDING,
     feature::UNTITLED_DETAIL,

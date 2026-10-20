@@ -231,7 +231,8 @@ pub mod demo {
 /// A phone and desktop layout that picks files, which a television cannot,
 /// and a television layout that the remote drives: Play/Pause, the
 /// clickpad's left edge and Back stand for keys, and the focus starts on
-/// the first button.
+/// the first button. Its tabs show the search's symbol alone beside the
+/// pages' names.
 const UI: &str = r#"
 use bern::prelude::*;
 use demo_protocol::demo;
@@ -242,6 +243,14 @@ style! {
     }
 }
 
+#[bern::value]
+pub enum Page {
+    #[label(tr! { "en" => "Search" })]
+    Search,
+    #[label(tr! { "en" => "Home" })]
+    Home,
+}
+
 #[bern::session]
 pub struct Draft {
     pub file: MediaSource,
@@ -250,6 +259,8 @@ pub struct Draft {
     pub level: f64,
     pub on: bool,
     pub mode: demo::Mode,
+    #[initial(Page::Home)]
+    pub page: Page,
 }
 
 #[component]
@@ -285,6 +296,20 @@ pub fn phone(app: demo::Client, #[session] draft: Draft) -> impl View {
 
 #[component]
 pub fn television(app: demo::Client, #[session] draft: Draft) -> impl View {
+    ui! {
+        Tabs(id: pages, selection: draft.page) {
+            Tab(value: Page::Search, label: tr! { "en" => "Search" }, icon: "magnifyingglass", display: icon) {
+                Text(content: tr! { "en" => "Search" })
+            }
+            Tab(value: Page::Home, label: tr! { "en" => "Home" }) {
+                home(app: app)
+            }
+        }
+    }
+}
+
+#[component]
+pub fn home(app: demo::Client, #[session] draft: Draft) -> impl View {
     ui! {
         Stack {
             if window.tv {
@@ -427,6 +452,8 @@ fn a_television_keeps_its_layout_and_the_remote_stands_for_keys() {
         "BernKeyShortcut(remote: .left, enabled: (bernEngine.count) > (Int64(0)))",
         "BernKeyShortcut(remote: .back, enabled: true)",
         ".bernDefaultFocus()",
+        // The search tab shows its symbol alone, named by its label.
+        "SwiftUI.Image(systemName: \"magnifyingglass\").accessibilityLabel(SwiftUI.Text(verbatim: ",
     ] {
         assert!(
             generated.contains(expected),
@@ -467,6 +494,8 @@ fn a_television_keeps_its_layout_and_the_remote_stands_for_keys() {
         "BernKeyShortcut(shortcut: SwiftUI.KeyboardShortcut(.escape, modifiers: []), enabled: true)",
         ".bernDefaultFocus()",
         "open_file",
+        // A Mac's tab picker shows the symbol of an icon-only label.
+        "systemImage: \"magnifyingglass\").labelStyle(.iconOnly)",
     ] {
         assert!(
             generated.contains(expected),

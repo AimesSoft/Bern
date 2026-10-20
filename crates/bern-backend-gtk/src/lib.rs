@@ -83,6 +83,7 @@ const FEATURES: &[&str] = &[
     feature::AXIS_PADDING,
     feature::ICON_MENUS,
     feature::ICON_LABELS,
+    feature::ICON_TABS,
     feature::ROW_BASELINE,
     feature::SIDEBAR_HEADER,
     feature::UNTITLED_DETAIL,

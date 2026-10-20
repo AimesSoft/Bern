@@ -1183,13 +1183,21 @@ fun BernTabAccessory(content: @Composable () -> Unit) {
     }
 }
 
+/// One tab of the navigation bar. `iconOnly` (`Tab(display: icon)`) shows
+/// the icon alone, the label its content description.
 @Composable
-fun RowScope.BernTabItem(label: String, icon: ImageVector?, selected: Boolean, onClick: () -> Unit) {
+fun RowScope.BernTabItem(
+    label: String,
+    icon: ImageVector?,
+    selected: Boolean,
+    iconOnly: Boolean = false,
+    onClick: () -> Unit,
+) {
     NavigationBarItem(
         selected = selected,
         onClick = onClick,
-        icon = { Icon(icon ?: BernIcons.get(""), contentDescription = null) },
-        label = { Text(label) },
+        icon = { Icon(icon ?: BernIcons.get(""), contentDescription = if (iconOnly) label else null) },
+        label = if (iconOnly) null else ({ Text(label) }),
     )
 }
 

@@ -101,6 +101,12 @@ impl Checker<'_> {
                 }
             }
         }
+        if parts.kind == "Tab"
+            && matches!(parts.props.get("display"), Some(ir::Prop::Keyword { value }) if value == "icon")
+            && !parts.props.contains_key("icon")
+        {
+            self.error(element.span, "a `Tab` with `display: icon` needs an `icon`");
+        }
         let children = self.children(element, path, &parts.child_ctx, scope);
         if parts.kind == "Tabs" {
             self.tab_accessory(element, &children);

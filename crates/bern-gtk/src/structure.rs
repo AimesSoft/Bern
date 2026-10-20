@@ -882,6 +882,10 @@ pub struct TabRegistry {
     entries: RefCell<Vec<Rc<TabEntry>>>,
     version: crate::reactive::Version,
     next: std::cell::Cell<u32>,
+    /// The names of the pages whose tabs show only their icon.
+    icon_only: RefCell<std::collections::HashSet<String>>,
+    /// The view switchers of the pages: the header's and the bottom bar's.
+    switchers: RefCell<Vec<adw::ViewSwitcher>>,
 }
 
 impl TabRegistry {
@@ -892,6 +896,70 @@ impl TabRegistry {
             .find(|entry| entry.value == *value)
             .cloned()
     }
+
+    /// Shows the tabs with `display: icon` as their icon alone in every
+    /// switcher: the title is hidden and names the button, as its tooltip
+    /// and accessible label. A switcher makes its buttons anew, one per
+    /// page in the pages' order, whenever a page comes or goes, and keeps
+    /// them when a title changes.
+    fn decorate(&self) {
+        let icon_only = self.icon_only.borrow();
+        if icon_only.is_empty() {
+            return;
+        }
+        let pages = self.stack.pages();
+        for switcher in self.switchers.borrow().iter() {
+            let mut button = switcher.first_child();
+            for position in 0..pages.n_items() {
+                let Some(current) = button else {
+                    break;
+                };
+                button = current.next_sibling();
+                let Some(page) = pages.item(position).and_downcast::<adw::ViewStackPage>() else {
+                    continue;
+                };
+                if !page
+                    .name()
+                    .is_some_and(|name| icon_only.contains(name.as_str()))
+                {
+                    continue;
+                }
+                let title = page.title().unwrap_or_default();
+                hide_labels(&current, &title);
+                current.set_tooltip_text(Some(&title));
+                current.update_property(&[gtk::accessible::Property::Label(&title)]);
+            }
+        }
+    }
+}
+
+/// Hides the labels below `widget` that show `title`: a switcher button's
+/// wide and narrow titles, not its badge.
+fn hide_labels(widget: &gtk::Widget, title: &str) {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        match current.downcast_ref::<gtk::Label>() {
+            Some(label) if label.label() == title => label.set_visible(false),
+            Some(_) => {}
+            None => hide_labels(&current, title),
+        }
+        child = current.next_sibling();
+    }
+}
+
+/// The view switcher inside `widget`, as a switcher bar holds one.
+fn inner_switcher(widget: &gtk::Widget) -> Option<adw::ViewSwitcher> {
+    let mut child = widget.first_child();
+    while let Some(current) = child {
+        if let Some(switcher) = current.downcast_ref::<adw::ViewSwitcher>() {
+            return Some(switcher.clone());
+        }
+        if let Some(found) = inner_switcher(&current) {
+            return Some(found);
+        }
+        child = current.next_sibling();
+    }
+    None
 }
 
 pub struct TabProps {
@@ -900,6 +968,8 @@ pub struct TabProps {
     pub enum_name: &'static str,
     pub label: Str,
     pub icon: Option<&'static str>,
+    /// `display: icon`: the tab shows only its icon, the label naming it.
+    pub icon_only: bool,
 }
 
 /// One tab; it is part of the tab view while mounted. Its content is built
@@ -914,6 +984,11 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
     let index = registry.next.get();
     registry.next.set(index + 1);
     let name = format!("t{index}");
+    // Known before the page is added, which makes the switchers' buttons.
+    let icon_only = props.icon_only && props.icon.is_some();
+    if icon_only {
+        registry.icon_only.borrow_mut().insert(name.clone());
+    }
     let page = registry.stack.add_titled(&holder, Some(&name), "");
     if let Some(icon) = props.icon {
         page.set_icon_name(Some(icons::name(icon)));
@@ -924,7 +999,13 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
         Rc::new(move || label(&at))
     };
     let titled = Rc::clone(&label);
-    effect(move || page.set_title(Some(&titled())));
+    let named = Rc::downgrade(&registry);
+    effect(move || {
+        page.set_title(Some(&titled()));
+        if icon_only && let Some(registry) = named.upgrade() {
+            registry.decorate();
+        }
+    });
     let entry = Rc::new(TabEntry {
         name: variant_name(props.enum_name, &value),
         value,
@@ -943,6 +1024,7 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
                 .entries
                 .borrow_mut()
                 .retain(|kept| !Rc::ptr_eq(kept, &entry));
+            registry.icon_only.borrow_mut().remove(&entry.page);
             registry.stack.remove(&holder);
             registry.version.bump();
         }
@@ -974,6 +1056,8 @@ pub fn Tabs(
         entries: RefCell::new(Vec::new()),
         version: crate::reactive::Version::new(),
         next: std::cell::Cell::new(0),
+        icon_only: RefCell::new(std::collections::HashSet::new()),
+        switchers: RefCell::new(Vec::new()),
     });
     let (declared, _) = Parent::capture(p);
     tabs(&declared, &ctx.with_tabs(Rc::clone(&registry)));
@@ -993,6 +1077,23 @@ pub fn Tabs(
     // GNOME's adaptive applications do; wider ones from the header.
     let switcher_bar = adw::ViewSwitcherBar::new();
     switcher_bar.set_stack(Some(&stack));
+    // Tabs with `display: icon` show their icon alone in both switchers,
+    // also after pages come and go, which makes their buttons anew; this
+    // handler runs after theirs.
+    registry.switchers.borrow_mut().push(switcher.clone());
+    registry
+        .switchers
+        .borrow_mut()
+        .extend(inner_switcher(switcher_bar.upcast_ref()));
+    registry.decorate();
+    {
+        let weak = Rc::downgrade(&registry);
+        stack.pages().connect_items_changed(move |_, _, _, _| {
+            if let Some(registry) = weak.upgrade() {
+                registry.decorate();
+            }
+        });
+    }
     {
         let at = ctx.clone();
         let (header, bottom) = (switcher.clone(), switcher_bar.clone());

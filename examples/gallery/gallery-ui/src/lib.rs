@@ -1,7 +1,8 @@
 //! UI of the gallery: a sidebar of pages with the account and an action at
 //! its foot, a search field in the toolbar whose results drop below it, and
 //! a wall of cards. Each card is a button showing its pattern; the star
-//! beside it shows while the pointer is over the card.
+//! beside it shows while the pointer is over the card. The about window's
+//! tabs show the about page as its symbol alone.
 
 use bern::prelude::*;
 use gallery_protocol::gallery::{self, Accent, Appearance, NoticeKind};
@@ -84,11 +85,45 @@ pub fn app(app: gallery::Client, windows: AppWindows) -> impl View {
             Window(id: main, title: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, initial: open, width: 900, height: 600, idle_after: 3) {
                 main_window(app: app, windows: windows)
             }
-            Window(id: about, title: tr! { "zh-Hans" => "关于图案集", "en" => "About Gallery" }, role: dialog, width: 360, height: 220) {
+            Window(id: about, title: tr! { "zh-Hans" => "关于图案集", "en" => "About Gallery" }, role: dialog, width: 360, height: 360) {
+                about(windows: windows)
+            }
+        }
+    }
+}
+
+/// The pages of the about window.
+#[bern::value]
+pub enum AboutPage {
+    #[label(tr! { "zh-Hans" => "关于", "en" => "About" })]
+    About,
+    #[label(tr! { "zh-Hans" => "快捷键", "en" => "Shortcuts" })]
+    Shortcuts,
+}
+
+#[bern::session]
+pub struct AboutDraft {
+    pub page: AboutPage,
+}
+
+/// The about window: its first tab shows only its symbol, beside a tab
+/// that shows only its name.
+#[component]
+pub fn about(windows: AppWindows, #[session] draft: AboutDraft) -> impl View {
+    ui! {
+        Tabs(id: about_pages, selection: draft.page) {
+            Tab(value: AboutPage::About, label: tr! { "zh-Hans" => "关于", "en" => "About" }, icon: "info.circle", display: icon) {
                 Column(gap: 12, padding: 24, align: center) {
                     Text(content: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, style: title)
                     Text(content: tr! { "zh-Hans" => "一面会浮起的图案墙。", "en" => "A wall of patterns that lift." }, emphasis: secondary)
                     Button(id: done, label: tr! { "zh-Hans" => "好", "en" => "OK" }, prominence: prominent, default_focus: true) => windows.about.close()
+                }
+            }
+            Tab(value: AboutPage::Shortcuts, label: tr! { "zh-Hans" => "快捷键", "en" => "Shortcuts" }) {
+                Column(gap: 8, padding: 24) {
+                    Text(content: tr! { "zh-Hans" => "⌘O（Ctrl+O）打开视频", "en" => "⌘O (Ctrl+O) opens a video" })
+                    Text(content: tr! { "zh-Hans" => "⌘K（Ctrl+K）搜索图案", "en" => "⌘K (Ctrl+K) searches the patterns" })
+                    Text(content: tr! { "zh-Hans" => "⌘⌥I（Ctrl+Alt+I）显示详情", "en" => "⌘⌥I (Ctrl+Alt+I) shows the details" })
                 }
             }
         }

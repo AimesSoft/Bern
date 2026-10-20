@@ -169,12 +169,17 @@ impl Generator<'_> {
                 .unwrap_or_default();
             options.push((self.expr(value), label.clone()));
             out.open(format!(
-                "{{ value: {}, name: {}, label: () => {label}, icon: {}, build: (p, ctx) => {{",
+                "{{ value: {}, name: {}, label: () => {label}, icon: {}, {}build: (p, ctx) => {{",
                 self.expr(value),
                 self.variant_name(value),
                 tab.icon("icon")
                     .map(string)
-                    .unwrap_or_else(|| "null".into())
+                    .unwrap_or_else(|| "null".into()),
+                if tab.keyword("display") == Some("icon") {
+                    "iconOnly: true, "
+                } else {
+                    ""
+                }
             ));
             self.nodes(out, &tab.children);
             out.close("} },");
