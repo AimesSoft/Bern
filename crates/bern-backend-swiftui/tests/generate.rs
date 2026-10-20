@@ -230,6 +230,15 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
         "{row}"
     );
     assert!(row.contains("SwiftUI.HStack(spacing: 0) {"), "{row}");
+    // Spacers of the row and of the column shrink to nothing, as on the
+    // other targets: the system's least is a gap of 8 points on macOS and
+    // 60 on tvOS, which squeezed a narrow row's texts.
+    assert_eq!(
+        row.matches("SwiftUI.Spacer(minLength: 0)\n").count(),
+        2,
+        "{row}"
+    );
+    assert!(!source.contains("SwiftUI.Spacer()"), "{source}");
     assert!(
         source.contains(".frame(width: 58.0, height: nil, alignment: .topLeading)"),
         "{source}"
