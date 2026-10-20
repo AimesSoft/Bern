@@ -16,6 +16,19 @@ pub fn pascal(snake: &str) -> String {
         .collect()
 }
 
+/// The name an application value type (a `#[value]` enum or record)
+/// has in generated Swift and Kotlin: `Layout` → `App_Layout`.
+///
+/// Those types sit at the top of the module the generated code shares
+/// with the platform's frameworks and Bern's runtime, so a bare name like
+/// SwiftUI's `Layout` or `View`, or Compose's `Modifier`, would hide the
+/// framework's type from every file of the module. No type of those
+/// frameworks and none of Bern's (`Bern…`) begins with `App_`, and the
+/// prefix keeps distinct names distinct.
+pub fn value_type(name: &str) -> String {
+    format!("App_{name}")
+}
+
 /// `last_action` → `lastAction`.
 pub fn camel(snake: &str) -> String {
     let mut out = String::new();
@@ -47,5 +60,6 @@ mod tests {
         assert_eq!(camel("last_action"), "lastAction");
         assert_eq!(camel("_private"), "private");
         assert_eq!(camel("volume_2"), "volume2");
+        assert_eq!(value_type("Layout"), "App_Layout");
     }
 }

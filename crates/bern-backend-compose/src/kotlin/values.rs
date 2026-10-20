@@ -2,27 +2,50 @@
 //! and session state that holds them.
 
 use super::Out;
-use crate::names::{double, member, string};
+use crate::names::{double, member, string, value_type};
 use bern_ir::Application;
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
 pub fn kotlin_type(ty: &Type) -> String {
+    spell(ty, false)
+}
+
+/// The type of a field of a variant class, which sits inside its enum's
+/// sealed class next to the other variants: a variant named like a type
+/// of Kotlin's standard library (`String`, `List`) hides it there, so
+/// those are written in full.
+fn field_type(ty: &Type) -> String {
+    spell(ty, true)
+}
+
+fn spell(ty: &Type, full: bool) -> String {
+    let std = |name: &str, package: &str| {
+        if full {
+            format!("{package}.{name}")
+        } else {
+            name.to_string()
+        }
+    };
     match ty {
-        Type::Unit => "Unit".into(),
-        Type::Bool => "Boolean".into(),
-        Type::Int => "Long".into(),
-        Type::Float => "Double".into(),
-        Type::Text => "String".into(),
-        Type::Enum { name } | Type::Record { name } => name.clone(),
+        Type::Unit => std("Unit", "kotlin"),
+        Type::Bool => std("Boolean", "kotlin"),
+        Type::Int => std("Long", "kotlin"),
+        Type::Float => std("Double", "kotlin"),
+        Type::Text => std("String", "kotlin"),
+        Type::Enum { name } | Type::Record { name } => value_type(name),
         Type::Optional { inner } => {
-            let inner = kotlin_type(inner);
+            let inner = spell(inner, full);
             if inner.ends_with('?') {
                 inner
             } else {
                 format!("{inner}?")
             }
         }
-        Type::List { inner } => format!("List<{}>", kotlin_type(inner)),
+        Type::List { inner } => format!(
+            "{}<{}>",
+            std("List", "kotlin.collections"),
+            spell(inner, full)
+        ),
     }
 }
 
@@ -34,7 +57,9 @@ pub(super) fn decode(ty: &Type, reader: &str) -> String {
         Type::Int => format!("{reader}.i64()"),
         Type::Float => format!("{reader}.f64()"),
         Type::Text => format!("{reader}.text()"),
-        Type::Enum { name } | Type::Record { name } => format!("{name}.decode({reader})"),
+        Type::Enum { name } | Type::Record { name } => {
+            format!("{}.decode({reader})", value_type(name))
+        }
         Type::Optional { inner } => format!("{reader}.optional {{ {} }}", decode(inner, reader)),
         Type::List { inner } => format!("{reader}.list {{ {} }}", decode(inner, reader)),
     }
@@ -83,6 +108,7 @@ pub(super) fn value_literal(value: &Value, ty: &Type, types: &TypeTable) -> Stri
         (Value::Enum { variant, fields }, Type::Enum { name }) => {
             let def = types.enum_def(name).expect("known enum");
             let variant_def = &def.variants[*variant as usize];
+            let name = value_type(name);
             if variant_def.fields.is_empty() {
                 format!("{name}.{}", variant_def.name)
             } else {
@@ -113,7 +139,7 @@ pub(super) fn value_literal(value: &Value, ty: &Type, types: &TypeTable) -> Stri
                     )
                 })
                 .collect();
-            format!("{name}({})", args.join(", "))
+            format!("{}({})", value_type(name), args.join(", "))
         }
         _ => "Unit".into(),
     }
@@ -125,12 +151,13 @@ fn default_literal(ty: &Type, types: &TypeTable) -> String {
 }
 
 pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
-    let name = &def.name;
+    let name = value_type(&def.name);
     let labeled = def.variants.iter().all(|variant| variant.label.is_some());
     let supertypes = if labeled { " : BernLabeled" } else { "" };
-    let label = |out: &mut Out, prefix: &str| {
+    // Variant classes of a sealed class hide Kotlin's `String` inside it.
+    let label = |out: &mut Out, prefix: &str, text: &str| {
         if labeled {
-            out.open("override val bernLabel: String");
+            out.open(format!("override val bernLabel: {text}"));
             out.open("get() = when (this) {");
             for variant in &def.variants {
                 let label = variant.label.as_ref().unwrap();
@@ -172,7 +199,7 @@ pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
         let names: Vec<_> = def.variants.iter().map(|v| v.name.clone()).collect();
         out.line(format!("{};", names.join(", ")));
         out.line("");
-        label(out, "");
+        label(out, "", "String");
         out.line("/// The declared variant name, used by external entries.");
         out.line("val bernName: String get() = name");
         out.line("");
@@ -187,7 +214,7 @@ pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
         }
         out.line(format!(
             "else -> throw BernDecodeError({})",
-            string(&format!("invalid {name}"))
+            string(&format!("invalid {}", def.name))
         ));
         out.close("}");
         out.line("");
@@ -207,7 +234,7 @@ pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
             let fields: Vec<_> = variant
                 .fields
                 .iter()
-                .map(|field| format!("val {}: {}", member(&field.name), kotlin_type(&field.ty)))
+                .map(|field| format!("val {}: {}", member(&field.name), field_type(&field.ty)))
                 .collect();
             out.line(format!(
                 "data class {}({}) : {name}()",
@@ -217,8 +244,8 @@ pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
         }
     }
     out.line("");
-    label(out, "is ");
-    out.open("val bernName: String");
+    label(out, "is ", "kotlin.String");
+    out.open("val bernName: kotlin.String");
     out.open("get() = when (this) {");
     for variant in &def.variants {
         out.line(format!("is {} -> {}", variant.name, string(&variant.name)));
@@ -257,7 +284,7 @@ pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
     }
     out.line(format!(
         "else -> throw BernDecodeError({})",
-        string(&format!("invalid {name}"))
+        string(&format!("invalid {}", def.name))
     ));
     out.close("}");
     out.close("}");
@@ -277,14 +304,14 @@ pub(super) fn argument(value: &str, ty: &Type) -> String {
 }
 
 pub(super) fn generate_record(out: &mut Out, def: &RecordDef) {
-    let name = &def.name;
+    let name = value_type(&def.name);
     let fields: Vec<_> = def
         .fields
         .iter()
         .map(|field| format!("val {}: {}", member(&field.name), kotlin_type(&field.ty)))
         .collect();
     out.open(format!("data class {name}({}) {{", fields.join(", ")));
-    if *name == bern_protocol::format::CALENDAR_DATE {
+    if def.name == bern_protocol::format::CALENDAR_DATE {
         out.line("/// The date as an argument of a translated text.");
         out.line("val bernArg: BernArg get() = BernArg.Date(year, month, day)");
         out.line("");

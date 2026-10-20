@@ -2,7 +2,7 @@
 
 use super::values::{argument, session_var, value_literal};
 use super::{Ctx, Generator};
-use crate::names::{case, double, member, string};
+use crate::names::{case, double, member, string, value_type};
 use bern_ir::{Action, Binding, Element, Expr, ExprKind, MediaOp, Prop, SessionOp, Text, WindowOp};
 use bern_protocol::{Type, Value};
 
@@ -76,6 +76,7 @@ impl Generator<'_> {
                 };
                 let def = self.types().enum_def(name).expect("enum");
                 let variant_def = &def.variants[*variant as usize];
+                let name = value_type(name);
                 if variant_def.fields.is_empty() {
                     format!("{name}.{}", case(&variant_def.name))
                 } else {
@@ -253,7 +254,9 @@ impl Generator<'_> {
         let field = self.field(element, name)?;
         let optional = matches!(element.field(name)?.ty, Type::Optional { .. });
         let kinds = string(element.keyword("files").unwrap_or("any"));
-        let give = format!("{{ url in {field} = MediaSource(url: url.absoluteString); {action} }}");
+        let source = value_type(bern_media::MEDIA_SOURCE);
+        let give =
+            format!("{{ url in {field} = {source}(url: url.absoluteString); {action} }}");
         let actions = format!(
             "value: {{ {field}{}.url }}, setFile: {give}, fileKinds: {kinds}",
             if optional { "?" } else { "" }
