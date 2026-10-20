@@ -327,6 +327,18 @@ struct SidebarRegistry {
         return nullptr;
     }
 
+    /// The navigation view slides its pill from the old item to the new
+    /// only where the two pills line up, measured with each item's move and
+    /// scale; otherwise both pills shrink and grow at once. While it
+    /// measures, as the selection changes, the items stand at rest; they
+    /// are back before the frame is drawn.
+    bool resting = false;
+    void Rest(bool rest) {
+        resting = rest;
+        for (auto const& entry : entries)
+            if (auto layers = ExistingLayers(entry.item)) layers->Rest(rest);
+    }
+
     /// A selection without a mounted item moves on to `fallback` or the
     /// first item left, once the update that removed it has mounted
     /// whatever replaces it.
@@ -578,7 +590,9 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
             IInspectable item = entry ? IInspectable(entry->item) : nullptr;
             if (view.SelectedItem() != item) {
                 registry->updating = true;
+                registry->Rest(true);
                 view.SelectedItem(item);
+                registry->Rest(false);
                 registry->updating = false;
             }
             for (auto const& one : registry->entries)
@@ -599,8 +613,23 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
             return 0;
         });
     });
+    // A click or a key chooses an item: the view raises ItemInvoked, then
+    // measures its pills, then raises SelectionChanged.
+    view.ItemInvoked([weak = std::weak_ptr<SidebarRegistry>(registry), ctx, selection](auto&&, controls::NavigationViewItemInvokedEventArgs const& args) {
+        auto registry = weak.lock();
+        if (!registry || registry->updating) return;
+        auto current = registry->Selected(ctx.Peek(selection));
+        if (current && current->item == args.InvokedItemContainer()) return;
+        registry->Rest(true);
+        // Should the selection stay, nothing raises SelectionChanged.
+        std::weak_ptr<SidebarRegistry> later = registry;
+        Host::Post([later] {
+            if (auto registry = later.lock(); registry && registry->resting) registry->Rest(false);
+        });
+    });
     view.SelectionChanged([weak = std::weak_ptr<SidebarRegistry>(registry), ctx, selection](auto&&, controls::NavigationViewSelectionChangedEventArgs const& args) {
         auto registry = weak.lock();
+        if (registry && registry->resting && !registry->updating) registry->Rest(false);
         if (!registry || registry->updating || !args.SelectedItem()) return;
         for (auto const& entry : registry->entries)
             if (entry.item == args.SelectedItem()) ctx.Write(selection, entry.value);

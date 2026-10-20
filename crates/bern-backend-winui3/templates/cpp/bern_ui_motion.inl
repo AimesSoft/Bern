@@ -184,6 +184,14 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
     /// Whether the element's own Composition visual moves, for controls
     /// that already use it themselves and so refuse Translation and Scale.
     bool handoff = false;
+    /// For a navigation view item: its scale holds the line of its
+    /// selection pill still, so the pill keeps to the track it slides along
+    /// from item to item while a row grows or shrinks.
+    bool alongPill = false;
+    winrt::weak_ref<xaml::UIElement> pillTrack;
+    /// While true the element shows no move or scale, whatever its layers
+    /// say: see `Rest`.
+    bool resting = false;
 
     std::shared_ptr<Layer> Get(std::string const& name) {
         for (auto const& [existing, layer] : layers)
@@ -216,6 +224,8 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
             if (shown.Width > 0) w = (std::min)(w, shown.Width);
             if (shown.Height > 0) h = (std::min)(h, shown.Height);
             center = float3{w / 2, h / 2, 0};
+            if (alongPill)
+                if (auto line = PillLine(element)) center.x = *line;
         }
         for (auto const& [name, layer] : layers) {
             x += layer->x->value;
@@ -230,6 +240,7 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
                 y += (layer->pivot->y * h - center.y) * (1 - layer->sy->value);
             }
         }
+        if (resting) x = y = 0, sx = sy = 1;
         float3 move{static_cast<float>(x), static_cast<float>(y), 0};
         float3 scale{static_cast<float>(sx), static_cast<float>(sy), 1};
         element.Opacity((std::clamp)(opacity, 0.0, 1.0));
@@ -250,6 +261,35 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
         visual.Properties().InsertVector3(L"Translation", move);
     }
 
+    /// Show the element without its move and scale until `Rest(false)`,
+    /// for a control that measures where its parts are, within one update
+    /// so the screen never shows it.
+    void Rest(bool rest) {
+        if (resting == rest) return;
+        resting = rest;
+        Write();
+    }
+
+    /// How far in from the item's leading edge its selection pill runs.
+    std::optional<float> PillLine(xaml::UIElement const& element) {
+        auto track = pillTrack.get();
+        if (!track) {
+            // The pill's own visual is the view's to animate: its line is
+            // that of the cell holding it.
+            auto pill = TemplatePart(element, L"SelectionIndicator");
+            if (!pill) return std::nullopt;
+            track = media::VisualTreeHelper::GetParent(pill).try_as<xaml::UIElement>();
+            if (!track) return std::nullopt;
+            pillTrack = winrt::make_weak(track);
+        }
+        try {
+            return track.TransformToVisual(element).TransformPoint({0, 0}).X;
+        } catch (winrt::hresult_error const&) {
+            pillTrack = nullptr;
+            return std::nullopt;
+        }
+    }
+
     /// The move and scale all layers but `except` apply now.
     std::array<double, 4> Current(std::string const& except) const {
         double x = 0, y = 0, sx = 1, sy = 1;
@@ -264,12 +304,20 @@ struct LayerStack : winrt::implements<LayerStack, IInspectable> {
     }
 };
 
-/// The layers of `element`, made on first use and kept with it.
-inline winrt::com_ptr<LayerStack> LayersOf(xaml::UIElement const& element) {
-    auto framework = element.as<xaml::FrameworkElement>();
+/// The layers of `element`, if anything has moved it.
+inline winrt::com_ptr<LayerStack> ExistingLayers(xaml::UIElement const& element) {
+    auto framework = element.try_as<xaml::FrameworkElement>();
+    if (!framework) return nullptr;
     auto key = winrt::box_value(L"bern.layers");
     auto resources = framework.Resources();
-    if (resources.HasKey(key)) return winrt::get_self<LayerStack>(resources.Lookup(key))->get_strong();
+    if (!resources.HasKey(key)) return nullptr;
+    return winrt::get_self<LayerStack>(resources.Lookup(key))->get_strong();
+}
+
+/// The layers of `element`, made on first use and kept with it.
+inline winrt::com_ptr<LayerStack> LayersOf(xaml::UIElement const& element) {
+    if (auto existing = ExistingLayers(element)) return existing;
+    auto framework = element.as<xaml::FrameworkElement>();
     auto made = winrt::make_self<LayerStack>();
     made->node = winrt::make_weak(element);
     made->baseOpacity = element.Opacity();
@@ -277,9 +325,10 @@ inline winrt::com_ptr<LayerStack> LayersOf(xaml::UIElement const& element) {
     // Translation and Scale: move that visual instead, from the start.
     if (element.try_as<controls::NavigationViewItem>()) {
         made->handoff = true;
+        made->alongPill = true;
         xaml::Hosting::ElementCompositionPreview::SetIsTranslationEnabled(element, true);
     }
-    resources.Insert(key, made.as<IInspectable>());
+    framework.Resources().Insert(winrt::box_value(L"bern.layers"), made.as<IInspectable>());
     // The center moves with the size.
     framework.SizeChanged([weak = made->get_weak()](auto&&, auto&&) {
         if (auto self = weak.get()) self->Write();

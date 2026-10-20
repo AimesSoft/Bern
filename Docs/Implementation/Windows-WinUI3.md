@@ -141,7 +141,8 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - 缩放、位移与透明度放在“状态”层（见“动效”），以最上层会动的状态所带的弹簧进入，回到普通状态用 `settle`；状态来自指针进入、离开、按下、抬起、捕获丢失与焦点事件，禁用来自 `IsEnabled`。
 - `shadow`：Direct2D 的阴影效果按按钮的圆角与尺寸画成位图（只保留按钮形状以外的部分），垫在按钮下方，与按钮在同一个外层里一起缩放、移动；不同状态的阴影以透明度切换。
 - 带内容的按钮（`Button { … }`）去掉按钮自己的外框与底色，内容原样显示；`corner` 用 Composition 的圆角几何裁剪内容。内容铺满时按钮随之拉伸。
-- 侧栏项：底色与前景写成 `NavigationViewItem` 的轻量样式资源（`NavigationViewItemBackgroundPointerOver`、`…Selected` 等）；`selected: fill(…)` 时选中项整行填色，导航视图自己的选中指示条设为透明。缩放等变换作用在项上（导航视图会改写它的 Composition 视觉，所以变换写在 `UIElement` 的 `Translation`、`Scale` 上，而不是视觉上）。`indicator` 没有列出：`NavigationView` 只在前缘画自己的指示条，不能换成样式描述的形状。
+- 侧栏项：底色与前景写成 `NavigationViewItem` 的轻量样式资源（`NavigationViewItemBackgroundPointerOver`、`…Selected` 等）；`selected: fill(…)` 时选中项整行填色，导航视图自己的选中指示条设为透明。缩放等变换作用在项上：`NavigationViewItem` 拒绝 `UIElement` 的 `Translation`、`Scale`，变换写在它自己的 Composition 视觉上。`indicator` 没有列出：`NavigationView` 只在前缘画自己的指示条，不能换成样式描述的形状。
+- 侧栏项的变换与指示条：选中改变时，`NavigationView` 用 `TransformToVisual` 量出新旧两项指示条的位置，横坐标完全相等才播放滑动动画（共 600 毫秒：前 200 毫秒指示条从旧项伸长到新项，三次贝塞尔 (0.9, 0.1, 1.0, 0.2)；后 400 毫秒收拢到新项，(0.1, 0.9, 0.2, 1.0)；旧条在后 400 毫秒淡出，两条重合，看上去是同一条），否则两项的指示条同时各自缩放 600 毫秒（线性），看上去是两段断开的竖条。量出的位置包含写在项视觉上的缩放（WinUI 内核的 `GetLocalTransform` 计入应用在视觉上设的变换），所以点击时被点项正处在悬停与按下的缩放里，总是走后一种。为此：（1）运行时每次改变选中时让所有侧栏项暂时没有变换，量完再写回，同一次调用里完成，屏幕上看不到：点击与按键的顺序是 `ItemInvoked`、量位置与动画、`SelectionChanged`，在前一个事件里放下、后一个事件里恢复（点的是已选中的项时不放下；选中最终没有改变时没有 `SelectionChanged`，由投递的任务恢复）；运行时自己写 `SelectedItem` 时在前后包住。（2）侧栏项缩放时横向以指示条所在的线为原点（找模板中的 `SelectionIndicator`，取包着它的格子在项中的横坐标），行从前缘起伸缩，指示条留在它滑动的轨道上，新旧两条在滑动中重合。系统 XAML（Islands）的导航视图按 2018 年的 WinUI 源码（系统版本由此而来）没有横坐标的判断，`SelectionChanged` 在动画之前；（1）在那里不起作用也无害，（2）照样让两条重合。时长与曲线取自 microsoft-ui-xaml 的 `NavigationView.cpp`（`AnimateSelectionChanged`、`PlayIndicatorAnimations`、`PlayIndicatorNonSameLevelAnimations`）。
 - 语义角色映射到各前端的主题资源：WinUI 3 用 `SolidBackgroundFillColorBaseBrush`、`CardBackgroundFillColorDefaultBrush`、`TextFillColorPrimaryBrush`、`AccentFillColorDefaultBrush` 等，系统 XAML 用 `SystemControl…` 一族；系统 XAML 没有的角色按浅色、深色各给一个取值。画布等需要具体颜色的地方，从窗口中隐藏的探针元素读出主题画刷当前的颜色，所以跟随所在部分的明暗与运行时强调色。
 
 ### 动效
@@ -388,6 +389,14 @@ target\bern\windows\Showcase\showcase.exe
 
 - 应用的设置 › 插件（设置窗口 1000 宽）：分段控件是 `SelectorBar`「市场 / 已安装 3」，靠左；五个 chip 是 `ToggleButton`，靠右，选中的「全部」为强调色填充，4 px 圆角，与原型 Fluent 版一致；两者竖直居中。
 - 换行：应用的窗口到不了手机宽度，改用展示应用的「工具条」一节（窗口 720 宽）。`BERN_DUMP_TREE` 的元素树中 `FlowPanel` 宽 336：第一行是 `SelectorBar`（156 × 47）、`Spacer` 与靠右的「全部」「常用」（末端 681，正是行尾），「最近」换到第二行行首；chip 32 高，在 47 高的行里竖直居中。转储同时发现 `Spacer` 的竖直位置按零高度算了偏移，已改正（SwiftUI 的 `BernFlow` 同样改正）。
+
+2026-10-20，侧栏的选中指示条（Windows PC，150% 缩放，WinUI 3 与强制回退的 Islands；`BERN_SNAPSHOT_BURST` 每 40 毫秒一张的窗口截取）：
+
+- 测试应用：四个侧栏项，样式与用于验收的媒体类应用相同（悬停 1.03、按下 0.94、`settle: jelly`），另加 `selected: scale(0.94)`，让换选中时新旧两项的缩放不同，不必向桌面发指针输入。用 CLI 的 `ui select`（运行时写 `SelectedItem`）与 UI 自动化的 `SelectionItemPattern.Select`（导航项的自动化对象由此调用 `Invoke`，与点击走同一条路，经过 `ItemInvoked`）各换一次。
+- 改动前（WinUI 3）：两种方式都是两段竖条同时在动：旧项的条向下缩、新项的条从上往下长，20 到约 540 毫秒两条一直同时可见，横向错开约 3 个物理像素，与报告的截图相同。
+- 改动后：WinUI 3 下两种方式都播放滑动动画：到 180 毫秒旧条在旧项内向下伸长，220 毫秒旧条淡出、新条从新项顶边进入并收拢，约 300 毫秒落定；行的 9 圆角把条裁在各自的行内，所以看上去是旧条先走、新条后到，两条始终在同一条竖线上。Islands 下行不裁剪，一条竖条从旧项伸到新项再收拢，也在同一条竖线上（改动前的 Islands 没有测）。
+- 测试：`cargo test -p bern-backend-winui3 -- --test-threads=1` 在 Windows 上用 MSVC 编译两套前端通过（库测试 12 项，含检查选中改变前后放下与恢复的 `sidebar_items_rest_while_the_selection_changes`；生成测试 11 项）。
+- 未验证：真实指针的悬停与按下（没有向桌面发送输入；它们的缩放与上面的选中缩放在同一个状态层里，由同一处放下）；用于验收的媒体类应用本身（PC 上它正开着，没有重新构建）。
 
 ## 未完成与已知限制
 

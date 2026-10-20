@@ -659,4 +659,50 @@ mod tests {
             .unwrap();
         assert!(!header.contains("app_ui.inl") && !header.contains("app_id.h"));
     }
+
+    fn runtime(file: &str) -> &'static str {
+        RUNTIME
+            .iter()
+            .find(|(name, _)| *name == file)
+            .map(|(_, contents)| *contents)
+            .unwrap()
+    }
+
+    /// The navigation view slides its selection pill from the old item to
+    /// the new only where the two pills line up, measured with the items'
+    /// moves and scales; otherwise both pills shrink and grow at once. So
+    /// the items stand at rest whenever the selection changes, and scale
+    /// about the line of the pill.
+    #[test]
+    fn sidebar_items_rest_while_the_selection_changes() {
+        let structure = runtime("bern_ui_structure.inl");
+        // The runtime's own choice, from the selection field.
+        let lines: Vec<&str> = structure.lines().map(str::trim).collect();
+        let write = lines
+            .iter()
+            .position(|line| *line == "view.SelectedItem(item);")
+            .unwrap();
+        assert_eq!(lines[write - 1], "registry->Rest(true);");
+        assert_eq!(lines[write + 1], "registry->Rest(false);");
+        // A click or a key: ItemInvoked comes before the view measures,
+        // SelectionChanged after.
+        let between = |from: &str, to: &str| {
+            let start = structure.find(from).unwrap();
+            &structure[start..start + structure[start..].find(to).unwrap()]
+        };
+        let invoked = between("view.ItemInvoked(", "view.SelectionChanged(");
+        assert!(invoked.contains("registry->Rest(true);"), "{invoked}");
+        let changed = between("view.SelectionChanged(", "TextFn selectedLabel");
+        assert!(changed.contains("registry->Rest(false);"), "{changed}");
+
+        let motion = runtime("bern_ui_motion.inl");
+        let layers = motion
+            .split_once("inline winrt::com_ptr<LayerStack> LayersOf(")
+            .unwrap()
+            .1;
+        let item = layers.split_once("NavigationViewItem").unwrap().1;
+        let item = item.split_once('}').unwrap().0;
+        assert!(item.contains("made->alongPill = true;"), "{item}");
+        assert!(motion.contains("if (resting) x = y = 0, sx = sy = 1;"));
+    }
 }

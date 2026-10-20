@@ -476,17 +476,6 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
     else p.Add(button);
 }
 
-/// The element of a control's template named `name`, once it is loaded.
-inline xaml::FrameworkElement TemplatePart(xaml::DependencyObject const& node, wchar_t const* name) {
-    auto count = media::VisualTreeHelper::GetChildrenCount(node);
-    for (int32_t i = 0; i < count; ++i) {
-        auto child = media::VisualTreeHelper::GetChild(node, i);
-        if (auto element = child.try_as<xaml::FrameworkElement>(); element && element.Name() == name) return element;
-        if (auto found = TemplatePart(child, name)) return found;
-    }
-    return nullptr;
-}
-
 struct SplitButtonProps {
     char const* id = "";
     Str label;
