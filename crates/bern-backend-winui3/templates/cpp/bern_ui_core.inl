@@ -621,6 +621,10 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
             thickness = (std::max)(thickness, (std::min)(Cross(child.DesiredSize()), cross));
         }
         float main = filling > 0 && !std::isinf(space) ? space : used + gaps + filled;
+        // What is longer than the room runs past its end, as a SwiftUI
+        // stack in a frame of that size does: asking for more would have
+        // XAML clip the panel to its room, across as well.
+        if (!std::isinf(space)) main = (std::min)(main, space);
         if (baseline && horizontal) thickness += extra;
         auto size = Make(main, thickness);
         return Size{size.Width + static_cast<float>(padding.Left + padding.Right), size.Height + static_cast<float>(padding.Top + padding.Bottom)};
