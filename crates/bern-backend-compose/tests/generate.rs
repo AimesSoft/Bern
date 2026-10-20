@@ -406,21 +406,45 @@ fn add_layout_features(app: &mut bern_ir::Application) {
             node(
                 "ScaleBox",
                 vec![("width", number(400.0)), ("height", number(300.0))],
-                vec![node(
-                    "Positioned",
-                    vec![
-                        ("x", number(10.0)),
-                        ("y", number(20.0)),
-                        ("width", number(100.0)),
-                        ("height", number(40.0)),
-                        ("animate", word("smooth")),
-                    ],
-                    vec![node(
-                        "Marquee",
-                        vec![("duration", number(8.0)), ("phase", number(0.2))],
-                        vec![text()],
-                    )],
-                )],
+                vec![
+                    // The scene's background bleeds to the box's edges.
+                    node(
+                        "Positioned",
+                        vec![
+                            ("x", number(0.0)),
+                            ("y", number(0.0)),
+                            ("width", number(400.0)),
+                            ("height", number(300.0)),
+                            (
+                                "bleed",
+                                bern_ir::Prop::Expr {
+                                    expr: bern_ir::Expr {
+                                        ty: bern_protocol::Type::Bool,
+                                        kind: bern_ir::ExprKind::Literal {
+                                            value: bern_protocol::Value::Bool(true),
+                                        },
+                                    },
+                                },
+                            ),
+                        ],
+                        vec![],
+                    ),
+                    node(
+                        "Positioned",
+                        vec![
+                            ("x", number(10.0)),
+                            ("y", number(20.0)),
+                            ("width", number(100.0)),
+                            ("height", number(40.0)),
+                            ("animate", word("smooth")),
+                        ],
+                        vec![node(
+                            "Marquee",
+                            vec![("duration", number(8.0)), ("phase", number(0.2))],
+                            vec![node("WindowButtons", vec![], vec![]), text()],
+                        )],
+                    ),
+                ],
             ),
             node(
                 "Accordion",
@@ -559,6 +583,7 @@ fn layout_features_generate_for_compose() {
     for expected in [
         "Column(Modifier.padding(horizontal = 12f.dp, vertical = 4f.dp)",
         "BernScaleBox(400f.dp, 300f.dp) {",
+        "BernPositioned(0f.dp, 0f.dp, 400f.dp, 300f.dp, bleed = BernBleed(true, 0f.dp, 0f.dp, 400f.dp, 300f.dp, null)) {",
         "BernPositioned(bernLength(10f.dp, BernMotion(",
         "BernMarquee(8.0, 0.2, false, (1).toFloat()) {",
         "BernText(BernText.text(\"Text\"), bernTextStyle(\"body\", size = 12f, lineHeight = 16f), Color.Unspecified, lines = 2)",

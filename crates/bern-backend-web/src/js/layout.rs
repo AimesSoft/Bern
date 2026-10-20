@@ -191,18 +191,19 @@ impl Generator<'_> {
             ("height", self.length(element, "height")),
         ]);
         let first = if element.kind == "Positioned" {
-            {
-                let mut lines =
-                    self.layout_lines(element, &[("width", "width"), ("height", "height")]);
-                for (name, property) in [("x", "left"), ("y", "top")] {
-                    lines.push(format!(
-                        "F.bindPosition(p, \"{property}\", {}, {});",
-                        self.length(element, name).unwrap(),
-                        self.animate(element).unwrap_or_else(|| "null".into())
-                    ));
-                }
-                lines
-            }
+            let mut lines = self.layout_lines(element, &[]);
+            let place = Self::props(vec![
+                ("x", self.length(element, "x")),
+                ("y", self.length(element, "y")),
+                ("width", self.length(element, "width")),
+                ("height", self.length(element, "height")),
+                ("bleed", self.value_prop(element, "bleed")),
+            ]);
+            lines.push(format!(
+                "F.bindLayer(p, ctx, {place}, {});",
+                self.animate(element).unwrap_or_else(|| "null".into())
+            ));
+            lines
         } else {
             vec![]
         };

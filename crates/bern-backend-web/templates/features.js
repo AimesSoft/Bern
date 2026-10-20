@@ -216,6 +216,8 @@ export function bindLength(node, property, value, motion) {
   if (property === "height") node.classList.add("bern-sized-height");
   bindNumber(value, motion, (v) => {
     node.style[property] = `${Math.max(0, v)}px`;
+    // Children read their container's gap, as a toolbar group does.
+    if (property === "gap") node.style.setProperty("--bern-gap", `${Math.max(0, v)}px`);
   });
 }
 
@@ -1459,11 +1461,9 @@ export function ContentButton(p, ctx, { id, label, enabled, style, shape, height
     actions: { activate: () => action?.(), ...(setFile ? { setFile, fileKinds: kinds } : {}) },
   });
   if (style) applyStyle(node, style, {});
-  if (shape === "capsule") {
-    node.classList.add("bern-control-capsule");
-    node.style.borderRadius = "999px";
-  }
-  bindLength(node, "height", height);
+  // The web has no capsule buttons: a capsule is the standard button.
+  if (shape === "capsule") node.classList.add("bern-control-capsule");
+  else bindLength(node, "height", height);
   p.append(node);
   if (defaultFocus) B.startFocus(node);
 }
@@ -1547,9 +1547,9 @@ export function SplitButton(p, ctx, { id, label, icon: glyph, field, more, shape
     if (panel.matches(":popover-open")) panel.hidePopover();
   });
   const node = el("div", { class: "bern-split-button", role: "group" }, toggle, chevron, panel);
+  // The web's split button is the standard one, at the standard height.
   if (shape === "capsule") {
     node.classList.add("bern-split-capsule");
-    bindLength(node, "height", height);
     effect(() => node.classList.toggle("bern-split-selected", Boolean(field.get())));
   }
   B.mark(toggle, ctx, id);
@@ -2239,4 +2239,51 @@ export function activateTarget(ctx, id) {
 
 export function bindPosition(node, property, value, motion) {
   bindNumber(value, motion, (v) => { node.style[property] = `${v}px`; });
+}
+
+/// A `Positioned` layer: its place and size in the scene, each on the
+/// layer's motion. With `bleed`, each side that reaches the edge of the
+/// scene continues past it, to the edge of the room the `ScaleBox` has
+/// around the scene, so the layer meets the window's edges whatever the
+/// window's shape. The sides follow the place the layer is going to, on
+/// the same motion; a change of the window's shape moves them at once.
+export function bindLayer(node, _ctx, { x, y, width, height, bleed }, motion) {
+  node.classList.add("bern-sized-width", "bern-sized-height");
+  const at = { x: 0, y: 0, width: 0, height: 0 };
+  const out = { left: 0, right: 0, top: 0, bottom: 0 };
+  const write = () => {
+    node.style.left = `${at.x - out.left}px`;
+    node.style.top = `${at.y - out.top}px`;
+    node.style.width = `${Math.max(0, at.width + out.left + out.right)}px`;
+    node.style.height = `${Math.max(0, at.height + out.top + out.bottom)}px`;
+  };
+  for (const [key, value] of [["x", x], ["y", y], ["width", width], ["height", height]]) {
+    bindNumber(value, motion, (v) => { at[key] = v; write(); });
+  }
+  const room = node.bernScene;
+  if (bleed === undefined || bleed === null || bleed === false || !room) return;
+  const springs = Object.fromEntries(Object.keys(out).map((side) =>
+    [side, new Spring(0, (v) => { out[side] = Math.max(0, v); write(); })]));
+  const read = (value) => Number(typeof value === "function" ? value() : value) || 0;
+  let last = null;
+  effect(() => {
+    const scene = room.get();
+    const on = !!(typeof bleed === "function" ? bleed() : bleed);
+    const left = read(x), top = read(y), w = read(width), h = read(height);
+    // Half a point of slack: a layer laid out to the edge reaches it.
+    const target = {
+      left: on && left <= 0.5 ? scene.x : 0,
+      right: on && left + w >= scene.width - 0.5 ? scene.x : 0,
+      top: on && top <= 0.5 ? scene.y : 0,
+      bottom: on && top + h >= scene.height - 0.5 ? scene.y : 0,
+    };
+    const jump = last === null || last.x !== scene.x || last.y !== scene.y;
+    last = scene;
+    untrack(() => {
+      for (const side of Object.keys(target)) {
+        if (jump) springs[side].set(target[side]);
+        else springs[side].to(target[side], motion);
+      }
+    });
+  });
 }

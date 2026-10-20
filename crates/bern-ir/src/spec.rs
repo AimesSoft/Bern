@@ -582,9 +582,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("y", PropKind::Length),
             req("width", PropKind::Length),
             req("height", PropKind::Length),
+            opt("bleed", PropKind::Bool),
         ],
         Children::Any,
-        "A layer positioned from the top leading corner of its containing coordinate space",
+        "A layer positioned from the top leading corner of its containing coordinate space; with `bleed`, a layer of a `ScaleBox` scene continues past each scene edge it reaches, to the edge of the box",
     ),
     spec(
         "Modal",
@@ -649,6 +650,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "A strip along `axis` that places each child at the fraction `at` of its length, or between the fractions `from` and `to`; the fractions may follow state; with `overhang` the scale runs that far past both ends, fraction 0 standing before the rail's start",
     ),
     spec("Spacer", &[], Children::None, "Flexible space"),
+    spec(
+        "WindowButtons",
+        &[],
+        Children::None,
+        "The room the window's own buttons take at the leading end of content that runs under the title bar: the traffic lights on macOS; nothing, and no gap, where the window has no buttons there",
+    ),
     spec("Divider", &[], Children::None, "Separator line"),
     spec(
         "ScrollView",

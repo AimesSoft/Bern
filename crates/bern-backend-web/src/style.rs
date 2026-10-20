@@ -37,7 +37,7 @@ const ROW_STATES: &[&str] = &[
 pub const SUPPORT: &[StyleSupport] = &[
     StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "corner"],
+        base: &["background", "foreground", "border", "corner"],
         states: &[],
     },
     // A form's background is its rows'.

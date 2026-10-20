@@ -305,6 +305,8 @@ impl Generator<'_> {
             "Progress" => self.progress(out, element),
             "Canvas" => self.canvas(out, element),
             "Spacer" => out.line("B::Spacer(p);"),
+            // The caption buttons stand at the trailing end of the title bar.
+            "WindowButtons" => {}
             "Divider" => out.line("B::Divider(p, c);"),
             "ScrollView" => self.scroll_view(out, element),
             // Items before a `Spacer` stand at the leading end of the

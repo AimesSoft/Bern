@@ -8,24 +8,25 @@
 :root {
   --bern-font: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans", "Noto Sans CJK SC", sans-serif;
-  --bern-control-height: 32px;
+  --bern-control-height: 36px;
   --bern-compact-height: 32px;
-  --bern-icon-target: 32px;
-  --bern-glyph: 16px;
+  --bern-icon-target: 36px;
+  --bern-glyph: 18px;
   --bern-row-height: 52px;
-  --bern-nav-row: 32px;
-  --bern-switch-width: 40px;
+  --bern-nav-row: 34px;
+  --bern-switch-width: 36px;
   --bern-switch-height: 20px;
-  --bern-switch-thumb: 14px;
-  --bern-slider-thumb: 20px;
-  --bern-track: 4px;
+  --bern-switch-thumb: 16px;
+  --bern-slider-thumb: 16px;
+  --bern-track: 6px;
   --bern-scrub-track: 6px;
   --bern-knob-width: 20px;
   --bern-knob-height: 16px;
   --bern-text-up: 0px;
   --bern-page-margin: 24px;
   --bern-motion: 150ms;
-  --bern-radius-control: 6px;
+  --bern-radius-control: 8px;
+  --bern-radius-icon: 8px;
   --bern-radius-card: 8px;
   --bern-radius-dialog: 12px;
 }
@@ -1018,6 +1019,13 @@ button:disabled {
   scrollbar-gutter: stable;
 }
 
+/* A window whose content is one stack of layers sized to the window, such
+   as a scene or a split view, does not scroll itself, so it keeps no room
+   for a scroll bar: the scene meets the window's edge. */
+.bern-window-content:has(> .bern-layers) {
+  scrollbar-gutter: auto;
+}
+
 /* Scrolls without showing the scroll bar. */
 /* `Button(width: fill)`: the button stretches across its container. */
 .bern-button-fill {
@@ -1214,11 +1222,12 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-width: 80px;
+  min-width: 0;
   height: var(--bern-control-height);
-  padding: 0 20px;
+  padding: 0 14px;
   border: 1px solid transparent;
   border-radius: var(--bern-radius-control);
+  font-size: calc(13.5px + var(--bern-text-up));
   font-weight: 500;
   white-space: nowrap;
   transition: background var(--bern-motion) ease-out, color var(--bern-motion) ease-out,
@@ -1231,7 +1240,7 @@ button:disabled {
 }
 
 .bern-button-standard {
-  background: var(--bern-surface-canvas);
+  background: transparent;
   border-color: var(--bern-separator);
   color: var(--bern-text-primary);
 }
@@ -1307,8 +1316,9 @@ button:disabled {
   background: transparent;
 }
 
-/* The default icon button paints no container; feedback is the icon
- * color, and keyboard focus keeps its ring. */
+/* The default icon button is a ghost button: no container at rest, a
+ * neutral fill under the pointer and while pressed, and keyboard focus
+ * keeps its ring. */
 .bern-icon-button {
   display: inline-flex;
   align-items: center;
@@ -1318,10 +1328,10 @@ button:disabled {
   height: var(--bern-icon-target);
   padding: 0;
   border: 0;
-  border-radius: var(--bern-radius-control);
+  border-radius: var(--bern-radius-icon);
   background: transparent;
-  color: var(--bern-icon-secondary);
-  transition: color var(--bern-motion) ease-out;
+  color: var(--bern-icon-primary);
+  transition: color var(--bern-motion) ease-out, background-color var(--bern-motion) ease-out;
 }
 
 .bern-icon-button .bern-icon {
@@ -1331,11 +1341,14 @@ button:disabled {
 
 @media (hover: hover) {
   .bern-icon-button:hover:not(:disabled) {
-    color: var(--bern-accent);
+    background: var(--bern-hover-overlay);
   }
 }
 
-.bern-icon-button:active:not(:disabled),
+.bern-icon-button:active:not(:disabled) {
+  background: var(--bern-pressed-overlay);
+}
+
 .bern-icon-button[aria-pressed="true"] {
   color: var(--bern-accent-text);
 }
@@ -1369,28 +1382,41 @@ button:disabled {
   outline: 2px solid var(--bern-focus-indicator);
   outline-offset: 3px;
 }
+/* The web has no capsule buttons: a button, menu or picker asked for as a
+ * capsule is the standard one, with the room of a menu's chevron (12 before
+ * the text, 10 after the chevron). A switch shown as a button is a chip. */
 .bern-dropdown.bern-control-capsule {
   min-width: 0;
   width: 100%;
-  padding-inline: 10px;
+  padding: 0 10px 0 12px;
   gap: 6px;
   border-color: var(--bern-separator);
-  background: var(--bern-surface-canvas);
-  font-size: 13px;
+  background: transparent;
+  font-size: calc(13.5px + var(--bern-text-up));
   font-weight: 500;
 }
 .bern-button.bern-control-capsule {
   min-width: 0;
-  padding-inline: 10px;
   gap: 6px;
-  font-size: 13px;
 }
-.bern-control-capsule > .bern-icon:last-child { width: 12px; height: 12px; }
+.bern-menu-button.bern-control-capsule {
+  padding: 0 10px 0 12px;
+}
+.bern-control-capsule > .bern-icon:last-child { width: 14px; height: 14px; color: var(--bern-text-secondary); }
 .bern-dropdown-wrap:has(> .bern-control-capsule) { width: 100%; }
-.bern-toggle-button.bern-control-capsule { min-width: 0; padding-inline: 13px; }
-
-.bern-control-capsule {
+.bern-toggle-button.bern-control-capsule {
+  min-width: 0;
+  height: 30px;
+  padding: 0 12px;
   border-radius: 999px;
+  border-color: var(--bern-separator);
+  color: var(--bern-text-secondary);
+  font-size: calc(13px + var(--bern-text-up));
+}
+.bern-toggle-button.bern-control-capsule[aria-pressed="true"] {
+  border-color: transparent;
+  background: var(--bern-text-primary);
+  color: var(--bern-surface-canvas);
 }
 
 /* The palette is a browser modal so its focus and overlay follow the
@@ -1733,13 +1759,13 @@ textarea.bern-field {
 .bern-slider::-webkit-slider-runnable-track {
   height: var(--bern-track);
   border-radius: calc(var(--bern-track) / 2);
-  background: linear-gradient(to right, var(--bern-accent) var(--bern-fill), var(--bern-control-track) var(--bern-fill));
+  background: linear-gradient(to right, var(--bern-accent) var(--bern-fill), var(--bern-separator) var(--bern-fill));
 }
 
 .bern-slider::-moz-range-track {
   height: var(--bern-track);
   border-radius: calc(var(--bern-track) / 2);
-  background: var(--bern-control-track);
+  background: var(--bern-separator);
 }
 
 .bern-slider::-moz-range-progress {
@@ -1748,46 +1774,46 @@ textarea.bern-field {
   background: var(--bern-accent);
 }
 
-/* The thumb: an accent dot inside a ring of the thumb color, outlined. */
+/* The thumb: a disc of the page color in an accent ring, a little larger
+ * under the pointer and while dragged. */
 .bern-slider::-webkit-slider-thumb {
   box-sizing: border-box;
   width: var(--bern-slider-thumb);
   height: var(--bern-slider-thumb);
   margin-top: calc((var(--bern-track) - var(--bern-slider-thumb)) / 2);
-  border: calc(var(--bern-slider-thumb) / 5) solid var(--bern-control-thumb);
+  border: 2px solid var(--bern-accent);
   border-radius: 50%;
-  background: var(--bern-accent);
-  box-shadow: 0 0 0 1px var(--bern-control-border);
+  background: var(--bern-surface-canvas);
   appearance: none;
   -webkit-appearance: none;
-  transition: background var(--bern-motion) ease-out;
+  transition: transform var(--bern-motion) ease-out;
 }
 
 .bern-slider::-moz-range-thumb {
   box-sizing: border-box;
   width: var(--bern-slider-thumb);
   height: var(--bern-slider-thumb);
-  border: calc(var(--bern-slider-thumb) / 5) solid var(--bern-control-thumb);
+  border: 2px solid var(--bern-accent);
   border-radius: 50%;
-  background: var(--bern-accent);
-  box-shadow: 0 0 0 1px var(--bern-control-border);
+  background: var(--bern-surface-canvas);
+  transition: transform var(--bern-motion) ease-out;
 }
 
 @media (hover: hover) {
   .bern-slider:hover:not(:disabled)::-webkit-slider-thumb {
-    background: var(--bern-button-prominent-hover);
+    transform: scale(1.15);
   }
   .bern-slider:hover:not(:disabled)::-moz-range-thumb {
-    background: var(--bern-button-prominent-hover);
+    transform: scale(1.15);
   }
 }
 
 .bern-slider:active:not(:disabled)::-webkit-slider-thumb {
-  background: var(--bern-button-prominent-pressed);
+  transform: scale(1.15);
 }
 
 .bern-slider:active:not(:disabled)::-moz-range-thumb {
-  background: var(--bern-button-prominent-pressed);
+  transform: scale(1.15);
 }
 
 .bern-slider:disabled::-webkit-slider-runnable-track {
@@ -1865,10 +1891,6 @@ textarea.bern-field {
   background: var(--bern-surface-raised);
   color: var(--bern-text-primary);
   box-shadow: 0 12px 32px -12px var(--bern-scrim);
-}
-
-.bern-menu:popover-open {
-  animation: bern-fade 120ms ease-out;
 }
 
 .bern-menu-item {

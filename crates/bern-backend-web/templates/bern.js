@@ -1837,17 +1837,44 @@ let typeaheadReset = 0;
 /// there. It runs before the popover shows, from the anchor alone: the
 /// popover's height is capped by the room it gets.
 export function placePopover(popover, anchor) {
+  popover.bernAnchor = anchor;
   const rect = anchor.getBoundingClientRect();
   const below = innerHeight - rect.bottom - 12;
   const above = rect.top - 12;
   const up = below < 160 && above > below;
   popover.style.minWidth = `${rect.width}px`;
-  popover.style.maxWidth = `${Math.max(rect.width, innerWidth - rect.left - 8)}px`;
-  popover.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - 168))}px`;
+  // A trigger in the trailing half opens the popover leftwards, its end on
+  // the trigger's end, as a menu at the end of a toolbar does.
+  const leftwards = rect.left + rect.width / 2 > innerWidth / 2;
+  popover.style.maxWidth = `${Math.max(rect.width, leftwards ? rect.right - 8 : innerWidth - rect.left - 8)}px`;
+  popover.style.left = leftwards ? "auto" : `${Math.max(8, Math.min(rect.left, innerWidth - 168))}px`;
+  popover.style.right = leftwards ? `${Math.max(8, innerWidth - rect.right)}px` : "auto";
   popover.style.top = up ? "auto" : `${rect.bottom + 4}px`;
   popover.style.bottom = up ? `${innerHeight - rect.top + 4}px` : "auto";
   popover.style.maxHeight = `${Math.min(328, up ? above : below)}px`;
 }
+
+/// Menus and popovers open from their trigger: from 0.9 of their size to
+/// full on a bouncy spring, fading in meanwhile; with less motion, a short
+/// fade alone.
+globalThis.document?.addEventListener("toggle", (event) => {
+  const panel = event.target;
+  if (event.newState !== "open" || !(panel instanceof HTMLElement)) return;
+  if (!panel.matches(".bern-menu, .bern-popover-panel")) return;
+  if (prefersReducedMotion()) {
+    panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
+    return;
+  }
+  const anchor = panel.bernAnchor;
+  if (anchor?.isConnected) {
+    const from = anchor.getBoundingClientRect(), to = panel.getBoundingClientRect();
+    const x = Math.min(to.width, Math.max(0, from.left + from.width / 2 - to.left));
+    panel.style.transformOrigin = `${x}px ${to.top >= from.bottom - 1 ? "0" : "100%"}`;
+  }
+  const { easing, duration } = springEasing(0.5, 0.62);
+  panel.animate([{ transform: "scale(0.9)" }, { transform: "scale(1)" }], { duration, easing });
+  panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+}, true);
 
 /// Bern's own dropdown, a select-only combobox (WAI-ARIA APG). The list is
 /// a popover in the browser's top layer, so cards, dialogs and scroll
@@ -2054,7 +2081,14 @@ function readValue(value) {
 }
 
 function length(node, property, value) {
-  if (value !== undefined) effect(() => node.style[property] = `${Math.max(0, Number(readValue(value)) || 0)}px`);
+  if (value === undefined) return;
+  effect(() => {
+    const px = `${Math.max(0, Number(readValue(value)) || 0)}px`;
+    node.style[property] = px;
+    // Children read their container's gap, as a toolbar group does to
+    // keep its spacing from the next group.
+    if (property === "gap") node.style.setProperty("--bern-gap", px);
+  });
 }
 
 function paddingOf(node, { padding, paddingX, paddingY }) {
@@ -2064,9 +2098,11 @@ function paddingOf(node, { padding, paddingX, paddingY }) {
 }
 
 function controlShape(node, shape, height) {
+  // The web has no capsule buttons: a capsule button, menu or picker is
+  // the standard control, at the standard height.
   if (shape === "capsule") {
     node.classList.add("bern-control-capsule");
-    node.style.borderRadius = "999px";
+    return;
   }
   length(node, "height", height);
 }
@@ -4460,16 +4496,28 @@ export function ScaleBox(p, ctx, { width, height }, children) {
   const size = cell({ width: 0, height: 0 });
   const observer = new ResizeObserver(([entry]) => size.set(entry.contentRect));
   observer.observe(host); onCleanup(() => observer.disconnect());
+  // The scene's size and the room around it on each side, in scene
+  // points, for the layers that bleed into it.
+  const room = cell({ width: 0, height: 0, x: 0, y: 0 });
   effect(() => {
     const w = Math.max(1, Number(readValue(width))), h = Math.max(1, Number(readValue(height)));
     const available = size.get(), scale = Math.min(available.width / w, available.height / h);
     Object.assign(scene.style, { width: `${w}px`, height: `${h}px`, transform: `scale(${scale})`, left: `${(available.width-w*scale)/2}px`, top: `${(available.height-h*scale)/2}px` });
+    const fit = scale > 0 && Number.isFinite(scale);
+    room.set({
+      width: w, height: h,
+      x: fit ? Math.max(0, (available.width / scale - w) / 2) : 0,
+      y: fit ? Math.max(0, (available.height / scale - h) / 2) : 0,
+    });
   });
-  children(scene, ctx);
+  children(scene, { ...ctx, scene: room });
 }
 export function Positioned(p, ctx, props, children) {
   const node = el("div", { class: "bern-positioned bern-sized-width bern-sized-height" });
-  p.append(node); children(node, ctx);
+  // The scene the layer is placed in; layers inside it are placed in the
+  // layer's own space, which has no room around it to bleed into.
+  node.bernScene = ctx.scene;
+  p.append(node); children(node, { ...ctx, scene: undefined });
 }
 
 export function Marquee(p, ctx, { duration, phase = 0, paused, opacity }, children) {

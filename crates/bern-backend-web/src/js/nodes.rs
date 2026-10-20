@@ -251,6 +251,8 @@ impl Generator<'_> {
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
             "Spacer" => out.line("B.Spacer(p);"),
+            // A page has no window buttons of its own.
+            "WindowButtons" => {}
             "Divider" => out.line("B.Divider(p);"),
             "ScrollView" => self.scroll_view(out, element),
             "Rail" => self.rail(out, element),

@@ -253,6 +253,8 @@ impl Generator<'_> {
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
             "Spacer" => out.line("b::Spacer(p);"),
+            // A header bar keeps its buttons at its ends, never over content.
+            "WindowButtons" => {}
             "Divider" => out.line("b::Divider(p);"),
             "ScrollView" => self.scroll_view(out, element),
             "Canvas" => self.canvas(out, element),

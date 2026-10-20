@@ -450,3 +450,48 @@ fn chip_pickers_stand_in_their_flow_beside_a_spacer() {
         "{generated}"
     );
 }
+
+#[test]
+fn scene_layers_bleed_and_window_buttons_take_no_room() {
+    let app = app();
+    let number = |value: f64| Prop::Number { value };
+    let mut background = element("Positioned");
+    for (name, value) in [("x", 0.0), ("y", 0.0), ("width", 1280.0), ("height", 800.0)] {
+        background.props.insert(name.into(), number(value));
+    }
+    background.props.insert(
+        "bleed".into(),
+        Prop::Expr {
+            expr: literal_expr(Value::Bool(true), Type::Bool),
+        },
+    );
+    let mut bar = element("Positioned");
+    for (name, value) in [("x", 14.0), ("y", 0.0), ("width", 1246.0), ("height", 64.0)] {
+        bar.props.insert(name.into(), number(value));
+    }
+    let mut row = element("Row");
+    row.children = vec![
+        Node::Element(element("WindowButtons")),
+        Node::Element(element("Spacer")),
+    ];
+    bar.children = vec![Node::Element(row)];
+    let mut scene = element("ScaleBox");
+    scene.props.insert("width".into(), number(1280.0));
+    scene.props.insert("height".into(), number(800.0));
+    scene.children = vec![Node::Element(background), Node::Element(bar)];
+    let mut out = Out::default();
+    Generator::new(&app).element(&mut out, &scene);
+    let generated = out.finish();
+    // Each layer places itself in the scene; the background bleeds.
+    assert!(
+        generated.contains("F.bindLayer(p, ctx, { x: 0, y: 0, width: 1280, height: 800, bleed: () => true }, null);"),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("F.bindLayer(p, ctx, { x: 14, y: 0, width: 1246, height: 64 }, null);"),
+        "{generated}"
+    );
+    // A page has no window buttons: nothing stands for them.
+    assert!(!generated.contains("WindowButtons"), "{generated}");
+    assert!(!generated.contains("unsupported"), "{generated}");
+}

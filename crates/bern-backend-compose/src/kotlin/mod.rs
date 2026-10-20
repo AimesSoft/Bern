@@ -468,6 +468,8 @@ impl<'a> Generator<'a> {
                 Scope::Column | Scope::Row | Scope::Flow => out.line("Spacer(Modifier.weight(1f))"),
                 Scope::Other => out.line("Spacer(Modifier.size(8.dp))"),
             },
+            // Android windows have no buttons of their own.
+            "WindowButtons" => {}
             "Divider" => match ctx.scope {
                 Scope::Row => out.line("VerticalDivider()"),
                 _ => out.line("HorizontalDivider()"),

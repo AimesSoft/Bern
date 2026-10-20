@@ -387,6 +387,13 @@ impl<'a> Generator<'a> {
                 out.line(".layoutValue(key: BernRowSpacer.self, value: true)");
             }
             "Spacer" => out.line("SwiftUI.Spacer()"),
+            // The traffic lights and the room after them; iOS and tvOS
+            // windows have no buttons of their own.
+            "WindowButtons" => {
+                out.line("#if os(macOS)");
+                out.line("SwiftUI.Color.clear.frame(width: 84, height: 1)");
+                out.line("#endif");
+            }
             // Only a stack along the row sets a divider upright.
             "Divider" if ctx.row => {
                 out.open("SwiftUI.HStack(spacing: 0) {");

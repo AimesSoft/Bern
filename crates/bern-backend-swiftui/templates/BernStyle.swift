@@ -760,6 +760,51 @@ extension EnvironmentValues {
         get { self[BernSceneScaleKey.self] }
         set { self[BernSceneScaleKey.self] = newValue }
     }
+
+    /// The scene a layer is placed in and the room around it; none inside
+    /// a layer, which places its own layers in its own space.
+    var bernSceneRoom: BernSceneRoom? {
+        get { self[BernSceneRoomKey.self] }
+        set { self[BernSceneRoomKey.self] = newValue }
+    }
+}
+
+/// A `ScaleBox` scene's size and the room the box has around it on each
+/// side, in scene points.
+struct BernSceneRoom: Equatable {
+    var width: CGFloat
+    var height: CGFloat
+    var x: CGFloat
+    var y: CGFloat
+}
+
+private struct BernSceneRoomKey: EnvironmentKey {
+    static let defaultValue: BernSceneRoom? = nil
+}
+
+/// A `Positioned` layer that bleeds: each side that reaches the edge of its
+/// scene continues past it to the edge of the room around the scene, so
+/// the layer meets the window's edges whatever the window's shape.
+struct BernBleedingLayer: ViewModifier {
+    let x: CGFloat
+    let y: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+    let bleed: Bool
+    @Environment(\.bernSceneRoom) private var room
+
+    func body(content: Content) -> some View {
+        // Half a point of slack: a layer laid out to the edge reaches it.
+        let room = bleed ? room : nil
+        let left = room.map { x <= 0.5 ? $0.x : 0 } ?? 0
+        let right = room.map { x + width >= $0.width - 0.5 ? $0.x : 0 } ?? 0
+        let top = room.map { y <= 0.5 ? $0.y : 0 } ?? 0
+        let bottom = room.map { y + height >= $0.height - 0.5 ? $0.y : 0 } ?? 0
+        content
+            .environment(\.bernSceneRoom, nil)
+            .frame(width: max(0, width + left + right), height: max(0, height + top + bottom))
+            .offset(x: x - left, y: y - top)
+    }
 }
 
 private struct BernSystemButtonLook: ViewModifier {

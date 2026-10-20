@@ -200,8 +200,32 @@ impl Generator<'_> {
 
     pub(super) fn positioned(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let length = |name| self.length(element, name).unwrap_or_else(|| "0.dp".into());
+        // A layer that bleeds learns where it is going before any motion,
+        // to know which edges of its scene it reaches.
+        let bleed = element
+            .expr("bleed")
+            .map(|on| {
+                let place = |name| match element.prop(name) {
+                    Some(Prop::Number { value }) => format!("{}.dp", float(*value)),
+                    Some(Prop::Expr { expr }) => format!("({}).toFloat().dp", self.expr(expr)),
+                    _ => "0.dp".into(),
+                };
+                format!(
+                    ", bleed = BernBleed({}, {}, {}, {}, {}, {})",
+                    self.expr(on),
+                    place("x"),
+                    place("y"),
+                    place("width"),
+                    place("height"),
+                    element
+                        .keyword("animate")
+                        .map(|token| crate::style::motion(self.app, token))
+                        .unwrap_or_else(|| "null".into())
+                )
+            })
+            .unwrap_or_default();
         out.open(format!(
-            "BernPositioned({}, {}, {}, {}) {{",
+            "BernPositioned({}, {}, {}, {}{bleed}) {{",
             length("x"),
             length("y"),
             length("width"),

@@ -186,8 +186,9 @@
 .bern-icon-button.bern-size-large {
   height: 42px;
   min-width: 42px;
-  padding-inline: 18px;
-  font-size: calc(15px + var(--bern-text-up));
+  padding-inline: 20px;
+  font-size: calc(14.5px + var(--bern-text-up));
+  font-weight: 600;
 }
 
 .bern-button.bern-size-extra_large,
@@ -306,6 +307,10 @@
 .bern-popover-panel:popover-open,
 .bern-search-results:popover-open {
   display: flex;
+}
+
+/* A popover panel opens from its trigger on a spring (bern.js). */
+.bern-search-results:popover-open {
   animation: bern-fade 120ms ease-out;
 }
 
@@ -324,24 +329,27 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 24px;
+  bottom: 30px;
   display: flex;
   justify-content: center;
   pointer-events: none;
   z-index: 20;
 }
 
+/* A toast stands out against the page: the page's text color as its
+ * background, the page's color as its text. */
 .bern-toast {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
+  gap: 10px;
+  height: 40px;
+  padding: 0 16px 0 14px;
   border-radius: 999px;
-  border: 1px solid var(--bern-separator);
-  background: var(--bern-surface-raised);
-  color: var(--bern-text-primary);
-  box-shadow: 0 10px 28px -10px var(--bern-scrim);
+  background: var(--bern-text-primary);
+  color: var(--bern-surface-canvas);
+  box-shadow: 0 12px 30px -8px rgb(0 0 0 / 0.5);
   font-size: calc(13px + var(--bern-text-up));
+  white-space: nowrap;
 }
 
 /* MARK: - Inspector */
@@ -549,35 +557,42 @@ body:has(.bern-window-page.bern-immersive) .bern-appbar { display: none; }
 .bern-split-main { width: auto; gap: 6px; padding-inline: 8px; }
 .bern-marquee-line.bern-marquee-reduced { animation: none; left: 28%; }
 
-/* Shared surfaces keep related controls together without nested buttons. */
+/* A web toolbar has no shared surfaces: a group is a run of ghost icon
+ * buttons 6 px apart, and it keeps 6 px from what stands next to it in its
+ * row, another group or not, whatever gap the row asks for. */
 .bern-control-group {
   display: inline-flex;
   flex: none;
   align-items: center;
-  height: var(--bern-group-height, 40px);
-  border-radius: 999px;
-  background: var(--bern-surface-raised);
-  border: 1px solid var(--bern-separator);
+  gap: 6px;
 }
-.bern-control-group > .bern-icon-button,
-.bern-control-group > .bern-popover-wrap > .bern-icon-button {
-  width: var(--bern-group-height, 40px);
-  height: var(--bern-group-height, 40px);
-  background: transparent;
-  color: var(--bern-text-primary);
+.bern-hstack > * + .bern-control-group {
+  margin-inline-start: calc(6px - var(--bern-gap, 6px));
 }
-.bern-control-group .bern-icon { width: 18px; height: 18px; }
+.bern-hstack > .bern-control-group:has(+ :not(.bern-control-group)) {
+  margin-inline-end: calc(6px - var(--bern-gap, 6px));
+}
+/* A split button is one outlined button in two parts, the arrow behind a
+ * divider; on, the main part takes the stronger fill and its icon the
+ * accent. */
 .bern-split-capsule {
   gap: 0;
-  border-radius: 999px;
-  background: var(--bern-surface-raised);
-  border: 1px solid var(--bern-separator);
+  height: var(--bern-compact-height);
+  border-radius: var(--bern-radius-control);
+  box-shadow: inset 0 0 0 1px var(--bern-separator);
+  overflow: hidden;
 }
-.bern-split-capsule.bern-split-selected { background: var(--bern-accent); color: var(--bern-on-accent); }
 .bern-split-capsule > .bern-icon-button {
   height: 100%;
+  border-radius: 0;
   background: transparent;
-  color: inherit;
+  color: var(--bern-text-secondary);
+  font-size: calc(13px + var(--bern-text-up));
+  font-weight: 500;
 }
-.bern-split-capsule > .bern-split-main { padding-inline: 14px; border-radius: 999px 0 0 999px; }
-.bern-split-capsule > .bern-split-more { width: 30px; border-left: 1px solid currentColor; border-radius: 0 999px 999px 0; }
+.bern-split-capsule > .bern-icon-button[aria-pressed="true"] { color: var(--bern-text-primary); }
+.bern-split-capsule.bern-split-selected > .bern-split-main { background: var(--bern-pressed-overlay); }
+.bern-split-capsule.bern-split-selected > .bern-split-main .bern-icon { color: var(--bern-accent); }
+.bern-split-capsule > .bern-split-main { width: auto; gap: 6px; padding: 0 10px 0 12px; }
+.bern-split-capsule > .bern-split-more { width: 30px; box-shadow: inset 1px 0 0 var(--bern-separator); }
+.bern-split-capsule > .bern-split-more .bern-icon { width: 14px; height: 14px; }

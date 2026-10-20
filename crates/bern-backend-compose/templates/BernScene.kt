@@ -14,6 +14,7 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -97,6 +98,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -301,16 +303,14 @@ fun BernStack(
 
 /// `ScaleBox`: its children stacked from the top leading corner in a
 /// space of `width` × `height`, scaled as a whole to fit the room it is
-/// given and centered there; what stands outside is clipped.
+/// given and centered there; what stands outside the box is clipped. The
+/// scene's layers learn the room around the scene, which a layer that
+/// bleeds reaches into.
 @Composable
 fun BernScaleBox(width: Dp, height: Dp, content: @Composable () -> Unit) {
-    Layout(
-        content = { Box(contentAlignment = Alignment.TopStart) { content() } },
-        modifier = Modifier.clipToBounds(),
-    ) { measurables, constraints ->
+    SubcomposeLayout(Modifier.clipToBounds()) { constraints ->
         val w = width.roundToPx().coerceAtLeast(1)
         val h = height.roundToPx().coerceAtLeast(1)
-        val placeable = measurables.first().measure(Constraints.fixed(w, h))
         val scale = when {
             constraints.hasBoundedWidth && constraints.hasBoundedHeight ->
                 min(constraints.maxWidth.toFloat() / w, constraints.maxHeight.toFloat() / h)
@@ -320,6 +320,18 @@ fun BernScaleBox(width: Dp, height: Dp, content: @Composable () -> Unit) {
         }
         val outWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else (w * scale).roundToInt()
         val outHeight = if (constraints.hasBoundedHeight) constraints.maxHeight else (h * scale).roundToInt()
+        val fits = scale > 0f && scale.isFinite()
+        val room = BernSceneRoom(
+            width = width,
+            height = height,
+            x = if (fits) ((outWidth / scale - w) / 2f).coerceAtLeast(0f).toDp() else 0.dp,
+            y = if (fits) ((outHeight / scale - h) / 2f).coerceAtLeast(0f).toDp() else 0.dp,
+        )
+        val placeable = subcompose(Unit) {
+            CompositionLocalProvider(LocalBernSceneRoom provides room) {
+                Box(contentAlignment = Alignment.TopStart) { content() }
+            }
+        }.first().measure(Constraints.fixed(w, h))
         layout(outWidth, outHeight) {
             placeable.placeWithLayer(0, 0) {
                 transformOrigin = TransformOrigin(0f, 0f)
@@ -332,20 +344,52 @@ fun BernScaleBox(width: Dp, height: Dp, content: @Composable () -> Unit) {
     }
 }
 
+/// A `ScaleBox` scene's size and the room the box has around it on each
+/// side; none inside a layer, which places its own layers in its space.
+data class BernSceneRoom(val width: Dp, val height: Dp, val x: Dp, val y: Dp)
+
+val LocalBernSceneRoom = compositionLocalOf<BernSceneRoom?> { null }
+
+/// Where a layer that bleeds is going (its place before any motion) and
+/// whether it bleeds there, with the motion its sides follow.
+data class BernBleed(val on: Boolean, val x: Dp, val y: Dp, val width: Dp, val height: Dp, val motion: BernMotion?)
+
+/// How far a side of a layer reaches past its scene, moving on the layer's
+/// motion.
+@Composable
+private fun bernBleedSide(target: Dp, motion: BernMotion?): Dp {
+    if (motion == null || bernReduceMotion()) return target
+    val moving by animateDpAsState(target, motion.spec(), label = "bleed")
+    return moving.coerceAtLeast(0.dp)
+}
+
 /// `Positioned`: its content in the rectangle `x`, `y`, `width`,
 /// `height` of the space it stands in, centered there. It takes all the
-/// room its stack offers, as a layer does.
+/// room its stack offers, as a layer does. With `bleed`, each side that
+/// reaches its scene's edge continues to the edge of the room around the
+/// scene.
 @Composable
-fun BernPositioned(x: Dp, y: Dp, width: Dp, height: Dp, content: @Composable () -> Unit) {
-    Layout(content = { Box(contentAlignment = Alignment.Center) { content() } }) { measurables, constraints ->
-        val w = width.roundToPx().coerceAtLeast(0)
-        val h = height.roundToPx().coerceAtLeast(0)
-        val left = x.roundToPx()
-        val top = y.roundToPx()
+fun BernPositioned(x: Dp, y: Dp, width: Dp, height: Dp, bleed: BernBleed? = null, content: @Composable () -> Unit) {
+    val room = LocalBernSceneRoom.current?.takeIf { bleed?.on == true }
+    val half = 0.5.dp
+    val left = bernBleedSide(if (room != null && bleed!!.x <= half) room.x else 0.dp, bleed?.motion)
+    val right = bernBleedSide(if (room != null && bleed!!.x + bleed.width >= room.width - half) room.x else 0.dp, bleed?.motion)
+    val top = bernBleedSide(if (room != null && bleed!!.y <= half) room.y else 0.dp, bleed?.motion)
+    val bottom = bernBleedSide(if (room != null && bleed!!.y + bleed.height >= room.height - half) room.y else 0.dp, bleed?.motion)
+    Layout(content = {
+        Box(contentAlignment = Alignment.Center) {
+            // The layer's own layers are placed in its space.
+            CompositionLocalProvider(LocalBernSceneRoom provides null) { content() }
+        }
+    }) { measurables, constraints ->
+        val w = (width + left + right).roundToPx().coerceAtLeast(0)
+        val h = (height + top + bottom).roundToPx().coerceAtLeast(0)
+        val atX = (x - left).roundToPx()
+        val atY = (y - top).roundToPx()
         val placeable = measurables.first().measure(Constraints.fixed(w, h))
-        val outWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else max(0, left + w)
-        val outHeight = if (constraints.hasBoundedHeight) constraints.maxHeight else max(0, top + h)
-        layout(outWidth, outHeight) { placeable.place(left, top) }
+        val outWidth = if (constraints.hasBoundedWidth) constraints.maxWidth else max(0, atX + w)
+        val outHeight = if (constraints.hasBoundedHeight) constraints.maxHeight else max(0, atY + h)
+        layout(outWidth, outHeight) { placeable.place(atX, atY) }
     }
 }
 

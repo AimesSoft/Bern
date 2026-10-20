@@ -6,14 +6,14 @@
 - 阶段：Web 后端的视觉与交互规范（[架构设计](../Design.md)“Web 应用与 WebUI”要求先单独成文）
 - 关联：[Bern 架构设计](../Design.md)、[自适应适配规范](README.md)
 
-Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的视觉语言：**Bern 自有的中性网页风格**。它提炼各家网页设计系统与成熟网页应用共有的做法，风格接近 Linear、Vercel、GitHub 这类网页应用，整体不复制 Material、Fluent 或任何一家公司的视觉语言，也不模仿桌面操作系统的窗口。个别控件按项目决定借用成熟的形态：开关与滑块采用类似 Fluent 2 的形态，视频进度条的滑块采用类似 macOS 26 的圆角胶囊滑块；借用的只是形状与尺寸，颜色全部来自 Bern 主题内核（`bern-theme`）。除“官方依据”一节引用的 W3C 规范外，文中规则都是 Bern 的设计决策。
+Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的视觉语言：**Bern 自有的中性网页风格**。它提炼各家网页设计系统与成熟网页应用共有的做法，风格接近 Linear、Vercel、GitHub 这类网页应用，整体不复制 Material、Fluent 或任何一家公司的视觉语言，也不模仿桌面操作系统的窗口。个别控件按项目决定借用成熟的形态：开关采用类似 Fluent 2 的形态，滑块的圆钮是页面底色的圆盘加 2 px 强调色圆环；中性色取冷灰色阶（zinc：深色页面 #09090B，填充 #18181B、#27272A）；借用的只是形状与尺寸，颜色全部来自 Bern 主题内核（`bern-theme`）。除“官方依据”一节引用的 W3C 规范外，文中规则都是 Bern 的设计决策。
 
 ## 1. 原则
 
 - **页面就是应用。** 主窗口不画窗口外框、标题栏或窗口按钮；网页没有“窗口”这个概念，次级界面用对话框或侧边面板呈现。可拖动的浮动窗口只在应用显式声明 `presentation: floating` 时出现。
 - **安静的表面，清楚的层级。** 页面为纯色画布，内容分组用细边框卡片；颜色只用于主要操作、选中、焦点与状态，不用大面积品牌色或装饰性渐变。
-- **交互反馈用高饱和的强调色。** 侧边栏与竖排导航的选中项填满强调色，选中的页签、图标按钮的悬停与按下、开关的开启与滑块的已选范围都用强调色，不用灰度或浅色底表示；导航项不带左侧竖线。视频进度是例外：已播放部分用中性色，避免与画面争夺注意力。
-- **网页的密度与尺度。** 正文 14 px，按钮、输入框与下拉菜单高 32 px，按钮横向更宽；粗略指针下控件与点按区域整体放大。
+- **交互反馈用高饱和的强调色。** 侧边栏与竖排导航的选中项填满强调色，选中的页签、开关的开启与滑块的已选范围都用强调色；导航项不带左侧竖线。图标按钮是例外：它是没有底板的 Ghost 按钮，悬停与按下铺一层中性浅底。
+- **网页的密度与尺度。** 正文 14 px，按钮、输入框、下拉菜单与图标按钮高 36 px；粗略指针下控件与点按区域整体放大。网页没有胶囊形按钮：声明 `shape: capsule` 的按钮、分体按钮、菜单与选择器就是标准控件，用标准高度与圆角；只有按钮样式的开关是胶囊形的 chip。
 - **一套配色算法。** 生成的 CSS 只引用 `--bern-*` 变量，组件样式中没有字面颜色；浅色、深色、提高对比由同一算法生成，应用不写任何深浅色分支。
 - **浏览器托管部分不伪装。** 滚动条、文本选区由浏览器绘制，Bern 通过 `color-scheme` 让它们与当前模式一致。下拉菜单由 Bern 自绘，使它与页面的样式、深浅模式一致，并在各浏览器中表现相同。
 - **语义不只靠颜色。** 选中、错误、禁用同时保留文字、图标、形状或可访问状态。
@@ -34,7 +34,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 ### 3.1 网格与圆角
 
 - 间距以 4 px 为单位：控件内 8–12，行内 16，卡片之间 24，页面边距 24（窄屏 16），分区之间 32。
-- 圆角：控件 6 px；卡片、菜单、下拉 8 px；对话框与浮动窗口 12 px；开关与胶囊形标记全圆角。
+- 圆角：控件与图标按钮 8 px；卡片、菜单、下拉 8 px；对话框与浮动窗口 12 px；开关、chip 与胶囊形标记全圆角。
 - 边框 1 px：卡片与分隔线用 `separator`；需要靠边界识别的控件（输入框、复选框）用 `control.border`。
 
 ### 3.2 字体与字号
@@ -61,13 +61,13 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 | 项目 | 精确指针 | 粗略指针（`pointer: coarse`） |
 | --- | --- | --- |
-| 按钮、输入框、下拉菜单高度 | 32 px | 44 px |
-| 按钮横向 | 左右内边距 20 px，最小宽度 80 px | 同左 |
-| 图标按钮热区 | 32 × 32 px（图标 16 px） | 44 × 44 px（图标 20 px） |
+| 按钮、输入框、下拉菜单高度 | 36 px（大号 42 px） | 44 px |
+| 按钮横向 | 左右内边距 14 px（大号 20 px），13.5 px 字重 500（大号 14.5 px 字重 600），不设最小宽度 | 同左 |
+| 图标按钮热区 | 36 × 36 px（图标 18 px），圆角 8 | 44 × 44 px（图标 20 px） |
 | 卡片内的行最小高度 | 52 px | 60 px |
-| 侧边栏导航项高度 | 32 px | 44 px |
-| 开关 | 轨道 40 × 20，圆钮 14（距轨道边 3） | 轨道 48 × 26，圆钮 18 |
-| 滑块 | 轨道高 4，圆钮 20（4 px 白环包住强调色圆心） | 轨道高 6，圆钮 28 |
+| 侧边栏导航项高度 | 34 px | 44 px |
+| 开关 | 轨道 36 × 20，圆钮 16（距轨道边 2） | 轨道 48 × 26，圆钮 18 |
+| 滑块 | 轨道高 6，圆钮 16（页面底色圆盘加 2 px 强调色圆环，悬停与拖动放大到 1.15 倍） | 轨道高 6，圆钮 28 |
 | 视频进度条 | 轨道高 6，滑块 20 × 16、圆角 7 | 轨道高 8，滑块 28 × 22 |
 | 下拉菜单项 | 高 32，最多显示约 10 项后滚动 | 高 44 |
 
@@ -108,14 +108,14 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 | 配方 | 状态 | 底色 / 前景 / 边界 |
 | --- | --- | --- |
-| `button.standard` | rest、hover、pressed、focus、disabled | canvas / text.primary / separator；悬停、按下为求解后的底色 |
+| `button.standard` | rest、hover、pressed、focus、disabled | 透明 / text.primary / separator；悬停 hover.overlay，按下 pressed.overlay |
 | `button.prominent` | 同上 | accent / on_accent；悬停、按下为 accent 的明度变体，仍满足 on_accent 配对 |
 | `button.plain` | 同上 | 透明 / accent.text；悬停 hover.overlay |
 | `button.destructive` | 同上 | status.error.surface / on_error；standard 与 plain 的危险角色改用 status.error 文字 |
-| `icon_button` | rest、hover、pressed、selected、focus、disabled | 默认配方各状态都不画底色或边框；前景 icon.secondary → accent（悬停）→ accent.text（按下、选中） |
+| `icon_button` | rest、hover、pressed、selected、focus、disabled | Ghost 按钮：静止时没有底色或边框，前景 icon.primary；悬停 hover.overlay，按下 pressed.overlay；选中前景 accent.text |
 | `field` | rest、hover、focus、error、disabled | raised / text.primary / control.border；聚焦时边界 accent 并显示焦点环；错误时边界与说明 status.error |
 | `switch` | off、on、focus、disabled | 关：透明轨道加 1 px control.border 边框，圆钮 control.border，悬停时边框与圆钮为 text.secondary；开：轨道 accent，圆钮 on_accent，悬停轨道 button.prominent.hover |
-| `slider` | rest、hover、active、focus、disabled | 未选轨道 control.track，已选范围 accent；圆钮为 control.thumb 外环、1 px control.border 轮廓、accent 圆心，悬停与拖动时圆心为 button.prominent.hover / pressed |
+| `slider` | rest、hover、active、focus、disabled | 未选轨道 separator，已选范围 accent；圆钮为 surface.canvas 圆盘加 2 px accent 圆环，悬停与拖动时放大到 1.15 倍 |
 | `media_scrubber` | rest、hover、active、focus、disabled | 已播放 media.played，未播放 media.track；滑块 control.thumb 加 0.5 px control.border 轮廓与投影 |
 | `segmented` | rest、selected、hover、focus、disabled | 外槽 panel；选中段 canvas + text.primary + separator；未选中 text.secondary |
 | `chip` | rest、selected、hover、focus、disabled | 透明 / text.secondary / 1 px control.border 内描边；悬停 hover.overlay + text.primary；选中反色：text.primary 底、surface.canvas 字、无描边 |
@@ -124,6 +124,8 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 | `tab` | rest、selected、hover、focus | 透明 / text.secondary；选中 accent.text + 2 px accent 下划线；竖排时选中同 `nav_item` |
 | `menu` | rest、hover、selected、focus | 弹出层 raised / separator / 投影；项透明 / text.primary，悬停与键盘活动项 hover.overlay，选中项尾端 accent.text 对勾、字重 500；触发器用 `field` |
 | `dialog` | — | raised / text.primary / separator；遮罩 scrim |
+| `split_button` | rest、on、hover、focus | 一个整体：1 px separator 轮廓、8 px 圆角，两段高 32，箭头段宽 30、前面一条 separator 分隔线；开启时主段 pressed.overlay 底、text.primary 字、图标 accent |
+| `toast` | — | 反色胶囊：text.primary 底、surface.canvas 字，高 40，距页面底边 30 |
 
 ## 5. 组件
 
@@ -169,7 +171,8 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ### 5.6 Toolbar
 
-- 位于页面头或对话框头的尾端，项间距 8 px，高 32 px。Button 用 standard 外观（`prominence: prominent` 保持主要按钮），Picker 用 segmented 外观，IconButton 无容器。Toolbar 模式：方向键在项之间移动焦点。
+- 位于页面头或对话框头的尾端，项间距 8 px，高 36 px。Button 用 standard 外观（`prominence: prominent` 保持主要按钮），Picker 用 segmented 外观，IconButton 无容器。Toolbar 模式：方向键在项之间移动焦点。
+- `ControlGroup` 在网页上没有共享的底板：组里的图标按钮依次排开，相隔 6 px；组与同一行里相邻的东西（另一个组、标题、间隔）也只隔 6 px，不论所在行声明多大的间距，读起来是一排连续的 Ghost 图标按钮。
 
 ### 5.7 List 与 ForEach
 
@@ -182,8 +185,8 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ### 5.9 Button 与 IconButton
 
-- Button：`<button>`，高 32 px，左右内边距 20 px，最小宽度 80 px，圆角 6 px，14 px 字重 500；有图标时图标 16 px 在文字前，间距 6 px。外观由 `prominence` 与 `role` 选择 4.3 的配方；`cancel` 角色用 standard。
-- IconButton：`<button aria-label>`，默认热区 32 × 32 px；默认及 plain 样式以图标颜色反馈悬停、按下与选中，焦点环保留。显式 prominent 或 ControlGroup 内的控件按声明提供强调容器或共享胶囊，不受默认无底板样式限制。`font_size` 调整图标字号；完整尺寸与分组用法见[当前组件参考](../Reference/UI.md)。
+- Button：`<button>`，高 36 px，左右内边距 14 px，不设最小宽度，圆角 8 px，13.5 px 字重 500；有图标时图标在文字前，间距 6 px。外观由 `prominence` 与 `role` 选择 4.3 的配方；`cancel` 角色用 standard。`shape: capsule` 不改变它的形状与高度（网页没有胶囊形按钮），菜单与选择器的触发按钮同样如此，尾端箭头 14 px、左 12 右 10 的内边距。
+- IconButton：`<button aria-label>`，默认热区 36 × 36 px、圆角 8 px，Ghost 按钮：静止时只有图标（`icon.primary`），悬停与按下铺中性浅底，焦点环保留。显式 prominent 提供强调容器（44 × 44、圆角 12）；ControlGroup 不加底板（见 5.6）。`font_size` 调整图标字号；完整尺寸与分组用法见[当前组件参考](../Reference/UI.md)。
 - 禁用：`disabled` 属性与配方的禁用颜色；不用整体降低不透明度表示禁用。
 
 ### 5.10 TextInput 与 Search
@@ -199,7 +202,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ### 5.12 Slider
 
-- `<input type="range">`，以 `slider` 配方自绘轨道与圆钮。形态类似 Fluent 2：4 px 轨道，已选范围为强调色；圆钮 20 px，由 4 px 白环包住强调色圆心，外加 1 px 轮廓；悬停与拖动时圆心变深。`min_icon` / `max_icon` 在两端（16 px，`icon.secondary`）。
+- `<input type="range">`，以 `slider` 配方自绘轨道与圆钮：6 px 轨道，已选范围为强调色；圆钮 16 px，页面底色的圆盘加 2 px 强调色圆环，悬停与拖动时放大到 1.15 倍。`min_icon` / `max_icon` 在两端（16 px，`icon.secondary`）。
 - 拖动时只更新会话预览；松开或键盘调整结束时运行声明的提交动作。
 
 ### 5.13 Picker
@@ -235,6 +238,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 ### 5.17 Menu 与 MenuItem
 
 - 遵循 WAI-ARIA APG 的 Menu Button 模式：触发器是 standard 按钮（图标、标签、尾端 `chevron.down`），`aria-haspopup="menu"`；菜单是浏览器顶层中的弹出层（Popover API，`role="menu"`），外观与下拉菜单相同（`menu` 配方），不被卡片、对话框与滚动容器裁切。
+- 菜单与弹出面板从触发按钮处打开：以按钮一侧为原点，从 0.9 倍大小沿 bouncy 弹簧（周期 0.5 s、阻尼 0.62）放大到 1，同时在 120 ms 内淡入；触发按钮在页面右半边时，弹出层的尾端对齐按钮的尾端，向左展开。减少动态效果时只做 150 ms 淡入。
 - 菜单项是 `role="menuitem"` 的按钮，高 32 px，图标 16 px 在前；`role: destructive` 用 `status.error` 文字；`Divider` 为 1 px `separator`。悬停与键盘焦点为 `hover.overlay` 底色。
 - 键盘：↓、Enter、Space 打开并聚焦第一项，↑ 打开并聚焦最后一项；菜单内 ↑ ↓ 循环移动，Home / End 到首尾，输入字母跳到以其开头的项；Enter / Space 执行并关闭，焦点回到按钮；Esc 关闭（不关闭外层对话框）并回到按钮；Tab 关闭。
 - 每个菜单项按自己的 `id` 登记为按钮控件，外部入口的 `ui.activate` 在菜单未打开时也走同一个命令闭包。
@@ -253,7 +257,7 @@ Web 没有统一的平台样式规范。本文是 Bern 为 Web 目标定义的�
 
 ## 7. 动效
 
-- 颜色、底色与边框变化 150 ms `ease-out`；对话框打开 180 ms 透明度与 0.98→1 缩放，遮罩淡入；推入导航不做位移动画。
+- 颜色、底色与边框变化 150 ms `ease-out`；对话框打开 180 ms 透明度与 0.98→1 缩放，遮罩淡入；菜单与弹出面板从触发按钮弹出（见 5.17）；推入导航不做位移动画。
 - `prefers-reduced-motion: reduce` 时只保留不超过 150 ms 的透明度变化。
 
 ## 8. 图标

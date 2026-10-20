@@ -2322,7 +2322,14 @@ struct BernScaleBox<Content: View>: View {
     var body: some View {
         GeometryReader { geometry in
             let scale = min(geometry.size.width / max(1, width), geometry.size.height / max(1, height))
+            let fits = scale > 0 && scale.isFinite
             ZStack(alignment: .topLeading) { content() }
+                .environment(\.bernSceneRoom, BernSceneRoom(
+                    width: width,
+                    height: height,
+                    x: fits ? max(0, (geometry.size.width / scale - width) / 2) : 0,
+                    y: fits ? max(0, (geometry.size.height / scale - height) / 2) : 0
+                ))
                 #if os(tvOS)
                 // Text the scene leaves to the system reads at the design's
                 // body size, not at tvOS's, which the scale would enlarge.

@@ -323,12 +323,26 @@ impl Generator<'_> {
         out.open("SwiftUI.ZStack(alignment: .topLeading) {");
         self.nodes(out, &element.children, ctx);
         out.close("}");
-        self.frame(out, element);
-        out.line(format!(
-            ".offset(x: {}, y: {})",
-            self.length(element, "x").unwrap(),
-            self.length(element, "y").unwrap()
-        ));
+        match element.expr("bleed") {
+            Some(bleed) => out.line(format!(
+                ".modifier(BernBleedingLayer(x: {}, y: {}, width: {}, height: {}, bleed: {}))",
+                self.length(element, "x").unwrap(),
+                self.length(element, "y").unwrap(),
+                self.length(element, "width").unwrap(),
+                self.length(element, "height").unwrap(),
+                self.expr(bleed)
+            )),
+            None => {
+                // The layer's own layers are placed in its space.
+                out.line(".environment(\\.bernSceneRoom, nil)");
+                self.frame(out, element);
+                out.line(format!(
+                    ".offset(x: {}, y: {})",
+                    self.length(element, "x").unwrap(),
+                    self.length(element, "y").unwrap()
+                ));
+            }
+        }
         out.line(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)");
     }
 

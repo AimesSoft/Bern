@@ -1377,3 +1377,95 @@ fn declared_apple_icons_are_used_as_they_are() {
     )));
     let _ = std::fs::remove_dir_all(&art);
 }
+
+/// A scene's background bleeds to the window's edges; the traffic lights
+/// keep their room on macOS only.
+#[test]
+fn scene_layers_bleed_and_window_buttons_keep_the_traffic_lights_room() {
+    use bern_ir::{Element, Expr, ExprKind, Node, Prop};
+    use bern_protocol::{Type, Value};
+    let (config, mut compiled) = showcase();
+    let element = |kind: &str, props: Vec<(&str, Prop)>, children| {
+        Node::Element(Element {
+            kind: kind.into(),
+            id: None,
+            path: format!("test.{kind}"),
+            props: props
+                .into_iter()
+                .map(|(name, prop)| (name.into(), prop))
+                .collect(),
+            template: None,
+            children,
+            action: None,
+            source: SourceLocation {
+                file: "scene.rs".into(),
+                line: 1,
+                column: 1,
+            },
+        })
+    };
+    let number = |value| Prop::Number { value };
+    let place = |x, y, width, height| {
+        vec![
+            ("x", number(x)),
+            ("y", number(y)),
+            ("width", number(width)),
+            ("height", number(height)),
+        ]
+    };
+    let mut background = place(0.0, 0.0, 1280.0, 800.0);
+    background.push((
+        "bleed",
+        Prop::Expr {
+            expr: Expr {
+                ty: Type::Bool,
+                kind: ExprKind::Literal {
+                    value: Value::Bool(true),
+                },
+            },
+        },
+    ));
+    compiled.app.components[0].body = element(
+        "ScaleBox",
+        vec![("width", number(1280.0)), ("height", number(800.0))],
+        vec![
+            element("Positioned", background, vec![]),
+            element(
+                "Positioned",
+                place(14.0, 0.0, 1246.0, 64.0),
+                vec![element(
+                    "Row",
+                    vec![],
+                    vec![
+                        element("WindowButtons", vec![], vec![]),
+                        element("Spacer", vec![], vec![]),
+                    ],
+                )],
+            ),
+        ],
+    );
+    let output = workspace().join("target/bern-test/scene-bleed");
+    let context = context(&config, &compiled, "macos", &output);
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
+        .unwrap();
+    let source = String::from_utf8_lossy(&generated.contents);
+    assert!(
+        source.contains(
+            ".modifier(BernBleedingLayer(x: 0.0, y: 0.0, width: 1280.0, height: 800.0, bleed: true))"
+        ),
+        "{source}"
+    );
+    // A layer that does not bleed keeps its own space for its layers.
+    assert!(
+        source.contains(".environment(\\.bernSceneRoom, nil)"),
+        "{source}"
+    );
+    assert!(
+        source.contains("#if os(macOS)\n")
+            && source.contains("SwiftUI.Color.clear.frame(width: 84, height: 1)"),
+        "{source}"
+    );
+}

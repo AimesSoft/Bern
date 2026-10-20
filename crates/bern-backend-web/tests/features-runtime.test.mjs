@@ -212,7 +212,7 @@ test("template images derive their missing side from the source aspect ratio", (
   assert.match(css, /\.bern-image-template\s*\{[^}]*background:\s*currentColor/);
 });
 
-test("content capsules preserve their children and bind their declared height", () => {
+test("content capsules are the standard button and keep their children", () => {
   const { B, F, Element } = runtime();
   const root = new Element("root");
   const height = B.cell(30);
@@ -223,15 +223,21 @@ test("content capsules preserve their children and bind their declared height", 
   B.within(scope, () => F.ContentButton(root, { comp: "demo" }, {
     id: "capsule", label: () => "Enable", shape: "capsule", height: () => height.get(), enabled: () => enabled.get(),
   }, () => activations++, (node) => node.append(child)));
-  const button = root.childNodes[0];
+  B.within(scope, () => F.ContentButton(root, { comp: "demo" }, {
+    id: "plain", label: () => "Open", height: () => height.get(),
+  }, () => {}, () => {}));
+  const [button, plain] = root.childNodes;
+  // The web has no capsule buttons: the standard one, at its own height.
   assert.ok(button.classes.has("bern-control-capsule"));
-  assert.equal(button.style.borderRadius, "999px");
-  assert.equal(button.style.height, "30px");
+  assert.equal(button.style.borderRadius, undefined);
+  assert.equal(button.style.height, undefined);
   assert.equal(button.childNodes[0], child);
   assert.equal(button.attributes["aria-label"], "Enable");
+  // Any other content button takes the height it declares.
+  assert.equal(plain.style.height, "30px");
   height.set(42);
   enabled.set(false);
-  assert.equal(button.style.height, "42px");
+  assert.equal(plain.style.height, "42px");
   assert.equal(button.disabled, true);
   const control = B.controlEntries().find((entry) => entry.target() === "demo.capsule");
   control.actions.activate();
