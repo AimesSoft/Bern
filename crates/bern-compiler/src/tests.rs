@@ -1980,6 +1980,66 @@ fn image_and_progress_diagnostics() {
     }
 }
 
+#[test]
+fn pictures_placed_directly_in_a_window_are_declared() {
+    let source = wrap("Spacer").replace(
+        "page(app: app, windows: windows)",
+        r#"Column {
+                    page(app: app, windows: windows)
+                    Image(source: "missing.png", width: 10)
+                }"#,
+    );
+    let Err(errors) = compile_ui(&source) else {
+        panic!("an undeclared picture in a window compiled");
+    };
+    let error = errors
+        .iter()
+        .find(|e| {
+            e.message
+                == "resource `missing.png` is not declared; list it under [resources] in Bern.toml"
+        })
+        .unwrap_or_else(|| panic!("{errors:?}"));
+    assert!(error.location.is_some(), "{error:?}");
+}
+
+#[test]
+fn sessions_read_directly_in_a_window_belong_to_it() {
+    let source = wrap("Spacer")
+        .replace(
+            "pub fn app(app: demo::Client, windows: AppWindows)",
+            "pub fn app(app: demo::Client, windows: AppWindows, #[session] draft: Draft)",
+        )
+        .replacen(
+            "about_page()",
+            r#"Column {
+                    about_page()
+                    if draft.on {
+                        Switch(id: on, label: tr! { "en" => "On", "ja" => "オン" }, value: draft.on)
+                    }
+                }"#,
+            1,
+        );
+    let app = compile_ui(&source)
+        .unwrap_or_else(|errors| panic!("{errors:?}"))
+        .app;
+    assert_eq!(app.window("about").unwrap().sessions, ["Draft"]);
+    assert_eq!(app.window("main").unwrap().sessions, ["Draft"]);
+}
+
+#[test]
+fn windows_cannot_place_the_root() {
+    let source = wrap("Spacer").replacen("about_page()", "app(app: app, windows: windows)", 1);
+    let Err(errors) = compile_ui(&source) else {
+        panic!("a window that places the root compiled");
+    };
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message == "the root component cannot be placed by a component or a window"),
+        "{errors:?}"
+    );
+}
+
 /// Compile `body` with pictures the engine gives and the resource
 /// `pics/a.png`.
 fn with_engine_pictures(body: &str) -> Result<Compiled, Vec<Diagnostic>> {

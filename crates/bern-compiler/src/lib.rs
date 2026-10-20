@@ -396,6 +396,46 @@ fn component_refs(node: &ir::Node, out: &mut Vec<String>) {
     });
 }
 
+/// Session state types the elements of `node` read and write themselves,
+/// not those of the components it places.
+fn read_sessions(node: &ir::Node) -> Vec<String> {
+    let mut sessions = Vec::new();
+    let mut exprs: Vec<&ir::Expr> = Vec::new();
+    node.walk(&mut |node| match node {
+        ir::Node::Element(element) => {
+            for prop in element.props.values() {
+                match prop {
+                    ir::Prop::Text { text } => exprs.extend(text.exprs()),
+                    ir::Prop::Expr { expr } => exprs.push(expr),
+                    ir::Prop::Field { field } => sessions.push(field.session.clone()),
+                    ir::Prop::Query { query } => exprs.extend(&query.args),
+                    _ => {}
+                }
+            }
+            match &element.action {
+                Some(ir::Action::Engine { args, .. } | ir::Action::Media { args, .. }) => {
+                    exprs.extend(args);
+                }
+                Some(ir::Action::Session { field, op }) => {
+                    sessions.push(field.session.clone());
+                    if let ir::SessionOp::Set { value } | ir::SessionOp::PushStr { value } = op {
+                        exprs.push(value);
+                    }
+                }
+                Some(ir::Action::Window { .. }) | None => {}
+            }
+        }
+        ir::Node::If(node) => exprs.extend(node.branches.iter().map(|(when, _)| when)),
+        ir::Node::IfLet(node) => exprs.push(&node.value),
+        ir::Node::Match(node) => exprs.push(&node.value),
+        ir::Node::Component(_) => {}
+    });
+    sessions.extend(exprs.into_iter().flat_map(ir::Expr::sessions));
+    let mut seen = BTreeSet::new();
+    sessions.retain(|session| seen.insert(session.clone()));
+    sessions
+}
+
 fn find_cycle(components: &BTreeMap<String, Vec<String>>) -> Option<Vec<String>> {
     fn visit(
         name: &str,
@@ -478,6 +518,12 @@ fn window_catalog(
                 {
                     sessions.push(session.clone());
                 }
+            }
+        }
+        // Elements written directly in the window use its sessions too.
+        for session in read_sessions(&content) {
+            if !sessions.contains(&session) {
+                sessions.push(session);
             }
         }
         let keyword = |name: &str, default: &str| -> String {
@@ -1661,10 +1707,12 @@ fn add_page_sessions(
 }
 
 /// The components each lowered component places. Components cannot place
-/// each other recursively, and none places the root.
+/// each other recursively, and neither they nor the windows of the `root`
+/// window set place the root.
 fn component_graph(
     components: &[ir::ComponentDef],
-    root: &str,
+    root: Option<&ir::Element>,
+    root_name: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> BTreeMap<String, Vec<String>> {
     let mut graph = BTreeMap::new();
@@ -1679,13 +1727,17 @@ fn component_graph(
             cycle.join(" → ")
         )));
     }
-    if components.iter().any(|component| {
-        let mut refs = Vec::new();
-        component_refs(&component.body, &mut refs);
-        refs.iter().any(|name| name == root)
-    }) {
+    let mut windows = Vec::new();
+    if let Some(root) = root {
+        component_refs(&ir::Node::Element(root.clone()), &mut windows);
+    }
+    if graph
+        .values()
+        .chain([&windows])
+        .any(|refs| refs.iter().any(|name| name == root_name))
+    {
         diagnostics.push(Diagnostic::error(
-            "the root component cannot be referenced by another component",
+            "the root component cannot be placed by a component or a window",
         ));
     }
     graph
@@ -1772,14 +1824,21 @@ fn prove_contracts(
     contracts
 }
 
-/// Pictures come from declared resources, in library components too.
+/// Pictures come from declared resources, in library components and in
+/// the `root` window set too.
 fn check_resources(
     components: &[ir::ComponentDef],
+    root: Option<&ir::Element>,
     resources: &[ir::ResourceDef],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for component in components {
-        component.body.walk(&mut |node| {
+    let root = root.cloned().map(ir::Node::Element);
+    let trees = components
+        .iter()
+        .map(|component| &component.body)
+        .chain(root.as_ref());
+    for tree in trees {
+        tree.walk(&mut |node| {
             let ir::Node::Element(element) = node else {
                 return;
             };
@@ -1902,7 +1961,12 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
     add_page_sessions(page_sessions, &mut lowered, &mut signatures);
 
     // Checks across the lowered components and the windows they fill.
-    let graph = component_graph(&lowered, &config.root, &mut diagnostics);
+    let graph = component_graph(
+        &lowered,
+        root_element.as_ref(),
+        &config.root,
+        &mut diagnostics,
+    );
     let windows = root_element
         .as_ref()
         .and_then(|root| window_catalog(root, handle, &graph, &signatures, &mut diagnostics));
@@ -1918,7 +1982,12 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         &mut diagnostics,
     );
     placement::check(&lowered, root_element.as_ref(), &mut diagnostics);
-    check_resources(&lowered, &config.resources, &mut diagnostics);
+    check_resources(
+        &lowered,
+        root_element.as_ref(),
+        &config.resources,
+        &mut diagnostics,
+    );
 
     let name = LocalizedText {
         key: "app.name".into(),
