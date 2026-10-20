@@ -364,7 +364,14 @@ target/bern/linux/Showcase/showcase
 - 修正：生成器把 `fallback` 传给 `b::Tabs`；选中值没有挂载的页签时，等这次更新挂载完替换的页签后，选中移到 `fallback`（它也挂载着时），否则移到切换器里的第一个页签，与 WinUI 3、Web 相同。侧栏与页签共用这一选择（`settled`）。页签增减、运行时切换显示的页时，视图栈自己显示的页不当作选择写回。
 - 测试：bern-gtk 的 `a_selection_without_its_item_moves_to_the_fallback_or_the_first`；生成器测试 `tabs_hand_their_fallback_to_the_runtime` 断言有 `fallback` 的 `Tabs` 传 `Some(b::get(…))`、没有的传 `None`。
 - 改后（同一探针）：不写 `fallback` 的窗口回到甲，页面是甲页、切换器高亮甲；写了 `fallback: 丁` 的回到丁，切换器为“甲 丙 丁”、高亮丁。在切换器上点丙后选中为丙；选中丙时乙出现、消失，选中都留在丙。
-- 同时看到、尚未修正：后挂载的页签排在切换器末尾，而不是声明的位置（乙重新出现后为“甲 丙 丁 乙”）。`Tab` 挂载时把页加到 `AdwViewStack` 末尾，视图栈没有插入到指定位置的接口。
+- 同时看到、尚未修正：后挂载的页签排在切换器末尾，而不是声明的位置（乙重新出现后为“甲 丙 丁 乙”）。`Tab` 挂载时把页加到 `AdwViewStack` 末尾，视图栈没有插入到指定位置的接口。同日修正，见下一条。
+
+2026-10-21，后挂载的页签排在声明的位置（设计文档“导航容器的项同样可以是动态的”）：
+
+- 改前：见上一条，乙重新出现后切换器为“甲 丙 丁 乙”；其他目标按声明的顺序排（WinUI 3 按项的位置插入，Web 按区域放按钮，按代码）。
+- 修正：每个 `Tab` 在声明处放一个不显示的标记：`Tabs` 的子内容写进一个从不显示的 GtkBox，条件、`match` 与 `ForEach` 的区域照常把标记插在各自的位置。页签挂载时，以及 `ForEach` 重排行后（标记换了父容器，在下一帧与选中回落之前），视图栈按标记的顺序重排页：`AdwViewStack` 只能追加，所以从头起已按声明顺序排着的页留下，其后的页移除再按顺序加回，标题、图标与显示中的页保留，期间视图栈自己显示的页不当作选择写回（`arranged`、`TabRegistry::arrange`）。登记的页签与切换器同序，选中回落时的“第一个页签”按它取。
+- 测试：bern-gtk 的 `tab_pages_follow_the_declared_order`（条件让第二个、第一个页签后挂载，列表把末行移到最前、交换两行，没有声明位置的页签留在末尾）。Ubuntu 24.04 虚拟机上 bern-gtk 的 `cargo test --all-features`（100 项）与 `cargo clippy --all-features --all-targets -- -D warnings` 通过。
+- 未实测：没有在 Broadway 上用探针看切换器的顺序、重新加回后选中与选中页的内容是否保留，`ForEach` 重排页签也没有实测。
 
 ## 未完成与已知限制
 
@@ -382,7 +389,6 @@ target/bern/linux/Showcase/showcase
 - `Menu` 的菜单项图标与 `destructive` 角色不呈现（GNOME 菜单通常只有文字）。
 - 多实例窗口、焦点迁移、Flatpak 等打包与图标安装尚未实现；桌面文件的 `Exec` 是构建机上的绝对路径。
 - 设置窗口切换页签只构建选中的页签。
-- 写在 `if`、`match` 或 `ForEach` 里、晚于其他页签挂载的页签排在切换器末尾，不在声明的位置（2026-10-21 实测，见验证记录同日条目）；其他目标按声明的顺序排（按代码，未逐一实测）。
 - HDR 图片的 HDR 输出（GTK 4.16 起、Wayland、打开色彩管理）没有实测：测试用的虚拟机是 GTK 4.14，也不能输出 HDR。GTK 的 JPEG 加载器不读增益图，所以增益图由 Bern 应用；GTK 的色彩空间转换只截断不做色调映射，所以 GTK 不输出 HDR 时由 Bern 先转成 SDR。
 - `Video` 的 HDR 视频依赖 GTK：GTK 4.16 起 GStreamer 的帧带有色彩空间，HDR 输出同样需要打开色彩管理；未实测。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。

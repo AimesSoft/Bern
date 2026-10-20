@@ -886,20 +886,49 @@ pub(crate) struct TabEntry {
     value: Value,
     name: &'static str,
     label: Rc<dyn Fn() -> String>,
+    icon: Option<&'static str>,
     slot: Rc<Slot>,
     build: Build,
     ctx: Ctx,
     page: String,
+    /// The page's content in the stack.
+    holder: gtk::Box,
+    /// The stack's page, which carries the title and icon; a new one each
+    /// time the page comes back.
+    titled: Rc<RefCell<adw::ViewStackPage>>,
+    /// The tab's place among those declared.
+    marker: gtk::Widget,
 }
 
-/// The tabs a tab view shows now, as they mount and leave, in the order of
-/// the stack's pages, which the switcher shows.
+/// The stack's new page order from `places`, the declared place of each
+/// page in the stack's order: the pages in declared order, by their
+/// index in the stack, and how many lead it in place. The stack only
+/// appends, so the pages after the longest run of the declared order it
+/// already shows from the start leave and come back.
+fn arranged(places: &[usize]) -> (Vec<usize>, usize) {
+    let mut order: Vec<usize> = (0..places.len()).collect();
+    order.sort_by_key(|&page| places[page]);
+    let mut kept = 0;
+    for page in 0..places.len() {
+        if order.get(kept) == Some(&page) {
+            kept += 1;
+        }
+    }
+    (order, kept)
+}
+
+/// The tabs a tab view shows now, in the order of the stack's pages,
+/// which the switcher shows: the order they are declared in, also when a
+/// condition or a list mounts one before others.
 pub struct TabRegistry {
     stack: adw::ViewStack,
+    /// Where the tabs are declared: each marks its place there.
+    declared: Parent,
     entries: RefCell<Vec<Rc<TabEntry>>>,
     version: crate::reactive::Version,
     next: std::cell::Cell<u32>,
     updating: std::cell::Cell<bool>,
+    arranging: std::cell::Cell<bool>,
 }
 
 impl TabRegistry {
@@ -921,6 +950,71 @@ impl TabRegistry {
         self.updating.set(was);
         result
     }
+
+    /// Put the stack's pages in the order the tabs are declared, keeping
+    /// each page's title and icon and the page shown. Whether the order
+    /// changed.
+    fn arrange(&self) -> bool {
+        let entries = self.entries.borrow().clone();
+        let declared = self.declared.widgets();
+        let places: Vec<usize> = entries
+            .iter()
+            .map(|entry| {
+                declared
+                    .iter()
+                    .position(|marker| *marker == entry.marker)
+                    .unwrap_or(usize::MAX)
+            })
+            .collect();
+        let (order, kept) = arranged(&places);
+        if kept == order.len() {
+            return false;
+        }
+        let order: Vec<Rc<TabEntry>> = order
+            .into_iter()
+            .map(|page| Rc::clone(&entries[page]))
+            .collect();
+        let shown = self.stack.visible_child_name();
+        self.quietly(|| {
+            for entry in &order[kept..] {
+                self.stack.remove(&entry.holder);
+            }
+            for entry in &order[kept..] {
+                let title = untrack(|| (entry.label)());
+                let page = self
+                    .stack
+                    .add_titled(&entry.holder, Some(&entry.page), &title);
+                if let Some(icon) = entry.icon {
+                    page.set_icon_name(Some(icons::name(icon)));
+                }
+                *entry.titled.borrow_mut() = page;
+            }
+            if let Some(shown) = shown {
+                self.stack.set_visible_child_name(&shown);
+            }
+        });
+        *self.entries.borrow_mut() = order;
+        true
+    }
+
+    /// Arrange the pages once the update that moved a tab's place, such
+    /// as a list reordering its rows, is over: before the selection
+    /// settles, which counts from the first tab, and before the next frame.
+    fn arrange_later(self: &Rc<Self>) {
+        if self.arranging.replace(true) {
+            return;
+        }
+        let registry = Rc::downgrade(self);
+        glib::idle_add_local_full(glib::Priority::HIGH_IDLE, move || {
+            if let Some(registry) = registry.upgrade() {
+                registry.arranging.set(false);
+                if registry.arrange() {
+                    registry.version.bump();
+                }
+            }
+            glib::ControlFlow::Break
+        });
+    }
 }
 
 pub struct TabProps {
@@ -931,14 +1025,27 @@ pub struct TabProps {
     pub icon: Option<&'static str>,
 }
 
-/// One tab; it is part of the tab view while mounted. Its content is built
-/// while it is selected.
+/// One tab; it is part of the tab view while mounted, at the place it is
+/// declared. Its content is built while it is selected.
 #[allow(non_snake_case)]
-pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
+pub fn Tab(p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
     let Some(registry) = ctx.tabs().cloned() else {
         return;
     };
     let value = untrack(|| (props.value)(ctx));
+    // The tab's place among the others, in the regions of conditions and
+    // lists; the page follows it when a list reorders its rows.
+    let marker = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    marker.set_visible(false);
+    p.add(&marker);
+    {
+        let registry = Rc::downgrade(&registry);
+        marker.connect_parent_notify(move |_| {
+            if let Some(registry) = registry.upgrade() {
+                registry.arrange_later();
+            }
+        });
+    }
     let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let index = registry.next.get();
     registry.next.set(index + 1);
@@ -947,23 +1054,32 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
     if let Some(icon) = props.icon {
         page.set_icon_name(Some(icons::name(icon)));
     }
+    let titled = Rc::new(RefCell::new(page));
     let label: Rc<dyn Fn() -> String> = {
         let at = ctx.clone();
         let label = Rc::clone(&props.label);
         Rc::new(move || label(&at))
     };
-    let titled = Rc::clone(&label);
-    effect(move || page.set_title(Some(&titled())));
+    {
+        let label = Rc::clone(&label);
+        let titled = Rc::clone(&titled);
+        effect(move || titled.borrow().set_title(Some(&label())));
+    }
     let entry = Rc::new(TabEntry {
         name: variant_name(props.enum_name, &value),
         value,
         label,
+        icon: props.icon,
         slot: Slot::new(Parent::of_box(&holder)),
         build,
         ctx: ctx.clone(),
         page: name,
+        holder,
+        titled,
+        marker: marker.upcast(),
     });
     registry.entries.borrow_mut().push(Rc::clone(&entry));
+    registry.arrange();
     registry.version.bump();
     let weak = Rc::downgrade(&registry);
     on_cleanup(move || {
@@ -972,7 +1088,7 @@ pub fn Tab(_p: &Parent, ctx: &Ctx, props: TabProps, build: Build) {
                 .entries
                 .borrow_mut()
                 .retain(|kept| !Rc::ptr_eq(kept, &entry));
-            registry.quietly(|| registry.stack.remove(&holder));
+            registry.quietly(|| registry.stack.remove(&entry.holder));
             registry.version.bump();
         }
     });
@@ -1000,14 +1116,17 @@ pub fn Tabs(
 ) {
     let stack = adw::ViewStack::new();
     stack.set_vexpand(true);
+    // The tabs mark their places in a box that is never shown.
+    let declared = Parent::of_box(&gtk::Box::new(gtk::Orientation::Vertical, 0));
     let registry = Rc::new(TabRegistry {
         stack: stack.clone(),
+        declared: declared.clone(),
         entries: RefCell::new(Vec::new()),
         version: crate::reactive::Version::new(),
         next: std::cell::Cell::new(0),
         updating: std::cell::Cell::new(false),
+        arranging: std::cell::Cell::new(false),
     });
-    let (declared, _) = Parent::capture(p);
     tabs(&declared, &ctx.with_tabs(Rc::clone(&registry)));
     let switcher = adw::ViewSwitcher::new();
     switcher.set_stack(Some(&stack));
@@ -1310,6 +1429,27 @@ mod tests {
         assert_eq!(settled(&b, &mounted, || None), Some(a.clone()));
         // A fallback that is not mounted either is passed over.
         assert_eq!(settled(&d, &mounted[..2], || Some(b.clone())), Some(a));
+    }
+
+    /// Tabs show in the order they are declared, as on the other targets,
+    /// also when a condition mounts one after the others; only the pages
+    /// after it come back.
+    #[test]
+    fn tab_pages_follow_the_declared_order() {
+        // Declared in order: nothing moves.
+        assert_eq!(arranged(&[0, 1, 2, 3]), (vec![0, 1, 2, 3], 4));
+        assert_eq!(arranged(&[]), (vec![], 0));
+        // The second tab came back last: the two after it come back.
+        assert_eq!(arranged(&[0, 2, 3, 1]), (vec![0, 3, 1, 2], 2));
+        // The first did: all the others.
+        assert_eq!(arranged(&[1, 2, 3, 0]), (vec![3, 0, 1, 2], 1));
+        // A list moved its last row first: the rest follow it.
+        assert_eq!(arranged(&[4, 6, 8, 2]), (vec![3, 0, 1, 2], 1));
+        // It swapped the first two rows: the one now second and those
+        // after it come back.
+        assert_eq!(arranged(&[1, 0, 2]), (vec![1, 0, 2], 1));
+        // A tab without a declared place stays last.
+        assert_eq!(arranged(&[usize::MAX, 0, 1]), (vec![1, 2, 0], 2));
     }
 
     #[test]
