@@ -639,6 +639,14 @@ extension View {
     }
 }
 
+/// A mounted control's registration: its token, and whether it is on
+/// screen. A reference, so marking it does not draw the control again.
+@MainActor
+private final class BernControlMount {
+    let token = UUID()
+    var mounted = false
+}
+
 private struct BernControl: ViewModifier {
     let name: String
     let role: String
@@ -647,7 +655,7 @@ private struct BernControl: ViewModifier {
     let actions: BernControlActions
     @Environment(BernWindowContext.self) private var window
     @Environment(\.bernItemKeys) private var keys
-    @State private var token = UUID()
+    @State private var mount = BernControlMount()
 
     init(target: String, role: String, label: String, enabled: Bool, actions: BernControlActions) {
         self.name = target
@@ -659,17 +667,33 @@ private struct BernControl: ViewModifier {
 
     private var target: String { name + keys }
 
+    private func register() {
+        BernHost.shared.controls.register(
+            mount.token,
+            BernControlEntry(
+                target: target, window: window.id, role: role, label: label, enabled: enabled,
+                actions: actions))
+    }
+
     func body(content: Content) -> some View {
+        // Listed as the control appears and dropped as it disappears, both
+        // at once. A task registering it may start later (iOS 26 does): for
+        // a control that came and went in one update, as a layout shown
+        // until the width is measured, it ran after the control had been
+        // dropped and left it listed for good.
         content
             .accessibilityIdentifier(target)
-            .task(id: "\(window.id)|\(target)|\(label)|\(enabled)") {
-                BernHost.shared.controls.register(
-                    token,
-                    BernControlEntry(
-                        target: target, window: window.id, role: role, label: label, enabled: enabled,
-                        actions: actions))
+            .onAppear {
+                mount.mounted = true
+                register()
             }
-            .onDisappear { BernHost.shared.controls.remove(token) }
+            .onChange(of: "\(window.id)|\(target)|\(label)|\(enabled)") {
+                if mount.mounted { register() }
+            }
+            .onDisappear {
+                mount.mounted = false
+                BernHost.shared.controls.remove(mount.token)
+            }
     }
 }
 
