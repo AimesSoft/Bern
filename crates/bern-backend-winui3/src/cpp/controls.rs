@@ -1,7 +1,7 @@
 //! Controls: buttons, text fields, search fields, switches, sliders,
 //! pickers, menus, and the areas that take drops and gestures.
 
-use super::{Generator, Out, designated, null, string, wide};
+use super::{Generator, Out, designated, motion_ref, null, string, wide};
 use bern_ir::{Element, ExprKind, Node};
 use bern_protocol::{EnumDef, Type};
 
@@ -137,6 +137,20 @@ impl Generator<'_> {
             (
                 "suggest",
                 (element.keyword("suggest") == Some("true")).then(|| "true".into()),
+            ),
+            // A palette grows out of its field on the hero spring, follows
+            // its results on the bouncy one and goes back on the snappy one.
+            (
+                "grow",
+                (element.keyword("style") == Some("palette")).then(|| motion_ref("hero")),
+            ),
+            (
+                "follow",
+                (element.keyword("style") == Some("palette")).then(|| motion_ref("bouncy")),
+            ),
+            (
+                "shrink",
+                (element.keyword("style") == Some("palette")).then(|| motion_ref("snappy")),
             ),
         ])
     }

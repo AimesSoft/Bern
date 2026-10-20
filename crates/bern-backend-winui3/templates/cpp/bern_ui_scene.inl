@@ -2,8 +2,9 @@
 // room, marquees, accordions and flowing rows, modals over the window,
 // timers, control groups and the search palette. Scenes keep one
 // coordinate space under one render transform, so pictures, text and hit
-// targets stay registered. Modals are the system's content dialogs and the
-// palette the system's flyout. Generated build input; do not edit.
+// targets stay registered. Modals are the system's content dialogs; the
+// palette grows out of its search box in the flyout's material. Generated
+// build input; do not edit.
 
 namespace B {
 
@@ -687,13 +688,16 @@ struct PaletteState {
 /// The palette whose results are being built.
 inline std::shared_ptr<PaletteState> currentPalette;
 
-/// `Search(style: palette)`: a search button that opens the search over the
-/// window: the field and a way to close it on top, the results below,
-/// built only while it is open. A compact window shows it whole, a wider
-/// one as a card of `width` × `height`. The arrow keys move among the
-/// results, Return chooses the current one or else submits, Escape, the
-/// close button or a click outside close it. External entries open it with
-/// `activate` or `focus`.
+/// `Search(style: palette)`: the system's search box, which grows into the
+/// search over the window (design 10.8, T17): the panel moves out of the
+/// box to its place on the hero spring, its height follows the results on
+/// the bouncy spring, and it goes back into the box on the snappy one. The
+/// panel is in the flyout's material over the dimmed page, `width` wide
+/// and at most `height` tall; the field row (the glass, the native text
+/// box, `esc`) on top, the results below, built only while it is open. The
+/// arrow keys move among the results, Return chooses the current one or
+/// else submits, Escape, `esc` or a click outside close it. External
+/// entries open it with `activate` or `focus`.
 inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Build const& results) {
     if (!props.field || !ctx.win) return;
     auto field = *props.field;
@@ -712,63 +716,214 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
         });
     double width = props.width.value_or(640), height = props.height.value_or(480);
     auto submit = Run(ctx, props.submit);
+    auto grow = props.grow, follow = props.follow ? props.follow : props.grow, shrink = props.shrink ? props.shrink : props.grow;
+    Win* win = ctx.win;
+    std::weak_ptr<Page> page = ctx.page;
+    // Fluent's control and overlay corners; square in the system XAML.
+    double fieldCorner = kWinUI ? 4 : 0, panelCorner = kWinUI ? 8 : 0;
     struct Open {
-        controls::Flyout flyout{nullptr};
+        controls::Grid layer{nullptr};
+        controls::Border dim{nullptr};
+        controls::Border panel{nullptr};
+        controls::Grid content{nullptr};
+        xaml::FrameworkElement list{nullptr};
         std::unique_ptr<Scope> scope;
         std::shared_ptr<PaletteState> state;
+        /// How far the panel has grown out of the field (0 to 1), and the
+        /// height its results ask for.
+        std::shared_ptr<Spring> progress, tall;
+        /// The field's rectangle and the panel's: left, top, width, height
+        /// (the panel's most) and corner, in the layer.
+        std::array<double, 5> from{}, to{};
+        bool started = false, closing = false;
     };
     auto open = std::make_shared<Open>();
     auto close = std::make_shared<std::function<void()>>();
-    *close = [open] {
-        if (!open->flyout) return;
-        auto flyout = open->flyout;
-        open->flyout = nullptr;
-        if (open->scope) open->scope->Dispose();
-        open->scope.reset();
-        open->state = nullptr;
-        flyout.Hide();
+    // The panel where its springs stand: between the field and its place,
+    // as tall as its results; its content shows once it has mostly grown
+    // and the page dims with it.
+    auto place = [open] {
+        if (!open->panel) return;
+        double t = open->progress ? open->progress->value : 0;
+        auto mix = [t](double a, double b) { return a + (b - a) * t; };
+        double tall = open->tall ? open->tall->value : open->to[3];
+        double w = (std::max)(1.0, mix(open->from[2], open->to[2])), h = (std::max)(1.0, mix(open->from[3], tall));
+        double r = (std::max)(0.0, mix(open->from[4], open->to[4]));
+        controls::Canvas::SetLeft(open->panel, mix(open->from[0], open->to[0]));
+        controls::Canvas::SetTop(open->panel, mix(open->from[1], open->to[1]));
+        open->panel.Width(w);
+        open->panel.Height(h);
+        open->panel.CornerRadius(xaml::CornerRadius{r, r, r, r});
+        media::RectangleGeometry clip;
+        clip.Rect(winrt::Windows::Foundation::Rect{0, 0, static_cast<float>(w), static_cast<float>(h)});
+        open->panel.Clip(clip);
+        if (open->content) open->content.Opacity(open->closing ? 0.0 : (std::clamp)(t * 1.6 - 0.5, 0.0, 1.0));
+        if (open->dim) open->dim.Opacity((std::clamp)(t, 0.0, 1.0));
     };
-    auto show = [open, close, ctx, field, panelPrompt, results, submit, width, height, weakEntry = winrt::make_weak(entry)] {
+    // Where the field stands and where the panel goes: as wide as declared
+    // (16 from the window's edges at most), centered over the column of the
+    // page header the field stands in, 26 under the field as the design's
+    // panel stands under its toolbar, and at most as tall as declared.
+    auto measure = [open, page, width, height, fieldCorner, panelCorner, weakEntry = winrt::make_weak(entry)] {
         auto entry = weakEntry.get();
-        if (open->flyout || !entry || !entry.XamlRoot()) return;
+        if (!entry || !open->layer) return;
+        double W = open->layer.ActualWidth(), H = open->layer.ActualHeight();
+        winrt::Windows::Foundation::Rect field{0, 0, static_cast<float>(entry.ActualWidth()), static_cast<float>(entry.ActualHeight())};
+        try {
+            field = entry.TransformToVisual(open->layer).TransformBounds(field);
+        } catch (winrt::hresult_error const&) {
+        }
+        open->from = {field.X, field.Y, field.Width, field.Height, fieldCorner};
+        double w = (std::min)(width, (std::max)(280.0, W - 32));
+        double center = W / 2;
+        if (auto shown = page.lock(); shown && shown->tools)
+            if (auto header = shown->tools.Parent().try_as<xaml::FrameworkElement>()) {
+                try {
+                    auto box = header.TransformToVisual(open->layer)
+                                   .TransformBounds({0, 0, static_cast<float>(header.ActualWidth()), static_cast<float>(header.ActualHeight())});
+                    center = box.X + box.Width / 2;
+                } catch (winrt::hresult_error const&) {
+                }
+            }
+        center = (std::clamp)(center, w / 2 + 16, (std::max)(w / 2 + 16, W - w / 2 - 16));
+        double top = (std::clamp)(static_cast<double>(field.Y + field.Height) + 26, 16.0, (std::max)(16.0, H * 0.3));
+        open->to = {center - w / 2, top, w, (std::min)(height, (std::max)(120.0, H - top - 16)), panelCorner};
+    };
+    // The height the results ask for: the field row, its rule and the list.
+    auto wanted = [open] {
+        double list = open->list ? open->list.ActualHeight() : 0;
+        return (std::min)(open->to[3], 57 + list);
+    };
+    *close = [open, place, shrink, weakEntry = winrt::make_weak(entry)] {
+        if (!open->layer || open->closing) return;
+        open->closing = true;
+        auto finish = [open, weakEntry] {
+            if (auto layer = open->layer)
+                if (auto parent = layer.Parent().try_as<controls::Panel>()) {
+                    uint32_t at = 0;
+                    if (parent.Children().IndexOf(layer, at)) parent.Children().RemoveAt(at);
+                }
+            if (open->scope) open->scope->Dispose();
+            open->scope.reset();
+            open->state = nullptr;
+            open->layer = nullptr;
+            open->dim = nullptr;
+            open->panel = nullptr;
+            open->content = nullptr;
+            open->list = nullptr;
+            open->progress = open->tall = nullptr;
+            open->started = open->closing = false;
+            if (auto entry = weakEntry.get()) entry.Opacity(1);
+        };
+        if (!open->started || !open->progress) {
+            finish();
+            return;
+        }
+        place();
+        open->progress->To(0, shrink, finish);
+    };
+    auto show = [open, close, place, measure, wanted, win, ctx, field, panelPrompt, results, submit, grow, follow, weakEntry = winrt::make_weak(entry)] {
+        auto entry = weakEntry.get();
+        if (open->layer || !entry || !entry.XamlRoot() || !win) return;
+        auto host = win->host ? win->host : win->root;
+        if (!host) return;
         // What the open palette runs belongs to its own scope, ended when
         // it closes.
         open->scope = std::make_unique<Scope>();
-        controls::Flyout flyout;
-        if (auto style = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter"><Setter Property="Padding" Value="0" /><Setter Property="MaxWidth" Value=")" +
-                std::to_wstring(width) + LR"(" /><Setter Property="MaxHeight" Value=")" + std::to_wstring(height) + LR"(" /><Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" /></Style>)")
-                              .try_as<xaml::Style>())
-            flyout.FlyoutPresenterStyle(style);
-        open->flyout = flyout;
         auto state = std::make_shared<PaletteState>();
         std::weak_ptr<std::function<void()>> weakClose = close;
         state->dismiss = [weakClose] {
             if (auto close = weakClose.lock()) (*close)();
         };
         open->state = state;
-        flyout.Closed([weakClose](auto&&, auto&&) {
+        // Over the window's content: the page dims, a click on it closes.
+        controls::Grid layer;
+        controls::Border dim;
+        dim.Background(media::SolidColorBrush(Rgb(0x000000, IsDark(host) ? 82 : 51)));
+        dim.Opacity(0);
+        dim.Tapped([weakClose](auto&&, auto&&) {
             if (auto close = weakClose.lock()) (*close)();
         });
-        // As wide as declared; as tall as its results, up to the height.
+        layer.Children().Append(dim);
+        controls::Canvas stage;
+        layer.Children().Append(stage);
+        // The panel in the platform's overlay material, as a flyout is.
+        controls::Border panel;
+        if (auto style = Styles::Themed(L"Border", {{L"Background", kWinUI ? L"AcrylicInAppFillColorDefaultBrush" : L"SystemControlTransientBackgroundBrush"},
+                                                       {L"BorderBrush", kWinUI ? L"SurfaceStrokeColorFlyoutBrush" : L"SystemControlTransientBorderBrush"}}))
+            panel.Style(style);
+        panel.BorderThickness(xaml::Thickness{1, 1, 1, 1});
+        panel.Opacity(0);
+        media::ThemeShadow shadow;
+        shadow.Receivers().Append(dim);
+        panel.Shadow(shadow);
+        panel.Translation({0.0f, 0.0f, 32.0f});
+        stage.Children().Append(panel);
+        // At the panel's full width from the start; the panel's growing
+        // edges uncover it.
         controls::Grid body;
-        body.Width(width);
-        body.MaxHeight(height);
-        controls::RowDefinition top;
-        top.Height(AutoLength());
+        body.HorizontalAlignment(xaml::HorizontalAlignment::Left);
+        body.VerticalAlignment(xaml::VerticalAlignment::Stretch);
+        for (auto rowHeight : {56.0, 1.0}) {
+            controls::RowDefinition row;
+            row.Height(xaml::GridLength{rowHeight, xaml::GridUnitType::Pixel});
+            body.RowDefinitions().Append(row);
+        }
         controls::RowDefinition rest;
         rest.Height(Star());
-        body.RowDefinitions().Append(top);
         body.RowDefinitions().Append(rest);
+        // The field row (`.pin`): the glass, the native text box, and `esc`.
+        controls::Grid head;
+        head.Padding(xaml::Thickness{18, 0, 10, 0});
+        for (auto star : {false, true, false}) {
+            controls::ColumnDefinition column;
+            column.Width(star ? Star() : AutoLength());
+            head.ColumnDefinitions().Append(column);
+        }
+        controls::FontIcon glass;
+        glass.Glyph(L"");
+        glass.FontSize(16);
+        glass.VerticalAlignment(xaml::VerticalAlignment::Center);
+        if (auto style = Styles::Themed(L"FontIcon", {{L"Foreground", Keys::SecondaryText}})) glass.Style(style);
+        head.Children().Append(glass);
         controls::TextBox box;
-        box.Margin(xaml::Thickness{12, 12, 12, 8});
-        body.Children().Append(box);
+        box.Margin(xaml::Thickness{12, 0, 8, 0});
+        box.VerticalAlignment(xaml::VerticalAlignment::Center);
+        controls::Grid::SetColumn(box, 1);
+        head.Children().Append(box);
+        controls::Button escape;
+        Styles::MakeSubtle(escape);
+        controls::TextBlock escapeText;
+        escapeText.Text(L"esc");
+        escapeText.FontSize(12);
+        if (auto style = Styles::Themed(L"TextBlock", {{L"Foreground", Keys::SecondaryText}})) escapeText.Style(style);
+        escape.Content(escapeText);
+        escape.Padding(xaml::Thickness{8, 4, 8, 4});
+        escape.VerticalAlignment(xaml::VerticalAlignment::Center);
+        xaml::Automation::AutomationProperties::SetName(escape, bern::Text::Tr("bern.window.close"));
+        escape.Click([weakClose](auto&&, auto&&) {
+            if (auto close = weakClose.lock()) (*close)();
+        });
+        controls::Grid::SetColumn(escape, 2);
+        head.Children().Append(escape);
+        body.Children().Append(head);
+        controls::Border rule;
+        if (auto style = Styles::Themed(L"Border", {{L"Background", Keys::Divider}})) rule.Style(style);
+        controls::Grid::SetRow(rule, 1);
+        body.Children().Append(rule);
         controls::ScrollViewer scroller;
         scroller.HorizontalScrollBarVisibility(controls::ScrollBarVisibility::Disabled);
-        controls::Grid::SetRow(scroller, 1);
-        auto list = MakeFlex(false, 2, xaml::Thickness{8, 0, 8, 8});
+        scroller.VerticalScrollBarVisibility(controls::ScrollBarVisibility::Auto);
+        controls::Grid::SetRow(scroller, 2);
+        auto list = MakeFlex(false, 2, xaml::Thickness{6, 6, 6, 6});
         scroller.Content(list);
         body.Children().Append(scroller);
-        flyout.Content(body);
+        panel.Child(body);
+        open->layer = layer;
+        open->dim = dim;
+        open->panel = panel;
+        open->content = body;
+        open->list = list.as<xaml::FrameworkElement>();
         open->scope->Run([&] {
             if (panelPrompt) Reactive::Run([box, panelPrompt] { box.PlaceholderText(panelPrompt()); });
             auto updating = Editable([box] { return box.Text(); }, [box](auto const& v) { box.Text(v); }, ctx, field);
@@ -797,18 +952,35 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
             default: break;
             }
         });
-        box.Loaded([weak = winrt::make_weak(box)](auto&&, auto&&) {
-            if (auto box = weak.get()) {
+        // Once laid out: from the field to its place on the hero spring,
+        // as tall as the results at the panel's width; then the height
+        // follows them on the bouncy spring, and a resized window moves it.
+        layer.SizeChanged([open, place, measure, wanted, grow, weakBox = winrt::make_weak(box), weakEntry](auto&&, auto&&) {
+            if (!open->layer || open->closing) return;
+            measure();
+            open->content.Width(open->to[2]);
+            if (open->started) {
+                if (open->tall) open->tall->Set(wanted());
+                place();
+                return;
+            }
+            open->layer.UpdateLayout();
+            open->started = true;
+            open->progress = Spring::Make(0, [place](double) { place(); });
+            open->tall = Spring::Make(wanted(), [place](double) { place(); });
+            place();
+            open->panel.Opacity(1);
+            if (auto entry = weakEntry.get()) entry.Opacity(0);
+            open->progress->To(1, grow);
+            if (auto box = weakBox.get()) {
                 box.Focus(xaml::FocusState::Programmatic);
                 box.SelectionStart(static_cast<int32_t>(box.Text().size()));
             }
         });
-        // Over the search box, its trailing edges at the box's, growing
-        // down and toward the leading side.
-        controls::Primitives::FlyoutShowOptions options;
-        options.Placement(controls::Primitives::FlyoutPlacementMode::BottomEdgeAlignedRight);
-        options.Position(winrt::Windows::Foundation::Point{static_cast<float>(entry.ActualWidth()), 0});
-        flyout.ShowAt(entry, options);
+        list.as<xaml::FrameworkElement>().SizeChanged([open, wanted, follow](auto&&, auto&&) {
+            if (open->started && !open->closing && open->tall) open->tall->To(wanted(), follow);
+        });
+        host.Children().Append(layer);
     };
     // Pointing at the box, its search button or typing in it opens the
     // palette with the text. The box's own text field marks the tap handled,
@@ -826,7 +998,7 @@ inline void SearchPalette(Parent const& p, Ctx const& ctx, SearchProps props, Bu
         Actions{.activate = show,
             .edit = [ctx, field](std::string const& value) { SetDraft(ctx, field, Value::Text(value)); },
             .submit = submit,
-            .value = [ctx, field, open] { return std::optional<std::string>((open->flyout ? "open: " : "") + R::AsText(ctx.Peek(field))); },
+            .value = [ctx, field, open] { return std::optional<std::string>((open->layer ? "open: " : "") + R::AsText(ctx.Peek(field))); },
             .focus = show});
     p.Add(entry);
 }
