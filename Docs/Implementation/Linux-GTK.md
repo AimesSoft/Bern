@@ -334,6 +334,14 @@ target/bern/linux/Showcase/showcase
 - 未验证：窄宽度下的换行。该应用的主窗口最小 720、设置窗口最小 1000，到不了手机布局；Broadway 下 `window resize` 不生效。`BernFlow` 的断行与分配抽成 `flow_lines`，单元测试用原型手机版的实测尺寸（分段 123、chip 54、宽 358、间距 10）算出第一行 chip 在 176、240、304，第二行在 0、64，与原型一致。
 - `cargo clippy --all-features --all-targets -- -D warnings` 与 `cargo test --all-features`（92 项）通过；`cargo test -p bern-backend-gtk` 对生成的展示应用做类型检查通过。
 
+2026-10-20，量到宽度之前的布局选择（Ubuntu 24.04 虚拟机，经 Broadway；提交 67fc1be 的副本，只在虚拟机副本的 `bern-gtk` 里临时向 stderr 打印窗口的打开尺寸、量到的宽度与 `Adaptive` 每次填入的布局，看完改回）：
+
+- `examples/gallery`（主窗口声明 900 × 600，断点 600 / 1024 / 1440）：主窗口在挂内容之前按打开尺寸 900 定为 `medium`，量到 900 后不变。经 CLI 的 `ui select` 切到胶片页，新挂的 `Adaptive(id: film_controls)` 只填一次 `medium`（按窗口宽 900），之后量到自己的可用宽度 675，仍是 `medium`，没有重填；画面是 `medium` 布局（两个文字按钮，没有 `expanded` 那行说明）。「关于」对话框按声明的 360 × 220 打开即为 `compact`，量到 360 不变。
+- Broadway 的显示器在浏览器视口改变大小之后才跟着变，此前（包括刚连上或重新加载页面时）一直报 1024 × 768，所以上面的打开尺寸没有受显示器限制。
+- 比显示器宽的窗口：视口改为 520 宽后，经 CLI 关掉再打开主窗口，打开尺寸按显示器限为 520，定为 `compact`；实际窗口 751 宽，量到后换成 `medium`。推断是 GTK 把默认尺寸限在显示器内，但窗口不会窄于内容的最小宽度，所以这时的估计比实际窄，会先按窄一档构建一次。
+- 所在位置比窗口窄一档：在这个 751 宽的窗口里切到胶片页，`Adaptive` 先按窗口宽填 `medium`，量到自己的 552 后换成 `compact`。用窗口宽代替的估计不小于它的可用宽度，侧栏占去宽度时就会这样多构建一次，与规则相符。
+- 未验证：真实 Wayland/X11 会话与手机外壳（Phosh）中窗口是否被限在屏幕内；多显示器。
+
 ## 未完成与已知限制
 
 - WinUI 3 与 `flutter + macos` 属于阶段五后续批次。
