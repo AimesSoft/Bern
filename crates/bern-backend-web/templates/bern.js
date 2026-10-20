@@ -1835,13 +1835,15 @@ let typeaheadReset = 0;
 
 /// Place a popover below `anchor`, or above it when there is more room
 /// there. It runs before the popover shows, from the anchor alone: the
-/// popover's height is capped by the room it gets.
+/// popover's height is capped by the room it gets. A list of options or
+/// commands is at most 328 high and opens upwards when less than 160 is
+/// left below; a panel of other content is as high as its content, as a
+/// native popover is, and opens upwards when only the room above holds it.
 export function placePopover(popover, anchor) {
   popover.bernAnchor = anchor;
   const rect = anchor.getBoundingClientRect();
   const below = innerHeight - rect.bottom - 12;
   const above = rect.top - 12;
-  const up = below < 160 && above > below;
   popover.style.minWidth = `${rect.width}px`;
   // A trigger in the trailing half opens the popover leftwards, its end on
   // the trigger's end, as a menu at the end of a toolbar does.
@@ -1849,9 +1851,20 @@ export function placePopover(popover, anchor) {
   popover.style.maxWidth = `${Math.max(rect.width, leftwards ? rect.right - 8 : innerWidth - rect.left - 8)}px`;
   popover.style.left = leftwards ? "auto" : `${Math.max(8, Math.min(rect.left, innerWidth - 168))}px`;
   popover.style.right = leftwards ? `${Math.max(8, innerWidth - rect.right)}px` : "auto";
+  const panel = popover.classList.contains("bern-popover-panel");
+  const up = (panel ? below < naturalHeight(popover) : below < 160) && above > below;
   popover.style.top = up ? "auto" : `${rect.bottom + 4}px`;
   popover.style.bottom = up ? `${innerHeight - rect.top + 4}px` : "auto";
-  popover.style.maxHeight = `${Math.min(328, up ? above : below)}px`;
+  popover.style.maxHeight = `${panel ? (up ? above : below) : Math.min(328, up ? above : below)}px`;
+}
+
+/// How high a popover that has not shown yet is with all its content.
+function naturalHeight(popover) {
+  const { display, visibility, maxHeight } = popover.style;
+  Object.assign(popover.style, { display: "flex", visibility: "hidden", maxHeight: "none" });
+  const height = popover.offsetHeight;
+  Object.assign(popover.style, { display, visibility, maxHeight });
+  return height;
 }
 
 /// Menus and popovers open from their trigger: from 0.9 of their size to

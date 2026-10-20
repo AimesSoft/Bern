@@ -19,6 +19,7 @@ function runtime(search = "") {
         add: (...names) => names.forEach((name) => this.classes.add(name)),
         remove: (...names) => names.forEach((name) => this.classes.delete(name)),
         toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name),
+        contains: (name) => this.classes.has(name),
       };
     }
     set className(value) { this.classes = new Set(value.split(/\s+/)); }
@@ -102,7 +103,7 @@ function runtime(search = "") {
     disconnect() { this.targets.clear(); this.disconnected = true; }
   }
   const globals = {
-    TextEncoder, TextDecoder, URLSearchParams, performance,
+    TextEncoder, TextDecoder, URLSearchParams, performance, innerWidth: 1280, innerHeight: 800,
     navigator: { platform: "MacIntel" }, location: { search }, Image: Probe,
     Node: { ELEMENT_NODE: 1, DOCUMENT_POSITION_FOLLOWING: 4 },
     document: {
@@ -722,6 +723,77 @@ test("a window is sized for the room it gets before it is laid out", () => {
   assert.deepEqual(room(floating, state, { width: 800, height: 700 }, false), [800, 600]);
   assert.deepEqual(room(floating, { frame: { width: 700, height: 500 }, maximized: false }, desktop, false), [700, 500]);
   assert.deepEqual(room(floating, { frame: { width: 700, height: 500 }, maximized: true }, desktop, false), [1440, 900]);
+});
+
+test("a popover panel is as high as its content and opens on the side that holds it", () => {
+  const { B, Element } = runtime();
+  // In a window 800 high, a trigger 36 high whose top is at `top`.
+  const anchor = (top) => Object.assign(new Element("button"), { rect: { left: 40, right: 120, top, bottom: top + 36, width: 80, height: 36 } });
+  const panel = () => {
+    const node = new Element("div");
+    node.classList.add("bern-popover-panel");
+    // Shown with all its content it is 347 high; hidden it has no box.
+    Object.defineProperty(node, "offsetHeight", { get: () => (node.style.display === "flex" ? 347 : 0) });
+    return node;
+  };
+  // 152 below the trigger, 588 above: upwards, as high as the room.
+  const low = panel();
+  B.placePopover(low, anchor(600));
+  assert.equal(low.style.top, "auto");
+  assert.equal(low.style.bottom, "204px");
+  assert.equal(low.style.maxHeight, "588px", "a panel has no list's 328 cap, so content that fits does not scroll");
+  assert.equal(low.style.display, undefined, "measuring leaves the panel hidden");
+  assert.equal(low.style.visibility, undefined);
+  // 290 below, 450 above: only the room above holds the panel.
+  const middle = panel();
+  B.placePopover(middle, anchor(462));
+  assert.equal(middle.style.top, "auto");
+  assert.equal(middle.style.maxHeight, "450px");
+  // 652 below: downwards.
+  const high = panel();
+  B.placePopover(high, anchor(100));
+  assert.equal(high.style.top, "140px");
+  assert.equal(high.style.bottom, "auto");
+  assert.equal(high.style.maxHeight, "652px");
+  // A list of options is at most 328 high and opens upwards only when
+  // less than 160 is left below.
+  const list = new Element("div");
+  B.placePopover(list, anchor(600));
+  assert.equal(list.style.top, "auto");
+  assert.equal(list.style.maxHeight, "328px");
+  B.placePopover(list, anchor(462));
+  assert.equal(list.style.top, "502px");
+  assert.equal(list.style.maxHeight, "290px");
+});
+
+test("scroll views scroll along their axis only and a segmented control narrows to its room", () => {
+  const { B, Element } = runtime();
+  const root = new Element("root");
+  const options = ["Danmaku", "Subtitles", "Picture"].map((name) => ({ name, value: name, label: () => name }));
+  const scope = new B.Scope();
+  B.within(scope, () => B.Picker(root, { comp: "demo" }, { id: "tab", label: () => "Tab", field: B.cell("Danmaku"), options, style: "segmented", labelHidden: true }));
+  const segmented = root.childNodes[0];
+  assert.ok(segmented.classes.has("bern-segmented"));
+  // Each segment holds its label alone, the middle track of its grid.
+  for (const segment of segmented.childNodes) {
+    assert.ok(segment.classes.has("bern-segment"));
+    assert.deepEqual(segment.childNodes.map((child) => child.tagName), ["span"]);
+  }
+  scope.dispose();
+  const features = readFileSync(new URL("../templates/features.css", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../templates/bern.css", import.meta.url), "utf8") + features;
+  assert.match(css, /\.bern-scroll-vertical\s*\{\s*overflow-x:\s*hidden;/);
+  assert.match(css, /\.bern-scroll-horizontal\s*\{\s*overflow-y:\s*hidden;/);
+  assert.match(features.match(/\n\.bern-inspector \{[^}]*\}/)[0], /overflow:\s*hidden auto;/);
+  assert.match(css.match(/\n\.bern-segmented \{[^}]*\}/)[0], /max-width:\s*100%;/);
+  const segment = css.match(/\n\.bern-segment \{[^}]*\}/)[0];
+  // 12 beside the label at full width: 4 of padding and an outer track of
+  // 8 that gives way first; the label's track does not.
+  assert.match(segment, /grid-template-columns:\s*minmax\(0, 8px\) minmax\(min-content, max-content\) minmax\(0, 8px\);/);
+  assert.match(segment, /padding:\s*0 4px;/);
+  assert.doesNotMatch(segment, /min-width/, "a fixed least width would keep the control from narrowing");
+  // At least 56 wide with its 1 of border: 30 + 2 × 8 + 2 × 4 + 2.
+  assert.match(css, /\.bern-segment > span\s*\{\s*grid-column:\s*2;\s*min-width:\s*30px;/);
 });
 
 test("a canvas with nothing to draw keeps no bitmap however it resizes, and draws once it has something", () => {

@@ -374,7 +374,8 @@
   bottom: 0;
   right: 0;
   width: var(--bern-inspector-width);
-  overflow: auto;
+  /* It scrolls down only, as the native inspectors do. */
+  overflow: hidden auto;
   padding: 16px;
   display: flex;
   flex-direction: column;

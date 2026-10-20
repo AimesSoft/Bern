@@ -1017,6 +1017,13 @@ button:disabled {
   overflow-y: hidden;
 }
 
+/* A scroll view scrolls along its axis only, as on the native targets:
+   content a little wider than a vertical one, such as a segmented control
+   in a narrow panel, does not make it scroll sideways. */
+.bern-scroll-vertical {
+  overflow-x: hidden;
+}
+
 /* Vertical scroll areas keep the scroll bar's room whether it shows or not,
    so content does not move when it becomes long enough to scroll. Overlay
    scroll bars take no room either way. */
@@ -1990,6 +1997,7 @@ button.bern-menu-item:disabled .bern-icon {
 
 .bern-segmented {
   display: inline-flex;
+  max-width: 100%;
   padding: 2px;
   gap: 2px;
   border: 1px solid var(--bern-separator);
@@ -1997,16 +2005,29 @@ button.bern-menu-item:disabled .bern-icon {
   background: var(--bern-surface-panel);
 }
 
+/* A segment is its label with 12 on each side, at least 56 wide. With less
+   room, as in a narrow panel, the control narrows: the room beside each
+   label gives way first, down to 4 on each side (the outer tracks give
+   way, the label's track does not), and the labels stay whole. */
 .bern-segment {
-  min-width: 56px;
+  display: inline-grid;
+  grid-template-columns: minmax(0, 8px) minmax(min-content, max-content) minmax(0, 8px);
+  justify-content: center;
+  align-items: center;
   height: calc(var(--bern-control-height) - 6px);
-  padding: 0 12px;
+  padding: 0 4px;
   border: 1px solid transparent;
   border-radius: var(--bern-radius-control);
   background: transparent;
   color: var(--bern-text-secondary);
   white-space: nowrap;
   transition: background var(--bern-motion) ease-out, color var(--bern-motion) ease-out;
+}
+
+.bern-segment > span {
+  grid-column: 2;
+  min-width: 30px;
+  text-align: center;
 }
 
 @media (hover: hover) {
