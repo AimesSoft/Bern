@@ -1,6 +1,6 @@
 use super::*;
 use bern_ir::{
-    Action, AppInfo, Binding, Element, Expr, ExprKind, FieldRef, Languages, SessionDef,
+    Action, AppInfo, Binding, Element, Expr, ExprKind, FieldRef, IfNode, Languages, SessionDef,
     SessionFieldDef, SourceLocation, Text, Theme, ThemeMode, WindowCatalog,
 };
 use bern_protocol::{
@@ -493,5 +493,99 @@ fn scene_layers_bleed_and_window_buttons_take_no_room() {
     );
     // A page has no window buttons: nothing stands for them.
     assert!(!generated.contains("WindowButtons"), "{generated}");
+    assert!(!generated.contains("unsupported"), "{generated}");
+}
+
+#[test]
+fn tabs_under_conditions_build_in_the_tab_bar() {
+    let mut app = app();
+    app.sessions.push(SessionDef {
+        name: "draft".into(),
+        fields: vec![SessionFieldDef {
+            name: "page".into(),
+            ty: Type::Int,
+            initial: Value::Int(0),
+        }],
+    });
+    let tab = |value: i64, label: &str| {
+        let mut tab = element("Tab");
+        tab.id = None;
+        tab.props.insert(
+            "value".into(),
+            Prop::Expr {
+                expr: literal_expr(Value::Int(value), Type::Int),
+            },
+        );
+        tab.props.insert(
+            "label".into(),
+            dynamic_text(literal_expr(Value::Text(label.into()), Type::Text)),
+        );
+        let mut text = element("Text");
+        text.id = None;
+        text.props.insert(
+            "content".into(),
+            dynamic_text(literal_expr(
+                Value::Text(format!("{label} page")),
+                Type::Text,
+            )),
+        );
+        tab.children.push(Node::Element(text));
+        Node::Element(tab)
+    };
+    let mut accessory = element("TabAccessory");
+    accessory.id = None;
+    accessory.children.push(Node::Element(element("Divider")));
+    let mut tabs = element("Tabs");
+    tabs.props.insert(
+        "selection".into(),
+        Prop::Field {
+            field: FieldRef {
+                session: "draft".into(),
+                field: 0,
+                ty: Type::Int,
+            },
+        },
+    );
+    tabs.props.insert(
+        "fallback".into(),
+        Prop::Expr {
+            expr: literal_expr(Value::Int(2), Type::Int),
+        },
+    );
+    tabs.children.extend([
+        Node::If(IfNode {
+            branches: vec![(
+                literal_expr(Value::Bool(true), Type::Bool),
+                vec![tab(0, "Home")],
+            )],
+            otherwise: vec![],
+        }),
+        tab(2, "Search"),
+        Node::Element(accessory),
+    ]);
+    let mut out = Out::default();
+    Generator::new(&app).element(&mut out, &tabs);
+    let generated = out.finish();
+    // The tabs build into the bar, the one under the condition too, each
+    // with its page; the accessory builds once, beside them.
+    assert!(generated.contains("fallback: 2n,"), "{generated}");
+    assert!(generated.contains("}, (p, ctx) => {"), "{generated}");
+    assert!(
+        generated.contains("B.When(p, ctx, () => (true) ? 0 : -1, ["),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("B.Tab(p, ctx, { value: 0n, name: \"\", label: () => \"Home\""),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("content: () => \"Home page\""),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("B.Tab(p, ctx, { value: 2n, name: \"\", label: () => \"Search\""),
+        "{generated}"
+    );
+    assert_eq!(generated.matches("B.Divider(p);").count(), 1, "{generated}");
     assert!(!generated.contains("unsupported"), "{generated}");
 }

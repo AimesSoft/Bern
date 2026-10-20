@@ -149,37 +149,19 @@ impl Generator<'_> {
         );
     }
 
+    /// Tabs whose tabs may sit in `if`, `if let`, `match` and `ForEach`, as
+    /// a sidebar's items may: the children build into the tab bar, and each
+    /// `Tab` takes part while it is mounted.
     pub(super) fn tabs(&self, out: &mut Out, element: &Element) {
         let selection = self.field(element, "selection").expect("selection field");
-        let mut options = Vec::new();
         out.open("B.Tabs(p, ctx, {");
         if element.id.is_some() {
             out.line(format!("id: {},", self.id(element)));
         }
         out.line(format!("selection: {selection},"));
-        out.open("tabs: [");
-        for node in &element.children {
-            let Node::Element(tab) = node else { continue };
-            let Some(value) = tab.expr("value") else {
-                continue;
-            };
-            let label = tab
-                .text("label")
-                .map(|text| self.text(text))
-                .unwrap_or_default();
-            options.push((self.expr(value), label.clone()));
-            out.open(format!(
-                "{{ value: {}, name: {}, label: () => {label}, icon: {}, build: (p, ctx) => {{",
-                self.expr(value),
-                self.variant_name(value),
-                tab.icon("icon")
-                    .map(string)
-                    .unwrap_or_else(|| "null".into())
-            ));
-            self.nodes(out, &tab.children);
-            out.close("} },");
+        if let Some(fallback) = element.expr("fallback") {
+            out.line(format!("fallback: {},", self.expr(fallback)));
         }
-        out.close("],");
         let accessory = element.children.iter().find_map(|node| match node {
             Node::Element(child) if child.kind == "TabAccessory" => Some(child),
             _ => None,
@@ -195,22 +177,31 @@ impl Generator<'_> {
             self.nodes(out, &accessory.children);
             out.close("} },");
         }
-        out.line(format!(
-            "selectedLabel: {},",
-            self.selected_label(&selection, &options)
-        ));
+        out.close("}, (p, ctx) => {");
+        out.indent += 1;
+        self.nodes(out, &element.children);
         out.close("});");
     }
 
-    fn selected_label(&self, selection: &str, options: &[(String, String)]) -> String {
-        let cases: Vec<_> = options
-            .iter()
-            .map(|(value, label)| format!("if (B.eq(v, {value})) return {label}; "))
-            .collect();
-        format!(
-            "() => {{ const v = {selection}.get(); {}return \"\"; }}",
-            cases.concat()
-        )
+    /// One tab of the `Tabs` around it; its page is built while selected.
+    pub(super) fn tab(&self, out: &mut Out, tab: &Element) {
+        let Some(value) = tab.expr("value") else {
+            return;
+        };
+        let label = tab
+            .text("label")
+            .map(|text| self.text(text))
+            .unwrap_or_else(|| "\"\"".into());
+        out.open(format!(
+            "B.Tab(p, ctx, {{ value: {}, name: {}, label: () => {label}, icon: {}, build: (p, ctx) => {{",
+            self.expr(value),
+            self.variant_name(value),
+            tab.icon("icon")
+                .map(string)
+                .unwrap_or_else(|| "null".into())
+        ));
+        self.nodes(out, &tab.children);
+        out.close("} });");
     }
 
     pub(super) fn inspector(&self, out: &mut Out, element: &Element) {

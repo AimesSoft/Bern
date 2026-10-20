@@ -2721,9 +2721,13 @@ export function NavLink(p, ctx, { id, route, label }, children) {
   p.append(node);
 }
 
-/// Underline tabs. At a wide dialog's root they become a vertical
-/// navigation beside the content.
-export function Tabs(p, ctx, { id, selection, tabs, accessory, selectedLabel }) {
+/// Underline tabs whose tabs may come and go with `if`, `match` and
+/// `ForEach`: the children build into the tab bar, where each `Tab` puts
+/// its button and takes part while it is mounted. When the selected tab
+/// disappears, the selection moves to `fallback` or the first tab left. At
+/// a wide dialog's root they become a vertical navigation beside the
+/// content.
+export function Tabs(p, ctx, { id, selection, fallback, accessory }, children) {
   const bar = el("div", { class: "bern-tabbar", role: "tablist" });
   const panels = el("div", { class: "bern-tabpanels", role: "tabpanel" });
   const node = el("div", { class: "bern-tabs" }, bar, panels);
@@ -2734,24 +2738,39 @@ export function Tabs(p, ctx, { id, selection, tabs, accessory, selectedLabel }) 
     accessory.build(strip, ctx);
     if (accessory.shown) effect(() => { strip.hidden = !accessory.shown(); });
   }
-  const entries = tabs.map((tab) => {
-    const text = el("span");
-    bindText(text, tab.label);
-    const button = el("button", { class: "bern-tab", type: "button", role: "tab" }, tab.icon ? icon(tab.icon, 16) : null, text);
-    button.addEventListener("click", () => selection.set(tab.value));
-    button.addEventListener("keydown", (event) => {
-      const vertical = node.classList.contains("bern-tabs-vertical");
-      const keys = vertical ? { ArrowDown: 1, ArrowUp: -1 } : { ArrowRight: 1, ArrowLeft: -1 };
-      const move = { ...keys, Home: -Infinity, End: Infinity }[event.key];
-      if (move === undefined) return;
-      event.preventDefault();
-      const index = tabs.indexOf(tab);
-      const at = move === -Infinity ? 0 : move === Infinity ? tabs.length - 1 : (index + move + tabs.length) % tabs.length;
-      selection.set(tabs[at].value);
-      entries[at].button.focus();
-    });
-    bar.append(button);
-    return { tab, button };
+  const registry = { items: cell([]), selection };
+  children(bar, { ...ctx, tabs: registry });
+  /// Mounted tabs in the order their buttons show.
+  const ordered = () => {
+    const items = registry.items.peek();
+    return [...bar.children].flatMap((button) => items.filter((item) => item.button === button));
+  };
+  bar.addEventListener("keydown", (event) => {
+    const items = ordered();
+    const index = items.findIndex((item) => item.button === event.target);
+    const vertical = node.classList.contains("bern-tabs-vertical");
+    const keys = vertical ? { ArrowDown: 1, ArrowUp: -1 } : { ArrowRight: 1, ArrowLeft: -1 };
+    const move = { ...keys, Home: -Infinity, End: Infinity }[event.key];
+    if (index < 0 || move === undefined) return;
+    event.preventDefault();
+    const at = move === -Infinity ? 0 : move === Infinity ? items.length - 1 : (index + move + items.length) % items.length;
+    selection.set(items[at].value);
+    items[at].button.focus();
+  });
+  // A selection without a mounted tab moves on, once the update that
+  // removed it has mounted whatever replaces it.
+  let live = true;
+  onCleanup(() => { live = false; });
+  const settle = () => {
+    const shown = registry.items.peek();
+    if (!live || !shown.length || shown.some((item) => eq(item.value, selection.peek()))) return;
+    const back = fallback !== undefined && shown.find((item) => eq(item.value, fallback));
+    selection.set((back || ordered()[0]).value);
+  };
+  effect(() => {
+    registry.items.get();
+    selection.get();
+    queueMicrotask(settle);
   });
   if (ctx.win?.dialog) {
     const observer = new ResizeObserver(() => {
@@ -2768,38 +2787,54 @@ export function Tabs(p, ctx, { id, selection, tabs, accessory, selectedLabel }) 
   let owner = null;
   effect(() => {
     const value = selection.get();
-    for (const { tab, button } of entries) {
-      const selected = eq(tab.value, value);
-      button.setAttribute("aria-selected", selected ? "true" : "false");
-      button.tabIndex = selected ? 0 : -1;
-    }
-    const tab = tabs.find((candidate) => eq(candidate.value, value));
+    const tab = registry.items.get().find((candidate) => eq(candidate.value, value));
     if (tab === shown) return;
     shown = tab;
     untrack(() => {
       owner?.dispose();
       region.clear();
       owner = new Scope(null);
-      if (tab) within(owner, () => region.fill((fragment) => tab.build(fragment, ctx)));
+      if (tab) within(owner, () => region.fill((fragment) => tab.build(fragment, tab.ctx)));
     });
   });
   onCleanup(() => owner?.dispose());
   if (id) {
     mark(bar, ctx, id);
+    const selected = (value) => registry.items.get().find((tab) => eq(tab.value, value));
     control(ctx, {
-      target: () => target(ctx, id), role: "tabs", label: selectedLabel,
+      target: () => target(ctx, id), role: "tabs", label: () => selected(selection.get())?.label() ?? "",
       actions: {
         select: (name) => {
-          const tab = tabs.find((candidate) => candidate.name === name);
+          const tab = registry.items.peek().find((candidate) => candidate.name === name);
           if (!tab) return false;
           selection.set(tab.value);
           return true;
         },
-        value: () => tabs.find((tab) => eq(tab.value, selection.peek()))?.name ?? null,
+        value: () => untrack(() => selected(selection.peek()))?.name ?? null,
       },
     });
   }
   p.append(node);
+}
+
+/// One tab of the `Tabs` around it: its button where it is written, part
+/// of the tabs while mounted. Its page is built while it is selected.
+export function Tab(p, ctx, { value, name, label, icon: glyph, build }) {
+  const registry = ctx.tabs;
+  if (!registry) return;
+  const text = el("span");
+  bindText(text, label);
+  const button = el("button", { class: "bern-tab", type: "button", role: "tab" }, glyph ? icon(glyph, 16) : null, text);
+  button.addEventListener("click", () => registry.selection.set(value));
+  effect(() => {
+    const selected = eq(registry.selection.get(), value);
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+    button.tabIndex = selected ? 0 : -1;
+  });
+  const entry = { value, name, label, build, ctx, button };
+  registry.items.set([...registry.items.peek(), entry]);
+  onCleanup(() => registry.items.set(registry.items.peek().filter((item) => item !== entry)));
+  p.append(button);
 }
 
 /// Chooses one layout by the available width, or the `tv` layout on a

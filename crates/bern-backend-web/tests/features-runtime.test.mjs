@@ -367,6 +367,80 @@ test("the sidebar button hides the whole sidebar and shows it again from the pag
   assert.match(css, /@container \(max-width: 767px\) \{[\s\S]*?\.bern-split-handle,\s*\.bern-icon-button\.bern-split-toggle \{\s*display:\s*none/);
 });
 
+test("tabs under conditions come and go in their written order, and a selection without its tab moves on", () => {
+  const { B, Element, flushMicrotasks } = runtime();
+  const root = new Element("root");
+  const anime = B.cell(true);
+  const library = B.cell(false);
+  const selection = B.cell("home");
+  const built = [];
+  const tab = (value) => (p, ctx) => B.Tab(p, ctx, {
+    value, name: value, label: () => value, icon: null,
+    build: (p) => { built.push(value); p.append(new Element(value)); },
+  });
+  B.Tabs(root, { comp: "shell" }, { id: "tabs", selection, fallback: "new" }, (p, ctx) => {
+    B.When(p, ctx, () => (anime.get() ? 0 : -1), [(p, ctx) => { tab("home")(p, ctx); tab("new")(p, ctx); }]);
+    B.When(p, ctx, () => (library.get() ? 0 : -1), [tab("library")]);
+    tab("search")(p, ctx);
+  });
+  const [bar, panels] = root.childNodes[0].children;
+  const names = () => bar.children.map((button) => button.children.at(-1).textContent);
+  const page = () => panels.children.map((child) => child.tagName);
+  const selected = () => names().filter((_, index) => bar.children[index].attributes["aria-selected"] === "true");
+  const control = () => B.controlEntries().find((entry) => entry.role === "tabs");
+  flushMicrotasks();
+  assert.deepEqual(names(), ["home", "new", "search"]);
+  assert.deepEqual(selected(), ["home"]);
+  assert.deepEqual(page(), ["home"]);
+  assert.equal(control().label(), "home");
+
+  // A tab whose condition turns on takes its written place, before `search`.
+  library.set(true);
+  flushMicrotasks();
+  assert.deepEqual(names(), ["home", "new", "library", "search"]);
+  bar.children[2].dispatch("click");
+  assert.equal(selection.peek(), "library");
+  assert.deepEqual(page(), ["library"]);
+  assert.equal(control().actions.value(), "library");
+
+  // The arrow keys move along the tabs shown, wrapping at the ends.
+  bar.dispatch("keydown", { key: "ArrowRight", target: bar.children[2] });
+  assert.equal(selection.peek(), "search");
+  assert.equal(bar.children[3].focused, true);
+  bar.dispatch("keydown", { key: "ArrowRight", target: bar.children[3] });
+  assert.equal(selection.peek(), "home");
+  assert.equal(control().actions.select("library"), true);
+
+  // The selected tab goes away: the fallback, while it is shown.
+  library.set(false);
+  flushMicrotasks();
+  assert.deepEqual(names(), ["home", "new", "search"]);
+  assert.equal(selection.peek(), "new");
+  assert.deepEqual(page(), ["new"]);
+  assert.equal(control().actions.select("library"), false, "a tab that is not mounted cannot be chosen");
+
+  // With the fallback gone too, the first tab left.
+  anime.set(false);
+  flushMicrotasks();
+  assert.deepEqual(names(), ["search"]);
+  assert.equal(selection.peek(), "search");
+  assert.deepEqual(page(), ["search"]);
+  assert.deepEqual(built, ["home", "library", "search", "home", "library", "new", "search"]);
+});
+
+test("a stack holding a form or a scroll view fills a page's room as it fills a column", () => {
+  // A navigation page, a tab's page and the layout an `Adaptive` chose are
+  // the page's room: a flexible child stretches across and grows down it.
+  const css = readFileSync(new URL("../templates/features.css", import.meta.url), "utf8");
+  const rule = (body) => css.split("}").map((block) => block.split("{")).filter(([selector, rest]) => rest?.includes(body)).map(([selector]) => selector);
+  const across = rule("align-self: stretch;\n  width: auto;\n").find((selector) => selector.includes(":is(.bern-fill-width, .bern-layout-width)"));
+  const down = rule("flex: 1 1 auto;\n  min-height: 0;").find((selector) => selector.includes(":is(.bern-fill-height, .bern-layout-height)") && selector.includes(".bern-detail-body"));
+  for (const host of [".bern-detail-body", ".bern-nav-page", ".bern-tabpanels", ".bern-adaptive"]) {
+    assert.ok(across.includes(host), `${host} stretches a flexible child across`);
+    assert.ok(down.includes(host), `${host} grows a flexible child down`);
+  }
+});
+
 test("edge grow keeps its opacity and anchors the scaling edge", () => {
   const { F, Element } = runtime();
   const node = new Element("div");

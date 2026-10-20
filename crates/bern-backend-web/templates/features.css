@@ -61,7 +61,7 @@
 /* A stack with a backdrop (a drawing without a size) fills across the
    column or grid cell it stands in, as a block does, and keeps the height
    its other layers give. */
-:is(.bern-vstack, .bern-detail-body, .bern-window-content, .bern-modal-content, .bern-grid) > .bern-layers:has(> .bern-canvas.bern-fill-width.bern-fill-height):not(.bern-sized-width) {
+:is(.bern-vstack, .bern-detail-body, .bern-nav-page, .bern-tabpanels, .bern-adaptive, .bern-window-content, .bern-modal-content, .bern-grid) > .bern-layers:has(> .bern-canvas.bern-fill-width.bern-fill-height):not(.bern-sized-width) {
   align-self: stretch;
   justify-self: stretch;
   width: auto;
@@ -85,13 +85,16 @@
 }
 
 /* In a column a child that holds such a drawing, a scroll view, a grid or
-   a video is as wide as the column; in a row it takes the room left. */
-:is(.bern-vstack, .bern-detail-body, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture, .bern-inspector, .bern-popover-panel, .bern-search-results) > :is(.bern-fill-width, .bern-layout-width):not(.bern-inspector, .bern-sized-width) {
+   a video is as wide as the column; in a row it takes the room left. A
+   page's own room (a navigation page, a tab's page, the layout an
+   `Adaptive` chose) is such a column: a stack holding a form or a scroll
+   view fills it, as on the native targets. */
+:is(.bern-vstack, .bern-detail-body, .bern-nav-page, .bern-tabpanels, .bern-adaptive, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture, .bern-inspector, .bern-popover-panel, .bern-search-results) > :is(.bern-fill-width, .bern-layout-width):not(.bern-inspector, .bern-sized-width) {
   align-self: stretch;
   width: auto;
 }
 
-:is(.bern-detail-body, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture) > :is(.bern-fill-height, .bern-layout-height):not(.bern-inspector, .bern-sized-height) {
+:is(.bern-detail-body, .bern-nav-page, .bern-tabpanels, .bern-adaptive, .bern-window-content, .bern-modal-content, .bern-query, .bern-query-content, .bern-drop, .bern-gesture) > :is(.bern-fill-height, .bern-layout-height):not(.bern-inspector, .bern-sized-height) {
   flex: 1 1 auto;
   min-height: 0;
 }

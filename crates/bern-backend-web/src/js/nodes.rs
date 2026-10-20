@@ -269,11 +269,12 @@ impl Generator<'_> {
             "NavLink" => self.nav_link(out, element),
             "List" | "ForEach" => self.list(out, element),
             "Tabs" => self.tabs(out, element),
+            "Tab" => self.tab(out, element),
             "Adaptive" => self.adaptive(out, element),
             "Menu" => self.menu(out, element),
             "LanguagePicker" => self.language_picker(out, element),
-            "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
-            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption" => {
+            "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
+            | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),
