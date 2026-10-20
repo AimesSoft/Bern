@@ -1,6 +1,6 @@
 # 平台能力与验证范围
 
-更新：2026-10-20。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 在共用 SwiftUI 清单之外单独开放搜索面板；iOS 不开放。tvOS 与 iOS 共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
+更新：2026-10-21。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 在共用 SwiftUI 清单之外单独开放搜索面板；iOS 不开放。tvOS 与 iOS 共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
 
 ## 编译期功能支持
 
@@ -75,11 +75,12 @@
 | 电视字号（`text` 块的 `font(tv:)`） | tvOS 构建时取电视字号（模拟器实测）；Android 与 Web 运行时判断为电视时取（Web 由 `bern-television` 类切换，未在电视设备上验证）；macOS、iOS、Windows、Linux 不受影响。各后端生成器测试覆盖 |
 | 文字会话动作（`push_str`、`pop`） | 六个目标生成；tvOS 模拟器上经屏幕键盘实测输入与删除；SwiftUI 在 tvOS 与 macOS 上类型检查，Compose 随 Android 构建编译，GTK 在 Ubuntu 虚拟机上编译，WinUI 3 在 Windows PC 上编译 |
 | `Search(suggest: true)` | 未输入时就列出结果：SwiftUI 与 Web 获得焦点时、电视上一直列出（tvOS 模拟器实测）；Compose 的工具栏搜索页本来打开就列出；GTK 与 WinUI 3 获得焦点时弹出。tvOS 以外未实测交互 |
+| 性能追踪（`BERN_TRACE`、`trace.*`、`bern run --trace`） | 共用的 Rust 一侧对所有目标相同：规则与过滤、记录与汇总、时间线、会话命令，以及引擎（排队、执行、快照、比较、模块调用、`span!`）与桥接（解码、按字段编码、回调触发）的分段。各前端界面线程的打点尚未接入，交互链路与长帧暂不出现。见[性能追踪](Tracing.md) |
 | `default_focus` | `Button` / `IconButton` 出现时取得焦点，六个目标生成：tvOS 是焦点区域的首选焦点（模拟器实测），macOS / iOS 用 `FocusState`，Web 调用 `focus()`，Compose 用 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点；tvOS 以外未实测；GTK 在 Ubuntu 24.04 虚拟机上编译并通过 Clippy 与生成应用的类型检查，WinUI 3 在 Windows PC 上用 MSVC 编译生成的 gallery |
 
 ## 最近新增能力的验证
 
-这一节只描述 2026-10-15 至 20 日的新增能力；已有平台的历史验收见各实现记录。构建成功不代替实际设备交互。
+这一节只描述 2026-10-15 至 21 日的新增能力；已有平台的历史验收见各实现记录。构建成功不代替实际设备交互。
 
 | 范围 | 代码 / 构建证据 | 实际交互范围 |
 | --- | --- | --- |
@@ -97,6 +98,7 @@
 | 动画 SVG | 六目标生成；示例 macOS、iOS 模拟器、Android、Web 构建；Linux 随真实应用原生构建（WebKitGTK 6）；Windows 本轮未原生构建 | macOS / Web 实测 Logo 与交互；Linux 实测引导页的动画 Logo；Ubuntu 24.04 上 WebKit 沙箱需要 AppArmor 配置，`.deb` 已附带（同形配置下沙箱运行实测，安装未实测），`.tar.gz` 需手动添加，见 Linux 记录；iOS / Android 本轮未运行设备交互，Windows 未验收 |
 | 画布延伸 `Positioned(bleed:)`、`WindowButtons`、网页控件与中性色（2026-10-20） | `bleed` 在 Web、SwiftUI、Compose、GTK 与 WinUI 3 实现；`WindowButtons` 六个目标生成，SwiftUI 在 macOS 上占 84 点；Web、SwiftUI、Compose 的生成器测试覆盖 `bleed` 与 `WindowButtons`，GTK 与 WinUI 3 的生成器测试覆盖 `bleed`（GTK 生成的应用在 Ubuntu 24.04 虚拟机上类型检查，WinUI 3 的两种前端在 Windows PC 上用 MSVC 编译），GTK 的单元测试覆盖画布四周的空白与各边的延伸量；真实应用的 macOS 构建通过 Swift 类型检查，Linux 与 Windows 构建通过。Web 运行时测试覆盖带内容的胶囊按钮取标准高度 | Chromium 1280 × 800、1512 × 860、1920 × 970：播放器铺满时画面贴到窗口边（超宽窗口按 16:9 左右留黑），显示控件时画框与控制条在居中的设计画布里；顶栏图标按钮没有共享底板、相隔 6 px；菜单从按钮处弹出、尾端对齐按钮；控件在铺满与退后之间淡入淡出并移动 8 px。Ubuntu 24.04 虚拟机（Broadway，窗口 1600 × 713）：铺满时画面 1267 宽（按窗口高的 16:9），越出 1280 × 800 设计画布、两侧只留 16:9 之外的黑边；退后时画框在设计坐标 (103, 64, 1074)，控件在居中的设计画布里；各边的延伸量与画框随同一个弹簧逐帧移动，窗口变宽后下一次布局即用新的空白。Windows 11 实体机（WinUI 3，150% 缩放）：窗口 1600 × 800 时显示控件的画框在居中的设计画布里（x 268.7、宽 1063，即设计坐标 (103, 1074) 乘画布缩放 0.99），铺满时画面 1408 宽（按内容高的 16:9），越出设计画布；拉成 1400 × 800 后铺满的画面横跨整个内容宽度，1280 × 977 时按宽铺满、上下居中；静置隐藏控件后画面同样铺满，Windows 上过渡未逐帧采样。Android、iOS 上的 `bleed` 与 macOS 改窗口比例后的外观未实测 |
 | 按平台给出的长度与 `shape: chip`（2026-10-20） | 编译器测试覆盖 `style!` 里 `gap`、`padding_x`、`padding_y`、`width`（含 `fit`）、`height`、`font_size`、`row_height` 的解析与报错；构建每个目标前按它的平台替换元素写下的长度、在网页以外把 chip 换成 30 点胶囊，生成器测试覆盖两者；六个目标都经过这一步，不需要各自实现 | Chromium 1280 × 800 对照网页设计稿：侧边栏、品牌行、导航项、账户行、工具栏与搜索框、媒体库的标签与缩放、设置对话框的标题行、分组与行内下拉逐项量得与设计稿一致（相差不超过 1 px，系统滚动条占位与 Inter 字宽除外）；macOS 上同一应用的外观未在本轮实测 |
+| 性能追踪的引擎与桥接一侧（2026-10-21） | Rust 测试：规则解析与报错、环形缓冲（写满丢弃并计数、边写边读）、乱序到达的记录按 token 与修订号对上、长帧归因、同一命令过频时合并成一行、关闭时不读时钟也不分配缓冲；真实引擎走完命令写出可解析的时间线；bern-ffi 测试模拟一次控件操作，报告里从动作到上屏各段对上；`bern run --trace` 的传参有测试；WebAssembly 编译通过 | 未在设备或真实应用上实测；各前端界面线程一侧未接入 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

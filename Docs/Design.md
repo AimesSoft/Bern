@@ -1,8 +1,8 @@
 # Bern UI 框架设计文档
 
-- 版本：v0.33
+- 版本：v0.34
 - 状态：架构与语义规范；当前接口、平台支持与待实现目标分别标注
-- 更新日期：2026-10-20
+- 更新日期：2026-10-21
 - 项目名称：Bern UI
 - 仓库：AimesSoft/Bern
 - 主要开发语言：Rust
@@ -2013,9 +2013,13 @@ browser = "art/web"                         # 页面图标文件夹、SVG，或�
 
 浏览器 app 可用 `bern run --target web_app --port 4173` 固定开发 origin，使刷新与重启继续读同一份 localStorage。`--port` 仅用于浏览器 app，范围 1–65535，省略时选择空闲端口；目标名以项目清单为准。
 
+`bern run --trace <规则>` 让启动的应用带上性能追踪，规则与 `BERN_TRACE` 相同，写错时在构建前报错：桌面程序与 WebUI 引擎宿主得到环境变量 `BERN_TRACE`，模拟器经 `SIMCTL_CHILD_BERN_TRACE`，Android 经启动意图的 `bern.trace`，浏览器 app 经地址的 `#bern-trace=`。规则与输出见[性能追踪参考](Reference/Tracing.md)。
+
 `bern run` 默认选择本机系统的桌面目标，没有时选择任何系统都能构建的目标。构建后按目标模块给出的方式启动：桌面目标直接运行可执行文件并等待它退出；Web `app` 构建在 127.0.0.1 上提供页面（与 WebUI 宿主相同的 `Host` 校验，不带 WebSocket 通道）并打开浏览器；WebUI 构建运行引擎宿主，打开它打印的地址。
 
 `bern doctor` 检查 Rust 版本（1.99 起）、macOS SDK 26 与 Swift 编译器、带 C++ 工具的 Visual Studio 与含 `cppwinrt.exe` 的 Windows SDK 以及 MSVC 版 Rust、GTK 4.14 与 libadwaita 1.5 的开发包、`wasm32-unknown-unknown` 目标。在项目内运行时还列出 Bern 的来源与每个目标在本机能否构建；本机能构建的已声明目标缺少工具时以失败退出。
+
+release 构建的生成 crate 统一以 `lto = true`、`codegen-units = 1`、`strip = true` 编译（`bern_target_api::glue::RELEASE_PROFILE`；引擎捕获 panic 的地方保持 `panic = "unwind"`）：macOS arm64 上 planner 的应用 CLI 与 MCP 服务器从 1.50 MB 降到 0.91 MB，WebUI 引擎宿主从 2.50 MB 降到 1.35 MB，页面模块从 685 KB 降到 518 KB，宿主的 release 构建约慢一倍。
 
 `bern package` 按 release 构建本机能构建的目标，再由目标模块生成安装包，统一写入 `target/bern/dist/`：
 
@@ -2505,6 +2509,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 | 版本 | 主要内容 |
 | --- | --- |
+| v0.34 | `style!` 按平台给出长度（`gap`、`padding_x`、`padding_y`、`width` 与 `fit`、`height`、`font_size`、`row_height`），构建每个目标前替换元素写下的长度；`shape: chip`；`Positioned(bleed:)` 在 GTK 与 WinUI 3 补齐；不写 `align` 的 `Column` 在 GTK 与 WinUI 3 也是前缘列；与框架类型同名的值类型、组件与会话在各目标都能编译；监听控制通道的构建在 `bin/` 旁附带列出命令的 Agent skill；release 构建的生成 crate 以 LTO、单一代码生成单元编译并剥离符号；WebUI 安装包只带本应用的程序；框架级性能追踪（`BERN_TRACE`、会话命令 `trace.*`、`bern run --trace` 与 `bern::trace::span!`），先接入引擎与桥接一侧 |
 | v0.33 | `swiftui + tvos`：Apple TV 模拟器构建与 `bern run --target tvos`，一个场景中的虚拟窗口、系统焦点与遥控器；电视布局 `Layout(size: tv)` 与 `window.tv`，只运行在电视上的目标在构建时裁剪电视不显示的部分；没有控件的快捷键 `Shortcut`，电视上对应遥控按键；按钮的起始焦点 `default_focus`；`[app.icon].tvos` 接受 `.brandassets`，未声明时由图标生成分层图标与顶部货架图；文本样式的电视字号 `font(tv:)`；文字会话动作 `push_str` 与 `pop`；`Search(suggest: true)` 未输入时就列出结果；以上 Bern 新能力六个目标都生成；tvOS 上按设计尺寸画的场景里控件按设计尺寸画（开关、分段、滑块、菜单行、分组标题、正文字号），自绘按钮按设计稿的电视焦点（行变白、图片抬起、按钮变白放大）；`Sidebar(width:)` 在保持系统侧栏宽度的目标上改为警告；只显示图标的页签 `Tab(display: icon)`（电视标签栏里的搜索只是放大镜） |
 | v0.32 | 文档与当前接口同步：新增组件与属性参考、目标能力矩阵；播放器坐标场景与滚动内容、共享胶囊和受控滑块、空闲检测开关、图片跨分栏 Hero；同步 Web 搜索、引导、布局与存储支持。历史验证记录保留各自的范围，后续设计单独标注；`[app.icon]` 让各平台使用自己的图标（方形 PNG 或平台原生格式：`.icns`、`.appiconset`、`.ico`、hicolor 图标主题、Android `res`、页面图标文件夹）；`SidebarHeader(role: title)` 在标题栏已显示应用图标与标题的 Windows 上不显示 |
 | v0.2 | 提出 Rust 宏 UI、多语言、自适应功能契约和多后端编译目标 |

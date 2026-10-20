@@ -11,12 +11,12 @@
 | 方式 | 用法 |
 | --- | --- |
 | 环境变量 | `BERN_TRACE=engine,ui,slow:16ms`，应用启动时读取 |
-| `bern run --trace <规则>` | 规则写错时在构建前报错。桌面程序与 WebUI 引擎宿主设为 `BERN_TRACE`；iOS、tvOS 模拟器经 `SIMCTL_CHILD_BERN_TRACE` 传入；Android 用 `am start --es bern.trace '<规则>'` 传给应用；`web_mode = "app"` 的页面在地址后加 `#bern-trace=<规则>` |
+| `bern run --trace <规则>` | 规则写错时在构建前报错。桌面程序与 WebUI 引擎宿主设为 `BERN_TRACE`；iOS、tvOS 模拟器经 `SIMCTL_CHILD_BERN_TRACE` 传入；Android 用 `am start --es bern.trace '<规则>'` 传给应用；`web_mode = "app"` 的页面在地址后加 `#bern-trace=<规则>`。后两种要由前端读出交给运行时，前端接入前不起作用，Android 现在用下面的系统属性 |
 | 会话命令 | 运行中用 `trace.start`、`trace.stop`、`trace.report`，CLI 写作 `trace start --rules …`，MCP 工具同名 |
 
 Android 不经 `bern run` 启动时，可以用 `adb shell setprop debug.bern.trace '<规则>'`（不超过 91 字节，release 构建也读取），对之后启动的应用生效，用 `adb shell setprop debug.bern.trace ''` 清掉。`web_mode = "app"` 的页面没有控制通道，运行中只能用浏览器控制台（前端接入后提供）。WebUI 的引擎宿主收到 `trace.*` 后自己记录引擎一侧，并转给页面记录界面一侧。
 
-旧的调试变量是这套规则的别名：`BERN_FRAME_LOG`（非空）等于 `motion,frame,style`，`BERN_MOTION_LOG`（设置即可）等于 `motion.values`。
+旧的调试变量是这套规则的别名：`BERN_FRAME_LOG`（非空）等于 `motion,frame,style`，`BERN_MOTION_LOG`（设置即可）等于 `motion.values`。WinUI 3 与 GTK 前端接入前，它们照旧由前端自己读取并打印原来的行，运行时同时按别名开启一次追踪。
 
 ## 规则
 
