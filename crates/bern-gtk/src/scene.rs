@@ -27,6 +27,7 @@ row.bern-plain-row { padding: 10px 12px; }\n\
 row.bern-plain-row.bern-button-row { padding: 8px 12px; }\n\
 list.bern-plain-list, list.bern-plain-list > row { background: none; border: none; box-shadow: none; padding: 0; }\n\
 list.bern-plain-list > row > box.header { padding: 0; min-height: 0; }\n\
+.bern-form-rows > :first-child:not(.bern-plain-section) { margin-top: 24px; }\n\
 .bern-badge { padding: 0 7px; min-width: 10px; border-radius: 9999px; background-color: alpha(currentColor, 0.12); font-size: smaller; font-weight: 600; }\n\
 .bern-marquee label { text-shadow: 0 1px 1px black; }\n\
 .bern-control-group { border-radius: 9999px; }\n\

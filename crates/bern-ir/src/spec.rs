@@ -742,7 +742,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("padding_y", PropKind::Length),
         ],
         Children::Any,
-        "Titled group inside a form, list or sidebar; `style: plain` sets its rows on the page itself, without the group's background, margins or separators, as a heading that scrolls with the form; `padding_x` and `padding_y` are its rows' insets",
+        "Titled group inside a form, list or sidebar; `style: plain` sets its rows on the page itself, without the group's background, margins or separators, as a heading that scrolls with the form, and the form's row insets do not reach them; `padding_x` and `padding_y` are its rows' insets",
     ),
     spec(
         "Slot",
@@ -779,7 +779,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("padding_y", PropKind::Length),
         ],
         Children::Any,
-        "Grouped form of labelled controls, optionally titling its page; `gap` is the room between its sections, `row_height` the least height of a row, and `padding_x` / `padding_y` the rows' insets in every section; a form opening with a plain section starts at the top of its page",
+        "Grouped form of labelled controls, optionally titling its page; `gap` is the room between its sections, `row_height` the least height of a row, and `padding_x` / `padding_y` the rows' insets in every section; a form opening with a plain section starts at the top of its page, also when a slot, a component or a condition gives that section",
     ),
     spec(
         "Navigation",

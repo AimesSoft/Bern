@@ -201,7 +201,7 @@ GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `featu
 - `SidebarHeader` 固定在侧栏列表上方；`Sidebar(width:)` 以像素固定 `AdwNavigationSplitView` 的侧栏宽度；`Detail(titled: false)` 时详情标题栏不再显示选中项的名称；`SidebarItem(badge:)` 在行尾显示计数（为 0 时隐藏）。
 - 工具栏中 `Spacer` 之前的项放在页面标题栏的前缘（返回按钮之后），之后的放在后缘；`Text` 可以放在工具栏里。
 - 标签页：宽窗口的切换器在页面标题栏，紧凑窗口（`window.compact`）改为页面下方的 `AdwViewSwitcherBar`，与 GNOME 自适应应用相同；`TabAccessory` 在页面与底部标签栏之间。
-- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分组间距为盒子间距；行高与行内边距写成一条按值生成的规则（plain 行与 libadwaita 行的 `box.header`），`Section` 自己的边距优先；plain 分组去掉列表的底色、边框、内边距与分隔，表单以它开头时从页面顶部开始。非 libadwaita 行的内边距改由行的 CSS 给出，才能被这些规则覆盖。
+- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分组间距为盒子间距；行高与行内边距写成一条按值生成的规则（plain 行与 libadwaita 行的 `box.header`），`Section` 自己的边距优先，plain 分组不取表单的行高与内边距、只用自己的；plain 分组去掉列表的底色、边框、内边距与分隔，表单以它开头时从页面顶部开始：表单顶部的 24 由样式规则 `.bern-form-rows > :first-child:not(.bern-plain-section)` 给第一项，条件分支换掉第一项时跟着变。非 libadwaita 行的内边距改由行的 CSS 给出，才能被这些规则覆盖。
 - 页面中的 `Search` 是 `GtkSearchEntry`，`width`、`height`、`font_size` 为框自身的尺寸与字号，结果列在框下的浮层中（已有实现）。
 
 ### 模态、搜索面板与计时

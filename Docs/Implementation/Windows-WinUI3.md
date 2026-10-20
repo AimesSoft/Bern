@@ -209,7 +209,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - `ScaleBox`：子元素在声明的逻辑尺寸中层叠，整体以一个 `CompositeTransform`（缩放加居中平移）适配所得空间，超出部分裁掉；图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Marquee`：内容按自然宽度每帧（`CompositionTarget.Rendering`）从右缘外跑到左缘外，`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字由 Composition 的 `DropShadow`（以文字自己的 `GetAlphaMask` 为蒙版）带 1 点黑色阴影。
 - `Accordion`：每列一个 0 到 1 的权重弹簧，列宽由权重分配，总宽不变，每列按 `corner` 圆角裁剪（裁剪在每次排布时按列的大小设置）。
 - 页头：工具栏中 `Spacer` 之前的项放在返回按钮之后的前缘，之后的放在后缘；`Text` 可以放在工具栏里。`SidebarHeader` 是 `NavigationView.PaneHeader`，`role: title` 时不显示（两种前端的标题栏都已在应用图标旁显示窗口标题）；`Sidebar(width:)` 是 `OpenPaneLength`；`Detail(titled: false)` 时页头不显示所选目的地的名称；`SidebarItem(badge:)` 在 WinUI 3 中是 `InfoBadge`（为 0 时隐藏）。
-- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分节间距、卡片行的最小高度与内边距（`Section` 自己的优先），后来加入的行也照此设置；plain 分节的行直接放在页面上（没有卡片），表单以它开头时从页面顶部开始。页面中的 `Search` 用 `width`、`height`、`font_size` 设置搜索框自身。
+- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分节间距、卡片行的最小高度与内边距（`Section` 自己的优先），后来加入的行也照此设置；plain 分节的行直接放在页面上（没有卡片），只用自己的内边距、不取表单的；表单以它开头时从页面顶部开始：plain 分节的面板名为 `bern-plain-section`，表单在建好内容和内容尺寸变化时看第一项（穿过包装层），所以插槽、组件或条件给出的标题也算。页面中的 `Search` 用 `width`、`height`、`font_size` 设置搜索框自身。
 
 ### 模态、搜索面板与计时
 

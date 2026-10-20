@@ -95,7 +95,9 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -111,7 +113,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.constrainHeight
+import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -568,19 +573,37 @@ class BernRows(val height: Dp?, val x: Dp?, val y: Dp?)
 
 val LocalBernFormRows = staticCompositionLocalOf<BernRows?> { null }
 
+/// The top edge of a plain section. A form's sections pass it up, so the
+/// form sees whether one stands at the top of its rows, wherever it came
+/// from: a slot, a component, a condition.
+private val BernHeadingTop = HorizontalAlignmentLine(::min)
+
 /// A scrolling form: its sections `gap` apart (20 unless given). One
 /// opening with a plain section starts at the top of its page.
 @Composable
-fun BernForm(gap: Dp?, rows: BernRows, plainFirst: Boolean, content: @Composable ColumnScope.() -> Unit) {
+fun BernForm(gap: Dp?, rows: BernRows, content: @Composable ColumnScope.() -> Unit) {
     CompositionLocalProvider(LocalBernFormRows provides rows) {
         Column(
             Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(start = 16.dp, end = 16.dp, top = if (plainFirst) 0.dp else 16.dp, bottom = 16.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                .bernFormTop(16.dp),
             verticalArrangement = Arrangement.spacedBy(gap ?: 20.dp),
             content = content,
         )
+    }
+}
+
+/// Room `top` above a form's rows, unless a plain section opens them. The
+/// form keeps at least the height it is asked for: a smaller one would be
+/// centered in it, moving the rows down.
+private fun Modifier.bernFormTop(top: Dp) = layout { measurable, constraints ->
+    val room = top.roundToPx()
+    val rows = measurable.measure(constraints.offset(vertical = -room))
+    val above = if (rows[BernHeadingTop] == 0) 0 else room
+    layout(constraints.constrainWidth(rows.width), constraints.constrainHeight(rows.height + above)) {
+        rows.place(0, above)
     }
 }
 
@@ -588,7 +611,9 @@ fun BernForm(gap: Dp?, rows: BernRows, plainFirst: Boolean, content: @Composable
 /// metrics (its own `padding_x`, `padding_y`, or the form's, and the form's
 /// `row_height`), each child is a row inset by them and at least that
 /// tall, its content centered along; without, the children stand 8 apart.
-/// A plain section is a heading on the page, as Material's sections are.
+/// A plain section is a heading on the page, as Material's sections are:
+/// its rows keep the page's layout, whatever the form gives its groups,
+/// only its own insets apply, and they stand without room between them.
 @Composable
 fun BernSection(
     title: String?,
@@ -598,15 +623,16 @@ fun BernSection(
     paddingY: Dp? = null,
     content: @Composable () -> Unit,
 ) {
-    val form = LocalBernFormRows.current
+    val form = LocalBernFormRows.current?.takeUnless { plain }
     val x = paddingX ?: form?.x
     val y = paddingY ?: form?.y
     val height = form?.height
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(if (plain) 0.dp else 8.dp)) {
+    val heading = if (plain) Modifier.bernHeading() else Modifier
+    Column(Modifier.fillMaxWidth().then(heading), verticalArrangement = Arrangement.spacedBy(if (plain) 0.dp else 8.dp)) {
         if (title != null) {
             Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
-        if (x == null && y == null && height == null) {
+        if (!plain && x == null && y == null && height == null) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
         } else {
             BernRowsLayout(height, x ?: 0.dp, y ?: 0.dp, content)
@@ -615,6 +641,12 @@ fun BernSection(
             Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+/// Marks a plain section's top edge for the form around it.
+private fun Modifier.bernHeading() = layout { measurable, constraints ->
+    val section = measurable.measure(constraints)
+    layout(section.width, section.height, mapOf(BernHeadingTop to 0)) { section.place(0, 0) }
 }
 
 /// Each child a row the full width: inset `x` across and `y` along, at

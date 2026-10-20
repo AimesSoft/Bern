@@ -1085,6 +1085,12 @@ button:disabled {
   gap: 24px;
 }
 
+/* A form opening with a plain section starts at the top of its page, also
+   when a slot, a component or a condition gives that section. */
+.bern-form:has(> .bern-section:first-child > .bern-group-plain) {
+  padding-top: 0;
+}
+
 .bern-section {
   display: flex;
   flex-direction: column;
@@ -1148,7 +1154,9 @@ button:disabled {
   border-top: 1px solid var(--bern-separator);
 }
 
-.bern-group > .bern-stack {
+/* A row of a group centers its content along; a column there keeps its
+   own alignment across. */
+.bern-group > .bern-hstack {
   align-items: center;
 }
 

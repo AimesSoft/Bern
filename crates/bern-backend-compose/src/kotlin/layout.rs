@@ -519,15 +519,12 @@ impl Generator<'_> {
         if let Some(title) = self.text_prop(element, "title") {
             out.line(format!("BernChrome(title = {title})"));
         }
-        // A form opening with a plain section starts at the top of
-        // its page.
-        let plain_first = matches!(
-            element.children.first(),
-            Some(Node::Element(first)) if first.kind == "Section" && first.keyword("style") == Some("plain")
-        );
+        // A form opening with a plain section starts at the top of its
+        // page: the form sees that as it lays out, so it follows a heading
+        // that a slot, a component or a condition gives.
         let or_null = |name| self.length(element, name).unwrap_or_else(|| "null".into());
         out.open(format!(
-            "BernForm(gap = {}, rows = BernRows({}, {}, {}), plainFirst = {plain_first}) {{",
+            "BernForm(gap = {}, rows = BernRows({}, {}, {})) {{",
             or_null("gap"),
             or_null("row_height"),
             or_null("padding_x"),

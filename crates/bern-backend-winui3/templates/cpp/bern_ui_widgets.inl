@@ -2390,21 +2390,23 @@ struct FormProps {
     std::optional<double> rowHeight;
     std::optional<double> paddingX;
     std::optional<double> paddingY;
-    /// It opens with a plain section, which starts at the top of the page.
-    bool plainFirst = false;
 };
 
 /// What rows of the sections in a form take from it.
 inline std::shared_ptr<FormProps> currentForm;
 
+/// The name a plain section's rows carry, for the form to find.
+inline constexpr wchar_t kPlainSection[] = L"bern-plain-section";
+
 /// A grouped form: sections of card rows in a scrolling page with a
-/// readable maximum width, as Windows Settings pages lay them out.
+/// readable maximum width, as Windows Settings pages lay them out. One
+/// opening with a plain section starts at the top of the page, also when
+/// a slot, a component or a condition gives that section, or takes it away.
 inline void Form(Parent const& p, Ctx const& ctx, Str const& title, FormProps form, Build const& children) {
     if (title && ctx.page) ctx.page->PushTitle(Bound(ctx, title));
     controls::StackPanel content;
     content.Spacing(form.gap.value_or(24));
     content.MaxWidth(1000);
-    content.Padding(xaml::Thickness{24, form.plainFirst ? 0.0 : 8.0, 24, 24});
     auto saved = currentForm;
     currentForm = std::make_shared<FormProps>(form);
     controls::ScrollViewer scroller;
@@ -2414,6 +2416,18 @@ inline void Form(Parent const& p, Ctx const& ctx, Str const& title, FormProps fo
     MarkFill(scroller);
     children(Parent::Of(content), ctx);
     currentForm = saved;
+    auto top = [weak = winrt::make_weak(content)] {
+        auto panel = weak.get();
+        if (!panel) return;
+        bool heading = false;
+        if (panel.Children().Size() > 0)
+            if (auto first = Unwrapped(panel.Children().GetAt(0)).try_as<xaml::FrameworkElement>())
+                heading = first.Name() == kPlainSection;
+        xaml::Thickness padding{24, heading ? 0.0 : 8.0, 24, 24};
+        if (panel.Padding() != padding) panel.Padding(padding);
+    };
+    top();
+    content.SizeChanged([top](auto&&, auto&&) { top(); });
     p.Add(scroller);
 }
 
@@ -2426,18 +2440,22 @@ struct SectionProps {
 };
 
 /// A titled group of card rows with an optional footnote; the rows take
-/// the section's (else the form's) insets and the form's least height.
+/// the section's (else the form's) insets and the form's least height. A
+/// plain section's rows keep the page's layout, whatever the form gives
+/// its groups: only its own insets apply.
 inline void Section(Parent const& p, Ctx const& ctx, Str const& title, Str const& footer, SectionProps section, Build const& children) {
-    auto form = currentForm;
-    auto x = section.paddingX ? section.paddingX : form ? form->paddingX : std::nullopt;
-    auto y = section.paddingY ? section.paddingY : form ? form->paddingY : std::nullopt;
-    auto least = form ? form->rowHeight : std::nullopt;
     if (section.plain) {
-        auto rows = MakeFlex(false, 0, xaml::Thickness{x.value_or(0), y.value_or(0), x.value_or(0), y.value_or(0)});
+        auto x = section.paddingX.value_or(0), y = section.paddingY.value_or(0);
+        auto rows = MakeFlex(false, 0, xaml::Thickness{x, y, x, y});
+        rows.Name(kPlainSection);
         children(Parent::Aligned(rows, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
         p.Add(rows);
         return;
     }
+    auto form = currentForm;
+    auto x = section.paddingX ? section.paddingX : form ? form->paddingX : std::nullopt;
+    auto y = section.paddingY ? section.paddingY : form ? form->paddingY : std::nullopt;
+    auto least = form ? form->rowHeight : std::nullopt;
     controls::StackPanel group;
     group.Spacing(4);
     if (title) {

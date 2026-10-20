@@ -2097,7 +2097,10 @@ pub fn Form(p: &Parent, ctx: &Ctx, props: FormProps, children: Build) {
             .map(|gap| gap.round().max(0.0) as i32)
             .unwrap_or(24),
     );
-    content.set_margin_top(24);
+    // The room above the first section, unless that is a plain one: a
+    // rule on the first child, so it follows a heading a condition gives
+    // or takes away later.
+    content.add_css_class("bern-form-rows");
     content.set_margin_bottom(24);
     content.set_margin_start(12);
     content.set_margin_end(12);
@@ -2120,12 +2123,6 @@ pub fn Form(p: &Parent, ctx: &Ctx, props: FormProps, children: Build) {
         padding_y: props.padding_y,
     };
     children(&Parent::of_box(&content), &ctx.with_form(Rc::new(layout)));
-    if content
-        .first_child()
-        .is_some_and(|first| first.has_css_class("bern-plain-section"))
-    {
-        content.set_margin_top(0);
-    }
     p.add(&scrolled);
 }
 
@@ -2155,7 +2152,13 @@ pub fn Section(p: &Parent, ctx: &Ctx, props: SectionProps, children: Build) {
         group.append(&heading);
     }
     let list = boxed_list();
-    let form = ctx.form().map(|form| **form).unwrap_or_default();
+    // A plain section's rows keep the page's layout, whatever the form
+    // gives its groups: only its own insets apply.
+    let form = ctx
+        .form()
+        .filter(|_| !props.plain)
+        .map(|form| **form)
+        .unwrap_or_default();
     let layout = RowLayout {
         row_height: form.row_height,
         padding_x: props.padding_x.or(form.padding_x),

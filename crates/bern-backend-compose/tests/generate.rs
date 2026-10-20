@@ -571,7 +571,7 @@ fn layout_features_generate_for_compose() {
         "iconOnly = true, shape = BernShape(true, 30f.dp)) { dismiss ->",
         "BernControlGroup(null, 32f.dp) {",
         "BernSearchItem(\"text_page.test_searchitem\", BernText.text(\"Open\")",
-        "BernForm(gap = 12f.dp, rows = BernRows(44f.dp, null, null), plainFirst = true) {",
+        "BernForm(gap = 12f.dp, rows = BernRows(44f.dp, null, null)) {",
         "BernSection(null, null, plain = true, paddingX = 8f.dp) {",
         "BernModal(300f.dp, 200f.dp, true, null, null) {",
     ] {

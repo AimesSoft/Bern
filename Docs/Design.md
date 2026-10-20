@@ -498,7 +498,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | ControlGroup | 按功能将控件放入共享胶囊，保留各自的命中区域、菜单和动作 | SwiftUI 与 Web；见[控件容器](Reference/UI.md#控件容器与尺寸) |
 | SidebarHeader | 固定在侧栏顶部、列表上方的内容；`role: title` 表示它只给窗口命名（应用图标与名称），标题栏已显示图标与标题的 Windows 不显示它 | SwiftUI 与 Web，`sidebar_header` |
 | Svg | 按需呈现打包的动画与交互 SVG 文档 | 见[专项接口与依赖](Implementation/Animated-SVG.md) |
-| Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题 | 基础组件 |
+| Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题。`Section(style: plain)` 是随表单滚动的标题，行直接在页面上，不取 Form 给分组的行内边距，只用自己的；表单以它开头时从页面顶部开始，这个标题也可以来自插槽、组件或条件，各目标在布局时看第一项，条件变了跟着变 | 基础组件；六个目标按同一规则实现 |
 | Label | 图标与标题组合；`display: icon` 只显示图标，保留 `title` 作为可访问名称，图标字号仍由 `style` 决定 | `display: icon` 已在 SwiftUI 与 Web 实现（`icon_labels`）；其他目标未实现时构建报错 |
 | Spacer 和 Divider | 弹性空白与分隔线 | 基础组件 |
 | Text | 本地化或动态文本、文字层级、换行及截断；`mark` 标注底纹 | 基础组件；`mark` 见“画布与标注文字” |

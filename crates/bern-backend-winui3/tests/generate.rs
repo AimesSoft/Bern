@@ -885,7 +885,7 @@ fn layout_features_generate_for_winui3() {
         "B::MenuLook{.iconOnly = true, .shape = B::ControlShape{.capsule = true, .height = B::Len(30.0)}}",
         "B::ControlGroup(p, c, {.height = B::Len(32.0)}, ",
         "B::SearchItem(p, c, {.id = \"test_searchitem\"",
-        "B::Form(p, c, nullptr, {.gap = 12.0, .rowHeight = 44.0, .plainFirst = true}, ",
+        "B::Form(p, c, nullptr, {.gap = 12.0, .rowHeight = 44.0}, ",
         "B::Section(p, c, nullptr, nullptr, {.plain = true, .paddingX = 8.0}, ",
         "B::Modal(p, c, {.width = B::Len(300.0), .height = B::Len(200.0), .cover = true}, ",
         ".underBars = true}",

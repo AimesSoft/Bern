@@ -2,7 +2,7 @@
 //! sections, lists, repetitions and queries.
 
 use super::{BUILDER, Generator, Out, designated, ident, motion_ref, null, string};
-use bern_ir::{Element, Node, Prop};
+use bern_ir::{Element, Prop};
 
 impl Generator<'_> {
     /// `Column` and `Row`: a stack along their axis.
@@ -272,14 +272,6 @@ impl Generator<'_> {
                     ("rowHeight", Self::number(element, "row_height")),
                     ("paddingX", Self::number(element, "padding_x")),
                     ("paddingY", Self::number(element, "padding_y")),
-                    (
-                        "plainFirst",
-                        matches!(
-                            element.children.first(),
-                            Some(Node::Element(first)) if first.kind == "Section" && first.keyword("style") == Some("plain")
-                        )
-                        .then(|| "true".to_string())
-                    ),
                 ])
             ),
             &element.children,

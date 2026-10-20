@@ -147,7 +147,7 @@ bern package --target android
 - `ScaleBox`：子元素在声明的逻辑尺寸中层叠（左上对齐），整体在 `placeWithLayer` 中缩放到能放下并居中，超出部分裁掉；Compose 的命中测试经过同一个变换，点击区域与画面对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Marquee`：内容按自然宽度从右缘外跑到左缘外，位置在图层中按帧时钟写入，不重新组合；`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字带 1 dp 的黑色阴影（`LocalBernTextShadow`）。
 - `Accordion`：每列一个 0 到 1 的权重（`Animatable`），列宽由权重分配，总宽不变，每列在图层中按 `corner` 圆角裁剪。
 - 顶栏：工具栏中 `Spacer` 之前的项放在返回按钮之后（`TopAppBar` 的导航位置），之后的放在末端；`Text` 可以放在工具栏里。`SidebarHeader` 固定在侧栏列表上方，`Sidebar(width:)` 是宽窗口中侧栏的宽度，`Detail(titled: false)` 时顶栏不显示所选目的地的名称，`SidebarItem(badge:)` 是 `NavigationDrawerItem` 的 `badge`（为 0 时隐藏）。
-- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分节间距；有行高或内边距时，分节的每个直接子元素是一行，按内边距缩进、至少为该行高、内容竖向居中（`Section` 自己的内边距优先）；表单以 plain 分节开头时从页面顶部开始。页面中的 `Search` 给了 `width`、`height` 或 `font_size` 时是 Material 搜索框样式的胶囊（`surfaceContainerHigh`、搜索图标、清除按钮），按这些尺寸。
+- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分节间距；有行高或内边距时，分节的每个直接子元素是一行，按内边距缩进、至少为该行高、内容竖向居中（`Section` 自己的内边距优先；plain 分节不取表单的内边距与行高，只用自己的内边距）；表单以 plain 分节开头时从页面顶部开始：plain 分节在顶边给出一条对齐线（`BernHeadingTop`），表单的列把子项的对齐线往上传，表单量出这条线在 0 处时不留顶部的 16，所以插槽、组件或条件给出的标题也算，条件变了跟着变。页面中的 `Search` 给了 `width`、`height` 或 `font_size` 时是 Material 搜索框样式的胶囊（`surfaceContainerHigh`、搜索图标、清除按钮），按这些尺寸。
 
 ### 模态、搜索面板与计时
 
