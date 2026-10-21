@@ -59,6 +59,12 @@ void bern_media_release(BernApp *app, const uint8_t *bytes, size_t len);
 void bern_media_view(BernApp *app, const uint8_t *bytes, size_t len);
 void bern_media_complete(BernApp *app, const uint8_t *bytes, size_t len);
 void bern_media_event(BernApp *app, const uint8_t *bytes, size_t len);
+// The application's media kernel; see `bern_media_kernel_attach` in bern-ffi.
+BernBuffer bern_media_kernel_attach(BernApp *app, const uint8_t *bytes, size_t len);
+void bern_media_surface_attach(BernApp *app, const uint8_t *bytes, size_t len);
+void bern_media_surface_resize(BernApp *app, const uint8_t *bytes, size_t len);
+void bern_media_surface_detach(BernApp *app, const uint8_t *bytes, size_t len);
+void bern_media_surface_frame(BernApp *app, const uint8_t *view, size_t len, double now, double target);
 void bern_buffer_free(BernBuffer buffer);
 
 #endif

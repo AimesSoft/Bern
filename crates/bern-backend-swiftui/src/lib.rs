@@ -157,6 +157,34 @@ pub fn product_name(app: &Application) -> String {
     names::pascal(&app.app.id)
 }
 
+/// Cargo arguments that build the engine's static library like `build`
+/// (`cargo build --lib …`) and have rustc write the native libraries and
+/// frameworks it needs to `file` (its `native-static-libs`). swiftc reads
+/// the file as a response file: a dependency of the engine, such as a
+/// media kernel, may link system frameworks the frontend does not name.
+pub(crate) fn listing_native_libs(build: &[String], file: &std::path::Path) -> Vec<String> {
+    let mut args: Vec<String> = build
+        .iter()
+        .filter(|arg| arg.as_str() != "--lib" && arg.as_str() != "--bins")
+        .cloned()
+        .collect();
+    if let Some(first) = args.first_mut() {
+        *first = "rustc".into();
+    }
+    args.insert(1, "--lib".into());
+    args.extend([
+        "--".into(),
+        "--print".into(),
+        format!("native-static-libs={}", file.display()),
+    ]);
+    args
+}
+
+/// The response file of [`listing_native_libs`] next to the library.
+pub(crate) fn native_libs_file(rust_output: &std::path::Path) -> PathBuf {
+    rust_output.join("libbern_app.native-libs")
+}
+
 fn architecture() -> (&'static str, &'static str) {
     match std::env::consts::ARCH {
         "x86_64" => ("x86_64", "x86_64-apple-darwin"),
@@ -375,6 +403,10 @@ impl Target for SwiftUiMacos {
             "-L".into(),
             rust_output.display().to_string(),
             "-lbern_app".into(),
+            format!("@{}", native_libs_file(&rust_output).display()),
+            // rustc's list repeats libraries swiftc links anyway.
+            "-Xlinker".into(),
+            "-no_warn_duplicate_libraries".into(),
             "-framework".into(),
             "SwiftUI".into(),
             "-framework".into(),
@@ -416,11 +448,19 @@ impl Target for SwiftUiMacos {
             .join(format!("{product}.dSYM"));
         let symbols = output.join(format!("{product}.app.dSYM"));
 
+        let native_libs = listing_native_libs(&cargo, &native_libs_file(&rust_output));
         let mut steps = vec![
             BuildStep::Run {
                 description: "Build the Rust engine and bridge".into(),
                 program: "cargo".into(),
                 args: cargo,
+                cwd: output.join("glue"),
+                env: env.clone(),
+            },
+            BuildStep::Run {
+                description: "List the native libraries the engine links".into(),
+                program: "cargo".into(),
+                args: native_libs,
                 cwd: output.join("glue"),
                 env: env.clone(),
             },

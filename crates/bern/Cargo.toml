@@ -11,8 +11,8 @@ bern-macros.workspace = true
 bern-protocol.workspace = true
 bern-command.workspace = true
 bern-runtime.workspace = true
+bern-media.workspace = true
 
 [dev-dependencies]
 trybuild = "1"
 serde_json.workspace = true
-bern-media.workspace = true

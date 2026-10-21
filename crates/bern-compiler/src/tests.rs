@@ -3125,12 +3125,29 @@ fn buttons_show_content_and_reveal_on_hover() {
             "cannot hold `Button`",
         ),
         (
+            format!(
+                "Button(id: card, {label}) {{ Video(id: clip, source: draft.file) }} => app.add(1)"
+            ),
+            "cannot hold `Video`",
+        ),
+        (
             "Text(content: app.title, reveal: always)".to_string(),
             "hover",
         ),
     ] {
         let message = errors(&body);
         assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
+fn a_button_shows_a_video_without_controls() {
+    let label = r#"label: tr! { "en" => "Pause", "ja" => "一時停止" }"#;
+    let body = format!(
+        "Button(id: frame, {label}) {{ Stack {{ Video(id: clip, source: draft.file, controls: none) }} }} => app.add(1)"
+    );
+    if let Err(errors) = compile_ui(&wrap(&body)) {
+        panic!("{body}: {errors:?}");
     }
 }
 

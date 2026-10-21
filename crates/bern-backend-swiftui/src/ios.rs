@@ -280,6 +280,10 @@ impl Target for SwiftUiIos {
             "-L".into(),
             path(&rust_output),
             "-lbern_app".into(),
+            format!("@{}", path(&crate::native_libs_file(&rust_output))),
+            // rustc's list repeats libraries swiftc links anyway.
+            "-Xlinker".into(),
+            "-no_warn_duplicate_libraries".into(),
             "-framework".into(),
             "SwiftUI".into(),
             "-framework".into(),
@@ -325,7 +329,10 @@ impl Target for SwiftUiIos {
             BuildStep::Run {
                 description: "Build the Rust engine and bridge for the iOS simulator".into(),
                 program: "cargo".into(),
-                args: cargo("--lib", rust_target),
+                args: crate::listing_native_libs(
+                    &cargo("--lib", rust_target),
+                    &crate::native_libs_file(&rust_output),
+                ),
                 cwd: output.join("glue"),
                 env: vec![(
                     "IPHONEOS_DEPLOYMENT_TARGET".to_string(),

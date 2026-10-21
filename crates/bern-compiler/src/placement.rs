@@ -298,6 +298,13 @@ fn rail_items<'a>(
 
 /// The first control in `nodes`, looking into the components they place;
 /// component cycles are reported elsewhere, so each is visited once.
+/// A `Video` without controls only shows its picture and takes no input,
+/// as an `Image`: a button may show it, such as a player's frame that
+/// pauses when pressed.
+fn passive_video(element: &ir::Element) -> bool {
+    element.kind == "Video" && element.keyword("controls") == Some("none")
+}
+
 fn control_inside<'a>(
     nodes: &'a [ir::Node],
     bodies: &BTreeMap<&str, &'a ir::Node>,
@@ -309,7 +316,8 @@ fn control_inside<'a>(
         node.walk(&mut |node| match node {
             ir::Node::Element(element)
                 if found.is_none()
-                    && ir::spec::component(&element.kind).is_some_and(|spec| spec.interactive) =>
+                    && ir::spec::component(&element.kind).is_some_and(|spec| spec.interactive)
+                    && !passive_video(element) =>
             {
                 found = Some(element);
             }

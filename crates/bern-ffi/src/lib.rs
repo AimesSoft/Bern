@@ -368,6 +368,8 @@ pub struct BernApp {
     sessions: Sessions,
     bridge: Arc<UiBridge>,
     media: Arc<dyn MediaLink>,
+    /// The application's media kernel, once the frontend let it execute.
+    kernel: Mutex<Option<Arc<dyn bern_media::kernel::MediaKernel>>>,
     queries: query::Subscriptions,
     _subscription: Guard,
     _media_subscription: Guard,
@@ -553,6 +555,7 @@ pub(crate) fn assemble(
         sessions,
         bridge,
         media,
+        kernel: Mutex::new(None),
         queries,
         _subscription: subscription,
         _media_subscription: media_subscription,
@@ -598,6 +601,9 @@ pub unsafe extern "C" fn bern_app_stop(app: *mut BernApp) {
     let _ = catch_unwind(AssertUnwindSafe(|| {
         app.sessions.unregister(&app.bridge.session_id);
         app.media.detach_executor();
+        if let Some(kernel) = app.kernel.lock().expect("kernel lock").take() {
+            kernel.detached();
+        }
         app.host.stop();
         drop(app);
     }));

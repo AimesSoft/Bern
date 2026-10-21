@@ -521,6 +521,145 @@ fn call(
     take(unsafe { function(app, bytes.as_ptr(), bytes.len()) })
 }
 
+/// A media kernel that records what reaches it and completes every request.
+#[derive(Default)]
+struct RecordingKernel {
+    seen: Mutex<Vec<String>>,
+    hub: Mutex<Option<Arc<dyn bern_media::kernel::KernelHub>>>,
+}
+
+impl RecordingKernel {
+    fn note(&self, what: String) {
+        self.seen.lock().unwrap().push(what);
+    }
+    fn seen(&self) -> Vec<String> {
+        std::mem::take(&mut *self.seen.lock().unwrap())
+    }
+}
+
+impl bern_media::MediaExecutor for RecordingKernel {
+    fn execute(&self, request: bern_media::ExecRequest) {
+        self.note(format!("{:?}", request.op));
+        let hub = self.hub.lock().unwrap().clone().expect("attached before requests");
+        hub.complete(request.request, Ok(()));
+    }
+}
+
+impl bern_media::kernel::MediaKernel for RecordingKernel {
+    fn capabilities(&self) -> bern_media::MediaCapabilities {
+        bern_media::MediaCapabilities {
+            backend: "recording".into(),
+            backend_version: "1".into(),
+            background_playback: true,
+            multi_view: false,
+        }
+    }
+    fn surfaces(&self) -> Vec<bern_media::kernel::SurfaceKind> {
+        vec![bern_media::kernel::SurfaceKind::MetalLayer]
+    }
+    fn attached(&self, hub: Arc<dyn bern_media::kernel::KernelHub>) {
+        *self.hub.lock().unwrap() = Some(hub);
+        self.note("attached".into());
+    }
+    fn detached(&self) {
+        self.note("detached".into());
+    }
+    fn attach_surface(&self, view: &str, player: &str, surface: bern_media::kernel::VideoSurface) {
+        self.note(format!("attach {view} {player} {surface:?}"));
+    }
+    fn resize_surface(&self, view: &str, size: bern_media::kernel::SurfaceSize) {
+        self.note(format!("resize {view} {size:?}"));
+    }
+    fn detach_surface(&self, view: &str) {
+        self.note(format!("detach {view}"));
+    }
+    fn frame(&self, view: &str, timing: bern_media::kernel::FrameTiming) {
+        self.note(format!("frame {view} {timing:?}"));
+    }
+}
+
+#[test]
+fn an_installed_kernel_plays_and_draws_into_the_views_surfaces() {
+    use bern_media::kernel::{self, SurfaceKind};
+    let frontend = Box::new(Frontend::default());
+    let app = start(&frontend, descriptor().fingerprint()).unwrap();
+    let offer = |kinds: &[SurfaceKind]| {
+        let mut offer = Writer::new();
+        offer.u32(kinds.len() as u32);
+        for kind in kinds {
+            offer.u32(kind.code());
+        }
+        call(media::bern_media_kernel_attach, app, &offer.bytes)
+    };
+    // No kernel: the frontend keeps its own media facilities.
+    assert_eq!(offer(&[SurfaceKind::MetalLayer]), vec![0]);
+
+    let recording = Arc::new(RecordingKernel::default());
+    kernel::install(recording.clone());
+    // A frontend whose views give no surface the kernel draws into.
+    assert_eq!(offer(&[]), vec![0]);
+    let answer = offer(&[SurfaceKind::MetalLayer]);
+    let mut reader = Reader::new(&answer);
+    assert_eq!(reader.u8().unwrap(), 1);
+    assert_eq!(reader.u32().unwrap(), SurfaceKind::MetalLayer.code());
+    assert_eq!(recording.seen(), ["attached"]);
+
+    // Every entry's commands reach the kernel through the hub.
+    let (types, _) = bern_media::media_catalog();
+    let mut params = Writer::new();
+    params.text("preview");
+    encode(
+        &Value::Record(vec![Value::Text("file:///clip.mkv".into())]),
+        &Type::Record { name: bern_media::MEDIA_SOURCE.into() },
+        &types,
+        &mut params,
+    );
+    // SAFETY: valid buffer.
+    unsafe { media::bern_media_dispatch(app, 2, params.bytes.as_ptr(), params.bytes.len(), 11) };
+    let (token, reply) = frontend.wait_for("reply");
+    assert_eq!((token, reply[0]), (11, 0));
+    assert_eq!(recording.seen(), [r#"Load { url: "file:///clip.mkv" }"#]);
+
+    // A view's surface, its size, its frames and its end.
+    let mut surface = Writer::new();
+    surface.text("view-1");
+    surface.text("preview");
+    surface.u32(SurfaceKind::MetalLayer.code());
+    surface.u64(0x1234);
+    surface.u32(1280);
+    surface.u32(720);
+    surface.f64(2.0);
+    surface.u32(1);
+    // SAFETY: valid buffers and a live handle.
+    unsafe {
+        media::bern_media_surface_attach(app, surface.bytes.as_ptr(), surface.bytes.len());
+        let mut resize = Writer::new();
+        resize.text("view-1");
+        resize.u32(0);
+        resize.u32(360);
+        resize.f64(f64::NAN);
+        media::bern_media_surface_resize(app, resize.bytes.as_ptr(), resize.bytes.len());
+        let view = b"view-1";
+        media::bern_media_surface_frame(app, view.as_ptr(), view.len(), 1.0, 1.008);
+        let mut detach = Writer::new();
+        detach.text("view-1");
+        media::bern_media_surface_detach(app, detach.bytes.as_ptr(), detach.bytes.len());
+    }
+    assert_eq!(
+        recording.seen(),
+        [
+            "attach view-1 preview VideoSurface { handle: MetalLayer(4660), size: SurfaceSize { width: 1280, height: 720, scale: 2.0 }, fit: Cover }",
+            // Sizes are at least a pixel, and an unknown scale is 1.
+            "resize view-1 SurfaceSize { width: 1, height: 360, scale: 1.0 }",
+            "frame view-1 FrameTiming { now: 1.0, target: 1.008 }",
+            "detach view-1",
+        ]
+    );
+    kernel::clear();
+    unsafe { bern_app_stop(app) };
+    assert_eq!(recording.seen(), ["detached"]);
+}
+
 #[test]
 fn media_players_cross_the_abi() {
     use bern_media::{ExecOp, ExecRequest, Observation, Phase};

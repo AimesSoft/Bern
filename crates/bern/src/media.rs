@@ -98,6 +98,16 @@ impl ToRef for MediaSourceRef {
 /// The type of fields in a `#[bern::players]` struct.
 pub type Player = crate::bind::PlayerRef;
 
+/// A media kernel the application brings in place of the platform's media
+/// facilities: the engine installs it, the hub routes the players to it,
+/// and video views give it surfaces to draw into.
+pub mod kernel {
+    pub use bern_media::kernel::*;
+    pub use bern_media::{
+        ExecOp, ExecRequest, MediaCapabilities, MediaCommand, MediaExecutor, Observation, Phase,
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

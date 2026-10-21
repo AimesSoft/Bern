@@ -884,12 +884,12 @@ private func bernOnQuery(
 
 /// Media functions of the bridge that answer at once.
 enum BernMediaCall {
-    case attachExecutor, create, bind
+    case attachExecutor, create, bind, attachKernel
 }
 
 /// Media functions of the bridge that answer later or not at all.
 enum BernMediaPost {
-    case release, view, complete, event
+    case release, view, complete, event, surfaceAttach, surfaceResize, surfaceDetach
 }
 
 @MainActor
@@ -947,12 +947,15 @@ final class BernHost {
         engineID = String(decoding: Self.take(bern_app_engine_id(app)), as: UTF8.self)
         channel = String(decoding: Self.take(bern_app_channel(app)), as: UTF8.self)
         receiveState(Self.take(bern_app_snapshot(app)))
+        BernKernelClock.shared.serve(app)
         BernMedia.shared.attachExecutor()
         BernMedia.shared.receive(Self.take(bern_media_snapshot(app)))
         platformDidStart()
     }
 
     func stop() {
+        // No kernel frame may reach the app once it is gone.
+        BernKernelClock.shared.serve(nil)
         if let handle { bern_app_stop(handle) }
         handle = nil
     }
@@ -1034,6 +1037,7 @@ final class BernHost {
             case .attachExecutor: bern_media_executor_attached(handle, pointer.baseAddress, pointer.count)
             case .create: bern_media_create(handle, pointer.baseAddress, pointer.count)
             case .bind: bern_media_bind(handle, pointer.baseAddress, pointer.count)
+            case .attachKernel: bern_media_kernel_attach(handle, pointer.baseAddress, pointer.count)
             }
         }
         return Self.take(buffer)
@@ -1047,6 +1051,9 @@ final class BernHost {
             case .view: bern_media_view(handle, pointer.baseAddress, pointer.count)
             case .complete: bern_media_complete(handle, pointer.baseAddress, pointer.count)
             case .event: bern_media_event(handle, pointer.baseAddress, pointer.count)
+            case .surfaceAttach: bern_media_surface_attach(handle, pointer.baseAddress, pointer.count)
+            case .surfaceResize: bern_media_surface_resize(handle, pointer.baseAddress, pointer.count)
+            case .surfaceDetach: bern_media_surface_detach(handle, pointer.baseAddress, pointer.count)
             }
         }
     }

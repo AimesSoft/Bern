@@ -7,6 +7,10 @@
 //! controls dispatch the same media commands every other entry uses.
 
 use super::{BernApp, BernBuffer, BernCallbacks, error_bytes, result_bytes, slice, with_app};
+use bern_media::kernel::{
+    self, FrameTiming, KernelHub, MediaKernel, SurfaceHandle, SurfaceKind, SurfaceSize, VideoFit,
+    VideoSurface,
+};
 use bern_media::{
     ExecRequest, MediaCapabilities, MediaCommand, MediaExecutor, Observation, media_catalog,
 };
@@ -304,6 +308,173 @@ pub unsafe extern "C" fn bern_media_event(app: *mut BernApp, bytes: *const u8, l
     with_app(app, (), |app| {
         if let Ok((player, version, observation)) = Observation::decode(bytes) {
             app.media.observe(&player, version, observation);
+        }
+    })
+}
+
+/// The hub, as the application's media kernel sees it.
+struct KernelLink(std::sync::Arc<dyn crate::link::MediaLink>);
+
+impl KernelHub for KernelLink {
+    fn dispatch(
+        &self,
+        command: MediaCommand,
+        params: Vec<Value>,
+        reply: Box<dyn FnOnce(Result<Value, CommandError>) + Send>,
+    ) {
+        self.0.dispatch(command, params, reply);
+    }
+
+    fn complete(&self, request: u64, result: Result<(), CommandError>) {
+        self.0.complete(request, result);
+    }
+
+    fn observe(&self, player: &str, source_version: u64, observation: Observation) {
+        self.0.observe(player, source_version, observation);
+    }
+}
+
+/// The frontend can host the application's media kernel. Layout: count
+/// u32, then the `SurfaceKind` codes its video views can create. When the
+/// application installed a kernel that draws into one of them, the kernel
+/// becomes the executor of every player and the answer is `1, kind u32`:
+/// video views then create surfaces of that kind instead of the platform's
+/// player views, and the frontend attaches no executor of its own. `0`
+/// otherwise.
+///
+/// # Safety
+/// `bytes` must point to `len` readable bytes or be null with `len == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_media_kernel_attach(
+    app: *mut BernApp,
+    bytes: *const u8,
+    len: usize,
+) -> BernBuffer {
+    // SAFETY: guaranteed by the caller.
+    let bytes = unsafe { slice(bytes, len) };
+    with_app(app, BernBuffer::empty(), |app| {
+        let mut reader = Reader::new(bytes);
+        let offers: Vec<SurfaceKind> = match reader.u32() {
+            Ok(count) => (0..count)
+                .filter_map(|_| reader.u32().ok().and_then(SurfaceKind::from_code))
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        let mut writer = Writer::new();
+        match kernel::for_target(&offers) {
+            Some((kernel, kind)) => {
+                *app.kernel.lock().expect("kernel lock") = Some(kernel.clone());
+                kernel.attached(std::sync::Arc::new(KernelLink(app.media.clone())));
+                app.media.attach_executor(kernel.clone(), kernel.capabilities());
+                writer.u8(1);
+                writer.u32(kind.code());
+            }
+            None => writer.u8(0),
+        }
+        BernBuffer::from_vec(writer.bytes)
+    })
+}
+
+fn current_kernel(app: &BernApp) -> Option<std::sync::Arc<dyn MediaKernel>> {
+    app.kernel.lock().expect("kernel lock").clone()
+}
+
+fn surface_size(reader: &mut Reader) -> Option<SurfaceSize> {
+    let width = reader.u32().ok()?;
+    let height = reader.u32().ok()?;
+    let scale = reader.f64().ok()?;
+    Some(SurfaceSize {
+        width: width.max(1),
+        height: height.max(1),
+        scale: if scale.is_finite() && scale > 0.0 { scale } else { 1.0 },
+    })
+}
+
+/// A video view created its surface for the kernel. Layout: view token
+/// text, player text, kind u32, handle u64, width u32, height u32 (physical
+/// pixels), scale f64 and fit u32 (`VideoFit`: contain, cover, fill). The
+/// view keeps the surface alive until `bern_media_surface_detach` returns.
+///
+/// # Safety
+/// `bytes` must point to `len` readable bytes or be null with `len == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_media_surface_attach(app: *mut BernApp, bytes: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let bytes = unsafe { slice(bytes, len) };
+    with_app(app, (), |app| {
+        let Some(kernel) = current_kernel(app) else { return };
+        let mut reader = Reader::new(bytes);
+        let (Ok(view), Ok(player), Ok(kind), Ok(handle)) =
+            (reader.text(), reader.text(), reader.u32(), reader.u64())
+        else {
+            return;
+        };
+        let handle = match SurfaceKind::from_code(kind) {
+            Some(SurfaceKind::MetalLayer) => SurfaceHandle::MetalLayer(handle),
+            None => return,
+        };
+        let Some(size) = surface_size(&mut reader) else { return };
+        let fit = VideoFit::from_code(reader.u32().unwrap_or(0));
+        kernel.attach_surface(&view, &player, VideoSurface { handle, size, fit });
+    })
+}
+
+/// A kernel surface changed size. Layout: view token text, width u32,
+/// height u32 (physical pixels) and scale f64.
+///
+/// # Safety
+/// `bytes` must point to `len` readable bytes or be null with `len == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_media_surface_resize(app: *mut BernApp, bytes: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let bytes = unsafe { slice(bytes, len) };
+    with_app(app, (), |app| {
+        let Some(kernel) = current_kernel(app) else { return };
+        let mut reader = Reader::new(bytes);
+        let Ok(view) = reader.text() else { return };
+        if let Some(size) = surface_size(&mut reader) {
+            kernel.resize_surface(&view, size);
+        }
+    })
+}
+
+/// A kernel surface is going away; when this returns the kernel no longer
+/// draws into it. Layout: view token text.
+///
+/// # Safety
+/// `bytes` must point to `len` readable bytes or be null with `len == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_media_surface_detach(app: *mut BernApp, bytes: *const u8, len: usize) {
+    // SAFETY: guaranteed by the caller.
+    let bytes = unsafe { slice(bytes, len) };
+    with_app(app, (), |app| {
+        let Some(kernel) = current_kernel(app) else { return };
+        if let Ok(view) = Reader::new(bytes).text() {
+            kernel.detach_surface(&view);
+        }
+    })
+}
+
+/// The display of a kernel surface prepares a frame. `view` is the view
+/// token as UTF-8; `now` and `target` are seconds of the host's monotonic
+/// clock. Called on the frame clock's thread, once per display refresh.
+///
+/// # Safety
+/// `view` must point to `len` readable bytes or be null with `len == 0`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_media_surface_frame(
+    app: *mut BernApp,
+    view: *const u8,
+    len: usize,
+    now: f64,
+    target: f64,
+) {
+    // SAFETY: guaranteed by the caller.
+    let view = unsafe { slice(view, len) };
+    with_app(app, (), |app| {
+        let Some(kernel) = current_kernel(app) else { return };
+        if let Ok(view) = std::str::from_utf8(view) {
+            kernel.frame(view, FrameTiming { now, target });
         }
     })
 }

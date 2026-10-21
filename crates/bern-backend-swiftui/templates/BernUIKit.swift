@@ -649,6 +649,115 @@ struct BernVideoSurface: UIViewRepresentable {
     }
 }
 
+/// The surface a video view gives the application's media kernel: a view
+/// whose layer is the `CAMetalLayer` the kernel draws into. It takes no
+/// touches; the views around it do.
+final class BernKernelView: UIView {
+    override class var layerClass: AnyClass { CAMetalLayer.self }
+
+    var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
+    /// How much the scenes around the view enlarge it.
+    var sceneScale = 1.0 {
+        didSet { if sceneScale != oldValue { report() } }
+    }
+    /// Called when the size on screen changes.
+    var resized: ((BernSurfaceSize) -> Void)?
+    private var reported: BernSurfaceSize?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        metalLayer.isOpaque = true
+        backgroundColor = .black
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    /// The size on screen, in the pixels of the view's screen.
+    var size: BernSurfaceSize {
+        let backing = window?.screen.scale ?? traitCollection.displayScale
+        return BernSurfaceSize(points: bounds.size, backing: Double(backing), sceneScale: sceneScale)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        report()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        report()
+    }
+
+    private func report() {
+        let size = self.size
+        guard size != reported else { return }
+        reported = size
+        resized?(size)
+    }
+}
+
+/// Gives the application's media kernel a surface to show a player in,
+/// with a display link of the screen.
+struct BernKernelVideoSurface: UIViewRepresentable {
+    let playerID: String
+    let window: String
+    let fit: BernVideoFit
+    var corner: Double = 0
+    var cornerMotion: BernMotion? = nil
+    var sceneScale = 1.0
+
+    final class Coordinator {
+        var token: String?
+        var playerID: String?
+        var window: String?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> BernKernelView {
+        let view = BernKernelView()
+        view.sceneScale = sceneScale
+        bernRoundCorners(view.layer, corner, motion: nil)
+        attach(view, context.coordinator)
+        return view
+    }
+
+    func updateUIView(_ view: BernKernelView, context: Context) {
+        view.sceneScale = sceneScale
+        bernRoundCorners(view.layer, corner, motion: cornerMotion)
+        if context.coordinator.playerID != playerID || context.coordinator.window != window {
+            Self.detach(view, context.coordinator)
+            attach(view, context.coordinator)
+        }
+    }
+
+    static func dismantleUIView(_ view: BernKernelView, coordinator: Coordinator) {
+        detach(view, coordinator)
+    }
+
+    private func attach(_ view: BernKernelView, _ coordinator: Coordinator) {
+        let token = UUID().uuidString
+        coordinator.token = token
+        coordinator.playerID = playerID
+        coordinator.window = window
+        let frames = BernKernelFrames(token: token)
+        let link = CADisplayLink(target: frames, selector: #selector(BernKernelFrames.step(_:)))
+        view.resized = { size in BernMedia.shared.resizeKernel(token: token, size: size) }
+        BernMedia.shared.attachKernel(
+            view.metalLayer, size: view.size, fit: fit, token: token, player: playerID, window: window,
+            link: link, frames: frames)
+    }
+
+    private static func detach(_ view: BernKernelView, _ coordinator: Coordinator) {
+        view.resized = nil
+        if let token = coordinator.token { BernMedia.shared.detachKernel(token: token) }
+        coordinator.token = nil
+        coordinator.playerID = nil
+        coordinator.window = nil
+    }
+}
+
 // MARK: - Tab accessory
 
 extension View {

@@ -941,7 +941,7 @@ style! {
 
 ### 带内容的按钮与悬停显示
 
-海报、卡片、列表行这类“点了就打开”的东西，显示的是图片与文字，而不是按钮标题。`Button` 可以带一个子元素作为它显示的内容，`label` 仍是必写的可访问名称，`icon` 与 `prominence` 不能再写；多个元素放进 `Column`、`Row` 或 `Stack`。内容里不能有其他控件，经过组件也一样，否则一次按下有两种含义，构建失败；需要第二个操作时，把它放在按钮旁边，例如叠放在同一个 `Stack` 中。
+海报、卡片、列表行这类“点了就打开”的东西，显示的是图片与文字，而不是按钮标题。`Button` 可以带一个子元素作为它显示的内容，`label` 仍是必写的可访问名称，`icon` 与 `prominence` 不能再写；多个元素放进 `Column`、`Row` 或 `Stack`。内容里不能有其他控件，经过组件也一样，否则一次按下有两种含义，构建失败；需要第二个操作时，把它放在按钮旁边，例如叠放在同一个 `Stack` 中。没有控制条的视频（`Video(controls: none)`）只显示画面、不接收输入，与 `Image` 一样可以作为按钮的内容，例如按下就暂停的播放器画框。
 
 `style!` 的 `text` 块给文本样式定字重与字号，例如 `body: font(size: 13, weight: regular)`。设计稿给电视另一套字号时写 `tv:`，例如 `body: font(size: 13, tv: 16)`、`caption: font(tv: 14)`（只给电视定字号）：电视在远处看，tvOS 构建时就取电视的字号，Android 与 Web 在运行时判断为电视时取它（Web 在文档上加 `bern-television` 类），macOS、iOS、Windows、Linux 不受影响。tvOS 上按设计尺寸画的场景（`ScaleBox`）里，没有指定字体的系统文字取应用正文的电视字号，不取 tvOS 自己的 29 点。
 
@@ -2276,6 +2276,30 @@ macOS、Linux 和 Windows 可以分别接入其平台媒体设施，也可以由
 
 视频内容像素保持原始颜色，控制条、加载状态和错误提示使用统一主题。弹幕、字幕和自定义工具栏通过声明的覆盖层组合，必须验证原生视频表面上的层叠和命中能力，不假设所有平台都与 DOM 一样。
 
+### 应用自带的媒体内核
+
+应用可以用自己的播放内核代替平台的媒体设施，例如一个用 Rust 写成、自己解码并渲染的内核。引擎在创建时登记实现了 `MediaKernel` 的内核；前端启动时报告它的视频视图能创建哪些原生表面，内核能画进其中一种时，内核成为所有播放器的执行端，前端不再挂接自己的媒体设施。应用的声明不变：仍是 `Video(player: …)` 或 `Video(source: …)`。
+
+```rust
+// 引擎创建时，在支持的平台上
+let kernel = Arc::new(MyKernel::start());
+bern::media::kernel::install(kernel.clone());
+```
+
+| 接口 | 内容 |
+| --- | --- |
+| `MediaKernel: MediaExecutor` | `capabilities`、能画进的表面种类 `surfaces`；`attached(hub)` 与 `detached`；`attach_surface(view, player, surface)`、`resize_surface`、`detach_surface`；每帧的 `frame(view, timing)` |
+| `KernelHub` | 内核眼中的媒体中心：`complete` 完成请求，`observe` 报告带源版本的事实，`dispatch` 代它的应用发标准媒体命令 |
+| `VideoSurface` | 表面句柄（`SurfaceHandle`，目前是 `CAMetalLayer` 的地址）、物理像素尺寸与像素比（`SurfaceSize`，含外层 `ScaleBox` 的放大）、声明的 `fit` |
+| `FrameTiming` | 帧时钟触发的时刻与这一帧上屏的时刻，宿主单调时钟（Apple 上是 `CACurrentMediaTime`）的秒数 |
+
+- 标准媒体命令照常经媒体中心校验、带源版本路由给内核，内核经 `KernelHub` 完成请求、报告事实，事实不产生命令。应用自己的命令要打开、播放、暂停、跳转或调音量时，内核也经 `KernelHub::dispatch` 发标准命令，与 CLI、MCP 一样校验并计入源版本，所以各入口看到的仍是同一个播放器。标准命令以外的能力（字幕轨、弹幕、超分辨率等）由应用的引擎直接调用内核，不进入媒体契约。
+- 表面由视图持有，应用代码不接触：视图创建内核要求的原生表面而不是平台的播放器视图，把它交给内核（`attach_surface`），尺寸或像素比变化时 `resize_surface`，视图卸载前 `detach_surface`，返回后内核不再使用该表面。跨语言的命令与状态协议里没有表面句柄。
+- 帧时钟：每个表面一个显示同步的帧回调，运行在专门的线程上，不受主线程布局与动画影响；内核应合并来不及处理的帧，`frame` 只登记、不在调用线程上绘制。
+- 能力 `multi_view: false` 时，一个播放器画在最后附着的视图里；那个视图卸载后回到仍附着的上一个视图。例如播放层缩进侧栏的迷你播放器时，画面跟到迷你播放器里继续播放。
+- 没有登记内核，或内核不支持前端提供的任何表面种类时，前端照常挂接平台媒体设施。所以一个只在部分平台上有的内核（例如没有 Web 版的内核）不影响其他目标。
+- 实现进度：`bern-media` 的 `kernel` 模块、C ABI（`bern_media_kernel_attach`、`bern_media_surface_attach`、`_resize`、`_detach`、`_frame`）；SwiftUI 的视频视图在内核模式下创建以 `CAMetalLayer` 为图层的视图，帧时钟是视图所在屏幕的 `CADisplayLink`（macOS 14 起由视图给出，跟随窗口换屏），在名为 “Bern media frames” 的线程上运行。macOS 上用 Erika 的 liberika 内核实测（2026-10-21）：播放 HEVC 的 mkv，画面、ASS 字幕、音频、暂停、跳转、倍速、换字幕轨、播完与重播都经内核；画框铺满、退后与推开时圆角与尺寸跟随；播放层缩进侧栏后画面转到迷你播放器继续播放，展开时转回；窗口缩成手机横屏布局时转到另一个视图；`media.pause` 等命令行命令作用于同一个播放器。iOS、tvOS 生成同样的视图（`UIView` 的图层类为 `CAMetalLayer`，`CADisplayLink`），未实测。Compose、GTK、WinUI 3 与 Web 尚未提供内核表面，内核不会被挂接。
+
 ### 引擎读取交来的文件
 
 用户选中、拖入或用应用打开的文件以 `MediaSource` 交给引擎。播放器与图片按地址读取它；引擎自己也常要读：按文件名与开头的内容认出作品、计算校验值、交给应用自带的解码内核。地址的写法因平台而异：macOS、iOS、Linux 与 Windows 交 `file://` 地址；Android 交 `content://` 文档地址，它没有文件名，也不是路径；网页交页面的 `blob:` 地址。引擎不分辨这些写法，统一经 `MediaSource` 读取：
@@ -2509,6 +2533,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 | 版本 | 主要内容 |
 | --- | --- |
+| v0.35 | 应用自带的媒体内核：引擎登记 `MediaKernel`，前端的视频视图给它原生表面（Apple 上是 `CAMetalLayer`）与显示同步的帧时钟，标准媒体命令照常经媒体中心路由给它；没有控制条的 `Video` 可以作为按钮的内容；Apple 目标把引擎依赖需要的系统框架与库（rustc 的 `native-static-libs`）交给 swiftc 链接 |
 | v0.34 | `style!` 按平台给出长度（`gap`、`padding_x`、`padding_y`、`width` 与 `fit`、`height`、`font_size`、`row_height`），构建每个目标前替换元素写下的长度；`shape: chip`；`Positioned(bleed:)` 在 GTK 与 WinUI 3 补齐；不写 `align` 的 `Column` 在 GTK 与 WinUI 3 也是前缘列；与框架类型同名的值类型、组件与会话在各目标都能编译；监听控制通道的构建在 `bin/` 旁附带列出命令的 Agent skill；release 构建的生成 crate 以 LTO、单一代码生成单元编译并剥离符号；WebUI 安装包只带本应用的程序；框架级性能追踪（`BERN_TRACE`、会话命令 `trace.*`、`bern run --trace` 与 `bern::trace::span!`），先接入引擎与桥接一侧 |
 | v0.33 | `swiftui + tvos`：Apple TV 模拟器构建与 `bern run --target tvos`，一个场景中的虚拟窗口、系统焦点与遥控器；电视布局 `Layout(size: tv)` 与 `window.tv`，只运行在电视上的目标在构建时裁剪电视不显示的部分；没有控件的快捷键 `Shortcut`，电视上对应遥控按键；按钮的起始焦点 `default_focus`；`[app.icon].tvos` 接受 `.brandassets`，未声明时由图标生成分层图标与顶部货架图；文本样式的电视字号 `font(tv:)`；文字会话动作 `push_str` 与 `pop`；`Search(suggest: true)` 未输入时就列出结果；以上 Bern 新能力六个目标都生成；tvOS 上按设计尺寸画的场景里控件按设计尺寸画（开关、分段、滑块、菜单行、分组标题、正文字号），自绘按钮按设计稿的电视焦点（行变白、图片抬起、按钮变白放大）；`Sidebar(width:)` 在保持系统侧栏宽度的目标上改为警告；只显示图标的页签 `Tab(display: icon)`（电视标签栏里的搜索只是放大镜） |
 | v0.32 | 文档与当前接口同步：新增组件与属性参考、目标能力矩阵；播放器坐标场景与滚动内容、共享胶囊和受控滑块、空闲检测开关、图片跨分栏 Hero；同步 Web 搜索、引导、布局与存储支持。历史验证记录保留各自的范围，后续设计单独标注；`[app.icon]` 让各平台使用自己的图标（方形 PNG 或平台原生格式：`.icns`、`.appiconset`、`.ico`、hicolor 图标主题、Android `res`、页面图标文件夹）；`SidebarHeader(role: title)` 在标题栏已显示应用图标与标题的 Windows 上不显示 |

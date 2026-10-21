@@ -12,6 +12,7 @@
 //! reports back into one state that every entry observes.
 
 mod hub;
+pub mod kernel;
 
 pub use hub::{APPLICATION_OWNER, MediaHub, MediaSubscription, MediaUpdate};
 

@@ -701,6 +701,125 @@ struct BernVideoSurface: NSViewRepresentable {
     }
 }
 
+/// The surface a video view gives the application's media kernel: a view
+/// whose layer is the `CAMetalLayer` the kernel draws into. It takes no
+/// input; the views around it do.
+final class BernKernelView: NSView {
+    let metalLayer = CAMetalLayer()
+    /// How much the scenes around the view enlarge it.
+    var sceneScale = 1.0 {
+        didSet { if sceneScale != oldValue { report() } }
+    }
+    /// Called when the size on screen changes.
+    var resized: ((BernSurfaceSize) -> Void)?
+    private var reported: BernSurfaceSize?
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        metalLayer.isOpaque = true
+        metalLayer.backgroundColor = NSColor.black.cgColor
+        layer = metalLayer
+        layerContentsRedrawPolicy = .duringViewResize
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    /// The size on screen, in the pixels of the window's display.
+    var size: BernSurfaceSize {
+        let backing = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        return BernSurfaceSize(points: bounds.size, backing: Double(backing), sceneScale: sceneScale)
+    }
+
+    override func layout() {
+        super.layout()
+        report()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        report()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        report()
+    }
+
+    private func report() {
+        let size = self.size
+        guard size != reported else { return }
+        reported = size
+        resized?(size)
+    }
+}
+
+/// Gives the application's media kernel a surface to show a player in,
+/// with the display link of the screen the view is on.
+struct BernKernelVideoSurface: NSViewRepresentable {
+    let playerID: String
+    let window: String
+    let fit: BernVideoFit
+    var corner: Double = 0
+    var cornerMotion: BernMotion? = nil
+    var sceneScale = 1.0
+
+    final class Coordinator {
+        var token: String?
+        var playerID: String?
+        var window: String?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> BernKernelView {
+        let view = BernKernelView()
+        view.sceneScale = sceneScale
+        bernRoundCorners(view.layer, corner, motion: nil)
+        attach(view, context.coordinator)
+        return view
+    }
+
+    func updateNSView(_ view: BernKernelView, context: Context) {
+        view.sceneScale = sceneScale
+        bernRoundCorners(view.layer, corner, motion: cornerMotion)
+        if context.coordinator.playerID != playerID || context.coordinator.window != window {
+            Self.detach(view, context.coordinator)
+            attach(view, context.coordinator)
+        }
+    }
+
+    static func dismantleNSView(_ view: BernKernelView, coordinator: Coordinator) {
+        detach(view, coordinator)
+    }
+
+    private func attach(_ view: BernKernelView, _ coordinator: Coordinator) {
+        let token = UUID().uuidString
+        coordinator.token = token
+        coordinator.playerID = playerID
+        coordinator.window = window
+        let frames = BernKernelFrames(token: token)
+        // The view's display link follows the window to other screens.
+        let link = view.displayLink(target: frames, selector: #selector(BernKernelFrames.step(_:)))
+        view.resized = { size in BernMedia.shared.resizeKernel(token: token, size: size) }
+        BernMedia.shared.attachKernel(
+            view.metalLayer, size: view.size, fit: fit, token: token, player: playerID, window: window,
+            link: link, frames: frames)
+    }
+
+    private static func detach(_ view: BernKernelView, _ coordinator: Coordinator) {
+        view.resized = nil
+        if let token = coordinator.token { BernMedia.shared.detachKernel(token: token) }
+        coordinator.token = nil
+        coordinator.playerID = nil
+        coordinator.window = nil
+    }
+}
+
 extension BernMedia {
     /// Development snapshots: caching a view's display leaves out video
     /// layers, so draw the current frame of each local file into the image.

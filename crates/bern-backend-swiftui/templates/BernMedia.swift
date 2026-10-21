@@ -1,5 +1,8 @@
 // Bern media runtime for SwiftUI. Generated build input; do not edit.
 //
+// When the application installed a media kernel of its own, the kernel is
+// the executor: video views give it Metal layers to draw into and a frame
+// clock (see "Application media kernel" below). Otherwise
 // AVFoundation is the media executor: it performs the requests the Rust
 // media hub routes to it and reports what it observes, tagged with the
 // source version it played. Reports are facts; nothing here turns them into
@@ -93,6 +96,9 @@ final class BernMedia {
     private(set) var players: [String: BernPlayerState] = [:]
     @ObservationIgnored private var revision: UInt64 = 0
     @ObservationIgnored let backend = BernMediaBackend()
+    /// The kind of surface video views give the application's media
+    /// kernel; nil while AVFoundation plays.
+    private(set) var kernel: BernSurfaceKind?
 
     func receive(_ bytes: [UInt8]) {
         var reader = BernReader(bytes)
@@ -112,8 +118,17 @@ final class BernMedia {
         }
     }
 
-    /// Attach AVFoundation as the executor of every player.
+    /// Let the application's media kernel execute every player when it can
+    /// draw into a Metal layer, or else attach AVFoundation.
     func attachExecutor() {
+        var offer = BernWriter()
+        offer.u32(1)
+        offer.u32(BernSurfaceKind.metalLayer.rawValue)
+        var answer = BernReader(BernHost.shared.mediaCall(.attachKernel, offer.bytes))
+        if (try? answer.u8()) == 1, let code = try? answer.u32(), let kind = BernSurfaceKind(rawValue: code) {
+            kernel = kind
+            return
+        }
         var writer = BernWriter()
         writer.text("avfoundation")
         writer.text("1")
@@ -205,6 +220,58 @@ final class BernMedia {
             surface.view.player = nil
             surfaces[token] = nil
         }
+        for (token, surface) in kernelSurfaces where surface.window == window {
+            detachKernel(token: token)
+        }
+    }
+
+    /// Kernel surfaces by attachment token.
+    @ObservationIgnored private var kernelSurfaces: [String: (window: String, link: CADisplayLink, frames: BernKernelFrames)] = [:]
+
+    /// Give the kernel `layer` to show `player` in, with its frame clock
+    /// `link`, whose target is `frames`; the hub counts the view.
+    func attachKernel(
+        _ layer: CAMetalLayer, size: BernSurfaceSize, fit: BernVideoFit, token: String, player: String,
+        window: String, link: CADisplayLink, frames: BernKernelFrames
+    ) {
+        kernelSurfaces[token] = (window, link, frames)
+        var view = BernWriter()
+        view.text(token)
+        view.u8(1)
+        view.text(player)
+        view.text(window)
+        BernHost.shared.mediaPost(.view, view.bytes)
+        var surface = BernWriter()
+        surface.text(token)
+        surface.text(player)
+        surface.u32(BernSurfaceKind.metalLayer.rawValue)
+        surface.u64(UInt64(UInt(bitPattern: Unmanaged.passUnretained(layer).toOpaque())))
+        size.write(&surface)
+        surface.u32(fit.code)
+        BernHost.shared.mediaPost(.surfaceAttach, surface.bytes)
+        BernKernelClock.shared.start(link)
+    }
+
+    func resizeKernel(token: String, size: BernSurfaceSize) {
+        guard kernelSurfaces[token] != nil else { return }
+        var writer = BernWriter()
+        writer.text(token)
+        size.write(&writer)
+        BernHost.shared.mediaPost(.surfaceResize, writer.bytes)
+    }
+
+    /// Stop the frames and take the surface back: when this returns the
+    /// kernel no longer draws into the layer.
+    func detachKernel(token: String) {
+        guard let surface = kernelSurfaces.removeValue(forKey: token) else { return }
+        BernKernelClock.shared.stop(surface.link, surface.frames)
+        var writer = BernWriter()
+        writer.text(token)
+        BernHost.shared.mediaPost(.surfaceDetach, writer.bytes)
+        var view = BernWriter()
+        view.text(token)
+        view.u8(0)
+        BernHost.shared.mediaPost(.view, view.bytes)
     }
 }
 
@@ -488,6 +555,15 @@ enum BernVideoFit {
         case .fill: .resize
         }
     }
+
+    /// Code of the fit in the C ABI (`VideoFit` in bern-media).
+    var code: UInt32 {
+        switch self {
+        case .contain: 0
+        case .cover: 1
+        case .fill: 2
+        }
+    }
 }
 
 /// How a `Video` gets its player.
@@ -544,6 +620,7 @@ struct BernVideo: View {
     var corner: Double = 0
     var cornerMotion: BernMotion? = nil
     @Environment(BernWindowContext.self) private var window
+    @Environment(\.bernSceneScale) private var sceneScale
     @BernReducedMotion private var reduce
     @State private var owner = BernPlayerOwner()
 
@@ -566,11 +643,20 @@ struct BernVideo: View {
         VStack(spacing: 6) {
             ZStack {
                 if state != nil {
-                    BernVideoSurface(
-                        playerID: playerID, window: window.id, gravity: fit.gravity, corner: corner,
-                        cornerMotion: reduce || bernForcedReduceMotion ? nil : cornerMotion
-                    )
-                    .opacity(BernVideo.showsVideo(state) ? 1 : 0)
+                    if BernMedia.shared.kernel != nil {
+                        BernKernelVideoSurface(
+                            playerID: playerID, window: window.id, fit: fit, corner: corner,
+                            cornerMotion: reduce || bernForcedReduceMotion ? nil : cornerMotion,
+                            sceneScale: sceneScale
+                        )
+                        .opacity(BernVideo.showsVideo(state) ? 1 : 0)
+                    } else {
+                        BernVideoSurface(
+                            playerID: playerID, window: window.id, gravity: fit.gravity, corner: corner,
+                            cornerMotion: reduce || bernForcedReduceMotion ? nil : cornerMotion
+                        )
+                        .opacity(BernVideo.showsVideo(state) ? 1 : 0)
+                    }
                 }
                 BernVideoStatus(state: state)
             }
@@ -855,4 +941,114 @@ struct BernScrubber: View {
         .tint(.primary)
     }
     #endif
+}
+
+// MARK: - Application media kernel
+
+/// Surface kinds of the C ABI (`SurfaceKind` in bern-media).
+enum BernSurfaceKind: UInt32 {
+    case metalLayer = 0
+}
+
+/// A kernel surface's size on screen: physical pixels, and pixels per point.
+struct BernSurfaceSize: Equatable {
+    var width: UInt32
+    var height: UInt32
+    var scale: Double
+
+    /// `points` on a display of `backing` pixels per point, inside scenes
+    /// that draw it `sceneScale` times its size.
+    init(points: CGSize, backing: Double, sceneScale: Double) {
+        let scale = max(backing, 1) * (sceneScale > 0 && sceneScale.isFinite ? sceneScale : 1)
+        width = UInt32(max(1, (points.width * scale).rounded()))
+        height = UInt32(max(1, (points.height * scale).rounded()))
+        self.scale = scale
+    }
+
+    func write(_ writer: inout BernWriter) {
+        writer.u32(width)
+        writer.u32(height)
+        writer.f64(scale)
+    }
+}
+
+/// The frame clock of kernel surfaces. A thread of its own runs their
+/// display links, one per surface, so the kernel's frames keep the
+/// display's pace while the main thread lays out or animates.
+final class BernKernelClock: NSObject, @unchecked Sendable {
+    static let shared = BernKernelClock()
+
+    /// Guards `app`, `thread` and every target's `active`. A frame holds it
+    /// while it reaches the app, so none arrives once its surface detached
+    /// or the app stopped.
+    private let lock = NSLock()
+    private var app: OpaquePointer?
+    private var thread: Thread?
+
+    /// Frames reach `app` from now on; nothing reaches anything after nil.
+    func serve(_ app: OpaquePointer?) {
+        lock.lock()
+        self.app = app
+        lock.unlock()
+    }
+
+    func start(_ link: CADisplayLink) {
+        perform(#selector(add(_:)), on: clockThread(), with: link, waitUntilDone: false)
+    }
+
+    /// No frame of `frames` reaches the app after this returns.
+    func stop(_ link: CADisplayLink, _ frames: BernKernelFrames) {
+        lock.lock()
+        frames.active = false
+        lock.unlock()
+        perform(#selector(remove(_:)), on: clockThread(), with: link, waitUntilDone: false)
+    }
+
+    fileprivate func step(_ frames: BernKernelFrames, now: Double, target: Double) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard frames.active, let app else { return }
+        frames.token.withUnsafeBufferPointer { token in
+            bern_media_surface_frame(app, token.baseAddress, token.count, now, target)
+        }
+    }
+
+    @objc private func add(_ link: CADisplayLink) {
+        link.add(to: .current, forMode: .common)
+    }
+
+    @objc private func remove(_ link: CADisplayLink) {
+        link.invalidate()
+    }
+
+    private func clockThread() -> Thread {
+        lock.lock()
+        defer { lock.unlock() }
+        if let thread { return thread }
+        let thread = Thread {
+            // A port keeps the run loop waiting while no display link runs.
+            RunLoop.current.add(NSMachPort(), forMode: .default)
+            while true { RunLoop.current.run(mode: .default, before: .distantFuture) }
+        }
+        thread.name = "Bern media frames"
+        thread.qualityOfService = .userInteractive
+        thread.start()
+        self.thread = thread
+        return thread
+    }
+}
+
+/// The target of one kernel surface's display link.
+final class BernKernelFrames: NSObject, @unchecked Sendable {
+    let token: [UInt8]
+    /// Guarded by the clock's lock.
+    fileprivate var active = true
+
+    init(token: String) {
+        self.token = Array(token.utf8)
+    }
+
+    @objc func step(_ link: CADisplayLink) {
+        BernKernelClock.shared.step(self, now: link.timestamp, target: link.targetTimestamp)
+    }
 }

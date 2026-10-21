@@ -403,10 +403,24 @@ fn showcase_generates_swift_that_type_checks() {
             },
         )
         .unwrap();
+    // The engine, then the list of native libraries it links.
     assert_eq!(
         programs(&release),
-        ["cargo", "xcrun swiftc", "mv", "xcrun strip", "codesign"]
+        ["cargo", "cargo", "xcrun swiftc", "mv", "xcrun strip", "codesign"]
     );
+    let listing = release
+        .steps
+        .iter()
+        .filter_map(|step| match step {
+            BuildStep::Run { program, args, .. } if program == "cargo" => Some(args),
+            _ => None,
+        })
+        .nth(1)
+        .unwrap();
+    assert_eq!(listing[..2], ["rustc", "--lib"]);
+    assert!(listing.contains(&"--release".to_string()));
+    let native_libs = listing.last().unwrap().strip_prefix("native-static-libs=").unwrap();
+    assert!(native_libs.ends_with("libbern_app.native-libs"));
     let swiftc = release
         .steps
         .iter()
@@ -421,6 +435,8 @@ fn showcase_generates_swift_that_type_checks() {
             .any(|pair| pair == ["-Xlinker", "-dead_strip"])
     );
     assert!(swiftc.contains(&"-g".to_string()));
+    // swiftc links what the engine's static library needs.
+    assert!(swiftc.contains(&format!("@{native_libs}")));
 
     // The showcase declares no style overrides, so it keeps the system look.
     let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
