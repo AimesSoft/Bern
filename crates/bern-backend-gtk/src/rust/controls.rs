@@ -211,23 +211,24 @@ impl Generator<'_> {
     }
 
     pub(super) fn split_button(&self, out: &mut Out, element: &Element) {
-        let field = self
-            .field(element, "value")
-            .unwrap_or_else(|| "b::Field { session: 0, field: 0 }".into());
+        let model = self.model(element, "checked", true);
         self.children(
             out,
             &format!(
-                "b::SplitButton(p, c, b::SplitButtonProps {{ id: {}, label: {}, icon: {}, field: {field}, more: {}, shape: {} }}, ",
+                "b::SplitButton(p, c, b::SplitButtonProps {{ id: {}, label: {}, icon: {}, model: {}, more: {}, shape: {} }}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 Self::icon(element, "icon"),
+                some(model.clone()),
                 some(self.text_prop(element, "more_label")),
                 self.shape(element),
             ),
             &element.children,
             ");",
         );
-        self.shortcut(out, element, &format!("b::session_toggle(c, {field})"));
+        if let Some(model) = model {
+            self.shortcut(out, element, &format!("b::toggle(c, &{model})"));
+        }
     }
 
     /// A `Drop`: an area that takes dropped files.

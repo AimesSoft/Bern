@@ -316,19 +316,19 @@ impl Generator<'_> {
     }
 
     pub(super) fn split_button(&self, out: &mut Out, element: &Element) {
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("icon", Self::icon(element, "icon")),
+        ];
+        fields.extend(self.model(element, "checked"));
+        fields.extend([
+            ("more", self.text_prop(element, "more_label")),
+            ("shape", self.shape(element)),
+        ]);
         self.call(
             out,
-            &format!(
-                "B::SplitButton(p, c, {}, ",
-                designated(&[
-                    ("id", Some(self.id(element))),
-                    ("label", self.text_prop(element, "label")),
-                    ("icon", Self::icon(element, "icon")),
-                    ("field", self.field(element, "value")),
-                    ("more", self.text_prop(element, "more_label")),
-                    ("shape", self.shape(element)),
-                ])
-            ),
+            &format!("B::SplitButton(p, c, {}, ", designated(&fields)),
             &element.children,
         );
         self.shortcut(out, element, "activate");

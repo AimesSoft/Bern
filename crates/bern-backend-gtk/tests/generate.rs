@@ -295,6 +295,9 @@ fn planner_and_gallery_build_for_gtk() {
         "b::ScrollView(p, c, b::ScrollProps { axis: Some(\"horizontal\"), snap: Some(\"center\")",
         "b::PopoverButton(p, c,",
         "b::SplitButton(p, c,",
+        // The caption's split button shows engine state and sets it.
+        "id: \"caption\", label: Some(",
+        "model: Some(b::Model::Controlled(b::get(|c| ",
         "b::Drop(p, c,",
         "b::Pinch(p, c,",
         "b::Swipe(p, c,",

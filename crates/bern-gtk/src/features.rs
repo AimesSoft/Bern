@@ -420,7 +420,8 @@ pub struct SplitButtonProps {
     pub id: &'static str,
     pub label: Option<Str>,
     pub icon: Option<&'static str>,
-    pub field: Field,
+    /// A draft field, or engine state whose change runs a command.
+    pub model: Option<crate::widgets::Model>,
     pub more: Option<Str>,
     pub shape: crate::widgets::Shape,
 }
@@ -429,11 +430,12 @@ pub struct SplitButtonProps {
 /// such as the usual settings of what the toggle turns on.
 #[allow(non_snake_case)]
 pub fn SplitButton(p: &Parent, ctx: &Ctx, props: SplitButtonProps, content: Build) {
+    let Some(model) = props.model else { return };
     let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     group.add_css_class("linked");
     group.set_valign(gtk::Align::Center);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
-    let bound = Bound::new(ctx, props.field);
+    let bound = Bound::model(ctx, model);
     let toggle = toggle_widget(
         label.clone(),
         bound.clone(),

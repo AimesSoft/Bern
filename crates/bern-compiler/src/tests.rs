@@ -3905,10 +3905,27 @@ fn controlled_settings_reject_ambiguous_sources_and_non_enum_selections() {
             format!("Picker(id: mode, label: {label}, selected: app.count) => app.add(1)"),
             "enum",
         ),
+        (
+            format!("SplitButton(id: split, label: {label}, checked: true) {{ Spacer }}"),
+            "needs an action",
+        ),
+        (
+            format!(
+                "SplitButton(id: split, label: {label}, checked: true, value: draft.on) {{ Spacer }} => app.add(1)"
+            ),
+            "exactly one",
+        ),
+        (
+            format!("SplitButton(id: split, label: {label}) {{ Spacer }}"),
+            "exactly one",
+        ),
     ] {
         assert!(errors(&body).contains(message), "{}", errors(&body));
     }
     compile_ui(&wrap(&format!("Column {{ Switch(id: flag, label: {label}, checked: true) => app.add(1) Picker(id: mode, label: {label}, selected: app.mode) => app.add(1) }}"))).unwrap();
+    // A split button shows engine state and changes it with its action,
+    // or toggles a draft field as before.
+    compile_ui(&wrap(&format!("Column {{ SplitButton(id: split, label: {label}, checked: true) {{ Spacer }} => app.add(1) SplitButton(id: drafted, label: {label}, value: draft.on) {{ Spacer }} }}"))).unwrap();
 }
 
 #[test]

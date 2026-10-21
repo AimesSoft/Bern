@@ -83,6 +83,8 @@ pub mod gallery {
         pub poster: MediaSource,
         pub accent: Accent,
         pub appearance: Appearance,
+        /// Whether the player page shows its caption.
+        pub caption: bool,
     }
 
     #[commands]
@@ -105,6 +107,10 @@ pub mod gallery {
         /// Show every window light, dark, or as the system is.
         #[idempotent]
         fn set_appearance(&mut self, appearance: Appearance) -> Result<(), CommandError>;
+
+        /// Show the player page's caption, or hide it.
+        #[idempotent]
+        fn set_caption(&mut self, shown: bool) -> Result<(), CommandError>;
 
         /// Play `source` in the frame.
         fn play(&mut self, source: MediaSource) -> Result<(), CommandError>;

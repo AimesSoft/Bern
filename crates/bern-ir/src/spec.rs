@@ -858,13 +858,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
+        action: ActionRule::Optional,
         interactive: true,
         ..spec(
             "SplitButton",
             &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
-                req("value", PropKind::BoolField),
+                opt("value", PropKind::BoolField),
+                opt("checked", PropKind::Bool),
                 opt("icon", PropKind::Icon),
                 opt("shape", PropKind::Keyword(&["capsule"])),
                 opt("height", PropKind::Length),
@@ -872,7 +874,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("shortcut", PropKind::Shortcut),
             ],
             Children::Any,
-            "A toggle with a second part beside it that shows its children in a popover, such as the settings of what it turns on",
+            "A toggle with a second part beside it that shows its children in a popover, such as the settings of what it turns on; like a `Switch`, it toggles a session field (`value`) or shows engine state (`checked`) whose change runs the action",
         )
     },
     ComponentSpec {
@@ -1601,8 +1603,8 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             message: "`appear_delay` needs an `appear` transition".into(),
         });
     }
-    if matches!(spec.name, "Switch" | "Picker" | "Slider") {
-        let controlled = if spec.name == "Switch" {
+    if matches!(spec.name, "Switch" | "SplitButton" | "Picker" | "Slider") {
+        let controlled = if matches!(spec.name, "Switch" | "SplitButton") {
             "checked"
         } else if spec.name == "Slider" {
             "current"

@@ -278,7 +278,7 @@ impl Generator<'_> {
     }
 
     pub(super) fn split_button(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let field = self.field(element, "value").expect("bool field");
+        let (_, binding, _) = self.control_value(element, "checked");
         let label = self.text_prop(element, "label").unwrap_or_default();
         let more = self
             .text_prop(element, "more_label")
@@ -288,8 +288,7 @@ impl Generator<'_> {
             .map(string)
             .unwrap_or_else(|| "nil".into());
         out.open(format!(
-            "BernSplitButton(label: {label}, systemImage: {icon}, more: {more}, isOn: {}, capsule: {}, height: {}, target: {}) {{",
-            self.binding_of(&field),
+            "BernSplitButton(label: {label}, systemImage: {icon}, more: {more}, isOn: {binding}, capsule: {}, height: {}, target: {}) {{",
             element.keyword("shape") == Some("capsule"),
             self.length(element, "height").unwrap_or_else(|| "34.0".into()),
             self.target(element, ctx)

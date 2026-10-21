@@ -115,14 +115,20 @@ impl Generator<'_> {
     }
 
     pub(super) fn split_button(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let field = self.field(element, "value").expect("bool field");
+        let Some((value, change)) = self.model(element, "checked", &|_| "it".into()) else {
+            return;
+        };
         let label = self.text_prop(element, "label").unwrap_or_default();
         let more = self
             .text_prop(element, "more_label")
             .unwrap_or_else(|| "BernText.string(\"bern.split.more\")".into());
-        self.shortcut(out, element, &format!("{field} = !{field}"));
+        self.shortcut(
+            out,
+            element,
+            &format!("run {{ val it = !({value}); {change} }}"),
+        );
         out.open(format!(
-            "BernSplitButton({}, {label}, {}, {more}, {field}, {{ {field} = it }}{}) {{",
+            "BernSplitButton({}, {label}, {}, {more}, {value}, {{ it: Boolean -> {change} }}{}) {{",
             self.target(element, ctx),
             Self::icon(element.icon("icon")),
             self.shape_arg(element)

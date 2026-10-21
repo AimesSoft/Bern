@@ -491,6 +491,9 @@ fn gallery_generates_without_warnings() {
         "B::Toast(p, c, {",
         "B::Inspector(p, c, {.presented = Field{",
         "B::SplitButton(p, c, {",
+        // The caption's split button shows engine state and sets it.
+        "B::SplitButton(p, c, {.id = \"caption\"",
+        ".current = ",
         "B::PopoverButton(p, c, {",
         "B::Drop(p, c, {",
         "B::Pinch(p, c, {",

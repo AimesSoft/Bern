@@ -248,7 +248,7 @@ impl Generator<'_> {
     }
 
     pub(super) fn split_button(&self, out: &mut Out, element: &Element) {
-        let field = self.field(element, "value");
+        let field = self.control_field(element, "checked");
         let props = Self::props(vec![
             ("id", Some(self.id(element))),
             ("shape", Self::keyword(element, "shape")),
@@ -265,7 +265,11 @@ impl Generator<'_> {
             ");",
         );
         if let Some(field) = field {
-            self.shortcut(out, element, &format!("() => {field}.set(!{field}.peek())"));
+            self.shortcut(
+                out,
+                element,
+                &format!("() => {{ const field = {field}; field.set(!field.peek()); }}"),
+            );
         }
     }
 

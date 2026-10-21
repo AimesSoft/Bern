@@ -56,9 +56,7 @@ pub struct GalleryDraft {
     /// Smallest width of a card.
     #[initial(180.0)]
     pub card_size: f64,
-    /// Whether the frame shows its caption, and how large.
-    #[initial(true)]
-    pub caption: bool,
+    /// How large the frame's caption is.
     #[initial(13.0)]
     pub caption_size: f64,
     /// The video chosen or dropped last.
@@ -388,10 +386,10 @@ pub fn frame(app: gallery::Client, #[session] draft: GalleryDraft) -> impl View 
                 Video(id: clip, source: app.clip, controls: none, corner: if window.idle { 0 } else { 20 }, animate: hero, label: tr! { "zh-Hans" => "片段", "en" => "Clip" })
                 if !window.idle {
                     Row(gap: 12, align: center) {
-                        SplitButton(id: caption, label: tr! { "zh-Hans" => "说明", "en" => "Caption" }, icon: "captions.bubble", value: draft.caption) {
+                        SplitButton(id: caption, label: tr! { "zh-Hans" => "说明", "en" => "Caption" }, icon: "captions.bubble", checked: app.caption) {
                             Text(content: tr! { "zh-Hans" => "说明文字", "en" => "Caption text" }, style: headline)
                             Slider(id: caption_size, label: tr! { "zh-Hans" => "字号", "en" => "Size" }, value: draft.caption_size, min: 11, max: 20)
-                        }
+                        } => app.set_caption(app.caption)
                         Menu(id: caption_sizes, label: tr! { "zh-Hans" => "字号", "en" => "Size" }, icon: "textformat.size") {
                             MenuItem(id: small, label: tr! { "zh-Hans" => "小", "en" => "Small" }) => draft.caption_size.set(12)
                             MenuItem(id: large, label: tr! { "zh-Hans" => "大", "en" => "Large" }) => draft.caption_size.set(18)
@@ -400,7 +398,7 @@ pub fn frame(app: gallery::Client, #[session] draft: GalleryDraft) -> impl View 
                             Text(content: tr! { "zh-Hans" => "音量", "en" => "Volume" }, style: headline)
                             Slider(id: volume_level, label: tr! { "zh-Hans" => "音量", "en" => "Volume" }, value: draft.volume, min: 0, max: 1)
                         }
-                        if draft.caption {
+                        if app.caption {
                             Text(content: tr! { "zh-Hans" => "静置三秒，画面铺满", "en" => "Rest for three seconds to fill the page" }, emphasis: secondary, appear: fade, disappear: fade)
                         }
                     }

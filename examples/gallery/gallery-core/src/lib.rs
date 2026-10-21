@@ -46,6 +46,7 @@ impl Default for GalleryEngine {
                     .expect("the gallery bundles media/poster.jpg"),
                 accent: Accent::Crimson,
                 appearance: Appearance::System,
+                caption: true,
             },
         }
     }
@@ -109,6 +110,11 @@ impl gallery::Commands for GalleryEngine {
 
     fn set_appearance(&mut self, appearance: Appearance) -> Result<(), CommandError> {
         self.state.appearance = appearance;
+        Ok(())
+    }
+
+    fn set_caption(&mut self, shown: bool) -> Result<(), CommandError> {
+        self.state.caption = shown;
         Ok(())
     }
 

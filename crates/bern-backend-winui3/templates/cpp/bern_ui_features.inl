@@ -482,6 +482,12 @@ struct SplitButtonProps {
     Str label;
     char const* icon = nullptr;
     std::optional<Field> field;
+    /// Runs after the draft changed.
+    Act then;
+    /// `checked:`: engine state the toggle shows; a change runs `change`
+    /// with the new value.
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
     Str more;
     std::optional<ControlShape> shape;
 };
@@ -491,8 +497,8 @@ struct SplitButtonProps {
 /// External entries turn it on or off with `set_bool` and open the popover
 /// with `activate`.
 inline void SplitButton(Parent const& p, Ctx const& ctx, SplitButtonProps props, Build const& content) {
-    if (!props.field) return;
-    auto field = *props.field;
+    auto model = ModelOf(ctx, props.field, props.then, props.current, props.change);
+    if (!model.read) return;
     controls::ToggleSplitButton button;
     auto text = Bound(ctx, props.label);
     // Its icon and label, as the design shows it; a toolbar's icon alone.
@@ -505,16 +511,16 @@ inline void SplitButton(Parent const& p, Ctx const& ctx, SplitButtonProps props,
             xaml::Automation::AutomationProperties::SetName(button, name);
         });
     auto updating = std::make_shared<bool>(false);
-    Reactive::Run([button, ctx, field, updating] {
-        bool on = ctx.Read(field) == Value::Bool(true);
+    Reactive::Run([button, model, updating] {
+        bool on = model.read() == Value::Bool(true);
         if (button.IsChecked() != on) {
             *updating = true;
             button.IsChecked(on);
             *updating = false;
         }
     });
-    button.IsCheckedChanged([updating, ctx, field](controls::ToggleSplitButton const& sender, auto&&) {
-        if (!*updating) SetDraft(ctx, field, Value::Bool(sender.IsChecked()));
+    button.IsCheckedChanged([updating, model](controls::ToggleSplitButton const& sender, auto&&) {
+        if (!*updating) model.write(Value::Bool(sender.IsChecked()));
     });
     ShapeControl(ctx, button, props.shape);
     auto popover = MakePopover(ctx, content);
@@ -533,8 +539,8 @@ inline void SplitButton(Parent const& p, Ctx const& ctx, SplitButtonProps props,
         Actions{.activate = [popover, weak = winrt::make_weak(button)] {
                     if (auto button = weak.get()) popover->flyout.ShowAt(button);
                 },
-            .setBool = [ctx, field](bool on) { SetDraft(ctx, field, Value::Bool(on)); },
-            .value = [ctx, field] { return std::optional<std::string>(ctx.Peek(field) == Value::Bool(true) ? "true" : "false"); }});
+            .setBool = [model](bool on) { model.write(Value::Bool(on)); },
+            .value = [model] { return std::optional<std::string>(model.peek() == Value::Bool(true) ? "true" : "false"); }});
     KeepWidth(button);
     if (p.isList && !ctx.toolbar) p.Add(Card(button));
     else p.Add(button);
