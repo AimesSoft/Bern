@@ -406,7 +406,16 @@ fn showcase_generates_swift_that_type_checks() {
     // The engine, then the list of native libraries it links.
     assert_eq!(
         programs(&release),
-        ["cargo", "cargo", "xcrun swiftc", "mv", "xcrun strip", "codesign"]
+        [
+            "cargo",
+            "cargo",
+            "xcrun swiftc",
+            "mv",
+            "xcrun strip",
+            "codesign",
+            "touch",
+            "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+        ]
     );
     let listing = release
         .steps

@@ -314,6 +314,7 @@ impl Target for WebBrowser {
                 "scroll_origin_y",
                 "nudge",
                 "stagger",
+                "idle_area",
                 "appear_delay",
                 "nudge_key",
                 "nudge_scale",

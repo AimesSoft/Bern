@@ -215,6 +215,11 @@ fn check_motion(descriptor: &TargetDescriptor, app: &Application) -> Vec<Diagnos
                 "target `{}` does not nudge: the element stays still",
                 descriptor.id
             )
+        } else if prop == "idle_area" {
+            format!(
+                "target `{}` does not watch where the pointer rests: its windows go idle wherever it is",
+                descriptor.id
+            )
         } else if prop.starts_with("scroll_") {
             format!(
                 "target `{}` does not follow scrolling with `{prop}`: items keep their look",

@@ -165,7 +165,10 @@ impl Generator<'_> {
             .text_prop(element, "prompt")
             .unwrap_or_else(|| "null".into());
         let kind = element.keyword("kind").unwrap_or("plain");
-        let action = element.action.as_ref().map(|a| self.action(a));
+        let action = element.action.as_ref().map(|a| match element.clearing() {
+            Some(clear) => format!("{}; {}", self.action(a), self.action(&clear)),
+            None => self.action(a),
+        });
         let target = self.target(element, ctx);
         let submit = action
             .as_ref()

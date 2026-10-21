@@ -249,12 +249,15 @@ impl Generator<'_> {
     }
 
     pub(super) fn action(&self, element: &Element) -> String {
-        some(
-            element
-                .action
-                .as_ref()
-                .map(|action| format!("b::act(|c| {})", self.action_body(action))),
-        )
+        some(element.action.as_ref().map(|action| match element.clearing() {
+            // The draft empties after the action.
+            Some(clear) => format!(
+                "b::act(|c| {{ {}; {}; }})",
+                self.action_body(action),
+                self.action_body(&clear)
+            ),
+            None => format!("b::act(|c| {})", self.action_body(action)),
+        }))
     }
 
     pub(super) fn keyword(element: &Element, name: &str) -> String {

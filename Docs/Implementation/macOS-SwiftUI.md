@@ -309,6 +309,7 @@ flowchart LR
 - **标准控制条**：系统控件（无边框按钮、`Slider`、系统文字样式），位于视频下方而非覆盖在画面上，颜色全部来自系统；拖动进度和音量只改本地预览，松开时提交一次命令，状态更新不会回调成命令。控件登记为 `目标.play_pause`、`目标.position`、`目标.mute`、`目标.volume`，可由 `ui.*` 驱动；视频区域登记为角色 `video`，值为当前阶段与时间。无媒体、加载、失败、不可用时显示系统 `ContentUnavailableView` 或 `ProgressView`，不在视频上叠加文字。
 - **生命周期**：视图附着按窗口记录；窗口关闭时立即解除该窗口的附着、释放其组件拥有的播放器，应用级播放器继续。执行端断开时所有播放器变为 `Unavailable`，等待中的请求失败，不再显示已确认的“正在播放”。
 - **应用自带的媒体内核**（2026-10-21）：启动时先问 `bern_media_kernel_attach` 能否挂接应用登记的内核（提供 `MetalLayer`）；能时不挂接 AVFoundation，`Video` 改用 `BernKernelVideoSurface`：一个以 `CAMetalLayer` 为图层、不接收点按的 `NSView`，把图层地址、物理像素尺寸（视图大小 × 窗口像素比 × 外层 `ScaleBox` 的放大）与 `fit` 交给内核，布局、换屏或像素比变化时报告新尺寸，卸载时先停帧时钟再同步取回表面。帧时钟是视图给出的 `CADisplayLink`（`NSView.displayLink(target:selector:)`），加在名为 “Bern media frames” 的线程的运行循环上；每帧持锁调用 `bern_media_surface_frame`，应用停止前清空，保证停止后没有帧到达。圆角照常裁在图层上。实测见[设计文档](../Design.md#应用自带的媒体内核)。
+- **构建后刷新图标登记**（2026-10-21）：每次构建都在同一位置替换应用包，Finder 与程序坞会一直显示第一次见到的图标（换了图标后仍是旧图标）。签名之后先 `touch` 应用包，再用 Launch Services 的 `lsregister -f` 重新登记，程序坞与 Finder 随之读取新图标；正在运行的应用重新打开后生效。
 - **引擎依赖的原生库**：构建引擎后再用 `cargo rustc --lib -- --print native-static-libs=…` 把静态库需要的系统框架与库写进 `libbern_app.native-libs`，swiftc 以响应文件（`@文件`）读入，并用 `-no_warn_duplicate_libraries` 去掉与 swiftc 自带库重复的警告。媒体内核等依赖链接的 Metal、VideoToolbox、CoreAudio、libc++ 等因此不用在生成器里逐个写；iOS 与 tvOS 的构建同样处理。
 
 ### 查询订阅与答复

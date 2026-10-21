@@ -338,6 +338,10 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("nudge_scale", PropKind::Number),
     opt("reduce_motion", PropKind::Bool),
     opt("stagger", PropKind::Number),
+    // Seconds a mouse rests over the element, such as a player's picture,
+    // before its window goes idle; with such areas on screen a mouse
+    // anywhere else keeps the window awake.
+    opt("idle_area", PropKind::Number),
 ];
 
 /// Where an element sits on the `Rail` it stands in: at a fraction of its
@@ -1229,9 +1233,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("pick", PropKind::FileField),
                 opt("files", PropKind::FileKinds),
                 opt("default_focus", PropKind::Flag),
+                opt("clears", PropKind::TextField),
             ],
             Children::Any,
-            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen; `default_focus: true` starts the focus on it when it appears (a television's remote, or a keyboard)",
+            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen; `default_focus: true` starts the focus on it when it appears (a television's remote, or a keyboard); `clears: draft.text` empties that draft after the action and gives the keyboard back to the window, as a composer's send button does",
         )
     },
     ComponentSpec {
@@ -1273,10 +1278,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("value", PropKind::TextField),
                 opt("prompt", PropKind::DisplayText),
                 opt("kind", PropKind::Keyword(&["plain", "secure", "multiline"])),
+                opt("submit", PropKind::Keyword(&["clear"])),
                 FEATURE,
             ],
             Children::None,
-            "Text editing bound to a session draft; the action runs on submit",
+            "Text editing bound to a session draft; the action runs on submit, and with `submit: clear` the draft then empties and the field gives up the keyboard, as a message composer does",
         )
     },
     ComponentSpec {

@@ -434,10 +434,15 @@ impl<'a> Generator<'a> {
     }
 
     fn action(&self, element: &Element) -> Option<String> {
-        element
-            .action
-            .as_ref()
-            .map(|action| format!("[](Ctx const& c) {{ {}; }}", self.action_body(action)))
+        element.action.as_ref().map(|action| match element.clearing() {
+            // The draft empties after the action.
+            Some(clear) => format!(
+                "[](Ctx const& c) {{ {}; {}; }}",
+                self.action_body(action),
+                self.action_body(&clear)
+            ),
+            None => format!("[](Ctx const& c) {{ {}; }}", self.action_body(action)),
+        })
     }
 
     fn keyword(element: &Element, name: &str) -> Option<String> {

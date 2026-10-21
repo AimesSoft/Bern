@@ -49,6 +49,9 @@ impl Generator<'_> {
         if element.keyword("reveal") == Some("hover") {
             entries.push(("reveal", Some("true".into())));
         }
+        if let Some(seconds) = element.number("idle_area") {
+            entries.push(("idleArea", Some(seconds.to_string())));
+        }
         entries.push(("appearance", Self::keyword(element, "appearance")));
         if let Some(when) = element.expr("nudge") {
             entries.push(("nudge", Some(format!("() => ({})", self.expr(when)))));

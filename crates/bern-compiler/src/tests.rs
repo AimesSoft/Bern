@@ -3141,6 +3141,38 @@ fn buttons_show_content_and_reveal_on_hover() {
 }
 
 #[test]
+fn a_composer_clears_its_draft_after_sending() {
+    let label = r#"label: tr! { "en" => "Say", "ja" => "言う" }"#;
+    let body = format!(
+        "Row {{ TextInput(id: say, {label}, value: draft.name, submit: clear) => app.add(1) Button(id: send, {label}, clears: draft.name) => app.add(1) }}"
+    );
+    let compiled = compile_ui(&wrap(&body)).unwrap_or_else(|errors| panic!("{errors:?}"));
+    let mut clearing = 0;
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let bern_ir::Node::Element(element) = node
+                && element.clearing().is_some()
+            {
+                clearing += 1;
+            }
+        });
+    }
+    assert_eq!(clearing, 2);
+    assert!(errors(&format!("Button(id: send, {label}, clears: draft.on) => app.add(1)")).contains("bool"));
+}
+
+#[test]
+fn any_element_may_be_an_idle_area() {
+    let label = r#"label: tr! { "en" => "Pause", "ja" => "一時停止" }"#;
+    let body = format!(
+        "Stack {{ Button(id: frame, {label}, idle_area: 1) {{ Spacer }} => app.add(1) Column(idle_area: 0.5) {{ Spacer }} }}"
+    );
+    if let Err(errors) = compile_ui(&wrap(&body)) {
+        panic!("{body}: {errors:?}");
+    }
+}
+
+#[test]
 fn a_button_shows_a_video_without_controls() {
     let label = r#"label: tr! { "en" => "Pause", "ja" => "一時停止" }"#;
     let body = format!(

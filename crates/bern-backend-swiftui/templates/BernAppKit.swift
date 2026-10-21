@@ -1038,9 +1038,11 @@ struct BernWindowBehavior: ViewModifier {
 final class BernEventMonitor {
     private var monitor: Any?
     private var timer: Timer?
+    private weak var context: BernWindowContext?
 
     func start(context: BernWindowContext, after seconds: Double) {
         stop()
+        self.context = context
         context.platform.nsWindow?.acceptsMouseMovedEvents = true
         let events: NSEvent.EventTypeMask = [
             .mouseMoved, .leftMouseDown, .rightMouseDown, .otherMouseDown,
@@ -1052,6 +1054,10 @@ final class BernEventMonitor {
             }
             return event
         }
+        context.idleAreasChanged = { [weak self, weak context] in
+            guard let context else { return }
+            self?.reset(context, after: seconds)
+        }
         reset(context, after: seconds)
     }
 
@@ -1060,6 +1066,9 @@ final class BernEventMonitor {
             NSEvent.removeMonitor(monitor)
         }
         monitor = nil
+        // A change of the areas does not start counting again while off.
+        context?.idleAreasChanged = nil
+        context = nil
         timer?.invalidate()
         timer = nil
     }
@@ -1070,7 +1079,16 @@ final class BernEventMonitor {
             context.idle = false
         }
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: seconds, repeats: false) { [weak context] _ in
+        timer = nil
+        // With `idle_area`s on screen, only a pointer resting over one
+        // counts, for that area's seconds: elsewhere, or outside the
+        // window, it stays awake.
+        var wait = seconds
+        if !context.idleAreas.isEmpty {
+            guard let area = context.idleAreasHovered.values.min() else { return }
+            wait = area
+        }
+        timer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak context] _ in
             MainActor.assumeIsolated {
                 guard let context else { return }
                 if context.platform.nsWindow?.attachedSheet != nil || context.platform.nsWindow?.childWindows?.contains(where: { $0.isVisible }) == true || context.platform.nsWindow?.firstResponder is NSTextView || NSApp.mainMenu?.highlightedItem != nil {
@@ -1079,6 +1097,48 @@ final class BernEventMonitor {
             }
         }
     }
+}
+
+/// `submit: clear`: the field gives the keyboard back to its window.
+@MainActor
+func bernEndEditing() {
+    NSApp.keyWindow?.makeFirstResponder(nil)
+}
+
+/// `idle_area`: the window goes idle only while the pointer rests over
+/// this view (or another `idle_area`), after `seconds`.
+struct BernIdleArea: ViewModifier {
+    let seconds: Double
+    @Environment(BernWindowContext.self) private var window
+    @State private var id = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onContinuousHover { phase in
+                switch phase {
+                case .active:
+                    guard window.idleAreasHovered[id] == nil else { return }
+                    window.idleAreasHovered[id] = seconds
+                    window.idleAreasChanged?()
+                case .ended:
+                    guard window.idleAreasHovered.removeValue(forKey: id) != nil else { return }
+                    window.idleAreasChanged?()
+                }
+            }
+            .onAppear {
+                window.idleAreas.insert(id)
+                window.idleAreasChanged?()
+            }
+            .onDisappear {
+                window.idleAreas.remove(id)
+                window.idleAreasHovered.removeValue(forKey: id)
+                window.idleAreasChanged?()
+            }
+    }
+}
+
+extension View {
+    func bernIdleArea(_ seconds: Double) -> some View { modifier(BernIdleArea(seconds: seconds)) }
 }
 
 // MARK: - Open panel

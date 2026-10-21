@@ -1216,6 +1216,10 @@ export function Decorate(p, ctx, spec, build) {
   const nodes = [...fragment.childNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE);
   for (const node of nodes) {
     if (spec.appearance) node.classList.add(`bern-appearance-${spec.appearance}`);
+    if (spec.idleArea !== undefined) {
+      node.classList.add("bern-idle-area");
+      node.dataset.idleAfter = spec.idleArea;
+    }
     if (spec.reveal) {
       node.classList.add("bern-reveal");
       queueMicrotask(() => node.parentElement?.classList.add("bern-reveal-host"));
@@ -1407,26 +1411,47 @@ function scrollEffect(node, scale, opacity, originX = 0.5, originY = 0.5) {
 // MARK: - Idle windows
 
 /// `window.idle` turns true after `seconds` without pointer, touch, wheel
-/// or key input in the window, and false at the next input.
+/// or key input in the window, and false at the next input. With
+/// `idle_area`s on the page, a mouse counts only while it rests over one,
+/// for that area's seconds: elsewhere, or outside the window, the window
+/// stays awake.
 B.hooks.idle = (win, seconds, enabled = () => true) => {
   let timer = 0;
+  // What the mouse is over, null once it left the window; touch and pens
+  // leave it undefined, so areas do not apply to them.
+  let mouseOver;
+  const track = (event) => { mouseOver = event.pointerType === "mouse" ? event.target : undefined; };
+  // How long the input that came last lets the window rest, or null when
+  // it keeps the window awake.
+  const quiet = () => {
+    if (mouseOver === undefined || !win.element.querySelector(".bern-idle-area")) return seconds;
+    const area = mouseOver?.closest?.(".bern-idle-area");
+    return area ? Number(area.dataset.idleAfter) : null;
+  };
   const rest = () => {
     clearTimeout(timer);
     if (win.idle.peek()) win.idle.set(false);
-    if (enabled()) timer = setTimeout(() => {
+    const wait = quiet();
+    if (enabled() && wait !== null) timer = setTimeout(() => {
       const typing = document.activeElement?.matches("input:not([type=range]),textarea");
       const popup = document.querySelector(".bern-popover:not([hidden]),.bern-menu-popover:not([hidden]),[popover]:popover-open");
       if (typing || popup) rest(); else win.idle.set(true);
-    }, seconds * 1000);
+    }, wait * 1000);
   };
   const events = ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"];
+  const leave = (event) => { if (event.pointerType === "mouse") { mouseOver = null; rest(); } };
+  // The pointer is known before the input that wakes the window counts.
+  for (const name of ["pointermove", "pointerdown"]) win.element.addEventListener(name, track, { capture: true, passive: true });
   for (const name of events) win.element.addEventListener(name, rest, { capture: true, passive: true });
+  win.element.addEventListener("pointerleave", leave);
   effect(() => win.element.classList.toggle("bern-idle", win.idle.get()));
   let previousEnabled;
   effect(() => { const next = enabled(); if (next !== previousEnabled) { previousEnabled = next; rest(); } });
   onCleanup(() => {
     clearTimeout(timer);
+    for (const name of ["pointermove", "pointerdown"]) win.element.removeEventListener(name, track, { capture: true });
     for (const name of events) win.element.removeEventListener(name, rest, { capture: true });
+    win.element.removeEventListener("pointerleave", leave);
   });
   rest();
 };

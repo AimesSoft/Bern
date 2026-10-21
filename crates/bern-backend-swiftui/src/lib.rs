@@ -30,6 +30,9 @@ pub use tvos::{MINIMUM_TVOS, SwiftUiTvos};
 /// Minimum deployment target, chosen in the design document.
 pub const MINIMUM_MACOS: &str = "14.0";
 
+/// Launch Services' tool, which registers an app bundle and its icon.
+const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+
 /// The application icon in `Contents/Resources` (`CFBundleIconFile`).
 pub const ICON_FILE: &str = "AppIcon.icns";
 
@@ -50,6 +53,7 @@ pub(crate) const MOTION: &[&str] = &[
     "nudge_scale",
     "reduce_motion",
     "stagger",
+    "idle_area",
 ];
 
 /// IR features SwiftUI builds, on macOS and iOS.
@@ -548,6 +552,23 @@ impl Target for SwiftUiMacos {
                     "-".into(),
                     bundle.display().to_string(),
                 ],
+                cwd: output.clone(),
+                env: vec![],
+            },
+            // Each build replaces the bundle at the same place, where Finder
+            // and the Dock keep showing the icon they first saw; registering
+            // it again makes them read the new one.
+            BuildStep::Run {
+                description: "Refresh the app's icon in Finder and the Dock".into(),
+                program: "touch".into(),
+                args: vec![bundle.display().to_string()],
+                cwd: output.clone(),
+                env: vec![],
+            },
+            BuildStep::Run {
+                description: "Register the app again with Launch Services".into(),
+                program: LSREGISTER.into(),
+                args: vec!["-f".into(), bundle.display().to_string()],
                 cwd: output.clone(),
                 env: vec![],
             },

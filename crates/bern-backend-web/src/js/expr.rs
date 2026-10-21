@@ -312,7 +312,15 @@ impl Generator<'_> {
         element
             .action
             .as_ref()
-            .map(|action| format!("() => {}", self.action(action)))
+            .map(|action| match element.clearing() {
+                // The draft empties and the keyboard goes back to the page.
+                Some(clear) => format!(
+                    "() => {{ {}; {}; document.activeElement?.blur?.(); }}",
+                    self.action(action),
+                    self.action(&clear)
+                ),
+                None => format!("() => {}", self.action(action)),
+            })
             .unwrap_or_else(|| "null".into())
     }
 

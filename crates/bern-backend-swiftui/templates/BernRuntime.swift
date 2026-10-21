@@ -499,6 +499,13 @@ final class BernWindowContext {
     @ObservationIgnored var allowsClose = false
     /// Whether the window had no input for its `idle_after` seconds.
     var idle = false
+    /// The `idle_area` elements on screen, and the seconds of those the
+    /// pointer is over: while there are any, the window goes idle only
+    /// while the pointer rests over one, after its seconds.
+    /// `idleAreasChanged` restarts the count.
+    @ObservationIgnored var idleAreas: Set<UUID> = []
+    @ObservationIgnored var idleAreasHovered: [UUID: Double] = [:]
+    @ObservationIgnored var idleAreasChanged: (() -> Void)?
     /// The width of the window's content, for `window.compact` and its
     /// siblings; 0 until its first layout measures it.
     var width: CGFloat = 0

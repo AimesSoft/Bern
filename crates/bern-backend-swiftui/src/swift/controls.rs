@@ -370,7 +370,11 @@ impl Generator<'_> {
                 out.close("}");
             }
         }
-        let action = element.action.as_ref().map(|a| self.action(a));
+        let action = element.action.as_ref().map(|a| match element.clearing() {
+            // The draft empties and the keyboard goes back to the window.
+            Some(clear) => format!("{}; {}; bernEndEditing()", self.action(a), self.action(&clear)),
+            None => self.action(a),
+        });
         if let Some(action) = &action {
             out.line(format!(".onSubmit {{ {action} }}"));
         }

@@ -758,6 +758,18 @@ struct BernKernelVideoSurface: UIViewRepresentable {
     }
 }
 
+/// `submit: clear`: the field gives up the keyboard.
+@MainActor
+func bernEndEditing() {
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+}
+
+extension View {
+    /// `idle_area` matters where a mouse rests; touch and the remote keep
+    /// the window's idleness as it was.
+    func bernIdleArea(_ seconds: Double) -> some View { self }
+}
+
 // MARK: - Tab accessory
 
 extension View {

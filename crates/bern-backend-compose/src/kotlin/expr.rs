@@ -346,7 +346,11 @@ impl Generator<'_> {
         let action = element
             .action
             .as_ref()
-            .map(|a| self.action(a))
+            .map(|a| match element.clearing() {
+                // The draft empties after the action.
+                Some(clear) => format!("{}; {}", self.action(a), self.action(&clear)),
+                None => self.action(a),
+            })
             .unwrap_or_else(|| "Unit".into());
         match self.file_target(element, "pick", &action) {
             Some((give, actions)) => (

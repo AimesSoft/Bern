@@ -892,6 +892,28 @@ impl Element {
         }
     }
 
+    /// What follows the element's action: with `submit: clear` on a
+    /// `TextInput`, or `clears: draft.x` on a `Button`, the draft becomes
+    /// empty, and the keyboard goes back to the window.
+    pub fn clearing(&self) -> Option<Action> {
+        let field = if self.keyword("submit") == Some("clear") {
+            self.field("value")?
+        } else {
+            self.field("clears")?
+        };
+        Some(Action::Session {
+            field: field.clone(),
+            op: SessionOp::Set {
+                value: Expr {
+                    kind: ExprKind::Literal {
+                        value: Value::Text(String::new()),
+                    },
+                    ty: Type::Text,
+                },
+            },
+        })
+    }
+
     pub fn field(&self, name: &str) -> Option<&FieldRef> {
         match self.props.get(name) {
             Some(Prop::Field { field }) => Some(field),

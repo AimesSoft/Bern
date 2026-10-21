@@ -214,6 +214,9 @@ impl Generator<'_> {
                 crate::style::motion(self.app, "snappy")
             ));
         }
+        if let Some(seconds) = element.number("idle_area") {
+            out.line(format!(".bernIdleArea({})", double(seconds)));
+        }
         if element.kind != "ForEach" && element.kind != "List" && reveals(&element.children) {
             out.line(".bernHoverScope()");
         }
