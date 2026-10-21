@@ -344,6 +344,34 @@ fn disabled(id: &str) -> CommandError {
     )
 }
 
+impl Composite {
+    /// Run what `origin` sent, in order; what that sends runs after it.
+    fn follow(&mut self, sent: Vec<Pending>, origin: &str) {
+        let mut queue: VecDeque<Pending> = sent.into();
+        let mut steps = 0;
+        while let Some(pending) = queue.pop_front() {
+            for (command, params) in self.resolve(pending) {
+                steps += 1;
+                if steps > FOLLOW_UP_LIMIT {
+                    eprintln!(
+                        "bern: `{origin}` set off more than {FOLLOW_UP_LIMIT} commands through calls and events; the rest are dropped"
+                    );
+                    return;
+                }
+                let (outcome, more) =
+                    crate::trace::module_call(command, || self.run(command, &params));
+                if let Err(error) = outcome {
+                    eprintln!(
+                        "bern: `{}`, set off by `{origin}`, failed: {}: {}",
+                        self.descriptor.commands[command].id, error.code, error.message
+                    );
+                }
+                queue.extend(more);
+            }
+        }
+    }
+}
+
 impl EngineProtocol for Composite {
     fn descriptor(&self) -> &'static ProtocolDescriptor {
         self.descriptor
@@ -352,35 +380,28 @@ impl EngineProtocol for Composite {
     fn invoke(&mut self, invocation: &Invocation) -> Result<Value, CommandError> {
         let (result, sent) = self.run(invocation.command, &invocation.params);
         let result = Ok(result?);
-        // What the command sent runs now, in order; what that sends runs
-        // after it.
-        let mut queue: VecDeque<Pending> = sent.into();
-        let mut steps = 0;
-        while let Some(pending) = queue.pop_front() {
-            for (command, params) in self.resolve(pending) {
-                steps += 1;
-                if steps > FOLLOW_UP_LIMIT {
-                    eprintln!(
-                        "bern: `{}` set off more than {FOLLOW_UP_LIMIT} commands through calls and events; the rest are dropped",
-                        self.descriptor.commands[invocation.command].id
-                    );
-                    return result;
-                }
-                let (outcome, more) =
-                    crate::trace::module_call(command, || self.run(command, &params));
-                if let Err(error) = outcome {
-                    eprintln!(
-                        "bern: `{}`, set off by `{}`, failed: {}: {}",
-                        self.descriptor.commands[command].id,
-                        self.descriptor.commands[invocation.command].id,
-                        error.code,
-                        error.message
-                    );
-                }
-                queue.extend(more);
-            }
-        }
+        let origin = self.descriptor.commands[invocation.command].id.clone();
+        self.follow(sent, &origin);
         result
+    }
+
+    /// Every part takes in what its background work left; what they send
+    /// runs afterwards, as after a command.
+    fn wake(&mut self) {
+        outbox::begin(self.readable(0));
+        self.shell.wake();
+        let mut sent = outbox::take();
+        for part in 1..=self.modules.len() {
+            if self.modules[part - 1].engine.is_none() {
+                continue;
+            }
+            outbox::begin(self.readable(part));
+            if let Some(engine) = &mut self.modules[part - 1].engine {
+                engine.wake();
+            }
+            sent.extend(outbox::take());
+        }
+        self.follow(sent, "wake");
     }
 
     fn query(&self, invocation: &Invocation, answer: QueryAnswer) {

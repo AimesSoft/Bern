@@ -28,6 +28,42 @@ impl CalendarDate {
     }
 }
 
+/// A moment: seconds since 1970 in UTC, and how many seconds the local time
+/// zone is ahead of UTC then.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Now {
+    pub unix: i64,
+    pub offset: i64,
+}
+
+/// Now, with the local time zone's offset where the application runs: the
+/// system's clock and time zone, or the page's in the browser.
+pub fn now() -> Now {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let now = chrono::Local::now();
+        Now {
+            unix: now.timestamp(),
+            offset: i64::from(now.offset().local_minus_utc()),
+        }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        #[link(wasm_import_module = "bern")]
+        unsafe extern "C" {
+            /// `Date.now()`, and the page's offset from UTC in minutes.
+            fn unix_ms() -> f64;
+            fn utc_offset_minutes() -> i32;
+        }
+        // SAFETY: the page provides both functions with these signatures.
+        let (milliseconds, minutes) = unsafe { (unix_ms(), utc_offset_minutes()) };
+        Now {
+            unix: (milliseconds / 1000.0).floor() as i64,
+            offset: i64::from(minutes) * 60,
+        }
+    }
+}
+
 /// Typed reference to a `CalendarDate` inside declarations.
 #[derive(Clone)]
 pub struct CalendarDateRef {

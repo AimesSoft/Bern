@@ -13,6 +13,10 @@ bern-command.workspace = true
 bern-runtime.workspace = true
 bern-media.workspace = true
 
+# The local time zone; the browser's comes from the page.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
 [dev-dependencies]
 trybuild = "1"
 serde_json.workspace = true

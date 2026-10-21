@@ -21,8 +21,10 @@ mod composite;
 pub mod files;
 pub mod outbox;
 pub mod resources;
+pub mod secrets;
 pub mod storage;
 pub mod trace;
+pub mod wake;
 
 pub use composite::{Composite, ModuleEngine};
 
@@ -65,6 +67,10 @@ pub trait EngineProtocol: Send + 'static {
     fn modules_changed(&mut self, enabled: &[String]) {
         let _ = enabled;
     }
+    /// Take in the results of work the engine started elsewhere, once its
+    /// [`wake::Waker`] was woken, and once as the host starts. Runs on the
+    /// engine thread; the state is published afterwards.
+    fn wake(&mut self) {}
 }
 
 /// Which entry a request came through, for diagnostics and policy.
@@ -108,6 +114,8 @@ enum Job {
         reply: Reply,
         trace: Option<trace::JobTrace>,
     },
+    /// Background work asked the engine to take in its results.
+    Wake,
     Stop,
 }
 
@@ -237,7 +245,7 @@ pub struct Host {
 /// are no threads.
 #[derive(Clone)]
 enum Jobs {
-    Thread(Sender<Job>),
+    Thread(Arc<Sender<Job>>),
     Local(Arc<LocalJobs>),
 }
 
@@ -353,7 +361,15 @@ impl Host {
     fn start_thread(engine: impl EngineProtocol) -> Host {
         let shared = Self::shared(&engine);
         let (jobs, receiver) = channel::<Job>();
-        let mut worker = Worker::new(engine, Arc::clone(&shared));
+        let jobs = Arc::new(jobs);
+        // The waker must not keep the engine thread alive once every host
+        // handle is gone.
+        let weak = Arc::downgrade(&jobs);
+        let waker = wake::Waker::new(move || {
+            weak.upgrade()
+                .is_some_and(|jobs| jobs.send(Job::Wake).is_ok())
+        });
+        let mut worker = Worker::new(engine, Arc::clone(&shared), waker.clone());
         thread::Builder::new()
             .name("bern-engine".into())
             .spawn(move || {
@@ -364,6 +380,7 @@ impl Host {
                 }
             })
             .expect("start engine thread");
+        waker.wake();
         Host {
             shared,
             jobs: Jobs::Thread(jobs),
@@ -376,16 +393,28 @@ impl Host {
     /// made from a reply or listener in this mode.
     pub fn start_local(engine: impl EngineProtocol) -> Host {
         let shared = Self::shared(&engine);
-        let mut worker = Worker::new(engine, Arc::clone(&shared));
-        let local = LocalJobs {
-            worker: Mutex::new(Box::new(move |job| trace::local_engine(|| worker.handle(job)))),
-            pending: Mutex::new(VecDeque::new()),
-            draining: AtomicBool::new(false),
-            stopped: AtomicBool::new(false),
-        };
+        let mut waker = None;
+        let local = Arc::new_cyclic(|weak: &std::sync::Weak<LocalJobs>| {
+            let weak = weak.clone();
+            let wakes = wake::Waker::new(move || {
+                weak.upgrade()
+                    .is_some_and(|local| local.push(Job::Wake).is_ok())
+            });
+            waker = Some(wakes.clone());
+            let mut worker = Worker::new(engine, Arc::clone(&shared), wakes);
+            LocalJobs {
+                worker: Mutex::new(Box::new(move |job| trace::local_engine(|| worker.handle(job)))),
+                pending: Mutex::new(VecDeque::new()),
+                draining: AtomicBool::new(false),
+                stopped: AtomicBool::new(false),
+            }
+        });
+        if let Some(waker) = waker {
+            waker.wake();
+        }
         Host {
             shared,
-            jobs: Jobs::Local(Arc::new(local)),
+            jobs: Jobs::Local(local),
         }
     }
 
@@ -565,19 +594,43 @@ struct Worker<E> {
     engine: E,
     shared: Arc<Shared>,
     poisoned: bool,
+    waker: wake::Waker,
 }
 
 impl<E: EngineProtocol> Worker<E> {
-    fn new(engine: E, shared: Arc<Shared>) -> Self {
+    fn new(engine: E, shared: Arc<Shared>, waker: wake::Waker) -> Self {
         Self {
             engine,
             shared,
             poisoned: false,
+            waker,
         }
+    }
+
+    /// Let the engine take in what its background work left, then publish.
+    fn wake(&mut self) {
+        self.waker.taken();
+        if self.poisoned {
+            return;
+        }
+        let engine = &mut self.engine;
+        if catch_unwind(AssertUnwindSafe(|| engine.wake())).is_err() {
+            self.poisoned = true;
+            return;
+        }
+        publish(&self.shared, self.engine.snapshot());
     }
 
     /// Run one job; `false` once the engine should stop.
     fn handle(&mut self, job: Job) -> bool {
+        let _entered = wake::enter(&self.waker);
+        let job = match job {
+            Job::Wake => {
+                self.wake();
+                return true;
+            }
+            job => job,
+        };
         let Job::Invoke {
             invocation,
             context: _context,

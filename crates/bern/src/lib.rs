@@ -21,7 +21,7 @@ pub mod trace {
 }
 
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
-pub use bern_command::{resources, storage};
+pub use bern_command::{files, resources, secrets, storage, wake};
 pub use bern_macros::{component, features, players, protocol, session, style, tr, ui, value};
 pub use bern_protocol::{
     CommandError, CommandOutcome, Invocation, LocalizedText, ProtocolDescriptor, SchemaError,

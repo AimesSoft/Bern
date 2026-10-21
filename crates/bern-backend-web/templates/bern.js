@@ -616,6 +616,8 @@ class Host {
         on_query: (subscription, ptr, len) =>
           this.defer(this.copy(ptr, len), (bytes) => this.queries.get(subscription)?.(bytes)),
         random_u32: () => crypto.getRandomValues(new Uint32Array(1))[0],
+        unix_ms: () => Date.now(),
+        utc_offset_minutes: () => -new Date().getTimezoneOffset(),
         storage_read: (appPtr, appLen, keyPtr, keyLen, out, capacity) => {
           try {
             const key = `bern:${this.text(appPtr, appLen)}:${this.text(keyPtr, keyLen)}`;

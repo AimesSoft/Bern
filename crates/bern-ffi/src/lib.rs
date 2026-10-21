@@ -469,6 +469,13 @@ pub unsafe fn start_app<E: EngineProtocol>(
             located
                 .install()
                 .map_err(|message| format!("cannot install the app's resources: {message}"))?;
+            // Android's resources sit in the app's private files folder,
+            // which holds its stored values and data too.
+            if cfg!(target_os = "android")
+                && let Some(files) = std::path::Path::new(root).parent()
+            {
+                bern_command::storage::Store::install_files_folder(files);
+            }
         }
         bern_command::storage::Store::install_application(spec.bundle_id);
         let engine = make_engine();

@@ -722,3 +722,101 @@ mod composite {
         );
     }
 }
+
+/// An engine that hands its work to another thread and takes the result in
+/// when that thread wakes it.
+mod background {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+    use std::time::Duration;
+
+    struct Slow {
+        value: i64,
+        done: Arc<Mutex<Vec<i64>>>,
+        wakes: Arc<AtomicUsize>,
+    }
+
+    impl EngineProtocol for Slow {
+        fn descriptor(&self) -> &'static ProtocolDescriptor {
+            descriptor()
+        }
+        fn invoke(&mut self, invocation: &Invocation) -> Result<Value, CommandError> {
+            let Value::Int(amount) = invocation.params[0] else {
+                unreachable!()
+            };
+            let waker = wake::waker().expect("a command knows its engine's waker");
+            let done = Arc::clone(&self.done);
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(20));
+                done.lock().unwrap().push(amount);
+                assert!(waker.wake());
+            });
+            Ok(Value::Unit)
+        }
+        fn snapshot(&self) -> Vec<Value> {
+            vec![Value::Int(self.value)]
+        }
+        fn wake(&mut self) {
+            self.wakes.fetch_add(1, Ordering::SeqCst);
+            assert!(wake::waker().is_some(), "wake runs with the waker current");
+            self.value += self.done.lock().unwrap().drain(..).sum::<i64>();
+        }
+    }
+
+    #[test]
+    fn work_done_elsewhere_reaches_the_state_through_a_wake() {
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let host = Host::start(Slow {
+            value: 0,
+            done: Arc::default(),
+            wakes: Arc::clone(&wakes),
+        });
+        let (sender, receiver) = channel();
+        let _subscription = host.subscribe(move |update| {
+            let _ = sender.send(update.changes.clone());
+        });
+        let outcome = host.dispatch_blocking(
+            Invocation {
+                command: 0,
+                params: vec![Value::Int(5)],
+            },
+            context(),
+        );
+        assert_eq!(outcome.result, Ok(Value::Unit));
+        // The command returned before the work was done.
+        assert_eq!(host.snapshot().1, vec![Value::Int(0)]);
+        let changes = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(changes, vec![(0, Value::Int(5))]);
+        // Once as the host started, once for the work.
+        assert_eq!(wakes.load(Ordering::SeqCst), 2);
+        assert!(wake::waker().is_none(), "no waker outside the engine");
+    }
+
+    #[test]
+    fn a_waker_outliving_its_engine_reports_that_nothing_runs() {
+        let host = Host::start(Slow {
+            value: 0,
+            done: Arc::default(),
+            wakes: Arc::default(),
+        });
+        let (sender, receiver) = channel();
+        host.dispatch(
+            Invocation {
+                command: 0,
+                params: vec![Value::Int(1)],
+            },
+            context(),
+            move |_| {
+                let _ = sender.send(wake::waker());
+            },
+        );
+        let waker = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .expect("replies run on the engine thread");
+        host.stop();
+        drop(host);
+        thread::sleep(Duration::from_millis(100));
+        assert!(!waker.wake());
+    }
+}

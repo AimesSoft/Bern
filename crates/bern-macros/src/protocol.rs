@@ -365,6 +365,11 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 fn modules_changed(&mut self, enabled: &[::std::string::String]) {
                     let _ = enabled;
                 }
+
+                /// Take in the results of work started elsewhere, after its
+                /// `bern::wake::Waker` was woken, and once as the
+                /// application starts. The state is published afterwards.
+                fn wake(&mut self) {}
             }
 
             /// The protocol descriptor: types, state and command catalog.
@@ -417,6 +422,10 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 
                 fn modules_changed(&mut self, enabled: &[::std::string::String]) {
                     Engine::modules_changed(&mut self.0, enabled)
+                }
+
+                fn wake(&mut self) {
+                    Engine::wake(&mut self.0)
                 }
             }
 

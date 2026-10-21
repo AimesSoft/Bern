@@ -1,6 +1,10 @@
 //! Small application-owned persistent values, isolated by the host bundle ID.
 //! Hosts install a store before constructing the engine. Headless engines
 //! without a host use an ephemeral store; tests can inject a directory.
+//!
+//! The same installation tells the application where its larger files go:
+//! [`data_dir`] for its own data that is not a setting, such as a database,
+//! and [`cache_dir`] for files it can fetch again.
 use bern_protocol::CommandError;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -14,6 +18,11 @@ pub struct Store {
     root: Option<PathBuf>,
 }
 static HOST: OnceLock<Store> = OnceLock::new();
+/// The application's identity on this device, and its folders.
+static APPLICATION: OnceLock<(String, Folders)> = OnceLock::new();
+/// Android has no home folder; its host passes the application's private
+/// files folder before installing the application.
+static ANDROID_FILES: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(not(target_arch = "wasm32"))]
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 impl Store {
@@ -29,29 +38,28 @@ impl Store {
         if !valid_name(bundle_id) {
             return;
         }
-        let base = if cfg!(target_arch = "wasm32") {
+        let env = |name: &str| std::env::var_os(name).map(PathBuf::from);
+        let folders = Folders::of(
+            std::env::consts::OS,
+            &env,
+            ANDROID_FILES.get().map(PathBuf::as_path),
+            bundle_id,
+        );
+        let settings = if cfg!(target_arch = "wasm32") {
             // The browser host interprets this as an application namespace,
             // not a filesystem path. It stays isolated per web origin.
-            Some(PathBuf::new())
-        } else if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
-            std::env::var_os("HOME").map(|p| PathBuf::from(p).join("Library/Application Support"))
-        } else if cfg!(target_os = "tvos") {
-            // A tvOS app may write only its caches, which the system
-            // clears when the television runs short of room.
-            std::env::var_os("HOME").map(|p| PathBuf::from(p).join("Library/Caches"))
-        } else if cfg!(target_os = "windows") {
-            std::env::var_os("APPDATA").map(PathBuf::from)
-        } else if cfg!(target_os = "linux") {
-            std::env::var_os("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-                .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
+            Some(PathBuf::from(bundle_id))
         } else {
-            None
+            folders.settings.clone()
         };
-        let _ = HOST.set(Self {
-            root: base.map(|p| p.join(bundle_id)),
-        });
+        let _ = HOST.set(Self { root: settings });
+        let _ = APPLICATION.set((bundle_id.into(), folders));
+    }
+
+    /// Android's host passes the application's private files folder
+    /// (`Context.getFilesDir()`) before installing the application.
+    pub fn install_files_folder(path: impl Into<PathBuf>) {
+        let _ = ANDROID_FILES.set(path.into());
     }
     fn path(&self, key: &str) -> Result<Option<PathBuf>, CommandError> {
         if !valid_name(key) {
@@ -85,6 +93,100 @@ impl Store {
         write_atomic(&path, bytes).map_err(|e| CommandError::new("storage_write", e.to_string()))
     }
 }
+/// The application's identity on this device, once a host installed it.
+pub fn application_id() -> Option<&'static str> {
+    APPLICATION.get().map(|(id, _)| id.as_str())
+}
+
+/// A folder for the application's own data that is not a setting, such as
+/// a database; created when missing. `None` where the platform gives the
+/// application no folders (the browser) or before a host installed it.
+/// On tvOS this is inside the caches, which the system may empty when the
+/// television runs short of room.
+pub fn data_dir() -> Option<PathBuf> {
+    created(APPLICATION.get()?.1.data.clone()?)
+}
+
+/// A folder for files the application can fetch again; created when
+/// missing. The system or the user may empty it at any time.
+pub fn cache_dir() -> Option<PathBuf> {
+    created(APPLICATION.get()?.1.cache.clone()?)
+}
+
+fn created(path: PathBuf) -> Option<PathBuf> {
+    std::fs::create_dir_all(&path).ok()?;
+    Some(path)
+}
+
+/// Where an application keeps its things, each folder already named after
+/// the application.
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Folders {
+    /// The small values of [`Store`].
+    settings: Option<PathBuf>,
+    data: Option<PathBuf>,
+    cache: Option<PathBuf>,
+}
+
+impl Folders {
+    /// The folders on `os`, the platform's own conventions: Application
+    /// Support and Caches on Apple systems, the roaming and local
+    /// application data on Windows, the XDG base directories on Linux.
+    fn of(
+        os: &str,
+        env: &dyn Fn(&str) -> Option<PathBuf>,
+        android_files: Option<&Path>,
+        id: &str,
+    ) -> Self {
+        let home = || env("HOME");
+        // An XDG variable counts only when it is an absolute path.
+        let xdg = |name: &str, fallback: &str| {
+            env(name)
+                .filter(|path| path.is_absolute())
+                .or_else(|| home().map(|home| home.join(fallback)))
+        };
+        let (settings, data, cache) = match os {
+            "macos" | "ios" => {
+                let support = home().map(|home| home.join("Library/Application Support"));
+                let caches = home().map(|home| home.join("Library/Caches"));
+                (support.clone(), support, caches)
+            }
+            // A tvOS app may write only its caches.
+            "tvos" => {
+                let caches = home().map(|home| home.join("Library/Caches"));
+                (caches.clone(), caches.clone(), caches)
+            }
+            "windows" => {
+                let local = env("LOCALAPPDATA");
+                (env("APPDATA"), local.clone(), local)
+            }
+            "linux" => (
+                xdg("XDG_CONFIG_HOME", ".config"),
+                xdg("XDG_DATA_HOME", ".local/share"),
+                xdg("XDG_CACHE_HOME", ".cache"),
+            ),
+            "android" => {
+                let files = android_files.map(Path::to_path_buf);
+                // `getCacheDir()` sits beside `getFilesDir()`.
+                let cache = android_files.and_then(Path::parent).map(|app| app.join("cache"));
+                (files.clone(), files, cache)
+            }
+            _ => (None, None, None),
+        };
+        let named = |path: Option<PathBuf>| path.map(|path| path.join(id));
+        let (settings, data, mut cache) = (named(settings), named(data), named(cache));
+        // Where data and caches share one folder, the caches get their own.
+        if cache.is_some() && cache == data {
+            cache = cache.map(|cache| cache.join("Cache"));
+        }
+        Self {
+            settings,
+            data,
+            cache,
+        }
+    }
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name != "."
@@ -240,5 +342,69 @@ mod tests {
         assert_eq!(store.read("first-run").unwrap(), Some(b"two".to_vec()));
         assert!(store.write("../escape", b"x").is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn each_platform_keeps_settings_data_and_caches_where_it_expects_them() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| PathBuf::from(value))
+            }
+        };
+        let folders = |os, pairs, files: Option<&str>| {
+            let f = Folders::of(os, &env(pairs), files.map(Path::new), "app.id");
+            let show = |path: Option<PathBuf>| path.map(|path| path.display().to_string());
+            (show(f.settings), show(f.data), show(f.cache))
+        };
+        let some = |path: &str| Some(path.to_string());
+        assert_eq!(
+            folders("macos", &[("HOME", "/Users/a")], None),
+            (
+                some("/Users/a/Library/Application Support/app.id"),
+                some("/Users/a/Library/Application Support/app.id"),
+                some("/Users/a/Library/Caches/app.id")
+            )
+        );
+        assert_eq!(
+            folders("tvos", &[("HOME", "/h")], None),
+            (
+                some("/h/Library/Caches/app.id"),
+                some("/h/Library/Caches/app.id"),
+                some("/h/Library/Caches/app.id/Cache")
+            )
+        );
+        assert_eq!(
+            folders("windows", &[("APPDATA", "C:/R"), ("LOCALAPPDATA", "C:/L")], None),
+            (
+                some("C:/R/app.id"),
+                some("C:/L/app.id"),
+                some("C:/L/app.id/Cache")
+            )
+        );
+        assert_eq!(
+            folders("linux", &[("HOME", "/home/a"), ("XDG_CACHE_HOME", "relative")], None),
+            (
+                some("/home/a/.config/app.id"),
+                some("/home/a/.local/share/app.id"),
+                some("/home/a/.cache/app.id")
+            )
+        );
+        assert_eq!(
+            folders("linux", &[("HOME", "/home/a"), ("XDG_DATA_HOME", "/d")], None).1,
+            some("/d/app.id")
+        );
+        assert_eq!(
+            folders("android", &[], Some("/data/user/0/pkg/files")),
+            (
+                some("/data/user/0/pkg/files/app.id"),
+                some("/data/user/0/pkg/files/app.id"),
+                some("/data/user/0/pkg/cache/app.id")
+            )
+        );
+        assert_eq!(folders("android", &[], None), (None, None, None));
+        assert_eq!(folders("macos", &[], None), (None, None, None));
     }
 }
