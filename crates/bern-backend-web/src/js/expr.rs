@@ -178,9 +178,29 @@ impl Generator<'_> {
     /// their command. Compare IR expressions, never generated source text: a
     /// string argument may contain the same spelling as the controlled field.
     pub(super) fn control_field(&self, element: &Element, controlled: &str) -> Option<String> {
+        self.control_binding(element, controlled, false)
+    }
+
+    /// Popovers need command completion to distinguish stale engine frames
+    /// from an external change while a native open/close is in flight.
+    pub(super) fn acknowledged_control_field(
+        &self,
+        element: &Element,
+        controlled: &str,
+    ) -> Option<String> {
+        self.control_binding(element, controlled, true)
+    }
+
+    fn control_binding(
+        &self,
+        element: &Element,
+        controlled: &str,
+        acknowledged: bool,
+    ) -> Option<String> {
         if let Some(expr) = element.expr(controlled) {
             let value = self.expr(expr);
             let action = element.action.as_ref()?;
+            let acknowledged = acknowledged && matches!(action, Action::Engine { .. });
             let commit = match action {
                 Action::Engine { command, args } => {
                     let spec = &self.app.protocol.commands[*command];
@@ -192,6 +212,9 @@ impl Generator<'_> {
                             self.expr(arg)
                         }
                     }));
+                    if acknowledged {
+                        values.push("done".into());
+                    }
                     format!(
                         "C.{}({})",
                         self.app.protocol.command_symbol(spec),
@@ -200,8 +223,13 @@ impl Generator<'_> {
                 }
                 _ => self.action(action),
             };
+            let setter = if acknowledged {
+                "commit: (newValue, done)"
+            } else {
+                "set: (newValue)"
+            };
             Some(format!(
-                "{{ get: () => {value}, peek: () => {value}, set: (newValue) => {{ {commit}; }} }}"
+                "{{ get: () => {value}, peek: () => {value}, {setter} => {{ {commit}; }} }}"
             ))
         } else {
             let field = self.field(element, "value")?;
@@ -255,6 +283,7 @@ impl Generator<'_> {
             }
             Action::Window { op, window } => match op {
                 WindowOp::Open | WindowOp::Activate => format!("B.openWindow({})", string(window)),
+                WindowOp::ToggleFullscreen => format!("B.toggleFullscreen({})", string(window)),
                 WindowOp::Close => format!("B.closeWindow({})", string(window)),
             },
             Action::Media { player, op, args } => {

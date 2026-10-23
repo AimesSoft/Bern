@@ -517,6 +517,10 @@ pub struct WindowCatalog {
     /// of `style!`.
     #[serde(default)]
     pub accent: Option<Expr>,
+    /// Optional JSON map of semantic roles to light/dark #RRGGBB pairs.
+    /// The application supplies a complete, contrast-checked palette.
+    #[serde(default)]
+    pub palette: Option<Expr>,
     /// The appearance every window shows: an enum of `System`, `Light`
     /// and `Dark`.
     #[serde(default)]
@@ -744,6 +748,7 @@ pub struct QueryBinding {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WindowOp {
+    ToggleFullscreen,
     Open,
     Close,
     Activate,

@@ -764,6 +764,8 @@ inline std::shared_ptr<Probes> ProbesOf(Win* win) {
     return made;
 }
 
+inline std::map<std::string, std::pair<uint32_t, uint32_t>> customPalette;
+
 /// The color of `paint` in the light or dark appearance, as `win` shows it.
 inline winrt::Windows::UI::Color ColorOf(Win* win, bool dark, Paint const& paint, double alpha = 1) {
     auto scaled = [alpha](winrt::Windows::UI::Color color) {
@@ -773,6 +775,7 @@ inline winrt::Windows::UI::Color ColorOf(Win* win, bool dark, Paint const& paint
     if (paint.fixed) return scaled(Rgb(dark ? paint.dark : paint.light));
     if (!paint.role) return winrt::Windows::UI::Color{0, 0, 0, 0};
     std::string role = paint.role;
+    if (auto it = customPalette.find(role); it != customPalette.end()) return scaled(Rgb(dark ? it->second.second : it->second.first));
     if (auto fallback = RoleFallback(role); fallback && !RoleKey(role)) return scaled(Rgb(dark ? fallback->second : fallback->first));
     auto key = RoleKey(role);
     if (!key) return scaled(Rgb(dark ? 0xFFFFFF : 0x000000));
@@ -960,6 +963,47 @@ inline void ApplyAccent(uint32_t light, uint32_t dark) {
             resources.Insert(winrt::box_value(L"SystemAccentColorDark" + std::to_wstring(step)), winrt::box_value(Shade(light, -step)));
         }
     } catch (winrt::hresult_error const&) {
+    }
+    themeTick.Set(themeTick.Peek() + 1);
+}
+
+inline void ApplyPalette(std::string const& text) {
+    using namespace winrt::Windows::Data::Json;
+    JsonObject object;
+    if (!JsonObject::TryParse(winrt::to_hstring(text), object)) return;
+    std::map<std::string, std::pair<uint32_t, uint32_t>> colors;
+    auto hex = [](winrt::hstring const& value) -> std::optional<uint32_t> {
+        auto s = winrt::to_string(value);
+        if (s.size() != 7 || s[0] != '#') return std::nullopt;
+        uint32_t n = 0;
+        for (size_t i = 1; i < s.size(); ++i) {
+            char c = s[i];
+            int d = c >= '0' && c <= '9' ? c-'0' : c >= 'a' && c <= 'f' ? c-'a'+10 : c >= 'A' && c <= 'F' ? c-'A'+10 : -1;
+            if (d < 0) return std::nullopt;
+            n = (n << 4) | d;
+        }
+        return n;
+    };
+    for (auto const& item : object) {
+        try {
+            auto pair = item.Value().GetObject();
+            auto light = hex(pair.GetNamedString(L"light")), dark = hex(pair.GetNamedString(L"dark"));
+            if (light && dark) colors[winrt::to_string(item.Key())] = {*light, *dark};
+        } catch (winrt::hresult_error const&) {}
+    }
+    customPalette = colors;
+    if (auto accent = colors.find("accent"); accent != colors.end()) ApplyAccent(accent->second.first, accent->second.second);
+    auto resources = xaml::Application::Current().Resources();
+    for (auto const& [role, pair] : colors) {
+        auto key = RoleKey(role);
+        if (!key) continue;
+        for (int dark = 0; dark < 2; ++dark) {
+            std::vector<media::SolidColorBrush> brushes;
+            for (auto const& theme : dark ? std::vector<std::wstring>{L"Dark", L"Default"} : std::vector<std::wstring>{L"Light"}) {
+                FindThemeBrushes(resources, theme, key, brushes);
+            }
+            for (auto const& brush : brushes) { try { brush.Color(Rgb(dark ? pair.second : pair.first)); } catch (...) {} }
+        }
     }
     themeTick.Set(themeTick.Peek() + 1);
 }
@@ -1320,6 +1364,7 @@ struct DecorateProps {
     Motion const* heroMotion = nullptr;
     bool reveal = false;
     char const* appearance = nullptr;
+    char const* tint = nullptr;
     Get nudge;
     Motion const* nudgeMotion = nullptr;
     /// `nudge_key`: a nudge each time the value changes; `nudge_scale` how
@@ -1377,6 +1422,18 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
     for (auto const& element : made) {
         if (props.appearance)
             if (auto framework = element.try_as<xaml::FrameworkElement>()) framework.RequestedTheme(ThemeNamed(props.appearance));
+        if (props.tint) {
+            if (auto framework = element.try_as<xaml::FrameworkElement>()) {
+                bool dark = props.appearance ? std::string_view(props.appearance) == "dark" : framework.ActualTheme() == xaml::ElementTheme::Dark;
+                auto color = ColorOf(ctx.win, dark, Paint(props.tint));
+                uint32_t rgb = (uint32_t(color.R) << 16) | (uint32_t(color.G) << 8) | color.B;
+                for (auto const& entry : AccentBrushes()) {
+                    media::SolidColorBrush brush(entry.on ? OnAccent(rgb) : color);
+                    brush.Opacity(entry.opacity);
+                    framework.Resources().Insert(winrt::box_value(entry.key), brush);
+                }
+            }
+        }
         xaml::UIElement shown = element;
         if ((props.scrollScale || props.scrollOpacity) && ctx.scroll) {
             auto wrapper = Wrap(shown);

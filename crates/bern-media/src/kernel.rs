@@ -205,6 +205,9 @@ pub fn installed() -> Option<Arc<dyn MediaKernel>> {
 pub fn for_target(offers: &[SurfaceKind]) -> Option<(Arc<dyn MediaKernel>, SurfaceKind)> {
     let kernel = installed()?;
     let supported = kernel.surfaces();
-    let kind = offers.iter().copied().find(|kind| supported.contains(kind))?;
+    let kind = offers
+        .iter()
+        .copied()
+        .find(|kind| supported.contains(kind))?;
     Some((kernel, kind))
 }

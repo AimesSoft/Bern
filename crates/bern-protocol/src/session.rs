@@ -376,11 +376,23 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                 &[
                     ("id", Type::Text, "Command id"),
                     ("entry", Type::Text, "ui, cli, json, mcp or test"),
-                    ("total_us", distribution(), "From dispatch to on screen, or to the engine's answer"),
+                    (
+                        "total_us",
+                        distribution(),
+                        "From dispatch to on screen, or to the engine's answer",
+                    ),
                     ("queue_us", distribution(), "Waiting for the engine"),
                     ("exec_us", distribution(), "Running the command"),
-                    ("publish_us", distribution(), "Snapshot, comparison and encoding of the state"),
-                    ("apply_us", distribution(), "Decoding and writing the state on the UI thread"),
+                    (
+                        "publish_us",
+                        distribution(),
+                        "Snapshot, comparison and encoding of the state",
+                    ),
+                    (
+                        "apply_us",
+                        distribution(),
+                        "Decoding and writing the state on the UI thread",
+                    ),
                     ("bytes", distribution(), "State bytes sent to the UI"),
                 ],
             ),
@@ -390,15 +402,27 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                     ("id", Type::Text, "Query id"),
                     ("cancelled", Type::Int, "Answers no one waited for any more"),
                     ("queue_us", distribution(), "Waiting for the engine"),
-                    ("provider_us", distribution(), "From the provider's start to its answer"),
-                    ("round_trip_us", distribution(), "From the request to the UI showing the answer"),
+                    (
+                        "provider_us",
+                        distribution(),
+                        "From the provider's start to its answer",
+                    ),
+                    (
+                        "round_trip_us",
+                        distribution(),
+                        "From the request to the UI showing the answer",
+                    ),
                 ],
             ),
             trace_record(
                 "TraceField",
                 &[
                     ("name", Type::Text, "State field"),
-                    ("sent", Type::Int, "Times it changed, and was sent to a UI if one runs"),
+                    (
+                        "sent",
+                        Type::Int,
+                        "Times it changed, and was sent to a UI if one runs",
+                    ),
                     ("bytes_max", Type::Int, "Largest encoding sent"),
                     (
                         "items_max",
@@ -406,9 +430,17 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                         "Most items, for a list",
                     ),
                     ("snapshot_us", distribution(), "Taking it from the engine"),
-                    ("compare_us", distribution(), "Comparing it with the last state"),
+                    (
+                        "compare_us",
+                        distribution(),
+                        "Comparing it with the last state",
+                    ),
                     ("encode_us", distribution(), "Encoding it for the UI"),
-                    ("apply_us", distribution(), "Decoding and writing it on the UI thread"),
+                    (
+                        "apply_us",
+                        distribution(),
+                        "Decoding and writing it on the UI thread",
+                    ),
                 ],
             ),
             trace_record(
@@ -429,7 +461,11 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                     ("entry", Type::Text, "Where it came from"),
                     ("commands", Type::list(Type::Text), "Commands it ran"),
                     ("at_ms", Type::Int, "Milliseconds after tracing started"),
-                    ("total_us", Type::Int, "From the action to the frame showing its result"),
+                    (
+                        "total_us",
+                        Type::Int,
+                        "From the action to the frame showing its result",
+                    ),
                     (
                         "revision",
                         Type::optional(Type::Int),
@@ -450,15 +486,27 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                 &[
                     ("at_ms", Type::Int, "Milliseconds after tracing started"),
                     ("us", Type::Int, "Time since the frame before"),
-                    ("refresh_us", Type::Int, "The display's refresh interval, 0 when unknown"),
+                    (
+                        "refresh_us",
+                        Type::Int,
+                        "The display's refresh interval, 0 when unknown",
+                    ),
                     ("bern_us", Type::Int, "Bern's own work on the UI thread"),
                     (
                         "outside_us",
                         Type::Int,
                         "The rest: generated views and the platform's layout and drawing",
                     ),
-                    ("segments", Type::list(segment()), "Bern's longest work on the UI thread"),
-                    ("engine", Type::list(segment()), "What the engine did meanwhile"),
+                    (
+                        "segments",
+                        Type::list(segment()),
+                        "Bern's longest work on the UI thread",
+                    ),
+                    (
+                        "engine",
+                        Type::list(segment()),
+                        "What the engine did meanwhile",
+                    ),
                 ],
             ),
             trace_record(
@@ -475,16 +523,28 @@ pub fn session_catalog() -> (TypeTable, Vec<CommandSpec>) {
                     ("window_ms", Type::Int, "Milliseconds the statistics cover"),
                     ("events", Type::Int, "Records read"),
                     ("dropped", Type::Int, "Records lost because a ring was full"),
-                    ("commands", Type::list(named("TraceCommand")), "Per command, slowest first"),
+                    (
+                        "commands",
+                        Type::list(named("TraceCommand")),
+                        "Per command, slowest first",
+                    ),
                     ("queries", Type::list(named("TraceQuery")), "Per query"),
-                    ("fields", Type::list(named("TraceField")), "State fields sent, largest first"),
+                    (
+                        "fields",
+                        Type::list(named("TraceField")),
+                        "State fields sent, largest first",
+                    ),
                     (
                         "interactions",
                         Type::list(named("TraceInteraction")),
                         "The slowest interactions and commands",
                     ),
                     ("frames", named("TraceFrames"), "Frame ticks"),
-                    ("long_frames", Type::list(named("TraceFrame")), "The latest long frames"),
+                    (
+                        "long_frames",
+                        Type::list(named("TraceFrame")),
+                        "The latest long frames",
+                    ),
                     ("spans", Type::list(named("TraceSpan")), "Spans by name"),
                 ],
             ),

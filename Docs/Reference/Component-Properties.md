@@ -56,8 +56,9 @@
 | `WindowSet` | **`handle: TypeName`**<br>**`primary: WindowId`**<br>`accent: KeyValue`<br>`appearance: KeyValue` | 仅含 ["Window"]；无动作；仅根节点 |
 | `Window` | **`id: WindowId`**<br>**`title: LocalizedText`**<br>`initial: open / closed`<br>`presentation: auto / virtual / floating / native_required`<br>`role: standard / settings / dialog`<br>`width: Number`<br>`height: Number`<br>`min_width: Number`<br>`min_height: Number`<br>`confirm_close: Bool`<br>`close_message: LocalizedText`<br>`chrome: standard / unified`<br>`immersive: Bool`<br>`landscape: Bool`<br>`idle_after: Number`<br>`idle_enabled: Bool` | 恰好一个子节点；动作可选；直接位于 ["WindowSet"] |
 | `Column` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: leading / center / trailing` | 可含子内容；无动作 |
+| `FocusRegion` | 无 | 一个内容视图；文本编辑时首次区域外指针操作只失焦并消费整次点击，保留草稿；区域内控件和下一次点击正常 |
 | `Row` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: top / center / bottom / baseline` | 可含子内容；无动作 |
-| `Accordion` | **`count: NumberValue`**<br>**`selected: NumberValue`**<br>**`collapsed_width: Length`**<br>**`height: Length`**<br>`gap: Length`<br>`corner: Length` | 可含子内容；无动作 |
+| `Accordion` | **`count: NumberValue`**<br>**`selected: NumberValue`**<br>**`collapsed_width: Length`**<br>`height: Length`<br>`gap: Length`<br>`corner: Length` | 可含子内容；无动作；省略 height 时使用剩余可用高度 |
 | `Grid` | **`min_width: Length`**<br>`gap: Length`<br>`row_gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`cell_ratio: Number`<br>`cell_extra: Length` | 可含子内容；无动作 |
 | `Stack` | `variant: StyleVariant`<br>`enabled: Bool`<br>`align: top_leading / top / top_trailing / leading / center / trailing / bottom_leading / bottom / bottom_trailing`<br>`width: Length`<br>`height: Length`<br>`under_bars: Flag` | 可含子内容；无动作 |
 | `Marquee` | **`duration: Length`**<br>`phase: Number`<br>`paused: Bool`<br>`opacity: NumberValue` | 可含子内容；无动作 |
@@ -92,7 +93,7 @@
 | `TabAccessory` | `shown: Bool` | 可含子内容；无动作；直接位于 ["Tabs"]，最多一个，不放在 `if` 或 `ForEach` 里。各页之上常驻的一条，例如正在播放的小播放器；`shown` 为假时收起 |
 | `Tab` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`display: title_and_icon / icon` | 可含子内容；无动作；直接位于 ["Tabs"]。`display: icon` 只显示图标（必须写 `icon`），`label` 仍是可访问名称 |
 | `SplitButton` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`more_label: DisplayText`<br>`shortcut: Shortcut` | 可含子内容；`value` 与 `checked` 二选一，`checked` 须有动作，切换时执行 |
-| `PopoverButton` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`presented: BoolField`<br>`shortcut: Shortcut` | 可含子内容；无动作 |
+| `PopoverButton` | `panel_appearance: inherit / window / surface`<br>**`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`presented: BoolField`<br>`open: Bool`<br>`shortcut: Shortcut` | 可含子内容；`open` 必须绑定动作，与 `presented` 互斥；未使用 `open` 时无动作 |
 | `Inspector` | **`presented: BoolField`**<br>`width: Number` | 可含子内容；无动作 |
 | `Toast` | **`content: DisplayText`**<br>`icon: Icon`<br>`key: KeyValue`<br>`duration: Number` | 不含子节点；无动作 |
 | `Pinch` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`feature: Feature` | 恰好一个子节点；动作可选 |
@@ -101,7 +102,7 @@
 | `Toolbar` | 无专有属性 | 仅含 ["Button", "IconButton", "Picker", "Menu", "Search", "Switch", "SplitButton", "PopoverButton", "Divider", "Spacer", "Text"]；无动作 |
 | `Adaptive` | `id: Id` | 仅含 ["Layout"]；无动作 |
 | `Layout` | **`size: compact / medium / expanded / large / tv`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
-| `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
+| `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`hide_disabled: Flag`<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
 | `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds` | 不含子节点；必须绑定动作；直接位于 ["Menu"] |
 | `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`** | 不含子节点；无动作 |
 | `List` | `items: Items`<br>`key: KeyField` | 可含子内容；无动作 |
@@ -117,12 +118,12 @@
 | `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText` | 不含子节点；无动作 |
 | `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField` | 可含子内容；必须绑定动作 |
 | `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag` | 不含子节点；必须绑定动作 |
-| `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`feature: Feature` | 不含子节点；动作可选；`submit: clear` 在动作后清空草稿、交出焦点 |
+| `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | 不含子节点；动作可选；`submit: clear` 在动作后清空草稿、交出焦点；SwiftUI 的 `clear_key` 在数值变化时清空，供异步成功回执使用 |
 | `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | 可含子内容；动作可选 |
 | `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
 | `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut` | 不含子节点；动作可选 |
-| `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |
-| `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |
+| `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |
+| `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。`sizing: fill` 让播放表面占满有明确大小的父容器，`fit` 只控制视频内容如何放进表面；内核弹幕可以使用黑边。默认 `standard` 保持原有布局。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |
 | `Query` | **`id: Id`**<br>**`query: Query`**<br>`loading: DisplayText`<br>`empty: DisplayText`<br>`failed: DisplayText`<br>`icon: Icon` | 可含子内容；无动作 |
 | `Picker` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: PickerField`<br>`selected: KeyValue`<br>`label_hidden: Flag`<br>`shape: capsule`<br>`height: Length`<br>`style: automatic / menu / segmented / radio / inline / chips` | 仅含 ["PickerOption"]；动作可选；`chips` 不接受 `shape` / `height` |
 
@@ -168,3 +169,12 @@
 不接受上述通用属性的当前组件：`WindowSet`、`Window`、`Detail`、`SidebarItem`、`Section`、`Slot`、`Pages`、`PageContent`、`Destination`、`Tab`、`Layout`、`MenuItem`。
 
 `scroll_origin_x`、`scroll_origin_y` 是 `scroll_scale` 放大时不动的那一点，按元素宽高的比例取 0 到 1，默认 0.5（正中），如 CSS 的 `transform-origin`。`at`、`from`、`to` 用于 Rail 中的定位；`stagger` 仅用于支持错峰的 Column、Row、Grid、Stack、ForEach、List。通用属性存在并不表示它在任意容器中都有意义。
+
+## 浮层状态与消息输入
+
+
+`PopoverButton(panel_appearance: window)` 的气泡跟随窗口（应用明暗选择或系统），触发按钮仍保留所在区域的外观。省略时继承所在区域；气泡打开期间也响应明暗变化。`panel_appearance: surface` 根据当前平台样式选择：指定背景色时跟随窗口，原生材质气泡继承所在区域，以便视频上方的玻璃气泡保持深色和浅色文字。macOS 未指定背景色时保留系统气泡材质（支持的系统上为 Liquid Glass）。所有目标都支持 `style! { PopoverButton { background: color(light: "#F2F2F2", dark: "#1E1E1E"), foreground: text.primary } }`，颜色作用于完整气泡表面及内容，不作用于触发按钮。
+
+`PopoverButton(open: app.panel) { … } => app.set_panel(app.panel)` 将动作中相同的状态表达式替换为新的开关值；打开、点击外部收起和 Escape 关闭都走这个动作。省略 `open` 时可继续使用 `presented: draft.panel`，或让组件自行保存状态。
+
+macOS 上，`TextInput` 点击外部时释放焦点、保留草稿，也不阻止所点击控件的正常动作。点击内部仍可定位光标和选中文字。`submit: clear` 在提交后立即清空并释放键盘；等待服务器确认的输入框应使用 `clear_key`，在成功后递增数值，失败时保留。`clear_key` 初次挂载不清空，目前仅 SwiftUI 后端实现其运行行为。

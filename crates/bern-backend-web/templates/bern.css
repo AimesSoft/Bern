@@ -835,6 +835,8 @@ button:disabled {
 .bern-accordion {
   display: grid;
   min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .bern-accordion > *,
@@ -1968,6 +1970,12 @@ textarea.bern-field {
   transform: rotate(180deg);
 }
 
+/* Native popovers may paint before their deferred toggle event starts the
+   entrance animation. beforetoggle arms this first frame synchronously. */
+.bern-popover-entering {
+  opacity: 0;
+}
+
 .bern-menu {
   position: fixed;
   inset: auto;
@@ -2223,7 +2231,7 @@ button.bern-menu-item:disabled .bern-icon {
 .bern-tabs-vertical .bern-tab[aria-selected="true"] {
   background: var(--bern-accent);
   color: var(--bern-on-accent);
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .bern-sidebar-item[aria-selected="true"] .bern-icon,
@@ -2525,7 +2533,7 @@ button.bern-menu-item:disabled .bern-icon {
 
 .bern-tab[aria-selected="true"] {
   color: var(--bern-accent-text);
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .bern-tab[aria-selected="true"]::after {
@@ -2735,6 +2743,26 @@ button.bern-menu-item:disabled .bern-icon {
   position: relative;
   aspect-ratio: 16 / 9;
   background: var(--bern-surface-panel);
+}
+
+/* The renderer owns picture fitting inside this full-container surface. */
+.bern-video-expand {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.bern-video-expand > .bern-video-surface {
+  aspect-ratio: auto;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.bern-video-expand > .bern-video-controls {
+  flex-shrink: 0;
 }
 
 /* The picture keeps its own colors; no filter or theme color applies. */

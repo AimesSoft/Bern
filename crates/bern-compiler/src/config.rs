@@ -264,11 +264,16 @@ struct RawTarget {
     platform: String,
     ui: Option<String>,
     web_mode: Option<String>,
+    web_extension: Option<bern_target_api::WebExtension>,
     application_transport: Option<String>,
     application_codec: Option<String>,
     #[serde(default)]
     channels: Vec<String>,
     frontends: Option<Vec<String>>,
+    webview: Option<bool>,
+    #[serde(default)]
+    javascript: bool,
+    android: Option<bern_target_api::AndroidOptions>,
 }
 
 /// A Rust source file listed in the configuration.
@@ -326,6 +331,8 @@ pub struct Config {
     pub libraries: Vec<PathBuf>,
     /// The application's modules, in the order `Bern.toml` lists them.
     pub modules: Vec<ModuleConfig>,
+    /// Declared modules and whether this build includes them.
+    pub build_modules: bern_syntax::build::Modules,
     /// Slot id to the application's own components placed there, before
     /// the modules'.
     pub contributes: BTreeMap<String, Vec<String>>,
@@ -988,6 +995,32 @@ fn app_sources(
 /// Check one `[targets.<name>]` table and turn it into its configuration.
 fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) -> TargetConfig {
     check_web_mode(&name, &target, errors);
+    if target.platform == "browser" && target.webview == Some(false) {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: the browser provides JavaScript; webview cannot be disabled"
+        )));
+    }
+    if target.platform == "tvos" && target.webview == Some(true) {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: tvOS has no WebView; omit webview or set it to false"
+        )));
+    }
+    if target.javascript && target.web_mode.as_deref() == Some("ui") {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: JavaScript hosting currently requires web_mode = \"app\""
+        )));
+    }
+    if target.web_extension.is_some() && target.platform != "browser" {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: web_extension requires a browser target"
+        )));
+    }
+    if target.android.is_some() && target.platform != "android" {
+        errors.push(Diagnostic::error(format!(
+            "target `{name}`: android host options require an Android target"
+        )));
+    }
+
     let frontends = windows_frontends(&name, &target.platform, target.frontends, errors);
     for channel in &target.channels {
         if channel != "ipc" {
@@ -1001,8 +1034,12 @@ fn target_config(name: String, target: RawTarget, errors: &mut Vec<Diagnostic>) 
         platform: target.platform,
         ui: target.ui,
         web_mode: target.web_mode,
+        web_extension: target.web_extension,
         channels: target.channels,
         frontends,
+        webview: target.webview,
+        javascript: target.javascript,
+        android: target.android,
     }
 }
 
@@ -1119,10 +1156,22 @@ fn load_modules(
     dir: &Path,
     entries: &[RawModuleRef],
     languages: &[String],
+    selection: &bern_syntax::build::Modules,
     errors: &mut Vec<Diagnostic>,
 ) -> Vec<ModuleConfig> {
     let mut modules: Vec<ModuleConfig> = Vec::new();
     for entry in entries {
+        let manifest = dir.join(&entry.path).join("Bern.toml");
+        let id = std::fs::read_to_string(&manifest)
+            .ok()
+            .and_then(|text| text.parse::<toml::Value>().ok())
+            .and_then(|value| value.get("module")?.get("id")?.as_str().map(str::to_string));
+        if id
+            .as_ref()
+            .is_some_and(|id| selection.0.get(id) == Some(&false))
+        {
+            continue;
+        }
         match load_module(dir, &entry.path) {
             Ok(module) => {
                 if modules.iter().any(|other| other.id == module.id) {
@@ -1190,8 +1239,105 @@ fn check_contributes(
     }
 }
 
+/// Read identity and dependency metadata before touching any module sources.
+fn module_selection(
+    dir: &Path,
+    entries: &[RawModuleRef],
+    excluded: &[String],
+) -> Result<bern_syntax::build::Modules, Vec<Diagnostic>> {
+    let mut catalog = BTreeMap::<String, Vec<String>>::new();
+    let mut errors = Vec::new();
+    for entry in entries {
+        let path = dir.join(&entry.path).join("Bern.toml");
+        let result = std::fs::read_to_string(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| text.parse::<toml::Value>().map_err(|e| e.to_string()));
+        match result {
+            Ok(value) => {
+                let module = value.get("module");
+                if let Some(id) = module
+                    .and_then(|m| m.get("id"))
+                    .and_then(toml::Value::as_str)
+                {
+                    let depends = module
+                        .and_then(|m| m.get("depends"))
+                        .and_then(toml::Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(toml::Value::as_str)
+                        .map(str::to_string)
+                        .collect();
+                    if !bern_protocol::valid_name(id) {
+                        errors.push(Diagnostic::error(format!(
+                            "invalid module id `{id}` in {}",
+                            path.display()
+                        )));
+                    }
+                    if catalog.insert(id.to_string(), depends).is_some() {
+                        errors.push(Diagnostic::error(format!("module `{id}` is listed twice")));
+                    }
+                } else {
+                    errors.push(Diagnostic::error(format!(
+                        "{} needs [module].id",
+                        path.display()
+                    )));
+                }
+            }
+            Err(e) => errors.push(Diagnostic::error(format!("{}: {e}", path.display()))),
+        }
+    }
+    for id in excluded {
+        if !catalog.contains_key(id) {
+            errors.push(Diagnostic::error(format!(
+                "unknown module `{id}` in --exclude-module; declared modules: {}",
+                catalog.keys().cloned().collect::<Vec<_>>().join(", ")
+            )));
+        }
+    }
+    fn chain(
+        id: &str,
+        catalog: &BTreeMap<String, Vec<String>>,
+        excluded: &[String],
+        path: &mut Vec<String>,
+    ) -> Option<Vec<String>> {
+        if path.iter().any(|p| p == id) {
+            return None;
+        }
+        path.push(id.to_string());
+        if excluded.iter().any(|e| e == id) {
+            return Some(path.clone());
+        }
+        for dep in catalog.get(id).into_iter().flatten() {
+            if let Some(found) = chain(dep, catalog, excluded, path) {
+                return Some(found);
+            }
+        }
+        path.pop();
+        None
+    }
+    for id in catalog.keys().filter(|id| !excluded.contains(id)) {
+        if let Some(path) = chain(id, &catalog, excluded, &mut Vec::new()) {
+            errors.push(Diagnostic::error(format!("cannot exclude module `{}`: retained dependency chain {}; also exclude the dependent module or keep its dependency", path.last().unwrap(), path.join(" -> "))));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+    Ok(bern_syntax::build::Modules(
+        catalog
+            .keys()
+            .map(|id| (id.clone(), !excluded.contains(id)))
+            .collect(),
+    ))
+}
+
 /// Load and validate a project configuration.
 pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
+    load_excluding(path, &[])
+}
+
+/// Load only the selected modules; excluded source files are never opened.
+pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Diagnostic>> {
     let text = std::fs::read_to_string(path).map_err(|error| {
         vec![Diagnostic::error(format!(
             "cannot read {}: {error}",
@@ -1219,7 +1365,14 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         .map(|(name, target)| target_config(name, target, &mut errors))
         .collect();
     let libraries = library_manifests(&dir, &raw.libraries, &mut errors);
-    let modules = load_modules(&dir, &raw.modules, &raw.languages.supported, &mut errors);
+    let build_modules = module_selection(&dir, &raw.modules, excluded)?;
+    let modules = load_modules(
+        &dir,
+        &raw.modules,
+        &raw.languages.supported,
+        &build_modules,
+        &mut errors,
+    );
     let manifest = path.display().to_string();
     check_contributes(&raw.contributes, &manifest, &mut errors);
     let resources = raw
@@ -1265,6 +1418,7 @@ pub fn load(path: &Path) -> Result<Config, Vec<Diagnostic>> {
         targets,
         libraries,
         modules,
+        build_modules,
         contributes: raw.contributes,
         resources,
         layouts,
@@ -1508,6 +1662,34 @@ fn canonical(dir: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_host_options_are_explicit_and_platform_scoped() {
+        let parse = |text: &str| toml::from_str::<RawTarget>(text).unwrap();
+        let mut errors = Vec::new();
+        let target = target_config(
+            "phone".into(),
+            parse("platform = 'android'\nandroid = { network = true, multicast = true }"),
+            &mut errors,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        let options = target.android.unwrap();
+        assert!(options.network && options.multicast);
+
+        let default = target_config("phone".into(), parse("platform = 'android'"), &mut errors);
+        assert!(default.android.is_none());
+        target_config(
+            "desktop".into(),
+            parse("platform = 'macos'\nandroid = { network = true }"),
+            &mut errors,
+        );
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].message.contains("require an Android target"));
+        assert!(
+            toml::from_str::<RawTarget>("platform = 'android'\nandroid = { netwrok = true }")
+                .is_err()
+        );
+    }
 
     #[test]
     fn language_tags_are_validated() {

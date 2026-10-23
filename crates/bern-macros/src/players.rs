@@ -6,7 +6,11 @@ use quote::quote;
 use syn::Item;
 
 pub fn expand(tokens: TokenStream) -> syn::Result<TokenStream> {
-    let item: Item = syn::parse2(tokens)?;
+    let mut items = vec![syn::parse2(tokens)?];
+    crate::config::build_modules()?.items(&mut items)?;
+    let Some(item) = items.pop() else {
+        return Ok(crate::config::track_build());
+    };
     let players = parse_players(&item)?;
     let Item::Struct(item_struct) = item else {
         unreachable!()
@@ -27,7 +31,9 @@ pub fn expand(tokens: TokenStream) -> syn::Result<TokenStream> {
         }
     });
     let b = quote!(::bern::bind);
+    let track_build = crate::config::track_build();
     Ok(quote! {
+        #track_build
         #(#attrs)*
         #[derive(Clone, Copy)]
         #vis struct #name {

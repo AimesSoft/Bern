@@ -49,6 +49,7 @@ const FEATURES: &[&str] = &[
     feature::APPEARANCE,
     feature::SHORTCUTS,
     feature::RUNTIME_THEME,
+    feature::RUNTIME_PALETTE,
     feature::RUNTIME_IMAGES,
     feature::PICTURE_FILLS,
     feature::FILE_PICK,
@@ -276,6 +277,7 @@ impl Target for GtkLinux {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let app = &bern_target_api::svg::prepare(app, config);
         let mut diagnostics = check_common(self, app);
         let framework = bern_target_api::texts::framework_languages();
         for language in &app.languages.supported {
@@ -332,6 +334,7 @@ impl Target for GtkLinux {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let executable = executable(app);
@@ -445,6 +448,8 @@ impl Target for GtkLinux {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(bern_target_api::svg::static_files(app, context)?);
+        bern_target_api::script::configure(&mut files, context);
         Ok(files)
     }
 
@@ -453,6 +458,7 @@ impl Target for GtkLinux {
         app: &Application,
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let executable = executable(app);
         let output = &context.output_dir;
@@ -490,7 +496,7 @@ impl Target for GtkLinux {
                     .iter()
                     .map(|resource| {
                         (
-                            context.project_dir.join(&resource.name),
+                            bern_target_api::svg::resource_path(context, &resource.name),
                             PathBuf::from(&resource.name),
                         )
                     })
@@ -546,6 +552,7 @@ impl Target for GtkLinux {
         context: &BuildContext,
         _signing: &Signing,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let executable = executable(app);
         let output = &context.output_dir;
@@ -684,6 +691,7 @@ impl Target for GtkLinux {
                         &executable,
                         architecture,
                         installed_size.div_ceil(1024),
+                        bern_target_api::script::webview(context),
                     )
                     .into_bytes(),
                 },
@@ -695,7 +703,11 @@ impl Target for GtkLinux {
                 });
             }
             let mut programs = Vec::new();
-            for file in glue::apparmor_files(app, &installed.join(&executable)) {
+            for file in glue::apparmor_files(
+                app,
+                &installed.join(&executable),
+                bern_target_api::script::webview(context),
+            ) {
                 let path = root.join(&file.path);
                 if file.program {
                     programs.push(path.display().to_string());
@@ -734,7 +746,7 @@ impl Target for GtkLinux {
         } else {
             notes.push("dpkg-deb is not installed here, so there is no .deb; the .tar.gz runs on any Linux with GTK 4.14 and libadwaita 1.5".into());
         }
-        if bern_target_api::svg::used(app) {
+        if bern_target_api::svg::used(app) || bern_target_api::script::webview(context) {
             notes.push(format!(
                 "`Svg` uses WebKitGTK, whose sandbox stops the app on Ubuntu 24.04 and later unless an AppArmor profile grants it `userns`: the .deb installs one for /opt/{id}/{executable}; the .tar.gz does not, so give the unpacked {executable} one there"
             ));

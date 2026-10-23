@@ -556,6 +556,7 @@ class BernWindowContext(
     /// pending, the window's controls are blocked for every entry.
     var pendingClose by mutableStateOf<BernPendingClose?>(null)
     /// Whether the window had no input for its `idle_after` seconds.
+    val fullscreen = true
     var idle by mutableStateOf(false)
     /// The window's width in dp once laid out; before that, an estimate
     /// from the screen or the declared size.
@@ -804,6 +805,7 @@ object BernNative {
 @Keep
 class BernBridge(context: Context) {
     private val main = Handler(Looper.getMainLooper())
+    private val application = context.applicationContext
     private val documents = context.contentResolver
 
     @Keep
@@ -853,6 +855,167 @@ class BernBridge(context: Context) {
         documents.openFileDescriptor(Uri.parse(uri), "r")?.detachFd() ?: -1
     } catch (error: Exception) {
         -1
+    }
+
+    /// Host services called from an engine worker. Only clipboard and
+    /// activity launch move to the main thread; document copies stay here.
+    @Keep
+    fun platformRequest(operation: String, first: String, second: String): String = try {
+        val value = when (operation) {
+            "copy_text" -> onMain {
+                val clipboard = application.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", first))
+                ""
+            }
+            "open_path" -> onMain { openPath(first); "" }
+            "import_folder" -> importFolder(Uri.parse(first), File(second)).absolutePath
+            "export_path" -> exportPath(File(first), Uri.parse(second)).toString()
+            else -> error("Unsupported platform operation: $operation")
+        }
+        "ok:$value"
+    } catch (error: Exception) {
+        "error:${error.cause?.message ?: error.message ?: error.javaClass.simpleName}"
+    }
+
+    private fun <T> onMain(action: () -> T): T {
+        if (Looper.myLooper() == Looper.getMainLooper()) return action()
+        val task = java.util.concurrent.FutureTask<T> { action() }
+        check(main.post(task)) { "The Android UI is unavailable" }
+        return task.get()
+    }
+
+    private fun openPath(value: String) {
+        val parsed = Uri.parse(value)
+        val uri = if (parsed.scheme == "content") parsed else {
+            val file = if (parsed.scheme == "file") File(requireNotNull(parsed.path)) else File(value)
+            require(file.exists()) { "The file no longer exists" }
+            require(file.isFile) { "Export this folder to a location selected in Files before opening it" }
+            androidx.core.content.FileProvider.getUriForFile(application, "${application.packageName}.bern.files", file)
+        }
+        val type = documents.getType(uri) ?: "application/octet-stream"
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, type)
+            // Grant only this selected document, never a URI prefix.
+            clipData = android.content.ClipData.newRawUri("", uri)
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        application.startActivity(intent)
+    }
+
+    private data class Document(val uri: Uri, val name: String, val directory: Boolean)
+
+    private fun rootDocument(tree: Uri): Document {
+        require(tree.scheme == "content" && android.provider.DocumentsContract.isTreeUri(tree)) { "Select a folder in the system Files picker" }
+        val uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, android.provider.DocumentsContract.getTreeDocumentId(tree))
+        val columns = arrayOf(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME, android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val document = documents.query(uri, columns, null, null, null)?.use { cursor ->
+            check(cursor.moveToFirst()) { "The selected folder is unavailable" }
+            Document(uri, cursor.getString(0) ?: "Folder", cursor.getString(1) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+        } ?: error("The selected folder is unavailable")
+        require(document.directory) { "The selected document is not a folder" }
+        return document
+    }
+
+    private fun children(parent: Uri, limit: Int = Int.MAX_VALUE): List<Document> {
+        val uri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(parent, android.provider.DocumentsContract.getDocumentId(parent))
+        val columns = arrayOf(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME, android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE)
+        return documents.query(uri, columns, null, null, null)?.use { cursor ->
+            buildList {
+                while (cursor.moveToNext()) {
+                    check(size < limit) { "The folder contains too many items" }
+                    add(Document(
+                        android.provider.DocumentsContract.buildDocumentUriUsingTree(parent, cursor.getString(0)),
+                        cursor.getString(1) ?: "File",
+                        cursor.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR,
+                    ))
+                }
+            }
+        } ?: error("The selected folder cannot be read")
+    }
+
+    private fun safeName(name: String): String = name.map { if (it == '/' || it == '\\' || it.code < 32) '_' else it }
+        .joinToString("").trim().takeUnless { it.isEmpty() || it == "." || it == ".." } ?: "File"
+
+    private fun numbered(name: String, number: Int, directory: Boolean): String {
+        if (number == 0) return name
+        val dot = if (directory) -1 else name.lastIndexOf('.').takeIf { it > 0 } ?: -1
+        return if (dot < 0) "$name ($number)" else "${name.substring(0, dot)} ($number)${name.substring(dot)}"
+    }
+
+    private fun newLocal(parent: File, name: String, directory: Boolean): File {
+        val safe = safeName(name)
+        for (number in 0..100_000) {
+            val file = File(parent, numbered(safe, number, directory))
+            if (if (directory) file.mkdir() else file.createNewFile()) return file
+            check(file.exists()) { "Cannot create ${file.name}" }
+        }
+        error("Too many files have the same name")
+    }
+
+    private fun importFolder(tree: Uri, destination: File): File {
+        val source = rootDocument(tree)
+        check(destination.isDirectory || destination.mkdirs()) { "Cannot create the import directory" }
+        val root = newLocal(destination, source.name, true)
+        try {
+            var fileCount = 0
+            var directoryCount = 0
+            fun copy(document: Document, target: File, depth: Int) {
+                check(depth < 32) { "The folder nesting exceeds 32 levels" }
+                if (document.directory) {
+                    check(++directoryCount <= 10_000) { "The folder contains more than 10,000 directories" }
+                    for (child in children(document.uri, 20_000 - fileCount - directoryCount)) {
+                        copy(child, newLocal(target, child.name, child.directory), depth + 1)
+                    }
+                } else {
+                    check(++fileCount <= 10_000) { "The folder contains more than 10,000 files" }
+                    val input = documents.openInputStream(document.uri) ?: error("Cannot read ${document.name}")
+                    input.use { read -> target.outputStream().use { write -> read.copyTo(write, 128 * 1024) } }
+                }
+            }
+            copy(source, root, 0)
+            return root
+        } catch (error: Exception) {
+            root.deleteRecursively()
+            throw error
+        }
+    }
+
+    private fun createDocument(parent: Uri, name: String, directory: Boolean): Uri {
+        val existing = children(parent).map { it.name }.toHashSet()
+        val safe = safeName(name)
+        val chosen = (0..100_000).asSequence().map { numbered(safe, it, directory) }.firstOrNull { it !in existing }
+            ?: error("Too many documents have the same name")
+        val type = if (directory) android.provider.DocumentsContract.Document.MIME_TYPE_DIR else {
+            android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(chosen.substringAfterLast('.', "").lowercase(Locale.ROOT))
+                ?: "application/octet-stream"
+        }
+        return android.provider.DocumentsContract.createDocument(documents, parent, type, chosen)
+            ?: error("Cannot create $chosen in the selected folder")
+    }
+
+    private fun exportPath(source: File, tree: Uri): Uri {
+        require(!java.nio.file.Files.isSymbolicLink(source.toPath())) { "Symbolic links cannot be exported" }
+        require(source.isFile || source.isDirectory) { "The file to export no longer exists" }
+        val parent = rootDocument(tree)
+        val root = createDocument(parent.uri, source.name, source.isDirectory)
+        try {
+            fun copy(file: File, target: Uri, depth: Int) {
+                require(!java.nio.file.Files.isSymbolicLink(file.toPath())) { "Symbolic links cannot be exported" }
+                check(depth < 128) { "The folder nesting is too deep" }
+                if (file.isDirectory) {
+                    val entries = file.listFiles() ?: error("Cannot read ${file.name}")
+                    for (child in entries) copy(child, createDocument(target, child.name, child.isDirectory), depth + 1)
+                } else {
+                    val output = documents.openOutputStream(target, "w") ?: error("Cannot write ${file.name}")
+                    output.use { write -> file.inputStream().use { read -> read.copyTo(write, 128 * 1024) } }
+                }
+            }
+            copy(source, root, 0)
+            return root
+        } catch (error: Exception) {
+            runCatching { android.provider.DocumentsContract.deleteDocument(documents, root) }
+            throw error
+        }
     }
 }
 
@@ -1661,7 +1824,9 @@ fun BernWindowRoot(
     val dialogWidth = BernHost.kinds.firstOrNull { it.id == context.kindID && it.isDialog }?.width
     context.estimatedWidth = dialogWidth ?: LocalConfiguration.current.screenWidthDp.toDouble()
     context.estimatedHeight = LocalConfiguration.current.screenHeightDp.toDouble()
-    CompositionLocalProvider(LocalBernWindow provides context, LocalBernSettled provides settled) {
+    val editingRegions = remember(context) { BernEditingRegions() }
+    CompositionLocalProvider(LocalBernWindow provides context, LocalBernSettled provides settled,
+        LocalBernEditingRegions provides editingRegions) {
         val chrome = context.chrome
         val titled = chrome.lastOrNull { it.title != null }?.title
         val title = titled ?: context.title
@@ -1671,7 +1836,7 @@ fun BernWindowRoot(
             // The width for `window.compact` and its siblings, and touches
             // for `window.idle`. Keyboard shortcuts and keys come from the
             // activity, which sees them whether or not a control has focus.
-            modifier = Modifier.onSizeChanged { size ->
+            modifier = Modifier.bernEditingPresses(editingRegions).onSizeChanged { size ->
                 context.measuredWidth = with(density) { size.width.toDp().value.toDouble() }
                 context.measuredHeight = with(density) { size.height.toDp().value.toDouble() }
             }.then(if (idleAfter == null) {

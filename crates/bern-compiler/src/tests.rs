@@ -698,6 +698,10 @@ mod independent_target {
                     platform: "test".into(),
                     ui: None,
                     web_mode: None,
+                    web_extension: None,
+                    webview: None,
+                    javascript: false,
+                    android: None,
                     channels: vec![],
                     frontends: vec![],
                 },
@@ -725,6 +729,10 @@ mod independent_target {
                 platform: "test".into(),
                 ui: Some("outline".into()),
                 web_mode: None,
+                web_extension: None,
+                webview: None,
+                javascript: false,
+                android: None,
                 channels: vec![],
                 frontends: vec![],
             })
@@ -2081,7 +2089,10 @@ fn window_expressions_read_only_sessions_the_window_owns() {
         };
         let error = errors
             .iter()
-            .find(|e| e.message.contains("reads `Draft`, which this window does not own"))
+            .find(|e| {
+                e.message
+                    .contains("reads `Draft`, which this window does not own")
+            })
             .unwrap_or_else(|| panic!("{errors:?}"));
         assert!(error.message.starts_with("window `about`"), "{error:?}");
         assert!(error.location.is_some(), "{error:?}");
@@ -3158,7 +3169,12 @@ fn a_composer_clears_its_draft_after_sending() {
         });
     }
     assert_eq!(clearing, 2);
-    assert!(errors(&format!("Button(id: send, {label}, clears: draft.on) => app.add(1)")).contains("bool"));
+    assert!(
+        errors(&format!(
+            "Button(id: send, {label}, clears: draft.on) => app.add(1)"
+        ))
+        .contains("bool")
+    );
 }
 
 #[test]
@@ -3920,6 +3936,51 @@ fn controls_placed_directly_in_a_window_use_their_style() {
 }
 
 #[test]
+fn controlled_popovers_validate_state_and_dismissal_action() {
+    let label = r#"tr! { "en" => "Settings", "ja" => "設定" }"#;
+    for (body, expected) in [
+        (
+            format!("PopoverButton(id: settings, label: {label}, open: true) {{ Spacer }}"),
+            "needs an action",
+        ),
+        (
+            format!(
+                "PopoverButton(id: settings, label: {label}, open: true, presented: draft.on) {{ Spacer }} => app.add(1)"
+            ),
+            "not both",
+        ),
+        (
+            format!(
+                "PopoverButton(id: settings, label: {label}, presented: app.count) {{ Spacer }}"
+            ),
+            "session",
+        ),
+        (
+            format!("PopoverButton(id: settings, label: {label}) {{ Spacer }} => app.add(1)"),
+            "action needs `open`",
+        ),
+        (
+            format!(
+                "PopoverButton(id: settings, label: {label}, open: app.count) {{ Spacer }} => app.add(1)"
+            ),
+            "bool",
+        ),
+    ] {
+        let message = errors(&body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+    let protocol = PROTOCOL
+        .replace("pub count: i64,", "pub count: i64, pub panel: bool,")
+        .replace(
+            "fn add(",
+            "fn panel(&mut self, open: bool) -> Result<(), CommandError>; fn add(",
+        );
+    compile_project(&protocol, &wrap(&format!(
+        "Column {{ PopoverButton(id: settings, label: {label}, open: app.panel) {{ Spacer }} => app.panel(app.panel) PopoverButton(id: draft, label: {label}, presented: draft.on) {{ Spacer }} PopoverButton(id: local, label: {label}) {{ Spacer }} }}"
+    ))).unwrap();
+}
+
+#[test]
 fn controlled_settings_reject_ambiguous_sources_and_non_enum_selections() {
     let label = r#"tr! { "en" => "Preference", "ja" => "設定" }"#;
     for (body, message) in [
@@ -4140,4 +4201,127 @@ fn styles_set_the_lengths_elements_write_for_their_platforms() {
     ] {
         assert_style_error(body, expected);
     }
+}
+
+#[test]
+fn webview_capability_prunes_branches_components_and_bound_expressions() {
+    let ui = r#"
+#[component]
+pub fn animated() -> impl View { ui! { Text(content: tr! { "en" => "animated", "ja" => "animated" }) } }
+#[component]
+pub fn still() -> impl View { ui! { Text(content: tr! { "en" => "still", "ja" => "still" }) } }
+#[component]
+pub fn app(app: demo::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Main", "ja" => "Main" }) {
+                Column(gap: if window.webview { 10 } else { 20 }) {
+                    if window.webview { animated() } else { still() }
+                    if window.webview && app.count > 0 { animated() }
+                }
+            }
+        }
+    }
+}
+"#;
+    let app = compile_ui(ui).unwrap().app;
+    for enabled in [true, false] {
+        let app = app.with_webview(enabled);
+        assert!(
+            app.component(if enabled { "animated" } else { "still" })
+                .is_some()
+        );
+        assert!(
+            app.component(if enabled { "still" } else { "animated" })
+                .is_none()
+        );
+        let json = serde_json::to_string(&app).unwrap();
+        assert!(
+            !json.contains("\"field\":\"webview\""),
+            "capabilities must not reach runtime bindings"
+        );
+    }
+}
+
+#[test]
+fn excluded_modules_do_not_load_sources_or_contribute_to_the_catalog() {
+    let ui =
+        wrap("Column { if build.modules.downloads { nonexistent(app: missing) } else { Spacer } }");
+    let dir = write_project(
+        PROTOCOL,
+        &ui,
+        "\n[[modules]]\npath = \"missing-implementation\"\n",
+    );
+    std::fs::create_dir_all(dir.join("missing-implementation")).unwrap();
+    // No Rust files or Cargo manifests: identity metadata is enough to exclude it.
+    std::fs::write(
+        dir.join("missing-implementation/Bern.toml"),
+        "[module]\nid = \"downloads\"\ndepends = []\n",
+    )
+    .unwrap();
+    let config = config::load_excluding(&dir.join("Bern.toml"), &["downloads".into()]).unwrap();
+    assert!(config.modules.is_empty());
+    let compiled = compile(&config).unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(compiled.module_protocols.is_empty());
+    assert!(
+        !serde_json::to_string(&compiled.app)
+            .unwrap()
+            .contains("nonexistent")
+    );
+    let errors = config::load_excluding(&dir.join("Bern.toml"), &["typo".into()]).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message.contains("unknown module `typo`"))
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn excluding_a_required_module_reports_the_retained_dependency_chain() {
+    let dir = write_project(
+        PROTOCOL,
+        &wrap("Spacer"),
+        "\n[[modules]]\npath = \"a\"\n[[modules]]\npath = \"b\"\n[[modules]]\npath = \"c\"\n",
+    );
+    for (id, depends) in [("a", "[]"), ("b", "[\"a\"]"), ("c", "[\"b\"]")] {
+        std::fs::create_dir_all(dir.join(id)).unwrap();
+        std::fs::write(
+            dir.join(id).join("Bern.toml"),
+            format!("[module]\nid = {id:?}\ndepends = {depends}\n"),
+        )
+        .unwrap();
+    }
+    let errors = config::load_excluding(&dir.join("Bern.toml"), &["a".into()]).unwrap_err();
+    assert!(
+        errors.iter().any(|e| e.message.contains("c -> b -> a")),
+        "{errors:?}"
+    );
+    let config = config::load_excluding(
+        &dir.join("Bern.toml"),
+        &["a".into(), "b".into(), "c".into()],
+    )
+    .unwrap();
+    assert!(config.modules.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn runtime_palette_requires_text_and_is_optional() {
+    let plain = wrap("Spacer");
+    assert!(compile_ui(&plain).unwrap().app.windows.palette.is_none());
+    let source = |binding: &str| {
+        plain.replace(
+            "WindowSet(handle: AppWindows, primary: main)",
+            &format!("WindowSet(handle: AppWindows, primary: main, palette: {binding})"),
+        )
+    };
+    let compiled = compile_ui(&source("app.title")).unwrap();
+    assert_eq!(compiled.app.windows.palette.unwrap().ty, Type::Text);
+    let errors = compile_ui(&source("app.mode")).err().unwrap();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.to_string().contains("`palette` is a text binding"))
+    );
 }

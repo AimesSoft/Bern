@@ -78,5 +78,8 @@ pub fn now_ns() -> u64 {
 )))]
 pub fn now_ns() -> u64 {
     static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    ORIGIN.get_or_init(std::time::Instant::now).elapsed().as_nanos() as u64
+    ORIGIN
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_nanos() as u64
 }

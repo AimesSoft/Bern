@@ -880,6 +880,7 @@ pub struct Decor {
     pub hero: Option<(Get, Curve)>,
     pub reveal: bool,
     pub appearance: Option<&'static str>,
+    pub tint: Option<&'static str>,
     /// A nudge each time this turns true, back with the spring.
     pub nudge: Option<(Get, Curve)>,
     pub scroll_scale: Option<f64>,
@@ -931,6 +932,10 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
         if let Some(appearance) = decor.appearance {
             crate::theme::use_part(appearance == "dark");
             motion.add_css_class(&format!("bern-appearance-{appearance}"));
+        }
+        if let Some(tint) = decor.tint {
+            let dark = decor.appearance.map(|v| v == "dark").unwrap_or_else(|| adw::StyleManager::default().is_dark());
+            motion.add_css_class(&crate::theme::use_tint(tint, dark));
         }
         if let Some(disappear) = decor.disappear {
             let leaving = motion.downgrade();

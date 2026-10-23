@@ -4,7 +4,7 @@
   "use strict";
   const svg = document.querySelector("body > svg");
   if (!svg) return;
-  let playing = true, visible = true, speed = 1, revision = null;
+  let playing = true, visible = true, speed = 1, revision = null, externalLinks = false;
   let frame = 0, previous = 0;
   const owned = new WeakSet();
   const active = () => playing && visible && !document.hidden;
@@ -36,6 +36,7 @@
     frame = requestAnimationFrame(tick);
   }
   function update(value = {}) {
+    if (typeof value.externalLinks === "boolean") externalLinks = value.externalLinks;
     if (typeof value.playing === "boolean") playing = value.playing;
     if (typeof value.visible === "boolean") visible = value.visible;
     if (Number.isFinite(value.speed) && value.speed > 0) speed = value.speed;
@@ -53,6 +54,8 @@
       revision = value.restart;
     }
     sync();
+    // Read-only application data; the document receives no engine/host APIs.
+    window.dispatchEvent(new CustomEvent("bern:svg-state", { detail: { ...value, playing, visible, speed, restart: revision } }));
   }
   window.bernSvg = Object.freeze({ update });
   addEventListener("message", event => {
@@ -63,7 +66,11 @@
   new MutationObserver(sync).observe(svg, { attributes: true, attributeFilter: ["class"], childList: true, subtree: true });
   // Links must never navigate the containing application or SVG document.
   document.addEventListener("click", event => {
-    if (event.target.closest?.("a")) event.preventDefault();
+    const link=event.target.closest?.("a");
+    if (!link) return;
+    let url; try { url=new URL(link.getAttribute("href")); } catch {}
+    if (!externalLinks || !url || url.protocol!=="https:" || !url.hostname) { event.preventDefault(); return; }
+    if (parent !== window) { link.target="_blank"; link.rel="noopener noreferrer"; }
   }, true);
   sync();
 })();

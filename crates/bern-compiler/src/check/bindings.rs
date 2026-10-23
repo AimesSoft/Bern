@@ -183,14 +183,16 @@ impl Checker<'_> {
         if root_name == "window" && scope.get(&root_name).is_none() {
             let field = path.segments.get(1).map(ToString::to_string);
             let sizes = ir::LayoutSize::ALL.map(ir::LayoutSize::name);
-            let known = field.as_deref() == Some("idle")
+            let known = field.as_deref() == Some("fullscreen")
+                || field.as_deref() == Some("idle")
                 || field.as_deref() == Some("short")
                 || field.as_deref() == Some("tv")
+                || field.as_deref() == Some("webview")
                 || field.as_deref().is_some_and(|name| sizes.contains(&name));
             if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), and `window.tv` (the window is on a television)",
+                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.tv` (the window is on a television), and `window.webview` (the target supports WebView)",
                 );
                 return None;
             }
@@ -202,7 +204,12 @@ impl Checker<'_> {
                 );
             }
             // A television is a television whatever the breakpoints.
-            if field != "idle" && field != "short" && field != "tv" {
+            if field != "fullscreen"
+                && field != "idle"
+                && field != "short"
+                && field != "tv"
+                && field != "webview"
+            {
                 match self.layouts {
                     None => {
                         self.error(

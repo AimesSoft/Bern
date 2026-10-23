@@ -21,6 +21,10 @@ pub const PLATFORMS: [&str; 7] = [
 /// Controls that take style overrides, with the states that apply to them.
 const STYLEABLE: &[(&str, &[StyleState])] = &[
     ("Stack", &[]),
+    // Popover colors style the presented surface, not its trigger.
+    ("PopoverButton", &[]),
+    ("Sidebar", &[]),
+    ("Detail", &[]),
     // A row's or column's lengths, per platform.
     ("Row", &[]),
     ("Column", &[]),

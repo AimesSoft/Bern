@@ -456,9 +456,10 @@ fun BernAccordion(
     selected: Int,
     collapsedWidth: Dp,
     gap: Dp,
-    height: Dp,
+    height: Dp?,
     corner: Dp,
     motion: BernMotion?,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     val columns = count.coerceAtLeast(0)
@@ -474,10 +475,12 @@ fun BernAccordion(
         }
     }
     val shape = RoundedCornerShape(corner)
-    Layout(content, Modifier.fillMaxWidth().height(height)) { measurables, constraints ->
+    val sized = if (height == null) modifier.fillMaxSize() else modifier.fillMaxWidth().height(height)
+    Layout(content, sized) { measurables, constraints ->
         val n = measurables.size
         val gapPx = gap.toPx()
-        val heightPx = height.roundToPx()
+        val heightPx = constraints.constrainHeight(height?.roundToPx()
+            ?: if (constraints.hasBoundedHeight) constraints.maxHeight else 560.dp.roundToPx())
         val total = if (constraints.hasBoundedWidth) {
             constraints.maxWidth.toFloat()
         } else {
@@ -540,6 +543,7 @@ fun BernModal(
     val window = LocalBernWindow.current
     val covering = cover && window.compact
     val visibility = LocalBernVisibility.current
+    val dark = bernDark()
     Dialog(
         onDismissRequest = {},
         properties = DialogProperties(
@@ -549,7 +553,17 @@ fun BernModal(
             decorFitsSystemWindows = !covering,
         ),
     ) {
-        (LocalView.current.parent as? DialogWindowProvider)?.window?.setDimAmount(0.24f)
+        val view = LocalView.current
+        SideEffect {
+            (view.parent as? DialogWindowProvider)?.window?.let { dialogWindow ->
+                dialogWindow.setDimAmount(0.24f)
+                // A modal has its own Window; the activity's system-bar
+                // appearance does not carry into an edge-to-edge dialog.
+                val controller = androidx.core.view.WindowCompat.getInsetsController(dialogWindow, view)
+                controller.isAppearanceLightStatusBars = !dark
+                controller.isAppearanceLightNavigationBars = !dark
+            }
+        }
         BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val card = if (covering) {
                 Modifier.fillMaxSize()

@@ -2,8 +2,8 @@
 // runs SVG scripts without access to the application's DOM or engine.
 const bernSvgPrefix = /*bern:svg-prefix*/;
 const bernSvgSuffix = /*bern:svg-suffix*/;
-export function Svg(p, ctx, { source, label, width, height, fit = "contain", playing, speed, restart, interactive = true }) {
-  const frame = el("iframe", { sandbox: "allow-scripts", class: "bern-svg", scrolling: "no", referrerpolicy: "no-referrer" });
+export function Svg(p, ctx, { source, label, width, height, fit = "contain", playing, speed, restart, data, externalLinks = false, interactive = true }) {
+  const frame = el("iframe", { sandbox: externalLinks ? "allow-scripts allow-popups allow-popups-to-escape-sandbox" : "allow-scripts", class: "bern-svg", scrolling: "no", referrerpolicy: "no-referrer" });
   frame.style.border = "0";
   frame.style.background = "transparent";
   frame.style.display = "block";
@@ -21,7 +21,7 @@ export function Svg(p, ctx, { source, label, width, height, fit = "contain", pla
   const observer = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? true; send(); });
   observer.observe(frame);
   effect(() => {
-    current = { playing: read(playing, true), speed: Number(read(speed, 1)), restart: Number(read(restart, 0)), fit, interactive };
+    current = { playing: read(playing, true), speed: Number(read(speed, 1)), restart: Number(read(restart, 0)), fit, interactive, data: read(data, ""), externalLinks };
     send();
   });
   const abort = new AbortController();

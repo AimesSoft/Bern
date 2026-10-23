@@ -121,6 +121,18 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.MutableState
@@ -252,6 +264,9 @@ object BernIcons {
             "M16,17.01V10h-2v7.01h-3L15,21l4,-3.99h-3zM9,3L5,6.99h3V14h2V6.99h3L9,3z",
         )
     }
+    private val fullscreen by lazy { icon("Fullscreen", "M7,14H5v5h5v-2H7v-3zM5,10h2V7h3V5H5v5zM17,17h-3v2h5v-5h-2v3zM14,5v2h3v3h2V5h-5z") }
+    private val closeFullscreen by lazy { icon("CloseFullscreen", "M5,16h3v3h2v-5H5v2zM14,5v5h5V8h-3V5h-2zM5,8v2h5V5H8v3H5zM16,16h3v-2h-5v5h2v-3z") }
+    private val speed by lazy { icon("Speed", "M20.38,8.57l-1.23,1.85A8,8 0,0 1,20,14a8,8 0,0 1,-.84,3.55H4.84A8,8 0,0 1,15.58,6.85l1.85,-1.23A10,10 0,0 0,2,14a10,10 0,0 0,1.43,5.15h17.14A10,10 0,0 0,20.38,8.57zM10.59,12.59a2,2 0,1 0,2.82,2.82L19,5l-8.41,7.59z") }
     private val openInFull by lazy {
         icon(
             "OpenInFull",
@@ -575,6 +590,76 @@ fun BernIconButton(
 
 // MARK: - Inputs
 
+class BernEditingRegion {
+    var bounds = Rect.Zero
+    val editors = mutableSetOf<Any>()
+    var dismiss: () -> Unit = {}
+}
+
+class BernEditingRegions {
+    val regions = mutableListOf<BernEditingRegion>()
+    var origin = Offset.Zero
+}
+
+val LocalBernEditingRegions = staticCompositionLocalOf<BernEditingRegions?> { null }
+private val LocalBernEditingAncestors = staticCompositionLocalOf<List<BernEditingRegion>> { emptyList() }
+
+@Composable
+fun BernFocusRegion(content: @Composable () -> Unit) {
+    val registry = LocalBernEditingRegions.current
+    val region = remember { BernEditingRegion() }
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    region.dismiss = { focus.clearFocus(force = true); keyboard?.hide() }
+    DisposableEffect(registry, region) {
+        registry?.regions?.add(region)
+        onDispose { registry?.regions?.remove(region) }
+    }
+    val ancestors = LocalBernEditingAncestors.current + region
+    CompositionLocalProvider(LocalBernEditingAncestors provides ancestors) {
+        Box(Modifier.onGloballyPositioned { region.bounds = it.boundsInRoot() }) { content() }
+    }
+}
+
+@Composable
+private fun Modifier.bernEditingFocus(): Modifier {
+    val regions = LocalBernEditingAncestors.current
+    val token = remember { Any() }
+    DisposableEffect(regions, token) {
+        onDispose { regions.forEach { it.editors.remove(token) } }
+    }
+    return onFocusChanged { state ->
+        regions.forEach { if (state.isFocused) it.editors.add(token) else it.editors.remove(token) }
+    }
+}
+
+// Installed on the window root: Initial runs before descendant controls see
+// the down event, so consuming it also cancels their click/drag recognizers.
+fun Modifier.bernEditingPresses(registry: BernEditingRegions): Modifier =
+    onGloballyPositioned { registry.origin = it.positionInRoot() }.pointerInput(registry) {
+        awaitPointerEventScope {
+            var consuming = false
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (!consuming) {
+                    val down = event.changes.firstOrNull { it.pressed && !it.previousPressed }
+                    if (down != null) {
+                        val region = registry.regions.filter { it.editors.isNotEmpty() }
+                            .minByOrNull { it.bounds.width * it.bounds.height }
+                        if (region != null && !region.bounds.contains(down.position + registry.origin)) {
+                            consuming = true
+                            region.dismiss()
+                        }
+                    }
+                }
+                if (consuming) {
+                    event.changes.forEach { it.consume() }
+                    if (event.changes.none { it.pressed }) consuming = false
+                }
+            }
+        }
+    }
+
 @Composable
 fun BernTextInput(
     value: String,
@@ -601,7 +686,7 @@ fun BernTextInput(
             imeAction = if (submit != null && kind != "multiline") ImeAction.Done else ImeAction.Default,
         ),
         keyboardActions = KeyboardActions(onDone = { submit?.invoke() }),
-        modifier = modifier.fillMaxWidth().then(
+        modifier = modifier.bernEditingFocus().fillMaxWidth().then(
             if (labelHidden) Modifier.semantics { contentDescription = label } else Modifier
         ),
     )
@@ -715,11 +800,12 @@ fun BernControlledSlider(
     minIcon: ImageVector?,
     maxIcon: ImageVector?,
     labelHidden: Boolean = false,
+    continuous: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var preview by remember { mutableStateOf<Double?>(null) }
     BernSlider(
-        label, preview ?: value, { preview = it }, min, max, step,
+        label, preview ?: value, { preview = it; if (continuous) commit(it) }, min, max, step,
         { preview?.let(commit); preview = null },
         minIcon, maxIcon, labelHidden, modifier,
     )
@@ -1138,7 +1224,7 @@ fun BernSidebarSection(title: String?, content: @Composable () -> Unit) {
 @Composable
 fun BernSidebarItem(label: String, icon: ImageVector?, selected: Boolean, badge: Long? = null, onClick: () -> Unit) {
     NavigationDrawerItem(
-        label = { Text(label) },
+        label = { Text(label, fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else null) },
         icon = icon?.let { { Icon(it, contentDescription = null) } },
         // A live count beside the page, hidden at zero.
         badge = if (badge != null && badge > 0) {
@@ -1193,7 +1279,7 @@ fun RowScope.BernTabItem(
         selected = selected,
         onClick = onClick,
         icon = { Icon(icon ?: BernIcons.get(""), contentDescription = if (iconOnly) label else null) },
-        label = if (iconOnly) null else ({ Text(label) }),
+        label = if (iconOnly) null else ({ Text(label, fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else null) }),
     )
 }
 

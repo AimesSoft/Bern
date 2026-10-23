@@ -146,3 +146,5 @@ constexpr bool kWinUI = false;
 #undef BERN_WINUI
 }
 #endif
+
+#include <winrt/Windows.Data.Json.h>

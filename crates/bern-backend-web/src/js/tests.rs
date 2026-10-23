@@ -47,6 +47,7 @@ fn app() -> Application {
             primary: "main".into(),
             windows: vec![],
             accent: None,
+            palette: None,
             appearance: None,
         },
         players: vec![],
@@ -158,6 +159,48 @@ fn controlled_switch_commits_new_value_without_rewriting_string_arguments() {
     assert!(generated.contains("peek: () => E.enabled.get()"));
     assert!(
         generated.contains("C.set_enabled(ctx, \"E.enabled.get()\", newValue)"),
+        "{generated}"
+    );
+}
+
+#[test]
+fn controlled_popover_waits_for_its_engine_command_completion() {
+    let mut app = app();
+    app.protocol.state.push(StateField {
+        name: "panel".into(),
+        ty: Type::Bool,
+        doc: String::new(),
+        content: false,
+    });
+    app.protocol
+        .commands
+        .push(command("set_panel", &[Type::Bool]));
+    let open = Expr {
+        ty: Type::Bool,
+        kind: ExprKind::Binding {
+            binding: Binding::Engine {
+                field: 0,
+                path: vec![],
+            },
+        },
+    };
+    let mut popover = element("PopoverButton");
+    popover
+        .props
+        .insert("open".into(), Prop::Expr { expr: open.clone() });
+    popover.action = Some(Action::Engine {
+        command: 0,
+        args: vec![open],
+    });
+    let mut out = Out::default();
+    Generator::new(&app).popover_button(&mut out, &popover);
+    let generated = out.finish();
+    assert!(
+        generated.contains("get: () => E.panel.get(), peek: () => E.panel.get()"),
+        "{generated}"
+    );
+    assert!(
+        generated.contains("commit: (newValue, done) => { C.set_panel(ctx, newValue, done); }"),
         "{generated}"
     );
 }

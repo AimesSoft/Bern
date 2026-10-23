@@ -16,9 +16,7 @@
 //! other. Globs know `*` (any run of characters, dots too) and `?` (one
 //! character).
 
-use super::{
-    ALL, DEFAULT, ENGINE, FRAME, MOTION, MOTION_VALUES, SPAN, STYLE, UI, VIEW,
-};
+use super::{ALL, DEFAULT, ENGINE, FRAME, MOTION, MOTION_VALUES, SPAN, STYLE, UI, VIEW};
 use std::fmt;
 
 /// Records each thread keeps before the collector reads them.
@@ -111,11 +109,11 @@ pub fn duration(text: &str) -> Option<u64> {
 }
 
 fn duration_text(ns: u64) -> String {
-    if ns % 1_000_000_000 == 0 && ns > 0 {
+    if ns.is_multiple_of(1_000_000_000) && ns > 0 {
         format!("{}s", ns / 1_000_000_000)
-    } else if ns % 1_000_000 == 0 {
+    } else if ns.is_multiple_of(1_000_000) {
         format!("{}ms", ns / 1_000_000)
-    } else if ns % 1_000 == 0 {
+    } else if ns.is_multiple_of(1_000) {
         format!("{}us", ns / 1_000)
     } else {
         format!("{}ms", ns as f64 / 1e6)
@@ -131,7 +129,11 @@ impl Rules {
         };
         let mut categories = false;
         let mut excluded = 0;
-        for item in text.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+        for item in text
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+        {
             if let Some(name) = item.strip_prefix('-') {
                 excluded |= category(name).ok_or_else(|| unknown(item))?;
                 continue;

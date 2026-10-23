@@ -16,6 +16,8 @@ pub struct SvgProps {
     pub speed: Option<Get>,
     pub restart: Option<Get>,
     pub interactive: bool,
+    pub data: Option<Str>,
+    pub external_links: bool,
 }
 
 /// The presenter's update for the bound values: a speed that is not
@@ -26,9 +28,11 @@ fn update_script(
     restart: f64,
     fit: Option<&str>,
     interactive: bool,
+    data: &str,
+    external_links: bool,
 ) -> String {
     let update = serde_json::json!({"playing": playing, "speed": if speed > 0.0 { speed } else { 1.0 },
-        "restart": restart, "fit": fit.unwrap_or("contain"), "interactive": interactive});
+        "restart": restart, "fit": fit.unwrap_or("contain"), "interactive": interactive, "data": data, "externalLinks": external_links});
     format!("window.bernSvg?.update({update})")
 }
 
@@ -67,7 +71,8 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
             );
         }
     });
-    view.connect_decide_policy(|_, decision, kind| {
+    let external_links=props.external_links;
+    view.connect_decide_policy(move |_, decision, kind| {
         if (kind == webkit6::PolicyDecisionType::NavigationAction
             || kind == webkit6::PolicyDecisionType::NewWindowAction)
             && let Some(nav) = decision.downcast_ref::<webkit6::NavigationPolicyDecision>()
@@ -76,6 +81,10 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
                 .navigation_action()
                 .and_then(|action| action.request())
                 .and_then(|req| req.uri());
+            if external_links && nav.navigation_action().is_some_and(|a| a.navigation_type() == webkit6::NavigationType::LinkClicked)
+                && let Some(url)=uri.as_deref().filter(|u|u.starts_with("https://") && !u.chars().any(char::is_whitespace)) {
+                if let Err(error)=gio::AppInfo::launch_default_for_uri(url,None::<&gio::AppLaunchContext>) { eprintln!("Open SVG link: {error}"); }
+            }
             if uri.as_deref() != Some("about:blank") {
                 decision.ignore();
                 return true;
@@ -123,7 +132,7 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
             .is_none_or(|get| get(&ctx) == crate::protocol::Value::Bool(true));
         let speed = number(&props.speed, 1.0);
         let restart = number(&props.restart, 0.0);
-        *state.borrow_mut() = update_script(playing, speed, restart, props.fit, props.interactive);
+        *state.borrow_mut() = update_script(playing, speed, restart, props.fit, props.interactive, &props.data.as_ref().map(|get| get(&ctx)).unwrap_or_default(), props.external_links);
         if ready.get() {
             evaluate(&displayed, &state.borrow());
         }
@@ -162,18 +171,18 @@ mod tests {
     #[test]
     fn updates_pass_the_bound_values() {
         assert_eq!(
-            values(&update_script(false, 2.0, 1.5, Some("cover"), true)),
-            serde_json::json!({"playing": false, "speed": 2.0, "restart": 1.5, "fit": "cover", "interactive": true})
+            values(&update_script(false, 2.0, 1.5, Some("cover"), true, "{}", false)),
+            serde_json::json!({"playing": false, "speed": 2.0, "restart": 1.5, "fit": "cover", "interactive": true, "data": "{}", "externalLinks": false})
         );
     }
 
     #[test]
     fn speeds_that_are_not_positive_play_at_one() {
         for speed in [0.0, -1.0] {
-            let update = values(&update_script(true, speed, 0.0, None, false));
+            let update = values(&update_script(true, speed, 0.0, None, false, "", false));
             assert_eq!(update["speed"], 1.0);
         }
-        let update = values(&update_script(true, 1.0, 0.0, None, false));
+        let update = values(&update_script(true, 1.0, 0.0, None, false, "", false));
         assert_eq!(update["fit"], "contain");
     }
 }

@@ -338,8 +338,12 @@ fn start_engine(host: &Host, start: StartEngine) -> Result<(), String> {
         len: 0,
         capacity: 0,
     };
+    #[cfg(feature = "script")]
+    crate::script::start();
     let app = start(callbacks, &resources_dir(), &mut error);
     if app.is_null() {
+        #[cfg(feature = "script")]
+        crate::script::stop();
         return Err(String::from_utf8_lossy(&take(error)).into_owned());
     }
     host.app.set(app);
@@ -477,6 +481,8 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     application.connect_shutdown(|_| {
         let host = host();
         media::detach_executor();
+        #[cfg(feature = "script")]
+        crate::script::stop();
         let app = host.app.replace(std::ptr::null_mut());
         if !app.is_null() {
             // SAFETY: the handle is live and not used afterwards.

@@ -201,7 +201,10 @@ impl Done {
 
     fn applied(&self) -> Option<u64> {
         [
-            self.ui_state.as_ref().and_then(|state| state.seg).map(|seg| seg.t1),
+            self.ui_state
+                .as_ref()
+                .and_then(|state| state.seg)
+                .map(|seg| seg.t1),
             self.ui_reply.map(|seg| seg.t1),
             self.ui_query.map(|seg| seg.t1),
         ]
@@ -222,7 +225,9 @@ impl Done {
     }
 
     fn queue(&self) -> Option<u64> {
-        self.job.queued.map(|(queued, started)| started.saturating_sub(queued))
+        self.job
+            .queued
+            .map(|(queued, started)| started.saturating_sub(queued))
     }
 
     fn to_ui(&self) -> Option<u64> {
@@ -575,7 +580,8 @@ impl Collector {
             }
             kind::CALLBACK => match record.extra {
                 CALLBACK_STATE => {
-                    self.state_callbacks.insert(record.key, (record.t0, record.b));
+                    self.state_callbacks
+                        .insert(record.key, (record.t0, record.b));
                 }
                 CALLBACK_REPLY => {
                     self.reply_callbacks.insert(record.key, record.t0);
@@ -854,7 +860,11 @@ impl Collector {
         let mut engine_pending = false;
         let mut reply_pending = false;
         for token in &interaction.tokens {
-            if let Some(done) = interaction.done.iter().find(|done| done.job.origin == *token) {
+            if let Some(done) = interaction
+                .done
+                .iter()
+                .find(|done| done.job.origin == *token)
+            {
                 applied = applied.max(done.applied());
                 continue;
             }
@@ -914,7 +924,11 @@ impl Collector {
         self.ui_replies.retain(|_, seg| keep(seg.t1));
         self.ui_queries.retain(|_, seg| keep(seg.t1));
         let horizon = now.saturating_sub(RECENT);
-        while self.recent.front().is_some_and(|recent| recent.t1 < horizon) {
+        while self
+            .recent
+            .front()
+            .is_some_and(|recent| recent.t1 < horizon)
+        {
             self.recent.pop_front();
         }
         // Frames stay as long as a request may still wait for one.
@@ -922,7 +936,11 @@ impl Collector {
             .jobs
             .values()
             .map(|job| job.seen)
-            .chain(self.interactions.values().map(|interaction| interaction.seen))
+            .chain(
+                self.interactions
+                    .values()
+                    .map(|interaction| interaction.seen),
+            )
             .min()
             .unwrap_or(now)
             .min(now.saturating_sub(RECENT));
@@ -999,7 +1017,7 @@ impl Collector {
             })
             .filter(|segment| segment.us > 0)
             .collect();
-        segments.sort_by(|a, b| b.us.cmp(&a.us));
+        segments.sort_by_key(|segment| std::cmp::Reverse(segment.us));
         segments.truncate(6);
         segments
     }
@@ -1055,7 +1073,10 @@ impl Collector {
             if !frame.segments.is_empty() {
                 line.push_str(&format!(" ({})", list(&frame.segments)));
             }
-            line.push_str(&format!(", outside Bern {}", ms(duration.saturating_sub(bern))));
+            line.push_str(&format!(
+                ", outside Bern {}",
+                ms(duration.saturating_sub(bern))
+            ));
             if !frame.engine.is_empty() {
                 line.push_str(&format!("; engine meanwhile: {}", list(&frame.engine)));
             }
@@ -1139,7 +1160,10 @@ impl Collector {
     fn field_shown(&self, catalog_id: u16, field: u32) -> bool {
         self.rules.fields.is_empty() || {
             let name = field_name(catalog_id, field);
-            self.rules.fields.iter().any(|glob| glob_matches(glob, &name))
+            self.rules
+                .fields
+                .iter()
+                .any(|glob| glob_matches(glob, &name))
         }
     }
 
@@ -1151,8 +1175,16 @@ impl Collector {
         let mut first = head;
         let engine = parts(&[
             ("queue", done.queue()),
-            (if query { "provider" } else { "exec" }, job.exec.map(|seg| seg.dur())),
-            ("publish", job.publish.filter(|_| job.revision > 0).map(|seg| seg.dur())),
+            (
+                if query { "provider" } else { "exec" },
+                job.exec.map(|seg| seg.dur()),
+            ),
+            (
+                "publish",
+                job.publish
+                    .filter(|_| job.revision > 0)
+                    .map(|seg| seg.dur()),
+            ),
         ]);
         first.push_str(&engine);
         if job.revision > 0 {
@@ -1198,7 +1230,7 @@ impl Collector {
                 .iter()
                 .filter(|(_, field)| field.changed || field.sent)
                 .collect();
-            sent.sort_by(|a, b| b.1.bytes.cmp(&a.1.bytes));
+            sent.sort_by_key(|entry| std::cmp::Reverse(entry.1.bytes));
             for (index, field) in sent {
                 if !self.field_shown(job.catalog, *index) {
                     hidden += 1;
@@ -1225,7 +1257,11 @@ impl Collector {
                 ]));
                 lines.push(line);
             }
-            for field in job.fields.values().filter(|field| !field.changed && !field.sent) {
+            for field in job
+                .fields
+                .values()
+                .filter(|field| !field.changed && !field.sent)
+            {
                 quiet.0 += 1;
                 quiet.1 += field.snapshot;
                 quiet.2 += field.compare;
@@ -1246,10 +1282,7 @@ impl Collector {
                 ));
             }
         }
-        let ui = parts(&[
-            ("to UI", done.to_ui()),
-            ("apply", done.apply()),
-        ]);
+        let ui = parts(&[("to UI", done.to_ui()), ("apply", done.apply())]);
         let mut tail = ui;
         if let Some(to_frame) = done.to_frame().filter(|_| with_frame) {
             if !tail.is_empty() {
@@ -1278,7 +1311,10 @@ impl Collector {
             return true;
         }
         let printed = self.printed.entry(key).or_default();
-        while printed.front().is_some_and(|t| at.saturating_sub(*t) > SECOND) {
+        while printed
+            .front()
+            .is_some_and(|t| at.saturating_sub(*t) > SECOND)
+        {
             printed.pop_front();
         }
         if printed.len() >= FOLD_AFTER {
@@ -1316,7 +1352,7 @@ impl Collector {
 
     fn segments(dones: &[Done], interaction: Option<&Interaction>) -> Vec<Segment> {
         let sum = |value: &dyn Fn(&Done) -> Option<u64>| -> Option<u64> {
-            let values: Vec<u64> = dones.iter().filter_map(|done| value(done)).collect();
+            let values: Vec<u64> = dones.iter().filter_map(value).collect();
             (!values.is_empty()).then(|| values.iter().sum())
         };
         let to_frame = match interaction {
@@ -1332,12 +1368,20 @@ impl Collector {
         };
         [
             ("act", interaction.and_then(|i| i.act).map(|seg| seg.dur())),
-            ("dispatch", sum(&|done| done.dispatch.or(done.decode).map(|seg| seg.dur()))),
+            (
+                "dispatch",
+                sum(&|done| done.dispatch.or(done.decode).map(|seg| seg.dur())),
+            ),
             ("queue", sum(&Done::queue)),
             ("exec", sum(&|done| done.job.exec.map(|seg| seg.dur()))),
             (
                 "publish",
-                sum(&|done| done.job.publish.filter(|_| done.job.revision > 0).map(|seg| seg.dur())),
+                sum(&|done| {
+                    done.job
+                        .publish
+                        .filter(|_| done.job.revision > 0)
+                        .map(|seg| seg.dur())
+                }),
             ),
             ("to_ui", sum(&Done::to_ui)),
             ("apply", sum(&Done::apply)),
@@ -1417,7 +1461,14 @@ impl Collector {
             .frame
             .map(|frame| frame.on_screen())
             .unwrap_or(applied)
-            .max(interaction.done.iter().map(Done::engine_end).max().unwrap_or(0));
+            .max(
+                interaction
+                    .done
+                    .iter()
+                    .map(Done::engine_end)
+                    .max()
+                    .unwrap_or(0),
+            );
         let total = end.saturating_sub(start);
         let control = interaction.control.clone().unwrap_or_default();
         let commands: Vec<String> = interaction
@@ -1516,7 +1567,7 @@ impl Collector {
                 bytes: stats.bytes.distribution(1),
             })
             .collect();
-        commands.sort_by(|a, b| b.total_us.p95.cmp(&a.total_us.p95));
+        commands.sort_by_key(|command| std::cmp::Reverse(command.total_us.p95));
         let mut queries: Vec<QueryReport> = self
             .stats
             .queries
@@ -1529,7 +1580,7 @@ impl Collector {
                 round_trip_us: stats.round_trip.distribution(1000),
             })
             .collect();
-        queries.sort_by(|a, b| b.round_trip_us.p95.cmp(&a.round_trip_us.p95));
+        queries.sort_by_key(|query| std::cmp::Reverse(query.round_trip_us.p95));
         let mut fields: Vec<FieldReport> = self
             .stats
             .fields
@@ -1546,7 +1597,7 @@ impl Collector {
                 apply_us: stats.apply.distribution(1000),
             })
             .collect();
-        fields.sort_by(|a, b| b.bytes_max.cmp(&a.bytes_max));
+        fields.sort_by_key(|field| std::cmp::Reverse(field.bytes_max));
         let mut spans: Vec<SpanReport> = self
             .stats
             .spans
@@ -1556,7 +1607,7 @@ impl Collector {
                 us: samples.distribution(1000),
             })
             .collect();
-        spans.sort_by(|a, b| b.us.p95.cmp(&a.us.p95));
+        spans.sort_by_key(|span| std::cmp::Reverse(span.us.p95));
         Report {
             running: super::mask() != 0,
             window_ms: self.rel(now) / 1_000_000,
@@ -1582,7 +1633,7 @@ impl Collector {
         if track == LOCAL_ENGINE_TRACK {
             return "engine (on the page thread)".into();
         }
-        if track >= FRAMES_TRACK && track < LOCAL_ENGINE_TRACK {
+        if (FRAMES_TRACK..LOCAL_ENGINE_TRACK).contains(&track) {
             return format!("{} frames", self.track_name(track - FRAMES_TRACK));
         }
         self.thread_names
@@ -1826,7 +1877,9 @@ impl Collector {
         };
         let (path, text) = timeline.close(contents);
         (
-            path.map(|path| path.display().to_string()).into_iter().collect(),
+            path.map(|path| path.display().to_string())
+                .into_iter()
+                .collect(),
             text,
         )
     }

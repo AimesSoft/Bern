@@ -115,6 +115,9 @@ impl Generator<'_> {
             self.motion_modifiers(out, footer);
             out.close("}");
         }
+        if let Some(style) = self.style_of(sidebar) {
+            out.line(format!(".bernSidebarStyle(BernStyles.{})", style.name));
+        }
         // The detail column and the sidebar control are both named after
         // the selected destination.
         let title = labeled.then(|| self.nav_label(&selection, &sidebar.children, "SidebarItem"));
@@ -128,6 +131,9 @@ impl Generator<'_> {
         out.open("SwiftUI.Group {");
         self.nodes(out, &detail.children, ctx);
         out.close("}");
+        if let Some(style) = self.style_of(detail) {
+            out.line(format!(".bernDetailStyle(BernStyles.{})", style.name));
+        }
         // The detail column is titled by the selected sidebar destination,
         // as macOS sidebar apps are.
         if let Some(title) = &title {

@@ -108,7 +108,7 @@ Slider(id: volume,
 ) => app.set_volume(app.volume)
 ```
 
-受控 Slider 拖动中显示本地预览，拖动结束提交；引擎快照不会在编辑中抢回滑块位置。`PickerOption(value:, label:)` 可显式声明选项并把实时计数插入 label。受控值由 SwiftUI 与 Web 的 `controlled_values` 支持，显式选项另由 `modal_flow_timer` 检查。
+受控 Slider 默认拖动中显示本地预览，拖动结束提交；`current:` 搭配 `continuous: true` 可在拖动中提交（适用于音量、透明度、字号等即时设置），Apple 平台合并到每秒最多 30 次，松手立即提交最后值；引擎快照不会在编辑中抢回滑块位置。`PickerOption(value:, label:)` 可显式声明选项并把实时计数插入 label。受控值由 SwiftUI 与 Web 的 `controlled_values` 支持，显式选项另由 `modal_flow_timer` 检查。
 
 `Picker(style: chips)` 每个选项一枚标签（chip），选中的一枚突出：Apple 平台是系统玻璃胶囊按钮（设计的 30 点 chip，选中项为主题色，26 之前是材质胶囊），Compose 是 Material `FilterChip`，WinUI 3 是 `ToggleButton`，GTK 是同组的 `GtkToggleButton`，Web 是描边药丸按钮（选中项反色）。没有可见标签（`label_hidden: true`）而直接放在 `Flow` 里时，每枚标签都是这个 Flow 的子项，窄的时候逐枚换行；其他位置它们在自己的一行里换行。下面是一条工具栏：分段控件靠左，标签靠右，放不下的标签换到下一行。
 
@@ -138,12 +138,14 @@ macOS 的 Image 使用窗口上层像素覆盖层，Web 使用视口坐标的图
 
 ## 同窗口引导、侧栏与搜索
 
+SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAFA", dark: "#171717") }` 和 `Detail { background: color(light: "#F2F2F2", dark: "#1E1E1E") }` 设置分栏底色，规则加 `#[target(macos, ios, tvos)]`。背景直接绘制在原生分栏上并延伸到窗口栏后方，内容仍遵循标题栏的安全区域，不必额外包裹 `Stack`。侧栏列表的系统底色会隐藏，顶栏和底栏也使用同一背景。
+
 | 接口 | 当前语义 |
 | --- | --- |
 | `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。背景子树使用 `Stack(enabled: false)` 禁用 |
 | `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
-| `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置 |
+| `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置；height 可省略，此时填满父布局剩余高度，应放在有高度约束的容器中（如窗口内的 Column） |
 | `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示图标与标题的平台（Windows 的两种前端）不显示它，其他平台照常显示 |
 | `SidebarItem(badge:)` | 显示正数计数；模块页面清单的 badge 可绑定模块状态字段 |
 | `Search(style: palette)` | 从工具栏入口打开命令面板；`panel_prompt`、`width`、`height` 设置提示与面板尺寸 |
@@ -176,6 +178,7 @@ bern run --target web_app --port 4173
 - `Layout(size: tv)` 是电视上的布局，`Adaptive` 里最多一个，不影响其他尺寸的必需与回退规则；表达式可读 `window.tv`。tvOS 在构建时只保留电视显示的部分，所以手机与桌面布局里电视没有的能力（如 `pick:`）不会让 tvOS 构建失败。
 - `Shortcut(key:, enabled:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。
 - `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
+- macOS 窗口统一隐藏系统焦点框，包括按钮、输入框、滑块、工具栏和弹出面板；键盘焦点、文本编辑和快捷键仍正常工作。
 - `style!` 的 `text` 块可以给电视另定字号：`body: font(size: 13, tv: 16)`。
 - 元素自己写的长度也可以交给样式按平台给出，元素用 `variant` 选择：`Row`、`Column` 的 `gap`、`padding`、`padding_x`、`padding_y`、`width`、`height`，`Stack` 的 `width`、`height`，`Form` 的 `gap`、`padding_x`、`padding_y`、`row_height`，`IconButton` 的 `font_size`、`height`。`width: fit` 与 `height: fit` 去掉写下的尺寸，元素取内容的大小。构建某个平台时，适用于它的规则（不带 `#[target]` 的在前，带的在后）替换元素写下的值，所以设计在各平台尺寸不同的地方不需要在界面里判断平台：
 
@@ -219,3 +222,25 @@ Tabs(id: tv_tabs, selection: draft.page) {
 ## 其他接口
 
 动画 SVG 是按需使用的独立组件，接口、资源声明、平台依赖与生命周期见[专项文档](../Implementation/Animated-SVG.md)。视频播放器、查询、模块、主题及命令协议的完整语义继续见[设计文档](../Design.md)与对应实现记录。
+
+### 隐藏不可用的菜单项
+
+`Menu(hide_disabled: true)` 根据每个 `MenuItem` 的 `enabled` 条件隐藏不可用项，条件恢复时重新显示。省略此选项时仍显示灰色的禁用项。SwiftUI、Web、Compose、GTK 和 WinUI 3 都支持。
+
+
+### 输入区域
+
+`FocusRegion` 包住一个内容视图（通常是输入框与发送按钮的 `Row`）。当其中的文本框正在编辑时，首次指针操作落在区域外，只取消编辑焦点，并消费这次按下及后续抬起，保留草稿且不提交。区域内按钮照常工作；下一次外部点击照常执行。键盘 Tab 切换不受影响。各平台后端负责事件处理，应用无需按控件 ID 或平台拦截。
+
+```rust
+FocusRegion {
+    Row {
+        TextInput(id: message, label: tr! { "en" => "Message" }, value: draft.text)
+        Button(id: send, label: tr! { "en" => "Send" }) => app.send(draft.text)
+    }
+}
+```
+
+### Runtime semantic palette
+
+`WindowSet(palette: app.palette)` binds a text field containing a JSON object from semantic roles to light/dark `#RRGGBB` pairs, for example `{"accent":{"light":"#006A60","dark":"#4FDAC8"},"surface.canvas":{"light":"#F4FBF8","dark":"#101815"}}`. The palette can change at runtime; omitted roles keep their platform defaults. Supply both appearances and readable foreground/background pairs. The `accent` pair also tints native controls. SwiftUI, GTK and WinUI expose `runtime_palette`; other targets reject this property. Existing `accent:` and `appearance:` declarations remain valid without a palette.

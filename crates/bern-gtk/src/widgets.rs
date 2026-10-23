@@ -1145,6 +1145,7 @@ pub struct SliderProps {
     pub max_icon: Option<&'static str>,
     /// The label names the slider for assistive technology only.
     pub label_hidden: bool,
+    pub continuous: bool,
 }
 
 /// A slider. Bound to a draft, dragging only updates this window's draft
@@ -1227,7 +1228,7 @@ pub fn Slider(p: &Parent, ctx: &Ctx, props: SliderProps, commit: Option<Act>) {
         let value = snap(scale.value());
         if dragging.get() {
             // A preview: the draft follows, a controlled value waits.
-            if !controlled {
+            if !controlled || props.continuous {
                 changed.set(Value::Float(value));
             }
             return;
@@ -2360,6 +2361,7 @@ pub struct MenuProps {
     /// `style: icon`: a round button showing only the icon, the label as
     /// its tooltip and accessible name.
     pub icon_only: bool,
+    pub hide_disabled: bool,
     pub shape: Shape,
 }
 
@@ -2401,7 +2403,7 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
     shape(ctx, button.upcast_ref(), &props.shape);
     button.set_valign(gtk::Align::Center);
     let group = gio::SimpleActionGroup::new();
-    let mut entries: Vec<Option<(String, crate::TextFn)>> = Vec::new();
+    let mut entries = Vec::new();
     for (index, item) in items.into_iter().enumerate() {
         let Some(item) = item else {
             entries.push(None);
@@ -2430,7 +2432,7 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
             item.id,
             "button",
             Some(Rc::clone(&item_label)),
-            enabled,
+            enabled.clone(),
             Actions {
                 activate: run,
                 set_file,
@@ -2439,7 +2441,7 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
             },
         );
         let _ = (item.icon, item.role);
-        entries.push(Some((format!("menu.{name}"), item_label)));
+        entries.push(Some((format!("menu.{name}"), item_label, enabled)));
     }
     button.insert_action_group("menu", Some(&group));
     let shown = button.clone();
@@ -2448,7 +2450,11 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
         let mut section = gio::Menu::new();
         for entry in &entries {
             match entry {
-                Some((action, label)) => section.append(Some(&label()), Some(action)),
+                Some((action, label, enabled)) => {
+                    if !props.hide_disabled || enabled.as_ref().is_none_or(|enabled| enabled()) {
+                        section.append(Some(&label()), Some(action));
+                    }
+                }
                 None => {
                     menu.append_section(None, &section);
                     section = gio::Menu::new();

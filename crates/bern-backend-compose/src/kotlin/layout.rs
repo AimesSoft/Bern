@@ -260,6 +260,14 @@ impl Generator<'_> {
     }
 
     pub(super) fn accordion(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let modifier = if element.prop("height").is_none()
+            && ctx.scope == Scope::Column
+            && !ctx.scroll_content
+        {
+            ", modifier = Modifier.weight(1f)"
+        } else {
+            ""
+        };
         let number = |name| match element.prop(name) {
             Some(Prop::Expr { expr }) => format!("({}).toInt()", self.expr(expr)),
             Some(Prop::Number { value }) => format!("{}", *value as i64),
@@ -270,14 +278,14 @@ impl Generator<'_> {
             .map(|token| crate::style::motion(self.app, token))
             .unwrap_or_else(|| "null".into());
         out.open(format!(
-            "BernAccordion({}, {}, {}, {}, {}, {}, {motion}) {{",
+            "BernAccordion({}, {}, {}, {}, {}, {}, {motion}{modifier}) {{",
             number("count"),
             number("selected"),
             self.length(element, "collapsed_width")
                 .unwrap_or_else(|| "86.dp".into()),
             self.length(element, "gap").unwrap_or_else(|| "8.dp".into()),
             self.length(element, "height")
-                .unwrap_or_else(|| "560.dp".into()),
+                .unwrap_or_else(|| "null".into()),
             self.length(element, "corner")
                 .unwrap_or_else(|| "0.dp".into()),
         ));

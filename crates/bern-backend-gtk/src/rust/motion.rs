@@ -76,6 +76,9 @@ impl Generator<'_> {
         if element.keyword("reveal") == Some("hover") {
             entries.push("reveal: true".into());
         }
+        if let Some(tint) = element.keyword("tint") {
+            entries.push(format!("tint: Some({})", string(tint)));
+        }
         if let Some(appearance) = element.keyword("appearance") {
             entries.push(format!("appearance: Some({})", string(appearance)));
         }

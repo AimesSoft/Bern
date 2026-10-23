@@ -136,6 +136,7 @@ pub mod feature {
     /// `WindowSet(accent:, appearance:)` chosen at run time; without it the
     /// windows keep the system's accent and appearance.
     pub const RUNTIME_THEME: &str = "runtime_theme";
+    pub const RUNTIME_PALETTE: &str = "runtime_palette";
     /// `Image(source:)` from a `MediaSource`: a file or an http(s) URL.
     pub const RUNTIME_IMAGES: &str = "runtime_images";
     /// `Shape(fill_from:)`, the average color of a picture, and `fade`.
@@ -160,7 +161,7 @@ pub mod feature {
     /// `Sidebar(width:)`: a sidebar of a fixed width; without it the
     /// sidebar keeps the platform's width.
     pub const SIDEBAR_WIDTH: &str = "sidebar_width";
-    /// `Switch(checked:)`, `Picker(selected:)` and `Slider(current:)`:
+    /// `Switch(checked:)`, `Picker(selected:)`, `Slider(current:)` and `PopoverButton(open:)`:
     /// controls showing engine state and reporting changes as commands.
     pub const CONTROLLED_VALUES: &str = "controlled_values";
     /// `Search(style: palette)` and its `SearchItem`s: a toolbar search
@@ -376,10 +377,62 @@ pub struct TargetConfig {
     pub ui: Option<String>,
     /// Web build mode: `app` (engine in the page) or `ui` (separate engine).
     pub web_mode: Option<String>,
+    /// Browser extension entry and optional build command (receives the output directory).
+    pub web_extension: Option<WebExtension>,
     pub channels: Vec<String>,
     /// Windows front ends to build, from [`WINDOWS_FRONTENDS`]; both unless
     /// the target names fewer. Empty for other platforms.
     pub frontends: Vec<String>,
+    /// Override the target's web document capability. False removes all
+    /// WebView dependencies and compiles SVGs into static pictures.
+    pub webview: Option<bool>,
+    /// Assemble the portable JavaScript host (off unless requested).
+    pub javascript: bool,
+    /// Explicit Android host capabilities; absent on other platforms.
+    pub android: Option<AndroidOptions>,
+}
+
+/// Android capabilities needed by an application's Rust engine, which
+/// cannot be inferred from its UI. Multicast also enables network access.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AndroidOptions {
+    pub network: bool,
+    pub multicast: bool,
+}
+
+impl TargetConfig {
+    pub fn has_webview(&self) -> bool {
+        self.platform == "browser"
+            || (self.platform != "tvos"
+                && self.webview.unwrap_or(matches!(
+                    self.platform.as_str(),
+                    "macos" | "ios" | "android" | "windows" | "linux" | "browser"
+                )))
+    }
+
+    pub fn javascript_backend(&self) -> Option<&'static str> {
+        self.javascript.then(|| {
+            if self.has_webview() {
+                if self.platform == "browser" {
+                    "browser"
+                } else {
+                    "webview"
+                }
+            } else {
+                "boa"
+            }
+        })
+    }
+}
+
+/// An application-owned browser adapter. Its `index.js` exports a setup function.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WebExtension {
+    pub path: String,
+    #[serde(default)]
+    pub build: Vec<String>,
 }
 
 /// The Windows front ends: WinUI 3 on the Windows App Runtime, and the
@@ -699,6 +752,10 @@ mod tests {
             platform: platform.into(),
             ui: ui.map(String::from),
             web_mode: None,
+            web_extension: None,
+            webview: None,
+            javascript: false,
+            android: None,
             channels: vec![],
             frontends: vec![],
         }
@@ -744,3 +801,5 @@ mod tests {
         assert_eq!(toml_string(r#"C:\a "b""#), r#""C:\\a \"b\"""#);
     }
 }
+
+pub mod script;

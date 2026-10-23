@@ -194,6 +194,7 @@ impl Generator<'_> {
     /// so external entries reach them whether the menu is open or not.
     pub(super) fn menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
+        let hide_disabled = element.keyword("hide_disabled") == Some("true");
         let items: Vec<&Element> = element
             .children
             .iter()
@@ -207,6 +208,10 @@ impl Generator<'_> {
             if item.kind == "Divider" {
                 out.line("SwiftUI.Divider()");
                 continue;
+            }
+            let visible = item.expr("enabled").filter(|_| hide_disabled);
+            if let Some(visible) = visible {
+                out.open(format!("if {} {{", self.expr(visible)));
             }
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, _) = self.pressed(item);
@@ -232,6 +237,9 @@ impl Generator<'_> {
             }
             if let Some(enabled) = item.expr("enabled") {
                 out.line(format!(".disabled(!({}))", self.expr(enabled)));
+            }
+            if visible.is_some() {
+                out.close("}");
             }
         }
         out.close("} label: {");

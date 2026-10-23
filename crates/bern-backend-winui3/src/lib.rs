@@ -120,6 +120,7 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::APPEARANCE,
     bern_target_api::feature::SHORTCUTS,
     bern_target_api::feature::RUNTIME_THEME,
+    bern_target_api::feature::RUNTIME_PALETTE,
     bern_target_api::feature::RUNTIME_IMAGES,
     bern_target_api::feature::PICTURE_FILLS,
     bern_target_api::feature::FILE_PICK,
@@ -253,6 +254,7 @@ impl Target for WinUi3Windows {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let app = &bern_target_api::svg::prepare(app, config);
         let mut diagnostics = check_common(self, app);
         let framework = bern_target_api::texts::framework_languages();
         for language in &app.languages.supported {
@@ -308,6 +310,7 @@ impl Target for WinUi3Windows {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let executable = executable(app);
@@ -319,9 +322,15 @@ impl Target for WinUi3Windows {
         let frontends = glue::Frontends::of(&context.target.frontends);
         let generator = Generator::new(app);
         let svg_identity = format!(
-            "{}-{}-{:016x}",
+            "{}-{}-{}-{:016x}-{:016x}",
             precompiled_identity(context.release, frontends),
             bern_target_api::svg::used(app),
+            bern_target_api::script::webview(context),
+            bern_protocol::fingerprint_bytes(
+                include_str!("../../bern-target-api/src/script.rs").as_bytes()
+            ) ^ bern_protocol::fingerprint_bytes(
+                include_str!("../../bern-target-api/templates/script/host.cpp").as_bytes()
+            ) ^ bern_protocol::fingerprint_bytes(bern_target_api::script::RUNTIME.as_bytes()),
             bern_protocol::fingerprint_bytes(
                 bern_target_api::svg::cpp_template(include_str!(
                     "../templates/cpp/bern_ui_svg.inl"
@@ -433,6 +442,8 @@ impl Target for WinUi3Windows {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(bern_target_api::svg::static_files(app, context)?);
+        bern_target_api::script::configure(&mut files, context);
         Ok(files)
     }
 
@@ -441,6 +452,7 @@ impl Target for WinUi3Windows {
         app: &Application,
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let executable = executable(app);
         let output = &context.output_dir;
@@ -486,7 +498,7 @@ impl Target for WinUi3Windows {
                     .iter()
                     .map(|resource| {
                         (
-                            context.project_dir.join(&resource.name),
+                            bern_target_api::svg::resource_path(context, &resource.name),
                             PathBuf::from(&resource.name),
                         )
                     })
@@ -542,6 +554,7 @@ impl Target for WinUi3Windows {
         context: &BuildContext,
         signing: &Signing,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let executable = executable(app);
         let output = &context.output_dir;

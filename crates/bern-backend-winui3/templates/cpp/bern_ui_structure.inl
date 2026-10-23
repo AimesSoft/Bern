@@ -718,14 +718,16 @@ inline void SplitView(Parent const& p, Ctx const& ctx, SplitViewProps props, Bui
                 registry->Rest(false);
                 registry->updating = false;
             }
-            for (auto const& one : registry->entries)
+            for (auto const& one : registry->entries) {
+                bool selected = entry && one.token == entry->token;
+                one.item.FontWeight(WeightNamed(selected ? "bold" : "regular"));
                 if (one.state) {
-                    bool selected = entry && one.token == entry->token;
                     if (one.state->selected != selected) {
                         one.state->selected = selected;
                         one.restyle();
                     }
                 }
+            }
             if (!entry && !registry->settling) {
                 registry->settling = true;
                 std::weak_ptr<SidebarRegistry> weak = registry;
@@ -1659,6 +1661,7 @@ struct VideoScreen {
 /// least 120.
 struct VideoPanel : controls::PanelT<VideoPanel> {
     static constexpr float kGap = 6;
+    bool fillsContainer = false;
 
     float Bar(Size available) {
         if (Children().Size() < 2) return 0;
@@ -1671,14 +1674,14 @@ struct VideoPanel : controls::PanelT<VideoPanel> {
         float width = std::isinf(available.Width) ? 640.0f : available.Width;
         float bar = Bar(Size{width, available.Height});
         float picture = std::isinf(available.Height) ? std::round(width * 9.0f / 16) : available.Height - bar;
-        picture = (std::max)(120.0f, picture);
+        picture = (std::max)(fillsContainer ? 0.0f : 120.0f, picture);
         if (Children().Size() > 0) Children().GetAt(0).Measure(Size{width, picture});
         return Size{std::isinf(available.Width) ? width : 0.0f, picture + bar};
     }
 
     Size ArrangeOverride(Size final) {
         float bar = Children().Size() > 1 ? Children().GetAt(1).DesiredSize().Height + kGap : 0;
-        float picture = (std::max)(120.0f, final.Height - bar);
+        float picture = (std::max)(fillsContainer ? 0.0f : 120.0f, final.Height - bar);
         if (Children().Size() > 0) Children().GetAt(0).Arrange(Rect{0, 0, final.Width, picture});
         if (Children().Size() > 1) Children().GetAt(1).Arrange(Rect{0, picture + kGap, final.Width, (std::max)(0.0f, bar - kGap)});
         return Size{final.Width, picture + bar};
@@ -1692,6 +1695,7 @@ struct VideoProps {
     Str label;
     bool controls = true;
     char const* fit = nullptr;
+    bool fillsContainer = false;
     /// Rounds the picture, following its expression with `animate`.
     Len corner;
     Motion const* animate = nullptr;
@@ -1720,7 +1724,7 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
     }
 
     controls::Grid frame;
-    frame.MinHeight(120);
+    frame.MinHeight(props.fillsContainer ? 0 : 120);
     if (auto style = Styles::Themed(L"Grid", {{L"Background", Keys::VideoBackground}})) frame.Style(style);
     auto screen = std::make_shared<VideoScreen>();
     screen->frame = frame;
@@ -1819,6 +1823,7 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
     }
     // The picture takes the space it is given, or 16:9 of its width.
     auto impl = winrt::make_self<VideoPanel>();
+    impl->fillsContainer = props.fillsContainer;
     controls::Panel container = impl.as<controls::Panel>();
     SetRole(container, L"bern-fill");
     container.Children().Append(frame);

@@ -225,6 +225,7 @@ fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
         // A styled sidebar row leaves its look to the content it holds.
         ".navigation-sidebar > row.bern-styled-row { padding: 0; background: none; box-shadow: none; }\n\
          .navigation-sidebar > row.bern-styled-row:focus-visible { outline-offset: -2px; }\n\
+         .navigation-sidebar > row:selected .bern-sidebar-label { font-weight: 700; }\n\
          .bern-sidebar-content { padding: 8px 10px; border-radius: 6px; min-height: 20px; }\n\
          .bern-sidebar-content.bern-hover { background-color: alpha(currentColor, 0.07); }\n\
          .bern-sidebar-content.bern-selected { background-color: alpha(currentColor, 0.1); }\n\
@@ -282,6 +283,22 @@ fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
                         css.push_str(&format!("{class}.bern-{state} {{ {body}}}\n"));
                     }
                 }
+            }
+        }
+    }
+    css
+}
+
+/// Re-resolve styled descendants inside a popup that follows its window,
+/// even when its trigger is nested in a part with a fixed appearance.
+pub(crate) fn scoped_colors(scope: &str, dark: bool) -> String {
+    let mut css = String::new();
+    for style in STYLES.with(Cell::get) {
+        let class = format!("{scope} .bern-style-{}", style.name);
+        css.push_str(&format!("{class} {{ {} }}\n", declarations(&style.base, &Look::NONE, Some(dark))));
+        for state in STATES {
+            if let Some(look) = style.state(state) {
+                css.push_str(&format!("{class}.bern-{state} {{ {} }}\n", declarations(look, &style.base, Some(dark))));
             }
         }
     }

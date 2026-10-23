@@ -15,13 +15,13 @@ pub mod query;
 /// measures application code on the trace timeline while tracing is on
 /// (`BERN_TRACE`, `trace.start`), and costs one check while it is off.
 pub mod trace {
-    pub use bern_command::trace::{Span, mask, on};
     pub use bern_command::trace::{ALL, DEFAULT, ENGINE, SPAN, UI};
+    pub use bern_command::trace::{Span, mask, on};
     pub use bern_command::trace_span as span;
 }
 
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
-pub use bern_command::{files, resources, secrets, storage, wake};
+pub use bern_command::{files, platform, resources, secrets, storage, wake};
 pub use bern_macros::{component, features, players, protocol, session, style, tr, ui, value};
 pub use bern_protocol::{
     CommandError, CommandOutcome, Invocation, LocalizedText, ProtocolDescriptor, SchemaError,
@@ -45,3 +45,6 @@ pub mod prelude {
 
 #[doc(hidden)]
 pub mod __private;
+
+/// Target-selected JavaScript contexts.
+pub use bern_script as script;

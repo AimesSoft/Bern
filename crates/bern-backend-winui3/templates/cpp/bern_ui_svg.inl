@@ -1,6 +1,8 @@
 // Animated SVG documents. Edge WebView2 in both Windows front ends.
 // This source is generated only for applications declaring Svg.
 
+#include <shellapi.h>
+
 namespace B {
 
 namespace SvgRuntime {
@@ -29,6 +31,16 @@ inline void Prepare() {
 }
 }
 
+inline std::string SvgJsonString(std::string const& value) {
+    std::string out = "\"";
+    constexpr char hex[] = "0123456789abcdef";
+    for (unsigned char ch : value) {
+        if (ch == '\\' || ch == '\"') { out += '\\'; out += char(ch); }
+        else if (ch < 0x20) { out += "\\u00"; out += hex[ch >> 4]; out += hex[ch & 15]; }
+        else out += char(ch);
+    }
+    return out + "\"";
+}
 struct SvgProps {
     char const* source = nullptr;
     Str label;
@@ -38,10 +50,13 @@ struct SvgProps {
     Get playing;
     Get speed;
     Get restart;
+    Str data;
+    bool externalLinks = false;
     bool interactive = true;
 };
 
 struct SvgView : std::enable_shared_from_this<SvgView> {
+    bool externalLinks = false;
     controls::Grid frame;
     std::string html, state;
     bool started = false, loaded = false, disposed = false, visible = false;
@@ -177,6 +192,13 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
                                         auto view = weak.lock();
                                         bool allowed = view && view->opening;
                                         if (view) view->opening = false;
+                                        BOOL user = FALSE; args->get_IsUserInitiated(&user);
+                                        if (view && view->externalLinks && user && !allowed) {
+                                            LPWSTR uri = nullptr; args->get_Uri(&uri);
+                                            if (uri && wcsncmp(uri, L"https://", 8) == 0 && !wcspbrk(uri, L" \t\r\n"))
+                                                ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL);
+                                            CoTaskMemFree(uri);
+                                        }
                                         args->put_Cancel(!allowed); return S_OK;
                                     }).Get(), &token);
                                 view->web->add_NewWindowRequested(Microsoft::WRL::Callback<ICoreWebView2NewWindowRequestedEventHandler>(
@@ -212,6 +234,7 @@ struct SvgView : std::enable_shared_from_this<SvgView> {
 
 inline void Svg(Parent const& p, Ctx const& ctx, SvgProps props) {
     auto view = std::make_shared<SvgView>();
+    view->externalLinks = props.externalLinks;
     auto bytes = ResourceBytes(props.source);
     view->html = SvgRuntime::prefix + std::string(bytes.begin(), bytes.end()) + SvgRuntime::suffix;
     view->frame.HorizontalAlignment(xaml::HorizontalAlignment::Left);
@@ -228,6 +251,8 @@ inline void Svg(Parent const& p, Ctx const& ctx, SvgProps props) {
         if (!std::isfinite(restart)) restart = 0;
         view->state = std::string("{\"playing\":") + (playing ? "true" : "false")
             + ",\"speed\":" + R::Number(speed) + ",\"restart\":" + R::Number(restart)
+            + ",\"externalLinks\":" + (props.externalLinks ? "true" : "false")
+            + ",\"data\":" + SvgJsonString(props.data ? props.data(ctx) : "")
             + ",\"interactive\":" + (props.interactive ? "true" : "false")
             + ",\"fit\":\"" + (props.fit ? props.fit : "contain") + "\"}";
         view->Send();

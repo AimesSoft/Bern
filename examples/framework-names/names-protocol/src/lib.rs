@@ -231,16 +231,28 @@ pub mod names {
     /// other variants' fields.
     #[value]
     pub enum Content {
-        Text { text: Text },
-        Image { image: Image },
-        List { items: Vec<String> },
+        Text {
+            text: Text,
+        },
+        Image {
+            image: Image,
+        },
+        List {
+            items: Vec<String>,
+        },
         String {
             #[content]
             value: String,
         },
-        Boolean { on: bool },
-        Long { value: i64 },
-        Double { value: f64 },
+        Boolean {
+            on: bool,
+        },
+        Long {
+            value: i64,
+        },
+        Double {
+            value: f64,
+        },
         Empty,
     }
 

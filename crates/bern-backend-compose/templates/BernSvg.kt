@@ -23,7 +23,7 @@ private const val bernSvgSuffix = /*bern:svg-suffix*/
 
 @Composable
 fun BernSvg(source: String, label: String?, width: Dp, height: Dp, fit: String = "contain",
-            playing: Boolean = true, speed: Double = 1.0, restart: Double = 0.0, interactive: Boolean = true) {
+            playing: Boolean = true, speed: Double = 1.0, restart: Double = 0.0, interactive: Boolean = true, data: String = "", externalLinks: Boolean = false) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
@@ -32,13 +32,18 @@ fun BernSvg(source: String, label: String?, width: Dp, height: Dp, fit: String =
         put("playing", playing); put("visible", resumed)
         put("speed", if (speed.isFinite() && speed > 0) speed else 1.0)
         put("restart", if (restart.isFinite()) restart else 0.0)
-        put("interactive", interactive); put("fit", fit); put("scheme", if (dark) "dark" else "light")
+        put("externalLinks", externalLinks); put("data", data); put("interactive", interactive); put("fit", fit); put("scheme", if (dark) "dark" else "light")
     }.toString()
     val currentState by rememberUpdatedState(state)
     val view = remember(source) {
         (BernSvgViews.take(context, source) ?: bernSvgView(context)).apply {
             webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    if (externalLinks && request.hasGesture() && request.url.scheme == "https") {
+                        try { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, request.url)) } catch (_: Exception) {}
+                    }
+                    return true
+                }
                 override fun onPageFinished(view: WebView, url: String) {
                     view.evaluateJavascript("window.bernSvg?.update($currentState)", null)
                 }

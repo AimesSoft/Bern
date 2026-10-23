@@ -71,6 +71,7 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::APPEARANCE,
     bern_target_api::feature::SHORTCUTS,
     bern_target_api::feature::RUNTIME_THEME,
+    bern_target_api::feature::RUNTIME_PALETTE,
     bern_target_api::feature::RUNTIME_IMAGES,
     bern_target_api::feature::PICTURE_FILLS,
     bern_target_api::feature::FILE_PICK,
@@ -236,6 +237,7 @@ impl Target for SwiftUiMacos {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let app = &bern_target_api::svg::prepare(app, config);
         let mut diagnostics = check_swiftui(self, app, config, Platform::Macos);
         for window in &app.windows.windows {
             if window.id == app.windows.primary && window.initial != WindowInitial::Open {
@@ -259,6 +261,7 @@ impl Target for SwiftUiMacos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
@@ -359,6 +362,8 @@ impl Target for SwiftUiMacos {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(bern_target_api::svg::static_files(app, context)?);
+        bern_target_api::script::configure(&mut files, context);
         Ok(files)
     }
 
@@ -367,6 +372,7 @@ impl Target for SwiftUiMacos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let output = &context.output_dir;
         let bundle = output.join(format!("{product}.app"));
@@ -480,7 +486,7 @@ impl Target for SwiftUiMacos {
                     .iter()
                     .map(|resource| {
                         (
-                            context.project_dir.join(&resource.name),
+                            bern_target_api::svg::resource_path(context, &resource.name),
                             PathBuf::from(&resource.name),
                         )
                     })
@@ -607,6 +613,7 @@ impl Target for SwiftUiMacos {
         context: &BuildContext,
         signing: &Signing,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let output = &context.output_dir;
         let cli = app.app.id.replace('_', "-");

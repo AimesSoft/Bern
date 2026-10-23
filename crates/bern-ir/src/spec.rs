@@ -329,6 +329,7 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("reveal", PropKind::Keyword(&["hover"])),
     opt("animate", PropKind::MotionToken),
     opt("appearance", PropKind::Keyword(&["light", "dark"])),
+    opt("tint", PropKind::ColorRole),
     opt("scroll_scale", PropKind::Number),
     opt("scroll_opacity", PropKind::Number),
     opt("scroll_origin_x", PropKind::Number),
@@ -445,6 +446,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("handle", PropKind::TypeName),
                 req("primary", PropKind::WindowId),
                 opt("accent", PropKind::KeyValue),
+                opt("palette", PropKind::KeyValue),
                 opt("appearance", PropKind::KeyValue),
             ],
             Children::Only(&["Window"]),
@@ -484,6 +486,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "Logical window with its own identity and state; `confirm_close` asks before closing, and the action saves",
         )
     },
+    spec(
+        "FocusRegion",
+        &[],
+        Children::One,
+        "An editing region around one content view: while a text field inside is editing, the first pointer press outside ends editing without submitting or clearing and consumes the entire press; controls inside and subsequent outside presses work normally",
+    ),
     spec(
         "Column",
         &[
@@ -526,12 +534,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("count", PropKind::NumberValue),
             req("selected", PropKind::NumberValue),
             req("collapsed_width", PropKind::Length),
-            req("height", PropKind::Length),
+            opt("height", PropKind::Length),
             opt("gap", PropKind::Length),
             opt("corner", PropKind::Length),
         ],
         Children::Any,
-        "Horizontal accordion: one column expands into the remaining width; animated widths share a layout and fixed gaps",
+        "Horizontal accordion: one column expands into the remaining width; without height it fills the available height; animated widths share a layout and fixed gaps",
     ),
     spec(
         "Grid",
@@ -883,17 +891,23 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     },
     ComponentSpec {
         interactive: true,
+        action: ActionRule::Optional,
         ..spec(
             "PopoverButton",
             &[
+                opt(
+                    "panel_appearance",
+                    PropKind::Keyword(&["inherit", "window", "surface"]),
+                ),
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 opt("icon", PropKind::Icon),
                 opt("presented", PropKind::BoolField),
+                opt("open", PropKind::Bool),
                 opt("shortcut", PropKind::Shortcut),
             ],
             Children::Any,
-            "A button that shows its children in a popover, such as a volume slider; `presented` opens and closes it from a session field",
+            "A button that shows its children in a popover; `presented` binds a session field, or `open` follows engine state and commits opening and dismissal through its action",
         )
     },
     spec(
@@ -1010,6 +1024,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
+                opt("hide_disabled", PropKind::Flag),
                 opt("icon", PropKind::Icon),
                 opt("style", PropKind::Keyword(&["button", "icon"])),
                 opt("shape", PropKind::Keyword(&["capsule"])),
@@ -1169,6 +1184,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         "Svg",
         &[
             req("source", PropKind::SvgResource),
+            opt("static_source", PropKind::SvgResource),
             req("width", PropKind::Length),
             req("height", PropKind::Length),
             opt("label", PropKind::DisplayText),
@@ -1177,6 +1193,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("speed", PropKind::NumberValue),
             opt("restart", PropKind::NumberValue),
             opt("interactive", PropKind::Flag),
+            opt("data", PropKind::DisplayText),
+            opt("external_links", PropKind::Flag),
         ],
         Children::None,
         "Bundled SVG document with CSS, SMIL and script animation; explicit viewport, playing/speed controls and restart revision; document-local interaction is enabled by default",
@@ -1279,6 +1297,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("prompt", PropKind::DisplayText),
                 opt("kind", PropKind::Keyword(&["plain", "secure", "multiline"])),
                 opt("submit", PropKind::Keyword(&["clear"])),
+                opt("clear_key", PropKind::NumberValue),
                 FEATURE,
             ],
             Children::None,
@@ -1362,6 +1381,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("label_hidden", PropKind::Flag),
                 opt("value", PropKind::NumberField),
                 opt("current", PropKind::NumberValue),
+                opt("continuous", PropKind::Flag),
                 req("min", PropKind::Number),
                 req("max", PropKind::Number),
                 opt("step", PropKind::Number),
@@ -1384,10 +1404,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("label", PropKind::DisplayText),
                 opt("controls", PropKind::Keyword(&["standard", "none"])),
                 opt("fit", PropKind::Keyword(VIDEO_FIT)),
+                opt("sizing", PropKind::Keyword(&["standard", "fill"])),
                 opt("corner", PropKind::Length),
             ],
             Children::None,
-            "Video of a player created from `source` or attached with `player`, with the standard command-driven controls; `corner` rounds the picture",
+            "Video of a player created from `source` or attached with `player`; `sizing: fill` fills a bounded container independently of the picture's `fit`; `corner` rounds the picture",
         )
     },
     ComponentSpec {
@@ -1608,6 +1629,35 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             prop: Some("appear_delay".into()),
             message: "`appear_delay` needs an `appear` transition".into(),
         });
+    }
+    if spec.name == "Slider"
+        && shape.props.contains(&"continuous")
+        && !shape.props.contains(&"current")
+    {
+        errors.push(ShapeError {
+            prop: Some("continuous".into()),
+            message: "`continuous` needs a controlled slider (`current`)".into(),
+        });
+    }
+    if spec.name == "PopoverButton" {
+        if shape.props.contains(&"open") && shape.props.contains(&"presented") {
+            errors.push(ShapeError {
+                prop: None,
+                message: "choose `presented` or `open`, not both".into(),
+            });
+        }
+        if shape.props.contains(&"open") && !shape.has_action {
+            errors.push(ShapeError {
+                prop: None,
+                message: "`open` needs an action to commit the new value".into(),
+            });
+        }
+        if shape.has_action && !shape.props.contains(&"open") {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a `PopoverButton` action needs `open`".into(),
+            });
+        }
     }
     if matches!(spec.name, "Switch" | "SplitButton" | "Picker" | "Slider") {
         let controlled = if matches!(spec.name, "Switch" | "SplitButton") {

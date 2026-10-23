@@ -75,13 +75,21 @@ fn syn_error(file: &str, error: syn::Error) -> Vec<Diagnostic> {
 }
 
 fn read(file: &SourceFile) -> Result<ast::SourceItems, Vec<Diagnostic>> {
+    read_selected(file, &bern_syntax::build::Modules::default())
+}
+
+fn read_selected(
+    file: &SourceFile,
+    modules: &bern_syntax::build::Modules,
+) -> Result<ast::SourceItems, Vec<Diagnostic>> {
     let text = std::fs::read_to_string(&file.path).map_err(|error| {
         vec![Diagnostic::error(format!(
             "cannot read {}: {error}",
             file.path.display()
         ))]
     })?;
-    ast::parse_source_file(&text).map_err(|error| syn_error(&file.display, error))
+    bern_syntax::items::parse_source_file_with_modules(&text, modules)
+        .map_err(|error| syn_error(&file.display, error))
 }
 
 /// Resolve a UI-side type reference against the merged type table.
@@ -552,22 +560,22 @@ fn window_catalog(
             }),
             _ => None,
         };
-        if let Some(check) = &close {
-            if matches!(
+        if let Some(check) = &close
+            && matches!(
                 check.save,
                 Some(
                     ir::Action::Window { .. }
                         | ir::Action::Media { .. }
                         | ir::Action::Session { .. }
                 )
-            ) {
-                diagnostics.push(
-                    Diagnostic::error(format!(
-                        "window `{id}`: the save action must be an engine command"
-                    ))
-                    .at(window.source.clone()),
-                );
-            }
+            )
+        {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "window `{id}`: the save action must be an engine command"
+                ))
+                .at(window.source.clone()),
+            );
         }
         // The close check and the window's own expressions read that
         // window instance's drafts.
@@ -662,6 +670,7 @@ fn window_catalog(
         primary,
         windows,
         accent: root.expr("accent").cloned(),
+        palette: root.expr("palette").cloned(),
         appearance: root.expr("appearance").cloned(),
     })
 }
@@ -909,8 +918,11 @@ impl ProtocolSource {
 }
 
 /// Read a protocol source, which holds exactly one protocol module.
-fn read_protocol(file: &SourceFile) -> Result<ProtocolSource, Vec<Diagnostic>> {
-    let items = read(file)?;
+fn read_protocol(
+    file: &SourceFile,
+    modules: &bern_syntax::build::Modules,
+) -> Result<ProtocolSource, Vec<Diagnostic>> {
+    let items = read_selected(file, modules)?;
     let Ok([(path, item)]) = <[_; 1]>::try_from(items.protocols) else {
         return Err(vec![Diagnostic::error(format!(
             "{} must contain exactly one #[bern::protocol] module",
@@ -965,7 +977,7 @@ fn compose_protocols(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Protocols, Vec<Diagnostic>> {
     let protocol_file = &config.protocol_source;
-    let shell = read_protocol(protocol_file)?;
+    let shell = read_protocol(protocol_file, &config.build_modules)?;
     check_protocol_labels(&shell.item, &protocol_file.display, config, diagnostics);
     let mut clients = Clients {
         protocols: vec![(shell.name(), shell.descriptor.namespace.clone())],
@@ -974,7 +986,7 @@ fn compose_protocols(
     let mut module_protocols = Vec::new();
     for module in &config.modules {
         let file = &module.protocol_source;
-        let source = read_protocol(file)?;
+        let source = read_protocol(file, &config.build_modules)?;
         if source.descriptor.namespace != module.id {
             diagnostics.push(Diagnostic::error(format!(
                 "{}: the protocol of module `{}` must use `namespace = \"{}\"`, not `{}`",
@@ -1088,7 +1100,7 @@ fn collect_sources(config: &Config, namespace: &str, diagnostics: &mut Vec<Diagn
                 .map(move |file| (file, module.id.clone()))
         }));
     for (file, home) in files {
-        let items = match read(file) {
+        let items = match read_selected(file, &config.build_modules) {
             Ok(items) => items,
             Err(errors) => {
                 diagnostics.extend(errors);
@@ -1763,6 +1775,16 @@ fn check_accent_and_appearance(
     style: &ir::style::StyleSheet,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    if catalog
+        .palette
+        .as_ref()
+        .is_some_and(|value| value.ty != Type::Text)
+    {
+        diagnostics.push(
+            Diagnostic::error("`palette` is a text binding containing semantic color pairs")
+                .at(root.source.clone()),
+        );
+    }
     let variants = |expr: &ir::Expr| match &expr.ty {
         Type::Enum { name } => types.enum_def(name).map(|def| {
             def.variants

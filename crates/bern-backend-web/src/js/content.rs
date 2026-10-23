@@ -59,6 +59,11 @@ impl Generator<'_> {
                 ("playing", self.value_prop(element, "playing")),
                 ("speed", self.value_prop(element, "speed")),
                 ("restart", self.value_prop(element, "restart")),
+                ("data", self.text_prop(element, "data")),
+                (
+                    "externalLinks",
+                    element.keyword("external_links").map(str::to_owned)
+                ),
                 (
                     "interactive",
                     element.keyword("interactive").map(str::to_owned)
@@ -115,6 +120,7 @@ impl Generator<'_> {
                     Some((element.keyword("controls") != Some("none")).to_string())
                 ),
                 ("fit", Self::keyword(element, "fit")),
+                ("sizing", Self::keyword(element, "sizing")),
                 ("corner", self.length(element, "corner")),
                 ("animate", self.animate(element)),
             ])

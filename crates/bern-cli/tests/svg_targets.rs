@@ -69,7 +69,7 @@ fn animated_svg_generates_for_every_presenter() {
         ),
     ];
     for (name, target, file, marker) in targets {
-        let context = BuildContext {
+        let mut context = BuildContext {
             project_dir: config.dir.clone(),
             workspace_dir: root.clone(),
             output_dir: root.join("target/svg-generation-test").join(name),
@@ -112,11 +112,113 @@ fn animated_svg_generates_for_every_presenter() {
                 "Android's source cleanup must preserve the SVG presenter"
             );
         }
+        // The same target selects its script adapter at build time.
+        context.target.javascript = true;
+        let scripted = target.generate(&compiled.app, &context).unwrap();
+        let text = scripted
+            .iter()
+            .filter(|f| {
+                f.path
+                    .extension()
+                    .is_some_and(|e| e != "png" && e != "icns")
+            })
+            .map(|f| String::from_utf8_lossy(&f.contents))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("bern-script ="), "{name}: script dependency");
+        assert!(
+            !text.contains("features = [\"boa\"]"),
+            "{name}: must not link Boa"
+        );
+        assert!(
+            !text.contains("/*bern:script-"),
+            "{name}: unexpanded script template"
+        );
+        match name {
+            "linux" => assert!(text.contains("\"script\"")),
+            "web_app" => assert!(text.contains("new Worker(url)")),
+            _ => assert!(text.contains("bernScriptDispatch")),
+        }
+        if name != "web_app" {
+            context.target.webview = Some(false);
+            let plain = target.generate(&compiled.app, &context).unwrap();
+            let png = plain
+                .iter()
+                .find(|f| f.path.to_string_lossy().starts_with("__bern_static_svg/"))
+                .unwrap();
+            assert_eq!(&png.contents[..8], b"\x89PNG\r\n\x1a\n");
+            let text = plain
+                .iter()
+                .filter(|f| {
+                    f.path
+                        .extension()
+                        .is_some_and(|e| e != "png" && e != "icns")
+                })
+                .map(|f| String::from_utf8_lossy(&f.contents))
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("features = [\"boa\"]"));
+            assert!(!text.contains("bernScriptDispatch"));
+            assert!(!text.contains("class BernSvg"));
+            context.target.webview = None;
+        }
+        let files = scripted;
         // Preserve files for native toolchain checking on a corresponding host.
         for file in files {
             let path = context.output_dir.join(file.path);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, file.contents).unwrap();
         }
+    }
+}
+
+#[test]
+fn tvos_compiles_svg_to_png_and_selects_boa() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let config =
+        bern_compiler::config::load(&root.join("examples/svg-animation/Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/svg-generation-test/tvos"),
+        target: bern_target_api::TargetConfig {
+            platform: "tvos".into(),
+            javascript: true,
+            ..Default::default()
+        },
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let target = bern_backend_swiftui::SwiftUiTvos;
+    let errors = target.check(&compiled.app, &context.target);
+    assert!(!errors.iter().any(|e| e.is_error()), "{errors:?}");
+    let files = target.generate(&compiled.app, &context).unwrap();
+    let runtime = files
+        .iter()
+        .find(|f| f.path == Path::new("Sources/BernRuntime.swift"))
+        .unwrap();
+    assert!(!String::from_utf8_lossy(&runtime.contents).contains("WebKit"));
+    assert!(
+        files
+            .iter()
+            .any(|f| f.path == Path::new("__bern_static_svg/animation.svg.png"))
+    );
+    let plan = target.plan(&compiled.app, &context).unwrap();
+    assert!(plan.steps.iter().any(|s| matches!(s, bern_target_api::BuildStep::Mirror { files, .. } if files.iter().any(|(from, to)| from.starts_with(&context.output_dir) && to == Path::new("__bern_static_svg/animation.svg.png")))));
+    for file in files {
+        let path = context.output_dir.join(file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, file.contents).unwrap();
     }
 }

@@ -229,7 +229,10 @@ impl Report {
             Value::List(queries),
             Value::List(fields),
             Value::List(interactions),
-            Value::Record(vec![self.frames.spacing_us.to_value(), int(self.frames.long)]),
+            Value::Record(vec![
+                self.frames.spacing_us.to_value(),
+                int(self.frames.long),
+            ]),
             Value::List(long_frames),
             Value::List(spans),
         ])

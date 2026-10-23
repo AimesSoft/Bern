@@ -75,9 +75,88 @@ fn parse(path: PathBuf) -> Result<Languages, String> {
     })
 }
 
+/// The enclosing application, including when expanding a crate inside a module.
+fn application_manifest() -> Option<PathBuf> {
+    let mut dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").ok()?);
+    loop {
+        let path = dir.join("Bern.toml");
+        if path.is_file() && read(&path).ok().is_some_and(|v| v.get("app").is_some()) {
+            return Some(path);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+fn excluded_for(path: &Path) -> Vec<String> {
+    let root = std::env::var_os("BERN_BUILD_ROOT").map(PathBuf::from);
+    if root.and_then(|p| p.canonicalize().ok()) != path.parent().and_then(|p| p.canonicalize().ok())
+    {
+        return Vec::new();
+    }
+    std::env::var("BERN_EXCLUDE_MODULES")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+pub fn build_modules() -> syn::Result<bern_syntax::build::Modules> {
+    let Some(path) = application_manifest() else {
+        return Ok(Default::default());
+    };
+    let result = (|| -> Result<_, String> {
+        let app = read(&path)?;
+        let excluded = excluded_for(&path);
+        let modules = all_module_manifests(&path, &app)?
+            .into_iter()
+            .filter_map(|(_, module)| {
+                let id = module.get("module")?.get("id")?.as_str()?.to_string();
+                let enabled = !excluded.contains(&id);
+                Some((id, enabled))
+            })
+            .collect();
+        Ok(bern_syntax::build::Modules(modules))
+    })();
+    result.map_err(|e| syn::Error::new(proc_macro2::Span::call_site(), e))
+}
+
+/// Track both environment inputs in rustc's dep-info, including transitions
+/// from a selected build back to an ordinary all-module Cargo build.
+pub fn track_build() -> proc_macro2::TokenStream {
+    let manifest: Vec<_> = application_manifest()
+        .map(|p| p.display().to_string())
+        .into_iter()
+        .collect();
+    quote::quote! {
+        const _: Option<&str> = ::core::option_env!("BERN_BUILD_ROOT");
+        const _: Option<&str> = ::core::option_env!("BERN_EXCLUDE_MODULES");
+        #(const _: &[u8] = ::core::include_bytes!(#manifest);)*
+    }
+}
+
+fn module_manifests(path: &Path, app: &toml::Value) -> Result<Vec<(PathBuf, toml::Value)>, String> {
+    let excluded = excluded_for(path);
+    Ok(all_module_manifests(path, app)?
+        .into_iter()
+        .filter(|(_, module)| {
+            !module
+                .get("module")
+                .and_then(|m| m.get("id"))
+                .and_then(toml::Value::as_str)
+                .is_some_and(|id| excluded.iter().any(|e| e == id))
+        })
+        .collect())
+}
+
 /// The manifests of the modules of the application in `app`, read from
 /// `path`, in the order of its `[[modules]]`.
-fn module_manifests(path: &Path, app: &toml::Value) -> Result<Vec<(PathBuf, toml::Value)>, String> {
+fn all_module_manifests(
+    path: &Path,
+    app: &toml::Value,
+) -> Result<Vec<(PathBuf, toml::Value)>, String> {
     let dir = path.parent().unwrap_or(Path::new("."));
     let entries = app.get("modules").and_then(toml::Value::as_array);
     entries

@@ -147,6 +147,7 @@ inline Facts Win::CurrentFacts() {
 /// presentation commands they satisfy.
 inline void Win::Report() {
     if (closed || !Host::handle || !hwnd) return;
+    fullscreen.Set(window.AppWindow().Presenter().Kind() == winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
     auto facts = CurrentFacts();
     bern_window_facts(Host::handle, static_cast<uint32_t>(kind), generation, command ? 0 : 1, facts.visibility, facts.size, facts.x, facts.y,
         facts.width, facts.height, facts.focused ? 1 : 0, facts.actions);
@@ -662,6 +663,13 @@ inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
                 Snapshot::Schedule();
                 return 0;
             });
+        });
+    }
+    if (def.palette) {
+        auto palette = def.palette;
+        Reactive::Run([palette, ctx] {
+            auto value = palette(ctx);
+            Reactive::Untrack([&] { B::ApplyPalette(value); Snapshot::Schedule(); return 0; });
         });
     }
     if (def.accent) {
@@ -1320,6 +1328,17 @@ inline void ReopenPrimary() {
 }
 
 namespace WindowOps {
+inline void ToggleFullscreen(Ctx const& ctx, std::string const& kind) {
+    for (auto const& win : WindowManager::all) {
+        if (win->Def().id != kind) continue;
+        auto app = win->window.AppWindow();
+        using winrt::Microsoft::UI::Windowing::AppWindowPresenterKind;
+        app.SetPresenter(app.Presenter().Kind() == AppWindowPresenterKind::FullScreen
+            ? AppWindowPresenterKind::Overlapped : AppWindowPresenterKind::FullScreen);
+        win->fullscreen.Set(app.Presenter().Kind() == AppWindowPresenterKind::FullScreen);
+    }
+}
+
 
 /// `windows.<kind>.open()` and `activate()` in declarations.
 inline void Open(Ctx const& ctx, std::string const& kind) {

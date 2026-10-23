@@ -194,7 +194,7 @@ val LocalBernDark = compositionLocalOf<Boolean?> { null }
 @Composable
 fun bernDark(): Boolean = LocalBernDark.current ?: isSystemInDarkTheme()
 
-/// Material colors for `dark`, with the application's accent as primary.
+/// Material colors for `dark`, with complete containers for a fixed accent.
 @Composable
 fun BernScheme(dark: Boolean, content: @Composable () -> Unit) {
     val colors = BernSchemes.get(
@@ -224,19 +224,75 @@ private object BernSchemes {
             this.configuration = android.content.res.Configuration(configuration)
         }
         return made.getOrPut(dark to accent) {
-            var colors = if (Build.VERSION.SDK_INT >= 31) {
+            val colors = if (Build.VERSION.SDK_INT >= 31) {
                 if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
             } else {
                 if (dark) darkColorScheme() else lightColorScheme()
             }
             if (accent != null) {
                 val color = BernPalette(colors, dark).color(accent)
-                val on = if (color.luminance() > 0.4f) Color(0xFF111114) else Color.White
-                colors = colors.copy(primary = color, onPrimary = on, inversePrimary = color, surfaceTint = color)
-            }
-            colors
+                val fixed = BernPalette(lightColorScheme(), false).color(accent)
+                bernAccentScheme(color, fixed, dark)
+            } else colors
         }
     }
+}
+
+/// A chosen accent must not inherit unrelated hues from the wallpaper.
+/// Keep surfaces neutral and derive all accent containers from the choice.
+/// Channel-wise mixing also keeps a grayscale input exactly grayscale.
+internal fun bernAccentScheme(color: Color, fixed: Color, dark: Boolean): androidx.compose.material3.ColorScheme {
+    fun neutral(light: Long, night: Long) = Color(0xFF000000 or if (dark) night else light)
+    fun mix(base: Color, tint: Color, amount: Float) = Color(
+        red = base.red + (tint.red - base.red) * amount,
+        green = base.green + (tint.green - base.green) * amount,
+        blue = base.blue + (tint.blue - base.blue) * amount,
+    )
+    fun on(fill: Color) = if (fill.luminance() > 0.179f) Color.Black else Color.White
+    val base = if (dark) darkColorScheme() else lightColorScheme()
+    val canvas = neutral(0xFAFAFA, 0x121212)
+    val text = neutral(0x1B1B1B, 0xE2E2E2)
+    val muted = neutral(0x494949, 0xC7C7C7)
+    val container = mix(canvas, color, if (dark) 0.22f else 0.14f)
+    val secondary = mix(color, text, 0.25f)
+    val secondaryContainer = mix(canvas, color, if (dark) 0.16f else 0.10f)
+    val tertiary = mix(color, text, 0.45f)
+    val tertiaryContainer = mix(canvas, color, if (dark) 0.12f else 0.08f)
+    val fixedContainer = mix(Color.White, fixed, 0.15f)
+    val fixedDim = mix(Color.White, fixed, 0.28f)
+    val monochrome = color.red == color.green && color.green == color.blue
+    return base.copy(
+        primary = color, onPrimary = on(color),
+        primaryContainer = container, onPrimaryContainer = text,
+        inversePrimary = if (dark) mix(Color.Black, fixed, 0.85f) else mix(Color.White, color, 0.45f),
+        secondary = secondary, onSecondary = on(secondary),
+        secondaryContainer = secondaryContainer, onSecondaryContainer = text,
+        tertiary = tertiary, onTertiary = on(tertiary),
+        tertiaryContainer = tertiaryContainer, onTertiaryContainer = text,
+        background = canvas, onBackground = text,
+        surface = canvas, onSurface = text,
+        surfaceVariant = neutral(0xE3E3E3, 0x444444), onSurfaceVariant = muted,
+        surfaceTint = color,
+        inverseSurface = neutral(0x303030, 0xE2E2E2), inverseOnSurface = neutral(0xF1F1F1, 0x303030),
+        error = if (monochrome) color else base.error,
+        onError = if (monochrome) on(color) else base.onError,
+        errorContainer = if (monochrome) container else base.errorContainer,
+        onErrorContainer = if (monochrome) text else base.onErrorContainer,
+        outline = neutral(0x777777, 0x929292), outlineVariant = neutral(0xC7C7C7, 0x444444),
+        scrim = Color.Black,
+        surfaceBright = neutral(0xFAFAFA, 0x383838), surfaceDim = neutral(0xDADADA, 0x121212),
+        surfaceContainerLowest = neutral(0xFFFFFF, 0x0D0D0D),
+        surfaceContainerLow = neutral(0xF5F5F5, 0x1A1A1A),
+        surfaceContainer = neutral(0xEFEFEF, 0x1F1F1F),
+        surfaceContainerHigh = neutral(0xE9E9E9, 0x292929),
+        surfaceContainerHighest = neutral(0xE2E2E2, 0x343434),
+        primaryFixed = fixedContainer, primaryFixedDim = fixedDim,
+        onPrimaryFixed = Color.Black, onPrimaryFixedVariant = Color(0xFF333333),
+        secondaryFixed = fixedContainer, secondaryFixedDim = fixedDim,
+        onSecondaryFixed = Color.Black, onSecondaryFixedVariant = Color(0xFF333333),
+        tertiaryFixed = fixedContainer, tertiaryFixedDim = fixedDim,
+        onTertiaryFixed = Color.Black, onTertiaryFixedVariant = Color(0xFF333333),
+    )
 }
 
 /// Content always drawn light or dark (`appearance:`), whatever the
@@ -246,6 +302,19 @@ fun BernAppearance(dark: Boolean, content: @Composable () -> Unit) {
     BernScheme(dark) {
         CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface, content = content)
     }
+}
+
+/// A local control tint, inherited by popup content as well as inline controls.
+@Composable
+fun BernTint(role: String, content: @Composable () -> Unit) {
+    val tint = bernPalette().role(role)
+    val foreground = if (tint.red + tint.green + tint.blue > 1.5f) Color.Black else Color.White
+    MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(
+        primary = tint, onPrimary = foreground,
+        secondary = tint, onSecondary = foreground,
+        secondaryContainer = tint, onSecondaryContainer = foreground,
+        tertiary = tint, onTertiary = foreground,
+    ), content = content)
 }
 
 /// The `WindowSet`'s accent and appearance, applied to every window.
@@ -856,6 +925,12 @@ object BernFiles {
         if (uri == null || then == null) return
         // Readable after the app restarts too.
         runCatching {
+            val access = Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                (if (android.provider.DocumentsContract.isTreeUri(uri)) Intent.FLAG_GRANT_WRITE_URI_PERMISSION else 0)
+            context?.contentResolver?.takePersistableUriPermission(uri, access)
+        }.recoverCatching {
+            // A read-only provider may refuse a write grant while still
+            // allowing a selected folder to be imported after a restart.
             context?.contentResolver?.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         then(uri.toString())
@@ -1484,6 +1559,8 @@ fun BernPopoverButton(
     onPresented: ((Boolean) -> Unit)?,
     shortcut: String?,
     plain: Boolean,
+    windowTheme: Boolean = false,
+    style: BernStyle? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     var own by remember { mutableStateOf(false) }
@@ -1500,12 +1577,26 @@ fun BernPopoverButton(
             plain -> TextButton(onClick = { show(!showing) }) { Text(label) }
             else -> FilledTonalButton(onClick = { show(!showing) }) { Text(label) }
         }
-        DropdownMenu(expanded = showing, onDismissRequest = { show(false) }) {
-            Column(
-                Modifier.padding(16.dp).widthIn(min = 240.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                content = content,
-            )
+        val panelDark = if (windowTheme) when (BernThemeState.appearance?.lowercase()) {
+            "dark" -> true
+            "light" -> false
+            else -> isSystemInDarkTheme()
+        } else bernDark()
+        BernAppearance(panelDark) {
+            val palette = bernPalette()
+            DropdownMenu(
+                expanded = showing, onDismissRequest = { show(false) },
+                containerColor = style?.base?.background?.let(palette::color) ?: MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = if (style?.base?.background != null) 0.dp else 3.dp,
+            ) {
+                CompositionLocalProvider(LocalContentColor provides (style?.base?.foreground?.let(palette::color) ?: MaterialTheme.colorScheme.onSurface)) {
+                    Column(
+                        Modifier.padding(16.dp).widthIn(min = 240.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        content = content,
+                    )
+                }
+            }
         }
     }
 }

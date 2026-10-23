@@ -1075,6 +1075,7 @@ struct SliderProps {
     /// `change` with the new value.
     Get current;
     std::function<void(Ctx const&, Value const&)> change;
+    bool continuous = false;
     std::optional<double> min, max, step;
     char const* minIcon = nullptr;
     char const* maxIcon = nullptr;
@@ -1137,9 +1138,9 @@ inline void Slider(Parent const& p, Ctx const& ctx, SliderProps props) {
     };
     slider.AddHandler(xaml::UIElement::PointerReleasedEvent(), winrt::box_value(xaml::Input::PointerEventHandler(release)), true);
     slider.AddHandler(xaml::UIElement::PointerCaptureLostEvent(), winrt::box_value(xaml::Input::PointerEventHandler(release)), true);
-    slider.ValueChanged([updating, dragging, give, snap](auto&&, controls::Primitives::RangeBaseValueChangedEventArgs const& args) {
+    slider.ValueChanged([updating, dragging, give, snap, continuous = props.continuous](auto&&, controls::Primitives::RangeBaseValueChangedEventArgs const& args) {
         if (*updating) return;
-        give(snap(args.NewValue()), !*dragging);
+        give(snap(args.NewValue()), !*dragging || continuous);
     });
     BindName(slider, text);
     controls::Grid track;
@@ -2687,6 +2688,7 @@ inline winrt::hstring ShortcutText(char const* keys) {
 struct MenuLook {
     bool iconOnly = false;
     std::optional<ControlShape> shape;
+    bool hideDisabled = false;
 };
 
 /// A menu button. Each item is registered on its own, so external entries
@@ -2734,7 +2736,11 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
         auto itemLabel = item->label ? Bound(ctx, item->label) : TextFn([] { return winrt::hstring(); });
         Reactive::Run([entry, itemLabel] { entry.Text(itemLabel()); });
         auto isEnabled = Enabled(ctx, item->enabled);
-        if (isEnabled) Reactive::Run([entry, isEnabled] { entry.IsEnabled(isEnabled()); });
+        if (isEnabled) Reactive::Run([entry, isEnabled, hideDisabled = look.hideDisabled] {
+            bool enabled = isEnabled();
+            entry.IsEnabled(enabled);
+            if (hideDisabled) entry.Visibility(enabled ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        });
         auto run = RunOf(ctx, item->pick, item->files, item->action);
         if (run.activate) entry.Click([activate = run.activate](auto&&, auto&&) { activate(); });
         if (item->shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item->shortcut));

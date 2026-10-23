@@ -365,7 +365,8 @@ pub unsafe extern "C" fn bern_media_kernel_attach(
             Some((kernel, kind)) => {
                 *app.kernel.lock().expect("kernel lock") = Some(kernel.clone());
                 kernel.attached(std::sync::Arc::new(KernelLink(app.media.clone())));
-                app.media.attach_executor(kernel.clone(), kernel.capabilities());
+                app.media
+                    .attach_executor(kernel.clone(), kernel.capabilities());
                 writer.u8(1);
                 writer.u32(kind.code());
             }
@@ -386,7 +387,11 @@ fn surface_size(reader: &mut Reader) -> Option<SurfaceSize> {
     Some(SurfaceSize {
         width: width.max(1),
         height: height.max(1),
-        scale: if scale.is_finite() && scale > 0.0 { scale } else { 1.0 },
+        scale: if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            1.0
+        },
     })
 }
 
@@ -398,11 +403,17 @@ fn surface_size(reader: &mut Reader) -> Option<SurfaceSize> {
 /// # Safety
 /// `bytes` must point to `len` readable bytes or be null with `len == 0`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn bern_media_surface_attach(app: *mut BernApp, bytes: *const u8, len: usize) {
+pub unsafe extern "C" fn bern_media_surface_attach(
+    app: *mut BernApp,
+    bytes: *const u8,
+    len: usize,
+) {
     // SAFETY: guaranteed by the caller.
     let bytes = unsafe { slice(bytes, len) };
     with_app(app, (), |app| {
-        let Some(kernel) = current_kernel(app) else { return };
+        let Some(kernel) = current_kernel(app) else {
+            return;
+        };
         let mut reader = Reader::new(bytes);
         let (Ok(view), Ok(player), Ok(kind), Ok(handle)) =
             (reader.text(), reader.text(), reader.u32(), reader.u64())
@@ -413,7 +424,9 @@ pub unsafe extern "C" fn bern_media_surface_attach(app: *mut BernApp, bytes: *co
             Some(SurfaceKind::MetalLayer) => SurfaceHandle::MetalLayer(handle),
             None => return,
         };
-        let Some(size) = surface_size(&mut reader) else { return };
+        let Some(size) = surface_size(&mut reader) else {
+            return;
+        };
         let fit = VideoFit::from_code(reader.u32().unwrap_or(0));
         kernel.attach_surface(&view, &player, VideoSurface { handle, size, fit });
     })
@@ -425,11 +438,17 @@ pub unsafe extern "C" fn bern_media_surface_attach(app: *mut BernApp, bytes: *co
 /// # Safety
 /// `bytes` must point to `len` readable bytes or be null with `len == 0`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn bern_media_surface_resize(app: *mut BernApp, bytes: *const u8, len: usize) {
+pub unsafe extern "C" fn bern_media_surface_resize(
+    app: *mut BernApp,
+    bytes: *const u8,
+    len: usize,
+) {
     // SAFETY: guaranteed by the caller.
     let bytes = unsafe { slice(bytes, len) };
     with_app(app, (), |app| {
-        let Some(kernel) = current_kernel(app) else { return };
+        let Some(kernel) = current_kernel(app) else {
+            return;
+        };
         let mut reader = Reader::new(bytes);
         let Ok(view) = reader.text() else { return };
         if let Some(size) = surface_size(&mut reader) {
@@ -444,11 +463,17 @@ pub unsafe extern "C" fn bern_media_surface_resize(app: *mut BernApp, bytes: *co
 /// # Safety
 /// `bytes` must point to `len` readable bytes or be null with `len == 0`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn bern_media_surface_detach(app: *mut BernApp, bytes: *const u8, len: usize) {
+pub unsafe extern "C" fn bern_media_surface_detach(
+    app: *mut BernApp,
+    bytes: *const u8,
+    len: usize,
+) {
     // SAFETY: guaranteed by the caller.
     let bytes = unsafe { slice(bytes, len) };
     with_app(app, (), |app| {
-        let Some(kernel) = current_kernel(app) else { return };
+        let Some(kernel) = current_kernel(app) else {
+            return;
+        };
         if let Ok(view) = Reader::new(bytes).text() {
             kernel.detach_surface(&view);
         }
@@ -472,7 +497,9 @@ pub unsafe extern "C" fn bern_media_surface_frame(
     // SAFETY: guaranteed by the caller.
     let view = unsafe { slice(view, len) };
     with_app(app, (), |app| {
-        let Some(kernel) = current_kernel(app) else { return };
+        let Some(kernel) = current_kernel(app) else {
+            return;
+        };
         if let Ok(view) = std::str::from_utf8(view) {
             kernel.frame(view, FrameTiming { now, target });
         }

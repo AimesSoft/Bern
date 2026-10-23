@@ -14,3 +14,4 @@ bern-ir.workspace = true
 bern-protocol.workspace = true
 serde.workspace = true
 png = "0.18"
+resvg = { version = "0.45", default-features = false, features = ["text", "system-fonts", "raster-images"] }

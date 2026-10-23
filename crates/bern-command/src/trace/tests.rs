@@ -40,7 +40,10 @@ fn rules_parse_categories_filters_and_options() {
     assert!(rules.quiet);
     assert_eq!(rules.buffer, 1024);
     assert_eq!(Rules::parse("1").unwrap().mask, DEFAULT);
-    assert_eq!(Rules::parse("on,motion.values").unwrap().mask, DEFAULT | MOTION_VALUES);
+    assert_eq!(
+        Rules::parse("on,motion.values").unwrap().mask,
+        DEFAULT | MOTION_VALUES
+    );
     assert_eq!(Rules::parse("file:none").unwrap().file, TimelineFile::None);
 }
 
@@ -178,7 +181,10 @@ fn rings_read_while_threads_write() {
     ring.drain(&mut seen);
     // What was kept arrives once and in order.
     assert!(seen.windows(2).all(|pair| pair[0].key < pair[1].key));
-    assert_eq!(seen.len() as u64 + ring.dropped(), seen.len() as u64 + ring.dropped());
+    assert_eq!(
+        seen.len() as u64 + ring.dropped(),
+        seen.len() as u64 + ring.dropped()
+    );
     assert!(!seen.is_empty());
 }
 
@@ -197,7 +203,11 @@ fn off_points_read_no_clock_and_make_no_ring() {
     local_engine(|| ());
     let job = super::job(1, 0, &context());
     assert!(job.is_some(), "jobs are only asked for while tracing");
-    assert_eq!(CLOCK_READS.with(|reads| reads.get()), 1, "only `job` read the clock");
+    assert_eq!(
+        CLOCK_READS.with(|reads| reads.get()),
+        1,
+        "only `job` read the clock"
+    );
     assert!(!ring::has_ring(), "nothing recorded");
 }
 
@@ -370,14 +380,28 @@ fn an_interaction_is_matched_across_threads_and_out_of_order() {
     assert!(collector.take_lines().is_empty(), "waits for the engine");
     collector.process(engine.to_vec(), Vec::new(), 0, &[], 41 * MS);
     let lines = collector.take_lines().join("\n");
-    assert!(lines.starts_with("bern-trace: interaction Library.add 39.0 ms (action 0.20)"), "{lines}");
-    assert!(lines.contains("tracetest.add_item: dispatch 0.10, queue 0.20, exec 0.20, publish 4.60 -> rev 5"), "{lines}");
-    assert!(lines.contains("publish: snapshot 1.60, compare 2.00, encode 0.90"), "{lines}");
+    assert!(
+        lines.starts_with("bern-trace: interaction Library.add 39.0 ms (action 0.20)"),
+        "{lines}"
+    );
+    assert!(
+        lines.contains(
+            "tracetest.add_item: dispatch 0.10, queue 0.20, exec 0.20, publish 4.60 -> rev 5"
+        ),
+        "{lines}"
+    );
+    assert!(
+        lines.contains("publish: snapshot 1.60, compare 2.00, encode 0.90"),
+        "{lines}"
+    );
     assert!(
         lines.contains("items 1.25 MiB, 10001 items, sent whole (large): snapshot 1.50, compare 1.90, encode 0.90, apply 6.60"),
         "{lines}"
     );
-    assert!(lines.contains("1 unchanged field: snapshot 0.10, compare 0.10"), "{lines}");
+    assert!(
+        lines.contains("1 unchanged field: snapshot 0.10, compare 0.10"),
+        "{lines}"
+    );
     assert!(lines.contains("to UI 0.20, apply 6.80"), "{lines}");
     assert!(lines.contains("on screen +26.8"), "{lines}");
     let report = collector.report(10, 41 * MS);
@@ -434,7 +458,11 @@ fn slow_hides_fast_blocks_and_control_filters_interactions() {
     let mut collector = new_collector("all,slow:50ms");
     collector.process(interaction_records(), Vec::new(), 0, &[], 41 * MS);
     assert!(collector.take_lines().is_empty(), "39 ms is under 50 ms");
-    assert_eq!(collector.report(10, 41 * MS).interactions.len(), 1, "still reported");
+    assert_eq!(
+        collector.report(10, 41 * MS).interactions.len(),
+        1,
+        "still reported"
+    );
     let mut filtered = new_collector("all,control:Other.*");
     filtered.process(interaction_records(), Vec::new(), 0, &[], 41 * MS);
     assert!(filtered.take_lines().is_empty());
@@ -502,7 +530,10 @@ fn frequent_commands_fold_into_one_line_a_second() {
     collector.process(Vec::new(), Vec::new(), 0, &[], 2_000 * MS);
     let lines = collector.take_lines();
     assert_eq!(lines.len(), 1, "{lines:?}");
-    assert!(lines[0].contains("tracetest.noop x20 more within a second"), "{lines:?}");
+    assert!(
+        lines[0].contains("tracetest.noop x20 more within a second"),
+        "{lines:?}"
+    );
 }
 
 #[test]
@@ -510,7 +541,14 @@ fn reports_match_the_session_catalog() {
     let mut collector = new_collector("all");
     collector.process(interaction_records(), Vec::new(), 0, &[], 41 * MS);
     let (types, specs) = session_catalog();
-    let result = |id: &str| specs.iter().find(|spec| spec.id == id).unwrap().result.clone();
+    let result = |id: &str| {
+        specs
+            .iter()
+            .find(|spec| spec.id == id)
+            .unwrap()
+            .result
+            .clone()
+    };
     collector
         .report(10, 41 * MS)
         .to_value()
@@ -572,7 +610,10 @@ fn a_traced_engine_reports_and_writes_a_timeline() {
         file.display()
     ))
     .unwrap();
-    assert_eq!(started.file.as_deref(), Some(file.display().to_string().as_str()));
+    assert_eq!(
+        started.file.as_deref(),
+        Some(file.display().to_string().as_str())
+    );
     let host = Host::start(Items(Vec::new()));
     for _ in 0..3 {
         host.dispatch_blocking(
@@ -599,9 +640,19 @@ fn a_traced_engine_reports_and_writes_a_timeline() {
     assert_eq!(add.exec_us.count, 3);
     assert_eq!(add.entry, "test");
     // Changed fields count without a UI to send them to.
-    assert!(report.fields.iter().any(|field| field.name == "items" && field.sent == 3));
+    assert!(
+        report
+            .fields
+            .iter()
+            .any(|field| field.name == "items" && field.sent == 3)
+    );
     assert!(report.fields.iter().all(|field| field.bytes_max == 0));
-    assert!(report.spans.iter().any(|span| span.name == "make item" && span.us.count == 3));
+    assert!(
+        report
+            .spans
+            .iter()
+            .any(|span| span.name == "make item" && span.us.count == 3)
+    );
     let stopped = stop(true);
     host.stop();
     assert_eq!(mask(), 0);
@@ -615,8 +666,11 @@ fn a_traced_engine_reports_and_writes_a_timeline() {
     assert!(named("compare items"));
     assert!(named("publish rev 3"));
     assert!(named("make item"));
-    assert!(events.iter().any(|event| event["name"] == "thread_name"
-        && event["args"]["name"] == "bern-engine"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["name"] == "thread_name" && event["args"]["name"] == "bern-engine")
+    );
     // Untraced again: nothing more is recorded.
     host.dispatch_blocking(
         Invocation {
@@ -646,7 +700,11 @@ fn filtered_commands_are_not_traced() {
     let report = report(10, false);
     stop(false);
     host.stop();
-    let ids: Vec<&str> = report.commands.iter().map(|command| command.id.as_str()).collect();
+    let ids: Vec<&str> = report
+        .commands
+        .iter()
+        .map(|command| command.id.as_str())
+        .collect();
     assert_eq!(ids, ["tracetest.noop"]);
     assert_eq!(report.commands[0].exec_us.count, 2);
 }

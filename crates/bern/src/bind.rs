@@ -220,6 +220,10 @@ impl WindowRef {
     pub fn open(&self) -> CommandRef {
         CommandRef::declared()
     }
+    /// Toggle the native full-screen presentation of the window.
+    pub fn toggle_fullscreen(&self) -> CommandRef {
+        CommandRef::declared()
+    }
     /// Request closing the window instance.
     pub fn close(&self) -> CommandRef {
         CommandRef::declared()

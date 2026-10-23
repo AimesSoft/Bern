@@ -139,6 +139,7 @@ pub(crate) struct Win {
     pub(crate) ghosts: gtk::Fixed,
     /// `window.idle`: no input for `idle_after` seconds.
     idle: Cell<bool>,
+    fullscreen: Cell<bool>,
     /// Whether rest counts toward `window.idle` (`idle_enabled`).
     idle_enabled: StdCell<bool>,
     /// The layout size of the window's width.
@@ -341,6 +342,7 @@ impl Win {
     /// never true: a GNOME desktop is not a television.
     pub(crate) fn state(&self, field: &str) -> Value {
         match field {
+            "fullscreen" => Value::Bool(self.fullscreen.get()),
             "idle" => Value::Bool(self.idle.get()),
             "short" => Value::Bool(self.short.get()),
             "tv" => Value::Bool(false),
@@ -798,6 +800,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         closed: StdCell::new(false),
         ghosts,
         idle: Cell::new(false),
+        fullscreen: Cell::new(window.is_fullscreen()),
         idle_enabled: StdCell::new(true),
         size: Cell::new(crate::structure::size_of(opening_width)),
         width: StdCell::new(opening_width),
@@ -960,6 +963,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         let watched = Rc::downgrade(&win);
         window.connect_notify_local(Some(property), move |_, _| {
             if let Some(win) = watched.upgrade() {
+                win.fullscreen.set(win.window.is_fullscreen());
                 win.schedule_report();
             }
         });
@@ -1051,6 +1055,14 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
 /// `WindowSet(accent:, appearance:)`: the accent and appearance every
 /// window shows, chosen at run time.
 fn follow_theme(ctx: &Ctx, theme: &'static crate::ThemeDef) {
+    if let Some(palette) = theme.palette {
+        let at = ctx.clone();
+        effect(move || {
+            if let Value::Text(value) = palette(&at) {
+                untrack(|| crate::theme::set_palette(&value));
+            }
+        });
+    }
     if let Some(accent) = theme.accent {
         let at = ctx.clone();
         effect(move || {
@@ -1422,6 +1434,12 @@ pub fn open_window(ctx: &Ctx, kind: &str) {
 
 /// `windows.<kind>.close()` in declarations: the close protocol, as from
 /// the title bar.
+pub fn toggle_fullscreen(_ctx: &Ctx, kind: &str) {
+    if let Some(win) = all().into_iter().find(|win| win.kind_id() == kind) {
+        if win.window.is_fullscreen() { win.window.unfullscreen(); } else { win.window.fullscreen(); }
+    }
+}
+
 pub fn close_window(ctx: &Ctx, kind: &str) {
     let found = all().into_iter().find(|win| win.kind_id() == kind);
     if let Some(win) = found

@@ -181,7 +181,9 @@ impl Composite {
                 );
             };
             let id = id.clone();
-            return (self.set_enabled(&id, *enabled), Vec::new());
+            let result = self.set_enabled(&id, *enabled);
+            // The shell's lifecycle callback can notify other modules.
+            return (result, outbox::take());
         }
         let Some((part, local)) = self.route(command) else {
             return (Err(unknown()), Vec::new());
@@ -327,6 +329,7 @@ impl Composite {
                 .filter(|module| module.entry.optional && module.engine.is_some())
                 .map(|module| module.id.clone())
                 .collect();
+            outbox::begin(self.readable(0));
             self.shell.modules_changed(&running);
         }
         Ok(Value::List(changed.into_iter().map(Value::Text).collect()))
@@ -427,9 +430,11 @@ impl EngineProtocol for Composite {
         for module in &self.modules {
             // A module's state is one field of the application's.
             let field = state.len();
-            state.push(crate::trace::snapshot_field(field, || match &module.engine {
-                Some(engine) => Value::Record(engine.snapshot()),
-                None => module.idle.clone(),
+            state.push(crate::trace::snapshot_field(field, || {
+                match &module.engine {
+                    Some(engine) => Value::Record(engine.snapshot()),
+                    None => module.idle.clone(),
+                }
             }));
         }
         if self.switch.is_some() {

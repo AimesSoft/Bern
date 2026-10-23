@@ -388,6 +388,12 @@ impl<'a> Generator<'a> {
             "Button" | "IconButton" => self.button(out, element, ctx),
             "Drop" => self.drop_zone(out, element, ctx),
             "TextInput" => self.text_input(out, element, ctx),
+            "FocusRegion" => {
+                out.open("SwiftUI.Group {");
+                self.nodes(out, &element.children, ctx);
+                out.close("}");
+                out.line(".modifier(BernFocusRegion())");
+            }
             "Switch" => self.switch(out, element, ctx),
             "Slider" => self.slider(out, element, ctx),
             "Video" => self.video(out, element, ctx),

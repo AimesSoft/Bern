@@ -20,15 +20,17 @@ function runtime() {
     querySelector() { return svg; }, getAnimations() { return animations; },
     addEventListener(k, fn) { listeners[k] = fn; }
   };
-  const window = {}, parent = {};
+  const events = [];
+  const window = { dispatchEvent(event) { events.push(event); } }, parent = {};
   vm.runInNewContext(readFileSync(new URL("../src/runtime.js", import.meta.url), "utf8"), {
-    window, parent, document,
+    window, parent, document, URL,
+    CustomEvent: class { constructor(type, options) { this.type=type; this.detail=options.detail; } },
     addEventListener(k, fn) { listeners[k] = fn; },
     requestAnimationFrame(fn) { frames.set(++next, fn); return next; },
     cancelAnimationFrame(id) { frames.delete(id); },
     MutationObserver: class { constructor(fn) { observer = fn; } observe() {} }
   });
-  return { svg, animations, document, parent, listeners, frames,
+  return { events, svg, animations, document, parent, listeners, frames,
     update: window.bernSvg.update, makeAnimation,
     mutation() { observer(); },
     tick(now) { const work = [...frames.values()]; frames.clear(); work.forEach(fn => fn(now)); }
@@ -88,4 +90,32 @@ test("invalid rates are ignored; cover/fill and page visibility work", () => {
   assert.equal(r.animations[0].playState, "paused");
   r.document.hidden = false; r.listeners.visibilitychange();
   assert.equal(r.animations[0].playState, "running");
+});
+
+test("application data is dispatched as inert text with the lifecycle state", () => {
+  const r=runtime(); const data=JSON.stringify({ skin: "<script>unsafe</script>", quote: '\"' });
+  r.update({data, visible:false, restart:2});
+  assert.equal(r.events.at(-1).type,"bern:svg-state");
+  assert.equal(r.events.at(-1).detail.data,data);
+  assert.equal(r.events.at(-1).detail.visible,false);
+  assert.equal(r.events.at(-1).detail.restart,2);
+});
+
+test("external links require explicit opt-in and an absolute HTTPS destination", () => {
+  const r=runtime();
+  function click(href) {
+    let prevented=false;
+    const link={getAttribute:()=>href};
+    r.listeners.click({target:{closest:()=>link},preventDefault(){prevented=true;}});
+    return {prevented,link};
+  }
+  assert.equal(click("https://example.com").prevented,true);
+  r.update({externalLinks:true});
+  const allowed=click("https://example.com/docs");
+  assert.equal(allowed.prevented,false);
+  assert.equal(allowed.link.target,"_blank");
+  assert.equal(allowed.link.rel,"noopener noreferrer");
+  for(const url of ["javascript:alert(1)","file:///tmp/a","http://example.com","/relative","data:text/html,test"]) assert.equal(click(url).prevented,true);
+  r.update({externalLinks:false});
+  assert.equal(click("https://example.com").prevented,true);
 });

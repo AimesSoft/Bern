@@ -394,6 +394,7 @@ inline void Marquee(Parent const& p, Ctx const& ctx, MarqueeProps props, Build c
 /// column is clipped to `corner`.
 struct AccordionPanel : controls::PanelT<AccordionPanel> {
     double collapsed = 86, gap = 8, height = 560, corner = 0;
+    bool fillsHeight = false;
     std::vector<std::shared_ptr<Spring>> weights;
     /// Each column's rounded clip, sized as the column is arranged.
     std::vector<std::pair<winrt::weak_ref<xaml::UIElement>, composition::CompositionRoundedRectangleGeometry>> clips;
@@ -419,18 +420,20 @@ struct AccordionPanel : controls::PanelT<AccordionPanel> {
     Size MeasureOverride(Size available) {
         size_t n = Children().Size();
         float total = std::isinf(available.Width) ? static_cast<float>(collapsed * n + gap * (n > 0 ? n - 1 : 0)) : available.Width;
+        float measuredHeight = fillsHeight && std::isfinite(available.Height) ? available.Height : static_cast<float>(height);
         auto widths = Widths(total, n);
-        for (uint32_t i = 0; i < n; ++i) Children().GetAt(i).Measure(Size{widths[i], static_cast<float>(height)});
-        return Size{total, static_cast<float>(height)};
+        for (uint32_t i = 0; i < n; ++i) Children().GetAt(i).Measure(Size{widths[i], measuredHeight});
+        return Size{total, measuredHeight};
     }
 
     Size ArrangeOverride(Size final) {
         size_t n = Children().Size();
+        float arrangedHeight = fillsHeight ? final.Height : static_cast<float>(height);
         auto widths = Widths(final.Width, n);
         float x = 0;
         for (uint32_t i = 0; i < n; ++i) {
             auto child = Children().GetAt(i);
-            child.Arrange(Rect{x, 0, widths[i], static_cast<float>(height)});
+            child.Arrange(Rect{x, 0, widths[i], arrangedHeight});
             x += widths[i] + static_cast<float>(gap);
             // Each column clipped to the corner at the size it has now.
             if (corner <= 0) continue;
@@ -443,7 +446,7 @@ struct AccordionPanel : controls::PanelT<AccordionPanel> {
                 visual.Clip(visual.Compositor().CreateGeometricClip(geometry));
                 clips.emplace_back(winrt::make_weak(child), geometry);
             }
-            float w = widths[i], h = static_cast<float>(height);
+            float w = widths[i], h = arrangedHeight;
             float r = (std::min)({static_cast<float>(corner), w / 2, h / 2});
             geometry.Size(float2{w, h});
             geometry.CornerRadius(float2{r, r});
@@ -465,7 +468,8 @@ struct AccordionProps {
 inline void Accordion(Parent const& p, Ctx const& ctx, AccordionProps props, Build const& children) {
     auto impl = winrt::make_self<AccordionPanel>();
     controls::Panel panel = impl.as<controls::Panel>();
-    SetRole(panel, L"bern-fill-width");
+    impl->fillsHeight = !props.height.Given();
+    SetRole(panel, impl->fillsHeight ? L"bern-fill" : L"bern-fill-width");
     AccordionPanel* accordion = impl.get();
     auto keep = winrt::make_weak(panel);
     auto relayout = [keep] {

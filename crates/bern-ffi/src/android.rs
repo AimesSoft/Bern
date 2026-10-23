@@ -37,6 +37,7 @@ struct Bridge {
     on_query: jmethodID,
     file_name: jmethodID,
     open_file: jmethodID,
+    platform_request: jmethodID,
 }
 
 impl Bridge {
@@ -234,6 +235,66 @@ impl Opener for Documents {
     }
 }
 
+impl bern_command::platform::Services for Documents {
+    fn request(&self, operation: &str, first: &str, second: &str) -> Result<String, CommandError> {
+        let failed = || {
+            CommandError::new(
+                "platform_failed",
+                "the Android host could not complete the operation",
+            )
+        };
+        // SAFETY: the bridge owns a global reference for the process's
+        // lifetime; each calling worker is attached before JNI is used.
+        unsafe {
+            let bridge = &*self.0;
+            let env = bridge.env().ok_or_else(failed)?;
+            let mut strings = Vec::with_capacity(3);
+            for text in [operation, first, second] {
+                let utf16: Vec<u16> = text.encode_utf16().collect();
+                let value = ((**env).v1_6.NewString)(env, utf16.as_ptr(), utf16.len() as jsize);
+                if value.is_null() {
+                    ((**env).v1_6.ExceptionClear)(env);
+                    for value in strings {
+                        ((**env).v1_6.DeleteLocalRef)(env, value);
+                    }
+                    return Err(failed());
+                }
+                strings.push(value);
+            }
+            let arguments: Vec<jvalue> = strings.iter().map(|value| jvalue { l: *value }).collect();
+            let answer = ((**env).v1_6.CallObjectMethodA)(
+                env,
+                bridge.object,
+                bridge.platform_request,
+                arguments.as_ptr(),
+            );
+            let thrown = ((**env).v1_6.ExceptionCheck)(env);
+            if thrown {
+                ((**env).v1_6.ExceptionClear)(env);
+            }
+            for value in strings {
+                ((**env).v1_6.DeleteLocalRef)(env, value);
+            }
+            if thrown || answer.is_null() {
+                return Err(failed());
+            }
+            let length = ((**env).v1_6.GetStringLength)(env, answer).max(0);
+            let mut utf16 = vec![0u16; length as usize];
+            ((**env).v1_6.GetStringRegion)(env, answer, 0, length, utf16.as_mut_ptr());
+            ((**env).v1_6.DeleteLocalRef)(env, answer);
+            let answer = String::from_utf16_lossy(&utf16);
+            if let Some(value) = answer.strip_prefix("ok:") {
+                Ok(value.into())
+            } else {
+                Err(CommandError::new(
+                    "platform_failed",
+                    answer.strip_prefix("error:").unwrap_or(&answer),
+                ))
+            }
+        }
+    }
+}
+
 /// The bytes of a Java byte array; empty for null.
 ///
 /// # Safety
@@ -352,6 +413,10 @@ pub unsafe fn start<E: EngineProtocol>(
             method(c"onQuery", c"(J[B)V"),
             method(c"fileName", c"(Ljava/lang/String;)Ljava/lang/String;"),
             method(c"openFile", c"(Ljava/lang/String;)I"),
+            method(
+                c"platformRequest",
+                c"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+            ),
         ];
         if methods.iter().any(|method| method.is_null()) {
             ((**env).v1_6.ExceptionClear)(env);
@@ -370,8 +435,10 @@ pub unsafe fn start<E: EngineProtocol>(
             on_query: methods[5],
             file_name: methods[6],
             open_file: methods[7],
+            platform_request: methods[8],
         }));
         bern_command::files::install("content", Documents(context));
+        bern_command::platform::install(Documents(context));
         // Trace summaries go to logcat: an app has no terminal.
         bern_command::trace::set_sink(std::sync::Arc::new(logcat));
         let callbacks = BernCallbacks {
@@ -615,3 +682,36 @@ native!(Java_dev_bern_runtime_BernNative_mediaEvent(env, handle: jlong, bytes: j
     let bytes = bytes_in(env, bytes);
     media::bern_media_event(app(handle), bytes.as_ptr(), bytes.len())
 });
+
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptStart(
+    _: *mut JNIEnv,
+    _: jobject,
+) {
+    bern_script::host::start();
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptStop(
+    _: *mut JNIEnv,
+    _: jobject,
+) {
+    bern_script::host::stop();
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptPoll(
+    env: *mut JNIEnv,
+    _: jobject,
+    now_ms: jdouble,
+) -> jbyteArray {
+    unsafe { bytes_out(env, bern_script::host::poll(now_ms).as_bytes()) }
+}
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptComplete(
+    env: *mut JNIEnv,
+    _: jobject,
+    bytes: jbyteArray,
+) {
+    if let Ok(json) = std::str::from_utf8(&unsafe { bytes_in(env, bytes) }) {
+        bern_script::host::complete(json);
+    }
+}

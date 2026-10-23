@@ -109,17 +109,26 @@ fn value_types_named_like_framework_types_compile() {
         r#"BType::Record("Text")"#,
         r#"BType::Record("Image")"#,
     ] {
-        assert!(catalog.contains(expected), "app_catalog.cpp lacks `{expected}`");
+        assert!(
+            catalog.contains(expected),
+            "app_catalog.cpp lacks `{expected}`"
+        );
     }
     for expected in [r#"SessionDef{"URL", {"#, r#"SessionDef{"Window", {"#] {
-        assert!(catalog.contains(expected), "app_catalog.cpp lacks `{expected}`");
+        assert!(
+            catalog.contains(expected),
+            "app_catalog.cpp lacks `{expected}`"
+        );
     }
     let interface = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
     for expected in [
         "static void c_empty(Parent const& p, Ctx const& c) {",
         "static void c_bern_player(Parent const& p, Ctx const& c) {",
     ] {
-        assert!(interface.contains(expected), "app_ui.inl lacks `{expected}`");
+        assert!(
+            interface.contains(expected),
+            "app_ui.inl lacks `{expected}`"
+        );
     }
     compile(&output);
 }

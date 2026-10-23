@@ -62,6 +62,7 @@ fn parse_props(input: ParseStream<'_>) -> syn::Result<Vec<Prop>> {
     parenthesized!(content in input);
     let mut props = Vec::new();
     while !content.is_empty() {
+        let attrs = content.call(syn::Attribute::parse_outer)?;
         let name: Ident = content.parse()?;
         if !content.peek(Token![:]) {
             return Err(syn::Error::new(
@@ -88,7 +89,7 @@ fn parse_props(input: ParseStream<'_>) -> syn::Result<Vec<Prop>> {
                 format!("property `{name}` is given twice"),
             ));
         }
-        props.push(Prop { name, value });
+        props.push(Prop { attrs, name, value });
         if content.is_empty() {
             break;
         }
@@ -320,6 +321,7 @@ fn parse_match(input: ParseStream<'_>) -> syn::Result<MatchNode> {
     braced!(content in input);
     let mut arms = Vec::new();
     while !content.is_empty() {
+        let attrs = content.call(syn::Attribute::parse_outer)?;
         let arm_span = content.span();
         let pattern = if content.peek(Token![_]) {
             Pattern::Wildcard(content.parse::<Token![_]>()?.span)
@@ -358,6 +360,7 @@ fn parse_match(input: ParseStream<'_>) -> syn::Result<MatchNode> {
         }
         let body = parse_block(&content)?;
         arms.push(MatchArm {
+            attrs,
             pattern,
             body,
             span: arm_span,

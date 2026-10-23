@@ -428,7 +428,11 @@ fn showcase_generates_swift_that_type_checks() {
         .unwrap();
     assert_eq!(listing[..2], ["rustc", "--lib"]);
     assert!(listing.contains(&"--release".to_string()));
-    let native_libs = listing.last().unwrap().strip_prefix("native-static-libs=").unwrap();
+    let native_libs = listing
+        .last()
+        .unwrap()
+        .strip_prefix("native-static-libs=")
+        .unwrap();
     assert!(native_libs.ends_with("libbern_app.native-libs"));
     let swiftc = release
         .steps
@@ -920,7 +924,7 @@ fn check_dynamic_navigation(styled: bool) {
     if styled {
         std::fs::write(
             dir.join("demo-ui/src/lib.rs"),
-            format!("{DYNAMIC_UI}\nstyle! {{ SidebarItem {{ hover: background(fill.subtle) + scale(1.03, snappy), selected: fill(fill.strong) }} }}"),
+            format!("{DYNAMIC_UI}\nstyle! {{ SidebarItem {{ hover: background(fill.subtle) + scale(1.03, snappy), selected: fill(fill.strong) }} Sidebar {{ background: color(light: \"#FAFAFA\", dark: \"#171717\") }} Detail {{ background: color(light: \"#F2F2F2\", dark: \"#1E1E1E\") }} }}"),
         )
         .unwrap();
     }
@@ -983,6 +987,14 @@ platform = "macos"
     }
     let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
     assert_eq!(generated.contains(".bernSidebarNavigation("), styled);
+    assert_eq!(
+        generated.contains(".bernSidebarStyle(BernStyles.sidebar)"),
+        styled
+    );
+    assert_eq!(
+        generated.contains(".bernDetailStyle(BernStyles.detail)"),
+        styled
+    );
     // A transition on a match arm must start when the discriminator changes,
     // including when no button/engine command supplies an animation transaction.
     assert!(

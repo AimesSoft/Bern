@@ -191,7 +191,9 @@ impl WebSession {
                         && let Value::Text(timeline) = *timeline
                     {
                         let path = match stopped.files.first() {
-                            Some(file) => std::path::PathBuf::from(file.trim_end_matches(".json").to_string() + "-page.json"),
+                            Some(file) => std::path::PathBuf::from(
+                                file.trim_end_matches(".json").to_string() + "-page.json",
+                            ),
                             None => std::env::temp_dir()
                                 .join(format!("bern-trace-page-{}.json", std::process::id())),
                         };
@@ -221,7 +223,9 @@ impl WebSession {
                 // Commands, queries and fields are the engine's; interactions
                 // and frames the page's; spans and counts from both.
                 for index in [2, 3] {
-                    if let (Value::Int(host), Some(Value::Int(page))) = (&merged[index], page.get(index)) {
+                    if let (Value::Int(host), Some(Value::Int(page))) =
+                        (&merged[index], page.get(index))
+                    {
                         merged[index] = Value::Int(host + page);
                     }
                 }
@@ -230,7 +234,9 @@ impl WebSession {
                         merged[index] = value.clone();
                     }
                 }
-                if let (Value::List(host), Some(Value::List(page))) = (&mut merged[10], page.get(10)) {
+                if let (Value::List(host), Some(Value::List(page))) =
+                    (&mut merged[10], page.get(10))
+                {
                     host.extend(page.iter().cloned());
                 }
                 Ok(Value::Record(merged))
@@ -494,6 +500,13 @@ impl Connection {
                         }),
                         Ok(params) => {
                             let me = Arc::clone(self);
+                            // The initiating executor holds browser-local sources.
+                            // A view mounted in another tab must not steal its load.
+                            if self.lock().executor
+                                && let Some(Value::Text(player)) = params.first()
+                            {
+                                env.router.claim(player, self.id);
+                            }
                             env.media.dispatch(media_command, params, move |result| {
                                 let (types, _) = media_catalog();
                                 me.send(&ServerMessage::Result {
@@ -665,7 +678,8 @@ impl Connection {
                     && let Some(session) = self.lock().session.clone()
                 {
                     std::thread::spawn(move || {
-                        let _ = session.forward(SessionCommand::TraceStart, vec![Value::Text(rules)]);
+                        let _ =
+                            session.forward(SessionCommand::TraceStart, vec![Value::Text(rules)]);
                     });
                 }
             }

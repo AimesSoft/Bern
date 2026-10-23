@@ -89,7 +89,9 @@ fn value_types_named_like_framework_types_stay_properties() {
         assert!(js.contains(expected), "app.js lacks `{expected}`");
     }
     // No type becomes a binding of the module.
-    for name in ["Layout", "Text", "Image", "Event", "Map", "Error", "Content"] {
+    for name in [
+        "Layout", "Text", "Image", "Event", "Map", "Error", "Content",
+    ] {
         for binding in ["const", "let", "function", "class"] {
             assert!(
                 !js.contains(&format!("{binding} {name} ")),

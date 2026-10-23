@@ -36,6 +36,11 @@ const ROW_STATES: &[&str] = &[
 /// content of sidebar rows and on the layers of a `Stack`, transforms on
 /// springs in a motion box.
 pub const SUPPORT: &[StyleSupport] = &[
+    StyleSupport {
+        component: "PopoverButton",
+        base: &["background", "foreground"],
+        states: &[],
+    },
     // A stack's surface: its background, the color of the text and
     // symbolic icons in it, and corners that clip its layers.
     StyleSupport {

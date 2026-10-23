@@ -49,10 +49,15 @@ panic = "unwind"
 {release}"#,
         version = app.app.version,
         gtk = bern("bern-gtk"),
-        svg = if bern_target_api::svg::used(app) {
-            ", features = [\"svg\"]"
-        } else {
-            ""
+        svg = {
+            let mut features = Vec::new();
+            if bern_target_api::svg::used(app) {
+                features.push("\"svg\"");
+            }
+            if bern_target_api::script::webview(context) {
+                features.push("\"script\"");
+            }
+            format!(", features = [{}]", features.join(", "))
         },
         ffi = bern("bern-ffi"),
         ipc = if context
@@ -138,6 +143,7 @@ pub fn debian_control(
     package: &str,
     architecture: &str,
     installed_kb: u64,
+    scripts: bool,
 ) -> String {
     let name = control_line(
         app.app
@@ -153,7 +159,7 @@ pub fn debian_control(
         .unwrap_or_else(|| format!("{name} maintainers"));
     let mut depends = vec!["libgtk-4-1 (>= 4.14)", "libadwaita-1-0 (>= 1.5)"];
     let mut extra = String::new();
-    if bern_target_api::svg::used(app) {
+    if scripts || bern_target_api::svg::used(app) {
         depends.push("libwebkitgtk-6.0-4");
     }
     if app.uses_media() {
@@ -207,8 +213,8 @@ pub struct PackageFile {
 /// as a configuration file and loads it where AppArmor is enabled. Like
 /// the profiles Ubuntu ships for its own WebKitGTK applications, it
 /// confines nothing else. Nothing without `Svg`.
-pub fn apparmor_files(app: &Application, executable: &Path) -> Vec<PackageFile> {
-    if !bern_target_api::svg::used(app) {
+pub fn apparmor_files(app: &Application, executable: &Path, scripts: bool) -> Vec<PackageFile> {
+    if !scripts && !bern_target_api::svg::used(app) {
         return Vec::new();
     }
     let name = &app.app.bundle_id;
@@ -423,7 +429,7 @@ mod tests {
 
     #[test]
     fn debian_packages_need_gtk_and_gstreamer_only_with_media() {
-        let hello = debian_control(&app("hello"), "hello", "arm64", 4321);
+        let hello = debian_control(&app("hello"), "hello", "arm64", 4321, false);
         for expected in [
             "Package: hello\n",
             "Architecture: arm64\n",
@@ -434,7 +440,7 @@ mod tests {
             assert!(hello.contains(expected), "{hello}");
         }
         assert!(!hello.contains("gstreamer"));
-        let showcase = debian_control(&app("showcase"), "showcase", "amd64", 1);
+        let showcase = debian_control(&app("showcase"), "showcase", "amd64", 1, false);
         assert!(
             showcase.contains("libgtk-4-media-gstreamer, gstreamer1.0-plugins-good")
                 && showcase.contains("Recommends: gstreamer1.0-libav"),
@@ -473,7 +479,7 @@ mod tests {
             .insert("en".into(), "Hello\nDepends: evil\r\n\tWorld\u{7}".into());
         hello.app.publisher = Some("Bern\n Pre-Depends: evil <bern@example.com>".into());
         hello.app.version = "1.0\nConflicts: libc6".into();
-        let control = debian_control(&hello, "hello", "arm64", 1);
+        let control = debian_control(&hello, "hello", "arm64", 1, false);
         // Neither field may continue on another line, so line breaks are
         // read as spaces.
         assert!(
@@ -534,12 +540,12 @@ mod tests {
     fn only_packages_with_svg_carry_an_apparmor_profile() {
         for example in ["hello", "showcase", "gallery", "planner"] {
             assert!(
-                apparmor_files(&app(example), Path::new("/opt/x/x")).is_empty(),
+                apparmor_files(&app(example), Path::new("/opt/x/x"), false).is_empty(),
                 "{example}"
             );
         }
         let svg = app("svg-animation");
-        let files = apparmor_files(&svg, Path::new("/opt/dev.bern.svgdemo/svg-demo"));
+        let files = apparmor_files(&svg, Path::new("/opt/dev.bern.svgdemo/svg-demo"), false);
         let file = |name: &str| {
             files
                 .iter()

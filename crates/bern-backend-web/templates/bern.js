@@ -594,19 +594,36 @@ function readSync(blob) {
   }
 }
 
+let webExtension = null;
+let extensionSetup = null;
+/// An application adapter can add WASM imports and replace the media executor.
+/// Setup runs before WASM instantiation; imports must copy input bytes before deferring.
+export function installWebExtension(setup) {
+  if (extensionSetup) throw new Error("Only one browser extension can be installed");
+  extensionSetup = setup;
+}
+
+/// Register file metadata before dispatching the action that consumes its URL.
+export async function prepareFile(url) {
+  await webExtension?.file?.(url, pageFiles.get(url));
+  return url;
+}
+
 class Host {
   constructor() {
     this.app = 0;
     this.replies = new Map();
+    this.controlReplies = new Map();
     this.queries = new Map();
     this.nextToken = 1n;
     this.revision = 0n;
     this.timers = new Map();
   }
 
-  async load(url) {
+  async load(url, mode) {
     const imports = {
       bern: {
+        report_panic: (ptr, len) => { this.lastPanic = this.text(ptr, len); console.error(this.lastPanic); },
         on_state: (ptr, len) => this.defer(this.copy(ptr, len), (bytes) => this.receiveState(bytes)),
         on_reply: (token, ptr, len) => this.defer(this.copy(ptr, len), (bytes) => this.receiveReply(token, bytes)),
         on_session_request: (request, ptr, len) =>
@@ -669,6 +686,36 @@ class Host {
         },
       },
     };
+    if (extensionSetup) {
+      webExtension = extensionSetup({
+        mode,
+        remote: { call: (command, params) => link.call(command, params) },
+        pageFiles,
+        text: (ptr, len) => this.text(ptr, len),
+        write: (out, capacity, bytes) => {
+          if (bytes.length <= capacity) new Uint8Array(this.exports.memory.buffer, out, bytes.length).set(bytes);
+          return bytes.length;
+        },
+        defer: (body) => this.defer(null, body),
+        media: {
+          player: (id) => media.player(id),
+          command: (command, id, value) => new Promise((resolve, reject) => {
+            host.dispatchMedia(MEDIA[command], writer => {
+              writer.text(id);
+              if (command === "open") writer.text(value);
+              if (command === "seek") writer.i64(BigInt(Math.round(value * 1000)));
+              if (command === "set_volume") writer.f64(value);
+              if (command === "set_muted") writer.u8(value ? 1 : 0);
+            }, null, error => error ? reject(error) : resolve());
+          }),
+          stop: (id) => media.backend.get(id)?.unload(media.backend.get(id).version),
+        },
+      });
+      for (const [name, functions] of Object.entries(webExtension.imports ?? {})) {
+        if (imports[name]) throw new Error(`Reserved WASM import module: ${name}`);
+        imports[name] = functions;
+      }
+    }
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
     const { instance } = await WebAssembly.instantiate(await response.arrayBuffer(), imports);
@@ -767,6 +814,14 @@ class Host {
   }
 
   receiveReply(token, bytes) {
+    const control = this.controlReplies.get(token);
+    if (control) {
+      this.controlReplies.delete(token);
+      clearTimeout(control.timer);
+      try { control.resolve(JSON.parse(new TextDecoder().decode(bytes))); }
+      catch (error) { control.reject(error); }
+      return;
+    }
     const pending = this.replies.get(token);
     if (!pending) return;
     this.replies.delete(token);
@@ -791,6 +846,23 @@ class Host {
 
   windowOpened(kind) {
     return this.buffer("bern_window_opened", this.app, kind);
+  }
+
+  control(envelope) {
+    return new Promise((resolve, reject) => {
+      const token = this.nextToken++;
+      const timer = setTimeout(() => {
+        this.controlReplies.delete(token);
+        reject(new Error("The browser command timed out; its outcome is unknown. Do not retry automatically."));
+      }, 25000);
+      this.controlReplies.set(token, { resolve, reject, timer });
+      try {
+        this.withBytes(new TextEncoder().encode(JSON.stringify(envelope)), (ptr, len) =>
+          this.exports.bern_app_control(this.app, ptr, len, token));
+      } catch (error) {
+        clearTimeout(timer); this.controlReplies.delete(token); reject(error);
+      }
+    });
   }
 
   windowClosed(kind, generation) {
@@ -1045,6 +1117,8 @@ function sessionRequest(request, bytes) {
 /// again after a drop. Waiting requests fail with an unknown outcome when
 /// it drops; nothing is sent again by itself.
 const link = {
+  extensionRequests: new Map(),
+  nextExtensionRequest: 0,
   socket: null,
   attempts: 0,
   engineID: null,
@@ -1061,10 +1135,28 @@ const link = {
       this.attempts = 0;
       host.exports.bern_remote_open(host.app);
     });
-    socket.addEventListener("message", (event) => host.remote("bern_remote_receive", String(event.data)));
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.request_id?.startsWith("extension-")) {
+        const pending = this.extensionRequests.get(message.request_id);
+        if (pending && (message.type === "error" || message.status === "completed")) {
+          this.extensionRequests.delete(message.request_id);
+          clearTimeout(pending.timer);
+          if (message.ok) pending.resolve(message.result);
+          else pending.reject(new CommandFailure(message.error?.code ?? "remote_failed", message.error?.message ?? "Remote command failed"));
+        }
+        return;
+      }
+      host.remote("bern_remote_receive", String(event.data));
+    });
     socket.addEventListener("close", (event) => {
       if (this.socket !== socket) return;
       this.socket = null;
+      for (const pending of this.extensionRequests.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("Engine connection lost; command outcome is unknown"));
+      }
+      this.extensionRequests.clear();
       host.remote("bern_remote_closed", event.reason || `code ${event.code}`);
       if (this.problem.peek()?.final) return;
       const delay = Math.min(10000, 500 * 2 ** this.attempts++);
@@ -1074,6 +1166,19 @@ const link = {
 
   send(text) {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(text);
+  },
+
+  call(command, params = {}) {
+    if (!this.connected.peek() || this.socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error("Engine is disconnected"));
+    const request_id = `extension-${++this.nextExtensionRequest}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.extensionRequests.delete(request_id);
+        reject(new Error("Engine command timed out; outcome is unknown"));
+      }, 10000);
+      this.extensionRequests.set(request_id, { resolve, reject, timer });
+      this.send(JSON.stringify({ type: "command", request_id, engine_id: this.engineID, command, params }));
+    });
   },
 
   status(status) {
@@ -1811,7 +1916,7 @@ export function Switch(p, ctx, { id, label, field, style, labelHidden }) {
   } else p.append(labelled(node, label, false));
 }
 
-export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxIcon, labelHidden, controlled }, commit) {
+export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxIcon, labelHidden, controlled, continuous }, commit) {
   const input = el("input", { class: "bern-slider", type: "range", min, max, step: step ?? "any" });
   const fill = () => {
     const ratio = max > min ? (Number(input.value) - min) / (max - min) : 0;
@@ -1827,7 +1932,7 @@ export function Slider(p, ctx, { id, label, field, min, max, step, minIcon, maxI
     fill();
   });
   input.addEventListener("input", () => {
-    if (!controlled) field.set(Number(input.value));
+    if (!controlled || continuous) field.set(Number(input.value));
     fill();
   });
   input.addEventListener("change", () => { editing = false; if (controlled) field.set(Number(input.value)); commit?.(); });
@@ -1903,12 +2008,28 @@ export function shortcutText(spec) {
 /// Menus and popovers open from their trigger: from 0.9 of their size to
 /// full on a bouncy spring, fading in meanwhile; with less motion, a short
 /// fade alone.
+const popoverAnimations = new WeakMap();
+function cancelPopoverAnimations(panel) {
+  for (const animation of popoverAnimations.get(panel) ?? []) animation.cancel();
+  popoverAnimations.delete(panel);
+  panel.classList.remove("bern-popover-entering");
+}
+globalThis.document?.addEventListener("beforetoggle", (event) => {
+  const panel = event.target;
+  if (!(panel instanceof HTMLElement) || !panel.matches(".bern-menu, .bern-popover-panel")) return;
+  cancelPopoverAnimations(panel);
+  // toggle is deferred and may run after the first paint. Hold the entrance
+  // start before the native popover becomes visible; its content and position
+  // can then be measured without flashing the full panel first.
+  if (event.newState === "open") panel.classList.add("bern-popover-entering");
+}, true);
 globalThis.document?.addEventListener("toggle", (event) => {
   const panel = event.target;
   if (event.newState !== "open" || !(panel instanceof HTMLElement)) return;
-  if (!panel.matches(".bern-menu, .bern-popover-panel")) return;
+  if (!panel.matches(":popover-open") || !panel.classList.contains("bern-popover-entering")) return;
   if (prefersReducedMotion()) {
-    panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out" });
+    popoverAnimations.set(panel, [panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150, easing: "ease-out", fill: "backwards" })]);
+    panel.classList.remove("bern-popover-entering");
     return;
   }
   const anchor = panel.bernAnchor;
@@ -1918,9 +2039,59 @@ globalThis.document?.addEventListener("toggle", (event) => {
     panel.style.transformOrigin = `${x}px ${to.top >= from.bottom - 1 ? "0" : "100%"}`;
   }
   const { easing, duration } = springEasing(0.5, 0.62);
-  panel.animate([{ transform: "scale(0.9)" }, { transform: "scale(1)" }], { duration, easing });
-  panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out" });
+  popoverAnimations.set(panel, [
+    panel.animate([{ transform: "scale(0.9)" }, { transform: "scale(1)" }], { duration, easing, fill: "backwards" }),
+    panel.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, easing: "ease-out", fill: "backwards" }),
+  ]);
+  panel.classList.remove("bern-popover-entering");
 }, true);
+
+const dismissiblePopovers = new Set();
+let listeningForPopoverDismissal = false;
+
+/// Consume the whole outside press, including its compatibility mouse events
+/// and click. Hiding a native popover alone still activates the control below it.
+export function dismissPopoverOnOutsidePress(panel, trigger) {
+  const entry = { panel, trigger };
+  dismissiblePopovers.add(entry);
+  onCleanup(() => {
+    dismissiblePopovers.delete(entry);
+    cancelPopoverAnimations(panel);
+  });
+  if (listeningForPopoverDismissal) return;
+  listeningForPopoverDismissal = true;
+  let pointer = null;
+  const consume = (event) => {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  document.addEventListener("pointerdown", (event) => {
+    pointer = null;
+    if (event.button !== 0 || event.isPrimary === false) return;
+    const open = [...dismissiblePopovers].reverse().find((one) => one.panel.matches(":popover-open"));
+    if (!open || open.panel.contains(event.target) || open.trigger.contains(event.target)) return;
+    // Another popup trigger is a switch, not a press on the content below.
+    // Let its native click open the next panel in the same gesture.
+    if ([...dismissiblePopovers].some((one) => one.trigger.contains(event.target))) {
+      open.panel.hidePopover();
+      return;
+    }
+    pointer = event.pointerId;
+    consume(event);
+    open.panel.hidePopover();
+  }, true);
+  for (const type of ["pointerup", "pointercancel", "mousedown", "mouseup", "click"]) {
+    document.addEventListener(type, (event) => {
+      if (pointer === null) return;
+      if (type.startsWith("pointer") && event.pointerId !== pointer) return;
+      // WebKit can give a touch's compatibility click a different pointerId.
+      // Keyboard/programmatic activation does not belong to this press.
+      if (type === "click" && event.detail === 0) return;
+      consume(event);
+      if (type === "click" || type === "pointercancel") pointer = null;
+    }, true);
+  }
+}
 
 /// Bern's own dropdown, a select-only combobox (WAI-ARIA APG). The list is
 /// a popover in the browser's top layer, so cards, dialogs and scroll
@@ -1935,6 +2106,7 @@ function dropdown(options, field, select) {
     "aria-expanded": "false", "aria-controls": listId, popovertarget: listId,
   }, value, icon("chevron.down", 16));
   const list = el("div", { class: "bern-menu", role: "listbox", id: listId, popover: "auto", tabindex: "-1" });
+  dismissPopoverOnOutsidePress(list, trigger);
   let active = -1;
   // Keep the active option visible inside the list only.
   const reveal = () => {
@@ -2228,6 +2400,46 @@ function trackLayout(node, axis) {
   onCleanup(() => observer.disconnect());
 }
 
+const focusRegions = new Set();
+let listeningForFocusDismissal = false;
+
+export function FocusRegion(p, ctx, children) {
+  const region = el("div", { class: "bern-focus-region" });
+  // Preserve the child's layout and its participation in flex/grid parents.
+  region.style.display = "contents";
+  children(region, ctx);
+  p.append(region);
+  focusRegions.add(region);
+  onCleanup(() => focusRegions.delete(region));
+  if (listeningForFocusDismissal) return;
+  listeningForFocusDismissal = true;
+  let pointer = null;
+  const consume = event => { event.preventDefault(); event.stopImmediatePropagation(); };
+  document.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || event.isPrimary === false) return;
+    pointer = null;
+    const input = document.activeElement;
+    if (!input?.matches('input:not([type="range"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]), textarea, [contenteditable="true"]')) return;
+    let region = input.parentElement;
+    while (region && !focusRegions.has(region)) region = region.parentElement;
+    if (!region || region.contains(event.target)) return;
+    pointer = event.pointerId;
+    consume(event);
+    input.blur();
+  }, true);
+  for (const type of ["pointerup", "pointercancel", "mousedown", "mouseup", "click"]) {
+    document.addEventListener(type, event => {
+      if (pointer === null) return;
+      if (type.startsWith("pointer") && event.pointerId !== pointer) return;
+      // WebKit touch clicks may use a different pointerId. Keyboard activation
+      // is independent of the dismissed pointer gesture.
+      if (type === "click" && event.detail === 0) return;
+      consume(event);
+      if (type === "click" || type === "pointercancel") pointer = null;
+    }, true);
+  }
+}
+
 export function Stack(p, ctx, { axis, gap, padding, paddingX, paddingY, align }, children) {
   const node = el("div", {
     class: `bern-stack bern-${axis === "column" ? "vstack" : "hstack"} bern-align-${align ?? (axis === "column" ? "leading" : "center")}`,
@@ -2321,6 +2533,7 @@ export function accordionWidths(total, collapsedWidth, gap, weights) {
 
 export function Accordion(p, ctx, { count, selected, collapsedWidth, gap, height, corner, animate }, children) {
   const node = el("div", { class: "bern-accordion bern-fill-width" });
+  node.classList.add(height === undefined ? "bern-fill-height" : "bern-sized-height");
   length(node, "height", height);
   length(node, "gap", gap ?? 8);
   if (corner !== undefined) effect(() => node.style.setProperty("--bern-accordion-corner", `${Math.max(0, Number(readValue(corner)) || 0)}px`));
@@ -2974,7 +3187,7 @@ export function Adaptive(p, ctx, { id, breakpoints, layouts }) {
 /// A menu button (WAI-ARIA APG Menu Button): the menu is a popover in the
 /// top layer and takes focus while open. Each item runs its command through
 /// the same closure external entries activate, open or not.
-export function Menu(p, ctx, { id, label, icon: name, style, shape, height }, items) {
+export function Menu(p, ctx, { id, label, icon: name, style, shape, height, hideDisabled = false }, items) {
   const menuId = `bern-menu-${++fieldSequence}`;
   const text = el("span");
   bindText(text, label);
@@ -2990,6 +3203,7 @@ export function Menu(p, ctx, { id, label, icon: name, style, shape, height }, it
   }
   if (!iconOnly) controlShape(trigger, shape, height);
   const list = el("div", { class: "bern-menu", role: "menu", id: menuId, popover: "auto" });
+  dismissPopoverOnOutsidePress(list, trigger);
   bindAttr(list, "aria-label", label);
   const buttons = [];
   for (const item of items) {
@@ -3006,6 +3220,7 @@ export function Menu(p, ctx, { id, label, icon: name, style, shape, height }, it
     const isEnabled = enabledOf(item.enabled);
     effect(() => {
       button.disabled = !isEnabled();
+      if (hideDisabled) button.style.display = button.disabled ? "none" : "";
     });
     mark(button, ctx, item.id);
     button.addEventListener("click", () => {
@@ -3331,8 +3546,27 @@ class HtmlPlayer {
       this.video.currentTime = 0;
     }
     this.started = true;
-    return this.video.play();
+    return this.video.play().catch(error => {
+      this.started = false;
+      this.report();
+      throw error;
+    });
   }
+
+  pause() { this.video.pause(); }
+  seek(position) {
+    this.ended = false;
+    return new Promise((resolve, reject) => {
+      const done = () => { cleanup(); resolve(); };
+      const failed = () => { cleanup(); reject(new Error("Media seek failed")); };
+      const cleanup = () => { this.video.removeEventListener("seeked", done); this.video.removeEventListener("error", failed); };
+      this.video.addEventListener("seeked", done, { once: true });
+      this.video.addEventListener("error", failed, { once: true });
+      try { this.video.currentTime = position; } catch (error) { cleanup(); reject(error); }
+    });
+  }
+  setVolume(value) { this.video.volume = Math.min(1, Math.max(0, value)); }
+  setMuted(value) { this.video.muted = value; }
 
   release() {
     this.video.pause();
@@ -3354,18 +3588,25 @@ class HtmlPlayer {
     else if (!video.paused) phase = this.waiting || video.readyState < 3 ? PHASE.Buffering : PHASE.Playing;
     else phase = this.started ? PHASE.Paused : PHASE.Ready;
     const duration = Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null;
-    const writer = new Writer();
-    writer.text(this.id);
-    writer.u64(this.version);
-    writer.u32(phase);
-    writer.i64(BigInt(Math.max(0, Math.round((video.currentTime || 0) * 1000))));
-    writeOptional(writer, duration === null ? null : BigInt(duration), (w, v) => w.i64(v));
-    writer.u8(duration !== null && video.seekable.length > 0 ? 1 : 0);
-    writer.f64(Math.round(video.volume * 1000) / 1000);
-    writer.u8(video.muted ? 1 : 0);
-    writeOptional(writer, error, (w, v) => w.text(v));
-    host.mediaPost("bern_media_event", writer.finish());
+    mediaObservation(this.id, this.version, {
+      phase, position: video.currentTime || 0, duration: duration === null ? null : duration / 1000,
+      seekable: duration !== null && video.seekable.length > 0, volume: video.volume, muted: video.muted, error,
+    });
   }
+}
+
+function mediaObservation(id, version, state) {
+  const writer = new Writer();
+  writer.text(id);
+  writer.u64(version);
+  writer.u32(typeof state.phase === "string" ? PHASE[state.phase] : state.phase);
+  writer.i64(BigInt(Math.max(0, Math.round((state.position || 0) * 1000))));
+  writeOptional(writer, state.duration == null ? null : BigInt(Math.round(state.duration * 1000)), (w, v) => w.i64(v));
+  writer.u8(state.seekable ? 1 : 0);
+  writer.f64(Math.round((state.volume ?? 1) * 1000) / 1000);
+  writer.u8(state.muted ? 1 : 0);
+  writeOptional(writer, state.error ?? null, (w, v) => w.text(v));
+  host.mediaPost("bern_media_event", writer.finish());
 }
 
 /// Player identities, merged states and the commands of the media hub.
@@ -3376,7 +3617,7 @@ const media = {
 
   attach() {
     const writer = new Writer();
-    writer.text("html-media-element");
+    writer.text(webExtension?.media?.name ?? "html-media-element");
     writer.text("1");
     writer.u8(1); // keeps playing without a view
     writer.u8(0); // one view per player
@@ -3401,7 +3642,7 @@ const media = {
   player(id) {
     let player = this.backend.get(id);
     if (!player) {
-      player = new HtmlPlayer(id);
+      player = webExtension?.media?.create(id, (version, state) => mediaObservation(id, version, state)) ?? new HtmlPlayer(id);
       this.backend.set(id, player);
     }
     return player;
@@ -3424,57 +3665,40 @@ const media = {
       } else writer.u8(0);
       host.mediaPost("bern_media_complete", writer.finish());
     };
+    const fail = (error) => complete(new CommandFailure(
+      error?.name === "NotAllowedError" ? "user_activation_required" : "media_failed",
+      String(error?.message ?? error),
+    ));
     try {
       if (operation === 0) {
         const url = reader.text();
-        this.player(id).load(new URL(url, document.baseURI).href, version);
-        return complete(null);
+        Promise.resolve(this.player(id).load(new URL(url, document.baseURI).href, version)).then(() => complete(null), fail);
+        return;
       }
       if (operation === 1) {
-        this.player(id).unload(version);
-        return complete(null);
+        Promise.resolve(this.player(id).unload(version)).then(() => complete(null), fail);
+        return;
       }
       if (operation === 7) {
-        this.backend.get(id)?.release();
+        const releasing = this.backend.get(id)?.release();
         this.backend.delete(id);
-        return complete(null);
+        Promise.resolve(releasing).then(() => complete(null), fail);
+        return;
       }
       const player = this.player(id);
       if (player.version !== version) {
         return complete(new CommandFailure("stale_source", "a newer source is loaded"));
       }
+      let result;
       switch (operation) {
-        case 2:
-          player.play().then(
-            () => complete(null),
-            (error) => {
-              player.started = false;
-              player.report();
-              complete(error?.name === "NotAllowedError"
-                ? new CommandFailure("user_activation_required", "the browser allows playback only after a user gesture on the page")
-                : new CommandFailure("media_failed", String(error?.message ?? error)));
-            },
-          );
-          return;
-        case 3:
-          player.video.pause();
-          return complete(null);
-        case 4: {
-          const position = Number(reader.i64()) / 1000;
-          player.ended = false;
-          player.video.addEventListener("seeked", () => complete(null), { once: true });
-          player.video.currentTime = position;
-          return;
-        }
-        case 5:
-          player.video.volume = Math.min(1, Math.max(0, reader.f64()));
-          return complete(null);
-        case 6:
-          player.video.muted = reader.u8() !== 0;
-          return complete(null);
-        default:
-          return complete(new CommandFailure("unknown_command", `unknown media operation ${operation}`));
+        case 2: result = player.play(); break;
+        case 3: result = player.pause(); break;
+        case 4: result = player.seek(Number(reader.i64()) / 1000); break;
+        case 5: result = player.setVolume(reader.f64()); break;
+        case 6: result = player.setMuted(reader.u8() !== 0); break;
+        default: return complete(new CommandFailure("unknown_command", `unknown media operation ${operation}`));
       }
+      Promise.resolve(result).then(() => complete(null), fail);
     } catch (error) {
       complete(new CommandFailure("invalid_request", String(error?.message ?? error)));
     }
@@ -3548,7 +3772,7 @@ let viewSequence = 0;
 
 /// A video of a declaration's own player (`source`) or of an application
 /// player, with the standard command-driven control bar.
-export function Video(p, ctx, { id, source, player, label, controls, fit, corner, animate }) {
+export function Video(p, ctx, { id, source, player, label, controls, fit, sizing, corner, animate }) {
   const name = label ?? (() => tr("bern.media.video"));
   const playerID = player ?? `${sessionPrefix()}${ctx.win.id}/${target(ctx, id)}`;
   const state = () => media.players.get().get(playerID) ?? null;
@@ -3606,6 +3830,7 @@ export function Video(p, ctx, { id, source, player, label, controls, fit, corner
     } },
   });
   const node = el("div", { class: "bern-video bern-fill-width" }, surface);
+  if (sizing === "fill") node.classList.add("bern-video-expand", "bern-fill");
   if (controls !== false) node.append(videoControls(ctx, id, playerID, state));
   // A rounded picture: the surface clips the video to its corners.
   if (corner !== undefined) {
@@ -3798,6 +4023,10 @@ class Win {
     this.allowsClose = false;
     /// `window.idle`: no input for the window's `idle_after` seconds.
     this.idle = cell(false);
+    this.fullscreen = cell(false);
+    document.addEventListener("fullscreenchange", () => {
+      this.fullscreen.set(document.fullscreenElement?.dataset.bernWindowKind === this.spec.id);
+    });
     /// `window.compact` and its siblings: the size of the window's width.
     this.compact = cell(false);
     this.medium = cell(false);
@@ -4531,6 +4760,15 @@ export function openWindow(id) {
   manager.open(id);
 }
 
+export async function toggleFullscreen(id) {
+  const element = manager.windows.get(id)?.element;
+  if (!element) return;
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen();
+    else { element.dataset.bernWindowKind = id; await element.requestFullscreen(); }
+  } catch (error) { console.error("Fullscreen failed", error); }
+}
+
 export function closeWindow(id) {
   const win = manager.windows.get(id);
   if (win) manager.close(win);
@@ -4554,7 +4792,7 @@ export async function start(app) {
   engine = app.engine;
   const root = document.getElementById("bern-host");
   try {
-    await host.load(app.wasm);
+    await host.load(app.wasm, app.mode);
     if (app.mode === "ui") {
       // The channel credential travels in the address fragment, which the
       // browser never sends to the server.
@@ -4570,9 +4808,10 @@ export async function start(app) {
       host.start(app.fingerprint, app.resources);
     }
     media.attach();
+    await webExtension?.start?.();
   } catch (error) {
     root.replaceChildren(el("div", { class: "bern-startup-failure", role: "alert" },
-      el("h1", {}, tr("bern.startup.failed")), el("p", {}, String(error.message ?? error))));
+      el("h1", {}, tr("bern.startup.failed")), el("p", {}, host.lastPanic ?? String(error.message ?? error))));
     throw error;
   }
   manager = new WindowManager(app, root);
@@ -4581,6 +4820,13 @@ export async function start(app) {
   }
   // Development handle for inspecting the running page.
   window.bern = { host, manager, link, controls: controlEntries };
+  if (app.mode !== "ui" && host.exports.bern_app_control) {
+    const wasm = new URL(app.wasm, location.href);
+    const url = new URL('control.js', wasm);
+    url.search = wasm.search;
+    const { connectControl } = await import(url.href);
+    connectControl(host);
+  }
 }
 
 /// Dispatch an engine command for a control in `ctx`'s window.

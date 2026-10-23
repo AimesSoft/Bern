@@ -183,7 +183,14 @@ impl Timeline {
     }
 
     /// A moment on a track.
-    pub fn instant(&mut self, tid: u32, ts: u64, name: &str, category: &str, args: &[(&str, Arg<'_>)]) {
+    pub fn instant(
+        &mut self,
+        tid: u32,
+        ts: u64,
+        name: &str,
+        category: &str,
+        args: &[(&str, Arg<'_>)],
+    ) {
         let mut head = String::new();
         self.head(&mut head, "i", tid, ts);
         self.event(|out| {
@@ -217,7 +224,11 @@ impl Timeline {
                 let _ = file.flush();
                 drop(file);
                 let text = contents
-                    .then(|| self.path.as_ref().and_then(|path| std::fs::read_to_string(path).ok()))
+                    .then(|| {
+                        self.path
+                            .as_ref()
+                            .and_then(|path| std::fs::read_to_string(path).ok())
+                    })
                     .flatten();
                 (self.path, text)
             }

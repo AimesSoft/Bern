@@ -758,6 +758,67 @@ struct BernKernelVideoSurface: UIViewRepresentable {
     }
 }
 
+/// The first touch outside an editing region only dismisses its keyboard.
+struct BernFocusRegion: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background(BernFocusRegionPress())
+    }
+}
+
+struct BernFocusRegionPress: UIViewRepresentable {
+    func makeUIView(context: Context) -> Observer { Observer() }
+    func updateUIView(_ view: Observer, context: Context) {}
+    static func dismantleUIView(_ view: Observer, coordinator: ()) { view.stop() }
+
+    final class Observer: UIView {
+        private var press: OutsidePress?
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            stop()
+            guard let window else { return }
+            let press = OutsidePress()
+            press.region = self
+            press.cancelsTouchesInView = true
+            window.addGestureRecognizer(press)
+            self.press = press
+        }
+        func stop() {
+            if let press { press.view?.removeGestureRecognizer(press) }
+            press = nil
+        }
+    }
+
+    final class OutsidePress: UIGestureRecognizer {
+        weak var region: UIView?
+        private func editor(in view: UIView) -> UIView? {
+            if view.isFirstResponder && view is UITextInput { return view }
+            for child in view.subviews {
+                if let found = editor(in: child) { return found }
+            }
+            return nil
+        }
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+            guard let region, let window = region.window, !region.isHidden,
+                  let touch = touches.first, let field = editor(in: window),
+                  region.bounds.contains(region.convert(CGPoint(x: field.bounds.midX, y: field.bounds.midY), from: field)),
+                  !region.bounds.contains(touch.location(in: region)) else {
+                state = .failed
+                return
+            }
+            // Recognize before the target's release action; UIKit cancels the
+            // underlying button/gesture while the keyboard gives up focus.
+            state = .began
+            field.resignFirstResponder()
+        }
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+            if state == .began || state == .changed { state = .changed }
+        }
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { state = .ended }
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { state = .cancelled }
+    }
+}
+
 /// `submit: clear`: the field gives up the keyboard.
 @MainActor
 func bernEndEditing() {

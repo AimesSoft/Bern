@@ -107,7 +107,7 @@ impl Generator<'_> {
 
     pub(super) fn slider(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Slider(p, c, b::SliderProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, step: {}, min_icon: {}, max_icon: {}, label_hidden: {} }}, {});",
+            "b::Slider(p, c, b::SliderProps {{ id: {}, label: {}, model: {}, min: {}, max: {}, step: {}, min_icon: {}, max_icon: {}, label_hidden: {}, continuous: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             some(self.model(element, "current", false)),
@@ -117,6 +117,7 @@ impl Generator<'_> {
             Self::icon(element, "min_icon"),
             Self::icon(element, "max_icon"),
             element.keyword("label_hidden") == Some("true"),
+            element.keyword("continuous") == Some("true"),
             // A controlled slider's action is its change.
             if element.expr("current").is_some() {
                 "None".into()
@@ -190,14 +191,22 @@ impl Generator<'_> {
     }
 
     pub(super) fn popover_button(&self, out: &mut Out, element: &Element) {
+        let presented = if element.expr("open").is_some() {
+            self.model(element, "open", true)
+        } else {
+            self.field(element, "presented")
+                .map(|field| format!("b::Model::Field({field}, None)"))
+        };
         self.children(
             out,
             &format!(
-                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {} }}, ",
+                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {}, window_theme: {}, style: {} }}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 Self::icon(element, "icon"),
-                some(self.field(element, "presented")),
+                some(presented),
+                bern_target_api::style::popover_window_theme(self.app, "linux", element),
+                self.style("PopoverButton", element),
             ),
             &element.children,
             ");",

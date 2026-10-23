@@ -26,8 +26,8 @@ mod timeline;
 
 pub use clock::now_ns;
 pub use report::{Distribution, Report};
-pub use rules::Rules;
 pub use ring::Record;
+pub use rules::Rules;
 
 use crate::{CallContext, Entry};
 use bern_protocol::{ProtocolDescriptor, Value};
@@ -315,9 +315,15 @@ mod filter {
                     .commands
                     .iter()
                     .map(|spec| {
-                        rules.commands.iter().any(|glob| glob_matches(glob, &spec.id))
+                        rules
+                            .commands
+                            .iter()
+                            .any(|glob| glob_matches(glob, &spec.id))
                             || (spec.is_query()
-                                && rules.queries.iter().any(|glob| glob_matches(glob, &spec.id)))
+                                && rules
+                                    .queries
+                                    .iter()
+                                    .any(|glob| glob_matches(glob, &spec.id)))
                             || featured.iter().any(|id| **id == spec.id)
                     })
                     .collect()
@@ -792,9 +798,8 @@ pub fn auto_start() {
         return;
     }
     let configured = state().configured.take();
-    let rules = configured.or_else(|| {
-        rules::from_env(|name| std::env::var(name).ok()).or_else(system_property)
-    });
+    let rules = configured
+        .or_else(|| rules::from_env(|name| std::env::var(name).ok()).or_else(system_property));
     if let Some(rules) = rules {
         report_start(start(&rules));
     }
@@ -817,9 +822,8 @@ fn system_property() -> Option<String> {
     let mut value = [0u8; 92];
     // SAFETY: the name is NUL-terminated and `value` holds PROP_VALUE_MAX
     // bytes.
-    let len = unsafe {
-        __system_property_get(c"debug.bern.trace".as_ptr(), value.as_mut_ptr().cast())
-    };
+    let len =
+        unsafe { __system_property_get(c"debug.bern.trace".as_ptr(), value.as_mut_ptr().cast()) };
     let text = String::from_utf8_lossy(&value[..len.clamp(0, 91) as usize]).into_owned();
     (!text.trim().is_empty()).then_some(text)
 }
@@ -895,20 +899,25 @@ pub fn start(rules: &str) -> Result<Started, String> {
         }
     };
     ring::begin(parsed.buffer);
-    TEXTS.lock().unwrap_or_else(|error| error.into_inner()).clear();
+    TEXTS
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .clear();
     filter::set(Some(&parsed));
     let started_at = now();
     let mut lines = Vec::new();
-    let timeline = file.as_ref().and_then(|path| match timeline::Timeline::create(path) {
-        Ok(timeline) => Some(timeline),
-        Err(error) => {
-            lines.push(format!(
-                "bern-trace: cannot write the timeline {}: {error}",
-                path.display()
-            ));
-            None
-        }
-    });
+    let timeline = file
+        .as_ref()
+        .and_then(|path| match timeline::Timeline::create(path) {
+            Ok(timeline) => Some(timeline),
+            Err(error) => {
+                lines.push(format!(
+                    "bern-trace: cannot write the timeline {}: {error}",
+                    path.display()
+                ));
+                None
+            }
+        });
     let written = timeline
         .as_ref()
         .and_then(|timeline| timeline.path().map(|path| path.display().to_string()));
@@ -942,7 +951,10 @@ pub fn start(rules: &str) -> Result<Started, String> {
 
 /// The rules of the running session, in their normal spelling.
 pub fn rules() -> Option<String> {
-    state().session.as_ref().map(|collector| collector.rules().to_string())
+    state()
+        .session
+        .as_ref()
+        .map(|collector| collector.rules().to_string())
 }
 
 /// Stop the session; with `timeline`, the result carries the timeline.

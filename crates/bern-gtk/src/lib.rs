@@ -70,7 +70,7 @@ pub use structure::*;
 pub use style::{Look, StyleDef};
 pub use theme::Color;
 pub use widgets::*;
-pub use windows::{close_window, open_window};
+pub use windows::{close_window, open_window, toggle_fullscreen};
 
 use protocol::{ProtocolDescriptor, Type, TypeTable, Value};
 use std::rc::Rc;
@@ -173,6 +173,7 @@ pub struct WindowDef {
 
 /// The accent and appearance of `WindowSet`, chosen at run time.
 pub struct ThemeDef {
+    pub palette: Option<fn(&Ctx) -> protocol::Value>,
     /// The accent enum value; its variant names an accent of `style!`.
     pub accent: Option<fn(&Ctx) -> protocol::Value>,
     pub accents: theme::Accents,
@@ -222,3 +223,6 @@ pub struct AppDef {
     /// Extensions of the file kinds `files:` names.
     pub file_kinds: &'static [(&'static str, &'static [&'static str])],
 }
+
+#[cfg(feature = "script")]
+mod script;

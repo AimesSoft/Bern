@@ -93,6 +93,7 @@ impl Target for SwiftUiIos {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let app = &bern_target_api::svg::prepare(app, config);
         let mut diagnostics = check_swiftui(self, app, config, Platform::Ios);
         for window in &app.windows.windows {
             if window.id == app.windows.primary && window.initial != WindowInitial::Open {
@@ -110,6 +111,7 @@ impl Target for SwiftUiIos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let bundle = PathBuf::from(format!("{product}.app"));
@@ -229,6 +231,8 @@ impl Target for SwiftUiIos {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(bern_target_api::svg::static_files(app, context)?);
+        bern_target_api::script::configure(&mut files, context);
         Ok(files)
     }
 
@@ -237,6 +241,7 @@ impl Target for SwiftUiIos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let output = &context.output_dir;
         let bundle = output.join(format!("{product}.app"));
@@ -361,7 +366,7 @@ impl Target for SwiftUiIos {
                     .iter()
                     .map(|resource| {
                         (
-                            context.project_dir.join(&resource.name),
+                            bern_target_api::svg::resource_path(context, &resource.name),
                             PathBuf::from(&resource.name),
                         )
                     })

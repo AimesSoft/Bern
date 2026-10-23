@@ -120,6 +120,7 @@ impl Ctx {
 
 pub struct Generator<'a> {
     app: &'a Application,
+    multicast: bool,
     /// Whether a container anywhere declares `stagger`. Only then do the
     /// children of containers and the roots of components take part in
     /// the turns.
@@ -138,7 +139,17 @@ impl<'a> Generator<'a> {
         for window in &app.windows.windows {
             window.content.walk(&mut find);
         }
-        Self { app, staggers }
+        Self {
+            app,
+            staggers,
+            multicast: false,
+        }
+    }
+
+    /// Hold Android's Wi-Fi multicast filter open while the activity is visible.
+    pub fn with_multicast(mut self, enabled: bool) -> Self {
+        self.multicast = enabled;
+        self
     }
 
     fn types(&self) -> &TypeTable {
@@ -295,7 +306,12 @@ impl<'a> Generator<'a> {
                 // takes the size the other layers give the stack: a rail
                 // holding only spans without a thickness of their own, a
                 // canvas without a size, its backdrop.
-                let direct = appear.is_none()
+                let tint = element.keyword("tint");
+                if let Some(tint) = tint {
+                    out.open(format!("BernTint({}) {{", string(tint)));
+                }
+                let direct = tint.is_none()
+                    && appear.is_none()
                     && effects.is_empty()
                     && appearance.is_none()
                     && element.keyword("hero").is_none();
@@ -321,6 +337,9 @@ impl<'a> Generator<'a> {
                         out.close("}");
                     }
                     None => self.element(out, element, &own),
+                }
+                if tint.is_some() {
+                    out.close("}");
                 }
                 if appearance.is_some() {
                     out.close("}");
@@ -476,6 +495,11 @@ impl<'a> Generator<'a> {
             "Column" | "Row" => self.column_or_row(out, element, ctx),
             "Grid" => self.grid(out, element, ctx),
             "Stack" => self.stack(out, element, ctx),
+            "FocusRegion" => {
+                out.open("BernFocusRegion {");
+                self.nodes(out, &element.children, &ctx.within(Scope::Other));
+                out.close("}");
+            }
             "ScaleBox" => self.scale_box(out, element, ctx),
             "Positioned" => self.positioned(out, element, ctx),
             "Marquee" => self.marquee(out, element, ctx),

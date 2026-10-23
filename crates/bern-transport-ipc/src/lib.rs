@@ -410,7 +410,8 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) ->
         };
         // The request on the timeline, from handling it to its answer.
         let _request = bern_command::trace::Span::entry(|| match &message {
-            ClientMessage::Command { command, .. } | ClientMessage::SessionCommand { command, .. } => {
+            ClientMessage::Command { command, .. }
+            | ClientMessage::SessionCommand { command, .. } => {
                 format!("{} {command}", entry.name())
             }
             _ => format!("{} request", entry.name()),

@@ -358,3 +358,51 @@ fn players_run_on_the_page_that_holds_them() {
     );
     assert!(env.media.player("s/main#1/page.video").is_none());
 }
+
+#[test]
+fn local_media_commands_return_to_the_initiating_executor() {
+    let (env, first, page) = connect();
+    send(&first, hello("secret"));
+    let second_page = Arc::new(Page::default());
+    let sink = Arc::clone(&second_page);
+    let second = Connection::new(
+        Arc::clone(&env),
+        Arc::new(move |m| {
+            sink.received
+                .lock()
+                .unwrap()
+                .push(serde_json::to_value(m).unwrap());
+        }),
+    );
+    send(&second, hello("secret"));
+    for c in [&first, &second] {
+        send(
+            c,
+            json!({"type":"media_attach","backend":"test","backend_version":"1","background_playback":true,"multi_view":false}),
+        );
+    }
+    send(
+        &second,
+        json!({"type":"media_view","token":"v","player":"preview","window":"second/main"}),
+    );
+    send(
+        &first,
+        json!({"type":"command","request_id":"local","engine_id":env.host.engine_id().to_string(),
+        "command":"media.open","params":{"player_id":"preview","source":{"url":"blob:first"}}}),
+    );
+    let load = page.wait(|m| m["type"] == "media_request" && m["op"] == "load");
+    assert_eq!(load["url"], "blob:first");
+    assert!(
+        second_page
+            .position(|m| m["type"] == "media_request" && m["op"] == "load")
+            .is_none()
+    );
+    send(
+        &first,
+        json!({"type":"media_complete","request":load["request"],"ok":true}),
+    );
+    assert_eq!(
+        page.wait(|m| m["request_id"] == "local" && m["status"] == "completed")["ok"],
+        true
+    );
+}

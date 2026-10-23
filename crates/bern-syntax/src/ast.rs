@@ -154,6 +154,7 @@ impl Expr {
 
 #[derive(Clone, Debug)]
 pub struct Prop {
+    pub attrs: Vec<syn::Attribute>,
     pub name: Ident,
     pub value: Expr,
 }
@@ -247,6 +248,7 @@ pub enum Pattern {
 
 #[derive(Clone, Debug)]
 pub struct MatchArm {
+    pub attrs: Vec<syn::Attribute>,
     pub pattern: Pattern,
     pub body: Vec<Node>,
     pub span: Span,

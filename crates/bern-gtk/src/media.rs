@@ -592,6 +592,7 @@ pub struct VideoProps {
     pub label: Option<Str>,
     pub controls: bool,
     pub fit: Option<&'static str>,
+    pub fills_container: bool,
     /// Rounded corners of the picture, bound or fixed.
     pub corner: Option<crate::motion::Num>,
     pub animate: Option<crate::motion::Curve>,
@@ -781,19 +782,25 @@ pub fn Video(p: &Parent, ctx: &Ctx, props: VideoProps) {
         _ => gtk::ContentFit::Contain,
     });
     picture.set_can_shrink(true);
-    let frame = gtk::AspectFrame::new(0.5, 0.5, 16.0 / 9.0, false);
-    match &props.corner {
-        Some(corner) => {
-            let clip = crate::features::rounded(ctx, &picture, corner, props.animate);
-            frame.set_child(Some(&clip));
-        }
-        None => frame.set_child(Some(&picture)),
-    }
-    frame.set_hexpand(true);
+    let picture_widget: gtk::Widget = match &props.corner {
+        Some(corner) => crate::features::rounded(ctx, &picture, corner, props.animate).upcast(),
+        None => picture.clone().upcast(),
+    };
     let overlay = gtk::Overlay::new();
-    overlay.set_child(Some(&frame));
-    // Room for the status while there is no picture to size the frame.
-    overlay.set_size_request(-1, 220);
+    if props.fills_container {
+        picture_widget.set_hexpand(true);
+        picture_widget.set_vexpand(true);
+        overlay.set_child(Some(&picture_widget));
+        overlay.set_hexpand(true);
+        overlay.set_vexpand(true);
+    } else {
+        let frame = gtk::AspectFrame::new(0.5, 0.5, 16.0 / 9.0, false);
+        frame.set_child(Some(&picture_widget));
+        frame.set_hexpand(true);
+        overlay.set_child(Some(&frame));
+        // Room for the status while there is no picture to size the frame.
+        overlay.set_size_request(-1, 220);
+    }
     let status_box = gtk::Box::new(gtk::Orientation::Vertical, 6);
     status_box.set_halign(gtk::Align::Center);
     status_box.set_valign(gtk::Align::Center);
@@ -889,18 +896,22 @@ pub fn Video(p: &Parent, ctx: &Ctx, props: VideoProps) {
         },
     );
     let container = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    // The picture area keeps 16:9 at the width it gets: a probe with no
-    // height measures that width.
-    let probe = gtk::DrawingArea::new();
-    probe.set_content_height(0);
-    probe.set_hexpand(true);
-    let sized = overlay.clone();
-    probe.connect_resize(move |_, width, _| {
-        if width > 0 {
-            sized.set_size_request(-1, (width * 9 / 16).max(120));
-        }
-    });
-    container.append(&probe);
+    if props.fills_container {
+        container.set_hexpand(true);
+        container.set_vexpand(true);
+    } else {
+        // The standard picture measures 16:9 of the available width.
+        let probe = gtk::DrawingArea::new();
+        probe.set_content_height(0);
+        probe.set_hexpand(true);
+        let sized = overlay.clone();
+        probe.connect_resize(move |_, width, _| {
+            if width > 0 {
+                sized.set_size_request(-1, (width * 9 / 16).max(120));
+            }
+        });
+        container.append(&probe);
+    }
     container.append(&overlay);
     if props.controls {
         container.append(&control_bar(ctx, props.id, &player));

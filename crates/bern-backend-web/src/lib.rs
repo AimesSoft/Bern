@@ -351,8 +351,9 @@ impl Target for WebBrowser {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let app = &bern_target_api::svg::prepare(app, config);
         let mut diagnostics = check_common(self, app);
-        let ui = match config.web_mode.as_deref() {
+        let _ui = match config.web_mode.as_deref() {
             Some("app") => false,
             Some("ui") => true,
             _ => {
@@ -364,12 +365,7 @@ impl Target for WebBrowser {
             }
         };
         for channel in &config.channels {
-            if !ui {
-                diagnostics.push(Diagnostic::error(format!(
-                    "target `{}`: channel `{channel}` needs a process that can listen; the `app` build runs only in the page (use `web_mode = \"ui\"`, whose engine host assembles it)",
-                    config.name
-                )));
-            } else if channel != "ipc" {
+            if channel != "ipc" {
                 diagnostics.push(Diagnostic::error(format!(
                     "target `{}`: unknown channel `{channel}`",
                     config.name
@@ -431,6 +427,7 @@ impl Target for WebBrowser {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
         let strings = strings::tables(app);
         let remote = context.target.web_mode.as_deref() == Some("ui");
@@ -475,8 +472,53 @@ impl Target for WebBrowser {
                 glue::page_lib_rs(context, app, remote),
             ),
         ];
+        if let Some(extension) = &context.target.web_extension {
+            if !context
+                .project_dir
+                .join(&extension.path)
+                .join("index.js")
+                .is_file()
+            {
+                return Err(vec![Diagnostic::error(
+                    "web_extension.path must contain index.js",
+                )]);
+            }
+            files.push(GeneratedFile::text("extension-loader.js", format!(
+                "import {{ installWebExtension }} from './bern.js?v={version}';\nimport setup from './extension/index.js?v={version}';\ninstallWebExtension(setup);\n"
+            )));
+            let app_js = files
+                .iter_mut()
+                .find(|file| file.path == Path::new("app.js"))
+                .unwrap();
+            let mut contents =
+                format!("import './extension-loader.js?v={version}';\n").into_bytes();
+            contents.extend_from_slice(&app_js.contents);
+            app_js.contents = contents;
+        }
         files.extend(icon_files);
         let mut crates = vec!["glue/page"];
+        if !remote && skill::listens(&context.target.channels) {
+            let mut tools_app = app.clone();
+            tools_app.app.bundle_id.push_str(".web");
+            files.extend([
+                GeneratedFile::text("control.js", include_str!("../templates/control.js")),
+                GeneratedFile::text(
+                    "serve-bridge.py",
+                    include_str!("../templates/serve-bridge.py"),
+                ),
+                GeneratedFile::text(
+                    "control.json",
+                    serde_json::json!({"bundle_id":tools_app.app.bundle_id}).to_string(),
+                ),
+                GeneratedFile::text(
+                    "glue/control/Cargo.toml",
+                    glue::control_cargo_toml(context, app),
+                ),
+                GeneratedFile::text("glue/control/src/cli.rs", glue::cli_rs(context, &tools_app)),
+                GeneratedFile::text("glue/control/src/mcp.rs", glue::mcp_rs(context, &tools_app)),
+            ]);
+            crates.push("glue/control");
+        }
         if remote {
             files.extend([
                 GeneratedFile::text("glue/host/Cargo.toml", glue::host_cargo_toml(context, app)),
@@ -525,6 +567,8 @@ impl Target for WebBrowser {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(bern_target_api::svg::static_files(app, context)?);
+        bern_target_api::script::configure(&mut files, context);
         Ok(files)
     }
 
@@ -533,6 +577,7 @@ impl Target for WebBrowser {
         app: &Application,
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let output = &context.output_dir;
         let remote = context.target.web_mode.as_deref() == Some("ui");
         let profile = if context.release { "release" } else { "debug" };
@@ -587,7 +632,7 @@ impl Target for WebBrowser {
                     .iter()
                     .map(|resource| {
                         (
-                            context.project_dir.join(&resource.name),
+                            bern_target_api::svg::resource_path(context, &resource.name),
                             PathBuf::from(&resource.name),
                         )
                     })
@@ -595,6 +640,36 @@ impl Target for WebBrowser {
                 keep: vec![],
             },
         ];
+        if let Some(extension) = &context.target.web_extension {
+            let source = context.project_dir.join(&extension.path);
+            let destination = output.join("extension");
+            let step = if let Some((program, args)) = extension.build.split_first() {
+                let mut args = args.to_vec();
+                args.push(destination.display().to_string());
+                BuildStep::Run {
+                    description: "Build the application browser extension".into(),
+                    program: program.clone(),
+                    args,
+                    cwd: source,
+                    env: vec![],
+                }
+            } else {
+                BuildStep::Mirror {
+                    dir: destination,
+                    files: files_below(&source)
+                        .map_err(|error| vec![Diagnostic::error(error.to_string())])?,
+                    keep: vec![],
+                }
+            };
+            steps.insert(0, step);
+        } else {
+            steps.push(BuildStep::RemoveIfExists {
+                path: output.join("extension"),
+            });
+            steps.push(BuildStep::RemoveIfExists {
+                path: output.join("extension-loader.js"),
+            });
+        }
         let mut products = vec![output.join("index.html")];
         if !remote {
             // A target switched from `ui` to `app` must not keep the engine
@@ -605,6 +680,39 @@ impl Target for WebBrowser {
             steps.push(BuildStep::RemoveIfExists {
                 path: output.join("glue/host"),
             });
+            if skill::listens(&context.target.channels) {
+                let target = context.workspace_dir.join("target/bern-web-glue/control");
+                steps.push(BuildStep::Run {
+                    description: "Build the browser command CLI and MCP adapter (no native engine)"
+                        .into(),
+                    program: "cargo".into(),
+                    args: cargo("glue/control/Cargo.toml", &target, None),
+                    cwd: output.join("glue/control"),
+                    env: vec![],
+                });
+                steps.push(BuildStep::CreateDir {
+                    path: output.join("bin"),
+                });
+                for stem in [glue::program(app), format!("{}-mcp", glue::program(app))] {
+                    let name = format!("{stem}{}", std::env::consts::EXE_SUFFIX);
+                    steps.push(BuildStep::Copy {
+                        from: target.join(profile).join(&name),
+                        to: output.join("bin").join(&name),
+                    });
+                    products.push(output.join("bin").join(&name));
+                }
+            } else {
+                for name in [
+                    "control.js",
+                    "control.json",
+                    "serve-bridge.py",
+                    "glue/control",
+                ] {
+                    steps.push(BuildStep::RemoveIfExists {
+                        path: output.join(name),
+                    });
+                }
+            }
         }
         if remote {
             let host_target = context.workspace_dir.join("target/bern-web-glue/host");
@@ -636,13 +744,15 @@ impl Target for WebBrowser {
         }
         // The agent skill beside `bin/`, where the engine host listens; an
         // `app` build has no programs to describe.
-        let listens = remote && skill::listens(&context.target.channels);
+        let listens = skill::listens(&context.target.channels);
         let place = listens.then(|| {
-            skill::Place::beside_bin(app, cfg!(windows)).connect(format!(
+            skill::Place::beside_bin(app, cfg!(windows)).connect(if remote { format!(
                 "The programs reach the engine host `{program}-host` beside them, which serves the page: start it (`bern run --target {target}` does) before calling them. The `ui` and `window` commands act on the page while a browser has it open.",
                 program = glue::program(app),
                 target = context.target.name,
-            ))
+            ) } else { format!(
+                "These programs address the pure Web app's `.web` IPC namespace, separate from desktop instances. Start `python3 serve-bridge.py --port 18766` in the build directory (or `bern run --target {}`), and open its printed credential URL. The engine runs in that browser tab; the local server only relays requests. Several tabs require CLI `--engine ID`. Closing a tab removes its endpoint. Streaming state subscriptions are not supported.", context.target.name
+            ) })
         });
         steps.extend(skill::steps(app, output, place.as_ref()));
         if listens {
@@ -676,6 +786,7 @@ impl Target for WebBrowser {
         context: &BuildContext,
         _signing: &Signing,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let output = &context.output_dir;
         let remote = context.target.web_mode.as_deref() == Some("ui");
         let program = glue::program(app);
@@ -689,7 +800,12 @@ impl Target for WebBrowser {
             .generate(app, context)?
             .into_iter()
             .map(|file| file.path)
-            .filter(|path| !path.starts_with("glue") && path != Path::new("build.json"))
+            .filter(|path| {
+                !path.starts_with("glue")
+                    && !["build.json", "serve-bridge.py", "control.json"]
+                        .iter()
+                        .any(|name| path == Path::new(name))
+            })
             .collect();
         paths.push(WASM.into());
         paths.extend(
@@ -704,9 +820,17 @@ impl Target for WebBrowser {
             .into_iter()
             .map(|path| (output.join(&path), path))
             .collect();
+        if context.target.web_extension.is_some() {
+            files.extend(
+                files_below(&output.join("extension"))
+                    .map_err(|error| vec![Diagnostic::error(error.to_string())])?
+                    .into_iter()
+                    .map(|(source, path)| (source, Path::new("extension").join(path))),
+            );
+        }
         // The agent skill, which each build writes afresh.
         let skills = output.join("skills");
-        if skills.is_dir() {
+        if remote && skills.is_dir() {
             let below = files_below(&skills).map_err(|error| {
                 vec![Diagnostic::error(format!(
                     "cannot read {}: {error}",

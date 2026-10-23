@@ -104,6 +104,9 @@ fn css_rgba([r, g, b, a]: [f64; 4]) -> String {
 pub(crate) fn css(color: &Color, part: Option<bool>) -> String {
     match color {
         Color::Role(role) => {
+            if let Some((light, dark)) = CUSTOM_PALETTE.with(|palette| palette.borrow().get(*role).copied()) {
+                return css(&Color::Fixed(light, dark), part);
+            }
             let (name, alpha) = named(role);
             match part.and_then(|dark| palette(name, dark)) {
                 Some([r, g, b, a]) => css_rgba([r, g, b, a * alpha]),
@@ -141,6 +144,9 @@ pub(crate) fn is_dark() -> bool {
 pub(crate) fn part_of(widget: &gtk::Widget) -> Option<bool> {
     let mut current = Some(widget.clone());
     while let Some(widget) = current {
+        if widget.has_css_class("bern-appearance-window") {
+            return Some(is_dark());
+        }
         if widget.has_css_class("bern-appearance-dark") {
             return Some(true);
         }
@@ -157,6 +163,9 @@ pub(crate) fn rgba(color: &Color, widget: &gtk::Widget) -> gtk::gdk::RGBA {
     let part = part_of(widget);
     match color {
         Color::Role(role) => {
+            if let Some((light, dark)) = CUSTOM_PALETTE.with(|palette| palette.borrow().get(*role).copied()) {
+                return rgba(&Color::Fixed(light, dark), widget);
+            }
             let (name, alpha) = named(role);
             let base = match part.and_then(|dark| palette(name, dark)) {
                 Some([r, g, b, a]) => gtk::gdk::RGBA::new(r as f32, g as f32, b as f32, a as f32),
@@ -241,6 +250,7 @@ type Pair = ((u8, u8, u8), (u8, u8, u8));
 pub type Accents = &'static [(u32, (u8, u8, u8), (u8, u8, u8))];
 
 thread_local! {
+    static CUSTOM_PALETTE: RefCell<std::collections::BTreeMap<String, Pair>> = const { RefCell::new(std::collections::BTreeMap::new()) };
     static ACCENT: RefCell<Option<Pair>> = const { RefCell::new(None) };
     static ACCENT_CSS: RefCell<Option<gtk::CssProvider>> = const { RefCell::new(None) };
 }
@@ -266,7 +276,7 @@ fn mix((r, g, b): (u8, u8, u8), toward: f64, amount: f64) -> (u8, u8, u8) {
 
 fn reload_accent() {
     let accent = ACCENT.with(|accent| *accent.borrow());
-    let css = match accent {
+    let mut css = match accent {
         None => String::new(),
         Some((light, dark)) => {
             let night = is_dark();
@@ -291,6 +301,24 @@ fn reload_accent() {
             )
         }
     };
+    CUSTOM_PALETTE.with(|palette| {
+        for (role, (light, dark)) in palette.borrow().iter() {
+            let (r, g, b) = if is_dark() { *dark } else { *light };
+            let token = role.replace('.', "_");
+            css.push_str(&format!("@define-color bern_palette_{token} rgb({r}, {g}, {b});\n"));
+            let aliases: &[&str] = match role.as_str() {
+                "surface.canvas" => &["window_bg_color"],
+                "surface.panel" => &["card_bg_color", "view_bg_color"],
+                "surface.raised" => &["popover_bg_color"],
+                "surface.host" => &["headerbar_bg_color"],
+                "accent" => &["accent_bg_color", "accent_color"],
+                "on_accent" => &["accent_fg_color"],
+                "text.primary" => &["window_fg_color", "card_fg_color", "view_fg_color", "popover_fg_color"],
+                _ => &[],
+            };
+            for alias in aliases { css.push_str(&format!("@define-color {alias} rgb({r}, {g}, {b});\n")); }
+        }
+    });
     ACCENT_CSS.with(|provider| {
         let mut provider = provider.borrow_mut();
         let provider = provider.get_or_insert_with(|| {
@@ -426,6 +454,10 @@ fn selectors(list: &str) -> Vec<&str> {
 /// colors of the other appearance: the part looks as the whole window would
 /// in that appearance.
 fn part_sheet(dark: bool) -> String {
+    scoped_part_sheet(dark, if dark { ".bern-appearance-dark" } else { ".bern-appearance-light" })
+}
+
+pub(crate) fn scoped_part_sheet(dark: bool, scope: &str) -> String {
     let (Some(base), Some(defaults)) = (
         resource("/org/gnome/Adwaita/styles/base.css"),
         resource(if dark {
@@ -435,11 +467,6 @@ fn part_sheet(dark: bool) -> String {
         }),
     ) else {
         return String::new();
-    };
-    let scope = if dark {
-        ".bern-appearance-dark"
-    } else {
-        ".bern-appearance-light"
     };
     let mut names = std::collections::HashMap::new();
     definitions(&base, &mut names);
@@ -655,4 +682,49 @@ mod tests {
         );
         assert_eq!(selectors("window"), ["window"]);
     }
+}
+
+/// Palette values are strict hex pairs; role names cannot inject CSS.
+pub(crate) fn set_palette(value: &str) {
+    let Ok(input) = serde_json::from_str::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>>(value) else { return; };
+    fn rgb(value: &str) -> Option<(u8,u8,u8)> {
+        if value.len() != 7 || !value.starts_with('#') { return None; }
+        let n = u32::from_str_radix(&value[1..], 16).ok()?;
+        Some(((n >> 16) as u8, (n >> 8) as u8, n as u8))
+    }
+    let colors: std::collections::BTreeMap<_,_> = input.into_iter().filter_map(|(role, pair)| {
+        if !role.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_') { return None; }
+        Some((role, (rgb(pair.get("light")?)?, rgb(pair.get("dark")?)?)))
+    }).collect();
+    watch();
+    let accent = colors.get("accent").copied();
+    CUSTOM_PALETTE.with(|palette| *palette.borrow_mut() = colors);
+    ACCENT.with(|current| *current.borrow_mut() = accent);
+    reload_accent();
+    crate::style::reload();
+    glib::idle_add_local_once(bump);
+}
+
+thread_local! {
+    static TINTS: RefCell<Vec<(String, gtk::CssProvider)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Scoped copies of native CSS replace only the accent roles of this subtree.
+pub(crate) fn use_tint(role: &'static str, dark: bool) -> String {
+    let class = format!("bern-tint-{}-{}", role.replace('.', "-"), dark);
+    if TINTS.with(|tints| tints.borrow().iter().any(|(name, _)| *name == class)) { return class; }
+    let provider = gtk::CssProvider::new();
+    let (name, _) = named(role);
+    let tint = PALETTE.iter().find(|entry| entry.0 == name).map(|entry| if dark { entry.2 } else { entry.1 });
+    let color = tint.map(|c| format!("rgba({},{},{},{})", c[0]*255.0,c[1]*255.0,c[2]*255.0,c[3])).unwrap_or_else(|| format!("@{name}"));
+    let foreground = if dark { "black" } else { "white" };
+    let scope = if dark { ".bern-appearance-dark" } else { ".bern-appearance-light" };
+    let css = part_sheet(dark).replace(scope, &format!(".{class}"))
+        .replace("@accent_bg_color", &color).replace("@accent_color", &color).replace("@accent_fg_color", foreground);
+    provider.load_from_string(&css);
+    if let Some(display) = gtk::gdk::Display::default() {
+        gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    TINTS.with(|tints| tints.borrow_mut().push((class.clone(), provider)));
+    class
 }

@@ -104,6 +104,7 @@ impl Generator<'_> {
                 (element.keyword("reveal") == Some("hover")).then(|| "true".to_string()),
             ),
             ("appearance", Self::keyword(element, "appearance")),
+            ("tint", Self::keyword(element, "tint")),
             ("nudge", element.expr("nudge").map(|when| self.getter(when))),
             (
                 "nudgeMotion",
@@ -290,6 +291,7 @@ impl Generator<'_> {
             "Column" | "Row" => self.stack(out, element),
             "Grid" => self.grid(out, element),
             "Stack" => self.layers(out, element),
+            "FocusRegion" => self.call(out, "B::FocusRegion(p, c, ", &element.children),
             "ScaleBox" => self.scale_box(out, element),
             "Positioned" => self.positioned(out, element),
             "Marquee" => self.marquee(out, element),

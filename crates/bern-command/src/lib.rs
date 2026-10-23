@@ -20,6 +20,7 @@
 mod composite;
 pub mod files;
 pub mod outbox;
+pub mod platform;
 pub mod resources;
 pub mod secrets;
 pub mod storage;
@@ -259,6 +260,8 @@ struct LocalJobs {
 impl LocalJobs {
     /// Queue a job and, unless a job is already running further up the
     /// stack, run queued jobs until none are left.
+    // Return ownership like mpsc::send, without allocating another error wrapper.
+    #[allow(clippy::result_large_err)]
     fn push(&self, job: Job) -> Result<(), Job> {
         if self.stopped.load(Ordering::Acquire) {
             return Err(job);
@@ -403,7 +406,9 @@ impl Host {
             waker = Some(wakes.clone());
             let mut worker = Worker::new(engine, Arc::clone(&shared), wakes);
             LocalJobs {
-                worker: Mutex::new(Box::new(move |job| trace::local_engine(|| worker.handle(job)))),
+                worker: Mutex::new(Box::new(move |job| {
+                    trace::local_engine(|| worker.handle(job))
+                })),
                 pending: Mutex::new(VecDeque::new()),
                 draining: AtomicBool::new(false),
                 stopped: AtomicBool::new(false),
@@ -418,6 +423,8 @@ impl Host {
         }
     }
 
+    // Preserve the rejected job so its reply can be completed by the caller.
+    #[allow(clippy::result_large_err)]
     fn send(&self, job: Job) -> Result<(), Job> {
         match &self.jobs {
             Jobs::Thread(sender) => sender.send(job).map_err(|error| error.0),

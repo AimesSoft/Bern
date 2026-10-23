@@ -220,6 +220,9 @@ impl Generator<'_> {
                 WindowOp::Open | WindowOp::Activate => {
                     format!("b::open_window(c, {})", string(window))
                 }
+                WindowOp::ToggleFullscreen => {
+                    format!("b::toggle_fullscreen(c, {})", string(window))
+                }
                 WindowOp::Close => format!("b::close_window(c, {})", string(window)),
             },
             Action::Media { player, op, args } => {
@@ -249,15 +252,20 @@ impl Generator<'_> {
     }
 
     pub(super) fn action(&self, element: &Element) -> String {
-        some(element.action.as_ref().map(|action| match element.clearing() {
-            // The draft empties after the action.
-            Some(clear) => format!(
-                "b::act(|c| {{ {}; {}; }})",
-                self.action_body(action),
-                self.action_body(&clear)
-            ),
-            None => format!("b::act(|c| {})", self.action_body(action)),
-        }))
+        some(
+            element
+                .action
+                .as_ref()
+                .map(|action| match element.clearing() {
+                    // The draft empties after the action.
+                    Some(clear) => format!(
+                        "b::act(|c| {{ {}; {}; }})",
+                        self.action_body(action),
+                        self.action_body(&clear)
+                    ),
+                    None => format!("b::act(|c| {})", self.action_body(action)),
+                }),
+        )
     }
 
     pub(super) fn keyword(element: &Element, name: &str) -> String {

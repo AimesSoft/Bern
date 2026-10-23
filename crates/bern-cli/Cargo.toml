@@ -24,3 +24,6 @@ bern-backend-winui3.workspace = true
 bern-backend-compose.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+
+[dev-dependencies]
+bern-ir.workspace = true

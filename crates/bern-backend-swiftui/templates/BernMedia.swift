@@ -610,12 +610,26 @@ func bernRoundCorners(_ layer: CALayer?, _ radius: Double, motion: BernMotion?) 
     layer.cornerRadius = radius
 }
 
+/// Surface geometry is independent of how the renderer fits the video inside it.
+/// Full-player surfaces include letterboxing so kernel overlays can use it too.
+struct BernVideoSizing: ViewModifier {
+    let fill: Bool
+    func body(content: Content) -> some View {
+        if fill {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            content.aspectRatio(16.0 / 9.0, contentMode: .fit)
+        }
+    }
+}
+
 struct BernVideo: View {
     let target: String
     let label: String?
     let binding: BernVideoBinding
     let controls: Bool
     let fit: BernVideoFit
+    var fillsContainer = false
     /// Rounds the picture; a change moves with `cornerMotion`.
     var corner: Double = 0
     var cornerMotion: BernMotion? = nil
@@ -661,7 +675,7 @@ struct BernVideo: View {
                 BernVideoStatus(state: state)
             }
             .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
-            .aspectRatio(16.0 / 9.0, contentMode: .fit)
+            .modifier(BernVideoSizing(fill: fillsContainer))
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(label ?? BernText.string("bern.media.video"))

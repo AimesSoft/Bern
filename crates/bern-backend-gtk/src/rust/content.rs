@@ -36,7 +36,7 @@ impl Generator<'_> {
 
     pub(super) fn svg(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Svg(p, c, b::SvgProps {{ source: {}, label: {}, width: {}, height: {}, fit: {}, playing: {}, speed: {}, restart: {}, interactive: {} }});",
+            "b::Svg(p, c, b::SvgProps {{ source: {}, label: {}, width: {}, height: {}, fit: {}, playing: {}, speed: {}, restart: {}, interactive: {}, data: {}, external_links: {} }});",
             string(element.resource("source").unwrap_or_default()),
             some(self.text_prop(element, "label")),
             some(self.num(element, "width")), some(self.num(element, "height")),
@@ -45,6 +45,8 @@ impl Generator<'_> {
             some(element.expr("speed").map(|e| self.getter(e))),
             some(element.expr("restart").map(|e| self.getter(e))),
             element.keyword("interactive").unwrap_or("true"),
+            some(self.text_prop(element, "data")),
+            element.keyword("external_links").unwrap_or("false"),
         ));
     }
 
@@ -79,13 +81,14 @@ impl Generator<'_> {
             _ => (None, None),
         };
         out.line(format!(
-            "b::Video(p, c, b::VideoProps {{ id: {}, source: {}, player: {}, label: {}, controls: {}, fit: {}, corner: {}, animate: {} }});",
+            "b::Video(p, c, b::VideoProps {{ id: {}, source: {}, player: {}, label: {}, controls: {}, fit: {}, fills_container: {}, corner: {}, animate: {} }});",
             self.id(element),
             some(source),
             some(player),
             some(self.text_prop(element, "label")),
             element.keyword("controls") != Some("none"),
             Self::keyword(element, "fit"),
+            element.keyword("sizing") == Some("fill"),
             some(self.num(element, "corner")),
             self.animate(element),
         ));

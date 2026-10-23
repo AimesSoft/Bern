@@ -116,6 +116,7 @@ impl Generator<'_> {
 
     pub(super) fn menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
+        let hide_disabled = element.keyword("hide_disabled") == Some("true");
         out.line(format!(
             "BernControl({}, \"menu\", {label}, actions = BernControlActions())",
             self.target(element, ctx)
@@ -155,6 +156,10 @@ impl Generator<'_> {
                 out.line("HorizontalDivider()");
                 continue;
             }
+            let visible = item.expr("enabled").filter(|_| hide_disabled);
+            if let Some(visible) = visible {
+                out.open(format!("if ({}) {{", self.expr(visible)));
+            }
             let item_label = self.text_prop(item, "label").unwrap_or_default();
             let (action, _) = self.pressed(item);
             out.line(format!(
@@ -163,6 +168,9 @@ impl Generator<'_> {
                 self.enabled(item),
                 item.keyword("role") == Some("destructive")
             ));
+            if visible.is_some() {
+                out.close("}");
+            }
         }
         out.close("}");
     }

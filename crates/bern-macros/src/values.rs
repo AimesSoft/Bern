@@ -172,7 +172,11 @@ pub fn visibility(item: &Item) -> syn::Visibility {
 
 /// `pages` is the page slot the enum selects, from `pages = "slot"`.
 pub fn expand_standalone(tokens: TokenStream, pages: Option<&str>) -> syn::Result<TokenStream> {
-    let mut item: Item = syn::parse2(tokens)?;
+    let mut items = vec![syn::parse2(tokens)?];
+    crate::config::build_modules()?.items(&mut items)?;
+    let Some(mut item) = items.pop() else {
+        return Ok(crate::config::track_build());
+    };
     let mut track_modules = TokenStream::new();
     if let (Some(slot), Item::Enum(item)) = (pages, &mut item) {
         let (pages, manifests) = crate::config::module_pages(slot)
@@ -194,11 +198,13 @@ pub fn expand_standalone(tokens: TokenStream, pages: Option<&str>) -> syn::Resul
     let cleaned = clean_item(&item);
     let impls = impls(&value, &visibility(&item));
     let track = crate::component::track(languages.as_ref());
+    let track_build = crate::config::track_build();
     Ok(quote! {
         #cleaned
         #impls
         #track
         #track_modules
+        #track_build
     })
 }
 

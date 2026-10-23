@@ -30,8 +30,23 @@ const ROW_STATES: &[&str] = &[
 /// `BernStyledRow`.
 pub const SUPPORT: &[StyleSupport] = &[
     StyleSupport {
+        component: "PopoverButton",
+        base: &["background", "foreground"],
+        states: &[],
+    },
+    StyleSupport {
+        component: "Sidebar",
+        base: &["background"],
+        states: &[],
+    },
+    StyleSupport {
+        component: "Detail",
+        base: &["background"],
+        states: &[],
+    },
+    StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "corner"],
+        base: &["background", "foreground", "corner", "shadow"],
         states: &[],
     },
     // A form's background is its rows'.

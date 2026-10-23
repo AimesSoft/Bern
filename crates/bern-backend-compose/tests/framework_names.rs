@@ -120,7 +120,10 @@ fn value_types_named_like_framework_types_compile() {
         "val session_Engine = bernWindow.session(App_Engine::class.java)",
         "if (session_Window.pinned) {",
     ] {
-        assert!(kotlin.contains(expected), "BernGenerated.kt lacks `{expected}`");
+        assert!(
+            kotlin.contains(expected),
+            "BernGenerated.kt lacks `{expected}`"
+        );
     }
     for bare in [
         "class Layout",

@@ -15,6 +15,67 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+/// An editing region consumes the first outside pointer gesture at the window
+/// capture phase, before a button or slider can act on it.
+#[allow(non_snake_case)]
+pub fn FocusRegion(p: &Parent, ctx: &Ctx, children: Build) {
+    let region = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    children(&Parent::of_box(&region), ctx);
+    p.add(&region);
+    let window = ctx.win().window.clone();
+    let controller = gtk::EventControllerLegacy::new();
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak_region = region.downgrade();
+    let weak_window = window.downgrade();
+    let held = std::cell::Cell::new(false);
+    controller.connect_event(move |_, event| {
+        use gtk::gdk::EventType;
+        use gtk::glib::Propagation;
+        let kind = event.event_type();
+        if held.get() {
+            match kind {
+                EventType::ButtonRelease | EventType::TouchEnd | EventType::TouchCancel => {
+                    held.set(false);
+                    return Propagation::Stop;
+                }
+                EventType::MotionNotify | EventType::TouchUpdate => return Propagation::Stop,
+                _ => {}
+            }
+        }
+        if !matches!(kind, EventType::ButtonPress | EventType::TouchBegin) {
+            return Propagation::Proceed;
+        }
+        held.set(false);
+        let (Some(region), Some(window)) = (weak_region.upgrade(), weak_window.upgrade()) else {
+            return Propagation::Proceed;
+        };
+        if !region.is_mapped() || event.surface() != window.surface() {
+            return Propagation::Proceed;
+        }
+        let Some(focus) = gtk::prelude::RootExt::focus(&window) else {
+            return Propagation::Proceed;
+        };
+        if !focus.is_ancestor(&region)
+            || !(focus.is::<gtk::Editable>() || focus.is::<gtk::TextView>())
+        {
+            return Propagation::Proceed;
+        }
+        let (Some((x, y)), Some(bounds)) = (event.position(), region.compute_bounds(&window))
+        else {
+            return Propagation::Proceed;
+        };
+        let (dx, dy) = window.surface_transform();
+        if bounds.contains_point(&gtk::graphene::Point::new((x + dx) as f32, (y + dy) as f32)) {
+            return Propagation::Proceed;
+        }
+        held.set(true);
+        gtk::prelude::RootExt::set_focus(&window, None::<&gtk::Widget>);
+        Propagation::Stop
+    });
+    window.add_controller(controller.clone());
+    on_cleanup(move || window.remove_controller(&controller));
+}
+
 /// Content that a builder replaces: the current scope and region.
 struct Slot {
     region: Parent,
@@ -386,6 +447,7 @@ pub fn SidebarItem(p: &Parent, ctx: &Ctx, props: SidebarItemProps) {
         content.append(&icons::image(icon));
     }
     let text = gtk::Label::new(None);
+    text.add_css_class("bern-sidebar-label");
     text.set_xalign(0.0);
     text.set_ellipsize(gtk::pango::EllipsizeMode::End);
     let shown = text.clone();

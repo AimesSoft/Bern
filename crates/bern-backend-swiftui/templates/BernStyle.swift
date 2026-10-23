@@ -57,11 +57,7 @@ extension View {
     @ViewBuilder func bernPopover<Content: View>(
         isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        #if os(tvOS)
-        sheet(isPresented: isPresented, content: content)
-        #else
-        popover(isPresented: isPresented, arrowEdge: .bottom, content: content)
-        #endif
+        modifier(BernPopoverPresentation(requested: isPresented, panel: content))
     }
 
     /// A toggle shown as a button that stays down while on: the platform's
@@ -112,6 +108,70 @@ extension View {
     }
 }
 
+/// Keep the old binding and the platform presentation in agreement when
+/// a command in one popover opens another (quick settings → full settings).
+private struct BernPopoverPresentation<Panel: View>: ViewModifier {
+    @Binding var requested: Bool
+    @ViewBuilder let panel: () -> Panel
+    @Environment(BernWindowContext.self) private var window
+    @State private var id = UUID()
+    @State private var presented = false
+
+    func body(content: Content) -> some View {
+        presentation(content)
+            .onChange(of: requested, initial: true) {
+                if requested {
+                    if window.popoverOwner != id { window.dismissPopover?() }
+                    window.popoverOwner = id
+                    window.dismissPopover = { presented = false; requested = false }
+                    presented = true
+                } else {
+                    presented = false
+                    release()
+                }
+            }
+            .onChange(of: presented) {
+                if !presented {
+                    if requested { requested = false }
+                    release()
+                }
+            }
+            .onDisappear {
+                presented = false
+                if requested { requested = false }
+                release()
+            }
+    }
+
+    @ViewBuilder private func presentation(_ content: Content) -> some View {
+        #if os(tvOS)
+        content.sheet(isPresented: $presented, content: panel)
+        #elseif os(macOS)
+        content.popover(isPresented: $presented, arrowEdge: .bottom) {
+            panel().onExitCommand {
+                presented = false
+                requested = false
+                release()
+            }
+        }
+            .background(BernPopoverOutsidePress(active: presented) {
+                presented = false
+                requested = false
+                release()
+            }.allowsHitTesting(false))
+        #else
+        content.popover(isPresented: $presented, arrowEdge: .bottom, content: panel)
+        #endif
+    }
+
+    private func release() {
+        if window.popoverOwner == id {
+            window.popoverOwner = nil
+            window.dismissPopover = nil
+        }
+    }
+}
+
 // MARK: - Motion
 
 /// A spring from `style!`: undamped period and damping ratio.
@@ -158,6 +218,7 @@ enum BernColor: Equatable, Sendable {
     var color: Color {
         switch self {
         case .role(let role):
+            if let custom = MainActor.assumeIsolated({ BernThemeState.shared.palette[role] }) { return custom.color }
             return Self.system(role)
         case .fixed(let light, let dark):
             return Self.dynamic(light: light, dark: dark)
@@ -547,8 +608,7 @@ enum BernFocusKind {
 
 extension View {
     /// The focus a television shows on a control the style draws; nothing
-    /// elsewhere, where the platform's own focus ring stays, and nothing
-    /// while the control is not focused.
+    /// elsewhere, and nothing while the control is not focused.
     @ViewBuilder func bernTelevisionFocus(_ kind: BernFocusKind, corner: Double, shown: Bool = true) -> some View {
         #if os(tvOS)
         modifier(BernTelevisionFocus(kind: kind, corner: corner, shown: shown))
@@ -961,20 +1021,52 @@ struct BernSidebarLabel: View {
 final class BernThemeState {
     static let shared = BernThemeState()
     var accent: BernColor?
+    var palette: [String: BernColor] = [:]
+}
+
+/// Malformed values never reach a platform color constructor.
+private func bernPalette(_ text: String) -> [String: BernColor] {
+    guard let data = text.data(using: .utf8),
+          let input = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return [:] }
+    func hex(_ value: String?) -> UInt32? {
+        guard let value, value.count == 7, value.first == "#" else { return nil }
+        return UInt32(value.dropFirst(), radix: 16)
+    }
+    return input.reduce(into: [:]) { result, item in
+        if let light = hex(item.value["light"]), let dark = hex(item.value["dark"]) {
+            result[item.key] = .fixed(light: light, dark: dark)
+        }
+    }
 }
 
 /// The accent and appearance of `WindowSet`, applied to a window. The
 /// accent is not the window's tint: only the controls that show an accent
 /// take it (`bernAccentTint`), drawn parts through the `accent` role; the
 /// appearance is the application's (`system`, `light`, `dark`).
+private struct BernWindowSchemeKey: EnvironmentKey {
+    static let defaultValue: ColorScheme? = nil
+}
+extension EnvironmentValues {
+    var bernWindowScheme: ColorScheme? {
+        get { self[BernWindowSchemeKey.self] }
+        set { self[BernWindowSchemeKey.self] = newValue }
+    }
+}
+
 struct BernThemeChoice: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
     let accent: BernColor?
     let appearance: String?
+    var palette: String = ""
 
     func body(content: Content) -> some View {
+        let colors = bernPalette(palette)
+        let chosen = colors["accent"] ?? accent
         content
-            .environment(\.bernAccent, accent?.color)
-            .onChange(of: accent, initial: true) { BernThemeState.shared.accent = accent }
+            .environment(\.bernWindowScheme, appearance?.lowercased() == "dark" ? .dark : appearance?.lowercased() == "light" ? .light : scheme)
+            .environment(\.bernAccent, chosen?.color)
+            .onChange(of: chosen, initial: true) { BernThemeState.shared.accent = chosen }
+            .onChange(of: palette, initial: true) { BernThemeState.shared.palette = colors }
         #if os(macOS)
             .onChange(of: appearance, initial: true) {
                 switch appearance?.lowercased() {
@@ -1125,9 +1217,7 @@ struct BernSplitButton<Content: View>: View {
                 // drawn in the appearance of where it opens, as the
                 // content is.
                 .presentationCompactAdaptation(.popover)
-                .presentationBackground {
-                    Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
-                }
+                .bernPopoverBackground(nil, scheme: scheme)
                 .environment(\.colorScheme, scheme)
                 .environment(\.bernControlGroupHeight, nil)
         }
@@ -1316,6 +1406,7 @@ struct BernSidebarRow<Value: Hashable>: View {
                     .foregroundStyle(iconForeground)
             }
             Text(verbatim: label)
+                .fontWeight(isSelected ? .bold : nil)
             Spacer(minLength: 0)
             if badge > 0 { Text(String(badge)).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary) }
         }
@@ -2624,13 +2715,14 @@ private struct BernAccordionLayout: Layout {
     var weights: BernAccordionWeights
     let collapsedWidth: CGFloat
     let gap: CGFloat
-    let height: CGFloat
+    let height: CGFloat?
     var animatableData: BernAccordionWeights {
         get { weights }
         set { weights = newValue }
     }
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        CGSize(width: proposal.width ?? (collapsedWidth * CGFloat(subviews.count) + gap * CGFloat(max(0, subviews.count - 1))), height: height)
+        let proposedHeight = proposal.height.flatMap { $0.isFinite ? $0 : nil }
+        return CGSize(width: proposal.width ?? (collapsedWidth * CGFloat(subviews.count) + gap * CGFloat(max(0, subviews.count - 1))), height: max(0, height ?? proposedHeight ?? 560))
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let current = subviews.indices.map { weights.values.indices.contains($0) ? weights.values[$0] : 0 }
@@ -2638,7 +2730,7 @@ private struct BernAccordionLayout: Layout {
         var x = bounds.minX
         for index in subviews.indices {
             subviews[index].place(at: CGPoint(x: x, y: bounds.minY), anchor: .topLeading,
-                                 proposal: ProposedViewSize(width: widths[index], height: height))
+                                 proposal: ProposedViewSize(width: widths[index], height: bounds.height))
             x += widths[index] + gap
         }
     }
@@ -2661,7 +2753,7 @@ struct BernAccordion<Content: View>: View {
     let selected: Int
     let collapsedWidth: CGFloat
     let gap: CGFloat
-    let height: CGFloat
+    let height: CGFloat?
     let motion: BernMotion?
     @ViewBuilder let content: Content
     @BernReducedMotion private var reduce
@@ -2669,12 +2761,12 @@ struct BernAccordion<Content: View>: View {
         let count = max(0, count)
         let selection = min(max(0, selected), max(0, count - 1))
         let weights = BernAccordionWeights(values: (0..<count).map { $0 == selection ? 1 : 0 })
-        BernAccordionLayout(weights: weights, collapsedWidth: max(0, collapsedWidth), gap: max(0, gap), height: max(0, height)) {
+        BernAccordionLayout(weights: weights, collapsedWidth: max(0, collapsedWidth), gap: max(0, gap), height: height.map { max(0, $0) }) {
             // Width belongs to the layout. Switching a column's content must
             // not create a second, independently animated sizing transition.
             content.animation(nil, value: selected)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: height == nil ? 0 : nil, maxHeight: height == nil ? .infinity : nil)
         .animation(reduce || bernForcedReduceMotion ? nil : motion?.animation, value: weights)
     }
 }
@@ -2891,6 +2983,27 @@ extension View {
 
 // MARK: - Popover buttons
 
+extension View {
+    /// Leave an unstyled macOS popover's surface to the system, including
+    /// Liquid Glass and its arrow. A custom presentation background replaces
+    /// that material, so apply it only when the app supplies a fill.
+    @ViewBuilder func bernPopoverBackground(_ background: BernColor?, scheme: ColorScheme) -> some View {
+        if let background {
+            presentationBackground {
+                Rectangle().fill(background.color).environment(\.colorScheme, scheme)
+            }
+        } else {
+            #if os(macOS)
+            preferredColorScheme(scheme)
+            #else
+            presentationBackground {
+                Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
+            }
+            #endif
+        }
+    }
+}
+
 /// A button that shows its content in a popover, such as a volume slider.
 /// The content exists while the popover shows. `presented`, when given,
 /// opens and closes it and follows it; external entries open it with
@@ -2900,8 +3013,11 @@ struct BernPopoverButton<Content: View>: View {
     let systemImage: String?
     let presented: Binding<Bool>?
     let target: String
+    var windowTheme = false
+    var style: BernStyle? = nil
     @ViewBuilder let content: () -> Content
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.bernWindowScheme) private var windowScheme
     @State private var local = false
 
     private var isPresented: Binding<Bool> {
@@ -2910,6 +3026,7 @@ struct BernPopoverButton<Content: View>: View {
 
     var body: some View {
         let showing = isPresented
+        let panelScheme = windowTheme ? (windowScheme ?? scheme) : scheme
         Button {
             showing.wrappedValue.toggle()
         } label: {
@@ -2924,13 +3041,10 @@ struct BernPopoverButton<Content: View>: View {
             VStack(alignment: .leading, spacing: 12) { content() }
                 .padding(16)
                 .frame(minWidth: 240, alignment: .leading)
-                // A popover also on iPhone, drawn in the appearance of
-                // where it opens.
                 .presentationCompactAdaptation(.popover)
-                .presentationBackground {
-                    Rectangle().fill(.regularMaterial).environment(\.colorScheme, scheme)
-                }
-                .environment(\.colorScheme, scheme)
+                .bernPopoverBackground(style?.base.background, scheme: panelScheme)
+                .foregroundStyle(style?.base.foreground?.color ?? Color.primary)
+                .environment(\.colorScheme, panelScheme)
                 .environment(\.bernControlGroupHeight, nil)
         }
         .bernControl(
@@ -3520,8 +3634,14 @@ struct BernPaletteInput: View {
 /// A decorative surface keeps its children as native controls.
 struct BernSurface: ViewModifier {
     let style: BernStyle
-    @ViewBuilder
     func body(content: Content) -> some View {
+        let shadow = style.base.shadow ?? BernShadow(radius: 0, y: 0, opacity: 0)
+        surface(content)
+            .shadow(color: .black.opacity(shadow.opacity), radius: shadow.radius, y: shadow.y)
+    }
+
+    @ViewBuilder
+    private func surface(_ content: Content) -> some View {
         if let corner = style.corner {
             content
                 .bernForeground(style.base.foreground?.color)
@@ -4237,6 +4357,26 @@ extension EnvironmentValues {
 }
 
 extension View {
+    /// Color the native split columns in place, keeping the navigation
+    /// container and its toolbar safe area intact. Only the paint extends
+    /// under the bars; the column's content keeps its original layout.
+    @ViewBuilder func bernSidebarStyle(_ style: BernStyle) -> some View {
+        if let background = style.base.background?.color {
+            self.bernScrollContentBackgroundHidden()
+                .background { background.ignoresSafeArea(.container) }
+        } else {
+            self
+        }
+    }
+
+    @ViewBuilder func bernDetailStyle(_ style: BernStyle) -> some View {
+        if let background = style.base.background?.color {
+            self.background { background.ignoresSafeArea(.container) }
+        } else {
+            self
+        }
+    }
+
     /// A form standing on its page: with a background in its style, its
     /// rows take that and the form's own grouped background gives way to
     /// the page's.

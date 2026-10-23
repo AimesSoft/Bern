@@ -540,7 +540,12 @@ impl RecordingKernel {
 impl bern_media::MediaExecutor for RecordingKernel {
     fn execute(&self, request: bern_media::ExecRequest) {
         self.note(format!("{:?}", request.op));
-        let hub = self.hub.lock().unwrap().clone().expect("attached before requests");
+        let hub = self
+            .hub
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("attached before requests");
         hub.complete(request.request, Ok(()));
     }
 }
@@ -610,7 +615,9 @@ fn an_installed_kernel_plays_and_draws_into_the_views_surfaces() {
     params.text("preview");
     encode(
         &Value::Record(vec![Value::Text("file:///clip.mkv".into())]),
-        &Type::Record { name: bern_media::MEDIA_SOURCE.into() },
+        &Type::Record {
+            name: bern_media::MEDIA_SOURCE.into(),
+        },
         &types,
         &mut params,
     );
@@ -991,7 +998,9 @@ fn trace_commands_answer_from_the_runtime_and_join_the_ui_side() {
         .handle(
             None,
             SessionCommand::TraceStart,
-            vec![Value::Text("all,control:Counter.plus,quiet,file:none".into())],
+            vec![Value::Text(
+                "all,control:Counter.plus,quiet,file:none".into(),
+            )],
         )
         .unwrap();
     assert_eq!(
@@ -1002,10 +1011,18 @@ fn trace_commands_answer_from_the_runtime_and_join_the_ui_side() {
         ])
     );
     let invalid = sessions
-        .handle(None, SessionCommand::TraceStart, vec![Value::Text("fast".into())])
+        .handle(
+            None,
+            SessionCommand::TraceStart,
+            vec![Value::Text("fast".into())],
+        )
         .unwrap_err();
     assert_eq!(invalid.code, "invalid_rules");
-    assert_ne!(bern_trace_mask() & trace::UI, 0, "a failed start keeps the trace");
+    assert_ne!(
+        bern_trace_mask() & trace::UI,
+        0,
+        "a failed start keeps the trace"
+    );
 
     // The frontend's side of one press of `Counter.plus`.
     let name = "Counter.plus";
@@ -1025,19 +1042,54 @@ fn trace_commands_answer_from_the_runtime_and_join_the_ui_side() {
     let revision = Reader::new(&state).u64().unwrap();
     assert!(revision > 40);
     let applying = bern_trace_now();
-    ui(trace::kind::APPLY_FIELD, revision, 0, 8, applying, bern_trace_now(), "");
-    ui(trace::kind::RECEIVE_STATE, revision, state.len() as u64, 0, applying, bern_trace_now(), "");
+    ui(
+        trace::kind::APPLY_FIELD,
+        revision,
+        0,
+        8,
+        applying,
+        bern_trace_now(),
+        "",
+    );
+    ui(
+        trace::kind::RECEIVE_STATE,
+        revision,
+        state.len() as u64,
+        0,
+        applying,
+        bern_trace_now(),
+        "",
+    );
     frontend.wait_for("reply");
     let replied = bern_trace_now();
-    ui(trace::kind::RECEIVE_REPLY, 9001, 0, 0, replied, bern_trace_now(), "");
+    ui(
+        trace::kind::RECEIVE_REPLY,
+        9001,
+        0,
+        0,
+        replied,
+        bern_trace_now(),
+        "",
+    );
     let tick = bern_trace_now() + 1;
-    ui(trace::kind::FRAME, 1, 16_666_667, 0, tick, tick + 1_000_000, "");
+    ui(
+        trace::kind::FRAME,
+        1,
+        16_666_667,
+        0,
+        tick,
+        tick + 1_000_000,
+        "",
+    );
 
     let report = sessions
         .handle(
             None,
             SessionCommand::TraceReport,
-            vec![Value::Optional(Some(Box::new(Value::Int(5)))), Value::Optional(None)],
+            vec![
+                Value::Optional(Some(Box::new(Value::Int(5)))),
+                Value::Optional(None),
+            ],
         )
         .unwrap();
     let Value::Record(fields) = &report else {
@@ -1057,7 +1109,9 @@ fn trace_commands_answer_from_the_runtime_and_join_the_ui_side() {
         })
         .expect("the press is reported");
     let segments = segments(pressed);
-    for segment in ["act", "dispatch", "queue", "exec", "publish", "to_ui", "apply", "to_frame"] {
+    for segment in [
+        "act", "dispatch", "queue", "exec", "publish", "to_ui", "apply", "to_frame",
+    ] {
         assert!(segments.contains_key(segment), "{segment} in {segments:?}");
     }
     let Value::List(fields_sent) = &fields[6] else {

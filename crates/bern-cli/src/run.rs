@@ -214,6 +214,35 @@ fn exit_code(code: Option<i32>) -> ExitCode {
 
 /// Serve a page whose engine runs in the page until Ctrl-C.
 fn serve(root: &Path, port: Option<u16>, trace: Option<&str>) -> Result<ExitCode, String> {
+    let bridge = root.join("serve-bridge.py");
+    if bridge.is_file() {
+        let mut command = Command::new("python3");
+        command
+            .arg("-u")
+            .arg(&bridge)
+            .arg("--directory")
+            .arg(root)
+            .arg("--port")
+            .arg(port.unwrap_or(0).to_string());
+        if let Some(rules) = trace {
+            command.arg("--trace").arg(rules);
+        }
+        let mut child = command
+            .stdout(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot start browser command bridge (Python 3 required): {e}"))?;
+        for line in BufReader::new(child.stdout.take().expect("piped")).lines() {
+            let Ok(line) = line else { break };
+            println!("{line}");
+            if let Some(url) = line.strip_prefix("open ") {
+                open_browser(url.trim());
+            }
+        }
+        return child
+            .wait()
+            .map(|status| exit_code(status.code()))
+            .map_err(|e| format!("cannot wait for browser command bridge: {e}"));
+    }
     let server = bern_transport_ws::FileServer::start(root.to_path_buf(), port.unwrap_or(0))
         .map_err(|error| format!("cannot serve {}: {error}", root.display()))?;
     let url = server.url() + &trace.map(page_trace).unwrap_or_default();
@@ -383,7 +412,11 @@ mod tests {
                     .contains("web_mode = \"app\"")
             );
             // Invalid options fail before the nonexistent program is started.
-            assert!(start(&run, Some(4173), None).unwrap_err().contains("--port"));
+            assert!(
+                start(&run, Some(4173), None)
+                    .unwrap_err()
+                    .contains("--port")
+            );
         }
     }
 }

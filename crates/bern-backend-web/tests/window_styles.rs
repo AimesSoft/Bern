@@ -259,3 +259,75 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
         runtime.contains("bern-align-${align ?? (axis === \"column\" ? \"leading\" : \"center\")}")
     );
 }
+
+#[test]
+fn browser_extension_is_loaded_built_and_packaged_with_the_page() {
+    use bern_target_api::{BuildStep, Signing};
+    let root = workspace();
+    let project = root.join("target/bern-test/web-extension-project");
+    let (_, compiled) = stage_project(&project, STAGE_UI);
+    let manifest = project.join("Bern.toml");
+    let config_text = std::fs::read_to_string(&manifest).unwrap();
+    std::fs::write(&manifest, format!("{config_text}\nweb_extension = {{ path = \"web\", build = [\"python3\", \"build.py\"] }}\n")).unwrap();
+    std::fs::create_dir_all(project.join("web")).unwrap();
+    std::fs::write(
+        project.join("web/index.js"),
+        "export default () => ({imports:{}});",
+    )
+    .unwrap();
+    let config = bern_compiler::config::load(&manifest).unwrap();
+    let output = root.join("target/bern-test/web-extension-output");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: config.targets[0].clone(),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let files = WebBrowser.generate(&compiled.app, &context).unwrap();
+    let text = |name: &str| {
+        String::from_utf8(
+            files
+                .iter()
+                .find(|f| f.path == Path::new(name))
+                .unwrap()
+                .contents
+                .clone(),
+        )
+        .unwrap()
+    };
+    assert!(text("app.js").starts_with("import './extension-loader.js?v="));
+    assert!(text("extension-loader.js").contains("installWebExtension(setup)"));
+    let plan = WebBrowser.plan(&compiled.app, &context).unwrap();
+    let BuildStep::Run {
+        program, args, cwd, ..
+    } = &plan.steps[0]
+    else {
+        panic!("extension builds first")
+    };
+    assert_eq!(program, "python3");
+    assert_eq!(
+        args,
+        &[
+            "build.py".to_string(),
+            output.join("extension").display().to_string()
+        ]
+    );
+    assert_eq!(cwd, &project.join("web"));
+    std::fs::create_dir_all(output.join("extension/lib")).unwrap();
+    std::fs::write(output.join("extension/lib/worker.wasm"), [0, 97, 115, 109]).unwrap();
+    let package = WebBrowser
+        .package(&compiled.app, &context, &Signing::default())
+        .unwrap();
+    assert!(format!("{:?}", package.steps).contains("extension/lib/worker.wasm"));
+    std::fs::remove_file(project.join("web/index.js")).unwrap();
+    assert!(WebBrowser.generate(&compiled.app, &context).is_err());
+}

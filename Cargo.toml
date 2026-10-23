@@ -10,6 +10,7 @@ members = [
     "crates/bern-media",
     "crates/bern-image",
     "crates/bern-svg",
+    "crates/bern-script",
     "crates/bern-runtime",
     "crates/bern-theme",
     "crates/bern-adapter-json",
@@ -70,6 +71,7 @@ bern-command = { path = "crates/bern-command" }
 bern-media = { path = "crates/bern-media" }
 bern-image = { path = "crates/bern-image" }
 bern-svg = { path = "crates/bern-svg" }
+bern-script = { path = "crates/bern-script" }
 bern-runtime = { path = "crates/bern-runtime" }
 bern-theme = { path = "crates/bern-theme" }
 bern-target-api = { path = "crates/bern-target-api" }

@@ -72,6 +72,10 @@ function runtime(search = "") {
       }
     }
     prepend(child) { this.childNodes.unshift(child); child.parentElement = this; }
+    replaceChildren(...children) {
+      for (const child of [...this.childNodes]) child.remove();
+      this.append(...children);
+    }
     matches() { return false; }
     setPointerCapture(id) { this.captured = id; }
     focus() { this.focused = true; }
@@ -105,10 +109,11 @@ function runtime(search = "") {
     disconnect() { this.targets.clear(); this.disconnected = true; }
   }
   const globals = {
-    TextEncoder, TextDecoder, URLSearchParams, performance, innerWidth: 1280, innerHeight: 800,
+    TextEncoder, TextDecoder, URLSearchParams, performance, innerWidth: 1280, innerHeight: 800, HTMLElement: Element,
     navigator: { platform: "MacIntel" }, location: { search }, Image: Probe,
     Node: { ELEMENT_NODE: 1, DOCUMENT_POSITION_FOLLOWING: 4 },
     document: {
+      documentElement: new Element("html"),
       listeners: {},
       addEventListener(name, callback) { (this.listeners[name] ??= []).push(callback); },
       querySelector: () => null,
@@ -132,7 +137,7 @@ function runtime(search = "") {
       });
       return queries.get(query);
     },
-    getComputedStyle: (node) => ({ direction: node.style.direction ?? "ltr", paddingTop: node.style.paddingBlock ?? "0px", paddingLeft: node.style.paddingInline ?? "0px" }),
+    getComputedStyle: (node) => ({ colorScheme: node.style.colorScheme ?? "light", direction: node.style.direction ?? "ltr", paddingTop: node.style.paddingBlock ?? "0px", paddingLeft: node.style.paddingInline ?? "0px" }),
     requestAnimationFrame: (callback) => { frames.push(callback); return frames.length; },
     cancelAnimationFrame() {},
     setTimeout: (callback, delay) => { timers.push({ callback, delay }); return timers.length; },
@@ -163,6 +168,28 @@ test("the interface language follows the browser's preferences in order", () => 
   assert.equal(choose(["pt-BR", "en"], ["pt", "pt-BR"]), "pt-BR", "an exact match still wins within one language");
   assert.equal(choose(["EN-us"], ["fr", "en-US"]), "en-US");
   assert.equal(choose(["ja"], ["de", "fr"]), "en");
+});
+
+test("transparent surfaces and plain controls shadow their content while filled controls keep box shadows", () => {
+  const { B, F, Element } = runtime();
+  for (const className of ["bern-layers", "bern-button-plain", "bern-icon-button", "bern-icon-button bern-icon-button-prominent", "bern-button"]) {
+    const node = new Element("div");
+    node.className = className;
+    const scope = new B.Scope();
+    B.within(scope, () => F.applyStyle(node, {
+      base: { shadow: [3, 1, 0.9] },
+      hover: { background: { role: "fill.subtle" } },
+    }));
+    const content = ["bern-layers", "bern-button-plain", "bern-icon-button"].includes(className);
+    assert.equal(node.style.filter, content ? "drop-shadow(0 1px 3px rgb(0 0 0 / 0.9))" : "");
+    assert.equal(node.style.boxShadow, content ? "" : "0 1px 3px rgb(0 0 0 / 0.9)");
+    node.dispatch("pointerenter", { pointerType: "mouse" });
+    assert.equal(node.style.filter, "");
+    assert.equal(node.style.boxShadow, "0 1px 3px rgb(0 0 0 / 0.9)");
+    node.dispatch("pointerleave");
+    assert.equal(node.style.filter, content ? "drop-shadow(0 1px 3px rgb(0 0 0 / 0.9))" : "");
+    scope.dispose();
+  }
 });
 
 test("neutral sidebar selection pairs text with its replacement fill through hover and selection changes", () => {
@@ -556,6 +583,281 @@ test("a scroll view in a split button's or popover button's panel leaves the but
   scope.dispose();
 });
 
+test("popup surface follows the window theme without recoloring its dark trigger", () => {
+  const { B, F, Element, document } = runtime();
+  const player = new Element("player"), scope = new B.Scope();
+  player.classList.add("bern-appearance-dark");
+  B.within(scope, () => F.PopoverButton(player, { comp: "player" }, {
+    id: "rate", label: () => "Rate", windowTheme: true,
+    style: { base: { background: { light: "#F2F2F2", dark: "#1E1E1E" }, foreground: { role: "text.primary" } } },
+  }, () => {}));
+  const [trigger, panel] = player.children[0].children;
+  assert.equal(panel.classList.contains("bern-appearance-light"), true);
+  assert.equal(panel.style.background, "light-dark(#F2F2F2, #1E1E1E)");
+  assert.equal(panel.style.color, "var(--bern-text-primary)");
+  assert.equal(trigger.style.background, undefined);
+  document.documentElement.style.colorScheme = "dark";
+  F.themeTick.set(F.themeTick.peek() + 1);
+  assert.equal(panel.classList.contains("bern-appearance-dark"), true);
+  assert.equal(panel.classList.contains("bern-appearance-light"), false);
+  document.documentElement.style.colorScheme = "light";
+  F.themeTick.set(F.themeTick.peek() + 1);
+  assert.equal(panel.classList.contains("bern-appearance-light"), true);
+  assert.equal(player.classList.contains("bern-appearance-dark"), true);
+  scope.dispose();
+});
+
+test("controlled popovers publish native changes before deferred toggle and release every content scope", () => {
+  const { B, F, Element, flushMicrotasks } = runtime();
+  const root = new Element("root"), scope = new B.Scope();
+  const state = B.cell({ open: false, tick: 0 });
+  const writes = [];
+  let mounted = 0, released = 0;
+  B.within(scope, () => F.PopoverButton(root, { comp: "demo" }, {
+    id: "settings", label: () => "Settings",
+    presented: {
+      get: () => state.get().open, peek: () => state.peek().open,
+      set: (open) => { writes.push(open); state.set({ ...state.peek(), open }); },
+    },
+  }, (panel) => {
+    mounted++;
+    B.onCleanup(() => released++);
+    panel.append(new Element("content"));
+  }));
+  const [trigger, panel] = root.children[0].children;
+  panel.isConnected = true;
+  let showing = false;
+  let transitioning = false;
+  panel.matches = () => showing;
+  const nativeChange = (next) => {
+    if (showing === next) return;
+    assert.equal(transitioning, false, "native popovers reject reentrant show operations");
+    transitioning = true;
+    panel.dispatch("beforetoggle", { newState: next ? "open" : "closed" });
+    // Engine microtasks may flush before the browser completes its show/hide.
+    state.set({ ...state.peek() });
+    showing = next;
+    transitioning = false;
+  };
+  panel.showPopover = () => nativeChange(true);
+  panel.hidePopover = () => nativeChange(false);
+  flushMicrotasks();
+  panel.showPopover();
+  assert.equal(state.peek().open, true, "opening publishes without waiting for toggle");
+  for (let tick = 1; tick <= 3; tick++) {
+    panel.hidePopover();
+    assert.equal(state.peek().open, false, "native dismissal publishes synchronously");
+    assert.equal(panel.children.length, 0);
+    state.set({ ...state.peek(), tick });
+    assert.equal(showing, false, "a player tick must not reopen dismissed settings");
+    state.set({ ...state.peek(), open: true });
+    assert.equal(panel.children.length, 1);
+    assert.equal(mounted - released, 1);
+    // Browsers may coalesce close/reopen into one delayed toggle event.
+    panel.dispatch("toggle", { oldState: "open", newState: "open" });
+    assert.equal(panel.children.length, 1);
+  }
+  assert.equal(trigger.attributes["aria-expanded"], "true");
+  assert.deepEqual(writes, [true, false, false, false]);
+  scope.dispose();
+  assert.equal(mounted, released);
+  assert.equal(state.peek().open, true, "unmounting must not overwrite the next layout's binding");
+  flushMicrotasks();
+  assert.equal(showing, false);
+});
+
+test("engine popovers keep the latest native intent until its command completes", () => {
+  const { B, F, Element, flushMicrotasks } = runtime();
+  const root = new Element("root"), scope = new B.Scope();
+  const state = B.cell({ open: false, tick: 0 });
+  const requests = [];
+  const commit = (open, done) => requests.push({ open, done });
+  let mounted = 0, released = 0;
+  B.within(scope, () => F.PopoverButton(root, { comp: "demo" }, {
+    id: "settings", label: () => "Settings",
+    presented: { get: () => state.get().open, peek: () => state.peek().open, set: commit, commit },
+  }, panel => {
+    mounted++;
+    B.onCleanup(() => released++);
+    panel.append(new Element("content"));
+  }));
+  const [trigger, panel] = root.children[0].children;
+  let showing = false;
+  panel.isConnected = true;
+  panel.matches = () => showing;
+  const change = next => {
+    if (showing === next) return;
+    panel.dispatch("beforetoggle", { newState: next ? "open" : "closed" });
+    showing = next;
+  };
+  panel.showPopover = () => change(true);
+  panel.hidePopover = () => change(false);
+  const tick = () => state.set({ ...state.peek(), tick: state.peek().tick + 1 });
+  const ack = (index, error = null) => {
+    const request = requests[index];
+    if (!error) state.set({ ...state.peek(), open: request.open });
+    request.done?.(error);
+    flushMicrotasks();
+  };
+  flushMicrotasks();
+  panel.showPopover();
+  tick();
+  assert.equal(showing, true, "stale player frames cannot close newly opened settings");
+  assert.equal(mounted, 1, "no duplicate mount or entrance animation during acknowledgement");
+  panel.hidePopover();
+  assert.deepEqual(requests.map(r => r.open), [true, false], "closing must supersede an in-flight open even when the record still says closed");
+  ack(0);
+  tick();
+  assert.equal(showing, false, "an earlier acknowledgement cannot reopen dismissed settings");
+  ack(1);
+  assert.equal(showing, false);
+  panel.showPopover();
+  ack(2);
+  tick();
+  assert.equal(showing, true);
+  panel.hidePopover();
+  ack(3, new Error("rejected"));
+  assert.equal(showing, true, "failed commits reconcile with authoritative state");
+  state.set({ ...state.peek(), open: false });
+  assert.equal(showing, false, "external commands still control the popover after completion");
+  assert.equal(trigger.attributes["aria-expanded"], "false");
+  panel.showPopover();
+  scope.dispose();
+  ack(4);
+  assert.equal(showing, false, "late completion cannot reopen an unmounted panel");
+  assert.equal(mounted, released);
+});
+
+test("popover entrance animations are cancelled on closing and replaced on reopening", () => {
+  const { Element, document } = runtime();
+  const panel = new Element("div"), animations = [];
+  let open = false;
+  panel.matches = selector => selector === ":popover-open" ? open : true;
+  panel.animate = (_keyframes, options) => {
+    assert.ok(panel.classes.has("bern-popover-entering"), "the first-paint guard stays until animation creation");
+    assert.equal(options.fill, "backwards", "the animation start applies while its timeline is pending");
+    const animation = { cancelled: false, cancel() { this.cancelled = true; } };
+    animations.push(animation);
+    return animation;
+  };
+  const toggle = (type, state) => {
+    for (const listener of document.listeners[type] ?? []) listener({ target: panel, newState: state });
+  };
+  toggle("beforetoggle", "open");
+  assert.ok(panel.classes.has("bern-popover-entering"), "arm the invisible first frame before the browser shows the panel");
+  assert.equal(animations.length, 0, "position and content are measured before animating");
+  open = true;
+  toggle("toggle", "open");
+  assert.equal(animations.length, 2);
+  assert.equal(panel.classes.has("bern-popover-entering"), false);
+  toggle("beforetoggle", "closed");
+  open = false;
+  assert.ok(animations.every(a => a.cancelled), "a closed popup must not retain scale/fade animations");
+  assert.equal(panel.classes.has("bern-popover-entering"), false);
+  toggle("toggle", "open");
+  assert.equal(animations.length, 2, "stale deferred open events must not animate a hidden panel");
+  toggle("beforetoggle", "open");
+  open = true;
+  toggle("toggle", "open");
+  toggle("toggle", "open");
+  assert.equal(animations.length, 4, "duplicate deferred toggles cannot restart the entrance");
+  assert.ok(animations.slice(0, -2).every(a => a.cancelled));
+});
+
+for (const kind of ["popover", "split", "menu", "picker"]) {
+test(`${kind} outside dismissal consumes a complete press and leaves the next press and inside controls usable`, () => {
+  const { B, F, Element, document } = runtime();
+  const root = new Element("root"), scope = new B.Scope();
+  B.within(scope, () => {
+    const ctx = { comp: "demo" }, spec = { id: "settings", label: () => "Settings" };
+    if (kind === "popover") F.PopoverButton(root, ctx, spec, () => {});
+    if (kind === "split") F.SplitButton(root, ctx, { ...spec, field: B.cell(true) }, () => {});
+    if (kind === "menu") B.Menu(root, ctx, spec, []);
+    if (kind === "picker") B.Picker(root, ctx, { ...spec, field: B.cell(1), options: [
+      { value: 1, name: "one", label: () => "One" },
+    ], style: "menu", labelHidden: true });
+  });
+  const children = root.children[0].children;
+  const trigger = children.at(-2), panel = children.at(-1);
+  const otherTrigger = new Element("button"), otherPanel = new Element("div");
+  const otherIcon = new Element("svg");
+  otherTrigger.append(otherIcon);
+  B.within(scope, () => B.dismissPopoverOnOutsidePress(otherPanel, otherTrigger));
+  let showing = true, closed = 0;
+  panel.matches = () => showing;
+  panel.hidePopover = () => { showing = false; closed++; };
+  const outside = new Element("video"), inside = new Element("slider");
+  panel.append(inside);
+  const press = (type, target, pointerId = 7) => {
+    let prevented = false, stopped = false;
+    for (const listener of document.listeners[type] ?? []) {
+      listener({ target, button: 0, pointerId, isPrimary: true,
+        preventDefault() { prevented = true; }, stopImmediatePropagation() { stopped = true; },
+      });
+      if (stopped) break;
+    }
+    assert.equal(prevented, stopped);
+    return prevented;
+  };
+  assert.equal(press("pointerdown", inside), false);
+  assert.equal(press("pointerdown", trigger), false);
+  assert.equal(closed, 0);
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+    assert.equal(press(type, outside, type === "click" ? 1 : 7), true, type);
+  }
+  assert.equal(closed, 1);
+  for (const type of ["pointerdown", "pointerup", "click"]) assert.equal(press(type, outside), false, type);
+  showing = true;
+  assert.equal(press("pointerdown", outside), true);
+  assert.equal(press("pointercancel", outside), true);
+  assert.equal(press("click", outside), false);
+  showing = true;
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+    assert.equal(press(type, otherIcon), false, "switching popup triggers must reach the new trigger");
+  }
+  assert.equal(showing, false, "switching closes the old popover");
+  scope.dispose();
+  showing = true;
+  assert.equal(press("pointerdown", outside), false, "disposed panels are unregistered");
+});
+}
+
+test("focus regions dismiss editing with one complete press and preserve inside controls", () => {
+  const { B, Element, document } = runtime();
+  const root = new Element("root"), scope = new B.Scope();
+  const input = new Element("input"), send = new Element("button"), outside = new Element("video");
+  input.value = "unsent draft";
+  input.matches = () => true;
+  input.blur = () => { document.activeElement = null; };
+  B.within(scope, () => B.FocusRegion(root, {}, p => p.append(input, send)));
+  const press = (type, target, detail = 1) => {
+    let consumed = false;
+    for (const listener of document.listeners[type] ?? []) {
+      listener({ type, target, button: 0, pointerId: type === "click" ? 1 : 7, isPrimary: true, detail,
+        preventDefault() {}, stopImmediatePropagation() { consumed = true; } });
+      if (consumed) break;
+    }
+    return consumed;
+  };
+  document.activeElement = input;
+  assert.equal(press("pointerdown", input), false);
+  assert.equal(press("pointerdown", send), false);
+  assert.equal(document.activeElement, input);
+  assert.equal(press("pointerdown", outside), true);
+  assert.equal(document.activeElement, null);
+  assert.equal(input.value, "unsent draft");
+  assert.equal(press("click", send, 0), false, "keyboard activation remains independent");
+  for (const type of ["mousedown", "pointerup", "mouseup", "click"]) assert.equal(press(type, outside), true, type);
+  assert.equal(press("pointerdown", outside), false, "next press works");
+  document.activeElement = input;
+  assert.equal(press("pointerdown", outside), true);
+  assert.equal(press("pointercancel", outside), true);
+  assert.equal(press("click", outside), false);
+  scope.dispose();
+  document.activeElement = input;
+  assert.equal(press("pointerdown", outside), false, "unmounted regions unregister");
+});
+
 test("edge grow keeps its opacity and anchors the scaling edge", () => {
   const { F, Element } = runtime();
   const node = new Element("div");
@@ -791,6 +1093,27 @@ test("idle timeout survives unrelated playback ticks, pauses and cleans up", () 
   assert.equal(win.element.events.pointermove.length, 0);
 });
 
+test("Escape belongs to an open native popover before the underlying page shortcut", () => {
+  const { B, F, Element, document } = runtime();
+  const scope = new B.Scope(), target = new Element("button");
+  let ran = 0, prevented = false, open = true;
+  document.querySelector = selector => selector === '[popover="auto"]:popover-open' && open ? target : null;
+  B.within(scope, () => F.KeyShortcut(null, {}, { key: "escape" }, () => ran++));
+  const press = () => {
+    for (const listener of document.listeners.keydown) listener({ key: "Escape", target,
+      preventDefault() { prevented = true; },
+    });
+  };
+  press();
+  assert.equal(ran, 0);
+  assert.equal(prevented, false, "native dismissal must still receive Escape");
+  open = false;
+  press();
+  assert.equal(ran, 1);
+  assert.equal(prevented, true);
+  scope.dispose();
+});
+
 test("a disabled shortcut leaves its key to the one under it, and unmounting removes it", () => {
   const { B, F, Element, document } = runtime();
   const ran = [];
@@ -1012,4 +1335,58 @@ test("a canvas with nothing to draw keeps no bitmap however it resizes, and draw
   assert.equal(canvas.width, 0);
   assert.equal(canvas.height, 0);
   scope.dispose();
+});
+
+
+test("continuous controlled slider commits during the drag without losing its preview", () => {
+  const { B, Element } = runtime();
+  const host = new Element("div");
+  const current = B.cell(0.8);
+  const commits = [];
+  const scope = new B.Scope();
+  const field = { get: () => current.get(), peek: () => current.peek(), set: value => { commits.push(value); current.set(value); } };
+  B.within(scope, () => B.Slider(host, {}, { id: "opacity", label: () => "Opacity", field, min: 0, max: 1, controlled: true, continuous: true, labelHidden: true }));
+  const input = host.children[0].children[0];
+  input.events.pointerdown[0]();
+  for (const value of [0.3, 0.4, 0.5]) {
+    input.value = value;
+    input.events.input[0]();
+  }
+  assert.deepEqual(commits, [0.3, 0.4, 0.5]);
+  current.set(0.4); // An older engine response must not move the held thumb.
+  assert.equal(Number(input.value), 0.5);
+  input.value = 0.6;
+  input.events.change[0]();
+  assert.equal(commits.at(-1), 0.6);
+  scope.dispose();
+});
+
+test("menus can hide disabled items and restore them without replacing the menu", () => {
+  for (const hideDisabled of [false, true]) {
+    const { B, Element, document } = runtime();
+    const scope = new B.Scope();
+    const root = new Element("root");
+    const available = B.cell(false);
+    B.within(scope, () => B.Menu(root, { comp: "player" }, { id: "more", label: () => "More", hideDisabled }, [
+      { id: "chapters", label: () => "Chapters", enabled: () => available.get(), action() {} },
+      { id: "info", label: () => "Information", action() {} },
+    ]));
+    const menu = root.children[0].children[1];
+    const [chapters, info] = menu.children;
+    assert.equal(chapters.disabled, true);
+    assert.equal(chapters.style.display === "none", hideDisabled);
+    menu.dispatch("keydown", { key: "Home" });
+    assert.equal(info.focused, true, "keyboard navigation skips the unavailable entry");
+    available.set(true);
+    assert.equal(chapters.disabled, false);
+    assert.notEqual(chapters.style.display, "none");
+    document.activeElement = info;
+    menu.dispatch("keydown", { key: "Home" });
+    assert.equal(chapters.focused, true, "restored entries rejoin keyboard navigation");
+    available.set(false);
+    assert.equal(chapters.style.display === "none", hideDisabled);
+    assert.equal(root.children[0].children[1], menu);
+    scope.dispose();
+    assert.equal(B.controlEntries().length, 0);
+  }
 });

@@ -190,6 +190,10 @@ impl Generator<'_> {
             fields.push(("field", self.field(element, "value")));
         }
         fields.extend([
+            (
+                "continuous",
+                (element.keyword("continuous") == Some("true")).then(|| "true".to_string()),
+            ),
             ("min", Self::number(element, "min")),
             ("max", Self::number(element, "max")),
             ("step", Self::number(element, "step")),
@@ -299,17 +303,29 @@ impl Generator<'_> {
     }
 
     pub(super) fn popover_button(&self, out: &mut Out, element: &Element) {
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            ("icon", Self::icon(element, "icon")),
+            ("presented", self.field(element, "presented")),
+        ];
+        fields.push((
+            "windowTheme",
+            Some(
+                (bern_target_api::style::popover_window_theme(self.app, "windows", element))
+                    .to_string(),
+            ),
+        ));
+        fields.push((
+            "style",
+            self.style("PopoverButton", element.keyword("variant")),
+        ));
+        if element.expr("open").is_some() {
+            fields.extend(self.model(element, "open"));
+        }
         self.call(
             out,
-            &format!(
-                "B::PopoverButton(p, c, {}, ",
-                designated(&[
-                    ("id", Some(self.id(element))),
-                    ("label", self.text_prop(element, "label")),
-                    ("icon", Self::icon(element, "icon")),
-                    ("presented", self.field(element, "presented")),
-                ])
-            ),
+            &format!("B::PopoverButton(p, c, {}, ", designated(&fields)),
             &element.children,
         );
         self.shortcut(out, element, "activate");
@@ -347,6 +363,10 @@ impl Generator<'_> {
                     (element.keyword("style") == Some("icon")).then(|| "true".to_string())
                 ),
                 ("shape", self.shape(element)),
+                (
+                    "hideDisabled",
+                    (element.keyword("hide_disabled") == Some("true")).then(|| "true".into()),
+                ),
             ])
             .replacen('{', "B::MenuLook{", 1),
         ));

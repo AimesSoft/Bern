@@ -5,10 +5,14 @@ use crate::values;
 use bern_syntax::{is_bern_attr, parse_protocol, parse_protocol_args};
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
-use syn::{Item, ItemMod};
+use syn::Item;
 
 pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
-    let module: ItemMod = syn::parse2(item)?;
+    let mut items = vec![Item::Mod(syn::parse2(item)?)];
+    crate::config::build_modules()?.items(&mut items)?;
+    let Some(Item::Mod(module)) = items.pop() else {
+        return Ok(crate::config::track_build());
+    };
     let span = module.ident.span();
     let args = parse_protocol_args(args, Span::call_site())?;
     let protocol = parse_protocol(args, module.clone())?;
@@ -26,6 +30,7 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     }
     let descriptor_value = bern_syntax::lower::protocol_descriptor(&protocol)?;
     let descriptor_tokens = descriptor::tokens(&descriptor_value);
+    let track_build = crate::config::track_build();
 
     let p = quote!(::bern::__private::protocol);
     let b = quote!(::bern::bind);
@@ -343,6 +348,7 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         )
     };
     Ok(quote! {
+        #track_build
         #(#attrs)*
         #vis mod #ident {
             #(#kept)*

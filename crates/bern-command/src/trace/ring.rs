@@ -218,5 +218,10 @@ pub fn drain(out: &mut Vec<Record>) -> (u64, Vec<(u32, String)>) {
 #[cfg(test)]
 pub fn has_ring() -> bool {
     let session = SESSION.load(Ordering::Acquire);
-    LOCAL.with(|local| local.borrow().as_ref().is_some_and(|(owner, _)| *owner == session))
+    LOCAL.with(|local| {
+        local
+            .borrow()
+            .as_ref()
+            .is_some_and(|(owner, _)| *owner == session)
+    })
 }

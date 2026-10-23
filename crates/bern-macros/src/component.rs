@@ -578,6 +578,14 @@ impl<'a> Gen<'a> {
             let Some(prop_spec) = component.prop(&prop.name.to_string()) else {
                 continue;
             };
+            // Named corner radii are resolved against style! by the compiler.
+            // They are static tokens, not Rust bindings in the macro check.
+            if prop.name == "corner"
+                && matches!(prop_spec.kind, PropKind::Number | PropKind::Length)
+                && matches!(&prop.value, Expr::Path(path) if path.single().is_some())
+            {
+                continue;
+            }
             match prop_spec.kind {
                 PropKind::Query => match &prop.value {
                     Expr::Query(call) => {
@@ -651,6 +659,14 @@ impl<'a> Gen<'a> {
             let Some(prop_spec) = component.prop(&prop_name) else {
                 continue;
             };
+            // Named corner radii are resolved against style! by the compiler.
+            // They are static tokens, not Rust bindings in the macro check.
+            if prop.name == "corner"
+                && matches!(prop_spec.kind, PropKind::Number | PropKind::Length)
+                && matches!(&prop.value, Expr::Path(path) if path.single().is_some())
+            {
+                continue;
+            }
             match prop_spec.kind {
                 PropKind::Id => {
                     if let Some(id) = self.ident_prop(&prop.value, "id") {
@@ -1029,13 +1045,16 @@ impl<'a> Gen<'a> {
 }
 
 pub fn expand(args: TokenStream, tokens: TokenStream) -> syn::Result<TokenStream> {
-    let func: syn::ItemFn = syn::parse2(tokens)?;
+    let mut func: syn::ItemFn = syn::parse2(tokens)?;
+    let modules = crate::config::build_modules()?;
+    modules.function(&mut func)?;
     let mut stripped = func.clone();
     stripped
         .attrs
         .retain(|attr| !is_bern_attr(attr, "component"));
     let features = bern_syntax::parse_component_args(args)?;
-    let component = bern_syntax::parse_component_with(stripped.clone(), features)?;
+    let mut component = bern_syntax::parse_component_with(stripped.clone(), features)?;
+    modules.component(&mut component)?;
     let languages =
         crate::config::languages().map_err(|message| syn::Error::new(component.span, message))?;
     let strict = languages.as_ref().is_none_or(|languages| languages.strict);
@@ -1095,6 +1114,7 @@ pub fn expand(args: TokenStream, tokens: TokenStream) -> syn::Result<TokenStream
         checks
     };
     let track = track(languages.as_ref());
+    let track_build = crate::config::track_build();
     let props_doc = format!("Properties of the `{name}` component.");
     let contract = component
         .features
@@ -1102,6 +1122,7 @@ pub fn expand(args: TokenStream, tokens: TokenStream) -> syn::Result<TokenStream
         .map(|path| quote!(::bern::__private::features::<#path>();));
     Ok(quote! {
         #errors
+        #track_build
 
         #[doc = #props_doc]
         #[allow(non_camel_case_types)]

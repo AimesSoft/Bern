@@ -60,6 +60,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::APPEARANCE, appearance),
     (feature::SHORTCUTS, shortcuts),
     (feature::RUNTIME_THEME, runtime_theme),
+    (feature::RUNTIME_PALETTE, runtime_palette),
     (feature::RUNTIME_IMAGES, runtime_images),
     (feature::FILE_PICK, file_pick),
     (feature::SCROLL_SNAP, scroll_snap),
@@ -560,6 +561,8 @@ fn controlled_values(
         if e.kind == "Slider" {
             // Draft-backed sliders already support commit actions on every target.
             e.prop("current").is_some()
+        } else if e.kind == "PopoverButton" {
+            e.prop("open").is_some()
         } else {
             matches!(e.kind.as_str(), "Switch" | "Picker")
                 && (e.prop("checked").is_some()
@@ -1077,5 +1080,18 @@ fn reveal(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Ve
             ))
             .at(element.source.clone()),
         );
+    }
+}
+
+fn runtime_palette(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if app.windows.palette.is_some() {
+        diagnostics.push(Diagnostic::error(format!(
+            "target `{}` does not support WindowSet(palette:)",
+            descriptor.id
+        )));
     }
 }

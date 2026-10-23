@@ -266,6 +266,15 @@
   cursor: pointer;
 }
 
+/* Flexible content needs the button's proposed size even when its children
+   have no intrinsic dimensions (for example an overlaid video and ScaleBox). */
+.bern-content-button > :is(.bern-fill-width, .bern-layout-width):not(.bern-sized-width) {
+  width: 100%;
+}
+.bern-content-button > :is(.bern-fill-height, .bern-layout-height):not(.bern-sized-height) {
+  height: 100%;
+}
+
 .bern-content-button:not(.bern-styled-look):active {
   filter: brightness(0.92);
 }
@@ -510,6 +519,19 @@
 
 .bern-rail > * {
   pointer-events: auto;
+}
+
+/* A positioned rail's empty area must reach the controls underneath, too.
+   Layers may wrap the rail to supply its style (for example chapter marks
+   over a seek slider). Interactive rail items keep their own hit targets. */
+.bern-positioned:has(> .bern-rail),
+.bern-positioned:has(> .bern-layers > .bern-rail) {
+  pointer-events: none;
+}
+
+/* Bare drawing items are decoration; gestures use an interactive wrapper. */
+.bern-rail > .bern-canvas {
+  pointer-events: none;
 }
 
 /* Across a horizontal rail the children share one cell: the rail is as

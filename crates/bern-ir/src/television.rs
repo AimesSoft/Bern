@@ -19,10 +19,26 @@ pub const TELEVISION_SCREEN: (f64, f64) = (1920.0, 1080.0);
 impl Application {
     /// This application with what a television never shows left out.
     pub fn on_television(&self) -> Application {
-        let mut app = self.clone();
         let window = Known {
-            layouts: app.layouts,
+            layouts: self.layouts,
+            television: true,
+            webview: None,
         };
+        self.pruned(&window)
+    }
+
+    /// Resolve a target capability before checking and code generation.
+    /// Unselected branches, including their component dependencies, vanish.
+    pub fn with_webview(&self, enabled: bool) -> Application {
+        self.pruned(&Known {
+            layouts: self.layouts,
+            television: false,
+            webview: Some(enabled),
+        })
+    }
+
+    fn pruned(&self, window: &Known) -> Application {
+        let mut app = self.clone();
         for component in &mut app.components {
             component.body = single(window.prune_node(&component.body));
         }
@@ -59,6 +75,8 @@ impl Application {
 /// What the window of a television is known to be.
 struct Known {
     layouts: Option<LayoutConfig>,
+    television: bool,
+    webview: Option<bool>,
 }
 
 impl Known {
@@ -70,7 +88,10 @@ impl Known {
             ExprKind::Binding {
                 binding: Binding::Window { field },
             } => match field.as_str() {
+                "webview" => self.webview,
+                _ if !self.television => None,
                 "tv" => Some(true),
+                "landscape" => Some(true),
                 "idle" => None,
                 "short" => self
                     .layouts
@@ -140,7 +161,7 @@ impl Known {
         match node {
             Node::Element(element) => {
                 let mut element = element.clone();
-                let tv = element.kind == "Adaptive"
+                let tv = self.television && element.kind == "Adaptive"
                 && element.children.iter().any(|child| {
                     matches!(child, Node::Element(layout) if layout.keyword("size") == Some("tv"))
                 });
@@ -150,9 +171,53 @@ impl Known {
                 });
                 }
                 element.children = self.prune_nodes(&element.children);
+                for prop in element.props.values_mut() {
+                    match prop {
+                        crate::Prop::Expr { expr } => self.resolve_expr(expr),
+                        crate::Prop::Text {
+                            text: crate::Text::Dynamic { expr },
+                        } => self.resolve_expr(expr),
+                        crate::Prop::Text {
+                            text: crate::Text::Localized { args, .. },
+                        } => {
+                            for (_, expr) in args {
+                                self.resolve_expr(expr);
+                            }
+                        }
+                        crate::Prop::Query { query } => {
+                            for expr in &mut query.args {
+                                self.resolve_expr(expr);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                if let Some(action) = &mut element.action {
+                    match action {
+                        crate::Action::Engine { args, .. } | crate::Action::Media { args, .. } => {
+                            for expr in args {
+                                self.resolve_expr(expr);
+                            }
+                        }
+                        crate::Action::Session {
+                            op:
+                                crate::SessionOp::Set { value } | crate::SessionOp::PushStr { value },
+                            ..
+                        } => self.resolve_expr(value),
+                        _ => {}
+                    }
+                }
                 vec![Node::Element(element)]
             }
-            Node::Component(_) => vec![node.clone()],
+            Node::Component(call) => {
+                let mut call = call.clone();
+                for (_, arg) in &mut call.args {
+                    if let crate::ComponentArg::Value { expr } = arg {
+                        self.resolve_expr(expr);
+                    }
+                }
+                vec![Node::Component(call)]
+            }
             Node::If(condition) => {
                 let mut branches = Vec::new();
                 for (expr, body) in &condition.branches {
@@ -170,7 +235,11 @@ impl Known {
                             })];
                         }
                         Some(false) => {}
-                        None => branches.push((expr.clone(), self.prune_nodes(body))),
+                        None => {
+                            let mut expr = expr.clone();
+                            self.resolve_expr(&mut expr);
+                            branches.push((expr, self.prune_nodes(body)));
+                        }
                     }
                 }
                 let otherwise = self.prune_nodes(&condition.otherwise);
@@ -184,17 +253,59 @@ impl Known {
             }
             Node::IfLet(node) => {
                 let mut node = node.clone();
+                self.resolve_expr(&mut node.value);
                 node.then = self.prune_nodes(&node.then);
                 node.otherwise = self.prune_nodes(&node.otherwise);
                 vec![Node::IfLet(node)]
             }
             Node::Match(node) => {
                 let mut node = node.clone();
+                self.resolve_expr(&mut node.value);
                 for arm in &mut node.arms {
                     arm.body = self.prune_nodes(&arm.body);
                 }
                 vec![Node::Match(node)]
             }
+        }
+    }
+
+    fn resolve_expr(&self, expr: &mut Expr) {
+        if let Some(value) = self.known(expr) {
+            expr.kind = ExprKind::Literal {
+                value: Value::Bool(value),
+            };
+            return;
+        }
+        match &mut expr.kind {
+            ExprKind::If {
+                cond,
+                then,
+                otherwise,
+            } => {
+                if let Some(value) = self.known(cond) {
+                    *expr = if value {
+                        (**then).clone()
+                    } else {
+                        (**otherwise).clone()
+                    };
+                    self.resolve_expr(expr);
+                } else {
+                    self.resolve_expr(cond);
+                    self.resolve_expr(then);
+                    self.resolve_expr(otherwise);
+                }
+            }
+            ExprKind::Not { expr } | ExprKind::Neg { expr } => self.resolve_expr(expr),
+            ExprKind::Binary { lhs, rhs, .. } => {
+                self.resolve_expr(lhs);
+                self.resolve_expr(rhs);
+            }
+            ExprKind::Variant { fields, .. } => {
+                for field in fields {
+                    self.resolve_expr(field);
+                }
+            }
+            _ => {}
         }
     }
 }

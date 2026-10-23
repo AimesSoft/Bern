@@ -141,6 +141,12 @@ impl Generator<'_> {
                     self.condition(immersive)
                 ));
             }
+            if let Some(palette) = &app.windows.palette {
+                out.line(format!(
+                    "w.palette = [](Ctx const& c) {{ return R::AsText({}); }};",
+                    self.expr(palette)
+                ));
+            }
             if app.windows.accent.is_some() {
                 out.line("w.accent = ThemeAccent;");
             }

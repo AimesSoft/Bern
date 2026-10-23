@@ -652,10 +652,20 @@ export function applyStyle(node, style, { selected } = {}) {
     node.classList.toggle("bern-styled-foreground", foreground !== "");
     node.style.border = look.border ? `${look.borderWidth ?? 1}px solid ${cssColor(look.border)}` : "";
     const shadows = [];
+    // Transparent content surfaces and plain controls cast the shape of
+    // their text/icons, not a rectangular shadow around an empty box.
+    const contentShadow = !fill && !look.background && !look.border && (
+      node.classList.contains("bern-layers") || node.classList.contains("bern-button-plain") ||
+      (node.classList.contains("bern-icon-button") && !node.classList.contains("bern-icon-button-prominent"))
+    );
+    let filter = "";
     if (look.shadow) {
       const [radius, y, opacity] = look.shadow;
-      shadows.push(`0 ${y}px ${radius}px rgb(0 0 0 / ${opacity})`);
+      const shadow = `0 ${y}px ${radius}px rgb(0 0 0 / ${opacity})`;
+      if (contentShadow) filter = `drop-shadow(${shadow})`;
+      else shadows.push(shadow);
     }
+    node.style.filter = filter;
     if (look.indicator) shadows.push(`${INDICATOR[look.indicatorEdge ?? "leading"](look.indicatorWidth ?? 3)} ${cssColor(look.indicator)}`);
     node.style.boxShadow = shadows.join(", ");
     // The motion of the topmost state that moves; back at rest, `settle`.
@@ -1216,6 +1226,14 @@ export function Decorate(p, ctx, spec, build) {
   const nodes = [...fragment.childNodes].filter((node) => node.nodeType === Node.ELEMENT_NODE);
   for (const node of nodes) {
     if (spec.appearance) node.classList.add(`bern-appearance-${spec.appearance}`);
+    if (spec.tint) {
+      const tint = `var(--bern-${spec.tint.replace(/[._]/g, "-")})`;
+      node.style.setProperty("--bern-accent", tint);
+      node.style.setProperty("--bern-focus-indicator", tint);
+      node.style.setProperty("--bern-selection-background", tint);
+      node.style.setProperty("--bern-on-accent", "var(--bern-surface-canvas)");
+      node.style.setProperty("--bern-selection-foreground", "var(--bern-surface-canvas)");
+    }
     if (spec.idleArea !== undefined) {
       node.classList.add("bern-idle-area");
       node.dataset.idleAfter = spec.idleArea;
@@ -1512,6 +1530,15 @@ function fileURL(file) {
   return url;
 }
 
+function giveFile(file, give) {
+  const url = fileURL(file);
+  B.prepareFile(url).then(() => give(url)).catch(error => {
+    B.pageFiles.delete(url);
+    URL.revokeObjectURL(url);
+    window.alert(String(error?.message ?? error));
+  });
+}
+
 /// The browser's open panel for `kinds`; `give(url)` runs with the chosen
 /// file, nothing on cancel.
 export function pick(kinds, give) {
@@ -1520,7 +1547,7 @@ export function pick(kinds, give) {
   input.addEventListener("change", () => {
     const file = input.files?.[0];
     input.remove();
-    if (file) give(fileURL(file));
+    if (file) giveFile(file, give);
   });
   input.addEventListener("cancel", () => input.remove());
   document.body.append(input);
@@ -1539,7 +1566,7 @@ function listenForLaunches() {
     for (const handle of params.files ?? []) {
       const file = await handle.getFile();
       const opener = [...openers].reverse().find((entry) => accepts(file.name, file.type, entry.kinds));
-      opener?.give(fileURL(file));
+      if (opener) giveFile(file, opener.give);
     }
   });
 }
@@ -1640,6 +1667,7 @@ export function SplitButton(p, ctx, { id, label, icon: glyph, field, more, shape
   B.bindAttr(chevron, "aria-label", more ?? (() => B.tr("bern.split.more")));
   const panel = el("div", { class: "bern-popover-panel", id: panelId, popover: "auto", role: "dialog" });
   B.bindAttr(panel, "aria-label", label);
+  B.dismissPopoverOnOutsidePress(panel, chevron);
   content(panel, ctx);
   panel.addEventListener("beforetoggle", (event) => {
     const open = event.newState === "open";
@@ -1816,7 +1844,7 @@ export function Drop(p, ctx, { id, label, field, kinds, over, opens }, action, c
     depth = 0;
     over?.set(false);
     const file = [...(event.dataTransfer?.files ?? [])].find((one) => accepts(one.name, one.type, kinds));
-    if (file) give(fileURL(file));
+    if (file) giveFile(file, give);
   });
   if (opens) {
     const entry = { kinds, give };
@@ -2180,6 +2208,9 @@ export function shortcut(spec, run, active) {
   listening = true;
   document.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
+    // Let the focused menu or native popover handle Escape before an app's
+    // window-level shortcut (for example leaving the player) can act on it.
+    if (event.key === "Escape" && document.querySelector('[popover="auto"]:popover-open')) return;
     const keys = pressed(event);
     const found = [...shortcuts].reverse().find((one) => one.keys === keys && (!one.active || one.active()));
     if (!found) return;
@@ -2268,7 +2299,7 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
 /// The children mount while the popover shows. `presented`, when given,
 /// follows the popover and opens or closes it; external entries open it
 /// with `activate`.
-export function PopoverButton(p, ctx, { id, label, icon: glyph, presented }, content) {
+export function PopoverButton(p, ctx, { id, label, icon: glyph, presented, windowTheme = false, style }, content) {
   const panelId = `bern-popover-${Math.random().toString(36).slice(2)}`;
   const iconOnly = Boolean(glyph);
   const trigger = el("button", {
@@ -2284,36 +2315,73 @@ export function PopoverButton(p, ctx, { id, label, icon: glyph, presented }, con
   B.bindAttr(trigger, "title", label);
   const panel = el("div", { class: "bern-popover-panel", id: panelId, popover: "auto", role: "dialog" });
   B.bindAttr(panel, "aria-label", label);
-  const open = cell(false);
-  let owner = null;
-  panel.addEventListener("beforetoggle", (event) => {
-    const showing = event.newState === "open";
-    trigger.setAttribute("aria-expanded", showing ? "true" : "false");
-    if (showing) {
-      // The children mount with the popover and leave with it.
-      owner = new B.Scope(null);
-      B.within(owner, () => content(panel, ctx));
-      B.placePopover(panel, trigger);
-      panel.style.minWidth = `${Math.max(240, trigger.getBoundingClientRect().width)}px`;
-    }
+  if (windowTheme) effect(() => {
+    themeTick.get();
+    const night = dark(document.documentElement);
+    panel.classList.toggle("bern-appearance-dark", night);
+    panel.classList.toggle("bern-appearance-light", !night);
   });
-  panel.addEventListener("toggle", (event) => {
+  if (style?.base.background) panel.style.background = cssColor(style.base.background);
+  if (style?.base.foreground) panel.style.color = cssColor(style.base.foreground);
+  B.dismissPopoverOnOutsidePress(panel, trigger);
+  let owner = null;
+  let open = false;
+  let changing = false;
+  let disposed = false;
+  let pending = null;
+  const follow = () => {
+    if (changing || disposed || pending || !presented) return;
+    const want = presented.peek();
+    // beforetoggle runs before the browser updates :popover-open.
+    if (want && !open && panel.isConnected) panel.showPopover();
+    else if (!want && open) panel.hidePopover();
+  };
+  const clear = () => {
+    owner?.dispose();
+    owner = null;
+    panel.replaceChildren();
+  };
+  panel.addEventListener("beforetoggle", (event) => {
+    if (disposed) return;
     const showing = event.newState === "open";
-    if (!showing) {
-      owner?.dispose();
-      owner = null;
-      panel.replaceChildren();
+    open = showing;
+    changing = true;
+    try {
+      trigger.setAttribute("aria-expanded", showing ? "true" : "false");
+      if (showing) {
+        // Native toggle events can be coalesced across a close and reopen.
+        // Mount once and release synchronously, not in the deferred toggle.
+        if (!owner) {
+          owner = new B.Scope(null);
+          untrack(() => B.within(owner, () => content(panel, ctx)));
+        }
+        B.placePopover(panel, trigger);
+        panel.style.minWidth = `${Math.max(240, trigger.getBoundingClientRect().width)}px`;
+      } else {
+        clear();
+      }
+      // Publish before another player update can reopen the stale binding.
+      // While beforetoggle runs, :popover-open still describes the old state.
+      untrack(() => {
+        if (!presented || (!pending && presented.peek() === showing)) return;
+        if (presented.commit) {
+          // WebUI commands complete asynchronously. Player frames received
+          // before that acknowledgement still contain the old open state.
+          // A close must also supersede an outstanding open, and vice versa.
+          const request = {};
+          pending = request;
+          presented.commit(showing, () => {
+            if (disposed || pending !== request) return;
+            pending = null;
+            queueMicrotask(follow);
+          });
+        } else presented.set(showing);
+      });
+    } finally {
+      changing = false;
     }
-    open.set(showing);
-    if (presented && presented.peek() !== showing) presented.set(showing);
   });
   if (presented) {
-    const follow = () => {
-      const want = presented.peek();
-      const showing = panel.matches(":popover-open");
-      if (want && !showing && panel.isConnected) panel.showPopover();
-      else if (!want && showing) panel.hidePopover();
-    };
     effect(() => {
       presented.get();
       untrack(follow);
@@ -2322,8 +2390,9 @@ export function PopoverButton(p, ctx, { id, label, icon: glyph, presented }, con
     queueMicrotask(follow);
   }
   onCleanup(() => {
+    disposed = true;
     if (panel.matches(":popover-open")) panel.hidePopover();
-    owner?.dispose();
+    clear();
   });
   const node = el("div", { class: "bern-popover-wrap" }, trigger, panel);
   B.mark(trigger, ctx, id);
@@ -2331,7 +2400,7 @@ export function PopoverButton(p, ctx, { id, label, icon: glyph, presented }, con
     target: () => B.target(ctx, id), role: "popover_button", label,
     actions: {
       activate: () => panel.showPopover(),
-      value: () => (open.peek() ? "open" : "closed"),
+      value: () => (panel.matches(":popover-open") ? "open" : "closed"),
     },
   });
   p.append(node);

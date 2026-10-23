@@ -649,7 +649,7 @@ mod accordion {
         pub weights: RefCell<Vec<f64>>,
         pub collapsed: Cell<f64>,
         pub gap: Cell<f64>,
-        pub height: Cell<f64>,
+        pub height: Cell<Option<f64>>,
         pub corner: Cell<f64>,
     }
 
@@ -672,16 +672,19 @@ mod accordion {
         fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             match orientation {
                 gtk::Orientation::Horizontal => (0, 0, -1, -1),
-                _ => {
-                    let height = side(self.height.get());
-                    (height, height, -1, -1)
-                }
+                _ => match self.height.get() {
+                    Some(height) => {
+                        let height = side(height);
+                        (height, height, -1, -1)
+                    }
+                    None => (0, 560, -1, -1),
+                },
             }
         }
 
         fn compute_expand(&self, hexpand: &mut bool, vexpand: &mut bool) {
             *hexpand = true;
-            *vexpand = false;
+            *vexpand = self.height.get().is_none();
         }
 
         fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
@@ -750,7 +753,7 @@ pub fn Accordion(p: &Parent, ctx: &Ctx, props: AccordionProps, children: Build) 
     let imp = accordion.imp();
     imp.collapsed.set(86.0);
     imp.gap.set(8.0);
-    imp.height.set(560.0);
+    imp.height.set(None);
     let lengths = [
         (props.collapsed_width.clone(), 0),
         (props.gap.clone(), 1),
@@ -765,7 +768,7 @@ pub fn Accordion(p: &Parent, ctx: &Ctx, props: AccordionProps, children: Build) 
             match which {
                 0 => imp.collapsed.set(value),
                 1 => imp.gap.set(value),
-                2 => imp.height.set(value),
+                2 => imp.height.set(Some(value)),
                 _ => imp.corner.set(value),
             }
             shown.queue_resize();

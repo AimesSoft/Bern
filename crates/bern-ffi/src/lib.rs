@@ -11,6 +11,8 @@
 
 #[cfg(target_os = "android")]
 pub mod android;
+#[cfg(feature = "control")]
+pub mod control;
 pub mod link;
 pub mod media;
 #[cfg(feature = "picture")]
@@ -1132,3 +1134,5 @@ pub unsafe extern "C" fn bern_buffer_free(buffer: BernBuffer) {
 
 #[cfg(test)]
 mod tests;
+
+mod script;

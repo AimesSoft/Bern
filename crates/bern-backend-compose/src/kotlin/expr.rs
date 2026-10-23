@@ -257,6 +257,7 @@ impl Generator<'_> {
             }
             Action::Window { op, window } => match op {
                 WindowOp::Open | WindowOp::Activate => format!("BernHost.open({})", string(window)),
+                WindowOp::ToggleFullscreen => "Unit".into(), // Mobile activities already fill the screen.
                 WindowOp::Close => format!("BernHost.close({})", string(window)),
             },
             Action::Media { player, op, args } => {

@@ -53,6 +53,7 @@ impl Generator<'_> {
             entries.push(("idleArea", Some(seconds.to_string())));
         }
         entries.push(("appearance", Self::keyword(element, "appearance")));
+        entries.push(("tint", Self::keyword(element, "tint")));
         if let Some(when) = element.expr("nudge") {
             entries.push(("nudge", Some(format!("() => ({})", self.expr(when)))));
             entries.push(("nudgeMotion", Some(self.motion("jelly"))));

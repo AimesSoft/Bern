@@ -242,6 +242,7 @@ impl Generator<'_> {
             "Column" | "Row" => self.column_or_row(out, element),
             "Grid" => self.grid(out, element),
             "Stack" => self.stack(out, element),
+            "FocusRegion" => self.children(out, "B.FocusRegion(p, ctx, ", &element.children, ");"),
             "Marquee" => self.marquee(out, element),
             "ScaleBox" | "Positioned" => self.scale_box(out, element),
             "Modal" | "Flow" | "Accordion" => self.sized_container(out, element),

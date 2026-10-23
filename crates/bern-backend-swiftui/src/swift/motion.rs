@@ -180,6 +180,16 @@ impl Generator<'_> {
                 appearance == "dark"
             ));
         }
+        if let Some(tint) = element.keyword("tint") {
+            out.line(format!(
+                ".environment(\\.bernAccent, BernColor.role({}).color)",
+                crate::names::string(tint)
+            ));
+            out.line(format!(
+                ".tint(BernColor.role({}).color)",
+                crate::names::string(tint)
+            ));
+        }
         if let Some(when) = element.expr("nudge") {
             out.line(format!(
                 ".bernNudge({}, motion: {})",

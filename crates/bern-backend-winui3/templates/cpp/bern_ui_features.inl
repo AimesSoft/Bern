@@ -6,6 +6,98 @@
 
 namespace B {
 
+/// A transparent shield surrounds the editing region. XAML pointer events
+/// bubble after the target sees them, so intercepting on the root alone is too
+/// late for sliders; these four surfaces receive the outside press first.
+inline void FocusRegion(Parent const& p, Ctx const& ctx, Build const& children) {
+    controls::ContentControl holder;
+    holder.IsTabStop(false);
+    holder.UseSystemFocusVisuals(false);
+    holder.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
+    holder.VerticalContentAlignment(xaml::VerticalAlignment::Stretch);
+    controls::Grid content;
+    children(Parent::Of(content), ctx);
+    holder.Content(content);
+    p.Add(holder);
+    if (!ctx.win || !ctx.win->root) return;
+    auto root = ctx.win->root;
+    controls::Canvas shield;
+    shield.Visibility(xaml::Visibility::Collapsed);
+    controls::Canvas::SetZIndex(shield, 10000);
+    controls::Grid::SetRowSpan(shield, (std::max)(1, static_cast<int>(root.RowDefinitions().Size())));
+    controls::Grid::SetColumnSpan(shield, (std::max)(1, static_cast<int>(root.ColumnDefinitions().Size())));
+    std::array<controls::Border, 4> edges;
+    for (auto const& edge : edges) {
+        edge.Background(media::SolidColorBrush(winrt::Windows::UI::Color{0, 0, 0, 0}));
+        shield.Children().Append(edge);
+    }
+    root.Children().Append(shield);
+    auto held = std::make_shared<std::optional<uint32_t>>();
+    auto weakHolder = winrt::make_weak(holder);
+    auto weakShield = winrt::make_weak(shield);
+    auto weakRoot = winrt::make_weak(root);
+    auto update = [weakHolder, weakShield, weakRoot, edges, held] {
+        auto holder = weakHolder.get(); auto shield = weakShield.get(); auto root = weakRoot.get();
+        if (!holder || !shield || !root) return;
+        bool editing = false;
+        if (holder.IsLoaded() && holder.Visibility() == xaml::Visibility::Visible) {
+            auto focused = xaml::Input::FocusManager::GetFocusedElement(root.XamlRoot());
+            if (focused && (focused.try_as<controls::TextBox>() || focused.try_as<controls::PasswordBox>())) {
+                for (auto node = focused.try_as<xaml::DependencyObject>(); node; node = media::VisualTreeHelper::GetParent(node)) {
+                    if (node == holder) { editing = true; break; }
+                }
+            }
+        }
+        bool shown = editing || held->has_value();
+        auto visibility = shown ? xaml::Visibility::Visible : xaml::Visibility::Collapsed;
+        if (shield.Visibility() != visibility) shield.Visibility(visibility);
+        if (!shown) return;
+        auto box = holder.TransformToVisual(root).TransformBounds({0, 0, static_cast<float>(holder.ActualWidth()), static_cast<float>(holder.ActualHeight())});
+        double width = root.ActualWidth(), height = root.ActualHeight();
+        double left = (std::clamp)(static_cast<double>(box.X), 0.0, width);
+        double right = (std::clamp)(static_cast<double>(box.X + box.Width), left, width);
+        double top = (std::clamp)(static_cast<double>(box.Y), 0.0, height);
+        double bottom = (std::clamp)(static_cast<double>(box.Y + box.Height), top, height);
+        std::array<std::array<double, 4>, 4> rects{{
+            {0, 0, width, top}, {0, bottom, width, height - bottom},
+            {0, top, left, bottom - top}, {right, top, width - right, bottom - top}
+        }};
+        for (size_t i = 0; i < edges.size(); ++i) {
+            auto const& edge = edges[i]; auto const& rect = rects[i];
+            if (controls::Canvas::GetLeft(edge) != rect[0]) controls::Canvas::SetLeft(edge, rect[0]);
+            if (controls::Canvas::GetTop(edge) != rect[1]) controls::Canvas::SetTop(edge, rect[1]);
+            if (edge.Width() != rect[2]) edge.Width(rect[2]);
+            if (edge.Height() != rect[3]) edge.Height(rect[3]);
+        }
+    };
+    shield.PointerPressed([weakHolder, weakShield, held](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        *held = args.Pointer().PointerId();
+        args.Handled(true);
+        if (auto shield = weakShield.get()) shield.CapturePointer(args.Pointer());
+        if (auto holder = weakHolder.get()) holder.Focus(xaml::FocusState::Programmatic);
+    });
+    auto release = [weakShield, held, update](auto&&, xaml::Input::PointerRoutedEventArgs const& args) {
+        if (*held != args.Pointer().PointerId()) return;
+        args.Handled(true);
+        held->reset();
+        if (auto shield = weakShield.get()) shield.ReleasePointerCapture(args.Pointer());
+        update();
+    };
+    shield.PointerReleased(release);
+    shield.PointerCanceled(release);
+    shield.PointerCaptureLost(release);
+    auto focus = root.GotFocus([update](auto&&, auto&&) { update(); });
+    auto layout = root.LayoutUpdated([update](auto&&, auto&&) { update(); });
+    Reactive::OnCleanup([weakRoot, shield, focus, layout] {
+        if (auto root = weakRoot.get()) {
+            root.GotFocus(focus);
+            root.LayoutUpdated(layout);
+            uint32_t index;
+            if (root.Children().IndexOf(shield, index)) root.Children().RemoveAt(index);
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Scroll views
 
@@ -392,12 +484,40 @@ struct Popover {
     }
 };
 
-inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content) {
+inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool windowTheme = false, StyleDef const* style = nullptr) {
     auto popover = std::make_shared<Popover>();
-    if (auto style = PresenterTheme(L"FlyoutPresenter", ctx.appearance)) popover->flyout.FlyoutPresenterStyle(style);
+    auto inner = ctx;
+    if (windowTheme) inner.appearance.clear();
+    if (auto inherited = PresenterTheme(L"FlyoutPresenter", inner.appearance)) popover->flyout.FlyoutPresenterStyle(inherited);
     std::weak_ptr<Popover> weak = popover;
-    popover->flyout.Opening([weak, content, ctx](auto&&, auto&&) {
-        if (auto popover = weak.lock()) popover->Mount(content, ctx);
+    auto apply = [weak, ctx, inner, windowTheme, style] {
+        auto popover = weak.lock();
+        if (!popover || (!windowTheme && !style)) return;
+        bool dark = inner.appearance.empty() ? IsDark(ctx.win->root) : inner.appearance == "dark";
+        auto theme = dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light;
+        auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
+        look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(theme)));
+        if (style && style->base.background) look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(ColorOf(ctx.win, dark, *style->base.background))));
+        if (style && style->base.foreground) look.Setters().Append(xaml::Setter(controls::Control::ForegroundProperty(), media::SolidColorBrush(ColorOf(ctx.win, dark, *style->base.foreground))));
+        popover->flyout.FlyoutPresenterStyle(look);
+        if (popover->content) {
+            popover->content.RequestedTheme(theme);
+            // Already-open flyouts must change alongside their window.
+            auto node = media::VisualTreeHelper::GetParent(popover->content);
+            while (node) {
+                if (auto presenter = node.try_as<controls::FlyoutPresenter>()) { presenter.Style(look); break; }
+                node = media::VisualTreeHelper::GetParent(node);
+            }
+        }
+    };
+    apply();
+    if (ctx.win && ctx.win->root) {
+        auto root = ctx.win->root;
+        auto token = root.ActualThemeChanged([apply](auto&&, auto&&) { apply(); });
+        Reactive::OnCleanup([root, token] { root.ActualThemeChanged(token); });
+    }
+    popover->flyout.Opening([weak, content, inner, apply](auto&&, auto&&) {
+        if (auto popover = weak.lock()) { popover->Mount(content, inner); apply(); }
     });
     popover->flyout.Opened([weak](auto&&, auto&&) {
         if (auto popover = weak.lock()) popover->open = true;
@@ -423,6 +543,10 @@ struct PopoverButtonProps {
     Str label;
     char const* icon = nullptr;
     std::optional<Field> presented;
+    bool windowTheme = false;
+    StyleDef const* style = nullptr;
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
 };
 
 /// A button that shows its children in a popover, such as a volume slider.
@@ -444,15 +568,18 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
             controls::ToolTipService::SetToolTip(button, winrt::box_value(name));
             xaml::Automation::AutomationProperties::SetName(button, name);
         });
-    auto popover = MakePopover(ctx, content);
+    auto popover = MakePopover(ctx, content, props.windowTheme, props.style);
     button.Flyout(popover->flyout);
-    auto presented = props.presented;
-    if (presented) {
-        auto field = *presented;
-        popover->flyout.Opened([ctx, field](auto&&, auto&&) { SetDraft(ctx, field, Value::Bool(true)); });
-        popover->flyout.Closed([ctx, field](auto&&, auto&&) { SetDraft(ctx, field, Value::Bool(false)); });
-        Reactive::Run([ctx, field, popover, weak = winrt::make_weak(button)] {
-            bool want = ctx.Read(field) == Value::Bool(true);
+    auto model = ModelOf(ctx, props.presented, nullptr, props.current, props.change);
+    if (model.read) {
+        popover->flyout.Opened([model](auto&&, auto&&) {
+            if (model.peek() != Value::Bool(true)) model.write(Value::Bool(true));
+        });
+        popover->flyout.Closed([model](auto&&, auto&&) {
+            if (model.peek() != Value::Bool(false)) model.write(Value::Bool(false));
+        });
+        Reactive::Run([model, popover, weak = winrt::make_weak(button)] {
+            bool want = model.read() == Value::Bool(true);
             Reactive::Untrack([&] {
                 auto button = weak.get();
                 if (!button) return 0;

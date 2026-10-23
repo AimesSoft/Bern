@@ -201,7 +201,7 @@ impl Generator<'_> {
                 .unwrap_or_else(|| default.into())
         };
         out.line(format!(
-            "BernSvg(name: {}, label: {}, width: {}, height: {}, fit: {}, playing: {}, speed: Double({}), restart: Double({}), interactive: {})",
+            "BernSvg(name: {}, label: {}, width: {}, height: {}, fit: {}, playing: {}, speed: Double({}), restart: Double({}), interactive: {}, data: {}, externalLinks: {})",
             string(element.resource("source").unwrap_or_default()),
             self.text_prop(element, "label").unwrap_or_else(|| "nil".into()),
             self.length(element, "width").unwrap_or_else(|| "0".into()),
@@ -209,6 +209,8 @@ impl Generator<'_> {
             string(element.keyword("fit").unwrap_or("contain")),
             value("playing", "true"), value("speed", "1"), value("restart", "0"),
             element.keyword("interactive").unwrap_or("true"),
+            self.text_prop(element, "data").unwrap_or_else(|| "\"\"".into()),
+            element.keyword("external_links").unwrap_or("false"),
         ));
     }
 
@@ -231,6 +233,11 @@ impl Generator<'_> {
             _ => ".source(nil)".into(),
         };
         let controls = element.keyword("controls") != Some("none");
+        let sizing = if element.keyword("sizing") == Some("fill") {
+            ", fillsContainer: true"
+        } else {
+            ""
+        };
         let fit = match element.keyword("fit") {
             Some("cover") => ".cover",
             Some("fill") => ".fill",
@@ -249,7 +256,7 @@ impl Generator<'_> {
             })
             .unwrap_or_default();
         out.line(format!(
-            "BernVideo(target: {}, label: {label}, binding: {binding}, controls: {controls}, fit: {fit}{corner})",
+            "BernVideo(target: {}, label: {label}, binding: {binding}, controls: {controls}, fit: {fit}{sizing}{corner})",
             self.target(element, ctx)
         ));
     }

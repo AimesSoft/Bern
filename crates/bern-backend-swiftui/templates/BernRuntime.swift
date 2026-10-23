@@ -483,6 +483,10 @@ final class BernWindowContext {
     let isSettings: Bool
     @ObservationIgnored let sessions: [any BernSessionState]
     @ObservationIgnored var dismiss: DismissAction?
+    /// Only one transient popover per window. Opening another releases
+    /// the previous binding so SwiftUI cannot reopen it after dismissal.
+    @ObservationIgnored var popoverOwner: UUID?
+    @ObservationIgnored var dismissPopover: (() -> Void)?
     /// The window's declared close check, set by the generated window root.
     @ObservationIgnored var closeCheck: BernCloseCheck? {
         didSet { closeCheckChanged() }
@@ -499,6 +503,8 @@ final class BernWindowContext {
     @ObservationIgnored var allowsClose = false
     /// Whether the window had no input for its `idle_after` seconds.
     var idle = false
+    /// Follows native full-screen notifications, including the window zoom button.
+    var fullscreen = false
     /// The `idle_area` elements on screen, and the seconds of those the
     /// pointer is over: while there are any, the window goes idle only
     /// while the pointer rests over one, after its seconds.
@@ -1188,6 +1194,14 @@ final class BernHost {
                     buffer.count))
         }
         return result.first == 0
+    }
+
+    func toggleFullscreen(_ kindID: String) {
+        #if os(macOS)
+        guard let context = windows[kindID], context.pendingClose == nil,
+              let window = context.platform.nsWindow, window.attachedSheet == nil else { return }
+        window.toggleFullScreen(nil)
+        #endif
     }
 
     /// Request closing a window kind's instance through the close protocol.
@@ -2367,29 +2381,78 @@ struct BernControlledSlider: View {
     let step: Double?
     let label: String
     let labelHidden: Bool
+    let continuous: Bool
     let commit: (Double) -> Void
     @State private var preview = 0.0
     @State private var editing = false
+    @State private var lastSubmitted: Double?
+    @State private var lastCommitAt = -Double.infinity
+    @State private var pendingCommit: Task<Void, Never>?
+
+    private var previewBinding: Binding<Double> {
+        Binding(get: { preview }, set: { next in
+            preview = next
+            if continuous { scheduleCommit() }
+        })
+    }
+
     var body: some View {
         Group {
             #if os(tvOS)
-            BernFocusSlider(value: $preview, minimum: minimum, maximum: maximum, step: step, label: label, labelHidden: labelHidden, onEditingChanged: edit)
+            BernFocusSlider(value: previewBinding, minimum: minimum, maximum: maximum, step: step, label: label, labelHidden: labelHidden, onEditingChanged: edit)
             #else
             if let step {
-                Slider(value: $preview, in: minimum...maximum, step: step, onEditingChanged: edit) { Text(label) }
+                Slider(value: previewBinding, in: minimum...maximum, step: step, onEditingChanged: edit) { Text(label) }
             } else {
-                Slider(value: $preview, in: minimum...maximum, onEditingChanged: edit) { Text(label) }
+                Slider(value: previewBinding, in: minimum...maximum, onEditingChanged: edit) { Text(label) }
             }
             #endif
         }
         .modifier(BernSliderLabelHidden(hidden: labelHidden))
         .bernAccentTint()
-        .onAppear { preview = value }
-        .onChange(of: value) { _, newValue in if !editing { preview = newValue } }
+        .onAppear { preview = value; lastSubmitted = value }
+        .onChange(of: value) { _, newValue in
+            if !editing && pendingCommit == nil { preview = newValue; lastSubmitted = newValue }
+        }
+        .onDisappear {
+            pendingCommit?.cancel()
+            pendingCommit = nil
+            if continuous && editing { submit() }
+        }
     }
+
+    // Coalesce pointer events, including the trailing value when the pointer
+    // stops while still held. Engine snapshots never feed this binding back.
+    private func scheduleCommit() {
+        let remaining = 1.0 / 30.0 - (ProcessInfo.processInfo.systemUptime - lastCommitAt)
+        if remaining <= 0 {
+            pendingCommit?.cancel()
+            pendingCommit = nil
+            submit()
+        } else if pendingCommit == nil {
+            pendingCommit = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                pendingCommit = nil
+                submit()
+            }
+        }
+    }
+
+    private func submit() {
+        guard lastSubmitted != preview else { return }
+        lastSubmitted = preview
+        lastCommitAt = ProcessInfo.processInfo.systemUptime
+        commit(preview)
+    }
+
     private func edit(_ active: Bool) {
         editing = active
-        if !active { commit(preview) }
+        if !active {
+            pendingCommit?.cancel()
+            pendingCommit = nil
+            if continuous { submit() } else { commit(preview) }
+        }
     }
 }
 struct BernSliderLabelHidden: ViewModifier {

@@ -228,7 +228,7 @@ impl<'a> Generator<'a> {
     /// The accent and appearance of `WindowSet`, chosen at run time.
     fn theme(&self, out: &mut Out) {
         let windows = &self.app.windows;
-        if windows.accent.is_none() && windows.appearance.is_none() {
+        if windows.accent.is_none() && windows.appearance.is_none() && windows.palette.is_none() {
             out.line("theme: None,");
             return;
         }
@@ -287,6 +287,15 @@ impl<'a> Generator<'a> {
             )
         ));
         out.line(format!("accents: &[{}],", accents.join(", ")));
+        out.line(format!(
+            "palette: {},",
+            some(
+                windows
+                    .palette
+                    .as_ref()
+                    .map(|expr| format!("|c: &b::Ctx| {}", self.expr(expr)))
+            )
+        ));
         out.line(format!(
             "appearance: {},",
             some(

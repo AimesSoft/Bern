@@ -6,6 +6,7 @@
 //! on what a declaration means.
 
 pub mod ast;
+pub mod build;
 mod expr;
 pub mod items;
 pub mod lower;

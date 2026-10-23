@@ -255,8 +255,7 @@ impl Generator<'_> {
         let optional = matches!(element.field(name)?.ty, Type::Optional { .. });
         let kinds = string(element.keyword("files").unwrap_or("any"));
         let source = value_type(bern_media::MEDIA_SOURCE);
-        let give =
-            format!("{{ url in {field} = {source}(url: url.absoluteString); {action} }}");
+        let give = format!("{{ url in {field} = {source}(url: url.absoluteString); {action} }}");
         let actions = format!(
             "value: {{ {field}{}.url }}, setFile: {give}, fileKinds: {kinds}",
             if optional { "?" } else { "" }
@@ -272,7 +271,11 @@ impl Generator<'_> {
             .as_ref()
             .map(|a| match element.clearing() {
                 // The draft empties and the keyboard goes back to the window.
-                Some(clear) => format!("{}; {}; bernEndEditing()", self.action(a), self.action(&clear)),
+                Some(clear) => format!(
+                    "{}; {}; bernEndEditing()",
+                    self.action(a),
+                    self.action(&clear)
+                ),
                 None => self.action(a),
             })
             .unwrap_or_default();
@@ -317,6 +320,9 @@ impl Generator<'_> {
             Action::Window { op, window } => match op {
                 WindowOp::Open | WindowOp::Activate => {
                     format!("BernHost.shared.open({})", string(window))
+                }
+                WindowOp::ToggleFullscreen => {
+                    format!("BernHost.shared.toggleFullscreen({})", string(window))
                 }
                 WindowOp::Close => format!("BernHost.shared.close({})", string(window)),
             },

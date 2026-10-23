@@ -657,6 +657,110 @@ mod composite {
     }
 
     #[test]
+    fn module_change_callbacks_reach_running_modules_before_the_command_returns() {
+        fn availability_descriptor() -> &'static ProtocolDescriptor {
+            static DESCRIPTOR: OnceLock<ProtocolDescriptor> = OnceLock::new();
+            DESCRIPTOR.get_or_init(|| ProtocolDescriptor {
+                namespace: "availability".into(),
+                state: Vec::new(),
+                commands: Vec::new(),
+                ..tally_descriptor().clone()
+            })
+        }
+        struct Availability;
+        impl EngineProtocol for Availability {
+            fn descriptor(&self) -> &'static ProtocolDescriptor {
+                availability_descriptor()
+            }
+            fn snapshot(&self) -> Vec<Value> {
+                Vec::new()
+            }
+            fn invoke(&mut self, _: &Invocation) -> Result<Value, CommandError> {
+                unreachable!("availability has no commands")
+            }
+        }
+        struct Notifying;
+        impl EngineProtocol for Notifying {
+            fn descriptor(&self) -> &'static ProtocolDescriptor {
+                descriptor()
+            }
+            fn snapshot(&self) -> Vec<Value> {
+                vec![Value::Int(0)]
+            }
+            fn invoke(&mut self, invocation: &Invocation) -> Result<Value, CommandError> {
+                let enabled = matches!(invocation.params.first(), Some(Value::Int(n)) if *n > 0);
+                outbox::call(
+                    "modules",
+                    0,
+                    vec![Value::Text("availability".into()), Value::Bool(enabled)],
+                );
+                Ok(Value::Unit)
+            }
+            fn modules_changed(&mut self, enabled: &[String]) {
+                assert_eq!(
+                    outbox::state_of("availability").is_some(),
+                    enabled.iter().any(|id| id == "availability"),
+                    "callbacks read module state after the switch"
+                );
+                outbox::call("tally", 0, Vec::new());
+            }
+        }
+        let availability = ModuleEngine {
+            descriptor: availability_descriptor(),
+            start: Box::new(|| Box::new(Availability)),
+            optional: true,
+            enabled: true,
+            depends: Vec::new(),
+        };
+        let mut engine =
+            Composite::new(Box::new(Notifying), vec![availability, tally(false, true)]).unwrap();
+        let switch = engine
+            .descriptor()
+            .commands
+            .iter()
+            .position(|command| command.id == "modules.set_enabled")
+            .unwrap();
+        let mut notifications = 0;
+        // Use Composite directly so a Host's initial wake cannot flush a
+        // callback left pending by the command under test.
+        for via_shell in [false, true] {
+            for enabled in [false, true] {
+                let invocation = if via_shell {
+                    Invocation {
+                        command: 0,
+                        params: vec![Value::Int(i64::from(enabled))],
+                    }
+                } else {
+                    Invocation {
+                        command: switch,
+                        params: vec![Value::Text("availability".into()), Value::Bool(enabled)],
+                    }
+                };
+                engine.invoke(&invocation).unwrap();
+                notifications += 1;
+                assert_eq!(
+                    engine.snapshot()[2],
+                    Value::Record(vec![Value::Int(notifications)])
+                );
+                assert!(
+                    outbox::take().is_empty(),
+                    "the callback leaves no delayed calls"
+                );
+            }
+        }
+        engine
+            .invoke(&Invocation {
+                command: switch,
+                params: vec![Value::Text("availability".into()), Value::Bool(true)],
+            })
+            .unwrap();
+        assert_eq!(
+            engine.snapshot()[2],
+            Value::Record(vec![Value::Int(notifications)])
+        );
+    }
+
+    #[test]
     fn optional_modules_switch_off_and_on() {
         let changes = std::sync::Arc::new(Mutex::new(Vec::new()));
         let shell = Remembering {

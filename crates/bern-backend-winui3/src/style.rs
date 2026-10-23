@@ -42,6 +42,11 @@ const BUTTON_BASE: &[&str] = &[
 /// `indicator` is not listed: the navigation view draws its own pill on the
 /// leading edge only.
 pub const SUPPORT: &[StyleSupport] = &[
+    StyleSupport {
+        component: "PopoverButton",
+        base: &["background", "foreground"],
+        states: &[],
+    },
     // A stack's surface: its background, the color of text and icons in
     // it, and corners that clip its layers.
     StyleSupport {

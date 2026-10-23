@@ -137,6 +137,41 @@ impl Generator<'_> {
         out.line("/// The application's one activity: it starts the engine and shows the");
         out.line("/// primary window with the windows open over it.");
         out.open("class MainActivity : ComponentActivity() {");
+        if self.multicast {
+            out.line(
+                "private var bernMulticastLock: android.net.wifi.WifiManager.MulticastLock? = null",
+            );
+            out.open("override fun onStart() {");
+            out.line("super.onStart()");
+            out.open("try {");
+            out.line("val wifi = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager");
+            out.open("val lock = bernMulticastLock ?: wifi?.createMulticastLock(\"${packageName}:bern-discovery\")?.apply {");
+            out.line("setReferenceCounted(false)");
+            out.line("bernMulticastLock = this");
+            out.close("}");
+            out.line("if (lock != null && !lock.isHeld) lock.acquire()");
+            out.close("} catch (error: RuntimeException) {");
+            out.indent += 1;
+            out.line(
+                "android.util.Log.w(\"Bern\", \"Cannot enable Wi-Fi multicast reception\", error)",
+            );
+            out.close("}");
+            out.close("}");
+            out.open("override fun onStop() {");
+            out.open("try {");
+            out.line("val lock = bernMulticastLock");
+            out.line("if (lock != null && lock.isHeld) lock.release()");
+            out.close("} catch (error: RuntimeException) {");
+            out.indent += 1;
+            out.line(
+                "android.util.Log.w(\"Bern\", \"Cannot release Wi-Fi multicast lock\", error)",
+            );
+            out.close("} finally {");
+            out.indent += 1;
+            out.line("super.onStop()");
+            out.close("}");
+            out.close("}");
+        }
         out.open("override fun onCreate(savedInstanceState: Bundle?) {");
         out.line("super.onCreate(savedInstanceState)");
         out.line("enableEdgeToEdge()");

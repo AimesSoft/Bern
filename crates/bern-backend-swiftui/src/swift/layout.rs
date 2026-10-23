@@ -303,7 +303,7 @@ impl Generator<'_> {
             number("count"), number("selected"),
             self.length(element, "collapsed_width").unwrap_or_else(|| "86.0".into()),
             self.length(element, "gap").unwrap_or_else(|| "8.0".into()),
-            self.length(element, "height").unwrap_or_else(|| "560.0".into()),
+            self.length(element, "height").unwrap_or_else(|| "nil".into()),
         ));
         self.nodes(
             out,
@@ -344,6 +344,11 @@ impl Generator<'_> {
             }
         }
         out.line(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)");
+        // SwiftUI otherwise demotes a removed ZStack child behind an opaque
+        // video, hiding the entire removal animation.
+        if element.keyword("appear").is_some() || element.keyword("disappear").is_some() {
+            out.line(".zIndex(1)");
+        }
     }
 
     pub(super) fn scale_box(&self, out: &mut Out, element: &Element, ctx: &Ctx) {

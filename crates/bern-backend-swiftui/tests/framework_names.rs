@@ -112,7 +112,10 @@ fn check_names(output: &Path) {
         "private var session_Window: App_Window { context.session(App_Window.self) }",
         "if session_Window.pinned {",
     ] {
-        assert!(swift.contains(expected), "BernGenerated.swift lacks `{expected}`");
+        assert!(
+            swift.contains(expected),
+            "BernGenerated.swift lacks `{expected}`"
+        );
     }
     for bare in [
         "enum Layout",

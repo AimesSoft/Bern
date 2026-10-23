@@ -1453,8 +1453,19 @@ fn collect(items: &[Item], path: &mut Vec<String>, out: &mut SourceItems) -> syn
 
 /// Collect Bern declarations from the text of one Rust source file.
 pub fn parse_source_file(source: &str) -> syn::Result<SourceItems> {
-    let file = syn::parse_file(source)?;
+    parse_source_file_with_modules(source, &crate::build::Modules::default())
+}
+
+pub fn parse_source_file_with_modules(
+    source: &str,
+    modules: &crate::build::Modules,
+) -> syn::Result<SourceItems> {
+    let mut file = syn::parse_file(source)?;
+    modules.items(&mut file.items)?;
     let mut out = SourceItems::default();
     collect(&file.items, &mut Vec::new(), &mut out)?;
+    for (_, component) in &mut out.components {
+        modules.component(component)?;
+    }
     Ok(out)
 }

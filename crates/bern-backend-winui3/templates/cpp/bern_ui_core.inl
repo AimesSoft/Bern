@@ -59,6 +59,7 @@ struct WindowDef {
     std::function<bool(Ctx const&)> idleEnabled;
     /// `WindowSet(accent:)`: an index into the accents of `style!`.
     std::function<int(Ctx const&)> accent;
+    std::function<std::string(Ctx const&)> palette;
     /// `WindowSet(appearance:)`: "light", "dark" or "" for the system's.
     std::function<char const*(Ctx const&)> appearance;
 };
@@ -1368,6 +1369,7 @@ struct Win {
 #endif
 
     /// `window.idle`: no input for the window's `idle_after` seconds.
+    Cell<bool> fullscreen{false};
     Cell<bool> idle{false};
     /// The window's layout size by its width: compact, medium, expanded
     /// or large.
@@ -1411,6 +1413,7 @@ struct Win {
 inline Value Ctx::Session(int session, int field) const { return win->CellOf(Field{session, field}).Get(); }
 inline Value Ctx::WindowFlag(std::string_view name) const {
     if (!win) return Value::Bool(false);
+    if (name == "fullscreen") return Value::Bool(win->fullscreen.Get());
     if (name == "idle") return Value::Bool(win->idle.Get());
     if (name == "short") return Value::Bool(win->isShort.Get());
     // A Windows desktop app never runs on a television.
@@ -1441,6 +1444,7 @@ inline void Dispatch(Ctx const& ctx, int command, Values const& args, Done done 
 }
 
 namespace WindowOps {
+void ToggleFullscreen(Ctx const& ctx, std::string const& kind);
 void Open(Ctx const& ctx, std::string const& kind);
 void Close(Ctx const& ctx, std::string const& kind);
 }

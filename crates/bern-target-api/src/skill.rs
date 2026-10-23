@@ -727,6 +727,7 @@ mod tests {
                 primary: "main".into(),
                 windows: vec![],
                 accent: None,
+                palette: None,
                 appearance: None,
             },
             players: vec![],

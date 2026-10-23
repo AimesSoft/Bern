@@ -141,18 +141,27 @@ impl Generator<'_> {
     /// label shows as a text button.
     pub(super) fn popover_button(&self, out: &mut Out, element: &Element, ctx: &Ctx, plain: bool) {
         let label = self.text_prop(element, "label").unwrap_or_default();
-        let (presented, on_presented) = match self.field(element, "presented") {
-            Some(field) => (field.clone(), format!("{{ {field} = it }}")),
-            None => ("null".into(), "null".into()),
+        let (presented, on_presented) = if element.expr("open").is_some() {
+            let (value, change) = self
+                .model(element, "open", &|_| "it".into())
+                .expect("controlled popover");
+            (value, format!("{{ it: Boolean -> {change} }}"))
+        } else {
+            match self.field(element, "presented") {
+                Some(field) => (field.clone(), format!("{{ {field} = it }}")),
+                None => ("null".into(), "null".into()),
+            }
         };
         let shortcut = element
             .keyword("shortcut")
             .map(string)
             .unwrap_or_else(|| "null".into());
         out.open(format!(
-            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}) {{",
+            "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}) {{",
             self.target(element, ctx),
-            Self::icon(element.icon("icon"))
+            Self::icon(element.icon("icon")),
+            bern_target_api::style::popover_window_theme(self.app, "android", element),
+            self.style_arg(element)
         ));
         self.nodes(out, &element.children, &ctx.within(Scope::Column));
         out.close("}");
@@ -259,7 +268,8 @@ impl Generator<'_> {
                 "BernControl({target}, \"slider\", {label}, actions = BernControlActions(setNumber = {{ it: Double -> {change} }}, value = {{ BernText.text({value}) }}))"
             ));
             out.line(format!(
-                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, modifier = Modifier.testTag({target}))"
+                "BernControlledSlider({label}, ({value}).toDouble(), {{ it: Double -> {change} }}, {min}, {max}, {step}, {icons}, labelHidden = {label_hidden}, continuous = {}, modifier = Modifier.testTag({target}))",
+                element.keyword("continuous") == Some("true")
             ));
             return;
         }

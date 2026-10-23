@@ -70,6 +70,7 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::APPEARANCE,
     feature::SHORTCUTS,
     feature::RUNTIME_THEME,
+    feature::RUNTIME_PALETTE,
     feature::RUNTIME_IMAGES,
     feature::PICTURE_FILLS,
     feature::SCROLL_SNAP,
@@ -172,6 +173,7 @@ impl Target for SwiftUiTvos {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let app = &bern_target_api::svg::prepare(app, config);
         // Only what a television shows is built, and checked.
         let app = &app.on_television();
         let mut diagnostics = check_swiftui(self, app, config, Platform::Tvos);
@@ -191,6 +193,7 @@ impl Target for SwiftUiTvos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let app = &app.on_television();
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
@@ -316,6 +319,8 @@ impl Target for SwiftUiTvos {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(bern_target_api::svg::static_files(app, context)?);
+        bern_target_api::script::configure(&mut files, context);
         Ok(files)
     }
 
@@ -324,6 +329,7 @@ impl Target for SwiftUiTvos {
         app: &Application,
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let product = product_name(app);
         let output = &context.output_dir;
         let bundle = output.join(format!("{product}.app"));
@@ -447,7 +453,7 @@ impl Target for SwiftUiTvos {
                     .iter()
                     .map(|resource| {
                         (
-                            context.project_dir.join(&resource.name),
+                            bern_target_api::svg::resource_path(context, &resource.name),
                             PathBuf::from(&resource.name),
                         )
                     })

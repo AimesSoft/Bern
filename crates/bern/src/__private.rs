@@ -101,6 +101,8 @@ pub fn features<F: crate::Features>() {}
 
 /// The hosting window's UI state, as `window.idle` reads it.
 pub struct WindowState {
+    /// Whether the hosting window is currently full screen.
+    pub fullscreen: <bool as BernValue>::Ref,
     /// Whether the window had no input for its `idle_after` seconds.
     pub idle: <bool as BernValue>::Ref,
     /// The size of the window's width, by the breakpoints of `[layouts]`:
@@ -114,10 +116,13 @@ pub struct WindowState {
     pub short: <bool as BernValue>::Ref,
     /// Whether the window is a television's.
     pub tv: <bool as BernValue>::Ref,
+    /// Build-time availability of a web document engine.
+    pub webview: <bool as BernValue>::Ref,
 }
 
 pub fn window() -> WindowState {
     WindowState {
+        fullscreen: bool::reference(),
         idle: bool::reference(),
         compact: bool::reference(),
         medium: bool::reference(),
@@ -125,5 +130,6 @@ pub fn window() -> WindowState {
         large: bool::reference(),
         short: bool::reference(),
         tv: bool::reference(),
+        webview: bool::reference(),
     }
 }

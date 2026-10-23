@@ -415,6 +415,7 @@ fun BernVideo(
     controls: Boolean,
     fit: BernVideoFit,
     corner: androidx.compose.ui.unit.Dp? = null,
+    fillsContainer: Boolean = false,
 ) {
     val window = LocalBernWindow.current
     val playerID = when (binding) {
@@ -438,11 +439,11 @@ fun BernVideo(
             }
         }
     }
-    Column(Modifier.fillMaxWidth()) {
+    Column(if (fillsContainer) Modifier.fillMaxSize() else Modifier.fillMaxWidth()) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .aspectRatio(16f / 9f)
+                .then(if (fillsContainer) Modifier.weight(1f) else Modifier.aspectRatio(16f / 9f))
                 .then(if (corner != null) Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(corner)) else Modifier)
                 .background(Color.Black)
                 .semantics {

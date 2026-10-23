@@ -2,6 +2,23 @@
 
 当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
 
+## 引擎的 Android 宿主服务
+
+`bern::platform` 提供 Android 宿主需要完成的操作。宿主在引擎启动前登记实现；没有实现的其他目标返回 `platform_unavailable`，不会静默成功。
+
+```rust
+bern::platform::copy_text("要复制的文字")?;
+bern::platform::open_path(&received_file)?;
+let imported = bern::platform::import_folder(&selected_tree.url, &import_cache)?;
+let exported_uri = bern::platform::export_path(&received_file, &selected_tree.url)?;
+```
+
+`copy_text` 与 `open_path` 由主线程调用 Android 的剪贴板和 `ACTION_VIEW`。私有文件通过 `${applicationId}.bern.files` 的 `FileProvider` 提供，只授予选中文件的读取权限，不授予 URI 前缀权限。私有目录无法由其他应用直接浏览，应先导出至用户选择的文件夹；`open_path` 对此返回错误。
+
+目录来自 `Button(pick: draft.folder, files: "folder")` 的系统目录选择器。`import_folder` 递归复制用户所选的文档树，返回缓存中的新根目录；`export_path` 将一个文件或目录递归导出到用户所选的文档树，返回新根文档的 `content://` URI。两者保留原内容，同名编号，失败时尝试清理本次新建的副本。选择器保存目录的读写授权；只读提供方则退回读取授权，导出会明确失败。
+
+导入和导出是同步 I/O，调用方应放在工作线程上，不能放在 UI 线程。2026-10-23 实现，Android 构建与真机验证记录待补充。
+
 - 日期：2026-10-14（页面级布局、场景与控件形态的能力于 2026-10-19 补齐，见同名一节）
 - 依据：[Bern 架构设计 v0.30](../Design.md)，[Android 适配规范](../Adaptation/Android.md)
 - 工具链：Rust 1.99.0（`aarch64-linux-android`）；Android NDK 29.0.14206865；Android Gradle 插件 9.3.3、Gradle 9.5.1、JDK 21（Android Studio 自带的运行时）；Kotlin 2.4.21 的 Compose 编译器插件；Compose BOM 2026.09.00（Compose 1.12.1、Material 3）；Media3 1.11.1；compileSdk 37、targetSdk 36、minSdk 26
@@ -94,6 +111,17 @@ ExoPlayer 是执行端：每个播放器一个 ExoPlayer，按媒体契约执行
 - 读到之前，框保持声明的大小：两边都给出或给了 `aspect` 时与读到后相同；比例要跟随图片时，声明资源在组合时只读文件头（每个文件一次），框不跳动；引擎给出的图片在比例未知时按海报的 2:3 占位。读不出文件头的声明资源不占位置，与此前一样。
 
 ## 构建、运行与打包
+
+Rust 引擎的网络访问不能从 UI 推断，使用显式 Android 目标选项声明：
+
+```toml
+[targets.android]
+platform = "android"
+channels = ["ipc"]
+android = { network = true, multicast = true }
+```
+
+`network` 生成 `INTERNET` 权限；`multicast` 同时生成 `INTERNET` 与 `CHANGE_WIFI_MULTICAST_STATE`，并在 Activity 的 `onStart` 持有非引用计数的 `WifiManager.MulticastLock`，在 `onStop` 释放，以接收前台局域网发现的 Wi-Fi 组播。两项默认关闭；声明媒体或网络图片的应用仍按原规则获得网络权限。`android` 选项只能用于 Android 目标，未知字段会报错。后台持续接收需另外的 Android 后台服务支持，不由这个锁保持应用运行。
 
 ```bash
 rustup target add aarch64-linux-android

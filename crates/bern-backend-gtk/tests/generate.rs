@@ -242,6 +242,10 @@ fn linux() -> TargetConfig {
         platform: "linux".into(),
         ui: None,
         web_mode: None,
+        web_extension: None,
+        webview: None,
+        javascript: false,
+        android: None,
         channels: Vec::new(),
         frontends: Vec::new(),
     }

@@ -86,10 +86,11 @@ impl Checker<'_> {
                     "open" => ir::WindowOp::Open,
                     "close" => ir::WindowOp::Close,
                     "activate" => ir::WindowOp::Activate,
+                    "toggle_fullscreen" => ir::WindowOp::ToggleFullscreen,
                     other => {
                         self.error(
                             action.method.span(),
-                            format!("windows support open, close and activate, not `{other}`"),
+                            format!("windows support open, close, activate and toggle_fullscreen, not `{other}`"),
                         );
                         return None;
                     }

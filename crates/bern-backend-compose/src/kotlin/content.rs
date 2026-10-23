@@ -119,7 +119,7 @@ impl Generator<'_> {
                 .unwrap_or_else(|| default.into())
         };
         out.line(format!(
-            "BernSvg({}, {}, {}, {}, {}, {}, ({}).toDouble(), ({}).toDouble(), {})",
+            "BernSvg({}, {}, {}, {}, {}, {}, ({}).toDouble(), ({}).toDouble(), {}, {}, {})",
             string(element.resource("source").unwrap_or_default()),
             self.text_prop(element, "label")
                 .unwrap_or_else(|| "null".into()),
@@ -132,6 +132,9 @@ impl Generator<'_> {
             value("speed", "1"),
             value("restart", "0"),
             element.keyword("interactive").unwrap_or("true"),
+            self.text_prop(element, "data")
+                .unwrap_or_else(|| "\"\"".into()),
+            element.keyword("external_links").unwrap_or("false"),
         ));
     }
 
@@ -159,12 +162,17 @@ impl Generator<'_> {
             _ => "BernVideoFit.Contain",
         };
         out.line(format!(
-            "BernVideo({}, {label}, {binding}, {}, {fit}{})",
+            "BernVideo({}, {label}, {binding}, {}, {fit}{}{})",
             self.target(element, ctx),
             element.keyword("controls") != Some("none"),
             self.length(element, "corner")
                 .map(|corner| format!(", corner = {corner}"))
-                .unwrap_or_default()
+                .unwrap_or_default(),
+            if element.keyword("sizing") == Some("fill") {
+                ", fillsContainer = true"
+            } else {
+                ""
+            },
         ));
     }
 

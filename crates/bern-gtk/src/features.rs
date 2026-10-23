@@ -480,13 +480,55 @@ pub struct PopoverButtonProps {
     pub id: &'static str,
     pub label: Option<Str>,
     pub icon: Option<&'static str>,
-    pub presented: Option<Field>,
+    pub presented: Option<crate::widgets::Model>,
+    pub window_theme: bool,
+    pub style: Option<&'static StyleDef>,
+}
+
+fn popover_look(popover: &gtk::Popover, window_theme: bool, style: Option<&'static StyleDef>) {
+    if !window_theme && style.is_none() { return; }
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let name = format!("bern-popover-{id}");
+    popover.set_widget_name(&name);
+    if window_theme { popover.add_css_class("bern-appearance-window"); }
+    let provider = gtk::CssProvider::new();
+    let Some(display) = gtk::gdk::Display::default() else { return; };
+    gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
+    let cleanup = provider.clone();
+    on_cleanup(move || gtk::style_context_remove_provider_for_display(&display, &cleanup));
+    let weak = popover.downgrade();
+    effect(move || {
+        crate::theme::track();
+        let Some(popover) = weak.upgrade() else { return; };
+        let dark = if window_theme { crate::theme::is_dark() }
+            else { crate::theme::part_of(popover.upcast_ref()).unwrap_or_else(crate::theme::is_dark) };
+        let scope = format!("#{name}");
+        let mut css = if window_theme {
+            crate::theme::scoped_part_sheet(dark, &scope) + &crate::style::scoped_colors(&scope, dark)
+        } else { String::new() };
+        if let Some(style) = style {
+            let mut colors = String::new();
+            if let Some(color) = style.base.background {
+                colors.push_str(&format!("background-color: {}; ", crate::theme::css(&color, Some(dark))));
+            }
+            if let Some(color) = style.base.foreground {
+                colors.push_str(&format!("color: {}; ", crate::theme::css(&color, Some(dark))));
+            }
+            css.push_str(&format!("{scope} > contents {{ {colors} }}\n"));
+            if let Some(color) = style.base.background {
+                css.push_str(&format!("{scope} > arrow {{ background-color: {}; }}\n", crate::theme::css(&color, Some(dark))));
+            }
+        }
+        provider.load_from_string(&css);
+    });
 }
 
 /// A button that shows its children in a popover. The children mount
 /// while the popover shows; `presented` follows it and opens or closes it.
 #[allow(non_snake_case)]
 pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: Build) {
+    let presented = props.presented.map(|model| Bound::model(ctx, model));
     let button = gtk::MenuButton::new();
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     match (props.icon, label.clone()) {
@@ -508,6 +550,7 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
     }
     let (popover, column) = popover_content();
     button.set_popover(Some(&popover));
+    popover_look(&popover, props.window_theme, props.style);
     let open = crate::reactive::Cell::new(false);
     let owner: Rc<RefCell<Option<Scope>>> = Rc::new(RefCell::new(None));
     {
@@ -515,8 +558,7 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
         let at = ctx.outside_toolbar();
         let column = column.clone();
         let open = open.clone();
-        let presented = props.presented;
-        let window = ctx.clone();
+        let presented = presented.clone();
         popover.connect_show(move |_| {
             if owner.borrow().is_some() {
                 return;
@@ -525,10 +567,8 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
             untrack(|| scope.run(|| content(&Parent::of_box(&column), &at)));
             *owner.borrow_mut() = Some(scope);
             open.set(true);
-            if let Some(field) = presented
-                && window.peek(field) != Value::Bool(true)
-            {
-                window.write(field, Value::Bool(true));
+            if let Some(bound) = &presented {
+                bound.set(Value::Bool(true));
             }
         });
     }
@@ -536,8 +576,7 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
         let owner = Rc::clone(&owner);
         let column = column.clone();
         let open = open.clone();
-        let presented = props.presented;
-        let window = ctx.clone();
+        let presented = presented.clone();
         popover.connect_closed(move |_| {
             let scope = owner.borrow_mut().take();
             if let Some(scope) = scope {
@@ -547,18 +586,15 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
                 column.remove(&child);
             }
             open.set(false);
-            if let Some(field) = presented
-                && window.peek(field) == Value::Bool(true)
-            {
-                window.write(field, Value::Bool(false));
+            if let Some(bound) = &presented {
+                bound.set(Value::Bool(false));
             }
         });
     }
-    if let Some(field) = props.presented {
-        let at = ctx.clone();
+    if let Some(bound) = presented {
         let shown = button.clone();
         effect(move || {
-            let want = at.read(field) == Value::Bool(true);
+            let want = bound.get() == Value::Bool(true);
             let shown = shown.clone();
             // Presented from the start: open once the button is on screen.
             glib::idle_add_local_once(move || {

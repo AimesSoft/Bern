@@ -56,7 +56,16 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - run: node --test crates/bern-svg/tests/*.test.mjs crates/bern-backend-web/tests/*.test.mjs
+      - name: Install browser test dependencies
+        run: |
+          npm install --prefix "$RUNNER_TEMP/bern-playwright" playwright@1.58.2
+          "$RUNNER_TEMP/bern-playwright/node_modules/.bin/playwright" install --with-deps chromium webkit
+      - name: Test JavaScript runtimes and browser hit testing
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/bern-playwright/node_modules/playwright/index.mjs
+        run: node --test crates/bern-svg/tests/*.test.mjs crates/bern-backend-web/tests/*.test.mjs crates/bern-script/tests/*.test.mjs
+      - name: Test WebUI control bridge
+        run: python3 crates/bern-backend-web/tests/control-bridge.test.py
 
   gtk:
     name: bern-gtk

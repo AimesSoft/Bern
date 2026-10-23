@@ -89,6 +89,10 @@ impl Generator<'_> {
             Self::props(vec![
                 ("id", Some(self.id(element))),
                 ("label", self.text_prop(element, "label")),
+                (
+                    "hideDisabled",
+                    (element.keyword("hide_disabled") == Some("true")).then(|| "true".into()),
+                ),
                 ("icon", element.icon("icon").map(string)),
                 ("style", Self::keyword(element, "style")),
                 ("shape", Self::keyword(element, "shape")),

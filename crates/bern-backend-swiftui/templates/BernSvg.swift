@@ -15,6 +15,8 @@ struct BernSvg: View {
     var speed: Double = 1
     var restart: Double = 0
     var interactive: Bool = true
+    var data: String = ""
+    var externalLinks: Bool = false
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var phase
     @State private var visible = false
@@ -24,7 +26,7 @@ struct BernSvg: View {
             "playing": playing, "visible": visible && phase == .active,
             "speed": speed.isFinite && speed > 0 ? speed : 1,
             "restart": restart.isFinite ? restart : 0,
-            "interactive": interactive, "fit": fit,
+            "interactive": interactive, "fit": fit, "data": data, "externalLinks": externalLinks,
             "scheme": scheme == .dark ? "dark" : "light"
         ])
         .frame(width: max(0, width), height: max(0, height))
@@ -55,8 +57,16 @@ private final class BernSvgCoordinator: NSObject, WKNavigationDelegate {
         apply(webView)
     }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
-        // loadHTMLString's initial about:blank is the only navigation.
-        !loaded && action.request.url?.absoluteString == "about:blank" ? .allow : .cancel
+        if state["externalLinks"] as? Bool == true, action.navigationType == .linkActivated,
+           let url = action.request.url, url.scheme == "https", url.host != nil {
+            #if os(macOS)
+            NSWorkspace.shared.open(url)
+            #else
+            UIApplication.shared.open(url)
+            #endif
+        }
+        // The document itself never navigates away from the bundled source.
+        return !loaded && action.request.url?.absoluteString == "about:blank" ? .allow : .cancel
     }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         NSLog("Bern SVG %@: %@", name, error.localizedDescription)

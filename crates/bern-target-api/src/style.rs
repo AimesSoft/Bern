@@ -45,6 +45,22 @@ impl Resolved {
     }
 }
 
+/// Opaque app-colored panels can follow the window; native material panels
+/// inherit their presenting area's contrast (for example, white on video).
+pub fn popover_window_theme(app: &Application, platform: &str, element: &Element) -> bool {
+    match element.keyword("panel_appearance") {
+        Some("window") => true,
+        Some("surface") => resolve(app, platform, "PopoverButton", element.keyword("variant"))
+            .is_some_and(|style| {
+                style
+                    .base
+                    .iter()
+                    .any(|effect| matches!(effect, StyleEffect::Background { .. }))
+            }),
+        _ => false,
+    }
+}
+
 fn applies(rule: &StyleRule, platform: &str) -> bool {
     !rule.exempt.iter().any(|exempt| exempt == platform)
 }

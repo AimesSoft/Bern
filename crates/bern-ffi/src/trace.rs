@@ -47,7 +47,9 @@ pub(crate) fn run(command: SessionCommand, params: &[Value]) -> Result<Value, Co
 fn utf8<'a>(bytes: *const u8, len: usize) -> Option<&'a str> {
     // SAFETY: the callers' contracts guarantee `len` readable bytes.
     let bytes = unsafe { slice(bytes, len) };
-    std::str::from_utf8(bytes).ok().filter(|text| !text.is_empty())
+    std::str::from_utf8(bytes)
+        .ok()
+        .filter(|text| !text.is_empty())
 }
 
 /// The trace clock in nanoseconds: the platform's monotonic clock.

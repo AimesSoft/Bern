@@ -438,7 +438,9 @@ fun BernStyledSidebarItem(
             Icon(icon, contentDescription = null, tint = foreground)
             Spacer(Modifier.width(12.dp))
         }
-        Text(label, color = foreground, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+        Text(label, color = foreground, style = MaterialTheme.typography.labelLarge,
+            fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else null,
+            modifier = Modifier.weight(1f))
         // A live count beside the page, hidden at zero.
         if (badge != null && badge > 0) {
             Text("$badge", color = foreground, style = MaterialTheme.typography.labelLarge)

@@ -18,6 +18,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+mod modules;
+
 const USAGE: &str = "\
 bern: create, check, build and run Bern applications
 
@@ -44,6 +46,7 @@ Commands:
 Options:
   --manifest   Path to Bern.toml (default: search from the current directory)
   --target     Target name from [targets.<name>]
+  --exclude-module  Omit module ids from compilation (comma-separated; repeatable)
   --release    Optimized build
   --port       Local HTTP port, 1–65535, for browser app runs;
                omitted: choose a free port (a fixed port preserves browser storage)
@@ -78,6 +81,7 @@ struct Options {
     bern_path: Option<PathBuf>,
     /// `bern new --module <id>`.
     module: Option<String>,
+    exclude_modules: Vec<String>,
 }
 
 fn parse() -> Result<Options, String> {
@@ -97,11 +101,19 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
             "--module",
             "--manifest",
         ],
-        "run" => &["--manifest", "--target", "--release", "--port", "--trace"],
-        "build" => &["--manifest", "--target", "--release"],
-        "package" => &["--manifest", "--target"],
-        "check" => &["--manifest", "--target"],
-        "doctor" | "ir" => &["--manifest"],
+        "run" => &[
+            "--manifest",
+            "--target",
+            "--release",
+            "--port",
+            "--trace",
+            "--exclude-module",
+        ],
+        "build" => &["--manifest", "--target", "--release", "--exclude-module"],
+        "package" => &["--manifest", "--target", "--exclude-module"],
+        "check" => &["--manifest", "--target", "--exclude-module"],
+        "doctor" => &["--manifest"],
+        "ir" => &["--manifest", "--exclude-module"],
         other => return Err(format!("unknown command `{other}`\n\n{USAGE}")),
     };
     let mut options = Options {
@@ -148,6 +160,18 @@ fn parse_args(mut args: impl Iterator<Item = String>) -> Result<Options, String>
             }
             "--bern-path" => options.bern_path = Some(value()?.into()),
             "--module" => options.module = Some(value()?),
+            "--exclude-module" => {
+                for id in value()?.split(',').map(str::trim) {
+                    if !bern_syntax::valid_id(id) {
+                        return Err(format!(
+                            "--exclude-module needs comma-separated module ids; invalid id `{id}`"
+                        ));
+                    }
+                    if !options.exclude_modules.iter().any(|other| other == id) {
+                        options.exclude_modules.push(id.to_string());
+                    }
+                }
+            }
             _ if options.command == "new" && options.path.is_none() => {
                 options.path = Some(arg.into())
             }
@@ -374,7 +398,15 @@ fn context(
     BuildContext {
         project_dir: config.dir.clone(),
         workspace_dir: workspace.to_path_buf(),
-        output_dir: workspace.join("target").join("bern").join(&target.name),
+        output_dir: {
+            let base = workspace.join("target").join("bern").join(&target.name);
+            let excluded = modules::excluded(config);
+            if excluded.is_empty() {
+                base
+            } else {
+                base.join(format!("without-{}", excluded.replace(',', "+")))
+            }
+        },
         target: target.clone(),
         protocol_package: config.protocol_package.name.clone(),
         protocol_path: config.protocol_package.dir.clone(),
@@ -631,7 +663,7 @@ fn build(options: &Options) -> ExitCode {
         );
         return ExitCode::from(2);
     };
-    let config = match bern_compiler::config::load(&manifest) {
+    let config = match bern_compiler::config::load_excluding(&manifest, &options.exclude_modules) {
         Ok(config) => config,
         Err(errors) => {
             report(&errors);
@@ -867,6 +899,10 @@ fn build(options: &Options) -> ExitCode {
                 .collect::<Vec<_>>(),
         });
         let mut files = files;
+        if let Err(error) = modules::configure(&mut files, &config) {
+            eprintln!("error: {error}");
+            return ExitCode::FAILURE;
+        }
         files.push(bern_target_api::GeneratedFile::text(
             "features.json",
             serde_json::to_string_pretty(&features_json).expect("report serializes"),
@@ -887,7 +923,7 @@ fn build(options: &Options) -> ExitCode {
             files.len(),
             context.output_dir.display()
         );
-        let plan = match target.plan(&app, &context) {
+        let mut plan = match target.plan(&app, &context) {
             Ok(plan) => plan,
             Err(errors) => {
                 report(&errors);
@@ -901,6 +937,7 @@ fn build(options: &Options) -> ExitCode {
             eprintln!("error: {message}");
             return ExitCode::FAILURE;
         }
+        modules::environment(&mut plan.steps, &config);
         if !run_steps(&plan.steps) {
             return ExitCode::FAILURE;
         }
@@ -909,13 +946,14 @@ fn build(options: &Options) -> ExitCode {
         }
         print_notes(&plan.notes);
         if options.command == "package" {
-            let packages = match target.package(&app, &context, &signing) {
+            let mut packages = match target.package(&app, &context, &signing) {
                 Ok(packages) => packages,
                 Err(errors) => {
                     report(&errors);
                     return ExitCode::FAILURE;
                 }
             };
+            modules::environment(&mut packages.steps, &config);
             if !run_steps(&packages.steps) {
                 return ExitCode::FAILURE;
             }
@@ -1110,6 +1148,83 @@ mod tests {
         let _ = std::fs::remove_dir_all(&workspace);
     }
 
+    #[test]
+    fn web_app_control_is_opt_in_and_the_package_stays_static() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .unwrap();
+        let workspace =
+            std::env::temp_dir().join(format!("bern-web-control-{}", std::process::id()));
+        let config = bern_compiler::config::load(&root.join("examples/planner/Bern.toml")).unwrap();
+        let compiled = bern_compiler::compile(&config).unwrap();
+        let framework = Framework::Path(root.join("crates"));
+        let web = bern_backend_web::WebBrowser;
+        let mut target = config
+            .targets
+            .iter()
+            .find(|t| t.name == "web_ui")
+            .unwrap()
+            .clone();
+        target.name = "web_app".into();
+        target.web_mode = Some("app".into());
+        target.channels = vec!["ipc".into()];
+        let context = context(&config, &compiled, &workspace, &target, &framework, false);
+        let files = web.generate(&compiled.app, &context).unwrap();
+        let source = |name: &str| {
+            String::from_utf8(
+                files
+                    .iter()
+                    .find(|f| f.path == Path::new(name))
+                    .unwrap()
+                    .contents
+                    .clone(),
+            )
+            .unwrap()
+        };
+        assert!(source("glue/page/Cargo.toml").contains("features = [\"control\"]"));
+        assert!(
+            source("glue/control/src/cli.rs")
+                .contains(&format!("{}.web", compiled.app.app.bundle_id))
+        );
+        assert!(!files.iter().any(|f| f.path.starts_with("glue/host")));
+        for file in files {
+            write_if_changed(&context.output_dir.join(file.path), &file.contents).unwrap();
+        }
+        place_files(&web.plan(&compiled.app, &context).unwrap().steps);
+        assert!(
+            context
+                .output_dir
+                .join(format!("bin/planner-mcp{}", std::env::consts::EXE_SUFFIX))
+                .is_file()
+        );
+        place_files(
+            &web.package(
+                &compiled.app,
+                &context,
+                &bern_target_api::Signing::default(),
+            )
+            .unwrap()
+            .steps,
+        );
+        let packaged = files_below(&context.output_dir.join("package/planner"));
+        assert!(packaged.iter().any(|p| p == "control.js"));
+        assert!(!packaged.iter().any(|p| p.starts_with("bin/")
+            || p.starts_with("skills/")
+            || p.starts_with("glue/")
+            || p == "serve-bridge.py"
+            || p == "control.json"));
+        // Removing the channel also removes the local relay and native tools.
+        let mut disabled = context.clone();
+        disabled.target.channels.clear();
+        let generated = web.generate(&compiled.app, &disabled).unwrap();
+        assert!(!generated.iter().any(|f| f.path == Path::new("control.js")));
+        place_files(&web.plan(&compiled.app, &disabled).unwrap().steps);
+        assert!(!disabled.output_dir.join("bin").exists());
+        assert!(!disabled.output_dir.join("serve-bridge.py").exists());
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
     fn parsed(args: &[&str]) -> Result<Options, String> {
         parse_args(args.iter().map(|arg| arg.to_string()))
     }
@@ -1202,5 +1317,45 @@ mod tests {
                 .unwrap_err()
                 .contains("does not take `--trace`")
         );
+    }
+}
+
+#[cfg(test)]
+mod module_option_tests {
+    use super::*;
+    #[test]
+    fn every_compilation_command_accepts_repeated_and_comma_separated_exclusions() {
+        for command in ["run", "build", "package", "check", "ir"] {
+            let options = parse_args(
+                [
+                    command,
+                    "--exclude-module",
+                    "notes,tags",
+                    "--exclude-module",
+                    "tags,sync",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
+            .unwrap();
+            assert_eq!(options.exclude_modules, ["notes", "tags", "sync"]);
+        }
+        for value in [
+            "",
+            "notes,",
+            ",notes",
+            "notes,,tags",
+            "--target",
+            "notes/../tags",
+        ] {
+            assert!(
+                parse_args(
+                    ["build", "--exclude-module", value]
+                        .into_iter()
+                        .map(str::to_string)
+                )
+                .is_err()
+            );
+        }
     }
 }

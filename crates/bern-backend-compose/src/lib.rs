@@ -189,6 +189,7 @@ impl Target for ComposeAndroid {
     }
 
     fn check(&self, app: &Application, config: &TargetConfig) -> Vec<Diagnostic> {
+        let app = &bern_target_api::svg::prepare(app, config);
         let mut diagnostics = check_common(self, app);
         for channel in &config.channels {
             if !self.descriptor().channels.contains(&channel.as_str()) {
@@ -220,6 +221,7 @@ impl Target for ComposeAndroid {
         app: &Application,
         context: &BuildContext,
     ) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         bern_target_api::svg::validate(app, context)?;
         let product = product_name(app);
         let package = names::package(&app.app.bundle_id);
@@ -264,7 +266,11 @@ impl Target for ComposeAndroid {
             GeneratedFile::text("project/app/build.gradle.kts", project::app_build(app)),
             GeneratedFile::text(
                 main.join("AndroidManifest.xml"),
-                project::manifest(app, round),
+                project::manifest(app, round, context.target.android.as_ref()),
+            ),
+            GeneratedFile::text(
+                main.join("res/xml/bern_file_paths.xml"),
+                project::FILE_PROVIDER_PATHS,
             ),
             GeneratedFile::text(
                 main.join("baseline-prof.txt"),
@@ -304,7 +310,15 @@ impl Target for ComposeAndroid {
                 sources
                     .join(package.replace('.', "/"))
                     .join("BernGenerated.kt"),
-                Generator::new(app).generate(&package, app.protocol.fingerprint()),
+                Generator::new(app)
+                    .with_multicast(
+                        context
+                            .target
+                            .android
+                            .as_ref()
+                            .is_some_and(|options| options.multicast),
+                    )
+                    .generate(&package, app.protocol.fingerprint()),
             ),
             GeneratedFile::text("glue/Cargo.toml", glue::cargo_toml(context, app)),
             GeneratedFile::text("glue/src/lib.rs", glue::lib_rs(context, app)),
@@ -375,6 +389,8 @@ impl Target for ComposeAndroid {
             "build.json",
             serde_json::to_string_pretty(&manifest).expect("manifest"),
         ));
+        files.extend(bern_target_api::svg::static_files(app, context)?);
+        bern_target_api::script::configure(&mut files, context);
         Ok(files)
     }
 
@@ -383,6 +399,7 @@ impl Target for ComposeAndroid {
         app: &Application,
         context: &BuildContext,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let tools = toolchain::find().map_err(|message| vec![Diagnostic::error(message)])?;
         let product = product_name(app);
         let output = &context.output_dir;
@@ -480,7 +497,7 @@ impl Target for ComposeAndroid {
                     .iter()
                     .map(|resource| {
                         (
-                            context.project_dir.join(&resource.name),
+                            bern_target_api::svg::resource_path(context, &resource.name),
                             PathBuf::from(&resource.name),
                         )
                     })
@@ -593,6 +610,7 @@ impl Target for ComposeAndroid {
         context: &BuildContext,
         signing: &Signing,
     ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
         let tools = toolchain::find().map_err(|message| vec![Diagnostic::error(message)])?;
         if signing.android_keystore.is_some()
             && (signing.android_keystore_password.is_none() || signing.android_key_alias.is_none())

@@ -36,8 +36,13 @@ const ROW_STATES: &[&str] = &[
 /// CSS, their transforms moved by springs.
 pub const SUPPORT: &[StyleSupport] = &[
     StyleSupport {
+        component: "PopoverButton",
+        base: &["background", "foreground"],
+        states: &[],
+    },
+    StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "border", "corner"],
+        base: &["background", "foreground", "border", "corner", "shadow"],
         states: &[],
     },
     // A form's background is its rows'.

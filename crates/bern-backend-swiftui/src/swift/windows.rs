@@ -127,9 +127,9 @@ impl Generator<'_> {
         }
         // The application's accent and appearance, chosen at run time.
         let catalog = &self.app.windows;
-        if catalog.accent.is_some() || catalog.appearance.is_some() {
+        if catalog.accent.is_some() || catalog.appearance.is_some() || catalog.palette.is_some() {
             out.line(format!(
-                ".modifier(BernThemeChoice(accent: {}, appearance: {}))",
+                ".modifier(BernThemeChoice(accent: {}, appearance: {}, palette: {}))",
                 catalog
                     .accent
                     .as_ref()
@@ -139,7 +139,12 @@ impl Generator<'_> {
                     .appearance
                     .as_ref()
                     .map(|expr| format!("({}).bernName", self.expr(expr)))
-                    .unwrap_or_else(|| "nil".into())
+                    .unwrap_or_else(|| "nil".into()),
+                catalog
+                    .palette
+                    .as_ref()
+                    .map(|expr| self.expr(expr))
+                    .unwrap_or_else(|| "\"\"".into())
             ));
         }
         for session in &window.sessions {

@@ -255,12 +255,21 @@ impl Generator<'_> {
             .icon("icon")
             .map(string)
             .unwrap_or_else(|| "nil".into());
-        let presented = self
-            .field(element, "presented")
-            .map(|field| self.binding_of(&field))
+        let presented = if element.expr("open").is_some() {
+            self.control_value(element, "open").1
+        } else {
+            self.field(element, "presented")
+                .map(|field| self.binding_of(&field))
+                .unwrap_or_else(|| "nil".into())
+        };
+        let window_theme =
+            bern_target_api::style::popover_window_theme(self.app, self.style_platform(), element);
+        let style = self
+            .style_of(element)
+            .map(|style| format!("BernStyles.{}", style.name))
             .unwrap_or_else(|| "nil".into());
         out.open(format!(
-            "BernPopoverButton(label: {label}, systemImage: {icon}, presented: {presented}, target: {}) {{",
+            "BernPopoverButton(label: {label}, systemImage: {icon}, presented: {presented}, target: {}, windowTheme: {window_theme}, style: {style}) {{",
             self.target(element, ctx)
         ));
         self.nodes(out, &element.children, ctx);
@@ -372,11 +381,24 @@ impl Generator<'_> {
         }
         let action = element.action.as_ref().map(|a| match element.clearing() {
             // The draft empties and the keyboard goes back to the window.
-            Some(clear) => format!("{}; {}; bernEndEditing()", self.action(a), self.action(&clear)),
+            Some(clear) => format!(
+                "{}; {}; bernEndEditing()",
+                self.action(a),
+                self.action(&clear)
+            ),
             None => self.action(a),
         });
         if let Some(action) = &action {
             out.line(format!(".onSubmit {{ {action} }}"));
+        }
+        if self.platform == Platform::Macos {
+            out.line(".modifier(BernComposerFocus())");
+        }
+        if let Some(key) = element.expr("clear_key") {
+            out.line(format!(
+                ".onChange(of: {}) {{ {field} = \"\"; bernEndEditing() }}",
+                self.expr(key)
+            ));
         }
         let submit = action
             .map(|action| format!(", submit: {{ {action} }}"))
@@ -447,7 +469,7 @@ impl Generator<'_> {
         if element.expr("current").is_some() {
             let (value, _, commit) = self.control_value(element, "current");
             let label = self.text_prop(element, "label").unwrap_or_default();
-            out.line(format!("BernControlledSlider(value: {value}, minimum: {}, maximum: {}, step: {}, label: {label}, labelHidden: {}, commit: {commit})", double(element.number("min").unwrap_or(0.0)), double(element.number("max").unwrap_or(1.0)), element.number("step").map(double).unwrap_or_else(|| "nil".into()), element.keyword("label_hidden") == Some("true")));
+            out.line(format!("BernControlledSlider(value: {value}, minimum: {}, maximum: {}, step: {}, label: {label}, labelHidden: {}, continuous: {}, commit: {commit})", double(element.number("min").unwrap_or(0.0)), double(element.number("max").unwrap_or(1.0)), element.number("step").map(double).unwrap_or_else(|| "nil".into()), element.keyword("label_hidden") == Some("true"), element.keyword("continuous") == Some("true")));
             out.line(format!(".bernControl({}, role: \"slider\", label: {label}, actions: BernControlActions(setNumber: {commit}, value: {{ BernText.text({value}) }}))", self.target(element, ctx)));
             return;
         }

@@ -402,6 +402,9 @@ impl<'a> Generator<'a> {
                 WindowOp::Open | WindowOp::Activate => {
                     format!("WindowOps::Open(c, {})", string(window))
                 }
+                WindowOp::ToggleFullscreen => {
+                    format!("WindowOps::ToggleFullscreen(c, {})", string(window))
+                }
                 WindowOp::Close => format!("WindowOps::Close(c, {})", string(window)),
             },
             Action::Media { player, op, args } => {
@@ -434,15 +437,18 @@ impl<'a> Generator<'a> {
     }
 
     fn action(&self, element: &Element) -> Option<String> {
-        element.action.as_ref().map(|action| match element.clearing() {
-            // The draft empties after the action.
-            Some(clear) => format!(
-                "[](Ctx const& c) {{ {}; {}; }}",
-                self.action_body(action),
-                self.action_body(&clear)
-            ),
-            None => format!("[](Ctx const& c) {{ {}; }}", self.action_body(action)),
-        })
+        element
+            .action
+            .as_ref()
+            .map(|action| match element.clearing() {
+                // The draft empties after the action.
+                Some(clear) => format!(
+                    "[](Ctx const& c) {{ {}; {}; }}",
+                    self.action_body(action),
+                    self.action_body(&clear)
+                ),
+                None => format!("[](Ctx const& c) {{ {}; }}", self.action_body(action)),
+            })
     }
 
     fn keyword(element: &Element, name: &str) -> Option<String> {

@@ -31,8 +31,15 @@ macro_rules! lucide {
 
 /// `(Bern name, Lucide SVG, fill)`.
 const ICONS: &[(&str, &str, Fill)] = &[
+    (
+        "arrow.down.right.and.arrow.up.left",
+        lucide!("minimize-2"),
+        Fill::None,
+    ),
     ("plus", lucide!("plus"), Fill::None),
     ("minus", lucide!("minus"), Fill::None),
+    ("speedometer", lucide!("gauge"), Fill::None),
+    ("viewfinder", lucide!("maximize"), Fill::None),
     ("xmark", lucide!("x"), Fill::None),
     ("checkmark", lucide!("check"), Fill::None),
     ("chevron.left", lucide!("chevron-left"), Fill::None),

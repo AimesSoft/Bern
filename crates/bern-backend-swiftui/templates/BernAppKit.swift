@@ -74,6 +74,7 @@ extension BernWindowContext {
 
     func reportFacts() {
         guard let window = platform.nsWindow, generation > 0, !window.inLiveResize else { return }
+        fullscreen = window.styleMask.contains(.fullScreen)
         BernHost.shared.reportFacts(self, window)
     }
 
@@ -100,6 +101,7 @@ extension BernHost {
             "ApplePersistenceIgnoreState": true,
             "NSQuitAlwaysKeepsWindows": false,
         ])
+        BernFocusAppearance.install()
     }
 
     func platformDidStart() {
@@ -481,6 +483,43 @@ final class BernCloseGuard: NSObject, NSWindowDelegate {
     }
 }
 
+// MARK: - Focus appearance
+
+/// macOS controls keep their keyboard focus without drawing a system ring.
+/// SwiftUI's focus effect is disabled at the window root; AppKit fields,
+/// toolbar controls and newly presented panels need their native ring disabled
+/// too. Apply before window updates so controls added after launch are covered.
+@MainActor
+enum BernFocusAppearance {
+    private static var observer: NSObjectProtocol?
+
+    static func install() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.willUpdateNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated {
+                for window in NSApplication.shared.windows where window.isVisible {
+                    apply(to: window)
+                }
+            }
+        }
+    }
+
+    static func apply(to window: NSWindow) {
+        guard let root = window.contentView?.superview ?? window.contentView else { return }
+        suppress(in: root)
+    }
+
+    private static func suppress(in view: NSView) {
+        if view.focusRingType != .none { view.focusRingType = .none }
+        if let cell = (view as? NSControl)?.cell, cell.focusRingType != .none {
+            cell.focusRingType = .none
+        }
+        for child in view.subviews { suppress(in: child) }
+    }
+}
+
 /// Reports the NSWindow that hosts a window root.
 struct BernWindowReader: NSViewRepresentable {
     let found: @MainActor (NSWindow?) -> Void
@@ -490,6 +529,7 @@ struct BernWindowReader: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            if let window { BernFocusAppearance.apply(to: window) }
             found?(window)
         }
     }
@@ -615,6 +655,7 @@ struct BernWindowPlatformModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .focusEffectDisabled()
             .overlay(alignment: .topLeading) {
                 BernWindowReader { [context] window in context.found(window) }
                     .frame(width: 0, height: 0)
@@ -1076,7 +1117,7 @@ final class BernEventMonitor {
     private func reset(_ context: BernWindowContext, after seconds: Double) {
         context.platform.nsWindow?.acceptsMouseMovedEvents = true
         if context.idle {
-            context.idle = false
+            withAnimation(.easeOut(duration: 0.22)) { context.idle = false }
         }
         timer?.invalidate()
         timer = nil
@@ -1091,9 +1132,9 @@ final class BernEventMonitor {
         timer = Timer.scheduledTimer(withTimeInterval: wait, repeats: false) { [weak context] _ in
             MainActor.assumeIsolated {
                 guard let context else { return }
-                if context.platform.nsWindow?.attachedSheet != nil || context.platform.nsWindow?.childWindows?.contains(where: { $0.isVisible }) == true || context.platform.nsWindow?.firstResponder is NSTextView || NSApp.mainMenu?.highlightedItem != nil {
+                if context.platform.nsWindow?.attachedSheet != nil || context.popoverOwner != nil || context.platform.nsWindow?.firstResponder is NSTextView || NSApp.mainMenu?.highlightedItem != nil {
                     self.reset(context, after: seconds)
-                } else { context.idle = true }
+                } else { withAnimation(.easeInOut(duration: 0.22)) { context.idle = true } }
             }
         }
     }
@@ -1103,6 +1144,216 @@ final class BernEventMonitor {
 @MainActor
 func bernEndEditing() {
     NSApp.keyWindow?.makeFirstResponder(nil)
+}
+
+private struct BernFocusRegionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var bernInFocusRegion: Bool {
+        get { self[BernFocusRegionKey.self] }
+        set { self[BernFocusRegionKey.self] = newValue }
+    }
+}
+
+/// Owns outside presses while a descendant text field is editing. The region
+/// includes companion controls such as Send, which keep their normal behavior.
+struct BernFocusRegion: ViewModifier {
+    func body(content: Content) -> some View {
+        content.environment(\.bernInFocusRegion, true)
+            .background(BernFocusRegionPress())
+    }
+}
+
+struct BernFocusRegionPress: NSViewRepresentable {
+    func makeNSView(context: Context) -> Observer { Observer() }
+    func updateNSView(_ view: Observer, context: Context) {}
+    static func dismantleNSView(_ view: Observer, coordinator: ()) { view.stop() }
+
+    @MainActor final class Observer: NSView {
+        private var monitor: Any?
+        private var swallowedRelease: NSEvent.EventType?
+        private var swallowedDrag: NSEvent.EventType?
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [
+                .leftMouseDown, .leftMouseUp, .leftMouseDragged,
+                .rightMouseDown, .rightMouseUp, .rightMouseDragged
+            ]) { [weak self] event in
+                let consumed = MainActor.assumeIsolated { self?.consume(event) ?? false }
+                return consumed ? nil : event
+            }
+        }
+
+        func consume(_ event: NSEvent) -> Bool {
+            guard let window, event.window === window else { return false }
+            if event.type == swallowedRelease {
+                swallowedRelease = nil
+                swallowedDrag = nil
+                return true
+            }
+            if event.type == swallowedDrag { return true }
+            guard event.type == .leftMouseDown || event.type == .rightMouseDown else { return false }
+            swallowedRelease = nil
+            swallowedDrag = nil
+            guard !isHiddenOrHasHiddenAncestor,
+                  let editor = window.firstResponder as? NSTextView else { return false }
+            // An NSTextField's editor is shared by the window; its delegate is
+            // the field whose geometry identifies the editing region.
+            let field = (editor.delegate as? NSView) ?? editor
+            guard field.window === window,
+                  bounds.contains(convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), from: field)),
+                  !bounds.contains(convert(event.locationInWindow, from: nil)) else { return false }
+            swallowedRelease = event.type == .leftMouseDown ? .leftMouseUp : .rightMouseUp
+            swallowedDrag = event.type == .leftMouseDown ? .leftMouseDragged : .rightMouseDragged
+            window.makeFirstResponder(nil)
+            return true
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            swallowedRelease = nil
+            swallowedDrag = nil
+        }
+    }
+}
+
+/// A message composer relinquishes the keyboard on an outside press,
+/// without submitting or clearing its draft. Keep the event for its target.
+struct BernComposerFocus: ViewModifier {
+    @FocusState private var focused: Bool
+    @Environment(\.bernInFocusRegion) private var inRegion
+
+    func body(content: Content) -> some View {
+        content.focused($focused)
+            .background(BernComposerOutsidePress(active: focused && !inRegion) { focused = false })
+    }
+}
+
+struct BernComposerOutsidePress: NSViewRepresentable {
+    let active: Bool
+    let dismiss: () -> Void
+
+    func makeNSView(context: Context) -> Observer { Observer() }
+
+    func updateNSView(_ view: Observer, context: Context) {
+        view.active = active
+        view.dismiss = dismiss
+    }
+
+    static func dismantleNSView(_ view: Observer, coordinator: ()) { view.stop() }
+
+    @MainActor final class Observer: NSView {
+        var active = false
+        var dismiss: (() -> Void)?
+        private var monitor: Any?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                MainActor.assumeIsolated { self?.handle(event) }
+                return event
+            }
+        }
+
+        func handle(_ event: NSEvent) {
+            guard active, let window, event.window === window,
+                  !bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+            // End editing before the clicked control handles the same press,
+            // so switching to another field keeps its newly acquired focus.
+            window.makeFirstResponder(nil)
+            dismiss?()
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+        }
+    }
+}
+
+/// The press dismissing a popover belongs to the popover, not to the
+/// button or video underneath it. Observe its anchor's window so clicks
+/// inside the separate popover window continue to reach its controls.
+struct BernPopoverOutsidePress: NSViewRepresentable {
+    let active: Bool
+    let dismiss: () -> Void
+
+    func makeNSView(context: Context) -> Observer { Observer() }
+
+    func updateNSView(_ view: Observer, context: Context) {
+        view.active = active
+        view.dismiss = dismiss
+    }
+
+    static func dismantleNSView(_ view: Observer, coordinator: ()) { view.stop() }
+
+    @MainActor final class Observer: NSView {
+        var active = false
+        var dismiss: (() -> Void)?
+        private var monitor: Any?
+        private var swallowedRelease: NSEvent.EventType?
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            stop()
+            guard window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [
+                .leftMouseDown, .rightMouseDown, .otherMouseDown,
+                .leftMouseUp, .rightMouseUp, .otherMouseUp, .keyDown
+            ]) { [weak self] event in
+                let consumed = MainActor.assumeIsolated { self?.consume(event) ?? false }
+                return consumed ? nil : event
+            }
+        }
+
+        func consume(_ event: NSEvent) -> Bool {
+            if event.type == swallowedRelease {
+                swallowedRelease = nil
+                return true
+            }
+            guard active, let window else { return false }
+            if event.type == .keyDown {
+                guard event.keyCode == 53 else { return false }
+                // A popover may close before the main window's Escape shortcut
+                // runs. Consume Escape here so it cannot also leave the player.
+                var owner = event.window
+                while let candidate = owner, candidate !== window { owner = candidate.parent }
+                guard owner === window else { return false }
+                active = false
+                dismiss?()
+                return true
+            }
+            guard event.window === window else { return false }
+            switch event.type {
+            case .leftMouseDown: swallowedRelease = .leftMouseUp
+            case .rightMouseDown: swallowedRelease = .rightMouseUp
+            case .otherMouseDown: swallowedRelease = .otherMouseUp
+            default: return false
+            }
+            active = false
+            dismiss?()
+            return true
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            swallowedRelease = nil
+        }
+    }
 }
 
 /// `idle_area`: the window goes idle only while the pointer rests over

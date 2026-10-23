@@ -42,7 +42,11 @@ fn initial_tokens(expr: &Expr) -> syn::Result<TokenStream> {
 }
 
 pub fn expand(tokens: TokenStream) -> syn::Result<TokenStream> {
-    let item: Item = syn::parse2(tokens)?;
+    let mut items = vec![syn::parse2(tokens)?];
+    crate::config::build_modules()?.items(&mut items)?;
+    let Some(item) = items.pop() else {
+        return Ok(crate::config::track_build());
+    };
     let session = parse_session(&item)?;
     let Item::Struct(mut item_struct) = item else {
         unreachable!()
@@ -69,7 +73,9 @@ pub fn expand(tokens: TokenStream) -> syn::Result<TokenStream> {
     let check_name = format_ident!("__bern_initial_values_of_{}", name);
     let doc = format!("Writable session fields of `{name}`.");
     let b = quote!(::bern::bind);
+    let track_build = crate::config::track_build();
     Ok(quote! {
+        #track_build
         #[derive(Clone, Debug, PartialEq)]
         #item_struct
 

@@ -32,6 +32,11 @@ const ROW_STATES: &[&str] = &[
 /// What Compose shows: buttons drawn by `BernStyledButton`, sidebar items
 /// by `BernStyledSidebarItem`, and a stack's surface by `bernSurface`.
 pub const SUPPORT: &[StyleSupport] = &[
+    StyleSupport {
+        component: "PopoverButton",
+        base: &["background", "foreground"],
+        states: &[],
+    },
     // A stack's surface: its background, the color of the text and icons
     // in it, and corners that clip its layers.
     StyleSupport {

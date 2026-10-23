@@ -130,6 +130,10 @@ impl Generator<'_> {
                     "controlled",
                     Some(element.expr("current").is_some().to_string())
                 ),
+                (
+                    "continuous",
+                    Some((element.keyword("continuous") == Some("true")).to_string())
+                ),
                 ("min", element.number("min").map(number)),
                 ("max", element.number("max").map(number)),
                 ("step", element.number("step").map(number)),
@@ -215,11 +219,27 @@ impl Generator<'_> {
     }
 
     pub(super) fn popover_button(&self, out: &mut Out, element: &Element) {
+        let presented = if element.expr("open").is_some() {
+            self.acknowledged_control_field(element, "open")
+        } else {
+            self.field(element, "presented")
+        };
         let props = Self::props(vec![
             ("id", Some(self.id(element))),
             ("label", self.text_prop(element, "label")),
             ("icon", element.icon("icon").map(string)),
-            ("presented", self.field(element, "presented")),
+            ("presented", presented),
+            (
+                "windowTheme",
+                Some(
+                    (bern_target_api::style::popover_window_theme(self.app, "browser", element))
+                        .to_string(),
+                ),
+            ),
+            (
+                "style",
+                crate::style::reference(self.app, "PopoverButton", element.keyword("variant")),
+            ),
         ]);
         self.children(
             out,

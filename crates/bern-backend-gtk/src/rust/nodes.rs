@@ -240,6 +240,7 @@ impl Generator<'_> {
             "Column" | "Row" => self.column_or_row(out, element),
             "Grid" => self.grid(out, element),
             "Stack" => self.stack(out, element),
+            "FocusRegion" => self.children(out, "b::FocusRegion(p, c, ", &element.children, ");"),
             "ScaleBox" => self.scale_box(out, element),
             "Positioned" => self.positioned(out, element),
             "Marquee" => self.marquee(out, element),

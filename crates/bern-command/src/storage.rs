@@ -168,7 +168,9 @@ impl Folders {
             "android" => {
                 let files = android_files.map(Path::to_path_buf);
                 // `getCacheDir()` sits beside `getFilesDir()`.
-                let cache = android_files.and_then(Path::parent).map(|app| app.join("cache"));
+                let cache = android_files
+                    .and_then(Path::parent)
+                    .map(|app| app.join("cache"));
                 (files.clone(), files, cache)
             }
             _ => (None, None, None),
@@ -377,7 +379,11 @@ mod tests {
             )
         );
         assert_eq!(
-            folders("windows", &[("APPDATA", "C:/R"), ("LOCALAPPDATA", "C:/L")], None),
+            folders(
+                "windows",
+                &[("APPDATA", "C:/R"), ("LOCALAPPDATA", "C:/L")],
+                None
+            ),
             (
                 some("C:/R/app.id"),
                 some("C:/L/app.id"),
@@ -385,7 +391,11 @@ mod tests {
             )
         );
         assert_eq!(
-            folders("linux", &[("HOME", "/home/a"), ("XDG_CACHE_HOME", "relative")], None),
+            folders(
+                "linux",
+                &[("HOME", "/home/a"), ("XDG_CACHE_HOME", "relative")],
+                None
+            ),
             (
                 some("/home/a/.config/app.id"),
                 some("/home/a/.local/share/app.id"),
@@ -393,7 +403,12 @@ mod tests {
             )
         );
         assert_eq!(
-            folders("linux", &[("HOME", "/home/a"), ("XDG_DATA_HOME", "/d")], None).1,
+            folders(
+                "linux",
+                &[("HOME", "/home/a"), ("XDG_DATA_HOME", "/d")],
+                None
+            )
+            .1,
             some("/d/app.id")
         );
         assert_eq!(

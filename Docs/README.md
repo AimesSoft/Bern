@@ -18,10 +18,13 @@
 ## 实现与专题
 
 - [macOS](Implementation/macOS-SwiftUI.md)、[iOS](Implementation/iOS-SwiftUI.md)、[tvOS](Implementation/tvOS-SwiftUI.md)、[Android](Implementation/Android-Compose.md)、[Windows](Implementation/Windows-WinUI3.md)、[Linux](Implementation/Linux-GTK.md)、[Web](Implementation/Web.md)：实现细节、历次验证与限制。
-- [动画 SVG](Implementation/Animated-SVG.md)：可选组件接口、资源、依赖和验证范围。
+- [动画 SVG](Implementation/Animated-SVG.md)：可选组件接口、资源、依赖、静态回退和验证范围。
+- [JavaScript 与目标能力](Implementation/JavaScript.md)：WebView／浏览器与 Boa 的条件构建、脚本上下文和能力分支。
 
 ## 更新规则
 
 组件或属性变化时同步属性表与用法；后端新增功能时同步能力表；验收记录写清日期、目标、场景及未验证范围。代码生成成功、原生构建成功和实际设备交互通过是三个不同结论。新增记录后同时检查旧“尚未实现”“未验证”条目，避免同一能力在文档中有互相冲突的状态。
 
 接口来源为 [bern-ir 组件定义](../crates/bern-ir/src/spec.rs)，能力来源为 [bern-target-api](../crates/bern-target-api/src/lib.rs)（检查规则在 [check/](../crates/bern-target-api/src/check/)）与各后端 TargetDescriptor。实现日志保留历史上下文，不能覆盖当前参考表中的接口事实。
+
+- [按模块编译](Implementation/Module-Builds.md)：`--exclude-module`、编译期 UI 条件和可选 Cargo 依赖。
