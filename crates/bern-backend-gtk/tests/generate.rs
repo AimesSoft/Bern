@@ -69,12 +69,14 @@ fn linux_resolves_to_gtk_by_default() {
 fn languages_without_runtime_texts_are_rejected() {
     let (config, compiled) = showcase();
     let mut app: Application = compiled.app;
-    app.languages.supported.push("ko".into());
+    // Use a reserved private-use language so adding translations cannot
+    // turn this unsupported-language case into a supported one.
+    app.languages.supported.push("qaa".into());
     let problems = GtkLinux.check(&app, &linux_target(&config));
     assert!(
         problems
             .iter()
-            .any(|problem| problem.message.contains("no `ko` translation")),
+            .any(|problem| problem.message.contains("no `qaa` translation")),
         "{problems:?}"
     );
 }

@@ -77,7 +77,7 @@
     ("speaker.slash.fill", "audio-volume-muted-symbolic"),
     ("speaker.wave.2", "audio-volume-medium-symbolic"),
     ("speaker.wave.3.fill", "audio-volume-high-symbolic"),
-    ("speedometer", "speedometer-symbolic"),
+    ("speedometer", "power-profile-performance-symbolic"),
     ("square", "checkbox-symbolic"),
     ("square.and.arrow.up", "send-to-symbolic"),
     ("square.grid.2x2", "view-grid-symbolic"),
