@@ -36,6 +36,7 @@ No JS engine and no embedded browser on the desktop or the phone; every button i
 
 <p>
 <a href="#why-bern">Why Bern</a> ·
+<a href="#built-with-bern">Built with Bern</a> ·
 <a href="#built-for-ai">Built for AI</a> ·
 <a href="#measured">Measured</a> ·
 <a href="#compared-with-other-cross-platform-frameworks">Comparison</a> ·
@@ -68,6 +69,23 @@ No JS engine and no embedded browser on the desktop or the phone; every button i
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-en-dark.svg">
 <img alt="Why Bern: compiled into native UI, one Rust declaration generating each platform's own UI code with no JS engine at runtime; built for AI, where omissions are compile errors and every button is an MCP tool; too light to feel cross-platform, 39 MB, 0.4 s and 2.7 MB on macOS, 35 MB, 0.3 s and 4.2 MB on Windows, 189 KB on the web" src="Docs/Assets/tables/why-en-light.svg" width="100%">
 </picture>
+
+## Built with Bern
+
+### RustSend · Local file sharing
+
+[RustSend](https://github.com/AimesSoft/RustSend) is an open-source local file sharing app built with Bern and compatible with LocalSend v2. Its UI declarations, state and transfer logic are written in Rust. Bern generates native SwiftUI interfaces for macOS and iOS, WinUI 3 for Windows, GTK 4 for Linux, and Jetpack Compose for Android.
+
+It supports device discovery, file and text transfers, receive approval, and in-app completion notices, sharing the same application logic between compact desktop windows and phone layouts. In the local 1.0 macOS ARM64 Release build, the complete `.app` measures **8.09 MiB** and the download `.zip` **3.80 MiB**. See the [measurement record](https://github.com/AimesSoft/RustSend/blob/main/docs/measurements.md) for the build environment and methodology.
+
+<table>
+<tr>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png" height="360" alt="RustSend 1.0 Receive page on a physical Mac"></a><br><sub><b>macOS</b> · SwiftUI</sub></td>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png" height="360" alt="RustSend 1.0 Receive page on a physical Android device"></a><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+</tr>
+</table>
+
+[Source code](https://github.com/AimesSoft/RustSend) · [Download RustSend](https://github.com/AimesSoft/RustSend/releases/latest) · [Screenshots and capture environments for all five platforms](https://github.com/AimesSoft/RustSend/blob/main/docs/screenshots/README.md)
 
 ## Built for AI
 

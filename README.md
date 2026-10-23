@@ -36,6 +36,7 @@
 
 <p>
 <a href="#为什么是-bern">为什么是 Bern</a> ·
+<a href="#应用案例">应用案例</a> ·
 <a href="#为-ai-而建">为 AI 而建</a> ·
 <a href="#实测数据">实测数据</a> ·
 <a href="#与其他跨平台框架对比">对比</a> ·
@@ -68,6 +69,23 @@
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/why-dark.svg">
 <img alt="为什么是 Bern：编译成原生界面，一份 Rust 声明生成各平台自己的 UI 代码，运行时没有 JS 引擎；为 AI 而建，漏写是编译错误，每个按钮都是 MCP 工具；轻到不像跨平台，macOS 内存 39 MB、0.4 秒出窗口、应用包 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-light.svg" width="100%">
 </picture>
+
+## 应用案例
+
+### RustSend · 局域网文件传输
+
+[RustSend](https://github.com/AimesSoft/RustSend) 是使用 Bern 开发的开源局域网文件传输工具，兼容 LocalSend v2。界面声明、状态与传输业务统一使用 Rust；Bern 为 macOS 和 iOS 生成 SwiftUI、为 Windows 生成 WinUI 3、为 Linux 生成 GTK 4、为 Android 生成 Jetpack Compose 原生界面。
+
+它支持设备发现、文件与文字互传、接收确认和应用内完成提示，桌面小窗口与手机布局共用一套业务逻辑。1.0 的本地 macOS ARM64 Release 构建中，完整 `.app` 为 **8.09 MiB**，下载 `.zip` 为 **3.80 MiB**；构建环境和统计口径见[测量记录](https://github.com/AimesSoft/RustSend/blob/main/docs/measurements.md)。
+
+<table>
+<tr>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png" height="360" alt="RustSend 1.0 在 macOS 实机上的接收页"></a><br><sub><b>macOS</b> · SwiftUI</sub></td>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png" height="360" alt="RustSend 1.0 在 Android 实机上的接收页"></a><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+</tr>
+</table>
+
+[源码仓库](https://github.com/AimesSoft/RustSend) · [下载 RustSend](https://github.com/AimesSoft/RustSend/releases/latest) · [五个平台的截图与运行环境](https://github.com/AimesSoft/RustSend/blob/main/docs/screenshots/README.md)
 
 ## 为 AI 而建
 
