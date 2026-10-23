@@ -1545,12 +1545,21 @@ mod tests {
         let room = Room::around((1280.0, 800.0), (1920.0, 800.0), 1.0);
         // The whole scene reaches past both sides; the room above and
         // below is none.
-        assert_eq!(room.reach((0.0, 0.0, 1280.0, 800.0)), [320.0, 320.0, 0.0, 0.0]);
+        assert_eq!(
+            room.reach((0.0, 0.0, 1280.0, 800.0)),
+            [320.0, 320.0, 0.0, 0.0]
+        );
         // Half a point short of an edge still reaches it.
-        assert_eq!(room.reach((0.4, 0.0, 1279.2, 64.0)), [320.0, 320.0, 0.0, 0.0]);
+        assert_eq!(
+            room.reach((0.4, 0.0, 1279.2, 64.0)),
+            [320.0, 320.0, 0.0, 0.0]
+        );
         // A panel inside the scene stays where it is.
         assert_eq!(room.reach((24.0, 114.0, 896.0, 504.0)), [0.0; 4]);
         // A bar along the trailing edge reaches past it alone.
-        assert_eq!(room.reach((1180.0, 0.0, 100.0, 800.0)), [0.0, 320.0, 0.0, 0.0]);
+        assert_eq!(
+            room.reach((1180.0, 0.0, 100.0, 800.0)),
+            [0.0, 320.0, 0.0, 0.0]
+        );
     }
 }

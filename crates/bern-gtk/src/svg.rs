@@ -71,7 +71,7 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
             );
         }
     });
-    let external_links=props.external_links;
+    let external_links = props.external_links;
     view.connect_decide_policy(move |_, decision, kind| {
         if (kind == webkit6::PolicyDecisionType::NavigationAction
             || kind == webkit6::PolicyDecisionType::NewWindowAction)
@@ -81,9 +81,19 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
                 .navigation_action()
                 .and_then(|action| action.request())
                 .and_then(|req| req.uri());
-            if external_links && nav.navigation_action().is_some_and(|a| a.navigation_type() == webkit6::NavigationType::LinkClicked)
-                && let Some(url)=uri.as_deref().filter(|u|u.starts_with("https://") && !u.chars().any(char::is_whitespace)) {
-                if let Err(error)=gio::AppInfo::launch_default_for_uri(url,None::<&gio::AppLaunchContext>) { eprintln!("Open SVG link: {error}"); }
+            if external_links
+                && nav
+                    .navigation_action()
+                    .is_some_and(|a| a.navigation_type() == webkit6::NavigationType::LinkClicked)
+                && let Some(url) = uri
+                    .as_deref()
+                    .filter(|u| u.starts_with("https://") && !u.chars().any(char::is_whitespace))
+            {
+                if let Err(error) =
+                    gio::AppInfo::launch_default_for_uri(url, None::<&gio::AppLaunchContext>)
+                {
+                    eprintln!("Open SVG link: {error}");
+                }
             }
             if uri.as_deref() != Some("about:blank") {
                 decision.ignore();
@@ -132,7 +142,15 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
             .is_none_or(|get| get(&ctx) == crate::protocol::Value::Bool(true));
         let speed = number(&props.speed, 1.0);
         let restart = number(&props.restart, 0.0);
-        *state.borrow_mut() = update_script(playing, speed, restart, props.fit, props.interactive, &props.data.as_ref().map(|get| get(&ctx)).unwrap_or_default(), props.external_links);
+        *state.borrow_mut() = update_script(
+            playing,
+            speed,
+            restart,
+            props.fit,
+            props.interactive,
+            &props.data.as_ref().map(|get| get(&ctx)).unwrap_or_default(),
+            props.external_links,
+        );
         if ready.get() {
             evaluate(&displayed, &state.borrow());
         }
@@ -171,7 +189,15 @@ mod tests {
     #[test]
     fn updates_pass_the_bound_values() {
         assert_eq!(
-            values(&update_script(false, 2.0, 1.5, Some("cover"), true, "{}", false)),
+            values(&update_script(
+                false,
+                2.0,
+                1.5,
+                Some("cover"),
+                true,
+                "{}",
+                false
+            )),
             serde_json::json!({"playing": false, "speed": 2.0, "restart": 1.5, "fit": "cover", "interactive": true, "data": "{}", "externalLinks": false})
         );
     }

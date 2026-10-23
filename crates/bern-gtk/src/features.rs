@@ -486,38 +486,65 @@ pub struct PopoverButtonProps {
 }
 
 fn popover_look(popover: &gtk::Popover, window_theme: bool, style: Option<&'static StyleDef>) {
-    if !window_theme && style.is_none() { return; }
+    if !window_theme && style.is_none() {
+        return;
+    }
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let name = format!("bern-popover-{id}");
     popover.set_widget_name(&name);
-    if window_theme { popover.add_css_class("bern-appearance-window"); }
+    if window_theme {
+        popover.add_css_class("bern-appearance-window");
+    }
     let provider = gtk::CssProvider::new();
-    let Some(display) = gtk::gdk::Display::default() else { return; };
-    gtk::style_context_add_provider_for_display(&display, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2);
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+    );
     let cleanup = provider.clone();
     on_cleanup(move || gtk::style_context_remove_provider_for_display(&display, &cleanup));
     let weak = popover.downgrade();
     effect(move || {
         crate::theme::track();
-        let Some(popover) = weak.upgrade() else { return; };
-        let dark = if window_theme { crate::theme::is_dark() }
-            else { crate::theme::part_of(popover.upcast_ref()).unwrap_or_else(crate::theme::is_dark) };
+        let Some(popover) = weak.upgrade() else {
+            return;
+        };
+        let dark = if window_theme {
+            crate::theme::is_dark()
+        } else {
+            crate::theme::part_of(popover.upcast_ref()).unwrap_or_else(crate::theme::is_dark)
+        };
         let scope = format!("#{name}");
         let mut css = if window_theme {
-            crate::theme::scoped_part_sheet(dark, &scope) + &crate::style::scoped_colors(&scope, dark)
-        } else { String::new() };
+            crate::theme::scoped_part_sheet(dark, &scope)
+                + &crate::style::scoped_colors(&scope, dark)
+        } else {
+            String::new()
+        };
         if let Some(style) = style {
             let mut colors = String::new();
             if let Some(color) = style.base.background {
-                colors.push_str(&format!("background-color: {}; ", crate::theme::css(&color, Some(dark))));
+                colors.push_str(&format!(
+                    "background-color: {}; ",
+                    crate::theme::css(&color, Some(dark))
+                ));
             }
             if let Some(color) = style.base.foreground {
-                colors.push_str(&format!("color: {}; ", crate::theme::css(&color, Some(dark))));
+                colors.push_str(&format!(
+                    "color: {}; ",
+                    crate::theme::css(&color, Some(dark))
+                ));
             }
             css.push_str(&format!("{scope} > contents {{ {colors} }}\n"));
             if let Some(color) = style.base.background {
-                css.push_str(&format!("{scope} > arrow {{ background-color: {}; }}\n", crate::theme::css(&color, Some(dark))));
+                css.push_str(&format!(
+                    "{scope} > arrow {{ background-color: {}; }}\n",
+                    crate::theme::css(&color, Some(dark))
+                ));
             }
         }
         provider.load_from_string(&css);

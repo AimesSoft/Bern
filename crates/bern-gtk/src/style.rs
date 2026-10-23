@@ -295,10 +295,16 @@ pub(crate) fn scoped_colors(scope: &str, dark: bool) -> String {
     let mut css = String::new();
     for style in STYLES.with(Cell::get) {
         let class = format!("{scope} .bern-style-{}", style.name);
-        css.push_str(&format!("{class} {{ {} }}\n", declarations(&style.base, &Look::NONE, Some(dark))));
+        css.push_str(&format!(
+            "{class} {{ {} }}\n",
+            declarations(&style.base, &Look::NONE, Some(dark))
+        ));
         for state in STATES {
             if let Some(look) = style.state(state) {
-                css.push_str(&format!("{class}.bern-{state} {{ {} }}\n", declarations(look, &style.base, Some(dark))));
+                css.push_str(&format!(
+                    "{class}.bern-{state} {{ {} }}\n",
+                    declarations(look, &style.base, Some(dark))
+                ));
             }
         }
     }

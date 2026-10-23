@@ -516,7 +516,9 @@ fn rail_of(widget: &gtk::Widget) -> Option<Rail> {
         return Some(rail);
     }
     if widget.is::<crate::motion::MotionBox>() {
-        return widget.first_child().and_then(|child| child.downcast::<Rail>().ok());
+        return widget
+            .first_child()
+            .and_then(|child| child.downcast::<Rail>().ok());
     }
     None
 }

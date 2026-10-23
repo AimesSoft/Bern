@@ -1436,7 +1436,11 @@ pub fn open_window(ctx: &Ctx, kind: &str) {
 /// the title bar.
 pub fn toggle_fullscreen(_ctx: &Ctx, kind: &str) {
     if let Some(win) = all().into_iter().find(|win| win.kind_id() == kind) {
-        if win.window.is_fullscreen() { win.window.unfullscreen(); } else { win.window.fullscreen(); }
+        if win.window.is_fullscreen() {
+            win.window.unfullscreen();
+        } else {
+            win.window.fullscreen();
+        }
     }
 }
 

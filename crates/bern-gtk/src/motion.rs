@@ -934,7 +934,10 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
             motion.add_css_class(&format!("bern-appearance-{appearance}"));
         }
         if let Some(tint) = decor.tint {
-            let dark = decor.appearance.map(|v| v == "dark").unwrap_or_else(|| adw::StyleManager::default().is_dark());
+            let dark = decor
+                .appearance
+                .map(|v| v == "dark")
+                .unwrap_or_else(|| adw::StyleManager::default().is_dark());
             motion.add_css_class(&crate::theme::use_tint(tint, dark));
         }
         if let Some(disappear) = decor.disappear {
