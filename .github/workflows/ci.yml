@@ -32,7 +32,7 @@ jobs:
       - name: Install GTK 4 and libadwaita
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libdbus-1-dev
       # rustup installs the toolchain rust-toolchain.toml names.
       - run: rustup toolchain install
       - uses: actions/cache@v4
@@ -79,7 +79,7 @@ jobs:
       - name: Install GTK 4, libadwaita and WebKitGTK
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev
+          sudo apt-get install -y libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev libdbus-1-dev
       - run: rustup toolchain install
       - uses: actions/cache@v4
         with:
