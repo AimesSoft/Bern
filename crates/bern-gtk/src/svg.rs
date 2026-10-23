@@ -88,12 +88,10 @@ pub fn Svg(p: &Parent, ctx: &Ctx, props: SvgProps) {
                 && let Some(url) = uri
                     .as_deref()
                     .filter(|u| u.starts_with("https://") && !u.chars().any(char::is_whitespace))
-            {
-                if let Err(error) =
+                && let Err(error) =
                     gio::AppInfo::launch_default_for_uri(url, None::<&gio::AppLaunchContext>)
-                {
-                    eprintln!("Open SVG link: {error}");
-                }
+            {
+                eprintln!("Open SVG link: {error}");
             }
             if uri.as_deref() != Some("about:blank") {
                 decision.ignore();
