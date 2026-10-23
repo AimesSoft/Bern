@@ -1,8 +1,8 @@
-error[E0277]: the trait bound `String: Numeric` is not satisfied
+error[E0277]: the trait bound `std::string::String: Numeric` is not satisfied
   --> tests/ui/fail_progress_value_type.rs:39:27
    |
 39 |     ui! { Progress(value: app.title) }
-   |                           ^^^ the trait `Numeric` is not implemented for `String`
+   |                           ^^^ the trait `Numeric` is not implemented for `std::string::String`
    |
 help: the following other types implement trait `Numeric`
   --> src/bind.rs

@@ -1,10 +1,10 @@
-error[E0277]: the trait bound `Binding<String>: SourceBinding` is not satisfied
+error[E0277]: the trait bound `Binding<std::string::String>: SourceBinding` is not satisfied
   --> tests/ui/fail_video_source_type.rs:33:35
    |
 33 |     ui! { Video(id: clip, source: app.title) }
    |                                   ---^^^^^^
    |                                   |
-   |                                   the trait `SourceBinding` is not implemented for `Binding<String>`
+   |                                   the trait `SourceBinding` is not implemented for `Binding<std::string::String>`
    |                                   required by a bound introduced by this call
    |
 help: the following other types implement trait `SourceBinding`

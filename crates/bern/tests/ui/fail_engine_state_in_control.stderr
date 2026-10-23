@@ -7,8 +7,8 @@ error[E0308]: mismatched types
 40 |     ui! { TextInput(id: title, label: tr! { "en" => "Title" }, value: app.title) }
    |                                                                       ^^^^^^^^^ expected `&SessionField<String>`, found `&Binding<String>`
    |
-   = note: expected reference `&SessionField<String>`
-              found reference `&Binding<String>`
+   = note: expected reference `&SessionField<std::string::String>`
+              found reference `&Binding<std::string::String>`
 note: function defined here
   --> src/__private.rs
    |
