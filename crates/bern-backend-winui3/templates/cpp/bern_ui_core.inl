@@ -1366,6 +1366,9 @@ struct Win {
 #else
     xaml::Hosting::DesktopWindowXamlSource source{nullptr};
     HWND island = nullptr;
+    /// Where the window was before it filled the screen, and its style.
+    WINDOWPLACEMENT restorePlacement{sizeof(WINDOWPLACEMENT)};
+    LONG_PTR restoreStyle = 0;
 #endif
 
     /// `window.idle`: no input for the window's `idle_after` seconds.

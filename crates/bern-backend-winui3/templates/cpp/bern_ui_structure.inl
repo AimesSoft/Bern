@@ -240,7 +240,7 @@ inline void PreviewList(Parent const& p, Ctx const& ctx, Get items, int key, cha
     column.Children().Append(more);
     panel.Children().Append(column);
     Cell<double> height(0);
-    auto resize = panel.SizeChanged([height](auto const&, xaml::SizeChangedEventArgs const& e) { height.Set(e.NewSize().Height); });
+    auto resize = panel.SizeChanged([height](auto const&, xaml::SizeChangedEventArgs const& e) mutable { height.Set(e.NewSize().Height); });
     Reactive::OnCleanup([panel, resize] { panel.SizeChanged(resize); });
     Get visible = [items, height, itemHeight, gap, moreHeight](Ctx const& at) {
         auto list = R::AsList(items(at));

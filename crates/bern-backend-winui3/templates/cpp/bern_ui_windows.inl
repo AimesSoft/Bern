@@ -147,7 +147,9 @@ inline Facts Win::CurrentFacts() {
 /// presentation commands they satisfy.
 inline void Win::Report() {
     if (closed || !Host::handle || !hwnd) return;
+#if BERN_WINUI
     fullscreen.Set(window.AppWindow().Presenter().Kind() == winrt::Microsoft::UI::Windowing::AppWindowPresenterKind::FullScreen);
+#endif
     auto facts = CurrentFacts();
     bern_window_facts(Host::handle, static_cast<uint32_t>(kind), generation, command ? 0 : 1, facts.visibility, facts.size, facts.x, facts.y,
         facts.width, facts.height, facts.focused ? 1 : 0, facts.actions);
@@ -1399,11 +1401,34 @@ namespace WindowOps {
 inline void ToggleFullscreen(Ctx const& ctx, std::string const& kind) {
     for (auto const& win : WindowManager::all) {
         if (win->Def().id != kind) continue;
+#if BERN_WINUI
         auto app = win->window.AppWindow();
         using winrt::Microsoft::UI::Windowing::AppWindowPresenterKind;
         app.SetPresenter(app.Presenter().Kind() == AppWindowPresenterKind::FullScreen
             ? AppWindowPresenterKind::Overlapped : AppWindowPresenterKind::FullScreen);
         win->fullscreen.Set(app.Presenter().Kind() == AppWindowPresenterKind::FullScreen);
+#else
+        // The system XAML has no presenters: a window without a frame over
+        // its monitor, then back where it was.
+        HWND hwnd = win->hwnd;
+        if (!win->fullscreen.Get()) {
+            win->restoreStyle = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            GetWindowPlacement(hwnd, &win->restorePlacement);
+            MONITORINFO info{sizeof(MONITORINFO)};
+            GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &info);
+            SetWindowLongPtrW(hwnd, GWL_STYLE, win->restoreStyle & ~WS_OVERLAPPEDWINDOW);
+            auto const& r = info.rcMonitor;
+            SetWindowPos(hwnd, HWND_TOP, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+            win->fullscreen.Set(true);
+        } else {
+            SetWindowLongPtrW(hwnd, GWL_STYLE, win->restoreStyle);
+            SetWindowPlacement(hwnd, &win->restorePlacement);
+            SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+            win->fullscreen.Set(false);
+        }
+#endif
     }
 }
 

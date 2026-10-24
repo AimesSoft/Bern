@@ -53,20 +53,26 @@ pub fn detect(workspace: &Path, package: &str) -> Result<Framework, String> {
 }
 
 /// The checkout a `[patch]` puts in place of the declared source of `bern`,
-/// as Cargo resolves the workspace. Nothing when the workspace cannot be
-/// resolved offline: the declared source stands.
+/// as Cargo resolves the workspace: offline first, then fetching what a
+/// computer that never built the workspace lacks. Nothing when the workspace
+/// cannot be resolved: the declared source stands.
 fn patched_checkout(workspace: &Path) -> Option<PathBuf> {
-    let output = Command::new("cargo")
-        .args(["metadata", "--offline", "--format-version", "1"])
-        .arg("--manifest-path")
-        .arg(workspace.join("Cargo.toml"))
-        .current_dir(workspace)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    checkout_of(&serde_json::from_slice(&output.stdout).ok()?)
+    let resolve = |offline: bool| {
+        let mut command = Command::new("cargo");
+        command.args(["metadata", "--format-version", "1"]);
+        if offline {
+            command.arg("--offline");
+        }
+        let output = command
+            .arg("--manifest-path")
+            .arg(workspace.join("Cargo.toml"))
+            .current_dir(workspace)
+            .output()
+            .ok()?;
+        output.status.success().then_some(output.stdout)
+    };
+    let metadata = resolve(true).or_else(|| resolve(false))?;
+    checkout_of(&serde_json::from_slice(&metadata).ok()?)
 }
 
 /// The `crates` directory of the resolved `bern` package in `metadata`

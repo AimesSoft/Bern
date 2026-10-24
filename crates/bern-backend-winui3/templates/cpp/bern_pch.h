@@ -22,9 +22,11 @@
 #include <dwmapi.h>
 #include <dxgi1_6.h>
 #include <shlwapi.h>
+#include <shellapi.h>
 #include <shobjidl_core.h>
 #include <wincodec.h>
 #include <winrt/Windows.ApplicationModel.DataTransfer.h>
+#include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Devices.Input.h>
 #include <winrt/Windows.Graphics.h>
 #include <winrt/Windows.Graphics.Imaging.h>
