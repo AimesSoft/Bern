@@ -238,7 +238,6 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
         if (auto text = weak.get()) DrawMarks(text, layer, paint);
     };
     block.SizeChanged([redraw](auto&&, auto&&) { redraw(); });
-    auto content = Bound(ctx, props.content);
     // After a new text is laid out.
     Reactive::Run([content, weak = winrt::make_weak(block), redraw] {
         if (content) content();
