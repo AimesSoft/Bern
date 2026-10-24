@@ -4249,7 +4249,10 @@ private struct BernModalLayer<Content: View>: View {
     }
 
     private var floating: some View {
-        BernModalStage(width: width, height: height, scale: scale) {
+        // The backdrop covers the whole screen; the card keeps to the safe
+        // area, whose insets the stage is given.
+        GeometryReader { proxy in
+        BernModalStage(width: width, height: height, scale: scale, insets: proxy.safeAreaInsets) {
             Color.black.opacity(0.24).contentShape(Rectangle()).onTapGesture { }
             presentation(AnyView(content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -4262,6 +4265,7 @@ private struct BernModalLayer<Content: View>: View {
                 .accessibilityAddTraits(.isModal)
                 .scaleEffect(scale)))
         }.ignoresSafeArea()
+        }
     }
 }
 
@@ -4269,13 +4273,16 @@ private struct BernModalLayer<Content: View>: View {
 /// it: the card as wide as declared and as tall as declared or, without a
 /// height, as its content at the card's width (a scroll view as tall as
 /// what it scrolls), 16 points in from the edges at most. On macOS a
-/// window too short for the card keeps both below its toolbar.
+/// window too short for the card keeps both below its toolbar; elsewhere
+/// the card keeps to the safe area — clear of the status bar, the island,
+/// the home indicator and the keyboard — while the backdrop covers all.
 private struct BernModalStage: Layout {
     let width: CGFloat
     let height: CGFloat?
     /// The scale of the scene the modal was declared in; the card is laid
     /// out at its own size and drawn scaled.
     var scale: CGFloat = 1
+    var insets = EdgeInsets()
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         proposal.replacingUnspecifiedDimensions()
@@ -4283,16 +4290,26 @@ private struct BernModalStage: Layout {
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         guard subviews.count == 2 else { return }
-        let cardWidth = min(width, max(0, bounds.width / scale - 32))
+        #if os(macOS)
+        let safe = bounds
+        #else
+        let safe = CGRect(
+            x: bounds.minX + insets.leading, y: bounds.minY + insets.top,
+            width: max(0, bounds.width - insets.leading - insets.trailing),
+            height: max(0, bounds.height - insets.top - insets.bottom))
+        #endif
+        let cardWidth = min(width, max(0, safe.width / scale - 32))
         let wanted = height ?? subviews[1].sizeThatFits(ProposedViewSize(width: cardWidth, height: nil)).height
         #if os(macOS)
         let top: CGFloat = bounds.height < wanted + 32 ? 52 : 0
+        let backdrop = CGRect(x: bounds.minX, y: bounds.minY + top, width: bounds.width, height: max(0, bounds.height - top))
+        let room = backdrop
         #else
-        let top: CGFloat = 0
+        let backdrop = bounds
+        let room = safe
         #endif
-        let room = CGRect(x: bounds.minX, y: bounds.minY + top, width: bounds.width, height: max(0, bounds.height - top))
         let cardHeight = min(wanted, max(0, room.height / scale - 32))
-        subviews[0].place(at: room.origin, proposal: ProposedViewSize(room.size))
+        subviews[0].place(at: backdrop.origin, proposal: ProposedViewSize(backdrop.size))
         subviews[1].place(at: CGPoint(x: room.midX, y: room.midY), anchor: .center,
                           proposal: ProposedViewSize(width: cardWidth, height: cardHeight))
     }
