@@ -27,6 +27,10 @@ impl Generator<'_> {
             if lines > 1.0 {
                 out.line(".fixedSize(horizontal: false, vertical: true)");
             }
+        } else if element.keyword("markdown") == Some("true") {
+            // Writing runs as long as it is: a stack would otherwise cut
+            // a paragraph short with an ellipsis.
+            out.line(".fixedSize(horizontal: false, vertical: true)");
         }
         match element.keyword("emphasis") {
             Some("secondary") => out.line(".foregroundStyle(.secondary)"),
