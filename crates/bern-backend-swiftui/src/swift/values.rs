@@ -2,7 +2,7 @@
 //! session state that holds them.
 
 use super::Out;
-use crate::names::{self, case, double, member, string, value_type};
+use crate::names::{self, case, double, label, member, string, value_type};
 use bern_ir::Application;
 use bern_protocol::{EnumDef, RecordDef, Type, TypeTable, Value};
 
@@ -51,7 +51,7 @@ pub(super) fn value_literal(value: &Value, ty: &Type, types: &TypeTable) -> Stri
                     .map(|(value, field)| {
                         format!(
                             "{}: {}",
-                            member(&field.name),
+                            label(&field.name),
                             value_literal(value, &field.ty, types)
                         )
                     })
@@ -67,7 +67,7 @@ pub(super) fn value_literal(value: &Value, ty: &Type, types: &TypeTable) -> Stri
                 .map(|(value, field)| {
                     format!(
                         "{}: {}",
-                        member(&field.name),
+                        label(&field.name),
                         value_literal(value, &field.ty, types)
                     )
                 })
@@ -120,7 +120,7 @@ pub(super) fn generate_enum(out: &mut Out, def: &EnumDef) {
                 .map(|field| {
                     format!(
                         "{}: try {}(bern: &reader)",
-                        member(&field.name),
+                        label(&field.name),
                         swift_type(&field.ty)
                     )
                 })
@@ -285,7 +285,7 @@ pub(super) fn generate_record(out: &mut Out, def: &RecordDef) {
         .map(|field| {
             format!(
                 "{}: try {}(bern: &reader)",
-                member(&field.name),
+                label(&field.name),
                 swift_type(&field.ty)
             )
         })

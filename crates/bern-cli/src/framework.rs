@@ -1,10 +1,11 @@
 //! Where a project takes the Bern crates from: the source of the `bern`
 //! dependency of its engine, as Cargo reads the workspace. Generated crates
-//! take every Bern crate from the same source.
+//! take every Bern crate from the same source; when the project's Cargo
+//! configuration patches `bern` to a checkout, from that checkout.
 
 use bern_target_api::Framework;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The source of the `bern` dependency of `package` in the workspace at
@@ -42,7 +43,44 @@ pub fn detect(workspace: &Path, package: &str) -> Result<Framework, String> {
         .flatten()
         .find(|dependency| dependency["name"] == "bern" && dependency["kind"].is_null())
         .ok_or_else(|| format!("the package `{package}` does not depend on `bern`"))?;
-    from_dependency(dependency)
+    let declared = from_dependency(dependency)?;
+    if matches!(declared, Framework::Path(_)) {
+        return Ok(declared);
+    }
+    Ok(patched_checkout(workspace)
+        .map(Framework::Path)
+        .unwrap_or(declared))
+}
+
+/// The checkout a `[patch]` puts in place of the declared source of `bern`,
+/// as Cargo resolves the workspace. Nothing when the workspace cannot be
+/// resolved offline: the declared source stands.
+fn patched_checkout(workspace: &Path) -> Option<PathBuf> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--offline", "--format-version", "1"])
+        .arg("--manifest-path")
+        .arg(workspace.join("Cargo.toml"))
+        .current_dir(workspace)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    checkout_of(&serde_json::from_slice(&output.stdout).ok()?)
+}
+
+/// The `crates` directory of the resolved `bern` package in `metadata`
+/// when it is a local Bern checkout.
+fn checkout_of(metadata: &Value) -> Option<PathBuf> {
+    let bern = metadata["packages"]
+        .as_array()?
+        .iter()
+        .find(|package| package["name"] == "bern" && package["source"].is_null())?;
+    let crates = Path::new(bern["manifest_path"].as_str()?).parent()?.parent()?;
+    crates
+        .join("bern-ffi/Cargo.toml")
+        .is_file()
+        .then(|| crates.to_path_buf())
 }
 
 /// Read one dependency entry of `cargo metadata`.
@@ -145,6 +183,25 @@ mod tests {
         );
         let elsewhere = json!({ "name": "bern", "path": "/nowhere/bern" });
         assert!(from_dependency(&elsewhere).is_err());
+    }
+
+    #[test]
+    fn a_patched_bern_is_taken_from_its_checkout() {
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let manifest = crates.join("bern/Cargo.toml").display().to_string();
+        let patched = json!({ "packages": [
+            { "name": "serde", "source": "registry+https://github.com/rust-lang/crates.io-index", "manifest_path": "/registry/serde/Cargo.toml" },
+            { "name": "bern", "source": null, "manifest_path": manifest },
+        ] });
+        assert_eq!(checkout_of(&patched), Some(crates.to_path_buf()));
+        let declared = json!({ "packages": [
+            { "name": "bern", "source": "git+https://github.com/AimesSoft/Bern?rev=abc#abc", "manifest_path": "/git/bern/crates/bern/Cargo.toml" },
+        ] });
+        assert_eq!(checkout_of(&declared), None);
+        let elsewhere = json!({ "packages": [
+            { "name": "bern", "source": null, "manifest_path": "/nowhere/crates/bern/Cargo.toml" },
+        ] });
+        assert_eq!(checkout_of(&elsewhere), None);
     }
 
     #[test]

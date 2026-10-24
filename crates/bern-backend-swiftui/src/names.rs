@@ -80,6 +80,18 @@ pub fn member(snake: &str) -> String {
     escape(bern_target_api::names::camel(snake))
 }
 
+/// `last_action` as the label of an argument: Swift takes every keyword
+/// there but `inout`, `var` and `let` as it is, and warns when the others
+/// are escaped.
+pub fn label(snake: &str) -> String {
+    let name = bern_target_api::names::camel(snake);
+    if matches!(name.as_str(), "inout" | "var" | "let") {
+        format!("`{name}`")
+    } else {
+        name
+    }
+}
+
 /// `Primary` → `primary`, `URLKind` → `urlKind`.
 pub fn case(pascal: &str) -> String {
     let chars: Vec<char> = pascal.chars().collect();
@@ -135,6 +147,9 @@ mod tests {
     fn names_follow_swift_conventions() {
         assert_eq!(member("last_action"), "lastAction");
         assert_eq!(member("default"), "`default`");
+        assert_eq!(label("open"), "open");
+        assert_eq!(label("default"), "default");
+        assert_eq!(label("var"), "`var`");
         assert_eq!(case("Primary"), "primary");
         assert_eq!(case("URLKind"), "urlKind");
         assert_eq!(case("Default"), "`default`");

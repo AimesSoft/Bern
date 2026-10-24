@@ -2,7 +2,7 @@
 
 use super::values::{argument, session_var, value_literal};
 use super::{Ctx, Generator};
-use crate::names::{case, double, member, string, value_type};
+use crate::names::{case, double, label, member, string, value_type};
 use bern_ir::{Action, Binding, Element, Expr, ExprKind, MediaOp, Prop, SessionOp, Text, WindowOp};
 use bern_protocol::{Type, Value};
 
@@ -84,7 +84,7 @@ impl Generator<'_> {
                         .iter()
                         .zip(&variant_def.fields)
                         .map(|(value, field)| {
-                            format!("{}: {}", member(&field.name), self.expr(value))
+                            format!("{}: {}", label(&field.name), self.expr(value))
                         })
                         .collect();
                     format!("{name}.{}({})", case(&variant_def.name), args.join(", "))

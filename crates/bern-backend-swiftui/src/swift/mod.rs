@@ -16,7 +16,7 @@ mod toolbar;
 mod values;
 mod windows;
 
-use crate::names::{self, case, double, member};
+use crate::names::{self, case, double, label, member};
 use bern_ir::{
     Application, ComponentArg, Element, IfLetNode, IfNode, MatchArm, MatchNode, Node, ParamKind,
 };
@@ -261,7 +261,7 @@ impl<'a> Generator<'a> {
                             .find(|(name, _)| *name == param.name)
                             .and_then(|(_, arg)| match arg {
                                 ComponentArg::Value { expr } => {
-                                    Some(format!("{}: {}", member(&param.name), self.expr(expr)))
+                                    Some(format!("{}: {}", label(&param.name), self.expr(expr)))
                                 }
                                 _ => None,
                             }),
