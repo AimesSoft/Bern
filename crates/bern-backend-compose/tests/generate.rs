@@ -1022,7 +1022,9 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
     ui! {
         WindowSet(handle: AppWindows, primary: main) {
             Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
-                if app.count > 1 {
+                if app.count > 5 {
+                    switcher(app: app)
+                } else if app.count > 1 {
                     Stack(align: bottom) {
                         Button(id: layer, label: tr! { "en" => "Layer" }) => app.add()
                     }
@@ -1046,6 +1048,21 @@ pub fn centered(app: stage::Client) -> impl View {
     ui! {
         Column(gap: 12, align: center) {
             Button(id: centered, label: tr! { "en" => "Centered" }) => app.add()
+        }
+    }
+}
+
+#[component]
+pub fn switcher(app: stage::Client) -> impl View {
+    ui! {
+        if app.count > 6 {
+            Stack(align: top_leading) {
+                Text(content: tr! { "en" => "Many" })
+            }
+        } else {
+            Column(gap: 4) {
+                Text(content: tr! { "en" => "Some" })
+            }
         }
     }
 }
@@ -1236,8 +1253,12 @@ fn content_in_a_window_starts_at_its_top_leading_corner() {
     let window = &kotlin[kotlin.find("fun BernWindow0()").unwrap()..];
     for (expected, what) in [
         (
-            "Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {",
+            "Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter, propagateMinConstraints = true) {",
             "the stack fills the window",
+        ),
+        (
+            "Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart, propagateMinConstraints = true) { AppView_switcher() }",
+            "a component whose body is a condition fills the window",
         ),
         (
             "Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) { AppView_centered() }",

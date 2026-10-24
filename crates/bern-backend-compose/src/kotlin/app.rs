@@ -283,6 +283,7 @@ const IMPORTS: &[&str] = &[
     "androidx.compose.foundation.layout.Column",
     "androidx.compose.foundation.layout.Row",
     "androidx.compose.foundation.layout.Spacer",
+    "androidx.compose.foundation.layout.fillMaxHeight",
     "androidx.compose.foundation.layout.fillMaxSize",
     "androidx.compose.foundation.layout.fillMaxWidth",
     "androidx.compose.foundation.layout.padding",

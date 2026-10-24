@@ -116,14 +116,45 @@ impl Generator<'_> {
         out.close("}");
     }
 
-    /// The window room of a component's body, through the components it is
-    /// made of.
+    /// The window room of a component's body, through the components and
+    /// conditions it is made of.
     pub(super) fn window_body(&self, body: &Node) -> Option<String> {
         match body {
             Node::Element(element) => window_box(element),
             Node::Component(reference) => {
                 self.window_body(&self.app.component(&reference.component)?.body)
             }
+            // A condition: each branch is written in the window as well.
+            Node::If(node) => self.window_branches(
+                node.branches
+                    .iter()
+                    .map(|(_, body)| body.as_slice())
+                    .chain([node.otherwise.as_slice()]),
+            ),
+            Node::IfLet(node) => {
+                self.window_branches([node.then.as_slice(), node.otherwise.as_slice()].into_iter())
+            }
+            Node::Match(node) => {
+                self.window_branches(node.arms.iter().map(|arm| arm.body.as_slice()))
+            }
+        }
+    }
+
+    /// The room of branches written in a window: theirs when they agree,
+    /// else the whole window, which each branch then fills.
+    fn window_branches<'a>(&self, branches: impl Iterator<Item = &'a [Node]>) -> Option<String> {
+        let rooms: Vec<Option<String>> = branches
+            .map(|body| match body {
+                [node] => self.window_body(node),
+                _ => None,
+            })
+            .collect();
+        match rooms.first() {
+            Some(first) if rooms.iter().all(|room| room == first) => first.clone(),
+            _ if rooms.iter().any(Option::is_some) => Some(
+                "Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopStart, propagateMinConstraints = true) {"
+                    .into(),
+            ),
             _ => None,
         }
     }
@@ -621,7 +652,7 @@ impl Generator<'_> {
             (Scope::Row, _) | (Scope::Column, false) => "Modifier.weight(1f)",
             (Scope::Column, true) => "Modifier",
             (Scope::Other | Scope::Flow, true) => "Modifier.bernFlexible(column = false)",
-            (Scope::Other | Scope::Flow, false) => "Modifier.bernFlexible()",
+            (Scope::Other | Scope::Flow, false) => "Modifier.bernFlexible().fillMaxHeight()",
         };
         out.open(format!(
             "BernScroll({horizontal}, {snap}, {position}, {on_position}, {}, {arrival}, 0.dp, {flexible}) {{",
@@ -660,9 +691,12 @@ impl Generator<'_> {
             out.open(format!("Row({flexible}.horizontalScroll({state}), horizontalArrangement = Arrangement.spacedBy(8.dp)) {{"));
             self.nodes(out, &element.children, &ctx.within(Scope::Row));
         } else {
+            // In a stack it takes the stack's height, as a scroll view
+            // does in a layered stack on the other targets, so that a
+            // short page does not shrink to its content.
             let flexible = match ctx.scope {
                 Scope::Column | Scope::Row => "Modifier.weight(1f)",
-                Scope::Other | Scope::Flow => "Modifier.bernFlexible()",
+                Scope::Other | Scope::Flow => "Modifier.bernFlexible().fillMaxHeight()",
             };
             out.open(format!(
                 "Column({flexible}.fillMaxWidth().verticalScroll({state})) {{",
@@ -919,8 +953,10 @@ pub(super) fn window_box(element: &Element) -> Option<String> {
                 && element.prop("height").is_none()
                 && element.keyword("under_bars") != Some("true") =>
         {
+            // The stack itself fills it, its surface too, not only the room
+            // its layers are placed in.
             Some(format!(
-                "Box(Modifier.fillMaxSize(), contentAlignment = {}) {{",
+                "Box(Modifier.fillMaxSize(), contentAlignment = {}, propagateMinConstraints = true) {{",
                 stack_alignment(element.keyword("align"))
             ))
         }
