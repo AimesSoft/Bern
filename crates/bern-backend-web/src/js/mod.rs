@@ -336,8 +336,9 @@ impl<'a> Generator<'a> {
                     .map(|expr| format!("(ctx) => ({})", self.expr(expr)))
                     .unwrap_or_else(|| "null".into());
                 let idle_enabled = window.idle_enabled.as_ref().map(|e| format!("(ctx) => ({})", self.expr(e))).unwrap_or_else(|| "null".into());
+                let landscape = window.landscape.as_ref().map(|e| format!("(ctx) => ({})", self.expr(e))).unwrap_or_else(|| "null".into());
                 format!(
-                    "{{ id: {}, title: {}, presentation: \"{presentation}\", settings: {settings}, resizable: {}, width: {}, height: {}, minWidth: {}, minHeight: {}, initial: {}, render: w_{}, closeCheck: {}, idleAfter: {}, idleEnabled: {idle_enabled}, immersive: {immersive} }}",
+                    "{{ id: {}, title: {}, presentation: \"{presentation}\", settings: {settings}, resizable: {}, width: {}, height: {}, minWidth: {}, minHeight: {}, initial: {}, render: w_{}, closeCheck: {}, idleAfter: {}, idleEnabled: {idle_enabled}, immersive: {immersive}, landscape: {landscape} }}",
                     string(&window.id),
                     string(&window.title.key),
                     !settings,

@@ -202,7 +202,9 @@ pub mod feature {
     /// is compact.
     pub const MODAL_COVER: &str = "modal_cover";
     /// `Window(landscape:)`: a phone turns the window to landscape while
-    /// it holds, and back to portrait.
+    /// it holds, and back to portrait. A target whose windows never turn
+    /// (a television, a desktop window) lists it as well: there the
+    /// property does not apply, and nothing is left to warn about.
     pub const WINDOW_LANDSCAPE: &str = "window_landscape";
     /// `window.short`: the window is shorter than the compact breakpoint.
     pub const WINDOW_SHORT: &str = "window_short";

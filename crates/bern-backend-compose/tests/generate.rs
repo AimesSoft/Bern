@@ -1072,6 +1072,25 @@ pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> 
 }
 "#;
 
+/// A window that rests after three seconds and holds landscape, over a
+/// picture where a resting mouse lets it rest after one.
+const IDLE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open, idle_after: 3, landscape: true) {
+                Button(id: picture, label: tr! { "en" => "Picture" }, idle_area: 1) {
+                    Spacer
+                } => app.add()
+            }
+        }
+    }
+}
+"#;
+
 /// A project of the interface `ui` over a small protocol, compiled from
 /// sources written under `dir`.
 fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
@@ -1297,3 +1316,24 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
     }
 }
 "#;
+
+/// The picture watches whether a mouse rests over it, for the window's
+/// idle count; neither it nor `landscape` warns.
+#[test]
+fn an_idle_area_watches_where_the_mouse_rests() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/compose-idle-project"), IDLE_UI);
+    let problems = ComposeAndroid.check(&compiled.app, &android(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let files = ComposeAndroid
+        .generate(&compiled.app, &context(&config, &compiled))
+        .unwrap();
+    let kotlin = file(&files, "BernGenerated.kt");
+    assert!(
+        kotlin.contains("Box(Modifier.bernIdleArea(1.0)) {"),
+        "{kotlin}"
+    );
+    assert!(kotlin.contains("idleAfter = 3.0"), "{kotlin}");
+    assert!(kotlin.contains("landscape = true"), "{kotlin}");
+}

@@ -1,6 +1,7 @@
 //! Content written directly in a window, not in a component: the page
-//! defines a styled control's style as it does for one in a component, and
-//! places what is smaller than the window at its top leading corner.
+//! defines a styled control's style as it does for one in a component,
+//! places what is smaller than the window at its top leading corner, and
+//! keeps the window's idle areas and `landscape`.
 
 use bern_backend_web::WebBrowser;
 use bern_target_api::{BuildContext, Framework, Target};
@@ -330,4 +331,60 @@ fn browser_extension_is_loaded_built_and_packaged_with_the_page() {
     assert!(format!("{:?}", package.steps).contains("extension/lib/worker.wasm"));
     std::fs::remove_file(project.join("web/index.js")).unwrap();
     assert!(WebBrowser.generate(&compiled.app, &context).is_err());
+}
+
+/// A window that rests after three seconds and holds landscape, over a
+/// picture where a resting mouse lets it rest after one.
+const IDLE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open, idle_after: 3, landscape: app.count > 0) {
+                Button(id: picture, label: tr! { "en" => "Picture" }, idle_area: 1) {
+                    Spacer
+                } => app.add()
+            }
+        }
+    }
+}
+"#;
+
+/// `idle_area` marks its element for the page's idle count, and
+/// `landscape` reaches the window, both without a warning.
+#[test]
+fn an_idle_area_and_landscape_reach_the_page() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/web-idle-project"), IDLE_UI);
+    let target = config.targets[0].clone();
+    let problems = WebBrowser.check(&compiled.app, &target);
+    assert!(problems.is_empty(), "{problems:?}");
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: root.join("target/bern-test/web-idle"),
+        target,
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let script = WebBrowser
+        .generate(&compiled.app, &context)
+        .unwrap()
+        .into_iter()
+        .find(|file| file.path.as_os_str() == "app.js")
+        .map(|file| String::from_utf8_lossy(&file.contents).into_owned())
+        .expect("the page's `app.js`");
+    for expected in ["idleAfter: 3, ", "landscape: (ctx) => (", "idleArea: 1"] {
+        assert!(script.contains(expected), "missing `{expected}`:\n{script}");
+    }
 }

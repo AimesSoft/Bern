@@ -260,8 +260,9 @@ impl<'a> Generator<'a> {
                         self.transition_args(Some(name))
                     ));
                 }
-                // Effects drawn on the element as a whole: a nudge and the
-                // look that follows scrolling.
+                // Effects on the element as a whole: a nudge, the look that
+                // follows scrolling, and an area a resting mouse lets the
+                // window rest over.
                 let mut effects = String::new();
                 let nudge_scale = float(element.number("nudge_scale").unwrap_or(1.06));
                 if let Some(when) = element.expr("nudge") {
@@ -290,6 +291,9 @@ impl<'a> Generator<'a> {
                         float(element.number("scroll_origin_x").unwrap_or(0.5)),
                         float(element.number("scroll_origin_y").unwrap_or(0.5))
                     ));
+                }
+                if let Some(seconds) = element.number("idle_area") {
+                    effects.push_str(&format!(".bernIdleArea({})", double(seconds)));
                 }
                 if !effects.is_empty() {
                     out.open(format!("Box(Modifier{effects}) {{"));

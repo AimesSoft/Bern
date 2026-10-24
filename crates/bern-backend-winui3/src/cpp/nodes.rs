@@ -127,6 +127,7 @@ impl Generator<'_> {
             ("scrollOpacity", Self::number(element, "scroll_opacity")),
             ("scrollOriginX", Self::number(element, "scroll_origin_x")),
             ("scrollOriginY", Self::number(element, "scroll_origin_y")),
+            ("idleArea", Self::number(element, "idle_area")),
         ];
         fields
             .iter()

@@ -1383,7 +1383,41 @@ struct DecorateProps {
     /// of its size; the center when not given.
     std::optional<double> scrollOriginX;
     std::optional<double> scrollOriginY;
+    /// `idle_area`: a mouse resting over the element lets its window rest
+    /// after these seconds; with areas on screen, resting elsewhere does
+    /// not.
+    std::optional<double> idleArea;
 };
+
+/// `idle_area`: while `area` is on screen, a mouse lets the window rest
+/// only over it or another area, after `seconds`. Areas coming and going
+/// start the count again, as input does.
+inline void WatchIdleArea(Win& win, xaml::UIElement const& area, double seconds) {
+    win.idleAreas.emplace_back(winrt::make_weak(area), seconds);
+    std::weak_ptr<bool> alive(win.life);
+    Win* owner = &win;
+    // Once the change is in place, not while elements are built or taken
+    // down.
+    auto changed = [alive, owner] {
+        Host::Post([alive, owner] {
+            if (!alive.expired() && owner->idleRest) owner->idleRest();
+        });
+    };
+    changed();
+    if (auto framework = area.try_as<xaml::FrameworkElement>()) {
+        framework.Loaded([changed](auto&&, auto&&) { changed(); });
+        framework.Unloaded([changed](auto&&, auto&&) { changed(); });
+    }
+    Reactive::OnCleanup([alive, owner, gone = winrt::make_weak(area), changed] {
+        if (alive.expired()) return;
+        auto element = gone.get();
+        std::erase_if(owner->idleAreas, [&](auto const& entry) {
+            auto area = entry.first.get();
+            return !area || area == element;
+        });
+        changed();
+    });
+}
 
 inline xaml::ElementTheme ThemeNamed(std::string_view name) {
     if (name == "dark") return xaml::ElementTheme::Dark;
@@ -1393,8 +1427,8 @@ inline xaml::ElementTheme ThemeNamed(std::string_view name) {
 
 /// The motion and appearance props any element takes, applied to the
 /// element `build` makes: `appear` and `disappear` transitions, a `hero`
-/// key, `reveal: hover`, `appearance`, `nudge`, and following scroll with
-/// `scroll_scale` and `scroll_opacity`.
+/// key, `reveal: hover`, `appearance`, `nudge`, following scroll with
+/// `scroll_scale` and `scroll_opacity`, and `idle_area`.
 inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build const& build) {
     if (props.reduceMotion) {
         auto token = nextReduceHolder++;
@@ -1447,6 +1481,7 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
             props.scrollOpacity;
         if (moves) shown = Wrap(shown);
         p.Add(shown);
+        if (props.idleArea && ctx.win) WatchIdleArea(*ctx.win, shown, *props.idleArea);
         // With a delay the entrance plays on the first display too.
         if (props.appear && (animated || (clock && clock->play) || props.appearDelay))
             PlayTransition(shown, *props.appear, true, nullptr, (clock && clock->play ? Turn(clock) : 0) + props.appearDelay.value_or(0));

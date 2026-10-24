@@ -10,7 +10,7 @@
 use crate::ctx::Page;
 use crate::host::{host, status, take, with_bytes};
 use crate::protocol::{Value, Writer, decode, encode};
-use crate::reactive::{Cell, Scope, effect, untrack};
+use crate::reactive::{Cell, Scope, effect, on_cleanup, untrack};
 use crate::text::tr;
 use crate::{CloseCheck, Ctx, Done, Failure, Field, Parent, snapshot};
 use adw::prelude::*;
@@ -142,6 +142,12 @@ pub(crate) struct Win {
     fullscreen: Cell<bool>,
     /// Whether rest counts toward `window.idle` (`idle_enabled`).
     idle_enabled: StdCell<bool>,
+    /// The `idle_area`s of the window, each with its seconds.
+    idle_areas: RefCell<Vec<(glib::WeakRef<gtk::Widget>, f64)>>,
+    /// Where the mouse is, for `idle_area`s.
+    mouse: StdCell<Mouse>,
+    /// Starts the count toward `window.idle` again, with `idle_after`.
+    idle_rest: RefCell<Option<Rc<dyn Fn()>>>,
     /// The layout size of the window's width.
     size: Cell<&'static str>,
     /// The width of the window's content: measured, or before the window
@@ -161,6 +167,32 @@ pub(crate) struct Win {
     views: RefCell<Vec<glib::WeakRef<adw::ToolbarView>>>,
     shortcuts: RefCell<Vec<Shortcut>>,
     next_shortcut: StdCell<u64>,
+}
+
+/// Where the mouse is, for `idle_area`s: not known after a touch or a pen,
+/// which do not rest over areas; outside the window; or at a point of the
+/// window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Mouse {
+    Unknown,
+    Outside,
+    At(f64, f64),
+}
+
+/// Whether the event a controller handles now comes from a mouse, a
+/// touchpad or a trackpoint, rather than a finger or a pen.
+fn from_mouse(controller: &impl IsA<gtk::EventController>) -> bool {
+    use gtk::gdk::InputSource;
+    let Some(event) = controller.current_event() else {
+        return false;
+    };
+    !event.is_pointer_emulated()
+        && event.device().is_some_and(|device| {
+            matches!(
+                device.source(),
+                InputSource::Mouse | InputSource::Touchpad | InputSource::Trackpoint
+            )
+        })
 }
 
 /// A mounted shortcut: its token, keys and action, and whether it takes
@@ -422,18 +454,96 @@ impl Win {
         if !self.idle_enabled.get() {
             return;
         }
+        let Some(wait) = self.idle_wait(seconds) else {
+            return;
+        };
         let win = Rc::downgrade(self);
         let done = Rc::clone(timer);
         *timer.borrow_mut() = Some(glib::timeout_add_local_once(
-            Duration::from_secs_f64(seconds.max(0.0)),
+            Duration::from_secs_f64(wait.max(0.0)),
             move || {
                 done.borrow_mut().take();
-                if let Some(win) = win.upgrade() {
+                // Waking the window can show controls under a still mouse:
+                // it rests only if the mouse is over an area still.
+                if let Some(win) = win.upgrade()
+                    && win.idle_wait(seconds).is_some()
+                {
                     win.idle.set(true);
                     snapshot::schedule();
                 }
             },
         ));
+    }
+
+    /// How long the window waits before it rests: `seconds`; with
+    /// `idle_area`s on screen and a mouse, the seconds of the area under
+    /// the mouse, and none while it is over none or outside the window.
+    fn idle_wait(&self, seconds: f64) -> Option<f64> {
+        let areas: Vec<(gtk::Widget, f64)> = self
+            .idle_areas
+            .borrow()
+            .iter()
+            .filter_map(|(area, seconds)| area.upgrade().map(|area| (area, *seconds)))
+            .filter(|(area, _)| area.is_mapped())
+            .collect();
+        if areas.is_empty() {
+            return Some(seconds);
+        }
+        match self.mouse.get() {
+            Mouse::Unknown => Some(seconds),
+            Mouse::Outside => None,
+            Mouse::At(x, y) => {
+                // What takes the mouse there, as GTK picks it: a control
+                // standing over an area takes it off the area.
+                let mut hit = self.window.pick(x, y, gtk::PickFlags::DEFAULT);
+                while let Some(widget) = hit {
+                    if let Some((_, seconds)) = areas.iter().find(|(area, _)| *area == widget) {
+                        return Some(*seconds);
+                    }
+                    hit = widget.parent();
+                }
+                None
+            }
+        }
+    }
+
+    /// `idle_area`: while `area` is on screen, a mouse lets the window
+    /// rest only over it or another area, after `seconds`. Areas coming
+    /// and going start the count again, as input does.
+    pub(crate) fn watch_idle_area(self: &Rc<Self>, area: &gtk::Widget, seconds: f64) {
+        self.idle_areas
+            .borrow_mut()
+            .push((area.downgrade(), seconds));
+        let changed = {
+            let win = Rc::downgrade(self);
+            move || {
+                // Once the change is in place, not while widgets are
+                // built or taken down.
+                let win = win.clone();
+                glib::idle_add_local_once(move || {
+                    let rest = win.upgrade().and_then(|win| win.idle_rest.borrow().clone());
+                    if let Some(rest) = rest {
+                        rest();
+                    }
+                });
+            }
+        };
+        let mapped = changed.clone();
+        area.connect_map(move |_| mapped());
+        let unmapped = changed.clone();
+        area.connect_unmap(move |_| unmapped());
+        let win = Rc::downgrade(self);
+        let gone = area.downgrade();
+        on_cleanup(move || {
+            if let Some(win) = win.upgrade() {
+                let gone = gone.upgrade();
+                win.idle_areas.borrow_mut().retain(|(area, _)| {
+                    area.upgrade()
+                        .is_some_and(|area| Some(&area) != gone.as_ref())
+                });
+            }
+            changed();
+        });
     }
 
     fn def(&self) -> &'static crate::WindowDef {
@@ -802,6 +912,9 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         idle: Cell::new(false),
         fullscreen: Cell::new(window.is_fullscreen()),
         idle_enabled: StdCell::new(true),
+        idle_areas: RefCell::new(Vec::new()),
+        mouse: StdCell::new(Mouse::Unknown),
+        idle_rest: RefCell::new(None),
         size: Cell::new(crate::structure::size_of(opening_width)),
         width: StdCell::new(opening_width),
         short: Cell::new(opening_height < compact),
@@ -1008,15 +1121,39 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
             }
         })
     };
+    // A mouse's place is known before the input that wakes the window
+    // counts; `idle_area`s go by it.
+    let place = {
+        let win = Rc::downgrade(win);
+        move |mouse: Mouse| {
+            if let Some(win) = win.upgrade() {
+                win.mouse.set(mouse);
+            }
+        }
+    };
     let pointer = gtk::EventControllerMotion::new();
     pointer.set_propagation_phase(gtk::PropagationPhase::Capture);
     let moved = Rc::clone(&rest);
+    let at = place.clone();
     // Content moving under a still pointer makes GTK report motion at the
     // same place; only a pointer that moves is input.
     let last = StdCell::new(None::<(f64, f64)>);
-    pointer.connect_motion(move |_, x, y| {
+    pointer.connect_motion(move |pointer, x, y| {
+        at(if from_mouse(pointer) {
+            Mouse::At(x, y)
+        } else {
+            Mouse::Unknown
+        });
         if last.replace(Some((x, y))) != Some((x, y)) {
             moved();
+        }
+    });
+    let left = Rc::clone(&rest);
+    let outside = place.clone();
+    pointer.connect_leave(move |pointer| {
+        if from_mouse(pointer) {
+            outside(Mouse::Outside);
+            left();
         }
     });
     win.window.add_controller(pointer);
@@ -1040,7 +1177,14 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
     press.set_propagation_phase(gtk::PropagationPhase::Capture);
     press.set_button(0);
     let pressed = Rc::clone(&rest);
-    press.connect_pressed(move |_, _, _, _| pressed());
+    press.connect_pressed(move |press, _, x, y| {
+        place(if from_mouse(press) {
+            Mouse::At(x, y)
+        } else {
+            Mouse::Unknown
+        });
+        pressed();
+    });
     win.window.add_controller(press);
     let ended = Rc::clone(&timer);
     win.scope.on_dispose(move || {
@@ -1048,6 +1192,7 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
             source.remove();
         }
     });
+    *win.idle_rest.borrow_mut() = Some(Rc::clone(&rest) as Rc<dyn Fn()>);
     rest();
     Some(rest)
 }

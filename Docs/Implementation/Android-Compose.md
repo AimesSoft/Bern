@@ -92,7 +92,7 @@ Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `androi
 
 - `chrome` 在手机上不起作用：手机窗口没有标题栏，顶栏是导航的一部分（与 iPhone 相同）。
 - `immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；为假时恢复。只有最上面的窗口控制系统栏。
-- `idle_after`：触摸、指针与按键都会重新计时，计时到期后 `window.idle` 为真。
+- `idle_after`：触摸、指针与按键都会重新计时，计时到期后 `window.idle` 为真。布局变化后 Compose 会在原位置重发一次指针事件，位置没变的移动不算输入，否则控制层淡出、顶栏收起后窗口会立即被自己唤醒。页面上有 `idle_area` 时见“静置区”。
 
 ## 本地控制通道
 
@@ -241,6 +241,12 @@ bern package --target android
 
 `tests/framework_names.rs` 核对这些写法（示例新增的组件与会话见 macOS 实现记录的同日条目）。这次没有设 `BERN_TEST_KOTLIN=1` 编译生成的工程，上面两处冲突也没有在 kotlinc 上实测，未验证；新的断言没有运行。
 
+## 静置区（2026-10-24）
+
+`idle_area` 生成为元素外层 `Box` 上的 `bernIdleArea(秒数)`：元素在组合中时登记为窗口的静置区，鼠标的悬停进入与移动把它记为“鼠标停在上面”，悬停离开时去掉。悬停按 Compose 自己的命中测试判断，所以立在静置区上面、接收指针的控件会把鼠标从静置区拿走；触摸与触控笔不算。窗口的计时用 `snapshotFlow` 跟随要等的秒数：最近一次指针输入来自鼠标、屏幕上又有静置区时，只有鼠标停在静置区上才按那个区的秒数计时，停在别处或移出窗口时不计时；触摸、触控笔与按键仍按 `idle_after`。静置区出现、消失，鼠标进出静置区，都重新计时。
+
+验证：生成器测试 `an_idle_area_watches_where_the_mouse_rests` 检查生成的 `bernIdleArea` 与窗口参数；一个同时声明 `idle_after`、`landscape` 与 `idle_area` 的临时应用 `bern check` 各目标无警告，`bern build --target android` 编译 Kotlin 并打出 APK。没有在接鼠标的设备上实测。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：
@@ -384,6 +390,7 @@ bern package --target android
 - 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。
 - 宽度不小于 600 dp 的布局只在模拟器上用 `wm density` 改变逻辑宽度验证过；真的平板、折叠屏展开与横屏未实测。
 - 屏幕旋转未实测。
+- `idle_area` 未在接鼠标的设备（平板、ChromeOS、桌面模式）上实测，包括按下鼠标键时 Android 先报一次悬停离开的情况。
 - 窗口事实不报告窗口的位置与尺寸（为 0）。
 - 后台继续播放未实现（需要媒体服务）；一个播放器同一时刻只在一个视图中显示。
 - HDR 图片与 HDR 视频未验证；这台手机的屏幕按 SDR 显示。

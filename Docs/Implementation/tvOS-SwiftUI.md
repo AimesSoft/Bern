@@ -42,7 +42,7 @@ Rust 1.99.0 的 rustup 为 `aarch64-apple-tvos` 与 `aarch64-apple-tvos-sim` 提
 
 ## 与 iOS 的差异
 
-- **场景与窗口**：一个 `WindowGroup`，内容是 `BernVirtualHost`，主窗口铺满屏幕；其他窗口（含设置）以 `fullScreenCover` 铺满屏幕打开，没有标题栏与“完成”按钮（tvOS 自己的全屏页也没有），菜单键（返回）关闭；需要关闭按钮时由窗口内容自己画。tvOS 的 sheet 是屏幕中间的小卡片，放不下表单与分栏。窗口事实报告为 `Virtual`。没有 iOS 的方向、状态栏、iPad 多窗口与 ⌘, 菜单。
+- **场景与窗口**：一个 `WindowGroup`，内容是 `BernVirtualHost`，主窗口铺满屏幕；其他窗口（含设置）以 `fullScreenCover` 铺满屏幕打开，没有标题栏与“完成”按钮（tvOS 自己的全屏页也没有），菜单键（返回）关闭；需要关闭按钮时由窗口内容自己画。tvOS 的 sheet 是屏幕中间的小卡片，放不下表单与分栏。窗口事实报告为 `Virtual`。没有 iOS 的方向、状态栏、iPad 多窗口与 ⌘, 菜单。电视总是横屏，`Window(landscape:)` 不适用：能力表声明 `window_landscape`，运行时什么也不做，检查不再警告（2026-10-24）。
 - **正文字号**：tvOS 的正文是 29 点，生成的默认字号随之取 29（iOS 17）。应用在 `text` 块里给了电视字号（`font(size: 13, tv: 16)`）时，tvOS 取电视字号。
 - **控件**：都是 tvOS 的系统控件，焦点下抬起、变白、带阴影。tvOS 没有的控件按系统做法替换：
   - `Slider` 是 `BernFocusSlider`：一条可聚焦的轨道，焦点在上时触控板左右各移动一步（没有 `step` 时为范围的二十分之一），连续按的一串算一次编辑（最后一次后 0.5 秒结束），辅助功能为可调节元素。`Video` 的进度条同样如此。

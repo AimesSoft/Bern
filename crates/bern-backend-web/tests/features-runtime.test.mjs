@@ -111,7 +111,7 @@ function runtime(search = "") {
   }
   const globals = {
     TextEncoder, TextDecoder, URLSearchParams, performance, innerWidth: 1280, innerHeight: 800, HTMLElement: Element,
-    navigator: { platform: "MacIntel" }, location: { search }, Image: Probe,
+    navigator: { platform: "MacIntel" }, location: { search }, Image: Probe, screen: {},
     Node: { ELEMENT_NODE: 1, DOCUMENT_POSITION_FOLLOWING: 4 },
     document: {
       documentElement: new Element("html"),
@@ -154,7 +154,7 @@ function runtime(search = "") {
     vm.runInContext(`globalThis.${name === "bern" ? "B" : "F"} = (() => { ${plain}\nreturn { ${[...exported, ...extra].join(", ")} }; })();`, context, { filename: `${name}.js` });
   }
   const flushMicrotasks = () => { while (microtasks.length) microtasks.shift()(); };
-  return { B: context.B, F: context.F, Element, document: globals.document, navigator: globals.navigator, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
+  return { B: context.B, F: context.F, Element, document: globals.document, navigator: globals.navigator, screen: globals.screen, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
 }
 
 test("preview creates only rows fitting the viewport and releases rows when it shrinks", () => {
@@ -933,6 +933,40 @@ test("a toolbar appearing under a stationary mouse keeps the window awake", () =
   assert.equal(win.idle.peek(), false);
   assert.equal(timers.at(-1).cancelled, true);
   scope.dispose();
+});
+
+test("a window held in landscape locks the screen while it holds", () => {
+  const { B, document, screen } = runtime();
+  const calls = [];
+  screen.orientation = {
+    // Like a phone's browser: locking works only in fullscreen.
+    lock(kind) {
+      calls.push(`lock ${kind}`);
+      return document.fullscreenElement ? Promise.resolve() : Promise.reject(new Error("NotSupportedError"));
+    },
+    unlock() { calls.push("unlock"); },
+  };
+  document.removeEventListener = function (name, callback) {
+    this.listeners[name] = (this.listeners[name] ?? []).filter((one) => one !== callback);
+  };
+  const wanted = B.cell(false);
+  const scope = new B.Scope();
+  B.within(scope, () => B.hooks.landscape(() => wanted.get()));
+  assert.deepEqual(calls, [], "a window that does not hold landscape leaves the orientation alone");
+  wanted.set(true);
+  assert.deepEqual(calls, ["lock landscape"]);
+  // Refused outside fullscreen, the lock is asked for again once it begins.
+  document.fullscreenElement = {};
+  for (const callback of document.listeners.fullscreenchange) callback();
+  assert.deepEqual(calls, ["lock landscape", "lock landscape"]);
+  wanted.set(false);
+  assert.equal(calls.at(-1), "unlock");
+  for (const callback of document.listeners.fullscreenchange) callback();
+  assert.equal(calls.at(-1), "unlock", "fullscreen does not lock a window that let go");
+  wanted.set(true);
+  scope.dispose();
+  assert.equal(calls.at(-1), "unlock", "a closed window gives the orientation back");
+  assert.equal(document.listeners.fullscreenchange.length, 0);
 });
 
 test("edge grow keeps its opacity and anchors the scaling edge", () => {

@@ -1183,6 +1183,25 @@ pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> 
 }
 "#;
 
+/// A window that rests after three seconds and holds landscape, over a
+/// picture where a resting mouse lets it rest after one.
+const IDLE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open, idle_after: 3, landscape: true) {
+                Button(id: picture, label: tr! { "en" => "Picture" }, idle_area: 1) {
+                    Spacer
+                } => app.add()
+            }
+        }
+    }
+}
+"#;
+
 /// A project of the interface `ui` over a small protocol, compiled from
 /// sources written under `dir`.
 fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
@@ -1391,6 +1410,32 @@ fn tabs_hand_their_fallback_to_the_runtime() {
     for expected in [
         "b::Tabs(p, c, Some(\"plain\"), b::Field { session: 0, field: 0 }, None, b::build(|p, c| {",
         "b::Tabs(p, c, Some(\"backed\"), b::Field { session: 0, field: 1 }, Some(b::get(|c| rt::variant(2, vec![]))), b::build(|p, c| {",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+}
+
+/// The picture is an idle area of its window; neither it nor `landscape`,
+/// which a desktop window has nothing to do with, warns.
+#[test]
+fn an_idle_area_is_watched_by_its_window() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/gtk-idle-project"), IDLE_UI);
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-idle");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    for expected in [
+        "b::Decor { idle_area: Some(1.0), ..Default::default() }",
+        "idle_after: Some(3.0)",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }

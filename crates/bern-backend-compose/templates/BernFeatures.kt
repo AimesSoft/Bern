@@ -28,6 +28,9 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -1344,6 +1347,38 @@ fun Modifier.bernNudgeKey(key: Any?, motion: BernMotion, size: Float = 1.06f): M
     return graphicsLayer {
         scaleX = scale.value
         scaleY = scale.value
+    }
+}
+
+// MARK: - Idle areas
+
+/// `idle_area`: while it is on screen, a mouse lets the window rest only
+/// over it (or another area), after `seconds`. Hovering follows Compose's
+/// own hit testing, so a control standing over the area takes the mouse
+/// off it; touch and pens do not hover it.
+@Composable
+fun Modifier.bernIdleArea(seconds: Double): Modifier {
+    val window = LocalBernWindow.current
+    val key = remember { Any() }
+    DisposableEffect(window, seconds) {
+        window.idleAreas[key] = seconds
+        onDispose {
+            window.idleAreas.remove(key)
+            window.idleAreasHovered.remove(key)
+        }
+    }
+    return pointerInput(window, seconds) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val mouse = event.changes.any { it.type == PointerType.Mouse }
+                when (event.type) {
+                    PointerEventType.Enter, PointerEventType.Move ->
+                        if (mouse && window.idleAreasHovered[key] != seconds) window.idleAreasHovered[key] = seconds
+                    PointerEventType.Exit -> window.idleAreasHovered.remove(key)
+                }
+            }
+        }
     }
 }
 

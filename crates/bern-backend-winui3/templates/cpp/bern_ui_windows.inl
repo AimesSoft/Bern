@@ -545,8 +545,44 @@ inline void HideCursor(bool hide) {
     }
 }
 
+/// Whether `element` is on screen in `win`: loaded, and visible with every
+/// element around it up to the window's content.
+inline bool OnScreen(Win const& win, xaml::UIElement const& element) {
+    auto framework = element.try_as<xaml::FrameworkElement>();
+    if (framework && !framework.IsLoaded()) return false;
+    for (xaml::DependencyObject node = element; node; node = media::VisualTreeHelper::GetParent(node)) {
+        if (auto shown = node.try_as<xaml::UIElement>(); shown && shown.Visibility() != xaml::Visibility::Visible) return false;
+        if (node == win.root) return true;
+    }
+    return false;
+}
+
+/// How long the window waits before it rests: `seconds`; with `idle_area`s
+/// on screen and a mouse, the seconds of the area under the mouse, and none
+/// while it is over none or outside the window.
+inline std::optional<double> IdleWait(Win const& win, double seconds) {
+    std::vector<std::pair<xaml::UIElement, double>> areas;
+    for (auto const& [weak, wait] : win.idleAreas)
+        if (auto area = weak.get(); area && OnScreen(win, area)) areas.emplace_back(area, wait);
+    if (areas.empty() || win.mouse == Win::Mouse::Unknown) return seconds;
+    if (win.mouse == Win::Mouse::Outside) return std::nullopt;
+    // What takes the mouse there, topmost first: a control standing over
+    // an area takes it off the area.
+    try {
+        auto hits = media::VisualTreeHelper::FindElementsInHostCoordinates(win.mousePoint, win.root).First();
+        if (!hits.HasCurrent()) return std::nullopt;
+        for (xaml::DependencyObject node = hits.Current(); node; node = media::VisualTreeHelper::GetParent(node))
+            for (auto const& [area, wait] : areas)
+                if (node == area) return wait;
+    } catch (winrt::hresult_error const&) {
+    }
+    return std::nullopt;
+}
+
 /// `window.idle`: true after `seconds` without pointer, wheel or key input
-/// in the window, and false at the next input.
+/// in the window, and false at the next input. With `idle_area`s on screen
+/// a mouse counts only while it rests over one, for that area's seconds:
+/// elsewhere, or outside the window, the window stays awake.
 inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::function<bool()> enabled = nullptr) {
     auto generation = std::make_shared<int64_t>(0);
     auto on = std::make_shared<bool>(true);
@@ -561,8 +597,12 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
         auto mine = ++*generation;
         // Switched off (`idle_enabled`), the window stays awake.
         if (!*on) return;
-        Host::After(std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000)), [weak, generation, mine] {
-            if (auto win = weak.lock(); win && *generation == mine) {
+        auto wait = IdleWait(*win, seconds);
+        if (!wait) return;
+        Host::After(std::chrono::milliseconds(static_cast<int64_t>(*wait * 1000)), [weak, generation, mine, seconds] {
+            // Waking the window can show controls under a still mouse: it
+            // rests only if the mouse is over an area still.
+            if (auto win = weak.lock(); win && *generation == mine && IdleWait(*win, seconds)) {
                 win->idle.Set(true);
                 Snapshot::Schedule();
             }
@@ -570,20 +610,48 @@ inline void TrackIdle(std::shared_ptr<Win> const& win, double seconds, std::func
     };
     auto root = win->root;
     using PointerHandler = xaml::Input::PointerEventHandler;
+    // A mouse's place is known before the input that wakes the window
+    // counts; `idle_area`s go by it.
+    auto place = [weak](xaml::Input::PointerRoutedEventArgs const& args) {
+        auto win = weak.lock();
+        if (!win) return;
+        if (args.Pointer().PointerDeviceType() != PointerKind::Mouse) {
+            win->mouse = Win::Mouse::Unknown;
+            return;
+        }
+        win->mouse = Win::Mouse::At;
+        win->mousePoint = args.GetCurrentPoint(nullptr).Position();
+    };
     // Only a pointer that really moved counts: a window whose frame changes,
     // as an immersive one's does, gets moves where the pointer stayed.
     auto last = std::make_shared<POINT>();
     GetCursorPos(last.get());
-    root.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler([rest, last](auto&&, auto&&) {
+    root.AddHandler(xaml::UIElement::PointerMovedEvent(), winrt::box_value(PointerHandler([rest, last, place](auto&&, auto&& args) {
+        place(args);
         POINT now{};
         GetCursorPos(&now);
         if (now.x == last->x && now.y == last->y) return;
         *last = now;
         rest();
     })), true);
-    for (auto const& event : {xaml::UIElement::PointerPressedEvent(), xaml::UIElement::PointerWheelChangedEvent()})
-        root.AddHandler(event, winrt::box_value(PointerHandler([rest](auto&&, auto&&) { rest(); })), true);
+    root.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(PointerHandler([rest, place](auto&&, auto&& args) {
+        place(args);
+        rest();
+    })), true);
+    root.AddHandler(xaml::UIElement::PointerWheelChangedEvent(), winrt::box_value(PointerHandler([rest](auto&&, auto&&) { rest(); })), true);
+    // A mouse leaving the window rests nowhere. The content also hears the
+    // exits of its parts, so only a mouse outside it counts.
+    root.AddHandler(xaml::UIElement::PointerExitedEvent(), winrt::box_value(PointerHandler([weak, rest](auto&& sender, auto&& args) {
+        auto win = weak.lock();
+        auto content = sender.try_as<xaml::FrameworkElement>();
+        if (!win || !content || args.Pointer().PointerDeviceType() != PointerKind::Mouse) return;
+        auto at = args.GetCurrentPoint(content).Position();
+        if (at.X >= 0 && at.Y >= 0 && at.X < content.ActualWidth() && at.Y < content.ActualHeight()) return;
+        win->mouse = Win::Mouse::Outside;
+        rest();
+    })), true);
     root.AddHandler(xaml::UIElement::KeyDownEvent(), winrt::box_value(xaml::Input::KeyEventHandler([rest](auto&&, auto&&) { rest(); })), true);
+    win->idleRest = rest;
     if (enabled) {
         // Switched on again, the count starts over.
         Reactive::Run([enabled, on, rest] {

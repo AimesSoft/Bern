@@ -105,6 +105,9 @@ impl Generator<'_> {
         if let Some(reduce) = element.expr("reduce_motion") {
             entries.push(format!("reduce_motion: Some({})", self.getter(reduce)));
         }
+        if let Some(seconds) = element.number("idle_area") {
+            entries.push(format!("idle_area: Some({})", float(seconds)));
+        }
         if let Some(scale) = element.number("scroll_scale") {
             entries.push(format!("scroll_scale: Some({})", float(scale)));
         }

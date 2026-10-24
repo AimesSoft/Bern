@@ -58,6 +58,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 弹簧每帧在界面线程上推进，写到元素的 `Translation`、`Scale` 与 `Opacity`，不影响布局；滚动联动是 Composition 表达式动画。见“动效” |
 | 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | Direct2D 画进 WIC 位图后交给 `Image`，两种前端同一套代码；颜色按元素所在部分的主题解析 |
 | 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 对话框窗口是主窗口上的 `ContentDialog`；标题栏显示窗口标题（`chrome: unified` 不改变它），Islands 下保留系统标题栏。见“窗口外框、静置与对话框” |
+| 静置区 `idle_area` | 完成，未实测 | 鼠标停在静置区上才静置；两种前端经 MSVC 编译，未运行。见“窗口外框、静置与对话框” |
 | 可增减的侧栏项与页签 | 完成 | 侧栏项是 `NavigationView.MenuItems` 中的项，随 `if`、`match`、`ForEach` 增减；选中项离开时选中移到 `fallback` 或剩下的第一项 |
 | v0.29 的 `features` 与媒体类组件 | 完成 | `SidebarFooter`（`PaneFooter`）、`Inspector`（右侧的 `SplitView` 窗格）、`Toast`、`SplitButton`（`ToggleSplitButton`）、`PopoverButton`（`Flyout`）、`Drop`、`Pinch`、`Swipe`、`Rail`；工具栏搜索与结果、会话动作、开关按钮、绑定长度、`appearance`、快捷键（`KeyboardAccelerator`）、运行时强调色与明暗、运行时图片、取色填充、`pick`（`FileOpenPicker`/`FolderPicker`）、滚动停靠与位置；会话命令 `ui.focus`、`ui.set_file`。描述中列出 `features` 的全部 18 项 |
 
@@ -167,6 +168,8 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 ### 窗口外框、静置与对话框
 
 - `idle_after`：窗口根元素上（含已处理的事件）的指针移动、按下、滚轮与按键重新计时，到时 `window.idle` 为真。指针移动只在屏幕上的光标位置确实改变时才算：沉浸式窗口改变外框时，系统会在原位置再报告一次指针移动，否则会立即被自己唤醒。
+- `idle_area`（2026-10-24）：带它的元素在装饰时登记为窗口的静置区。根元素上鼠标的移动与按下记下它在窗口内容中的位置（`GetCurrentPoint(nullptr)`），触摸与触控笔不记；离开时根元素也收到各部分冒泡上来的离开事件，所以只有位置落在内容之外的离开才记为在窗口外。屏幕上有已加载且可见的静置区、最近的指针又是鼠标时，开始计时与到时都用 `VisualTreeHelper::FindElementsInHostCoordinates` 取那个位置最上面的元素，沿父元素找到它所在的静置区，按那个区的秒数计时；不在任何静置区上或在窗口外时不计时。命中测试与输入是同一套规则，立在静置区上面、可命中的控件会把鼠标从静置区拿走；到时再命中一次，唤醒时出现在静止鼠标下的控制条因此不会立刻隐藏。静置区加载、卸载或离开界面时，投递到界面线程重新计时。按键、触摸与触控笔仍按 `idle_after`。两种前端用同一份代码。
+- `window_landscape`（2026-10-24）声明为不适用：桌面窗口没有方向；平板旋转的是整个屏幕，与 iPad 上 `landscape` 保持设备方向相同。检查不再警告。
 - `immersive`：为真时隐藏标题栏与详情页头。WinUI 3 下 `TitleBar` 收起，`OverlappedPresenter.SetBorderAndTitleBar(true, false)` 去掉系统标题栏与标题按钮；Islands 下去掉窗口样式中的 `WS_CAPTION`（保留可调整大小的边框）。同时静置时指针隐藏（`ShowCursor`）。
 - `chrome: unified`：WinUI 3 下内容本来就延伸到标题栏，标题栏在图标旁显示窗口标题（设计稿的 Fluent 窗口如此），`unified` 不改变它；Islands 下保留系统标题栏。
 - `role: dialog`：没有自己的顶层窗口，是主窗口（或打开时第一个普通窗口）上的 `ContentDialog`，宽度按声明的尺寸在对话框允许的范围内设置；对话框的关闭（包括 Esc）都经关闭协议。对话框窗口报告所属窗口的位置，`minimize`、`maximize`、`move`、`resize` 返回 `target_unavailable`。
@@ -189,7 +192,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 
 ## 页面级布局、场景与控件形态的能力（2026-10-19）
 
-能力描述补上此前只有 SwiftUI、Web 与 GTK 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。`window_landscape` 仍未声明：桌面窗口没有设备方向，检查给出警告。两种前端用同一份代码（新代码在 `bern_ui_scene.inl` 与原有各部分中），只有侧栏计数在系统 XAML 中改为跟在名称后的数字（它的导航项没有 `InfoBadge`）。图标表补上 33 个名称（如 `house` → Home、`calendar` → Calendar、`text.bubble` → Message、`server.rack` → MediaStorageTower、`gobackward.10` → SkipBack10、`goforward.10` → FastForward、`sparkles` → SearchSparkle），码位取自 Segoe Fluent Icons 的官方列表。
+能力描述补上此前只有 SwiftUI、Web 与 GTK 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。`window_landscape` 当时未声明，检查给出警告（2026-10-24 起作为不适用声明，见“窗口外框、静置与对话框”）。两种前端用同一份代码（新代码在 `bern_ui_scene.inl` 与原有各部分中），只有侧栏计数在系统 XAML 中改为跟在名称后的数字（它的导航项没有 `InfoBadge`）。图标表补上 33 个名称（如 `house` → Home、`calendar` → Calendar、`text.bubble` → Message、`server.rack` → MediaStorageTower、`gobackward.10` → SkipBack10、`goforward.10` → FastForward、`sparkles` → SearchSparkle），码位取自 Segoe Fluent Icons 的官方列表。
 
 ### 外观与文字
 
@@ -511,7 +514,8 @@ target\bern\windows\Showcase\showcase.exe
 - `reflow` 只在 `Column`、`Row`、`Grid` 与 `ScrollView` 的面板中生效，其他容器中写了不起作用，构建时没有警告。
 - 系统 XAML 的导航项没有 `InfoBadge`，侧栏计数是名称后面的数字。
 - `Row(align: baseline)` 按第一个文字块对齐；没有文字的子元素保持顶对齐。基线变化后要多一轮布局才计入多占的高度。
-- `window_landscape` 未声明：桌面窗口没有设备方向，`Window(landscape:)` 检查时给出警告。
+- `Window(landscape:)` 不适用（桌面窗口没有方向），平板上不会因它转成横屏；系统的 `SetDisplayAutoRotationPreferences` 只是限制整个屏幕的自动旋转，没有采用。
+- `idle_area` 只编译过（2026-10-24，bern-pc 上 MSVC 编译生成测试的两种前端），没有运行：停在静置区上静置、移到控制条或移出窗口保持醒着，都未实测。
 - `shape: capsule` 在 Windows 上不画成胶囊，保留 Fluent 控件自己的圆角（设计稿如此）；只有强调色的定尺寸 `IconButton` 是圆形。
 - 动画 SVG 是窗口之上的子 HWND：不随祖先的透明度与滚动以外的裁剪变化，浮层菜单等 XAML 图层会被它挡住；弹出动画中只跟随位置与大小。
 - 只有变体、没有值的枚举标签（如选项列表）写出时，标签显示的字段为空。

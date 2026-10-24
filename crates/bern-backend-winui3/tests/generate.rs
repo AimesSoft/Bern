@@ -1561,6 +1561,25 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 }
 "#;
 
+/// A window that rests after three seconds and holds landscape, over a
+/// picture where a resting mouse lets it rest after one.
+const IDLE_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open, idle_after: 3, landscape: true) {
+                Button(id: picture, label: tr! { "en" => "Picture" }, idle_area: 1) {
+                    Spacer
+                } => app.add()
+            }
+        }
+    }
+}
+"#;
+
 /// A project whose only styled control is written directly in its window,
 /// compiled from sources written under `dir`.
 fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
@@ -1828,6 +1847,47 @@ fn a_column_without_align_is_a_leading_one() {
         "B::Stack(p, c, {.axis = \"column\", .align = \"center\"}, ",
         "B::Divider(p, c);",
         "B::List(p, c, ",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+    compile(&output);
+}
+
+/// The picture is an idle area of its window; neither it nor `landscape`,
+/// which a desktop window has nothing to do with, warns.
+#[test]
+fn an_idle_area_is_watched_by_its_window() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/winui3-idle-project"), IDLE_UI);
+    let problems = WinUi3Windows.check(&compiled.app, &windows_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/winui3-idle");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = BuildContext {
+        project_dir: config.dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: output.clone(),
+        target: windows_target(&config),
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    for file in WinUi3Windows.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/app_ui.inl")).unwrap();
+    for expected in [
+        "B::Decorate(p, c, {.idleArea = 1.0}, ",
+        "w.idleAfter = 3.0;",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }

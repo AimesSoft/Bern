@@ -1,10 +1,10 @@
 # 平台能力与验证范围
 
-更新：2026-10-21。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 在共用 SwiftUI 清单之外单独开放搜索面板；iOS 不开放。tvOS 与 iOS 共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
+更新：2026-10-24。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 在共用 SwiftUI 清单之外单独开放搜索面板；iOS 不开放。tvOS 与 iOS 共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
 
 ## 编译期功能支持
 
-“支持”表示后端声明接受对应特性；“—”表示未声明，用到该特性的声明会被相应能力检查拒绝。它不表示所有属性行为、视觉效果或设备场景都已经验收。颜色覆盖、动效、窗口和媒体还有独立的能力描述，不能只看此表推断完整支持。
+“支持”表示后端声明接受对应特性；“不适用”表示后端同样声明接受，但那里没有对应的行为（例如电视与桌面窗口没有方向可转），用到时不报错也不警告；“—”表示未声明，用到该特性的声明会被相应能力检查拒绝。它不表示所有属性行为、视觉效果或设备场景都已经验收。颜色覆盖、动效、窗口和媒体还有独立的能力描述，不能只看此表推断完整支持。
 
 | 功能标记 | 对应能力 | macOS | iOS | tvOS | Web | Android | Linux | Windows |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -52,7 +52,7 @@
 | `fill_buttons` | 横向撑满容器的系统按钮（`Button(width: fill)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `page_search` | 页面里的系统搜索框（不在 `Toolbar` / `Sidebar` 里的 `Search`），结果列在框下 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `window_short` | 窗口高度低于紧凑断点（`window.short`），如手机横屏 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
-| `window_landscape` | 手机上按状态转为横屏或竖屏（`Window(landscape:)`），如播放器打开时横过来 | 不适用 | 支持 | 不适用 | — | 支持 | — | — |
+| `window_landscape` | 手机上按状态转为横屏或竖屏（`Window(landscape:)`），如播放器打开时横过来 | 不适用 | 支持 | 不适用 | 支持（浏览器允许锁定方向时） | 支持 | 不适用 | 不适用 |
 | `modal_cover` | 紧凑窗口里铺满整个窗口的模态（`Modal(cover: compact)`），如手机的全屏流程 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `form_layout` | 表单版式：`Section(style: plain)` 标题组、行内边距、`Form(gap:, row_height:)` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `tab_accessory` | 随页签常驻的一条（`TabAccessory`），如小播放器；iOS 26.1 起为标签栏上方的系统附件 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
@@ -65,6 +65,8 @@
 | 能力 | 当前范围 |
 | --- | --- |
 | `Window(idle_enabled:)` | 六个目标都消费启停状态（能力 `idle_control`）：为假时 `window.idle` 保持为假且不计时，变真时重新计时 |
+| 静置区（`idle_area`） | 七个目标的动效能力都声明它。macOS、Web、Android、Linux、Windows 上，页面有静置区时鼠标只在静置区上停住才静置，停在别处或移出窗口保持醒着，触摸、遥控器与键盘仍按 `idle_after`；iOS 与 tvOS 上静置区不改变计时（接上鼠标的 iPad 也是）。macOS 用一个实际应用的播放画面实测；Web 有运行时测试；Android 编译打包、Windows 两种前端经 MSVC 编译、Linux 运行时在 macOS 的 GTK 4 上通过 Clippy，这三者都未运行实测 |
+| `Window(landscape:)` 在网页上 | 用屏幕方向接口锁成横屏：浏览器只在手机与平板上锁定，多数还要求页面全屏或作为已安装的应用运行，iOS 的 Safari 不提供锁定；被拒绝时保持设备方向，进入全屏时再请求。运行时测试覆盖，未在手机浏览器上实测 |
 | 图片跨分栏 Hero | macOS 使用窗口级覆盖层，Web 使用视口级副本；iOS 与 macOS 其他视图沿用匹配几何。Video 连续画面传递另行验证 |
 | 本地持久化 | 原生 FFI 宿主提供文件存储，Web app 使用同源 localStorage；未安装存储宿主时不持久化 |
 | 可选 Svg | 六目标有生成路径；tvOS 没有 WebKit，不可用，用到时检查报错；专属依赖及验证见[动画 SVG](../Implementation/Animated-SVG.md)，不改变普通界面的默认实现 |
@@ -80,7 +82,7 @@
 
 ## 最近新增能力的验证
 
-这一节只描述 2026-10-15 至 21 日的新增能力；已有平台的历史验收见各实现记录。构建成功不代替实际设备交互。
+这一节只描述 2026-10-15 至 24 日的新增能力；已有平台的历史验收见各实现记录。构建成功不代替实际设备交互。
 
 | 范围 | 代码 / 构建证据 | 实际交互范围 |
 | --- | --- | --- |
@@ -100,6 +102,7 @@
 | 按平台给出的长度与 `shape: chip`（2026-10-20） | 编译器测试覆盖 `style!` 里 `gap`、`padding_x`、`padding_y`、`width`（含 `fit`）、`height`、`font_size`、`row_height` 的解析与报错；构建每个目标前按它的平台替换元素写下的长度、在网页以外把 chip 换成 30 点胶囊，生成器测试覆盖两者；六个目标都经过这一步，不需要各自实现 | Chromium 1280 × 800 对照网页设计稿：侧边栏、品牌行、导航项、账户行、工具栏与搜索框、媒体库的标签与缩放、设置对话框的标题行、分组与行内下拉逐项量得与设计稿一致（相差不超过 1 px，系统滚动条占位与 Inter 字宽除外）；macOS 上同一应用的外观未在本轮实测 |
 | 应用自带的媒体内核（2026-10-21） | `bern-media` 的 `MediaKernel` 与 C ABI；SwiftUI 的视频视图在内核模式下给出 `CAMetalLayer` 与 `CADisplayLink` 帧时钟（macOS、iOS、tvOS 生成），macOS 上用一个实际应用自带的播放内核实测播放、跳转、视图间转移与命令行控制；iOS、tvOS 未实测；Compose、GTK、WinUI 3、Web 不提供内核表面，内核不挂接，平台媒体设施照常 |
 | 性能追踪的引擎与桥接一侧（2026-10-21） | Rust 测试：规则解析与报错、环形缓冲（写满丢弃并计数、边写边读）、乱序到达的记录按 token 与修订号对上、长帧归因、同一命令过频时合并成一行、关闭时不读时钟也不分配缓冲；真实引擎走完命令写出可解析的时间线；bern-ffi 测试模拟一次控件操作，报告里从动作到上屏各段对上；`bern run --trace` 的传参有测试；WebAssembly 编译通过 | 未在设备或真实应用上实测；各前端界面线程一侧未接入 |
+| 静置区与 `landscape` 的适用范围（2026-10-24） | `idle_area` 在 Compose、GTK 与 WinUI 3 实现：Compose 按静置区的悬停进出，GTK 按拾取、WinUI 3 按命中测试找出鼠标所在的静置区；`window_landscape` 在 Web 实现（屏幕方向锁定），tvOS、Linux、Windows 声明为不适用。四个后端的生成器测试覆盖，Web 的运行时测试覆盖横屏锁定；临时应用 `bern check` 各目标无警告、`bern build --target android` 通过；WinUI 3 的两种前端在 bern-pc 上经 MSVC 编译（需先绕过当时 HEAD 中三处与本项无关的编译错误）；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy | 未运行实测：Ubuntu 虚拟机磁盘已满，Windows 只编译，Android 没有接鼠标的设备，横屏锁定没有在手机浏览器上试 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

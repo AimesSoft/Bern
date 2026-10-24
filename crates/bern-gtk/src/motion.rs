@@ -897,6 +897,10 @@ pub struct Decor {
     pub nudge_scale: Option<f64>,
     /// While true, motion is reduced everywhere.
     pub reduce_motion: Option<Get>,
+    /// `idle_area`: a mouse resting over the element lets its window rest
+    /// after these seconds; with areas on screen, resting elsewhere does
+    /// not.
+    pub idle_area: Option<f64>,
 }
 
 /// Wrap a widget an element made in a motion box: inside a list row the
@@ -972,6 +976,9 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
         }
         if decor.reveal {
             reveal(&outer, &motion);
+        }
+        if let Some(seconds) = decor.idle_area {
+            ctx.win().watch_idle_area(&outer, seconds);
         }
         let scale = decor.nudge_scale.unwrap_or(1.06);
         if let Some((when, curve)) = &decor.nudge {

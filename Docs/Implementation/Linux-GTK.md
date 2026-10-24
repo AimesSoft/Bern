@@ -27,6 +27,7 @@
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 变换在分配子控件时施加，不影响布局；`reflow` 只在 `Column`、`Row` 里（含其中的 `ForEach`），其他容器构建时警告。见“动效” |
 | 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | cairo 绘制，颜色取 libadwaita 的命名颜色；标注按 Pango 的行位置画在文字下 |
 | 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 见“窗口外框、静置与对话框” |
+| 静置区 `idle_area` | 完成，未实测 | 鼠标停在静置区上才静置；运行时在 macOS 上用 Homebrew 的 GTK 4 通过 Clippy，生成器测试覆盖。Ubuntu 虚拟机的磁盘已满，未构建运行。见“窗口外框、静置与对话框” |
 | 可增减的侧栏项、页签与工具栏项 | 完成 | 侧栏项与页签在挂载期间登记；选中项离开时选中移到 `fallback` 或剩下的第一项 |
 | v0.29 的 `features` 与媒体类组件 | 完成 | `SidebarFooter`、`Inspector`（`AdwOverlaySplitView`）、`Toast`（`AdwToast`）、`SplitButton`、`PopoverButton`、`Drop`（`GtkDropTarget`）、`Pinch`（`GtkGestureZoom`）、`Swipe`（`GtkGestureDrag`）、`Rail`；工具栏搜索与结果、会话动作、开关按钮、绑定长度、`appearance`、快捷键、运行时强调色与明暗、运行时图片、取色填充、`pick`（`GtkFileDialog`）、滚动停靠与位置；会话命令 `ui.focus`、`ui.set_file` |
 
@@ -152,6 +153,7 @@
 ### 窗口外框、静置与对话框
 
 - `idle_after`：窗口捕获阶段的指针移动、按键、滚轮与按下重新计时，到时 `window.idle` 为真。内容在静止的指针下移动时 GTK 会在原位置报告指针移动，位置没变的不算输入，否则画框铺满时会立即被自己的布局变化唤醒。
+- `idle_area`（2026-10-24）：带它的元素在装饰时登记为窗口的静置区。窗口记下鼠标（以及触控板、指点杆）最后在窗口里的位置，离开窗口时记为在外面；触摸、触控笔与模拟出来的指针事件不记位置。屏幕上有已映射的静置区、最近的指针又是鼠标时，开始计时与到时都按 GTK 的拾取（`gtk_widget_pick`）找出那个位置上接收事件的控件，沿父控件找到它所在的静置区，按那个区的秒数计时；不在任何静置区上或在窗口外时不计时。拾取与输入用的是同一套规则，立在静置区上面、接收事件的控件会把鼠标从静置区拿走；到时再拾取一次，唤醒时出现在静止鼠标下的控制条因此不会立刻隐藏。静置区映射、取消映射或离开界面时，在下一次空闲时重新计时。按键、触摸与触控笔仍按 `idle_after`。`window_landscape` 同时声明为不适用：桌面窗口没有方向，Linux 手机（如 Phosh）由合成器按传感器旋转整个屏幕，Wayland 没有让应用要求方向的协议，`landscape` 无事可做，检查不再警告。
 - `immersive`：为真时窗口里所有标题栏（窗口自己的、侧栏与详情的）`reveal-top-bars` 关闭；同时静置时指针隐藏。
 - `chrome: unified`：标题栏用 `AdwToolbarView` 的平铺样式（`flat`），不再有分隔阴影；内容不延伸到标题栏下。
 - `role: dialog`：设为主窗口的临时窗口并模态，Esc 关闭；在 GNOME 上由 mutter 附着在主窗口上（未验证，测试环境 Broadway 没有窗口管理器，对话框出现在左上角）。
@@ -168,7 +170,7 @@
 
 ## 页面级布局、场景与控件形态的能力（2026-10-18）
 
-GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。`window_landscape` 仍未声明：桌面 GTK 没有设备方向，检查给出警告。一个真实的媒体类应用在 GTK 上的检查从 67 个错误变为 0 个错误，构建并运行（见“验证记录”）。
+GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。`window_landscape` 当时未声明，检查给出警告（2026-10-24 起作为不适用声明，见“窗口外框、静置与对话框”）。一个真实的媒体类应用在 GTK 上的检查从 67 个错误变为 0 个错误，构建并运行（见“验证记录”）。
 
 ### 外观与文字
 
@@ -401,6 +403,7 @@ target/bern/linux/Showcase/showcase
 - `Menu` 的菜单项图标与 `destructive` 角色不呈现（GNOME 菜单通常只有文字）。
 - 多实例窗口、焦点迁移、Flatpak 等打包与图标安装尚未实现；桌面文件的 `Exec` 是构建机上的绝对路径。
 - 设置窗口切换页签只构建选中的页签。
+- `idle_area` 未在 Linux 上构建运行：拾取在静置区上、移到控制条上保持醒着、移出窗口保持醒着，以及触摸屏与 Wayland、X11 的设备来源都未实测。
 - HDR 图片的 HDR 输出（GTK 4.16 起、Wayland、打开色彩管理）没有实测：测试用的虚拟机是 GTK 4.14，也不能输出 HDR。GTK 的 JPEG 加载器不读增益图，所以增益图由 Bern 应用；GTK 的色彩空间转换只截断不做色调映射，所以 GTK 不输出 HDR 时由 Bern 先转成 SDR。
 - `Video` 的 HDR 视频依赖 GTK：GTK 4.16 起 GStreamer 的帧带有色彩空间，HDR 输出同样需要打开色彩管理；未实测。
 - 其余与 macOS 相同的限制见 [macOS SwiftUI 实现记录](macOS-SwiftUI.md)“未完成与已知限制”中与平台无关的条目。

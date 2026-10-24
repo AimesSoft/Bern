@@ -53,15 +53,20 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
@@ -73,6 +78,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
@@ -558,6 +564,19 @@ class BernWindowContext(
     /// Whether the window had no input for its `idle_after` seconds.
     val fullscreen = true
     var idle by mutableStateOf(false)
+    /// The `idle_area`s on screen, and those a mouse rests over, each with
+    /// its seconds.
+    internal val idleAreas = mutableStateMapOf<Any, Double>()
+    internal val idleAreasHovered = mutableStateMapOf<Any, Double>()
+    /// Whether the pointer that came last is a mouse: only a mouse rests
+    /// over an `idle_area`.
+    internal var mouse by mutableStateOf(false)
+
+    /// How long the window waits before it rests: `idleAfter`, or with
+    /// `idle_area`s on screen and a mouse, the seconds of the area it
+    /// rests over; null when it rests over none, or is outside the window.
+    internal fun idleWait(idleAfter: Double): Double? =
+        if (mouse && idleAreas.isNotEmpty()) idleAreasHovered.values.minOrNull() else idleAfter
     /// The window's width in dp once laid out; before that, an estimate
     /// from the screen or the declared size.
     var measuredWidth by mutableStateOf<Double?>(null)
@@ -1819,14 +1838,21 @@ fun BernWindowRoot(
     val top = BernHost.sheets.lastOrNull() ?: BernHost.primary
     val onTop = top == context.kindID
     // `window.idle`: no touch, pointer or key input for `idleAfter` seconds,
-    // while `idleEnabled` holds; switched off, the window is not idle.
+    // while `idleEnabled` holds; switched off, the window is not idle. With
+    // `idle_area`s on screen a mouse counts only while it rests over one,
+    // for that area's seconds: elsewhere, or outside the window, the window
+    // stays awake. A change of the areas starts the count again.
     var input by remember { mutableLongStateOf(0L) }
     if (idleAfter != null) {
         LaunchedEffect(input, BernShortcuts.keys, idleEnabled) {
             context.idle = false
             if (!idleEnabled) return@LaunchedEffect
-            delay((idleAfter * 1000).toLong())
-            context.idle = true
+            snapshotFlow { context.idleWait(idleAfter) }.collectLatest { wait ->
+                context.idle = false
+                if (wait == null) return@collectLatest
+                delay((wait * 1000).toLong())
+                context.idle = true
+            }
         }
     }
     // Immersive: the top bar and the system bars hide; a swipe from the
@@ -1895,8 +1921,16 @@ fun BernWindowRoot(
             } else {
                 Modifier.pointerInput(Unit) {
                     awaitPointerEventScope {
+                        // Content moving under a still pointer makes Compose
+                        // send it again where it was; only a pointer that
+                        // moves is input.
+                        var last: Offset? = null
                         while (true) {
-                            awaitPointerEvent(PointerEventPass.Initial)
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull() ?: continue
+                            context.mouse = change.type == PointerType.Mouse
+                            if (event.type == PointerEventType.Move && change.position == last) continue
+                            last = change.position
                             input += 1
                         }
                     }

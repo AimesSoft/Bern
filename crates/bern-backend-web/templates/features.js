@@ -1492,6 +1492,31 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
   rest();
 };
 
+// MARK: - Orientation
+
+/// `Window(landscape:)`: while `wanted()` holds the page is locked to
+/// landscape, and after it the device's orientation counts again.
+/// Browsers lock only on phones and tablets, and most only while the page
+/// is fullscreen or an installed app, so the lock is asked for again each
+/// time fullscreen begins; where it is refused, the page keeps the
+/// device's orientation.
+B.hooks.landscape = (wanted) => {
+  const orientation = globalThis.screen?.orientation;
+  if (!orientation?.lock) return;
+  let on = false;
+  const apply = () => {
+    if (on) orientation.lock("landscape").catch(() => {});
+    else try { orientation.unlock(); } catch {}
+  };
+  effect(() => { const next = wanted(); if (next !== on) { on = next; apply(); } });
+  const again = () => { if (on && document.fullscreenElement) apply(); };
+  document.addEventListener("fullscreenchange", again);
+  onCleanup(() => {
+    document.removeEventListener("fullscreenchange", again);
+    if (on) { on = false; apply(); }
+  });
+};
+
 // MARK: - Files
 
 /// Extensions of the file kinds `files:` names, from the build.

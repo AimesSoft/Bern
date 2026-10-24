@@ -155,6 +155,7 @@ impl Target for ComposeAndroid {
                 "reduce_motion",
                 "appear_delay",
                 "stagger",
+                "idle_area",
             ],
             window_chrome: true,
             text_marks: true,

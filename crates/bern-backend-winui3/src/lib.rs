@@ -148,6 +148,10 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::FORM_LAYOUT,
     bern_target_api::feature::MODAL_COVER,
     bern_target_api::feature::WINDOW_SHORT,
+    // Not applicable, so nothing to warn about: a desktop window has no
+    // orientation; a tablet turns its whole screen, as an iPad keeps its
+    // own with `landscape` too.
+    bern_target_api::feature::WINDOW_LANDSCAPE,
     bern_target_api::feature::TEXT_FORMATS,
     bern_target_api::feature::EDGE_GROW,
     bern_target_api::feature::DELAYED_APPEAR,
@@ -178,6 +182,7 @@ const MOTION: &[&str] = &[
     "reduce_motion",
     "appear_delay",
     "stagger",
+    "idle_area",
 ];
 
 fn component_names() -> &'static [&'static str] {

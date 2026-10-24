@@ -78,6 +78,10 @@ const FEATURES: &[&str] = &[
     feature::FORM_LAYOUT,
     feature::MODAL_COVER,
     feature::WINDOW_SHORT,
+    // Not applicable, so nothing to warn about: a desktop window has no
+    // orientation, and where a Linux phone turns its screen, Wayland lets
+    // an application ask for no orientation.
+    feature::WINDOW_LANDSCAPE,
     feature::EDGE_GROW,
     feature::DELAYED_APPEAR,
     feature::TOOLBAR_LEADING,
@@ -245,6 +249,7 @@ impl Target for GtkLinux {
                 "reduce_motion",
                 "appear_delay",
                 "stagger",
+                "idle_area",
             ],
             window_chrome: true,
             text_marks: true,

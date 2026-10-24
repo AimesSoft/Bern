@@ -1371,6 +1371,15 @@ struct Win {
     /// `window.idle`: no input for the window's `idle_after` seconds.
     Cell<bool> fullscreen{false};
     Cell<bool> idle{false};
+    /// The `idle_area`s of the window, each with its seconds.
+    std::vector<std::pair<winrt::weak_ref<xaml::UIElement>, double>> idleAreas;
+    /// Where the mouse is, for `idle_area`s: not known after a touch or a
+    /// pen, which do not rest over areas; outside the window; or at
+    /// `mousePoint`, in the coordinates of the window's content.
+    enum class Mouse { Unknown, Outside, At } mouse = Mouse::Unknown;
+    winrt::Windows::Foundation::Point mousePoint{};
+    /// Starts the count toward `window.idle` again, with `idle_after`.
+    std::function<void()> idleRest;
     /// The window's layout size by its width: compact, medium, expanded
     /// or large.
     Cell<std::string> size{std::string("expanded")};

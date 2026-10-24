@@ -52,10 +52,11 @@ const ASSETS: &str = "Assets.xcassets";
 
 /// IR features SwiftUI builds on tvOS: those of macOS and iOS, without the
 /// ones a television has no system part for. tvOS has no open panel or
-/// file system to pick from (`file_pick`), no orientations
-/// (`window_landscape`), no pointer to hover with (`reveal`, whose content
-/// then always shows, as the focus engine reaches it like any other), and
-/// its sidebar is a floating panel of the system's width (`sidebar_width`).
+/// file system to pick from (`file_pick`), no pointer to hover with
+/// (`reveal`, whose content then always shows, as the focus engine reaches
+/// it like any other), and its sidebar is a floating panel of the system's
+/// width (`sidebar_width`). A television is always landscape, so
+/// `window_landscape` has nothing to turn and nothing to warn about.
 /// A popover's content shows in a sheet, tvOS's own way to show more over a
 /// screen; keyboard shortcuts are the Siri Remote's buttons.
 pub(crate) const FEATURES: &[&str] = &[
@@ -104,6 +105,7 @@ pub(crate) const FEATURES: &[&str] = &[
     feature::FORM_LAYOUT,
     feature::MODAL_COVER,
     feature::WINDOW_SHORT,
+    feature::WINDOW_LANDSCAPE,
     feature::SEARCH_PALETTE,
     feature::SIZE_CLASSES,
     feature::TEXT_FORMATS,

@@ -81,6 +81,9 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::FORM_LAYOUT,
     bern_target_api::feature::MODAL_COVER,
     bern_target_api::feature::WINDOW_SHORT,
+    // A phone's browser locks the page to landscape where it allows a
+    // lock: mostly while the page is fullscreen or an installed app.
+    bern_target_api::feature::WINDOW_LANDSCAPE,
     bern_target_api::feature::TEXT_LINES,
     bern_target_api::feature::CONTROLLED_VALUES,
     bern_target_api::feature::SEARCH_PALETTE,

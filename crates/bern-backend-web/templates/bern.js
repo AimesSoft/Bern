@@ -1239,6 +1239,8 @@ export const hooks = {
   exit: null,
   /// `(win, seconds)`: keeps `win.idle` from the window's input.
   idle: null,
+  /// `(wanted)`: keeps the page in landscape while `wanted()` holds.
+  landscape: null,
   /// `(node, property, value, motion)`: a length bound to state.
   length: null,
   /// `(url, kinds)`: whether a file at `url` is one of `kinds`.
@@ -4351,6 +4353,8 @@ class WindowManager {
       // Immersive: the page header and its toolbar hide, and the pointer
       // once the window is idle.
       if (kind.immersive) effect(() => win.element.classList.toggle("bern-immersive", kind.immersive(ctx) === true));
+      // Landscape: a phone turns the page while it holds.
+      if (kind.landscape) hooks.landscape?.(() => kind.landscape(ctx) === true);
       if (kind.closeCheck) win.closeCheck = kind.closeCheck(win);
       if (win.floating) effect(() => this.place(win));
       effect(() => this.dialog(win));
