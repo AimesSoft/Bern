@@ -332,8 +332,18 @@ impl Generator<'_> {
 
     /// `F.shortcut(…)` running `run` while the element is mounted.
     pub(super) fn shortcut(&self, out: &mut Out, element: &Element, run: &str) {
-        if let Some(shortcut) = element.keyword("shortcut") {
-            out.line(format!("F.shortcut({}, {run});", string(shortcut)));
+        if let Some(shortcut) = self.shortcut_keys(element, "shortcut") {
+            out.line(format!("F.shortcut({shortcut}, {run});"));
+        }
+    }
+
+    /// The keys of the shortcut prop `name`: a literal, or a getter of the
+    /// text the shortcut follows.
+    pub(super) fn shortcut_keys(&self, element: &Element, name: &str) -> Option<String> {
+        match element.prop(name)? {
+            bern_ir::Prop::Keyword { value } => Some(string(value)),
+            bern_ir::Prop::Expr { expr } => Some(format!("() => {}", self.expr(expr))),
+            _ => None,
         }
     }
 

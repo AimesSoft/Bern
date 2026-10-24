@@ -528,6 +528,9 @@ fn gallery_generates_without_warnings() {
         ".suggest = true",
         // The about window's first tab shows only its symbol.
         ".icon = \"info.circle\", .iconOnly = true, .build = ",
+        // The details' keys follow state, and the user chooses them.
+        "B::Shortcut(c, [](Ctx const& c) { return ",
+        "B::ShortcutInput(p, c, {.id = \"details_key\"",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }

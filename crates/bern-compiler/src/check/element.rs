@@ -101,6 +101,17 @@ impl Checker<'_> {
                 }
             }
         }
+        // The shortcut a user chooses is state: the action keeps it.
+        if parts.kind == "ShortcutInput"
+            && let Some(ir::Prop::Keyword { .. }) = parts.props.get("current")
+        {
+            self.error(
+                element
+                    .prop("current")
+                    .map_or(element.span, |prop| prop.value.span()),
+                "`current` is the shortcut the state holds, such as `app.keys.open`; the action keeps the one chosen",
+            );
+        }
         if parts.kind == "Tab"
             && matches!(parts.props.get("display"), Some(ir::Prop::Keyword { value }) if value == "icon")
             && !parts.props.contains_key("icon")
@@ -367,7 +378,7 @@ impl Checker<'_> {
                 )
                 .map(|text| ir::Prop::Text { text }),
             PropKind::Icon => self.icon(value),
-            PropKind::Shortcut => self.shortcut(value),
+            PropKind::Shortcut => self.shortcut(value, scope),
             // A picture is a declared resource, or a `MediaSource`
             // the engine gives: a file or an http(s) URL.
             PropKind::SvgResource => self.svg_resource(value),

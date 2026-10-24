@@ -266,6 +266,10 @@ target/bern/linux/Showcase/showcase
 - 实测（2026-10-12，Ubuntu 24.04 ARM64）：`.deb` 1.06 MB，`.tar.gz` 1.9 MB；`desktop-file-validate` 通过，`apt-get -s install` 能解析全部依赖；解开 `.deb` 后从 `/opt` 位置启动并经包内 CLI 驱动正常。虚拟机的 sudo 需要密码，没有实际安装。没有桌面会话时，GTK 启动会等约 25 秒的 D-Bus 门户超时，引擎与控制通道随后才就绪。
 - 实测（2026-10-18，同一虚拟机，AppArmor 4.0.0~beta3、WebKitGTK 2.52.3、bubblewrap 0.9.0，`examples/svg-animation`）：`.deb` 1.2 MB，含 `etc/apparmor.d/dev.bern.svgdemo`、`DEBIAN/conffiles` 与权限为 755 的 `postinst`、`postrm`；两个脚本 `sh -n` 通过；`apparmor_parser -Q -K`（不载入内核、不用缓存）解析配置通过，结果为 `Mode: unconfined` 与 `userns`；`apt-get -s install` 只新装这一个包。解开的程序不带配置运行时，约 26 秒后报 `bwrap: setting up uid map: Permission denied` 与 `Failed to fully launch dbus-proxy` 并中止。载入新配置需要 root，而虚拟机的 sudo 需要密码，所以没有安装 `.deb`，也没有用这份配置本身运行；改用系统自带、形式相同的 `busybox` 配置（`profile busybox /usr/bin/busybox flags=(unconfined) { userns, … }`），经 `busybox env` 启动同一程序：程序、WebKitNetworkProcess、两层 bwrap、xdg-dbus-proxy 与 WebKitWebProcess 都带 `busybox (unconfined)` 标签，沙箱建立成功，应用不中止，Broadway 中 SVG 正常显示。没有桌面会话时，带沙箱的网页视图在窗口出现约 44 秒后才创建（关闭沙箱时不到 1 秒），原因未查。
 
+## 跟随状态的快捷键与改键（2026-10-24）
+
+跟随状态的快捷键生成为 `b::bound_shortcut(c, b::str(…), …)` 与 `KeyShortcutProps { bound: Some(…) }`：窗口的捕获阶段按键控制器在每次按键时读取文本并按 Bern 的规则解析。`b::ShortcutInput` 是一个按钮，按下后把窗口的 `recorder` 设为它：按键控制器先把按键交给它（Control 写作 `cmd`，按 Shift 时取不带 Shift 的键），Esc 保持原样，单独按退格或 Delete 清空，只按修饰键继续等待；等待期间快捷键不执行。显示文字为 `Ctrl+Shift+K` 的写法。`MenuBar` 不生成（GNOME 的应用不用菜单栏）。验证：`bern-gtk` 的单元测试在 macOS 的 GTK 4 上覆盖按键的写法、每次读取文本与空文本不占键；生成器测试（gallery）覆盖生成代码；未在 Linux 上运行。
+
 ## 验证记录
 
 2026-10-11，Ubuntu 24.04（aarch64，GNOME 46 Wayland），经 SSH 驱动虚拟机桌面会话中的应用，截图来自开发快照：

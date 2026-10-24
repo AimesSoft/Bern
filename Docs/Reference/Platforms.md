@@ -18,6 +18,9 @@
 | `bound_lengths` | 状态绑定长度 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `appearance` | 局部明暗外观 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `shortcuts` | 键盘快捷键 | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
+| `bound_shortcuts` | 跟随状态的快捷键（`shortcut: app.keys.x`、`Shortcut(key: app.keys.x)`） | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
+| `shortcut_input` | 按下组合键改键的 `ShortcutInput` | 支持 | 支持（硬件键盘） | 支持（只显示） | 支持 | 支持（硬件键盘） | 支持 | 支持 |
+| `menu_bar` | 应用菜单栏 `MenuBar`、`CommandMenu`、`CommandItem`，`window.menu_bar` | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 |
 | `runtime_theme` | 运行时主题选择 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `runtime_images` | 引擎提供图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `picture_fills` | 图片取色与渐隐填充 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
@@ -102,6 +105,7 @@
 | 按平台给出的长度与 `shape: chip`（2026-10-20） | 编译器测试覆盖 `style!` 里 `gap`、`padding_x`、`padding_y`、`width`（含 `fit`）、`height`、`font_size`、`row_height` 的解析与报错；构建每个目标前按它的平台替换元素写下的长度、在网页以外把 chip 换成 30 点胶囊，生成器测试覆盖两者；六个目标都经过这一步，不需要各自实现 | Chromium 1280 × 800 对照网页设计稿：侧边栏、品牌行、导航项、账户行、工具栏与搜索框、媒体库的标签与缩放、设置对话框的标题行、分组与行内下拉逐项量得与设计稿一致（相差不超过 1 px，系统滚动条占位与 Inter 字宽除外）；macOS 上同一应用的外观未在本轮实测 |
 | 应用自带的媒体内核（2026-10-21） | `bern-media` 的 `MediaKernel` 与 C ABI；SwiftUI 的视频视图在内核模式下给出 `CAMetalLayer` 与 `CADisplayLink` 帧时钟（macOS、iOS、tvOS 生成），macOS 上用一个实际应用自带的播放内核实测播放、跳转、视图间转移与命令行控制；iOS、tvOS 未实测；Compose、GTK、WinUI 3、Web 不提供内核表面，内核不挂接，平台媒体设施照常 |
 | 性能追踪的引擎与桥接一侧（2026-10-21） | Rust 测试：规则解析与报错、环形缓冲（写满丢弃并计数、边写边读）、乱序到达的记录按 token 与修订号对上、长帧归因、同一命令过频时合并成一行、关闭时不读时钟也不分配缓冲；真实引擎走完命令写出可解析的时间线；bern-ffi 测试模拟一次控件操作，报告里从动作到上屏各段对上；`bern run --trace` 的传参有测试；WebAssembly 编译通过 | 未在设备或真实应用上实测；各前端界面线程一侧未接入 |
+| 跟随状态的快捷键、`ShortcutInput` 与菜单栏（2026-10-24） | `bound_shortcuts` 与 `shortcut_input` 六个目标实现，`menu_bar` 在 macOS 实现、其他目标声明为不适用；`examples/gallery` 用到三者（菜单栏的应用、文件、自建菜单与子菜单，跟随状态的详情快捷键，改键的 `ShortcutInput`），各后端的生成器测试随之覆盖；SwiftUI 另有测试按 macOS、iOS、tvOS 的 SDK 类型检查；Web 运行时测试覆盖跟随状态的键与录制；GTK 运行时的单元测试在 macOS 的 GTK 4 上通过；编译器与 trybuild 测试覆盖绑定、字面量 `current` 与形状检查；gallery 与一个实际应用 `bern check` 各目标无警告 | macOS 27 上 `examples/gallery` 实测：菜单出现在菜单栏，`ui.activate` 与真实点击菜单项执行命令，草稿与引擎状态变化后勾选、启用随之更新；改键后旧键失效、新键生效；`ShortcutInput` 录下 ⌃⌘F、Esc 保持、Delete 清空。`examples/gallery` 的 Android 构建编译了 Compose 的运行时代码；iOS、tvOS、Android、Linux、Windows、Web 未运行实测，WinUI 3 的 C++ 未编译 |
 | 静置区与 `landscape` 的适用范围（2026-10-24） | `idle_area` 在 Compose、GTK 与 WinUI 3 实现：Compose 按静置区的悬停进出，GTK 按拾取、WinUI 3 按命中测试找出鼠标所在的静置区；`window_landscape` 在 Web 实现（屏幕方向锁定），tvOS、Linux、Windows 声明为不适用。四个后端的生成器测试覆盖，Web 的运行时测试覆盖横屏锁定；临时应用 `bern check` 各目标无警告、`bern build --target android` 通过；WinUI 3 的两种前端在 bern-pc 上经 MSVC 编译（需先绕过当时 HEAD 中三处与本项无关的编译错误）；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy | 未运行实测：Ubuntu 虚拟机磁盘已满，Windows 只编译，Android 没有接鼠标的设备，横屏锁定没有在手机浏览器上试 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。

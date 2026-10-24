@@ -173,6 +173,7 @@ impl Generator<'_> {
             out.line(format!("let bernSceneBodySize: CGFloat = {}", double(body)));
             out.line("");
         }
+        let menu_bar = self.menu_bar(&mut out);
         out.line("@main");
         out.open("struct BernApplication: App {");
         match self.platform {
@@ -202,7 +203,7 @@ impl Generator<'_> {
         out.line("");
         out.open("var body: some Scene {");
         match self.platform {
-            Platform::Macos => self.macos_scenes(&mut out, &order, &initial),
+            Platform::Macos => self.macos_scenes(&mut out, &order, &initial, menu_bar),
             Platform::Ios => self.ios_scene(&mut out, &initial),
             Platform::Tvos => self.tvos_scene(&mut out, &initial),
         }
@@ -212,8 +213,9 @@ impl Generator<'_> {
     }
 
     /// One SwiftUI scene per window kind: `Window`, or `Settings` for the
-    /// settings window.
-    fn macos_scenes(&self, out: &mut Out, order: &[usize], initial: &[String]) {
+    /// settings window. The primary window's scene carries the menu bar's
+    /// commands, which hold for the whole application.
+    fn macos_scenes(&self, out: &mut Out, order: &[usize], initial: &[String], menu_bar: bool) {
         let app = self.app;
         for &index in order {
             let window = &app.windows.windows[index];
@@ -252,6 +254,9 @@ impl Generator<'_> {
                 }
                 if window.min_width.is_some() || window.min_height.is_some() {
                     out.line(".windowResizability(.contentMinSize)");
+                }
+                if menu_bar && window.id == app.windows.primary {
+                    out.line(".commands { BernMenuBar() }");
                 }
             }
         }

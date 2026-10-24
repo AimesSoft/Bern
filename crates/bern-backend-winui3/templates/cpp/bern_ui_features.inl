@@ -367,6 +367,62 @@ inline std::optional<winrt::Windows::System::VirtualKey> KeyOf(std::string const
     return std::nullopt;
 }
 
+/// Whether a `ShortcutInput` waits for a key: it takes every key
+/// meanwhile, and no accelerator runs.
+inline bool shortcutRecording = false;
+
+/// A text in Bern's form, modifiers in order and the key in lower case;
+/// "" for an empty text, nothing for one that is no shortcut.
+inline std::optional<std::string> NormalizedShortcut(std::string const& text) {
+    std::vector<std::string> parts;
+    std::string part;
+    for (char c : text + "+") {
+        if (c == '+') {
+            auto begin = part.find_first_not_of(" \t");
+            auto end = part.find_last_not_of(" \t");
+            parts.push_back(begin == std::string::npos ? std::string() : part.substr(begin, end - begin + 1));
+            part.clear();
+        } else {
+            part += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+    }
+    if (parts.size() == 1 && parts[0].empty()) return std::string();
+    auto key = parts.back();
+    parts.pop_back();
+    static std::vector<std::string> const order{"cmd", "ctrl", "alt", "shift"};
+    static std::vector<std::string> const named{"space", "escape", "return", "tab", "delete", "up", "down", "left",
+        "right", "home", "end", "pageup", "pagedown"};
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (std::find(order.begin(), order.end(), parts[i]) == order.end()) return std::nullopt;
+        if (std::find(parts.begin() + i + 1, parts.end(), parts[i]) != parts.end()) return std::nullopt;
+    }
+    bool printable = key.size() == 1 && key[0] > 32 && key[0] < 127;
+    if (!printable && std::find(named.begin(), named.end(), key) == named.end()) return std::nullopt;
+    std::string out;
+    for (auto const& modifier : order)
+        if (std::find(parts.begin(), parts.end(), modifier) != parts.end()) out += modifier + "+";
+    return out + key;
+}
+
+/// The name Bern gives a virtual key, as shortcuts write keys.
+inline std::optional<std::string> KeyName(winrt::Windows::System::VirtualKey key) {
+    using winrt::Windows::System::VirtualKey;
+    static std::map<VirtualKey, std::string> const named{
+        {VirtualKey::Space, "space"}, {VirtualKey::Escape, "escape"}, {VirtualKey::Enter, "return"}, {VirtualKey::Tab, "tab"},
+        {VirtualKey::Back, "delete"}, {VirtualKey::Delete, "delete"}, {VirtualKey::Up, "up"}, {VirtualKey::Down, "down"},
+        {VirtualKey::Left, "left"}, {VirtualKey::Right, "right"}, {VirtualKey::Home, "home"}, {VirtualKey::End, "end"},
+        {VirtualKey::PageUp, "pageup"}, {VirtualKey::PageDown, "pagedown"},
+    };
+    if (auto found = named.find(key); found != named.end()) return found->second;
+    int code = static_cast<int>(key);
+    if (code >= 'A' && code <= 'Z') return std::string(1, static_cast<char>('a' + (code - 'A')));
+    if (code >= '0' && code <= '9') return std::string(1, static_cast<char>(code));
+    static std::map<int, char> const symbols{{VK_OEM_COMMA, ','}, {VK_OEM_PERIOD, '.'}, {VK_OEM_MINUS, '-'}, {VK_OEM_PLUS, '='},
+        {VK_OEM_1, ';'}, {VK_OEM_2, '/'}, {VK_OEM_3, '`'}, {VK_OEM_4, '['}, {VK_OEM_5, '\\'}, {VK_OEM_6, ']'}, {VK_OEM_7, '\''}};
+    if (auto found = symbols.find(code); found != symbols.end()) return std::string(1, found->second);
+    return std::nullopt;
+}
+
 /// While mounted, `keys` (`cmd` is Control on Windows) calls `invoked`,
 /// which says whether it handled them, as a keyboard accelerator of the
 /// window. Without Control or Alt the keys are text while a text field has
@@ -399,6 +455,7 @@ inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> 
     accelerator.Modifiers(modifiers);
     bool typed = (modifiers & (VirtualKeyModifiers::Control | VirtualKeyModifiers::Menu)) == VirtualKeyModifiers::None;
     accelerator.Invoked([invoked, typed, root = winrt::make_weak(ctx.win->root)](auto&&, xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args) {
+        if (shortcutRecording) return;
         if (typed)
             if (auto element = root.get(); element && element.XamlRoot()) {
                 auto focused = xaml::Input::FocusManager::GetFocusedElement(element.XamlRoot());
@@ -416,13 +473,23 @@ inline void Accelerator(Ctx const& ctx, char const* keys, std::function<bool()> 
     });
 }
 
-/// While mounted, `keys` runs the `action` (`activate` or `focus`) of the
-/// control `id` in this context, as the external entries do; a split
+/// While mounted, the keys the text `keys` names call `invoked`: the
+/// accelerator follows the text as it changes, and none stands while it is
+/// empty or no shortcut.
+inline void BoundAccelerator(Ctx const& ctx, Str keys, std::function<bool()> invoked) {
+    Reactive::Run([ctx, keys, invoked] {
+        auto normal = NormalizedShortcut(Utf8(keys(ctx)));
+        if (normal && !normal->empty()) Accelerator(ctx, normal->c_str(), invoked);
+    });
+}
+
+/// What the shortcut of the control `id` in this context does: its
+/// `action` (`activate` or `focus`), as the external entries do; a split
 /// button's flips its toggle. A disabled control's shortcut does nothing.
-inline void Shortcut(Ctx const& ctx, char const* keys, char const* id, char const* action) {
+inline std::function<bool()> ControlShortcut(Ctx const& ctx, char const* id, char const* action) {
     auto target = ctx.Target(id);
     std::string kind = action ? action : "activate";
-    Accelerator(ctx, keys, [target, kind] {
+    return [target, kind] {
         for (auto const& [token, entry] : Controls::entries) {
             if (entry.target != target) continue;
             if (entry.enabled && !Reactive::Untrack([&] { return entry.enabled(); })) return false;
@@ -434,11 +501,24 @@ inline void Shortcut(Ctx const& ctx, char const* keys, char const* id, char cons
             return true;
         }
         return false;
-    });
+    };
+}
+
+/// While mounted, `keys` runs the shortcut of the control `id`.
+inline void Shortcut(Ctx const& ctx, char const* keys, char const* id, char const* action) {
+    Accelerator(ctx, keys, ControlShortcut(ctx, id, action));
+}
+
+/// While mounted, the keys the text `keys` names run the shortcut of the
+/// control `id`.
+inline void Shortcut(Ctx const& ctx, Str keys, char const* id, char const* action) {
+    BoundAccelerator(ctx, std::move(keys), ControlShortcut(ctx, id, action));
 }
 
 struct KeyShortcutProps {
     char const* keys = nullptr;
+    /// The text the keys follow instead of `keys`.
+    Str bound;
     Get enabled;
     Act action;
 };
@@ -449,11 +529,98 @@ inline void KeyShortcut(Parent const&, Ctx const& ctx, KeyShortcutProps props) {
     auto enabled = props.enabled;
     auto action = props.action;
     if (!action) return;
-    Accelerator(ctx, props.keys, [ctx, enabled, action] {
+    std::function<bool()> invoked = [ctx, enabled, action] {
         if (enabled && !Reactive::Untrack([&] { return R::Truthy(enabled(ctx)); })) return false;
         action(ctx);
         return true;
+    };
+    if (props.bound) BoundAccelerator(ctx, props.bound, std::move(invoked));
+    else Accelerator(ctx, props.keys, std::move(invoked));
+}
+
+struct ShortcutInputProps {
+    char const* id = "";
+    Str label;
+    /// The shortcut the state holds; a choice runs `change` with it.
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
+    Str prompt;
+    Str empty;
+    Get enabled;
+    bool labelHidden = false;
+};
+
+/// `ShortcutInput`: a button showing the shortcut as Windows writes it;
+/// pressed, it takes the next key with its modifiers. Escape leaves the
+/// shortcut as it was, Backspace or Delete alone clears it, and leaving the
+/// button stops waiting. While it waits, no accelerator runs.
+inline void ShortcutInput(Parent const& p, Ctx const& ctx, ShortcutInputProps props) {
+    auto model = ModelOf(ctx, std::nullopt, nullptr, props.current, props.change);
+    if (!model.read) return;
+    auto text = Bound(ctx, props.label);
+    auto prompt = Bound(ctx, props.prompt);
+    auto empty = Bound(ctx, props.empty);
+    auto isEnabled = Enabled(ctx, props.enabled);
+    Cell<bool> recording(false);
+    controls::Button button;
+    Reactive::Run([button, model, recording, prompt, empty] {
+        if (recording.Get()) {
+            button.Content(winrt::box_value(prompt ? prompt() : bern::Text::Tr("bern.shortcut.prompt")));
+            return;
+        }
+        auto keys = R::AsText(model.read());
+        auto shown = keys.empty() ? winrt::hstring() : ShortcutText(keys.c_str());
+        button.Content(winrt::box_value(shown.empty() ? (empty ? empty() : bern::Text::Tr("bern.shortcut.none")) : shown));
     });
+    Reactive::Run([recording] { shortcutRecording = recording.Get(); });
+    Reactive::OnCleanup([recording] { if (recording.Peek()) shortcutRecording = false; });
+    if (isEnabled)
+        Reactive::Run([button, isEnabled, recording] {
+            bool on = isEnabled();
+            button.IsEnabled(on);
+            // A copy shares the cell; the captured one is const here.
+            auto waiting = recording;
+            if (!on) waiting.Set(false);
+        });
+    button.Click([recording](auto&&, auto&&) {
+        auto waiting = recording;
+        waiting.Set(!recording.Peek());
+    });
+    button.LostFocus([recording](auto&&, auto&&) {
+        auto waiting = recording;
+        waiting.Set(false);
+    });
+    button.PreviewKeyDown([recording, model](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+        if (!recording.Peek()) return;
+        args.Handled(true);
+        using winrt::Windows::System::VirtualKey;
+        auto key = args.Key();
+        auto waiting = recording;
+        if (key == VirtualKey::Escape) {
+            waiting.Set(false);
+            return;
+        }
+        auto down = [](int code) { return (GetKeyState(code) & 0x8000) != 0; };
+        std::string keys;
+        if (down(VK_CONTROL)) keys += "cmd+";
+        if (down(VK_MENU)) keys += "alt+";
+        if (down(VK_SHIFT)) keys += "shift+";
+        auto name = KeyName(key);
+        // Modifiers alone, and keys Bern has no name for, wait for another.
+        if (!name) return;
+        waiting.Set(false);
+        model.write(Value::Text(keys.empty() && *name == "delete" ? std::string() : keys + *name));
+    });
+    BindName(button, text);
+    KeepWidth(button);
+    if (p.isList) p.Add(props.labelHidden ? xaml::UIElement(Card(button)) : xaml::UIElement(LabeledCard(text, button)));
+    else if (props.labelHidden || !text) p.Add(button);
+    else p.Add(LabeledCard(text, button));
+    Controls::Register(ctx, props.id, "shortcut_input", text, isEnabled,
+        Actions{.edit = [model](std::string const& value) {
+                    if (auto keys = NormalizedShortcut(value)) model.write(Value::Text(*keys));
+                },
+            .value = [model] { return std::optional<std::string>(R::AsText(model.peek())); }});
 }
 
 // ---------------------------------------------------------------------------

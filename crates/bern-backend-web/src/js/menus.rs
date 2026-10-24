@@ -18,7 +18,7 @@ impl Generator<'_> {
             (
                 "shortcut",
                 palette
-                    .then(|| element.keyword("shortcut").map(string))
+                    .then(|| self.shortcut_keys(element, "shortcut"))
                     .flatten(),
             ),
             (
@@ -109,7 +109,7 @@ impl Generator<'_> {
                 .expr("enabled")
                 .map(|expr| format!("() => {}", self.expr(expr)));
             let (action, set_file, kinds) = self.file_actions(item);
-            if item.keyword("shortcut").is_some() {
+            if item.prop("shortcut").is_some() {
                 shortcuts.push((item, action.clone()));
             }
             out.line(format!(

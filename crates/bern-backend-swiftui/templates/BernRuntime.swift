@@ -926,6 +926,9 @@ final class BernHost {
     @ObservationIgnored let controls = BernControls()
 
     var failure: BernFailure?
+    /// Changes as windows open and close, for what follows the open ones,
+    /// such as the menu bar's items, which act on the primary window.
+    private(set) var windowRevision: UInt64 = 0
     private(set) var startupError: String?
     private(set) var engineID = ""
     private(set) var channel = ""
@@ -1164,6 +1167,7 @@ final class BernHost {
             }
             context.attached(generation: generation, id: id)
             windows[context.kindID] = context
+            windowRevision &+= 1
             context.reportFacts()
             BernSnapshot.schedule()
             for request in pendingOpens.removeValue(forKey: context.kindID) ?? [] {
@@ -1177,6 +1181,7 @@ final class BernHost {
     func detach(_ context: BernWindowContext) {
         guard let handle, windows[context.kindID] === context else { return }
         windows[context.kindID] = nil
+        windowRevision &+= 1
         BernMedia.shared.windowClosed(context.id)
         bern_window_closed(handle, context.kind, context.generation)
     }

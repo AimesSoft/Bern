@@ -191,10 +191,26 @@ impl Generator<'_> {
     /// enabled.
     pub(super) fn key_shortcut(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::KeyShortcut(p, c, b::KeyShortcutProps {{ keys: {}, enabled: {} }}, {});",
+            "b::KeyShortcut(p, c, b::KeyShortcutProps {{ keys: {}, bound: {}, enabled: {} }}, {});",
             string(element.keyword("key").unwrap_or_default()),
+            some(self.bound_keys(element, "key")),
             self.enabled(element),
             self.action(element),
+        ));
+    }
+
+    /// `ShortcutInput`: a button that takes the next key pressed as the
+    /// shortcut, which the action keeps.
+    pub(super) fn shortcut_input(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::ShortcutInput(p, c, b::ShortcutInputProps {{ id: {}, label: {}, model: {}, prompt: {}, empty: {}, enabled: {}, label_hidden: {} }});",
+            self.id(element),
+            some(self.text_prop(element, "label")),
+            some(self.model(element, "current", false)),
+            some(self.text_prop(element, "prompt")),
+            some(self.text_prop(element, "empty")),
+            self.enabled(element),
+            element.keyword("label_hidden") == Some("true"),
         ));
     }
 

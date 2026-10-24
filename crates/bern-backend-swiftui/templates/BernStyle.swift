@@ -26,6 +26,130 @@ typealias BernKeyboardShortcut = Never
 typealias BernKeyboardShortcut = KeyboardShortcut
 #endif
 
+/// Shortcuts in Bern's form, `cmd+shift+k`: those that follow state, read
+/// as the application runs, how Apple's systems write them, and what a
+/// key pressed for a `ShortcutInput` is. A text that is empty or no
+/// shortcut is none.
+@MainActor
+enum BernShortcuts {
+    private static let modifierOrder = ["cmd", "ctrl", "alt", "shift"]
+    private static let named = [
+        "space", "escape", "return", "tab", "delete", "up", "down", "left", "right", "home", "end",
+        "pageup", "pagedown",
+    ]
+
+    /// The text as Bern writes it: modifiers in order, the key in lower
+    /// case; "" for an empty text, nil for one that is no shortcut.
+    static func normalized(_ text: String) -> String? {
+        let parts = text.split(separator: "+", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        if parts == [""] { return "" }
+        guard let key = parts.last else { return nil }
+        let modifiers = parts.dropLast()
+        guard modifiers.allSatisfy(modifierOrder.contains), Set(modifiers).count == modifiers.count else { return nil }
+        let printable = key.count == 1 && key.unicodeScalars.allSatisfy { $0.isASCII && $0.value > 32 && $0.value < 127 }
+        guard printable || named.contains(key) else { return nil }
+        return (modifierOrder.filter(modifiers.contains) + [key]).joined(separator: "+")
+    }
+
+    /// The modifiers and the key of a shortcut.
+    private static func parts(_ text: String) -> (key: String, modifiers: [String])? {
+        guard let normal = normalized(text), !normal.isEmpty else { return nil }
+        var parts = normal.split(separator: "+").map(String.init)
+        let key = parts.removeLast()
+        return (key, parts)
+    }
+
+    #if !os(tvOS)
+    /// The keyboard shortcut a text stands for.
+    static func keyboard(_ text: String) -> KeyboardShortcut? {
+        guard let (key, modifiers) = parts(text) else { return nil }
+        let equivalent: KeyEquivalent
+        switch key {
+        case "space": equivalent = .space
+        case "escape": equivalent = .escape
+        case "return": equivalent = .return
+        case "tab": equivalent = .tab
+        case "delete": equivalent = .delete
+        case "up": equivalent = .upArrow
+        case "down": equivalent = .downArrow
+        case "left": equivalent = .leftArrow
+        case "right": equivalent = .rightArrow
+        case "home": equivalent = .home
+        case "end": equivalent = .end
+        case "pageup": equivalent = .pageUp
+        case "pagedown": equivalent = .pageDown
+        default: equivalent = KeyEquivalent(Character(key))
+        }
+        var flags: EventModifiers = []
+        if modifiers.contains("cmd") { flags.insert(.command) }
+        if modifiers.contains("ctrl") { flags.insert(.control) }
+        if modifiers.contains("alt") { flags.insert(.option) }
+        if modifiers.contains("shift") { flags.insert(.shift) }
+        return KeyboardShortcut(equivalent, modifiers: flags)
+    }
+
+    /// How a keyboard shortcut reads, as `display` writes its text.
+    static func display(_ shortcut: KeyboardShortcut) -> String {
+        var parts: [String] = []
+        if shortcut.modifiers.contains(.command) { parts.append("cmd") }
+        if shortcut.modifiers.contains(.control) { parts.append("ctrl") }
+        if shortcut.modifiers.contains(.option) { parts.append("alt") }
+        if shortcut.modifiers.contains(.shift) { parts.append("shift") }
+        let keys: [(KeyEquivalent, String)] = [
+            (.space, "space"), (.escape, "escape"), (.return, "return"), (.tab, "tab"), (.delete, "delete"),
+            (.upArrow, "up"), (.downArrow, "down"), (.leftArrow, "left"), (.rightArrow, "right"),
+            (.home, "home"), (.end, "end"), (.pageUp, "pageup"), (.pageDown, "pagedown"),
+        ]
+        let key = keys.first { $0.0 == shortcut.key }?.1 ?? String(shortcut.key.character).lowercased()
+        return display((parts + [key]).joined(separator: "+"))
+    }
+    #endif
+
+    #if os(tvOS)
+    /// The Siri Remote's button for a text: Back for `escape`, Play/Pause
+    /// for `space`, the clickpad's edges for the arrows; none for others.
+    static func remote(_ text: String) -> BernRemoteKey? {
+        switch normalized(text) {
+        case "escape": return .back
+        case "space": return .playPause
+        case "left": return .left
+        case "right": return .right
+        case "up": return .up
+        case "down": return .down
+        default: return nil
+        }
+    }
+    #endif
+
+    /// How Apple's systems write a shortcut: ⌃⌥⇧⌘ and the key, letters in
+    /// capitals and named keys as their symbols; "" for none.
+    static func display(_ text: String) -> String {
+        guard let (key, modifiers) = parts(text) else { return "" }
+        var out = ""
+        if modifiers.contains("ctrl") { out += "⌃" }
+        if modifiers.contains("alt") { out += "⌥" }
+        if modifiers.contains("shift") { out += "⇧" }
+        if modifiers.contains("cmd") { out += "⌘" }
+        let symbols = [
+            "escape": "⎋", "return": "↩", "tab": "⇥", "delete": "⌫", "up": "↑", "down": "↓",
+            "left": "←", "right": "→", "home": "↖", "end": "↘", "pageup": "⇞", "pagedown": "⇟",
+        ]
+        if key == "space" { return out + BernText.string("bern.shortcut.space") }
+        return out + (symbols[key] ?? key.uppercased())
+    }
+
+    /// The modifiers held, in Bern's order, for a key pressed.
+    static func modifiers(command: Bool, control: Bool, option: Bool, shift: Bool) -> [String] {
+        var parts: [String] = []
+        if command { parts.append("cmd") }
+        if control { parts.append("ctrl") }
+        if option { parts.append("alt") }
+        if shift { parts.append("shift") }
+        return parts
+    }
+}
+
 extension View {
     /// Follows the pointer over the view. A television has no pointer:
     /// there the focus is what stands over a control
@@ -3392,7 +3516,7 @@ struct BernSearchPalette<Results: View>: View {
                 Text(verbatim: prompt).font(.system(size: 13)).lineLimit(1)
                 Spacer(minLength: 4)
                 #if !os(tvOS)
-                if let shortcut { Text(shortcut.key == "k" ? "⌘K" : "").font(.system(size: 11.5, weight: .medium)) }
+                if let shortcut { Text(verbatim: BernShortcuts.display(shortcut)).font(.system(size: 11.5, weight: .medium)) }
                 #endif
             }
             .foregroundStyle(.secondary)
@@ -4346,21 +4470,23 @@ private struct BernTelevisionField: ViewModifier {
 /// the Siri Remote's button that stands for the key.
 struct BernKeyShortcut: View {
     #if os(tvOS)
-    let remote: BernRemoteKey
+    let remote: BernRemoteKey?
     #else
-    let shortcut: KeyboardShortcut
+    let shortcut: KeyboardShortcut?
     #endif
     let enabled: Bool
     let action: () -> Void
 
+    /// A shortcut that follows state may be none for a while: the key
+    /// does nothing then.
     #if os(tvOS)
-    init(remote: BernRemoteKey, enabled: Bool, action: @escaping () -> Void) {
+    init(remote: BernRemoteKey?, enabled: Bool, action: @escaping () -> Void) {
         self.remote = remote
         self.enabled = enabled
         self.action = action
     }
     #else
-    init(shortcut: KeyboardShortcut, enabled: Bool, action: @escaping () -> Void) {
+    init(shortcut: KeyboardShortcut?, enabled: Bool, action: @escaping () -> Void) {
         self.shortcut = shortcut
         self.enabled = enabled
         self.action = action
@@ -4374,12 +4500,156 @@ struct BernKeyShortcut: View {
         #else
         Button("", action: action)
             .keyboardShortcut(shortcut)
-            .disabled(!enabled)
+            .disabled(!enabled || shortcut == nil)
             .opacity(0)
             .frame(width: 0, height: 0)
             .accessibilityHidden(true)
         #endif
     }
+}
+
+// MARK: - Shortcut inputs
+
+/// `ShortcutInput`: a button showing the shortcut as the platform writes
+/// it; pressed, it takes the next key with its modifiers. Escape leaves the
+/// shortcut as it was, Delete alone clears it, and a press elsewhere stops
+/// waiting. A keyboard is needed: on a television it only shows the
+/// shortcut, and on iOS it waits for a hardware keyboard's keys.
+struct BernShortcutInput: View {
+    let current: String
+    let label: String
+    let labelHidden: Bool
+    let prompt: String
+    let empty: String
+    let commit: (String) -> Void
+    @State private var recording = false
+    #if os(macOS)
+    @State private var monitor: Any?
+    #elseif os(iOS)
+    @FocusState private var focused: Bool
+    #endif
+
+    private var shown: String {
+        if recording { return prompt }
+        let text = BernShortcuts.display(current)
+        return text.isEmpty ? empty : text
+    }
+
+    var body: some View {
+        if labelHidden {
+            field.accessibilityLabel(SwiftUI.Text(verbatim: label))
+        } else {
+            SwiftUI.LabeledContent {
+                field
+            } label: {
+                SwiftUI.Text(verbatim: label)
+            }
+        }
+    }
+
+    @ViewBuilder private var field: some View {
+        #if os(tvOS)
+        SwiftUI.Text(verbatim: shown).foregroundStyle(.secondary)
+        #else
+        SwiftUI.Button {
+            recording.toggle()
+        } label: {
+            SwiftUI.Text(verbatim: shown)
+                .monospacedDigit()
+                .frame(minWidth: 72)
+        }
+        .bernButtonLook(.secondary)
+        #if os(macOS)
+        .onChange(of: recording) { _, now in now ? listen() : stop() }
+        .onDisappear { recording = false; stop() }
+        #else
+        .focusable(recording)
+        .focused($focused)
+        .onChange(of: recording) { _, now in focused = now }
+        .onChange(of: focused) { _, now in if !now { recording = false } }
+        .onKeyPress(phases: .down) { press in
+            guard recording else { return .ignored }
+            take(press)
+            return .handled
+        }
+        #endif
+        #endif
+    }
+
+    private func finish(_ keys: String?) {
+        recording = false
+        if let keys { commit(keys) }
+    }
+
+    #if os(macOS)
+    /// AppKit's key codes of the keys Bern names.
+    private static let codes: [UInt16: String] = [
+        49: "space", 36: "return", 76: "return", 48: "tab", 51: "delete", 117: "delete",
+        123: "left", 124: "right", 125: "down", 126: "up", 115: "home", 119: "end",
+        116: "pageup", 121: "pagedown",
+    ]
+
+    /// Take key presses before windows and menus do, while waiting: the
+    /// shortcut being chosen must not run what it is bound to now. A
+    /// click anywhere stops waiting.
+    private func listen() {
+        stop()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { event in
+            guard recording else { return event }
+            if event.type != .keyDown {
+                recording = false
+                return event
+            }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let held = BernShortcuts.modifiers(
+                command: flags.contains(.command), control: flags.contains(.control),
+                option: flags.contains(.option), shift: flags.contains(.shift))
+            if event.keyCode == 53 {
+                finish(nil)
+                return nil
+            }
+            let key = Self.codes[event.keyCode]
+                ?? event.characters(byApplyingModifiers: [])?.lowercased()
+            if key == "delete" && held.isEmpty {
+                finish("")
+                return nil
+            }
+            // Function keys and other keys Bern has no name for wait for another.
+            if let key, let keys = BernShortcuts.normalized((held + [key]).joined(separator: "+")), !keys.isEmpty {
+                finish(keys)
+            }
+            return nil
+        }
+    }
+
+    private func stop() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+    #elseif os(iOS)
+    private func take(_ press: KeyPress) {
+        let named: [(KeyEquivalent, String)] = [
+            (.space, "space"), (.return, "return"), (.tab, "tab"), (.delete, "delete"),
+            (.upArrow, "up"), (.downArrow, "down"), (.leftArrow, "left"), (.rightArrow, "right"),
+            (.home, "home"), (.end, "end"), (.pageUp, "pageup"), (.pageDown, "pagedown"),
+        ]
+        if press.key == .escape {
+            finish(nil)
+            return
+        }
+        let held = BernShortcuts.modifiers(
+            command: press.modifiers.contains(.command), control: press.modifiers.contains(.control),
+            option: press.modifiers.contains(.option), shift: press.modifiers.contains(.shift))
+        let key = named.first { $0.0 == press.key }?.1 ?? String(press.key.character).lowercased()
+        if key == "delete" && held.isEmpty {
+            finish("")
+            return
+        }
+        if let keys = BernShortcuts.normalized((held + [key]).joined(separator: "+")), !keys.isEmpty {
+            finish(keys)
+        }
+    }
+    #endif
 }
 
 // MARK: - Forms on their page

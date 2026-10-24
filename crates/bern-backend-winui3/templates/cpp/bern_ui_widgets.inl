@@ -2658,6 +2658,8 @@ struct MenuItemDef {
     char const* files = nullptr;
     /// Shown beside the item; the shortcut itself is registered on its own.
     char const* shortcut = nullptr;
+    /// The text the shortcut follows instead of `shortcut`.
+    Str boundShortcut;
 };
 
 /// A shortcut as Windows writes it: `cmd+shift+k` is Ctrl+Shift+K.
@@ -2673,12 +2675,21 @@ inline winrt::hstring ShortcutText(char const* keys) {
             part += c;
         }
     }
+    // Windows names some keys in words of its own, and the space bar in the
+    // interface's language.
+    static std::map<std::string, std::string> const words{
+        {"escape", "Esc"}, {"return", "Enter"}, {"tab", "Tab"}, {"delete", "Backspace"}, {"up", "↑"}, {"down", "↓"},
+        {"left", "←"}, {"right", "→"}, {"home", "Home"}, {"end", "End"}, {"pageup", "PgUp"}, {"pagedown", "PgDn"},
+    };
     for (size_t i = 0; i < parts.size(); ++i) {
         auto const& word = parts[i];
-        std::string name = word == "cmd" || word == "ctrl" ? "Ctrl" : word == "alt" ? "Alt" : word == "shift" ? "Shift"
+        bool last = i + 1 == parts.size();
+        std::string name = !last && (word == "cmd" || word == "ctrl") ? "Ctrl" : !last && word == "alt" ? "Alt" : !last && word == "shift" ? "Shift"
+            : word == "space" ? Utf8(bern::Text::Tr("bern.shortcut.space"))
+            : words.contains(word) ? words.at(word)
             : word.size() == 1 ? std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(word[0]))))
             : std::string(1, static_cast<char>(std::toupper(static_cast<unsigned char>(word[0])))) + word.substr(1);
-        if (word == "ctrl" && std::find(parts.begin(), parts.end(), "cmd") != parts.end()) continue;
+        if (word == "ctrl" && !last && std::find(parts.begin(), parts.end(), "cmd") != parts.end()) continue;
         text += (text.empty() ? "" : "+") + name;
     }
     return Wide(text);
@@ -2744,6 +2755,10 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
         auto run = RunOf(ctx, item->pick, item->files, item->action);
         if (run.activate) entry.Click([activate = run.activate](auto&&, auto&&) { activate(); });
         if (item->shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item->shortcut));
+        if (item->boundShortcut)
+            Reactive::Run([entry, ctx, keys = item->boundShortcut] {
+                entry.KeyboardAcceleratorTextOverride(ShortcutText(Utf8(keys(ctx)).c_str()));
+            });
         flyout.Items().Append(entry);
         Controls::Register(ctx, item->id, "button", itemLabel, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
     }

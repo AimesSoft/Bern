@@ -168,9 +168,20 @@ pub fn shortcut(ctx: &Ctx, keys: &'static str, run: Act) {
         .add_shortcut(keys, Rc::new(move || run(&at)), None);
 }
 
+/// Run `run` on the keys the text `keys` names at each key press, while
+/// the current scope lasts: a shortcut that follows state.
+pub fn bound_shortcut(ctx: &Ctx, keys: Str, run: Act) {
+    let at = ctx.clone();
+    let text = bound_text(ctx, &keys);
+    ctx.win()
+        .add_bound_shortcut(text, Rc::new(move || run(&at)), None);
+}
+
 /// Props of `Shortcut`.
 pub struct KeyShortcutProps {
     pub keys: &'static str,
+    /// The text the keys follow instead of `keys`, read at each press.
+    pub bound: Option<Str>,
     pub enabled: Option<Get>,
 }
 
@@ -185,8 +196,128 @@ pub fn KeyShortcut(_p: &Parent, ctx: &Ctx, props: KeyShortcutProps, action: Opti
         Rc::new(move || crate::value::truthy(&untrack(|| enabled(&at)))) as Rc<dyn Fn() -> bool>
     });
     let at = ctx.clone();
-    ctx.win()
-        .add_shortcut(props.keys, Rc::new(move || action(&at)), active);
+    let run = Rc::new(move || action(&at));
+    match &props.bound {
+        Some(keys) => ctx.win().add_bound_shortcut(bound_text(ctx, keys), run, active),
+        None => ctx.win().add_shortcut(props.keys, run, active),
+    }
+}
+
+/// Props of `ShortcutInput`.
+#[derive(Default)]
+pub struct ShortcutInputProps {
+    pub id: &'static str,
+    pub label: Option<Str>,
+    pub model: Option<crate::widgets::Model>,
+    pub prompt: Option<Str>,
+    pub empty: Option<Str>,
+    pub enabled: Option<Get>,
+    /// The label names the button for assistive technology only.
+    pub label_hidden: bool,
+}
+
+/// `ShortcutInput`: a button showing the shortcut as Linux writes it;
+/// pressed, it takes the next key with its modifiers. Escape leaves the
+/// shortcut as it was, Delete alone clears it, and pressing the button
+/// again stops waiting. While it waits, keys reach no other shortcut.
+#[allow(non_snake_case)]
+pub fn ShortcutInput(p: &Parent, ctx: &Ctx, props: ShortcutInputProps) {
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
+    let label = props.label.as_ref().map(|label| bound_text(ctx, label));
+    let prompt = props.prompt.as_ref().map(|prompt| bound_text(ctx, prompt));
+    let empty = props.empty.as_ref().map(|empty| bound_text(ctx, empty));
+    let enabled = bound_enabled(ctx, &props.enabled);
+    let recording = crate::reactive::Cell::new(false);
+    let button = gtk::Button::new();
+    let shown = button.clone();
+    let (waiting, current) = (recording.clone(), bound.clone());
+    effect(move || {
+        let text = if waiting.get() {
+            prompt
+                .as_ref()
+                .map(|prompt| prompt())
+                .unwrap_or_else(|| crate::text::tr("bern.shortcut.prompt"))
+        } else {
+            let keys = crate::value::as_text(&current.get());
+            let text = crate::windows::shortcut_text(&keys);
+            if text.is_empty() {
+                empty
+                    .as_ref()
+                    .map(|empty| empty())
+                    .unwrap_or_else(|| crate::text::tr("bern.shortcut.none"))
+            } else {
+                text
+            }
+        };
+        shown.set_label(&text);
+    });
+    if let Some(enabled) = enabled.clone() {
+        let sensitive = button.clone();
+        let stop = recording.clone();
+        effect(move || {
+            let on = enabled();
+            sensitive.set_sensitive(on);
+            if !on {
+                stop.set(false);
+            }
+        });
+    }
+    // The window gives the recorder the next key; stopping takes it back.
+    let win = Rc::downgrade(ctx.win());
+    let (watched, taking) = (recording.clone(), bound.clone());
+    effect(move || {
+        let Some(win) = win.upgrade() else { return };
+        if watched.get() {
+            let (stop, keep) = (watched.clone(), taking.clone());
+            *win.recorder.borrow_mut() = Some(Rc::new(move |keys: Option<String>| {
+                stop.set(false);
+                if let Some(keys) = keys {
+                    keep.set(Value::Text(keys));
+                }
+            }));
+        } else {
+            win.recorder.borrow_mut().take();
+        }
+    });
+    let gone = Rc::downgrade(ctx.win());
+    let ended = recording.clone();
+    on_cleanup(move || {
+        if ended.peek()
+            && let Some(win) = gone.upgrade()
+        {
+            win.recorder.borrow_mut().take();
+        }
+    });
+    let toggle = recording.clone();
+    button.connect_clicked(move |_| toggle.set(!toggle.peek()));
+    if props.label_hidden
+        && let Some(label) = label.clone()
+    {
+        let named = button.clone();
+        effect(move || named.update_property(&[gtk::accessible::Property::Label(&label())]));
+    }
+    let shown_label = label.clone().filter(|_| !props.label_hidden);
+    p.add(&crate::widgets::beside(shown_label, &button));
+    let (edit, value) = (bound.clone(), bound);
+    controls::register(
+        ctx,
+        props.id,
+        "shortcut_input",
+        label,
+        enabled,
+        Actions {
+            edit: Some(Rc::new(move |text: String| {
+                if let Ok(keys) = crate::protocol::shortcut::parse_shortcut(&text) {
+                    edit.set(Value::Text(keys));
+                } else if text.trim().is_empty() {
+                    edit.set(Value::Text(String::new()));
+                }
+            })),
+            value: Some(Rc::new(move || Some(crate::value::as_text(&value.peek())))),
+            ..Actions::default()
+        },
+    );
 }
 
 /// Take the keyboard focus to `widget`, while it lives.

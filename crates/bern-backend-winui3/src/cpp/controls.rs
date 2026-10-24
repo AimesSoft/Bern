@@ -9,14 +9,44 @@ impl Generator<'_> {
     /// `B::Shortcut(…)` for an element with `shortcut:`, running the
     /// control's `activate` (or `focus` for search fields) while mounted.
     fn shortcut(&self, out: &mut Out, element: &Element, action: &str) {
-        if let Some(keys) = element.keyword("shortcut") {
+        if let Some(keys) = self
+            .shortcut_keys(element, "shortcut")
+            .or_else(|| element.keyword("shortcut").map(string))
+        {
             out.line(format!(
-                "B::Shortcut(c, {}, {}, {});",
-                string(keys),
+                "B::Shortcut(c, {keys}, {}, {});",
                 self.id(element),
                 string(action)
             ));
         }
+    }
+
+    /// The text a shortcut prop `name` follows, as a getter, when it is not
+    /// a literal.
+    pub(super) fn shortcut_keys(&self, element: &Element, name: &str) -> Option<String> {
+        element
+            .expr(name)
+            .map(|expr| format!("[](Ctx const& c) {{ return {}; }}", self.display(expr)))
+    }
+
+    /// `ShortcutInput`: a button that takes the next key pressed as the
+    /// shortcut, which the action keeps.
+    pub(super) fn shortcut_input(&self, out: &mut Out, element: &Element) {
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+        ];
+        fields.extend(self.model(element, "current"));
+        fields.extend([
+            ("prompt", self.text_prop(element, "prompt")),
+            ("empty", self.text_prop(element, "empty")),
+            ("enabled", self.enabled(element)),
+            (
+                "labelHidden",
+                (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+            ),
+        ]);
+        out.line(format!("B::ShortcutInput(p, c, {});", designated(&fields)));
     }
 
     /// `Button` and `IconButton`; a `Button` with children shows them
@@ -377,7 +407,7 @@ impl Generator<'_> {
                 out.line("std::nullopt,");
                 continue;
             }
-            if item.keyword("shortcut").is_some() {
+            if item.prop("shortcut").is_some() {
                 shortcuts.push(item);
             }
             out.line(format!(
@@ -392,6 +422,7 @@ impl Generator<'_> {
                     ("pick", self.field(item, "pick")),
                     ("files", Self::files(item)),
                     ("shortcut", Self::keyword(item, "shortcut")),
+                    ("boundShortcut", self.shortcut_keys(item, "shortcut")),
                 ])
             ));
         }

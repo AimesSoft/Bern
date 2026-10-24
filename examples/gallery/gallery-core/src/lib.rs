@@ -47,6 +47,7 @@ impl Default for GalleryEngine {
                 accent: Accent::Crimson,
                 appearance: Appearance::System,
                 caption: true,
+                details_key: "cmd+alt+i".into(),
             },
         }
     }
@@ -115,6 +116,16 @@ impl gallery::Commands for GalleryEngine {
 
     fn set_caption(&mut self, shown: bool) -> Result<(), CommandError> {
         self.state.caption = shown;
+        Ok(())
+    }
+
+    fn set_details_key(&mut self, keys: String) -> Result<(), CommandError> {
+        self.state.details_key = if keys.trim().is_empty() {
+            String::new()
+        } else {
+            bern::shortcut::parse_shortcut(&keys)
+                .map_err(|message| CommandError::new("invalid_shortcut", message))?
+        };
         Ok(())
     }
 

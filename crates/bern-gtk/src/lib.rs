@@ -51,8 +51,8 @@ pub use features::{
     ContentButton, ContentButtonProps, Drop, DropProps, GestureProps, Inspector, InspectorProps,
     KeyShortcut, KeyShortcutProps, Pick, Pinch, Place, PlaceProps, PopoverButton,
     PopoverButtonProps, Rail, RailProps, RuntimeImage, RuntimeImageProps, ScrollProps, ScrollView,
-    SplitButton, SplitButtonProps, Swipe, Toast, ToastProps, activate_target, default_focus,
-    focus_target, shortcut,
+    ShortcutInput, ShortcutInputProps, SplitButton, SplitButtonProps, Swipe, Toast, ToastProps,
+    activate_target, bound_shortcut, default_focus, focus_target, shortcut,
 };
 pub use glib;
 pub use host::{dispatch, run};

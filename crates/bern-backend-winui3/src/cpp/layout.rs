@@ -193,6 +193,7 @@ impl Generator<'_> {
             "B::KeyShortcut(p, c, {});",
             designated(&[
                 ("keys", Self::keyword(element, "key")),
+                ("bound", self.shortcut_keys(element, "key")),
                 ("enabled", self.enabled(element)),
                 ("action", self.action(element)),
             ])

@@ -249,6 +249,7 @@ impl Generator<'_> {
             "Modal" => self.modal(out, element),
             "Timer" => self.timer(out, element),
             "Shortcut" => self.key_shortcut(out, element),
+            "ShortcutInput" => self.shortcut_input(out, element),
             "ControlGroup" => self.control_group(out, element),
             "Svg" => self.svg(out, element),
             "Image" => self.image(out, element),
@@ -299,6 +300,8 @@ impl Generator<'_> {
             "Menu" => self.menu(out, element),
             "Detail" | "Destination" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "Shape" | "Series"
+            // GNOME applications keep no menu bar.
+            | "MenuBar" | "CommandMenu" | "CommandItem"
             | "Pattern" | "TabAccessory" | "PickerOption" => {
                 // Realized by their parents.
             }

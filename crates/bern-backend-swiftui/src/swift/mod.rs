@@ -5,6 +5,7 @@
 //! a version-gated API: appearance comes from the SDK and the running macOS.
 
 mod app;
+mod commands;
 mod content;
 mod controls;
 mod drawing;
@@ -411,6 +412,9 @@ impl<'a> Generator<'a> {
             "Flow" => self.flow(out, element, ctx),
             "Timer" => self.timer(out, element),
             "Shortcut" => self.key_shortcut(out, element),
+            "ShortcutInput" => self.shortcut_input(out, element, ctx),
+            "CommandItem" => self.command_item(out, element, ctx),
+            "CommandMenu" => self.submenu(out, element, ctx),
             "Stack" => self.stack(out, element, ctx),
             "Svg" => self.svg(out, element),
             "Image" => self.image(out, element),
@@ -448,7 +452,7 @@ impl<'a> Generator<'a> {
             "Menu" => self.menu(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
-            | "WindowSet" | "Window" | "Layout" | "MenuItem" => {
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "MenuBar" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),

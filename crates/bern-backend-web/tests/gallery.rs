@@ -75,6 +75,9 @@ fn gallery_generates_television_layouts_shortcuts_and_first_focus() {
         ".slice(0, -1).join(\"\"))",
         // The about window's first tab shows only its symbol.
         "icon: \"info.circle\", iconOnly: true, build: (p, ctx) => {",
+        // The details' keys follow state, and the user chooses them.
+        "F.shortcut(() => E.details_key.get(), ",
+        "F.ShortcutInput(p, ctx, { id: \"details_key\"",
     ] {
         assert!(
             script.contains(expected),

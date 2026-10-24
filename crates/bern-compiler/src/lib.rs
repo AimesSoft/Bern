@@ -665,6 +665,32 @@ fn window_catalog(
                 .at(root.source.clone()),
         );
     }
+    let bars: Vec<&ir::Element> = root
+        .children
+        .iter()
+        .filter_map(|child| match child {
+            ir::Node::Element(bar) if bar.kind == "MenuBar" => Some(bar),
+            _ => None,
+        })
+        .collect();
+    if let [_, second, ..] = bars.as_slice() {
+        diagnostics.push(
+            Diagnostic::error("a `WindowSet` has one `MenuBar`; put every menu in it")
+                .at(second.source.clone()),
+        );
+    }
+    let menu_bar = bars.first().map(|bar| (*bar).clone());
+    // The menu bar's items read and write the primary window's drafts,
+    // so that window owns them.
+    if let Some(bar) = &menu_bar
+        && let Some(window) = windows.iter_mut().find(|window| window.id == primary)
+    {
+        for session in read_sessions(&ir::Node::Element(bar.clone())) {
+            if !window.sessions.contains(&session) {
+                window.sessions.push(session);
+            }
+        }
+    }
     Some(ir::WindowCatalog {
         handle,
         primary,
@@ -672,6 +698,7 @@ fn window_catalog(
         accent: root.expr("accent").cloned(),
         palette: root.expr("palette").cloned(),
         appearance: root.expr("appearance").cloned(),
+        menu_bar,
     })
 }
 

@@ -167,6 +167,9 @@ pub(crate) struct Win {
     views: RefCell<Vec<glib::WeakRef<adw::ToolbarView>>>,
     shortcuts: RefCell<Vec<Shortcut>>,
     next_shortcut: StdCell<u64>,
+    /// The `ShortcutInput` waiting for a key: it takes every key meanwhile,
+    /// and no shortcut runs.
+    pub(crate) recorder: RefCell<Option<Rc<dyn Fn(Option<String>)>>>,
 }
 
 /// Where the mouse is, for `idle_area`s: not known after a touch or a pen,
@@ -197,7 +200,100 @@ fn from_mouse(controller: &impl IsA<gtk::EventController>) -> bool {
 
 /// A mounted shortcut: its token, keys and action, and whether it takes
 /// its keys now (always, without one).
-type Shortcut = (u64, Keys, Rc<dyn Fn()>, Option<Rc<dyn Fn() -> bool>>);
+type Shortcut = (u64, KeySource, Rc<dyn Fn()>, Option<Rc<dyn Fn() -> bool>>);
+
+/// The keys of a mounted shortcut: written out, or the text a shortcut
+/// follows, read at each key press. A text that is empty or no shortcut
+/// takes no keys.
+#[derive(Clone)]
+enum KeySource {
+    Fixed(Keys),
+    Bound(Rc<dyn Fn() -> String>),
+}
+
+impl KeySource {
+    fn keys(&self) -> Option<Keys> {
+        match self {
+            KeySource::Fixed(keys) => Some(keys.clone()),
+            KeySource::Bound(text) => crate::protocol::shortcut::parse_shortcut(&untrack(|| text()))
+                .ok()
+                .map(|text| parse_keys(&text)),
+        }
+    }
+}
+
+/// What a key pressed for a `ShortcutInput` gives: `Some(None)` for
+/// Escape, which leaves the shortcut, `Some(Some(""))` for Delete alone,
+/// which clears it, the keys with their modifiers as Bern writes them, or
+/// `None` for a modifier alone and keys Bern has no name for, which it
+/// waits past.
+fn recorded(
+    typed: gtk::gdk::Key,
+    unshifted: Option<gtk::gdk::Key>,
+    state: gtk::gdk::ModifierType,
+) -> Option<Option<String>> {
+    use gtk::gdk::{Key, ModifierType};
+    if typed == Key::Escape {
+        return Some(None);
+    }
+    let shift = state.contains(ModifierType::SHIFT_MASK);
+    let key = key_name(if shift { unshifted.unwrap_or(typed) } else { typed })?;
+    let mut parts = Vec::new();
+    if state.contains(ModifierType::CONTROL_MASK) {
+        parts.push("cmd");
+    }
+    if state.contains(ModifierType::ALT_MASK) {
+        parts.push("alt");
+    }
+    if shift {
+        parts.push("shift");
+    }
+    if key == "delete" && parts.is_empty() {
+        return Some(Some(String::new()));
+    }
+    parts.push(&key);
+    crate::protocol::shortcut::parse_shortcut(&parts.join("+"))
+        .ok()
+        .map(Some)
+}
+
+/// How Linux writes a shortcut: `Ctrl+Shift+K`, `cmd` and `ctrl` both
+/// Ctrl; "" for none.
+pub(crate) fn shortcut_text(text: &str) -> String {
+    let Ok(normal) = crate::protocol::shortcut::parse_shortcut(text) else {
+        return String::new();
+    };
+    let parts: Vec<&str> = normal.split('+').collect();
+    let key = parts.last().copied().unwrap_or_default();
+    let shown = match key {
+        "space" => tr("bern.shortcut.space"),
+        "escape" => "Esc".into(),
+        "return" => "Enter".into(),
+        "tab" => "Tab".into(),
+        "delete" => "Backspace".into(),
+        "up" => "↑".into(),
+        "down" => "↓".into(),
+        "left" => "←".into(),
+        "right" => "→".into(),
+        "home" => "Home".into(),
+        "end" => "End".into(),
+        "pageup" => "PgUp".into(),
+        "pagedown" => "PgDn".into(),
+        other => other.to_uppercase(),
+    };
+    let mut words: Vec<String> = Vec::new();
+    if parts.contains(&"cmd") || parts.contains(&"ctrl") {
+        words.push("Ctrl".into());
+    }
+    if parts.contains(&"alt") {
+        words.push("Alt".into());
+    }
+    if parts.contains(&"shift") {
+        words.push("Shift".into());
+    }
+    words.push(shown);
+    words.join("+")
+}
 
 /// A keyboard shortcut: the modifiers and the key, lowercase.
 #[derive(Clone, Debug, PartialEq)]
@@ -400,11 +496,29 @@ impl Win {
         run: Rc<dyn Fn()>,
         active: Option<Rc<dyn Fn() -> bool>>,
     ) {
+        self.mount_shortcut(KeySource::Fixed(parse_keys(keys)), run, active);
+    }
+
+    /// Run `run` on the keys `text` names at each key press, while the
+    /// current scope lasts.
+    pub(crate) fn add_bound_shortcut(
+        self: &Rc<Self>,
+        text: Rc<dyn Fn() -> String>,
+        run: Rc<dyn Fn()>,
+        active: Option<Rc<dyn Fn() -> bool>>,
+    ) {
+        self.mount_shortcut(KeySource::Bound(text), run, active);
+    }
+
+    fn mount_shortcut(
+        self: &Rc<Self>,
+        keys: KeySource,
+        run: Rc<dyn Fn()>,
+        active: Option<Rc<dyn Fn() -> bool>>,
+    ) {
         let token = self.next_shortcut.get();
         self.next_shortcut.set(token + 1);
-        self.shortcuts
-            .borrow_mut()
-            .push((token, parse_keys(keys), run, active));
+        self.shortcuts.borrow_mut().push((token, keys, run, active));
         let win = Rc::downgrade(self);
         crate::reactive::on_cleanup(move || {
             if let Some(win) = win.upgrade() {
@@ -423,10 +537,11 @@ impl Win {
             .borrow()
             .iter()
             .rev()
-            .find(|(_, keys, _, active)| {
-                pressed.contains(keys) && active.as_ref().is_none_or(|active| active())
-            })
-            .map(|(_, keys, run, _)| (keys.clone(), Rc::clone(run)))?;
+            .find_map(|(_, keys, run, active)| {
+                let keys = keys.keys()?;
+                (pressed.contains(&keys) && active.as_ref().is_none_or(|active| active()))
+                    .then(|| (keys, Rc::clone(run)))
+            })?;
         // A key without a modifier does not fire while text is being edited.
         let plain = !found
             .0
@@ -924,6 +1039,7 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
         views: RefCell::new(Vec::new()),
         shortcuts: RefCell::new(Vec::new()),
         next_shortcut: StdCell::new(1),
+        recorder: RefCell::new(None),
     });
     MANAGER.with(|manager| manager.windows.borrow_mut().push(Rc::clone(&win)));
 
@@ -1022,7 +1138,21 @@ pub(crate) fn open(kind_id: &str) -> Result<String, Failure> {
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let shortcuts = Rc::downgrade(&win);
     keys.connect_key_pressed(move |keys, keyval, keycode, state| {
-        let pressed = pressed_keys(keyval, unshifted_key(keys, keycode, state), state);
+        let unshifted = unshifted_key(keys, keycode, state);
+        // A shortcut input waiting for a key takes it, whatever it is.
+        let recorder = shortcuts
+            .upgrade()
+            .and_then(|win| win.recorder.borrow().clone());
+        if let Some(record) = recorder {
+            if let Some(keys) = recorded(keyval, unshifted, state) {
+                if let Some(win) = shortcuts.upgrade() {
+                    win.recorder.borrow_mut().take();
+                }
+                record(keys);
+            }
+            return glib::Propagation::Stop;
+        }
+        let pressed = pressed_keys(keyval, unshifted, state);
         let run = shortcuts
             .upgrade()
             .and_then(|win| win.shortcut_for(&pressed));
@@ -1698,6 +1828,45 @@ mod tests {
         // Keys that type nothing have no name.
         assert_eq!(key_name(Key::F1), None);
         assert_eq!(key_name(Key::Shift_L), None);
+    }
+
+    #[test]
+    fn keys_pressed_for_a_shortcut_input_are_written_as_bern_writes_them() {
+        let control_shift = ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK;
+        assert_eq!(
+            recorded(Key::K, Some(Key::k), control_shift),
+            Some(Some("cmd+shift+k".into()))
+        );
+        assert_eq!(
+            recorded(Key::Left, None, ModifierType::ALT_MASK),
+            Some(Some("alt+left".into()))
+        );
+        assert_eq!(recorded(Key::Escape, None, ModifierType::empty()), Some(None));
+        assert_eq!(
+            recorded(Key::BackSpace, None, ModifierType::empty()),
+            Some(Some(String::new()))
+        );
+        assert_eq!(
+            recorded(Key::BackSpace, None, ModifierType::CONTROL_MASK),
+            Some(Some("cmd+delete".into()))
+        );
+        // A modifier alone waits for a key.
+        assert_eq!(recorded(Key::Shift_L, None, ModifierType::SHIFT_MASK), None);
+        assert_eq!(shortcut_text("cmd+shift+k"), "Ctrl+Shift+K");
+        assert_eq!(shortcut_text("alt+left"), "Alt+←");
+        assert_eq!(shortcut_text(""), "");
+    }
+
+    #[test]
+    fn a_bound_shortcut_reads_its_keys_at_each_press() {
+        let text = Rc::new(RefCell::new(String::from("cmd+o")));
+        let read = Rc::clone(&text);
+        let source = KeySource::Bound(Rc::new(move || read.borrow().clone()));
+        assert_eq!(source.keys(), Some(parse_keys("cmd+o")));
+        *text.borrow_mut() = "Shift+Alt+P".into();
+        assert_eq!(source.keys(), Some(parse_keys("alt+shift+p")));
+        text.borrow_mut().clear();
+        assert_eq!(source.keys(), None, "an empty text takes no keys");
     }
 
     #[test]

@@ -92,7 +92,7 @@ impl Generator<'_> {
                 out.line("None,");
                 continue;
             }
-            if item.keyword("shortcut").is_some() {
+            if item.prop("shortcut").is_some() {
                 shortcuts.push(item);
             }
             out.line(format!(
