@@ -651,6 +651,10 @@ class BernRows(val height: Dp?, val x: Dp?, val y: Dp?)
 
 val LocalBernFormRows = staticCompositionLocalOf<BernRows?> { null }
 
+/// Whether a view stands in a section's rows, which give it its height and
+/// insets: a row there adds no room of its own.
+val LocalBernInRows = staticCompositionLocalOf { false }
+
 /// The top edge of a plain section. A form's sections pass it up, so the
 /// form sees whether one stands at the top of its rows, wherever it came
 /// from: a slot, a component, a condition.
@@ -713,7 +717,9 @@ fun BernSection(
         if (!plain && x == null && y == null && height == null) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
         } else {
-            BernRowsLayout(height, x ?: 0.dp, y ?: 0.dp, content)
+            CompositionLocalProvider(LocalBernInRows provides true) {
+                BernRowsLayout(height, x ?: 0.dp, y ?: 0.dp, content)
+            }
         }
         if (footer != null) {
             Text(footer, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

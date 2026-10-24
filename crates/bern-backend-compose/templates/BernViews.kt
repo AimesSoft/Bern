@@ -1149,11 +1149,13 @@ fun BernMenuItem(label: String, icon: ImageVector?, enabled: Boolean, destructiv
 
 // MARK: - Navigation
 
-/// A row that pushes a route.
+/// A row that pushes a route. In a section's rows it is as tall as they
+/// make it; elsewhere it keeps a list item's room above and below.
 @Composable
 fun BernNavLink(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val room = if (LocalBernInRows.current) 0.dp else 12.dp
     Row(
-        modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(vertical = 12.dp),
+        modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).padding(vertical = room),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f), content = content)

@@ -711,7 +711,8 @@ fun BernToolbarSearch(
                             Icon(Icons.Filled.Close, contentDescription = BernText.string("bern.window.done"))
                         }
                     }
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), content = results)
+                    // The results line up with the field above them.
+                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), content = results)
                 }
             }
             LaunchedEffect(Unit) { focus.requestFocus() }
