@@ -462,7 +462,7 @@ enum BernColor: Equatable, Sendable {
         case "surface.raised": return Color(uiColor: .tertiarySystemBackground)
         #endif
         case "control.border": return Color(uiColor: .separator)
-        case "selection.background": return .accentColor
+        case "selection.background": return MainActor.assumeIsolated { accentColor }
         case "selection.foreground": return .white
         case "disabled.foreground": return Color(uiColor: .tertiaryLabel)
         default: return .primary
@@ -1164,9 +1164,12 @@ private func bernPalette(_ text: String) -> [String: BernColor] {
 }
 
 /// The accent and appearance of `WindowSet`, applied to a window. The
-/// accent is not the window's tint: only the controls that show an accent
-/// take it (`bernAccentTint`), drawn parts through the `accent` role; the
-/// appearance is the application's (`system`, `light`, `dark`).
+/// accent is the window's tint, as the design maps a chosen accent to the
+/// platform's: system controls take it (menus, pickers, links, the glass
+/// buttons' tint), as do the UIKit windows for what UIKit presents; drawn
+/// parts take it through the `accent` role. Without a chosen accent the
+/// system's stays. The appearance is the application's (`system`,
+/// `light`, `dark`).
 private struct BernWindowSchemeKey: EnvironmentKey {
     static let defaultValue: ColorScheme? = nil
 }
@@ -1189,7 +1192,16 @@ struct BernThemeChoice: ViewModifier {
         content
             .environment(\.bernWindowScheme, appearance?.lowercased() == "dark" ? .dark : appearance?.lowercased() == "light" ? .light : scheme)
             .environment(\.bernAccent, chosen?.color)
-            .onChange(of: chosen, initial: true) { BernThemeState.shared.accent = chosen }
+            .tint(chosen?.color)
+            .onChange(of: chosen, initial: true) {
+                BernThemeState.shared.accent = chosen
+                #if canImport(UIKit)
+                let tint = chosen.map { UIColor($0.color) }
+                for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                    for window in scene.windows { window.tintColor = tint }
+                }
+                #endif
+            }
             .onChange(of: palette, initial: true) { BernThemeState.shared.palette = colors }
         #if os(macOS)
             .onChange(of: appearance, initial: true) {
@@ -4865,13 +4877,56 @@ extension View {
     }
 
     /// The rows of a plain section stand on the page: no background, no
-    /// margins, no separators.
+    /// margins, no separators, and no clipping, so that what reaches past
+    /// them (the glow of a glass button) is not cut at the row's rounded
+    /// edge.
     func bernPlainRows() -> some View {
         self.listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
             .bernListRowSeparatorHidden()
+            #if canImport(UIKit)
+            .background(BernUnclippedRow())
+            #endif
     }
 }
+
+#if canImport(UIKit)
+/// UIKit clips a grouped list's cells to their section's rounded shape, the
+/// content too. A plain row has nothing to round: its cell and the views up
+/// to it stop clipping, again whenever UIKit lays the row out.
+private struct BernUnclippedRow: UIViewRepresentable {
+    func makeUIView(context: Context) -> BernUnclippingView { BernUnclippingView() }
+    func updateUIView(_ view: BernUnclippingView, context: Context) { view.unclip() }
+}
+
+final class BernUnclippingView: UIView {
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        unclip()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        unclip()
+    }
+
+    func unclip() {
+        var view = superview
+        while let current = view, !(current is UICollectionView || current is UITableView) {
+            current.clipsToBounds = false
+            current.layer.masksToBounds = false
+            if current is UICollectionViewCell || current is UITableViewCell { break }
+            view = current.superview
+        }
+    }
+}
+#endif
 
 /// The rows' insets a form gives all its sections.
 struct BernFormInsets: Equatable {
