@@ -12,7 +12,7 @@
 
 一个已有 macOS 版的多页媒体应用继续使用同一套声明，以 `web_mode = "app"` 将引擎编译成 WASM。为现有界面补齐以下浏览器能力，再开放对应 capability 检查：
 
-- `Modal`、`Flow`、`Timer`、搜索面板及分组结果、显式 `PickerOption`、引擎受控 Switch/Picker。`Picker(style: chips)` 是 Radio Group 模式的药丸按钮（`chip` 配方），直接放在 `Flow` 里时组容器为 `display: contents`，每枚都是 Flow 的子项。定时器随声明生命周期清理；搜索支持方向键、回车、Escape 和焦点恢复。
+- `Modal`（不写高度时 `<dialog>` 不设高度，与内容一样高，`max-height` 为视口减 32，超出时由其中的滚动区收缩）、`Flow`、`Timer`、搜索面板及分组结果、显式 `PickerOption`、引擎受控 Switch/Picker。`Picker(style: chips)` 是 Radio Group 模式的药丸按钮（`chip` 配方），直接放在 `Flow` 里时组容器为 `display: contents`，每枚都是 Flow 的子项。定时器随声明生命周期清理；搜索支持方向键、回车、Escape 和焦点恢复。
 - Stack 样式、文本字号/字重/行数、纯图标 Label/Menu、胶囊控件、分轴 padding、baseline、模板图及固有比例、图片圆角与响应式比例、独立 Grid 行距。
 - 固定侧栏宽度、顶栏、动态 badge、无标题 Detail、工具栏 leading 项、手风琴列宽动画、边缘 grow、延迟入场、事件触发 nudge、应用减少动态效果。
 - 布局的伸展意图在显式宽高处停止，Spacer 按主轴参与布局。`reflow` 在条件分支的 DocumentFragment 挂载后观察实际父元素，共享观察器并在最后一个声明卸载后清理。

@@ -2514,7 +2514,8 @@ export function Modal(p, ctx, { width, height, cover }, children) {
   const dialog = el("dialog", { class: "bern-modal", tabindex: "-1" });
   bindAttr(dialog, "aria-label", () => tr("app.name"));
   length(dialog, "width", width ?? 960);
-  length(dialog, "height", height ?? 600);
+  // Without a height, as tall as its content.
+  if (height !== undefined) length(dialog, "height", height);
   // `cover: compact`: the whole window where the window is compact.
   if (cover === "compact" && ctx.win) effect(() => dialog.classList.toggle("bern-modal-cover", ctx.win.compact.get()));
   const content = el("div", { class: "bern-modal-content" });

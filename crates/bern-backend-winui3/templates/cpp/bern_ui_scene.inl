@@ -630,12 +630,14 @@ inline winrt::fire_and_forget ShowModal(winrt::weak_ref<controls::ContentDialog>
 /// `Modal`: its content in the system's content dialog over the window,
 /// which dims what lies below and takes no input there, with the dialog's
 /// own entrance and exit. The dialog is the declared size within the
-/// window; `cover: compact` fills a compact window. It stays while the
-/// element is mounted: Escape does not close it.
+/// window, without a height as tall as its content; `cover: compact`
+/// fills a compact window. It stays while the element is mounted: Escape
+/// does not close it.
 inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& children) {
     if (!ctx.win || !ctx.win->root) return;
     double width = props.width.Given() ? Reactive::Untrack([&] { return props.width.Now(ctx); }) : 960;
-    double height = props.height.Given() ? Reactive::Untrack([&] { return props.height.Now(ctx); }) : 600;
+    std::optional<double> height;
+    if (props.height.Given()) height = Reactive::Untrack([&] { return props.height.Now(ctx); });
     Win* win = ctx.win;
     auto root = win->root;
     controls::ContentDialog dialog;
@@ -646,7 +648,7 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
     resources.Insert(winrt::box_value(L"ContentDialogMinHeight"), winrt::box_value(0.0));
     resources.Insert(winrt::box_value(L"ContentDialogMaxWidth"), winrt::box_value(100000.0));
     resources.Insert(winrt::box_value(L"ContentDialogMaxHeight"), winrt::box_value(100000.0));
-    auto content = MakeFlex(false, 0);
+    auto content = MakeFlex(false, 0, xaml::Thickness{0, 0, 0, 0}, !height);
     dialog.Content(content);
     children(Parent::Aligned(content, xaml::HorizontalAlignment::Stretch, std::nullopt), ctx);
     // The declared size, within the window's edges, or the whole window.
@@ -658,7 +660,9 @@ inline void Modal(Parent const&, Ctx const& ctx, ModalProps props, Build const& 
         bool covering = cover && win->size.Peek() == "compact";
         dialog.FullSizeDesired(covering);
         content.Width(covering ? roomW : (std::max)(0.0, (std::min)(width, roomW - 32)));
-        content.Height(covering ? roomH : (std::max)(0.0, (std::min)(height, roomH - 32)));
+        double most = (std::max)(0.0, roomH - 32);
+        content.Height(covering ? roomH : height ? (std::min)(*height, most) : NAN);
+        content.MaxHeight(covering || height ? INFINITY : most);
     };
     auto sizeToken = root.SizeChanged([size](auto&&, auto&&) { size(); });
     Reactive::Run([win, size] {

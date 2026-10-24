@@ -46,6 +46,9 @@ struct Inner {
     form: Option<Rc<crate::widgets::RowLayout>>,
     /// The search palette whose results the content lists.
     palette: Option<Rc<crate::palette::Palette>>,
+    /// In a modal as tall as its content: a scroll view says the height
+    /// of what it scrolls.
+    fits: bool,
 }
 
 /// The context generated code evaluates expressions in.
@@ -70,6 +73,7 @@ impl Ctx {
             tabs: None,
             form: None,
             palette: None,
+            fits: false,
         }))
     }
 
@@ -88,6 +92,7 @@ impl Ctx {
             tabs: self.0.tabs.clone(),
             form: self.0.form.clone(),
             palette: self.0.palette.clone(),
+            fits: self.0.fits,
         };
         change(&mut inner);
         Self(Rc::new(inner))
@@ -171,6 +176,15 @@ impl Ctx {
 
     pub(crate) fn scroll(&self) -> Option<&Rc<crate::features::ScrollScope>> {
         self.0.scroll.as_ref()
+    }
+
+    /// The content of a modal as tall as its content.
+    pub(crate) fn fitting(&self) -> Self {
+        self.with(|inner| inner.fits = true)
+    }
+
+    pub(crate) fn fits(&self) -> bool {
+        self.0.fits
     }
 
     pub(crate) fn with_sidebar(&self, sidebar: Rc<crate::structure::Registry>) -> Self {

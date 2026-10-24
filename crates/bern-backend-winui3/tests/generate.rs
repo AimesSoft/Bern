@@ -857,6 +857,8 @@ fn add_layout_features(app: &mut bern_ir::Application) {
                 ],
                 vec![text()],
             ),
+            // As tall as its content.
+            node("Modal", vec![("width", number(280.0))], vec![text()]),
             // A scene under the window's bars, and a capsule button around
             // its content.
             node("Stack", vec![("under_bars", word("true"))], vec![text()]),
@@ -943,6 +945,7 @@ fn layout_features_generate_for_winui3() {
         "B::Form(p, c, nullptr, {.gap = 12.0, .rowHeight = 44.0}, ",
         "B::Section(p, c, nullptr, nullptr, {.plain = true, .paddingX = 8.0}, ",
         "B::Modal(p, c, {.width = B::Len(300.0), .height = B::Len(200.0), .cover = true}, ",
+        "B::Modal(p, c, {.width = B::Len(280.0)}, ",
         ".underBars = true}",
         "B::ContentButton(p, c, {.id = \"test_button\"",
     ] {

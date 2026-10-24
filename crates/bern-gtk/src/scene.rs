@@ -1215,7 +1215,9 @@ mod modal {
 
     #[derive(Default)]
     pub struct Modal {
-        pub size: Cell<(f64, f64)>,
+        /// The declared width and height; without a height, the card is
+        /// as tall as its content.
+        pub size: Cell<(f64, Option<f64>)>,
         pub cover: Cell<bool>,
         /// The modal's content has left and the frame goes with it.
         pub closing: Cell<bool>,
@@ -1245,27 +1247,34 @@ mod modal {
             (0, 0, -1, -1)
         }
 
-        /// The card centered, as large as declared and 16 points in from
-        /// the edges at most, or the whole window when it covers it.
+        /// The card centered, as large as declared (without a height, as
+        /// tall as its content at its width) and 16 points in from the
+        /// edges at most, or the whole window when it covers it.
         fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
             let obj = self.obj();
             let all = children(obj.upcast_ref());
             let (w, h) = self.size.get();
-            let (card_width, card_height) = if self.cover.get() {
-                (f64::from(width), f64::from(height))
+            let covers = self.cover.get();
+            let card_width = if covers {
+                f64::from(width)
             } else {
-                (
-                    w.min(f64::from(width) - 32.0).max(0.0),
-                    h.min(f64::from(height) - 32.0).max(0.0),
-                )
+                w.min(f64::from(width) - 32.0).max(0.0)
             };
-            let x = (f64::from(width) - card_width) / 2.0;
-            let y = (f64::from(height) - card_height) / 2.0;
             for child in &all {
                 if !child.should_layout() {
                     continue;
                 }
                 child.measure(gtk::Orientation::Horizontal, -1);
+                let card_height = if covers {
+                    f64::from(height)
+                } else {
+                    let wanted = h.unwrap_or_else(|| {
+                        f64::from(child.measure(gtk::Orientation::Vertical, side(card_width)).1)
+                    });
+                    wanted.min(f64::from(height) - 32.0).max(0.0)
+                };
+                let x = (f64::from(width) - card_width) / 2.0;
+                let y = (f64::from(height) - card_height) / 2.0;
                 child.allocate(side(card_width), side(card_height), -1, translate(x, y));
             }
             // Once the card has gone, so does the frame.
@@ -1288,7 +1297,7 @@ glib::wrapper! {
 impl ModalFrame {
     /// A frame of `width` by `height` above `win`'s content, with its
     /// backdrop; the content below takes no focus while it stands.
-    pub(crate) fn above(win: &crate::windows::Win, width: f64, height: f64) -> Self {
+    pub(crate) fn above(win: &crate::windows::Win, width: f64, height: Option<f64>) -> Self {
         let frame: Self = glib::Object::new();
         frame.imp().size.set((width, height));
         frame.add_css_class("bern-modal-backdrop");
@@ -1335,7 +1344,9 @@ pub struct ModalProps {
 #[allow(non_snake_case)]
 pub fn Modal(_p: &Parent, ctx: &Ctx, props: ModalProps, children: Build) {
     let win = Rc::clone(ctx.win());
-    let frame = ModalFrame::above(&win, 960.0, 600.0);
+    // Without a height, as tall as its content.
+    let fits = props.height.is_none();
+    let frame = ModalFrame::above(&win, 960.0, None);
     for (length, index) in [(props.width, 0), (props.height, 1)] {
         let Some(length) = length else { continue };
         let sized = frame.clone();
@@ -1344,7 +1355,7 @@ pub fn Modal(_p: &Parent, ctx: &Ctx, props: ModalProps, children: Build) {
             sized.imp().size.set(if index == 0 {
                 (value, height)
             } else {
-                (width, value)
+                (width, Some(value))
             });
             sized.queue_allocate();
         });
@@ -1372,7 +1383,13 @@ pub fn Modal(_p: &Parent, ctx: &Ctx, props: ModalProps, children: Build) {
             covered.queue_allocate();
         });
     }
-    children(&Parent::of_box(&card), &ctx.outside_toolbar());
+    let inside = ctx.outside_toolbar();
+    let inside = if fits {
+        inside.fitting()
+    } else {
+        inside
+    };
+    children(&Parent::of_box(&card), &inside);
     let cards = Parent::of_children(&frame, false);
     let holder = card.clone();
     let add: Build = Rc::new(move |p, _| p.add(&holder));

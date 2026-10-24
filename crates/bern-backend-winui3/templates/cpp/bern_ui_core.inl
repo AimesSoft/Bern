@@ -571,6 +571,10 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
     /// text share one baseline; `extra` is the height that takes.
     bool baseline = false;
     float extra = 0;
+    /// A column as tall as its content, a modal's without a height: what
+    /// fills it (a scroll view, a spacer) is as tall as its own content,
+    /// until the column has less room than that.
+    bool fits = false;
 
     bool Fills(xaml::UIElement const& child) const {
         if (horizontal) return FillsRow(child);
@@ -602,6 +606,14 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
     }
 
     Size MeasureOverride(Size available) {
+        if (fits && !horizontal && !std::isinf(available.Height)) {
+            auto natural = Measured(Size{available.Width, INFINITY});
+            if (natural.Height <= available.Height) return natural;
+        }
+        return Measured(available);
+    }
+
+    Size Measured(Size available) {
         Size inner{(std::max)(0.0f, available.Width - static_cast<float>(padding.Left + padding.Right)),
             (std::max)(0.0f, available.Height - static_cast<float>(padding.Top + padding.Bottom))};
         float space = Main(inner), cross = Cross(inner), used = 0, thickness = 0, filled = 0;
@@ -712,12 +724,13 @@ struct FlexPanel : controls::PanelT<FlexPanel> {
     }
 };
 
-/// A new flexible panel.
-inline controls::Panel MakeFlex(bool horizontal = false, double spacing = 8, xaml::Thickness padding = {0, 0, 0, 0}) {
+/// A new flexible panel; with `fits`, a column as tall as its content.
+inline controls::Panel MakeFlex(bool horizontal = false, double spacing = 8, xaml::Thickness padding = {0, 0, 0, 0}, bool fits = false) {
     auto impl = winrt::make_self<FlexPanel>();
     impl->horizontal = horizontal;
     impl->spacing = spacing;
     impl->padding = padding;
+    impl->fits = fits;
     controls::Panel panel = impl.as<controls::Panel>();
     SetRole(panel, horizontal ? L"bern-row" : L"bern-column");
     FlexPanel* flex = impl.get();

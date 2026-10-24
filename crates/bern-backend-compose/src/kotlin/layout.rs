@@ -347,8 +347,9 @@ impl Generator<'_> {
             "BernModal({}, {}, {}, {enter}, {exit}) {{",
             self.length(element, "width")
                 .unwrap_or_else(|| "960.dp".into()),
+            // Without a height, as tall as its content.
             self.length(element, "height")
-                .unwrap_or_else(|| "600.dp".into()),
+                .unwrap_or_else(|| "androidx.compose.ui.unit.Dp.Unspecified".into()),
             element.keyword("cover") == Some("compact"),
         ));
         self.nodes(out, &element.children, &ctx.within(Scope::Other));

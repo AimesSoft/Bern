@@ -901,8 +901,12 @@ button:disabled {
   }
 }
 
+/* A column: a modal without a height is as tall as its content until the
+   window stops it, and then its content shrinks with it, the scroll view
+   in it giving up the height. */
 .bern-modal[open] {
   display: flex;
+  flex-direction: column;
   position: fixed;
   inset: 0;
 }

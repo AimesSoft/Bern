@@ -189,7 +189,7 @@ bern package --target android
 
 ### 模态、搜索面板与计时
 
-- `Modal` 是 Material 的 `Dialog`：背景按 0.24 变暗并吸收输入，卡片是对话框的形状与底色，为声明尺寸且离窗口边缘至少 16；`cover: compact` 时在紧凑窗口中铺满整个屏幕，避开系统栏。元素的 `appear`、`disappear` 作用在卡片上：在带过渡的条件分支中，卡片随分支的进出（`animateEnterExit`）播放，播完消失过渡后对话框才关闭。系统返回不关闭模态。
+- `Modal` 是 Material 的 `Dialog`：背景按 0.24 变暗并吸收输入，卡片是对话框的形状与底色，为声明尺寸且离窗口边缘至少 16，不写高度时取内容的固有高度（`maxIntrinsicHeight`，竖向滚动的列取所滚内容的高度，权重 `Spacer` 为 0；内容说不出固有高度时取窗口允许的高度）；`cover: compact` 时在紧凑窗口中铺满整个屏幕，避开系统栏。元素的 `appear`、`disappear` 作用在卡片上：在带过渡的条件分支中，卡片随分支的进出（`animateEnterExit`）播放，播完消失过渡后对话框才关闭。系统返回不关闭模态。
 - `Search(style: palette)`：一个搜索图标按钮；打开时是一个对话框，紧凑窗口铺满屏幕，较宽时是 `width` × `height`（默认 640×480）的卡片：上方是搜索框与关闭按钮，下面是结果，结果只在打开时组合。方向键在 `navigation` 不为假的 `SearchItem` 之间移动（按屏幕上的先后），回车选中当前项，没有当前项时执行提交动作；系统返回、Esc 或关闭按钮关闭。`SearchItem` 是 Material 的 `ListItem`，选中后先关闭面板再执行动作；不在面板中时是普通的结果行。
 - `Timer`：启用且组合中时每 `interval` 秒（不少于 0.05）执行动作，关掉或离开时取消。`Window(idle_enabled:)` 为假时 `window.idle` 保持为假且不计时，变真时重新计时。`window.short` 是窗口高度低于紧凑断点。`Window(landscape:)` 为真时活动请求横屏（`SCREEN_ORIENTATION_SENSOR_LANDSCAPE`），变假后交还系统决定方向。
 

@@ -142,7 +142,7 @@ SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAF
 
 | 接口 | 当前语义 |
 | --- | --- |
-| `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。背景子树使用 `Stack(enabled: false)` 禁用 |
+| `Modal(width:, height:)` | 窗口内居中面板，尺寸受可用窗口约束，背景遮罩；正文可滚动、页脚可单独放置。不写 `height` 时与内容一样高：正文的 `ScrollView` 取它滚动的内容的高度，超出窗口时面板停在窗口边缘、正文滚动。背景子树使用 `Stack(enabled: false)` 禁用 |
 | `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
 | `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置；height 可省略，此时填满父布局剩余高度，应放在有高度约束的容器中（如窗口内的 Column） |

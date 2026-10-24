@@ -180,7 +180,7 @@ pub fn SearchPalette(
             owner.run(|| {
                 untrack(|| {
                     bound.set(Value::Text(String::new()));
-                    let frame = ModalFrame::above(ctx.win(), size.0, size.1);
+                    let frame = ModalFrame::above(ctx.win(), size.0, Some(size.1));
                     let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
                     card.add_css_class("bern-modal");
                     card.set_overflow(gtk::Overflow::Hidden);

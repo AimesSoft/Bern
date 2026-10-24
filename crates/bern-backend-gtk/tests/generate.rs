@@ -719,6 +719,8 @@ fn add_layout_features(app: &mut Application) {
                 ],
                 vec![text()],
             ),
+            // As tall as its content.
+            node("Modal", vec![("width", number(280.0))], vec![text()]),
         ],
     );
     let component = app
@@ -769,6 +771,7 @@ fn layout_features_generate_for_gtk() {
         "b::Form(p, c, b::FormProps { title: None, gap: Some(12.0), row_height: Some(44.0)",
         "plain: true, padding_x: Some(8.0)",
         "b::Modal(p, c, b::ModalProps { width: Some(b::Num::Fixed(300.0)), height: Some(b::Num::Fixed(200.0)), cover: true, decor: None }",
+        "b::Modal(p, c, b::ModalProps { width: Some(b::Num::Fixed(280.0)), height: None, cover: false, decor: None }",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }

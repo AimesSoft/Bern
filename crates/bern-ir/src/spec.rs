@@ -415,6 +415,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("accent", PropKind::KeyValue),
                 opt("palette", PropKind::KeyValue),
                 opt("appearance", PropKind::KeyValue),
+                opt("icon", PropKind::KeyValue),
             ],
             Children::Only(&["Window", "MenuBar"]),
             "Window catalog of a session root, with the application's `MenuBar`",
@@ -616,7 +617,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("cover", PropKind::Keyword(&["compact"])),
         ],
         Children::Any,
-        "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop; with `cover: compact` it covers the whole window where the window is compact, as a phone's full-screen flow",
+        "Centered modal content, constrained to the hosting window, above a dimmed input-blocking backdrop; without `height` it is as tall as its content, a scroll view in it as tall as what it scrolls, until the window is too short; with `cover: compact` it covers the whole window where the window is compact, as a phone's full-screen flow",
     ),
     spec(
         "Flow",

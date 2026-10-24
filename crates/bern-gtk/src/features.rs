@@ -1369,8 +1369,10 @@ pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
     );
     view.set_vexpand(!horizontal);
     view.set_hexpand(true);
-    // Across its axis a scroll view is as large as its content.
-    if horizontal {
+    // Across its axis a scroll view is as large as its content; in a
+    // modal as tall as its content, along it too until the modal is
+    // too short.
+    if horizontal || ctx.fits() {
         view.set_propagate_natural_height(true);
     }
     let content = gtk::Box::new(

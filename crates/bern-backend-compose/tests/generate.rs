@@ -554,6 +554,8 @@ fn add_layout_features(app: &mut bern_ir::Application) {
                 ],
                 vec![text()],
             ),
+            // As tall as its content.
+            node("Modal", vec![("width", number(280.0))], vec![text()]),
         ],
     );
     let component = app
@@ -607,6 +609,7 @@ fn layout_features_generate_for_compose() {
         "BernForm(gap = 12f.dp, rows = BernRows(44f.dp, null, null)) {",
         "BernSection(null, null, plain = true, paddingX = 8f.dp) {",
         "BernModal(300f.dp, 200f.dp, true, null, null) {",
+        "BernModal(280f.dp, androidx.compose.ui.unit.Dp.Unspecified, false, null, null) {",
     ] {
         assert!(kotlin.contains(expected), "missing `{expected}`");
     }

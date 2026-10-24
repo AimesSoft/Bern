@@ -527,8 +527,9 @@ fun BernFlow(gap: Dp, content: @Composable FlowRowScope.() -> Unit) {
 // MARK: - Modals
 
 /// `Modal`: a Material dialog over the window, which dims what lies below
-/// and takes no input there: a card of `width` × `height`, at least 16
-/// points from the window's edges, or with `cover` the whole window where
+/// and takes no input there: a card of `width` × `height` (without a
+/// height, as tall as its content), at least 16 points from the window's
+/// edges, or with `cover` the whole window where
 /// it is compact. The element's `appear` and `disappear` play on the card;
 /// inside an animated branch the branch's clock drives them, so the card
 /// leaves with its transition before the dialog closes.
@@ -575,7 +576,10 @@ fun BernModal(
             val card = if (covering) {
                 Modifier.fillMaxSize()
             } else {
-                Modifier.size(min(width.value, maxWidth.value - 32f).coerceAtLeast(0f).dp, min(height.value, maxHeight.value - 32f).coerceAtLeast(0f).dp)
+                val cardWidth = min(width.value, maxWidth.value - 32f).coerceAtLeast(0f).dp
+                val most = (maxHeight.value - 32f).coerceAtLeast(0f)
+                if (height == Dp.Unspecified) Modifier.width(cardWidth).bernFitHeight(most.dp)
+                else Modifier.size(cardWidth, min(height.value, most).dp)
             }
             val surface: @Composable (Modifier) -> Unit = { modifier ->
                 Surface(
@@ -604,6 +608,22 @@ fun BernModal(
             }
         }
     }
+}
+
+/// A modal card without a height: as tall as its content at its width
+/// (a scroll view as tall as what it scrolls, a spacer nothing), at most
+/// `most`. Content that cannot say its height before it is measured, such
+/// as a lazy list, takes `most`.
+private fun Modifier.bernFitHeight(most: Dp) = layout { measurable, constraints ->
+    val room = constraints.constrainHeight(most.roundToPx())
+    val natural = try {
+        measurable.maxIntrinsicHeight(constraints.maxWidth)
+    } catch (_: IllegalStateException) {
+        room
+    }
+    val height = natural.coerceIn(constraints.minHeight, room)
+    val placeable = measurable.measure(constraints.copy(minHeight = height, maxHeight = height))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
 
 // MARK: - Timers

@@ -4200,7 +4200,8 @@ struct BernModal<Content: View>: View {
     /// A modal declared in a scaled scene shows at the scene's scale.
     @Environment(\.bernSceneScale) private var scale
     let width: CGFloat
-    let height: CGFloat
+    /// Without one, as tall as its content.
+    let height: CGFloat?
     /// Covers the whole window where the window is compact.
     var cover = false
     @ViewBuilder var content: Content
@@ -4226,7 +4227,7 @@ struct BernModalContent: PreferenceKey {
 /// enlarge its coordinate space.
 private struct BernModalLayer<Content: View>: View {
     let width: CGFloat
-    let height: CGFloat
+    let height: CGFloat?
     /// The whole window, edge to edge, as a phone's full-screen flow.
     var covers = false
     /// The scale of the scene the modal was declared in.
@@ -4248,29 +4249,52 @@ private struct BernModalLayer<Content: View>: View {
     }
 
     private var floating: some View {
-        GeometryReader { proxy in
-            #if os(macOS)
-            let topInset: CGFloat = proxy.size.height < height + 32 ? 52 : 0
-            #else
-            let topInset: CGFloat = 0
-            #endif
-            let modalWidth = min(width, max(0, proxy.size.width / scale - 32))
-            let modalHeight = min(height, max(0, (proxy.size.height - topInset) / scale - 32))
-            ZStack {
-                Color.black.opacity(0.24).contentShape(Rectangle()).onTapGesture { }
-                presentation(AnyView(content
-                    .frame(width: modalWidth, height: modalHeight)
-                    .clipShape(RoundedRectangle(cornerRadius: 24))
-                    .background {
-                        RoundedRectangle(cornerRadius: 24).fill(.background)
-                            .shadow(color: .black.opacity(0.28), radius: 40, y: 20)
-                    }
-                    .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
-                    .accessibilityAddTraits(.isModal)
-                    .scaleEffect(scale)
-                    .frame(width: modalWidth * scale, height: modalHeight * scale)))
-            }.frame(width: proxy.size.width, height: proxy.size.height - topInset).offset(y: topInset)
+        BernModalStage(width: width, height: height, scale: scale) {
+            Color.black.opacity(0.24).contentShape(Rectangle()).onTapGesture { }
+            presentation(AnyView(content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .clipShape(RoundedRectangle(cornerRadius: 24))
+                .background {
+                    RoundedRectangle(cornerRadius: 24).fill(.background)
+                        .shadow(color: .black.opacity(0.28), radius: 40, y: 20)
+                }
+                .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.primary.opacity(0.12), lineWidth: 0.5))
+                .accessibilityAddTraits(.isModal)
+                .scaleEffect(scale)))
         }.ignoresSafeArea()
+    }
+}
+
+/// A floating modal's backdrop over the window and its card centered on
+/// it: the card as wide as declared and as tall as declared or, without a
+/// height, as its content at the card's width (a scroll view as tall as
+/// what it scrolls), 16 points in from the edges at most. On macOS a
+/// window too short for the card keeps both below its toolbar.
+private struct BernModalStage: Layout {
+    let width: CGFloat
+    let height: CGFloat?
+    /// The scale of the scene the modal was declared in; the card is laid
+    /// out at its own size and drawn scaled.
+    var scale: CGFloat = 1
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let cardWidth = min(width, max(0, bounds.width / scale - 32))
+        let wanted = height ?? subviews[1].sizeThatFits(ProposedViewSize(width: cardWidth, height: nil)).height
+        #if os(macOS)
+        let top: CGFloat = bounds.height < wanted + 32 ? 52 : 0
+        #else
+        let top: CGFloat = 0
+        #endif
+        let room = CGRect(x: bounds.minX, y: bounds.minY + top, width: bounds.width, height: max(0, bounds.height - top))
+        let cardHeight = min(wanted, max(0, room.height / scale - 32))
+        subviews[0].place(at: room.origin, proposal: ProposedViewSize(room.size))
+        subviews[1].place(at: CGPoint(x: room.midX, y: room.midY), anchor: .center,
+                          proposal: ProposedViewSize(width: cardWidth, height: cardHeight))
     }
 }
 
