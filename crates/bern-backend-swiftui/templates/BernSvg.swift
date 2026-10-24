@@ -62,7 +62,8 @@ private final class BernSvgCoordinator: NSObject, WKNavigationDelegate {
             #if os(macOS)
             NSWorkspace.shared.open(url)
             #else
-            UIApplication.shared.open(url)
+            // In this async method the plain call would be the async overload.
+            UIApplication.shared.open(url, options: [:], completionHandler: nil)
             #endif
         }
         // The document itself never navigates away from the bundled source.
