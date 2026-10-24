@@ -121,6 +121,8 @@ pub struct WindowState {
     /// Whether the application's `MenuBar` shows in a system menu bar,
     /// known when the application is built for a platform.
     pub menu_bar: <bool as BernValue>::Ref,
+    /// Whether a hardware keyboard is connected; always on a computer.
+    pub keyboard: <bool as BernValue>::Ref,
 }
 
 pub fn window() -> WindowState {
@@ -135,5 +137,6 @@ pub fn window() -> WindowState {
         tv: bool::reference(),
         webview: bool::reference(),
         menu_bar: bool::reference(),
+        keyboard: bool::reference(),
     }
 }
