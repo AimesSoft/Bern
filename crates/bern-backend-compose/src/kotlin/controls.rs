@@ -10,9 +10,40 @@ use bern_protocol::Type;
 impl Generator<'_> {
     /// The element's keyboard shortcut running `action`.
     pub(super) fn shortcut(&self, out: &mut Out, element: &Element, action: &str) {
-        if let Some(shortcut) = element.keyword("shortcut") {
-            out.line(format!("BernShortcut({}) {{ {action} }}", string(shortcut)));
+        if let Some(shortcut) = self.shortcut_keys(element, "shortcut") {
+            out.line(format!("BernShortcut({shortcut}) {{ {action} }}"));
         }
+    }
+
+    /// The keys of the shortcut prop `name`: a literal, or the text the
+    /// shortcut follows, which registers anew as it changes.
+    pub(super) fn shortcut_keys(&self, element: &Element, name: &str) -> Option<String> {
+        match element.prop(name)? {
+            bern_ir::Prop::Keyword { value } => Some(string(value)),
+            bern_ir::Prop::Expr { expr } => Some(self.expr(expr)),
+            _ => None,
+        }
+    }
+
+    /// `ShortcutInput`: a button that takes the next key pressed as the
+    /// shortcut, which the action keeps.
+    pub(super) fn shortcut_input(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let Some((value, change)) = self.model(element, "current", &|_| "it".into()) else {
+            return;
+        };
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let optional = |name| {
+            self.text_prop(element, name)
+                .unwrap_or_else(|| "null".into())
+        };
+        out.line(format!(
+            "BernShortcutInput({}, {label}, {}, {value}, {}, {}, {}) {{ it: String -> {change} }}",
+            self.target(element, ctx),
+            element.keyword("label_hidden") == Some("true"),
+            optional("prompt"),
+            optional("empty"),
+            self.enabled(element)
+        ));
     }
 
     /// `, shape = BernShape(…)` for a system control with `shape: capsule`
@@ -152,9 +183,8 @@ impl Generator<'_> {
                 None => ("null".into(), "null".into()),
             }
         };
-        let shortcut = element
-            .keyword("shortcut")
-            .map(string)
+        let shortcut = self
+            .shortcut_keys(element, "shortcut")
             .unwrap_or_else(|| "null".into());
         out.open(format!(
             "BernPopoverButton({}, {label}, {}, {presented}, {on_presented}, {shortcut}, {plain}, windowTheme = {}{}) {{",

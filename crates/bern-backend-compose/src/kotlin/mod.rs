@@ -512,6 +512,7 @@ impl<'a> Generator<'a> {
             "Modal" => self.modal(out, element, ctx),
             "Timer" => self.timer(out, element),
             "Shortcut" => self.key_shortcut(out, element),
+            "ShortcutInput" => self.shortcut_input(out, element, ctx),
             "ControlGroup" => self.control_group(out, element, ctx),
             "SearchItem" => self.search_item(out, element, ctx),
             "Rail" => self.rail(out, element, ctx),
@@ -549,7 +550,9 @@ impl<'a> Generator<'a> {
             "Adaptive" => self.adaptive(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "SidebarHeader"
-            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "TabAccessory" | "PickerOption" => {
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "TabAccessory" | "PickerOption"
+            // Android has no menu bar for applications.
+            | "MenuBar" | "CommandMenu" | "CommandItem" => {
                 // Realized by their parents.
             }
             other => out.line(format!("// unsupported {other}")),

@@ -222,6 +222,10 @@ flowchart LR
 
 生成的 `app.js` 把组件写成 `function c_` 加声明的名字（`function c_empty(p, ctx, a)`），以名字字符串描述会话（`{ name: "URL", fields: [...] }`），运行时以 `B` 引用，模块里没有别的以 `c_` 开头的绑定，所以 SwiftUI 与 Compose 这次改名的组件与会话在 Web 上不会相撞，生成器不变（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 加了这些写法的断言；这次没有运行，未验证。
 
+## 跟随状态的快捷键与改键（2026-10-24）
+
+`F.shortcut` 接受文本或返回文本的函数：跟随状态的快捷键在每次按键时读取当前文本，空文本或读不成快捷键时不占任何键。`F.ShortcutInput` 是一个按钮，按下后在捕获阶段取下一次按键（`pressedKeys`，与快捷键匹配用同一套键名），Esc 保持原样，单独按 Backspace 或 Delete 清空，点到别处停止等待；等待时所有快捷键都让开。按钮上的文字按 `shortcutText` 写出：苹果系统上 ⌃⌥⇧⌘ 与键的符号，其他系统 `Ctrl+Shift+K`，空格键按界面语言（框架文本 `bern.shortcut.space`）。搜索面板上的按键提示也跟随状态。`MenuBar` 在网页上不生成。验证：`tests/features-runtime.test.mjs` 覆盖文本变化后旧键让出、新键生效、空文本不占键，以及录制、Esc、修饰键单独按下继续等待、Delete 清空、`ui.edit`、卸载后不再监听；未在浏览器里实测。
+
 ## 验证记录
 
 2026-10-10，v0.1 视觉规范（窗口呈现已由 v0.2 取代），内置浏览器，`python3 -m http.server` 提供 `target/bern/web_app`：

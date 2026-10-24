@@ -335,7 +335,8 @@ impl Generator<'_> {
             .unwrap_or_else(|| "Unit".into());
         out.line(format!(
             "BernShortcut({}, {{ {enabled} }}) {{ {action} }}",
-            string(element.keyword("key").unwrap_or_default())
+            self.shortcut_keys(element, "key")
+                .unwrap_or_else(|| string(""))
         ));
     }
 

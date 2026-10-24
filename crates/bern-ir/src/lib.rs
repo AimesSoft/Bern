@@ -525,6 +525,11 @@ pub struct WindowCatalog {
     /// and `Dark`.
     #[serde(default)]
     pub appearance: Option<Expr>,
+    /// The `MenuBar`: its `CommandMenu`s, their `CommandItem`s, dividers
+    /// and submenus, whose drafts are the primary window's. Only a target
+    /// with a system menu bar shows it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub menu_bar: Option<Element>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

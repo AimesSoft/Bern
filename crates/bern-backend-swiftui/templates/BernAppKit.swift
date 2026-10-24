@@ -9,6 +9,26 @@ import AppKit
 import AVKit
 import SwiftUI
 
+// MARK: - Menu bar
+
+/// The items of the application's `MenuBar` as external entries see them:
+/// `ui.inspect` lists them, and `ui.activate` runs one as choosing it in
+/// the menu does. The menu bar registers each item as it shows it.
+@MainActor
+enum BernMenuItems {
+    private static var tokens: [String: UUID] = [:]
+
+    static func register(_ target: String, label: String, enabled: Bool, activate: @escaping @MainActor () -> Void) -> Bool {
+        let token = tokens[target] ?? UUID()
+        tokens[target] = token
+        BernHost.shared.controls.register(
+            token,
+            BernControlEntry(target: target, window: "", role: "menu_item", label: label, enabled: enabled,
+                             actions: BernControlActions(activate: activate)))
+        return true
+    }
+}
+
 // MARK: - Platform state
 
 /// What a window instance keeps about its NSWindow.

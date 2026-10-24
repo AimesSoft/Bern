@@ -710,7 +710,16 @@ impl<'a> Gen<'a> {
                             self.error(*span, format!("shortcut \"{text}\": {message}"));
                         }
                     }
-                    other => self.error(other.span(), "a shortcut is a literal such as \"cmd+k\""),
+                    Expr::Literal { span, .. } => self.error(
+                        *span,
+                        "a shortcut is a literal such as \"cmd+k\", or a text it follows such as `app.keys.open`",
+                    ),
+                    // A text the shortcut follows while the application runs.
+                    other => {
+                        let value = self.value(other);
+                        let span = other.span();
+                        pre.push(quote_spanned!(span=> let _: ::std::string::String = #value;));
+                    }
                 },
                 PropKind::Icon => match &prop.value {
                     Expr::Literal {

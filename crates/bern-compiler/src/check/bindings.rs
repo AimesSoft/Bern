@@ -188,11 +188,12 @@ impl Checker<'_> {
                 || field.as_deref() == Some("short")
                 || field.as_deref() == Some("tv")
                 || field.as_deref() == Some("webview")
+                || field.as_deref() == Some("menu_bar")
                 || field.as_deref().is_some_and(|name| sizes.contains(&name));
             if !known || path.segments.len() != 2 {
                 self.error(
                     path.span(),
-                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.tv` (the window is on a television), and `window.webview` (the target supports WebView)",
+                    "the hosting window offers `window.fullscreen` (the actual full-screen state), `window.idle` (no input for `idle_after` seconds), its size: `window.compact`, `window.medium`, `window.expanded`, `window.large`, `window.short` (shorter than the compact breakpoint, as a phone on its side), `window.tv` (the window is on a television), `window.webview` (the target supports WebView), and `window.menu_bar` (the application's `MenuBar` shows in the system menu bar)",
                 );
                 return None;
             }
@@ -209,6 +210,7 @@ impl Checker<'_> {
                 && field != "short"
                 && field != "tv"
                 && field != "webview"
+                && field != "menu_bar"
             {
                 match self.layouts {
                     None => {

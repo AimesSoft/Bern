@@ -609,3 +609,17 @@ macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出
 - 改前的生成器生成这个示例，swiftc 报 `invalid redeclaration of 'BernPlayerView'`、`'BernQueryView'`、`'bernWindow'`、`'bernEngine'`。
 - 改后的生成里每次只把一个组件换回旧名：`any` 让 `BernAppKit.swift` 报 3 处 `argument passed to call that takes no arguments`，`scroll` 让 `BernStyle.swift` 报 `extra trailing closure passed in call`，`content_unavailable` 让 `BernMedia.swift` 报 `argument passed to call that takes no arguments`，`bern_player`、`bern_query` 报重复声明；`empty`、`progress`、`tab`、`navigation`、`timeline` 单独换回时类型检查通过（它们同样遮住 SwiftUI 的同名类型，只是运行时现有的写法没有因此报错）。会话没有逐个换回测量，`URLSession` 单独的影响未测。
 - 改后 macOS、iOS、tvOS 的 swiftc 类型检查都通过；之后补进 `tests/framework_names.rs` 的写法断言只对照生成文件逐条核对过，没有再运行测试。
+
+### 菜单栏、跟随状态的快捷键与改键（2026-10-24）
+
+`MenuBar` 生成为主窗口场景上的 `.commands { BernMenuBar() }`：自己的菜单是 `CommandMenu`，带 `role` 的是 `CommandGroup`（`app` 在设置项之后、`file` 替换新建文档项、`edit` 在剪贴板项之后、`view` 在工具栏项之前、`window` 在窗口排列项之后、`help` 替换帮助项）。每个菜单的项生成为一个视图 `BernMenuN`：只写在 `Commands` 的 `body` 里时，项读到的引擎状态与草稿变了菜单也不更新（实测勾选和启用停在第一次的样子），放进视图的 `body` 后由 Observation 跟随。项读写的草稿取主窗口的 `BernWindowContext`（`BernMenuBarWindow.primary`），主窗口还没打开或已关闭时取一份新的；`BernHost.windowRevision` 随窗口打开、关闭变化，让菜单换到新打开的主窗口。`CommandItem` 是 `Button`，有 `checked` 时是 `Toggle`；`.keyboardShortcut(_:)` 接受可选的快捷键，跟随状态的快捷键为 nil 时没有按键。每次显示菜单项时 `BernMenuItems` 把它登记为外部入口 `menu_bar.<id>`（角色 `menu_item`）。
+
+跟随状态的快捷键由 `BernShortcuts.keyboard(_:)` 在视图求值时把文本读成 `KeyboardShortcut?`；tvOS 用 `BernShortcuts.remote(_:)`，遥控按键随文本重新登记。`ShortcutInput` 是 `BernShortcutInput`：一个系统按钮，按下后用 `NSEvent.addLocalMonitorForEvents` 在窗口和菜单之前取下一次按键（键码换成 Bern 的键名，字符键取不带修饰键时的字符），鼠标按下时停止等待；iOS 用硬件键盘的 `onKeyPress`；tvOS 只显示。
+
+验证（macOS 27.0.1）：
+
+- `examples/gallery`：菜单栏多出“图案”菜单，文件菜单里有“打开视频…”，帮助菜单里是“关于图案集”，“强调色”子菜单展开；`ui.activate menu_bar.menu_details` 打开详情后，读菜单的辅助功能属性（`AXMenuItemMarkChar`、`enabled`）得到“详情”打勾、“关闭详情”可用；用 System Events 点“群青”后引擎的强调色改变、勾随之移动。`set-details-key` 改成 ⇧⌘D 后向进程投递按键：⌘⌥I 不再打开详情，⇧⌘D 打开。点“关于”窗口里的 `ShortcutInput` 后投递 ⌃⌘F，状态变为 `cmd+ctrl+f`；Esc 保持，Delete 清空为空文本。
+- 一个实际应用（用临时的 bundle id 构建，数据与钥匙串和正式版分开）：菜单栏的应用菜单、文件菜单、自建的“播放”菜单（含倍速子菜单）与显示菜单按声明出现，菜单项显示的按键与状态一致（`AXMenuItemCmdChar`、`AXMenuItemCmdModifiers`）；打开文件的键改成 ⌘P 后菜单显示 ⌘P，⌘O 不再打开面板、⌘P 打开一个面板；同一个键既是窗口里控件的快捷键又是菜单项的快捷键时（空格、D、→、⌘P），每按一次只执行一次；输入框获得焦点时按 F、空格、X，字符进入输入框，不触发菜单里没有修饰键的项（系统输入法为拼音时测得）；改键在应用重启后仍在。
+- `tests/menu_bar.rs` 为 macOS、iOS、tvOS 生成同一个应用并按各自 SDK 类型检查：iOS 与 tvOS 不生成菜单栏，`window.menu_bar` 的分支只留在 macOS。
+
+未验证：iPad 的菜单栏（未生成）；没有输入法时输入框与无修饰键菜单项的关系只在拼音输入法下测过；读屏朗读。

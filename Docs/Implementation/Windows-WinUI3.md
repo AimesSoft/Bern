@@ -344,6 +344,10 @@ target\bern\windows\Showcase\showcase.exe
 
 4.2 MB 是 `showcase.exe`（3.8 MB，内含引擎）加上引导 DLL（0.4 MB），不含展示用的媒体资源。
 
+## 跟随状态的快捷键与改键（2026-10-24）
+
+跟随状态的快捷键用 `BoundAccelerator`：一个响应式效果读取文本、规范化后登记 `KeyboardAccelerator`，文本变化时先撤下旧的再登记新的；控件的快捷键是 `B::Shortcut(c, [](Ctx const&){…}, id, action)` 的重载，菜单项的按键提示随文本更新（`boundShortcut`）。`B::ShortcutInput` 是一个按钮，按下后在它的 `PreviewKeyDown` 取下一次按键（修饰键用 `GetKeyState` 读取，Control 写作 `cmd`），Esc 保持原样，单独按 Backspace 或 Delete 清空，失去焦点时停止等待；等待期间所有加速键不执行。显示文字为 `Ctrl+Shift+K` 的写法，空格键按界面语言。`MenuBar` 不生成。验证：生成器测试（gallery）覆盖生成代码；C++ 未编译，两种前端都未在 Windows 上运行。
+
 ## 验证记录
 
 2026-10-11，Windows 11 25H2 实体机，经 SSH 构建，以计划任务把应用启动到用户的桌面会话，由生成的 CLI 驱动；截图来自开发快照中的窗口截取。两种前端分别执行：

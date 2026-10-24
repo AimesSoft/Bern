@@ -4,7 +4,7 @@
 use super::values::swift_type;
 use super::{Ctx, Generator, Out, Platform};
 use crate::names::{double, string};
-use bern_ir::{Element, Node};
+use bern_ir::{Element, Node, Prop};
 
 impl Generator<'_> {
     /// `.keyboardShortcut(…)` arguments for an element's `shortcut`; `cmd`
@@ -14,7 +14,28 @@ impl Generator<'_> {
         if self.platform == Platform::Tvos {
             return None;
         }
-        keyboard_shortcut(element.keyword("shortcut")?)
+        self.keyboard(element, "shortcut")
+    }
+
+    /// The `KeyboardShortcut` of the shortcut prop `name`: a literal's, or
+    /// for a text the shortcut follows an optional one read as the app
+    /// runs, nil while the text is no shortcut.
+    fn keyboard(&self, element: &Element, name: &str) -> Option<String> {
+        match element.prop(name)? {
+            Prop::Keyword { value } => keyboard_shortcut(value),
+            Prop::Expr { expr } => Some(format!("BernShortcuts.keyboard({})", self.expr(expr))),
+            _ => None,
+        }
+    }
+
+    /// The Siri Remote's button for the shortcut prop `name` (see
+    /// `remote_key`); for a text the shortcut follows, an optional one.
+    fn remote(&self, element: &Element, name: &str) -> Option<String> {
+        match element.prop(name)? {
+            Prop::Keyword { value } => remote_key(value).map(String::from),
+            Prop::Expr { expr } => Some(format!("BernShortcuts.remote({})", self.expr(expr))),
+            _ => None,
+        }
     }
 
     /// The modifier that gives a control its `shortcut`: the keyboard
@@ -28,7 +49,7 @@ impl Generator<'_> {
                 .shortcut(element)
                 .map(|shortcut| format!(".keyboardShortcut({shortcut})"));
         }
-        let key = remote_key(element.keyword("shortcut")?)?;
+        let key = self.remote(element, "shortcut")?;
         let enabled = element
             .expr("enabled")
             .map(|enabled| self.expr(enabled))
@@ -52,11 +73,12 @@ impl Generator<'_> {
             .expr("enabled")
             .map(|enabled| self.expr(enabled))
             .unwrap_or_else(|| "true".into());
-        let key = element.keyword("key").unwrap_or_default();
         let source = if self.platform == Platform::Tvos {
-            remote_key(key).map(|remote| format!("remote: {remote}"))
+            self.remote(element, "key")
+                .map(|remote| format!("remote: {remote}"))
         } else {
-            keyboard_shortcut(key).map(|shortcut| format!("shortcut: {shortcut}"))
+            self.keyboard(element, "key")
+                .map(|shortcut| format!("shortcut: {shortcut}"))
         };
         if let Some(source) = source {
             out.line(format!(
@@ -803,6 +825,33 @@ impl Generator<'_> {
             ".bernControl({}, role: {}, label: {label}, actions: BernControlActions(setNumber: {{ value in {field} = min(max(value, {min}), {max}); {action} }}, value: {{ BernText.text({field}) }}))",
             self.target(element, ctx),
             string(&element.kind.to_lowercase())
+        ));
+    }
+
+    /// `ShortcutInput`: a button showing the shortcut that takes the next
+    /// key pressed; the action keeps the one chosen. External entries set
+    /// it with `ui.edit` and a shortcut in Bern's form.
+    pub(super) fn shortcut_input(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (value, _, commit) = self.control_value(element, "current");
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let prompt = self
+            .text_prop(element, "prompt")
+            .unwrap_or_else(|| "BernText.string(\"bern.shortcut.prompt\")".into());
+        let empty = self
+            .text_prop(element, "empty")
+            .unwrap_or_else(|| "BernText.string(\"bern.shortcut.none\")".into());
+        let enabled = element.expr("enabled").map(|expr| self.expr(expr));
+        out.line(format!(
+            "BernShortcutInput(current: {value}, label: {label}, labelHidden: {}, prompt: {prompt}, empty: {empty}, commit: {commit})",
+            element.keyword("label_hidden") == Some("true")
+        ));
+        if let Some(enabled) = &enabled {
+            out.line(format!(".disabled(!({enabled}))"));
+        }
+        out.line(format!(
+            ".bernControl({}, role: \"shortcut_input\", label: {label}, enabled: {}, actions: BernControlActions(edit: {{ text in if let keys = BernShortcuts.normalized(text) {{ ({commit})(keys) }} }}, value: {{ {value} }}))",
+            self.target(element, ctx),
+            enabled.unwrap_or_else(|| "true".into())
         ));
     }
 

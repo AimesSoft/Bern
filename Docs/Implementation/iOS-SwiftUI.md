@@ -217,3 +217,7 @@ iPhone 17e 模拟器（iOS 26.5，390 × 844 点，截图 1170 × 2532）上，�
 - **胶囊按钮的内部排列**：`Button(shape: capsule)` 带图标时不再用系统 `Label`（两端平台间距不同），改为符号在 16 点框内（30 点高的标签胶囊为 14 点）、与文字相隔 6；左右内边距按尺寸档取：42 点及以上 22，30 点及以下 13，其余 14。macOS 与 iOS 同一做法。
 
 中文字形：同为 30 点系统字体，Chrome 渲染的苹方汉字前进宽度为 1 em，iOS 原生渲染约 0.947 em，所以中文标题看起来小约 5%。布局按点对齐，字形交给系统渲染，没有放大字号补偿。
+
+## 跟随状态的快捷键与改键（2026-10-24）
+
+与 macOS 共用生成：`shortcut:` 与 `Shortcut(key:)` 绑定文本时生成 `BernShortcuts.keyboard(…)`。`ShortcutInput` 在 iOS 上等待硬件键盘的按键（`focusable` 加 `onKeyPress`），没有硬件键盘时只显示快捷键。`MenuBar` 在 iOS 上不生成（iPad 的菜单栏未接入，能力 `menu_bar` 不适用）。验证：`tests/menu_bar.rs` 按 iOS 模拟器 SDK 类型检查；未在模拟器或设备上运行。

@@ -301,6 +301,7 @@ impl Generator<'_> {
             "Modal" => self.modal(out, element),
             "Timer" => self.timer(out, element),
             "Shortcut" => self.key_shortcut(out, element),
+            "ShortcutInput" => self.shortcut_input(out, element),
             "ControlGroup" => self.control_group(out, element),
             "Rail" => self.rail(out, element),
             "Svg" => self.svg(out, element),
@@ -341,6 +342,8 @@ impl Generator<'_> {
             "Pinch" | "Swipe" => self.gesture(out, element),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "TabAccessory"
+            // Windows applications of this kind keep no menu bar.
+            | "MenuBar" | "CommandMenu" | "CommandItem"
             | "PickerOption" => {
                 // Realized by their parents.
             }

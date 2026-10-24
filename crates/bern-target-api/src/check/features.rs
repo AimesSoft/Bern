@@ -59,6 +59,9 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::BOUND_LENGTHS, bound_lengths),
     (feature::APPEARANCE, appearance),
     (feature::SHORTCUTS, shortcuts),
+    (feature::BOUND_SHORTCUTS, bound_shortcuts),
+    (feature::SHORTCUT_INPUT, shortcut_input),
+    (feature::MENU_BAR, menu_bar),
     (feature::RUNTIME_THEME, runtime_theme),
     (feature::RUNTIME_PALETTE, runtime_palette),
     (feature::RUNTIME_IMAGES, runtime_images),
@@ -985,6 +988,71 @@ fn shortcuts(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut
                 descriptor.id
             ))
             .at(element.source.clone()),
+        );
+    }
+}
+
+fn bound_shortcuts(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let bound = |element: &bern_ir::Element| {
+        ["shortcut", "key"].iter().any(|name| {
+            matches!(element.prop(name), Some(bern_ir::Prop::Expr { .. }))
+                && (*name == "shortcut" || element.kind == "Shortcut")
+        })
+    };
+    let in_menu_bar = app.windows.menu_bar.as_ref().and_then(|bar| {
+        let mut first = None;
+        bern_ir::Node::Element(bar.clone()).walk(&mut |node| {
+            if let bern_ir::Node::Element(element) = node
+                && first.is_none()
+                && bound(element)
+            {
+                first = Some(element.source.clone());
+            }
+        });
+        first
+    });
+    if let Some(source) = first_element(app, bound)
+        .map(|element| element.source.clone())
+        .or(in_menu_bar)
+    {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot change a shortcut while the application runs; write the shortcut as a literal such as \"cmd+k\"",
+                descriptor.id
+            ))
+            .at(source),
+        );
+    }
+}
+
+fn shortcut_input(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(input) = first_element(app, |element| element.kind == "ShortcutInput") {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot build a `ShortcutInput`",
+                descriptor.id
+            ))
+            .at(input.source.clone()),
+        );
+    }
+}
+
+fn menu_bar(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(bar) = &app.windows.menu_bar {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` shows no `MenuBar`: its items are reached only through the windows there",
+                descriptor.id
+            ))
+            .at(bar.source.clone()),
         );
     }
 }

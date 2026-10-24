@@ -321,7 +321,7 @@ fn planner_and_gallery_build_for_gtk() {
         // Escape closes the details; the dialog's focus starts on its
         // button; the margins ask whether the window is a television's
         // (never, on a desktop).
-        "b::KeyShortcut(p, c, b::KeyShortcutProps { keys: \"escape\", enabled: None }",
+        "b::KeyShortcut(p, c, b::KeyShortcutProps { keys: \"escape\", bound: None, enabled: None }",
         "b::default_focus(c, ",
         "c.window(\"tv\")",
         // Keys that type into the search, which suggests.
@@ -331,6 +331,9 @@ fn planner_and_gallery_build_for_gtk() {
         // The about window's first tab shows only its symbol.
         "icon: Some(\"info.circle\"), icon_only: true }",
         "icon: None, icon_only: false }",
+        // The details' keys follow state, and the user chooses them.
+        "b::bound_shortcut(c, b::str(|c| ",
+        "b::ShortcutInput(p, c, b::ShortcutInputProps { id: \"details_key\"",
     ] {
         assert!(ui.contains(expected), "the gallery lacks `{expected}`");
     }

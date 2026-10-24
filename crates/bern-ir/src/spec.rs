@@ -25,8 +25,11 @@ pub enum PropKind {
     SvgResource,
     /// Numeric literal in logical units.
     Number,
-    /// A keyboard shortcut literal such as `"cmd+k"`, `"space"` or
-    /// `"cmd+shift+p"`; see [`parse_shortcut`].
+    /// A keyboard shortcut: a literal such as `"cmd+k"`, `"space"` or
+    /// `"cmd+shift+p"`, checked when the application is built (see
+    /// [`parse_shortcut`]), or a text the shortcut follows while the
+    /// application runs, such as `app.keys.open`, read by the same rules;
+    /// a text that is empty or no shortcut gives none.
     Shortcut,
     /// A length in logical units: a literal, or a numeric expression the
     /// length follows, such as `if window.idle { 0 } else { 24 }`.
@@ -183,15 +186,14 @@ impl ComponentSpec {
                 | "MenuItem"
                 | "SidebarItem"
                 | "Section"
+                | "MenuBar"
+                | "CommandMenu"
+                | "CommandItem"
         )
     }
 }
 
-/// Keys a shortcut may name besides a single printable character.
-pub const SHORTCUT_KEYS: &[&str] = &[
-    "space", "escape", "return", "tab", "delete", "up", "down", "left", "right", "home", "end",
-    "pageup", "pagedown",
-];
+pub use bern_protocol::shortcut::{SHORTCUT_KEYS, parse_shortcut};
 
 /// File categories a control may accept besides `.ext` extensions.
 pub const FILE_KINDS: &[&str] = &["any", "video", "audio", "picture", "folder"];
@@ -271,50 +273,15 @@ pub fn parse_file_kinds(text: &str) -> Result<String, String> {
     Ok(kinds.join(" "))
 }
 
-/// Normalize a keyboard shortcut: modifiers `cmd` (the primary modifier:
-/// Command on Apple systems, Control elsewhere), `ctrl`, `alt` and
-/// `shift`, then one key, joined by `+`, such as `"cmd+k"` or `"space"`.
-pub fn parse_shortcut(text: &str) -> Result<String, String> {
-    let parts: Vec<String> = text
-        .split('+')
-        .map(|part| part.trim().to_lowercase())
-        .collect();
-    let (key, modifiers) = parts.split_last().ok_or("an empty shortcut")?;
-    let mut ordered = Vec::new();
-    for wanted in ["cmd", "ctrl", "alt", "shift"] {
-        match modifiers.iter().filter(|m| *m == wanted).count() {
-            0 => {}
-            1 => ordered.push(wanted.to_string()),
-            _ => return Err(format!("`{wanted}` is written twice")),
-        }
-    }
-    if let Some(other) = modifiers
-        .iter()
-        .find(|m| !["cmd", "ctrl", "alt", "shift"].contains(&m.as_str()))
-    {
-        return Err(format!(
-            "`{other}` is not a modifier; use cmd, ctrl, alt or shift"
-        ));
-    }
-    let printable = key.chars().count() == 1
-        && key
-            .chars()
-            .all(|c| c.is_ascii_graphic() && !c.is_ascii_uppercase());
-    if !printable && !SHORTCUT_KEYS.contains(&key.as_str()) {
-        return Err(format!(
-            "`{key}` is not a key; use one character or one of {}",
-            SHORTCUT_KEYS.join(", ")
-        ));
-    }
-    ordered.push(key.clone());
-    Ok(ordered.join("+"))
-}
-
 /// Properties every element shown in a layout takes: how it appears and
 /// disappears, how its children make room, and which shared element it is.
 /// Navigation containers whose items may sit in `if`, `if let`, `match`
 /// and `ForEach`; each branch and template holds only allowed items.
-pub const DYNAMIC_ITEMS: &[&str] = &["Sidebar", "Tabs", "Toolbar"];
+pub const DYNAMIC_ITEMS: &[&str] = &["Sidebar", "Tabs", "Toolbar", "CommandMenu"];
+
+/// Roles of a `CommandMenu` in the menu bar: the system's menu of that
+/// name takes the items, and the menu shows no title of its own.
+pub const MENU_ROLES: &[&str] = &["app", "file", "edit", "view", "window", "help"];
 
 /// Drawing components: a target without a canvas lists none of them.
 pub const DRAWING: &[&str] = &["Canvas", "Shape", "Series", "Pattern"];
@@ -449,8 +416,48 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("palette", PropKind::KeyValue),
                 opt("appearance", PropKind::KeyValue),
             ],
-            Children::Only(&["Window"]),
-            "Window catalog of a session root",
+            Children::Only(&["Window", "MenuBar"]),
+            "Window catalog of a session root, with the application's `MenuBar`",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["WindowSet"]),
+        ..spec(
+            "MenuBar",
+            &[],
+            Children::Only(&["CommandMenu"]),
+            "The application's menus in the system menu bar, where the platform has one (macOS; `window.menu_bar` holds there): each `CommandMenu` is a menu of its own, or with `role` adds its items to the system's menu of that name. Its items run their commands from any window; the drafts they read and write are the primary window's. Elsewhere it shows nothing",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["MenuBar", "CommandMenu"]),
+        ..spec(
+            "CommandMenu",
+            &[
+                opt("label", PropKind::LocalizedText),
+                opt("role", PropKind::Keyword(MENU_ROLES)),
+            ],
+            Children::Only(&["CommandItem", "CommandMenu", "Divider"]),
+            "A menu of the `MenuBar` titled `label`, or with `role` the system's menu of that name (`app`, `file`, `edit`, `view`, `window`, `help`) taking its items; inside another `CommandMenu` a submenu that opens beside its item; `Divider`s separate groups of items",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["CommandMenu"]),
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "CommandItem",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("shortcut", PropKind::Shortcut),
+                opt("enabled", PropKind::Bool),
+                opt("checked", PropKind::Bool),
+                opt("pick", PropKind::FileField),
+                opt("files", PropKind::FileKinds),
+            ],
+            Children::None,
+            "A command of a `CommandMenu`: the menu shows its `shortcut`, greys it out while `enabled` is false and checks it while `checked` holds; `pick` asks for a file as `Button` does",
         )
     },
     ComponentSpec {
@@ -1387,6 +1394,25 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
+        action: ActionRule::Required,
+        interactive: true,
+        ..spec(
+            "ShortcutInput",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                opt("label_hidden", PropKind::Flag),
+                req("current", PropKind::Shortcut),
+                opt("prompt", PropKind::DisplayText),
+                opt("empty", PropKind::DisplayText),
+                opt("enabled", PropKind::Bool),
+                FEATURE,
+            ],
+            Children::None,
+            "A keyboard shortcut chosen by pressing it: a button showing `current` as the platform writes shortcuts (`empty` while there is none); pressed, it shows `prompt` and takes the next key with its modifiers, Escape leaving it as it was and Delete alone clearing it; the action receives the new shortcut in place of `current`",
+        )
+    },
+    ComponentSpec {
         action: ActionRule::Optional,
         interactive: true,
         ..spec(
@@ -1600,7 +1626,14 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
     }
     if shape.props.contains(&"files")
         && !shape.props.contains(&"pick")
-        && ["Button", "IconButton", "MenuItem", "SearchItem"].contains(&spec.name)
+        && [
+            "Button",
+            "IconButton",
+            "MenuItem",
+            "SearchItem",
+            "CommandItem",
+        ]
+        .contains(&spec.name)
     {
         errors.push(ShapeError {
             prop: Some("files".into()),
@@ -1609,6 +1642,21 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
                 spec.name
             ),
         });
+    }
+    if spec.name == "CommandMenu" {
+        let role = shape.props.contains(&"role");
+        if role == shape.props.contains(&"label") {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a `CommandMenu` takes `label:` for a menu of its own, or `role:` to add its items to the system's menu of that name".into(),
+            });
+        }
+        if role && shape.parent != Some("MenuBar") {
+            errors.push(ShapeError {
+                prop: Some("role".into()),
+                message: "`role:` names a menu of the menu bar; a submenu takes `label:`".into(),
+            });
+        }
     }
     if spec.name == "ScrollView"
         && shape.props.contains(&"arrival")

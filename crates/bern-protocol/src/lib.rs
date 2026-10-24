@@ -13,6 +13,7 @@ pub mod format;
 mod message;
 mod resource;
 mod session;
+pub mod shortcut;
 mod text;
 mod types;
 mod value;

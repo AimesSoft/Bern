@@ -247,6 +247,10 @@ bern package --target android
 
 验证：生成器测试 `an_idle_area_watches_where_the_mouse_rests` 检查生成的 `bernIdleArea` 与窗口参数；一个同时声明 `idle_after`、`landscape` 与 `idle_area` 的临时应用 `bern check` 各目标无警告，`bern build --target android` 编译 Kotlin 并打出 APK。没有在接鼠标的设备上实测。
 
+## 跟随状态的快捷键与改键（2026-10-24）
+
+`BernShortcut` 的键可以是状态里的文本：组合时把当前文本登记进活动的快捷键表，文本变化随重组重新登记。`BernShortcutInput` 是一个色调按钮，按下后把 `BernShortcuts.recorder` 设为它自己：活动的 `dispatchKeyEvent` 先把下一次按键交给它（Ctrl 或 Meta 写作 `cmd`），Esc 与返回键保持原样，单独按 Delete 清空，只按修饰键继续等待；等待期间快捷键不执行。显示文字为 `Ctrl+Shift+K` 的写法，空格键按界面语言。`MenuBar` 不生成。验证：生成器测试（gallery）覆盖生成的调用；`examples/gallery` 用到跟随状态的快捷键与 `ShortcutInput`，`bern build --target android` 编译 Kotlin 并打出 APK；未在设备上运行。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：

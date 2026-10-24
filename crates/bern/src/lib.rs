@@ -23,6 +23,10 @@ pub mod trace {
 pub use bern_command::{CallContext, EngineProtocol, Entry, Host, Subscription};
 pub use bern_command::{files, platform, resources, secrets, storage, wake};
 pub use bern_macros::{component, features, players, protocol, session, style, tr, ui, value};
+/// Keyboard shortcuts as declarations write them, for engines that keep
+/// shortcuts the interface follows: [`shortcut::parse_shortcut`]
+/// normalizes one a user chose.
+pub use bern_protocol::shortcut;
 pub use bern_protocol::{
     CommandError, CommandOutcome, Invocation, LocalizedText, ProtocolDescriptor, SchemaError,
     StateUpdate, Type, Value,

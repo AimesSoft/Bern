@@ -1570,7 +1570,7 @@ let fieldSequence = 0;
 
 /// A form row: the label, then `display`, whose focusable part `input`
 /// the label names.
-function labelled(display, label, stacked, input = display) {
+export function labelled(display, label, stacked, input = display) {
   const id = `bern-field-${++fieldSequence}`;
   input.id = id;
   const caption = el("label", { class: "bern-row-label", for: id });
@@ -1716,7 +1716,11 @@ export function SearchPalette(p, ctx, { id, field, prompt, panelPrompt, width, h
   const caption = el("span", { class: "bern-search-palette-prompt" });
   bindText(caption, prompt ?? (() => ""));
   const trigger = el("button", { class: "bern-search-palette-trigger", type: "button", "aria-haspopup": "dialog", "aria-expanded": "false" }, icon("magnifyingglass", 16), caption);
-  if (shortcut) trigger.append(el("kbd", { class: "bern-search-palette-key", "aria-hidden": "true" }, shortcutText(shortcut)));
+  if (shortcut) {
+    const key = el("kbd", { class: "bern-search-palette-key", "aria-hidden": "true" });
+    bindText(key, () => shortcutText(typeof shortcut === "function" ? shortcut() : shortcut));
+    trigger.append(key);
+  }
   const dialog = el("dialog", { class: "bern-search-palette" });
   const input = el("input", { class: "bern-search-palette-input", type: "search", autocomplete: "off", "aria-autocomplete": "list" });
   if (panelPrompt ?? prompt) {
@@ -1994,17 +1998,32 @@ function naturalHeight(popover) {
 }
 
 /// How a key shortcut such as `cmd+k` reads on this computer: `⌘K` on
-/// Apple's systems, `Ctrl K` elsewhere.
+/// Apple's systems, modifiers as ⌃⌥⇧⌘ and named keys as their symbols;
+/// `Ctrl+K` elsewhere. "" for a text that is no shortcut.
 export function shortcutText(spec) {
   const apple = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? "");
-  const parts = spec.split("+");
+  const parts = String(spec ?? "").toLowerCase().split("+").map((part) => part.trim());
   const key = parts.pop();
-  const names = apple
-    ? { cmd: "⌘", ctrl: "⌃", alt: "⌥", shift: "⇧" }
-    : { cmd: "Ctrl", ctrl: "Ctrl", alt: "Alt", shift: "Shift" };
-  const shown = key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1);
-  const mods = [...new Set(parts.map((part) => names[part] ?? part))];
-  return apple ? [...mods, shown].join("") : [...mods, shown].join(" ");
+  if (!key) return "";
+  const symbols = {
+    escape: "⎋", return: "↩", tab: "⇥", delete: "⌫", up: "↑", down: "↓", left: "←", right: "→",
+    home: "↖", end: "↘", pageup: "⇞", pagedown: "⇟",
+  };
+  const words = {
+    escape: "Esc", return: "Enter", tab: "Tab", delete: "Backspace", up: "↑", down: "↓", left: "←", right: "→",
+    home: "Home", end: "End", pageup: "PgUp", pagedown: "PgDn",
+  };
+  const shown = key === "space" ? tr("bern.shortcut.space")
+    : (apple ? symbols[key] : words[key]) ?? key.toUpperCase();
+  if (apple) {
+    const mods = [["ctrl", "⌃"], ["alt", "⌥"], ["shift", "⇧"], ["cmd", "⌘"]]
+      .filter(([name]) => parts.includes(name)).map(([, symbol]) => symbol);
+    return [...mods, shown].join("");
+  }
+  const mods = [["cmd", "Ctrl"], ["alt", "Alt"], ["shift", "Shift"]]
+    .filter(([name]) => parts.includes(name) || (name === "cmd" && parts.includes("ctrl")))
+    .map(([, word]) => word);
+  return [...mods, shown].join("+");
 }
 
 /// Menus and popovers open from their trigger: from 0.9 of their size to

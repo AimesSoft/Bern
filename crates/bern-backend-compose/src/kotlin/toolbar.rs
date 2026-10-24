@@ -1,7 +1,7 @@
 //! Toolbars, side panels, menus and search.
 
 use super::{Ctx, Generator, Out, Scope};
-use crate::names::{double, float, string};
+use crate::names::{double, float};
 use bern_ir::{Element, Node};
 
 impl Generator<'_> {
@@ -57,10 +57,9 @@ impl Generator<'_> {
         ));
         self.nodes(out, &element.children, &ctx.within(Scope::Column));
         out.close("}");
-        if let Some(shortcut) = element.keyword("shortcut") {
+        if let Some(shortcut) = self.shortcut_keys(element, "shortcut") {
             out.line(format!(
-                "BernShortcut({}) {{ BernSearchPalettes.open({target}) }}",
-                string(shortcut)
+                "BernShortcut({shortcut}) {{ BernSearchPalettes.open({target}) }}"
             ));
         }
     }

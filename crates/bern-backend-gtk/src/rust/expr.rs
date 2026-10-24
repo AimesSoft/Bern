@@ -380,13 +380,27 @@ impl Generator<'_> {
         }
     }
 
-    /// `b::shortcut(…)` for an element with `shortcut`, running `run`.
+    /// `b::shortcut(…)` for an element with `shortcut`, running `run`; a
+    /// shortcut that follows state is `b::bound_shortcut(…)`.
     pub(super) fn shortcut(&self, out: &mut Out, element: &Element, run: &str) {
-        if let Some(keys) = element.keyword("shortcut") {
-            out.line(format!(
+        match element.prop("shortcut") {
+            Some(bern_ir::Prop::Keyword { value }) => out.line(format!(
                 "b::shortcut(c, {}, b::act(|c| {run}));",
-                string(keys)
-            ));
+                string(value)
+            )),
+            Some(bern_ir::Prop::Expr { expr }) => out.line(format!(
+                "b::bound_shortcut(c, b::str(|c| {}), b::act(|c| {run}));",
+                self.display(expr)
+            )),
+            _ => {}
         }
+    }
+
+    /// The text a shortcut prop `name` follows, as a `Str`, when it is not
+    /// a literal.
+    pub(super) fn bound_keys(&self, element: &Element, name: &str) -> Option<String> {
+        element
+            .expr(name)
+            .map(|expr| format!("b::str(|c| {})", self.display(expr)))
     }
 }

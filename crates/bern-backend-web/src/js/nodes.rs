@@ -248,6 +248,7 @@ impl Generator<'_> {
             "Modal" | "Flow" | "Accordion" => self.sized_container(out, element),
             "Timer" => self.timer(out, element),
             "Shortcut" => self.key_shortcut(out, element),
+            "ShortcutInput" => self.shortcut_input(out, element),
             "Svg" => self.svg(out, element),
             "Image" => self.image(out, element),
             "Progress" => self.progress(out, element),
@@ -276,7 +277,9 @@ impl Generator<'_> {
             "Menu" => self.menu(out, element),
             "LanguagePicker" => self.language_picker(out, element),
             "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
-            | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption" => {
+            | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption"
+            // A page has no menu bar.
+            | "MenuBar" | "CommandMenu" | "CommandItem" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

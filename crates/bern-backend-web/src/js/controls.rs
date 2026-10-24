@@ -344,10 +344,30 @@ impl Generator<'_> {
         out.line(format!(
             "F.KeyShortcut(p, ctx, {}, {});",
             Self::props(vec![
-                ("key", Self::keyword(element, "key")),
+                ("key", self.shortcut_keys(element, "key")),
                 ("enabled", self.value_prop(element, "enabled")),
             ]),
             self.action_fn(element)
+        ));
+    }
+
+    /// `ShortcutInput`: a button that takes the next key pressed as the
+    /// shortcut, which the action keeps.
+    pub(super) fn shortcut_input(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "F.ShortcutInput(p, ctx, {});",
+            Self::props(vec![
+                ("id", Some(self.id(element))),
+                ("label", self.text_prop(element, "label")),
+                ("field", self.control_field(element, "current")),
+                ("prompt", self.text_prop(element, "prompt")),
+                ("empty", self.text_prop(element, "empty")),
+                ("enabled", self.value_prop(element, "enabled")),
+                (
+                    "labelHidden",
+                    (element.keyword("label_hidden") == Some("true")).then(|| "true".into()),
+                ),
+            ])
         ));
     }
 

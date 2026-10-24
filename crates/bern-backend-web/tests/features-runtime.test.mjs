@@ -1252,6 +1252,76 @@ test("a disabled shortcut leaves its key to the one under it, and unmounting rem
   assert.equal(press("Escape"), false, "no shortcut, no key taken");
 });
 
+test("a shortcut that follows state takes the keys its text names now", () => {
+  const { B, F, Element, document } = runtime();
+  const keys = B.cell("cmd+o");
+  let ran = 0;
+  const scope = new B.Scope();
+  B.within(scope, () => F.shortcut(() => keys.get(), () => ran++));
+  const press = (init) => {
+    const event = { target: new Element("div"), prevented: false, preventDefault() { this.prevented = true; }, ...init };
+    for (const listener of document.listeners.keydown ?? []) listener(event);
+    return event.prevented;
+  };
+  assert.equal(press({ key: "o", code: "KeyO", metaKey: true }), true);
+  keys.set("alt+p");
+  assert.equal(press({ key: "o", code: "KeyO", metaKey: true }), false, "the old keys are free again");
+  assert.equal(press({ key: "π", code: "KeyP", altKey: true }), true);
+  keys.set("");
+  assert.equal(press({ key: "π", code: "KeyP", altKey: true }), false, "an empty text is no shortcut");
+  assert.equal(ran, 2);
+  scope.dispose();
+});
+
+test("a shortcut input takes the next keys, keeps the shortcut on Escape and clears it on Delete", () => {
+  const { B, F, Element, document } = runtime();
+  document.removeEventListener = function (name, callback) {
+    this.listeners[name] = (this.listeners[name] ?? []).filter((one) => one !== callback);
+  };
+  const root = new Element("root");
+  const keys = B.cell("cmd+o");
+  const chosen = [];
+  const field = { get: () => keys.get(), peek: () => keys.peek(), set: (value) => { chosen.push(value); keys.set(value); } };
+  let played = 0;
+  const scope = new B.Scope();
+  B.within(scope, () => {
+    F.shortcut("space", () => played++);
+    F.ShortcutInput(root, { comp: "settings" }, { id: "open_key", label: () => "Open", field, labelHidden: true });
+  });
+  const button = root.childNodes[0];
+  const text = () => button.childNodes.map((node) => node.textContent ?? node.data ?? "").join("") || button.textContent;
+  assert.equal(text(), "⌘O");
+  const press = (init) => {
+    const event = { target: new Element("div"), preventDefault() {}, stopImmediatePropagation() {}, ...init };
+    for (const listener of [...(document.listeners.keydown ?? [])]) listener(event);
+  };
+  button.dispatch("click");
+  assert.equal(text(), "bern.shortcut.prompt", "waiting shows the prompt");
+  press({ key: " ", code: "Space" });
+  assert.equal(played, 0, "the keys being chosen run nothing");
+  assert.deepEqual(chosen, ["space"]);
+  button.dispatch("click");
+  press({ key: "Escape", code: "Escape" });
+  assert.deepEqual(chosen, ["space"], "Escape leaves the shortcut");
+  button.dispatch("click");
+  press({ key: "Shift", code: "ShiftLeft", shiftKey: true });
+  press({ key: "K", code: "KeyK", metaKey: true, shiftKey: true });
+  assert.deepEqual(chosen, ["space", "cmd+shift+k"], "modifiers alone wait for a key");
+  assert.equal(text(), "⇧⌘K");
+  button.dispatch("click");
+  press({ key: "Backspace", code: "Backspace" });
+  assert.deepEqual(chosen, ["space", "cmd+shift+k", ""], "Delete alone clears it");
+  assert.equal(text(), "bern.shortcut.none");
+  press({ key: " ", code: "Space" });
+  assert.equal(played, 1, "shortcuts take their keys once it stops waiting");
+  const entry = B.controlEntries().find((one) => one.target() === "settings.open_key");
+  entry.actions.edit("Ctrl+Alt+Left");
+  // On a Mac, Control is a modifier of its own.
+  assert.equal(keys.peek(), "ctrl+alt+left", "ui.edit sets a shortcut in Bern's form");
+  scope.dispose();
+  assert.equal((document.listeners.keydown ?? []).length, 1, "the input stops listening once gone");
+});
+
 test("chip pickers in a flow are its items and mark the chosen option", () => {
   const { B, Element } = runtime();
   const root = new Element("root");

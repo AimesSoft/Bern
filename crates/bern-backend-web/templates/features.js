@@ -2232,31 +2232,45 @@ function pressed(event) {
 }
 
 function normalized(shortcut) {
-  const parts = shortcut.toLowerCase().split("+");
+  const parts = shortcut.toLowerCase().split("+").map((part) => part.trim());
   const key = parts.pop();
+  if (!key) return "";
   const order = ["cmd", "ctrl", "alt", "shift"];
   const mods = order.filter((mod) => parts.includes(mod) || (mod === "cmd" && !apple && parts.includes("ctrl")));
   return [...new Set(mods), key].join("+");
 }
 
+/// The keys of a key press as Bern writes a shortcut, `cmd+shift+k`; the
+/// key alone for a key `ShortcutInput` takes. Bare modifiers are no key.
+export function pressedKeys(event) {
+  if (["Shift", "Control", "Alt", "Meta"].includes(event.key)) return null;
+  const keys = pressed(event);
+  return /(^|\+)(unidentified|dead|process)$/.test(keys) ? null : keys;
+}
+
 let listening = false;
+/// The `ShortcutInput` waiting for a key: no shortcut takes keys meanwhile.
+let recordingInput = null;
 
 /// `spec` runs `run` while it is mounted; `active`, when given, says
 /// whether it takes the key now. Of the shortcuts that take a key, the one
-/// mounted last runs.
+/// mounted last runs. A shortcut that follows state is a getter, read at
+/// each key press; a text that is empty or no shortcut takes no key.
 export function shortcut(spec, run, active) {
-  const entry = { keys: normalized(spec), run, active };
+  const fixed = typeof spec === "function" ? null : normalized(spec);
+  const keys = fixed === null ? () => normalized(String(untrack(spec) ?? "")) : () => fixed;
+  const entry = { keys, run, active };
   shortcuts.push(entry);
   onCleanup(() => shortcuts.splice(shortcuts.indexOf(entry), 1));
   if (listening) return;
   listening = true;
   document.addEventListener("keydown", (event) => {
-    if (event.isComposing) return;
+    if (event.isComposing || recordingInput) return;
     // Let the focused menu or native popover handle Escape before an app's
     // window-level shortcut (for example leaving the player) can act on it.
     if (event.key === "Escape" && document.querySelector('[popover="auto"]:popover-open')) return;
     const keys = pressed(event);
-    const found = [...shortcuts].reverse().find((one) => one.keys === keys && (!one.active || one.active()));
+    const found = [...shortcuts].reverse().find((one) => one.keys() === keys && (!one.active || one.active()));
     if (!found) return;
     const editing = event.target.closest?.("input, textarea, [contenteditable]");
     if (editing && !/^(cmd|ctrl|alt)\+/.test(keys)) return;
@@ -2272,6 +2286,70 @@ export function KeyShortcut(p, ctx, { key, enabled }, action) {
   const active = enabled === undefined ? undefined
     : () => Boolean(typeof enabled === "function" ? untrack(enabled) : enabled);
   shortcut(key, () => untrack(action), active);
+}
+
+/// `ShortcutInput`: a button showing the shortcut as this computer writes
+/// it; pressed, it takes the next key with its modifiers. Escape leaves the
+/// shortcut as it was, Delete or Backspace alone clears it, and a press
+/// elsewhere stops waiting. While it waits, keys reach no other shortcut.
+export function ShortcutInput(p, ctx, { id, label, field, prompt, empty, enabled, labelHidden }) {
+  const node = el("button", { class: "bern-button bern-button-standard bern-shortcut-input", type: "button" });
+  const recording = B.cell(false);
+  const isEnabled = enabled ?? (() => true);
+  B.bindText(node, () => {
+    if (recording.get()) return prompt ? prompt() : B.tr("bern.shortcut.prompt");
+    const text = B.shortcutText(field.get() ?? "");
+    return text || (empty ? empty() : B.tr("bern.shortcut.none"));
+  });
+  effect(() => {
+    node.disabled = !isEnabled();
+    if (node.disabled) recording.set(false);
+  });
+  effect(() => {
+    const now = recording.get();
+    node.setAttribute("aria-pressed", now ? "true" : "false");
+    if (now) recordingInput = node;
+    else if (recordingInput === node) recordingInput = null;
+  });
+  onCleanup(() => { if (recordingInput === node) recordingInput = null; });
+  const take = (event) => {
+    if (!recording.peek() || event.isComposing) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (event.key === "Escape") {
+      recording.set(false);
+      return;
+    }
+    const keys = pressedKeys(event);
+    if (!keys) return;
+    recording.set(false);
+    field.set(keys === "delete" ? "" : keys);
+  };
+  const outside = (event) => {
+    if (recording.peek() && event.target !== node) recording.set(false);
+  };
+  document.addEventListener("keydown", take, true);
+  document.addEventListener("pointerdown", outside, true);
+  onCleanup(() => {
+    document.removeEventListener("keydown", take, true);
+    document.removeEventListener("pointerdown", outside, true);
+  });
+  node.addEventListener("click", () => recording.set(!recording.peek()));
+  B.mark(node, ctx, id);
+  B.control(ctx, {
+    target: () => B.target(ctx, id), role: "shortcut_input", label, enabled: isEnabled,
+    actions: {
+      edit: (text) => {
+        const keys = normalized(String(text ?? ""));
+        field.set(keys);
+      },
+      value: () => field.peek() ?? "",
+    },
+  });
+  if (labelHidden) {
+    B.bindAttr(node, "aria-label", label);
+    p.append(node);
+  } else p.append(B.labelled(node, label, false));
 }
 
 /// Focus the control at `target`, as `ui.focus` does: search fields only.

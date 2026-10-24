@@ -118,6 +118,9 @@ pub struct WindowState {
     pub tv: <bool as BernValue>::Ref,
     /// Build-time availability of a web document engine.
     pub webview: <bool as BernValue>::Ref,
+    /// Whether the application's `MenuBar` shows in a system menu bar,
+    /// known when the application is built for a platform.
+    pub menu_bar: <bool as BernValue>::Ref,
 }
 
 pub fn window() -> WindowState {
@@ -131,5 +134,6 @@ pub fn window() -> WindowState {
         short: bool::reference(),
         tv: bool::reference(),
         webview: bool::reference(),
+        menu_bar: bool::reference(),
     }
 }

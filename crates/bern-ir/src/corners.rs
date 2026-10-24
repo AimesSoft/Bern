@@ -2,7 +2,8 @@
 //! (`corner { card: 22 }`) and gives other values on some platforms
 //! (`#[target(windows)] corner { card: 8 }`); elements and style rules use
 //! the names. Before a target generates, the names in elements become the
-//! numbers they have on its platform.
+//! numbers they have on its platform, and `window.menu_bar` what it is
+//! there.
 
 use crate::{Application, Expr, ExprKind, Node, Prop};
 use bern_protocol::Value;
@@ -10,8 +11,10 @@ use bern_protocol::Value;
 impl Application {
     /// This application with every named corner of its elements at the
     /// radius it has on `platform` (`macos`, `windows`, `browser`, …).
+    /// `window.menu_bar` holds on macOS, whose menu bar shows the
+    /// application's `MenuBar`, and nowhere else.
     pub fn on_platform(&self, platform: &str) -> Application {
-        let mut app = self.clone();
+        let mut app = self.with_menu_bar(platform == "macos");
         if app.style.corners.is_empty() {
             return app;
         }

@@ -23,6 +23,7 @@ impl Application {
             layouts: self.layouts,
             television: true,
             webview: None,
+            menu_bar: Some(false),
         };
         self.pruned(&window)
     }
@@ -34,6 +35,19 @@ impl Application {
             layouts: self.layouts,
             television: false,
             webview: Some(enabled),
+            menu_bar: None,
+        })
+    }
+
+    /// This application where the `MenuBar` does (`shown`) or does not show
+    /// in a system menu bar: `window.menu_bar` is known, and the branches it
+    /// leaves out vanish with the components only they place.
+    pub fn with_menu_bar(&self, shown: bool) -> Application {
+        self.pruned(&Known {
+            layouts: self.layouts,
+            television: false,
+            webview: None,
+            menu_bar: Some(shown),
         })
     }
 
@@ -44,6 +58,12 @@ impl Application {
         }
         for content in app.windows.windows.iter_mut().map(|w| &mut w.content) {
             *content = single(window.prune_node(content));
+        }
+        if let Some(bar) = &mut app.windows.menu_bar
+            && let [Node::Element(pruned)] =
+                window.prune_node(&Node::Element(bar.clone())).as_slice()
+        {
+            *bar = pruned.clone();
         }
         // Components placed from what is left, starting at the windows.
         let mut reached = BTreeSet::new();
@@ -77,6 +97,8 @@ struct Known {
     layouts: Option<LayoutConfig>,
     television: bool,
     webview: Option<bool>,
+    /// Whether the application's `MenuBar` shows in a system menu bar.
+    menu_bar: Option<bool>,
 }
 
 impl Known {
@@ -89,6 +111,7 @@ impl Known {
                 binding: Binding::Window { field },
             } => match field.as_str() {
                 "webview" => self.webview,
+                "menu_bar" => self.menu_bar,
                 _ if !self.television => None,
                 "tv" => Some(true),
                 "landscape" => Some(true),

@@ -1359,13 +1359,15 @@ final class BernRemoteShortcuts {
 extension View {
     /// While on screen and enabled, the remote's button for `key` runs
     /// `action`.
-    func bernRemoteShortcut(_ key: BernRemoteKey, enabled: Bool, action: @escaping () -> Void) -> some View {
+    /// A key that follows state may be none for a while: the button
+    /// does nothing then.
+    func bernRemoteShortcut(_ key: BernRemoteKey?, enabled: Bool, action: @escaping () -> Void) -> some View {
         modifier(BernRemoteShortcut(key: key, enabled: enabled, action: action))
     }
 }
 
 private struct BernRemoteShortcut: ViewModifier {
-    let key: BernRemoteKey
+    let key: BernRemoteKey?
     let enabled: Bool
     let action: () -> Void
     @Environment(BernWindowContext.self) private var window
@@ -1385,17 +1387,19 @@ private struct BernRemoteShortcut: ViewModifier {
                 update()
             }
             .onChange(of: enabled) { update() }
+            .onChange(of: key) { update() }
     }
 
     private func update() {
-        let wanted = shown && enabled
-        if wanted, entry == nil {
-            let made = BernRemoteShortcuts.Entry(key: key, window: window.kindID, action: action)
-            BernRemoteShortcuts.shared.add(made)
-            entry = made
-        } else if !wanted, let entry {
+        let wanted = shown && enabled ? key : nil
+        if let entry, entry.key != wanted {
             BernRemoteShortcuts.shared.remove(entry)
             self.entry = nil
+        }
+        if let wanted, entry == nil {
+            let made = BernRemoteShortcuts.Entry(key: wanted, window: window.kindID, action: action)
+            BernRemoteShortcuts.shared.add(made)
+            entry = made
         }
     }
 }

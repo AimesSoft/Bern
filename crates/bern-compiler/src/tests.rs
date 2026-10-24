@@ -4325,3 +4325,140 @@ fn runtime_palette_requires_text_and_is_optional() {
             .any(|e| e.to_string().contains("`palette` is a text binding"))
     );
 }
+
+/// `wrap`'s project with a `MenuBar` of `menus` in the window set, whose
+/// root reads the main window's `Draft`.
+fn with_menu_bar(body: &str, menus: &str) -> String {
+    wrap(body)
+        .replace(
+            "pub fn app(app: demo::Client, windows: AppWindows) -> impl View {",
+            "pub fn app(app: demo::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {",
+        )
+        .replace(
+            "                about_page()\n            }\n",
+            &format!("                about_page()\n            }}\n            {menus}\n"),
+        )
+}
+
+#[test]
+fn the_menu_bar_lowers_into_the_window_catalog_with_the_primary_windows_drafts() {
+    let ui = with_menu_bar(
+        "Spacer",
+        r#"MenuBar {
+                CommandMenu(role: file) {
+                    CommandItem(id: open, label: tr! { "en" => "Open", "ja" => "開く" }, shortcut: "cmd+o", pick: draft.file, files: "video") => app.add(1)
+                }
+                CommandMenu(label: tr! { "en" => "Count", "ja" => "数" }) {
+                    CommandItem(id: add, label: tr! { "en" => "Add", "ja" => "追加" }, shortcut: app.title, enabled: app.count > 0, checked: draft.on) => app.add(1)
+                    Divider
+                    CommandMenu(label: tr! { "en" => "More", "ja" => "他" }) {
+                        if app.count > 2 {
+                            CommandItem(id: about, label: tr! { "en" => "About", "ja" => "情報" }) => windows.about.open()
+                        }
+                    }
+                }
+            }"#,
+    );
+    let app = compile_ui(&ui).unwrap_or_else(|e| panic!("{e:?}")).app;
+    let bar = app.windows.menu_bar.as_ref().expect("the menu bar");
+    assert_eq!(bar.children.len(), 2);
+    let main = app.window("main").unwrap();
+    assert!(
+        main.sessions.iter().any(|session| session == "Draft"),
+        "the primary window owns the drafts the menu bar reads: {:?}",
+        main.sessions
+    );
+    let json = serde_json::to_string(bar).unwrap();
+    assert!(json.contains("\"shortcut\":{\"kind\":\"expr\""), "{json}");
+    // `window.menu_bar` holds on macOS alone, decided before targets see it.
+    let page = |app: &bern_ir::Application| {
+        serde_json::to_string(&app.component("page").unwrap().body).unwrap()
+    };
+    let probe = compile_ui(&with_menu_bar(
+        r#"Column { if window.menu_bar { Text(content: tr! { "en" => "Mac", "ja" => "Mac" }) } else { Spacer } }"#,
+        "MenuBar { CommandMenu(role: help) { CommandItem(id: about, label: tr! { \"en\" => \"About\", \"ja\" => \"情報\" }) => windows.about.open() } }",
+    ))
+    .unwrap()
+    .app;
+    assert!(page(&probe.on_platform("macos")).contains("\"Text\""));
+    assert!(!page(&probe.on_platform("windows")).contains("\"Text\""));
+    assert!(!page(&probe.on_platform("macos")).contains("menu_bar"));
+}
+
+#[test]
+fn menu_bar_shapes_are_checked() {
+    for (menus, expected) in [
+        (
+            "MenuBar { CommandMenu { CommandItem(id: a, label: tr! { \"en\" => \"A\", \"ja\" => \"A\" }) => app.add(1) } }",
+            "takes `label:` for a menu of its own, or `role:`",
+        ),
+        (
+            "MenuBar { CommandMenu(label: tr! { \"en\" => \"A\", \"ja\" => \"A\" }) { CommandMenu(role: file) { Divider } } }",
+            "a submenu takes `label:`",
+        ),
+        (
+            "MenuBar { CommandMenu(role: view) { Button(id: b, label: tr! { \"en\" => \"B\", \"ja\" => \"B\" }) => app.add(1) } }",
+            "cannot contain `Button`",
+        ),
+        (
+            "MenuBar { CommandMenu(role: view) { CommandItem(id: a, label: tr! { \"en\" => \"A\", \"ja\" => \"A\" }) } }",
+            "B301",
+        ),
+        (
+            "MenuBar { CommandMenu(role: view) { Divider } } MenuBar { CommandMenu(role: help) { Divider } }",
+            "has one `MenuBar`",
+        ),
+    ] {
+        let errors = match compile_ui(&with_menu_bar("Spacer", menus)) {
+            Ok(_) => panic!("expected `{menus}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(errors.contains(expected), "`{menus}`: {errors}");
+    }
+    let errors =
+        errors(r#"CommandItem(id: a, label: tr! { "en" => "A", "ja" => "A" }) => app.add(1)"#);
+    assert!(
+        errors.contains("may only appear directly inside CommandMenu"),
+        "{errors}"
+    );
+}
+
+#[test]
+fn shortcuts_follow_text_and_shortcut_inputs_keep_state() {
+    let app = compile_ui(&wrap(
+        r#"Column {
+            Button(id: add, label: tr! { "en" => "Add", "ja" => "追加" }, shortcut: app.title) => app.add(1)
+            Shortcut(key: draft.name) => app.add(1)
+            ShortcutInput(id: key, label: tr! { "en" => "Key", "ja" => "キー" }, current: app.title) => app.add(1)
+        }"#,
+    ))
+    .unwrap_or_else(|e| panic!("{e:?}"))
+    .app;
+    let json = serde_json::to_string(&app.component("page").unwrap().body).unwrap();
+    assert!(json.matches("\"kind\":\"expr\"").count() >= 3, "{json}");
+    for (body, expected) in [
+        (
+            r#"Button(id: add, label: tr! { "en" => "Add", "ja" => "追加" }, shortcut: app.count) => app.add(1)"#,
+            "a shortcut",
+        ),
+        (
+            r#"Shortcut(key: true) => app.add(1)"#,
+            "a text it follows such as `app.keys.open`",
+        ),
+        (
+            r#"ShortcutInput(id: key, label: tr! { "en" => "Key", "ja" => "キー" }, current: "cmd+k") => app.add(1)"#,
+            "`current` is the shortcut the state holds",
+        ),
+        (
+            r#"ShortcutInput(id: key, label: tr! { "en" => "Key", "ja" => "キー" }, current: app.title)"#,
+            "B301",
+        ),
+    ] {
+        let errors = errors(body);
+        assert!(errors.contains(expected), "`{body}`: {errors}");
+    }
+}

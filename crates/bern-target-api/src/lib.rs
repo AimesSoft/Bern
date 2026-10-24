@@ -133,6 +133,18 @@ pub mod feature {
     /// Keyboard `shortcut`s of buttons, menu items, switches and search
     /// fields; without them the controls work from the pointer only.
     pub const SHORTCUTS: &str = "shortcuts";
+    /// Shortcuts that follow state, such as `shortcut: app.keys.open` and
+    /// `Shortcut(key: app.keys.back)`: the runtime reads the text each time
+    /// it changes; without it a shortcut is a literal.
+    pub const BOUND_SHORTCUTS: &str = "bound_shortcuts";
+    /// `ShortcutInput`: a button that takes the next key pressed, with its
+    /// modifiers, as a shortcut.
+    pub const SHORTCUT_INPUT: &str = "shortcut_input";
+    /// `MenuBar` in the `WindowSet`: the application's menus in the system
+    /// menu bar. A target whose platform has no menu bar for applications
+    /// lists it as well: there the menus show nowhere, `window.menu_bar`
+    /// is false, and nothing is left to warn about.
+    pub const MENU_BAR: &str = "menu_bar";
     /// `WindowSet(accent:, appearance:)` chosen at run time; without it the
     /// windows keep the system's accent and appearance.
     pub const RUNTIME_THEME: &str = "runtime_theme";

@@ -1615,6 +1615,48 @@ Shortcut(key: "space", enabled: app.has_video) => app.toggle_pause()
 
 电视没有键盘，`Shortcut` 与控件的 `shortcut` 对应 Siri Remote 的按键：`escape` 是返回（菜单）键，`space` 是播放/暂停键，方向键是触控板的方向，只在焦点无处可移时到达快捷键（否则移动焦点）；带修饰键的组合在电视上没有对应按键。Android TV 同样如此：遥控器的返回键对应 `escape`、播放/暂停键对应 `space`，方向键先移动焦点，焦点移不动时才交给快捷键。同一个键有多个启用的快捷键时，最后显示的那个生效，停用的把键让给之前显示的（tvOS、Web、Compose、GTK 如此；macOS、iOS 与 WinUI 3 上同键的先后由系统决定，未验证）；没有返回键的快捷键时，返回交给系统（关闭全屏页、回到主屏幕）。实现进度：tvOS 模拟器上实测方向键；Web 运行时测试覆盖停用让键；返回与播放/暂停、Android TV、其他目标的 `Shortcut` 按键未实测。
 
+#### 跟随状态的快捷键与改键
+
+快捷键也可以跟随状态：`shortcut:` 与 `Shortcut(key:)` 除了字面量，还可以写一段文本绑定，例如 `shortcut: app.keys.open`。文本的写法与字面量相同（`cmd+o`、`space`），运行时每次变化都按同样的规则读取；空文本或读不成快捷键的文本表示没有快捷键，控件照常可用，只是没有按键。字面量仍在编译时检查。引擎保存用户选的键之前用 `bern::shortcut::parse_shortcut` 规范化，判断两段键在某个系统上是不是同一组按键用 `bern::shortcut::same_keys`（苹果系统以外 `cmd` 与 `ctrl` 都是 Control）。目标能力 `bound_shortcuts`。
+
+```rust
+Button(id: open, label: tr! { "zh-Hans" => "打开", "en" => "Open" }, pick: draft.file, files: "video", shortcut: app.keys.open) => app.open(draft.file)
+Shortcut(key: app.keys.back) => app.close_details()
+ShortcutInput(id: open_key, label: tr! { "zh-Hans" => "打开文件", "en" => "Open File" }, current: app.keys.open) => app.set_open_key(app.keys.open)
+```
+
+`ShortcutInput` 让用户按下新的组合键来改键：它是一个系统按钮，按平台的写法显示 `current`（苹果系统上 `⇧⌘O`，其他系统 `Ctrl+Shift+O`，空格键按界面语言写出），没有快捷键时显示 `empty`（默认“无”）。按下按钮后显示 `prompt`（默认“按下快捷键…”）并等待下一次按键：带修饰键的组合按 Bern 的写法交给动作（动作参数中与 `current` 相同的表达式换成新值，与受控控件一样），只按修饰键继续等待，Esc 保持原样，单独按 Delete（退格）清空；再按一次按钮或点到别处也停止等待。等待期间按键不触发任何快捷键与菜单项。外部入口用 `ui.edit` 直接设定（`cmd+shift+o`，空文本清空）。`current` 必须是状态，不能是字面量；冲突、保存与恢复默认由应用的引擎决定。目标能力 `shortcut_input`。
+
+实现：SwiftUI 用 `KeyboardShortcut?` 与可选的遥控按键（tvOS），`ShortcutInput` 在 macOS 上用应用内的按键监视器、在 iOS 上用硬件键盘的 `onKeyPress`，tvOS 只显示快捷键；Web 在每次按键时读取文本，`ShortcutInput` 在捕获阶段取键；Compose 在活动的快捷键表里登记当前文本，`ShortcutInput` 经活动的 `dispatchKeyEvent` 取键（返回键等同 Esc）；GTK 在每次按键时读取文本，`ShortcutInput` 经窗口的捕获阶段按键控制器取键；WinUI 3 随文本重建 `KeyboardAccelerator`，`ShortcutInput` 在按钮的 `PreviewKeyDown` 取键并在等待时停用加速键。实现进度（2026-10-24）：macOS 上用 `examples/gallery` 实测——改键后旧键失效、新键生效，`ShortcutInput` 录下 ⌃⌘F、Esc 保持、Delete 清空；SwiftUI 测试按 macOS、iOS、tvOS 的 SDK 类型检查；Web 运行时测试覆盖跟随状态的键、录制、Esc、Delete 与 `ui.edit`；GTK 运行时的单元测试覆盖按键的写法与每次读取；Compose 随 `examples/gallery` 的 Android 构建编译，未在设备上运行；WinUI 3 只经过生成器测试，C++ 未编译。
+
+### 菜单栏
+
+应用的菜单写在 `WindowSet` 里的 `MenuBar` 中：每个 `CommandMenu` 是菜单栏上的一个菜单，或用 `role` 把其中的项加进系统的同名菜单（`app` 应用菜单、`file`、`edit`、`view`、`window`、`help`）；`CommandMenu` 里再放 `CommandMenu` 是在该项旁展开的子菜单；`Divider` 分隔各组。`CommandItem` 是一个命令：`label`、绑定的动作、可选的 `shortcut`（字面量或跟随状态）、可绑定的 `enabled`（为假时变灰）与 `checked`（为真时打勾），`pick` 与 `files` 与按钮一样先选文件。菜单里可以写 `if`、`match` 与 `ForEach`。
+
+```rust
+WindowSet(handle: AppWindows, primary: main) {
+    Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, initial: open) { page(app: app) }
+    MenuBar {
+        CommandMenu(role: file) {
+            CommandItem(id: open, label: tr! { "zh-Hans" => "打开…", "en" => "Open…" }, shortcut: app.keys.open, pick: draft.file, files: "video") => app.open(draft.file)
+        }
+        CommandMenu(label: tr! { "zh-Hans" => "播放", "en" => "Playback" }) {
+            CommandItem(id: play, label: tr! { "zh-Hans" => "播放 / 暂停", "en" => "Play / Pause" }, shortcut: "space", enabled: app.has_video) => app.toggle_pause()
+            Divider
+            CommandMenu(label: tr! { "zh-Hans" => "倍速", "en" => "Speed" }) {
+                CommandItem(id: double, label: tr! { "zh-Hans" => "2×", "en" => "2×" }, checked: app.speed == Speed::Double) => app.set_speed(Speed::Double)
+            }
+        }
+    }
+}
+```
+
+菜单栏属于应用而不属于某个窗口：菜单项从任何窗口都能执行，它们读写的草稿是主窗口（`primary`）的，根组件用 `#[session]` 参数声明，主窗口因此拥有这些草稿；主窗口关闭时菜单项读写一份新的草稿。外部入口把菜单项列为 `menu_bar.<id>`（角色 `menu_item`），`ui.activate` 与在菜单里选择它相同。
+
+只有系统菜单栏属于应用的平台显示 `MenuBar`：macOS。表达式可以读 `window.menu_bar`，它在构建每个平台时就已知（macOS 为真，其他为假），用来只在 Mac 上显示只有菜单才有的设置，例如这些菜单项的快捷键。iOS、tvOS、Android、Linux、Windows 与网页没有应用菜单栏，目标能力 `menu_bar` 在那里“不适用”：接受声明，什么也不生成，不警告；菜单项的命令应当另有界面入口。
+
+预期实现：SwiftUI 的 `.commands`：自己的菜单是 `CommandMenu`，系统菜单是 `CommandGroup`（`app` 在设置项之后、`file` 替换新建文档项、`edit` 在剪贴板项之后、`view` 在工具栏项之前、`window` 在窗口排列项之后、`help` 替换帮助项），每个菜单的项是一个视图，因此启用、勾选与快捷键随状态更新。实现进度（2026-10-24）：macOS 已实现，用 `examples/gallery` 与一个实际应用实测：菜单出现在菜单栏，系统菜单的项在对应位置，子菜单展开，`ui.activate` 与真实点击菜单项都执行命令，草稿与引擎状态变化后勾选和启用随之更新（读菜单的辅助功能属性验证）。
+
 ### 起始焦点
 
 `Button` 与 `IconButton` 可写 `default_focus: true`：界面出现时焦点从它开始。电视上焦点就是遥控器操作的位置，每个界面应给出起始焦点，例如引导的“继续”、播放器的暂停。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），标签页的每页各是一个焦点区域；其他平台上是键盘焦点：SwiftUI 的 `FocusState`，Web 的 `focus()`，Compose 的 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点。实现进度：tvOS 模拟器实测；其他目标未实测。
@@ -2543,6 +2585,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 | 版本 | 主要内容 |
 | --- | --- |
+| v0.40 | 跟随状态的快捷键：`shortcut:` 与 `Shortcut(key:)` 可绑定文本，六个目标运行时读取；`ShortcutInput` 按下新的组合键改键；`MenuBar`、`CommandMenu`、`CommandItem`：应用的菜单栏菜单、系统菜单里的项与子菜单，项有动作、快捷键、可绑定的启用与勾选，macOS 实现，其他目标不适用；`window.menu_bar`；引擎侧的 `bern::shortcut` |
 | v0.39 | 现在与本地时区（`bern::date::now()`，浏览器取页面的时钟）；引擎在别处做的工作：命令把耗时工作交给别的线程，完成后用 `bern::wake::Waker` 唤醒引擎收进结果；应用的数据与缓存文件夹（`bern::storage::data_dir / cache_dir`，按各平台规范）；系统凭据库中的机密（`bern::secrets`） |
 | v0.38 | 输入框 `submit: clear` 与按钮 `clears: draft.x`：发送后清空草稿并交出焦点 |
 | v0.37 | 静置区 `idle_area: 秒数`：页面上有静置区时，鼠标只在其上停住才让窗口静置 |

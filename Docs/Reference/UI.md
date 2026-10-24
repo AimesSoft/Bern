@@ -1,6 +1,6 @@
 # 当前组件用法
 
-更新：2026-10-19。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
+更新：2026-10-24。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
 
 ## 声明与数据来源
 
@@ -218,6 +218,33 @@ Tabs(id: tv_tabs, selection: draft.page) {
 ```
 
 各目标的范围见[平台能力表](Platforms.md)，tvOS 的焦点、遥控与缩放场景见 [tvOS 实现记录](../Implementation/tvOS-SwiftUI.md)。
+
+## 菜单栏与可改的快捷键
+
+- `shortcut:` 与 `Shortcut(key:)` 可以绑定文本，快捷键跟随它：`shortcut: app.keys.open`。文本按快捷键的写法读取（`cmd+shift+o`），空文本或读不成快捷键时没有快捷键。引擎用 `bern::shortcut::parse_shortcut` 规范化用户选的键，用 `bern::shortcut::same_keys` 判断两段键是不是同一组按键。
+- `ShortcutInput(id:, label:, current: app.keys.x) => app.set_key(app.keys.x)` 是改键的按钮：显示当前快捷键（没有时显示 `empty`），按下后等待新的组合键（显示 `prompt`），Esc 保持原样，单独按 Delete 清空；等待时按键不触发其他快捷键。冲突、保存与恢复默认由应用的引擎处理。
+- `WindowSet` 里的 `MenuBar` 是应用的菜单：`CommandMenu(label:)` 是自己的菜单，`CommandMenu(role: file)` 等把项加进系统的同名菜单，嵌套的 `CommandMenu` 是子菜单，`Divider` 分组；`CommandItem` 有动作、`shortcut`、`enabled`（变灰）、`checked`（打勾）与 `pick`。菜单项读写的草稿属于主窗口，根组件用 `#[session]` 参数声明。
+- 只有 macOS 显示菜单栏；其他目标接受声明但不显示（能力 `menu_bar` 不适用，不警告）。`window.menu_bar` 在构建时已知，macOS 为真，用来只在 Mac 上显示菜单才有的设置。
+
+```rust
+WindowSet(handle: AppWindows, primary: main) {
+    Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, initial: open) { page(app: app) }
+    MenuBar {
+        CommandMenu(role: file) {
+            CommandItem(id: open, label: tr! { "zh-Hans" => "打开…", "en" => "Open…" }, shortcut: app.keys.open, pick: draft.file, files: "video") => app.open(draft.file)
+        }
+        CommandMenu(label: tr! { "zh-Hans" => "播放", "en" => "Playback" }) {
+            CommandItem(id: play, label: tr! { "zh-Hans" => "播放 / 暂停", "en" => "Play / Pause" }, shortcut: app.keys.play, enabled: app.has_video) => app.toggle_pause()
+            Divider
+            CommandMenu(label: tr! { "zh-Hans" => "倍速", "en" => "Speed" }) {
+                CommandItem(id: double, label: tr! { "zh-Hans" => "2×", "en" => "2×" }, checked: app.speed == Speed::Double) => app.set_speed(Speed::Double)
+            }
+        }
+    }
+}
+```
+
+各目标的范围见[平台能力表](Platforms.md)，语义与实现进度见[设计文档的快捷键与菜单栏](../Design.md#菜单栏)。
 
 ## 其他接口
 

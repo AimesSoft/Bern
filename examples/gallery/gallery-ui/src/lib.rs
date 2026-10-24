@@ -76,15 +76,37 @@ pub struct GalleryDraft {
     pub volume: f64,
 }
 
+/// The windows, and the menus of the menu bar where the platform has one:
+/// its items toggle the main window's details and choose the accent.
 #[component]
-pub fn app(app: gallery::Client, windows: AppWindows) -> impl View {
+pub fn app(app: gallery::Client, windows: AppWindows, #[session] draft: GalleryDraft) -> impl View {
     ui! {
         WindowSet(handle: AppWindows, primary: main, accent: app.accent, appearance: app.appearance) {
             Window(id: main, title: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, initial: open, width: 900, height: 600, idle_after: 3) {
                 main_window(app: app, windows: windows)
             }
             Window(id: about, title: tr! { "zh-Hans" => "关于图案集", "en" => "About Gallery" }, role: dialog, width: 360, height: 360) {
-                about(windows: windows)
+                about(app: app, windows: windows)
+            }
+            MenuBar {
+                CommandMenu(role: file) {
+                    CommandItem(id: menu_open, label: tr! { "zh-Hans" => "打开视频…", "en" => "Open Video…" }, pick: draft.file, files: "video") => app.play(draft.file)
+                }
+                CommandMenu(label: tr! { "zh-Hans" => "图案", "en" => "Patterns" }) {
+                    CommandItem(id: menu_details, label: tr! { "zh-Hans" => "详情", "en" => "Details" }, checked: draft.details) => draft.details.toggle()
+                    CommandItem(id: menu_close_details, label: tr! { "zh-Hans" => "关闭详情", "en" => "Close the Details" }, enabled: draft.details) => draft.details.set(false)
+                    CommandItem(id: menu_clear, label: tr! { "zh-Hans" => "清除收藏", "en" => "Clear Favorites" }) => app.clear_favorites()
+                    Divider
+                    CommandMenu(label: tr! { "zh-Hans" => "强调色", "en" => "Accent" }) {
+                        CommandItem(id: menu_crimson, label: tr! { "zh-Hans" => "绯红", "en" => "Crimson" }, checked: app.accent == Accent::Crimson) => app.set_accent(Accent::Crimson)
+                        CommandItem(id: menu_ultramarine, label: tr! { "zh-Hans" => "群青", "en" => "Ultramarine" }, checked: app.accent == Accent::Ultramarine) => app.set_accent(Accent::Ultramarine)
+                        CommandItem(id: menu_neon, label: tr! { "zh-Hans" => "荧绿", "en" => "Neon" }, checked: app.accent == Accent::Neon) => app.set_accent(Accent::Neon)
+                    }
+                }
+                // The about window in place of a help book the gallery has not.
+                CommandMenu(role: help) {
+                    CommandItem(id: menu_about, label: tr! { "zh-Hans" => "关于图案集", "en" => "About Gallery" }) => windows.about.open()
+                }
             }
         }
     }
@@ -107,7 +129,7 @@ pub struct AboutDraft {
 /// The about window: its first tab shows only its symbol, beside a tab
 /// that shows only its name.
 #[component]
-pub fn about(windows: AppWindows, #[session] draft: AboutDraft) -> impl View {
+pub fn about(app: gallery::Client, windows: AppWindows, #[session] draft: AboutDraft) -> impl View {
     ui! {
         Tabs(id: about_pages, selection: draft.page) {
             Tab(value: AboutPage::About, label: tr! { "zh-Hans" => "关于", "en" => "About" }, icon: "info.circle", display: icon) {
@@ -121,7 +143,12 @@ pub fn about(windows: AppWindows, #[session] draft: AboutDraft) -> impl View {
                 Column(gap: 8, padding: 24) {
                     Text(content: tr! { "zh-Hans" => "⌘O（Ctrl+O）打开视频", "en" => "⌘O (Ctrl+O) opens a video" })
                     Text(content: tr! { "zh-Hans" => "⌘K（Ctrl+K）搜索图案", "en" => "⌘K (Ctrl+K) searches the patterns" })
-                    Text(content: tr! { "zh-Hans" => "⌘⌥I（Ctrl+Alt+I）显示详情", "en" => "⌘⌥I (Ctrl+Alt+I) shows the details" })
+                    // The details' keys are the user's to choose.
+                    Form {
+                        Section {
+                            ShortcutInput(id: details_key, label: tr! { "zh-Hans" => "显示详情", "en" => "Show the Details" }, current: app.details_key) => app.set_details_key(app.details_key)
+                        }
+                    }
                 }
             }
         }
@@ -165,7 +192,7 @@ pub fn main_window(
                         MenuItem(id: choose_poster, label: tr! { "zh-Hans" => "换海报…", "en" => "Choose Poster…" }, pick: draft.picture, files: "picture") => app.set_poster(draft.picture)
                     }
                     Divider
-                    Switch(id: show_details, label: tr! { "zh-Hans" => "详情", "en" => "Details" }, value: draft.details, style: button, icon: "sidebar.right", shortcut: "cmd+alt+i")
+                    Switch(id: show_details, label: tr! { "zh-Hans" => "详情", "en" => "Details" }, value: draft.details, style: button, icon: "sidebar.right", shortcut: app.details_key)
                     // The patterns show as soon as the field is in use.
                     Search(id: find, value: draft.query, prompt: tr! { "zh-Hans" => "搜索图案", "en" => "Search Patterns" }, shortcut: "cmd+k", suggest: true) {
                         Query(

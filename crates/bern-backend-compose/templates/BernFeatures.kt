@@ -364,11 +364,24 @@ object BernShortcuts {
     fun isArrow(event: android.view.KeyEvent): Boolean =
         event.keyCode in android.view.KeyEvent.KEYCODE_DPAD_UP..android.view.KeyEvent.KEYCODE_DPAD_RIGHT
 
+    /// The `ShortcutInput` waiting for a key: it takes every key meanwhile,
+    /// and no shortcut runs. It hears the keys pressed with their
+    /// modifiers, `""` to clear the shortcut, or null to leave it.
+    var recorder: ((String?) -> Unit)? = null
+
     fun handle(event: KeyEvent): Boolean {
         val code = event.nativeKeyEvent.keyCode
         val back = code == android.view.KeyEvent.KEYCODE_BACK
         if (back && event.type == KeyEventType.KeyUp && tookBack) {
             tookBack = false
+            return true
+        }
+        recorder?.let { record ->
+            if (event.type == KeyEventType.KeyDown) recorded(event, code)?.let { keys ->
+                recorder = null
+                if (back) tookBack = true
+                record(if (keys == "\u0000") null else keys)
+            }
             return true
         }
         if (event.type != KeyEventType.KeyDown) return false
@@ -391,6 +404,61 @@ object BernShortcuts {
         if (back) tookBack = true
         entry.action()
         return true
+    }
+
+    /// What a key pressed for a `ShortcutInput` gives: `"\u0000"` for
+    /// Escape or Back, which leave the shortcut, `""` for Delete alone,
+    /// which clears it, the keys with their modifiers, or null for a
+    /// modifier alone and keys Bern has no name for, which it waits past.
+    private fun recorded(event: KeyEvent, code: Int): String? {
+        if (code == android.view.KeyEvent.KEYCODE_ESCAPE || code == android.view.KeyEvent.KEYCODE_BACK) return "\u0000"
+        val key = keyName(code) ?: return null
+        val held = buildList {
+            if (event.isCtrlPressed || event.isMetaPressed) add("cmd")
+            if (event.isAltPressed) add("alt")
+            if (event.isShiftPressed) add("shift")
+        }
+        if (key == "delete" && held.isEmpty()) return ""
+        return (held + key).joinToString("+")
+    }
+
+    /// A text in Bern's form, modifiers in order and the key in lower
+    /// case; `""` for an empty text, null for one that is no shortcut.
+    fun normalized(text: String): String? {
+        val parts = text.split("+").map { it.trim().lowercase() }
+        if (parts == listOf("")) return ""
+        val key = parts.last()
+        val modifiers = parts.dropLast(1)
+        val order = listOf("cmd", "ctrl", "alt", "shift")
+        if (!modifiers.all { it in order } || modifiers.toSet().size != modifiers.size) return null
+        val printable = key.length == 1 && key[0].code in 33..126
+        if (!printable && key !in NAMED) return null
+        return (order.filter { it in modifiers } + key).joinToString("+")
+    }
+
+    private val NAMED = listOf(
+        "space", "escape", "return", "tab", "delete", "up", "down", "left", "right", "home", "end",
+        "pageup", "pagedown",
+    )
+
+    /// How Android writes a shortcut: `Ctrl+Shift+K`, `cmd` and `ctrl`
+    /// both Ctrl; "" for none.
+    fun display(text: String): String {
+        val normal = normalized(text)?.takeIf { it.isNotEmpty() } ?: return ""
+        val parts = normal.split("+")
+        val key = parts.last()
+        val words = mapOf(
+            "escape" to "Esc", "return" to "Enter", "tab" to "Tab", "delete" to "Backspace",
+            "up" to "↑", "down" to "↓", "left" to "←", "right" to "→", "home" to "Home", "end" to "End",
+            "pageup" to "PgUp", "pagedown" to "PgDn",
+        )
+        val shown = if (key == "space") BernText.string("bern.shortcut.space") else words[key] ?: key.uppercase()
+        return buildList {
+            if ("cmd" in parts || "ctrl" in parts) add("Ctrl")
+            if ("alt" in parts) add("Alt")
+            if ("shift" in parts) add("Shift")
+            add(shown)
+        }.joinToString("+")
     }
 
     private fun keyName(code: Int): String? = when (code) {
@@ -423,6 +491,47 @@ object BernShortcuts {
         in android.view.KeyEvent.KEYCODE_0..android.view.KeyEvent.KEYCODE_9 ->
             ('0' + (code - android.view.KeyEvent.KEYCODE_0)).toString()
         else -> null
+    }
+}
+
+/// `ShortcutInput`: a button showing the shortcut; pressed, it takes the
+/// next key of a keyboard with its modifiers. Escape or Back leave the
+/// shortcut as it was, Delete alone clears it, and pressing the button
+/// again stops waiting.
+@Composable
+fun BernShortcutInput(
+    target: String,
+    label: String,
+    labelHidden: Boolean,
+    current: String,
+    prompt: String?,
+    empty: String?,
+    enabled: Boolean,
+    commit: (String) -> Unit,
+) {
+    var recording by remember { mutableStateOf(false) }
+    val latest by rememberUpdatedState(commit)
+    val take = remember { { keys: String? -> recording = false; if (keys != null) latest(keys) } }
+    DisposableEffect(recording, enabled) {
+        if (recording && enabled) BernShortcuts.recorder = take else if (recording) recording = false
+        onDispose { if (BernShortcuts.recorder === take) BernShortcuts.recorder = null }
+    }
+    BernControl(
+        target, "shortcut_input", label, enabled,
+        BernControlActions(edit = { text -> BernShortcuts.normalized(text)?.let { latest(it) } }, value = { current }),
+    )
+    val shown = if (recording) prompt ?: BernText.string("bern.shortcut.prompt")
+    else BernShortcuts.display(current).ifEmpty { empty ?: BernText.string("bern.shortcut.none") }
+    val button = @Composable {
+        FilledTonalButton(onClick = { recording = !recording }, enabled = enabled, modifier = Modifier.testTag(target)) { Text(shown) }
+    }
+    if (labelHidden) {
+        Box(Modifier.semantics { contentDescription = label }) { button() }
+    } else {
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.weight(1f))
+            button()
+        }
     }
 }
 

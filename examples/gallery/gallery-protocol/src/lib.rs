@@ -85,6 +85,9 @@ pub mod gallery {
         pub appearance: Appearance,
         /// Whether the player page shows its caption.
         pub caption: bool,
+        /// The keys that show the details, as Bern writes shortcuts: the
+        /// user chooses them in the about window.
+        pub details_key: String,
     }
 
     #[commands]
@@ -118,6 +121,12 @@ pub mod gallery {
         /// Show `source` as the poster.
         #[idempotent]
         fn set_poster(&mut self, source: MediaSource) -> Result<(), CommandError>;
+
+        /// Show the details with `keys`, such as `cmd+alt+i`; empty for
+        /// no shortcut.
+        #[idempotent]
+        #[errors("invalid_shortcut")]
+        fn set_details_key(&mut self, keys: String) -> Result<(), CommandError>;
     }
 
     #[queries]

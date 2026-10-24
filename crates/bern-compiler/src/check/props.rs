@@ -271,8 +271,9 @@ impl Checker<'_> {
         }
     }
 
-    /// A keyboard shortcut written as a literal, such as `"cmd+k"`.
-    pub(super) fn shortcut(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
+    /// A keyboard shortcut: a literal such as `"cmd+k"`, checked now, or a
+    /// text the shortcut follows, such as `app.keys.open`.
+    pub(super) fn shortcut(&mut self, expr: &ast::Expr, scope: &Scope) -> Option<ir::Prop> {
         match expr {
             ast::Expr::Literal {
                 value: Literal::Text(text),
@@ -284,10 +285,16 @@ impl Checker<'_> {
                     None
                 }
             },
-            other => {
-                self.error(other.span(), "a shortcut is a literal such as \"cmd+k\"");
+            ast::Expr::Literal { span, .. } => {
+                self.error(
+                    *span,
+                    "a shortcut is a literal such as \"cmd+k\", or a text it follows such as `app.keys.open`",
+                );
                 None
             }
+            other => self
+                .expect(other, &Type::Text, scope, "a shortcut")
+                .map(|expr| ir::Prop::Expr { expr }),
         }
     }
 

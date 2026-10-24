@@ -729,6 +729,7 @@ mod tests {
                 accent: None,
                 palette: None,
                 appearance: None,
+                menu_bar: None,
             },
             players: vec![],
             components: vec![],
