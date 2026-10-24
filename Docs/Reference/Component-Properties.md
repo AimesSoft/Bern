@@ -73,7 +73,7 @@
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |
 | `WindowButtons` | 无专有属性 | 不含子节点；无动作；macOS 上占出红绿灯的位置，其他平台不占位置 |
 | `Divider` | 无专有属性 | 不含子节点；无动作 |
-| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden`<br>`open_at: Number` | 可含子内容；无动作 |
+| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden`<br>`open_at: Number`<br>`open_center: Number` | 可含子内容；无动作 |
 | `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |
 | `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"] |
 | `SidebarHeader` | `role: content / title` | 可含子内容；无动作；直接位于 ["Sidebar"] |
@@ -132,7 +132,7 @@
 
 `Search` 放在 `Toolbar` 或 `Sidebar` 里由它们接管；放在页面里是平台自己的搜索框（iOS 的 `UISearchTextField`、macOS 的 `NSSearchField`、网页的 `input[type=search]`），子内容是在框获得焦点或有文字时列在框下的结果，`width` / `height` / `font_size` 是框本身的尺寸与字号（工具栏里的搜索面板则是面板尺寸）。
 
-`Rail(overhang:)` 让刻度在轨道两端各伸出这么多点：比例 f 的子项站在 f × (长度 + 2 × overhang) − overhang，如 CSS 里负外边距的时间轴。`ScrollView(open_at:)` 是打开时的位置：内容中比例为 f 的点对齐到视图中同一比例处（0 起点，0.5 正中对正中，1 末尾）。
+`Rail(overhang:)` 让刻度在轨道两端各伸出这么多点：比例 f 的子项站在 f × (长度 + 2 × overhang) − overhang，如 CSS 里负外边距的时间轴。`ScrollView(open_at:)` 是打开时的位置：内容中比例为 f 的点对齐到视图中同一比例处（0 起点，0.5 正中对正中，1 末尾）。`ScrollView(open_center:)` 也是打开时的位置：内容中比例为 f 的点停在视图正中；靠近两端放不到正中时滚到尽头为止，这一点仍在视图里。它可以绑定表达式，只在打开时读一次，之后值变了也不跟着滚，例如时间轴打开时让“现在”尽量居中。
 
 `Form` 的 `gap` 是分组之间的距离，`row_height` 是行的最小高度，`padding_x` / `padding_y` 是所有分组行的内边距（`Section` 自己的同名属性优先）；表单以 `Section(style: plain)` 开头时从页面顶部开始，这一组的行没有底色、边距和分隔线，作为随表单滚动的标题。表单给分组的行内边距不作用于 plain 分组，它只用自己的 `padding_x` / `padding_y`。打头的 plain 分组也可以来自插槽、组件或条件：表单在布局时看第一项是不是 plain 分组，条件变了跟着变，所以 `if window.compact { Section(style: plain) { … } }` 只在窄窗口里让表单贴顶。`style!` 里 `Form { background: 角色 }` 是行的底色，表单本身透出页面背景。
 

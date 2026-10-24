@@ -1655,3 +1655,19 @@ fun rememberBernScroll(at: Float): ScrollState {
     }
     return state
 }
+
+/// A scroll state that opens with the point at `at` of the content in the
+/// middle of the view, or as near the middle as the content reaches. A
+/// bound `at` is read once, as the view opens.
+@Composable
+fun rememberBernCenterScroll(at: Float): ScrollState {
+    val state = rememberScrollState()
+    val fraction = remember { at.coerceIn(0f, 1f) }
+    LaunchedEffect(Unit) {
+        val most = snapshotFlow { state.maxValue }.first { it in 1 until Int.MAX_VALUE }
+        val port = snapshotFlow { state.viewportSize }.first { it > 0 }
+        val middle = fraction * (most + port) - port / 2f
+        state.scrollTo(middle.roundToInt().coerceIn(0, most))
+    }
+    return state
+}

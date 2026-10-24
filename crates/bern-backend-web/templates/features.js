@@ -2013,7 +2013,7 @@ export function Swipe(p, ctx, { id, label, field, min, max, axis, distance }, co
 /// scrolls to the item it is set to, giving it a nudge on arrival with
 /// `arrival: "nudge"`. Items are the rows of the lists inside, each known
 /// by its key.
-export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion, hideIndicators, openAt }, children) {
+export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion, hideIndicators, openAt, openCenter }, children) {
   const horizontal = axis === "horizontal";
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
   if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
@@ -2021,6 +2021,7 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
   children(node, ctx);
   p.append(node);
   if (openAt !== undefined) B.openScroll(node, horizontal, openAt);
+  if (openCenter !== undefined) B.centerScroll(node, horizontal, openCenter);
   if (!snap && !position) return;
   // A position binding follows the leading item unless center snapping
   // was explicitly requested (for example by a horizontal episode rail).

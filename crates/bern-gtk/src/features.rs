@@ -1209,6 +1209,9 @@ pub struct ScrollProps {
     /// Where it opens: the point at this fraction of the content at the
     /// same fraction of the view.
     pub open_at: Option<f64>,
+    /// Where it opens centered: the point at this fraction of the content
+    /// in the middle of the view, or as near it as the content reaches.
+    pub open_center: Option<Num>,
 }
 
 #[allow(non_snake_case)]
@@ -1262,6 +1265,9 @@ pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
     if let Some(at) = props.open_at {
         open_at(&view, horizontal, at);
     }
+    if let Some(at) = &props.open_center {
+        open_center(&view, horizontal, at.peek(ctx));
+    }
     if props.snap.is_some() || props.position.is_some() {
         snapping(ctx, &scope, &content, horizontal, &props);
     }
@@ -1297,6 +1303,32 @@ fn open_at(view: &gtk::ScrolledWindow, horizontal: bool, at: f64) {
             return;
         }
         adjustment.set_value(adjustment.lower() + at.clamp(0.0, 1.0) * room);
+        if let Some(id) = held.borrow_mut().take() {
+            adjustment.disconnect(id);
+        }
+    });
+    handler.replace(Some(id));
+}
+
+/// Once the scroll view first knows how far it scrolls, stand with the
+/// point at `at` of the content in the middle of the view, or as near the
+/// middle as the content reaches.
+fn open_center(view: &gtk::ScrolledWindow, horizontal: bool, at: f64) {
+    let adjustment = if horizontal {
+        view.hadjustment()
+    } else {
+        view.vadjustment()
+    };
+    let handler: Rc<RefCell<Option<glib::SignalHandlerId>>> = Rc::new(RefCell::new(None));
+    let held = Rc::clone(&handler);
+    let id = adjustment.connect_changed(move |adjustment| {
+        let length = adjustment.upper() - adjustment.lower();
+        let room = length - adjustment.page_size();
+        if room <= 0.0 {
+            return;
+        }
+        let middle = at.clamp(0.0, 1.0) * length - adjustment.page_size() / 2.0;
+        adjustment.set_value(adjustment.lower() + middle.clamp(0.0, room));
         if let Some(id) = held.borrow_mut().take() {
             adjustment.disconnect(id);
         }

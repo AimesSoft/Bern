@@ -2256,6 +2256,45 @@ private let bernScrollSpace = "bern.scroll"
 /// moves the view, but does not tell which item the person scrolled to:
 /// it only clears itself once the person scrolls, which is when the item
 /// nearest the anchor starts to count.
+/// Content that opens with the point at `at` of it in the middle of its
+/// scroll view, or as near the middle as the content reaches: a mark there
+/// is scrolled to the center once, after the first layout.
+struct BernOpenCenter<Content: View>: View {
+    let at: Double
+    let horizontal: Bool
+    @ViewBuilder let content: () -> Content
+    @State private var opened = false
+
+    var body: some View {
+        SwiftUI.ScrollViewReader { proxy in
+            content()
+                .background(alignment: .topLeading) {
+                    SwiftUI.GeometryReader { geometry in
+                        let fraction = min(max(at, 0), 1)
+                        Color.clear
+                            .frame(width: 1, height: 1)
+                            .position(
+                                x: horizontal ? geometry.size.width * fraction : 0.5,
+                                y: horizontal ? 0.5 : geometry.size.height * fraction
+                            )
+                            .id(BernOpenCenterMark.mark)
+                    }
+                }
+                .onAppear {
+                    guard !opened else { return }
+                    opened = true
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(BernOpenCenterMark.mark, anchor: .center)
+                    }
+                }
+        }
+    }
+}
+
+enum BernOpenCenterMark {
+    static let mark = "bern-open-center"
+}
+
 private struct BernScrollPosition<ID: Hashable & Sendable>: ViewModifier {
     let position: Binding<ID>
     let anchor: UnitPoint

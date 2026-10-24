@@ -637,9 +637,15 @@ impl Generator<'_> {
     }
 
     pub(super) fn scroll_view(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let center = match element.prop("open_center") {
+            Some(Prop::Number { value }) => Some(float(*value)),
+            Some(Prop::Expr { expr }) => Some(format!("({}).toFloat()", self.expr(expr))),
+            _ => None,
+        };
         let state = element
             .number("open_at")
             .map(|at| format!("rememberBernScroll({})", float(at)))
+            .or_else(|| center.map(|at| format!("rememberBernCenterScroll({at})")))
             .unwrap_or_else(|| "rememberScrollState()".into());
         // A scroll view takes the free room of the column or row it
         // is in (a horizontal one only along a row), as on the

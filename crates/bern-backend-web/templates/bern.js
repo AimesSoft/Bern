@@ -2643,13 +2643,33 @@ export function Divider(p) {
   p.append(el("hr", { class: "bern-divider" }));
 }
 
-export function ScrollView(p, ctx, { axis, hideIndicators, openAt }, children) {
+export function ScrollView(p, ctx, { axis, hideIndicators, openAt, openCenter }, children) {
   // A scroll view takes the room it gets, as on the native targets.
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
   if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
   children(node, ctx);
   p.append(node);
   if (openAt !== undefined) openScroll(node, axis === "horizontal", openAt);
+  if (openCenter !== undefined) centerScroll(node, axis === "horizontal", openCenter);
+}
+
+/// Once the scroll view first knows how far it scrolls, it stands with the
+/// point at `at` of the content in the middle of the view, or as near the
+/// middle as the content reaches. A bound `at` is read once, untracked.
+export function centerScroll(node, horizontal, at) {
+  const fraction = Math.min(1, Math.max(0, Number(typeof at === "function" ? untrack(at) : at)));
+  const observer = new ResizeObserver(() => {
+    const length = horizontal ? node.scrollWidth : node.scrollHeight;
+    const port = horizontal ? node.clientWidth : node.clientHeight;
+    const room = length - port;
+    if (room <= 0) return;
+    observer.disconnect();
+    const value = Math.min(room, Math.max(0, fraction * length - port / 2));
+    if (horizontal) node.scrollLeft = value;
+    else node.scrollTop = value;
+  });
+  observer.observe(node);
+  for (const child of node.children) observer.observe(child);
 }
 
 /// Once the scroll view first knows how far it scrolls, it stands at

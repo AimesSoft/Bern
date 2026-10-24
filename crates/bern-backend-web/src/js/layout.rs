@@ -251,6 +251,7 @@ impl Generator<'_> {
                 (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
             ),
             ("openAt", element.number("open_at").map(number)),
+            ("openCenter", self.length(element, "open_center")),
         ]);
         let first = self.layout_lines(element, &[]);
         self.children_with(

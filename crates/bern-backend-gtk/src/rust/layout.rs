@@ -224,7 +224,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::ScrollView(p, c, b::ScrollProps {{ axis: {}, snap: {}, position: {}, arrival_nudge: {}, hide_indicators: {}, nudge_motion: {}, smooth: {}, open_at: {} }}, ",
+                "b::ScrollView(p, c, b::ScrollProps {{ axis: {}, snap: {}, position: {}, arrival_nudge: {}, hide_indicators: {}, nudge_motion: {}, smooth: {}, open_at: {}, open_center: {} }}, ",
                 Self::keyword(element, "axis"),
                 Self::keyword(element, "snap"),
                 some(self.field(element, "position")),
@@ -233,6 +233,7 @@ impl Generator<'_> {
                 self.motion("jelly"),
                 self.motion("smooth"),
                 some(element.number("open_at").map(float)),
+                some(self.num(element, "open_center")),
             ),
             &element.children,
             ");",

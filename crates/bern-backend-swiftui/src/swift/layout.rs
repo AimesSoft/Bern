@@ -514,6 +514,14 @@ impl Generator<'_> {
             .keyword("appear")
             .and_then(|_| self.transition_line(element, true));
         out.open(format!("SwiftUI.ScrollView({axis}) {{"));
+        // Where it opens centered: a mark at that fraction of the content,
+        // scrolled to the middle once, which SwiftUI keeps within reach.
+        let open_center = self.length(element, "open_center");
+        if let Some(at) = &open_center {
+            out.open(format!(
+                "BernOpenCenter(at: {at}, horizontal: {horizontal}) {{"
+            ));
+        }
         if snap.is_some() || position.is_some() {
             // The items to rest on and to scroll to are those of
             // the layout inside.
@@ -539,6 +547,9 @@ impl Generator<'_> {
             out.line(entrance);
         } else {
             self.nodes(out, &element.children, ctx);
+        }
+        if open_center.is_some() {
+            out.close("}");
         }
         out.close("}");
         if let Some(snap) = snap {

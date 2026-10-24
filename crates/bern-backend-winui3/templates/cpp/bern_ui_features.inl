@@ -116,6 +116,9 @@ struct ScrollProps {
     /// Where it opens: the point at this fraction of the content at the
     /// same fraction of the view.
     std::optional<double> openAt;
+    /// Where it opens centered: the point at this fraction of the content
+    /// in the middle of the view, or as near it as the content reaches.
+    Len openCenter;
 };
 
 /// The scroll offset that puts `item` at the anchor of `scroll`.
@@ -187,6 +190,22 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
             *opened = true;
             if (horizontal) viewer.ChangeView(at * room, nullptr, nullptr, true);
             else viewer.ChangeView(nullptr, at * room, nullptr, true);
+        });
+    }
+    if (props.openCenter.Given()) {
+        // Read once, untracked: the view opens there and then scrolls freely.
+        double at = (std::clamp)(Reactive::Untrack([&] { return props.openCenter.Now(ctx); }), 0.0, 1.0);
+        auto opened = std::make_shared<bool>(false);
+        scroller.LayoutUpdated([weak = winrt::make_weak(scroller), at, opened, horizontal](auto&&, auto&&) {
+            auto viewer = weak.get();
+            if (!viewer || *opened) return;
+            double room = horizontal ? viewer.ScrollableWidth() : viewer.ScrollableHeight();
+            if (room <= 0) return;
+            *opened = true;
+            double port = horizontal ? viewer.ViewportWidth() : viewer.ViewportHeight();
+            double middle = (std::clamp)(at * (room + port) - port / 2, 0.0, room);
+            if (horizontal) viewer.ChangeView(middle, nullptr, nullptr, true);
+            else viewer.ChangeView(nullptr, middle, nullptr, true);
         });
     }
     if (!props.snap && !props.position) return;
