@@ -2375,50 +2375,137 @@ private struct BernScrollItem: ViewModifier {
 
 private let bernScrollSpace = "bern.scroll"
 
+/// Content that opens with the point at `at` of it in the middle of its
+/// scroll view, or as near the middle as the content reaches. A probe in
+/// its background finds the platform scroll view around it and sets the
+/// offset once, when the content has its size: `ScrollViewReader` moved
+/// to marks inside a background unreliably.
+struct BernOpenCenter<Content: View>: View {
+    let at: Double
+    let horizontal: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content()
+            .background(BernOpenCenterProbe(at: min(max(at, 0), 1), horizontal: horizontal))
+    }
+}
+
+#if os(macOS)
+private struct BernOpenCenterProbe: NSViewRepresentable {
+    let at: Double
+    let horizontal: Bool
+    func makeNSView(context: Context) -> BernOpenCenterView {
+        BernOpenCenterView(at: at, horizontal: horizontal)
+    }
+    func updateNSView(_ view: BernOpenCenterView, context: Context) {
+        view.at = at
+    }
+}
+
+final class BernOpenCenterView: NSView {
+    var at: Double
+    let horizontal: Bool
+    private var opened = false
+    private var tries = 0
+
+    init(at: Double, horizontal: Bool) {
+        self.at = at
+        self.horizontal = horizontal
+        super.init(frame: .zero)
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { open() }
+    }
+
+    /// Until the scroll view has measured its content, try again shortly.
+    private func open() {
+        guard !opened, window != nil else { return }
+        guard let scroll = enclosingScrollView, let document = scroll.documentView else { return retry() }
+        let clip = scroll.contentView.bounds
+        let length = horizontal ? document.frame.width : document.frame.height
+        let port = horizontal ? clip.width : clip.height
+        guard length > 0, port > 0 else { return retry() }
+        opened = true
+        guard length > port else { return }
+        let middle = min(max(at * length - port / 2, 0), length - port)
+        scroll.contentView.scroll(to: horizontal ? NSPoint(x: middle, y: clip.origin.y) : NSPoint(x: clip.origin.x, y: middle))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    private func retry() {
+        tries += 1
+        guard tries < 40 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.open() }
+    }
+}
+#else
+private struct BernOpenCenterProbe: UIViewRepresentable {
+    let at: Double
+    let horizontal: Bool
+    func makeUIView(context: Context) -> BernOpenCenterView {
+        BernOpenCenterView(at: at, horizontal: horizontal)
+    }
+    func updateUIView(_ view: BernOpenCenterView, context: Context) {
+        view.at = at
+    }
+}
+
+final class BernOpenCenterView: UIView {
+    var at: Double
+    let horizontal: Bool
+    private var opened = false
+    private var tries = 0
+
+    init(at: Double, horizontal: Bool) {
+        self.at = at
+        self.horizontal = horizontal
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+    }
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { open() }
+    }
+
+    /// Until the scroll view has measured its content, try again shortly.
+    private func open() {
+        guard !opened, window != nil else { return }
+        let scroll = sequence(first: superview, next: { $0?.superview })
+            .lazy.compactMap { $0 as? UIScrollView }.first
+        guard let scroll else { return retry() }
+        let inset = scroll.adjustedContentInset
+        let length = horizontal ? scroll.contentSize.width : scroll.contentSize.height
+        let port = horizontal
+            ? scroll.bounds.width - inset.left - inset.right
+            : scroll.bounds.height - inset.top - inset.bottom
+        guard length > 0, port > 0 else { return retry() }
+        opened = true
+        guard length > port else { return }
+        let middle = min(max(at * length - port / 2, 0), length - port)
+        var offset = scroll.contentOffset
+        if horizontal { offset.x = middle - inset.left } else { offset.y = middle - inset.top }
+        scroll.setContentOffset(offset, animated: false)
+    }
+
+    private func retry() {
+        tries += 1
+        guard tries < 40 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.open() }
+    }
+}
+#endif
+
 /// Scrolling sets `position` to the item nearest the anchor; setting
 /// `position` scrolls to that item. The platform's own scroll position
 /// moves the view, but does not tell which item the person scrolled to:
 /// it only clears itself once the person scrolls, which is when the item
 /// nearest the anchor starts to count.
-/// Content that opens with the point at `at` of it in the middle of its
-/// scroll view, or as near the middle as the content reaches: a mark there
-/// is scrolled to the center once, after the first layout.
-struct BernOpenCenter<Content: View>: View {
-    let at: Double
-    let horizontal: Bool
-    @ViewBuilder let content: () -> Content
-    @State private var opened = false
-
-    var body: some View {
-        SwiftUI.ScrollViewReader { proxy in
-            content()
-                .background(alignment: .topLeading) {
-                    SwiftUI.GeometryReader { geometry in
-                        let fraction = min(max(at, 0), 1)
-                        Color.clear
-                            .frame(width: 1, height: 1)
-                            .position(
-                                x: horizontal ? geometry.size.width * fraction : 0.5,
-                                y: horizontal ? 0.5 : geometry.size.height * fraction
-                            )
-                            .id(BernOpenCenterMark.mark)
-                    }
-                }
-                .onAppear {
-                    guard !opened else { return }
-                    opened = true
-                    DispatchQueue.main.async {
-                        proxy.scrollTo(BernOpenCenterMark.mark, anchor: .center)
-                    }
-                }
-        }
-    }
-}
-
-enum BernOpenCenterMark {
-    static let mark = "bern-open-center"
-}
-
 private struct BernScrollPosition<ID: Hashable & Sendable>: ViewModifier {
     let position: Binding<ID>
     let anchor: UnitPoint
@@ -4082,12 +4169,13 @@ private struct BernModalLayer<Content: View>: View {
     let presentation: (AnyView) -> AnyView
     var body: some View {
         if covers {
-            GeometryReader { proxy in
-                presentation(AnyView(content
-                    .frame(width: proxy.size.width, height: proxy.size.height)
-                    .background(.background)
-                    .accessibilityAddTraits(.isModal)))
-            }.ignoresSafeArea()
+            // Its background reaches the edges; its content keeps to the
+            // safe area as a window's does, unless a `Stack(under_bars:)`
+            // in it goes under the status bar and the home indicator.
+            presentation(AnyView(content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background { Rectangle().fill(.background).ignoresSafeArea() }
+                .accessibilityAddTraits(.isModal)))
         } else {
             floating
         }

@@ -47,7 +47,7 @@ fn animated_svg_generates_for_every_presenter() {
             "web_app",
             Box::new(bern_backend_web::WebBrowser),
             "features.js",
-            "sandbox: \"allow-scripts\"",
+            "class: \"bern-svg\"",
         ),
         (
             "android",
