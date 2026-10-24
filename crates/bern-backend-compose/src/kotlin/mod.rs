@@ -174,7 +174,21 @@ impl<'a> Generator<'a> {
     }
 
     fn nodes(&self, out: &mut Out, nodes: &[Node], ctx: &Ctx) {
-        for node in nodes {
+        let mut spacer_taken = false;
+        for (index, node) in nodes.iter().enumerate() {
+            if std::mem::take(&mut spacer_taken) {
+                continue;
+            }
+            // The words that lead a row take the spacer's room: the row
+            // measures the controls after them first, and the words wrap
+            // in what is left instead of pushing them out.
+            if ctx.scope == Scope::Row && !ctx.baseline && bern_ir::leads_row(node, nodes.get(index + 1)) {
+                out.open("Box(Modifier.weight(1f)) {");
+                self.node(out, node, &ctx.within(Scope::Other));
+                out.close("}");
+                spacer_taken = true;
+                continue;
+            }
             self.node(out, node, ctx);
         }
     }

@@ -154,10 +154,26 @@ impl<'a> Generator<'a> {
             snap_level: ctx.snap_level - 1,
             ..ctx.clone()
         });
-        for node in nodes {
+        let mut spacer_taken = false;
+        for (index, node) in nodes.iter().enumerate() {
+            if std::mem::take(&mut spacer_taken) {
+                continue;
+            }
             // Toolbars and side panels attach to their container.
             if matches!(node, Node::Element(element) if element.kind == "Toolbar" || element.kind == "Inspector")
             {
+                continue;
+            }
+            // The words that lead a row take the spacer's room: the row
+            // keeps the controls after them as wide as they want, and the
+            // words wrap in what is left instead of squeezing them.
+            if ctx.row && !ctx.flow && ctx.snap_level == 0 && bern_ir::leads_row(node, nodes.get(index + 1)) {
+                out.open("SwiftUI.Group {");
+                self.node(out, node, ctx);
+                out.close("}");
+                out.line(".frame(maxWidth: .infinity, alignment: .leading)");
+                spacer_taken = true;
+                emitted = true;
                 continue;
             }
             match (&inner, ctx.snap_level) {

@@ -636,16 +636,22 @@ impl Generator<'_> {
         }
         // tvOS's menu picker shows its value alone: there the row says what
         // it chooses, and the choice is a capsule menu at its end, as a
-        // form's row reads on the other platforms.
-        let row = self.platform == Platform::Tvos
+        // form's row reads on the other platforms. iOS keeps its menu, but
+        // its value stands in the capsule too, in the words' color rather
+        // than the accent the system gives a picker's value.
+        let row = matches!(self.platform, Platform::Tvos | Platform::Ios)
             && element.keyword("style") == Some("menu")
             && element.keyword("shape") != Some("capsule")
             && element.keyword("label_hidden") != Some("true");
         let capsule = row || element.keyword("shape") == Some("capsule");
         if row {
-            out.open("SwiftUI.HStack(spacing: 12) {");
-            out.line(format!("SwiftUI.Text(verbatim: {label})"));
-            out.line("SwiftUI.Spacer(minLength: 12)");
+            if self.platform == Platform::Ios {
+                out.open("SwiftUI.LabeledContent {");
+            } else {
+                out.open("SwiftUI.HStack(spacing: 12) {");
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                out.line("SwiftUI.Spacer(minLength: 12)");
+            }
         }
         if capsule {
             out.open("SwiftUI.Menu {");
@@ -723,18 +729,30 @@ impl Generator<'_> {
                 out.line(".menuStyle(.borderlessButton)");
             }
             out.line(format!(
-                ".bernCapsuleControl(height: {})",
-                self.length(element, "height").unwrap_or_else(|| if row {
-                    "46.0".into()
+                ".bernCapsuleControl(height: {}{})",
+                self.length(element, "height").unwrap_or_else(|| {
+                    if row && self.platform == Platform::Tvos {
+                        "46.0".into()
+                    } else {
+                        "32.0".into()
+                    }
+                }),
+                if row && self.platform == Platform::Ios {
+                    ", filled: true"
                 } else {
-                    "32.0".into()
-                })
+                    ""
+                }
             ));
             out.line(format!(
                 ".accessibilityLabel(SwiftUI.Text(verbatim: {label}))"
             ));
         }
         if row {
+            if self.platform == Platform::Ios {
+                out.close("} label: {");
+                out.indent += 1;
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+            }
             out.close("}");
         }
         out.line(format!(

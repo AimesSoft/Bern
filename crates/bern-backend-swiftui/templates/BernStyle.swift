@@ -854,8 +854,8 @@ extension View {
     /// A real system glass capsule around a native button or pull-down.
     /// Explicit height keeps neighboring actions the same size regardless
     /// of the different default AppKit button and menu bezels.
-    func bernCapsuleControl(height: CGFloat, prominent: Bool = false) -> some View {
-        modifier(BernCapsuleControl(height: height, prominent: prominent))
+    func bernCapsuleControl(height: CGFloat, prominent: Bool = false, filled: Bool = false) -> some View {
+        modifier(BernCapsuleControl(height: height, prominent: prominent, filled: filled))
     }
 
     func bernButtonLook(_ look: BernButtonLook) -> some View {
@@ -1224,7 +1224,9 @@ struct BernThemeChoice: ViewModifier {
 /// A search field with its results below it. External entries edit,
 /// submit and focus it; `shortcut` focuses it from the keyboard. Focus
 /// needs macOS 15 or iOS 18; before them the field cannot be focused by
-/// command or shortcut.
+/// command or shortcut. On iOS the results, when the search has any, take
+/// the place of what it searches while something is typed, as the
+/// system's own searches show what they find.
 struct BernSearchable<Results: View>: ViewModifier {
     let text: Binding<String>
     let placement: SearchFieldPlacement
@@ -1232,14 +1234,27 @@ struct BernSearchable<Results: View>: ViewModifier {
     let target: String
     var submit: (@MainActor () -> Void)? = nil
     var shortcut: BernKeyboardShortcut? = nil
+    var hasResults = false
     @ViewBuilder let results: () -> Results
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
+        #if os(iOS)
+        let replaced = hasResults && !text.wrappedValue.isEmpty
+        let field = content
+            .opacity(replaced ? 0 : 1)
+            .accessibilityHidden(replaced)
+            .overlay {
+                if replaced { BernSearchResults(results: results) }
+            }
+            .searchable(text: text, placement: placement, prompt: prompt.map { Text(verbatim: $0) })
+            .onSubmit(of: .search) { submit?() }
+        #else
         let field = content
             .searchable(text: text, placement: placement, prompt: prompt.map { Text(verbatim: $0) })
             .searchSuggestions { results() }
             .onSubmit(of: .search) { submit?() }
+        #endif
         SwiftUI.Group {
             #if os(tvOS)
             // tvOS searches on a screen of its own, which takes the focus
@@ -1259,6 +1274,39 @@ struct BernSearchable<Results: View>: ViewModifier {
             actions: BernControlActions(
                 edit: { text.wrappedValue = $0 }, submit: submit, value: { text.wrappedValue },
                 focus: { focused = true }))
+    }
+}
+
+#if os(iOS)
+/// What a search finds, in place of the page it searches: a list in the
+/// platform's style. A query that finds nothing says so in the middle of
+/// the page, not in a row of the list.
+struct BernSearchResults<Results: View>: View {
+    @ViewBuilder let results: () -> Results
+    @State private var empty: String?
+
+    var body: some View {
+        List { results() }
+            .environment(\.bernSearchEmpty, { empty = $0 })
+            .overlay {
+                if let empty {
+                    ContentUnavailableView(empty, systemImage: "magnifyingglass")
+                        .allowsHitTesting(false)
+                }
+            }
+    }
+}
+#endif
+
+/// Where a query in a search's results says that it found nothing, in
+/// place of its own empty view; `nil` once it finds something.
+private struct BernSearchEmptyKey: EnvironmentKey {
+    static let defaultValue: (@MainActor (String?) -> Void)? = nil
+}
+extension EnvironmentValues {
+    var bernSearchEmpty: (@MainActor (String?) -> Void)? {
+        get { self[BernSearchEmptyKey.self] }
+        set { self[BernSearchEmptyKey.self] = newValue }
     }
 }
 
@@ -4103,6 +4151,10 @@ private struct BernCapsuleControl: ViewModifier {
     @Environment(\.bernAccent) private var accent
     let height: CGFloat
     let prominent: Bool
+    /// In a form's row, on the row's own surface: a capsule of the
+    /// system's fill, as a list's buttons are, where glass would cast its
+    /// shadow across the row.
+    var filled = false
     @ViewBuilder func body(content: Content) -> some View {
         #if os(tvOS)
         content
@@ -4115,11 +4167,13 @@ private struct BernCapsuleControl: ViewModifier {
         // more is set in 15-point semibold, 22 from its ends; the others in
         // 13-point medium, 14 from their ends, or 13 on a 30-point chip.
         let control = content.buttonStyle(.plain)
-            .font(height >= 40 ? .system(size: 15, weight: .semibold) : .system(size: 13, weight: .medium))
+            .font(filled ? .system(size: 15) : height >= 40 ? .system(size: 15, weight: .semibold) : .system(size: 13, weight: .medium))
             .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
             .padding(.horizontal, height >= 40 ? 22 : height <= 30 ? 13 : 14).frame(height: height)
             .contentShape(Capsule())
-        if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
+        if filled {
+            control.background(.fill.tertiary, in: Capsule())
+        } else if #available(macOS 26.0, iOS 26.0, tvOS 26.0, *) {
             if prominent {
                 // Keep the accent legible when the window's native glass
                 // desaturates; the glass still supplies the interactive surface.

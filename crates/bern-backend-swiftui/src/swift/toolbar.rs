@@ -96,8 +96,15 @@ impl Generator<'_> {
             .shortcut(search)
             .map(|shortcut| format!(", shortcut: {shortcut}"))
             .unwrap_or_default();
+        // A search with results shows them in place of what it searches on
+        // iOS; one without filters its page as it is.
+        let results = if search.children.is_empty() {
+            ""
+        } else {
+            ", hasResults: true"
+        };
         out.open(format!(
-            ".modifier(BernSearchable(text: {}, placement: {placement}, prompt: {prompt}, target: {}{submit}{shortcut}) {{",
+            ".modifier(BernSearchable(text: {}, placement: {placement}, prompt: {prompt}, target: {}{submit}{shortcut}{results}) {{",
             self.binding_of(&field),
             self.target(search, ctx)
         ));
@@ -185,7 +192,17 @@ impl Generator<'_> {
                 shared: group.len() > 1,
                 ..ctx.clone()
             };
-            self.nodes(out, group, &group_ctx);
+            if self.platform == Platform::Ios {
+                // iOS draws a bar's buttons in the label color, as its own
+                // way back is; the accent the window gives its controls
+                // would color only these.
+                out.open("SwiftUI.Group {");
+                self.nodes(out, group, &group_ctx);
+                out.close("}");
+                out.line(".tint(nil as SwiftUI.Color?)");
+            } else {
+                self.nodes(out, group, &group_ctx);
+            }
             out.close("}");
         }
     }

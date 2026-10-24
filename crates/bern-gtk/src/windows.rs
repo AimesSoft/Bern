@@ -466,14 +466,16 @@ impl Win {
     }
 
     /// UI state of the window, recording a dependency: `idle`, the layout
-    /// size `compact`, `medium`, `expanded` or `large`, `short`, and `tv`,
-    /// never true: a GNOME desktop is not a television.
+    /// size `compact`, `medium`, `expanded` or `large`, `short`, `tv`,
+    /// never true: a GNOME desktop is not a television, and `keyboard`,
+    /// always true: a desktop has one.
     pub(crate) fn state(&self, field: &str) -> Value {
         match field {
             "fullscreen" => Value::Bool(self.fullscreen.get()),
             "idle" => Value::Bool(self.idle.get()),
             "short" => Value::Bool(self.short.get()),
             "tv" => Value::Bool(false),
+            "keyboard" => Value::Bool(true),
             size => Value::Bool(self.size.get() == size),
         }
     }

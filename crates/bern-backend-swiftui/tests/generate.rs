@@ -204,7 +204,7 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
             ("width".into(), Prop::Number { value: 224.0 }),
         ]
         .into(),
-        vec![text(), conditional, divider, column],
+        vec![text(), divider, conditional, column],
     );
     let output = workspace().join("target/bern-test/row-widths");
     let context = context(&config, &compiled, "macos", &output);
@@ -247,6 +247,33 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
         source.contains(".frame(width: 224.0, height: nil, alignment: .leading)"),
         "{source}"
     );
+
+    // Words that lead a row take its spacer's room: they fill what the
+    // items after them leave and wrap there, instead of squeezing them.
+    compiled.app.components[0].body = element(
+        "Row",
+        [("gap".into(), Prop::Number { value: 12.0 })].into(),
+        vec![
+            element("Column", Default::default(), vec![text(), text()]),
+            spacer(),
+            text(),
+        ],
+    );
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
+        .unwrap();
+    let source = String::from_utf8_lossy(&generated.contents);
+    let start = source
+        .find("BernRow(alignment: .center, spacing: 12.0) {")
+        .unwrap();
+    let row = &source[start..];
+    assert!(
+        row.contains(".frame(maxWidth: .infinity, alignment: .leading)"),
+        "{row}"
+    );
+    assert!(!row[..row.find("\n}").unwrap_or(row.len())].contains("BernRowSpacer"), "{row}");
 }
 
 /// The showcase's tool strip: a segmented picker, a spacer and chips in a

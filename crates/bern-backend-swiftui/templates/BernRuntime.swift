@@ -9,6 +9,7 @@
 // lifecycle, snapshots and the video view — is in BernAppKit.swift and
 // BernUIKit.swift, of which a build compiles the one for its platform.
 
+import GameController
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
@@ -474,6 +475,27 @@ protocol BernSessionState: AnyObject {
     func load(_ reader: inout BernReader) throws
 }
 
+/// Whether a hardware keyboard is attached, for `window.keyboard`: a Mac
+/// always has one; iOS and tvOS follow keyboards as they connect.
+@MainActor @Observable
+final class BernKeyboard {
+    static let shared = BernKeyboard()
+    private(set) var attached: Bool
+
+    private init() {
+        #if os(macOS)
+        attached = true
+        #else
+        attached = GCKeyboard.coalesced != nil
+        for name in [Notification.Name.GCKeyboardDidConnect, .GCKeyboardDidDisconnect] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                MainActor.assumeIsolated { BernKeyboard.shared.attached = GCKeyboard.coalesced != nil }
+            }
+        }
+        #endif
+    }
+}
+
 /// One window instance: its kind, generation and session drafts.
 @MainActor
 @Observable
@@ -531,6 +553,8 @@ final class BernWindowContext {
     var short: Bool { layoutHeight < bernAppBreakpoints.compact }
     /// On a television: `window.tv`.
     var tv: Bool { bernTelevision }
+    /// A hardware keyboard is attached: `window.keyboard`.
+    var keyboard: Bool { BernKeyboard.shared.attached }
     private(set) var generation: UInt64 = 0
     private(set) var id: String = ""
 
@@ -1764,6 +1788,9 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
     let shown: (Data) -> Shown?
     let content: (Shown) -> Content
     @Environment(BernWindowContext.self) private var window
+    #if os(iOS)
+    @Environment(\.bernSearchEmpty) private var searchEmpty
+    #endif
     @State private var query: BernQuery<Data>
 
     init(
@@ -1819,8 +1846,23 @@ struct BernQueryView<Data: BernCodable, Shown, Content: View>: View {
         if let value = shown(data) {
             content(value)
         } else if let empty {
+            #if os(iOS)
+            if let searchEmpty {
+                // The search's results say it in the middle of the page.
+                Color.clear
+                    .frame(height: 0)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .onAppear { searchEmpty(empty) }
+                    .onDisappear { searchEmpty(nil) }
+            } else {
+                ContentUnavailableView(empty, systemImage: emptyIcon)
+                    .frame(maxWidth: .infinity)
+            }
+            #else
             ContentUnavailableView(empty, systemImage: emptyIcon)
                 .frame(maxWidth: .infinity)
+            #endif
         }
     }
 }

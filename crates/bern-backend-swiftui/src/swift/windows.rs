@@ -9,12 +9,25 @@ impl Generator<'_> {
     fn uses_engine(&self, nodes: &[&Node]) -> bool {
         let mut uses = false;
         for node in nodes {
-            node.walk(&mut |node| {
-                if let Node::Element(element) = node
-                    && matches!(element.action, Some(Action::Engine { .. }))
-                {
+            node.walk(&mut |node| match node {
+                Node::Element(element) if matches!(element.action, Some(Action::Engine { .. })) => {
                     uses = true;
                 }
+                // A slot an optional module fills shows while the module
+                // runs, which the engine's state says.
+                Node::If(node) => {
+                    for (condition, _) in &node.branches {
+                        condition.walk(&mut |part| {
+                            uses |= matches!(
+                                part.kind,
+                                bern_ir::ExprKind::Binding {
+                                    binding: bern_ir::Binding::Engine { .. }
+                                }
+                            );
+                        });
+                    }
+                }
+                _ => {}
             });
         }
         uses

@@ -576,6 +576,12 @@ impl Generator<'_> {
                 crate::style::motion(self.app, "smooth")
             ));
         }
+        // A row that scrolls cuts nothing off at its frame, as the
+        // platform's carousels do: its items' shadows stand around it, and
+        // what passes its ends runs on to the screen's.
+        if horizontal {
+            out.line(".scrollClipDisabled()");
+        }
         // `.hidden` still shows the bar when macOS is set to show
         // scroll bars always; `.never` does not.
         if element.keyword("indicators") == Some("hidden") {

@@ -91,6 +91,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -167,6 +168,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
@@ -672,6 +674,10 @@ fun BernToggleButton(
 
 // MARK: - Search in the toolbar
 
+/// Where a query in a search's results says that it found nothing, in
+/// place of its own empty view; `null` once it finds something.
+val LocalBernSearchEmpty = staticCompositionLocalOf<((String?) -> Unit)?> { null }
+
 /// A search the toolbar opens over the window: the field on top and its
 /// results below it. External entries focus it with `ui.focus`.
 @Composable
@@ -711,8 +717,19 @@ fun BernToolbarSearch(
                             Icon(Icons.Filled.Close, contentDescription = BernText.string("bern.window.done"))
                         }
                     }
-                    // The results line up with the field above them.
-                    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), content = results)
+                    // The results line up with the field above them; a query
+                    // among them that finds nothing says so in the middle of
+                    // the room above the keyboard.
+                    var empty by remember { mutableStateOf<String?>(null) }
+                    val report = remember { { value: String? -> empty = value } }
+                    Box(Modifier.fillMaxSize().imePadding()) {
+                        CompositionLocalProvider(LocalBernSearchEmpty provides report) {
+                            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), content = results)
+                        }
+                        empty?.let {
+                            Box(Modifier.align(Alignment.Center)) { BernUnavailable(it, Icons.Filled.Search, null, null) }
+                        }
+                    }
                 }
             }
             LaunchedEffect(Unit) { focus.requestFocus() }

@@ -4112,6 +4112,14 @@ class Win {
     this.short = cell(false);
     /// `window.tv`: the page is on a television.
     this.tv = cell(television);
+    /// `window.keyboard`: a hardware keyboard is attached. A browser does
+    /// not say so: a page with a fine pointer has one, and a key a
+    /// keyboard presses shows one; an on-screen keyboard's keys name no
+    /// key.
+    this.keyboard = cell(!matchMedia("(pointer: coarse)").matches);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Unidentified" && event.keyCode !== 229) this.keyboard.set(true);
+    }, { capture: true });
     /// The width of the window's content: measured, or before the window
     /// is laid out the room it gets. Layouts chosen by width go by it until
     /// they measure themselves.

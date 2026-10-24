@@ -597,6 +597,8 @@ class BernWindowContext(
     val large: Boolean get() = size == "large"
     /// `window.tv`: the window is on a television.
     val tv: Boolean get() = BernHost.television
+    /// A hardware keyboard is attached: `window.keyboard`.
+    val keyboard: Boolean get() = BernHost.keyboard
     val chrome = mutableStateListOf<BernChromeEntry>()
 
     /// The window's title in the interface language.
@@ -1111,6 +1113,15 @@ object BernHost {
     /// shows an `Adaptive`'s `tv` layout whatever its width.
     var television = false
         private set
+    /// Whether a hardware keyboard is attached, from the configuration the
+    /// activity has; it changes as one connects.
+    var keyboard by mutableStateOf(true)
+        private set
+
+    fun readKeyboard(config: android.content.res.Configuration) {
+        keyboard = config.keyboard == android.content.res.Configuration.KEYBOARD_QWERTY &&
+            config.hardKeyboardHidden != android.content.res.Configuration.HARDKEYBOARDHIDDEN_YES
+    }
 
     var failure by mutableStateOf<BernFailure?>(null)
     var startupError by mutableStateOf<String?>(null)

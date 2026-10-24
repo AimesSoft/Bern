@@ -1419,12 +1419,21 @@ fun <T, S> BernQueryView(
     val state = remember { BernQuery(query, decode).also { it.count = count } }
     SideEffect { state.want(window, params, target) }
     DisposableEffect(state) { onDispose { state.close() } }
+    val searchEmpty = LocalBernSearchEmpty.current
     val presented: @Composable (T) -> Unit = { data ->
         val value = shown(data)
         if (value != null) {
             content(value)
         } else if (empty != null) {
-            BernUnavailable(empty, BernIcons.get(emptyIcon), null, null)
+            if (searchEmpty != null) {
+                // The search's results say it in the middle of their room.
+                DisposableEffect(empty) {
+                    searchEmpty(empty)
+                    onDispose { searchEmpty(null) }
+                }
+            } else {
+                BernUnavailable(empty, BernIcons.get(emptyIcon), null, null)
+            }
         }
     }
     when (val phase = state.phase) {

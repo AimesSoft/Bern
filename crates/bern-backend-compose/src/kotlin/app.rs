@@ -184,6 +184,7 @@ impl Generator<'_> {
         out.line(format!("{},", string(&app.windows.primary)));
         out.close(") { field, reader -> BernEngine.bernApply(field, reader) }");
         out.line("BernFiles.register(this)");
+        out.line("BernHost.readKeyboard(resources.configuration)");
         // The weights and sizes `text { … }` gives text styles.
         if !app.style.text_weights.is_empty() {
             let styles: Vec<String> = app
@@ -234,6 +235,12 @@ impl Generator<'_> {
         out.close("}");
         out.close("}");
         out.close("}");
+        out.close("}");
+        out.line("");
+        out.line("/// A keyboard connecting or going away, for `window.keyboard`.");
+        out.open("override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {");
+        out.line("super.onConfigurationChanged(newConfig)");
+        out.line("BernHost.readKeyboard(newConfig)");
         out.close("}");
         out.line("");
         out.line("/// A file another app opens with this one while it runs.");

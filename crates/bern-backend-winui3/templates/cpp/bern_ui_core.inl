@@ -1430,6 +1430,8 @@ inline Value Ctx::WindowFlag(std::string_view name) const {
     if (name == "short") return Value::Bool(win->isShort.Get());
     // A Windows desktop app never runs on a television.
     if (name == "tv") return Value::Bool(false);
+    // A Windows PC has a keyboard.
+    if (name == "keyboard") return Value::Bool(true);
     return Value::Bool(win->size.Get() == name);
 }
 inline double B::Len::Now(Ctx const& ctx) const {

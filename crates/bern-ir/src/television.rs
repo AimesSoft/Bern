@@ -116,6 +116,8 @@ impl Known {
                 "tv" => Some(true),
                 "landscape" => Some(true),
                 "idle" => None,
+                // A television takes a keyboard too.
+                "keyboard" => None,
                 "short" => self
                     .layouts
                     .map(|layouts| TELEVISION_SCREEN.1 < layouts.compact_below),
