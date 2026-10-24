@@ -113,6 +113,7 @@ fn style_class(style: Option<&str>) -> &'static str {
         Some("title3") => "title-4",
         Some("headline") | Some("subheadline") => "heading",
         Some("footnote") | Some("caption") | Some("caption2") => "caption",
+        Some("code") => "monospace",
         _ => "body",
     }
 }
@@ -2577,6 +2578,7 @@ mod tests {
             (Some("subheadline"), "heading"),
             (Some("footnote"), "caption"),
             (Some("caption2"), "caption"),
+            (Some("code"), "monospace"),
             (Some("body"), "body"),
             (None, "body"),
         ] {

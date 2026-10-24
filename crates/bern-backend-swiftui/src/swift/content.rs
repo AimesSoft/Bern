@@ -105,7 +105,13 @@ impl Generator<'_> {
                 "footnote" => "footnote",
                 "caption" => "caption",
                 "caption2" => "caption2",
+                "code" => "system(.callout, design: .monospaced)",
                 _ => "body",
+            };
+            let design = if style == "code" {
+                ", design: .monospaced"
+            } else {
+                ""
             };
             // The weight the application gives the style, if any.
             match self
@@ -120,13 +126,13 @@ impl Generator<'_> {
                     .or_else(|| self.style_size(entry).map(double))
                 {
                     Some(size) => out.line(format!(
-                        ".font(.system(size: {}, weight: .{}))",
+                        ".font(.system(size: {}, weight: .{}{design}))",
                         size, entry.weight
                     )),
                     None => out.line(format!(".font(.{font}.weight(.{}))", entry.weight)),
                 },
                 None => match self.length(element, "font_size") {
-                    Some(size) => out.line(format!(".font(.system(size: {size}))")),
+                    Some(size) => out.line(format!(".font(.system(size: {size}{design}))")),
                     None => out.line(format!(".font(.{font})")),
                 },
             }

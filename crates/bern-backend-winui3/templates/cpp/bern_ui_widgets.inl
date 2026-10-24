@@ -74,6 +74,8 @@ inline void ApplyTextStyle(controls::TextBlock const& block, char const* style) 
     // inherits, as a button's title does.
     if (style && std::string_view(style) == "control") return;
     if (auto named = Styles::TextStyle(style)) block.Style(named);
+    // `code`: Windows' monospaced font, Consolas where Cascadia is missing.
+    if (style && std::string_view(style) == "code") block.FontFamily(media::FontFamily(L"Cascadia Mono, Consolas"));
     std::string name = style ? style : "body";
     for (auto const& [entry, weight, size] : app->catalog.textStyles) {
         if (entry != name) continue;

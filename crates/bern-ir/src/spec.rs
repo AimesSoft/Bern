@@ -354,6 +354,9 @@ pub const TEXT_STYLES: &[&str] = &[
     // The platform's control font, as a button's title has it: the text
     // of a capsule button's content matches the platform's own buttons.
     "control",
+    // The platform's monospaced font, a little smaller than body: code,
+    // commands, file contents.
+    "code",
 ];
 
 pub const EMPHASIS: &[&str] = &["primary", "secondary", "tertiary"];

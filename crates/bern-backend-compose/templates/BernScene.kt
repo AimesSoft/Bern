@@ -189,6 +189,7 @@ fun bernTextStyle(style: String, size: Float? = null, lineHeight: Float? = null)
         "caption2" -> typography.labelSmall
         // `control`: a Material button's title.
         "control" -> typography.labelLarge
+        "code" -> typography.bodyMedium.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
         else -> typography.bodyLarge
     }
     BernTypography.styles[style]?.let { (weight, points) ->

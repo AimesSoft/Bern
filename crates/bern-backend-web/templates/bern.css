@@ -739,6 +739,12 @@ button:disabled {
   font: inherit;
 }
 
+.bern-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: calc(12px + var(--bern-text-up));
+  line-height: 18px;
+}
+
 .bern-emphasis-secondary {
   color: var(--bern-text-secondary);
 }

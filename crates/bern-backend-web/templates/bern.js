@@ -1542,7 +1542,7 @@ function springEasing(period, damping) {
 export const STYLE_CLASS = {
   large_title: "large-title", title: "title", title2: "title2", title3: "title3", headline: "headline",
   subheadline: "subheadline", body: "body", callout: "callout", footnote: "footnote", caption: "caption",
-  caption2: "caption2", control: "control-font",
+  caption2: "caption2", control: "control-font", code: "code",
 };
 
 export function Text(p, ctx, { content, style, emphasis, fontSize, lines, lineHeight, markdown }) {
