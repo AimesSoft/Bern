@@ -275,7 +275,7 @@
   height: 100%;
 }
 
-.bern-content-button:not(.bern-styled-look):active {
+.bern-content-button:not(.bern-styled-look, .bern-styled-pressed-quiet):active {
   filter: brightness(0.92);
 }
 

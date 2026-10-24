@@ -623,6 +623,10 @@ export function formRows(node, style) {
 export function applyStyle(node, style, { selected } = {}) {
   node.classList.add("bern-styled");
   if (style.draws) node.classList.add("bern-styled-look");
+  // Native :active can apply even when a popup consumes pointerdown before
+  // the control receives it. Honor pressed:none without waiting for a JS
+  // state update, so a picture beneath a dismissed popup never dims.
+  if (style.pressed?.quiet) node.classList.add("bern-styled-pressed-quiet");
   if (style.size) node.classList.add(`bern-size-${style.size}`);
   if (style.corner !== undefined) {
     node.style.borderRadius = `${style.corner}px`;
@@ -1042,6 +1046,11 @@ function fade(spring, from, to, duration, done) {
 B.hooks.exit = (node, done) => {
   if (!node.bernDisappear) return false;
   node.bernExiting = true;
+  // Its scope has already been disposed. Keep the fading picture, but no
+  // stale controls in keyboard/accessibility navigation or descendant hit
+  // targets that override pointer-events while a replacement enters.
+  node.inert = true;
+  node.setAttribute("aria-hidden", "true");
   node.style.pointerEvents = "none";
   playTransition(node, node.bernDisappear, false, done);
   return true;
@@ -1438,12 +1447,21 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
   // What the mouse is over, null once it left the window; touch and pens
   // leave it undefined, so areas do not apply to them.
   let mouseOver;
-  const track = (event) => { mouseOver = event.pointerType === "mouse" ? event.target : undefined; };
+  let mousePoint = null;
+  const track = (event) => {
+    const mouse = event.pointerType === "mouse";
+    mouseOver = mouse ? event.target : undefined;
+    mousePoint = mouse ? { x: event.clientX, y: event.clientY } : null;
+  };
   // How long the input that came last lets the window rest, or null when
   // it keeps the window awake.
   const quiet = () => {
     if (mouseOver === undefined || !win.element.querySelector(".bern-idle-area")) return seconds;
-    const area = mouseOver?.closest?.(".bern-idle-area");
+    // Waking the window can mount a toolbar underneath a stationary mouse.
+    // Recheck the live hit target, including after its entrance animation;
+    // the pointer event's original video target is no longer authoritative.
+    const hit = mousePoint ? document.elementFromPoint(mousePoint.x, mousePoint.y) : mouseOver;
+    const area = hit?.closest?.(".bern-idle-area");
     return area ? Number(area.dataset.idleAfter) : null;
   };
   const rest = () => {
@@ -1453,11 +1471,11 @@ B.hooks.idle = (win, seconds, enabled = () => true) => {
     if (enabled() && wait !== null) timer = setTimeout(() => {
       const typing = document.activeElement?.matches("input:not([type=range]),textarea");
       const popup = document.querySelector(".bern-popover:not([hidden]),.bern-menu-popover:not([hidden]),[popover]:popover-open");
-      if (typing || popup) rest(); else win.idle.set(true);
+      if (typing || popup || quiet() === null) rest(); else win.idle.set(true);
     }, wait * 1000);
   };
   const events = ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"];
-  const leave = (event) => { if (event.pointerType === "mouse") { mouseOver = null; rest(); } };
+  const leave = (event) => { if (event.pointerType === "mouse") { mouseOver = null; mousePoint = null; rest(); } };
   // The pointer is known before the input that wakes the window counts.
   for (const name of ["pointermove", "pointerdown"]) win.element.addEventListener(name, track, { capture: true, passive: true });
   for (const name of events) win.element.addEventListener(name, rest, { capture: true, passive: true });

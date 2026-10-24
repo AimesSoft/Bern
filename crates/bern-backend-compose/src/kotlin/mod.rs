@@ -533,6 +533,7 @@ impl<'a> Generator<'a> {
             "Pinch" | "Swipe" => self.gesture(out, element, ctx),
             "ScrollView" => self.scroll_view(out, element, ctx),
             "List" | "ForEach" => self.list(out, element, ctx),
+            "PreviewList" => self.preview_list(out, element, ctx),
             "Query" => self.query(out, element, ctx),
             "Video" => self.video(out, element, ctx),
             "SplitView" => self.split_view(out, element, ctx),

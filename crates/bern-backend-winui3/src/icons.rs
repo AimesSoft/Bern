@@ -90,6 +90,7 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("sun.min", 0xE706),
     ("switch.2", 0xE73A),
     ("text.bubble", 0xE8BD),
+    ("text.rectangle", 0xED1E),
     ("textformat", 0xE8D2),
     ("textformat.size", 0xE8E9),
     ("textformat.size.larger", 0xE8E8),

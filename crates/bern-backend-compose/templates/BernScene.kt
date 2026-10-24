@@ -32,7 +32,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -550,13 +552,14 @@ fun BernModal(
             dismissOnBackPress = false,
             dismissOnClickOutside = false,
             usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = !covering,
+            decorFitsSystemWindows = false,
         ),
     ) {
         val view = LocalView.current
         SideEffect {
             (view.parent as? DialogWindowProvider)?.window?.let { dialogWindow ->
                 dialogWindow.setDimAmount(0.24f)
+                dialogWindow.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
                 // A modal has its own Window; the activity's system-bar
                 // appearance does not carry into an edge-to-edge dialog.
                 val controller = androidx.core.view.WindowCompat.getInsetsController(dialogWindow, view)
@@ -564,7 +567,11 @@ fun BernModal(
                 controller.isAppearanceLightNavigationBars = !dark
             }
         }
-        BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        // Measure the card in the space above the keyboard, so scrollable
+        // fields can shrink while the dialog's footer remains reachable.
+        val viewport = Modifier.fillMaxSize().imePadding()
+            .then(if (covering) Modifier else Modifier.safeDrawingPadding())
+        BoxWithConstraints(viewport, contentAlignment = Alignment.Center) {
             val card = if (covering) {
                 Modifier.fillMaxSize()
             } else {

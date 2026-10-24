@@ -292,6 +292,7 @@ impl Generator<'_> {
             "NavLink" => self.nav_link(out, element),
             "List" => self.children(out, "b::List(p, c, ", &element.children, ");"),
             "ForEach" => self.for_each(out, element),
+            "PreviewList" => self.preview_list(out, element),
             "Tabs" => self.tabs(out, element),
             "Tab" => self.tab(out, element),
             "Adaptive" => self.adaptive(out, element),

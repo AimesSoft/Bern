@@ -90,6 +90,7 @@
     ("sun.min", "display-brightness-symbolic"),
     ("switch.2", "checkbox-checked-symbolic"),
     ("text.bubble", "chat-message-new-symbolic"),
+    ("text.rectangle", "media-view-subtitles-symbolic"),
     ("textformat", "font-x-generic-symbolic"),
     ("textformat.size", "format-text-plaintext-symbolic"),
     ("textformat.size.larger", "zoom-in-symbolic"),

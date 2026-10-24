@@ -1079,6 +1079,21 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ComponentSpec {
         template: true,
         ..spec(
+            "PreviewList",
+            &[
+                req("items", PropKind::Items),
+                req("key", PropKind::KeyField),
+                req("item_height", PropKind::Number),
+                opt("gap", PropKind::Number),
+                opt("more_height", PropKind::Number),
+            ],
+            Children::Any,
+            "A bounded vertical preview: creates only complete rows fitting its height, reserving a +N badge for omitted items; does not scroll",
+        )
+    },
+    ComponentSpec {
+        template: true,
+        ..spec(
             "ForEach",
             &[
                 req("items", PropKind::Items),

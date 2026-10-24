@@ -520,7 +520,12 @@ fun BernContentButton(
             .background(look.background?.let(palette::color) ?: Color.Transparent)
             .clickable(interaction, ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = label },
-    ) { content() }
+    ) {
+        CompositionLocalProvider(
+            LocalContentColor provides (look.foreground?.let(palette::color) ?: LocalContentColor.current),
+            content = content,
+        )
+    }
 }
 
 // MARK: - Toggle buttons

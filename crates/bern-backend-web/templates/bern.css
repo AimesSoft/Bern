@@ -2943,3 +2943,10 @@ button.bern-menu-item:disabled .bern-icon {
     background: ButtonText;
   }
 }
+
+.bern-preview-list { position: relative; min-height: 0; overflow: hidden; contain: size; display: flex; flex-direction: column; align-items: center; gap: var(--bern-preview-gap); }
+.bern-preview-rows { display: flex; flex-direction: column; align-items: center; gap: var(--bern-preview-gap); flex: 0 0 auto; width: 100%; }
+.bern-preview-rows:empty { display: none; }
+.bern-preview-row { height: var(--bern-preview-item-height); flex: none; display: grid; justify-items: center; }
+.bern-preview-more { flex: none; min-width: 30px; padding: 0 6px; box-sizing: border-box; border-radius: 999px; font-size: 12px; font-weight: 500; color: var(--bern-text-secondary); background: var(--bern-surface-raised); display: flex; align-items: center; justify-content: center; }
+.bern-preview-more[hidden] { display: none; }

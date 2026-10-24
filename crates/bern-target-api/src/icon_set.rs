@@ -94,6 +94,7 @@ pub const NAMES: &[&str] = &[
     "sun.min",
     "switch.2",
     "text.bubble",
+    "text.rectangle",
     "textformat",
     "textformat.size",
     "textformat.size.larger",

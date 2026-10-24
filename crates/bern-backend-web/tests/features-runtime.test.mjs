@@ -12,6 +12,7 @@ function runtime(search = "") {
       this.nodeType = nodeType;
       this.childNodes = [];
       this.attributes = {};
+      this.dataset = {};
       this.events = {};
       this.style = { setProperty(name, value) { this[name] = value; } };
       this.classes = new Set();
@@ -155,6 +156,45 @@ function runtime(search = "") {
   const flushMicrotasks = () => { while (microtasks.length) microtasks.shift()(); };
   return { B: context.B, F: context.F, Element, document: globals.document, navigator: globals.navigator, probes, queries, timers, frames, flushMicrotasks, resizeObservers, mutationObservers };
 }
+
+test("preview creates only rows fitting the viewport and releases rows when it shrinks", () => {
+  const { B, Element, flushMicrotasks, resizeObservers } = runtime();
+  const scope = new B.Scope();
+  const root = new Element("div");
+  const items = B.cell(Array.from({ length: 1000 }, (_, id) => ({ id })));
+  const active = new Set(), created = [];
+  B.within(scope, () => B.PreviewList(root, {}, {
+    items: () => items.get(), key: item => item.id, itemHeight: 97, gap: 10, moreHeight: 22,
+  }, (parent, ctx, item) => {
+    const id = item().id;
+    active.add(id); created.push(id);
+    parent.append(new Element("img"));
+    B.onCleanup(() => active.delete(id));
+  }));
+  const preview = root.children[0];
+  const more = preview.children[1];
+  const observer = resizeObservers.find(one => one.targets.has(preview));
+  const resize = (height) => { observer.callback([{ contentRect: { height } }]); flushMicrotasks(); };
+  assert.equal(active.size, 0, "unmeasured previews must not request images");
+  resize(650);
+  assert.deepEqual([...active], [0, 1, 2, 3, 4]);
+  assert.equal(more.textContent, "+995");
+  resize(900);
+  assert.equal(active.size, 8);
+  assert.equal(created.length, 8, "kept rows retain their identity");
+  resize(300);
+  assert.deepEqual([...active], [0, 1]);
+  assert.equal(more.textContent, "+998");
+  items.set(items.get().slice(0, 3)); flushMicrotasks();
+  resize(311);
+  assert.equal(active.size, 3);
+  assert.equal(more.hidden, true, "no badge or reserved gap when everything fits");
+  items.set([]); flushMicrotasks();
+  assert.equal(active.size, 0);
+  assert.equal(more.hidden, true);
+  scope.dispose();
+  assert.equal(observer.disconnected, true);
+});
 
 test("the interface language follows the browser's preferences in order", () => {
   const { B, navigator } = runtime();
@@ -856,6 +896,43 @@ test("focus regions dismiss editing with one complete press and preserve inside 
   scope.dispose();
   document.activeElement = input;
   assert.equal(press("pointerdown", outside), false, "unmounted regions unregister");
+});
+
+test("a toolbar appearing under a stationary mouse keeps the window awake", () => {
+  const { B, Element, document, timers } = runtime();
+  const root = new Element("div");
+  const picture = new Element("button");
+  const toolbar = new Element("button");
+  picture.dataset = { idleAfter: "1" };
+  picture.closest = selector => selector === ".bern-idle-area" ? picture : null;
+  root.querySelector = selector => selector === ".bern-idle-area" ? picture : null;
+  let hit = picture;
+  document.elementFromPoint = () => hit;
+  const win = { element: root, idle: B.cell(true) };
+  const scope = new B.Scope();
+  B.within(scope, () => B.hooks.idle(win, 3));
+  const move = () => root.dispatch("pointermove", {
+    target: picture, pointerType: "mouse", clientX: 110, clientY: 40,
+  });
+  move();
+  assert.equal(win.idle.peek(), false);
+  assert.equal(timers.at(-1).delay, 1000);
+  // The entrance finishes without another mouse move. The original event
+  // hit the picture, but the button now occupies that same screen position.
+  hit = toolbar;
+  timers.at(-1).callback();
+  assert.equal(win.idle.peek(), false, "the appearing toolbar must not hide before it can be clicked");
+  // Moving back onto the picture still hides the controls normally.
+  hit = picture;
+  move();
+  timers.at(-1).callback();
+  assert.equal(win.idle.peek(), true);
+  // Leaving the window while a hide is pending also cancels that hide.
+  move();
+  root.dispatch("pointerleave", { pointerType: "mouse" });
+  assert.equal(win.idle.peek(), false);
+  assert.equal(timers.at(-1).cancelled, true);
+  scope.dispose();
 });
 
 test("edge grow keeps its opacity and anchors the scaling edge", () => {

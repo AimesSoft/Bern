@@ -329,6 +329,7 @@ impl Generator<'_> {
             "NavLink" => self.nav_link(out, element),
             "List" => self.list(out, element),
             "ForEach" => self.for_each(out, element),
+            "PreviewList" => self.preview_list(out, element),
             "Tabs" => self.tabs(out, element),
             "Adaptive" => self.adaptive(out, element),
             "Menu" => self.menu(out, element),

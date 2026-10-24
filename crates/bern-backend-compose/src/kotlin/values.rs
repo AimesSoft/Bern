@@ -310,7 +310,18 @@ pub(super) fn generate_record(out: &mut Out, def: &RecordDef) {
         .iter()
         .map(|field| format!("val {}: {}", member(&field.name), kotlin_type(&field.ty)))
         .collect();
-    out.open(format!("data class {name}({}) {{", fields.join(", ")));
+    if fields.is_empty() {
+        // Kotlin data classes require a constructor property. Empty protocol
+        // records still have value equality, including after each decode.
+        out.open(format!("class {name} {{"));
+        out.line(format!(
+            "override fun equals(other: Any?): Boolean = other is {name}"
+        ));
+        out.line("override fun hashCode(): Int = 0");
+        out.line("");
+    } else {
+        out.open(format!("data class {name}({}) {{", fields.join(", ")));
+    }
     if def.name == bern_protocol::format::CALENDAR_DATE {
         out.line("/// The date as an argument of a translated text.");
         out.line("val bernArg: BernArg get() = BernArg.Date(year, month, day)");

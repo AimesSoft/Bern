@@ -2679,6 +2679,46 @@ final class BernPlace {
 
 /// A vector lets an interrupted selection retain every column's current
 /// width and velocity, instead of starting independent position animations.
+// A preview measures its room before constructing any rows. Clipping a full
+// stack would still start image requests for the omitted items.
+enum BernPreviewGeometry {
+    static func visible(total: Int, height: CGFloat, item: CGFloat, gap: CGFloat, more: CGFloat) -> Int {
+        guard total > 0, height.isFinite, height > 0, item.isFinite, item > 0 else { return 0 }
+        let gap = max(0, gap), more = max(0, more)
+        if CGFloat(total) * item + CGFloat(total - 1) * gap <= height { return total }
+        return min(total, max(0, Int(floor(max(0, height - more) / (item + gap)))))
+    }
+}
+
+struct BernPreviewList<Item, ID: Hashable, Content: View>: View {
+    let items: [Item]
+    let id: KeyPath<Item, ID>
+    let itemHeight: CGFloat
+    let gap: CGFloat
+    let moreHeight: CGFloat
+    @ViewBuilder let content: (Item) -> Content
+
+    var body: some View {
+        GeometryReader { geometry in
+            let count = BernPreviewGeometry.visible(total: items.count, height: geometry.size.height,
+                                                   item: itemHeight, gap: gap, more: moreHeight)
+            VStack(spacing: max(0, gap)) {
+                ForEach(Array(items.prefix(count)), id: id) { item in
+                    content(item).frame(height: itemHeight)
+                }
+                if count < items.count && geometry.size.height >= moreHeight {
+                    Text("+\(items.count - count)")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 6).frame(height: max(0, moreHeight))
+                        .background(.quaternary, in: Capsule())
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .clipped()
+    }
+}
+
 struct BernAccordionWeights: VectorArithmetic {
     var values: [Double]
     static let zero = Self(values: [])

@@ -7,7 +7,7 @@
 //! Each secret is stored under the application's identity and a simple
 //! name. Engines without a host, such as tests, keep their secrets in memory
 //! for the life of the process. Where the system has no credential store
-//! Bern can reach (tvOS, Android and the browser for now), reading finds
+//! Bern can reach (tvOS and the browser for now), reading finds
 //! nothing and writing fails with `secrets_unavailable`.
 
 use bern_protocol::CommandError;
@@ -137,7 +137,23 @@ mod system {
     }
 }
 
+/// Android's host encrypts credentials with an app-scoped Keystore key.
+#[cfg(target_os = "android")]
+mod system {
+    use super::*;
+    pub fn read(_service: &str, name: &str) -> Result<Option<String>, CommandError> {
+        crate::platform::request("secret_read", name, "").map(|s| s.strip_prefix("value:").map(str::to_string))
+    }
+    pub fn write(_service: &str, name: &str, value: &str) -> Result<(), CommandError> {
+        crate::platform::request("secret_write", name, value).map(|_| ())
+    }
+    pub fn delete(_service: &str, name: &str) -> Result<(), CommandError> {
+        crate::platform::request("secret_delete", name, "").map(|_| ())
+    }
+}
+
 #[cfg(not(any(
+    target_os = "android",
     target_os = "macos",
     target_os = "ios",
     target_os = "windows",

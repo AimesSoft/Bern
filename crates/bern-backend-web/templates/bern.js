@@ -2806,6 +2806,41 @@ export function List(p, ctx, children) {
   p.append(node);
 }
 
+export function previewVisibleCount(total, height, itemHeight, gap = 0, moreHeight = 22) {
+  if (!total || !Number.isFinite(height) || height <= 0 || !Number.isFinite(itemHeight) || itemHeight <= 0) return 0;
+  gap = Math.max(0, gap); moreHeight = Math.max(0, moreHeight);
+  if (total * itemHeight + (total - 1) * gap <= height) return total;
+  return Math.min(total, Math.max(0, Math.floor((height - moreHeight) / (itemHeight + gap))));
+}
+
+// Keep omitted rows out of Each, so their images are never created. No rows
+// mount before the viewport has been measured.
+export function PreviewList(p, ctx, { items, key, itemHeight, gap = 0, moreHeight = 22 }, row) {
+  const node = el("div", { class: "bern-preview-list bern-fill-height bern-fill-width" });
+  const rows = el("div", { class: "bern-preview-rows" });
+  const more = el("span", { class: "bern-preview-more" });
+  node.style.setProperty("--bern-preview-gap", `${Math.max(0, gap)}px`);
+  node.style.setProperty("--bern-preview-item-height", `${itemHeight}px`);
+  more.style.height = `${Math.max(0, moreHeight)}px`;
+  const height = cell(0);
+  const visible = () => previewVisibleCount(items().length, height.get(), itemHeight, gap, moreHeight);
+  Each(rows, ctx, { items: () => items().slice(0, visible()), key }, (p, ctx, item) => {
+    const holder = el("div", { class: "bern-preview-row" });
+    row(holder, ctx, item);
+    p.append(holder);
+  });
+  effect(() => {
+    const remaining = items().length - visible();
+    more.hidden = remaining <= 0 || height.get() < moreHeight;
+    more.textContent = `+${remaining}`;
+  });
+  node.append(rows, more);
+  p.append(node);
+  const resize = new ResizeObserver(([entry]) => height.set(entry.contentRect.height));
+  resize.observe(node);
+  onCleanup(() => resize.disconnect());
+}
+
 /// A sidebar and detail split. On narrow windows the sidebar is the first
 /// page and choosing a destination shows the detail with a back button.
 export function SplitView(p, ctx, spec, detail) {

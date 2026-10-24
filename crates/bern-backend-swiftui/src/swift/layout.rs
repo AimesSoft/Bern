@@ -582,6 +582,23 @@ impl Generator<'_> {
         self.toolbar(out, &element.children, ctx);
     }
 
+    pub(super) fn preview_list(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
+            (element.expr("items"), &element.template, element.prop("key"))
+        {
+            let var = member(&template.var);
+            out.open(format!(
+                "BernPreviewList(items: {}, id: \\.{}, itemHeight: {}, gap: {}, moreHeight: {}) {{ {var} in",
+                self.expr(items), member(name),
+                double(element.number("item_height").unwrap_or(1.0)),
+                double(element.number("gap").unwrap_or(0.0)),
+                double(element.number("more_height").unwrap_or(22.0)),
+            ));
+            self.nodes(out, &element.children, ctx);
+            out.close("}");
+        }
+    }
+
     pub(super) fn list(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let view = if element.kind == "List" {
             "List"

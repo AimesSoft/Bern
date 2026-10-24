@@ -229,6 +229,61 @@ pub fn Match(p: &Parent, ctx: &Ctx, value: Get, arms: Vec<MatchArm>) {
     );
 }
 
+/// A height-bounded preview. The overlay's measuring child has no intrinsic
+/// height, so the rows cannot enlarge their own viewport.
+#[allow(non_snake_case)]
+pub fn PreviewList(p: &Parent, ctx: &Ctx, items: Get, key: usize, var: &'static str,
+                   item_height: f64, gap: f64, more_height: f64, row: Build) {
+    let gap = gap.max(0.0);
+    let more_height = more_height.max(0.0);
+    let viewport = gtk::Overlay::new();
+    viewport.set_hexpand(true);
+    viewport.set_vexpand(true);
+    let measure = gtk::DrawingArea::new();
+    measure.set_hexpand(true);
+    measure.set_vexpand(true);
+    viewport.set_child(Some(&measure));
+    let column = gtk::Box::new(gtk::Orientation::Vertical, gap.round() as i32);
+    column.set_halign(gtk::Align::Center);
+    column.set_valign(gtk::Align::Start);
+    viewport.add_overlay(&column);
+    viewport.set_measure_overlay(&column, false);
+    viewport.set_clip_overlay(&column, true);
+    let rows = gtk::Box::new(gtk::Orientation::Vertical, gap.round() as i32);
+    column.append(&rows);
+    let more = gtk::Label::new(None);
+    more.add_css_class("caption");
+    more.add_css_class("dim-label");
+    more.set_height_request(more_height.round() as i32);
+    column.append(&more);
+    let height = Cell::new(0.0_f64);
+    let measured = height.clone();
+    measure.connect_resize(move |_, _, h| measured.set(f64::from(h)));
+    let badge_items = items.clone();
+    let badge_height = height.clone();
+    let shown: Get = Rc::new(move |ctx| {
+        let mut list = as_list(items(ctx));
+        let total = list.len();
+        let h = height.get();
+        let count = if total == 0 || h <= 0.0 || item_height <= 0.0 { 0 }
+            else if total as f64 * item_height + total.saturating_sub(1) as f64 * gap <= h { total }
+            else { (((h - more_height).max(0.0) / (item_height + gap)).floor() as usize).min(total) };
+        list.truncate(count);
+        Value::List(list)
+    });
+    // The badge uses the same geometry without constructing omitted rows.
+    Each(&Parent::of_box(&rows), ctx, shown.clone(), key, var, None, row);
+    let at = ctx.clone();
+    effect(move || {
+        let count = as_list(shown(&at)).len();
+        let remaining = as_list(badge_items(&at)).len().saturating_sub(count);
+        rows.set_visible(count > 0);
+        more.set_text(&format!("+{remaining}"));
+        more.set_visible(remaining > 0 && badge_height.get() >= more_height);
+    });
+    p.add(&viewport);
+}
+
 struct Row {
     key: String,
     value: Cell<Value>,

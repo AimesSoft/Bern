@@ -669,6 +669,34 @@ impl Generator<'_> {
         out.close("}");
     }
 
+    pub(super) fn preview_list(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
+            (element.expr("items"), &element.template, element.prop("key"))
+        {
+            let item = element.number("item_height").unwrap_or(1.0);
+            let gap = element.number("gap").unwrap_or(0.0).max(0.0);
+            let more = element.number("more_height").unwrap_or(22.0).max(0.0);
+            let modifier = if ctx.scope == Scope::Column && !ctx.scroll_content {
+                "Modifier.fillMaxWidth().weight(1f)"
+            } else { "Modifier.fillMaxSize()" };
+            let var = member(&template.var);
+            out.open(format!("BoxWithConstraints({modifier}.clipToBounds()) {{"));
+            out.line(format!("val previewItems = {}", self.expr(items)));
+            out.line("val previewHeight = maxHeight.value");
+            out.line(format!("val previewCount = if (!previewHeight.isFinite() || previewHeight <= 0f || {item} <= 0.0) 0 else if (previewItems.size * {item} + (previewItems.size - 1) * {gap} <= previewHeight) previewItems.size else ((previewHeight.toDouble() - {more}).coerceAtLeast(0.0) / {}).toInt().coerceIn(0, previewItems.size)", item + gap));
+            out.open(format!("Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy({gap}.dp), horizontalAlignment = Alignment.CenterHorizontally) {{"));
+            out.open(format!("for ({var} in previewItems.take(previewCount)) {{"));
+            out.open(format!("key(BernKey.of({var}.{})) {{", member(name)));
+            out.open(format!("Box(Modifier.height({item}.dp), contentAlignment = Alignment.TopCenter) {{"));
+            self.nodes(out, &element.children, &ctx.within(Scope::Other));
+            out.close("}"); out.close("}"); out.close("}");
+            out.open(format!("if (previewCount < previewItems.size && previewHeight >= {more}) {{"));
+            out.open(format!("Box(Modifier.height({more}.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {{"));
+            out.line("Text(\"+${previewItems.size - previewCount}\", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)");
+            out.close("}"); out.close("}"); out.close("}"); out.close("}");
+        }
+    }
+
     pub(super) fn list(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let lazy = element.kind == "List";
         // With `stagger`, the rows take turns appearing; without, rows of a

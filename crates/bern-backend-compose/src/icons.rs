@@ -158,6 +158,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("tag.fill", "tag"),
     ("text.bubble", "chat"),
     ("text.bubble.fill", "chat"),
+    ("text.rectangle", "subtitles"),
     ("textformat", "text"),
     ("textformat.size", "text"),
     ("textformat.size.larger", "text"),

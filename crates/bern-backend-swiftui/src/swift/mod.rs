@@ -442,6 +442,7 @@ impl<'a> Generator<'a> {
             "Navigation" => self.navigation(out, element, ctx),
             "NavLink" => self.nav_link(out, element, ctx),
             "List" | "ForEach" => self.list(out, element, ctx),
+            "PreviewList" => self.preview_list(out, element, ctx),
             "Tabs" => self.tabs(out, element, ctx),
             "Adaptive" => self.adaptive(out, element, ctx),
             "Menu" => self.menu(out, element, ctx),

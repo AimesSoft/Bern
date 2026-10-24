@@ -116,6 +116,21 @@ inline void Match(Parent const& p, Ctx const& ctx, Get value, std::vector<MatchA
     }, std::move(builders));
 }
 
+struct PreviewPanel : controls::PanelT<PreviewPanel> {
+    Size MeasureOverride(Size available) {
+        for (auto child : Children()) child.Measure(Size{available.Width, std::numeric_limits<float>::infinity()});
+        return Size{std::isfinite(available.Width) ? available.Width : 0,
+                    std::isfinite(available.Height) ? available.Height : 0};
+    }
+    Size ArrangeOverride(Size final) {
+        for (auto child : Children()) child.Arrange(Rect{0, 0, final.Width, final.Height});
+        media::RectangleGeometry clip;
+        clip.Rect(Rect{0, 0, final.Width, final.Height});
+        Clip(clip);
+        return final;
+    }
+};
+
 struct EachProps {
     Get items;
     int key = 0;
@@ -206,6 +221,48 @@ inline void Each(Parent const& p, Ctx const& ctx, EachProps props, Build row) {
             return 0;
         });
     });
+}
+
+inline void PreviewList(Parent const& p, Ctx const& ctx, Get items, int key, char const* variable,
+                        double itemHeight, double gap, double moreHeight, Build row) {
+    gap = (std::max)(0.0, gap); moreHeight = (std::max)(0.0, moreHeight);
+    auto impl = winrt::make_self<PreviewPanel>();
+    auto panel = impl.as<controls::Panel>();
+    SetRole(panel, L"bern-fill");
+    controls::StackPanel column, rows;
+    column.Spacing(gap); rows.Spacing(gap);
+    column.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+    column.VerticalAlignment(xaml::VerticalAlignment::Top);
+    column.Children().Append(rows);
+    controls::TextBlock more;
+    more.FontSize(12); more.Height(moreHeight);
+    more.HorizontalAlignment(xaml::HorizontalAlignment::Center);
+    column.Children().Append(more);
+    panel.Children().Append(column);
+    Cell<double> height(0);
+    auto resize = panel.SizeChanged([height](auto const&, xaml::SizeChangedEventArgs const& e) { height.Set(e.NewSize().Height); });
+    Reactive::OnCleanup([panel, resize] { panel.SizeChanged(resize); });
+    Get visible = [items, height, itemHeight, gap, moreHeight](Ctx const& at) {
+        auto list = R::AsList(items(at));
+        auto total = list.size();
+        double h = height.Get();
+        size_t count = 0;
+        if (total && h > 0 && itemHeight > 0) {
+            count = total * itemHeight + (total - 1) * gap <= h ? total
+                : (std::min)(total, static_cast<size_t>(std::floor((std::max)(0.0, h - moreHeight) / (itemHeight + gap))));
+        }
+        list.resize(count);
+        return Value::List(std::move(list));
+    };
+    Each(Parent::Of(rows), ctx, EachProps{.items = visible, .key = key, .variable = variable}, row);
+    Reactive::Run([ctx, items, visible, height, moreHeight, rows, more] {
+        auto count = R::AsList(visible(ctx)).size();
+        auto remaining = R::AsList(items(ctx)).size() - count;
+        rows.Visibility(count ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        more.Text(winrt::to_hstring("+" + std::to_string(remaining)));
+        more.Visibility(remaining && height.Get() >= moreHeight ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+    });
+    p.Add(panel);
 }
 
 /// A list of rows; inside a form section the rows join the section.

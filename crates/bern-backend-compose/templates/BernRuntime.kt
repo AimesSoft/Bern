@@ -862,6 +862,7 @@ class BernBridge(context: Context) {
     @Keep
     fun platformRequest(operation: String, first: String, second: String): String = try {
         val value = when (operation) {
+            "secret_read", "secret_write", "secret_delete" -> credential(operation, first, second)
             "copy_text" -> onMain {
                 val clipboard = application.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("", first))
@@ -875,6 +876,56 @@ class BernBridge(context: Context) {
         "ok:$value"
     } catch (error: Exception) {
         "error:${error.cause?.message ?: error.message ?: error.javaClass.simpleName}"
+    }
+
+    // Credentials are excluded from backup and encrypted by a non-exportable
+    // Android Keystore key. No plaintext token is written to preferences.
+    @Synchronized
+    private fun credential(operation: String, name: String, value: String): String {
+        require(name.isNotEmpty() && name.all { it in 'a'..'z' || it in 'A'..'Z' || it in '0'..'9' || it in "._-" })
+        val directory = File(application.noBackupFilesDir, "bern-credentials")
+        check(directory.isDirectory || directory.mkdirs())
+        val file = android.util.AtomicFile(File(directory, name))
+        if (operation == "secret_delete") {
+            file.delete()
+            check(!file.baseFile.exists())
+            return ""
+        }
+        if (operation == "secret_read" && !file.baseFile.exists()) return "missing"
+        val alias = "bern.credentials.v1"
+        val store = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        val key = (store.getKey(alias, null) as? javax.crypto.SecretKey) ?: run {
+            check(operation == "secret_write") { "Credential key unavailable" }
+            val generator = javax.crypto.KeyGenerator.getInstance("AES", "AndroidKeyStore")
+            generator.init(android.security.keystore.KeyGenParameterSpec.Builder(alias,
+                android.security.keystore.KeyProperties.PURPOSE_ENCRYPT or android.security.keystore.KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(android.security.keystore.KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(android.security.keystore.KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256).build())
+            generator.generateKey()
+        }
+        val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+        val aad = "${application.packageName}:$name".toByteArray(Charsets.UTF_8)
+        if (operation == "secret_read") {
+            val bytes = file.readFully()
+            require(bytes.size >= 29 && bytes[0] == 1.toByte()) { "Invalid credential format" }
+            cipher.init(javax.crypto.Cipher.DECRYPT_MODE, key, javax.crypto.spec.GCMParameterSpec(128, bytes.copyOfRange(1, 13)))
+            cipher.updateAAD(aad)
+            return "value:" + String(cipher.doFinal(bytes.copyOfRange(13, bytes.size)), Charsets.UTF_8)
+        }
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, key)
+        cipher.updateAAD(aad)
+        check(cipher.iv.size == 12)
+        val encrypted = byteArrayOf(1) + cipher.iv + cipher.doFinal(value.toByteArray(Charsets.UTF_8))
+        val output = file.startWrite()
+        try {
+            output.write(encrypted)
+            file.finishWrite(output)
+        } catch (error: Exception) {
+            file.failWrite(output)
+            throw error
+        }
+        return ""
     }
 
     private fun <T> onMain(action: () -> T): T {

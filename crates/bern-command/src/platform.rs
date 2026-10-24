@@ -22,7 +22,7 @@ pub fn install(services: impl Services + 'static) {
     *SERVICES.write().unwrap_or_else(|e| e.into_inner()) = Some(Arc::new(services));
 }
 
-fn request(operation: &str, first: &str, second: &str) -> Result<String, CommandError> {
+pub(crate) fn request(operation: &str, first: &str, second: &str) -> Result<String, CommandError> {
     let host = SERVICES
         .read()
         .unwrap_or_else(|e| e.into_inner())

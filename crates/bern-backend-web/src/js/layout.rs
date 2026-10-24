@@ -283,6 +283,23 @@ impl Generator<'_> {
         );
     }
 
+    pub(super) fn preview_list(&self, out: &mut Out, element: &Element) {
+        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
+            (element.expr("items"), &element.template, element.prop("key"))
+        {
+            out.open(format!(
+                "B.PreviewList(p, ctx, {{ items: () => {}, key: (v) => v.{name}, itemHeight: {}, gap: {}, moreHeight: {} }}, (p, ctx, {}) => {{",
+                self.expr(items),
+                number(element.number("item_height").unwrap_or(1.0)),
+                number(element.number("gap").unwrap_or(0.0)),
+                number(element.number("more_height").unwrap_or(22.0)),
+                local(&template.var),
+            ));
+            self.nodes(out, &element.children);
+            out.close("});");
+        }
+    }
+
     pub(super) fn list(&self, out: &mut Out, element: &Element) {
         let wrap = element.kind == "List";
         if wrap {
