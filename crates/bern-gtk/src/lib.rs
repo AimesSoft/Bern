@@ -19,6 +19,7 @@ mod hdr;
 mod host;
 mod icons;
 mod layout;
+mod markdown;
 mod media;
 pub mod motion;
 mod palette;

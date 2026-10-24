@@ -1286,6 +1286,71 @@ export function icon(name, size = 16) {
 }
 
 /// Keep a text node, attribute or property in step with a getter.
+/// `Text(markdown)`: `**strong**`, `*emphasis*` or `_emphasis_`, `` `code` ``,
+/// `~~struck~~` and `[links](address)` as elements — never as HTML, so the
+/// words add none — links only to web and mail addresses; a backslash takes
+/// the next mark literally.
+function inlineMarkdown(source) {
+  const root = document.createDocumentFragment();
+  const parents = [root];
+  const marks = [];
+  let words = "";
+  const top = () => parents[parents.length - 1];
+  const flush = () => {
+    if (words) top().append(words);
+    words = "";
+  };
+  let at = 0;
+  while (at < source.length) {
+    const c = source[at];
+    const two = source.slice(at, at + 2);
+    if (c === "\\" && at + 1 < source.length) {
+      words += source[at + 1];
+      at += 2;
+    } else if (two === "**" || two === "~~" || c === "*" || c === "_") {
+      const mark = two === "**" || two === "~~" ? two : c;
+      flush();
+      if (marks[marks.length - 1] === mark) {
+        marks.pop();
+        parents.pop();
+      } else {
+        const node = el(mark === "**" ? "strong" : mark === "~~" ? "s" : "em");
+        top().append(node);
+        parents.push(node);
+        marks.push(mark);
+      }
+      at += mark.length;
+    } else if (c === "`" && source.indexOf(two === "``" ? "``" : "`", at + (two === "``" ? 2 : 1)) >= 0) {
+      const fence = two === "``" ? "``" : "`";
+      const end = source.indexOf(fence, at + fence.length);
+      flush();
+      const node = el("code");
+      node.textContent = source.slice(at + fence.length, end);
+      top().append(node);
+      at = end + fence.length;
+    } else if (c === "[" && source.indexOf("](", at) >= 0 && source.indexOf(")", source.indexOf("](", at) + 2) >= 0) {
+      const middle = source.indexOf("](", at);
+      const end = source.indexOf(")", middle + 2);
+      const address = source.slice(middle + 2, end);
+      flush();
+      const node = el("a");
+      if (/^(https?:|mailto:)/i.test(address)) {
+        node.href = address;
+        node.target = "_blank";
+        node.rel = "noopener noreferrer";
+      }
+      node.append(inlineMarkdown(source.slice(at + 1, middle)));
+      top().append(node);
+      at = end + 1;
+    } else {
+      words += c;
+      at += 1;
+    }
+  }
+  flush();
+  return root;
+}
+
 export function bindText(node, getter) {
   effect(() => {
     node.textContent = getter();
@@ -1480,9 +1545,10 @@ export const STYLE_CLASS = {
   caption2: "caption2", control: "control-font",
 };
 
-export function Text(p, ctx, { content, style, emphasis, fontSize, lines, lineHeight }) {
+export function Text(p, ctx, { content, style, emphasis, fontSize, lines, lineHeight, markdown }) {
   const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
-  bindText(node, content);
+  if (markdown) effect(() => node.replaceChildren(inlineMarkdown(String(content() ?? ""))));
+  else bindText(node, content);
   length(node, "fontSize", fontSize);
   length(node, "lineHeight", lineHeight);
   if (lines !== undefined) {

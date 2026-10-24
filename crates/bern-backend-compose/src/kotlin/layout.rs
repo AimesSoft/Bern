@@ -569,6 +569,9 @@ impl Generator<'_> {
                     .unwrap_or_else(|| "0.dp".into())
             ));
         }
+        if element.keyword("masonry") == Some("true") {
+            extra.push_str(", masonry = true");
+        }
         let padding = self.padding(element);
         if !padding.is_empty() {
             extra.push_str(&format!(", modifier = Modifier{padding}"));

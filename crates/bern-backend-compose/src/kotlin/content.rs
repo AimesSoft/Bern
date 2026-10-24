@@ -40,6 +40,9 @@ impl Generator<'_> {
             .map(|lines| format!(", lines = {}", lines.max(1.0) as i64))
             .unwrap_or_default();
         match element.keyword("mark") {
+            _ if element.keyword("markdown") == Some("true") => out.line(format!(
+                "BernMarkdownText({content}, {style}, {color}{lines})"
+            )),
             Some(role) => out.line(format!(
                 "BernMarkedText({content}, {style}, {color}, BernColor.Role({}){lines})",
                 string(role)

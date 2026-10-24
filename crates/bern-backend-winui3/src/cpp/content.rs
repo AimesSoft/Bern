@@ -23,6 +23,10 @@ impl Generator<'_> {
                 ("lines", Self::number(element, "lines")),
                 ("fontSize", self.len(element, "font_size")),
                 ("lineHeight", self.len(element, "line_height")),
+                (
+                    "markdown",
+                    (element.keyword("markdown") == Some("true")).then(|| "true".to_string()),
+                ),
             ])
         ));
     }

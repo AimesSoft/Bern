@@ -9,7 +9,11 @@ use bern_protocol::Type;
 impl Generator<'_> {
     pub(super) fn text_view(&self, out: &mut Out, element: &Element) {
         let content = self.text_prop(element, "content").unwrap_or_default();
-        out.line(format!("SwiftUI.Text(verbatim: {content})"));
+        if element.keyword("markdown") == Some("true") {
+            out.line(format!("SwiftUI.Text(bernMarkdown({content}))"));
+        } else {
+            out.line(format!("SwiftUI.Text(verbatim: {content})"));
+        }
         self.font(out, element);
         if let Some(height) = self.length(element, "line_height") {
             out.line(format!(

@@ -130,6 +130,8 @@ pub struct TextProps {
     pub font_size: Option<Num>,
     /// The height of each line, the extra split above and below it.
     pub line_height: Option<Num>,
+    /// The content is inline Markdown.
+    pub markdown: bool,
 }
 
 /// The size and line height of a label's text, as Pango attributes.
@@ -201,7 +203,14 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
     }
     bind_text_size(ctx, &label, props.font_size, props.line_height);
     if let Some(content) = &props.content {
-        bind_label(&label, bound_text(ctx, content));
+        if props.markdown {
+            let text = bound_text(ctx, content);
+            let shown = label.clone();
+            shown.set_use_markup(true);
+            effect(move || shown.set_markup(&crate::markdown::markup(&text())));
+        } else {
+            bind_label(&label, bound_text(ctx, content));
+        }
     }
     match props.mark {
         Some(mark) => place(p, &crate::canvas::Marked::new(&label, mark)),

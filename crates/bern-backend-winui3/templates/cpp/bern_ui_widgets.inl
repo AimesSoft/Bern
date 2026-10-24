@@ -178,10 +178,40 @@ struct TextProps {
     Len fontSize;
     /// The height of each line.
     Len lineHeight;
+    /// `markdown`: the content is inline Markdown.
+    bool markdown = false;
 };
 
+/// `Text(markdown)` here: the words of inline Markdown without its marks,
+/// a link shown by its words; a backslash keeps the next mark.
+inline winrt::hstring PlainMarkdown(std::wstring_view source) {
+    std::wstring out;
+    for (size_t at = 0; at < source.size();) {
+        wchar_t c = source[at];
+        if (c == L'\\' && at + 1 < source.size()) {
+            out += source[at + 1];
+            at += 2;
+        } else if (source.substr(at, 2) == L"~~") {
+            at += 2;
+        } else if (c == L'*' || c == L'_' || c == L'`') {
+            at += 1;
+        } else if (c == L'[' && source.find(L"](", at) != std::wstring_view::npos
+                   && source.find(L')', source.find(L"](", at) + 2) != std::wstring_view::npos) {
+            auto middle = source.find(L"](", at);
+            out += PlainMarkdown(source.substr(at + 1, middle - at - 1));
+            at = source.find(L')', middle + 2) + 1;
+        } else {
+            out += c;
+            at += 1;
+        }
+    }
+    return winrt::hstring(out);
+}
+
 inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
-    auto block = TextOf(Bound(ctx, props.content));
+    auto content = Bound(ctx, props.content);
+    if (props.markdown && content) content = [source = content] { return PlainMarkdown(source()); };
+    auto block = TextOf(content);
     ApplyTextStyle(block, props.style);
     if (props.lines) {
         block.MaxLines(static_cast<int32_t>((std::max)(1.0, *props.lines)));

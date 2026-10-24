@@ -30,6 +30,10 @@ impl Generator<'_> {
                 ("lines", element.number("lines").map(number)),
                 ("fontSize", self.length(element, "font_size")),
                 ("lineHeight", self.length(element, "line_height")),
+                (
+                    "markdown",
+                    (element.keyword("markdown") == Some("true")).then(|| "true".to_string()),
+                ),
             ])
         ));
     }

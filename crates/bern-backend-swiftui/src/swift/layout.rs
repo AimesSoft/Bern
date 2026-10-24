@@ -249,10 +249,21 @@ impl Generator<'_> {
                 )
             })
             .unwrap_or_default();
+        let minimum = self
+            .length(element, "min_width")
+            .unwrap_or_else(|| double(120.0));
+        if element.keyword("masonry") == Some("true") {
+            out.open(format!(
+                "BernMasonry(minimum: {minimum}, gap: {gap}, rowGap: {row_gap}) {{"
+            ));
+            self.nodes(out, &element.children, ctx);
+            out.close("}");
+            out.line(".frame(maxWidth: .infinity, alignment: .leading)");
+            self.padding(out, element);
+            return;
+        }
         out.open(format!(
-            "BernAdaptiveGrid(minimum: {}, gap: {gap}, rowGap: {row_gap}, motion: {motion}{cells}) {{",
-            self.length(element, "min_width")
-                .unwrap_or_else(|| double(120.0))
+            "BernAdaptiveGrid(minimum: {minimum}, gap: {gap}, rowGap: {row_gap}, motion: {motion}{cells}) {{"
         ));
         if cells.is_empty() {
             self.nodes(out, &element.children, ctx);

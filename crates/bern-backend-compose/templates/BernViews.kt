@@ -152,6 +152,18 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -1031,6 +1043,7 @@ fun BernGrid(
     rowGap: Dp? = null,
     cellRatio: Float? = null,
     cellExtra: Dp = 0.dp,
+    masonry: Boolean = false,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
@@ -1042,6 +1055,24 @@ fun BernGrid(
         val cell = maxOf(0, (width - spacing * (columns - 1)) / columns)
         val placeables = measurables.map {
             it.measure(Constraints(minWidth = cell, maxWidth = cell, minHeight = 0, maxHeight = Constraints.Infinity))
+        }
+        // Masonry: each item under the column that ends highest so far,
+        // the leftmost of those that tie.
+        if (masonry) {
+            val ends = IntArray(columns)
+            val filled = BooleanArray(columns)
+            val origins = placeables.map { placeable ->
+                val column = ends.indices.minBy { ends[it] }
+                val top = if (filled[column]) ends[column] + rowSpacing else 0
+                ends[column] = top + placeable.height
+                filled[column] = true
+                column * (cell + spacing) to top
+            }
+            return@Layout layout(width, ends.maxOrNull() ?: 0) {
+                placeables.forEachIndexed { index, placeable ->
+                    placeable.place(origins[index].first, origins[index].second)
+                }
+            }
         }
         val rows = placeables.chunked(columns)
         val fixed = cellRatio?.takeIf { it > 0f }?.let { (cell / it + cellExtra.toPx()).toInt() }
@@ -1524,5 +1555,100 @@ fun <T> BernToolbarPicker(
                 )
             }
         }
+    }
+}
+
+// MARK: - Inline Markdown
+
+/// A `Text` with `markdown`: its inline Markdown styled, links opening in
+/// the browser.
+@Composable
+fun BernMarkdownText(text: String, style: TextStyle, color: Color, lines: Int? = null) {
+    val link = MaterialTheme.colorScheme.primary
+    val code = MaterialTheme.colorScheme.surfaceVariant
+    val styled = remember(text, link, code) { bernInlineMarkdown(text, link, code) }
+    Text(
+        styled,
+        style = style,
+        color = color,
+        maxLines = lines ?: Int.MAX_VALUE,
+        overflow = if (lines != null) TextOverflow.Ellipsis else TextOverflow.Clip,
+    )
+}
+
+/// `**strong**`, `*emphasis*` or `_emphasis_`, `` `code` ``, `~~struck~~`
+/// and `[links](address)` as styled text; a backslash takes the next mark
+/// literally, and a mark left open styles nothing.
+fun bernInlineMarkdown(source: String, link: Color, code: Color): AnnotatedString = buildAnnotatedString {
+    val open = ArrayDeque<String>()
+    var at = 0
+    while (at < source.length) {
+        val c = source[at]
+        when {
+            c == '\\' && at + 1 < source.length -> {
+                append(source[at + 1])
+                at += 2
+            }
+            source.startsWith("**", at) || source.startsWith("~~", at) -> {
+                val mark = source.substring(at, at + 2)
+                if (open.lastOrNull() == mark) {
+                    pop()
+                    open.removeLast()
+                } else {
+                    pushStyle(
+                        if (mark == "**") SpanStyle(fontWeight = FontWeight.SemiBold)
+                        else SpanStyle(textDecoration = TextDecoration.LineThrough)
+                    )
+                    open.addLast(mark)
+                }
+                at += 2
+            }
+            c == '*' || c == '_' -> {
+                val mark = c.toString()
+                if (open.lastOrNull() == mark) {
+                    pop()
+                    open.removeLast()
+                } else {
+                    pushStyle(SpanStyle(fontStyle = FontStyle.Italic))
+                    open.addLast(mark)
+                }
+                at += 1
+            }
+            c == '`' -> {
+                val fence = if (source.startsWith("``", at)) "``" else "`"
+                val end = source.indexOf(fence, at + fence.length)
+                if (end < 0) {
+                    append(c)
+                    at += 1
+                } else {
+                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = code)) {
+                        append(source.substring(at + fence.length, end))
+                    }
+                    at = end + fence.length
+                }
+            }
+            c == '[' -> {
+                val middle = source.indexOf("](", at)
+                val end = if (middle >= 0) source.indexOf(')', middle + 2) else -1
+                if (end < 0) {
+                    append(c)
+                    at += 1
+                } else {
+                    val address = source.substring(middle + 2, end)
+                    withLink(LinkAnnotation.Url(address, TextLinkStyles(SpanStyle(color = link)))) {
+                        append(bernInlineMarkdown(source.substring(at + 1, middle), link, code))
+                    }
+                    at = end + 1
+                }
+            }
+            else -> {
+                append(c)
+                at += 1
+            }
+        }
+    }
+    while (open.isNotEmpty()) {
+        pop()
+        open.removeLast()
     }
 }

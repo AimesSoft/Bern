@@ -230,6 +230,27 @@ export function bindGridMinWidth(node, value, motion) {
   });
 }
 
+/// `Grid(masonry)`: each item as tall as it is, under the column that ends
+/// highest so far — rows a pixel tall, each item spanning its height and
+/// the gap below it, kept as the items change size.
+export function bindMasonry(grid, gap) {
+  grid.style.rowGap = "0px";
+  grid.style.gridAutoRows = "1px";
+  grid.style.alignItems = "start";
+  const spans = new ResizeObserver((entries) => {
+    const below = Number(typeof gap === "function" ? gap() : gap) || 0;
+    for (const entry of entries) {
+      const height = entry.target.getBoundingClientRect().height;
+      entry.target.style.gridRowEnd = `span ${Math.max(1, Math.ceil(height + below))}`;
+    }
+  });
+  const watch = () => {
+    for (const child of grid.children) spans.observe(child);
+  };
+  new MutationObserver(watch).observe(grid, { childList: true });
+  watch();
+}
+
 /// Rows of a `Grid` as tall as the column width ÷ `ratio` + `extra`, its
 /// items at their tops; content taller than that runs into the gap below.
 export function bindGridCells(node, ratio, extra, motion) {

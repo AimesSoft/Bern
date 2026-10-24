@@ -2537,3 +2537,60 @@ struct BernMarquee<Content: View>: View {
         }
     }
 }
+
+// MARK: - Masonry and inline Markdown
+
+/// A `Grid` with `masonry`: as many columns as fit at `minimum` wide, each
+/// item as tall as it is, under the column that ends highest so far, the
+/// leftmost of those that tie.
+struct BernMasonry: Layout {
+    let minimum: CGFloat
+    let gap: CGFloat
+    let rowGap: CGFloat
+
+    private func columns(_ width: CGFloat) -> (count: Int, width: CGFloat) {
+        let count = max(1, Int((width + gap) / max(1, minimum + gap)))
+        return (count, max(0, (width - gap * CGFloat(count - 1)) / CGFloat(count)))
+    }
+
+    /// Where each item stands, the columns' width, and how tall the
+    /// tallest column is.
+    private func arrange(_ width: CGFloat, _ subviews: Subviews) -> (origins: [CGPoint], column: CGFloat, height: CGFloat) {
+        let (count, column) = columns(width)
+        var ends = Array(repeating: CGFloat(0), count: count)
+        var filled = Array(repeating: false, count: count)
+        var origins: [CGPoint] = []
+        for subview in subviews {
+            let height = subview.sizeThatFits(ProposedViewSize(width: column, height: nil)).height
+            let index = ends.indices.min { ends[$0] < ends[$1] } ?? 0
+            let top = filled[index] ? ends[index] + rowGap : 0
+            origins.append(CGPoint(x: CGFloat(index) * (column + gap), y: top))
+            ends[index] = top + height
+            filled[index] = true
+        }
+        return (origins, column, ends.max() ?? 0)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minimum
+        return CGSize(width: width, height: arrange(width, subviews).height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let arranged = arrange(bounds.width, subviews)
+        for (subview, origin) in zip(subviews, arranged.origins) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(width: arranged.column, height: nil))
+        }
+    }
+}
+
+/// A `Text` with `markdown`: its inline Markdown as the system styles it,
+/// links opening as the platform opens them; the words as they are where
+/// they do not parse.
+func bernMarkdown(_ source: String) -> AttributedString {
+    let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+    return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
+}

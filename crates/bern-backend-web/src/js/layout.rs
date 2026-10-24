@@ -128,6 +128,14 @@ impl Generator<'_> {
                 self.animate(element).unwrap_or_else(|| "null".into())
             ));
         }
+        if element.keyword("masonry") == Some("true") {
+            first.push(format!(
+                "F.bindMasonry(p, {});",
+                self.length(element, "row_gap")
+                    .or_else(|| self.length(element, "gap"))
+                    .unwrap_or_else(|| "8".into())
+            ));
+        }
         if let Some(ratio) = element.number("cell_ratio") {
             first.push(format!(
                 "F.bindGridCells(p, {}, {}, {});",

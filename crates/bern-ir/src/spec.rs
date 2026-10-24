@@ -560,9 +560,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("padding_y", PropKind::Length),
             opt("cell_ratio", PropKind::Number),
             opt("cell_extra", PropKind::Length),
+            opt("masonry", PropKind::Flag),
         ],
         Children::Any,
-        "Equal columns, as many as fit with each at least `min_width` wide; children fill them row by row; with `cell_ratio` every row is the column width ÷ `cell_ratio` + `cell_extra` tall, its children at the top, and taller content runs into the gap below",
+        "Equal columns, as many as fit with each at least `min_width` wide; children fill them row by row; with `cell_ratio` every row is the column width ÷ `cell_ratio` + `cell_extra` tall, its children at the top, and taller content runs into the gap below; with `masonry` each child is as tall as it is and stands under the column that ends highest so far, the leftmost of those that tie",
     ),
     spec(
         "Stack",
@@ -1122,9 +1123,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("lines", PropKind::Number),
             opt("font_size", PropKind::Length),
             opt("line_height", PropKind::Length),
+            opt("markdown", PropKind::Flag),
         ],
         Children::None,
-        "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS",
+        "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
     ),
     spec(
         "Canvas",
