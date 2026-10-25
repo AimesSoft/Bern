@@ -276,6 +276,29 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
     assert!(!row[..row.find("\n}").unwrap_or(row.len())].contains("BernRowSpacer"), "{row}");
 }
 
+/// A menu picker on macOS is the system's own pop-up, in the words' color,
+/// not the accent the window gives everything else.
+#[test]
+fn macos_menu_pickers_take_no_accent() {
+    let (config, compiled) = showcase();
+    let output = workspace().join("target/bern-test/menu-picker");
+    let context = context(&config, &compiled, "macos", &output);
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    let generated = files
+        .iter()
+        .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
+        .unwrap();
+    let source = String::from_utf8_lossy(&generated.contents);
+    let density = source.find("controls_page.density").expect("the density picker");
+    let before = &source[..density];
+    let picker = before.rfind("SwiftUI.Picker(selection:").unwrap();
+    assert!(
+        before[picker..].contains(".pickerStyle(.menu).tint(nil as SwiftUI.Color?)"),
+        "{}",
+        &before[picker..]
+    );
+}
+
 /// The showcase's tool strip: a segmented picker, a spacer and chips in a
 /// flow; the chips are items of the flow, the spacer takes the rest of its
 /// line. Labelled chips elsewhere wrap in a flow of their own.

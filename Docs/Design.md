@@ -681,7 +681,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | PopoverButton | 浮层按钮：按下弹出一个浮层，里面放任意内容（滑块、开关、文字），例如音量键；`label` 是可访问名称，有 `icon` 时只显示图标；`presented` 可以绑定会话的 `bool` 字段；或用 `open: app.panel => app.set_panel(app.panel)` 跟随引擎状态，动作中相同表达式替换为新的开关值，点击外部或 Escape 关闭也提交 `false`；两种写法互斥；外部入口用 `ui.activate` 打开；内容里的控件随浮层挂载 | 媒体类应用；Web 已实现（弹出层），浏览器中验证画框页的音量浮层：关闭时只有按钮，`ui.activate` 打开后其中的滑块才出现在 `ui.inspect` 里，关闭后随之卸载；macOS 与 iOS 已实现（系统浮层，iPhone 上也保持气泡而不是底部面板），在 macOS 与 iPhone 17 Pro 模拟器上同样验证；Compose 已实现（Material 的 `DropdownMenu` 浮层；只有文字时是色调按钮），Android 模拟器上验证同样只在打开时挂载滑块，`presented` 的两个方向与 `shortcut` 在临时应用中验证；GTK 与 WinUI 3（`Flyout`）已实现，Linux 虚拟机上验证 `ui.activate` 打开后滑块出现在 `ui.inspect`，Windows PC 上验证打开时挂载、关闭后卸载 |
 | Toast | 轻提示：出现或 `key`（没写时是内容）变化时浮现，`duration` 秒后（默认 3）自己隐藏；放在哪里就显示在哪里，通常叠放在页面底部 | 媒体类应用；SwiftUI 已实现；Web 在窗口底部居中弹出、按时下沉淡出，浏览器中已验证；GTK（`AdwToast`）与 WinUI 3（带 `ThemeShadow` 的胶囊）已实现，Linux 虚拟机与 Windows PC 上验证收藏后的轻提示 |
 | Slider | 范围值、连续变化和提交事件 | 基础组件 |
-| Picker | 从有限选项中单选，按场景呈现为菜单、分段控件、单选列表或一排标签（`style: chips`，每个选项一枚系统的开关按钮或 chip；直接放在 `Flow` 里且不显示标签时，每枚都是 Flow 的子项） | 基础组件；`chips` 六个目标都已实现（2026-10-20） |
+| Picker | 从有限选项中单选，按场景呈现为菜单、分段控件、单选列表或一排标签（`style: chips`，每个选项一枚系统的开关按钮或 chip；直接放在 `Flow` 里且不显示标签时，每枚都是 Flow 的子项） | 基础组件；`chips` 六个目标都已实现（2026-10-20）。菜单不取应用的强调色：macOS 是系统自己的弹出按钮，值与箭头用文字颜色；iOS 表单行里的值放在填充胶囊中，用正文色 |
 | ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复；`ScrollView` 的 `snap` 与 `position` 见“联动” | 基础组件，虚拟化后续；`snap`、`position` SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动”；iOS 上横向滚动视图不裁切内容与阴影（`.scrollClipDisabled()`） |
 | PreviewList | 有界的竖向预览：只排能完整放下的行，没放下的项收成一个 +N 标记，`item_height` 是每行高度、`more_height` 是标记的高度；不滚动 | 六个目标生成 |
 | Pinch 和 Swipe | 把双指缩放或拖动绑定到一个会话数值，见“联动” | 媒体类应用；SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动” |

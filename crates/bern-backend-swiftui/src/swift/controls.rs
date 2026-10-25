@@ -681,6 +681,12 @@ impl Generator<'_> {
         }
         match element.keyword("style") {
             Some("menu") if capsule => out.line(".pickerStyle(.inline)"),
+            // macOS draws a menu picker's value and arrows in the tint, and
+            // the window's tint is the app's accent; without it the picker
+            // is the system's own, in the words' color as in System Settings.
+            Some("menu") if self.platform == Platform::Macos => {
+                out.line(".pickerStyle(.menu).tint(nil as SwiftUI.Color?)")
+            }
             Some("menu") => out.line(".pickerStyle(.menu)"),
             Some("segmented") => out.line(".pickerStyle(.segmented).bernAccentTint()"),
             // iOS lists the options with a checkmark instead of
