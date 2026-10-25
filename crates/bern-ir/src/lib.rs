@@ -1210,7 +1210,6 @@ pub struct ComponentLibrary {
     pub texts: Vec<LocalizedText>,
 }
 
-/// Resource key of a text declared on an element property.
 /// Whether `node`, followed in a row by `next`, is the words that lead the
 /// row: a text, or a column standing at its leading edge, before a spacer.
 /// It takes the spacer's room itself, so the controls after it keep their
@@ -1224,6 +1223,7 @@ pub fn leads_row(node: &Node, next: Option<&Node>) -> bool {
     words && matches!(next, Some(Node::Element(spacer)) if spacer.kind == "Spacer")
 }
 
+/// Resource key of a text declared on an element property.
 pub fn text_key(component: &str, node_path: &str, prop: &str) -> String {
     format!("{component}.{node_path}.{prop}")
 }
