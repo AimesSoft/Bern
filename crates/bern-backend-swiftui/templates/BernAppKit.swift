@@ -1921,3 +1921,19 @@ struct BernSearchInput: NSViewRepresentable {
         }
     }
 }
+
+// MARK: - Application icon
+
+/// The icon `WindowSet(icon:)` chooses: the Dock shows the alternate icon
+/// of that asset name while the app runs; `nil` goes back to the bundle's
+/// icon. Finder and the Dock show the bundle's icon while it is closed:
+/// changing that would change the signed bundle.
+struct BernIconChoice: ViewModifier {
+    let icon: String?
+
+    func body(content: Content) -> some View {
+        content.onChange(of: icon, initial: true) {
+            NSApplication.shared.applicationIconImage = icon.flatMap { NSImage(named: $0) }
+        }
+    }
+}

@@ -62,6 +62,9 @@ struct WindowDef {
     std::function<std::string(Ctx const&)> palette;
     /// `WindowSet(appearance:)`: "light", "dark" or "" for the system's.
     std::function<char const*(Ctx const&)> appearance;
+    /// `WindowSet(icon:)`: an `.ico` beside the executable, or "" for the
+    /// application's own (resource 1).
+    std::function<std::wstring(Ctx const&)> icon;
 };
 
 /// Everything the runtime needs to know about a generated application.

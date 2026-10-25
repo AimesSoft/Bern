@@ -199,6 +199,9 @@ struct RawApp {
     /// A square PNG, relative to `Bern.toml`, or a table giving platforms
     /// their own icons; the Bern logo without it.
     icon: Option<toml::Spanned<RawIcon>>,
+    /// Icons the application can switch to at run time, by name, each as
+    /// `icon` is written.
+    alternate_icons: Option<BTreeMap<String, toml::Spanned<RawIcon>>>,
     /// Who publishes the application, for installers and packages.
     publisher: Option<String>,
 }
@@ -312,6 +315,9 @@ pub struct Config {
     /// The other entries of `[app.icon]`: platform name to a checked square
     /// PNG, or a file or folder in the platform's own form, relative to `dir`.
     pub platform_icons: BTreeMap<String, String>,
+    /// `[app.alternate_icons.<name>]`: name to its checked entries, as
+    /// `[app.icon]` has them, with `default` for every platform.
+    pub alternate_icons: BTreeMap<String, BTreeMap<String, String>>,
     /// `[app].publisher`, trimmed; `None` when absent or blank.
     pub publisher: Option<String>,
     pub languages: Vec<String>,
@@ -541,6 +547,7 @@ fn app_icons(
     dir: &Path,
     manifest: &str,
     text: &str,
+    (parent, leaf): (&str, &str),
     entry: &toml::Spanned<RawIcon>,
     errors: &mut Vec<Diagnostic>,
 ) -> (Option<String>, BTreeMap<String, String>) {
@@ -548,13 +555,20 @@ fn app_icons(
     let mut platforms = BTreeMap::new();
     match entry.get_ref() {
         RawIcon::One(written) => (
-            app_icon(dir, "[app].icon", None, written, &declared, errors),
+            app_icon(
+                dir,
+                &format!("[{parent}].{leaf}"),
+                None,
+                written,
+                &declared,
+                errors,
+            ),
             platforms,
         ),
         RawIcon::Platforms(table) => {
             let mut every = None;
             for (key, written) in table {
-                let name = format!("[app.icon].{key}");
+                let name = format!("[{parent}.{leaf}].{key}");
                 if key == "default" {
                     every = app_icon(dir, &name, None, written, &declared, errors);
                 } else if bern_target_api::icon::PLATFORMS.contains(&key.as_str()) {
@@ -1384,8 +1398,41 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
         .app
         .icon
         .as_ref()
-        .map(|entry| app_icons(&dir, &manifest, &text, entry, &mut errors))
+        .map(|entry| app_icons(&dir, &manifest, &text, ("app", "icon"), entry, &mut errors))
         .unwrap_or_default();
+    let mut alternate_icons = BTreeMap::new();
+    for (name, entry) in raw.app.alternate_icons.iter().flatten() {
+        // `WindowSet(icon:)` names it by an enum variant: `DarkSkin` is
+        // `dark_skin`, and `Default` is `[app.icon]`.
+        let named = name.starts_with(|c: char| c.is_ascii_lowercase())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            && name != "default";
+        if !named {
+            errors.push(
+                Diagnostic::error(format!(
+                    "[app.alternate_icons].{name}: name an alternate icon with lowercase letters, digits and `_`, starting with a letter; `default` is `[app.icon]`"
+                ))
+                .at(manifest_location(&manifest, &text, entry.span().start)),
+            );
+            continue;
+        }
+        let (every, mut entries) = app_icons(
+            &dir,
+            &manifest,
+            &text,
+            ("app.alternate_icons", name),
+            entry,
+            &mut errors,
+        );
+        if let Some(every) = every {
+            entries.insert("default".to_string(), every);
+        }
+        if !entries.is_empty() {
+            alternate_icons.insert(name.clone(), entries);
+        }
+    }
 
     if !errors.is_empty() {
         return Err(errors);
@@ -1398,6 +1445,7 @@ pub fn load_excluding(path: &Path, excluded: &[String]) -> Result<Config, Vec<Di
         name: raw.app.name,
         icon,
         platform_icons,
+        alternate_icons,
         publisher: raw
             .app
             .publisher
@@ -1885,7 +1933,14 @@ mod tests {
         let text = format!("# Bern.toml\nicon = {value}\n");
         let raw: Manifest = toml::from_str(&text).unwrap();
         let mut errors = Vec::new();
-        let (every, platforms) = app_icons(&dir, "Bern.toml", &text, &raw.icon, &mut errors);
+        let (every, platforms) = app_icons(
+            &dir,
+            "Bern.toml",
+            &text,
+            ("app", "icon"),
+            &raw.icon,
+            &mut errors,
+        );
         let _ = std::fs::remove_dir_all(&dir);
         (every, platforms, errors)
     }
@@ -1955,6 +2010,11 @@ mod tests {
                 br#"{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}]}"#.to_vec(),
             ),
             ("ios/AppIcon.appiconset/AppIcon.png", png(1024, 1024)),
+            (
+                "apple/App.icon/icon.json",
+                br#"{"fill":"automatic","groups":[{"layers":[{"image-name":"Shape.svg","name":"Shape","glass":true}]}]}"#.to_vec(),
+            ),
+            ("apple/App.icon/Assets/Shape.svg", b"<svg/>".to_vec()),
             ("android/res/mipmap-anydpi-v26/ic_launcher.xml", b"<adaptive-icon/>".to_vec()),
             ("android/res/mipmap-hdpi/ic_launcher_foreground.png", png(162, 162)),
             ("android/res/mipmap-hdpi/ic_launcher_round.png", png(72, 72)),
@@ -2004,6 +2064,14 @@ mod tests {
         assert!(errors.is_empty(), "{errors:?}");
         assert_eq!(every, None);
         assert_eq!(platforms["android"], "icon.png");
+        // An Icon Composer document serves macOS and iOS alike.
+        let (_, platforms, errors) = check_icons(
+            &files,
+            r#"{ macos = "apple/App.icon", ios = "apple/App.icon" }"#,
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(platforms["macos"], "apple/App.icon");
+        assert_eq!(platforms["ios"], "apple/App.icon");
 
         for (extra, value, expected) in [
             (vec![], r#"{ watchos = "icon.png" }"#, "not a platform"),
@@ -2057,6 +2125,15 @@ mod tests {
                 r#"{ browser = "web" }"#,
                 "notes.txt",
             ),
+            (
+                vec![(
+                    "apple/App.icon/icon.json",
+                    br#"{"groups":[{"layers":[{"image-name":"Gone.svg"}]}]}"#.to_vec(),
+                )],
+                r#"{ macos = "apple/App.icon" }"#,
+                "Gone.svg",
+            ),
+            (vec![], r#"{ windows = "apple/App.icon" }"#, "`.ico`"),
         ] {
             let mut all = files.clone();
             all.retain(|(path, _)| !extra.iter().any(|(other, _)| other == path));

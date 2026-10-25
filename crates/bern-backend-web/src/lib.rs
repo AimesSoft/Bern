@@ -137,7 +137,7 @@ fn page_icons(
     let version = html_escape(version);
     if let icon::Source::Native(path) = icon::source(app, "browser", &context.project_dir) {
         if path.is_dir() {
-            return folder_icons(&path, &version).map_err(failed);
+            return folder_icons(&path, "icons", &version).map_err(failed);
         }
         let svg = std::fs::read(&path)
             .map_err(|error| failed(format!("cannot read the icon {}: {error}", path.display())))?;
@@ -190,7 +190,11 @@ fn page_icons(
 /// `favicon.ico` for browsers without SVG icons, then SVG icons, PNG icons
 /// only when there is neither (the maskable ones belong to the manifest),
 /// `apple-touch-icon*.png` for home screens, and the web app manifest.
-fn folder_icons(dir: &Path, version: &str) -> Result<(Vec<GeneratedFile>, String), String> {
+fn folder_icons(
+    dir: &Path,
+    base: &str,
+    version: &str,
+) -> Result<(Vec<GeneratedFile>, String), String> {
     let names = icon::page_icons(dir)
         .map_err(|message| format!("the browser icon {} {message}", dir.display()))?;
     let mut files = Vec::new();
@@ -205,7 +209,7 @@ fn folder_icons(dir: &Path, version: &str) -> Result<(Vec<GeneratedFile>, String
             .unwrap_or_default();
         found.push((shown, extension, contents));
     }
-    let href = |name: &str| format!("icons/{name}?v={version}");
+    let href = |name: &str| format!("{base}/{name}?v={version}");
     let vector = found
         .iter()
         .any(|(_, extension, _)| extension == "svg" || extension == "ico");
@@ -247,11 +251,57 @@ fn folder_icons(dir: &Path, version: &str) -> Result<(Vec<GeneratedFile>, String
     }
     for (name, _, contents) in found {
         files.push(GeneratedFile {
-            path: PathBuf::from("icons").join(name),
+            path: PathBuf::from(base).join(name),
             contents,
         });
     }
     Ok((files, format!("{ico}{svg}{png}{touch}{manifest}")))
+}
+
+/// The icons `WindowSet(icon:)` switches to: each in `icons-<name>/`, its
+/// `<link>`s in a `<template id="bern-icon-<name>">` the runtime swaps in.
+fn alternate_page_icons(
+    app: &Application,
+    context: &BuildContext,
+    version: &str,
+) -> Result<(Vec<GeneratedFile>, String), Vec<Diagnostic>> {
+    let failed = |message: String| vec![Diagnostic::error(message)];
+    let version = html_escape(version);
+    let mut files = Vec::new();
+    let mut templates = String::new();
+    for (name, source) in icon::alternates(app, "browser", &context.project_dir).map_err(failed)? {
+        let base = format!("icons-{name}");
+        let links = match source {
+            icon::Source::Native(path) if path.is_dir() => {
+                let (found, links) = folder_icons(&path, &base, &version).map_err(failed)?;
+                files.extend(found);
+                // The page keeps its web app manifest.
+                links
+                    .lines()
+                    .filter(|line| !line.contains("rel=\"manifest\""))
+                    .map(|line| format!("{line}\n"))
+                    .collect()
+            }
+            icon::Source::Native(path) | icon::Source::Png(path) => {
+                let contents = std::fs::read(&path).map_err(|error| {
+                    failed(format!("cannot read the icon {}: {error}", path.display()))
+                })?;
+                let png = icon::is_png_name(&path.display().to_string());
+                let file = if png { "icon.png" } else { "favicon.svg" };
+                files.push(GeneratedFile {
+                    path: PathBuf::from(&base).join(file),
+                    contents,
+                });
+                let kind = if png { "image/png" } else { "image/svg+xml" };
+                format!("<link rel=\"icon\" type=\"{kind}\" href=\"{base}/{file}?v={version}\">\n")
+            }
+            icon::Source::Logo => String::new(),
+        };
+        templates.push_str(&format!(
+            "<template id=\"bern-icon-{name}\">\n{links}</template>\n"
+        ));
+    }
+    Ok((files, templates))
 }
 
 fn index_html(app: &Application, version: &str, icons: &str) -> String {
@@ -438,7 +488,10 @@ impl Target for WebBrowser {
         let strings = strings::tables(app);
         let remote = context.target.web_mode.as_deref() == Some("ui");
         let version = build_version();
-        let (icon_files, icon_links) = page_icons(app, context, &version)?;
+        let (mut icon_files, mut icon_links) = page_icons(app, context, &version)?;
+        let (alternate_files, alternate_links) = alternate_page_icons(app, context, &version)?;
+        icon_files.extend(alternate_files);
+        icon_links.push_str(&alternate_links);
         let mut files = vec![
             GeneratedFile::text("index.html", index_html(app, &version, &icon_links)),
             GeneratedFile::text("bern.js", RUNTIME),
@@ -905,7 +958,7 @@ mod tests {
         ] {
             std::fs::write(dir.join(name), contents).unwrap();
         }
-        let (files, links) = folder_icons(&dir, "7").unwrap();
+        let (files, links) = folder_icons(&dir, "icons", "7").unwrap();
         assert_eq!(files.len(), 6);
         assert!(files.iter().all(|file| file.path.starts_with("icons")));
         assert_eq!(
@@ -919,7 +972,7 @@ mod tests {
         // maskable one stays the manifest's.
         std::fs::remove_file(dir.join("favicon.ico")).unwrap();
         std::fs::remove_file(dir.join("favicon.svg")).unwrap();
-        let (_, links) = folder_icons(&dir, "7").unwrap();
+        let (_, links) = folder_icons(&dir, "icons", "7").unwrap();
         assert!(links.contains(
             "<link rel=\"icon\" type=\"image/png\" sizes=\"512x512\" href=\"icons/icon-512.png?v=7\">"
         ));

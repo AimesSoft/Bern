@@ -181,6 +181,10 @@ pub struct ThemeDef {
     /// The appearance enum value: `system`, `light` or `dark` by variant.
     pub appearance: Option<fn(&Ctx) -> protocol::Value>,
     pub appearances: &'static [(u32, &'static str)],
+    /// The application icon enum value, `WindowSet(icon:)`; its variants'
+    /// icon names, the application's own for `Default`.
+    pub icon: Option<fn(&Ctx) -> protocol::Value>,
+    pub icons: &'static [(u32, &'static str)],
 }
 
 /// The engine of a generated application, started with the frontend's

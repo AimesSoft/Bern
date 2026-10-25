@@ -216,6 +216,11 @@ fn app_ico(app: &Application, context: &BuildContext) -> Result<Vec<u8>, Vec<Dia
     }
 }
 
+/// The file of the alternate icon `name` beside the executable.
+pub(crate) fn alternate_ico(name: &str) -> String {
+    format!("app-{name}.ico")
+}
+
 fn exe(name: &str) -> String {
     format!("{name}.exe")
 }
@@ -328,6 +333,34 @@ impl Target for WinUi3Windows {
         let cache = context.workspace_dir.join("target/bern-winrt");
         let bundle = context.output_dir.join(&product);
         let frontends = glue::Frontends::of(&context.target.frontends);
+        // The icons `WindowSet(icon:)` switches to, beside the executable: a
+        // declared `.ico` as it is, or the declared PNG packed into one.
+        let mut alternate_icos = Vec::new();
+        for (name, source) in icon::alternates(app, "windows", &context.project_dir)
+            .map_err(|message| vec![Diagnostic::error(message)])?
+        {
+            let failed = |message: String| vec![Diagnostic::error(message)];
+            let contents = match source {
+                icon::Source::Native(path) => std::fs::read(&path).map_err(|error| {
+                    failed(format!("cannot read the icon {}: {error}", path.display()))
+                })?,
+                icon::Source::Png(path) => {
+                    let png = std::fs::read(&path).map_err(|error| {
+                        failed(format!("cannot read the icon {}: {error}", path.display()))
+                    })?;
+                    let size = icon::png_size(&png).map_or(256, |(width, _)| width);
+                    icon::ico(&[icon::Image {
+                        size,
+                        png: png.into(),
+                    }])
+                }
+                icon::Source::Logo => continue,
+            };
+            alternate_icos.push(GeneratedFile {
+                path: PathBuf::from(&product).join(alternate_ico(&name)),
+                contents,
+            });
+        }
         let generator = Generator::new(app);
         let svg_identity = format!(
             "{}-{}-{}-{:016x}-{:016x}",
@@ -452,6 +485,7 @@ impl Target for WinUi3Windows {
         ));
         files.extend(bern_target_api::svg::static_files(app, context)?);
         bern_target_api::script::configure(&mut files, context);
+        files.extend(alternate_icos);
         Ok(files)
     }
 

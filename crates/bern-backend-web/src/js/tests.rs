@@ -19,6 +19,7 @@ fn app() -> Application {
             version: "1".into(),
             icon: None,
             platform_icons: BTreeMap::new(),
+            alternate_icons: BTreeMap::new(),
             publisher: None,
         },
         languages: Languages {
@@ -49,6 +50,7 @@ fn app() -> Application {
             accent: None,
             palette: None,
             appearance: None,
+            icon: None,
             menu_bar: None,
         },
         players: vec![],

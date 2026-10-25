@@ -132,8 +132,10 @@ pub fn check_declared(app: &Application, platform: Platform) -> Vec<Diagnostic> 
         let (_, directories) = segments.split_last().expect("names are not empty");
         let problem = if let Some(part) = segments.iter().find(|part| part.ends_with(".lproj")) {
             format!("`{part}` is where the {system} bundle keeps localizations")
-        } else if platform == Platform::Macos && resource.name == crate::ICON_FILE {
-            format!("`{}` is the application icon", crate::ICON_FILE)
+        } else if platform == Platform::Macos
+            && [crate::ICON_FILE, "Assets.car"].contains(&resource.name.as_str())
+        {
+            format!("`{}` is the application icon", resource.name)
         } else if reserved(segments[0]) {
             format!("`{}` is a file of the {system} bundle itself", segments[0])
         } else if let Some(directory) = directories.iter().find(|part| part.contains('.')) {
@@ -177,7 +179,16 @@ fn xml(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
-pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> String {
+/// The Info.plist of a macOS app. `catalog_icon`: the icon is compiled into
+/// the bundle's asset catalog (from an Icon Composer document), which
+/// `CFBundleIconName` names; `CFBundleIconFile` names the `.icns` either
+/// way, for systems before macOS 26.
+pub fn info_plist(
+    app: &Application,
+    executable: &str,
+    minimum_system: &str,
+    catalog_icon: bool,
+) -> String {
     let name = translation(
         &app.app.name,
         &app.languages.default,
@@ -201,7 +212,7 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
     <key>CFBundleExecutable</key>
     <string>{executable}</string>
     <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
+    <string>AppIcon</string>{icon_name}
     <key>CFBundleIdentifier</key>
     <string>{bundle}</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -231,6 +242,11 @@ pub fn info_plist(app: &Application, executable: &str, minimum_system: &str) -> 
         executable = xml(executable),
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
+        icon_name = if catalog_icon {
+            "\n    <key>CFBundleIconName</key>\n    <string>AppIcon</string>"
+        } else {
+            ""
+        },
         documents = document_types(app, false),
     )
 }
@@ -390,13 +406,31 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         .iter()
         .map(|language| format!("\n        <string>{}</string>", xml(language)))
         .collect();
+    // The icons `WindowSet(icon:)` can switch to, by their asset names.
+    let alternates: String = bern_target_api::icon::choices(app)
+        .into_iter()
+        .filter_map(|(_, alternate)| alternate)
+        .map(|name| {
+            format!(
+                "\n            <key>{0}</key>\n            <dict>\n                <key>CFBundleIconName</key>\n                <string>{0}</string>\n            </dict>",
+                crate::alternate_icon(&name)
+            )
+        })
+        .collect();
+    let alternates = if alternates.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n        <key>CFBundleAlternateIcons</key>\n        <dict>{alternates}\n        </dict>"
+        )
+    };
     let icons = format!(
         r#"<dict>
         <key>CFBundlePrimaryIcon</key>
         <dict>
             <key>CFBundleIconName</key>
             <string>{icon}</string>
-        </dict>
+        </dict>{alternates}
     </dict>"#,
         icon = crate::ios::ICON_NAME
     );
@@ -635,10 +669,10 @@ mod tests {
             }
         });
         let mut hello = app("hello");
-        let plist = info_plist(&hello, "Hello", "14.0");
+        let plist = info_plist(&hello, "Hello", "14.0", false);
         assert!(!plist.contains("CFBundleDocumentTypes"), "{plist}");
         hello.windows.windows[0].content = drop.unwrap();
-        let mac = info_plist(&hello, "Hello", "14.0");
+        let mac = info_plist(&hello, "Hello", "14.0", false);
         assert!(mac.contains("<key>CFBundleDocumentTypes</key>"), "{mac}");
         assert!(mac.contains("<string>public.movie</string>"), "{mac}");
         let ios = info_plist_ios(&hello, "Hello", "17.0");

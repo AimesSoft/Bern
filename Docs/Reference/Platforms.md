@@ -73,7 +73,7 @@
 | 图片跨分栏 Hero | macOS 使用窗口级覆盖层，Web 使用视口级副本；iOS 与 macOS 其他视图沿用匹配几何。Video 连续画面传递另行验证 |
 | 本地持久化 | 原生 FFI 宿主提供文件存储，Web app 使用同源 localStorage；未安装存储宿主时不持久化 |
 | 可选 Svg | 六目标有生成路径；tvOS 没有 WebKit，不可用，用到时检查报错；专属依赖及验证见[动画 SVG](../Implementation/Animated-SVG.md)，不改变普通界面的默认实现 |
-| 平台各自的应用图标（`[app.icon]`） | 七个目标都接受方形 PNG 与各自的原生格式：macOS `.icns`、iOS `.appiconset`、tvOS `.brandassets`（未声明时由默认图标生成分层图标与顶部货架图）、Windows `.ico`、Linux hicolor 图标主题、Android `res`、Web 页面图标文件夹或 SVG；配置阶段检查，生成时原样使用。规则见[应用图标](../Design.md#应用图标) |
+| 平台各自的应用图标（`[app.icon]`） | 七个目标都接受方形 PNG 与各自的原生格式：macOS `.icns`、iOS `.appiconset`（两者也接受 Icon Composer 的 `.icon`，即 26 起的液态玻璃图标）、tvOS `.brandassets`（未声明时由默认图标生成分层图标与顶部货架图）、Windows `.ico`、Linux hicolor 图标主题、Android `res`、Web 页面图标文件夹或 SVG；配置阶段检查，生成时原样使用。规则见[应用图标](../Design.md#应用图标) |
 | `SidebarHeader(role: title)` | WinUI 3 与系统 XAML 不显示（标题栏已显示应用图标与标题）；其他目标照常显示 |
 | 电视布局（`Layout(size: tv)`、`window.tv`） | tvOS 永远是电视：构建时只保留 `tv` 布局并按已知的窗口条件裁剪（实测）。Android 按系统的电视模式或 leanback 特性、Web 按电视浏览器的用户代理判断，未在电视设备上验证。macOS、iOS、Windows、Linux 永远为假，`tv` 布局不生成 |
 | `Shortcut` | 没有控件的快捷键，六个目标生成：macOS、iOS、Web、Android、Linux、Windows 为键盘快捷键；tvOS 与 Android TV 为遥控按键（`escape` 返回、`space` 播放/暂停、方向键为焦点无处可移时的方向）。停用的快捷键把键让给之前显示的（Web 运行时测试覆盖）。tvOS 模拟器实测方向键；返回与播放/暂停、Android TV、其他目标的按键未实测 |
@@ -85,7 +85,7 @@
 
 ## 最近新增能力的验证
 
-这一节只描述 2026-10-15 至 24 日的新增能力；已有平台的历史验收见各实现记录。构建成功不代替实际设备交互。
+这一节只描述 2026-10-15 至 25 日的新增能力；已有平台的历史验收见各实现记录。构建成功不代替实际设备交互。
 
 | 范围 | 代码 / 构建证据 | 实际交互范围 |
 | --- | --- | --- |
@@ -107,6 +107,8 @@
 | 性能追踪的引擎与桥接一侧（2026-10-21） | Rust 测试：规则解析与报错、环形缓冲（写满丢弃并计数、边写边读）、乱序到达的记录按 token 与修订号对上、长帧归因、同一命令过频时合并成一行、关闭时不读时钟也不分配缓冲；真实引擎走完命令写出可解析的时间线；bern-ffi 测试模拟一次控件操作，报告里从动作到上屏各段对上；`bern run --trace` 的传参有测试；WebAssembly 编译通过 | 未在设备或真实应用上实测；各前端界面线程一侧未接入 |
 | 跟随状态的快捷键、`ShortcutInput` 与菜单栏（2026-10-24） | `bound_shortcuts` 与 `shortcut_input` 六个目标实现，`menu_bar` 在 macOS 实现、其他目标声明为不适用；`examples/gallery` 用到三者（菜单栏的应用、文件、自建菜单与子菜单，跟随状态的详情快捷键，改键的 `ShortcutInput`），各后端的生成器测试随之覆盖；SwiftUI 另有测试按 macOS、iOS、tvOS 的 SDK 类型检查；Web 运行时测试覆盖跟随状态的键与录制；GTK 运行时的单元测试在 macOS 的 GTK 4 上通过；编译器与 trybuild 测试覆盖绑定、字面量 `current` 与形状检查；gallery 与一个实际应用 `bern check` 各目标无警告 | macOS 27 上 `examples/gallery` 实测：菜单出现在菜单栏，`ui.activate` 与真实点击菜单项执行命令，草稿与引擎状态变化后勾选、启用随之更新；改键后旧键失效、新键生效；`ShortcutInput` 录下 ⌃⌘F、Esc 保持、Delete 清空。`examples/gallery` 的 Android 构建编译了 Compose 的运行时代码；iOS、tvOS、Android、Linux、Windows、Web 未运行实测，WinUI 3 的 C++ 未编译 |
 | 静置区与 `landscape` 的适用范围（2026-10-24） | `idle_area` 在 Compose、GTK 与 WinUI 3 实现：Compose 按静置区的悬停进出，GTK 按拾取、WinUI 3 按命中测试找出鼠标所在的静置区；`window_landscape` 在 Web 实现（屏幕方向锁定），tvOS、Linux、Windows 声明为不适用。四个后端的生成器测试覆盖，Web 的运行时测试覆盖横屏锁定；临时应用 `bern check` 各目标无警告、`bern build --target android` 通过；WinUI 3 的两种前端在 bern-pc 上经 MSVC 编译（需先绕过当时 HEAD 中三处与本项无关的编译错误）；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy | 未运行实测：Ubuntu 虚拟机磁盘已满，Windows 只编译，Android 没有接鼠标的设备，横屏锁定没有在手机浏览器上试 |
+| 运行时切换的应用图标（`[app.alternate_icons]`、`WindowSet(icon:)`，2026-10-25） | 编译器测试覆盖枚举与备用图标的对应和错误；五个后端的生成器测试覆盖各自的打包与切换代码（iOS 的 `CFBundleAlternateIcons` 与 `--alternate-app-icon`、macOS 的 `Assets.car`、Android 的 `activity-alias`、Windows 的 `app-<名称>.ico`、GTK 的图标名、Web 的模板） | 一个实际应用：iOS 26.5 模拟器上切换后系统弹出确认、主屏幕换成备用图标；macOS 27.0.1 上程序坞随设置切换并能换回；Android 15 实体机上选中后离开应用，启动器入口换成该图标并能换回（开着主题图标时两款单色层相同，外观看不出区别）；Windows、Linux 未运行；tvOS 不支持 |
+| Icon Composer 的 `.icon` 图标（2026-10-25） | 配置测试覆盖 `macos`、`ios` 接受 `.icon` 及缺图、平台不符的错误；生成器测试覆盖两个平台的 `AppIcon.icon` 落位、`actool` 参数，以及 macOS `Info.plist` 的 `CFBundleIconName` | 一个实际应用：macOS 27.0.1 上 `actool` 编出 `Assets.car` 与 `AppIcon.icns`，`NSWorkspace.icon(forFile:)` 渲染的访达图标是液态玻璃版本，并随系统的深色图标风格显示 `.icon` 指定的深色底；iOS 26.5 模拟器主屏幕显示液态玻璃图标，`Assets.car` 带浅色、深色、着色三种外观。macOS 14、15 与 iOS 17、18 上的平面图未在真机上看过 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

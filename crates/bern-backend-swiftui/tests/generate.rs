@@ -1451,6 +1451,176 @@ fn declared_apple_icons_are_used_as_they_are() {
     let _ = std::fs::remove_dir_all(&art);
 }
 
+/// An Icon Composer document goes beside the bundle under the icon's name,
+/// and `actool` compiles it on macOS and iOS alike.
+#[test]
+fn icon_composer_documents_are_compiled_by_actool() {
+    let root = workspace();
+    let (config, mut compiled) = showcase();
+    let art = root.join("target/bern-test/swiftui-icon-document");
+    let _ = std::fs::remove_dir_all(&art);
+    let json = r#"{"fill":"automatic","groups":[{"layers":[{"image-name":"Shape.svg","name":"Shape","glass":true}]}]}"#;
+    for (path, text) in [
+        ("App.icon/icon.json", json),
+        ("App.icon/Assets/Shape.svg", "<svg/>"),
+    ] {
+        let path = art.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let document = art.join("App.icon").display().to_string();
+    let icons = &mut compiled.app.app.platform_icons;
+    icons.insert("macos".into(), document.clone());
+    icons.insert("ios".into(), document);
+    let output = root.join("target/bern-test/swiftui-icon-document-out");
+    let compiled_document = output.join("AppIcon.icon").display().to_string();
+    let has = |files: &[bern_target_api::GeneratedFile], path: &str| {
+        files.iter().any(|file| file.path == Path::new(path))
+    };
+    let actool = |plan: &bern_target_api::BuildPlan| {
+        plan.steps
+            .iter()
+            .find_map(|step| match step {
+                BuildStep::Run { program, args, .. }
+                    if program == "xcrun" && args.first().is_some_and(|arg| arg == "actool") =>
+                {
+                    Some(args.clone())
+                }
+                _ => None,
+            })
+            .expect("a step runs actool")
+    };
+    let given = |args: &[String], flag: &str, value: &str| {
+        args.windows(2)
+            .any(|pair| pair[0] == flag && pair[1] == value)
+    };
+
+    let mac_context = context(&config, &compiled, "macos", &output);
+    let mac = SwiftUiMacos.generate(&compiled.app, &mac_context).unwrap();
+    assert!(has(&mac, "AppIcon.icon/icon.json"));
+    assert!(has(&mac, "AppIcon.icon/Assets/Shape.svg"));
+    // actool writes the .icns for earlier systems itself.
+    assert!(!has(&mac, "Showcase.app/Contents/Resources/AppIcon.icns"));
+    let plist = mac
+        .iter()
+        .find(|file| file.path == Path::new("Showcase.app/Contents/Info.plist"))
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&plist.contents)
+            .contains("<key>CFBundleIconName</key>\n    <string>AppIcon</string>")
+    );
+    let args = actool(&SwiftUiMacos.plan(&compiled.app, &mac_context).unwrap());
+    assert_eq!(args[1], compiled_document);
+    assert!(given(&args, "--platform", "macosx"), "{args:?}");
+    assert!(given(&args, "--app-icon", "AppIcon"), "{args:?}");
+
+    let ios_context = context(&config, &compiled, "ios", &output);
+    let ios = SwiftUiIos.generate(&compiled.app, &ios_context).unwrap();
+    assert!(has(&ios, "AppIcon.icon/icon.json"));
+    assert!(!has(
+        &ios,
+        "Assets.xcassets/AppIcon.appiconset/Contents.json"
+    ));
+    let args = actool(&SwiftUiIos.plan(&compiled.app, &ios_context).unwrap());
+    assert!(args.contains(&compiled_document), "{args:?}");
+    assert!(given(&args, "--app-icon", "AppIcon"), "{args:?}");
+    let _ = std::fs::remove_dir_all(&art);
+}
+
+/// Icons `WindowSet(icon:)` switches to: compiled beside the primary one,
+/// listed in iOS's Info.plist, chosen at run time by their asset names.
+#[test]
+fn alternate_icons_compile_beside_the_primary_and_switch_at_run_time() {
+    let root = workspace();
+    let config = bern_compiler::config::load(&root.join("examples/gallery/Bern.toml")).unwrap();
+    let mut compiled =
+        bern_compiler::compile(&config).unwrap_or_else(|errors| panic!("{errors:?}"));
+    let art = root.join("target/bern-test/swiftui-alternate-icons");
+    let _ = std::fs::remove_dir_all(&art);
+    let json = r#"{"fill":"automatic","groups":[{"layers":[{"image-name":"Shape.svg","name":"Shape","glass":true}]}]}"#;
+    for (path, text) in [
+        ("Alt.icon/icon.json", json),
+        ("Alt.icon/Assets/Shape.svg", "<svg/>"),
+    ] {
+        let path = art.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    // The gallery's accent enum stands in for the icon's: every variant
+    // names an alternate icon, all from the same document.
+    compiled.app.windows.icon = compiled.app.windows.accent.clone();
+    let document = art.join("Alt.icon").display().to_string();
+    for (variant, _) in bern_target_api::icon::choices(&compiled.app) {
+        let name = bern_target_api::icon::alternate_name(&variant);
+        compiled.app.app.alternate_icons.insert(
+            name,
+            [
+                ("macos".to_string(), document.clone()),
+                ("ios".to_string(), document.clone()),
+            ]
+            .into(),
+        );
+    }
+    let output = root.join("target/bern-test/swiftui-alternate-icons-out");
+    let has = |files: &[bern_target_api::GeneratedFile], path: &str| {
+        files.iter().any(|file| file.path == Path::new(path))
+    };
+    let text = |files: &[bern_target_api::GeneratedFile], path: &str| {
+        String::from_utf8_lossy(
+            &files
+                .iter()
+                .find(|file| file.path == Path::new(path))
+                .unwrap()
+                .contents,
+        )
+        .into_owned()
+    };
+    let actool = |plan: &BuildPlan| {
+        plan.steps
+            .iter()
+            .find_map(|step| match step {
+                BuildStep::Run { program, args, .. }
+                    if program == "xcrun" && args.first().is_some_and(|arg| arg == "actool") =>
+                {
+                    Some(args.join(" "))
+                }
+                _ => None,
+            })
+            .expect("a step runs actool")
+    };
+
+    let mac_context = context(&config, &compiled, "macos", &output);
+    let mac = SwiftUiMacos.generate(&compiled.app, &mac_context).unwrap();
+    assert!(has(&mac, "AppIcon-crimson.icon/icon.json"));
+    assert!(
+        text(&mac, "Sources/BernGenerated.swift")
+            .contains(r#"BernIconChoice(icon: (["Crimson": "AppIcon-crimson""#)
+    );
+    let args = actool(&SwiftUiMacos.plan(&compiled.app, &mac_context).unwrap());
+    assert!(args.contains("--alternate-app-icon AppIcon-neon"), "{args}");
+    assert!(!args.contains("--app-icon"), "{args}");
+
+    let ios_context = context(&config, &compiled, "ios", &output);
+    let ios = SwiftUiIos.generate(&compiled.app, &ios_context).unwrap();
+    assert!(has(&ios, "AppIcon-ultramarine.icon/icon.json"));
+    let plist = text(&ios, "Gallery.app/Info.plist");
+    assert!(
+        plist.contains("<key>CFBundleAlternateIcons</key>"),
+        "{plist}"
+    );
+    assert!(
+        plist.contains("<string>AppIcon-crimson</string>"),
+        "{plist}"
+    );
+    let args = actool(&SwiftUiIos.plan(&compiled.app, &ios_context).unwrap());
+    assert!(args.contains("AppIcon-crimson.icon"), "{args}");
+    assert!(
+        args.contains("--alternate-app-icon AppIcon-crimson"),
+        "{args}"
+    );
+    let _ = std::fs::remove_dir_all(&art);
+}
+
 /// A scene's background bleeds to the window's edges; the traffic lights
 /// keep their room on macOS only.
 #[test]

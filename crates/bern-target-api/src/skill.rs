@@ -691,6 +691,7 @@ mod tests {
                 version: "0.1.0".into(),
                 icon: None,
                 platform_icons: BTreeMap::new(),
+                alternate_icons: BTreeMap::new(),
                 publisher: None,
             },
             languages: Languages {
@@ -729,6 +730,7 @@ mod tests {
                 accent: None,
                 palette: None,
                 appearance: None,
+                icon: None,
                 menu_bar: None,
             },
             players: vec![],

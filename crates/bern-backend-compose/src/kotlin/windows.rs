@@ -90,6 +90,27 @@ impl Generator<'_> {
                 .unwrap_or_else(|| "null".into());
             out.line(format!("BernThemeChoice({accent}, {appearance})"));
         }
+        // The application icon, chosen at run time: the launcher alias of
+        // the variant's icon, the `Default` one first as the manifest has it.
+        if let Some(icon) = &windows.icon {
+            let choices = bern_target_api::icon::choices(self.app);
+            if choices.iter().any(|(_, alternate)| alternate.is_some()) {
+                let package = names::package(&self.app.app.bundle_id);
+                let mut aliases = vec![string(&format!("{package}.BernIconDefault"))];
+                aliases.extend(
+                    choices
+                        .iter()
+                        .filter(|(_, alternate)| alternate.is_some())
+                        .map(|(variant, _)| string(&format!("{package}.BernIcon{variant}"))),
+                );
+                out.line(format!(
+                    "BernIconChoice({} + ({}).bernName, listOf({}))",
+                    string(&format!("{package}.BernIcon")),
+                    self.expr(icon),
+                    aliases.join(", ")
+                ));
+            }
+        }
         // `chrome: unified`: the top bar shows only for what the content
         // puts there; immersion hides the top bar and the system bars.
         let mut args = Vec::new();

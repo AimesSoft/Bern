@@ -1667,3 +1667,21 @@ struct BernFocusSlider: View {
     }
 }
 #endif
+
+// MARK: - Application icon
+
+/// The icon `WindowSet(icon:)` chooses: the system's alternate icon of that
+/// asset name, `nil` for the primary one. iOS confirms the change itself.
+struct BernIconChoice: ViewModifier {
+    let icon: String?
+
+    func body(content: Content) -> some View {
+        content.onChange(of: icon, initial: true) {
+            let application = UIApplication.shared
+            guard application.supportsAlternateIcons, application.alternateIconName != icon else { return }
+            application.setAlternateIconName(icon) { error in
+                if let error { NSLog("Bern: the icon %@ cannot be shown: %@", icon ?? "AppIcon", error.localizedDescription) }
+            }
+        }
+    }
+}

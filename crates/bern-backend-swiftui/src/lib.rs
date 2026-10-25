@@ -21,7 +21,7 @@ use bern_target_api::{
     Signing, Target, TargetConfig, TargetDescriptor, WindowCapabilities, check_common, dist_dir,
     icon, package_architecture, skill,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub use ios::{MINIMUM_IOS, SwiftUiIos};
 pub use swift::{Generator, Platform};
@@ -35,6 +35,65 @@ const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Fram
 
 /// The application icon in `Contents/Resources` (`CFBundleIconFile`).
 pub const ICON_FILE: &str = "AppIcon.icns";
+
+/// A declared Icon Composer document, copied outside the bundle under the
+/// icon's name for `actool`, which compiles it into the bundle's
+/// `Assets.car` and writes [`ICON_FILE`] beside it for earlier systems.
+pub const ICON_DOCUMENT: &str = "AppIcon.icon";
+
+/// The asset or resource name of the alternate icon `name`, beside
+/// `AppIcon`: what `WindowSet(icon:)` switches to.
+pub(crate) fn alternate_icon(name: &str) -> String {
+    format!("AppIcon-{name}")
+}
+
+/// The alternate icons `WindowSet(icon:)` can switch to on `platform`, by
+/// name, and where each comes from; an error names one with nothing for
+/// the platform.
+pub(crate) fn alternate_icons(
+    app: &Application,
+    platform: &str,
+    project_dir: &Path,
+) -> Result<Vec<(String, icon::Source)>, Vec<Diagnostic>> {
+    icon::alternates(app, platform, project_dir).map_err(|message| vec![Diagnostic::error(message)])
+}
+
+/// The Icon Composer document `app` declares for `platform`, if any.
+pub(crate) fn icon_document(
+    app: &Application,
+    platform: &str,
+    project_dir: &Path,
+) -> Option<PathBuf> {
+    match icon::source(app, platform, project_dir) {
+        icon::Source::Native(path) if icon::is_icon_document(&path) => Some(path),
+        _ => None,
+    }
+}
+
+/// The files of the Icon Composer document at `dir`, generated under
+/// `into`.
+pub(crate) fn icon_document_files(
+    dir: &Path,
+    into: &Path,
+) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+    let failed = |message: String| vec![Diagnostic::error(message)];
+    icon::icon_document(dir)
+        .map_err(|message| failed(format!("the icon {} {message}", dir.display())))?
+        .into_iter()
+        .map(|file| {
+            let contents = std::fs::read(dir.join(&file)).map_err(|error| {
+                failed(format!(
+                    "cannot read {}: {error}",
+                    dir.join(&file).display()
+                ))
+            })?;
+            Ok(GeneratedFile {
+                path: into.join(file),
+                contents,
+            })
+        })
+        .collect()
+}
 
 /// Motion SwiftUI shows, on macOS and iOS.
 pub(crate) const MOTION: &[&str] = &[
@@ -290,7 +349,12 @@ impl Target for SwiftUiMacos {
             GeneratedFile::text("glue/src/mcp.rs", glue::mcp_rs(context, app)),
             GeneratedFile::text(
                 bundle.join("Contents/Info.plist"),
-                resources::info_plist(app, &product, MINIMUM_MACOS),
+                resources::info_plist(
+                    app,
+                    &product,
+                    MINIMUM_MACOS,
+                    icon_document(app, "macos", &context.project_dir).is_some(),
+                ),
             ),
         ];
         let lock = context.workspace_dir.join("Cargo.lock");
@@ -308,23 +372,58 @@ impl Target for SwiftUiMacos {
                 table,
             ));
         }
-        // The application icon: a declared `.icns` as it is, a declared PNG,
+        // The application icon: a declared Icon Composer document for
+        // `actool` to compile, a declared `.icns` as it is, a declared PNG,
         // or the Bern logo on a full square that macOS cuts to its rounded
         // shape.
         let failed = |message: String| vec![Diagnostic::error(message)];
-        let contents = match icon::source(app, "macos", &context.project_dir) {
-            icon::Source::Native(path) => std::fs::read(&path).map_err(|error| {
-                failed(format!("cannot read the icon {}: {error}", path.display()))
-            })?,
-            _ => icon::icns(
-                &icon::images(app, "macos", &context.project_dir, icon::Shape::Masked)
-                    .map_err(failed)?,
-            ),
-        };
-        files.push(GeneratedFile {
-            path: bundle.join("Contents/Resources").join(ICON_FILE),
-            contents,
-        });
+        if let Some(document) = icon_document(app, "macos", &context.project_dir) {
+            files.extend(icon_document_files(&document, Path::new(ICON_DOCUMENT))?);
+        } else {
+            let contents = match icon::source(app, "macos", &context.project_dir) {
+                icon::Source::Native(path) => std::fs::read(&path).map_err(|error| {
+                    failed(format!("cannot read the icon {}: {error}", path.display()))
+                })?,
+                _ => icon::icns(
+                    &icon::images(app, "macos", &context.project_dir, icon::Shape::Masked)
+                        .map_err(failed)?,
+                ),
+            };
+            files.push(GeneratedFile {
+                path: bundle.join("Contents/Resources").join(ICON_FILE),
+                contents,
+            });
+        }
+        // The icons `WindowSet(icon:)` switches to, under their asset names:
+        // an Icon Composer document beside the primary one for `actool`, an
+        // `.icns` or a PNG in `Contents/Resources`.
+        for (name, source) in alternate_icons(app, "macos", &context.project_dir)? {
+            match source {
+                icon::Source::Native(path) if icon::is_icon_document(&path) => {
+                    files.extend(icon_document_files(
+                        &path,
+                        Path::new(&format!("{}.icon", alternate_icon(&name))),
+                    )?);
+                }
+                icon::Source::Native(path) | icon::Source::Png(path) => {
+                    let contents = std::fs::read(&path).map_err(|error| {
+                        failed(format!("cannot read the icon {}: {error}", path.display()))
+                    })?;
+                    let extension = if icon::is_png_name(&path.display().to_string()) {
+                        "png"
+                    } else {
+                        "icns"
+                    };
+                    files.push(GeneratedFile {
+                        path: bundle
+                            .join("Contents/Resources")
+                            .join(format!("{}.{extension}", alternate_icon(&name))),
+                        contents,
+                    });
+                }
+                icon::Source::Logo => {}
+            }
+        }
         let (architecture, _) = architecture();
         let media = self
             .descriptor()
@@ -461,6 +560,7 @@ impl Target for SwiftUiMacos {
             .join(format!("{product}.dSYM"));
         let symbols = output.join(format!("{product}.app.dSYM"));
 
+        let alternates = alternate_icons(app, "macos", &context.project_dir)?;
         let native_libs = listing_native_libs(&cargo, &native_libs_file(&rust_output));
         let mut steps = vec![
             BuildStep::Run {
@@ -498,6 +598,11 @@ impl Target for SwiftUiMacos {
                     .into_iter()
                     .map(|(path, _)| path)
                     .chain([PathBuf::from(ICON_FILE)])
+                    .chain(alternates.iter().flat_map(|(name, _)| {
+                        ["png", "icns"].map(|extension| {
+                            PathBuf::from(format!("{}.{extension}", alternate_icon(name)))
+                        })
+                    }))
                     .collect(),
             },
             // Symbols of an earlier build must not stay in or beside the
@@ -526,6 +631,60 @@ impl Target for SwiftUiMacos {
                 env: vec![],
             },
         ];
+        // Icon Composer documents, the primary icon's and the alternates':
+        // Liquid Glass layers in Assets.car for macOS 26, and an .icns drawn
+        // from the primary for earlier systems.
+        let primary_document = icon_document(app, "macos", &context.project_dir).is_some();
+        let documents: Vec<String> = alternates
+            .iter()
+            .filter(|(_, source)| matches!(source, icon::Source::Native(path) if icon::is_icon_document(path)))
+            .map(|(name, _)| alternate_icon(name))
+            .collect();
+        if primary_document || !documents.is_empty() {
+            let mut inputs = Vec::new();
+            let mut names = Vec::new();
+            if primary_document {
+                inputs.push(output.join(ICON_DOCUMENT).display().to_string());
+                names.extend(["--app-icon".to_string(), "AppIcon".into()]);
+            }
+            for document in &documents {
+                inputs.push(
+                    output
+                        .join(format!("{document}.icon"))
+                        .display()
+                        .to_string(),
+                );
+                names.extend(["--alternate-app-icon".to_string(), document.clone()]);
+            }
+            steps.push(BuildStep::Run {
+                description: "Compile the icon".into(),
+                program: "xcrun".into(),
+                args: [
+                    vec!["actool".into()],
+                    inputs,
+                    vec![
+                        "--compile".into(),
+                        bundle.join("Contents/Resources").display().to_string(),
+                        "--platform".into(),
+                        "macosx".into(),
+                        "--minimum-deployment-target".into(),
+                        MINIMUM_MACOS.into(),
+                    ],
+                    names,
+                    vec![
+                        "--output-partial-info-plist".into(),
+                        output.join("AssetCatalog.plist").display().to_string(),
+                        "--output-format".into(),
+                        "human-readable-text".into(),
+                        "--errors".into(),
+                        "--warnings".into(),
+                    ],
+                ]
+                .concat(),
+                cwd: output.clone(),
+                env: vec![],
+            });
+        }
         if context.release {
             steps.push(BuildStep::Run {
                 description: "Strip the symbols the dSYM keeps from the executable".into(),

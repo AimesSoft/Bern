@@ -153,6 +153,9 @@ impl Generator<'_> {
             if app.windows.appearance.is_some() {
                 out.line("w.appearance = ThemeAppearance;");
             }
+            if app.windows.icon.is_some() {
+                out.line("w.icon = ThemeIcon;");
+            }
             out.line("windows.push_back(std::move(w));");
             out.close("}");
         }

@@ -1999,8 +1999,8 @@ icon = "art/icon.png"
 ```toml
 [app.icon]
 default = "art/icon.png"                    # 没有单独声明的平台都用它，可省略
-macos = "art/macos/App.icns"                # .icns，或方形 PNG
-ios = "art/ios/AppIcon.appiconset"          # .appiconset 文件夹（可含深色、着色版），或方形 PNG
+macos = "art/macos/App.icns"                # .icns、Icon Composer 的 .icon 文件夹，或方形 PNG
+ios = "art/ios/AppIcon.appiconset"          # .appiconset 文件夹（可含深色、着色版）、.icon 文件夹，或方形 PNG
 tvos = "art/tvos/App.brandassets"           # .brandassets 文件夹（分层图标与顶部货架图），或方形 PNG
 windows = "art/windows/app.ico"             # .ico，或方形 PNG
 linux = "art/linux/hicolor"                 # 按 hicolor 排布的图标主题文件夹，或方形 PNG
@@ -2014,6 +2014,7 @@ browser = "art/web"                         # 页面图标文件夹、SVG，或�
 | --- | --- | --- | --- |
 | `macos` | `.icns` 文件 | 文件头与各项长度 | 原样作为 `AppIcon.icns` |
 | `ios` | `.appiconset` 文件夹 | `Contents.json` 可解析，列出的图片都在文件夹顶层 | 文件夹内容原样放进资源目录的 `AppIcon.appiconset`，由 `actool` 编译；深色与着色版随之生效 |
+| `macos`、`ios` | Icon Composer 的 `.icon` 文件夹 | `icon.json` 可解析，有 `groups`，各层引用的图片（含按外观替换的）都在 `Assets` 里 | 文件夹内容以 `AppIcon.icon` 放在应用包旁，由 `actool` 编译进 `Assets.car`：macOS 26、iOS 26 起显示液态玻璃图标，深色、清透与着色外观随之生效；更早的系统用 `actool` 从它画出的平面图。macOS 另得到 `AppIcon.icns`，`Info.plist` 加 `CFBundleIconName` |
 | `tvos` | `.brandassets` 文件夹 | `Contents.json` 列出的图像栈与图像集都在；图像栈 2 至 5 层，每层的图片都在；有 400 × 240 的主应用图标 | 文件夹内容原样放进资源目录的 `App Icon & Top Shelf Image.brandassets`，由 `actool` 编译；方形 PNG 则生成分层图标与顶部货架图（见下表） |
 | `windows` | `.ico` 文件 | 文件头与各图片位置 | 原样作为 `app.ico`；其中的 PNG 与位图项都可用 |
 | `linux` | 图标主题文件夹 | 只含 `<尺寸>/apps/<名称>.png`（尺寸目录如 `48x48`、`48x48@2`，PNG 尺寸须与目录相符）、`scalable/apps/<名称>.svg`、`symbolic/apps/<名称>-symbolic.svg`，同一个名称，至少一个 PNG | 名称换成 `bundle_id`；最大的 PNG 放在可执行文件旁供运行时使用，全部图标放在 `icons/hicolor` 下，`.deb` 装进 `/usr/share/icons/hicolor` |
@@ -2032,7 +2033,31 @@ browser = "art/web"                         # 页面图标文件夹、SVG，或�
 | Android | `mipmap-xxxhdpi/ic_launcher.png` | 启动器 |
 | Web | `favicon.svg`、`icon.png` 与 `apple-touch-icon.png` | 浏览器标签页与主屏幕 |
 
-圆形标志以透明背景用于 Windows、Linux、Android 与 Web；macOS 会把非圆角方形的图标放进灰色底板，因此使用同一画面铺满方形的版本。声明的 PNG 按原样使用，不缩放；macOS 上应提供铺满方形的画面，或按苹果模板画好底板的图标（824 方块、圆角 185.4 的连续圆角矩形；底板形状不符时 macOS 26 起会把图标放进灰色底板）。需要各平台各自的形状（圆角底板、自适应分层、单色主题图标）时用上表的原生格式。
+圆形标志以透明背景用于 Windows、Linux、Android 与 Web；macOS 会把非圆角方形的图标放进灰色底板，因此使用同一画面铺满方形的版本。声明的 PNG 按原样使用，不缩放；macOS 上应提供铺满方形的画面，或按苹果模板画好底板的图标（824 方块、圆角 185.4 的连续圆角矩形；底板形状不符时 macOS 26 起会把图标放进灰色底板）。需要各平台各自的形状（圆角底板、自适应分层、单色主题图标）时用上表的原生格式；要 macOS 26、iOS 26 的液态玻璃图标时声明 Icon Composer 的 `.icon`，两个平台可以指向同一个文件夹。
+
+#### 运行时切换的图标
+
+应用可以让用户在几个图标之间切换（比如设置里的「应用图标」）。备用图标在 `[app.alternate_icons.<名称>]` 下声明，写法与 `[app.icon]` 相同，名称用小写字母、数字与 `_`，以字母开头，不能叫 `default`：
+
+```toml
+[app.alternate_icons.skin]
+default = "art/skin/icon.png"               # 没有单独声明的平台都用它
+macos = "art/skin/App.icon"                 # 平台各自的格式，规则同 [app.icon]
+ios = "art/skin/App.icon"
+```
+
+根组件的 `WindowSet(icon:)` 绑定一个枚举：`Default` 变体是 `[app.icon]`，其余每个变体指一个备用图标，`DarkSkin` 指 `dark_skin`；变体指向未声明的备用图标是构建错误。值变化时各目标这样切换：
+
+| 目标 | 切换 | 打包 |
+| --- | --- | --- |
+| iOS | `setAlternateIconName`，系统弹出确认 | `.icon`、`.appiconset` 或 1024 像素 PNG，以 `AppIcon-<名称>` 编进 `Assets.car`（`--alternate-app-icon`），`Info.plist` 列在 `CFBundleAlternateIcons` |
+| macOS | 应用运行时程序坞显示该图标（`applicationIconImage`）；关闭后访达与程序坞仍是应用包自带的图标，改它会改动已签名的应用包 | `.icon` 编进 `Assets.car`，`.icns` 或 PNG 放进 `Contents/Resources`，都名为 `AppIcon-<名称>` |
+| Android | 每个图标是主活动的一个 `activity-alias`；应用离开屏幕（界面停止）时才启用选中的、停用其余的，因为停用启动它的那个入口会把应用关掉；启动器稍后刷新，开着主题图标时显示的是各图标的单色层 | `res` 文件夹里的 `ic_launcher*` 改名为 `ic_launcher_<名称>*` 并入，PNG 放进 `mipmap-xxxhdpi` |
+| Windows | 每个窗口的标题栏、任务栏按钮与 Alt+Tab 换成该图标；可执行文件与快捷方式的图标不变 | `.ico`（PNG 打包成 `.ico`）放在可执行文件旁，名为 `app-<名称>.ico` |
+| Linux | 窗口的图标名换成 `<bundle_id>-<名称>`；GNOME 在 Wayland 下的程序坞取 `.desktop` 里的图标，不跟着变 | 图标主题里最大的 PNG 或声明的 PNG，放进可执行文件旁的 `icons/` |
+| Web | 页面的图标链接换成该图标的；网页应用清单不变 | 页面图标文件夹、SVG 或 PNG 复制到 `icons-<名称>/`，链接放在页面的 `<template id="bern-icon-<名称>">` 里 |
+
+tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主图标。
 
 ### 构建产物与增量更新
 

@@ -30,6 +30,7 @@ const STYLE: &str = include_str!("../templates/BernStyle.kt");
 const MEDIA: &str = include_str!("../templates/BernMedia.kt");
 const FEATURES: &str = include_str!("../templates/BernFeatures.kt");
 const SCENE: &str = include_str!("../templates/BernScene.kt");
+const APP_ICON: &str = include_str!("../templates/BernAppIcon.kt");
 
 /// The Rust target of the engine library: 64-bit ARM, which every phone
 /// of the supported Android versions runs.
@@ -235,7 +236,7 @@ impl Target for ComposeAndroid {
         // adaptive, round and themed icons), or the declared PNG or the
         // Bern logo as drawn.
         let failed = |message: String| vec![Diagnostic::error(message)];
-        let (launcher, round) = match icon::source(app, "android", &context.project_dir) {
+        let (mut launcher, round) = match icon::source(app, "android", &context.project_dir) {
             icon::Source::Native(dir) => {
                 let res = icon::android_res(&dir).map_err(|message| {
                     failed(format!("the Android icon {} {message}", dir.display()))
@@ -263,6 +264,66 @@ impl Target for ComposeAndroid {
                 (vec![launcher], false)
             }
         };
+        // The icons `WindowSet(icon:)` switches to: each its own launcher
+        // alias, its resources renamed from `ic_launcher` to
+        // `ic_launcher_<name>` so they sit beside the primary icon's.
+        let mut icons = Vec::new();
+        let alternates = icon::alternates(app, "android", &context.project_dir).map_err(failed)?;
+        if !alternates.is_empty() {
+            icons.push(project::LauncherIcon {
+                alias: ".BernIconDefault".into(),
+                icon: "ic_launcher".into(),
+                round,
+            });
+        }
+        for (variant, alternate) in icon::choices(app) {
+            let Some(name) = alternate else { continue };
+            let Some((_, source)) = alternates.iter().find(|(other, _)| *other == name) else {
+                continue;
+            };
+            let renamed = format!("ic_launcher_{name}");
+            let alternate_round = match source {
+                icon::Source::Native(dir) => {
+                    let res = icon::android_res(dir).map_err(|message| {
+                        failed(format!("the Android icon {} {message}", dir.display()))
+                    })?;
+                    for file in &res.files {
+                        let mut contents = std::fs::read(dir.join(file)).map_err(|error| {
+                            failed(format!("cannot read {}: {error}", dir.join(file).display()))
+                        })?;
+                        let shown = file.to_string_lossy().replace('\\', "/");
+                        if shown.ends_with(".xml") {
+                            contents = String::from_utf8_lossy(&contents)
+                                .replace("ic_launcher", &renamed)
+                                .into_bytes();
+                        }
+                        launcher.push(GeneratedFile {
+                            path: main
+                                .join("res")
+                                .join(shown.replace("ic_launcher", &renamed)),
+                            contents,
+                        });
+                    }
+                    res.round
+                }
+                icon::Source::Png(path) => {
+                    let contents = std::fs::read(path).map_err(|error| {
+                        failed(format!("cannot read {}: {error}", path.display()))
+                    })?;
+                    launcher.push(GeneratedFile {
+                        path: main.join(format!("res/mipmap-xxxhdpi/{renamed}.png")),
+                        contents,
+                    });
+                    false
+                }
+                icon::Source::Logo => false,
+            };
+            icons.push(project::LauncherIcon {
+                alias: format!(".BernIcon{variant}"),
+                icon: renamed,
+                round: alternate_round,
+            });
+        }
         let mut files = vec![
             GeneratedFile::text("project/settings.gradle.kts", project::settings(&product)),
             GeneratedFile::text("project/build.gradle.kts", project::root_build()),
@@ -270,7 +331,7 @@ impl Target for ComposeAndroid {
             GeneratedFile::text("project/app/build.gradle.kts", project::app_build(app)),
             GeneratedFile::text(
                 main.join("AndroidManifest.xml"),
-                project::manifest(app, round, context.target.android.as_ref()),
+                project::manifest(app, round, context.target.android.as_ref(), &icons),
             ),
             GeneratedFile::text(
                 main.join("res/xml/bern_file_paths.xml"),
@@ -310,6 +371,7 @@ impl Target for ComposeAndroid {
             ),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernMedia.kt"), MEDIA),
             GeneratedFile::text(sources.join("dev/bern/runtime/BernScene.kt"), SCENE),
+            GeneratedFile::text(sources.join("dev/bern/runtime/BernAppIcon.kt"), APP_ICON),
             GeneratedFile::text(
                 sources
                     .join(package.replace('.', "/"))
@@ -469,6 +531,7 @@ impl Target for ComposeAndroid {
                 "BernFeatures",
                 "BernMedia",
                 "BernScene",
+                "BernAppIcon",
             ]
             .iter()
             .map(|name| PathBuf::from(format!("dev/bern/runtime/{name}.kt")))

@@ -345,6 +345,12 @@ pub struct AppInfo {
     /// form, as a `/`-separated path relative to `Bern.toml`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub platform_icons: BTreeMap<String, String>,
+    /// Icons the application can switch to at run time, from
+    /// `[app.alternate_icons.<name>]`: name to its entries, each as
+    /// `[app.icon]` has them (`default` and platform names, `/`-separated
+    /// paths relative to `Bern.toml`). `WindowSet(icon:)` chooses one.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub alternate_icons: BTreeMap<String, BTreeMap<String, String>>,
     /// Who publishes the application, from `[app].publisher`: shown by
     /// installers and package managers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -525,6 +531,11 @@ pub struct WindowCatalog {
     /// and `Dark`.
     #[serde(default)]
     pub appearance: Option<Expr>,
+    /// The application icon the system shows: an enum whose `Default`
+    /// variant is `[app.icon]` and whose other variants name icons of
+    /// `[app.alternate_icons]` (`DarkSkin` names `dark_skin`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<Expr>,
     /// The `MenuBar`: its `CommandMenu`s, their `CommandItem`s, dividers
     /// and submenus, whose drafts are the primary window's. Only a target
     /// with a system menu bar shows it.

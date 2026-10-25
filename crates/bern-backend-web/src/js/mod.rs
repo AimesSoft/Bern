@@ -391,6 +391,24 @@ impl<'a> Generator<'a> {
                 appearance.unwrap_or_else(|| "null".into())
             ));
         }
+        // The page icons the application chooses, by the alternate each
+        // variant names; `Default` keeps the page's own.
+        let alternates: Vec<String> = bern_target_api::icon::choices(app)
+            .into_iter()
+            .filter_map(|(variant, alternate)| {
+                Some(format!("{}: {}", string(&variant), string(&alternate?)))
+            })
+            .collect();
+        if let Some(icon) = &app.windows.icon
+            && !alternates.is_empty()
+        {
+            out.line("// The application icon the application chooses.");
+            out.line(format!(
+                "F.appIcon(() => {}, {{ {} }});",
+                self.variant_name(icon),
+                alternates.join(", ")
+            ));
+        }
         out.line("// Startup.");
         out.open("B.start({");
         out.line(format!("mode: {},", string(mode)));

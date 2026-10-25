@@ -12,6 +12,8 @@ name = { {{app_names}} }
 # Or a table giving platforms their own icons, as a square PNG or in the
 # platform's own form; `default` covers the rest:
 # icon = { default = "icon.png", macos = "icons/App.icns", windows = "icons/app.ico", ios = "icons/AppIcon.appiconset", android = "icons/android/res", linux = "icons/hicolor", browser = "icons/web" }
+# macOS and iOS also take an Icon Composer document (`icons/App.icon`),
+# shown in Liquid Glass from macOS 26 and iOS 26 on.
 # Shown by installers and package managers.
 # publisher = "Your Name"
 

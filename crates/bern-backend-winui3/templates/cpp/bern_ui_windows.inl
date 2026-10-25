@@ -366,13 +366,23 @@ inline void SetPosition(Win& win, double x, double y) {
 #endif
 }
 
-/// The application icon (resource 1) for the title bar, the taskbar and
-/// Alt+Tab, at the sizes of the window's display.
-inline void SetWindowIcons(HWND hwnd) {
+/// The application icon (resource 1), or the `.ico` `file` beside the
+/// executable, for the title bar, the taskbar and Alt+Tab, at the sizes of
+/// the window's display.
+inline void SetWindowIcons(HWND hwnd, std::wstring const& file = {}) {
     auto instance = GetModuleHandleW(nullptr);
     auto dpi = GetDpiForWindow(hwnd);
+    std::wstring path;
+    if (!file.empty()) {
+        wchar_t exe[MAX_PATH];
+        std::wstring own(exe, GetModuleFileNameW(nullptr, exe, MAX_PATH));
+        path = own.substr(0, own.find_last_of(L"\\/") + 1) + file;
+    }
     auto load = [&](int metric) {
         int side = GetSystemMetricsForDpi(metric, dpi ? dpi : 96);
+        if (!path.empty())
+            if (auto chosen = static_cast<HICON>(LoadImageW(nullptr, path.c_str(), IMAGE_ICON, side, side, LR_LOADFROMFILE)))
+                return chosen;
         return static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(1), IMAGE_ICON, side, side, LR_SHARED));
     };
     if (auto large = load(SM_CXICON)) SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(large));
@@ -731,6 +741,19 @@ inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
                 }
 #endif
                 Snapshot::Schedule();
+                return 0;
+            });
+        });
+    }
+    // `WindowSet(icon:)`: the window's title bar, taskbar button and Alt+Tab
+    // show the chosen icon. The executable and its shortcuts keep their own.
+    if (def.icon) {
+        auto icon = def.icon;
+        std::weak_ptr<Win> weak = win;
+        Reactive::Run([weak, icon, ctx] {
+            std::wstring file = icon(ctx);
+            Reactive::Untrack([&] {
+                if (auto win = weak.lock(); win && win->hwnd) SetWindowIcons(win->hwnd, file);
                 return 0;
             });
         });

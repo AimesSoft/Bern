@@ -53,7 +53,7 @@
 
 | 组件 | 属性（粗体必填） | 子内容、动作与位置 |
 | --- | --- | --- |
-| `WindowSet` | **`handle: TypeName`**<br>**`primary: WindowId`**<br>`accent: KeyValue`<br>`palette: KeyValue`<br>`appearance: KeyValue` | 仅含 ["Window", "MenuBar"]；无动作；仅根节点 |
+| `WindowSet` | **`handle: TypeName`**<br>**`primary: WindowId`**<br>`accent: KeyValue`<br>`palette: KeyValue`<br>`appearance: KeyValue`<br>`icon: KeyValue` | 仅含 ["Window", "MenuBar"]；无动作；仅根节点 |
 | `MenuBar` | 无 | 仅含 ["CommandMenu"]；无动作；直接位于 ["WindowSet"]，最多一个；只在 macOS 的菜单栏显示 |
 | `CommandMenu` | `label: LocalizedText`<br>`role: app / file / edit / view / window / help` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["MenuBar", "CommandMenu"]；`label` 与 `role` 二选一，`role` 只用于菜单栏上的菜单 |
 | `CommandItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`shortcut: Shortcut`<br>`enabled: Bool`<br>`checked: Bool`<br>`pick: FileField`<br>`files: FileKinds` | 不含子节点；必须绑定动作；直接位于 ["CommandMenu"]；草稿属于主窗口 |

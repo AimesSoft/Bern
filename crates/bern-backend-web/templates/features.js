@@ -2227,6 +2227,21 @@ export function theme(accent, appearance) {
   });
 }
 
+/// The page icons `WindowSet(icon:)` chooses: the links of a variant's
+/// `<template id="bern-icon-NAME">` replace the page's icon links; a variant
+/// without one (`Default`) brings back the page's own.
+export function appIcon(choose, names) {
+  const selector = 'link[rel~="icon"], link[rel="apple-touch-icon"]';
+  const own = [...document.head.querySelectorAll(selector)].map((link) => link.cloneNode());
+  effect(() => {
+    const name = names[choose()];
+    const chosen = name && document.getElementById(`bern-icon-${name}`);
+    const links = chosen ? [...chosen.content.children] : own;
+    for (const link of document.head.querySelectorAll(selector)) link.remove();
+    document.head.append(...links.map((link) => link.cloneNode()));
+  });
+}
+
 // MARK: - Shortcuts
 
 /// Keyboard shortcuts of the controls on the page: `cmd` is ⌘ on Apple

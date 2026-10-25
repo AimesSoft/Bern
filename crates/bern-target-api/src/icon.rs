@@ -1,9 +1,10 @@
 //! Application icons. Without `[app].icon` every target uses the Bern logo;
 //! with it, the declared square PNG. `[app.icon]` can also give a platform
 //! its own icon: another square PNG, or the icon in the platform's own form
-//! (an `.icns` file, an `.ico` file, an `.appiconset` folder, a tvOS
-//! `.brandassets` folder, an Android `res` folder, an icon theme folder, a
-//! folder of page icons), which is shipped as it is. The platform
+//! (an `.icns` file, an `.ico` file, an `.appiconset` folder, an Icon
+//! Composer `.icon` folder for macOS and iOS, a tvOS `.brandassets` folder,
+//! an Android `res` folder, an icon theme folder, a folder of page icons),
+//! which is shipped as it is. The platform
 //! containers (`.ico` on Windows, `.icns` on macOS) hold PNG images as they
 //! are, so nothing here decodes or scales pixels: the logo ships
 //! pre-rendered at every size the platforms ask for, and a declared PNG is
@@ -51,9 +52,91 @@ pub fn source(app: &Application, platform: &str, project_dir: &Path) -> Source {
     }
 }
 
+/// The `[app.alternate_icons]` name a `WindowSet(icon:)` variant names:
+/// `Skin` is `skin`, `DarkSkin` is `dark_skin`.
+pub fn alternate_name(variant: &str) -> String {
+    let mut name = String::new();
+    for (index, c) in variant.chars().enumerate() {
+        if c.is_ascii_uppercase() && index > 0 {
+            name.push('_');
+        }
+        name.push(c.to_ascii_lowercase());
+    }
+    name
+}
+
+/// The icons `WindowSet(icon:)` chooses among, in its enum's order: each
+/// variant's name, and the alternate icon it shows (`None`: `[app.icon]`,
+/// for `Default`). Empty when the window set does not choose.
+pub fn choices(app: &Application) -> Vec<(String, Option<String>)> {
+    let Some(bern_protocol::Type::Enum { name }) = app.windows.icon.as_ref().map(|icon| &icon.ty)
+    else {
+        return Vec::new();
+    };
+    app.types
+        .enum_def(name)
+        .map(|def| {
+            def.variants
+                .iter()
+                .map(|variant| {
+                    let alternate =
+                        (variant.name != "Default").then(|| alternate_name(&variant.name));
+                    (variant.name.clone(), alternate)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Where the alternate icon `name` comes from on `platform`: its own entry
+/// under `[app.alternate_icons.<name>]`, else its `default`; `None` when it
+/// has neither.
+pub fn alternate_source(
+    app: &Application,
+    name: &str,
+    platform: &str,
+    project_dir: &Path,
+) -> Option<Source> {
+    let entries = app.app.alternate_icons.get(name)?;
+    let declared = entries.get(platform).or_else(|| entries.get("default"))?;
+    Some(if is_png_name(declared) {
+        Source::Png(project_dir.join(declared))
+    } else {
+        Source::Native(project_dir.join(declared))
+    })
+}
+
+/// The alternate icons `WindowSet(icon:)` switches to on `platform`, by
+/// name, with where each comes from; the error names one with nothing for
+/// the platform.
+pub fn alternates(
+    app: &Application,
+    platform: &str,
+    project_dir: &Path,
+) -> Result<Vec<(String, Source)>, String> {
+    choices(app)
+        .into_iter()
+        .filter_map(|(_, alternate)| alternate)
+        .map(|name| match alternate_source(app, &name, platform, project_dir) {
+            Some(source) => Ok((name, source)),
+            None => Err(format!(
+                "[app.alternate_icons.{name}] has no `{platform}` or `default` entry; the {platform} app cannot switch to it"
+            )),
+        })
+        .collect()
+}
+
 /// Whether a declared icon is a PNG by its name.
 pub fn is_png_name(name: &str) -> bool {
     name.to_ascii_lowercase().ends_with(".png")
+}
+
+/// Whether a declared icon is an Icon Composer document, the layered
+/// `.icon` folder that macOS 26 and iOS 26 draw in Liquid Glass. `actool`
+/// compiles it, and draws flat images from it for earlier systems.
+pub fn is_icon_document(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("icon"))
 }
 
 /// How a platform shows application icons.
@@ -258,8 +341,8 @@ pub fn icns(images: &[Image]) -> Vec<u8> {
 /// What `platform` takes under `[app.icon]`, for messages.
 pub fn accepted(platform: &str) -> &'static str {
     match platform {
-        "macos" => "a square PNG or an `.icns` file",
-        "ios" => "a square PNG or an `.appiconset` folder",
+        "macos" => "a square PNG, an `.icns` file or an Icon Composer `.icon` folder",
+        "ios" => "a square PNG, an `.appiconset` folder or an Icon Composer `.icon` folder",
         "tvos" => "a square PNG or a `.brandassets` folder",
         "windows" => "a square PNG or an `.ico` file",
         "linux" => "a square PNG or an icon theme folder laid out like `hicolor`",
@@ -271,7 +354,8 @@ pub fn accepted(platform: &str) -> &'static str {
 
 /// Check an icon in `platform`'s own form at `path`, a file or a folder:
 /// an `.icns` file (macOS), an `.ico` file (Windows), an `.appiconset`
-/// folder (iOS), a `.brandassets` folder (tvOS), a `res` folder (Android), an icon theme folder (Linux), or
+/// folder (iOS), an Icon Composer `.icon` folder (macOS and iOS), a
+/// `.brandassets` folder (tvOS), a `res` folder (Android), an icon theme folder (Linux), or
 /// an SVG or a folder of page icons (browser).
 pub fn check_native(platform: &str, path: &Path) -> Result<(), String> {
     let extension = path
@@ -290,6 +374,7 @@ pub fn check_native(platform: &str, path: &Path) -> Result<(), String> {
                 Err("is not an SVG image".into())
             }
         }
+        ("macos" | "ios", true, "icon") => icon_document(path).map(drop),
         ("ios", true, _) => app_icon_set(path).map(drop),
         ("tvos", true, _) => crate::brand_assets::check(path).map(drop),
         ("android", true, _) => android_res(path).map(drop),
@@ -427,6 +512,48 @@ pub fn app_icon_set(dir: &Path) -> Result<Vec<PathBuf>, String> {
     }
     if named == 0 {
         return Err("names no image in Contents.json".into());
+    }
+    Ok(files)
+}
+
+/// The files of an Icon Composer document (an `.icon` folder):
+/// `icon.json` and the layer images it names, which sit in `Assets`.
+pub fn icon_document(dir: &Path) -> Result<Vec<PathBuf>, String> {
+    let files = files_in(dir)?;
+    let contents = std::fs::read(dir.join("icon.json"))
+        .map_err(|_| "has no icon.json; an .icon folder describes its layers there".to_string())?;
+    let document: serde_json::Value = serde_json::from_slice(&contents)
+        .map_err(|error| format!("has an icon.json that is not JSON: {error}"))?;
+    let groups = document
+        .get("groups")
+        .and_then(|groups| groups.as_array())
+        .ok_or_else(|| "has an icon.json without a `groups` list".to_string())?;
+    let mut named = 0;
+    let layers = groups
+        .iter()
+        .filter_map(|group| group.get("layers")?.as_array())
+        .flatten();
+    for layer in layers {
+        // A layer names its image, and may name others per appearance.
+        let specialized = layer
+            .get("image-name-specializations")
+            .and_then(|values| values.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|value| value.get("value"));
+        for name in layer.get("image-name").into_iter().chain(specialized) {
+            let Some(name) = name.as_str() else { continue };
+            if !files
+                .iter()
+                .any(|file| *file == Path::new("Assets").join(name))
+            {
+                return Err(format!("names {name} in icon.json, which is not in Assets"));
+            }
+            named += 1;
+        }
+    }
+    if named == 0 {
+        return Err("names no layer image in icon.json".into());
     }
     Ok(files)
 }

@@ -190,6 +190,25 @@ impl Generator<'_> {
     /// The accent and appearance the `WindowSet` chooses at run time.
     pub(super) fn theme_functions(&self, out: &mut Out) {
         let windows = &self.app.windows;
+        if let Some(icon) = &windows.icon {
+            out.line(
+                "/// The icon of `WindowSet(icon:)`: the `.ico` of the variant's alternate icon.",
+            );
+            out.open("static std::wstring ThemeIcon(Ctx const& c) {");
+            out.line(format!("auto tag = R::Tag({});", self.expr(icon)));
+            for (index, (_, alternate)) in
+                bern_target_api::icon::choices(self.app).iter().enumerate()
+            {
+                if let Some(name) = alternate {
+                    out.line(format!(
+                        "if (tag == {index}u) return L\"{}\";",
+                        crate::alternate_ico(name)
+                    ));
+                }
+            }
+            out.line("return {};");
+            out.close("}");
+        }
         if let Some(accent) = &windows.accent {
             out.line(
                 "/// The accent of `WindowSet(accent:)`: its index in the accents of `style!`.",

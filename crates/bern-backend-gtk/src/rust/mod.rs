@@ -228,7 +228,11 @@ impl<'a> Generator<'a> {
     /// The accent and appearance of `WindowSet`, chosen at run time.
     fn theme(&self, out: &mut Out) {
         let windows = &self.app.windows;
-        if windows.accent.is_none() && windows.appearance.is_none() && windows.palette.is_none() {
+        if windows.accent.is_none()
+            && windows.appearance.is_none()
+            && windows.palette.is_none()
+            && windows.icon.is_none()
+        {
             out.line("theme: None,");
             return;
         }
@@ -306,6 +310,29 @@ impl<'a> Generator<'a> {
             )
         ));
         out.line(format!("appearances: &[{}],", appearances.join(", ")));
+        // Each variant's icon name: the application's own for `Default`,
+        // `<bundle id>-<name>` for an alternate icon.
+        let icons: Vec<String> = bern_target_api::icon::choices(self.app)
+            .iter()
+            .enumerate()
+            .map(|(index, (_, alternate))| {
+                let name = match alternate {
+                    Some(name) => format!("{}-{name}", self.app.app.bundle_id),
+                    None => self.app.app.bundle_id.clone(),
+                };
+                format!("({index}, {})", string(&name))
+            })
+            .collect();
+        out.line(format!(
+            "icon: {},",
+            some(
+                windows
+                    .icon
+                    .as_ref()
+                    .map(|expr| format!("|c: &b::Ctx| {}", self.expr(expr)))
+            )
+        ));
+        out.line(format!("icons: &[{}],", icons.join(", ")));
         out.close("}),");
     }
 

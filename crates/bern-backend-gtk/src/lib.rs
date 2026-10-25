@@ -408,6 +408,36 @@ impl Target for GtkLinux {
                 });
             }
         }
+        // The icons `WindowSet(icon:)` switches to, beside the application's
+        // own as `<bundle id>-<name>.png`: a declared PNG, or the largest PNG
+        // of a declared icon theme.
+        for (name, source) in
+            icon::alternates(app, "linux", &context.project_dir).map_err(failed)?
+        {
+            let contents = match source {
+                icon::Source::Native(dir) => {
+                    let largest = icon::theme_icons(&dir)
+                        .map_err(|message| {
+                            failed(format!("the Linux icon {} {message}", dir.display()))
+                        })?
+                        .into_iter()
+                        .filter(|one| !one.symbolic)
+                        .filter_map(|one| one.size.map(|size| (size, one.path)))
+                        .max_by_key(|(size, _)| *size)
+                        .map(|(_, path)| path)
+                        .expect("an icon theme has a PNG");
+                    read(&dir.join(largest))?
+                }
+                icon::Source::Png(path) => read(&path)?,
+                icon::Source::Logo => continue,
+            };
+            files.push(GeneratedFile {
+                path: PathBuf::from(&product)
+                    .join("icons")
+                    .join(format!("{}-{name}.png", app.app.bundle_id)),
+                contents,
+            });
+        }
         let lock = context.workspace_dir.join("Cargo.lock");
         if let Ok(contents) = std::fs::read(&lock)
             && !context.output_dir.join("app/Cargo.lock").exists()

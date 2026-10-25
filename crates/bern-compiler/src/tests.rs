@@ -2865,6 +2865,63 @@ fn accents_and_appearance_come_from_enums() {
 }
 
 #[test]
+fn the_icon_comes_from_an_enum_naming_alternate_icons() {
+    // `Mode` with a `Default` variant: `Default` is `[app.icon]`, `Slow`
+    // names `[app.alternate_icons.slow]`.
+    let protocol = PROTOCOL.replace("Fast,", "Default,");
+    let compile_with = |props: &str, manifest: &str| {
+        let ui = wrap("Spacer").replace(
+            "WindowSet(handle: AppWindows, primary: main)",
+            &format!("WindowSet(handle: AppWindows, primary: main{props})"),
+        );
+        let dir = write_project(&protocol, &ui, manifest);
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR".to_vec();
+        png.extend_from_slice(&1024u32.to_be_bytes());
+        png.extend_from_slice(&1024u32.to_be_bytes());
+        std::fs::write(dir.join("slow.png"), png).unwrap();
+        let result = config::load(&dir.join("Bern.toml")).and_then(|c| compile(&c));
+        let _ = std::fs::remove_dir_all(&dir);
+        result
+    };
+    let message = |result: Result<Compiled, Vec<Diagnostic>>| match result {
+        Ok(_) => panic!("expected an error"),
+        Err(errors) => errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    };
+    let declared = "\n[app.alternate_icons.slow]\ndefault = \"slow.png\"\n";
+    let compiled =
+        compile_with(", icon: app.mode", declared).unwrap_or_else(|errors| panic!("{errors:?}"));
+    assert!(compiled.app.windows.icon.is_some());
+    assert_eq!(
+        compiled.app.app.alternate_icons["slow"]["default"],
+        "slow.png"
+    );
+    assert_eq!(
+        bern_target_api::icon::choices(&compiled.app),
+        [
+            ("Default".to_string(), None),
+            ("Slow".to_string(), Some("slow".to_string()))
+        ]
+    );
+
+    let undeclared = message(compile_with(", icon: app.mode", ""));
+    assert!(
+        undeclared.contains("`[app.alternate_icons.slow]`"),
+        "{undeclared}"
+    );
+    let not_enum = message(compile_with(", icon: app.title", declared));
+    assert!(not_enum.contains("`icon` is an enum"), "{not_enum}");
+    let misnamed = message(compile_with(
+        "",
+        "\n[app.alternate_icons.Slow]\ndefault = \"slow.png\"\n",
+    ));
+    assert!(misnamed.contains("lowercase letters"), "{misnamed}");
+}
+
+#[test]
 fn navigation_items_may_come_and_go() {
     let sidebar = |props: &str, items: &str| {
         wrap(&format!(

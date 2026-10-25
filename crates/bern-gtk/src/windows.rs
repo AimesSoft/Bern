@@ -1329,9 +1329,34 @@ fn watch_input(win: &Rc<Win>, seconds: Option<f64>) -> Option<Rc<dyn Fn()>> {
     Some(rest)
 }
 
-/// `WindowSet(accent:, appearance:)`: the accent and appearance every
-/// window shows, chosen at run time.
+/// `WindowSet(accent:, appearance:, icon:)`: the accent, appearance and
+/// icon every window shows, chosen at run time.
 fn follow_theme(ctx: &Ctx, theme: &'static crate::ThemeDef) {
+    // The icon theme finds every icon beside the executable; a window
+    // shows the chosen one in the task switcher and the dock where the
+    // desktop takes it from the window.
+    if let Some(icon) = theme.icon {
+        let at = ctx.clone();
+        effect(move || {
+            let variant = crate::value::tag(&icon(&at));
+            let Some((_, name)) = variant.and_then(|variant| {
+                theme
+                    .icons
+                    .iter()
+                    .find(|(candidate, _)| *candidate == variant)
+            }) else {
+                return;
+            };
+            untrack(|| {
+                gtk::Window::set_default_icon_name(name);
+                for window in gtk::Window::list_toplevels() {
+                    if let Ok(window) = window.downcast::<gtk::Window>() {
+                        window.set_icon_name(Some(name));
+                    }
+                }
+            });
+        });
+    }
     if let Some(palette) = theme.palette {
         let at = ctx.clone();
         effect(move || {

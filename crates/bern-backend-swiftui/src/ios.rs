@@ -150,7 +150,8 @@ impl Target for SwiftUiIos {
         for (path, table) in resources::localization_files(app) {
             files.push(GeneratedFile::text(bundle.join(path), table));
         }
-        // The icon: a declared `.appiconset` as it is (with its dark and
+        // The icon: a declared Icon Composer document beside the asset
+        // catalog, a declared `.appiconset` as it is (with its dark and
         // tinted images), a declared PNG, or the Bern logo on a full square,
         // which iOS cuts to its rounded shape. `actool` compiles it into
         // the bundle's asset catalog.
@@ -160,7 +161,12 @@ impl Target for SwiftUiIos {
             PathBuf::from(ASSETS).join("Contents.json"),
             "{\n  \"info\" : {\n    \"author\" : \"bern\",\n    \"version\" : 1\n  }\n}\n",
         ));
-        if let icon::Source::Native(dir) = icon::source(app, "ios", &context.project_dir) {
+        if let Some(document) = crate::icon_document(app, "ios", &context.project_dir) {
+            files.extend(crate::icon_document_files(
+                &document,
+                &PathBuf::from(format!("{ICON_NAME}.icon")),
+            )?);
+        } else if let icon::Source::Native(dir) = icon::source(app, "ios", &context.project_dir) {
             for file in icon::app_icon_set(&dir)
                 .map_err(|message| failed(format!("the iOS icon {} {message}", dir.display())))?
             {
@@ -188,6 +194,59 @@ impl Target for SwiftUiIos {
                 path: set.join(format!("{ICON_NAME}.png")),
                 contents: icon::largest(&images).png.to_vec(),
             });
+        }
+        // The icons `WindowSet(icon:)` switches to, under their asset names:
+        // an Icon Composer document beside the catalog, a declared
+        // `.appiconset` as it is, or a 1024-pixel PNG in a set of its own.
+        for (name, source) in crate::alternate_icons(app, "ios", &context.project_dir)? {
+            let asset = crate::alternate_icon(&name);
+            let set = PathBuf::from(ASSETS).join(format!("{asset}.appiconset"));
+            match source {
+                icon::Source::Native(path) if icon::is_icon_document(&path) => {
+                    files.extend(crate::icon_document_files(
+                        &path,
+                        &PathBuf::from(format!("{asset}.icon")),
+                    )?);
+                }
+                icon::Source::Native(dir) => {
+                    for file in icon::app_icon_set(&dir).map_err(|message| {
+                        failed(format!("the iOS icon {} {message}", dir.display()))
+                    })? {
+                        let contents = std::fs::read(dir.join(&file)).map_err(|error| {
+                            failed(format!(
+                                "cannot read {}: {error}",
+                                dir.join(&file).display()
+                            ))
+                        })?;
+                        files.push(GeneratedFile {
+                            path: set.join(file),
+                            contents,
+                        });
+                    }
+                }
+                icon::Source::Png(path) => {
+                    let contents = std::fs::read(&path).map_err(|error| {
+                        failed(format!("cannot read {}: {error}", path.display()))
+                    })?;
+                    if icon::png_size(&contents) != Some((1024, 1024)) {
+                        return Err(failed(format!(
+                            "the iOS icon {} is not 1024 × 1024 pixels; an alternate icon takes that size",
+                            path.display()
+                        )));
+                    }
+                    files.push(GeneratedFile::text(
+                        set.join("Contents.json"),
+                        format!(
+                            "{{\n  \"images\" : [\n    {{\n      \"filename\" : \"{asset}.png\",\n      \"idiom\" : \"universal\",\n      \"platform\" : \"ios\",\n      \"size\" : \"1024x1024\"\n    }}\n  ],\n  \"info\" : {{\n    \"author\" : \"bern\",\n    \"version\" : 1\n  }}\n}}\n"
+                        ),
+                    ));
+                    files.push(GeneratedFile {
+                        path: set.join(format!("{asset}.png")),
+                        contents,
+                    });
+                }
+                icon::Source::Logo => {}
+            }
         }
         let (architecture, _, _) = architectures();
         let media = self
@@ -401,32 +460,54 @@ impl Target for SwiftUiIos {
                 vec![],
             ));
         }
+        // A declared Icon Composer document is compiled with the catalog:
+        // Liquid Glass layers for iOS 26, and flat images drawn from them
+        // for earlier systems.
+        let mut catalogs = vec![path(&output.join(ASSETS))];
+        if crate::icon_document(app, "ios", &context.project_dir).is_some() {
+            catalogs.push(path(&output.join(format!("{ICON_NAME}.icon"))));
+        }
+        // The alternate icons, from the catalog or their own documents.
+        let mut alternates = Vec::new();
+        for (name, source) in crate::alternate_icons(app, "ios", &context.project_dir)? {
+            let asset = crate::alternate_icon(&name);
+            if matches!(&source, icon::Source::Native(path) if icon::is_icon_document(path)) {
+                catalogs.push(path(&output.join(format!("{asset}.icon"))));
+            }
+            alternates.extend(["--alternate-app-icon".to_string(), asset]);
+        }
         steps.extend([
             run(
                 "Compile the icon",
                 "xcrun",
-                vec![
-                    "actool".into(),
-                    path(&output.join(ASSETS)),
-                    "--compile".into(),
-                    path(&bundle),
-                    "--platform".into(),
-                    "iphonesimulator".into(),
-                    "--minimum-deployment-target".into(),
-                    MINIMUM_IOS.into(),
-                    "--app-icon".into(),
-                    ICON_NAME.into(),
-                    "--output-partial-info-plist".into(),
-                    path(&output.join("AssetCatalog.plist")),
-                    "--target-device".into(),
-                    "iphone".into(),
-                    "--target-device".into(),
-                    "ipad".into(),
-                    "--output-format".into(),
-                    "human-readable-text".into(),
-                    "--errors".into(),
-                    "--warnings".into(),
-                ],
+                [
+                    vec!["actool".into()],
+                    catalogs,
+                    vec![
+                        "--compile".into(),
+                        path(&bundle),
+                        "--platform".into(),
+                        "iphonesimulator".into(),
+                        "--minimum-deployment-target".into(),
+                        MINIMUM_IOS.into(),
+                        "--app-icon".into(),
+                        ICON_NAME.into(),
+                    ],
+                    alternates,
+                    vec![
+                        "--output-partial-info-plist".into(),
+                        path(&output.join("AssetCatalog.plist")),
+                        "--target-device".into(),
+                        "iphone".into(),
+                        "--target-device".into(),
+                        "ipad".into(),
+                        "--output-format".into(),
+                        "human-readable-text".into(),
+                        "--errors".into(),
+                        "--warnings".into(),
+                    ],
+                ]
+                .concat(),
                 vec![],
             ),
             BuildStep::RemoveIfExists {

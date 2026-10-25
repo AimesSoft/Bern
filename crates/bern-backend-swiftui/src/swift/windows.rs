@@ -160,6 +160,27 @@ impl Generator<'_> {
                     .unwrap_or_else(|| "\"\"".into())
             ));
         }
+        // The application icon, chosen at run time: the variant's alternate
+        // icon by its asset name, `nil` for `Default`.
+        if let Some(icon) = &catalog.icon {
+            let names: Vec<String> = bern_target_api::icon::choices(self.app)
+                .into_iter()
+                .filter_map(|(variant, alternate)| {
+                    Some(format!(
+                        "{}: {}",
+                        string(&variant),
+                        string(&crate::alternate_icon(&alternate?))
+                    ))
+                })
+                .collect();
+            if !names.is_empty() {
+                out.line(format!(
+                    ".modifier(BernIconChoice(icon: ([{}] as [String: String])[({}).bernName]))",
+                    names.join(", "),
+                    self.expr(icon)
+                ));
+            }
+        }
         for session in &window.sessions {
             out.line(format!(
                 ".environment(context.session({}.self))",

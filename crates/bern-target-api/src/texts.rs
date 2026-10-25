@@ -1187,6 +1187,7 @@ mod tests {
                 version: "1".into(),
                 icon: None,
                 platform_icons: Default::default(),
+                alternate_icons: Default::default(),
                 publisher: None,
             },
             languages: Languages {
@@ -1217,6 +1218,7 @@ mod tests {
                 accent: None,
                 palette: None,
                 appearance: None,
+                icon: None,
                 menu_bar: None,
             },
             players: vec![],

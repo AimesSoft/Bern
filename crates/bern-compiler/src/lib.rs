@@ -698,6 +698,7 @@ fn window_catalog(
         accent: root.expr("accent").cloned(),
         palette: root.expr("palette").cloned(),
         appearance: root.expr("appearance").cloned(),
+        icon: root.expr("icon").cloned(),
         menu_bar,
     })
 }
@@ -1854,6 +1855,49 @@ fn check_accent_and_appearance(
     }
 }
 
+/// The icon the system shows comes from an enum: `Default` is `[app.icon]`,
+/// every other variant names an icon of `[app.alternate_icons]`.
+fn check_icon_choice(
+    catalog: &ir::WindowCatalog,
+    root: &ir::Element,
+    types: &TypeTable,
+    alternates: &BTreeMap<String, BTreeMap<String, String>>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let Some(icon) = &catalog.icon else {
+        return;
+    };
+    let variants = match &icon.ty {
+        Type::Enum { name } => types.enum_def(name).map(|def| {
+            def.variants
+                .iter()
+                .map(|variant| variant.name.clone())
+                .collect::<Vec<_>>()
+        }),
+        _ => None,
+    };
+    let Some(variants) = variants else {
+        diagnostics.push(
+            Diagnostic::error(
+                "`icon` is an enum: `Default` shows `[app.icon]`, and every other variant names an icon of `[app.alternate_icons]`",
+            )
+            .at(root.source.clone()),
+        );
+        return;
+    };
+    for variant in variants.iter().filter(|variant| *variant != "Default") {
+        let name = bern_target_api::icon::alternate_name(variant);
+        if !alternates.contains_key(&name) {
+            diagnostics.push(
+                Diagnostic::error(format!(
+                    "icon `{variant}` names `[app.alternate_icons.{name}]` in Bern.toml, which is not declared"
+                ))
+                .at(root.source.clone()),
+            );
+        }
+    }
+}
+
 /// Lower the feature contracts that scope a component and prove what each
 /// scope reaches.
 fn prove_contracts(
@@ -2032,6 +2076,13 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
         .and_then(|root| window_catalog(root, handle, &graph, &signatures, &mut diagnostics));
     if let (Some(catalog), Some(root)) = (&windows, &root_element) {
         check_accent_and_appearance(catalog, root, &types, &style, &mut diagnostics);
+        check_icon_choice(
+            catalog,
+            root,
+            &types,
+            &config.alternate_icons,
+            &mut diagnostics,
+        );
     }
     let contracts = prove_contracts(
         &sources.features,
@@ -2073,6 +2124,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 version: config.version.clone(),
                 icon: config.icon.clone(),
                 platform_icons: config.platform_icons.clone(),
+                alternate_icons: config.alternate_icons.clone(),
                 publisher: config.publisher.clone(),
             },
             languages: ir::Languages {
