@@ -1880,19 +1880,32 @@ struct BernPictureHero: ViewModifier {
     let corner: CGFloat
     let motion: BernMotion
     @BernReducedMotion private var reduce
+    @Environment(BernWindowContext.self) private var window
     @State private var flying = false
+    @State private var entered = false
 
     func body(content: Content) -> some View {
         if let id {
             #if os(macOS)
+            let reduced = reduce || bernForcedReduceMotion
+            // Due to fly in from an element still on screen: hidden from
+            // the first frame, not shown in place for a frame before.
+            let awaiting = !entered && !reduced && window.platform.nsWindow.map {
+                BernWindowImageHeroes.forWindow($0).expects(id)
+            } == true
             content
-                .opacity(flying ? 0 : 1)
+                .opacity(flying || awaiting ? 0 : 1)
                 .background(BernPictureHeroProbe(id: id, picture: picture, fit: fit,
-                    corner: corner, motion: motion, reduced: reduce || bernForcedReduceMotion,
+                    corner: corner, motion: motion, reduced: reduced,
                     visibility: { hidden in
                         var transaction = Transaction()
                         transaction.disablesAnimations = true
                         withTransaction(transaction) { flying = hidden }
+                    },
+                    entered: {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) { entered = true }
                     }))
             #else
             content.bernHero(id)

@@ -1533,6 +1533,8 @@ struct BernPictureHeroProbe: NSViewRepresentable {
     /// than images.
     var capturesView = false
     let visibility: (Bool) -> Void
+    /// The element has been handed to the window's flights, flying or not.
+    var entered: () -> Void = {}
 
     func makeNSView(context: Context) -> BernPictureHeroAnchor { BernPictureHeroAnchor() }
     func updateNSView(_ view: BernPictureHeroAnchor, context: Context) {
@@ -1545,6 +1547,7 @@ struct BernPictureHeroProbe: NSViewRepresentable {
         view.motion = motion
         view.reduced = reduced
         view.visibility = visibility
+        view.entered = entered
         view.schedule()
     }
     static func dismantleNSView(_ view: BernPictureHeroAnchor, coordinator: ()) { view.detach() }
@@ -1560,6 +1563,7 @@ final class BernPictureHeroAnchor: NSView {
     var reduced = false
     var capturesView = false
     var visibility: ((Bool) -> Void)?
+    var entered: (() -> Void)?
     weak var heroes: BernWindowImageHeroes?
     var attached = false
     /// Where the element was at its last layout, in the overlay, for when
@@ -1590,6 +1594,7 @@ final class BernPictureHeroAnchor: NSView {
             guard !self.attached else { return }
             self.attached = true
             heroes.enter(self)
+            self.entered?()
         }
     }
 
@@ -1680,6 +1685,8 @@ private final class BernHeroFlightView: NSView {
     init(from: NSImage, to: NSImage) {
         self.from = from; self.to = to
         super.init(frame: .zero)
+        // Layer-backed, so the picture can fade out once it has landed.
+        wantsLayer = true
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     override var isFlipped: Bool { true }
@@ -1778,6 +1785,18 @@ final class BernWindowImageHeroes {
         }
     }
 
+    /// Whether an element with `key` that mounts now will fly in: another
+    /// one with the key is on screen, or left it a moment ago. The new
+    /// element stays hidden from its first frame until its flight begins,
+    /// rather than showing for a frame in its own place.
+    func expects(_ key: String) -> Bool {
+        if let departure = departed[key],
+           ProcessInfo.processInfo.systemUptime - departure.time < 0.3 {
+            return true
+        }
+        return entries[key]?.contains { $0.anchor?.attached == true } == true
+    }
+
     /// Where `anchor` is in the overlay.
     func rect(of anchor: BernPictureHeroAnchor) -> CGRect? {
         guard prepareOverlay() else { return nil }
@@ -1818,6 +1837,23 @@ final class BernWindowImageHeroes {
         if flights.isEmpty { timer?.invalidate(); timer = nil }
     }
 
+    /// The flight has reached its place: the elements show again and the
+    /// picture fades out over them, so whatever came in over the element
+    /// meanwhile (controls, a video) is not cut in all at once.
+    private func land(_ key: String) {
+        guard let flight = flights.removeValue(forKey: key) else { return }
+        flight.source?.visibility?(false)
+        flight.destination?.visibility?(false)
+        let view = flight.view
+        let duration = 0.15 * bernMotionScale
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration
+            view.animator().alphaValue = 0
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) { view.removeFromSuperview() }
+        if flights.isEmpty { timer?.invalidate(); timer = nil }
+    }
+
     private func tick() {
         let now = ProcessInfo.processInfo.systemUptime
         for (key, flight) in flights {
@@ -1847,9 +1883,15 @@ final class BernWindowImageHeroes {
             flight.view.corner = mix(flight.from.corner, flight.to.corner)
             flight.view.progress = p
             flight.view.needsDisplay = true
-            let settled = abs(p - 1) < 0.0001 && abs(p - flight.progress) < 0.0001
+            // Settled once no edge is half a point from its place or moved
+            // more than that since the last tick: the spring's long tail
+            // would keep the picture over the window for no visible change.
+            let from = flight.from.rect, to = flight.to.rect
+            let travel = max(abs(to.minX - from.minX), abs(to.minY - from.minY),
+                             abs(to.maxX - from.maxX), abs(to.maxY - from.maxY), 1)
+            let settled = abs(p - 1) * travel < 0.5 && abs(p - flight.progress) * travel < 0.5
             flight.progress = p
-            if (t > flight.motion.period && settled) || t > 5 { finish(key) }
+            if (t > flight.motion.period && settled) || t > 5 { land(key) }
         }
     }
 }
