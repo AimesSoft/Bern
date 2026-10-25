@@ -1,6 +1,6 @@
 # 平台能力与验证范围
 
-更新：2026-10-24。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 在共用 SwiftUI 清单之外单独开放搜索面板；iOS 不开放。tvOS 与 iOS 共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
+更新：2026-10-25。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
 
 ## 编译期功能支持
 
@@ -21,6 +21,7 @@
 | `bound_shortcuts` | 跟随状态的快捷键（`shortcut: app.keys.x`、`Shortcut(key: app.keys.x)`） | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
 | `shortcut_input` | 按下组合键改键的 `ShortcutInput` | 支持 | 支持（硬件键盘） | 支持（只显示） | 支持 | 支持（硬件键盘） | 支持 | 支持 |
 | `menu_bar` | 应用菜单栏 `MenuBar`、`CommandMenu`、`CommandItem`，`window.menu_bar` | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 |
+| `runtime_palette` | 运行时语义调色板（`WindowSet(palette:)`），各语义角色的浅色与深色可以在运行时整体替换 | 支持 | 支持 | 支持 | — | — | 支持 | 支持 |
 | `runtime_theme` | 运行时主题选择 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `runtime_images` | 引擎提供图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `picture_fills` | 图片取色与渐隐填充 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
@@ -109,8 +110,14 @@
 | 静置区与 `landscape` 的适用范围（2026-10-24） | `idle_area` 在 Compose、GTK 与 WinUI 3 实现：Compose 按静置区的悬停进出，GTK 按拾取、WinUI 3 按命中测试找出鼠标所在的静置区；`window_landscape` 在 Web 实现（屏幕方向锁定），tvOS、Linux、Windows 声明为不适用。四个后端的生成器测试覆盖，Web 的运行时测试覆盖横屏锁定；临时应用 `bern check` 各目标无警告、`bern build --target android` 通过；WinUI 3 的两种前端在 bern-pc 上经 MSVC 编译（需先绕过当时 HEAD 中三处与本项无关的编译错误）；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy | 未运行实测：Ubuntu 虚拟机磁盘已满，Windows 只编译，Android 没有接鼠标的设备，横屏锁定没有在手机浏览器上试 |
 | 运行时切换的应用图标（`[app.alternate_icons]`、`WindowSet(icon:)`，2026-10-25） | 编译器测试覆盖枚举与备用图标的对应和错误；五个后端的生成器测试覆盖各自的打包与切换代码（iOS 的 `CFBundleAlternateIcons` 与 `--alternate-app-icon`、macOS 的 `Assets.car`、Android 的 `activity-alias`、Windows 的 `app-<名称>.ico`、GTK 的图标名、Web 的模板） | 一个实际应用：iOS 26.5 模拟器上切换后系统弹出确认、主屏幕换成备用图标；macOS 27.0.1 上程序坞随设置切换并能换回；Android 15 实体机上选中后离开应用，启动器入口换成该图标并能换回（开着主题图标时两款单色层相同，外观看不出区别）；Windows、Linux 未运行；tvOS 不支持 |
 | Icon Composer 的 `.icon` 图标（2026-10-25） | 配置测试覆盖 `macos`、`ios` 接受 `.icon` 及缺图、平台不符的错误；生成器测试覆盖两个平台的 `AppIcon.icon` 落位、`actool` 参数，以及 macOS `Info.plist` 的 `CFBundleIconName` | 一个实际应用：macOS 27.0.1 上 `actool` 编出 `Assets.car` 与 `AppIcon.icns`，`NSWorkspace.icon(forFile:)` 渲染的访达图标是液态玻璃版本，并随系统的深色图标风格显示 `.icon` 指定的深色底；iOS 26.5 模拟器主屏幕显示液态玻璃图标，`Assets.car` 带浅色、深色、着色三种外观。macOS 14、15 与 iOS 17、18 上的平面图未在真机上看过 |
+| iOS 的搜索结果、工具栏与表单下拉菜单，横向滚动不裁阴影（2026-10-24） | SwiftUI：页面里的搜索框有结果时由系统列表在页面位置列出、没有结果时居中显示；iOS 工具栏按钮不染强调色；表单里的 `Picker` 菜单把当前值放进填充胶囊、用正文色；横向 `ScrollView` 加 `.scrollClipDisabled()` | iOS 26.5 模拟器上一个实际应用的设置搜索、工具栏与媒体库横向滚动的筛选标签 |
+| `window.keyboard`（2026-10-24） | 七个目标生成：macOS、Linux、Windows 总是成立；iOS 与 tvOS 跟随 GameController 的键盘连接；Android 读当前配置的硬键盘；浏览器按指针与按键判断 | Android 真机（没接键盘）上一个实际应用的设置里不显示快捷键；接上键盘时的切换未实测 |
+| 行里领头的文字占去后面 `Spacer` 的位置（2026-10-24） | `bern_ir::leads_row`：SwiftUI 与 Compose 让文字取得剩余宽度并换行，后面的控件保持宽度；其他目标按 `Row` 的一般规则 | iOS 模拟器上一个实际应用的设置行：说明文字换行，开关不被挤出 |
+| 按内容定高的 `Modal`（2026-10-24、25） | 不写 `height` 时六个后端都按内容定高，超过窗口减 32 时由里面的滚动视图滚动；SwiftUI 在 iOS 上让卡片留在安全区内，遮罩仍铺满整屏 | macOS、iOS 26.5 模拟器与 Android 真机上一个实际应用的插件页（长短两种说明）；GTK 与 WinUI 3 见各自实现记录 |
+| 瀑布流 `Grid(masonry)` 与行内 Markdown `Text(markdown)`（2026-10-24） | 瀑布流：SwiftUI 与 Compose 用自定义布局，Web 用一像素高的网格行，GTK 与 WinUI 3 按普通网格排。Markdown：SwiftUI 用系统的 `AttributedString`，Compose 用 `AnnotatedString` 与 `LinkAnnotation`，Web 生成元素，GTK 用 Pango 标记，WinUI 3 去掉标记只显示文字 | macOS、iOS 模拟器与 Android 真机上一个实际应用的插件市场与插件页：多列卡片按高度错落排列，标题、列表（含嵌套）、粗体、链接与行内代码按平台样式显示；GTK 与 WinUI 3 未实测 |
+| 文字样式 `code`（2026-10-25） | 五个后端用各自平台的等宽字体：SwiftUI 的 `.monospaced`、Compose 的 `FontFamily.Monospace`、Web 的 `ui-monospace`、GTK 的 `monospace` 样式类、WinUI 3 的 Cascadia Mono；定了字号时 SwiftUI 也保留等宽 | Android 真机上一个实际应用插件页的代码块；其他目标未实测 |
 
-Firefox 与 Safari 手机布局尚未实测。用于验收的应用播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
+Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 
 ## 来源与维护
 

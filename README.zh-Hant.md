@@ -69,6 +69,23 @@
 <img alt="為什麼選擇 Bern：編譯成原生介面，一份 Rust 宣告產生各平台自己的 UI 程式碼，執行時沒有 JS 引擎；為 AI 而建，漏寫是編譯錯誤，每個按鈕都是 MCP 工具；輕到不像跨平台，macOS 記憶體 39 MB、0.4 秒出現視窗、應用程式套件 2.7 MB，Windows 35 MB、0.3 秒、4.2 MB，Web 189 KB" src="Docs/Assets/tables/why-zh-Hant-light.svg" width="100%">
 </picture>
 
+## 應用案例
+
+### RustSend · 區域網路檔案傳輸
+
+[RustSend](https://github.com/AimesSoft/RustSend) 是使用 Bern 開發的開源區域網路檔案傳輸工具，相容 LocalSend v2。介面宣告、狀態與傳輸業務統一使用 Rust；Bern 為 macOS 和 iOS 產生 SwiftUI、為 Windows 產生 WinUI 3、為 Linux 產生 GTK 4、為 Android 產生 Jetpack Compose 原生介面。
+
+它支援裝置探索、檔案與文字互傳、接收確認和應用程式內完成提示，桌面小視窗與手機版面共用一套業務邏輯。1.0 的本機 macOS ARM64 Release 建置中，完整 `.app` 為 **8.09 MiB**，下載 `.zip` 為 **3.80 MiB**；建置環境和統計口徑見[測量紀錄](https://github.com/AimesSoft/RustSend/blob/main/docs/measurements.md)。
+
+<table>
+<tr>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png" height="360" alt="RustSend 1.0 在 macOS 實機上的接收頁"></a><br><sub><b>macOS</b> · SwiftUI</sub></td>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png" height="360" alt="RustSend 1.0 在 Android 實機上的接收頁"></a><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+</tr>
+</table>
+
+[原始碼儲存庫](https://github.com/AimesSoft/RustSend) · [下載 RustSend](https://github.com/AimesSoft/RustSend/releases/latest) · [五個平台的截圖與執行環境](https://github.com/AimesSoft/RustSend/blob/main/docs/screenshots/README.md)
+
 ## 為 AI 而建
 
 ### AI 寫程式：漏掉的，編譯器替它記著
@@ -279,10 +296,10 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-zh-Hant-dark.svg">
-<img alt="支援的平台：macOS、Windows、Linux、Web 應用程式、WebUI 與 Android 可用，iOS 目前建置模擬器應用程式；下一步是 flutter + macos、iOS 實機打包與 HarmonyOS" src="Docs/Assets/tables/platforms-zh-Hant-light.svg" width="100%">
+<img alt="支援的平台：macOS、Windows、Linux、Web 應用程式、WebUI 與 Android 可用，iOS 與 tvOS 目前建置模擬器應用程式；下一步是 flutter + macos、iOS 實機打包與 HarmonyOS" src="Docs/Assets/tables/platforms-zh-Hant-light.svg" width="100%">
 </picture>
 
-實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web 與 WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)；下一步的平台見[適配規範](Docs/Adaptation/README.md)。
+實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web 與 WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)；下一步的平台見[適配規範](Docs/Adaptation/README.md)。
 
 未指定 UI 技術時採用平台的預設技術；預設技術無法使用時直接回報錯誤，不會悄悄換成另一套技術。
 
@@ -476,7 +493,7 @@ cargo test --workspace
 - [文件目錄](Docs/README.md) · [目前元件用法](Docs/Reference/UI.md) · [完整屬性表](Docs/Reference/Component-Properties.md) · [平台能力與驗證範圍](Docs/Reference/Platforms.md)（簡體中文）
 - [設計文件](Docs/Design.md)：目標、架構、元件、主題、命令、視窗與媒體
 - [適配規範](Docs/Adaptation/README.md)：Apple、Windows 與 Linux、Web、Android、HarmonyOS
-- 實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- 實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 設計與實作文件以簡體中文撰寫。
 

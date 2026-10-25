@@ -69,6 +69,23 @@
 <img alt="Bern を選ぶ理由：ネイティブ UI へコンパイルし、一つの Rust 宣言から各プラットフォーム自身の UI コードを生成、実行時に JS エンジンなし。AI のための設計で、書き漏れはコンパイルエラー、どのボタンも MCP ツール。クロスプラットフォームとは思えない軽さで、macOS は 39 MB・0.4 秒・2.7 MB、Windows は 35 MB・0.3 秒・4.2 MB、Web は 189 KB" src="Docs/Assets/tables/why-ja-light.svg" width="100%">
 </picture>
 
+## Bern で作られたアプリ
+
+### RustSend · LAN ファイル転送
+
+[RustSend](https://github.com/AimesSoft/RustSend) は Bern で開発したオープンソースの LAN ファイル転送ツールで、LocalSend v2 と互換性があります。UI の宣言、状態、転送処理はすべて Rust で書かれ、Bern が macOS と iOS には SwiftUI、Windows には WinUI 3、Linux には GTK 4、Android には Jetpack Compose のネイティブ UI を生成します。
+
+デバイスの検出、ファイルとテキストの送受信、受信の確認、アプリ内の完了通知に対応し、デスクトップの小さなウインドウとスマートフォンのレイアウトが同じビジネスロジックを共有します。1.0 のローカル macOS ARM64 Release ビルドでは、`.app` 全体が **8.09 MiB**、ダウンロード用の `.zip` が **3.80 MiB** です。ビルド環境と計測方法は[計測記録](https://github.com/AimesSoft/RustSend/blob/main/docs/measurements.md)を参照してください。
+
+<table>
+<tr>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/macos-receive.png" height="360" alt="macOS 実機での RustSend 1.0 の受信画面"></a><br><sub><b>macOS</b> · SwiftUI</sub></td>
+<td width="50%" align="center"><a href="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png"><img src="https://raw.githubusercontent.com/AimesSoft/RustSend/main/docs/screenshots/android-receive.png" height="360" alt="Android 実機での RustSend 1.0 の受信画面"></a><br><sub><b>Android</b> · Jetpack Compose</sub></td>
+</tr>
+</table>
+
+[ソースコード](https://github.com/AimesSoft/RustSend) · [RustSend をダウンロード](https://github.com/AimesSoft/RustSend/releases/latest) · [5 つのプラットフォームのスクリーンショットと実行環境](https://github.com/AimesSoft/RustSend/blob/main/docs/screenshots/README.md)
+
 ## AI のための設計
 
 ### コードを書く：AI が忘れたことは、コンパイラーが覚えている
@@ -279,10 +296,10 @@ counter-mcp   # 同じカタログを AI エージェントへ
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-ja-dark.svg">
-<img alt="対応プラットフォーム：macOS、Windows、Linux、Web アプリ、WebUI、Android が利用可能、iOS は現在シミュレータ向けアプリをビルド。次は flutter + macos、iOS 実機パッケージ、HarmonyOS" src="Docs/Assets/tables/platforms-ja-light.svg" width="100%">
+<img alt="対応プラットフォーム：macOS、Windows、Linux、Web アプリ、WebUI、Android が利用可能、iOS と tvOS は現在シミュレータ向けアプリをビルド。次は flutter + macos、iOS 実機パッケージ、HarmonyOS" src="Docs/Assets/tables/platforms-ja-light.svg" width="100%">
 </picture>
 
-実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web と WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)。次のプラットフォームは[適応仕様](Docs/Adaptation/README.md)にあります。
+実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web と WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)。次のプラットフォームは[適応仕様](Docs/Adaptation/README.md)にあります。
 
 UI 技術を省略するとプラットフォームの既定が選ばれます。既定が使えないときは、別の技術へ黙って切り替えずにエラーになります。
 
@@ -476,7 +493,7 @@ cargo test --workspace
 - [ドキュメント索引](Docs/README.md) · [現在のコンポーネントガイド](Docs/Reference/UI.md) · [プロパティ一覧](Docs/Reference/Component-Properties.md) · [プラットフォーム対応と検証範囲](Docs/Reference/Platforms.md)（中国語）
 - [設計ドキュメント](Docs/Design.md)：目標、アーキテクチャ、コンポーネント、テーマ、コマンド、ウィンドウ、メディア
 - [適応仕様](Docs/Adaptation/README.md)：Apple、Windows と Linux、Web、Android、HarmonyOS
-- 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 設計ドキュメントと実装記録は中国語で書かれています。
 

@@ -85,4 +85,4 @@ cd examples/svg-animation
 
 无 WebView 时，`Svg` 自动降低成 `Image`，保留尺寸、fit 和辅助名称，移除播放、倍速、重播与互动属性。PNG 在构建目录的 `__bern_static_svg/` 生成并随资源打包；resvg 只链接到构建工具。默认按固有尺寸两倍输出，每条边上限 4096 像素。
 
-`static_source` 用来指定动画完成后的画面，尤其适合入场动画和由脚本生成图形的 SVG；构建器不执行动画脚本来寻找最终帧。该文件也应列入 `[resources].paths`。Erika 的 Logo 使用最终矢量稿，因此无 WebView 的版本直接显示完整 Logo。
+`static_source` 用来指定动画完成后的画面，尤其适合入场动画和由脚本生成图形的 SVG；构建器不执行动画脚本来寻找最终帧。该文件也应列入 `[resources].paths`。一个实际应用的 Logo 使用最终矢量稿，因此无 WebView 的版本直接显示完整 Logo。

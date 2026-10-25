@@ -49,4 +49,4 @@ UI 可用 `if window.webview { ... } else { ... }`。这是编译期条件，未
 
 验证：`cargo test -p bern-script`、`cargo test -p bern-script --features boa`、`cargo test -p bern-cli --test svg_targets`、`node --test crates/bern-script/tests/browser.test.mjs`。macOS 的 `bern-script` 测试还会编译 Swift 宿主并实测 WKWebView。
 
-2026-10-22 验证：编译器／IR／目标 API 的 114 项单元测试、七平台生成与回退测试、GTK 生成和打包测试通过。Boa 的持久变量、独立上下文、JSON、Promise、异常与循环限制测试通过；WKWebView 真正执行与浏览器 Worker 测试通过。Erika 的 tvOS 模拟器整包构建成功，二进制未链接 WebKit；启用脚本的 SVG 示例完成 iOS 模拟器、Android APK、Web 整包构建，iOS 依赖树不含 Boa。Windows、Linux 的原生宿主尚未在对应系统上编译运行。
+2026-10-22 验证：编译器／IR／目标 API 的 114 项单元测试、七平台生成与回退测试、GTK 生成和打包测试通过。Boa 的持久变量、独立上下文、JSON、Promise、异常与循环限制测试通过；WKWebView 真正执行与浏览器 Worker 测试通过。一个实际应用的 tvOS 模拟器整包构建成功，二进制未链接 WebKit；启用脚本的 SVG 示例完成 iOS 模拟器、Android APK、Web 整包构建，iOS 依赖树不含 Boa。Windows、Linux 的原生宿主尚未在对应系统上编译运行。

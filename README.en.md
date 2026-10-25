@@ -297,10 +297,10 @@ counter-mcp   # the same catalog for AI agents
 
 <picture>
 <source media="(prefers-color-scheme: dark)" srcset="Docs/Assets/tables/platforms-en-dark.svg">
-<img alt="Platforms: macOS, Windows, Linux, the web app, WebUI and Android are available, iOS builds simulator apps today; next are flutter + macos, iOS device packages and HarmonyOS" src="Docs/Assets/tables/platforms-en-light.svg" width="100%">
+<img alt="Platforms: macOS, Windows, Linux, the web app, WebUI and Android are available, iOS and tvOS build simulator apps today; next are flutter + macos, iOS device packages and HarmonyOS" src="Docs/Assets/tables/platforms-en-light.svg" width="100%">
 </picture>
 
-Implementation notes: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web and WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md); the next platforms are in the [adaptation specs](Docs/Adaptation/README.md).
+Implementation notes: [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web and WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md); the next platforms are in the [adaptation specs](Docs/Adaptation/README.md).
 
 Omitting the UI technology picks the platform default; an unavailable default fails loudly instead of silently switching to another stack.
 
@@ -494,7 +494,7 @@ Tests include declarations that must fail to compile, and type-check the generat
 - [Documentation index](Docs/README.md) · [Current component guide](Docs/Reference/UI.md) · [Property reference](Docs/Reference/Component-Properties.md) · [Platform capabilities and verification](Docs/Reference/Platforms.md) (Chinese)
 - [Design document](Docs/Design.md) – goals, architecture, components, theming, commands, windows, media
 - [Adaptation specs](Docs/Adaptation/README.md) – Apple, Windows and Linux, Web, Android, HarmonyOS
-- Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
 The design and implementation documents are written in Chinese.
 

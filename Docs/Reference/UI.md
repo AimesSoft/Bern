@@ -1,6 +1,6 @@
 # 当前组件用法
 
-更新：2026-10-24。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
+更新：2026-10-25。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
 
 ## 声明与数据来源
 
@@ -48,6 +48,17 @@ pub fn heading(#[content] title: String) -> impl View {
 - 月名与星期名是框架文本，内置简体中文、繁体中文、英文、日文，其他语言用英文。
 - `CalendarDate { year, month, day }` 在 `bern::prelude` 中，只表示日期，不含时刻与时区。`Text(content: date)` 会被拒绝，须用 `tr!` 写出格式。
 - 这些格式与显示字段的标签由 SwiftUI、Web、GTK、Compose 与 WinUI 3 实现（目标功能 `text_formats`）：各后端的运行时按同一格式解析翻译文本，复数分支、日期与时长在当前语言下写出。
+
+数据里的说明文字（插件的介绍、更新日志）常带行内 Markdown。`Text(markdown: true)` 把 `**粗体**`、`*斜体*`、`` `代码` ``、`~~删除线~~` 与 `[链接](地址)` 按平台的样式显示，反斜杠让下一个标记照字面显示；它只认行内标记，标题、列表、引用、代码块与表格由应用拆成块，每块用合适的组件显示。代码块用 `style: code`，即平台的等宽字体：
+
+```rust
+Column(gap: 10) {
+    Text(content: plugin.summary, markdown: true)
+    Text(content: plugin.install_command, style: code)
+}
+```
+
+Windows 暂时去掉标记只显示文字；其他目标的实现见[属性表](Component-Properties.md)。
 
 ## 坐标场景与滚动内容
 
@@ -128,6 +139,8 @@ Flow(gap: 10) {
 | `Image(corner:)` | 裁切图片圆角，可绑定长度；也可以写 `style!` 的具名圆角，例如 `corner: poster` |
 | `Image(rendering: template)` | 按当前前景色渲染模板图片；原始彩色图片使用 original |
 | `Grid(row_gap:)` | 独立设置行距；省略时沿用 gap |
+| `Grid(min_width: 300, gap: 12, masonry: true)` | 瀑布流：高度不一的卡片各按自己的高度，放进目前最短的一列；GTK 与 Windows 按普通网格逐行排 |
+| `Row { Text(…) Spacer Switch(…) }` | 领头的文字占去 `Spacer` 的位置，在剩下的宽度里换行，开关保持自己的宽度，如系统设置的一行；SwiftUI 与 Compose 这样排 |
 | `Text(font_size:, lines:)` | 字号可绑定长度，lines 指定行数上限；动态字号要求 scaled_scene |
 | `Row(align: baseline)` | 按第一行文字基线对齐 |
 | `padding_x` / `padding_y` | 支持的布局容器分别设置水平、垂直内边距；见属性表 |
@@ -178,6 +191,7 @@ bern run --target web_app --port 4173
 - `Layout(size: tv)` 是电视上的布局，`Adaptive` 里最多一个，不影响其他尺寸的必需与回退规则；表达式可读 `window.tv`。tvOS 在构建时只保留电视显示的部分，所以手机与桌面布局里电视没有的能力（如 `pick:`）不会让 tvOS 构建失败。
 - `Shortcut(key:, enabled:) => 动作` 是没有控件的快捷键，键的写法与控件的 `shortcut` 相同。电视上 `escape`、`space` 与方向键分别是遥控器的返回、播放/暂停与触控板方向（方向只在焦点无处可移时到达）。
 - `Button` / `IconButton` 的 `default_focus: true` 让界面出现时焦点从它开始；电视上每个页面都应给出一个。
+- `window.keyboard` 是否连着实体键盘：电脑上总是成立，手机与平板跟随键盘的连接与断开。只对键盘有用的内容（如快捷键设置）写在 `if window.keyboard { … }` 里，没接键盘的手机上就不出现。
 - macOS 窗口统一隐藏系统焦点框，包括按钮、输入框、滑块、工具栏和弹出面板；键盘焦点、文本编辑和快捷键仍正常工作。
 - `style!` 的 `text` 块可以给电视另定字号：`body: font(size: 13, tv: 16)`。
 - 元素自己写的长度也可以交给样式按平台给出，元素用 `variant` 选择：`Row`、`Column` 的 `gap`、`padding`、`padding_x`、`padding_y`、`width`、`height`，`Stack` 的 `width`、`height`，`Form` 的 `gap`、`padding_x`、`padding_y`、`row_height`，`IconButton` 的 `font_size`、`height`。`width: fit` 与 `height: fit` 去掉写下的尺寸，元素取内容的大小。构建某个平台时，适用于它的规则（不带 `#[target]` 的在前，带的在后）替换元素写下的值，所以设计在各平台尺寸不同的地方不需要在界面里判断平台：
@@ -268,6 +282,6 @@ FocusRegion {
 }
 ```
 
-### Runtime semantic palette
+### 运行时语义调色板
 
-`WindowSet(palette: app.palette)` binds a text field containing a JSON object from semantic roles to light/dark `#RRGGBB` pairs, for example `{"accent":{"light":"#006A60","dark":"#4FDAC8"},"surface.canvas":{"light":"#F4FBF8","dark":"#101815"}}`. The palette can change at runtime; omitted roles keep their platform defaults. Supply both appearances and readable foreground/background pairs. The `accent` pair also tints native controls. SwiftUI, GTK and WinUI expose `runtime_palette`; other targets reject this property. Existing `accent:` and `appearance:` declarations remain valid without a palette.
+`WindowSet(palette: app.palette)` 绑定一个文本字段，内容是从语义角色到浅色与深色 `#RRGGBB` 的 JSON 对象，例如 `{"accent":{"light":"#006A60","dark":"#4FDAC8"},"surface.canvas":{"light":"#F4FBF8","dark":"#101815"}}`。调色板可以在运行时更换，没写的角色保持平台默认。两种外观都要给出，前景与背景要成对可读。`accent` 这一对也给原生控件着色。SwiftUI（macOS、iOS、tvOS）、GTK 与 WinUI 3 支持 `runtime_palette`，其他目标用到这个属性时构建报错。不写调色板时，原有的 `accent:` 与 `appearance:` 照常有效。

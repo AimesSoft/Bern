@@ -1,6 +1,6 @@
 # 内置组件属性表
 
-更新：2026-10-24。本表从 [bern-ir::spec](../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 75 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
+更新：2026-10-25。本表从 [bern-ir::spec](../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 78 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
 
 ## 属性类型
 
@@ -76,7 +76,7 @@
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |
 | `WindowButtons` | 无专有属性 | 不含子节点；无动作；macOS 上占出红绿灯的位置，其他平台不占位置 |
 | `Divider` | 无专有属性 | 不含子节点；无动作 |
-| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden`<br>`open_at: Number`<br>`open_center: Number` | 可含子内容；无动作 |
+| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden`<br>`open_at: Number`<br>`open_center: NumberValue` | 可含子内容；无动作 |
 | `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |
 | `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"] |
 | `SidebarHeader` | `role: content / title` | 可含子内容；无动作；直接位于 ["Sidebar"] |
@@ -117,7 +117,7 @@
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Pattern` | **`name: PatternName`**<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Label` | **`title: DisplayText`**<br>**`icon: Icon`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`font_size: Number`<br>`display: title_and_icon / icon` | 不含子节点；无动作 |
-| `Svg` | **`source: SvgResource`**<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag` | 不含子节点；无动作 |
+| `Svg` | **`source: SvgResource`**<br>`static_source: SvgResource`<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag`<br>`data: DisplayText`<br>`external_links: Flag` | 不含子节点；无动作 |
 | `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`aspect: Number` | 不含子节点；无动作 |
 | `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText` | 不含子节点；无动作 |
 | `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField` | 可含子内容；必须绑定动作 |
@@ -136,6 +136,10 @@
 
 `Grid` 加 `masonry` 时成为瀑布流：各项按自己的高度排，每一项放进目前最短的那一列（一样短时取最左边的），适合高度不一的卡片。SwiftUI 与 Compose 用自定义布局，Web 用一像素高的网格行让各项跨过自己的高度；GTK 与 Windows 暂按普通网格逐行排。
 
+`Text(style: code)` 用平台自己的等宽字体，比正文略小，用于代码、命令和文件内容：SwiftUI 的 `.monospaced` 设计，Compose 的 `FontFamily.Monospace`，Web 的 `ui-monospace` 一族，GTK 的 `monospace` 样式类，Windows 的 Cascadia Mono（没有时 Consolas）。`style!` 的 `text` 块可以像其他样式一样给它定字号与字重。
+
+`Svg` 的 `static_source` 是动画结束时的画面，没有 WebView 的构建直接显示它；`data` 是交给文档的一段文字，文档的脚本在 `window.bernSvg.update(state)` 的 `state.data` 中读到，变化时再交一次；`external_links: true` 时，文档里点开的 https 链接交给系统浏览器打开，文档本身始终不离开打包的资源。见[动画 SVG](../Implementation/Animated-SVG.md)。
+
 `Text` 加 `markdown` 时，内容是行内 Markdown：`**粗体**`、`*斜体*` 或 `_斜体_`、`` `代码` ``、`~~删除线~~` 和 `[链接](地址)`，反斜杠让下一个标记照字面显示。SwiftUI 交给系统的 `AttributedString(markdown:)`，Compose 写成带样式与 `LinkAnnotation` 的 `AnnotatedString`，Web 生成元素（不当作 HTML，链接只接受网页和邮件地址），GTK 转成 Pango 标记；Windows 暂时去掉标记只显示文字。整篇文档（标题、列表、表格等）由应用自己分块，每块用这样的文字显示。
 
 `Search` 放在 `Toolbar` 或 `Sidebar` 里由它们接管；放在页面里是平台自己的搜索框（iOS 的 `UISearchTextField`、macOS 的 `NSSearchField`、网页的 `input[type=search]`），子内容是在框获得焦点或有文字时列在框下的结果，`width` / `height` / `font_size` 是框本身的尺寸与字号（工具栏里的搜索面板则是面板尺寸）。
@@ -144,7 +148,7 @@
 
 `Form` 的 `gap` 是分组之间的距离，`row_height` 是行的最小高度，`padding_x` / `padding_y` 是所有分组行的内边距（`Section` 自己的同名属性优先）；表单以 `Section(style: plain)` 开头时从页面顶部开始，这一组的行没有底色、边距和分隔线，作为随表单滚动的标题。表单给分组的行内边距不作用于 plain 分组，它只用自己的 `padding_x` / `padding_y`。打头的 plain 分组也可以来自插槽、组件或条件：表单在布局时看第一项是不是 plain 分组，条件变了跟着变，所以 `if window.compact { Section(style: plain) { … } }` 只在窄窗口里让表单贴顶。`style!` 里 `Form { background: 角色 }` 是行的底色，表单本身透出页面背景。
 
-`Row` 的各项放得下时取各自的宽度，剩余空间由 `Spacer` 和撑满的项平分；放不下时其余项按各自宽度的比例收缩，不小于各自的最小宽度。`Spacer` 没有最小长度，放不下时先收到零，各目标相同。给定 `width` / `height` 而内容较小时，`Column` 从顶部开始、横向按 `align` 摆放，`Row` 从前缘开始、纵向按 `align` 摆放。`Column` 不写 `align` 时与 `leading` 相同：按钮等控件、内层的 `Column` 与 `Stack` 保持自己的宽度，输入框、分隔线、`Grid`、`List` 等横向填满的内容横跨整列，要让按钮横跨整列写 `Button(width: fill)`。直接写在窗口里、没写宽度的 `Column` 与窗口内容区同宽，从顶部开始、横向按 `align` 摆放；没写尺寸的 `Stack` 铺满内容区；比内容区小的其他正文从左上角排起。
+`Row` 的各项放得下时取各自的宽度，剩余空间由 `Spacer` 和撑满的项平分；放不下时其余项按各自宽度的比例收缩，不小于各自的最小宽度。`Spacer` 没有最小长度，放不下时先收到零，各目标相同。`Row` 里领头的文字后面紧跟 `Spacer` 时（没写宽度的 `Text`，或不写 `align`、`align: leading` 的 `Column`），由文字占去 `Spacer` 的位置：后面的控件保持自己的宽度，文字在剩下的宽度里换行，如系统列表行的标签；SwiftUI 与 Compose 这样排，其他目标按上面的一般规则。给定 `width` / `height` 而内容较小时，`Column` 从顶部开始、横向按 `align` 摆放，`Row` 从前缘开始、纵向按 `align` 摆放。`Column` 不写 `align` 时与 `leading` 相同：按钮等控件、内层的 `Column` 与 `Stack` 保持自己的宽度，输入框、分隔线、`Grid`、`List` 等横向填满的内容横跨整列，要让按钮横跨整列写 `Button(width: fill)`。直接写在窗口里、没写宽度的 `Column` 与窗口内容区同宽，从顶部开始、横向按 `align` 摆放；没写尺寸的 `Stack` 铺满内容区；比内容区小的其他正文从左上角排起。
 
 ## 通用动效与轨道属性
 
@@ -161,6 +165,7 @@
 | `reveal` | `hover` |
 | `animate` | `MotionToken` |
 | `appearance` | `light / dark` |
+| `tint` | `ColorRole`：这部分界面的强调色改用该角色，里面的控件、选中态与链接随之着色 |
 | `scroll_scale` | `Number` |
 | `scroll_opacity` | `Number` |
 | `scroll_origin_x` | `Number` |
