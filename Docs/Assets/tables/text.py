@@ -140,7 +140,7 @@ TEXT = {
             columns=("macOS", "Windows", "Linux", "移动端", "Web", "原生外观", "内置 MCP", "编译期检查"),
         ),
         choose=dict(
-            labels=("适合", "代价", "暂不适合"),
+            labels=("适合", "代价", "为什么选它"),
             rows=list(zip(CHOOSE_KEYS, *zip(*[
                 ("Web 团队、需要最成熟的生态与最一致的跨平台表现。", "每个应用带一份 Chromium 与 Node.js，体积与内存都偏大。"),
                 ("想保留网页前端、又要小体积和 Rust 后端。", "界面仍是网页；各平台系统 WebView 的引擎不同，需要分别测试。"),
@@ -152,8 +152,8 @@ TEXT = {
                 ("喜欢 React 写法的 Rust 全栈项目，一套代码覆盖 Web、桌面与移动。", "桌面与移动端目前是 WebView 界面；原生渲染器仍在实验。"),
                 ("国内多端（小程序、App、H5、鸿蒙）一套代码。", "没有桌面应用目标；经典模式的 App 界面是 WebView。"),
             ]))),
-            bern=("桌面与 Android 应用要每个平台的系统外观，业务写在 Rust 里，并希望 AI 既能写它、也能用它。",
-                  "现在就要上架 iOS（真机签名与打包尚未完成），或依赖成熟的第三方组件生态。Bern 仍是早期预览。"),
+            bern=("想用一份 Rust 代码做出各平台原生应用的团队：每个平台都是系统自己的控件与观感，业务逻辑只写一次，AI 既能写它、也能直接用它。",
+                  "编译成各平台自己的 UI 代码，运行时没有 JS 引擎、没有自绘层：macOS 上 39 MB 内存、0.4 秒出窗口、应用包 2.7 MB。漏写的翻译、某个布局里忘了的入口在编译时就报错；每个按钮都是 MCP 工具。RustSend 已经用它跑在五个平台上。"),
         ),
         roadmap=dict(
             status=dict(done="已完成", wip="进行中"),
@@ -282,7 +282,7 @@ TEXT = {
             columns=("macOS", "Windows", "Linux", "行動端", "Web", "原生外觀", "內建 MCP", "編譯期檢查"),
         ),
         choose=dict(
-            labels=("適合", "代價", "暫不適合"),
+            labels=("適合", "代價", "為什麼選它"),
             rows=list(zip(CHOOSE_KEYS, *zip(*[
                 ("Web 團隊、需要最成熟的生態與最一致的跨平台表現。", "每個應用程式帶一份 Chromium 與 Node.js，大小與記憶體都偏大。"),
                 ("想保留網頁前端，又要小體積與 Rust 後端。", "介面仍是網頁；各平台系統 WebView 的引擎不同，需要分別測試。"),
@@ -294,8 +294,8 @@ TEXT = {
                 ("喜歡 React 寫法的 Rust 全端專案，一套程式碼涵蓋 Web、桌面與行動端。", "桌面與行動端目前是 WebView 介面；原生繪製器仍在實驗。"),
                 ("中國大陸多端（小程式、App、H5、鴻蒙）一套程式碼。", "沒有桌面應用程式目標；經典模式的 App 介面是 WebView。"),
             ]))),
-            bern=("桌面與 Android 應用程式要每個平台的系統外觀，商業邏輯寫在 Rust 裡，並希望 AI 既能寫它、也能用它。",
-                  "現在就要上架 iOS（實機簽署與打包尚未完成），或依賴成熟的第三方元件生態。Bern 仍是早期預覽。"),
+            bern=("想用一份 Rust 程式碼做出各平台原生應用程式的團隊：每個平台都是系統自己的控制項與觀感，商業邏輯只寫一次，AI 既能寫它、也能直接用它。",
+                  "編譯成各平台自己的 UI 程式碼，執行時沒有 JS 引擎、沒有自繪層：macOS 上 39 MB 記憶體、0.4 秒出現視窗、應用程式套件 2.7 MB。漏寫的翻譯、某個版面裡忘了的入口在編譯時就報錯；每個按鈕都是 MCP 工具。RustSend 已經用它在五個平台上執行。"),
         ),
         roadmap=dict(
             status=dict(done="已完成", wip="進行中"),
@@ -426,7 +426,7 @@ TEXT = {
             columns=("macOS", "Windows", "Linux", "Mobile", "Web", "Native look", "Built-in MCP", "Compile-time checks"),
         ),
         choose=dict(
-            labels=("Best for", "Cost", "Not yet for"),
+            labels=("Best for", "Cost", "Why Bern"),
             rows=list(zip(CHOOSE_KEYS, *zip(*[
                 ("Web teams that want the most mature ecosystem and the most consistent behavior across platforms.",
                  "Every app ships its own Chromium and Node.js, so size and memory run high."),
@@ -447,8 +447,8 @@ TEXT = {
                 ("One codebase for China's many targets (mini programs, apps, H5, HarmonyOS).",
                  "No desktop app target; classic-mode apps render in a WebView."),
             ]))),
-            bern=("Desktop and Android apps that want each platform's system look, business logic in Rust, and AI that can both write and use them.",
-                  "Projects that must ship on iOS today (device signing and packages are not done) or rely on a mature third-party component ecosystem. Bern is an early preview."),
+            bern=("Teams that want native apps on every platform from one Rust codebase: each platform gets its own system controls and look, the business logic is written once, and AI can both write the app and use it.",
+                  "It compiles to each platform's own UI code, with no JS engine and no self-drawn layer at run time: 39 MB of memory, a window in 0.4 s and a 2.7 MB app on macOS. A missing translation or an entry point forgotten in one layout is a compile error, and every button is an MCP tool. RustSend already runs on five platforms with it."),
         ),
         roadmap=dict(
             status=dict(done="Done", wip="In progress"),
@@ -577,7 +577,7 @@ TEXT = {
             columns=("macOS", "Windows", "Linux", "モバイル", "Web", "ネイティブの外観", "MCP 内蔵", "コンパイル時チェック"),
         ),
         choose=dict(
-            labels=("向いている", "代償", "まだ向かない"),
+            labels=("向いている", "代償", "Bern を選ぶ理由"),
             rows=list(zip(CHOOSE_KEYS, *zip(*[
                 ("Web チームで、最も成熟したエコシステムとプラットフォーム間で最もそろった挙動がほしい場合。",
                  "アプリごとに Chromium と Node.js を同梱するため、サイズとメモリが大きくなります。"),
@@ -598,8 +598,8 @@ TEXT = {
                 ("中国のマルチターゲット（ミニプログラム、アプリ、H5、HarmonyOS）を一つのコードで。",
                  "デスクトップアプリのターゲットはありません。クラシックモードのアプリは WebView です。"),
             ]))),
-            bern=("各プラットフォームのシステムの外観、Rust の業務ロジック、そして AI が書けて使えることを求めるデスクトップと Android のアプリ。",
-                  "今すぐ iOS で配布したいプロジェクト（実機の署名とパッケージは未対応）や、成熟したサードパーティのコンポーネント群に頼るプロジェクト。Bern は早期プレビューです。"),
+            bern=("一つの Rust コードからあらゆるプラットフォームのネイティブアプリを作りたいチーム。各プラットフォームでシステム自身のコントロールと見た目になり、ビジネスロジックは一度書くだけ。AI がアプリを書くことも、使うこともできます。",
+                  "各プラットフォーム自身の UI コードにコンパイルされ、実行時に JS エンジンも独自描画レイヤーもありません。macOS ではメモリ 39 MB、0.4 秒でウインドウ表示、アプリは 2.7 MB。翻訳の書き漏れや、あるレイアウトで忘れた入口はコンパイルエラーになり、どのボタンも MCP ツールです。RustSend はすでに Bern で 5 つのプラットフォームで動いています。"),
         ),
         roadmap=dict(
             status=dict(done="完了", wip="進行中"),

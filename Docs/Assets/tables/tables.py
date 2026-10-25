@@ -453,7 +453,7 @@ def capabilities(theme, lang):
 
 def choose(theme, lang):
     t, s = THEMES[theme], TEXT[lang]["choose"]
-    good, cost, not_yet = s["labels"]
+    good, cost, why = s["labels"]
     green, amber = TONES[theme]["green"], TONES[theme]["amber"]
 
     def section(name, ink, text, x, y, w, fill):
@@ -469,13 +469,13 @@ def choose(theme, lang):
         return render
 
     body, bottom = columns([render_cell(*c) for c in s["rows"]], 3)
-    # Bern, across the width, under a rule.
+    # Bern, across the width, under a rule: what it is for, and why to pick it.
     y = bottom + 32
     body.append(rule(y, theme, strong=True))
     half = (W - 48) / 2
     top = y + 28
     parts, h1 = section(good, green, s["bern"][0], 0, top + 42, half, t["text"])
-    parts2, h2 = section(not_yet, amber, s["bern"][1], half + 48, top + 42, half, t["muted"])
+    parts2, h2 = section(why, green, s["bern"][1], half + 48, top + 42, half, t["text"])
     body += [framework_name("bern", 0, top + 16, theme, r=16)] + parts + parts2
     return page(top + 42 + max(h1, h2) + 4, theme, "\n".join(body))
 
