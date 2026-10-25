@@ -487,21 +487,45 @@ fn add_layout_features(app: &mut bern_ir::Application) {
                     ("cell_ratio", number(0.667)),
                     ("cell_extra", number(20.0)),
                 ],
-                vec![node(
-                    "Image",
-                    vec![
-                        (
-                            "source",
-                            bern_ir::Prop::Resource {
-                                name: "images/bern.png".into(),
-                            },
-                        ),
-                        ("corner", number(8.0)),
-                        ("rendering", word("template")),
-                        ("aspect", number(1.5)),
-                    ],
-                    vec![],
-                )],
+                vec![
+                    node(
+                        "Image",
+                        vec![
+                            (
+                                "source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern.png".into(),
+                                },
+                            ),
+                            ("corner", number(8.0)),
+                            ("rendering", word("template")),
+                            ("aspect", number(1.5)),
+                        ],
+                        vec![],
+                    ),
+                    // A picture lowered from an SVG with colors per
+                    // appearance: one for the dark one beside it.
+                    node(
+                        "Image",
+                        vec![
+                            (
+                                "source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern.png".into(),
+                                },
+                            ),
+                            (
+                                "dark_source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern-dark.png".into(),
+                                },
+                            ),
+                            ("width", number(24.0)),
+                            ("height", number(24.0)),
+                        ],
+                        vec![],
+                    ),
+                ],
             ),
             node(
                 "Row",
@@ -602,6 +626,7 @@ fn layout_features_generate_for_compose() {
         "bernTextStyle(\"body\"), iconOnly = true)",
         "BernGrid(minWidth = 80f.dp, gap = 8.dp, rowGap = 6f.dp, cellRatio = 0.667f, cellExtra = 20f.dp) {",
         ", corner = 8f.dp, template = true, aspect = 1.5f)",
+        "BernImage(\"images/bern.png\", null, 24f.dp, 24f.dp, ContentScale.Fit, dark = \"images/bern-dark.png\", oneSize = true)",
         "Box(Modifier.alignByBaseline()) {",
         "iconOnly = true, shape = BernShape(true, 30f.dp)) { dismiss ->",
         "BernControlGroup(null, 32f.dp) {",

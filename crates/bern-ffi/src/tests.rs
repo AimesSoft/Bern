@@ -603,6 +603,7 @@ fn an_installed_kernel_plays_and_draws_into_the_views_surfaces() {
     kernel::install(recording.clone());
     // A frontend whose views give no surface the kernel draws into.
     assert_eq!(offer(&[]), vec![0]);
+    assert_eq!(offer(&[SurfaceKind::SwapChainPanel]), vec![0]);
     let answer = offer(&[SurfaceKind::MetalLayer]);
     let mut reader = Reader::new(&answer);
     assert_eq!(reader.u8().unwrap(), 1);
@@ -651,6 +652,17 @@ fn an_installed_kernel_plays_and_draws_into_the_views_surfaces() {
         let mut detach = Writer::new();
         detach.text("view-1");
         media::bern_media_surface_detach(app, detach.bytes.as_ptr(), detach.bytes.len());
+        // A Windows panel.
+        let mut panel = Writer::new();
+        panel.text("view-2");
+        panel.text("preview");
+        panel.u32(SurfaceKind::SwapChainPanel.code());
+        panel.u64(0x5678);
+        panel.u32(1920);
+        panel.u32(1080);
+        panel.f64(1.5);
+        panel.u32(0);
+        media::bern_media_surface_attach(app, panel.bytes.as_ptr(), panel.bytes.len());
     }
     assert_eq!(
         recording.seen(),
@@ -660,6 +672,7 @@ fn an_installed_kernel_plays_and_draws_into_the_views_surfaces() {
             "resize view-1 SurfaceSize { width: 1, height: 360, scale: 1.0 }",
             "frame view-1 FrameTiming { now: 1.0, target: 1.008 }",
             "detach view-1",
+            "attach view-2 preview VideoSurface { handle: SwapChainPanel(22136), size: SurfaceSize { width: 1920, height: 1080, scale: 1.5 }, fit: Contain }",
         ]
     );
     kernel::clear();

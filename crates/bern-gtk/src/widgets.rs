@@ -1842,6 +1842,11 @@ fn under_bars(widget: &gtk::Widget) {
 pub struct ImageProps {
     /// Name of the declared resource.
     pub source: &'static str,
+    /// The declared resource shown in place of `source` where the picture
+    /// is dark: in a dark part, or a dark window.
+    pub dark: Option<&'static str>,
+    /// Its sides never change: it is double-sampled.
+    pub one_size: bool,
     pub label: Option<Str>,
     pub width: Option<Num>,
     pub height: Option<Num>,
@@ -1937,15 +1942,15 @@ pub(crate) fn framed(
 /// follows the picture's aspect ratio. Without a label it is decorative.
 #[allow(non_snake_case)]
 pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
-    let path = std::path::Path::new(&crate::host::resources_dir()).join(props.source);
-    let texture: Option<gtk::gdk::Paintable> = crate::hdr::texture(&path)
-        .or_else(|| oriented(&path))
-        .map(|texture| texture.upcast())
-        .or_else(|| {
-            gtk::gdk::Texture::from_filename(&path)
-                .ok()
-                .map(|texture| texture.upcast())
-        });
+    let resources = std::path::PathBuf::from(crate::host::resources_dir());
+    let light = resources.join(props.source);
+    let dark = props.dark.map(|dark| resources.join(dark));
+    // The window's appearance until the picture is placed in its part.
+    let path = match &dark {
+        Some(dark) if crate::theme::is_dark() => dark.clone(),
+        _ => light.clone(),
+    };
+    let texture = read_picture(&path, None);
     let (natural_width, natural_height) = texture
         .as_ref()
         .map(|paintable| (paintable.intrinsic_width(), paintable.intrinsic_height()))
@@ -1982,6 +1987,13 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         }
         None => picture.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
+    if dark.is_some() || props.one_size {
+        let sides = props.one_size.then(|| {
+            let side = |num: &Option<Num>| num.as_ref().map(|num| num.peek(ctx));
+            (side(&props.width), side(&props.height))
+        });
+        follow_picture(&picture, path, light, dark, sides, fit);
+    }
     let (outer, _, _) = framed(
         ctx,
         &picture,
@@ -1995,6 +2007,120 @@ pub fn Image(p: &Parent, ctx: &Ctx, props: ImageProps) {
         Rc::new(Cell::new(ratio)),
     );
     place(p, &outer);
+}
+
+/// The declared picture at `path`: in HDR where GTK presents it, upright,
+/// and with `pixels`, its longer side that many pixels, drawn down by
+/// gdk-pixbuf, which averages the pixels each one covers.
+fn read_picture(path: &std::path::Path, pixels: Option<i32>) -> Option<gtk::gdk::Paintable> {
+    if let Some(texture) = crate::hdr::texture(path) {
+        return Some(texture.upcast());
+    }
+    if let Some(pixels) = pixels
+        && let Ok(pixbuf) = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, pixels, pixels, true)
+    {
+        let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
+        return Some(gtk::gdk::Texture::for_pixbuf(&upright).upcast());
+    }
+    oriented(path).map(|texture| texture.upcast()).or_else(|| {
+        gtk::gdk::Texture::from_filename(path)
+            .ok()
+            .map(|texture| texture.upcast())
+    })
+}
+
+/// Keep in `picture` (a `gtk::Picture` or a template) the declared picture
+/// for where it is, starting from `shown`: `dark` in a dark part or window,
+/// else `light`; and with `sides` that never change (points, `None` for a
+/// side that follows the picture) double-sampled once it is placed:
+/// decoded at twice the pixels it covers, which GTK halves when it draws
+/// it. Squeezed down from a much larger picture by GTK alone, its edges
+/// would break up.
+fn follow_picture(
+    picture: &gtk::Widget,
+    shown: std::path::PathBuf,
+    light: std::path::PathBuf,
+    dark: Option<std::path::PathBuf>,
+    sides: Option<(Option<f64>, Option<f64>)>,
+    fit: gtk::ContentFit,
+) {
+    // Placed in a window, or on a display of another scale.
+    let placed = crate::reactive::Version::new();
+    let bump = placed.clone();
+    picture.connect_map(move |_| bump.bump());
+    let bump = placed.clone();
+    picture.connect_scale_factor_notify(move |_| bump.bump());
+    let current = Rc::new(std::cell::RefCell::new((shown, None::<i32>)));
+    let weak = picture.downgrade();
+    effect(move || {
+        crate::theme::track();
+        placed.track();
+        let Some(widget) = weak.upgrade() else {
+            return;
+        };
+        let path = match &dark {
+            Some(dark) if crate::theme::part_of(&widget).unwrap_or_else(crate::theme::is_dark) => {
+                dark
+            }
+            _ => &light,
+        };
+        let scale = widget
+            .native()
+            .and_then(|native| native.surface())
+            .map(|surface| surface.scale())
+            .unwrap_or_else(|| f64::from(widget.scale_factor()));
+        let pixels = sides
+            .filter(|_| widget.is_mapped())
+            .and_then(|(width, height)| twice_pixels(path, width, height, fit, scale));
+        let next = (path.clone(), pixels);
+        if *current.borrow() == next {
+            return;
+        }
+        let texture = read_picture(path, pixels);
+        current.replace(next);
+        if let Some(template) = widget.downcast_ref::<crate::picture::Template>() {
+            template.set_paintable(texture.as_ref());
+        } else if let Some(picture) = widget.downcast_ref::<gtk::Picture>() {
+            picture.set_paintable(texture.as_ref());
+        }
+    });
+}
+
+/// The longer side, in pixels, of the picture at `path` decoded at twice
+/// the pixels it covers shown `width` × `height` points (`None` for a side
+/// that follows the picture) as `fit` places it, at `scale` pixels per
+/// point; `None` when it has no more pixels than that.
+fn twice_pixels(
+    path: &std::path::Path,
+    width: Option<f64>,
+    height: Option<f64>,
+    fit: gtk::ContentFit,
+    scale: f64,
+) -> Option<i32> {
+    let (_, w, h) = gtk::gdk_pixbuf::Pixbuf::file_info(path)?;
+    let (w, h) = (f64::from(w), f64::from(h));
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let (shown_width, shown_height) = match (width, height) {
+        (Some(width), Some(height)) => match fit {
+            gtk::ContentFit::Fill => (width, height),
+            _ => {
+                let (fx, fy) = (width / w, height / h);
+                let s = if fit == gtk::ContentFit::Cover {
+                    fx.max(fy)
+                } else {
+                    fx.min(fy)
+                };
+                (w * s, h * s)
+            }
+        },
+        (Some(width), None) => (width, width * h / w),
+        (None, Some(height)) => (height * w / h, height),
+        (None, None) => return None,
+    };
+    let factor = (2.0 * shown_width * scale / w).max(2.0 * shown_height * scale / h);
+    (factor < 1.0).then(|| (w.max(h) * factor).ceil().max(1.0) as i32)
 }
 
 /// A JPEG turned upright by its EXIF orientation, which GTK's own loader

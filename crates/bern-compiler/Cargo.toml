@@ -11,6 +11,7 @@ bern-syntax.workspace = true
 bern-ir.workspace = true
 bern-protocol.workspace = true
 bern-media.workspace = true
+bern-svg.workspace = true
 bern-target-api.workspace = true
 bern-theme.workspace = true
 proc-macro2.workspace = true

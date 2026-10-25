@@ -652,21 +652,45 @@ fn add_layout_features(app: &mut Application) {
                     ("cell_ratio", number(0.667)),
                     ("cell_extra", number(20.0)),
                 ],
-                vec![node(
-                    "Image",
-                    vec![
-                        (
-                            "source",
-                            bern_ir::Prop::Resource {
-                                name: "images/bern.png".into(),
-                            },
-                        ),
-                        ("corner", number(8.0)),
-                        ("rendering", word("template")),
-                        ("aspect", number(1.5)),
-                    ],
-                    vec![],
-                )],
+                vec![
+                    node(
+                        "Image",
+                        vec![
+                            (
+                                "source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern.png".into(),
+                                },
+                            ),
+                            ("corner", number(8.0)),
+                            ("rendering", word("template")),
+                            ("aspect", number(1.5)),
+                        ],
+                        vec![],
+                    ),
+                    // A picture lowered from an SVG with colors per
+                    // appearance: one for the dark one beside it.
+                    node(
+                        "Image",
+                        vec![
+                            (
+                                "source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern.png".into(),
+                                },
+                            ),
+                            (
+                                "dark_source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern-dark.png".into(),
+                                },
+                            ),
+                            ("width", number(24.0)),
+                            ("height", number(24.0)),
+                        ],
+                        vec![],
+                    ),
+                ],
             ),
             node(
                 "Row",
@@ -764,6 +788,7 @@ fn layout_features_generate_for_gtk() {
         "icon_only: true",
         "cells: Some((0.667, b::Num::Fixed(20.0)))",
         "corner: Some(b::Num::Fixed(8.0)), template: true, aspect: Some(1.5)",
+        "b::ImageProps { source: \"images/bern.png\", dark: Some(\"images/bern-dark.png\"), one_size: true, label: None, width: Some(b::Num::Fixed(24.0)), height: Some(b::Num::Fixed(24.0))",
         "align: Some(\"baseline\")",
         "icon_only: true, shape: b::Shape { capsule: true, height: Some(b::Num::Fixed(30.0)) }",
         "b::ControlGroup(p, c, b::ControlGroupProps { label: None, height: Some(b::Num::Fixed(32.0)) }",

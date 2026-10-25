@@ -409,7 +409,8 @@ inline ButtonRun RunOf(Ctx const& ctx, std::optional<Field> pick, char const* fi
 
 /// Show `style!`'s look on a button: its lightweight resources, corner,
 /// padding and size; its scale, offset, opacity and shadow on `moving`.
-inline void StyleButton(controls::Button const& button, xaml::UIElement const& moving, StyleDef const* style, std::shared_ptr<ShadowImage> shadow = nullptr) {
+inline void StyleButton(controls::Button const& button, xaml::UIElement const& moving, StyleDef const* style, std::shared_ptr<ShadowImage> shadow = nullptr,
+    std::shared_ptr<ContentShadow> cast = nullptr) {
     if (!style) return;
     if (style->draws) {
         auto resources = ButtonResources(*style, L"Button");
@@ -428,36 +429,55 @@ inline void StyleButton(controls::Button const& button, xaml::UIElement const& m
         if (!style->padding) button.Padding(xaml::Thickness{inline_, 0, inline_, 0});
     }
     auto state = std::make_shared<StyleState>();
-    auto changed = [weak = winrt::make_weak(moving), style, state, shadow] {
+    auto changed = [weak = winrt::make_weak(moving), style, state, shadow, cast] {
         auto element = weak.get();
         if (!element) return;
         MoveTo(element, *style, *state);
-        if (shadow) {
+        if (shadow || cast) {
             bool quiet = false, system = false;
             auto look = Merged(*style, state->selected, state->hover, state->pressed, state->focus, state->disabled, quiet, system);
             static Motion const fade{0.25, 1};
             if (look.shadow) {
                 auto [radius, y, opacity] = *look.shadow;
-                if (radius != shadow->radius || y != shadow->y || opacity != shadow->opacity) {
+                if (cast) cast->Set(radius, y, opacity);
+                if (shadow && (radius != shadow->radius || y != shadow->y || opacity != shadow->opacity)) {
                     shadow->radius = radius;
                     shadow->y = y;
                     shadow->opacity = opacity;
                     shadow->Draw();
                 }
             }
-            LayerTo(shadow->image, "state", 0, 0, 1, 1, look.shadow ? 1 : 0, &fade);
+            xaml::UIElement shown = shadow ? xaml::UIElement(shadow->image) : xaml::UIElement(cast->host);
+            LayerTo(shown, "state", 0, 0, 1, 1, look.shadow ? 1 : 0, &fade);
         }
     };
     TrackState(button, state, changed);
     changed();
 }
 
+/// Whether a style draws no surface in any state, as a bare glyph's.
+inline bool Surfaceless(StyleDef const& style) {
+    auto bare = [](Look const& look) { return !look.background && !look.border && !look.fill; };
+    for (auto const* state : {&style.hover, &style.pressed, &style.selected, &style.focus, &style.disabled})
+        if (*state && !bare(**state)) return false;
+    return bare(style.base);
+}
+
 /// A styled control with a shadow: the shadow behind it, both moving
-/// together in a wrapper. Returns the wrapper.
-inline controls::Grid Shadowed(controls::Button const& button, StyleDef const* style, std::shared_ptr<ShadowImage>& shadow) {
+/// together in a wrapper. Returns the wrapper. A control without a surface
+/// casts the shadow from what it shows (`cast`), one with a surface from
+/// its shape (`shadow`).
+inline controls::Grid Shadowed(controls::Button const& button, StyleDef const* style, std::shared_ptr<ShadowImage>& shadow, std::shared_ptr<ContentShadow>& cast) {
     auto wrapper = Wrap(button);
     bool shadows = style->base.shadow || (style->hover && style->hover->shadow) || (style->pressed && style->pressed->shadow);
     if (!shadows) return wrapper;
+    if (Surfaceless(*style)) {
+        cast = std::make_shared<ContentShadow>();
+        LayersOf(cast->host)->Get("state")->opacity->Set(0);
+        wrapper.Children().InsertAt(0, cast->host);
+        cast->Follow(button);
+        return wrapper;
+    }
     shadow = std::make_shared<ShadowImage>();
     shadow->corner = style->corner.value_or(4);
     shadow->image.IsHitTestVisible(false);
@@ -531,8 +551,9 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     }
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
-        auto wrapper = Shadowed(button, props.style, shadow);
-        StyleButton(button, wrapper, props.style, shadow);
+        std::shared_ptr<ContentShadow> cast;
+        auto wrapper = Shadowed(button, props.style, shadow, cast);
+        StyleButton(button, wrapper, props.style, shadow, cast);
         shown = wrapper;
     }
     if (p.isList && !ctx.toolbar) p.Add(Card(shown));
@@ -594,8 +615,9 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
         });
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
-        auto wrapper = Shadowed(button, props.style, shadow);
-        StyleButton(button, wrapper, props.style, shadow);
+        std::shared_ptr<ContentShadow> cast;
+        auto wrapper = Shadowed(button, props.style, shadow, cast);
+        StyleButton(button, wrapper, props.style, shadow, cast);
         // A border the style draws stands inside its padding.
         if (!framed)
             if (double width = BorderWidth(*props.style); width > 0) {
@@ -702,8 +724,9 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     xaml::UIElement shown = button;
     if (props.style) {
         std::shared_ptr<ShadowImage> shadow;
-        auto wrapper = Shadowed(button, props.style, shadow);
-        StyleButton(button, wrapper, props.style, shadow);
+        std::shared_ptr<ContentShadow> cast;
+        auto wrapper = Shadowed(button, props.style, shadow, cast);
+        StyleButton(button, wrapper, props.style, shadow, cast);
         // The style's size is the square's, not a text button's padding.
         if (!sized && props.style->size && !props.style->padding) button.Padding(xaml::Thickness{0, 0, 0, 0});
         shown = wrapper;
@@ -1749,6 +1772,16 @@ inline void Layers(Parent const& p, Ctx const& ctx, LayersProps props, Build con
             layers.CornerRadius(xaml::CornerRadius{r, r, r, r});
             RoundedClip(layers, [r](float, float) { return static_cast<float>(r); });
         }
+        // Its texts, icons, pictures and shapes cast the shadow, behind
+        // every layer.
+        if (auto const& shadow = style->base.shadow) {
+            auto cast = std::make_shared<ContentShadow>();
+            auto [radius, y, opacity] = *shadow;
+            cast->Set(radius, y, opacity);
+            layers.Children().InsertAt(0, cast->host);
+            cast->Follow(layers);
+            Reactive::OnCleanup([cast] {});
+        }
     }
     if (auto isEnabled = Enabled(ctx, props.enabled)) Reactive::Run([holder, isEnabled] { holder.IsEnabled(isEnabled()); });
     Place(p, holder);
@@ -1781,23 +1814,6 @@ inline std::vector<uint8_t> ResourceBytes(std::string_view name) {
     return bytes;
 }
 
-/// Decode `bytes` into `bitmap`, back on the UI thread.
-inline winrt::fire_and_forget LoadPicture(media::Imaging::BitmapImage bitmap, std::vector<uint8_t> bytes, std::string name) {
-    winrt::apartment_context ui;
-    try {
-        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
-        winrt::Windows::Storage::Streams::DataWriter writer(stream);
-        writer.WriteBytes(bytes);
-        co_await writer.StoreAsync();
-        writer.DetachStream();
-        stream.Seek(0);
-        co_await ui;
-        co_await bitmap.SetSourceAsync(stream);
-    } catch (winrt::hresult_error const& error) {
-        Report("image " + name + ": " + Utf8(error.message()));
-    }
-}
-
 /// A picture's frame and fit, with the sizes it has now.
 struct PictureProps {
     char const* source = "";
@@ -1808,7 +1824,96 @@ struct PictureProps {
     /// The picture fills a frame its container sizes, as one with only an
     /// `aspect` does.
     bool fills = false;
+    /// Its sides never change: it is decoded at the size it shows.
+    bool fixed = false;
+    /// The display's pixels per DIP where it shows.
+    double scale = 1;
 };
+
+/// The size in DIPs a picture of `width` × `height` pixels shows at.
+inline std::pair<double, double> ShownSize(PictureProps const& props, double width, double height) {
+    std::string_view fit = props.fit ? props.fit : "contain";
+    if (props.width && props.height) {
+        if (fit == "fill") return {*props.width, *props.height};
+        double fx = *props.width / width, fy = *props.height / height;
+        double scale = fit == "cover" ? (std::max)(fx, fy) : (std::min)(fx, fy);
+        return {width * scale, height * scale};
+    }
+    if (props.width) return {*props.width, height * *props.width / width};
+    if (props.height) return {width * *props.height / height, *props.height};
+    return {0, 0};
+}
+
+/// Decode `bytes` into `bitmap`, which XAML does on the UI thread.
+inline winrt::fire_and_forget LoadPicture(media::Imaging::BitmapImage bitmap, std::vector<uint8_t> bytes, std::string name) {
+    try {
+        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+        winrt::Windows::Storage::Streams::DataWriter writer(stream);
+        writer.WriteBytes(bytes);
+        co_await writer.StoreAsync();
+        writer.DetachStream();
+        stream.Seek(0);
+        co_await bitmap.SetSourceAsync(stream);
+    } catch (winrt::hresult_error const& error) {
+        Report("image " + name + ": " + Utf8(error.message()));
+    }
+}
+
+/// Decode a picture that shows at a size that never changes (`shown`) away
+/// from the UI thread, then show it in `image`. A picture larger than it
+/// shows is double-sampled: decoded, with the decoder's filter, at twice
+/// the display's pixels it covers, which the compositor halves. Squeezed
+/// down from a much larger picture by the compositor alone, its edges
+/// would break up; decoded whole by XAML, a page of posters holds the
+/// window still.
+inline winrt::fire_and_forget DecodePicture(winrt::weak_ref<controls::Image> weak, std::vector<uint8_t> bytes, std::string name, PictureProps shown) {
+    namespace imaging = winrt::Windows::Graphics::Imaging;
+    winrt::apartment_context ui;
+    co_await winrt::resume_background();
+    imaging::SoftwareBitmap pixels{nullptr};
+    std::string failed;
+    try {
+        winrt::Windows::Storage::Streams::InMemoryRandomAccessStream stream;
+        winrt::Windows::Storage::Streams::DataWriter writer(stream);
+        writer.WriteBytes(bytes);
+        co_await writer.StoreAsync();
+        writer.DetachStream();
+        stream.Seek(0);
+        auto decoder = co_await imaging::BitmapDecoder::CreateAsync(stream);
+        double width = decoder.OrientedPixelWidth(), height = decoder.OrientedPixelHeight();
+        imaging::BitmapTransform transform;
+        if (width > 0 && height > 0) {
+            auto size = ShownSize(shown, width, height);
+            double twiceWidth = size.first * 2 * shown.scale, twiceHeight = size.second * 2 * shown.scale;
+            if (twiceWidth >= 1 && twiceHeight >= 1 && twiceWidth < width && twiceHeight < height) {
+                // The decoder scales before it turns the picture upright.
+                double across = twiceWidth / width, down = twiceHeight / height;
+                if (decoder.PixelWidth() != decoder.OrientedPixelWidth()) std::swap(across, down);
+                transform.ScaledWidth(static_cast<uint32_t>((std::max)(1L, std::lround(decoder.PixelWidth() * across))));
+                transform.ScaledHeight(static_cast<uint32_t>((std::max)(1L, std::lround(decoder.PixelHeight() * down))));
+                transform.InterpolationMode(imaging::BitmapInterpolationMode::Fant);
+            }
+        }
+        pixels = co_await decoder.GetSoftwareBitmapAsync(imaging::BitmapPixelFormat::Bgra8, imaging::BitmapAlphaMode::Premultiplied, transform,
+            imaging::ExifOrientationMode::RespectExifOrientation, imaging::ColorManagementMode::ColorManageToSRgb);
+    } catch (winrt::hresult_error const& error) {
+        failed = Utf8(error.message());
+    }
+    co_await ui;
+    if (!pixels) {
+        Report("image " + name + ": " + failed);
+        co_return;
+    }
+    auto image = weak.get();
+    if (!image) co_return;
+    try {
+        media::Imaging::SoftwareBitmapSource source;
+        image.Source(source);
+        co_await source.SetBitmapAsync(pixels);
+    } catch (winrt::hresult_error const& error) {
+        Report("image " + name + ": " + Utf8(error.message()));
+    }
+}
 
 /// The XAML picture: SDR pictures, and HDR ones where they cannot be drawn
 /// as HDR. `framed` when both sides are given.
@@ -1828,10 +1933,14 @@ inline controls::Image SdrImage(PictureProps const& props, std::vector<uint8_t> 
         image.HorizontalAlignment(xaml::HorizontalAlignment::Left);
         image.VerticalAlignment(xaml::VerticalAlignment::Top);
     }
-    media::Imaging::BitmapImage bitmap;
-    image.Source(bitmap);
-    if (uri) bitmap.UriSource(winrt::Windows::Foundation::Uri(Wide(*uri)));
-    else if (!bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
+    if (props.fixed && !uri && !bytes.empty()) {
+        DecodePicture(winrt::make_weak(image), std::move(bytes), props.source, props);
+    } else {
+        media::Imaging::BitmapImage bitmap;
+        image.Source(bitmap);
+        if (uri) bitmap.UriSource(winrt::Windows::Foundation::Uri(Wide(*uri)));
+        else if (!bytes.empty()) LoadPicture(bitmap, std::move(bytes), props.source);
+    }
     if (name) BindName(image, name);
     else xaml::Automation::AutomationProperties::SetAccessibilityView(image, xaml::Automation::Peers::AccessibilityView::Raw);
     return image;
@@ -2220,6 +2329,9 @@ inline std::vector<uint8_t> FileBytes(std::wstring const& path) {
 struct ImageProps {
     /// A declared resource, by name.
     char const* source = nullptr;
+    /// The declared resource shown in place of `source` where the picture
+    /// is dark: the system's, the application's or its part's theme.
+    char const* darkSource = nullptr;
     /// Or a `MediaSource` the engine gives: a file or an http(s) URL.
     Get url;
     Str label;
@@ -2235,6 +2347,8 @@ struct ImageProps {
     /// The picture's proportion in place of its own; alone, the picture
     /// takes its container's width.
     std::optional<double> aspect;
+    /// It flies with `hero`, drawn larger than its size on the way.
+    bool flies = false;
 };
 
 /// A frame as wide as its container and `aspect` as tall.
@@ -2365,6 +2479,11 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
     }
     props.width = width;
     props.height = height;
+    // A picture whose sides are numbers, and that does not fly, shows at
+    // one size.
+    picture.fixed = !props.flies && !picture.fills && (picture.width || picture.height)
+        && (!props.width.Given() || props.width.fixed) && (!props.height.Given() || props.height.fixed);
+    picture.scale = ctx.win ? ctx.win->Scale() : 1.0;
     // A template: the alpha of a declared picture in the text's color.
     if (props.templated && props.source) {
         controls::BitmapIcon icon;
@@ -2403,7 +2522,27 @@ inline void Image(Parent const& p, Ctx const& ctx, ImageProps props) {
         });
     }
     TextFn name = props.label ? Bound(ctx, props.label) : nullptr;
-    if (props.source) {
+    if (props.source && props.darkSource) {
+        // The picture of the frame's theme, shown again when that changes;
+        // the theme is known once the frame is in the tree (-1 until then).
+        Cell<int> dark(-1);
+        frame.ActualThemeChanged([dark](xaml::FrameworkElement const& element, auto&&) mutable { dark.Set(IsDark(element)); });
+        frame.Loaded([dark](IInspectable const& sender, auto&&) mutable { dark.Set(IsDark(sender.as<xaml::FrameworkElement>())); });
+        char const* light = props.source;
+        char const* night = props.darkSource;
+        Reactive::Run([frame, ctx, dark, light, night, picture, name] {
+            int now = dark.Get();
+            if (now < 0) return;
+            Reactive::Untrack([&] {
+                frame.Children().Clear();
+                PictureProps shown = picture;
+                shown.source = now ? night : light;
+                std::string source = shown.source;
+                ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, shown, name);
+                return 0;
+            });
+        });
+    } else if (props.source) {
         std::string source = props.source;
         ShowRead(frame, ctx, L"resource:" + std::wstring(Wide(source)), [source] { return ResourceBytes(source); }, source, picture, name);
     } else if (props.url) {

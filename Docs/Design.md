@@ -2372,15 +2372,15 @@ bern::media::kernel::install(kernel.clone());
 | --- | --- |
 | `MediaKernel: MediaExecutor` | `capabilities`、能画进的表面种类 `surfaces`；`attached(hub)` 与 `detached`；`attach_surface(view, player, surface)`、`resize_surface`、`detach_surface`；每帧的 `frame(view, timing)` |
 | `KernelHub` | 内核眼中的媒体中心：`complete` 完成请求，`observe` 报告带源版本的事实，`dispatch` 代它的应用发标准媒体命令 |
-| `VideoSurface` | 表面句柄（`SurfaceHandle`，目前是 `CAMetalLayer` 的地址）、物理像素尺寸与像素比（`SurfaceSize`，含外层 `ScaleBox` 的放大）、声明的 `fit` |
-| `FrameTiming` | 帧时钟触发的时刻与这一帧上屏的时刻，宿主单调时钟（Apple 上是 `CACurrentMediaTime`）的秒数 |
+| `VideoSurface` | 表面句柄（`SurfaceHandle`：Apple 上是 `CAMetalLayer` 的地址，Windows 上是 `SwapChainPanel` 的 `ISwapChainPanelNative`）、物理像素尺寸与像素比（`SurfaceSize`，含外层 `ScaleBox` 的放大）、声明的 `fit` |
+| `FrameTiming` | 帧时钟触发的时刻与这一帧上屏的时刻，宿主单调时钟（Apple 上是 `CACurrentMediaTime`，Windows 上是性能计数器）的秒数 |
 
 - 标准媒体命令照常经媒体中心校验、带源版本路由给内核，内核经 `KernelHub` 完成请求、报告事实，事实不产生命令。应用自己的命令要打开、播放、暂停、跳转或调音量时，内核也经 `KernelHub::dispatch` 发标准命令，与 CLI、MCP 一样校验并计入源版本，所以各入口看到的仍是同一个播放器。标准命令以外的能力（字幕轨、弹幕、超分辨率等）由应用的引擎直接调用内核，不进入媒体契约。
 - 表面由视图持有，应用代码不接触：视图创建内核要求的原生表面而不是平台的播放器视图，把它交给内核（`attach_surface`），尺寸或像素比变化时 `resize_surface`，视图卸载前 `detach_surface`，返回后内核不再使用该表面。跨语言的命令与状态协议里没有表面句柄。
 - 帧时钟：每个表面一个显示同步的帧回调，运行在专门的线程上，不受主线程布局与动画影响；内核应合并来不及处理的帧，`frame` 只登记、不在调用线程上绘制。
 - 能力 `multi_view: false` 时，一个播放器画在最后附着的视图里；那个视图卸载后回到仍附着的上一个视图。例如播放层缩进侧栏的迷你播放器时，画面跟到迷你播放器里继续播放。
 - 没有登记内核，或内核不支持前端提供的任何表面种类时，前端照常挂接平台媒体设施。所以一个只在部分平台上有的内核（例如没有 Web 版的内核）不影响其他目标。
-- 实现进度：`bern-media` 的 `kernel` 模块、C ABI（`bern_media_kernel_attach`、`bern_media_surface_attach`、`_resize`、`_detach`、`_frame`）；SwiftUI 的视频视图在内核模式下创建以 `CAMetalLayer` 为图层的视图，帧时钟是视图所在屏幕的 `CADisplayLink`（macOS 14 起由视图给出，跟随窗口换屏），在名为 “Bern media frames” 的线程上运行。macOS 上用一个实际应用自带的播放内核实测（2026-10-21）：播放 HEVC 的 mkv，画面、ASS 字幕、音频、暂停、跳转、倍速、换字幕轨、播完与重播都经内核；画框铺满、退后与推开时圆角与尺寸跟随；播放层缩进侧栏后画面转到迷你播放器继续播放，展开时转回；窗口缩成手机横屏布局时转到另一个视图；`media.pause` 等命令行命令作用于同一个播放器。iOS、tvOS 生成同样的视图（`UIView` 的图层类为 `CAMetalLayer`，`CADisplayLink`），未实测。Compose、GTK、WinUI 3 与 Web 尚未提供内核表面，内核不会被挂接。
+- 实现进度：`bern-media` 的 `kernel` 模块、C ABI（`bern_media_kernel_attach`、`bern_media_surface_attach`、`_resize`、`_detach`、`_frame`）；SwiftUI 的视频视图在内核模式下创建以 `CAMetalLayer` 为图层的视图，帧时钟是视图所在屏幕的 `CADisplayLink`（macOS 14 起由视图给出，跟随窗口换屏），在名为 “Bern media frames” 的线程上运行。macOS 上用一个实际应用自带的播放内核实测（2026-10-21）：播放 HEVC 的 mkv，画面、ASS 字幕、音频、暂停、跳转、倍速、换字幕轨、播完与重播都经内核；画框铺满、退后与推开时圆角与尺寸跟随；播放层缩进侧栏后画面转到迷你播放器继续播放，展开时转回；窗口缩成手机横屏布局时转到另一个视图；`media.pause` 等命令行命令作用于同一个播放器。iOS、tvOS 生成同样的视图（`UIView` 的图层类为 `CAMetalLayer`，`CADisplayLink`），未实测。WinUI 3（2026-10-25）：视频视图在内核模式下给出 `SwapChainPanel`，内核用为合成创建的交换链绘制，任意线程经 `ISwapChainPanelNative::SetSwapChain` 交来，视图在界面线程上放进面板；面板的像素与画框的物理像素一一对应，`fit` 由内核自己画（含留边）；帧时钟是名为 “Bern media frames” 的线程，每次主显示器垂直空白（`IDXGIOutput::WaitForVBlank`）给每个表面一帧。Windows 11 实体机上用同一个实际应用的内核实测：播放 HEVC 10 位的 mkv，画面与两条 ASS 字幕、硬件解码、暂停、跳转都经内核。Compose、GTK 与 Web 尚未提供内核表面，内核不会被挂接。
 
 ### 引擎读取交来的文件
 

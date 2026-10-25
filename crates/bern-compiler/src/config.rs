@@ -1,7 +1,7 @@
 //! `Bern.toml`: project, language, theme, source, resource and target
 //! configuration.
 
-use bern_ir::{LayoutConfig, ResourceDef, SourceLocation, Srgb, ThemeMode};
+use bern_ir::{LayoutConfig, ResourceDef, SourceLocation, Srgb, SvgPicture, ThemeMode};
 use bern_target_api::{Diagnostic, TargetConfig, WINDOWS_FRONTENDS};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -697,6 +697,7 @@ fn resources(
             Some(Ok(file_type)) if file_type.is_file() => found.push(ResourceDef {
                 name: written.to_string(),
                 declared,
+                picture: svg_picture(&path),
             }),
             Some(Ok(file_type)) if file_type.is_dir() => {
                 let before = found.len();
@@ -774,6 +775,7 @@ fn directory_files(
             directory_files(&entry.path(), &name, declared, found)?;
         } else if file_type.is_file() {
             found.push(ResourceDef {
+                picture: svg_picture(&entry.path()),
                 name,
                 declared: declared.clone(),
             });
@@ -784,6 +786,22 @@ fn directory_files(
         }
     }
     Ok(())
+}
+
+/// How the file, when it is an SVG document, shows as a picture of it.
+fn svg_picture(path: &Path) -> Option<SvgPicture> {
+    if !path
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("svg"))
+    {
+        return None;
+    }
+    let source = std::fs::read_to_string(path).ok()?;
+    Some(match bern_svg::picture(&source)? {
+        bern_svg::Picture::Still => SvgPicture::Still,
+        bern_svg::Picture::Tinted => SvgPicture::Tinted,
+        bern_svg::Picture::Themed => SvgPicture::Themed,
+    })
 }
 
 /// Check `[app].id` and `[app].bundle_id`.

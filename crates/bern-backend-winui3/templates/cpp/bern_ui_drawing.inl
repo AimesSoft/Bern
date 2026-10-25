@@ -578,4 +578,111 @@ struct ShadowImage {
     }
 };
 
+/// A shadow under what a styled control or stack shows without a surface
+/// of its own, as a glyph over a picture: each text, icon, picture and
+/// shape in it casts the shadow from its own shape (a Composition drop
+/// shadow from its alpha mask) onto `host`, a canvas behind the content,
+/// following the content's layout.
+struct ContentShadow : std::enable_shared_from_this<ContentShadow> {
+    controls::Canvas host;
+    double radius = 0, y = 0, opacity = 0;
+
+    /// Cast what `content` shows, from now on.
+    void Follow(xaml::FrameworkElement const& content) {
+        shown = winrt::make_weak(content);
+        host.IsHitTestVisible(false);
+        auto visual = xaml::Hosting::ElementCompositionPreview::GetElementVisual(host);
+        layer = visual.Compositor().CreateContainerVisual();
+        xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(host, layer);
+        std::weak_ptr<ContentShadow> weak = shared_from_this();
+        content.LayoutUpdated([weak](auto&&, auto&&) {
+            if (auto self = weak.lock()) self->Refresh();
+        });
+    }
+
+    void Set(double blur, double down, double alpha) {
+        if (blur == radius && down == y && alpha == opacity) return;
+        radius = blur;
+        y = down;
+        opacity = alpha;
+        for (auto& cast : casts) Shade(cast.shadow);
+    }
+
+private:
+    struct Cast {
+        winrt::weak_ref<xaml::FrameworkElement> element;
+        composition::SpriteVisual sprite{nullptr};
+        composition::DropShadow shadow{nullptr};
+        /// What the mask was taken of: a text's characters, or a size.
+        winrt::hstring text;
+        float2 size{};
+    };
+    winrt::weak_ref<xaml::FrameworkElement> shown;
+    composition::ContainerVisual layer{nullptr};
+    std::vector<Cast> casts;
+
+    void Shade(composition::DropShadow const& shadow) const {
+        shadow.Color(winrt::Windows::UI::Color{255, 0, 0, 0});
+        shadow.BlurRadius(static_cast<float>(radius));
+        shadow.Offset(float3{0, static_cast<float>(y), 0});
+        shadow.Opacity(static_cast<float>(opacity));
+    }
+
+    /// A cast for each element that shows, where it stands now.
+    void Refresh() {
+        auto content = shown.get();
+        if (!content || !layer) return;
+        auto compositor = layer.Compositor();
+        size_t used = 0;
+        std::function<void(xaml::DependencyObject const&)> visit = [&](xaml::DependencyObject const& node) {
+            auto element = node.try_as<xaml::FrameworkElement>();
+            if (!element || element.Visibility() != xaml::Visibility::Visible || element.Opacity() <= 0) return;
+            auto block = element.try_as<controls::TextBlock>();
+            auto image = block ? nullptr : element.try_as<controls::Image>();
+            auto shape = block || image ? nullptr : element.try_as<xaml::Shapes::Shape>();
+            if (!block && !image && !shape) {
+                int32_t count = media::VisualTreeHelper::GetChildrenCount(node);
+                for (int32_t i = 0; i < count; ++i) visit(media::VisualTreeHelper::GetChild(node, i));
+                return;
+            }
+            float2 size{static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())};
+            if (size.x <= 0 || size.y <= 0) return;
+            winrt::Windows::Foundation::Point at{};
+            try {
+                at = element.TransformToVisual(host).TransformPoint({0, 0});
+            } catch (winrt::hresult_error const&) {
+                return;
+            }
+            if (used == casts.size()) {
+                Cast cast;
+                cast.shadow = compositor.CreateDropShadow();
+                Shade(cast.shadow);
+                cast.sprite = compositor.CreateSpriteVisual();
+                cast.sprite.Shadow(cast.shadow);
+                layer.Children().InsertAtTop(cast.sprite);
+                casts.push_back(cast);
+            }
+            auto& cast = casts[used++];
+            auto text = block ? block.Text() : winrt::hstring();
+            // A new element, new characters or a new size: a new mask.
+            if (cast.element.get() != element || cast.text != text || cast.size.x != size.x || cast.size.y != size.y) {
+                cast.element = winrt::make_weak(element);
+                cast.text = text;
+                cast.size = size;
+                try {
+                    cast.shadow.Mask(block ? block.GetAlphaMask() : image ? image.GetAlphaMask() : shape.GetAlphaMask());
+                } catch (winrt::hresult_error const&) {
+                }
+                cast.sprite.Size(size);
+            }
+            cast.sprite.Offset(float3{at.X, at.Y, 0});
+        };
+        visit(content);
+        while (casts.size() > used) {
+            layer.Children().Remove(casts.back().sprite);
+            casts.pop_back();
+        }
+    }
+};
+
 }

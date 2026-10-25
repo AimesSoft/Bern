@@ -1226,7 +1226,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("external_links", PropKind::Flag),
         ],
         Children::None,
-        "Bundled SVG document with CSS, SMIL and script animation; explicit viewport, playing/speed controls and restart revision; document-local interaction is enabled by default",
+        "Bundled SVG document with CSS, SMIL and script animation; explicit viewport, playing/speed controls and restart revision; document-local interaction is enabled by default; a document that neither moves nor runs is drawn as a picture when the app is built, with no document engine",
     ),
     spec(
         "Image",

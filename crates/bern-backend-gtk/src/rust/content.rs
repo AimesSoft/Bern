@@ -69,8 +69,10 @@ impl Generator<'_> {
                 self.getter(source),
             )),
             None => out.line(format!(
-                "b::Image(p, c, b::ImageProps {{ source: {}, {shared} }});",
+                "b::Image(p, c, b::ImageProps {{ source: {}, dark: {}, one_size: {}, {shared} }});",
                 string(element.resource("source").unwrap_or_default()),
+                some(element.resource("dark_source").map(string)),
+                bern_target_api::svg::one_size(element),
             )),
         }
     }

@@ -78,6 +78,7 @@ impl Generator<'_> {
             "B::Image(p, c, {});",
             designated(&[
                 ("source", element.resource("source").map(string)),
+                ("darkSource", element.resource("dark_source").map(string)),
                 ("url", url),
                 ("label", self.text_prop(element, "label")),
                 ("width", self.len(element, "width")),
@@ -90,6 +91,13 @@ impl Generator<'_> {
                     (element.keyword("rendering") == Some("template")).then(|| "true".to_string())
                 ),
                 ("aspect", Self::number(element, "aspect")),
+                (
+                    "flies",
+                    element
+                        .keyword("hero")
+                        .is_some()
+                        .then(|| "true".to_string())
+                ),
             ])
         ));
     }

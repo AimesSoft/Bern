@@ -2157,8 +2157,11 @@ function nudgeOnce(node, motion) {
 
 /// A picture from a declared resource or from a `MediaSource` the engine
 /// gives (a file the user chose, or an http(s) URL); with one side given,
-/// the other follows the picture.
-export function Image(p, ctx, { source, url, label, width, height, fit, animate, corner, rendering, aspect, adaptive }) {
+/// the other follows the picture. Where it is dark (the system's, the
+/// application's or its part's appearance) it shows `darkSource` when
+/// given. A picture larger than it shows is drawn down by the browser's
+/// own image filter.
+export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, aspect, adaptive }) {
   const template = rendering === "template";
   const intrinsicRatio = cell(aspect ?? 1);
   const probe = template && !aspect ? new globalThis.Image() : null;
@@ -2180,7 +2183,18 @@ export function Image(p, ctx, { source, url, label, width, height, fit, animate,
     } else if (value) node.src = value;
     else node.removeAttribute("src");
   };
-  if (source) setSource(resource(source));
+  if (source && darkSource) {
+    // Its appearance is known once it is laid out in the page: the
+    // picture for it then, and again when the appearance changes.
+    const placed = cell(false);
+    const observer = new ResizeObserver(() => placed.set(true));
+    observer.observe(node);
+    onCleanup(() => observer.disconnect());
+    effect(() => {
+      themeTick.get();
+      if (placed.get()) setSource(resource(dark(node) ? darkSource : source));
+    });
+  } else if (source) setSource(resource(source));
   if (url) {
     effect(() => {
       const value = url();

@@ -12,7 +12,9 @@
 #include <shellapi.h>
 #include <shlwapi.h>
 
+#include <condition_variable>
 #include <cwctype>
+#include <thread>
 
 #include <winrt/Windows.Globalization.h>
 #include <winrt/Windows.Graphics.Imaging.h>
@@ -1503,7 +1505,28 @@ static std::optional<Failure> StatusOf(Bytes const& reply) {
     return Host::Status(reply, reader);
 }
 
+/// The application's media kernel executes the players.
+static bool kernel = false;
+
+/// `SurfaceKind::SwapChainPanel` in bern-media.
+constexpr uint32_t kSwapChainPanel = 1;
+
+bool Kernel() { return kernel; }
+
 void AttachExecutor() {
+    Writer offer;
+    offer.U32(1);
+    offer.U32(kSwapChainPanel);
+    auto answer = Call(bern_media_kernel_attach, offer.bytes);
+    try {
+        Reader reader(answer);
+        if (reader.U8() == 1 && reader.U32() == kSwapChainPanel) {
+            kernel = true;
+            ReceiveState(Host::Take(bern_media_snapshot(Host::handle)));
+            return;
+        }
+    } catch (DecodeError const&) {
+    }
     Writer w;
     w.Text("windows-mediaengine");
     w.Text("1");
@@ -1513,7 +1536,16 @@ void AttachExecutor() {
     ReceiveState(Host::Take(bern_media_snapshot(Host::handle)));
 }
 
+namespace Clock {
+void Stop();
+}
+
 void DetachExecutor() {
+    if (kernel) {
+        // The app stops next: no frame may reach it afterwards.
+        Clock::Stop();
+        return;
+    }
     if (Host::handle) bern_media_executor_detached(Host::handle);
     for (auto& [id, stream] : streams) stream->Release();
     streams.clear();
@@ -1690,6 +1722,144 @@ void DetachView(std::string const& token) {
     bern_media_view(Host::handle, w.bytes.data(), w.bytes.size());
 }
 
+/// The frame clock of kernel surfaces. A thread of its own waits for each
+/// vertical blank of the primary display and gives every surface a frame,
+/// so the kernel keeps the display's pace while the UI thread lays out or
+/// animates. A frame reaches the app with the lock held, so none arrives
+/// once its surface detached or the clock stopped.
+namespace Clock {
+
+static std::mutex lock;
+static std::condition_variable wake;
+static std::vector<std::string> surfaces;
+static BernApp* app = nullptr;
+static std::thread thread;
+static bool stopping = false;
+
+static double Seconds(int64_t counter) {
+    static int64_t const frequency = [] {
+        LARGE_INTEGER value;
+        QueryPerformanceFrequency(&value);
+        return value.QuadPart;
+    }();
+    return static_cast<double>(counter) / static_cast<double>(frequency);
+}
+
+static double Now() {
+    LARGE_INTEGER counter;
+    QueryPerformanceCounter(&counter);
+    return Seconds(counter.QuadPart);
+}
+
+static winrt::com_ptr<IDXGIOutput> PrimaryOutput() {
+    winrt::com_ptr<IDXGIFactory1> factory;
+    winrt::com_ptr<IDXGIAdapter1> adapter;
+    winrt::com_ptr<IDXGIOutput> output;
+    if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.put())))) return nullptr;
+    if (FAILED(factory->EnumAdapters1(0, adapter.put()))) return nullptr;
+    if (FAILED(adapter->EnumOutputs(0, output.put()))) return nullptr;
+    return output;
+}
+
+static void Run() {
+    SetThreadDescription(GetCurrentThread(), L"Bern media frames");
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+    auto output = PrimaryOutput();
+    double last = Now();
+    for (;;) {
+        {
+            std::unique_lock guard(lock);
+            wake.wait(guard, [] { return stopping || !surfaces.empty(); });
+            if (stopping) return;
+        }
+        double period = 1.0 / 60;
+        DWM_TIMING_INFO timing{};
+        timing.cbSize = sizeof timing;
+        if (SUCCEEDED(DwmGetCompositionTimingInfo(nullptr, &timing)) && timing.qpcRefreshPeriod > 0)
+            period = Seconds(static_cast<int64_t>(timing.qpcRefreshPeriod));
+        if (!output || FAILED(output->WaitForVBlank())) output = nullptr;
+        // Never faster than the display; where no blank is waited for, a
+        // refresh period after the last frame.
+        double early = last + period * (output ? 0.75 : 1.0) - Now();
+        if (early > 0) Sleep(static_cast<DWORD>(early * 1000) + 1);
+        double now = Now();
+        last = now;
+        std::lock_guard guard(lock);
+        if (stopping || !app) continue;
+        for (auto const& token : surfaces)
+            bern_media_surface_frame(app, reinterpret_cast<uint8_t const*>(token.data()), token.size(), now, now + period);
+    }
+}
+
+static void Start(std::string const& token) {
+    std::lock_guard guard(lock);
+    if (stopping) return;
+    app = Host::handle;
+    surfaces.push_back(token);
+    if (!thread.joinable()) thread = std::thread(Run);
+    wake.notify_all();
+}
+
+/// No frame of `token` reaches the app after this returns.
+static void Stop(std::string const& token) {
+    std::lock_guard guard(lock);
+    std::erase(surfaces, token);
+}
+
+void Stop() {
+    {
+        std::lock_guard guard(lock);
+        stopping = true;
+        surfaces.clear();
+        app = nullptr;
+    }
+    wake.notify_all();
+    if (thread.joinable()) thread.join();
+}
+
+}
+
+static uint32_t FitCode(uint32_t fit) { return fit <= 2 ? fit : 0; }
+
+static void WriteSize(Writer& w, SurfaceSize size) {
+    w.U32((std::max)(1u, size.width));
+    w.U32((std::max)(1u, size.height));
+    w.F64(size.scale > 0 && std::isfinite(size.scale) ? size.scale : 1.0);
+}
+
+std::string Attach(::IUnknown* native, SurfaceSize size, uint32_t fit, std::string const& player, std::string const& window) {
+    auto token = AttachView(player, window);
+    if (!Host::handle) return token;
+    Writer w;
+    w.Text(token);
+    w.Text(player);
+    w.U32(kSwapChainPanel);
+    w.U64(reinterpret_cast<uint64_t>(native));
+    WriteSize(w, size);
+    w.U32(FitCode(fit));
+    bern_media_surface_attach(Host::handle, w.bytes.data(), w.bytes.size());
+    Clock::Start(token);
+    return token;
+}
+
+void Resize(std::string const& token, SurfaceSize size) {
+    if (!Host::handle) return;
+    Writer w;
+    w.Text(token);
+    WriteSize(w, size);
+    bern_media_surface_resize(Host::handle, w.bytes.data(), w.bytes.size());
+}
+
+void Detach(std::string const& token) {
+    Clock::Stop(token);
+    if (Host::handle) {
+        Writer w;
+        w.Text(token);
+        bern_media_surface_detach(Host::handle, w.bytes.data(), w.bytes.size());
+    }
+    DetachView(token);
+}
+
 std::optional<PlayerState> State(std::string const& player) {
     auto const& map = *players.Get();
     auto found = map.find(player);
@@ -1725,16 +1895,22 @@ std::string Appearance() {
     return winrt::to_string(std::wstring_view(buffer, length));
 }
 
-winrt::fire_and_forget SavePng(Bytes pixels, int32_t width, int32_t height, double dpi, std::wstring path, bool dark) {
+winrt::fire_and_forget SavePng(Bytes pixels, int32_t width, int32_t height, double dpi, std::wstring path, bool dark, bool opaque) {
     using namespace winrt::Windows::Graphics::Imaging;
     using namespace winrt::Windows::Storage::Streams;
     try {
+        // Off the UI thread: a window's worth of pixels takes long enough to
+        // stall the interface it pictures.
+        co_await winrt::resume_background();
         // The backdrop is not part of the rendering: put the content on the
-        // theme's base color, as the window shows it.
+        // theme's base color, as the window shows it. A capture of the
+        // screen is opaque already, whatever its alpha says.
         uint8_t backdrop = dark ? 0x20 : 0xF3;
         for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
-            int rest = 255 - pixels[i + 3];
-            for (int c = 0; c < 3; ++c) pixels[i + c] = static_cast<uint8_t>((std::min)(255, pixels[i + c] + backdrop * rest / 255));
+            if (!opaque) {
+                int rest = 255 - pixels[i + 3];
+                for (int c = 0; c < 3; ++c) pixels[i + c] = static_cast<uint8_t>((std::min)(255, pixels[i + c] + backdrop * rest / 255));
+            }
             pixels[i + 3] = 255;
         }
         InMemoryRandomAccessStream stream;

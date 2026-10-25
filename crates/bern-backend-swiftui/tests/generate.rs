@@ -48,6 +48,7 @@ fn resources_must_fit_the_bundle_layout() {
         app.resources.push(ResourceDef {
             name: name.into(),
             declared: declared.clone(),
+            picture: None,
         });
     }
     let macos = config.targets.iter().find(|t| t.name == "macos").unwrap();
@@ -273,7 +274,10 @@ fn rows_give_items_their_widths_and_sized_stacks_start_them() {
         row.contains(".frame(maxWidth: .infinity, alignment: .leading)"),
         "{row}"
     );
-    assert!(!row[..row.find("\n}").unwrap_or(row.len())].contains("BernRowSpacer"), "{row}");
+    assert!(
+        !row[..row.find("\n}").unwrap_or(row.len())].contains("BernRowSpacer"),
+        "{row}"
+    );
 }
 
 /// A menu picker on macOS is the system's own pop-up, in the words' color,
@@ -289,7 +293,9 @@ fn macos_menu_pickers_take_no_accent() {
         .find(|f| f.path == Path::new("Sources/BernGenerated.swift"))
         .unwrap();
     let source = String::from_utf8_lossy(&generated.contents);
-    let density = source.find("controls_page.density").expect("the density picker");
+    let density = source
+        .find("controls_page.density")
+        .expect("the density picker");
     let before = &source[..density];
     let picker = before.rfind("SwiftUI.Picker(selection:").unwrap();
     assert!(
@@ -330,6 +336,86 @@ fn chip_pickers_are_items_of_their_flow() {
     assert!(
         source.contains("flat: false, target: \"controls_page.density_chips\""),
         "{source}"
+    );
+}
+
+/// A picture lowered from an SVG with colors per appearance names the one
+/// for the dark appearance beside it; at sides that never change it is
+/// double-sampled.
+#[test]
+fn pictures_with_a_dark_one_follow_the_appearance() {
+    use bern_ir::{Element, Node, Prop};
+    let (config, mut compiled) = showcase();
+    let resource = |name: &str| Prop::Resource { name: name.into() };
+    compiled.app.components[0].body = Node::Element(Element {
+        kind: "Image".into(),
+        id: None,
+        path: "test.Image".into(),
+        props: [
+            ("source".into(), resource("images/bern.png")),
+            ("dark_source".into(), resource("images/hdr-pq.png")),
+            ("width".into(), Prop::Number { value: 24.0 }),
+            ("height".into(), Prop::Number { value: 24.0 }),
+        ]
+        .into(),
+        template: None,
+        children: vec![],
+        action: None,
+        source: SourceLocation {
+            file: "logo.rs".into(),
+            line: 1,
+            column: 1,
+        },
+    });
+    let output = workspace().join("target/bern-test/dark-picture");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = context(&config, &compiled, "macos", &output);
+    let files = SwiftUiMacos.generate(&compiled.app, &context).unwrap();
+    for file in &files {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
+    assert!(
+        generated.contains(r#"BernImage(name: "images/bern.png", darkName: "images/hdr-pq.png", label: nil, width: 24.0, height: 24.0, fit: .contain, aspect: nil, oneSize: true)"#),
+        "{generated}"
+    );
+    if !Command::new("xcrun")
+        .arg("--find")
+        .arg("swiftc")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("swiftc not available; skipping type check");
+        return;
+    }
+    let sources = output.join("Sources");
+    let result = Command::new("xcrun")
+        .args([
+            "swiftc",
+            "-typecheck",
+            "-swift-version",
+            "6",
+            "-parse-as-library",
+        ])
+        .arg("-target")
+        .arg(format!("arm64-apple-macos{MINIMUM_MACOS}"))
+        .arg("-module-cache-path")
+        .arg(workspace().join("target/bern-swift-module-cache"))
+        .arg("-import-objc-header")
+        .arg(sources.join("bern.h"))
+        .arg(sources.join("BernRuntime.swift"))
+        .arg(sources.join("BernMedia.swift"))
+        .arg(sources.join("BernStyle.swift"))
+        .arg(sources.join("BernAppKit.swift"))
+        .arg(sources.join("BernGenerated.swift"))
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "swiftc rejected the generated code:\n{}",
+        String::from_utf8_lossy(&result.stderr)
     );
 }
 
@@ -603,6 +689,7 @@ fn ios_resources_must_not_take_the_bundles_own_names() {
         app.resources.push(ResourceDef {
             name: name.into(),
             declared: declared.clone(),
+            picture: None,
         });
     }
     let target = config.targets.iter().find(|t| t.name == "ios").unwrap();

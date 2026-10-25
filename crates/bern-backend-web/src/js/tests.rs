@@ -723,3 +723,30 @@ fn a_chip_is_the_webs_pill_and_elsewhere_the_capsule_at_thirty_points() {
     assert_eq!(button(&["browser"]), (Some("chip".into()), None));
     assert_eq!(button(&["macos"]), (Some("capsule".into()), Some(30.0)));
 }
+
+#[test]
+fn a_picture_names_the_one_for_the_dark_appearance() {
+    let app = app();
+    let mut image = element("Image");
+    for (name, resource) in [
+        ("source", "logo.svg.png"),
+        ("dark_source", "logo.svg.dark.png"),
+    ] {
+        image.props.insert(
+            name.into(),
+            Prop::Resource {
+                name: resource.into(),
+            },
+        );
+    }
+    image.props.insert("width".into(), Prop::Number { value: 24.0 });
+    let mut out = Out::default();
+    Generator::new(&app).element(&mut out, &image);
+    let generated = out.finish();
+    assert!(
+        generated.contains(
+            r#"F.Image(p, ctx, { source: "logo.svg.png", darkSource: "logo.svg.dark.png", width: 24 });"#
+        ),
+        "{generated}"
+    );
+}

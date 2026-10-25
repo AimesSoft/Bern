@@ -2029,6 +2029,9 @@ struct BernImage: View {
     var name: String? = nil
     /// a file or http(s) URL from a `MediaSource`.
     var url: String? = nil
+    /// The declared resource shown in place of `name` where the image is
+    /// dark: the system's, the application's or its part's appearance.
+    var darkName: String? = nil
     let label: String?
     let width: CGFloat?
     let height: CGFloat?
@@ -2039,7 +2042,13 @@ struct BernImage: View {
     var hero: String? = nil
     var heroMotion = BernMotion(period: 0.48, damping: 0.86)
     var heroCorner: CGFloat = 0
+    /// Its sides never change: the declared picture is decoded at twice the
+    /// pixels it covers, which the compositor halves. Squeezed down from a
+    /// much larger picture by the compositor alone, its edges would break up.
+    var oneSize = false
     @State private var fetched: Picture?
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.displayScale) private var displayScale
 
     struct Picture: @unchecked Sendable {
         let image: CGImage
@@ -2059,19 +2068,65 @@ struct BernImage: View {
         return picture
     }
 
+    /// The declared picture `name` shown `width` × `height` points (nil
+    /// for a side that follows the picture) on a display of `scale` pixels
+    /// per point: decoded at twice the pixels it covers when it has more.
+    @MainActor static func picture(_ name: String, width: CGFloat?, height: CGFloat?, fit: BernImageFit, scale: CGFloat) -> Picture? {
+        guard scale > 0, width != nil || height != nil,
+              let url = Bundle.main.resourceURL?.appendingPathComponent(name),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return picture(name) }
+        let pixelsWide = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
+        let pixelsTall = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
+        guard pixelsWide > 0, pixelsTall > 0 else { return picture(name) }
+        let exif = (properties[kCGImagePropertyOrientation] as? UInt32) ?? 1
+        let turned = (5...8).contains(exif)
+        let w = turned ? pixelsTall : pixelsWide, h = turned ? pixelsWide : pixelsTall
+        // The points it shows at, as the frame fits it.
+        let shown: CGSize
+        switch (width, height) {
+        case let (width?, height?):
+            if fit == .fill {
+                shown = CGSize(width: width, height: height)
+            } else {
+                let fx = width / w, fy = height / h
+                let s = fit == .cover ? max(fx, fy) : min(fx, fy)
+                shown = CGSize(width: w * s, height: h * s)
+            }
+        case let (width?, nil): shown = CGSize(width: width, height: width * h / w)
+        case let (nil, height?): shown = CGSize(width: height * w / h, height: height)
+        default: return picture(name)
+        }
+        let factor = max(2 * shown.width * scale / w, 2 * shown.height * scale / h)
+        guard factor < 1 else { return picture(name) }
+        let pixels = Int((max(w, h) * factor).rounded(.up))
+        let key = "\(name)@\(pixels)"
+        if let sampled = loaded[key] { return sampled }
+        guard let sampled = decode(source, pixels: pixels) else { return picture(name) }
+        loaded[key] = sampled
+        return sampled
+    }
+
     /// The first picture of `source`, in HDR where the system can show it,
-    /// with its EXIF orientation.
-    nonisolated static func decode(_ source: CGImageSource) -> Picture? {
+    /// with its EXIF orientation; with `pixels`, its longer side that many
+    /// pixels, drawn down by ImageIO.
+    nonisolated static func decode(_ source: CGImageSource, pixels: Int? = nil) -> Picture? {
+        let create = { (options: [CFString: Any]) -> CGImage? in
+            guard let pixels else { return CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) }
+            var options = options
+            options[kCGImageSourceCreateThumbnailFromImageAlways] = true
+            options[kCGImageSourceThumbnailMaxPixelSize] = pixels
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        }
         var decoded: CGImage?
         // The iOS simulator decodes gain maps to HDR as black, and cannot
         // show HDR anyway; it shows the SDR picture.
         #if !targetEnvironment(simulator)
         if #available(macOS 15, iOS 18, tvOS 18, *) {
-            decoded = CGImageSourceCreateImageAtIndex(
-                source, 0, [kCGImageSourceDecodeRequest: kCGImageSourceDecodeToHDR] as CFDictionary)
+            decoded = create([kCGImageSourceDecodeRequest: kCGImageSourceDecodeToHDR])
         }
         #endif
-        guard let image = decoded ?? CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+        guard let image = decoded ?? create([:]) else { return nil }
         // ImageIO leaves the EXIF orientation to the caller.
         let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
         let exif = (properties?[kCGImagePropertyOrientation] as? UInt32) ?? 1
@@ -2091,7 +2146,11 @@ struct BernImage: View {
     }
 
     var body: some View {
-        let picture = name.flatMap(Self.picture) ?? fetched ?? url.flatMap { BernPictures.shared.cached($0) }
+        let resource = scheme == .dark ? darkName ?? name : name
+        let declared = resource.flatMap {
+            oneSize ? Self.picture($0, width: width, height: height, fit: fit, scale: displayScale) : Self.picture($0)
+        }
+        let picture = declared ?? fetched ?? url.flatMap { BernPictures.shared.cached($0) }
         let ratio = picture?.ratio ?? 1
         let content = Group {
             if let picture {

@@ -994,7 +994,9 @@ fun BernProgress(value: Double?, total: Double, label: String?) {
 /// image for assistive technologies; without one it is decorative. It is
 /// read like a picture from the engine, off the main thread; a frame that
 /// follows the picture's own proportion reads only its header right away,
-/// once, and a picture that cannot be read then takes no room.
+/// once, and a picture that cannot be read then takes no room. Where it is
+/// dark (`bernDark`) it shows the resource `dark` when given. At `oneSize`,
+/// sides that never change, it is double-sampled.
 @Composable
 fun BernImage(
     name: String,
@@ -1005,14 +1007,17 @@ fun BernImage(
     corner: Dp? = null,
     template: Boolean = false,
     aspect: Float? = null,
+    dark: String? = null,
+    oneSize: Boolean = false,
 ) {
-    val url = remember(name) { BernPictures.resource(name) }
+    val shown = if (dark != null && bernDark()) dark else name
+    val url = remember(shown) { BernPictures.resource(shown) }
     val ratio = if (aspect == null && (width == null || height == null)) {
         BernPictures.ratio(url) ?: return
     } else {
         null
     }
-    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio)
+    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize)
 }
 
 /// The frame of a picture: its declared sizes, the other side by `ratio`

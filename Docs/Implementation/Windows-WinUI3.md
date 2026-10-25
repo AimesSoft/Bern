@@ -52,7 +52,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 | 列表身份、订阅释放 | 完成 | `ForEach` 按键保留行；查询订阅随视图与窗口结束 |
 | 深浅色 | 完成 | 颜色全部来自系统主题资源，经 `ThemeResource` 绑定，运行中切换主题也会更新；Islands 窗口的标题栏经 DWM 跟随深浅色 |
 | 原生多窗口、关闭确认、窗口事实 | 完成 | 两种模式均已实测 |
-| Video 原生呈现 | 完成 | Media Foundation 媒体引擎执行端，两种模式以 `SwapChainPanel` 显示引擎的交换链；HDR 视频在 SDR 显示器上经系统色调映射，HDR 显示器未实测 |
+| Video 原生呈现 | 完成 | Media Foundation 媒体引擎执行端，两种模式以 `SwapChainPanel` 显示引擎的交换链；HDR 视频在 SDR 显示器上经系统色调映射，HDR 显示器未实测。应用自带的媒体内核画进同样的 `SwapChainPanel`（2026-10-25） |
 | 阶段四：`Adaptive`、`Menu`、`LanguagePicker`、运行时切换语言 | 完成 | 两种模式均已实测 |
 | 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换；圆角、内边距、尺寸档直接设置；阴影由 Direct2D 画成位图垫在按钮下；缩放、位移与透明度用运行时的弹簧。选中侧栏项的 `indicator` 不列出。见“样式覆盖” |
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 弹簧每帧在界面线程上推进，写到元素的 `Translation`、`Scale` 与 `Opacity`，不影响布局；滚动联动是 Composition 表达式动画。见“动效” |
@@ -97,7 +97,7 @@ frontends = ["winui3"]   # 或 ["xaml-islands"]；不写则两个都编译
 
 | Bern | 两种前端 |
 | --- | --- |
-| `Image` | `Image` 显示 `BitmapImage`：从可执行文件旁的 `resources` 读出资源字节，写入内存流后回到界面线程 `SetSourceAsync`（未打包的应用没有 `ms-appx`）。两边都写时外面是声明尺寸的 `Grid`，`contain` 为 `Uniform` 并居中，`cover` 为 `UniformToFill`，`fill` 为 `Fill`；只写一边时为 `Uniform`，另一边按图片比例。`label` 为自动化名称，没有时 `AccessibilityView` 为 `Raw` |
+| `Image` | `Image` 显示 `BitmapImage`：从可执行文件旁的 `resources` 读出资源字节，写入内存流后回到界面线程 `SetSourceAsync`（未打包的应用没有 `ms-appx`）；给出的边都是数字、不飞行的图片在后台按显示像素的两倍解成 `SoftwareBitmap`，显示 `SoftwareBitmapSource`（见下面的性能一节）。两边都写时外面是声明尺寸的 `Grid`，`contain` 为 `Uniform` 并居中，`cover` 为 `UniformToFill`，`fill` 为 `Fill`；只写一边时为 `Uniform`，另一边按图片比例。`label` 为自动化名称，没有时 `AccessibilityView` 为 `Raw` |
 | `Progress` | 有 `value` 时为标签下的 `ProgressBar`（`Minimum` 0，`Maximum` 为 `total`）；没有时为 20 px 的 `ProgressRing` 加次要文字 |
 | `Grid` | 自定义面板 `GridPanel`：列数为放得下的最大值，列宽平分，每行与该行最高的单元格一样高 |
 | `Stack` | 单格 `Grid`，子元素叠放，按 `align` 设对齐 |
@@ -127,6 +127,8 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 
 画面不用 `MediaPlayerElement`：WinUI 3 的 `MediaPlayerElement` 不显示 HDR（[microsoft-ui-xaml#9238](https://github.com/microsoft/microsoft-ui-xaml/issues/9238)，微软工程师的解释是 UWP 靠 CoreWindow 判断显示器，Windows App SDK 应用没有 CoreWindow）。引擎用一个带视频支持的 Direct3D 11 设备解码，拿到元数据后进入无窗口交换链模式（`EnableWindowlessSwapchainMode`），把画面画进它自己的交换链；`Video` 用 `SwapChainPanel` 的 `ISwapChainPanelNative2::SetSwapChainHandle` 显示这个交换链，两种前端同一套代码（与 HDR 图片一样，两套头文件里的接口同名不同 ID，预编译头里另行声明）。这是微软 Media Foundation 示例与 Chromium 播放受保护视频的做法，HDR 视频怎样输出由引擎与系统决定。引擎按视频在屏幕上占的像素绘制（`UpdateVideoStream`）；`SwapChainPanel` 把交换链的一个像素当作一个 DIP，所以面板的 DIP 尺寸设为像素数、再按显示缩放缩回，交换链的像素与屏幕像素一一对应。`fit` 由面板的位置、缩放与外框的裁剪实现：`contain` 居中留边，`cover` 裁掉超出外框的部分，`fill` 拉伸。
 
+应用登记了自带的媒体内核时（见[设计文档](../Design.md#应用自带的媒体内核)），启动时先以 `SwapChainPanel` 问 `bern_media_kernel_attach`；内核接受时不挂接 Media Foundation，`Video` 改为把面板交给内核：交出去的是 Bern 自己实现的 `ISwapChainPanelNative`，内核在任意线程用它交来为合成创建的交换链，Bern 把最新的一个在界面线程上放进真正的面板，视图解除附着后不再接受。面板的 DIP 尺寸设为画框的物理像素数、再按显示缩放缩回，内核画整个画框（`fit` 与留边由内核处理），画框尺寸或显示缩放变化时 `bern_media_surface_resize`。帧时钟是名为 “Bern media frames” 的线程：等主显示器的垂直空白（`IDXGIOutput::WaitForVBlank`，等不到时按 DWM 的刷新周期计时），持锁给每个附着的表面调用 `bern_media_surface_frame`，时刻为性能计数器的秒数；表面解除附着或应用停止后不再有帧到达。
+
 一个引擎只有一个交换链，所以一个播放器同一时间只在一个视图中显示画面（`multi_view: false`）：最新附着的视图显示，它解除附着后交还给上一个仍在的视图，与 Web 的单视图一致。
 
 实测（2026-10-12，PC 为 2560×1440、150% 缩放的 SDR 显示器，由 CLI 读回状态；以下在 WinUI 3 前端全部测过，Islands 前端测了 HDR10 测试片与预览播放器在页面间转移，结果相同）：精选片段加载后 `Ready 0 / 8000`，播放、暂停、播完为 `Ended` 后再播放从头开始、跳转到 5000、静音与音量 0.4 都生效；换为色条后静音与音量保留，换为损坏文件后 `Failed`（“The file is damaged or its format is not supported (0xC00D36C4)”）。4:3 的测试片放进 16:9 的外框，三种 `fit` 都正确，最大化与改变窗口大小后重新排布；视频尺寸正确说明 150% 下的缩放校正生效。应用级预览播放器在项目详情页播放，回到视频页后画面出现在视频页的视图中。本机 HTTP 提供的 HLS 直播打开后为 `Ready`，播放后 `Playing`，`duration_ms` 为空，`media seek` 返回 `not_seekable`，画面正常。用 ffmpeg 编成 10 位 HEVC（BT.2020、PQ、HDR10 元数据）的测试片，左半为 SDR 白（203 尼特）、右半为它的 4 倍，在 SDR 模式下由系统做色调映射：左右分别为 237 与 252，渐变平滑，没有发灰。HDR 模式下的输出未验证：测试用的 PC 没有 HDR 显示器。开发快照的窗口截取（`PrintWindow`）里有视频画面。
@@ -140,7 +142,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - 每个用到的样式生成一个 `B::StyleDef`：基础外观与各状态（悬停、按下、焦点、禁用、选中）的 `Look`。
 - 按钮的底色、前景与边框写成按钮自己 `Resources` 中的轻量样式资源（`ButtonBackgroundPointerOver`、`ButtonForegroundPressed` 等，浅色与深色主题各一份），由控件模板自己的视觉状态切换；样式没写的状态保留系统的外观与反馈。`none` 让该状态与普通状态相同，`system` 保留系统的。`corner` 为 `CornerRadius`，`padding` 为内边距；尺寸档 `small`、`large`、`extra_large` 的最小高度为 24、42、52，并调整字号与左右内边距。
 - 缩放、位移与透明度放在“状态”层（见“动效”），以最上层会动的状态所带的弹簧进入，回到普通状态用 `settle`；状态来自指针进入、离开、按下、抬起、捕获丢失与焦点事件，禁用来自 `IsEnabled`。
-- `shadow`：Direct2D 的阴影效果按按钮的圆角与尺寸画成位图（只保留按钮形状以外的部分），垫在按钮下方，与按钮在同一个外层里一起缩放、移动；不同状态的阴影以透明度切换。
+- `shadow`：Direct2D 的阴影效果按按钮的圆角与尺寸画成位图（只保留按钮形状以外的部分），垫在按钮下方，与按钮在同一个外层里一起缩放、移动；不同状态的阴影以透明度切换。样式在任何状态都不画背景、描边或填充的按钮（光秃的图标或文字，如浮在画面上的播放控件）改为从内容投影（2026-10-25）：其中每段文字、图标、图片与形状各取自己的透明度遮罩（`GetAlphaMask`）做 Composition 投影，画在按钮后面的画布上，按内容的布局跟随，与 SwiftUI 的 `shadow` 一样是字形的影子而不是方框。`Stack` 的 `shadow` 也这样投影它里面的内容。
 - 带内容的按钮（`Button { … }`）去掉按钮自己的外框与底色，内容原样显示；`corner` 用 Composition 的圆角几何裁剪内容。内容铺满时按钮随之拉伸。
 - 侧栏项：底色与前景写成 `NavigationViewItem` 的轻量样式资源（`NavigationViewItemBackgroundPointerOver`、`…Selected` 等）；`selected: fill(…)` 时选中项整行填色，导航视图自己的选中指示条设为透明。缩放等变换作用在项上：`NavigationViewItem` 拒绝 `UIElement` 的 `Translation`、`Scale`，变换写在它自己的 Composition 视觉上。`indicator` 没有列出：`NavigationView` 只在前缘画自己的指示条，不能换成样式描述的形状。
 - 侧栏项的变换与指示条：选中改变时，`NavigationView` 用 `TransformToVisual` 量出新旧两项指示条的位置，横坐标完全相等才播放滑动动画（共 600 毫秒：前 200 毫秒指示条从旧项伸长到新项，三次贝塞尔 (0.9, 0.1, 1.0, 0.2)；后 400 毫秒收拢到新项，(0.1, 0.9, 0.2, 1.0)；旧条在后 400 毫秒淡出，两条重合，看上去是同一条），否则两项的指示条同时各自缩放 600 毫秒（线性），看上去是两段断开的竖条。量出的位置包含写在项视觉上的缩放（WinUI 内核的 `GetLocalTransform` 计入应用在视觉上设的变换），所以点击时被点项正处在悬停与按下的缩放里，总是走后一种。为此：（1）运行时每次改变选中时让所有侧栏项暂时没有变换，量完再写回，同一次调用里完成，屏幕上看不到：点击与按键的顺序是 `ItemInvoked`、量位置与动画、`SelectionChanged`，在前一个事件里放下、后一个事件里恢复（点的是已选中的项时不放下；选中最终没有改变时没有 `SelectionChanged`，由投递的任务恢复）；运行时自己写 `SelectedItem` 时在前后包住。（2）侧栏项缩放时横向以指示条所在的线为原点（找模板中的 `SelectionIndicator`，取包着它的格子在项中的横坐标），行从前缘起伸缩，指示条留在它滑动的轨道上，新旧两条在滑动中重合。系统 XAML（Islands）的导航视图按 2018 年的 WinUI 源码（系统版本由此而来）没有横坐标的判断，`SelectionChanged` 在动画之前；（1）在那里不起作用也无害，（2）照样让两条重合。时长与曲线取自 microsoft-ui-xaml 的 `NavigationView.cpp`（`AnimateSelectionChanged`、`PlayIndicatorAnimations`、`PlayIndicatorNonSameLevelAnimations`）。
@@ -184,7 +186,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - `Pinch`：触摸的捏合经 `ManipulationDelta` 的缩放；触控板捏合在 Windows 上以带 Ctrl 的滚轮到达，按每格 e^0.1 缩放。`Swipe`：按下后沿轴拖动，`distance`（默认 300）走完整个范围，向上与向右增大，捕获指针，抬起时执行动作。
 - 快捷键：每个快捷键是窗口根元素上的 `KeyboardAccelerator`，随控件挂载与卸载；`cmd` 与 `ctrl` 都是 Control。`Search` 的快捷键聚焦搜索框，开关与分体按钮切换，按钮、菜单项与浮层按钮激活；控件禁用时不起作用，没有 Control 或 Alt 的快捷键在文本框有焦点时不触发。菜单项的快捷键显示在菜单中。
 - 工具栏搜索与结果：搜索框是 `AutoSuggestBox`；结果是任意组件，所以不用它自己的建议列表，而是在搜索框下方的 `Flyout` 中显示，搜索框有焦点且有结果时打开，点选结果后收起。
-- `PopoverButton`：按钮的 `Flyout`，内容在浮层打开时挂载、关闭后卸载；`presented` 双向跟随。`SplitButton`：`ToggleSplitButton`，主体切换开关，旁边的部分打开同样的浮层；该部分的无障碍名称为 `more_label`，没有时为“更多选项”。
+- `PopoverButton`：按钮的 `Flyout`，内容在浮层打开时挂载、关闭后卸载；`presented` 双向跟随。`SplitButton`：`ToggleSplitButton`，主体切换开关，旁边的部分打开同样的浮层；该部分的无障碍名称为 `more_label`，没有时为“更多选项”。没有指定背景色的气泡是系统的应用内亚克力（WinUI 3 的 `AcrylicInAppFillColorDefaultBrush`，系统 XAML 的 `SystemControlAcrylicElementBrush`），按气泡自己的明暗（所在区域的 `appearance` 或窗口）从主题字典取，并限制在窗口内（`ShouldConstrainToRootBounds`）：伸出窗口的浮层是单独的弹出窗口，应用内亚克力在那里只显示底色。此前带样式的气泡会用只含明暗与文字色的样式替换掉按明暗取的底色，深色区域里的气泡因而是浅色底（2026-10-26 修正，样式改为继承按明暗取的那份）。实测（WinUI 3 与强制回退的系统 XAML）：视频上的播放设置气泡是深色亚克力；WinUI 3 的应用内亚克力几乎不透明（亮度不透明度 0.96），系统 XAML 的透出更多后面的画面。
 - `Toast`：在所在位置显示系统的 `InfoBar`（信息级别、不可关闭，`icon` 为它的图标），从下方滑入，`duration` 秒后淡出；内容变化时重新显示，朗读为礼貌的实时区域。系统 XAML 没有 `InfoBar`，Islands 下是同形的 4 圆角条。
 - `Inspector`：所在容器换成右侧窗格的 `SplitView`（`Inline` 模式），`presented` 为真时窗格滑出，其余内容让出位置。
 - `ScrollView(snap:, position:)`：滚动停下（`ViewChanged` 不再是中间状态）时取最近的一项，以动画对齐到锚点；`center` 时首尾按最大一项留出空白，位置按项在内容中的坐标加内容的边距计算。停稳的一项写回 `position`；字段被设成另一项时以动画滚过去；首次布局后直接停在字段的一项。
@@ -234,13 +236,14 @@ release 版里，切换列表的筛选（一列海报行收起、另一列展开
 - 原因一：`Image` 的资源图片与 `file:` 图片在界面线程上同步读取文件（`ResourceBytes`、`FileBytes`）。文件已在系统缓存里时读得很快（见下面的实测），Defender 扫描刚解压的文件或磁盘繁忙时一张要几十毫秒：bern-pc 在负载下测到切换时停 0.4–1 秒，期间界面线程自己只用了 40–80 毫秒的 CPU，其余是在等文件。
 - 原因二：动画每帧都要布局（手风琴每帧改列宽），布局后所有订阅 `LayoutUpdated` 的元素都会收到这个事件（它不分元素，任何一处布局都会触发），所以每帧都要跑一遍。用采样器（暂停界面线程、展开调用栈，只在诊断时编进去）在切换列表时看界面线程忙的时间：约三成的样本停在 XAML 框架自己的代码里，其次是 `Canvas` 重画约 5%、WinUI `TitleBar` 更新非客户区约 7%。
 - 图片改在后台读取：读文件放到线程池（`resume_background`），读完回到界面线程再解码显示；元素所在的作用域已经释放就不显示。最近读过的图片字节按键（资源名或文件路径）留在内存里，最多 64 MB，按最近使用淘汰，单张超过 16 MB 不留；命中时当场显示，同一张图再次挂载不会先空一下再出现。图片的尺寸本来就要等 XAML 异步解码后才知道，所以改成后台读取不会多出布局跳动。`Image(source: app.x)` 原本就在后台读取。
+- 尺寸写死的图片也在后台解码：XAML 的 `BitmapImage` 在界面线程上用 WIC 整张解码（采样器看到界面线程大半时间在 `windowscodecs` 里），一个实际应用的首页一次出现二十来张 88×132 的海报，原图平均三百多 KB、大的 3 MB，进入首页时界面线程连续停 0.2–0.6 秒，十秒里只出 66 帧。给出的边都是数字、不飞行（没有 `hero`）的图片，资源和文件来的都算，改为在线程池用 `BitmapDecoder` 解码：按显示尺寸乘窗口缩放的两倍，`BitmapTransform` 用 Fant 滤镜缩（JPEG 解码器直接按比例解，不先解整张），比这还小的图整张解；解成预乘的 BGRA `SoftwareBitmap`，回到界面线程放进 `SoftwareBitmapSource`。改后同样进入首页：2.6 秒出 456 帧，平均间隔 5.5 毫秒，只在建页那一帧停约 90 毫秒（其中 41 毫秒是应用引擎的状态和建元素）。其余图片仍交给 `BitmapImage`。
 - 没有内容的 `Canvas` 不画：画布每次出现或改变尺寸都要新建 WIC 位图和 Direct2D 渲染目标，再复制进 `WriteableBitmap`；只占位置的画布（留白、按钮里撑满的底）也一样，列宽每帧变化时每帧都要重画。现在绘制列表为空时不建位图，已有的位图也释放。Web 的画布同理，空画布不再在每次改变尺寸时重新分配位图。GTK（GTK 自己的绘制过程）、Compose 与 SwiftUI（系统画布）没有中间位图，没有改（未实测）。
 - 标题栏插距修正先比较：`FitTitleBarInsets` 挂在标题栏的 `LayoutUpdated` 上，此前每次布局都去查询 `AppWindow` 的标题栏插距；现在记下上次设置的两列宽度与缩放，列宽与缩放都没变时直接返回，只在标题栏自己改了列宽或缩放变化时才查询。
 - 样式字典只解析一次：`Restyle` 给元素的轻量 `ResourceDictionary` 按 XAML 文本缓存，同样外观的元素合并同一个字典，此前每个元素各解析一次。合并共享字典失败时退回解析一份自己的。
 - 变换层每帧写一次：一帧里所有弹簧先推进完，再由每个元素的层把合成结果写一次；此前一层的五根弹簧、元素的每一层各写一次 `Translation`、`Scale`、`Opacity`。值没有变化时不写。
 - WinUI 的 `TitleBar` 设了图标时会订阅图标的 `LayoutUpdated`，每次都无条件调用 `InputNonClientPointerSource.SetRegionRects(Icon, …)`，进而调用 `SetWindowRgn`、`SetWindowPos`（microsoft-ui-xaml 的 `TitleBar.cpp` 注释说这是为另一个问题加的绕行办法：标题栏会在每次交互后清掉非穿透区域）。按采样估算这笔开销每次布局约 0.15 毫秒，只抬高 CPU，不造成停顿；没有绕开它，标题栏仍用系统的图标与系统菜单。
 - `BERN_FRAME_LOG`：设为非空时在标准错误输出每段弹簧动画的帧数、第一帧来得多晚、帧间隔、超过 25 毫秒的帧、推进弹簧用的时间、界面线程自己用掉的 CPU 周期（`QueryThreadCycleTime`）与其中最忙的一帧，以及界面线程超过 50 毫秒没有出帧的停顿：停顿期间的周期数、执行投递的工作（应用引擎的状态并建出元素）用的时间、解析了几个样式字典。bern-pc 上同时运行着其他程序，墙钟时间起伏很大，周期数更稳定。
-- 试过没有采用：给 `BitmapImage` 设 `DecodePixelWidth`（XAML 本来就按显示尺寸解码，显式设置测得反而更慢）；把变换层交给合成器的 `SpringVector3Animation` / `SpringScalarAnimation` 播放（要在建层时就交出每个元素的视觉，与 `UIElement.Translation` 等属性不能并用；实测切换后展开的行停在透明，没有采用）。
+- 试过没有采用：给 `BitmapImage` 设 `DecodePixelWidth`（XAML 本来就按显示尺寸解码，显式设置测得反而更慢；解码仍在界面线程，所以尺寸写死的图片后来改为自己在后台解码，见上）；把变换层交给合成器的 `SpringVector3Animation` / `SpringScalarAnimation` 播放（要在建层时就交出每个元素的视觉，与 `UIElement.Translation` 等属性不能并用；实测切换后展开的行停在透明，没有采用）。
 - 实测（Windows 11 实体机 i5-13490F、150%，release，同一套操作：进入列表页、切换 7 次筛选、打开设置窗口、切换 8 次分页；两个版本交替各跑 3 轮，取中位数；周期按 2.5 GHz 计，约 0.4 纳秒一个）：
   - 文件在系统缓存里、机器空闲时，只改图片读取前后没有差别：切换筛选的第一帧都在 31–33 毫秒后出来，都没有超过 50 毫秒的停顿。改动针对的是冷启动和杀毒软件扫描的情形。
   - 加上空画布不画与插距比较之后：切换筛选的动画每帧界面线程 6.19 → 5.47 百万周期（−12%）；设置切换分页每帧 3.53 → 2.70（−24%），建出新页那一帧 91 → 68（−25%），第一帧 27 → 22 毫秒。切换筛选建出新列那一帧仍约 82 百万周期（约 33 毫秒），时间主要花在 XAML 建元素与布局上。
@@ -314,7 +317,7 @@ target\bern\windows\Showcase\showcase.exe
 
 **开发辅助**（默认全部关闭）：
 
-- `BERN_SNAPSHOT_DIR`：每次变化后输出两种快照。`<窗口>.png` 是 XAML 内容的渲染，打开的对话框和菜单另存为 `-popup<n>.png`；`<窗口>-window.png` 用 `PrintWindow` 截取应用自己的窗口，含标题栏、Mica 与视频画面。
+- `BERN_SNAPSHOT_DIR`：界面静止 700 毫秒后输出两种快照，一直在变（如播放中的时间）时最多每 5 秒一次；渲染界面要占用界面线程，PNG 的编码在后台线程（2026-10-26：此前每 700 毫秒截一次、在界面线程编码，播放时界面只剩约每秒一帧）。`<窗口>.png` 是 XAML 内容的渲染，打开的对话框和菜单另存为 `-popup<n>.png`；`<窗口>-window.png` 用 `PrintWindow` 截取应用自己的窗口，含标题栏、Mica 与视频画面。
 - `BERN_APPEARANCE=light|dark`：覆盖系统外观。
 - `BERN_FORCE_ISLANDS`：在装有运行时的机器上试用回退前端。
 - `BERN_APP_RUNTIME=installed|inbox|none`：只用其他程序装的运行时、只用 Windows 自带的，或当作都没有（只编译 WinUI 3 时会出现提示框）。

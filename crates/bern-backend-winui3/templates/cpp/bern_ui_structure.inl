@@ -1653,12 +1653,65 @@ inline xaml::FrameworkElement ControlBar(Ctx const& ctx, std::string const& id, 
     return bar;
 }
 
+using SwapChainPanelNative = std::conditional_t<kWinUI, IBernWinUISwapChainPanelNative, IBernIslandsSwapChainPanelNative>;
 using SwapChainPanelNative2 = std::conditional_t<kWinUI, IBernWinUISwapChainPanelNative2, IBernIslandsSwapChainPanelNative2>;
+
+/// A SwapChainPanel as the application's media kernel sees it: the kernel
+/// gives its swap chain from any thread, and the panel takes the newest on
+/// the UI thread until the view has taken the surface back.
+struct KernelPanel : winrt::implements<KernelPanel, SwapChainPanelNative> {
+    winrt::weak_ref<controls::SwapChainPanel> panel;
+    std::mutex lock;
+    /// Guarded by the lock.
+    winrt::com_ptr<IDXGISwapChain> chain;
+    bool detached = false;
+
+    explicit KernelPanel(controls::SwapChainPanel const& shown) : panel(winrt::make_weak(shown)) {}
+
+    HRESULT __stdcall SetSwapChain(IDXGISwapChain* next) noexcept override {
+        {
+            std::lock_guard guard(lock);
+            if (detached) return S_OK;
+            chain.copy_from(next);
+        }
+        try {
+            Host::Post([self = get_strong()] { self->Apply(); });
+        } catch (...) {
+            return E_FAIL;
+        }
+        return S_OK;
+    }
+
+    void Apply() {
+        winrt::com_ptr<IDXGISwapChain> next;
+        {
+            std::lock_guard guard(lock);
+            if (detached) return;
+            next = chain;
+        }
+        if (auto shown = panel.get(); shown && FAILED(shown.as<SwapChainPanelNative>()->SetSwapChain(next.get())))
+            Report("video: the panel does not take the media kernel's swap chain");
+    }
+
+    /// The kernel no longer draws into the panel: show nothing.
+    void Detach() {
+        {
+            std::lock_guard guard(lock);
+            detached = true;
+            chain = nullptr;
+        }
+        if (auto shown = panel.get()) {
+            try { shown.as<SwapChainPanelNative>()->SetSwapChain(nullptr); } catch (...) {}
+        }
+    }
+};
 
 /// A player's frames on screen: the swap chain its media engine draws
 /// into, in a SwapChainPanel. The engine draws as many pixels as the video
 /// takes up on screen; the panel is that many DIPs large and scaled back by
 /// the display scale, so that each pixel of the swap chain is one on screen.
+/// The application's media kernel draws the whole frame instead, fitting
+/// the video itself, into a panel as many pixels as the frame.
 struct VideoScreen {
     controls::SwapChainPanel panel;
     controls::Canvas canvas;
@@ -1670,6 +1723,10 @@ struct VideoScreen {
     uint64_t token = 0;
     /// Clipped by a rounded Composition clip instead of the frame's own.
     bool rounded = false;
+    /// The kernel's view of the panel, its attachment and the size it has.
+    winrt::com_ptr<KernelPanel> kernel;
+    std::string view;
+    Media::SurfaceSize reported;
 
     void Show(Media::Frames const& next) {
         frames = next;
@@ -1688,6 +1745,18 @@ struct VideoScreen {
             media::RectangleGeometry clip;
             clip.Rect({0, 0, static_cast<float>(w), static_cast<float>(h)});
             frame.Clip(clip);
+        }
+        if (kernel) {
+            auto size = Size();
+            panel.Width(static_cast<double>(size.width));
+            panel.Height(static_cast<double>(size.height));
+            scale.ScaleX(w / size.width);
+            scale.ScaleY(h / size.height);
+            if (size != reported) {
+                reported = size;
+                Media::Resize(view, size);
+            }
+            return;
         }
         if (!frames.width || !frames.height) return;
         // The swap chain keeps the video's shape: the fitted rectangle for
@@ -1711,6 +1780,16 @@ struct VideoScreen {
         controls::Canvas::SetTop(panel, std::round((h - dh) / 2 * s) / s);
         Media::Resize(token, static_cast<uint32_t>(pw), static_cast<uint32_t>(ph));
     }
+
+    /// The frame in the pixels of its display.
+    Media::SurfaceSize Size() const {
+        auto root = frame.XamlRoot();
+        double s = root ? root.RasterizationScale() : 1.0;
+        auto pixels = [s](double dips) { return static_cast<uint32_t>((std::max)(1L, std::lround(dips * s))); };
+        return {pixels(frame.ActualWidth()), pixels(frame.ActualHeight()), s};
+    }
+
+    uint32_t FitCode() const { return fit == "cover" ? 1 : fit == "fill" ? 2 : 0; }
 };
 
 /// A video's picture above its control bar: the picture takes the height
@@ -1806,18 +1885,29 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
     element.CompositionScaleChanged([weak](auto&&, auto&&) {
         if (auto screen = weak.lock()) screen->Layout();
     });
-    screen->token = Media::Show(playerId, [weak](Media::Frames const& frames) {
-        if (auto screen = weak.lock()) screen->Show(frames);
-    });
-    auto token = Media::AttachView(playerId, win->id);
-    Reactive::OnCleanup([token, screen] {
-        Media::DetachView(token);
-        Media::Hide(screen->token);
-        if (screen->shown) {
-            screen->shown = nullptr;
-            try { screen->panel.as<SwapChainPanelNative2>()->SetSwapChainHandle(nullptr); } catch (...) {}
-        }
-    });
+    if (Media::Kernel()) {
+        screen->kernel = winrt::make_self<KernelPanel>(element);
+        screen->reported = screen->Size();
+        SwapChainPanelNative* native = screen->kernel.get();
+        screen->view = Media::Attach(native, screen->reported, screen->FitCode(), playerId, win->id);
+        Reactive::OnCleanup([screen] {
+            Media::Detach(screen->view);
+            screen->kernel->Detach();
+        });
+    } else {
+        screen->token = Media::Show(playerId, [weak](Media::Frames const& frames) {
+            if (auto screen = weak.lock()) screen->Show(frames);
+        });
+        auto token = Media::AttachView(playerId, win->id);
+        Reactive::OnCleanup([token, screen] {
+            Media::DetachView(token);
+            Media::Hide(screen->token);
+            if (screen->shown) {
+                screen->shown = nullptr;
+                try { screen->panel.as<SwapChainPanelNative2>()->SetSwapChainHandle(nullptr); } catch (...) {}
+            }
+        });
+    }
     Reactive::Run([element, status, playerId, labelText] {
         auto state = Media::State(playerId);
         element.Opacity(state && state->ShowsFrames() ? 1.0 : 0.0);

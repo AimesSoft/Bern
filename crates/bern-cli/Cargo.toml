@@ -27,3 +27,5 @@ toml.workspace = true
 
 [dev-dependencies]
 bern-ir.workspace = true
+bern-svg.workspace = true
+png = "0.18"

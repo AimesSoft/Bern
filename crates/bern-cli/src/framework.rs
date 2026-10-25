@@ -82,7 +82,9 @@ fn checkout_of(metadata: &Value) -> Option<PathBuf> {
         .as_array()?
         .iter()
         .find(|package| package["name"] == "bern" && package["source"].is_null())?;
-    let crates = Path::new(bern["manifest_path"].as_str()?).parent()?.parent()?;
+    let crates = Path::new(bern["manifest_path"].as_str()?)
+        .parent()?
+        .parent()?;
     crates
         .join("bern-ffi/Cargo.toml")
         .is_file()

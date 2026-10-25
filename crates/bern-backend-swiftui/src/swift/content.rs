@@ -166,8 +166,12 @@ impl Generator<'_> {
             }
             Some(expr) => format!("url: ({}).url", self.expr(expr)),
             None => format!(
-                "name: {}",
-                string(element.resource("source").unwrap_or_default())
+                "name: {}{}",
+                string(element.resource("source").unwrap_or_default()),
+                element
+                    .resource("dark_source")
+                    .map(|dark| format!(", darkName: {}", string(dark)))
+                    .unwrap_or_default()
             ),
         };
         let hero = element
@@ -184,8 +188,13 @@ impl Generator<'_> {
                 )
             })
             .unwrap_or_default();
+        let one_size = if bern_target_api::svg::one_size(element) {
+            ", oneSize: true"
+        } else {
+            ""
+        };
         out.line(format!(
-            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero})",
+            "BernImage({source}, label: {}, width: {}, height: {}, fit: {fit}{}, aspect: {}{hero}{one_size})",
             self.text_prop(element, "label")
                 .unwrap_or_else(|| "nil".into()),
             length("width"),

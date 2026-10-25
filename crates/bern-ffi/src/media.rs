@@ -422,6 +422,7 @@ pub unsafe extern "C" fn bern_media_surface_attach(
         };
         let handle = match SurfaceKind::from_code(kind) {
             Some(SurfaceKind::MetalLayer) => SurfaceHandle::MetalLayer(handle),
+            Some(SurfaceKind::SwapChainPanel) => SurfaceHandle::SwapChainPanel(handle),
             None => return,
         };
         let Some(size) = surface_size(&mut reader) else {

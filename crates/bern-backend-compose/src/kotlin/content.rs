@@ -104,6 +104,13 @@ impl Generator<'_> {
             ));
             return;
         }
+        // The picture where it is dark, and double-sampling at one size.
+        if let Some(dark) = element.resource("dark_source") {
+            extra.push_str(&format!(", dark = {}", string(dark)));
+        }
+        if bern_target_api::svg::one_size(element) {
+            extra.push_str(", oneSize = true");
+        }
         out.line(format!(
             "BernImage({}, {}, {}, {}, {fit}{extra})",
             string(element.resource("source").unwrap_or_default()),

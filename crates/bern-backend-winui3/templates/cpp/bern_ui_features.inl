@@ -670,20 +670,41 @@ struct Popover {
     }
 };
 
+/// The platform's in-app acrylic in the dark or light appearance: the
+/// material of transient surfaces, blurring the window's content behind.
+inline media::Brush InAppAcrylic(bool dark) {
+    wchar_t const* key = kWinUI ? L"AcrylicInAppFillColorDefaultBrush" : L"SystemControlAcrylicElementBrush";
+    auto resources = xaml::Application::Current().Resources();
+    for (auto theme : dark ? std::initializer_list<wchar_t const*>{L"Dark", L"Default"} : std::initializer_list<wchar_t const*>{L"Light"})
+        if (auto value = ThemeValue(resources, theme, key))
+            if (auto brush = value.try_as<media::Brush>()) return brush;
+    return nullptr;
+}
+
 inline std::shared_ptr<Popover> MakePopover(Ctx const& ctx, Build content, bool windowTheme = false, StyleDef const* style = nullptr) {
     auto popover = std::make_shared<Popover>();
     auto inner = ctx;
     if (windowTheme) inner.appearance.clear();
     if (auto inherited = PresenterTheme(L"FlyoutPresenter", inner.appearance)) popover->flyout.FlyoutPresenterStyle(inherited);
+    // Without a color of its own the bubble is the platform's in-app
+    // acrylic, blurring the window's content under it (a video): it stays
+    // inside the window, as a popup window of its own would show only the
+    // acrylic's fallback color.
+    bool material = !(style && style->base.background);
+    if (material) popover->flyout.ShouldConstrainToRootBounds(true);
     std::weak_ptr<Popover> weak = popover;
-    auto apply = [weak, ctx, inner, windowTheme, style] {
+    auto apply = [weak, ctx, inner, windowTheme, style, material] {
         auto popover = weak.lock();
-        if (!popover || (!windowTheme && !style)) return;
+        if (!popover || (!windowTheme && !style && !material)) return;
         bool dark = inner.appearance.empty() ? IsDark(ctx.win->root) : inner.appearance == "dark";
         auto theme = dark ? xaml::ElementTheme::Dark : xaml::ElementTheme::Light;
         auto look = xaml::Markup::XamlReader::Load(LR"(<Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="FlyoutPresenter" />)").as<xaml::Style>();
+        // The platform's material (acrylic) in the bubble's own appearance:
+        // the default style would take it from the window's.
+        if (auto themed = PresenterTheme(L"FlyoutPresenter", dark ? "dark" : "light")) look.BasedOn(themed);
         look.Setters().Append(xaml::Setter(xaml::FrameworkElement::RequestedThemeProperty(), winrt::box_value(theme)));
         if (style && style->base.background) look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), media::SolidColorBrush(ColorOf(ctx.win, dark, *style->base.background))));
+        else if (auto acrylic = InAppAcrylic(dark)) look.Setters().Append(xaml::Setter(controls::Control::BackgroundProperty(), acrylic));
         if (style && style->base.foreground) look.Setters().Append(xaml::Setter(controls::Control::ForegroundProperty(), media::SolidColorBrush(ColorOf(ctx.win, dark, *style->base.foreground))));
         popover->flyout.FlyoutPresenterStyle(look);
         if (popover->content) {

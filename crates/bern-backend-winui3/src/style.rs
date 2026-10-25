@@ -48,10 +48,11 @@ pub const SUPPORT: &[StyleSupport] = &[
         states: &[],
     },
     // A stack's surface: its background, the color of text and icons in
-    // it, and corners that clip its layers.
+    // it, corners that clip its layers, and the shadow its texts, icons,
+    // pictures and shapes cast.
     StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "corner"],
+        base: &["background", "foreground", "corner", "shadow"],
         states: &[],
     },
     StyleSupport {

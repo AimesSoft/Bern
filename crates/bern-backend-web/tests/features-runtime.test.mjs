@@ -306,6 +306,27 @@ test("template images derive their missing side from the source aspect ratio", (
   assert.match(css, /\.bern-image-template\s*\{[^}]*background:\s*currentColor/);
 });
 
+test("pictures with a dark one show it where they are dark, once laid out", () => {
+  const { B, F, Element, resizeObservers } = runtime();
+  const root = new Element("root");
+  const scope = new B.Scope();
+  B.within(scope, () => F.Image(root, {}, { source: "logo.png", darkSource: "logo.dark.png", width: 24, height: 24 }));
+  const image = root.childNodes[0];
+  // Its appearance is not known before it is laid out in the page.
+  assert.equal(image.src, undefined);
+  const observer = resizeObservers.find((one) => one.targets.has(image));
+  observer.callback([]);
+  assert.match(image.src, /logo\.png$/);
+  image.style.colorScheme = "dark";
+  F.themeTick.set(F.themeTick.peek() + 1);
+  assert.match(image.src, /logo\.dark\.png$/);
+  image.style.colorScheme = "light";
+  F.themeTick.set(F.themeTick.peek() + 1);
+  assert.match(image.src, /logo\.png$/);
+  scope.dispose();
+  assert.equal(observer.disconnected, true);
+});
+
 test("content capsules are the standard button and keep their children", () => {
   const { B, F, Element } = runtime();
   const root = new Element("root");

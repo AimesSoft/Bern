@@ -61,15 +61,18 @@ impl KernelHub for MediaHub {
 pub enum SurfaceKind {
     /// A `CAMetalLayer`: macOS, iOS and tvOS.
     MetalLayer,
+    /// A XAML `SwapChainPanel`: Windows.
+    SwapChainPanel,
 }
 
 impl SurfaceKind {
-    pub const ALL: &[SurfaceKind] = &[SurfaceKind::MetalLayer];
+    pub const ALL: &[SurfaceKind] = &[SurfaceKind::MetalLayer, SurfaceKind::SwapChainPanel];
 
     /// Code of the kind in the C ABI.
     pub fn code(self) -> u32 {
         match self {
             SurfaceKind::MetalLayer => 0,
+            SurfaceKind::SwapChainPanel => 1,
         }
     }
 
@@ -86,12 +89,20 @@ pub enum SurfaceHandle {
     /// attaching it but its frame and corner; the kernel sets its drawable
     /// size, pixel format and colour space.
     MetalLayer(u64),
+    /// The address of the panel's `ISwapChainPanelNative`: `IUnknown`,
+    /// then `SetSwapChain(IDXGISwapChain*)`. The kernel draws into a swap
+    /// chain of its own, created for composition, and gives it to the panel
+    /// whenever it makes a new one, from any thread; the view shows it from
+    /// the UI thread. The panel is as many pixels as the surface's size, so
+    /// each pixel of the swap chain is one on screen.
+    SwapChainPanel(u64),
 }
 
 impl SurfaceHandle {
     pub fn kind(self) -> SurfaceKind {
         match self {
             SurfaceHandle::MetalLayer(_) => SurfaceKind::MetalLayer,
+            SurfaceHandle::SwapChainPanel(_) => SurfaceKind::SwapChainPanel,
         }
     }
 }
@@ -142,7 +153,8 @@ pub struct VideoSurface {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameTiming {
     /// When the frame clock fired, in seconds of the host's monotonic clock
-    /// (`CACurrentMediaTime` on Apple platforms).
+    /// (`CACurrentMediaTime` on Apple platforms, the performance counter on
+    /// Windows).
     pub now: f64,
     /// When the frame being prepared will be on screen, same clock.
     pub target: f64,

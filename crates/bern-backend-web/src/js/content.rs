@@ -88,6 +88,7 @@ impl Generator<'_> {
             "F.Image(p, ctx, {});",
             Self::props(vec![
                 ("source", element.resource("source").map(string)),
+                ("darkSource", element.resource("dark_source").map(string)),
                 ("url", url),
                 ("label", self.text_prop(element, "label")),
                 ("width", self.length(element, "width")),

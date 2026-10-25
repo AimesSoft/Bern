@@ -87,6 +87,11 @@ void bern_media_release(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_media_view(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_media_complete(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_media_event(BernApp* app, uint8_t const* bytes, size_t len);
+BernBuffer bern_media_kernel_attach(BernApp* app, uint8_t const* bytes, size_t len);
+void bern_media_surface_attach(BernApp* app, uint8_t const* bytes, size_t len);
+void bern_media_surface_resize(BernApp* app, uint8_t const* bytes, size_t len);
+void bern_media_surface_detach(BernApp* app, uint8_t const* bytes, size_t len);
+void bern_media_surface_frame(BernApp* app, uint8_t const* view, size_t len, double now, double target);
 void bern_buffer_free(BernBuffer buffer);
 
 /// An HDR picture decoded by Rust: RGBA rows in linear scRGB with straight
@@ -607,7 +612,9 @@ inline std::string engineId;
 
 // ---------------------------------------------------------------------------
 // The media executor: a Media Foundation media engine per player and
-// source, reporting what it does as observations, never as commands.
+// source, reporting what it does as observations, never as commands. When
+// the application installed a media kernel of its own, the kernel executes
+// every player instead and video views give it SwapChainPanels to draw in.
 
 /// The standard media commands declarations use on players, by their index
 /// in the media catalog.
@@ -639,8 +646,30 @@ struct PlayerState {
 };
 
 namespace Media {
+/// Let the application's media kernel execute every player when it can
+/// draw into a SwapChainPanel, or else attach the Media Foundation engine.
 void AttachExecutor();
 void DetachExecutor();
+/// The application's media kernel executes the players: video views give
+/// it surfaces (`Attach`) instead of showing the media engines' frames.
+bool Kernel();
+/// A kernel surface's size on screen: physical pixels, at least 1 each,
+/// and pixels per DIP.
+struct SurfaceSize {
+    uint32_t width = 1, height = 1;
+    double scale = 1;
+    bool operator==(SurfaceSize const&) const = default;
+};
+/// Give the kernel the panel `native` (its `ISwapChainPanelNative`, which
+/// the caller keeps alive until `Detach` returns) to show `player` in, with
+/// `fit` (0 contain, 1 cover, 2 fill); the hub counts the view, and the
+/// frame clock gives it a frame per composition of the desktop. Returns
+/// the view token.
+std::string Attach(::IUnknown* native, SurfaceSize size, uint32_t fit, std::string const& player, std::string const& window);
+void Resize(std::string const& token, SurfaceSize size);
+/// Stop the frames and take the surface back: when this returns the
+/// kernel no longer draws into the panel.
+void Detach(std::string const& token);
 void ReceiveState(Bytes const& bytes);
 void Request(Bytes const& bytes);
 /// What a view of a player shows: the swap chain the player's media engine
@@ -679,8 +708,9 @@ namespace Dev {
 std::optional<std::wstring> SnapshotDirectory();
 /// `BERN_APPEARANCE`: "light", "dark" or empty.
 std::string Appearance();
-/// Encode BGRA pixels as a PNG at `path`, on the theme's base color.
-winrt::fire_and_forget SavePng(Bytes pixels, int32_t width, int32_t height, double dpi, std::wstring path, bool dark);
+/// Encode BGRA pixels as a PNG at `path`, on the theme's base color, on a
+/// background thread; `opaque` pixels (a capture of the screen) keep theirs.
+winrt::fire_and_forget SavePng(Bytes pixels, int32_t width, int32_t height, double dpi, std::wstring path, bool dark, bool opaque = false);
 }
 
 }

@@ -790,21 +790,61 @@ fn add_layout_features(app: &mut bern_ir::Application) {
                     ("cell_ratio", number(0.667)),
                     ("cell_extra", number(20.0)),
                 ],
-                vec![node(
-                    "Image",
-                    vec![
-                        (
-                            "source",
-                            bern_ir::Prop::Resource {
-                                name: "images/bern.png".into(),
-                            },
-                        ),
-                        ("corner", number(8.0)),
-                        ("rendering", word("template")),
-                        ("aspect", number(1.5)),
-                    ],
-                    vec![],
-                )],
+                vec![
+                    node(
+                        "Image",
+                        vec![
+                            (
+                                "source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern.png".into(),
+                                },
+                            ),
+                            ("corner", number(8.0)),
+                            ("rendering", word("template")),
+                            ("aspect", number(1.5)),
+                        ],
+                        vec![],
+                    ),
+                    // A picture lowered from an SVG with colors per
+                    // appearance: one for the dark one beside it.
+                    node(
+                        "Image",
+                        vec![
+                            (
+                                "source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern.png".into(),
+                                },
+                            ),
+                            (
+                                "dark_source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern-dark.png".into(),
+                                },
+                            ),
+                            ("width", number(24.0)),
+                            ("height", number(24.0)),
+                        ],
+                        vec![],
+                    ),
+                    // Flying, it is drawn larger than its size on the way.
+                    node(
+                        "Image",
+                        vec![
+                            (
+                                "source",
+                                bern_ir::Prop::Resource {
+                                    name: "images/bern.png".into(),
+                                },
+                            ),
+                            ("width", number(48.0)),
+                            ("height", number(27.0)),
+                            ("hero", word("still")),
+                        ],
+                        vec![],
+                    ),
+                ],
             ),
             node(
                 "Row",
@@ -938,6 +978,8 @@ fn layout_features_generate_for_winui3() {
         ".iconOnly = true}",
         ".rowGap = B::Len(6.0), .cellRatio = 0.667, .cellExtra = B::Len(20.0)}",
         ".corner = B::Len(8.0), .templated = true, .aspect = 1.5}",
+        "B::Image(p, c, {.source = \"images/bern.png\", .darkSource = \"images/bern-dark.png\", .width = B::Len(24.0), .height = B::Len(24.0)});",
+        "B::Image(p, c, {.source = \"images/bern.png\", .width = B::Len(48.0), .height = B::Len(27.0), .flies = true});",
         ".align = \"baseline\"",
         "B::MenuLook{.iconOnly = true, .shape = B::ControlShape{.capsule = true, .height = B::Len(30.0)}}",
         "B::ControlGroup(p, c, {.height = B::Len(32.0)}, ",

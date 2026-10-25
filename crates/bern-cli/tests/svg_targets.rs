@@ -222,3 +222,150 @@ fn tvos_compiles_svg_to_png_and_selects_boa() {
         std::fs::write(path, file.contents).unwrap();
     }
 }
+
+#[test]
+fn svgs_that_neither_move_nor_run_are_pictures() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let config =
+        bern_compiler::config::load(&root.join("examples/svg-animation/Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    let target = |platform: &str| bern_target_api::TargetConfig {
+        platform: platform.into(),
+        ..Default::default()
+    };
+    let platforms = ["windows", "macos", "android", "linux", "browser"];
+    // The example's document animates: it stays a document.
+    assert!(
+        compiled
+            .app
+            .resources
+            .iter()
+            .all(|resource| resource.picture.is_none())
+    );
+    for platform in platforms {
+        let app = bern_target_api::svg::prepare(&compiled.app, &target(platform));
+        assert!(bern_target_api::svg::used(&app), "{platform}");
+    }
+    // A still one, one in the text's color, or one with colors per
+    // appearance is a picture of it everywhere: no document engine.
+    for (picture, rendering, dark) in [
+        (bern_ir::SvgPicture::Still, None, None),
+        (bern_ir::SvgPicture::Tinted, Some("template"), None),
+        (
+            bern_ir::SvgPicture::Themed,
+            None,
+            Some("__bern_static_svg/animation.svg.dark.png"),
+        ),
+    ] {
+        let mut still = compiled.app.clone();
+        for resource in &mut still.resources {
+            resource.picture = Some(picture);
+        }
+        for platform in platforms {
+            let app = bern_target_api::svg::prepare(&still, &target(platform));
+            assert!(!bern_target_api::svg::used(&app), "{platform}");
+            for name in ["__bern_static_svg/animation.svg.png"]
+                .into_iter()
+                .chain(dark)
+            {
+                assert!(
+                    app.resources.iter().any(|resource| resource.name == name),
+                    "{platform}: {name}"
+                );
+            }
+            let mut images = Vec::new();
+            let mut look = |node: &bern_ir::Node| {
+                if let bern_ir::Node::Element(e) = node
+                    && e.kind == "Image"
+                {
+                    images.push((
+                        e.keyword("rendering").map(str::to_string),
+                        e.resource("dark_source").map(str::to_string),
+                    ));
+                }
+            };
+            for window in &app.windows.windows {
+                window.content.walk(&mut look);
+            }
+            for component in &app.components {
+                component.body.walk(&mut look);
+            }
+            assert!(!images.is_empty(), "{platform}");
+            assert!(
+                images
+                    .iter()
+                    .all(|(r, d)| r.as_deref() == rendering && d.as_deref() == dark),
+                "{platform}: {images:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn svgs_with_colors_per_appearance_are_drawn_in_each() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()
+        .unwrap();
+    let config =
+        bern_compiler::config::load(&root.join("examples/svg-animation/Bern.toml")).unwrap();
+    let compiled = bern_compiler::compile(&config).unwrap();
+    // The example's resource, as a document black in the light appearance
+    // and white in the dark one.
+    let dir = root.join("target/svg-generation-test/themed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let svg = concat!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4">"#,
+        r#"<style>rect{fill:#000}@media (prefers-color-scheme: dark){rect{fill:#fff}}</style>"#,
+        r#"<rect width="4" height="4"/></svg>"#,
+    );
+    std::fs::write(dir.join("animation.svg"), svg).unwrap();
+    assert_eq!(bern_svg::picture(svg), Some(bern_svg::Picture::Themed));
+    let mut themed = compiled.app.clone();
+    for resource in &mut themed.resources {
+        resource.picture = Some(bern_ir::SvgPicture::Themed);
+    }
+    let context = BuildContext {
+        project_dir: dir.clone(),
+        workspace_dir: root.clone(),
+        output_dir: dir.join("out"),
+        target: bern_target_api::TargetConfig {
+            platform: "macos".into(),
+            ..Default::default()
+        },
+        protocol_package: config.protocol_package.name.clone(),
+        protocol_path: config.protocol_package.dir.clone(),
+        protocol_module: compiled.protocol_module.clone(),
+        engine_package: config.engine_package.name.clone(),
+        engine_path: config.engine_package.dir.clone(),
+        engine_type: config.engine_type.clone(),
+        modules: Vec::new(),
+        framework: Framework::Path(root.join("crates")),
+        release: false,
+    };
+    let app = bern_target_api::svg::prepare(&themed, &context.target);
+    let files = bern_target_api::svg::static_files(&app, &context).unwrap();
+    let first_pixel = |name: &str| {
+        let file = files
+            .iter()
+            .find(|file| file.path == Path::new(name))
+            .unwrap_or_else(|| panic!("{name}"));
+        let mut reader = png::Decoder::new(std::io::Cursor::new(&file.contents))
+            .read_info()
+            .unwrap();
+        let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
+        reader.next_frame(&mut pixels).unwrap();
+        pixels[..4].to_vec()
+    };
+    assert_eq!(
+        first_pixel("__bern_static_svg/animation.svg.png"),
+        [0, 0, 0, 255]
+    );
+    assert_eq!(
+        first_pixel("__bern_static_svg/animation.svg.dark.png"),
+        [255, 255, 255, 255]
+    );
+}

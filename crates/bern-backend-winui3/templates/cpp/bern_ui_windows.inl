@@ -1743,8 +1743,7 @@ inline void CaptureWindow(HWND hwnd, std::wstring path, double dpi) {
         // PW_RENDERFULLCONTENT: composed content, XAML included.
         if (PrintWindow(hwnd, dc, 2)) {
             Bytes pixels(static_cast<uint8_t*>(bits), static_cast<uint8_t*>(bits) + static_cast<size_t>(width) * height * 4);
-            for (size_t i = 3; i < pixels.size(); i += 4) pixels[i] = 255;
-            Dev::SavePng(std::move(pixels), width, height, dpi, std::move(path), false);
+            Dev::SavePng(std::move(pixels), width, height, dpi, std::move(path), false, true);
         }
         SelectObject(dc, previous);
         DeleteObject(bitmap);
@@ -1847,15 +1846,31 @@ inline void Burst() {
     }
 }
 
+/// The last change, and the first one since the last snapshot.
+inline std::chrono::steady_clock::time_point changed{}, waiting{};
+
+/// Capture once the windows have stood still for 700 ms, and every 5 s
+/// while they keep changing (a playing video's time): each capture renders
+/// a whole window on the UI thread.
+inline void Settle() {
+    auto now = std::chrono::steady_clock::now();
+    auto still = std::chrono::duration_cast<std::chrono::milliseconds>(now - changed);
+    if (still < std::chrono::milliseconds(700) && now - waiting < std::chrono::seconds(5)) {
+        Host::After(std::chrono::milliseconds(700) - still, Settle);
+        return;
+    }
+    queued = false;
+    CaptureAll();
+}
+
 inline void Schedule() {
     if (!Dev::SnapshotDirectory()) return;
     Burst();
+    changed = std::chrono::steady_clock::now();
     if (queued) return;
     queued = true;
-    Host::After(std::chrono::milliseconds(700), [] {
-        queued = false;
-        CaptureAll();
-    });
+    waiting = changed;
+    Host::After(std::chrono::milliseconds(700), Settle);
 }
 
 }
@@ -1909,6 +1924,8 @@ inline bool Launch(xaml::ResourceDictionary const& resources) {
         return false;
     }
     Media::AttachExecutor();
+    // `BERN_FRAME_RATE`: XAML's frame rate counters over every window.
+    if (GetEnvironmentVariableW(L"BERN_FRAME_RATE", nullptr, 0) != 0) xaml::Application::Current().DebugSettings().EnableFrameRateCounter(true);
     WindowManager::OpenInitial();
     return true;
 }

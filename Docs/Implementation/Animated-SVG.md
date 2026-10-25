@@ -2,6 +2,10 @@
 
 Bern 内置 `bern-svg` 文档运行时和 `Svg` 组件。它保留 SVG 原文件的矢量图形、CSS 关键帧、SMIL、渐变、滤镜、蒙版、文字和文档内 JavaScript。支持 WebView 的目标由平台的 SVG/DOM 引擎渲染；无 WebView 的目标在构建时转成静态 PNG。
 
+文档引擎很重（每个 `Svg` 一个 WebView 及其进程与内存），只给真正会动或运行代码的文档用（2026-10-26）。编译器读取每个声明的 SVG 资源（`bern_svg::picture`）：没有 SMIL 或 CSS 动画、过渡、指针状态、脚本、链接、内嵌网页与媒体的文档是一张图，在所有目标都于构建时画成 PNG，`Svg` 降低成 `Image`，不启动文档引擎；只用 `currentColor`、不用其他颜色的画成模板图片（`rendering: template`），跟随周围文字的颜色。按明暗换色的（`@media (prefers-color-scheme: dark|light)` 规则、`light-dark()`）画成两张：resvg 不认这两样，构建时先把文档展开成各自外观的样子（`bern_svg::in_appearance`：这个外观的规则直接生效，另一个外观的删掉，`light-dark(浅, 深)` 换成对应的值），浅色一张 `<文件>.png`，深色一张 `<文件>.dark.png`；`Image` 多一个内部属性 `dark_source` 指向深色那张，前端按控件实际的外观显示（系统的、应用 `WindowSet(appearance:)` 强制的、部件 `appearance:` 固定的都算），外观变化时跟着换（2026-10-26）。仍用文档引擎的只剩：外观以外的媒体查询、CSS 变量，以及 `currentColor` 与其他颜色或与明暗规则并用的。
+
+各前端取外观的方式：SwiftUI 读环境的 `colorScheme`；WinUI 3 与 XAML Islands 读画框的 `ActualTheme`（放进界面树之前不知道，`Loaded` 与 `ActualThemeChanged` 时选图）；Compose 用 `bernDark()`；GTK 用 `theme::part_of`（所在部件的外观，不在部件里就是窗口的），映射到窗口后和外观变化时重新选；Web 在图片排进页面后（`ResizeObserver` 第一次回调）按 `getComputedStyle(…).colorScheme` 选，主题变化（`themeTick`）时再选。
+
 ```rust
 Svg(
     source: "assets/logo.svg",
@@ -50,7 +54,7 @@ Svg(
 
 SVG 是打包的、自包含的应用资源：图片／字体请嵌入为 data URI，样式和脚本放在文件内。文档不暴露 Bern 引擎、原生命令或宿主 DOM；CSP 限制外部子资源和网络请求，运行时阻止链接点击，原生宿主限制导航和弹窗。Web 的 iframe 使用独立源的 `sandbox="allow-scripts"`，但这不能禁止脚本导航其自身文档，因此只接受应用自己提供的 SVG，不作为不可信脚本的通用沙箱。
 
-Android、Windows 和 Linux 需要表中对应的 WebView 运行环境。发行目标不提供 WebView 时，在对应 `[targets.*]` 配置 `webview = false`，构建会转换 SVG；Linux 的 WebKitGTK 是启用 `svg` 特性后的动态链接依赖，需要随系统安装。WebKitGTK 的网页进程沙箱（bwrap）需要建立用户命名空间：Ubuntu 24.04 起默认只允许带 AppArmor 配置的程序这样做，没有配置时 WebKitGTK 中止整个应用。用到 `Svg` 时，Bern 的 `.deb` 附带这份配置（`/etc/apparmor.d/<bundle_id>`，与 Ubuntu 为 epiphany 等 WebKitGTK 应用提供的相同：不另加限制，只允许 `userns`），并在 AppArmor 启用时安装后立即载入；`.tar.gz` 与开发构建需要手动添加，见 [Linux GTK 实现记录](Linux-GTK.md)“打包”。Windows 两种前端都用 WebView2 的 Win32 呈现器：WinUI 3 的 `WebView2` 控件在透明页面下面垫一层主题底色（浅色主题下是白色，微软文档也写明它不支持透明背景），所以不用它。呈现器是窗口之上的子 HWND，按占位区域在布局后逐帧跟随位置与缩放（直到半秒不动），按外层滚动视图裁剪；它不随祖先的其他裁剪、透明度变化，也总在其他 XAML 图层（如浮层菜单）之上。WebView2 的缓存在用户临时目录（`BernSvgWebView2`），不在可执行文件旁边。
+Android、Windows 和 Linux 需要表中对应的 WebView 运行环境。发行目标不提供 WebView 时，在对应 `[targets.*]` 配置 `webview = false`，构建会转换 SVG；Linux 的 WebKitGTK 是启用 `svg` 特性后的动态链接依赖，需要随系统安装。WebKitGTK 的网页进程沙箱（bwrap）需要建立用户命名空间：Ubuntu 24.04 起默认只允许带 AppArmor 配置的程序这样做，没有配置时 WebKitGTK 中止整个应用。用到 `Svg` 时，Bern 的 `.deb` 附带这份配置（`/etc/apparmor.d/<bundle_id>`，与 Ubuntu 为 epiphany 等 WebKitGTK 应用提供的相同：不另加限制，只允许 `userns`），并在 AppArmor 启用时安装后立即载入；`.tar.gz` 与开发构建需要手动添加，见 [Linux GTK 实现记录](Linux-GTK.md)“打包”。Windows 两种前端都用 WebView2 的 Win32 呈现器：WinUI 3 的 `WebView2` 控件在透明页面下面垫一层主题底色（浅色主题下是白色，微软文档也写明它不支持透明背景），所以不用它。呈现器是窗口之上的子 HWND，按占位区域在布局后逐帧跟随位置与缩放（直到半秒不动），按外层滚动视图裁剪；它不随祖先的其他裁剪、透明度变化，也总在其他 XAML 图层（如浮层菜单、盖在上面的页面）之上；所以静止的 SVG 不走它，而是 XAML 图片，与其他内容一样被上层盖住。WebView2 的缓存在用户临时目录（`BernSvgWebView2`），不在可执行文件旁边。
 
 ## 验证
 
@@ -83,6 +87,6 @@ cd examples/svg-animation
 
 `window.webview` 是目标能力常量，Bern 在检查和生成前裁剪条件分支、无用组件，并折叠属性中的条件表达式。tvOS 固定关闭；macOS、iOS、Android、Windows、Linux 默认开启，也可通过 `webview = false` 生成无 WebView 发行版。Web 使用浏览器能力。
 
-无 WebView 时，`Svg` 自动降低成 `Image`，保留尺寸、fit 和辅助名称，移除播放、倍速、重播与互动属性。PNG 在构建目录的 `__bern_static_svg/` 生成并随资源打包；resvg 只链接到构建工具。默认按固有尺寸两倍输出，每条边上限 4096 像素。
+无 WebView 时（以及上面不动也不运行代码的文档在任何目标），`Svg` 降低成 `Image`，保留尺寸、fit 和辅助名称，移除播放、倍速、重播、互动、数据与外部链接属性。PNG 在构建目录的 `__bern_static_svg/` 生成并随资源打包；resvg 只链接到构建工具。按它声明的最大显示边长出图：每点 6 像素（3 倍屏再双采样），例如 46 点的头像是 276 像素；没有写死尺寸的按固有尺寸两倍。每条边上限 4096 像素。图片显示时要双采样：按所占物理像素的两倍解码或绘制，再缩到一半。尺寸写死的声明图片（给出的边都是数字、不飞行，`bern_target_api::svg::one_size`）在各前端都这样做，而不是让合成器从大得多的图直接缩，否则边缘会断裂成锯齿：Windows 在线程池按显示尺寸乘窗口缩放的两倍解码（`BitmapDecoder` 加 Fant 滤镜的 `BitmapTransform`，放进 `SoftwareBitmapSource`），由合成器缩到一半，文件来的图片也这样；SwiftUI 按环境的 `displayScale` 算出所占像素，用 ImageIO 的缩略图解成两倍（`kCGImageSourceThumbnailMaxPixelSize`），每个尺寸单独缓存；Compose 先按 2 的幂整数倍抽样解码到不小于两倍，再用 `Bitmap.createScaledBitmap`（双线性）缩到正好两倍，GPU 画时再减半；GTK 映射到窗口后按表面的缩放（`GdkSurface::scale`，含分数缩放）算像素，用 gdk-pixbuf 按面积平均缩到两倍，缩放变化时重解；Web 交给浏览器自己的缩图滤镜，不另做。GTK 与 Windows 的 HDR 图片走各自的 HDR 绘制，不做这一步；SwiftUI 的缩略图照样按 HDR 解码。
 
 `static_source` 用来指定动画完成后的画面，尤其适合入场动画和由脚本生成图形的 SVG；构建器不执行动画脚本来寻找最终帧。该文件也应列入 `[resources].paths`。一个实际应用的 Logo 使用最终矢量稿，因此无 WebView 的版本直接显示完整 Logo。

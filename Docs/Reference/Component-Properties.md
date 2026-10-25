@@ -187,7 +187,7 @@
 ## 浮层状态与消息输入
 
 
-`PopoverButton(panel_appearance: window)` 的气泡跟随窗口（应用明暗选择或系统），触发按钮仍保留所在区域的外观。省略时继承所在区域；气泡打开期间也响应明暗变化。`panel_appearance: surface` 根据当前平台样式选择：指定背景色时跟随窗口，原生材质气泡继承所在区域，以便视频上方的玻璃气泡保持深色和浅色文字。macOS 未指定背景色时保留系统气泡材质（支持的系统上为 Liquid Glass）。所有目标都支持 `style! { PopoverButton { background: color(light: "#F2F2F2", dark: "#1E1E1E"), foreground: text.primary } }`，颜色作用于完整气泡表面及内容，不作用于触发按钮。
+`PopoverButton(panel_appearance: window)` 的气泡跟随窗口（应用明暗选择或系统），触发按钮仍保留所在区域的外观。省略时继承所在区域；气泡打开期间也响应明暗变化。`panel_appearance: surface` 根据当前平台样式选择：指定背景色时跟随窗口，原生材质气泡继承所在区域，以便视频上方的玻璃气泡保持深色和浅色文字。macOS 未指定背景色时保留系统气泡材质（支持的系统上为 Liquid Glass）。Windows 未指定背景色时是系统的应用内亚克力，同样继承所在区域的明暗，并限制在窗口内。所有目标都支持 `style! { PopoverButton { background: color(light: "#F2F2F2", dark: "#1E1E1E"), foreground: text.primary } }`，颜色作用于完整气泡表面及内容，不作用于触发按钮。
 
 `PopoverButton(open: app.panel) { … } => app.set_panel(app.panel)` 将动作中相同的状态表达式替换为新的开关值；打开、点击外部收起和 Escape 关闭都走这个动作。省略 `open` 时可继续使用 `presented: draft.panel`，或让组件自行保存状态。
 

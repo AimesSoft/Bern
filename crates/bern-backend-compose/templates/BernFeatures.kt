@@ -873,6 +873,29 @@ object BernPictures {
         return ratio.takeIf { it > 0f }
     }
 
+    /// Where the double-sampled picture at `url` drawn `wide` × `tall` is kept.
+    fun twiceKey(url: String, wide: Int, tall: Int): String = "$url#$wide×$tall"
+
+    /// The picture at `url` drawn `wide` × `tall` pixels (0 for a side that
+    /// follows the other) as `fit` places it, double-sampled: read at twice
+    /// the pixels it covers, which the GPU halves when it draws it. Squeezed
+    /// down from a much larger picture by the GPU alone, its edges would
+    /// break up. Each size is kept apart.
+    suspend fun twice(context: Context, url: String, wide: Int, tall: Int, fit: ContentScale): Picture? {
+        val key = twiceKey(url, wide, tall)
+        kept.get(key)?.let { return it }
+        val app = context.applicationContext
+        val read = reading[key] ?: scope.async {
+            runCatching { decode(app, url, wide, tall, keep = false, twice = fit) }.getOrNull()
+        }.also { read ->
+            reading[key] = read
+            read.invokeOnCompletion { reading.remove(key, read) }
+        }
+        val picture = read.await() ?: return null
+        kept.put(key, picture)
+        return picture
+    }
+
     /// Whether `picture` has the pixels to be drawn `wide` × `tall` (0 for
     /// a side that follows the other).
     fun enough(picture: Picture, wide: Int, tall: Int): Boolean =
@@ -935,9 +958,33 @@ object BernPictures {
         return ((red / count) shl 16) or ((green / count) shl 8) or (blue / count)
     }
 
+    /// Twice the pixels a `width` × `height` picture covers drawn in a
+    /// `wide` × `tall` frame as `fit` places it; null when it has no more.
+    private fun twiceCovered(width: Int, height: Int, wide: Int, tall: Int, fit: ContentScale): Pair<Int, Int>? {
+        val w = width.toFloat()
+        val h = height.toFloat()
+        val (shownWide, shownTall) = when {
+            wide > 0 && tall > 0 -> when (fit) {
+                ContentScale.FillBounds -> wide.toFloat() to tall.toFloat()
+                else -> {
+                    val scale = if (fit == ContentScale.Crop) maxOf(wide / w, tall / h) else minOf(wide / w, tall / h)
+                    w * scale to h * scale
+                }
+            }
+            wide > 0 -> wide.toFloat() to wide * h / w
+            tall > 0 -> tall * w / h to tall.toFloat()
+            else -> return null
+        }
+        val factor = maxOf(2 * shownWide / w, 2 * shownTall / h)
+        if (factor >= 1f) return null
+        return maxOf(1, kotlin.math.ceil(w * factor).toInt()) to maxOf(1, kotlin.math.ceil(h * factor).toInt())
+    }
+
     /// Reads the size first, then the pixels at the sample that covers
-    /// `wide` × `tall`; a download is fetched once for both.
-    private fun decode(context: Context, url: String, wide: Int, tall: Int, keep: Boolean): Picture? {
+    /// `wide` × `tall`; a download is fetched once for both. With `twice`,
+    /// the fit of a double-sampled picture, at exactly twice the pixels it
+    /// covers: the sample that covers that, drawn down to it.
+    private fun decode(context: Context, url: String, wide: Int, tall: Int, keep: Boolean, twice: ContentScale? = null): Picture? {
         val uri = Uri.parse(url)
         val scheme = uri.scheme?.lowercase()
         val bytes = when (scheme) {
@@ -956,8 +1003,12 @@ object BernPictures {
         val height = bounds.outHeight
         if (width <= 0 || height <= 0) return null
         ratios[url] = width.toFloat() / height
-        val sample = sample(width, height, wide, tall)
-        val bitmap = pixels(BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        val target = twice?.let { twiceCovered(width, height, wide, tall, it) }
+        val sample = if (target != null) sample(width, height, target.first, target.second) else sample(width, height, wide, tall)
+        var bitmap = pixels(BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        if (target != null && (bitmap.width > target.first || bitmap.height > target.second)) {
+            bitmap = Bitmap.createScaledBitmap(bitmap, target.first, target.second, true)
+        }
         // Hands it to the GPU before it is first drawn.
         bitmap.prepareToDraw()
         val picture = Picture(bitmap.asImageBitmap(), width, height, sample)
@@ -985,34 +1036,41 @@ fun BernImageURL(
     template: Boolean = false,
     aspect: Float? = null,
     ratio: Float? = null,
+    twice: Boolean = false,
 ) {
-    var picture by remember(url) { mutableStateOf(url?.let(BernPictures::cached)) }
-    val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
     // A frame that fills its container's width is read at the width it
     // was laid out at.
     val fills = width == null && height == null
     var laid by remember { mutableIntStateOf(0) }
+    // The pixels it is drawn at; a side that follows the picture's own
+    // proportion does not count (0).
+    val density = LocalDensity.current
+    val px = { length: Dp -> with(density) { maxOf(1, length.roundToPx()) } }
+    val wide = when {
+        width != null -> px(width)
+        height == null -> laid
+        aspect != null -> px(height * aspect)
+        else -> 0
+    }
+    val tall = when {
+        height != null -> px(height)
+        aspect != null && wide > 0 -> maxOf(1, (wide / aspect).roundToInt())
+        else -> 0
+    }
+    // Double-sampled (`twice`), it is read for the size it is drawn at.
+    val key = if (twice && url != null) BernPictures.twiceKey(url, wide, tall) else url
+    var picture by remember(key) { mutableStateOf(key?.let(BernPictures::cached)) }
+    val proportion = aspect ?: picture?.ratio ?: ratio ?: url?.let(BernPictures::known)
     val frame = bernPictureFrame(width, height, proportion, corner)
     val modifier = if (fills) frame.onSizeChanged { laid = it.width } else frame
     if (url != null) {
-        // The pixels it is drawn at; a side that follows the picture's own
-        // proportion does not count (0).
-        val density = LocalDensity.current
-        val px = { length: Dp -> with(density) { maxOf(1, length.roundToPx()) } }
-        val wide = when {
-            width != null -> px(width)
-            height == null -> laid
-            aspect != null -> px(height * aspect)
-            else -> 0
-        }
-        val tall = when {
-            height != null -> px(height)
-            aspect != null && wide > 0 -> maxOf(1, (wide / aspect).roundToInt())
-            else -> 0
-        }
         val context = LocalContext.current
         LaunchedEffect(url, wide, tall) {
             if (fills && wide == 0) return@LaunchedEffect
+            if (twice) {
+                BernPictures.twice(context, url, wide, tall, fit)?.let { picture = it }
+                return@LaunchedEffect
+            }
             if (picture?.let { BernPictures.enough(it, wide, tall) } == true) return@LaunchedEffect
             BernPictures.read(context, url, wide, tall)?.let { picture = it }
         }

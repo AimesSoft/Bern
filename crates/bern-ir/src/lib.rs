@@ -318,6 +318,23 @@ pub struct ResourceDef {
     pub name: String,
     /// The `[resources]` entry that declared the file.
     pub declared: SourceLocation,
+    /// How an SVG document shows as a picture of it, with no document
+    /// engine; `None` for one that moves or runs, and for other files.
+    #[serde(default)]
+    pub picture: Option<SvgPicture>,
+}
+
+/// How an SVG document shows as a picture of it (`bern_svg::picture`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SvgPicture {
+    /// In its own colors.
+    Still,
+    /// In the color of the text around it, as a template.
+    Tinted,
+    /// In colors of its own for the light and for the dark appearance: a
+    /// picture of each.
+    Themed,
 }
 
 /// An application player from the `#[bern::players]` catalog. Its id is
