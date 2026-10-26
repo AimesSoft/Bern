@@ -247,8 +247,14 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
             .contains("\"caption\" to Pair(\"regular\", if (BernHost.television) 14.0 else null)")
     );
     // The details' keys follow state, and the user chooses them.
-    assert!(kotlin.contains("BernShortcut(BernEngine.detailsKey) {"), "{kotlin}");
-    assert!(kotlin.contains("BernShortcutInput(\"about.details_key\""), "{kotlin}");
+    assert!(
+        kotlin.contains("BernShortcut(BernEngine.detailsKey) {"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("BernShortcutInput(\"about.details_key\""),
+        "{kotlin}"
+    );
     // The remote's arrows move the focus before a shortcut takes them.
     assert!(kotlin.contains("if (BernHost.television && BernShortcuts.isArrow(event))"));
     // The about window's first tab shows only its symbol.

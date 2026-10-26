@@ -271,16 +271,24 @@ impl Generator<'_> {
     }
 
     pub(super) fn preview_list(&self, out: &mut Out, element: &Element) {
-        if let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
-            (element.expr("items"), &element.template, element.prop("key"))
-        {
-            self.children(out, &format!(
-                "b::PreviewList(p, c, {}, {field}, {}, {}f64, {}f64, {}f64, ",
-                self.getter(items), string(&template.var),
-                element.number("item_height").unwrap_or(1.0),
-                element.number("gap").unwrap_or(0.0),
-                element.number("more_height").unwrap_or(22.0),
-            ), &element.children, ");");
+        if let (Some(items), Some(template), Some(Prop::Key { field, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) {
+            self.children(
+                out,
+                &format!(
+                    "b::PreviewList(p, c, {}, {field}, {}, b::PreviewListProps {{ item_height: {}f64, gap: {}f64, more_height: {}f64 }}, ",
+                    self.getter(items),
+                    string(&template.var),
+                    element.number("item_height").unwrap_or(1.0),
+                    element.number("gap").unwrap_or(0.0),
+                    element.number("more_height").unwrap_or(22.0),
+                ),
+                &element.children,
+                ");",
+            );
         }
     }
 

@@ -8,7 +8,10 @@ fn preview_mounts_only_complete_rows_and_reserves_overflow() {
     let end = style.find("struct BernAccordionWeights:").unwrap();
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/bern-test/preview-list");
     fs::create_dir_all(&dir).unwrap();
-    let source = format!("import AppKit\nimport SwiftUI\n{}\n{}", &style[start..end], r#"
+    let source = format!(
+        "import AppKit\nimport SwiftUI\n{}\n{}",
+        &style[start..end],
+        r#"
 @MainActor @Observable final class Probe {
     var total = 1000
     var active: Set<Int> = []
@@ -64,13 +67,27 @@ struct Page: View {
         }
     }
 }
-"#);
+"#
+    );
     let file = dir.join("main.swift");
     let binary = dir.join("preview-list");
     fs::write(&file, source).unwrap();
-    let result = Command::new("xcrun").args(["swiftc", "-swift-version", "6", "-parse-as-library"])
-        .arg(&file).arg("-o").arg(&binary).output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    let result = Command::new("xcrun")
+        .args(["swiftc", "-swift-version", "6", "-parse-as-library"])
+        .arg(&file)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
     let result = Command::new(binary).output().unwrap();
-    assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
 }

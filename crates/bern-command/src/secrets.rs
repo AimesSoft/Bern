@@ -142,7 +142,8 @@ mod system {
 mod system {
     use super::*;
     pub fn read(_service: &str, name: &str) -> Result<Option<String>, CommandError> {
-        crate::platform::request("secret_read", name, "").map(|s| s.strip_prefix("value:").map(str::to_string))
+        crate::platform::request("secret_read", name, "")
+            .map(|s| s.strip_prefix("value:").map(str::to_string))
     }
     pub fn write(_service: &str, name: &str, value: &str) -> Result<(), CommandError> {
         crate::platform::request("secret_write", name, value).map(|_| ())

@@ -8,7 +8,11 @@ pub(crate) fn markup(source: &str) -> String {
     let mut out = String::new();
     let mut open: Vec<&'static str> = Vec::new();
     let mut at = 0;
-    let starts = |at: usize, mark: &str| mark.chars().enumerate().all(|(i, c)| chars.get(at + i) == Some(&c));
+    let starts = |at: usize, mark: &str| {
+        mark.chars()
+            .enumerate()
+            .all(|(i, c)| chars.get(at + i) == Some(&c))
+    };
     let find = |from: usize, mark: &str| (from..chars.len()).find(|&i| starts(i, mark));
     while at < chars.len() {
         let c = chars[at];
@@ -40,12 +44,20 @@ pub(crate) fn markup(source: &str) -> String {
             let code: String = chars[at + 1..end].iter().collect();
             out.push_str(&format!("<tt>{}</tt>", escape(&code)));
             at = end + 1;
-        } else if c == '[' && find(at, "](").and_then(|middle| find(middle + 2, ")")).is_some() {
+        } else if c == '['
+            && find(at, "](")
+                .and_then(|middle| find(middle + 2, ")"))
+                .is_some()
+        {
             let middle = find(at, "](").unwrap();
             let end = find(middle + 2, ")").unwrap();
             let words: String = chars[at + 1..middle].iter().collect();
             let address: String = chars[middle + 2..end].iter().collect();
-            out.push_str(&format!("<a href=\"{}\">{}</a>", escape(&address), markup(&words)));
+            out.push_str(&format!(
+                "<a href=\"{}\">{}</a>",
+                escape(&address),
+                markup(&words)
+            ));
             at = end + 1;
         } else {
             out.push_str(&escape(&c.to_string()));
@@ -72,8 +84,14 @@ mod tests {
 
     #[test]
     fn inline_markdown_becomes_markup() {
-        assert_eq!(markup("**a** *b* `c<d` ~~e~~"), "<b>a</b> <i>b</i> <tt>c&lt;d</tt> <s>e</s>");
-        assert_eq!(markup("[x](https://a.b?c=1&d=2)"), "<a href=\"https://a.b?c=1&amp;d=2\">x</a>");
+        assert_eq!(
+            markup("**a** *b* `c<d` ~~e~~"),
+            "<b>a</b> <i>b</i> <tt>c&lt;d</tt> <s>e</s>"
+        );
+        assert_eq!(
+            markup("[x](https://a.b?c=1&d=2)"),
+            "<a href=\"https://a.b?c=1&amp;d=2\">x</a>"
+        );
         assert_eq!(markup(r"2\*3 **open"), "2*3 <b>open</b>");
     }
 }

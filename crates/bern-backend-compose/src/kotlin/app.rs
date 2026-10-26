@@ -238,7 +238,9 @@ impl Generator<'_> {
         out.close("}");
         out.line("");
         out.line("/// A keyboard connecting or going away, for `window.keyboard`.");
-        out.open("override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {");
+        out.open(
+            "override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {",
+        );
         out.line("super.onConfigurationChanged(newConfig)");
         out.line("BernHost.readKeyboard(newConfig)");
         out.close("}");

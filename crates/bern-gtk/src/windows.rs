@@ -169,8 +169,12 @@ pub(crate) struct Win {
     next_shortcut: StdCell<u64>,
     /// The `ShortcutInput` waiting for a key: it takes every key meanwhile,
     /// and no shortcut runs.
-    pub(crate) recorder: RefCell<Option<Rc<dyn Fn(Option<String>)>>>,
+    pub(crate) recorder: RefCell<Option<Recorder>>,
 }
+
+/// What takes the next key a `ShortcutInput` records: its keys, or `None`
+/// when the recording is cancelled.
+pub(crate) type Recorder = Rc<dyn Fn(Option<String>)>;
 
 /// Where the mouse is, for `idle_area`s: not known after a touch or a pen,
 /// which do not rest over areas; outside the window; or at a point of the
@@ -215,9 +219,11 @@ impl KeySource {
     fn keys(&self) -> Option<Keys> {
         match self {
             KeySource::Fixed(keys) => Some(keys.clone()),
-            KeySource::Bound(text) => crate::protocol::shortcut::parse_shortcut(&untrack(|| text()))
-                .ok()
-                .map(|text| parse_keys(&text)),
+            KeySource::Bound(text) => {
+                crate::protocol::shortcut::parse_shortcut(&untrack(|| text()))
+                    .ok()
+                    .map(|text| parse_keys(&text))
+            }
         }
     }
 }
@@ -237,7 +243,11 @@ fn recorded(
         return Some(None);
     }
     let shift = state.contains(ModifierType::SHIFT_MASK);
-    let key = key_name(if shift { unshifted.unwrap_or(typed) } else { typed })?;
+    let key = key_name(if shift {
+        unshifted.unwrap_or(typed)
+    } else {
+        typed
+    })?;
     let mut parts = Vec::new();
     if state.contains(ModifierType::CONTROL_MASK) {
         parts.push("cmd");
@@ -1868,7 +1878,10 @@ mod tests {
             recorded(Key::Left, None, ModifierType::ALT_MASK),
             Some(Some("alt+left".into()))
         );
-        assert_eq!(recorded(Key::Escape, None, ModifierType::empty()), Some(None));
+        assert_eq!(
+            recorded(Key::Escape, None, ModifierType::empty()),
+            Some(None)
+        );
         assert_eq!(
             recorded(Key::BackSpace, None, ModifierType::empty()),
             Some(Some(String::new()))

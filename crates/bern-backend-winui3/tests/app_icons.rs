@@ -64,19 +64,6 @@ fn context(
     }
 }
 
-fn text<'a>(files: &'a [bern_target_api::GeneratedFile], suffix: &str) -> &'a str {
-    let file = files
-        .iter()
-        .find(|file| {
-            file.path
-                .to_string_lossy()
-                .replace('\\', "/")
-                .ends_with(suffix)
-        })
-        .unwrap_or_else(|| panic!("no generated `{suffix}`"));
-    std::str::from_utf8(&file.contents).unwrap()
-}
-
 fn has(files: &[bern_target_api::GeneratedFile], suffix: &str) -> bool {
     files.iter().any(|file| {
         file.path

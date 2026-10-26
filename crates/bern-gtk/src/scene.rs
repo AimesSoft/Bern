@@ -1269,7 +1269,11 @@ mod modal {
                     f64::from(height)
                 } else {
                     let wanted = h.unwrap_or_else(|| {
-                        f64::from(child.measure(gtk::Orientation::Vertical, side(card_width)).1)
+                        f64::from(
+                            child
+                                .measure(gtk::Orientation::Vertical, side(card_width))
+                                .1,
+                        )
                     });
                     wanted.min(f64::from(height) - 32.0).max(0.0)
                 };
@@ -1384,11 +1388,7 @@ pub fn Modal(_p: &Parent, ctx: &Ctx, props: ModalProps, children: Build) {
         });
     }
     let inside = ctx.outside_toolbar();
-    let inside = if fits {
-        inside.fitting()
-    } else {
-        inside
-    };
+    let inside = if fits { inside.fitting() } else { inside };
     children(&Parent::of_box(&card), &inside);
     let cards = Parent::of_children(&frame, false);
     let holder = card.clone();

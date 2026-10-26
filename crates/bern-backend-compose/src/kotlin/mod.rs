@@ -182,7 +182,10 @@ impl<'a> Generator<'a> {
             // The words that lead a row take the spacer's room: the row
             // measures the controls after them first, and the words wrap
             // in what is left instead of pushing them out.
-            if ctx.scope == Scope::Row && !ctx.baseline && bern_ir::leads_row(node, nodes.get(index + 1)) {
+            if ctx.scope == Scope::Row
+                && !ctx.baseline
+                && bern_ir::leads_row(node, nodes.get(index + 1))
+            {
                 out.open("Box(Modifier.weight(1f)) {");
                 self.node(out, node, &ctx.within(Scope::Other));
                 out.close("}");

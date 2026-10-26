@@ -612,9 +612,11 @@ impl Generator<'_> {
     }
 
     pub(super) fn preview_list(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
-            (element.expr("items"), &element.template, element.prop("key"))
-        {
+        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) {
             let var = member(&template.var);
             out.open(format!(
                 "BernPreviewList(items: {}, id: \\.{}, itemHeight: {}, gap: {}, moreHeight: {}) {{ {var} in",

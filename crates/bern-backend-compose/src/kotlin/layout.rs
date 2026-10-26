@@ -715,15 +715,19 @@ impl Generator<'_> {
     }
 
     pub(super) fn preview_list(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
-            (element.expr("items"), &element.template, element.prop("key"))
-        {
+        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) {
             let item = element.number("item_height").unwrap_or(1.0);
             let gap = element.number("gap").unwrap_or(0.0).max(0.0);
             let more = element.number("more_height").unwrap_or(22.0).max(0.0);
             let modifier = if ctx.scope == Scope::Column && !ctx.scroll_content {
                 "Modifier.fillMaxWidth().weight(1f)"
-            } else { "Modifier.fillMaxSize()" };
+            } else {
+                "Modifier.fillMaxSize()"
+            };
             let var = member(&template.var);
             out.open(format!("BoxWithConstraints({modifier}.clipToBounds()) {{"));
             out.line(format!("val previewItems = {}", self.expr(items)));
@@ -732,13 +736,22 @@ impl Generator<'_> {
             out.open(format!("Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy({gap}.dp), horizontalAlignment = Alignment.CenterHorizontally) {{"));
             out.open(format!("for ({var} in previewItems.take(previewCount)) {{"));
             out.open(format!("key(BernKey.of({var}.{})) {{", member(name)));
-            out.open(format!("Box(Modifier.height({item}.dp), contentAlignment = Alignment.TopCenter) {{"));
+            out.open(format!(
+                "Box(Modifier.height({item}.dp), contentAlignment = Alignment.TopCenter) {{"
+            ));
             self.nodes(out, &element.children, &ctx.within(Scope::Other));
-            out.close("}"); out.close("}"); out.close("}");
-            out.open(format!("if (previewCount < previewItems.size && previewHeight >= {more}) {{"));
+            out.close("}");
+            out.close("}");
+            out.close("}");
+            out.open(format!(
+                "if (previewCount < previewItems.size && previewHeight >= {more}) {{"
+            ));
             out.open(format!("Box(Modifier.height({more}.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(50)).padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {{"));
             out.line("Text(\"+${previewItems.size - previewCount}\", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)");
-            out.close("}"); out.close("}"); out.close("}"); out.close("}");
+            out.close("}");
+            out.close("}");
+            out.close("}");
+            out.close("}");
         }
     }
 

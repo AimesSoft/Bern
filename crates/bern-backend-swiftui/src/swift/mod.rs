@@ -167,7 +167,11 @@ impl<'a> Generator<'a> {
             // The words that lead a row take the spacer's room: the row
             // keeps the controls after them as wide as they want, and the
             // words wrap in what is left instead of squeezing them.
-            if ctx.row && !ctx.flow && ctx.snap_level == 0 && bern_ir::leads_row(node, nodes.get(index + 1)) {
+            if ctx.row
+                && !ctx.flow
+                && ctx.snap_level == 0
+                && bern_ir::leads_row(node, nodes.get(index + 1))
+            {
                 out.open("SwiftUI.Group {");
                 self.node(out, node, ctx);
                 out.close("}");

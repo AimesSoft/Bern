@@ -229,11 +229,31 @@ pub fn Match(p: &Parent, ctx: &Ctx, value: Get, arms: Vec<MatchArm>) {
     );
 }
 
+/// A preview list's rows: each one's height, the gap between them, and the
+/// height of the line counting the rows left out.
+pub struct PreviewListProps {
+    pub item_height: f64,
+    pub gap: f64,
+    pub more_height: f64,
+}
+
 /// A height-bounded preview. The overlay's measuring child has no intrinsic
 /// height, so the rows cannot enlarge their own viewport.
 #[allow(non_snake_case)]
-pub fn PreviewList(p: &Parent, ctx: &Ctx, items: Get, key: usize, var: &'static str,
-                   item_height: f64, gap: f64, more_height: f64, row: Build) {
+pub fn PreviewList(
+    p: &Parent,
+    ctx: &Ctx,
+    items: Get,
+    key: usize,
+    var: &'static str,
+    props: PreviewListProps,
+    row: Build,
+) {
+    let PreviewListProps {
+        item_height,
+        gap,
+        more_height,
+    } = props;
     let gap = gap.max(0.0);
     let more_height = more_height.max(0.0);
     let viewport = gtk::Overlay::new();
@@ -265,14 +285,26 @@ pub fn PreviewList(p: &Parent, ctx: &Ctx, items: Get, key: usize, var: &'static 
         let mut list = as_list(items(ctx));
         let total = list.len();
         let h = height.get();
-        let count = if total == 0 || h <= 0.0 || item_height <= 0.0 { 0 }
-            else if total as f64 * item_height + total.saturating_sub(1) as f64 * gap <= h { total }
-            else { (((h - more_height).max(0.0) / (item_height + gap)).floor() as usize).min(total) };
+        let count = if total == 0 || h <= 0.0 || item_height <= 0.0 {
+            0
+        } else if total as f64 * item_height + total.saturating_sub(1) as f64 * gap <= h {
+            total
+        } else {
+            (((h - more_height).max(0.0) / (item_height + gap)).floor() as usize).min(total)
+        };
         list.truncate(count);
         Value::List(list)
     });
     // The badge uses the same geometry without constructing omitted rows.
-    Each(&Parent::of_box(&rows), ctx, shown.clone(), key, var, None, row);
+    Each(
+        &Parent::of_box(&rows),
+        ctx,
+        shown.clone(),
+        key,
+        var,
+        None,
+        row,
+    );
     let at = ctx.clone();
     effect(move || {
         let count = as_list(shown(&at)).len();

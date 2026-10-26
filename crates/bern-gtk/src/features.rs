@@ -198,7 +198,9 @@ pub fn KeyShortcut(_p: &Parent, ctx: &Ctx, props: KeyShortcutProps, action: Opti
     let at = ctx.clone();
     let run = Rc::new(move || action(&at));
     match &props.bound {
-        Some(keys) => ctx.win().add_bound_shortcut(bound_text(ctx, keys), run, active),
+        Some(keys) => ctx
+            .win()
+            .add_bound_shortcut(bound_text(ctx, keys), run, active),
         None => ctx.win().add_shortcut(props.keys, run, active),
     }
 }

@@ -7,8 +7,8 @@
 #[test]
 fn modals_without_a_height_fit_their_content() {
     use std::{fs, process::Command};
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../target/bern-test/modal-fit");
+    let root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/bern-test/modal-fit");
     fs::create_dir_all(&root).unwrap();
     let style = include_str!("../templates/BernStyle.swift");
     let start = style.find("private struct BernModalStage").unwrap();

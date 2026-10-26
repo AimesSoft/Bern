@@ -739,7 +739,9 @@ fn a_picture_names_the_one_for_the_dark_appearance() {
             },
         );
     }
-    image.props.insert("width".into(), Prop::Number { value: 24.0 });
+    image
+        .props
+        .insert("width".into(), Prop::Number { value: 24.0 });
     let mut out = Out::default();
     Generator::new(&app).element(&mut out, &image);
     let generated = out.finish();

@@ -293,9 +293,11 @@ impl Generator<'_> {
     }
 
     pub(super) fn preview_list(&self, out: &mut Out, element: &Element) {
-        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) =
-            (element.expr("items"), &element.template, element.prop("key"))
-        {
+        if let (Some(items), Some(template), Some(Prop::Key { name, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) {
             out.open(format!(
                 "B.PreviewList(p, ctx, {{ items: () => {}, key: (v) => v.{name}, itemHeight: {}, gap: {}, moreHeight: {} }}, (p, ctx, {}) => {{",
                 self.expr(items),
