@@ -1,8 +1,10 @@
-//! Bern icon names (SF Symbols naming) as freedesktop symbolic icons from
-//! the system icon theme. GNOME draws them from Adwaita; other themes
-//! provide the same names or inherit Adwaita, so icons follow the user's
-//! theme. The table is shared with `bern-backend-gtk`, whose check rejects
-//! the names it lacks; `image-missing-symbolic` is only a last resort.
+//! Bern icon names (SF Symbols naming) as freedesktop symbolic icons of
+//! Adwaita, which the application keeps as its icon theme where it is
+//! installed (other themes, Breeze on KDE among them, lack many of these
+//! names or color them). Every name is in Adwaita 46 and in the releases
+//! after it, which dropped some emblems. The table is shared with
+//! `bern-backend-gtk`, whose check rejects the names it lacks;
+//! `image-missing-symbolic` is only a last resort.
 
 const ICONS: &[(&str, &str)] = include!("icon_table.rs");
 

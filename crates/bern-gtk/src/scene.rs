@@ -330,6 +330,14 @@ mod positioned {
             *vexpand = false;
         }
 
+        /// Only the content takes input. The layer itself spans from its
+        /// container's corner to the content's far corner, so a layer
+        /// placed low in a scene would otherwise catch every press above
+        /// it and hide the layers beneath.
+        fn contains(&self, _x: f64, _y: f64) -> bool {
+            false
+        }
+
         fn size_allocate(&self, _width: i32, _height: i32, _baseline: i32) {
             let (x, y, width, height) = self.frame.get();
             let [left, right, top, bottom] = match self.bleed.borrow().as_ref() {

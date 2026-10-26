@@ -85,7 +85,7 @@
 | 带内容的 `Button` | 无外框的 `GtkButton`，内容按原样显示，`overflow: hidden` 让样式的圆角裁住内容；没有样式时按下变暗 |
 | 工具栏中的 `Search` | 页眉末端的 `GtkSearchEntry`；子元素是不抢焦点的 `GtkPopover`，有焦点且有文字时显示，点选结果后收起 |
 
-图标使用 Bern 的 SF Symbols 命名，映射到 freedesktop 符号图标名（例如 `magnifyingglass` → `system-search-symbolic`），由用户的图标主题绘制；GNOME 上即 Adwaita 图标。对照表只有一份（`crates/bern-gtk/src/icon_table.rs`，按名字排序）：运行时读它，`bern-backend-gtk` 也以 `include!` 读它，应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示缺失图标。表中的图标都在 Adwaita 46 里（Yaru 等主题经 `Inherits` 最终回落到 Adwaita），只有 `arrow.up.right.square` 用 libadwaita 自带资源中的 `adw-external-link-symbolic`。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字。
+图标使用 Bern 的 SF Symbols 命名，映射到 freedesktop 符号图标名（例如 `magnifyingglass` → `system-search-symbolic`），由 Adwaita 绘制：启动时只要装有 Adwaita，就把应用的 `gtk-icon-theme-name` 设为 Adwaita（显示器自带的图标主题不接受直接改名），不跟随桌面的图标主题；KDE 的 Breeze 缺少表中的许多名字，另一些画成彩色（2026-10-27，Steam Deck 的 KDE 上实看）。对照表只有一份（`crates/bern-gtk/src/icon_table.rs`，按名字排序）：运行时读它，`bern-backend-gtk` 也以 `include!` 读它，应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示缺失图标。表中的图标都在 Adwaita 46 里（Yaru 等主题经 `Inherits` 最终回落到 Adwaita），只有 `arrow.up.right.square` 用 libadwaita 自带资源中的 `adw-external-link-symbolic`。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字。
 
 ## 运行结构
 
@@ -193,7 +193,7 @@ GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `featu
 - 声明的宽高就是请求的尺寸：`Column`、`Row` 给出 `width` 或 `height` 时外包 `BernSized`，`Stack` 自己测量，它们都不再因内容（如未截断的长标题）要求更宽。
 - `Grid(row_gap:)` 单独设置行距。`Grid(cell_ratio:, cell_extra:)` 用 `BernCellGrid`：按最小宽度算出列数，每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各项从格子顶部排，内容更高时伸进下面的行距。
 - `Flow` 是 `BernFlow`：子项各取自然宽度，放不下时换到下一行，行高取该行最高者，子项在行内竖直居中；`Spacer`（带 `bern-spacer` 样式类）换行时不占宽度，排好后分得所在行余下的宽度。
-- `ScaleBox` 是 `BernScaleBox`：子项在声明的逻辑尺寸中层叠（左上对齐），整体以一个变换缩放到能放下并居中、超出部分裁掉，所以图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，按（可弹簧的）`x`、`y`、`width`、`height` 放置内容。
+- `ScaleBox` 是 `BernScaleBox`：子项在声明的逻辑尺寸中层叠（左上对齐），整体以一个变换缩放到能放下并居中、超出部分裁掉，所以图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，按（可弹簧的）`x`、`y`、`width`、`height` 放置内容。`Positioned` 与动效盒（`BernMotion`，出现、消失与 `animate` 用的外层）自身不接收输入（`contains` 为假），只有内容接收：它们的范围从容器的角一直到内容的远角，否则场景下方的一层（例如播放器的底部控制条）会挡住它上面各层的点按（2026-10-27，Steam Deck 上只有底部控制条能点）。
 - `Positioned(bleed:)`：`BernScaleBox` 分配时算出画布四周的空白（场景点）；有 `bleed` 的图层分配内容时向上找到最近的 `BernScaleBox`（中间隔着另一个图层就不延伸），把到达的每条画布边延伸到空白的边缘。四条边各是一个随图层 `animate` 的弹簧，碰到哪条边按图层要去的位置判断。窗口改变比例时 GTK 只改场景的变换，同样大小的子部件不会重新分配（`gtk_widget_allocate` 走 `ensure_allocate_on_children`），所以空白一变，盒子先让场景里有 `bleed` 的图层 `queue_allocate`，延伸量随即跳到新值。
 - `Marquee`：内容按自然宽度从右缘外跑到左缘外，每 `duration` 秒一次，`phase` 为起始进度；`paused` 时停在原处，减少动态效果时静止在宽度 28% 处；文字带 1 点黑色阴影；`opacity` 可绑定。
 - `Accordion`：列宽由每列一个 0 到 1 的权重弹簧决定，收起列为固定宽度，总宽保持不变；每列按 `corner` 圆角裁剪。
@@ -402,7 +402,7 @@ target/bern/linux/Showcase/showcase
 - `reflow` 在 `Column`、`Row`、`Stack` 与 `cell_ratio` 网格中生效；没有 `cell_ratio` 的 `Grid` 是 `GtkFlowBox`，表单行由 `GtkListBox` 布置，它们的子元素不能在布局后另加偏移，写了会构建警告。
 - 用到 `Svg` 的应用依赖 WebKitGTK 的沙箱，`.deb` 为此附带 AppArmor 配置（见“打包”）。实际安装未实测（需要 root）：`postinst` 载入配置、安装后从菜单或 `/usr/bin` 启动、remove 与 purge 后的情形都没有验证，只验证了包的内容、配置的解析和同形配置下的运行。`.tar.gz` 与开发构建仍需手动添加配置，或只为测试以 `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1` 运行。
 - `Adaptive` 在第一次排布之前按 `expanded` 构建，窄窗口启动时先构建宽布局，排布后才换成窄布局。
-- Adwaita 46 没有气泡、筛选、滑杆、闪光、画中画这几类图标，对应名字用最接近的图标代替：`text.bubble` → `chat-message-new-symbolic`（带加号的气泡）、`line.3.horizontal.decrease` → `format-justify-center-symbolic`、`slider.horizontal.3` → `preferences-system-symbolic`、`sparkles` → `star-new-symbolic`、`pip.enter` → `focus-windows-symbolic`。`note.text`、`paintbrush`、`paintpalette` 用的是 Adwaita 46 `legacy` 目录中的图标，更新的 Adwaita 若移除它们会显示缺失图标（未验证）。
+- Adwaita 46 没有气泡、筛选、滑杆、闪光、画中画这几类图标，对应名字用最接近的图标代替：`text.bubble` → `chat-message-new-symbolic`（带加号的气泡）、`line.3.horizontal.decrease` → `format-justify-center-symbolic`、`slider.horizontal.3` → `preferences-system-symbolic`、`sparkles` → `star-new-symbolic`、`pip.enter` → `focus-windows-symbolic`。`note.text`、`paintbrush`、`paintpalette` 用的是 Adwaita 46 `legacy` 目录中的图标，Adwaita 51 里仍在。Adwaita 47 起去掉了 `emblem-synchronizing-symbolic` 与 `emblem-favorite-symbolic`（只留彩色的 `emblem-synchronizing`），`arrow.triangle.2.circlepath` 改用 `view-refresh-symbolic`、`heart` 改用 `emote-love-symbolic`，两者在 46 与 51 中都有（2026-10-27，Arch 的 Adwaita 51 上 `cargo test --all-features` 全部通过）。
 - `hero` 只在同一窗口内配对；离开的元素若是视频或画布不留画面，只有新元素从旧位置展开。
 - 侧栏项的样式没有 `shadow`（与其他目标相同，检查时报错）。
 - `appearance` 的部分依赖 libadwaita 自带的 `base.css` 与 `defaults-*.css`（1.5 的资源路径）；Ubuntu 的 Yaru 强调色变体未单独处理，部分里使用 libadwaita 默认的取值。

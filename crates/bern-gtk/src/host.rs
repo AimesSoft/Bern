@@ -355,6 +355,25 @@ fn start_engine(host: &Host, start: StartEngine) -> Result<(), String> {
     Ok(())
 }
 
+/// Bern's icon names are Adwaita's. Other themes, such as Breeze on KDE,
+/// lack many of them or draw them in colors of their own, so wherever
+/// Adwaita is installed the application keeps it, as libadwaita's widgets
+/// expect.
+fn keep_adwaita_icons() {
+    let Some(display) = gtk::gdk::Display::default() else {
+        return;
+    };
+    let installed = gtk::IconTheme::for_display(&display)
+        .search_path()
+        .iter()
+        .any(|dir| dir.join("Adwaita").join("index.theme").is_file());
+    // The display's own icon theme follows this setting; it takes no name
+    // of its own.
+    if installed {
+        gtk::Settings::for_display(&display).set_gtk_icon_theme_name(Some("Adwaita"));
+    }
+}
+
 /// The application icon: `icons/<bundle id>.png` beside the executable joins
 /// the icon theme's search path, and windows take it as their icon.
 fn install_icon(bundle_id: &str) {
@@ -431,6 +450,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     let failed_startup = Rc::clone(&failed);
     application.connect_startup(move |application| {
         snapshot::apply_appearance();
+        keep_adwaita_icons();
         install_icon(host().def.bundle_id);
         crate::style::install(host().def.styles, host().def.text_styles);
         if let Some((red, green, blue)) = host().def.brand_seed {

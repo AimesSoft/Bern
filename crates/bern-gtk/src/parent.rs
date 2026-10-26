@@ -430,6 +430,13 @@ impl Parent {
         )
     }
 
+    /// Whether children are the segments of a `ControlGroup`'s capsule.
+    pub(crate) fn is_control_group(&self) -> bool {
+        self.sink
+            .container()
+            .is_some_and(|container| container.has_css_class("bern-control-group"))
+    }
+
     /// Whether children are rows of a boxed list, as in form sections.
     pub fn is_list(&self) -> bool {
         matches!(self.sink, Sink::List(_) | Sink::Capture(_, true))

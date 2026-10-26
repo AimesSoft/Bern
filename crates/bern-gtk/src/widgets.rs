@@ -426,7 +426,9 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
     let button = gtk::Button::from_icon_name(icons::name(props.icon));
     if props.prominence == Some("prominent") {
         button.add_css_class("suggested-action");
-    } else {
+    } else if !p.is_control_group() {
+        // In a control group it is a segment of the group's capsule, drawn
+        // like the popover buttons beside it.
         button.add_css_class("flat");
     }
     if let Some(size) = props.font_size

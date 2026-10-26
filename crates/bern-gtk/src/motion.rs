@@ -323,6 +323,14 @@ mod imp {
             }
         }
 
+        /// Only the element takes input. The box is as large as the room it
+        /// is given, which can reach far past the element (around a layer
+        /// of a scene it spans the scene), and must not catch presses meant
+        /// for what lies beneath.
+        fn contains(&self, _x: f64, _y: f64) -> bool {
+            false
+        }
+
         fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
             self.allocating.set(true);
             let pending: Vec<_> = self.laid_out.borrow_mut().drain(..).collect();
