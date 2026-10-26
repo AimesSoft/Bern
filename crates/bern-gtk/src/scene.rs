@@ -700,8 +700,11 @@ mod accordion {
                 .into_iter()
                 .filter(|child| child.should_layout())
                 .collect();
+            // The declared columns share the width, also while the later
+            // ones are still on their way in: those that are here stand
+            // where they will stay.
             let mut weights = self.weights.borrow().clone();
-            weights.resize(columns.len(), 0.0);
+            weights.resize(weights.len().max(columns.len()), 0.0);
             let widths = accordion_widths(
                 f64::from(width),
                 self.collapsed.get(),

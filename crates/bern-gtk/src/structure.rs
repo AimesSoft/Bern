@@ -323,10 +323,98 @@ struct Row {
     region: Parent,
 }
 
+/// Rows that enter in turns are built this long before their turn comes,
+/// so their pictures and text are ready when they start to appear.
+const BUILT_AHEAD: f64 = 1.0 / 60.0;
+
+/// A row that enters in turns, waiting to be built near its turn.
+struct Waiting {
+    due: std::time::Instant,
+    /// When the turns began, its turn among them, and their step.
+    began: std::time::Instant,
+    turn: u32,
+    step: f64,
+    owner: Scope,
+    fill: Box<dyn FnOnce(Option<Rc<motion::Clock>>)>,
+}
+
+/// The rows a list builds late, one a frame: rows built between two frames
+/// would all be laid out in the next one.
+#[derive(Default)]
+struct Late {
+    rows: RefCell<std::collections::VecDeque<Waiting>>,
+    /// The row widget whose frame clock builds them, while it does.
+    ticking: RefCell<Option<glib::WeakRef<gtk::Widget>>>,
+}
+
+impl Late {
+    /// Build the waiting rows on `widget`'s frame clock, unless a live one
+    /// already does; without one, build them all now.
+    fn start(self: &Rc<Self>, widget: Option<gtk::Widget>) {
+        if self.rows.borrow().is_empty() {
+            return;
+        }
+        let live = self
+            .ticking
+            .borrow()
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .is_some();
+        if live {
+            return;
+        }
+        let Some(widget) = widget else {
+            while let Some(waiting) = self.next(None) {
+                Self::build(waiting);
+            }
+            return;
+        };
+        *self.ticking.borrow_mut() = Some(widget.downgrade());
+        let late = Rc::clone(self);
+        widget.add_tick_callback(move |_, _| {
+            if let Some(waiting) = late.next(Some(std::time::Instant::now())) {
+                Self::build(waiting);
+            }
+            if late.rows.borrow().is_empty() {
+                late.ticking.borrow_mut().take();
+                glib::ControlFlow::Break
+            } else {
+                glib::ControlFlow::Continue
+            }
+        });
+    }
+
+    /// The first row still waiting, once it is due at `now` (any time
+    /// without one); rows that left are dropped.
+    fn next(&self, now: Option<std::time::Instant>) -> Option<Waiting> {
+        let mut rows = self.rows.borrow_mut();
+        while rows
+            .front()
+            .is_some_and(|waiting| waiting.owner.is_disposed())
+        {
+            rows.pop_front();
+        }
+        match (rows.front(), now) {
+            (Some(waiting), Some(now)) if waiting.due > now => None,
+            _ => rows.pop_front(),
+        }
+    }
+
+    fn build(waiting: Waiting) {
+        let late = waiting.began.elapsed().as_secs_f64();
+        let clock = motion::late_clock(waiting.step, waiting.turn, late);
+        let fill = waiting.fill;
+        untrack(|| waiting.owner.run(|| fill(Some(clock))));
+    }
+}
+
 /// Keyed rows: a row keeps its widgets, controls and state while its key
 /// stays; its value is a cell the row's bindings read. Rows added after the
 /// first ones appear with their transitions; with `stagger` they take
-/// turns.
+/// turns, and each but the first is built just before its turn, one a
+/// frame, instead of with the others: a page of rows that enter one by one
+/// would otherwise be built and laid out in one frame, which stalls it.
+/// Each row's place is kept from the start, so they arrive in order.
 #[allow(non_snake_case)]
 pub fn Each(
     p: &Parent,
@@ -340,7 +428,10 @@ pub fn Each(
     let region = p.region();
     let rows: Rc<RefCell<Vec<Row>>> = Rc::new(RefCell::new(Vec::new()));
     let ended = Rc::clone(&rows);
+    let late = Rc::new(Late::default());
+    let abandoned = Rc::clone(&late);
     on_cleanup(move || {
+        abandoned.rows.borrow_mut().clear();
         for row in ended.borrow_mut().drain(..) {
             row.owner.dispose();
         }
@@ -348,7 +439,8 @@ pub fn Each(
     let ctx = ctx.clone();
     let outer = motion::clock();
     let started = std::cell::Cell::new(false);
-    let first_entering = motion::entering();
+    // Staggering rows also appear with what the list stands in.
+    let first_entering = motion::entering() || (stagger.is_some() && motion::appearing());
     effect(move || {
         let list = as_list(items(&ctx));
         let entering = started.replace(true) || first_entering;
@@ -358,6 +450,14 @@ pub fn Each(
             }
             _ => outer.clone(),
         };
+        // Rows entering in turns, after the first, wait for theirs.
+        let turns = match (&clock, stagger) {
+            (Some(clock), Some(_)) if entering && !motion::reduced() => Some(Rc::clone(clock)),
+            _ => None,
+        };
+        let began = std::time::Instant::now();
+        let mut built_now = false;
+        let mut waiting: u32 = 0;
         untrack(|| {
             let previous: Vec<Row> = rows.borrow_mut().drain(..).collect();
             let order_before: Vec<String> = previous.iter().map(|row| row.key.clone()).collect();
@@ -384,15 +484,40 @@ pub fn Each(
                     .with_local(var, Rc::new(move || read.get()));
                 let build = Rc::clone(&row);
                 let scroll = ctx.scroll().cloned();
-                owner.run(|| {
-                    motion::with_entering(entering, || {
-                        motion::with_clock(clock.clone(), || build(&child, &row_ctx))
-                    });
-                    // Rows are the items a scroll view comes to rest on.
-                    if let (Some(scroll), Some(first)) = (scroll, child.widgets().first()) {
-                        scroll.add_item(key_value, first);
+                let fill = {
+                    let child = child.clone();
+                    move |clock: Option<Rc<motion::Clock>>| {
+                        motion::with_entering(entering, || {
+                            motion::with_clock(clock, || build(&child, &row_ctx))
+                        });
+                        // Rows are the items a scroll view comes to rest on.
+                        if let (Some(scroll), Some(first)) = (scroll, child.widgets().first()) {
+                            scroll.add_item(key_value, first);
+                        }
                     }
-                });
+                };
+                match &turns {
+                    Some(turns) if built_now => {
+                        // Its turn, had it been built with the first row,
+                        // and when to build it: just before that.
+                        let step = turns.step();
+                        let turn = turns.next_turn() + waiting;
+                        waiting += 1;
+                        let due = (f64::from(turn) * step - BUILT_AHEAD).max(0.0);
+                        late.rows.borrow_mut().push_back(Waiting {
+                            due: began + std::time::Duration::from_secs_f64(due),
+                            began,
+                            turn,
+                            step,
+                            owner: owner.clone(),
+                            fill: Box::new(fill),
+                        });
+                    }
+                    _ => {
+                        built_now = true;
+                        owner.run(|| fill(clock.clone()));
+                    }
+                }
                 next.push(Row {
                     key: id,
                     value,
@@ -415,7 +540,11 @@ pub fn Each(
                 let order: Vec<Parent> = next.iter().map(|row| row.region.clone()).collect();
                 region.reorder(&order);
             }
+            let shown = next
+                .iter()
+                .find_map(|row| row.region.widgets().first().cloned());
             *rows.borrow_mut() = next;
+            late.start(shown);
         });
     });
 }
@@ -1711,6 +1840,33 @@ mod tests {
         assert_eq!(arranged(&[1, 0, 2]), (vec![1, 0, 2], 1));
         // A tab without a declared place stays last.
         assert_eq!(arranged(&[usize::MAX, 0, 1]), (vec![1, 2, 0], 2));
+    }
+
+    /// Rows built late come in order once due; those whose list left are
+    /// dropped, and without a time all come at once.
+    #[test]
+    fn late_rows_come_in_order_once_due() {
+        let began = std::time::Instant::now();
+        let late = Late::default();
+        let owners: Vec<Scope> = (0..3).map(|_| Scope::detached()).collect();
+        for (turn, owner) in owners.iter().enumerate() {
+            late.rows.borrow_mut().push_back(Waiting {
+                due: began + std::time::Duration::from_millis(30 * turn as u64 + 30),
+                began,
+                turn: turn as u32 + 1,
+                step: 0.03,
+                owner: owner.clone(),
+                fill: Box::new(|_| {}),
+            });
+        }
+        let at = |ms| Some(began + std::time::Duration::from_millis(ms));
+        assert!(late.next(at(10)).is_none());
+        assert_eq!(late.next(at(31)).map(|row| row.turn), Some(1));
+        assert!(late.next(at(31)).is_none());
+        owners[1].dispose();
+        assert!(late.next(at(70)).is_none());
+        assert_eq!(late.next(None).map(|row| row.turn), Some(3));
+        assert!(late.rows.borrow().is_empty());
     }
 
     #[test]

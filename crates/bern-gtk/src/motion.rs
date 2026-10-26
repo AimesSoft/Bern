@@ -489,6 +489,11 @@ thread_local! {
     /// Whether what is being built appears in an update, not the first
     /// display.
     static ENTERING: Cell<bool> = const { Cell::new(false) };
+    /// Whether it stands, at any depth, in something that appears in an
+    /// update: inside an element that appears, elements do not play their
+    /// own `appear`, but a staggering container's children still take
+    /// turns.
+    static APPEARING: Cell<bool> = const { Cell::new(false) };
     /// The stagger clock of the container whose direct children are being
     /// built.
     static CLOCK: RefCell<Option<Rc<Clock>>> = const { RefCell::new(None) };
@@ -498,10 +503,16 @@ pub(crate) fn entering() -> bool {
     ENTERING.with(Cell::get)
 }
 
+pub(crate) fn appearing() -> bool {
+    APPEARING.with(Cell::get)
+}
+
 pub(crate) fn with_entering<R>(entering: bool, body: impl FnOnce() -> R) -> R {
     let saved = ENTERING.with(|cell| cell.replace(entering));
+    let around = APPEARING.with(|cell| cell.replace(entering || cell.get()));
     let result = body();
     ENTERING.with(|cell| cell.set(saved));
+    APPEARING.with(|cell| cell.set(around));
     result
 }
 
@@ -511,14 +522,17 @@ pub struct Clock {
     step: f64,
     next: Cell<u32>,
     resetting: Cell<bool>,
-    /// Whether the container itself appeared in an update, so its children
-    /// play `appear` with it.
+    /// Whether the container appeared in an update, itself or with what
+    /// it stands in, so its children play `appear` with it.
     play: bool,
+    /// Seconds since the turns began, for a child built late: its turn
+    /// keeps the moment it would have had.
+    late: f64,
 }
 
 impl Clock {
     fn turn(self: &Rc<Self>) -> f64 {
-        let delay = self.next.get() as f64 * self.step;
+        let delay = (self.next.get() as f64 * self.step - self.late).max(0.0);
         self.next.set(self.next.get() + 1);
         if !self.resetting.replace(true) {
             let clock = Rc::clone(self);
@@ -548,8 +562,34 @@ pub(crate) fn new_clock(step: f64) -> Rc<Clock> {
         step,
         next: Cell::new(0),
         resetting: Cell::new(false),
-        play: entering(),
+        play: appearing(),
+        late: 0.0,
     })
+}
+
+/// The clock of a child that takes turn `turn` of a container's turns,
+/// `step` seconds apart, but is built `late` seconds after they began: it
+/// appears when it would have, had it been built with the others.
+pub(crate) fn late_clock(step: f64, turn: u32, late: f64) -> Rc<Clock> {
+    Rc::new(Clock {
+        step,
+        next: Cell::new(turn),
+        resetting: Cell::new(false),
+        play: true,
+        late,
+    })
+}
+
+impl Clock {
+    /// Seconds between turns.
+    pub(crate) fn step(&self) -> f64 {
+        self.step
+    }
+
+    /// The turn the next child that appears takes.
+    pub(crate) fn next_turn(&self) -> u32 {
+        self.next.get()
+    }
 }
 
 /// The children `body` builds are the staggering children of a container.
@@ -932,8 +972,9 @@ fn wrap(widget: &gtk::Widget) -> (gtk::Widget, MotionBox) {
 /// Apply the motion props to the element `build` makes.
 #[allow(non_snake_case)]
 pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
-    // Elements inside this one enter with it, not on their own; a
-    // staggering container's clock is only for its direct children.
+    // Elements inside this one enter with it, not on their own, though
+    // staggering containers inside still take turns; a staggering
+    // container's clock is only for its direct children.
     if let Some(when) = &decor.reduce_motion {
         prefer_reduced(ctx, Rc::clone(when));
     }
@@ -1291,14 +1332,16 @@ mod tests {
 
     #[test]
     fn entering_and_clocks_hold_only_for_their_body() {
-        assert!(!entering() && clock().is_none());
+        assert!(!entering() && !appearing() && clock().is_none());
         let update = with_entering(true, || {
             assert!(entering());
-            with_entering(false, || assert!(!entering()));
+            // Inside an element that appears, staggering containers
+            // still appear with it.
+            with_entering(false, || assert!(!entering() && appearing()));
             assert!(entering());
-            new_clock(0.05)
+            with_entering(false, || new_clock(0.05))
         });
-        assert!(!entering());
+        assert!(!entering() && !appearing());
         // The children of a container built in an update appear with it.
         assert!(update.play && !new_clock(0.05).play);
         with_clock(Some(Rc::clone(&update)), || {
