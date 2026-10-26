@@ -63,16 +63,25 @@ pub enum SurfaceKind {
     MetalLayer,
     /// A XAML `SwapChainPanel`: Windows.
     SwapChainPanel,
+    /// A [`FrameSink`]: the kernel renders pictures of the surface's size
+    /// and hands them to the view, which composites them with the rest of
+    /// the window. GTK on Linux.
+    FrameSink,
 }
 
 impl SurfaceKind {
-    pub const ALL: &[SurfaceKind] = &[SurfaceKind::MetalLayer, SurfaceKind::SwapChainPanel];
+    pub const ALL: &[SurfaceKind] = &[
+        SurfaceKind::MetalLayer,
+        SurfaceKind::SwapChainPanel,
+        SurfaceKind::FrameSink,
+    ];
 
     /// Code of the kind in the C ABI.
     pub fn code(self) -> u32 {
         match self {
             SurfaceKind::MetalLayer => 0,
             SurfaceKind::SwapChainPanel => 1,
+            SurfaceKind::FrameSink => 2,
         }
     }
 
@@ -96,6 +105,10 @@ pub enum SurfaceHandle {
     /// the UI thread. The panel is as many pixels as the surface's size, so
     /// each pixel of the swap chain is one on screen.
     SwapChainPanel(u64),
+    /// A sink registered with [`register_frame_sink`]; [`frame_sink`]
+    /// gives it to the kernel. The view keeps it registered until
+    /// [`MediaKernel::detach_surface`] returns.
+    FrameSink(u64),
 }
 
 impl SurfaceHandle {
@@ -103,8 +116,63 @@ impl SurfaceHandle {
         match self {
             SurfaceHandle::MetalLayer(_) => SurfaceKind::MetalLayer,
             SurfaceHandle::SwapChainPanel(_) => SurfaceKind::SwapChainPanel,
+            SurfaceHandle::FrameSink(_) => SurfaceKind::FrameSink,
         }
     }
+}
+
+/// One picture for a [`FrameSink`]: RGBA, 8 bits per channel, opaque,
+/// rows from the top without padding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VideoFrame {
+    /// Physical pixels.
+    pub width: u32,
+    pub height: u32,
+    /// `width * height * 4` bytes.
+    pub pixels: Vec<u8>,
+}
+
+/// Where a kernel hands the pictures of a view that composites them
+/// itself. Each picture replaces the one before; the view shows the latest
+/// at its own pace, so a kernel never waits for it.
+pub trait FrameSink: Send + Sync {
+    /// Show `frame` from now on. Called from the kernel's threads.
+    fn present(&self, frame: VideoFrame);
+}
+
+static SINKS: Mutex<Vec<(u64, Arc<dyn FrameSink>)>> = Mutex::new(Vec::new());
+static NEXT_SINK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Register the sink of a video view, for a [`SurfaceHandle::FrameSink`].
+pub fn register_frame_sink(sink: Arc<dyn FrameSink>) -> SurfaceHandle {
+    let id = NEXT_SINK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    SINKS.lock().expect("frame sinks lock").push((id, sink));
+    SurfaceHandle::FrameSink(id)
+}
+
+/// The view no longer takes pictures through `handle`.
+pub fn unregister_frame_sink(handle: SurfaceHandle) {
+    if let SurfaceHandle::FrameSink(id) = handle {
+        SINKS
+            .lock()
+            .expect("frame sinks lock")
+            .retain(|(existing, _)| *existing != id);
+    }
+}
+
+/// The sink a [`SurfaceHandle::FrameSink`] names, while its view keeps it
+/// registered. A kernel may hold on to it; once the view is detached it
+/// shows nothing more that the sink is given.
+pub fn frame_sink(handle: SurfaceHandle) -> Option<Arc<dyn FrameSink>> {
+    let SurfaceHandle::FrameSink(id) = handle else {
+        return None;
+    };
+    SINKS
+        .lock()
+        .expect("frame sinks lock")
+        .iter()
+        .find(|(existing, _)| *existing == id)
+        .map(|(_, sink)| Arc::clone(sink))
 }
 
 /// How large a surface is on screen.
@@ -154,7 +222,7 @@ pub struct VideoSurface {
 pub struct FrameTiming {
     /// When the frame clock fired, in seconds of the host's monotonic clock
     /// (`CACurrentMediaTime` on Apple platforms, the performance counter on
-    /// Windows).
+    /// Windows, `g_get_monotonic_time` with GTK).
     pub now: f64,
     /// When the frame being prepared will be on screen, same clock.
     pub target: f64,

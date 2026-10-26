@@ -396,9 +396,10 @@ fn surface_size(reader: &mut Reader) -> Option<SurfaceSize> {
 }
 
 /// A video view created its surface for the kernel. Layout: view token
-/// text, player text, kind u32, handle u64, width u32, height u32 (physical
-/// pixels), scale f64 and fit u32 (`VideoFit`: contain, cover, fill). The
-/// view keeps the surface alive until `bern_media_surface_detach` returns.
+/// text, player text, kind u32, handle u64 (for a frame sink, its
+/// registration), width u32, height u32 (physical pixels), scale f64 and
+/// fit u32 (`VideoFit`: contain, cover, fill). The view keeps the surface
+/// alive until `bern_media_surface_detach` returns.
 ///
 /// # Safety
 /// `bytes` must point to `len` readable bytes or be null with `len == 0`.
@@ -423,6 +424,7 @@ pub unsafe extern "C" fn bern_media_surface_attach(
         let handle = match SurfaceKind::from_code(kind) {
             Some(SurfaceKind::MetalLayer) => SurfaceHandle::MetalLayer(handle),
             Some(SurfaceKind::SwapChainPanel) => SurfaceHandle::SwapChainPanel(handle),
+            Some(SurfaceKind::FrameSink) => SurfaceHandle::FrameSink(handle),
             None => return,
         };
         let Some(size) = surface_size(&mut reader) else {

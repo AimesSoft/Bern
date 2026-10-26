@@ -21,7 +21,7 @@
 | 列表身份正确、订阅可释放 | 完成 | `ForEach` 按键保留行；查询订阅随视图与窗口结束；见“验证记录” |
 | 同一主题快照正确映射深浅色 | 完成 | 原生优先：颜色全部来自 libadwaita 的样式管理器，生成代码与运行时不写颜色；深色截图见验证记录 |
 | 原生多窗口、关闭确认、窗口事实 | 完成 | 每个窗口是 `AdwApplicationWindow`；关闭协议、最大化、恢复、调整尺寸由命令驱动并以平台事实答复；Wayland 的限制见“窗口” |
-| Video 原生呈现 | 完成 | `GtkMediaFile`（GStreamer）执行端与 `GtkPicture` 呈现、命令驱动的控制条；播放、暂停、跳转、静音、音量、播完与重播、换源、损坏文件、应用级播放器跨页面与跨窗口均已实测（见“验证记录”）；HLS 直播（时长未知、不可跳转）已实测 |
+| Video 原生呈现 | 完成 | `GtkMediaFile`（GStreamer）执行端与 `GtkPicture` 呈现、命令驱动的控制条；播放、暂停、跳转、静音、音量、播完与重播、换源、损坏文件、应用级播放器跨页面与跨窗口均已实测（见“验证记录”）；HLS 直播（时长未知、不可跳转）已实测。应用自带的媒体内核经帧接收器显示（2026-10-27，见“媒体”） |
 | 阶段四：`Adaptive`、`Menu`、`LanguagePicker`、运行时切换语言 | 完成 | 窗口缩窄后布局切换为紧凑并挂载菜单，菜单未打开时也能执行菜单项；语言切换后界面全部更新，草稿保留 |
 | 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色、边框、圆角、内边距、尺寸档与阴影生成应用优先级的样式表，状态取 GTK 的状态标志；缩放、位移与透明度用 `AdwSpringAnimation`，回到普通状态用 `settle`。见“样式覆盖” |
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 变换在分配子控件时施加，不影响布局；`reflow` 只在 `Column`、`Row` 里（含其中的 `ForEach`），其他容器构建时警告。见“动效” |
@@ -110,6 +110,7 @@
 - `Video(source:)` 的播放器属于组件实例，绑定变化时按新源版本加载，同值不重复加载；`Video(player:)` 只附着呈现。控制条（播放/暂停、进度、时长、静音、音量）只发送标准媒体命令，状态来自媒体中心；拖动进度与音量只更新预览，松开时提交一次。控件登记为 `目标.play_pause`、`.position`、`.mute`、`.volume`。
 - 位置每 0.5 秒回报一次，位置跳变（例如跳转完成）时立即回报；播完时位置为时长。画面区按可用宽度保持 16:9。
 - 错误只显示 GStreamer 消息的第一句（不含元素路径），完整内容写入日志。
+- **应用自带的媒体内核**（2026-10-27）：启动时先以 `FrameSink` 问 `bern_media_kernel_attach`；内核接受时不挂接 `GtkMediaFile` 执行端，`Video` 改用 `BernKernelVideo`（`kernel.rs`）：一个不报告自然尺寸、把最新画面画满自身的控件。映射后它在帧时钟上登记回调；第一次有尺寸时登记帧接收器（`register_frame_sink`），把登记号、物理像素尺寸（分配的尺寸 × `GdkSurface::scale`，支持分数缩放）与 `fit` 交给内核，尺寸或像素比变化时 `bern_media_surface_resize`；每帧调用 `bern_media_surface_frame`，时刻为帧时钟的 `frame_time`，目标是预测的上屏时刻再加一个刷新周期。内核在自己的线程上把画面交给接收器，接收器只留最新的一幅并请界面线程显示，界面线程把它做成 `GdkMemoryTexture`（RGBA8），线性缩放画满控件。取消映射与销毁时先停帧回调，再同步 `bern_media_surface_detach`、注销接收器；最后一幅画面保留到下次显示。圆角、透明度与过渡照常作用在这个控件上，控制条叠在它上面。实测见[设计文档](../Design.md#应用自带的媒体内核)。
 - **系统依赖**：GStreamer 的 H.264 与 AAC 解码器不在 Ubuntu 的默认安装中，需要 `gstreamer1.0-libav`；缺少时片段报告 `Failed`（“您的 GStreamer 安装缺少插件。”），`media.play` 返回 `media_failed`。MPEG-TS 的 HLS 直播还需要 `gstreamer1.0-plugins-bad`（`tsdemux`）。媒体的网络请求遵循 `http_proxy` 等环境变量。
 
 ## 本地化与主题

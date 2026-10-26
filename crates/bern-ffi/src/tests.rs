@@ -663,6 +663,17 @@ fn an_installed_kernel_plays_and_draws_into_the_views_surfaces() {
         panel.f64(1.5);
         panel.u32(0);
         media::bern_media_surface_attach(app, panel.bytes.as_ptr(), panel.bytes.len());
+        // A GTK view's frame sink, by its registration.
+        let mut sink = Writer::new();
+        sink.text("view-3");
+        sink.text("preview");
+        sink.u32(SurfaceKind::FrameSink.code());
+        sink.u64(7);
+        sink.u32(1280);
+        sink.u32(720);
+        sink.f64(1.0);
+        sink.u32(2);
+        media::bern_media_surface_attach(app, sink.bytes.as_ptr(), sink.bytes.len());
     }
     assert_eq!(
         recording.seen(),
@@ -673,6 +684,7 @@ fn an_installed_kernel_plays_and_draws_into_the_views_surfaces() {
             "frame view-1 FrameTiming { now: 1.0, target: 1.008 }",
             "detach view-1",
             "attach view-2 preview VideoSurface { handle: SwapChainPanel(22136), size: SurfaceSize { width: 1920, height: 1080, scale: 1.5 }, fit: Contain }",
+            "attach view-3 preview VideoSurface { handle: FrameSink(7), size: SurfaceSize { width: 1280, height: 720, scale: 1.0 }, fit: Fill }",
         ]
     );
     kernel::clear();

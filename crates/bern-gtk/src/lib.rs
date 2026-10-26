@@ -18,6 +18,7 @@ mod features;
 mod hdr;
 mod host;
 mod icons;
+mod kernel;
 mod layout;
 mod markdown;
 mod media;

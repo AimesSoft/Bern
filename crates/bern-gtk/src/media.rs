@@ -6,6 +6,10 @@
 //! observations, never as commands. Views present a player's stream with
 //! a `GtkPicture`; the control bar sends the same media commands every
 //! other entry uses, and shows the hub's merged state.
+//!
+//! When the application brings a media kernel that draws into frame sinks,
+//! the kernel executes the players instead and views show its pictures
+//! (`kernel`).
 
 use crate::controls::{self, Actions};
 use crate::host::{host, status, take, with_bytes};
@@ -16,6 +20,7 @@ use crate::value::{as_f64, number};
 use crate::widgets::plain_row;
 use crate::{Ctx, Get, Parent, Str};
 use adw::prelude::*;
+use bern_ffi::media_contract::kernel::{SurfaceKind, VideoFit};
 use bern_ffi::media_contract::{
     ExecOp, ExecRequest, MediaCommand, Observation, Phase, media_catalog,
 };
@@ -346,6 +351,8 @@ struct Media {
     players: Cell<Rc<HashMap<String, PlayerState>>>,
     revision: StdCell<u64>,
     views: StdCell<u64>,
+    /// The application's media kernel executes the players.
+    kernel: StdCell<bool>,
 }
 
 thread_local! {
@@ -354,6 +361,7 @@ thread_local! {
         players: Cell::new(Rc::new(HashMap::new())),
         revision: StdCell::new(0),
         views: StdCell::new(0),
+        kernel: StdCell::new(false),
     };
 }
 
@@ -369,8 +377,12 @@ fn stream(id: &str) -> Rc<Stream> {
     })
 }
 
-/// Attach this frontend's executor to the hub and take the current state.
+/// Attach this frontend's executor to the hub and take the current state,
+/// unless the application's media kernel executes the players.
 pub(crate) fn attach_executor() {
+    if attach_kernel() {
+        return;
+    }
     let mut writer = Writer::new();
     writer.text("gtk-mediafile");
     writer.text("1");
@@ -389,7 +401,35 @@ pub(crate) fn attach_executor() {
     }));
 }
 
+/// Offer the kernel frame sinks; when it takes them it executes every
+/// player and video views show its pictures.
+fn attach_kernel() -> bool {
+    let sink = SurfaceKind::FrameSink.code();
+    let mut offer = Writer::new();
+    offer.u32(1);
+    offer.u32(sink);
+    let answer = with_bytes(&offer.bytes, |ptr, len| {
+        // SAFETY: the handle is live while the application runs.
+        take(unsafe { bern_ffi::media::bern_media_kernel_attach(host().app(), ptr, len) })
+    });
+    let mut reader = crate::protocol::Reader::new(&answer);
+    if !matches!(reader.u8(), Ok(1)) || !matches!(reader.u32(), Ok(kind) if kind == sink) {
+        return false;
+    }
+    MEDIA.with(|media| media.kernel.set(true));
+    // SAFETY: as above.
+    receive_state(&take(unsafe {
+        bern_ffi::media::bern_media_snapshot(host().app())
+    }));
+    true
+}
+
 pub(crate) fn detach_executor() {
+    // The kernel stops with the application; its views stop their frame
+    // clocks when they go away.
+    if MEDIA.with(|media| media.kernel.get()) {
+        return;
+    }
     let app = host().app();
     if !app.is_null() {
         // SAFETY: the handle is live until the application stops.
@@ -774,14 +814,29 @@ pub fn Video(p: &Parent, ctx: &Ctx, props: VideoProps) {
         }
     }
 
-    let picture = gtk::Picture::new();
-    stream(&player).present(&picture);
-    picture.set_content_fit(match props.fit {
-        Some("cover") => gtk::ContentFit::Cover,
-        Some("fill") => gtk::ContentFit::Fill,
-        _ => gtk::ContentFit::Contain,
+    let token = MEDIA.with(|media| {
+        let next = media.views.get() + 1;
+        media.views.set(next);
+        format!("view-{next}")
     });
-    picture.set_can_shrink(true);
+    let picture: gtk::Widget = if MEDIA.with(|media| media.kernel.get()) {
+        let fit = match props.fit {
+            Some("cover") => VideoFit::Cover,
+            Some("fill") => VideoFit::Fill,
+            _ => VideoFit::Contain,
+        };
+        crate::kernel::Screen::new(&token, &player, fit).upcast()
+    } else {
+        let picture = gtk::Picture::new();
+        stream(&player).present(&picture);
+        picture.set_content_fit(match props.fit {
+            Some("cover") => gtk::ContentFit::Cover,
+            Some("fill") => gtk::ContentFit::Fill,
+            _ => gtk::ContentFit::Contain,
+        });
+        picture.set_can_shrink(true);
+        picture.upcast()
+    };
     let picture_widget: gtk::Widget = match &props.corner {
         Some(corner) => crate::features::rounded(ctx, &picture, corner, props.animate).upcast(),
         None => picture.clone().upcast(),
@@ -805,17 +860,14 @@ pub fn Video(p: &Parent, ctx: &Ctx, props: VideoProps) {
     status_box.set_halign(gtk::Align::Center);
     status_box.set_valign(gtk::Align::Center);
     overlay.add_overlay(&status_box);
-    let token = MEDIA.with(|media| {
-        let next = media.views.get() + 1;
-        media.views.set(next);
-        format!("view-{next}")
-    });
     view(&token, Some((&player, &win.id)));
     let detached = token.clone();
     let shown_picture = picture.clone();
     on_cleanup(move || {
         view(&detached, None);
-        shown_picture.set_paintable(None::<&gtk::gdk::Paintable>);
+        if let Some(picture) = shown_picture.downcast_ref::<gtk::Picture>() {
+            picture.set_paintable(None::<&gtk::gdk::Paintable>);
+        }
     });
     {
         let player = player.clone();

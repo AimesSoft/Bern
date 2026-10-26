@@ -571,3 +571,38 @@ fn closing_a_window_releases_what_it_owns() {
         Value::Int(1)
     );
 }
+
+#[test]
+fn frame_sinks_reach_the_kernel_while_their_views_keep_them() {
+    use crate::kernel::{self, FrameSink, SurfaceHandle, SurfaceKind, VideoFrame};
+    #[derive(Default)]
+    struct Sink(Mutex<Vec<(u32, u32)>>);
+    impl FrameSink for Sink {
+        fn present(&self, frame: VideoFrame) {
+            self.0.lock().unwrap().push((frame.width, frame.height));
+        }
+    }
+    let sink = Arc::new(Sink::default());
+    let handle = kernel::register_frame_sink(sink.clone());
+    assert_eq!(handle.kind(), SurfaceKind::FrameSink);
+    assert_eq!(
+        SurfaceKind::from_code(SurfaceKind::FrameSink.code()),
+        Some(SurfaceKind::FrameSink)
+    );
+    kernel::frame_sink(handle)
+        .expect("registered")
+        .present(VideoFrame {
+            width: 2,
+            height: 1,
+            pixels: vec![0; 8],
+        });
+    assert_eq!(*sink.0.lock().unwrap(), [(2, 1)]);
+    // Other surfaces name no sink, and a view's sink is gone once it lets
+    // go of it; the next view gets a sink of its own.
+    assert!(kernel::frame_sink(SurfaceHandle::MetalLayer(1)).is_none());
+    kernel::unregister_frame_sink(handle);
+    assert!(kernel::frame_sink(handle).is_none());
+    let next = kernel::register_frame_sink(sink);
+    assert_ne!(next, handle);
+    kernel::unregister_frame_sink(next);
+}
