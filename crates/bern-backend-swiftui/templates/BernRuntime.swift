@@ -2042,9 +2042,10 @@ struct BernImage: View {
     var hero: String? = nil
     var heroMotion = BernMotion(period: 0.48, damping: 0.86)
     var heroCorner: CGFloat = 0
-    /// Its sides never change: the declared picture is decoded at twice the
-    /// pixels it covers, which the compositor halves. Squeezed down from a
-    /// much larger picture by the compositor alone, its edges would break up.
+    /// Its sides never change: the picture, declared or from a URL, is
+    /// decoded at twice the pixels it covers, which the compositor halves.
+    /// Squeezed down from a much larger picture by the compositor alone, its
+    /// edges would break up.
     var oneSize = false
     @State private var fetched: Picture?
     @Environment(\.colorScheme) private var scheme
@@ -2072,13 +2073,26 @@ struct BernImage: View {
     /// for a side that follows the picture) on a display of `scale` pixels
     /// per point: decoded at twice the pixels it covers when it has more.
     @MainActor static func picture(_ name: String, width: CGFloat?, height: CGFloat?, fit: BernImageFit, scale: CGFloat) -> Picture? {
-        guard scale > 0, width != nil || height != nil,
-              let url = Bundle.main.resourceURL?.appendingPathComponent(name),
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent(name),
               let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return picture(name) }
+              let pixels = sampledPixels(source, width: width, height: height, fit: fit, scale: scale) else { return picture(name) }
+        let key = "\(name)@\(pixels)"
+        if let sampled = loaded[key] { return sampled }
+        guard let sampled = decode(source, pixels: pixels) else { return picture(name) }
+        loaded[key] = sampled
+        return sampled
+    }
+
+    /// The pixels of the longer side to decode `source`'s picture at when it
+    /// shows `width` × `height` points (nil for a side that follows it) on a
+    /// display of `scale` pixels per point: twice what it covers, or nil when
+    /// the picture has no more than that.
+    nonisolated static func sampledPixels(_ source: CGImageSource, width: CGFloat?, height: CGFloat?, fit: BernImageFit, scale: CGFloat) -> Int? {
+        guard scale > 0, width != nil || height != nil,
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else { return nil }
         let pixelsWide = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.doubleValue ?? 0
         let pixelsTall = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.doubleValue ?? 0
-        guard pixelsWide > 0, pixelsTall > 0 else { return picture(name) }
+        guard pixelsWide > 0, pixelsTall > 0 else { return nil }
         let exif = (properties[kCGImagePropertyOrientation] as? UInt32) ?? 1
         let turned = (5...8).contains(exif)
         let w = turned ? pixelsTall : pixelsWide, h = turned ? pixelsWide : pixelsTall
@@ -2095,25 +2109,23 @@ struct BernImage: View {
             }
         case let (width?, nil): shown = CGSize(width: width, height: width * h / w)
         case let (nil, height?): shown = CGSize(width: height * w / h, height: height)
-        default: return picture(name)
+        default: return nil
         }
         let factor = max(2 * shown.width * scale / w, 2 * shown.height * scale / h)
-        guard factor < 1 else { return picture(name) }
-        let pixels = Int((max(w, h) * factor).rounded(.up))
-        let key = "\(name)@\(pixels)"
-        if let sampled = loaded[key] { return sampled }
-        guard let sampled = decode(source, pixels: pixels) else { return picture(name) }
-        loaded[key] = sampled
-        return sampled
+        guard factor < 1 else { return nil }
+        return Int((max(w, h) * factor).rounded(.up))
     }
 
     /// The first picture of `source`, in HDR where the system can show it,
     /// with its EXIF orientation; with `pixels`, its longer side that many
-    /// pixels, drawn down by ImageIO.
+    /// pixels, drawn down by ImageIO. Decoded here, on the caller's thread:
+    /// ImageIO would otherwise decode it when it is first drawn, on the
+    /// interface thread.
     nonisolated static func decode(_ source: CGImageSource, pixels: Int? = nil) -> Picture? {
         let create = { (options: [CFString: Any]) -> CGImage? in
-            guard let pixels else { return CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) }
             var options = options
+            options[kCGImageSourceShouldCacheImmediately] = true
+            guard let pixels else { return CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary) }
             options[kCGImageSourceCreateThumbnailFromImageAlways] = true
             options[kCGImageSourceThumbnailMaxPixelSize] = pixels
             return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
@@ -2150,7 +2162,12 @@ struct BernImage: View {
         let declared = resource.flatMap {
             oneSize ? Self.picture($0, width: width, height: height, fit: fit, scale: displayScale) : Self.picture($0)
         }
-        let picture = declared ?? fetched ?? url.flatMap { BernPictures.shared.cached($0) }
+        // A picture from a URL with sides that never change is decoded at
+        // its size, as a declared one is.
+        let request = url.map {
+            BernPictures.Request(url: $0, width: oneSize ? width : nil, height: oneSize ? height : nil, fit: fit, scale: oneSize ? displayScale : 0)
+        }
+        let picture = declared ?? fetched ?? request.flatMap { BernPictures.shared.cached($0) }
         let ratio = picture?.ratio ?? 1
         let content = Group {
             if let picture {
@@ -2180,9 +2197,9 @@ struct BernImage: View {
                 content.frame(width: width ?? height.map { $0 * ratio }, height: height ?? width.map { $0 / ratio }).clipped()
             }
         }
-        .task(id: url) {
-            guard let url else { return }
-            fetched = await BernPictures.shared.load(url)
+        .task(id: request) {
+            guard let request else { return }
+            fetched = await BernPictures.shared.load(request)
         }
         .modifier(BernPictureHero(id: hero, picture: picture, fit: fit, corner: heroCorner, motion: heroMotion))
         if let label {
@@ -2193,23 +2210,40 @@ struct BernImage: View {
     }
 }
 
-/// Pictures loaded from files and http(s) URLs, kept while the app runs,
-/// with the average color of each for fills drawn from a picture.
+/// Pictures loaded from files and http(s) URLs, read and decoded in the
+/// background and kept while the app runs, by URL and the size they are
+/// decoded at, with the average color of each for fills drawn from a
+/// picture.
 @MainActor
 @Observable
 final class BernPictures {
     static let shared = BernPictures()
-    @ObservationIgnored private var pictures: [String: BernImage.Picture] = [:]
-    @ObservationIgnored private var loading: [String: Task<BernImage.Picture?, Never>] = [:]
+
+    /// A picture from `url`, decoded at twice the pixels of `width` ×
+    /// `height` points on a display of `scale` (`0`: as it is).
+    struct Request: Hashable, Sendable {
+        let url: String
+        var width: CGFloat? = nil
+        var height: CGFloat? = nil
+        var fit: BernImageFit = .contain
+        var scale: CGFloat = 0
+    }
+
+    @ObservationIgnored private var pictures: [Request: BernImage.Picture] = [:]
+    @ObservationIgnored private var loading: [Request: Task<BernImage.Picture?, Never>] = [:]
     /// Average colors as 0xRRGGBB, by URL; observed, so fills follow.
     private(set) var averages: [String: UInt32] = [:]
 
-    func cached(_ url: String) -> BernImage.Picture? { pictures[url] }
+    func cached(_ request: Request) -> BernImage.Picture? { pictures[request] }
 
     func load(_ url: String) async -> BernImage.Picture? {
-        if let picture = pictures[url] { return picture }
-        let task = loading[url] ?? Task.detached(priority: .userInitiated) { () -> BernImage.Picture? in
-            guard let location = URL(string: url) else { return nil }
+        await load(Request(url: url))
+    }
+
+    func load(_ request: Request) async -> BernImage.Picture? {
+        if let picture = pictures[request] { return picture }
+        let task = loading[request] ?? Task.detached(priority: .userInitiated) { () -> BernImage.Picture? in
+            guard let location = URL(string: request.url) else { return nil }
             let data: Data?
             if location.isFileURL {
                 data = try? Data(contentsOf: location)
@@ -2217,14 +2251,17 @@ final class BernPictures {
                 data = try? await URLSession.shared.data(from: location).0
             }
             guard let data, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            return BernImage.decode(source)
+            let pixels = BernImage.sampledPixels(source, width: request.width, height: request.height, fit: request.fit, scale: request.scale)
+            return BernImage.decode(source, pixels: pixels)
         }
-        loading[url] = task
+        loading[request] = task
         let picture = await task.value
-        loading[url] = nil
+        loading[request] = nil
         if let picture {
-            pictures[url] = picture
-            averages[url] = Self.average(picture.image)
+            pictures[request] = picture
+            if averages[request.url] == nil {
+                averages[request.url] = Self.average(picture.image)
+            }
         }
         return picture
     }
@@ -2233,8 +2270,9 @@ final class BernPictures {
     func average(_ url: String?) -> BernColor? {
         guard let url else { return nil }
         if let value = averages[url] { return .fixed(light: value, dark: value) }
-        if pictures[url] == nil, loading[url] == nil {
-            Task { _ = await load(url) }
+        let request = Request(url: url)
+        if pictures[request] == nil, loading[request] == nil {
+            Task { _ = await load(request) }
         }
         return nil
     }
