@@ -2022,7 +2022,7 @@ fn read_picture(path: &std::path::Path, pixels: Option<i32>) -> Option<gtk::gdk:
         && let Ok(pixbuf) = gtk::gdk_pixbuf::Pixbuf::from_file_at_scale(path, pixels, pixels, true)
     {
         let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
-        return Some(gtk::gdk::Texture::for_pixbuf(&upright).upcast());
+        return crate::features::premultiplied_texture(&upright).map(|texture| texture.upcast());
     }
     oriented(path).map(|texture| texture.upcast()).or_else(|| {
         gtk::gdk::Texture::from_filename(path)
@@ -2134,8 +2134,7 @@ fn oriented(path: &std::path::Path) -> Option<gtk::gdk::Texture> {
         return None;
     }
     let pixbuf = gtk::gdk_pixbuf::Pixbuf::from_file(path).ok()?;
-    let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
-    Some(gtk::gdk::Texture::for_pixbuf(&upright))
+    crate::features::premultiplied_texture(&pixbuf.apply_embedded_orientation().unwrap_or(pixbuf))
 }
 
 #[derive(Default)]

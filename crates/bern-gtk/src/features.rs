@@ -1842,22 +1842,189 @@ fn view_adjustment(view: &gtk::ScrolledWindow, horizontal: bool) -> gtk::Adjustm
 
 // MARK: - Pictures from state
 
-/// A texture read from a `file://` or http(s) URL.
-fn load_texture(url: &str, done: impl FnOnce(Option<gtk::gdk::Texture>) + 'static) {
+/// The pixels a picture from state is decoded at: twice the points its
+/// frame covers at the display's largest scale (double sampling), each
+/// side `None` when it follows the picture.
+#[derive(Clone, Copy, PartialEq)]
+struct DecodeBox {
+    width: Option<f64>,
+    height: Option<f64>,
+    cover: bool,
+}
+
+impl DecodeBox {
+    fn new(width: &Option<Num>, height: &Option<Num>, fit: gtk::ContentFit) -> Self {
+        let scale = gtk::gdk::Display::default()
+            .map(|display| {
+                let monitors = display.monitors();
+                (0..monitors.n_items())
+                    .filter_map(|index| monitors.item(index).and_downcast::<gtk::gdk::Monitor>())
+                    .map(|monitor| monitor.scale())
+                    .fold(1.0, f64::max)
+            })
+            .unwrap_or(1.0);
+        let pixels = |side: &Option<Num>| match side {
+            Some(Num::Fixed(points)) if *points > 0.0 => Some((points * scale * 2.0).ceil()),
+            _ => None,
+        };
+        Self {
+            width: pixels(width),
+            height: pixels(height),
+            cover: fit != gtk::ContentFit::Contain && fit != gtk::ContentFit::ScaleDown,
+        }
+    }
+
+    /// The size to decode a picture of `width` × `height` at: smaller
+    /// only, never larger.
+    fn size_for(self, width: i32, height: i32) -> Option<(i32, i32)> {
+        let (w, h) = (f64::from(width.max(1)), f64::from(height.max(1)));
+        let scale = match (self.width, self.height) {
+            (Some(bw), Some(bh)) if self.cover => (bw / w).max(bh / h),
+            (Some(bw), Some(bh)) => (bw / w).min(bh / h),
+            (Some(bw), None) => bw / w,
+            (None, Some(bh)) => bh / h,
+            (None, None) => return None,
+        };
+        (scale < 1.0).then(|| {
+            (
+                (w * scale).round().max(1.0) as i32,
+                (h * scale).round().max(1.0) as i32,
+            )
+        })
+    }
+
+    fn key(self) -> (u32, u32, bool) {
+        let side = |pixels: Option<f64>| pixels.map_or(0, |pixels| pixels as u32);
+        (side(self.width), side(self.height), self.cover)
+    }
+}
+
+/// Pictures from state already decoded, by URL and decoding size, the
+/// most recently shown last; at most `TEXTURE_CACHE_BYTES` of pixels.
+type TextureKey = (String, (u32, u32, bool));
+
+thread_local! {
+    static TEXTURES: RefCell<std::collections::VecDeque<(TextureKey, gtk::gdk::Texture, usize)>> =
+        const { RefCell::new(std::collections::VecDeque::new()) };
+}
+
+const TEXTURE_CACHE_BYTES: usize = 96 << 20;
+
+fn cached_texture(key: &TextureKey) -> Option<gtk::gdk::Texture> {
+    TEXTURES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let index = cache.iter().position(|(known, ..)| known == key)?;
+        let entry = cache.remove(index)?;
+        let texture = entry.1.clone();
+        cache.push_back(entry);
+        Some(texture)
+    })
+}
+
+fn cache_texture(key: TextureKey, texture: &gtk::gdk::Texture) {
+    let bytes = texture.width().max(0) as usize * texture.height().max(0) as usize * 4;
+    TEXTURES.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.retain(|(known, ..)| *known != key);
+        cache.push_back((key, texture.clone(), bytes));
+        let mut total: usize = cache.iter().map(|(.., bytes)| bytes).sum();
+        while total > TEXTURE_CACHE_BYTES && cache.len() > 1 {
+            if let Some((.., bytes)) = cache.pop_front() {
+                total -= bytes;
+            }
+        }
+    });
+}
+
+/// Decode `bytes` at the size `wanted` asks for, upright, into a texture
+/// of premultiplied RGBA. Runs off the interface thread.
+fn decode_texture(bytes: &glib::Bytes, wanted: DecodeBox) -> Option<gtk::gdk::Texture> {
+    let loader = gtk::gdk_pixbuf::PixbufLoader::new();
+    loader.connect_size_prepared(move |loader, width, height| {
+        if let Some((w, h)) = wanted.size_for(width, height) {
+            loader.set_size(w, h);
+        }
+    });
+    let written = loader.write_bytes(bytes);
+    let closed = loader.close();
+    written.and(closed).ok()?;
+    let pixbuf = loader.pixbuf()?;
+    premultiplied_texture(&pixbuf.apply_embedded_orientation().unwrap_or(pixbuf))
+}
+
+/// The picture of `pixbuf` as a texture of premultiplied RGBA, which the
+/// renderer uploads as it is. A texture made from the pixbuf itself keeps
+/// its three-byte RGB (gdk-pixbuf's JPEG), which GTK converts pixel by
+/// pixel on the interface thread when it uploads it.
+pub(crate) fn premultiplied_texture(pixbuf: &gtk::gdk_pixbuf::Pixbuf) -> Option<gtk::gdk::Texture> {
+    let (width, height) = (pixbuf.width(), pixbuf.height());
+    let (channels, stride) = (pixbuf.n_channels() as usize, pixbuf.rowstride() as usize);
+    let alpha = pixbuf.has_alpha();
+    let source = pixbuf.read_pixel_bytes();
+    let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
+    for row in 0..height as usize {
+        let line = source.get(row * stride..)?;
+        for pixel in line.chunks(channels).take(width as usize) {
+            if alpha && pixel.len() >= 4 {
+                let a = u16::from(pixel[3]);
+                let times = |c: u8| ((u16::from(c) * a + 127) / 255) as u8;
+                pixels.extend_from_slice(&[
+                    times(pixel[0]),
+                    times(pixel[1]),
+                    times(pixel[2]),
+                    pixel[3],
+                ]);
+            } else if pixel.len() >= 3 {
+                pixels.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+            }
+        }
+    }
+    if pixels.len() != width as usize * height as usize * 4 {
+        return None;
+    }
+    Some(
+        gtk::gdk::MemoryTexture::new(
+            width,
+            height,
+            gtk::gdk::MemoryFormat::R8g8b8a8Premultiplied,
+            &glib::Bytes::from_owned(pixels),
+            width as usize * 4,
+        )
+        .upcast(),
+    )
+}
+
+/// A texture read from a `file://` or http(s) URL and decoded in the
+/// background at the size `wanted` asks for; from the cache when a view
+/// showed the same picture at that size before.
+fn load_texture(
+    url: &str,
+    wanted: DecodeBox,
+    done: impl FnOnce(Option<gtk::gdk::Texture>) + 'static,
+) {
+    let key: TextureKey = (url.to_string(), wanted.key());
+    if let Some(texture) = cached_texture(&key) {
+        done(Some(texture));
+        return;
+    }
     let file = if url.contains("://") {
         gio::File::for_uri(url)
     } else {
         gio::File::for_path(url)
     };
     file.load_bytes_async(None::<&gio::Cancellable>, move |result| {
-        let texture = result.ok().and_then(|(bytes, _)| {
-            let stream = gio::MemoryInputStream::from_bytes(&bytes);
-            let pixbuf =
-                gtk::gdk_pixbuf::Pixbuf::from_stream(&stream, None::<&gio::Cancellable>).ok()?;
-            let upright = pixbuf.apply_embedded_orientation().unwrap_or(pixbuf);
-            Some(gtk::gdk::Texture::for_pixbuf(&upright))
+        let Ok((bytes, _)) = result else {
+            done(None);
+            return;
+        };
+        let decoding = gio::spawn_blocking(move || decode_texture(&bytes, wanted));
+        glib::spawn_future_local(async move {
+            let texture = decoding.await.ok().flatten();
+            if let Some(texture) = &texture {
+                cache_texture(key, texture);
+            }
+            done(texture);
         });
-        done(texture);
     });
 }
 
@@ -1882,6 +2049,7 @@ pub struct RuntimeImageProps {
 #[allow(non_snake_case)]
 pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
     let fit = crate::widgets::content_fit(props.fit);
+    let decoded_at = DecodeBox::new(&props.width, &props.height, fit);
     // What shows the texture: a picture, or a template drawn in the
     // foreground color.
     let (picture, show): (gtk::Widget, ShowTexture) = if props.template {
@@ -1948,7 +2116,7 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
             let resize = Rc::clone(&resize);
             let wanted = Rc::clone(&current);
             let requested = url.clone();
-            load_texture(&url, move |texture| {
+            load_texture(&url, decoded_at, move |texture| {
                 // A later URL replaced this one while it was read.
                 if wanted.borrow().as_deref() != Some(requested.as_str()) {
                     return;
@@ -1990,6 +2158,42 @@ pub(crate) fn rounded(
 mod tests {
     use super::*;
     use crate::host::tests::{app, start};
+
+    #[test]
+    fn pictures_decode_at_twice_their_frame_and_never_larger() {
+        let poster = DecodeBox {
+            width: Some(176.0),
+            height: Some(264.0),
+            cover: true,
+        };
+        // A 600 × 900 poster covers 176 × 264 at 0.293 of its size.
+        assert_eq!(poster.size_for(600, 900), Some((176, 264)));
+        // Covering a frame of another shape keeps the longer overflow.
+        assert_eq!(poster.size_for(1000, 500), Some((528, 264)));
+        // Fitting inside it takes the smaller scale.
+        let fitted = DecodeBox {
+            cover: false,
+            ..poster
+        };
+        assert_eq!(fitted.size_for(1000, 500), Some((176, 88)));
+        // A picture already small enough is decoded as it is.
+        assert_eq!(poster.size_for(100, 150), None);
+        // One side given: that side decides.
+        let wide = DecodeBox {
+            width: Some(200.0),
+            height: None,
+            cover: true,
+        };
+        assert_eq!(wide.size_for(800, 400), Some((200, 100)));
+        // No side given: the whole picture.
+        let free = DecodeBox {
+            width: None,
+            height: None,
+            cover: true,
+        };
+        assert_eq!(free.size_for(800, 400), None);
+        assert_ne!(poster.key(), fitted.key());
+    }
 
     #[test]
     fn extensions_come_from_the_last_path_segment() {

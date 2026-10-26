@@ -411,6 +411,13 @@ mod rail {
             *vexpand = self.vertical.get();
         }
 
+        /// Only what stands on the rail takes input: a rail laid over other
+        /// content (a marker across a timeline of posters) must not catch
+        /// the presses meant for it.
+        fn contains(&self, _x: f64, _y: f64) -> bool {
+            false
+        }
+
         fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             let along = if self.vertical.get() {
                 gtk::Orientation::Vertical
