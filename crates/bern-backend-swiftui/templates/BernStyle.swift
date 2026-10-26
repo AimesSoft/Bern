@@ -2111,6 +2111,14 @@ extension View {
         modifier(BernSnap(center: center, axis: axis))
     }
 
+    /// The scroll bar only while a mouse is in use: on macOS while the
+    /// system draws scroll bars that stay (a mouse is connected, or they
+    /// are set to always show), on iPadOS once a pointer hovers over the
+    /// scroll view; never for touch alone.
+    func bernMouseIndicators() -> some View {
+        modifier(BernMouseIndicators())
+    }
+
     /// An item of a scroll view that comes to rest at its center: its size
     /// leaves room for the first and last item to reach the center.
     func bernSnapItem() -> some View {
@@ -2174,6 +2182,37 @@ private struct BernScrollEffect: ViewModifier {
                     .opacity(opacity + (1 - opacity) * near)
             }
         }
+    }
+}
+
+private struct BernMouseIndicators: ViewModifier {
+    #if os(macOS)
+    /// The style macOS picks follows the mouse: scroll bars that stay
+    /// while one is connected, overlay bars that fade for a trackpad.
+    @State private var mouse = NSScroller.preferredScrollerStyle == .legacy
+    #elseif os(iOS)
+    @State private var mouse = false
+    #endif
+
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        // `.never`, not `.hidden`: `.hidden` still shows the bar when
+        // scroll bars are set to always show.
+        content
+            .scrollIndicators(mouse ? .automatic : .never)
+            .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+                mouse = NSScroller.preferredScrollerStyle == .legacy
+            }
+        #elseif os(iOS)
+        // Only a pointer hovers; a finger never does.
+        content
+            .scrollIndicators(mouse ? .automatic : .never)
+            .onContinuousHover { phase in
+                if case .active = phase, !mouse { mouse = true }
+            }
+        #else
+        content.scrollIndicators(.never)
+        #endif
     }
 }
 

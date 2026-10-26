@@ -1337,6 +1337,8 @@ pub struct ScrollProps {
     pub arrival_nudge: bool,
     /// Scroll without showing the scroll bar.
     pub hide_indicators: bool,
+    /// Show the scroll bar only for a mouse.
+    pub mouse_indicators: bool,
     pub nudge_motion: Curve,
     pub smooth: Curve,
     /// Where it opens: the point at this fraction of the content at the
@@ -1369,6 +1371,9 @@ pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
             scrolling
         },
     );
+    if props.mouse_indicators {
+        mouse_indicators(&view, horizontal);
+    }
     view.set_vexpand(!horizontal);
     view.set_hexpand(true);
     // Across its axis a scroll view is as large as its content; in a
@@ -1419,6 +1424,42 @@ pub(crate) fn natural_scrolling(view: &gtk::ScrolledWindow, horizontal: bool) {
             viewport.set_vscroll_policy(gtk::ScrollablePolicy::Natural);
         }
     }
+}
+
+/// The scroll bar follows the device in use: a mouse brings it back as it
+/// moves over the view, a touchscreen or pen leaves it scrolling without
+/// one.
+fn mouse_indicators(view: &gtk::ScrolledWindow, horizontal: bool) {
+    use gtk::gdk::{EventType, InputSource};
+    let events = gtk::EventControllerLegacy::new();
+    events.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak = view.downgrade();
+    events.connect_event(move |_, event| {
+        if !matches!(
+            event.event_type(),
+            EventType::MotionNotify
+                | EventType::ButtonPress
+                | EventType::Scroll
+                | EventType::TouchBegin
+        ) {
+            return glib::Propagation::Proceed;
+        }
+        let policy = match event.device().map(|device| device.source()) {
+            Some(InputSource::Mouse | InputSource::Trackpoint) => gtk::PolicyType::Automatic,
+            Some(InputSource::Touchscreen | InputSource::Pen) => gtk::PolicyType::External,
+            _ => return glib::Propagation::Proceed,
+        };
+        if let Some(view) = weak.upgrade() {
+            let (h, v) = view.policy();
+            if horizontal && h != policy {
+                view.set_policy(policy, v);
+            } else if !horizontal && v != policy {
+                view.set_policy(h, policy);
+            }
+        }
+        glib::Propagation::Proceed
+    });
+    view.add_controller(events);
 }
 
 /// Once the scroll view first knows how far it scrolls, stand at `at` of

@@ -690,12 +690,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("snap", PropKind::Keyword(&["start", "center"])),
             opt("position", PropKind::PositionField),
             opt("arrival", PropKind::Keyword(&["nudge"])),
-            opt("indicators", PropKind::Keyword(&["automatic", "hidden"])),
+            opt(
+                "indicators",
+                PropKind::Keyword(&["automatic", "hidden", "mouse"]),
+            ),
             opt("open_at", PropKind::Number),
             opt("open_center", PropKind::NumberValue),
         ],
         Children::Any,
-        "Scrolling container; `open_at` is where it opens: the point at that fraction of the content at the same fraction of the view, 0 the start, 0.5 the middle at the middle, 1 the end; `open_center` opens with the point at that fraction of the content in the middle of the view, or as near the middle as the content reaches, so the point is always in view; it may be bound, and is read once as the view opens; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives; `indicators: hidden` scrolls without showing the scroll bar, for a shelf that has its own paging buttons",
+        "Scrolling container; `open_at` is where it opens: the point at that fraction of the content at the same fraction of the view, 0 the start, 0.5 the middle at the middle, 1 the end; `open_center` opens with the point at that fraction of the content in the middle of the view, or as near the middle as the content reaches, so the point is always in view; it may be bound, and is read once as the view opens; with `snap`, scrolling comes to rest with an item at the start or center; `position` holds the key of the item there, and setting it scrolls to that item, which with `arrival: nudge` gives a nudge when it arrives; `indicators: hidden` scrolls without showing the scroll bar, for a shelf that has its own paging buttons; `indicators: mouse` shows it only while a mouse is in use, which cannot drag the shelf as a finger does, and hides it for touch",
     ),
     spec(
         "SplitView",

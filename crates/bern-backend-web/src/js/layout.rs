@@ -258,6 +258,10 @@ impl Generator<'_> {
                 "hideIndicators",
                 (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
             ),
+            (
+                "mouseIndicators",
+                (element.keyword("indicators") == Some("mouse")).then(|| "true".into()),
+            ),
             ("openAt", element.number("open_at").map(number)),
             ("openCenter", self.length(element, "open_center")),
         ]);

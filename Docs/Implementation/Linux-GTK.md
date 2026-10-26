@@ -270,6 +270,10 @@ target/bern/linux/Showcase/showcase
 
 跟随状态的快捷键生成为 `b::bound_shortcut(c, b::str(…), …)` 与 `KeyShortcutProps { bound: Some(…) }`：窗口的捕获阶段按键控制器在每次按键时读取文本并按 Bern 的规则解析。`b::ShortcutInput` 是一个按钮，按下后把窗口的 `recorder` 设为它：按键控制器先把按键交给它（Control 写作 `cmd`，按 Shift 时取不带 Shift 的键），Esc 保持原样，单独按退格或 Delete 清空，只按修饰键继续等待；等待期间快捷键不执行。显示文字为 `Ctrl+Shift+K` 的写法。`MenuBar` 不生成（GNOME 的应用不用菜单栏）。验证：`bern-gtk` 的单元测试在 macOS 的 GTK 4 上覆盖按键的写法、每次读取文本与空文本不占键；生成器测试（gallery）覆盖生成代码；未在 Linux 上运行。
 
+## 只为鼠标显示的滚动条（2026-10-27）
+
+`ScrollView(indicators: mouse)` 生成 `mouse_indicators: true`：滚动窗口上加一个捕获阶段的 `EventControllerLegacy`，在移动、按下、滚动与触摸开始时看事件设备的 `InputSource`。鼠标与指点杆把这个方向的策略设为 `Automatic`（GTK 的浮层滚动条随指针出现），触摸屏与笔设为 `External`（照样滚动，不显示滚动条），其他来源不改变；起初为 `Automatic`。Wayland 上触控板移动指针通常按鼠标上报。验证：`bern-gtk` 在 macOS 的 GTK 4 上编译通过；未在 Linux 上运行。
+
 ## 验证记录
 
 2026-10-11，Ubuntu 24.04（aarch64，GNOME 46 Wayland），经 SSH 驱动虚拟机桌面会话中的应用，截图来自开发快照：

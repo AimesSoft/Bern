@@ -221,3 +221,7 @@ iPhone 17e 模拟器（iOS 26.5，390 × 844 点，截图 1170 × 2532）上，�
 ## 跟随状态的快捷键与改键（2026-10-24）
 
 与 macOS 共用生成：`shortcut:` 与 `Shortcut(key:)` 绑定文本时生成 `BernShortcuts.keyboard(…)`。`ShortcutInput` 在 iOS 上等待硬件键盘的按键（`focusable` 加 `onKeyPress`），没有硬件键盘时只显示快捷键。`MenuBar` 在 iOS 上不生成（iPad 的菜单栏未接入，能力 `menu_bar` 不适用）。验证：`tests/menu_bar.rs` 按 iOS 模拟器 SDK 类型检查；未在模拟器或设备上运行。
+
+## 只为鼠标显示的滚动条（2026-10-27）
+
+`ScrollView(indicators: mouse)` 与 macOS 共用 `.bernMouseIndicators()`：只有指针会悬停，手指不会，所以 iPad 上指针悬停过滚动视图后为 `.scrollIndicators(.automatic)`，此前与只用手指时为 `.never`。验证：生成器测试对 iOS 做 Swift 类型检查；未在 iPad 或模拟器上实测。

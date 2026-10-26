@@ -113,6 +113,8 @@ struct ScrollProps {
     Motion const* reflow = nullptr;
     /// Scroll without showing the scroll bar.
     bool hideIndicators = false;
+    /// Show the scroll bar only for a mouse.
+    bool mouseIndicators = false;
     /// Where it opens: the point at this fraction of the content at the
     /// same fraction of the view.
     std::optional<double> openAt;
@@ -170,6 +172,20 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     scroller.HorizontalScrollMode(horizontal ? controls::ScrollMode::Enabled : controls::ScrollMode::Disabled);
     scroller.VerticalScrollMode(horizontal ? controls::ScrollMode::Disabled : controls::ScrollMode::Enabled);
     SetRole(scroller, horizontal ? L"bern-fill-width" : L"bern-fill");
+    if (props.mouseIndicators) {
+        // `Auto` shows the bar as a mouse moves over the view; touch and
+        // pen hide it before panning would show their thin indicator.
+        using PointerHandler = xaml::Input::PointerEventHandler;
+        auto follow = PointerHandler([horizontal](IInspectable const& sender, xaml::Input::PointerRoutedEventArgs const& args) {
+            auto viewer = sender.as<controls::ScrollViewer>();
+            auto shown = args.Pointer().PointerDeviceType() == PointerKind::Mouse ? controls::ScrollBarVisibility::Auto : controls::ScrollBarVisibility::Hidden;
+            if ((horizontal ? viewer.HorizontalScrollBarVisibility() : viewer.VerticalScrollBarVisibility()) == shown) return;
+            if (horizontal) viewer.HorizontalScrollBarVisibility(shown);
+            else viewer.VerticalScrollBarVisibility(shown);
+        });
+        scroller.AddHandler(xaml::UIElement::PointerEnteredEvent(), winrt::box_value(follow), true);
+        scroller.AddHandler(xaml::UIElement::PointerPressedEvent(), winrt::box_value(follow), true);
+    }
     auto scroll = std::make_shared<ScrollInfo>();
     scroll->viewer = scroller;
     scroll->horizontal = horizontal;

@@ -1232,6 +1232,7 @@ pub fn screen(app: demo::Client, #[session] draft: Draft) -> impl View {
      }
      Text(content: tr! { "en" => "Home" })
      ScrollView(axis: horizontal, indicators: hidden, appear: fade) { Text(content: tr! { "en" => "Shelf" }) }
+     ScrollView(axis: horizontal, indicators: mouse) { Text(content: tr! { "en" => "Strip" }) }
      Form(appear: fade) { Section { Text(content: tr! { "en" => "Row" }) } }
     }
    }
@@ -1324,6 +1325,8 @@ platform = "ios"
     assert!(generated.contains(".disabled(!("));
     assert!(!generated.contains(".allowsHitTesting("));
     assert!(generated.contains(".scrollIndicators(.never)"));
+    // The strip shows its scroll bar only for a mouse.
+    assert!(generated.contains(".bernMouseIndicators()"));
     // Scroll views enter without moving themselves: a scroll view's
     // content enters on appear inside it, and a form fades below the bar.
     let shelf = generated

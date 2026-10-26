@@ -410,3 +410,7 @@ bern package --target android
 - 浮层按钮：浮层是 Material 的 `DropdownMenu`，位置由它决定（锚在按钮下方，放不下时左移），没有箭头。画框页静置三秒后按钮行隐藏，打开的浮层随之卸载，这是声明的行为。
 - 动画 SVG 第一次显示时新建 `WebView`，主线程约 50 ms；离开后 30 秒内再显示同一文档才复用。图标出现的那一帧在 RenderThread 上 9–22 ms，可能误一帧；显示期间每帧约 5 ms。
 - 切页的长帧之后，其后的帧在缓冲队列里多排一到两块，整体晚一到两帧上屏，直到动画结束（不是掉帧）；这是切页长帧的后果，没有单独处理。
+
+## 滚动条（2026-10-27）
+
+`ScrollView` 的 `indicators`（`automatic`、`hidden`、`mouse`）在 Compose 上都不生成代码：`horizontalScroll`、`verticalScroll` 本身不画滚动条。

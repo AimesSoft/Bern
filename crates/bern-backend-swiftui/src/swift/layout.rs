@@ -596,8 +596,10 @@ impl Generator<'_> {
         }
         // `.hidden` still shows the bar when macOS is set to show
         // scroll bars always; `.never` does not.
-        if element.keyword("indicators") == Some("hidden") {
-            out.line(".scrollIndicators(.never)");
+        match element.keyword("indicators") {
+            Some("hidden") => out.line(".scrollIndicators(.never)"),
+            Some("mouse") => out.line(".bernMouseIndicators()"),
+            _ => {}
         }
         // Where it opens: that fraction of the content at the same
         // fraction of the view.

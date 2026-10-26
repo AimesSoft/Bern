@@ -256,6 +256,10 @@ impl Generator<'_> {
                         "hideIndicators",
                         (element.keyword("indicators") == Some("hidden")).then(|| "true".into()),
                     ),
+                    (
+                        "mouseIndicators",
+                        (element.keyword("indicators") == Some("mouse")).then(|| "true".into()),
+                    ),
                     ("openAt", Self::number(element, "open_at")),
                     ("openCenter", self.len(element, "open_center")),
                 ])

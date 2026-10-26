@@ -226,6 +226,10 @@ flowchart LR
 
 `F.shortcut` 接受文本或返回文本的函数：跟随状态的快捷键在每次按键时读取当前文本，空文本或读不成快捷键时不占任何键。`F.ShortcutInput` 是一个按钮，按下后在捕获阶段取下一次按键（`pressedKeys`，与快捷键匹配用同一套键名），Esc 保持原样，单独按 Backspace 或 Delete 清空，点到别处停止等待；等待时所有快捷键都让开。按钮上的文字按 `shortcutText` 写出：苹果系统上 ⌃⌥⇧⌘ 与键的符号，其他系统 `Ctrl+Shift+K`，空格键按界面语言（框架文本 `bern.shortcut.space`）。搜索面板上的按键提示也跟随状态。`MenuBar` 在网页上不生成。验证：`tests/features-runtime.test.mjs` 覆盖文本变化后旧键让出、新键生效、空文本不占键，以及录制、Esc、修饰键单独按下继续等待、Delete 清空、`ui.edit`、卸载后不再监听；未在浏览器里实测。
 
+## 只为鼠标显示的滚动条（2026-10-27）
+
+`ScrollView(indicators: mouse)` 生成 `mouseIndicators: true`，运行时 `followPointer` 按设备切换 `bern-scroll-indicators-hidden`：起初看 `(pointer: fine)`，主指针是鼠标的设备一开始就显示，页面不会在鼠标第一次移过时多出一条滚动条的高度；之后 `pointerover`、`pointerdown` 的 `pointerType` 为 `mouse` 时显示，触摸与笔隐藏。验证：生成器测试覆盖生成代码；未在浏览器里实测。
+
 ## 验证记录
 
 2026-10-10，v0.1 视觉规范（窗口呈现已由 v0.2 取代），内置浏览器，`python3 -m http.server` 提供 `target/bern/web_app`：

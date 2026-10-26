@@ -584,6 +584,8 @@ macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出
 
 `ScrollView(indicators: hidden)` 生成 `.scrollIndicators(.never)`：`.hidden` 在系统设为「始终显示滚动条」时仍会显示滚动条。
 
+`ScrollView(indicators: mouse)`（2026-10-27）生成 `.bernMouseIndicators()`，只在用鼠标时显示滚动条：鼠标不能像手指那样拖动横向的条带。macOS 上照 `NSScroller.preferredScrollerStyle`：系统给常驻滚动条时（接着鼠标，或设为「始终显示滚动条」）为 `.automatic`，只有触控板、系统给浮层滚动条时为 `.never`；插拔鼠标或改设置时随 `preferredScrollerStyleDidChangeNotification` 更新。iOS 见 iOS 实现记录，tvOS 总是 `.never`。验证：`search_palette_generates_native_controls_and_type_checks` 生成这种滚动视图，并对 macOS 与 iOS 做 Swift 类型检查；未在应用里看过滚动条。
+
 ### 标签选择器与换行工具条（2026-10-20）
 
 `Picker(style: chips)` 生成 `BernChips`：每个选项一个系统 `Button`，用 `bernCapsuleControl(height: 30, prominent:)` 画成设计 6.3 的 30 点 chip（13 点中等字重，两端 13 点）；macOS / iOS 26 是系统可交互的 Liquid Glass，选中项染主题色，26 之前是材质胶囊与主题色胶囊；tvOS 上高 40 点、按 tvOS 的焦点样式。选中项带 `.isSelected` 无障碍特征。不显示标签且直接放在 `Flow` 里时，`BernChips` 的主体是一个 `ForEach`，每个按钮都是 `BernFlow` 的子视图，控件登记挂在第一个按钮上；其他位置它们放进自己的 `BernFlow(gap: 8)`，整组带标签作为无障碍名称。

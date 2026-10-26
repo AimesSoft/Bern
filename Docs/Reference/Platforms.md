@@ -1,6 +1,6 @@
 # 平台能力与验证范围
 
-更新：2026-10-25。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
+更新：2026-10-27。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
 
 ## 编译期功能支持
 
@@ -117,6 +117,7 @@
 | 瀑布流 `Grid(masonry)` 与行内 Markdown `Text(markdown)`（2026-10-24） | 瀑布流：SwiftUI 与 Compose 用自定义布局，Web 用一像素高的网格行，GTK 与 WinUI 3 按普通网格排。Markdown：SwiftUI 用系统的 `AttributedString`，Compose 用 `AnnotatedString` 与 `LinkAnnotation`，Web 生成元素，GTK 用 Pango 标记，WinUI 3 去掉标记只显示文字 | macOS、iOS 模拟器与 Android 真机上一个实际应用的插件市场与插件页：多列卡片按高度错落排列，标题、列表（含嵌套）、粗体、链接与行内代码按平台样式显示；GTK 与 WinUI 3 未实测 |
 | 文字样式 `code`（2026-10-25） | 五个后端用各自平台的等宽字体：SwiftUI 的 `.monospaced`、Compose 的 `FontFamily.Monospace`、Web 的 `ui-monospace`、GTK 的 `monospace` 样式类、WinUI 3 的 Cascadia Mono；定了字号时 SwiftUI 也保留等宽 | Android 真机上一个实际应用插件页的代码块；其他目标未实测 |
 | 按明暗换色的 SVG 画成两张图、声明图片双采样（2026-10-26） | `bern-svg` 测试覆盖分类与按外观展开；`svg_targets` 覆盖 macOS、Windows、Android、Linux、Web 的降低（`dark_source`）与两张 PNG 的颜色；Compose、GTK、WinUI 3、SwiftUI（含 swiftc 类型检查）与 Web 的生成器测试，Web 运行时测试覆盖排进页面后选图与主题变化时换图；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy；WinUI 3 与 XAML Islands 在 Windows PC 上经 MSVC 编译；临时示例 `bern build` 的 macOS、Android、Web 构建通过 | macOS 27：窗口里、`appearance: dark` 部件里、`appearance: light` 部件里各一张，跟随系统（深色）、`WindowSet(appearance:)` 强制浅色与深色、回到跟随系统时都显示对应那张；Chromium（内置浏览器）上同样四种情况及模拟系统切到浅色都对。macOS 的系统外观切换、iOS、tvOS、Android、Linux、Windows 未运行实测 |
+| 只为鼠标显示的滚动条 `ScrollView(indicators: mouse)`（2026-10-27） | SwiftUI 在 macOS 照系统滚动条样式（接着鼠标或设为始终显示时显示）、在 iOS 指针悬停后显示，tvOS 不显示；WinUI 3 按指针设备类型、GTK 按事件设备来源、Web 按 `pointerType` 在显示与隐藏之间切换，触摸与笔隐藏；Compose 本来不画滚动条。生成器测试含 macOS 与 iOS 的 Swift 类型检查，`bern-gtk` 编译通过；WinUI 3 的 C++ 未编译 | 未在任何设备上实测 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

@@ -1,6 +1,6 @@
 # 内置组件属性表
 
-更新：2026-10-25。本表从 [bern-ir::spec](../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 78 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
+更新：2026-10-27。本表从 [bern-ir::spec](../../crates/bern-ir/src/spec.rs) 的当前公共定义导出，共 78 个内置组件。**粗体属性必填**，其余可选；这些是声明规则，目标实现范围见[平台能力表](Platforms.md)，具体使用见[组件用法](UI.md)。
 
 ## 属性类型
 
@@ -76,7 +76,7 @@
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |
 | `WindowButtons` | 无专有属性 | 不含子节点；无动作；macOS 上占出红绿灯的位置，其他平台不占位置 |
 | `Divider` | 无专有属性 | 不含子节点；无动作 |
-| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden`<br>`open_at: Number`<br>`open_center: NumberValue` | 可含子内容；无动作 |
+| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue` | 可含子内容；无动作 |
 | `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |
 | `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"] |
 | `SidebarHeader` | `role: content / title` | 可含子内容；无动作；直接位于 ["Sidebar"] |

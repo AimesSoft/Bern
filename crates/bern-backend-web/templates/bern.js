@@ -2729,14 +2729,26 @@ export function Divider(p) {
   p.append(el("hr", { class: "bern-divider" }));
 }
 
-export function ScrollView(p, ctx, { axis, hideIndicators, openAt, openCenter }, children) {
+export function ScrollView(p, ctx, { axis, hideIndicators, mouseIndicators, openAt, openCenter }, children) {
   // A scroll view takes the room it gets, as on the native targets.
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
   if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
+  if (mouseIndicators) followPointer(node);
   children(node, ctx);
   p.append(node);
   if (openAt !== undefined) openScroll(node, axis === "horizontal", openAt);
   if (openCenter !== undefined) centerScroll(node, axis === "horizontal", openCenter);
+}
+
+/// The scroll bar follows the device in use: a mouse shows it, touch and
+/// pen hide it. It opens shown where the main pointer is a mouse, so a
+/// desktop page does not shift as the mouse first comes over it.
+export function followPointer(node) {
+  const follow = (mouse) => node.classList.toggle("bern-scroll-indicators-hidden", !mouse);
+  follow(matchMedia("(pointer: fine)").matches);
+  const seen = (event) => follow(event.pointerType === "mouse");
+  node.addEventListener("pointerover", seen);
+  node.addEventListener("pointerdown", seen);
 }
 
 /// Once the scroll view first knows how far it scrolls, it stands with the
