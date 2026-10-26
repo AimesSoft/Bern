@@ -775,7 +775,10 @@ fn hero_leave(key: &str, motion: &MotionBox, layer: &gtk::Fixed) {
 /// Videos and drawings change on their own; their pictures go stale, so
 /// they get no ghost.
 fn contains_media(widget: &gtk::Widget) -> bool {
-    if widget.is::<gtk::Picture>() || widget.is::<gtk::DrawingArea>() {
+    if widget.is::<gtk::Picture>()
+        || widget.is::<gtk::DrawingArea>()
+        || widget.is::<crate::canvas::CanvasArea>()
+    {
         return true;
     }
     let mut child = widget.first_child();

@@ -25,7 +25,7 @@
 | 阶段四：`Adaptive`、`Menu`、`LanguagePicker`、运行时切换语言 | 完成 | 窗口缩窄后布局切换为紧凑并挂载菜单，菜单未打开时也能执行菜单项；语言切换后界面全部更新，草稿保留 |
 | 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色、边框、圆角、内边距、尺寸档与阴影生成应用优先级的样式表，状态取 GTK 的状态标志；缩放、位移与透明度用 `AdwSpringAnimation`，回到普通状态用 `settle`。见“样式覆盖” |
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 变换在分配子控件时施加，不影响布局；`reflow` 只在 `Column`、`Row` 里（含其中的 `ForEach`），其他容器构建时警告。见“动效” |
-| 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | cairo 绘制，颜色取 libadwaita 的命名颜色；标注按 Pango 的行位置画在文字下 |
+| 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | 纯色的形状用渲染器自己的节点，渐隐、虚线、序列与图案用 cairo；颜色取 libadwaita 的命名颜色；标注按 Pango 的行位置画在文字下 |
 | 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 见“窗口外框、静置与对话框” |
 | 静置区 `idle_area` | 完成，未实测 | 鼠标停在静置区上才静置；运行时在 macOS 上用 Homebrew 的 GTK 4 通过 Clippy，生成器测试覆盖。Ubuntu 虚拟机的磁盘已满，未构建运行。见“窗口外框、静置与对话框” |
 | 可增减的侧栏项、页签与工具栏项 | 完成 | 侧栏项与页签在挂载期间登记；选中项离开时选中移到 `fallback` 或剩下的第一项 |
@@ -71,7 +71,7 @@
 | `Progress` | 有 `value` 时为标签下的 `GtkProgressBar`，由标签命名；没有时为 `GtkSpinner` 加 `dim-label` 文字（libadwaita 1.5 还没有 `AdwSpinner`） |
 | `Grid` | 同宽单元格的 `GtkFlowBox`：每格至少 `min_width` 宽，不可选择，单元格本身不获得焦点；绑定的 `min_width` 随 `animate` 的弹簧变化，列数随之改变 |
 | `Stack` | `BernLayers`：子元素叠在同一处，后写的在上面、先接收输入，按 `align` 对齐；整体与最大的一层一样大，得到更多空间时保持在前缘，除非某层要填满（没有尺寸的画布、轨道、视频等，GTK 的 expand 向上传递） |
-| `Canvas` | `GtkDrawingArea`，cairo 绘制；没写 `width`、`height` 的方向填满可用空间；有 `label` 时是带名称的图像，没有时对辅助技术隐藏 |
+| `Canvas` | `BernCanvas`（见“自绘”）；没写 `width`、`height` 的方向填满可用空间；有 `label` 时是带名称的图像，没有时对辅助技术隐藏 |
 | `Text(mark:)` | `BernMarkedText`：标签之下按 Pango 每一行的逻辑范围画胶囊形底纹（行高 74% 至 98%，右端多出 0.4 个字宽），文字变化或主题变化时重画 |
 | `Rail` | `BernRail`：沿轴取得到的长度，交叉方向为最厚的子元素；`at` 的子元素按 `anchor` 对准比例点，`from`/`to` 的子元素铺在两点之间、没有交叉尺寸时铺满厚度；比例变化随 `animate` 的弹簧移动。轨道只沿轴向外要空间：没有尺寸的子元素不让外面的容器在交叉方向变大。在 `Stack` 中轨道两个方向都铺满其他层给出的尺寸，自己只按有尺寸的子元素计入 |
 | `SidebarFooter` | 侧栏列表下方、分隔线之下的一栏，列表在它上方滚动 |
@@ -147,7 +147,7 @@
 
 ### 自绘与图片
 
-- `Canvas` 是 `GtkDrawingArea`，绘图元素在一个绑定中读取，状态、尺寸或颜色（系统明暗、对比度、应用的强调色与明暗）变化时重绘；颜色在绘制时按控件所在部分的外观解析。图案按条带逐条绘制，`twill` 叠 45° 细线，不缓存位图。
+- `Canvas` 是 `BernCanvas`：纯色的 `Shape` 画成渲染器自己的节点，填充是同一轮廓的圆角裁剪下的颜色，描边是向轮廓两侧各伸出半个线宽的边框（与 cairo 的描边重合）；只有 `fade`、虚线、`Series` 与图案用 cairo，各自画进一张图，空的 `Canvas` 什么也不画。此前它是 `GtkDrawingArea`：每次绘制都在界面线程上把整块区域栅格化成一张 cairo 图再上传，作间隔用的空 `Canvas` 也一样。绘图元素在一个绑定中读取，状态、尺寸或颜色（系统明暗、对比度、应用的强调色与明暗）变化时重绘；颜色在绘制时按控件所在部分的外观解析。图案按条带逐条绘制，`twill` 叠 45° 细线，不缓存位图。
 - `fill_from` 的图片在后台读取（`GFile`，本地文件或 http(s)），按 EXIF 方向转正后缩到 32×32 取平均色，按 URL 缓存；读到之前用 `fill`。`fade` 是向一侧渐隐为透明的线性渐变。
 - `Image(source: app.x)` 在后台读取后显示，`None` 时不显示；只写一边时另一边按图片比例。
 
@@ -334,7 +334,7 @@ target/bern/linux/Showcase/showcase
 
 2026-10-20，Ubuntu 24.04 虚拟机经 Broadway，用于验收的媒体类应用的设置窗口“可选功能”（窗口快照与生成的 CLI）：
 
-- `Stack` 里两个方向都不给尺寸的绘图（`DrawingArea`）是其他层的底板，和轨道一样不让 `Stack` 撑开：此前预览里选中项的 `Stack` 因底板而纵向撑开。
+- `Stack` 里两个方向都不给尺寸的绘图（`Canvas`）是其他层的底板，和轨道一样不让 `Stack` 撑开：此前预览里选中项的 `Stack` 因底板而纵向撑开。
 - `Form` 横向也占满给它的空间，与其他目标相同：此前它的横向撑开是借每行图标底的 `Stack` 撑开得来的，底板的规则改正后表单被挤成一列窄条。
 - 写了 `reflow` 的行与列（`ReflowBox`）像 GTK 的盒子一样汇总子元素的撑开：此前预览播放条那一行只有自然宽度，其中的轨道分到 0 宽，进度条不显示。
 - 带底板的 `Stack` 横向占满分给它的宽度、底板随之铺满：此前层叠按其他层的自然宽度分配，设置页插件横幅的底图只有文字那么宽。

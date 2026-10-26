@@ -505,7 +505,7 @@ glib::wrapper! {
 /// Whether `widget` is a drawing without a size, which fills both ways:
 /// among the layers of a stack, their backdrop.
 fn is_backdrop(widget: &gtk::Widget) -> bool {
-    widget.is::<gtk::DrawingArea>()
+    (widget.is::<gtk::DrawingArea>() || widget.is::<crate::canvas::CanvasArea>())
         && widget.is_hexpand_set()
         && widget.hexpands()
         && widget.is_vexpand_set()

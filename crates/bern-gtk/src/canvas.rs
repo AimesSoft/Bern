@@ -1,10 +1,14 @@
 //! `Canvas` and `Text(mark:)`: drawings in semantic colors.
 //!
-//! A canvas is a `GtkDrawingArea` drawn with cairo in its own coordinates.
-//! Its drawing elements are read in one binding, so it redraws when the
-//! state they show changes, as it does when it resizes or the colors behind
-//! the roles change. Patterns are drawn band by band each time; nothing is
-//! cached as a bitmap.
+//! A canvas draws its elements in its own coordinates. Shapes in solid
+//! colors become the renderer's own nodes (colors under rounded clips,
+//! borders); only fades, dashes, series and patterns are drawn with cairo,
+//! each into a picture of its own, and an empty canvas draws nothing. A
+//! cairo picture is rasterized and uploaded on the interface thread, which
+//! a page of spacers and dots made slow to appear. Its drawing elements are
+//! read in one binding, so it redraws when the state they show changes, as
+//! it does when it resizes or the colors behind the roles change. Patterns
+//! are drawn band by band each time; nothing is cached as a bitmap.
 
 use crate::motion::{Curve, Num, bind_number};
 use crate::reactive::{Version, effect};
@@ -443,11 +447,185 @@ fn draw_pattern(
     }
 }
 
+/// Draw `op` as the renderer's own nodes: its fill as a color under a
+/// rounded clip of the same outline, its stroke as a border reaching half
+/// its width to either side of the outline, as cairo strokes it. `false`
+/// for what only cairo draws: a fade or a dash.
+fn native_shape(
+    snapshot: &gtk::Snapshot,
+    widget: &gtk::Widget,
+    op: &ShapeOp,
+    average: Option<(f64, f64, f64)>,
+    w: f64,
+    h: f64,
+) -> bool {
+    if op.fade.is_some() || op.dash.is_some() {
+        return false;
+    }
+    let x = op.x.unwrap_or(0.0);
+    let y = op.y.unwrap_or(0.0);
+    let width = op.width.unwrap_or(w - x);
+    let height = op.height.unwrap_or(h - y);
+    if width <= 0.0 || height <= 0.0 {
+        return true;
+    }
+    // Each corner's radii, grown by `grow` where the outline is round.
+    let corners = |grow: f64| -> gtk::graphene::Size {
+        let (rx, ry) = match op.kind {
+            "ellipse" => (width / 2.0, height / 2.0),
+            "rounded" => {
+                let r = op
+                    .corner
+                    .unwrap_or(8.0)
+                    .min(width / 2.0)
+                    .min(height / 2.0)
+                    .max(0.0);
+                (r, r)
+            }
+            "capsule" => (width.min(height) / 2.0, width.min(height) / 2.0),
+            _ => (0.0, 0.0),
+        };
+        if rx <= 0.0 || ry <= 0.0 {
+            return gtk::graphene::Size::zero();
+        }
+        gtk::graphene::Size::new((rx + grow) as f32, (ry + grow) as f32)
+    };
+    let rounded_rect = |x: f64, y: f64, width: f64, height: f64, grow: f64| {
+        let corner = corners(grow);
+        gtk::gsk::RoundedRect::new(
+            gtk::graphene::Rect::new(x as f32, y as f32, width as f32, height as f32),
+            corner,
+            corner,
+            corner,
+            corner,
+        )
+    };
+    let opacity = op.opacity.unwrap_or(1.0) as f32;
+    let faded = |color: gtk::gdk::RGBA| {
+        gtk::gdk::RGBA::new(
+            color.red(),
+            color.green(),
+            color.blue(),
+            color.alpha() * opacity,
+        )
+    };
+    let fill = match average {
+        Some((r, g, b)) => Some(gtk::gdk::RGBA::new(r as f32, g as f32, b as f32, 1.0)),
+        None if op.fill.is_some() || op.stroke.is_none() => Some(theme::rgba(
+            &op.fill.unwrap_or(Color::Role("fill.strong")),
+            widget,
+        )),
+        None => None,
+    };
+    if let Some(fill) = fill {
+        let outline = rounded_rect(x, y, width, height, 0.0);
+        let bounds = *outline.bounds();
+        if outline.corner()[0].width() > 0.0 {
+            snapshot.push_rounded_clip(&outline);
+            snapshot.append_color(&faded(fill), &bounds);
+            snapshot.pop();
+        } else {
+            snapshot.append_color(&faded(fill), &bounds);
+        }
+    }
+    if let Some(stroke) = &op.stroke {
+        let line = op.stroke_width.unwrap_or(1.0);
+        if line > 0.0 {
+            let half = line / 2.0;
+            let outline = rounded_rect(x - half, y - half, width + line, height + line, half);
+            let color = faded(theme::rgba(stroke, widget));
+            snapshot.append_border(&outline, &[line as f32; 4], &[color; 4]);
+        }
+    }
+    true
+}
+
+mod area {
+    use super::*;
+
+    #[derive(Default)]
+    pub struct CanvasArea {
+        /// The size it asks for, `0` where it fills.
+        pub width: std::cell::Cell<i32>,
+        pub height: std::cell::Cell<i32>,
+        pub(super) drawn: RefCell<Vec<Drawn>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for CanvasArea {
+        const NAME: &'static str = "BernCanvas";
+        type Type = super::CanvasArea;
+        type ParentType = gtk::Widget;
+
+        fn class_init(klass: &mut Self::Class) {
+            klass.set_accessible_role(gtk::AccessibleRole::Img);
+        }
+    }
+
+    impl ObjectImpl for CanvasArea {}
+
+    impl WidgetImpl for CanvasArea {
+        fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            let size = match orientation {
+                gtk::Orientation::Horizontal => self.width.get(),
+                _ => self.height.get(),
+            };
+            (size, size, -1, -1)
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            let obj = self.obj();
+            let (w, h) = (f64::from(obj.width()), f64::from(obj.height()));
+            if w <= 0.0 || h <= 0.0 {
+                return;
+            }
+            let widget = obj.upcast_ref::<gtk::Widget>();
+            let bounds = gtk::graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
+            for item in self.drawn.borrow().iter() {
+                if let Drawn::Shape(op, average) = item
+                    && native_shape(snapshot, widget, op, *average, w, h)
+                {
+                    continue;
+                }
+                let cr = snapshot.append_cairo(&bounds);
+                match item {
+                    Drawn::Shape(op, average) => draw_shape(&cr, widget, op, *average, w, h),
+                    Drawn::Series(op) => draw_series(&cr, widget, op, w, h),
+                    Drawn::Pattern(pattern, opacity) => {
+                        draw_pattern(&cr, widget, pattern, *opacity, w, h)
+                    }
+                }
+            }
+        }
+    }
+}
+
+glib::wrapper! {
+    /// A `Canvas`: its drawing elements in its own coordinates.
+    pub struct CanvasArea(ObjectSubclass<area::CanvasArea>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl CanvasArea {
+    fn set_content_width(&self, width: i32) {
+        if self.imp().width.replace(width) != width {
+            self.queue_resize();
+        }
+    }
+
+    fn set_content_height(&self, height: i32) {
+        if self.imp().height.replace(height) != height {
+            self.queue_resize();
+        }
+    }
+}
+
 /// `Canvas`: its drawing elements in order, in its own coordinates; it
 /// fills the space where it has no size.
 #[allow(non_snake_case)]
 pub fn Canvas(p: &Parent, ctx: &Ctx, props: CanvasProps, ops: Ops) {
-    let area = gtk::DrawingArea::new();
+    let area: CanvasArea = glib::Object::new();
     match &props.width {
         Some(width) => {
             let sized = area.clone();
@@ -475,21 +653,6 @@ pub fn Canvas(p: &Parent, ctx: &Ctx, props: CanvasProps, ops: Ops) {
         }
         None => area.update_state(&[gtk::accessible::State::Hidden(true)]),
     }
-    let drawn: Rc<RefCell<Vec<Drawn>>> = Rc::new(RefCell::new(Vec::new()));
-    let shown = Rc::clone(&drawn);
-    area.set_draw_func(move |area, cr, w, h| {
-        let (w, h) = (f64::from(w), f64::from(h));
-        let widget = area.upcast_ref::<gtk::Widget>();
-        for item in shown.borrow().iter() {
-            match item {
-                Drawn::Shape(op, average) => draw_shape(cr, widget, op, *average, w, h),
-                Drawn::Series(op) => draw_series(cr, widget, op, w, h),
-                Drawn::Pattern(pattern, opacity) => {
-                    draw_pattern(cr, widget, pattern, *opacity, w, h)
-                }
-            }
-        }
-    });
     let at = ctx.clone();
     let redrawn = area.clone();
     effect(move || {
@@ -506,7 +669,7 @@ pub fn Canvas(p: &Parent, ctx: &Ctx, props: CanvasProps, ops: Ops) {
                 Op::Pattern(pattern, opacity) => Drawn::Pattern(pattern, opacity),
             })
             .collect();
-        *drawn.borrow_mut() = items;
+        *redrawn.imp().drawn.borrow_mut() = items;
         redrawn.queue_draw();
     });
     if p.is_list() {
