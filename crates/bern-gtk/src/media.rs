@@ -597,7 +597,7 @@ pub fn media(ctx: &Ctx, op: MediaOp, player: &str, args: Vec<Value>) {
         encode(value, &param.ty, &types, &mut writer);
     }
     let host = host();
-    let token = host.token(Some(ctx.win()), None);
+    let token = host.token(ctx.window_of(), None);
     with_bytes(&writer.bytes, |ptr, len| {
         // SAFETY: the handle is live while the application runs.
         unsafe {

@@ -25,7 +25,8 @@ struct Local {
 }
 
 struct Inner {
-    win: Rc<Win>,
+    /// None in the menu of the status item, which belongs to no window.
+    win: Option<Rc<Win>>,
     comp: &'static str,
     /// The key of every repeated row the content is in, outermost first.
     keys: Vec<Rc<dyn Fn() -> String>>,
@@ -61,7 +62,7 @@ impl Ctx {
     pub(crate) fn root(win: Rc<Win>, page: Option<Rc<Page>>) -> Self {
         Self(Rc::new(Inner {
             comp: win.kind_id(),
-            win,
+            win: Some(win),
             keys: Vec::new(),
             locals: None,
             page,
@@ -79,7 +80,7 @@ impl Ctx {
 
     fn with(&self, change: impl FnOnce(&mut Inner)) -> Self {
         let mut inner = Inner {
-            win: Rc::clone(&self.0.win),
+            win: self.0.win.clone(),
             comp: self.0.comp,
             keys: self.0.keys.clone(),
             locals: self.0.locals.clone(),
@@ -98,8 +99,37 @@ impl Ctx {
         Self(Rc::new(inner))
     }
 
+    /// The context of the status item's menu: it reads engine state and
+    /// runs commands, and failures show in the primary window while it is
+    /// open.
+    pub(crate) fn detached(comp: &'static str, win: Option<Rc<Win>>) -> Self {
+        Self(Rc::new(Inner {
+            comp,
+            win,
+            keys: Vec::new(),
+            locals: None,
+            page: None,
+            toolbar: false,
+            nav: None,
+            shown: None,
+            scroll: None,
+            sidebar: None,
+            tabs: None,
+            form: None,
+            palette: None,
+            fits: false,
+        }))
+    }
+
+    /// The window the content is in; content is always in one, only the
+    /// status item's menu is not, and it builds no content.
     pub(crate) fn win(&self) -> &Rc<Win> {
-        &self.0.win
+        self.0.win.as_ref().expect("content belongs to a window")
+    }
+
+    /// The window to show a failure in, if any.
+    pub(crate) fn window_of(&self) -> Option<&Rc<Win>> {
+        self.0.win.as_ref()
     }
 
     pub(crate) fn page(&self) -> Option<&Rc<Page>> {
@@ -117,13 +147,13 @@ impl Ctx {
 
     /// A field of the window's session drafts, recording a dependency.
     pub fn session(&self, session: usize, field: usize) -> Value {
-        self.0.win.cell(Field { session, field }).get()
+        self.win().cell(Field { session, field }).get()
     }
 
     /// UI state of the window, such as `window.idle` and `window.compact`,
     /// recording a dependency.
     pub fn window(&self, field: &str) -> Value {
-        self.0.win.state(field)
+        self.win().state(field)
     }
 
     /// A local variable: a component parameter, row variable or pattern
@@ -159,7 +189,9 @@ impl Ctx {
         })
     }
 
-    pub(crate) fn with_local(&self, name: &'static str, get: Rc<dyn Fn() -> Value>) -> Self {
+    /// The context with a local variable: a row variable or pattern
+    /// binding, which the menu of the status item binds itself.
+    pub fn with_local(&self, name: &'static str, get: Rc<dyn Fn() -> Value>) -> Self {
         let next = self.0.locals.clone();
         self.with(|inner| {
             inner.locals = Some(Rc::new(Local { name, get, next }));
@@ -263,15 +295,15 @@ impl Ctx {
     /// Write a session field of this window: the session runtime first,
     /// then the cell. Returns false when the runtime refused the write.
     pub(crate) fn write(&self, field: Field, value: Value) -> bool {
-        self.0.win.write(field, value)
+        self.win().write(field, value)
     }
 
     pub(crate) fn read(&self, field: Field) -> Value {
-        self.0.win.cell(field).get()
+        self.win().cell(field).get()
     }
 
     pub(crate) fn peek(&self, field: Field) -> Value {
-        self.0.win.cell(field).peek()
+        self.win().cell(field).peek()
     }
 }
 

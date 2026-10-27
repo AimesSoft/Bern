@@ -344,6 +344,8 @@ impl Generator<'_> {
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "TabAccessory"
             // Windows applications of this kind keep no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
+            // The application builds the status item's menu when it opens.
+            | "StatusItem"
             | "PickerOption" => {
                 // Realized by their parents.
             }

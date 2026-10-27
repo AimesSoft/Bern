@@ -558,6 +558,12 @@ pub struct WindowCatalog {
     /// with a system menu bar shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub menu_bar: Option<Element>,
+    /// The `StatusItem`: the application's item in the system's status
+    /// area and the `CommandItem`s, dividers and submenus of its menu, which
+    /// run without a window. Only a target with a status area shows it; with
+    /// it, closing the last window leaves the application running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_item: Option<Element>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

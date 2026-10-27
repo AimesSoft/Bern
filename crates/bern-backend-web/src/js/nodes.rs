@@ -279,7 +279,9 @@ impl Generator<'_> {
             "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
             | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption"
             // A page has no menu bar.
-            | "MenuBar" | "CommandMenu" | "CommandItem" => {
+            | "MenuBar" | "CommandMenu" | "CommandItem"
+            // Nor a status area.
+            | "StatusItem" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

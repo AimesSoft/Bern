@@ -1,7 +1,8 @@
-//! The menu bar, shortcuts that follow state and `ShortcutInput`: macOS
-//! puts the `MenuBar` in its menu bar, iOS and tvOS show none; shortcuts
-//! read their keys from state on all three. The Swift is type-checked
-//! against each system's SDK.
+//! The menu bar, the status item, shortcuts that follow state and
+//! `ShortcutInput`: macOS puts the `MenuBar` in its menu bar and the
+//! `StatusItem` at its right, iOS and tvOS show neither; shortcuts read
+//! their keys from state on all three. The Swift is type-checked against
+//! each system's SDK.
 
 use bern_backend_swiftui::{
     MINIMUM_IOS, MINIMUM_MACOS, MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos,
@@ -88,6 +89,16 @@ pub fn app(app: keys::Client, windows: AppWindows, #[session] draft: Draft) -> i
                 }
                 CommandMenu(role: app) {
                     CommandItem(id: preferences, label: tr! { "en" => "Settings…" }, shortcut: "cmd+,") => windows.settings.open()
+                }
+            }
+            StatusItem(icon: "play", label: tr! { "en" => "Keys" }) {
+                CommandItem(id: status_play, label: tr! { "en" => "Playing" }, checked: app.playing) => app.toggle()
+                Divider
+                CommandMenu(label: tr! { "en" => "Rate" }) {
+                    CommandItem(id: status_rate, label: tr! { "en" => "2×" }, checked: app.rate == 2) => app.set_rate(2)
+                }
+                if app.playing {
+                    CommandItem(id: status_back, label: tr! { "en" => "Back" }) => app.back()
                 }
             }
         }
@@ -266,6 +277,16 @@ fn the_menu_bar_is_the_macos_commands_and_shortcuts_follow_state() {
         "prompt: BernText.string(\"bern.shortcut.prompt\"), empty: BernText.string(\"bern.shortcut.none\")",
         // `window.menu_bar` holds on macOS: its branch stays, unconditional.
         "SwiftUI.Text(verbatim: BernText.string(\"page.0.3.if0.0.content\"))",
+        // The status item: a symbol the menu bar draws as a template, a
+        // menu that opens the primary window, the application's items, and
+        // Quit; without windows the application stays in the menu bar.
+        "SwiftUI.MenuBarExtra {",
+        "SwiftUI.Image(systemName: \"play\").accessibilityLabel(",
+        "struct BernStatusMenu: View {",
+        "SwiftUI.Button(BernText.format(\"bern.window.open\", [BernText.string(",
+        "BernMenuItems.register(\"status_item.status_play\"",
+        "SwiftUI.Button(BernText.string(\"bern.app.quit\")) { NSApplication.shared.terminate(nil) }",
+        "BernStatusArea.shown = true",
     ] {
         assert!(
             swift.contains(expected),
@@ -276,10 +297,12 @@ fn the_menu_bar_is_the_macos_commands_and_shortcuts_follow_state() {
 }
 
 #[test]
-fn ios_and_tvos_show_no_menu_bar() {
+fn ios_and_tvos_show_no_menu_bar_or_status_item() {
     for (name, target) in [("ios", &SwiftUiIos as &dyn Target), ("tvos", &SwiftUiTvos)] {
         let swift = generate(name, target);
         assert!(!swift.contains("BernMenuBar"), "{name}:\n{swift}");
+        assert!(!swift.contains("MenuBarExtra"), "{name}:\n{swift}");
+        assert!(!swift.contains("BernStatusMenu"), "{name}:\n{swift}");
         assert!(
             !swift.contains("page.0.3.if0.0.content"),
             "{name}:\n{swift}"

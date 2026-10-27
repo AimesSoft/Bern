@@ -240,7 +240,7 @@ pub fn dispatch(ctx: &Ctx, command: usize, args: Vec<Value>, done: Option<Done>)
     for (value, param) in args.iter().zip(&spec.params) {
         encode(value, &param.ty, &host.def.descriptor.types, &mut writer);
     }
-    let token = host.token(Some(ctx.win()), done);
+    let token = host.token(ctx.window_of(), done);
     with_bytes(&writer.bytes, |ptr, len| {
         // SAFETY: the handle is live while the application runs; the
         // parameter bytes are valid for this call.
@@ -475,6 +475,10 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         }
         media::attach_executor();
         windows::install_actions(application);
+        let def = host().def;
+        if let Some(item) = &def.status_item {
+            crate::status::show(item);
+        }
         // The engine keeps running without windows, as the session's
         // entries may still use it; activating the application again
         // opens the primary window.
@@ -558,6 +562,7 @@ pub(crate) mod tests {
             text_styles: &[],
             theme: None,
             file_kinds: &[],
+            status_item: None,
         }
     }
 

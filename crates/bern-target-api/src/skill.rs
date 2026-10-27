@@ -732,6 +732,7 @@ mod tests {
                 appearance: None,
                 icon: None,
                 menu_bar: None,
+                status_item: None,
             },
             players: vec![],
             components: vec![],

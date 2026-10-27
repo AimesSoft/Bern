@@ -187,6 +187,7 @@ impl ComponentSpec {
                 | "SidebarItem"
                 | "Section"
                 | "MenuBar"
+                | "StatusItem"
                 | "CommandMenu"
                 | "CommandItem"
         )
@@ -277,7 +278,7 @@ pub fn parse_file_kinds(text: &str) -> Result<String, String> {
 /// disappears, how its children make room, and which shared element it is.
 /// Navigation containers whose items may sit in `if`, `if let`, `match`
 /// and `ForEach`; each branch and template holds only allowed items.
-pub const DYNAMIC_ITEMS: &[&str] = &["Sidebar", "Tabs", "Toolbar", "CommandMenu"];
+pub const DYNAMIC_ITEMS: &[&str] = &["Sidebar", "Tabs", "Toolbar", "CommandMenu", "StatusItem"];
 
 /// Roles of a `CommandMenu` in the menu bar: the system's menu of that
 /// name takes the items, and the menu shows no title of its own.
@@ -420,8 +421,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("appearance", PropKind::KeyValue),
                 opt("icon", PropKind::KeyValue),
             ],
-            Children::Only(&["Window", "MenuBar"]),
-            "Window catalog of a session root, with the application's `MenuBar`",
+            Children::Only(&["Window", "MenuBar", "StatusItem"]),
+            "Window catalog of a session root, with the application's `MenuBar` and `StatusItem`",
         )
     },
     ComponentSpec {
@@ -434,7 +435,19 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
-        placement: Placement::Within(&["MenuBar", "CommandMenu"]),
+        placement: Placement::Within(&["WindowSet"]),
+        ..spec(
+            "StatusItem",
+            &[
+                req("label", PropKind::LocalizedText),
+                req("icon", PropKind::Icon),
+            ],
+            Children::Only(&["CommandItem", "CommandMenu", "Divider"]),
+            "The application's item in the system's status area, where the platform has one: the notification area of the Windows taskbar and the status icons of Linux desktops show the application icon, and the macOS menu bar shows `icon` as a monochrome symbol. `label` is its tooltip and accessible name. Its menu opens the primary window, then has its children, then quits the application; a click on Windows and Linux opens the primary window. With it, closing the last window leaves the application running. Its items run without a window: they read engine state and run commands, not drafts. Elsewhere it shows nothing",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["MenuBar", "CommandMenu", "StatusItem"]),
         ..spec(
             "CommandMenu",
             &[
@@ -442,11 +455,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("role", PropKind::Keyword(MENU_ROLES)),
             ],
             Children::Only(&["CommandItem", "CommandMenu", "Divider"]),
-            "A menu of the `MenuBar` titled `label`, or with `role` the system's menu of that name (`app`, `file`, `edit`, `view`, `window`, `help`) taking its items; inside another `CommandMenu` a submenu that opens beside its item; `Divider`s separate groups of items",
+            "A menu of the `MenuBar` titled `label`, or with `role` the system's menu of that name (`app`, `file`, `edit`, `view`, `window`, `help`) taking its items; inside another `CommandMenu` or a `StatusItem` a submenu that opens beside its item; `Divider`s separate groups of items",
         )
     },
     ComponentSpec {
-        placement: Placement::Within(&["CommandMenu"]),
+        placement: Placement::Within(&["CommandMenu", "StatusItem"]),
         action: ActionRule::Required,
         interactive: true,
         ..spec(
@@ -461,7 +474,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("files", PropKind::FileKinds),
             ],
             Children::None,
-            "A command of a `CommandMenu`: the menu shows its `shortcut`, greys it out while `enabled` is false and checks it while `checked` holds; `pick` asks for a file as `Button` does",
+            "A command of a `CommandMenu` or `StatusItem`: the menu shows its `shortcut`, greys it out while `enabled` is false and checks it while `checked` holds; `pick` asks for a file as `Button` does",
         )
     },
     ComponentSpec {

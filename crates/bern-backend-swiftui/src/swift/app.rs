@@ -173,7 +173,9 @@ impl Generator<'_> {
             out.line(format!("let bernSceneBodySize: CGFloat = {}", double(body)));
             out.line("");
         }
+        self.menu_window(&mut out);
         let menu_bar = self.menu_bar(&mut out);
+        let status_item = self.status_menu(&mut out);
         out.line("@main");
         out.open("struct BernApplication: App {");
         match self.platform {
@@ -199,11 +201,19 @@ impl Generator<'_> {
         ));
         out.line("try BernEngine.shared.bernApply(field, &reader)");
         out.close("}");
+        if status_item {
+            out.line("BernStatusArea.shown = true");
+        }
         out.close("}");
         out.line("");
         out.open("var body: some Scene {");
         match self.platform {
-            Platform::Macos => self.macos_scenes(&mut out, &order, &initial, menu_bar),
+            Platform::Macos => {
+                self.macos_scenes(&mut out, &order, &initial, menu_bar);
+                if status_item {
+                    self.status_scene(&mut out);
+                }
+            }
             Platform::Ios => self.ios_scene(&mut out, &initial),
             Platform::Tvos => self.tvos_scene(&mut out, &initial),
         }

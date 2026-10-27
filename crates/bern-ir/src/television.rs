@@ -59,11 +59,15 @@ impl Application {
         for content in app.windows.windows.iter_mut().map(|w| &mut w.content) {
             *content = single(window.prune_node(content));
         }
-        if let Some(bar) = &mut app.windows.menu_bar
-            && let [Node::Element(pruned)] =
-                window.prune_node(&Node::Element(bar.clone())).as_slice()
+        for menu in [&mut app.windows.menu_bar, &mut app.windows.status_item]
+            .into_iter()
+            .flatten()
         {
-            *bar = pruned.clone();
+            if let [Node::Element(pruned)] =
+                window.prune_node(&Node::Element(menu.clone())).as_slice()
+            {
+                *menu = pruned.clone();
+            }
         }
         // Components placed from what is left, starting at the windows.
         let mut reached = BTreeSet::new();

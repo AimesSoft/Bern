@@ -113,7 +113,7 @@ HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）不经过 XAML 的 `Ima
 - **区域与生命周期**：条件、列表这类会重建的内容各占父面板中的一个区域，插入位置由区域树算出。面板经自己的 `Resources` 持有根区域，因此构建函数返回后，区域树依然随面板存在。事件处理函数通过弱引用访问自己所属的元素，不形成循环引用。
 - **响应式**：单元、效果与作用域和其他目标相同；效果在运行中创建的子作用域在下一次运行前结束；批量更新后每个受影响的效果只运行一次。
 - **宿主**：UI 线程上有一个只接收消息的窗口，负责投递任务（`WM_APP`）和定时器（`WM_TIMER`），在两种前端下都可用。它还兼作单实例标识：互斥量 `Local\Bern.<bundle_id>`。再次启动时，新进程找到这个窗口、交出前台权限并请求显示主窗口，然后自己退出。
-- **应用生命周期**：最后一个窗口关闭后应用退出，引擎随之停止（WinUI 调用 `Application.Exit`，Islands 结束消息循环）。Ctrl+W 关闭当前窗口；设置窗口按 Esc 关闭，不可最小化与最大化。
+- **应用生命周期**：最后一个窗口关闭后应用退出，引擎随之停止（WinUI 调用 `Application.Exit`，Islands 结束消息循环）；声明了 `StatusItem` 时应用留在通知区域，从它的菜单退出（见“状态栏项”）。Ctrl+W 关闭当前窗口；设置窗口按 Esc 关闭，不可最小化与最大化。
 - **外部入口**：与其他目标相同的本地控制通道（`channels = ["ipc"]`）；CLI 与 MCP 服务器从同一命令目录生成，CRT 同样静态链接。
 
 ## 窗口
@@ -354,6 +354,18 @@ target\bern\windows\Showcase\showcase.exe
 ## 只为鼠标显示的滚动条（2026-10-27）
 
 `ScrollView(indicators: mouse)` 生成 `mouseIndicators = true`（紧跟 `hideIndicators`，指定初始化器按声明顺序写）。滚动条可见性起初为 `Auto`，鼠标移到上面时系统显示鼠标样式的滚动条；`PointerEntered` 与 `PointerPressed`（连同已处理的事件）按 `PointerDeviceType` 切换：鼠标为 `Auto`，触摸与笔为 `Hidden`，平移时不再出现细的平移指示条。精确式触控板的指针按鼠标上报，同样显示。验证：生成器测试覆盖生成代码；C++ 未编译，未在 Windows 上运行。
+
+## 状态栏项（2026-10-28）
+
+`StatusItem` 是通知区域里的应用图标，两种前端共用同一段 Win32 代码（`bern_ui_windows.inl` 的 `StatusArea`）：
+
+- 启动时建一个隐藏的顶层窗口（类名 `BernStatusArea`）接收图标的消息，用 `Shell_NotifyIcon` 加入图标（`NOTIFYICON_VERSION_4`），图标是资源 1 的应用图标，按系统缩放取小图标尺寸；提示文字跟随 `label`（一个效果，文字变了就 `NIM_MODIFY`）。资源管理器重启后收到 `TaskbarCreated` 时重新加入；应用结束时删除图标。
+- 单击（`NIN_SELECT`、键盘的 `NIN_KEYSELECT`）打开主窗口；右键（`WM_CONTEXTMENU`）在图标处打开系统的弹出菜单（`TrackPopupMenuEx`，`TPM_RETURNCMD`）。菜单在打开时由生成代码的 `StatusMenu` 按当时的状态建立：先是“打开“主窗口标题””，然后是声明的项（`if`、`match`、`ForEach` 生成为 C++ 的条件与循环，每项记下它所在的上下文，`ForEach` 的行变量随之），最后是“退出”；分隔线只在两项之间。选中的项在菜单关闭后执行。打开前把隐藏窗口设为前台窗口、关闭后投递 `WM_NULL`，菜单才会在点到别处时关闭。
+- 系统处于深色模式时菜单也是深色的：经 uxtheme 的序号 135、136 函数（`SetPreferredAppMode(AllowDark)`、`FlushMenuThemes`），Windows 自己的程序这样做，其他程序也这样调用；找不到这两个函数时菜单保持浅色。
+- 有状态栏项时最后一个窗口关闭后应用不退出：Bern 自己不结束应用，WinUI 下还要把 `DispatcherShutdownMode` 设为 `OnExplicitShutdown`，否则 WinUI 在最后一个 XAML 窗口关闭时自行结束（第一次实测就是这样退出的）。“退出”调用 `Application.Exit`（Islands 结束消息循环），不经过窗口的关闭检查。
+- 菜单的上下文不属于窗口，只读引擎状态；命令失败时显示在打开着的主窗口里。外部入口不列出菜单项。
+
+验证（2026-10-28，Windows 11 25H2 实体机，150% 缩放，WinUI 3 前端，Windows App Runtime 2.6，显示器调节程序的 debug 构建）：启动后 `Shell_NotifyIconGetRect` 得到通知区域里的图标；经 CLI 关闭 `main#1` 后进程仍在、`window list` 为空、图标还在；向隐藏窗口投递图标的单击消息后出现 `main#2`，可见且取得焦点；投递右键消息后读出弹出菜单：“打开“显示器调节””、分隔线、“Q27G41ZE 亮度”子菜单（10% 至 100% 五项）、分隔线、“退出”，当前亮度 36 不在预设中，没有项打勾，截下的菜单是 Windows 11 的系统菜单（系统为浅色）；`WM_CANCELMODE` 关闭菜单。用菜单的键盘导航（向菜单窗口投递按键，不移动指针）选子菜单的 30% 后，另一个进程经 DDC/CI 读出显示器亮度为 30；选“退出”后进程结束、图标消失。所有操作都是发给应用自己窗口的消息。未验证：真实的鼠标点击、深色模式下的菜单、Islands 前端、资源管理器重启后重新加入。
 
 ## 验证记录
 

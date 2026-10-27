@@ -472,7 +472,7 @@ impl<'a> Generator<'a> {
             "Menu" => self.menu(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
-            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "MenuBar" => {
+            | "WindowSet" | "Window" | "Layout" | "MenuItem" | "MenuBar" | "StatusItem" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),

@@ -53,7 +53,7 @@
 | 可控时钟与异步顺序场景 | 完成 | 查询在协议中声明、在 `ui!` 中以 `Query` 绑定（见“异步查询”与“查询订阅与答复”）；`showcase-core` 的场景测试用 `ManualClock` 驱动真实引擎、宿主与会话订阅，较早的慢搜索不会覆盖较新的结果；C ABI 测试覆盖同一路径 |
 | 主窗口与设置窗口：四入口打开/关闭/激活、重复打开复用、独立草稿 | 完成 | 窗口实例带代次，重开后旧引用被拒绝；启动时总是打开 `initial: open` 的主窗口，主窗口关闭后点 Dock 图标重新打开 |
 | 关闭确认、模态阻挡、确认失效 | 完成 | 见“窗口关闭协议”；系统关闭按钮与 File > Close 先走关闭检查 |
-| 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放 |
+| 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放；声明了 `StatusItem` 时没有窗口就收起 Dock 图标，见“状态栏项” |
 | 最小化后恢复 | 完成 | `window.minimize`、`window.restore`、`window.maximize`、`window.move`、`window.resize` 与查询 `window.list`；系统完成的最小化、缩放、移动与聚焦以带来源和代次的事实同步，不派发命令（见“窗口呈现”）；最小化不释放草稿、导航与查询订阅 |
 | macOS Video 验证 | 完成 | 见“Video”；用受控测试媒体实测 AVFoundation 播放 |
 
@@ -546,6 +546,14 @@ open target/bern/macos/Showcase.app
 2026-10-14：`file://` 地址由引擎直接打开，不经宿主。`examples/gallery` 经 `ui.set_file` 收到本地的“海浪 Tides #2.mp4”后，引擎状态中的提示为“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”。地址与路径的互相转换（含 Windows 的盘符与共享路径）由 `bern-command` 的单元测试覆盖。
 
 2026-10-20，macOS 27.0.1，用于验收的媒体类应用的设置窗口“可选功能”（窗口截图与生成的 CLI）：两个方向都不给尺寸的 `Canvas` 作为 `Stack` 的一层时标记为 `bernFillsLayers()`，`Stack` 改用 `BernLayers`，底板取其他层的尺寸；`Stack` 写了尺寸时 `BernLayers` 按写的尺寸算，底板铺满它。此前预览里选中项的底色被拉成整列高的一块。实测选中项一行高，72 宽的侧栏底板铺满 188 高。iOS 走同一生成路径，模拟器本轮未实看。
+
+## 状态栏项（2026-10-28）
+
+`StatusItem` 生成为 SwiftUI 的 `MenuBarExtra` 场景，标签是 `Image(systemName: icon)`：SF Symbol 由菜单栏按模板图标着色，跟随菜单栏的明暗，不显示彩色的应用图标；`label` 是它的可访问名称。菜单是视图 `BernStatusMenu`：“打开“主窗口标题””（`BernHost.open`）、声明的项（与菜单栏的项同一套生成：按钮、勾选的开关、子菜单，随状态更新）、“退出”（`NSApplication.terminate`）。菜单项以 `status_item.<id>` 登记为外部入口；它们执行命令时用 `BernMenuBarWindow.primary`，与菜单栏共用。
+
+有状态栏项时 `BernStatusArea.shown` 为真：窗口登记与注销时，没有窗口就切到 `accessory` 激活策略（Dock 里的图标收起），有窗口就回到 `regular`。应用本来就在最后一个窗口关闭后保持运行。
+
+验证（2026-10-28）：`bern-backend-swiftui` 的 `menu_bar` 测试含状态栏项，生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过（iOS 与 tvOS 不生成）；显示器调节程序的 macOS 版构建成功。未运行实测：菜单栏里的图标、菜单、Dock 图标的收起与恢复都未在真机上看过。
 
 ## 未完成与已知限制
 

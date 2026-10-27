@@ -62,6 +62,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::BOUND_SHORTCUTS, bound_shortcuts),
     (feature::SHORTCUT_INPUT, shortcut_input),
     (feature::MENU_BAR, menu_bar),
+    (feature::STATUS_ITEM, status_item),
     (feature::RUNTIME_THEME, runtime_theme),
     (feature::RUNTIME_PALETTE, runtime_palette),
     (feature::RUNTIME_IMAGES, runtime_images),
@@ -1053,6 +1054,22 @@ fn menu_bar(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut 
                 descriptor.id
             ))
             .at(bar.source.clone()),
+        );
+    }
+}
+
+fn status_item(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(item) = &app.windows.status_item {
+        diagnostics.push(
+            Diagnostic::warning(format!(
+                "target `{}` shows no `StatusItem`: the application ends with its last window there",
+                descriptor.id
+            ))
+            .at(item.source.clone()),
         );
     }
 }

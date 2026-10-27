@@ -1137,14 +1137,21 @@ inline void Show(Win& win) {
     SetForegroundWindow(win.hwnd);
 }
 
-/// The application ends with its last window, as Windows applications do.
-inline void ExitIfDone() {
-    if (!all.empty()) return;
+/// End the application: its windows close without their close checks, as
+/// quitting from the menu of a status item does.
+inline void Quit() {
 #if BERN_WINUI
     xaml::Application::Current().Exit();
 #else
     PostQuitMessage(0);
 #endif
+}
+
+/// The application ends with its last window, as Windows applications do,
+/// unless its status item keeps it in the notification area.
+inline void ExitIfDone() {
+    if (!all.empty() || app->statusItem) return;
+    Quit();
 }
 
 /// The window instance ended: release its drafts, controls and
@@ -1906,9 +1913,197 @@ inline std::wstring ExecutableDirectory() {
     return path.substr(0, path.find_last_of(L'\\'));
 }
 
+/// The `StatusItem` in the notification area of the taskbar: the
+/// application icon with the label as its tooltip. A click opens the
+/// primary window; the context menu is the system's menu with an item that
+/// opens the primary window, the application's items and Quit. A hidden
+/// window takes the icon's messages.
+namespace StatusArea {
+
+constexpr UINT kCallback = WM_APP + 0x51;
+constexpr UINT kIcon = 1;
+
+/// An item chosen in the menu runs after the menu closed, in the context it
+/// was added in (a `ForEach` row's, say).
+struct Entry {
+    Act act;
+    Ctx ctx;
+};
+
+/// The menu while it is built. Dividers come between items only: never
+/// first, last or twice in a row.
+struct Menu {
+    HMENU handle = nullptr;
+    std::vector<Entry>* entries = nullptr;
+    bool divider = false;
+
+    void Item(Ctx const& c, winrt::hstring const& label, bool enabled, bool checked, Act act) {
+        Separate();
+        entries->push_back(Entry{std::move(act), c});
+        UINT flags = MF_STRING | (enabled ? MF_ENABLED : MF_GRAYED) | (checked ? MF_CHECKED : MF_UNCHECKED);
+        AppendMenuW(handle, flags, entries->size(), label.c_str());
+    }
+    void Divider() { divider = true; }
+    void Sub(winrt::hstring const& label, std::function<void(Menu&)> const& fill) {
+        Menu sub{CreatePopupMenu(), entries};
+        fill(sub);
+        if (GetMenuItemCount(sub.handle) == 0) {
+            DestroyMenu(sub.handle);
+            return;
+        }
+        Separate();
+        AppendMenuW(handle, MF_POPUP, reinterpret_cast<UINT_PTR>(sub.handle), label.c_str());
+    }
+
+private:
+    void Separate() {
+        if (divider && GetMenuItemCount(handle) > 0) AppendMenuW(handle, MF_SEPARATOR, 0, nullptr);
+        divider = false;
+    }
+};
+
+inline HWND hwnd = nullptr;
+inline UINT taskbarCreated = 0;
+inline winrt::hstring tooltip;
+
+/// What the menu reads: engine state, with the primary window for showing
+/// failures while it is open.
+inline Ctx Context() {
+    Ctx c;
+    c.comp = "status_item";
+    for (auto const& win : WindowManager::all)
+        if (win->Def().id == app->catalog.primary) c.win = win.get();
+    return c;
+}
+
+inline NOTIFYICONDATAW Data(UINT flags) {
+    NOTIFYICONDATAW data{};
+    data.cbSize = sizeof data;
+    data.hWnd = hwnd;
+    data.uID = kIcon;
+    data.uFlags = flags;
+    return data;
+}
+
+/// Add the icon, at the small icon size of the system's scale; again after
+/// Explorer restarted.
+inline void Add() {
+    auto data = Data(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP);
+    data.uCallbackMessage = kCallback;
+    int side = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
+    data.hIcon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, side, side, LR_SHARED));
+    wcsncpy_s(data.szTip, tooltip.c_str(), _TRUNCATE);
+    if (!Shell_NotifyIconW(NIM_ADD, &data)) return;
+    data.uVersion = NOTIFYICON_VERSION_4;
+    Shell_NotifyIconW(NIM_SETVERSION, &data);
+}
+
+inline void Popup(int x, int y) {
+    auto const& def = *app->statusItem;
+    std::vector<Entry> entries;
+    Menu menu{CreatePopupMenu(), &entries};
+    auto c = Context();
+    winrt::hstring title;
+    for (auto const& window : app->windows)
+        if (window.id == app->catalog.primary) title = bern::Text::Tr(window.title);
+    Reactive::Untrack([&] {
+        menu.Item(c, bern::Text::Fmt("bern.window.reopen", {{"title", bern::Text::Arg(title)}}), true, false,
+            [](Ctx const&) { WindowManager::ReopenPrimary(); });
+        menu.Divider();
+        if (def.menu) def.menu(c, menu);
+        menu.Divider();
+        menu.Item(c, bern::Text::Tr("bern.app.quit"), true, false, [](Ctx const&) { WindowManager::Quit(); });
+        return 0;
+    });
+    // The menu closes when the pointer goes elsewhere only while its owner
+    // is the foreground window.
+    SetForegroundWindow(hwnd);
+    UINT align = GetSystemMetrics(SM_MENUDROPALIGNMENT) ? TPM_RIGHTALIGN : TPM_LEFTALIGN;
+    int chosen = TrackPopupMenuEx(menu.handle, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | align, x, y, hwnd, nullptr);
+    PostMessageW(hwnd, WM_NULL, 0, 0);
+    DestroyMenu(menu.handle);
+    if (chosen > 0 && static_cast<size_t>(chosen) <= entries.size()) {
+        auto const& entry = entries[chosen - 1];
+        entry.act(entry.ctx);
+    }
+}
+
+inline LRESULT CALLBACK Proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
+    if (message == kCallback) {
+        switch (LOWORD(lparam)) {
+        case NIN_SELECT:
+        case NIN_KEYSELECT:
+            WindowManager::ReopenPrimary();
+            break;
+        case WM_CONTEXTMENU:
+            Popup(static_cast<short>(LOWORD(wparam)), static_cast<short>(HIWORD(wparam)));
+            break;
+        }
+        return 0;
+    }
+    if (taskbarCreated && message == taskbarCreated) {
+        Add();
+        return 0;
+    }
+    return DefWindowProcW(window, message, wparam, lparam);
+}
+
+/// Menus in the system's dark mode while apps are dark: Windows offers it
+/// to its own programs through two unnamed functions of uxtheme.dll, which
+/// other programs call as well; without them the menu stays light.
+inline void FollowDarkMode() {
+    auto theme = LoadLibraryExW(L"uxtheme.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!theme) return;
+    using SetPreferredAppMode = int(WINAPI*)(int);
+    using FlushMenuThemes = void(WINAPI*)();
+    if (auto set = reinterpret_cast<SetPreferredAppMode>(GetProcAddress(theme, MAKEINTRESOURCEA(135)))) set(1);
+    if (auto flush = reinterpret_cast<FlushMenuThemes>(GetProcAddress(theme, MAKEINTRESOURCEA(136)))) flush();
+}
+
+inline void Show() {
+    if (!app->statusItem || hwnd) return;
+    auto instance = GetModuleHandleW(nullptr);
+    WNDCLASSW type{};
+    type.lpfnWndProc = Proc;
+    type.hInstance = instance;
+    type.lpszClassName = L"BernStatusArea";
+    RegisterClassW(&type);
+    hwnd = CreateWindowExW(0, type.lpszClassName, L"", WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
+    if (!hwnd) {
+        bern::Report("cannot create the window of the status item");
+        return;
+    }
+    taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    FollowDarkMode();
+    auto label = app->statusItem->label;
+    // The tooltip follows the label: state it reads, the language.
+    Reactive::Run([label] {
+        tooltip = label(Context());
+        if (!hwnd) return;
+        auto data = Data(NIF_TIP | NIF_SHOWTIP);
+        wcsncpy_s(data.szTip, tooltip.c_str(), _TRUNCATE);
+        if (!Shell_NotifyIconW(NIM_MODIFY, &data)) Add();
+    });
+}
+
+inline void Remove() {
+    if (!hwnd) return;
+    auto data = Data(0);
+    Shell_NotifyIconW(NIM_DELETE, &data);
+    DestroyWindow(hwnd);
+    hwnd = nullptr;
+}
+
+}
+
 /// Install resources, start the engine and open the initial windows. False
 /// when the engine could not start; the user has been told why.
 inline bool Launch(xaml::ResourceDictionary const& resources) {
+#if BERN_WINUI
+    // WinUI ends the application with its last window on its own; with a
+    // status item it ends when the item's menu says so.
+    if (app->statusItem) xaml::Application::Current().DispatcherShutdownMode(xaml::DispatcherShutdownMode::OnExplicitShutdown);
+#endif
     if (app->catalog.brandSeed) ApplyBrand(resources, *app->catalog.brandSeed);
     Styles::Install(resources);
     bern::Text::Install(app->catalog);
@@ -1927,10 +2122,12 @@ inline bool Launch(xaml::ResourceDictionary const& resources) {
     // `BERN_FRAME_RATE`: XAML's frame rate counters over every window.
     if (GetEnvironmentVariableW(L"BERN_FRAME_RATE", nullptr, 0) != 0) xaml::Application::Current().DebugSettings().EnableFrameRateCounter(true);
     WindowManager::OpenInitial();
+    StatusArea::Show();
     return true;
 }
 
 inline void Finish() {
+    StatusArea::Remove();
     Media::DetachExecutor();
     Host::Stop();
 }

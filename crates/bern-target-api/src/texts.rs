@@ -181,6 +181,28 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
             ("id", "Buka {title}"),
         ],
     ),
+    // The last item of the `StatusItem`'s menu.
+    (
+        "bern.app.quit",
+        &[
+            ("zh-Hans", "退出"),
+            ("zh-Hant", "結束"),
+            ("en", "Quit"),
+            ("ja", "終了"),
+            ("ko", "종료"),
+            ("ru", "Завершить"),
+            ("de", "Beenden"),
+            ("fr", "Quitter"),
+            ("es", "Salir"),
+            ("pt-BR", "Encerrar"),
+            ("it", "Esci"),
+            ("tr", "Çık"),
+            ("vi", "Thoát"),
+            ("pl", "Zakończ"),
+            ("uk", "Завершити"),
+            ("id", "Keluar"),
+        ],
+    ),
     (
         "bern.window.settings",
         &[
@@ -1220,6 +1242,7 @@ mod tests {
                 appearance: None,
                 icon: None,
                 menu_bar: None,
+                status_item: None,
             },
             players: vec![],
             components: vec![],

@@ -1739,8 +1739,10 @@ pub(crate) fn reopen_primary() {
 
 /// `windows.<kind>.open()` and `activate()` in declarations.
 pub fn open_window(ctx: &Ctx, kind: &str) {
-    if let Err(failure) = open(kind) {
-        ctx.win().fail(&failure);
+    if let Err(failure) = open(kind)
+        && let Some(win) = ctx.window_of()
+    {
+        win.fail(&failure);
     }
 }
 
@@ -1760,8 +1762,9 @@ pub fn close_window(ctx: &Ctx, kind: &str) {
     let found = all().into_iter().find(|win| win.kind_id() == kind);
     if let Some(win) = found
         && let Err(failure) = request_close(&win)
+        && let Some(shown) = ctx.window_of()
     {
-        ctx.win().fail(&failure);
+        shown.fail(&failure);
     }
 }
 

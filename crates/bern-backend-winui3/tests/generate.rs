@@ -1188,12 +1188,20 @@ pub mod formats {
         Files { n: i64, size: Size },
     }
 
+    #[value]
+    pub struct Entry {
+        pub id: i64,
+        #[content]
+        pub name: String,
+    }
+
     #[state]
     pub struct State {
         pub count: i64,
         pub seconds: f64,
         pub today: CalendarDate,
         pub notice: Notice,
+        pub entries: Vec<Entry>,
     }
 
     #[commands]
@@ -1217,6 +1225,26 @@ pub fn app(app: formats::Client, windows: AppWindows) -> impl View {
                     Text(content: tr! { "en" => "{t, duration, m:ss} used", "zh-Hans" => "已用 {t, duration, m:ss}"; t: app.seconds })
                     Text(content: tr! { "en" => "Braces {{stay}}", "zh-Hans" => "括号 {{保留}}" })
                     Text(content: app.notice)
+                }
+            }
+            StatusItem(icon: "star", label: tr! { "en" => "Formats: {n}", "zh-Hans" => "格式：{n}"; n: app.count }) {
+                CommandItem(id: add, label: tr! { "en" => "Add", "zh-Hans" => "添加" }, checked: app.count > 2) => app.add()
+                Divider
+                CommandMenu(label: tr! { "en" => "More", "zh-Hans" => "更多" }) {
+                    if app.count > 0 {
+                        CommandItem(id: add_more, label: tr! { "en" => "Add more", "zh-Hans" => "再添加" }, enabled: app.count < 9) => app.add()
+                    } else {
+                        Divider
+                    }
+                }
+                ForEach(items: app.entries, key: id) |entry| {
+                    CommandItem(id: entry, label: tr! { "en" => "Open {name}", "zh-Hans" => "打开 {name}"; name: entry.name }) => windows.main.open()
+                }
+                match app.notice {
+                    Notice::Saved { name, day } => {
+                        CommandItem(id: saved, label: tr! { "en" => "Saved {name}", "zh-Hans" => "已保存 {name}"; name: name }) => app.add()
+                    }
+                    _ => { Divider }
                 }
             }
         }
@@ -1329,8 +1357,17 @@ fn text_formats_generate_for_winui3() {
         "{\"n\", bern::Text::ArgOf(",
         "{\"d\", bern::Text::DateArg(",
         "{\"t\", bern::Text::ArgOf(",
+        // The status item: its menu is built when it opens, branches and
+        // rows as C++ control flow.
+        "static void StatusMenu(Ctx const& c, StatusArea::Menu& m) {",
+        "m.Sub(bern::Text::Tr(",
+        "for (auto const& row : R::AsList(",
+        "}(c.WithLocal(\"entry\", [row] { return row; }));",
+        "auto tag = R::Tag(value);",
+        "[value] { return R::Payload(value, 0); }",
+        "item.menu = StatusMenu;",
     ] {
-        assert!(ui.contains(expected), "missing `{expected}`");
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
     let catalog = std::fs::read_to_string(output.join("app/app_catalog.cpp")).unwrap();
     for expected in [

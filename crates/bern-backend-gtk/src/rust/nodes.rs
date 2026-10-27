@@ -302,6 +302,8 @@ impl Generator<'_> {
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "Shape" | "Series"
             // GNOME applications keep no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
+            // The application builds the status item's menu.
+            | "StatusItem"
             | "Pattern" | "TabAccessory" | "PickerOption" => {
                 // Realized by their parents.
             }

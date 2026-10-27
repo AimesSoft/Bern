@@ -569,7 +569,9 @@ impl<'a> Generator<'a> {
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "SidebarHeader"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "TabAccessory" | "PickerOption"
             // Android has no menu bar for applications.
-            | "MenuBar" | "CommandMenu" | "CommandItem" => {
+            | "MenuBar" | "CommandMenu" | "CommandItem"
+            // Nor a status area.
+            | "StatusItem" => {
                 // Realized by their parents.
             }
             other => out.line(format!("// unsupported {other}")),

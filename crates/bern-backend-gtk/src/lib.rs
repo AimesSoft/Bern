@@ -51,6 +51,7 @@ const FEATURES: &[&str] = &[
     feature::BOUND_SHORTCUTS,
     feature::SHORTCUT_INPUT,
     feature::MENU_BAR,
+    feature::STATUS_ITEM,
     feature::RUNTIME_THEME,
     feature::RUNTIME_PALETTE,
     feature::RUNTIME_IMAGES,

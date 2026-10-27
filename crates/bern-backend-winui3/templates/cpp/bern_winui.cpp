@@ -12,6 +12,6 @@ namespace bern::winui {
 /// `resources`: the runtime's resource index, for a runtime that does not
 /// lead WinUI to it; empty otherwise.
 int BernRunWinUI(std::wstring const& resources) {
-    static bern::winui::AppDef const definition{bern::BernCatalog(), bern::winui::Windows(), bern::winui::AccentColors()};
+    static bern::winui::AppDef const definition{bern::BernCatalog(), bern::winui::Windows(), bern::winui::AccentColors(), bern::winui::StatusItem()};
     return bern::winui::Run(definition, resources);
 }

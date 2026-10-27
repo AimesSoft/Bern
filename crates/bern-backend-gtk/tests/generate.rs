@@ -1058,14 +1058,74 @@ const STAGE_PROTOCOL: &str = r#"
 pub mod stage {
     use bern::prelude::*;
 
+    #[value]
+    pub struct Entry {
+        pub id: i64,
+        #[content]
+        pub name: String,
+    }
+
+    #[value]
+    pub enum Mood {
+        Calm,
+        Busy {
+            #[content]
+            task: String,
+        },
+    }
+
     #[state]
     pub struct State {
         pub count: i64,
+        pub entries: Vec<Entry>,
+        pub pinned: Option<Entry>,
+        pub mood: Mood,
     }
 
     #[commands]
     pub trait Commands {
         fn add(&mut self) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+/// A status item whose menu has every kind of item, branch and row.
+const STATUS_UI: &str = r#"
+use bern::prelude::*;
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                Button(id: add, label: tr! { "en" => "Add" }) => app.add()
+            }
+            StatusItem(icon: "star", label: tr! { "en" => "Stage: {n}"; n: app.count }) {
+                CommandItem(id: status_add, label: tr! { "en" => "Add" }, checked: app.count > 2) => app.add()
+                Divider
+                CommandMenu(label: tr! { "en" => "More" }) {
+                    if app.count > 0 {
+                        CommandItem(id: more, label: tr! { "en" => "Add more" }, enabled: app.count < 9) => app.add()
+                    } else {
+                        Divider
+                    }
+                }
+                ForEach(items: app.entries, key: id) |entry| {
+                    CommandItem(id: entry, label: tr! { "en" => "Open {name}"; name: entry.name }) => windows.main.open()
+                }
+                if let Some(pinned) = app.pinned {
+                    CommandItem(id: pinned, label: tr! { "en" => "Pinned {name}"; name: pinned.name }) => app.add()
+                } else {
+                    Divider
+                }
+                match app.mood {
+                    Mood::Busy { task } => {
+                        CommandItem(id: task, label: tr! { "en" => "Busy with {task}"; task: task }) => app.add()
+                    }
+                    _ => { Divider }
+                }
+            }
+        }
     }
 }
 "#;
@@ -1396,6 +1456,36 @@ fn a_style_variant_in_a_window_is_defined() {
         "static STYLES: &[b::StyleDef] = &[\n    b::StyleDef { name: \"buttonStage\", ",
         "b::Button(p, c, b::ButtonProps { id: \"mini\", ",
         "style: Some(&STYLES[0])",
+    ] {
+        assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+}
+
+/// The status item's menu is a function that adds items as the state is
+/// when the menu is built, and the application definition carries it.
+#[test]
+fn a_status_item_builds_its_menu() {
+    let root = workspace();
+    let (config, compiled) =
+        stage_project(&root.join("target/bern-test/gtk-status-project"), STATUS_UI);
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-status");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    for expected in [
+        "fn status_menu(c: &b::Ctx, m: &mut b::StatusMenu) {",
+        "m.sub(b::text::tr(",
+        "for row in rt::as_list(",
+        "let c = &c.with_local(\"entry\", Rc::new(move || row.clone()));",
+        "let tag = rt::tag(&value);",
+        "status_item: Some(b::StatusItemDef { label: b::str(|c| ",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }

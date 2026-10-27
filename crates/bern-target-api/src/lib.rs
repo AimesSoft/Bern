@@ -145,6 +145,12 @@ pub mod feature {
     /// lists it as well: there the menus show nowhere, `window.menu_bar`
     /// is false, and nothing is left to warn about.
     pub const MENU_BAR: &str = "menu_bar";
+    /// `StatusItem` in the `WindowSet`: the application's item in the
+    /// system's status area, with its menu, and the application running on
+    /// after its last window closes. A target whose platform has no status
+    /// area for applications lists it as well: there the item shows nowhere
+    /// and nothing is left to warn about.
+    pub const STATUS_ITEM: &str = "status_item";
     /// `WindowSet(accent:, appearance:)` chosen at run time; without it the
     /// windows keep the system's accent and appearance.
     pub const RUNTIME_THEME: &str = "runtime_theme";

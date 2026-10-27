@@ -206,10 +206,14 @@ impl Generator<'_> {
                     let spec = &self.app.protocol.commands[*command];
                     let mut values = vec!["ctx".to_string()];
                     values.extend(args.iter().map(|arg| {
-                        if arg == expr {
-                            "newValue".into()
-                        } else {
+                        if arg != expr {
                             self.expr(arg)
+                        } else if arg.ty == Type::Int {
+                            // A whole number takes the slider's value
+                            // rounded.
+                            "BigInt(Math.round(Number(newValue)))".into()
+                        } else {
+                            "newValue".into()
                         }
                     }));
                     if acknowledged {

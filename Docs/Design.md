@@ -1661,6 +1661,32 @@ WindowSet(handle: AppWindows, primary: main) {
 
 预期实现：SwiftUI 的 `.commands`：自己的菜单是 `CommandMenu`，系统菜单是 `CommandGroup`（`app` 在设置项之后、`file` 替换新建文档项、`edit` 在剪贴板项之后、`view` 在工具栏项之前、`window` 在窗口排列项之后、`help` 替换帮助项），每个菜单的项是一个视图，因此启用、勾选与快捷键随状态更新。实现进度（2026-10-24）：macOS 已实现，用 `examples/gallery` 与一个实际应用实测：菜单出现在菜单栏，系统菜单的项在对应位置，子菜单展开，`ui.activate` 与真实点击菜单项都执行命令，草稿与引擎状态变化后勾选和启用随之更新（读菜单的辅助功能属性验证）。
 
+### 状态栏项
+
+应用可以在 `WindowSet` 里声明一个 `StatusItem`：应用在系统状态区域的一项，常说的托盘图标。有了它，关闭最后一个窗口时应用不退出，而是留在那里，从它的菜单再打开窗口或退出。
+
+```rust
+WindowSet(handle: AppWindows, primary: main) {
+    Window(id: main, title: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }, initial: open) { monitor_list(app: app) }
+    StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }) {
+        ForEach(items: app.monitors, key: id) |monitor| {
+            CommandMenu(label: tr! { "zh-Hans" => "{name} 亮度", "en" => "{name} Brightness"; name: monitor.name }) {
+                CommandItem(id: dim, label: tr! { "zh-Hans" => "10%", "en" => "10%" }, checked: monitor.brightness == 10) => app.set_brightness(monitor.id, 10)
+            }
+        }
+    }
+}
+```
+
+- `label` 是它的提示文字与可访问名称，可以带状态参数；`icon` 是 Bern 图标名，只在 macOS 用：菜单栏里的状态项按系统规定是单色的模板图标，由系统按菜单栏的明暗着色。Windows 的通知区域与 Linux 的状态区显示应用图标（`[app.icon]`，没有时是 Bern 的标志），与其他程序一样是彩色的。
+- 菜单由 Bern 组成：第一项打开主窗口（“打开“主窗口标题””），然后是声明里的 `CommandItem`、`CommandMenu`（子菜单）与 `Divider`，最后一项退出应用；分隔线只出现在两项之间。菜单项可以写在 `if`、`if let`、`match` 与 `ForEach` 里，跟随引擎状态增减、勾选与变灰。
+- 在 Windows 与 Linux 上，单击图标打开主窗口（已打开时把它带到前面），右键打开菜单；macOS 上点按图标打开菜单。
+- 状态项不属于任何窗口：它可能在没有窗口时打开，所以菜单只读引擎状态、执行命令与窗口动作，不读写草稿，不读 `window.compact` 这类窗口自己的字段（构建期就知道的 `window.menu_bar` 等除外），菜单项不带 `pick` 与 `shortcut`，这些都在编译时报错。命令失败时显示在打开着的主窗口里。
+- 退出不经过窗口的关闭检查，与 macOS 的 Cmd-Q、Linux 的 Ctrl+Q 相同。
+- 手机、电视与网页没有给应用的状态区域：目标能力 `status_item` 在 iOS、tvOS、Android 与网页上“不适用”，接受声明、不生成任何东西、不警告，应用照常随平台的规则结束。
+
+各平台的实现：macOS 是 SwiftUI 的 `MenuBarExtra`，`icon` 是 SF Symbol；没有窗口打开时应用切到 `accessory` 激活策略，Dock 里的图标随之收起，再打开窗口时回到 `regular`，与菜单栏应用的习惯一致。Windows 是 `Shell_NotifyIcon` 放进通知区域的图标（版本 4 的回调），由一个隐藏窗口接收它的消息，菜单是系统的弹出菜单（`TrackPopupMenuEx`），在打开时按当时的状态建立；系统处于深色模式时菜单也是深色的（经 uxtheme 的 `SetPreferredAppMode`），资源管理器重启后图标重新加入。Linux 没有 GTK 控件可用：应用在会话总线上提供 StatusNotifierItem 与 `com.canonical.dbusmenu` 菜单，向 `org.kde.StatusNotifierWatcher` 登记，图标是应用图标按几种尺寸给出的 ARGB 像素；KDE Plasma 自己显示这些项，GNOME 经 AppIndicator 扩展（Ubuntu 默认带有）显示；菜单随它读的状态重建，打开前（`AboutToShow`）也重建一次；Wayland 上单击时用状态区给的激活令牌把窗口带到前面。macOS 上外部入口把菜单项列为 `status_item.<id>`（角色 `menu_item`），Windows 与 Linux 的菜单在打开时才建立，外部入口不列出它们，菜单项的命令照常是各自的工具。
+
 ### 起始焦点
 
 `Button` 与 `IconButton` 可写 `default_focus: true`：界面出现时焦点从它开始。电视上焦点就是遥控器操作的位置，每个界面应给出起始焦点，例如引导的“继续”、播放器的暂停。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），标签页的每页各是一个焦点区域；其他平台上是键盘焦点：SwiftUI 的 `FocusState`，Web 的 `focus()`，Compose 的 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点。实现进度：tvOS 模拟器实测；其他目标未实测。
@@ -1799,7 +1825,7 @@ UI 控件、Bern 快捷键、虚拟标题栏及 CLI、JSON、MCP 都调用同一
 
 每个窗口拥有自己的导航、焦点作用域和编辑会话。模态默认只阻挡所属窗口，阻挡整个 Bern 会话需显式声明；模态关系是逻辑关系，不依赖原生父子句柄。即使通过 CLI 或 MCP 发出 UI 激活命令，也必须检查目标窗口是否被模态阻挡。关闭后优先恢复仍有效的打开者焦点，失效则选择可用窗口。系统实际焦点始终以观察结果为准。
 
-普通窗口默认由会话持有，关闭打开它的窗口不自动级联关闭；声明为从属模态窗口的实例跟随所有者关闭协议处理，子窗口拒绝关闭时不能先释放所有者。关闭最后一个逻辑窗口采用明确的宿主策略，默认 keep_running 保留引擎和会话，允许后续打开；可配置 request_quit 进入应用退出命令。虚拟宿主保留重新打开窗口的入口，主窗口关闭不等于直接关闭浏览器页面。宿主或进程被外部销毁后的状态另按会话断连规则处理。
+普通窗口默认由会话持有，关闭打开它的窗口不自动级联关闭；声明为从属模态窗口的实例跟随所有者关闭协议处理，子窗口拒绝关闭时不能先释放所有者。关闭最后一个逻辑窗口采用明确的宿主策略，默认 keep_running 保留引擎和会话，允许后续打开；可配置 request_quit 进入应用退出命令。各平台的默认按平台习惯：macOS 与 Linux 保留运行，Windows 随最后一个窗口退出；声明了 `StatusItem` 时三者都保留运行，从状态项再打开窗口或退出（见“状态栏项”）。虚拟宿主保留重新打开窗口的入口，主窗口关闭不等于直接关闭浏览器页面。宿主或进程被外部销毁后的状态另按会话断连规则处理。
 
 关闭窗口释放其订阅和窗口级资源，并解除 Video 呈现附着。应用级播放器和任务按自身所有者继续存活；多个窗口共享一个 player_id 时检查媒体后端的多视图能力，不支持时显式转移附着或返回不支持，不能暗中复制播放器。切换虚拟窗口导致视图暂时不显示时，也不能把不可用的后台播放能力伪装为持续播放。
 

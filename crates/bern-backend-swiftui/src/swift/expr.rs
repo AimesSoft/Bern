@@ -200,10 +200,14 @@ impl Generator<'_> {
                     let mut values: Vec<_> = args
                         .iter()
                         .map(|arg| {
-                            if arg == expr {
-                                "newValue".into()
-                            } else {
+                            if arg != expr {
                                 self.expr(arg)
+                            } else if arg.ty == Type::Int {
+                                // A whole number takes the slider's value
+                                // rounded.
+                                "Int64(newValue.rounded())".into()
+                            } else {
+                                "newValue".into()
                             }
                         })
                         .collect();

@@ -1192,6 +1192,9 @@ final class BernHost {
             context.attached(generation: generation, id: id)
             windows[context.kindID] = context
             windowRevision &+= 1
+            #if os(macOS)
+            BernStatusArea.windowsChanged(anyOpen: true)
+            #endif
             context.reportFacts()
             BernSnapshot.schedule()
             for request in pendingOpens.removeValue(forKey: context.kindID) ?? [] {
@@ -1206,6 +1209,9 @@ final class BernHost {
         guard let handle, windows[context.kindID] === context else { return }
         windows[context.kindID] = nil
         windowRevision &+= 1
+        #if os(macOS)
+        BernStatusArea.windowsChanged(anyOpen: !windows.isEmpty)
+        #endif
         BernMedia.shared.windowClosed(context.id)
         bern_window_closed(handle, context.kind, context.generation)
     }

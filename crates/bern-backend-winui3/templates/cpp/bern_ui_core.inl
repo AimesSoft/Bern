@@ -68,11 +68,23 @@ struct WindowDef {
 };
 
 /// Everything the runtime needs to know about a generated application.
+namespace StatusArea {
+struct Menu;
+}
+
+/// The `StatusItem`: its tooltip, and the application's items of its menu,
+/// which the generated code adds each time the menu opens.
+struct StatusItemDef {
+    Str label;
+    void (*menu)(Ctx const&, StatusArea::Menu&) = nullptr;
+};
+
 struct AppDef {
     Catalog catalog;
     std::vector<WindowDef> windows;
     /// The accents of `style!`, by index: light and dark sRGB.
     std::vector<std::pair<uint32_t, uint32_t>> accents;
+    std::optional<StatusItemDef> statusItem;
 };
 
 inline AppDef const* app = nullptr;

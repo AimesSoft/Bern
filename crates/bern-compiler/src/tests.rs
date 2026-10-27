@@ -4485,6 +4485,67 @@ fn menu_bar_shapes_are_checked() {
 }
 
 #[test]
+fn the_status_item_lowers_into_the_window_catalog_and_belongs_to_no_window() {
+    let ui = with_menu_bar(
+        "Spacer",
+        r#"StatusItem(icon: "star", label: tr! { "en" => "Demo", "ja" => "デモ" }) {
+                CommandItem(id: add, label: tr! { "en" => "Add", "ja" => "追加" }, enabled: app.count > 0, checked: app.count > 2) => app.add(1)
+                Divider
+                CommandMenu(label: tr! { "en" => "More", "ja" => "他" }) {
+                    if app.count > 2 {
+                        CommandItem(id: about, label: tr! { "en" => "About", "ja" => "情報" }) => windows.about.open()
+                    }
+                }
+            }"#,
+    );
+    let app = compile_ui(&ui).unwrap_or_else(|e| panic!("{e:?}")).app;
+    let item = app.windows.status_item.as_ref().expect("the status item");
+    assert_eq!(item.icon("icon"), Some("star"));
+    assert_eq!(item.children.len(), 3);
+    assert!(app.windows.menu_bar.is_none());
+    for (items, expected) in [
+        (
+            r#"StatusItem(icon: "star", label: tr! { "en" => "A", "ja" => "A" }) { CommandItem(id: a, label: tr! { "en" => "A", "ja" => "A" }, checked: draft.on) => app.add(1) }"#,
+            "runs without a window, so it has no drafts",
+        ),
+        (
+            r#"StatusItem(icon: "star", label: tr! { "en" => "A", "ja" => "A" }) { CommandItem(id: a, label: tr! { "en" => "A", "ja" => "A" }, pick: draft.file) => app.add(1) }"#,
+            "takes no `pick:`",
+        ),
+        (
+            r#"StatusItem(icon: "star", label: tr! { "en" => "A", "ja" => "A" }) { CommandItem(id: a, label: tr! { "en" => "A", "ja" => "A" }, shortcut: "cmd+a") => app.add(1) }"#,
+            "takes no `shortcut:`",
+        ),
+        (
+            r#"StatusItem(icon: "star", label: tr! { "en" => "A", "ja" => "A" }) { if window.compact { Divider } }"#,
+            "cannot read `window.compact`",
+        ),
+        (
+            r#"StatusItem(icon: "star", label: tr! { "en" => "A", "ja" => "A" }) { Divider } StatusItem(icon: "star", label: tr! { "en" => "B", "ja" => "B" }) { Divider }"#,
+            "has one `StatusItem`",
+        ),
+        (
+            r#"StatusItem(label: tr! { "en" => "A", "ja" => "A" }) { Divider }"#,
+            "icon",
+        ),
+        (
+            r#"StatusItem(icon: "star", label: tr! { "en" => "A", "ja" => "A" }) { CommandMenu(role: file) { Divider } }"#,
+            "a submenu takes `label:`",
+        ),
+    ] {
+        let errors = match compile_ui(&with_menu_bar("Spacer", items)) {
+            Ok(_) => panic!("expected `{items}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(errors.contains(expected), "`{items}`: {errors}");
+    }
+}
+
+#[test]
 fn shortcuts_follow_text_and_shortcut_inputs_keep_state() {
     let app = compile_ui(&wrap(
         r#"Column {

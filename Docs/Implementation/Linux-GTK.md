@@ -91,7 +91,7 @@
 
 - **窗口与草稿**：窗口出现时向会话运行时登记，获得代次与外部 ID（`main#1`），草稿单元由运行时返回的初值创建；写入先经运行时，再更新单元。窗口关闭即释放草稿、控件登记与查询订阅，应用级播放器继续。
 - **控件登记与会话命令**：可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、可用性与动作闭包，外部的 `ui.*` 命令经这些闭包执行；禁用、被关闭确认阻挡、多处挂载分别返回 `target_unavailable`、`target_blocked`、`target_ambiguous`；密码框不暴露值。
-- **应用生命周期**：`AdwApplication` 以 `bundle_id` 为应用 ID，同一用户只运行一个实例；最后一个窗口关闭后应用保持运行（引擎与外部入口仍可用），再次启动应用会打开主窗口。Ctrl+Q 退出（与 macOS 的 Cmd-Q 一样不经过关闭检查），Ctrl+W 关闭当前窗口，设置窗口按 Esc 关闭。
+- **应用生命周期**：`AdwApplication` 以 `bundle_id` 为应用 ID，同一用户只运行一个实例；最后一个窗口关闭后应用保持运行（引擎与外部入口仍可用），再次启动应用会打开主窗口；声明了 `StatusItem` 时它在桌面的状态区，从那里打开窗口或退出（见“状态栏项”）。Ctrl+Q 退出（与 macOS 的 Cmd-Q 一样不经过关闭检查），Ctrl+W 关闭当前窗口，设置窗口按 Esc 关闭。
 - **外部入口**：与 macOS 相同的本地控制通道（`channels = ["ipc"]`），CLI 与 MCP 服务器从同一命令目录生成。
 
 ## 窗口
@@ -275,6 +275,18 @@ target/bern/linux/Showcase/showcase
 ## 只为鼠标显示的滚动条（2026-10-27）
 
 `ScrollView(indicators: mouse)` 生成 `mouse_indicators: true`：滚动窗口上加一个捕获阶段的 `EventControllerLegacy`，在移动、按下、滚动与触摸开始时看事件设备的 `InputSource`。鼠标与指点杆把这个方向的策略设为 `Automatic`（GTK 的浮层滚动条随指针出现），触摸屏与笔设为 `External`（照样滚动，不显示滚动条），其他来源不改变；起初为 `Automatic`。Wayland 上触控板移动指针通常按鼠标上报。验证：`bern-gtk` 在 macOS 的 GTK 4 上编译通过；未在 Linux 上运行。
+
+## 状态栏项（2026-10-28）
+
+`StatusItem` 没有 GTK 控件可用，`bern-gtk` 的 `status.rs` 在会话总线上提供 StatusNotifierItem（`/StatusNotifierItem`）与 `com.canonical.dbusmenu` 菜单（`/MenuBar`），以 `org.kde.StatusNotifierItem-<pid>-1` 为名，取得名字且 `org.kde.StatusNotifierWatcher` 在时向它登记一次（之后出现的 watcher，例如重启的 Plasma，再登记一次）。
+
+- 图标是程序旁 `icons/<bundle_id>.png` 按 16、22、24、32、48、64 缩放的 ARGB32（网络字节序、非预乘）像素（`IconPixmap`），没有这个文件时用主题的 `application-x-executable`；`Title` 与 `ToolTip` 跟随 `label`。
+- 菜单：生成代码的 `status_menu` 把声明的项加进 `StatusMenu`，运行时在前面加“打开“主窗口标题””，后面加“退出”，分隔线只在两项之间。菜单在一个效果里建立，它读的引擎状态变化时重建，结构或文字变了才增加修订号并发出 `LayoutUpdated`；`AboutToShow` 再建一次。条目的编号是深度优先的序号（根为 0）；`Event(clicked)` 在下一次空闲时执行该项的动作。勾选项带 `toggle-type: checkmark`，子菜单带 `children-display: submenu`，标签里的下划线写成两个（dbusmenu 用它标助记键）。
+- `Activate` 打开主窗口；Wayland 上先用状态区经 `ProvideXdgActivationToken` 给的令牌设为窗口的启动标识，窗口才能取得焦点。
+- 菜单的上下文不属于窗口（`Ctx::detached`），只读引擎状态；命令失败时显示在打开着的主窗口里。生成代码用 `Ctx::with_local` 绑定 `ForEach` 的行与 `if let`、`match` 的变量。
+- 应用本来就在最后一个窗口关闭后保持运行，状态项不改变这一点；“退出”调用 `Application::quit`。
+
+验证（2026-10-28，`bern-ubuntu` 虚拟机，Ubuntu 24.04、GTK 4.14，显示器调节程序 Linux 版的 debug 构建，Broadway 上运行）：虚拟机没有桌面会话，在 `dbus-run-session` 里用一个最小的 StatusNotifierWatcher（Python 与 GDBus）代替状态区，用 `gdbus` 读写。程序启动后登记一次；`Id` 为 `monitor_dial`，`Title` 与 `ToolTip` 为“显示器调节”（`LANG=zh_CN.UTF-8`），`IconPixmap` 有 16 至 64 的六种尺寸，`Menu` 为 `/MenuBar`，dbusmenu `Version` 为 3；`GetLayout` 得到“打开“显示器调节””、分隔线、“退出”（这台机器没有显示器，程序自己的亮度子菜单不出现）。经 CLI 关闭 `main#1` 后进程仍在、没有窗口；`Activate` 后出现 `main#2`；再关闭后对第一项发 `Event(clicked)`，出现 `main#3`；对“退出”发 `Event(clicked)` 后进程结束。`bern-gtk` 的 clippy（全部特性，警告视为错误）与 108 个测试在虚拟机上通过。未验证：KDE Plasma 与 GNOME AppIndicator 扩展的真实状态区里的显示、右键菜单与激活令牌。
 
 ## 验证记录
 

@@ -5,6 +5,7 @@ use super::values::swift_type;
 use super::{Ctx, Generator, Out, Platform};
 use crate::names::{double, string};
 use bern_ir::{Element, Node, Prop};
+use bern_protocol::Type;
 
 impl Generator<'_> {
     /// `.keyboardShortcut(…)` arguments for an element's `shortcut`; `cmd`
@@ -488,8 +489,14 @@ impl Generator<'_> {
     }
 
     pub(super) fn slider(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        if element.expr("current").is_some() {
+        if let Some(current) = element.expr("current") {
             let (value, _, commit) = self.control_value(element, "current");
+            // The slider shows a whole number as a `Double`.
+            let value = if current.ty == Type::Int {
+                format!("Double({value})")
+            } else {
+                value
+            };
             let label = self.text_prop(element, "label").unwrap_or_default();
             out.line(format!("BernControlledSlider(value: {value}, minimum: {}, maximum: {}, step: {}, label: {label}, labelHidden: {}, continuous: {}, commit: {commit})", double(element.number("min").unwrap_or(0.0)), double(element.number("max").unwrap_or(1.0)), element.number("step").map(double).unwrap_or_else(|| "nil".into()), element.keyword("label_hidden") == Some("true"), element.keyword("continuous") == Some("true")));
             out.line(format!(".bernControl({}, role: \"slider\", label: {label}, actions: BernControlActions(setNumber: {commit}, value: {{ BernText.text({value}) }}))", self.target(element, ctx)));

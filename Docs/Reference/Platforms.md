@@ -1,6 +1,6 @@
 # 平台能力与验证范围
 
-更新：2026-10-27。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
+更新：2026-10-28。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
 
 ## 编译期功能支持
 
@@ -21,6 +21,7 @@
 | `bound_shortcuts` | 跟随状态的快捷键（`shortcut: app.keys.x`、`Shortcut(key: app.keys.x)`） | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
 | `shortcut_input` | 按下组合键改键的 `ShortcutInput` | 支持 | 支持（硬件键盘） | 支持（只显示） | 支持 | 支持（硬件键盘） | 支持 | 支持 |
 | `menu_bar` | 应用菜单栏 `MenuBar`、`CommandMenu`、`CommandItem`，`window.menu_bar` | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 |
+| `status_item` | 状态栏项 `StatusItem`（托盘图标与菜单），关闭最后一个窗口后应用留在那里 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
 | `runtime_palette` | 运行时语义调色板（`WindowSet(palette:)`），各语义角色的浅色与深色可以在运行时整体替换 | 支持 | 支持 | 支持 | — | — | 支持 | 支持 |
 | `runtime_theme` | 运行时主题选择 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `runtime_images` | 引擎提供图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
@@ -118,6 +119,8 @@
 | 文字样式 `code`（2026-10-25） | 五个后端用各自平台的等宽字体：SwiftUI 的 `.monospaced`、Compose 的 `FontFamily.Monospace`、Web 的 `ui-monospace`、GTK 的 `monospace` 样式类、WinUI 3 的 Cascadia Mono；定了字号时 SwiftUI 也保留等宽 | Android 真机上一个实际应用插件页的代码块；其他目标未实测 |
 | 按明暗换色的 SVG 画成两张图、声明图片双采样（2026-10-26） | `bern-svg` 测试覆盖分类与按外观展开；`svg_targets` 覆盖 macOS、Windows、Android、Linux、Web 的降低（`dark_source`）与两张 PNG 的颜色；Compose、GTK、WinUI 3、SwiftUI（含 swiftc 类型检查）与 Web 的生成器测试，Web 运行时测试覆盖排进页面后选图与主题变化时换图；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy；WinUI 3 与 XAML Islands 在 Windows PC 上经 MSVC 编译；临时示例 `bern build` 的 macOS、Android、Web 构建通过 | macOS 27：窗口里、`appearance: dark` 部件里、`appearance: light` 部件里各一张，跟随系统（深色）、`WindowSet(appearance:)` 强制浅色与深色、回到跟随系统时都显示对应那张；Chromium（内置浏览器）上同样四种情况及模拟系统切到浅色都对。macOS 的系统外观切换、iOS、tvOS、Android、Linux、Windows 未运行实测 |
 | 只为鼠标显示的滚动条 `ScrollView(indicators: mouse)`（2026-10-27） | SwiftUI 在 macOS 照系统滚动条样式（接着鼠标或设为始终显示时显示）、在 iOS 指针悬停后显示，tvOS 不显示；WinUI 3 按指针设备类型、GTK 按事件设备来源、Web 按 `pointerType` 在显示与隐藏之间切换，触摸与笔隐藏；Compose 本来不画滚动条。生成器测试含 macOS 与 iOS 的 Swift 类型检查，`bern-gtk` 编译通过；WinUI 3 的 C++ 未编译 | 未在任何设备上实测 |
+| 状态栏项 `StatusItem`（2026-10-28） | `status_item`：macOS 为 `MenuBarExtra`（单色 SF Symbol，没有窗口时收起 Dock 图标），Windows 为通知区域图标与系统弹出菜单，Linux 为 StatusNotifierItem 与 dbusmenu；iOS、tvOS、Android、Web 不适用。编译器测试覆盖降入窗口目录与不属于窗口的规则；SwiftUI 测试按三个 SDK 类型检查；WinUI 3 与 GTK 的生成器测试覆盖菜单函数（条件、`if let`、`match`、`ForEach`）；显示器调节程序的三个桌面目标都构建成功 | Windows 实体机：关窗后应用留在通知区域，单击图标重开窗口，右键菜单的各项与子菜单正确，子菜单的预设把显示器亮度设为 30，“退出”结束进程并移除图标。Linux 虚拟机：在测试用的 watcher 下登记、属性、菜单、`Activate` 与菜单项点击、退出都经 D-Bus 验证。macOS 未运行实测；KDE、GNOME 的真实状态区未看 |
+| 受控滑块绑定整数（2026-10-28） | `Slider(current:)` 读写 `i64` 时，SwiftUI、GTK 与 Web 把滑块的值取整后交给命令，与 WinUI 3、Compose 相同：此前 SwiftUI 编译失败（`Double` 交给 `Int64`），GTK 把浮点数按整数的位置编码，Web 交出非整数 | 显示器调节程序的 macOS 版构建通过；其他目标未实测 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

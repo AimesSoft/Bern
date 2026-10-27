@@ -3,7 +3,7 @@
 
 use super::{Generator, Out, float, string};
 use bern_ir::style::ColorRef;
-use bern_ir::{Action, ComponentDef, WindowChrome, WindowDef, WindowInitial, WindowRole};
+use bern_ir::{Action, ComponentDef, Node, WindowChrome, WindowDef, WindowInitial, WindowRole};
 
 impl Generator<'_> {
     fn component(&self, out: &mut Out, component: &ComponentDef) {
@@ -82,8 +82,171 @@ impl Generator<'_> {
         }
         self.window_table(&mut out);
         out.line("");
+        self.status_item(&mut out);
+        out.line("");
         self.accent_colors(&mut out);
         out.finish()
+    }
+
+    /// `StatusItem()`: the status item's tooltip and the function that adds
+    /// the application's items to its menu each time it opens, reading the
+    /// state of that moment; none without a `StatusItem`.
+    fn status_item(&self, out: &mut Out) {
+        let Some(item) = &self.app.windows.status_item else {
+            out.line("static std::optional<StatusItemDef> StatusItem() { return std::nullopt; }");
+            return;
+        };
+        out.line("/// The application's items of the status item's menu.");
+        out.open("static void StatusMenu(Ctx const& c, StatusArea::Menu& m) {");
+        self.status_nodes(out, &item.children);
+        out.close("}");
+        out.line("");
+        out.line("/// The status item in the notification area.");
+        out.open("static std::optional<StatusItemDef> StatusItem() {");
+        out.line("StatusItemDef item;");
+        if let Some(label) = self.text_prop(item, "label") {
+            out.line(format!("item.label = {label};"));
+        }
+        out.line("item.menu = StatusMenu;");
+        out.line("return item;");
+        out.close("}");
+    }
+
+    /// Statements that add menu items to `m` in the context `c`: branches
+    /// and rows are C++ control flow, as the menu is built at once.
+    fn status_nodes(&self, out: &mut Out, nodes: &[Node]) {
+        for node in nodes {
+            match node {
+                Node::Element(element) => match element.kind.as_str() {
+                    "CommandItem" => {
+                        let flag = |name: &str| {
+                            element
+                                .expr(name)
+                                .map(|expr| self.condition(expr))
+                                .unwrap_or_else(|| (name == "enabled").to_string())
+                        };
+                        out.line(format!(
+                            "m.Item(c, {}, {}, {}, {});",
+                            element
+                                .text("label")
+                                .map(|text| self.text(text))
+                                .unwrap_or_else(|| "winrt::hstring()".into()),
+                            flag("enabled"),
+                            flag("checked"),
+                            self.action(element)
+                                .unwrap_or_else(|| "[](Ctx const&) {}".into())
+                        ));
+                    }
+                    "CommandMenu" => {
+                        out.open(format!(
+                            "m.Sub({}, [&](StatusArea::Menu& m) {{",
+                            element
+                                .text("label")
+                                .map(|text| self.text(text))
+                                .unwrap_or_else(|| "winrt::hstring()".into())
+                        ));
+                        self.status_nodes(out, &element.children);
+                        out.close("});");
+                    }
+                    "Divider" => out.line("m.Divider();"),
+                    "ForEach" => {
+                        let (Some(items), Some(template)) =
+                            (element.expr("items"), &element.template)
+                        else {
+                            continue;
+                        };
+                        out.open(format!(
+                            "for (auto const& row : R::AsList({})) {{",
+                            self.expr(items)
+                        ));
+                        out.open("[&](Ctx const& c) {");
+                        self.status_nodes(out, &element.children);
+                        out.close(format!(
+                            "}}(c.WithLocal({}, [row] {{ return row; }}));",
+                            string(&template.var)
+                        ));
+                        out.close("}");
+                    }
+                    _ => {}
+                },
+                Node::If(node) => {
+                    for (index, (condition, body)) in node.branches.iter().enumerate() {
+                        let keyword = if index == 0 { "if" } else { "} else if" };
+                        if index == 0 {
+                            out.open(format!("{keyword} ({}) {{", self.condition(condition)));
+                        } else {
+                            out.indent -= 1;
+                            out.open(format!("{keyword} ({}) {{", self.condition(condition)));
+                        }
+                        self.status_nodes(out, body);
+                    }
+                    if !node.otherwise.is_empty() {
+                        out.indent -= 1;
+                        out.open("} else {");
+                        self.status_nodes(out, &node.otherwise);
+                    }
+                    out.close("}");
+                }
+                Node::IfLet(node) => {
+                    out.open(format!(
+                        "if (auto value = {}; value.IsSome()) {{",
+                        self.expr(&node.value)
+                    ));
+                    out.open("[&](Ctx const& c) {");
+                    self.status_nodes(out, &node.then);
+                    out.close(format!(
+                        "}}(c.WithLocal({}, [value] {{ return R::Some(value).value_or(Value::Unit()); }}));",
+                        string(&node.var)
+                    ));
+                    if !node.otherwise.is_empty() {
+                        out.indent -= 1;
+                        out.open("} else {");
+                        self.status_nodes(out, &node.otherwise);
+                    }
+                    out.close("}");
+                }
+                Node::Match(node) => {
+                    out.open("{");
+                    out.line(format!("auto value = {};", self.expr(&node.value)));
+                    out.line("auto tag = R::Tag(value);");
+                    // Arms of a variant first, then the wildcard, as the
+                    // runtime's `match` chooses.
+                    let arms = node
+                        .arms
+                        .iter()
+                        .filter(|arm| arm.variant.is_some())
+                        .chain(node.arms.iter().filter(|arm| arm.variant.is_none()));
+                    for (index, arm) in arms.enumerate() {
+                        let test = match arm.variant {
+                            Some(variant) => format!("(tag == {variant}u)"),
+                            None => "(true)".into(),
+                        };
+                        if index == 0 {
+                            out.open(format!("if {test} {{"));
+                        } else {
+                            out.indent -= 1;
+                            out.open(format!("}} else if {test} {{"));
+                        }
+                        let mut inner = "c".to_string();
+                        for binding in &arm.bindings {
+                            inner = format!(
+                                "{inner}.WithLocal({}, [value] {{ return R::Payload(value, {}); }})",
+                                string(&binding.name),
+                                binding.field
+                            );
+                        }
+                        out.open("[&](Ctx const& c) {");
+                        self.status_nodes(out, &arm.body);
+                        out.close(format!("}}({inner});"));
+                    }
+                    if !node.arms.is_empty() {
+                        out.close("}");
+                    }
+                    out.close("}");
+                }
+                Node::Component(_) => {}
+            }
+        }
     }
 
     /// `Windows()`: the window kinds, as the runtime sees them.

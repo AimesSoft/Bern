@@ -51,6 +51,7 @@ const FEATURES_BUILT: &[&str] = &[
     bern_target_api::feature::BOUND_SHORTCUTS,
     bern_target_api::feature::SHORTCUT_INPUT,
     bern_target_api::feature::MENU_BAR,
+    bern_target_api::feature::STATUS_ITEM,
     bern_target_api::feature::RUNTIME_THEME,
     bern_target_api::feature::BUTTON_CONTENT,
     bern_target_api::feature::TOOLBAR_SEARCH,

@@ -29,6 +29,23 @@ enum BernMenuItems {
     }
 }
 
+/// The application's `StatusItem` in the menu bar. With one, closing the
+/// last window leaves the application running there, without a Dock icon
+/// until a window opens again, as menu bar applications do.
+@MainActor
+enum BernStatusArea {
+    static var shown = false
+
+    /// The Dock icon follows whether any window is open.
+    static func windowsChanged(anyOpen: Bool) {
+        guard shown else { return }
+        let policy: NSApplication.ActivationPolicy = anyOpen ? .regular : .accessory
+        if NSApplication.shared.activationPolicy() != policy {
+            NSApplication.shared.setActivationPolicy(policy)
+        }
+    }
+}
+
 // MARK: - Platform state
 
 /// What a window instance keeps about its NSWindow.

@@ -1,6 +1,6 @@
 # 当前组件用法
 
-更新：2026-10-25。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
+更新：2026-10-28。本文说明当前可声明的接口；完整属性、必填项、子节点与动作规则见[组件属性表](Component-Properties.md)，各后端的接受范围见[平台能力表](Platforms.md)。可直接构建的工程在 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery`；下文片段省略所在组件、协议与状态定义。
 
 ## 声明与数据来源
 
@@ -259,6 +259,29 @@ WindowSet(handle: AppWindows, primary: main) {
 ```
 
 各目标的范围见[平台能力表](Platforms.md)，语义与实现进度见[设计文档的快捷键与菜单栏](../Design.md#菜单栏)。
+
+## 状态栏项（托盘）
+
+`WindowSet` 里的 `StatusItem` 是应用在系统状态区域的一项：Windows 任务栏的通知区域、Linux 桌面的状态区与 macOS 菜单栏右侧。声明了它，关闭最后一个窗口时应用不退出，留在那里。
+
+- `label` 是提示文字与可访问名称；`icon` 只给 macOS，菜单栏里的状态项是系统着色的单色符号。Windows 与 Linux 显示应用图标。
+- 菜单第一项打开主窗口、最后一项退出，中间是声明的 `CommandItem`、`CommandMenu` 与 `Divider`，可以写在 `if`、`match` 与 `ForEach` 里。Windows 与 Linux 上单击图标打开主窗口，右键是菜单；macOS 上点按就是菜单。
+- 菜单不属于任何窗口：只读引擎状态、执行命令与窗口动作，不读写草稿、不读窗口字段，菜单项不带 `pick` 与 `shortcut`。
+- 手机、电视与网页没有这个位置，接受声明而不显示（能力 `status_item` 不适用）。
+
+```rust
+StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }) {
+    CommandItem(id: dim, label: tr! { "zh-Hans" => "调暗", "en" => "Dim" }, enabled: app.brightness > 10) => app.set_brightness(10)
+    Divider
+    CommandMenu(label: tr! { "zh-Hans" => "预设", "en" => "Presets" }) {
+        ForEach(items: app.presets, key: id) |preset| {
+            CommandItem(id: preset, label: preset.name, checked: preset.id == app.preset) => app.apply(preset.id)
+        }
+    }
+}
+```
+
+语义与各平台的实现见[设计文档的状态栏项](../Design.md#状态栏项)。
 
 ## 其他接口
 

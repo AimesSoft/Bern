@@ -31,6 +31,7 @@ pub mod reactive;
 mod scene;
 mod session;
 mod snapshot;
+mod status;
 mod structure;
 pub mod style;
 #[cfg(feature = "svg")]
@@ -68,6 +69,7 @@ pub use scene::{
     MarqueeProps, Modal, ModalProps, Positioned, PositionedProps, ScaleBox, ScaleBoxProps, Timer,
     TimerProps,
 };
+pub use status::{StatusItemDef, StatusMenu};
 pub use structure::*;
 pub use style::{Look, StyleDef};
 pub use theme::Color;
@@ -228,6 +230,8 @@ pub struct AppDef {
     pub theme: Option<ThemeDef>,
     /// Extensions of the file kinds `files:` names.
     pub file_kinds: &'static [(&'static str, &'static [&'static str])],
+    /// The `StatusItem` in the desktop's status area.
+    pub status_item: Option<StatusItemDef>,
 }
 
 #[cfg(feature = "script")]

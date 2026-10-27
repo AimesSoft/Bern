@@ -359,6 +359,7 @@ impl<'a> Generator<'a> {
         for window in &app.windows.windows {
             self.window(&mut out, window);
         }
+        self.status_menu(&mut out);
 
         out.line("/// Strings of every supported language.");
         out.open("static STRINGS: b::text::StringTable = &[");
@@ -521,8 +522,154 @@ impl<'a> Generator<'a> {
             })
             .collect();
         out.line(format!("file_kinds: &[{}],", kinds.join(", ")));
+        let status_item = app.windows.status_item.as_ref().map(|item| {
+            format!(
+                "b::StatusItemDef {{ label: {}, menu: status_menu }}",
+                self.text_prop(item, "label")
+                    .unwrap_or_else(|| "b::str(|_| String::new())".into())
+            )
+        });
+        out.line(format!("status_item: {},", some(status_item)));
         out.close("}");
         out.close("}");
         out.finish()
+    }
+
+    /// `status_menu`: the application's items of the status item's menu,
+    /// added at once each time the menu is built; branches and rows are
+    /// Rust control flow.
+    fn status_menu(&self, out: &mut Out) {
+        let Some(item) = &self.app.windows.status_item else {
+            return;
+        };
+        out.line("/// The application's items of the status item's menu.");
+        out.open("fn status_menu(c: &b::Ctx, m: &mut b::StatusMenu) {");
+        self.status_nodes(out, &item.children);
+        out.close("}");
+        out.line("");
+    }
+
+    fn status_nodes(&self, out: &mut Out, nodes: &[bern_ir::Node]) {
+        use bern_ir::Node;
+        for node in nodes {
+            match node {
+                Node::Element(element) => match element.kind.as_str() {
+                    "CommandItem" => {
+                        let label = element
+                            .text("label")
+                            .map(|text| self.text(text))
+                            .unwrap_or_else(|| "String::new()".into());
+                        let enabled = element
+                            .expr("enabled")
+                            .map(|expr| self.condition(expr))
+                            .unwrap_or_else(|| "true".into());
+                        let checked =
+                            some(element.expr("checked").map(|expr| self.condition(expr)));
+                        out.line(format!(
+                            "m.item(c, {label}, {enabled}, {checked}, {});",
+                            self.action(element)
+                        ));
+                    }
+                    "CommandMenu" => {
+                        out.open(format!(
+                            "m.sub({}, |m| {{",
+                            element
+                                .text("label")
+                                .map(|text| self.text(text))
+                                .unwrap_or_else(|| "String::new()".into())
+                        ));
+                        self.status_nodes(out, &element.children);
+                        out.close("});");
+                    }
+                    "Divider" => out.line("m.divider();"),
+                    "ForEach" => {
+                        let (Some(items), Some(template)) =
+                            (element.expr("items"), &element.template)
+                        else {
+                            continue;
+                        };
+                        out.open(format!("for row in rt::as_list({}) {{", self.expr(items)));
+                        out.line(format!(
+                            "let c = &c.with_local({}, Rc::new(move || row.clone()));",
+                            string(&template.var)
+                        ));
+                        self.status_nodes(out, &element.children);
+                        out.close("}");
+                    }
+                    _ => {}
+                },
+                Node::If(node) => {
+                    for (index, (condition, body)) in node.branches.iter().enumerate() {
+                        if index == 0 {
+                            out.open(format!("if {} {{", self.condition(condition)));
+                        } else {
+                            out.indent -= 1;
+                            out.open(format!("}} else if {} {{", self.condition(condition)));
+                        }
+                        self.status_nodes(out, body);
+                    }
+                    if !node.otherwise.is_empty() {
+                        out.indent -= 1;
+                        out.open("} else {");
+                        self.status_nodes(out, &node.otherwise);
+                    }
+                    out.close("}");
+                }
+                Node::IfLet(node) => {
+                    out.open(format!(
+                        "if let Some(value) = rt::some({}) {{",
+                        self.expr(&node.value)
+                    ));
+                    out.line(format!(
+                        "let c = &c.with_local({}, Rc::new(move || value.clone()));",
+                        string(&node.var)
+                    ));
+                    self.status_nodes(out, &node.then);
+                    if !node.otherwise.is_empty() {
+                        out.indent -= 1;
+                        out.open("} else {");
+                        self.status_nodes(out, &node.otherwise);
+                    }
+                    out.close("}");
+                }
+                Node::Match(node) => {
+                    out.open("{");
+                    out.line(format!("let value = {};", self.expr(&node.value)));
+                    out.line("let tag = rt::tag(&value);");
+                    // Arms of a variant first, then the wildcard, as the
+                    // runtime's `match` chooses.
+                    let arms = node
+                        .arms
+                        .iter()
+                        .filter(|arm| arm.variant.is_some())
+                        .chain(node.arms.iter().filter(|arm| arm.variant.is_none()));
+                    for (index, arm) in arms.enumerate() {
+                        let test = match arm.variant {
+                            Some(variant) => format!("tag == Some({variant})"),
+                            None => "true".into(),
+                        };
+                        if index == 0 {
+                            out.open(format!("if {test} {{"));
+                        } else {
+                            out.indent -= 1;
+                            out.open(format!("}} else if {test} {{"));
+                        }
+                        for binding in &arm.bindings {
+                            out.line(format!(
+                                "let c = &c.with_local({}, {{ let value = value.clone(); Rc::new(move || rt::payload(value.clone(), {})) }});",
+                                string(&binding.name),
+                                binding.field
+                            ));
+                        }
+                        self.status_nodes(out, &arm.body);
+                    }
+                    if !node.arms.is_empty() {
+                        out.close("}");
+                    }
+                    out.close("}");
+                }
+                Node::Component(_) => {}
+            }
+        }
     }
 }

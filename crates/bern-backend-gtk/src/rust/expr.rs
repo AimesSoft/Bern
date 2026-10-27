@@ -310,10 +310,14 @@ impl Generator<'_> {
                     let values: Vec<_> = args
                         .iter()
                         .map(|arg| {
-                            if arg == expr {
-                                "v.clone()".to_string()
-                            } else {
+                            if arg != expr {
                                 self.expr(arg)
+                            } else if arg.ty == Type::Int {
+                                // A whole number takes the slider's value
+                                // rounded.
+                                "V::Int(rt::as_f64(&v).round() as i64)".to_string()
+                            } else {
+                                "v.clone()".to_string()
                             }
                         })
                         .collect();

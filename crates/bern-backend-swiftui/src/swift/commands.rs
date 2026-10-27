@@ -1,7 +1,8 @@
 //! The application's `MenuBar` in the menu bar of macOS: SwiftUI
 //! `Commands`, a `CommandMenu` for each menu of its own and a
-//! `CommandGroup` for the items added to a menu of the system's. iOS and
-//! tvOS show no menu bar.
+//! `CommandGroup` for the items added to a menu of the system's. Its
+//! `StatusItem` is a `MenuBarExtra` on the right of the menu bar. iOS and
+//! tvOS show neither.
 
 use super::values::{session_class, session_var};
 use super::{Ctx, Generator, Out, Platform};
@@ -37,12 +38,6 @@ impl Generator<'_> {
             return false;
         }
         let app = self.app;
-        let index = app
-            .windows
-            .windows
-            .iter()
-            .position(|window| window.id == app.windows.primary)
-            .unwrap_or(0);
         let sessions: &[String] = app
             .window(&app.windows.primary)
             .map_or(&[], |window| &window.sessions);
@@ -76,28 +71,6 @@ impl Generator<'_> {
         out.close("}");
         out.close("}");
         out.line("");
-        out.line("/// The window the menu bar's items act on: the primary window, whose");
-        out.line("/// drafts they read and write, or fresh drafts while it is closed.");
-        out.line("@MainActor");
-        out.open("enum BernMenuBarWindow {");
-        out.line(format!(
-            "static let closed = BernWindowContext(kind: {index}, kindID: {}, isSettings: false, sessions: [{}])",
-            string(&app.windows.primary),
-            sessions
-                .iter()
-                .map(|session| format!("{}()", session_class(session)))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-        out.open("static var primary: BernWindowContext {");
-        out.line("_ = BernHost.shared.windowRevision");
-        out.line(format!(
-            "return BernHost.shared.windows[{}] ?? closed",
-            string(&app.windows.primary)
-        ));
-        out.close("}");
-        out.close("}");
-        out.line("");
         let ctx = Ctx {
             component: "menu_bar".into(),
             ..Ctx::default()
@@ -126,6 +99,113 @@ impl Generator<'_> {
             out.line("");
         }
         true
+    }
+
+    /// `BernMenuBarWindow`, the window the items of the menu bar and the
+    /// status item act on: the primary window, whose drafts the menu bar's
+    /// items read and write, or fresh drafts while it is closed. Generated
+    /// on macOS when the application has either.
+    pub(super) fn menu_window(&self, out: &mut Out) {
+        let app = self.app;
+        if self.platform != Platform::Macos
+            || (app.windows.menu_bar.is_none() && app.windows.status_item.is_none())
+        {
+            return;
+        }
+        let index = app
+            .windows
+            .windows
+            .iter()
+            .position(|window| window.id == app.windows.primary)
+            .unwrap_or(0);
+        let sessions: &[String] = app
+            .window(&app.windows.primary)
+            .map_or(&[], |window| &window.sessions);
+        out.line("/// The window the menu bar's items act on: the primary window, whose");
+        out.line("/// drafts they read and write, or fresh drafts while it is closed.");
+        out.line("@MainActor");
+        out.open("enum BernMenuBarWindow {");
+        out.line(format!(
+            "static let closed = BernWindowContext(kind: {index}, kindID: {}, isSettings: false, sessions: [{}])",
+            string(&app.windows.primary),
+            sessions
+                .iter()
+                .map(|session| format!("{}()", session_class(session)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        out.open("static var primary: BernWindowContext {");
+        out.line("_ = BernHost.shared.windowRevision");
+        out.line(format!(
+            "return BernHost.shared.windows[{}] ?? closed",
+            string(&app.windows.primary)
+        ));
+        out.close("}");
+        out.close("}");
+        out.line("");
+    }
+
+    /// `BernStatusMenu`, the menu of the `StatusItem` on macOS; whether
+    /// there is one. It opens the primary window, runs the application's
+    /// items, and quits, as menu bar extras do.
+    pub(super) fn status_menu(&self, out: &mut Out) -> bool {
+        let Some(item) = self.app.windows.status_item.as_ref() else {
+            return false;
+        };
+        if self.platform != Platform::Macos {
+            return false;
+        }
+        let app = self.app;
+        let title = app
+            .window(&app.windows.primary)
+            .map(|window| format!("BernText.string({})", string(&window.title.key)))
+            .unwrap_or_else(|| "\"\"".into());
+        out.line("// MARK: - Status item");
+        out.line("");
+        out.line("/// The menu of the `StatusItem` in the menu bar.");
+        out.open("struct BernStatusMenu: View {");
+        out.line("private var bernEngine: BernEngine { BernEngine.shared }");
+        out.line("private var bernWindow: BernWindowContext { BernMenuBarWindow.primary }");
+        out.line("");
+        out.open("var body: some View {");
+        out.line(format!(
+            "SwiftUI.Button(BernText.format(\"bern.window.open\", [{title}])) {{ BernHost.shared.open({}) }}",
+            string(&app.windows.primary)
+        ));
+        if !item.children.is_empty() {
+            out.line("SwiftUI.Divider()");
+            let ctx = Ctx {
+                component: "status_item".into(),
+                ..Ctx::default()
+            };
+            self.nodes(out, &item.children, &ctx);
+        }
+        out.line("SwiftUI.Divider()");
+        out.line("SwiftUI.Button(BernText.string(\"bern.app.quit\")) { NSApplication.shared.terminate(nil) }");
+        out.close("}");
+        out.close("}");
+        out.line("");
+        true
+    }
+
+    /// The `MenuBarExtra` scene of the `StatusItem`: `icon` is a symbol,
+    /// which the menu bar draws as a template in its own colour.
+    pub(super) fn status_scene(&self, out: &mut Out) {
+        let Some(item) = self.app.windows.status_item.as_ref() else {
+            return;
+        };
+        let icon = item.icon("icon").unwrap_or("circle");
+        out.open("SwiftUI.MenuBarExtra {");
+        out.line("BernStatusMenu()");
+        out.line("    .environment(BernEngine.shared)");
+        out.close("} label: {");
+        out.indent += 1;
+        out.line(format!(
+            "SwiftUI.Image(systemName: {}).accessibilityLabel(SwiftUI.Text(verbatim: {}))",
+            string(icon),
+            self.text_prop(item, "label").unwrap_or_default()
+        ));
+        out.close("}");
     }
 
     /// A submenu of the menu bar, opening beside its item.

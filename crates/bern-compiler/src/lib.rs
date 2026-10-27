@@ -691,6 +691,24 @@ fn window_catalog(
             }
         }
     }
+    let items: Vec<&ir::Element> = root
+        .children
+        .iter()
+        .filter_map(|child| match child {
+            ir::Node::Element(item) if item.kind == "StatusItem" => Some(item),
+            _ => None,
+        })
+        .collect();
+    if let [_, second, ..] = items.as_slice() {
+        diagnostics.push(
+            Diagnostic::error("a `WindowSet` has one `StatusItem`; put every item in its menu")
+                .at(second.source.clone()),
+        );
+    }
+    let status_item = items.first().map(|item| (*item).clone());
+    if let Some(item) = &status_item {
+        check_status_item(item, diagnostics);
+    }
     Some(ir::WindowCatalog {
         handle,
         primary,
@@ -700,7 +718,75 @@ fn window_catalog(
         appearance: root.expr("appearance").cloned(),
         icon: root.expr("icon").cloned(),
         menu_bar,
+        status_item,
     })
+}
+
+/// The `StatusItem`'s menu runs while no window is open: it reads engine
+/// state and runs commands, and takes nothing that needs a window: drafts,
+/// the window's own fields, files asked for in its open panel, shortcuts.
+fn check_status_item(item: &ir::Element, diagnostics: &mut Vec<Diagnostic>) {
+    let node = ir::Node::Element(item.clone());
+    if let Some(session) = read_sessions(&node).first() {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "the `StatusItem`'s menu runs without a window, so it has no drafts: read engine state and run commands instead of `{session}`"
+            ))
+            .at(item.source.clone()),
+        );
+    }
+    node.walk(&mut |node| {
+        let exprs: Vec<&ir::Expr> = match node {
+            ir::Node::Element(element) => {
+                for prop in ["pick", "shortcut"] {
+                    if element.prop(prop).is_some() {
+                        diagnostics.push(
+                            Diagnostic::error(format!(
+                                "a `CommandItem` of the `StatusItem` takes no `{prop}:`: its menu belongs to no window"
+                            ))
+                            .at(element.source.clone()),
+                        );
+                    }
+                }
+                element
+                    .props
+                    .values()
+                    .flat_map(|prop| match prop {
+                        ir::Prop::Text { text } => text.exprs(),
+                        ir::Prop::Expr { expr } => vec![expr],
+                        _ => Vec::new(),
+                    })
+                    .chain(match &element.action {
+                        Some(ir::Action::Engine { args, .. } | ir::Action::Media { args, .. }) => {
+                            args.iter().collect()
+                        }
+                        _ => Vec::new(),
+                    })
+                    .collect()
+            }
+            ir::Node::If(node) => node.branches.iter().map(|(when, _)| when).collect(),
+            ir::Node::IfLet(node) => vec![&node.value],
+            ir::Node::Match(node) => vec![&node.value],
+            ir::Node::Component(_) => Vec::new(),
+        };
+        for expr in exprs {
+            expr.walk(&mut |expr| {
+                if let ir::ExprKind::Binding {
+                    binding: ir::Binding::Window { field },
+                } = &expr.kind
+                    // Known when the target builds.
+                    && !matches!(field.as_str(), "menu_bar" | "webview" | "tv")
+                {
+                    diagnostics.push(
+                        Diagnostic::error(format!(
+                            "the `StatusItem`'s menu belongs to no window, so it cannot read `window.{field}`"
+                        ))
+                        .at(item.source.clone()),
+                    );
+                }
+            });
+        }
+    });
 }
 
 fn source_fingerprint(files: &[&std::path::Path]) -> String {
