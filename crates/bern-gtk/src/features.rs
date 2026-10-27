@@ -70,22 +70,17 @@ fn filters(kinds: &str) -> Option<gio::ListStore> {
                 filter.add_suffix(&word[1..]);
                 any = true;
             }
+            // A kind is its extensions, as a drop judges it. No MIME
+            // pattern: KDE's open panel, through the portal, matches MIME
+            // types exactly, so `video/*` matched no file and hid every
+            // video, the extensions beside it too.
             kind => {
-                let mime = match kind {
-                    "video" => Some("video/*"),
-                    "audio" => Some("audio/*"),
-                    "picture" => Some("image/*"),
-                    _ => None,
-                };
-                if let Some(mime) = mime {
-                    filter.add_mime_type(mime);
-                }
                 if let Some((_, extensions)) = table.iter().find(|(name, _)| *name == kind) {
                     for extension in *extensions {
                         filter.add_suffix(extension);
+                        any = true;
                     }
                 }
-                any = true;
             }
         }
     }
@@ -396,6 +391,13 @@ pub fn ContentButton(
         button.set_overflow(gtk::Overflow::Hidden);
     }
     let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    // In the platform's button the content stands in the middle, as its
+    // label does; a capsule of a declared height was taller than the
+    // content, which kept to its top.
+    if framed {
+        holder.set_halign(gtk::Align::Center);
+        holder.set_valign(gtk::Align::Center);
+    }
     content(&Parent::of_box(&holder), ctx);
     button.set_child(Some(&holder));
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));

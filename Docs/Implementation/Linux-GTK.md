@@ -82,7 +82,7 @@
 | `Drop` | `GtkDropTarget`（文件列表，预读值以便按种类拒绝）：可接受的文件经过时 `over` 为真，松手后存入字段并执行动作；`opens: true` 时应用接收系统交来的文件（`GApplication` 的 open），桌面文件登记 `MimeType` 与 `%U` |
 | `Pinch` / `Swipe` | `GtkGestureZoom`（另接受 Ctrl 加滚轮）/ `GtkGestureDrag`（10 点后开始，`distance` 默认 300） |
 | `Switch(style: button)`、工具栏中的 `Switch` | `GtkToggleButton`，工具栏中有图标时只显示图标 |
-| 带内容的 `Button` | 无外框的 `GtkButton`，内容按原样显示，`overflow: hidden` 让样式的圆角裁住内容；没有样式时按下变暗 |
+| 带内容的 `Button` | 无外框的 `GtkButton`，内容按原样显示，`overflow: hidden` 让样式的圆角裁住内容；没有样式时按下变暗。`shape: capsule` 时是平台的按钮包着内容，内容在按钮中横竖都居中，与标签一样（此前写了高度的胶囊比内容高，内容贴在上沿） |
 | 工具栏中的 `Search` | 页眉末端的 `GtkSearchEntry`；子元素是不抢焦点的 `GtkPopover`，有焦点且有文字时显示，点选结果后收起 |
 
 图标使用 Bern 的 SF Symbols 命名，映射到 freedesktop 符号图标名（例如 `magnifyingglass` → `system-search-symbolic`），由 Adwaita 绘制：启动时只要装有 Adwaita，就把应用的 `gtk-icon-theme-name` 设为 Adwaita（显示器自带的图标主题不接受直接改名），不跟随桌面的图标主题；KDE 的 Breeze 缺少表中的许多名字，另一些画成彩色（2026-10-27，Steam Deck 的 KDE 上实看）。对照表只有一份（`crates/bern-gtk/src/icon_table.rs`，按名字排序）：运行时读它，`bern-backend-gtk` 也以 `include!` 读它，应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示缺失图标。表中的图标都在 Adwaita 46 里（Yaru 等主题经 `Inherits` 最终回落到 Adwaita），只有 `arrow.up.right.square` 用 libadwaita 自带资源中的 `adw-external-link-symbolic`。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字。
@@ -164,7 +164,7 @@
 
 ### 媒体类应用的组件与输入
 
-- 文件：`pick` 用 `GtkFileDialog`（按种类加 MIME 与扩展名过滤，`folder` 选目录），选中后以 `file://` 地址存进字段再执行动作；种类与扩展名表随生成代码一起提供。`ui.set_file` 校验地址（`file`、`http`、`https`，否则 `invalid_url`）与种类（否则 `unsupported_file`）后交给带 `pick` 的按钮、菜单项或 `Drop`。
+- 文件：`pick` 用 `GtkFileDialog`（按种类的扩展名表过滤，与拖放的判断相同；`folder` 选目录），选中后以 `file://` 地址存进字段再执行动作；种类与扩展名表随生成代码一起提供。过滤里不放 `video/*` 这类通配的 MIME 类型：KDE 的打开面板（经门户）按确切的 MIME 类型筛选，通配的一个也匹配不上，此前选视频时连 mp4 也不显示，同一过滤里的扩展名也不起作用（2026-10-27，Steam Deck 的 KDE）。`ui.set_file` 校验地址（`file`、`http`、`https`，否则 `invalid_url`）与种类（否则 `unsupported_file`）后交给带 `pick` 的按钮、菜单项或 `Drop`。
 - 快捷键：每个窗口一个捕获阶段的按键控制器，按控件挂载的先后取最新的；`cmd` 与 `ctrl` 都是 Control。没有 Control 或 Alt 的快捷键在编辑文字时不触发。`Search` 的快捷键聚焦搜索框，`Switch`、`SplitButton` 的开关，按钮、菜单项、`PopoverButton` 的激活。
 - `ScrollView(snap:, position:)`：滚动停下（160 毫秒不变）时取最近的一项对齐到锚点；离上次停下的位置走过 24 点以上而最近的一项在身后时，取运动方向上的下一项，所以一格滚轮也能前进。`center` 时首尾按最大一项留出空白；位置按项在内容中的坐标加内容的边距计算，与当前滚动无关。字段被设成另一项时以 `smooth` 滚过去；首次显示等边距生效后直接停在字段的一项。
 - 重复项中的控件目标带上每一层的键，经过组件也一样（`card.open_swatch[2]`）。
