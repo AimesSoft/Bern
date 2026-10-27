@@ -31,7 +31,10 @@ list.bern-plain-list > row > box.header { padding: 0; min-height: 0; }\n\
 .bern-badge { padding: 0 7px; min-width: 10px; border-radius: 9999px; background-color: alpha(currentColor, 0.12); font-size: smaller; font-weight: 600; }\n\
 .bern-preview-more { padding: 0 6px; min-width: 18px; border-radius: 9999px; background-color: alpha(@window_fg_color, 0.15); }\n\
 .bern-marquee label { text-shadow: 0 1px 1px black; }\n\
-.bern-control-group { border-radius: 9999px; }\n\
+.bern-control-group { border-radius: 9999px; background-color: alpha(currentColor, 0.1); }\n\
+.bern-control-group > button, .bern-control-group > widget > button, .bern-control-group > menubutton > button { min-width: 30px; min-height: 30px; padding: 0; margin: 0 5px; border-radius: 9999px; background-color: transparent; box-shadow: none; }\n\
+.bern-control-group > button:hover, .bern-control-group > widget > button:hover, .bern-control-group > menubutton > button:hover { background-color: alpha(currentColor, 0.07); }\n\
+.bern-control-group > button:active, .bern-control-group > widget > button:active, .bern-control-group > menubutton > button:active, .bern-control-group > menubutton > button:checked { background-color: alpha(currentColor, 0.16); }\n\
 .bern-modal-backdrop { background-color: transparent; transition: background-color 200ms ease-out; }\n\
 .bern-modal-backdrop.bern-shown { background-color: rgba(0, 0, 0, 0.24); }\n\
 .bern-modal { background-color: @dialog_bg_color; color: @dialog_fg_color; border-radius: 24px; border: 1px solid alpha(currentColor, 0.12); box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28); }\n\
@@ -1469,11 +1472,14 @@ pub struct ControlGroupProps {
     pub height: Option<Num>,
 }
 
-/// Controls joined into one capsule, as linked buttons.
+/// Controls sharing one capsule: the group draws it, and every control in
+/// it, a plain button, one wrapped in its motion or a popover's, is the
+/// same bare segment that only shows a fill while pointed at or pressed.
+/// libadwaita's linked buttons each draw their own part instead, which a
+/// button wrapped in its motion box is not, so it stood apart.
 #[allow(non_snake_case)]
 pub fn ControlGroup(p: &Parent, ctx: &Ctx, props: ControlGroupProps, children: Build) {
     let group = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    group.add_css_class("linked");
     group.add_css_class("bern-control-group");
     group.set_valign(gtk::Align::Center);
     if let Some(label) = &props.label {
@@ -1489,7 +1495,7 @@ pub fn ControlGroup(p: &Parent, ctx: &Ctx, props: ControlGroupProps, children: B
             height: Some(props.height.unwrap_or(Num::Fixed(40.0))),
         },
     );
-    children(&Parent::of_aligned_box(&group, gtk::Align::Fill), ctx);
+    children(&Parent::of_aligned_box(&group, gtk::Align::Center), ctx);
     place(p, &group);
 }
 

@@ -426,9 +426,7 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
     let button = gtk::Button::from_icon_name(icons::name(props.icon));
     if props.prominence == Some("prominent") {
         button.add_css_class("suggested-action");
-    } else if !p.is_control_group() {
-        // In a control group it is a segment of the group's capsule, drawn
-        // like the popover buttons beside it.
+    } else {
         button.add_css_class("flat");
     }
     if let Some(size) = props.font_size
@@ -1798,7 +1796,7 @@ pub fn Layers(p: &Parent, ctx: &Ctx, props: LayersProps, children: Build) {
         props.animate,
     );
     if let Some(style) = props.style {
-        crate::style::surface(style, layers.upcast_ref());
+        crate::style::surface(style, &layers);
     }
     if let Some(enabled) = bound_enabled(ctx, &props.enabled) {
         // Disabled content keeps its look: it only stops taking input and

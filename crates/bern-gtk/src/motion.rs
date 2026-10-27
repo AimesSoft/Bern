@@ -275,6 +275,8 @@ mod imp {
         pub laid_out: RefCell<Vec<Box<dyn FnOnce()>>>,
         /// Run after every allocation.
         pub watchers: RefCell<Vec<Rc<dyn Fn()>>>,
+        /// The shadow what the child draws casts.
+        pub shadow: Cell<Option<crate::style::Shadow>>,
     }
 
     #[glib::object_subclass]
@@ -363,6 +365,12 @@ mod imp {
             };
             child.allocate(width, height, baseline, transform);
         }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            crate::style::cast(snapshot, self.shadow.get(), || {
+                self.parent_snapshot(snapshot)
+            });
+        }
     }
 }
 
@@ -386,6 +394,13 @@ impl MotionBox {
         child.set_valign(gtk::Align::Fill);
         child.set_parent(&motion);
         motion
+    }
+
+    /// Casts `shadow` from what the child draws, not from its box.
+    pub(crate) fn set_shadow(&self, shadow: Option<crate::style::Shadow>) {
+        if self.imp().shadow.replace(shadow) != shadow {
+            self.queue_draw();
+        }
     }
 
     /// The named layer of this element's transform, made at rest.

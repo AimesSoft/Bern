@@ -109,6 +109,8 @@ mod layers {
         /// With a backdrop beside other layers, the stack fills across the
         /// column or grid cell it stands in, as a block does.
         pub block: Cell<bool>,
+        /// The shadow what the layers draw casts.
+        pub shadow: Cell<Option<crate::style::Shadow>>,
     }
 
     #[glib::object_subclass]
@@ -269,6 +271,12 @@ mod layers {
                 }
             }
         }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            crate::style::cast(snapshot, self.shadow.get(), || {
+                self.parent_snapshot(snapshot)
+            });
+        }
     }
 }
 
@@ -294,6 +302,13 @@ impl Layers {
     /// stands in, as a block does; not in a row, or with a width of its own.
     pub(crate) fn set_block(&self, block: bool) {
         self.imp().block.set(block);
+    }
+
+    /// Casts `shadow` from what the layers draw, not from the stack's box.
+    pub(crate) fn set_shadow(&self, shadow: Option<crate::style::Shadow>) {
+        if self.imp().shadow.replace(shadow) != shadow {
+            self.queue_draw();
+        }
     }
 
     /// Where layers that do not fill the stack stand in it.

@@ -88,6 +88,32 @@ impl StyleDef {
             _ => None,
         }
     }
+
+    /// Whether the style draws no surface in any state: no background,
+    /// border or fill, as bare glyphs and text over a picture. Its shadow
+    /// is then cast by what it shows, not by its box.
+    fn bare(&self) -> bool {
+        std::iter::once(&self.base)
+            .chain(STATES.iter().filter_map(|state| self.state(state)))
+            .all(|look| look.background.is_none() && look.border.is_none() && look.fill.is_none())
+    }
+}
+
+/// A shadow cast by what is drawn: blur radius, distance down, opacity.
+pub(crate) type Shadow = (f64, f64, f64);
+
+/// Runs `draw` with `shadow` cast by what it draws (a glyph, the letters
+/// of a title, a seek bar), as SwiftUI's `shadow` is, instead of by the
+/// widget's box as CSS draws it.
+pub(crate) fn cast(snapshot: &gtk::Snapshot, shadow: Option<Shadow>, draw: impl FnOnce()) {
+    let Some((radius, y, opacity)) = shadow else {
+        draw();
+        return;
+    };
+    let color = gtk::gdk::RGBA::new(0.0, 0.0, 0.0, opacity as f32);
+    snapshot.push_shadow(&[gtk::gsk::Shadow::new(color, 0.0, y as f32, radius as f32)]);
+    draw();
+    snapshot.pop();
 }
 
 /// The weight and size `text { … }` gives a text style: its name, one of
@@ -168,8 +194,9 @@ fn shadows(look: &Look, part: Option<bool>) -> Option<String> {
 }
 
 /// The declarations of one look; `base` is the style's resting look, for
-/// states that show no feedback.
-fn declarations(look: &Look, base: &Look, part: Option<bool>) -> String {
+/// states that show no feedback. A `bare` style's shadow is not the box's:
+/// its widget casts it from its content.
+fn declarations(look: &Look, base: &Look, part: Option<bool>, bare: bool) -> String {
     let mut out = String::new();
     if look.system {
         return out;
@@ -203,7 +230,15 @@ fn declarations(look: &Look, base: &Look, part: Option<bool>) -> String {
             theme::css(color, part)
         ));
     }
-    if let Some(shadows) = shadows(look, part) {
+    let boxed = if bare {
+        Look {
+            shadow: None,
+            ..*look
+        }
+    } else {
+        *look
+    };
+    if let Some(shadows) = shadows(&boxed, part) {
         out.push_str(&format!("box-shadow: {shadows}; "));
     }
     out
@@ -258,7 +293,8 @@ fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
     ] {
         for style in styles {
             let class = format!("{scope}.bern-style-{}", style.name);
-            let mut base = declarations(&style.base, &Look::NONE, part);
+            let bare = style.bare();
+            let mut base = declarations(&style.base, &Look::NONE, part, bare);
             if part.is_none() {
                 base.push_str(
                     "transition: background-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out, border-color 150ms ease-out; ",
@@ -278,7 +314,7 @@ fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
             }
             for state in STATES {
                 if let Some(look) = style.state(state) {
-                    let body = declarations(look, &style.base, part);
+                    let body = declarations(look, &style.base, part, bare);
                     if !body.is_empty() {
                         css.push_str(&format!("{class}.bern-{state} {{ {body}}}\n"));
                     }
@@ -295,15 +331,16 @@ pub(crate) fn scoped_colors(scope: &str, dark: bool) -> String {
     let mut css = String::new();
     for style in STYLES.with(Cell::get) {
         let class = format!("{scope} .bern-style-{}", style.name);
+        let bare = style.bare();
         css.push_str(&format!(
             "{class} {{ {} }}\n",
-            declarations(&style.base, &Look::NONE, Some(dark))
+            declarations(&style.base, &Look::NONE, Some(dark), bare)
         ));
         for state in STATES {
             if let Some(look) = style.state(state) {
                 css.push_str(&format!(
                     "{class}.bern-{state} {{ {} }}\n",
-                    declarations(look, &style.base, Some(dark))
+                    declarations(look, &style.base, Some(dark), bare)
                 ));
             }
         }
@@ -340,11 +377,15 @@ pub(crate) fn reload() {
 }
 
 /// Show `style` on a surface: a stack's background, foreground and
-/// corners. The corners clip what the layers draw.
-pub(crate) fn surface(style: &'static StyleDef, widget: &gtk::Widget) {
+/// corners. The corners clip what the layers draw. Without a surface of
+/// its own, its shadow is cast by what its layers draw.
+pub(crate) fn surface(style: &'static StyleDef, widget: &crate::layout::Layers) {
     widget.add_css_class(&format!("bern-style-{}", style.name));
     if style.corner.is_some() {
         widget.set_overflow(gtk::Overflow::Hidden);
+    }
+    if style.bare() {
+        widget.set_shadow(style.base.shadow);
     }
 }
 
@@ -359,6 +400,12 @@ pub(crate) fn apply(
 ) {
     styled.add_css_class(&format!("bern-style-{}", style.name));
     let layer = motion.layer("state");
+    // A bare control's shadow is cast by its glyph or text, drawn by its
+    // motion box, as on the other targets; CSS would shade its box.
+    let casting = style.bare().then(|| motion.downgrade());
+    if casting.is_some() {
+        motion.set_shadow(style.base.shadow);
+    }
     let last: Rc<Cell<Option<Curve>>> = Rc::new(Cell::new(None));
     let shown: Rc<RefCell<[bool; 5]>> = Rc::new(RefCell::new([false; 5]));
     let update = {
@@ -393,6 +440,9 @@ pub(crate) fn apply(
                         .filter_map(|(state, _)| style.state(state)),
                 )
                 .collect();
+            if let Some(motion) = casting.as_ref().and_then(|motion| motion.upgrade()) {
+                motion.set_shadow(looks.iter().rev().find_map(|look| look.shadow));
+            }
             let mut scale = (1.0, 1.0);
             let mut offset = (0.0, 0.0);
             let mut opacity = 1.0;
@@ -519,7 +569,7 @@ mod tests {
             ..Look::NONE
         };
         assert_eq!(
-            declarations(&accent, &Look::NONE, None),
+            declarations(&accent, &Look::NONE, None, false),
             "background-color: @accent_bg_color; background-image: none; color: @accent_fg_color; border: 1px solid alpha(@window_fg_color, 0.15); "
         );
         // A selected fill covers the background; a foreground of its own
@@ -531,7 +581,7 @@ mod tests {
             ..Look::NONE
         };
         assert_eq!(
-            declarations(&selected, &Look::NONE, None),
+            declarations(&selected, &Look::NONE, None, false),
             "background-color: @error_bg_color; background-image: none; color: @window_fg_color; "
         );
         let panel = Look {
@@ -539,7 +589,7 @@ mod tests {
             ..Look::NONE
         };
         assert_eq!(
-            declarations(&panel, &Look::NONE, None),
+            declarations(&panel, &Look::NONE, None, false),
             "background-color: @card_bg_color; background-image: none; "
         );
     }
@@ -555,7 +605,7 @@ mod tests {
             background: Some(ACCENT),
             ..Look::NONE
         };
-        assert_eq!(declarations(&system, &base, None), "");
+        assert_eq!(declarations(&system, &base, None, false), "");
         // No feedback: the resting background, nothing drawn over it.
         let quiet = Look {
             quiet: true,
@@ -563,11 +613,11 @@ mod tests {
             ..Look::NONE
         };
         assert_eq!(
-            declarations(&quiet, &base, None),
+            declarations(&quiet, &base, None, false),
             "background-color: @card_bg_color; background-image: none; box-shadow: none; "
         );
         assert_eq!(
-            declarations(&quiet, &Look::NONE, None),
+            declarations(&quiet, &Look::NONE, None, false),
             "background-color: transparent; background-image: none; box-shadow: none; "
         );
     }
@@ -623,5 +673,46 @@ mod tests {
         );
         assert!(rule(".bern-style-plain").is_some_and(|rule| rule.contains("transition: ")));
         assert_eq!(rule(".bern-appearance-light .bern-style-plain"), None);
+    }
+
+    /// A style without a surface in any state casts its shadow from what
+    /// it shows; one with a surface keeps the box's shadow.
+    #[test]
+    fn a_bare_style_leaves_its_shadow_to_the_content() {
+        let shadow = Some((3.0, 1.0, 0.9));
+        let mut glyph = style(
+            "glyph",
+            Look {
+                shadow,
+                foreground: Some(Color::Role("text.primary")),
+                ..Look::NONE
+            },
+        );
+        glyph.pressed = Some(Look {
+            scale: Some((0.9, 0.9)),
+            ..Look::NONE
+        });
+        assert!(glyph.bare());
+        let mut card = style(
+            "card",
+            Look {
+                shadow,
+                ..Look::NONE
+            },
+        );
+        card.hover = Some(Look {
+            background: Some(Color::Role("fill.subtle")),
+            ..Look::NONE
+        });
+        assert!(!card.bare());
+        let css = sheet(&[glyph, card], &[]);
+        let rule = |selector: &str| {
+            css.lines()
+                .find(|line| line.starts_with(&format!("{selector} {{")))
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(!rule(".bern-style-glyph").contains("0 1px 3px"));
+        assert!(rule(".bern-style-card").contains("box-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); "));
     }
 }

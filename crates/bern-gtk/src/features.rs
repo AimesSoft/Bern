@@ -549,6 +549,45 @@ fn popover_content() -> (gtk::Popover, gtk::Box) {
     (popover, column)
 }
 
+/// Opens `button`'s popover from code: its bound state, or the session's
+/// `activate`. The popovers open elsewhere in the window close first, as a
+/// click outside them would; those it stands in stay. On Wayland a popover
+/// that grabs input opens only above the topmost one: opened beside another
+/// it was never shown though GTK counted it open, and every press after
+/// went to it (a danmaku popover's way to the playback settings).
+fn present(button: &gtk::MenuButton) {
+    if let Some(root) = button.root() {
+        let own = button.popover();
+        for popover in open_popovers(root.upcast_ref()) {
+            if own.as_ref() != Some(&popover) && !button.is_ancestor(&popover) {
+                popover.popdown();
+            }
+        }
+    }
+    button.popup();
+}
+
+/// The popovers shown in `widget`'s tree.
+fn open_popovers(widget: &gtk::Widget) -> Vec<gtk::Popover> {
+    let mut open = Vec::new();
+    let mut pending = vec![widget.clone()];
+    while let Some(widget) = pending.pop() {
+        let mut child = widget.first_child();
+        while let Some(next) = child {
+            child = next.next_sibling();
+            if let Some(popover) = next.downcast_ref::<gtk::Popover>() {
+                // A closed popover shows nothing, nor the popovers in it.
+                if !popover.is_visible() {
+                    continue;
+                }
+                open.push(popover.clone());
+            }
+            pending.push(next);
+        }
+    }
+    open
+}
+
 pub struct SplitButtonProps {
     pub id: &'static str,
     pub label: Option<Str>,
@@ -603,7 +642,7 @@ pub fn SplitButton(p: &Parent, ctx: &Ctx, props: SplitButtonProps, content: Buil
         label,
         None,
         Actions {
-            activate: Some(Rc::new(move || opened.popup())),
+            activate: Some(Rc::new(move || present(&opened))),
             ..switch_actions(bound)
         },
     );
@@ -759,7 +798,7 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
             // Presented from the start: open once the button is on screen.
             glib::idle_add_local_once(move || {
                 if want && shown.is_mapped() && !shown.is_active() {
-                    shown.popup();
+                    present(&shown);
                 } else if !want && shown.is_active() {
                     shown.popdown();
                 }
@@ -787,7 +826,7 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
         label,
         None,
         Actions {
-            activate: Some(Rc::new(move || opened.popup())),
+            activate: Some(Rc::new(move || present(&opened))),
             value: Some(Rc::new(move || {
                 Some(if open.peek() { "open" } else { "closed" }.to_string())
             })),

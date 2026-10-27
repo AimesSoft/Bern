@@ -23,7 +23,7 @@
 | 原生多窗口、关闭确认、窗口事实 | 完成 | 每个窗口是 `AdwApplicationWindow`；关闭协议、最大化、恢复、调整尺寸由命令驱动并以平台事实答复；Wayland 的限制见“窗口” |
 | Video 原生呈现 | 完成 | `GtkMediaFile`（GStreamer）执行端与 `GtkPicture` 呈现、命令驱动的控制条；播放、暂停、跳转、静音、音量、播完与重播、换源、损坏文件、应用级播放器跨页面与跨窗口均已实测（见“验证记录”）；HLS 直播（时长未知、不可跳转）已实测。应用自带的媒体内核经帧接收器显示（2026-10-27，见“媒体”） |
 | 阶段四：`Adaptive`、`Menu`、`LanguagePicker`、运行时切换语言 | 完成 | 窗口缩窄后布局切换为紧凑并挂载菜单，菜单未打开时也能执行菜单项；语言切换后界面全部更新，草稿保留 |
-| 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem` | 完成 | 颜色、边框、圆角、内边距、尺寸档与阴影生成应用优先级的样式表，状态取 GTK 的状态标志；缩放、位移与透明度用 `AdwSpringAnimation`，回到普通状态用 `settle`。见“样式覆盖” |
+| 样式覆盖（`style!`）：`Button`、`IconButton`、`SidebarItem`、`Stack` 的表面 | 完成 | 颜色、边框、圆角、内边距、尺寸档与阴影生成应用优先级的样式表，状态取 GTK 的状态标志；缩放、位移与透明度用 `AdwSpringAnimation`，回到普通状态用 `settle`。见“样式覆盖” |
 | 动效：`appear`、`disappear`、`reflow`、`hero`、`animate`、`stagger`、`nudge`、`scroll_scale`、`scroll_opacity` | 完成 | 变换在分配子控件时施加，不影响布局；`reflow` 只在 `Column`、`Row` 里（含其中的 `ForEach`），其他容器构建时警告。见“动效” |
 | 自绘：`Canvas`、`Shape`、`Series`、`Pattern`，`Text(mark:)`，`fill_from` 与 `fade` | 完成 | 纯色的形状用渲染器自己的节点，渐隐、虚线、序列与图案用 cairo；颜色取 libadwaita 的命名颜色；标注按 Pango 的行位置画在文字下 |
 | 窗口：`chrome`、`immersive`、`idle_after` 与 `window.idle`，`role: dialog`，`window.compact` 等尺寸档 | 完成 | 见“窗口外框、静置与对话框” |
@@ -78,7 +78,7 @@
 | `Inspector` | `AdwOverlaySplitView` 的尾侧边栏：`presented` 双向绑定，宽窗口推开内容，窄于 640sp 时浮在内容上 |
 | `Toast` | 窗口的 `AdwToastOverlay` 中的 `AdwToast`，`key` 或内容变化时替换，`duration` 秒后消失；有 `icon` 时为图标加文字的标题 |
 | `SplitButton` | `linked` 的开关按钮加箭头菜单按钮，浮层中放子元素（始终挂载） |
-| `PopoverButton` | `GtkMenuButton` 与 `GtkPopover`：子元素在浮层显示时挂载、关闭时卸载；`presented` 双向绑定 |
+| `PopoverButton` | `GtkMenuButton` 与 `GtkPopover`：子元素在浮层显示时挂载、关闭时卸载；`presented` 双向绑定。由状态或会话的 `activate` 打开时，先关掉同一窗口里别处开着的浮层（它所在的上层浮层保留），与在浮层外点一下相同：Wayland 上抢占输入的弹出层只能开在最上层的弹出层之上，挨着另一个浮层打开时 GDK 拒绝映射（“Tried to map a grabbing popup with a non-top most parent”），GTK 却当它已打开，之后的点按都被它吞掉。此前播放界面弹幕浮层里的“更多弹幕设置…”打开播放设置时就是这样：设置没有出现，弹幕浮层关不掉，用 Esc 关掉后所有按钮只有按下的样子、不执行（2026-10-27，Steam Deck 的 KDE Wayland） |
 | `Drop` | `GtkDropTarget`（文件列表，预读值以便按种类拒绝）：可接受的文件经过时 `over` 为真，松手后存入字段并执行动作；`opens: true` 时应用接收系统交来的文件（`GApplication` 的 open），桌面文件登记 `MimeType` 与 `%U` |
 | `Pinch` / `Swipe` | `GtkGestureZoom`（另接受 Ctrl 加滚轮）/ `GtkGestureDrag`（10 点后开始，`distance` 默认 300） |
 | `Switch(style: button)`、工具栏中的 `Switch` | `GtkToggleButton`，工具栏中有图标时只显示图标 |
@@ -130,7 +130,7 @@
 - 状态来自 GTK 自己的状态标志（`PRELIGHT`、`ACTIVE`、`FOCUS_VISIBLE`、`INSENSITIVE`、`SELECTED`/`CHECKED`），不另装事件控制器，键盘按下与指针按下都是 `ACTIVE`。
 - 缩放、位移与透明度作用在控件外层的 `BernMotion` 上（见“动效”），用状态所带的弹簧进入、`settle` 回到普通状态，可在动画中途换目标。
 - 侧栏项有样式时，行本身不再画底色，样式画在行内容上，内容在 `BernMotion` 里随状态缩放；没有写的状态沿用 libadwaita 侧栏的样子（悬停 7%、选中 10%、按下 16% 的前景色）。选中由行的 `SELECTED` 标志驱动；行仍是 `GtkListBox` 的行，键盘导航不变（未实测）。
-- 尺寸档：`small` 最小高 24、`large` 44、`extra_large` 52，并调整内边距与字号；`corner` 为 `border-radius`，带内容的按钮另有 `overflow: hidden` 裁住内容，`shadow` 为沿圆角的 `box-shadow`。
+- 尺寸档：`small` 最小高 24、`large` 44、`extra_large` 52，并调整内边距与字号；`corner` 为 `border-radius`，带内容的按钮另有 `overflow: hidden` 裁住内容，`shadow` 为沿圆角的 `box-shadow`；样式在任何状态都不画背景、描边或填充时（浮在画面上的光秃图标与文字），阴影改由内容投出：动效盒绘制时先压一个 GSK 阴影节点（`push_shadow`，半径、下移与透明度与 CSS 同义，和 Web 的 `drop-shadow`、Windows 的 `BlurRadius` 同一个量），影子是字形与图标的形状，不是方框。`Stack` 的 `shadow` 同理：没有背景时由层叠投下它的各层所画的内容（文字、图标、进度条、画布），有背景时为 `box-shadow`。此前 GTK 不支持 `Stack` 的阴影、按钮的阴影只是方框，播放界面因此在 Linux 上没有阴影，纯白的画面上白色的控件与文字看不清（2026-10-27）。
 - 语义角色映射到 libadwaita 的命名颜色：`surface.canvas` → `window_bg_color`，`surface.panel` → `card_bg_color`，`surface.raised` → `popover_bg_color`，`text.primary` → `window_fg_color`，`text.secondary` → 它的 55%，`accent` → `accent_bg_color`，`on_accent` → `accent_fg_color`，`status.*` → `success`/`warning`/`error_bg_color`，`fill.subtle` → 前景色 7%，`fill.strong`、`control.track`、`control.border` → 15%。固定的 `color(light:, dark:)` 按当前明暗取值，明暗变化时样式表重写。
 
 ### 动效
@@ -183,7 +183,7 @@ GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `featu
 
 ### 控件形态与受控值
 
-- `shape: capsule` 是类 `bern-capsule`（9999 圆角，分组控件的首尾按钮同理），`height` 用尺寸请求并去掉主题的最小高度与上下内边距（类 `bern-sized-control`）。`IconButton(height:)` 是该直径的圆形按钮，`font_size` 是图标像素尺寸，`prominence: prominent` 为强调色底。`Button(width: fill)` 横向撑满。`ControlGroup` 是 libadwaita 的 `linked` 分组，整体为胶囊、默认高 40。
+- `shape: capsule` 是类 `bern-capsule`（9999 圆角，分组控件的首尾按钮同理），`height` 用尺寸请求并去掉主题的最小高度与上下内边距（类 `bern-sized-control`）。`IconButton(height:)` 是该直径的圆形按钮，`font_size` 是图标像素尺寸，`prominence: prominent` 为强调色底。`Button(width: fill)` 横向撑满。`ControlGroup` 由组自己画一个胶囊（`alpha(currentColor, 0.1)` 的底色，默认高 40），组里的按钮、弹出按钮与菜单都是同样不画底的一段：30 的圆形命中区、竖直居中、左右各留 5，指针移入与按下时才有圆形的填充，没有分隔线，与 macOS 的共享玻璃一致。此前它是 libadwaita 的 `linked` 分组，由每个按钮各画自己那段底色；带动效的 `IconButton` 外面套着动效盒，`linked` 的规则认不出它，于是自成一个圆角按钮，和旁边的弹出按钮连不起来（播放界面的截图与全屏按钮，2026-10-27）。
 - `Menu(style: icon)`：只显示图标的圆形扁平菜单按钮，标签为提示与无障碍名称。
 - 受控值：`Switch(checked:)`、`Picker(selected:)`、`Slider(current:)` 显示表达式的值，改动时执行动作的命令，参数中与该表达式相同的一项换成新值；绑定草稿并带动作的 `Switch`、`Picker` 先写草稿再执行动作。受控的滑块拖动时只移动滑块，松开时提交；键盘与滚轮立即提交。`PickerOption` 给出自己的值与标签。`label_hidden` 不显示标签，只作无障碍名称。
 
