@@ -48,7 +48,10 @@ impl Generator<'_> {
             )),
             None => out.line("search: None,"),
         }
-        match header {
+        // A header that only names the window is left out: the sidebar's
+        // header bar shows the application's name, and its icon too where
+        // the desktop's button layout asks for one (KDE).
+        match header.filter(|header| header.keyword("role") != Some("title")) {
             Some(header) => self.children(out, "header: Some(", &header.children, "),"),
             None => out.line("header: None,"),
         }

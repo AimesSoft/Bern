@@ -75,7 +75,7 @@
 | 本地持久化 | 原生 FFI 宿主提供文件存储，Web app 使用同源 localStorage；未安装存储宿主时不持久化 |
 | 可选 Svg | 六目标有生成路径；tvOS 没有 WebKit，不可用，用到时检查报错；专属依赖及验证见[动画 SVG](../Implementation/Animated-SVG.md)，不改变普通界面的默认实现 |
 | 平台各自的应用图标（`[app.icon]`） | 七个目标都接受方形 PNG 与各自的原生格式：macOS `.icns`、iOS `.appiconset`（两者也接受 Icon Composer 的 `.icon`，即 26 起的液态玻璃图标）、tvOS `.brandassets`（未声明时由默认图标生成分层图标与顶部货架图）、Windows `.ico`、Linux hicolor 图标主题、Android `res`、Web 页面图标文件夹或 SVG；配置阶段检查，生成时原样使用。规则见[应用图标](../Design.md#应用图标) |
-| `SidebarHeader(role: title)` | WinUI 3 与系统 XAML 不显示（标题栏已显示应用图标与标题）；其他目标照常显示 |
+| `SidebarHeader(role: title)` | WinUI 3 与系统 XAML 不显示（标题栏已显示应用图标与标题）；GTK 不显示（侧栏的标题栏已显示应用名称，KDE 按它的按钮布局还在前缘显示应用图标）；其他目标照常显示 |
 | 电视布局（`Layout(size: tv)`、`window.tv`） | tvOS 永远是电视：构建时只保留 `tv` 布局并按已知的窗口条件裁剪（实测）。Android 按系统的电视模式或 leanback 特性、Web 按电视浏览器的用户代理判断，未在电视设备上验证。macOS、iOS、Windows、Linux 永远为假，`tv` 布局不生成 |
 | `Shortcut` | 没有控件的快捷键，六个目标生成：macOS、iOS、Web、Android、Linux、Windows 为键盘快捷键；tvOS 与 Android TV 为遥控按键（`escape` 返回、`space` 播放/暂停、方向键为焦点无处可移时的方向）。停用的快捷键把键让给之前显示的（Web 运行时测试覆盖）。tvOS 模拟器实测方向键；返回与播放/暂停、Android TV、其他目标的按键未实测 |
 | 电视字号（`text` 块的 `font(tv:)`） | tvOS 构建时取电视字号（模拟器实测）；Android 与 Web 运行时判断为电视时取（Web 由 `bern-television` 类切换，未在电视设备上验证）；macOS、iOS、Windows、Linux 不受影响。各后端生成器测试覆盖 |

@@ -271,10 +271,17 @@ pub fn PreviewList(
     viewport.set_clip_overlay(&column, true);
     let rows = gtk::Box::new(gtk::Orientation::Vertical, gap.round() as i32);
     column.append(&rows);
-    let more = gtk::Label::new(None);
-    more.add_css_class("caption");
-    more.add_css_class("dim-label");
+    // The count stands in a capsule, as on the other targets; its text is
+    // dimmed, not the capsule.
+    let badge = gtk::Label::new(None);
+    badge.add_css_class("caption");
+    badge.add_css_class("dim-label");
+    badge.set_hexpand(true);
+    let more = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    more.add_css_class("bern-preview-more");
+    more.set_halign(gtk::Align::Center);
     more.set_height_request(more_height.round() as i32);
+    more.append(&badge);
     column.append(&more);
     let height = Cell::new(0.0_f64);
     let measured = height.clone();
@@ -310,7 +317,7 @@ pub fn PreviewList(
         let count = as_list(shown(&at)).len();
         let remaining = as_list(badge_items(&at)).len().saturating_sub(count);
         rows.set_visible(count > 0);
-        more.set_text(&format!("+{remaining}"));
+        badge.set_text(&format!("+{remaining}"));
         more.set_visible(remaining > 0 && badge_height.get() >= more_height);
     });
     p.add(&viewport);

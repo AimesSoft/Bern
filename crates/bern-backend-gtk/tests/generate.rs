@@ -1214,6 +1214,60 @@ pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> 
 }
 "#;
 
+/// Two sidebars: one whose header only names the window, one whose header
+/// is content.
+const SIDEBAR_UI: &str = r#"
+use bern::prelude::*;
+
+#[bern::value]
+pub enum Pick {
+    A,
+    B,
+}
+
+#[bern::session]
+pub struct Draft {
+    pub named: Pick,
+    pub filled: Pick,
+}
+
+#[component]
+pub fn app(app: stage::Client, windows: AppWindows, #[session] draft: Draft) -> impl View {
+    ui! {
+        WindowSet(handle: AppWindows, primary: main) {
+            Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
+                SplitView {
+                    Sidebar(id: named, selection: draft.named) {
+                        SidebarHeader(role: title) {
+                            Text(content: tr! { "en" => "Stage" }, style: headline)
+                        }
+                        SidebarItem(value: Pick::A, label: tr! { "en" => "A" }, icon: "house")
+                        SidebarItem(value: Pick::B, label: tr! { "en" => "B" }, icon: "calendar")
+                    }
+                    Detail {
+                        Text(content: tr! { "en" => "Detail" })
+                    }
+                }
+            }
+            Window(id: other, title: tr! { "en" => "Other" }, initial: open) {
+                SplitView {
+                    Sidebar(id: filled, selection: draft.filled) {
+                        SidebarHeader {
+                            Text(content: tr! { "en" => "Shelf" })
+                        }
+                        SidebarItem(value: Pick::A, label: tr! { "en" => "A" }, icon: "house")
+                        SidebarItem(value: Pick::B, label: tr! { "en" => "B" }, icon: "calendar")
+                    }
+                    Detail {
+                        Text(content: tr! { "en" => "Detail" })
+                    }
+                }
+            }
+        }
+    }
+}
+"#;
+
 /// A window that rests after three seconds and holds landscape, over a
 /// picture where a resting mouse lets it rest after one.
 const IDLE_UI: &str = r#"
@@ -1444,6 +1498,33 @@ fn tabs_hand_their_fallback_to_the_runtime() {
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
+}
+
+/// The sidebar's header bar already names the window, so a header that
+/// only does that is left out; a header with other content stays.
+#[test]
+fn a_header_that_names_the_window_is_left_out() {
+    let root = workspace();
+    let (config, compiled) = stage_project(
+        &root.join("target/bern-test/gtk-sidebar-project"),
+        SIDEBAR_UI,
+    );
+    let problems = GtkLinux.check(&compiled.app, &linux_target(&config));
+    assert!(problems.is_empty(), "{problems:?}");
+    let output = root.join("target/bern-test/gtk-sidebar");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    for file in GtkLinux.generate(&compiled.app, &context).unwrap() {
+        let path = output.join(&file.path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &file.contents).unwrap();
+    }
+    let ui = std::fs::read_to_string(output.join("app/src/ui.rs")).unwrap();
+    assert_eq!(ui.matches("header: None,").count(), 1, "{ui}");
+    assert_eq!(ui.matches("header: Some(").count(), 1, "{ui}");
+    let named = ui.find("Some(\"named\")").expect(&ui);
+    let filled = ui.find("Some(\"filled\")").expect(&ui);
+    assert!(ui[named..filled].contains("header: None,"), "{ui}");
 }
 
 /// The picture is an idle area of its window; neither it nor `landscape`,

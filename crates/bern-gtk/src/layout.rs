@@ -215,7 +215,8 @@ mod layers {
                 // length along its axis; across it, it is as thick as its
                 // children with a size of their own and stands where the
                 // stack aligns its layers, as a progress bar at the foot of
-                // a picture, or without such children covers the stack.
+                // a picture, or covers the stack when a child has none (a
+                // bordered card behind a column measures only its border).
                 let positioned = crate::scene::is_positioned(&child);
                 let rail = rail_of(&child);
                 let fills = |orientation: gtk::Orientation| {
@@ -229,7 +230,9 @@ mod layers {
                             } else {
                                 gtk::Orientation::Horizontal
                             };
-                            orientation == along || child.measure(orientation, -1).1 <= 0
+                            orientation == along
+                                || child.measure(orientation, -1).1 <= 0
+                                || rail.fills_across()
                         }
                         None => child.compute_expand(orientation),
                     }
@@ -545,6 +548,20 @@ impl Rail {
 
     pub(crate) fn vertical(&self) -> bool {
         self.imp().vertical.get()
+    }
+
+    /// Whether a child fills the rail's thickness, having no size of its
+    /// own across: what it measures there is only its frame, such as the
+    /// border of a button around a drawing without a size.
+    pub(crate) fn fills_across(&self) -> bool {
+        let across = if self.vertical() {
+            gtk::Orientation::Horizontal
+        } else {
+            gtk::Orientation::Vertical
+        };
+        children(self.upcast_ref())
+            .iter()
+            .any(|child| child.should_layout() && child.compute_expand(across))
     }
 
     /// How far the scale runs past each end.

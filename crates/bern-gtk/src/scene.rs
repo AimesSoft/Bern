@@ -29,6 +29,7 @@ list.bern-plain-list, list.bern-plain-list > row { background: none; border: non
 list.bern-plain-list > row > box.header { padding: 0; min-height: 0; }\n\
 .bern-form-rows > :first-child:not(.bern-plain-section) { margin-top: 24px; }\n\
 .bern-badge { padding: 0 7px; min-width: 10px; border-radius: 9999px; background-color: alpha(currentColor, 0.12); font-size: smaller; font-weight: 600; }\n\
+.bern-preview-more { padding: 0 6px; min-width: 18px; border-radius: 9999px; background-color: alpha(@window_fg_color, 0.15); }\n\
 .bern-marquee label { text-shadow: 0 1px 1px black; }\n\
 .bern-control-group { border-radius: 9999px; }\n\
 .bern-modal-backdrop { background-color: transparent; transition: background-color 200ms ease-out; }\n\

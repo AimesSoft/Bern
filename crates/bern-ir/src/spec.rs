@@ -733,7 +733,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "SidebarHeader",
             &[opt("role", PropKind::Keyword(&["content", "title"]))],
             Children::Any,
-            "Content pinned to the top of the sidebar, above its list, such as the application's name and icon; `role: title` says it only names the window with the application's icon and name, so platforms whose title bar already shows both (Windows) leave it out",
+            "Content pinned to the top of the sidebar, above its list, such as the application's name and icon; `role: title` says it only names the window with the application's icon and name, so platforms whose title bar already shows the application's name (Windows, Linux) leave it out",
         )
     },
     ComponentSpec {

@@ -159,7 +159,7 @@ SwiftUI 目标可在 `style!` 中用 `Sidebar { background: color(light: "#FAFAF
 | `Flow(gap:)` | 按内容固有尺寸从左到右换行；每行的子项竖直居中，`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度 |
 | `Timer(interval:, enabled:) => command()` | 挂载且启用时定期提交命令；卸载、禁用时取消，间隔单位为秒。不能用来驱动逐帧绘制 |
 | `Accordion(count:, selected:, collapsed_width:, height:, gap:, corner:)` | 一列展开，其余列固定折叠宽度；selected 从 0 开始，animate 驱动列宽及位置；height 可省略，此时填满父布局剩余高度，应放在有高度约束的容器中（如窗口内的 Column） |
-| `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示图标与标题的平台（Windows 的两种前端）不显示它，其他平台照常显示 |
+| `Sidebar(width:)` | 固定列宽。`SidebarHeader` 固定在列表上方，`SidebarFooter` 固定在下方。`SidebarHeader(role: title)` 表示头部只用应用的图标与名称给窗口命名：标题栏本身就显示应用名称的平台（Windows 的两种前端与 Linux GTK）不显示它，其他平台照常显示 |
 | `SidebarItem(badge:)` | 显示正数计数；模块页面清单的 badge 可绑定模块状态字段 |
 | `Search(style: palette)` | 从工具栏入口打开命令面板；`panel_prompt`、`width`、`height` 设置提示与面板尺寸 |
 | `SearchItem(id:, label:) => command()` | 面板结果，可带 icon、detail、hint 或自定义子内容；`navigation: false` 不参与方向键选择，仍可点击与 Tab 聚焦 |

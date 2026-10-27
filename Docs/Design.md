@@ -662,7 +662,7 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | ScaleBox / Positioned | 固定逻辑画布等比适配父容器；图层用逻辑坐标声明位置、尺寸与状态动画 | 六个目标实现（`scaled_scene`）；见[播放器布局](Reference/UI.md#坐标场景与滚动内容) |
 | Marquee | 渲染端计时的水平循环内容，支持暂停、相位、透明度和减少动态效果 | 六个目标实现（`scaled_scene`）；不提供逐帧业务回调 |
 | ControlGroup | 按功能将控件放入共享胶囊，保留各自的命中区域、菜单和动作 | 六个目标实现（`capsule_controls`）；见[控件容器](Reference/UI.md#控件容器与尺寸) |
-| SidebarHeader | 固定在侧栏顶部、列表上方的内容；`role: title` 表示它只给窗口命名（应用图标与名称），标题栏已显示图标与标题的 Windows 不显示它 | 六个目标实现（`sidebar_header`） |
+| SidebarHeader | 固定在侧栏顶部、列表上方的内容；`role: title` 表示它只给窗口命名（应用图标与名称），标题栏已显示应用名称的 Windows 与 Linux 不显示它 | 六个目标实现（`sidebar_header`） |
 | WindowButtons | 伸到标题栏下面的内容里，窗口自己的按钮在前缘占的位置：macOS 是红绿灯，其他目标在那里没有按钮，不占位也不留间距 | 六个目标生成；SwiftUI 在 macOS 上占 84 点 |
 | Svg | 按需呈现打包的动画与交互 SVG 文档 | 见[专项接口与依赖](Implementation/Animated-SVG.md) |
 | Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题。`Section(style: plain)` 是随表单滚动的标题，行直接在页面上，不取 Form 给分组的行内边距，只用自己的；表单以它开头时从页面顶部开始，这个标题也可以来自插槽、组件或条件，各目标在布局时看第一项，条件变了跟着变 | 基础组件；六个目标按同一规则实现 |

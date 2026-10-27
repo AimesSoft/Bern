@@ -73,7 +73,7 @@
 | `Stack` | `BernLayers`：子元素叠在同一处，后写的在上面、先接收输入，按 `align` 对齐；整体与最大的一层一样大，得到更多空间时保持在前缘，除非某层要填满（没有尺寸的画布、轨道、视频等，GTK 的 expand 向上传递） |
 | `Canvas` | `BernCanvas`（见“自绘”）；没写 `width`、`height` 的方向填满可用空间；有 `label` 时是带名称的图像，没有时对辅助技术隐藏 |
 | `Text(mark:)` | `BernMarkedText`：标签之下按 Pango 每一行的逻辑范围画胶囊形底纹（行高 74% 至 98%，右端多出 0.4 个字宽），文字变化或主题变化时重画 |
-| `Rail` | `BernRail`：沿轴取得到的长度，交叉方向为最厚的子元素；`at` 的子元素按 `anchor` 对准比例点，`from`/`to` 的子元素铺在两点之间、没有交叉尺寸时铺满厚度；比例变化随 `animate` 的弹簧移动。轨道只沿轴向外要空间：没有尺寸的子元素不让外面的容器在交叉方向变大。在 `Stack` 中轨道两个方向都铺满其他层给出的尺寸，自己只按有尺寸的子元素计入 |
+| `Rail` | `BernRail`：沿轴取得到的长度，交叉方向为最厚的子元素；`at` 的子元素按 `anchor` 对准比例点，`from`/`to` 的子元素铺在两点之间、没有交叉尺寸时铺满厚度；比例变化随 `animate` 的弹簧移动。轨道只沿轴向外要空间：没有尺寸的子元素不让外面的容器在交叉方向变大。在 `Stack` 中轨道沿轴铺满其他层给出的长度，交叉方向上自己只按有尺寸的子元素计入：只有这样的子元素时，轨道按它们的厚度站在层叠对齐的位置（画面底部的进度条）；有子元素在交叉方向没有自己的尺寸时铺满整层。是否“有尺寸”看子元素是否要在交叉方向铺开，不看量出的大小：列后面只有描边的卡片按钮量出来是描边的 2 像素，此前因此整条轨道只有 2 像素高、贴在列顶 |
 | `SidebarFooter` | 侧栏列表下方、分隔线之下的一栏，列表在它上方滚动 |
 | `Inspector` | `AdwOverlaySplitView` 的尾侧边栏：`presented` 双向绑定，宽窗口推开内容，窄于 640sp 时浮在内容上 |
 | `Toast` | 窗口的 `AdwToastOverlay` 中的 `AdwToast`，`key` 或内容变化时替换，`duration` 秒后消失；有 `icon` 时为图标加文字的标题 |
@@ -196,13 +196,14 @@ GTK 的能力描述补上了此前只有 SwiftUI 与 Web 声明的 29 项 `featu
 - `ScaleBox` 是 `BernScaleBox`：子项在声明的逻辑尺寸中层叠（左上对齐），整体以一个变换缩放到能放下并居中、超出部分裁掉，所以图片、文字与点击区域保持对齐。`Positioned` 在所在层叠中占满，按（可弹簧的）`x`、`y`、`width`、`height` 放置内容。`Positioned`、动效盒（`BernMotion`，出现、消失与 `animate` 用的外层）与 `Rail` 自身不接收输入（`contains` 为假），只有内容接收（叠在海报时间轴上、只放“现在”标线的 `Rail` 原先挡住了下面海报的点按）：它们的范围从容器的角一直到内容的远角，否则场景下方的一层（例如播放器的底部控制条）会挡住它上面各层的点按（2026-10-27，Steam Deck 上只有底部控制条能点）。
 - `Positioned(bleed:)`：`BernScaleBox` 分配时算出画布四周的空白（场景点）；有 `bleed` 的图层分配内容时向上找到最近的 `BernScaleBox`（中间隔着另一个图层就不延伸），把到达的每条画布边延伸到空白的边缘。四条边各是一个随图层 `animate` 的弹簧，碰到哪条边按图层要去的位置判断。窗口改变比例时 GTK 只改场景的变换，同样大小的子部件不会重新分配（`gtk_widget_allocate` 走 `ensure_allocate_on_children`），所以空白一变，盒子先让场景里有 `bleed` 的图层 `queue_allocate`，延伸量随即跳到新值。
 - `Marquee`：内容按自然宽度从右缘外跑到左缘外，每 `duration` 秒一次，`phase` 为起始进度；`paused` 时停在原处，减少动态效果时静止在宽度 28% 处；文字带 1 点黑色阴影；`opacity` 可绑定。
+- `PreviewList`：放不下的项收成的 +N 标记是胶囊（`fill.strong` 的底色、左右各 6、至少 30 宽，高为 `more_height`），只有文字是次要色；此前只有一行暗色文字。
 - `Accordion`：列宽由每列一个 0 到 1 的权重弹簧决定，收起列为固定宽度，总宽保持不变；每列按 `corner` 圆角裁剪。错峰进场的列还没全到时，宽度仍按声明的 `count` 列分配，已到的列就在最终的位置上。
 - `reflow` 现在也作用于 `Stack` 的各层和 `cell_ratio` 网格的格子（共用 `Slides`：布局后比较新旧位置，以弹簧从旧位置滑到新位置）；`GtkFlowBox` 网格与表单行仍然只警告。
 - 滚动视图：内容沿滚动方向按自然尺寸排布（视口在该方向用 `Natural` 策略），横向滚动视图的高度取内容的自然高度。
 
 ### 页面结构
 
-- `SidebarHeader` 固定在侧栏列表上方；`Sidebar(width:)` 以像素固定 `AdwNavigationSplitView` 的侧栏宽度；`Detail(titled: false)` 时详情标题栏不再显示选中项的名称；`SidebarItem(badge:)` 在行尾显示计数（为 0 时隐藏）。
+- `SidebarHeader` 固定在侧栏列表上方；`role: title` 的头部在生成时去掉：侧栏的标题栏已显示应用名称，KDE 的按钮布局（`icon:minimize,maximize,close`）还在它前缘显示应用图标，侧栏里再放一遍图标与名称就重复了；`Sidebar(width:)` 以像素固定 `AdwNavigationSplitView` 的侧栏宽度；`Detail(titled: false)` 时详情标题栏不再显示选中项的名称；`SidebarItem(badge:)` 在行尾显示计数（为 0 时隐藏）。
 - 工具栏中 `Spacer` 之前的项放在页面标题栏的前缘（返回按钮之后），之后的放在后缘；`Text` 可以放在工具栏里。
 - 标签页：宽窗口的切换器在页面标题栏，紧凑窗口（`window.compact`）改为页面下方的 `AdwViewSwitcherBar`，与 GNOME 自适应应用相同；`TabAccessory` 在页面与底部标签栏之间。
 - `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分组间距为盒子间距；行高与行内边距写成一条按值生成的规则（plain 行与 libadwaita 行的 `box.header`），`Section` 自己的边距优先，plain 分组不取表单的行高与内边距、只用自己的；plain 分组去掉列表的底色、边框、内边距与分隔，表单以它开头时从页面顶部开始：表单顶部的 24 由样式规则 `.bern-form-rows > :first-child:not(.bern-plain-section)` 给第一项，条件分支换掉第一项时跟着变。非 libadwaita 行的内边距改由行的 CSS 给出，才能被这些规则覆盖。
