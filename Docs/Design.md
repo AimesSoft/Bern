@@ -1687,6 +1687,8 @@ WindowSet(handle: AppWindows, primary: main) {
 
 各平台的实现：macOS 是 SwiftUI 的 `MenuBarExtra`，`icon` 是 SF Symbol；没有窗口打开时应用切到 `accessory` 激活策略，Dock 里的图标随之收起，再打开窗口时回到 `regular`，与菜单栏应用的习惯一致。Windows 是 `Shell_NotifyIcon` 放进通知区域的图标（版本 4 的回调），由一个隐藏窗口接收它的消息，菜单是系统的弹出菜单（`TrackPopupMenuEx`），在打开时按当时的状态建立；系统处于深色模式时菜单也是深色的（经 uxtheme 的 `SetPreferredAppMode`），资源管理器重启后图标重新加入。Linux 没有 GTK 控件可用：应用在会话总线上提供 StatusNotifierItem 与 `com.canonical.dbusmenu` 菜单，向 `org.kde.StatusNotifierWatcher` 登记，图标是应用图标按几种尺寸给出的 ARGB 像素；KDE Plasma 自己显示这些项，GNOME 经 AppIndicator 扩展（Ubuntu 默认带有）显示；菜单随它读的状态重建，打开前（`AboutToShow`）也重建一次；Wayland 上单击时用状态区给的激活令牌把窗口带到前面。macOS 上外部入口把菜单项列为 `status_item.<id>`（角色 `menu_item`），Windows 与 Linux 的菜单在打开时才建立，外部入口不列出它们，菜单项的命令照常是各自的工具。
 
+实现进度（2026-10-28）：三个桌面目标已实现。Windows 实体机上用一个实际应用实测：关闭最后一个窗口后应用留在通知区域，单击图标重新打开主窗口，右键菜单的各项与 `ForEach` 生成的子菜单正确，子菜单的项执行命令，“退出”结束应用并移除图标；深色模式下的菜单与资源管理器重启后重新加入图标未验证。Linux 在虚拟机上以测试用的 StatusNotifierWatcher 经 D-Bus 验证登记、属性、菜单、单击、菜单项与退出，KDE 与 GNOME 的真实状态区未看。macOS 只构建与类型检查，未运行。见各平台的实现记录。
+
 ### 起始焦点
 
 `Button` 与 `IconButton` 可写 `default_focus: true`：界面出现时焦点从它开始。电视上焦点就是遥控器操作的位置，每个界面应给出起始焦点，例如引导的“继续”、播放器的暂停。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），标签页的每页各是一个焦点区域；其他平台上是键盘焦点：SwiftUI 的 `FocusState`，Web 的 `focus()`，Compose 的 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点。实现进度：tvOS 模拟器实测；其他目标未实测。
