@@ -1,7 +1,7 @@
 //! Search fields and their items, menus and toolbars.
 
-use super::{Generator, Out, number, string};
-use bern_ir::{Element, Node};
+use super::{Generator, Out, local, number, string};
+use bern_ir::{Element, Node, Prop};
 
 impl Generator<'_> {
     pub(super) fn search(&self, out: &mut Out, element: &Element) {
@@ -149,6 +149,96 @@ impl Generator<'_> {
             self.children(out, "B.tools(ctx, ", &element.children[index + 1..], ");");
         } else {
             self.children(out, "B.tools(ctx, ", &element.children, ");");
+        }
+    }
+
+    /// A `Table`: its columns, each a heading and a cell builder taking
+    /// the row, its row menu, and its primary action.
+    pub(super) fn table(&self, out: &mut Out, element: &Element) {
+        let (Some(items), Some(template), Some(Prop::Key { name, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) else {
+            return;
+        };
+        out.open(format!(
+            "B.Table(p, ctx, {}, [",
+            Self::props(vec![
+                ("id", Some(self.id(element))),
+                ("label", self.text_prop(element, "label")),
+                ("selection", self.field(element, "selection")),
+                ("items", Some(format!("() => {}", self.expr(items)))),
+                ("key", Some(format!("(v) => v.{name}"))),
+            ])
+        ));
+        let mut menu = Vec::new();
+        for node in &element.children {
+            let Node::Element(part) = node else { continue };
+            match part.kind.as_str() {
+                "TableColumn" => {
+                    out.open("{");
+                    out.line(format!(
+                        "...{},",
+                        Self::props(vec![
+                            ("title", self.text_prop(part, "title")),
+                            ("width", part.number("width").map(number)),
+                            ("sorted", self.value_prop(part, "sorted")),
+                            ("descending", self.value_prop(part, "descending")),
+                            ("sort", part.action.as_ref().map(|_| self.action_fn(part))),
+                        ])
+                    ));
+                    out.open(format!("cell: (p, ctx, {}) => {{", local(&template.var)));
+                    self.nodes(out, &part.children);
+                    out.close("},");
+                    out.close("},");
+                }
+                "TableMenu" => menu.extend(part.children.iter().filter_map(|node| match node {
+                    Node::Element(item) => Some(item),
+                    _ => None,
+                })),
+                _ => {}
+            }
+        }
+        out.close("], [");
+        out.indent += 1;
+        let mut shortcuts = Vec::new();
+        for item in menu {
+            if item.kind == "Divider" {
+                out.line("null,");
+                continue;
+            }
+            let enabled = item
+                .expr("enabled")
+                .map(|expr| format!("() => {}", self.expr(expr)));
+            let (action, set_file, kinds) = self.file_actions(item);
+            if item.prop("shortcut").is_some() {
+                shortcuts.push((item, action.clone()));
+            }
+            out.line(format!(
+                "{},",
+                Self::props(vec![
+                    ("id", Some(self.id(item))),
+                    ("label", self.text_prop(item, "label")),
+                    ("icon", item.icon("icon").map(string)),
+                    ("role", Self::keyword(item, "role")),
+                    ("enabled", enabled),
+                    ("action", Some(action)),
+                    ("setFile", set_file),
+                    ("fileKinds", kinds),
+                ])
+            ));
+        }
+        out.close(format!(
+            "], {});",
+            element
+                .action
+                .as_ref()
+                .map(|_| self.action_fn(element))
+                .unwrap_or_else(|| "null".into())
+        ));
+        for (item, action) in shortcuts {
+            self.shortcut(out, item, &action);
         }
     }
 }

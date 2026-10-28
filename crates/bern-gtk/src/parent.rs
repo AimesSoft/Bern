@@ -44,6 +44,19 @@ fn take_exit(widget: &gtk::Widget) -> Option<Exit> {
 
 const LEAVING: &str = "bern-leaving";
 
+/// Marks a container of Bern content inside a widget GTK manages: what
+/// fills inside it does not make GTK's widgets around it refit or expand.
+const BOUNDARY: &str = "bern-boundary";
+
+/// Make `container` hold Bern content inside a widget GTK manages, such as
+/// a cell of a column view: refits stop there and its expanding stays in.
+pub(crate) fn bound_content(container: &impl IsA<gtk::Widget>) {
+    let container = container.as_ref();
+    container.add_css_class(BOUNDARY);
+    container.set_hexpand(false);
+    container.set_vexpand(false);
+}
+
 /// Marks a control that keeps its own width, such as a button.
 const OWN_WIDTH: &str = "bern-own-width";
 
@@ -90,6 +103,11 @@ fn cross_of(container: &gtk::Widget) -> Option<(bool, gtk::Align)> {
 fn refit(from: &gtk::Widget) {
     let mut widget = from.clone();
     for _ in 0..32 {
+        // Content placed in a widget GTK manages, such as a table's cell,
+        // refits up to that widget only.
+        if widget.has_css_class(BOUNDARY) {
+            return;
+        }
         let Some(container) = widget.parent() else {
             return;
         };

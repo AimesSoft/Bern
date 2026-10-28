@@ -109,6 +109,7 @@ ControlGroup(height: 40) {
 | Switch | `value: draft.enabled` | `checked: app.enabled` | 用户刚选择的布尔值 |
 | Picker | `value: draft.appearance` | `selected: app.appearance` | 用户刚选择的枚举值 |
 | Slider | `value: draft.volume` | `current: app.volume` | 用户提交的数值 |
+| TextInput | `value: draft.name` | `current: app.name` | 用户刚改成的整段文字 |
 
 每个控件只能选择一列作为来源，不能两者都写或都不写。引擎来源必须提供动作；动作参数中与 `checked` / `selected` / `current` 完全相同的表达式被替换为用户的新值，不替换其子表达式或其他参数。Picker 的枚举变体必须具有标签。
 
@@ -117,6 +118,12 @@ Slider(id: volume,
     label: tr! { "zh-Hans" => "音量", "en" => "Volume" },
     label_hidden: true, current: app.volume, min: 0, max: 1, step: 0.01
 ) => app.set_volume(app.volume)
+```
+
+受控 `TextInput` 每次编辑都运行动作，不等 Enter：重命名、过滤条件这类随打随存的字段用它。字段有焦点时用户的文字留在框里，引擎的回应不会把光标挪走或吞掉刚打的字；焦点离开后显示引擎的文字。用 `value:` 时动作在提交时运行。
+
+```rust
+TextInput(id: rename, label: tr! { "zh-Hans" => "名称", "en" => "Name" }, current: app.opened_name) => app.rename(app.opened, app.opened_name)
 ```
 
 受控 Slider 默认拖动中显示本地预览，拖动结束提交；`current:` 搭配 `continuous: true` 可在拖动中提交（适用于音量、透明度、字号等即时设置），Apple 平台合并到每秒最多 30 次，松手立即提交最后值；引擎快照不会在编辑中抢回滑块位置。`PickerOption(value:, label:)` 可显式声明选项并把实时计数插入 label。受控值由 SwiftUI 与 Web 的 `controlled_values` 支持，显式选项另由 `modal_flow_timer` 检查。
@@ -283,6 +290,42 @@ StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "e
 ```
 
 语义与各平台的实现见[设计文档的状态栏项](../Design.md#状态栏项)。
+
+## 表格
+
+`Table` 把记录列表排成列，每项一行，`key` 是行的身份：行随状态增删、换序时保留各自的控件。每个 `TableColumn` 有表头 `title`，子节点是这一列每行的格子，用表格的行变量写。
+
+- `selection: draft.chosen` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。桌面上单击选一行，Shift 与平台的切换键（macOS 的 Command、其他平台的 Ctrl）选多行；Android 上每行前有勾选框，表头的勾选框全选或全不选。
+- 表格的动作是选中行的主操作：双击或 Enter；Android 上点一行就只选它并运行。
+- `TableColumn` 的动作在点表头时运行，用来让引擎换排序；`sorted` 与 `descending` 只显示表头上的排序标记，行的顺序就是 `items` 的顺序。
+- `TableMenu` 是行菜单，右键（键盘的菜单键或 Shift+F10）或长按一行时打开；那一行不在选中行里时先只选中它，所以菜单项读 `selection` 就是要处理的行。
+
+```rust
+Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, items: app.servers, key: id, selection: draft.selected) |server| {
+    TableColumn(title: tr! { "zh-Hans" => "别名", "en" => "Name" }, width: 260, sorted: app.sort == SortKey::Name, descending: app.descending) {
+        Text(content: server.name, lines: 1)
+    } => app.sort_by(SortKey::Name)
+    TableColumn(title: tr! { "zh-Hans" => "延迟", "en" => "Delay" }) {
+        Text(content: tr! { "zh-Hans" => "{n} ms", "en" => "{n} ms"; n: server.delay })
+    }
+    TableMenu {
+        MenuItem(id: copy_links, label: tr! { "zh-Hans" => "复制分享链接", "en" => "Copy Share Links" }) => app.copy_links(draft.selected)
+        Divider
+        MenuItem(id: remove, label: tr! { "zh-Hans" => "删除", "en" => "Delete" }, role: destructive) => app.remove(draft.selected)
+    }
+} => app.use_chosen(draft.selected)
+```
+
+macOS 与 iOS 是 SwiftUI 的 `Table`，GTK 是 `GtkColumnView`，WinUI 3 是表头加 `ListView`（Windows 没有系统表格），网页是 `<table>`，Android 是 Material 数据表的样子；tvOS 没有表格，是一列行按钮。
+
+## 剪贴板
+
+- `Button`、`IconButton`、`MenuItem` 与 `CommandItem` 的 `paste: draft.text` 先把剪贴板里的文字放进该草稿，再运行动作；剪贴板里没有文字时两者都不做。与 `pick` 二选一。
+- 引擎用 `bern::platform::copy_text(text)` 把文字放上剪贴板，在任何线程调用都可以，由界面线程完成。
+
+```rust
+Button(id: import, label: tr! { "zh-Hans" => "从剪贴板导入", "en" => "Import from the Clipboard" }, paste: draft.pasted) => app.import_links(draft.pasted)
+```
 
 ## 其他接口
 

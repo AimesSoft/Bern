@@ -7,7 +7,10 @@
 package dev.bern.runtime
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,6 +85,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.TriStateCheckbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -98,6 +102,8 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.material3.HorizontalDivider
@@ -702,6 +708,119 @@ fun BernTextInput(
             if (labelHidden) Modifier.semantics { contentDescription = label } else Modifier
         ),
     )
+}
+
+/// A field showing text from state whose every edit runs `onChange`: the
+/// user's text stands while the field has the focus, so the engine's round
+/// trip never moves the caret, and the state's shows again when it leaves.
+@Composable
+fun BernHeldTextInput(
+    value: String,
+    onChange: (String) -> Unit,
+    label: String,
+    prompt: String?,
+    kind: String,
+    modifier: Modifier = Modifier,
+    labelHidden: Boolean = false,
+) {
+    var held by remember { mutableStateOf<String?>(null) }
+    BernTextInput(
+        held ?: value,
+        { held = it; onChange(it) },
+        label,
+        prompt,
+        kind,
+        null,
+        modifier.onFocusChanged { if (!it.isFocused) held = null },
+        labelHidden,
+    )
+}
+
+// MARK: - Tables
+
+/// The headings of a `Table`, as a Material data table's: with a choice,
+/// first the box that chooses every row or none.
+@Composable
+fun BernTableHeadings(chosen: ToggleableState?, chooseAll: (Boolean) -> Unit, headings: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        if (chosen != null) TriStateCheckbox(state = chosen, onClick = { chooseAll(chosen != ToggleableState.On) })
+        headings()
+    }
+}
+
+/// A heading: its title, and the arrow of the order while the rows are
+/// sorted by its column; a tap runs `sort`.
+@Composable
+fun BernTableHeading(title: String, sorted: Boolean, descending: Boolean, sort: (() -> Unit)?, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .then(if (sort != null) Modifier.clickable(onClick = sort) else Modifier)
+            .semantics(mergeDescendants = true) { heading() },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        if (sorted) Icon(BernIcons.get(if (descending) "chevron.down" else "chevron.up"), contentDescription = null, modifier = Modifier.size(18.dp))
+    }
+}
+
+/// A row of a `Table`. With a choice (`chosen` not null) a box comes first
+/// that adds the row to it or takes it out. A tap runs the primary action
+/// on the row alone, or without one adds or takes it out; a long press
+/// opens the row menu over the chosen rows, choosing the row alone first
+/// when it is not among them.
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun BernTableRow(
+    chosen: Boolean?,
+    toggle: (Boolean) -> Unit,
+    only: () -> Unit,
+    primary: (() -> Unit)?,
+    menu: (@Composable ColumnScope.(dismiss: () -> Unit) -> Unit)?,
+    modifier: Modifier = Modifier,
+    cells: @Composable RowScope.() -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(if (chosen == true) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                .combinedClickable(
+                    onClick = {
+                        if (primary != null) {
+                            only()
+                            primary()
+                        } else if (chosen != null) {
+                            toggle(!chosen)
+                        }
+                    },
+                    onLongClick = if (menu != null) ({
+                        if (chosen == false) only()
+                        open = true
+                    }) else null,
+                )
+                .heightIn(min = 52.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            if (chosen != null) Checkbox(checked = chosen, onCheckedChange = toggle)
+            cells()
+        }
+        if (menu != null) DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menu { open = false } }
+    }
 }
 
 @Composable

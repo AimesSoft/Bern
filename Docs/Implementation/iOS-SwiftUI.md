@@ -184,6 +184,10 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 - **浮层按钮**：画框页静置后控件隐藏；后台循环等待 `frame.volume` 挂载，再用模拟器点按画面唤醒，挂载后立即 `ui activate`：按钮值为 `open`，浮层中的音量滑块挂载、值为 0.7。截图中 iPhone 上显示的是指向按钮的气泡（`presentationCompactAdaptation(.popover)`），外观随画框页为深色。
 - **四档尺寸**：iPhone 竖屏时胶片页的 `Adaptive` 为 `compact`，显示两个图标按钮。iPad 与横屏未测。
 
+## 表格、受控文字与剪贴板（2026-10-29）
+
+与 macOS 共用生成器（见 macOS 的实现记录）：`Table` 是 SwiftUI 的 `Table`，紧凑宽度的 iPhone 上系统只显示第一列，行菜单是长按的上下文菜单；`paste:` 读 `UIPasteboard.general`，系统第一次会问用户是否允许粘贴；引擎的 `copy_text` 写 `UIPasteboard.general`。验证：生成的 Swift 按 iOS SDK 类型检查，gallery 的 iOS 构建成功；未在模拟器或设备上运行。
+
 ## 未完成与已知限制
 
 - 只构建模拟器应用。真机需要开发者签名与描述文件，安装与 `bern package` 未实现。

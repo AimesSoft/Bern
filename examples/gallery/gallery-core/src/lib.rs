@@ -48,6 +48,8 @@ impl Default for GalleryEngine {
                 appearance: Appearance::System,
                 caption: true,
                 details_key: "cmd+alt+i".into(),
+                by_name: false,
+                descending: false,
             },
         }
     }
@@ -139,6 +141,76 @@ impl gallery::Commands for GalleryEngine {
     fn set_poster(&mut self, source: MediaSource) -> Result<(), CommandError> {
         self.state.poster = source;
         Ok(())
+    }
+
+    fn toggle_favorites(&mut self, ids: Vec<i64>) -> Result<(), CommandError> {
+        for swatch in &mut self.state.swatches {
+            if ids.contains(&swatch.id) {
+                swatch.favorite = !swatch.favorite;
+            }
+        }
+        self.collect_favorites();
+        Ok(())
+    }
+
+    fn open_chosen(&mut self, ids: Vec<i64>) -> Result<(), CommandError> {
+        match ids.first() {
+            Some(&id) => self.open(id),
+            None => Ok(()),
+        }
+    }
+
+    fn open_named(&mut self, name: String) -> Result<(), CommandError> {
+        let wanted = name.trim().to_lowercase();
+        let id = self
+            .state
+            .swatches
+            .iter()
+            .find(|swatch| swatch.name.to_lowercase() == wanted)
+            .map(|swatch| swatch.id)
+            .ok_or_else(|| CommandError::new("unknown_swatch", format!("no pattern {name}")))?;
+        self.open(id)
+    }
+
+    fn rename(&mut self, id: i64, name: String) -> Result<(), CommandError> {
+        if id == 0 {
+            return Ok(());
+        }
+        self.swatch(id)?.name = name.clone();
+        if self.state.opened == id {
+            self.state.opened_name = name;
+        }
+        self.collect_favorites();
+        Ok(())
+    }
+
+    fn sort_by_name(&mut self) -> Result<(), CommandError> {
+        match (self.state.by_name, self.state.descending) {
+            (false, _) => (self.state.by_name, self.state.descending) = (true, false),
+            (true, false) => self.state.descending = true,
+            (true, true) => (self.state.by_name, self.state.descending) = (false, false),
+        }
+        if self.state.by_name {
+            let descending = self.state.descending;
+            self.state.swatches.sort_by(|a, b| {
+                let order = a.name.to_lowercase().cmp(&b.name.to_lowercase());
+                if descending { order.reverse() } else { order }
+            });
+        } else {
+            self.state.swatches.sort_by_key(|swatch| swatch.id);
+        }
+        Ok(())
+    }
+
+    fn copy_names(&mut self, ids: Vec<i64>) -> Result<(), CommandError> {
+        let names: Vec<&str> = self
+            .state
+            .swatches
+            .iter()
+            .filter(|swatch| ids.contains(&swatch.id))
+            .map(|swatch| swatch.name.as_str())
+            .collect();
+        bern::platform::copy_text(&names.join("\n"))
     }
 
     fn clear_favorites(&mut self) -> Result<(), CommandError> {

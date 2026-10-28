@@ -8,7 +8,7 @@ use bern_protocol::{EnumDef, Type};
 impl Generator<'_> {
     /// `B::Shortcut(…)` for an element with `shortcut:`, running the
     /// control's `activate` (or `focus` for search fields) while mounted.
-    fn shortcut(&self, out: &mut Out, element: &Element, action: &str) {
+    pub(super) fn shortcut(&self, out: &mut Out, element: &Element, action: &str) {
         if let Some(keys) = self
             .shortcut_keys(element, "shortcut")
             .or_else(|| element.keyword("shortcut").map(string))
@@ -71,6 +71,7 @@ impl Generator<'_> {
             ("style", self.style(kind, element.keyword("variant"))),
             ("pick", self.field(element, "pick")),
             ("files", Self::files(element)),
+            ("paste", self.field(element, "paste")),
             ("shape", self.shape(element)),
             (
                 "fill",
@@ -93,22 +94,36 @@ impl Generator<'_> {
         }
     }
 
+    /// `TextInput`: a draft field, or text read from state (`current:`)
+    /// whose every edit runs the action.
     pub(super) fn text_input(&self, out: &mut Out, element: &Element) {
-        out.line(format!(
-            "B::TextInput(p, c, {});",
-            designated(&[
-                ("id", Some(self.id(element))),
-                ("label", self.text_prop(element, "label")),
-                (
-                    "labelHidden",
-                    (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
-                ),
-                ("field", self.field(element, "value")),
-                ("prompt", self.text_prop(element, "prompt")),
-                ("kind", Self::keyword(element, "kind")),
-                ("submit", self.action(element)),
-            ])
-        ));
+        let controlled = element.expr("current").is_some();
+        let mut fields = vec![
+            ("id", Some(self.id(element))),
+            ("label", self.text_prop(element, "label")),
+            (
+                "labelHidden",
+                (element.keyword("label_hidden") == Some("true")).then(|| "true".to_string()),
+            ),
+        ];
+        if controlled {
+            fields.extend(self.model(element, "current"));
+        } else {
+            fields.push(("field", self.field(element, "value")));
+        }
+        fields.extend([
+            ("prompt", self.text_prop(element, "prompt")),
+            ("kind", Self::keyword(element, "kind")),
+            (
+                "submit",
+                if controlled {
+                    None
+                } else {
+                    self.action(element)
+                },
+            ),
+        ]);
+        out.line(format!("B::TextInput(p, c, {});", designated(&fields)));
     }
 
     /// A `Search` field, with its results below it when it has children.
@@ -410,26 +425,29 @@ impl Generator<'_> {
             if item.prop("shortcut").is_some() {
                 shortcuts.push(item);
             }
-            out.line(format!(
-                "B::MenuItemDef{},",
-                designated(&[
-                    ("id", Some(self.id(item))),
-                    ("label", self.text_prop(item, "label")),
-                    ("icon", Self::icon(item, "icon")),
-                    ("role", Self::keyword(item, "role")),
-                    ("enabled", self.enabled(item)),
-                    ("action", self.action(item)),
-                    ("pick", self.field(item, "pick")),
-                    ("files", Self::files(item)),
-                    ("shortcut", Self::keyword(item, "shortcut")),
-                    ("boundShortcut", self.shortcut_keys(item, "shortcut")),
-                ])
-            ));
+            out.line(format!("B::MenuItemDef{},", self.menu_item_def(item)));
         }
         out.close("});");
         for item in shortcuts {
             self.shortcut(out, item, "activate");
         }
+    }
+
+    /// The fields of a `MenuItem`.
+    pub(super) fn menu_item_def(&self, item: &Element) -> String {
+        designated(&[
+            ("id", Some(self.id(item))),
+            ("label", self.text_prop(item, "label")),
+            ("icon", Self::icon(item, "icon")),
+            ("role", Self::keyword(item, "role")),
+            ("enabled", self.enabled(item)),
+            ("action", self.action(item)),
+            ("pick", self.field(item, "pick")),
+            ("files", Self::files(item)),
+            ("paste", self.field(item, "paste")),
+            ("shortcut", Self::keyword(item, "shortcut")),
+            ("boundShortcut", self.shortcut_keys(item, "shortcut")),
+        ])
     }
 
     /// `Drop`: its content takes a file dragged onto it.

@@ -1685,3 +1685,31 @@ struct BernIconChoice: ViewModifier {
         }
     }
 }
+
+
+// MARK: - Clipboard
+
+#if os(tvOS)
+/// tvOS has no clipboard; the target lists neither `paste` nor a way for
+/// the engine to copy.
+@MainActor
+enum BernClipboard {
+    nonisolated static let available = false
+    static func copy(_ text: String) {}
+    static func paste(then give: @escaping @MainActor (String) -> Void) {}
+}
+#else
+/// The general pasteboard: `copy_text` of the engine, `paste:` of controls.
+/// Reading it asks the user the first time, as iOS does for any app.
+@MainActor
+enum BernClipboard {
+    nonisolated static let available = true
+
+    static func copy(_ text: String) { UIPasteboard.general.string = text }
+
+    /// The text on the clipboard goes to `give`, unless there is none.
+    static func paste(then give: @escaping @MainActor (String) -> Void) {
+        if let text = UIPasteboard.general.string, !text.isEmpty { give(text) }
+    }
+}
+#endif

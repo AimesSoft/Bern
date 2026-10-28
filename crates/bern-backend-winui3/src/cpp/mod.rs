@@ -20,6 +20,7 @@ mod layout;
 mod navigation;
 mod nodes;
 mod styles;
+mod table;
 
 use bern_ir::{
     Action, Application, BinaryOp, Binding, Element, Expr, ExprKind, FieldRef, MediaOp, Prop,

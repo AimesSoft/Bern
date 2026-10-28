@@ -341,8 +341,9 @@ impl Generator<'_> {
         Some((give, actions))
     }
 
-    /// A control's action, and with `pick:` first the document picker:
-    /// what pressing runs, and the extra control actions.
+    /// A control's action, and with `pick:` first the document picker or
+    /// with `paste:` the clipboard: what pressing runs, and the extra
+    /// control actions.
     pub(super) fn pressed(&self, element: &Element) -> (String, String) {
         let action = element
             .action
@@ -353,6 +354,13 @@ impl Generator<'_> {
                 None => self.action(a),
             })
             .unwrap_or_else(|| "Unit".into());
+        // `paste:`: the clipboard's text goes into the draft first.
+        if let Some(field) = self.field(element, "paste") {
+            return (
+                format!("BernClipboard.paste {{ text -> {field} = text; {action} }}"),
+                String::new(),
+            );
+        }
         match self.file_target(element, "pick", &action) {
             Some((give, actions)) => (
                 format!(

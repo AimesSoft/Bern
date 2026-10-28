@@ -23,6 +23,25 @@ pub fn install(services: impl Services + 'static) {
 }
 
 pub(crate) fn request(operation: &str, first: &str, second: &str) -> Result<String, CommandError> {
+    // In the browser the page is the host: the engine reaches its
+    // clipboard through the page's imports.
+    #[cfg(target_arch = "wasm32")]
+    if operation == "copy_text" && SERVICES.read().unwrap_or_else(|e| e.into_inner()).is_none() {
+        #[link(wasm_import_module = "bern")]
+        unsafe extern "C" {
+            fn copy_text(ptr: *const u8, len: usize) -> i32;
+        }
+        // SAFETY: the page reads `len` bytes at `ptr` before returning.
+        let status = unsafe { copy_text(first.as_ptr(), first.len()) };
+        return if status == 0 {
+            Ok(String::new())
+        } else {
+            Err(CommandError::new(
+                "platform_unavailable",
+                "the page has no clipboard",
+            ))
+        };
+    }
     let host = SERVICES
         .read()
         .unwrap_or_else(|e| e.into_inner())

@@ -9,6 +9,7 @@ mod expr;
 mod layout;
 mod motion;
 mod navigation;
+mod table;
 mod toolbar;
 mod values;
 mod windows;
@@ -564,10 +565,12 @@ impl<'a> Generator<'a> {
             "Tabs" => self.tabs(out, element, ctx),
             "Toolbar" => self.toolbar(out, element, ctx),
             "Menu" => self.menu(out, element, ctx),
+            "Table" => self.table(out, element, ctx),
             "Adaptive" => self.adaptive(out, element, ctx),
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "SidebarHeader"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "TabAccessory" | "PickerOption"
+            | "TableColumn" | "TableMenu"
             // Android has no menu bar for applications.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

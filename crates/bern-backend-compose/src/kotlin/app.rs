@@ -184,6 +184,7 @@ impl Generator<'_> {
         out.line(format!("{},", string(&app.windows.primary)));
         out.close(") { field, reader -> BernEngine.bernApply(field, reader) }");
         out.line("BernFiles.register(this)");
+        out.line("BernClipboard.register(this)");
         out.line("BernHost.readKeyboard(resources.configuration)");
         // The weights and sizes `text { … }` gives text styles.
         if !app.style.text_weights.is_empty() {
@@ -323,6 +324,7 @@ const IMPORTS: &[&str] = &[
     "androidx.compose.ui.layout.ContentScale",
     "androidx.compose.ui.platform.testTag",
     "androidx.compose.ui.platform.LocalContext",
+    "androidx.compose.ui.state.ToggleableState",
     "androidx.compose.ui.unit.dp",
     "dev.bern.runtime.*",
 ];

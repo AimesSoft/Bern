@@ -557,6 +557,19 @@ open target/bern/macos/Showcase.app
 
 验证（2026-10-28）：`bern-backend-swiftui` 的 `menu_bar` 测试含状态栏项，生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过（iOS 与 tvOS 不生成）；显示器调节程序的 macOS 版构建成功。未运行实测：菜单栏里的图标、菜单、Dock 图标的收起与恢复都未在真机上看过。“登录时启动”同样只有生成测试（含 `BernLoginItemToggle`）与类型检查：登录项的登记、登录启动时 Apple 事件是否带 `keyAELaunchedAsLogInItem`（`SMAppService` 登记的登录项未查证）、窗口关闭前是否闪现都未验证。
 
+## 表格、受控文字与剪贴板（2026-10-29）
+
+`Table` 生成为 SwiftUI 的 `Table(of: BernTableRow<行, 键>.self, selection:, sortOrder:)`，`BernTableRow` 把行的值与它的键（`Identifiable`）包在一起：
+
+- 选择绑定读草稿的 `Set`，写的时候经 `bernChosen` 按行的顺序排好再写回草稿。
+- 有动作或写了 `sorted` 的列带 `sortUsing: BernColumnOrder(column: n)`：这个比较器什么都不比较（行的顺序由引擎决定），只用来让表头显示排序标记；`sortOrder` 的读取由各列的 `sorted`、`descending` 算出，写入（点表头）运行那一列的动作。写了 `width` 的列是 `.width(min: 40, ideal: width)`。
+- 行菜单与主操作是 `.contextMenu(forSelectionType: 键.self, menu:, primaryAction:)`：系统给出菜单打开时所指的行（右键点的行不在选中行里时就是那一行），每个菜单项先把草稿设为这些行，再运行动作；主操作（双击、Enter）同样先设选择。菜单为空集合时（在空白处）不显示菜单项。
+- 外部入口：`bernControl` 的角色 `table`，`select` 收逗号分隔的键，`value` 是选中的键；行菜单的项各自是 `button`，菜单关着也能操作。
+
+`TextInput(current:)` 生成 `BernHeldText`：视图里有一份 `@State` 文字绑定给系统的文本框，编辑时（与引擎的值不同）每次都运行动作；引擎的值变化时，只有不在 `@FocusState` 焦点上才替换；失去焦点时换回引擎的值。`paste:` 生成 `BernClipboard.paste { text in 草稿 = text; 动作 }`：macOS 是 `NSPasteboard.general.string(forType: .string)`，iOS 是 `UIPasteboard.general.string`，没有文字时不执行。`copy_text`：`bern_app_start` 之前调用 `bern_platform_install(nil, bernPlatformRequest)`，请求在主队列上 `BernClipboard.copy`（macOS 先 `clearContents` 再 `setString`）。
+
+验证：`bern-backend-swiftui` 的 `tables` 测试（表格、受控输入、`paste` 按钮与菜单项）生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过；gallery 的 macOS 与 iOS 构建成功，一个实际应用的 macOS 版构建成功（第一次因与 `BernStyle.swift` 的 `BernRow` 布局重名而失败，行类型改名为 `BernTableRow`）。未运行：表格的选择、菜单、排序标记与剪贴板的读写在 macOS 与 iOS 上都未实测。
+
 ## 未完成与已知限制
 
 - 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）均未实现。菜单栏已在 2026-10-24 实现，见下文“菜单栏、跟随状态的快捷键与改键”。

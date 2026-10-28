@@ -198,12 +198,40 @@ impl Generator<'_> {
     }
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
-        let field = self.field(element, "value").expect("text field");
         let label = self.text_prop(element, "label").unwrap_or_default();
         let prompt = self
             .text_prop(element, "prompt")
             .unwrap_or_else(|| "null".into());
         let kind = element.keyword("kind").unwrap_or("plain");
+        // In a row the field takes the room its neighbours leave, as a
+        // text field does in a SwiftUI stack.
+        let weight = if ctx.scope == Scope::Row {
+            ".weight(1f)"
+        } else {
+            ""
+        };
+        // `current:`: text from state whose every edit runs the action.
+        if element.expr("current").is_some() {
+            let Some((value, change)) = self.model(element, "current", &|_| "it".into()) else {
+                return;
+            };
+            let target = self.target(element, ctx);
+            let value_action = if kind == "secure" {
+                String::new()
+            } else {
+                format!(", value = {{ {value} }}")
+            };
+            out.line(format!(
+                "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {change} }}{value_action}))"
+            ));
+            out.line(format!(
+                "BernHeldTextInput({value}, {{ {change} }}, {label}, {prompt}, {}, Modifier.testTag({target}){weight}, labelHidden = {})",
+                string(kind),
+                element.keyword("label_hidden") == Some("true")
+            ));
+            return;
+        }
+        let field = self.field(element, "value").expect("text field");
         let action = element.action.as_ref().map(|a| match element.clearing() {
             Some(clear) => format!("{}; {}", self.action(a), self.action(&clear)),
             None => self.action(a),
@@ -222,13 +250,6 @@ impl Generator<'_> {
         out.line(format!(
             "BernControl({target}, \"text_input\", {label}, actions = BernControlActions(edit = {{ {field} = it }}{submit}{value}))"
         ));
-        // In a row the field takes the room its neighbours leave, as a
-        // text field does in a SwiftUI stack.
-        let weight = if ctx.scope == Scope::Row {
-            ".weight(1f)"
-        } else {
-            ""
-        };
         out.line(format!(
             "BernTextInput({field}, {{ {field} = it }}, {label}, {prompt}, {}, {}, Modifier.testTag({target}){weight}, labelHidden = {})",
             string(kind),

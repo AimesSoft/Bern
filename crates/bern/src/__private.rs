@@ -59,6 +59,8 @@ pub fn file_field<T: FileValue>(_: &SessionField<T>) {}
 
 pub fn position_field<T: PositionValue>(_: &SessionField<T>) {}
 
+pub fn keys_field<T: PositionValue>(_: &SessionField<Vec<T>>) {}
+
 pub fn number_value<N: Numeric>(_: &N) {}
 
 pub fn picker_field<E: LabeledEnum>(_: &SessionField<E>) {}

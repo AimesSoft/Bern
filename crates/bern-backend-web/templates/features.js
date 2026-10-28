@@ -1603,6 +1603,14 @@ function giveFile(file, give) {
   });
 }
 
+/// `paste:` of a control: the text on the clipboard goes to `give`, unless
+/// there is none or the browser refuses to read it.
+export function paste(give) {
+  navigator.clipboard?.readText?.().then((text) => {
+    if (text) give(text);
+  }, () => {});
+}
+
 /// The browser's open panel for `kinds`; `give(url)` runs with the chosen
 /// file, nothing on cancel.
 export function pick(kinds, give) {

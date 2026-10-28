@@ -294,6 +294,8 @@ pub struct ButtonProps {
     pub style: Option<&'static crate::style::StyleDef>,
     /// `pick:`: the open panel asks for a file before the action runs.
     pub pick: Option<crate::features::Pick>,
+    /// `paste:`: the clipboard's text goes into this draft first.
+    pub paste: Option<crate::ctx::Field>,
     pub shape: Shape,
     /// `width: fill`: as wide as its container.
     pub fill: bool,
@@ -372,6 +374,7 @@ pub fn Button(p: &Parent, ctx: &Ctx, props: ButtonProps, action: Option<Act>) {
         effect(move || shown.set_sensitive(enabled()));
     }
     let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
+    let run = crate::features::pasting(ctx, props.paste, run);
     if let Some(run) = run.clone() {
         button.connect_clicked(move |_| run());
     }
@@ -413,6 +416,8 @@ pub struct IconButtonProps {
     pub enabled: Option<Get>,
     pub style: Option<&'static crate::style::StyleDef>,
     pub pick: Option<crate::features::Pick>,
+    /// `paste:`: the clipboard's text goes into this draft first.
+    pub paste: Option<crate::ctx::Field>,
     /// The size of the icon in points.
     pub font_size: Option<f64>,
     /// A round button of this diameter.
@@ -458,6 +463,7 @@ pub fn IconButton(p: &Parent, ctx: &Ctx, props: IconButtonProps, action: Option<
         effect(move || shown.set_sensitive(enabled()));
     }
     let (run, set_file) = crate::features::picking(ctx, props.pick, bound_action(ctx, &action));
+    let run = crate::features::pasting(ctx, props.paste, run);
     if let Some(run) = run.clone() {
         button.connect_clicked(move |_| run());
     }
@@ -666,7 +672,9 @@ pub struct TextInputProps {
     pub label: Option<Str>,
     /// `label_hidden`: the label names the field without showing.
     pub label_hidden: bool,
-    pub field: Option<Field>,
+    /// The draft it edits (`value`), or the state it shows and the command
+    /// each edit runs (`current`).
+    pub model: Option<Model>,
     pub prompt: Option<Str>,
     pub kind: Option<&'static str>,
 }
@@ -678,10 +686,25 @@ pub(crate) fn editable(
     set: Rc<dyn Fn(&str)>,
     bound: Bound,
 ) -> Rc<Cell<bool>> {
+    editable_unless(text, set, bound, None)
+}
+
+/// Like [`editable`]; while `editing` holds, state from elsewhere waits:
+/// a field showing engine state keeps what the user types until the
+/// engine has caught up with it.
+fn editable_unless(
+    text: Rc<dyn Fn() -> String>,
+    set: Rc<dyn Fn(&str)>,
+    bound: Bound,
+    editing: Option<Rc<dyn Fn() -> bool>>,
+) -> Rc<Cell<bool>> {
     let updating = Rc::new(Cell::new(false));
     let guard = Rc::clone(&updating);
     effect(move || {
         let value = as_text(&bound.get());
+        if editing.as_ref().is_some_and(|editing| editing()) {
+            return;
+        }
         if untrack(|| text()) != value {
             guard.set(true);
             set(&value);
@@ -691,10 +714,67 @@ pub(crate) fn editable(
     updating
 }
 
+/// For a field showing engine state: whether `widget` is being edited, and
+/// when it stops, the engine's text again.
+fn held_while_focused(
+    widget: &impl IsA<gtk::Widget>,
+    text: Rc<dyn Fn() -> String>,
+    set: Rc<dyn Fn(&str)>,
+    bound: &Bound,
+    updating: Rc<Cell<bool>>,
+) {
+    let focus = gtk::EventControllerFocus::new();
+    let bound = bound.clone();
+    focus.connect_leave(move |_| {
+        let value = as_text(&bound.peek());
+        if text() != value {
+            updating.set(true);
+            set(&value);
+            updating.set(false);
+        }
+    });
+    widget.as_ref().add_controller(focus);
+}
+
+/// Whether the keyboard focus is in `widget`, as in the text of an entry.
+fn contains_focus(widget: &gtk::Widget) -> bool {
+    widget
+        .root()
+        .and_then(|root| root.focus())
+        .is_some_and(|focus| focus == *widget || focus.is_ancestor(widget))
+}
+
+/// The text of a field bound to `bound`; a field showing engine state is
+/// held while it is being edited.
+fn text_binding(
+    widget: &impl IsA<gtk::Widget>,
+    text: Rc<dyn Fn() -> String>,
+    set: Rc<dyn Fn(&str)>,
+    bound: &Bound,
+) -> Rc<Cell<bool>> {
+    if !bound.controlled() {
+        return editable(text, set, bound.clone());
+    }
+    let watched = widget.as_ref().downgrade();
+    let editing: Rc<dyn Fn() -> bool> = Rc::new(move || {
+        watched
+            .upgrade()
+            .is_some_and(|widget| contains_focus(&widget))
+    });
+    let updating = editable_unless(
+        Rc::clone(&text),
+        Rc::clone(&set),
+        bound.clone(),
+        Some(editing),
+    );
+    held_while_focused(widget, text, set, bound, Rc::clone(&updating));
+    updating
+}
+
 #[allow(non_snake_case)]
 pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Act>) {
-    let Some(field) = props.field else { return };
-    let bound = Bound::new(ctx, field);
+    let Some(model) = props.model else { return };
+    let bound = Bound::model(ctx, model);
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     // The label shown above or in the field; a hidden one only names it.
     let shown = label.clone().filter(|_| !props.label_hidden);
@@ -715,13 +795,14 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
         let buffer = view.buffer();
         let read = buffer.clone();
         let write = buffer.clone();
-        let updating = editable(
+        let updating = text_binding(
+            &view,
             Rc::new(move || {
                 read.text(&read.start_iter(), &read.end_iter(), false)
                     .to_string()
             }),
             Rc::new(move |value| write.set_text(value)),
-            bound.clone(),
+            &bound,
         );
         let changed = bound.clone();
         buffer.connect_changed(move |buffer| {
@@ -755,10 +836,11 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
         }
         let read = row.clone();
         let write = row.clone();
-        let updating = editable(
+        let updating = text_binding(
+            &row,
             Rc::new(move || read.text().to_string()),
             Rc::new(move |value| write.set_text(value)),
-            bound.clone(),
+            &bound,
         );
         let changed = bound.clone();
         row.connect_changed(move |row| {
@@ -782,10 +864,11 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
         }
         let read = entry.clone();
         let write = entry.clone();
-        let updating = editable(
+        let updating = text_binding(
+            &entry,
             Rc::new(move || read.text().to_string()),
             Rc::new(move |value| write.set_text(value)),
-            bound.clone(),
+            &bound,
         );
         let changed = bound.clone();
         entry.connect_changed(move |entry| {
@@ -2486,6 +2569,9 @@ pub struct MenuItem {
     pub enabled: Option<Get>,
     pub action: Option<Act>,
     pub pick: Option<crate::features::Pick>,
+    /// `paste:`: the clipboard's text goes into this draft before the
+    /// action runs.
+    pub paste: Option<crate::ctx::Field>,
 }
 
 #[derive(Default)]
@@ -2548,6 +2634,7 @@ pub fn Menu(p: &Parent, ctx: &Ctx, props: MenuProps, items: Vec<Option<MenuItem>
         let action = gio::SimpleAction::new(&name, None);
         let (run, set_file) =
             crate::features::picking(ctx, item.pick, bound_action(ctx, &item.action));
+        let run = crate::features::pasting(ctx, item.paste, run);
         if let Some(run) = run.clone() {
             action.connect_activate(move |_, _| run());
         }

@@ -2062,3 +2062,23 @@ struct BernIconChoice: ViewModifier {
         }
     }
 }
+
+
+// MARK: - Clipboard
+
+/// The general pasteboard: `copy_text` of the engine, `paste:` of controls.
+@MainActor
+enum BernClipboard {
+    nonisolated static let available = true
+
+    static func copy(_ text: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
+    }
+
+    /// The text on the clipboard goes to `give`, unless there is none.
+    static func paste(then give: @escaping @MainActor (String) -> Void) {
+        if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty { give(text) }
+    }
+}

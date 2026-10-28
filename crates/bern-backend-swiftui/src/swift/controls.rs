@@ -348,6 +348,9 @@ impl Generator<'_> {
     }
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if element.expr("current").is_some() {
+            return self.held_text_input(out, element, ctx);
+        }
         let field = self.field(element, "value").expect("text field");
         let label = self.text_prop(element, "label").unwrap_or_default();
         let prompt = self
@@ -434,6 +437,76 @@ impl Generator<'_> {
         };
         out.line(format!(
             ".bernControl({}, role: \"text_input\", label: {label}, actions: BernControlActions(edit: {{ {field} = $0 }}{submit}{value}))",
+            self.target(element, ctx)
+        ));
+    }
+
+    /// `TextInput(current:)`: the field shows engine state and each edit
+    /// runs the action; it holds the user's text while being edited.
+    fn held_text_input(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let (value, _, setter) = self.control_value(element, "current");
+        let label = self.text_prop(element, "label").unwrap_or_default();
+        let prompt = self
+            .text_prop(element, "prompt")
+            .map(|prompt| format!("SwiftUI.Text(verbatim: {prompt})"))
+            .unwrap_or_else(|| "nil".into());
+        let kind = element.keyword("kind").unwrap_or("plain");
+        let ios = self.platform.uikit() && element.keyword("label_hidden") != Some("true");
+        if ios {
+            if kind == "multiline" {
+                out.open("SwiftUI.VStack(alignment: .leading, spacing: 6) {");
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+            } else {
+                out.open("SwiftUI.LabeledContent {");
+            }
+        }
+        out.open(format!(
+            "BernHeldText(value: {value}, commit: {setter}) {{ text in"
+        ));
+        match kind {
+            "secure" => out.open(format!(
+                "SwiftUI.SecureField(text: text, prompt: {prompt}) {{"
+            )),
+            "multiline" => out.open(format!(
+                "SwiftUI.TextField(text: text, prompt: {prompt}, axis: .vertical) {{"
+            )),
+            _ => out.open(format!(
+                "SwiftUI.TextField(text: text, prompt: {prompt}) {{"
+            )),
+        }
+        out.line(format!("SwiftUI.Text(verbatim: {label})"));
+        out.close("}");
+        if kind == "multiline" {
+            out.line(".lineLimit(3...8)");
+        }
+        if self.platform == Platform::Tvos {
+            out.line(".bernFieldLook()");
+        }
+        out.close("}");
+        if element.keyword("label_hidden") == Some("true") {
+            out.line(".labelsHidden()");
+        }
+        if ios {
+            if kind == "multiline" {
+                out.close("}");
+            } else {
+                out.line(".multilineTextAlignment(.trailing)");
+                out.close("} label: {");
+                out.indent += 1;
+                out.line(format!("SwiftUI.Text(verbatim: {label})"));
+                out.close("}");
+            }
+        }
+        if self.platform == Platform::Macos {
+            out.line(".modifier(BernComposerFocus())");
+        }
+        let shown = if kind == "secure" {
+            String::new()
+        } else {
+            format!(", value: {{ {value} }}")
+        };
+        out.line(format!(
+            ".bernControl({}, role: \"text_input\", label: {label}, actions: BernControlActions(edit: {setter}{shown}))",
             self.target(element, ctx)
         ));
     }

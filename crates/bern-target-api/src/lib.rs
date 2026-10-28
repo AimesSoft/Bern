@@ -162,6 +162,15 @@ pub mod feature {
     /// `pick:` on `Button`, `IconButton` and `MenuItem`: the system's open
     /// panel asks for a file before the action runs.
     pub const FILE_PICK: &str = "file_pick";
+    /// `Table`: rows of data in columns, with a selection of the rows'
+    /// keys, a row menu, a primary action and sorting by a heading.
+    pub const TABLE: &str = "table";
+    /// `TextInput(current:)`: a field showing engine state, each edit
+    /// running its action, the user's text held while being edited.
+    pub const CONTROLLED_TEXT: &str = "controlled_text";
+    /// `paste:` on `Button`, `IconButton`, `MenuItem` and `CommandItem`:
+    /// the clipboard's text goes into a draft before the action runs.
+    pub const PASTE: &str = "paste";
     /// `ScrollView(snap:, position:)`: scrolling comes to rest on an item,
     /// and a session field follows and sets the item it stands at.
     pub const SCROLL_SNAP: &str = "scroll_snap";

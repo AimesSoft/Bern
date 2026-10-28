@@ -42,6 +42,7 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+pub use bern_command::platform;
 pub use bern_media as media_contract;
 pub use bern_protocol as protocol;
 pub use bern_runtime as runtime;
@@ -1117,6 +1118,53 @@ pub unsafe extern "C" fn bern_bytes_free(ptr: *mut u8, len: usize) {
         // SAFETY: allocated by `bern_bytes_alloc` with this capacity.
         drop(unsafe { Vec::from_raw_parts(ptr, 0, len.max(1)) });
     }
+}
+
+/// A host's answer to the engine's platform requests (the clipboard):
+/// `request(context, operation, first, second)` with UTF-8 texts, 0 when
+/// done, another number when the platform cannot.
+pub type PlatformRequest =
+    extern "C" fn(*mut c_void, *const u8, usize, *const u8, usize, *const u8, usize) -> i32;
+
+struct HostPlatform {
+    context: usize,
+    request: PlatformRequest,
+}
+
+impl bern_command::platform::Services for HostPlatform {
+    fn request(&self, operation: &str, first: &str, second: &str) -> Result<String, CommandError> {
+        let status = (self.request)(
+            self.context as *mut c_void,
+            operation.as_ptr(),
+            operation.len(),
+            first.as_ptr(),
+            first.len(),
+            second.as_ptr(),
+            second.len(),
+        );
+        if status == 0 {
+            Ok(String::new())
+        } else {
+            Err(CommandError::new(
+                "platform_unavailable",
+                format!("the host cannot `{operation}`"),
+            ))
+        }
+    }
+}
+
+/// Answer the engine's platform requests, such as `copy_text`, with
+/// `request`. Hosts call it before `bern_app_start`; `request` may run on
+/// any thread and must not keep the texts.
+///
+/// # Safety
+/// `context` must stay valid for as long as the process runs.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn bern_platform_install(context: *mut c_void, request: PlatformRequest) {
+    bern_command::platform::install(HostPlatform {
+        context: context as usize,
+        request,
+    });
 }
 
 /// Release a buffer returned by this library.

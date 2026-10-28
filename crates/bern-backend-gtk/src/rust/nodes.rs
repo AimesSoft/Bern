@@ -298,13 +298,14 @@ impl Generator<'_> {
             "Tab" => self.tab(out, element),
             "Adaptive" => self.adaptive(out, element),
             "Menu" => self.menu(out, element),
+            "Table" => self.table(out, element),
             "Detail" | "Destination" | "Sidebar" | "SidebarHeader" | "SidebarFooter"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "Inspector" | "Shape" | "Series"
             // GNOME applications keep no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu.
             | "StatusItem"
-            | "Pattern" | "TabAccessory" | "PickerOption" => {
+            | "Pattern" | "TabAccessory" | "PickerOption" | "TableColumn" | "TableMenu" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

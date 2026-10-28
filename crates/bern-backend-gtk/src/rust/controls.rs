@@ -10,12 +10,13 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, shape: {} }}, {}, ",
+                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {} }}, {}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 self.enabled(element),
                 self.style("Button", element),
                 self.pick(element),
+                some(self.field(element, "paste")),
                 self.shape(element),
                 self.action(element),
             ),
@@ -32,7 +33,7 @@ impl Generator<'_> {
 
     pub(super) fn button(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, shape: {}, fill: {} }}, {});",
+            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, fill: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             Self::icon(element, "icon"),
@@ -41,6 +42,7 @@ impl Generator<'_> {
             self.enabled(element),
             self.style("Button", element),
             self.pick(element),
+            some(self.field(element, "paste")),
             self.shape(element),
             element.keyword("width") == Some("fill"),
             self.action(element),
@@ -55,13 +57,14 @@ impl Generator<'_> {
 
     pub(super) fn icon_button(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::IconButton(p, c, b::IconButtonProps {{ id: {}, icon: {}, label: {}, enabled: {}, style: {}, pick: {}, font_size: {}, diameter: {}, prominence: {} }}, {});",
+            "b::IconButton(p, c, b::IconButtonProps {{ id: {}, icon: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, font_size: {}, diameter: {}, prominence: {} }}, {});",
             self.id(element),
             string(element.icon("icon").unwrap_or("circle")),
             some(self.text_prop(element, "label")),
             self.enabled(element),
             self.style("IconButton", element),
             self.pick(element),
+            some(self.field(element, "paste")),
             Self::number(element, "font_size"),
             some(self.num(element, "height")),
             Self::keyword(element, "prominence"),
@@ -76,15 +79,22 @@ impl Generator<'_> {
     }
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element) {
+        // A field showing engine state runs its action on each edit; one
+        // editing a draft, when the text is submitted.
+        let controlled = element.expr("current").is_some();
         out.line(format!(
-            "b::TextInput(p, c, b::TextInputProps {{ id: {}, label: {}, label_hidden: {}, field: {}, prompt: {}, kind: {} }}, {});",
+            "b::TextInput(p, c, b::TextInputProps {{ id: {}, label: {}, label_hidden: {}, model: {}, prompt: {}, kind: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             element.keyword("label_hidden") == Some("true"),
-            some(self.field(element, "value")),
+            some(self.model(element, "current", false)),
             some(self.text_prop(element, "prompt")),
             Self::keyword(element, "kind"),
-            self.action(element),
+            if controlled {
+                "None".into()
+            } else {
+                self.action(element)
+            },
         ));
     }
 

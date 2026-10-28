@@ -435,6 +435,35 @@ fn install(def: &'static AppDef) -> Rc<Host> {
 
 /// Run the application: start the engine, open the initial windows and
 /// keep running until the application quits.
+/// What the engine asks of the desktop: the clipboard, on the main
+/// thread, where GDK lives.
+struct Services;
+
+impl bern_ffi::platform::Services for Services {
+    fn request(
+        &self,
+        operation: &str,
+        first: &str,
+        _second: &str,
+    ) -> Result<String, bern_ffi::protocol::CommandError> {
+        match operation {
+            "copy_text" => {
+                let text = first.to_string();
+                glib::MainContext::default().invoke(move || {
+                    if let Some(display) = gtk::gdk::Display::default() {
+                        display.clipboard().set_text(&text);
+                    }
+                });
+                Ok(String::new())
+            }
+            _ => Err(bern_ffi::protocol::CommandError::new(
+                "platform_unavailable",
+                format!("Linux has no `{operation}`"),
+            )),
+        }
+    }
+}
+
 pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
     // The definition lives as long as the process.
     let def: &'static AppDef = Box::leak(Box::new(def));
@@ -471,6 +500,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         let Some(start) = start.borrow_mut().take() else {
             return;
         };
+        bern_ffi::platform::install(Services);
         if let Err(message) = start_engine(&host(), start) {
             eprintln!("bern: {message}");
             failed_startup.set(true);

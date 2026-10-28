@@ -633,6 +633,13 @@ class Host {
         on_query: (subscription, ptr, len) =>
           this.defer(this.copy(ptr, len), (bytes) => this.queries.get(subscription)?.(bytes)),
         random_u32: () => crypto.getRandomValues(new Uint32Array(1))[0],
+        // `bern::platform::copy_text`: the text goes to the clipboard as the
+        // command runs, while the click that started it still counts.
+        copy_text: (ptr, len) => {
+          if (!navigator.clipboard?.writeText) return -1;
+          navigator.clipboard.writeText(this.text(ptr, len)).catch(() => {});
+          return 0;
+        },
         unix_ms: () => Date.now(),
         utc_offset_minutes: () => -new Date().getTimezoneOffset(),
         storage_read: (appPtr, appLen, keyPtr, keyLen, out, capacity) => {
@@ -1646,7 +1653,10 @@ export function labelled(display, label, stacked, input = display) {
 
 /// Text editing: input events update the draft except during input method
 /// composition, which writes once when it ends.
-function editable(input, field) {
+/// Text editing of `field`. With `held`, the field shows engine state:
+/// what the user types stays while the field has the focus, and the
+/// engine's text shows again when it leaves.
+function editable(input, field, held = false) {
   let composing = false;
   input.addEventListener("compositionstart", () => {
     composing = true;
@@ -1660,16 +1670,23 @@ function editable(input, field) {
   });
   effect(() => {
     const value = field.get();
+    if (held && document.activeElement === input) return;
     if (!composing && input.value !== value) input.value = value;
   });
+  if (held) {
+    input.addEventListener("blur", () => {
+      const value = field.peek();
+      if (input.value !== value) input.value = value;
+    });
+  }
 }
 
-export function TextInput(p, ctx, { id, label, field, prompt, kind, labelHidden }, submit) {
+export function TextInput(p, ctx, { id, label, field, prompt, kind, labelHidden, controlled }, submit) {
   const input = kind === "multiline"
     ? el("textarea", { class: "bern-field", rows: 3 })
     : el("input", { class: "bern-field", type: kind === "secure" ? "password" : "text", autocomplete: "off" });
   if (prompt) bindAttr(input, "placeholder", prompt);
-  editable(input, field);
+  editable(input, field, Boolean(controlled));
   if (submit && kind !== "multiline") {
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter" && !event.isComposing) submit();
@@ -3452,6 +3469,237 @@ export function Menu(p, ctx, { id, label, icon: name, style, shape, height, hide
   });
   const holder = el("div", { class: "bern-menu-wrap" }, trigger, list);
   p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, holder) : holder);
+}
+
+/// Rows of data in columns: a `table` of role `grid`. The selection is a
+/// draft of the rows' keys: a click chooses a row, the platform's toggle
+/// modifier adds or removes one, Shift extends from the last one chosen;
+/// a double click or Enter runs the action; a secondary click or the menu
+/// key opens the row menu over the selection, which the row under the
+/// pointer joins first. A heading's button runs its column's action, and
+/// `aria-sort` shows the order the rows are in.
+export function Table(p, ctx, { id, label, selection, items, key }, columns, menu, action) {
+  const table = el("table", { class: "bern-table", role: "grid", "aria-multiselectable": "true", tabindex: "0" });
+  bindAttr(table, "aria-label", label);
+  const head = el("tr", { role: "row" });
+  for (const column of columns) {
+    const title = el("span");
+    bindText(title, column.title);
+    const arrow = el("span", { class: "bern-table-arrow", "aria-hidden": "true" });
+    const th = el("th", { role: "columnheader", scope: "col" });
+    if (column.width !== undefined) th.style.width = `${column.width}px`;
+    if (column.sort) {
+      const button = el("button", { class: "bern-table-heading", type: "button" }, title, arrow);
+      button.addEventListener("click", () => column.sort());
+      th.append(button);
+    } else {
+      th.append(el("span", { class: "bern-table-heading" }, title, arrow));
+    }
+    effect(() => {
+      const sorted = column.sorted?.() ?? false;
+      const down = sorted && (column.descending?.() ?? false);
+      th.setAttribute("aria-sort", sorted ? (down ? "descending" : "ascending") : "none");
+      arrow.replaceChildren(sorted ? icon(down ? "chevron.down" : "chevron.up", 12) : "");
+    });
+    head.append(th);
+  }
+  const body = el("tbody");
+  table.append(el("thead", {}, head), body);
+
+  const chosen = selection ?? cell([]);
+  let anchor = null;
+  const keyText = (value) => String(value);
+  const isChosen = (k) => chosen.get().some((other) => keyText(other) === keyText(k));
+  const choose = (keys) => chosen.set(keys);
+  let rows = new Map();
+  let order = [];
+  effect(() => {
+    const list = items();
+    untrack(() => {
+      const next = new Map();
+      order = [];
+      for (const item of list) {
+        const k = key(item);
+        const id = keyText(k);
+        let entry = rows.get(id);
+        if (entry) {
+          entry.value.set(item);
+          rows.delete(id);
+        } else {
+          const value = cell(item);
+          const owner = new Scope(null);
+          const tr = el("tr", { role: "row", "aria-selected": "false" });
+          const rowKey = () => keyText(key(value.peek()));
+          const rowCtx = { ...ctx, key: rowKey, keys: [...(ctx.keys ?? []), rowKey] };
+          within(owner, () => {
+            for (const column of columns) {
+              const td = el("td", { role: "gridcell" });
+              column.cell(td, rowCtx, () => value.get());
+              tr.append(td);
+            }
+            effect(() => tr.setAttribute("aria-selected", isChosen(key(value.get())) ? "true" : "false"));
+          });
+          entry = { value, owner, tr, key: () => key(value.peek()) };
+          tr.addEventListener("mousedown", (event) => {
+            if (event.button !== 0) return;
+            pick(entry, event);
+          });
+          tr.addEventListener("dblclick", () => action?.());
+          tr.addEventListener("contextmenu", (event) => {
+            event.preventDefault();
+            if (!isChosen(entry.key())) choose([entry.key()]);
+            anchor = entry.key();
+            openMenu(event.clientX, event.clientY);
+          });
+        }
+        next.set(id, entry);
+        order.push(entry);
+      }
+      for (const stale of rows.values()) {
+        stale.owner.dispose();
+        stale.tr.remove();
+      }
+      let before = null;
+      for (const entry of order) {
+        const expected = before ? before.nextSibling : body.firstChild;
+        if (expected !== entry.tr) {
+          if (before) before.after(entry.tr);
+          else body.prepend(entry.tr);
+        }
+        before = entry.tr;
+      }
+      rows = next;
+    });
+  });
+  onCleanup(() => {
+    for (const entry of rows.values()) entry.owner.dispose();
+  });
+
+  function indexOf(k) {
+    return order.findIndex((entry) => keyText(entry.key()) === keyText(k));
+  }
+  function pick(entry, event) {
+    const k = entry.key();
+    const toggle = navigator.platform.startsWith("Mac") ? event.metaKey : event.ctrlKey;
+    if (event.shiftKey && anchor !== null && indexOf(anchor) >= 0) {
+      const [from, to] = [indexOf(anchor), indexOf(k)].sort((a, b) => a - b);
+      choose(order.slice(from, to + 1).map((row) => row.key()));
+      return;
+    }
+    if (toggle) {
+      choose(isChosen(k) ? chosen.peek().filter((other) => keyText(other) !== keyText(k)) : [...chosen.peek(), k]);
+    } else {
+      choose([k]);
+    }
+    anchor = k;
+  }
+  table.addEventListener("keydown", (event) => {
+    if (event.target !== table) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      action?.();
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!order.length) return;
+      const at = anchor === null ? -1 : indexOf(anchor);
+      const next = Math.max(0, Math.min(order.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)));
+      const k = order[next].key();
+      if (event.shiftKey && anchor !== null) {
+        if (!isChosen(k)) choose([...chosen.peek(), k]);
+      } else {
+        choose([k]);
+      }
+      anchor = k;
+      order[next].tr.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      const row = order[Math.max(0, indexOf(anchor))]?.tr ?? table;
+      const box = row.getBoundingClientRect();
+      openMenu(box.left + 24, box.bottom);
+    } else if ((event.key === "a" || event.key === "A") && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      choose(order.map((row) => row.key()));
+    }
+  });
+
+  // The row menu.
+  const list = el("div", { class: "bern-menu", role: "menu", popover: "auto" });
+  bindAttr(list, "aria-label", label);
+  const buttons = [];
+  for (const item of menu) {
+    if (!item) {
+      list.append(el("div", { class: "bern-menu-separator", role: "separator" }));
+      continue;
+    }
+    const itemText = el("span", { class: "bern-menu-text" });
+    bindText(itemText, item.label);
+    const button = el("button", {
+      class: `bern-menu-item${item.role === "destructive" ? " bern-destructive" : ""}`, type: "button",
+      role: "menuitem", tabindex: "-1",
+    }, item.icon ? icon(item.icon, 16) : null, itemText);
+    const isEnabled = enabledOf(item.enabled);
+    effect(() => {
+      button.disabled = !isEnabled();
+    });
+    mark(button, ctx, item.id);
+    button.addEventListener("click", () => {
+      list.hidePopover();
+      table.focus();
+      item.action();
+    });
+    button.addEventListener("pointermove", () => {
+      if (!button.disabled && document.activeElement !== button) button.focus();
+    });
+    control(ctx, {
+      target: () => target(ctx, item.id), role: "button", label: item.label, enabled: isEnabled,
+      actions: { activate: item.action, ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}) },
+    });
+    list.append(button);
+    buttons.push(button);
+  }
+  function openMenu(x, y) {
+    if (!buttons.length) return;
+    list.style.left = `${x}px`;
+    list.style.top = `${y}px`;
+    list.showPopover();
+    const rect = list.getBoundingClientRect();
+    if (rect.right > innerWidth) list.style.left = `${Math.max(8, innerWidth - rect.width - 8)}px`;
+    if (rect.bottom > innerHeight) list.style.top = `${Math.max(8, innerHeight - rect.height - 8)}px`;
+    buttons.find((button) => !button.disabled)?.focus();
+  }
+  list.addEventListener("keydown", (event) => {
+    const available = buttons.filter((button) => !button.disabled);
+    const at = available.indexOf(document.activeElement);
+    const move = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: available.length - 1 }[event.key];
+    if (move !== undefined && available.length) {
+      event.preventDefault();
+      available[(move + available.length) % available.length].focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      list.hidePopover();
+      table.focus();
+    }
+  });
+  onCleanup(() => {
+    if (list.matches(":popover-open")) list.hidePopover();
+  });
+
+  mark(table, ctx, id);
+  control(ctx, {
+    target: () => target(ctx, id), role: "table", label,
+    actions: {
+      activate: action,
+      select: (text) => {
+        const wanted = String(text).split(",").map((part) => part.trim()).filter(Boolean);
+        const keys = order.filter((row) => wanted.includes(keyText(row.key()))).map((row) => row.key());
+        if (keys.length !== wanted.length) return false;
+        choose(keys);
+        return true;
+      },
+      value: () => chosen.peek().map(keyText).join(","),
+    },
+  });
+  p.append(el("div", { class: "bern-table-scroll" }, table, list));
 }
 
 /// Switches the interface language among the supported languages; each is

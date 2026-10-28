@@ -88,6 +88,9 @@ pub mod gallery {
         /// The keys that show the details, as Bern writes shortcuts: the
         /// user chooses them in the about window.
         pub details_key: String,
+        /// Whether the table lists the patterns by name, and downward.
+        pub by_name: bool,
+        pub descending: bool,
     }
 
     #[commands]
@@ -102,6 +105,25 @@ pub mod gallery {
 
         /// No pattern is a favorite any more.
         fn clear_favorites(&mut self) -> Result<(), CommandError>;
+
+        /// Turn each of the patterns `ids` into a favorite, or no longer.
+        fn toggle_favorites(&mut self, ids: Vec<i64>) -> Result<(), CommandError>;
+
+        /// Open the first of the patterns `ids`.
+        fn open_chosen(&mut self, ids: Vec<i64>) -> Result<(), CommandError>;
+
+        /// Open the pattern called `name`, ignoring case.
+        fn open_named(&mut self, name: String) -> Result<(), CommandError>;
+
+        /// Call the pattern `id` by `name`.
+        fn rename(&mut self, id: i64, name: String) -> Result<(), CommandError>;
+
+        /// List the patterns by name, or by name downward when they already
+        /// are, or in their own order after that.
+        fn sort_by_name(&mut self) -> Result<(), CommandError>;
+
+        /// Put the names of the patterns `ids` on the clipboard, one a line.
+        fn copy_names(&mut self, ids: Vec<i64>) -> Result<(), CommandError>;
 
         /// Show `accent` in every window.
         #[idempotent]

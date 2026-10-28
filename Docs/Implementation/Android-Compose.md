@@ -251,6 +251,18 @@ bern package --target android
 
 `BernShortcut` 的键可以是状态里的文本：组合时把当前文本登记进活动的快捷键表，文本变化随重组重新登记。`BernShortcutInput` 是一个色调按钮，按下后把 `BernShortcuts.recorder` 设为它自己：活动的 `dispatchKeyEvent` 先把下一次按键交给它（Ctrl 或 Meta 写作 `cmd`），Esc 与返回键保持原样，单独按 Delete 清空，只按修饰键继续等待；等待期间快捷键不执行。显示文字为 `Ctrl+Shift+K` 的写法，空格键按界面语言。`MenuBar` 不生成。验证：生成器测试（gallery）覆盖生成的调用；`examples/gallery` 用到跟随状态的快捷键与 `ShortcutInput`，`bern build --target android` 编译 Kotlin 并打出 APK；未在设备上运行。
 
+## 表格、受控文字与剪贴板（2026-10-29）
+
+Android 与 Material 3 都没有表格控件，`Table` 按 Material 数据表的样子生成：一个 `Column`（在列与行里取 `weight(1f)`），上面是 `BernTableHeadings`，下面是 `LazyColumn` 的行，行间有分隔线。
+
+- 表头一行最低 56dp：有 `selection` 时第一格是 `TriStateCheckbox`（全选、全不选，部分选中时为不定态），然后每列一个 `BernTableHeading`：`labelLarge` 的标题，`sorted` 时后面是 `chevron.up` / `chevron.down` 图标，有动作时整格可点。写了 `width` 的列是 `Modifier.width`，其他列分 `weight(1f)`；表头与行用同样的宽度。
+- 行（`BernTableRow`）最低 52dp：有 `selection` 时第一格是 `Checkbox`，加入或移出选择；选中的行底色是 `secondaryContainer`。点一行：有主操作时只选它并运行，没有时加入或移出选择；长按打开 `DropdownMenu` 的行菜单，那一行未选中时先只选中它。每格是一个 `Row`（竖直居中，间距 8），格子里的控件目标带上行的键。
+- `items(…, key = { BernKey.of(行.键) })` 保留行；草稿按行的顺序写（`tableKeys.filter { it in … }`）。外部入口：角色 `table`，`select` 收逗号分隔的键，`value` 是选中的键；行菜单的项各自登记为按钮。
+
+`TextInput(current:)` 生成 `BernHeldTextInput`：视图里记着用户正在编辑的文字（`held`），有它时显示它，每次编辑都运行动作；`onFocusChanged` 在失去焦点时清掉它，于是显示引擎的文字。`paste:` 生成 `BernClipboard.paste { text -> 草稿 = text; 动作 }`：`ClipboardManager.primaryClip` 的第一项 `coerceToText`，有文字才执行；Android 12 起系统会提示应用读了剪贴板。`BernClipboard.register(this)` 与 `BernFiles` 一样在 `onCreate` 时取应用上下文。引擎的 `copy_text` 原本就由 `platformRequest` 在主线程设 `ClipboardManager`。
+
+验证：生成器测试（gallery 的表格页）覆盖表格、受控输入与 `paste`；`bern build --target android` 构建 gallery 成功（Gradle 编译生成的 Kotlin 与运行时）。未安装到设备，未运行。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：

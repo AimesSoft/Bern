@@ -45,6 +45,8 @@ pub enum Page {
     Frame,
     #[label(tr! { "zh-Hans" => "胶片", "en" => "Film" })]
     Film,
+    #[label(tr! { "zh-Hans" => "表格", "en" => "Table" })]
+    Table,
 }
 
 #[bern::session]
@@ -74,6 +76,8 @@ pub struct GalleryDraft {
     /// The frame's volume, set in its popover.
     #[initial(0.7)]
     pub volume: f64,
+    /// The patterns chosen in the table.
+    pub chosen: Vec<i64>,
 }
 
 /// The windows, and the menus of the menu bar where the platform has one:
@@ -168,6 +172,7 @@ pub fn main_window(
                 SidebarItem(value: Page::Favorites, label: tr! { "zh-Hans" => "收藏", "en" => "Favorites" }, icon: "star")
                 SidebarItem(value: Page::Frame, label: tr! { "zh-Hans" => "画框", "en" => "Frame" }, icon: "play.rectangle")
                 SidebarItem(value: Page::Film, label: tr! { "zh-Hans" => "胶片", "en" => "Film" }, icon: "film")
+                SidebarItem(value: Page::Table, label: tr! { "zh-Hans" => "表格", "en" => "Table" }, icon: "list.bullet.rectangle")
                 SidebarFooter {
                     Row(gap: 8, align: center) {
                         Label(title: tr! { "zh-Hans" => "本地用户", "en" => "Local user" }, icon: "person.crop.circle")
@@ -217,6 +222,7 @@ pub fn main_window(
                         Page::Favorites => { wall(app: app, swatches: app.favorites) }
                         Page::Frame => { frame(app: app) }
                         Page::Film => { film(app: app) }
+                        Page::Table => { table_page(app: app) }
                     }
                     // Escape (a television's Back) closes the details.
                     if draft.details {
@@ -457,6 +463,40 @@ pub fn card(app: gallery::Client, swatch: gallery::Swatch) -> impl View {
                 IconButton(id: favorite, icon: "star", label: tr! { "zh-Hans" => "收藏", "en" => "Favorite" }, reveal: hover) => app.toggle_favorite(swatch.id)
             }
             Text(content: swatch.name, style: headline)
+        }
+    }
+}
+
+/// The patterns in a table: several can be chosen, the row menu acts on
+/// them, a double click opens the first, and the name's heading sorts. The
+/// field above renames the open pattern; the button opens the pattern whose
+/// name is on the clipboard.
+#[component]
+pub fn table_page(app: gallery::Client, #[session] draft: GalleryDraft) -> impl View {
+    ui! {
+        Column(gap: 12, padding: 24) {
+            Row(gap: 8, align: center) {
+                TextInput(id: rename, label: tr! { "zh-Hans" => "名称", "en" => "Name" }, label_hidden: true, current: app.opened_name, prompt: tr! { "zh-Hans" => "打开的图案", "en" => "The open pattern" }) => app.rename(app.opened, app.opened_name)
+                Button(id: paste_open, label: tr! { "zh-Hans" => "打开剪贴板里的图案", "en" => "Open the Pattern on the Clipboard" }, paste: draft.query) => app.open_named(draft.query)
+            }
+            Table(id: swatch_table, label: tr! { "zh-Hans" => "图案", "en" => "Patterns" }, items: app.swatches, key: id, selection: draft.chosen) |swatch| {
+                TableColumn(title: tr! { "zh-Hans" => "名称", "en" => "Name" }, width: 200, sorted: app.by_name, descending: app.descending) {
+                    Text(content: swatch.name, lines: 1)
+                } => app.sort_by_name()
+                TableColumn(title: tr! { "zh-Hans" => "收藏", "en" => "Favorite" }, width: 80) {
+                    if swatch.favorite {
+                        Label(title: tr! { "zh-Hans" => "收藏", "en" => "Favorite" }, icon: "star.fill", display: icon)
+                    }
+                }
+                TableColumn(title: tr! { "zh-Hans" => "位置", "en" => "Place" }) {
+                    Text(content: tr! { "zh-Hans" => "{at}", "en" => "{at}"; at: swatch.at }, emphasis: secondary)
+                }
+                TableMenu {
+                    MenuItem(id: table_favorite, label: tr! { "zh-Hans" => "收藏或取消收藏", "en" => "Favorite or Not" }, icon: "star") => app.toggle_favorites(draft.chosen)
+                    Divider
+                    MenuItem(id: table_copy, label: tr! { "zh-Hans" => "复制名称", "en" => "Copy the Names" }) => app.copy_names(draft.chosen)
+                }
+            } => app.open_chosen(draft.chosen)
         }
     }
 }

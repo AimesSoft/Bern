@@ -1696,6 +1696,39 @@ WindowSet(handle: AppWindows, primary: main) {
 
 `Button` 与 `IconButton` 可写 `default_focus: true`：界面出现时焦点从它开始。电视上焦点就是遥控器操作的位置，每个界面应给出起始焦点，例如引导的“继续”、播放器的暂停。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），标签页的每页各是一个焦点区域；其他平台上是键盘焦点：SwiftUI 的 `FocusState`，Web 的 `focus()`，Compose 的 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点。实现进度：tvOS 模拟器实测；其他目标未实测。
 
+### 表格
+
+`Table` 把记录列表排成列：每项一行，`key` 是行的身份，行随状态增删与换序时保留各自的控件与状态。`TableColumn` 有表头 `title`，可给 `width`，子节点是每行这一格的内容，用表格的行变量写；不写 `width` 的列分去其余的宽度。格子里可以写 `if`、`match` 与任意内容，随行的值更新。
+
+```rust
+Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, items: app.servers, key: id, selection: draft.selected) |server| {
+    TableColumn(title: tr! { "zh-Hans" => "别名", "en" => "Name" }, width: 260, sorted: app.sort == SortKey::Name, descending: app.descending) {
+        Text(content: server.name, lines: 1)
+    } => app.sort_by(SortKey::Name)
+    TableMenu {
+        MenuItem(id: copy_links, label: tr! { "zh-Hans" => "复制分享链接", "en" => "Copy Share Links" }) => app.copy_links(draft.selected)
+    }
+} => app.use_chosen(draft.selected)
+```
+
+- 选择：`selection` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。桌面上单击只选一行，Shift 连选，平台的切换键（macOS 的 Command，Windows 与 Linux 的 Ctrl）加选或减选，与各平台的列表相同。外部入口用 `ui select` 给出逗号分隔的键来选行，其中有不存在的键时失败。
+- 主操作：表格的动作在双击或按 Enter 时对选中行运行。触屏上点一行就只选它并运行；没有动作时点一行把它加入或移出选择。
+- 排序：点表头运行该列的动作，由引擎换顺序；`sorted` 与 `descending` 只决定表头上哪一列显示排序标记、朝哪个方向。行的顺序始终是 `items` 的顺序，Bern 不在界面里排序，所以排序可以按界面看不见的规则（比如没测过的行总在最后）。
+- 行菜单：`TableMenu` 里的 `MenuItem` 与 `Divider` 在右键（键盘的菜单键或 Shift+F10）或长按一行时打开。那一行不在选中行里时先只选中它，所以菜单项读 `selection` 就是要处理的行，与 Finder、资源管理器的习惯相同。菜单项与 `Menu` 的一样各自是外部入口的控件，菜单关着也能操作。
+
+各平台：macOS 与 iOS 是 SwiftUI 的 `Table`，表头的排序标记由 `sortOrder` 绑定显示，行菜单与主操作是 `contextMenu(forSelectionType:primaryAction:)`；紧凑宽度的 iPhone 上系统只显示第一列。tvOS 没有表格，是一列行按钮，各列的格子横排，按下运行主操作，长按出行菜单。GTK 是 `GtkColumnView` 与 `GtkMultiSelection`，表头的排序标记由 `GtkColumnViewSorter` 显示，行菜单是 `GtkPopoverMenu`；每个格子放在一个边界盒里，Bern 的伸缩规则不越过它进入 ColumnView 自己的部件（越过时 GTK 在行回收时断言失败）。WinUI 3 没有系统表格（DataGrid 在社区工具包里，不随 Windows App SDK 提供）：行是 `ListView`（`Extended` 选择），上面一排表头按钮，列宽在表头与各行之间共用，表头对齐到行里格子的位置；行菜单是 `MenuFlyout`。网页是 `<table>`，表头是按钮，`aria-sort` 标出排序，方向键在行间移动。Android 也没有表格控件，按 Material 数据表的样子做：表头一行，每行前有勾选框，表头的勾选框全选或全不选，选中的行用 `secondaryContainer` 着色，长按出 `DropdownMenu`。
+
+实现进度（2026-10-29）：七个目标已实现。Linux 虚拟机上用一个实际应用（GTK，Broadway）实测：反复增删与换序行的压力测试、选择、右键先选中再出菜单、菜单项、点表头换排序、经外部入口的主操作；网页在浏览器里实测单击与 Shift 选择、行菜单、排序与双击。macOS、iOS 与 Android 只构建，WinUI 3 只经 MSVC 编译，都未运行。
+
+### 剪贴板
+
+控件读剪贴板、引擎写剪贴板，各走一条路：
+
+- `Button`、`IconButton`、`MenuItem` 与 `CommandItem` 的 `paste: draft.text`：按下时先把剪贴板里的文字放进该草稿，再运行动作；剪贴板里没有文字时草稿与动作都不动。与 `pick` 二选一。读剪贴板要用户按下，这也是 iOS 与浏览器的要求（iOS 第一次会问用户，浏览器会请求许可）。
+- 引擎的 `bern::platform::copy_text(text)`：把文字放上剪贴板，任何线程都可以调用，由界面线程完成；宿主在启动引擎前经 `bern_platform_install` 接上（Android 早已经 JNI 提供）。macOS 是 `NSPasteboard`，iOS 是 `UIPasteboard`，Windows 是 `Clipboard.SetContent` 加 `Flush`（应用退出后文字仍在），GTK 是 `GdkClipboard`，网页是 `navigator.clipboard.writeText`。tvOS 没有剪贴板：`paste` 不可用（能力检查报告），`copy_text` 返回失败。
+
+实现进度（2026-10-29）：Linux 虚拟机上实测从应用复制分享链接、再用 `paste` 读回，内容一字不差；网页在浏览器里只验证到调用剪贴板接口（浏览器拒绝了自动化读取，读的结果用替身代替）。其他目标未运行。
+
 ### 路由与返回行为
 
 路由目录声明稳定身份、类型化参数、目的地和状态保留规则。`ui.navigate`、`ui.back` 等会话命令引用该目录；传输中可以使用路由 ID，但不能用任意字符串路径替代参数类型检查。
@@ -2714,6 +2747,8 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 `Picker(selected: app.appearance) => app.set_appearance(app.appearance)`，以及
 `Slider(current: app.volume, min: 0, max: 1) => app.set_volume(app.volume)`
 读取引擎快照（此处省略各控件必填的 id 和 label）；动作参数中与 `checked` / `selected` / `current` **完全相同的表达式**代表用户刚选择的新值。只替换完整的参数表达式，不替换字符串或其他字段。控件不直接修改引擎快照。原有 `value: draft.field` 继续用于会话草稿，可选动作在写入后执行。
+
+`TextInput(current: app.name) => app.rename(app.name)` 同样读引擎快照（2026-10-29）：每次编辑都运行动作，动作参数里与 `current` 相同的表达式是改后的整段文字。字段有焦点时，用户的文字留在框里，引擎的回应不替换它，否则一来一回的延迟会挪走光标、吞掉刚打的字；焦点离开后显示引擎的文字。七个目标都这样实现（SwiftUI、Compose 在视图里留一份正在编辑的文字，GTK、WinUI 3、网页在有焦点时不写入控件）。
 
 两个来源必须且只能写一个；引擎来源必须声明提交动作，`selected` 必须是所有变体都有标签的枚举。`label_hidden: true` 隐藏可见标签，保留可访问名称。SwiftUI 的鼠标、键盘与 `ui.set-bool` / `ui.select` 使用同一个 setter。Web 同样支持受控控件；Slider 拖动时显示本地预览，拖动结束提交。其余目标通过 `controlled_values` 能力检查拒绝尚未实现的用法。
 

@@ -292,6 +292,21 @@ target/bern/linux/Showcase/showcase
 
 验证“登录时启动”（2026-10-29，同一虚拟机与测试方法，显示器调节程序加 `login_item: true` 的 debug 构建）：菜单为“打开“显示器调节””、分隔线、“登录时启动”（`toggle-state` 0）、“退出”；对它发 `Event(clicked)` 后写出 `~/.config/autostart/dev.bern.monitordial.desktop`（`Exec="/home/…/MonitorDial/monitor-dial" --at-login`、`TryExec`、`Name=显示器调节`、`Icon`），菜单变为 1；在文件末尾加 `Hidden=true` 后为 0，再选一次重写文件（不再有 `Hidden`）、回到 1。退出后按文件的 `Exec` 启动：登记到 watcher，`window list` 为空；这时再以 `--at-login` 启动一次，第二个进程约 0.1 秒后以 0 结束，仍没有窗口；`Activate` 后出现 `main#1`；取消勾选删去文件。未验证：真实桌面会话在登录时读取自启文件并启动它。
 
+## 表格、受控文字与剪贴板（2026-10-29）
+
+`Table` 是 `GtkColumnView` 与 `GtkMultiSelection`（`table.rs`）：
+
+- 模型是一个 `gio::ListStore`，每项是一个“位置”：它记着当前在这一位置的行的键与项，列的格子读它。项换序时各位置换成新的行，格子随之更新，不重新绑定；行数变化时只在末尾增删位置。每列的 `SignalListItemFactory` 在 `setup` 时建格子、在 `bind` 时为这一行建作用域，在 `unbind` 与表格清理时释放。
+- 每个格子是一个带 `bern-boundary` 类的盒子（`parent::bound_content`，不横竖扩展），以行的键命名；Bern 的伸缩重排（`refit`）在边界处停下，不再沿父级进入 ColumnView 自己的行部件：此前格子里有 `Spacer` 时它一路改到 ColumnView 内部，行回收（`splice`）时 GTK 报 `gtk_widget_get_next_sibling`、`insert_after` 的断言并崩溃。
+- 选择：`selection-changed` 按行的顺序把选中行的键写进草稿；草稿变化时（外部入口、行菜单）设成恰好这些行，两个方向之间有一个标志防止回写。
+- 排序：每列有一个什么都不比较的 `CustomSorter`（行的顺序由引擎决定），点表头时 ColumnView 改变它的排序器，`changed` 时运行该列的动作；`sorted` 与 `descending` 经 `sort_by_column` 设表头的箭头，设的时候不运行动作。
+- 行菜单：副键单击（`GestureClick`）、长按（`GestureLongPress`）以及 `Menu`、`Shift+F10` 快捷键，按指针位置的格子名找到行；那一行未选中时先只选中它，再在该处打开 `GtkPopoverMenu`。菜单项是表格自己的动作组里的动作，各自登记为外部入口的按钮。
+- 主操作：ColumnView 的 `activate`（双击、Enter）。外部入口：角色 `table`，`select` 收逗号分隔的键，`value` 是选中的键。
+
+`TextInput(current:)`：控件的模型可以是读状态的值与 `change`；字段有焦点（`contains_focus`）时不写入，失去焦点时写回状态的文字，每次 `changed` 都调用 `change`。`paste:`（`features::pasting`）在按下时用 `GdkClipboard::read_text_async` 读文字，有文字才写入草稿并运行动作，`Button`、`IconButton`、`MenuItem` 与菜单栏的 `CommandItem` 都经它。`copy_text`：`host.rs` 在启动引擎前安装平台服务，`copy_text` 经 `glib::MainContext::default().invoke` 回到主线程，`GdkDisplay` 的剪贴板 `set_text`。
+
+验证（2026-10-29，`bern-ubuntu` 虚拟机，Ubuntu 24.04、GTK 4.14，Broadway 上运行一个实际应用的 debug 构建）：服务器表格的显示与选择、右键先选中那一行再出菜单、菜单项执行、点表头换排序、经外部入口的主操作；反复增删与换序行的压力脚本没有 GTK 断言；订阅编辑窗口里受控输入框的每次编辑（经 `ui edit`）到达引擎；从行菜单复制分享链接，再用 `paste` 按钮读回，内容一字不差。Broadway 上的真实键盘输入未测（打字经外部入口代替）；KDE、GNOME 桌面会话里未看。
+
 ## 验证记录
 
 2026-10-11，Ubuntu 24.04（aarch64，GNOME 46 Wayland），经 SSH 驱动虚拟机桌面会话中的应用，截图来自开发快照：

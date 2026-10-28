@@ -335,6 +335,7 @@ impl Generator<'_> {
             "Tabs" => self.tabs(out, element),
             "Adaptive" => self.adaptive(out, element),
             "Menu" => self.menu(out, element),
+            "Table" => self.table(out, element),
             "PopoverButton" => self.popover_button(out, element),
             "SplitButton" => self.split_button(out, element),
             "Toast" => self.toast(out, element),
@@ -346,7 +347,7 @@ impl Generator<'_> {
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu when it opens.
             | "StatusItem"
-            | "PickerOption" => {
+            | "PickerOption" | "TableColumn" | "TableMenu" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

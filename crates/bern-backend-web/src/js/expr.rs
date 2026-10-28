@@ -320,6 +320,13 @@ impl Generator<'_> {
             .as_ref()
             .map(|action| self.action(action))
             .unwrap_or_default();
+        if let Some(field) = self.field(element, "paste") {
+            return (
+                format!("() => F.paste((text) => {{ {field}.set(text); {inner} }})"),
+                None,
+                None,
+            );
+        }
         match self.field(element, "pick") {
             Some(field) => {
                 let kinds = string(element.keyword("files").unwrap_or("any"));

@@ -110,6 +110,9 @@ impl Checker<'_> {
                         ty == source || ty == Type::optional(source)
                     }
                     FieldExpect::Position => matches!(ty, Type::Int | Type::Text),
+                    FieldExpect::Keys => {
+                        matches!(&ty, Type::List { inner } if matches!(**inner, Type::Int | Type::Text))
+                    }
                     FieldExpect::Picker => is_labeled_enum(&ty, self.types),
                     FieldExpect::Selection => matches!(ty, Type::Enum { .. }),
                     FieldExpect::Path => {
@@ -128,6 +131,9 @@ impl Checker<'_> {
                         FieldExpect::Picker => "an enum field whose variants all have labels",
                         FieldExpect::Selection => "an enum field",
                         FieldExpect::Path => "a `Vec` of a route enum",
+                        FieldExpect::Keys => {
+                            "a `Vec<String>` or `Vec<i64>` field, like the keys of the items"
+                        }
                     };
                     self.error(
                         path.span(),

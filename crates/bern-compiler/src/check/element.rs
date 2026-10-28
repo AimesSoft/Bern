@@ -122,6 +122,11 @@ impl Checker<'_> {
         if parts.kind == "Tabs" {
             self.tab_accessory(element, &children);
         }
+        if parts.kind == "Table"
+            && let Some(template) = &parts.template
+        {
+            self.table_parts(element, &template.var, &children);
+        }
         if let (Some(ir::Prop::Number { value: min }), Some(ir::Prop::Number { value: max })) =
             (parts.props.get("min"), parts.props.get("max"))
             && min >= max
@@ -148,6 +153,65 @@ impl Checker<'_> {
             action,
             source: self.loc(element.span),
         })
+    }
+
+    /// The headings of a table's columns and its row menu belong to no
+    /// row: they must not read the row variable `var`.
+    fn table_parts(&mut self, element: &ast::Element, var: &str, children: &[ir::Node]) {
+        let reads_row = |expr: &ir::Expr| {
+            let mut found = false;
+            expr.walk(&mut |e| {
+                if let ir::ExprKind::Binding {
+                    binding: ir::Binding::Local { name, .. },
+                } = &e.kind
+                    && name == var
+                {
+                    found = true;
+                }
+            });
+            found
+        };
+        let prop_reads = |prop: &ir::Prop| match prop {
+            ir::Prop::Expr { expr } => reads_row(expr),
+            ir::Prop::Text { text } => text.exprs().into_iter().any(reads_row),
+            _ => false,
+        };
+        let action_reads = |action: &Option<ir::Action>| match action {
+            Some(ir::Action::Engine { args, .. }) => args.iter().any(reads_row),
+            Some(ir::Action::Session {
+                op: ir::SessionOp::Set { value } | ir::SessionOp::PushStr { value },
+                ..
+            }) => reads_row(value),
+            _ => false,
+        };
+        let mut misplaced = None;
+        for child in children {
+            let ir::Node::Element(part) = child else {
+                continue;
+            };
+            if part.kind == "TableColumn"
+                && (part.props.values().any(prop_reads) || action_reads(&part.action))
+            {
+                misplaced = Some("a column's heading and sort action");
+            }
+            if part.kind == "TableMenu" {
+                child.walk(&mut |node| {
+                    if let ir::Node::Element(item) = node
+                        && (item.props.values().any(prop_reads) || action_reads(&item.action))
+                    {
+                        misplaced = Some("the row menu");
+                    }
+                });
+            }
+        }
+        if let Some(what) = misplaced {
+            self.error(
+                element.span,
+                format!(
+                    "{what} belong to no row, so they cannot read `{var}`; act on the table's `selection`"
+                ),
+            );
+        }
     }
 
     /// Check an element against its component's spec: its props, template,
@@ -398,11 +462,15 @@ impl Checker<'_> {
             PropKind::Bool => self
                 .expect(value, &Type::Bool, scope, "this property")
                 .map(|expr| ir::Prop::Expr { expr }),
+            PropKind::TextValue => self
+                .expect(value, &Type::Text, scope, "this property")
+                .map(|expr| ir::Prop::Expr { expr }),
             PropKind::TextField => self.field_prop(value, scope, FieldExpect::Text),
             PropKind::BoolField => self.field_prop(value, scope, FieldExpect::Bool),
             PropKind::NumberField => self.field_prop(value, scope, FieldExpect::Number),
             PropKind::FileField => self.field_prop(value, scope, FieldExpect::File),
             PropKind::PositionField => self.field_prop(value, scope, FieldExpect::Position),
+            PropKind::KeysField => self.field_prop(value, scope, FieldExpect::Keys),
             PropKind::FileKinds => self.file_kinds(value),
             PropKind::PickerField => self.field_prop(value, scope, FieldExpect::Picker),
             // A container's `fallback` is one of its own values.

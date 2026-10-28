@@ -61,6 +61,10 @@ const ASSETS: &str = "Assets.xcassets";
 /// screen; keyboard shortcuts are the Siri Remote's buttons.
 pub(crate) const FEATURES: &[&str] = &[
     feature::CONTROLLED_VALUES,
+    // A list of row buttons stands for the table tvOS has not; there is
+    // no clipboard, so no `paste`.
+    feature::TABLE,
+    feature::CONTROLLED_TEXT,
     feature::BUTTON_CONTENT,
     feature::TOOLBAR_SEARCH,
     feature::SEARCH_RESULTS,

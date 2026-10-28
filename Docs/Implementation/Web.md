@@ -230,6 +230,14 @@ flowchart LR
 
 `ScrollView(indicators: mouse)` 生成 `mouseIndicators: true`，运行时 `followPointer` 按设备切换 `bern-scroll-indicators-hidden`：起初看 `(pointer: fine)`，主指针是鼠标的设备一开始就显示，页面不会在鼠标第一次移过时多出一条滚动条的高度；之后 `pointerover`、`pointerdown` 的 `pointerType` 为 `mouse` 时显示，触摸与笔隐藏。验证：生成器测试覆盖生成代码；未在浏览器里实测。
 
+## 表格、受控文字与剪贴板（2026-10-29）
+
+`F.Table` 是 `role="grid"`、`aria-multiselectable` 的 `<table>`：表头一行，有动作的列标题是按钮（运行该列的动作），`aria-sort` 与箭头跟随 `sorted`、`descending`；`width` 是 `<th>` 的像素宽度。行按键保留，项换序时移动已有的 `<tr>`。单击只选一行，平台的切换键（macOS 的 Command，其他平台的 Ctrl）加选或减选，Shift 从上一次选的行连选；方向键移动并选中，Shift 加方向键扩展；选中的行 `aria-selected`。双击或 Enter 运行表格的动作；副键单击（`contextmenu`）与菜单键在指针或当前行处打开行菜单，那一行未选中时先只选中它；菜单的样子与 `Menu` 的弹出列表相同，项各自登记为外部入口的按钮。外部入口的角色是 `table`，`select` 收逗号分隔的键。
+
+`TextInput(current:)` 生成 `controlled: true`，字段的写入是那条命令：`editable` 在输入框有焦点时不写入，`blur` 时写回状态的文字，每次 `input`（输入法组合结束时一次）都发命令。`paste:` 用 `navigator.clipboard.readText()`，有文字才写入草稿并运行动作，浏览器拒绝时什么都不做。引擎的 `copy_text` 是一个 WebAssembly 导入，命令在点击的同一任务里运行，`navigator.clipboard.writeText` 因此仍算用户操作；`web_ui` 模式的引擎在原生宿主里，它的 `copy_text` 不转给页面（未实现）。表格的 `chevron.up` 加入运行时图标。
+
+验证（2026-10-29，gallery 的 `web_app` 在桌面 Chromium 内核的浏览器里）：表格显示、单击与 Shift 多选、以真实的 `contextmenu` 事件打开行菜单（那一行先被选中）、菜单项、点表头换排序与箭头、双击运行主操作；受控输入框打字时文字保留（失去焦点后写回引擎文字未单独验证）。剪贴板：浏览器拒绝自动化读取剪贴板，`readText` 与 `writeText` 用替身代替，验证到调用路径与之后的草稿与命令。观察到：一行里 `TextInput` 旁的按钮会被压得比文字还窄（已有问题，不是这次引入）。Safari 与 Firefox 未看。
+
 ## 验证记录
 
 2026-10-10，v0.1 视觉规范（窗口呈现已由 v0.2 取代），内置浏览器，`python3 -m http.server` 提供 `target/bern/web_app`：

@@ -1979,4 +1979,276 @@ inline void Video(Parent const& p, Ctx const& ctx, VideoProps props) {
     else p.Add(container);
 }
 
+
+// ---------------------------------------------------------------------------
+// Tables
+
+/// A column of a `Table`: its heading and what each row shows in it.
+struct TableColumnDef {
+    Str title;
+    /// Its width; columns without one share what the others leave.
+    std::optional<double> width;
+    /// Whether the rows are sorted by it, and the other way round.
+    Get sorted;
+    Get descending;
+    /// A click on its heading.
+    Act sort;
+    Build cell;
+};
+
+struct TableProps {
+    char const* id = "";
+    Str label;
+    Get items;
+    int key = 0;
+    char const* variable = "item";
+    /// The keys of the chosen rows, in the rows' order.
+    std::optional<Field> selection;
+    /// A double click or Enter on the chosen rows.
+    Act primary;
+};
+
+/// `Table`: headings above the system list's rows, as the details view of
+/// File Explorer. The list chooses rows (Ctrl and Shift add to the
+/// choice); its context menu opens over the chosen rows, and a row outside
+/// them becomes the choice first. A click on a heading runs its column's
+/// action. Rows keep their elements while their key stays, as `Each`'s.
+inline void Table(Parent const& p, Ctx const& ctx, TableProps props, std::vector<TableColumnDef> columns, std::vector<std::optional<MenuItemDef>> menu) {
+    auto text = Bound(ctx, props.label);
+    // The heading and every row share the columns' widths.
+    auto define = [widths = [&] {
+        std::vector<std::optional<double>> widths;
+        for (auto const& column : columns) widths.push_back(column.width);
+        return widths;
+    }()](controls::Grid const& grid) {
+        grid.ColumnSpacing(12);
+        for (auto const& width : widths) grid.ColumnDefinitions().Append(Column(width ? xaml::GridLength{*width, xaml::GridUnitType::Pixel} : Star()));
+    };
+    controls::Grid table;
+    MarkFill(table);
+    table.RowDefinitions().Append([] { controls::RowDefinition row; row.Height(AutoLength()); return row; }());
+    table.RowDefinitions().Append([] { controls::RowDefinition row; row.Height(Star()); return row; }());
+    controls::Grid heading;
+    define(heading);
+    heading.Padding(xaml::Thickness{0, 0, 0, 4});
+    for (size_t i = 0; i < columns.size(); ++i) {
+        auto const& column = columns[i];
+        controls::StackPanel label;
+        label.Orientation(controls::Orientation::Horizontal);
+        label.Spacing(6);
+        auto title = TextOf(Bound(ctx, column.title));
+        title.TextWrapping(xaml::TextWrapping::NoWrap);
+        title.TextTrimming(xaml::TextTrimming::CharacterEllipsis);
+        Secondary(title);
+        label.Children().Append(title);
+        if (column.sorted) {
+            auto arrow = Icons::Icon("chevron.up", 10);
+            arrow.VerticalAlignment(xaml::VerticalAlignment::Center);
+            Reactive::Run([arrow, ctx, sorted = column.sorted, descending = column.descending] {
+                bool on = R::Truthy(sorted(ctx));
+                bool down = descending && R::Truthy(descending(ctx));
+                arrow.Visibility(on ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+                arrow.Glyph(Icons::Glyph(down ? "chevron.down" : "chevron.up"));
+            });
+            label.Children().Append(arrow);
+        }
+        xaml::FrameworkElement shown = label;
+        if (auto sort = Run(ctx, column.sort)) {
+            controls::Button button;
+            Styles::MakeSubtle(button);
+            button.HorizontalAlignment(xaml::HorizontalAlignment::Stretch);
+            button.HorizontalContentAlignment(xaml::HorizontalAlignment::Left);
+            button.Padding(xaml::Thickness{6, 4, 6, 4});
+            button.Content(label);
+            BindName(button, Bound(ctx, column.title));
+            button.Click([sort](auto&&, auto&&) { sort(); });
+            shown = button;
+        } else {
+            label.Margin(xaml::Thickness{6, 4, 6, 4});
+            label.VerticalAlignment(xaml::VerticalAlignment::Center);
+        }
+        controls::Grid::SetColumn(shown, static_cast<int32_t>(i));
+        heading.Children().Append(shown);
+    }
+    controls::Grid::SetRow(heading, 0);
+    table.Children().Append(heading);
+
+    controls::ListView list;
+    list.SelectionMode(controls::ListViewSelectionMode::Extended);
+    BindName(list, text);
+    controls::Grid::SetRow(list, 1);
+    table.Children().Append(list);
+
+    struct Row {
+        std::string key;
+        Value keyValue;
+        Cell<Value> value;
+        std::unique_ptr<Scope> owner;
+        controls::ListViewItem item;
+        controls::Grid cells;
+    };
+    auto rows = std::make_shared<std::vector<std::shared_ptr<Row>>>();
+    // The list's own changes of the choice, not the draft's, go to the draft.
+    auto syncing = std::make_shared<bool>(false);
+    Reactive::OnCleanup([rows] {
+        for (auto& row : *rows) row->owner->Dispose();
+        rows->clear();
+    });
+    auto selection = props.selection;
+    auto show = [rows, syncing](Value const& chosen) {
+        std::set<std::string> keys;
+        for (auto const& key : R::AsList(chosen)) keys.insert(R::KeyText(key));
+        *syncing = true;
+        for (auto& row : *rows)
+            if (bool on = keys.contains(row->key); row->item.IsSelected() != on) row->item.IsSelected(on);
+        *syncing = false;
+    };
+    // The heading starts where the rows' cells do.
+    auto align = [weak = winrt::make_weak(heading), table = winrt::make_weak(table)](controls::Grid const& cells) {
+        auto head = weak.get();
+        auto whole = table.get();
+        if (!head || !whole || cells.ActualWidth() <= 0) return;
+        auto at = cells.TransformToVisual(whole).TransformPoint({0, 0});
+        double right = whole.ActualWidth() - at.X - cells.ActualWidth();
+        head.Margin(xaml::Thickness{at.X, 0, (std::max)(0.0, right), 0});
+    };
+    std::string name = props.variable;
+    Reactive::Run([list, rows, syncing, show, align, selection, define, columns, items = props.items, key = props.key, name, ctx] {
+        auto values = R::AsList(items(ctx));
+        Reactive::Untrack([&] {
+            std::unordered_map<std::string, std::shared_ptr<Row>> old;
+            for (auto& existing : *rows) old[existing->key] = existing;
+            std::vector<std::shared_ptr<Row>> next;
+            for (auto const& value : values) {
+                auto keyValue = R::At(value, {key});
+                auto id = R::KeyText(keyValue);
+                if (auto found = old.find(id); found != old.end()) {
+                    found->second->value.Set(value);
+                    next.push_back(found->second);
+                    old.erase(found);
+                    continue;
+                }
+                controls::ListViewItem item;
+                item.HorizontalContentAlignment(xaml::HorizontalAlignment::Stretch);
+                controls::Grid cells;
+                define(cells);
+                item.Content(cells);
+                auto created = std::make_shared<Row>(Row{id, keyValue, Cell<Value>(value), std::make_unique<Scope>(), item, cells});
+                auto cell = created->value;
+                auto rowCtx = ctx.WithKey([id] { return id; }).WithLocal(name, [cell] { return cell.Get(); });
+                created->owner->Run([&] {
+                    for (size_t i = 0; i < columns.size(); ++i) {
+                        auto holder = MakeFlex(true);
+                        holder.VerticalAlignment(xaml::VerticalAlignment::Center);
+                        controls::Grid::SetColumn(holder, static_cast<int32_t>(i));
+                        cells.Children().Append(holder);
+                        if (columns[i].cell) columns[i].cell(Parent::Of(holder), rowCtx);
+                    }
+                });
+                cells.SizeChanged([align, weak = winrt::make_weak(cells)](auto&&, auto&&) {
+                    if (auto cells = weak.get()) align(cells);
+                });
+                next.push_back(created);
+            }
+            *syncing = true;
+            auto shown = list.Items();
+            for (auto& [id, stale] : old) {
+                stale->owner->Dispose();
+                uint32_t at = 0;
+                if (shown.IndexOf(stale->item, at)) shown.RemoveAt(at);
+            }
+            for (uint32_t i = 0; i < next.size(); ++i) {
+                auto const& want = next[i]->item;
+                if (i < shown.Size() && shown.GetAt(i) == want) continue;
+                uint32_t at = 0;
+                if (shown.IndexOf(want, at)) shown.RemoveAt(at);
+                shown.InsertAt(i, want);
+            }
+            *syncing = false;
+            *rows = std::move(next);
+            if (selection) show(ctx.Peek(*selection));
+            return 0;
+        });
+    });
+    if (selection) {
+        auto field = *selection;
+        Reactive::Run([ctx, field, show] { show(ctx.Read(field)); });
+        list.SelectionChanged([rows, syncing, ctx, field](auto&&, auto&&) {
+            if (*syncing) return;
+            Values keys;
+            for (auto& row : *rows)
+                if (row->item.IsSelected()) keys.push_back(row->keyValue);
+            SetDraft(ctx, field, Value::List(std::move(keys)));
+        });
+    }
+    // The row an event happened in.
+    auto rowAt = [rows](winrt::Windows::Foundation::IInspectable const& source) -> std::shared_ptr<Row> {
+        for (auto node = source.try_as<xaml::DependencyObject>(); node; node = media::VisualTreeHelper::GetParent(node)) {
+            if (auto item = node.try_as<controls::ListViewItem>()) {
+                for (auto& row : *rows)
+                    if (row->item == item) return row;
+                return nullptr;
+            }
+        }
+        return nullptr;
+    };
+    auto primary = Run(ctx, props.primary);
+    if (primary) {
+        list.DoubleTapped([rowAt, primary](auto&&, xaml::Input::DoubleTappedRoutedEventArgs const& args) {
+            if (rowAt(args.OriginalSource())) primary();
+        });
+        list.KeyDown([rowAt, primary](auto&&, xaml::Input::KeyRoutedEventArgs const& args) {
+            if (IsEnter(args) && rowAt(args.OriginalSource())) {
+                args.Handled(true);
+                primary();
+            }
+        });
+    }
+    if (!menu.empty()) {
+        controls::MenuFlyout flyout;
+        MenuEntries(ctx, flyout, menu);
+        if (auto style = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(style);
+        // A right click, the menu key or Shift+F10.
+        list.ContextRequested([flyout, rowAt, ctx, selection](auto&&, xaml::Input::ContextRequestedEventArgs const& args) {
+            auto row = rowAt(args.OriginalSource());
+            if (!row) return;
+            if (selection && !row->item.IsSelected()) SetDraft(ctx, *selection, Value::List(Values{row->keyValue}));
+            controls::Primitives::FlyoutShowOptions options;
+            winrt::Windows::Foundation::Point point{};
+            if (args.TryGetPosition(row->item, point)) options.Position(point);
+            flyout.ShowAt(row->item, options);
+            args.Handled(true);
+        });
+    }
+    Actions actions{.activate = primary};
+    if (selection) {
+        auto field = *selection;
+        actions.select = [rows, ctx, field](std::string const& wanted) {
+            std::set<std::string> keys;
+            std::string part;
+            for (char c : wanted + ",") {
+                if (c != ',') {
+                    part += c;
+                    continue;
+                }
+                if (!part.empty()) keys.insert(part);
+                part.clear();
+            }
+            Values chosen;
+            for (auto& row : *rows)
+                if (keys.erase(row->key)) chosen.push_back(row->keyValue);
+            if (!keys.empty()) return false;
+            SetDraft(ctx, field, Value::List(std::move(chosen)));
+            return true;
+        };
+        actions.value = [ctx, field] {
+            std::string joined;
+            for (auto const& key : R::AsList(ctx.Peek(field))) joined += (joined.empty() ? "" : ",") + R::KeyText(key);
+            return std::optional<std::string>(joined);
+        };
+    }
+    Controls::Register(ctx, props.id, "table", text ? text : TextFn([] { return winrt::hstring(); }), nullptr, std::move(actions));
+    p.Add(table);
+}
+
 }

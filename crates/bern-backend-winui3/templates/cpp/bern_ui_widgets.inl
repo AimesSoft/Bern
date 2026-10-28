@@ -364,6 +364,7 @@ inline void GiveFile(Ctx const& ctx, Field field, std::string const& url) {
 }
 
 inline winrt::fire_and_forget PickFile(Ctx ctx, char const* kinds, std::function<void(std::string const&)> give);
+inline winrt::fire_and_forget PasteText(Ctx ctx, Field field, std::function<void()> then);
 
 struct ButtonProps {
     char const* id = "";
@@ -378,22 +379,30 @@ struct ButtonProps {
     /// action runs.
     std::optional<Field> pick;
     char const* files = nullptr;
+    /// `paste:`: the draft the clipboard's text goes into before the action
+    /// runs.
+    std::optional<Field> paste;
     std::optional<ControlShape> shape;
     /// `width: fill`: across its container.
     bool fill = false;
     std::optional<double> iconSize;
 };
 
-/// What a button does: its action, after asking for a file with `pick`.
-/// `give` is what external entries (`ui.set_file`) and the open panel use.
+/// What a button does: its action, after asking for a file with `pick` or
+/// reading the clipboard with `paste`. `give` is what external entries
+/// (`ui.set_file`) and the open panel use.
 struct ButtonRun {
     std::function<void()> activate;
     std::function<void(std::string const&)> give;
 };
 
-inline ButtonRun RunOf(Ctx const& ctx, std::optional<Field> pick, char const* files, Act const& action) {
+inline ButtonRun RunOf(Ctx const& ctx, std::optional<Field> pick, char const* files, Act const& action, std::optional<Field> paste = std::nullopt) {
     ButtonRun run;
     auto act = Run(ctx, action);
+    if (paste) {
+        run.activate = [ctx, field = *paste, act] { PasteText(ctx, field, act); };
+        return run;
+    }
     if (!pick) {
         run.activate = act;
         return run;
@@ -538,7 +547,7 @@ inline void Button(Parent const& p, Ctx const& ctx, ButtonProps props) {
     BindName(button, text);
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
-    auto run = RunOf(ctx, props.pick, props.files, props.action);
+    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
@@ -602,7 +611,7 @@ inline void ContentButton(Parent const& p, Ctx const& ctx, ButtonProps props, Bu
     BindName(button, text);
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
-    auto run = RunOf(ctx, props.pick, props.files, props.action);
+    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
@@ -668,6 +677,7 @@ struct IconButtonProps {
     StyleDef const* style = nullptr;
     std::optional<Field> pick;
     char const* files = nullptr;
+    std::optional<Field> paste;
     /// `height`: a button of that size, round when prominent.
     std::optional<ControlShape> shape;
     bool fill = false;
@@ -718,7 +728,7 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
         });
     auto isEnabled = Enabled(ctx, props.enabled);
     if (isEnabled) Reactive::Run([button, isEnabled] { button.IsEnabled(isEnabled()); });
-    auto run = RunOf(ctx, props.pick, props.files, props.action);
+    auto run = RunOf(ctx, props.pick, props.files, props.action, props.paste);
     if (run.activate) button.Click([activate = run.activate](auto&&, auto&&) { activate(); });
     Controls::Register(ctx, props.id, "button", text, isEnabled, Actions{.activate = run.activate, .focus = FocusOf(button), .setFile = run.give, .files = props.files});
     xaml::UIElement shown = button;
@@ -735,13 +745,16 @@ inline void IconButton(Parent const& p, Ctx const& ctx, IconButtonProps props) {
     Place(p, shown);
 }
 
-/// Text editing: changes update the draft; draft changes from elsewhere
-/// update the text without echoing back. Returns whether an update from the
-/// draft is in progress.
-inline std::shared_ptr<bool> Editable(std::function<winrt::hstring()> read, std::function<void(winrt::hstring const&)> write, Ctx const& ctx, Field field) {
+/// Text editing: changes update the model; its changes from elsewhere
+/// update the text without echoing back, except while `held` says the
+/// user's text stands. Returns whether an update from the model is in
+/// progress.
+inline std::shared_ptr<bool> Editable(std::function<winrt::hstring()> read, std::function<void(winrt::hstring const&)> write, std::function<winrt::hstring()> source,
+    std::function<bool()> held = nullptr) {
     auto updating = std::make_shared<bool>(false);
-    Reactive::Run([read, write, ctx, field, updating] {
-        auto value = Wide(R::AsText(ctx.Read(field)));
+    Reactive::Run([read, write, source, held, updating] {
+        auto value = source();
+        if (held && held()) return;
         if (Reactive::Untrack([&] { return read(); }) != value) {
             *updating = true;
             write(value);
@@ -751,8 +764,32 @@ inline std::shared_ptr<bool> Editable(std::function<winrt::hstring()> read, std:
     return updating;
 }
 
+/// Text editing of a draft field.
+inline std::shared_ptr<bool> Editable(std::function<winrt::hstring()> read, std::function<void(winrt::hstring const&)> write, Ctx const& ctx, Field field) {
+    return Editable(std::move(read), std::move(write), [ctx, field] { return Wide(R::AsText(ctx.Read(field))); });
+}
+
 inline void SetDraft(Ctx const& ctx, Field field, Value const& value) {
     if (!(ctx.Peek(field) == value)) ctx.Write(field, value);
+}
+
+/// Put the clipboard's text into `field`, then run `then`; a clipboard
+/// without text leaves both alone.
+inline winrt::fire_and_forget PasteText(Ctx ctx, Field field, std::function<void()> then) {
+    using namespace winrt::Windows::ApplicationModel::DataTransfer;
+    auto alive = ctx.win ? std::weak_ptr<bool>(ctx.win->life) : std::weak_ptr<bool>();
+    winrt::hstring text;
+    try {
+        auto content = Clipboard::GetContent();
+        if (!content.Contains(StandardDataFormats::Text())) co_return;
+        text = co_await content.GetTextAsync();
+    } catch (winrt::hresult_error const& error) {
+        Report("clipboard: " + Utf8(error.message()));
+        co_return;
+    }
+    if (text.empty() || (ctx.win && alive.expired())) co_return;
+    SetDraft(ctx, field, Value::Text(Utf8(text)));
+    if (then) then();
 }
 
 inline bool IsEnter(xaml::Input::KeyRoutedEventArgs const& args) {
@@ -765,14 +802,33 @@ struct TextInputProps {
     /// `label_hidden`: the label names the field without showing.
     bool labelHidden = false;
     std::optional<Field> field;
+    /// `current:`: text read from state, whose every edit runs `change`;
+    /// the user's text stands while the field has the focus.
+    Get current;
+    std::function<void(Ctx const&, Value const&)> change;
     Str prompt;
     char const* kind = nullptr;
     Act submit;
 };
 
 inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
-    if (!props.field) return;
-    auto field = *props.field;
+    if (!props.field && !props.current) return;
+    // What the field shows and where an edit goes.
+    std::function<winrt::hstring()> source;
+    std::function<void(std::string const&)> commit;
+    if (props.current) {
+        source = [ctx, current = props.current] { return Wide(R::AsText(current(ctx))); };
+        commit = [ctx, change = props.change](std::string const& value) {
+            if (change) change(ctx, Value::Text(value));
+        };
+    } else {
+        source = [ctx, field = *props.field] { return Wide(R::AsText(ctx.Read(field))); };
+        commit = [ctx, field = *props.field](std::string const& value) { SetDraft(ctx, field, Value::Text(value)); };
+    }
+    bool controlled = !!props.current;
+    // A controlled field keeps the user's text while focused and shows the
+    // state's again when the focus leaves.
+    auto focused = [](xaml::Controls::Control const& control) { return control && control.FocusState() != xaml::FocusState::Unfocused; };
     auto text = Bound(ctx, props.label);
     auto placeholder = Bound(ctx, props.prompt);
     auto run = Run(ctx, props.submit);
@@ -786,10 +842,21 @@ inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
         controls::PasswordBox box;
         box.MinWidth(64);
         if (placeholder) Reactive::Run([box, placeholder] { box.PlaceholderText(placeholder()); });
-        auto updating = Editable([box] { return box.Password(); }, [box](auto const& v) { box.Password(v); }, ctx, field);
-        box.PasswordChanged([weak = winrt::make_weak(box), updating, ctx, field](auto&&, auto&&) {
-            if (auto box = weak.get(); box && !*updating) SetDraft(ctx, field, Value::Text(Utf8(box.Password())));
+        std::function<bool()> held;
+        if (controlled) held = [weak = winrt::make_weak(box), focused] { return focused(weak.get()); };
+        auto updating = Editable([box] { return box.Password(); }, [box](auto const& v) { box.Password(v); }, source, held);
+        box.PasswordChanged([weak = winrt::make_weak(box), updating, commit](auto&&, auto&&) {
+            if (auto box = weak.get(); box && !*updating) commit(Utf8(box.Password()));
         });
+        if (controlled)
+            box.LostFocus([weak = winrt::make_weak(box), updating, source](auto&&, auto&&) {
+                auto box = weak.get();
+                auto value = Reactive::Untrack([&] { return source(); });
+                if (!box || box.Password() == value) return;
+                *updating = true;
+                box.Password(value);
+                *updating = false;
+            });
         if (run) box.KeyDown([run](auto&&, xaml::Input::KeyRoutedEventArgs const& args) { if (IsEnter(args)) run(); });
         control = box;
     } else {
@@ -799,10 +866,21 @@ inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
         box.TextWrapping(multiline ? xaml::TextWrapping::Wrap : xaml::TextWrapping::NoWrap);
         if (multiline) box.MinHeight(80);
         if (placeholder) Reactive::Run([box, placeholder] { box.PlaceholderText(placeholder()); });
-        auto updating = Editable([box] { return box.Text(); }, [box](auto const& v) { box.Text(v); }, ctx, field);
-        box.TextChanged([weak = winrt::make_weak(box), updating, ctx, field](auto&&, auto&&) {
-            if (auto box = weak.get(); box && !*updating) SetDraft(ctx, field, Value::Text(Utf8(box.Text())));
+        std::function<bool()> held;
+        if (controlled) held = [weak = winrt::make_weak(box), focused] { return focused(weak.get()); };
+        auto updating = Editable([box] { return box.Text(); }, [box](auto const& v) { box.Text(v); }, source, held);
+        box.TextChanged([weak = winrt::make_weak(box), updating, commit](auto&&, auto&&) {
+            if (auto box = weak.get(); box && !*updating) commit(Utf8(box.Text()));
         });
+        if (controlled)
+            box.LostFocus([weak = winrt::make_weak(box), updating, source](auto&&, auto&&) {
+                auto box = weak.get();
+                auto value = Reactive::Untrack([&] { return source(); });
+                if (!box || box.Text() == value) return;
+                *updating = true;
+                box.Text(value);
+                *updating = false;
+            });
         if (run && !multiline) box.KeyDown([run](auto&&, xaml::Input::KeyRoutedEventArgs const& args) { if (IsEnter(args)) run(); });
         control = box;
     }
@@ -822,8 +900,8 @@ inline void TextInput(Parent const& p, Ctx const& ctx, TextInputProps props) {
         Mirror(stacked, control);
         p.Add(stacked);
     }
-    Actions actions{.edit = [ctx, field](std::string const& value) { SetDraft(ctx, field, Value::Text(value)); }, .submit = run};
-    if (!secure) actions.value = [ctx, field] { return std::optional<std::string>(R::AsText(ctx.Peek(field))); };
+    Actions actions{.edit = commit, .submit = run};
+    if (!secure) actions.value = [source] { return std::optional<std::string>(Utf8(Reactive::Untrack([&] { return source(); }))); };
     Controls::Register(ctx, props.id, "text_input", text, nullptr, std::move(actions));
 }
 
@@ -2826,6 +2904,7 @@ struct MenuItemDef {
     Act action;
     std::optional<Field> pick;
     char const* files = nullptr;
+    std::optional<Field> paste;
     /// Shown beside the item; the shortcut itself is registered on its own.
     char const* shortcut = nullptr;
     /// The text the shortcut follows instead of `shortcut`.
@@ -2872,6 +2951,37 @@ struct MenuLook {
     bool hideDisabled = false;
 };
 
+/// The items of a menu in `flyout`, dividers where an item is missing.
+/// Each item is registered on its own, so external entries reach it while
+/// the menu is closed.
+inline void MenuEntries(Ctx const& ctx, controls::MenuFlyout const& flyout, std::vector<std::optional<MenuItemDef>> const& items, bool hideDisabled = false) {
+    for (auto const& item : items) {
+        if (!item) {
+            flyout.Items().Append(controls::MenuFlyoutSeparator());
+            continue;
+        }
+        controls::MenuFlyoutItem entry;
+        if (item->icon) entry.Icon(Icons::Icon(item->icon));
+        auto itemLabel = item->label ? Bound(ctx, item->label) : TextFn([] { return winrt::hstring(); });
+        Reactive::Run([entry, itemLabel] { entry.Text(itemLabel()); });
+        auto isEnabled = Enabled(ctx, item->enabled);
+        if (isEnabled) Reactive::Run([entry, isEnabled, hideDisabled] {
+            bool enabled = isEnabled();
+            entry.IsEnabled(enabled);
+            if (hideDisabled) entry.Visibility(enabled ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
+        });
+        auto run = RunOf(ctx, item->pick, item->files, item->action, item->paste);
+        if (run.activate) entry.Click([activate = run.activate](auto&&, auto&&) { activate(); });
+        if (item->shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item->shortcut));
+        if (item->boundShortcut)
+            Reactive::Run([entry, ctx, keys = item->boundShortcut] {
+                entry.KeyboardAcceleratorTextOverride(ShortcutText(Utf8(keys(ctx)).c_str()));
+            });
+        flyout.Items().Append(entry);
+        Controls::Register(ctx, item->id, "button", itemLabel, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
+    }
+}
+
 /// A menu button. Each item is registered on its own, so external entries
 /// reach the items while the menu is closed. With `iconOnly` it is an icon
 /// button without a background until pointed at, as an app bar button.
@@ -2907,31 +3017,7 @@ inline void Menu(Parent const& p, Ctx const& ctx, char const* id, Str const& lab
     }
     BindName(button, text);
     controls::MenuFlyout flyout;
-    for (auto const& item : items) {
-        if (!item) {
-            flyout.Items().Append(controls::MenuFlyoutSeparator());
-            continue;
-        }
-        controls::MenuFlyoutItem entry;
-        if (item->icon) entry.Icon(Icons::Icon(item->icon));
-        auto itemLabel = item->label ? Bound(ctx, item->label) : TextFn([] { return winrt::hstring(); });
-        Reactive::Run([entry, itemLabel] { entry.Text(itemLabel()); });
-        auto isEnabled = Enabled(ctx, item->enabled);
-        if (isEnabled) Reactive::Run([entry, isEnabled, hideDisabled = look.hideDisabled] {
-            bool enabled = isEnabled();
-            entry.IsEnabled(enabled);
-            if (hideDisabled) entry.Visibility(enabled ? xaml::Visibility::Visible : xaml::Visibility::Collapsed);
-        });
-        auto run = RunOf(ctx, item->pick, item->files, item->action);
-        if (run.activate) entry.Click([activate = run.activate](auto&&, auto&&) { activate(); });
-        if (item->shortcut) entry.KeyboardAcceleratorTextOverride(ShortcutText(item->shortcut));
-        if (item->boundShortcut)
-            Reactive::Run([entry, ctx, keys = item->boundShortcut] {
-                entry.KeyboardAcceleratorTextOverride(ShortcutText(Utf8(keys(ctx)).c_str()));
-            });
-        flyout.Items().Append(entry);
-        Controls::Register(ctx, item->id, "button", itemLabel, isEnabled, Actions{.activate = run.activate, .setFile = run.give, .files = item->files});
-    }
+    MenuEntries(ctx, flyout, items, look.hideDisabled);
     if (auto style = PresenterTheme(L"MenuFlyoutPresenter", ctx.appearance)) flyout.MenuFlyoutPresenterStyle(style);
     button.Flyout(flyout);
     auto open = std::make_shared<bool>(false);

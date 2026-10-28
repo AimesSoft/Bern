@@ -1089,6 +1089,29 @@ fun BernImageURL(
     }
 }
 
+// MARK: - Clipboard
+
+/// The text on the clipboard, for controls with `paste:`.
+object BernClipboard {
+    private var context: Context? = null
+
+    /// Called from the activity's `onCreate`.
+    fun register(activity: ComponentActivity) {
+        context = activity.applicationContext
+    }
+
+    /// Runs `then` with the clipboard's text; a clipboard without text
+    /// leaves it alone.
+    fun paste(then: (String) -> Unit) {
+        val context = context ?: return
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
+        val clip = clipboard.primaryClip ?: return
+        if (clip.itemCount == 0) return
+        val text = clip.getItemAt(0).coerceToText(context)?.toString()
+        if (!text.isNullOrEmpty()) then(text)
+    }
+}
+
 // MARK: - Files
 
 /// The kinds of file a control takes (`files:`), the system's document

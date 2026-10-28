@@ -149,6 +149,38 @@ pub(crate) fn picking(
     (Some(press), Some(give))
 }
 
+/// For a control with `paste`: pressing it reads the clipboard's text into
+/// the draft, then acts; an empty clipboard leaves both alone.
+pub(crate) fn pasting(
+    ctx: &Ctx,
+    paste: Option<Field>,
+    run: Option<crate::Thunk>,
+) -> Option<crate::Thunk> {
+    let Some(field) = paste else {
+        return run;
+    };
+    let at = ctx.clone();
+    Some(Rc::new(move || {
+        let Some(display) = gtk::gdk::Display::default() else {
+            return;
+        };
+        let at = at.clone();
+        let run = run.clone();
+        display
+            .clipboard()
+            .read_text_async(None::<&gio::Cancellable>, move |result| {
+                if let Ok(Some(text)) = result
+                    && !text.is_empty()
+                {
+                    at.write(field, Value::Text(text.to_string()));
+                    if let Some(run) = &run {
+                        run();
+                    }
+                }
+            });
+    }))
+}
+
 fn pick_file(ctx: &Ctx, kinds: &'static str, give: Rc<dyn Fn(String)>) {
     pick(ctx, kinds, give);
 }
@@ -368,6 +400,8 @@ pub struct ContentButtonProps {
     pub enabled: Option<Get>,
     pub style: Option<&'static StyleDef>,
     pub pick: Option<Pick>,
+    /// `paste:`: the clipboard's text goes into this draft first.
+    pub paste: Option<Field>,
     pub shape: crate::widgets::Shape,
 }
 
@@ -411,6 +445,7 @@ pub fn ContentButton(
         effect(move || shown.set_sensitive(enabled()));
     }
     let (run, set_file) = picking(ctx, props.pick, bound_action(ctx, &action));
+    let run = pasting(ctx, props.paste, run);
     if let Some(run) = run.clone() {
         button.connect_clicked(move |_| run());
     }

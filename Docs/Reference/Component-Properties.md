@@ -15,6 +15,7 @@
 | `Number` | 构建期数字 |
 | `Length` | 逻辑长度数字或受限数值表达式 |
 | `NumberValue` | 只读数值表达式 |
+| `TextValue` | 只读文本表达式 |
 | `Bool` | 布尔表达式 |
 | `Flag` | 构建期 true / false |
 | `Shortcut` | 快捷键字符串字面量，或快捷键跟随的文本绑定 |
@@ -22,6 +23,7 @@
 | `FileField` | 可写 MediaSource 会话字段 |
 | `PositionField` | 可写滚动位置会话字段 |
 | `TextField` | 可写文本会话字段 |
+| `KeysField` | 可写 `Vec<String>` 或 `Vec<i64>` 会话字段，存行的键 |
 | `BoolField` | 可写布尔会话字段 |
 | `NumberField` | 可写浮点会话字段 |
 | `PickerField` | 可写、变体带标签的枚举会话字段 |
@@ -57,7 +59,7 @@
 | `MenuBar` | 无 | 仅含 ["CommandMenu"]；无动作；直接位于 ["WindowSet"]，最多一个；只在 macOS 的菜单栏显示 |
 | `StatusItem` | **`label: LocalizedText`**<br>**`icon: Icon`**<br>`login_item: Flag` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["WindowSet"]，最多一个；菜单不读写草稿与窗口字段，菜单项不带 `pick`、`shortcut`；`icon` 只在 macOS 显示，iOS、tvOS、Android 与网页不显示 |
 | `CommandMenu` | `label: LocalizedText`<br>`role: app / file / edit / view / window / help` | 仅含 ["CommandItem", "CommandMenu", "Divider"]，可在 `if`、`match`、`ForEach` 中；无动作；直接位于 ["MenuBar", "CommandMenu", "StatusItem"]；`label` 与 `role` 二选一，`role` 只用于菜单栏上的菜单 |
-| `CommandItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`shortcut: Shortcut`<br>`enabled: Bool`<br>`checked: Bool`<br>`pick: FileField`<br>`files: FileKinds` | 不含子节点；必须绑定动作；直接位于 ["CommandMenu", "StatusItem"]；菜单栏的项的草稿属于主窗口 |
+| `CommandItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`shortcut: Shortcut`<br>`enabled: Bool`<br>`checked: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["CommandMenu", "StatusItem"]；菜单栏的项的草稿属于主窗口；`pick` 与 `paste` 二选一 |
 | `Window` | **`id: WindowId`**<br>**`title: LocalizedText`**<br>`initial: open / closed`<br>`presentation: auto / virtual / floating / native_required`<br>`role: standard / settings / dialog`<br>`width: Number`<br>`height: Number`<br>`min_width: Number`<br>`min_height: Number`<br>`confirm_close: Bool`<br>`close_message: LocalizedText`<br>`chrome: standard / unified`<br>`immersive: Bool`<br>`landscape: Bool`<br>`idle_after: Number`<br>`idle_enabled: Bool` | 恰好一个子节点；动作可选；直接位于 ["WindowSet"] |
 | `Column` | `variant: StyleVariant`<br>`gap: Length`<br>`padding: Length`<br>`padding_x: Length`<br>`padding_y: Length`<br>`width: Length`<br>`height: Length`<br>`align: leading / center / trailing` | 可含子内容；无动作 |
 | `FocusRegion` | 无 | 一个内容视图；文本编辑时首次区域外指针操作只失焦并消费整次点击，保留草稿；区域内控件和下一次点击正常 |
@@ -107,10 +109,13 @@
 | `Adaptive` | `id: Id` | 仅含 ["Layout"]；无动作 |
 | `Layout` | **`size: compact / medium / expanded / large / tv`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
 | `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`hide_disabled: Flag`<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
-| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds` | 不含子节点；必须绑定动作；直接位于 ["Menu"] |
+| `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["Menu", "TableMenu"]；`pick` 与 `paste` 二选一 |
 | `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`** | 不含子节点；无动作 |
 | `List` | `items: Items`<br>`key: KeyField` | 可含子内容；无动作 |
 | `ForEach` | **`items: Items`**<br>**`key: KeyField`** | 可含子内容；无动作 |
+| `Table` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>`selection: KeysField` | 仅含 ["TableColumn", "TableMenu"]，至少一个 `TableColumn`，最多一个 `TableMenu`；动作可选，是选中行的主操作（双击或 Enter，触屏上点一行）；`selection` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。使用 `\|item\|` 行模板 |
+| `TableColumn` | **`title: DisplayText`**<br>`width: Number`<br>`sorted: Bool`<br>`descending: Bool` | 恰好一个子节点，是每行这一格的内容；动作可选，点表头时运行；直接位于 ["Table"]；`sorted`、`descending` 只显示排序标记，行的顺序由引擎决定 |
+| `TableMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Table"]；右键或长按一行时打开，该行不在选中行里时先只选中它 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
 | `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag` | 不含子节点；无动作 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
@@ -121,9 +126,9 @@
 | `Svg` | **`source: SvgResource`**<br>`static_source: SvgResource`<br>**`width: Length`**<br>**`height: Length`**<br>`label: DisplayText`<br>`fit: contain / cover / fill`<br>`playing: Bool`<br>`speed: NumberValue`<br>`restart: NumberValue`<br>`interactive: Flag`<br>`data: DisplayText`<br>`external_links: Flag` | 不含子节点；无动作 |
 | `Image` | **`source: ImageResource`**<br>`label: DisplayText`<br>`width: Length`<br>`height: Length`<br>`fit: contain / cover / fill`<br>`corner: Length`<br>`rendering: original / template`<br>`aspect: Number` | 不含子节点；无动作 |
 | `Progress` | `value: NumberValue`<br>`total: Number`<br>`label: DisplayText` | 不含子节点；无动作 |
-| `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField` | 可含子内容；必须绑定动作 |
-| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag` | 不含子节点；必须绑定动作 |
-| `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | 不含子节点；动作可选；`submit: clear` 在动作后清空草稿、交出焦点；SwiftUI 的 `clear_key` 在数值变化时清空，供异步成功回执使用 |
+| `Button` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`shape: capsule / chip`<br>`height: Length`<br>`width: fill`<br>`role: normal / destructive / cancel`<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`default_focus: Flag`<br>`clears: TextField`<br>`paste: TextField` | 可含子内容；必须绑定动作；`paste` 先把剪贴板里的文字放进该草稿，有文字时才运行动作；`pick` 与 `paste` 二选一 |
+| `IconButton` | **`id: Id`**<br>**`icon: Icon`**<br>`font_size: Number`<br>`height: Length`<br>**`label: DisplayText`**<br>`prominence: standard / prominent / plain`<br>`enabled: Bool`<br>`variant: StyleVariant`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField`<br>`default_focus: Flag` | 不含子节点；必须绑定动作；`pick` 与 `paste` 二选一 |
+| `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: TextField`<br>`current: TextValue`<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | 不含子节点；动作可选；`value` 与 `current` 二选一；`value` 时动作在提交时运行，`submit: clear` 在动作后清空草稿、交出焦点；`current` 时每次编辑都运行动作，动作参数里同一表达式就是输入的文字，编辑中引擎的文字不覆盖用户的输入；SwiftUI 的 `clear_key` 在数值变化时清空，供异步成功回执使用 |
 | `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | 可含子内容；动作可选 |
 | `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
 | `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut` | 不含子节点；动作可选 |

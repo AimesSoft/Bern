@@ -27,6 +27,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -93,6 +94,9 @@ void bern_media_surface_resize(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_media_surface_detach(BernApp* app, uint8_t const* bytes, size_t len);
 void bern_media_surface_frame(BernApp* app, uint8_t const* view, size_t len, double now, double target);
 void bern_buffer_free(BernBuffer buffer);
+/// Answer the engine's platform requests, such as `copy_text`: an
+/// operation and its two texts; 0 when done.
+void bern_platform_install(void* context, int32_t (*request)(void*, uint8_t const*, size_t, uint8_t const*, size_t, uint8_t const*, size_t));
 
 /// An HDR picture decoded by Rust: RGBA rows in linear scRGB with straight
 /// alpha, 1.0 at SDR white.

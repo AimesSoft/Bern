@@ -4581,3 +4581,216 @@ fn shortcuts_follow_text_and_shortcut_inputs_keep_state() {
         assert!(errors.contains(expected), "`{body}`: {errors}");
     }
 }
+
+const TABLE_PROTOCOL: &str = r#"
+#[bern::protocol(namespace = "demo", version = 1)]
+pub mod demo {
+    use bern::prelude::*;
+
+    #[value]
+    pub struct Row {
+        pub id: String,
+        #[content]
+        pub name: String,
+        pub delay: i64,
+    }
+
+    #[state]
+    pub struct State {
+        pub rows: Vec<Row>,
+        pub by_name: bool,
+        pub down: bool,
+        pub title: String,
+    }
+
+    #[commands]
+    pub trait Commands {
+        fn open(&mut self, ids: Vec<String>) -> Result<(), CommandError>;
+        fn remove(&mut self, ids: Vec<String>) -> Result<(), CommandError>;
+        fn sort_name(&mut self) -> Result<(), CommandError>;
+        fn rename(&mut self, title: String) -> Result<(), CommandError>;
+    }
+}
+"#;
+
+fn table_ui(body: &str) -> String {
+    format!(
+        r#"
+use bern::prelude::*;
+
+#[bern::session]
+pub struct Draft {{
+    pub chosen: Vec<String>,
+    pub name: String,
+    pub file: MediaSource,
+}}
+
+#[component]
+pub fn app(app: demo::Client, windows: AppWindows) -> impl View {{
+    ui! {{
+        WindowSet(handle: AppWindows, primary: main) {{
+            Window(id: main, title: tr! {{ "en" => "Main", "ja" => "メイン" }}, initial: open) {{
+                page(app: app)
+            }}
+        }}
+    }}
+}}
+
+#[component]
+pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {{
+    ui! {{
+        {body}
+    }}
+}}
+"#
+    )
+}
+
+fn table_errors(body: &str) -> String {
+    match compile_project(TABLE_PROTOCOL, &table_ui(body)) {
+        Ok(_) => panic!("expected `{body}` to fail"),
+        Err(errors) => errors
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+#[test]
+fn tables_take_columns_a_selection_and_a_row_menu() {
+    let compiled = compile_project(
+        TABLE_PROTOCOL,
+        &table_ui(
+            r#"Table(id: rows, label: tr! { "en" => "Rows", "ja" => "行" }, items: app.rows, key: id, selection: draft.chosen) |row| {
+                TableColumn(title: tr! { "en" => "Name", "ja" => "名前" }, width: 160, sorted: app.by_name, descending: app.down) {
+                    Text(content: row.name)
+                } => app.sort_name()
+                TableColumn(title: tr! { "en" => "Delay", "ja" => "遅延" }) {
+                    Text(content: tr! { "en" => "{n} ms", "ja" => "{n} ms"; n: row.delay })
+                }
+                TableMenu {
+                    MenuItem(id: remove, label: tr! { "en" => "Remove", "ja" => "削除" }, role: destructive) => app.remove(draft.chosen)
+                    Divider
+                    MenuItem(id: open, label: tr! { "en" => "Open", "ja" => "開く" }) => app.open(draft.chosen)
+                }
+            } => app.open(draft.chosen)"#,
+        ),
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let mut table = None;
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node
+                && element.kind == "Table"
+            {
+                table = Some(element.clone());
+            }
+        });
+    }
+    let table = table.expect("a table");
+    assert_eq!(table.template.as_ref().map(|t| t.var.as_str()), Some("row"));
+    assert!(matches!(
+        table.prop("selection"),
+        Some(ir::Prop::Field { .. })
+    ));
+    assert!(matches!(table.action, Some(ir::Action::Engine { .. })));
+    let kinds: Vec<&str> = table
+        .children
+        .iter()
+        .filter_map(|node| match node {
+            ir::Node::Element(element) => Some(element.kind.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(kinds, ["TableColumn", "TableColumn", "TableMenu"]);
+}
+
+#[test]
+fn table_headings_and_menus_belong_to_no_row() {
+    let heading = table_errors(
+        r#"Table(id: rows, label: tr! { "en" => "Rows", "ja" => "行" }, items: app.rows, key: id) |row| {
+            TableColumn(title: row.name) { Text(content: row.name) }
+        }"#,
+    );
+    assert!(heading.contains("cannot read `row`"), "{heading}");
+    let menu = table_errors(
+        r#"Table(id: rows, label: tr! { "en" => "Rows", "ja" => "行" }, items: app.rows, key: id) |row| {
+            TableColumn(title: tr! { "en" => "Name", "ja" => "名前" }) { Text(content: row.name) }
+            TableMenu {
+                MenuItem(id: open, label: row.name) => app.open(draft.chosen)
+            }
+        }"#,
+    );
+    assert!(menu.contains("the row menu"), "{menu}");
+    let selection = table_errors(
+        r#"Table(id: rows, label: tr! { "en" => "Rows", "ja" => "行" }, items: app.rows, key: id, selection: draft.name) |row| {
+            TableColumn(title: tr! { "en" => "Name", "ja" => "名前" }) { Text(content: row.name) }
+        }"#,
+    );
+    assert!(selection.contains("Vec<String>"), "{selection}");
+    let empty = table_errors(
+        r#"Table(id: rows, label: tr! { "en" => "Rows", "ja" => "行" }, items: app.rows, key: id) |row| {
+            TableMenu {
+                MenuItem(id: open, label: tr! { "en" => "Open", "ja" => "開く" }) => app.open(draft.chosen)
+            }
+        }"#,
+    );
+    assert!(empty.contains("at least one `TableColumn`"), "{empty}");
+}
+
+#[test]
+fn a_text_input_shows_state_and_each_edit_runs_the_action() {
+    let compiled = compile_project(
+        TABLE_PROTOCOL,
+        &table_ui(
+            r#"TextInput(id: title, label: tr! { "en" => "Title", "ja" => "題名" }, current: app.title) => app.rename(app.title)"#,
+        ),
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let mut input = None;
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node
+                && element.kind == "TextInput"
+            {
+                input = Some(element.clone());
+            }
+        });
+    }
+    let input = input.expect("a text input");
+    assert!(input.expr("current").is_some());
+    assert!(matches!(input.action, Some(ir::Action::Engine { .. })));
+    let both = table_errors(
+        r#"TextInput(id: title, label: tr! { "en" => "Title", "ja" => "題名" }, value: draft.name, current: app.title) => app.rename(app.title)"#,
+    );
+    assert!(both.contains("write one of them"), "{both}");
+    let silent = table_errors(
+        r#"TextInput(id: title, label: tr! { "en" => "Title", "ja" => "題名" }, current: app.title)"#,
+    );
+    assert!(silent.contains("needs an action"), "{silent}");
+}
+
+#[test]
+fn paste_reads_the_clipboard_into_a_text_draft() {
+    compile_project(
+        TABLE_PROTOCOL,
+        &table_ui(
+            r#"Column {
+                Button(id: paste, label: tr! { "en" => "Paste", "ja" => "貼り付け" }, paste: draft.name) => app.rename(draft.name)
+                Menu(id: more, label: tr! { "en" => "More", "ja" => "その他" }) {
+                    MenuItem(id: paste_item, label: tr! { "en" => "Paste", "ja" => "貼り付け" }, paste: draft.name) => app.rename(draft.name)
+                }
+            }"#,
+        ),
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let not_text = table_errors(
+        r#"Button(id: paste, label: tr! { "en" => "Paste", "ja" => "貼り付け" }, paste: draft.chosen) => app.open(draft.chosen)"#,
+    );
+    assert!(!not_text.is_empty());
+    let both = table_errors(
+        r#"Button(id: paste, label: tr! { "en" => "Paste", "ja" => "貼り付け" }, pick: draft.file, paste: draft.name) => app.rename(draft.name)"#,
+    );
+    assert!(both.contains("not both"), "{both}");
+}

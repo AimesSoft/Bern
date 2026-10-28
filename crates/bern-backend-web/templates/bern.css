@@ -2960,3 +2960,82 @@ button.bern-menu-item:disabled .bern-icon {
 .bern-preview-row { height: var(--bern-preview-item-height); flex: none; display: grid; justify-items: center; }
 .bern-preview-more { flex: none; min-width: 30px; padding: 0 6px; box-sizing: border-box; border-radius: 999px; font-size: 12px; font-weight: 500; color: var(--bern-text-secondary); background: var(--bern-surface-raised); display: flex; align-items: center; justify-content: center; }
 .bern-preview-more[hidden] { display: none; }
+
+/* Tables: a header row of headings that sort, rows that the selection
+ * fills with the selection color. The scroll box takes the room left. */
+.bern-table-scroll {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  border: 1px solid var(--bern-separator);
+  border-radius: var(--bern-radius-control);
+  background: var(--bern-surface-raised);
+}
+
+.bern-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+  color: var(--bern-text-primary);
+  outline: none;
+}
+
+.bern-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  text-align: start;
+  font-weight: 500;
+  color: var(--bern-text-secondary);
+  background: var(--bern-surface-raised);
+  border-bottom: 1px solid var(--bern-separator);
+}
+
+.bern-table-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+button.bern-table-heading:hover {
+  background: var(--bern-hover-overlay);
+}
+
+.bern-table td {
+  height: 26px;
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bern-table tbody tr {
+  cursor: default;
+  user-select: none;
+}
+
+.bern-table tbody tr:hover {
+  background: var(--bern-hover-overlay);
+}
+
+.bern-table tbody tr[aria-selected="true"] {
+  background: var(--bern-accent);
+  color: var(--bern-on-accent);
+}
+
+.bern-table:focus-visible tbody tr[aria-selected="true"] {
+  outline: 2px solid var(--bern-focus-indicator);
+  outline-offset: -2px;
+}

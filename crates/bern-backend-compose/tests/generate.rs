@@ -257,6 +257,25 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     );
     // The remote's arrows move the focus before a shortcut takes them.
     assert!(kotlin.contains("if (BernHost.television && BernShortcuts.isArrow(event))"));
+    // The table page: a data table with a choice, sorting headings and a
+    // row menu; a field whose edits rename; a button that pastes.
+    assert!(
+        kotlin.contains("BernControl(\"table_page.swatch_table\", \"table\""),
+        "{kotlin}"
+    );
+    assert!(kotlin.contains("BernTableHeading("), "{kotlin}");
+    assert!(
+        kotlin.contains("BernTableRow(swatch.id in session_GalleryDraft.chosen"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("BernHeldTextInput(BernEngine.openedName"),
+        "{kotlin}"
+    );
+    assert!(
+        kotlin.contains("BernClipboard.paste { text -> session_GalleryDraft.query = text; "),
+        "{kotlin}"
+    );
     // The about window's first tab shows only its symbol.
     assert_eq!(
         kotlin.matches(", iconOnly = true) {").count(),

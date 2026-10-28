@@ -531,6 +531,14 @@ fn gallery_generates_without_warnings() {
         // The details' keys follow state, and the user chooses them.
         "B::Shortcut(c, [](Ctx const& c) { return ",
         "B::ShortcutInput(p, c, {.id = \"details_key\"",
+        // The table page: headings that sort, a row menu, a primary
+        // action; a field whose edits rename; a button that pastes.
+        "B::Table(p, c, {.id = \"swatch_table\"",
+        "B::TableColumnDef{.title = ",
+        ".width = 200.0, .sorted = [](Ctx const& c)",
+        "B::MenuItemDef{.id = \"table_favorite\"",
+        "B::TextInput(p, c, {.id = \"rename\"",
+        ".paste = Field{",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }

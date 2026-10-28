@@ -152,6 +152,10 @@ bern run --target tvos
 
 2026-10-21，与框架类型同名的组件与会话：组件写成 `AppView_` 加声明的名字、会话类写成 `App_` 加声明的名字、视图读会话的变量写成 `session_` 加声明的名字（原因与实测见 macOS 实现记录的同日条目，tvOS 共用同一段生成）。加入这些组件与会话的示例按 tvOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
 
+## 表格与受控文字（2026-10-29）
+
+tvOS 没有 `Table`：生成为 `List` 里每行一个按钮，各列的格子在按钮里横排（间距 24）；按下时选择设为只有这一行并运行主操作，长按出行菜单（`contextMenu`），菜单项同样先只选中这一行。表头与排序标记不显示。`TextInput(current:)` 与 macOS 相同（`BernHeldText`）。tvOS 没有剪贴板：能力 `paste` 不声明（检查报告不可用），`BernClipboard` 是空实现，引擎的 `copy_text` 返回 `platform_unavailable`。验证：生成的 Swift 按 tvOS SDK 类型检查；未在模拟器上运行。
+
 ## 未完成与已知限制
 
 - 只构建模拟器应用；真机需要签名与描述文件，安装与 `bern package` 未实现。

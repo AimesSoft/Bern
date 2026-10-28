@@ -68,6 +68,9 @@ impl Generator<'_> {
     }
 
     pub(super) fn text_input(&self, out: &mut Out, element: &Element) {
+        // A field showing engine state commits each edit through its
+        // action; one editing a draft runs the action on submit.
+        let controlled = element.expr("current").is_some();
         out.line(format!(
             "B.TextInput(p, ctx, {}, {});",
             Self::props(vec![
@@ -77,11 +80,23 @@ impl Generator<'_> {
                     "labelHidden",
                     Some((element.keyword("label_hidden") == Some("true")).to_string())
                 ),
-                ("field", self.field(element, "value")),
+                (
+                    "field",
+                    if controlled {
+                        self.control_field(element, "current")
+                    } else {
+                        self.field(element, "value")
+                    }
+                ),
+                ("controlled", controlled.then(|| "true".into())),
                 ("prompt", self.text_prop(element, "prompt")),
                 ("kind", Self::keyword(element, "kind")),
             ]),
-            self.action_fn(element)
+            if controlled {
+                "null".into()
+            } else {
+                self.action_fn(element)
+            }
         ));
     }
 

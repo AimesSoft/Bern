@@ -49,6 +49,8 @@ pub enum PropKind {
     NumberValue,
     /// Boolean restricted expression.
     Bool,
+    /// Text restricted expression, read only, such as `app.name`.
+    TextValue,
     /// Writable session text field.
     TextField,
     /// Writable session bool field.
@@ -67,6 +69,9 @@ pub enum PropKind {
     KeyField,
     /// Writable session list of a route enum.
     PathField,
+    /// Writable session list of `String` or `i64` keys: the rows of a
+    /// `Table` that are chosen.
+    KeysField,
     /// Route value for the enclosing navigation path.
     Route,
     /// Window kind identifier.
@@ -190,6 +195,8 @@ impl ComponentSpec {
                 | "StatusItem"
                 | "CommandMenu"
                 | "CommandItem"
+                | "TableColumn"
+                | "TableMenu"
         )
     }
 }
@@ -473,9 +480,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("checked", PropKind::Bool),
                 opt("pick", PropKind::FileField),
                 opt("files", PropKind::FileKinds),
+                opt("paste", PropKind::TextField),
             ],
             Children::None,
-            "A command of a `CommandMenu` or `StatusItem`: the menu shows its `shortcut`, greys it out while `enabled` is false and checks it while `checked` holds; `pick` asks for a file as `Button` does",
+            "A command of a `CommandMenu` or `StatusItem`: the menu shows its `shortcut`, greys it out while `enabled` is false and checks it while `checked` holds; `pick` asks for a file and `paste` reads the clipboard as `Button` does",
         )
     },
     ComponentSpec {
@@ -1065,7 +1073,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
         )
     },
     ComponentSpec {
-        placement: Placement::Within(&["Menu"]),
+        placement: Placement::Within(&["Menu", "TableMenu"]),
         action: ActionRule::Required,
         interactive: true,
         ..spec(
@@ -1080,9 +1088,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
                 opt("files", PropKind::FileKinds),
+                opt("paste", PropKind::TextField),
             ],
             Children::None,
-            "Menu command bound to a registered command; `pick` asks for a file as `Button` does",
+            "Menu command bound to a registered command; `pick` asks for a file as `Button` does; `paste` reads the clipboard as `Button` does",
         )
     },
     ComponentSpec {
@@ -1104,6 +1113,47 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             ],
             Children::Any,
             "List of rows, static or keyed by data",
+        )
+    },
+    ComponentSpec {
+        template: true,
+        action: ActionRule::Optional,
+        interactive: true,
+        ..spec(
+            "Table",
+            &[
+                req("id", PropKind::Id),
+                req("label", PropKind::DisplayText),
+                req("items", PropKind::Items),
+                req("key", PropKind::KeyField),
+                opt("selection", PropKind::KeysField),
+            ],
+            Children::Only(&["TableColumn", "TableMenu"]),
+            "Rows of data in columns, one row per item, keyed by `key`; `selection` holds the keys of the chosen rows (click, shift and the platform's toggle modifier choose several); the action is the primary action of the chosen rows: a double click or Enter, a tap on touch screens",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Table"]),
+        action: ActionRule::Optional,
+        ..spec(
+            "TableColumn",
+            &[
+                req("title", PropKind::DisplayText),
+                opt("width", PropKind::Number),
+                opt("sorted", PropKind::Bool),
+                opt("descending", PropKind::Bool),
+            ],
+            Children::One,
+            "A column of a `Table`: `title` heads it and its child is the cell of each row, written with the table's row variable; the action runs when the user clicks the heading to sort by it, and `sorted` and `descending` show the order the rows are in",
+        )
+    },
+    ComponentSpec {
+        placement: Placement::Within(&["Table"]),
+        ..spec(
+            "TableMenu",
+            &[],
+            Children::Only(&["MenuItem", "Divider"]),
+            "The menu a row of a `Table` opens with a secondary click or a long press; a row outside the selection becomes the selection first, so the items act on `selection`",
         )
     },
     ComponentSpec {
@@ -1296,11 +1346,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
                 opt("files", PropKind::FileKinds),
+                opt("paste", PropKind::TextField),
                 opt("default_focus", PropKind::Flag),
                 opt("clears", PropKind::TextField),
             ],
             Children::Any,
-            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen; `default_focus: true` starts the focus on it when it appears (a television's remote, or a keyboard); `clears: draft.text` empties that draft after the action and gives the keyboard back to the window, as a composer's send button does",
+            "Button bound to a registered command; with one child, the child is what it shows and `label` its accessible name; `width: fill` stretches the system button across its container; with `pick`, it first asks for a file of `files` and runs the action once one is chosen; with `paste: draft.text`, it first puts the text on the clipboard into that draft and runs the action when there was some; `default_focus: true` starts the focus on it when it appears (a television's remote, or a keyboard); `clears: draft.text` empties that draft after the action and gives the keyboard back to the window, as a composer's send button does",
         )
     },
     ComponentSpec {
@@ -1324,10 +1375,11 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("shortcut", PropKind::Shortcut),
                 opt("pick", PropKind::FileField),
                 opt("files", PropKind::FileKinds),
+                opt("paste", PropKind::TextField),
                 opt("default_focus", PropKind::Flag),
             ],
             Children::None,
-            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
+            "Icon-only button with an accessible name; `prominence: plain` draws no background, as the icons at the foot of a sidebar; `height` makes it a round system button of that diameter; `pick` asks for a file and `paste` reads the clipboard as `Button` does; `default_focus: true` starts the focus on it as `Button` does",
         )
     },
     ComponentSpec {
@@ -1339,7 +1391,8 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 req("id", PropKind::Id),
                 req("label", PropKind::DisplayText),
                 opt("label_hidden", PropKind::Flag),
-                req("value", PropKind::TextField),
+                opt("value", PropKind::TextField),
+                opt("current", PropKind::TextValue),
                 opt("prompt", PropKind::DisplayText),
                 opt("kind", PropKind::Keyword(&["plain", "secure", "multiline"])),
                 opt("submit", PropKind::Keyword(&["clear"])),
@@ -1347,7 +1400,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 FEATURE,
             ],
             Children::None,
-            "Text editing bound to a session draft; the action runs on submit, and with `submit: clear` the draft then empties and the field gives up the keyboard, as a message composer does",
+            "Text editing bound to a session draft (`value`) or showing engine state (`current`); with `value` the action runs on submit, and with `submit: clear` the draft then empties and the field gives up the keyboard, as a message composer does; with `current` each edit runs the action, in which the same expression is the text typed, and the engine's text does not replace the user's while the field is being edited",
         )
     },
     ComponentSpec {
@@ -1666,6 +1719,40 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             ),
         });
     }
+    if shape.props.contains(&"paste") && shape.props.contains(&"pick") {
+        errors.push(ShapeError {
+            prop: Some("paste".into()),
+            message: format!(
+                "a `{}` either asks for a file (`pick:`) or reads the clipboard (`paste:`), not both",
+                spec.name
+            ),
+        });
+    }
+    if spec.name == "TextInput" {
+        let current = shape.props.contains(&"current");
+        if current == shape.props.contains(&"value") {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a `TextInput` edits a draft (`value: draft.text`) or shows engine state (`current: app.text`); write one of them".into(),
+            });
+        }
+        if current && !shape.has_action {
+            errors.push(ShapeError {
+                prop: Some("current".into()),
+                message: "`current` needs an action to hand the edited text to, such as `=> app.rename(app.text)`".into(),
+            });
+        }
+        for prop in ["submit", "clear_key"] {
+            if current && shape.props.contains(&prop) {
+                errors.push(ShapeError {
+                    prop: Some(prop.into()),
+                    message: format!(
+                        "`{prop}` empties a draft; a field showing `current` has none"
+                    ),
+                });
+            }
+        }
+    }
     if spec.name == "CommandMenu" {
         let role = shape.props.contains(&"role");
         if role == shape.props.contains(&"label") {
@@ -1835,6 +1922,28 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: None,
             message: "a `Sidebar` has at most one `SidebarHeader`".into(),
+        });
+    }
+    if spec.name == "Table" && count("TableColumn") == 0 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Table` needs at least one `TableColumn`".into(),
+        });
+    }
+    if spec.name == "Table" && count("TableMenu") > 1 {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `Table` has at most one `TableMenu`".into(),
+        });
+    }
+    if spec.name == "TableColumn"
+        && shape.props.contains(&"descending")
+        && !shape.props.contains(&"sorted")
+    {
+        errors.push(ShapeError {
+            prop: Some("descending".into()),
+            message: "`descending` says which way a column sorts; add `sorted:` for when it does"
+                .into(),
         });
     }
     if spec.name == "Toolbar" && count("Search") > 1 {

@@ -139,6 +139,7 @@ enum FieldExpect {
     Picker,
     Selection,
     Path,
+    Keys,
 }
 
 /// Locations are reported relative to the project, like rustc does.

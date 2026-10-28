@@ -283,6 +283,13 @@ impl Generator<'_> {
                 None => self.action(a),
             })
             .unwrap_or_default();
+        // `paste:`: the clipboard's text goes into the draft first.
+        if let Some(field) = self.field(element, "paste") {
+            return (
+                format!("BernClipboard.paste {{ text in {field} = text; {action} }}"),
+                String::new(),
+            );
+        }
         match self.file_target(element, "pick", &action) {
             Some((give, actions)) => (
                 format!(

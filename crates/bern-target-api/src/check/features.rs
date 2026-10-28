@@ -67,6 +67,9 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::RUNTIME_PALETTE, runtime_palette),
     (feature::RUNTIME_IMAGES, runtime_images),
     (feature::FILE_PICK, file_pick),
+    (feature::TABLE, table),
+    (feature::CONTROLLED_TEXT, controlled_text),
+    (feature::PASTE, paste),
     (feature::SCROLL_SNAP, scroll_snap),
     (feature::PICTURE_FILLS, picture_fills),
     (feature::REVEAL, reveal),
@@ -1114,6 +1117,45 @@ fn file_pick(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut
                 descriptor.id
             ))
             .at(button.source.clone()),
+        );
+    }
+}
+
+fn table(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(table) = first_element(app, |element| element.kind == "Table") {
+        diagnostics.push(
+            Diagnostic::error(format!("target `{}` cannot build a `Table`", descriptor.id))
+                .at(table.source.clone()),
+        );
+    }
+}
+
+fn controlled_text(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(input) = first_element(app, |element| {
+        element.kind == "TextInput" && element.props.contains_key("current")
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot show engine state in a `TextInput`; edit a draft with `value:`",
+                descriptor.id
+            ))
+            .at(input.source.clone()),
+        );
+    }
+}
+
+fn paste(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(control) = first_element(app, |element| element.props.contains_key("paste")) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot read the clipboard with `paste:`",
+                descriptor.id
+            ))
+            .at(control.source.clone()),
         );
     }
 }

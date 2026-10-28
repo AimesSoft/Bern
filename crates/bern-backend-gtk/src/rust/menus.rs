@@ -1,7 +1,7 @@
 //! Search fields and menus.
 
-use super::{Generator, Out, some};
-use bern_ir::{Element, Node};
+use super::{Generator, Out, some, string};
+use bern_ir::{Element, Node, Prop};
 
 impl Generator<'_> {
     pub(super) fn search(&self, out: &mut Out, element: &Element) {
@@ -95,19 +95,86 @@ impl Generator<'_> {
             if item.prop("shortcut").is_some() {
                 shortcuts.push(item);
             }
-            out.line(format!(
-                "Some(b::MenuItem {{ id: {}, label: {}, icon: {}, role: {}, enabled: {}, action: {}, pick: {} }}),",
-                self.id(item),
-                some(self.text_prop(item, "label")),
-                Self::icon(item, "icon"),
-                Self::keyword(item, "role"),
-                self.enabled(item),
-                self.action(item),
-                self.pick(item),
-            ));
+            out.line(format!("{},", self.menu_item(item)));
         }
         out.close("]);");
         for item in shortcuts {
+            self.shortcut(
+                out,
+                item,
+                &format!("b::activate_target(c, {})", self.id(item)),
+            );
+        }
+    }
+
+    /// One item of a menu or of a table's row menu.
+    pub(super) fn menu_item(&self, item: &Element) -> String {
+        format!(
+            "Some(b::MenuItem {{ id: {}, label: {}, icon: {}, role: {}, enabled: {}, action: {}, pick: {}, paste: {} }})",
+            self.id(item),
+            some(self.text_prop(item, "label")),
+            Self::icon(item, "icon"),
+            Self::keyword(item, "role"),
+            self.enabled(item),
+            self.action(item),
+            self.pick(item),
+            some(self.field(item, "paste")),
+        )
+    }
+
+    /// A `Table`: its columns, each a heading and the cell of each row, its
+    /// row menu, and its primary action.
+    pub(super) fn table(&self, out: &mut Out, element: &Element) {
+        let (Some(items), Some(template), Some(Prop::Key { field, .. })) = (
+            element.expr("items"),
+            &element.template,
+            element.prop("key"),
+        ) else {
+            return;
+        };
+        out.open(format!(
+            "b::Table(p, c, b::TableProps {{ id: {}, label: {}, selection: {} }}, {}, {field}, {}, vec![",
+            self.id(element),
+            some(self.text_prop(element, "label")),
+            some(self.field(element, "selection")),
+            self.getter(items),
+            string(&template.var),
+        ));
+        let mut menu = Vec::new();
+        for node in &element.children {
+            let Node::Element(part) = node else { continue };
+            match part.kind.as_str() {
+                "TableColumn" => {
+                    out.open("b::TableColumn {");
+                    out.line(format!(
+                        "title: {}, width: {}, sorted: {}, descending: {}, sort: {},",
+                        some(self.text_prop(part, "title")),
+                        Self::number(part, "width"),
+                        some(part.expr("sorted").map(|expr| self.getter(expr))),
+                        some(part.expr("descending").map(|expr| self.getter(expr))),
+                        self.action(part),
+                    ));
+                    self.children(out, "cell: ", &part.children, ",");
+                    out.close("},");
+                }
+                "TableMenu" => menu.extend(part.children.iter().filter_map(|node| match node {
+                    Node::Element(item) => Some(item),
+                    _ => None,
+                })),
+                _ => {}
+            }
+        }
+        out.close("], vec![");
+        out.indent += 1;
+        for item in &menu {
+            if item.kind == "Divider" {
+                out.line("None,");
+            } else {
+                out.line(format!("{},", self.menu_item(item)));
+            }
+        }
+        out.close(format!("], {});", self.action(element)));
+        for item in menu.iter().filter(|item| item.prop("shortcut").is_some()) {
             self.shortcut(
                 out,
                 item,

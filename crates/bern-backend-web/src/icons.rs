@@ -285,6 +285,7 @@ pub const RUNTIME_ICONS: &[&str] = &[
     "chevron.left",
     "chevron.right",
     "chevron.up.chevron.down",
+    "chevron.up",
     "chevron.down",
     "checkmark",
     "magnifyingglass",

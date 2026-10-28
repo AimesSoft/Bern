@@ -796,6 +796,11 @@ impl<'a> Gen<'a> {
                     let span = prop.value.span();
                     pre.push(quote_spanned!(span=> let _: bool = #value;));
                 }
+                PropKind::TextValue => {
+                    let value = self.value(&prop.value);
+                    let span = prop.value.span();
+                    pre.push(quote_spanned!(span=> let _: ::std::string::String = #value;));
+                }
                 PropKind::TextField => {
                     pre.push(self.writable(&prop.value, quote!(::bern::__private::text_field)))
                 }
@@ -811,6 +816,9 @@ impl<'a> Gen<'a> {
                 PropKind::PositionField => pre.push(
                     self.writable(&prop.value, quote!(::bern::__private::position_field)),
                 ),
+                PropKind::KeysField => {
+                    pre.push(self.writable(&prop.value, quote!(::bern::__private::keys_field)))
+                }
                 PropKind::FileKinds => match &prop.value {
                     Expr::Literal {
                         value: Literal::Text(text),

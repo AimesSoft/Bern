@@ -997,11 +997,31 @@ static void OnQuery(void*, uint64_t subscription, uint8_t const* bytes, size_t l
     });
 }
 
+/// The engine's platform requests, from any of its threads: the
+/// clipboard is set on the interface thread.
+static int32_t OnPlatformRequest(void*, uint8_t const* operation, size_t operationLen, uint8_t const* first, size_t firstLen, uint8_t const*, size_t) {
+    std::string_view name(reinterpret_cast<char const*>(operation), operationLen);
+    if (name != "copy_text") return 1;
+    Post([text = std::string(reinterpret_cast<char const*>(first), firstLen)] {
+        using namespace winrt::Windows::ApplicationModel::DataTransfer;
+        try {
+            DataPackage package;
+            package.SetText(Wide(text));
+            Clipboard::SetContent(package);
+            Clipboard::Flush();
+        } catch (winrt::hresult_error const& error) {
+            Report("clipboard: " + Utf8(error.message()));
+        }
+    });
+    return 0;
+}
+
 std::optional<std::string> Start(Catalog const& app, std::string const& resources) {
     catalog = &app;
     engine.clear();
     for (size_t i = 0; i < app.state.size(); ++i) engine.emplace_back(Value::Unit());
     BernCallbacks callbacks{nullptr, OnState, OnReply, OnSessionRequest, OnMediaRequest, OnMediaState, OnQuery};
+    bern_platform_install(nullptr, OnPlatformRequest);
     BernBuffer error{};
     auto app_handle = bern_app_start(app.fingerprint, reinterpret_cast<uint8_t const*>(resources.data()), resources.size(), callbacks, &error);
     if (!app_handle) {

@@ -371,6 +371,25 @@ target\bern\windows\Showcase\showcase.exe
 
 验证“登录时启动”（2026-10-28，同一台机器，显示器调节程序 release 安装版，经 `bern package` 的安装程序静默安装）：以一次性计划任务在桌面会话里运行 `monitor-dial.exe --at-login`（与登录时 Windows 运行 `Run` 值相同的命令）后，进程在会话 1 中运行，没有主窗口，`window list` 为空，通知区域有图标；菜单读出“打开“显示器调节””、分隔线、亮度子菜单、分隔线、“登录时启动”（未勾选）、“退出”。用菜单的键盘导航选“登录时启动”后，`Run` 下出现 `dev.bern.monitordial` = `"C:\Users\…\Programs\MonitorDial\monitor-dial.exe" --at-login`，再打开菜单时已勾选；在 `StartupApproved\Run` 写入 `03 00 …`（任务管理器“禁用”写的值）后菜单显示未勾选，再选一次后该记录被删去、重新显示勾选；取消勾选删去 `Run` 值。应用运行时再以 `--at-login` 启动一次，第二个进程直接结束，原进程仍没有窗口。退出后静默卸载，安装目录、卸载项与 `Run` 值都被删去。Defender 没有报告。未验证：注销后重新登录时的实际启动、隐藏启动后从图标打开主窗口。
 
+## 表格、受控文字与剪贴板（2026-10-29）
+
+Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Table` 用系统的 `ListView` 作行，两种前端共用：
+
+- 整体是两行的 `Grid`：上面一排表头，下面是 `ListView`（`SelectionMode::Extended`，Ctrl 与 Shift 的多选由它处理）。列宽给成 `ColumnDefinition`：写了 `width` 的是像素，其他分 `Star`；表头与每行的格子用同一组定义，列间距 12。表头按行里格子的实际位置对齐：格子的 `SizeChanged` 时用 `TransformToVisual` 量出它在表格里的左右边距，设为表头的 `Margin`，不必猜 `ListViewItem` 的内边距。
+- 表头：有动作的列是一个不画底的按钮（`MakeSubtle`），标题加 10 号的 `chevron.up` / `chevron.down` 字形，`sorted` 为真时显示，`descending` 选方向；没有动作的列只有文字。
+- 行：每项一个 `ListViewItem`（`HorizontalContentAlignment::Stretch`），内容是那组列定义的 `Grid`，每格一个横向的 Bern 行面板。行按键保留（与 `B::Each` 相同的做法），项变化时只删去不再有的行、按新顺序移动 `Items()` 里的项，值变了的行只更新它的单元格。
+- 选择：`SelectionChanged` 按行的顺序收集 `IsSelected` 的键写进草稿；草稿变化时（外部入口、行菜单）逐行设 `IsSelected`。两个方向之间有一个标志，列表自己因增删行而改变的选择不写回草稿。
+- 行菜单：`ContextRequested`（右键、菜单键、Shift+F10）从 `OriginalSource` 沿可视树找到所在的 `ListViewItem`；那一行未选中时先把草稿设为只有它，再在指针处（键盘打开时在行上）`ShowAt` 一个 `MenuFlyout`。菜单项由 `MenuEntries` 建立，与 `B::Menu` 共用，各自登记为外部入口的按钮。
+- 主操作：行上的 `DoubleTapped`，以及行有焦点时的 Enter。外部入口：角色 `table`，`activate` 运行主操作，`select` 收逗号分隔的键（有不存在的键时返回失败），`value` 是选中的键。
+
+`TextInput(current:)` 生成 `current` 与 `change`（与受控 `Slider` 相同的 `model()`），不生成 `submit`。`Editable` 多了一个读模型的函数与一个“保留”判断：受控字段在 `FocusState` 不是 `Unfocused` 时不写入控件；`LostFocus` 时写回引擎的文字；`TextChanged` 每次都调用 `change`。外部入口的 `edit` 走同一个 `change`。
+
+`paste:` 在 `RunOf` 里：按下时 `PasteText` 读 `Clipboard::GetContent()`，没有 `StandardDataFormats::Text` 或文字为空时什么都不做，否则 `co_await GetTextAsync()` 后写入草稿再运行动作；窗口在等待中关闭时不再执行。`Button`、`IconButton`、带内容的按钮与 `MenuItem` 都有 `paste` 字段（指定初始化器紧跟 `files`）。Windows 没有菜单栏，`CommandItem` 的 `paste` 无处可用；状态栏项的菜单不读写草稿。
+
+`copy_text`：`Start` 在 `bern_app_start` 之前调用 `bern_platform_install(nullptr, OnPlatformRequest)`；引擎从任意线程请求时，`OnPlatformRequest` 复制文字，经 `Post` 回到界面线程，`DataPackage::SetText`、`Clipboard::SetContent` 后 `Clipboard::Flush`（应用退出后文字仍在）。其他操作返回 1，与安装前一样报告 `platform_unavailable`。
+
+验证：生成器测试（gallery 的表格页）覆盖 `B::Table`、列、行菜单、受控 `TextInput` 与 `paste`；gallery 在 Windows 11 实体机上由 MSVC 编译（WinUI 3 与 Islands 两种前端；第一次编译缺 `<set>`，已加入 `bern_base.h`），后端全部测试在那台机器上通过；一个实际应用的 Windows 版构建成功。未在 Windows 上运行：表格的点击、选择、菜单、对齐与剪贴板的读写都未实测。
+
 ## 验证记录
 
 2026-10-11，Windows 11 25H2 实体机，经 SSH 构建，以计划任务把应用启动到用户的桌面会话，由生成的 CLI 驱动；截图来自开发快照中的窗口截取。两种前端分别执行：

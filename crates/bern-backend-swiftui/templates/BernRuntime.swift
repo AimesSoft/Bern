@@ -912,6 +912,26 @@ private func bernOnMediaState(_ context: UnsafeMutableRawPointer?, _ bytes: Unsa
     DispatchQueue.main.async { MainActor.assumeIsolated { BernMedia.shared.receive(data) } }
 }
 
+/// The engine's platform requests: `copy_text` puts the text on the
+/// clipboard, on the main thread.
+private func bernPlatformRequest(
+    _ context: UnsafeMutableRawPointer?, _ operation: UnsafePointer<UInt8>?, _ operationLength: Int,
+    _ first: UnsafePointer<UInt8>?, _ firstLength: Int, _ second: UnsafePointer<UInt8>?, _ secondLength: Int
+) -> Int32 {
+    func text(_ pointer: UnsafePointer<UInt8>?, _ length: Int) -> String {
+        guard let pointer else { return "" }
+        return String(decoding: UnsafeBufferPointer(start: pointer, count: length), as: UTF8.self)
+    }
+    switch text(operation, operationLength) {
+    case "copy_text" where BernClipboard.available:
+        let copied = text(first, firstLength)
+        DispatchQueue.main.async { BernClipboard.copy(copied) }
+        return 0
+    default:
+        return 1
+    }
+}
+
 private func bernOnQuery(
     _ context: UnsafeMutableRawPointer?, _ subscription: UInt64, _ bytes: UnsafePointer<UInt8>?, _ count: Int
 ) {
@@ -972,6 +992,7 @@ final class BernHost {
             context: nil, on_state: bernOnState, on_reply: bernOnReply,
             on_session_request: bernOnSessionRequest, on_media_request: bernOnMediaRequest,
             on_media_state: bernOnMediaState, on_query: bernOnQuery)
+        bern_platform_install(nil, bernPlatformRequest)
         // Declared resources live in the bundle's Resources directory; the
         // engine resolves them by name through the host.
         let resources = Array((Bundle.main.resourceURL?.path ?? "").utf8)
@@ -2696,4 +2717,72 @@ struct BernMasonry: Layout {
 func bernMarkdown(_ source: String) -> AttributedString {
     let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
     return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
+}
+
+
+// MARK: - Fields showing engine state
+
+/// A text field showing engine state (`TextInput(current:)`): each edit
+/// goes to `commit`; while the field has the focus the user's text stays
+/// whatever the engine shows, and the engine's text comes back when the
+/// focus leaves.
+struct BernHeldText<Field: View>: View {
+    let value: String
+    let commit: @MainActor (String) -> Void
+    let field: (SwiftUI.Binding<String>) -> Field
+    @State private var text: String
+    @FocusState private var focused: Bool
+
+    init(value: String, commit: @escaping @MainActor (String) -> Void,
+         @ViewBuilder field: @escaping (SwiftUI.Binding<String>) -> Field) {
+        self.value = value
+        self.commit = commit
+        self.field = field
+        _text = State(initialValue: value)
+    }
+
+    var body: some View {
+        field($text)
+            .focused($focused)
+            .onChange(of: text) { _, edited in
+                if edited != value { commit(edited) }
+            }
+            .onChange(of: value) { _, shown in
+                if !focused && text != shown { text = shown }
+            }
+            .onChange(of: focused) { _, now in
+                if !now && text != value { text = value }
+            }
+    }
+}
+
+// MARK: - Tables
+
+/// A row of a `Table`: its item and the key the selection holds.
+struct BernTableRow<Value, Key: Hashable>: Identifiable {
+    let id: Key
+    let value: Value
+}
+
+/// The sort order a `Table` shows: which column, which way. It compares
+/// nothing, since the engine orders the rows; a click on a heading changes
+/// it, which the table turns into that column's action.
+struct BernColumnOrder<Row>: SortComparator {
+    var column: Int
+    var order: SortOrder = .forward
+
+    func compare(_ lhs: Row, _ rhs: Row) -> ComparisonResult { .orderedSame }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.column == rhs.column && lhs.order == rhs.order }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(column)
+        hasher.combine(order == .forward)
+    }
+}
+
+/// The keys of `rows` that `chosen` holds, in the rows' order: what a
+/// table's selection writes to its draft.
+func bernChosen<Key: Hashable>(_ chosen: Set<Key>, in rows: [Key]) -> [Key] {
+    rows.filter { chosen.contains($0) }
 }

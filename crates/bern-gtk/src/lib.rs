@@ -36,6 +36,7 @@ mod structure;
 pub mod style;
 #[cfg(feature = "svg")]
 mod svg;
+mod table;
 pub mod text;
 pub mod theme;
 pub mod value;
@@ -72,6 +73,7 @@ pub use scene::{
 pub use status::{StatusItemDef, StatusMenu};
 pub use structure::*;
 pub use style::{Look, StyleDef};
+pub use table::{Table, TableColumn, TableProps};
 pub use theme::Color;
 pub use widgets::*;
 pub use windows::{close_window, open_window, toggle_fullscreen};

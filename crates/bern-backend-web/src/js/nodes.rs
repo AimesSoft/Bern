@@ -275,9 +275,11 @@ impl Generator<'_> {
             "Tab" => self.tab(out, element),
             "Adaptive" => self.adaptive(out, element),
             "Menu" => self.menu(out, element),
+            "Table" => self.table(out, element),
             "LanguagePicker" => self.language_picker(out, element),
             "Detail" | "Destination" | "TabAccessory" | "Sidebar" | "SidebarHeader"
             | "SidebarFooter" | "WindowSet" | "Window" | "Layout" | "MenuItem" | "PickerOption"
+            | "TableColumn" | "TableMenu"
             // A page has no menu bar.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.
