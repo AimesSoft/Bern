@@ -1100,7 +1100,7 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
             Window(id: main, title: tr! { "en" => "Stage" }, initial: open) {
                 Button(id: add, label: tr! { "en" => "Add" }) => app.add()
             }
-            StatusItem(icon: "star", label: tr! { "en" => "Stage: {n}"; n: app.count }) {
+            StatusItem(icon: "star", label: tr! { "en" => "Stage: {n}"; n: app.count }, login_item: true) {
                 CommandItem(id: status_add, label: tr! { "en" => "Add" }, checked: app.count > 2) => app.add()
                 Divider
                 CommandMenu(label: tr! { "en" => "More" }) {
@@ -1486,6 +1486,7 @@ fn a_status_item_builds_its_menu() {
         "let c = &c.with_local(\"entry\", Rc::new(move || row.clone()));",
         "let tag = rt::tag(&value);",
         "status_item: Some(b::StatusItemDef { label: b::str(|c| ",
+        "menu: status_menu, login_item: true }),",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }

@@ -1227,7 +1227,7 @@ pub fn app(app: formats::Client, windows: AppWindows) -> impl View {
                     Text(content: app.notice)
                 }
             }
-            StatusItem(icon: "star", label: tr! { "en" => "Formats: {n}", "zh-Hans" => "格式：{n}"; n: app.count }) {
+            StatusItem(icon: "star", label: tr! { "en" => "Formats: {n}", "zh-Hans" => "格式：{n}"; n: app.count }, login_item: true) {
                 CommandItem(id: add, label: tr! { "en" => "Add", "zh-Hans" => "添加" }, checked: app.count > 2) => app.add()
                 Divider
                 CommandMenu(label: tr! { "en" => "More", "zh-Hans" => "更多" }) {
@@ -1366,6 +1366,7 @@ fn text_formats_generate_for_winui3() {
         "auto tag = R::Tag(value);",
         "[value] { return R::Payload(value, 0); }",
         "item.menu = StatusMenu;",
+        "item.loginItem = true;",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }

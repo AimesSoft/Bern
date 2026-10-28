@@ -147,7 +147,8 @@ impl Generator<'_> {
 
     /// `BernStatusMenu`, the menu of the `StatusItem` on macOS; whether
     /// there is one. It opens the primary window, runs the application's
-    /// items, and quits, as menu bar extras do.
+    /// items, has “Open at Login” with `login_item`, and quits, as menu bar
+    /// extras do.
     pub(super) fn status_menu(&self, out: &mut Out) -> bool {
         let Some(item) = self.app.windows.status_item.as_ref() else {
             return false;
@@ -169,7 +170,7 @@ impl Generator<'_> {
         out.line("");
         out.open("var body: some View {");
         out.line(format!(
-            "SwiftUI.Button(BernText.format(\"bern.window.open\", [{title}])) {{ BernHost.shared.open({}) }}",
+            "SwiftUI.Button(BernText.format(\"bern.window.open\", [{title}])) {{ BernStatusArea.open({}) }}",
             string(&app.windows.primary)
         ));
         if !item.children.is_empty() {
@@ -181,6 +182,9 @@ impl Generator<'_> {
             self.nodes(out, &item.children, &ctx);
         }
         out.line("SwiftUI.Divider()");
+        if item.keyword("login_item") == Some("true") {
+            out.line("BernLoginItemToggle()");
+        }
         out.line("SwiftUI.Button(BernText.string(\"bern.app.quit\")) { NSApplication.shared.terminate(nil) }");
         out.close("}");
         out.close("}");

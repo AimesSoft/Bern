@@ -108,6 +108,9 @@ impl Generator<'_> {
             out.line(format!("item.label = {label};"));
         }
         out.line("item.menu = StatusMenu;");
+        if item.keyword("login_item") == Some("true") {
+            out.line("item.loginItem = true;");
+        }
         out.line("return item;");
         out.close("}");
     }

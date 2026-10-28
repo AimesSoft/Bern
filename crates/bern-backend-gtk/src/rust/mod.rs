@@ -524,9 +524,10 @@ impl<'a> Generator<'a> {
         out.line(format!("file_kinds: &[{}],", kinds.join(", ")));
         let status_item = app.windows.status_item.as_ref().map(|item| {
             format!(
-                "b::StatusItemDef {{ label: {}, menu: status_menu }}",
+                "b::StatusItemDef {{ label: {}, menu: status_menu, login_item: {} }}",
                 self.text_prop(item, "label")
-                    .unwrap_or_else(|| "b::str(|_| String::new())".into())
+                    .unwrap_or_else(|| "b::str(|_| String::new())".into()),
+                item.keyword("login_item") == Some("true")
             )
         });
         out.line(format!("status_item: {},", some(status_item)));

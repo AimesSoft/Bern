@@ -21,7 +21,7 @@
 | `bound_shortcuts` | 跟随状态的快捷键（`shortcut: app.keys.x`、`Shortcut(key: app.keys.x)`） | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
 | `shortcut_input` | 按下组合键改键的 `ShortcutInput` | 支持 | 支持（硬件键盘） | 支持（只显示） | 支持 | 支持（硬件键盘） | 支持 | 支持 |
 | `menu_bar` | 应用菜单栏 `MenuBar`、`CommandMenu`、`CommandItem`，`window.menu_bar` | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 |
-| `status_item` | 状态栏项 `StatusItem`（托盘图标与菜单），关闭最后一个窗口后应用留在那里 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
+| `status_item` | 状态栏项 `StatusItem`（托盘图标与菜单，可加“登录时启动”），关闭最后一个窗口后应用留在那里 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
 | `runtime_palette` | 运行时语义调色板（`WindowSet(palette:)`），各语义角色的浅色与深色可以在运行时整体替换 | 支持 | 支持 | 支持 | — | — | 支持 | 支持 |
 | `runtime_theme` | 运行时主题选择 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `runtime_images` | 引擎提供图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
@@ -121,6 +121,7 @@
 | 只为鼠标显示的滚动条 `ScrollView(indicators: mouse)`（2026-10-27） | SwiftUI 在 macOS 照系统滚动条样式（接着鼠标或设为始终显示时显示）、在 iOS 指针悬停后显示，tvOS 不显示；WinUI 3 按指针设备类型、GTK 按事件设备来源、Web 按 `pointerType` 在显示与隐藏之间切换，触摸与笔隐藏；Compose 本来不画滚动条。生成器测试含 macOS 与 iOS 的 Swift 类型检查，`bern-gtk` 编译通过；WinUI 3 的 C++ 未编译 | 未在任何设备上实测 |
 | 状态栏项 `StatusItem`（2026-10-28） | `status_item`：macOS 为 `MenuBarExtra`（单色 SF Symbol，没有窗口时收起 Dock 图标），Windows 为通知区域图标与系统弹出菜单，Linux 为 StatusNotifierItem 与 dbusmenu；iOS、tvOS、Android、Web 不适用。编译器测试覆盖降入窗口目录与不属于窗口的规则；SwiftUI 测试按三个 SDK 类型检查；WinUI 3 与 GTK 的生成器测试覆盖菜单函数（条件、`if let`、`match`、`ForEach`）；显示器调节程序的三个桌面目标都构建成功 | Windows 实体机：关窗后应用留在通知区域，单击图标重开窗口，右键菜单的各项与子菜单正确，子菜单的预设把显示器亮度设为 30，“退出”结束进程并移除图标。Linux 虚拟机：在测试用的 watcher 下登记、属性、菜单、`Activate` 与菜单项点击、退出都经 D-Bus 验证。macOS 未运行实测；KDE、GNOME 的真实状态区未看 |
 | 受控滑块绑定整数（2026-10-28） | `Slider(current:)` 读写 `i64` 时，SwiftUI、GTK 与 Web 把滑块的值取整后交给命令，与 WinUI 3、Compose 相同：此前 SwiftUI 编译失败（`Double` 交给 `Int64`），GTK 把浮点数按整数的位置编码，Web 交出非整数 | 显示器调节程序的 macOS 版构建通过；其他目标未实测 |
+| 状态栏项的“登录时启动” `login_item`（2026-10-29） | 菜单在“退出”前加一项，由用户勾选；勾选时系统在登录时以不开窗口的方式启动应用。Windows 为当前用户 `Run` 键下以 `bundle_id` 命名的值（命令带 `--at-login`，任务管理器关掉的算未勾选，卸载程序删去），Linux 为 XDG 自启桌面文件，macOS 为 `SMAppService.mainApp` 并按 `keyAELaunchedAsLogInItem` 关闭启动时的窗口。编译器、SwiftUI（三个 SDK 类型检查）、WinUI 3 与 GTK 的生成测试覆盖这一项；`bern-gtk` 测试覆盖自启命令的引号规则 | Windows 实体机（release 安装版）：按登录命令启动后只有通知区域图标、没有窗口，勾选写入 `Run` 值、取消删去，任务管理器的禁用记录显示为未勾选、重新勾选后清除，运行中再次启动直接结束，卸载删去 `Run` 值。Linux 虚拟机（测试 watcher）：勾选写出自启文件，`Hidden=true` 显示为未勾选，按 `Exec` 启动没有窗口，重复启动直接结束，单击图标打开主窗口，取消删去文件。未验证：真实的注销再登录、Windows 隐藏启动后从图标打开窗口、macOS 的全部行为 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

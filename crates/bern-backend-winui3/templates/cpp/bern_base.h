@@ -579,6 +579,10 @@ void After(std::chrono::milliseconds delay, std::function<void()> work);
 /// told to show itself and runs `onActivate`.
 bool Claim(std::string const& bundleId);
 inline std::function<void()> onActivate;
+/// Whether the system started this process at logon, with `--at-login`
+/// (“Open at Login” of the status item): the application then opens no
+/// window, and a running instance stays as it is.
+inline bool atLogin = false;
 /// Files the system opened with the application, as `file:` URLs: from this
 /// process's command line, then from later launches, which hand theirs to
 /// this instance.

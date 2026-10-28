@@ -4,7 +4,7 @@
 //! menu. KDE Plasma shows these itself, GNOME through the AppIndicator
 //! extension that Ubuntu ships. The icon is the application icon; a click
 //! opens the primary window, and the menu opens the primary window, has the
-//! application's items and quits.
+//! application's items, “Open at Login” with `login_item`, and quits.
 
 use crate::ctx::Ctx;
 use crate::host::host;
@@ -23,6 +23,8 @@ use std::cell::RefCell;
 pub struct StatusItemDef {
     pub label: Str,
     pub menu: fn(&Ctx, &mut StatusMenu),
+    /// The menu has “Open at Login”.
+    pub login_item: bool,
 }
 
 /// An item of the menu: a command, a divider or a submenu.
@@ -486,6 +488,19 @@ fn rebuild() -> bool {
     menu.divider();
     (def.menu)(&c, &mut menu);
     menu.divider();
+    if def.login_item {
+        let on = login::enabled();
+        menu.item(
+            &c,
+            crate::text::tr("bern.app.open_at_login"),
+            true,
+            Some(on),
+            Some(crate::act(move |_| {
+                login::set(!on);
+                untrack(rebuild);
+            })),
+        );
+    }
     menu.item(
         &c,
         crate::text::tr("bern.app.quit"),
@@ -523,6 +538,107 @@ fn rebuild() -> bool {
 fn quit() {
     if let Some(application) = host().application.get() {
         application.quit();
+    }
+}
+
+/// “Open at Login”: a desktop entry in the user's autostart folder, which
+/// the session starts at login (XDG Autostart) with `--at-login`. Turning
+/// it off removes the entry; one the user turned off elsewhere (`Hidden`,
+/// GNOME's `X-GNOME-Autostart-enabled`) or one of another copy of the
+/// application counts as off.
+mod login {
+    use crate::host::host;
+    use std::path::{Path, PathBuf};
+
+    const GROUP: &str = "Desktop Entry";
+
+    fn entry() -> PathBuf {
+        glib::user_config_dir()
+            .join("autostart")
+            .join(format!("{}.desktop", host().def.bundle_id))
+    }
+
+    /// The entry's command: the executable, quoted as desktop entries
+    /// quote arguments.
+    fn command(executable: &Path) -> String {
+        let mut quoted = String::from("\"");
+        for c in executable.to_string_lossy().chars() {
+            match c {
+                '"' | '`' | '$' | '\\' => {
+                    quoted.push('\\');
+                    quoted.push(c);
+                }
+                '%' => quoted.push_str("%%"),
+                _ => quoted.push(c),
+            }
+        }
+        quoted.push_str("\" --at-login");
+        quoted
+    }
+
+    pub(super) fn enabled() -> bool {
+        let Ok(executable) = std::env::current_exe() else {
+            return false;
+        };
+        let file = glib::KeyFile::new();
+        if file
+            .load_from_file(entry(), glib::KeyFileFlags::NONE)
+            .is_err()
+        {
+            return false;
+        }
+        let hidden = file.boolean(GROUP, "Hidden").unwrap_or(false);
+        let gnome = file
+            .boolean(GROUP, "X-GNOME-Autostart-enabled")
+            .unwrap_or(true);
+        let ours = file
+            .string(GROUP, "Exec")
+            .is_ok_and(|exec| exec.as_str() == command(&executable));
+        ours && !hidden && gnome
+    }
+
+    pub(super) fn set(on: bool) {
+        let path = entry();
+        if !on {
+            if let Err(error) = std::fs::remove_file(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!("bern: cannot remove {}: {error}", path.display());
+            }
+            return;
+        }
+        let Ok(executable) = std::env::current_exe() else {
+            eprintln!("bern: the executable's path is unknown; it cannot open at login");
+            return;
+        };
+        let file = glib::KeyFile::new();
+        file.set_string(GROUP, "Type", "Application");
+        file.set_string(GROUP, "Name", &crate::text::tr(host().def.name));
+        file.set_string(GROUP, "Icon", host().def.bundle_id);
+        file.set_string(GROUP, "TryExec", &executable.to_string_lossy());
+        file.set_string(GROUP, "Exec", &command(&executable));
+        let saved = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .map_err(|error| error.to_string())
+            .and_then(|()| file.save_to_file(&path).map_err(|error| error.to_string()));
+        if let Err(error) = saved {
+            eprintln!("bern: cannot write {}: {error}", path.display());
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::command;
+        use std::path::Path;
+
+        #[test]
+        fn the_command_quotes_the_executable_as_desktop_entries_do() {
+            assert_eq!(
+                command(Path::new("/opt/My $App/100% \"real\"/app")),
+                "\"/opt/My \\$App/100%% \\\"real\\\"/app\" --at-login"
+            );
+        }
     }
 }
 

@@ -1668,7 +1668,7 @@ WindowSet(handle: AppWindows, primary: main) {
 ```rust
 WindowSet(handle: AppWindows, primary: main) {
     Window(id: main, title: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }, initial: open) { monitor_list(app: app) }
-    StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }) {
+    StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }, login_item: true) {
         ForEach(items: app.monitors, key: id) |monitor| {
             CommandMenu(label: tr! { "zh-Hans" => "{name} 亮度", "en" => "{name} Brightness"; name: monitor.name }) {
                 CommandItem(id: dim, label: tr! { "zh-Hans" => "10%", "en" => "10%" }, checked: monitor.brightness == 10) => app.set_brightness(monitor.id, 10)
@@ -1683,13 +1683,16 @@ WindowSet(handle: AppWindows, primary: main) {
 - 在 Windows 与 Linux 上，单击图标打开主窗口（已打开时把它带到前面），右键打开菜单；macOS 上点按图标打开菜单。
 - 状态项不属于任何窗口：它可能在没有窗口时打开，所以菜单只读引擎状态、执行命令与窗口动作，不读写草稿，不读 `window.compact` 这类窗口自己的字段（构建期就知道的 `window.menu_bar` 等除外），菜单项不带 `pick` 与 `shortcut`，这些都在编译时报错。命令失败时显示在打开着的主窗口里。
 - 退出不经过窗口的关闭检查，与 macOS 的 Cmd-Q、Linux 的 Ctrl+Q 相同。
+- `login_item: true` 在“退出”前加一项“登录时启动”：勾选时系统在用户登录时启动应用，这样启动的应用不打开窗口，只有状态项，要用时再从它打开；取消勾选就不再启动。开关只由用户在菜单里打开，应用不自行登记，这是各平台对登录项的要求。设置就是系统里的登录项本身，应用不另存：在系统设置或任务管理器里关掉的，菜单里也显示为未勾选；登记的是另一份副本（例如开发构建）时同样算未勾选，勾选后改为当前这一份。
 - 手机、电视与网页没有给应用的状态区域：目标能力 `status_item` 在 iOS、tvOS、Android 与网页上“不适用”，接受声明、不生成任何东西、不警告，应用照常随平台的规则结束。
 
 各平台的实现：macOS 是 SwiftUI 的 `MenuBarExtra`，`icon` 是 SF Symbol；没有窗口打开时应用切到 `accessory` 激活策略，Dock 里的图标随之收起，再打开窗口时回到 `regular`，与菜单栏应用的习惯一致。Windows 是 `Shell_NotifyIcon` 放进通知区域的图标（版本 4 的回调），由一个隐藏窗口接收它的消息，菜单是系统的弹出菜单（`TrackPopupMenuEx`），在打开时按当时的状态建立；系统处于深色模式时菜单也是深色的（经 uxtheme 的 `SetPreferredAppMode`），资源管理器重启后图标重新加入。Linux 没有 GTK 控件可用：应用在会话总线上提供 StatusNotifierItem 与 `com.canonical.dbusmenu` 菜单，向 `org.kde.StatusNotifierWatcher` 登记，图标是应用图标按几种尺寸给出的 ARGB 像素；KDE Plasma 自己显示这些项，GNOME 经 AppIndicator 扩展（Ubuntu 默认带有）显示；菜单随它读的状态重建，打开前（`AboutToShow`）也重建一次；Wayland 上单击时用状态区给的激活令牌把窗口带到前面。macOS 上外部入口把菜单项列为 `status_item.<id>`（角色 `menu_item`），Windows 与 Linux 的菜单在打开时才建立，外部入口不列出它们，菜单项的命令照常是各自的工具。
 
+“登录时启动”的登录项：Windows 是当前用户 `Run` 键下以 `bundle_id` 命名的值，命令是程序的完整路径加 `--at-login`，任务管理器的“启动应用”里关掉的（`StartupApproved` 里第一个字节为奇数）算未勾选，勾选时把它清掉；卸载程序删去这个值。Linux 是 XDG 自启的桌面文件 `~/.config/autostart/<bundle_id>.desktop`，`Exec` 同样带 `--at-login`，`TryExec` 指向程序，程序删去后会话不再启动它；`Hidden=true` 或 GNOME 的 `X-GNOME-Autostart-enabled=false` 算未勾选，取消勾选时删去文件。macOS 是 `SMAppService.mainApp`：勾选时 `register`，取消时 `unregister`，用户在系统设置里关掉的（`requiresApproval`）由这一项打开系统设置的登录项页。带 `--at-login` 启动时不打开初始窗口；已有实例在运行时，这次启动直接结束，不把那个实例带到前面。macOS 的登录项不能带参数，应用在 `applicationDidFinishLaunching` 里看打开应用的 Apple 事件是否标着 `keyAELaunchedAsLogInItem`，是就关闭这次启动打开的窗口、不显示 Dock 图标，直到用户从菜单或 Finder 再打开。
+
 实现进度（2026-10-28）：三个桌面目标已实现。Windows 实体机上用一个实际应用实测：关闭最后一个窗口后应用留在通知区域，单击图标重新打开主窗口，右键菜单的各项与 `ForEach` 生成的子菜单正确，子菜单的项执行命令，“退出”结束应用并移除图标；深色模式下的菜单与资源管理器重启后重新加入图标未验证。Linux 在虚拟机上以测试用的 StatusNotifierWatcher 经 D-Bus 验证登记、属性、菜单、单击、菜单项与退出，KDE 与 GNOME 的真实状态区未看。macOS 只构建与类型检查，未运行。见各平台的实现记录。
 
-### 起始焦点
+“登录时启动”（2026-10-29）：三个桌面目标已实现。Windows 实体机上用 release 安装版实测：按登录时的命令启动后只有通知区域图标、没有窗口；菜单勾选写入 `Run` 值、取消删去；任务管理器的禁用记录显示为未勾选，重新勾选后清除；运行中再次启动直接结束；卸载删去 `Run` 值。Linux 在虚拟机上以测试用的 watcher 验证勾选写出自启文件、被关掉时显示为未勾选、按 `Exec` 启动没有窗口、重复启动直接结束、单击图标打开主窗口、取消删去文件。真实的注销再登录、Windows 上隐藏启动后从图标打开窗口未验证；macOS 只有生成测试与类型检查。
 
 `Button` 与 `IconButton` 可写 `default_focus: true`：界面出现时焦点从它开始。电视上焦点就是遥控器操作的位置，每个界面应给出起始焦点，例如引导的“继续”、播放器的暂停。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），标签页的每页各是一个焦点区域；其他平台上是键盘焦点：SwiftUI 的 `FocusState`，Web 的 `focus()`，Compose 的 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点。实现进度：tvOS 模拟器实测；其他目标未实测。
 

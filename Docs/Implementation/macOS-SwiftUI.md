@@ -553,7 +553,9 @@ open target/bern/macos/Showcase.app
 
 有状态栏项时 `BernStatusArea.shown` 为真：窗口登记与注销时，没有窗口就切到 `accessory` 激活策略（Dock 里的图标收起），有窗口就回到 `regular`。应用本来就在最后一个窗口关闭后保持运行。
 
-验证（2026-10-28）：`bern-backend-swiftui` 的 `menu_bar` 测试含状态栏项，生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过（iOS 与 tvOS 不生成）；显示器调节程序的 macOS 版构建成功。未运行实测：菜单栏里的图标、菜单、Dock 图标的收起与恢复都未在真机上看过。
+`login_item` 时菜单在“退出”前有 `BernLoginItemToggle`：勾选状态是 `SMAppService.mainApp.status == .enabled`，勾选时 `register()`，取消时 `unregister()`；用户在系统设置里关掉的（`requiresApproval`）勾选时打开系统设置的登录项页（`openSystemSettingsLoginItems`）。登录项不能带参数，登录启动由 `BernAppDelegate.applicationDidFinishLaunching` 识别：当前的 Apple 事件是打开应用（`kAEOpenApplication`）且 `keyAEPropData` 为 `keyAELaunchedAsLogInItem` 时，`BernStatusArea.hidingAtLaunch` 为真，已经出现的窗口关闭，之后出现的窗口在取得 NSWindow 时关闭，激活策略保持 `accessory`；用户从菜单打开窗口（`BernStatusArea.open`）或在 Finder 再次打开应用时结束。macOS 14 上 `Window` 场景总在启动时出现，所以窗口是先出现再关闭，不是不创建。
+
+验证（2026-10-28）：`bern-backend-swiftui` 的 `menu_bar` 测试含状态栏项，生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过（iOS 与 tvOS 不生成）；显示器调节程序的 macOS 版构建成功。未运行实测：菜单栏里的图标、菜单、Dock 图标的收起与恢复都未在真机上看过。“登录时启动”同样只有生成测试（含 `BernLoginItemToggle`）与类型检查：登录项的登记、登录启动时 Apple 事件是否带 `keyAELaunchedAsLogInItem`（`SMAppService` 登记的登录项未查证）、窗口关闭前是否闪现都未验证。
 
 ## 未完成与已知限制
 

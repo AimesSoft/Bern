@@ -4488,7 +4488,7 @@ fn menu_bar_shapes_are_checked() {
 fn the_status_item_lowers_into_the_window_catalog_and_belongs_to_no_window() {
     let ui = with_menu_bar(
         "Spacer",
-        r#"StatusItem(icon: "star", label: tr! { "en" => "Demo", "ja" => "デモ" }) {
+        r#"StatusItem(icon: "star", label: tr! { "en" => "Demo", "ja" => "デモ" }, login_item: true) {
                 CommandItem(id: add, label: tr! { "en" => "Add", "ja" => "追加" }, enabled: app.count > 0, checked: app.count > 2) => app.add(1)
                 Divider
                 CommandMenu(label: tr! { "en" => "More", "ja" => "他" }) {
@@ -4501,6 +4501,7 @@ fn the_status_item_lowers_into_the_window_catalog_and_belongs_to_no_window() {
     let app = compile_ui(&ui).unwrap_or_else(|e| panic!("{e:?}")).app;
     let item = app.windows.status_item.as_ref().expect("the status item");
     assert_eq!(item.icon("icon"), Some("star"));
+    assert_eq!(item.keyword("login_item"), Some("true"));
     assert_eq!(item.children.len(), 3);
     assert!(app.windows.menu_bar.is_none());
     for (items, expected) in [

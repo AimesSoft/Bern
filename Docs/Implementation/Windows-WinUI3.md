@@ -332,7 +332,7 @@ target\bern\windows\Showcase\showcase.exe
 
 - 应用目录与 `bin\` 中的 CLI、MCP 服务器先复制到暂存目录；有 `BERN_WINDOWS_CERTIFICATE` 时用 `signtool` 签名这些程序，再签安装程序（证书库指纹或 `.pfx`，RFC 3161 时间戳）。证书与密码只从环境变量读取，不写进生成的脚本。
 - 安装程序由 Bern 生成（`templates/installer/setup.cpp`），文件作为资源编进可执行文件，用同一套 MSVC 编译。它按当前用户安装到 `%LOCALAPPDATA%\Programs\<产品>`，不需要管理员权限；创建开始菜单快捷方式，在“应用和功能”中登记卸载项；提示按系统界面语言显示（英文、简体中文、繁体中文、日文），`/S` 静默安装。清单声明 `asInvoker`，否则 Windows 会把名字含 setup 的程序当作需要提权的安装程序。
-- 安装目录中的 `uninstall.exe` 是安装程序的副本，先把自己复制到临时目录再执行，以便删除整个目录；`/S` 静默卸载。应用或其工具在运行时（按进程映像路径判断），安装与卸载都拒绝进行，不删任何文件；`uninstall.exe` 最后删除，中途失败也能再次卸载。
+- 安装目录中的 `uninstall.exe` 是安装程序的副本，先把自己复制到临时目录再执行，以便删除整个目录；`/S` 静默卸载。卸载时也删去状态栏项“登录时启动”登记的 `Run` 值与任务管理器在 `StartupApproved` 下的记录。应用或其工具在运行时（按进程映像路径判断），安装与卸载都拒绝进行，不删任何文件；`uninstall.exe` 最后删除，中途失败也能再次卸载。
 - 实测（2026-10-12，新项目）：安装程序 5.08 MB，`.zip` 1.94 MB；静默安装后文件、快捷方式与卸载项正确，从安装位置启动并经 `bin\my-app.exe` 驱动；运行中卸载与覆盖安装都被拒绝，关闭后卸载清除目录、快捷方式与卸载项；中文确认框显示正常；Defender 没有报告。未签名时 SmartScreen 会提示。
 
 ## 实测数据
@@ -364,8 +364,12 @@ target\bern\windows\Showcase\showcase.exe
 - 系统处于深色模式时菜单也是深色的：经 uxtheme 的序号 135、136 函数（`SetPreferredAppMode(AllowDark)`、`FlushMenuThemes`），Windows 自己的程序这样做，其他程序也这样调用；找不到这两个函数时菜单保持浅色。
 - 有状态栏项时最后一个窗口关闭后应用不退出：Bern 自己不结束应用，WinUI 下还要把 `DispatcherShutdownMode` 设为 `OnExplicitShutdown`，否则 WinUI 在最后一个 XAML 窗口关闭时自行结束（第一次实测就是这样退出的）。“退出”调用 `Application.Exit`（Islands 结束消息循环），不经过窗口的关闭检查。
 - 菜单的上下文不属于窗口，只读引擎状态；命令失败时显示在打开着的主窗口里。外部入口不列出菜单项。
+- `login_item` 时菜单在“退出”前有“登录时启动”（`StatusArea::Login`）：勾选时在 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 下写入以 `bundle_id` 命名的值，内容是带引号的程序路径加 `--at-login`，取消时删去；两种情况都删去 `Explorer\StartupApproved\Run` 下同名的记录。勾选状态在每次打开菜单时读注册表：值与当前程序的命令相同（不区分大小写），且任务管理器没有把它记为关闭（`StartupApproved` 第一个字节为奇数），才显示为勾选。
+- `Claim` 见到命令行的 `--at-login` 时记下 `Host::atLogin`：已有实例在运行时这次启动直接结束，不发激活消息；`OpenInitial` 在有状态栏项时不打开窗口，应用只在通知区域。
 
 验证（2026-10-28，Windows 11 25H2 实体机，150% 缩放，WinUI 3 前端，Windows App Runtime 2.6，显示器调节程序的 debug 构建）：启动后 `Shell_NotifyIconGetRect` 得到通知区域里的图标；经 CLI 关闭 `main#1` 后进程仍在、`window list` 为空、图标还在；向隐藏窗口投递图标的单击消息后出现 `main#2`，可见且取得焦点；投递右键消息后读出弹出菜单：“打开“显示器调节””、分隔线、“Q27G41ZE 亮度”子菜单（10% 至 100% 五项）、分隔线、“退出”，当前亮度 36 不在预设中，没有项打勾，截下的菜单是 Windows 11 的系统菜单（系统为浅色）；`WM_CANCELMODE` 关闭菜单。用菜单的键盘导航（向菜单窗口投递按键，不移动指针）选子菜单的 30% 后，另一个进程经 DDC/CI 读出显示器亮度为 30；选“退出”后进程结束、图标消失。所有操作都是发给应用自己窗口的消息。未验证：真实的鼠标点击、深色模式下的菜单、Islands 前端、资源管理器重启后重新加入。
+
+验证“登录时启动”（2026-10-28，同一台机器，显示器调节程序 release 安装版，经 `bern package` 的安装程序静默安装）：以一次性计划任务在桌面会话里运行 `monitor-dial.exe --at-login`（与登录时 Windows 运行 `Run` 值相同的命令）后，进程在会话 1 中运行，没有主窗口，`window list` 为空，通知区域有图标；菜单读出“打开“显示器调节””、分隔线、亮度子菜单、分隔线、“登录时启动”（未勾选）、“退出”。用菜单的键盘导航选“登录时启动”后，`Run` 下出现 `dev.bern.monitordial` = `"C:\Users\…\Programs\MonitorDial\monitor-dial.exe" --at-login`，再打开菜单时已勾选；在 `StartupApproved\Run` 写入 `03 00 …`（任务管理器“禁用”写的值）后菜单显示未勾选，再选一次后该记录被删去、重新显示勾选；取消勾选删去 `Run` 值。应用运行时再以 `--at-login` 启动一次，第二个进程直接结束，原进程仍没有窗口。退出后静默卸载，安装目录、卸载项与 `Run` 值都被删去。Defender 没有报告。未验证：注销后重新登录时的实际启动、隐藏启动后从图标打开主窗口。
 
 ## 验证记录
 

@@ -441,9 +441,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             &[
                 req("label", PropKind::LocalizedText),
                 req("icon", PropKind::Icon),
+                opt("login_item", PropKind::Flag),
             ],
             Children::Only(&["CommandItem", "CommandMenu", "Divider"]),
-            "The application's item in the system's status area, where the platform has one: the notification area of the Windows taskbar and the status icons of Linux desktops show the application icon, and the macOS menu bar shows `icon` as a monochrome symbol. `label` is its tooltip and accessible name. Its menu opens the primary window, then has its children, then quits the application; a click on Windows and Linux opens the primary window. With it, closing the last window leaves the application running. Its items run without a window: they read engine state and run commands, not drafts. Elsewhere it shows nothing",
+            "The application's item in the system's status area, where the platform has one: the notification area of the Windows taskbar and the status icons of Linux desktops show the application icon, and the macOS menu bar shows `icon` as a monochrome symbol. `label` is its tooltip and accessible name. Its menu opens the primary window, then has its children, then quits the application; a click on Windows and Linux opens the primary window. With it, closing the last window leaves the application running. `login_item: true` adds “Open at Login” before quitting: while it is checked the system starts the application when the user logs in, with no window, only this item. Its items run without a window: they read engine state and run commands, not drafts. Elsewhere it shows nothing",
         )
     },
     ComponentSpec {

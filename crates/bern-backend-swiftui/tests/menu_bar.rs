@@ -91,7 +91,7 @@ pub fn app(app: keys::Client, windows: AppWindows, #[session] draft: Draft) -> i
                     CommandItem(id: preferences, label: tr! { "en" => "Settings…" }, shortcut: "cmd+,") => windows.settings.open()
                 }
             }
-            StatusItem(icon: "play", label: tr! { "en" => "Keys" }) {
+            StatusItem(icon: "play", label: tr! { "en" => "Keys" }, login_item: true) {
                 CommandItem(id: status_play, label: tr! { "en" => "Playing" }, checked: app.playing) => app.toggle()
                 Divider
                 CommandMenu(label: tr! { "en" => "Rate" }) {
@@ -278,13 +278,16 @@ fn the_menu_bar_is_the_macos_commands_and_shortcuts_follow_state() {
         // `window.menu_bar` holds on macOS: its branch stays, unconditional.
         "SwiftUI.Text(verbatim: BernText.string(\"page.0.3.if0.0.content\"))",
         // The status item: a symbol the menu bar draws as a template, a
-        // menu that opens the primary window, the application's items, and
-        // Quit; without windows the application stays in the menu bar.
+        // menu that opens the primary window, the application's items,
+        // “Open at Login” and Quit; without windows the application stays
+        // in the menu bar.
         "SwiftUI.MenuBarExtra {",
         "SwiftUI.Image(systemName: \"play\").accessibilityLabel(",
         "struct BernStatusMenu: View {",
         "SwiftUI.Button(BernText.format(\"bern.window.open\", [BernText.string(",
         "BernMenuItems.register(\"status_item.status_play\"",
+        "{ BernStatusArea.open(\"",
+        "BernLoginItemToggle()",
         "SwiftUI.Button(BernText.string(\"bern.app.quit\")) { NSApplication.shared.terminate(nil) }",
         "BernStatusArea.shown = true",
     ] {

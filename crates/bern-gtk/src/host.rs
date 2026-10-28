@@ -444,6 +444,10 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
         .build();
     let _ = shared.application.set(application.clone());
+    // Started at login (“Open at Login” of the status item): no window, and
+    // a running instance stays as it is.
+    let at_login =
+        def.status_item.is_some() && std::env::args().skip(1).any(|arg| arg == "--at-login");
     let start = RefCell::new(Some(start));
     let hold = RefCell::new(None);
     let failed = Rc::new(StdCell::new(false));
@@ -492,7 +496,7 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         }
         if opened.replace(true) {
             windows::reopen_primary();
-        } else {
+        } else if !at_login {
             windows::open_initial();
         }
     });
@@ -519,6 +523,15 @@ pub fn run(def: AppDef, start: StartEngine) -> glib::ExitCode {
         .take(1)
         .chain(std::env::args().skip(1).filter(|arg| !arg.starts_with('-')))
         .collect();
+    // Registering runs `startup`, so it comes after the handlers above. A
+    // second instance leaves before the application is finalized, which
+    // would warn that `run` did not end its registration.
+    if at_login
+        && application.register(None::<&gio::Cancellable>).is_ok()
+        && application.is_remote()
+    {
+        std::process::exit(0);
+    }
     application.run_with_args(&args)
 }
 

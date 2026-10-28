@@ -267,10 +267,11 @@ WindowSet(handle: AppWindows, primary: main) {
 - `label` 是提示文字与可访问名称；`icon` 只给 macOS，菜单栏里的状态项是系统着色的单色符号。Windows 与 Linux 显示应用图标。
 - 菜单第一项打开主窗口、最后一项退出，中间是声明的 `CommandItem`、`CommandMenu` 与 `Divider`，可以写在 `if`、`if let`、`match` 与 `ForEach` 里。Windows 与 Linux 上单击图标打开主窗口，右键是菜单；macOS 上点按就是菜单。
 - 菜单不属于任何窗口：只读引擎状态、执行命令与窗口动作，不读写草稿、不读窗口字段，菜单项不带 `pick` 与 `shortcut`。
+- `login_item: true` 在“退出”前加“登录时启动”：用户勾选后，登录时系统启动应用，只出现在状态区，不打开窗口。
 - 手机、电视与网页没有这个位置，接受声明而不显示（能力 `status_item` 不适用）。
 
 ```rust
-StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }) {
+StatusItem(icon: "sun.max.fill", label: tr! { "zh-Hans" => "显示器调节", "en" => "Monitor Dial" }, login_item: true) {
     CommandItem(id: dim, label: tr! { "zh-Hans" => "调暗", "en" => "Dim" }, enabled: app.brightness > 10) => app.set_brightness(10)
     Divider
     CommandMenu(label: tr! { "zh-Hans" => "预设", "en" => "Presets" }) {

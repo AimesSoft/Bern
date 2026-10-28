@@ -7,6 +7,7 @@
 
 import AppKit
 import AVKit
+import ServiceManagement
 import SwiftUI
 
 // MARK: - Menu bar
@@ -35,14 +36,71 @@ enum BernMenuItems {
 @MainActor
 enum BernStatusArea {
     static var shown = false
+    /// Opened at login: the windows the launch opens close as they appear,
+    /// until the user opens one.
+    static var hidingAtLaunch = false
 
     /// The Dock icon follows whether any window is open.
     static func windowsChanged(anyOpen: Bool) {
         guard shown else { return }
-        let policy: NSApplication.ActivationPolicy = anyOpen ? .regular : .accessory
+        let policy: NSApplication.ActivationPolicy = anyOpen && !hidingAtLaunch ? .regular : .accessory
         if NSApplication.shared.activationPolicy() != policy {
             NSApplication.shared.setActivationPolicy(policy)
         }
+    }
+
+    /// The system opened the application at login (“Open at Login”): only
+    /// the menu bar item shows.
+    static func launched() {
+        guard shown, let event = NSAppleEventManager.shared().currentAppleEvent,
+              event.eventID == AEEventID(kAEOpenApplication),
+              event.paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue == OSType(keyAELaunchedAsLogInItem)
+        else { return }
+        hidingAtLaunch = true
+        for context in BernHost.shared.windows.values { context.nsWindow?.close() }
+        windowsChanged(anyOpen: false)
+    }
+
+    /// A window the launch opened while hiding closes once it appears.
+    static func appeared(_ window: NSWindow) {
+        guard hidingAtLaunch else { return }
+        DispatchQueue.main.async { window.close() }
+    }
+
+    /// The user opens a window: the launch is over.
+    static func open(_ kindID: String) {
+        hidingAtLaunch = false
+        BernHost.shared.open(kindID)
+    }
+}
+
+/// “Open at Login” in the menu of the `StatusItem`: the application as the
+/// login item of `SMAppService`. One the user turned off in System Settings
+/// needs their approval there, which choosing the item opens.
+struct BernLoginItemToggle: View {
+    /// Changes after each choice, so the item reads the service again.
+    @State private var revision = 0
+
+    var body: some View {
+        let _ = revision
+        SwiftUI.Toggle(BernText.string("bern.app.open_at_login"), isOn: Binding(
+            get: { SMAppService.mainApp.status == .enabled },
+            set: { on in
+                do {
+                    if on {
+                        try SMAppService.mainApp.register()
+                    } else {
+                        try SMAppService.mainApp.unregister()
+                    }
+                } catch {
+                    NSLog("Bern: “Open at Login” cannot change: %@", error.localizedDescription)
+                }
+                if on && SMAppService.mainApp.status == .requiresApproval {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+                revision &+= 1
+            }
+        ))
     }
 }
 
@@ -80,6 +138,7 @@ extension BernWindowContext {
     func found(_ window: NSWindow?) {
         guard let window, window !== platform.nsWindow else { return }
         platform.nsWindow = window
+        BernStatusArea.appeared(window)
         closeCheckChanged()
         observe(window)
         reportFacts()
@@ -660,9 +719,16 @@ enum BernSnapshot {
 final class BernAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { BernStatusArea.launched() }
+    }
+
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows {
-            MainActor.assumeIsolated { BernHost.shared.reopenPrimary() }
+            MainActor.assumeIsolated {
+                BernStatusArea.hidingAtLaunch = false
+                BernHost.shared.reopenPrimary()
+            }
         }
         return true
     }

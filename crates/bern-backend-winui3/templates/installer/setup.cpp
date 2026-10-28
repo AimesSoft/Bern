@@ -254,6 +254,10 @@ int Uninstall() {
     }
     DeleteFileW(Shortcut().c_str());
     RegDeleteTreeW(HKEY_CURRENT_USER, UninstallKey().c_str());
+    // “Open at Login” of the application's status item, and Task Manager's
+    // note on it.
+    RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run", kKey);
+    RegDeleteKeyValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run", kKey);
     Tell(Text().uninstalled);
     return 0;
 }

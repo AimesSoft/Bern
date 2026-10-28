@@ -847,12 +847,25 @@ static std::vector<std::string> CommandLineFiles() {
     return urls;
 }
 
+/// Whether `--at-login` is on this process's command line.
+static bool CommandLineAtLogin() {
+    int count = 0;
+    LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (!arguments) return false;
+    bool found = false;
+    for (int i = 1; i < count; ++i) found = found || wcscmp(arguments[i], L"--at-login") == 0;
+    LocalFree(arguments);
+    return found;
+}
+
 bool Claim(std::string const& bundleId) {
     openedFiles = CommandLineFiles();
+    atLogin = CommandLineAtLogin();
     auto className = L"BernHost." + std::wstring(Wide(bundleId));
     auto mutexName = L"Local\\Bern." + std::wstring(Wide(bundleId));
     CreateMutexW(nullptr, TRUE, mutexName.c_str());
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        if (atLogin) return false;
         // Another instance runs: let it come to the front and show itself.
         for (int attempt = 0; attempt < 50; ++attempt) {
             if (HWND other = FindWindowExW(HWND_MESSAGE, nullptr, className.c_str(), nullptr)) {

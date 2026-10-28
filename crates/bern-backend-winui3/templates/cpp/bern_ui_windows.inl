@@ -1404,6 +1404,8 @@ inline void Resize(Win& win, double width, double height, Complete done) {
 
 /// Open the windows declared `initial: open`.
 inline void OpenInitial() {
+    // Started at logon: only the status item shows.
+    if (Host::atLogin && app->statusItem) return;
     for (auto const& def : app->windows) {
         if (!def.initialOpen) continue;
         try {
@@ -1916,8 +1918,8 @@ inline std::wstring ExecutableDirectory() {
 /// The `StatusItem` in the notification area of the taskbar: the
 /// application icon with the label as its tooltip. A click opens the
 /// primary window; the context menu is the system's menu with an item that
-/// opens the primary window, the application's items and Quit. A hidden
-/// window takes the icon's messages.
+/// opens the primary window, the application's items, “Open at Login” with
+/// `login_item`, and Quit. A hidden window takes the icon's messages.
 namespace StatusArea {
 
 constexpr UINT kCallback = WM_APP + 0x51;
@@ -1998,6 +2000,60 @@ inline void Add() {
     Shell_NotifyIconW(NIM_SETVERSION, &data);
 }
 
+/// “Open at Login”: the application's value under the user's `Run` key,
+/// which Windows starts at logon. Task Manager's list of startup apps turns
+/// it off under `StartupApproved` (an odd first byte) without removing it;
+/// a value of another copy of the application counts as off.
+namespace Login {
+
+constexpr wchar_t kRun[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr wchar_t kApproved[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+
+inline std::wstring Name() { return std::wstring(Wide(app->catalog.bundleId)); }
+
+inline std::wstring Command() {
+    std::wstring path(MAX_PATH, L'\0');
+    for (;;) {
+        auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+        if (length < path.size()) {
+            path.resize(length);
+            break;
+        }
+        path.resize(path.size() * 2);
+    }
+    return L"\"" + path + L"\" --at-login";
+}
+
+inline bool Enabled() {
+    auto name = Name();
+    DWORD size = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, kRun, name.c_str(), RRF_RT_REG_SZ, nullptr, nullptr, &size) != ERROR_SUCCESS) return false;
+    std::wstring value(size / sizeof(wchar_t), L'\0');
+    if (RegGetValueW(HKEY_CURRENT_USER, kRun, name.c_str(), RRF_RT_REG_SZ, nullptr, value.data(), &size) != ERROR_SUCCESS) return false;
+    value.resize(wcslen(value.c_str()));
+    if (_wcsicmp(value.c_str(), Command().c_str()) != 0) return false;
+    BYTE approved[64];
+    size = sizeof approved;
+    bool off = RegGetValueW(HKEY_CURRENT_USER, kApproved, name.c_str(), RRF_RT_REG_BINARY, nullptr, approved, &size) == ERROR_SUCCESS
+        && size > 0 && (approved[0] & 1);
+    return !off;
+}
+
+inline void Set(bool on) {
+    auto name = Name();
+    if (on) {
+        auto command = Command();
+        auto bytes = static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t));
+        if (RegSetKeyValueW(HKEY_CURRENT_USER, kRun, name.c_str(), REG_SZ, command.c_str(), bytes) != ERROR_SUCCESS)
+            bern::Report("cannot add the application to the startup apps");
+    } else {
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, kRun, name.c_str());
+    }
+    RegDeleteKeyValueW(HKEY_CURRENT_USER, kApproved, name.c_str());
+}
+
+}
+
 inline void Popup(int x, int y) {
     auto const& def = *app->statusItem;
     std::vector<Entry> entries;
@@ -2012,6 +2068,10 @@ inline void Popup(int x, int y) {
         menu.Divider();
         if (def.menu) def.menu(c, menu);
         menu.Divider();
+        if (def.loginItem) {
+            bool on = Login::Enabled();
+            menu.Item(c, bern::Text::Tr("bern.app.open_at_login"), true, on, [on](Ctx const&) { Login::Set(!on); });
+        }
         menu.Item(c, bern::Text::Tr("bern.app.quit"), true, false, [](Ctx const&) { WindowManager::Quit(); });
         return 0;
     });

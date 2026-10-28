@@ -285,8 +285,12 @@ target/bern/linux/Showcase/showcase
 - `Activate` 打开主窗口；Wayland 上先用状态区经 `ProvideXdgActivationToken` 给的令牌设为窗口的启动标识，窗口才能取得焦点。
 - 菜单的上下文不属于窗口（`Ctx::detached`），只读引擎状态；命令失败时显示在打开着的主窗口里。生成代码用 `Ctx::with_local` 绑定 `ForEach` 的行与 `if let`、`match` 的变量。
 - 应用本来就在最后一个窗口关闭后保持运行，状态项不改变这一点；“退出”调用 `Application::quit`。
+- `login_item` 时菜单在“退出”前有“登录时启动”（勾选项）：勾选时用 `glib::KeyFile` 写入 `$XDG_CONFIG_HOME/autostart/<bundle_id>.desktop`（`Type=Application`，`Name` 为应用名，`Icon` 为 `bundle_id`，`TryExec` 为程序路径，`Exec` 为按桌面文件规则加引号、转义 `"`、`` ` ``、`$`、`\` 与 `%` 的程序路径加 `--at-login`），取消时删去；选后立即重建菜单。勾选状态在每次建立菜单时读这个文件：`Exec` 与当前程序相同，且没有 `Hidden=true` 或 `X-GNOME-Autostart-enabled=false`，才显示为勾选。`.deb` 卸载时不会删除用户目录里的这个文件，`TryExec` 使会话在程序删去后跳过它。
+- 命令行有 `--at-login` 且声明了状态栏项时，`run` 在连好各信号处理之后先注册应用：已有实例在运行就直接结束进程，不激活那个实例；否则第一次激活不打开窗口，之后的激活（单击图标、再次启动）照常打开主窗口。注册会发出 `startup`，所以必须在连好处理之后；第一次实测时注册放在前面，`startup` 空发，引擎没有启动。Flatpak 等沙箱需要经后台门户登记自启，未实现；Bern 目前也不打 Flatpak 包。
 
 验证（2026-10-28，`bern-ubuntu` 虚拟机，Ubuntu 24.04、GTK 4.14，显示器调节程序 Linux 版的 debug 构建，Broadway 上运行）：虚拟机没有桌面会话，在 `dbus-run-session` 里用一个最小的 StatusNotifierWatcher（Python 与 GDBus）代替状态区，用 `gdbus` 读写。程序启动后登记一次；`Id` 为 `monitor_dial`，`Title` 与 `ToolTip` 为“显示器调节”（`LANG=zh_CN.UTF-8`），`IconPixmap` 有 16 至 64 的六种尺寸，`Menu` 为 `/MenuBar`，dbusmenu `Version` 为 3；`GetLayout` 得到“打开“显示器调节””、分隔线、“退出”（这台机器没有显示器，程序自己的亮度子菜单不出现）。经 CLI 关闭 `main#1` 后进程仍在、没有窗口；`Activate` 后出现 `main#2`；再关闭后对第一项发 `Event(clicked)`，出现 `main#3`；对“退出”发 `Event(clicked)` 后进程结束。`bern-gtk` 的 clippy（全部特性，警告视为错误）与 108 个测试在虚拟机上通过。未验证：KDE Plasma 与 GNOME AppIndicator 扩展的真实状态区里的显示、右键菜单与激活令牌。
+
+验证“登录时启动”（2026-10-29，同一虚拟机与测试方法，显示器调节程序加 `login_item: true` 的 debug 构建）：菜单为“打开“显示器调节””、分隔线、“登录时启动”（`toggle-state` 0）、“退出”；对它发 `Event(clicked)` 后写出 `~/.config/autostart/dev.bern.monitordial.desktop`（`Exec="/home/…/MonitorDial/monitor-dial" --at-login`、`TryExec`、`Name=显示器调节`、`Icon`），菜单变为 1；在文件末尾加 `Hidden=true` 后为 0，再选一次重写文件（不再有 `Hidden`）、回到 1。退出后按文件的 `Exec` 启动：登记到 watcher，`window list` 为空；这时再以 `--at-login` 启动一次，第二个进程约 0.1 秒后以 0 结束，仍没有窗口；`Activate` 后出现 `main#1`；取消勾选删去文件。未验证：真实桌面会话在登录时读取自启文件并启动它。
 
 ## 验证记录
 

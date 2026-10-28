@@ -181,6 +181,29 @@ pub const FRAMEWORK_TEXTS: &[(&str, &[(&str, &str)])] = &[
             ("id", "Buka {title}"),
         ],
     ),
+    // The item of the `StatusItem`'s menu that `login_item` adds: whether
+    // the system starts the application when the user logs in.
+    (
+        "bern.app.open_at_login",
+        &[
+            ("zh-Hans", "登录时启动"),
+            ("zh-Hant", "登入時啟動"),
+            ("en", "Open at Login"),
+            ("ja", "ログイン時に開く"),
+            ("ko", "로그인 시 열기"),
+            ("ru", "Открывать при входе"),
+            ("de", "Beim Anmelden öffnen"),
+            ("fr", "Ouvrir à l’ouverture de session"),
+            ("es", "Abrir al iniciar sesión"),
+            ("pt-BR", "Abrir ao iniciar sessão"),
+            ("it", "Apri al login"),
+            ("tr", "Oturum açılınca aç"),
+            ("vi", "Mở khi đăng nhập"),
+            ("pl", "Otwórz przy logowaniu"),
+            ("uk", "Відкривати під час входу"),
+            ("id", "Buka saat masuk"),
+        ],
+    ),
     // The last item of the `StatusItem`'s menu.
     (
         "bern.app.quit",
