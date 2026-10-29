@@ -644,6 +644,15 @@ fun BernTimer(interval: Double, enabled: Boolean, action: () -> Unit) {
     }
 }
 
+// MARK: - Watch
+
+/// `Watch`: runs its action when composed and whenever `value` changes.
+@Composable
+fun BernWatch(value: Any?, action: () -> Unit) {
+    val current by rememberUpdatedState(action)
+    LaunchedEffect(value) { current() }
+}
+
 // MARK: - Control groups
 
 /// `ControlGroup`: related controls on one capsule of the tonal surface,

@@ -888,7 +888,7 @@ impl<'a> Gen<'a> {
                     let span = prop.value.span();
                     pre.push(quote_spanned!(span=> let _ = &#value;));
                 }
-                PropKind::KeyValue => {
+                PropKind::KeyValue | PropKind::Watched => {
                     let value = self.value(&prop.value);
                     let span = prop.value.span();
                     pre.push(quote_spanned!(span=> let _ = &#value;));

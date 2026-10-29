@@ -123,6 +123,8 @@ pub struct TextProps {
     pub content: Option<Str>,
     pub style: Option<&'static str>,
     pub emphasis: Option<&'static str>,
+    /// The accent or a status role the text is drawn in.
+    pub color: Option<&'static str>,
     /// A capsule of this color under each line.
     pub mark: Option<crate::theme::Color>,
     /// At most this many lines, the last ending in an ellipsis.
@@ -197,6 +199,14 @@ pub fn Text(p: &Parent, ctx: &Ctx, props: TextProps) {
     text_style(&label, props.style);
     if matches!(props.emphasis, Some("secondary") | Some("tertiary")) {
         label.add_css_class("dim-label");
+    }
+    // libadwaita's text colors of the accent and the status colors.
+    match props.color {
+        Some("accent") => label.add_css_class("accent"),
+        Some("status.success") => label.add_css_class("success"),
+        Some("status.warning") => label.add_css_class("warning"),
+        Some("status.error") => label.add_css_class("error"),
+        _ => {}
     }
     if let Some(lines) = props.lines {
         label.set_lines(lines.max(1.0) as i32);

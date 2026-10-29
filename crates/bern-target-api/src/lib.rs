@@ -168,6 +168,12 @@ pub mod feature {
     /// `TextInput(current:)`: a field showing engine state, each edit
     /// running its action, the user's text held while being edited.
     pub const CONTROLLED_TEXT: &str = "controlled_text";
+    /// `Watch`: a command runs when the element is mounted and whenever
+    /// the value it follows changes.
+    pub const WATCH: &str = "watch";
+    /// `Switch(login_item: true)`: whether the system opens the
+    /// application at login, shown where it can, left out elsewhere.
+    pub const LOGIN_SWITCH: &str = "login_switch";
     /// `paste:` on `Button`, `IconButton`, `MenuItem` and `CommandItem`:
     /// the clipboard's text goes into a draft before the action runs.
     pub const PASTE: &str = "paste";

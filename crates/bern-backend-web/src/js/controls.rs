@@ -101,6 +101,10 @@ impl Generator<'_> {
     }
 
     pub(super) fn switch(&self, out: &mut Out, element: &Element) {
+        // A page does not open at login.
+        if element.keyword("login_item") == Some("true") {
+            return;
+        }
         let field = self.control_field(element, "checked");
         out.line(format!(
             "F.Switch(p, ctx, {});",
@@ -383,6 +387,14 @@ impl Generator<'_> {
                     (element.keyword("label_hidden") == Some("true")).then(|| "true".into()),
                 ),
             ])
+        ));
+    }
+
+    pub(super) fn watch(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B.Watch(p, ctx, {}, {});",
+            Self::props(vec![("value", self.value_prop(element, "value"))]),
+            self.action_fn(element)
         ));
     }
 

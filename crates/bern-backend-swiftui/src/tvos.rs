@@ -65,6 +65,8 @@ pub(crate) const FEATURES: &[&str] = &[
     // no clipboard, so no `paste`.
     feature::TABLE,
     feature::CONTROLLED_TEXT,
+    feature::WATCH,
+    feature::LOGIN_SWITCH,
     feature::BUTTON_CONTENT,
     feature::TOOLBAR_SEARCH,
     feature::SEARCH_RESULTS,

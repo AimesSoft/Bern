@@ -173,6 +173,8 @@ struct TextProps {
     Str content;
     char const* style = nullptr;
     char const* emphasis = nullptr;
+    /// `color:`: the accent or a status role the text is drawn in.
+    char const* color = nullptr;
     /// `mark:`: a role whose color bands each line.
     char const* mark = nullptr;
     /// At most this many lines, the last ending with an ellipsis.
@@ -210,6 +212,17 @@ inline winrt::hstring PlainMarkdown(std::wstring_view source) {
     return winrt::hstring(out);
 }
 
+/// `Text(color:)`: `shown` inside a presenter whose foreground, the role's
+/// theme resource, its text takes; the text keeps its own style.
+inline xaml::FrameworkElement Colored(xaml::FrameworkElement const& shown, char const* color) {
+    if (!color) return shown;
+    controls::ContentPresenter presenter;
+    PaintWith<controls::ContentPresenter>(presenter, L"ContentPresenter", L"Foreground", Paint{color},
+        [](controls::ContentPresenter const& e, media::Brush const& b) { e.Foreground(b); });
+    presenter.Content(shown);
+    return presenter;
+}
+
 inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
     auto content = Bound(ctx, props.content);
     if (props.markdown && content) content = [source = content] { return PlainMarkdown(source()); };
@@ -226,7 +239,7 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
     }
     if (props.emphasis && (std::string_view(props.emphasis) == "secondary" || std::string_view(props.emphasis) == "tertiary")) Secondary(block);
     if (!props.mark) {
-        Place(p, block);
+        Place(p, Colored(block, props.color));
         return;
     }
     // The marks lie behind the text in a layer of their own.
@@ -251,7 +264,7 @@ inline void Text(Parent const& p, Ctx const& ctx, TextProps props) {
             });
         }
     });
-    Place(p, holder);
+    Place(p, Colored(holder, props.color));
 }
 
 struct LabelProps {

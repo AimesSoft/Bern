@@ -432,6 +432,7 @@ impl<'a> Generator<'a> {
             "Modal" => self.modal(out, element, ctx),
             "Flow" => self.flow(out, element, ctx),
             "Timer" => self.timer(out, element),
+            "Watch" => self.watch(out, element),
             "Shortcut" => self.key_shortcut(out, element),
             "ShortcutInput" => self.shortcut_input(out, element, ctx),
             "CommandItem" => self.command_item(out, element, ctx),

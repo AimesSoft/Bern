@@ -41,6 +41,7 @@
 | `MotionToken` | 动效 token 名 |
 | `HeroName` | 共享元素静态名称 |
 | `KeyValue` | 只读文本、数值或枚举身份值 |
+| `Watched` | 只读的布尔、数值、文本或枚举，或它们的可选值与列表：`Watch` 跟随的值 |
 | `ColorRole` | 语义颜色角色 |
 | `NumberList` | 只读数值列表 |
 | `PatternName` | style! 图案名称 |
@@ -73,6 +74,7 @@
 | `Modal` | `width: Length`<br>`height: Length`<br>`cover: compact` | 可含子内容；无动作；不写 `height` 时与内容一样高（其中的 `ScrollView` 与它滚动的内容一样高），窗口放不下时到窗口边缘为止 |
 | `Flow` | `gap: Length` | 可含子内容；无动作；每行的子项竖直居中，`Spacer` 占满所在行余下的宽度 |
 | `Timer` | **`interval: Number`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
+| `Watch` | **`value: Watched`** | 不含子节点；必须绑定动作；挂载时与值变化时运行 |
 | `Shortcut` | **`key: Shortcut`**<br>`enabled: Bool` | 不含子节点；必须绑定动作 |
 | `PickerOption` | **`value: KeyValue`**<br>**`label: DisplayText`** | 不含子节点；无动作；直接位于 ["Picker"] |
 | `Rail` | `axis: horizontal / vertical`<br>`anchor: start / center / end`<br>`overhang: Length` | 可含子内容；无动作 |
@@ -117,7 +119,7 @@
 | `TableColumn` | **`title: DisplayText`**<br>`width: Number`<br>`sorted: Bool`<br>`descending: Bool` | 恰好一个子节点，是每行这一格的内容；动作可选，点表头时运行；直接位于 ["Table"]；`sorted`、`descending` 只显示排序标记，行的顺序由引擎决定 |
 | `TableMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Table"]；右键或长按一行时打开，该行不在选中行里时先只选中它 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
-| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag` | 不含子节点；无动作 |
+| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
 | `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
@@ -131,7 +133,7 @@
 | `TextInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: TextField`<br>`current: TextValue`<br>`prompt: DisplayText`<br>`kind: plain / secure / multiline`<br>`submit: clear`<br>`clear_key: NumberValue`<br>`feature: Feature` | 不含子节点；动作可选；`value` 与 `current` 二选一；`value` 时动作在提交时运行，`submit: clear` 在动作后清空草稿、交出焦点；`current` 时每次编辑都运行动作，动作参数里同一表达式就是输入的文字，编辑中引擎的文字不覆盖用户的输入；SwiftUI 的 `clear_key` 在数值变化时清空，供异步成功回执使用 |
 | `Search` | **`id: Id`**<br>**`value: TextField`**<br>`prompt: DisplayText`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`style: automatic / palette`<br>`panel_prompt: DisplayText`<br>`width: Number`<br>`height: Number`<br>`font_size: Number`<br>`suggest: Flag` | 可含子内容；动作可选 |
 | `SearchItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`detail: DisplayText`<br>`hint: DisplayText`<br>`navigation: Bool`<br>`pick: FileField`<br>`files: FileKinds`<br>`feature: Feature` | 可含子内容；必须绑定动作 |
-| `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut` | 不含子节点；动作可选 |
+| `Switch` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`label_hidden: Flag`<br>`shape: capsule / chip`<br>`height: Length`<br>`style: switch / checkbox / button`<br>`icon: Icon`<br>`shortcut: Shortcut`<br>`login_item: Flag` | 不含子节点；动作可选；`login_item: true` 显示并改变系统的登录项，不写 `value`、`checked` 与动作 |
 | `ShortcutInput` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>**`current: Shortcut`**（状态，不可为字面量）<br>`prompt: DisplayText`<br>`empty: DisplayText`<br>`enabled: Bool`<br>`feature: Feature` | 不含子节点；必须绑定动作，动作中与 `current` 相同的表达式换成选中的快捷键 |
 | `Slider` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag`<br>`value: NumberField`<br>`current: NumberValue`<br>`continuous: Flag`（仅 `current`）<br>**`min: Number`**<br>**`max: Number`**<br>`step: Number`<br>`min_icon: Icon`<br>`max_icon: Icon`<br>`feature: Feature` | 不含子节点；动作可选 |
 | `Video` | **`id: Id`**<br>`source: MediaSource`<br>`player: Player`<br>`label: DisplayText`<br>`controls: standard / none`<br>`fit: contain / cover / fill`<br>`sizing: standard / fill`<br>`corner: Length` | 不含子节点；无动作。`controls: none` 的视频只显示画面，可以作为 `Button` 的内容。`sizing: fill` 让播放表面占满有明确大小的父容器，`fit` 只控制视频内容如何放进表面；内核弹幕可以使用黑边。默认 `standard` 保持原有布局。应用登记了媒体内核时由内核画进视图给它的表面，见[设计文档](../Design.md#应用自带的媒体内核) |

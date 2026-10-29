@@ -99,7 +99,11 @@ impl Generator<'_> {
     }
 
     pub(super) fn switch(&self, out: &mut Out, element: &Element) {
-        let model = self.model(element, "checked", true);
+        let model = if element.keyword("login_item") == Some("true") {
+            Some("b::login_model()".to_string())
+        } else {
+            self.model(element, "checked", true)
+        };
         out.line(format!(
             "b::Switch(p, c, b::SwitchProps {{ id: {}, label: {}, model: {}, style: {}, icon: {}, label_hidden: {}, shape: {} }});",
             self.id(element),

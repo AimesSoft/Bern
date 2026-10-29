@@ -392,6 +392,12 @@ Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Tab
 
 验证：生成器测试（gallery 的表格页）覆盖 `B::Table`、列、行菜单、受控 `TextInput` 与 `paste`；gallery 在 Windows 11 实体机上由 MSVC 编译（WinUI 3 与 Islands 两种前端；第一次编译缺 `<set>`，已加入 `bern_base.h`），后端全部测试在那台机器上通过；一个实际应用的 Windows 版构建成功。未在 Windows 上运行：表格的点击、选择、菜单、对齐与剪贴板的读写都未实测。
 
+## 跟随值的动作、文字颜色与登录项开关（2026-10-29）
+
+`Watch` 是 `B::Watch`：`Reactive::Run` 读值，与上一次的 `Value` 不同时在 `Reactive::Untrack` 里运行动作，第一次总会运行。`Text(color:)` 把文字放进一个 `ContentPresenter`，它的 `Foreground` 经主题样式取角色的主题资源（WinUI 3 的 `SystemFillColorSuccessBrush` 等；系统 XAML 没有的取固定的明暗两色，随 `ActualThemeChanged` 更新），文字继承这个颜色，文字样式不受影响。`Switch(login_item: true)` 的 `current` 与 `change` 是 `StatusArea::LoginCurrent()` 与 `LoginChange()`：按菜单“登录时启动”的规则读 `Run` 键，改动时写入或删去并递增 `loginTick`；菜单的项也经 `SetLogin`，两处互相跟随。
+
+验证：gallery 的生成器测试覆盖三者；Windows 实体机上 gallery 与一个实际应用的 debug 构建都用到三者，WinUI 3 与 Islands 两种前端经 MSVC 编译通过，`bern-backend-winui3` 的 17 个测试通过（第一次编译时生成代码写成了 `B::StatusArea`，`StatusArea` 与 `B` 同级，已改）。未在 Windows 上运行。
+
 ## 验证记录
 
 2026-10-11，Windows 11 25H2 实体机，经 SSH 构建，以计划任务把应用启动到用户的桌面会话，由生成的 CLI 驱动；截图来自开发快照中的窗口截取。两种前端分别执行：

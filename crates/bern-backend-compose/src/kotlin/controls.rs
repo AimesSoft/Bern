@@ -261,6 +261,10 @@ impl Generator<'_> {
     }
 
     pub(super) fn switch(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        // Android applications do not open at login.
+        if element.keyword("login_item") == Some("true") {
+            return;
+        }
         let Some((value, change)) = self.model(element, "checked", &|_| "it".into()) else {
             return;
         };

@@ -188,6 +188,10 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 与 macOS 共用生成器（见 macOS 的实现记录）：`Table` 是 SwiftUI 的 `Table`，紧凑宽度的 iPhone 上系统只显示第一列，行菜单是长按的上下文菜单；`paste:` 读 `UIPasteboard.general`，系统第一次会问用户是否允许粘贴；引擎的 `copy_text` 写 `UIPasteboard.general`。验证：生成的 Swift 按 iOS SDK 类型检查，gallery 的 iOS 构建成功；未在模拟器或设备上运行。
 
+## 跟随值的动作与文字颜色（2026-10-29）
+
+`Watch` 与 `Text(color:)` 与 macOS 相同（`BernWatch`、`foregroundStyle`）。iOS 没有登录项，`Switch(login_item: true)` 生成 `EmptyView`（能力 `login_switch` 不适用）。验证：`tables` 测试按 iOS SDK 类型检查；未在模拟器上运行。
+
 ## 未完成与已知限制
 
 - 只构建模拟器应用。真机需要开发者签名与描述文件，安装与 `bern package` 未实现。

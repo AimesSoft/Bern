@@ -211,6 +211,19 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn watch(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "B::Watch(p, c, {});",
+            designated(&[
+                (
+                    "value",
+                    element.expr("value").map(|expr| self.getter(expr)),
+                ),
+                ("action", self.action(element)),
+            ])
+        ));
+    }
+
     pub(super) fn control_group(&self, out: &mut Out, element: &Element) {
         self.call(
             out,

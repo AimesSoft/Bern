@@ -668,13 +668,13 @@ fn player_screen(player: PlayerHandle) -> impl View {
 | Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题。`Section(style: plain)` 是随表单滚动的标题，行直接在页面上，不取 Form 给分组的行内边距，只用自己的；表单以它开头时从页面顶部开始，这个标题也可以来自插槽、组件或条件，各目标在布局时看第一项，条件变了跟着变 | 基础组件；六个目标按同一规则实现 |
 | Label | 图标与标题组合；`display: icon` 只显示图标，保留 `title` 作为可访问名称，图标字号仍由 `style` 决定 | `display: icon` 六个目标实现（`icon_labels`） |
 | Spacer 和 Divider | 弹性空白与分隔线 | 基础组件 |
-| Text | 本地化或动态文本、文字层级、换行及截断；`mark` 标注底纹；`markdown` 把内容当作行内 Markdown（强调、代码、删除线与链接）按平台样式显示；`style: code` 是平台的等宽字体 | 基础组件；`mark` 见“画布与标注文字”；`markdown` 由 SwiftUI、Compose、Web 与 GTK 实现，WinUI 3 去掉标记只显示文字，整篇文档由应用分块后逐块显示；`code` 五个后端都用各自平台的等宽字体，见[属性表](Reference/Component-Properties.md) |
+| Text | 本地化或动态文本、文字层级、换行及截断；`color` 用强调色或状态色画文字（与 `emphasis` 二选一）；`mark` 标注底纹；`markdown` 把内容当作行内 Markdown（强调、代码、删除线与链接）按平台样式显示；`style: code` 是平台的等宽字体 | 基础组件；`mark` 见“画布与标注文字”；`markdown` 由 SwiftUI、Compose、Web 与 GTK 实现，WinUI 3 去掉标记只显示文字，整篇文档由应用分块后逐块显示；`code` 五个后端都用各自平台的等宽字体，见[属性表](Reference/Component-Properties.md)；`color` 六个后端实现：SwiftUI 的 `foregroundStyle`（系统的 green、orange、red 与强调色）、libadwaita 的 `accent`/`success`/`warning`/`error` 文字类、WinUI 3 的主题画刷、Compose 的调色板、网页的主题变量 |
 | Button | 可访问名称、语义角色、强调程度、启用状态及激活事件；可以带一个子元素作为它显示的内容，见“带内容的按钮与悬停显示”。`pick: draft.file` 让按下先弹出系统的打开面板，选中一个文件后存进这个会话字段（`MediaSource` 或 `Option<MediaSource>`）再执行动作，取消则什么都不做；`files` 写接受的种类：`any`（默认）、`video`、`audio`、`picture`、`folder` 与 `.ass` 这样的扩展名，用空格或逗号分开。`IconButton` 与 `MenuItem` 同样可以写 | 基础组件；带内容见该节的实现进度。`pick` SwiftUI 已实现（`file_pick`）：macOS 是挂在窗口上的打开面板，不接受的文件变灰，已验证；iOS 是文档选择器，选中的文件就地打开并保持可读，iOS 26.5 模拟器已验证。Compose 用系统的文档选择器（`OpenDocument`），按种类过滤并保留读取授权，Android 模拟器上验证了只列出视频或图片、选中后播放或显示。`video` 除系统的影片类型外还收 mkv、webm、flv、rmvb 等系统未必认识的容器。Web 用浏览器的文件选择框（`<input type=file>`），按种类过滤，选中的文件以页面的 `blob:` 地址交给动作；系统的选择框无法在自动化中操作，未实测，用 `ui.set_file` 验证了动作。GTK 用 `GtkFileDialog`，按种类过滤，虚拟机上没有桌面门户，选择未实测；WinUI 3 用 `FileOpenPicker` 与 `FolderPicker`，Windows PC 上验证 Ctrl+O 弹出打开面板 |
 | IconButton | 图标激活、点击区域与可访问名称 | 基础组件；原生目标默认使用平台的图标按钮样式 |
 | FocusRegion | 编辑区：包着一块内容，里面的输入框正在编辑时，在区域外的第一次按下只结束编辑（不提交、不清空），这次按下不再交给别的控件；区域里的控件与之后的按下照常 | 六个目标生成 |
 | TextInput | 文本编辑、输入法与提交事件；在行里占行内剩余的宽度、行窄时让出，在列里横跨整列；`label_hidden: true` 时标签只作可访问名称、不显示；`submit: clear` 提交并执行动作后清空草稿、交出键盘焦点（如发弹幕、发消息的输入框），旁边的发送按钮写 `clears: draft.x` 做同样的事 | 基础组件；`submit: clear` 与按钮的 `clears`（2026-10-21）：六个目标在生成的动作后追加清空草稿，SwiftUI 与 Web 同时交出焦点；macOS 上在一个实际应用的输入框中实测清空 |
 | Search | 搜索文本编辑与提交；子元素是在搜索框使用时显示在它下方的结果，例如由 `Query` 驱动的结果列表，结果中的按钮直接打开或执行 | 基础组件；结果 SwiftUI 已实现：macOS 为 `searchSuggestions`；iOS 有结果时由系统列表在页面所在的位置列出，没有结果时居中显示，iOS 26.5 模拟器已验证；Web 的结果是搜索框下方的浮层，有焦点且有文字时显示，选中结果后收起，浏览器中已验证；GTK 与 WinUI 3（`Flyout`，不用 `AutoSuggestBox` 的建议列表）同样是搜索框下方的浮层，Linux 虚拟机与 Windows PC 上验证 Ctrl+K 聚焦、输入后列出匹配项（GTK 点选“Tartan”后打开它并收起结果） |
-| Switch | 布尔状态与修改事件；`style: button` 是开着时保持按下的按钮，可带 `icon`，也可以放进 `Toolbar` | 基础组件；按钮样式六个目标实现（`toggle_button`） |
+| Switch | 布尔状态与修改事件；`style: button` 是开着时保持按下的按钮，可带 `icon`，也可以放进 `Toolbar`；`login_item: true` 是系统的登录项（见“状态栏项”） | 基础组件；按钮样式六个目标实现（`toggle_button`）；`login_item` 三个桌面目标实现，其他目标不显示（`login_switch`） |
 | SplitButton | 分体开关按钮：一侧是开关，另一侧在浮层中显示它的子元素，例如所开功能的常用设置；开关与 `Switch` 一样二选一：`value:` 绑定 `bool` 草稿，或 `checked:` 显示引擎状态、切换时执行动作（`checked: app.show_danmaku => app.set_show_danmaku(app.show_danmaku)`，动作参数里的这个表达式是新值）；`more_label` 是第二部分的可访问名称；外部入口用 `set_bool` 开关、`activate` 打开浮层 | 媒体类应用；SwiftUI 已实现（`ControlGroup` 与浮层），在 macOS 上验证开关、浮层与其中的控件，浮层跟随 `appearance`；iPhone 上浮层原本会被系统改成整页表单、背景按浅色解析，现在保持为浮层并在所在区域的明暗中绘制，iOS 26.5 模拟器已验证；Web 是开关按钮加弹出浮层的箭头按钮，浏览器中验证浮层与其中的滑块，浮层跟随 `appearance`；GTK 与 WinUI 3（`ToggleSplitButton`）已实现，Linux 虚拟机与 Windows PC 上验证开关与浮层，浮层跟随 `appearance`。`checked:` 与动作（2026-10-21）：六个目标的生成器都改用 `Switch` 的受控写法，GTK 与 WinUI 3 的运行时改收 `Model`；编译器测试、各后端生成测试（gallery 的「说明」改为引擎状态）、GTK 运行时在 macOS 上类型检查、SwiftUI 在 macOS 上的一个实际应用中实测；GTK、WinUI 3 尚未在实机上运行 |
 | Inspector | 侧面板：`presented` 为真时显示在它所在容器的尾侧，容器的其余内容让出位置；直接写在容器中，不放在条件或重复里，一个容器最多一个 | 媒体类应用；SwiftUI 已实现（`.inspector`）；Web 是详情栏尾部滑入的面板，推开内容，窄窗口时是底部弹层，浏览器中验证宽窗口的推开与关闭；GTK（`AdwOverlaySplitView`）与 WinUI 3（右侧窗格的 `SplitView`）已实现，Linux 虚拟机与 Windows PC 上验证详情面板推开海报墙 |
 | Drop | 拖放区：它的内容接受拖到上面的文件，`files` 同 `pick`；拿着可接受的文件停在上面时 `over` 绑定的会话字段为真，其他文件被拒绝且不触发；松手后文件存进 `value` 再执行动作。只接一个文件。`opens: true` 让它也接收系统交给应用的文件：访达里的“打开方式”、拖到程序坞图标、iOS 的“用…打开”；应用为这些种类登记为可选的打开方式（不抢默认），屏幕上没有这样的拖放区时主窗口回来、文件等它出现 | 媒体类应用；SwiftUI 已实现：macOS 上从访达拖入视频时 `over` 变真、松手后播放，拖入 txt 被拒绝，已验证；`opens: true` 在 macOS 上验证了系统把应用列为 mp4 与 mkv 的打开方式（txt、png 不列），运行中与未运行时用它打开文件都交给拖放区并开始播放，拖放区不在屏幕上时文件等到它出现；iOS 26.5 模拟器验证了“用…打开”，从“文件”拖入未验证。Compose 已实现（`dragAndDropTarget`，`opens: true` 在清单里登记 `VIEW` 与 `SEND` 意图），Android 模拟器上验证：分屏时从“文件”长按拖入视频，经过时 `over` 变真、松手后播放；其他应用用 `VIEW` 意图交来的视频交给拖放区播放。Web 已实现：拿着可接受的文件经过时 `over` 变真，松手后以页面的 `blob:` 地址交给动作；浏览器中用页面里构造的真实视频文件模拟拖入，描边出现、画框晃一下，松手后播放，描边淡出；`opens: true` 只在页面作为应用安装后经浏览器的 `launchQueue` 收到文件，未验证。GTK（`GtkDropTarget`，`opens: true` 在桌面文件中登记 `MimeType` 与 `%U`）与 WinUI 3（`StorageItems` 拖放，不登记文件关联）已实现，真实拖放与系统交来的文件都未验证（Broadway 不支持从系统拖入文件），用 `ui.set_file` 验证了动作 |
@@ -1685,6 +1685,7 @@ WindowSet(handle: AppWindows, primary: main) {
 - 状态项不属于任何窗口：它可能在没有窗口时打开，所以菜单只读引擎状态、执行命令与窗口动作，不读写草稿，不读 `window.compact` 这类窗口自己的字段（构建期就知道的 `window.menu_bar` 等除外），菜单项不带 `pick` 与 `shortcut`，这些都在编译时报错。命令失败时显示在打开着的主窗口里。
 - 退出不经过窗口的关闭检查，与 macOS 的 Cmd-Q、Linux 的 Ctrl+Q 相同。
 - `login_item: true` 在“退出”前加一项“登录时启动”：勾选时系统在用户登录时启动应用，这样启动的应用不打开窗口，只有状态项，要用时再从它打开；取消勾选就不再启动。开关只由用户在菜单里打开，应用不自行登记，这是各平台对登录项的要求。设置就是系统里的登录项本身，应用不另存：在系统设置或任务管理器里关掉的，菜单里也显示为未勾选；登记的是另一份副本（例如开发构建）时同样算未勾选，勾选后改为当前这一份。
+- 设置窗口里的开关写 `Switch(id:, label:, login_item: true)`：它就是这个登录项，与菜单里的“登录时启动”读写同一处，两处互相跟随；不写 `value`、`checked` 与动作，同样只在用户拨动时登记。没有登录项的手机、电视与网页不显示它（目标能力 `login_switch` 不适用）。
 - 手机、电视与网页没有给应用的状态区域：目标能力 `status_item` 在 iOS、tvOS、Android 与网页上“不适用”，接受声明、不生成任何东西、不警告，应用照常随平台的规则结束。
 
 各平台的实现：macOS 是 SwiftUI 的 `MenuBarExtra`，`icon` 是 SF Symbol，`image` 是包里 18 点的模板图片（`BernStatusIcon.png` 与 `@2x`）；没有窗口打开时应用切到 `accessory` 激活策略，Dock 里的图标随之收起，再打开窗口时回到 `regular`，与菜单栏应用的习惯一致。Windows 是 `Shell_NotifyIcon` 放进通知区域的图标（版本 4 的回调；`image` 画成黑白两个 `.ico`，编为图标资源 2 与 3，按 `SystemUsesLightTheme` 选用，收到 `ImmersiveColorSet` 的设置变更时换），由一个隐藏窗口接收它的消息，菜单是系统的弹出菜单（`TrackPopupMenuEx`），在打开时按当时的状态建立；系统处于深色模式时菜单也是深色的（经 uxtheme 的 `SetPreferredAppMode`），资源管理器重启后图标重新加入。Linux 没有 GTK 控件可用：应用在会话总线上提供 StatusNotifierItem 与 `com.canonical.dbusmenu` 菜单，向 `org.kde.StatusNotifierWatcher` 登记，图标是应用图标或 `image` 按几种尺寸给出的 ARGB 像素；KDE Plasma 自己显示这些项，GNOME 经 AppIndicator 扩展（Ubuntu 默认带有）显示；菜单随它读的状态重建，打开前（`AboutToShow`）也重建一次；Wayland 上单击时用状态区给的激活令牌把窗口带到前面。macOS 上外部入口把菜单项列为 `status_item.<id>`（角色 `menu_item`），Windows 与 Linux 的菜单在打开时才建立，外部入口不列出它们，菜单项的命令照常是各自的工具。
@@ -1729,6 +1730,14 @@ Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, i
 - 引擎的 `bern::platform::copy_text(text)`：把文字放上剪贴板，任何线程都可以调用，由界面线程完成；宿主在启动引擎前经 `bern_platform_install` 接上（Android 早已经 JNI 提供）。macOS 是 `NSPasteboard`，iOS 是 `UIPasteboard`，Windows 是 `Clipboard.SetContent` 加 `Flush`（应用退出后文字仍在），GTK 是 `GdkClipboard`，网页是 `navigator.clipboard.writeText`。tvOS 没有剪贴板：`paste` 不可用（能力检查报告），`copy_text` 返回失败。
 
 实现进度（2026-10-29）：Linux 虚拟机上实测从应用复制分享链接、再用 `paste` 读回，内容一字不差；网页在浏览器里只验证到调用剪贴板接口（浏览器拒绝了自动化读取，读的结果用替身代替）。其他目标未运行。
+
+### 跟随值的动作
+
+`Watch(value: draft.selected) => app.inspect(draft.selected)` 在挂载时运行一次动作，之后值每变一次运行一次，相等的新值不算变化。它让引擎知道只在界面里的状态：表格选中的行（检查器据此显示那一行）、侧栏选中的页面（引擎据此只列出那一组的服务器）、搜索框的文字。值是布尔、数值、文本、枚举，或它们的可选值与列表；记录不行，因为各平台比较记录的方式不一。动作可以是命令、会话动作或窗口动作。写在 `if` 里时它随条件挂载，条件成立的那一刻运行一次，例如某个状态出现时切到另一页。
+
+各平台：SwiftUI 是 `onChange(of:initial:)`；GTK、WinUI 3 与网页是记着上一次值的 effect，动作在不追踪依赖的范围里运行，所以动作读到的状态不会让它再运行；Compose 是 `LaunchedEffect(value)`。
+
+实现进度（2026-10-29）：七个目标实现（`watch`）。Linux 虚拟机上一个实际应用实测侧栏换页、表格选中行与搜索框经它到达引擎；网页运行时测试覆盖首次运行、变化、相等的值与卸载；SwiftUI 按 macOS、iOS、tvOS 的 SDK 类型检查；WinUI 3 经 MSVC 编译了用到它的实际应用；Compose 只有生成器测试。
 
 ### 路由与返回行为
 

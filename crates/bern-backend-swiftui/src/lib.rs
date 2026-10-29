@@ -144,6 +144,8 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::FILE_PICK,
     bern_target_api::feature::TABLE,
     bern_target_api::feature::CONTROLLED_TEXT,
+    bern_target_api::feature::WATCH,
+    bern_target_api::feature::LOGIN_SWITCH,
     bern_target_api::feature::PASTE,
     bern_target_api::feature::SCROLL_SNAP,
     bern_target_api::feature::RAILS,

@@ -209,7 +209,14 @@ impl Generator<'_> {
             ("id", Some(self.id(element))),
             ("label", self.text_prop(element, "label")),
         ];
-        fields.extend(self.model(element, "checked"));
+        if element.keyword("login_item") == Some("true") {
+            fields.extend([
+                ("current", Some("StatusArea::LoginCurrent()".to_string())),
+                ("change", Some("StatusArea::LoginChange()".to_string())),
+            ]);
+        } else {
+            fields.extend(self.model(element, "checked"));
+        }
         fields.extend([
             ("style", Self::keyword(element, "style")),
             ("icon", Self::icon(element, "icon")),

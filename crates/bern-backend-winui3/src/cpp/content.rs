@@ -19,6 +19,7 @@ impl Generator<'_> {
                 ("content", self.text_prop(element, "content")),
                 ("style", Self::keyword(element, "style")),
                 ("emphasis", Self::keyword(element, "emphasis")),
+                ("color", Self::keyword(element, "color")),
                 ("mark", Self::keyword(element, "mark")),
                 ("lines", Self::number(element, "lines")),
                 ("fontSize", self.len(element, "font_size")),

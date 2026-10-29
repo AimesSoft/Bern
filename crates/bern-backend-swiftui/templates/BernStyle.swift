@@ -4632,6 +4632,16 @@ struct BernTimer: View {
     }
 }
 
+/// `Watch`: runs its action when it appears and whenever `value` changes.
+struct BernWatch<Value: Equatable>: View {
+    let value: Value
+    let action: () -> Void
+    var body: some View {
+        Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+            .onChange(of: value, initial: true) { action() }
+    }
+}
+
 extension View {
     /// `default_focus`: the focus starts on the control when it appears,
     /// the remote's on a television and the keyboard's elsewhere.

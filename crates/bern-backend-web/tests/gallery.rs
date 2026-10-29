@@ -78,6 +78,11 @@ fn gallery_generates_television_layouts_shortcuts_and_first_focus() {
         // The details' keys follow state, and the user chooses them.
         "F.shortcut(() => E.details_key.get(), ",
         "F.ShortcutInput(p, ctx, { id: \"details_key\"",
+        // Choosing a pattern in the table opens it.
+        "B.Watch(p, ctx, { value: () => ",
+        // The about window's note in the accent; a page does not open at
+        // login, so it has no such switch.
+        "color: \"accent\"",
     ] {
         assert!(
             script.contains(expected),

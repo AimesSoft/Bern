@@ -156,6 +156,10 @@ bern run --target tvos
 
 tvOS 没有 `Table`：生成为 `List` 里每行一个按钮，各列的格子在按钮里横排（间距 24）；按下时选择设为只有这一行并运行主操作，长按出行菜单（`contextMenu`），菜单项同样先只选中这一行。表头与排序标记不显示。`TextInput(current:)` 与 macOS 相同（`BernHeldText`）。tvOS 没有剪贴板：能力 `paste` 不声明（检查报告不可用），`BernClipboard` 是空实现，引擎的 `copy_text` 返回 `platform_unavailable`。验证：生成的 Swift 按 tvOS SDK 类型检查；未在模拟器上运行。
 
+## 跟随值的动作与文字颜色（2026-10-29）
+
+`Watch` 与 `Text(color:)` 与 macOS 相同。tvOS 没有登录项，`Switch(login_item: true)` 生成 `EmptyView`。验证：`tables` 测试按 tvOS SDK 类型检查；未在模拟器上运行。
+
 ## 未完成与已知限制
 
 - 只构建模拟器应用；真机需要签名与描述文件，安装与 `bern package` 未实现。

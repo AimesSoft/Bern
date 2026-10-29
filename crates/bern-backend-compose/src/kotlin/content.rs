@@ -29,10 +29,13 @@ impl Generator<'_> {
 
     pub(super) fn text_view(&self, out: &mut Out, element: &Element) {
         let content = self.text_prop(element, "content").unwrap_or_default();
-        let color = match element.keyword("emphasis") {
-            Some("secondary") => "MaterialTheme.colorScheme.onSurfaceVariant",
-            Some("tertiary") => "MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)",
-            _ => "Color.Unspecified",
+        let color = match (element.keyword("color"), element.keyword("emphasis")) {
+            (Some(role), _) => format!("bernPalette().role({})", string(role)),
+            (None, Some("secondary")) => "MaterialTheme.colorScheme.onSurfaceVariant".into(),
+            (None, Some("tertiary")) => {
+                "MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)".into()
+            }
+            (None, _) => "Color.Unspecified".into(),
         };
         let style = self.text_style(element);
         let lines = element

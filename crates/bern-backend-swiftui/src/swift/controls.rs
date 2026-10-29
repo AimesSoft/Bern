@@ -512,6 +512,24 @@ impl Generator<'_> {
     }
 
     pub(super) fn switch(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        if element.keyword("login_item") == Some("true") {
+            // Only macOS opens applications at login.
+            if self.platform != Platform::Macos {
+                out.line("SwiftUI.EmptyView()");
+                return;
+            }
+            let label = self.text_prop(element, "label").unwrap_or_default();
+            out.line(format!("BernLoginItemToggle(label: {label})"));
+            if element.keyword("label_hidden") == Some("true") {
+                out.line(".labelsHidden()");
+            }
+            out.line(".bernAccentTint()");
+            out.line(format!(
+                ".bernControl({}, role: \"switch\", label: {label}, actions: BernControlActions(setBool: {{ on in BernLoginItem.set(on) }}, value: {{ BernLoginItem.isOn ? \"true\" : \"false\" }}))",
+                self.target(element, ctx)
+            ));
+            return;
+        }
         let (field, binding, setter) = self.control_value(element, "checked");
         let label = self.text_prop(element, "label").unwrap_or_default();
         out.open(format!("SwiftUI.Toggle(isOn: {binding}) {{"));
@@ -969,6 +987,15 @@ impl Generator<'_> {
             "BernTimer(interval: {}, enabled: {enabled}) {{ {action} }}",
             double(element.number("interval").unwrap_or(1.0))
         ));
+    }
+
+    pub(super) fn watch(&self, out: &mut Out, element: &Element) {
+        let value = element
+            .expr("value")
+            .map(|e| self.expr(e))
+            .unwrap_or_else(|| "0".into());
+        let action = self.action(element.action.as_ref().expect("watch action"));
+        out.line(format!("BernWatch(value: {value}) {{ {action} }}"));
     }
 }
 

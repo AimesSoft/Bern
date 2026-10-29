@@ -311,6 +311,12 @@ target/bern/linux/Showcase/showcase
 
 验证（2026-10-29，`bern-ubuntu` 虚拟机，Ubuntu 24.04、GTK 4.14，Broadway 上运行一个实际应用的 debug 构建）：服务器表格的显示与选择、右键先选中那一行再出菜单、菜单项执行、点表头换排序、经外部入口的主操作；反复增删与换序行的压力脚本没有 GTK 断言；订阅编辑窗口里受控输入框的每次编辑（经 `ui edit`）到达引擎；从行菜单复制分享链接，再用 `paste` 按钮读回，内容一字不差。Broadway 上的真实键盘输入未测（打字经外部入口代替）；KDE、GNOME 桌面会话里未看。
 
+## 跟随值的动作、文字颜色与登录项开关（2026-10-29）
+
+`Watch`（`scene.rs`）是一个 effect：读值（被跟踪），与上一次的 `Value` 不同时在 `untrack` 里运行动作，动作读到的状态不成为它的依赖；第一次总会运行。`Text(color:)` 给标签加 libadwaita 的文字类 `accent`、`success`、`warning`、`error`，即随明暗换色、适合文字的颜色，不是填充色。`Switch(login_item: true)` 的模型是 `b::login_model()`：读 `status.rs` 里缓存的登录项状态（第一次时读自启文件），改动时写入或删去 `~/.config/autostart/<bundle_id>.desktop` 再重读；状态栏菜单的“登录时启动”用同一份状态，两处互相跟随。
+
+验证（2026-10-29，`bern-ubuntu` 虚拟机，Broadway 上运行一个实际应用的 Linux debug 构建）：侧栏换页、表格选中行与搜索框经 `Watch` 到达引擎（切到分组后只列这一组，检查器显示选中的服务器，搜索只留匹配的行）；延迟以绿色显示，日志的错误行带错误类；设置窗口的“登录时启动”打开时写出自启文件、开关读回打开，关掉时删去文件；`bern-gtk` 的 clippy 与 107 个测试通过。
+
 ## 验证记录
 
 2026-10-11，Ubuntu 24.04（aarch64，GNOME 46 Wayland），经 SSH 驱动虚拟机桌面会话中的应用，截图来自开发快照：

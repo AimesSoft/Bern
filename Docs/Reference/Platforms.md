@@ -38,6 +38,8 @@
 | `controlled_text` | `TextInput(current:)` 引擎受控文字，编辑中保留用户的输入 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `table` | 表格 `Table`：列、选中行、点表头排序、行菜单与主操作 | 支持 | 支持 | 支持（一列行按钮） | 支持 | 支持（Material 数据表） | 支持 | 支持 |
 | `paste` | `Button`、`IconButton`、`MenuItem`、`CommandItem` 的 `paste:`，先把剪贴板的文字放进草稿 | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `watch` | `Watch(value:) => command()`：挂载时与值变化时运行动作，把草稿告诉引擎 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `login_switch` | `Switch(login_item: true)`：系统的“登录时打开”，与状态栏项菜单里的是同一项 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
 | `search_palette` | 搜索命令面板 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `image_template` | 模板图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `adaptive_images` | 图片比例与网格独立行距 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |

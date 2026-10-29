@@ -82,33 +82,47 @@ enum BernStatusArea {
     }
 }
 
-/// “Open at Login” in the menu of the `StatusItem`: the application as the
-/// login item of `SMAppService`. One the user turned off in System Settings
-/// needs their approval there, which choosing the item opens.
+/// “Open at Login”: the application as the login item of `SMAppService`.
+/// One the user turned off in System Settings needs their approval there,
+/// which turning it on opens.
+@MainActor
+enum BernLoginItem {
+    static var isOn: Bool { SMAppService.mainApp.status == .enabled }
+
+    static func set(_ on: Bool) {
+        do {
+            if on {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            NSLog("Bern: “Open at Login” cannot change: %@", error.localizedDescription)
+        }
+        if on && SMAppService.mainApp.status == .requiresApproval {
+            SMAppService.openSystemSettingsLoginItems()
+        }
+    }
+}
+
+/// “Open at Login” in the menu of the `StatusItem`, and
+/// `Switch(login_item: true)` with the application's own label.
 struct BernLoginItemToggle: View {
-    /// Changes after each choice, so the item reads the service again.
+    var label = BernText.string("bern.app.open_at_login")
+    /// Changes after each choice, so the toggle reads the service again.
     @State private var revision = 0
 
     var body: some View {
         let _ = revision
-        SwiftUI.Toggle(BernText.string("bern.app.open_at_login"), isOn: Binding(
-            get: { SMAppService.mainApp.status == .enabled },
+        SwiftUI.Toggle(label, isOn: Binding(
+            get: { BernLoginItem.isOn },
             set: { on in
-                do {
-                    if on {
-                        try SMAppService.mainApp.register()
-                    } else {
-                        try SMAppService.mainApp.unregister()
-                    }
-                } catch {
-                    NSLog("Bern: “Open at Login” cannot change: %@", error.localizedDescription)
-                }
-                if on && SMAppService.mainApp.status == .requiresApproval {
-                    SMAppService.openSystemSettingsLoginItems()
-                }
+                BernLoginItem.set(on)
                 revision &+= 1
             }
         ))
+        // The other toggle may have changed it.
+        .onAppear { revision &+= 1 }
     }
 }
 

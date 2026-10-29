@@ -90,6 +90,9 @@ pub enum PropKind {
     HeroName,
     /// A text, number or enum value identifying something, read only.
     KeyValue,
+    /// A value an element follows, read only: a bool, number, text or
+    /// enum, or an optional or a list of them, such as `draft.selected`.
+    Watched,
     /// A semantic color role, such as `accent` or `fill.subtle`.
     ColorRole,
     /// A list of numbers, read only, such as the values a `Series` draws.
@@ -667,6 +670,15 @@ pub const COMPONENTS: &[ComponentSpec] = &[
     ComponentSpec {
         action: ActionRule::Required,
         ..spec(
+            "Watch",
+            &[req("value", PropKind::Watched)],
+            Children::None,
+            "Invoke a command when mounted and whenever the value changes, such as telling the engine which rows are selected",
+        )
+    },
+    ComponentSpec {
+        action: ActionRule::Required,
+        ..spec(
             "Shortcut",
             &[
                 req("key", PropKind::Shortcut),
@@ -1190,6 +1202,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             req("content", PropKind::DisplayText),
             opt("style", PropKind::Keyword(TEXT_STYLES)),
             opt("emphasis", PropKind::Keyword(EMPHASIS)),
+            opt("color", PropKind::ColorRole),
             opt("mark", PropKind::ColorRole),
             opt("lines", PropKind::Number),
             opt("font_size", PropKind::Length),
@@ -1197,7 +1210,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             opt("markdown", PropKind::Flag),
         ],
         Children::None,
-        "Text with a semantic style; `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
+        "Text with a semantic style; `color` draws it in the accent or a status color (`status.success`, `status.warning`, `status.error`); `mark` draws a band of the color under each line; `lines` shows at most that many lines, ending the last with an ellipsis; `line_height` sets the height of each line, the extra split above and below it as in CSS; with `markdown` the content's inline Markdown — `**strong**`, `*emphasis*`, `` `code` ``, `~~struck~~` and `[links](address)`, a backslash taking the next mark literally — shows as the platform styles it",
     ),
     spec(
         "Canvas",
@@ -1465,9 +1478,10 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 ),
                 opt("icon", PropKind::Icon),
                 opt("shortcut", PropKind::Shortcut),
+                opt("login_item", PropKind::Flag),
             ],
             Children::None,
-            "Boolean state; `style: button` is a button that stays pressed while on",
+            "Boolean state; `style: button` is a button that stays pressed while on; `login_item: true` is whether the system opens the application at login, left out where there is no such thing",
         )
     },
     ComponentSpec {
@@ -1841,7 +1855,33 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             });
         }
     }
-    if matches!(spec.name, "Switch" | "SplitButton" | "Picker" | "Slider") {
+    if spec.name == "Text" && shape.props.contains(&"color") && shape.props.contains(&"emphasis")
+    {
+        errors.push(ShapeError {
+            prop: Some("color".into()),
+            message: "a text is drawn in its `color` or with an `emphasis`; write one of them".into(),
+        });
+    }
+    let login_item = spec.name == "Switch" && shape.props.contains(&"login_item");
+    if login_item {
+        for prop in ["value", "checked"] {
+            if shape.props.contains(&prop) {
+                errors.push(ShapeError {
+                    prop: Some(prop.into()),
+                    message: format!(
+                        "a `login_item` switch shows the system's login item; it takes no `{prop}`"
+                    ),
+                });
+            }
+        }
+        if shape.has_action {
+            errors.push(ShapeError {
+                prop: None,
+                message: "a `login_item` switch changes the system's login item itself; it takes no action".into(),
+            });
+        }
+    }
+    if matches!(spec.name, "Switch" | "SplitButton" | "Picker" | "Slider") && !login_item {
         let controlled = if matches!(spec.name, "Switch" | "SplitButton") {
             "checked"
         } else if spec.name == "Slider" {
@@ -2071,8 +2111,8 @@ mod tests {
     #[test]
     fn unknown_components_and_props_are_reported() {
         assert!(!check_shape(&shape("Marquee", vec![], false)).is_empty());
-        let errors = check_shape(&shape("Text", vec!["content", "color"], false));
-        assert_eq!(errors[0].prop.as_deref(), Some("color"));
+        let errors = check_shape(&shape("Text", vec!["content", "colour"], false));
+        assert_eq!(errors[0].prop.as_deref(), Some("colour"));
     }
 
     #[test]

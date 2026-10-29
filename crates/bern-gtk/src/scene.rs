@@ -1464,6 +1464,31 @@ pub fn Timer(_p: &Parent, ctx: &Ctx, props: TimerProps, action: Option<Act>) {
     });
 }
 
+// MARK: - Watch
+
+#[derive(Default)]
+pub struct WatchProps {
+    pub value: Option<Get>,
+}
+
+/// Runs its action when shown and whenever `value` changes.
+#[allow(non_snake_case)]
+pub fn Watch(_p: &Parent, ctx: &Ctx, props: WatchProps, action: Option<Act>) {
+    let (Some(value), Some(action)) = (props.value, action) else {
+        return;
+    };
+    let at = ctx.clone();
+    let last = RefCell::new(None);
+    effect(move || {
+        let now = value(&at);
+        if last.borrow().as_ref() == Some(&now) {
+            return;
+        }
+        *last.borrow_mut() = Some(now);
+        untrack(|| action(&at));
+    });
+}
+
 // MARK: - Control groups
 
 #[derive(Default)]

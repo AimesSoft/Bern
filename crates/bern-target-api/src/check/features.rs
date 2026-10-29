@@ -69,6 +69,8 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::FILE_PICK, file_pick),
     (feature::TABLE, table),
     (feature::CONTROLLED_TEXT, controlled_text),
+    (feature::WATCH, watch),
+    (feature::LOGIN_SWITCH, login_switch),
     (feature::PASTE, paste),
     (feature::SCROLL_SNAP, scroll_snap),
     (feature::PICTURE_FILLS, picture_fills),
@@ -1144,6 +1146,33 @@ fn controlled_text(
                 descriptor.id
             ))
             .at(input.source.clone()),
+        );
+    }
+}
+
+fn login_switch(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(switch) = first_element(app, |element| {
+        element.kind == "Switch" && element.props.contains_key("login_item")
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot show whether it opens at login",
+                descriptor.id
+            ))
+            .at(switch.source.clone()),
+        );
+    }
+}
+
+fn watch(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(watch) = first_element(app, |element| element.kind == "Watch") {
+        diagnostics.push(
+            Diagnostic::error(format!("target `{}` cannot build a `Watch`", descriptor.id))
+                .at(watch.source.clone()),
         );
     }
 }

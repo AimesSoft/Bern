@@ -1552,8 +1552,9 @@ export const STYLE_CLASS = {
   caption2: "caption2", control: "control-font", code: "code",
 };
 
-export function Text(p, ctx, { content, style, emphasis, fontSize, lines, lineHeight, markdown }) {
+export function Text(p, ctx, { content, style, emphasis, color, fontSize, lines, lineHeight, markdown }) {
   const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
+  textColor(node, color);
   if (markdown) effect(() => node.replaceChildren(inlineMarkdown(String(content() ?? ""))));
   else bindText(node, content);
   length(node, "fontSize", fontSize);
@@ -1563,6 +1564,11 @@ export function Text(p, ctx, { content, style, emphasis, fontSize, lines, lineHe
     effect(() => node.style.setProperty("--bern-text-lines", String(Math.max(1, Number(readValue(lines))))));
   }
   p.append(node);
+}
+
+/// `Text(color:)`: the accent or a status color, following the theme.
+export function textColor(node, color) {
+  if (color) node.style.color = `var(--bern-${color.replace(/[._]/g, "-")})`;
 }
 
 export function Label(p, ctx, { title, icon: name, style, fontSize, display }) {
@@ -2588,6 +2594,18 @@ export function Timer(p, ctx, { interval, enabled }, action) {
     };
     pending = setTimeout(tick, delay);
     onCleanup(() => { cancelled = true; clearTimeout(pending); });
+  });
+}
+
+/// Runs its action when rendered and whenever `value` changes.
+export function Watch(p, ctx, { value }, action) {
+  let last, shown = false;
+  effect(() => {
+    const now = readValue(value);
+    if (shown && eq(now, last)) return;
+    shown = true;
+    last = now;
+    untrack(action);
   });
 }
 

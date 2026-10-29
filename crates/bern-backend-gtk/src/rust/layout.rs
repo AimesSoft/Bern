@@ -223,6 +223,14 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn watch(&self, out: &mut Out, element: &Element) {
+        out.line(format!(
+            "b::Watch(p, c, b::WatchProps {{ value: {} }}, {});",
+            self.value(element, "value"),
+            self.action(element),
+        ));
+    }
+
     pub(super) fn control_group(&self, out: &mut Out, element: &Element) {
         self.children(
             out,

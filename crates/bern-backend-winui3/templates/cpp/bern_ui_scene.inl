@@ -740,6 +740,26 @@ inline void Timer(Parent const&, Ctx const& ctx, TimerProps props) {
 }
 
 // ---------------------------------------------------------------------------
+// Watch
+
+struct WatchProps {
+    Get value;
+    Act action;
+};
+
+/// `Watch`: runs its action when mounted and whenever `value` changes.
+inline void Watch(Parent const&, Ctx const& ctx, WatchProps props) {
+    if (!props.value || !props.action) return;
+    auto last = std::make_shared<std::optional<Value>>();
+    Reactive::Run([ctx, props, last] {
+        auto now = props.value(ctx);
+        if (*last && **last == now) return;
+        *last = std::move(now);
+        Reactive::Untrack([&] { props.action(ctx); });
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Control groups
 
 struct ControlGroupProps {

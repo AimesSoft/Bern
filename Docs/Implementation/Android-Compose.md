@@ -263,6 +263,10 @@ Android 与 Material 3 都没有表格控件，`Table` 按 Material 数据表的
 
 验证：生成器测试（gallery 的表格页）覆盖表格、受控输入与 `paste`；`bern build --target android` 构建 gallery 成功（Gradle 编译生成的 Kotlin 与运行时）。未安装到设备，未运行。
 
+## 跟随值的动作与文字颜色（2026-10-29）
+
+`Watch` 是 `BernWatch(value)`：`LaunchedEffect(value)` 在组合时与值变化时运行动作（`rememberUpdatedState` 取最新的动作），列表与枚举按值比较。`Text(color:)` 取 `bernPalette().role(…)`。Android 应用不在登录时打开，`Switch(login_item: true)` 不生成任何东西。验证：gallery 的生成器测试；未构建 APK、未在设备上运行。
+
 ## 验证记录
 
 2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：

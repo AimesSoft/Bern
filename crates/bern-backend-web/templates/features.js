@@ -588,8 +588,9 @@ export function markText(node, text, role) {
   return draw;
 }
 
-export function MarkedText(p, ctx, { content, style, emphasis, mark }) {
+export function MarkedText(p, ctx, { content, style, emphasis, color, mark }) {
   const node = el("p", { class: `bern-text bern-${B.STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
+  B.textColor(node, color);
   const text = el("span", { class: "bern-marked-text" });
   node.append(text);
   const draw = markText(node, text, mark);

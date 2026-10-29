@@ -131,7 +131,8 @@ pub struct AboutDraft {
 }
 
 /// The about window: its first tab shows only its symbol, beside a tab
-/// that shows only its name.
+/// that shows only its name, with the system's “open at login” where the
+/// platform has one.
 #[component]
 pub fn about(app: gallery::Client, windows: AppWindows, #[session] draft: AboutDraft) -> impl View {
     ui! {
@@ -140,6 +141,7 @@ pub fn about(app: gallery::Client, windows: AppWindows, #[session] draft: AboutD
                 Column(gap: 12, padding: 24, align: center) {
                     Text(content: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, style: title)
                     Text(content: tr! { "zh-Hans" => "一面会浮起的图案墙。", "en" => "A wall of patterns that lift." }, emphasis: secondary)
+                    Text(content: tr! { "zh-Hans" => "预览版", "en" => "Preview" }, style: footnote, color: accent)
                     Button(id: done, label: tr! { "zh-Hans" => "好", "en" => "OK" }, prominence: prominent, default_focus: true) => windows.about.close()
                 }
             }
@@ -151,6 +153,9 @@ pub fn about(app: gallery::Client, windows: AppWindows, #[session] draft: AboutD
                     Form {
                         Section {
                             ShortcutInput(id: details_key, label: tr! { "zh-Hans" => "显示详情", "en" => "Show the Details" }, current: app.details_key) => app.set_details_key(app.details_key)
+                        }
+                        Section {
+                            Switch(id: open_at_login, label: tr! { "zh-Hans" => "登录时打开", "en" => "Open at Login" }, login_item: true)
                         }
                     }
                 }
@@ -468,9 +473,9 @@ pub fn card(app: gallery::Client, swatch: gallery::Swatch) -> impl View {
 }
 
 /// The patterns in a table: several can be chosen, the row menu acts on
-/// them, a double click opens the first, and the name's heading sorts. The
-/// field above renames the open pattern; the button opens the pattern whose
-/// name is on the clipboard.
+/// them, choosing opens the first, and the name's heading sorts. The field
+/// above renames the open pattern; the button opens the pattern whose name
+/// is on the clipboard.
 #[component]
 pub fn table_page(app: gallery::Client, #[session] draft: GalleryDraft) -> impl View {
     ui! {
@@ -497,6 +502,7 @@ pub fn table_page(app: gallery::Client, #[session] draft: GalleryDraft) -> impl 
                     MenuItem(id: table_copy, label: tr! { "zh-Hans" => "复制名称", "en" => "Copy the Names" }) => app.copy_names(draft.chosen)
                 }
             } => app.open_chosen(draft.chosen)
+            Watch(value: draft.chosen) => app.open_chosen(draft.chosen)
         }
     }
 }

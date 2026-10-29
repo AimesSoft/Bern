@@ -505,14 +505,14 @@ fn rebuild() -> bool {
     (def.menu)(&c, &mut menu);
     menu.divider();
     if def.login_item {
-        let on = login::enabled();
+        let on = login_on();
         menu.item(
             &c,
             crate::text::tr("bern.app.open_at_login"),
             true,
             Some(on),
             Some(crate::act(move |_| {
-                login::set(!on);
+                set_login(!on);
                 untrack(rebuild);
             })),
         );
@@ -549,6 +549,36 @@ fn rebuild() -> bool {
         );
     }
     true
+}
+
+thread_local! {
+    /// Whether the application opens at login, read once and kept as the
+    /// switches and the menu change it.
+    static LOGIN: crate::reactive::Cell<Option<bool>> = crate::reactive::Cell::new(None);
+}
+
+fn login_on() -> bool {
+    LOGIN.with(|cell| {
+        cell.get().unwrap_or_else(|| {
+            let on = login::enabled();
+            cell.set(Some(on));
+            on
+        })
+    })
+}
+
+fn set_login(on: bool) {
+    login::set(on);
+    LOGIN.with(|cell| cell.set(Some(login::enabled())));
+}
+
+/// `Switch(login_item: true)`: the same setting as the status item's “Open
+/// at Login”, as a switch's state and change.
+pub fn login_model() -> crate::widgets::Model {
+    crate::widgets::Model::Controlled(
+        crate::get(|_| Value::Bool(login_on())),
+        std::rc::Rc::new(|_, value| set_login(crate::value::truthy(&value))),
+    )
 }
 
 fn quit() {

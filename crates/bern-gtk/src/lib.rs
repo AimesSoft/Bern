@@ -68,9 +68,9 @@ pub use query::{Query, QueryProps};
 pub use scene::{
     Accordion, AccordionProps, ControlGroup, ControlGroupProps, Flow, FlowProps, Marquee,
     MarqueeProps, Modal, ModalProps, Positioned, PositionedProps, ScaleBox, ScaleBoxProps, Timer,
-    TimerProps,
+    TimerProps, Watch, WatchProps,
 };
-pub use status::{StatusItemDef, StatusMenu};
+pub use status::{StatusItemDef, StatusMenu, login_model};
 pub use structure::*;
 pub use style::{Look, StyleDef};
 pub use table::{Table, TableColumn, TableProps};

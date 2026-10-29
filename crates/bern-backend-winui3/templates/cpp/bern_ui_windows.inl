@@ -2067,6 +2067,28 @@ inline void Set(bool on) {
 
 }
 
+/// Bumped when “Open at Login” changes here, so a switch showing it reads
+/// the `Run` key again.
+inline Cell<int64_t> loginTick{0};
+
+inline void SetLogin(bool on) {
+    Login::Set(on);
+    loginTick.Set(loginTick.Peek() + 1);
+}
+
+/// `Switch(login_item: true)`: the same setting as the status item's
+/// “Open at Login”, as a switch's state and change.
+inline Get LoginCurrent() {
+    return [](Ctx const&) {
+        loginTick.Get();
+        return Value::Bool(Login::Enabled());
+    };
+}
+
+inline std::function<void(Ctx const&, Value const&)> LoginChange() {
+    return [](Ctx const&, Value const& on) { SetLogin(R::Truthy(on)); };
+}
+
 inline void Popup(int x, int y) {
     auto const& def = *app->statusItem;
     std::vector<Entry> entries;
@@ -2083,7 +2105,7 @@ inline void Popup(int x, int y) {
         menu.Divider();
         if (def.loginItem) {
             bool on = Login::Enabled();
-            menu.Item(c, bern::Text::Tr("bern.app.open_at_login"), true, on, [on](Ctx const&) { Login::Set(!on); });
+            menu.Item(c, bern::Text::Tr("bern.app.open_at_login"), true, on, [on](Ctx const&) { SetLogin(!on); });
         }
         menu.Item(c, bern::Text::Tr("bern.app.quit"), true, false, [](Ctx const&) { WindowManager::Quit(); });
         return 0;

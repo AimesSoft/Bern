@@ -572,6 +572,12 @@ open target/bern/macos/Showcase.app
 
 验证：`bern-backend-swiftui` 的 `tables` 测试（表格、受控输入、`paste` 按钮与菜单项）生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过；gallery 的 macOS 与 iOS 构建成功，一个实际应用的 macOS 版构建成功（第一次因与 `BernStyle.swift` 的 `BernRow` 布局重名而失败，行类型改名为 `BernTableRow`）。未运行：表格的选择、菜单、排序标记与剪贴板的读写在 macOS 与 iOS 上都未实测。
 
+## 跟随值的动作、文字颜色与登录项开关（2026-10-29）
+
+`Watch` 生成 `BernWatch(value:)`：一个不可见的视图，`.onChange(of: value, initial: true)` 运行动作；它跟随的值都是 `Equatable` 的（数值、文字、列表、可选值与生成的枚举）。`Text(color:)` 加 `.foregroundStyle(BernColor.role(…).color)`：状态色是系统的 green、orange、red，`accent` 是应用选的或系统的强调色。`Switch(login_item: true)` 生成 `BernLoginItemToggle(label:)`，与状态栏菜单的“登录时启动”共用 `BernLoginItem`（`SMAppService.mainApp` 的 register 与 unregister，被用户在系统设置里关掉的打开系统设置的登录项页），出现时重读状态；外部入口的 `set_bool` 也经它。
+
+验证：`tables` 测试覆盖三者，按 macOS、iOS、tvOS 的 SDK 类型检查；一个实际应用的 macOS debug 构建编译通过。未在 Mac 上运行。
+
 ## 未完成与已知限制
 
 - 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）均未实现。菜单栏已在 2026-10-24 实现，见下文“菜单栏、跟随状态的快捷键与改键”。

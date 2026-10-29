@@ -63,6 +63,8 @@ const FEATURES: &[&str] = &[
     feature::FILE_PICK,
     feature::TABLE,
     feature::CONTROLLED_TEXT,
+    feature::WATCH,
+    feature::LOGIN_SWITCH,
     feature::PASTE,
     feature::SCROLL_SNAP,
     feature::RAILS,

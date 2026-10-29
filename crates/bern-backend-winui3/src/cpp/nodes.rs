@@ -300,6 +300,7 @@ impl Generator<'_> {
             "Flow" => self.flow(out, element),
             "Modal" => self.modal(out, element),
             "Timer" => self.timer(out, element),
+            "Watch" => self.watch(out, element),
             "Shortcut" => self.key_shortcut(out, element),
             "ShortcutInput" => self.shortcut_input(out, element),
             "ControlGroup" => self.control_group(out, element),

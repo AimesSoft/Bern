@@ -125,6 +125,8 @@ const FEATURES: &[&str] = &[
     bern_target_api::feature::STATUS_ITEM,
     bern_target_api::feature::TABLE,
     bern_target_api::feature::CONTROLLED_TEXT,
+    bern_target_api::feature::WATCH,
+    bern_target_api::feature::LOGIN_SWITCH,
     bern_target_api::feature::PASTE,
     bern_target_api::feature::RUNTIME_THEME,
     bern_target_api::feature::RUNTIME_PALETTE,

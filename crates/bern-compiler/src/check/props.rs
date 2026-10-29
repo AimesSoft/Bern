@@ -509,6 +509,22 @@ impl Checker<'_> {
     }
 
     /// A semantic color role, such as `accent` or `fill.subtle`.
+    /// The color a text is drawn in: the accent or a status color.
+    pub(super) fn text_color(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
+        const TEXT_COLORS: &[&str] = &["accent", "status.success", "status.warning", "status.error"];
+        let prop = self.color_role(expr)?;
+        match &prop {
+            ir::Prop::Keyword { value } if TEXT_COLORS.contains(&value.as_str()) => Some(prop),
+            _ => {
+                self.error(
+                    expr.span(),
+                    format!("a text's `color` is one of {}", TEXT_COLORS.join(", ")),
+                );
+                None
+            }
+        }
+    }
+
     pub(super) fn color_role(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
         match expr {
             ast::Expr::Path(path) => {
@@ -599,6 +615,36 @@ impl Checker<'_> {
                     expr.span(),
                     format!(
                         "`{prop_name}` identifies with text, a number or an enum, found {}",
+                        lowered.ty.display()
+                    ),
+                );
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// A value an element follows: scalars, and optionals or lists of them.
+    pub(super) fn watched(
+        &mut self,
+        prop_name: &str,
+        expr: &ast::Expr,
+        scope: &Scope,
+    ) -> Option<ir::Prop> {
+        fn plain(ty: &Type) -> bool {
+            match ty {
+                Type::Bool | Type::Int | Type::Float | Type::Text | Type::Enum { .. } => true,
+                Type::Optional { inner } | Type::List { inner } => plain(inner),
+                Type::Unit | Type::Record { .. } => false,
+            }
+        }
+        match self.expr(expr, scope) {
+            Some(lowered) if plain(&lowered.ty) => Some(ir::Prop::Expr { expr: lowered }),
+            Some(lowered) => {
+                self.error(
+                    expr.span(),
+                    format!(
+                        "`{prop_name}` follows a bool, number, text or enum, or an optional or list of them, found {}",
                         lowered.ty.display()
                     ),
                 );

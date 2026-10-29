@@ -539,6 +539,11 @@ fn gallery_generates_without_warnings() {
         "B::MenuItemDef{.id = \"table_favorite\"",
         "B::TextInput(p, c, {.id = \"rename\"",
         ".paste = Field{",
+        // Choosing a pattern opens it.
+        "B::Watch(p, c, {.value = ",
+        // The about window's note in the accent, and the login item.
+        ".color = \"accent\"",
+        ".current = StatusArea::LoginCurrent(), .change = StatusArea::LoginChange()",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`");
     }

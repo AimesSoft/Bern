@@ -238,6 +238,12 @@ flowchart LR
 
 验证（2026-10-29，gallery 的 `web_app` 在桌面 Chromium 内核的浏览器里）：表格显示、单击与 Shift 多选、以真实的 `contextmenu` 事件打开行菜单（那一行先被选中）、菜单项、点表头换排序与箭头、双击运行主操作；受控输入框打字时文字保留（失去焦点后写回引擎文字未单独验证）。剪贴板：浏览器拒绝自动化读取剪贴板，`readText` 与 `writeText` 用替身代替，验证到调用路径与之后的草稿与命令。观察到：一行里 `TextInput` 旁的按钮会被压得比文字还窄（已有问题，不是这次引入）。Safari 与 Firefox 未看。
 
+## 跟随值的动作、文字颜色与登录项开关（2026-10-29）
+
+`Watch` 是 `B.Watch`：effect 读值，与上一次用 `eq` 比较（深比较；64 位整数是 `bigint`，`JSON.stringify` 会抛错），不同时在 `untrack` 里运行动作，第一次总会运行。`Text(color:)` 把文字的 `color` 设为主题变量（`var(--bern-status-success)` 等），随明暗与高对比切换。网页不能在登录时打开，`Switch(login_item: true)` 不生成任何东西（能力 `login_switch` 不适用）。
+
+验证：`features-runtime` 测试覆盖 `Watch` 的首次运行、变化、相等的值不算变化、64 位数值与卸载后不再运行；gallery 的生成器测试覆盖 `Watch` 与文字颜色。未在浏览器里运行。
+
 ## 验证记录
 
 2026-10-10，v0.1 视觉规范（窗口呈现已由 v0.2 取代），内置浏览器，`python3 -m http.server` 提供 `target/bern/web_app`：

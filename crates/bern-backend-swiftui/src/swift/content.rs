@@ -37,6 +37,12 @@ impl Generator<'_> {
             Some("tertiary") => out.line(".foregroundStyle(.tertiary)"),
             _ => {}
         }
+        if let Some(role) = element.keyword("color") {
+            out.line(format!(
+                ".foregroundStyle(BernColor.role({}).color)",
+                string(role)
+            ));
+        }
         if let Some(role) = element.keyword("mark") {
             out.line(format!(".bernMark(.role({}))", string(role)));
         }

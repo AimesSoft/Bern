@@ -4823,6 +4823,78 @@ fn a_text_input_shows_state_and_each_edit_runs_the_action() {
 }
 
 #[test]
+fn a_watch_follows_plain_values_and_needs_an_action() {
+    let compiled = compile_project(
+        TABLE_PROTOCOL,
+        &table_ui(
+            r#"Column {
+                Watch(value: draft.chosen) => app.open(draft.chosen)
+                Watch(value: app.title) => app.rename(app.title)
+            }"#,
+        ),
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let mut watches = Vec::new();
+    for component in &compiled.app.components {
+        component.body.walk(&mut |node| {
+            if let ir::Node::Element(element) = node
+                && element.kind == "Watch"
+            {
+                watches.push(element.clone());
+            }
+        });
+    }
+    assert_eq!(watches.len(), 2);
+    assert!(watches.iter().all(|watch| watch.expr("value").is_some()
+        && matches!(watch.action, Some(ir::Action::Engine { .. }))));
+    let records = table_errors(r#"Watch(value: app.rows) => app.open(draft.chosen)"#);
+    assert!(records.contains("`value` follows"), "{records}");
+    let silent = table_errors(r#"Watch(value: draft.chosen)"#);
+    assert!(!silent.is_empty());
+}
+
+#[test]
+fn text_takes_the_accent_or_a_status_color() {
+    compile_project(
+        TABLE_PROTOCOL,
+        &table_ui(
+            r#"Column {
+                Text(content: tr! { "en" => "Fast", "ja" => "速い" }, color: status.success)
+                Text(content: tr! { "en" => "Mine", "ja" => "自分" }, color: accent)
+            }"#,
+        ),
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let surface = table_errors(
+        r#"Text(content: tr! { "en" => "Fast", "ja" => "速い" }, color: surface.panel)"#,
+    );
+    assert!(surface.contains("a text's `color` is one of"), "{surface}");
+    let both = table_errors(
+        r#"Text(content: tr! { "en" => "Fast", "ja" => "速い" }, color: status.error, emphasis: secondary)"#,
+    );
+    assert!(both.contains("write one of them"), "{both}");
+}
+
+#[test]
+fn a_login_item_switch_shows_the_system_setting() {
+    compile_project(
+        TABLE_PROTOCOL,
+        &table_ui(
+            r#"Switch(id: at_login, label: tr! { "en" => "Open at Login", "ja" => "ログイン時に開く" }, login_item: true)"#,
+        ),
+    )
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let checked = table_errors(
+        r#"Switch(id: at_login, label: tr! { "en" => "Open at Login", "ja" => "ログイン時に開く" }, login_item: true, checked: true)"#,
+    );
+    assert!(checked.contains("takes no `checked`"), "{checked}");
+    let acting = table_errors(
+        r#"Switch(id: at_login, label: tr! { "en" => "Open at Login", "ja" => "ログイン時に開く" }, login_item: true) => app.rename(app.title)"#,
+    );
+    assert!(acting.contains("takes no action"), "{acting}");
+}
+
+#[test]
 fn paste_reads_the_clipboard_into_a_text_draft() {
     compile_project(
         TABLE_PROTOCOL,

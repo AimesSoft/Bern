@@ -1,8 +1,9 @@
-//! `Table`, `TextInput(current:)` and `paste:`: the system table on macOS
-//! and iOS and a list of row buttons on tvOS, a field that keeps the
-//! user's text while it is edited, and buttons that read the clipboard,
-//! which tvOS does not have. The Swift is type-checked against each
-//! system's SDK.
+//! `Table`, `TextInput(current:)`, `paste:` and `Watch`: the system table
+//! on macOS and iOS and a list of row buttons on tvOS, a field that keeps
+//! the user's text while it is edited, buttons that read the clipboard,
+//! which tvOS does not have, and the choice told to the engine; with them
+//! a text in a status color and the login item's switch, which only macOS
+//! shows. The Swift is type-checked against each system's SDK.
 
 use bern_backend_swiftui::{
     MINIMUM_IOS, MINIMUM_MACOS, MINIMUM_TVOS, SwiftUiIos, SwiftUiMacos, SwiftUiTvos,
@@ -112,6 +113,9 @@ pub fn page(app: rows::Client, #[session] draft: Draft) -> impl View {{
                     MenuItem(id: remove, label: tr! {{ "en" => "Remove" }}, role: destructive) => app.remove(draft.chosen)
                 }}
             }} => app.activate(draft.chosen)
+            Watch(value: draft.chosen) => app.activate(draft.chosen)
+            Text(content: tr! {{ "en" => "Fast" }}, color: status.success)
+            Switch(id: at_login, label: tr! {{ "en" => "Open at Login" }}, login_item: true)
         }}
     }}
 }}
@@ -272,12 +276,21 @@ fn macos_and_ios_show_the_system_table() {
             // clipboard.
             "BernHeldText(",
             "BernClipboard.paste { text in ",
+            // The engine hears of each new choice.
+            "BernWatch(value: session_Draft.chosen) {",
+            ".foregroundStyle(BernColor.role(\"status.success\").color)",
         ] {
             assert!(
                 swift.contains(expected),
                 "{name} lacks `{expected}`:\n{swift}"
             );
         }
+        // Only macOS opens applications at login.
+        assert_eq!(
+            swift.contains("BernLoginItemToggle(label: "),
+            name == "macos",
+            "{name}:\n{swift}"
+        );
         typecheck(name);
     }
 }
@@ -307,6 +320,7 @@ fn tvos_lists_row_buttons_and_has_no_clipboard() {
     assert!(!swift.contains("SwiftUI.Table("), "{swift}");
     assert!(swift.contains("SwiftUI.List {"), "{swift}");
     assert!(swift.contains("BernHeldText("), "{swift}");
+    assert!(swift.contains("BernWatch(value: "), "{swift}");
     typecheck("tvos");
 }
 

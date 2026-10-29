@@ -385,6 +385,19 @@ impl Generator<'_> {
         ));
     }
 
+    pub(super) fn watch(&self, out: &mut Out, element: &Element) {
+        let value = element
+            .expr("value")
+            .map(|expr| self.expr(expr))
+            .unwrap_or_else(|| "null".into());
+        let action = element
+            .action
+            .as_ref()
+            .map(|a| self.action(a))
+            .unwrap_or_else(|| "Unit".into());
+        out.line(format!("BernWatch({value}) {{ {action} }}"));
+    }
+
     pub(super) fn control_group(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         out.open(format!(
             "BernControlGroup({}, {}) {{",

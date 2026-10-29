@@ -196,6 +196,29 @@ test("preview creates only rows fitting the viewport and releases rows when it s
   assert.equal(observer.disconnected, true);
 });
 
+test("a watch runs when rendered and when its value changes, not when it is set equal", () => {
+  const { B, Element, flushMicrotasks } = runtime();
+  const scope = new B.Scope();
+  const chosen = B.cell(["a"]);
+  const seen = [];
+  B.within(scope, () => B.Watch(new Element("div"), {}, { value: () => chosen.get() }, () => seen.push(chosen.get().join())));
+  flushMicrotasks();
+  assert.deepEqual(seen, ["a"]);
+  chosen.set(["a", "b"]); flushMicrotasks();
+  assert.deepEqual(seen, ["a", "a,b"]);
+  chosen.set(["a", "b"]); flushMicrotasks();
+  assert.deepEqual(seen, ["a", "a,b"], "an equal value is no change");
+  const opened = B.cell(1n);
+  const ids = [];
+  B.within(scope, () => B.Watch(new Element("div"), {}, { value: () => opened.get() }, () => ids.push(opened.get())));
+  opened.set(1n); flushMicrotasks();
+  opened.set(2n); flushMicrotasks();
+  assert.deepEqual(ids, [1n, 2n], "64-bit numbers compare by value");
+  scope.dispose();
+  chosen.set([]); flushMicrotasks();
+  assert.deepEqual(seen, ["a", "a,b"], "a removed watch runs no more");
+});
+
 test("the interface language follows the browser's preferences in order", () => {
   const { B, navigator } = runtime();
   const choose = (languages, supported) => {

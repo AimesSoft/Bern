@@ -334,6 +334,12 @@ fn planner_and_gallery_build_for_gtk() {
         // The details' keys follow state, and the user chooses them.
         "b::bound_shortcut(c, b::str(|c| ",
         "b::ShortcutInput(p, c, b::ShortcutInputProps { id: \"details_key\"",
+        // Choosing a pattern in the table opens it.
+        "b::Watch(p, c, b::WatchProps { value: Some(b::get(|c| ",
+        // The about window's note in the accent, and the system's login
+        // item as a switch.
+        "color: Some(\"accent\")",
+        "model: Some(b::login_model())",
     ] {
         assert!(ui.contains(expected), "the gallery lacks `{expected}`");
     }
