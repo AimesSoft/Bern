@@ -447,11 +447,12 @@ pub const COMPONENTS: &[ComponentSpec] = &[
             "StatusItem",
             &[
                 req("label", PropKind::LocalizedText),
-                req("icon", PropKind::Icon),
+                opt("icon", PropKind::Icon),
+                opt("image", PropKind::SvgResource),
                 opt("login_item", PropKind::Flag),
             ],
             Children::Only(&["CommandItem", "CommandMenu", "Divider"]),
-            "The application's item in the system's status area, where the platform has one: the notification area of the Windows taskbar and the status icons of Linux desktops show the application icon, and the macOS menu bar shows `icon` as a monochrome symbol. `label` is its tooltip and accessible name. Its menu opens the primary window, then has its children, then quits the application; a click on Windows and Linux opens the primary window. With it, closing the last window leaves the application running. `login_item: true` adds “Open at Login” before quitting: while it is checked the system starts the application when the user logs in, with no window, only this item. Its items run without a window: they read engine state and run commands, not drafts. Elsewhere it shows nothing",
+            "The application's item in the system's status area, where the platform has one. With `icon` the macOS menu bar shows that symbol and the notification area of the Windows taskbar and the status icons of Linux desktops show the application icon; with `image`, a declared one-colour SVG, all three show its shape in the colour of their bar (white on a dark one, black on a light one), as status icons are. `label` is its tooltip and accessible name. Its menu opens the primary window, then has its children, then quits the application; a click on Windows and Linux opens the primary window. With it, closing the last window leaves the application running. `login_item: true` adds “Open at Login” before quitting: while it is checked the system starts the application when the user logs in, with no window, only this item. Its items run without a window: they read engine state and run commands, not drafts. Elsewhere it shows nothing",
         )
     },
     ComponentSpec {
@@ -1726,6 +1727,13 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
                 "a `{}` either asks for a file (`pick:`) or reads the clipboard (`paste:`), not both",
                 spec.name
             ),
+        });
+    }
+    if spec.name == "StatusItem" && shape.props.contains(&"icon") == shape.props.contains(&"image")
+    {
+        errors.push(ShapeError {
+            prop: None,
+            message: "a `StatusItem` shows a symbol (`icon:`) or its own one-colour SVG (`image:`); write one of them".into(),
         });
     }
     if spec.name == "TextInput" {

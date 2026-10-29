@@ -2,7 +2,9 @@
 //! has no widget for it: the desktop shows a StatusNotifierItem that the
 //! application puts on the session bus, with a `com.canonical.dbusmenu`
 //! menu. KDE Plasma shows these itself, GNOME through the AppIndicator
-//! extension that Ubuntu ships. The icon is the application icon; a click
+//! extension that Ubuntu ships. The icon is the application icon, or with
+//! `StatusItem(image:)` its own picture in the colour of the bar: white on
+//! GNOME's top bar and on dark colour schemes, black on light ones. A click
 //! opens the primary window, and the menu opens the primary window, has the
 //! application's items, “Open at Login” with `login_item`, and quits.
 
@@ -25,6 +27,9 @@ pub struct StatusItemDef {
     pub menu: fn(&Ctx, &mut StatusMenu),
     /// The menu has “Open at Login”.
     pub login_item: bool,
+    /// `StatusItem(image:)`: its shape at each size the build drew, as PNG
+    /// in black on clear; empty for the application icon.
+    pub image: &'static [(i32, &'static [u8])],
 }
 
 /// An item of the menu: a command, a divider or a submenu.
@@ -190,8 +195,8 @@ struct Item {
     connection: Option<gio::DBusConnection>,
     name: String,
     title: String,
-    /// The application icon at the sizes status areas use, as ARGB32 in
-    /// network byte order.
+    /// The application icon or the item's own picture at the sizes status
+    /// areas use, as ARGB32 in network byte order.
     pixmaps: Vec<(i32, i32, Vec<u8>)>,
     /// The menu with its top-level entries; ids are positions in a
     /// depth-first walk, from 1 (0 is the root).
@@ -206,6 +211,9 @@ struct Item {
     owned: bool,
     watcher: Option<String>,
     registered: Option<String>,
+    /// With `StatusItem(image:)`, the subscription to the desktop's colour
+    /// scheme the picture's colour follows.
+    scheme: Option<gio::SignalSubscription>,
 }
 
 thread_local! {
@@ -239,13 +247,18 @@ pub(crate) fn show(def: &'static StatusItemDef) {
             connection: None,
             name: name.clone(),
             title: String::new(),
-            pixmaps: pixmaps(host.def.bundle_id),
+            pixmaps: if def.image.is_empty() {
+                pixmaps(host.def.bundle_id)
+            } else {
+                picture(def.image, bar_is_dark(0))
+            },
             menu: Vec::new(),
             revision: 0,
             activation: None,
             owned: false,
             watcher: None,
             registered: None,
+            scheme: None,
         })
     });
     let scope = Scope::detached();
@@ -282,7 +295,10 @@ pub(crate) fn show(def: &'static StatusItemDef) {
         gio::BusType::Session,
         &name,
         gio::BusNameOwnerFlags::NONE,
-        |connection, _| register_objects(&connection),
+        |connection, _| {
+            register_objects(&connection);
+            follow_color_scheme(&connection);
+        },
         |connection, _| {
             with_item(|item| item.owned = true);
             register_with_watcher(&connection);
@@ -828,6 +844,113 @@ fn choose(id: i32) {
     if let Some((act, c)) = run {
         glib::idle_add_local_once(move || act(&c));
     }
+}
+
+/// Whether the bar the status area is on is dark: GNOME's top bar always
+/// is; elsewhere the desktop's colour scheme says (`color-scheme` of the
+/// settings portal: 1 prefers dark, 2 light, 0 says nothing).
+fn bar_is_dark(scheme: u32) -> bool {
+    let gnome = std::env::var("XDG_CURRENT_DESKTOP")
+        .map(|desktop| {
+            desktop
+                .split(':')
+                .any(|part| part.eq_ignore_ascii_case("GNOME"))
+        })
+        .unwrap_or(false);
+    gnome || scheme == 1
+}
+
+/// Draw `StatusItem(image:)` in the colour of the bar now and whenever the
+/// desktop's colour scheme changes.
+fn follow_color_scheme(connection: &gio::DBusConnection) {
+    let def = with_item(|item| item.def);
+    let Some(def) = def.filter(|def| !def.image.is_empty()) else {
+        return;
+    };
+    let apply = move |scheme: u32| {
+        let pixmaps = picture(def.image, bar_is_dark(scheme));
+        let changed = with_item(|item| {
+            let changed = item.pixmaps != pixmaps;
+            item.pixmaps = pixmaps;
+            changed.then(|| item.connection.clone()).flatten()
+        })
+        .flatten();
+        if let Some(connection) = changed {
+            emit(
+                &connection,
+                ITEM_PATH,
+                "org.kde.StatusNotifierItem",
+                "NewIcon",
+                None,
+            );
+        }
+    };
+    // `Read` rather than `ReadOne`, which older portals lack: the value is
+    // wrapped in one more variant.
+    let scheme = |value: &Variant| {
+        let mut value = value.clone();
+        while value.type_() == VariantTy::VARIANT {
+            value = value.as_variant()?;
+        }
+        value.get::<u32>()
+    };
+    connection.call(
+        Some(PORTAL),
+        PORTAL_PATH,
+        "org.freedesktop.portal.Settings",
+        "Read",
+        Some(&("org.freedesktop.appearance", "color-scheme").to_variant()),
+        None,
+        gio::DBusCallFlags::NONE,
+        2000,
+        None::<&gio::Cancellable>,
+        move |result| {
+            if let Some(value) = result.ok().and_then(|reply| scheme(&reply.child_value(0))) {
+                apply(value);
+            }
+        },
+    );
+    let subscription = connection.subscribe_to_signal(
+        Some(PORTAL),
+        Some("org.freedesktop.portal.Settings"),
+        Some("SettingChanged"),
+        Some(PORTAL_PATH),
+        None,
+        gio::DBusSignalFlags::NONE,
+        move |signal| {
+            let args = signal.parameters;
+            let namespace = args.child_value(0).get::<String>().unwrap_or_default();
+            let key = args.child_value(1).get::<String>().unwrap_or_default();
+            if namespace == "org.freedesktop.appearance"
+                && key == "color-scheme"
+                && let Some(value) = scheme(&args.child_value(2))
+            {
+                apply(value);
+            }
+        },
+    );
+    with_item(|item| item.scheme = Some(subscription));
+}
+
+const PORTAL: &str = "org.freedesktop.portal.Desktop";
+const PORTAL_PATH: &str = "/org/freedesktop/portal/desktop";
+
+/// `StatusItem(image:)`'s shape at each size the build drew it, white on a
+/// dark bar and black on a light one.
+fn picture(image: &[(i32, &'static [u8])], dark: bool) -> Vec<(i32, i32, Vec<u8>)> {
+    let shade = if dark { 255 } else { 0 };
+    image
+        .iter()
+        .filter_map(|(_, png)| {
+            let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_static(png));
+            let pixbuf = Pixbuf::from_stream(&stream, None::<&gio::Cancellable>).ok()?;
+            let mut pixels = argb(&pixbuf);
+            for pixel in pixels.as_chunks_mut::<4>().0 {
+                pixel[1..].fill(shade);
+            }
+            Some((pixbuf.width(), pixbuf.height(), pixels))
+        })
+        .collect()
 }
 
 /// The application icon beside the executable, at the sizes status areas

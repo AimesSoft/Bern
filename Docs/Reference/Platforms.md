@@ -21,7 +21,7 @@
 | `bound_shortcuts` | 跟随状态的快捷键（`shortcut: app.keys.x`、`Shortcut(key: app.keys.x)`） | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
 | `shortcut_input` | 按下组合键改键的 `ShortcutInput` | 支持 | 支持（硬件键盘） | 支持（只显示） | 支持 | 支持（硬件键盘） | 支持 | 支持 |
 | `menu_bar` | 应用菜单栏 `MenuBar`、`CommandMenu`、`CommandItem`，`window.menu_bar` | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 |
-| `status_item` | 状态栏项 `StatusItem`（托盘图标与菜单，可加“登录时启动”），关闭最后一个窗口后应用留在那里 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
+| `status_item` | 状态栏项 `StatusItem`（托盘图标与菜单，可加“登录时启动”，图标可以是自己的单色 SVG），关闭最后一个窗口后应用留在那里 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
 | `runtime_palette` | 运行时语义调色板（`WindowSet(palette:)`），各语义角色的浅色与深色可以在运行时整体替换 | 支持 | 支持 | 支持 | — | — | 支持 | 支持 |
 | `runtime_theme` | 运行时主题选择 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | `runtime_images` | 引擎提供图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
@@ -126,6 +126,7 @@
 | 受控滑块绑定整数（2026-10-28） | `Slider(current:)` 读写 `i64` 时，SwiftUI、GTK 与 Web 把滑块的值取整后交给命令，与 WinUI 3、Compose 相同：此前 SwiftUI 编译失败（`Double` 交给 `Int64`），GTK 把浮点数按整数的位置编码，Web 交出非整数 | 显示器调节程序的 macOS 版构建通过；其他目标未实测 |
 | 状态栏项的“登录时启动” `login_item`（2026-10-29） | 菜单在“退出”前加一项，由用户勾选；勾选时系统在登录时以不开窗口的方式启动应用。Windows 为当前用户 `Run` 键下以 `bundle_id` 命名的值（命令带 `--at-login`，任务管理器关掉的算未勾选，卸载程序删去），Linux 为 XDG 自启桌面文件，macOS 为 `SMAppService.mainApp` 并按 `keyAELaunchedAsLogInItem` 关闭启动时的窗口。编译器、SwiftUI（三个 SDK 类型检查）、WinUI 3 与 GTK 的生成测试覆盖这一项；`bern-gtk` 测试覆盖自启命令的引号规则 | Windows 实体机（release 安装版）：按登录命令启动后只有通知区域图标、没有窗口，勾选写入 `Run` 值、取消删去，任务管理器的禁用记录显示为未勾选、重新勾选后清除，运行中再次启动直接结束，卸载删去 `Run` 值。Linux 虚拟机（测试 watcher）：勾选写出自启文件，`Hidden=true` 显示为未勾选，按 `Exec` 启动没有窗口，重复启动直接结束，单击图标打开主窗口，取消删去文件。未验证：真实的注销再登录、Windows 隐藏启动后从图标打开窗口、macOS 的全部行为 |
 | 表格 `Table`、受控 `TextInput(current:)`、`paste:` 与引擎的 `copy_text`（2026-10-29） | `table`、`controlled_text` 七个目标实现，`paste` 除 tvOS 外实现（tvOS 没有剪贴板）。编译器测试覆盖表格的结构规则、`KeysField` 与 `pick`/`paste` 互斥；六个后端的生成器测试含 gallery 的表格页；SwiftUI 生成代码按 macOS、iOS、tvOS 的 SDK 类型检查；WinUI 3 与 Islands 的 gallery 在 Windows 实体机上经 MSVC 编译；Android gallery 构建出 APK；`bern-gtk` 的 clippy 与测试在虚拟机上通过（不含需 WebKitGTK 6 的 `svg`、`script` 特性） | Linux 虚拟机（Broadway）上一个实际应用：表格的选择、右键先选中再出菜单、菜单项、点表头换排序、主操作，增删换序的压力测试无 GTK 断言，受控输入的编辑到达引擎，复制再粘贴的分享链接一字不差。网页（Chromium 内核）：选择、行菜单、排序、双击、受控输入；剪贴板读写用替身。macOS、iOS、tvOS、Android、Windows 未运行 |
+| 状态栏项自己的单色图标 `StatusItem(image:)`（2026-10-29） | `status_item` 的三个桌面目标：构建时把 SVG 的形状画成各平台的尺寸；macOS 是 18 点的模板图片，Windows 是黑白两个 `.ico`（图标资源 2、3，跟随任务栏的明暗），Linux 是嵌进程序的黑色 PNG，运行时按 GNOME 顶栏或设置门户的 `color-scheme` 涂成白色或黑色。编译器测试覆盖 `icon` 与 `image` 二选一、只收已声明的 SVG；三个后端的生成测试检查生成的图片与代码，SwiftUI 按 macOS SDK 类型检查，WinUI 3 在 Windows 实体机上经 `rc` 与 MSVC 编译 | Linux 虚拟机：测试用的 watcher 与门户下，浅色配色时六种尺寸都是黑色，门户改为深色后发出 `NewIcon`、全部变白。macOS 与 Windows 未运行 |
 
 Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
 

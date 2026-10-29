@@ -74,11 +74,13 @@ struct Menu;
 
 /// The `StatusItem`: its tooltip, and the application's items of its menu,
 /// which the generated code adds each time the menu opens; `loginItem`
-/// adds “Open at Login” to the menu.
+/// adds “Open at Login” to the menu; with `image` its icon is its own
+/// picture (icon resources 2 and 3) instead of the application's.
 struct StatusItemDef {
     Str label;
     void (*menu)(Ctx const&, StatusArea::Menu&) = nullptr;
     bool loginItem = false;
+    bool image = false;
 };
 
 struct AppDef {

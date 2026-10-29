@@ -35,6 +35,10 @@ const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Fram
 
 /// The application icon in `Contents/Resources` (`CFBundleIconFile`).
 pub const ICON_FILE: &str = "AppIcon.icns";
+/// The status item's picture in `Contents/Resources`, at one and two
+/// pixels per point.
+pub const STATUS_IMAGE: &str = "BernStatusIcon.png";
+pub const STATUS_IMAGE_2X: &str = "BernStatusIcon@2x.png";
 
 /// A declared Icon Composer document, copied outside the bundle under the
 /// icon's name for `actool`, which compiles it into the bundle's
@@ -398,6 +402,18 @@ impl Target for SwiftUiMacos {
                 contents,
             });
         }
+        // `StatusItem(image:)`: the SVG's shape at the menu bar's 18 points,
+        // which the menu bar draws in its own colour.
+        if let Some(name) = icon::status_image(app) {
+            let path = bern_target_api::svg::resource_path(context, name);
+            for (side, file) in [(18, STATUS_IMAGE), (36, STATUS_IMAGE_2X)] {
+                files.push(GeneratedFile {
+                    path: bundle.join("Contents/Resources").join(file),
+                    contents: icon::status_picture(&path, side, icon::ON_LIGHT)
+                        .map_err(|message| failed(format!("StatusItem image: {message}")))?,
+                });
+            }
+        }
         // The icons `WindowSet(icon:)` switches to, under their asset names:
         // an Icon Composer document beside the primary one for `actool`, an
         // `.icns` or a PNG in `Contents/Resources`.
@@ -602,6 +618,12 @@ impl Target for SwiftUiMacos {
                     .into_iter()
                     .map(|(path, _)| path)
                     .chain([PathBuf::from(ICON_FILE)])
+                    .chain(
+                        icon::status_image(app)
+                            .map(|_| [STATUS_IMAGE, STATUS_IMAGE_2X].map(PathBuf::from))
+                            .into_iter()
+                            .flatten(),
+                    )
                     .chain(alternates.iter().flat_map(|(name, _)| {
                         ["png", "icns"].map(|extension| {
                             PathBuf::from(format!("{}.{extension}", alternate_icon(name)))

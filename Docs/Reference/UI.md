@@ -271,7 +271,7 @@ WindowSet(handle: AppWindows, primary: main) {
 
 `WindowSet` 里的 `StatusItem` 是应用在系统状态区域的一项：Windows 任务栏的通知区域、Linux 桌面的状态区与 macOS 菜单栏右侧。声明了它，关闭最后一个窗口时应用不退出，留在那里。
 
-- `label` 是提示文字与可访问名称；`icon` 只给 macOS，菜单栏里的状态项是系统着色的单色符号。Windows 与 Linux 显示应用图标。
+- `label` 是提示文字与可访问名称。图标二选一：`icon` 是 Bern 图标名，只给 macOS，菜单栏按系统颜色画这个符号，Windows 与 Linux 显示应用图标；`image` 是 `[resources]` 里的单色 SVG（只看形状、不看颜色，镂空就是挖掉的部分），三个桌面平台都显示它，深色的栏上是白色、浅色的栏上是黑色，跟随系统切换。
 - 菜单第一项打开主窗口、最后一项退出，中间是声明的 `CommandItem`、`CommandMenu` 与 `Divider`，可以写在 `if`、`if let`、`match` 与 `ForEach` 里。Windows 与 Linux 上单击图标打开主窗口，右键是菜单；macOS 上点按就是菜单。
 - 菜单不属于任何窗口：只读引擎状态、执行命令与窗口动作，不读写草稿、不读窗口字段，菜单项不带 `pick` 与 `shortcut`。
 - `login_item: true` 在“退出”前加“登录时启动”：用户勾选后，登录时系统启动应用，只出现在状态区，不打开窗口。

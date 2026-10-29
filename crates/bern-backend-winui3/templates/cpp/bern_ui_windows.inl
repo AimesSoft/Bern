@@ -1987,13 +1987,26 @@ inline NOTIFYICONDATAW Data(UINT flags) {
     return data;
 }
 
-/// Add the icon, at the small icon size of the system's scale; again after
-/// Explorer restarted.
+/// The icon at the small icon size of the system's scale: the application
+/// icon, or with `StatusItem(image:)` its picture, black on a light taskbar
+/// (resource 2) and white on a dark one (3), as Windows draws its own.
+inline HICON Icon() {
+    int resource = 1;
+    if (app->statusItem->image) {
+        DWORD light = 0, size = sizeof light;
+        RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme",
+            RRF_RT_REG_DWORD, nullptr, &light, &size);
+        resource = light ? 2 : 3;
+    }
+    int side = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
+    return static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resource), IMAGE_ICON, side, side, LR_SHARED));
+}
+
+/// Add the icon; again after Explorer restarted.
 inline void Add() {
     auto data = Data(NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP);
     data.uCallbackMessage = kCallback;
-    int side = GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem());
-    data.hIcon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(1), IMAGE_ICON, side, side, LR_SHARED));
+    data.hIcon = Icon();
     wcsncpy_s(data.szTip, tooltip.c_str(), _TRUNCATE);
     if (!Shell_NotifyIconW(NIM_ADD, &data)) return;
     data.uVersion = NOTIFYICON_VERSION_4;
@@ -2104,6 +2117,13 @@ inline LRESULT CALLBACK Proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
     if (taskbarCreated && message == taskbarCreated) {
         Add();
         return 0;
+    }
+    // The taskbar turned light or dark: its own picture in the other colour.
+    if (message == WM_SETTINGCHANGE && app->statusItem->image && lparam
+        && wcscmp(reinterpret_cast<wchar_t const*>(lparam), L"ImmersiveColorSet") == 0) {
+        auto data = Data(NIF_ICON);
+        data.hIcon = Icon();
+        Shell_NotifyIconW(NIM_MODIFY, &data);
     }
     return DefWindowProcW(window, message, wparam, lparam);
 }

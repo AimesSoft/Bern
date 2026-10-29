@@ -371,6 +371,8 @@ target\bern\windows\Showcase\showcase.exe
 
 验证“登录时启动”（2026-10-28，同一台机器，显示器调节程序 release 安装版，经 `bern package` 的安装程序静默安装）：以一次性计划任务在桌面会话里运行 `monitor-dial.exe --at-login`（与登录时 Windows 运行 `Run` 值相同的命令）后，进程在会话 1 中运行，没有主窗口，`window list` 为空，通知区域有图标；菜单读出“打开“显示器调节””、分隔线、亮度子菜单、分隔线、“登录时启动”（未勾选）、“退出”。用菜单的键盘导航选“登录时启动”后，`Run` 下出现 `dev.bern.monitordial` = `"C:\Users\…\Programs\MonitorDial\monitor-dial.exe" --at-login`，再打开菜单时已勾选；在 `StartupApproved\Run` 写入 `03 00 …`（任务管理器“禁用”写的值）后菜单显示未勾选，再选一次后该记录被删去、重新显示勾选；取消勾选删去 `Run` 值。应用运行时再以 `--at-login` 启动一次，第二个进程直接结束，原进程仍没有窗口。退出后静默卸载，安装目录、卸载项与 `Run` 值都被删去。Defender 没有报告。未验证：注销后重新登录时的实际启动、隐藏启动后从图标打开主窗口。
 
+
+`StatusItem(image:)`（2026-10-29）：构建时把 SVG 的形状画成 16、20、24、32、40、48、64 像素，黑色一份、白色一份，打成 `status-light.ico` 与 `status-dark.ico`，资源脚本编为图标资源 2 与 3；`StatusItemDef::image` 为真时，`StatusArea::Icon` 读 `HKCU\…\Themes\Personalize` 的 `SystemUsesLightTheme`（任务栏跟随的系统模式，不是应用模式），浅色用 2、深色或读不到用 3，按系统缩放的小图标尺寸载入；隐藏窗口收到 `WM_SETTINGCHANGE`（`ImmersiveColorSet`）时 `NIM_MODIFY` 换图标。验证：生成测试（`formats` 项目）检查资源脚本与两个 `.ico` 的七种尺寸，在 Windows 实体机上经 `rc` 与 MSVC 编译；一个实际应用的 Windows 版构建成功。未运行，通知区域里的样子与随系统切换未看。
 ## 表格、受控文字与剪贴板（2026-10-29）
 
 Windows App SDK 没有表格控件（DataGrid 在社区工具包里），`B::Table` 用系统的 `ListView` 作行，两种前端共用：

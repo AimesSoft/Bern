@@ -1939,7 +1939,7 @@ fn animated_svg_resources_and_controls_are_checked() {
     for (body, expected) in [
         (
             r#"Svg(source: "motion.png", width: 104, height: 104)"#,
-            "Svg requires a .svg resource",
+            "expected a declared .svg resource",
         ),
         (
             r#"Svg(source: "missing.svg", width: 104, height: 104)"#,
@@ -4543,6 +4543,57 @@ fn the_status_item_lowers_into_the_window_catalog_and_belongs_to_no_window() {
                 .join("\n"),
         };
         assert!(errors.contains(expected), "`{items}`: {errors}");
+    }
+}
+
+#[test]
+fn a_status_item_shows_a_symbol_or_its_own_svg() {
+    let compile_item = |item: &str| {
+        let dir = write_project(
+            PROTOCOL,
+            &with_menu_bar("Spacer", item),
+            "\n[resources]\npaths = [\"tray.svg\"]\n",
+        );
+        std::fs::write(
+            dir.join("tray.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/></svg>"#,
+        )
+        .unwrap();
+        let result = config::load(&dir.join("Bern.toml")).and_then(|c| compile(&c));
+        let _ = std::fs::remove_dir_all(dir);
+        result
+    };
+    let app = compile_item(
+        r#"StatusItem(image: "tray.svg", label: tr! { "en" => "A", "ja" => "A" }) { Divider }"#,
+    )
+    .unwrap_or_else(|e| panic!("{e:?}"))
+    .app;
+    let item = app.windows.status_item.as_ref().expect("the status item");
+    assert_eq!(item.resource("image"), Some("tray.svg"));
+    assert_eq!(item.icon("icon"), None);
+    for (item, expected) in [
+        (
+            r#"StatusItem(icon: "star", image: "tray.svg", label: tr! { "en" => "A", "ja" => "A" }) { Divider }"#,
+            "write one of them",
+        ),
+        (
+            r#"StatusItem(image: "tray.png", label: tr! { "en" => "A", "ja" => "A" }) { Divider }"#,
+            "expected a declared .svg resource",
+        ),
+        (
+            r#"StatusItem(image: "other.svg", label: tr! { "en" => "A", "ja" => "A" }) { Divider }"#,
+            "is not declared",
+        ),
+    ] {
+        let errors = match compile_item(item) {
+            Ok(_) => panic!("expected `{item}` to fail"),
+            Err(errors) => errors
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        };
+        assert!(errors.contains(expected), "`{item}`: {errors}");
     }
 }
 

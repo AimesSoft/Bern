@@ -36,6 +36,14 @@ enum BernMenuItems {
 @MainActor
 enum BernStatusArea {
     static var shown = false
+    /// `StatusItem(image:)`: the picture the build drew from the SVG at one
+    /// and two pixels per point, which the menu bar tints as a template.
+    static let picture: NSImage = {
+        let image = NSImage(named: "BernStatusIcon") ?? NSImage(size: NSSize(width: 18, height: 18))
+        image.size = NSSize(width: 18, height: 18)
+        image.isTemplate = true
+        return image
+    }()
     /// Opened at login: the windows the launch opens close as they appear,
     /// until the user opens one.
     static var hidingAtLaunch = false

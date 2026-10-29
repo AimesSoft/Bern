@@ -220,6 +220,32 @@ fn app_ico(app: &Application, context: &BuildContext) -> Result<Vec<u8>, Vec<Dia
     }
 }
 
+/// `StatusItem(image:)`'s icons for a light and a dark taskbar: the SVG's
+/// shape in black and in white at the sizes of the notification area.
+fn status_icos(
+    app: &Application,
+    context: &BuildContext,
+) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+    let Some(name) = icon::status_image(app) else {
+        return Ok(Vec::new());
+    };
+    let path = bern_target_api::svg::resource_path(context, name);
+    [
+        ("app/status-light.ico", icon::ON_LIGHT),
+        ("app/status-dark.ico", icon::ON_DARK),
+    ]
+    .into_iter()
+    .map(|(file, color)| {
+        let images = icon::status_pictures(&path, &[16, 20, 24, 32, 40, 48, 64], color)
+            .map_err(|message| vec![Diagnostic::error(format!("StatusItem image: {message}"))])?;
+        Ok(GeneratedFile {
+            path: file.into(),
+            contents: icon::ico(&images),
+        })
+    })
+    .collect()
+}
+
 /// The file of the alternate icon `name` beside the executable.
 pub(crate) fn alternate_ico(name: &str) -> String {
     format!("app-{name}.ico")
@@ -414,6 +440,7 @@ impl Target for WinUi3Windows {
             ),
             GeneratedFile::text("app/app_ui.inl", generator.interface()),
         ];
+        files.extend(status_icos(app, context)?);
         let svg = bern_target_api::svg::used(app);
         files.push(GeneratedFile::text(
             "app/runtime/bern_ui_svg.inl",

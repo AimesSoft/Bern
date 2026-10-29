@@ -1350,7 +1350,23 @@ pub fn app(app: stage::Client, windows: AppWindows) -> impl View {
 /// A project of the interface `ui` over a small protocol, compiled from
 /// sources written under `dir`.
 fn stage_project(dir: &Path, ui: &str) -> (bern_compiler::Config, bern_compiler::Compiled) {
+    stage_project_with(dir, ui, &[], "")
+}
+
+/// A stage project with `files` beside its `Bern.toml` and `extra` at the
+/// end of it.
+fn stage_project_with(
+    dir: &Path,
+    ui: &str,
+    files: &[(&str, &str)],
+    extra: &str,
+) -> (bern_compiler::Config, bern_compiler::Compiled) {
     let _ = std::fs::remove_dir_all(dir);
+    for (name, contents) in files {
+        let path = dir.join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
     for (package, source) in [
         ("stage-protocol", STAGE_PROTOCOL),
         ("stage-ui", ui),
@@ -1392,7 +1408,9 @@ root = "app"
 
 [targets.linux]
 platform = "linux"
-"#,
+"#
+        .to_string()
+            + extra,
     )
     .unwrap();
     let config = bern_compiler::config::load(&dir.join("Bern.toml")).unwrap();
@@ -1486,10 +1504,48 @@ fn a_status_item_builds_its_menu() {
         "let c = &c.with_local(\"entry\", Rc::new(move || row.clone()));",
         "let tag = rt::tag(&value);",
         "status_item: Some(b::StatusItemDef { label: b::str(|c| ",
-        "menu: status_menu, login_item: true }),",
+        "menu: status_menu, login_item: true, image: &[] }),",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
     }
+    // With its own picture: the SVG's shape at each size, beside the code
+    // that embeds it.
+    let (config, compiled) = stage_project_with(
+        &root.join("target/bern-test/gtk-status-image-project"),
+        &STATUS_UI.replace(
+            "StatusItem(icon: \"star\",",
+            "StatusItem(image: \"art/tray.svg\",",
+        ),
+        &[(
+            "art/tray.svg",
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#08f"/></svg>"##,
+        )],
+        "\n[resources]\npaths = [\"art/tray.svg\"]\n",
+    );
+    let output = root.join("target/bern-test/gtk-status-image");
+    let _ = std::fs::remove_dir_all(&output);
+    let context = stage_context(&config, &compiled, &output);
+    let files = GtkLinux.generate(&compiled.app, &context).unwrap();
+    for side in [16, 22, 24, 32, 48, 64] {
+        let file = files
+            .iter()
+            .find(|file| file.path == Path::new(&format!("app/src/status/{side}.png")))
+            .unwrap_or_else(|| panic!("no {side} pixel picture"));
+        assert_eq!(
+            bern_target_api::icon::png_size(&file.contents),
+            Some((side, side))
+        );
+    }
+    let ui = &files
+        .iter()
+        .find(|file| file.path == Path::new("app/src/ui.rs"))
+        .unwrap()
+        .contents;
+    let ui = String::from_utf8_lossy(ui);
+    assert!(
+        ui.contains("image: &[(16, include_bytes!(\"status/16.png\")), (22, include_bytes!(\"status/22.png\"))"),
+        "{ui}"
+    );
 }
 
 /// A drop area that opens files, written directly in a window rather than

@@ -111,6 +111,9 @@ impl Generator<'_> {
         if item.keyword("login_item") == Some("true") {
             out.line("item.loginItem = true;");
         }
+        if item.resource("image").is_some() {
+            out.line("item.image = true;");
+        }
         out.line("return item;");
         out.close("}");
     }

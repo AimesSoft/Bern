@@ -557,6 +557,8 @@ open target/bern/macos/Showcase.app
 
 验证（2026-10-28）：`bern-backend-swiftui` 的 `menu_bar` 测试含状态栏项，生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过（iOS 与 tvOS 不生成）；显示器调节程序的 macOS 版构建成功。未运行实测：菜单栏里的图标、菜单、Dock 图标的收起与恢复都未在真机上看过。“登录时启动”同样只有生成测试（含 `BernLoginItemToggle`）与类型检查：登录项的登记、登录启动时 Apple 事件是否带 `keyAELaunchedAsLogInItem`（`SMAppService` 登记的登录项未查证）、窗口关闭前是否闪现都未验证。
 
+
+`StatusItem(image:)`（2026-10-29）：构建时把 SVG 的形状画成黑色、背景透明的 18 与 36 像素图，放进 `Contents/Resources` 的 `BernStatusIcon.png` 与 `BernStatusIcon@2x.png`（声明的资源不能用这两个名字）；`BernStatusArea.picture` 用 `NSImage(named:)` 读出，设为 18 × 18 点的模板图片，`MenuBarExtra` 的标签是 `Image(nsImage:)`，由菜单栏按自己的明暗着色。构建计划里把声明的资源放进 `Contents/Resources` 的一步会删去它不认识的文件，两张图加进了保留名单（第一次 release 构建时它们就是这样被删掉的）。验证：`status_image` 测试检查两张图的尺寸、保留名单与生成的标签，生成的 Swift 按 macOS SDK 类型检查通过；未运行，菜单栏里的样子未看。
 ## 表格、受控文字与剪贴板（2026-10-29）
 
 `Table` 生成为 SwiftUI 的 `Table(of: BernTableRow<行, 键>.self, selection:, sortOrder:)`，`BernTableRow` 把行的值与它的键（`Identifiable`）包在一起：

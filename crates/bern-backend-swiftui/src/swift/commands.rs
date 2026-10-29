@@ -193,20 +193,27 @@ impl Generator<'_> {
     }
 
     /// The `MenuBarExtra` scene of the `StatusItem`: `icon` is a symbol,
-    /// which the menu bar draws as a template in its own colour.
+    /// `image` the picture the build drew from its SVG; the menu bar draws
+    /// either as a template in its own colour.
     pub(super) fn status_scene(&self, out: &mut Out) {
         let Some(item) = self.app.windows.status_item.as_ref() else {
             return;
         };
-        let icon = item.icon("icon").unwrap_or("circle");
+        let image = if item.resource("image").is_some() {
+            "SwiftUI.Image(nsImage: BernStatusArea.picture)".to_string()
+        } else {
+            format!(
+                "SwiftUI.Image(systemName: {})",
+                string(item.icon("icon").unwrap_or("circle"))
+            )
+        };
         out.open("SwiftUI.MenuBarExtra {");
         out.line("BernStatusMenu()");
         out.line("    .environment(BernEngine.shared)");
         out.close("} label: {");
         out.indent += 1;
         out.line(format!(
-            "SwiftUI.Image(systemName: {}).accessibilityLabel(SwiftUI.Text(verbatim: {}))",
-            string(icon),
+            "{image}.accessibilityLabel(SwiftUI.Text(verbatim: {}))",
             self.text_prop(item, "label").unwrap_or_default()
         ));
         out.close("}");

@@ -292,6 +292,10 @@ target/bern/linux/Showcase/showcase
 
 验证“登录时启动”（2026-10-29，同一虚拟机与测试方法，显示器调节程序加 `login_item: true` 的 debug 构建）：菜单为“打开“显示器调节””、分隔线、“登录时启动”（`toggle-state` 0）、“退出”；对它发 `Event(clicked)` 后写出 `~/.config/autostart/dev.bern.monitordial.desktop`（`Exec="/home/…/MonitorDial/monitor-dial" --at-login`、`TryExec`、`Name=显示器调节`、`Icon`），菜单变为 1；在文件末尾加 `Hidden=true` 后为 0，再选一次重写文件（不再有 `Hidden`）、回到 1。退出后按文件的 `Exec` 启动：登记到 watcher，`window list` 为空；这时再以 `--at-login` 启动一次，第二个进程约 0.1 秒后以 0 结束，仍没有窗口；`Activate` 后出现 `main#1`；取消勾选删去文件。未验证：真实桌面会话在登录时读取自启文件并启动它。
 
+
+`StatusItem(image:)`（2026-10-29）：构建时把 SVG 的形状画成 16、22、24、32、48、64 像素的黑色 PNG，放在生成的 `app/src/status/` 下，`StatusItemDef::image` 用 `include_bytes!` 带进程序，应用里不带 SVG 渲染器。运行时解码成 ARGB，把颜色换成栏的颜色：`XDG_CURRENT_DESKTOP` 含 GNOME 时（顶栏总是深色）或设置门户的 `org.freedesktop.appearance` `color-scheme` 为 1（偏好深色）时为白色，否则为黑色；启动时用 `Read`（旧门户没有 `ReadOne`，值多包一层 variant）读一次，再订阅 `SettingChanged`，颜色变了就更新 `IconPixmap` 并发出 `NewIcon`。
+
+验证（2026-10-29，`bern-ubuntu` 虚拟机，一个实际应用的 Linux debug 构建，Broadway 上运行）：在 `dbus-run-session` 里用测试用的 StatusNotifierWatcher 代替状态区，用一个 Python 写的设置门户代替 `xdg-desktop-portal`（`color-scheme` 起初为 2，收到信号后改为 1 并发出 `SettingChanged`），`XDG_CURRENT_DESKTOP=KDE`。应用启动后向门户读了 `color-scheme`，`IconPixmap` 的六种尺寸都只有黑色的不透明像素（16 像素是 109 个，64 像素是 2242 个）；门户改为深色后应用发出一次 `NewIcon`，同样多的像素都变成白色。第一次实测时解包门户的值对非 variant 也调用了 `as_variant`，日志里有 GLib 断言，已改为先看类型。`bern-gtk` 的 clippy（默认特性，警告视为错误）与 107 个测试在虚拟机上通过。未验证：KDE Plasma 与 GNOME 真实状态区里的样子。
 ## 表格、受控文字与剪贴板（2026-10-29）
 
 `Table` 是 `GtkColumnView` 与 `GtkMultiSelection`（`table.rs`）：

@@ -136,6 +136,10 @@ pub fn check_declared(app: &Application, platform: Platform) -> Vec<Diagnostic> 
             && [crate::ICON_FILE, "Assets.car"].contains(&resource.name.as_str())
         {
             format!("`{}` is the application icon", resource.name)
+        } else if platform == Platform::Macos
+            && [crate::STATUS_IMAGE, crate::STATUS_IMAGE_2X].contains(&resource.name.as_str())
+        {
+            format!("`{}` is the status item's picture", resource.name)
         } else if reserved(segments[0]) {
             format!("`{}` is a file of the {system} bundle itself", segments[0])
         } else if let Some(directory) = directories.iter().find(|part| part.contains('.')) {

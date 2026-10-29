@@ -1235,7 +1235,7 @@ pub fn app(app: formats::Client, windows: AppWindows) -> impl View {
                     Text(content: app.notice)
                 }
             }
-            StatusItem(icon: "star", label: tr! { "en" => "Formats: {n}", "zh-Hans" => "格式：{n}"; n: app.count }, login_item: true) {
+            StatusItem(image: "art/tray.svg", label: tr! { "en" => "Formats: {n}", "zh-Hans" => "格式：{n}"; n: app.count }, login_item: true) {
                 CommandItem(id: add, label: tr! { "en" => "Add", "zh-Hans" => "添加" }, checked: app.count > 2) => app.add()
                 Divider
                 CommandMenu(label: tr! { "en" => "More", "zh-Hans" => "更多" }) {
@@ -1277,6 +1277,12 @@ fn formats_project(dir: &Path) -> (bern_compiler::Config, bern_compiler::Compile
         .unwrap();
         std::fs::write(dir.join(package).join("src/lib.rs"), source).unwrap();
     }
+    std::fs::create_dir_all(dir.join("art")).unwrap();
+    std::fs::write(
+        dir.join("art/tray.svg"),
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#08f"/></svg>"##,
+    )
+    .unwrap();
     std::fs::write(
         dir.join("Bern.toml"),
         r#"
@@ -1302,6 +1308,9 @@ type = "formats_core::Engine"
 package = "formats-ui"
 sources = ["formats-ui/src/lib.rs"]
 root = "app"
+
+[resources]
+paths = ["art/tray.svg"]
 
 [targets.android]
 platform = "android"
@@ -1375,8 +1384,25 @@ fn text_formats_generate_for_winui3() {
         "[value] { return R::Payload(value, 0); }",
         "item.menu = StatusMenu;",
         "item.loginItem = true;",
+        // Its own picture instead of the application icon.
+        "item.image = true;",
     ] {
         assert!(ui.contains(expected), "missing `{expected}`:\n{ui}");
+    }
+    // The picture for a light and a dark taskbar, as icon resources 2 and 3.
+    let script = std::fs::read_to_string(output.join("app/app.rc")).unwrap();
+    assert!(
+        script.contains("2 ICON \"status-light.ico\"\n3 ICON \"status-dark.ico\""),
+        "{script}"
+    );
+    for name in ["status-light.ico", "status-dark.ico"] {
+        let ico = std::fs::read(output.join("app").join(name)).unwrap();
+        bern_target_api::icon::check_ico(&ico).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!(
+            u16::from_le_bytes([ico[4], ico[5]]),
+            7,
+            "{name} has seven sizes"
+        );
     }
     let catalog = std::fs::read_to_string(output.join("app/app_catalog.cpp")).unwrap();
     for expected in [

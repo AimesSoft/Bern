@@ -523,11 +523,21 @@ impl<'a> Generator<'a> {
             .collect();
         out.line(format!("file_kinds: &[{}],", kinds.join(", ")));
         let status_item = app.windows.status_item.as_ref().map(|item| {
+            // `image`: the pictures the build drew beside this file.
+            let image: Vec<String> = if item.resource("image").is_some() {
+                crate::STATUS_SIDES
+                    .iter()
+                    .map(|side| format!("({side}, include_bytes!(\"status/{side}.png\"))"))
+                    .collect()
+            } else {
+                Vec::new()
+            };
             format!(
-                "b::StatusItemDef {{ label: {}, menu: status_menu, login_item: {} }}",
+                "b::StatusItemDef {{ label: {}, menu: status_menu, login_item: {}, image: &[{}] }}",
                 self.text_prop(item, "label")
                     .unwrap_or_else(|| "b::str(|_| String::new())".into()),
-                item.keyword("login_item") == Some("true")
+                item.keyword("login_item") == Some("true"),
+                image.join(", ")
             )
         });
         out.line(format!("status_item: {},", some(status_item)));

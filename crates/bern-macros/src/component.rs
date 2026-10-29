@@ -744,7 +744,7 @@ impl<'a> Gen<'a> {
                         if let Err(message) = bern_protocol::check_resource_name(name) {
                             self.error(*span, message);
                         } else if !name.to_ascii_lowercase().ends_with(".svg") {
-                            self.error(*span, "Svg requires a .svg resource");
+                            self.error(*span, "expected a declared .svg resource");
                         }
                     }
                     other => self.error(other.span(), "expected a declared .svg resource"),

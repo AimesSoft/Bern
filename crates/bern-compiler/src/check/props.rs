@@ -131,7 +131,7 @@ impl Checker<'_> {
             return None;
         }
         if !name.to_ascii_lowercase().ends_with(".svg") {
-            self.error(*span, "Svg requires a .svg resource");
+            self.error(*span, "expected a declared .svg resource");
             return None;
         }
         Some(ir::Prop::Resource { name: name.clone() })

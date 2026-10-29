@@ -271,6 +271,62 @@ pub fn check(bytes: &[u8]) -> Result<u32, String> {
     Ok(width)
 }
 
+/// The one-colour SVG of `StatusItem(image:)`, a declared resource name.
+pub fn status_image(app: &Application) -> Option<&str> {
+    app.windows.status_item.as_ref()?.resource("image")
+}
+
+/// The colour a status area's own pictures are in on a light bar.
+pub const ON_LIGHT: [u8; 3] = [0, 0, 0];
+/// The colour a status area's own pictures are in on a dark bar.
+pub const ON_DARK: [u8; 3] = [255, 255, 255];
+
+/// The status item's picture, `side` pixels square: the SVG at `path`
+/// fitted and centred, its shape (what it covers, whatever its colours) in
+/// `color`. PNG.
+pub fn status_picture(path: &Path, side: u32, color: [u8; 3]) -> Result<Vec<u8>, String> {
+    let data =
+        std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let options = resvg::usvg::Options {
+        resources_dir: path.parent().map(|parent| parent.to_owned()),
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(&data, &options)
+        .map_err(|error| format!("{}: {error}", path.display()))?;
+    let size = tree.size();
+    let scale = side as f32 / size.width().max(size.height());
+    let dx = (side as f32 - size.width() * scale) / 2.0;
+    let dy = (side as f32 - size.height() * scale) / 2.0;
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(side, side).ok_or("cannot allocate the picture")?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy),
+        &mut pixmap.as_mut(),
+    );
+    // Premultiplied: each channel is the colour times the coverage.
+    for pixel in pixmap.data_mut().as_chunks_mut::<4>().0 {
+        let alpha = pixel[3] as u16;
+        for (channel, value) in pixel[..3].iter_mut().zip(color) {
+            *channel = ((value as u16 * alpha + 127) / 255) as u8;
+        }
+    }
+    pixmap.encode_png().map_err(|error| error.to_string())
+}
+
+/// The status item's picture at each of `sides`, smallest first.
+pub fn status_pictures(path: &Path, sides: &[u32], color: [u8; 3]) -> Result<Vec<Image>, String> {
+    sides
+        .iter()
+        .map(|&side| {
+            Ok(Image {
+                size: side,
+                png: Cow::Owned(status_picture(path, side, color)?),
+            })
+        })
+        .collect()
+}
+
 /// A Windows icon (`.ico`) holding the images as PNG. Images larger than
 /// 256 pixels are kept only when there is nothing smaller, as Windows reads
 /// icons up to 256 pixels.
@@ -831,5 +887,36 @@ mod tests {
                 "ic10"
             ]
         );
+    }
+
+    #[test]
+    fn a_status_picture_is_its_shape_in_one_colour() {
+        let dir = std::env::temp_dir().join(format!("bern-status-picture-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tray.svg");
+        // A red bar across a wide picture: fitted and centred in the
+        // square, white whatever its colour.
+        std::fs::write(
+            &path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 16"><rect width="32" height="16" fill="#e00"/></svg>"##,
+        )
+        .unwrap();
+        let png = super::status_picture(&path, 16, super::ON_DARK).unwrap();
+        assert_eq!(super::png_size(&png), Some((16, 16)));
+        let pixmap = resvg::tiny_skia::Pixmap::decode_png(&png).unwrap();
+        let at = |x: u32, y: u32| pixmap.pixel(x, y).unwrap();
+        assert_eq!(at(8, 1).alpha(), 0, "above the bar");
+        let middle = at(8, 8);
+        assert_eq!(
+            (middle.red(), middle.green(), middle.blue(), middle.alpha()),
+            (255, 255, 255, 255)
+        );
+        assert_eq!(at(8, 14).alpha(), 0, "below the bar");
+        let black = super::status_pictures(&path, &[16, 32], super::ON_LIGHT).unwrap();
+        assert_eq!(
+            black.iter().map(|image| image.size).collect::<Vec<_>>(),
+            [16, 32]
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

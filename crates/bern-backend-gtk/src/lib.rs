@@ -28,6 +28,10 @@ pub use rust::Generator;
 pub const MINIMUM_GTK: &str = "4.14";
 pub const MINIMUM_LIBADWAITA: &str = "1.5";
 
+/// The sizes `StatusItem(image:)` is drawn at, as status areas draw the
+/// application icon.
+pub(crate) const STATUS_SIDES: [u32; 6] = [16, 22, 24, 32, 48, 64];
+
 pub struct GtkLinux;
 
 fn component_names() -> &'static [&'static str] {
@@ -371,6 +375,19 @@ impl Target for GtkLinux {
                 ),
             ),
         ];
+        // `StatusItem(image:)`: the SVG's shape at the sizes status areas
+        // draw, in black on clear; the runtime gives it the bar's colour.
+        if let Some(name) = icon::status_image(app) {
+            let path = bern_target_api::svg::resource_path(context, name);
+            for side in STATUS_SIDES {
+                files.push(GeneratedFile {
+                    path: format!("app/src/status/{side}.png").into(),
+                    contents: icon::status_picture(&path, side, icon::ON_LIGHT).map_err(
+                        |message| vec![Diagnostic::error(format!("StatusItem image: {message}"))],
+                    )?,
+                });
+            }
+        }
         // The application icon next to the executable, which adds the
         // directory to the icon theme and names it after the application:
         // the declared PNG or the Bern logo, or the largest PNG of a
