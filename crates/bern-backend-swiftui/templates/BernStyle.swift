@@ -3550,17 +3550,35 @@ private struct BernPaletteHeight: PreferenceKey {
 }
 
 struct BernSearchPaletteHost<Content: View>: View {
+    /// The window takes its content's size, as a macOS settings window
+    /// does. A geometry reader has no size of its own: around such content
+    /// it would leave the window empty.
+    var fits = false
     @ViewBuilder let content: () -> Content
     @State private var palette = BernPaletteState()
     @Environment(\.colorScheme) private var scheme
     @BernReducedMotion private var reduceMotion
 
     var body: some View {
-        GeometryReader { bounds in
-          // The window's content: what is smaller than the window starts at
-          // its top leading corner, as on the other targets.
-          content()
-            .frame(width: bounds.size.width, height: bounds.size.height, alignment: .topLeading)
+        Group {
+            if fits {
+                layer(content())
+            } else {
+                GeometryReader { bounds in
+                    // The window's content: what is smaller than the window
+                    // starts at its top leading corner, as on the other
+                    // targets.
+                    layer(content().frame(width: bounds.size.width, height: bounds.size.height, alignment: .topLeading))
+                }
+            }
+        }
+        .environment(palette)
+        .onChange(of: reduceMotion, initial: true) { palette.reduceMotion = reduceMotion }
+    }
+
+    /// The content under the palette, which covers it while presented.
+    private func layer(_ content: some View) -> some View {
+        content
             .disabled(palette.presented)
             .accessibilityHidden(palette.presented)
             .overlay {
@@ -3583,9 +3601,6 @@ struct BernSearchPaletteHost<Content: View>: View {
                 }
                 .ignoresSafeArea()
             }
-        }
-        .environment(palette)
-        .onChange(of: reduceMotion, initial: true) { palette.reduceMotion = reduceMotion }
     }
 
     private func panelBounds(in geometry: GeometryProxy) -> CGRect {

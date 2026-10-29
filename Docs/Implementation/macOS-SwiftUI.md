@@ -385,7 +385,7 @@ target/bern/macos/bin/showcase window confirm-close --window settings#1 --confir
 - 资源键可追溯到源码：元素文案为 `组件.节点路径.属性`，枚举标签为 `枚举.变体`，应用名为 `app.name`。生成各语言的 `Localizable.strings` 与 `InfoPlist.strings`。不带参数的文本原样写入（`{{`、`}}` 还原为括号）；带参数的文本保留 Bern 的[消息格式](../Reference/UI.md#文本内容与格式化)，由 `BernText.format(键, [名: BernArg])` 在运行时随当前语言写出复数分支、日期与时长，月名与星期名作为框架文本写入。显示变体字段的枚举标签在 `bernLabel` 中按变体取字段；`CalendarDate` 生成 `bernArg`。2026-10-18 以临时工程经 `BERN_SNAPSHOT_DIR` 快照实测中英文结果。Info.plist 声明 `CFBundleDevelopmentRegion` 与 `CFBundleLocalizations`。
 - 框架自身文案（失败提示、视频控制条、关闭确认按钮等）内置 zh-Hans、zh-Hant、en、ja；应用要求其他语言时构建失败。
 - 颜色全部来自系统：生成代码不设置颜色、背景或材质。未声明品牌色时使用用户的系统强调色。
-- 设置窗口按内容定高、切换页签时自动调整；侧边栏详情列以选中项名称为标题，`Form(title:)` 可为推入页面命名。
+- 设置窗口按内容定高、切换页签时自动调整；侧边栏详情列以选中项名称为标题，`Form(title:)` 可为推入页面命名。窗口内容外的 `BernSearchPaletteHost` 平时用 `GeometryReader` 让内容铺满窗口、从左上角开始，但 `GeometryReader` 没有自己的理想高度：按内容定高（`fixedSize`）时它只有 10 点高，直接写一个 `Form` 的设置窗口因此是空白的（用页签的设置窗口此前实测正常；2026-10-29 修正）。设置窗口改为 `BernSearchPaletteHost(fits: true)`，内容不在 `GeometryReader` 里，窗口取内容的高度；搜索面板的覆盖层不变。离屏量得同样的分组表单在旧写法下 10 点高、新写法下 446 点；`settings_window` 测试检查生成代码并按 macOS SDK 类型检查。
 
 ## 构建与运行
 

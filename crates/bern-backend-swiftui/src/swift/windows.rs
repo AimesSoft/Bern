@@ -113,7 +113,12 @@ impl Generator<'_> {
             window: true,
             ..Ctx::default()
         };
-        out.open("BernSearchPaletteHost {");
+        // A macOS settings window takes its content's height.
+        if self.platform == Platform::Macos && window.role == WindowRole::Settings {
+            out.open("BernSearchPaletteHost(fits: true) {");
+        } else {
+            out.open("BernSearchPaletteHost {");
+        }
         self.node(out, &window.content, &ctx);
         out.close("}");
         out.close("}");
