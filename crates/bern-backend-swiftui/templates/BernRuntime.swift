@@ -1036,6 +1036,7 @@ final class BernHost {
             guard next >= revision else { return }
             revision = next
             let count = try reader.u32()
+            BernTiming.note("state \(next), \(count) fields")
             for _ in 0..<count {
                 let field = try reader.u32()
                 try apply?(field, &reader)
@@ -1073,6 +1074,7 @@ final class BernHost {
         let token = nextToken
         nextToken += 1
         replies[token] = reply
+        BernTiming.note("command \(command)")
         writer.bytes.withUnsafeBufferPointer { buffer in
             bern_app_dispatch(handle, command, buffer.baseAddress, buffer.count, token)
         }
@@ -1241,6 +1243,7 @@ final class BernHost {
         _ context: BernWindowContext, session: UInt32, field: UInt32, _ encode: (inout BernWriter) -> Void
     ) -> Bool {
         guard let handle, context.generation > 0 else { return false }
+        BernTiming.note("draft \(session).\(field)")
         var writer = BernWriter()
         encode(&writer)
         let result = writer.bytes.withUnsafeBufferPointer { buffer in
@@ -2785,4 +2788,51 @@ struct BernColumnOrder<Row>: SortComparator {
 /// table's selection writes to its draft.
 func bernChosen<Key: Hashable>(_ chosen: Set<Key>, in rows: [Key]) -> [Key] {
     rows.filter { chosen.contains($0) }
+}
+
+// MARK: - Development timing
+
+/// Development aid, off unless `BERN_TIMING` is set: prints to standard
+/// error, in milliseconds of system uptime (the clock other tools on the
+/// machine read too), each mouse click and key the app receives, each
+/// draft write, engine command and state the engine sends, and each turn
+/// of the main run loop that kept it busy more than 4 ms, so a slow
+/// interaction splits into waiting and work.
+@MainActor
+enum BernTiming {
+    static let on = ProcessInfo.processInfo.environment["BERN_TIMING"] != nil
+    private static var installed = false
+    private static var turnStart = 0.0
+    private static var observer: CFRunLoopObserver?
+
+    static func now() -> Double { Double(DispatchTime.now().uptimeNanoseconds) / 1e6 }
+
+    static func note(_ text: @autoclosure () -> String) {
+        guard on else { return }
+        FileHandle.standardError.write(Data(String(format: "bern-timing %.1f %@\n", now(), text()).utf8))
+    }
+
+    static func install() {
+        guard on, !installed else { return }
+        installed = true
+        #if os(macOS)
+        NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp, .keyDown]) { event in
+            note("event \(event.type == .leftMouseDown ? "down" : event.type == .leftMouseUp ? "up" : "key")")
+            return event
+        }
+        #endif
+        let activities: CFRunLoopActivity = [.afterWaiting, .beforeWaiting]
+        observer = CFRunLoopObserverCreateWithHandler(nil, activities.rawValue, true, 0) { _, activity in
+            MainActor.assumeIsolated {
+                if activity == .afterWaiting {
+                    turnStart = now()
+                } else if turnStart > 0 {
+                    let took = now() - turnStart
+                    if took > 4 { note(String(format: "busy %.1f", took)) }
+                    turnStart = 0
+                }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
 }

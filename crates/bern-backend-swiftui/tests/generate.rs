@@ -969,7 +969,7 @@ pub fn page(app: demo::Client, #[session] draft: Draft) -> impl View {
     ui! {
         SplitView {
             Sidebar(id: nav, selection: draft.dest, fallback: Dest::Home) {
-                SidebarItem(value: Dest::Home, label: tr! { "en" => "Home" })
+                SidebarItem(value: Dest::Home, label: tr! { "en" => "Home" }, badge: app.count)
                 if draft.more {
                     SidebarItem(value: Dest::Extra, label: tr! { "en" => "Extra" })
                 }
@@ -1140,6 +1140,16 @@ platform = "macos"
             .any(|line| line.contains(".animation(") && line.contains("value: bernEngine.mode)")),
         "{generated}"
     );
+    if !styled {
+        // The tag goes outside the badge: inside it, the system sidebar's row
+        // has no selection value and clicking it does nothing.
+        let lines: Vec<&str> = generated.lines().map(str::trim).collect();
+        let badge = lines
+            .iter()
+            .position(|line| *line == ".badge(Int(bernEngine.count))")
+            .expect("the badge");
+        assert_eq!(lines[badge + 1], ".tag(App_Dest.home)", "{generated}");
+    }
     if styled {
         // Keyboard navigation must see conditional, repeated and matched rows,
         // not just the destinations that existed at initial construction.

@@ -87,7 +87,7 @@ enum BernStatusArea {
 /// which turning it on opens.
 @MainActor
 enum BernLoginItem {
-    static var isOn: Bool { SMAppService.mainApp.status == .enabled }
+    static var isOn: Bool { BernLoginItemState.shared.on }
 
     static func set(_ on: Bool) {
         do {
@@ -99,9 +99,36 @@ enum BernLoginItem {
         } catch {
             NSLog("Bern: “Open at Login” cannot change: %@", error.localizedDescription)
         }
+        BernLoginItemState.shared.refresh()
         if on && SMAppService.mainApp.status == .requiresApproval {
             SMAppService.openSystemSettingsLoginItems()
         }
+    }
+}
+
+/// Whether the login item is on, as last read. The service answers over
+/// XPC, too slowly to ask on every view update (a settings window with
+/// the switch took tens of milliseconds more for each), so it is read at
+/// launch, when the application becomes active, when a toggle appears and
+/// after each change.
+@MainActor
+@Observable
+final class BernLoginItemState {
+    static let shared = BernLoginItemState()
+    private(set) var on = SMAppService.mainApp.status == .enabled
+    @ObservationIgnored private var observer: NSObjectProtocol?
+
+    private init() {
+        observer = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { BernLoginItemState.shared.refresh() }
+        }
+    }
+
+    func refresh() {
+        let now = SMAppService.mainApp.status == .enabled
+        if now != on { on = now }
     }
 }
 
@@ -109,20 +136,12 @@ enum BernLoginItem {
 /// `Switch(login_item: true)` with the application's own label.
 struct BernLoginItemToggle: View {
     var label = BernText.string("bern.app.open_at_login")
-    /// Changes after each choice, so the toggle reads the service again.
-    @State private var revision = 0
 
     var body: some View {
-        let _ = revision
-        SwiftUI.Toggle(label, isOn: Binding(
-            get: { BernLoginItem.isOn },
-            set: { on in
-                BernLoginItem.set(on)
-                revision &+= 1
-            }
-        ))
-        // The other toggle may have changed it.
-        .onAppear { revision &+= 1 }
+        let on = BernLoginItemState.shared.on
+        SwiftUI.Toggle(label, isOn: Binding(get: { on }, set: { BernLoginItem.set($0) }))
+            // System Settings or the other toggle may have changed it.
+            .onAppear { BernLoginItemState.shared.refresh() }
     }
 }
 
@@ -790,6 +809,7 @@ struct BernWindowPlatformModifier: ViewModifier {
             .onAppear {
                 BernSnapshot.applyAppearance()
                 BernSnapshot.installWindowSignals()
+                BernTiming.install()
                 BernHost.shared.registerActions(openWindow: openWindow, openSettings: openSettings)
             }
     }

@@ -432,14 +432,17 @@ impl Generator<'_> {
                     .unwrap_or_default();
                 match element.icon("icon") {
                     Some(icon) => out.line(format!(
-                        "BernSidebarLabel(title: {label}, systemImage: {}).tag({value})",
+                        "BernSidebarLabel(title: {label}, systemImage: {})",
                         string(icon)
                     )),
-                    None => out.line(format!("SwiftUI.Text(verbatim: {label}).tag({value})")),
+                    None => out.line(format!("SwiftUI.Text(verbatim: {label})")),
                 }
+                // The tag goes last: a badge outside it leaves the row
+                // without a selection value, and clicking it does nothing.
                 if let Some(badge) = element.expr("badge") {
                     out.line(format!(".badge(Int({}))", self.expr(badge)));
                 }
+                out.line(format!(".tag({value})"));
             }
             _ => {}
         }

@@ -402,7 +402,7 @@ open target/bern/macos/Showcase.app
 
 示例的受控测试媒体在 `examples/showcase/media/`，由 `make-media.sh` 用 ffmpeg 生成：`aurora.mp4`（8 秒）、`tides.mp4`（6 秒）、`broken.mp4`（不是影片，用于失败）声明为随包资源，随应用包发布；`live/live.m3u8`（没有结束标记的 HLS，时长未知、不可跳转）不随包发布，只作开发辅助：AVFoundation 只通过 HTTP 播放 HLS，例如 `python3 -m http.server --directory examples/showcase/media`。
 
-开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_WINDOW_SIGNALS=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，SIGUSR2 调用 `performMiniaturize(_:)`，与点按标题栏的关闭、最小化按钮相同，供没有屏幕访问的工具验证系统关闭路径和来自用户的窗口事实。这三项只用于开发检查，默认关闭。
+开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_WINDOW_SIGNALS=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，SIGUSR2 调用 `performMiniaturize(_:)`，与点按标题栏的关闭、最小化按钮相同，供没有屏幕访问的工具验证系统关闭路径和来自用户的窗口事实；设置 `BERN_TIMING` 时，应用把收到的点击与按键、草稿写回、引擎命令、引擎送来的状态，以及主线程每一轮忙超过 4 毫秒的时长，按系统开机以来的毫秒数（其他工具读的是同一个时钟）写到标准错误，用来把一次慢的交互分成等待与干活。这四项只用于开发检查，默认关闭。
 
 ### 打包
 
@@ -577,6 +577,14 @@ open target/bern/macos/Showcase.app
 `Watch` 生成 `BernWatch(value:)`：一个不可见的视图，`.onChange(of: value, initial: true)` 运行动作；它跟随的值都是 `Equatable` 的（数值、文字、列表、可选值与生成的枚举）。`Text(color:)` 加 `.foregroundStyle(BernColor.role(…).color)`：状态色是系统的 green、orange、red，`accent` 是应用选的或系统的强调色。`Switch(login_item: true)` 生成 `BernLoginItemToggle(label:)`，与状态栏菜单的“登录时启动”共用 `BernLoginItem`（`SMAppService.mainApp` 的 register 与 unregister，被用户在系统设置里关掉的打开系统设置的登录项页），出现时重读状态；外部入口的 `set_bool` 也经它。
 
 验证：`tables` 测试覆盖三者，按 macOS、iOS、tvOS 的 SDK 类型检查；一个实际应用的 macOS debug 构建编译通过。未在 Mac 上运行。
+
+## 侧栏数量、登录项状态与点击耗时（2026-10-30）
+
+带 `badge` 的 `SidebarItem` 生成 `.badge(n).tag(value)`。此前是 `.tag(value).badge(n)`：数量在选中值外面，系统侧栏的这一行就没有选中值，点它什么都不发生，经会话选中则正常。
+
+登录项开关不再在每次更新视图时读 `SMAppService.mainApp.status`（它经 XPC 回答，设置窗口每更新一次多几十毫秒），改读 `BernLoginItemState` 记下的值：启动时、应用变为活跃时、开关出现时和每次改动后读一次。外部入口的 `set_bool` 与读值也经它。
+
+验证（2026-10-30，GitHub 的 `xcode-27` 运行器，macOS 27.0.1、Xcode 27.1，一个实际应用的 release 构建；辅助功能接口找元素，真实鼠标事件点击）：改前侧栏中带数量的两项点击后 5 秒内都没有选中，改后选中、详情换页；同一台机器上直接用 SwiftUI 写的侧栏里，先 `tag` 后 `badge` 的一行同样点不中，先 `badge` 后 `tag` 的可以。打开含登录项开关的设置窗口，主线程合计忙的时间从 740–860 毫秒降到约 570 毫秒。`BERN_TIMING` 量得换页时主线程忙 70–310 毫秒（概览约 70，带表格、工具栏、搜索与检查器的列表页 220–310），同一台机器上把这几页直接用 SwiftUI 写一遍的对照程序是 70–570 毫秒，两者相当：时间花在 SwiftUI 重建工具栏、AppKit 按玻璃样式重排工具栏和创建表格与检查器上，不在 Bern 的代码里。运行器是虚拟机，真机上的绝对数值未量。iOS 走同一生成路径，未实看。
 
 ## 未完成与已知限制
 
