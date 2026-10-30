@@ -4,5 +4,7 @@
 /benchmarks/out/
 /crates/bern-gtk/target
 /crates/bern-gtk/Cargo.lock
+/crates/bern-gpui/target
+/crates/bern-gpui/Cargo.lock
 __pycache__/
 *.py[cod]

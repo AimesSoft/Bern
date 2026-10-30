@@ -251,6 +251,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bern-backend-gpui"
+version = "0.1.0"
+dependencies = [
+ "bern-backend-web",
+ "bern-compiler",
+ "bern-ir",
+ "bern-media",
+ "bern-protocol",
+ "bern-target-api",
+ "serde_json",
+]
+
+[[package]]
 name = "bern-backend-gtk"
 version = "0.1.0"
 dependencies = [
@@ -305,6 +318,7 @@ name = "bern-cli"
 version = "0.1.0"
 dependencies = [
  "bern-backend-compose",
+ "bern-backend-gpui",
  "bern-backend-gtk",
  "bern-backend-swiftui",
  "bern-backend-web",

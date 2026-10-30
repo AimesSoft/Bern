@@ -14,7 +14,7 @@
 //!   programs that reach the same engine through its IPC channel.
 
 mod glue;
-mod icons;
+pub mod icons;
 mod js;
 mod strings;
 mod style;

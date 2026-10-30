@@ -2,6 +2,8 @@
 
 更新：2026-10-29。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
 
+可选的 GPUI 目标（`ui = "gpui"`，macOS、Windows、Linux）是第一版，只在 macOS 上构建过，下表不含它；它声明的组件与功能见 [GPUI 实现记录](../Implementation/GPUI.md)。
+
 ## 编译期功能支持
 
 “支持”表示后端声明接受对应特性；“不适用”表示后端同样声明接受，但那里没有对应的行为（例如电视与桌面窗口没有方向可转），用到时不报错也不警告；“—”表示未声明，用到该特性的声明会被相应能力检查拒绝。它不表示所有属性行为、视觉效果或设备场景都已经验收。颜色覆盖、动效、窗口和媒体还有独立的能力描述，不能只看此表推断完整支持。

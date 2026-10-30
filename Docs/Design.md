@@ -99,7 +99,7 @@ Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel。Bern 作�
 | WinUI 3 | Windows | WinUI 3 界面（无运行时时回退到系统 XAML）、C++/WinRT 平台宿主与 Rust 桥接 | Windows 默认；阶段五第二批已实现 |
 | Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；第一版已实现 |
 | Flutter | Flutter 支持且 Bern 已适配的平台 | Dart Widget、绑定代码与 Flutter 工程集成 | 可选跨平台目标 |
-| GPUI | Windows、macOS、Linux | GPUI Rust UI 与原生集成 | 可选桌面目标 |
+| GPUI | Windows、macOS、Linux（含没有桌面环境的嵌入式 Linux） | GPUI Rust UI、Rust 运行时与原生窗口 | 可选桌面目标，面向大型生产力软件、跨平台一致外观与嵌入式设备；macOS 第一版 |
 | AppKit | macOS | AppKit 控件及窗口集成 | 可独立扩展，或辅助 SwiftUI 适配 |
 
 PC 默认采用各平台的原生 UI 技术：`swiftui + macos`、`gtk + linux`、`winui3 + windows`。`swiftui + macos` 是首个正式实现目标：macOS 有明确的设计规范和成熟的原生组件库，最容易达到系统自带应用的视觉水准，并验证完整架构。Web 没有统一的样式规范，需要 Bern 自行定义视觉规范与主题算法，作为第二个正式目标。其他桌面默认映射不代表对应后端已经实现。
@@ -1056,7 +1056,7 @@ ScrollView(axis: horizontal, snap: center, position: draft.episode) {
 ```
 
 - **晃一下**：任何元素写 `nudge: 条件`，条件变真时它稍稍放大、再以 `jelly` 弹簧弹回，例如拖入文件时画框晃一下：`Stack(nudge: draft.dragging)`。`ScrollView(position:, arrival: nudge)` 让设置 `position` 滚到的那一项在停稳后晃一下，例如点拼音索引后那张海报；用户自己滚动不会触发。减少动态效果时不晃。
-- **转动**：任何元素写 `spin: 条件`，条件成立时它绕自己的中心匀速转动，`spin_period` 秒一圈（默认 1），负数逆时针；条件不成立时停在当时的角度，再成立时从那里接着转，减少动态效果时不转。转动不影响布局，只是画面。例如接收服务就绪时转动的标志：`Image(source: "logo.png", width: 200, height: 200, spin: app.ready, spin_period: 15)`。只为转一张图不必用 `Svg`：`Svg` 需要文档引擎（各平台的网页视图），位图加 `spin` 由系统的合成器转动。SwiftUI 用 `TimelineView` 与 `rotationEffect`，Compose 用逐帧时钟写 `graphicsLayer` 的 `rotationZ`，WinUI 3 每帧写包装层的 `Rotation`，GTK 在帧时钟里给 `MotionBox` 的变换加上旋转，Web 用 CSS 的 `rotate` 属性动画（与其他动效的 `transform` 互不覆盖）。
+- **转动**：任何元素写 `spin: 条件`，条件成立时它绕自己的中心匀速转动，`spin_period` 秒一圈（默认 1），负数逆时针；条件不成立时停在当时的角度，再成立时从那里接着转，减少动态效果时不转。转动不影响布局，只是画面。例如接收服务就绪时转动的标志：`Image(source: "logo.png", width: 200, height: 200, spin: app.ready, spin_period: 15)`。只为转一张图不必用 `Svg`：`Svg` 需要文档引擎（各平台的网页视图），位图加 `spin` 由系统的合成器转动。SwiftUI 用 `TimelineView` 与 `rotationEffect`，Compose 用逐帧时钟写 `graphicsLayer` 的 `rotationZ`，WinUI 3 每帧写包装层的 `Rotation`，GTK 在帧时钟里给 `MotionBox` 的变换加上旋转，Web 用 CSS 的 `rotate` 属性动画（与其他动效的 `transform` 互不覆盖）。GPUI 只转资源里的 `Image`：图里可见的像素是同一种颜色（或 `rendering: template`）时作为单色图形在 GPU 上带变换绘制；多色的在后台线程逐帧转好再画；其他元素不转，`bern check` 给出警告。
 - **重复反馈**（SwiftUI）：`nudge_key: app.revision` 在键每次变化时播放一次反馈，首次挂载不播放；可配 `nudge_scale: 0.95`，先收缩、90 ms 后用 `jelly` 弹回。用于重复点选同一预设等不会改变选中值的操作；新事件取消上次等待，减少动态效果时保持静止。其他后端暂不播放并给出能力警告。
 - **手势绑定到值**：`Pinch` 与 `Swipe` 是包住内容的手势区。`Pinch(value:, min:, max:)` 用双指缩放的倍数乘到值上；`Swipe(value:, min:, max:, axis:, distance:)` 把拖动的距离换算成值的变化，向上或向右增大，`distance` 点（默认 300）走完整个范围。动作在手指离开时执行，与 `Slider` 一样；外部入口用 `ui.set_number`，辅助技术按十分之一范围调节。手势不能是唯一的入口：同一个值应另有滑块、按钮或菜单。
 
@@ -2280,6 +2280,60 @@ Web 是第二个正式后端，承担两种正式构建、浏览器预览和自�
 
 GPUI 目标模块作为显式选择的可选后端生成 Rust UI 代码，不再承担 PC 默认路线。它仍使用统一应用客户端获取状态和执行命令。窗口、字体、输入法、可访问性、焦点和视频表面集成需分别验证，不能只根据一个平台的成功推定全部桌面平台已支持。
 
+实现进度：第一版，macOS 上 RustSend 与一个大型媒体类应用能通过检查、构建并运行；Windows 与 Linux 没有构建过。见 [GPUI 实现记录](Implementation/GPUI.md)。
+
+这个目标服务三类应用，它们是选择 GPUI 而不是平台默认目标的理由：
+
+- **大型生产力软件**：几十万行的表格与列表、可停靠和拖动的多面板布局、代码与富文本编辑、每秒多次刷新的数据视图。这些界面需要虚拟滚动、自绘与 GPU 合成，用系统控件拼出来代价高、各平台表现也不一致。
+- **跨平台一致的外观**：同一个应用在 macOS、Windows 与 Linux 上外观和交互相同，由应用决定视觉，而不是跟随各平台的系统控件。
+- **没有原生 UI 的嵌入式设备**：只有 Linux、GPU 驱动和一个显示服务、没有桌面环境与 GTK 的设备，例如工控面板、车机、信息亭。
+
+目标的定位：
+
+- 显式选择：`ui = "gpui"`，`platform` 为 `macos`、`windows` 或 `linux`，不作为任何平台的默认值。同一应用可以同时构建 GPUI 目标与平台默认目标。
+- 颜色来源为 `BernTheme`：与 Web 同属算法目标，控件按 Bern 自有的视觉规范绘制（现为 [Web 视觉规范](Adaptation/Web.md)，两个算法目标共用，不模仿任何系统的控件外观）。主题快照由 `bern-theme` 在运行时生成，接入系统的明暗、对比偏好，以及平台能提供时的强调色。
+- 引擎与界面同在一个进程，都是 Rust，经 `bern-ffi` 的进程内接口相连，与 GTK 目标相同；没有 C 接口、Swift 或 C++ 宿主。
+
+目标由两个 crate 组成：
+
+| crate | 职责 |
+| --- | --- |
+| `bern-backend-gpui` | 目标描述、能力检查、生成 Rust 代码、构建计划与打包；只生成代码，不依赖 GPUI |
+| `bern-gpui` | 运行时：窗口宿主、会话桥接、主题、控件、图标与动效；与 `bern-gtk` 一样不属于 Bern 工作区，GPUI 只是这个目标的构建依赖 |
+
+依赖与接口隔离：
+
+- crates.io 上的官方 `gpui` 停在 0.2.2（2025-10）。Zed 主线由 longbridge 每周发布为 `gpui-pre`，GPUI Kit（`gpui-base`、`gpui-component`）与它同步发布。运行时钉死一组相互匹配的版本；升级是一次单独的改动，并重跑这个目标的验收。
+- 生成的代码只调用 `bern-gpui` 的函数，不直接调用 GPUI 或控件库，GPUI 的接口变化挡在运行时里，不波及生成器。
+- macOS 使用 `runtime_shaders`：着色器在启动时编译，构建不需要 Xcode 的 Metal 工具链。
+
+控件的行为与外观分开：
+
+- 行为来自 GPUI Kit 的无样式层 `gpui-base`：输入框与输入法、文字选择、焦点陷阱、虚拟列表、表格、可停靠面板、弹层定位、减少动效与 AccessKit 无障碍。这些是自绘控件中最难做对的部分，不自己重写。
+- 外观由 `bern-gpui` 按 Bern 视觉规范与 `bern-theme` 的控件配方绘制。不采用 `gpui-component` 的成品样式：它是另一套设计语言，会让 GPUI 与 Web 两个算法目标外观不同。`gpui-base` 没有行为层、只有 `gpui-component` 提供的复杂组件（例如代码编辑器）逐个评估。
+
+平台与窗口：
+
+| 平台 | 渲染 | 显示 |
+| --- | --- | --- |
+| macOS | Metal | AppKit 窗口 |
+| Windows | Direct3D 11 与 DirectComposition | Win32 窗口 |
+| Linux | wgpu：Vulkan，或 OpenGL ES | Wayland 或 X11 |
+
+三个平台都使用原生多窗口；Window 的虚拟呈现不是这个目标的需要。GPUI 的 Linux 平台只连接 Wayland 与 X11，没有直接写 DRM/KMS 的输出，所以嵌入式设备上由一个全屏的 Wayland 合成器（例如 cage，或 weston 的 kiosk 模式）承载应用。设备至少需要 Vulkan 或 OpenGL ES 3.0 的驱动；只有 OpenGL ES 2 或没有 GPU 的设备不在范围内。嵌入式另需交叉编译与只有一个全屏窗口的呈现，在后续阶段单独设计，并在目标设备上验收。
+
+能力按实现逐项声明：首版能力描述只列出已经实现的组件与功能标记，应用用到其余部分时，现有的能力检查在构建时报错，不生成占位界面。能力表随实现同步。
+
+实施顺序：
+
+1. 准备：依赖版本与构建实测、目标与运行时骨架、最小应用能构建运行。
+2. 控件展示示例：开关、滑块、输入框、选择器、侧栏导航、工具栏、设置窗口、多窗口、本地化与明暗。
+3. 生产力软件所需：虚拟列表与 `Table`、可调整与停靠的分栏、快捷键与命令面板、菜单栏，以及大数据量下的帧时间与内存测量。
+4. 视频、`Canvas`、样式覆盖与动效、状态栏项等平台服务。
+5. 嵌入式：交叉编译、全屏呈现与目标设备实测。
+
+每个阶段按“扩展完成的判断标准”验收：解析器、IR 与业务核心不变；去掉 GPUI 目标后其他目标照常构建；三个平台分别实测，不用 macOS 的结果代替 Windows 与 Linux。
+
 ### Flutter
 
 Flutter 目标模块生成 Dart Widget、属性与事件绑定、本地化数据以及所需工程配置。Flutter 管理布局、绘制和目标侧控件生命周期；Bern 的 Rust 前端绑定模块处理保留在 Rust 中的表达式与协议客户端。
@@ -2697,6 +2751,7 @@ GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试�
 
 | 版本 | 主要内容 |
 | --- | --- |
+| v0.41 | GPUI 目标的定位与准备：面向大型生产力软件、跨平台一致外观与没有原生 UI 的嵌入式设备；运行时钉死 `gpui-pre` 版本，控件行为取自 `gpui-base`、外观按 Bern 视觉规范绘制；嵌入式 Linux 经全屏 Wayland 合成器承载；`bern-backend-gpui` 与 `bern-gpui` 的第一版 |
 | v0.40 | 跟随状态的快捷键：`shortcut:` 与 `Shortcut(key:)` 可绑定文本，六个目标运行时读取；`ShortcutInput` 按下新的组合键改键；`MenuBar`、`CommandMenu`、`CommandItem`：应用的菜单栏菜单、系统菜单里的项与子菜单，项有动作、快捷键、可绑定的启用与勾选，macOS 实现，其他目标不适用；`window.menu_bar`；引擎侧的 `bern::shortcut` |
 | v0.39 | 现在与本地时区（`bern::date::now()`，浏览器取页面的时钟）；引擎在别处做的工作：命令把耗时工作交给别的线程，完成后用 `bern::wake::Waker` 唤醒引擎收进结果；应用的数据与缓存文件夹（`bern::storage::data_dir / cache_dir`，按各平台规范）；系统凭据库中的机密（`bern::secrets`） |
 | v0.38 | 输入框 `submit: clear` 与按钮 `clears: draft.x`：发送后清空草稿并交出焦点 |

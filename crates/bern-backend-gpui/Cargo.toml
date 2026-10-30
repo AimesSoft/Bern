@@ -1,0 +1,18 @@
+[package]
+name = "bern-backend-gpui"
+description = "GPUI target: generates desktop applications drawn with GPUI after Bern's own visual specification, on macOS, Windows and Linux"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bern-backend-web.workspace = true
+bern-ir.workspace = true
+bern-media.workspace = true
+bern-protocol.workspace = true
+bern-target-api.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+bern-compiler.workspace = true

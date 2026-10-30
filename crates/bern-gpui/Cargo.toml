@@ -1,0 +1,59 @@
+[package]
+name = "bern-gpui"
+description = "GPUI runtime of the `gpui` target: Bern's own visual specification drawn with GPUI, bound to the Bern session runtime"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+publish = false
+
+# Built only for applications that choose `ui = "gpui"`, by the crates
+# `bern build` generates. It is not a member of the Bern workspace, so GPUI
+# is never a requirement for building the other targets.
+[workspace]
+
+[dependencies]
+bern-ffi = { path = "../bern-ffi" }
+bern-theme = { path = "../bern-theme" }
+futures = "0.3"
+# Behavior of text fields from GPUI Kit's unstyled layer, made for the same
+# `gpui-pre` release; Bern draws their look.
+gpui-base = "=0.8.1"
+# Zed's GPUI as longbridge publishes it each week, pinned: an upgrade is a
+# change of its own and reruns this target's checks.
+gpui = { package = "gpui-pre", version = "=0.3.10" }
+# Pictures from http(s) addresses in state, fetched by GPUI's image loader.
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
+http_client = { package = "gpui-pre-http-client", version = "=0.3.10" }
+# Template pictures, recolored in the text color.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+smallvec = "1"
+sys-locale = "0.3"
+url = "2"
+
+# GPUI's platform crates, one per system: an application enables only the
+# one it is built for (`macos`, `linux`, `windows`), so Cargo resolves no
+# other system's dependencies. GPUI's own `gpui-pre-platform` would bring
+# the web platform's along, whose newer `js-sys` an application's own crates
+# may not allow.
+[features]
+macos = ["dep:gpui_macos"]
+linux = ["dep:gpui_linux"]
+windows = ["dep:gpui_windows"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Shaders compile when the application starts, so building needs no Metal
+# toolchain. Without `font-kit`, macOS draws no text at all.
+gpui_macos = { package = "gpui-pre-macos", version = "=0.3.10", default-features = false, features = ["runtime_shaders", "font-kit"], optional = true }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSCursor", "NSGraphics", "NSImage", "NSResponder", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColor"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDictionary", "NSGeometry", "NSString"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CABase", "CALayer", "CAMetalLayer", "objc2-core-foundation", "objc2-core-graphics"] }
+raw-window-handle = "0.6"
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
+gpui_linux = { package = "gpui-pre-linux", version = "=0.3.10", default-features = false, features = ["wayland", "x11"], optional = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+gpui_windows = { package = "gpui-pre-windows", version = "=0.3.10", optional = true }

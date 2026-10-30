@@ -191,6 +191,9 @@ fn registry() -> Registry {
     registry.register(Box::new(bern_backend_swiftui::SwiftUiTvos));
     registry.register(Box::new(bern_backend_web::WebBrowser));
     registry.register(Box::new(bern_backend_gtk::GtkLinux));
+    registry.register(Box::new(bern_backend_gpui::Gpui::MACOS));
+    registry.register(Box::new(bern_backend_gpui::Gpui::WINDOWS));
+    registry.register(Box::new(bern_backend_gpui::Gpui::LINUX));
     registry.register(Box::new(bern_backend_winui3::WinUi3Windows));
     registry.register(Box::new(bern_backend_compose::ComposeAndroid));
     registry
