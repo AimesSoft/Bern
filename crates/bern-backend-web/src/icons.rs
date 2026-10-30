@@ -116,6 +116,13 @@ const ICONS: &[(&str, &str, Fill)] = &[
     ),
     ("server.rack", lucide!("server"), Fill::None),
     ("wifi", lucide!("wifi"), Fill::None),
+    (
+        "dot.radiowaves.left.and.right",
+        lucide!("radio"),
+        Fill::None,
+    ),
+    ("power", lucide!("power"), Fill::None),
+    ("arrow.triangle.branch", lucide!("split"), Fill::None),
     ("eye.slash", lucide!("eye-off"), Fill::None),
     (
         "line.3.horizontal.decrease",
