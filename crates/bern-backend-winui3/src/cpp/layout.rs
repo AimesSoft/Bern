@@ -215,10 +215,7 @@ impl Generator<'_> {
         out.line(format!(
             "B::Watch(p, c, {});",
             designated(&[
-                (
-                    "value",
-                    element.expr("value").map(|expr| self.getter(expr)),
-                ),
+                ("value", element.expr("value").map(|expr| self.getter(expr)),),
                 ("action", self.action(element)),
             ])
         ));

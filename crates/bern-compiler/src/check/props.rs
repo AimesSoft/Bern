@@ -511,7 +511,8 @@ impl Checker<'_> {
     /// A semantic color role, such as `accent` or `fill.subtle`.
     /// The color a text is drawn in: the accent or a status color.
     pub(super) fn text_color(&mut self, expr: &ast::Expr) -> Option<ir::Prop> {
-        const TEXT_COLORS: &[&str] = &["accent", "status.success", "status.warning", "status.error"];
+        const TEXT_COLORS: &[&str] =
+            &["accent", "status.success", "status.warning", "status.error"];
         let prop = self.color_role(expr)?;
         match &prop {
             ir::Prop::Keyword { value } if TEXT_COLORS.contains(&value.as_str()) => Some(prop),

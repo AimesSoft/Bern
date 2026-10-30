@@ -490,9 +490,7 @@ impl Checker<'_> {
             PropKind::Transition | PropKind::MotionToken | PropKind::HeroName => {
                 self.style_name(kind, &prop_name, value)
             }
-            PropKind::ColorRole if name == "Text" && prop_name == "color" => {
-                self.text_color(value)
-            }
+            PropKind::ColorRole if name == "Text" && prop_name == "color" => self.text_color(value),
             PropKind::ColorRole => self.color_role(value),
             PropKind::PatternName => self.pattern_name(value),
             PropKind::NumberList => self.number_list(&prop_name, value, scope),

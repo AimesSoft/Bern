@@ -1856,11 +1856,11 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
             });
         }
     }
-    if spec.name == "Text" && shape.props.contains(&"color") && shape.props.contains(&"emphasis")
-    {
+    if spec.name == "Text" && shape.props.contains(&"color") && shape.props.contains(&"emphasis") {
         errors.push(ShapeError {
             prop: Some("color".into()),
-            message: "a text is drawn in its `color` or with an `emphasis`; write one of them".into(),
+            message: "a text is drawn in its `color` or with an `emphasis`; write one of them"
+                .into(),
         });
     }
     let login_item = spec.name == "Switch" && shape.props.contains(&"login_item");

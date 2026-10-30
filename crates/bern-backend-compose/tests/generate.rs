@@ -265,9 +265,15 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     );
     assert!(kotlin.contains("BernTableHeading("), "{kotlin}");
     // Choosing a pattern opens it.
-    assert!(kotlin.contains("BernWatch(session_GalleryDraft.chosen) {"), "{kotlin}");
+    assert!(
+        kotlin.contains("BernWatch(session_GalleryDraft.chosen) {"),
+        "{kotlin}"
+    );
     // The about window's note in the accent; Android has no login items.
-    assert!(kotlin.contains("bernPalette().role(\"accent\")"), "{kotlin}");
+    assert!(
+        kotlin.contains("bernPalette().role(\"accent\")"),
+        "{kotlin}"
+    );
     assert!(!kotlin.contains("open_at_login"), "{kotlin}");
     assert!(
         kotlin.contains("BernTableRow(swatch.id in session_GalleryDraft.chosen"),
