@@ -107,8 +107,8 @@ pub fn app(app: gallery::Client, windows: AppWindows, #[session] draft: GalleryD
                         CommandItem(id: menu_neon, label: tr! { "zh-Hans" => "荧绿", "en" => "Neon" }, checked: app.accent == Accent::Neon) => app.set_accent(Accent::Neon)
                     }
                 }
-                // The about window in place of a help book the gallery has not.
-                CommandMenu(role: help) {
+                // The about window in place of the system's about panel.
+                CommandMenu(role: about) {
                     CommandItem(id: menu_about, label: tr! { "zh-Hans" => "关于图案集", "en" => "About Gallery" }) => windows.about.open()
                 }
             }

@@ -291,8 +291,9 @@ pub fn parse_file_kinds(text: &str) -> Result<String, String> {
 pub const DYNAMIC_ITEMS: &[&str] = &["Sidebar", "Tabs", "Toolbar", "CommandMenu", "StatusItem"];
 
 /// Roles of a `CommandMenu` in the menu bar: the system's menu of that
-/// name takes the items, and the menu shows no title of its own.
-pub const MENU_ROLES: &[&str] = &["app", "file", "edit", "view", "window", "help"];
+/// name takes the items, and the menu shows no title of its own. `about`
+/// is the application menu's About item: the items stand in its place.
+pub const MENU_ROLES: &[&str] = &["app", "about", "file", "edit", "view", "window", "help"];
 
 /// Drawing components: a target without a canvas lists none of them.
 pub const DRAWING: &[&str] = &["Canvas", "Shape", "Series", "Pattern"];
@@ -467,7 +468,7 @@ pub const COMPONENTS: &[ComponentSpec] = &[
                 opt("role", PropKind::Keyword(MENU_ROLES)),
             ],
             Children::Only(&["CommandItem", "CommandMenu", "Divider"]),
-            "A menu of the `MenuBar` titled `label`, or with `role` the system's menu of that name (`app`, `file`, `edit`, `view`, `window`, `help`) taking its items; inside another `CommandMenu` or a `StatusItem` a submenu that opens beside its item; `Divider`s separate groups of items",
+            "A menu of the `MenuBar` titled `label`, or with `role` the system's menu of that name (`app`, `file`, `edit`, `view`, `window`, `help`) taking its items; `about` puts its items in place of the application menu's About item, as `help` puts them in place of the help menu's help item; inside another `CommandMenu` or a `StatusItem` a submenu that opens beside its item; `Divider`s separate groups of items",
         )
     },
     ComponentSpec {
@@ -1780,7 +1781,7 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         if role == shape.props.contains(&"label") {
             errors.push(ShapeError {
                 prop: None,
-                message: "a `CommandMenu` takes `label:` for a menu of its own, or `role:` to add its items to the system's menu of that name".into(),
+                message: "a `CommandMenu` takes `label:` for a menu of its own, or `role:` to add its items to the system's menu of that name (`about` in place of its About item)".into(),
             });
         }
         if role && shape.parent != Some("MenuBar") {

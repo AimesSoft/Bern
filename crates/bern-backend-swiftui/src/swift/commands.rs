@@ -13,10 +13,12 @@ use bern_ir::{Element, Node};
 /// menus: after the system's own items of that menu, the application menu's
 /// after its settings, the file menu's in place of its new-document items
 /// (single windows have none), and the help menu's in place of a help book
-/// the application does not have.
+/// the application does not have. `about`'s stand in place of the About
+/// item, so the system's standard about panel no longer opens.
 fn placement(role: &str) -> &'static str {
     match role {
         "app" => "after: .appSettings",
+        "about" => "replacing: .appInfo",
         "file" => "replacing: .newItem",
         "edit" => "after: .pasteboard",
         "view" => "before: .toolbar",

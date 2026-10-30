@@ -1637,12 +1637,15 @@ ShortcutInput(id: open_key, label: tr! { "zh-Hans" => "打开文件", "en" => "O
 
 ### 菜单栏
 
-应用的菜单写在 `WindowSet` 里的 `MenuBar` 中：每个 `CommandMenu` 是菜单栏上的一个菜单，或用 `role` 把其中的项加进系统的同名菜单（`app` 应用菜单、`file`、`edit`、`view`、`window`、`help`）；`CommandMenu` 里再放 `CommandMenu` 是在该项旁展开的子菜单；`Divider` 分隔各组。`CommandItem` 是一个命令：`label`、绑定的动作、可选的 `shortcut`（字面量或跟随状态）、可绑定的 `enabled`（为假时变灰）与 `checked`（为真时打勾），`pick` 与 `files` 与按钮一样先选文件。菜单里可以写 `if`、`match` 与 `ForEach`。
+应用的菜单写在 `WindowSet` 里的 `MenuBar` 中：每个 `CommandMenu` 是菜单栏上的一个菜单，或用 `role` 把其中的项加进系统的同名菜单（`app` 应用菜单、`file`、`edit`、`view`、`window`、`help`）；`CommandMenu` 里再放 `CommandMenu` 是在该项旁展开的子菜单；`Divider` 分隔各组。系统菜单里有两项由系统提供：应用菜单的“关于”项打开系统的标准关于面板，帮助菜单的帮助项打开应用的帮助手册（没有手册时只提示没有帮助）。`role: about` 的项代替前者，`role: help` 的项代替后者，应用借此打开自己的关于与帮助界面；不写这两个角色时系统的项保持原样。`CommandItem` 是一个命令：`label`、绑定的动作、可选的 `shortcut`（字面量或跟随状态）、可绑定的 `enabled`（为假时变灰）与 `checked`（为真时打勾），`pick` 与 `files` 与按钮一样先选文件。菜单里可以写 `if`、`match` 与 `ForEach`。
 
 ```rust
 WindowSet(handle: AppWindows, primary: main) {
     Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, initial: open) { page(app: app) }
     MenuBar {
+        CommandMenu(role: about) {
+            CommandItem(id: about, label: tr! { "zh-Hans" => "关于播放器", "en" => "About Player" }) => app.show_about(true)
+        }
         CommandMenu(role: file) {
             CommandItem(id: open, label: tr! { "zh-Hans" => "打开…", "en" => "Open…" }, shortcut: app.keys.open, pick: draft.file, files: "video") => app.open(draft.file)
         }
@@ -1659,9 +1662,9 @@ WindowSet(handle: AppWindows, primary: main) {
 
 菜单栏属于应用而不属于某个窗口：菜单项从任何窗口都能执行，它们读写的草稿是主窗口（`primary`）的，根组件用 `#[session]` 参数声明，主窗口因此拥有这些草稿；主窗口关闭时菜单项读写一份新的草稿。外部入口把菜单项列为 `menu_bar.<id>`（角色 `menu_item`），`ui.activate` 与在菜单里选择它相同。
 
-只有系统菜单栏属于应用的平台显示 `MenuBar`：macOS。表达式可以读 `window.menu_bar`，它在构建每个平台时就已知（macOS 为真，其他为假），用来只在 Mac 上显示只有菜单才有的设置，例如这些菜单项的快捷键。iOS、tvOS、Android、Linux、Windows 与网页没有应用菜单栏，目标能力 `menu_bar` 在那里“不适用”：接受声明，什么也不生成，不警告；菜单项的命令应当另有界面入口。
+只有系统菜单栏属于应用的平台显示 `MenuBar`：macOS。表达式可以读 `window.menu_bar`，它在构建每个平台时就已知（macOS 为真，其他为假），用来只在 Mac 上显示只有菜单才有的设置，例如这些菜单项的快捷键。iOS、tvOS、Android、Linux、Windows 与网页没有应用菜单栏，目标能力 `menu_bar` 在那里“不适用”：接受声明，什么也不生成，不警告；菜单项的命令应当另有界面入口。“关于”与帮助也是如此：Windows 与 Linux 没有系统规定的关于项与帮助项（GNOME 应用自己的主菜单里放“关于”，Windows 应用各自放在帮助菜单、设置或标题栏的按钮里），`role: about` 与 `role: help` 在那里同样不生成任何东西，应用把打开关于与帮助的命令放进自己的界面，例如设置里的“关于”页，与 macOS 的菜单项执行同一个命令。
 
-预期实现：SwiftUI 的 `.commands`：自己的菜单是 `CommandMenu`，系统菜单是 `CommandGroup`（`app` 在设置项之后、`file` 替换新建文档项、`edit` 在剪贴板项之后、`view` 在工具栏项之前、`window` 在窗口排列项之后、`help` 替换帮助项），每个菜单的项是一个视图，因此启用、勾选与快捷键随状态更新。实现进度（2026-10-24）：macOS 已实现，用 `examples/gallery` 与一个实际应用实测：菜单出现在菜单栏，系统菜单的项在对应位置，子菜单展开，`ui.activate` 与真实点击菜单项都执行命令，草稿与引擎状态变化后勾选和启用随之更新（读菜单的辅助功能属性验证）。
+预期实现：SwiftUI 的 `.commands`：自己的菜单是 `CommandMenu`，系统菜单是 `CommandGroup`（`app` 在设置项之后、`about` 替换关于项 `.appInfo`、`file` 替换新建文档项、`edit` 在剪贴板项之后、`view` 在工具栏项之前、`window` 在窗口排列项之后、`help` 替换帮助项），每个菜单的项是一个视图，因此启用、勾选与快捷键随状态更新。实现进度（2026-10-24）：macOS 已实现，用 `examples/gallery` 与一个实际应用实测：菜单出现在菜单栏，系统菜单的项在对应位置，子菜单展开，`ui.activate` 与真实点击菜单项都执行命令，草稿与引擎状态变化后勾选和启用随之更新（读菜单的辅助功能属性验证）。`role: about`（2026-10-30）：macOS 已实现，见 macOS 实现记录。
 
 ### 状态栏项
 

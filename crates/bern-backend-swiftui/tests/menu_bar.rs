@@ -90,6 +90,12 @@ pub fn app(app: keys::Client, windows: AppWindows, #[session] draft: Draft) -> i
                 CommandMenu(role: app) {
                     CommandItem(id: preferences, label: tr! { "en" => "Settings…" }, shortcut: "cmd+,") => windows.settings.open()
                 }
+                CommandMenu(role: about) {
+                    CommandItem(id: about, label: tr! { "en" => "About Keys" }) => windows.settings.open()
+                }
+                CommandMenu(role: help) {
+                    CommandItem(id: keys_help, label: tr! { "en" => "Keys Help" }, shortcut: "cmd+?") => app.back()
+                }
             }
             StatusItem(icon: "play", label: tr! { "en" => "Keys" }, login_item: true) {
                 CommandItem(id: status_play, label: tr! { "en" => "Playing" }, checked: app.playing) => app.toggle()
@@ -259,6 +265,10 @@ fn the_menu_bar_is_the_macos_commands_and_shortcuts_follow_state() {
         // The file menu's items stand where new documents would.
         "SwiftUI.CommandGroup(replacing: .newItem) { BernMenu0() }",
         "SwiftUI.CommandGroup(after: .appSettings) { BernMenu2() }",
+        // The About item and the help item run the application's own.
+        "SwiftUI.CommandGroup(replacing: .appInfo) { BernMenu3() }",
+        "SwiftUI.CommandGroup(replacing: .help) { BernMenu4() }",
+        "BernMenuItems.register(\"menu_bar.about\"",
         "SwiftUI.CommandMenu(SwiftUI.Text(verbatim: BernText.string(\"app.0.2.1.label\"))) { BernMenu1() }",
         // The items are views, which follow the state they read.
         "struct BernMenu1: View {",

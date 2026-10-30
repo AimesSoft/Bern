@@ -674,3 +674,9 @@ macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出
 - `tests/menu_bar.rs` 为 macOS、iOS、tvOS 生成同一个应用并按各自 SDK 类型检查：iOS 与 tvOS 不生成菜单栏，`window.menu_bar` 的分支只留在 macOS。
 
 未验证：iPad 的菜单栏（未生成）；没有输入法时输入框与无修饰键菜单项的关系只在拼音输入法下测过；读屏朗读。
+
+#### 应用自己的“关于”与帮助（2026-10-30）
+
+`CommandMenu(role: about)` 生成 `CommandGroup(replacing: .appInfo) { BernMenuN() }`：应用菜单的第一项换成声明的项，系统的标准关于面板不再出现；`role: help` 照旧是 `CommandGroup(replacing: .help)`，帮助菜单里系统的搜索框仍在，其下是声明的项。两者的项与其他菜单项一样是视图，登记为 `menu_bar.<id>`。`examples/gallery` 的“关于图案集”从帮助菜单移到 `role: about`。
+
+验证：`tests/menu_bar.rs` 加入两种角色，检查生成的 `.appInfo` 与 `.help` 两组，Swift 按 macOS SDK 类型检查通过。本机 macOS 27.2 上一个实际应用的 release 构建实测：System Events 点应用菜单的第一项与帮助菜单里的项，执行的是应用的命令（打开应用自己的弹窗），没有出现系统的关于面板与“没有帮助”的提示；帮助项显示声明的 ⌘?。用 `postToPid` 投递的 ⌘? 没有触发这一项（同样投递的 ⌘, 能打开设置），真实键盘未试。未运行：`examples/gallery`。
