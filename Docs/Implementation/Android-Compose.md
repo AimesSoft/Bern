@@ -141,7 +141,7 @@ bern package --target android
 能力描述列出全部 `features`（`session_actions`、`reveal`、`bound_lengths`、`appearance`、`shortcuts`、`runtime_theme`、`button_content`、`toolbar_search`、`search_results`、`toggle_button`、`dialog_windows`、`runtime_images`、`picture_fills`、`file_pick`、`scroll_snap`），动效属性加上 `animate`、`scroll_scale`、`scroll_opacity` 与 `nudge`。
 
 - **带内容的按钮与阴影**：`clickable` 加 `hoverable`，阴影随状态的弹簧变化；重复项中的控件经 `LocalBernItemKeys` 带上每一层的 key。触屏没有悬停，`reveal` 的内容一直显示。
-- **明暗与强调色**：`appearance` 在子树里换一套 Material 配色；`WindowSet(accent:, appearance:)` 改全局配色，状态栏图标随明暗变色。
+- **明暗与强调色**：`appearance` 在子树里换一套 Material 配色；`WindowSet(accent:, appearance:)` 改全局配色，状态栏图标随明暗变色。没有运行时强调色时，`[theme].brand_seed` 经 `bern_target_api::style::brand_accent` 生成 `BernThemeChoice(BernColor.Fixed(浅色, 深色), null)`（2026-10-30 起，未在设备上看过）。
 - **快捷键**：活动的 `dispatchKeyEvent` 先查当前屏幕上的控件登记的快捷键，`cmd` 是 Ctrl；按键也让 `window.idle` 重新计时。
 - **绑定的长度**：`animateDpAsState` 跟随，值与回弹都不低于零。
 - **视频圆角**：有 `corner` 时 `PlayerView` 改用 `TextureView` 才能被裁住。

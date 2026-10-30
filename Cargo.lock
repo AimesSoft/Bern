@@ -454,6 +454,7 @@ dependencies = [
  "bern-media",
  "bern-protocol",
  "bern-svg",
+ "bern-theme",
  "png 0.18.1",
  "resvg",
  "serde",

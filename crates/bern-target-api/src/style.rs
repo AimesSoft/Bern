@@ -2,9 +2,34 @@
 //! control kind and variant, merged for a target to draw.
 
 use crate::names::pascal;
-use bern_ir::style::{ControlSize, StyleEffect, StyleRule, StyleState};
-use bern_ir::{Application, Element, Prop};
+use bern_ir::style::{ColorRef, ControlSize, StyleEffect, StyleRule, StyleState};
+use bern_ir::{Application, Element, Prop, Srgb};
 use std::borrow::Cow;
+
+/// The accent `[theme].brand_seed` gives the native targets that take
+/// their accent from the application rather than from the system's
+/// settings: the seed in each mode as far as it reads there, as a single
+/// color of `style!`'s `accents` is (`bern_theme::native_accent`). `None`
+/// without a seed, or when `WindowSet(accent:)` chooses one at run time.
+pub fn brand_accent(app: &Application) -> Option<ColorRef> {
+    if app.windows.accent.is_some() {
+        return None;
+    }
+    let seed = app.theme.brand_seed?;
+    let readable = |mode| {
+        let color = bern_theme::Srgb::new(seed.red, seed.green, seed.blue);
+        let adjusted = bern_theme::native_accent(color, mode);
+        Srgb {
+            red: adjusted.r,
+            green: adjusted.g,
+            blue: adjusted.b,
+        }
+    };
+    Some(ColorRef::Fixed {
+        light: readable(bern_theme::Mode::Light),
+        dark: readable(bern_theme::Mode::Dark),
+    })
+}
 
 /// A control kind and variant's style on one platform: the rules for the
 /// kind, then those for the variant, merged in declaration order.
@@ -215,5 +240,49 @@ pub fn for_platforms<'a>(app: &'a Application, platforms: &[&str]) -> Cow<'a, Ap
         Cow::Borrowed(app)
     } else {
         Cow::Owned(owned)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::brand_accent;
+    use bern_ir::style::ColorRef;
+    use bern_ir::{Expr, ExprKind, Srgb};
+    use bern_protocol::{Type, Value};
+
+    #[test]
+    fn the_brand_seed_is_the_accent_each_mode_reads() {
+        let mut app = crate::texts::tests::app(Vec::new());
+        assert_eq!(brand_accent(&app), None);
+        // A medium blue reads on both modes and stays as chosen; a pale
+        // yellow darkens on light surfaces.
+        app.theme.brand_seed = Some(Srgb {
+            red: 0x33,
+            green: 0x66,
+            blue: 0xCC,
+        });
+        let Some(ColorRef::Fixed { light, dark }) = brand_accent(&app) else {
+            panic!("no accent");
+        };
+        assert_eq!((light.red, light.green, light.blue), (0x33, 0x66, 0xCC));
+        assert_eq!((dark.red, dark.green, dark.blue), (0x33, 0x66, 0xCC));
+        app.theme.brand_seed = Some(Srgb {
+            red: 0xFF,
+            green: 0xE6,
+            blue: 0x6D,
+        });
+        let Some(ColorRef::Fixed { light, .. }) = brand_accent(&app) else {
+            panic!("no accent");
+        };
+        let sum = |c: Srgb| u32::from(c.red) + u32::from(c.green) + u32::from(c.blue);
+        assert!(sum(light) < 0xFF + 0xE6 + 0x6D);
+        // An accent chosen at run time wins.
+        app.windows.accent = Some(Expr {
+            kind: ExprKind::Literal {
+                value: Value::Text("blue".into()),
+            },
+            ty: Type::Text,
+        });
+        assert_eq!(brand_accent(&app), None);
     }
 }

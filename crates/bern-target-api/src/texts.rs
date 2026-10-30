@@ -1208,7 +1208,7 @@ pub fn tables(app: &Application) -> Vec<(String, Vec<(String, String)>)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use bern_ir::{AppInfo, Languages, Theme, ThemeMode, WindowCatalog};
     use bern_protocol::{ProtocolDescriptor, TypeTable};
@@ -1222,7 +1222,7 @@ mod tests {
         }
     }
 
-    fn app(texts: Vec<LocalizedText>) -> Application {
+    pub(crate) fn app(texts: Vec<LocalizedText>) -> Application {
         Application {
             ir_version: bern_ir::IR_VERSION,
             app: AppInfo {

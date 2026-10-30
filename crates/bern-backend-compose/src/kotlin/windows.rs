@@ -77,11 +77,13 @@ impl Generator<'_> {
             self.close_check(out, close);
         }
         let windows = &self.app.windows;
-        if windows.accent.is_some() || windows.appearance.is_some() {
+        let brand = bern_target_api::style::brand_accent(self.app);
+        if windows.accent.is_some() || windows.appearance.is_some() || brand.is_some() {
             let accent = windows
                 .accent
                 .as_ref()
                 .map(|expr| format!("BernAccents.color(({}).bernName)", self.expr(expr)))
+                .or_else(|| brand.map(|color| crate::style::color(&color)))
                 .unwrap_or_else(|| "null".into());
             let appearance = windows
                 .appearance

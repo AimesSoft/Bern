@@ -729,6 +729,8 @@ TV 的方向键焦点、触摸手势和鼠标悬停作为独立交互能力规�
 
 应用可以只提供一个品牌色：原生目标将其映射为平台强调色，算法目标由 Bern 自动生成各模式与状态所需颜色。自定义品牌是可选项；普通应用无需知道调色算法和后端样式细节。用户可主动选择外观模式，但无需参与逐控件调色。
 
+`brand_seed` 在 SwiftUI 与 Compose 上与 `style!` 的 `accents` 里只写一个颜色时相同：浅色、深色各取 `bern_theme::native_accent` 调到可读的颜色（`bern_target_api::style::brand_accent`），作为系统控件的着色并替换 `accent` 角色；GTK 与 WinUI 3 把它交给系统的强调色资源，Web 用它做 Bern 配色的种子。`WindowSet(accent:)` 在运行时选强调色时，选中的那个优先。
+
 ```toml
 # 整段均可省略，默认跟随系统；原生目标使用系统配色，算法目标使用 Bern 内置配色。
 [theme]

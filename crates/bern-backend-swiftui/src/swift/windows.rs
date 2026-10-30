@@ -143,15 +143,24 @@ impl Generator<'_> {
                 window.landscape.as_ref().map(|e| self.expr(e)).unwrap_or_else(|| "nil".into())
             ));
         }
-        // The application's accent and appearance, chosen at run time.
+        // The application's accent and appearance, chosen at run time, or
+        // the accent of its brand.
         let catalog = &self.app.windows;
-        if catalog.accent.is_some() || catalog.appearance.is_some() || catalog.palette.is_some() {
+        let brand = bern_target_api::style::brand_accent(self.app);
+        if catalog.accent.is_some()
+            || catalog.appearance.is_some()
+            || catalog.palette.is_some()
+            || brand.is_some()
+        {
             out.line(format!(
                 ".modifier(BernThemeChoice(accent: {}, appearance: {}, palette: {}))",
                 catalog
                     .accent
                     .as_ref()
                     .map(|expr| format!("BernAccents.color(({}).bernName)", self.expr(expr)))
+                    .or_else(
+                        || brand.map(|color| format!("BernColor{}", crate::style::color(&color)))
+                    )
                     .unwrap_or_else(|| "nil".into()),
                 catalog
                     .appearance
