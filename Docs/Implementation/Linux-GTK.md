@@ -57,7 +57,7 @@
 | `Form` / `Section` | 滚动、`AdwClamp`（680）的页面；分节为标题、`boxed-list` 列表与脚注 |
 | `Text` / `Label` | `GtkLabel` 用 libadwaita 字体类（`title-1`…`title-4`、`heading`、`caption`、`dim-label`）；表单中的 `Label` 为带前缀图标的 `AdwActionRow` |
 | `Button` / `IconButton` | `GtkButton`；`prominent` 为 `suggested-action`，`plain` 为 `flat`，`destructive` 为 `destructive-action`；图标按钮无边框，名称为提示与可访问名称 |
-| `TextInput` | 表单中为 `AdwEntryRow`、`AdwPasswordEntryRow`，多行为带边框的 `GtkTextView`；其他位置为 `GtkEntry` |
+| `TextInput` | 表单中为 `AdwEntryRow`、`AdwPasswordEntryRow`，多行为带边框的 `GtkTextView`，`prompt` 是叠在空白输入框上的一行 `dim-label`（`GtkTextView` 没有占位文字，提示不接收点击，有字时隐藏）；其他位置为 `GtkEntry` |
 | `Search` | `GtkSearchEntry`；Esc 清空 |
 | `Switch` | 表单中为 `AdwSwitchRow`，`checkbox` 样式为带 `GtkCheckButton` 的行 |
 | `Slider` | 行内为标题与带两端图标的 `GtkScale`；拖动只改本窗口预览，松开提交一次，键盘与滚轮立即提交 |

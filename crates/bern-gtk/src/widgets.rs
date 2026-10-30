@@ -825,7 +825,32 @@ pub fn TextInput(p: &Parent, ctx: &Ctx, props: TextInputProps, submit: Option<Ac
             }
         });
         let frame = gtk::Frame::new(None);
-        frame.set_child(Some(&view));
+        // GtkTextView has no placeholder: the prompt lies over the empty
+        // view as an entry's does, dimmed, and lets the clicks through.
+        match prompt {
+            Some(prompt) => {
+                let overlay = gtk::Overlay::new();
+                overlay.set_child(Some(&view));
+                let hint = gtk::Label::new(None);
+                hint.add_css_class("dim-label");
+                hint.set_halign(gtk::Align::Fill);
+                hint.set_valign(gtk::Align::Start);
+                hint.set_xalign(0.0);
+                hint.set_wrap(true);
+                hint.set_margin_start(8);
+                hint.set_margin_end(8);
+                hint.set_margin_top(8);
+                hint.set_can_target(false);
+                hint.set_visible(buffer.char_count() == 0);
+                let text = hint.clone();
+                effect(move || text.set_text(&prompt()));
+                let shown = hint.clone();
+                buffer.connect_changed(move |buffer| shown.set_visible(buffer.char_count() == 0));
+                overlay.add_overlay(&hint);
+                frame.set_child(Some(&overlay));
+            }
+            None => frame.set_child(Some(&view)),
+        }
         accessible_name(&view, label.clone());
         if p.is_list() {
             p.add(&plain_row(&stacked(shown, &frame)));
