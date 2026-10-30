@@ -1795,6 +1795,13 @@ fn alternate_icons_compile_beside_the_primary_and_switch_at_run_time() {
         text(&mac, "Sources/BernGenerated.swift")
             .contains(r#"BernIconChoice(icon: (["Crimson": "AppIcon-crimson""#)
     );
+    // The record in the about window turns.
+    assert!(
+        mac.iter()
+            .filter(|file| file.path.extension().is_some_and(|ext| ext == "swift"))
+            .any(|file| String::from_utf8_lossy(&file.contents)
+                .contains(".bernSpin(true, period: 12.0)"))
+    );
     let args = actool(&SwiftUiMacos.plan(&compiled.app, &mac_context).unwrap());
     assert!(args.contains("--alternate-app-icon AppIcon-neon"), "{args}");
     assert!(!args.contains("--app-icon"), "{args}");

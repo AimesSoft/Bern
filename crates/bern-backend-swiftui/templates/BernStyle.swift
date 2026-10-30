@@ -2200,6 +2200,13 @@ extension View {
         modifier(BernScrollPosition(position: position, anchor: anchor, motion: motion, arrival: arrival))
     }
 
+    /// While `on` holds the view turns about its center, one turn every
+    /// `period` seconds, counterclockwise below zero; it stops where it is,
+    /// and stays still with reduced motion.
+    func bernSpin(_ on: Bool, period: Double) -> some View {
+        modifier(BernSpin(on: on, period: period))
+    }
+
     /// A short nudge each time `when` turns true: the view swells a little
     /// and springs back with `motion`.
     func bernNudge(_ when: Bool, motion: BernMotion) -> some View {
@@ -2782,6 +2789,37 @@ private struct BernKeyedNudge<Key: Equatable>: ViewModifier {
                 guard !Task.isCancelled else { return }
                 withAnimation(motion.animation) { scale = 1 }
             }
+    }
+}
+
+private struct BernSpin: ViewModifier {
+    let on: Bool
+    let period: Double
+    /// The turn the view stopped at, and when the current spin started.
+    @State private var rest = 0.0
+    @State private var start: Date?
+    @BernReducedMotion private var reduce
+
+    private var turning: Bool { on && !(reduce || bernForcedReduceMotion) }
+
+    func body(content: Content) -> some View {
+        TimelineView(.animation(paused: start == nil)) { timeline in
+            content.rotationEffect(.degrees(turn(at: timeline.date) * 360))
+        }
+        .onAppear { if turning { start = .now } }
+        .onChange(of: turning) { _, now in
+            if now {
+                start = .now
+            } else {
+                rest = turn(at: .now)
+                start = nil
+            }
+        }
+    }
+
+    private func turn(at date: Date) -> Double {
+        guard let start else { return rest }
+        return (rest + date.timeIntervalSince(start) / period).truncatingRemainder(dividingBy: 1)
     }
 }
 

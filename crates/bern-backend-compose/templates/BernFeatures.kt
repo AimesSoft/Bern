@@ -1517,6 +1517,29 @@ fun Modifier.bernScrollEffect(scale: Float, opacity: Float, originX: Float = 0.5
         }
 }
 
+// MARK: - Spinning
+
+/// `spin`: while `on` holds the element turns about its center, one turn
+/// every `period` seconds, counterclockwise below zero; it stops where it
+/// is, and stays still with reduced motion. The turn is read only while
+/// drawing, so spinning recomposes nothing.
+@Composable
+fun Modifier.bernSpin(on: Boolean, period: Double): Modifier {
+    var turn by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val turning = on && !bernReduceMotion()
+    LaunchedEffect(turning, period) {
+        if (!turning) return@LaunchedEffect
+        var last = androidx.compose.runtime.withFrameNanos { it }
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { now ->
+                turn = ((turn + (now - last) / 1e9 / period) % 1.0).toFloat()
+                last = now
+            }
+        }
+    }
+    return graphicsLayer { rotationZ = turn * 360f }
+}
+
 // MARK: - Nudges
 
 /// A short nudge each time `on` turns true: to `size` of its size, then

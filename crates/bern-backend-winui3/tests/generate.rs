@@ -519,6 +519,9 @@ fn gallery_generates_without_warnings() {
         ".reveal = true",
         ".appearance = \"dark\"",
         ".nudge = [](Ctx const& c)",
+        // The record in the about window turns.
+        ".spin = [](Ctx const& c)",
+        ".spinPeriod = 12",
         "R::Url(c.Engine(",
         "B::KeyShortcut(p, c, {.keys = \"escape\"",
         "B::DefaultFocus(c, ",

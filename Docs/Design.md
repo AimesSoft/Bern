@@ -1056,6 +1056,7 @@ ScrollView(axis: horizontal, snap: center, position: draft.episode) {
 ```
 
 - **晃一下**：任何元素写 `nudge: 条件`，条件变真时它稍稍放大、再以 `jelly` 弹簧弹回，例如拖入文件时画框晃一下：`Stack(nudge: draft.dragging)`。`ScrollView(position:, arrival: nudge)` 让设置 `position` 滚到的那一项在停稳后晃一下，例如点拼音索引后那张海报；用户自己滚动不会触发。减少动态效果时不晃。
+- **转动**：任何元素写 `spin: 条件`，条件成立时它绕自己的中心匀速转动，`spin_period` 秒一圈（默认 1），负数逆时针；条件不成立时停在当时的角度，再成立时从那里接着转，减少动态效果时不转。转动不影响布局，只是画面。例如接收服务就绪时转动的标志：`Image(source: "logo.png", width: 200, height: 200, spin: app.ready, spin_period: 15)`。只为转一张图不必用 `Svg`：`Svg` 需要文档引擎（各平台的网页视图），位图加 `spin` 由系统的合成器转动。SwiftUI 用 `TimelineView` 与 `rotationEffect`，Compose 用逐帧时钟写 `graphicsLayer` 的 `rotationZ`，WinUI 3 每帧写包装层的 `Rotation`，GTK 在帧时钟里给 `MotionBox` 的变换加上旋转，Web 用 CSS 的 `rotate` 属性动画（与其他动效的 `transform` 互不覆盖）。
 - **重复反馈**（SwiftUI）：`nudge_key: app.revision` 在键每次变化时播放一次反馈，首次挂载不播放；可配 `nudge_scale: 0.95`，先收缩、90 ms 后用 `jelly` 弹回。用于重复点选同一预设等不会改变选中值的操作；新事件取消上次等待，减少动态效果时保持静止。其他后端暂不播放并给出能力警告。
 - **手势绑定到值**：`Pinch` 与 `Swipe` 是包住内容的手势区。`Pinch(value:, min:, max:)` 用双指缩放的倍数乘到值上；`Swipe(value:, min:, max:, axis:, distance:)` 把拖动的距离换算成值的变化，向上或向右增大，`distance` 点（默认 300）走完整个范围。动作在手指离开时执行，与 `Slider` 一样；外部入口用 `ui.set_number`，辅助技术按十分之一范围调节。手势不能是唯一的入口：同一个值应另有滑块、按钮或菜单。
 

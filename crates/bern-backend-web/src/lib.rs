@@ -381,6 +381,8 @@ impl Target for WebBrowser {
                 "nudge_key",
                 "nudge_scale",
                 "reduce_motion",
+                "spin",
+                "spin_period",
             ],
             window_chrome: true,
             text_marks: true,

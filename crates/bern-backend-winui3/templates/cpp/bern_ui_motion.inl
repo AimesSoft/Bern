@@ -1356,6 +1356,44 @@ inline void ScrollEffect(controls::Grid const& wrapper, std::shared_ptr<ScrollIn
     wrapper.LayoutUpdated([update](auto&&, auto&&) { update(); });
 }
 
+/// `spin`: while `when` holds the element turns about its center, one
+/// turn every `period` seconds, counterclockwise below zero; it stops
+/// where it is, and stays still with reduced motion.
+inline void Spin(xaml::UIElement const& element, Ctx const& ctx, Get when, double period) {
+    struct State {
+        double turn = 0;
+        std::optional<std::chrono::steady_clock::time_point> last;
+        winrt::event_token rendering{};
+        bool running = false;
+    };
+    auto state = std::make_shared<State>();
+    element.as<xaml::FrameworkElement>().SizeChanged([weak = winrt::make_weak(element)](auto&&, xaml::SizeChangedEventArgs const& args) {
+        if (auto element = weak.get()) element.CenterPoint(float3{args.NewSize().Width / 2, args.NewSize().Height / 2, 0});
+    });
+    auto stop = [state] {
+        if (!state->running) return;
+        media::CompositionTarget::Rendering(state->rendering);
+        state->running = false;
+        state->last.reset();
+    };
+    Reactive::Run([when, ctx, state, stop, period, weak = winrt::make_weak(element)] {
+        bool on = R::Truthy(when(ctx)) && !Reduced();
+        if (!on) return stop();
+        if (state->running) return;
+        state->running = true;
+        state->rendering = media::CompositionTarget::Rendering([state, period, weak](auto&&, auto&&) {
+            auto now = std::chrono::steady_clock::now();
+            if (state->last) {
+                double seconds = std::chrono::duration<double>(now - *state->last).count();
+                state->turn = std::fmod(state->turn + seconds / period + 1, 1.0);
+                if (auto element = weak.get()) element.Rotation(static_cast<float>(state->turn * 360));
+            }
+            state->last = now;
+        });
+    });
+    Reactive::OnCleanup(stop);
+}
+
 struct DecorateProps {
     Transition const* appear = nullptr;
     Transition const* disappear = nullptr;
@@ -1371,6 +1409,10 @@ struct DecorateProps {
     /// large it grows.
     Get nudgeKey;
     std::optional<double> nudgeScale;
+    /// `spin`: the element turns while this holds, one turn every
+    /// `spin_period` seconds.
+    Get spin;
+    std::optional<double> spinPeriod;
     /// `appear_delay`: the entrance waits this much more, and plays on the
     /// first display too.
     std::optional<double> appearDelay;
@@ -1474,6 +1516,12 @@ inline void Decorate(Parent const& p, Ctx const& ctx, DecorateProps props, Build
             ScrollEffect(wrapper, ctx.scroll, props.scrollScale.value_or(1), props.scrollOpacity.value_or(1),
                 props.scrollOriginX.value_or(0.5), props.scrollOriginY.value_or(0.5));
             shown = wrapper;
+        }
+        // Turning goes on a wrapper of its own, inside the one other motion
+        // moves and scales.
+        if (props.spin) {
+            shown = Wrap(shown);
+            Spin(shown, ctx, props.spin, props.spinPeriod.value_or(1));
         }
         // What moves goes on a wrapper of its own: the one that follows
         // scrolling belongs to its Composition expressions.

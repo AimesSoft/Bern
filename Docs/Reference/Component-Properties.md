@@ -182,6 +182,8 @@
 | `nudge_key` | `KeyValue` |
 | `nudge_scale` | `Number` |
 | `reduce_motion` | `Bool` |
+| `spin` | `Bool`：成立时绕中心匀速转动，不成立时停在当时的角度 |
+| `spin_period` | `Number`：转一圈的秒数，默认 1，负数逆时针；需要 `spin` |
 | `stagger` | `Number` |
 | `idle_area` | `Number`：鼠标在此停住多少秒后窗口静置；有静置区时，鼠标停在别处不静置 |
 | `at` | `NumberValue` |

@@ -163,6 +163,8 @@ impl Target for ComposeAndroid {
                 "nudge_key",
                 "nudge_scale",
                 "reduce_motion",
+                "spin",
+                "spin_period",
                 "appear_delay",
                 "stagger",
                 "idle_area",

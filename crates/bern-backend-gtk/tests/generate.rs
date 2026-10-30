@@ -340,6 +340,9 @@ fn planner_and_gallery_build_for_gtk() {
         // item as a switch.
         "color: Some(\"accent\")",
         "model: Some(b::login_model())",
+        // The record in the about window turns.
+        "spin: Some((",
+        ", 12.0))",
     ] {
         assert!(ui.contains(expected), "the gallery lacks `{expected}`");
     }

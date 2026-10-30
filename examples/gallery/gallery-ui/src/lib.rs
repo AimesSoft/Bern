@@ -139,6 +139,8 @@ pub fn about(app: gallery::Client, windows: AppWindows, #[session] draft: AboutD
         Tabs(id: about_pages, selection: draft.page) {
             Tab(value: AboutPage::About, label: tr! { "zh-Hans" => "关于", "en" => "About" }, icon: "info.circle", display: icon) {
                 Column(gap: 12, padding: 24, align: center) {
+                    // A record, turning slowly.
+                    Image(source: "media/poster.jpg", width: 72, height: 72, fit: cover, corner: 36, spin: true, spin_period: 12)
                     Text(content: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, style: title)
                     Text(content: tr! { "zh-Hans" => "一面会浮起的图案墙。", "en" => "A wall of patterns that lift." }, emphasis: secondary)
                     Text(content: tr! { "zh-Hans" => "预览版", "en" => "Preview" }, style: footnote, color: accent)

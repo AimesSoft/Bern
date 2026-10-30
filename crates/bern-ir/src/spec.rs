@@ -317,6 +317,12 @@ pub const MOTION_PROPS: &[PropSpec] = &[
     opt("nudge_key", PropKind::KeyValue),
     opt("nudge_scale", PropKind::Number),
     opt("reduce_motion", PropKind::Bool),
+    // While the condition holds the element turns about its center, one
+    // turn every `spin_period` seconds (1 unless given), clockwise, or
+    // counterclockwise below zero; it stops where it is, and stays still
+    // with reduced motion.
+    opt("spin", PropKind::Bool),
+    opt("spin_period", PropKind::Number),
     opt("stagger", PropKind::Number),
     // Seconds a mouse rests over the element, such as a player's picture,
     // before its window goes idle; with such areas on screen a mouse
@@ -1819,6 +1825,12 @@ pub fn check_shape(shape: &ElementShape<'_>) -> Vec<ShapeError> {
         errors.push(ShapeError {
             prop: Some("nudge_key".into()),
             message: "choose `nudge` for a condition or `nudge_key` for repeated events".into(),
+        });
+    }
+    if shape.props.contains(&"spin_period") && !shape.props.contains(&"spin") {
+        errors.push(ShapeError {
+            prop: Some("spin_period".into()),
+            message: "`spin_period` needs a `spin` condition".into(),
         });
     }
     if shape.props.contains(&"appear_delay") && !shape.props.contains(&"appear") {

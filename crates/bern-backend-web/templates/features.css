@@ -222,6 +222,13 @@
   gap: 4px;
 }
 
+/* MARK: - Spinning */
+
+@keyframes bern-spin {
+  from { rotate: 0deg; }
+  to { rotate: 360deg; }
+}
+
 /* MARK: - Reveal on hover */
 
 .bern-reveal {

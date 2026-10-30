@@ -116,6 +116,8 @@ impl Generator<'_> {
                 element.expr("nudge_key").map(|key| self.getter(key)),
             ),
             ("nudgeScale", Self::number(element, "nudge_scale")),
+            ("spin", element.expr("spin").map(|when| self.getter(when))),
+            ("spinPeriod", Self::number(element, "spin_period")),
             ("appearDelay", Self::number(element, "appear_delay")),
             (
                 "reduceMotion",

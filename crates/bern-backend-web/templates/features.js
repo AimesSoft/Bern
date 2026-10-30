@@ -1292,6 +1292,7 @@ export function Decorate(p, ctx, spec, build) {
         if (current !== null) heroLeave(current, node);
       });
     }
+    if (spec.spin) spin(node, spec.spin, spec.spinPeriod ?? 1);
     if (spec.nudge) nudge(node, spec.nudge, spec.nudgeMotion);
     if (spec.nudgeKey) nudge(node, spec.nudgeKey, spec.nudgeMotion, spec.nudgeScale ?? 1.06, true);
     if (spec.scrollScale !== undefined || spec.scrollOpacity !== undefined) {
@@ -1383,6 +1384,26 @@ export function reflow(container, motion) {
     release?.();
     anchor?.remove();
   });
+}
+
+// MARK: - Spinning
+
+/// `spin`: while `when()` holds the node turns about its center, one turn
+/// every `period` seconds, counterclockwise below zero; it stops where it
+/// is, and stays still with reduced motion. The `rotate` property leaves
+/// the transforms of the other motion alone.
+export function spin(node, when, period) {
+  node.style.animation = `bern-spin ${Math.abs(period)}s linear infinite${period < 0 ? " reverse" : ""}`;
+  let on = false;
+  const update = () => {
+    node.style.animationPlayState = on && !reduced ? "running" : "paused";
+  };
+  effect(() => {
+    on = Boolean(when());
+    update();
+  });
+  reduceQuery.addEventListener("change", update);
+  onCleanup(() => reduceQuery.removeEventListener("change", update));
 }
 
 // MARK: - Nudges

@@ -83,6 +83,8 @@ fn gallery_generates_television_layouts_shortcuts_and_first_focus() {
         // The about window's note in the accent; a page does not open at
         // login, so it has no such switch.
         "color: \"accent\"",
+        // The record in the about window turns.
+        "spin: () => (true), spinPeriod: 12",
     ] {
         assert!(
             script.contains(expected),

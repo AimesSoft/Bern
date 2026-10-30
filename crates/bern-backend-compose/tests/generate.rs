@@ -234,6 +234,8 @@ fn gallery_generates_stagger_rails_popovers_and_four_sizes() {
     // Escape (a television's Back) closing the details while they show.
     assert!(kotlin.contains("tv = {"));
     assert!(kotlin.contains("bernWindow.tv"));
+    // The record in the about window turns.
+    assert!(kotlin.contains(".bernSpin(true, 12.0)"), "{kotlin}");
     assert!(kotlin.contains("bernDefaultFocus()"));
     assert!(
         kotlin.contains("BernShortcut(\"escape\", { true }) {"),

@@ -102,6 +102,13 @@ impl Generator<'_> {
         if let Some(scale) = element.number("nudge_scale") {
             entries.push(format!("nudge_scale: Some({})", float(scale)));
         }
+        if let Some(when) = element.expr("spin") {
+            entries.push(format!(
+                "spin: Some(({}, {}))",
+                self.getter(when),
+                float(element.number("spin_period").unwrap_or(1.0))
+            ));
+        }
         if let Some(reduce) = element.expr("reduce_motion") {
             entries.push(format!("reduce_motion: Some({})", self.getter(reduce)));
         }

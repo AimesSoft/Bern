@@ -2648,6 +2648,49 @@ fn scrolling_and_gestures_link_to_values() {
 }
 
 #[test]
+fn spinning_follows_a_condition() {
+    let compiled = compile_ui(&wrap(
+        r#"Column {
+            Text(content: app.title, spin: draft.on, spin_period: -15)
+            Text(content: app.title, spin: true)
+        }"#,
+    ))
+    .unwrap_or_else(|errors| panic!("{errors:?}"));
+    let page = compiled.app.component("page").unwrap();
+    let mut seen = Vec::new();
+    page.body.walk(&mut |node| {
+        if let ir::Node::Element(element) = node
+            && element.kind == "Text"
+        {
+            seen.push(format!(
+                "{:?} {:?}",
+                element.expr("spin").map(|spin| spin.ty.display()),
+                element.number("spin_period")
+            ));
+        }
+    });
+    assert_eq!(
+        seen,
+        [r#"Some("bool") Some(-15.0)"#, r#"Some("bool") None"#]
+    );
+
+    for (body, expected) in [
+        (
+            "Text(content: app.title, spin: draft.on, spin_period: 0)",
+            "other than zero",
+        ),
+        (
+            "Text(content: app.title, spin_period: 2)",
+            "needs a `spin` condition",
+        ),
+        ("Text(content: app.title, spin: app.title)", "bool"),
+    ] {
+        let message = errors(body);
+        assert!(message.contains(expected), "{body}: {message}");
+    }
+}
+
+#[test]
 fn rails_stagger_and_popover_buttons() {
     let compiled = compile_ui(&wrap(
         r#"Column(gap: 8, stagger: 0.03) {

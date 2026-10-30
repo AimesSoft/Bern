@@ -283,6 +283,13 @@ impl<'a> Generator<'a> {
                 // window rest over.
                 let mut effects = String::new();
                 let nudge_scale = float(element.number("nudge_scale").unwrap_or(1.06));
+                if let Some(when) = element.expr("spin") {
+                    effects.push_str(&format!(
+                        ".bernSpin({}, {})",
+                        self.expr(when),
+                        double(element.number("spin_period").unwrap_or(1.0))
+                    ));
+                }
                 if let Some(when) = element.expr("nudge") {
                     effects.push_str(&format!(
                         ".bernNudge({}, {}, {nudge_scale})",

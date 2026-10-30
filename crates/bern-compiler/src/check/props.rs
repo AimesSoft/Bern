@@ -376,6 +376,13 @@ impl Checker<'_> {
                 );
                 return None;
             }
+            if prop_name == "spin_period" && (!value.is_finite() || value == 0.0) {
+                self.error(
+                    expr.span(),
+                    "`spin_period` must be a finite number of seconds other than zero",
+                );
+                return None;
+            }
             if prop_name == "appear_delay" && (!value.is_finite() || value < 0.0) {
                 self.error(
                     expr.span(),

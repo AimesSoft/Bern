@@ -63,6 +63,10 @@ impl Generator<'_> {
             entries.push(("nudgeMotion", Some(self.motion("jelly"))));
         }
         entries.push(("nudgeScale", element.number("nudge_scale").map(number)));
+        if let Some(when) = element.expr("spin") {
+            entries.push(("spin", Some(format!("() => ({})", self.expr(when)))));
+            entries.push(("spinPeriod", element.number("spin_period").map(number)));
+        }
         entries.push(("reduceMotion", self.value_prop(element, "reduce_motion")));
         entries.push(("scrollScale", element.number("scroll_scale").map(number)));
         entries.push((
