@@ -588,6 +588,14 @@ open target/bern/macos/Showcase.app
 
 验证（2026-10-30，GitHub 的 `xcode-27` 运行器，macOS 27.0.1、Xcode 27.1，一个实际应用的 release 构建；辅助功能接口找元素，真实鼠标事件点击）：改前侧栏中带数量的两项点击后 5 秒内都没有选中，改后选中、详情换页；同一台机器上直接用 SwiftUI 写的侧栏里，先 `tag` 后 `badge` 的一行同样点不中，先 `badge` 后 `tag` 的可以。打开含登录项开关的设置窗口，主线程合计忙的时间从 740–860 毫秒降到约 570 毫秒。`BERN_TIMING` 量得换页时主线程忙 70–310 毫秒（概览约 70，带表格、工具栏、搜索与检查器的列表页 220–310），同一台机器上把这几页直接用 SwiftUI 写一遍的对照程序是 70–570 毫秒，两者相当：时间花在 SwiftUI 重建工具栏、AppKit 按玻璃样式重排工具栏和创建表格与检查器上，不在 Bern 的代码里。运行器是虚拟机，真机上的绝对数值未量。iOS 走同一生成路径，未实看。
 
+## 带样式侧栏的选中（2026-10-30）
+
+带样式的侧栏项在 macOS 上重新由系统列表选中：生成 `List(selection:)`，每个 `BernSidebarRow` 后跟 `.tag(value)`，不再生成 `.bernSidebarNavigation`。此前列表不保留选中，每行用 `onTapGesture` 选中自己：窗口在后台时点一行，这一下只把窗口带到前面，手势收不到，要再点一次；系统侧栏在同一下就选中。`allowsWindowActivationEvents(true)`（macOS 15 起）只对列表外的视图有效，列表里的行加上它仍收不到那一下，所以改回系统选中。
+
+行的背后放一个 `BernListRowProbe`：把所在 `NSTableView` 的 `selectionHighlightStyle` 设为 `.none`，选中仍由行按样式绘制；按下改由窗口的局部事件监视器报告（在行内按下到松开）。行上任何手势，包括 `bernPressWatch` 的 `DragGesture(minimumDistance: 0)`，都会让列表在窗口已在前台时选不中。方向键由列表自己处理。iOS 与 tvOS 不变：行自己选中，`bernSidebarNavigation` 处理方向键。
+
+验证（本机 macOS 27.2，一个实际应用的 release 构建，真实鼠标点击）：改前窗口在后台时点侧栏某项，窗口到前面但页面不换；改后同一下就选中、详情换页，之后的点击与上下方向键正常，选中项是样式的填充与粗体，没有系统的选中色。最小的 SwiftUI 程序对照：列表里的行加 `allowsWindowActivationEvents` 仍收不到那一下，列表外的按钮可以；`List(selection:)` 的系统选中可以；行上加按下手势后，前台窗口里点击不再选中，改用事件监视器后正常，按下时行按样式缩小。`dynamic_navigation_items_type_check` 改为检查 macOS 的带样式侧栏用系统选中、每行带 `tag`，iOS 的仍生成方向键导航并包含按条件、重复与 `match` 出现的项，两者都做 Swift 6 类型检查；SwiftUI 后端全部测试通过。未运行：macOS 14 与 15、按住一会儿再松开（测试工具模拟的按住在系统列表里同样不选中，无法判断）、iOS 与 tvOS 上的实际界面（生成未变）。
+
 ## 未完成与已知限制
 
 - 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）均未实现。菜单栏已在 2026-10-24 实现，见下文“菜单栏、跟随状态的快捷键与改键”。

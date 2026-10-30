@@ -1133,6 +1133,9 @@ root = "app"
 
 [targets.macos]
 platform = "macos"
+
+[targets.ios]
+platform = "ios"
 "#,
     )
     .unwrap();
@@ -1163,7 +1166,14 @@ platform = "macos"
         std::fs::write(path, &file.contents).unwrap();
     }
     let generated = std::fs::read_to_string(output.join("Sources/BernGenerated.swift")).unwrap();
-    assert_eq!(generated.contains(".bernSidebarNavigation("), styled);
+    // The Mac's list selects styled rows too, so the click that brings the
+    // window forward picks one, as in the system's sidebars.
+    assert!(
+        !generated.contains(".bernSidebarNavigation("),
+        "{generated}"
+    );
+    assert!(generated.contains("SwiftUI.List(selection:"), "{generated}");
+    assert_eq!(generated.contains("BernSidebarRow("), styled);
     assert_eq!(
         generated.contains(".bernSidebarStyle(BernStyles.sidebar)"),
         styled
@@ -1191,9 +1201,35 @@ platform = "macos"
         assert_eq!(lines[badge + 1], ".tag(App_Dest.home)", "{generated}");
     }
     if styled {
-        // Keyboard navigation must see conditional, repeated and matched rows,
-        // not just the destinations that existed at initial construction.
-        let navigation = generated
+        // Every styled row carries the value the Mac's list selects.
+        let lines: Vec<&str> = generated.lines().map(str::trim).collect();
+        for (at, line) in lines.iter().enumerate() {
+            if line.starts_with("BernSidebarRow(") {
+                assert!(lines[at + 1].starts_with(".tag("), "{generated}");
+            }
+        }
+        // On iOS the rows select themselves, and keyboard navigation must
+        // see conditional, repeated and matched rows, not just the
+        // destinations that existed at initial construction.
+        let ios_output = root.join("target/bern-test/swiftui-dynamic-styled-ios");
+        let _ = std::fs::remove_dir_all(&ios_output);
+        let mut ios = crate::context(&config, &compiled, "ios", &ios_output);
+        ios.project_dir = dir.clone();
+        let problems = SwiftUiIos.check(&compiled.app, &ios.target);
+        assert!(problems.is_empty(), "{problems:?}");
+        for file in SwiftUiIos.generate(&compiled.app, &ios).unwrap() {
+            let path = ios_output.join(&file.path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, &file.contents).unwrap();
+        }
+        let ios_generated =
+            std::fs::read_to_string(ios_output.join("Sources/BernGenerated.swift")).unwrap();
+        assert!(
+            !ios_generated.contains("SwiftUI.List(selection:"),
+            "{ios_generated}"
+        );
+        typecheck_ios(&root, &ios_output);
+        let navigation = ios_generated
             .lines()
             .find(|line| line.contains(".bernSidebarNavigation("))
             .unwrap();

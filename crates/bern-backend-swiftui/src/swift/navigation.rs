@@ -20,8 +20,10 @@ impl Generator<'_> {
         };
         let selection = self.field(sidebar, "selection").expect("selection field");
         out.open("SwiftUI.NavigationSplitView {");
-        // Styled items draw their own selection: the list keeps none, and
-        // each row selects itself.
+        // Styled items draw their own selection: on iOS and tvOS the list
+        // keeps none, and each row selects itself. The Mac's list still
+        // selects, so the click that brings the window forward picks the
+        // row as in the system's sidebars; the rows hide its highlight.
         let mut styled = false;
         for child in &sidebar.children {
             child.walk(&mut |node| {
@@ -36,16 +38,19 @@ impl Generator<'_> {
         let rows = styled.then(|| {
             format!("SwiftUI.Binding(get: {{ {selection} }}, set: {{ {selection} = $0 }})")
         });
-        if rows.is_some() {
-            out.open("SwiftUI.List {");
-        } else {
+        let list_selects = rows.is_none() || self.platform == Platform::Macos;
+        if list_selects {
             out.open(format!(
                 "SwiftUI.List(selection: SwiftUI.Binding(get: {{ Optional({selection}) }}, set: {{ if let value = $0 {{ {selection} = value }} }})) {{"
             ));
+        } else {
+            out.open("SwiftUI.List {");
         }
         self.sidebar_nodes(out, &sidebar.children, rows.as_deref());
         out.close("}");
-        if let Some(rows) = &rows {
+        if let Some(rows) = &rows
+            && !list_selects
+        {
             let ty = sidebar
                 .field("selection")
                 .map(|field| swift_type(&field.ty))
@@ -423,6 +428,9 @@ impl Generator<'_> {
                     "BernSidebarRow(label: {label}, systemImage: {icon}, value: {value}, selection: {}, style: {style}, badge: {badge})",
                     rows.unwrap_or_default()
                 ));
+                if self.platform == Platform::Macos {
+                    out.line(format!(".tag({value})"));
+                }
             }
             "SidebarItem" => {
                 let label = self.text_prop(element, "label").unwrap_or_default();

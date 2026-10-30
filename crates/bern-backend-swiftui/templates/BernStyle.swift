@@ -1526,9 +1526,10 @@ private struct BernReveal: ViewModifier {
     }
 }
 
-/// Styled rows draw selection themselves, so the list no longer owns it.
-/// Keep arrow-key navigation scoped to the focused sidebar, using only
-/// currently visible destinations (including conditional module pages).
+/// Styled rows draw selection themselves, so on iOS and tvOS the list no
+/// longer owns it. Keep arrow-key navigation scoped to the focused sidebar,
+/// using only currently visible destinations (including conditional module
+/// pages). The Mac's list keeps its selection (`BernListHighlightOff`).
 private struct BernSidebarNavigation<Value: Hashable>: ViewModifier {
     @Binding var selection: Value
     let values: [Value]
@@ -1617,8 +1618,17 @@ struct BernSidebarRow<Value: Hashable>: View {
         // select chooses it.
         .modifier(BernFocusableRow(corner: style.corner ?? 6))
         #endif
+        #if os(macOS)
+        // The list selects the row, as the system's sidebars do, also with
+        // the click that brings the window forward (a gesture of the row's
+        // own never gets that click); the row keeps only its own look. A
+        // gesture on the row would keep the list from selecting, so the
+        // probe reports presses.
+        .background(BernListRowProbe { updateInteraction(hover: hover, pressed: $0) })
+        #else
         .onTapGesture { selection = value }
         .bernPressWatch { updateInteraction(hover: hover, pressed: $0) }
+        #endif
         .listRowBackground(Color.clear)
         .bernListRowSeparatorHidden()
         .accessibilityElement(children: .combine)
@@ -1636,6 +1646,62 @@ struct BernSidebarRow<Value: Hashable>: View {
         }
     }
 }
+
+#if os(macOS)
+/// Under a styled sidebar row: turns off the highlight of the list it sits
+/// in (the list still selects, and the row draws the selection itself),
+/// and reports presses on the row by watching the window's clicks, which
+/// the list keeps receiving.
+private struct BernListRowProbe: NSViewRepresentable {
+    let pressed: (Bool) -> Void
+    func makeNSView(context: Context) -> BernListRowProbeView { BernListRowProbeView() }
+    func updateNSView(_ view: BernListRowProbeView, context: Context) { view.pressed = pressed }
+}
+
+final class BernListRowProbeView: NSView {
+    var pressed: (Bool) -> Void = { _ in }
+    private var monitor: Any?
+    private var down = false
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+            self?.watch(event)
+            return event
+        }
+        // The row's cell joins the table after the row joins the window.
+        DispatchQueue.main.async { [weak self] in
+            var view = self?.superview
+            while let current = view {
+                if let table = current as? NSTableView {
+                    table.selectionHighlightStyle = .none
+                    return
+                }
+                view = current.superview
+            }
+        }
+    }
+
+    private func watch(_ event: NSEvent) {
+        guard event.window === window else { return }
+        if event.type == .leftMouseDown {
+            guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
+            down = true
+            pressed(true)
+        } else if down {
+            down = false
+            pressed(false)
+        }
+    }
+}
+#endif
 
 private func bernAlignment(_ edge: Edge) -> Alignment {
     switch edge {
