@@ -1475,7 +1475,7 @@ JSON 是编码，不等于传输，也不等于 MCP。JSON 控制消息可以经
 
 ### 随应用附带的 Agent skill
 
-应用监听控制通道（目标声明 `channels = ["ipc"]`）时，构建在 `bin/` 旁写出 `skills/<程序>/SKILL.md`，让 Agent 通过应用 CLI 与 MCP 服务器使用应用。它与 CLI 帮助、MCP 工具列表出自同一份命令目录，列出本次构建的全部内容：
+应用监听控制通道（目标声明 `channels = ["ipc"]`）时，构建在 `bin/` 旁写出 `skills/<程序>/SKILL.md`（macOS 另在应用包的 `Contents/Resources/skills` 里写一份，程序在 `Contents/Helpers`），让 Agent 通过应用 CLI 与 MCP 服务器使用应用。它与 CLI 帮助、MCP 工具列表出自同一份命令目录，列出本次构建的全部内容：
 
 - 状态字段及其类型与说明；
 - 每条引擎命令与查询：CLI 写法、参数（类型、可否省略、说明）、结果类型、错误码、重复执行是否得到相同状态、MCP 工具名，以及自动触发它的事件；

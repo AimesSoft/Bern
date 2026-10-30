@@ -234,6 +234,20 @@ pub fn product_name(app: &Application) -> String {
     names::pascal(&app.app.id)
 }
 
+/// The agent skill in the macOS bundle, `Contents/Resources/skills/<cli>`,
+/// with the programs in `Contents/Helpers`; an installed copy keeps them
+/// in Applications.
+fn bundled_skill(product: &str, cli: &str) -> skill::Place {
+    skill::Place {
+        cli: format!("../../../Helpers/{cli}"),
+        mcp: format!("../../../Helpers/{cli}-mcp"),
+        installed: Some(format!(
+            "/Applications/{product}.app/Contents/Helpers/{cli}"
+        )),
+        connect: None,
+    }
+}
+
 /// Cargo arguments that build the engine's static library like `build`
 /// (`cargo build --lib …`) and have rustc write the native libraries and
 /// frameworks it needs to `file` (its `native-static-libs`). swiftc reads
@@ -727,18 +741,42 @@ impl Target for SwiftUiMacos {
                 env: vec![],
             });
         }
+        // The command line and MCP server live in the bundle, in
+        // `Contents/Helpers`, and the agent skill listing their commands in
+        // `Contents/Resources/skills`, so a copy of the app moved or
+        // installed anywhere carries them. The programs are signed before
+        // the app, whose signature seals them and the skill.
+        let helpers = bundle.join("Contents/Helpers");
+        let programs = [cli.clone(), format!("{cli}-mcp")];
+        let listens = skill::listens(&context.target.channels);
+        steps.push(BuildStep::CreateDir {
+            path: helpers.clone(),
+        });
+        for program in &programs {
+            steps.push(BuildStep::Copy {
+                from: rust_output.join(program),
+                to: helpers.join(program),
+            });
+            steps.push(BuildStep::Run {
+                description: "Sign the command line tools for local use".into(),
+                program: "codesign".into(),
+                args: vec![
+                    "--force".into(),
+                    "--sign".into(),
+                    "-".into(),
+                    helpers.join(program).display().to_string(),
+                ],
+                cwd: output.clone(),
+                env: vec![],
+            });
+        }
+        if listens {
+            steps.push(BuildStep::Write {
+                path: bundle.join("Contents/Resources").join(skill::path(app)),
+                contents: skill::markdown(app, &bundled_skill(&product, &cli)).into_bytes(),
+            });
+        }
         steps.extend([
-            BuildStep::CreateDir {
-                path: output.join("bin"),
-            },
-            BuildStep::Copy {
-                from: rust_output.join(&cli),
-                to: output.join("bin").join(&cli),
-            },
-            BuildStep::Copy {
-                from: rust_output.join(format!("{cli}-mcp")),
-                to: output.join("bin").join(format!("{cli}-mcp")),
-            },
             BuildStep::Run {
                 description: "Sign the app for local use".into(),
                 program: "codesign".into(),
@@ -768,9 +806,26 @@ impl Target for SwiftUiMacos {
                 cwd: output.clone(),
                 env: vec![],
             },
+            BuildStep::CreateDir {
+                path: output.join("bin"),
+            },
         ]);
-        // The agent skill beside `bin/`, where the app listens.
-        let listens = skill::listens(&context.target.channels);
+        // `bin/` beside the bundle, as every target lays it out, links to
+        // the programs inside it.
+        for program in &programs {
+            steps.push(BuildStep::Run {
+                description: "Link the command line tools in bin/".into(),
+                program: "ln".into(),
+                args: vec![
+                    "-sf".into(),
+                    format!("../{product}.app/Contents/Helpers/{program}"),
+                    output.join("bin").join(program).display().to_string(),
+                ],
+                cwd: output.clone(),
+                env: vec![],
+            });
+        }
+        // The agent skill beside `bin/` too, where the app listens.
         let place = listens.then(|| skill::Place::beside_bin(app, false));
         steps.extend(skill::steps(app, output, place.as_ref()));
         let mut products = vec![
@@ -790,13 +845,13 @@ impl Target for SwiftUiMacos {
         })
     }
 
-    /// A disk image with the app and a link to Applications. The command
-    /// line and MCP server go into `Contents/Helpers`, and the agent skill
-    /// listing their commands into `Contents/Resources/skills`, so the
-    /// installed app carries its entries for agents. Signed with the
-    /// identity from [`Signing`] (hardened runtime and a secure timestamp,
-    /// as notarization requires) and notarized when a notary profile is
-    /// given; otherwise signed for this Mac only.
+    /// A disk image with the app and a link to Applications. The app built
+    /// already carries the command line and MCP server in
+    /// `Contents/Helpers` and the agent skill in `Contents/Resources/skills`;
+    /// they and the app are signed again with the identity from [`Signing`]
+    /// (hardened runtime and a secure timestamp, as notarization requires)
+    /// and notarized when a notary profile is given; otherwise signed for
+    /// this Mac only.
     fn package(
         &self,
         app: &Application,
@@ -868,36 +923,13 @@ impl Target for SwiftUiMacos {
                 "ditto",
                 vec![path(&output.join(format!("{product}.app"))), path(&staged)],
             ),
-            BuildStep::CreateDir {
-                path: helpers.clone(),
-            },
         ];
         for program in [cli.clone(), format!("{cli}-mcp")] {
-            steps.push(BuildStep::Copy {
-                from: output.join("bin").join(&program),
-                to: helpers.join(&program),
-            });
             steps.push(run(
                 "Sign the command line tools",
                 "codesign",
                 sign(&helpers.join(&program)),
             ));
-        }
-        // The agent skill goes with the resources, which the signature
-        // seals; it finds the programs in `Helpers`.
-        if skill::listens(&context.target.channels) {
-            let place = skill::Place {
-                cli: format!("../../../Helpers/{cli}"),
-                mcp: format!("../../../Helpers/{cli}-mcp"),
-                installed: Some(format!(
-                    "/Applications/{product}.app/Contents/Helpers/{cli}"
-                )),
-                connect: None,
-            };
-            steps.push(BuildStep::Write {
-                path: staged.join("Contents/Resources").join(skill::path(app)),
-                contents: skill::markdown(app, &place).into_bytes(),
-            });
         }
         steps.push(run("Sign the app", "codesign", sign(&staged)));
         steps.push(run(

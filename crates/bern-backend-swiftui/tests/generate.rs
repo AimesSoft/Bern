@@ -539,7 +539,8 @@ fn showcase_generates_swift_that_type_checks() {
             },
         )
         .unwrap();
-    // The engine, then the list of native libraries it links.
+    // The engine, then the list of native libraries it links; the command
+    // line tools are signed before the app, and `bin/` links to them last.
     assert_eq!(
         programs(&release),
         [
@@ -549,10 +550,49 @@ fn showcase_generates_swift_that_type_checks() {
             "mv",
             "xcrun strip",
             "codesign",
+            "codesign",
+            "codesign",
             "touch",
             "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+            "ln",
+            "ln",
         ]
     );
+    // The command line, the MCP server and the agent skill are inside the
+    // bundle before its signature seals it, so the app carries them
+    // wherever it is moved or installed.
+    let app_signature = plan
+        .steps
+        .iter()
+        .position(|step| matches!(step, BuildStep::Run { program, args, .. }
+            if program == "codesign" && args.last() == Some(&output.join("Showcase.app").display().to_string())))
+        .unwrap();
+    let helpers = output.join("Showcase.app/Contents/Helpers");
+    for program in ["showcase", "showcase-mcp"] {
+        let copied = plan.steps.iter().position(
+            |step| matches!(step, BuildStep::Copy { to, .. } if to == &helpers.join(program)),
+        );
+        assert!(
+            copied.is_some_and(|copied| copied < app_signature),
+            "{:?}",
+            plan.steps
+        );
+        let linked = plan.steps.iter().position(|step| {
+            matches!(step, BuildStep::Run { program: ln, args, .. }
+                if ln == "ln"
+                    && args[1] == format!("../Showcase.app/Contents/Helpers/{program}")
+                    && args[2] == output.join("bin").join(program).display().to_string())
+        });
+        assert!(linked.is_some_and(|linked| linked > app_signature));
+    }
+    let bundled = output.join("Showcase.app/Contents/Resources/skills/showcase/SKILL.md");
+    let written = plan.steps.iter().position(|step| {
+        matches!(step, BuildStep::Write { path, contents }
+            if path == &bundled
+                && String::from_utf8_lossy(contents).contains("`../../../Helpers/showcase-mcp`")
+                && String::from_utf8_lossy(contents).contains("/Applications/Showcase.app/Contents/Helpers/showcase"))
+    });
+    assert!(written.is_some_and(|written| written < app_signature));
     let listing = release
         .steps
         .iter()

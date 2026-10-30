@@ -33,7 +33,7 @@
 | --- | --- | --- |
 | 控件展示示例：侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、侧边栏搜索、列表到详情的推入导航、工具栏分段选择器；设置窗口使用页签；至少两种语言 | 完成 | `examples/showcase`，中文与英文 |
 | 引擎与会话运行时在应用进程内运行 | 完成 | Rust 静态库链接进应用 |
-| 显式装配本地 IPC 通道，提供 CLI、JSON、MCP，连接同一引擎 | 完成 | `channels = ["ipc"]`；生成 `bin/showcase` 与 `bin/showcase-mcp` |
+| 显式装配本地 IPC 通道，提供 CLI、JSON、MCP，连接同一引擎 | 完成 | `channels = ["ipc"]`；生成 `Contents/Helpers/showcase` 与 `showcase-mcp`，包旁的 `bin/` 链接到它们 |
 | 未装配外部入口时无辅助进程、无监听；本地调用不经过 JSON | 完成 | 桥接使用类型化二进制值；`ipc = false` 由单元测试覆盖；装配 IPC 时实测无子进程、无 TCP 端口 |
 | 未声明样式覆盖时只用标准 SwiftUI 组件与系统样式 | 完成 | 生成测试检查展示应用（没有样式覆盖）生成的视图代码不含 `Color(`、`.background(`、`glassEffect`；运行时模板按功能需要分系统版本，例如视频控制条的媒体进度条在 macOS 26 以下绘制回退（见 [Apple 适配](../Adaptation/Apple.md) 第 8 节） |
 | 浅色与深色截图，与系统自带应用对照 | 部分 | 浅色、深色、英文截图已检查；与“系统设置”的并排对照未做（见验证记录） |
@@ -394,7 +394,9 @@ cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-产物位于 `target/bern/macos/`：`Showcase.app`、调试符号 `Showcase.app.dSYM`、`bin/showcase`、`bin/showcase-mcp`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
+产物位于 `target/bern/macos/`：`Showcase.app`、调试符号 `Showcase.app.dSYM`、`bin/showcase`、`bin/showcase-mcp`、`skills/showcase/SKILL.md`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
+
+应用 CLI 与 MCP 服务器在包里的 `Contents/Helpers`，Agent skill 在 `Contents/Resources/skills/<程序>/SKILL.md`（程序路径相对它写成 `../../../Helpers/…`，并写出装进“应用程序”后的位置）；两个程序先做临时签名，再签应用，应用的签名封住它们与 skill。所以把 `.app` 拖到别处或装进“应用程序”，Agent 仍能调用它们，例如 `/Applications/Showcase.app/Contents/Helpers/showcase state`。包旁的 `bin/showcase`、`bin/showcase-mcp` 是指向包内程序的相对链接，`skills/showcase/SKILL.md` 经 `bin/` 找到它们，所以开发时的命令不变。此前（2026-10-30 之前）两个程序只复制到包旁的 `bin/`，skill 也只在包旁，只有 `bern package` 生成的磁盘映像里的应用才带着它们，直接拿走构建出的 `.app` 时 Agent 无从调用。
 
 应用图标为 `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`）。没有声明 `[app].icon` 时是 Bern 标志铺满方形画布的版本，16 到 1024 像素各一张 PNG，由系统裁成圆角方形；圆形图标会被 macOS 放进灰色底板，所以 macOS 不用圆形版。资源同步保留这个文件，随包资源不能与它同名。`[app.icon].macos` 为 `.icns` 时原样使用。为 Icon Composer 的 `.icon` 文件夹时，它以 `AppIcon.icon` 放在包旁，由 `actool` 编译进 `Contents/Resources/Assets.car`，同时写出给更早系统的 `AppIcon.icns`；`Info.plist` 另加 `CFBundleIconName`，随包资源也不能叫 `Assets.car`。macOS 26 起显示液态玻璃图标，macOS 14、15 用 `Assets.car` 中从它画出的平面图（1024 像素以内各尺寸）。macOS 26 起，自带底板的旧式图标只有在底板正是苹果模板的形状时才按原样显示：1024 画布中 (100, 100) 起的 824 方块、圆角 185.4 的连续圆角矩形（与 `RoundedRectangle(style: .continuous)` 同一条路径）。底板是别的形状（例如指数 5 的超椭圆，轮廓相差约 4000 像素）或根本没有底板时，系统把整个图标缩小放进灰色底板；铺满方形的画面被裁成系统形状。以上为 macOS 27.0.1 实测：以 `NSWorkspace.icon(forFile:)` 渲染访达图标，比较本机多个只带 `.icns` 的应用，并交换图标排除构建所用 SDK 的影响。
 
@@ -408,7 +410,7 @@ open target/bern/macos/Showcase.app
 
 `bern package --target macos` 按 release 构建，生成 `target/bern/dist/<产品>-<版本>-macos-<架构>.dmg`：
 
-- 应用复制到暂存目录，应用 CLI 与 MCP 服务器放进 `Contents/Helpers`，先签工具、再签应用；磁盘映像里另有指向“应用程序”的链接。
+- 应用复制到暂存目录，构建时已放进包里的应用 CLI、MCP 服务器（`Contents/Helpers`）与 Agent skill（`Contents/Resources/skills`）随之复制；先签工具、再签应用；磁盘映像里另有指向“应用程序”的链接。
 - 有 `BERN_MACOS_SIGNING_IDENTITY` 时以强化运行时与安全时间戳签名，并签磁盘映像；再有 `BERN_MACOS_NOTARY_PROFILE` 时经 `notarytool` 公证并装订。没有时做临时签名，只能在本机打开，并提示 Gatekeeper 会拒绝。
 - 磁盘映像在有 `diskutil image` 的系统上用它生成（macOS 27 上 `hdiutil create` 已提示弃用），否则用 `hdiutil`。
 - 实测（2026-10-12，新项目）：磁盘映像 1.8 MB；挂载后签名校验通过，从映像中直接启动应用，`Contents/Helpers/my-app state` 能读到引擎状态。公证需要 Developer ID，这台机器只有开发证书，未实测。
