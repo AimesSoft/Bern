@@ -28,8 +28,8 @@
 </p>
 
 <p>
-<a href="README.md">简体中文</a> ·
-<a href="README.en.md">English</a> ·
+<a href="README.md">English</a> ·
+<a href="README.zh-Hans.md">简体中文</a> ·
 <b>繁體中文</b> ·
 <a href="README.ja.md">日本語</a>
 </p>
