@@ -261,6 +261,7 @@ fn sheet(styles: &[StyleDef], text: &[TextStyle]) -> String {
         ".navigation-sidebar > row.bern-styled-row { padding: 0; background: none; box-shadow: none; }\n\
          .navigation-sidebar > row.bern-styled-row:focus-visible { outline-offset: -2px; }\n\
          .navigation-sidebar > row:selected .bern-sidebar-label { font-weight: 700; }\n\
+         label.bern-bold { font-weight: 700; }\n\
          .bern-sidebar-content { padding: 8px 10px; border-radius: 6px; min-height: 20px; }\n\
          .bern-sidebar-content.bern-hover { background-color: alpha(currentColor, 0.07); }\n\
          .bern-sidebar-content.bern-selected { background-color: alpha(currentColor, 0.1); }\n\

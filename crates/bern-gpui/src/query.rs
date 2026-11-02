@@ -194,7 +194,7 @@ pub fn query(
     };
     let target = c.target(id);
     let window = c.win().id.clone();
-    let key = format!("{window}/{target}");
+    let key = format!("{window}/{}", c.key(id));
     let opened = SUBSCRIPTIONS.with(|subscriptions| subscriptions.borrow().contains_key(&key));
     // Looking for controls opens nothing.
     if !opened && c.listing() {
@@ -312,7 +312,10 @@ pub fn query(
             .font_weight(FontWeight::MEDIUM)
             .hover(move |style| style.bg(hover))
             .child(text::tr("bern.query.retry"))
-            .on_click(move |_, _, cx| retry(cx))
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                retry(cx)
+            })
     };
     let line = |content: Vec<El>| {
         div()

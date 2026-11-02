@@ -20,6 +20,7 @@ mod host;
 mod icons;
 mod kernel;
 mod layout;
+mod lazy;
 mod markdown;
 mod media;
 pub mod motion;
@@ -60,6 +61,7 @@ pub use features::{
 };
 pub use glib;
 pub use host::{dispatch, run};
+pub use lazy::LazyGrid;
 pub use media::{MediaOp, Video, VideoProps, media, media_open};
 pub use motion::{Curve, Decor, Decorate, Edge, Num, Transition, TransitionKind, staggered};
 pub use palette::{SearchItem, SearchItemProps, SearchPalette};

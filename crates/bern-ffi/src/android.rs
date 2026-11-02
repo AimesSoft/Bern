@@ -14,7 +14,7 @@ use crate::{
     bern_window_opened, bern_window_request_close, media, query, start_app,
 };
 use bern_command::EngineProtocol;
-use bern_command::files::{Opener, SourceFile};
+use bern_command::files::{Entry, Opener, SourceFile};
 use bern_protocol::CommandError;
 use jni_sys::{
     JNI_OK, JNIEnv, JavaVM, jbyte, jbyteArray, jdouble, jint, jlong, jmethodID, jobject, jsize,
@@ -37,6 +37,7 @@ struct Bridge {
     on_query: jmethodID,
     file_name: jmethodID,
     open_file: jmethodID,
+    list_folder: jmethodID,
     platform_request: jmethodID,
 }
 
@@ -195,14 +196,7 @@ impl Opener for Documents {
                     bridge.file_name,
                     &argument,
                 );
-                if name.is_null() {
-                    return None;
-                }
-                let len = ((**env).v1_6.GetStringLength)(env, name).max(0);
-                let mut units = vec![0u16; len as usize];
-                ((**env).v1_6.GetStringRegion)(env, name, 0, len, units.as_mut_ptr());
-                ((**env).v1_6.DeleteLocalRef)(env, name);
-                Some(String::from_utf16_lossy(&units))
+                text_in(env, name)
             })
         };
         name.flatten()
@@ -232,6 +226,62 @@ impl Opener for Documents {
                 ),
             )),
         }
+    }
+
+    fn list(&self, url: &str) -> Result<Vec<Entry>, CommandError> {
+        // SAFETY: as above.
+        let bridge = unsafe { &*self.0 };
+        // SAFETY: `listFolder` takes a string and answers a string.
+        let answer = unsafe {
+            bridge.ask(url, |env, argument| {
+                let answer: jstring = ((**env).v1_6.CallObjectMethodA)(
+                    env,
+                    bridge.object,
+                    bridge.list_folder,
+                    &argument,
+                );
+                text_in(env, answer)
+            })
+        };
+        let unavailable = |reason: &str| {
+            CommandError::new(
+                "source_unavailable",
+                format!("the system did not list `{url}`: {reason}"),
+            )
+        };
+        let answer = answer
+            .flatten()
+            .ok_or_else(|| unavailable("the host failed"))?;
+        if let Some(entries) = answer.strip_prefix("ok:") {
+            return bern_command::files::parse_entries(entries)
+                .ok_or_else(|| unavailable("the host answered something else"));
+        }
+        match answer.strip_prefix("error:") {
+            Some("not_a_folder") => Err(CommandError::new(
+                "not_a_folder",
+                format!("`{url}` is not a folder"),
+            )),
+            Some(reason) => Err(unavailable(reason)),
+            None => Err(unavailable(&answer)),
+        }
+    }
+}
+
+/// The text of a Java string, which is deleted; `None` for null.
+///
+/// # Safety
+/// `env` is the calling thread's environment and `value` a string or null.
+unsafe fn text_in(env: *mut JNIEnv, value: jstring) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+    // SAFETY: guaranteed by the caller.
+    unsafe {
+        let len = ((**env).v1_6.GetStringLength)(env, value).max(0);
+        let mut units = vec![0u16; len as usize];
+        ((**env).v1_6.GetStringRegion)(env, value, 0, len, units.as_mut_ptr());
+        ((**env).v1_6.DeleteLocalRef)(env, value);
+        Some(String::from_utf16_lossy(&units))
     }
 }
 
@@ -413,6 +463,7 @@ pub unsafe fn start<E: EngineProtocol>(
             method(c"onQuery", c"(J[B)V"),
             method(c"fileName", c"(Ljava/lang/String;)Ljava/lang/String;"),
             method(c"openFile", c"(Ljava/lang/String;)I"),
+            method(c"listFolder", c"(Ljava/lang/String;)Ljava/lang/String;"),
             method(
                 c"platformRequest",
                 c"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
@@ -421,6 +472,23 @@ pub unsafe fn start<E: EngineProtocol>(
         if methods.iter().any(|method| method.is_null()) {
             ((**env).v1_6.ExceptionClear)(env);
             return fail("the bridge object lacks a callback method");
+        }
+        // Engine libraries that reach Android through `ndk-context`, such
+        // as cpal's audio output, find the Java VM and the application
+        // there; the process keeps both, so this happens once.
+        static ANDROID_CONTEXT: std::sync::Once = std::sync::Once::new();
+        let application = method(c"applicationContext", c"()Landroid/content/Context;");
+        if application.is_null() {
+            ((**env).v1_6.ExceptionClear)(env);
+        } else {
+            ANDROID_CONTEXT.call_once(|| {
+                let found =
+                    ((**env).v1_6.CallObjectMethodA)(env, bridge, application, std::ptr::null());
+                if !found.is_null() {
+                    let found = ((**env).v1_6.NewGlobalRef)(env, found);
+                    ndk_context::initialize_android_context(vm.cast(), found.cast());
+                }
+            });
         }
         let object = ((**env).v1_6.NewGlobalRef)(env, bridge);
         // The bridge lives as long as the process, like the engine.
@@ -435,7 +503,8 @@ pub unsafe fn start<E: EngineProtocol>(
             on_query: methods[5],
             file_name: methods[6],
             open_file: methods[7],
-            platform_request: methods[8],
+            list_folder: methods[8],
+            platform_request: methods[9],
         }));
         bern_command::files::install("content", Documents(context));
         bern_command::platform::install(Documents(context));

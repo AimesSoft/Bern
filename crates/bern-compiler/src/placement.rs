@@ -43,7 +43,14 @@ fn check_buttons(
             if button.kind != "Button" || button.children.is_empty() {
                 return;
             }
-            if let Some(control) = control_inside(&button.children, bodies) {
+            // The items of its `ContextMenu` are not in what it shows.
+            let content: Vec<ir::Node> = button
+                .children
+                .iter()
+                .filter(|child| !matches!(child, ir::Node::Element(menu) if menu.kind == "ContextMenu"))
+                .cloned()
+                .collect();
+            if let Some(control) = control_inside(&content, bodies) {
                 diagnostics.push(
                     Diagnostic::error(format!(
                         "a `Button` cannot hold `{}`: one press would mean two things; put the `{}` beside the button, for example in a `Stack`",

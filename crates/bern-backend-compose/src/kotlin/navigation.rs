@@ -306,7 +306,12 @@ impl Generator<'_> {
                 self.target(element, ctx)
             ));
         }
-        out.open("BernTabs(content = {");
+        let floating = if element.keyword("bar") == Some("floating") {
+            "floating = true, "
+        } else {
+            ""
+        };
+        out.open(format!("BernTabs({floating}content = {{"));
         self.nav_walk(out, &element.children, &|out, tab| {
             if tab.kind != "Tab" {
                 return;

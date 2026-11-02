@@ -117,12 +117,19 @@ pub(crate) const MOTION: &[&str] = &[
     "reduce_motion",
     "spin",
     "spin_period",
+    "glow",
+    "glow_opacity",
+    "blur",
     "stagger",
     "idle_area",
 ];
 
 /// IR features SwiftUI builds, on macOS and iOS.
 pub(crate) const FEATURES: &[&str] = &[
+    bern_target_api::feature::SCROLL_ANCHOR,
+    bern_target_api::feature::SCROLL_BROWSING,
+    bern_target_api::feature::BOUND_BLUR,
+    bern_target_api::feature::TEXT_BOLD,
     bern_target_api::feature::CONTROLLED_VALUES,
     bern_target_api::feature::SIDEBAR_WIDTH,
     bern_target_api::feature::BUTTON_CONTENT,
@@ -143,6 +150,7 @@ pub(crate) const FEATURES: &[&str] = &[
     bern_target_api::feature::RUNTIME_PALETTE,
     bern_target_api::feature::RUNTIME_IMAGES,
     bern_target_api::feature::PICTURE_FILLS,
+    bern_target_api::feature::COVER_IMAGES,
     bern_target_api::feature::FILE_PICK,
     bern_target_api::feature::TABLE,
     bern_target_api::feature::CONTROLLED_TEXT,

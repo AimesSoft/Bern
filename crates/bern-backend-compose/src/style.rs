@@ -41,7 +41,7 @@ pub const SUPPORT: &[StyleSupport] = &[
     // in it, and corners that clip its layers.
     StyleSupport {
         component: "Stack",
-        base: &["background", "foreground", "corner"],
+        base: &["background", "foreground", "corner", "shadow"],
         states: &[],
     },
     StyleSupport {
@@ -241,6 +241,7 @@ pub fn transition(app: &Application, name: &str) -> Option<(String, String)> {
                 float(*distance)
             )
         }
+        TransitionKind::Move { edge } => format!("BernTransition.Move({})", edge_name(*edge)),
     };
     Some((kotlin, motion(app, &def.motion)))
 }

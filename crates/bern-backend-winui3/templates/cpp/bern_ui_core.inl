@@ -239,8 +239,9 @@ struct Paint {
 
 /// How an element appears or disappears.
 struct Transition {
-    /// `Grow` scales along one axis from nothing, `edge` holding still.
-    enum Kind { Fade, Pop, Slide, Grow };
+    /// `Grow` scales along one axis from nothing, `edge` holding still;
+    /// `Move` comes in from beyond `edge`, its whole size away, unfaded.
+    enum Kind { Fade, Pop, Slide, Grow, Move };
     Kind kind = Fade;
     double from = 0.8;
     char const* edge = "bottom";
@@ -1368,6 +1369,10 @@ struct Facts {
     uint32_t actions = 0;
 };
 
+namespace B {
+struct GlowLight;
+}
+
 struct Win {
     int kind = 0;
     uint64_t generation = 0;
@@ -1408,6 +1413,10 @@ struct Win {
     Cell<bool> idle{false};
     /// The `idle_area`s of the window, each with its seconds.
     std::vector<std::pair<winrt::weak_ref<xaml::UIElement>, double>> idleAreas;
+    /// The lights of the elements with `glow`, and whether the window's
+    /// content already follows the pointer for them.
+    std::vector<std::shared_ptr<B::GlowLight>> glows;
+    bool glowsWatched = false;
     /// Where the mouse is, for `idle_area`s: not known after a touch or a
     /// pen, which do not rest over areas; outside the window; or at
     /// `mousePoint`, in the coordinates of the window's content.
@@ -1436,6 +1445,13 @@ struct Win {
     /// How many `under_bars` layers are shown: while any is, the content
     /// reaches the window's top edge under the title bar and the header.
     Cell<int> underBars{0};
+    /// How many of them are pages over the window, with controls of their
+    /// own: while any is, the title bar shows only the caption buttons,
+    /// in the appearance of the page shown last ("" for the window's).
+    Cell<int> covering{0};
+    std::vector<std::pair<uint64_t, std::string>> coverings;
+    /// `WindowSet(appearance:)` as last chosen: "light", "dark" or "".
+    std::string appearanceMode;
     /// A dialog window's content dialog, and the window it shows over.
     controls::ContentDialog sheet{nullptr};
     Win* owner = nullptr;

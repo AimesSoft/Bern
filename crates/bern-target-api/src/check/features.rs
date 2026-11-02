@@ -57,6 +57,10 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::TOGGLE_BUTTON, toggle_button),
     (feature::DIALOG_WINDOWS, dialog_windows),
     (feature::BOUND_LENGTHS, bound_lengths),
+    (feature::SCROLL_ANCHOR, scroll_anchor),
+    (feature::SCROLL_BROWSING, scroll_browsing),
+    (feature::BOUND_BLUR, bound_blur),
+    (feature::TEXT_BOLD, text_bold),
     (feature::APPEARANCE, appearance),
     (feature::SHORTCUTS, shortcuts),
     (feature::BOUND_SHORTCUTS, bound_shortcuts),
@@ -74,6 +78,7 @@ const CHECKS: &[(&str, Check)] = &[
     (feature::PASTE, paste),
     (feature::SCROLL_SNAP, scroll_snap),
     (feature::PICTURE_FILLS, picture_fills),
+    (feature::COVER_IMAGES, cover_images),
     (feature::REVEAL, reveal),
 ];
 
@@ -974,6 +979,70 @@ fn bound_lengths(
     }
 }
 
+fn scroll_anchor(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "ScrollView" && element.props.contains_key("anchor")
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot stand a scroll position at a fraction of the view",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn scroll_browsing(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "ScrollView" && element.props.contains_key("browsing")
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot tell when a scroll view is scrolled by hand",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn bound_blur(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(element) = first_element(app, |element| {
+        matches!(element.prop("blur"), Some(bern_ir::Prop::Expr { .. }))
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot blur by a value that follows state",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
+fn text_bold(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
+    if let Some(element) = first_element(app, |element| {
+        element.kind == "Text" && element.props.contains_key("bold")
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot make a text bold by a condition",
+                descriptor.id
+            ))
+            .at(element.source.clone()),
+        );
+    }
+}
+
 fn appearance(descriptor: &TargetDescriptor, app: &Application, diagnostics: &mut Vec<Diagnostic>) {
     if let Some(element) = first_element(app, |element| element.props.contains_key("appearance")) {
         diagnostics.push(
@@ -1223,6 +1292,28 @@ fn picture_fills(
                 descriptor.id
             ))
             .at(shape.source.clone()),
+        );
+    }
+}
+
+fn cover_images(
+    descriptor: &TargetDescriptor,
+    app: &Application,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let Some(image) = first_element(app, |element| {
+        element.kind == "Image"
+            && element.keyword("fit") == Some("cover")
+            && ["width", "height", "aspect"]
+                .iter()
+                .all(|name| element.prop(name).is_none())
+    }) {
+        diagnostics.push(
+            Diagnostic::error(format!(
+                "target `{}` cannot cover its container with a picture without a size",
+                descriptor.id
+            ))
+            .at(image.source.clone()),
         );
     }
 }

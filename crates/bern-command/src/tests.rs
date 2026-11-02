@@ -453,6 +453,8 @@ mod composite {
     use super::*;
     use crate::{Composite, ModuleEngine};
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
 
     fn tally(optional: bool, enabled: bool) -> ModuleEngine {
         ModuleEngine {
@@ -511,6 +513,105 @@ mod composite {
         fn snapshot(&self) -> Vec<Value> {
             vec![Value::Int(self.0)]
         }
+    }
+
+    /// A module engine counting how often it was woken.
+    struct Woken(i64);
+
+    impl EngineProtocol for Woken {
+        fn descriptor(&self) -> &'static ProtocolDescriptor {
+            tally_descriptor()
+        }
+        fn invoke(&mut self, _: &Invocation) -> Result<Value, CommandError> {
+            Ok(Value::Int(self.0))
+        }
+        fn snapshot(&self) -> Vec<Value> {
+            vec![Value::Int(self.0)]
+        }
+        fn wake(&mut self) {
+            assert!(
+                crate::wake::waker().is_some(),
+                "wake runs with the waker current"
+            );
+            self.0 += 1;
+        }
+    }
+
+    /// A module engine counting how often its state was taken.
+    struct Watched(Arc<AtomicUsize>);
+
+    impl EngineProtocol for Watched {
+        fn descriptor(&self) -> &'static ProtocolDescriptor {
+            tally_descriptor()
+        }
+        fn invoke(&mut self, _: &Invocation) -> Result<Value, CommandError> {
+            Ok(Value::Unit)
+        }
+        fn snapshot(&self) -> Vec<Value> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            vec![Value::Int(0)]
+        }
+    }
+
+    #[test]
+    fn a_module_state_is_taken_only_when_read() {
+        let taken = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&taken);
+        let module = ModuleEngine {
+            descriptor: tally_descriptor(),
+            start: Box::new(move || Box::new(Watched(Arc::clone(&counted)))),
+            optional: false,
+            enabled: true,
+            depends: Vec::new(),
+        };
+        let host = Host::start(Composite::new(Box::new(Counter(0)), vec![module]).unwrap());
+        let add = host.resolve("counter.add").unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let _subscription = host.subscribe(move |_| {
+            let _ = sender.send(());
+        });
+        // The start's publishing is done.
+        std::thread::sleep(Duration::from_millis(100));
+        while receiver.try_recv().is_ok() {}
+        let before = taken.load(Ordering::SeqCst);
+        let outcome = host.dispatch_blocking(
+            Invocation {
+                command: add,
+                params: vec![Value::Int(1)],
+            },
+            context(),
+        );
+        assert_eq!(outcome.result, Ok(Value::Unit));
+        receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        // The shell could read the module but did not: only the state
+        // published after the command was taken.
+        assert_eq!(taken.load(Ordering::SeqCst) - before, 1);
+    }
+
+    #[test]
+    fn a_module_switched_on_is_woken_as_at_start() {
+        let module = ModuleEngine {
+            descriptor: tally_descriptor(),
+            start: Box::new(|| Box::new(Woken(0))),
+            optional: true,
+            enabled: false,
+            depends: Vec::new(),
+        };
+        let host = Host::start(Composite::new(Box::new(Counter(0)), vec![module]).unwrap());
+        let switch = host.resolve("modules.set_enabled").unwrap();
+        let outcome = host.dispatch_blocking(
+            Invocation {
+                command: switch,
+                params: vec![Value::Text("tally".into()), Value::Bool(true)],
+            },
+            context(),
+        );
+        assert_eq!(
+            outcome.result,
+            Ok(Value::List(vec![Value::Text("tally".into())]))
+        );
+        // Off as the host started, it was woken once as it was switched on.
+        assert_eq!(host.snapshot().1[1], Value::Record(vec![Value::Int(1)]));
     }
 
     #[test]

@@ -82,6 +82,34 @@ impl Generator<'_> {
     }
 
     /// A menu button and its items; dividers are `null`.
+    /// The items of a button's `ContextMenu`, `null` for each divider.
+    pub(super) fn context_menu(&self, element: &Element) -> Option<String> {
+        let items = element.context_menu()?;
+        let entries: Vec<String> = items
+            .iter()
+            .map(|item| {
+                if item.kind == "Divider" {
+                    return "null".to_string();
+                }
+                let enabled = item
+                    .expr("enabled")
+                    .map(|expr| format!("() => {}", self.expr(expr)));
+                let (action, set_file, kinds) = self.file_actions(item);
+                Self::props(vec![
+                    ("id", Some(self.id(item))),
+                    ("label", self.text_prop(item, "label")),
+                    ("icon", item.icon("icon").map(string)),
+                    ("role", Self::keyword(item, "role")),
+                    ("enabled", enabled),
+                    ("action", Some(action)),
+                    ("setFile", set_file),
+                    ("fileKinds", kinds),
+                ])
+            })
+            .collect();
+        Some(format!("[{}]", entries.join(", ")))
+    }
+
     pub(super) fn menu(&self, out: &mut Out, element: &Element) {
         let mut shortcuts = Vec::new();
         out.open(format!(

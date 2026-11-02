@@ -41,6 +41,10 @@ fn component_names() -> &'static [&'static str] {
 
 /// The further parts of the IR this target builds.
 const FEATURES: &[&str] = &[
+    bern_target_api::feature::SCROLL_ANCHOR,
+    bern_target_api::feature::SCROLL_BROWSING,
+    bern_target_api::feature::BOUND_BLUR,
+    bern_target_api::feature::TEXT_BOLD,
     feature::BUTTON_CONTENT,
     feature::TAB_ACCESSORY,
     feature::REVEAL,
@@ -60,6 +64,7 @@ const FEATURES: &[&str] = &[
     feature::RUNTIME_PALETTE,
     feature::RUNTIME_IMAGES,
     feature::PICTURE_FILLS,
+    feature::COVER_IMAGES,
     feature::FILE_PICK,
     feature::TABLE,
     feature::CONTROLLED_TEXT,
@@ -262,6 +267,9 @@ impl Target for GtkLinux {
                 "reduce_motion",
                 "spin",
                 "spin_period",
+                "glow",
+                "glow_opacity",
+                "blur",
                 "appear_delay",
                 "stagger",
                 "idle_area",

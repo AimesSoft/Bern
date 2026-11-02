@@ -16,9 +16,6 @@ use gpui::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// The height of the title bar content runs under with `chrome: unified`.
-const TITLE_BAR: f32 = 28.0;
-
 /// The root view of a window instance: its content, built again on every
 /// render in the colors of the window's appearance.
 struct WindowView {
@@ -117,9 +114,30 @@ impl Render for WindowView {
         crate::host::menus_follow_language(cx);
         let viewport = window.viewport_size();
         self.win.fullscreen.set(window.is_fullscreen());
-        let top = if self.def.unified { TITLE_BAR } else { 0.0 };
-        self.win.width.set(f32::from(viewport.width));
-        self.win.height.set(f32::from(viewport.height) - top);
+        // The frame the system leaves to the window: the title bar content
+        // runs under or starts below, and on Linux a shadow around it.
+        let frame = crate::chrome::frame(window, self.def.unified, self.win.bar_toolbar.get());
+        if frame.drawn {
+            window.set_client_inset(gpui::px(frame.inset));
+        }
+        #[cfg(target_os = "macos")]
+        crate::chrome::place_lights(window, &self.win, frame);
+        let top = frame.top;
+        self.win.title_bar.set(top);
+        self.win.inset.set(frame.inset);
+        self.win.caption.set(crate::chrome::caption_room(
+            frame,
+            self.win.idle() && self.win.immersive.get(),
+            cx.button_layout(),
+            window,
+            &self.win,
+        ));
+        self.win
+            .width
+            .set(f32::from(viewport.width) - 2.0 * frame.inset);
+        self.win
+            .height
+            .set(f32::from(viewport.height) - top - 2.0 * frame.inset);
         crate::controls::clear_shortcuts();
         let ctx = self.ctx(window.appearance(), None);
         if let Some(enabled) = self.def.idle_enabled {
@@ -132,22 +150,49 @@ impl Render for WindowView {
         if let Some(immersive) = self.def.immersive {
             self.win.immersive.set(immersive(&ctx));
         }
-        // The application's icon follows the window set's choice.
+        // The application's icon follows the window set's choice, and the
+        // menu bar's items read and write the primary window's state.
         let def = crate::host::host().def;
-        if self.def.id == def.primary
-            && let Some(icon) = def.window_icon
-        {
-            crate::native::show_icon(icon(&ctx).or(def.app_icon));
+        if self.def.id == def.primary {
+            if let Some(icon) = def.window_icon {
+                crate::native::show_icon(icon(&ctx).or(def.app_icon));
+            }
+            if let Some(menu_bar) = def.menu_bar {
+                crate::bar::show(menu_bar(&ctx), cx);
+            }
         }
         crate::query::begin(&self.win.id);
         crate::media::begin(&self.win.id);
+        crate::motion::begin(&self.win.id);
+        self.win.bar_toolbar_built.set(false);
         let content = (self.def.content)(&ctx.grown(crate::Grow::ALL));
+        // A toolbar came into the title bar's row or left it: the bar
+        // takes its height from the next frame on.
+        let toolbar = self.win.bar_toolbar_built.get();
+        if toolbar != self.win.bar_toolbar.get() {
+            self.win.bar_toolbar.set(toolbar);
+            window.request_animation_frame();
+        }
+        // While something moves, the next frame shows where it is by then.
+        if crate::motion::end(&self.win.id) {
+            window.request_animation_frame();
+        }
         crate::query::end(&self.win.id, false);
         crate::media::end(&self.win.id, false);
         // Under a video the window paints nothing, so the video shows.
         let canvas = ctx.color("surface.canvas");
         let video = crate::media::has_video(&self.win.id);
-        div()
+        // An immersive window at rest shows no title bar buttons.
+        let hidden = self.win.idle() && self.win.immersive.get();
+        let title_bar = crate::chrome::title_bar(
+            &ctx,
+            frame,
+            &text::tr(self.def.title),
+            hidden,
+            cx.button_layout(),
+            window,
+        );
+        let root = div()
             .id("bern-window")
             .relative()
             .size_full()
@@ -155,7 +200,7 @@ impl Render for WindowView {
             .flex_col()
             .pt(px(top))
             .map(|root| match video {
-                true => root.child(crate::media::backdrop(&self.win.id, canvas, 0.0)),
+                true => root.child(crate::media::backdrop(&self.win.id, canvas, frame.corner)),
                 false => root.bg(canvas),
             })
             .text_color(ctx.color("text.primary"))
@@ -173,6 +218,8 @@ impl Render for WindowView {
                 move |_, _, _| woke(&win)
             })
             .child(content)
+            .children(title_bar);
+        crate::chrome::around(&ctx, frame, root)
     }
 }
 
@@ -286,7 +333,9 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate:
     let height = def.height.unwrap_or(600.0) as f32;
     let mut bounds = Bounds::centered(None, size(px(width), px(height)), cx);
     let offscreen = offscreen();
-    if offscreen {
+    // Windows would give a window outside every display a size of its own:
+    // it opens on the display and moves out.
+    if offscreen && cfg!(target_os = "macos") {
         bounds.origin = point(px(-10000.0), px(-10000.0));
     }
     let win = Win::new(
@@ -295,7 +344,6 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate:
         id,
         drafts,
         (width, height),
-        if def.unified { TITLE_BAR } else { 0.0 },
         def.idle_after,
     );
     let options = WindowOptions {
@@ -314,15 +362,26 @@ fn open(kind: usize, def: &'static WindowDef, cx: &mut App) -> Result<(), crate:
             )),
         },
         app_id: Some(host.def.bundle_id.to_string()),
+        window_decorations: crate::chrome::decorations(def.unified),
+        // A frame drawn on Linux has a shadow around the window.
+        window_background: if cfg!(any(target_os = "linux", target_os = "freebsd")) {
+            gpui::WindowBackgroundAppearance::Transparent
+        } else {
+            gpui::WindowBackgroundAppearance::Opaque
+        },
         ..Default::default()
     };
     let instance = win.id.clone();
     cx.open_window(options, move |window, cx| {
+        if offscreen {
+            crate::native::move_offscreen(window);
+        }
         // The session runtime forgets the instance when it closes, and its
         // queries end.
         window.on_window_should_close(cx, move |_, _| {
             crate::query::end(&instance, true);
             crate::media::end(&instance, true);
+            crate::motion::forget(&instance);
             // SAFETY: the handle is live while windows are open.
             unsafe { bern_ffi::bern_window_closed(host.app(), kind as u32, generation) };
             true

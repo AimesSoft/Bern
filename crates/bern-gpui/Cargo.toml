@@ -25,6 +25,8 @@ gpui = { package = "gpui-pre", version = "=0.3.10" }
 # Pictures from http(s) addresses in state, fetched by GPUI's image loader.
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.10" }
 http_client = { package = "gpui-pre-http-client", version = "=0.3.10" }
+# The platform window under a GPUI window: where videos are composed.
+raw-window-handle = "0.6"
 # Template pictures, recolored in the text color.
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 smallvec = "1"
@@ -46,14 +48,18 @@ windows = ["dep:gpui_windows"]
 # toolchain. Without `font-kit`, macOS draws no text at all.
 gpui_macos = { package = "gpui-pre-macos", version = "=0.3.10", default-features = false, features = ["runtime_shaders", "font-kit"], optional = true }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSCursor", "NSGraphics", "NSImage", "NSResponder", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAccessibility", "NSApplication", "NSButton", "NSControl", "NSCursor", "NSGraphics", "NSImage", "NSMenu", "NSMenuItem", "NSResponder", "NSView", "NSWindow", "NSWorkspace", "objc2-core-foundation", "objc2-quartz-core"] }
 objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColor"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDictionary", "NSGeometry", "NSString"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CABase", "CALayer", "CAMetalLayer", "objc2-core-foundation", "objc2-core-graphics"] }
-raw-window-handle = "0.6"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies]
 gpui_linux = { package = "gpui-pre-linux", version = "=0.3.10", default-features = false, features = ["wayland", "x11"], optional = true }
+# The monotonic clock video frames are timed by.
+libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 gpui_windows = { package = "gpui-pre-windows", version = "=0.3.10", optional = true }
+# The release GPUI builds on: videos composed under a window, its place,
+# the pointer and the animation setting.
+win32 = { package = "windows", version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_DirectComposition", "Win32_Graphics_Dxgi", "Win32_System_Performance", "Win32_UI_WindowsAndMessaging"] }

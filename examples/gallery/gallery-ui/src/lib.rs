@@ -89,7 +89,7 @@ pub fn app(app: gallery::Client, windows: AppWindows, #[session] draft: GalleryD
             Window(id: main, title: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, initial: open, width: 900, height: 600, idle_after: 3) {
                 main_window(app: app, windows: windows)
             }
-            Window(id: about, title: tr! { "zh-Hans" => "关于图案集", "en" => "About Gallery" }, role: dialog, width: 360, height: 360) {
+            Window(id: about, title: tr! { "zh-Hans" => "关于图案集", "en" => "About Gallery" }, role: dialog, width: 360, height: 400) {
                 about(app: app, windows: windows)
             }
             MenuBar {
@@ -139,8 +139,12 @@ pub fn about(app: gallery::Client, windows: AppWindows, #[session] draft: AboutD
         Tabs(id: about_pages, selection: draft.page) {
             Tab(value: AboutPage::About, label: tr! { "zh-Hans" => "关于", "en" => "About" }, icon: "info.circle", display: icon) {
                 Column(gap: 12, padding: 24, align: center) {
-                    // A record, turning slowly.
-                    Image(source: "media/poster.jpg", width: 72, height: 72, fit: cover, corner: 36, spin: true, spin_period: 12)
+                    // A record, turning slowly, on its own picture blurred;
+                    // the pointer lights the picture, through the record too.
+                    Stack {
+                        Image(source: "media/poster.jpg", width: 200, height: 112, fit: cover, corner: 12, blur: 16, glow: 1, glow_opacity: 0.3)
+                        Image(source: "media/poster.jpg", width: 72, height: 72, fit: cover, corner: 36, spin: true, spin_period: 12)
+                    }
                     Text(content: tr! { "zh-Hans" => "图案集", "en" => "Gallery" }, style: title)
                     Text(content: tr! { "zh-Hans" => "一面会浮起的图案墙。", "en" => "A wall of patterns that lift." }, emphasis: secondary)
                     Text(content: tr! { "zh-Hans" => "预览版", "en" => "Preview" }, style: footnote, color: accent)

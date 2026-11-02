@@ -9,6 +9,8 @@
 //! reported where it is declared, so a build never shows a placeholder in
 //! its place.
 
+mod motion;
+
 use bern_ir::style::{ColorRef, ControlSize, StyleEffect, StyleState};
 use bern_ir::{
     Action, Application, BinaryOp, Binding, ComponentArg, ComponentDef, Element, Expr, ExprKind,
@@ -47,6 +49,10 @@ const COMMON: &[&str] = &[
     "spin_period",
     "stagger",
     "idle_area",
+    // Drawn by the runtime's filters: GPUI blurs and lights nothing itself.
+    "blur",
+    "glow",
+    "glow_opacity",
     // Where a child stands on a `Rail`.
     "at",
     "from",
@@ -83,7 +89,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "variant",
         ],
     ),
-    ("Flow", &["gap"]),
+    ("Flow", &["gap", "align"]),
     (
         "Grid",
         &[
@@ -96,6 +102,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "cell_ratio",
             "cell_extra",
             "masonry",
+            // Set by `bern_ir::lower_lists` on a list from a column.
+            "align",
         ],
     ),
     (
@@ -119,6 +127,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "arrival",
             "open_at",
             "open_center",
+            "anchor",
+            "browsing",
         ],
     ),
     ("Spacer", &[]),
@@ -135,6 +145,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "line_height",
             "markdown",
             "mark",
+            "bold",
         ],
     ),
     ("Label", &["title", "icon", "style", "font_size", "display"]),
@@ -217,7 +228,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "height",
         ],
     ),
-    ("LanguagePicker", &["id", "label"]),
+    ("LanguagePicker", &["id", "label", "label_hidden"]),
     (
         "TextInput",
         &[
@@ -240,6 +251,8 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
             "presented",
             "open",
             "panel_appearance",
+            "prominence",
+            "font_size",
         ],
     ),
     ("Modal", &["width", "height", "cover"]),
@@ -258,7 +271,7 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
         "Section",
         &["title", "footer", "style", "padding_x", "padding_y"],
     ),
-    ("Tabs", &["id", "selection"]),
+    ("Tabs", &["id", "selection", "fallback", "bar"]),
     ("Tab", &["value", "label", "icon", "display"]),
     ("TabAccessory", &["shown"]),
     ("Drop", &["id", "label", "value", "files", "over"]),
@@ -388,6 +401,14 @@ pub const COMPONENTS: &[(&str, &[&str])] = &[
         ],
     ),
     ("PickerOption", &["value", "label"]),
+    ("MenuBar", &[]),
+    ("CommandMenu", &["label", "role"]),
+    (
+        "CommandItem",
+        &[
+            "id", "label", "shortcut", "enabled", "checked", "pick", "files",
+        ],
+    ),
     ("ControlGroup", &["label", "height"]),
     (
         "Slider",
@@ -489,6 +510,9 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "Pattern",
     "Menu",
     "MenuItem",
+    "MenuBar",
+    "CommandMenu",
+    "CommandItem",
     "PickerOption",
     "ControlGroup",
     "Slider",
@@ -508,6 +532,7 @@ pub const COMPONENT_NAMES: &[&str] = &[
     "SidebarItem",
     "SidebarHeader",
     "SidebarFooter",
+    "ContextMenu",
     "Detail",
 ];
 
@@ -570,6 +595,31 @@ pub struct Generator<'a> {
     platform: &'a str,
     diagnostics: RefCell<Vec<Diagnostic>>,
     icons: RefCell<BTreeSet<String>>,
+    /// The corners of its container each child lies on (bits for top-left,
+    /// top-right, bottom-right and bottom-left), by the address of its node.
+    corners: RefCell<std::collections::HashMap<usize, u8>>,
+    /// The next element or component is built as it leaves.
+    leaving: std::cell::Cell<bool>,
+    /// Conditions numbered so far, for their names.
+    conditions: std::cell::Cell<usize>,
+    /// The spring the children of the container being built slide with
+    /// (`reflow`), for its children to take; and that of the children
+    /// being pushed.
+    reflow_next: RefCell<Option<String>>,
+    reflow_now: RefCell<Option<String>>,
+    /// The children being pushed are the layers of a `Stack` or `Modal`.
+    layers: std::cell::Cell<bool>,
+}
+
+/// How a container places its children, for the corners they lie on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Along {
+    /// Not on its corners: scrolled, wrapped, in cells.
+    None,
+    Column,
+    Row,
+    /// All on top of each other, each on every corner.
+    Layers,
 }
 
 impl<'a> Generator<'a> {
@@ -579,6 +629,12 @@ impl<'a> Generator<'a> {
             platform,
             diagnostics: RefCell::new(Vec::new()),
             icons: RefCell::new(RUNTIME_ICONS.iter().map(|icon| icon.to_string()).collect()),
+            corners: RefCell::new(std::collections::HashMap::new()),
+            leaving: std::cell::Cell::new(false),
+            conditions: std::cell::Cell::new(0),
+            reflow_next: RefCell::new(None),
+            reflow_now: RefCell::new(None),
+            layers: std::cell::Cell::new(false),
         }
     }
 
@@ -620,8 +676,10 @@ impl<'a> Generator<'a> {
         for window in &app.windows.windows {
             line(&self.window_content(window));
         }
+        line(&self.motion_tables());
         line(&self.styles());
         line(&self.window_theme());
+        line(&self.menu_bar());
         line("/// Strings of every supported language.");
         line("static STRINGS: b::text::StringTable = &[");
         for (language, table) in bern_target_api::texts::tables(app) {
@@ -643,12 +701,17 @@ impl<'a> Generator<'a> {
 
     fn component(&self, component: &ComponentDef) -> String {
         // Controls of the body are named after the component; the element
-        // the body is keeps the space its caller gives it.
-        format!(
+        // the body is keeps the space its caller gives it. A body that
+        // plays `disappear` is also built as it leaves.
+        let mut out = format!(
             "pub fn c_{}(c: &b::Ctx) -> b::El {{\n    {}\n}}\n",
             component.name,
             self.root(&component.body)
-        )
+        );
+        if let Some(leaving) = self.leaving_component(component) {
+            out.push_str(&leaving);
+        }
+        out
     }
 
     fn window_content(&self, window: &WindowDef) -> String {
@@ -679,9 +742,10 @@ impl<'a> Generator<'a> {
             Node::Element(element) if element.kind != "ForEach" => self
                 .element(element, "c")
                 .unwrap_or_else(|| "b::column(c, b::Flex::default(), Vec::new())".into()),
+            // What a condition shows fills the body, on all its corners.
             _ => format!(
                 "b::column(c, b::Flex::default(), {})",
-                self.children(std::slice::from_ref(node), Axis::Column)
+                self.children_along(std::slice::from_ref(node), Axis::Column, Along::Layers)
             ),
         }
     }
@@ -935,6 +999,7 @@ pub fn app() -> b::AppDef {{
         appearance: {appearance},
         app_icon: {app_icon},
         window_icon: {window_icon},
+        menu_bar: {menu_bar},
         icons: ICONS,
         text_weights: &[{text_weights}],
     }}
@@ -997,6 +1062,82 @@ pub fn app() -> b::AppDef {{
                 "Some(window_icon)"
             } else {
                 "None"
+            },
+            menu_bar = if app.windows.menu_bar.is_some() {
+                "Some(menu_bar)"
+            } else {
+                "None"
+            },
+        )
+    }
+
+    // MARK: - Menu bar
+
+    /// `menu_bar`, the application's menus in the menu bar, when it declares
+    /// a `MenuBar`: built with the primary window's context, whose drafts its
+    /// items read and write.
+    fn menu_bar(&self) -> String {
+        let Some(bar) = &self.app.windows.menu_bar else {
+            return String::new();
+        };
+        let menus: Vec<String> = bar
+            .children
+            .iter()
+            .filter_map(|node| match node {
+                Node::Element(menu) if menu.kind == "CommandMenu" => Some(menu),
+                _ => None,
+            })
+            .map(|menu| {
+                format!(
+                    "b::bar_menu({}, {}, {})",
+                    self.bar_label(menu),
+                    match menu.keyword("role") {
+                        Some(role) => format!("Some({})", string(role)),
+                        None => "None".into(),
+                    },
+                    self.bar_entries(&menu.children)
+                )
+            })
+            .collect();
+        format!(
+            "/// The application's menus in the menu bar.\nfn menu_bar(c: &b::Ctx) -> Vec<b::BarMenu> {{\n    vec![{}]\n}}\n",
+            menus.join(", ")
+        )
+    }
+
+    fn bar_label(&self, element: &Element) -> String {
+        element
+            .text("label")
+            .map(|label| self.text(label, Some(&element.source)))
+            .unwrap_or_else(|| "String::new()".into())
+    }
+
+    /// The items of a menu bar menu: commands, dividers and submenus.
+    fn bar_entries(&self, nodes: &[Node]) -> String {
+        self.entries(
+            nodes,
+            "b::BarEntry",
+            &|out, child| match child.kind.as_str() {
+                "Divider" => out.push_str("v.push(b::BarEntry::Divider); "),
+                "CommandMenu" => out.push_str(&format!(
+                    "v.push(b::bar_submenu({}, {})); ",
+                    self.bar_label(child),
+                    self.bar_entries(&child.children)
+                )),
+                "CommandItem" => out.push_str(&format!(
+                    "v.push(b::bar_item(c, {}, {}, {}, {}, {}, {}, {})); ",
+                    string(child.id.as_deref().unwrap_or(&child.path)),
+                    self.bar_label(child),
+                    self.shortcut(child),
+                    self.enabled(child),
+                    child
+                        .expr("checked")
+                        .map(|checked| self.condition(checked))
+                        .unwrap_or_else(|| "false".into()),
+                    self.pick(child),
+                    self.action(child)
+                )),
+                other => self.unsupported(format!("`{other}` in a menu"), Some(&child.source)),
             },
         )
     }
@@ -1079,6 +1220,9 @@ pub fn app() -> b::AppDef {{
                 };
                 fields.push(format!("{name}: Some({})", look(effects)));
             }
+            if let Some(settle) = &resolved.settle {
+                fields.push(format!("settle: Some({})", motion::constant("M", settle)));
+            }
             fields.push("..b::ControlStyle::NONE".into());
             out.push_str(&format!(
                 "static CONTROL_STYLE_{index}: b::ControlStyle = b::ControlStyle {{ {} }};\n",
@@ -1157,6 +1301,51 @@ pub fn app() -> b::AppDef {{
     // MARK: - Space
 
     /// Whether a node takes the space its container gives.
+    /// Whether `node`, as a layer of a stack, covers the whole stack with
+    /// an opaque surface: a filling stack with an opaque background, or one
+    /// with such a layer; through components and the branches they show.
+    fn covers(&self, node: &Node) -> bool {
+        fn covering(generator: &Generator<'_>, node: &Node, depth: usize) -> bool {
+            if depth > 8 {
+                return false;
+            }
+            match node {
+                Node::Element(element) if element.kind == "Stack" => {
+                    let greed = generator.element_greed(element, Axis::Column);
+                    let opaque = bern_target_api::style::resolve(
+                        generator.app,
+                        generator.platform,
+                        "Stack",
+                        element.keyword("variant"),
+                    )
+                    .is_some_and(|resolved| {
+                        resolved.base.iter().any(|effect| {
+                            matches!(effect, StyleEffect::Background { color }
+                                if matches!(color, ColorRef::Fixed { .. })
+                                    || matches!(color, ColorRef::Role { role } if role.starts_with("surface.")))
+                        })
+                    });
+                    greed.width
+                        && greed.height
+                        && (opaque
+                            || element
+                                .children
+                                .iter()
+                                .any(|layer| covering(generator, layer, depth + 1)))
+                }
+                // A video covers what is under it: it stands under the
+                // window's drawing, which would hide the picture there.
+                Node::Element(element) if element.kind == "Video" => true,
+                Node::Component(reference) => generator
+                    .app
+                    .component(&reference.component)
+                    .is_some_and(|component| covering(generator, &component.body, depth + 1)),
+                _ => false,
+            }
+        }
+        covering(self, node, 0)
+    }
+
     fn greed(&self, node: &Node, axis: Axis) -> Greed {
         match node {
             Node::Element(element) => self.element_greed(element, axis),
@@ -1206,7 +1395,14 @@ pub fn app() -> b::AppDef {{
     }
 
     fn element_greed(&self, element: &Element, parent: Axis) -> Greed {
-        let fixed = |name: &str| element.prop(name).is_some();
+        // A length that fills (`width: fill`) is no fixed length, nor are a
+        // `ScaleBox`'s, the size of its scene, which it fits into whatever
+        // space it is given.
+        let fixed = |name: &str| {
+            element.kind != "ScaleBox"
+                && element.prop(name).is_some()
+                && element.keyword(name) != Some("fill")
+        };
         let greed = match element.kind.as_str() {
             // A shelf scrolling sideways is as tall as what it shows.
             "ScrollView" if element.keyword("axis") == Some("horizontal") => Greed {
@@ -1221,7 +1417,7 @@ pub fn app() -> b::AppDef {{
                 width: parent == Axis::Column,
                 height: parent == Axis::Row,
             },
-            "TextInput" | "Progress" | "Section" | "NavLink" | "SearchItem" => Greed {
+            "TextInput" | "Progress" | "Slider" | "Section" | "NavLink" | "SearchItem" => Greed {
                 width: true,
                 height: false,
             },
@@ -1230,17 +1426,32 @@ pub fn app() -> b::AppDef {{
                     || element.prop("label_hidden").is_none(),
                 height: false,
             },
+            // A switch with its label spans the row; without, it is just
+            // the switch.
             "Switch" => Greed {
-                width: element.keyword("style") != Some("checkbox"),
+                width: element.keyword("style") != Some("checkbox")
+                    && element.prop("label_hidden").is_none(),
                 height: false,
             },
+            // A button with content is as large as its content wants.
             "Button" => Greed {
                 width: element.keyword("width") == Some("fill"),
                 height: false,
-            },
+            }
+            .or(self.children_greed(&element.children, Axis::Row)),
             "Video" => Greed {
                 width: true,
                 height: element.keyword("sizing") == Some("fill"),
+            },
+            // A list lowered from a column takes the room its rows would
+            // have given the column.
+            "Grid" if bern_ir::lowered_list_align(element).is_some() => {
+                self.children_greed(&element.children, Axis::Column)
+            }
+            // A picture with only its shape is as wide as its container.
+            "Image" => Greed {
+                width: element.prop("aspect").is_some() && element.prop("height").is_none(),
+                height: false,
             },
             "Toolbar" | "Search" => Greed {
                 width: true,
@@ -1250,6 +1461,14 @@ pub fn app() -> b::AppDef {{
                 width: true,
                 height: element.prop("height").is_none(),
             },
+            // A drawing without a size fills the space it is given, as on
+            // the web; as a layer of a `Stack` it fills the stack, which
+            // keeps the height its other layers give.
+            "Canvas" => Greed {
+                width: true,
+                height: true,
+            },
+
             "PreviewList" => Greed {
                 width: false,
                 height: true,
@@ -1257,16 +1476,33 @@ pub fn app() -> b::AppDef {{
             "Column" | "Drop" | "Adaptive" | "Layout" | "ForEach" | "Query" | "FocusRegion"
             | "Pinch" => self.children_greed(&element.children, Axis::Column),
             "Row" | "Flow" => self.children_greed(&element.children, Axis::Row),
-            "Rail" => Greed {
-                width: element.keyword("axis") != Some("vertical"),
-                height: element.keyword("axis") == Some("vertical"),
-            },
-            // As large as its largest layer: it fills what any layer fills.
+            // Along its axis it fills; across, as much as what stands on it.
+            "Rail" => {
+                let vertical = element.keyword("axis") == Some("vertical");
+                let across = self.children_greed(
+                    &element.children,
+                    if vertical { Axis::Row } else { Axis::Column },
+                );
+                Greed {
+                    width: !vertical || across.width,
+                    height: vertical || across.height,
+                }
+            }
+            // As large as its largest layer: it fills what any layer fills,
+            // but a drawing without a size only fills across, the stack
+            // keeping the height its other layers give.
             "Stack" => element
                 .children
                 .iter()
                 .fold(Greed::default(), |greed, layer| {
-                    greed.or(self.greed(layer, Axis::Column))
+                    let own = self.greed(layer, Axis::Column);
+                    greed.or(match layer {
+                        Node::Element(canvas) if canvas.kind == "Canvas" => Greed {
+                            width: own.width,
+                            height: false,
+                        },
+                        _ => own,
+                    })
                 }),
             _ => Greed::default(),
         };
@@ -1281,11 +1517,119 @@ pub fn app() -> b::AppDef {{
     /// The elements `nodes` show, as an expression for a `Vec<b::El>` in a
     /// container of `axis`.
     fn children(&self, nodes: &[Node], axis: Axis) -> String {
+        self.children_along(nodes, axis, Along::None)
+    }
+
+    /// The children of a container that places them `along`, each told the
+    /// container's corners it lies on.
+    fn children_along(&self, nodes: &[Node], axis: Axis, along: Along) -> String {
+        self.assign_corners(nodes, along, 0b1111);
+        // The children of a reflowing container slide to their places.
+        let reflow = self.reflow_next.borrow_mut().take();
+        let around = self.reflow_now.replace(reflow);
+        let layers = self.layers.replace(along == Along::Layers);
         let mut body = String::new();
         for node in nodes {
             self.push(&mut body, node, axis);
         }
+        self.layers.replace(layers);
+        self.reflow_now.replace(around);
         format!("{{ let mut v: Vec<b::El> = Vec::new(); {body} v }}")
+    }
+
+    /// Note the corners each of `nodes` lies on, within `allowed`: the first
+    /// and last of a column or row, every layer; through conditions to the
+    /// elements they show.
+    fn assign_corners(&self, nodes: &[Node], along: Along, allowed: u8) {
+        let count = nodes.len();
+        for (index, node) in nodes.iter().enumerate() {
+            let (first, last) = (index == 0, index + 1 == count);
+            let mask = match along {
+                Along::None => 0,
+                Along::Layers => 0b1111,
+                Along::Column => (if first { 0b0011 } else { 0 }) | (if last { 0b1100 } else { 0 }),
+                Along::Row => (if first { 0b1001 } else { 0 }) | (if last { 0b0110 } else { 0 }),
+            } & allowed;
+            match node {
+                Node::Element(element) if element.kind == "ForEach" => {}
+                Node::Element(_) | Node::Component(_) => {
+                    self.corners
+                        .borrow_mut()
+                        .insert(node as *const Node as usize, mask);
+                }
+                Node::If(node) => {
+                    for (_, body) in &node.branches {
+                        self.assign_corners(body, along, mask);
+                    }
+                    self.assign_corners(&node.otherwise, along, mask);
+                }
+                Node::IfLet(node) => {
+                    self.assign_corners(&node.then, along, mask);
+                    self.assign_corners(&node.otherwise, along, mask);
+                }
+                Node::Match(node) => {
+                    for arm in &node.arms {
+                        self.assign_corners(&arm.body, along, mask);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The corners the child `node` lies on, as `.corners(…)`.
+    fn corners_of(&self, node: &Node) -> String {
+        let mask = self
+            .corners
+            .borrow()
+            .get(&(node as *const Node as usize))
+            .copied()
+            .unwrap_or(0);
+        format!(".corners({mask})")
+    }
+
+    /// The corners left to a container's content: its own radius, or none
+    /// on the sides its padding keeps clear.
+    fn rounding(&self, element: &Element) -> Option<String> {
+        let own = |family: &str| {
+            let resolved = bern_target_api::style::resolve(
+                self.app,
+                self.platform,
+                &element.kind,
+                element.keyword("variant"),
+            )?;
+            self.style_index(family, element)?;
+            resolved.base.iter().find_map(|effect| match effect {
+                StyleEffect::Corner { radius } => Some(*radius),
+                _ => None,
+            })
+        };
+        let padded = |name: &str| element.prop(name).is_some() && element.number(name) != Some(0.0);
+        match element.kind.as_str() {
+            "Column" | "Row" => {
+                let mut sides = 0u8;
+                if padded("padding") {
+                    sides |= 0b1111;
+                }
+                if padded("padding_y") {
+                    sides |= 0b0101;
+                }
+                if padded("padding_x") {
+                    sides |= 0b1010;
+                }
+                (sides != 0).then(|| format!(".rounding(None, {sides})"))
+            }
+            "Stack" => {
+                own("surface").map(|radius| format!(".rounding(Some({}), 0)", float(radius)))
+            }
+            "Button" if !element.children.is_empty() => {
+                own("control").map(|radius| format!(".rounding(Some({}), 0)", float(radius)))
+            }
+            "Modal" => Some(format!(
+                ".in_modal({})",
+                element.keyword("cover") == Some("compact")
+            )),
+            _ => None,
+        }
     }
 
     /// Statements that push the elements of `node` onto `v`.
@@ -1302,8 +1646,26 @@ pub fn app() -> b::AppDef {{
                 }
             }
             Node::Element(element) => {
-                let ctx = format!("&c.grown({})", self.element_greed(element, axis).grow(axis));
+                let ctx = format!(
+                    "&c.grown({}){}",
+                    self.element_greed(element, axis).grow(axis),
+                    self.corners_of(node)
+                );
+                let reflow = self.reflow_now.borrow().clone();
+                let covering = self.layers.get() && self.covers(node);
                 if let Some(code) = self.element(element, &ctx) {
+                    let code = if covering {
+                        format!("b::cover({code})")
+                    } else {
+                        code
+                    };
+                    let code = match reflow {
+                        Some(curve) => format!(
+                            "b::reflowed(c, {}, {curve}, {code})",
+                            string(element.id.as_deref().unwrap_or(&element.path))
+                        ),
+                        None => code,
+                    };
                     out.push_str(&format!("v.push({code}); "));
                 }
             }
@@ -1325,13 +1687,54 @@ pub fn app() -> b::AppDef {{
                         ));
                     }
                 }
-                out.push_str(&format!(
-                    "v.push(c_{}(&c.child({}, vec![{}]).grown({}))); ",
+                // Where it is called keeps apart what each call draws.
+                let file = std::path::Path::new(&reference.source.file)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let site = format!(
+                    "{file}:{}:{}",
+                    reference.source.line, reference.source.column
+                );
+                let prefix = if self.leaving.replace(false) {
+                    "l"
+                } else {
+                    "c"
+                };
+                let code = format!(
+                    "{prefix}_{}(&c.child({}, {}, vec![{}]).grown({}){})",
                     component.name,
                     string(&component.name),
+                    string(&site),
                     params.join(", "),
-                    self.greed(node, axis).grow(axis)
-                ));
+                    self.greed(node, axis).grow(axis),
+                    self.corners_of(node)
+                );
+                let code = match self.reflow_now.borrow().clone() {
+                    Some(curve) => format!(
+                        "b::reflowed(c, {}, {curve}, {code})",
+                        string(&format!("{}@{site}", component.name))
+                    ),
+                    None => code,
+                };
+                let code = if self.layers.get() && self.covers(node) {
+                    format!("b::cover({code})")
+                } else {
+                    code
+                };
+                out.push_str(&format!("v.push({code}); "));
+            }
+            Node::If(node)
+                if node.branches.iter().any(|(_, body)| self.leaves(body))
+                    || self.leaves(&node.otherwise) =>
+            {
+                self.push_if_leaving(out, node, axis)
+            }
+            Node::IfLet(node) if self.leaves(&node.then) || self.leaves(&node.otherwise) => {
+                self.push_if_let_leaving(out, node, axis)
+            }
+            Node::Match(node) if node.arms.iter().any(|arm| self.leaves(&arm.body)) => {
+                self.push_match_leaving(out, node, axis)
             }
             Node::If(node) => {
                 for (index, (condition, body)) in node.branches.iter().enumerate() {
@@ -1415,21 +1818,58 @@ pub fn app() -> b::AppDef {{
         };
         // Each row's elements; inside a scroll view that rests on items,
         // the runtime wraps them to note where they are.
+        let step = element.number("stagger");
+        if let Some(step) = step {
+            out.push_str(&format!(
+                "b::staggered(c, {}, {}, || {{ ",
+                string(&format!("{}#stagger", element.path)),
+                float(step)
+            ));
+        }
+        // Rows that left stay, where they were, while what of them plays
+        // `disappear` leaves.
+        let leaves = self.leaves(&element.children);
+        let list = string(&element.path);
         out.push_str(&format!(
-            "for item in rt::as_list({}) {{ let key = rt::at(item.clone(), &[{field}]); let c = &c.with_local({}, item).with_item(&key); let row = {{ let mut v: Vec<b::El> = Vec::new(); ",
+            "{{ let list = c; for (item, gone) in b::rows(c, {list}, rt::as_list({}), {leaves}, |item| rt::at(item.clone(), &[{field}])) {{ let key = rt::at(item.clone(), &[{field}]); let c = &c.with_local({}, item).with_item(&key); ",
             self.expr(items, Some(&element.source)),
             string(&template.var)
         ));
+        if leaves {
+            out.push_str(&format!(
+                "if gone {{ b::left_row(list, {list}, &key, || {{ "
+            ));
+            self.push_leaving(out, &element.children, axis);
+            out.push_str("}); continue; } ");
+        } else {
+            out.push_str("let _ = (gone, list); ");
+        }
+        out.push_str("b::scroll_items(c, key, |c| { let mut v: Vec<b::El> = Vec::new(); ");
         for node in &element.children {
             self.push(out, node, axis);
         }
-        out.push_str("v }; b::scroll_items(c, key, row, &mut v); } ");
+        out.push_str("v }, &mut v); } } ");
+        if step.is_some() {
+            out.push_str("}); ");
+        }
     }
 
     /// An element's expression, built in context `ctx`; the element's own
     /// context, which its children build in too, adds its local appearance
     /// and a `Stack`'s `enabled`.
     fn element(&self, element: &Element, ctx: &str) -> Option<String> {
+        // Built as it leaves, it plays its `disappear`; what it contains is
+        // built as ever.
+        let leaving = self.leaving.replace(false);
+        let around = self.reflow_now.replace(None);
+        let layers = self.layers.replace(false);
+        let code = self.element_built(element, ctx, leaving);
+        self.layers.replace(layers);
+        self.reflow_now.replace(around);
+        code
+    }
+
+    fn element_built(&self, element: &Element, ctx: &str, leaving: bool) -> Option<String> {
         let Some((_, properties)) = COMPONENTS.iter().find(|(kind, _)| *kind == element.kind)
         else {
             // The target's capability check names the component.
@@ -1475,7 +1915,21 @@ pub fn app() -> b::AppDef {{
         if reveals(&element.children) {
             scope = format!("&({scope}).revealing()");
         }
-        let code = self.element_code(element)?;
+        // The rounded corners its content lies on.
+        if let Some(rounding) = self.rounding(element) {
+            scope = format!("&({scope}){rounding}");
+        }
+        let reflow = self.reflow_of(element);
+        if let Some(curve) = &reflow {
+            self.reflow_next.replace(Some(curve.clone()));
+        }
+        let code = self.element_code(element);
+        self.reflow_next.replace(None);
+        let code = code?;
+        let code = match reflow {
+            Some(_) => format!("b::reflow_origin({code})"),
+            None => code,
+        };
         let code = if element.prop("reveal").is_some() {
             format!("b::reveal(c, {code})")
         } else {
@@ -1488,6 +1942,27 @@ pub fn app() -> b::AppDef {{
             )
         } else {
             code
+        };
+        let code = if leaving {
+            self.left(element, code)
+        } else {
+            self.moved(element, code)
+        };
+        // Blurred: what it and its content draw, kept within its box.
+        let code = match self.length_value(element, "blur") {
+            Some(radius) => format!("b::blur_scope(c, {radius}, |c| {{ {code} }})"),
+            None => code,
+        };
+        // Lit under the pointer, over its blurred picture.
+        let code = match element.number("glow") {
+            Some(factor) => format!(
+                "b::glow(c, {}, &|c: &b::Ctx| {{ {code} }}, {}, {}, {})",
+                string(element.id.as_deref().unwrap_or(&element.path)),
+                float(factor),
+                float(element.number("glow_opacity").unwrap_or(0.4)),
+                self.optional_length(element, "corner"),
+            ),
+            None => code,
         };
         Some(format!("{{ let c = {scope}; {code} }}"))
     }
@@ -1519,22 +1994,39 @@ pub fn app() -> b::AppDef {{
                 } else {
                     Axis::Row
                 };
+                let along = match element.kind.as_str() {
+                    "Column" => Along::Column,
+                    "Row" => Along::Row,
+                    _ => Along::None,
+                };
                 format!(
                     "b::{}(c, {}, {})",
                     element.kind.to_ascii_lowercase(),
                     self.flex(element),
-                    self.children(&element.children, axis)
+                    self.staggered(element, self.children_along(&element.children, axis, along))
                 )
             }
-            "Stack" => format!(
-                "b::stack(c, b::Layers {{ under_bars: {}, align: b::Align::{}, width: {}, height: {}, style: {} }}, {})",
-                element.prop("under_bars").is_some(),
-                stack_align(element.keyword("align")),
-                self.length(element, "width"),
-                self.length(element, "height"),
-                self.stack_style(element),
-                column(&element.children)
-            ),
+            "Stack" => {
+                let under_bars = element.prop("under_bars").is_some();
+                let stack = format!(
+                    "b::stack(c, b::Layers {{ under_bars: {under_bars}, align: b::Align::{}, width: {}, height: {}, style: {} }}, {})",
+                    stack_align(element.keyword("align")),
+                    self.length(element, "width"),
+                    self.length(element, "height"),
+                    self.stack_style(element),
+                    self.staggered(
+                        element,
+                        self.children_along(&element.children, Axis::Column, Along::Layers)
+                    )
+                );
+                // Its layers reach under the title bar, where a toolbar
+                // keeps clear of the title bar's buttons.
+                if under_bars {
+                    format!("{{ let c = &c.under_bars(); {stack} }}")
+                } else {
+                    stack
+                }
+            }
             "ScrollView" => {
                 let horizontal = element.keyword("axis") == Some("horizontal");
                 let children = self.children(
@@ -1558,19 +2050,33 @@ pub fn app() -> b::AppDef {{
                         None => "None".into(),
                     },
                 };
+                let anchor = match element.number("anchor") {
+                    Some(anchor) => format!("Some({})", float(anchor)),
+                    None => "None".into(),
+                };
+                let browsing = match element.field("browsing") {
+                    Some(field) => format!(
+                        "Some({})",
+                        field_ref(self.session_index(&field.session), field.field)
+                    ),
+                    None => "None".into(),
+                };
                 if snap == "None"
                     && position.is_none()
                     && open_at == "None"
                     && open_center == "None"
+                    && browsing == "None"
                 {
+                    // What follows scrolling inside measures itself against
+                    // the view.
                     format!(
-                        "b::scroll(c, {}, {horizontal}, {children})",
-                        string(&element.path)
+                        "{{ let content = {{ let c = &c.within_scroll(b::scroll_key(c, {path}), {horizontal}); {children} }}; b::scroll(c, {path}, {horizontal}, content) }}",
+                        path = string(&element.path)
                     )
                 } else {
                     // The rows of the first lists inside are its items.
                     format!(
-                        "{{ let items = b::scroll_key(c, {path}); let content = {{ let c = &c.in_scroll(Some(items)); {children} }}; b::scroll_view(c, {path}, b::ScrollProps {{ horizontal: {horizontal}, snap: b::Snap::{snap}, position: {}, open_at: {open_at}, open_center: {open_center} }}, content) }}",
+                        "{{ let items = b::scroll_key(c, {path}); let content = {{ let c = &c.in_scroll(Some(items.clone())).within_scroll(items, {horizontal}); {children} }}; b::scroll_view(c, {path}, b::ScrollProps {{ horizontal: {horizontal}, snap: b::Snap::{snap}, position: {}, open_at: {open_at}, open_center: {open_center}, arrival: {arrival}, anchor: {anchor}, browsing: {browsing} }}, content) }}",
                         match position {
                             Some(field) => format!(
                                 "Some({})",
@@ -1579,26 +2085,78 @@ pub fn app() -> b::AppDef {{
                             None => "None".into(),
                         },
                         path = string(&element.path),
+                        arrival = element.keyword("arrival") == Some("nudge"),
                     )
                 }
             }
             "Spacer" => "b::spacer(c)".into(),
-            "Grid" => format!(
-                "b::grid(c, {}, b::GridProps {{ min_width: {}, gap: {}, row_gap: {}, pad: b::Pad {{ all: {}, x: {}, y: {} }}, cell_ratio: {}, cell_extra: {} }}, {})",
-                string(&element.path),
-                self.number(element, "min_width", 120.0),
-                self.number(element, "gap", 0.0),
-                self.optional_length(element, "row_gap"),
-                self.number(element, "padding", 0.0),
-                self.optional_length(element, "padding_x"),
-                self.optional_length(element, "padding_y"),
-                match element.number("cell_ratio") {
-                    Some(ratio) => format!("Some({})", float(ratio)),
-                    None => "None".into(),
-                },
-                self.number(element, "cell_extra", 0.0),
-                self.children(&element.children, Axis::Column)
-            ),
+            "Grid" => {
+                let props = format!(
+                    "b::GridProps {{ min_width: {}, gap: {}, row_gap: {}, pad: b::Pad {{ all: {}, x: {}, y: {} }}, cell_ratio: {}, cell_extra: {}, align: {} }}",
+                    self.number(element, "min_width", 120.0),
+                    self.number(element, "gap", 0.0),
+                    self.optional_length(element, "row_gap"),
+                    self.number(element, "padding", 0.0),
+                    self.optional_length(element, "padding_x"),
+                    self.optional_length(element, "padding_y"),
+                    match element.number("cell_ratio") {
+                        Some(ratio) => format!("Some({})", float(ratio)),
+                        None => "None".into(),
+                    },
+                    self.number(element, "cell_extra", 0.0),
+                    // A list lowered from a column places its rows as the
+                    // column would.
+                    match bern_ir::lowered_list_align(element) {
+                        Some("center") => "Some(b::Align::Center)",
+                        Some("trailing") => "Some(b::Align::Trailing)",
+                        Some(_) => "Some(b::Align::Leading)",
+                        None => "None",
+                    },
+                );
+                // A grid of one `ForEach` builds, in a scroll view, only
+                // the rows near what is in sight.
+                if let Some(each) = bern_ir::lazy_grid_items(element)
+                    && let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
+                        (each.expr("items"), &each.template, each.prop("key"))
+                {
+                    let mut body = String::new();
+                    for node in &each.children {
+                        self.push(&mut body, node, Axis::Column);
+                    }
+                    // Rows that left stay, where they were, while what of
+                    // them plays `disappear` leaves.
+                    let leaves = self.leaves(&each.children);
+                    let list = string(&each.path);
+                    let mut leaving = String::new();
+                    if leaves {
+                        self.push_leaving(&mut leaving, &each.children, Axis::Column);
+                    }
+                    let row = format!(
+                        "|c: &b::Ctx, item: &V, gone: bool| {{ let list = c; let key = rt::at(item.clone(), &[{field}]); let c = &c.with_local({}, item.clone()).with_item(&key); let mut v: Vec<b::El> = Vec::new(); if gone {{ b::left_row(list, {list}, &key, || {{ {leaving} }}); return v; }} b::scroll_items(c, key, |c| {{ let mut v: Vec<b::El> = Vec::new(); {body} v }}, &mut v); v }}",
+                        string(&template.var),
+                    );
+                    let grid = format!(
+                        "b::lazy_grid(c, {}, {props}, b::rows(c, {list}, rt::as_list({}), {leaves}, |item| rt::at(item.clone(), &[{field}])), |item| rt::at(item.clone(), &[{field}]), {row})",
+                        string(&element.path),
+                        self.expr(items, Some(&element.source)),
+                    );
+                    return Some(
+                        match each.number("stagger").or_else(|| element.number("stagger")) {
+                            Some(step) => format!(
+                                "b::staggered(c, {}, {}, || {grid})",
+                                string(&format!("{}#stagger", element.path)),
+                                float(step)
+                            ),
+                            None => grid,
+                        },
+                    );
+                }
+                format!(
+                    "b::grid(c, {}, {props}, {})",
+                    string(&element.path),
+                    self.staggered(element, self.children(&element.children, Axis::Column))
+                )
+            }
             "Divider" => "b::divider(c)".into(),
             "Video" => {
                 if element.keyword("controls") != Some("none") {
@@ -1682,7 +2240,12 @@ pub fn app() -> b::AppDef {{
                 )
             }
             "Accordion" => format!(
-                "b::accordion(c, b::AccordionProps {{ selected: rt::as_f64(&{}) as usize, collapsed_width: {}, height: {}, gap: {}, corner: {} }}, {})",
+                "b::accordion(c, b::AccordionProps {{ id: {}, motion: {}, selected: rt::as_f64(&{}) as usize, collapsed_width: {}, height: {}, gap: {}, corner: {} }}, {})",
+                string(&element.path),
+                match element.keyword("animate") {
+                    Some(token) => format!("Some({})", self.curve(token)),
+                    None => "None".into(),
+                },
                 element
                     .expr("selected")
                     .map(|selected| self.expr(selected, at))
@@ -1780,7 +2343,7 @@ pub fn app() -> b::AppDef {{
                 )
             }
             "Text" => format!(
-                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {} }})",
+                "b::text(c, {}, b::TextProps {{ style: b::TextStyle::{}, emphasis: b::Emphasis::{}, lines: {}, size: {}, color: {}, line_height: {}, markdown: {}, mark: {}, bold: {} }})",
                 text("content"),
                 pascal(element.keyword("style").unwrap_or("body")),
                 pascal(element.keyword("emphasis").unwrap_or("primary")),
@@ -1795,6 +2358,14 @@ pub fn app() -> b::AppDef {{
                 self.text_color(element),
                 self.optional_length(element, "line_height"),
                 element.prop("markdown").is_some(),
+                match element.keyword("mark") {
+                    Some(role) => format!("Some({})", string(role)),
+                    None => "None".into(),
+                },
+                match element.expr("bold") {
+                    Some(bold) => self.condition(bold),
+                    None => "false".into(),
+                },
             ),
             "Label" => format!(
                 "b::label(c, {}, {}, b::TextStyle::{}, {}, {})",
@@ -1815,10 +2386,14 @@ pub fn app() -> b::AppDef {{
                     Some(aspect) => format!("Some({})", float(aspect)),
                     None => "None".into(),
                 };
+                // Without a size it covers the room its container gives.
+                let covers = ["width", "height", "aspect"]
+                    .iter()
+                    .all(|name| element.prop(name).is_none());
                 let Some(source) = element.resource("source") else {
                     let source = element.expr("source")?;
                     return Some(format!(
-                        "b::image_url(c, rt::url(&{}), {}, {}, {}, b::Fit::{fit}, {template}, {aspect})",
+                        "b::image_url(c, rt::url(&{}), {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {covers})",
                         self.expr(source, at),
                         self.optional_length(element, "width"),
                         self.optional_length(element, "height"),
@@ -1837,7 +2412,7 @@ pub fn app() -> b::AppDef {{
                     None => "None".into(),
                 };
                 format!(
-                    "b::image(c, {}, {}, {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {spin})",
+                    "b::image(c, {}, {}, {}, {}, {}, b::Fit::{fit}, {template}, {aspect}, {spin}, {covers})",
                     string(source),
                     match element.resource("dark_source") {
                         Some(dark) => format!("Some({})", string(dark)),
@@ -1886,15 +2461,30 @@ pub fn app() -> b::AppDef {{
                     self.pick(element),
                     self.shortcut(element),
                 );
-                if element.children.is_empty() {
+                // A `ContextMenu` is not part of what the button shows.
+                let (menus, content): (Vec<Node>, Vec<Node>) =
+                    element.children.iter().cloned().partition(
+                        |node| matches!(node, Node::Element(child) if child.kind == "ContextMenu"),
+                    );
+                let button = if content.is_empty() {
                     format!("b::button(c, {}, {props}, {})", id(), self.action(element))
                 } else {
+                    // The content stands in a row that the button's own
+                    // corner rounds.
                     format!(
                         "b::button_with(c, {}, {props}, {}, &|c: &b::Ctx| {})",
                         id(),
                         self.action(element),
-                        column(&element.children)
+                        self.children_along(&content, Axis::Row, Along::Row)
                     )
+                };
+                match menus.first() {
+                    Some(Node::Element(menu)) => format!(
+                        "b::context_menu(c, {}, &|c: &b::Ctx| {button}, {})",
+                        id(),
+                        self.menu_entries(&menu.children)
+                    ),
+                    _ => button,
                 }
             }
             "IconButton" => format!(
@@ -1953,7 +2543,12 @@ pub fn app() -> b::AppDef {{
                     self.optional_length(element, "height"),
                 )
             }
-            "LanguagePicker" => format!("b::language_picker(c, {}, {})", id(), text("label")),
+            "LanguagePicker" => format!(
+                "b::language_picker(c, {}, {}, {})",
+                id(),
+                text("label"),
+                element.prop("label_hidden").is_some(),
+            ),
             "TextInput" => {
                 let Some(field) = element.field("value") else {
                     self.unsupported("a `TextInput` without a draft".into(), at);
@@ -1995,7 +2590,7 @@ pub fn app() -> b::AppDef {{
                     "None".into()
                 };
                 format!(
-                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {} }}, || {})",
+                    "b::popover_button(c, {}, {}, {}, b::PopoverProps {{ presented: {presented}, dark: {}, style: {}, plain: {}, size: {} }}, || {})",
                     id(),
                     text("label"),
                     self.icon(element.icon("icon")),
@@ -2005,15 +2600,18 @@ pub fn app() -> b::AppDef {{
                         _ => "None",
                     },
                     self.surface_style("PopoverButton", element),
+                    element.keyword("prominence") == Some("plain"),
+                    self.optional_length(element, "font_size"),
                     column(&element.children)
                 )
             }
             "Modal" => format!(
-                "b::modal(c, b::ModalProps {{ width: {}, height: {}, cover_compact: {} }}, {})",
+                "b::modal(c, b::ModalProps {{ width: {}, height: {}, cover_compact: {}, pose: {} }}, {})",
                 self.optional_length(element, "width"),
                 self.optional_length(element, "height"),
                 element.keyword("cover") == Some("compact"),
-                column(&element.children)
+                self.pose(element),
+                self.children_along(&element.children, Axis::Column, Along::Layers)
             ),
             "Form" => {
                 let props = format!(
@@ -2049,31 +2647,7 @@ pub fn app() -> b::AppDef {{
                 shape(),
                 self.optional_length(element, "height"),
                 element.prop("hide_disabled").is_some(),
-                self.entries(&element.children, "b::MenuEntry", &|out, child| {
-                    match child.kind.as_str() {
-                        "Divider" => out.push_str("v.push(b::MenuEntry::Divider); "),
-                        "MenuItem" => {
-                            let at = Some(&child.source);
-                            out.push_str(&format!(
-                                "v.push(b::menu_item(c, {}, {}, {}, {}, {}, {}, {}, {})); ",
-                                string(child.id.as_deref().unwrap_or(&child.path)),
-                                child
-                                    .text("label")
-                                    .map(|label| self.text(label, at))
-                                    .unwrap_or_else(|| "String::new()".into()),
-                                self.icon(child.icon("icon")),
-                                child.keyword("role") == Some("destructive"),
-                                self.enabled(child),
-                                self.pick(child),
-                                self.shortcut(child),
-                                self.action(child)
-                            ));
-                        }
-                        other => {
-                            self.unsupported(format!("`{other}` in a `Menu`"), Some(&child.source))
-                        }
-                    }
-                })
+                self.menu_entries(&element.children)
             ),
             "ControlGroup" => format!(
                 "b::control_group(c, {}, {})",
@@ -2176,12 +2750,13 @@ pub fn app() -> b::AppDef {{
                 column(&element.children)
             ),
             "Positioned" => format!(
-                "b::positioned(c, b::Place {{ x: {}, y: {}, width: {}, height: {}, bleed: {} }}, {})",
+                "b::positioned(c, b::Place {{ x: {}, y: {}, width: {}, height: {}, bleed: {}, pose: {} }}, {})",
                 self.number(element, "x", 0.0),
                 self.number(element, "y", 0.0),
                 self.optional_length(element, "width"),
                 self.optional_length(element, "height"),
                 element.prop("bleed").is_some(),
+                self.pose(element),
                 column(&element.children)
             ),
             "Rail" => {
@@ -2195,9 +2770,13 @@ pub fn app() -> b::AppDef {{
                 let children =
                     self.entries(&element.children, "(b::El, b::Placement)", &|out, child| {
                         let fraction = |name: &str| match (child.expr(name), child.number(name)) {
-                            (Some(expr), _) => Some(format!(
-                                "(rt::as_f64(&{}) as f32)",
-                                self.expr(expr, Some(&child.source))
+                            (Some(expr), _) => Some(self.animated(
+                                child,
+                                name,
+                                format!(
+                                    "(rt::as_f64(&{}) as f32)",
+                                    self.expr(expr, Some(&child.source))
+                                ),
                             )),
                             (None, Some(value)) => Some(float(value)),
                             (None, None) => None,
@@ -2693,6 +3272,35 @@ pub fn app() -> b::AppDef {{
         ops
     }
 
+    /// The entries of a `Menu` or `ContextMenu`, through any control flow.
+    fn menu_entries(&self, children: &[Node]) -> String {
+        self.entries(
+            children,
+            "b::MenuEntry",
+            &|out, child| match child.kind.as_str() {
+                "Divider" => out.push_str("v.push(b::MenuEntry::Divider); "),
+                "MenuItem" => {
+                    let at = Some(&child.source);
+                    out.push_str(&format!(
+                        "v.push(b::menu_item(c, {}, {}, {}, {}, {}, {}, {}, {})); ",
+                        string(child.id.as_deref().unwrap_or(&child.path)),
+                        child
+                            .text("label")
+                            .map(|label| self.text(label, at))
+                            .unwrap_or_else(|| "String::new()".into()),
+                        self.icon(child.icon("icon")),
+                        child.keyword("role") == Some("destructive"),
+                        self.enabled(child),
+                        self.pick(child),
+                        self.shortcut(child),
+                        self.action(child)
+                    ));
+                }
+                other => self.unsupported(format!("`{other}` in a `Menu`"), Some(&child.source)),
+            },
+        )
+    }
+
     fn tabs(&self, element: &Element, c: &str) -> Option<String> {
         let at = Some(&element.source);
         let Some(field) = element.field("selection") else {
@@ -2760,8 +3368,15 @@ pub fn app() -> b::AppDef {{
                 self.children(&tab.children, Axis::Column)
             ));
         });
+        // A chosen tab that is gone gives way to `fallback`, or to the
+        // first tab. `bar: floating` is for phones: on desktops the bar
+        // stays as it is.
+        let fallback = match element.expr("fallback") {
+            Some(fallback) => format!("Some({})", self.expr(fallback, at)),
+            None => "None".into(),
+        };
         Some(format!(
-            "{{ let selected = c.session({session}, {}); b::tabs({c}, {}, {tabs}, selected.clone(), b::Model::Field({target}, None), {content}, {accessory}) }}",
+            "{{ let tabs = {tabs}; let selected = b::tab_selection({c}, &tabs, c.session({session}, {}), {fallback}, &b::Model::Field({target}, None)); b::tabs({c}, {}, tabs, selected.clone(), b::Model::Field({target}, None), {content}, {accessory}) }}",
             field.field,
             string(element.id.as_deref().unwrap_or(&element.path)),
         ))
@@ -2805,9 +3420,13 @@ pub fn app() -> b::AppDef {{
     fn length_value(&self, element: &Element, name: &str) -> Option<String> {
         match element.prop(name)? {
             Prop::Number { value } => Some(float(*value)),
-            Prop::Expr { expr } => Some(format!(
-                "(rt::as_f64(&{}) as f32)",
-                self.expr(expr, Some(&element.source))
+            Prop::Expr { expr } => Some(self.animated(
+                element,
+                name,
+                format!(
+                    "(rt::as_f64(&{}) as f32)",
+                    self.expr(expr, Some(&element.source))
+                ),
             )),
             Prop::Keyword { value } => {
                 if !(element.kind == "Button" && name == "width" && value == "fill") {
@@ -3233,8 +3852,9 @@ fn look(effects: &[StyleEffect]) -> String {
             StyleEffect::Fill { color } => {
                 fields.push(format!("fill: Some({})", color_expr(color)))
             }
-            StyleEffect::Scale { x, y, .. } => {
-                fields.push(format!("scale: Some(({}, {}))", float(*x), float(*y)))
+            StyleEffect::Scale { x, y, motion } => {
+                fields.push(format!("scale: Some(({}, {}))", float(*x), float(*y)));
+                fields.push(format!("motion: Some({})", motion::constant("M", motion)));
             }
             StyleEffect::Nothing => fields.push("none: true".into()),
             _ => {}

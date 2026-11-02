@@ -221,7 +221,7 @@ impl Generator<'_> {
         match element.kind.as_str() {
             "Text" => self.text_element(out, element),
             "Label" => self.label(out, element),
-            "Button" if !element.children.is_empty() => self.content_button(out, element),
+            "Button" if element.has_content() => self.content_button(out, element),
             "Button" => self.button(out, element),
             "IconButton" => self.icon_button(out, element),
             "TextInput" => self.text_input(out, element),
@@ -306,7 +306,7 @@ impl Generator<'_> {
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // The application builds the status item's menu.
             | "StatusItem"
-            | "Pattern" | "TabAccessory" | "PickerOption" | "TableColumn" | "TableMenu" => {
+            | "Pattern" | "TabAccessory" | "PickerOption" | "TableColumn" | "TableMenu" | "ContextMenu" => {
                 // Realized by their parents.
             }
             other => out.line(format!("/* unsupported {other} */")),

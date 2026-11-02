@@ -107,6 +107,23 @@ impl Generator<'_> {
         }
     }
 
+    /// The items of a button's `ContextMenu`, `None` for each divider; an
+    /// empty list without one.
+    pub(super) fn context_menu(&self, element: &Element) -> String {
+        let items = element.context_menu().unwrap_or_default();
+        let entries: Vec<String> = items
+            .iter()
+            .map(|item| {
+                if item.kind == "Divider" {
+                    "None".to_string()
+                } else {
+                    self.menu_item(item)
+                }
+            })
+            .collect();
+        format!("vec![{}]", entries.join(", "))
+    }
+
     /// One item of a menu or of a table's row menu.
     pub(super) fn menu_item(&self, item: &Element) -> String {
         format!(

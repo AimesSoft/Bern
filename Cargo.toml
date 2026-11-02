@@ -54,6 +54,9 @@ members = [
     "examples/framework-names/names-protocol",
     "examples/framework-names/names-core",
     "examples/framework-names/names-ui",
+    "examples/catalog/catalog-protocol",
+    "examples/catalog/catalog-core",
+    "examples/catalog/catalog-ui",
 ]
 
 [workspace.package]

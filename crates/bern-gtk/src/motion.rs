@@ -279,6 +279,11 @@ mod imp {
         pub watchers: RefCell<Vec<Rc<dyn Fn()>>>,
         /// The shadow what the child draws casts.
         pub shadow: Cell<Option<crate::style::Shadow>>,
+        /// `blur`: the radius the child is blurred with, and the corner the
+        /// blur stays inside.
+        pub blur: Cell<Option<(f64, f64)>>,
+        /// `glow`, on an element that has it.
+        pub glow: RefCell<Option<Glow>>,
     }
 
     #[glib::object_subclass]
@@ -370,9 +375,41 @@ mod imp {
             child.allocate(width, height, baseline, transform);
         }
 
+        /// The child, blurred inside its corner with `blur`; with `glow`
+        /// lit, the light screened over it.
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
             crate::style::cast(snapshot, self.shadow.get(), || {
-                self.parent_snapshot(snapshot)
+                let obj = self.obj();
+                let bounds = obj
+                    .first_child()
+                    .and_then(|child| child.compute_bounds(&*obj));
+                let light = self
+                    .glow
+                    .borrow()
+                    .as_ref()
+                    .map(|glow| glow.light)
+                    .filter(|light| light.shown > 0.0)
+                    .zip(bounds);
+                if light.is_some() {
+                    snapshot.push_blend(gtk::gsk::BlendMode::Screen);
+                }
+                let blur = self.blur.get().zip(bounds);
+                if let Some(((radius, corner), bounds)) = blur {
+                    snapshot.push_rounded_clip(&rounded(bounds, corner));
+                    // A blur node's radius is twice the standard deviation
+                    // that CSS and the other platforms take.
+                    snapshot.push_blur(radius * 2.0);
+                }
+                self.parent_snapshot(snapshot);
+                if blur.is_some() {
+                    snapshot.pop();
+                    snapshot.pop();
+                }
+                if let Some((light, bounds)) = light {
+                    snapshot.pop();
+                    light.draw(snapshot, bounds);
+                    snapshot.pop();
+                }
             });
         }
     }
@@ -640,6 +677,8 @@ pub enum TransitionKind {
     /// Extends from nothing along one axis, the edge staying in place,
     /// without fading.
     Grow(Edge),
+    /// Comes in from beyond the edge, its whole size away, without fading.
+    Move(Edge),
 }
 
 /// How an element appears or disappears, moved by a spring.
@@ -674,6 +713,24 @@ fn start_of(transition: &Transition, widget: &gtk::Widget) -> Pose {
             match edge {
                 Edge::Top | Edge::Bottom => from.sy = 0.0,
                 Edge::Leading | Edge::Trailing => from.sx = 0.0,
+            }
+        }
+        TransitionKind::Move(edge) => {
+            from.opacity = 1.0;
+            // Before its first allocation, the window's size.
+            let (mut width, mut height) = (widget.width(), widget.height());
+            if (width <= 0 || height <= 0)
+                && let Some(root) = widget.root()
+            {
+                (width, height) = (root.width(), root.height());
+            }
+            let (width, height) = (f64::from(width), f64::from(height));
+            let rtl = widget.direction() == gtk::TextDirection::Rtl;
+            match edge {
+                Edge::Top => from.y = -height,
+                Edge::Bottom => from.y = height,
+                Edge::Leading => from.x = if rtl { width } else { -width },
+                Edge::Trailing => from.x = if rtl { -width } else { width },
             }
         }
     }
@@ -967,6 +1024,13 @@ pub struct Decor {
     pub nudge_scale: Option<f64>,
     /// While this holds the element turns, one turn in so many seconds.
     pub spin: Option<(Get, f64)>,
+    /// `glow`: the light's radius as a multiple of the element's shorter
+    /// side, its opacity at the centre, and the corner it stays inside.
+    pub glow: Option<(f64, f64, f64)>,
+    /// `blur`: the radius, written or following state, the corner the blur
+    /// stays inside, and the spring a radius that follows state changes
+    /// with.
+    pub blur: Option<(Num, f64, Option<Curve>)>,
     /// While true, motion is reduced everywhere.
     pub reduce_motion: Option<Get>,
     /// `idle_area`: a mouse resting over the element lets its window rest
@@ -1055,6 +1119,20 @@ pub fn Decorate(p: &Parent, ctx: &Ctx, decor: Decor, build: Build) {
         }
         if let Some((when, period)) = &decor.spin {
             spin(ctx, &motion, Rc::clone(when), *period);
+        }
+        if let Some((radius, corner, curve)) = &decor.blur {
+            let blurred = motion.clone();
+            let corner = *corner;
+            bind_number(ctx, radius, *curve, &motion, move |radius| {
+                blurred
+                    .imp()
+                    .blur
+                    .set((radius > 0.0).then_some((radius, corner)));
+                blurred.queue_draw();
+            });
+        }
+        if let Some((radius, opacity, corner)) = decor.glow {
+            glow(&motion, radius, opacity, corner);
         }
         let scale = decor.nudge_scale.unwrap_or(1.06);
         if let Some((when, curve)) = &decor.nudge {
@@ -1200,6 +1278,206 @@ fn reveal(outer: &gtk::Widget, motion: &MotionBox) {
             container.remove_controller(&controller);
         }
     });
+}
+
+// MARK: - Glow
+
+/// `glow` on a motion box: its light, whether the pointer is over the
+/// element, and the fade running.
+pub struct Glow {
+    light: Light,
+    lit: bool,
+    fading: Option<gtk::TickCallbackId>,
+}
+
+/// A white light: full strength at the centre, a fifth of it at 55% of the
+/// radius, none at the radius.
+#[derive(Clone, Copy)]
+struct Light {
+    radius: f64,
+    opacity: f64,
+    corner: f64,
+    /// Where the pointer is in the box, or last was while the light fades.
+    at: (f64, f64),
+    /// How far the light has faded in.
+    shown: f64,
+}
+
+impl Light {
+    fn draw(&self, snapshot: &gtk::Snapshot, bounds: gtk::graphene::Rect) {
+        let radius = (f64::from(bounds.width().min(bounds.height())) * self.radius) as f32;
+        let white = |alpha: f64| gtk::gdk::RGBA::new(1.0, 1.0, 1.0, (alpha * self.shown) as f32);
+        snapshot.push_rounded_clip(&rounded(bounds, self.corner));
+        snapshot.append_radial_gradient(
+            &bounds,
+            &gtk::graphene::Point::new(self.at.0 as f32, self.at.1 as f32),
+            radius,
+            radius,
+            0.0,
+            1.0,
+            &[
+                gtk::gsk::ColorStop::new(0.0, white(self.opacity)),
+                gtk::gsk::ColorStop::new(0.55, white(self.opacity * 0.2)),
+                gtk::gsk::ColorStop::new(1.0, white(0.0)),
+            ],
+        );
+        snapshot.pop();
+    }
+}
+
+fn rounded(bounds: gtk::graphene::Rect, corner: f64) -> gtk::gsk::RoundedRect {
+    gtk::gsk::RoundedRect::from_rect(bounds, corner as f32)
+}
+
+thread_local! {
+    /// The boxes that glow, and the windows watched for them.
+    static GLOWING: RefCell<Vec<glib::WeakRef<MotionBox>>> = RefCell::default();
+    static WATCHED: RefCell<Vec<glib::WeakRef<gtk::Window>>> = RefCell::default();
+}
+
+/// `glow`: a white light follows the pointer over the element, `radius`
+/// times its shorter side, `opacity` at the centre, inside `corner`.
+fn glow(motion: &MotionBox, radius: f64, opacity: f64, corner: f64) {
+    let light = Light {
+        radius,
+        opacity,
+        corner,
+        at: (0.0, 0.0),
+        shown: 0.0,
+    };
+    motion.imp().glow.replace(Some(Glow {
+        light,
+        lit: false,
+        fading: None,
+    }));
+    GLOWING.with(|all| all.borrow_mut().push(motion.downgrade()));
+    motion.connect_map(|motion| {
+        if let Some(window) = motion.root().and_downcast::<gtk::Window>() {
+            watch_pointer(&window);
+        }
+    });
+}
+
+/// Follows the mouse over `window`, and a finger while it presses, for the
+/// boxes in it that glow. The controllers only look: every event goes on
+/// to the widgets as before.
+fn watch_pointer(window: &gtk::Window) {
+    let new = WATCHED.with(|watched| {
+        let mut watched = watched.borrow_mut();
+        watched.retain(|one| one.upgrade().is_some());
+        let known = watched
+            .iter()
+            .any(|one| one.upgrade().as_ref() == Some(window));
+        if !known {
+            watched.push(window.downgrade());
+        }
+        !known
+    });
+    if !new {
+        return;
+    }
+    let mouse = gtk::EventControllerMotion::new();
+    mouse.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak = window.downgrade();
+    mouse.connect_motion(move |_, x, y| {
+        if let Some(window) = weak.upgrade() {
+            point(&window, Some((x, y)));
+        }
+    });
+    let weak = window.downgrade();
+    mouse.connect_leave(move |_| {
+        if let Some(window) = weak.upgrade() {
+            point(&window, None);
+        }
+    });
+    window.add_controller(mouse);
+    let touch = gtk::EventControllerLegacy::new();
+    touch.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak = window.downgrade();
+    touch.connect_event(move |_, event| {
+        use gtk::gdk::EventType;
+        if let Some(window) = weak.upgrade() {
+            match event.event_type() {
+                EventType::TouchBegin | EventType::TouchUpdate => {
+                    if let Some((x, y)) = event.position() {
+                        let (left, top) = window.surface_transform();
+                        point(&window, Some((x - left, y - top)));
+                    }
+                }
+                EventType::TouchEnd | EventType::TouchCancel => point(&window, None),
+                _ => {}
+            }
+        }
+        glib::Propagation::Proceed
+    });
+    window.add_controller(touch);
+}
+
+/// Lights the glowing boxes of `window` that the pointer at `at` (window
+/// coordinates) is over, and darkens the others. It goes by where they
+/// are, so what lies on top of an element does not keep it dark.
+fn point(window: &gtk::Window, at: Option<(f64, f64)>) {
+    let boxes: Vec<MotionBox> = GLOWING.with(|all| {
+        let mut all = all.borrow_mut();
+        all.retain(|one| one.upgrade().is_some());
+        all.iter().filter_map(|one| one.upgrade()).collect()
+    });
+    for motion in boxes {
+        if motion.root().and_downcast_ref::<gtk::Window>() != Some(window) {
+            continue;
+        }
+        let inside = at.and_then(|(x, y)| {
+            let point =
+                window.compute_point(&motion, &gtk::graphene::Point::new(x as f32, y as f32))?;
+            let bounds = motion.first_child()?.compute_bounds(&motion)?;
+            (motion.is_drawable() && bounds.contains_point(&point))
+                .then(|| (f64::from(point.x()), f64::from(point.y())))
+        });
+        light(&motion, inside);
+    }
+}
+
+/// Lights the box at `at`, or lets its light go; the light fades in and
+/// out in 0.18 s.
+fn light(motion: &MotionBox, at: Option<(f64, f64)>) {
+    let mut glow = motion.imp().glow.borrow_mut();
+    let Some(glow) = glow.as_mut() else {
+        return;
+    };
+    if let Some(at) = at {
+        glow.light.at = at;
+    }
+    glow.lit = at.is_some();
+    motion.queue_draw();
+    let target = if glow.lit { 1.0 } else { 0.0 };
+    if glow.light.shown == target || glow.fading.is_some() {
+        return;
+    }
+    let last = Cell::new(None::<i64>);
+    glow.fading = Some(motion.add_tick_callback(move |motion, clock| {
+        let now = clock.frame_time();
+        let step = last
+            .replace(Some(now))
+            .map_or(0.0, |before| (now - before) as f64 / 1e6 / 0.18);
+        let mut glow = motion.imp().glow.borrow_mut();
+        let Some(glow) = glow.as_mut() else {
+            return glib::ControlFlow::Break;
+        };
+        let target = if glow.lit { 1.0 } else { 0.0 };
+        let shown = glow.light.shown;
+        glow.light.shown = if target > shown {
+            (shown + step).min(target)
+        } else {
+            (shown - step).max(target)
+        };
+        motion.queue_draw();
+        if glow.light.shown == target {
+            glow.fading = None;
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    }));
 }
 
 /// While `when` holds the element turns about its center, one turn every
@@ -1410,6 +1688,63 @@ mod tests {
             assert!(clock().is_some());
         });
         assert!(clock().is_none());
+    }
+
+    /// `glow` where there is a display: the pointer over the element
+    /// lights it, also where another widget lies on top, the light fades
+    /// in, and it goes when the pointer leaves the element.
+    #[test]
+    fn a_glowing_box_lights_under_the_pointer_and_fades() {
+        if gtk::init().is_err() {
+            return;
+        }
+        let window = gtk::Window::new();
+        let layers = gtk::Overlay::new();
+        let cover = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        cover.set_size_request(120, 120);
+        let motion = MotionBox::wrap(&cover);
+        layers.set_child(Some(&motion));
+        // A title over the cover.
+        let title = gtk::Label::new(Some("Title"));
+        title.set_valign(gtk::Align::Center);
+        layers.add_overlay(&title);
+        window.set_child(Some(&layers));
+        glow(&motion, 1.0, 0.4, 12.0);
+        window.present();
+        let wait = |seconds: f64| {
+            let until = std::time::Instant::now() + Duration::from_secs_f64(seconds);
+            let context = glib::MainContext::default();
+            while std::time::Instant::now() < until {
+                context.iteration(false);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        wait(0.5);
+        let state = || {
+            let glow = motion.imp().glow.borrow();
+            let glow = glow.as_ref().unwrap();
+            (glow.lit, glow.light.at, glow.light.shown)
+        };
+        let middle = motion
+            .compute_point(&window, &gtk::graphene::Point::new(60.0, 60.0))
+            .unwrap();
+        point(
+            &window,
+            Some((f64::from(middle.x()), f64::from(middle.y()))),
+        );
+        let (lit, at, _) = state();
+        assert!(lit, "lit under the title too");
+        assert!(
+            (at.0 - 60.0).abs() < 1.0 && (at.1 - 60.0).abs() < 1.0,
+            "{at:?}"
+        );
+        wait(1.0);
+        assert_eq!(state().2, 1.0, "faded in");
+        point(&window, Some((-50.0, -50.0)));
+        assert!(!state().0, "dark outside");
+        wait(1.0);
+        assert_eq!(state().2, 0.0, "faded out");
+        window.destroy();
     }
 
     /// `spin` where there is a display (Broadway on the Linux test

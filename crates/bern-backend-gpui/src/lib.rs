@@ -39,6 +39,14 @@ impl Gpui {
 }
 
 /// The further parts of the IR this target builds.
+/// What the macOS target shows besides [`FEATURES`]: the menu bar, which
+/// the other systems GPUI runs on do not have.
+static MAC_FEATURES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+    let mut features = FEATURES.to_vec();
+    features.push(feature::MENU_BAR);
+    features
+});
+
 const FEATURES: &[&str] = &[
     feature::TEXT_FORMATS,
     feature::TEXT_LINES,
@@ -70,6 +78,7 @@ const FEATURES: &[&str] = &[
     feature::REVEAL,
     feature::SCROLL_SNAP,
     feature::PICTURE_FILLS,
+    feature::COVER_IMAGES,
     feature::ACCORDION_LAYOUT,
     feature::IDLE_CONTROL,
     feature::WINDOW_SHORT,
@@ -90,10 +99,12 @@ const FEATURES: &[&str] = &[
     feature::GRID_CELLS,
     feature::ICON_TABS,
     feature::TAB_ACCESSORY,
-    // Entrances show without motion here, so there is nothing to delay
-    // or to grow from an edge.
     feature::DELAYED_APPEAR,
     feature::EDGE_GROW,
+    feature::TEXT_BOLD,
+    feature::SCROLL_ANCHOR,
+    feature::SCROLL_BROWSING,
+    feature::BOUND_BLUR,
 ];
 
 const CONTROL_STATES: &[&str] = &[
@@ -330,6 +341,59 @@ fn mac_bundle_plan(
             contents: skill::markdown(app, &inside).into_bytes(),
         });
     }
+    // The primary icon and the alternates as Icon Composer documents, into
+    // the bundle's `Assets.car`.
+    use bern_target_api::icon;
+    let documents: Vec<String> = icon::alternates(app, "macos", &context.project_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|(_, source)| {
+            matches!(source, icon::Source::Native(path) if icon::is_icon_document(path))
+        })
+        .map(|(name, _)| alternate_icon(&name))
+        .collect();
+    let primary = icon_document(app, context).is_some();
+    if primary || !documents.is_empty() {
+        let mut args = vec!["actool".to_string()];
+        let mut names = Vec::new();
+        if primary {
+            args.push(output.join(ICON_DOCUMENT).display().to_string());
+            names.extend(["--app-icon".to_string(), "AppIcon".into()]);
+        }
+        for document in &documents {
+            args.push(
+                output
+                    .join(format!("{document}.icon"))
+                    .display()
+                    .to_string(),
+            );
+            names.extend(["--alternate-app-icon".to_string(), document.clone()]);
+        }
+        args.extend([
+            "--compile".to_string(),
+            contents.join("Resources").display().to_string(),
+            "--platform".into(),
+            "macosx".into(),
+            "--minimum-deployment-target".into(),
+            MINIMUM_MACOS.into(),
+        ]);
+        args.extend(names);
+        args.extend([
+            "--output-partial-info-plist".to_string(),
+            output.join("AssetCatalog.plist").display().to_string(),
+            "--output-format".into(),
+            "human-readable-text".into(),
+            "--errors".into(),
+            "--warnings".into(),
+        ]);
+        steps.push(BuildStep::Run {
+            description: "Compile the icons".into(),
+            program: "xcrun".into(),
+            args,
+            cwd: output.clone(),
+            env: vec![],
+        });
+    }
     steps.extend([
         sign(bundle.clone(), "Sign the app for local use"),
         // Each build replaces the bundle at the same place, where Finder
@@ -385,6 +449,26 @@ fn mac_bundle_plan(
     }
 }
 
+/// A declared Icon Composer document for macOS, copied beside the bundle
+/// under this name for `actool`, which compiles it into the bundle's
+/// `Assets.car` and writes `AppIcon.icns` beside it for earlier systems.
+const ICON_DOCUMENT: &str = "AppIcon.icon";
+
+/// The asset or resource name of the alternate icon `name`, beside
+/// `AppIcon`: what `WindowSet(icon:)` switches to.
+fn alternate_icon(name: &str) -> String {
+    format!("AppIcon-{name}")
+}
+
+/// The Icon Composer document declared as the macOS icon, if it is one.
+fn icon_document(app: &Application, context: &BuildContext) -> Option<PathBuf> {
+    use bern_target_api::icon;
+    match icon::source(app, "macos", &context.project_dir) {
+        icon::Source::Native(path) if icon::is_icon_document(&path) => Some(path),
+        _ => None,
+    }
+}
+
 /// Where macOS keeps an icon's cache fresh.
 const LSREGISTER: &str = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
 
@@ -435,7 +519,7 @@ fn mac_bundle_files(
     <key>CFBundleExecutable</key>
     <string>{executable}</string>
     <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
+    <string>AppIcon</string>{icon_name}
     <key>CFBundleIdentifier</key>
     <string>{bundle}</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -463,6 +547,11 @@ fn mac_bundle_files(
         executable = xml(&bern_target_api::glue::program(app)),
         bundle = xml(&app.app.bundle_id),
         version = xml(&app.app.version),
+        icon_name = if icon_document(app, context).is_some() {
+            "\n    <key>CFBundleIconName</key>\n    <string>AppIcon</string>"
+        } else {
+            ""
+        },
     );
     let mut files = vec![GeneratedFile::text(contents.join("Info.plist"), plist)];
     let strings = |value: &str| value.replace('\\', "\\\\").replace('"', "\\\"");
@@ -474,13 +563,59 @@ fn mac_bundle_files(
         ));
     }
     let failed = |message: String| vec![Diagnostic::error(message)];
-    let icon = match icon::source(app, "macos", &context.project_dir) {
-        icon::Source::Native(path) if icon::is_icon_document(&path) => {
-            return Err(failed(format!(
-                "the GPUI target takes the macOS icon as a PNG or an `.icns`, not the Icon Composer document {}",
-                path.display()
-            )));
+    // An Icon Composer document goes beside the bundle under `into`, for
+    // `actool` to compile into it (`mac_bundle_plan`).
+    let document_files = |document: &std::path::Path, into: &str| {
+        icon::icon_document(document)
+            .map_err(|message| failed(format!("the icon {} {message}", document.display())))?
+            .into_iter()
+            .map(|file| {
+                let contents = std::fs::read(document.join(&file)).map_err(|error| {
+                    failed(format!(
+                        "cannot read {}: {error}",
+                        document.join(&file).display()
+                    ))
+                })?;
+                Ok(GeneratedFile {
+                    path: PathBuf::from(into).join(file),
+                    contents,
+                })
+            })
+            .collect::<Result<Vec<_>, Vec<Diagnostic>>>()
+    };
+    // The icons `WindowSet(icon:)` switches to, under their asset names, as
+    // the SwiftUI target ships them: an Icon Composer document for
+    // `actool`, an `.icns` or a PNG in `Contents/Resources`. The runtime
+    // shows them by name, which the system draws in its shape.
+    for (name, source) in icon::alternates(app, "macos", &context.project_dir).map_err(failed)? {
+        match source {
+            icon::Source::Native(path) if icon::is_icon_document(&path) => {
+                files.extend(document_files(
+                    &path,
+                    &format!("{}.icon", alternate_icon(&name)),
+                )?);
+            }
+            icon::Source::Native(path) | icon::Source::Png(path) => {
+                let extension = if icon::is_png_name(&path.display().to_string()) {
+                    "png"
+                } else {
+                    "icns"
+                };
+                files.push(GeneratedFile {
+                    path: contents.join(format!("Resources/{}.{extension}", alternate_icon(&name))),
+                    contents: std::fs::read(&path).map_err(|error| {
+                        failed(format!("cannot read the icon {}: {error}", path.display()))
+                    })?,
+                });
+            }
+            icon::Source::Logo => {}
         }
+    }
+    if let Some(document) = icon_document(app, context) {
+        files.extend(document_files(&document, ICON_DOCUMENT)?);
+        return Ok(files);
+    }
+    let icon = match icon::source(app, "macos", &context.project_dir) {
         icon::Source::Native(path) => std::fs::read(&path)
             .map_err(|error| failed(format!("cannot read the icon {}: {error}", path.display())))?,
         _ => icon::icns(
@@ -493,6 +628,34 @@ fn mac_bundle_files(
         contents: icon,
     });
     Ok(files)
+}
+
+/// The Windows programs' resources, linked into each by the application
+/// crate's build script: the application icon, which GPUI gives every
+/// window as resource 1 and Windows shows for the executable, and the
+/// version, whose description Windows shows as the process's name.
+fn windows_resource_files(
+    app: &Application,
+    context: &BuildContext,
+) -> Result<Vec<GeneratedFile>, Vec<Diagnostic>> {
+    use bern_target_api::icon;
+    let failed = |message: String| vec![Diagnostic::error(message)];
+    let ico = match icon::source(app, "windows", &context.project_dir) {
+        icon::Source::Native(path) => std::fs::read(&path)
+            .map_err(|error| failed(format!("cannot read the icon {}: {error}", path.display())))?,
+        _ => icon::ico(
+            &icon::images(app, "windows", &context.project_dir, icon::Shape::AsDrawn)
+                .map_err(failed)?,
+        ),
+    };
+    Ok(vec![
+        GeneratedFile {
+            path: "app/app.ico".into(),
+            contents: ico,
+        },
+        GeneratedFile::text("app/app.rc", glue::resource_script(app)),
+        GeneratedFile::text("app/build.rs", glue::BUILD_RS.to_string()),
+    ])
 }
 
 impl Gpui {
@@ -554,13 +717,37 @@ impl Target for Gpui {
                 multi_view: true,
             }),
             styles: STYLES,
-            // Pictures turn (the generator warns of other elements); other
-            // motion shows as the change at once.
-            motion: &["spin", "spin_period"],
+            // Pictures turn (the generator warns of other elements);
+            // scroll effects show as the change at once.
+            motion: &[
+                "appear",
+                "appear_delay",
+                "disappear",
+                "reflow",
+                "hero",
+                "scroll_scale",
+                "scroll_opacity",
+                "scroll_origin_x",
+                "scroll_origin_y",
+                "animate",
+                "nudge",
+                "nudge_key",
+                "nudge_scale",
+                "reduce_motion",
+                "stagger",
+                "spin",
+                "spin_period",
+                "blur",
+                "glow",
+            ],
             window_chrome: true,
-            text_marks: false,
+            text_marks: true,
             dynamic_items: true,
-            features: FEATURES,
+            features: if self.platform == "macos" {
+                &MAC_FEATURES
+            } else {
+                FEATURES
+            },
         }
     }
 
@@ -638,6 +825,9 @@ impl Target for Gpui {
         files.extend(bern_target_api::svg::static_files(app, context)?);
         if self.platform == "macos" {
             files.extend(mac_bundle_files(app, context)?);
+        }
+        if self.platform == "windows" {
+            files.extend(windows_resource_files(app, context)?);
         }
         Ok(files)
     }

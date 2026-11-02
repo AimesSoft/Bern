@@ -70,7 +70,13 @@ impl Generator<'_> {
     pub(super) fn column_or_row(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let (stack, alignment) = if element.kind == "Column" {
             (
-                "VStack",
+                // A column with a list in a scroll view builds its rows as
+                // they come into sight.
+                if bern_ir::holds_lowered_list(&element.children) {
+                    "LazyVStack"
+                } else {
+                    "VStack"
+                },
                 match element.keyword("align") {
                     Some("center") => ".center",
                     Some("trailing") => ".trailing",
@@ -143,7 +149,27 @@ impl Generator<'_> {
         } else {
             format!("SwiftUI.ZStack(alignment: {alignment}) {{")
         });
-        self.nodes(out, &element.children, ctx);
+        let moving_layer = element.children.iter().any(|node| match node {
+            Node::If(node) => node
+                .branches
+                .iter()
+                .map(|(_, body)| body)
+                .chain(std::iter::once(&node.otherwise))
+                .any(|body| self.children_motion(body).is_some()),
+            Node::Match(node) => node
+                .arms
+                .iter()
+                .any(|arm| self.children_motion(&arm.body).is_some()),
+            _ => false,
+        });
+        self.nodes(
+            out,
+            &element.children,
+            &Ctx {
+                layers: moving_layer,
+                ..ctx.clone()
+            },
+        );
         out.close("}");
         self.frame(out, element);
         // The whole window to its edges, under its bars: the title bar and
@@ -159,8 +185,26 @@ impl Generator<'_> {
             // Over the layer the title bar keeps its controls, not the
             // window's title, also when the content before had a split
             // view that titled it.
+            // The layer stands in for the window's bars: its scroll views
+            // draw no edge of the bars over their content.
+            out.line(".bernScrollEdgeEffectHidden()");
             if self.platform == Platform::Macos {
                 out.line(".bernToolbarTitleHidden()");
+                // A layer with controls of its own is a page over the window,
+                // which hides the sidebar: the split view's button to show or
+                // hide it goes while the layer shows. A backdrop leaves it.
+                let mut controls = false;
+                for child in &element.children {
+                    child.walk(&mut |node| {
+                        if let Node::Element(inner) = node {
+                            controls |= bern_ir::spec::component(&inner.kind)
+                                .is_some_and(|spec| spec.interactive);
+                        }
+                    });
+                }
+                if controls {
+                    out.line(".bernSidebarToggleHidden()");
+                }
             }
         }
         // A toolbar among the layers belongs to the window, as a column's
@@ -282,8 +326,13 @@ impl Generator<'_> {
 
     pub(super) fn flow(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         out.open(format!(
-            "BernFlow(gap: {}) {{",
-            self.length(element, "gap").unwrap_or_else(|| "8.0".into())
+            "BernFlow(gap: {}{}) {{",
+            self.length(element, "gap").unwrap_or_else(|| "8.0".into()),
+            match element.keyword("align") {
+                Some("center") => ", align: 0.5",
+                Some("trailing") => ", align: 1",
+                _ => "",
+            }
         ));
         // A flow is a row that wraps: a spacer takes the rest of its line.
         self.nodes(
@@ -418,6 +467,8 @@ impl Generator<'_> {
         self.nodes(out, &element.children, ctx);
         out.close("}");
         out.line(".formStyle(.grouped)");
+        // Its fields are rows of the form, without boxes of their own.
+        out.line(".environment(\\.bernInForm, true)");
         if let Some(style) = self.style_of(element) {
             out.line(format!(".bernFormStyle(BernStyles.{})", style.name));
         }
@@ -571,10 +622,12 @@ impl Generator<'_> {
             ));
         }
         if let Some(position) = position {
-            let anchor = match (snap, horizontal) {
-                (Some("center"), _) => ".center",
-                (_, true) => ".leading",
-                (_, false) => ".top",
+            let anchor = match (element.number("anchor"), snap, horizontal) {
+                (Some(at), _, true) => format!("UnitPoint(x: {}, y: 0.5)", double(at)),
+                (Some(at), _, false) => format!("UnitPoint(x: 0.5, y: {})", double(at)),
+                (_, Some("center"), _) => ".center".into(),
+                (_, _, true) => ".leading".into(),
+                (_, _, false) => ".top".into(),
             };
             let arrival = match element.keyword("arrival") {
                 Some(_) => {
@@ -586,6 +639,12 @@ impl Generator<'_> {
                 ".bernScrollPosition({}, anchor: {anchor}, motion: {}{arrival})",
                 self.binding_of(&position),
                 crate::style::motion(self.app, "smooth")
+            ));
+        }
+        if let Some(browsing) = self.field(element, "browsing") {
+            out.line(format!(
+                ".bernScrollBrowsing({})",
+                self.binding_of(&browsing)
             ));
         }
         // A row that scrolls cuts nothing off at its frame, as the

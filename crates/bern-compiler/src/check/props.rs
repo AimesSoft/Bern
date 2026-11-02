@@ -383,6 +383,24 @@ impl Checker<'_> {
                 );
                 return None;
             }
+            if matches!(prop_name, "glow" | "blur") && (!value.is_finite() || value <= 0.0) {
+                self.error(
+                    expr.span(),
+                    format!("`{prop_name}` must be finite and greater than zero"),
+                );
+                return None;
+            }
+            if element == "ScrollView" && prop_name == "anchor" && !(0.0..=1.0).contains(&value) {
+                self.error(
+                    expr.span(),
+                    "`anchor` is a fraction of the view, from 0 to 1",
+                );
+                return None;
+            }
+            if prop_name == "glow_opacity" && !(value > 0.0 && value <= 1.0) {
+                self.error(expr.span(), "`glow_opacity` is an opacity above 0, up to 1");
+                return None;
+            }
             if prop_name == "appear_delay" && (!value.is_finite() || value < 0.0) {
                 self.error(
                     expr.span(),

@@ -35,6 +35,13 @@ impl Generator<'_> {
                     "markdown",
                     (element.keyword("markdown") == Some("true")).then(|| "true".to_string()),
                 ),
+                (
+                    "bold",
+                    element
+                        .expr("bold")
+                        .map(|bold| format!("() => ({})", self.expr(bold))),
+                ),
+                ("animate", self.animate(element)),
             ])
         ));
     }
@@ -99,6 +106,14 @@ impl Generator<'_> {
                 ("corner", self.length(element, "corner")),
                 ("rendering", Self::keyword(element, "rendering")),
                 ("aspect", element.number("aspect").map(number)),
+                // Without a size it covers the room its container gives.
+                (
+                    "covers",
+                    ["width", "height", "aspect"]
+                        .iter()
+                        .all(|name| element.prop(name).is_none())
+                        .then(|| "true".to_string()),
+                ),
             ])
         ));
     }

@@ -3,6 +3,9 @@
 //! icons `BernViews.kt` draws from their paths for the names the core set
 //! lacks. The table is the one source: it becomes the branches of the
 //! runtime's `BernIcons.get`, and the check rejects the names it lacks.
+//! Material has no quote bubble, so `quote.bubble`, the lyrics button of
+//! Apple's music apps, is Material's own lyrics icon: a speech bubble of
+//! lines with a note.
 
 /// `(name, Kotlin expression of its ImageVector)`, sorted by name.
 pub const ICONS: &[(&str, &str)] = &[
@@ -21,6 +24,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("arrow.up.left.and.arrow.down.right", "openInFull"),
     ("arrow.up.right.square", "openInNew"),
     ("backward.end.fill", "skipPrevious"),
+    ("backward.fill", "fastRewind"),
     ("bell", "Icons.Filled.Notifications"),
     ("bell.fill", "Icons.Filled.Notifications"),
     ("calendar", "Icons.Filled.DateRange"),
@@ -29,6 +33,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("captions.bubble.fill", "subtitles"),
     ("cart", "Icons.Filled.ShoppingCart"),
     ("character.cursor.ibeam", "text"),
+    ("chart.bar", "barChart"),
     ("checkmark", "Icons.Filled.Check"),
     ("checkmark.circle", "Icons.Filled.CheckCircle"),
     ("checkmark.circle.fill", "Icons.Filled.CheckCircle"),
@@ -47,6 +52,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("circle", "radioUnchecked"),
     ("circle.fill", "circle"),
     ("circle.lefthalf.filled", "palette"),
+    ("clock.arrow.circlepath", "history"),
     ("dial.low", "tune"),
     ("doc", "Icons.AutoMirrored.Filled.List"),
     ("doc.text", "Icons.AutoMirrored.Filled.List"),
@@ -63,6 +69,7 @@ pub const ICONS: &[(&str, &str)] = &[
     ("folder", "folder"),
     ("folder.fill", "folder"),
     ("forward.end.fill", "skipNext"),
+    ("forward.fill", "fastForward"),
     ("gear", "Icons.Filled.Settings"),
     ("gearshape", "Icons.Filled.Settings"),
     ("gearshape.2", "Icons.Filled.Settings"),
@@ -78,6 +85,8 @@ pub const ICONS: &[(&str, &str)] = &[
     ("house.fill", "Icons.Filled.Home"),
     ("info", "Icons.Filled.Info"),
     ("info.circle", "Icons.Filled.Info"),
+    ("info.circle.fill", "Icons.Filled.Info"),
+    ("iphone", "smartphone"),
     ("keyboard", "keyboard"),
     ("line.3.horizontal", "Icons.Filled.Menu"),
     ("line.3.horizontal.decrease", "filterList"),
@@ -121,10 +130,18 @@ pub const ICONS: &[(&str, &str)] = &[
     ("plus.circle", "Icons.Filled.Add"),
     ("power", "powerSettingsNew"),
     ("puzzlepiece.extension", "extension"),
+    ("qrcode", "qrCode"),
+    ("qrcode.viewfinder", "qrCodeScanner"),
+    ("quote.bubble", "lyricsOutlined"),
+    ("quote.bubble.fill", "lyrics"),
     ("rectangle.grid.2x2", "grid"),
+    ("rectangle.portrait.and.arrow.right", "logout"),
+    ("repeat", "repeatAll"),
+    ("repeat.1", "repeatOne"),
     ("scissors", "contentCut"),
     ("server.rack", "dns"),
     ("shield", "shield"),
+    ("shuffle", "shuffle"),
     ("sidebar.left", "Icons.Filled.Menu"),
     ("sidebar.right", "sidebarRight"),
     ("sidebar.trailing", "sidebarRight"),

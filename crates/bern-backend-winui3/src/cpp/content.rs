@@ -28,6 +28,8 @@ impl Generator<'_> {
                     "markdown",
                     (element.keyword("markdown") == Some("true")).then(|| "true".to_string()),
                 ),
+                ("bold", element.expr("bold").map(|bold| self.getter(bold))),
+                ("animate", Self::animate(element)),
             ])
         ));
     }
@@ -97,6 +99,14 @@ impl Generator<'_> {
                     element
                         .keyword("hero")
                         .is_some()
+                        .then(|| "true".to_string())
+                ),
+                // Without a size it covers the room its container gives.
+                (
+                    "covers",
+                    ["width", "height", "aspect"]
+                        .iter()
+                        .all(|name| element.prop(name).is_none())
                         .then(|| "true".to_string())
                 ),
             ])

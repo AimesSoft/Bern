@@ -63,6 +63,19 @@ pub fn mentions(ty: &TypeRef, name: &str) -> bool {
     }
 }
 
+/// Call `visit` with the name of each named type `ty` refers to.
+pub fn named(ty: &TypeRef, visit: &mut impl FnMut(&str)) {
+    match ty {
+        TypeRef::Named(path) => {
+            if let Some(last) = path.last() {
+                visit(last);
+            }
+        }
+        TypeRef::Optional(inner) | TypeRef::List(inner) => named(inner, visit),
+        _ => {}
+    }
+}
+
 /// Convert `snake_case` to `PascalCase`.
 pub fn pascal_case(name: &str) -> String {
     name.split('_')

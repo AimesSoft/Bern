@@ -311,6 +311,38 @@ pub fn path(path: &Path) -> String {
 /// debug builds keep Cargo's defaults.
 pub const RELEASE_PROFILE: &str = "codegen-units = 1\nlto = true\nstrip = true\n";
 
+/// The `[profile]` tables of a generated crate. A generated crate is a
+/// workspace of its own, so the application's profiles would not reach the
+/// programs a target builds: they are carried over from its workspace
+/// manifest. Release builds start from `RELEASE_PROFILE`, take the
+/// application's own release settings over it, and keep `fixed`, the lines
+/// the target cannot do without (unwinding across the FFI, say); the other
+/// profiles, such as optimized libraries in debug builds, are the
+/// application's as they are.
+pub fn profiles(context: &crate::BuildContext, fixed: &str) -> String {
+    let table = |text: &str| text.parse::<toml::Table>().unwrap_or_default();
+    let mut release = table(RELEASE_PROFILE);
+    let mut tables = toml::Table::new();
+    let own = std::fs::read_to_string(context.workspace_dir.join("Cargo.toml"))
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+        .and_then(|manifest| manifest.get("profile")?.as_table().cloned())
+        .unwrap_or_default();
+    for (name, value) in own {
+        match (name.as_str(), value) {
+            ("release", toml::Value::Table(settings)) => release.extend(settings),
+            (_, value) => {
+                tables.insert(name, value);
+            }
+        }
+    }
+    release.extend(table(fixed));
+    tables.insert("release".into(), toml::Value::Table(release));
+    let mut root = toml::Table::new();
+    root.insert("profile".into(), toml::Value::Table(tables));
+    toml::to_string(&root).unwrap_or_default()
+}
+
 /// Name stem of the generated programs, for example `showcase`.
 pub fn program(app: &Application) -> String {
     app.app.id.replace('_', "-")

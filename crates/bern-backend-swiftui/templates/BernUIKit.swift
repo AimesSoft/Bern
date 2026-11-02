@@ -842,7 +842,7 @@ extension View {
         self
         #else
         if #available(iOS 26.1, tvOS 26.1, *) {
-            tabViewBottomAccessory(isEnabled: shown) { accessory.environment(\.bernOnBar, true) }
+            modifier(BernTabAccessory(shown: shown, accessory: accessory))
         } else {
             self
         }
@@ -870,6 +870,27 @@ extension View {
         }
     }
 }
+
+#if !os(tvOS)
+/// The system's accessory, its contents in the window's appearance as the
+/// tab bar's are: the accessory's own glass follows what scrolls under it
+/// and would turn the words white over a dark picture while it stays pale
+/// itself.
+@available(iOS 26.1, *)
+private struct BernTabAccessory: ViewModifier {
+    let shown: Bool
+    let accessory: AnyView
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        content.tabViewBottomAccessory(isEnabled: shown) {
+            accessory
+                .environment(\.bernOnBar, true)
+                .environment(\.colorScheme, scheme)
+        }
+    }
+}
+#endif
 
 /// Whether the system shows a tab view's bottom accessory: iOS 26.1 and
 /// later.
@@ -1074,6 +1095,75 @@ final class BernTouchRecognizer: UIGestureRecognizer, UIGestureRecognizerDelegat
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool { true }
 }
+
+// MARK: - Glow
+
+#if os(iOS)
+/// Puts the window's fingers in its pointer for the views that glow.
+struct BernGlowTouches: UIViewRepresentable {
+    let pointer: BernPointer
+
+    func makeUIView(context: Context) -> BernGlowTouchView { BernGlowTouchView() }
+
+    func updateUIView(_ view: BernGlowTouchView, context: Context) {
+        view.follower.pointer = pointer
+    }
+}
+
+final class BernGlowTouchView: UIView {
+    let follower = BernGlowTouchFollower()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        follower.view?.removeGestureRecognizer(follower)
+        window?.addGestureRecognizer(follower)
+    }
+}
+
+/// Follows a finger over the window while it presses. It never recognizes,
+/// cancels or delays a touch, so every other gesture works as before.
+final class BernGlowTouchFollower: UIGestureRecognizer, UIGestureRecognizerDelegate {
+    weak var pointer: BernPointer?
+
+    init() {
+        super.init(target: nil, action: nil)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+        delegate = self
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) { follow(touches) }
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) { follow(touches) }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) { lift(event) }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) { lift(event) }
+
+    private func follow(_ touches: Set<UITouch>) {
+        guard let window = view as? UIWindow, let touch = touches.first else { return }
+        pointer?.location = touch.location(in: window)
+    }
+
+    /// Dark once the last finger lifts, and ready for the next touch.
+    private func lift(_ event: UIEvent) {
+        let pressing = event.allTouches?.contains { $0.phase != .ended && $0.phase != .cancelled } ?? false
+        guard !pressing else { return }
+        pointer?.location = nil
+        state = .failed
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool { true }
+}
+#endif
 
 // MARK: - Menus in a part with its own appearance
 
