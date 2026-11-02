@@ -71,9 +71,7 @@ bern-adapter-mcp = {{ {mcp_adapter} }}
 {modules}
 [workspace]
 
-[profile.release]
-panic = "unwind"
-{release}"#,
+{profiles}"#,
         version = app.app.version,
         ffi = bern("bern-ffi"),
         ipc = if context
@@ -93,7 +91,7 @@ panic = "unwind"
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
         modules = module_dependencies(context, true),
-        release = bern_target_api::glue::RELEASE_PROFILE,
+        profiles = bern_target_api::glue::profiles(context, "panic = \"unwind\"\n"),
     )
 }
 
@@ -404,7 +402,7 @@ rem Symbols stay with the intermediate files, out of the application.
 del /q "%OUT%\%EXE%.pdb" 2>nul
 set "LINKOPT="
 if "%DEBUGINFO%"=="1" set LINKOPT=/DEBUG /PDB:"%OBJ%\%EXE%.pdb"
-link /nologo %LINKOPT% /LIBPATH:"%WEBVIEW2%\build\native\%ARCH%" /OUT:"%OUT%\%EXE%.exe" /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /MANIFEST:EMBED /MANIFESTINPUT:"%APP%\app.manifest" {objects} "%OBJ%\app.res" "%ENGINE%"{bootstrap_lib} windowsapp.lib kernel32.lib user32.lib gdi32.lib ole32.lib oleaut32.lib advapi32.lib shell32.lib shlwapi.lib dwmapi.lib ntdll.lib userenv.lib ws2_32.lib bcrypt.lib dbghelp.lib secur32.lib crypt32.lib ncrypt.lib iphlpapi.lib synchronization.lib || goto failed
+link /nologo %LINKOPT% /LIBPATH:"%WEBVIEW2%\build\native\%ARCH%" /OUT:"%OUT%\%EXE%.exe" /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /MANIFEST:EMBED /MANIFESTINPUT:"%APP%\app.manifest" {objects} "%OBJ%\app.res" "%ENGINE%"{bootstrap_lib} windowsapp.lib kernel32.lib user32.lib gdi32.lib ole32.lib oleaut32.lib advapi32.lib shell32.lib shlwapi.lib dwmapi.lib ntdll.lib userenv.lib ws2_32.lib bcrypt.lib dbghelp.lib secur32.lib crypt32.lib ncrypt.lib iphlpapi.lib synchronization.lib propsys.lib || goto failed
 {bootstrap_dll}
 exit /b 0
 

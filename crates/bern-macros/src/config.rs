@@ -170,6 +170,109 @@ fn all_module_manifests(
         .collect()
 }
 
+/// The value types the protocol of module `namespace` of the enclosing
+/// application may use from the protocols of the modules it depends on,
+/// as the build tool reads them, and every protocol source read. Empty for
+/// a protocol that is not a module's.
+pub fn imported_types(namespace: &str) -> Result<(bern_protocol::TypeTable, Vec<PathBuf>), String> {
+    let Some(path) = application_manifest() else {
+        return Ok(Default::default());
+    };
+    let app = read(&path)?;
+    let modules = module_manifests(&path, &app)?;
+    let selection = build_modules().map_err(|error| error.to_string())?;
+    let mut files = Vec::new();
+    let mut done = std::collections::BTreeMap::new();
+    let imported = imports_of(namespace, &modules, &selection, &mut done, &mut files)?;
+    Ok((imported, files))
+}
+
+fn depends_of(module: &toml::Value) -> Vec<String> {
+    module
+        .get("module")
+        .and_then(|module| module.get("depends"))
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|id| id.as_str().map(str::to_string))
+        .collect()
+}
+
+/// The types of the modules module `id` depends on, each lowered with the
+/// types of those it depends on in turn.
+fn imports_of(
+    id: &str,
+    modules: &[(PathBuf, toml::Value)],
+    selection: &bern_syntax::build::Modules,
+    done: &mut std::collections::BTreeMap<String, bern_protocol::TypeTable>,
+    files: &mut Vec<PathBuf>,
+) -> Result<bern_protocol::TypeTable, String> {
+    let module_id = |module: &toml::Value| {
+        module
+            .get("module")
+            .and_then(|module| module.get("id"))
+            .and_then(toml::Value::as_str)
+            .map(str::to_string)
+    };
+    let Some((_, module)) = modules
+        .iter()
+        .find(|(_, module)| module_id(module).as_deref() == Some(id))
+    else {
+        return Ok(Default::default());
+    };
+    let mut imported = bern_protocol::TypeTable::default();
+    for dependency in depends_of(module) {
+        if !done.contains_key(&dependency) {
+            let types = protocol_types(&dependency, modules, selection, done, files)?;
+            done.insert(dependency.clone(), types);
+        }
+        imported
+            .merge(&done[&dependency])
+            .map_err(|error| format!("modules `{id}` depends on: {}", error.message))?;
+    }
+    Ok(imported)
+}
+
+/// The value types of module `id`'s protocol: its own and those it took.
+fn protocol_types(
+    id: &str,
+    modules: &[(PathBuf, toml::Value)],
+    selection: &bern_syntax::build::Modules,
+    done: &mut std::collections::BTreeMap<String, bern_protocol::TypeTable>,
+    files: &mut Vec<PathBuf>,
+) -> Result<bern_protocol::TypeTable, String> {
+    let imported = imports_of(id, modules, selection, done, files)?;
+    let Some((manifest, module)) = modules.iter().find(|(_, module)| {
+        module
+            .get("module")
+            .and_then(|m| m.get("id"))
+            .and_then(toml::Value::as_str)
+            == Some(id)
+    }) else {
+        return Ok(Default::default());
+    };
+    let Some(source) = module
+        .get("module")
+        .and_then(|module| module.get("protocol"))
+        .and_then(|protocol| protocol.get("source"))
+        .and_then(toml::Value::as_str)
+    else {
+        return Ok(Default::default());
+    };
+    let file = manifest.parent().unwrap_or(Path::new(".")).join(source);
+    let text = std::fs::read_to_string(&file)
+        .map_err(|error| format!("cannot read {}: {error}", file.display()))?;
+    files.push(file.clone());
+    let items = bern_syntax::items::parse_source_file_with_modules(&text, selection)
+        .map_err(|error| format!("{}: {error}", file.display()))?;
+    let Some((_, protocol)) = items.protocols.first() else {
+        return Ok(Default::default());
+    };
+    let descriptor = bern_syntax::lower::protocol_descriptor_with(protocol, &imported)
+        .map_err(|error| format!("{}: {error}", file.display()))?;
+    Ok(descriptor.types)
+}
+
 /// The optional modules when this crate is the shell protocol of the
 /// application in the nearest `Bern.toml` (its `[protocol] package`);
 /// none for any other crate.
@@ -214,6 +317,8 @@ fn optional_modules_of(path: &Path, package: &str) -> Result<OptionalModules, St
 pub struct ModulePage {
     pub id: String,
     pub label: Vec<(String, String)>,
+    /// The page comes first in the enum, as the build tool puts it.
+    pub start: bool,
 }
 
 /// The pages the modules of the application in the nearest `Bern.toml`
@@ -250,6 +355,10 @@ fn module_pages_of(path: &Path, slot: &str) -> Result<(Vec<ModulePage>, Vec<Path
             pages.push(ModulePage {
                 id: id.to_string(),
                 label,
+                start: page
+                    .get("start")
+                    .and_then(toml::Value::as_bool)
+                    .unwrap_or(false),
             });
         }
     }

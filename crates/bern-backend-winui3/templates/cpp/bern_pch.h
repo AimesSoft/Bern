@@ -29,6 +29,8 @@
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Devices.Input.h>
 #include <winrt/Windows.Graphics.h>
+#include <winrt/Windows.Graphics.Effects.h>
+#include <windows.graphics.effects.interop.h>
 #include <winrt/Windows.Graphics.Imaging.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.Storage.Pickers.h>

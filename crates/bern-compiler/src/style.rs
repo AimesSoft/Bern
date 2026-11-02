@@ -265,8 +265,11 @@ impl Lowering<'_> {
         sheet: &StyleSheet,
     ) -> (TransitionKind, Option<&'a StyleArg>) {
         let slide = name == "slide";
+        let moves = name == "move";
         let usage = if slide {
             "write `slide(bottom, 16, token)` or `slide(edge: bottom, distance: 16, token)`"
+        } else if moves {
+            "write `move(bottom, token)` or `move(edge: bottom, token)`"
         } else {
             "write `grow(bottom, token)` or `grow(edge: bottom, token)`"
         };
@@ -333,6 +336,8 @@ impl Lowering<'_> {
                     .and_then(|value| self.length(value, "a slide's distance"))
                     .unwrap_or(16.0),
             }
+        } else if moves {
+            TransitionKind::Move { edge }
         } else {
             TransitionKind::Grow { edge }
         };
@@ -555,7 +560,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
     }
     for decl in &item.transitions {
         let StyleValue::Call { name, args } = &decl.value else {
-            lowering.error(decl.value.span(), "a transition is `fade(token)`, `pop(from: 0.8, token)` or `slide(edge: bottom, distance: 16, token)`");
+            lowering.error(decl.value.span(), "a transition is `fade(token)`, `pop(from: 0.8, token)`, `slide(edge: bottom, distance: 16, token)` or `move(edge: bottom, token)`");
             continue;
         };
         let (positional, named) = lowering.numbers(args);
@@ -571,7 +576,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             "pop" => TransitionKind::Pop {
                 from: get("from").or(positional.first().copied()).unwrap_or(0.8),
             },
-            "slide" | "grow" => {
+            "slide" | "grow" | "move" => {
                 let (kind, token) = lowering.edge_transition(name, args, &sheet);
                 motion = token.map(std::slice::from_ref).unwrap_or_default();
                 kind
@@ -579,7 +584,7 @@ pub fn lower(items: &[(String, StyleItem)], diagnostics: &mut Vec<Diagnostic>) -
             other => {
                 lowering.error(
                     name.span(),
-                    format!("`{other}` is not a transition; use fade, pop, grow or slide"),
+                    format!("`{other}` is not a transition; use fade, pop, grow, slide or move"),
                 );
                 continue;
             }

@@ -10,7 +10,7 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {} }}, {}, ",
+                "b::ContentButton(p, c, b::ContentButtonProps {{ id: {}, label: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, menu: {} }}, {}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 self.enabled(element),
@@ -18,6 +18,7 @@ impl Generator<'_> {
                 self.pick(element),
                 some(self.field(element, "paste")),
                 self.shape(element),
+                self.context_menu(element),
                 self.action(element),
             ),
             &element.children,
@@ -33,7 +34,7 @@ impl Generator<'_> {
 
     pub(super) fn button(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, fill: {} }}, {});",
+            "b::Button(p, c, b::ButtonProps {{ id: {}, label: {}, icon: {}, role: {}, prominence: {}, enabled: {}, style: {}, pick: {}, paste: {}, shape: {}, fill: {}, menu: {} }}, {});",
             self.id(element),
             some(self.text_prop(element, "label")),
             Self::icon(element, "icon"),
@@ -45,6 +46,7 @@ impl Generator<'_> {
             some(self.field(element, "paste")),
             self.shape(element),
             element.keyword("width") == Some("fill"),
+            self.context_menu(element),
             self.action(element),
         ));
         self.shortcut(
@@ -198,9 +200,10 @@ impl Generator<'_> {
 
     pub(super) fn language_picker(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::LanguagePicker(p, c, b::LanguagePickerProps {{ id: {}, label: {} }});",
+            "b::LanguagePicker(p, c, b::LanguagePickerProps {{ id: {}, label: {}, label_hidden: {} }});",
             self.id(element),
             some(self.text_prop(element, "label")),
+            element.keyword("label_hidden") == Some("true"),
         ));
     }
 
@@ -214,13 +217,15 @@ impl Generator<'_> {
         self.children(
             out,
             &format!(
-                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {}, window_theme: {}, style: {} }}, ",
+                "b::PopoverButton(p, c, b::PopoverButtonProps {{ id: {}, label: {}, icon: {}, presented: {}, window_theme: {}, style: {}, plain: {}, font_size: {} }}, ",
                 self.id(element),
                 some(self.text_prop(element, "label")),
                 Self::icon(element, "icon"),
                 some(presented),
                 bern_target_api::style::popover_window_theme(self.app, "linux", element),
                 self.style("PopoverButton", element),
+                element.keyword("prominence") == Some("plain"),
+                Self::number(element, "font_size"),
             ),
             &element.children,
             ");",

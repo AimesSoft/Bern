@@ -233,9 +233,18 @@ impl Checker<'_> {
             .children
             .as_ref()
             .map(|children| ast::child_names(children, spec::DYNAMIC_ITEMS.contains(&name)));
+        let keywords: Vec<(String, String)> = element
+            .props
+            .iter()
+            .filter_map(|prop| Some((prop.name.to_string(), prop.keyword()?)))
+            .collect();
         let shape = ElementShape {
             name,
             props: prop_names.iter().map(String::as_str).collect(),
+            keywords: keywords
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+                .collect(),
             has_template: element.template.is_some(),
             children: child_names.as_ref().map(|children| {
                 children

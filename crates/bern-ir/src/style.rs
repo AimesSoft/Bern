@@ -158,6 +158,9 @@ pub enum TransitionKind {
     Grow { edge: Edge },
     /// Slides from (or to) `distance` beyond `edge` while fading.
     Slide { edge: Edge, distance: f64 },
+    /// Moves in from (or out to) beyond `edge`, its whole size away, without
+    /// fading, as a sheet comes up from the bottom of the screen.
+    Move { edge: Edge },
 }
 
 /// Transitions every application has.

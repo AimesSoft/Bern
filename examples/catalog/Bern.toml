@@ -1,0 +1,60 @@
+# A catalog of thousands of rows and a grid of cards over a picture that
+# covers the window: in a scroll view, a grid builds only the rows in sight,
+# on every target.
+
+[app]
+id = "catalog"
+bundle_id = "dev.bern.catalog"
+version = "0.1.0"
+name = { "zh-Hans" = "目录", "en" = "Catalog" }
+
+[languages]
+supported = ["zh-Hans", "en"]
+default = "zh-Hans"
+
+[protocol]
+package = "catalog-protocol"
+source = "catalog-protocol/src/lib.rs"
+
+[engine]
+package = "catalog-core"
+type = "catalog_core::CatalogEngine"
+
+[ui]
+package = "catalog-ui"
+sources = ["catalog-ui/src/lib.rs"]
+root = "app"
+
+[resources]
+paths = ["media/backdrop.jpg"]
+
+[targets.macos]
+platform = "macos"
+channels = ["ipc"]
+
+[targets.ios]
+platform = "ios"
+channels = ["ipc"]
+
+[targets.android]
+platform = "android"
+channels = ["ipc"]
+
+[targets.linux]
+platform = "linux"
+channels = ["ipc"]
+
+[targets.windows]
+platform = "windows"
+channels = ["ipc"]
+
+[targets.gpui_macos]
+ui = "gpui"
+platform = "macos"
+channels = ["ipc"]
+
+# The engine runs in the page, compiled to WebAssembly.
+[targets.web_app]
+ui = "web"
+platform = "browser"
+web_mode = "app"

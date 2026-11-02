@@ -174,6 +174,46 @@ impl Generator<'_> {
         out.close("}");
     }
 
+    /// A button, inside the long-press menu of its `ContextMenu` when it
+    /// has one. The menu's items are controls too, reached while it is
+    /// closed.
+    pub(super) fn context_menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let Some(items) = element.context_menu() else {
+            self.button(out, element, ctx);
+            return;
+        };
+        for item in items.iter().filter(|item| item.kind == "MenuItem") {
+            let item_label = self.text_prop(item, "label").unwrap_or_default();
+            let (action, file) = self.pressed(item);
+            out.line(format!(
+                "BernControl({}, \"button\", {item_label}, {}, BernControlActions(activate = {{ {action} }}{file}))",
+                self.target(item, ctx),
+                self.enabled(item)
+            ));
+            self.shortcut(out, item, &action);
+        }
+        out.open("BernContextMenu({ dismiss ->");
+        for item in &items {
+            if item.kind == "Divider" {
+                out.line("HorizontalDivider()");
+                continue;
+            }
+            let item_label = self.text_prop(item, "label").unwrap_or_default();
+            let (action, _) = self.pressed(item);
+            out.line(format!(
+                "BernMenuItem({item_label}, {}, {}, destructive = {}) {{ dismiss(); {action} }}",
+                Self::icon(item.icon("icon")),
+                self.enabled(item),
+                item.keyword("role") == Some("destructive")
+            ));
+        }
+        out.close("}) {");
+        out.indent += 1;
+        // Inside the menu's box, not the row or column around it.
+        self.button(out, element, &ctx.within(Scope::Other));
+        out.close("}");
+    }
+
     pub(super) fn inspector(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let field = self.field(element, "presented").expect("bool field");
         out.open(format!(
@@ -214,8 +254,15 @@ impl Generator<'_> {
         if let Some(size) = element.number("font_size") {
             extra.push_str(&format!(", fontSize = {}", float(size)));
         }
+        // In a row the field takes the room its neighbours leave, as a text
+        // field does, so a button beside it stays in view.
+        let weight = if ctx.scope == Scope::Row {
+            ".weight(1f)"
+        } else {
+            ""
+        };
         out.line(format!(
-            "BernSearchField({field}, {{ {field} = it }}, {prompt}, {}, Modifier.testTag({target}){extra})",
+            "BernSearchField({field}, {{ {field} = it }}, {prompt}, {}, Modifier{weight}.testTag({target}){extra})",
             action
                 .map(|action| format!("{{ {action} }}"))
                 .unwrap_or_else(|| "null".into())

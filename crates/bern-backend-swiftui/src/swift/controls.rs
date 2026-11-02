@@ -101,7 +101,7 @@ impl Generator<'_> {
         out.close("}) {");
         out.indent += 1;
         let enabled = element.expr("enabled").map(|expr| self.expr(expr));
-        if element.kind == "Button" && !element.children.is_empty() {
+        if element.kind == "Button" && element.has_content() {
             // The content is what the button shows; the label names it.
             self.nodes(out, &element.children, ctx);
             if element.keyword("width") == Some("fill") {
@@ -272,6 +272,29 @@ impl Generator<'_> {
         ));
     }
 
+    /// A button's `ContextMenu`: the system's menu on a secondary click or
+    /// a long press. Its items are controls too, reached while it is closed.
+    pub(super) fn context_menu(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
+        let Some(items) = element.context_menu() else {
+            return;
+        };
+        out.open(".contextMenu {");
+        self.table_menu(out, &items, "");
+        out.close("}");
+        for item in items.iter().filter(|item| item.kind == "MenuItem") {
+            let item_label = self.text_prop(item, "label").unwrap_or_default();
+            let (action, file) = self.pressed(item);
+            let enabled = item
+                .expr("enabled")
+                .map(|expr| self.expr(expr))
+                .unwrap_or_else(|| "true".into());
+            out.line(format!(
+                ".bernControl({}, role: \"button\", label: {item_label}, enabled: {enabled}, actions: BernControlActions(activate: {{ {action} }}{file}))",
+                self.target(item, ctx)
+            ));
+        }
+    }
+
     pub(super) fn popover_button(&self, out: &mut Out, element: &Element, ctx: &Ctx) {
         let label = self.text_prop(element, "label").unwrap_or_default();
         let icon = element
@@ -291,17 +314,22 @@ impl Generator<'_> {
             .style_of(element)
             .map(|style| format!("BernStyles.{}", style.name))
             .unwrap_or_else(|| "nil".into());
+        let icon_size = element
+            .number("font_size")
+            .map(|size| format!(", iconSize: {}", double(size)))
+            .unwrap_or_default();
         out.open(format!(
-            "BernPopoverButton(label: {label}, systemImage: {icon}, presented: {presented}, target: {}, windowTheme: {window_theme}, style: {style}) {{",
+            "BernPopoverButton(label: {label}, systemImage: {icon}, presented: {presented}, target: {}, windowTheme: {window_theme}, style: {style}{icon_size}) {{",
             self.target(element, ctx)
         ));
         self.nodes(out, &element.children, ctx);
         out.close("}");
         if !ctx.toolbar {
-            out.line(if element.icon("icon").is_some() {
-                ".bernButtonLook(.icon)"
-            } else {
-                ".bernButtonLook(.secondary)"
+            // `plain` draws no background, as a plain `IconButton` beside it.
+            out.line(match element.keyword("prominence") {
+                Some("plain") => ".bernButtonLook(.flat)",
+                _ if element.icon("icon").is_some() => ".bernButtonLook(.icon)",
+                _ => ".bernButtonLook(.secondary)",
             });
         }
         if let Some(line) = self.shortcut_line(element, None) {
@@ -393,6 +421,10 @@ impl Generator<'_> {
         // in a macOS form.
         if element.keyword("label_hidden") == Some("true") {
             out.line(".labelsHidden()");
+            // On iOS a field outside a form is otherwise bare text.
+            if self.platform == Platform::Ios {
+                out.line(".bernFieldBox()");
+            }
         }
         if ios {
             if kind == "multiline" {
@@ -779,13 +811,7 @@ impl Generator<'_> {
         }
         match element.keyword("style") {
             Some("menu") if capsule => out.line(".pickerStyle(.inline)"),
-            // macOS draws a menu picker's value and arrows in the tint, and
-            // the window's tint is the app's accent; without it the picker
-            // is the system's own, in the words' color as in System Settings.
-            Some("menu") if self.platform == Platform::Macos => {
-                out.line(".pickerStyle(.menu).tint(nil as SwiftUI.Color?)")
-            }
-            Some("menu") => out.line(".pickerStyle(.menu)"),
+            Some("menu") => out.line(format!(".pickerStyle(.menu){}", menu_tint(self.platform))),
             Some("segmented") => out.line(".pickerStyle(.segmented).bernAccentTint()"),
             // iOS lists the options with a checkmark instead of
             // radio buttons.
@@ -877,6 +903,10 @@ impl Generator<'_> {
         out.indent += 1;
         out.line(format!("SwiftUI.Text(verbatim: {label})"));
         out.close("}");
+        if element.keyword("label_hidden") == Some("true") {
+            out.line(".labelsHidden()");
+        }
+        out.line(format!(".pickerStyle(.menu){}", menu_tint(self.platform)));
         out.line(format!(
             ".bernControl({}, role: \"picker\", label: {label}, actions: BernControlActions(select: {{ BernLanguage.shared.select($0) }}, value: {{ BernLanguage.shared.current }}))",
             self.target(element, ctx)
@@ -1048,4 +1078,15 @@ fn remote_key(text: &str) -> Option<&'static str> {
         "down" => ".down",
         _ => return None,
     })
+}
+
+/// What a menu picker's value and arrows are drawn in: not the app's
+/// accent, which the system would give them. macOS draws the system's own
+/// pop-up button, in the words' color as in System Settings; iOS and tvOS
+/// the value in the secondary color, as Settings lists a choice.
+fn menu_tint(platform: Platform) -> &'static str {
+    match platform {
+        Platform::Macos => ".tint(nil as SwiftUI.Color?)",
+        _ => ".tint(SwiftUI.Color.secondary)",
+    }
 }

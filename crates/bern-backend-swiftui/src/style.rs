@@ -308,6 +308,7 @@ pub fn appear(app: &Application, name: &str) -> Option<String> {
             };
             format!("BernAppear.slide(x: {}, y: {})", number(x), number(y))
         }
+        TransitionKind::Move { edge } => format!("BernAppear.move({})", transition_edge(edge)),
     })
 }
 
@@ -333,6 +334,7 @@ pub fn transition(app: &Application, name: &str) -> Option<(String, String)> {
                 number(y)
             )
         }
+        TransitionKind::Move { edge } => format!(".move(edge: {})", transition_edge(edge)),
     };
     Some((swift, motion(app, &def.motion)))
 }

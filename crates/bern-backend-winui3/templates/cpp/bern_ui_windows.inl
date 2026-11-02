@@ -700,6 +700,24 @@ inline void ShowChrome(Win& win, bool immersive) {
 /// The accent last shown, to change the brushes only when it changes.
 inline int shownAccent = -1;
 
+#if BERN_WINUI
+/// The caption buttons in the window's appearance, or, while a page covers
+/// the window, in the page's: they stand on it.
+inline void ShowCaptionTheme(Win& win) {
+    if (!win.window || win.owner) return;
+    std::string mode = win.appearanceMode;
+    if (win.covering.Peek() > 0 && !win.coverings.empty() && !win.coverings.back().second.empty())
+        mode = win.coverings.back().second;
+    try {
+        using winrt::Microsoft::UI::Windowing::TitleBarTheme;
+        win.window.AppWindow().TitleBar().PreferredTheme(mode == "dark" ? TitleBarTheme::Dark
+                : mode == "light"                                        ? TitleBarTheme::Light
+                                                                         : TitleBarTheme::UseDefaultAppMode);
+    } catch (...) {
+    }
+}
+#endif
+
 /// `WindowSet(accent:, appearance:)` for one window: its appearance, and the
 /// application's accent.
 inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
@@ -730,15 +748,10 @@ inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
                 auto theme = B::ThemeNamed(mode);
                 win->root.RequestedTheme(theme);
                 if (win->sheet) win->sheet.RequestedTheme(theme);
+                win->appearanceMode = mode;
 #if BERN_WINUI
                 // The caption buttons follow the window's appearance.
-                if (win->window) try {
-                    auto bar = win->window.AppWindow().TitleBar();
-                    bar.PreferredTheme(mode == "dark" ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Dark
-                            : mode == "light"         ? winrt::Microsoft::UI::Windowing::TitleBarTheme::Light
-                                                      : winrt::Microsoft::UI::Windowing::TitleBarTheme::UseDefaultAppMode);
-                } catch (...) {
-                }
+                ShowCaptionTheme(*win);
 #endif
                 Snapshot::Schedule();
                 return 0;
@@ -780,6 +793,17 @@ inline void FollowTheme(std::shared_ptr<Win> const& win, Ctx const& ctx) {
         });
     }
 }
+
+#if BERN_WINUI
+/// Over a layer under the bars that is a page over the window, only the
+/// caption buttons stay, as macOS keeps only its window buttons: the title
+/// bar's icon, title and pane button fade out, and the bar still moves the
+/// window.
+inline void ShowTitleBarContent(controls::TitleBar const& bar, bool shown) {
+    bar.Opacity(shown ? 1.0 : 0.0);
+    bar.IsPaneToggleButtonVisible(shown && bar.Resources().HasKey(winrt::box_value(L"bern.paneToggle")));
+}
+#endif
 
 /// The page header's margins. While content is under the bars, the header
 /// stays below the title bar and its trailing end keeps clear of the
@@ -862,6 +886,16 @@ inline void Mount(std::shared_ptr<Win> const& win, controls::Grid const& host, s
                 return 0;
             });
         });
+#if BERN_WINUI
+        Reactive::Run([raw] {
+            bool covered = raw->covering.Get() > 0;
+            Reactive::Untrack([&] {
+                if (raw->titleBar && !raw->owner) ShowTitleBarContent(raw->titleBar, !covered);
+                ShowCaptionTheme(*raw);
+                return 0;
+            });
+        });
+#endif
         Ctx ctx;
         ctx.win = raw;
         // Controls written in the window itself are named after it.
@@ -1012,6 +1046,9 @@ inline std::string Open(std::string const& kindId) {
     window.ExtendsContentIntoTitleBar(true);
     controls::TitleBar titleBar;
     win->titleBar = titleBar;
+    xaml::ScalarTransition fade;
+    fade.Duration(std::chrono::milliseconds(200));
+    titleBar.OpacityTransition(fade);
     controls::RowDefinition titleRow;
     titleRow.Height(AutoLength());
     controls::RowDefinition hostRow;

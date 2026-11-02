@@ -121,10 +121,18 @@ struct ScrollProps {
     /// Where it opens centered: the point at this fraction of the content
     /// in the middle of the view, or as near it as the content reaches.
     Len openCenter;
+    /// `anchor`: the item of `position` stands this fraction of the way
+    /// down the view (and the item), rather than at its start.
+    std::optional<double> anchor;
+    /// `browsing`: set while the person scrolls the view, a fling
+    /// included.
+    std::optional<Field> browsing;
 };
 
-/// The scroll offset that puts `item` at the anchor of `scroll`.
-inline std::optional<double> OffsetOf(ScrollInfo const& scroll, xaml::UIElement const& item, bool center) {
+/// The scroll offset that puts `item` at the anchor of `scroll`: the point
+/// `fraction` of the way along the item at the same fraction of the view
+/// (0 its start, 0.5 its center).
+inline std::optional<double> OffsetOf(ScrollInfo const& scroll, xaml::UIElement const& item, double fraction) {
     auto viewer = scroll.viewer;
     auto content = viewer.Content().try_as<xaml::UIElement>();
     auto framework = item.try_as<xaml::FrameworkElement>();
@@ -138,12 +146,20 @@ inline std::optional<double> OffsetOf(ScrollInfo const& scroll, xaml::UIElement 
         auto room = content.as<xaml::FrameworkElement>().Margin();
         double start = (scroll.horizontal ? middle.X + room.Left : middle.Y + room.Top) - extent / 2;
         double port = scroll.horizontal ? viewer.ViewportWidth() : viewer.ViewportHeight();
-        double offset = center ? start + extent / 2 - port / 2 : start;
+        double offset = start - (port - extent) * fraction;
         double most = scroll.horizontal ? viewer.ScrollableWidth() : viewer.ScrollableHeight();
         return (std::clamp)(offset, 0.0, (std::max)(0.0, most));
     } catch (winrt::hresult_error const&) {
         return std::nullopt;
     }
+}
+
+/// The element of the row of `key` in a grid of `scroll` that builds only
+/// the rows near the view, built there; none when no such grid has it.
+inline xaml::UIElement RevealItem(ScrollInfo& scroll, std::string const& key) {
+    for (auto const& reveal : scroll.reveal)
+        if (auto element = reveal(key)) return element;
+    return nullptr;
 }
 
 /// The items of `scroll` still on screen, by key.
@@ -153,6 +169,371 @@ inline std::vector<std::pair<std::string, xaml::UIElement>> ItemsOf(ScrollInfo& 
     for (auto const& [key, weak] : scroll.items)
         if (auto element = weak.get(); element && element.as<xaml::FrameworkElement>().IsLoaded()) items.emplace_back(key, element);
     return items;
+}
+
+// ---------------------------------------------------------------------------
+// Grids that build only the rows near the view
+
+/// `Parent`, by a name the panel below can use: inside it `Parent` is the
+/// element's own `Parent()`.
+using RowParent = Parent;
+
+/// A grid of one `ForEach` in a vertical scroll view that builds only the
+/// rows near what is in sight: one view's height before and after the
+/// effective viewport the scroll view gives it. A row out of sight takes
+/// the height it had when last built, or that of the first item built;
+/// outside a scroll view every row is built. Rows are built and dropped
+/// outside layout, after the sight or the items change. Laid out as
+/// `GridPanel`.
+struct LazyGridPanel : controls::PanelT<LazyGridPanel> {
+    double minWidth = 120;
+    double spacing = 8;
+    std::optional<double> rowSpacing;
+    std::optional<double> cellRatio;
+    double cellExtra = 0;
+    xaml::Thickness padding{0, 0, 0, 0};
+    B::Motion const* reflow = nullptr;
+    Places places;
+    /// A list from a column (`EachProps::align`).
+    bool list = false;
+
+    struct Item {
+        std::string key;
+        Cell<Value> value;
+        std::unique_ptr<Scope> owner;
+        controls::Grid host;
+        /// The row's region in its host: removing it plays the
+        /// `disappear` of what is in it.
+        RowParent outer;
+        RowParent region;
+    };
+    /// Rows whose item is gone, playing their `disappear` where they were.
+    std::vector<std::pair<controls::Grid, Rect>> leaving;
+    /// Where each built row was last arranged, by key.
+    std::unordered_map<std::string, Rect> arranged;
+    std::vector<Value> values;
+    std::vector<std::string> keys;
+    std::unordered_map<std::string, std::shared_ptr<Item>> built;
+    /// Heights of built items by key, at the width they were measured at;
+    /// the guess for the rest.
+    std::unordered_map<std::string, float> heights;
+    float guess = 0;
+    float laidWidth = -1;
+    /// In a vertical scroll view, and what of the grid is in sight there.
+    bool scrolls = false;
+    std::optional<Rect> sight;
+    /// The last layout: columns, their width, where each row starts.
+    size_t columns = 1;
+    float cell = 0;
+    std::vector<float> starts{0.0f};
+    std::function<std::shared_ptr<Item>(size_t)> make;
+    std::function<void(std::shared_ptr<Item> const&)> drop;
+    bool posted = false;
+
+    float Horizontal() const { return static_cast<float>(padding.Left + padding.Right); }
+    float Vertical() const { return static_cast<float>(padding.Top + padding.Bottom); }
+    float RowGap() const { return static_cast<float>(rowSpacing.value_or(spacing)); }
+    std::optional<float> CellHeight(float width) const {
+        if (!cellRatio || *cellRatio <= 0) return std::nullopt;
+        return static_cast<float>(width / *cellRatio + cellExtra);
+    }
+    size_t Rows() const { return starts.size() - 1; }
+
+    /// Where each row starts, from the heights known.
+    void Lay() {
+        size_t count = keys.size();
+        size_t rows = (count + columns - 1) / columns;
+        starts.assign(rows + 1, 0.0f);
+        auto fixed = CellHeight(cell);
+        float at = 0;
+        for (size_t row = 0; row < rows; ++row) {
+            starts[row] = at;
+            float tallest = fixed.value_or(0.0f);
+            if (!fixed) {
+                for (size_t i = row * columns; i < (std::min)(count, (row + 1) * columns); ++i) {
+                    auto found = heights.find(keys[i]);
+                    tallest = (std::max)(tallest, found != heights.end() ? found->second : guess);
+                }
+            }
+            at += tallest + RowGap();
+        }
+        starts[rows] = at;
+    }
+
+    /// The first row whose bottom is below `y`.
+    size_t RowAt(float y) const {
+        size_t low = 0, high = Rows();
+        while (low < high) {
+            size_t mid = (low + high) / 2;
+            if (starts[mid + 1] - RowGap() <= y) low = mid + 1;
+            else high = mid;
+        }
+        return low;
+    }
+
+    /// The rows to build, from the first to before the last.
+    std::pair<size_t, size_t> Wanted() const {
+        size_t rows = Rows();
+        if (!scrolls) return {0, rows};
+        size_t first = (std::min)(rows, (24 + columns - 1) / columns);
+        if (!sight || laidWidth < 0 || (guess <= 0 && !CellHeight(cell))) return {0, first};
+        float top = sight->Y - static_cast<float>(padding.Top);
+        size_t from = (std::min)(rows, RowAt((std::max)(0.0f, top - sight->Height)));
+        size_t to = (std::min)(rows, RowAt((std::max)(0.0f, top + sight->Height * 2)) + 1);
+        return {from, (std::max)(from, to)};
+    }
+
+    /// Whether the rows built are the rows wanted.
+    bool Current() const {
+        auto [from, to] = Wanted();
+        size_t end = (std::min)(keys.size(), to * columns);
+        size_t start = (std::min)(end, from * columns);
+        if (built.size() != end - start) return false;
+        for (size_t i = start; i < end; ++i)
+            if (!built.contains(keys[i])) return false;
+        return true;
+    }
+
+    /// Build the rows wanted and drop the rest.
+    void Update() {
+        posted = false;
+        if (!make) return;
+        auto [from, to] = Wanted();
+        std::unordered_map<std::string, std::shared_ptr<Item>> next;
+        for (size_t i = from * columns; i < (std::min)(keys.size(), to * columns); ++i) {
+            if (auto found = built.find(keys[i]); found != built.end()) {
+                next.emplace(keys[i], found->second);
+                built.erase(found);
+            } else if (auto item = make(i)) {
+                next.emplace(keys[i], item);
+            }
+        }
+        // A row whose item is gone plays its `disappear` where it was; a row
+        // only scrolled out of range goes at once.
+        std::unordered_set<std::string> present(keys.begin(), keys.end());
+        for (auto& [key, item] : built) {
+            auto place = arranged.find(key);
+            if (!present.contains(key) && place != arranged.end()) {
+                item->owner->Dispose();
+                item->outer.Remove(item->region);
+                leaving.emplace_back(item->host, place->second);
+            } else {
+                drop(item);
+            }
+            if (place != arranged.end()) arranged.erase(place);
+        }
+        built = std::move(next);
+        // Rows that have left are taken away.
+        std::erase_if(leaving, [this](auto const& gone) {
+            if (gone.first.Children().Size() > 0) return false;
+            uint32_t at = 0;
+            if (Children().IndexOf(gone.first, at)) Children().RemoveAt(at);
+            return true;
+        });
+        InvalidateMeasure();
+    }
+
+    /// `Update` once layout is done: rows are not added while it runs.
+    void Later() {
+        if (posted) return;
+        posted = true;
+        Host::Post([weak = get_weak()] {
+            if (auto self = weak.get()) self->Update();
+        });
+    }
+
+    Size MeasureOverride(Size available) {
+        float inner = std::isinf(available.Width) ? 0.0f : (std::max)(0.0f, available.Width - Horizontal());
+        // A list from a column given any width wants that of its widest row
+        // built, as the column would.
+        if (list && std::isinf(available.Width)) {
+            for (auto& [key, item] : built) {
+                item->host.Measure(Size{INFINITY, INFINITY});
+                inner = (std::max)(inner, item->host.DesiredSize().Width);
+            }
+        }
+        // Another width wraps text otherwise: heights are measured again.
+        if (inner != laidWidth) {
+            laidWidth = inner;
+            heights.clear();
+            guess = 0;
+        }
+        auto gap = static_cast<float>(spacing);
+        columns = (std::max)(static_cast<size_t>((inner + gap) / static_cast<float>((std::max)(1.0, minWidth) + spacing)), size_t{1});
+        cell = (std::max)(0.0f, (inner - gap * static_cast<float>(columns - 1)) / static_cast<float>(columns));
+        for (auto& [key, item] : built) {
+            item->host.Measure(Size{cell, INFINITY});
+            float height = item->host.DesiredSize().Height;
+            heights[key] = height;
+            if (guess <= 0 && height > 0) guess = height;
+        }
+        for (auto& [host, place] : leaving) host.Measure(Size{place.Width, place.Height});
+        Lay();
+        // Rows that have left are taken away after this layout.
+        bool left = std::any_of(leaving.begin(), leaving.end(), [](auto const& gone) { return gone.first.Children().Size() == 0; });
+        if (!Current() || left) Later();
+        float total = Rows() ? starts.back() - RowGap() : 0.0f;
+        return Size{inner + Horizontal(), total + Vertical()};
+    }
+
+    Size ArrangeOverride(Size final) {
+        auto gap = static_cast<float>(spacing);
+        auto fixed = CellHeight(cell);
+        std::vector<std::pair<xaml::UIElement, winrt::Windows::Foundation::Point>> now;
+        for (size_t i = 0; i < keys.size() && i / columns < Rows(); ++i) {
+            auto found = built.find(keys[i]);
+            if (found == built.end()) continue;
+            size_t row = i / columns;
+            float rowHeight = starts[row + 1] - RowGap() - starts[row];
+            // In a row of cells, taller content runs into the gap below.
+            float height = fixed ? (std::max)(*fixed, found->second->host.DesiredSize().Height) : rowHeight;
+            Rect rect{static_cast<float>(padding.Left) + static_cast<float>(i % columns) * (cell + gap), static_cast<float>(padding.Top) + starts[row], cell, height};
+            found->second->host.Arrange(rect);
+            arranged[keys[i]] = rect;
+            if (reflow) now.emplace_back(found->second->host, winrt::Windows::Foundation::Point{rect.X, rect.Y});
+        }
+        for (auto& [host, place] : leaving) host.Arrange(place);
+        if (reflow) places.Arranged(reflow, std::move(now));
+        return final;
+    }
+};
+
+/// `Grid` whose items are one `ForEach`: in a vertical scroll view it builds
+/// only the rows near what is in sight (`LazyGridPanel`); elsewhere it
+/// builds them all. A built row keeps its elements, controls and state
+/// while its key stays and it is near the view; its value is a cell the
+/// row's bindings read.
+inline void LazyGrid(Parent const& p, Ctx const& ctx, GridProps props, EachProps each, Build row) {
+    auto impl = winrt::make_self<LazyGridPanel>();
+    impl->reflow = props.reflow ? props.reflow : each.reflow;
+    controls::Panel panel = impl.as<controls::Panel>();
+    SetRole(panel, L"bern-fill-width");
+    LazyGridPanel* grid = impl.get();
+    KeepReflow(panel, [grid](Motion const* motion) { grid->reflow = motion; });
+    grid->scrolls = ctx.scroll && !ctx.scroll->horizontal;
+    auto keep = winrt::make_weak(panel);
+    auto relayout = [keep] {
+        if (auto panel = keep.get()) panel.InvalidateMeasure();
+    };
+    BindLen(ctx, props.minWidth, props.animate, [grid, relayout](double v) {
+        grid->minWidth = (std::max)(1.0, v);
+        relayout();
+    });
+    BindLen(ctx, props.gap, props.animate, [grid, relayout](double v) {
+        grid->spacing = (std::max)(0.0, v);
+        relayout();
+    });
+    BindPadding(ctx, props.padding, props.paddingX, props.paddingY, props.animate, [grid, relayout](double x, double y) {
+        grid->padding = xaml::Thickness{x, y, x, y};
+        relayout();
+    });
+    BindLen(ctx, props.rowGap, props.animate, [grid, relayout](double v) {
+        grid->rowSpacing = (std::max)(0.0, v);
+        relayout();
+    });
+    grid->cellRatio = props.cellRatio;
+    BindLen(ctx, props.cellExtra, props.animate, [grid, relayout](double v) {
+        grid->cellExtra = v;
+        relayout();
+    });
+    // Rows added in one update take turns with `stagger`, and play their
+    // `appear` transition; rows built as the view scrolls do not.
+    auto stagger = each.stagger ? each.stagger : props.stagger;
+    auto rowsCtx = stagger ? Staggered(ctx, *stagger) : ctx;
+    auto animated = std::make_shared<bool>(false);
+    std::string name = each.variable;
+    auto scroll = ctx.scroll;
+    std::optional<xaml::HorizontalAlignment> across;
+    if (each.align) {
+        std::string_view align = each.align;
+        across = align == "center" ? xaml::HorizontalAlignment::Center
+            : align == "trailing" ? xaml::HorizontalAlignment::Right
+            : xaml::HorizontalAlignment::Left;
+    }
+    grid->make = [grid, row, rowsCtx, name, scroll, animated, across](size_t i) {
+        auto id = grid->keys[i];
+        controls::Grid host;
+        auto outer = across ? Parent::Aligned(host, across, std::nullopt) : Parent::Of(host);
+        auto region = outer.Sub();
+        auto item = std::make_shared<LazyGridPanel::Item>(LazyGridPanel::Item{id, Cell<Value>(grid->values[i]), std::make_unique<Scope>(), host, outer, region});
+        auto cell = item->value;
+        auto rowCtx = rowsCtx.WithKey([id] { return id; }).WithLocal(name, [cell] { return cell.Get(); });
+        Structure::Scope structural(*animated);
+        Reactive::Untrack([&] {
+            item->owner->Run([&] { row(item->region, rowCtx); });
+            return 0;
+        });
+        grid->Children().Append(item->host);
+        // The row's element, known by its key: scroll views find their
+        // items this way.
+        if (scroll && item->host.Children().Size() > 0)
+            scroll->items.emplace_back(id, winrt::make_weak(item->host.Children().GetAt(0)));
+        return item;
+    };
+    grid->drop = [grid](std::shared_ptr<LazyGridPanel::Item> const& item) {
+        item->owner->Dispose();
+        uint32_t at = 0;
+        if (grid->Children().IndexOf(item->host, at)) grid->Children().RemoveAt(at);
+    };
+    auto sighted = panel.EffectiveViewportChanged([grid](xaml::FrameworkElement const&, xaml::EffectiveViewportChangedEventArgs const& args) {
+        grid->sight = args.EffectiveViewport();
+        if (grid->scrolls && !grid->Current()) grid->Later();
+    });
+    // A scroll view's `position` reaches rows not built yet.
+    if (grid->scrolls) {
+        scroll->reveal.push_back([keep, grid, scroll](std::string const& key) -> xaml::UIElement {
+            auto panel = keep.get();
+            if (!panel || !grid->make || !scroll->viewer) return nullptr;
+            auto at = std::find(grid->keys.begin(), grid->keys.end(), key);
+            if (at == grid->keys.end()) return nullptr;
+            size_t row = static_cast<size_t>(at - grid->keys.begin()) / grid->columns;
+            if (row >= grid->Rows()) return nullptr;
+            // Stand near the row, and build the rows in sight there.
+            auto viewer = scroll->viewer;
+            float port = static_cast<float>(viewer.ViewportHeight());
+            float y = static_cast<float>(grid->padding.Top) + grid->starts[row];
+            try {
+                auto content = viewer.Content().as<xaml::UIElement>();
+                auto origin = panel.TransformToVisual(content).TransformPoint({0, 0});
+                viewer.ChangeView(nullptr, static_cast<double>(origin.Y + y), nullptr, true);
+            } catch (winrt::hresult_error const&) {
+            }
+            grid->sight = Rect{0, y, static_cast<float>(panel.ActualWidth()), port};
+            grid->Update();
+            auto found = grid->built.find(key);
+            if (found == grid->built.end() || found->second->host.Children().Size() == 0) return nullptr;
+            return found->second->host.Children().GetAt(0);
+        });
+    }
+    bool fromColumn = each.align != nullptr;
+    grid->list = fromColumn;
+    Reactive::Run([grid, fromColumn, items = each.items, key = each.key, ctx = rowsCtx, animated, first = std::make_shared<bool>(true)] {
+        auto list = R::AsList(items(ctx));
+        // A list without rows takes no place, nor a gap, in its column.
+        if (fromColumn) grid->Visibility(list.empty() ? xaml::Visibility::Collapsed : xaml::Visibility::Visible);
+        Reactive::Untrack([&] {
+            grid->values.assign(list.begin(), list.end());
+            grid->keys.clear();
+            for (auto const& item : list) grid->keys.push_back(R::KeyText(R::At(item, {key})));
+            // Rows still near the view follow their items' new values.
+            for (size_t i = 0; i < list.size(); ++i)
+                if (auto found = grid->built.find(grid->keys[i]); found != grid->built.end()) found->second->value.Set(list[i]);
+            *animated = !*first;
+            *first = false;
+            grid->Lay();
+            grid->Update();
+            *animated = false;
+            return 0;
+        });
+    });
+    Reactive::OnCleanup([impl, sighted] {
+        impl->EffectiveViewportChanged(sighted);
+        for (auto& [key, item] : impl->built) item->owner->Dispose();
+        impl->built.clear();
+        impl->make = nullptr;
+        impl->drop = nullptr;
+    });
+    Place(p, panel);
 }
 
 /// A scrolling container. With `snap`, scrolling comes to rest with an item
@@ -224,10 +605,21 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
             else viewer.ChangeView(nullptr, middle, nullptr, true);
         });
     }
+    // Scrolled by hand: the view moves, and not because it was asked to.
+    if (props.browsing) {
+        auto field = *props.browsing;
+        scroller.ViewChanged([scroll, ctx, field](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
+            bool byHand = args.IsIntermediate() && !scroll->byCode;
+            if (!args.IsIntermediate()) scroll->byCode = false;
+            if (R::Truthy(ctx.Peek(field)) != byHand) ctx.Write(field, Value::Bool(byHand));
+        });
+    }
     if (!props.snap && !props.position) return;
     // Items come to rest at the center only with `snap: center`; a position
-    // alone is kept at the start, as on the other targets.
+    // alone is kept at the start, or at its `anchor`, as on the other
+    // targets.
     bool center = props.snap && std::string_view(props.snap) == "center";
+    double fraction = center ? 0.5 : props.anchor.value_or(0);
     auto padding = [scroll, panel, center, horizontal] {
         // Room before the first and after the last item, so they can come
         // to the center too.
@@ -246,12 +638,12 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
     };
     scroller.SizeChanged([padding](auto&&, auto&&) { padding(); });
     panel.as<xaml::FrameworkElement>().SizeChanged([padding](auto&&, auto&&) { padding(); });
-    auto nearest = [scroll, center]() -> std::optional<std::pair<std::string, xaml::UIElement>> {
+    auto nearest = [scroll, fraction]() -> std::optional<std::pair<std::string, xaml::UIElement>> {
         double now = scroll->horizontal ? scroll->viewer.HorizontalOffset() : scroll->viewer.VerticalOffset();
         std::optional<std::pair<std::string, xaml::UIElement>> best;
         double distance = INFINITY;
         for (auto const& item : ItemsOf(*scroll)) {
-            auto offset = OffsetOf(*scroll, item.second, center);
+            auto offset = OffsetOf(*scroll, item.second, fraction);
             if (!offset) continue;
             double gap = std::abs(*offset - now);
             if (gap < distance) {
@@ -261,32 +653,39 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         }
         return best;
     };
-    auto scrollTo = [scroll, center](xaml::UIElement const& item, bool smooth) {
-        auto offset = OffsetOf(*scroll, item, center);
+    auto scrollTo = [scroll, fraction](xaml::UIElement const& item, bool smooth) {
+        auto offset = OffsetOf(*scroll, item, fraction);
         if (!offset) return;
+        scroll->byCode = true;
         if (scroll->horizontal) scroll->viewer.ChangeView(*offset, nullptr, nullptr, !smooth || Reduced());
         else scroll->viewer.ChangeView(nullptr, *offset, nullptr, !smooth || Reduced());
     };
-    // Scrolling that ends between items comes to rest on the nearest one.
+    // Scrolling that ends between items comes to rest on the nearest one,
+    // unless the position stands at an anchor of its own: then the view
+    // rests where the person leaves it.
     auto travelling = std::make_shared<winrt::weak_ref<xaml::UIElement>>();
     auto placed = std::make_shared<bool>(false);
     auto position = props.position;
     bool nudges = props.arrival && std::string_view(props.arrival) == "nudge";
     auto nudgeMotion = props.nudgeMotion;
-    scroller.ViewChanged([scroll, nearest, scrollTo, travelling, placed, position, ctx, nudges, nudgeMotion, center](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
+    scroller.ViewChanged([scroll, nearest, scrollTo, travelling, placed, position, ctx, nudges, nudgeMotion, fraction, snaps = props.snap || !props.anchor](auto&&, controls::ScrollViewerViewChangedEventArgs const& args) {
         if (args.IsIntermediate() || !*placed) return;
         auto item = nearest();
         if (!item) return;
         double now = scroll->horizontal ? scroll->viewer.HorizontalOffset() : scroll->viewer.VerticalOffset();
-        auto offset = OffsetOf(*scroll, item->second, center);
-        if (offset && std::abs(*offset - now) > 1) {
-            scrollTo(item->second, true);
-            return;
-        }
         if (auto arrived = travelling->get()) {
-            // A scroll the field asked for has arrived.
+            // A scroll the field asked for: until it reaches its item, the
+            // view goes on to it (a row built only now has the view stand
+            // near it first) rather than resting on another.
+            auto at = OffsetOf(*scroll, arrived, fraction);
+            if (at && std::abs(*at - now) > 1) return;
             *travelling = nullptr;
             if (nudges && arrived == item->second) NudgeOnce(arrived, nudgeMotion);
+            return;
+        }
+        auto offset = OffsetOf(*scroll, item->second, fraction);
+        if (snaps && offset && std::abs(*offset - now) > 1) {
+            scrollTo(item->second, true);
             return;
         }
         if (position && R::KeyText(ctx.Peek(*position)) != item->first) {
@@ -310,6 +709,15 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
                 if (at && at->first == key) return 0;
                 *travelling = winrt::make_weak(item);
                 scrollTo(item, true);
+                return 0;
+            }
+            // A row of a grid not built yet: built near the view, then
+            // scrolled to once it is laid out.
+            if (auto item = RevealItem(*scroll, key)) {
+                *travelling = winrt::make_weak(item);
+                Host::After(std::chrono::milliseconds(40), [scrollTo, weak = winrt::make_weak(item)] {
+                    if (auto item = weak.get()) scrollTo(item, true);
+                });
             }
             return 0;
         });
@@ -323,9 +731,20 @@ inline void ScrollView(Parent const& p, Ctx const& ctx, ScrollProps props, Build
         padding();
         Host::Post([scroll, position, ctx, placed, scrollTo] {
             auto key = R::KeyText(ctx.Peek(*position));
+            bool found = false;
             for (auto const& [itemKey, item] : ItemsOf(*scroll))
-                if (itemKey == key) scrollTo(item, false);
-            Host::After(std::chrono::milliseconds(100), [placed] { *placed = true; });
+                if (itemKey == key) {
+                    scrollTo(item, false);
+                    found = true;
+                }
+            if (!found) {
+                if (auto item = RevealItem(*scroll, key)) {
+                    Host::After(std::chrono::milliseconds(40), [scrollTo, weak = winrt::make_weak(item)] {
+                        if (auto item = weak.get()) scrollTo(item, false);
+                    });
+                }
+            }
+            Host::After(std::chrono::milliseconds(140), [placed] { *placed = true; });
         });
     });
 }
@@ -770,6 +1189,10 @@ struct PopoverButtonProps {
     StyleDef const* style = nullptr;
     Get current;
     std::function<void(Ctx const&, Value const&)> change;
+    /// `prominence: plain`: words without a background, as a plain button.
+    bool plain = false;
+    /// `font_size`: the size of the icon.
+    std::optional<double> iconSize;
 };
 
 /// A button that shows its children in a popover, such as a volume slider.
@@ -780,10 +1203,19 @@ inline void PopoverButton(Parent const& p, Ctx const& ctx, PopoverButtonProps pr
     controls::Button button;
     auto text = Bound(ctx, props.label);
     if (props.icon) {
-        button.Content(Icons::Icon(props.icon));
+        // As an `IconButton`: the icon with 10 on each side, no background
+        // until pointed at.
+        double size = props.iconSize.value_or(16);
+        button.Content(Icons::Icon(props.icon, size));
         Styles::MakeSubtle(button);
+        button.Width(size + 20);
+        button.Height(size + 20);
+        button.MinWidth(0);
+        button.MinHeight(0);
+        button.Padding(xaml::Thickness{0, 0, 0, 0});
     } else {
         button.Content(TextOf(text));
+        if (props.plain) Styles::MakeSubtle(button);
     }
     if (text)
         Reactive::Run([button, text] {

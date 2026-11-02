@@ -24,7 +24,11 @@ impl Generator<'_> {
         if let Some(height) = sp("line_height") {
             args.push(format!("lineHeight = {height}"));
         }
-        format!("bernTextStyle({})", args.join(", "))
+        let style = format!("bernTextStyle({})", args.join(", "));
+        match element.expr("bold") {
+            Some(bold) => format!("{style}.bernBold({})", self.expr(bold)),
+            None => style,
+        }
     }
 
     pub(super) fn text_view(&self, out: &mut Out, element: &Element) {
@@ -90,6 +94,13 @@ impl Generator<'_> {
         }
         if let Some(aspect) = element.number("aspect") {
             extra.push_str(&format!(", aspect = {}", float(aspect)));
+        }
+        // Without a size it covers the room its container gives.
+        if ["width", "height", "aspect"]
+            .iter()
+            .all(|name| element.prop(name).is_none())
+        {
+            extra.push_str(", covers = true");
         }
         // A picture the engine gives, read at run time.
         if let Some(source) = element.expr("source") {

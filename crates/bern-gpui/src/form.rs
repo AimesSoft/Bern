@@ -24,8 +24,10 @@ pub struct FormProps {
     pub style: Option<&'static Style>,
 }
 
-/// `Form`: sections down a page that scrolls, under the page's title.
+/// `Form`: sections down a page that scrolls, under the page's title. In a
+/// `Modal` there is no page, and the title is not shown, as on the web.
 pub fn form(c: &Ctx, props: FormProps, title: Option<String>, children: Vec<El>) -> El {
+    let title = title.filter(|_| !c.in_modal_content());
     let element = div()
         .id(c.element_id("form"))
         .flex()
@@ -47,7 +49,7 @@ pub fn form(c: &Ctx, props: FormProps, title: Option<String>, children: Vec<El>)
         .flex_col()
         .size_full()
         .child(element);
-    c.grow().apply(element).into_any_element()
+    c.faded(c.grow().apply(element)).into_any_element()
 }
 
 /// How a `Section` shows its rows.

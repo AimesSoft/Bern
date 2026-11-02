@@ -105,6 +105,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -134,8 +136,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -145,6 +151,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -243,6 +250,9 @@ object BernIcons {
     private val palette by lazy {
         icon("Palette", "M12,3c-4.97,0 -9,4.03 -9,9s4.03,9 9,9c0.83,0 1.5,-0.67 1.5,-1.5 0,-0.39 -0.15,-0.74 -0.39,-1.01 -0.23,-0.26 -0.38,-0.61 -0.38,-0.99 0,-0.83 0.67,-1.5 1.5,-1.5H16c2.76,0 5,-2.24 5,-5 0,-4.42 -4.03,-8 -9,-8zM6.5,12c-0.83,0 -1.5,-0.67 -1.5,-1.5S5.67,9 6.5,9 8,9.67 8,10.5 7.33,12 6.5,12zM9.5,8C8.67,8 8,7.33 8,6.5S8.67,5 9.5,5s1.5,0.67 1.5,1.5S10.33,8 9.5,8zM14.5,8c-0.83,0 -1.5,-0.67 -1.5,-1.5S13.67,5 14.5,5s1.5,0.67 1.5,1.5S15.33,8 14.5,8zM17.5,12c-0.83,0 -1.5,-0.67 -1.5,-1.5S16.67,9 17.5,9s1.5,0.67 1.5,1.5 -0.67,1.5 -1.5,1.5z")
     }
+    private val history by lazy {
+        icon("History", "M13,3c-4.97,0 -9,4.03 -9,9L1,12l3.89,3.89 0.07,0.14L9,12L6,12c0,-3.87 3.13,-7 7,-7s7,3.13 7,7 -3.13,7 -7,7c-1.93,0 -3.68,-0.79 -4.94,-2.06l-1.42,1.42C8.27,19.99 10.51,21 13,21c4.97,0 9,-4.03 9,-9s-4.03,-9 -9,-9zM12,8v5l4.28,2.54 0.72,-1.21 -3.5,-2.08L13.5,8L12,8z")
+    }
     private val download by lazy {
         icon("Download", "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z")
     }
@@ -317,6 +327,54 @@ object BernIcons {
     }
     private val skipPrevious by lazy { icon("SkipPrevious", "M6,6h2v12L6,18zM9.5,12l8.5,6L18,6z") }
     private val skipNext by lazy { icon("SkipNext", "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z") }
+    private val fastRewind by lazy { icon("FastRewind", "M11,18V6l-8.5,6 8.5,6zM11.5,12l8.5,6V6l-8.5,6z") }
+    private val fastForward by lazy { icon("FastForward", "M4,18l8.5,-6L4,6v12zM13,6v12l8.5,-6L13,6z") }
+    private val barChart by lazy { icon("BarChart", "M5,9.2h3V19H5zM10.6,5h2.8v14h-2.8zM16.2,13H19v6h-2.8z") }
+    private val smartphone by lazy {
+        icon("Smartphone", "M17,1.01L7,1c-1.1,0 -2,0.9 -2,2v18c0,1.1 0.9,2 2,2h10c1.1,0 2,-0.9 2,-2V3c0,-1.1 -0.9,-1.99 -2,-1.99zM17,19H7V5h10v14z")
+    }
+    private val qrCode by lazy {
+        icon(
+            "QrCode",
+            "M3,11h8V3H3V11zM5,5h4v4H5V5z",
+            "M3,21h8v-8H3V21zM5,15h4v4H5V15z",
+            "M13,3v8h8V3H13zM19,9h-4V5h4V9z",
+            "M19,19h2v2h-2zM13,13h2v2h-2zM15,15h2v2h-2zM13,17h2v2h-2zM15,19h2v2h-2zM17,17h2v2h-2zM17,13h2v2h-2zM19,15h2v2h-2z",
+        )
+    }
+    private val qrCodeScanner by lazy {
+        icon(
+            "QrCodeScanner",
+            "M9.5,6.5v3h-3v-3H9.5M11,5H5v6h6V5L11,5zM9.5,14.5v3h-3v-3H9.5M11,13H5v6h6V13L11,13zM17.5,6.5v3h-3v-3H17.5M19,5h-6v6h6V5L19,5z",
+            "M13,13h1.5v1.5H13V13zM14.5,14.5H16V16h-1.5V14.5zM16,13h1.5v1.5H16V13zM13,16h1.5v1.5H13V16zM14.5,17.5H16V19h-1.5V17.5zM16,16h1.5v1.5H16V16zM17.5,14.5H19V16h-1.5V14.5zM17.5,17.5H19V19h-1.5V17.5z",
+            "M22,7h-2V4h-3V2h5V7zM22,22v-5h-2v3h-3v2H22zM2,22h5v-2H4v-3H2V22zM2,2v5h2V4h3V2H2z",
+        )
+    }
+    private val lyrics by lazy {
+        icon(
+            "Lyrics",
+            "M14,9c0,-2.04 1.24,-3.79 3,-4.57V4c0,-1.1 -0.9,-2 -2,-2H4C2.9,2 2.01,2.9 2.01,4L2,22l4,-4h9c1.1,0 2,-0.9 2,-2v-2.42C15.24,12.8 14,11.05 14,9zM10,14H6v-2h4v2zM13,11H6V9h7v2zM13,8H6V6h7v2z",
+            "M20,6.18C19.69,6.07 19.35,6 19,6c-1.66,0 -3,1.34 -3,3c0,1.66 1.34,3 3,3s3,-1.34 3,-3V3h2V1h-4v5.18z",
+        )
+    }
+    private val lyricsOutlined by lazy {
+        icon(
+            "LyricsOutlined",
+            "M6,6h7v2H6zM6,12h4v2H6zM6,9h7v2H6z",
+            "M15,11.97V16H6l-2,2V4h11v2.03c0.52,-0.69 1.2,-1.25 2,-1.6V4c0,-1.1 -0.9,-2 -2,-2H4C2.9,2 2.01,2.9 2.01,4L2,22l4,-4h9c1.1,0 2,-0.9 2,-2v-2.42C16.2,13.22 15.52,12.66 15,11.97z",
+            "M20,6.18C19.69,6.07 19.35,6 19,6c-1.66,0 -3,1.34 -3,3c0,1.66 1.34,3 3,3s3,-1.34 3,-3V3h2V1h-4v5.18z",
+        )
+    }
+    private val logout by lazy {
+        icon("Logout", "M17,7l-1.41,1.41L18.17,11H8v2h10.17l-2.58,2.58L17,17l5,-5zM4,5h8V3H4c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h8v-2H4V5z")
+    }
+    private val repeatAll by lazy { icon("Repeat", "M7,7h10v3l4,-4 -4,-4v3H5v6h2V7zM17,17H7v-3l-4,4 4,4v-3h12v-6h-2v4z") }
+    private val repeatOne by lazy {
+        icon("RepeatOne", "M7,7h10v3l4,-4 -4,-4v3H5v6h2V7zM17,17H7v-3l-4,4 4,4v-3h12v-6h-2v4zM13,15V9h-1l-2,1v1h1.5v4H13z")
+    }
+    private val shuffle by lazy {
+        icon("Shuffle", "M10.59,9.17L5.41,4 4,5.41l5.17,5.17 1.42,-1.41zM14.5,4l2.04,2.04L4,18.59 5.41,20 17.96,7.46 20,9.5V4h-5.5zM14.83,13.41l-1.41,1.41 3.13,3.13L14.5,20H20v-5.5l-2.04,2.04 -3.13,-3.13z")
+    }
     private val photoCamera by lazy {
         icon(
             "PhotoCamera",
@@ -620,7 +678,13 @@ fun BernIconButton(
     if (style == null) {
         material(modifier, null)
     } else {
-        BernStyledButton(style, enabled, modifier, onClick, material, content)
+        // A styled one with a diameter is that size both ways, the icon in
+        // its middle, so the style's corner can round it into a circle.
+        if (diameter != null) {
+            BernStyledButton(style.copy(padding = 0.0), enabled, modifier.size(diameter), onClick, material, content)
+        } else {
+            BernStyledButton(style, enabled, modifier, onClick, material, content)
+        }
     }
 }
 
@@ -975,16 +1039,57 @@ fun <T> BernPicker(
     /// An item of a `Flow`: at its own width, and chips without a label of
     /// their own are items of the flow.
     inFlow: Boolean = false,
+    /// In a row beside other views: at its own width, a menu as the chosen
+    /// option in words that open the others, as a setting's value at the
+    /// end of its row.
+    inRow: Boolean = false,
 ) {
+    val menu = style != "segmented" && style != "radio" && style != "inline" && style != "chips"
+    if (inRow && shape == null && menu) {
+        var expanded by remember { mutableStateOf(false) }
+        Box(modifier) {
+            // In the words' colors, not the accent: a choice, not an action.
+            TextButton(
+                onClick = { expanded = true },
+                contentPadding = PaddingValues(start = 12.dp, end = 4.dp),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                modifier = Modifier.semantics { contentDescription = label },
+            ) {
+                Text(optionLabel(selected), maxLines = 1)
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                for (option in options) {
+                    DropdownMenuItem(
+                        text = { Text(optionLabel(option)) },
+                        leadingIcon = if (option == selected) {
+                            { Icon(Icons.Filled.Check, contentDescription = null) }
+                        } else {
+                            null
+                        },
+                        onClick = {
+                            onSelect(option)
+                            expanded = false
+                        },
+                    )
+                }
+            }
+        }
+        return
+    }
     // A capsule of its own height: the chosen option on a tonal button,
     // opening a menu of the others.
-    if (shape != null && style != "segmented" && style != "radio" && style != "inline" && style != "chips") {
+    if (shape != null && menu) {
         var expanded by remember { mutableStateOf(false) }
         Box(modifier) {
             FilledTonalButton(
                 onClick = { expanded = true },
                 shape = CircleShape,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    contentColor = MaterialTheme.colorScheme.onSurface,
+                ),
                 modifier = (if (shape.height != null) Modifier.height(shape.height) else Modifier)
                     .semantics { contentDescription = label },
             ) {
@@ -1013,7 +1118,7 @@ fun <T> BernPicker(
     when (style) {
         "segmented" -> Column(modifier.semantics { if (labelHidden) contentDescription = label }) {
             if (!labelHidden) Text(label, style = MaterialTheme.typography.bodyMedium)
-            SingleChoiceSegmentedButtonRow(if (inFlow) Modifier else Modifier.fillMaxWidth()) {
+            SingleChoiceSegmentedButtonRow(if (inFlow || inRow) Modifier else Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, option ->
                     SegmentedButton(
                         selected = option == selected,
@@ -1098,14 +1203,14 @@ fun <T> BernPicker(
 }
 
 @Composable
-fun BernLanguagePicker(label: String, target: String) {
+fun BernLanguagePicker(label: String, target: String, labelHidden: Boolean = false, inRow: Boolean = false) {
     BernControl(
         target, "picker", label,
         actions = BernControlActions(select = { BernLanguage.select(it) }, value = { BernLanguage.current }),
     )
     BernPicker(
         label, BernLanguage.supported, BernLanguage.current, { BernLanguage.autonym(it) },
-        { BernLanguage.select(it) }, "menu",
+        { BernLanguage.select(it) }, "menu", labelHidden = labelHidden, inRow = inRow,
     )
 }
 
@@ -1146,22 +1251,25 @@ fun BernImage(
     aspect: Float? = null,
     dark: String? = null,
     oneSize: Boolean = false,
+    covers: Boolean = false,
 ) {
     val shown = if (dark != null && bernDark()) dark else name
     val url = remember(shown) { BernPictures.resource(shown) }
-    val ratio = if (aspect == null && (width == null || height == null)) {
+    val ratio = if (!covers && aspect == null && (width == null || height == null)) {
         BernPictures.ratio(url) ?: return
     } else {
         null
     }
-    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize)
+    BernImageURL(url, label, width, height, fit, corner, template, aspect, ratio, twice = oneSize, covers = covers)
 }
 
 /// The frame of a picture: its declared sizes, the other side by `ratio`
-/// (a poster's 2:3 until the picture is read), or the container's width
-/// and `ratio`, and its rounded corners.
-fun bernPictureFrame(width: Dp?, height: Dp?, ratio: Float?, corner: Dp?): Modifier {
+/// (a poster's 2:3 until the picture is read), the container's width and
+/// `ratio`, or all the room the container gives (`covers`), and its rounded
+/// corners.
+fun bernPictureFrame(width: Dp?, height: Dp?, ratio: Float?, corner: Dp?, covers: Boolean = false): Modifier {
     val frame = when {
+        covers -> Modifier.fillMaxSize()
         width != null && height != null -> Modifier.size(width, height)
         width != null -> Modifier.width(width).height(width / (ratio ?: (2f / 3f)))
         height != null -> Modifier.height(height).width(height * (ratio ?: (2f / 3f)))
@@ -1320,6 +1428,45 @@ fun BernMenuItem(label: String, icon: ImageVector?, enabled: Boolean, destructiv
     )
 }
 
+/// A button with a `ContextMenu`: a long press, or a secondary click with a
+/// mouse, opens the menu at the button. The press that opens it does not
+/// also press the button.
+@Composable
+fun BernContextMenu(menu: @Composable (dismiss: () -> Unit) -> Unit, content: @Composable () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.bernMenuPress { open = true }) {
+        content()
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) { menu { open = false } }
+    }
+}
+
+/// Runs `open` on a secondary click, or once a press has been held without
+/// moving; it sees the press before the views inside, and takes the rest of
+/// it from them.
+fun Modifier.bernMenuPress(open: () -> Unit): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+        if (currentEvent.buttons.isSecondaryPressed) {
+            currentEvent.changes.forEach { it.consume() }
+            open()
+            return@awaitEachGesture
+        }
+        val released = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+            while (true) {
+                val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed || (change.position - down.position).getDistance() > viewConfiguration.touchSlop) break
+            }
+        }
+        if (released == null) {
+            open()
+            do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                event.changes.forEach { it.consume() }
+            } while (event.changes.any { it.pressed })
+        }
+    }
+}
+
 // MARK: - Navigation
 
 /// A row that pushes a route. In a section's rows it is as tall as they
@@ -1346,7 +1493,7 @@ fun BernSplitView(
     sidebarWidth: Dp = 280.dp,
     header: (@Composable () -> Unit)? = null,
     sidebar: @Composable (showDetail: () -> Unit) -> Unit,
-    footer: (@Composable () -> Unit)? = null,
+    footer: (@Composable ColumnScope.() -> Unit)? = null,
     detail: @Composable () -> Unit,
 ) {
     var showingDetail by showingDetail
@@ -1412,36 +1559,94 @@ fun BernSidebarItem(label: String, icon: ImageVector?, selected: Boolean, badge:
     )
 }
 
-/// Tab pages above a navigation bar.
+/// Whether the tab bar floats as a capsule (`Tabs(bar: floating)`).
+val LocalBernFloatingTabs = androidx.compose.runtime.compositionLocalOf { false }
+
+/// Where floating tabs and their accessory begin, from the top of the
+/// window, in pixels: what scrolls under them needs that much more room
+/// at its end.
+val LocalBernBarTop = androidx.compose.runtime.compositionLocalOf<androidx.compose.runtime.State<Float>?> { null }
+
+/// Tab pages above a navigation bar; `floating`, the bar a capsule clear
+/// of the screen's edges, the accessory a capsule above it, as on iOS.
 @Composable
 fun BernTabs(
+    floating: Boolean = false,
     content: @Composable () -> Unit,
     accessory: (@Composable () -> Unit)? = null,
     bar: @Composable RowScope.() -> Unit,
 ) {
-    Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth()) { content() }
-        accessory?.invoke()
-        NavigationBar(content = bar)
+    if (floating) {
+        // The pages run under the floating bars to the screen's bottom, as
+        // under iOS's; a scroll view they cover ends with room for them.
+        val barTop = remember { mutableFloatStateOf(Float.POSITIVE_INFINITY) }
+        // The window keeps its content above the system's navigation bar;
+        // here the pages reach under it, to the screen's bottom edge, and
+        // the bars stand above it.
+        val below = LocalBernBarsPadding.current.calculateBottomPadding()
+        CompositionLocalProvider(LocalBernFloatingTabs provides true, LocalBernBarTop provides barTop) {
+            Box(
+                Modifier.fillMaxSize().layout { measurable, constraints ->
+                    val extra = below.roundToPx()
+                    val tall = if (constraints.hasBoundedHeight) constraints.maxHeight + extra else constraints.maxHeight
+                    val placeable = measurable.measure(constraints.copy(minHeight = tall, maxHeight = tall))
+                    layout(placeable.width, constraints.maxHeight) { placeable.place(0, 0) }
+                },
+            ) {
+                Box(Modifier.fillMaxSize()) { content() }
+                Column(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .onGloballyPositioned { barTop.floatValue = it.boundsInRoot().top },
+                ) {
+                    accessory?.invoke()
+                    Surface(
+                        modifier = Modifier
+                            .navigationBarsPadding()
+                            .padding(bottom = below)
+                            .padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 10.dp)
+                            .fillMaxWidth()
+                            .height(64.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 3.dp,
+                        shadowElevation = 6.dp,
+                    ) {
+                        Row(Modifier.fillMaxSize().padding(4.dp), verticalAlignment = Alignment.CenterVertically, content = bar)
+                    }
+                }
+            }
+        }
+    } else {
+        Column(Modifier.fillMaxSize()) {
+            Box(Modifier.weight(1f).fillMaxWidth()) { content() }
+            accessory?.invoke()
+            NavigationBar(content = bar)
+        }
     }
 }
 
 /// `TabAccessory`: a bar on a raised surface above the navigation bar,
-/// as a player shows what is playing over every page.
+/// as a player shows what is playing over every page; a capsule over a
+/// floating bar.
 @Composable
 fun BernTabAccessory(content: @Composable () -> Unit) {
+    val floating = LocalBernFloatingTabs.current
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = if (floating) 20.dp else 12.dp, vertical = 6.dp),
+        shape = if (floating) CircleShape else RoundedCornerShape(24.dp),
+        color = if (floating) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface,
         tonalElevation = 3.dp,
-        shadowElevation = 2.dp,
+        shadowElevation = if (floating) 6.dp else 2.dp,
     ) {
-        Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.CenterStart) { content() }
+        Box(Modifier.heightIn(min = if (floating) 56.dp else 48.dp).padding(horizontal = if (floating) 8.dp else 0.dp), contentAlignment = Alignment.CenterStart) { content() }
     }
 }
 
 /// One tab of the navigation bar. `iconOnly` (`Tab(display: icon)`) shows
-/// the icon alone, the label its content description.
+/// the icon alone, the label its content description. On a floating bar
+/// the chosen tab sits on a capsule of its own, in the accent.
 @Composable
 fun RowScope.BernTabItem(
     label: String,
@@ -1450,6 +1655,36 @@ fun RowScope.BernTabItem(
     iconOnly: Boolean = false,
     onClick: () -> Unit,
 ) {
+    if (LocalBernFloatingTabs.current) {
+        val tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+        val backing by androidx.compose.animation.animateColorAsState(
+            if (selected) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f) else Color.Transparent,
+            label = "tab",
+        )
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .clip(CircleShape)
+                .background(backing)
+                .clickable(role = androidx.compose.ui.semantics.Role.Tab, onClick = onClick)
+                .semantics { this.selected = selected; if (iconOnly) contentDescription = label },
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(icon ?: BernIcons.get(""), contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            if (!iconOnly) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tint,
+                    fontWeight = if (selected) androidx.compose.ui.text.font.FontWeight.Bold else null,
+                    maxLines = 1,
+                )
+            }
+        }
+        return
+    }
     NavigationBarItem(
         selected = selected,
         onClick = onClick,

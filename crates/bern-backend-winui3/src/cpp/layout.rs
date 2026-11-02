@@ -36,29 +36,73 @@ impl Generator<'_> {
     }
 
     pub(super) fn grid(&self, out: &mut Out, element: &Element) {
-        self.container(
-            out,
-            element,
-            &format!(
-                "B::Grid(p, c, {}, ",
-                designated(&[
-                    ("minWidth", self.len(element, "min_width")),
-                    ("gap", self.len(element, "gap")),
-                    ("padding", self.len(element, "padding")),
-                    ("animate", Self::animate(element)),
-                    ("reflow", Self::reflow(element)),
-                    ("rowGap", self.len(element, "row_gap")),
-                    ("paddingX", self.len(element, "padding_x")),
-                    ("paddingY", self.len(element, "padding_y")),
-                    ("cellRatio", Self::number(element, "cell_ratio")),
-                    ("cellExtra", self.len(element, "cell_extra")),
-                ])
-            ),
-        );
+        let props = |stagger: Option<String>| {
+            designated(&[
+                ("minWidth", self.len(element, "min_width")),
+                ("gap", self.len(element, "gap")),
+                ("padding", self.len(element, "padding")),
+                ("animate", Self::animate(element)),
+                ("reflow", Self::reflow(element)),
+                // A list from a column without a gap keeps the column's 8.
+                (
+                    "rowGap",
+                    self.len(element, "row_gap").or_else(|| {
+                        bern_ir::lowered_list_align(element).map(|_| "B::Len(8.0)".to_string())
+                    }),
+                ),
+                ("paddingX", self.len(element, "padding_x")),
+                ("paddingY", self.len(element, "padding_y")),
+                ("cellRatio", Self::number(element, "cell_ratio")),
+                ("cellExtra", self.len(element, "cell_extra")),
+                ("stagger", stagger),
+            ])
+        };
+        // A grid of one `ForEach` builds, in a vertical scroll view, only
+        // the rows near what is in sight.
+        if let Some(each) = bern_ir::lazy_grid_items(element)
+            && let (Some(items), Some(template), Some(Prop::Key { field, .. })) =
+                (each.expr("items"), &each.template, each.prop("key"))
+        {
+            // A list lowered from a column keeps the column's gap (8 when
+            // it gives none) and places its rows as the column would.
+            let lowered = bern_ir::lowered_list_align(element);
+            let rows = designated(&[
+                ("items", Some(self.getter(items))),
+                ("key", Some(field.to_string())),
+                ("variable", Some(string(&template.var))),
+                ("stagger", Self::number(each, "stagger")),
+                ("reflow", Self::reflow(each)),
+                ("align", lowered.map(string)),
+            ]);
+            self.call(
+                out,
+                &format!(
+                    "B::LazyGrid(p, c, {}, {rows}, ",
+                    props(Self::number(element, "stagger"))
+                ),
+                &each.children,
+            );
+            return;
+        }
+        self.container(out, element, &format!("B::Grid(p, c, {}, ", props(None)));
     }
 
     /// `Stack`: its children layered over one another.
     pub(super) fn layers(&self, out: &mut Out, element: &Element) {
+        let under_bars = element.keyword("under_bars") == Some("true");
+        // A layer under the bars with controls of its own is a page over the
+        // window, as on macOS; a backdrop of pictures and fills is not.
+        let mut controls = false;
+        if under_bars {
+            for child in &element.children {
+                child.walk(&mut |node| {
+                    if let bern_ir::Node::Element(inner) = node {
+                        controls |= bern_ir::spec::component(&inner.kind)
+                            .is_some_and(|spec| spec.interactive);
+                    }
+                });
+            }
+        }
         self.container(
             out,
             element,
@@ -72,10 +116,8 @@ impl Generator<'_> {
                     ("reflow", Self::reflow(element)),
                     ("style", self.style("Stack", element.keyword("variant"))),
                     ("enabled", self.enabled(element)),
-                    (
-                        "underBars",
-                        (element.keyword("under_bars") == Some("true")).then(|| "true".into()),
-                    ),
+                    ("underBars", under_bars.then(|| "true".into())),
+                    ("covers", controls.then(|| "true".into())),
                 ])
             ),
         );
@@ -155,7 +197,17 @@ impl Generator<'_> {
             element,
             &format!(
                 "B::Flow(p, c, {}, ",
-                designated(&[("gap", self.len(element, "gap"))])
+                designated(&[
+                    ("gap", self.len(element, "gap")),
+                    (
+                        "align",
+                        match element.keyword("align") {
+                            Some("center") => Some("0.5f".into()),
+                            Some("trailing") => Some("1.0f".into()),
+                            _ => None,
+                        },
+                    ),
+                ])
             ),
         );
     }
@@ -272,6 +324,8 @@ impl Generator<'_> {
                     ),
                     ("openAt", Self::number(element, "open_at")),
                     ("openCenter", self.len(element, "open_center")),
+                    ("anchor", Self::number(element, "anchor")),
+                    ("browsing", self.field(element, "browsing")),
                 ])
             ),
             &element.children,

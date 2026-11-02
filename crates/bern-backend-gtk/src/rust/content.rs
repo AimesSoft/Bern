@@ -8,7 +8,7 @@ impl Generator<'_> {
     /// A `Text`, with its `mark` as a role color.
     pub(super) fn text_element(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "b::Text(p, c, b::TextProps {{ content: {}, style: {}, emphasis: {}, color: {}, mark: {}, lines: {}, font_size: {}, line_height: {}, markdown: {} }});",
+            "b::Text(p, c, b::TextProps {{ content: {}, style: {}, emphasis: {}, color: {}, mark: {}, lines: {}, font_size: {}, line_height: {}, markdown: {}, bold: {}, animate: {} }});",
             some(self.text_prop(element, "content")),
             Self::keyword(element, "style"),
             Self::keyword(element, "emphasis"),
@@ -22,6 +22,8 @@ impl Generator<'_> {
             some(self.num(element, "font_size")),
             some(self.num(element, "line_height")),
             element.keyword("markdown") == Some("true"),
+            some(element.expr("bold").map(|bold| self.getter(bold))),
+            self.animate(element),
         ));
     }
 

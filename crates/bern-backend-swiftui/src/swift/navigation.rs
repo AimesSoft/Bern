@@ -48,6 +48,7 @@ impl Generator<'_> {
         }
         self.sidebar_nodes(out, &sidebar.children, rows.as_deref());
         out.close("}");
+        out.line(".bernSidebarToggleFollowsCover()");
         if let Some(rows) = &rows
             && !list_selects
         {

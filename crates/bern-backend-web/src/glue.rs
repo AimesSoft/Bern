@@ -57,15 +57,13 @@ path = "src/lib.rs"
 {engine}{modules}
 [workspace]
 
-[profile.release]
-opt-level = "s"
-{release}"#,
+{profiles}"#,
         id = app.app.id.replace('_', "-"),
         version = app.app.version,
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         modules = module_dependencies(context, !remote),
-        release = bern_target_api::glue::RELEASE_PROFILE,
+        profiles = bern_target_api::glue::profiles(context, "opt-level = \"s\"\n"),
     )
 }
 
@@ -240,8 +238,7 @@ bern-adapter-mcp = {{ {mcp} }}
 {protocol} = {{ path = "{protocol_path}" }}
 {modules}
 [workspace]
-[profile.release]
-{release}"#,
+{profiles}"#,
         program = program(app),
         version = app.app.version,
         cli = context.framework.dependency("bern-adapter-cli"),
@@ -249,7 +246,7 @@ bern-adapter-mcp = {{ {mcp} }}
         protocol = context.protocol_package,
         protocol_path = path(&context.protocol_path),
         modules = module_dependencies(context, false),
-        release = bern_target_api::glue::RELEASE_PROFILE
+        profiles = bern_target_api::glue::profiles(context, "")
     )
 }
 
@@ -289,8 +286,7 @@ bern-adapter-mcp = {{ {mcp} }}
 {modules}
 [workspace]
 
-[profile.release]
-{release}"#,
+{profiles}"#,
         id = app.app.id.replace('_', "-"),
         version = app.app.version,
         command = bern("bern-command"),
@@ -305,7 +301,7 @@ bern-adapter-mcp = {{ {mcp} }}
         engine = context.engine_package,
         engine_path = path(&context.engine_path),
         modules = module_dependencies(context, true),
-        release = bern_target_api::glue::RELEASE_PROFILE,
+        profiles = bern_target_api::glue::profiles(context, ""),
     )
 }
 

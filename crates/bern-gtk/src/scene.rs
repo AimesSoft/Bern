@@ -847,6 +847,9 @@ mod flow {
     #[derive(Default)]
     pub struct Flow {
         pub gap: Cell<f64>,
+        /// Where a line without a spacer stands in the room left on it:
+        /// 0 at the leading edge, 0.5 centred, 1 at the trailing edge.
+        pub align: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -893,7 +896,7 @@ mod flow {
                     spacer,
                 });
             }
-            let (frames, height) = flow_lines(&items, width, self.gap.get());
+            let (frames, height) = flow_lines(&items, width, self.gap.get(), self.align.get());
             let placed = widgets
                 .into_iter()
                 .zip(frames)
@@ -956,12 +959,14 @@ struct FlowItem {
 
 /// Each item's frame (x, y, width, height) in lines `width` wide, and the
 /// height of them all: lines broken at the width, a spacer taking no room
-/// there; then the spacers of a line share the room left on it, and each
-/// item is centred in its line's height.
+/// there; then the spacers of a line share the room left on it, a line
+/// without one stands at `align` of the room left, and each item is centred
+/// in its line's height.
 fn flow_lines(
     items: &[FlowItem],
     width: Option<f64>,
     gap: f64,
+    align: f64,
 ) -> (Vec<(f64, f64, f64, f64)>, f64) {
     let mut lines: Vec<Vec<usize>> = vec![Vec::new()];
     let mut x = 0.0;
@@ -996,7 +1001,10 @@ fn flow_lines(
             Some(width) if spacers > 0 => (width - used).max(0.0) / spacers as f64,
             _ => 0.0,
         };
-        let mut at = 0.0;
+        let mut at = match width {
+            Some(width) if spacers == 0 => (width - used).max(0.0) * align,
+            _ => 0.0,
+        };
         for &index in line {
             let item = items[index];
             let (w, h) = if item.spacer {
@@ -1023,6 +1031,8 @@ glib::wrapper! {
 #[derive(Default)]
 pub struct FlowProps {
     pub gap: Option<Num>,
+    /// 0.5 for `align: center`, 1 for `trailing`.
+    pub align: f64,
 }
 
 /// A flow whose items are `gap` apart, filling the width it is given.
@@ -1036,6 +1046,7 @@ pub(crate) fn flow_of(gap: f64) -> FlowWidget {
 #[allow(non_snake_case)]
 pub fn Flow(p: &Parent, ctx: &Ctx, props: FlowProps, children: Build) {
     let flow = flow_of(8.0);
+    flow.imp().align.set(props.align);
     if let Some(gap) = &props.gap {
         let spaced = flow.clone();
         bind_number(ctx, gap, None, &flow, move |value| {
@@ -1552,7 +1563,7 @@ mod tests {
 
     #[test]
     fn a_spacer_takes_the_rest_of_its_line_and_the_others_wrap() {
-        let (frames, height) = flow_lines(&strip(), Some(358.0), 10.0);
+        let (frames, height) = flow_lines(&strip(), Some(358.0), 10.0, 0.0);
         // The first line ends with three chips at its end, the spacer
         // taking the room before them; the other two start the next line.
         assert_eq!(frames[1], (133.0, 0.0, 33.0, 32.0));
@@ -1572,19 +1583,29 @@ mod tests {
 
     #[test]
     fn a_wide_line_keeps_everything_on_it() {
-        let (frames, height) = flow_lines(&strip(), Some(705.0), 10.0);
+        let (frames, height) = flow_lines(&strip(), Some(705.0), 10.0, 0.0);
         assert_eq!(frames[1].2, 705.0 - 123.0 - 5.0 * 54.0 - 6.0 * 10.0);
         assert_eq!(frames[6].0 + frames[6].2, 705.0);
         assert_eq!(height, 32.0);
     }
 
     #[test]
+    fn a_centred_line_shares_the_room_left_on_both_sides() {
+        let items = [item(100.0, 30.0), item(100.0, 30.0), item(100.0, 30.0)];
+        let (frames, height) = flow_lines(&items, Some(250.0), 10.0, 0.5);
+        // Two fit on the first line, 210 of 250; the third stands alone.
+        assert_eq!((frames[0].0, frames[1].0), (20.0, 130.0));
+        assert_eq!((frames[2].0, frames[2].1), (75.0, 40.0));
+        assert_eq!(height, 70.0);
+    }
+
+    #[test]
     fn without_a_width_a_spacer_takes_nothing() {
-        let (frames, height) = flow_lines(&strip(), None, 10.0);
+        let (frames, height) = flow_lines(&strip(), None, 10.0, 0.0);
         assert_eq!(frames[1].2, 0.0);
         assert_eq!(frames[6].0, 123.0 + 10.0 + 10.0 + 4.0 * 64.0);
         assert_eq!(height, 32.0);
-        assert_eq!(flow_lines(&[], Some(100.0), 10.0), (vec![], 0.0));
+        assert_eq!(flow_lines(&[], Some(100.0), 10.0, 0.0), (vec![], 0.0));
     }
 
     #[test]

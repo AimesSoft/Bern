@@ -372,6 +372,10 @@ pub struct AppInfo {
     /// installers and package managers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publisher: Option<String>,
+    /// `[app].files_folder`: on iOS the application's Documents folder shows
+    /// in the Files app, for files the user puts there for it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub files_folder: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -901,6 +905,29 @@ impl Element {
         self.props.get(name)
     }
 
+    /// The items of its `ContextMenu`, dividers among them, if it has one.
+    pub fn context_menu(&self) -> Option<Vec<&Element>> {
+        self.children.iter().find_map(|node| match node {
+            Node::Element(menu) if menu.kind == "ContextMenu" => Some(
+                menu.children
+                    .iter()
+                    .filter_map(|node| match node {
+                        Node::Element(item) => Some(item),
+                        _ => None,
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        })
+    }
+
+    /// Whether it has children to show besides a `ContextMenu`.
+    pub fn has_content(&self) -> bool {
+        self.children
+            .iter()
+            .any(|node| !matches!(node, Node::Element(menu) if menu.kind == "ContextMenu"))
+    }
+
     pub fn keyword(&self, name: &str) -> Option<&str> {
         match self.props.get(name) {
             Some(Prop::Keyword { value }) => Some(value),
@@ -1246,6 +1273,318 @@ pub fn leads_row(node: &Node, next: Option<&Node>) -> bool {
     words && matches!(next, Some(Node::Element(spacer)) if spacer.kind == "Spacer")
 }
 
+/// The `ForEach` of a grid that, standing in a vertical scroll view, builds
+/// only the rows near what is in sight: a grid whose one child is a keyed
+/// `ForEach`, not laid out as masonry. Every target builds such a grid
+/// lazily; anywhere else it builds all its rows.
+pub fn lazy_grid_items(grid: &Element) -> Option<&Element> {
+    if grid.kind != "Grid" || grid.keyword("masonry") == Some("true") {
+        return None;
+    }
+    match grid.children.as_slice() {
+        [Node::Element(each)]
+            if each.kind == "ForEach"
+                && each.template.is_some()
+                && each.expr("items").is_some()
+                && matches!(each.prop("key"), Some(Prop::Key { .. })) =>
+        {
+            Some(each)
+        }
+        _ => None,
+    }
+}
+
+/// The `align` a list lowered by [`lower_lists`] keeps: how its rows
+/// stand across it, as in the column it came from.
+pub fn lowered_list_align(grid: &Element) -> Option<&str> {
+    (grid.kind == "Grid")
+        .then(|| grid.keyword("align"))
+        .flatten()
+}
+
+/// Whether `nodes`, the children of a column, hold a list lowered by
+/// [`lower_lists`], directly or in their conditions.
+pub fn holds_lowered_list(nodes: &[Node]) -> bool {
+    nodes.iter().any(|node| match node {
+        Node::Element(element) => lowered_list_align(element).is_some(),
+        Node::If(node) => {
+            node.branches
+                .iter()
+                .any(|(_, body)| holds_lowered_list(body))
+                || holds_lowered_list(&node.otherwise)
+        }
+        Node::IfLet(node) => holds_lowered_list(&node.then) || holds_lowered_list(&node.otherwise),
+        Node::Match(node) => node.arms.iter().any(|arm| holds_lowered_list(&arm.body)),
+        Node::Component(_) => false,
+    })
+}
+
+/// A list in a vertical scroll view builds only the rows near what is in
+/// sight: a keyed `ForEach` among the children of a `Column` there (through
+/// conditions) becomes a one-column grid of its rows, which every target
+/// builds lazily (see [`lazy_grid_items`]). The grid keeps the column's
+/// look: `align` says how the rows stand across it, `row_gap` is the
+/// column's `gap` (absent when the column has none, for the target's own),
+/// it staggers as the column does, and with no rows it takes no place. A
+/// component counts as in a scroll view when every place that shows it is.
+/// Columns that `reflow` keep building all their rows, since their rows
+/// slide among each other.
+pub fn lower_lists(app: &mut Application) {
+    let mut windows: Vec<&mut Node> = app
+        .windows
+        .windows
+        .iter_mut()
+        .map(|window| &mut window.content)
+        .collect();
+    let mut components: Vec<(&str, &mut Node)> = app
+        .components
+        .iter_mut()
+        .map(|component| (component.name.as_str(), &mut component.body))
+        .collect();
+    lower_bodies(&mut windows, &mut components);
+}
+
+/// [`lower_lists`] over the contents of the windows and the bodies of the
+/// components, by name.
+fn lower_bodies(windows: &mut [&mut Node], components: &mut [(&str, &mut Node)]) {
+    // Which components are only ever shown inside a vertical scroll view,
+    // found by going over the tree until nothing changes.
+    let mut scrolled: BTreeMap<String, bool> = components
+        .iter()
+        .map(|(name, _)| (name.to_string(), true))
+        .collect();
+    loop {
+        let mut calls: BTreeMap<String, bool> = BTreeMap::new();
+        let mut note = |name: &str, inside: bool| {
+            let entry = calls.entry(name.to_string()).or_insert(true);
+            *entry = *entry && inside;
+        };
+        for window in windows.iter() {
+            calls_in(window, false, &mut note);
+        }
+        for (name, body) in components.iter() {
+            calls_in(body, scrolled[*name], &mut note);
+        }
+        let next: BTreeMap<String, bool> = scrolled
+            .keys()
+            .map(|name| (name.clone(), calls.get(name).copied().unwrap_or(false)))
+            .collect();
+        if next == scrolled {
+            break;
+        }
+        scrolled = next;
+    }
+    for window in windows.iter_mut() {
+        lower_in(window, false);
+    }
+    for (name, body) in components.iter_mut() {
+        lower_in(body, scrolled[*name]);
+    }
+}
+
+/// Whether what an element contains scrolls with a vertical scroll view
+/// around it, given whether the element itself does.
+fn scrolls_inside(element: &Element, scrolling: bool) -> bool {
+    match element.kind.as_str() {
+        "ScrollView" => element.keyword("axis") != Some("horizontal"),
+        // A layer or page of its own, shown apart from the scroll view.
+        "Modal" | "PopoverButton" | "Menu" | "ContextMenu" | "Toolbar" | "SplitView"
+        | "Sidebar" | "Detail" | "Tabs" | "Tab" | "TabAccessory" | "Navigation" | "Destination"
+        | "Window" | "WindowSet" | "Form" | "Table" => false,
+        _ => scrolling,
+    }
+}
+
+fn calls_in(node: &Node, scrolling: bool, note: &mut impl FnMut(&str, bool)) {
+    match node {
+        Node::Element(element) => {
+            let inside = scrolls_inside(element, scrolling);
+            for child in &element.children {
+                calls_in(child, inside, note);
+            }
+        }
+        Node::Component(call) => note(&call.component, scrolling),
+        Node::If(node) => {
+            for (_, body) in &node.branches {
+                body.iter()
+                    .for_each(|child| calls_in(child, scrolling, note));
+            }
+            node.otherwise
+                .iter()
+                .for_each(|child| calls_in(child, scrolling, note));
+        }
+        Node::IfLet(node) => {
+            node.then
+                .iter()
+                .chain(&node.otherwise)
+                .for_each(|child| calls_in(child, scrolling, note));
+        }
+        Node::Match(node) => {
+            for arm in &node.arms {
+                arm.body
+                    .iter()
+                    .for_each(|child| calls_in(child, scrolling, note));
+            }
+        }
+    }
+}
+
+fn lower_in(node: &mut Node, scrolling: bool) {
+    match node {
+        Node::Element(element) => {
+            let inside = scrolls_inside(element, scrolling);
+            // What the rows hold first, so that the column a row's parts
+            // are put in below is not taken for one of the app's.
+            for child in &mut element.children {
+                lower_in(child, inside);
+            }
+            if inside && element.kind == "Column" && element.prop("reflow").is_none() {
+                let look = ListLook {
+                    gap: element.prop("gap").cloned(),
+                    align: element.keyword("align").unwrap_or("leading").to_string(),
+                    stagger: element.prop("stagger").cloned(),
+                    path: element.path.clone(),
+                };
+                let mut count = 0;
+                lower_rows(&mut element.children, &look, &mut count);
+            }
+        }
+        Node::Component(_) => {}
+        Node::If(node) => {
+            for (_, body) in &mut node.branches {
+                body.iter_mut().for_each(|child| lower_in(child, scrolling));
+            }
+            node.otherwise
+                .iter_mut()
+                .for_each(|child| lower_in(child, scrolling));
+        }
+        Node::IfLet(node) => {
+            node.then
+                .iter_mut()
+                .chain(&mut node.otherwise)
+                .for_each(|child| lower_in(child, scrolling));
+        }
+        Node::Match(node) => {
+            for arm in &mut node.arms {
+                arm.body
+                    .iter_mut()
+                    .for_each(|child| lower_in(child, scrolling));
+            }
+        }
+    }
+}
+
+/// How the column a list stands in lays it out.
+struct ListLook {
+    gap: Option<Prop>,
+    align: String,
+    stagger: Option<Prop>,
+    path: String,
+}
+
+/// Each keyed `ForEach` among `children` (and in the branches of the
+/// conditions among them), put in a one-column grid.
+fn lower_rows(children: &mut [Node], look: &ListLook, count: &mut usize) {
+    for child in children.iter_mut() {
+        match child {
+            Node::Element(each)
+                if each.kind == "ForEach"
+                    && each.template.is_some()
+                    && each.expr("items").is_some()
+                    && matches!(each.prop("key"), Some(Prop::Key { .. })) =>
+            {
+                let mut props = BTreeMap::new();
+                // As many columns as fit this wide: one.
+                props.insert("min_width".to_string(), Prop::Number { value: 1.0e6 });
+                props.insert("gap".to_string(), Prop::Number { value: 0.0 });
+                if let Some(gap) = &look.gap {
+                    props.insert("row_gap".to_string(), gap.clone());
+                }
+                props.insert(
+                    "align".to_string(),
+                    Prop::Keyword {
+                        value: look.align.clone(),
+                    },
+                );
+                if let Some(stagger) = &look.stagger {
+                    props.insert("stagger".to_string(), stagger.clone());
+                }
+                let source = each.source.clone();
+                let path = format!("{}/list{}", look.path, count);
+                *count += 1;
+                let mut each = std::mem::replace(
+                    child,
+                    Node::Component(ComponentRef {
+                        component: String::new(),
+                        args: Vec::new(),
+                        source: source.clone(),
+                    }),
+                );
+                if let Node::Element(each) = &mut each {
+                    stack_parts(each, look, &path);
+                }
+                *child = Node::Element(Element {
+                    kind: "Grid".into(),
+                    id: None,
+                    path,
+                    props,
+                    template: None,
+                    children: vec![each],
+                    action: None,
+                    source,
+                });
+            }
+            Node::If(node) => {
+                for (_, body) in &mut node.branches {
+                    lower_rows(body, look, count);
+                }
+                lower_rows(&mut node.otherwise, look, count);
+            }
+            Node::IfLet(node) => {
+                lower_rows(&mut node.then, look, count);
+                lower_rows(&mut node.otherwise, look, count);
+            }
+            Node::Match(node) => {
+                for arm in &mut node.arms {
+                    lower_rows(&mut arm.body, look, count);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A row of more than one part, such as a line and the divider under it,
+/// keeps its parts one under another as they stood in the column: in a
+/// column of their own, as far apart as the column's children and standing
+/// across it as they did. A grid's cell holds one row on every target,
+/// which otherwise lays several parts over one another or apart.
+fn stack_parts(each: &mut Element, look: &ListLook, path: &str) {
+    if each.children.len() < 2 {
+        return;
+    }
+    let mut props = BTreeMap::new();
+    if let Some(gap) = &look.gap {
+        props.insert("gap".to_string(), gap.clone());
+    }
+    props.insert(
+        "align".to_string(),
+        Prop::Keyword {
+            value: look.align.clone(),
+        },
+    );
+    each.children = vec![Node::Element(Element {
+        kind: "Column".into(),
+        id: None,
+        path: format!("{path}/row"),
+        props,
+        template: None,
+        children: std::mem::take(&mut each.children),
+        action: None,
+        source: each.source.clone(),
+    })];
+}
+
 /// Resource key of a text declared on an element property.
 pub fn text_key(component: &str, node_path: &str, prop: &str) -> String {
     format!("{component}.{node_path}.{prop}")
@@ -1266,6 +1605,226 @@ mod tests {
             action: None,
             source: SourceLocation::default(),
         })
+    }
+
+    fn with_props(node: Node, props: &[(&str, Prop)]) -> Node {
+        let Node::Element(mut element) = node else {
+            unreachable!()
+        };
+        for (name, prop) in props {
+            element.props.insert(name.to_string(), prop.clone());
+        }
+        Node::Element(element)
+    }
+
+    fn keyed_rows() -> Node {
+        let Node::Element(mut each) = element("ForEach", vec![element("Text", vec![])]) else {
+            unreachable!()
+        };
+        each.template = Some(Template {
+            var: "row".into(),
+            ty: Type::Int,
+        });
+        each.props.insert(
+            "items".into(),
+            Prop::Expr {
+                expr: Expr {
+                    kind: ExprKind::Literal {
+                        value: Value::Int(0),
+                    },
+                    ty: Type::Int,
+                },
+            },
+        );
+        each.props.insert(
+            "key".into(),
+            Prop::Key {
+                field: 0,
+                name: "id".into(),
+            },
+        );
+        Node::Element(each)
+    }
+
+    fn kinds(node: &Node) -> Vec<String> {
+        let Node::Element(element) = node else {
+            return vec![];
+        };
+        element
+            .children
+            .iter()
+            .map(|child| match child {
+                Node::Element(child) => child.kind.clone(),
+                Node::If(_) => "if".into(),
+                _ => "other".into(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_list_in_a_scroll_view_becomes_a_lazy_column_of_its_rows() {
+        let column = with_props(
+            element(
+                "Column",
+                vec![
+                    element("Text", vec![]),
+                    keyed_rows(),
+                    element("Spacer", vec![]),
+                ],
+            ),
+            &[
+                ("gap", Prop::Number { value: 4.0 }),
+                (
+                    "align",
+                    Prop::Keyword {
+                        value: "center".into(),
+                    },
+                ),
+            ],
+        );
+        let mut tree = element("ScrollView", vec![column]);
+        lower_bodies(&mut [&mut tree], &mut []);
+        let Node::Element(scroll) = &tree else {
+            unreachable!()
+        };
+        assert_eq!(kinds(&scroll.children[0]), ["Text", "Grid", "Spacer"]);
+        let Node::Element(column) = &scroll.children[0] else {
+            unreachable!()
+        };
+        let Node::Element(grid) = &column.children[1] else {
+            unreachable!()
+        };
+        assert_eq!(lowered_list_align(grid), Some("center"));
+        assert_eq!(grid.number("row_gap"), Some(4.0));
+        assert!(
+            lazy_grid_items(grid).is_some(),
+            "it is a grid every target builds lazily"
+        );
+    }
+
+    #[test]
+    fn a_row_of_several_parts_keeps_them_one_under_another() {
+        // A line and the divider under it, and inside the row a list of
+        // its own, which stays as the row's own.
+        let Node::Element(mut each) = keyed_rows() else {
+            unreachable!()
+        };
+        each.children = vec![
+            element("Row", vec![]),
+            element("Column", vec![element("Divider", vec![])]),
+            keyed_rows(),
+        ];
+        let parts = each.children.clone();
+        let column = with_props(
+            element("Column", vec![Node::Element(each), keyed_rows()]),
+            &[
+                ("gap", Prop::Number { value: 4.0 }),
+                (
+                    "align",
+                    Prop::Keyword {
+                        value: "center".into(),
+                    },
+                ),
+            ],
+        );
+        let mut tree = element("ScrollView", vec![column]);
+        lower_bodies(&mut [&mut tree], &mut []);
+        let rows_of = |at: usize| {
+            let Node::Element(scroll) = &tree else {
+                unreachable!()
+            };
+            let Node::Element(column) = &scroll.children[0] else {
+                unreachable!()
+            };
+            let Node::Element(grid) = &column.children[at] else {
+                unreachable!()
+            };
+            lazy_grid_items(grid).unwrap().clone()
+        };
+        let several = rows_of(0);
+        assert_eq!(kinds(&Node::Element(several.clone())), ["Column"]);
+        let Node::Element(stack) = &several.children[0] else {
+            unreachable!()
+        };
+        assert_eq!(stack.children, parts, "the parts stay as they were");
+        assert_eq!(stack.number("gap"), Some(4.0));
+        assert_eq!(stack.keyword("align"), Some("center"));
+        assert_eq!(stack.path, "Column/list0/row");
+        // A row of one part is that part.
+        assert_eq!(kinds(&Node::Element(rows_of(1))), ["Text"]);
+    }
+
+    #[test]
+    fn lists_outside_scroll_views_and_reflowing_lists_stay_as_they_are() {
+        let mut outside = element("Column", vec![keyed_rows()]);
+        let mut sideways = with_props(
+            element("ScrollView", vec![element("Column", vec![keyed_rows()])]),
+            &[(
+                "axis",
+                Prop::Keyword {
+                    value: "horizontal".into(),
+                },
+            )],
+        );
+        let mut reflowing = element(
+            "ScrollView",
+            vec![with_props(
+                element("Column", vec![keyed_rows()]),
+                &[(
+                    "reflow",
+                    Prop::Keyword {
+                        value: "smooth".into(),
+                    },
+                )],
+            )],
+        );
+        let before = (outside.clone(), sideways.clone(), reflowing.clone());
+        lower_bodies(&mut [&mut outside, &mut sideways, &mut reflowing], &mut []);
+        assert_eq!((outside, sideways, reflowing), before);
+    }
+
+    #[test]
+    fn a_list_in_a_condition_and_in_a_component_shown_in_a_scroll_view_is_lowered() {
+        let condition = Expr {
+            kind: ExprKind::Literal {
+                value: Value::Bool(true),
+            },
+            ty: Type::Bool,
+        };
+        let call = |name: &str| {
+            Node::Component(ComponentRef {
+                component: name.into(),
+                args: vec![],
+                source: SourceLocation::default(),
+            })
+        };
+        let mut window = element("ScrollView", vec![call("songs")]);
+        let mut songs = element(
+            "Column",
+            vec![Node::If(IfNode {
+                branches: vec![(condition, vec![keyed_rows()])],
+                otherwise: vec![],
+            })],
+        );
+        // Shown both in a scroll view and outside one: left as it is.
+        let mut window_two = element(
+            "Column",
+            vec![call("tags"), element("ScrollView", vec![call("tags")])],
+        );
+        let mut tags = element("Column", vec![keyed_rows()]);
+        let tags_before = tags.clone();
+        lower_bodies(
+            &mut [&mut window, &mut window_two],
+            &mut [("songs", &mut songs), ("tags", &mut tags)],
+        );
+        let Node::Element(column) = &songs else {
+            unreachable!()
+        };
+        let Node::If(branch) = &column.children[0] else {
+            unreachable!()
+        };
+        assert!(matches!(&branch.branches[0].1[0], Node::Element(grid) if grid.kind == "Grid"));
+        assert_eq!(tags, tags_before);
     }
 
     #[test]

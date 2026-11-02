@@ -2,7 +2,7 @@
 
 更新：2026-10-29。下表按 [bern-target-api](../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
 
-可选的 GPUI 目标（`ui = "gpui"`，macOS、Windows、Linux）是第一版，只在 macOS 上构建过，下表不含它；它声明的组件与功能见 [GPUI 实现记录](../Implementation/GPUI.md)。
+可选的 GPUI 目标（`ui = "gpui"`，macOS、Windows、Linux）是第一版，三个平台都构建并运行过，下表不含它；它声明的组件与功能见 [GPUI 实现记录](../Implementation/GPUI.md)。
 
 ## 编译期功能支持
 

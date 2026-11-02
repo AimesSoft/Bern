@@ -691,7 +691,8 @@ export function applyStyle(node, style, { selected } = {}) {
       if (contentShadow) filter = `drop-shadow(${shadow})`;
       else shadows.push(shadow);
     }
-    node.style.filter = filter;
+    node.bernShadow = filter;
+    node.style.filter = [filter, node.bernBlur].filter(Boolean).join(" ");
     if (look.indicator) shadows.push(`${INDICATOR[look.indicatorEdge ?? "leading"](look.indicatorWidth ?? 3)} ${cssColor(look.indicator)}`);
     node.style.boxShadow = shadows.join(", ");
     // The motion of the topmost state that moves; back at rest, `settle`.
@@ -972,6 +973,17 @@ function transitionFrom(transition, node) {
     else if (edge === "bottom") from.y = distance;
     else if (edge === "leading") from.x = rtl ? distance : -distance;
     else if (edge === "trailing") from.x = rtl ? -distance : distance;
+  } else if (transition.kind === "move") {
+    // A sheet: its whole size beyond the edge, without fading.
+    from.opacity = 1;
+    const rtl = getComputedStyle(node).direction === "rtl";
+    const edge = transition.edge;
+    const height = node.offsetHeight;
+    const width = node.offsetWidth;
+    if (edge === "top") from.y = -height;
+    else if (edge === "bottom") from.y = height;
+    else if (edge === "leading") from.x = rtl ? width : -width;
+    else if (edge === "trailing") from.x = rtl ? -width : width;
   }
   return from;
 }
@@ -1293,6 +1305,8 @@ export function Decorate(p, ctx, spec, build) {
       });
     }
     if (spec.spin) spin(node, spec.spin, spec.spinPeriod ?? 1);
+    if (spec.glow !== undefined) glow(node, spec.glow, spec.glowOpacity ?? 0.4);
+    if (spec.blur !== undefined) blur(node, spec.blur, spec.blurMotion);
     if (spec.nudge) nudge(node, spec.nudge, spec.nudgeMotion);
     if (spec.nudgeKey) nudge(node, spec.nudgeKey, spec.nudgeMotion, spec.nudgeScale ?? 1.06, true);
     if (spec.scrollScale !== undefined || spec.scrollOpacity !== undefined) {
@@ -1404,6 +1418,117 @@ export function spin(node, when, period) {
   });
   reduceQuery.addEventListener("change", update);
   onCleanup(() => reduceQuery.removeEventListener("change", update));
+}
+
+// MARK: - Glow
+
+/// Elements with `glow` and their lights. One set of listeners on the
+/// document lights the ones under the pointer by where they are, not by
+/// what is topmost there: a title laid over a cover leaves it lit.
+const glows = new Map();
+let lastPointer = null;
+
+/// Pictures and other replaced elements cannot hold a light: it goes
+/// beside them and takes their box each time it lights.
+const REPLACED = new Set(["IMG", "VIDEO", "CANVAS", "IFRAME", "INPUT", "TEXTAREA", "SELECT"]);
+
+/// The mouse lights what it is over; a finger, what it presses.
+function lightGlows(event) {
+  if (event.type !== "scroll") lastPointer = event;
+  const touch = event.pointerType !== undefined && event.pointerType !== "mouse";
+  const gone = event.type === "pointerleave" || event.type === "blur" ||
+    (touch && (event.type === "pointerup" || event.type === "pointercancel" || !event.buttons));
+  for (const [node, { light, radius, beside }] of glows) {
+    const box = node.getBoundingClientRect();
+    const lit = !gone && box.width > 0 && box.height > 0 &&
+      event.clientX >= box.left && event.clientX < box.left + box.width &&
+      event.clientY >= box.top && event.clientY < box.top + box.height;
+    if (lit) {
+      // Page pixels per unit where the light is drawn: scaling states and
+      // scaled windows make the two differ.
+      let unit;
+      if (beside) {
+        if (light.parentNode !== node.parentNode || node.nextSibling !== light) node.after(light);
+        // Wherever the light is placed from, its own box at a known size
+        // tells the origin and the scale there; it then takes the
+        // picture's box as drawn.
+        Object.assign(light.style, { left: "0px", top: "0px", width: "100px", height: "100px", borderRadius: getComputedStyle(node).borderRadius });
+        const origin = light.getBoundingClientRect();
+        unit = origin.width / 100 || 1;
+        Object.assign(light.style, {
+          left: `${(box.left - origin.left) / unit}px`, top: `${(box.top - origin.top) / unit}px`,
+          width: `${box.width / unit}px`, height: `${box.height / unit}px`,
+        });
+      } else {
+        if (light.parentNode !== node) {
+          if (getComputedStyle(node).position === "static") node.style.position = "relative";
+          node.append(light);
+        }
+        unit = node.offsetWidth ? box.width / node.offsetWidth : 1;
+      }
+      light.style.setProperty("--bern-glow-x", `${(event.clientX - box.left) / unit}px`);
+      light.style.setProperty("--bern-glow-y", `${(event.clientY - box.top) / unit}px`);
+      light.style.setProperty("--bern-glow-radius", `${Math.min(box.width, box.height) / unit * radius}px`);
+    }
+    light.classList.toggle("bern-lit", lit);
+  }
+}
+
+let watchingGlows = false;
+function watchGlows() {
+  if (watchingGlows) return;
+  watchingGlows = true;
+  const options = { capture: true, passive: true };
+  for (const name of ["pointermove", "pointerdown", "pointerup", "pointercancel"]) document.addEventListener(name, lightGlows, options);
+  document.documentElement.addEventListener("pointerleave", lightGlows);
+  globalThis.addEventListener?.("blur", lightGlows);
+  // What scrolls under a resting pointer lights or darkens as it passes.
+  document.addEventListener("scroll", () => {
+    if (!lastPointer) return;
+    const { clientX, clientY, pointerType, buttons } = lastPointer;
+    lightGlows({ type: "scroll", clientX, clientY, pointerType, buttons });
+  }, options);
+}
+
+/// `glow`: a white light follows the pointer over `node`, `radius` times
+/// its shorter side, `opacity` at the centre.
+export function glow(node, radius, opacity) {
+  const beside = REPLACED.has(node.tagName);
+  const light = el("span", { class: "bern-glow-light", "aria-hidden": "true" });
+  // Out of the flow even where a container places its children itself
+  // (a Stack's children are relative, layered in one cell).
+  light.style.position = "absolute";
+  light.style.setProperty("--bern-glow-opacity", String(opacity));
+  // Beside a picture the light is placed by its own left and top, not
+  // laid out or aligned by the picture's container.
+  if (beside) Object.assign(light.style, { inset: "auto", gridArea: "auto", placeSelf: "start", margin: "0" });
+  glows.set(node, { light, radius, beside });
+  watchGlows();
+  onCleanup(() => {
+    glows.delete(node);
+    light.remove();
+  });
+}
+
+// MARK: - Blur
+
+/// `blur`: the node's picture blurred with `radius` points and cut to its
+/// box and corners, so the blur does not spread past them. A radius bound
+/// to state springs with `motion`. A style's shadow adds its filter to
+/// this one.
+export function blur(node, radius, motion) {
+  bindNumber(radius, motion, (value) => {
+    // Kept apart from the style's shadow, which the browser's own copy of
+    // the filter no longer spells out the same way.
+    node.bernBlur = value > 0.01 ? `blur(${value}px)` : "";
+    node.style.filter = [node.bernShadow, node.bernBlur].filter(Boolean).join(" ");
+  });
+  const clip = () => {
+    node.style.clipPath = `inset(0 round ${getComputedStyle(node).borderRadius || "0px"})`;
+  };
+  const observer = new ResizeObserver(clip);
+  observer.observe(node);
+  onCleanup(() => observer.disconnect());
 }
 
 // MARK: - Nudges
@@ -1616,6 +1741,34 @@ function fileURL(file) {
   return url;
 }
 
+/// A page URL for the folder the user picked, from the files the browser
+/// gave for it (`webkitRelativePath` says where each is in the folder).
+/// The folders inside it get URLs too, and every file its own, so the
+/// engine lists the folder and reads its files as it does elsewhere. A
+/// folder without files gives nothing: the browser does not name it.
+export function folderURL(files) {
+  const folders = new Map();
+  const folderAt = (path) => {
+    let folder = folders.get(path);
+    if (folder) return folder;
+    const slash = path.lastIndexOf("/");
+    folder = { url: URL.createObjectURL(new Blob()), name: path.slice(slash + 1), entries: [] };
+    folders.set(path, folder);
+    B.pageFolders.set(folder.url, folder);
+    if (slash > 0) folderAt(path.slice(0, slash)).entries.push({ url: folder.url, name: folder.name, folder: true, size: 0 });
+    return folder;
+  };
+  let top = null;
+  for (const file of files) {
+    const path = file.webkitRelativePath || file.name;
+    const slash = path.lastIndexOf("/");
+    if (slash <= 0) continue;
+    top ??= folderAt(path.slice(0, path.indexOf("/")));
+    folderAt(path.slice(0, slash)).entries.push({ url: fileURL(file), name: file.name, folder: false, size: file.size, modified: file.lastModified });
+  }
+  return top?.url ?? null;
+}
+
 function giveFile(file, give) {
   const url = fileURL(file);
   B.prepareFile(url).then(() => give(url)).catch(error => {
@@ -1637,11 +1790,15 @@ export function paste(give) {
 /// file, nothing on cancel.
 export function pick(kinds, give) {
   const input = el("input", { type: "file", accept: acceptOf(kinds), hidden: true });
-  if (words(kinds).includes("folder")) input.webkitdirectory = true;
+  const folder = words(kinds).includes("folder");
+  if (folder) input.webkitdirectory = true;
   input.addEventListener("change", () => {
-    const file = input.files?.[0];
+    const files = [...(input.files ?? [])];
     input.remove();
-    if (file) giveFile(file, give);
+    if (folder) {
+      const url = folderURL(files);
+      if (url) give(url);
+    } else if (files[0]) giveFile(files[0], give);
   });
   input.addEventListener("cancel", () => input.remove());
   document.body.append(input);
@@ -1669,7 +1826,7 @@ function listenForLaunches() {
 
 /// A button showing its content instead of a label: no frame of its own,
 /// the content as it is; a style's corner clips it.
-export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds, defaultFocus }, action, content) {
+export function ContentButton(p, ctx, { id, label, enabled, style, shape, height, setFile, fileKinds: kinds, defaultFocus, menu }, action, content) {
   // A capsule is the platform's button around the content, as it is around
   // a label; otherwise the content is all there is.
   const framed = shape === "capsule";
@@ -1687,6 +1844,7 @@ export function ContentButton(p, ctx, { id, label, enabled, style, shape, height
     actions: { activate: () => action?.(), ...(setFile ? { setFile, fileKinds: kinds } : {}) },
   });
   if (style) applyStyle(node, style, {});
+  B.contextMenu(node, ctx, label, menu);
   // The web has no capsule buttons: a capsule is the standard button.
   if (shape === "capsule") node.classList.add("bern-control-capsule");
   else bindLength(node, "height", height);
@@ -2063,8 +2221,10 @@ export function Swipe(p, ctx, { id, label, field, min, max, axis, distance }, co
 /// or center (`snap`), whose `position` field follows the item there and
 /// scrolls to the item it is set to, giving it a nudge on arrival with
 /// `arrival: "nudge"`. Items are the rows of the lists inside, each known
-/// by its key.
-export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion, hideIndicators, mouseIndicators, openAt, openCenter }, children) {
+/// by its key. With `anchor`, the item of `position` stands that fraction
+/// of the way along the view (item and view meet at the same fraction).
+/// `browsing` is set while the person scrolls the view, until it rests.
+export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion, hideIndicators, mouseIndicators, openAt, openCenter, anchor: share, browsing }, children) {
   const horizontal = axis === "horizontal";
   const node = el("div", { class: `bern-scroll bern-scroll-${axis ?? "vertical"} bern-fill-width bern-fill-height` });
   if (hideIndicators) node.classList.add("bern-scroll-indicators-hidden");
@@ -2074,10 +2234,12 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
   p.append(node);
   if (openAt !== undefined) B.openScroll(node, horizontal, openAt);
   if (openCenter !== undefined) B.centerScroll(node, horizontal, openCenter);
+  if (browsing) followHand(node, browsing);
   if (!snap && !position) return;
   // A position binding follows the leading item unless center snapping
   // was explicitly requested (for example by a horizontal episode rail).
   const anchor = snap ?? "start";
+  const fraction = anchor === "center" ? 0.5 : share ?? 0;
   /// Rows of this scroll view's lists, not of nested scroll views.
   const items = () => [...node.querySelectorAll("[data-bern-item]")]
     .filter((item) => item.closest(".bern-scroll") === node);
@@ -2088,8 +2250,8 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
     const port = node.getBoundingClientRect();
     const rect = layoutRect(item);
     const start = along(rect) - along(port) + (horizontal ? node.scrollLeft : node.scrollTop);
-    if (anchor === "start") return start - (horizontal ? parseFloat(getComputedStyle(node).paddingLeft) : parseFloat(getComputedStyle(node).paddingTop));
-    return start + extent(rect) / 2 - extent(port) / 2;
+    if (fraction === 0) return start - (horizontal ? parseFloat(getComputedStyle(node).paddingLeft) : parseFloat(getComputedStyle(node).paddingTop));
+    return start - (extent(port) - extent(rect)) * fraction;
   };
   const current = () => (horizontal ? node.scrollLeft : node.scrollTop);
   const nearest = () => {
@@ -2162,7 +2324,8 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
     const key = position.get();
     untrack(() => {
       if (!placed) return;
-      const item = items().find((one) => eq(one.bernKey, key));
+      // An item of a lazy grid not built yet is built near the view first.
+      const item = items().find((one) => eq(one.bernKey, key)) ?? B.revealLazy(node, key);
       if (!item || item === nearest() && Math.abs(offsetOf(item) - current()) < 1) return;
       travelling = item;
       scrollTo(item, true);
@@ -2171,10 +2334,45 @@ export function ScrollView(p, ctx, { axis, snap, position, arrival, nudgeMotion,
   // The first display starts at the field's item, without a nudge.
   requestAnimationFrame(() => requestAnimationFrame(() => {
     margins();
-    const item = items().find((one) => eq(one.bernKey, position.peek()));
+    const item = items().find((one) => eq(one.bernKey, position.peek())) ?? B.revealLazy(node, position.peek());
     if (item) scrollTo(item, false);
     placed = true;
   }));
+}
+
+/// `browsing`: true from the person's own scrolling (wheel, touch, a drag
+/// of the scroll bar, keys) until the view rests; scrolls the page makes
+/// itself, such as setting `position`, leave it false.
+function followHand(node, field) {
+  let hand = 0;
+  let pressed = false;
+  let resting = 0;
+  let dragged = false;
+  const touched = () => { hand = performance.now(); };
+  const options = { passive: true };
+  node.addEventListener("wheel", touched, options);
+  node.addEventListener("keydown", touched, options);
+  // A tap that sets `position` is not a drag; a lifted drag flings on.
+  node.addEventListener("touchstart", () => { pressed = true; dragged = false; }, options);
+  node.addEventListener("touchmove", () => { dragged = true; touched(); }, options);
+  node.addEventListener("touchend", () => { pressed = false; if (dragged) touched(); }, options);
+  // The scroll bar belongs to the view itself, not to its content.
+  node.addEventListener("pointerdown", (event) => { if (event.target === node) pressed = true; }, options);
+  const up = () => { pressed = false; };
+  window.addEventListener("pointerup", up, options);
+  node.addEventListener("scroll", () => {
+    // Momentum after a flick keeps scrolling without input of its own.
+    const byHand = pressed || performance.now() - hand < 400 || field.peek();
+    if (!byHand) return;
+    if (!field.peek()) field.set(true);
+    hand = performance.now();
+    clearTimeout(resting);
+    resting = setTimeout(() => field.set(false), 200);
+  }, options);
+  onCleanup(() => {
+    clearTimeout(resting);
+    window.removeEventListener("pointerup", up);
+  });
 }
 
 function nudgeOnce(node, motion) {
@@ -2192,7 +2390,7 @@ function nudgeOnce(node, motion) {
 /// application's or its part's appearance) it shows `darkSource` when
 /// given. A picture larger than it shows is drawn down by the browser's
 /// own image filter.
-export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, aspect, adaptive }) {
+export function Image(p, ctx, { source, darkSource, url, label, width, height, fit, animate, corner, rendering, aspect, adaptive, covers }) {
   const template = rendering === "template";
   const intrinsicRatio = cell(aspect ?? 1);
   const probe = template && !aspect ? new globalThis.Image() : null;
@@ -2227,9 +2425,14 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
     });
   } else if (source) setSource(resource(source));
   if (url) {
+    // A new source shows nothing until its picture has come, not the
+    // picture before it, which the browser keeps meanwhile.
+    if (!template) node.addEventListener("load", () => { node.style.visibility = ""; });
     effect(() => {
       const value = url();
+      if (!template && value && value !== node.getAttribute("src")) node.style.visibility = "hidden";
       setSource(value);
+      if (!template && node.complete && node.naturalWidth) node.style.visibility = "";
       node.hidden = !value;
     });
   }
@@ -2247,6 +2450,8 @@ export function Image(p, ctx, { source, darkSource, url, label, width, height, f
     node.style.width = "100%";
     if (height === undefined) node.style.height = "auto";
   }
+  // Without a size it covers the room its container gives, asking for none.
+  if (covers) node.classList.add("bern-image-cover");
   if (template) {
     node.setAttribute("role", "img");
     if (label) B.bindAttr(node, "aria-label", label);
@@ -2502,13 +2707,14 @@ export function Place(p, ctx, { at, from, to, motion }, build) {
 /// The children mount while the popover shows. `presented`, when given,
 /// follows the popover and opens or closes it; external entries open it
 /// with `activate`.
-export function PopoverButton(p, ctx, { id, label, icon: glyph, presented, windowTheme = false, style }, content) {
+export function PopoverButton(p, ctx, { id, label, icon: glyph, prominence, fontSize, presented, windowTheme = false, style }, content) {
   const panelId = `bern-popover-${Math.random().toString(36).slice(2)}`;
   const iconOnly = Boolean(glyph);
   const trigger = el("button", {
-    class: iconOnly ? "bern-icon-button bern-popover-button" : "bern-button bern-button-standard bern-popover-button",
+    class: iconOnly ? "bern-icon-button bern-popover-button" : `bern-button bern-button-${prominence ?? "standard"} bern-popover-button`,
     type: "button", "aria-haspopup": "dialog", "aria-expanded": "false", popovertarget: panelId,
-  }, glyph ? B.icon(glyph, 16) : null);
+  }, glyph ? B.icon(glyph, fontSize ?? 16) : null);
+  if (glyph && fontSize != null) Object.assign(trigger.firstElementChild.style, { width: `${fontSize}px`, height: `${fontSize}px` });
   if (!iconOnly) {
     const text = el("span");
     B.bindText(text, label);

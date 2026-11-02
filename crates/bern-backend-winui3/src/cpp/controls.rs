@@ -78,8 +78,9 @@ impl Generator<'_> {
                 (element.keyword("width") == Some("fill")).then(|| "true".to_string()),
             ),
             ("iconSize", Self::number(element, "font_size")),
+            ("menu", self.context_menu_def(element)),
         ]);
-        if kind == "Button" && !element.children.is_empty() {
+        if kind == "Button" && element.has_content() {
             self.call(
                 out,
                 &format!("B::ContentButton(p, c, {props}, "),
@@ -348,9 +349,10 @@ impl Generator<'_> {
 
     pub(super) fn language_picker(&self, out: &mut Out, element: &Element) {
         out.line(format!(
-            "B::LanguagePicker(p, c, {}, {});",
+            "B::LanguagePicker(p, c, {}, {}, {});",
             self.id(element),
             null(self.text_prop(element, "label")),
+            element.keyword("label_hidden") == Some("true"),
         ));
     }
 
@@ -375,6 +377,11 @@ impl Generator<'_> {
         if element.expr("open").is_some() {
             fields.extend(self.model(element, "open"));
         }
+        fields.push((
+            "plain",
+            (element.keyword("prominence") == Some("plain")).then(|| "true".to_string()),
+        ));
+        fields.push(("iconSize", Self::number(element, "font_size")));
         self.call(
             out,
             &format!("B::PopoverButton(p, c, {}, ", designated(&fields)),
@@ -438,6 +445,26 @@ impl Generator<'_> {
         for item in shortcuts {
             self.shortcut(out, item, "activate");
         }
+    }
+
+    /// The items of a button's `ContextMenu`, a missing one for each
+    /// divider.
+    fn context_menu_def(&self, element: &Element) -> Option<String> {
+        let items = element.context_menu()?;
+        let entries: Vec<String> = items
+            .iter()
+            .map(|item| {
+                if item.kind == "Divider" {
+                    "std::nullopt".to_string()
+                } else {
+                    format!("B::MenuItemDef{}", self.menu_item_def(item))
+                }
+            })
+            .collect();
+        Some(format!(
+            "std::vector<std::optional<B::MenuItemDef>>{{{}}}",
+            entries.join(", ")
+        ))
     }
 
     /// The fields of a `MenuItem`.

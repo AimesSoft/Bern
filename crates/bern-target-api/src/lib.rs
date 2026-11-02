@@ -127,6 +127,16 @@ pub mod feature {
     /// else { 24 }`, sizes of `Column`, `Row` and `Stack`, and the
     /// `corner` of a `Video`.
     pub const BOUND_LENGTHS: &str = "bound_lengths";
+    /// `ScrollView(anchor:)`: the item of `position` at a fraction of the
+    /// view without snapping, as near as the content reaches.
+    pub const SCROLL_ANCHOR: &str = "scroll_anchor";
+    /// `ScrollView(browsing:)`: a flag that holds while the person scrolls
+    /// by hand.
+    pub const SCROLL_BROWSING: &str = "scroll_browsing";
+    /// `blur` bound to state, changing with `animate`.
+    pub const BOUND_BLUR: &str = "bound_blur";
+    /// `Text(bold:)`: a text bold while a condition holds.
+    pub const TEXT_BOLD: &str = "text_bold";
     /// `appearance: dark` or `light` on a part of the interface; without it
     /// the part follows the window's appearance.
     pub const APPEARANCE: &str = "appearance";
@@ -159,6 +169,9 @@ pub mod feature {
     pub const RUNTIME_IMAGES: &str = "runtime_images";
     /// `Shape(fill_from:)`, the average color of a picture, and `fade`.
     pub const PICTURE_FILLS: &str = "picture_fills";
+    /// `Image(fit: cover)` without `width`, `height` or `aspect`: the
+    /// picture covers the room its container gives, cropped.
+    pub const COVER_IMAGES: &str = "cover_images";
     /// `pick:` on `Button`, `IconButton` and `MenuItem`: the system's open
     /// panel asks for a file before the action runs.
     pub const FILE_PICK: &str = "file_pick";

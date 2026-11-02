@@ -69,6 +69,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -622,6 +623,33 @@ class BernWindowContext(
 
 val LocalBernWindow = staticCompositionLocalOf<BernWindowContext> { error("no Bern window") }
 
+/// Where the pointer is over a window, in window coordinates: a mouse while
+/// it is over the window, a finger or pen while it presses. Elements that
+/// glow compare it with where they are, so what lies on top of them does
+/// not keep them dark.
+class BernPointer {
+    var at by mutableStateOf<Offset?>(null)
+    /// The window content the positions are first taken in.
+    internal var root: androidx.compose.ui.layout.LayoutCoordinates? = null
+}
+
+val LocalBernPointer = staticCompositionLocalOf<BernPointer?> { null }
+
+/// Follows the pointer over the window's content for `pointer`. It only
+/// looks, before the content does, and consumes nothing.
+fun Modifier.bernPointerWatch(pointer: BernPointer): Modifier =
+    onGloballyPositioned { pointer.root = it }.pointerInput(pointer) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull() ?: continue
+                val over = event.type != PointerEventType.Exit &&
+                    (change.type == PointerType.Mouse || change.pressed)
+                pointer.at = if (over) pointer.root?.takeIf { it.isAttached }?.localToWindow(change.position) else null
+            }
+        }
+    }
+
 /// The room the app bar and the system bars take around a window's content.
 val LocalBernBarsPadding = staticCompositionLocalOf { androidx.compose.foundation.layout.PaddingValues() }
 
@@ -827,6 +855,10 @@ object BernNative {
 class BernBridge(context: Context) {
     private val main = Handler(Looper.getMainLooper())
     private val application = context.applicationContext
+
+    /// The application, for engine libraries that reach Android through
+    /// `ndk-context`, such as audio output.
+    fun applicationContext(): Context = application
     private val documents = context.contentResolver
 
     @Keep
@@ -860,14 +892,44 @@ class BernBridge(context: Context) {
     }
 
     /// The name the system shows for a document the app was given, such
-    /// as a `content:` file from the picker; null when it has none.
+    /// as a `content:` file or folder from the picker; null when it has none.
     @Keep
     fun fileName(uri: String): String? = try {
-        documents.query(Uri.parse(uri), arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        documents.query(documentOf(Uri.parse(uri)), arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
             ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
     } catch (error: Exception) {
         null
     }
+
+    /// What a folder from the picker, or a folder inside it, holds: for
+    /// each child its document URI, name, `d` or `f`, size and last change
+    /// in milliseconds (nothing when unknown), each followed by a NUL,
+    /// after `ok:`; `error:` and the reason when it cannot be listed,
+    /// `error:not_a_folder` for a file.
+    @Keep
+    fun listFolder(uri: String): String = try {
+        val parsed = Uri.parse(uri)
+        val folder = if (parsed.scheme == "content" && android.provider.DocumentsContract.isTreeUri(parsed)) {
+            describe(documentOf(parsed))
+        } else null
+        if (folder == null || !folder.directory) "error:not_a_folder" else {
+            val text = StringBuilder("ok:")
+            for (child in children(folder.uri)) {
+                for (field in listOf(child.uri.toString(), child.name, if (child.directory) "d" else "f", child.size.toString(), child.modified?.toString() ?: "")) {
+                    text.append(field).append('\u0000')
+                }
+            }
+            text.toString()
+        }
+    } catch (error: Exception) {
+        "error:${error.message ?: error.javaClass.simpleName}"
+    }
+
+    /// A folder from the picker (a tree) stands for its top document.
+    private fun documentOf(uri: Uri): Uri =
+        if (android.provider.DocumentsContract.isTreeUri(uri) && !android.provider.DocumentsContract.isDocumentUri(application, uri)) {
+            android.provider.DocumentsContract.buildDocumentUriUsingTree(uri, android.provider.DocumentsContract.getTreeDocumentId(uri))
+        } else uri
 
     /// A descriptor the engine reads a document through, which it closes;
     /// -1 when the document cannot be opened.
@@ -974,23 +1036,31 @@ class BernBridge(context: Context) {
         application.startActivity(intent)
     }
 
-    private data class Document(val uri: Uri, val name: String, val directory: Boolean)
+    private data class Document(val uri: Uri, val name: String, val directory: Boolean, val size: Long = 0, val modified: Long? = null)
 
-    private fun rootDocument(tree: Uri): Document {
-        require(tree.scheme == "content" && android.provider.DocumentsContract.isTreeUri(tree)) { "Select a folder in the system Files picker" }
-        val uri = android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, android.provider.DocumentsContract.getTreeDocumentId(tree))
+    /// The document at `uri`, a document of a tree.
+    private fun describe(uri: Uri): Document {
         val columns = arrayOf(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME, android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE)
-        val document = documents.query(uri, columns, null, null, null)?.use { cursor ->
+        return documents.query(uri, columns, null, null, null)?.use { cursor ->
             check(cursor.moveToFirst()) { "The selected folder is unavailable" }
             Document(uri, cursor.getString(0) ?: "Folder", cursor.getString(1) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
         } ?: error("The selected folder is unavailable")
+    }
+
+    private fun rootDocument(tree: Uri): Document {
+        require(tree.scheme == "content" && android.provider.DocumentsContract.isTreeUri(tree)) { "Select a folder in the system Files picker" }
+        val document = describe(android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, android.provider.DocumentsContract.getTreeDocumentId(tree)))
         require(document.directory) { "The selected document is not a folder" }
         return document
     }
 
     private fun children(parent: Uri, limit: Int = Int.MAX_VALUE): List<Document> {
         val uri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(parent, android.provider.DocumentsContract.getDocumentId(parent))
-        val columns = arrayOf(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME, android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val columns = arrayOf(
+            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID, android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE, android.provider.DocumentsContract.Document.COLUMN_SIZE,
+            android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
         return documents.query(uri, columns, null, null, null)?.use { cursor ->
             buildList {
                 while (cursor.moveToNext()) {
@@ -999,6 +1069,8 @@ class BernBridge(context: Context) {
                         android.provider.DocumentsContract.buildDocumentUriUsingTree(parent, cursor.getString(0)),
                         cursor.getString(1) ?: "File",
                         cursor.getString(2) == android.provider.DocumentsContract.Document.MIME_TYPE_DIR,
+                        if (cursor.isNull(3)) 0 else cursor.getLong(3),
+                        if (cursor.isNull(4)) null else cursor.getLong(4),
                     ))
                 }
             }
@@ -1913,8 +1985,9 @@ fun BernWindowRoot(
     context.estimatedWidth = dialogWidth ?: LocalConfiguration.current.screenWidthDp.toDouble()
     context.estimatedHeight = LocalConfiguration.current.screenHeightDp.toDouble()
     val editingRegions = remember(context) { BernEditingRegions() }
+    val pointer = remember(context) { BernPointer() }
     CompositionLocalProvider(LocalBernWindow provides context, LocalBernSettled provides settled,
-        LocalBernEditingRegions provides editingRegions) {
+        LocalBernEditingRegions provides editingRegions, LocalBernPointer provides pointer) {
         val chrome = context.chrome
         val titled = chrome.lastOrNull { it.title != null }?.title
         val title = titled ?: context.title
@@ -1924,7 +1997,7 @@ fun BernWindowRoot(
             // The width for `window.compact` and its siblings, and touches
             // for `window.idle`. Keyboard shortcuts and keys come from the
             // activity, which sees them whether or not a control has focus.
-            modifier = Modifier.bernEditingPresses(editingRegions).onSizeChanged { size ->
+            modifier = Modifier.bernEditingPresses(editingRegions).bernPointerWatch(pointer).onSizeChanged { size ->
                 context.measuredWidth = with(density) { size.width.toDp().value.toDouble() }
                 context.measuredHeight = with(density) { size.height.toDp().value.toDouble() }
             }.then(if (idleAfter == null) {

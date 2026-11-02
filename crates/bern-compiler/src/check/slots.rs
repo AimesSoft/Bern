@@ -25,9 +25,18 @@ impl Checker<'_> {
             .iter()
             .map(|prop| prop.name.to_string())
             .collect();
+        let keywords: Vec<(String, String)> = element
+            .props
+            .iter()
+            .filter_map(|prop| Some((prop.name.to_string(), prop.keyword()?)))
+            .collect();
         let shape = ElementShape {
             name: &name,
             props: prop_names.iter().map(String::as_str).collect(),
+            keywords: keywords
+                .iter()
+                .map(|(name, value)| (name.as_str(), value.as_str()))
+                .collect(),
             has_template: element.template.is_some(),
             children: element.children.as_ref().map(|_| Vec::new()),
             has_action: element.action.is_some(),
@@ -91,16 +100,25 @@ impl Checker<'_> {
                             .as_ref()
                             .map(|icon| format!(", icon: {icon:?}"))
                             .unwrap_or_default();
+                        // The item shows while the module runs and, with
+                        // `when`, while its field is true.
+                        let shown = |item: String| match &page.when {
+                            Some(field) => format!("if {}.{field} {{ {item} }}", slot_client(&page.module)),
+                            None => item,
+                        };
                         if tabs {
+                            if !page.tab {
+                                return None;
+                            }
                             return match self.slot_call(&page.component, scope) {
                                 Ok(call) => Some(self.contributions.guarded(
                                     &page.module,
-                                    format!(
+                                    shown(format!(
                                         "Tab(value: {}::{}, label: tr! {{ {} }}{icon}) {{ {call} }}",
                                         pages.enum_name,
                                         page.variant,
                                         label.join(", ")
-                                    ),
+                                    )),
                                 )),
                                 Err(message) => {
                                     failures.push(message);
@@ -115,12 +133,12 @@ impl Checker<'_> {
                             .unwrap_or_default();
                         Some(self.contributions.guarded(
                             &page.module,
-                            format!(
+                            shown(format!(
                                 "SidebarItem(value: {}::{}, label: tr! {{ {} }}{icon}{badge})",
                                 pages.enum_name,
                                 page.variant,
                                 label.join(", ")
-                            ),
+                            )),
                         ))
                     })
                     .collect::<Vec<_>>()

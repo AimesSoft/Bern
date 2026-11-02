@@ -15,7 +15,7 @@ impl Generator<'_> {
         let style = crate::style::reference(self.app, &element.kind, element.keyword("variant"));
         let default_focus =
             (element.keyword("default_focus") == Some("true")).then(|| "true".to_string());
-        if element.kind == "Button" && !element.children.is_empty() {
+        if element.kind == "Button" && element.has_content() {
             let props = Self::props(vec![
                 ("id", Some(self.id(element))),
                 ("label", self.text_prop(element, "label")),
@@ -26,6 +26,7 @@ impl Generator<'_> {
                 ("setFile", set_file),
                 ("fileKinds", kinds),
                 ("defaultFocus", default_focus.clone()),
+                ("menu", self.context_menu(element)),
             ]);
             self.children(
                 out,
@@ -61,6 +62,7 @@ impl Generator<'_> {
                     ("setFile", set_file),
                     ("fileKinds", kinds),
                     ("defaultFocus", default_focus),
+                    ("menu", self.context_menu(element)),
                 ]),
             ));
         }
@@ -233,6 +235,10 @@ impl Generator<'_> {
             Self::props(vec![
                 ("id", Some(self.id(element))),
                 ("label", self.text_prop(element, "label")),
+                (
+                    "labelHidden",
+                    (element.keyword("label_hidden") == Some("true")).then(|| "true".into())
+                ),
             ])
         ));
     }
@@ -247,6 +253,8 @@ impl Generator<'_> {
             ("id", Some(self.id(element))),
             ("label", self.text_prop(element, "label")),
             ("icon", element.icon("icon").map(string)),
+            ("prominence", Self::keyword(element, "prominence")),
+            ("fontSize", element.number("font_size").map(number)),
             ("presented", presented),
             (
                 "windowTheme",

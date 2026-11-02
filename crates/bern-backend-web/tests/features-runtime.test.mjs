@@ -109,8 +109,10 @@ function runtime(search = "") {
     unobserve(target) { this.targets.delete(target); }
     disconnect() { this.targets.clear(); this.disconnected = true; }
   }
+  let blobs = 0;
   const globals = {
     TextEncoder, TextDecoder, URLSearchParams, performance, innerWidth: 1280, innerHeight: 800, HTMLElement: Element,
+    URL: { createObjectURL: () => `blob:page/${++blobs}`, revokeObjectURL() {} }, Blob: class {},
     navigator: { platform: "MacIntel" }, location: { search }, Image: Probe, screen: {},
     Node: { ELEMENT_NODE: 1, DOCUMENT_POSITION_FOLLOWING: 4 },
     document: {
@@ -233,6 +235,45 @@ test("a spinning element turns while its condition holds and stops where it is",
   assert.equal(node.style.animationPlayState, "running");
   on.set(false); flushMicrotasks();
   assert.equal(node.style.animationPlayState, "paused", "it stops where it is");
+  scope.dispose();
+});
+
+test("a glowing element lights under the pointer, even beneath other elements", () => {
+  const { B, F, Element, document } = runtime();
+  const scope = new B.Scope();
+  const node = new Element("div");
+  node.rect = { left: 10, top: 20, width: 200, height: 100 };
+  B.within(scope, () => F.glow(node, 1.05, 0.22));
+  const send = (type, x, y, more = {}) =>
+    (document.listeners[type] ?? []).forEach((listener) => listener({ type, pointerType: "mouse", clientX: x, clientY: y, buttons: 0, ...more }));
+  const light = () => node.children.find((child) => child.classes.has("bern-glow-light"));
+  send("pointermove", 60, 50);
+  assert.ok(light(), "the light goes inside the element");
+  assert.ok(light().classes.has("bern-lit"));
+  assert.equal(light().style["--bern-glow-x"], "50px");
+  assert.equal(light().style["--bern-glow-y"], "30px");
+  assert.equal(light().style["--bern-glow-radius"], "105px", "1.05 times the shorter side");
+  assert.equal(light().style["--bern-glow-opacity"], "0.22");
+  send("pointermove", 300, 50);
+  assert.ok(!light().classes.has("bern-lit"), "dark once the pointer leaves");
+  send("pointerdown", 60, 50, { pointerType: "touch", buttons: 1 });
+  assert.ok(light().classes.has("bern-lit"), "a finger lights it while it presses");
+  send("pointerup", 60, 50, { pointerType: "touch" });
+  assert.ok(!light().classes.has("bern-lit"), "and not after");
+  scope.dispose();
+  assert.ok(!light(), "the light goes with the element");
+});
+
+test("a blurred element keeps its style's shadow and is cut to its box", () => {
+  const { B, F, Element, resizeObservers } = runtime();
+  const scope = new B.Scope();
+  const node = new Element("div");
+  // As a style leaves it: the shadow in the filter and kept apart for the blur.
+  node.bernShadow = node.style.filter = "drop-shadow(0 2px 6px rgb(0 0 0 / 0.2))";
+  B.within(scope, () => F.blur(node, 28));
+  assert.equal(node.style.filter, "drop-shadow(0 2px 6px rgb(0 0 0 / 0.2)) blur(28px)");
+  resizeObservers.at(-1).callback([]);
+  assert.equal(node.style.clipPath, "inset(0 round 0px)");
   scope.dispose();
 });
 
@@ -1631,4 +1672,21 @@ test("menus can hide disabled items and restore them without replacing the menu"
     scope.dispose();
     assert.equal(B.controlEntries().length, 0);
   }
+});
+
+test("a picked folder is held by the page as the engine lists it", () => {
+  const { B, F } = runtime();
+  const file = (path, size, modified) => ({ name: path.split("/").pop(), webkitRelativePath: path, size, lastModified: modified });
+  const picked = [file("Music/b.mp3", 3, 1700000000000), file("Music/Live/c.flac", 7, 5), file("Music/a.mp3", 1, 2)];
+  const url = F.folderURL(picked);
+  const top = B.pageFolders.get(url);
+  assert.equal(top.name, "Music");
+  const [b, live, a] = top.entries;
+  assert.deepEqual([b.name, live.name, a.name], ["b.mp3", "Live", "a.mp3"]);
+  assert.equal(B.pageFiles.get(b.url), picked[0], "each file is read through its own URL");
+  assert.equal(B.folderText(top), `${b.url}\0b.mp3\0f\x003\x001700000000000\0${live.url}\0Live\0d\x000\0\0${a.url}\0a.mp3\0f\x001\x002\0`);
+  const inside = B.pageFolders.get(live.url);
+  assert.equal(inside.name, "Live");
+  assert.deepEqual(Array.from(inside.entries, (entry) => [entry.name, entry.folder, entry.size]), [["c.flac", false, 7]]);
+  assert.equal(F.folderURL([]), null, "the browser names no folder without files");
 });

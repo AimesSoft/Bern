@@ -37,22 +37,33 @@ fn extension_of(url: &str) -> String {
     }
 }
 
-/// Whether a file at `url` is one of `kinds`, by its extension.
+/// Whether a file at `url` is one of `kinds`, by its extension; a `file:`
+/// URL of a folder is one only where `kinds` has `folder`.
 pub(crate) fn accepts(url: &str, kinds: &str) -> bool {
+    let mut words = kinds
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|word| !word.is_empty());
+    if words.clone().any(|word| word == "any") {
+        return true;
+    }
+    if url.starts_with("file:")
+        && gio::File::for_uri(url)
+            .query_file_type(gio::FileQueryInfoFlags::NONE, gio::Cancellable::NONE)
+            == gio::FileType::Directory
+    {
+        return words.any(|word| word == "folder");
+    }
     let extension = extension_of(url);
     let table = crate::host::host().def.file_kinds;
-    kinds
-        .split(|c: char| c.is_whitespace() || c == ',')
-        .filter(|word| !word.is_empty())
-        .any(|word| match word {
-            "any" => true,
-            "folder" => false,
-            word if word.starts_with('.') => extension == word[1..],
-            kind => table
-                .iter()
-                .find(|(name, _)| *name == kind)
-                .is_some_and(|(_, extensions)| extensions.contains(&extension.as_str())),
-        })
+    words.any(|word| match word {
+        "any" => true,
+        "folder" => false,
+        word if word.starts_with('.') => extension == word[1..],
+        kind => table
+            .iter()
+            .find(|(name, _)| *name == kind)
+            .is_some_and(|(_, extensions)| extensions.contains(&extension.as_str())),
+    })
 }
 
 /// Filters of the open panel for `kinds`: one for all of them.
@@ -403,6 +414,8 @@ pub struct ContentButtonProps {
     /// `paste:`: the clipboard's text goes into this draft first.
     pub paste: Option<Field>,
     pub shape: crate::widgets::Shape,
+    /// `ContextMenu`: what a secondary click or a long touch opens.
+    pub menu: Vec<Option<crate::widgets::MenuItem>>,
 }
 
 /// A button showing its content instead of a label: no frame of its own,
@@ -464,6 +477,9 @@ pub fn ContentButton(
         },
     );
     crate::widgets::shape(ctx, button.upcast_ref(), &props.shape);
+    if !props.menu.is_empty() {
+        crate::table::context_menu(ctx, button.upcast_ref(), props.menu);
+    }
     let motion = MotionBox::wrap(&button);
     match props.style {
         Some(style) => {
@@ -692,6 +708,10 @@ pub struct PopoverButtonProps {
     pub presented: Option<crate::widgets::Model>,
     pub window_theme: bool,
     pub style: Option<&'static StyleDef>,
+    /// `prominence: plain`: no frame, as a plain `IconButton`.
+    pub plain: bool,
+    /// The size of the icon in points.
+    pub font_size: Option<f64>,
 }
 
 fn popover_look(popover: &gtk::Popover, window_theme: bool, style: Option<&'static StyleDef>) {
@@ -768,12 +788,22 @@ pub fn PopoverButton(p: &Parent, ctx: &Ctx, props: PopoverButtonProps, content: 
     let button = gtk::MenuButton::new();
     let label = props.label.as_ref().map(|label| bound_text(ctx, label));
     match (props.icon, label.clone()) {
-        (Some(icon), _) => button.set_icon_name(icons::name(icon)),
+        (Some(icon), _) => match props.font_size {
+            Some(size) => {
+                let image = gtk::Image::from_icon_name(icons::name(icon));
+                image.set_pixel_size(size.round().max(1.0) as i32);
+                button.set_child(Some(&image));
+            }
+            None => button.set_icon_name(icons::name(icon)),
+        },
         (None, Some(label)) => {
             let shown = button.clone();
             effect(move || shown.set_label(&label()));
         }
         (None, None) => {}
+    }
+    if props.plain {
+        button.set_has_frame(false);
     }
     button.set_valign(gtk::Align::Center);
     if let Some(label) = label.clone() {
@@ -1370,11 +1400,21 @@ pub fn Place(p: &Parent, ctx: &Ctx, props: PlaceProps, build: Build) {
 
 // MARK: - Scroll views
 
+/// Builds the row of a key in a lazy list near the view, for a scroll
+/// view's `position`, and gives it.
+pub(crate) type Reveal = Rc<dyn Fn(&Value) -> Option<gtk::Widget>>;
+
 /// A scroll view and the rows of the lists inside it, by key.
 pub struct ScrollScope {
     pub(crate) view: gtk::ScrolledWindow,
     items: RefCell<Vec<(Value, glib::WeakRef<gtk::Widget>)>>,
     changed: crate::reactive::Version,
+    /// Grids inside that build only the rows near the view: each builds
+    /// the row of a key there and gives its first widget, or none.
+    reveal: RefCell<Vec<Reveal>>,
+    /// Set while such a grid moves the view to a row it builds: not a
+    /// scroll by hand, so the view does not rest on another item then.
+    pub(crate) by_code: std::cell::Cell<bool>,
 }
 
 impl ScrollScope {
@@ -1394,6 +1434,28 @@ impl ScrollScope {
                 scope.changed.bump();
             }
         });
+    }
+
+    /// A grid inside that builds only the rows near the view, until the
+    /// current scope ends.
+    pub(crate) fn add_reveal(self: &Rc<Self>, reveal: Reveal) {
+        self.reveal.borrow_mut().push(Rc::clone(&reveal));
+        let scope = Rc::downgrade(self);
+        on_cleanup(move || {
+            if let Some(scope) = scope.upgrade() {
+                scope
+                    .reveal
+                    .borrow_mut()
+                    .retain(|kept| !Rc::ptr_eq(kept, &reveal));
+            }
+        });
+    }
+
+    /// The row of `key` in a grid that builds only the rows near the view,
+    /// built there.
+    fn revealed(&self, key: &Value) -> Option<gtk::Widget> {
+        let reveal: Vec<_> = self.reveal.borrow().clone();
+        reveal.iter().find_map(|reveal| reveal(key))
     }
 
     fn items(&self) -> Vec<(Value, gtk::Widget)> {
@@ -1423,6 +1485,11 @@ pub struct ScrollProps {
     /// Where it opens centered: the point at this fraction of the content
     /// in the middle of the view, or as near it as the content reaches.
     pub open_center: Option<Num>,
+    /// `anchor`: the item of `position` stands this fraction of the way
+    /// along the view (and the item), rather than at its start.
+    pub anchor: Option<f64>,
+    /// `browsing`: set while the person scrolls the view, until it rests.
+    pub browsing: Option<Field>,
 }
 
 #[allow(non_snake_case)]
@@ -1472,6 +1539,8 @@ pub fn ScrollView(p: &Parent, ctx: &Ctx, props: ScrollProps, children: Build) {
         view: view.clone(),
         items: RefCell::new(Vec::new()),
         changed: crate::reactive::Version::new(),
+        reveal: RefCell::new(Vec::new()),
+        by_code: std::cell::Cell::new(false),
     });
     children(
         &Parent::of_box(&content),
@@ -1600,6 +1669,12 @@ fn snapping(
     let view = scope.view.clone();
     let center = props.snap == Some("center");
     let snap = props.snap.is_some();
+    // Where along an item and the view they meet.
+    let fraction = if center {
+        0.5
+    } else {
+        props.anchor.unwrap_or(0.0)
+    };
     let adjustment = if horizontal {
         view.hadjustment()
     } else {
@@ -1624,11 +1699,7 @@ fn snapping(
                     rect.height() as f64,
                 )
             };
-            Some(if center {
-                start + size / 2.0 - adjustment.page_size() / 2.0
-            } else {
-                start
-            })
+            Some(start - (adjustment.page_size() - size) * fraction)
         }
     };
     let offset_of = Rc::new(offset_of);
@@ -1761,9 +1832,22 @@ fn snapping(
         let moving_by_us = Rc::clone(&moving_by_us);
         let at = at.clone();
         let resting = Rc::clone(&resting);
+        let browsing = props.browsing;
+        let moved_by_grid = Rc::downgrade(scope);
         adjustment.connect_value_changed(move |adjustment| {
-            if moving_by_us.get() || !placed.get() {
+            if moving_by_us.get()
+                || !placed.get()
+                || moved_by_grid
+                    .upgrade()
+                    .is_some_and(|scope| scope.by_code.get())
+            {
                 return;
+            }
+            // Scrolled by hand, until it rests.
+            if let Some(field) = browsing
+                && !crate::value::truthy(&at.peek(field))
+            {
+                at.write(field, Value::Bool(true));
             }
             if let Some(source) = resting.borrow_mut().take() {
                 source.remove();
@@ -1778,6 +1862,9 @@ fn snapping(
                 Duration::from_millis(160),
                 move || {
                     done.borrow_mut().take();
+                    if let Some(field) = browsing {
+                        at.write(field, Value::Bool(false));
+                    }
                     let Some((key, _, offset)) = nearest(true) else {
                         return;
                     };
@@ -1822,6 +1909,22 @@ fn snapping(
                     .into_iter()
                     .find(|(candidate, _)| *candidate == key)
                 else {
+                    // A row of a grid not built yet: built near the view,
+                    // then scrolled to once it is laid out.
+                    if let Some(item) = scope.revealed(&key) {
+                        let (offset_of, scroll_to) = (Rc::clone(&offset_of), Rc::clone(&scroll_to));
+                        let item = item.downgrade();
+                        glib::timeout_add_local_once(
+                            std::time::Duration::from_millis(40),
+                            move || {
+                                if let Some(offset) =
+                                    item.upgrade().and_then(|item| offset_of(&item))
+                                {
+                                    scroll_to(offset, true, None);
+                                }
+                            },
+                        );
+                    }
                     return;
                 };
                 let Some(offset) = offset_of(&item) else {
@@ -1868,6 +1971,21 @@ fn snapping(
             {
                 scroll_to(offset, false, None);
                 rest_offset.set(adjustment.value());
+            } else if let Some(item) = scope.revealed(&key) {
+                // A row of a grid not built yet, once it is laid out.
+                let (offset_of, scroll_to, rest_offset, adjustment) = (
+                    Rc::clone(&offset_of),
+                    Rc::clone(&scroll_to),
+                    Rc::clone(&rest_offset),
+                    adjustment.clone(),
+                );
+                let item = item.downgrade();
+                glib::timeout_add_local_once(std::time::Duration::from_millis(40), move || {
+                    if let Some(offset) = item.upgrade().and_then(|item| offset_of(&item)) {
+                        scroll_to(offset, false, None);
+                        rest_offset.set(adjustment.value());
+                    }
+                });
             }
         })
     };
@@ -2183,8 +2301,9 @@ pub fn RuntimeImage(p: &Parent, ctx: &Ctx, props: RuntimeImageProps) {
             }
             *current.borrow_mut() = url.clone();
             hidden.set_visible(url.is_some());
+            // Nothing until the new picture is read, not the one before.
+            show(None);
             let Some(url) = url else {
-                show(None);
                 return;
             };
             let show = Rc::clone(&show);
@@ -2296,6 +2415,11 @@ mod tests {
         assert!(!accepts("file:///a/film.mp4", "audio"));
         assert!(!accepts("file:///a/photos", "folder"));
         assert!(!accepts("file:///a/film.mp4", ""));
+        // A folder that is there is taken only as a folder.
+        let folder = gio::File::for_path(std::env::temp_dir()).uri();
+        assert!(accepts(&folder, "folder"));
+        assert!(accepts(&folder, "audio folder"));
+        assert!(!accepts(&folder, "video subtitles"));
     }
 
     #[test]

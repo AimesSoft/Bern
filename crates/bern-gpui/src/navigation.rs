@@ -77,7 +77,10 @@ pub fn navigation(
                 .rounded(px(8.0))
                 .hover(move |style| style.bg(hover))
                 .child(icons::icon("chevron.left", 18.0, c.color("accent.text")))
-                .on_click(move |_, _, cx| back(cx)),
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    back(cx)
+                }),
         )
         .children(title.map(|title| {
             div()
@@ -140,7 +143,10 @@ pub fn nav_link(c: &Ctx, id: &'static str, label: String, route: Value, children
     }
     element
         .hover(move |style| style.bg(hover))
-        .on_click(move |_, _, cx| push(cx))
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            push(cx)
+        })
         .into_any_element()
 }
 

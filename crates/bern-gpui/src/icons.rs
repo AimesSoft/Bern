@@ -33,6 +33,10 @@ impl AssetSource for Assets {
 
 /// The icon `name`, `size` points square, in `color`.
 pub(crate) fn icon(name: &str, size: f32, color: Rgba) -> gpui::AnyElement {
+    let blur = crate::filters::building_blur();
+    if blur > 0.05 {
+        return crate::filters::blurred_icon(name, size, color, blur);
+    }
     svg()
         .path(SharedString::from(format!("icons/{name}.svg")))
         .size(px(size))

@@ -1118,6 +1118,51 @@ extension View {
         }
         #endif
     }
+
+    /// Scroll views in this view draw no edge effect where the window's bars
+    /// would be (macOS and iOS 26 on), and no background of those bars.
+    @ViewBuilder func bernScrollEdgeEffectHidden() -> some View {
+        #if os(tvOS)
+        self
+        #else
+        // The bar's background too, which a scroll view draws in its own
+        // frame, in the window's appearance rather than the layer's.
+        #if os(macOS)
+        if #available(macOS 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .all)
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else if #available(macOS 15.0, *) {
+            toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            self
+        }
+        #else
+        if #available(iOS 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .all)
+        } else {
+            self
+        }
+        #endif
+        #endif
+    }
+
+    /// This view covers the window: while it shows, the split view under it
+    /// has no button to show or hide its sidebar.
+    func bernSidebarToggleHidden() -> some View {
+        preference(key: BernCoversWindow.self, value: true)
+    }
+
+    /// A sidebar's list, whose split view drops its button to show or hide
+    /// the sidebar while a layer covers the window. The button belongs to
+    /// the sidebar column: only removed from there does it go.
+    func bernSidebarToggleFollowsCover() -> some View {
+        modifier(BernSidebarToggleFollowsCover())
+    }
+
+    /// Where a window learns whether a layer covers it.
+    func bernCoverRoot() -> some View {
+        modifier(BernCoverRoot())
+    }
 }
 
 /// A sidebar destination: its icon takes the application's accent, as the
@@ -1809,7 +1854,7 @@ private struct BernTransitionModifier: ViewModifier {
     @Environment(\.bernStagger) private var stagger
 
     func body(content: Content) -> some View {
-        if let appear, stagger != nil || delay != nil || appear.grows {
+        if let appear, stagger != nil || delay != nil || appear.entersItself {
             content
                 .modifier(BernEntrance(appear: appear, motion: insertionMotion, clock: stagger, delay: delay))
                 .transition(.asymmetric(
@@ -2207,6 +2252,30 @@ extension View {
         modifier(BernSpin(on: on, period: period))
     }
 
+    /// A white light follows the pointer over the view, `radius` times its
+    /// shorter side, `opacity` at its centre, inside `corner`. It goes by
+    /// where the view is, so what lies on top does not keep it dark.
+    func bernGlow(_ radius: Double, opacity: Double, corner: Double) -> some View {
+        modifier(BernGlow(radius: radius, opacity: opacity, corner: corner))
+    }
+
+    /// The view's picture blurred with `radius` points, kept inside its
+    /// bounds and `corner`.
+    func bernBlur(_ radius: Double, corner: Double) -> some View {
+        blur(radius: radius).clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+    }
+
+    /// While the person scrolls the view by hand `browsing` holds, until
+    /// the scrolling stops; scrolling to a set position does not count.
+    func bernScrollBrowsing(_ browsing: Binding<Bool>) -> some View {
+        modifier(BernScrollBrowsing(browsing: browsing))
+    }
+
+    /// Where the pointer is over this window, for the views in it that glow.
+    func bernGlowRoot() -> some View {
+        modifier(BernGlowRoot())
+    }
+
     /// A short nudge each time `when` turns true: the view swells a little
     /// and springs back with `motion`.
     func bernNudge(_ when: Bool, motion: BernMotion) -> some View {
@@ -2379,6 +2448,8 @@ private struct BernSnap: ViewModifier {
     let axis: Axis
     @State private var items = BernSnapItems()
     @State private var viewport: CGFloat = 0
+    /// The margin in effect when `viewport` was measured.
+    @State private var measuredWith: CGFloat = 0
 
     func body(content: Content) -> some View {
         let horizontal = axis == .horizontal
@@ -2388,8 +2459,15 @@ private struct BernSnap: ViewModifier {
             .environment(\.bernSnapItems, items)
             .scrollTargetBehavior(BernSnapBehavior(items: items, center: center, axis: axis))
             .contentMargins(horizontal ? .horizontal : .vertical, margin, for: .scrollContent)
-            .onGeometryChange(for: CGFloat.self) { horizontal ? $0.size.width : $0.size.height } action: {
-                viewport = $0
+            .onGeometryChange(for: CGFloat.self) { horizontal ? $0.size.width : $0.size.height } action: { length in
+                // A scroll view as long as its content grows with its own
+                // margins: growth that only echoes a change of the margin
+                // is not more room, and following it would grow the scroll
+                // view forever.
+                let grown = length - viewport
+                if grown > 0, abs(grown - 2 * (margin - measuredWith)) < 1 { return }
+                viewport = length
+                measuredWith = margin
             }
     }
 }
@@ -2770,6 +2848,69 @@ private struct BernScrollPosition<ID: Hashable & Sendable>: ViewModifier {
     }
 }
 
+struct BernCoversWindow: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+private struct BernWindowCoveredKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var bernWindowCovered: Bool {
+        get { self[BernWindowCoveredKey.self] }
+        set { self[BernWindowCoveredKey.self] = newValue }
+    }
+}
+
+@MainActor
+@Observable
+final class BernCover {
+    var covered = false
+}
+
+private struct BernCoverRoot: ViewModifier {
+    @State private var cover = BernCover()
+
+    func body(content: Content) -> some View {
+        content
+            .onPreferenceChange(BernCoversWindow.self) { covered in
+                cover.covered = covered
+            }
+            .environment(\.bernWindowCovered, cover.covered)
+    }
+}
+
+private struct BernSidebarToggleFollowsCover: ViewModifier {
+    @Environment(\.bernWindowCovered) private var covered
+
+    func body(content: Content) -> some View {
+        #if os(tvOS)
+        content
+        #else
+        content.toolbar(removing: covered ? .sidebarToggle : nil)
+        #endif
+    }
+}
+
+/// macOS 14 and iOS 17 do not tell how a scroll view is scrolled; there
+/// `browsing` stays false.
+private struct BernScrollBrowsing: ViewModifier {
+    let browsing: Binding<Bool>
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15.0, iOS 18.0, tvOS 18.0, *) {
+            content.onScrollPhaseChange { _, phase in
+                let byHand = phase == .tracking || phase == .interacting || phase == .decelerating
+                if browsing.wrappedValue != byHand { browsing.wrappedValue = byHand }
+            }
+        } else {
+            content
+        }
+    }
+}
+
 private struct BernKeyedNudge<Key: Equatable>: ViewModifier {
     let key: Key
     let peak: Double
@@ -2789,6 +2930,104 @@ private struct BernKeyedNudge<Key: Equatable>: ViewModifier {
                 guard !Task.isCancelled else { return }
                 withAnimation(motion.animation) { scale = 1 }
             }
+    }
+}
+
+// MARK: - Glow
+
+/// Where the pointer is over a window, in global coordinates: the mouse
+/// while it is over the window, a finger while it presses. Each window's
+/// root keeps one, and a view that glows compares it with its own frame,
+/// so a title laid over a cover leaves the cover lit.
+@MainActor
+@Observable
+final class BernPointer {
+    var location: CGPoint?
+}
+
+private struct BernPointerKey: EnvironmentKey {
+    static let defaultValue: BernPointer? = nil
+}
+
+extension EnvironmentValues {
+    var bernPointer: BernPointer? {
+        get { self[BernPointerKey.self] }
+        set { self[BernPointerKey.self] = newValue }
+    }
+}
+
+private struct BernGlowRoot: ViewModifier {
+    @State private var pointer = BernPointer()
+
+    func body(content: Content) -> some View {
+        content
+            #if os(macOS) || os(iOS)
+            .onContinuousHover(coordinateSpace: .global) { phase in
+                switch phase {
+                case .active(let location): pointer.location = location
+                case .ended: pointer.location = nil
+                }
+            }
+            #endif
+            #if os(iOS)
+            .background(BernGlowTouches(pointer: pointer))
+            #endif
+            .environment(\.bernPointer, pointer)
+    }
+}
+
+/// `glow`: full strength at the centre, a fifth of it at 55% of the
+/// radius, none at the radius, added to what the view draws; it fades in
+/// and out in 0.18 s.
+private struct BernGlow: ViewModifier {
+    let radius: Double
+    let opacity: Double
+    let corner: Double
+    @Environment(\.bernPointer) private var pointer
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            GeometryReader { proxy in
+                let frame = proxy.frame(in: .global)
+                let at = pointer?.location.flatMap { location in
+                    frame.contains(location) ? CGPoint(x: location.x - frame.minX, y: location.y - frame.minY) : nil
+                }
+                BernGlowLight(at: at, size: proxy.size, radius: radius, opacity: opacity)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+            .blendMode(.plusLighter)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+    }
+}
+
+/// The light, where the pointer is; while it fades out, where it last was.
+private struct BernGlowLight: View {
+    let at: CGPoint?
+    let size: CGSize
+    let radius: Double
+    let opacity: Double
+    @State private var last = CGPoint.zero
+
+    var body: some View {
+        let centre = at ?? last
+        RadialGradient(
+            stops: [
+                .init(color: .white.opacity(opacity), location: 0),
+                .init(color: .white.opacity(opacity * 0.2), location: 0.55),
+                .init(color: .white.opacity(0), location: 1),
+            ],
+            center: UnitPoint(x: centre.x / max(size.width, 1), y: centre.y / max(size.height, 1)),
+            startRadius: 0,
+            endRadius: min(size.width, size.height) * radius
+        )
+        // Only the fading is animated: the light does not glide from where
+        // it last was to where the pointer comes in.
+        .animation(.easeInOut(duration: 0.18)) { $0.opacity(at == nil ? 0 : 1) }
+        .onChange(of: at) { _, now in
+            if let now { last = now }
+        }
     }
 }
 
@@ -2949,10 +3188,22 @@ enum BernAppear: Sendable {
     case pop(Double)
     case slide(x: Double, y: Double)
     case grow(Edge)
+    /// In from beyond the edge, its whole size away, without fading.
+    case move(Edge)
 
     var grows: Bool {
         if case .grow = self { return true }
         return false
+    }
+
+    /// It comes in by itself once it has been drawn: a growing rule, or a
+    /// whole page moving in, whose first drawing may take long enough to
+    /// use up a transition's time before anything moves on screen.
+    var entersItself: Bool {
+        switch self {
+        case .grow, .move: return true
+        default: return false
+        }
     }
 
     var scale: Double {
@@ -3003,6 +3254,18 @@ private struct BernEntranceLook: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View {
         if case .grow(let edge) = appear {
             content.modifier(BernGrow(edge: edge, progress: shown ? 1 : 0))
+        } else if case .move(let edge) = appear {
+            let shown = shown
+            content.visualEffect { content, proxy in
+                let size = proxy.size
+                let away: CGSize = switch edge {
+                case .top: CGSize(width: 0, height: -size.height)
+                case .bottom: CGSize(width: 0, height: size.height)
+                case .leading: CGSize(width: -size.width, height: 0)
+                case .trailing: CGSize(width: size.width, height: 0)
+                }
+                return content.offset(shown ? .zero : away)
+            }
         } else {
             content
                 .opacity(shown ? 1 : 0)
@@ -3521,6 +3784,8 @@ struct BernPopoverButton<Content: View>: View {
     let target: String
     var windowTheme = false
     var style: BernStyle? = nil
+    /// The icon's size in points, as an `IconButton`'s `font_size`.
+    var iconSize: CGFloat? = nil
     @ViewBuilder let content: () -> Content
     @Environment(\.colorScheme) private var scheme
     @Environment(\.bernWindowScheme) private var windowScheme
@@ -3536,7 +3801,10 @@ struct BernPopoverButton<Content: View>: View {
         Button {
             showing.wrappedValue.toggle()
         } label: {
-            if let systemImage {
+            if let systemImage, let iconSize {
+                Label(label, systemImage: systemImage).labelStyle(.iconOnly)
+                    .font(.system(size: iconSize))
+            } else if let systemImage {
                 Label(label, systemImage: systemImage).labelStyle(.iconOnly)
             } else {
                 Text(verbatim: label)
@@ -4337,9 +4605,12 @@ private struct BernCapsuleControl: ViewModifier {
         // The design's button sizes (6.3): a main action of 42 points or
         // more is set in 15-point semibold, 22 from its ends; the others in
         // 13-point medium, 14 from their ends, or 13 on a 30-point chip.
+        // A pull-down's label takes the tint, not the foreground: a
+        // secondary capsule's menu is in the words' color, not the accent.
         let control = content.buttonStyle(.plain)
             .font(filled ? .system(size: 15) : height >= 40 ? .system(size: 15, weight: .semibold) : .system(size: 13, weight: .medium))
             .foregroundStyle(prominent ? BernColor.role("on_accent").color : Color.primary)
+            .tint(prominent ? accent ?? .accentColor : Color.primary)
             .padding(.horizontal, height >= 40 ? 22 : height <= 30 ? 13 : 14).frame(height: height)
             .contentShape(Capsule())
         if filled {
@@ -4425,7 +4696,9 @@ private struct BernModalLayer<Content: View>: View {
         GeometryReader { proxy in
         BernModalStage(width: width, height: height, scale: scale, insets: proxy.safeAreaInsets) {
             Color.black.opacity(0.24).contentShape(Rectangle()).onTapGesture { }
-            presentation(AnyView(content
+            // One card whatever the modal holds, a `Shortcut` beside its
+            // content too: the stage places the backdrop and one card.
+            presentation(AnyView(ZStack { content }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .clipShape(RoundedRectangle(cornerRadius: 24))
                 .background {
@@ -4621,6 +4894,9 @@ struct BernRow: Layout {
 
 struct BernFlow: Layout {
     var gap: CGFloat = 8
+    /// Where a line without a spacer stands in the room left on it: 0 at
+    /// the leading edge, 0.5 centred, 1 at the trailing edge.
+    var align: CGFloat = 0
 
     /// Where each child stands: lines broken at the width, a spacer taking
     /// no room there; then the spacers of a line share the room left on
@@ -4646,14 +4922,15 @@ struct BernFlow: Layout {
             let shares = line.filter { spacers[$0] }.count
             let share = shares > 0 && limit.isFinite ? max(0, limit - used) / CGFloat(shares) : 0
             let height = line.map { sizes[$0].height }.max() ?? 0
-            var x: CGFloat = 0
+            let lead = shares == 0 && limit.isFinite ? max(0, limit - used) * align : 0
+            var x: CGFloat = lead
             for index in line {
                 let width = spacers[index] ? share : sizes[index].width
                 let tall = spacers[index] ? height : sizes[index].height
                 frames[index] = CGRect(x: x, y: y + (height - tall) / 2, width: width, height: tall)
                 x += width + gap
             }
-            widest = max(widest, x - gap)
+            widest = max(widest, x - gap - lead)
             y += height + (number < lines.count - 1 ? gap : 0)
         }
         return (CGSize(width: width ?? widest, height: y), frames)
@@ -4860,6 +5137,44 @@ extension View {
         #else
         self
         #endif
+    }
+}
+
+private struct BernInFormKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Inside a form, whose rows frame its fields.
+    var bernInForm: Bool {
+        get { self[BernInFormKey.self] }
+        set { self[BernInFormKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// An iPhone or iPad field outside a form, which SwiftUI draws as bare
+    /// text: a filled box around it, as the system's sign-in sheets have.
+    func bernFieldBox() -> some View {
+        modifier(BernFieldBox())
+    }
+}
+
+private struct BernFieldBox: ViewModifier {
+    @Environment(\.bernInForm) private var inForm
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if inForm {
+            content
+        } else {
+            content
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(minHeight: 46)
+                #if os(iOS)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                #endif
+        }
     }
 }
 

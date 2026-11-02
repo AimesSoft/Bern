@@ -1031,10 +1031,13 @@ impl ProtocolSource {
     }
 }
 
-/// Read a protocol source, which holds exactly one protocol module.
+/// Read a protocol source, which holds exactly one protocol module; a
+/// module's protocol may use the value types `imported` from the modules
+/// it depends on.
 fn read_protocol(
     file: &SourceFile,
     modules: &bern_syntax::build::Modules,
+    imported: &TypeTable,
 ) -> Result<ProtocolSource, Vec<Diagnostic>> {
     let items = read_selected(file, modules)?;
     let Ok([(path, item)]) = <[_; 1]>::try_from(items.protocols) else {
@@ -1043,7 +1046,7 @@ fn read_protocol(
             file.display
         ))]);
     };
-    let descriptor = bern_syntax::lower::protocol_descriptor(&item)
+    let descriptor = bern_syntax::lower::protocol_descriptor_with(&item, imported)
         .map_err(|error| syn_error(&file.display, error))?;
     Ok(ProtocolSource {
         path,
@@ -1091,16 +1094,31 @@ fn compose_protocols(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Protocols, Vec<Diagnostic>> {
     let protocol_file = &config.protocol_source;
-    let shell = read_protocol(protocol_file, &config.build_modules)?;
+    let shell = read_protocol(protocol_file, &config.build_modules, &TypeTable::default())?;
     check_protocol_labels(&shell.item, &protocol_file.display, config, diagnostics);
     let mut clients = Clients {
         protocols: vec![(shell.name(), shell.descriptor.namespace.clone())],
     };
     let mut module_descriptors = Vec::new();
     let mut module_protocols = Vec::new();
+    // The value types of each module read so far, its own and those it
+    // took from the modules it depends on, which come before it.
+    let mut module_types: BTreeMap<&str, TypeTable> = BTreeMap::new();
     for module in &config.modules {
         let file = &module.protocol_source;
-        let source = read_protocol(file, &config.build_modules)?;
+        let mut imported = TypeTable::default();
+        for dependency in &module.depends {
+            if let Some(types) = module_types.get(dependency.as_str())
+                && let Err(error) = imported.merge(types)
+            {
+                diagnostics.push(Diagnostic::error(format!(
+                    "{}: the modules `{}` depends on declare one type in two shapes: {}",
+                    file.display, module.id, error.message
+                )));
+            }
+        }
+        let source = read_protocol(file, &config.build_modules, &imported)?;
+        module_types.insert(&module.id, source.descriptor.types.clone());
         if source.descriptor.namespace != module.id {
             diagnostics.push(Diagnostic::error(format!(
                 "{}: the protocol of module `{}` must use `namespace = \"{}\"`, not `{}`",
@@ -1379,6 +1397,7 @@ fn module_contributions(
             );
         }
     }
+    let mut starts: BTreeMap<String, (String, String)> = BTreeMap::new();
     let mut contributions = Contributions {
         namespaces: std::iter::once(namespace.to_string())
             .chain(config.modules.iter().map(|module| module.id.clone()))
@@ -1425,7 +1444,7 @@ fn module_contributions(
                     }
                 }
             }
-            def.variants.push(VariantDef {
+            let added = VariantDef {
                 name: variant.clone(),
                 fields: Vec::new(),
                 label: Some(LocalizedText {
@@ -1433,7 +1452,21 @@ fn module_contributions(
                     translations: page.label.clone(),
                     params: Vec::new(),
                 }),
-            });
+            };
+            // A selection starts on the enum's first variant.
+            if page.start {
+                if let Some(first) =
+                    starts.insert(enum_name.clone(), (module.id.clone(), page.id.clone()))
+                {
+                    diagnostics.push(Diagnostic::error(format!(
+                        "pages `{}` of module `{}` and `{}` of module `{}` both start slot `{}`; one page per slot can",
+                        first.1, first.0, page.id, module.id, page.slot
+                    )));
+                }
+                def.variants.insert(0, added);
+            } else {
+                def.variants.push(added);
+            }
             contributions
                 .pages
                 .entry(page.slot.clone())
@@ -1448,6 +1481,8 @@ fn module_contributions(
                     label: page.label.clone(),
                     icon: page.icon.clone(),
                     badge: page.badge.clone(),
+                    when: page.when.clone(),
+                    tab: page.tab,
                     component: page.component.clone(),
                 });
         }
@@ -2212,6 +2247,7 @@ pub fn compile(config: &Config) -> Result<Compiled, Vec<Diagnostic>> {
                 platform_icons: config.platform_icons.clone(),
                 alternate_icons: config.alternate_icons.clone(),
                 publisher: config.publisher.clone(),
+                files_folder: config.files_folder,
             },
             languages: ir::Languages {
                 supported: config.languages.clone(),

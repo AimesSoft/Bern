@@ -20,6 +20,9 @@ serde_json = { workspace = true, optional = true }
 # The JNI bridge of the Kotlin frontend.
 [target.'cfg(target_os = "android")'.dependencies]
 jni-sys = "0.4"
+# Where engine libraries find the Java VM and the application (cpal's
+# audio output among them).
+ndk-context = "0.1"
 
 [features]
 default = ["ipc"]

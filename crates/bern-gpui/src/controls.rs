@@ -253,7 +253,7 @@ pub(crate) fn painted(
     } = states;
     let hover_scale = style.and_then(|style| style.hover?.scale);
     let pressed_scale = style.and_then(|style| style.pressed?.scale);
-    let key = format!("{}/{}", c.win().id, c.target(id));
+    let key = format!("{}/{}", c.win().id, c.key(id));
     let (hovering, pressing) = POINTER.with(|pointer| {
         let pointer = pointer.borrow();
         (
@@ -261,17 +261,42 @@ pub(crate) fn painted(
             pointer.1.as_deref() == Some(&key),
         )
     });
-    let scale = match (pressing, hovering) {
-        (true, _) => pressed_scale.or(hover_scale.filter(|_| hovering)),
-        (false, true) => hover_scale,
+    let state =
+        |look: Option<Look>| look.and_then(|look| look.scale.map(|scale| (scale, look.motion)));
+    let hovered_state = style.and_then(|style| state(style.hover));
+    let pressed_state = style.and_then(|style| state(style.pressed));
+    let target = match (pressing, hovering) {
+        (true, _) => pressed_state.or(hovered_state.filter(|_| hovering)),
+        (false, true) => hovered_state,
         _ => None,
     };
+    // The scale springs to the state's with the state's motion, and back
+    // to rest with `settle`.
+    let smooth = (0.45, 1.0);
+    let (to, curve) = match target {
+        Some(((x, y), motion)) => (x.min(y), motion.unwrap_or(smooth)),
+        None => (
+            1.0,
+            style
+                .and_then(|style| style.settle)
+                .or(hovered_state.and_then(|(_, motion)| motion))
+                .unwrap_or(smooth),
+        ),
+    };
+    let scale = if hover_scale.is_some() || pressed_scale.is_some() {
+        crate::motion::spring_to(c, &format!("{key}^scale"), curve, to, 1.0)
+    } else {
+        1.0
+    };
+    let scale = ((scale - 1.0).abs() >= 0.0005).then_some((scale, scale));
     let element = match scale {
         Some((x, y)) => {
             let colors = if pressing {
                 pressed.unwrap_or(rest)
-            } else {
+            } else if hovering {
                 hover.unwrap_or(rest)
+            } else {
+                rest
             };
             let face = crate::units::scaled(x.min(y), || look::paint(build(), colors)).size_full();
             let (x, y) = ((1.0 - x) / 2.0, (1.0 - y) / 2.0);
@@ -321,7 +346,11 @@ pub(crate) fn painted(
     } else {
         element
     };
-    element.on_click(move |_, _, cx| press(cx))
+    // A control takes its click: what lies under it does not get it too.
+    element.on_click(move |_, _, cx| {
+        cx.stop_propagation();
+        press(cx)
+    })
 }
 
 /// `Button` with a text label and an optional icon: 36 points high, 14
@@ -412,8 +441,12 @@ fn button_of(
                 .py(px(padding.min(8.0)))
                 .children(content(&inner)),
             // Otherwise the content is all there is; a style's room pads it
-            // and its corner clips it.
+            // and its corner clips it. It is never wider than its
+            // container, so text in it wraps or ends in an ellipsis.
             Some(content) => element
+                .flex_shrink(1.0)
+                .min_w(px(0.0))
+                .max_w(gpui::relative(1.0))
                 .when_some(style.and_then(|style| style.padding), |element, padding| {
                     element.p(px(padding))
                 })
@@ -671,7 +704,10 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         let hover = c.color("hover.overlay");
         return element
             .hover(move |style| style.bg(hover))
-            .on_click(move |_, _, _| toggle(!on))
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                toggle(!on)
+            })
             .into_any_element();
     }
     let state = match (enabled, on) {
@@ -758,7 +794,10 @@ pub fn switch(c: &Ctx, id: &'static str, label: String, model: Model, props: Swi
         return element.into_any_element();
     }
     element
-        .on_click(move |_, _, _| toggle(!on))
+        .on_click(move |_, _, cx| {
+            cx.stop_propagation();
+            toggle(!on)
+        })
         .into_any_element()
 }
 
@@ -859,7 +898,10 @@ pub fn picker(
                     let choose = Rc::clone(&choose);
                     segment
                         .hover(move |style| style.bg(hover))
-                        .on_click(move |_, _, _| choose(value.clone()))
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            choose(value.clone())
+                        })
                 });
             c.grow()
                 .apply(
@@ -915,8 +957,9 @@ pub fn picker(
 }
 
 /// `LanguagePicker`: the supported languages by their own names; choosing
-/// one switches the interface language.
-pub fn language_picker(c: &Ctx, id: &'static str, label: String) -> El {
+/// one switches the interface language. With `label_hidden` the label is
+/// only its accessible name.
+pub fn language_picker(c: &Ctx, id: &'static str, label: String, label_hidden: bool) -> El {
     let current = crate::text::language();
     let options: Vec<(Value, String)> = crate::text::supported()
         .into_iter()
@@ -934,7 +977,7 @@ pub fn language_picker(c: &Ctx, id: &'static str, label: String) -> El {
         c,
         id,
         label,
-        false,
+        label_hidden,
         model,
         options,
         PickerStyle::Menu,
@@ -1177,6 +1220,10 @@ impl RenderOnce for TextField {
         let search = props.kind == InputKind::Search;
         let height = props.height.unwrap_or(if search { 32.0 } else { 36.0 });
         let field = div()
+            // The field takes the presses in it: what lies under it does
+            // not get them too.
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_up(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .flex()
             .flex_row()
             .items_center()
@@ -1272,7 +1319,7 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
     if let Some(key) = props.clear_key
         && !c.listing()
     {
-        let target = c.target(id);
+        let target = c.key(id);
         let changed = CLEAR_KEYS.with(|keys| {
             let mut keys = keys.borrow_mut();
             let previous = keys.insert(target, key);
@@ -1310,7 +1357,7 @@ pub fn text_input(c: &Ctx, id: &str, props: InputProps, field: Field, submit: Op
         c.slot("field", state, "border"),
     ];
     let element = TextField {
-        key: c.target(id).into(),
+        key: c.key(id).into(),
         props,
         value,
         enabled,

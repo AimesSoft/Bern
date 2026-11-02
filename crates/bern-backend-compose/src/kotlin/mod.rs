@@ -283,6 +283,16 @@ impl<'a> Generator<'a> {
                 // window rest over.
                 let mut effects = String::new();
                 let nudge_scale = float(element.number("nudge_scale").unwrap_or(1.06));
+                // The light goes outside any turning, under the pointer;
+                // the blur is innermost, so the light on top stays sharp.
+                let corner = float(element.number("corner").unwrap_or(0.0));
+                if let Some(radius) = element.number("glow") {
+                    effects.push_str(&format!(
+                        ".bernGlow({}, {}, {corner})",
+                        float(radius),
+                        float(element.number("glow_opacity").unwrap_or(0.4))
+                    ));
+                }
                 if let Some(when) = element.expr("spin") {
                     effects.push_str(&format!(
                         ".bernSpin({}, {})",
@@ -319,6 +329,11 @@ impl<'a> Generator<'a> {
                 }
                 if let Some(seconds) = element.number("idle_area") {
                     effects.push_str(&format!(".bernIdleArea({})", double(seconds)));
+                }
+                // A radius that follows state moves with the element's
+                // `animate` spring.
+                if let Some(radius) = self.length(element, "blur") {
+                    effects.push_str(&format!(".bernBlur({radius}, {corner})"));
                 }
                 if !effects.is_empty() {
                     out.open(format!("Box(Modifier{effects}) {{"));
@@ -502,7 +517,7 @@ impl<'a> Generator<'a> {
             "Text" => self.text_view(out, element),
             "Canvas" => self.canvas(out, element, ctx),
             "Label" => self.label_view(out, element),
-            "Button" | "IconButton" => self.button(out, element, ctx),
+            "Button" | "IconButton" => self.context_menu(out, element, ctx),
             "TextInput" => self.text_input(out, element, ctx),
             "Search" if element.keyword("style") == Some("palette") => {
                 self.search_palette(out, element, ctx)
@@ -557,6 +572,7 @@ impl<'a> Generator<'a> {
             "ScrollView"
                 if element.prop("snap").is_some()
                     || element.prop("position").is_some()
+                    || element.prop("browsing").is_some()
                     || self.scroll_effects(&element.children) =>
             {
                 self.tracked_scroll_view(out, element, ctx)
@@ -578,7 +594,7 @@ impl<'a> Generator<'a> {
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "SidebarHeader"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "TabAccessory" | "PickerOption"
-            | "TableColumn" | "TableMenu"
+            | "TableColumn" | "TableMenu" | "ContextMenu"
             // Android has no menu bar for applications.
             | "MenuBar" | "CommandMenu" | "CommandItem"
             // Nor a status area.

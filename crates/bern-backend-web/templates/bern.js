@@ -572,6 +572,19 @@ class CommandFailure extends Error {
 /// application), by the `blob:` URL the engine knows them by.
 export const pageFiles = new Map();
 
+/// The folders the user gave the page and the folders inside them, by the
+/// `blob:` URL the engine knows them by: each its `name` and `entries`,
+/// the files and folders it holds as `{ url, name, folder, size, modified }`.
+export const pageFolders = new Map();
+
+/// What a page folder holds, as the engine reads it: for each entry its
+/// URL, name, `d` or `f`, size and last change in milliseconds, each
+/// followed by a NUL.
+export function folderText(folder) {
+  return folder.entries.map((entry) => [entry.url, entry.name, entry.folder ? "d" : "f", entry.size, entry.modified ?? ""]
+    .map((field) => `${field}\0`).join("")).join("");
+}
+
 /// The bytes of `blob`, read at once. The engine runs on the page's thread
 /// and reads without waiting, and a synchronous request is the only way to
 /// read a blob there; the bytes arrive as text decoded one byte per letter.
@@ -667,11 +680,13 @@ class Host {
         },
         // Files the page was given, which the engine reads.
         file_name: (ptr, len, out, capacity) => {
-          const file = pageFiles.get(this.text(ptr, len));
-          if (!file) return -1;
-          const bytes = new TextEncoder().encode(file.name);
-          if (bytes.length <= capacity) new Uint8Array(this.exports.memory.buffer, out, bytes.length).set(bytes);
-          return bytes.length;
+          const url = this.text(ptr, len);
+          const file = pageFiles.get(url) ?? pageFolders.get(url);
+          return file ? this.answer(file.name, out, capacity) : -1;
+        },
+        folder_list: (ptr, len, out, capacity) => {
+          const folder = pageFolders.get(this.text(ptr, len));
+          return folder ? this.answer(folderText(folder), out, capacity) : -1;
         },
         file_size: (ptr, len) => pageFiles.get(this.text(ptr, len))?.size ?? -1,
         file_read: (ptr, len, offset, out, count) => {
@@ -736,6 +751,15 @@ class Host {
 
   text(ptr, len) {
     return new TextDecoder().decode(new Uint8Array(this.exports.memory.buffer, ptr, len));
+  }
+
+  /// `text` for an import that answers it: written to `out` when it fits in
+  /// `capacity`, its length answered either way, so a larger buffer can ask
+  /// again.
+  answer(text, out, capacity) {
+    const bytes = new TextEncoder().encode(text);
+    if (bytes.length <= capacity) new Uint8Array(this.exports.memory.buffer, out, bytes.length).set(bytes);
+    return bytes.length;
   }
 
   /// Callbacks arrive while Rust is running; their work happens after the
@@ -1552,12 +1576,18 @@ export const STYLE_CLASS = {
   caption2: "caption2", control: "control-font", code: "code",
 };
 
-export function Text(p, ctx, { content, style, emphasis, color, fontSize, lines, lineHeight, markdown }) {
+export function Text(p, ctx, { content, style, emphasis, color, fontSize, lines, lineHeight, markdown, bold, animate }) {
   const node = el("p", { class: `bern-text bern-${STYLE_CLASS[style] ?? "body"} bern-emphasis-${emphasis ?? "primary"}` });
   textColor(node, color);
   if (markdown) effect(() => node.replaceChildren(inlineMarkdown(String(content() ?? ""))));
   else bindText(node, content);
-  length(node, "fontSize", fontSize);
+  // With `animate`, a bound size springs and the weight eases to bold.
+  if (animate && hooks.length) hooks.length(node, "fontSize", fontSize, animate);
+  else length(node, "fontSize", fontSize);
+  if (bold !== undefined) {
+    if (animate) node.style.transition = `font-weight ${Array.isArray(animate) ? animate[0] : 0.3}s ease`;
+    effect(() => node.classList.toggle("bern-bold", Boolean(readValue(bold))));
+  }
   length(node, "lineHeight", lineHeight);
   if (lines !== undefined) {
     node.classList.add("bern-text-clamp");
@@ -1597,7 +1627,7 @@ export function startFocus(node) {
   });
 }
 
-export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill, defaultFocus }, action) {
+export function Button(p, ctx, { id, label, icon: name, role, prominence, enabled, style, setFile, fileKinds, shape, height, fill, defaultFocus, menu }, action) {
   const kind = prominence ?? "standard";
   const text = el("span");
   bindText(text, label);
@@ -1619,8 +1649,114 @@ export function Button(p, ctx, { id, label, icon: name, role, prominence, enable
   });
   if (style) hooks.style?.(node, style, {});
   controlShape(node, shape, height);
+  contextMenu(node, ctx, label, menu);
   p.append(ctx.inGroup && !ctx.inToolbar ? el("div", { class: "bern-row bern-row-button" }, node) : node);
   if (defaultFocus) startFocus(node);
+}
+
+/// A button's `ContextMenu`: a secondary click, a long touch, or the menu
+/// key or Shift+F10 opens `items` where it happened, and the press that
+/// opened it does not also press the button. Each item is a control of its
+/// own, reached while the menu is closed.
+export function contextMenu(node, ctx, label, items) {
+  if (!items?.length) return;
+  const list = el("div", { class: "bern-menu", role: "menu", popover: "auto" });
+  bindAttr(list, "aria-label", label);
+  const buttons = [];
+  for (const item of items) {
+    if (!item) {
+      list.append(el("div", { class: "bern-menu-separator", role: "separator" }));
+      continue;
+    }
+    const itemText = el("span", { class: "bern-menu-text" });
+    bindText(itemText, item.label);
+    const button = el("button", {
+      class: `bern-menu-item${item.role === "destructive" ? " bern-destructive" : ""}`, type: "button",
+      role: "menuitem", tabindex: "-1",
+    }, item.icon ? icon(item.icon, 16) : null, itemText);
+    const isEnabled = enabledOf(item.enabled);
+    effect(() => {
+      button.disabled = !isEnabled();
+    });
+    mark(button, ctx, item.id);
+    button.addEventListener("click", () => {
+      list.hidePopover();
+      node.focus();
+      item.action();
+    });
+    button.addEventListener("pointermove", () => {
+      if (!button.disabled && document.activeElement !== button) button.focus();
+    });
+    control(ctx, {
+      target: () => target(ctx, item.id), role: "button", label: item.label, enabled: isEnabled,
+      actions: { activate: item.action, ...(item.setFile ? { setFile: item.setFile, fileKinds: item.fileKinds } : {}) },
+    });
+    list.append(button);
+    buttons.push(button);
+  }
+  const openAt = (x, y) => {
+    list.style.left = `${x}px`;
+    list.style.top = `${y}px`;
+    list.showPopover();
+    const rect = list.getBoundingClientRect();
+    if (rect.right > innerWidth) list.style.left = `${Math.max(8, innerWidth - rect.width - 8)}px`;
+    if (rect.bottom > innerHeight) list.style.top = `${Math.max(8, innerHeight - rect.height - 8)}px`;
+    buttons.find((button) => !button.disabled)?.focus();
+  };
+  let timer = null;
+  let start = null;
+  let held = false;
+  const cancel = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+  };
+  node.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    cancel();
+    openAt(event.clientX, event.clientY);
+  });
+  node.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "touch") return;
+    start = [event.clientX, event.clientY];
+    timer = setTimeout(() => {
+      timer = null;
+      held = true;
+      openAt(start[0], start[1]);
+    }, 500);
+  });
+  node.addEventListener("pointermove", (event) => {
+    if (timer && start && Math.hypot(event.clientX - start[0], event.clientY - start[1]) > 10) cancel();
+  });
+  node.addEventListener("pointerup", cancel);
+  node.addEventListener("pointercancel", cancel);
+  node.addEventListener("click", (event) => {
+    if (!held) return;
+    held = false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
+      event.preventDefault();
+      const rect = node.getBoundingClientRect();
+      openAt(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    }
+  });
+  list.addEventListener("keydown", (event) => {
+    const available = buttons.filter((button) => !button.disabled);
+    const at = available.indexOf(document.activeElement);
+    const move = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: available.length - 1 }[event.key];
+    if (move !== undefined && available.length) {
+      event.preventDefault();
+      available[(move + available.length) % available.length].focus();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      list.hidePopover();
+      node.focus();
+    }
+  });
+  document.body.append(list);
+  onCleanup(() => list.remove());
 }
 
 export function IconButton(p, ctx, { id, icon: name, label, enabled, style, setFile, fileKinds, fontSize, prominence, diameter, defaultFocus }, action) {
@@ -2572,8 +2708,8 @@ export function Grid(p, ctx, { minWidth, gap, rowGap, padding, paddingX, padding
   p.append(node);
 }
 
-export function Flow(p, ctx, { gap }, children) {
-  const node = el("div", { class: "bern-flow bern-fill-width" });
+export function Flow(p, ctx, { gap, align }, children) {
+  const node = el("div", { class: `bern-flow bern-fill-width${align ? ` bern-flow-${align}` : ""}` });
   length(node, "gap", gap ?? 8);
   children(node, { ...ctx, inGroup: false });
   p.append(node);
@@ -2882,6 +3018,7 @@ export function When(p, ctx, branch, arms) {
 }
 
 /// The nodes from `start` to `end`, inclusive.
+const nodesBetween = (start, end) => range(start, end);
 function range(start, end) {
   const nodes = [];
   for (let node = start; node; node = node.nextSibling) {
@@ -2953,6 +3090,254 @@ export function Each(p, ctx, { items, key, stagger }, row) {
   onCleanup(() => {
     for (const entry of rows.values()) entry.owner.dispose();
   });
+}
+
+/// A `Grid` whose items are one `ForEach`: in a vertical scroll view only
+/// the rows near what is in sight are built, one view's height before and
+/// after it; the rows above and below stand as space of their height, the
+/// height of a row not yet built guessed from the first one built. Outside
+/// a scroll view every row is built. A built row keeps its DOM, controls
+/// and state while its key stays and it is near the view; `setup` binds the
+/// grid's lengths, `outer` its padding.
+export function LazyGrid(p, ctx, { minWidth, items, key, align }, setup, outer, row) {
+  const node = el("div", { class: "bern-lazy-grid bern-fill-width" });
+  const above = el("div", { class: "bern-lazy-space" });
+  // A list from a column (`align`): rows keep their own width and stand
+  // across it as the column says.
+  const body = el("div", { class: `bern-grid bern-fill-width${align ? ` bern-column-list bern-column-list-${align}` : ""}` });
+  const below = el("div", { class: "bern-lazy-space" });
+  node.append(above, body, below);
+  p.append(node);
+  // A minimum width bound to state sets the columns itself (`setup`).
+  if (minWidth !== undefined) {
+    effect(() => body.style.gridTemplateColumns = `repeat(auto-fill, minmax(min(100%, ${Math.max(1, Number(readValue(minWidth)) || 1)}px), 1fr))`);
+  }
+  length(body, "gap", 8);
+  setup?.(body);
+  outer?.(node);
+  let list = [];
+  let keys = [];
+  /// Built rows by key: their value cell, scope, markers and element.
+  let built = new Map();
+  /// Heights of built items by key; the guess for the rest.
+  const heights = new Map();
+  let guess = 0;
+  let width = -1;
+  let columns = 1;
+  let gap = 0;
+  /// Where each row starts, and the whole height.
+  let starts = [0];
+  let total = 0;
+  const scroller = () => {
+    const found = node.parentElement?.closest(".bern-scroll");
+    return found?.classList.contains("bern-scroll-vertical") ? found : null;
+  };
+  const measureColumns = () => {
+    const style = getComputedStyle(body);
+    const inner = body.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    gap = parseFloat(style.rowGap) || 0;
+    if (inner !== width) {
+      // Another width wraps text otherwise: heights are measured again.
+      width = inner;
+      heights.clear();
+      guess = 0;
+    }
+    // As many columns as the browser laid out.
+    const tracks = style.gridTemplateColumns.split(" ").filter((track) => track && track !== "none");
+    columns = Math.max(1, tracks.length);
+  };
+  const layout = () => {
+    const rows = Math.ceil(keys.length / columns);
+    starts = new Array(rows + 1);
+    let at = 0;
+    for (let r = 0; r < rows; r++) {
+      starts[r] = at;
+      let tallest = 0;
+      for (let i = r * columns; i < Math.min(keys.length, (r + 1) * columns); i++) {
+        tallest = Math.max(tallest, heights.get(keys[i]) ?? guess);
+      }
+      at += tallest + gap;
+    }
+    starts[rows] = at;
+    total = rows ? at - gap : 0;
+  };
+  /// The first row whose bottom is below `y`.
+  const rowAt = (y) => {
+    let low = 0;
+    let high = starts.length - 1;
+    while (low < high) {
+      const mid = (low + high) >> 1;
+      if (starts[mid + 1] - gap <= y) low = mid + 1;
+      else high = mid;
+    }
+    return low;
+  };
+  /// The rows to build: those near the view, or all outside a scroll view.
+  const wanted = () => {
+    const rows = starts.length - 1;
+    const first = [0, Math.min(rows, Math.ceil(24 / columns))];
+    // Not on the page yet: a first screenful, until it is.
+    if (!node.isConnected) return first;
+    const view = scroller();
+    if (!view) return [0, rows];
+    if (!guess) return first;
+    const port = view.getBoundingClientRect();
+    const top = port.top - above.getBoundingClientRect().top;
+    const from = rowAt(Math.max(0, top - port.height));
+    const to = Math.min(rows, rowAt(Math.max(0, top + port.height * 2)) + 1);
+    return [Math.min(from, rows), Math.max(to, Math.min(from, rows))];
+  };
+  const resize = new ResizeObserver((entries) => {
+    let changed = false;
+    for (const entry of entries) {
+      const id = entry.target.bernLazyKey;
+      if (id === undefined || !built.has(id)) continue;
+      const height = entry.target.getBoundingClientRect().height;
+      if (heights.get(id) !== height) {
+        heights.set(id, height);
+        if (!guess && height) guess = height;
+        changed = true;
+      }
+    }
+    if (changed) schedule();
+  });
+  /// The heights of the rows built, as they are laid out now.
+  const measureBuilt = () => {
+    for (const [id, entry] of built) {
+      const height = entry.element?.getBoundingClientRect().height ?? 0;
+      if (!height) continue;
+      heights.set(id, height);
+      if (!guess) guess = height;
+    }
+  };
+  const show = () => {
+    measureColumns();
+    measureBuilt();
+    layout();
+    const [from, to] = wanted();
+    const first = from * columns;
+    const last = Math.min(keys.length, to * columns);
+    const next = new Map();
+    untrack(() => {
+      for (let i = first; i < last; i++) {
+        const id = keys[i];
+        let entry = built.get(id);
+        if (entry) {
+          built.delete(id);
+        } else {
+          const value = cell(list[i]);
+          const owner = new Scope(null);
+          const fragment = document.createDocumentFragment();
+          const start = document.createComment("");
+          const end = document.createComment("");
+          fragment.append(start);
+          const rowKey = () => String(key(value.peek()));
+          within(owner, () => row(fragment, { ...ctx, key: rowKey, keys: [...(ctx.keys ?? []), rowKey] }, () => value.get()));
+          const element = [...fragment.childNodes].find((one) => one.nodeType === 1);
+          if (element) {
+            element.dataset.bernItem = "";
+            element.bernKey = key(list[i]);
+            element.bernLazyKey = id;
+            resize.observe(element);
+          }
+          fragment.append(end);
+          body.append(fragment);
+          entry = { value, owner, start, end, element };
+        }
+        next.set(id, entry);
+      }
+      // A row whose item is gone plays its `disappear` where it was; a
+      // row only scrolled out of range goes at once.
+      const present = new Set(keys);
+      for (const [id, stale] of built) {
+        if (stale.element) resize.unobserve(stale.element);
+        stale.owner.dispose();
+        for (const one of nodesBetween(stale.start, stale.end)) present.has(id) ? one.remove() : leave(one);
+      }
+      // Built rows in the order of the items.
+      let anchor = null;
+      for (const entry of next.values()) {
+        const at = anchor ? anchor.nextSibling : body.firstChild;
+        if (at !== entry.start) {
+          if (anchor) anchor.after(...nodesBetween(entry.start, entry.end));
+          else body.prepend(...nodesBetween(entry.start, entry.end));
+        }
+        anchor = entry.end;
+      }
+    });
+    built = next;
+    above.style.height = `${starts[from] ?? 0}px`;
+    below.style.height = `${Math.max(0, total - (starts[to] ?? total) + (to < starts.length - 1 ? gap : 0))}px`;
+  };
+  let pending = 0;
+  const schedule = () => {
+    if (pending) return;
+    // Once a frame; a hidden page draws no frames, so a timer stands in.
+    const run = () => {
+      pending = 0;
+      show();
+    };
+    pending = document.hidden ? setTimeout(run, 16) : requestAnimationFrame(run);
+  };
+  effect(() => {
+    list = items();
+    // A list without rows takes no place, nor a gap, in its column.
+    if (align) node.hidden = list.length === 0;
+    untrack(() => {
+      keys = list.map((item) => String(key(item)));
+      // Rows still near the view follow their items' new values.
+      for (let i = 0; i < list.length; i++) built.get(keys[i])?.value.set(list[i]);
+      show();
+    });
+  });
+  // The view it scrolls in, once it is on the page.
+  let watched = null;
+  const watch = () => {
+    const view = scroller();
+    if (view === watched) return;
+    watched?.removeEventListener("scroll", schedule);
+    watched = view;
+    view?.addEventListener("scroll", schedule, { passive: true });
+    if (view) sized.observe(view);
+    schedule();
+  };
+  const sized = new ResizeObserver(() => {
+    watch();
+    schedule();
+  });
+  sized.observe(node);
+  /// Brings the row of `key` near the view and gives its element, for a
+  /// scroll view's `position` to scroll to.
+  node.bernReveal = (wantedKey) => {
+    const i = keys.indexOf(String(wantedKey));
+    const view = scroller();
+    if (i < 0 || !view) return null;
+    const rowTop = starts[Math.floor(i / columns)] ?? 0;
+    view.scrollTop += above.getBoundingClientRect().top + rowTop - view.getBoundingClientRect().top;
+    show();
+    return built.get(keys[i])?.element ?? null;
+  };
+  onCleanup(() => {
+    if (pending) {
+      cancelAnimationFrame(pending);
+      clearTimeout(pending);
+    }
+    watched?.removeEventListener("scroll", schedule);
+    resize.disconnect();
+    sized.disconnect();
+    for (const entry of built.values()) entry.owner.dispose();
+  });
+}
+
+/// The element of the item of `key` in a lazy grid of `scroll`, built and
+/// brought near the view for it.
+export function revealLazy(scroll, wantedKey) {
+  for (const grid of scroll.querySelectorAll(".bern-lazy-grid")) {
+    if (grid.closest(".bern-scroll") !== scroll) continue;
+    const found = grid.bernReveal?.(wantedKey);
+    if (found) return found;
+  }
+  return null;
 }
 
 export function List(p, ctx, children) {
@@ -3722,7 +4107,7 @@ export function Table(p, ctx, { id, label, selection, items, key }, columns, men
 
 /// Switches the interface language among the supported languages; each is
 /// listed by its own name.
-export function LanguagePicker(p, ctx, { id, label }) {
+export function LanguagePicker(p, ctx, { id, label, labelHidden = false }) {
   const options = supportedLanguages.map((tag) => ({ value: tag, name: tag, label: () => autonym(tag) }));
   const field = { get: () => languageCell.get(), peek: () => languageCell.peek(), set: setLanguage };
   const select = (name) => {
@@ -3736,8 +4121,10 @@ export function LanguagePicker(p, ctx, { id, label }) {
     target: () => target(ctx, id), role: "picker", label,
     actions: { select, value: () => languageCell.peek() },
   });
-  if (ctx.inToolbar) p.append(node);
-  else p.append(labelled(node, label, false, node.control));
+  if (ctx.inToolbar || labelHidden) {
+    if (labelHidden) bindAttr(node.control, "aria-label", label);
+    p.append(node);
+  } else p.append(labelled(node, label, false, node.control));
 }
 
 /// The result of an asynchronous query. The subscription belongs to the

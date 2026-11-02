@@ -88,6 +88,9 @@ struct Ctx {
     /// Written directly in a window, or through a condition there: a
     /// column spans the window's width and a stack fills it.
     window: bool,
+    /// The layers of a stack some of whose conditions bring in a moving
+    /// layer: each is drawn at its place in the stack by its `zIndex`.
+    layers: bool,
 }
 
 /// The system the Swift is generated for. SwiftUI is shared; windows,
@@ -160,9 +163,36 @@ impl<'a> Generator<'a> {
             if std::mem::take(&mut spacer_taken) {
                 continue;
             }
+            // A list lowered to a lazy column is its rows, built by the
+            // lazy stack the column becomes (`bern_ir::lower_lists`).
+            if let Node::Element(element) = node
+                && bern_ir::lowered_list_align(element).is_some()
+            {
+                self.nodes(out, &element.children, ctx);
+                emitted = true;
+                continue;
+            }
             // Toolbars and side panels attach to their container.
             if matches!(node, Node::Element(element) if element.kind == "Toolbar" || element.kind == "Inspector")
             {
+                continue;
+            }
+            // SwiftUI draws a layer it is taking away behind the others
+            // unless the layer has its own place: a sheet sliding out would
+            // be hidden at once by the page it uncovers.
+            if ctx.layers {
+                out.open("SwiftUI.Group {");
+                self.node(
+                    out,
+                    node,
+                    &Ctx {
+                        layers: false,
+                        ..ctx.clone()
+                    },
+                );
+                out.close("}");
+                out.line(format!(".zIndex({index}.0)"));
+                emitted = true;
                 continue;
             }
             // The words that lead a row take the spacer's room: the row
@@ -407,7 +437,10 @@ impl<'a> Generator<'a> {
             }
             "Search" => self.page_search(out, element, ctx),
             "SearchItem" => self.search_item(out, element, ctx),
-            "Button" | "IconButton" => self.button(out, element, ctx),
+            "Button" | "IconButton" => {
+                self.button(out, element, ctx);
+                self.context_menu(out, element, ctx);
+            }
             "Drop" => self.drop_zone(out, element, ctx),
             "TextInput" => self.text_input(out, element, ctx),
             "FocusRegion" => {
@@ -476,7 +509,7 @@ impl<'a> Generator<'a> {
             "LanguagePicker" => self.language_picker(out, element, ctx),
             "Detail" | "Destination" | "Tab" | "Sidebar" | "SidebarItem" | "Toolbar"
             | "WindowSet" | "Window" | "Layout" | "MenuItem" | "MenuBar" | "StatusItem"
-            | "TableColumn" | "TableMenu" => {
+            | "TableColumn" | "TableMenu" | "ContextMenu" => {
                 // Realized by their parents.
             }
             other => out.line(format!("SwiftUI.EmptyView() // unsupported {other}")),

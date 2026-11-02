@@ -378,6 +378,7 @@ dependencies = [
  "bern-script",
  "bern-transport-ipc",
  "jni-sys",
+ "ndk-context",
  "serde_json",
 ]
 
@@ -473,6 +474,7 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
+ "toml 0.8.23",
 ]
 
 [[package]]
@@ -729,6 +731,29 @@ name = "byteorder-lite"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
+
+[[package]]
+name = "catalog-core"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "catalog-protocol",
+]
+
+[[package]]
+name = "catalog-protocol"
+version = "0.1.0"
+dependencies = [
+ "bern",
+]
+
+[[package]]
+name = "catalog-ui"
+version = "0.1.0"
+dependencies = [
+ "bern",
+ "catalog-protocol",
+]
 
 [[package]]
 name = "cbc"
@@ -1716,6 +1741,12 @@ dependencies = [
  "bern",
  "names-protocol",
 ]
+
+[[package]]
+name = "ndk-context"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "nix"

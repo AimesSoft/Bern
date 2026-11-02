@@ -28,7 +28,12 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             }
         }
     }
-    let descriptor_value = bern_syntax::lower::protocol_descriptor(&protocol)?;
+    // A module's protocol may use the types of the modules it depends on.
+    let (imported, read) = crate::config::imported_types(&protocol.args.namespace)
+        .map_err(|message| syn::Error::new(span, message))?;
+    let descriptor_value = bern_syntax::lower::protocol_descriptor_with(&protocol, &imported)?;
+    let read = read.iter().map(|path| path.display().to_string());
+    let track_imports = quote!(#(const _: &[u8] = ::core::include_bytes!(#read);)*);
     let descriptor_tokens = descriptor::tokens(&descriptor_value);
     let track_build = crate::config::track_build();
 
@@ -349,6 +354,7 @@ pub fn expand(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     };
     Ok(quote! {
         #track_build
+        #track_imports
         #(#attrs)*
         #vis mod #ident {
             #(#kept)*

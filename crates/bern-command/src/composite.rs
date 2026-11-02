@@ -13,6 +13,8 @@
 use crate::outbox::{self, Pending};
 use crate::{EngineProtocol, QueryAnswer};
 use std::collections::{BTreeMap, VecDeque};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 /// How many commands one command may set off through calls and events
 /// before the rest are dropped as a loop.
@@ -39,11 +41,25 @@ pub struct ModuleEngine {
     pub depends: Vec<String>,
 }
 
+/// A running module's engine, shared so a module depending on it can read
+/// its state while it handles a command.
+type Running = Arc<Mutex<Box<dyn EngineProtocol>>>;
+
+fn running(engine: Box<dyn EngineProtocol>) -> Running {
+    Arc::new(Mutex::new(engine))
+}
+
+fn lock(engine: &Running) -> MutexGuard<'_, Box<dyn EngineProtocol>> {
+    engine
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 struct Module {
     id: String,
     descriptor: &'static ProtocolDescriptor,
     entry: ModuleEngine,
-    engine: Option<Box<dyn EngineProtocol>>,
+    engine: Option<Running>,
     /// Its state while it is switched off.
     idle: Value,
 }
@@ -100,7 +116,7 @@ impl Composite {
             parts.push(Module {
                 id,
                 descriptor: entry.descriptor,
-                engine: running.then(|| (entry.start)()),
+                engine: running.then(|| self::running((entry.start)())),
                 entry,
                 idle,
             });
@@ -146,8 +162,8 @@ impl Composite {
 
     /// The states a part may read while it handles a command: the shell
     /// reads every running module, a module the running modules it
-    /// depends on.
-    fn readable(&self, part: usize) -> BTreeMap<String, Vec<Value>> {
+    /// depends on. Each is taken only if the part asks for it.
+    fn readable(&self, part: usize) -> BTreeMap<String, outbox::Reader> {
         let allowed = |module: &Module| match part {
             0 => true,
             part => self.modules[part - 1].entry.depends.contains(&module.id),
@@ -156,8 +172,9 @@ impl Composite {
             .iter()
             .filter(|module| allowed(module))
             .filter_map(|module| {
-                let engine = module.engine.as_ref()?;
-                Some((module.id.clone(), engine.snapshot()))
+                let engine = Arc::clone(module.engine.as_ref()?);
+                let read: outbox::Reader = Rc::new(move || lock(&engine).snapshot());
+                Some((module.id.clone(), read))
             })
             .collect()
     }
@@ -197,8 +214,8 @@ impl Composite {
             self.shell.invoke(&local)
         } else {
             let module = &mut self.modules[part - 1];
-            match &mut module.engine {
-                Some(engine) => engine.invoke(&local),
+            match &module.engine {
+                Some(engine) => lock(engine).invoke(&local),
                 None => Err(disabled(&module.id)),
             }
         };
@@ -265,7 +282,7 @@ impl Composite {
         }
         let module = &mut self.modules[index];
         if module.engine.is_none() {
-            module.engine = Some((module.entry.start)());
+            module.engine = Some(running((module.entry.start)()));
             changed.push(module.id.clone());
         }
     }
@@ -312,6 +329,18 @@ impl Composite {
         let mut changed = Vec::new();
         if enabled {
             self.switch_on(id, &mut changed);
+            // A module started now is woken once, as every engine is when
+            // the host starts, so the work it needs from the beginning
+            // starts there; what it sends runs after this command.
+            for started in &changed {
+                let Some(index) = self.position(started) else {
+                    continue;
+                };
+                outbox::begin(self.readable(index + 1));
+                if let Some(engine) = &self.modules[index].engine {
+                    lock(engine).wake();
+                }
+            }
         } else {
             self.switch_off(id, &mut changed);
         }
@@ -399,8 +428,8 @@ impl EngineProtocol for Composite {
                 continue;
             }
             outbox::begin(self.readable(part));
-            if let Some(engine) = &mut self.modules[part - 1].engine {
-                engine.wake();
+            if let Some(engine) = &self.modules[part - 1].engine {
+                lock(engine).wake();
             }
             sent.extend(outbox::take());
         }
@@ -420,7 +449,7 @@ impl EngineProtocol for Composite {
         }
         let module = &self.modules[part - 1];
         match &module.engine {
-            Some(engine) => engine.query(&local, answer),
+            Some(engine) => lock(engine).query(&local, answer),
             None => answer.send(Err(disabled(&module.id))),
         }
     }
@@ -432,7 +461,7 @@ impl EngineProtocol for Composite {
             let field = state.len();
             state.push(crate::trace::snapshot_field(field, || {
                 match &module.engine {
-                    Some(engine) => Value::Record(engine.snapshot()),
+                    Some(engine) => Value::Record(lock(engine).snapshot()),
                     None => module.idle.clone(),
                 }
             }));

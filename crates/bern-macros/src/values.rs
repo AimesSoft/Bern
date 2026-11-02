@@ -224,6 +224,11 @@ fn add_pages(item: &mut syn::ItemEnum, pages: &[crate::config::ModulePage]) {
         } else {
             syn::parse_quote!(#[label(tr! { #(#languages => #texts),* })] #name)
         };
-        item.variants.push(variant);
+        // A selection starts on the first variant.
+        if page.start {
+            item.variants.insert(0, variant);
+        } else {
+            item.variants.push(variant);
+        }
     }
 }

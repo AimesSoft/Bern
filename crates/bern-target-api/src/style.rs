@@ -220,7 +220,9 @@ fn chip_as_capsule(element: &mut Element) {
 }
 
 /// `app` as `platforms` show it: the elements whose styles set lengths
-/// there take them, and outside the web a chip is the platform's capsule.
+/// there take them, outside the web a chip is the platform's capsule, and
+/// lists in scroll views are lowered to lazy columns
+/// ([`bern_ir::lower_lists`]).
 pub fn for_platforms<'a>(app: &'a Application, platforms: &[&str]) -> Cow<'a, Application> {
     let web = platforms.contains(&"browser");
     let mut owned = app.clone();
@@ -236,6 +238,9 @@ pub fn for_platforms<'a>(app: &'a Application, platforms: &[&str]) -> Cow<'a, Ap
     for window in &mut owned.windows.windows {
         window.content.elements_mut(restyled);
     }
+    // Lists in scroll views build only the rows in sight, with the gaps
+    // the styles just gave their columns.
+    bern_ir::lower_lists(&mut owned);
     if owned == *app {
         Cow::Borrowed(app)
     } else {

@@ -81,7 +81,7 @@
 | `Spacer` | 无专有属性 | 不含子节点；无动作 |
 | `WindowButtons` | 无专有属性 | 不含子节点；无动作；macOS 上占出红绿灯的位置，其他平台不占位置 |
 | `Divider` | 无专有属性 | 不含子节点；无动作 |
-| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue` | 可含子内容；无动作 |
+| `ScrollView` | `axis: vertical / horizontal`<br>`snap: start / center`<br>`position: PositionField`<br>`arrival: nudge`<br>`indicators: automatic / hidden / mouse`<br>`open_at: Number`<br>`open_center: NumberValue`<br>`anchor: Number`<br>`browsing: BoolField` | 可含子内容；无动作 |
 | `SplitView` | 无专有属性 | 仅含 ["Sidebar", "Detail"]；无动作 |
 | `Sidebar` | **`selection: SelectionField`**<br>`width: Length`<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Search", "Section", "SidebarItem", "Pages", "SidebarHeader", "SidebarFooter"]；无动作；直接位于 ["SplitView"] |
 | `SidebarHeader` | `role: content / title` | 可含子内容；无动作；直接位于 ["Sidebar"] |
@@ -97,11 +97,11 @@
 | `Destination` | 无专有属性 | 可含子内容；无动作；直接位于 ["Navigation"] |
 | `NavLink` | **`id: Id`**<br>**`route: Route`** | 可含子内容；无动作 |
 | `ControlGroup` | `label: DisplayText`<br>`height: Length` | 可含子内容；无动作 |
-| `Tabs` | **`selection: SelectionField`**<br>`id: Id`<br>`fallback: SelectionValue` | 仅含 ["Tab", "Pages", "TabAccessory"]；无动作。选中的标签取应用强调色 |
+| `Tabs` | **`selection: SelectionField`**<br>`id: Id`<br>`fallback: SelectionValue`<br>`bar: standard / floating` | 仅含 ["Tab", "Pages", "TabAccessory"]；无动作。选中的标签取应用强调色；`bar: floating` 让手机上的标签栏成为离开屏幕边缘的胶囊：iOS 26 起本来如此，Compose 画成浮起的胶囊（选中的一项另有一块胶囊底），`TabAccessory` 也是胶囊；GTK、WinUI 3 与 Web 保持各自的标签栏 |
 | `TabAccessory` | `shown: Bool` | 可含子内容；无动作；直接位于 ["Tabs"]，最多一个，不放在 `if` 或 `ForEach` 里。各页之上常驻的一条，例如正在播放的小播放器；`shown` 为假时收起 |
 | `Tab` | **`value: SelectionValue`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`display: title_and_icon / icon` | 可含子内容；无动作；直接位于 ["Tabs"]。`display: icon` 只显示图标（必须写 `icon`），`label` 仍是可访问名称 |
 | `SplitButton` | **`id: Id`**<br>**`label: DisplayText`**<br>`value: BoolField`<br>`checked: Bool`<br>`icon: Icon`<br>`shape: capsule`<br>`height: Length`<br>`more_label: DisplayText`<br>`shortcut: Shortcut` | 可含子内容；`value` 与 `checked` 二选一，`checked` 须有动作，切换时执行 |
-| `PopoverButton` | `panel_appearance: inherit / window / surface`<br>**`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`presented: BoolField`<br>`open: Bool`<br>`shortcut: Shortcut` | 可含子内容；`open` 必须绑定动作，与 `presented` 互斥；未使用 `open` 时无动作 |
+| `PopoverButton` | `panel_appearance: inherit / window / surface`<br>**`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`font_size: Number`<br>`prominence: standard / plain`<br>`presented: BoolField`<br>`open: Bool`<br>`shortcut: Shortcut` | 可含子内容；`open` 必须绑定动作，与 `presented` 互斥；未使用 `open` 时无动作 |
 | `Inspector` | **`presented: BoolField`**<br>`width: Number` | 可含子内容；无动作 |
 | `Toast` | **`content: DisplayText`**<br>`icon: Icon`<br>`key: KeyValue`<br>`duration: Number` | 不含子节点；无动作 |
 | `Pinch` | **`id: Id`**<br>**`label: DisplayText`**<br>**`value: NumberField`**<br>**`min: Number`**<br>**`max: Number`**<br>`feature: Feature` | 恰好一个子节点；动作可选 |
@@ -112,14 +112,15 @@
 | `Layout` | **`size: compact / medium / expanded / large / tv`** | 可含子内容；无动作；直接位于 ["Adaptive"] |
 | `Menu` | **`id: Id`**<br>**`label: DisplayText`**<br>`hide_disabled: Flag`<br>`icon: Icon`<br>`style: button / icon`<br>`shape: capsule`<br>`height: Length` | 仅含 ["MenuItem", "Divider"]；无动作 |
 | `MenuItem` | **`id: Id`**<br>**`label: DisplayText`**<br>`icon: Icon`<br>`role: normal / destructive`<br>`enabled: Bool`<br>`feature: Feature`<br>`shortcut: Shortcut`<br>`pick: FileField`<br>`files: FileKinds`<br>`paste: TextField` | 不含子节点；必须绑定动作；直接位于 ["Menu", "TableMenu"]；`pick` 与 `paste` 二选一 |
-| `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`** | 不含子节点；无动作 |
+| `LanguagePicker` | **`id: Id`**<br>**`label: DisplayText`**<br>`label_hidden: Flag` | 不含子节点；无动作 |
 | `List` | `items: Items`<br>`key: KeyField` | 可含子内容；无动作 |
 | `ForEach` | **`items: Items`**<br>**`key: KeyField`** | 可含子内容；无动作 |
 | `Table` | **`id: Id`**<br>**`label: DisplayText`**<br>**`items: Items`**<br>**`key: KeyField`**<br>`selection: KeysField` | 仅含 ["TableColumn", "TableMenu"]，至少一个 `TableColumn`，最多一个 `TableMenu`；动作可选，是选中行的主操作（双击或 Enter，触屏上点一行）；`selection` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。使用 `\|item\|` 行模板 |
 | `TableColumn` | **`title: DisplayText`**<br>`width: Number`<br>`sorted: Bool`<br>`descending: Bool` | 恰好一个子节点，是每行这一格的内容；动作可选，点表头时运行；直接位于 ["Table"]；`sorted`、`descending` 只显示排序标记，行的顺序由引擎决定 |
 | `TableMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Table"]；右键或长按一行时打开，该行不在选中行里时先只选中它 |
+| `ContextMenu` | 无 | 仅含 ["MenuItem", "Divider"]；无动作；直接位于 ["Button"]，每个按钮最多一个；不算按钮显示的内容；右键或长按按钮时打开 |
 | `PreviewList` | **`items: Items`**<br>**`key: KeyField`**<br>**`item_height: Number`**<br>`gap: Number`<br>`more_height: Number` | 按可用高度创建能完整放下的前几项；有剩余时为 `+N` 留位，默认高度 22；不滚动，也不创建隐藏项。使用 `\|item\|` 行模板 |
-| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
+| `Text` | **`content: DisplayText`**<br>`style: large_title / title / title2 / title3 / headline / subheadline / body / callout / footnote / caption / caption2 / control / code`<br>`emphasis: primary / secondary / tertiary`<br>`color: accent / status.success / status.warning / status.error`<br>`mark: ColorRole`<br>`lines: Number`<br>`font_size: Length`<br>`line_height: Length`<br>`markdown: Flag`<br>`bold: Bool` | 不含子节点；无动作；`color` 与 `emphasis` 二选一 |
 | `Canvas` | `width: Length`<br>`height: Length`<br>`label: DisplayText` | 仅含 ["Shape", "Series", "Pattern"]；无动作 |
 | `Shape` | **`kind: rect / rounded / capsule / ellipse`**<br>`x: Number`<br>`y: Number`<br>`width: Number`<br>`height: Number`<br>`corner: Number`<br>`fill: ColorRole`<br>`fill_from: ImageResource`<br>`fade: up / down / left / right`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`dash: Number`<br>`dash_gap: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
 | `Series` | **`values: NumberList`**<br>`kind: area / line`<br>`max: NumberValue`<br>`fill: ColorRole`<br>`stroke: ColorRole`<br>`stroke_width: Number`<br>`opacity: Number` | 不含子节点；无动作；直接位于 ["Canvas"] |
@@ -184,6 +185,9 @@
 | `reduce_motion` | `Bool` |
 | `spin` | `Bool`：成立时绕中心匀速转动，不成立时停在当时的角度 |
 | `spin_period` | `Number`：转一圈的秒数，默认 1，负数逆时针；需要 `spin` |
+| `glow` | `Number`：指针（鼠标悬停，或手指按住时）在元素范围内时跟着它的白光，半径为元素短边的这个倍数；上面叠着别的元素也亮 |
+| `glow_opacity` | `Number`：光中心的不透明度，大于 0、不超过 1，默认 0.4；需要 `glow` |
+| `blur` | `Length`：把元素的画面按这个半径（点）模糊，不越出元素的范围与圆角；可以跟随状态，配 `animate` 时按它的动效变化（`bound_blur`：六个目标都已实现） |
 | `stagger` | `Number` |
 | `idle_area` | `Number`：鼠标在此停住多少秒后窗口静置；有静置区时，鼠标停在别处不静置 |
 | `at` | `NumberValue` |
