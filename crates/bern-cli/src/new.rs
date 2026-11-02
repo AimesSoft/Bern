@@ -79,21 +79,29 @@ pub enum Source {
     Checkout(PathBuf),
     /// A Git repository.
     Git(String),
+    /// A release on crates.io.
+    Release(String),
 }
 
 impl Source {
     /// The checkout this `bern` was built from, if it is still there and
-    /// is not Cargo's copy of a Git repository; else the public repository.
+    /// is not Cargo's copy of a Git repository; the public repository when
+    /// it is that copy; else, for a `bern` installed from crates.io or
+    /// downloaded from a release, the release of its own version.
     pub fn default_for_this_build() -> Source {
-        let checkout = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(Path::parent)
-            .map(Path::to_path_buf);
-        match checkout {
-            Some(checkout) if is_checkout(&checkout) && !in_cargo_git_cache(&checkout) => {
-                Source::Checkout(checkout)
-            }
-            _ => Source::Git(REPOSITORY.into()),
+        Source::for_build(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            env!("CARGO_PKG_VERSION"),
+        )
+    }
+
+    /// The default for a `bern` built from the `bern-cli` crate at
+    /// `manifest_dir`, at `version`.
+    fn for_build(manifest_dir: &Path, version: &str) -> Source {
+        match manifest_dir.parent().and_then(Path::parent) {
+            Some(checkout) if in_cargo_git_cache(checkout) => Source::Git(REPOSITORY.into()),
+            Some(checkout) if is_checkout(checkout) => Source::Checkout(checkout.to_path_buf()),
+            _ => Source::Release(version.into()),
         }
     }
 
@@ -104,6 +112,7 @@ impl Source {
                 format!("path = {}", toml_string(&path.replace('\\', "/")))
             }
             Source::Git(url) => format!("git = {}", toml_string(url)),
+            Source::Release(version) => format!("version = {}", toml_string(version)),
         }
     }
 }
@@ -345,6 +354,36 @@ mod tests {
         .err()
         .unwrap();
         assert!(error.contains("en, zh-Hans, zh-Hant, ja"), "{error}");
+    }
+
+    #[test]
+    fn bern_comes_from_where_this_bern_was_built() {
+        let this = Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(
+            Source::for_build(this, "0.1.0"),
+            Source::Checkout(this.parent().unwrap().parent().unwrap().to_path_buf())
+        );
+        let git = Path::new("/home/me/.cargo/git/checkouts/bern-1a2b/1e2a01f/crates/bern-cli");
+        assert_eq!(
+            Source::for_build(git, "0.1.0"),
+            Source::Git(REPOSITORY.into())
+        );
+        let registry =
+            Path::new("/home/me/.cargo/registry/src/index.crates.io-1a2b/bern-cli-0.2.0");
+        assert_eq!(
+            Source::for_build(registry, "0.2.0"),
+            Source::Release("0.2.0".into())
+        );
+        // A release download, built on another computer.
+        let elsewhere = Path::new("/home/runner/work/Bern/Bern/crates/bern-cli");
+        assert_eq!(
+            Source::for_build(elsewhere, "0.2.0"),
+            Source::Release("0.2.0".into())
+        );
+        assert_eq!(
+            Source::Release("0.2.0".into()).dependency(),
+            r#"version = "0.2.0""#
+        );
     }
 
     #[test]

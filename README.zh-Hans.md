@@ -380,13 +380,13 @@ counter-mcp   # 同一份命令目录，提供给 AI Agent
 
 ## 快速开始
 
-需要 Rust 1.99（`rustup` 按 `rust-toolchain.toml` 自动安装），以及所构建目标的工具链。先从源码安装构建工具 `bern`：
+需要 Rust 1.99（`rustup` 按 `rust-toolchain.toml` 自动安装），以及所构建目标的工具链。先安装构建工具 `bern`：
 
 ```sh
-git clone https://github.com/AimesSoft/Bern
-cd Bern
-cargo install --path crates/bern-cli
+cargo binstall bern-cli
 ```
+
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall) 从 [Releases](https://github.com/AimesSoft/Bern/releases) 下载编译好的 `bern`，也可以自己去那里下载；`cargo install bern-cli` 则从源码编译。这样装的 `bern` 创建的应用从 crates.io 取同一版本的 Bern。要修改 Bern 本身，在克隆下来的仓库里用 `cargo install --path crates/bern-cli` 安装 `bern`，它创建的应用从这个克隆取 Bern。
 
 ### 创建应用
 

@@ -5,10 +5,24 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "bern"
 path = "src/main.rs"
+
+# `cargo binstall bern-cli` downloads `bern` from the release of its
+# version instead of compiling it: the archives release.yml attaches.
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/bern-{ target }{ archive-suffix }"
+pkg-fmt = "tgz"
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
+
+[package.metadata.binstall.overrides.aarch64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [dependencies]
 bern-command.workspace = true

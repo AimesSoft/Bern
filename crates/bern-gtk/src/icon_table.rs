@@ -2,8 +2,8 @@
 // rendering of the Bern icon set. Every icon is in Adwaita 46 (which Yaru
 // and the other themes inherit), except `adw-external-link-symbolic`,
 // which libadwaita carries in its own resources. The runtime reads this
-// table and `bern-backend-gtk` includes it too, so its check rejects the
-// names missing here. Adwaita has no quote bubble, so `quote.bubble`, the
+// table and `bern-backend-gtk` keeps the same file, whose test holds the two
+// equal, so its check rejects the names missing here. Adwaita has no quote bubble, so `quote.bubble`, the
 // lyrics button of Apple's music apps, is the subtitles: words that go with
 // the sound. (A microphone, which it was, reads as recording.)
 &[
