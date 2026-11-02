@@ -409,11 +409,10 @@ impl Target for WinUi3Windows {
             precompiled_identity(context.release, frontends),
             bern_target_api::svg::used(app),
             bern_target_api::script::webview(context),
-            bern_protocol::fingerprint_bytes(
-                include_str!("../../bern-target-api/src/script.rs").as_bytes()
-            ) ^ bern_protocol::fingerprint_bytes(
-                include_str!("../../bern-target-api/templates/script/host.cpp").as_bytes()
-            ) ^ bern_protocol::fingerprint_bytes(bern_target_api::script::RUNTIME.as_bytes()),
+            bern_target_api::script::WINDOWS_SOURCES
+                .iter()
+                .fold(0, |identity, source| identity
+                    ^ bern_protocol::fingerprint_bytes(source.as_bytes())),
             bern_protocol::fingerprint_bytes(
                 bern_target_api::svg::cpp_template(include_str!(
                     "../templates/cpp/bern_ui_svg.inl"

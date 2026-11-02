@@ -13,7 +13,15 @@ pub fn dependency(context: &BuildContext) -> String {
 pub fn webview(context: &BuildContext) -> bool {
     context.target.javascript_backend() == Some("webview")
 }
-pub const RUNTIME: &str = include_str!("../../bern-script/src/runtime.js");
+pub const RUNTIME: &str = bern_script::HOST_RUNTIME;
+/// What the Windows host is made from, for the identity of the
+/// precompiled Windows sources: this module, its C++ template and the
+/// runtime.
+pub const WINDOWS_SOURCES: [&str; 3] = [
+    include_str!("script.rs"),
+    include_str!("../templates/script/host.cpp"),
+    RUNTIME,
+];
 pub fn html(complete: &str) -> String {
     format!(
         "<!doctype html><meta charset=\"utf-8\"><body><script>function bernScriptComplete(value){{{complete}}}\n{RUNTIME}</script>"

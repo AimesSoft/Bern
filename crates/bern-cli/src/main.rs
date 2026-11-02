@@ -32,6 +32,7 @@ Usage:
   bern check  [--manifest PATH] [--target NAME]
   bern doctor [--manifest PATH]
   bern ir     [--manifest PATH]
+  bern --version
 
 Commands:
   new          Create an application in <path>: a window with a counter; with
@@ -469,6 +470,10 @@ fn hosts_text(target: &dyn Target) -> String {
 }
 
 fn main() -> ExitCode {
+    if matches!(std::env::args().nth(1).as_deref(), Some("--version" | "-V")) {
+        println!("bern {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     let options = match parse() {
         Ok(options) => options,
         Err(message) => {
@@ -574,6 +579,9 @@ fn create(options: &Options) -> ExitCode {
             eprintln!("             with Bern from {}", checkout.display())
         }
         new::Source::Git(url) => eprintln!("             with Bern from {url}"),
+        new::Source::Release(version) => {
+            eprintln!("             with Bern {version} from crates.io")
+        }
     }
     eprintln!();
     eprintln!("Start it on this computer:");

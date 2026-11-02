@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.99"
-publish = false
+repository = "https://github.com/AimesSoft/Bern"
 
 # Built only for Linux applications, by the crates `bern build` generates.
 # It is not a member of the Bern workspace, so GTK is never a requirement
@@ -17,12 +17,12 @@ script = ["dep:webkit6", "dep:bern-script"]
 svg = ["dep:bern-svg", "dep:webkit6"]
 
 [dependencies]
-bern-script = { path = "../bern-script", optional = true }
-bern-svg = { path = "../bern-svg", optional = true }
+bern-script = { version = "=0.1.0", path = "../bern-script", optional = true }
+bern-svg = { version = "=0.1.0", path = "../bern-svg", optional = true }
 webkit6 = { version = "0.6.1", optional = true }
 serde_json = "1"
-bern-ffi = { path = "../bern-ffi" }
-bern-image = { path = "../bern-image" }
+bern-ffi = { version = "=0.1.0", path = "../bern-ffi" }
+bern-image = { version = "=0.1.0", path = "../bern-image" }
 libc = "0.2"
 gtk = { package = "gtk4", version = "0.11", features = ["v4_14"] }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }

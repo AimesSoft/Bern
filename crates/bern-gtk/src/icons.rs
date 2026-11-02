@@ -2,8 +2,8 @@
 //! Adwaita, which the application keeps as its icon theme where it is
 //! installed (other themes, Breeze on KDE among them, lack many of these
 //! names or color them). Every name is in Adwaita 46 and in the releases
-//! after it, which dropped some emblems. The table is shared with
-//! `bern-backend-gtk`, whose check rejects the names it lacks;
+//! after it, which dropped some emblems. `bern-backend-gtk` keeps the same
+//! table, and its check rejects the names it lacks;
 //! `image-missing-symbolic` is only a last resort.
 
 const ICONS: &[(&str, &str)] = include!("icon_table.rs");

@@ -2239,7 +2239,7 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 
 `bern new` 生成独立的 Cargo 工作区：`Bern.toml`、根 `Cargo.toml`、与 Bern 一致的 `rust-toolchain.toml`、`.gitignore`，以及协议、引擎、界面三个 crate。起始应用是一个带计数的窗口：状态一个字段，两条命令，界面上两个按钮，引擎附带单元测试。名称取目录名，`-` 与 `_` 都可以，应用 id 为小写下划线形式；`--bundle-id` 默认 `com.example.<名称>`；`--languages` 默认 `en,zh-Hans`，第一个为默认语言，模板只带 `en`、`zh-Hans`、`zh-Hant`、`ja` 四种文案，其他语言在创建后自行补充。`Bern.toml` 声明全部四个目标，桌面目标开启 `channels = ["ipc"]`，并注明删去即不监听任何通道。新项目必须直接通过全部编译检查，由测试保证。
 
-新项目的 `bern` 依赖默认指向构建当前 `bern` 的检出目录；该目录不存在或位于 Cargo 的 Git 缓存时改用公开仓库，也可以用 `--bern-path` 指定检出目录。
+新项目的 `bern` 依赖默认指向构建当前 `bern` 的检出目录；该目录位于 Cargo 的 Git 缓存时改用公开仓库，不存在时（从 crates.io 安装或从发布下载的 `bern`）改用 crates.io 上与当前 `bern` 同一版本的 Bern，也可以用 `--bern-path` 指定检出目录。`bern --version` 输出当前 `bern` 的版本。
 
 生成的胶水 crate 不假定项目位于 Bern 仓库内。构建驱动经 `cargo metadata --no-deps` 读出引擎包 `bern` 依赖的来源，胶水按同一来源引用每个 Bern crate：检出目录时取同一 `crates` 目录下的 crate，Git 仓库时使用同一地址与 `branch`、`tag` 或 `rev`，crates.io 时使用同一版本要求。来源必须完全相同，否则应用与胶水会得到两份 Bern crate、类型互不兼容。项目的 Cargo 配置用 `[patch]` 把 `bern` 换成本地检出目录时（例如声明公开仓库的固定版本、开发时改用旁边的检出），构建驱动再经离线的 `cargo metadata` 读出 Cargo 实际解析到的 `bern`，胶水改从这个检出目录取每个 Bern crate，配置里只需替换 `bern` 一个 crate；离线解析不了时仍按声明的来源。
 
@@ -2269,6 +2269,16 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 签名所需的证书只留在构建的机器或 CI 服务中，经环境变量提供，不写入 `Bern.toml`：`BERN_MACOS_SIGNING_IDENTITY` 以强化运行时与安全时间戳签名应用、工具与磁盘映像，`BERN_MACOS_NOTARY_PROFILE` 再提交公证并装订；`BERN_WINDOWS_CERTIFICATE`（证书库中的指纹或 `.pfx`，密码取自 `BERN_WINDOWS_CERTIFICATE_PASSWORD`）以 `signtool` 签名应用、工具与安装程序并加 RFC 3161 时间戳。没有配置时仍生成包，并说明未签名的后果。`[app].publisher` 是可选的发布者名称，显示在安装程序、卸载项与 Debian 包中。`[app].files_folder = true` 让 iOS 上应用的 Documents 文件夹出现在「文件」App 中（`UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`），用户放进去的文件由引擎自己读取，例如音乐应用的本地曲库；其他平台没有对应的东西。`[app].background_audio = true` 让应用在后台与锁屏时继续播放自己的声音（iOS 的 `audio` 后台模式；Android 的前台服务权限与 `BernPlaybackService`），`[app].overlays = true` 让 Android 应用可以请求显示悬浮文字（`SYSTEM_ALERT_WINDOW`），见“系统的正在播放”与“悬浮文字”。
 
 直接写在 `Window` 中的控件以窗口 id 作为组件名，目标形如 `main.add_one`；写在组件中的控件仍为 `组件名.控件 id`。四个目标一致。
+
+### 发布 Bern
+
+Bern 的 crate 以同一版本一起发布，相互之间按 `=版本` 精确依赖：工作区的 `[workspace.dependencies]` 写明版本，`bern-gtk` 不在工作区里，自己写。发新版本时改工作区的 `version`、`[workspace.dependencies]` 里的版本与 `bern-gtk` 的版本和依赖，再推送 `v<版本>` 标签，由 `.github/workflows/release.yml` 发布：
+
+- 为 macOS（arm64、x86_64）、Linux（x86_64、arm64，musl 静态链接，任何发行版都能运行）、Windows（x64、arm64）编译 `bern`，附在 GitHub Release 上：`bern-<目标>.tar.gz`，Windows 为 `.zip`，内含 `bern` 与许可证。`bern-cli` 的 `[package.metadata.binstall]` 指向它们，`cargo binstall bern-cli` 直接下载，不必编译。
+- 再按依赖顺序（开发依赖也算，crates.io 要求它们已经存在）把每个 crate 发布到 crates.io，令牌取自仓库机密 `CARGO_REGISTRY_TOKEN`（`.github/scripts/publish-crates.py`）。标签必须与 crate 的版本相同。已在 crates.io 上的版本跳过，中途停下的发布重跑即可补完。crates.io 让一个账号连续发布五个新 crate，之后每十分钟一个，遇到时等待后重试：第一次发布 28 个 crate 约需四小时，之后的版本不受这个限制。
+- 修改发布流程的拉取请求只编译各平台的 `bern`、打包并逐个编译每个 crate，不发布任何东西。
+
+发布的 crate 只含自己目录下的文件。几个 crate 共用的文件由其中一个以常量提供：JavaScript 运行时在 `bern-script`，Windows 脚本宿主的来源在 `bern_target_api::script::WINDOWS_SOURCES`；GTK 图标表在 `bern-gtk` 与 `bern-backend-gtk` 各有一份，测试保证二者相同。`bern-gpui` 暂不发布，选 `ui = "gpui"` 的应用要从检出目录或 Git 仓库取 Bern。
 
 ## 跨语言绑定
 

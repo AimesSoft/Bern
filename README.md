@@ -380,13 +380,13 @@ For the same window showing one line of text, package size, launch time and memo
 
 ## Quick start
 
-You need Rust 1.99 (`rustup` installs it from `rust-toolchain.toml`) plus the toolchain of the target you build. First install the build tool `bern` from source:
+You need Rust 1.99 (`rustup` installs it from `rust-toolchain.toml`) plus the toolchain of the target you build. First install the build tool `bern`:
 
 ```sh
-git clone https://github.com/AimesSoft/Bern
-cd Bern
-cargo install --path crates/bern-cli
+cargo binstall bern-cli
 ```
+
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall) downloads `bern` ready-built from the [releases](https://github.com/AimesSoft/Bern/releases), where you can also download it yourself; `cargo install bern-cli` compiles it instead. The apps this `bern` creates take Bern of the same version from crates.io. To work on Bern itself, install `bern` from a clone of this repository with `cargo install --path crates/bern-cli`; the apps it creates take Bern from that clone.
 
 ### Create an app
 

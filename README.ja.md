@@ -379,13 +379,13 @@ UI 層とロジック層がどの言語で、どう実行されるかが、実�
 
 ## クイックスタート
 
-Rust 1.99（`rustup` が `rust-toolchain.toml` に従って自動でインストール）と、ビルドするターゲットのツールチェーンが必要です。まずビルドツール `bern` をソースからインストールします。
+Rust 1.99（`rustup` が `rust-toolchain.toml` に従って自動でインストール）と、ビルドするターゲットのツールチェーンが必要です。まずビルドツール `bern` をインストールします。
 
 ```sh
-git clone https://github.com/AimesSoft/Bern
-cd Bern
-cargo install --path crates/bern-cli
+cargo binstall bern-cli
 ```
+
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall) は [Releases](https://github.com/AimesSoft/Bern/releases) からビルド済みの `bern` をダウンロードします。Releases から直接ダウンロードしてもよく、`cargo install bern-cli` ならソースからコンパイルします。こうして入れた `bern` で作ったアプリは、crates.io から同じバージョンの Bern を使います。Bern 自体を変更するときは、クローンしたリポジトリで `cargo install --path crates/bern-cli` を実行して `bern` をインストールします。それで作ったアプリはそのクローンの Bern を使います。
 
 ### アプリを作る
 
