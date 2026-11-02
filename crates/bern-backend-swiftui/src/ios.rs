@@ -5,7 +5,7 @@
 //! as sheets over it. The engine runs in the app process, linked as a
 //! static library built for the iOS simulator; the application CLI and MCP
 //! server are built for the Mac and reach the app in the simulator through
-//! the IPC channel.
+//! the IPC channel. The package builds the app again for devices.
 
 use crate::swift::{Generator, Platform};
 use crate::{check_swiftui, component_names, glue, product_name, resources};
@@ -13,9 +13,10 @@ use bern_ir::IR_VERSION;
 use bern_ir::{Application, WindowInitial};
 use bern_target_api::{
     BuildContext, BuildPlan, BuildStep, ColorSource, Diagnostic, GeneratedFile, MediaSupport, Run,
-    SimulatedSystem, Target, TargetConfig, TargetDescriptor, WindowCapabilities, icon, skill,
+    Signing, SimulatedSystem, Target, TargetConfig, TargetDescriptor, WindowCapabilities, icon,
+    skill,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Minimum iOS: the release with Observation and the standard components
 /// the runtime uses, as macOS 14 is on the Mac.
@@ -41,6 +42,9 @@ const SOURCES: &[&str] = &[
 
 /// The asset catalog with the application icon, outside the bundle.
 const ASSETS: &str = "Assets.xcassets";
+
+/// The Rust target of iPhones and iPads, which the package is built for.
+const DEVICE_TARGET: &str = "aarch64-apple-ios";
 
 pub struct SwiftUiIos;
 
@@ -327,54 +331,15 @@ impl Target for SwiftUiIos {
             }
             args
         };
-        let sources = output.join("Sources");
-        let mut swiftc = vec![
-            "--sdk".to_string(),
-            "iphonesimulator".into(),
-            "swiftc".into(),
-            "-swift-version".into(),
-            "6".into(),
-            "-parse-as-library".into(),
-            "-module-name".into(),
-            product.clone(),
-            "-target".into(),
-            format!("{architecture}-apple-ios{MINIMUM_IOS}-simulator"),
-            "-import-objc-header".into(),
-            path(&sources.join("bern.h")),
-            "-L".into(),
-            path(&rust_output),
-            "-lbern_app".into(),
-            format!("@{}", path(&crate::native_libs_file(&rust_output))),
-            // rustc's list repeats libraries swiftc links anyway.
-            "-Xlinker".into(),
-            "-no_warn_duplicate_libraries".into(),
-            "-framework".into(),
-            "SwiftUI".into(),
-            "-framework".into(),
-            "UIKit".into(),
-            "-framework".into(),
-            "AVFoundation".into(),
-            "-framework".into(),
-            "AVKit".into(),
-            "-module-cache-path".into(),
-            path(&context.workspace_dir.join("target/bern-swift-module-cache")),
-        ];
-        swiftc.extend(if context.release {
-            vec![
-                "-O".to_string(),
-                "-g".into(),
-                "-Xlinker".into(),
-                "-dead_strip".into(),
-            ]
-        } else {
-            vec!["-Onone".to_string(), "-g".into()]
-        });
-        for file in SOURCES {
-            swiftc.push(path(&sources.join(file)));
-        }
         let executable = bundle.join(&product);
-        swiftc.push("-o".into());
-        swiftc.push(path(&executable));
+        let swiftc = swiftc(
+            &product,
+            context,
+            "iphonesimulator",
+            &format!("{architecture}-apple-ios{MINIMUM_IOS}-simulator"),
+            &rust_output,
+            &executable,
+        );
         let linked_symbols = bundle.join(format!("{product}.dSYM"));
         let symbols = output.join(format!("{product}.app.dSYM"));
         let icon_set = output.join(ASSETS).join(format!("{ICON_NAME}.appiconset"));
@@ -460,54 +425,11 @@ impl Target for SwiftUiIos {
                 vec![],
             ));
         }
-        // A declared Icon Composer document is compiled with the catalog:
-        // Liquid Glass layers for iOS 26, and flat images drawn from them
-        // for earlier systems.
-        let mut catalogs = vec![path(&output.join(ASSETS))];
-        if crate::icon_document(app, "ios", &context.project_dir).is_some() {
-            catalogs.push(path(&output.join(format!("{ICON_NAME}.icon"))));
-        }
-        // The alternate icons, from the catalog or their own documents.
-        let mut alternates = Vec::new();
-        for (name, source) in crate::alternate_icons(app, "ios", &context.project_dir)? {
-            let asset = crate::alternate_icon(&name);
-            if matches!(&source, icon::Source::Native(path) if icon::is_icon_document(path)) {
-                catalogs.push(path(&output.join(format!("{asset}.icon"))));
-            }
-            alternates.extend(["--alternate-app-icon".to_string(), asset]);
-        }
         steps.extend([
             run(
                 "Compile the icon",
                 "xcrun",
-                [
-                    vec!["actool".into()],
-                    catalogs,
-                    vec![
-                        "--compile".into(),
-                        path(&bundle),
-                        "--platform".into(),
-                        "iphonesimulator".into(),
-                        "--minimum-deployment-target".into(),
-                        MINIMUM_IOS.into(),
-                        "--app-icon".into(),
-                        ICON_NAME.into(),
-                    ],
-                    alternates,
-                    vec![
-                        "--output-partial-info-plist".into(),
-                        path(&output.join("AssetCatalog.plist")),
-                        "--target-device".into(),
-                        "iphone".into(),
-                        "--target-device".into(),
-                        "ipad".into(),
-                        "--output-format".into(),
-                        "human-readable-text".into(),
-                        "--errors".into(),
-                        "--warnings".into(),
-                    ],
-                ]
-                .concat(),
+                actool(app, context, &bundle, "iphonesimulator")?,
                 vec![],
             ),
             BuildStep::RemoveIfExists {
@@ -575,4 +497,262 @@ impl Target for SwiftUiIos {
             products,
         })
     }
+
+    /// An `.ipa` for iPhones and iPads: the bundle the build made, with the
+    /// engine, the frontend and the icons built again for devices, signed
+    /// ad hoc. iOS installs it once a tool signs it again, with an Apple ID
+    /// (AltStore, Sideloadly) or a developer certificate.
+    fn package(
+        &self,
+        app: &Application,
+        context: &BuildContext,
+        _signing: &Signing,
+    ) -> Result<BuildPlan, Vec<Diagnostic>> {
+        let app = &bern_target_api::svg::prepare(app, &context.target);
+        let product = product_name(app);
+        let output = &context.output_dir;
+        let profile = if context.release { "release" } else { "debug" };
+        let glue_target = context.workspace_dir.join("target/bern-glue");
+        let rust_output = glue_target.join(DEVICE_TARGET).join(profile);
+        let stage = output.join("package");
+        let payload = stage.join("Payload");
+        let staged = payload.join(format!("{product}.app"));
+        let executable = staged.join(&product);
+        let dist = bern_target_api::dist_dir(context);
+        let ipa = dist.join(format!("{product}-{}-ios.ipa", app.app.version));
+        let path = |path: &Path| path.display().to_string();
+        let run = |description: &str, program: &str, args: Vec<String>| BuildStep::Run {
+            description: description.into(),
+            program: program.into(),
+            args,
+            cwd: output.clone(),
+            env: vec![],
+        };
+        let mut cargo = vec![
+            "build".to_string(),
+            "--lib".into(),
+            "--manifest-path".into(),
+            path(&output.join("glue/Cargo.toml")),
+            "--target".into(),
+            DEVICE_TARGET.into(),
+            "--target-dir".into(),
+            path(&glue_target),
+        ];
+        if context.release {
+            cargo.push("--release".into());
+        }
+        let mut steps = vec![
+            BuildStep::Run {
+                description: "Build the Rust engine and bridge for iOS devices".into(),
+                program: "cargo".into(),
+                args: crate::listing_native_libs(&cargo, &crate::native_libs_file(&rust_output)),
+                cwd: output.join("glue"),
+                env: vec![(
+                    "IPHONEOS_DEPLOYMENT_TARGET".to_string(),
+                    MINIMUM_IOS.to_string(),
+                )],
+            },
+            BuildStep::RemoveIfExists {
+                path: stage.clone(),
+            },
+            BuildStep::CreateDir {
+                path: payload.clone(),
+            },
+            BuildStep::CreateDir { path: dist.clone() },
+            BuildStep::RemoveIfExists { path: ipa.clone() },
+            // The simulator's bundle brings the resources, localizations
+            // and Info.plist; what was built for the simulator is replaced.
+            run(
+                "Copy the app",
+                "ditto",
+                vec![path(&output.join(format!("{product}.app"))), path(&staged)],
+            ),
+            BuildStep::RemoveIfExists {
+                path: staged.join("_CodeSignature"),
+            },
+            run(
+                "Compile the icon for devices",
+                "xcrun",
+                actool(app, context, &staged, "iphoneos")?,
+            ),
+            run(
+                "Compile the SwiftUI frontend for devices",
+                "xcrun",
+                swiftc(
+                    &product,
+                    context,
+                    "iphoneos",
+                    &format!("arm64-apple-ios{MINIMUM_IOS}"),
+                    &rust_output,
+                    &executable,
+                ),
+            ),
+            BuildStep::RemoveIfExists {
+                path: staged.join(format!("{product}.dSYM")),
+            },
+        ];
+        if context.release {
+            steps.push(run(
+                "Strip the symbols from the executable",
+                "xcrun",
+                vec!["strip".into(), "-S".into(), "-x".into(), path(&executable)],
+            ));
+        }
+        steps.extend([
+            run(
+                "Mark the app for devices",
+                "plutil",
+                vec![
+                    "-replace".into(),
+                    "CFBundleSupportedPlatforms".into(),
+                    "-json".into(),
+                    r#"["iPhoneOS"]"#.into(),
+                    path(&staged.join("Info.plist")),
+                ],
+            ),
+            run(
+                "Sign the app ad hoc",
+                "codesign",
+                vec!["--force".into(), "--sign".into(), "-".into(), path(&staged)],
+            ),
+            run(
+                "Make the .ipa",
+                "ditto",
+                vec![
+                    "-c".into(),
+                    "-k".into(),
+                    "--norsrc".into(),
+                    "--keepParent".into(),
+                    path(&payload),
+                    path(&ipa),
+                ],
+            ),
+        ]);
+        Ok(BuildPlan {
+            steps,
+            products: vec![ipa],
+            run: None,
+            notes: vec![
+                "the .ipa is signed ad hoc; iOS installs it once a tool signs it again with an Apple ID (AltStore, Sideloadly) or a developer certificate"
+                    .into(),
+            ],
+        })
+    }
+}
+
+/// The `xcrun` arguments that compile the Swift sources with the `sdk`
+/// for `triple`, linking the engine built in `rust_output`, into
+/// `executable`.
+fn swiftc(
+    product: &str,
+    context: &BuildContext,
+    sdk: &str,
+    triple: &str,
+    rust_output: &Path,
+    executable: &Path,
+) -> Vec<String> {
+    let path = |path: &Path| path.display().to_string();
+    let sources = context.output_dir.join("Sources");
+    let mut args = vec![
+        "--sdk".to_string(),
+        sdk.into(),
+        "swiftc".into(),
+        "-swift-version".into(),
+        "6".into(),
+        "-parse-as-library".into(),
+        "-module-name".into(),
+        product.into(),
+        "-target".into(),
+        triple.into(),
+        "-import-objc-header".into(),
+        path(&sources.join("bern.h")),
+        "-L".into(),
+        path(rust_output),
+        "-lbern_app".into(),
+        format!("@{}", path(&crate::native_libs_file(rust_output))),
+        // rustc's list repeats libraries swiftc links anyway.
+        "-Xlinker".into(),
+        "-no_warn_duplicate_libraries".into(),
+        "-framework".into(),
+        "SwiftUI".into(),
+        "-framework".into(),
+        "UIKit".into(),
+        "-framework".into(),
+        "AVFoundation".into(),
+        "-framework".into(),
+        "AVKit".into(),
+        "-module-cache-path".into(),
+        path(&context.workspace_dir.join("target/bern-swift-module-cache")),
+    ];
+    args.extend(if context.release {
+        vec![
+            "-O".to_string(),
+            "-g".into(),
+            "-Xlinker".into(),
+            "-dead_strip".into(),
+        ]
+    } else {
+        vec!["-Onone".to_string(), "-g".into()]
+    });
+    for file in SOURCES {
+        args.push(path(&sources.join(file)));
+    }
+    args.push("-o".into());
+    args.push(path(executable));
+    args
+}
+
+/// The `xcrun` arguments that compile the asset catalog into `bundle` for
+/// `platform` (`iphonesimulator` or `iphoneos`). A declared Icon Composer
+/// document is compiled with the catalog: Liquid Glass layers for iOS 26,
+/// and flat images drawn from them for earlier systems.
+fn actool(
+    app: &Application,
+    context: &BuildContext,
+    bundle: &Path,
+    platform: &str,
+) -> Result<Vec<String>, Vec<Diagnostic>> {
+    let output = &context.output_dir;
+    let path = |path: &Path| path.display().to_string();
+    let mut catalogs = vec![path(&output.join(ASSETS))];
+    if crate::icon_document(app, "ios", &context.project_dir).is_some() {
+        catalogs.push(path(&output.join(format!("{ICON_NAME}.icon"))));
+    }
+    // The alternate icons, from the catalog or their own documents.
+    let mut alternates = Vec::new();
+    for (name, source) in crate::alternate_icons(app, "ios", &context.project_dir)? {
+        let asset = crate::alternate_icon(&name);
+        if matches!(&source, icon::Source::Native(path) if icon::is_icon_document(path)) {
+            catalogs.push(path(&output.join(format!("{asset}.icon"))));
+        }
+        alternates.extend(["--alternate-app-icon".to_string(), asset]);
+    }
+    Ok([
+        vec!["actool".into()],
+        catalogs,
+        vec![
+            "--compile".into(),
+            path(bundle),
+            "--platform".into(),
+            platform.into(),
+            "--minimum-deployment-target".into(),
+            MINIMUM_IOS.into(),
+            "--app-icon".into(),
+            ICON_NAME.into(),
+        ],
+        alternates,
+        vec![
+            "--output-partial-info-plist".into(),
+            path(&output.join("AssetCatalog.plist")),
+            "--target-device".into(),
+            "iphone".into(),
+            "--target-device".into(),
+            "ipad".into(),
+            "--output-format".into(),
+            "human-readable-text".into(),
+            "--errors".into(),
+            "--warnings".into(),
+        ],
+    ]
+    .concat())
 }

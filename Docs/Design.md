@@ -2205,6 +2205,7 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 | 目标 | 包 | 说明 |
 | --- | --- | --- |
 | macOS | `<产品>-<版本>-macos-<架构>.dmg` | 应用与指向“应用程序”的链接；应用 CLI 与 MCP 服务器放在 `Contents/Helpers`，Agent skill 放在 `Contents/Resources/skills` |
+| iOS | `<产品>-<版本>-ios.ipa` | 模拟器构建出的包，引擎、SwiftUI 前端与图标按真机（`aarch64-apple-ios`、`iphoneos`）重新编译，Info.plist 标为 `iPhoneOS`，临时签名；iOS 只装开发者签过的应用，用 AltStore、Sideloadly 这类以 Apple ID 重新签名的工具安装（开发者证书与描述文件的签名尚未实现） |
 | Windows | `…-windows-<架构>-setup.exe` 与 `.zip` | 安装程序由 Bern 生成并用同一套 MSVC 编译：按当前用户安装到 `%LOCALAPPDATA%\Programs`，不需要管理员权限，创建开始菜单快捷方式与“应用和功能”中的卸载项，`/S` 静默安装与卸载；应用运行时拒绝覆盖或卸载。`.zip` 为免安装版本。两者都带 `bin\` 中的 CLI 与 MCP 服务器和 `skills\` 中的 Agent skill |
 | Linux | `<程序>_<版本>_<架构>.deb` 与 `.tar.gz` | `.deb` 安装到 `/opt/<bundle_id>`，附带菜单项、图标主题中的图标与 `/usr/bin` 启动器，依赖声明 GTK 4.14 与 libadwaita 1.5，使用媒体时另加 GStreamer；系统没有 `dpkg-deb` 时只生成 `.tar.gz`。两者都带 `bin/` 中的 CLI 与 MCP 服务器和 `skills/` 中的 Agent skill |
 | Android | `<应用>-<版本>-android.apk` 与 `.aab` | APK 直接安装，App Bundle 用于上架；Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，没有设置时用调试密钥签名并提示不能上架 |
