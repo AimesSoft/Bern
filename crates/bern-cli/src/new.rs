@@ -374,8 +374,9 @@ mod tests {
             Source::for_build(registry, "0.2.0"),
             Source::Release("0.2.0".into())
         );
-        // A release download, built on another computer.
-        let elsewhere = Path::new("/home/runner/work/Bern/Bern/crates/bern-cli");
+        // A release download, built on another computer (not CI's checkout,
+        // which is where these tests run there).
+        let elsewhere = Path::new("/nonexistent/builder/Bern/crates/bern-cli");
         assert_eq!(
             Source::for_build(elsewhere, "0.2.0"),
             Source::Release("0.2.0".into())

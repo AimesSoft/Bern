@@ -2274,7 +2274,7 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 
 Bern 的 crate 以同一版本一起发布，相互之间按 `=版本` 精确依赖：工作区的 `[workspace.dependencies]` 写明版本，`bern-gtk` 不在工作区里，自己写。发新版本时改工作区的 `version`、`[workspace.dependencies]` 里的版本与 `bern-gtk` 的版本和依赖，再推送 `v<版本>` 标签，由 `.github/workflows/release.yml` 发布：
 
-- 为 macOS（arm64、x86_64）、Linux（x86_64、arm64，musl 静态链接，任何发行版都能运行）、Windows（x64、arm64）编译 `bern`，附在 GitHub Release 上：`bern-<目标>.tar.gz`，Windows 为 `.zip`，内含 `bern` 与许可证。`bern-cli` 的 `[package.metadata.binstall]` 指向它们，`cargo binstall bern-cli` 直接下载，不必编译。
+- 为 macOS（arm64、x86_64）、Linux（x86_64、arm64，在 Ubuntu 22.04 上编译，glibc 2.35 起的发行版都能运行；`bern-command` 的 keyring 链接系统的 libdbus，所以不能用 musl 静态链接）、Windows（x64、arm64）编译 `bern`，附在 GitHub Release 上：`bern-<目标>.tar.gz`，Windows 为 `.zip`，内含 `bern` 与许可证。`bern-cli` 的 `[package.metadata.binstall]` 指向它们，`cargo binstall bern-cli` 直接下载，不必编译。
 - 再按依赖顺序（开发依赖也算，crates.io 要求它们已经存在）把每个 crate 发布到 crates.io，令牌取自仓库机密 `CARGO_REGISTRY_TOKEN`（`.github/scripts/publish-crates.py`）。标签必须与 crate 的版本相同。已在 crates.io 上的版本跳过，中途停下的发布重跑即可补完。crates.io 让一个账号连续发布五个新 crate，之后每十分钟一个，遇到时等待后重试：第一次发布 28 个 crate 约需四小时，之后的版本不受这个限制。
 - 修改发布流程的拉取请求只编译各平台的 `bern`、打包并逐个编译每个 crate，不发布任何东西。
 

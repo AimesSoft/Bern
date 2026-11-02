@@ -31,9 +31,11 @@ jobs:
         include:
           - { os: macos-15, target: aarch64-apple-darwin, runs: true }
           - { os: macos-15, target: x86_64-apple-darwin, runs: false }
-          # musl: one static program for every distribution.
-          - { os: ubuntu-24.04, target: x86_64-unknown-linux-musl, runs: true }
-          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, runs: true }
+          # The oldest glibc the runners have, so `bern` runs on the
+          # distributions after it. bern-command's keyring links the
+          # system's libdbus, which a static musl build cannot.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, runs: true }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, runs: true }
           - { os: windows-2025, target: x86_64-pc-windows-msvc, runs: true }
           - { os: windows-2025, target: aarch64-pc-windows-msvc, runs: false }
     defaults:
@@ -48,9 +50,9 @@ jobs:
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
             echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           fi
-      - name: Install musl
-        if: contains(matrix.target, 'musl')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Install libdbus
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
       # rustup installs the toolchain rust-toolchain.toml names.
       - run: rustup toolchain install && rustup target add ${{ matrix.target }}
       - run: cargo build --release --locked -p bern-cli --target ${{ matrix.target }}
