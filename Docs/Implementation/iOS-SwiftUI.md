@@ -76,7 +76,7 @@ The app in the simulator is a process on the Mac and can share the file system w
 
 `BERN_IPC_DIR` works on other platforms too: it replaces the temporary directory as the parent of each app's socket directory.
 
-When the app in the simulator has the same bundle identifier as the macOS version, the engines of both are in the same directory, and the CLI lists both engines and requires `--engine` to pick one.
+When the app in the simulator has the same bundle identifier as the macOS version, the engines of both are in the same directory, and the CLI lists both engines with their systems and requires `--engine` to pick one: `--engine ios` picks the simulator's, `--engine macos` the Mac's. The MCP server is started with the same `--engine`; without it, its tool calls fail with the same list.
 
 iOS suspends apps that are fully in the background, and a suspended engine does not respond. The client's handshake therefore has a 5-second timeout; on timeout it reports "engine not responding" instead of waiting forever; commands after the handshake are not subject to this timeout.
 

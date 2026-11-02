@@ -126,7 +126,7 @@ fn param_help(spec: &CommandSpec, types: &TypeTable) -> String {
 fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
     let (session_types, session_specs) = session_catalog();
     let mut text = format!(
-        "{name}: control the running `{}` engine\n\nUsage: {name} [--engine ID] [--session ID] <command> [--param value]...\n\nCommands:\n",
+        "{name}: control the running `{}` engine\n\nUsage: {name} [--engine ID|SYSTEM] [--session ID] <command> [--param value]...\n\nCommands:\n",
         descriptor.namespace
     );
     fn list(text: &mut String, spec: &CommandSpec, types: &TypeTable) {
