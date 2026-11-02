@@ -752,6 +752,34 @@ native!(Java_dev_bern_runtime_BernNative_mediaEvent(env, handle: jlong, bytes: j
     media::bern_media_event(app(handle), bytes.as_ptr(), bytes.len())
 });
 
+/// A command the system's media session sent, by name: `play`, `pause`,
+/// `toggle`, `next`, `previous` or `seek:<seconds>`.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_nowPlayingCommand(
+    env: *mut JNIEnv,
+    _: jobject,
+    bytes: jbyteArray,
+) {
+    if let Ok(name) = std::str::from_utf8(&unsafe { bytes_in(env, bytes) }) {
+        bern_command::now_playing::command_from_host(name);
+    }
+}
+
+/// A button of an overlay's bar was pressed (`bern::overlay`).
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_overlayPressed(
+    env: *mut JNIEnv,
+    _: jobject,
+    overlay: jbyteArray,
+    button: jbyteArray,
+) {
+    let (overlay, button) = unsafe { (bytes_in(env, overlay), bytes_in(env, button)) };
+    if let (Ok(overlay), Ok(button)) = (std::str::from_utf8(&overlay), std::str::from_utf8(&button))
+    {
+        bern_command::overlay::press(overlay, button);
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "system" fn Java_dev_bern_runtime_BernNative_scriptStart(
     _: *mut JNIEnv,

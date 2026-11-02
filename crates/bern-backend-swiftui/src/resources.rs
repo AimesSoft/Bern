@@ -500,7 +500,7 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         <string>UIInterfaceOrientationPortraitUpsideDown</string>
         <string>UIInterfaceOrientationLandscapeLeft</string>
         <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>{documents}{files}
+    </array>{documents}{files}{audio}
 </dict>
 </plist>
 "#,
@@ -511,6 +511,11 @@ pub fn info_plist_ios(app: &Application, executable: &str, minimum_ios: &str) ->
         version = xml(&app.app.version),
         documents = document_types(app, true),
         files = files_folder(app),
+        audio = if app.app.background_audio {
+            "\n    <key>UIBackgroundModes</key>\n    <array>\n        <string>audio</string>\n    </array>"
+        } else {
+            ""
+        },
     )
 }
 

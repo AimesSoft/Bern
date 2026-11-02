@@ -1755,6 +1755,61 @@ Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, i
 
 实现进度（2026-10-29）：Linux 虚拟机上实测从应用复制分享链接、再用 `paste` 读回，内容一字不差；网页在浏览器里只验证到调用剪贴板接口（浏览器拒绝了自动化读取，读的结果用替身代替）。其他目标未运行。
 
+### 系统的正在播放
+
+播放音乐、播客与视频的应用要出现在系统的播放控制里：键盘的媒体键、耳机的线控、菜单栏与控制中心的“正在播放”、锁屏、通知栏。这由引擎自己做，界面不必声明什么：
+
+```rust
+bern::now_playing::update(Some(&NowPlaying {
+    title, artist, album,
+    artwork: Some(cover_bytes),   // JPEG 或 PNG
+    duration: 245.0, position: 12.5, playing: true,
+}));
+for command in bern::now_playing::take_commands() {
+    match command {
+        Command::Toggle => self.toggle(),
+        Command::Next => self.next(),
+        Command::Seek(seconds) => self.seek(seconds),
+        _ => {}
+    }
+}
+```
+
+- `update` 在歌曲、播放与暂停、位置跳变时调用；`None` 表示没有在播放，系统的控制随之收起。系统自己按 `position` 与 `playing` 推算进度，不必每秒更新。
+- 系统送来的命令有播放、暂停、播放或暂停、下一首、上一首与跳到某秒；每来一条就唤醒引擎（`bern::wake`），引擎在下一次处理时用 `take_commands` 取走。
+- `[app].background_audio = true` 让应用在后台与锁屏时继续出声：iOS 声明 `UIBackgroundModes` 的 `audio`，Android 声明前台服务权限，播放时由一个 `mediaPlayback` 类型的前台服务（`BernPlaybackService`）守着进程。桌面平台不需要它。
+
+各平台的实现：macOS 与 iOS 是 MediaPlayer 的 `MPNowPlayingInfoCenter` 与 `MPRemoteCommandCenter`，在主队列上更新；iOS 另把音频会话设为 `playback`。Windows 是系统媒体传输控件（SMTC）：在自己的线程上建一个关掉了命令管理器的 `MediaPlayer`，只借用它的控件。Linux 在会话总线上提供 MPRIS（`org.mpris.MediaPlayer2.<bundle_id 的最后一段>`），由 zbus 实现。Android 由宿主建 `MediaSession`、带 `MediaStyle` 的通知与前台服务，命令经 JNI 的 `nowPlayingCommand` 回到引擎。
+
+实现进度（2026-11-03）：一个实际的音乐应用实测：macOS 上媒体键播放、暂停与下一首有效，系统的正在播放显示歌名、歌手与封面；iOS 模拟器与 Android 模拟器上系统收到正在播放，Android 的通知栏按钮回到引擎；Linux 虚拟机上用 D-Bus 读到 MPRIS 的状态、元数据与位置，`PlayPause`、`Next` 与 `SetPosition` 变成命令。Windows 只编译，未运行。
+
+### 悬浮文字
+
+`bern::overlay` 在所有窗口上面显示几行文字，例如桌面歌词，或 Windows 任务栏上的一行：
+
+```rust
+bern::overlay::show("lyrics", &Overlay {
+    lines: vec![Line { text, size: 30.0, bold: true, color: [255, 255, 255, 255] }],
+    place: Place::Free,
+    locked,
+    buttons: vec![
+        Button { id: "toggle".into(), symbol: "pause.fill".into(), while_locked: false },
+        Button { id: "lock".into(), symbol: "lock.open.fill".into(), while_locked: true },
+    ],
+});
+for (overlay, button) in bern::overlay::take_presses() { /* … */ }
+```
+
+- 文字带柔和的阴影，在任何背景上都看得清，窗口本身透明。`Place::Free` 在用户上次放下的地方（第一次在主屏幕下方居中），位置由 `storage` 记住；`Place::Taskbar` 立在 Windows 任务栏上通知区域的左边。
+- 未锁定时可以拖动；锁定时点击穿过它，落到下面的窗口上。
+- `buttons` 是自由放置的悬浮文字上方的一排按钮，指针移到文字上时出现，未锁定时连同一块半透明的底板；锁定时只出现 `while_locked` 的按钮，各在未锁定时的位置上，也只有它们接收指针，用户由此就地解锁。按钮的按下经 `take_presses` 回到引擎，每次都唤醒引擎。`symbol` 是 SF Symbols 名称：macOS 画任何一个，其他平台画 `backward.fill`、`forward.fill`、`play.fill`、`pause.fill`、`lock.fill`、`lock.open.fill` 与 `xmark`。
+- Android 上应用先要用户允许“显示在其他应用的上层”：`allowed()` 回答是否已允许，`ask()` 打开系统的设置页；`[app].overlays = true` 声明 `SYSTEM_ALERT_WINDOW` 权限。那里没有悬停，未锁定时点一下文字出现按钮，几秒后收起，窗口上移按钮那么高，文字不动。
+- `supported()` 回答这个系统是否有悬浮文字：iOS、tvOS 与网页没有。
+
+各平台的实现：macOS 是无边框、不激活的 `NSPanel`，在状态栏层级、所有桌面空间与全屏应用之上，每行一个文字标签；按钮是 `NSButton`，指针由定时读 `NSEvent.mouseLocation` 得知，锁定时面板只在指针落在按钮上时接收鼠标。Windows 是分层的置顶工具窗口，Direct2D 与 DirectWrite 画进位图，`UpdateLayeredWindow` 取它的透明度；锁定时带 `WS_EX_TRANSPARENT`，指针落在按钮上时去掉；按钮的图形来自系统图标字体（Windows 11 的 Segoe Fluent Icons，之前是 Segoe MDL2 Assets）；任务栏上的每秒放回任务栏上面。Linux 由 GTK 宿主经 `overlay::install` 接上：无装饰的透明窗口，锁定时输入区域只含解锁的按钮，未锁定时按下即由合成器移动；GTK 4 不能要求位置与置顶，这两样由桌面决定。Android 是 `TYPE_APPLICATION_OVERLAY` 的系统浮窗，锁定时带 `FLAG_NOT_TOUCHABLE`，按钮的图形由宿主自己画。
+
+实现进度（2026-11-03）：一个实际的音乐应用实测：macOS 上显示、拖动、锁定后点击穿过，指针移上去出现按钮，暂停、锁定与就地解锁有效；Android 模拟器上显示，点一下出现按钮，暂停、播放与锁定有效。Linux 只在 Broadway 显示上试过：指针移上去出现按钮与底板，按钮有效；锁定后的输入区域与真实合成器上的置顶未验证。Windows 只编译，未运行。
+
 ### 跟随值的动作
 
 `Watch(value: draft.selected) => app.inspect(draft.selected)` 在挂载时运行一次动作，之后值每变一次运行一次，相等的新值不算变化。它让引擎知道只在界面里的状态：表格选中的行（检查器据此显示那一行）、侧栏选中的页面（引擎据此只列出那一组的服务器）、搜索框的文字。值是布尔、数值、文本、枚举，或它们的可选值与列表；记录不行，因为各平台比较记录的方式不一。动作可以是命令、会话动作或窗口动作。写在 `if` 里时它随条件挂载，条件成立的那一刻运行一次，例如某个状态出现时切到另一页。
@@ -2211,7 +2266,7 @@ tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主�
 | Android | `<应用>-<版本>-android.apk` 与 `.aab` | APK 直接安装，App Bundle 用于上架；Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，没有设置时用调试密钥签名并提示不能上架 |
 | Web | `<程序>-<版本>-web.zip`，WebUI 为 `…-webui-<系统>-<架构>` | 只含服务器需要的文件；WebUI 另含引擎宿主及其 CLI、MCP 服务器与 Agent skill |
 
-签名所需的证书只留在构建的机器或 CI 服务中，经环境变量提供，不写入 `Bern.toml`：`BERN_MACOS_SIGNING_IDENTITY` 以强化运行时与安全时间戳签名应用、工具与磁盘映像，`BERN_MACOS_NOTARY_PROFILE` 再提交公证并装订；`BERN_WINDOWS_CERTIFICATE`（证书库中的指纹或 `.pfx`，密码取自 `BERN_WINDOWS_CERTIFICATE_PASSWORD`）以 `signtool` 签名应用、工具与安装程序并加 RFC 3161 时间戳。没有配置时仍生成包，并说明未签名的后果。`[app].publisher` 是可选的发布者名称，显示在安装程序、卸载项与 Debian 包中。`[app].files_folder = true` 让 iOS 上应用的 Documents 文件夹出现在「文件」App 中（`UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`），用户放进去的文件由引擎自己读取，例如音乐应用的本地曲库；其他平台没有对应的东西。
+签名所需的证书只留在构建的机器或 CI 服务中，经环境变量提供，不写入 `Bern.toml`：`BERN_MACOS_SIGNING_IDENTITY` 以强化运行时与安全时间戳签名应用、工具与磁盘映像，`BERN_MACOS_NOTARY_PROFILE` 再提交公证并装订；`BERN_WINDOWS_CERTIFICATE`（证书库中的指纹或 `.pfx`，密码取自 `BERN_WINDOWS_CERTIFICATE_PASSWORD`）以 `signtool` 签名应用、工具与安装程序并加 RFC 3161 时间戳。没有配置时仍生成包，并说明未签名的后果。`[app].publisher` 是可选的发布者名称，显示在安装程序、卸载项与 Debian 包中。`[app].files_folder = true` 让 iOS 上应用的 Documents 文件夹出现在「文件」App 中（`UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`），用户放进去的文件由引擎自己读取，例如音乐应用的本地曲库；其他平台没有对应的东西。`[app].background_audio = true` 让应用在后台与锁屏时继续播放自己的声音（iOS 的 `audio` 后台模式；Android 的前台服务权限与 `BernPlaybackService`），`[app].overlays = true` 让 Android 应用可以请求显示悬浮文字（`SYSTEM_ALERT_WINDOW`），见“系统的正在播放”与“悬浮文字”。
 
 直接写在 `Window` 中的控件以窗口 id 作为组件名，目标形如 `main.add_one`；写在组件中的控件仍为 `组件名.控件 id`。四个目标一致。
 

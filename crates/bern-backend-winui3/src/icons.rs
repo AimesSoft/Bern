@@ -24,6 +24,7 @@ pub const GLYPHS: &[(&str, u32)] = &[
     ("calendar", 0xE787),
     ("camera", 0xE722),
     ("captions.bubble", 0xED1E),
+    ("captions.bubble.fill", 0xED1E),
     ("character.cursor.ibeam", 0xE765),
     ("chart.bar", 0xEAFC),
     ("checkmark", 0xE73E),
