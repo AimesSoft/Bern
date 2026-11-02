@@ -639,7 +639,7 @@ pub fn LazyGrid(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::features::{ScrollProps, ScrollView};
     use std::time::Duration;
@@ -670,11 +670,7 @@ mod tests {
     /// the view, builds the rows where the view scrolls to, and follows its
     /// items. Without a display nothing lays out, and there is nothing to
     /// check.
-    #[test]
-    fn a_long_grid_builds_only_the_rows_near_the_view() {
-        if gtk::init().is_err() {
-            return;
-        }
+    pub(crate) fn a_long_grid_builds_only_the_rows_near_the_view() {
         let window = gtk::Window::new();
         window.set_default_size(400, 300);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 0);

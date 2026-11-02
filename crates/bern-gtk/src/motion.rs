@@ -1665,7 +1665,7 @@ pub(crate) fn bind_number(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -1693,11 +1693,7 @@ mod tests {
     /// `glow` where there is a display: the pointer over the element
     /// lights it, also where another widget lies on top, the light fades
     /// in, and it goes when the pointer leaves the element.
-    #[test]
-    fn a_glowing_box_lights_under_the_pointer_and_fades() {
-        if gtk::init().is_err() {
-            return;
-        }
+    pub(crate) fn a_glowing_box_lights_under_the_pointer_and_fades() {
         let window = gtk::Window::new();
         let layers = gtk::Overlay::new();
         let cover = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -1751,11 +1747,7 @@ mod tests {
     /// machine): the box turns while its condition holds, stops where it
     /// is and goes on from there. Without a display nothing draws, and
     /// there is nothing to check.
-    #[test]
-    fn a_spinning_box_turns_stops_where_it_is_and_goes_on() {
-        if gtk::init().is_err() {
-            return;
-        }
+    pub(crate) fn a_spinning_box_turns_stops_where_it_is_and_goes_on() {
         let window = gtk::Window::new();
         let child = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         child.set_size_request(40, 10);
