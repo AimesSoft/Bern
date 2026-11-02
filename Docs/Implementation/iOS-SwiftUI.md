@@ -21,7 +21,7 @@
 | 屏幕旋转、键盘、安全区域 | 部分 | 键盘输入、安全区域与 iPad 窗口缩放（停在最小尺寸）实测；旋转由 SwiftUI 处理，未实测 |
 | 状态可订阅；带参数命令与错误返回 | 完成 | 与 macOS 相同的运行时：引擎状态、会话草稿、查询、关闭协议 |
 | Video 原生呈现 | 完成 | AVFoundation 执行端与 `AVPlayerLayer` 呈现、命令驱动的控制条 |
-| 真机构建与打包 | 未完成 | 引擎与界面能按 `aarch64-apple-ios` 编译链接；签名、描述文件、安装与 `bern package` 未做 |
+| 真机构建与打包 | 部分 | `bern package` 生成临时签名的 `.ipa`（2026-11-02）；开发者签名、描述文件与安装未做 |
 
 ## 工程结构
 
@@ -192,9 +192,15 @@ iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全�
 
 `Watch` 与 `Text(color:)` 与 macOS 相同（`BernWatch`、`foregroundStyle`）。iOS 没有登录项，`Switch(login_item: true)` 生成 `EmptyView`（能力 `login_switch` 不适用）。验证：`tables` 测试按 iOS SDK 类型检查；未在模拟器上运行。
 
+## 打包（2026-11-02）
+
+`bern package --target ios` 先照常构建模拟器应用，再把包复制到 `target/bern/ios/package/Payload/`，在其中替换按真机构建的部分：引擎与桥按 `aarch64-apple-ios` 编译（`IPHONEOS_DEPLOYMENT_TARGET` 为最低系统版本），`actool` 按 `iphoneos` 重编图标，`swiftc` 用 `iphoneos` SDK 与 `arm64-apple-ios17.0` 重新编译链接前端，release 时剥去符号；`plutil` 把 `CFBundleSupportedPlatforms` 改为 `iPhoneOS`，`codesign --sign -` 临时签名，`ditto` 打成 `target/bern/dist/<产品>-<版本>-ios.ipa`。资源、本地化与其余 Info.plist 键沿用模拟器的包。
+
+验证：Enji 在本机与 GitHub Actions 的 macOS 26 上打出 `.ipa`；包里的程序是 `platform IOS`、`minos 17.0` 的 arm64，签名校验通过，压缩包里没有资源分叉。未在真机上安装运行。
+
 ## 未完成与已知限制
 
-- 只构建模拟器应用。真机需要开发者签名与描述文件，安装与 `bern package` 未实现。
+- `bern build` 只构建模拟器应用。`bern package` 的 `.ipa` 只有临时签名，要用以 Apple ID 或开发者证书重新签名的工具安装；按描述文件签名与直接安装到设备未实现。
 - HDR：模拟器显示不了 HDR，增益图在模拟器里只解码 SDR 版本；真机上图片按 HDR 解码，视频由 `AVPlayerLayer` 显示，HDR 均未验证。
 - 真机上没有声明后台音频，进入后台后系统会暂停播放；只在模拟器里观察过（模拟器里继续播放）。
 - iPadOS 菜单栏中的“设置”与 ⌘, 只经过类型检查，未实测（模拟器上没有接键盘的菜单栏操作）。
