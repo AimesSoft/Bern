@@ -238,6 +238,15 @@ const ICONS: &[(&str, &str, Fill)] = &[
         lucide!("message-square-text"),
         Fill::None,
     ),
+    // The bubble is filled; its lines are cut out of it.
+    (
+        "captions.bubble.fill",
+        lucide!("message-square-text"),
+        Fill::Knockout {
+            solid: &[0],
+            cut: &[1, 2, 3],
+        },
+    ),
     ("textformat.size", lucide!("a-large-small"), Fill::None),
     // The disc is filled; the rays stay lines.
     ("sun.max.fill", lucide!("sun"), Fill::Shapes(&[0])),

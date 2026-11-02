@@ -24,6 +24,7 @@ mod lazy;
 mod markdown;
 mod media;
 pub mod motion;
+mod overlay;
 mod palette;
 mod parent;
 mod picture;

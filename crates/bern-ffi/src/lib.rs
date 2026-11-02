@@ -42,7 +42,7 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-pub use bern_command::platform;
+pub use bern_command::{overlay, platform};
 pub use bern_media as media_contract;
 pub use bern_protocol as protocol;
 pub use bern_runtime as runtime;

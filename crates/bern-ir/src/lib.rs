@@ -376,6 +376,15 @@ pub struct AppInfo {
     /// in the Files app, for files the user puts there for it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub files_folder: bool,
+    /// `[app].background_audio`: the application's own audio plays on
+    /// behind the lock screen and in the background (iOS's audio background
+    /// mode).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub background_audio: bool,
+    /// `[app].overlays`: the application draws text over other apps
+    /// (`bern::overlay`), which Android asks the user to allow.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub overlays: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
