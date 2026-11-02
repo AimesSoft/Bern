@@ -28,8 +28,8 @@
 </p>
 
 <p>
-<a href="README.md">简体中文</a> ·
-<a href="README.en.md">English</a> ·
+<a href="README.md">English</a> ·
+<a href="README.zh-CN.md">简体中文</a> ·
 <a href="README.zh-Hant.md">繁體中文</a> ·
 <b>日本語</b>
 </p>
@@ -490,12 +490,12 @@ cargo test --workspace
 
 ## ドキュメント
 
-- [ドキュメント索引](Docs/README.md) · [現在のコンポーネントガイド](Docs/Reference/UI.md) · [プロパティ一覧](Docs/Reference/Component-Properties.md) · [プラットフォーム対応と検証範囲](Docs/Reference/Platforms.md)（中国語）
+- [ドキュメント索引](Docs/README.md) · [現在のコンポーネントガイド](Docs/Reference/UI.md) · [プロパティ一覧](Docs/Reference/Component-Properties.md) · [プラットフォーム対応と検証範囲](Docs/Reference/Platforms.md)
 - [設計ドキュメント](Docs/Design.md)：目標、アーキテクチャ、コンポーネント、テーマ、コマンド、ウィンドウ、メディア
 - [適応仕様](Docs/Adaptation/README.md)：Apple、Windows と Linux、Web、Android、HarmonyOS
 - 実装記録：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
-設計ドキュメントと実装記録は中国語で書かれています。
+ドキュメントは英語で書かれています。[簡体字中国語版](Docs/zh-CN/README.md)もあります。
 
 ## ライセンス
 

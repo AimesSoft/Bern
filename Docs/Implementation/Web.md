@@ -1,413 +1,415 @@
-# Web 实现记录
+**English** · [简体中文](../zh-CN/Implementation/Web.md)
 
-- 首次记录：2026-10-10
-- 更新日期：2026-10-17
-- 依据：[Bern 架构设计](../Design.md)（最初按 v0.14 实现）、[Web 视觉规范 v0.6](../Adaptation/Web.md)
-- 工具链：Rust 1.99.0（`wasm32-unknown-unknown`）；不依赖 wasm-bindgen，页面直接实例化 WebAssembly 模块
-- 验证浏览器：内置 Chromium，以及桌面 Safari 27.0.1 的指定场景；各轮范围见下文
+# Web implementation notes
 
-本文记录阶段三（Web 双构建）的实际完成情况：视觉规范、Bern 主题内核、`app` 构建（引擎在页面内）与 `ui` 构建（WebUI 连接独立引擎宿主）均已实现并在浏览器中验证。v0.2 视觉规范把 Web 呈现改为 Bern 自有的中性网页风格（主窗口即页面、次级窗口为对话框），实现与验证见“窗口呈现”和第三份验证记录；v0.3 调整控件（见“控件（v0.3）”与第四份验证记录）。
+- First recorded: 2026-10-10
+- Updated: 2026-10-17
+- Basis: [Bern architecture design](../Design.md) (originally implemented against v0.14), [Web design guidelines v0.6](../Adaptation/Web.md)
+- Toolchain: Rust 1.99.0 (`wasm32-unknown-unknown`); no dependency on wasm-bindgen, the page instantiates the WebAssembly module directly
+- Verification browsers: the built-in Chromium, and desktop Safari 27.0.1 for specific scenarios; the scope of each round is given below
 
-## 2026-10-15：多页应用的 Web app 适配
+This document records what was actually completed in Phase 3 (the Web dual build): the design guidelines, the Bern theme core, the `app` build (engine inside the page) and the `ui` build (WebUI connected to a separate engine host) are all implemented and verified in the browser. The v0.2 design guidelines changed the Web presentation to Bern's own neutral web style (the main window is the page, secondary windows are dialogs); for the implementation and verification see "Window presentation" and the third verification record; v0.3 adjusted the controls (see "Controls (v0.3)" and the fourth verification record).
 
-一个已有 macOS 版的多页媒体应用继续使用同一套声明，以 `web_mode = "app"` 将引擎编译成 WASM。为现有界面补齐以下浏览器能力，再开放对应 capability 检查：
+## 2026-10-15: Web app adaptation of a multi-page app
 
-- `Modal`（不写高度时 `<dialog>` 不设高度，与内容一样高，`max-height` 为视口减 32，超出时由其中的滚动区收缩）、`Flow`、`Timer`、搜索面板及分组结果、显式 `PickerOption`、引擎受控 Switch/Picker。`Picker(style: chips)` 是 Radio Group 模式的药丸按钮（`chip` 配方），直接放在 `Flow` 里时组容器为 `display: contents`，每枚都是 Flow 的子项。定时器随声明生命周期清理；搜索支持方向键、回车、Escape 和焦点恢复。
-- Stack 样式、文本字号/字重/行数、纯图标 Label/Menu、胶囊控件、分轴 padding、baseline、模板图及固有比例、图片圆角与响应式比例、独立 Grid 行距。
-- 固定侧栏宽度、顶栏、动态 badge、无标题 Detail、工具栏 leading 项、手风琴列宽动画、边缘 grow、延迟入场、事件触发 nudge、应用减少动态效果。
-- 布局的伸展意图在显式宽高处停止，Spacer 按主轴参与布局。`reflow` 在条件分支的 DocumentFragment 挂载后观察实际父元素，共享观察器并在最后一个声明卸载后清理。
-- 新增该应用用到的 SF 名称到 Lucide 的映射；SVG 随构建离线分发，授权保留。
+A multi-page media app that already has a macOS version keeps using the same declaration and compiles its engine to WASM with `web_mode = "app"`. The following browser capabilities were added for the existing UI before the corresponding capability checks were opened:
 
-`bern-command::storage::Store` 在 WASM 中使用宿主导入 `storage_read/storage_write`，保存到同源 localStorage 的 `bern:<bundle_id>:<key>`。二进制值以字节数组编码；缺失与空值不同，权限、格式和容量错误返回 `CommandError`。原生文件存储路径保持原行为。
+- `Modal` (without a height, the `<dialog>` gets no height and is as tall as its content, `max-height` is the viewport minus 32, and beyond that the scroll area inside it shrinks), `Flow`, `Timer`, the search panel and grouped results, explicit `PickerOption`, engine-controlled Switch/Picker. `Picker(style: chips)` is pill buttons in Radio Group mode (the `chip` recipe); placed directly in a `Flow`, the group container is `display: contents` and each chip is a child of the Flow. Timers are cleaned up with the declaration's lifecycle; search supports the arrow keys, Enter, Escape and focus restoration.
+- Stack styles, text size/weight/line count, icon-only Label/Menu, capsule controls, per-axis padding, baseline, template images and intrinsic aspect ratio, image corner radius and responsive aspect ratio, independent Grid row spacing.
+- Fixed sidebar width, top bar, dynamic badge, untitled Detail, toolbar leading items, accordion column-width animation, edge grow, delayed entrance, event-triggered nudge, app-level Reduce Motion.
+- A layout's stretch intent stops at an explicit width or height, and Spacer takes part in layout along the main axis. `reflow` observes the actual parent element after a conditional branch's DocumentFragment is mounted, shares one observer, and cleans it up after the last declaration unmounts.
+- Added mappings from the SF names this app uses to Lucide; the SVGs ship offline with the build, with their license kept.
 
-`bern run --target web_app --port 4173` 可使用固定开发 origin，避免随机端口使浏览器读取到另一份站点配置。`--port` 仅适用于浏览器 app 目标；未传参数保留随机端口。
+`bern-command::storage::Store` uses the host imports `storage_read/storage_write` in WASM and saves to same-origin localStorage under `bern:<bundle_id>:<key>`. Binary values are encoded as byte arrays; missing differs from empty, and permission, format and quota errors return `CommandError`. The native file storage path keeps its original behavior.
 
-首轮自动验证：Web 后端/CLI/存储 Rust 测试、浏览器运行时 Node 测试、应用引擎测试、Web WASM 构建与 macOS 声明检查通过。修改的 Rust 文件格式检查、Web 后端和存储的严格 clippy 通过。该轮包含 CLI 的严格 clippy 曾受 `bern-compiler` 三处 `collapsible_if` 警告阻断；2026-10-17 文档同步时已清理这些条件分支，并通过编译器 49 项回归。应用的原始 UI crate 依赖 Bern 模块组合，直接 `cargo test --workspace` 会在未组合的 Pages/组件符号处失败，因此使用 Bern 构建检查 UI、单独测试各引擎。截至 2026-10-16 本轮复查，Bern Rust 测试 46 项、Node 运行时测试 27 项通过，已补充滚动、布局及颜色配对回归。重新构建 Bern CLI 后，最新 Web 构建及 macOS 声明检查（72 个组件）通过；这些检查不替代浏览器验收。
+`bern run --target web_app --port 4173` can use a fixed development origin, so that a random port does not make the browser read another copy of the site's settings. `--port` applies only to the browser app target; without the argument the port stays random.
 
-首轮浏览器检查使用内置 Chromium，覆盖 1280 × 800 与 390 × 844：四步引导、刷新恢复、主题切换、设置搜索、可选模块依赖、周历展开/详情返回、媒体库筛选排序、全局搜索和模拟播放、下载进度及暂停/继续。窄屏引导的滚动区收缩与固定底栏、设置窗口全高也在该轮检查。后续真实 Safari 27.0.1 暴露了这些检查和逻辑测试未发现的问题，因此不能把首轮记录视为完整 Web 验收。
+First round of automated verification: the Web backend/CLI/storage Rust tests, the browser runtime Node tests, the app's engine tests, the Web WASM build and the macOS declaration check passed. The format check of the modified Rust files and strict clippy for the Web backend and storage passed. In that round, strict clippy including the CLI was blocked by three `collapsible_if` warnings in `bern-compiler`; during the 2026-10-17 documentation sync these conditional branches were cleaned up, and the compiler's 49 regression tests passed. The app's original UI crate depends on Bern's module composition, so running `cargo test --workspace` directly fails at the uncomposed Pages/component symbols; the UI is therefore checked with a Bern build and each engine is tested separately. As of this round's review on 2026-10-16, 46 Bern Rust tests and 27 Node runtime tests pass, with regression tests added for scrolling, layout and color pairing. After rebuilding the Bern CLI, the latest Web build and the macOS declaration check (72 components) pass; these checks do not replace browser acceptance.
 
-Safari 27.0.1 的修复与复查记录：
+The first round of browser checks used the built-in Chromium at 1280 × 800 and 390 × 844: four-step onboarding, restoring after a reload, theme switching, settings search, optional module dependencies, expanding the weekly calendar/returning from details, media library filtering and sorting, global search and simulated playback, download progress and pause/resume. The shrinking scroll area with a fixed bottom bar in the narrow-screen onboarding and the full height of the settings window were also checked in that round. A later real Safari 27.0.1 exposed problems that these checks and the logic tests had not found, so the first-round record cannot be taken as complete Web acceptance.
 
-- **普通滚动区**：未声明 `snap` 的 `ScrollView` 被运行时默认为 `center`，居中内边距又参与下一轮测量，最终产生 6793.7 px 内边距，媒体库列表移出可见区域。默认改为起始边对齐，仅显式 `snap: center` 使用居中停靠，并消除居中边距的累加反馈。
-- **高度与宽度约束**：`Query` 包装层中断 flex 高度链，深层图片的 `min-content` 宽度又传播到祖先布局，使页面超出视口。修复这些约束后，Safari 已确认媒体库列表恢复显示，首页工具栏与右栏位于视口内。
-- **侧栏选中色**：声明将选中背景改为 `fill.strong` 后，默认 `on_accent` 前景色没有随背景替换；朱红、霓虹深色主题的文字对比度只有 1.33:1。中性 `fill.*`、`surface.*` 背景现在配对 `text.primary`，`selection.background` 配对 `selection.foreground`；显式前景色仍优先，强调色背景继续使用自己的配对。选中图标继承文字前景色，该深色组合的对比度为 12.59:1，Safari 实测文字与图标清晰可见。回归覆盖主题配对、选中/悬停切换和显式前景色优先级。
-- **Rail 覆盖层**：Rail 不再参与放大含图片/文字的 Stack，覆盖范围由内容决定。2026-10-16，Safari 在 1470 CSS px 宽度下确认首页舞台图右侧圆角与 28 px 间距恢复，工具栏和右栏正常；Chromium 1470 × 754 的 DOM 测量中，舞台按钮与图片均为 528 × 297，画框一致。
-- **Safari 交互复查范围**：媒体库显示 16 张海报，筛选「未看」得到 8 张；深色侧栏选中白色文字与图标可读；周历从周一切换到周三、设置从通用切换到外观均目视正常。此次为桌面 Safari 27.0.1 验证，不包含 Safari 手机布局或所有页面。
-- **媒体库窄屏复查**：共享 UI 的 `compact` 布局改为三行头部、`Flow` 筛选项与较窄缩放控件。Chromium 390 × 844 和 360 × 780 下标题不换行，完整缩放控件两端均可见，海报网格正常，文档 `clientWidth` 与 `scrollWidth` 相等。结论限于这两个尺寸的媒体库布局，不扩展为所有窄屏页面通过；Safari 手机布局及 Firefox 尚未实测。
+Fixes and re-checks on Safari 27.0.1:
 
-应用仍为 UI 与状态模拟，没有接入实际播放、传输、更新或插件安装。
+- **Plain scroll areas**: a `ScrollView` without `snap` was defaulted to `center` by the runtime, and the centering padding fed into the next measurement round, eventually producing 6793.7 px of padding and moving the media library list out of the visible area. The default is now leading-edge alignment, only an explicit `snap: center` uses centered snapping, and the feedback that accumulated the centering padding is removed.
+- **Height and width constraints**: the `Query` wrapper broke the flex height chain, and the `min-content` width of deeply nested images propagated to ancestor layouts, making the page wider than the viewport. After these constraints were fixed, Safari confirmed that the media library list shows again and that the home toolbar and right column are within the viewport.
+- **Sidebar selection color**: after the declaration changed the selected background to `fill.strong`, the default `on_accent` foreground color was not replaced along with the background; with the vermilion and neon dark themes the text contrast was only 1.33:1. Neutral `fill.*` and `surface.*` backgrounds are now paired with `text.primary`, and `selection.background` with `selection.foreground`; an explicit foreground color still takes precedence, and accent backgrounds keep their own pairing. The selected icon inherits the text foreground color; the contrast of that dark combination is 12.59:1, and measured on Safari the text and icon are clearly visible. Regression tests cover theme pairing, selected/hover switching and explicit foreground precedence.
+- **Rail overlay**: Rail no longer takes part in enlarging a Stack that contains images/text; the covered area is determined by the content. On 2026-10-16, Safari at a width of 1470 CSS px confirmed that the right corner radius of the home stage image and the 28 px spacing are restored, and that the toolbar and right column are normal; in Chromium DOM measurements at 1470 × 754, the stage button and the image are both 528 × 297, with matching frames.
+- **Scope of the Safari interaction re-check**: the media library shows 16 posters, and filtering by "Unwatched" gives 8; the white selected text and icon in the dark sidebar are readable; switching the weekly calendar from Monday to Wednesday and settings from General to Appearance looked correct. This was verification on desktop Safari 27.0.1 and does not include the Safari phone layout or every page.
+- **Narrow-screen re-check of the media library**: the shared UI's `compact` layout changed to a three-row header, `Flow` filter items and a narrower zoom control. In Chromium at 390 × 844 and 360 × 780, the title does not wrap, both ends of the full zoom control are visible, the poster grid is normal, and the document's `clientWidth` equals its `scrollWidth`. The conclusion is limited to the media library layout at these two sizes and is not extended to all narrow-screen pages passing; the Safari phone layout and Firefox have not been measured yet.
 
-## 完成情况
+The app is still a UI and state simulation, with no actual playback, transfers, updates or plugin installation wired in.
 
-| 设计要求 | 状态 | 说明 |
+## Completion status
+
+| Design requirement | Status | Notes |
 | --- | --- | --- |
-| 实现前单独定义 Web 视觉规范 | 完成 | [Docs/Adaptation/Web.md](../Adaptation/Web.md) v0.2：Bern 自有的中性网页风格；度量与字号、主题角色与声明的配对、控件配方、各组件呈现与键盘行为、页面与对话框呈现、焦点、动效、图标与验收 |
-| Bern 主题内核：角色、控件配方、快照、确定性、受控配对、品牌种子变化 | 完成 | `bern-theme`（Bern Theme Algorithm v5），见“主题内核” |
-| 同一声明与命令 schema 生成两个独立目录；模式变化不残留另一模式的产物 | 完成 | `web_app`、`web_ui` 各自生成到 `target/bern/<目标名>/`；两种模式的 WebAssembly 编译目录分开（`target/bern-web-glue/app`、`…/ui`）。把同一目标从 `ui` 改为 `app` 后构建会删除引擎宿主程序与其胶水 crate，改回 `ui` 后页面模块重新不含引擎代码（实测） |
-| `app` 在没有独立引擎服务时完成示例业务 | 完成 | 引擎、会话运行时与 C ABI 编译为一个 WebAssembly 模块，在页面内运行 |
-| 不支持 WASM 的业务依赖明确失败 | 部分 | 依赖无法编译到 `wasm32` 时，构建在 Cargo 步骤失败并输出编译器诊断；尚未给出指向 `Bern.toml` 的专门诊断 |
-| `ui` 产物不包含业务处理器与服务端依赖 | 完成 | 页面模块只链接协议 crate 与 `bern-ffi`（`remote` 特性）；产物中没有任何 `showcase_core` 符号（`app` 构建有 1368 个） |
-| WebUI 多会话共享业务状态，窗口与草稿互不串用；CLI/MCP 路由到指定会话 | 完成 | 引擎宿主为每个页面登记一个 UI 会话；未指定会话时返回 `session_required` |
-| 版本不兼容、权限不足、断线、结果未知、重连与重同步 | 完成 | 见“`ui` 构建”；握手核对令牌、协议版本与目录指纹；断线时等待中的请求以 `connection_lost` 结束，不重发；重连后以完整快照重同步并恢复同一会话 |
-| 阶段二的通用验收在 Web 上重新执行 | 部分 | 见“验证记录”；四入口联调在 `ui` 构建中完成；键盘、输入法、读屏未实测 |
-| 主题切换验证颜色算法的受控配对 | 完成 | 298 个种子 × 浅深 × 标准/更高对比，全部声明的配对达标、无回退（单元测试） |
-| 虚拟呈现遵循宿主惯例，宽窄屏切换 | 完成 | 主窗口就是页面；设置等次级窗口为模态对话框（标题与关闭按钮，遮罩、Esc 与关闭按钮经关闭协议）；只有声明 `presentation: floating` 的窗口才是可拖动、可调整尺寸、可最小化的浮动面板；页面与对话框的窗口动作只有激活与关闭，其余返回 `target_unavailable`；窄屏时对话框占满页面区域 |
-| Video 生成实际 `<video>`；`play()` 拒绝与用户激活不足 | 部分 | 播放器为 HTML `<video>`，关闭原生控制条，用 Bern 控制条发命令；`play()` 被拒时返回 `user_activation_required`（代码路径已实现，未在真实拒绝场景下验证） |
+| Define the Web design guidelines separately before implementation | Done | [Docs/Adaptation/Web.md](../Adaptation/Web.md) v0.2: Bern's own neutral web style; metrics and font sizes, theme roles and declared pairings, control recipes, presentation and keyboard behavior of each component, page and dialog presentation, focus, motion, icons and acceptance |
+| Bern theme core: roles, control recipes, snapshots, determinism, controlled pairings, brand seed variation | Done | `bern-theme` (Bern Theme Algorithm v5), see "Theme core" |
+| The same declaration and command schema generate two independent directories; a mode change leaves no outputs of the other mode behind | Done | `web_app` and `web_ui` each generate into `target/bern/<target_name>/`; the WebAssembly compilation directories of the two modes are separate (`target/bern-web-glue/app`, `…/ui`). After changing the same target from `ui` to `app`, the build deletes the engine host program and its glue crate, and after changing back to `ui` the page module again contains no engine code (measured) |
+| `app` completes the example business flow without a separate engine service | Done | The engine, the session runtime and the C ABI compile into one WebAssembly module that runs inside the page |
+| Business dependencies that do not support WASM fail explicitly | Partial | When a dependency cannot compile to `wasm32`, the build fails at the Cargo step and prints the compiler diagnostics; there is no dedicated diagnostic pointing to `Bern.toml` yet |
+| `ui` outputs contain no business handlers and no server-side dependencies | Done | The page module links only the protocol crate and `bern-ffi` (the `remote` feature); the output contains no `showcase_core` symbols at all (the `app` build has 1368) |
+| Multiple WebUI sessions share business state, while windows and drafts are not mixed between them; CLI/MCP route to a specified session | Done | The engine host registers one UI session per page; without a specified session it returns `session_required` |
+| Version incompatibility, insufficient permissions, disconnection, unknown results, reconnection and resynchronization | Done | See "`ui` build"; the handshake checks the token, protocol version and catalog fingerprint; on disconnection, pending requests end with `connection_lost` and are not resent; after reconnecting, a full snapshot resynchronizes and the same session is restored |
+| Phase 2's general acceptance is re-run on the Web | Partial | See "Verification log"; end-to-end testing of the four entry points is done in the `ui` build; keyboard, input methods and screen readers not measured |
+| Theme switching verifies the controlled pairings of the color algorithm | Done | 298 seeds × light/dark × standard/increased contrast; every declared pairing meets its requirement with no fallback (unit tests) |
+| Virtual presentation follows host conventions and switches between wide and narrow screens | Done | The main window is the page; secondary windows such as settings are modal dialogs (title and close button; the backdrop, Esc and the close button go through the close protocol); only windows declared `presentation: floating` are floating panels that can be dragged, resized and minimized; the only window actions for pages and dialogs are activate and close, the others return `target_unavailable`; on narrow screens dialogs fill the page area |
+| Video generates a real `<video>`; `play()` rejection and insufficient user activation | Partial | The player is an HTML `<video>` with the native control bar turned off, and the Bern control bar sends commands; when `play()` is rejected it returns `user_activation_required` (the code path is implemented, not verified in a real rejection scenario) |
 
-## 主题内核
+## Theme core
 
-`crates/bern-theme`，纯计算，不访问平台接口。
+`crates/bern-theme`, pure computation, no access to platform interfaces.
 
-- **输入与输出**：`generate(种子, 模式, 对比策略)` 得到快照：schema 版本、算法版本、按名称排序的 token、每个声明配对的实测对比度与要求、回退原因。默认种子 `#2f6fe4`。
-- **颜色空间**：8 位 sRGB ↔ OKLab/OKLCH（Björn Ottosson 的参考矩阵）；超出色域时保持明度与色相、二分降低色度；对比度按正确线性化的 sRGB 相对亮度在最终 8 位颜色上计算。
-- **求解**：每个角色从目标明度出发（品牌角色用种子色相，表面与文字用固定的中性色相，状态色用固定色相），在 0.0025 的明度步长上寻找离目标最近、满足它所有声明配对的颜色；找不到时按 1、0.75、0.5、0.25、0 倍降低色度再找；仍不行则取最坏对比最大的中性端点并记录回退原因。
-- **配对求解**：`accent` 与 `on_accent`、`status.error.surface` 与 `on_error` 一起求解：背景向白色前景调到对比达标所需的明度变化不超过 0.12（OKLCH）时用白色，和各平台强调色上的白字一致；否则在白色与深色中性之间选择，使背景离目标最近。强调色这一对从种子本身出发、按图形对比度检查（v7），错误色这一对按正文对比度。
-- **层级**（v2）：浅色模式画布与浮层为白色，面板（侧边栏）略暗，宿主底色更暗；深色模式宿主、画布、面板、浮层逐层提亮，不做 RGB 反色。普通按钮以画布为底、`separator` 为边，悬停与按下底色由画布明度偏移得到。状态色不受品牌种子影响。
-- **对比策略**：标准为正文 4.5:1、辨识所需图形 3:1、禁用 3:1；更高对比为 7:1、4.5:1、4.5:1。
-- **控件配方**：`RECIPES` 以数据描述各控件各状态的槽位与 token，包括 `nav_item`（侧边栏）、下划线 `tab`（含竖排选中状态）、`menu`（下拉菜单）、`media_scrubber`（媒体进度条）与 `dialog`；图标按钮的底色与边框在所有状态都是 `transparent`。
-- **v3 的变化**：`accent` 也对 `surface.raised` 达到 3:1（图标按钮悬停色出现在对话框头部）；新增 `media.track`（固定的浅槽）与 `media.played`（中性色，对槽与各表面 3:1）。
-- **v4 的变化**：选中的导航项改为填满 `accent`、文字图标为 `on_accent`，不再有浅色选中底；`selection.background`、`selection.foreground`、`selection.indicator` 三个角色删除。
-- **v5 的变化**：`accent.text` 改为从 `accent` 自身的明度出发求解，只移动到对各表面 4.5:1 所需的程度。默认种子下浅色由 `#1a5acd` 变为 `#2060d4`，深色由偏淡的 `#85b1ff` 变为 `#528fff`；无边框按钮、链接、选中页签的文字更接近强调色。新增测试：品牌文字与强调色的明度差小于 0.12、色度大于 0.15。
-- **v6 的变化**（2026-10-19）：强调色上的前景优先白色（见“配对求解”）。此前偏红、偏亮的强调色因深色前景更近而配上近黑色文字，选中的侧栏项与开启的开关圆钮在浅色模式下和普通文字同色；现在例如种子 `#FF2E55` 在浅色与深色模式下都是 `#db364f` 配白色（原为 `#e54056` 与 `#f04b5f` 配 `#0e1217`）。亮绿等需要大幅变暗才能配白字的种子在深色模式下仍配深色前景。
-- **v7 的变化**（2026-10-20）：`accent` 从用户选的颜色本身出发（不再先把明度夹到 0.45–0.72 的范围），与 `on_accent` 按图形对比度求解：标准策略 3:1、高对比度 4.5:1，与系统强调色按钮上的白色标题一致；悬停与按下的变体保持同一档。种子满足时原样使用：`#FF2E55` 在标准策略下浅色与深色都是 `#ff2e55` 配白色（v6 为 `#db364f`），高对比度浅色为 `#e50043`；默认种子 `#2f6fe4` 原样使用；`#34c759` 浅色为 `#00a73f`，`#ffcc00` 浅色为 `#b08c00`、深色原样配深色前景。此前强调色按正文 4.5:1 求解，选的颜色在页面上明显偏暗。
-- **测试**：298 个种子（色相每 15°，四档明度，三档色度，加纯黑、纯白、灰、黄、绿等极端值）× 浅深 × 两种对比策略，全部配对达标且无回退；另有确定性、表面层级、品牌色相保持、状态色独立于种子、配方引用完整等测试。
+- **Input and output**: `generate(seed, mode, contrast_policy)` yields a snapshot: schema version, algorithm version, tokens sorted by name, the measured contrast and the requirement of each declared pairing, and fallback reasons. Default seed `#2f6fe4`.
+- **Color space**: 8-bit sRGB ↔ OKLab/OKLCH (Björn Ottosson's reference matrices); out of gamut, lightness and hue are kept and chroma is reduced by bisection; contrast is computed on the final 8-bit color from correctly linearized sRGB relative luminance.
+- **Solving**: each role starts from a target lightness (brand roles use the seed's hue, surfaces and text a fixed neutral hue, status colors fixed hues) and searches, in lightness steps of 0.0025, for the color closest to the target that satisfies all its declared pairings; if none is found, it reduces chroma by factors of 1, 0.75, 0.5, 0.25 and 0 and searches again; if that still fails, it takes the neutral endpoint with the highest worst-case contrast and records the fallback reason.
+- **Pair solving**: `accent` with `on_accent` and `status.error.surface` with `on_error` are solved together: when the lightness change needed to bring the background to the required contrast against a white foreground is no more than 0.12 (OKLCH), white is used, consistent with white text on accent colors on every platform; otherwise it chooses between white and a dark neutral so that the background stays closest to its target. The accent pair starts from the seed itself and is checked against graphics contrast (v7), the error pair against body-text contrast.
+- **Layers** (v2): in light mode the canvas and popovers are white, the panel (sidebar) is slightly darker, and the host background darker still; in dark mode the host, canvas, panel and popover get progressively lighter, with no RGB inversion. Plain buttons use the canvas as their background and `separator` as their border; hover and pressed backgrounds are derived by offsetting the canvas lightness. Status colors are not affected by the brand seed.
+- **Contrast policies**: standard is 4.5:1 for body text, 3:1 for graphics needed for recognition, 3:1 for disabled; increased contrast is 7:1, 4.5:1, 4.5:1.
+- **Control recipes**: `RECIPES` describes as data the slots and tokens of each state of each control, including `nav_item` (sidebar), underlined `tab` (including the vertical selected state), `menu` (dropdown menu), `media_scrubber` (media progress bar) and `dialog`; the background and border of icon buttons are `transparent` in every state.
+- **Changes in v3**: `accent` also reaches 3:1 against `surface.raised` (the icon button hover color appears in dialog headers); added `media.track` (a fixed light track) and `media.played` (neutral, 3:1 against the track and every surface).
+- **Changes in v4**: the selected navigation item is now filled with `accent`, with text and icon in `on_accent`, and there is no longer a light selected background; the three roles `selection.background`, `selection.foreground` and `selection.indicator` are removed.
+- **Changes in v5**: `accent.text` is now solved starting from the lightness of `accent` itself and moves only as far as needed for 4.5:1 against every surface. With the default seed, light changes from `#1a5acd` to `#2060d4`, and dark from the washed-out `#85b1ff` to `#528fff`; the text of borderless buttons, links and selected tabs is closer to the accent color. New tests: the lightness difference between brand text and the accent color is less than 0.12, and chroma is greater than 0.15.
+- **Changes in v6** (2026-10-19): the foreground on accent colors prefers white (see "Pair solving"). Previously, reddish and bright accent colors got near-black text because a dark foreground was closer, and selected sidebar items and the knob of switched-on switches had the same color as plain text in light mode; now, for example, the seed `#FF2E55` gives `#db364f` with white in both light and dark mode (previously `#e54056` and `#f04b5f` with `#0e1217`). Seeds such as bright green, which would need heavy darkening to pair with white text, still get a dark foreground in dark mode.
+- **Changes in v7** (2026-10-20): `accent` starts from the color the user picked itself (lightness is no longer first clamped to the 0.45–0.72 range) and is solved with `on_accent` against graphics contrast: 3:1 under the standard policy, 4.5:1 under high contrast, consistent with the white titles on system accent-color buttons; the hover and pressed variants stay at the same level. When the seed satisfies this it is used as is: `#FF2E55` under the standard policy is `#ff2e55` with white in both light and dark (v6 gave `#db364f`), and `#e50043` in light with high contrast; the default seed `#2f6fe4` is used as is; `#34c759` becomes `#00a73f` in light, and `#ffcc00` becomes `#b08c00` in light and is used as is with a dark foreground in dark. Previously the accent color was solved against body-text 4.5:1, and the chosen color looked noticeably darker on the page.
+- **Tests**: 298 seeds (hue every 15°, four lightness levels, three chroma levels, plus extremes such as pure black, pure white, gray, yellow and green) × light/dark × both contrast policies; every pairing meets its requirement with no fallback; there are also tests for determinism, surface layering, brand hue preservation, status colors being independent of the seed, and complete recipe references.
 
-## `app` 构建
+## `app` build
 
-页面图标：没有声明 `[app].icon` 时生成 Bern 标志的 `favicon.svg`、512 像素的 `icon.png` 与铺满方形的 `apple-touch-icon.png`（主屏幕图标），声明时三处都用该 PNG；`[app.icon].browser` 为 SVG 时只生成 `favicon.svg`，为页面图标文件夹时整个复制到 `icons/`，`.ico`、SVG、`apple-touch-icon*.png` 与 `.webmanifest` 各自生成 `<link>`（没有 SVG 与 `.ico` 时链接非 maskable 的 PNG）。`index.html` 以带构建版本的地址引用它们。`ui` 构建使用同一页面。
+Page icons: without a declared `[app].icon`, the build generates a `favicon.svg` of the Bern logo, a 512-pixel `icon.png` and an `apple-touch-icon.png` that fills the square (the home screen icon); when one is declared, all three use that PNG; when `[app.icon].browser` is an SVG, only `favicon.svg` is generated, and when it is a page icon folder, the whole folder is copied to `icons/`, with `.ico`, SVG, `apple-touch-icon*.png` and `.webmanifest` files each getting a `<link>` (without SVG and `.ico`, the non-maskable PNG is linked). `index.html` references them with addresses that carry the build version. The `ui` build uses the same page.
 
 ```mermaid
 flowchart LR
-    Page[生成的页面 app.js + bern.js] -->|C ABI 导出| Wasm[WebAssembly 模块]
-    Wasm -->|bern.* 导入：回调、时钟、随机数| Page
-    subgraph Wasm[WebAssembly 模块]
-        Ffi[bern-ffi] --> Runtime[会话运行时]
-        Ffi --> Host[引擎宿主（同线程）]
-        Ffi --> Hub[媒体 hub]
-        Host --> Engine[showcase 引擎]
+    Page[Generated page app.js + bern.js] -->|C ABI exports| Wasm[WebAssembly module]
+    Wasm -->|bern.* imports: callbacks, clock, random numbers| Page
+    subgraph Wasm[WebAssembly module]
+        Ffi[bern-ffi] --> Runtime[Session runtime]
+        Ffi --> Host[Engine host on the same thread]
+        Ffi --> Hub[Media hub]
+        Host --> Engine[showcase engine]
     end
-    Page --> Video[HTML video 执行端]
+    Page --> Video[HTML video executor]
 ```
 
-- **同一套 C ABI**：`bern-ffi` 不带 `ipc` 特性编译到 `wasm32`，macOS 前端调用的 `bern_*` 函数原样导出给页面，会话运行时、关闭协议、查询订阅与媒体 hub 只有一份实现。生成的胶水 crate 把回调接到页面提供的 `bern` 导入模块。
-- **WebAssembly 适配**：
-  - 引擎宿主在没有线程时于调用线程上依次执行任务，任务运行中发起的请求排在其后（`Host::start_local`）。
-  - `SystemClock` 改用页面的 `performance.now()` 与 `setTimeout`。
-  - 引擎实例 ID 取自页面的 `crypto.getRandomValues`，每个标签页各有独立身份。
-  - 随包资源以页面相对 URL 提供（`Resources::served("resources/")`），构建把声明的文件同步到输出目录的 `resources/`。
-- **调用约定**：返回结构体的导出通过隐藏的结果指针返回，按值传入的结构体按指针传递；64 位整数在 JavaScript 中是 BigInt。页面在调用期间收到的回调先复制字节，等调用返回后再按到达顺序处理，避免重入。
-- **生成的页面**：`index.html`、`theme.css`（四份主题快照，按 `prefers-color-scheme` 与 `prefers-contrast` 选择）、`bern.css`（视觉规范，无字面颜色）、`bern.js`（运行时）、`app.js`（由 IR 生成）、`app.wasm`、`resources/`、`build.json`。页面引用的样式、脚本与模块地址带本次构建的版本参数（`?v=…`），重新构建后浏览器与静态托管的缓存不会让页面混用旧文件。
-- **运行时**：
-  - 细粒度响应式单元：引擎字段、会话字段与行变量都是单元或 getter，状态变化只重新执行读取它的绑定；引擎的一次状态更新在同一批次内提交。
-  - 条件分支只在分支切换时重建；列表按 key 保持行的 DOM、控件与状态，行以注释标记界定，不增加包装元素。
-  - 推入导航保留根页面（隐藏而非卸载），返回后查询订阅、播放器与滚动位置仍在。
-  - 控件登记与 macOS 相同：目标 ID、角色、名称、启用状态与用户输入使用的同一闭包。
-  - 本地化：按浏览器语言选择受支持的语言（`zh-CN` 等映射到 `zh-Hans`），文本保留 `{name}` 占位并按名称填充。
-- **图标**：Web 版本用 Lucide（`lucide-static` v1.54.0）。所用的 87 个 Lucide SVG 与其 LICENSE 保存在 `crates/bern-backend-web/icons/lucide/`，以 `include_str!` 编入，构建时不联网。`icons.rs` 的对照表把每个 SF Symbols 名字对应到一个 Lucide 图标，并为 `.fill` 名字标明填充方式：整体（`play.fill`、`pause.fill`、`speaker.fill`、`star.fill`）、部分（`speaker.wave.3.fill`、`speaker.slash.fill` 只填喇叭，`sun.max.fill` 只填圆盘）、镂空（`xmark.circle.fill` 用遮罩把叉号从实心圆中挖出；遮罩 id 是占位符，运行时为每个图标实例替换成唯一 id）。填充保留 2 px 描边，实心版与线条版轮廓一致。运行时的 `icon()` 在根 `<svg>` 上设置 Lucide 的描边属性。生成的页面目录包含 `THIRD_PARTY_NOTICES.txt`（ISC 与 Feather 的 MIT 授权全文），`app.js` 的图标表前有指向它的注释。应用用到对照表中没有的名字时构建失败并指向声明（检查与 Compose、GTK、Windows 共用 `bern_target_api::icon_set::check`）。对照表至少包含 Bern 图标集（`icon_set::NAMES`）的全部名字，测试逐个核对。2026-10-20 补上 Windows 已有而 Web 缺的 `arrow.left`（`arrow-left`）、`chevron.up`（`chevron-up`）与 `star.fill`（`star` 整体填充）；两个新 SVG 是按 lucide-static 1.54.0 同名图标的路径数据与文件格式写入的，没有联网下载，未与发布包逐字节比对。
-- **媒体**：每个播放器一个 HTML `<video>`；执行端完成 hub 的加载、卸载、播放、暂停、跳转、音量、静音请求，`play()` 以 Promise 的结果完成请求，跳转以 `seeked` 完成；媒体事件只作为观测报告，不派发命令。视图把播放器的元素放入自己的区域，单视图（`multi_view: false`）。
+- **The same C ABI**: `bern-ffi` is compiled to `wasm32` without the `ipc` feature, and the `bern_*` functions the macOS frontend calls are exported to the page unchanged; the session runtime, close protocol, query subscriptions and media hub have only one implementation. The generated glue crate connects the callbacks to the `bern` import module provided by the page.
+- **WebAssembly adaptation**:
+  - Without threads, the engine host runs tasks one after another on the calling thread, and requests made while a task runs are queued after it (`Host::start_local`).
+  - `SystemClock` uses the page's `performance.now()` and `setTimeout` instead.
+  - The engine instance ID comes from the page's `crypto.getRandomValues`, so every tab has its own identity.
+  - Bundled resources are served as page-relative URLs (`Resources::served("resources/")`), and the build syncs the declared files into `resources/` in the output directory.
+- **Calling convention**: exports that return structs return them through a hidden result pointer, and structs passed by value are passed by pointer; 64-bit integers are BigInt in JavaScript. For callbacks the page receives during a call, the bytes are copied first and processed in arrival order after the call returns, which avoids reentrancy.
+- **Generated page**: `index.html`, `theme.css` (four theme snapshots, selected by `prefers-color-scheme` and `prefers-contrast`), `bern.css` (the design guidelines, no literal colors), `bern.js` (the runtime), `app.js` (generated from the IR), `app.wasm`, `resources/`, `build.json`. The style, script and module addresses the page references carry this build's version parameter (`?v=…`), so after a rebuild the browser and static-hosting caches do not make the page mix in old files.
+- **Runtime**:
+  - Fine-grained reactive cells: engine fields, session fields and row variables are all cells or getters, and a state change re-runs only the bindings that read it; one engine state update is committed in a single batch.
+  - Conditional branches are rebuilt only when the branch switches; lists keep each row's DOM, controls and state by key, and rows are delimited by comment markers without adding wrapper elements.
+  - Push navigation keeps the root page (hidden rather than unmounted), so after going back the query subscriptions, players and scroll position are still there.
+  - Control registration is the same as on macOS: target ID, role, name, enabled state, and the same closure that user input uses.
+  - Localization: a supported language is chosen from the browser language (`zh-CN` and others map to `zh-Hans`); text keeps `{name}` placeholders and fills them by name.
+- **Icons**: the Web version uses Lucide (`lucide-static` v1.54.0). The 87 Lucide SVGs in use and their LICENSE are stored in `crates/bern-backend-web/icons/lucide/` and compiled in with `include_str!`, so the build does not go online. The mapping table in `icons.rs` maps each SF Symbols name to a Lucide icon and specifies the fill style for `.fill` names: whole (`play.fill`, `pause.fill`, `speaker.fill`, `star.fill`), partial (`speaker.wave.3.fill` and `speaker.slash.fill` fill only the speaker, `sun.max.fill` only the disc), cut-out (`xmark.circle.fill` uses a mask to cut the cross out of a filled circle; the mask id is a placeholder that the runtime replaces with a unique id for each icon instance). Fills keep the 2 px stroke, so the filled and outline versions have the same contour. The runtime's `icon()` sets Lucide's stroke attributes on the root `<svg>`. The generated page directory contains `THIRD_PARTY_NOTICES.txt` (the full text of the ISC license and Feather's MIT license), and the icon table in `app.js` is preceded by a comment pointing to it. When the app uses a name that is not in the mapping table, the build fails and points to the declaration (the check is shared with Compose, GTK and Windows: `bern_target_api::icon_set::check`). The mapping table contains at least every name in the Bern icon set (`icon_set::NAMES`), which a test checks one by one. On 2026-10-20, `arrow.left` (`arrow-left`), `chevron.up` (`chevron-up`) and `star.fill` (`star` with a whole fill), which Windows already had and the Web lacked, were added; the two new SVGs were written from the path data and file format of the same-named icons in lucide-static 1.54.0, without downloading anything, and were not compared byte for byte with the release package.
+- **Media**: one HTML `<video>` per player; the executor fulfills the hub's load, unload, play, pause, seek, volume and mute requests, `play()` completes its request with the result of the Promise, and a seek completes on `seeked`; media events are only reported as observations and do not dispatch commands. The view places the player's element in its own area, single view (`multi_view: false`).
 
-## 窗口呈现
+## Window presentation
 
-v0.2 视觉规范下，生成的 `app.js` 为每个窗口种类写明呈现方式：声明 `presentation: floating` 的为 `floating`，WindowSet 的主窗口为 `page`，其余为 `dialog`。IR 版本为 4（新增 `Presentation::Floating` 与目标能力 `WindowCapabilities.floating`；不能提供浮动窗口的目标在检查阶段拒绝该声明）。
+Under the v0.2 design guidelines, the generated `app.js` states the presentation of each window kind: windows declared `presentation: floating` are `floating`, the WindowSet's main window is `page`, and the rest are `dialog`. The IR version is 4 (adding `Presentation::Floating` and the target capability `WindowCapabilities.floating`; targets that cannot provide floating windows reject that declaration during the check).
 
-- **应用栏**：48 px，前端为应用名，只在有内容可放时出现（窗口切换条或设置按钮），否则页面从窗口内容开始；声明了 `role: settings` 的窗口时尾端为设置按钮，Ctrl / Cmd + , 打开设置。只有应用声明了浮动窗口时才出现窗口切换条，且只列浮动窗口。
-- **页面**：主窗口铺满应用栏下方，没有标题栏和窗口按钮。被命令关闭后显示应用名与“打开“{标题}””按钮。
-- **对话框**：遮罩上的居中面板，宽度取声明宽度（未声明 560 px），高度贴合内容、最高 85%，超出时内容区滚动。头部即页面头：标题（导航推入时为页面标题）、工具栏、关闭按钮。点按遮罩（按下与松开都在遮罩上）、Esc、关闭按钮都请求关闭并经过关闭协议。打开时焦点进入第一个控件，Tab 限制在对话框内，关闭后焦点回到打开它的元素。对话框根部的 Tabs 在宽度 ≥ 640 px 时为左侧竖排导航（`aria-orientation` 随之切换，方向键改为上下）。
-- **浮动窗口**：保留原有的标题栏、拖动、调整尺寸、最小化、最大化与键盘移动；最小化后在切换条恢复。
-- **关闭确认与失败提示**：所属窗口内的模态提示，按钮靠右、主要选择在最后（“不存储”在左侧）；Esc 等同取消，Tab 限制在提示内。
-- **窗口事实**：帧按布局尺寸计算，打开动画的缩放不影响报告的尺寸与位置。
-- **导航**：推入后焦点移入新页面，Esc 或 Alt + ← 返回，返回后焦点回到推入时的链接。
-- **表单**：分组 `gap` 之间、行按 `row_height` 与 `padding_x` / `padding_y`；plain 分组只用自己的内边距（`.bern-group-plain` 把表单给的置零）。表单以 plain 分组开头时没有顶部内边距：规则 `.bern-form:has(> .bern-section:first-child > .bern-group-plain)`，条件区域只用注释节点作界，插槽、组件或条件给出的标题也是表单的第一个元素，条件变了跟着变。
+- **App bar**: 48 px, with the app name at the leading end; it appears only when there is something to put in it (the window switcher or the settings button), otherwise the page starts with the window content; when a window with `role: settings` is declared, the trailing end holds a settings button, and Ctrl / Cmd + , opens settings. The window switcher appears only when the app declares floating windows, and lists only the floating windows.
+- **Page**: the main window fills the area below the app bar, with no title bar and no window buttons. After it is closed by a command it shows the app name and an "Open '{title}'" button.
+- **Dialog**: a centered panel on a backdrop; the width is the declared width (560 px if not declared), the height fits the content up to 85%, and the content area scrolls beyond that. The header is the page header: title (the page title after a navigation push), toolbar, close button. Clicking the backdrop (both press and release on the backdrop), Esc and the close button all request closing and go through the close protocol. On opening, focus moves to the first control, Tab is trapped in the dialog, and after closing, focus returns to the element that opened it. Tabs at the dialog root become vertical navigation on the left when the width is ≥ 640 px (`aria-orientation` switches accordingly, and the arrow keys become up/down).
+- **Floating window**: keeps the existing title bar, dragging, resizing, minimize, maximize and keyboard moving; after minimizing, it is restored from the switcher.
+- **Close confirmation and failure notices**: a modal notice inside the owning window, with buttons aligned right and the main choice last ("Don't Save" on the left); Esc equals Cancel, and Tab is trapped in the notice.
+- **Window facts**: the frame is computed from the layout size; the scale of the opening animation does not affect the reported size and position.
+- **Navigation**: after a push, focus moves into the new page; Esc or Alt + ← goes back, and after going back focus returns to the link that pushed.
+- **Form**: `gap` between groups, rows by `row_height` and `padding_x` / `padding_y`; plain groups use only their own padding (`.bern-group-plain` zeroes what the form gives). When a form starts with a plain group there is no top padding: the rule is `.bern-form:has(> .bern-section:first-child > .bern-group-plain)`; conditional regions are delimited only by comment nodes, and a heading given by a slot, component or condition is also the form's first element, so the result follows when the condition changes.
 
-## 控件（v0.3）
+## Controls (v0.3)
 
-- **按钮**：高 32 px，左右内边距 20 px，最小宽度 80 px；输入框与下拉菜单同为 32 px，同一行中的控件对齐。
-- **图标按钮**：默认及 plain 样式用图标颜色反馈悬停、按下与选中；显式 prominent 绘制强调容器，ControlGroup 提供组内共享胶囊。尺寸和样式以当前声明为准。
-- **页签**：选中项文字与图标为 `accent.text`，下划线为 `accent`。
-- **侧边栏与竖排导航**：默认选中项填满 `accent`，文字与图标为 `on_accent`，选中且悬停为 `button.prominent.hover`；不带左侧竖线。声明覆盖背景时按对应语义角色重新配对前景色，显式前景色优先，选中图标继承文字颜色。浮动窗口切换条的当前项同样填满强调色。
-- **开关**：40 × 20 的轨道，关闭时为 `control.border` 边框加同色圆钮，开启时轨道填满 `accent`、圆钮为 `on_accent`；悬停时关闭态的边框与圆钮变为 `text.secondary`，开启态变为 `button.prominent.hover`。
-- **滑块**：仍是原生 `<input type="range">`，圆钮改为 4 px `control.thumb` 白环包住 `accent` 圆心并加 1 px 轮廓，悬停、拖动时圆心为 hover、pressed 变体。
-- **下拉菜单**：`automatic`、`menu` 样式不再用 `<select>`。触发器是 `role="combobox"` 的按钮，列表是 Popover API 的 `popover="auto"` 元素（顶层，不受卡片、对话框与滚动容器裁切；外部点按自动关闭），在 `beforetoggle` 中按触发器位置同步定位（下方不足 160 px 且上方更宽时向上），最高 328 px。焦点留在触发器上，活动项用 `aria-activedescendant`；键盘按 APG 只选组合框；Esc 在触发器上处理并阻止默认动作，所以对话框不会一起关闭；滚动页面或改变窗口大小时关闭。选择调用与外部入口相同的 `select` 闭包。
-- **媒体进度条**：视频控制条的进度与音量改用 `scrubber()`，不再是 range 输入。`role="slider"`，`aria-valuetext` 为时间或百分比；指针按下即跳到该点并开始预览，拖动只更新预览（进度时间同步显示），松开提交一次；方向键每次 5 秒（音量 5%），PageUp / PageDown 每次 10%，Home / End 到首尾，键松开时提交。已播放部分为 `media.played`，未播放为 `media.track`，滑块 20 × 16 px、圆角 7、`control.thumb` 加 0.5 px 轮廓与投影，拖动时放大到 1.1 倍。
+- **Buttons**: 32 px tall, 20 px horizontal padding, minimum width 80 px; text fields and dropdown menus are also 32 px, so controls in one row line up.
+- **Icon buttons**: the default and plain styles use the icon color as feedback for hover, pressed and selected; an explicit prominent draws an accent container, and ControlGroup provides a capsule shared within the group. Size and style follow the current declaration.
+- **Tabs**: the selected item's text and icon are `accent.text`, the underline is `accent`.
+- **Sidebar and vertical navigation**: by default the selected item is filled with `accent`, with text and icon in `on_accent`, and selected-and-hovered is `button.prominent.hover`; there is no vertical bar on the left. When a declaration overrides the background, the foreground color is re-paired by the corresponding semantic role, an explicit foreground color takes precedence, and the selected icon inherits the text color. The current item of the floating window switcher is likewise filled with the accent color.
+- **Switch**: a 40 × 20 track; when off, a `control.border` border with a knob of the same color; when on, the track is filled with `accent` and the knob is `on_accent`; on hover, the off state's border and knob change to `text.secondary`, and the on state to `button.prominent.hover`.
+- **Slider**: still a native `<input type="range">`; the thumb is now a 4 px white `control.thumb` ring around an `accent` center with a 1 px outline, and on hover and drag the center uses the hover and pressed variants.
+- **Dropdown menu**: the `automatic` and `menu` styles no longer use `<select>`. The trigger is a button with `role="combobox"`, and the list is a Popover API element with `popover="auto"` (top layer, not clipped by cards, dialogs or scroll containers; closes automatically on an outside click); in `beforetoggle` it is positioned synchronously from the trigger's position (upward when there is less than 160 px below and more space above), up to 328 px tall. Focus stays on the trigger, and the active item uses `aria-activedescendant`; the keyboard follows the APG select-only combobox; Esc is handled on the trigger and its default action is prevented, so the dialog does not close along with it; it closes when the page scrolls or the window is resized. Selecting calls the same `select` closure as the external entry points.
+- **Media progress bar**: the progress and volume of the video control bar now use `scrubber()` instead of range inputs. `role="slider"`, with `aria-valuetext` as a time or percentage; pressing the pointer jumps to that point and starts previewing, dragging only updates the preview (the progress time is shown in sync), and releasing commits once; the arrow keys move 5 seconds per press (volume 5%), PageUp / PageDown 10% per press, Home / End to the start and end, committing on key release. The played part is `media.played`, the unplayed part `media.track`; the thumb is 20 × 16 px, corner radius 7, `control.thumb` with a 0.5 px outline and a shadow, and it scales up to 1.1× while dragging.
 
-## 组件库第一批
+## First batch of the component library
 
-- **图片**：`<img>`，地址为 `resources/` 下的资源名称（两种构建都把资源复制到这里），`object-fit` 对应 `fit`；只写一边时另一边为 `auto`，按图片比例。`label` 写入 `alt`，没有时 `alt` 为空，即装饰图片。在表单分组中单独成行并靠前缘。图片通过 `flex: none` 和显式尺寸规则保留声明的画框，祖先 `Row` 与 `Column` 仍可收缩；2026-10-15 已移除因任意深层图片而设置祖先 `min-width: min-content` 的规则，避免整页被图片内容撑宽。HDR 由浏览器决定：Chrome 154 在 macOS 上按 HDR 显示带增益图的 JPEG 与 PQ 的 PNG（右半 1.69 与 1.85 倍 SDR 白），同一台 Mac 上默认配置的 WKWebView（macOS 27）显示 SDR 版本，`dynamic-range-limit: no-limit` 也不改变；Safari 的 HDR 尚未实测。
-- **进度**：有 `value` 时是轨道加填充的 `role="progressbar"`，带 `aria-valuenow` 与 `aria-valuemax`，标签在上；轨道与滑块同为 `control.track`，填充为 `accent`，宽度变化用 `--bern-motion` 过渡（减少动态效果时为 0）。没有 `value` 时为查询已在用的 `.bern-spinner` 加次要文字。
-- **网格**：CSS Grid，`grid-template-columns: repeat(auto-fill, minmax(min(100%, min_width), 1fr))`，`gap` 默认 8 px。
-- **层叠**：一个单元格的 CSS Grid，每层 `grid-area: 1 / 1`，`place-items` 对应 `align` 的九个方位；宽度为 `fit-content`，所以与最大的一层一样大，不会被分组撑满。
+- **Image**: `<img>`, whose address is the resource name under `resources/` (both builds copy resources there), with `object-fit` corresponding to `fit`; when only one side is given, the other is `auto`, following the image's aspect ratio. `label` goes into `alt`; without it `alt` is empty, i.e. a decorative image. In a form group it takes its own row, aligned to the leading edge. Images keep their declared frame through `flex: none` and explicit size rules, while ancestor `Row` and `Column` can still shrink; on 2026-10-15 the rule that set `min-width: min-content` on ancestors because of any deeply nested image was removed, so image content no longer stretches the whole page wider. HDR is up to the browser: Chrome 154 on macOS shows JPEGs with a gain map and PQ PNGs as HDR (the right halves at 1.69× and 1.85× SDR white), while WKWebView in its default configuration (macOS 27) on the same Mac shows the SDR version, and `dynamic-range-limit: no-limit` does not change that either; Safari's HDR has not been measured yet.
+- **Progress**: with `value`, a `role="progressbar"` of a track plus a fill, with `aria-valuenow` and `aria-valuemax`, label above; the track is `control.track` like the slider's, the fill is `accent`, and width changes transition with `--bern-motion` (0 under Reduce Motion). Without `value`, it is the `.bern-spinner` that queries already use, plus secondary text.
+- **Grid**: CSS Grid, `grid-template-columns: repeat(auto-fill, minmax(min(100%, min_width), 1fr))`, `gap` 8 px by default.
+- **Stack**: a one-cell CSS Grid, each layer `grid-area: 1 / 1`, `place-items` corresponding to the nine positions of `align`; the width is `fit-content`, so it is as large as its largest layer and is not stretched to fill a group.
 
-在内置浏览器（800 宽）验证：三种 `fit`、只写宽度与层叠的效果与 macOS 相同；网格为四列；进度条的 `aria-valuenow` 分别为 50（`total` 100）与 0.6，名称为各自的标签，装饰图片的 `alt` 为空。
+Verified in the built-in browser (800 wide): the three `fit` values, width only, and stacking look the same as on macOS; the grid has four columns; the progress bars' `aria-valuenow` values are 50 (`total` 100) and 0.6, their names are their respective labels, and the decorative image's `alt` is empty.
 
-## 阶段四：自适应布局、菜单与语言
+## Phase 4: adaptive layout, menus and languages
 
-- **`Adaptive`**：生成 `B.Adaptive(p, ctx, { id, breakpoint, layouts: { compact, expanded } })`，断点来自 `[layouts]`。运行时用 `ResizeObserver` 量容器宽度，尺寸变化时只重建布局区域；切换前聚焦的控件按 `data-bern-target` 在新布局中找回焦点，目标在未打开的菜单里时聚焦菜单按钮。
-- **`Menu` / `MenuItem`**：菜单按钮加 Popover API 弹出菜单，键盘按 APG Menu Button；与下拉菜单共用定位（`placePopover`）。每个菜单项按 `id` 登记，外部入口可在菜单关闭时执行。
-- **语言**：当前语言与字符串表是响应式单元，`tr()` 读取它们，所有文本绑定在切换时一次更新；`<html lang>` 与页面标题由同一效果更新。`ui.language`、`ui.set_language` 在会话请求中处理（命令序号 18、19）。`LanguagePicker` 复用自绘下拉菜单，选项名用 `Intl.DisplayNames` 取语言自称。
-- **功能契约报告**：`bern build` 为每个目标把报告写入产物目录的 `features.json`。
-- **消息格式**（2026-10-18）：`B.fmt` 按[消息格式](../Reference/UI.md#文本内容与格式化)解析译文（每条译文解析一次后缓存），写出 `{name}`、复数分支、日期与时长；日期参数以记录传入，其余按显示形式传入。显示变体字段的枚举标签生成为按变体分支的 `L.枚举`，字段按类型写出（嵌套枚举用它自己的标签）。月名与星期名随字符串表生成。浏览器面板中实测 `=0`、`one`、`other`、复数分支内嵌枚举标签、日期、时长与语言切换。
+- **`Adaptive`**: generates `B.Adaptive(p, ctx, { id, breakpoint, layouts: { compact, expanded } })`, with the breakpoint from `[layouts]`. The runtime measures the container width with `ResizeObserver` and rebuilds only the layout area when the size changes; the control focused before the switch gets focus back in the new layout via `data-bern-target`, and when the target is inside a menu that is not open, the menu button is focused.
+- **`Menu` / `MenuItem`**: a menu button with a Popover API popup menu, keyboard per the APG Menu Button; positioning is shared with the dropdown menu (`placePopover`). Each menu item is registered by `id`, and external entry points can run it while the menu is closed.
+- **Language**: the current language and the string table are reactive cells that `tr()` reads, so all text bindings update at once on a switch; `<html lang>` and the page title are updated by the same effect. `ui.language` and `ui.set_language` are handled in session requests (command numbers 18, 19). `LanguagePicker` reuses the self-drawn dropdown menu, and option names use `Intl.DisplayNames` to get each language's own name for itself.
+- **Feature contract report**: `bern build` writes the report for each target to `features.json` in the output directory.
+- **Message format** (2026-10-18): `B.fmt` parses translations according to the [message format](../Reference/UI.md#text-content-and-formatting) (each translation is parsed once and then cached) and writes out `{name}`, plural branches, dates and durations; date arguments are passed as records, the rest in their display form. Enum labels of display-variant fields are generated as `L.<enum>` branching by variant, and fields are written out by type (nested enums use their own labels). Month and weekday names are generated with the string table. Measured in the browser pane: `=0`, `one`, `other`, enum labels nested inside plural branches, dates, durations and language switching.
 
-## `ui` 构建
+## `ui` build
 
 ```mermaid
 flowchart LR
-    subgraph Host[引擎宿主 showcase-host]
-        Engine[引擎] --- Hub[媒体 hub]
+    subgraph Host[Engine host showcase-host]
+        Engine[Engine] --- Hub[Media hub]
         WS[HTTP + WebSocket 127.0.0.1] --> Engine
-        IPC[IPC 套接字] --> Engine
+        IPC[IPC socket] --> Engine
     end
-    Page1[WebUI 页面 1] <-->|JSON 消息| WS
-    Page2[WebUI 页面 2] <-->|JSON 消息| WS
+    Page1[WebUI page 1] <-->|JSON messages| WS
+    Page2[WebUI page 2] <-->|JSON messages| WS
     CLI[CLI] --> IPC
     MCP[MCP] --> IPC
 ```
 
-- **页面**：同一个 `app.js` 与 `bern.js`；页面模块是会话运行时与 C ABI，引擎经 `bern-ffi` 的远程链接到达（引擎与媒体 hub 通过 `EngineLink`、`MediaLink` 接口提供，同进程构建用本地实现，WebUI 用远程实现）。草稿、导航、窗口与查询订阅留在页面。
-- **引擎宿主**（`bin/<应用>-host`）：原生运行引擎与媒体 hub，在 127.0.0.1 提供页面文件与 `/bern` WebSocket 通道，并按目标的 `channels = ["ipc"]` 装配本地 IPC 通道；同目录生成的 `bin/<应用>`、`bin/<应用>-mcp` 连接同一引擎。
-- **通道消息**：与 IPC 相同的 JSON 控制消息（`bern-adapter-json`），另加页面专用消息：会话登记与恢复、窗口列表、会话请求与结果、查询取消、媒体执行端（登记、创建、绑定、释放、视图、完成、观测）与媒体请求。命令与查询异步应答，慢查询不阻塞同一连接上的其他请求；被新参数取代的查询发送取消。
-- **访问控制**：
-  - 只监听 127.0.0.1。
-  - 每个请求的 `Host` 必须是本服务器（防 DNS 重绑定）。
-  - WebSocket 升级要求 `Origin` 与之相同。
-  - 第一条消息必须携带启动时生成的令牌（常量时间比较）。令牌放在地址的片段中，浏览器不会发给服务器；静态文件本身不授予任何权限。
-- **会话**：每个页面登记为 `<engine_id>-web<n>` 会话，外部入口的会话命令经 WebSocket 交给页面，由页面的真实控件闭包执行。断线后页面以 `resume` 请求恢复同一会话（同一引擎实例且该 ID 空闲时），并重新发送窗口列表、播放器与视图登记。引擎宿主重启后旧令牌失效，页面显示“无法连接到引擎”并停止重试；同一令牌下引擎实例改变时页面重新载入，建立新会话。
-- **媒体**：页面登记为媒体执行端；宿主的路由器把每个播放器的请求交给持有它的页面（创建它的页面；应用级播放器交给最近显示它的页面，否则最近登记的页面）。窗口播放器的 ID 与所有者带会话前缀（`<会话>/<窗口>/<目标>`），多个页面的同名窗口不冲突。
-- **资源**：引擎以 `Resources::served("resources/", 目录, 声明)` 解析资源，返回页面相对 URL；需要读文件的引擎仍可读同一目录。
+- **Page**: the same `app.js` and `bern.js`; the page module is the session runtime and the C ABI, and the engine is reached over `bern-ffi`'s remote link (the engine and the media hub are provided through the `EngineLink` and `MediaLink` interfaces; the in-process build uses the local implementation, WebUI the remote one). Drafts, navigation, windows and query subscriptions stay in the page.
+- **Engine host** (`bin/<app>-host`): runs the engine and media hub natively, serves the page files and the `/bern` WebSocket channel on 127.0.0.1, and sets up the local IPC channel according to the target's `channels = ["ipc"]`; `bin/<app>` and `bin/<app>-mcp`, generated in the same directory, connect to the same engine.
+- **Channel messages**: the same JSON control messages as IPC (`bern-adapter-json`), plus page-only messages: session registration and resume, window list, session requests and results, query cancellation, the media executor (register, create, bind, release, view, complete, observe) and media requests. Commands and queries are answered asynchronously, so a slow query does not block other requests on the same connection; a query superseded by new arguments sends a cancellation.
+- **Access control**:
+  - Listens only on 127.0.0.1.
+  - The `Host` of every request must be this server (against DNS rebinding).
+  - The WebSocket upgrade requires the `Origin` to match it.
+  - The first message must carry the token generated at startup (constant-time comparison). The token is placed in the address fragment, which the browser does not send to the server; the static files themselves grant no permissions.
+- **Sessions**: each page registers as a `<engine_id>-web<n>` session; session commands from external entry points are passed to the page over the WebSocket and executed by the page's real control closures. After a disconnection, the page restores the same session with a `resume` request (when it is the same engine instance and that ID is free), and resends the window list and the player and view registrations. After the engine host restarts, the old token is invalid, so the page shows "Can't connect to the engine" and stops retrying; when the engine instance changes under the same token, the page reloads and sets up a new session.
+- **Media**: the page registers as a media executor; the host's router hands each player's requests to the page that holds it (the page that created it; app-level players go to the page that most recently showed them, otherwise to the most recently registered page). The IDs and owners of window players carry a session prefix (`<session>/<window>/<target>`), so same-named windows on several pages do not conflict.
+- **Resources**: the engine resolves resources with `Resources::served("resources/", dir, declaration)` and returns page-relative URLs; engines that need to read files can still read the same directory.
 
-## 打包
+## Packaging
 
-`bern package --target web_app` 生成 `<程序>-<版本>-web.zip`（Linux 上为 `.tar.gz`），只含服务器需要的文件：页面、脚本、WebAssembly、样式、图标、随包资源与第三方声明，不含生成的胶水源码与构建报告。`ui` 构建另含引擎宿主及其 CLI 与 MCP 服务器，文件名标明系统与架构（`…-webui-macos-arm64`）。macOS 上用 `ditto` 打包，不带资源分叉与扩展属性。新项目的 `app` 包为 0.55 MB（未压缩），11 个文件。
+`bern package --target web_app` produces `<program>-<version>-web.zip` (`.tar.gz` on Linux) containing only the files the server needs: page, scripts, WebAssembly, styles, icons, bundled resources and third-party notices, without the generated glue source and build reports. The `ui` build additionally includes the engine host with its CLI and MCP server, and the file name states the system and architecture (`…-webui-macos-arm64`). On macOS it is packed with `ditto`, without resource forks and extended attributes. A new project's `app` package is 0.55 MB (uncompressed), 11 files.
 
-## 样式、动效与媒体类应用的能力（v0.29）
+## Styles, motion and capabilities for media apps (v0.29)
 
-2026-10-13 补上了 Web 此前在能力描述中声明不支持的部分，使 `examples/planner` 与 `examples/gallery` 都能构建为 Web。能力描述现在列出全部 `features`、全部动效属性，`text_marks`、`dynamic_items` 与 `window_chrome` 为真，样式能力与 Compose 相同（`Button`、`IconButton`、`SidebarItem`）。新增的运行时在 `templates/features.js` 与 `templates/features.css`：前者以与页面相同的带版本地址导入 `bern.js`，两者共用一份运行时，`bern.js` 只留几个挂钩点；后者在构建时接在 `bern.css` 后面。
+On 2026-10-13 the parts that the Web had previously declared unsupported in its capability description were filled in, so that both `examples/planner` and `examples/gallery` can be built for the Web. The capability description now lists all `features` and all motion properties, `text_marks`, `dynamic_items` and `window_chrome` are true, and the style capabilities are the same as Compose's (`Button`, `IconButton`, `SidebarItem`). The new runtime is in `templates/features.js` and `templates/features.css`: the former imports `bern.js` with the same versioned address as the page, so the two share one runtime and `bern.js` keeps only a few hook points; the latter is appended after `bern.css` at build time.
 
-- **弹簧**：页面自己逐帧积分（质量 1，刚度 (2π/T)²，阻尼 4πζ/T），新目标从当前值与速度继续；系统要求减少动态效果时变换直接到位、过渡改为 150 毫秒淡入淡出。
-- **变换分层**：一个元素的位移、缩放与透明度分成样式状态、出现、消失、共享元素、让位、晃一下、滚动联动几层，各自驱动，再合成为一个 `transform` 与 `opacity`，缩放以中心为原点。
-- **结构过渡**：`When` 与 `Each` 在第一次显示之后的变化中挂载的元素播放 `appear`（其中的元素随它一起出现，不各自播放）；带 `disappear` 的元素在移除时先播完过渡再离开页面。`reflow` 的容器在子元素增减或尺寸变化后，让移动的子元素从旧位置滑过去。
-- **共享元素**：带 `hero` 键的元素卸载时记下位置并留一份副本（视频与画布不复制），同一更新中挂载的同键元素从那里长出，副本随之移动并淡出，一个弹簧驱动两者。
-- **样式覆盖**：基础外观写成样式，各状态的外观按悬停、按下、焦点、禁用与选中依次合并；颜色经 CSS 过渡，变换经状态的弹簧。主题缺少的 `fill.subtle`、`fill.strong`、`selection.*` 由现有变量派生。
-- **画布与标注**：2D `<canvas>`，按设备像素比绘制，状态、尺寸与颜色变化时重绘；标注的行框来自 `Range.getClientRects`。
-- **可伸展的视图**：没有尺寸的画布、滚动视图、表单、网格、视频与进度条标为可伸展，`Stack`、列、行与面板中含有它们的子元素随之拉伸（用 `:has()`）；写了尺寸的元素不参与。`SplitView` 在 `Stack` 中也铺满，`Stack` 的对齐只安排其他层。这对应原生目标上这些视图占满给它们的空间。此前（2026-10-19 修正）表单在默认前缘对齐的 `Column` 中只有内容宽，`Stack(align: bottom)` 中的 `SplitView` 按内容大小停在底部中央。
-  - 页面自己的空间（导航栈的一页 `.bern-nav-page`、页签的页面区 `.bern-tabpanels`、`Adaptive` 选中的布局 `.bern-adaptive`）与详情正文同样是这样的列（2026-10-21）：含可伸展视图的子元素横向拉满、纵向占满。此前这三处不在列表里，`Adaptive` 或页签里含表单的 `Stack` 只有内容的宽高，表单随之只有内容宽，`align: bottom` 的层落在内容底部而不是页面底部。
-- **页签**（2026-10-21）：与侧栏相同，`Tabs` 的子项生成为普通的构建函数，构建在页签栏里，`if`、`match` 与 `ForEach` 照常工作；每个 `Tab` 在写它的位置放下按钮、挂载时登记、卸载时注销，只构建选中页签的页面。选中的页签消失时回到 `fallback`（仍显示时）或剩下的第一个；方向键按显示的顺序移动，外部入口的 `select` 只认挂载着的页签。此前生成器只取 `Tabs` 的直接子元素，写在条件里的页签（包括 `Pages` 按模块展开的页签）全部丢失。`TabAccessory` 仍只能直接写在 `Tabs` 里。
-- **侧栏**：内容生成为普通的构建函数，侧栏项挂载时登记，选中项消失时回到 `fallback` 或第一个可见项；`SidebarFooter` 在侧栏底部。`SidebarHeader` 固定在列表上方，子项纵向排列、间距 8 px，默认上下留白 8 px、左右留白 7 px；此前遗漏容器布局，导致品牌贴顶并偏左。该留白是平台默认值，不会自动调整任意 Header 内容的图标列或文字列。
-- **侧栏的开关与宽度（2026-10-20）**：与 macOS、Windows 一样，宽窗口中的侧栏可以收起，没有声明宽度时可以拖宽。
-  - 开关是详情页头最前端的图标按钮（`sidebar.left`，即 Lucide 的 `panel-left`，右到左时镜像），排在返回按钮与工具栏前缘项之前；名称与提示随状态为“隐藏边栏”“显示边栏”，`aria-controls` 指向侧栏。按下后侧栏连同 `SidebarHeader`、搜索框与 `SidebarFooter` 整个向前缘滑出（0.25 秒；系统或应用要求减少动态效果时直接隐藏），滑完后 `visibility: hidden`，离开 Tab 顺序与无障碍树；再按一次从前缘滑回。按钮在页头中的位置不变，键盘焦点留在它上面。
-  - 整个隐藏、而不是像 Windows 那样收成图标栏：Web 设计稿给侧栏的是 Window Splitter 模式，它收起时主窗格整个让出；Web 的侧栏项可以没有图标，分组标题、搜索框、页眉与页脚在图标栏里都放不下；Windows 的图标栏是 `NavigationView` 自己的显示模式，网页没有对应的控件。按钮在页头前端：macOS 的系统按钮也在窗口前缘的工具栏里，常见的网页应用（邮箱、文档、代码托管）把侧栏按钮放在左上角，这里也是 Web 设计稿中返回按钮的位置。
-  - 没写 `Sidebar(width:)` 时，侧栏后缘有一条 8 px 宽、透明、两侧各压分隔线 4 px 的拖动条（`role="separator"`、`aria-orientation="vertical"`，值为侧栏宽度，名称“边栏”），指针为 `col-resize`。主键按下后捕获指针，按横向移动改宽度，取整并限制在 200–320（Web 设计稿 5.2 的范围，起始 232，与设计稿桌面侧栏同宽；2026-10-21 前为 240）；拖动期间整个分栏显示左右调整指针、不选中文字。拖动条可用 Tab 聚焦，聚焦时显示 2 px 焦点色竖线，左右方向键每次 10 px，Home / End 到最窄与最宽；右到左时侧栏在右边，向左拖或按左方向键都使它变宽。
-  - 写了 `width` 时宽度固定，没有拖动条。此前 `.bern-sidebar` 的 200–320 最小、最大宽度也限制声明的宽度（例如 `width: 180` 显示为 200），现在声明的宽度原样生效，与 macOS、Windows 相同。
-  - 窄窗口（< 768 px）中侧栏是第一页，开关与拖动条都不显示，收起状态不影响它；回到宽窗口时恢复原来的收起状态与宽度。
-- **窗口**：`window.idle` 由窗口内的指针、触摸、滚轮与按键重新计时；沉浸时隐藏页头，静置时隐藏指针。`chrome` 在页面上没有效果。
-- **横屏**（2026-10-24）：`Window(landscape:)` 为真时用屏幕方向接口 `screen.orientation.lock("landscape")` 锁成横屏，变假或窗口关闭时 `unlock()` 交还设备方向。浏览器只在手机与平板上锁定，多数（Android 上的 Chrome、Firefox）还要求页面全屏或作为已安装的应用运行，iOS 的 Safari 不提供锁定；被拒绝时页面保持设备方向，不报错，每次进入全屏时再请求一次。运行时测试用模拟的屏幕方向检查锁定、全屏后重试、解锁与关闭时交还；没有在手机浏览器上实测。
-- **运行时主题**：构建时为每个强调色生成浅色、深色与更高对比的变量，运行时切换根元素的 `data-bern-accent` 与 `data-bern-appearance`；`appearance` 的部分换用另一套变量，其中的浮层与菜单随之。
-- **文件**：`pick` 用 `<input type=file>`，按种类的扩展名与 MIME 过滤；`Drop` 处理拖入的文件；交给动作的是页面的 `blob:` 地址。`opens: true` 只在页面作为应用安装后经 `launchQueue` 收到文件。会话命令 `ui.set_file` 与 `ui.focus` 已加入。
-- **滚动停靠**：CSS `scroll-snap`；列表行带上自己的键，滚动视图据此找到各格；字段在滚动停下后跟随，设置字段时平滑滚动，到达后晃一下。
-- **其他组件**：带内容的按钮、开关按钮、分体按钮（浮层）、工具栏搜索与结果浮层、轻提示、侧面板（推开内容，窄窗口为底部弹层）、捏合（两指触摸，或触控板的带 Control 的滚轮）与滑动手势、引擎给出的图片、视频圆角、快捷键（`cmd` 在苹果系统上是 ⌘）。重复项中的控件身份带上每一层的键，经过组件也一样。
+- **Springs**: the page integrates them itself frame by frame (mass 1, stiffness (2π/T)², damping 4πζ/T), and a new target continues from the current value and velocity; when the system asks for Reduce Motion, transforms jump straight to their end and transitions become a 150-millisecond fade.
+- **Transform layers**: an element's translation, scale and opacity are split into the layers style state, appear, disappear, shared element, make way, nudge and scroll-linked, each driven on its own and then composed into one `transform` and `opacity`, with scaling around the center.
+- **Structural transitions**: elements that `When` and `Each` mount in changes after the first display play `appear` (elements inside them appear along with them rather than each playing their own); elements with `disappear` finish their transition before leaving the page when removed. A `reflow` container, after children are added or removed or sizes change, makes moved children slide over from their old positions.
+- **Shared elements**: when an element with a `hero` key unmounts, its position is recorded and a copy is left behind (video and canvas are not copied); an element with the same key mounted in the same update grows out from there, while the copy moves along with it and fades out, one spring driving both.
+- **Style overrides**: the base look is written as styles, and the per-state looks are merged in turn for hover, pressed, focus, disabled and selected; colors go through CSS transitions, transforms through the state's spring. `fill.subtle`, `fill.strong` and `selection.*`, which the theme lacks, are derived from existing variables.
+- **Canvas and annotations**: a 2D `<canvas>`, drawn at the device pixel ratio and redrawn when state, size or colors change; the line boxes of annotations come from `Range.getClientRects`.
+- **Stretchable views**: canvases, scroll views, forms, grids, videos and progress bars without a size are marked stretchable, and children of a `Stack`, column, row or panel that contain them stretch accordingly (using `:has()`); elements with a size do not take part. `SplitView` also fills a `Stack`, and the `Stack`'s alignment only arranges the other layers. This corresponds to these views taking all the space they are given on native targets. Before this (fixed on 2026-10-19), a form in a `Column` with the default leading alignment was only as wide as its content, and a `SplitView` in `Stack(align: bottom)` stayed at its content size at the bottom center.
+  - The page's own spaces (a page of the navigation stack `.bern-nav-page`, the tab page area `.bern-tabpanels`, the layout selected by `Adaptive` `.bern-adaptive`) are columns of this kind too, like the detail body (2026-10-21): children that contain stretchable views stretch fully horizontally and fill vertically. Before, these three were not in the list, so a `Stack` containing a form inside an `Adaptive` or a tab was only as wide and tall as its content, the form in turn was only as wide as its content, and an `align: bottom` layer landed at the bottom of the content rather than the bottom of the page.
+- **Tabs** (2026-10-21): as with the sidebar, the children of `Tabs` are generated as ordinary build functions and built inside the tab bar, so `if`, `match` and `ForEach` work as usual; each `Tab` places its button where it is written, registers on mount and unregisters on unmount, and only the selected tab's page is built. When the selected tab disappears, selection returns to `fallback` (if it is still shown) or to the first remaining tab; the arrow keys move in display order, and the external entry points' `select` only recognizes mounted tabs. Previously the generator took only the direct children of `Tabs`, so tabs written inside conditions (including the tabs that `Pages` expands per module) were all lost. `TabAccessory` can still only be written directly inside `Tabs`.
+- **Sidebar**: the content is generated as ordinary build functions, sidebar items register on mount, and when the selected item disappears selection returns to `fallback` or the first visible item; `SidebarFooter` is at the bottom of the sidebar. `SidebarHeader` is fixed above the list, with its children laid out vertically 8 px apart, and by default 8 px of space above and below and 7 px left and right; previously the container layout was missing, so the brand sat against the top and too far left. This spacing is the platform default and does not automatically adjust the icon column or text column of arbitrary Header content.
+- **Sidebar toggle and width (2026-10-20)**: as on macOS and Windows, the sidebar in a wide window can be collapsed, and when no width is declared it can be dragged wider.
+  - The toggle is the icon button at the very leading end of the detail header (`sidebar.left`, i.e. Lucide's `panel-left`, mirrored in right-to-left), before the back button and the toolbar's leading items; its name and tooltip follow the state as "Hide Sidebar" and "Show Sidebar", and `aria-controls` points to the sidebar. Pressing it slides the whole sidebar, together with `SidebarHeader`, the search field and `SidebarFooter`, out toward the leading edge (0.25 seconds; hidden directly when the system or the app asks for Reduce Motion); once the slide finishes it is `visibility: hidden` and leaves the Tab order and the accessibility tree; pressing again slides it back in from the leading edge. The button's position in the header does not change, and keyboard focus stays on it.
+  - It hides completely instead of collapsing into an icon rail as on Windows: the Web design spec gives the sidebar the Window Splitter pattern, in which collapsing gives up the whole primary pane; Web sidebar items may have no icons, and group headings, the search field, the header and the footer do not fit in an icon rail; the Windows icon rail is a display mode of `NavigationView` itself, and the web has no corresponding control. The button is at the leading end of the header: the macOS system button is also in the toolbar at the window's leading edge, common web apps (mail, documents, code hosting) put the sidebar button at the top left, and this is also where the back button sits in the Web design spec.
+  - Without `Sidebar(width:)`, the trailing edge of the sidebar has a drag bar that is 8 px wide, transparent, and overlaps the separator line by 4 px on each side (`role="separator"`, `aria-orientation="vertical"`, its value the sidebar width, name "Sidebar"), with a `col-resize` pointer. A primary-button press captures the pointer, and horizontal movement changes the width, rounded and clamped to 200–320 (the range in section 5.2 of the Web design spec; starting at 232, the same width as the desktop sidebar in the design spec; 240 before 2026-10-21); while dragging, the whole split view shows the left-right resize pointer and no text gets selected. The drag bar can be focused with Tab, shows a 2 px vertical line in the focus color while focused, the left and right arrow keys move it 10 px per press, and Home / End go to the narrowest and widest; in right-to-left the sidebar is on the right, and dragging left or pressing the left arrow both make it wider.
+  - With `width` declared, the width is fixed and there is no drag bar. Previously the 200–320 minimum and maximum width of `.bern-sidebar` also constrained the declared width (for example `width: 180` showed as 200); now the declared width takes effect as is, the same as on macOS and Windows.
+  - In a narrow window (< 768 px) the sidebar is the first page, neither the toggle nor the drag bar is shown, and the collapsed state does not affect it; back in a wide window, the previous collapsed state and width are restored.
+- **Window**: `window.idle` restarts its timer on pointer, touch, wheel and key input inside the window; when immersive the page header is hidden, and when idle the pointer is hidden. `chrome` has no effect on the page.
+- **Landscape** (2026-10-24): when `Window(landscape:)` is true, the Screen Orientation API `screen.orientation.lock("landscape")` locks the screen to landscape, and when it becomes false or the window closes, `unlock()` hands orientation back to the device. Browsers lock only on phones and tablets, most (Chrome and Firefox on Android) also require the page to be full screen or running as an installed app, and Safari on iOS does not offer locking; when the lock is refused, the page keeps the device orientation without reporting an error and requests again every time it enters full screen. Runtime tests use a simulated screen orientation to check locking, retrying after full screen, unlocking and handing back on close; not measured in a phone browser.
+- **Runtime theme**: at build time, light, dark and increased-contrast variables are generated for each accent color, and at runtime the root element's `data-bern-accent` and `data-bern-appearance` are switched; a part with `appearance` switches to the other set of variables, and the popovers and menus inside it follow.
+- **Files**: `pick` uses `<input type=file>`, filtered by the kind's extensions and MIME types; `Drop` handles dropped files; the action receives the page's `blob:` addresses. `opens: true` receives files through `launchQueue` only after the page is installed as an app. The session commands `ui.set_file` and `ui.focus` were added.
+- **Scroll snapping**: CSS `scroll-snap`; list rows carry their own keys, which the scroll view uses to find each cell; the field follows once scrolling stops, and setting the field scrolls smoothly and nudges on arrival.
+- **Other components**: buttons with content, toggle buttons, split buttons (popover), toolbar search with a results popover, toasts, side panels (pushing the content aside, a bottom sheet in narrow windows), pinch (two-finger touch, or the trackpad's scroll wheel with Control) and swipe gestures, images supplied by the engine, video corner radius, keyboard shortcuts (`cmd` is ⌘ on Apple systems). The identity of controls inside repeated items carries the key of every level, including through components.
 
-## 设计稿审阅后的四项扩展（v0.30）
+## Four extensions after the design review (v0.30)
 
-2026-10-13，四项扩展先在 Web 上实现，能力描述加上 `rails`、`popover_button`、`size_classes` 与动效属性 `stagger`：
+On 2026-10-13 the four extensions were implemented on the Web first, and the capability description gains `rails`, `popover_button`, `size_classes` and the motion property `stagger`:
 
-- **错峰**：`When` 与 `Each` 记住所在容器的错峰时钟；容器在一次更新中出现时（任意深度），它带 `appear` 的直接子元素依次开始，每个晚 `stagger` 秒，起点先隐藏；一次更新结束后计数归零。
-- **按比例摆放**：横向 `Rail` 是一格网格，每个子元素以按比例的起始边距定位、按 `anchor` 平移；铺在两点之间的子元素以比例宽度铺开。竖向轨道用绝对定位。比例绑定状态时由页面的弹簧移动，`animate` 给出弹簧。
-- **浮层按钮**：弹出层（Popover API），内容在打开时挂载、关闭时卸载；`presented` 双向跟随。浮层与原生的一样按内容定尺寸（至少 240 宽、至多到窗口边），高度只受所在一侧的空间限制，下方放不下而上方放得下时向上打开；下拉列表与菜单仍最高 328 px。
-- **四档尺寸**：`Adaptive` 按可用宽度和三条断点选档，没有自己布局的档用更大一档、否则更小一档的布局；每个窗口按自身宽度保持 `window.compact` 等四个值。
+- **Stagger**: `When` and `Each` remember the stagger clock of their container; when a container appears in an update (at any depth), its direct children with `appear` start one after another, each `stagger` seconds later than the one before, hidden at their starting point until then; the count resets to zero when the update ends.
+- **Proportional placement**: a horizontal `Rail` is a one-cell grid; each child is positioned by a proportional start margin and translated by its `anchor`; a child that spans two points stretches across a proportional width. Vertical rails use absolute positioning. When a proportion is bound to state, the page's spring moves it, and `animate` supplies the spring.
+- **Popover button**: a popover (Popover API) whose content is mounted when it opens and unmounted when it closes; `presented` follows in both directions. Like native popovers it is sized to its content (at least 240 wide, at most up to the window edge), its height is limited only by the space on the side it opens to, and it opens upward when it does not fit below but fits above; drop-down lists and menus stay at most 328 px tall.
+- **Four size classes**: `Adaptive` picks a class from the available width and three breakpoints; a class without its own layout uses the layout of the next larger class, or otherwise the next smaller one; each window keeps the four values such as `window.compact` according to its own width.
 
-## 与框架类型同名的值类型（2026-10-21）
+## Value types named like framework types (2026-10-21)
 
-生成的 `app.js` 把值类型的编解码、变体名与标签存为 `T`、`N`、`L` 对象的属性（`T.Layout`、`N.Layout`、`L.Layout`），不产生模块级的绑定，所以应用类型与浏览器的全局（`Text`、`Image`、`Event`、`Map`、`Error`）不会相遇（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 生成示例 `examples/framework-names`，核对没有以类型名声明的 `const`、`let`、`function` 或 `class`，并用 Node.js 解析模块。实测（2026-10-21，Node.js 25.2.1）：通过；没有在浏览器里打开。
+The generated `app.js` stores the codecs, variant names and labels of value types as properties of the `T`, `N` and `L` objects (`T.Layout`, `N.Layout`, `L.Layout`) and creates no module-level bindings, so app types never meet the browser's globals (`Text`, `Image`, `Event`, `Map`, `Error`) (for the rule, see "Language bindings" in the design document). `tests/framework_names.rs` generates the example `examples/framework-names`, checks that no `const`, `let`, `function` or `class` is declared with a type name, and parses the module with Node.js. Measured (2026-10-21, Node.js 25.2.1): passes; not opened in a browser.
 
-## 与框架类型同名的组件与会话（2026-10-21）
+## Components and sessions named like framework types (2026-10-21)
 
-生成的 `app.js` 把组件写成 `function c_` 加声明的名字（`function c_empty(p, ctx, a)`），以名字字符串描述会话（`{ name: "URL", fields: [...] }`），运行时以 `B` 引用，模块里没有别的以 `c_` 开头的绑定，所以 SwiftUI 与 Compose 这次改名的组件与会话在 Web 上不会相撞，生成器不变（规则见设计文档“跨语言绑定”）。`tests/framework_names.rs` 加了这些写法的断言；这次没有运行，未验证。
+The generated `app.js` writes a component as `function c_` plus the declared name (`function c_empty(p, ctx, a)`), describes a session by its name string (`{ name: "URL", fields: [...] }`) and refers to the runtime as `B`; the module has no other binding that starts with `c_`, so the components and sessions that SwiftUI and Compose renamed this time cannot collide on the Web, and the generator is unchanged (for the rule, see "Language bindings" in the design document). `tests/framework_names.rs` gains assertions for these forms; they were not run this time, not verified.
 
-## 跟随状态的快捷键与改键（2026-10-24）
+## State-driven keyboard shortcuts and rebinding (2026-10-24)
 
-`F.shortcut` 接受文本或返回文本的函数：跟随状态的快捷键在每次按键时读取当前文本，空文本或读不成快捷键时不占任何键。`F.ShortcutInput` 是一个按钮，按下后在捕获阶段取下一次按键（`pressedKeys`，与快捷键匹配用同一套键名），Esc 保持原样，单独按 Backspace 或 Delete 清空，点到别处停止等待；等待时所有快捷键都让开。按钮上的文字按 `shortcutText` 写出：苹果系统上 ⌃⌥⇧⌘ 与键的符号，其他系统 `Ctrl+Shift+K`，空格键按界面语言（框架文本 `bern.shortcut.space`）。搜索面板上的按键提示也跟随状态。`MenuBar` 在网页上不生成。验证：`tests/features-runtime.test.mjs` 覆盖文本变化后旧键让出、新键生效、空文本不占键，以及录制、Esc、修饰键单独按下继续等待、Delete 清空、`ui.edit`、卸载后不再监听；未在浏览器里实测。
+`F.shortcut` accepts text or a function that returns text: a state-driven shortcut reads the current text on every key press, and claims no key when the text is empty or cannot be read as a shortcut. `F.ShortcutInput` is a button; once pressed, it takes the next key press in the capture phase (`pressedKeys`, with the same key names as shortcut matching); Esc keeps the shortcut as it was, Backspace or Delete pressed on its own clears it, and clicking elsewhere stops waiting; while it waits, all shortcuts step aside. The text on the button is written by `shortcutText`: on Apple systems ⌃⌥⇧⌘ and key symbols, on other systems `Ctrl+Shift+K`, with the space key named in the UI language (framework string `bern.shortcut.space`). The key hints in the search panel also follow state. `MenuBar` generates nothing on the Web. Verification: `tests/features-runtime.test.mjs` covers the old key being released and the new one taking effect after the text changes, empty text claiming no key, as well as recording, Esc, continuing to wait when a modifier is pressed on its own, Delete clearing, `ui.edit`, and no longer listening after unmount; not measured in a browser.
 
-## 只为鼠标显示的滚动条（2026-10-27）
+## Scroll indicators shown only for the mouse (2026-10-27)
 
-`ScrollView(indicators: mouse)` 生成 `mouseIndicators: true`，运行时 `followPointer` 按设备切换 `bern-scroll-indicators-hidden`：起初看 `(pointer: fine)`，主指针是鼠标的设备一开始就显示，页面不会在鼠标第一次移过时多出一条滚动条的高度；之后 `pointerover`、`pointerdown` 的 `pointerType` 为 `mouse` 时显示，触摸与笔隐藏。验证：生成器测试覆盖生成代码；未在浏览器里实测。
+`ScrollView(indicators: mouse)` generates `mouseIndicators: true`, and the runtime's `followPointer` toggles `bern-scroll-indicators-hidden` by device: at first it looks at `(pointer: fine)`, so devices whose primary pointer is a mouse show the indicators from the start, and the page does not gain a scroll bar's height the first time the mouse moves over it; after that the indicators are shown when the `pointerType` of `pointerover` or `pointerdown` is `mouse`, and hidden for touch and pen. Verification: generator tests cover the generated code; not measured in a browser.
 
-## 表格、受控文字与剪贴板（2026-10-29）
+## Tables, controlled text and the clipboard (2026-10-29)
 
-`F.Table` 是 `role="grid"`、`aria-multiselectable` 的 `<table>`：表头一行，有动作的列标题是按钮（运行该列的动作），`aria-sort` 与箭头跟随 `sorted`、`descending`；`width` 是 `<th>` 的像素宽度。行按键保留，项换序时移动已有的 `<tr>`。单击只选一行，平台的切换键（macOS 的 Command，其他平台的 Ctrl）加选或减选，Shift 从上一次选的行连选；方向键移动并选中，Shift 加方向键扩展；选中的行 `aria-selected`。双击或 Enter 运行表格的动作；副键单击（`contextmenu`）与菜单键在指针或当前行处打开行菜单，那一行未选中时先只选中它；菜单的样子与 `Menu` 的弹出列表相同，项各自登记为外部入口的按钮。外部入口的角色是 `table`，`select` 收逗号分隔的键。
+`F.Table` is a `<table>` with `role="grid"` and `aria-multiselectable`: one header row, in which column headers that have an action are buttons (they run that column's action), and `aria-sort` and the arrow follow `sorted` and `descending`; `width` is the pixel width of the `<th>`. Rows are kept by key, and when items are reordered the existing `<tr>` elements are moved. A click selects only one row, the platform's toggle key (Command on macOS, Ctrl on other platforms) adds to or removes from the selection, and Shift selects a range from the row selected last; arrow keys move and select, and Shift plus an arrow key extends the selection; selected rows get `aria-selected`. Double-click or Enter runs the table's action; a secondary click (`contextmenu`) and the Menu key open the row menu at the pointer or at the current row, first selecting only that row when it is not selected; the menu looks the same as the pop-up list of `Menu`, and each of its items is registered as a button for external entry points. The role for external entry points is `table`, and `select` takes comma-separated keys.
 
-`TextInput(current:)` 生成 `controlled: true`，字段的写入是那条命令：`editable` 在输入框有焦点时不写入，`blur` 时写回状态的文字，每次 `input`（输入法组合结束时一次）都发命令。`paste:` 用 `navigator.clipboard.readText()`，有文字才写入草稿并运行动作，浏览器拒绝时什么都不做。引擎的 `copy_text` 是一个 WebAssembly 导入，命令在点击的同一任务里运行，`navigator.clipboard.writeText` 因此仍算用户操作；`web_ui` 模式的引擎在原生宿主里，它的 `copy_text` 不转给页面（未实现）。表格的 `chevron.up` 加入运行时图标。
+`TextInput(current:)` generates `controlled: true`, and the field's write is that command: `editable` does not write while the input has focus, writes the state's text back on `blur`, and every `input` (once when an input method composition ends) sends the command. `paste:` uses `navigator.clipboard.readText()`, writes to the draft and runs the action only when there is text, and does nothing when the browser refuses. The engine's `copy_text` is a WebAssembly import, and the command runs in the same task as the click, so `navigator.clipboard.writeText` still counts as a user action; in `web_ui` mode the engine is in the native host, and its `copy_text` is not forwarded to the page (not implemented). The table's `chevron.up` is added to the runtime icons.
 
-验证（2026-10-29，gallery 的 `web_app` 在桌面 Chromium 内核的浏览器里）：表格显示、单击与 Shift 多选、以真实的 `contextmenu` 事件打开行菜单（那一行先被选中）、菜单项、点表头换排序与箭头、双击运行主操作；受控输入框打字时文字保留（失去焦点后写回引擎文字未单独验证）。剪贴板：浏览器拒绝自动化读取剪贴板，`readText` 与 `writeText` 用替身代替，验证到调用路径与之后的草稿与命令。观察到：一行里 `TextInput` 旁的按钮会被压得比文字还窄（已有问题，不是这次引入）。Safari 与 Firefox 未看。
+Verification (2026-10-29, the gallery's `web_app` in a desktop Chromium-based browser): table display, click and Shift multi-selection, opening the row menu with a real `contextmenu` event (the row is selected first), menu items, clicking a header to change the sort and the arrow, double-click running the primary action; typing in a controlled input keeps the text (writing the engine's text back after focus is lost was not verified separately). Clipboard: the browser refuses automated clipboard reads, so `readText` and `writeText` were replaced with stand-ins, verifying the call path and the draft and command that follow. Observed: a button next to a `TextInput` in a row gets squeezed narrower than its own text (an existing problem, not introduced this time). Safari and Firefox were not checked.
 
-## 跟随值的动作、文字颜色与登录项开关（2026-10-29）
+## Actions that follow a value, text color and the login item switch (2026-10-29)
 
-`Watch` 是 `B.Watch`：effect 读值，与上一次用 `eq` 比较（深比较；64 位整数是 `bigint`，`JSON.stringify` 会抛错），不同时在 `untrack` 里运行动作，第一次总会运行。`Text(color:)` 把文字的 `color` 设为主题变量（`var(--bern-status-success)` 等），随明暗与高对比切换。网页不能在登录时打开，`Switch(login_item: true)` 不生成任何东西（能力 `login_switch` 不适用）。
+`Watch` is `B.Watch`: an effect reads the value and compares it with the previous one using `eq` (a deep comparison; 64-bit integers are `bigint`, on which `JSON.stringify` throws), runs the action inside `untrack` when they differ, and always runs the first time. `Text(color:)` sets the text's `color` to a theme variable (`var(--bern-status-success)` and so on), which switches with appearance and high contrast. A web page cannot open at login, so `Switch(login_item: true)` generates nothing (the capability `login_switch` does not apply).
 
-验证：`features-runtime` 测试覆盖 `Watch` 的首次运行、变化、相等的值不算变化、64 位数值与卸载后不再运行；gallery 的生成器测试覆盖 `Watch` 与文字颜色。未在浏览器里运行。
+Verification: the `features-runtime` tests cover `Watch`'s first run, changes, equal values not counting as a change, 64-bit numbers, and not running after unmount; the gallery's generator tests cover `Watch` and text color. Not run in a browser.
 
-## 验证记录
+## Verification log
 
-2026-10-10，v0.1 视觉规范（窗口呈现已由 v0.2 取代），内置浏览器，`python3 -m http.server` 提供 `target/bern/web_app`：
+2026-10-10, v0.1 design guidelines (the window presentation has since been replaced by v0.2), built-in browser, `python3 -m http.server` serving `target/bern/web_app`:
 
-- 页面加载约 21 MB 的调试版模块后启动引擎、打开主窗口（最大化），文字层级、标签与绑定引擎状态的文字正确显示。
-- 侧边栏切换页面，页面标题栏显示所选页面名，工具栏按钮位于标题栏尾端。
-- 按钮：点按“主要”后经引擎命令更新状态，“最近操作”变为“主要按钮”。
-- 设置窗口：“打开设置…”打开浮动的设置窗口（图标页签、分组开关、显示名称输入框）；点按主窗口时主窗口置顶，经切换条重新激活设置窗口；输入“Ada”后点关闭，窗口内弹出“要存储对显示名称的更改吗？”与存储、不存储、取消；选“存储”后运行存储命令并关闭窗口。
-- 开关与滑块页：开关、复选框、带两端图标的滑块、工具栏与表单中的分段选择器、下拉菜单；拖动音量滑块时只更新预览，松开后提交一次，引擎的“已提交的音量”变为 80.2158…（声明未设步长，显示 Bern 的基本数字文本，与 macOS 相同）。
-- 输入框页与列表页：查询结果经页面时钟异步到达，五个类别带计数；在真实搜索框输入“mo”后只剩“影片”，清除按钮出现；点按行推入详情，标题栏显示“项目 4”与返回按钮。
-- 视频页：精选片段从 `resources/media/aurora.mp4` 加载并显示首帧与 0:00 / 0:08；点控制条播放后合并状态为 `Playing`；切到损坏的文件后显示“无法播放”与浏览器的错误信息，播放与进度控件禁用；应用级预览播放器为 `Idle`。
-- 深色模式（`prefers-color-scheme: dark`）：全部来自主题变量，无分支代码。
-- 窄屏（375 × 812，粗略指针）：窗口铺满，侧边栏成为第一页，选择后显示详情与返回按钮，控件按粗略指针放大。
-- `cargo test --workspace` 129 项通过，`cargo clippy --workspace --all-targets -- -D warnings` 与 `cargo fmt --check` 通过。
+- After loading the roughly 21 MB debug module, the page starts the engine and opens the main window (maximized); the text hierarchy, labels and text bound to engine state display correctly.
+- The sidebar switches pages, the page title bar shows the selected page's name, and toolbar buttons sit at the trailing end of the title bar.
+- Buttons: clicking "Primary" updates state through an engine command, and "Last Action" changes to "Primary button".
+- Settings window: "Open Settings…" opens the floating settings window (icon tabs, grouped switches, a display name input); clicking the main window brings the main window to the front, and the switcher reactivates the settings window; after typing "Ada" and clicking close, the window shows "Do you want to save the display name?" with Save, Don't Save and Cancel; choosing "Save" runs the save command and closes the window.
+- Switches and sliders page: switches, checkboxes, a slider with icons at both ends, segmented pickers in the toolbar and in the form, drop-down menus; dragging the volume slider only updates the preview and commits once on release, and the engine's "Committed volume" becomes 80.2158… (the declaration sets no step, so Bern's basic number text is shown, the same as on macOS).
+- Inputs page and list page: query results arrive asynchronously through the page clock, five categories with counts; typing "mo" into the real search field leaves only "Movies", and the clear button appears; clicking a row pushes the detail, and the title bar shows "Item 4" and a back button.
+- Video page: the featured clip loads from `resources/media/aurora.mp4` and shows the first frame and 0:00 / 0:08; after clicking play on the control bar the merged state is `Playing`; switching to a corrupt file shows "Can't Play" and the browser's error message, and the play and progress controls are disabled; the app-level preview player is `Idle`.
+- Dark mode (`prefers-color-scheme: dark`): everything comes from theme variables, with no branching code.
+- Narrow screen (375 × 812, coarse pointer): the window fills the screen, the sidebar becomes the first page, selecting shows the detail and a back button, and controls are enlarged for the coarse pointer.
+- `cargo test --workspace`: 129 tests pass; `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` pass.
 
-2026-10-10，`ui` 构建（`showcase-host --port 8790`，内置浏览器）：
+2026-10-10, `ui` build (`showcase-host --port 8790`, built-in browser):
 
-- 新增测试：通道 4 项（握手需要令牌、协议版本与目录指纹；命令不等待更慢的查询，取消的查询报告 `cancelled`；页面作为 UI 会话被外部入口驱动，页面离开后会话结束；播放器请求路由到持有它的页面，关闭窗口释放其播放器），HTTP 与 WebSocket 2 项（只为指向本服务器的请求提供文件，路径不能离开根目录，字节范围；只有本页面来源能打开通道，RFC 6455 示例的接受键，无令牌的 hello 收到说明后关闭），SHA-1、base64、令牌、帧各 3 项，以及页面运行时对引擎宿主的端到端测试 1 项（握手、会话登记、完整状态、命令与状态更新、页面窗口与 `window.list`、断线后等待的请求以未知结果结束且不重发）。共 144 项通过。
-- 页面经宿主打印的地址连接，打开主窗口；CLI 的 `sessions` 列出 `…-web1`（`main#1`）；`ui inspect` 返回页面的控件；`ui select --option Library` 让浏览器切到列表页；`showcase add-item` 后页面的查询自动刷新为 6 项；`ui edit` 在页面搜索框输入“mo”后只剩“影片”。
-- MCP：`showcase_search_library` 返回照片（资源地址为 `resources/media/tides.mp4`），`ui_select` 切换页面，`window_list` 返回 `Virtual` 呈现的窗口事实。
-- 第二个标签页登记为 `…-web2`：两个会话共享引擎状态，所选页面各不相同；不指定会话时 `session_required`。
-- 断开页面的 WebSocket：出现“与引擎的连接已断开，正在重新连接…”，约 0.5 s 后恢复同一会话（`…-web3`），页面草稿保留，提示消失。重启引擎宿主后旧页面显示“无法连接到引擎”与原因，不再重试。
-- 视频：页面打开视频页后，精选片段经宿主的媒体 hub 加载（`Ready 0:00 / 0:08`）；CLI 的 `media players` 列出 `…-web3/main#1/media_page.featured`，`media play` 经路由到达页面，`media state` 为 `Playing`、请求 `Executed`。
-- 回归：macOS 应用的引擎命令、会话选择、查询与 `window.list`（`Native`）正常；`app` 构建正常。
+- New tests: 4 for the channel (the handshake requires the token, the protocol version and the catalog fingerprint; commands do not wait for slower queries, and a cancelled query reports `cancelled`; the page is driven by external entry points as a UI session, and the session ends when the page leaves; player requests are routed to the page that holds the player, and closing a window releases its players), 2 for HTTP and WebSocket (files are served only for requests addressed to this server, paths cannot leave the root, byte ranges; only this page's origin can open the channel, the accept key from the RFC 6455 example, a hello without a token receives an explanation and is then closed), 3 each for SHA-1, base64, tokens and frames, and 1 end-to-end test of the page runtime against the engine host (handshake, session registration, full state, commands and state updates, page windows and `window.list`, requests waiting at a disconnect ending with an unknown result and not being resent). 144 tests pass in total.
+- The page connects through the address the host prints and opens the main window; the CLI's `sessions` lists `…-web1` (`main#1`); `ui inspect` returns the page's controls; `ui select --option Library` switches the browser to the list page; after `showcase add-item` the page's query refreshes automatically to 6 items; after `ui edit` types "mo" into the page's search field, only "Movies" remains.
+- MCP: `showcase_search_library` returns "Photos" (resource address `resources/media/tides.mp4`), `ui_select` switches pages, and `window_list` returns window facts with `Virtual` presentation.
+- A second browser tab registers as `…-web2`: the two sessions share engine state, and each has its own selected page; without a session specified, the result is `session_required`.
+- Disconnecting the page's WebSocket: "Lost the connection to the engine. Reconnecting…" appears, the same session is restored after about 0.5 s (`…-web3`), the page's drafts are kept, and the notice disappears. After the engine host restarts, the old page shows "Can't Connect to the Engine" with the reason and does not retry.
+- Video: after the page opens the video page, the featured clip loads through the host's media hub (`Ready 0:00 / 0:08`); the CLI's `media players` lists `…-web3/main#1/media_page.featured`, `media play` reaches the page through routing, and `media state` is `Playing`, with the request `Executed`.
+- Regression: the macOS app's engine commands, session selection, queries and `window.list` (`Native`) work; the `app` build works.
 
-2026-10-10，v0.2 中性网页风格（内置浏览器，`app` 与 `ui` 构建）：
+2026-10-10, v0.2 neutral web style (built-in browser, `app` and `ui` builds):
 
-- 主窗口为页面，没有窗口按钮；侧边栏选中项为浅色强调底加左侧指示条，页面头 64 px，分区为标题加细边框卡片，文本输入的标签在上方，开关与选择器在行尾，工具栏按钮为普通按钮外观。
-- 设置：齿轮按钮与 Cmd + , 打开设置对话框（520 px，下划线页签，焦点进入当前页签）；在显示名称输入“Ada”后按 Esc，对话框内出现关闭确认（不存储在左，取消、存储在右）；再按 Esc 取消确认，对话框保留；点按遮罩再次请求关闭，选“存储”后运行存储命令、关闭对话框，焦点回到齿轮按钮；再次打开显示“已存储的名称：Ada”。
-- 把对话框宽度改为 760 px 后，根部 Tabs 变为左侧竖排导航，`aria-orientation` 为 `vertical`。
-- 窗口动作：页面与对话框的 `actions()` 只有激活与关闭；`ui` 构建中 CLI `window minimize --window main#1` 返回 `target_unavailable`（附可用动作），`window open --kind settings` 在浏览器中打开对话框，`window list` 两个窗口均为 `Virtual`。
-- 浮动窗口：把构建出的 `app.js` 中设置窗口临时改为 `floating` 后，应用栏出现切换条，窗口有 40 px 标题栏与最小化、关闭按钮，`actions()` 含移动；最小化后切换条项为最小化样式，点按后恢复，`move` 后帧为 (100, 50)。重新构建后恢复为对话框。
-- 关闭主窗口后显示空状态与“打开“Bern 控件展示””，点按后主窗口恢复。
-- 列表页：查询结果在卡片中为分隔的行；点按“文稿”推入“项目 1”，焦点移入新页面，按 Esc 返回且焦点回到“文稿”。
-- 深色模式：画布、面板、对话框逐层提亮，卡片在对话框内与对话框同底、保留边框。
-- 窄屏（390 × 760，粗略指针）：控件 44 px，侧边栏为第一页，设置对话框占满应用栏下方区域，应用栏中的焦点环内收不被裁切。
-- `cargo test --workspace` 145 项通过（新增：主题表面层级与选中配色 2 项、浮动呈现的能力检查），`cargo clippy --workspace --all-targets` 与 `cargo fmt --check` 通过。
+- The main window is the page, with no window buttons; the selected sidebar item has a light accent background plus an indicator bar on the left, the page header is 64 px, sections are a title plus a card with a thin border, text input labels are above the input, switches and pickers are at the end of the row, and toolbar buttons have the regular button appearance.
+- Settings: the gear button and Cmd + , open the settings dialog (520 px, underlined tabs, focus moves into the current tab); after typing "Ada" into the display name and pressing Esc, a close confirmation appears inside the dialog (Don't Save on the left, Cancel and Save on the right); pressing Esc again cancels the confirmation and the dialog stays; clicking the scrim requests closing again, and choosing "Save" runs the save command and closes the dialog, with focus returning to the gear button; reopening it shows "Saved name: Ada".
+- With the dialog width changed to 760 px, the root Tabs become vertical navigation on the left, with `aria-orientation` set to `vertical`.
+- Window actions: `actions()` of the page and the dialog are only activate and close; in the `ui` build the CLI's `window minimize --window main#1` returns `target_unavailable` (with the available actions), `window open --kind settings` opens the dialog in the browser, and `window list` shows both windows as `Virtual`.
+- Floating windows: after temporarily changing the settings window in the built `app.js` to `floating`, the app bar shows a switcher, the window has a 40 px title bar with minimize and close buttons, and `actions()` includes move; after minimizing, the switcher item has the minimized style and clicking it restores the window; after `move` the frame is (100, 50). Rebuilding restores the dialog.
+- After the main window is closed, an empty state with "Open Bern Showcase" is shown, and clicking it restores the main window.
+- List page: query results are separated rows in a card; clicking "Documents" pushes "Item 1", focus moves into the new page, and Esc goes back with focus returning to "Documents".
+- Dark mode: the canvas, panels and dialogs get lighter layer by layer, and cards inside a dialog share the dialog's background and keep their border.
+- Narrow screen (390 × 760, coarse pointer): controls are 44 px, the sidebar is the first page, the settings dialog fills the area below the app bar, and focus rings in the app bar are inset so they are not clipped.
+- `cargo test --workspace`: 145 tests pass (new: 2 for theme surface levels and selection colors, and a capability check for floating presentation); `cargo clippy --workspace --all-targets` and `cargo fmt --check` pass.
 
-2026-10-10，v0.3 控件（内置浏览器，`app` 构建；macOS 27.0.1 截图）：
+2026-10-10, v0.3 controls (built-in browser, `app` build; macOS 27.0.1 screenshots):
 
-- 开关与滑块页：开关为空心轨道加圆钮、开启为强调色；滑块圆钮为白环包住强调色圆心；按钮页的按钮高 32 px，普通按钮宽 134 px（“工具栏按钮”带图标），图标按钮悬停时颜色为 `#2f6fe4`（`accent`）。
-- 下拉菜单：点按“密度”打开列表（下方空间不足时向上弹出），选中项有对勾；点选“宽松”后值更新、列表关闭、焦点回到触发器；再次点按触发器时列表关闭而不是重开；↓ 打开、↑ 移动到“标准”、Enter 选择。设置对话框中的同一下拉菜单弹出到对话框边界之外不被裁切，按 Esc 只关闭列表，对话框保留。
-- 设置对话框：选中的页签“外观”为强调色文字与下划线。
-- 视频：点按进度条中部跳到 4.035 s（`aria-valuetext` “0:04”），→ 前进到 8 s（到头为止），拖动音量滑块后音量为 0.21，进度条已播放部分为中性深灰。
-- 深色模式下开关、滑块、下拉菜单与媒体进度条的颜色全部来自主题变量。
-- macOS：系统 `Slider`（macOS 26 及以上分支）加 `.tint(.primary)` 后，非活动窗口中已播放部分为浅灰 `#bfbfbf`，不再是强调色；把可用性判断临时改为 macOS 99 构建回退分支后，回退的形状（6 pt 轨道、20 × 16 pt 白色滑块）与系统滑块重合，非活动窗口中已播放部分随系统变浅。截图都来自后台窗口，活动窗口中的颜色未截图验证。
-- `cargo test --workspace` 146 项通过（新增：媒体进度为中性色且与轨道达到 3:1），clippy 与 fmt 通过；Swift 生成代码在 Swift 6 模式下类型检查通过。
-- 随后把侧边栏、对话框竖排导航与窗口切换条的选中项改为填满强调色、去掉左侧竖线（主题算法 v4）：浅色与深色模式下侧边栏选中项为 `#2f6fe4` 底、白字，竖排导航选中项计算样式同样为 `rgb(47, 111, 228)` 底、白字，`::before` 为 `none`；生成的 `theme.css` 中不再有 `selection` 变量。
+- Switches and sliders page: a switch is a hollow track with a round knob, accent-colored when on; the slider knob is a white ring around an accent-colored center; on the buttons page buttons are 32 px tall, a regular button is 134 px wide ("Toolbar Button", with an icon), and icon buttons turn `#2f6fe4` (`accent`) on hover.
+- Drop-down menu: clicking "Density" opens the list (upward when there is not enough space below), and the selected item has a checkmark; choosing "Spacious" updates the value, closes the list and returns focus to the trigger; clicking the trigger again closes the list instead of reopening it; ↓ opens, ↑ moves to "Regular", and Enter selects. The same drop-down menu in the settings dialog pops out beyond the dialog's bounds without being clipped, and Esc closes only the list while the dialog stays.
+- Settings dialog: the selected tab "Appearance" has accent-colored text and an underline.
+- Video: clicking the middle of the progress bar jumps to 4.035 s (`aria-valuetext` "0:04"), → advances to 8 s (stopping at the end), the volume is 0.21 after dragging the volume slider, and the played part of the progress bar is a neutral dark gray.
+- In dark mode, the colors of switches, sliders, drop-down menus and the media progress bar all come from theme variables.
+- macOS: with `.tint(.primary)` added to the system `Slider` (the macOS 26 and later branch), the played part in an inactive window is light gray `#bfbfbf` instead of the accent color; after temporarily changing the availability check to macOS 99 to build the fallback branch, the fallback's shape (6 pt track, 20 × 16 pt white thumb) coincides with the system slider, and the played part in an inactive window turns lighter along with the system. All screenshots come from background windows; the colors in an active window were not verified with screenshots.
+- `cargo test --workspace`: 146 tests pass (new: media progress is a neutral color and reaches 3:1 against the track); clippy and fmt pass; the generated Swift code type-checks in Swift 6 mode.
+- Then the selected item of the sidebar, of the dialog's vertical navigation and of the window switcher was changed to a full accent fill, dropping the vertical bar on the left (theme algorithm v4): in light and dark mode the selected sidebar item has a `#2f6fe4` background with white text, the computed style of the selected vertical navigation item is likewise a `rgb(47, 111, 228)` background with white text, and `::before` is `none`; the generated `theme.css` no longer has a `selection` variable.
 
-2026-10-10，图标改用 Lucide（内置浏览器，`app` 构建）：
+2026-10-10, icons switched to Lucide (built-in browser, `app` build):
 
-- 侧边栏、工具栏、图标按钮与设置按钮显示 Lucide 图标；搜索框输入后，清除按钮为实心圆中挖空的叉号；视频控制条的播放为实心三角，音量为实心喇叭加线条声波（放大到 72 px 检查）。
-- 生成目录中有 `THIRD_PARTY_NOTICES.txt`，开头说明来源与修改，随后是 ISC 与 MIT 授权全文。
-- 新增测试：每个对照项都来自 `lucide-static v1.54.0` 文件、填充所指的形状存在、只有 `.fill` 名字被填充；填充方式按表生成（整体、部分、镂空遮罩）；声明文本包含两份授权。
+- The sidebar, toolbar, icon buttons and settings button show Lucide icons; after typing in the search field, the clear button is a cross cut out of a filled circle; on the video control bar, play is a filled triangle and volume is a filled speaker with line sound waves (checked enlarged to 72 px).
+- The generated directory contains `THIRD_PARTY_NOTICES.txt`, which starts by stating the source and the modifications, followed by the full text of the ISC and MIT licenses.
+- New tests: every mapping entry comes from a `lucide-static v1.54.0` file, the shapes a fill refers to exist, and only `.fill` names are filled; fills are generated according to the table (whole, partial, cut-out mask); the notice text contains both licenses.
 
-2026-10-10，阶段四（内置浏览器，`app` 构建）：
+2026-10-10, Phase 4 (built-in browser, `app` build):
 
-- 1280 宽时媒体页的 `media_page.clip_choice` 为 `expanded`，显示三个片段按钮；聚焦“色条”后把视口改为 480 宽，变为 `compact`，显示“换片”菜单，焦点移到菜单按钮；按 ↓ 打开菜单并聚焦“测试图”，再 ↓、Enter 选择“色条”，菜单关闭、焦点回到按钮、片段变为色条；改回 1280 宽后回到按钮布局，片段仍是色条。600 宽时容器为 566 px，按规则仍为 `expanded`。
-- 设置对话框中显示名称草稿为“Ada”，经语言选择器选“English”：整页（侧边栏、页面、对话框、视频页说明）变为英文，`<html lang>` 为 `en`、页面标题为“Bern Showcase”，草稿、对话框与当前页面保持。
-- `features.json` 列出 `MediaFeature::Clip` 在两个尺寸的覆盖入口。
-- `ui` 构建（重启后的引擎宿主）：CLI 的 `ui language` 返回 `"zh-Hans"`；`ui set-language --language en` 后浏览器页面变为英文（`<html lang>` 为 `en`，侧边栏分组为“Controls”），`ui language` 返回 `"en"`；`--language ja` 返回 `unsupported_language` 并列出支持的语言。
-- `cargo test --workspace` 159 项通过，clippy 与 fmt 通过。
+- At 1280 wide, the media page's `media_page.clip_choice` is `expanded` and shows three clip buttons; after focusing "Color Bars" and changing the viewport to 480 wide, it becomes `compact` and shows the "Change Clip" menu, with focus moving to the menu button; ↓ opens the menu and focuses "Test Pattern", then ↓ and Enter choose "Color Bars": the menu closes, focus returns to the button, and the clip changes to the color bars; changing back to 1280 wide returns to the button layout, with the clip still the color bars. At 600 wide the container is 566 px, which by the rule is still `expanded`.
+- With the display name draft "Ada" in the settings dialog, choosing "English" in the language picker: the whole page (sidebar, pages, dialog, the video page's description) switches to English, `<html lang>` is `en`, the page title is "Bern Showcase", and the draft, the dialog and the current page are kept.
+- `features.json` lists the covering entry points of `MediaFeature::Clip` at both sizes.
+- `ui` build (engine host restarted): the CLI's `ui language` returns `"zh-Hans"`; after `ui set-language --language en` the browser page switches to English (`<html lang>` is `en`, the sidebar group is "Controls"), and `ui language` returns `"en"`; `--language ja` returns `unsupported_language` and lists the supported languages.
+- `cargo test --workspace`: 159 tests pass; clippy and fmt pass.
 
-2026-10-13，v0.29（内置浏览器，`ui` 构建，Chromium 内核）：
+2026-10-13, v0.29 (built-in browser, `ui` build, Chromium-based):
 
-- **planner**：画布的格纹、面积与折线，标题下的主题色标注；样式化的侧栏项悬停放大到 1.03 并出现底色、按下 0.96、离开回 1，主要按钮为强调色底、10 圆角、42 高；逐帧采样确认标题在两种字号间放大并交叉淡化、副本随后移除，新标签从 0.4 倍弹出；关闭“笔记”模块时侧栏项消失、选中回到“概览”，重新开启后出现；专注模式静置 3 秒后隐藏页头，移动指针后恢复。
-- **gallery 图案页**：三列海报墙，悬停时卡片浮起并出现星标，点星标收藏并在窗口底部弹出轻提示，点卡片打开图案；侧面板推开海报墙（三列变两列），其中海报、从海报取色并向下渐隐的头部与打开的图案；外观菜单切换群青与浅色，画布随之重绘；带 Control 的滚轮把卡片尺寸撑到上限，`ui set-number` 设回。
-- **gallery 工具栏**：图标菜单、分组竖线、开关按钮按下为强调色；`ui focus` 后输入出现结果下拉，点结果打开图案；⌘⌥I 开关详情、⌘K 聚焦搜索框。
-- **gallery 画框页**：浅色窗口中画框保持深色，视频圆角；分体按钮的浮层与“字号”菜单都是深色，选“大”后字号为 18；静置后画框铺满；模拟拖入真实视频文件时描边出现、画框晃一下，松手后播放，描边淡出后移除；`ui set-file` 对非地址答复 `invalid_url`、对非视频答复 `unsupported_file`，视频地址交给“打开视频”后播放。
-- **gallery 胶片页**：初始停在设定的一格正中、正中一格放大、两侧变小变淡；滚轮滚动后吸附到某一格且字段跟随；按钮滚到首尾并在到达时晃到 1.06；上拖使值从 0.5 增到 0.88。
-- **关于对话框**：以 360 宽的模态对话框显示在遮罩上，按“好”关闭。
-- **回归**：showcase 的侧栏分组、搜索框、页面切换与列表页正常。
+- **planner**: the canvas's grid pattern, area and line, and theme-colored annotations under the title; styled sidebar items scale up to 1.03 and gain a background on hover, go to 0.96 when pressed and back to 1 on leaving, and the primary button has an accent background, a corner radius of 10 and a height of 42; frame-by-frame sampling confirms that the title scales between the two font sizes with a cross-fade and that the copy is removed afterwards, and that a new label pops in from 0.4×; turning off the "Notes" module makes its sidebar item disappear and the selection return to "Overview", and the item reappears when the module is turned back on; focus mode hides the page header after 3 seconds of inactivity and restores it when the pointer moves.
+- **gallery Patterns page**: a three-column poster wall; on hover a card lifts and a star appears, clicking the star adds a favorite and pops up a toast at the bottom of the window, and clicking a card opens the pattern; the side panel pushes the poster wall aside (three columns become two) and holds the poster, a header colored from the poster that fades out downward, and the opened pattern; the Look menu switches to ultramarine and to light, and the canvas redraws accordingly; the scroll wheel with Control pushes the card size to its maximum, and `ui set-number` sets it back.
+- **gallery toolbar**: icon menus, group dividers, and toggle buttons that are accent-colored when on; after `ui focus`, typing shows a results drop-down, and clicking a result opens the pattern; ⌘⌥I toggles the detail and ⌘K focuses the search field.
+- **gallery Frame page**: in a light window the frame stays dark, and the video has rounded corners; the split button's popover and the "Size" menu are both dark, and choosing "Large" sets the size to 18; after inactivity the frame fills the window; when dragging in a real video file is simulated, an outline appears and the frame wiggles, playback starts on release, and the outline fades out and is then removed; `ui set-file` answers `invalid_url` for something that is not an address and `unsupported_file` for something that is not a video, and a video address handed to "Open Video" plays.
+- **gallery Film page**: initially it rests centered on the configured cell, the center cell is enlarged, and the cells on either side become smaller and fainter; after scrolling with the wheel it snaps to a cell and the field follows; the buttons scroll to the first and last cell and wiggle to 1.06 on arrival; dragging up increases the value from 0.5 to 0.88.
+- **About dialog**: shown as a 360-wide modal dialog over a scrim, closed with "OK".
+- **Regression**: the showcase's sidebar groups, search field, page switching and list page work.
 
-2026-10-13，v0.30（内置浏览器，`ui` 构建）：
+2026-10-13, v0.30 (built-in browser, `ui` build):
 
-- **错峰**：从“胶片”切到“图案”时，海报墙 6 张卡片依次在约 0、47、97、130、164、214 毫秒开始升起（`stagger: 0.04`）。
-- **按比例摆放**：胶片页的时间轴有底线、6 个按引擎给出的比例摆放的刻度与左对齐的名字；“现在”竖线绑定 `draft.level`，上拖时从 50% 平滑移到 80%；拖动区的底色按数值涨满。
-- **浮层按钮**：画框页的音量按钮，`ui activate` 打开后浮层里的滑块才出现在 `ui inspect` 中，`ui set-number` 设为 0.3，关闭后滑块卸载。
-- **四档尺寸**：视口 1024、800、1100 宽时海报墙页边距为 32、24、32；胶片页的 `Adaptive` 在可用宽度约 560 时为 `compact`，约 860 时为 `medium`。
+- **Stagger**: when switching from "Film" to "Patterns", the 6 cards of the poster wall start rising one after another at about 0, 47, 97, 130, 164 and 214 ms (`stagger: 0.04`).
+- **Proportional placement**: the Film page's timeline has a baseline, 6 ticks placed at proportions given by the engine, and left-aligned names; the "Now" vertical line is bound to `draft.level` and moves smoothly from 50% to 80% when dragged up; the drag area's background fills up according to the value.
+- **Popover button**: the Frame page's volume button; only after `ui activate` opens it does the slider in the popover appear in `ui inspect`, `ui set-number` sets it to 0.3, and after closing, the slider is unmounted.
+- **Four size classes**: with the viewport 1024, 800 and 1100 wide, the poster wall's page margins are 32, 24 and 32; the Film page's `Adaptive` is `compact` at an available width of about 560 and `medium` at about 860.
 
-2026-10-14，引擎读取交来的文件。`examples/gallery` 新增引擎在页面中的 `web_app` 目标；在内置浏览器中用页面取到的 `tides.mp4` 构造名为“海浪 Tides #3.mp4”的文件拖入画框，轻提示为“▶ 海浪 Tides #3.mp4 · MP4 · 49 KB”：引擎经导入取到文件名与大小，并读出开头的 12 个字节认出 MP4；控制台没有报错。
+2026-10-14, the engine reads handed-over files. `examples/gallery` gains a `web_app` target with the engine in the page; in the built-in browser, a file named "海浪 Tides #3.mp4" was built from the `tides.mp4` fetched by the page and dropped onto the frame, and the toast read "▶ 海浪 Tides #3.mp4 · MP4 · 49 KB": the engine got the file name and size through imports and read the first 12 bytes to recognize MP4; no errors in the console.
 
-2026-10-20，Chromium（内置浏览器，1280 × 800，深色），用于验收的媒体类应用引导第二步的可选功能预览：两个方向都不给尺寸的 `Canvas` 是 `Stack` 的底板，计算布局意图（`layoutIntent`、`fixedSize`）时与轨道一样排除，`Stack` 不再因它在列里撑开。量得卡片 300 × 188、侧栏底板 72 × 188、选中项底色 58 × 16、右侧画面 228 × 188。运行时测试新增一项覆盖底板。
+2026-10-20, Chromium (built-in browser, 1280 × 800, dark), the optional feature preview in step two of the onboarding of the media app used for acceptance: a `Canvas` given no size in either direction is the backdrop of a `Stack`, and is excluded like a rail when computing the layout intent (`layoutIntent`, `fixedSize`), so the `Stack` no longer stretches in a column because of it. Measured: card 300 × 188, sidebar backdrop 72 × 188, selected item background 58 × 16, picture on the right 228 × 188. One new runtime test covers the backdrop.
 
-同日，同一应用的整页验收（Chromium，浅色与深色）：
+The same day, whole-page acceptance of the same app (Chromium, light and dark):
 
-- **底板横向填满**：没写宽度、带底板的 `Stack` 在列、详情正文、窗口内容、模态内容与网格单元格里 `align-self: stretch`，与其他目标的“列里的块”一致；写了尺寸的层叠格子轨道为 `minmax(0, 100%)`，内容不再把格子撑宽。设置页插件横幅与正文同宽，插件卡片宽度一致、两列对齐。
-- **固定外观的文字颜色**：`appearance: light / dark` 的子树同时设定该外观的文字颜色与 `color-scheme`，此前只换了背景用的变量，浅色模式下深色横幅上的标题仍是深色字。
-- **强调色**：主题内核的强调色按图形对比度（标准档 3:1）求解，从用户选的颜色本身开始，满足即原样使用；此前按正文对比度（4.5:1）把选的颜色压暗。高对比度档仍为 4.5:1，错误色仍按正文对比度。
-- **圆角裁切**：层叠与带内容按钮上的 `corner` 用 `overflow: clip` 裁切；带内容按钮自身不再 `overflow: hidden`，引导里取色圆环的选中描边不再被裁成方形。
-- **应用栏**：只在有窗口切换条或设置按钮时出现，没有时页面顶部不再空出 48 px。
-- **搜索面板**：打开时从搜索框的位置与大小长成面板（位移加带圆角的 `clip-path`，弹簧周期 0.48 秒、阻尼 0.86，`linear()` 缓动按弹簧采样），遮罩淡入；关闭时缩回搜索框再关闭对话框，期间搜索框隐藏。系统要求减少动效时不做位移与裁切。
-- **滚动条占位**：竖向滚动容器 `scrollbar-gutter: stable`，传统（非浮层）滚动条出现或消失时内容宽度不变。
-- **`control` 字体**：`style: control` 的文字继承按钮的 `font`。
+- **Backdrops fill horizontally**: a `Stack` with a backdrop and no width gets `align-self: stretch` in columns, detail bodies, window content, modal content and grid cells, consistent with "blocks in a column" on the other targets; the grid tracks of a stack with a declared size are `minmax(0, 100%)`, so content no longer widens the cell. On the settings page the plugin banner is as wide as the body, and plugin cards have equal widths and align in two columns.
+- **Text color for a fixed appearance**: a subtree with `appearance: light / dark` sets both that appearance's text color and `color-scheme`; before, only the variables used for backgrounds were switched, and in light mode a title on a dark banner was still dark text.
+- **Accent color**: the theme core solves the accent color for graphics contrast (3:1 at the standard level), starting from the color the user picked and using it as is when it meets that; before, it darkened the picked color to body text contrast (4.5:1). The high-contrast level is still 4.5:1, and the error color still follows body text contrast.
+- **Corner clipping**: `corner` on stacks and on buttons with content clips with `overflow: clip`; buttons with content no longer have `overflow: hidden` themselves, so the selection outline of the color rings in onboarding is no longer clipped to a square.
+- **App bar**: appears only when there is a window switcher or a settings button; without them, the top of the page no longer leaves 48 px empty.
+- **Search panel**: on opening, it grows into the panel from the search field's position and size (a translation plus a rounded `clip-path`, spring period 0.48 seconds, damping 0.86, a `linear()` easing sampled from the spring), and the scrim fades in; on closing, it shrinks back into the search field before the dialog closes, with the search field hidden meanwhile. When the system asks for Reduce Motion, there is no translation or clipping.
+- **Scroll bar gutter**: vertical scroll containers have `scrollbar-gutter: stable`, so the content width does not change when a classic (non-overlay) scroll bar appears or disappears.
+- **`control` font**: text with `style: control` inherits the button's `font`.
 
-- **标签选择器与换行工具条（2026-10-20）**：应用的设置 › 插件页，无头 Chromium。1280 × 800 下分段控件靠左，五个 chip 靠右，chip 50 × 30、13 px 字重 500、药丸形、选中项反色，与原型网页版（30 高、左右 12）一致。390 × 844 下第一行是分段控件与靠右的「全部」「弹幕」「画面」（x = 176、240、304），「工具」「外观」换到第二行（x = 0、64），与原型手机版逐个位置一致；chip 为 54 × 30。手机宽度时页面左右留 16（原型 `phHTML` 的边距），原来的 28 使第一行只放得下两个。
+- **Chip picker and wrapping toolbar (2026-10-20)**: the app's Settings › Plugins page, headless Chromium. At 1280 × 800 the segmented control is on the left and the five chips on the right; chips are 50 × 30, 13 px at weight 500, pill-shaped, with the selected one in inverted colors, matching the prototype's web version (30 tall, 12 left and right). At 390 × 844 the first row holds the segmented control and, on the right, "All", "Danmaku" and "Picture" (x = 176, 240, 304), while "Tools" and "Appearance" wrap to the second row (x = 0, 64), matching the prototype's phone version position by position; chips are 54 × 30. At phone width the page keeps 16 on the left and right (the margin of the prototype's `phHTML`); the previous 28 left room for only two in the first row.
 
-2026-10-20（续），侧栏的开关与拖宽（内置浏览器，Chromium，1280 × 800，深色，`examples/showcase` 的 `web_app` 构建）：
+2026-10-20 (continued), toggling the sidebar and dragging it wider (built-in browser, Chromium, 1280 × 800, dark, `web_app` build of `examples/showcase`):
 
-- **拖动**：用真实鼠标拖侧栏边缘，240 → 299；向右拖过头停在 320，向左拖过头停在 200；松开后释放捕获、不再跟随，拖动中不选中文字。拖动条 8 宽、居中压在分隔线上，线两侧各 2 px 处 `elementFromPoint` 都命中它，指针为 `col-resize`。
-- **键盘**：拖动后焦点在拖动条上；右方向键三次 200 → 230，End 到 320，左方向键每次 −10；键盘聚焦时边缘显示焦点色竖线。
-- **开关**：点“隐藏边栏”后侧栏约 0.24 秒从 0 滑到 −320，随后 `visibility: hidden`，拖动条隐藏，详情占满整宽，按钮移到 x = 16 并改名“显示边栏”，焦点仍在按钮上；按空格展开，侧栏立即可见并滑回，宽度仍是 320。`?motion=reduce` 时直接隐藏，没有过渡。
-- **窄窗口**：收起后把视口改为 600 宽，侧栏作为第一页占满 600 并可见，开关与拖动条不显示；改回 1280 宽后仍是收起。
-- **声明宽度**：在构建产物中临时给侧栏加 `width: 180`：侧栏正好 180（此前会被限制为 200），没有拖动条，边缘是普通指针；收起时滑到 −180。
-- **右到左**：根元素设 `dir="rtl"` 后侧栏在右边（1040–1280），拖动条在 1036–1044，开关图标镜像；向左拖 40，宽度 240 → 280；收起时向右滑出。侧栏的分隔线原为物理方向的 `border-right`，右到左时画在外侧，现改为 `border-inline-end`，画在内侧。
-- 控制台没有报错。
+- **Dragging**: dragging the sidebar edge with a real mouse, 240 → 299; dragging too far right stops at 320, too far left stops at 200; on release the capture is released and the sidebar stops following, and no text is selected while dragging. The drag handle is 8 wide and centered over the divider line; `elementFromPoint` hits it 2 px on either side of the line, and the cursor is `col-resize`.
+- **Keyboard**: after dragging, focus is on the drag handle; three presses of the right arrow go 200 → 230, End goes to 320, and each press of the left arrow is −10; with keyboard focus, the edge shows a vertical line in the focus color.
+- **Toggle**: after clicking "Hide Sidebar", the sidebar slides from 0 to −320 in about 0.24 seconds and then gets `visibility: hidden`, the drag handle is hidden, the detail takes the full width, and the button moves to x = 16 and is renamed "Show Sidebar", with focus still on it; pressing Space expands it, the sidebar is visible immediately and slides back, still 320 wide. With `?motion=reduce` it hides directly, with no transition.
+- **Narrow window**: after collapsing, changing the viewport to 600 wide shows the sidebar as the first page, filling all 600 and visible, with neither the toggle nor the drag handle shown; after changing back to 1280 wide, it is still collapsed.
+- **Declared width**: temporarily adding `width: 180` to the sidebar in the build output: the sidebar is exactly 180 (before, it would have been limited to 200), there is no drag handle, and the edge shows the normal cursor; when collapsing, it slides to −180.
+- **Right-to-left**: with `dir="rtl"` on the root element the sidebar is on the right (1040–1280), the drag handle at 1036–1044, and the toggle icon is mirrored; dragging 40 to the left takes the width 240 → 280; collapsing slides it out to the right. The sidebar's divider used to be a physical `border-right`, which in right-to-left was drawn on the outer side; it is now `border-inline-end`, drawn on the inner side.
+- No errors in the console.
 
-2026-10-20，直接写在窗口正文里的样式变体（内置浏览器，Chromium）：此前 `style::used` 只看组件的正文，窗口正文里写的 `variant:` 在 `S` 里没有条目（原因见 WinUI 3 实现记录的同日条目）。测试应用的 `web_app` 构建：`S` 有 `buttonStage` 与 `buttonCard`；窗口正文里的按钮背景是强调色（`rgb(47, 111, 228)`）、圆角 12px，组件里的圆角 4px；点窗口里的按钮计数加一，控制台没有报错。生成器测试 `tests/window_styles.rs`。
+2026-10-20, style variants written directly in a window body (built-in browser, Chromium): before, `style::used` looked only at component bodies, so a `variant:` written in a window body had no entry in `S` (for the cause, see the entry of the same day in the WinUI 3 implementation notes). `web_app` build of a test app: `S` has `buttonStage` and `buttonCard`; the button in the window body has an accent background (`rgb(47, 111, 228)`) and a 12px corner radius, the one in the component a 4px radius; clicking the button in the window increments the count, and there are no errors in the console. Generator test: `tests/window_styles.rs`.
 
-2026-10-21，浮层与侧面板不再多出滚动条（内置浏览器，Chromium，传统滚动条 15 px，深色；用于验收的媒体类应用的 `web_app` 构建，播放页按窗口缩放，以下是缩放前的数值）：
+2026-10-21, popovers and side panels no longer get extra scroll bars (built-in browser, Chromium, classic 15 px scroll bars, dark; `web_app` build of the media app used for acceptance; the playback page scales with the window, and the values below are before scaling):
 
-- **原因**：分体按钮与浮层按钮的浮层沿用了下拉列表的高度上限 `min(328, 所在一侧的空间)`；弹幕参数浮层的内容 320 × 323，加上内边距共 347 高，于是竖向滚动 21 px。播放设置面板里的竖向 `ScrollView` 两个方向都是 `overflow: auto`；面板 320 宽，减去 1 px 边框、15 px 滚动条占位和左右各 16 的内边距只剩 271，而五段的分段控件每段至少 56、共 294，又不能收窄，于是横向滚动 23 px。其他目标的竖向滚动视图都不横向滚动（SwiftUI、Compose 只设竖向，GTK 横向为 `PolicyType::Never`，WinUI 3 横向为 `Disabled`），浮层都按内容定尺寸（SwiftUI、Compose、GTK 至少 240 宽；WinUI 3 是系统的 `FlyoutPresenter`），按代码看这两处都不会有多余的滚动条，本次未在这些平台上实测。
-- **浮层**：`placePopover` 对浮层面板不再套 328 的上限，最高为所在一侧的空间；打开前先量出内容的高度，下方放不下而上方放得下时向上打开（原来下方剩 160 以上就向下打开并滚动）。1440 × 900 与 1024 × 640 下弹幕参数浮层 346 × 349，`scrollHeight` 等于 `clientHeight`，没有滚动条；量完内联样式复原，关闭后为 `display: none`。
-- **竖向滚动视图与侧面板**：竖向 `ScrollView` 与 `Inspector` 只竖向滚动（`overflow-x: hidden`），内容稍宽时不再横向滚动。
-- **分段控件**：每段是三列网格，标签在中间一列（至少 30），两侧各是 4 的内边距加一列 0–8 的留白。放得下时与原来一样（标签两侧各 12，每段至少 56）；放不下时先收两侧的留白，标签不截断；控件 `max-width: 100%`。1440 × 900 下播放设置面板的分段控件 271 宽、每段 51，标签两侧各 11.7；900 × 360 时播放页换成手机横屏布局，面板里的分段控件 235 宽、每段 44，内容比面板高，只出竖向滚动条。浮层里“显示区域”的三段仍各 56。
-- 运行时测试新增两项：浮层面板的高度与开向、列表的 328 上限；竖向滚动视图与侧面板只竖向滚动、分段控件每段的网格。
+- **Cause**: the popovers of split buttons and popover buttons inherited the drop-down list's height limit `min(328, space on its side)`; the content of the Danmaku options popover is 320 × 323, 347 tall with padding, so it scrolled vertically by 21 px. The vertical `ScrollView` in the playback settings panel was `overflow: auto` in both directions; the panel is 320 wide, and after subtracting the 1 px border, the 15 px scroll bar gutter and 16 of padding on each side only 271 remained, while the five-segment segmented control needs at least 56 per segment, 294 in all, and could not shrink, so it scrolled horizontally by 23 px. On the other targets vertical scroll views never scroll horizontally (SwiftUI and Compose set only vertical, GTK's horizontal policy is `PolicyType::Never`, WinUI 3's horizontal is `Disabled`), and popovers are sized to their content (SwiftUI, Compose and GTK at least 240 wide; WinUI 3 uses the system `FlyoutPresenter`), so from the code neither place gets extra scroll bars there; this was not measured on those platforms this time.
+- **Popovers**: `placePopover` no longer applies the 328 limit to popover panels, whose maximum height is the space on their side; before opening, it measures the content's height, and opens upward when the panel does not fit below but fits above (before, it opened downward and scrolled whenever more than 160 remained below). At 1440 × 900 and 1024 × 640 the Danmaku options popover is 346 × 349, `scrollHeight` equals `clientHeight`, and there is no scroll bar; after measuring, the inline styles are restored, and after closing it is `display: none`.
+- **Vertical scroll views and side panels**: vertical `ScrollView` and `Inspector` scroll only vertically (`overflow-x: hidden`), and no longer scroll horizontally when the content is slightly wider.
+- **Segmented control**: each segment is a three-column grid with the label in the middle column (at least 30), and on each side 4 of padding plus a 0–8 column of slack. When it fits, it is the same as before (12 on each side of the label, at least 56 per segment); when it does not fit, the slack on both sides shrinks first and the label is not truncated; the control has `max-width: 100%`. At 1440 × 900 the segmented control in the playback settings panel is 271 wide, 51 per segment, with 11.7 on each side of the label; at 900 × 360 the playback page switches to the phone landscape layout, the segmented control in the panel is 235 wide, 44 per segment, and the content is taller than the panel, so only a vertical scroll bar appears. The three segments of "Display area" in the popover are still 56 each.
+- Two new runtime tests: the height and opening direction of popover panels and the 328 limit of lists; vertical scroll views and side panels scrolling only vertically, and the grid of each segmented control segment.
 
-2026-10-21，手机外壳的条件页签与层叠里的表单（无头 Chromium 390 × 844；用于验收的媒体类应用的 `web_app` 构建）：
+2026-10-21, conditional tabs in the phone shell and forms inside stacks (headless Chromium 390 × 844; `web_app` build of the media app used for acceptance):
 
-- **条件页签**：开启「看番」预设后页签栏为「首页」「新番」「媒体库」「搜索」，首页内容正常（此前只有无条件的「搜索」，页面区高 0）。在可选功能页打开「下载」，「下载」出现在「媒体库」与「搜索」之间；选中「媒体库」后关掉它，页签栏少了它、选中回到第一个「首页」；再关掉「看番」，只剩「下载」「搜索」，选中「首页」时回到「下载」。迷你播放器（`TabAccessory`）在各页签下都在页签栏下方（12, 790, 366 × 48）。
-- **层叠里的表单**：纯粹模式（不开媒体库、追番、下载）的设置放在 `Adaptive` 选中的布局中的 `Stack(align: bottom)` 里。此前该 `Stack` 与其中的表单只有内容宽（设置列表 224 × 525）；现在 `Stack` 与表单外壳都是 390 × 844，设置列表、通用、可选功能三页的分组都是 358 宽、两侧各 16。页签里的 `Stack` 也从内容大小（搜索页 218 × 117）变为页面区的 390 × 800。
-- 其他目标本来就如此：Compose、SwiftUI 按条件、`match`、列表生成页签，GTK 与 WinUI 3 的页签挂载时登记；Compose 的表单 `fillMaxSize`、`Adaptive` 与页签内容区占满，GTK 表单的滚动窗口向上传递 `hexpand`、`vexpand`，WinUI 3 的表单 `MarkFill`、宿主拉伸，SwiftUI 的 `Form` 本身占满给它的空间。
-- 运行时测试新增两项（条件页签的增减、顺序、`fallback`、方向键与外部入口；页面空间里可伸展子元素的规则），生成器测试一项（条件里的 `Tab` 与 `fallback`）。
+- **Conditional tabs**: with the "Anime" preset turned on, the tab bar is "Home", "New Shows", "Library", "Search", and the Home content displays correctly (before, there was only the unconditional "Search", and the page area was 0 tall). Turning on "Downloads" on the optional features page makes "Downloads" appear between "Library" and "Search"; selecting "Library" and then turning it off removes it from the tab bar and returns the selection to the first tab, "Home"; then turning off "Anime" leaves only "Downloads" and "Search", and with "Home" selected the selection goes back to "Downloads". The mini player (`TabAccessory`) sits below the tab bar under every tab (12, 790, 366 × 48).
+- **Forms inside stacks**: in pure mode (Library, show tracking and Downloads turned off), settings are placed in a `Stack(align: bottom)` inside the layout chosen by `Adaptive`. Before, that `Stack` and the form in it were only as wide as their content (settings list 224 × 525); now the `Stack` and the form shell are both 390 × 844, and the groups on the three pages, the settings list, General and Optional features, are all 358 wide with 16 on each side. The `Stack` in a tab also changes from its content size (search page 218 × 117) to the page area's 390 × 800.
+- The other targets already behaved this way: Compose and SwiftUI generate tabs from conditions, `match` and lists, and GTK and WinUI 3 register tabs when they mount; in Compose the form is `fillMaxSize` and `Adaptive` and the tab content area fill the space, the GTK form's scrolled window propagates `hexpand` and `vexpand` upward, the WinUI 3 form uses `MarkFill` and its host stretches, and SwiftUI's `Form` fills the space it is given by itself.
+- Two new runtime tests (adding and removing conditional tabs, order, `fallback`, arrow keys and external entry points; the rule for stretchable children in the page space), and one generator test (`Tab` inside a condition, and `fallback`).
 
-2026-10-21，窗口正文的摆放（内置浏览器，Chromium，420 × 300 视口；设计文档“一套窗口声明”）：Web 没有改动，改前就符合这条规则。`.bern-window-content` 是纵向 flex、子元素横向拉伸，所以直接写在窗口里的 `Column` 与窗口同宽（420），子元素按它的 `align` 排（默认 `flex-start`）。探针应用量得：默认列的按钮在 x = 24，宽 123 与 77；写在组件里的 `Column(align: center)` 的标题在 154–266（窗口中线 210）；只有一个小层的 `Stack` 铺满 420 × 300，卡片在 (154, 98)，正中；图标按钮、菜单、浮层按钮在 x = 24，宽 44、87、61。新增测试 `content_in_a_window_starts_at_its_top_leading_corner`（`tests/window_styles.rs`）断言这些样式与生成代码。
+2026-10-21, placement of a window body (built-in browser, Chromium, 420 × 300 viewport; "One set of window declarations" in the design document): no change on the Web, which already followed this rule. `.bern-window-content` is a vertical flex container whose children stretch horizontally, so a `Column` written directly in a window is as wide as the window (420), and its children are arranged by its `align` (default `flex-start`). Measured with a probe app: the buttons of the default column at x = 24, 123 and 77 wide; the title of a `Column(align: center)` written in a component at 154–266 (window center line 210); a `Stack` with only one small layer fills 420 × 300, with the card at (154, 98), dead center; icon button, menu and popover button at x = 24, 44, 87 and 61 wide. The new test `content_in_a_window_starts_at_its_top_leading_corner` (`tests/window_styles.rs`) asserts these styles and the generated code.
 
-2026-10-21，不写 `align` 的列（内置浏览器，Chromium，480 × 600 视口，探针应用 `fillcheck`；设计文档组件表 `Column` 一行）：Web 的默认列本来就是 `align-items: flex-start`，嵌在里面的 `Column(align: center)` 只与标题同宽、短按钮在标题下居中，带样式的小 `Stack` 只与文字同宽，与 macOS、tvOS 相同。同时看到、尚未修正：默认列里的 `TextInput` 只有约 200 px 宽（24–227），macOS、GTK、WinUI 3 上横跨整列；卡片（`Stack(variant: card) { Column { … } }`）里后到的 `Divider` 不让卡片变宽（24–208 不变），后到的 `TextInput` 只把卡片撑到输入框自身的宽度（24–251），macOS、tvOS、GTK、WinUI 3 上卡片横跨整列。原因：`layoutIntent` 不把分隔线与输入框算作横向填满。
+2026-10-21, columns without `align` (built-in browser, Chromium, 480 × 600 viewport, probe app `fillcheck`; the `Column` row of the component table in the design document): the Web's default column was already `align-items: flex-start`; a `Column(align: center)` nested in it is only as wide as its title, with a short button centered under the title, and a small styled `Stack` is only as wide as its text, the same as on macOS and tvOS. Also seen and not yet fixed: a `TextInput` in a default column is only about 200 px wide (24–227), while on macOS, GTK and WinUI 3 it spans the whole column; in a card (`Stack(variant: card) { Column { … } }`), a `Divider` that comes later does not make the card wider (24–208 unchanged), and a `TextInput` that comes later stretches the card only to the input's own width (24–251), while on macOS, tvOS, GTK and WinUI 3 the card spans the whole column. Cause: `layoutIntent` does not count dividers and inputs as filling horizontally.
 
-2026-10-21，页面里的搜索框按所在的列定宽（无头 Chromium 390 × 844 与 1280 × 800；用于验收的媒体类应用与 gallery 的 `web_app` 构建）：
+2026-10-21, search fields in a page take their width from their column (headless Chromium 390 × 844 and 1280 × 800; `web_app` builds of the media app used for acceptance and of the gallery):
 
-- **原因**：`B.Search` 的框是 `display: flex` 的块，列默认 `align-items: flex-start`，没写 `width:` 时只有内容宽：手机设置列表的搜索框 186 × 34，所在的列 358。手机搜索页的框原本就是 358，只因为结果浮层里有可伸展的视图，`layoutIntent` 把浮层里的伸展算到了框上；结果里没有可伸展视图时就只剩内容宽。其他目标没写宽度时都撑满：GTK `set_hexpand(true)`，Compose `fillMaxWidth()`，WinUI 3 的 `AutoSuggestBox` 横向拉伸；SwiftUI 的 `BernSearchInput`（macOS 的 `NSSearchField`、iOS 的 `UISearchTextField`）横向 hugging 为 `defaultLow`，按给它的宽度铺开，tvOS 是 `TextField`，同样可伸展（按代码看，本次未在 Apple 平台上实测）。工具栏里的搜索框各自定宽：GTK 18 个字符，WinUI 3 240，Web 按内容。
-- **改动**：页面里（不在工具栏）没写宽度的框带 `bern-fill-width`，按已有的可伸展视图规则在列里横向拉满、在行里与其他可伸展视图分剩下的空间、在 `Stack` 里铺满；写了宽度的带 `bern-sized-width`；框的高度总是自己的，带 `bern-sized-height`。浮层里的结果不再让框变成可伸展的，写了宽度的框在行里也不会被拉开。工具栏里的框不加类，宽度不变。
-- **实测**：手机设置列表的搜索框 358 × 34，x = 16，与下面的分组对齐；输入后结果浮层也是 358 宽。手机搜索页 358。1280 × 800 下工具栏的搜索入口（命令面板）250 × 34、设置窗口侧栏的搜索框 195 × 32、gallery 工具栏的搜索框 192 × 32（x = 1064），换回改动前的运行时量得相同。用页面样式搭的行：搜索框加按钮，搜索框 276、按钮 74；搜索框加 `Spacer` 平分剩下的空间（183 与 167，前者含 16 的内边距与边框）；写了 `width: 200` 的仍是 200；居中的列里拉满 358。
-- 运行时测试新增一项（页面里没写宽度、写了宽度、工具栏里三种搜索框的类，以及浮层里可伸展的结果不影响框）。
+- **Cause**: the field of `B.Search` is a `display: flex` block, and columns default to `align-items: flex-start`, so without `width:` it was only as wide as its content: the search field of the phone settings list was 186 × 34 in a 358 column. The field on the phone search page was already 358 only because the results popover contained a stretchable view, and `layoutIntent` attributed the stretch inside the popover to the field; with no stretchable view in the results, only the content width remained. On the other targets a field without a width fills the space: GTK `set_hexpand(true)`, Compose `fillMaxWidth()`, WinUI 3's `AutoSuggestBox` stretches horizontally; SwiftUI's `BernSearchInput` (`NSSearchField` on macOS, `UISearchTextField` on iOS) has horizontal hugging `defaultLow` and spreads to the width it is given, and on tvOS it is a `TextField`, likewise stretchable (from the code; not measured on Apple platforms this time). Search fields in toolbars have their own widths: GTK 18 characters, WinUI 3 240, Web by content.
+- **Change**: a field in a page (not in a toolbar) without a width gets `bern-fill-width`, and by the existing rule for stretchable views it fills a column horizontally, shares the remaining space with other stretchable views in a row, and fills a `Stack`; a field with a width gets `bern-sized-width`; the field's height is always its own, with `bern-sized-height`. Results in the popover no longer make the field stretchable, and a field with a width is not stretched in a row either. Fields in toolbars get no class, and their width is unchanged.
+- **Measured**: the search field of the phone settings list is 358 × 34 at x = 16, aligned with the groups below it; after typing, the results popover is also 358 wide. Phone search page: 358. At 1280 × 800, the toolbar's search entry (command palette) is 250 × 34, the search field in the settings window's sidebar 195 × 32, and the gallery toolbar's search field 192 × 32 (x = 1064); measuring with the runtime from before the change gives the same values. Rows built with page styles: a search field plus a button, search field 276 and button 74; a search field plus a `Spacer` split the remaining space evenly (183 and 167, the former including 16 of padding and the border); one with `width: 200` is still 200; in a centered column it fills 358.
+- One new runtime test (the classes of the three kinds of search fields, in a page without a width, in a page with a width and in a toolbar, and that stretchable results in the popover do not affect the field).
 
-2026-10-21，浮层面板不再撑开它的按钮（无头 Chromium 1280 × 800 与 390 × 844；gallery、用于验收的媒体类应用与一个探针应用的 `web_app` 构建）：
+2026-10-21, popover panels no longer stretch their buttons (headless Chromium 1280 × 800 and 390 × 844; `web_app` builds of the gallery, the media app used for acceptance and a probe app):
 
-- **原因**：`F.SplitButton` 与 `F.PopoverButton` 把 `popover="auto"` 的面板放在按钮的节点里，`B.Search` 的结果浮层也在框里。`layoutIntent` 走遍所有后代，只跳过 `DIALOG`，面板里的 `Slider`（轨道带 `bern-fill-width`）、`ScrollView`、`Grid` 就让按钮和它所在的行成了可伸展的：在行里 `flex: 1 1 0`，在列里横向拉满，`ScrollView` 还让它纵向长高。分体按钮的内容一直在面板里，所以一直被撑开；浮层按钮的内容随面板打开才挂上，所以打开时它所在的行才跳。
-- **改前实测**：gallery 画框页的 `Row(gap: 12, align: center)` 本该按内容宽、在视频下居中，实为 960 宽、从 x = 280 起；分体按钮「说明」541 宽（内容 116），「字号」菜单被推到 x = 833；打开「音量」浮层后音量按钮从 36 变成 288，说明按钮缩到 288。探针应用里，面板放 `ScrollView` 的分体按钮 1078 × 484（内容 119 × 36），高 200 的列里的分体按钮 1232 × 172，浮层按钮打开面板时从 69 宽变成 574 × 484。
-- **改动**：`layoutIntent` 像跳过 `DIALOG` 一样跳过带 `popover` 属性的元素：顶层的面板不计入按钮的布局，面板内部照常计算，面板里的滚动视图、滑块仍铺满面板。`fixedSize` 只看层叠的直接子层，面板不会是层叠的直接子层，不用改。
-- **改后实测**：画框页那一行 535 宽、居中（x = 492），说明按钮 116，打开音量浮层后行不动；探针应用的按钮都回到内容大小，打开面板也不变。媒体类应用播放页的分体按钮与音量、选集浮层，面板内容本来就是定宽的 `Column`（320、240、276），改前改后都是内容宽（134、36、88）。逐元素对比改前改后两个运行时在同一操作下的布局类与位置尺寸：手机的搜索页（输入后结果浮层打开，框 358、浮层 358 × 259）、设置列表的搜索（结果打开，框 358），1280 × 800 首页工具栏的搜索入口（命令面板打开）、设置窗口侧栏的搜索（结果打开）、播放页的各浮层，全部相同；唯一的差别是结果浮层自身不再带 `bern-layout-*` 类，没有样式读它。gallery 只有画框那一行变化，工具栏不变。
-- 其他目标的浮层本来就在布局之外（按代码看）：SwiftUI `.popover`（tvOS 为 `.sheet`），Compose `DropdownMenu`，GTK `gtk::Popover`，WinUI 3 `Flyout`。
-- 运行时测试新增一项（行里的分体按钮与浮层按钮：面板里铺满的滚动视图不让按钮和行可伸展，在面板里仍铺满），`runtime.mjs` 的布局意图测试加一条浮层面板的断言。
+- **Cause**: `F.SplitButton` and `F.PopoverButton` put the `popover="auto"` panel inside the button's node, and the results popover of `B.Search` is inside the field too. `layoutIntent` walks all descendants and skips only `DIALOG`, so a `Slider` (whose track has `bern-fill-width`), `ScrollView` or `Grid` in the panel made the button and the row it is in stretchable: `flex: 1 1 0` in a row, filling horizontally in a column, and a `ScrollView` also made it grow taller. A split button's content is always in the panel, so it was always stretched; a popover button's content is mounted only when the panel opens, so the row it is in jumped only on opening.
+- **Measured before the change**: the `Row(gap: 12, align: center)` on the gallery's Frame page should be as wide as its content and centered under the video, but was 960 wide starting at x = 280; the split button "Caption" was 541 wide (content 116), and the "Size" menu was pushed to x = 833; after opening the "Volume" popover, the volume button went from 36 to 288 and the caption button shrank to 288. In the probe app, a split button with a `ScrollView` in its panel was 1078 × 484 (content 119 × 36), a split button in a 200-tall column was 1232 × 172, and a popover button went from 69 wide to 574 × 484 when its panel opened.
+- **Change**: `layoutIntent` skips elements with the `popover` attribute just as it skips `DIALOG`: top-layer panels do not count toward the button's layout, the inside of a panel is computed as usual, and scroll views and sliders in a panel still fill the panel. `fixedSize` looks only at a stack's direct child layers, and a panel is never a direct child layer of a stack, so it needs no change.
+- **Measured after the change**: the row on the Frame page is 535 wide and centered (x = 492), the caption button is 116, and the row does not move when the volume popover opens; the probe app's buttons are all back to their content size and do not change when a panel opens. On the media app's playback page, the panel content of the split button and of the volume and episode popovers was already a fixed-width `Column` (320, 240, 276), and the buttons are content-wide both before and after the change (134, 36, 88). Comparing, element by element, the layout classes, positions and sizes of the runtimes from before and after the change under the same operations: the phone search page (results popover open after typing, field 358, popover 358 × 259), search in the settings list (results open, field 358), the search entry in the home toolbar at 1280 × 800 (command palette open), search in the settings window's sidebar (results open), and each popover on the playback page are all identical; the only difference is that the results popover itself no longer carries `bern-layout-*` classes, which no style reads. In the gallery only the Frame row changes; the toolbar is unchanged.
+- On the other targets popovers were already outside layout (from the code): SwiftUI `.popover` (`.sheet` on tvOS), Compose `DropdownMenu`, GTK `gtk::Popover`, WinUI 3 `Flyout`.
+- One new runtime test (split buttons and popover buttons in a row: a scroll view filling the panel does not make the button and the row stretchable, and still fills the panel), and the layout intent test in `runtime.mjs` gains an assertion for popover panels.
 
-## 未完成与已知限制
+## Unfinished work and known limitations
 
-- 不写 `align` 的列里，`TextInput` 只有自身的宽度（约 200 px），不横跨整列；`layoutIntent` 不把分隔线与输入框算作横向填满，所以装着后到的分隔线的卡片不变宽、装着后到的输入框的卡片只撑到输入框的宽度。macOS、tvOS、GTK、WinUI 3 上它们横跨整列（2026-10-21 实测，见验证记录同日条目）。
-- 选到或拖入的文件是页面的 `blob:` 地址。引擎在页面中时，页面记住每个地址对应的文件，经导入 `file_name`、`file_size`、`file_read` 把名字、大小与一段内容交给引擎（同步请求读取文件的一段，读取期间页面不响应）；WebUI 中原生运行的引擎读不到页面的文件。
-- 系统的文件选择框与从桌面拖入文件无法在自动化中操作，分别用 `ui.set_file` 与页面内构造的文件验证；`opens: true` 的 `launchQueue` 未验证。
-- 触控板捏合只在 Chromium 中验证（带 Control 的滚轮）；两指触摸、Safari 的手势事件未实测。
-- 共享元素的副本不复制视频与画布，它们只做位置与尺寸的过渡。
-- 内置浏览器面板隐藏时浏览器暂停逐帧回调，动效停在中途、显示后继续；这是浏览器的行为。
+- In a column without `align`, a `TextInput` has only its own width (about 200 px) and does not span the whole column; `layoutIntent` does not count dividers and inputs as filling horizontally, so a card holding a divider that comes later does not get wider, and a card holding an input that comes later stretches only to the input's width. On macOS, tvOS, GTK and WinUI 3 they span the whole column (measured 2026-10-21; see the entry of the same day in the verification log).
+- Picked or dropped files are `blob:` addresses of the page. When the engine is in the page, the page remembers the file for each address and hands the name, the size and a range of content to the engine through the imports `file_name`, `file_size` and `file_read` (a synchronous request reads a range of the file, and the page does not respond during the read); an engine running natively under WebUI cannot read the page's files.
+- The system file picker and dragging files in from the desktop cannot be operated in automation, so they were verified with `ui.set_file` and with files constructed in the page respectively; `launchQueue` for `opens: true` is not verified.
+- Trackpad pinch was verified only in Chromium (the wheel with Control); two-finger touch and Safari's gesture events were not measured.
+- Copies of shared elements do not copy video and canvases; those only transition their position and size.
+- When the built-in browser pane is hidden, the browser pauses per-frame callbacks, so motion stops midway and continues once the pane is shown again; this is browser behavior.
 
-- `app` 构建没有外部控制入口：浏览器内的引擎不能监听，设计要求另设明确中继，未实现。
-- 多个 WebUI 页面同时登记为媒体执行端时，第一个页面登记即把执行端交给宿主的路由器；页面离开后，它持有的应用级播放器不会自动在其他页面重新加载。
-- 引擎宿主断开时，页面上已显示的媒体状态保留到重连；重连后页面播放器重新加载，播放位置不保留。
-- 宿主只服务 HTTP；HTTPS 与跨源部署需要另行配置，未实现。
-- WebAssembly 中 panic 会终止模块，`app` 构建没有 macOS 那样的“引擎拒绝后续命令”。
-- 运行时主题只在构建时生成快照；没有运行时更换品牌种子的接口。强制颜色模式、更高对比模式与键盘遍历的完整检查、VoiceOver/NVDA 未验证。
-- 视频：未验证真实的用户激活拒绝；没有全屏与画中画；单视图，一个播放器不能同时在两个视图中显示。
-- 早期调试版模块约 21 MB。2026-10-11 release 展示应用的体积记录见 [README 测量方法](../../README.md#实测数据)；这些数字不代表其他应用的体积或性能。
-- 桌面 Safari 27.0.1 已验证该应用的媒体库、筛选、主题可读性、导航和部分布局，范围见前文。Firefox、Safari 手机布局及未列出的交互仍未实测。
-- 侧栏拖出的宽度与收起状态只在页面打开期间保留，重新载入后回到 240 px、展开；没有开关侧栏的键盘快捷键。
-- 示例应用没有声明浮动窗口；浮动呈现只通过临时修改构建产物验证过。
-- 下拉菜单依赖 Popover API（Chromium 114、Safari 17、Firefox 125 起）；更旧的浏览器没有回退。
-- 媒体进度条没有显示缓冲范围。
-- 分段控件每段收到两侧各 4 仍放不下时超出所在容器（在竖向滚动视图里被裁切），标签不加省略号。浮层打开后改变窗口大小不重新定位。
+- The `app` build has no external control entry point: an engine inside the browser cannot listen, and the design calls for a separate, explicit relay, which is not implemented.
+- When several WebUI pages register as media executors at the same time, the first page's registration hands the executor to the host's router; after a page leaves, the app-level players it held are not automatically reloaded in other pages.
+- When the engine host disconnects, the media state already shown on the page is kept until reconnection; after reconnecting, the page's players reload, and the playback position is not kept.
+- The host serves only HTTP; HTTPS and cross-origin deployment need separate configuration, which is not implemented.
+- A panic in WebAssembly terminates the module, and the `app` build has no "engine rejects later commands" as on macOS.
+- The runtime theme is snapshotted only at build time; there is no interface for changing the brand seed at runtime. Forced colors mode, increased contrast mode, a complete check of keyboard traversal, and VoiceOver/NVDA are not verified.
+- Video: real user-activation refusals are not verified; there is no full screen or picture-in-picture; single view: one player cannot be shown in two views at the same time.
+- The early debug module was about 21 MB. For the size record of the 2026-10-11 release showcase app, see [the measurement method in the README](../../README.md#measured); these numbers do not represent the size or performance of other apps.
+- Desktop Safari 27.0.1 has verified the app's library, filtering, theme readability, navigation and part of the layout, within the scope described earlier. Firefox, Safari's phone layout and interactions not listed are still not measured.
+- The width the sidebar is dragged to and its collapsed state are kept only while the page is open; after a reload it is back to 240 px and expanded; there is no keyboard shortcut for toggling the sidebar.
+- The example app declares no floating window; floating presentation has been verified only by temporarily modifying the build output.
+- Drop-down menus depend on the Popover API (from Chromium 114, Safari 17, Firefox 125); older browsers have no fallback.
+- The media progress bar does not show buffered ranges.
+- When a segmented control still does not fit with each segment shrunk to 4 on each side, it overflows its container (and is clipped inside a vertical scroll view), and labels get no ellipsis. Resizing the window after a popover opens does not reposition it.

@@ -1,6 +1,8 @@
-# 按模块编译
+**English** · [简体中文](../zh-CN/Implementation/Module-Builds.md)
 
-`bern build`、`run`、`package`、`check` 和 `ir` 支持 `--exclude-module`。不传时编译 `Bern.toml` 声明的全部模块。参数接受模块 ID，可以重复，也可以用逗号分隔：
+# Building by module
+
+`bern build`, `run`, `package`, `check` and `ir` support `--exclude-module`. Without it, every module declared in `Bern.toml` is compiled. The argument takes module IDs and can be repeated or comma-separated:
 
 ```sh
 bern build --target android --exclude-module downloads
@@ -9,13 +11,13 @@ bern run --target macos --exclude-module downloads --exclude-module sync
 bern ir --exclude-module downloads
 ```
 
-排除在加载模块源码之前生效。被排除模块的协议、引擎、UI、页面、slot 贡献和 `app.modules.<id>` 运行时开关均不进入应用。`optional`、`enabled` 仍控制**已编译模块**的运行时启停。
+Exclusion takes effect before module sources are loaded. An excluded module's protocol, engine, UI, pages, slot contributions and `app.modules.<id>` runtime switch never enter the app. `optional` and `enabled` still control whether **compiled modules** are enabled at runtime.
 
-模块 ID 必须存在。如果保留模块的 `depends` 指向被排除模块，构建报错并列出依赖链，例如 `sync -> anime`。调用者需要一并排除依赖它的模块，或者保留该依赖。Bern 不会自动追加排除项。
+Module IDs must exist. If a kept module's `depends` points to an excluded module, the build reports an error and lists the dependency chain, for example `sync -> anime`. The caller needs to also exclude the modules that depend on it, or keep that dependency. Bern does not add exclusions automatically.
 
-## UI 与 Rust 中的直接引用
+## Direct references in the UI and in Rust
 
-UI 使用 `build.modules.<id>`。编译器和 Rust 宏共用裁剪逻辑，在类型检查前折叠条件和移除分支：
+The UI uses `build.modules.<id>`. The compiler and the Rust macros share the pruning logic, which folds conditions and removes branches before type checking:
 
 ```rust
 #[component]
@@ -33,9 +35,9 @@ pub fn content(app: app::Client) -> impl View {
 }
 ```
 
-运行时条件可以组合，例如 `build.modules.anime && app.features.anime`。条件表达式中的 `if … { … } else { … }` 也会折叠。不认识的模块 ID 会报错。
+Runtime conditions can be combined with it, for example `build.modules.anime && app.features.anime`. `if … { … } else { … }` inside condition expressions is folded too. An unknown module ID reports an error.
 
-Rust 中使用 `bern-module-<id>` Cargo feature；Bern 声明也支持这些 feature 的 `#[cfg]` 和 `#[cfg_attr]`，包括 `not`、`any`、`all`：
+In Rust, use the `bern-module-<id>` Cargo features; Bern declarations also support `#[cfg]` and `#[cfg_attr]` on these features, including `not`, `any` and `all`:
 
 ```rust
 #[cfg(feature = "bern-module-anime")]
@@ -53,19 +55,19 @@ pub fn search(#[cfg(feature = "bern-module-anime")] anime: anime::Client) -> imp
 }
 ```
 
-转发可选组件参数时，给对应实参加相同的 `#[cfg]`：
+When forwarding an optional component parameter, give the corresponding argument the same `#[cfg]`:
 
 ```rust
 search(#[cfg(feature = "bern-module-anime")] anime: anime)
 ```
 
-由模块提供的页面枚举项在该模块排除后不存在，`match` 的对应分支也可以使用 `#[cfg(feature = "bern-module-anime")]`。协议命令或事件监听可以整项加 `#[cfg]`；若命令仍需保留、仅监听需要随模块移除，可使用 `#[cfg_attr(feature = "bern-module-anime", on(anime::play))]`。会被编译的 Rust 引擎实现需使用相同 feature。
+Page enum variants provided by a module do not exist once that module is excluded, and the matching `match` arms can also use `#[cfg(feature = "bern-module-anime")]`. A protocol command or event listener can take `#[cfg]` on the whole item; if the command must stay and only the listener should go away with the module, use `#[cfg_attr(feature = "bern-module-anime", on(anime::play))]`. Rust engine implementations that get compiled need to use the same feature.
 
-## Cargo 依赖
+## Cargo dependencies
 
-没有跨模块 Rust 引用的项目，无需增加 Cargo feature：生成的工作空间只引用保留模块的 protocol/core crate。
+Projects without cross-module Rust references need no extra Cargo features: the generated workspace only references the protocol/core crates of the kept modules.
 
-外壳直接引用模块时，把该依赖改为 optional，并声明对应 feature：
+When the shell references a module directly, make that dependency optional and declare the matching feature:
 
 ```toml
 [features]
@@ -78,14 +80,14 @@ downloads-protocol = { path = "../modules/downloads/protocol", optional = true }
 app-protocol = { path = "../app-protocol", default-features = false }
 ```
 
-被转发的 feature 也要在 `app-protocol` 中声明。生成器读取依赖包声明的 `bern-module-*` features，关闭这些包的默认 feature，显式启用保留模块和其他默认 feature。`default` 中的 `dep:foo` 或 `foo/bar` 项应先包装为普通具名 feature（例如 `base = ["dep:foo"]`、`default = ["base", "bern-module-downloads"]`）。模块 feature 应直接列在 `default` 中；其他默认 feature 若间接启用了已排除模块，会得到依赖链错误。
+Forwarded features must also be declared in `app-protocol`. The generator reads the `bern-module-*` features declared by dependency packages, turns off those packages' default features, and explicitly enables the kept modules and the other default features. `dep:foo` or `foo/bar` entries in `default` should first be wrapped in plain named features (for example `base = ["dep:foo"]`, `default = ["base", "bern-module-downloads"]`). Module features should be listed directly in `default`; another default feature that indirectly enables an excluded module gets a dependency chain error.
 
-跨 crate 的依赖边应设置 `default-features = false`，通过 feature 显式转发所需模块，避免 Cargo 合并 feature 时重新开启模块。普通无条件 Cargo 依赖仍由 Cargo 编译，因此跨模块依赖应按上例设为 optional，并用 `#[cfg]` 包围调用。
+Cross-crate dependency edges should set `default-features = false` and forward the needed modules explicitly through features, so that Cargo's feature unification does not turn modules back on. Plain unconditional Cargo dependencies are still compiled by Cargo, so cross-module dependencies should be made optional as in the example above, with the calls wrapped in `#[cfg]`.
 
-## 构建产物与重复构建
+## Build outputs and repeated builds
 
-默认输出仍为 `target/bern/<target>/`。裁剪构建输出到 `target/bern/<target>/without-<排序后的模块ID>/`，多个 ID 用 `+` 连接。目录中的 `modules.json` 记录本次模块选择。
+The default output is still `target/bern/<target>/`. Pruned builds go to `target/bern/<target>/without-<sorted-module-ids>/`, with multiple IDs joined by `+`. The `modules.json` in that directory records the module selection of this build.
 
-Bern 向所有构建步骤传递按应用目录限定的 `BERN_BUILD_ROOT` / `BERN_EXCLUDE_MODULES`，并在生成的 Cargo 工作空间中写入 `.cargo/config.toml`。已有后端配置会保留。Rust 宏通过 `option_env!` 将选择记录到 rustc 的依赖信息中；切换组合、恢复默认构建都会重新生成对应声明。
+Bern passes `BERN_BUILD_ROOT` / `BERN_EXCLUDE_MODULES`, scoped to the app directory, to every build step, and writes `.cargo/config.toml` into the generated Cargo workspace. Existing backend configuration is kept. The Rust macros record the selection in rustc's dependency info through `option_env!`; switching to another combination or going back to the default build regenerates the corresponding declarations.
 
-需要单独重新编译已生成的 Rust glue 时，在该 glue 的 Cargo.toml 所在目录运行 Cargo，以读取其 `.cargo/config.toml`。直接在源工作空间运行普通 Cargo 时，Bern 宏默认使用完整模块配置；裁剪构建以 Bern CLI 为入口。
+To recompile generated Rust glue on its own, run Cargo in the directory that holds that glue's Cargo.toml, so that it reads its `.cargo/config.toml`. When plain Cargo runs directly in the source workspace, the Bern macros use the full module configuration by default; pruned builds go through the Bern CLI.

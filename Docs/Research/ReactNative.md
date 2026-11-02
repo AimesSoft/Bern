@@ -1,266 +1,268 @@
-# React Native 原生 UI 实现与 Bern 架构借鉴
+**English** · [简体中文](../zh-CN/Research/ReactNative.md)
 
-- 文档版本：v0.1
-- 研究日期：2026-10-09
-- 源码仓库：[React Native 官方仓库](https://github.com/react/react-native)
-- 固定提交：[`1449daad5e133c80fd643caccf9633201cb4c4f9`](https://github.com/react/react-native/commit/1449daad5e133c80fd643caccf9633201cb4c4f9)
-- 范围：Fabric 的 JavaScript、共享 C++、iOS 和 Android 实现，以及 Codegen、事件和生命周期边界
-- 关联：[Bern 架构设计](../Design.md)、[UI 自适应适配规范](../Adaptation/README.md)
+# React Native's native UI implementation and lessons for Bern's architecture
 
-React Native 的核心机制是：**运行 React 得到界面描述，通过共享渲染层计算更新，再由平台适配器创建和更新原生视图。** Codegen 生成类型与连接代码，应用界面仍由运行时协调；它不会把任意 JSX 页面直接翻译成 SwiftUI 或 Kotlin 页面。
+- Document version: v0.1
+- Research date: 2026-10-09
+- Source repository: [Official React Native repository](https://github.com/react/react-native)
+- Pinned commit: [`1449daad5e133c80fd643caccf9633201cb4c4f9`](https://github.com/react/react-native/commit/1449daad5e133c80fd643caccf9633201cb4c4f9)
+- Scope: Fabric's JavaScript, shared C++, iOS and Android implementations, plus Codegen, events and lifecycle boundaries
+- Related: [Bern architecture design](../Design.md), [UI adaptation guidelines](../Adaptation/README.md)
 
-Bern 值得借鉴的是类型化边界、稳定实例身份、分阶段提交和平台生命周期管理。Bern 继续采用受约束 Rust 声明、目标代码生成和命令引擎；不因此引入 JavaScript 运行时，也不把 SwiftUI、GTK、WinUI 3 强制改造成 Fabric 式控件渲染器。下文的 Bern 建议用于原型设计，不自动改变主设计的既定约束。
+The core mechanism of React Native is: **run React to get a description of the UI, compute updates in a shared rendering layer, then have platform adapters create and update native views.** Codegen generates types and glue code, while the app's UI is still reconciled by the runtime; it does not translate arbitrary JSX pages directly into SwiftUI or Kotlin pages.
 
-## 源码基准与阅读范围
+What Bern can learn from are the typed boundaries, stable instance identity, staged commits and platform lifecycle management. Bern continues to use constrained Rust declarations, target code generation and a command engine; it does not bring in a JavaScript runtime because of this, and it does not force SwiftUI, GTK and WinUI 3 into Fabric-style control renderers. The suggestions for Bern below are for prototype design and do not automatically change the established constraints of the main design.
 
-本次读取官方仓库的上述完整提交，提交时间为 2026-10-09T03:06:33-07:00。这是 main 开发快照；`packages/react-native/package.json` 中的 `1000.0.0` 是开发占位版本，不能写成已发布版本。本文源码链接均固定到该提交，避免后续 main 更新使调用链与行号失效。
+## Source baseline and reading scope
 
-研究采用源码静态阅读，覆盖两端挂载和事件的关键路径；没有编译 React Native、运行性能基准或执行真机验证。源码中的 feature flag 分支按条件解释，不能从默认值推断所有宿主的实际配置。官方 [Fabric 概述](https://reactnative.dev/architecture/fabric-renderer)和[渲染阶段说明](https://reactnative.dev/architecture/render-pipeline)用于理解术语，具体实现以固定源码为准。
+This study reads the complete commit named above from the official repository; its commit time is 2026-10-09T03:06:33-07:00. It is a snapshot of main development; the `1000.0.0` in `packages/react-native/package.json` is a development placeholder version and must not be written as a released version. All source links in this document are pinned to that commit, so that later updates to main do not invalidate the call chains and line numbers.
 
-## JavaScript 到原生视图的完整路径
+The research reads the source statically and covers the key mounting and event paths on both platforms; it did not compile React Native, run performance benchmarks or verify anything on real devices. Feature flag branches in the source are explained conditionally; the actual configuration of every host cannot be inferred from the default values. The official [Fabric overview](https://reactnative.dev/architecture/fabric-renderer) and [render pipeline description](https://reactnative.dev/architecture/render-pipeline) were used to understand the terminology; for the concrete implementation, the pinned source is authoritative.
+
+## The full path from JavaScript to native views
 
 ```mermaid
 flowchart TD
-    Spec[组件和模块类型声明] --> Codegen[构建期 Codegen]
-    Codegen --> Glue[属性 事件 描述器及平台接口]
-    JS[运行时 React 组件与状态] --> Host[宿主组件与 React 协调器]
-    Host --> JSI[JSI 与 UIManagerBinding]
+    Spec[Component and module type declarations] --> Codegen[Build-time Codegen]
+    Codegen --> Glue[Props, events, descriptors and platform interfaces]
+    JS[Runtime React components and state] --> Host[Host components and React reconciler]
+    Host --> JSI[JSI and UIManagerBinding]
     JSI --> Shadow[C++ Shadow Tree]
-    Glue -. 类型和组件注册 .-> Shadow
-    Shadow --> Commit[提交与 Yoga 布局]
-    Commit --> Diff[版本差分与挂载操作]
-    Diff --> Apple[iOS 主线程挂载]
-    Diff --> Android[Android JNI 与 UI 线程挂载]
-    Apple --> UIView[UIKit 组件视图]
-    Android --> AndroidView[Android View 与 ViewGroup]
-    UIView --> Events[原生事件与事件队列]
+    Glue -. types and component registration .-> Shadow
+    Shadow --> Commit[Commit and Yoga layout]
+    Commit --> Diff[Revision diffing and mount operations]
+    Diff --> Apple[iOS main-thread mounting]
+    Diff --> Android[Android JNI and UI-thread mounting]
+    Apple --> UIView[UIKit component views]
+    Android --> AndroidView[Android View and ViewGroup]
+    UIView --> Events[Native events and event queue]
     AndroidView --> Events
     Events --> JS
 ```
 
-这里存在三种不同的树，不能混为一个数据结构：
+There are three different trees here, and they must not be lumped together as one data structure:
 
-| 层次 | 表达什么 | 谁负责 |
+| Layer | What it expresses | Who is responsible |
 | --- | --- | --- |
-| React 元素与 Fiber | 组件执行结果、状态和协调工作 | React 的 JavaScript 运行时 |
-| Shadow Tree | 宿主组件的属性、子节点、原生状态、布局与身份 | Fabric 共享 C++ 层 |
-| Host View Tree | 实际参与显示、输入和系统集成的原生视图 | iOS、Android 平台实现 |
+| React elements and Fiber | Results of component execution, state and reconciliation work | React's JavaScript runtime |
+| Shadow Tree | Host components' props, children, native state, layout and identity | Fabric's shared C++ layer |
+| Host View Tree | The native views that actually take part in display, input and system integration | The iOS and Android platform implementations |
 
-业务封装组件不一定产生 Shadow Node；纯布局节点也不一定产生原生视图。因此“写了一个组件，就创建一个系统控件”不是可靠模型。
+A business wrapper component does not necessarily produce a Shadow Node, and a pure layout node does not necessarily produce a native view. So "write one component and get one system control" is not a reliable model.
 
-### 从 View 到 C++ 节点
+### From View to a C++ node
 
-以 `<View style={{width: 120, height: 48, backgroundColor: 'red'}} />` 为例：
+Take `<View style={{width: 120, height: 48, backgroundColor: 'red'}} />` as an example:
 
-1. `View.js` 处理可访问性等属性，返回 `ViewNativeComponent`。[View 包装][r-view]
-2. `ViewNativeComponent.js` 使用 `NativeComponentRegistry.get('RCTView', …)` 登记宿主组件。这里的结果是宿主组件身份，不是已经创建的 `UIView`。[宿主组件定义][r-view-native]
-3. React renderer 在运行时分配 tag、读取 ViewConfig、生成属性载荷，调用 `createNode(tag, componentName, surfaceId, props, instanceHandle)`，随后连接子节点。[ReactFabric 节点创建][r-fabric-create]
-4. `UIManagerBinding::createAndInstallIfNeeded` 把 C++ HostObject 安装为 `global.nativeFabricUIManager`。其 `createNode` HostFunction 读取 JSI 参数，调用 C++ UIManager。[JSI 安装与调用入口][r-jsi]
-5. `UIManager::createNode` 查找 ComponentDescriptor，创建带 tag 与 surfaceId 的 family，解析 props，创建初始 state 和 Shadow Node。此时获得的是共享渲染层节点。[UIManager][r-uimanager]
+1. `View.js` handles accessibility and other props and returns `ViewNativeComponent`. [View wrapper][r-view]
+2. `ViewNativeComponent.js` registers the host component with `NativeComponentRegistry.get('RCTView', …)`. The result here is a host component identity, not a `UIView` that has already been created. [Host component definition][r-view-native]
+3. At runtime the React renderer allocates a tag, reads the ViewConfig, builds the props payload, calls `createNode(tag, componentName, surfaceId, props, instanceHandle)`, and then attaches the children. [ReactFabric node creation][r-fabric-create]
+4. `UIManagerBinding::createAndInstallIfNeeded` installs a C++ HostObject as `global.nativeFabricUIManager`. Its `createNode` HostFunction reads the JSI arguments and calls the C++ UIManager. [JSI installation and call entry point][r-jsi]
+5. `UIManager::createNode` looks up the ComponentDescriptor, creates a family with the tag and surfaceId, parses the props, and creates the initial state and the Shadow Node. What exists at this point is a node of the shared rendering layer. [UIManager][r-uimanager]
 
-JS 名称 `RCTView` 与 C++ 组件名 `View` 之间还有名称归一化；文本组件存在其他别名映射。新框架应从一开始统一组件身份，避免依赖各语言中的类名恰好相同。[名称映射][r-names]
+Between the JS name `RCTView` and the C++ component name `View` there is also a name normalization step; text components have other alias mappings. A new framework should unify component identity from the start, rather than relying on class names happening to match across languages. [Name mapping][r-names]
 
-JSI 提供 JavaScript 与 C++ 的调用及值访问接口，并不负责布局、组件注册或操作系统线程调度。`ReactInstance::loadScript` 中仍有通过运行时执行 JS bundle 的路径；主分支也有引擎专用加载分支，但这些都不构成向 SwiftUI 页面源码的翻译。[运行时加载][r-runtime]
+JSI provides the interface for calls and value access between JavaScript and C++; it is not responsible for layout, component registration or OS thread scheduling. `ReactInstance::loadScript` still has a path that executes the JS bundle through the runtime, and the main branch also has engine-specific loading branches, but none of these amounts to translation into SwiftUI page source. [Runtime loading][r-runtime]
 
-### 提交与布局
+### Commit and layout
 
-React renderer 完成根的子树后调用 `completeRoot`。JSI 绑定将其转为 `UIManager::completeSurface`，此处明确设置 `mountSynchronously = false`；一次 JS 到 C++ 的同步调用返回，不代表屏幕已经更新。[根提交绑定][r-complete]
+After the React renderer finishes the root's subtree, it calls `completeRoot`. The JSI binding turns this into `UIManager::completeSurface`, which explicitly sets `mountSynchronously = false`; the return of one synchronous JS-to-C++ call does not mean the screen has been updated. [Root commit binding][r-complete]
 
-`completeSurface` 以旧根为基础构造新根，交给 `ShadowTree::commit`。在普通非分支路径中，`tryCommit` 读取旧版本、执行树变换与状态协调、计算布局，再检查版本是否被其他提交改变；冲突会返回失败并进入重试。该快照另有 feature flag 控制的 React 分支提交与合并逻辑，不能把其中某一种路径写成固定线程流水线。[提交实现][r-shadow]
+`completeSurface` builds a new root from the old root and hands it to `ShadowTree::commit`. On the ordinary non-branching path, `tryCommit` reads the old revision, performs tree transformations and state reconciliation, computes layout, and then checks whether the revision was changed by another commit; a conflict returns failure and goes into a retry. This snapshot also has React branch commit and merge logic controlled by feature flags, so no single one of these paths can be described as a fixed thread pipeline. [Commit implementation][r-shadow]
 
-这一阶段以不可变快照和克隆共享为设计基础。源码中的 `sealRecursive` 在 release 下不执行同样的调试约束，说明不可变语义还依赖实现纪律；它不是自动获得的内存隔离保障。
+This stage is designed around immutable snapshots and shared clones. `sealRecursive` in the source does not enforce the same debug constraints in release builds, which shows that the immutable semantics also depend on implementation discipline; they are not a memory isolation guarantee obtained automatically.
 
-Yoga 负责公共布局计算。`YogaLayoutableShadowNode::layoutTree` 接收实际布局约束、比例和文字环境，调用 `YGNodeCalculateLayout`；需要测量内容的节点通过 `measureContent` 回调提供尺寸。公共布局算法仍需要平台文字度量等输入，不能仅靠统一坐标消除平台差异。[Yoga 布局与测量][r-yoga]
+Yoga handles the common layout computation. `YogaLayoutableShadowNode::layoutTree` takes the actual layout constraints, scale and text environment and calls `YGNodeCalculateLayout`; nodes that need to measure their content provide sizes through the `measureContent` callback. A common layout algorithm still needs inputs such as platform text metrics; unified coordinates alone cannot remove platform differences. [Yoga layout and measurement][r-yoga]
 
-### 差分与挂载操作
+### Diffing and mount operations
 
-`MountingCoordinator::push` 保留较新的树版本；`pullTransaction` 对基准树与待提交树调用 `calculateShadowViewMutations`，得到带 surfaceId 和序号的挂载批次。基准版本的推进与事务拉取关联，不能直接把它称作操作系统已经绘制完成的确认。[挂载协调器][r-coordinator]
+`MountingCoordinator::push` keeps the newer tree revision; `pullTransaction` calls `calculateShadowViewMutations` on the base tree and the tree to be committed, producing a mount batch that carries a surfaceId and a sequence number. Advancing the base revision is tied to pulling the transaction; it cannot be described as confirmation that the operating system has finished drawing. [Mounting coordinator][r-coordinator]
 
-共有五类基本变更：[ShadowViewMutation][r-mutations]。
+There are five basic kinds of mutation: [ShadowViewMutation][r-mutations].
 
-| 操作 | 语义 | 必须区分的生命周期 |
+| Operation | Semantics | Lifecycle distinction that must be kept |
 | --- | --- | --- |
-| Create | 分配或取得一个原生视图实例 | 不等于已经加入父视图 |
-| Insert | 挂到父视图的指定位置 | 初始属性、状态和布局也需要到位 |
-| Update | 应用变化的属性、布局、状态或事件连接 | 不应无故重建实例 |
-| Remove | 从父子层级中移除 | 不等于资源已销毁 |
-| Delete | 释放登记或回收实例 | 原生对象可能进入复用池 |
+| Create | Allocates or obtains a native view instance | Not the same as having been added to the parent view |
+| Insert | Attaches it at the given position in the parent view | The initial props, state and layout also need to be in place |
+| Update | Applies changed props, layout, state or event connections | Should not rebuild the instance without reason |
+| Remove | Removes it from the parent–child hierarchy | Not the same as the resources being destroyed |
+| Delete | Releases the registration or recycles the instance | The native object may go into a reuse pool |
 
-红色改为蓝色时，React/Fabric 可以复用身份和未变化的子树，生成属性更新，而不是重新创建整页。[ReactFabric 克隆路径][r-fabric-clone]、[差分入口][r-diff]
+When red changes to blue, React/Fabric can reuse the identity and the unchanged subtree and produce a prop update, instead of recreating the whole page. [ReactFabric clone path][r-fabric-clone], [Diff entry point][r-diff]
 
-这里的 transaction 是有顺序的 UI 操作批次，不是承诺失败时自动回滚的数据库事务。树版本已提交、操作已应用、系统已呈现也属于不同阶段；Bern 不应把三者合并为一个成功状态。
+The transaction here is an ordered batch of UI operations, not a database transaction that promises to roll back automatically on failure. A tree revision having been committed, the operations having been applied and the system having presented them are also different stages; Bern should not merge the three into one success state.
 
-### 视图扁平化
+### View flattening
 
-`ViewShadowNode::initialize` 根据属性设置 `FormsView` 和 `FormsStackingContext`。背景、边框、透明度、事件、可访问性、nativeId、裁剪等条件都会影响是否能折叠；差分过程据此建立真正需要的宿主视图层级。[视图条件][r-view-traits]
+`ViewShadowNode::initialize` sets `FormsView` and `FormsStackingContext` according to the props. Background, border, opacity, events, accessibility, nativeId, clipping and other conditions all affect whether a node can be collapsed; the diffing process uses this to build the host view hierarchy that is actually needed. [View conditions][r-view-traits]
 
-这项优化说明，逻辑组件树可以比原生视图树丰富。但“没有背景就删掉节点”不成立：节点可能承载焦点、输入、测试身份或辅助功能。Bern 的 Feature Contract 和命令入口身份也不能随呈现节点的优化一起消失。
+This optimization shows that the logical component tree can be richer than the native view tree. But "delete the node if it has no background" does not hold: a node may carry focus, input, test identity or accessibility. Bern's Feature Contract and the identity of command entry points must not disappear along with optimizations of presentation nodes either.
 
-## 平台如何接收挂载结果
+## How the platforms receive mount results
 
-### iOS 的 UIKit 挂载
+### UIKit mounting on iOS
 
-共享 `Scheduler` 发出渲染通知，经 `RCTScheduler` 的代理转到 `RCTSurfacePresenter`，由后者调用 `RCTMountingManager::scheduleTransaction`。已经位于主队列时直接处理，否则转到主队列。管理器通过进行中标记避免递归执行挂载事务。[共享调度][r-scheduler]、[iOS 呈现入口][r-ios-presenter]、[主队列挂载][r-ios-mount]
+The shared `Scheduler` sends render notifications, which go through `RCTScheduler`'s delegate to `RCTSurfacePresenter`, which in turn calls `RCTMountingManager::scheduleTransaction`. If it is already on the main queue it processes the transaction directly; otherwise it moves to the main queue. The manager uses an in-progress flag to avoid executing mount transactions recursively. [Shared scheduling][r-scheduler], [iOS presentation entry point][r-ios-presenter], [Main-queue mounting][r-ios-mount]
 
-平台并不是逐条解释 JSX，而是执行已经算出的变更：
+The platform does not interpret JSX statement by statement; it executes mutations that have already been computed:
 
-| 挂载步骤 | iOS 实现 |
+| Mount step | iOS implementation |
 | --- | --- |
-| 取得实例 | Registry 按 ComponentHandle 取复用对象，或交给 Factory 查类并执行 `[viewClass new]` |
-| 初始化并插入 | 应用 props、eventEmitter、state、layout，执行 `finalizeUpdates`，再加入父视图 |
-| 修改已有实例 | 按属性、事件连接、状态、布局的变化分别更新 |
-| 应用位置与尺寸 | 在组件协议实现中设置 UIKit `center`、`bounds` 等属性 |
-| 移除与回收 | 解除父子关系；移除 tag 登记，清理对象后按类型复用或失效 |
+| Obtain an instance | The Registry takes a reusable object by ComponentHandle, or hands off to the Factory, which looks up the class and executes `[viewClass new]` |
+| Initialize and insert | Apply props, eventEmitter, state and layout, run `finalizeUpdates`, then add it to the parent view |
+| Modify an existing instance | Update separately according to changes in props, event connections, state and layout |
+| Apply position and size | Set UIKit properties such as `center` and `bounds` in the component protocol implementation |
+| Remove and recycle | Break the parent–child relationship; remove the tag registration, clean up the object, then reuse or invalidate it by type |
 
-`RCTViewComponentView` 继承 `UIView`，子节点挂载调用 `insertSubview`，布局并非交给 SwiftUI 再求解。Factory、Registry 和组件协议各有职责，适配器因此可以独立扩充新的原生组件。[组件工厂][r-ios-factory]、[组件注册与复用][r-ios-registry]、[UIView 类型][r-ios-view-type]、[UIKit 布局应用][r-ios-layout]
+`RCTViewComponentView` inherits from `UIView`, mounting a child calls `insertSubview`, and layout is not handed to SwiftUI to be solved again. The Factory, the Registry and the component protocol each have their own responsibility, so the adapter can be extended with new native components independently. [Component factory][r-ios-factory], [Component registration and reuse][r-ios-registry], [UIView type][r-ios-view-type], [UIKit layout application][r-ios-layout]
 
-当前 main 在 feature flag 下使用局部 SwiftUI wrapper 实现部分滤镜。这是 UIKit 组件的内部呈现实现，不能据此说 RN 将整页 JS 编译为 SwiftUI，也不能绝对声称 RN 完全不使用 SwiftUI。[滤镜包装][r-ios-filters]
+Current main uses a local SwiftUI wrapper behind a feature flag to implement some filters. This is an internal presentation detail of a UIKit component; it cannot be used to claim that RN compiles whole JS pages into SwiftUI, nor to claim absolutely that RN never uses SwiftUI. [Filter wrapper][r-ios-filters]
 
-两个运行时细节尤其适合 Bern 借鉴：`RCTTextInputComponentView` 用事件计数抵御旧状态覆盖，并用 `_comingFromJS` 区分程序写回；`RCTViewComponentView` 将安全区变化通知延后到布局阶段，避免在挂载和更新属性时同步重入 React。状态版本、来源标识和重入控制必须进入适配器契约。[文本输入状态][r-ios-text-state]、[文本输入回调][r-ios-text-event]、[安全区事件时机][r-ios-safearea]
+Two runtime details are especially worth borrowing for Bern: `RCTTextInputComponentView` uses an event count to keep stale state from overwriting newer state, and uses `_comingFromJS` to distinguish programmatic write-backs; `RCTViewComponentView` defers safe-area change notifications to the layout phase, to avoid synchronously re-entering React while mounting and updating props. State versions, source identifiers and re-entrancy control must be part of the adapter contract. [Text input state][r-ios-text-state], [Text input callback][r-ios-text-event], [Safe-area event timing][r-ios-safearea]
 
-### Android 的 JNI 与 View 挂载
+### JNI and View mounting on Android
 
-Android 的平台 delegate 是 `FabricUIManagerBinding`。常规路径从 MountingCoordinator 拉取事务，`FabricMountingManager::executeMount` 将变更整理为整数和对象缓冲区，经 JNI 交给 Java `FabricUIManager`，再由 MountItemDispatcher 与 `IntBufferBatchMountItem` 分派到每个 surface 的管理器。[Android delegate][r-android-binding]、[C++ 挂载批次][r-android-cpp]、[Java 挂载入口][r-android-ui]、[批次执行][r-android-batch]
+Android's platform delegate is `FabricUIManagerBinding`. The regular path pulls transactions from the MountingCoordinator; `FabricMountingManager::executeMount` packs the mutations into integer and object buffers and passes them through JNI to the Java `FabricUIManager`, after which the MountItemDispatcher and `IntBufferBatchMountItem` dispatch them to the manager of each surface. [Android delegate][r-android-binding], [C++ mount batch][r-android-cpp], [Java mount entry point][r-android-ui], [Batch execution][r-android-batch]
 
-`SurfaceMountingManager` 根据组件名查找 ViewManager，以 tag 索引 ViewState，调用 `createView` 或 `updateProperties`。例如 `ReactViewManager.createViewInstance` 返回 `ReactViewGroup(context)`，该类继承 Android `ViewGroup`。这条路径使用 Android View 系统，不是自动生成 Compose 页面。[Surface 管理][r-android-surface]、[ViewManager][r-android-manager]、[ReactViewManager][r-android-view]、[ViewGroup 类型][r-android-viewgroup]
+`SurfaceMountingManager` looks up the ViewManager by component name, indexes ViewState by tag, and calls `createView` or `updateProperties`. For example, `ReactViewManager.createViewInstance` returns `ReactViewGroup(context)`, a class that inherits from Android's `ViewGroup`. This path uses the Android View system; it does not automatically generate Compose pages. [Surface management][r-android-surface], [ViewManager][r-android-manager], [ReactViewManager][r-android-view], [ViewGroup type][r-android-viewgroup]
 
-布局更新仍有原生工作：普通路径以精确尺寸调用 `measure`，再调用 `view.layout`；声明由父容器自行布局的情况另作处理。属性需要先于布局应用，因为原生控件的测量可能依赖它们。JNI 处也明确存在数组分配与复制，因此不能把这条链称为零拷贝。[Android 布局][r-android-layout]、[JNI 缓冲区传递][r-android-jni]
+Layout updates still involve native work: the ordinary path calls `measure` with exact sizes and then calls `view.layout`; the case where the parent container is declared to lay out its children itself is handled separately. Props need to be applied before layout, because the measurement of native controls may depend on them. Array allocation and copying explicitly happen at the JNI boundary as well, so this chain cannot be called zero-copy. [Android layout][r-android-layout], [JNI buffer passing][r-android-jni]
 
-待处理挂载通常由 UI 帧回调消费；已在 UI 线程的同步路径也可以立即执行。Dispatcher 防止重入，对尚未附着的根暂存操作。当前 main 还有 `enableMountingCoordinatorPullModelAndroid` 分支：启用时由 UI 线程拉取并执行事务，而非提前构造全部批次。该提交的默认值为 false，但宿主能够覆盖；线程安排须按实际配置确认。[Java 调度入口][r-android-ui]、[挂载分派][r-android-dispatch]、[pull model 分支][r-android-pull]、[默认配置][r-android-pull-default]
+Pending mounts are usually consumed by a UI frame callback; a synchronous path that is already on the UI thread can also execute them immediately. The Dispatcher prevents re-entrancy and holds operations for roots that are not attached yet. Current main also has an `enableMountingCoordinatorPullModelAndroid` branch: when it is enabled, the UI thread pulls and executes transactions, instead of all batches being built ahead of time. Its default at this commit is false, but hosts can override it; the threading arrangement has to be confirmed against the actual configuration. [Java scheduling entry point][r-android-ui], [Mount dispatch][r-android-dispatch], [Pull model branch][r-android-pull], [Default configuration][r-android-pull-default]
 
-反向路径可以用一个具体例子理解：可聚焦 ReactViewGroup 的 `OnClickListener` 创建 `ViewGroupClickEvent`，经 Fabric 事件分发、对应 surface 的 EventEmitterWrapper 和 JNI 返回共享 C++ 事件队列。触摸、文本和滚动有自己的入口，不能全部概括为点击监听器。[点击入口][r-android-click]、[JNI 事件封装][r-android-event]
+The reverse path can be understood through a concrete example: a focusable ReactViewGroup's `OnClickListener` creates a `ViewGroupClickEvent`, which goes through Fabric event dispatch, the EventEmitterWrapper of the corresponding surface and JNI back to the shared C++ event queue. Touch, text and scrolling have their own entry points; they cannot all be summed up as click listeners. [Click entry point][r-android-click], [JNI event wrapper][r-android-event]
 
-### 两个平台的共同边界
+### The boundary shared by both platforms
 
-两端复用共享渲染语义，但挂载队列、主线程切换、事件接线和回收方式由平台负责。C++ 中一个方法可同步调用，不表示所有原生 UI 对象可在任意线程访问。
+Both platforms reuse the shared rendering semantics, but mount queues, switching to the main thread, event wiring and recycling are the platform's responsibility. That a C++ method can be called synchronously does not mean every native UI object can be accessed from any thread.
 
-例如 iOS 的 FabricSurface 将根视图附着与 SurfaceHandler 启动分开，并在异步启动前重新检查注册状态；停止 surface 通过空树提交触发卸载。Bern 同样需要处理“排队时还有效，执行时已经关闭”的窗口和组件。[Surface 生命周期][r-ios-surface]、[SurfaceHandler 停止][r-surface-stop]
+For example, iOS's FabricSurface separates attaching the root view from starting the SurfaceHandler, and rechecks the registration state before an asynchronous start; stopping a surface triggers unmounting by committing an empty tree. Bern likewise has to handle windows and components that were "still valid when queued, already closed when executed". [Surface lifecycle][r-ios-surface], [SurfaceHandler stop][r-surface-stop]
 
-## 事件与命令如何返回
+## How events and commands come back
 
-原生触摸、编辑和滚动等输入经平台组件及 EventEmitter 进入 Fabric。共享 `EventDispatcher` 把事件送入 `EventQueue`，由 EventBeat 驱动处理，再经 UIManagerBinding 回到 React 注册的事件处理器。React 最终仍会执行应用提供的 listener。[事件分发][r-event-dispatch]、[事件队列][r-event-queue]、[事件回到 JS][r-event-js]、[listener 执行][r-listener]
+Native input such as touch, editing and scrolling enters Fabric through platform components and the EventEmitter. The shared `EventDispatcher` puts events into the `EventQueue`, whose processing is driven by EventBeat, and they then go back through UIManagerBinding to the event handlers registered by React. In the end React still runs the listeners the app provides. [Event dispatch][r-event-dispatch], [Event queue][r-event-queue], [Events back to JS][r-event-js], [Listener execution][r-listener]
 
-队列并非无条件丢弃中间事件：标记为 unique 的事件只在满足目标、类型和顺序条件时合并；普通事件保留。`EventQueueProcessor` 还负责目标对象在回调期间的保留和释放，即使回调异常也要完成释放。[队列生命周期][r-event-processor]
+The queue does not drop intermediate events unconditionally: events marked unique are coalesced only when target, type and ordering conditions are met; ordinary events are kept. `EventQueueProcessor` is also responsible for retaining and releasing the target objects during callbacks, and has to complete the release even if a callback throws. [Queue lifecycle][r-event-processor]
 
-RN 的 `codegenNativeCommands` 将 `focus`、`blur` 等组件操作包装为 `dispatchCommand(ref, name, args)`。它要求已有视图目标，主要解决“调用原生控件方法”。RN 同时存在任意事件 listener 和 `setNativeProps` 等路径，未强制所有业务操作进入统一命令目录。[原生命令包装][r-command]、[UIManagerBinding 命令及属性接口][r-command-binding]
+RN's `codegenNativeCommands` wraps component operations such as `focus` and `blur` as `dispatchCommand(ref, name, args)`. It requires an existing view target and mainly addresses "calling a method of a native control". RN also has paths such as arbitrary event listeners and `setNativeProps`, and does not force all business operations into a unified command catalog. [Native command wrapper][r-command], [UIManagerBinding command and prop interfaces][r-command-binding]
 
-对 Bern 来说，这需要拆为三种语义：
+For Bern, this has to be split into three semantics:
 
-| 入口内容 | Bern 中的处理方式 | 示例 |
+| What comes in | How Bern handles it | Examples |
 | --- | --- | --- |
-| 用户表达的操作意图 | 已登记的 Engine Command 或 Session Command | 播放、搜索、导航、焦点移动 |
-| 平台已经发生的事实 | 受信任适配器提交类型化 Event | 窗口尺寸改变、播放器已暂停 |
-| 渲染器的内部更新 | UI 绑定和调度机制 | 应用属性快照、布局、绘制、动画采样 |
+| An operation intent expressed by the user | A registered Engine Command or Session Command | Play, search, navigate, move focus |
+| A fact that has already happened on the platform | A trusted adapter submits a typed Event | Window size changed, player paused |
+| The renderer's internal updates | The UI binding and scheduling mechanism | Applying prop snapshots, layout, drawing, animation sampling |
 
-命令化不要求把每个绘制调用变成应用命令，也不能把已经完成的动作改名为“事前命令”。Bern 拥有的编辑草稿等语义操作仍必须经过命令；不能照搬“原生控件先任意修改会话状态，事后只发 onChange”的模式。目标必须提供可拦截适配或由 Bern 托管交互，无法满足契约时报告不支持。可信事实例外限于主设计定义的外部系统变化与适配器状态回报，不能成为自有交互绕过命令的路径。
+Turning things into commands does not require turning every draw call into an app command, nor may an action that has already completed be renamed a "command issued beforehand". Semantic operations that Bern owns, such as edit drafts, must still go through commands; the pattern "the native control first modifies session state however it likes and only emits onChange afterwards" must not be copied. A target must provide an adaptation that can be intercepted or let Bern host the interaction, and report it as unsupported when it cannot meet the contract. The trusted-fact exception is limited to the external system changes and adapter state reports defined by the main design, and must not become a path by which interactions Bern owns bypass commands.
 
-## Codegen 实际生成什么
+## What Codegen actually generates
 
-构建期的 spec 收集器识别 `codegenNativeComponent` 和 `extends TurboModule` 等声明，通过 Flow 或 TypeScript parser 建立 schema。它读取明确的接口描述，不分析任意应用函数来推导完整页面。[spec 收集][r-schema]
+At build time, the spec collector recognizes declarations such as `codegenNativeComponent` and `extends TurboModule`, and builds a schema through the Flow or TypeScript parser. It reads explicit interface descriptions; it does not analyze arbitrary app functions to derive complete pages. [Spec collection][r-schema]
 
-| 描述类型 | 生成的主要内容 | 仍需实现的部分 |
+| Description type | Main generated content | Parts that still have to be implemented |
 | --- | --- | --- |
-| Fabric 组件 | Props、EventEmitters、ComponentDescriptors、ShadowNodes、State、Android ViewManager interface/delegate、iOS helper | 真正的原生组件、测量、系统行为与资源管理 |
-| TurboModule | JNI/Java spec、ObjC++ 或 C++ JSI 接口 | 模块方法和平台服务逻辑 |
-| JS 组件配置与命令 | ViewConfig、受支持命令的分派包装 | React 运行、事件语义和调度 |
+| Fabric component | Props, EventEmitters, ComponentDescriptors, ShadowNodes, State, Android ViewManager interface/delegate, iOS helper | The actual native component, measurement, system behavior and resource management |
+| TurboModule | JNI/Java spec, ObjC++ or C++ JSI interface | Module methods and platform service logic |
+| JS component configuration and commands | ViewConfig, dispatch wrappers for the supported commands | Running React, event semantics and scheduling |
 
-产物清单可直接在 `RNCodegen.js` 的 generator 注册表看到；JS ViewConfig 另有生成器及 Babel 集成。[原生产物生成器][r-codegen]、[JS ViewConfig 生成器][r-viewconfig]
+The list of outputs can be seen directly in the generator registry in `RNCodegen.js`; the JS ViewConfig has a separate generator and Babel integration. [Native output generators][r-codegen], [JS ViewConfig generator][r-viewconfig]
 
-Fabric 负责 UI 渲染，TurboModules 负责原生模块访问，JSI 是可被两者使用的接口基础，三者不能互相替代。主分支中 TurboModule 的 Bridgeless 与非 Bridgeless 安装路径还不同；不存在“所有原生功能必经同一个旧桥接队列”的规则。[TurboModule 绑定][r-turbomodule]
+Fabric handles UI rendering, TurboModules handle native module access, and JSI is the interface foundation both can use; none of the three can stand in for another. On the main branch, the Bridgeless and non-Bridgeless installation paths of TurboModules also differ; there is no rule that "all native functionality has to pass through the same old bridge queue". [TurboModule binding][r-turbomodule]
 
-仓库保留的旧 `MessageQueue` 代码使用 module ID、method ID 和参数数组组织批次。这有助于理解历史文章中的 bridge，但不能拿来替代本文的 Fabric 调用链。反过来，使用 JSI 也不意味着取消了一切数据转换和批处理，Android 的 JNI 挂载批次就是具体例子。[旧队列实现][r-legacy]
+The old `MessageQueue` code kept in the repository organizes batches by module ID, method ID and argument array. This helps in understanding the bridge described in older articles, but it cannot replace the Fabric call chain in this document. Conversely, using JSI does not mean all data conversion and batching are gone; Android's JNI mount batches are a concrete example. [Old queue implementation][r-legacy]
 
-## Bern 应借鉴的架构设计
+## Architectural designs Bern should borrow
 
-### 分开编译期语义与运行时实例
+### Separate compile-time semantics from runtime instances
 
-Bern 的公共 IR 表达组件、能力、主题、命令绑定和布局关系；它不应该混入活跃的 GTK 对象、Swift 引用或 Android View。目标生成器消费 IR，生成平台 UI 源码和客户端；运行时再维护实际窗口、组件实例与订阅。这与 RN 区分 schema、Shadow Node 和 Host View 的经验一致，但不要求 Bern 复制三棵树。
+Bern's common IR expresses components, capabilities, themes, command bindings and layout relationships; it should not mix in live GTK objects, Swift references or Android Views. Target generators consume the IR and generate platform UI source and clients; the runtime then maintains the actual windows, component instances and subscriptions. This matches RN's experience of separating schema, Shadow Node and Host View, but does not require Bern to copy the three trees.
 
-| Bern 层次 | 建议承担的职责 | 避免承担的职责 |
+| Bern layer | Suggested responsibilities | Responsibilities to avoid |
 | --- | --- | --- |
-| 编译期组件与命令 schema | 类型、能力、命令覆盖、主题配方和源码位置 | 当前运行中的平台对象 |
-| Rust 引擎与会话 | 命令执行、查询、状态版本和长期资源身份 | 操作平台控件层级 |
-| UI 绑定运行时 | 展示订阅、更新版本、事件映射和实例作用域 | 重写业务处理器 |
-| 目标生成器与适配器 | 平台代码、UI 线程、原生组件及生命周期 | 重新解析任意 Rust 业务实现 |
+| Compile-time component and command schema | Types, capabilities, command coverage, theme recipes and source locations | Platform objects that are currently running |
+| Rust engine and session | Command execution, queries, state versions and long-lived resource identity | Manipulating platform control hierarchies |
+| UI binding runtime | Presentation subscriptions, update versions, event mapping and instance scope | Rewriting business handlers |
+| Target generators and adapters | Platform code, UI thread, native components and lifecycle | Re-parsing arbitrary Rust business implementations |
 
-组件描述应从同一声明派生类型、事件载荷、命令绑定和适配骨架。生成成功后仍要构建各目标，并验证属性、事件和生命周期；类型生成不能证明原生行为正确。
+A component description should derive types, event payloads, command bindings and adaptation skeletons from the same declaration. After generation succeeds, each target still has to be built and its props, events and lifecycle verified; type generation cannot prove that native behavior is correct.
 
-### 让目标框架拥有适合它的布局与协调
+### Let each target framework own the layout and reconciliation that suit it
 
-React Native 需要共享 C++ Shadow Tree 和 Yoga 来驱动其原生控件系统。Bern 的目标规划包含已有声明式运行时的 SwiftUI，以及 GTK、WinUI 3、Compose、Flutter、Web，职责不能一刀切。
+React Native needs the shared C++ Shadow Tree and Yoga to drive its native control system. Bern's target plan includes SwiftUI, which already has a declarative runtime, as well as GTK, WinUI 3, Compose, Flutter and the Web; one approach to responsibilities cannot fit them all.
 
-- SwiftUI、Compose、Flutter 目标优先生成该框架的声明与状态绑定，由它们协调自己的视图和布局。
-- GTK、Web 等目标可在适配器内采用显式属性更新与 keyed 子节点操作，具体实现保持目标私有。
-- 公共层统一布局语义、输入环境、稳定身份和状态版本；不默认逐帧给每个目标下发绝对坐标。
-- 只有目标明确需要共享布局算法时，才引入相应模块，并定义测量、字体、安全区域及失效规则。
+- SwiftUI, Compose and Flutter targets preferably generate that framework's declarations and state bindings, and let it reconcile its own views and layout.
+- Targets such as GTK and the Web can use explicit property updates and keyed child operations inside the adapter, with the concrete implementation kept private to the target.
+- The common layer unifies layout semantics, input environment, stable identity and state versions; it does not by default send absolute coordinates to every target frame by frame.
+- Only when a target explicitly needs a shared layout algorithm is the corresponding module brought in, with defined rules for measurement, fonts, safe areas and invalidation.
 
-这能避免 Rust 先算一套完整布局、SwiftUI 再算一遍，并且两套协调器同时争夺控件身份。跨平台语义一致也不要求逐像素相同。
+This avoids Rust first computing a complete layout and SwiftUI computing it again, with two reconcilers fighting over control identity at the same time. Consistent semantics across platforms do not require pixel-for-pixel sameness either.
 
-### 明确展示版本与命令顺序
+### Make presentation versions and command order explicit
 
-RN 可以在特定条件下跳过中间树版本，这属于展示优化。Bern 应分别管理命令的执行顺序和展示快照的消费顺序：播放器进度可按订阅策略合并，播放、删除、确认关闭等请求不能因为下一帧到来就被丢弃。
+RN can skip intermediate tree revisions under certain conditions; this is a presentation optimization. Bern should manage the execution order of commands and the consumption order of presentation snapshots separately: player progress can be coalesced according to the subscription policy, while requests such as play, delete and confirm close must not be dropped just because the next frame arrives.
 
-建议在现有 UI 绑定契约中落实以下信息，字段名称仍待原型确认：
+The suggestion is to carry the following information in the existing UI binding contract; the field names are still to be confirmed by the prototype:
 
-| 信息 | 用途 |
+| Information | Purpose |
 | --- | --- |
-| session、window、surface 身份 | 明确更新属于哪个会话与呈现根 |
-| 组件稳定 key 与实例代次 | 防止复用对象接收旧实例的回调 |
-| base revision 与 target revision | 区分增量更新的前置条件与目标版本 |
-| 主题及环境版本 | 防止旧主题或旧尺寸计算覆盖新状态 |
-| 来源及请求关联 | 区分命令结果、外部事实和展示写回，避免回环 |
+| session, window and surface identity | Make clear which session and presentation root an update belongs to |
+| Stable component key and instance generation | Keep reused objects from receiving callbacks meant for old instances |
+| base revision and target revision | Distinguish the precondition of an incremental update from its target version |
+| Theme and environment version | Keep computations based on an old theme or old size from overwriting new state |
+| Source and request correlation | Distinguish command results, external facts and presentation write-backs, avoiding loops |
 
-完整快照可以按策略选择较新版本；增量补丁必须匹配接收端的基准版本。出现缺口时请求重同步，不能只因序号更大就盲目应用。已派发命令按命令契约独立处理，组件卸载仅解除其展示订阅。
+A full snapshot can pick the newer version according to policy; an incremental patch must match the receiver's base version. When a gap appears, request a resync; never apply a patch blindly just because its sequence number is larger. Commands that have been dispatched are handled independently according to the command contract; unmounting a component only removes its presentation subscriptions.
 
-渲染求值、布局和可重试的提交阶段应没有应用副作用。例如 `Video(source: …)` 的源变化依据稳定源身份与版本生成一次加载请求，不能因布局重试再次加载；呈现重挂载也不应创建第二个播放器。
+Render evaluation, layout and retryable commit stages should have no app side effects. For example, a source change of `Video(source: …)` produces one load request based on the stable source identity and version, and must not load again because of a layout retry; remounting the presentation should not create a second player either.
 
-### 原生窗口与呈现根分别管理
+### Manage native windows and presentation roots separately
 
-RN 的 Surface 是渲染根与调度范围，不是通用操作系统窗口管理器。Bern 需要保留 WindowSet、逻辑窗口、呈现根和平台窗口之间的映射，不能用一个 surfaceId 代替全部所有权。
+RN's Surface is a rendering root and scheduling scope, not a general operating system window manager. Bern needs to keep the mapping among WindowSet, logical windows, presentation roots and platform windows, and cannot let one surfaceId stand in for all of the ownership.
 
-首版在创建时选择原生或虚拟呈现，能力不足时按契约回退，不承诺已打开窗口任意热迁移。两种呈现使用同一逻辑身份规则；虚拟窗口因尺寸变化切换布局时，保留窗口、导航、草稿和 `player_id`。未来若增加原生与虚拟之间的热迁移，也必须单独验证这些状态的保留。
+The first version chooses native or virtual presentation at creation time and falls back according to the contract when capabilities are insufficient; it does not promise arbitrary hot migration of windows that are already open. Both presentations follow the same logical identity rules; when a virtual window switches layout because of a size change, the window, navigation, drafts and `player_id` are kept. If hot migration between native and virtual is added in the future, the preservation of these states must also be verified separately.
 
-释放顺序要覆盖停止订阅、失效旧代次、解除原生事件、分离媒体表面和回收视图；应用级播放器是否结束仍由其所有者决定。
+The release order has to cover stopping subscriptions, invalidating old generations, detaching native events, detaching media surfaces and recycling views; whether an app-level player ends is still decided by its owner.
 
-### 把优化放在可验证的边界后
+### Put optimizations behind verifiable boundaries
 
-先验证创建、更新、移除与释放的语义，再加入视图复用、扁平化、预分配和事件合并。复用必须重置属性、事件、焦点、辅助功能和媒体附着，不能仅替换显示文字。
+First verify the semantics of creation, update, removal and release, then add view reuse, flattening, preallocation and event coalescing. Reuse must reset props, events, focus, accessibility and media attachment, not just replace the displayed text.
 
-图标按钮即使没有可见容器，也仍有命中区域、可访问名称和焦点反馈；不能把透明视图视作没有语义。自动主题同样需要 Bern 的语义角色、配色算法与版本化快照；RN 的原生视图挂载机制本身没有替 Bern 提供这项保证。
+An icon button still has a hit area, an accessible name and focus feedback even without a visible container; a transparent view must not be treated as having no semantics. Automatic theming likewise needs Bern's semantic roles, color algorithm and versioned snapshots; RN's native view mounting mechanism does not by itself provide this guarantee for Bern.
 
-## 原型验证顺序
+## Prototype verification order
 
-以下为建议加入后续实施的验证项，本轮没有执行这些测试。
+The following are verification items suggested for later implementation; these tests were not run in this round.
 
-1. **类型契约。** 同一组件声明生成展示值、事件和命令绑定；未知属性、缺少命令或不兼容 schema 明确失败，并定位回 Rust 声明。
-2. **最小 UI 闭环。** 先在 Web 完成一个属性更新和一个按钮命令，再在一个默认原生目标验证同一引擎；记录命令执行与 UI 更新的关联。
-3. **身份与增量更新。** 列表重排保留编辑与焦点；旧实例回调、版本乱序和缺失补丁被正确处理。
-4. **输入与回环。** 覆盖输入法组合、连续输入、命令写回、原生事实通知和组件卸载后的延迟事件；一次操作不会重复执行。
-5. **窗口与视频资源。** 分别验证原生和虚拟呈现、创建时能力不足的回退、虚拟布局切换和视频表面重挂载；不得重复创建逻辑实例或播放器。
-6. **优化前后等价。** 用简化的宿主模型验证增量应用结果等价于直接构造目标状态，再逐项加入扁平化或复用。
+1. **Type contract.** The same component declaration generates presentation values, events and command bindings; unknown props, missing commands or incompatible schemas fail explicitly and point back to the Rust declaration.
+2. **Minimal UI loop.** First complete one prop update and one button command on the Web, then verify the same engine on one default native target; record the correlation between command execution and UI updates.
+3. **Identity and incremental updates.** Reordering a list keeps edits and focus; callbacks from old instances, out-of-order versions and missing patches are handled correctly.
+4. **Input and loops.** Cover input method composition, continuous input, command write-backs, native fact notifications and delayed events after a component unmounts; one operation is never executed twice.
+5. **Windows and video resources.** Verify native and virtual presentation separately, fallback when capabilities are insufficient at creation time, virtual layout switching and remounting of video surfaces; logical instances or players must not be created twice.
+6. **Equivalence before and after optimization.** Use a simplified host model to verify that applying increments gives a result equivalent to constructing the target state directly, then add flattening or reuse one item at a time.
 
-RN 的 `ShadowTreeLifeCycleTest` 已展示一种值得采用的验证方式：生成并改变树，将差分应用到 StubViewTree，再与直接重建的宿主树比较。Bern 可借鉴这种测试判据；不必预先复制其完整差分器。[树生命周期测试][r-lifecycle-test]
+RN's `ShadowTreeLifeCycleTest` already shows a verification approach worth adopting: generate and mutate trees, apply the diff to a StubViewTree, then compare it with a host tree rebuilt directly. Bern can borrow this test criterion; it does not need to copy RN's complete differ up front. [Tree lifecycle test][r-lifecycle-test]
 
-原型还应记录状态求值、跨语言传递、UI 调度、平台应用和布局的耗时，以及原生视图与订阅数量。性能结论须来自 Bern 目标的实际测量，不能从 JSI、Rust 或“原生”名称推断。
+The prototype should also record the time spent in state evaluation, cross-language transfer, UI scheduling, platform application and layout, as well as the number of native views and subscriptions. Performance conclusions must come from actual measurements on Bern targets; they cannot be inferred from JSI, from Rust or from the word "native".
 
-## 源码导航
+## Source navigation
 
-下列引用均指向固定提交。长文件使用具体入口行号；它们是阅读入口，不表示函数只有该行内容。
+All references below point to the pinned commit. Long files use specific entry line numbers; these are reading entry points and do not mean the function consists only of that line.
 
-| 阅读问题 | 关键入口 |
+| Reading question | Key entry points |
 | --- | --- |
-| JS 如何进入宿主组件 | [View.js][r-view]、[ViewNativeComponent.js][r-view-native] |
-| React 何时创建与更新节点 | [ReactFabric 创建][r-fabric-create]、[ReactFabric 克隆][r-fabric-clone] |
-| JSI 如何连接共享核心 | [UIManagerBinding.cpp][r-jsi]、[UIManager.cpp][r-uimanager] |
-| 布局、提交与差分 | [ShadowTree.cpp][r-shadow]、[YogaLayoutableShadowNode.cpp][r-yoga]、[Differentiator.cpp][r-diff] |
-| 如何管理待挂载版本 | [MountingCoordinator.cpp][r-coordinator]、[Scheduler.cpp][r-scheduler] |
-| iOS 怎样创建真实视图 | [RCTMountingManager.mm][r-ios-mount]、[RCTComponentViewFactory.mm][r-ios-factory] |
-| Android 怎样跨 JNI 挂载 | [FabricMountingManager.cpp][r-android-cpp]、[SurfaceMountingManager.kt][r-android-surface] |
-| 事件如何回到 React | [EventQueue.cpp][r-event-queue]、[UIManagerBinding.cpp 事件入口][r-event-js] |
-| 如何避免编辑写回回环 | [RCTTextInputComponentView.mm][r-ios-text-state] |
-| Codegen 到底生成什么 | [combine-js-to-schema.js][r-schema]、[RNCodegen.js][r-codegen] |
-| RN 命令接口的范围 | [codegenNativeCommands.js][r-command]、[UIManagerBinding 命令入口][r-command-binding] |
-| 如何验证差分与直接构造等价 | [ShadowTreeLifeCycleTest.cpp][r-lifecycle-test] |
+| How JS reaches host components | [View.js][r-view], [ViewNativeComponent.js][r-view-native] |
+| When React creates and updates nodes | [ReactFabric create][r-fabric-create], [ReactFabric clone][r-fabric-clone] |
+| How JSI connects to the shared core | [UIManagerBinding.cpp][r-jsi], [UIManager.cpp][r-uimanager] |
+| Layout, commit and diffing | [ShadowTree.cpp][r-shadow], [YogaLayoutableShadowNode.cpp][r-yoga], [Differentiator.cpp][r-diff] |
+| How revisions waiting to be mounted are managed | [MountingCoordinator.cpp][r-coordinator], [Scheduler.cpp][r-scheduler] |
+| How iOS creates real views | [RCTMountingManager.mm][r-ios-mount], [RCTComponentViewFactory.mm][r-ios-factory] |
+| How Android mounts across JNI | [FabricMountingManager.cpp][r-android-cpp], [SurfaceMountingManager.kt][r-android-surface] |
+| How events get back to React | [EventQueue.cpp][r-event-queue], [UIManagerBinding.cpp event entry point][r-event-js] |
+| How edit write-back loops are avoided | [RCTTextInputComponentView.mm][r-ios-text-state] |
+| What Codegen actually generates | [combine-js-to-schema.js][r-schema], [RNCodegen.js][r-codegen] |
+| Scope of RN's command interface | [codegenNativeCommands.js][r-command], [UIManagerBinding command entry point][r-command-binding] |
+| How to verify that diffing is equivalent to direct construction | [ShadowTreeLifeCycleTest.cpp][r-lifecycle-test] |
 
 [r-view]: https://github.com/react/react-native/blob/1449daad5e133c80fd643caccf9633201cb4c4f9/packages/react-native/Libraries/Components/View/View.js#L135
 [r-view-native]: https://github.com/react/react-native/blob/1449daad5e133c80fd643caccf9633201cb4c4f9/packages/react-native/Libraries/Components/View/ViewNativeComponent.js#L18

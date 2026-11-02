@@ -1,218 +1,220 @@
-# Android、折叠屏与 Android TV 自适应适配
+**English** · [简体中文](../zh-CN/Adaptation/Android.md)
 
-- 核查日期：2026-10-09。
-- 文档性质：Bern 架构准备与后端验收依据；尚未实现的接口、布局策略与测试均为设计要求。
-- 范围：Android 手机、平板、折叠屏、可调整窗口与外接输入，以及 Android TV / Google TV。
-- 关联：[框架设计](../Design.md)。Android 默认前端技术沿用 Jetpack Compose；媒体后端单独选择。
-- 实现状态：`compose + android` 第一版已实现并在手机上验证（媒体后端为 Media3），见 [Android Compose 实现记录](../Implementation/Android-Compose.md)。平板、折叠屏、窗口化与 Android TV 的规则尚未实现或验证，本文这些部分仍是设计要求。
-- 证据边界：下文“官方依据”描述来源事实；“Bern 决策”是框架对这些事实的映射，不冒充 Google 规范。
+# Android, foldable and Android TV adaptive UI
 
-## 1. 自适应的输入是当前窗口
+- Checked on: 2026-10-09.
+- Nature of the document: a basis for Bern's architecture preparation and backend acceptance; interfaces, layout strategies and tests that are not yet implemented are all design requirements.
+- Scope: Android phones, tablets, foldables, resizable windows and external input, and Android TV / Google TV.
+- Related: [framework design](../Design.md). Jetpack Compose remains the default frontend technology on Android; the media backend is chosen separately.
+- Implementation status: the first version of `compose + android` is implemented and verified on a phone (the media backend is Media3); see the [Android Compose implementation notes](../Implementation/Android-Compose.md). The rules for tablets, foldables, windowing and Android TV are not yet implemented or verified, and those parts of this document are still design requirements.
+- Evidence boundary: "Official basis" below describes facts from the sources; "Bern decision" is the framework's mapping of those facts and does not pose as Google's guidelines.
 
-**官方依据。** Android 将当前应用可用窗口划分为尺寸类别，并分别观察宽与高；类别会随旋转、分屏和折叠改变。不能用 `isTablet`、整块物理屏幕或设备型号代替。[窗口尺寸类别](https://developer.android.com/develop/adaptive-apps/guides/use-window-size-classes)
+## 1. The input to adaptation is the current window
 
-| 维度 | 当前官方类别 | 边界 |
+**Official basis.** Android divides the window currently available to the app into size classes, and looks at width and height separately; the classes change with rotation, split screen and folding. `isTablet`, the whole physical screen or the device model cannot be used in their place. [Window size classes](https://developer.android.com/develop/adaptive-apps/guides/use-window-size-classes)
+
+| Dimension | Current official class | Bounds |
 | --- | --- | --- |
-| 宽 | Compact | `< 600 dp` |
-| 宽 | Medium | `600 ≤ width < 840 dp` |
-| 宽 | Expanded | `840 ≤ width < 1200 dp` |
-| 宽 | Large | `1200 ≤ width < 1600 dp` |
-| 宽 | Extra-large | `width ≥ 1600 dp` |
-| 高 | Compact | `< 480 dp` |
-| 高 | Medium | `480 ≤ height < 900 dp` |
-| 高 | Expanded | `height ≥ 900 dp` |
+| Width | Compact | `< 600 dp` |
+| Width | Medium | `600 ≤ width < 840 dp` |
+| Width | Expanded | `840 ≤ width < 1200 dp` |
+| Width | Large | `1200 ≤ width < 1600 dp` |
+| Width | Extra-large | `width ≥ 1600 dp` |
+| Height | Compact | `< 480 dp` |
+| Height | Medium | `480 ≤ height < 900 dp` |
+| Height | Expanded | `height ≥ 900 dp` |
 
-表中数值来自上述官方页面，不能把旧资料中的“≥ 840 dp 全部属于 Expanded”继续作为当前完整分类。宽度足够但高度很低时，仍需评估多栏是否可用。
+The values in the table come from the official page above; the "≥ 840 dp is all Expanded" of older material can no longer be used as the current complete classification. When the width is sufficient but the height is very low, whether multiple columns are usable still has to be evaluated.
 
-**Bern 决策。** Android 适配器上报窗口逻辑尺寸、密度、字体缩放、系统遮挡和姿态；公共布局规则消费这些能力与尺寸。上述断点属于 Android 策略，不成为所有平台的硬编码阈值。
+**Bern decision.** The Android adapter reports the window's logical size, density, font scale, system occlusions and posture; the shared layout rules consume these capabilities and sizes. The breakpoints above belong to the Android strategy and do not become hard-coded thresholds for all platforms.
 
-默认策略先选布局关系，再计算列宽和留白。增大屏幕应增加信息、并置关联内容或改善阅读宽度，不能无限拉伸同一个手机表单。
+The default strategy first chooses the layout relationship, then computes column widths and margins. A larger screen should add information, place related content side by side or improve the reading width, not stretch the same phone form indefinitely.
 
-Android 当前文档分别出现 `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)` 与较新的 `currentWindowAdaptiveInfoV2()`。后端实现时需锁定实际依赖和稳定性，不能把网站上的最新示例名直接承诺为 Bern 的最低库版本。[尺寸 API](https://developer.android.com/develop/adaptive-apps/guides/use-window-size-classes)、[姿态 API](https://developer.android.com/develop/adaptive-apps/guides/foldables/make-your-app-fold-aware)
+The current Android documentation shows both `currentWindowAdaptiveInfo(supportLargeAndXLargeWidth = true)` and the newer `currentWindowAdaptiveInfoV2()`. The backend implementation has to pin the actual dependency and its stability, and cannot promise the latest example name on the website directly as Bern's minimum library version. [Size API](https://developer.android.com/develop/adaptive-apps/guides/use-window-size-classes), [Posture API](https://developer.android.com/develop/adaptive-apps/guides/foldables/make-your-app-fold-aware)
 
-## 2. 布局关系、导航与内容连续性
+## 2. Layout relationships, navigation and content continuity
 
-**官方依据。** 官方典型布局包括列表—详情、内容网格和主内容—辅助面板。列表—详情在足够宽时并置；缩小时保留用户当前查看的详情，返回后再显示列表。[Canonical layouts](https://developer.android.com/develop/adaptive-apps/guides/canonical-layouts)
+**Official basis.** The official canonical layouts include list–detail, content grid, and main content–supporting pane. List–detail places the two side by side when there is enough width; when the window shrinks, it keeps the detail the user is currently viewing and shows the list again after back. [Canonical layouts](https://developer.android.com/develop/adaptive-apps/guides/canonical-layouts)
 
-**Bern 决策。** 为这些关系提供语义化适配，而不要求业务分别写“手机页面”和“平板页面”：
+**Bern decision.** Provide semantic adaptation for these relationships, without requiring the business code to write a "phone page" and a "tablet page" separately:
 
-| 内容关系 | 狭窄窗口 | 宽窗口 | 必须保留 |
+| Content relationship | Narrow window | Wide window | Must be kept |
 | --- | --- | --- | --- |
-| 媒体列表—详情 | 当前页与返回栈 | 列表和详情并置 | 选中 ID、列表锚点、详情路由 |
-| 视频—播放列表 | 视频优先，列表按需打开 | 主播放器加辅助面板 | 同一 `player_id`、当前集、播放位置 |
-| 海报内容流 | 可读的少量列 | 根据最小卡片宽度增加列数 | 稳定项目 key、筛选与滚动锚点 |
-| 设置与表单 | 有界阅读宽度、自然滚动 | 分类与表单并置 | 编辑草稿、验证结果、输入焦点 |
+| Media list–detail | Current page and back stack | List and detail side by side | Selected ID, list anchor, detail route |
+| Video–playlist | Video first, list opened on demand | Main player plus supporting pane | The same `player_id`, current episode, playback position |
+| Poster content feed | A few readable columns | More columns according to the minimum card width | Stable item keys, filters and scroll anchor |
+| Settings and forms | Bounded reading width, natural scrolling | Categories and form side by side | Edit drafts, validation results, input focus |
 
-布局重排不能触发“重新搜索”“重新加载当前影片”等业务命令。系统尺寸变化是环境事实，产生新的布局；用户选择内容才执行对应业务命令。
+A relayout must not trigger business commands such as "search again" or "reload the current movie". A change in system size is an environment fact and produces a new layout; only the user selecting content runs the corresponding business command.
 
-窄屏导航入口与宽屏导航入口可以改变位置或表现，但必须引用同一命令与 Feature。底部导航、导航轨、侧栏的选择属于目标策略；不能把外观切换误当作应用路由变化。
+The navigation entry points of narrow and wide screens may change position or presentation, but must refer to the same command and Feature. The choice among bottom navigation, navigation rail and sidebar belongs to the target strategy; a change of appearance must not be mistaken for a change of app route.
 
-## 3. 折叠屏、双屏与铰链
+## 3. Foldables, dual screens and hinges
 
-**官方依据。** `FoldingFeature` 提供边界、方向、折叠状态、遮挡类型及是否分隔窗口；半开且水平的折痕对应 tabletop，半开且垂直对应 book。该接口不提供精确铰链角度。[Make your app fold aware](https://developer.android.com/develop/adaptive-apps/guides/foldables/make-your-app-fold-aware)
+**Official basis.** `FoldingFeature` provides the bounds, orientation, fold state, occlusion type and whether it separates the window; a half-open horizontal fold corresponds to tabletop, and a half-open vertical fold to book. The interface does not provide the exact hinge angle. [Make your app fold aware](https://developer.android.com/develop/adaptive-apps/guides/foldables/make-your-app-fold-aware)
 
-**Bern 决策。** 环境协议记录可分隔区域和遮挡几何，不记录某个品牌或“折叠手机”的布尔值：
+**Bern decision.** The environment protocol records separating regions and occlusion geometry, not a boolean for a brand or for "foldable phone":
 
-- 使用窗口坐标系转换铰链区域；原生像素先转换为目标布局坐标，不直接当作 `dp`。
-- `occlusionType = FULL` 的区域不能承载正文、按钮、字幕或拖动把手。
-- `isSeparating` 为真时优先把自然分界放在区域之间；不能只看遮挡宽度是否为零。
-- 折叠信息缺失时采用当前尺寸的普通布局；不能据此声称设备没有铰链。
-- 支持多个 display feature 的输入结构，布局不依赖“永远只有第一条折痕”。
+- Convert the hinge region using the window coordinate system; native pixels are first converted to the target layout coordinates and are not used directly as `dp`.
+- A region with `occlusionType = FULL` cannot carry body text, buttons, subtitles or drag handles.
+- When `isSeparating` is true, prefer placing the natural divide between the regions; do not look only at whether the occlusion width is zero.
+- When fold information is missing, use the ordinary layout for the current size; do not claim from this that the device has no hinge.
+- The input structure supports multiple display features; layouts do not depend on "there is always only the first fold".
 
-| 姿态 | Bern 的初始适配策略 |
+| Posture | Bern's initial adaptation strategy |
 | --- | --- |
-| 窄外屏 / 折叠后 | 单栏导航；保持当前详情、草稿和播放器身份 |
-| 平展大屏 | 按窗口与分隔区域选择一栏或多栏 |
-| Tabletop | 上方显示视频，下方放命令化播放控制与辅助内容 |
-| Book / 被铰链分开的双屏 | 将列表—详情等关系分别放入两侧可用区域 |
+| Narrow outer screen / folded | Single-column navigation; keep the current detail, drafts and player identity |
+| Flat large screen | Choose one column or several according to the window and the separating regions |
+| Tabletop | Video on the upper part; command-based playback controls and supporting content on the lower part |
+| Book / dual screens separated by a hinge | Place relationships such as list–detail in the usable regions on the two sides |
 
-同样的视觉“平展”不代表同样的遮挡：双屏铰链在平展时仍可能形成分隔。用户控件应远离不便触达的折痕边缘。[折叠与双屏说明](https://developer.android.com/develop/adaptive-apps/guides/foldables/make-your-app-fold-aware)
+The same visual "flat" does not mean the same occlusion: a dual-screen hinge may still form a separation when flat. User controls should stay away from fold edges that are hard to reach. [Foldables and dual screens](https://developer.android.com/develop/adaptive-apps/guides/foldables/make-your-app-fold-aware)
 
-上表是 Bern 初始策略；应用可以声明主要内容和辅助内容角色。折叠展开不能创建第二个播放器，也不能把当前进度恢复成页面初始值。
+The table above is Bern's initial strategy; apps can declare primary and supporting content roles. Folding or unfolding cannot create a second player, nor reset the current progress to the page's initial value.
 
-## 4. 系统版本与多窗口边界
+## 4. System versions and multi-window boundaries
 
-| 官方行为 | Bern 适配要求 | 官方来源 |
+| Official behavior | Bern adaptation requirement | Official source |
 | --- | --- | --- |
-| Android 16、target API 36，在最小显示宽度 `sw ≥ 600 dp` 的适用环境忽略方向、比例和不可缩放限制；存在官方列出的例外及临时退出机制 | 默认可调整尺寸；不依赖锁定方向维持 UI 正确性 | [方向、比例和可缩放性](https://developer.android.com/develop/adaptive-apps/guides/app-orientation-aspect-ratio-resizability) |
-| Android 17、target API 37 移除上述开发者临时退出机制 | 新目标不能把退出开关当长期适配方案；构建矩阵记录运行系统和 target SDK | [Android 17 行为变更](https://developer.android.com/about/versions/17/behavior-changes-17) |
-| 系统提供分屏、画中画和桌面窗口等不同模式，具体支持取决于环境 | 分别声明能力，不用一个 `multi_window = true` 概括全部 | [多窗口模式](https://developer.android.com/develop/adaptive-apps/guides/support-multi-window-mode) |
+| Android 16 with target API 36 ignores orientation, aspect ratio and resizability restrictions in applicable environments whose smallest display width is `sw ≥ 600 dp`; there are officially listed exceptions and a temporary opt-out mechanism | Resizable by default; do not rely on a locked orientation to keep the UI correct | [Orientation, aspect ratio and resizability](https://developer.android.com/develop/adaptive-apps/guides/app-orientation-aspect-ratio-resizability) |
+| Android 17 with target API 37 removes the temporary developer opt-out above | New targets cannot treat the opt-out switch as a long-term adaptation; the build matrix records the running system and the target SDK | [Android 17 behavior changes](https://developer.android.com/about/versions/17/behavior-changes-17) |
+| The system provides different modes such as split screen, picture-in-picture and desktop windowing, and actual support depends on the environment | Declare the capabilities separately, rather than summing them all up with one `multi_window = true` | [Multi-window mode](https://developer.android.com/develop/adaptive-apps/guides/support-multi-window-mode) |
 
-这里的 `sw` 系统行为条件与第 1 节“当前应用窗口宽度”不是同一个量。小窗口可以运行在大显示器上；布局仍以自己的窗口空间为准。
+The `sw` condition of the system behavior here is not the same quantity as the "current app window width" in Section 1. A small window can run on a large display; the layout still goes by its own window space.
 
-**Bern 决策。** `Window(presentation: auto)` 只有在宿主确实能创建所需独立窗口、并维持 Bern 窗口契约时才映射原生窗口。否则在应用内提供虚拟窗口；窄屏使用活动窗口加切换器，不模拟难以操作的小型桌面浮窗。
+**Bern decision.** `Window(presentation: auto)` maps to a native window only when the host can actually create the required independent window and keep Bern's window contract. Otherwise virtual windows are provided inside the app; narrow screens use an active window plus a switcher, and do not simulate small desktop floating windows that are hard to operate.
 
-系统分屏支持不等于任意应用都能随时创建第二个自由浮动窗口。跨窗口复用同一引擎和所属 UI 会话；每个窗口保留独立的窗口作用域、返回栈、焦点和草稿。原生窗口已发生的尺寸与生命周期变化按事实回报，不循环执行同名命令。
+System split-screen support does not mean that any app can create a second free-floating window at any time. Across windows, the same engine and the owning UI session are reused; each window keeps its own window scope, back stack, focus and drafts. Size and lifecycle changes that have already happened to native windows are reported as facts, without looping back into running commands of the same name.
 
-官方说明相邻 Activity 启动是尽力请求而非创建位置保证；多实例也不同于同一窗口的多面板布局。Bern 必须检查实际创建结果后再报告窗口已打开。[多窗口与多实例](https://developer.android.com/develop/adaptive-apps/guides/support-multi-window-mode)
+The official documentation says that launching an adjacent Activity is a best-effort request rather than a guarantee of where it is created; multiple instances are also different from a multi-pane layout in one window. Bern must check the actual result of the creation before reporting that the window is open. [Multi-window and multi-instance](https://developer.android.com/develop/adaptive-apps/guides/support-multi-window-mode)
 
-## 5. 系统边缘、键盘与返回
+## 5. System edges, keyboard and back
 
-**官方依据。** Android 15 及以上、应用 target SDK 35 后强制 edge-to-edge；适配器需处理状态栏、导航栏、桌面标题栏、显示缺口和 IME 等实际 insets。`safeDrawing`、`safeGestures`、`safeContent` 保护范围不同。[Window insets](https://developer.android.com/develop/ui/compose/system/insets)
+**Official basis.** On Android 15 and later, once the app targets SDK 35, edge-to-edge is enforced; the adapter has to handle the actual insets such as the status bar, navigation bar, desktop caption bar, display cutout and IME. `safeDrawing`, `safeGestures` and `safeContent` protect different ranges. [Window insets](https://developer.android.com/develop/ui/compose/system/insets)
 
-**Bern 决策。** 背景和视频可铺满窗口，正文、可操作入口与字幕遵守相应安全区域。系统手势区与纯绘制遮挡分开保存；不能统一给整个 UI 增加固定顶部或底部空白。
+**Bern decision.** Backgrounds and video may fill the window; body text, actionable entry points and subtitles respect the corresponding safe areas. System gesture regions and pure drawing occlusions are kept separately; a fixed top or bottom margin must not be added uniformly to the whole UI.
 
-IME 出现时优先让当前编辑位置和提交入口可见；防止父子容器重复消费同一 inset。虚拟窗口内部仍继承宿主的系统约束。文本组合、候选选择和提交分别建模，不能把中文输入过程中每次组合更新当成一次业务搜索。
+When the IME appears, prefer keeping the current editing position and the submit entry point visible; prevent parent and child containers from consuming the same inset twice. Inside a virtual window, the host's system constraints are still inherited. Text composition, candidate selection and submission are modeled separately; each composition update during Chinese input must not be treated as a business search.
 
-官方预测返回允许用户预览返回目标，并通过系统返回接口接入应用导航。[Predictive back](https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture)
+Official predictive back lets the user preview the back destination, and connects to app navigation through the system back interface. [Predictive back](https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture)
 
-**Bern 决策。** 返回手势的采样只更新交互预览，完成后执行一次类型化返回命令；取消时恢复预览，不改变持久路由。模态、输入法、窗口与应用返回层次由宿主协调，不同时弹出两层。
+**Bern decision.** Samples of the back gesture only update the interactive preview, and on completion one typed back command is run; on cancel the preview is restored and the persistent route does not change. The back hierarchy of modals, the input method, windows and the app is coordinated by the host, and two levels are never popped at once.
 
-## 6. 键盘、鼠标、触控与无障碍
+## 6. Keyboard, mouse, touch and accessibility
 
-**官方依据。** 大屏指南要求考虑键盘 Tab/方向键导航、常用快捷键、鼠标右键与滚轮。复杂滚动集合需要明确焦点分组，不能只依赖默认空间推断。[Input compatibility](https://developer.android.com/develop/ui/compose/touch-input/input-compatibility-on-large-screens)
+**Official basis.** The large-screen guidelines call for keyboard Tab/arrow-key navigation, common keyboard shortcuts, the right mouse button and the scroll wheel. Complex scrolling collections need explicit focus groups and cannot rely only on the default spatial inference. [Input compatibility](https://developer.android.com/develop/ui/compose/touch-input/input-compatibility-on-large-screens)
 
-**Bern 决策。** 输入方式可以运行时并存与切换；不能检测到触屏就隐藏全部键盘能力：
+**Bern decision.** Input methods can coexist and switch at runtime; detecting a touch screen must not hide all keyboard capabilities:
 
-- 点击、Enter、遥控确认键和无障碍激活共用同一动作命令。
-- Tab 顺序、方向焦点和读屏顺序是不同关系；各自检查可达性。
-- 列表虚拟化和重排通过项目 ID 恢复焦点，不能恢复到已被回收的原生对象。
-- 滚轮、触控滚动与方向跳转共享滚动状态；连续输入可合并，最终语义可观察。
-- 保存、撤销、复制等快捷键采用平台约定；TextField 正在编辑时优先保留文本系统语义。
-- 右键菜单、长按和无障碍自定义动作都需保留功能入口；不能提供只能悬停后发现的必要功能。
+- Tap, Enter, the remote's confirm button and accessibility activation share the same action command.
+- Tab order, directional focus and screen reader order are different relationships; reachability is checked for each.
+- List virtualization and reordering restore focus by item ID, never to a native object that has already been recycled.
+- Scroll wheel, touch scrolling and directional jumps share the scroll state; continuous input may be merged, and the final semantics are observable.
+- Keyboard shortcuts such as save, undo and copy follow platform conventions; while a TextField is being edited, the text system's semantics take priority.
+- Right-click menus, long press and custom accessibility actions all have to keep the feature's entry point; necessary features must not be discoverable only by hovering.
 
-**官方依据。** Android Compose 的无障碍默认建议可交互触控区域至少 `48 × 48 dp`，并要求为不能从文本理解的图片或图标提供语义描述。[Accessibility API defaults](https://developer.android.com/develop/ui/compose/accessibility/api-defaults)
+**Official basis.** Android Compose's accessibility defaults recommend interactive touch targets of at least `48 × 48 dp`, and require semantic descriptions for images or icons that cannot be understood from text. [Accessibility API defaults](https://developer.android.com/develop/ui/compose/accessibility/api-defaults)
 
-**Bern 决策。** 最小热区与图形尺寸分离。Compose 目标使用 Material 标准的图标按钮样式，按平台规则提供触达反馈；透明热区保证触达，焦点反馈必须清晰。
+**Bern decision.** The minimum hit area is separate from the graphic size. The Compose target uses Material's standard icon button style and provides touch feedback by platform rules; a transparent hit area ensures reachability, and focus feedback must be clear.
 
-控件输出名称、角色、值、选中/禁用状态与动作；装饰性图片不重复朗读。适配器消费字体缩放和语言变化，文字允许换行与自然增高；不能把字体缩小回默认大小来挤入固定高度。
+Controls output name, role, value, selected/disabled state and actions; decorative images are not announced redundantly. The adapter consumes font scaling and language changes, and text may wrap and grow naturally in height; text must not be shrunk back to the default size to squeeze into a fixed height.
 
-## 7. 深浅色与平台主题
+## 7. Light and dark mode and platform themes
 
-**官方依据。** Material 3 使用语义颜色角色；动态取色在 Android 12 及以上可用，不可用时回落到自定义深浅色方案。[Material 3 in Compose](https://developer.android.com/develop/ui/compose/designsystems/material3)
+**Official basis.** Material 3 uses semantic color roles; dynamic color is available on Android 12 and later, and when it is unavailable, a custom light and dark scheme is the fallback. [Material 3 in Compose](https://developer.android.com/develop/ui/compose/designsystems/material3)
 
-**Bern 决策。** Compose 具备完整的深浅色体系，按“原生优先”使用 Material 3 配色：可接入动态取色，不可用时使用由品牌色或默认种子生成的 Material 深浅色方案。Bern 主题算法只用于 Bern 自行绘制的部分；应用作者不需逐控件编写深色分支。
+**Bern decision.** Compose has a complete light and dark system, so following "native first" it uses Material 3 colors: dynamic color can be used, and when it is unavailable, a Material light and dark scheme generated from the brand color or a default seed is used. Bern's theme algorithm is used only for the parts Bern draws itself; app authors do not need to write a dark branch for each control.
 
-系统栏图标、弹层、选择状态与输入控件跟随窗口解析后的主题。视频像素、海报与字幕内容不做全局反色；媒体上方的文字与控件通过受控承载表面保证可辨识性。
+System bar icons, popups, selection states and input controls follow the window's resolved theme. Video pixels, posters and subtitle content are not inverted globally; text and controls above media stay legible through a controlled backing surface.
 
-TV 媒体应用可显式选择适合观看环境的深色策略，但框架仍必须生成可用的浅色方案。默认 system 模式下没有外观信号时，沿用 Bern 核心规定的浅色回退，不能伪造一个系统深色状态。
+TV media apps may explicitly choose a dark strategy suited to the viewing environment, but the framework must still generate a usable light scheme. In the default system mode, when there is no appearance signal, the light fallback specified by the Bern core is used; a system dark state must not be faked.
 
 ## 8. Android TV / Google TV
 
-### 8.1 布局与安全区
+### 8.1 Layout and safe areas
 
-**官方依据。** TV 面向远距离观看和横向显示；开发指南建议使用 `dp`/`sp`，关键内容置于约 5% 的 overscan 安全区域，背景可以铺满。常用 `960 × 540` 设计基准对应左右 `48 dp`、上下 `27 dp`。[Build TV layouts](https://developer.android.com/training/tv/playback/compose/layouts)
+**Official basis.** TV is for viewing at a distance and landscape display; the development guide recommends `dp`/`sp` and placing key content inside an overscan safe area of about 5%, while backgrounds may fill the screen. The common `960 × 540` design baseline corresponds to `48 dp` left and right and `27 dp` top and bottom. [Build TV layouts](https://developer.android.com/training/tv/playback/compose/layouts)
 
-**来源冲突。** 另一官方设计页同时写有 `48/27 dp`、`58/28 dp` 和上下 `27` 四舍五入为 `24` 的示例；不能把这些数字全写成统一强制标准。Bern 首版采用约 5% 安全策略，以真实电视测试校正，而非对所有分辨率硬编码一组数。[TV Layouts 原文](https://developer.android.com/design/ui/tv/guides/styles/layouts)
+**Conflicting sources.** Another official design page has examples of `48/27 dp`, `58/28 dp`, and `27` top and bottom rounded to `24`, side by side; these numbers cannot all be written down as one uniform mandatory standard. Bern's first version uses a safe strategy of about 5%, calibrated by testing on real TVs, rather than hard-coding one set of numbers for all resolutions. [TV Layouts original](https://developer.android.com/design/ui/tv/guides/styles/layouts)
 
-**Bern 决策。** TV 是独立交互配置，不是把平板 UI 等比放大。主要浏览采用可预测的横向内容行或网格；限制一屏文本密度，所有必需功能都能用遥控器完成。不得以滑动、悬停、双击或精细拖动作为唯一入口。
+**Bern decision.** TV is an independent interaction configuration, not the tablet UI scaled up proportionally. Main browsing uses predictable horizontal content rows or grids; text density per screen is limited, and every necessary feature can be completed with the remote. Swiping, hovering, double-clicking or fine dragging must not be the only entry point.
 
-### 8.2 焦点与返回
+### 8.2 Focus and back
 
-**官方依据。** TV 导航以方向键与返回键为核心，应有清楚路径、可辨识焦点；返回不应陷入菜单循环，也不应通过普通退出确认阻挡离开。遥控器已提供返回，通常无需屏幕上的重复返回按钮。[TV navigation](https://developer.android.com/training/tv/get-started/navigation)
+**Official basis.** TV navigation centers on the D-pad and the back button, with clear paths and recognizable focus; back should not get stuck in a menu loop, nor block leaving with an ordinary exit confirmation. The remote already provides back, so a duplicate on-screen back button is usually unnecessary. [TV navigation](https://developer.android.com/training/tv/get-started/navigation)
 
-**Bern 决策。** 每个页面、列表行与弹层声明焦点作用域。打开详情记住来源卡片，返回时优先恢复；来源已移除时选取明确备用项。弹层获得焦点后，底层不可误激活。长按连续移动必须跟随项目身份，不能因异步海报加载跳焦。
+**Bern decision.** Every page, list row and popup declares a focus scope. Opening a detail remembers the source card, and back restores it first; when the source has been removed, an explicit fallback item is chosen. Once a popup has focus, the layer beneath cannot be activated by mistake. Continuous movement on long press must follow item identity, and must not make focus jump because of asynchronous poster loading.
 
-普通离开应用不弹“是否退出”；确有未保存编辑时走关闭契约的具体草稿确认。虚拟窗口关闭之后回到上一个活动窗口，不依靠遥控器操作桌面式标题栏。
+Ordinarily leaving the app does not pop up "Exit?"; when there really are unsaved edits, the specific draft confirmation of the close contract is used. After a virtual window closes, the previous active window comes back, without relying on the remote to operate a desktop-style title bar.
 
-Google TV / Android TV Live tab 合作接入有额外 direct-back 要求，且与普通深链接不同；仅在应用启用此集成时实现相应来源标记与返回规则，不能把它强加给所有页面。[Live tab navigation](https://developer.android.com/training/tv/get-started/navigation#live-tab-navigation)
+The Google TV / Android TV Live tab partner integration has extra direct-back requirements, which differ from ordinary deep links; the corresponding source markers and back rules are implemented only when the app enables this integration, and are not imposed on all pages. [Live tab navigation](https://developer.android.com/training/tv/get-started/navigation#live-tab-navigation)
 
-### 8.3 播放操作
+### 8.3 Playback controls
 
-**官方依据。** 播放场景中，中心键播放/暂停，左右单击前后跳转，左右长按连续定位；上下键显示进度等信息且不因此暂停。跳转秒数由应用定义，官方表用 `N`，不是统一 10 秒。[Playback controls on TV](https://developer.android.com/training/tv/playback/controls)
+**Official basis.** In playback, the center button plays/pauses, a single press left or right skips backward or forward, and a long press left or right seeks continuously; up and down show progress and other information without pausing because of it. The skip duration is defined by the app; the official table uses `N`, not a uniform 10 seconds. [Playback controls on TV](https://developer.android.com/training/tv/playback/controls)
 
-**Bern 决策。** `Video(controls: standard)` 的 TV 配方自动产生上述命令绑定，并区分“直接控制播放”与“控制条内导航”的焦点上下文。一个按键不能既移动焦点又额外快进。
+**Bern decision.** The TV recipe of `Video(controls: standard)` automatically produces the command bindings above, and distinguishes the focus contexts "controlling playback directly" and "navigating within the control bar". One key press must not both move focus and additionally fast-forward.
 
-进度定位、字幕、音轨与播放速度需要可聚焦的语义入口；直播或不可定位媒体明确禁用相应动作并报告原因。控件自动隐藏后保持确定的恢复位置，字幕不因控制条出现而落到安全区外。
+Seeking, subtitles, audio tracks and playback speed need focusable semantic entry points; live or non-seekable media explicitly disable the corresponding actions and report the reason. After the controls hide automatically, a definite restore position is kept, and subtitles do not fall outside the safe area because the control bar appears.
 
-**Bern 实现（2026-10-20）。** Compose 后端按系统的电视模式（`UI_MODE_TYPE_TELEVISION`）或 leanback 特性判断电视：`window.tv` 为真，`Adaptive` 选 `Layout(size: tv)`；`Shortcut` 在电视上对应遥控器（返回键为 `escape`、播放/暂停键为 `space`），方向键先移动焦点、移不动时才交给快捷键；`default_focus` 用 `FocusRequester` 给出起始焦点。以上只有生成器测试，未在 Android TV 设备或模拟器上验证；电视的焦点作用域、返回恢复来源卡片等上述决策尚未实现。
+**Bern implementation (2026-10-20).** The Compose backend detects a TV by the system's television mode (`UI_MODE_TYPE_TELEVISION`) or the leanback feature: `window.tv` is true, and `Adaptive` selects `Layout(size: tv)`; on a TV, `Shortcut` maps to the remote (the back button is `escape`, the play/pause button is `space`), and the arrow keys move focus first and are handed to shortcuts only when focus cannot move; `default_focus` gives the starting focus with `FocusRequester`. All of the above has only generator tests and is not verified on an Android TV device or emulator; the TV focus scopes, restoring the source card on back and the other decisions above are not yet implemented.
 
-## 9. 播放器、生命周期与系统入口
+## 9. Player, lifecycle and system entry points
 
-**官方依据。** 配置变化后应用应维持上下文与状态，尤其不能丢失输入或中断连续的媒体体验。[Configuration and continuity](https://developer.android.com/guide/topics/large-screens/configuration-and-continuity)
+**Official basis.** After a configuration change, the app should keep its context and state, and in particular must not lose input or interrupt a continuous media experience. [Configuration and continuity](https://developer.android.com/guide/topics/large-screens/configuration-and-continuity)
 
-**Bern 决策。** Rust 引擎、播放器所有者、Activity、窗口会话和视频呈现挂载是不同生命周期。旋转、折叠、调整尺寸只重挂视图；系统实际释放资源时可恢复状态，但不能宣称进程被杀后仍在连续播放。
+**Bern decision.** The Rust engine, the player owner, the Activity, the window session and the video presentation mount have different lifecycles. Rotating, folding and resizing only remount the view; when the system actually releases resources, state can be restored, but it must not be claimed that playback continues after the process is killed.
 
-可见、获得输入焦点和 resumed 是不同状态；不能在任何 `onPause` 到来时一律停止视频。多窗口中的可见播放器按产品播放策略和系统资源约束处理。[多窗口生命周期](https://developer.android.com/develop/adaptive-apps/guides/support-multi-window-mode)
+Visible, having input focus and resumed are different states; video must not be stopped across the board whenever any `onPause` arrives. Visible players in multi-window are handled according to the product's playback policy and the system's resource constraints. [Multi-window lifecycle](https://developer.android.com/develop/adaptive-apps/guides/support-multi-window-mode)
 
-**官方依据。** Media3 的后台播放方案通过 `MediaSessionService` 管理 Player 与 Session，UI 以 `MediaController` 连接；播放前台服务需要对应 manifest 权限和 `mediaPlayback` 类型。[Background playback](https://developer.android.com/media/media3/session/background-playback)
+**Official basis.** Media3's background playback approach manages the Player and Session through `MediaSessionService`, and the UI connects with a `MediaController`; the playback foreground service needs the corresponding manifest permission and the `mediaPlayback` type. [Background playback](https://developer.android.com/media/media3/session/background-playback)
 
-**Bern 决策。** 系统通知、蓝牙媒体键、遥控播放键与应用 UI 进入同一播放器命令入口。Media3 默认直接处理 Controller 命令，适配器必须在实际播放器调用边界接入 Bern 命令路由，不能仅在播放后补写命令日志。
+**Bern decision.** System notifications, Bluetooth media keys, remote playback buttons and the app UI enter the same player command entry point. Media3 handles Controller commands directly by default, so the adapter must hook Bern's command routing in at the actual player call boundary, not merely write a command log after playback.
 
-播放器观察到的缓冲、结束、音轨变化、系统强制暂停属于事实事件；这些状态更新不能再次反向发出播放命令形成回环。系统音频焦点策略可以先于应用生效，框架应如实同步实际状态。
+Buffering, ending, audio track changes and system-forced pauses observed by the player are fact events; these state updates must not send playback commands back the other way and form a loop. The system's audio focus policy may take effect before the app, and the framework should synchronize the actual state faithfully.
 
-**版本约束。** target API 35 及以上请求音频焦点需要处于顶层应用或运行前台服务。Android 17 对后台音频进一步收紧，target API 37 应按当前 while-in-use 等要求校验；拥有一个常驻 Rust 引擎不代表有后台播放授权。[音频焦点](https://developer.android.com/media/optimize/audio-focus)、[Android 17 后台音频](https://developer.android.com/about/versions/17/changes/bg-audio)
+**Version constraints.** With target API 35 and above, requesting audio focus requires being the top app or running a foreground service. Android 17 tightens background audio further, and target API 37 should be validated against the current while-in-use and other requirements; having a resident Rust engine does not mean having authorization for background playback. [Audio focus](https://developer.android.com/media/optimize/audio-focus), [Android 17 background audio](https://developer.android.com/about/versions/17/changes/bg-audio)
 
-**Bern 决策。** UI、CLI、JSON 和 MCP 收到同样的“需要前台交互/权限”“播放能力不可用”等结构化结果。后台限制、设备丢失或用户拒绝不能降格成“命令成功”。
+**Bern decision.** The UI, CLI, JSON and MCP receive the same structured results, such as "foreground interaction/permission required" and "playback capability unavailable". Background restrictions, device loss or user refusal must not be downgraded to "command succeeded".
 
-Android 17 部分后台音频 API 会静默失效，因此后端需先校验可知的生命周期条件，再区分请求已接受和已确认状态；无法确认音频输出时不得伪造成功证据。诊断测试应覆盖官方提供的音频强化测试模式。[静默失败与验证方法](https://developer.android.com/about/versions/17/changes/bg-audio)
+Some Android 17 background audio APIs fail silently, so the backend must first validate the lifecycle conditions that can be known, then distinguish "request accepted" from "state confirmed"; when audio output cannot be confirmed, no evidence of success may be faked. Diagnostic tests should cover the officially provided audio hardening test mode. [Silent failures and verification methods](https://developer.android.com/about/versions/17/changes/bg-audio)
 
-## 10. 媒体服务器连接与实施边界
+## 10. Media server connections and implementation boundaries
 
-**官方依据。** Android 17、target API 37 的本地网络访问要求适用权限或系统中介路径；这会影响局域网服务器发现与连接。[Android 17 本地网络权限](https://developer.android.com/about/versions/17/behavior-changes-17)
+**Official basis.** For Android 17 with target API 37, local network access requires the applicable permission or a system-mediated path; this affects discovering and connecting to LAN servers. [Android 17 local network permission](https://developer.android.com/about/versions/17/behavior-changes-17)
 
-**Bern 决策。** Emby/Jellyfin 等应用的“找不到服务器”必须区分未授权、地址不可达、TLS 失败、认证失败和服务器不支持。系统权限提示由平台宿主触发；远程命令返回待授权状态，不能绕过用户选择。
+**Bern decision.** "Server not found" in apps such as Emby/Jellyfin must distinguish unauthorized, address unreachable, TLS failure, authentication failure and server not supported. The system permission prompt is triggered by the platform host; remote commands return a pending-authorization state and must not bypass the user's choice.
 
-框架提供通用连接状态、权限能力、焦点和播放器语义；媒体库模型、账号认证、服务器选择、转码与协议兼容由应用/协议模块实现。API 权限变化不应迫使业务重新编写所有布局。
+The framework provides generic connection states, permission capabilities, focus and player semantics; the media library model, account authentication, server selection, transcoding and protocol compatibility are implemented by app/protocol modules. API permission changes should not force the business code to rewrite every layout.
 
-## 11. 验收清单
+## 11. Acceptance checklist
 
-以下为待执行的后端验收要求，本次仅完成研究与文档整理：
+The following are backend acceptance requirements still to be carried out; this round only completed the research and the documentation:
 
-- [ ] 在 599/600、839/840、1199/1200、1599/1600 dp 两侧检查宽度策略；同时验证矮窗口。
-- [ ] 在手机、平板、内外折叠屏、分屏与可调整窗口中保留选中项、草稿、滚动锚点和播放器身份。
-- [ ] 注入水平/垂直铰链、FULL 遮挡、分隔但零宽、无姿态数据；重要内容与热区均可达。
-- [ ] API 35/36/37 的运行系统与 target SDK 组合分别测试；不靠锁定方向掩盖问题。
-- [ ] 覆盖手势导航、三键导航、显示缺口、桌面标题栏与 IME 动画；无重复 inset 或提交入口遮挡。
-- [ ] 预测返回完成与取消各测试；弹层、窗口与应用路由只处理一次。
-- [ ] 字体放大、长翻译、RTL、TalkBack、键盘 Tab/方向键、鼠标滚轮/右键均能完成关键流程。
-- [ ] 所有主题与控件状态通过 Bern 既有配方检查；透明图标热区不相互重叠。
-- [ ] TV 仅用遥控器完成登录、浏览、搜索、播放、字幕/音轨选择和返回；无焦点死路。
-- [ ] TV 测试 overscan、不同分辨率、长按连续导航；真实观看距离下文本和焦点清晰。
-- [ ] 每个播放按键只触发一个预期命令；系统媒体入口与四种应用入口共享实际播放器状态。
-- [ ] 测试切页、旋转、Activity 重建、进后台、音频焦点丢失、服务结束与状态恢复。
-- [ ] 拒绝局域网权限和后台播放限制时显示真实原因，命令结果与 UI 一致。
+- [ ] Check the width strategy on both sides of 599/600, 839/840, 1199/1200 and 1599/1600 dp; verify short windows as well.
+- [ ] Keep the selected item, drafts, scroll anchor and player identity on phones, tablets, inward- and outward-folding foldables, split screen and resizable windows.
+- [ ] Inject horizontal/vertical hinges, FULL occlusion, separating but zero-width, and no posture data; important content and hit areas are all reachable.
+- [ ] Test each combination of running system and target SDK for API 35/36/37; do not rely on a locked orientation to hide problems.
+- [ ] Cover gesture navigation, three-button navigation, display cutouts, desktop caption bars and IME animation; no duplicated insets and no covered submit entry points.
+- [ ] Test both completing and cancelling predictive back; popups, windows and app routes each handle it only once.
+- [ ] Key flows can be completed with enlarged fonts, long translations, RTL, TalkBack, keyboard Tab/arrow keys, and mouse scroll wheel/right click.
+- [ ] All themes and control states pass Bern's existing recipe checks; transparent icon hit areas do not overlap each other.
+- [ ] On TV, sign-in, browsing, search, playback, subtitle/audio track selection and back are completed with the remote alone; no focus dead ends.
+- [ ] On TV, test overscan, different resolutions and continuous navigation on long press; text and focus are clear at a real viewing distance.
+- [ ] Each playback button triggers only one expected command; the system media entry points and the four app entry points share the actual player state.
+- [ ] Test page switches, rotation, Activity recreation, going to the background, audio focus loss, service termination and state restoration.
+- [ ] When LAN permission is refused or background playback is restricted, the real reason is shown, and command results match the UI.
 
-## 12. 来源读取状态与待核实项
+## 12. Source reading status and items to verify
 
-| 来源组 | 本次读取状态 | 采用范围 / 限制 |
+| Source group | Reading status this time | Scope adopted / limits |
 | --- | --- | --- |
-| Android 窗口尺寸、典型布局、fold-aware 指南 | 已打开原文并读取相关段落 | 尺寸分类、布局关系、姿态与 API 语义 |
-| Android 16 方向/比例/缩放指南；Android 17 行为变更与专项页 | 已打开原文 | 必须保留运行版本与 target SDK 条件；专项页将阈值写为 `>600`，总览写 `≥600`，Bern 在边界一并测试 |
-| WindowInsets、外接输入、无障碍默认、Material 3 in Compose | 已打开原文并读取相关段落 | 系统遮挡、输入、热区、动态取色；不声称覆盖所有无障碍标准 |
-| TV Layouts、Build TV layouts、TV navigation、Playback controls | 已打开原文并读取相关段落 | 安全区数字冲突已在正文显式记录 |
-| 配置连续性、MediaSessionService、音频焦点、Android 17 后台音频 | 已打开原文 | 生命周期与系统控制入口；实际依赖组合仍需原型验收 |
-| Material 官网窗口尺寸页 | 已尝试打开，但读取工具返回错误 | 未据此引入未读取事实；使用 Android 官方对应指南 |
-| Android 多窗口模式指南 | 已打开原文并读取模式、生命周期及多实例段落 | 不把相邻窗口请求当作成功保证；精细 Activity 启动策略仍需设备验证 |
+| Android window sizes, canonical layouts, fold-aware guide | Opened the original and read the relevant passages | Size classes, layout relationships, posture and API semantics |
+| Android 16 orientation/aspect ratio/resizability guide; Android 17 behavior changes and the dedicated page | Opened the original | The running version and target SDK conditions must be kept; the dedicated page writes the threshold as `>600` and the overview as `≥600`, and Bern tests both at the boundary |
+| WindowInsets, external input, accessibility defaults, Material 3 in Compose | Opened the original and read the relevant passages | System occlusions, input, hit areas, dynamic color; no claim to cover all accessibility standards |
+| TV Layouts, Build TV layouts, TV navigation, Playback controls | Opened the original and read the relevant passages | The conflict in safe-area numbers is recorded explicitly in the text |
+| Configuration continuity, MediaSessionService, audio focus, Android 17 background audio | Opened the original | Lifecycle and system control entry points; the actual dependency combination still needs prototype acceptance |
+| Window size page on the Material website | Tried to open it, but the reading tool returned an error | No unread facts were introduced on that basis; the corresponding official Android guide is used |
+| Android multi-window mode guide | Opened the original and read the passages on modes, lifecycle and multiple instances | An adjacent window request is not treated as a guarantee of success; the fine-grained Activity launch strategy still needs device verification |
 
-后端实施前还需确定 Compose/Adaptive/WindowManager/Media3 的锁定版本、最低 Android 版本、原生多窗口实现范围及 TV 发布渠道要求。本文不把文档研究等同于已通过设备认证。
+Before backend implementation, the pinned versions of Compose/Adaptive/WindowManager/Media3, the minimum Android version, the scope of the native multi-window implementation and the requirements of TV distribution channels still have to be decided. This document does not treat documentation research as equivalent to having passed device certification.

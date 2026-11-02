@@ -1,160 +1,162 @@
-# GPUI 实现记录
+**English** · [简体中文](../zh-CN/Implementation/GPUI.md)
 
-- 依据：[设计文档的 GPUI 一节](../Design.md#gpui-可选桌面目标)
-- 状态：第一版（2026-10-30）。macOS 上 RustSend 与一个大型媒体类应用都能在这个目标上通过检查、构建并运行；只有下文列出的组件。Windows 与 Linux 没有构建过。
+# GPUI implementation notes
 
-## 选择与配置
+- Basis: [the GPUI section of the design document](../Design.md#gpui-optional-desktop-target)
+- Status: first version (2026-10-30). On macOS, RustSend and a large media app both pass the check, build and run on this target; only the components listed below exist. Windows and Linux have never been built.
 
-GPUI 目标只在显式选择时使用，不是任何平台的默认值：
+## Selection and configuration
+
+The GPUI target is used only when chosen explicitly; it is not the default for any platform:
 
 ```toml
 [targets.gpui_macos]
-platform = "macos"       # 或 windows、linux
+platform = "macos"       # or windows, linux
 ui = "gpui"
 channels = ["ipc"]
 ```
 
-注册的目标为 `gpui-macos`、`gpui-windows`、`gpui-linux`，各自只在同名系统上构建。颜色来源为 `BernTheme`。
+The registered targets are `gpui-macos`, `gpui-windows` and `gpui-linux`, each built only on the system of the same name. Colors come from `BernTheme`.
 
-## 依赖
+## Dependencies
 
-| 依赖 | 版本 | 说明 |
+| Dependency | Version | Notes |
 | --- | --- | --- |
-| `gpui-pre`（以 `gpui` 引用） | `=0.3.10` | Zed 主线由 longbridge 每周发布的快照；crates.io 上的官方 `gpui` 停在 0.2.2（2025-10-22） |
-| `gpui-pre-macos`、`gpui-pre-linux`、`gpui-pre-windows` | `=0.3.10`，可选 | 平台包，见下 |
-| `gpui-base` | `=0.8.1` | GPUI Kit 的无样式层：输入框的编辑、选择与输入法 |
-| `gpui-pre-reqwest-client`、`gpui-pre-http-client` | `=0.3.10` | 状态里的 http(s) 图片；图片平均色的下载 |
-| `image` | 0.25（png、jpeg、webp、gif） | 模板图片着色、图片平均色 |
-| `objc2`、`objc2-app-kit`、`objc2-quartz-core`、`objc2-core-graphics`、`objc2-foundation`、`raw-window-handle` | 只在 macOS | 应用图标、隐藏指针、减少动态效果、关于面板、窗口命令、视频的 Metal 层 |
-| `bern-ffi`、`bern-theme` | 工作区 | 进程内接口；主题快照与控件配方 |
-| `sys-locale`、`url`、`smallvec`、`futures` | — | 首选语言、文件地址、帧、事件通道 |
+| `gpui-pre` (referenced as `gpui`) | `=0.3.10` | Weekly snapshots of Zed's main branch published by longbridge; the official `gpui` on crates.io stopped at 0.2.2 (2025-10-22) |
+| `gpui-pre-macos`, `gpui-pre-linux`, `gpui-pre-windows` | `=0.3.10`, optional | Platform crates, see below |
+| `gpui-base` | `=0.8.1` | The unstyled layer of GPUI Kit: editing, selection and input methods for text inputs |
+| `gpui-pre-reqwest-client`, `gpui-pre-http-client` | `=0.3.10` | http(s) images in state; downloads for image average colors |
+| `image` | 0.25 (png, jpeg, webp, gif) | Tinting template images, image average colors |
+| `objc2`, `objc2-app-kit`, `objc2-quartz-core`, `objc2-core-graphics`, `objc2-foundation`, `raw-window-handle` | macOS only | App icon, hiding the pointer, Reduce Motion, the About panel, window commands, the Metal layer for video |
+| `bern-ffi`, `bern-theme` | Workspace | In-process interface; theme snapshot and control recipes |
+| `sys-locale`, `url`, `smallvec`, `futures` | — | Preferred languages, file URLs, frames, event channels |
 
-- **平台包按特性启用**：`bern-gpui` 有 `macos`、`linux`、`windows` 三个特性，各自只启用对应的 GPUI 平台包，生成的应用只打开它所构建的那个。不用 GPUI 的 `gpui-pre-platform`：它在依赖解析时会带上 Web 平台的 wgpu 30，要求 `js-sys >= 0.3.104`，而应用自己的依赖可能钉着更早的版本（一个大型媒体类应用的媒体内核钉在 `=0.3.103`，构建在解析依赖时就失败）。Cargo 解析依赖时包括所有平台的依赖，但不包括没有启用的可选依赖。
-- **macOS 平台包的特性**：`runtime_shaders` 让 Metal 着色器在启动时编译，构建不需要 Xcode 的 Metal 工具链（这台 Mac 的 Xcode 没有装它）；代价是应用在这台机器上第一次启动时要编译着色器。`font-kit`：不开时 GPUI 用的是空的文字系统，所有文字都不画。
-- 版本是钉死的一组；GPUI Kit 的 `gpui-component` 0.8.1 也依赖 `gpui-pre =0.3.10`。升级是一次单独的改动，并重跑本记录的检查。
+- **Platform crates enabled by feature**: `bern-gpui` has three features, `macos`, `linux` and `windows`, each enabling only the corresponding GPUI platform crate, and the generated app turns on only the one it is built for. GPUI's `gpui-pre-platform` is not used: during dependency resolution it brings in wgpu 30 for the Web platform, which requires `js-sys >= 0.3.104`, while the app's own dependencies may pin an earlier version (a large media app's media core pins `=0.3.103`, and its build fails already while resolving dependencies). Cargo's dependency resolution includes the dependencies of all platforms, but not optional dependencies that are not enabled.
+- **Features of the macOS platform crate**: `runtime_shaders` compiles the Metal shaders at startup, so the build does not need Xcode's Metal toolchain (the Xcode on this Mac does not have it installed); the cost is that the app compiles the shaders the first time it starts on a given machine. `font-kit`: without it GPUI uses an empty text system, and no text is drawn at all.
+- The versions are a pinned set; GPUI Kit's `gpui-component` 0.8.1 also depends on `gpui-pre =0.3.10`. Upgrading is a separate change, and the checks in these notes are run again.
 
-## 结构
+## Structure
 
-- `crates/bern-backend-gpui`（工作区成员，只生成代码，不依赖 GPUI）：目标描述、检查、生成、构建计划。`bern package` 尚不支持这个目标。
-- `crates/bern-gpui`（不在工作区里，与 `bern-gtk` 相同，只由生成的应用编译）：
-  - `host`：经 `bern_ffi::start_app` 启动引擎。回调在引擎与通道线程上，字节复制进一个通道，由 GPUI 主线程上的任务按到达顺序处理。
-  - `windows`：每个 `Window` 一个原生窗口，打开与关闭都告诉会话运行时；最后一个窗口关闭时退出，退出前停掉引擎。
-  - 元素：`layout`（行列、层叠、网格、滚动、标签页、预览列表、手风琴）、`content`（文字、标签、图片）、`controls`（按钮、开关、选择器、输入框）、`overlay`（弹层、菜单、对话框、分体按钮）、`search`（搜索、搜索面板、工具栏）、`scroll`（停靠与定位）、`query`（异步查询）、`media`（视频）、`spin`（转动的图片）、`navigation`、`form`、`scene`、`canvas`、`behaviors`、`menus`；`look` 是 `style!` 规则，`theme`、`text`、`session`（外部入口）、`native`（平台接口）。
-- 生成的应用与其他目标的布局相同：Windows 与 Linux 上是 `<产品>/<程序>`（旁边是 `resources/`），macOS 上是 `<产品>.app`（见下）；`bin/` 里的应用 CLI 与 MCP 服务器、`skills/` 里的 Agent skill。
-- **macOS 应用包**：与 SwiftUI 目标相同，`Info.plist` 写名字、版本、标识与 `CFBundleIconFile`，各语言的名字在 `<语言>.lproj/InfoPlist.strings`；图标是声明的 PNG（或 Bern 标志）做成的 `.icns`，由系统裁成它的形状、套上底板，声明 `.icns` 时原样使用，Icon Composer 文档不支持（报错）；程序在 `Contents/MacOS`，资源在 `Contents/Resources/resources`，CLI 与 MCP 服务器在 `Contents/Helpers`、skill 在 `Contents/Resources/skills`，先签它们再临时签名整个包，然后 `touch` 并 `lsregister -f` 让 Finder 与 Dock 读新图标；`bin/` 里是指向包内程序的链接。运行时在包里不再用 `setApplicationIconImage` 设应用自己的图标（那样 Dock 显示的是没有底板的原图），只在 `WindowSet(icon:)` 换成别的图标时设置。
+- `crates/bern-backend-gpui` (a workspace member that only generates code and does not depend on GPUI): target descriptor, check, generation, build plan. `bern package` does not yet support this target.
+- `crates/bern-gpui` (not in the workspace; like `bern-gtk`, it is compiled only by the generated app):
+  - `host`: starts the engine through `bern_ffi::start_app`. Callbacks run on the engine and channel threads; the bytes are copied into a channel and processed in arrival order by a task on the GPUI main thread.
+  - `windows`: one native window per `Window`; opening and closing are both reported to the session runtime; when the last window closes the app quits, stopping the engine first.
+  - Elements: `layout` (rows and columns, stacks, grids, scrolling, tabs, preview lists, accordions), `content` (text, labels, images), `controls` (buttons, switches, pickers, text inputs), `overlay` (popovers, menus, dialogs, split buttons), `search` (search, the search panel, the toolbar), `scroll` (snapping and positioning), `query` (asynchronous queries), `media` (video), `spin` (spinning images), `navigation`, `form`, `scene`, `canvas`, `behaviors`, `menus`; `look` is the `style!` rules, plus `theme`, `text`, `session` (external entry points) and `native` (platform interfaces).
+- The generated app has the same layout as on other targets: on Windows and Linux it is `<product>/<program>` (with `resources/` next to it), on macOS `<product>.app` (see below); the app CLI and MCP server are in `bin/`, the agent skill in `skills/`.
+- **macOS app bundle**: as with the SwiftUI target, `Info.plist` holds the name, version, identifier and `CFBundleIconFile`, and the name in each language is in `<language>.lproj/InfoPlist.strings`; the icon is an `.icns` made from the declared PNG (or the Bern logo), which the system crops to its shape and puts on the icon plate; a declared `.icns` is used as is, and Icon Composer documents are not supported (an error is reported); the program is in `Contents/MacOS`, the resources in `Contents/Resources/resources`, the CLI and MCP server in `Contents/Helpers` and the skill in `Contents/Resources/skills`; these are signed first, then the whole bundle is ad-hoc signed, and then `touch` and `lsregister -f` make Finder and the Dock read the new icon; `bin/` holds links to the programs inside the bundle. Inside a bundle, the runtime no longer uses `setApplicationIconImage` to set the app's own icon (that way the Dock would show the original image without a plate); it sets it only when `WindowSet(icon:)` switches to a different icon.
 
-窗口内容在 GPUI 每次渲染时重新构建：生成的代码给每个窗口与组件各一个 `fn(&Ctx) -> El`，直接读引擎状态。引擎状态变化后，各窗口的根视图收到 `notify`，下一帧重画。所以这个目标不需要 GTK 运行时那样逐字段的响应式绑定。
+Window content is rebuilt every time GPUI renders: the generated code gives each window and component a `fn(&Ctx) -> El` that reads the engine state directly. After the engine state changes, each window's root view receives `notify` and redraws on the next frame. So this target does not need per-field reactive bindings like those of the GTK runtime.
 
-## 已实现
+## Implemented
 
-更新：2026-10-31。生成器只生成下列组件与属性，其余都在构建时报错并指向声明处。
+Updated: 2026-10-31. The generator generates only the following components and properties; everything else is reported as an error at build time, pointing at the declaration.
 
-| 类别 | 组件 |
+| Category | Components |
 | --- | --- |
-| 窗口 | `WindowSet`（运行时选择的 `accent`、`appearance` 与 `icon`）、`Window`（尺寸、最小尺寸、`chrome: unified`、草稿、`idle_after`、`idle_enabled`、`immersive`） |
-| 布局 | `Column`、`Row`（含 `align: baseline`）、`Flow`、`Grid`、`Stack`（`style!` 底色、前景、圆角、阴影，`enabled`、`under_bars`）、`ScrollView`（纵向、横向、`snap`、`position`、`open_at`、`open_center`）、`Spacer`、`Divider`、`Adaptive`/`Layout`、`Form`、`Section`、`Accordion`、`PreviewList`、`FocusRegion` |
-| 场景 | `ScaleBox`、`Positioned`、`Rail`、`Canvas`（`Shape` 的矩形、圆角、胶囊、椭圆、描边、虚线、渐隐与 `fill_from` 图片平均色，`Series`，`Pattern`） |
-| 导航 | `Navigation`/`NavLink`/`Destination`、`SplitView`/`Sidebar`/`SidebarItem`/`SidebarHeader`/`SidebarFooter`/`Detail`、`Tabs`/`Tab`（`display: icon`）/`TabAccessory`、`Toolbar`（`Spacer` 前的在前端） |
-| 内容 | `Text`、`Label`、`Image`（随包资源、状态里的文件与 http(s) 图片、深色图、圆角、`fit`、`aspect`、`rendering: template`）、`Progress`、`Toast`、`Video`（见下） |
-| 控件 | `Button`（形状、高度、`style!` 规则、`pick`、快捷键、带内容）、`IconButton`、`Switch`、`SplitButton`、`Picker`、`LanguagePicker`、`TextInput`、`Search`（页内、侧栏、工具栏里的搜索框与下方结果，`style: palette` 的搜索面板）、`SearchItem`、`Slider`、`Menu`/`MenuItem`、`PopoverButton`、`ControlGroup`、`ShortcutInput`、`Drop`（含 `over`）、`Pinch` |
-| 行为 | `ForEach`、`if`/`if let`/`match`、带参数的组件、`Query`、`Modal`、`Shortcut`、`Timer`、`Watch`、`reveal: hover`、媒体命令动作 |
+| Windows | `WindowSet` (`accent`, `appearance` and `icon` chosen at runtime), `Window` (size, minimum size, `chrome: unified`, drafts, `idle_after`, `idle_enabled`, `immersive`) |
+| Layout | `Column`, `Row` (including `align: baseline`), `Flow`, `Grid`, `Stack` (`style!` background, foreground, corner radius, shadow, `enabled`, `under_bars`), `ScrollView` (vertical, horizontal, `snap`, `position`, `open_at`, `open_center`), `Spacer`, `Divider`, `Adaptive`/`Layout`, `Form`, `Section`, `Accordion`, `PreviewList`, `FocusRegion` |
+| Scene | `ScaleBox`, `Positioned`, `Rail`, `Canvas` (`Shape` rectangles, rounded rectangles, capsules, ellipses, strokes, dashes, fades and `fill_from` image average color, `Series`, `Pattern`) |
+| Navigation | `Navigation`/`NavLink`/`Destination`, `SplitView`/`Sidebar`/`SidebarItem`/`SidebarHeader`/`SidebarFooter`/`Detail`, `Tabs`/`Tab` (`display: icon`)/`TabAccessory`, `Toolbar` (items before `Spacer` go at the leading end) |
+| Content | `Text`, `Label`, `Image` (bundled resources, files and http(s) images from state, dark images, corner radius, `fit`, `aspect`, `rendering: template`), `Progress`, `Toast`, `Video` (see below) |
+| Controls | `Button` (shape, height, `style!` rules, `pick`, keyboard shortcuts, with content), `IconButton`, `Switch`, `SplitButton`, `Picker`, `LanguagePicker`, `TextInput`, `Search` (search fields in a page, the sidebar or the toolbar with results below, and the search panel of `style: palette`), `SearchItem`, `Slider`, `Menu`/`MenuItem`, `PopoverButton`, `ControlGroup`, `ShortcutInput`, `Drop` (including `over`), `Pinch` |
+| Behaviors | `ForEach`, `if`/`if let`/`match`, components with parameters, `Query`, `Modal`, `Shortcut`, `Timer`, `Watch`, `reveal: hover`, media command actions |
 
-`style!` 规则：`Stack`、`Form`、`Sidebar`、`Detail` 与 `PopoverButton` 的面板取底色、前景（`Stack` 还有圆角与阴影）；`Button`、`IconButton` 与 `SidebarItem` 取静止外观与悬停、按下、禁用（侧栏项还有选中）状态，包括 `scale`。
+`style!` rules: the panels of `Stack`, `Form`, `Sidebar`, `Detail` and `PopoverButton` take background and foreground (`Stack` also corner radius and shadow); `Button`, `IconButton` and `SidebarItem` take the resting look and the hover, pressed and disabled states (sidebar items also selected), including `scale`.
 
-其他能力：
+Other capabilities:
 
-- **颜色**：`bern-theme` 按明暗与种子生成快照，种子是运行时选的强调色或 `[theme].brand_seed`；`appearance: dark` 让一段内容用深色。`fill.subtle`、`fill.strong`、`selection.background`、`selection.foreground` 与 Web 目标一样由别的令牌导出；主题里没有的角色画成洋红，便于发现。文字与图标没有指定颜色时取所在处的前景：按钮样式或 `Stack` 样式的前景，没有时是主要文字色。
-- **尺寸**：与 Web 视觉规范相同的字号表与控件尺寸；`style!` 的 `text { … }` 改字重与字号。`ScaleBox` 里所有长度（含画布）按场景缩放。行、列与文字不超过所在容器的宽度，多行文字因此在容器里换行：GPUI 按单行宽度量文字的最小宽度，只靠 flex 收缩不会换行。
-- **缩放状态**：`style!` 的 `scale` 在悬停或按下时把按钮按比例重画在一个不可见的原样副本之上，副本占住布局，周围不移动；没有动画。
-- **动效**：只有 `spin`；出现、消失、过渡等属性被接受，变化立即发生，共用检查对此给出警告。
-- **转动**：只转资源里的 `Image`，其他元素与状态里的图片不转，检查时给出警告。GPUI 的彩色图片在 GPU 上不能带变换，单色图形可以：图里不透明处（透明度 96 以上）都是同一种颜色、或 `rendering: template` 时，把图片包成一个内嵌位图的 SVG，按单色图形由 `paint_svg` 带旋转矩阵绘制，GPUI 按路径与尺寸缓存它的遮罩，转动只改矩阵；多色图片在后台线程按设备像素逐帧转成对角线大小的方图（双线性取样），主线程画最新的一帧，用完的帧从图集里删掉。转动时每帧请求下一帧，所以整个窗口每帧重建。减少动态效果取系统的辅助功能设置与 `BERN_MOTION=reduce`。
-- **菜单栏**（macOS）：系统的标准菜单，名字与快捷键按 macOS：应用菜单（关于、服务、隐藏、隐藏其他、全部显示、退出）、文件（关闭 ⌘W）、编辑（撤销到全选）、窗口（最小化、缩放、前置全部窗口）。编辑菜单用输入框（`gpui-base`）自己的动作，有输入框取得焦点时可用，否则变灰；关闭、最小化、缩放调用窗口自己的 `performClose:` 等，关闭因此与点关闭按钮一样经过窗口的关闭回调。关于面板是系统的标准面板，带应用名与版本。切换界面语言后菜单跟着换。应用声明的 `MenuBar` 还不显示。Windows 与 Linux 上只有退出。
-- **带内容的按钮**：与 Web 目标相同，除胶囊形以外没有自己的边框与底色，外观只来自 `style!` 规则，规则的圆角裁切内容；按下时稍暗。
-- **搜索面板**：工具栏里的入口显示提示与快捷键；打开后遮住窗口，面板里的输入框取得键盘，上下方向键在可导航的 `SearchItem` 之间移动，回车执行，Esc 或点面板外关闭。
-- **视频**：应用的媒体内核播放所有播放器（`bern_media_kernel_attach`）。macOS 上每个 `Video` 是窗口内容视图里、GPUI 视图下面的一个原生视图，宿主一个 `CAMetalLayer` 交给内核绘制，位置与大小跟随布局；窗口背景改为透明，窗口与各层的底色在视频处留空，所以叠在视频上的控件仍画在上面。帧时钟是一个按 60 Hz 调用 `bern_media_surface_frame` 的线程，时间取 `CACurrentMediaTime`。没有媒体内核时没有播放器能播放：这个目标还没有自己的媒体执行器；Windows 与 Linux 不向内核提供表面。`Video(controls: standard)` 的标准控制条没有实现，构建时报错。
-- **语言**：从系统首选语言里选；运行中经 `LanguagePicker` 或 `ui.set_language` 切换。
-- **外部入口**：`ui.inspect`、`ui.activate`、`ui.edit`、`ui.submit`、`ui.set_bool`、`ui.select`、`ui.language`、`ui.set_language`；其他会话命令立即返回 `ui_unavailable`。控件清单在请求到来时把窗口内容再构建一次得到，窗口被遮挡时也是当前状态；列清单时不打开查询订阅。
+- **Colors**: `bern-theme` generates snapshots by appearance and seed; the seed is the accent color chosen at runtime or `[theme].brand_seed`; `appearance: dark` makes a section of content dark. `fill.subtle`, `fill.strong`, `selection.background` and `selection.foreground` are derived from other tokens, as on the Web target; roles that the theme lacks are drawn in magenta so they are easy to spot. Text and icons without a specified color take the foreground of where they are: the foreground of the button style or the `Stack` style, or the primary text color when there is none.
+- **Sizes**: the same type scale and control sizes as the Web design guidelines; `text { … }` in `style!` changes the font weight and size. All lengths inside a `ScaleBox` (canvases included) scale with the scene. Rows, columns and text do not exceed the width of their container, so multi-line text wraps within the container: GPUI measures the minimum width of text by its single-line width, and flex shrinking alone does not wrap it.
+- **Scale states**: `scale` in `style!` redraws the button scaled on hover or press, above an invisible unscaled copy; the copy holds the layout, so the surroundings do not move; there is no animation.
+- **Motion**: only `spin`; appear, disappear, transition and similar properties are accepted, but changes happen immediately, and the shared check gives a warning about this.
+- **Spinning**: only an `Image` from resources spins; other elements and images from state do not spin, and the check gives a warning. GPUI's color images cannot carry a transform on the GPU, but monochrome graphics can: when all opaque parts of the image (opacity above 96) are the same color, or with `rendering: template`, the image is wrapped in an SVG with an embedded bitmap and drawn by `paint_svg` as a monochrome graphic with a rotation matrix; GPUI caches its mask by path and size, and spinning changes only the matrix; multi-color images are rotated frame by frame on a background thread, at device pixels, into a square the size of the diagonal (bilinear sampling), the main thread draws the newest frame, and used frames are removed from the atlas. While spinning, every frame requests the next one, so the whole window is rebuilt every frame. Reduce Motion is taken from the system's accessibility setting and from `BERN_MOTION=reduce`.
+- **Menu bar** (macOS): the system's standard menus, with names and keyboard shortcuts as on macOS: the app menu (About, Services, Hide, Hide Others, Show All, Quit), File (Close ⌘W), Edit (Undo through Select All), Window (Minimize, Zoom, Bring All to Front). The Edit menu uses the text input's (`gpui-base`) own actions, and is available when a text input has focus and grayed out otherwise; Close, Minimize and Zoom call the window's own `performClose:` and so on, so closing goes through the window's close callback just like clicking the close button. The About panel is the system's standard panel, with the app name and version. After the UI language is switched, the menus change along with it. The app's declared `MenuBar` is not shown yet. On Windows and Linux there is only Quit.
+- **Buttons with content**: as on the Web target, apart from the capsule shape they have no border or background of their own; their look comes only from `style!` rules, whose corner radius clips the content; they get slightly darker when pressed.
+- **Search panel**: the entry in the toolbar shows the prompt and the keyboard shortcut; once opened, the panel covers the window, its input field takes the keyboard, the up and down arrow keys move between navigable `SearchItem`s, Return executes, and Esc or a click outside the panel closes it.
+- **Video**: the app's media core plays all players (`bern_media_kernel_attach`). On macOS each `Video` is a native view in the window's content view, below the GPUI view, hosting a `CAMetalLayer` that is handed to the core for drawing, with its position and size following the layout; the window background is made transparent, and the backgrounds of the window and of each layer leave a hole where the video is, so controls placed over the video are still drawn above it. The frame clock is a thread that calls `bern_media_surface_frame` at 60 Hz, with time from `CACurrentMediaTime`. Without a media core no player can play: this target does not yet have its own media executor; Windows and Linux do not provide surfaces to the core. The standard control bar of `Video(controls: standard)` is not implemented and is reported as an error at build time.
+- **Language**: chosen from the system's preferred languages; switched at runtime through `LanguagePicker` or `ui.set_language`.
+- **External entry points**: `ui.inspect`, `ui.activate`, `ui.edit`, `ui.submit`, `ui.set_bool`, `ui.select`, `ui.language`, `ui.set_language`; other session commands return `ui_unavailable` immediately. The control list is obtained by building the window content once more when the request arrives, so it reflects the current state even when the window is covered; listing does not open query subscriptions.
 
 ### `BERN_WINDOW_OFFSCREEN`
 
-开发检查用。窗口开在所有显示器之外（-10000, -10000），应用设为 accessory（不进 Dock），窗口不取焦点。用途是在有人使用的电脑上检查：窗口不挡任何东西，也不抢键盘；又因为不会被别的窗口挡住，会一直出帧，可以用 `screencapture -l <窗口号>` 截图。
+For development checks. The window opens outside all displays (-10000, -10000), the app is set to accessory (not in the Dock), and the window does not take focus. The purpose is checking on a computer that someone is using: the window covers nothing and does not steal the keyboard; and since it cannot be covered by other windows, it keeps producing frames and can be captured with `screencapture -l <window number>`.
 
-macOS 上被其他窗口完全挡住的窗口，GPUI 会停掉它的 display link：既不重画，也不处理点击，重新露出来时才补画。第一次在屏幕上检查时，经 CLI 改了状态，窗口看起来没变，原因就在这里。
+On macOS, when a window is completely covered by other windows, GPUI stops its display link: it neither redraws nor handles clicks, and only catches up on drawing when it is uncovered again. This is why, during the first on-screen check, the window looked unchanged after the state was changed through the CLI.
 
-## 实测
+## Measured
 
-### 一个大型媒体类应用（2026-10-30）
+### A large media app (2026-10-30)
 
-同一份声明不改，测试副本另设 `bundle_id`，运行时把 `HOME` 指向空目录，数据目录因此与真实应用分开。
+The same declaration, unchanged; the test copy sets its own `bundle_id`, and at runtime `HOME` points to an empty directory, so the data directory is separate from the real app's.
 
-- 检查报错从 1749 处降到 0（只剩动效、`MenuBar` 等警告）。
-- 构建：应用、CLI、MCP 服务器与 skill 都产出；引擎与它自带的媒体内核一起编译。
-- 在 `BERN_WINDOW_OFFSCREEN` 下运行并截图，经应用 CLI 操作：
-  - 首次启动的引导对话框四步：欢迎页（格纹图案、矢量吉祥物、字标、换行的说明）、选择起点（选项卡片、选中描边与对勾、模块开关胶囊、跟着变的小窗口预览）、外观（四个主题色圆点、明暗分段）、准备好了；
-  - 主窗口的侧栏与工具栏（搜索面板入口、“打开”按钮），首页的今日更新（http 海报、时间线与“现在”线、横向滚动按 `open_center` 打开），新番页的一周手风琴与每天的预览列表，媒体库页（分段、筛选胶囊、滑块、排序菜单、空状态），下载页；
-  - 搜索面板：打开、输入后按分组列出结果，第一项高亮。
-- 检查中修正的问题：层叠容器只看第一层是否占满（窗口内容只占上半部）；横向滚动视图在高度上也占满；滚动内容被压缩；对话框按声明处而不是按窗口铺开（被压成一条竖线）；行与文字不换行；`fill.subtle` 等角色画成洋红；带内容的按钮多一圈按钮外观；按钮样式的前景没有传给图标；被禁用的层里侧栏项与搜索仍报告为可用。
+- Check errors dropped from 1749 to 0 (only warnings, such as for motion and `MenuBar`, remain).
+- Build: the app, CLI, MCP server and skill are all produced; the engine is compiled together with its own media core.
+- Run under `BERN_WINDOW_OFFSCREEN` with screenshots, operated through the app CLI:
+  - the four steps of the first-launch onboarding dialog: the welcome page (checkered pattern, vector mascot, wordmark, wrapped description), choosing a starting point (option cards, selected stroke and checkmark, module switch capsules, a small window preview that changes along), appearance (four theme color dots, light/dark segments), and ready;
+  - the main window's sidebar and toolbar (search panel entry, "Open" button), today's updates on the home page (http posters, the timeline and the "now" line, horizontal scrolling opened by `open_center`), the new-season page's weekly accordion with a preview list for each day, the library page (segments, filter capsules, sliders, sort menu, empty state), and the downloads page;
+  - the search panel: it opens, and after typing lists results by group, with the first item highlighted.
+- Problems fixed during the check: stack containers only checked whether the first layer filled the space (the window content filled only the upper half); horizontal scroll views also filled the height; scroll content was compressed; dialogs were laid out by their declaration site instead of the window (squeezed into a vertical line); rows and text did not wrap; roles such as `fill.subtle` were drawn in magenta; buttons with content had an extra ring of button look; the button style's foreground was not passed to icons; sidebar items and search in disabled layers were still reported as enabled.
 
-### RustSend：转动的标志、浅色、菜单与图标（2026-10-31）
+### RustSend: spinning logo, light mode, menus and icon (2026-10-31)
 
-测试副本把接收页的 `Svg`（只为转动而用文档引擎）换成位图加 `spin: app.ready && !app.pending, spin_period: 15`，标志是单色的，走 GPU。以 `.app` 包构建，`BERN_WINDOW_OFFSCREEN` 下运行：
+The test copy replaces the receive page's `Svg` (which used the document engine only for spinning) with a bitmap plus `spin: app.ready && !app.pending, spin_period: 15`; the logo is monochrome and goes through the GPU. Built as an `.app` bundle and run under `BERN_WINDOW_OFFSCREEN`:
 
-- 相隔两秒的两张窗口截图，标志区域有 4366 个像素不同、文字区域没有不同；转动时整个进程约占一个核心的 12–15%（debug 构建），主要是每帧重建整个窗口。
-- `ui select` 把设置里的外观改成“浅色”，窗口变为浅色，设置文件写入 `light`；改回“跟随系统”后随系统（这台 Mac 是深色）。
-- 经“系统事件”读菜单栏：苹果菜单、RustSend、文件、编辑、窗口；各项名字、可用状态与快捷键（⌘Q、⌥⌘H、⌘W、⌘C、⌘Z、⌘M）都对，编辑菜单在没有输入框取得焦点时变灰。
-- 用 `NSWorkspace` 画出包的图标（复制到新路径并重新登记）：标志在系统的圆角底板上。
+- In two window screenshots taken two seconds apart, 4366 pixels differ in the logo area and none in the text area; while spinning, the whole process uses about 12–15% of one core (debug build), mostly for rebuilding the whole window every frame.
+- `ui select` changes the appearance in settings to "Light"; the window turns light and the settings file gets `light`; after changing back to "Follow System" it follows the system (this Mac is dark).
+- Reading the menu bar through System Events: Apple menu, RustSend, File, Edit, Window; every item's name, enabled state and keyboard shortcut (⌘Q, ⌥⌘H, ⌘W, ⌘C, ⌘Z, ⌘M) are correct, and the Edit menu is grayed out when no text input has focus.
+- The bundle's icon drawn with `NSWorkspace` (copied to a new path and registered again): the logo sits on the system's rounded icon plate.
 
-### RustSend（2026-10-30）
+### RustSend (2026-10-30)
 
-RustSend 1.0 的界面声明不改，加上 `gpui_macos` 目标后检查通过，debug 构建 2 分 41 秒（新的 target 目录）。上面那个应用的修正之后用同一运行时重建，接收页与设置页截图正常。测试副本另设 `bundle_id`，并用 `RUSTSEND_DATA_DIR` 指向空数据目录（它的引擎默认读写 `~/Library/Application Support/localsend-bern`，与 `bundle_id` 无关）。在 `BERN_WINDOW_OFFSCREEN` 下运行并截图：
+With RustSend 1.0's UI declarations unchanged and the `gpui_macos` target added, the check passes, and the debug build takes 2 min 41 s (fresh target directory). After the fixes for the app above, it was rebuilt with the same runtime, and the screenshots of the receive and settings pages are correct. The test copy sets its own `bundle_id` and uses `RUSTSEND_DATA_DIR` to point to an empty data directory (its engine reads and writes `~/Library/Application Support/localsend-bern` by default, regardless of `bundle_id`). Run under `BERN_WINDOW_OFFSCREEN` with screenshots:
 
-- 接收、发送、传输记录、设置四页按紧凑布局显示，Logo（构建时把动画 SVG 画成图片）、图标、分段选择器、弹出按钮、开关、进度条、表单分节都在；
-- `ui select` 换页与设置分类，`ui activate` 打开网络信息弹层，`ui set-bool` 打开快速保存，`ui edit` 改名后“保存”变为可用、`ui activate` 保存后引擎里的名字随之改变；
-- `ui set-language` 切到英文、经引擎状态切到深色外观，单色强调色在两种外观下都对；
-- 临时把紧凑断点调到 400 时，桌面布局（标题行、页面大标题）同样显示。
+- the four pages Receive, Send, Transfer history and Settings display in the compact layout, with the logo (the animated SVG drawn into an image at build time), icons, segmented picker, popup button, switches, progress bar and form sections all present;
+- `ui select` switches pages and settings categories, `ui activate` opens the network info popover, `ui set-bool` turns on quick save, after `ui edit` changes the name "Save" becomes enabled, and after saving with `ui activate` the name in the engine changes accordingly;
+- `ui set-language` switches to English, and the dark appearance is switched on through the engine state; the monochrome accent color is correct in both appearances;
+- with the compact breakpoint temporarily set to 400, the desktop layout (title row, large page titles) displays as well.
 
-### 最小应用（2026-10-30）
+### Minimal app (2026-10-30)
 
-Apple M4、16 GB、macOS 27.2，Rust 1.99。
+Apple M4, 16 GB, macOS 27.2, Rust 1.99.
 
-**最小应用**：`bern new` 生成的计数器，加上 `gpui_macos` 目标：
+**Minimal app**: the counter generated by `bern new`, with the `gpui_macos` target added:
 
-- `bern check --target gpui_macos` 通过；
-- debug 构建（新的 target 目录，包括编译 GPUI）50 秒；
-- 在 `BERN_WINDOW_OFFSCREEN` 下运行、窗口截图：
-  - 标题、计数与两个按钮按简体中文显示；
-  - 经应用 CLI 执行三次 `counter add-one` 后显示 3，`counter reset` 后显示 0；
-  - `ui inspect` 列出 `main.add_one` 与 `main.reset`，标签为“加一”“重置”；
-  - 两次 `ui activate --target main.add_one` 后，引擎状态与窗口都是 2；
-  - 目标不存在时返回 `target_not_found`；
-  - 检查期间前台应用一直不变，测试窗口没有取得焦点。
+- `bern check --target gpui_macos` passes;
+- debug build (fresh target directory, including compiling GPUI) in 50 seconds;
+- run under `BERN_WINDOW_OFFSCREEN`, with window screenshots:
+  - the title, the count and the two buttons display in Simplified Chinese;
+  - after `counter add-one` is run three times through the app CLI it shows 3, and after `counter reset` it shows 0;
+  - `ui inspect` lists `main.add_one` and `main.reset`, with the labels "加一" and "重置";
+  - after `ui activate --target main.add_one` twice, both the engine state and the window show 2;
+  - a nonexistent target returns `target_not_found`;
+  - throughout the check the frontmost app never changed, and the test window never took focus.
 
-同一应用的 release 构建（LTO、`codegen-units = 1`、去符号）：
+Release build of the same app (LTO, `codegen-units = 1`, stripped):
 
-| 项目 | 结果 |
+| Item | Result |
 | --- | --- |
-| 编译时间 | 3 分 27 秒，冷编译，包括 GPUI |
-| 应用程序 | 6.6 MB |
-| CLI、MCP 服务器 | 各 0.9 MB |
-| 内存（`footprint`） | 第一次启动 73 MB（在编译着色器），之后 29 MB |
+| Compile time | 3 min 27 s, cold build, including GPUI |
+| App program | 6.6 MB |
+| CLI, MCP server | 0.9 MB each |
+| Memory (`footprint`) | 73 MB on first launch (while compiling shaders), 29 MB afterwards |
 
-**探针**：只用 GPUI 的计数器窗口与加上 `gpui-component` 的窗口，都是 LTO release，编译时没开 `font-kit`，所以不画文字，体积和内存都不含文字系统。
+**Probes**: a counter window using only GPUI and a window with `gpui-component` added, both LTO release builds compiled without `font-kit`, so they draw no text, and neither size nor memory includes the text system.
 
-| 探针 | 编译时间 | 体积 | 首帧 | 内存 |
+| Probe | Compile time | Size | First frame | Memory |
 | --- | --- | --- | --- | --- |
-| 只用 GPUI | 1 分 47 秒（冷编译） | 5.3 MB | 首次启动 1.8 秒，之后约 0.2 秒 | 首次 70 MB，之后 26 MB |
-| 加 `gpui-component` | 在上一行基础上再 3 分 59 秒 | 14.0 MB | 约 0.14 秒 | 27 MB |
+| GPUI only | 1 min 47 s (cold build) | 5.3 MB | 1.8 s on first launch, about 0.2 s afterwards | 70 MB the first time, 26 MB afterwards |
+| With `gpui-component` | another 3 min 59 s on top of the previous row | 14.0 MB | about 0.14 s | 27 MB |
 
-首次启动慢、内存高，是在编译 Metal 着色器（`runtime_shaders`）。
+The slow first launch and the high memory come from compiling the Metal shaders (`runtime_shaders`).
 
-## 未验证与未实现
+## Not verified and not implemented
 
-- **视频播放**：没有实际打开过媒体，内核绘制、留空的底色、帧时钟都未验证。
-- **真实指针与键盘**：没有实测点击；按钮的点击与 `ui.activate` 共用同一个闭包，但没有经过真实的鼠标事件。检查时用 `CGEventPostToPid` 发给进程的点击，应用不在前台时没有被处理。缩放状态、悬停高亮、搜索面板的方向键、拖放的 `over`、捏合、`FocusRegion` 都只编译、没有实测。
-- **其他平台**：Windows 与 Linux 上没有编译过，生成的应用、`gpui-pre` 的这两个平台都没有构建；嵌入式设备没有试过。
-- **外观**：系统强调色没有接入；对比度偏好没有看过；运行中改变系统明暗时“跟随系统”的切换没有看过（检查不改系统设置）；应用图标的切换没有看过，换上的图标经 `setApplicationIconImage` 显示，没有系统的底板。
-- **转动**：多色图片的后台线程逐帧转动只编译、没有实测。
-- **窗口**：前端没有报告 `bern_window_facts`；窗口的 `role`、`presentation`、关闭确认没有实现；`immersive` 只隐藏工具栏与静止时的指针，标题栏按钮仍在；应用声明的 `MenuBar` 不显示（只有系统的标准菜单）。
-- **外部入口**：`ui.select` 按选项的显示文字匹配，应用 CLI 的说明写的是枚举变体名；同一组件的多个实例（例如四张选项卡片）控件标识相同。
-- **macOS 产物**：`bern package` 不支持这个目标，没有发布签名与公证；Dock 里的图标没有截图看过（离屏运行的应用不进 Dock）。
-- **其余**：无障碍（GPUI 依赖 AccessKit，但控件还没给出角色与名称）、`Video` 的标准控制条、平台的媒体执行器、`spin` 以外的动效都没有实现。
+- **Video playback**: no media has actually been opened; the core's drawing, the backgrounds left open and the frame clock are all not verified.
+- **Real pointer and keyboard**: no clicks were measured; button clicks and `ui.activate` share the same closure, but have not gone through real mouse events. Clicks sent to the process with `CGEventPostToPid` during the check were not handled while the app was not frontmost. Scale states, hover highlights, the search panel's arrow keys, `over` for drag and drop, pinch and `FocusRegion` are only compiled, not measured.
+- **Other platforms**: never compiled on Windows and Linux; neither the generated app nor `gpui-pre` has been built for these two platforms; embedded devices have not been tried.
+- **Appearance**: the system accent color is not wired in; the contrast preference has not been looked at; switching under "Follow System" when the system appearance changes at runtime has not been looked at (the checks do not change system settings); switching the app icon has not been looked at, and the icon switched in is shown through `setApplicationIconImage`, without the system's icon plate.
+- **Spinning**: the frame-by-frame rotation of multi-color images on a background thread is only compiled, not measured.
+- **Windows**: the frontend does not report `bern_window_facts`; the window's `role`, `presentation` and close confirmation are not implemented; `immersive` only hides the toolbar and the pointer when idle, and the title bar buttons remain; the app's declared `MenuBar` is not shown (only the system's standard menus).
+- **External entry points**: `ui.select` matches options by their display text, while the app CLI's help describes enum variant names; multiple instances of the same component (for example the four option cards) have the same control identifiers.
+- **macOS outputs**: `bern package` does not support this target, and there is no release signing or notarization; the icon in the Dock has not been checked in a screenshot (an app running offscreen is not in the Dock).
+- **Other**: accessibility (GPUI depends on AccessKit, but the controls do not provide roles and names yet), the standard control bar of `Video`, a platform media executor, and motion other than `spin` are not implemented.

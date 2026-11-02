@@ -1,6 +1,8 @@
-# JavaScript 与目标能力
+**English** · [简体中文](../zh-CN/Implementation/JavaScript.md)
 
-Bern 的 `bern::script` 提供独立、持久的 JavaScript 上下文。目标配置选择执行宿主；插件调用接口保持一致。
+# JavaScript and target capabilities
+
+Bern's `bern::script` provides independent, persistent JavaScript contexts. The target configuration chooses the execution host; the interface plugins call stays the same.
 
 ```toml
 [targets.macos]
@@ -11,23 +13,23 @@ javascript = true
 platform = "tvos"
 javascript = true
 
-# 可选：需要去掉 WebView 依赖的发行版。
+# Optional: a distribution that needs to drop the WebView dependency.
 [targets.linux_plain]
 platform = "linux"
 webview = false
 javascript = true
 ```
 
-| 目标 | JS 后端 |
+| Target | JS backend |
 | --- | --- |
 | macOS / iOS | WKWebView |
 | Android | Android WebView |
 | Windows | WebView2 |
 | Linux | WebKitGTK 6 |
-| Web，web_mode = "app" | 浏览器 Worker |
-| tvOS、webview = false | Boa 0.22，纯 Rust 随应用编译 |
+| Web, web_mode = "app" | Browser Worker |
+| tvOS, webview = false | Boa 0.22, pure Rust compiled with the app |
 
-`javascript` 默认关闭。生成的 Cargo 工程只在无 WebView 时启用 `bern-script/boa`，系统宿主构建不编译 Boa。Linux 的 `bern-gtk/script` 引入 WebKitGTK；无 WebView 的 Linux 目标同时把 SVG 转为图片，不再引入该依赖。脚本功能目前用于引擎与 UI 同进程的目标；Web 的远程 `web_mode = "ui"` 暂不提供远程脚本路由。
+`javascript` is off by default. The generated Cargo project enables `bern-script/boa` only when there is no WebView; builds with a system host do not compile Boa. On Linux, `bern-gtk/script` pulls in WebKitGTK; a Linux target without a WebView also turns SVG into images and no longer pulls in that dependency. The script feature is currently used for targets where the engine and the UI run in the same process; the Web's remote `web_mode = "ui"` does not yet provide remote script routing.
 
 ```rust
 async fn example() -> Result<(), bern::script::Error> {
@@ -39,14 +41,14 @@ async fn example() -> Result<(), bern::script::Error> {
 }
 ```
 
-`Context` 应在插件存活期间保留；各上下文的全局变量独立。`eval` 返回可 await 的 `Evaluation`，也可使用 `try_result` 非阻塞读取。不要在 UI 线程阻塞等待。返回值使用 JSON，undefined 对应 null，脚本异常返回 `Error`。
+A `Context` should be kept for as long as the plugin is alive; the global variables of each context are independent. `eval` returns an awaitable `Evaluation`, and `try_result` can also read it without blocking. Do not block and wait on the UI thread. Return values use JSON, undefined maps to null, and script exceptions return `Error`.
 
-系统 WebView 在第一次执行脚本时创建，用私有路由文档与每个上下文的 iframe，Web 用每个上下文的 Worker，异步结果通过宿主桥回传；请求超时 30 秒，释放上下文和停止宿主会结束待处理请求。宿主提供单调时钟，因此 WebAssembly 不依赖 std::time::Instant。
+The system WebView is created the first time a script runs, with a private routing document and one iframe per context; the Web uses one Worker per context, and asynchronous results come back through the host bridge. Requests time out after 30 seconds, and releasing a context or stopping the host ends pending requests. The host provides a monotonic clock, so WebAssembly does not depend on std::time::Instant.
 
-Boa 每个上下文使用独立工作线程，并限制循环次数与递归深度。支持普通表达式、JSON 和能在当前任务队列中完成的 Promise；需要外部事件才能完成的 Promise 返回错误。网络、存储、播放器等插件 API 尚未在此层定义。此层是脚本执行基础设施，插件 SDK 可在其上增加统一宿主接口。
+Boa uses a separate worker thread for each context and limits loop iterations and recursion depth. It supports plain expressions, JSON, and Promises that can complete within the current task queue; Promises that need an external event to complete return an error. Plugin APIs for networking, storage, players and the like are not yet defined at this layer. This layer is script execution infrastructure; a plugin SDK can add a unified host interface on top of it.
 
-UI 可用 `if window.webview { ... } else { ... }`。这是编译期条件，未选分支不进入目标检查和代码生成。`Svg(static_source: ...)` 的自动静态回退见 [动画 SVG](Animated-SVG.md)。
+The UI can use `if window.webview { ... } else { ... }`. This is a compile-time condition: the branch not chosen does not enter target checks or code generation. For the automatic static fallback of `Svg(static_source: ...)`, see [Animated SVG](Animated-SVG.md).
 
-验证：`cargo test -p bern-script`、`cargo test -p bern-script --features boa`、`cargo test -p bern-cli --test svg_targets`、`node --test crates/bern-script/tests/browser.test.mjs`。macOS 的 `bern-script` 测试还会编译 Swift 宿主并实测 WKWebView。
+Verification: `cargo test -p bern-script`, `cargo test -p bern-script --features boa`, `cargo test -p bern-cli --test svg_targets`, `node --test crates/bern-script/tests/browser.test.mjs`. On macOS the `bern-script` tests also compile the Swift host and test WKWebView for real.
 
-2026-10-22 验证：编译器／IR／目标 API 的 114 项单元测试、七平台生成与回退测试、GTK 生成和打包测试通过。Boa 的持久变量、独立上下文、JSON、Promise、异常与循环限制测试通过；WKWebView 真正执行与浏览器 Worker 测试通过。一个实际应用的 tvOS 模拟器整包构建成功，二进制未链接 WebKit；启用脚本的 SVG 示例完成 iOS 模拟器、Android APK、Web 整包构建，iOS 依赖树不含 Boa。Windows、Linux 的原生宿主尚未在对应系统上编译运行。
+Verified on 2026-10-22: 114 unit tests of the compiler / IR / target API, generation and fallback tests for seven platforms, and GTK generation and packaging tests passed. Boa tests for persistent variables, independent contexts, JSON, Promises, exceptions and loop limits passed; tests of real WKWebView execution and of the browser Worker passed. A full-package tvOS simulator build of a real app succeeded, and the binary did not link WebKit; the script-enabled SVG example completed full-package builds for the iOS simulator, an Android APK and the Web, and the iOS dependency tree contained no Boa. The native hosts for Windows and Linux have not yet been compiled and run on those systems.

@@ -1,0 +1,146 @@
+[English](../../Reference/Platforms.md) · **简体中文**
+
+# 平台能力与验证范围
+
+更新：2026-10-29。下表按 [bern-target-api](../../../crates/bern-target-api/src/lib.rs) 与各后端 `TargetDescriptor.features` 整理。macOS 与 iOS 共用同一份 SwiftUI 清单；tvOS 与它们共用 SwiftUI 生成器，清单在 [tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)中单列。
+
+可选的 GPUI 目标（`ui = "gpui"`，macOS、Windows、Linux）是第一版，只在 macOS 上构建过，下表不含它；它声明的组件与功能见 [GPUI 实现记录](../Implementation/GPUI.md)。
+
+## 编译期功能支持
+
+“支持”表示后端声明接受对应特性；“不适用”表示后端同样声明接受，但那里没有对应的行为（例如电视与桌面窗口没有方向可转），用到时不报错也不警告；“—”表示未声明，用到该特性的声明会被相应能力检查拒绝。它不表示所有属性行为、视觉效果或设备场景都已经验收。颜色覆盖、动效、窗口和媒体还有独立的能力描述，不能只看此表推断完整支持。
+
+| 功能标记 | 对应能力 | macOS | iOS | tvOS | Web | Android | Linux | Windows |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `button_content` | 按钮内自定义内容 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `reveal` | 悬停显现（无指针目标常显） | 支持 | 支持 | —（常显，警告） | 支持 | 支持 | 支持 | 支持 |
+| `toolbar_search` | 工具栏搜索 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `search_results` | 搜索建议结果 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `session_actions` | 会话字段动作 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `toggle_button` | 开关按钮样式 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `dialog_windows` | 对话框窗口 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `bound_lengths` | 状态绑定长度 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `appearance` | 局部明暗外观 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `shortcuts` | 键盘快捷键 | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
+| `bound_shortcuts` | 跟随状态的快捷键（`shortcut: app.keys.x`、`Shortcut(key: app.keys.x)`） | 支持 | 支持 | 支持（遥控按键） | 支持 | 支持 | 支持 | 支持 |
+| `shortcut_input` | 按下组合键改键的 `ShortcutInput` | 支持 | 支持（硬件键盘） | 支持（只显示） | 支持 | 支持（硬件键盘） | 支持 | 支持 |
+| `menu_bar` | 应用菜单栏 `MenuBar`、`CommandMenu`、`CommandItem`，`window.menu_bar` | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 | 不适用 |
+| `status_item` | 状态栏项 `StatusItem`（托盘图标与菜单，可加“登录时启动”，图标可以是自己的单色 SVG），关闭最后一个窗口后应用留在那里 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
+| `runtime_palette` | 运行时语义调色板（`WindowSet(palette:)`），各语义角色的浅色与深色可以在运行时整体替换 | 支持 | 支持 | 支持 | — | — | 支持 | 支持 |
+| `runtime_theme` | 运行时主题选择 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `runtime_images` | 引擎提供图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `picture_fills` | 图片取色与渐隐填充 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `file_pick` | 文件选择 | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `scroll_snap` | 滚动停靠 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `rails` | 比例轨道布局 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `popover_button` | 浮层按钮 | 支持 | 支持 | 支持（sheet） | 支持 | 支持 | 支持 | 支持 |
+| `text_weights` | 文本字重样式 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `text_lines` | 文本行数上限 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `image_corners` | 图片圆角 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `sidebar_width` | 固定侧栏宽度 | 支持 | 支持 | —（系统宽度，警告） | 支持 | 支持 | 支持 | 支持 |
+| `controlled_values` | Switch / Picker / Slider 引擎受控值 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `controlled_text` | `TextInput(current:)` 引擎受控文字，编辑中保留用户的输入 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `table` | 表格 `Table`：列、选中行、点表头排序、行菜单与主操作 | 支持 | 支持 | 支持（一列行按钮） | 支持 | 支持（Material 数据表） | 支持 | 支持 |
+| `paste` | `Button`、`IconButton`、`MenuItem`、`CommandItem` 的 `paste:`，先把剪贴板的文字放进草稿 | 支持 | 支持 | — | 支持 | 支持 | 支持 | 支持 |
+| `watch` | `Watch(value:) => command()`：挂载时与值变化时运行动作，把草稿告诉引擎 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `login_switch` | `Switch(login_item: true)`：系统的“登录时打开”，与状态栏项菜单里的是同一项 | 支持 | 不适用 | 不适用 | 不适用 | 不适用 | 支持 | 支持 |
+| `search_palette` | 搜索命令面板 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `image_template` | 模板图片 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `adaptive_images` | 图片比例与网格独立行距 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `scaled_scene` | ScaleBox / Positioned / Marquee、动态字号 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `accordion_layout` | 手风琴列布局 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `capsule_controls` | 胶囊控件和 ControlGroup | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `modal_flow_timer` | Modal / Flow / Timer / PickerOption | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `page_badges` | 导航和模块页面计数 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `edge_grow` | 按边展开过渡 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `delayed_appear` | 延迟入场 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `toolbar_leading` | 工具栏前缘项和文字 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `axis_padding` | 分轴内边距 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `icon_menus` | 纯图标菜单 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `icon_labels` | 纯图标 Label | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `icon_tabs` | 纯图标页签（`Tab(display: icon)`），`label` 为可访问名称；未声明的目标连同标题一起显示并警告 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `row_baseline` | 行内文字基线对齐 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `sidebar_header` | 固定侧栏顶栏 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `untitled_detail` | 无标题详情 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `idle_control` | 按状态启停空闲检测（`Window(idle_enabled:)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `fill_buttons` | 横向撑满容器的系统按钮（`Button(width: fill)`） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `page_search` | 页面里的系统搜索框（不在 `Toolbar` / `Sidebar` 里的 `Search`），结果列在框下 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `window_short` | 窗口高度低于紧凑断点（`window.short`），如手机横屏 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `window_landscape` | 手机上按状态转为横屏或竖屏（`Window(landscape:)`），如播放器打开时横过来 | 不适用 | 支持 | 不适用 | 支持（浏览器允许锁定方向时） | 支持 | 不适用 | 不适用 |
+| `modal_cover` | 紧凑窗口里铺满整个窗口的模态（`Modal(cover: compact)`），如手机的全屏流程 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `form_layout` | 表单版式：`Section(style: plain)` 标题组、行内边距、`Form(gap:, row_height:)` | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `tab_accessory` | 随页签常驻的一条（`TabAccessory`），如小播放器；iOS 26.1 起为标签栏上方的系统附件 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `grid_cells` | 按列宽定行高的网格（`Grid(cell_ratio:, cell_extra:)`），格内内容顶对齐、可伸进行间距 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `size_classes` | 四档尺寸适配 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| `text_formats` | 文本中的复数分支、日期、时长，以及显示变体字段的枚举标签（见[文本、内容与格式化](UI.md#文本内容与格式化)） | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+
+## 不由上述功能标记完整表达的能力
+
+| 能力 | 当前范围 |
+| --- | --- |
+| `Window(idle_enabled:)` | 六个目标都消费启停状态（能力 `idle_control`）：为假时 `window.idle` 保持为假且不计时，变真时重新计时 |
+| 静置区（`idle_area`） | 七个目标的动效能力都声明它。macOS、Web、Android、Linux、Windows 上，页面有静置区时鼠标只在静置区上停住才静置，停在别处或移出窗口保持醒着，触摸、遥控器与键盘仍按 `idle_after`；iOS 与 tvOS 上静置区不改变计时（接上鼠标的 iPad 也是）。macOS 用一个实际应用的播放画面实测；Web 有运行时测试；Android 编译打包、Windows 两种前端经 MSVC 编译、Linux 运行时在 macOS 的 GTK 4 上通过 Clippy，这三者都未运行实测 |
+| `Window(landscape:)` 在网页上 | 用屏幕方向接口锁成横屏：浏览器只在手机与平板上锁定，多数还要求页面全屏或作为已安装的应用运行，iOS 的 Safari 不提供锁定；被拒绝时保持设备方向，进入全屏时再请求。运行时测试覆盖，未在手机浏览器上实测 |
+| 图片跨分栏 Hero | macOS 使用窗口级覆盖层，Web 使用视口级副本；iOS 与 macOS 其他视图沿用匹配几何。Video 连续画面传递另行验证 |
+| 本地持久化 | 原生 FFI 宿主提供文件存储，Web app 使用同源 localStorage；未安装存储宿主时不持久化 |
+| 可选 Svg | 六目标有生成路径；tvOS 没有 WebKit，不可用，用到时检查报错；专属依赖及验证见[动画 SVG](../Implementation/Animated-SVG.md)，不改变普通界面的默认实现 |
+| 平台各自的应用图标（`[app.icon]`） | 七个目标都接受方形 PNG 与各自的原生格式：macOS `.icns`、iOS `.appiconset`（两者也接受 Icon Composer 的 `.icon`，即 26 起的液态玻璃图标）、tvOS `.brandassets`（未声明时由默认图标生成分层图标与顶部货架图）、Windows `.ico`、Linux hicolor 图标主题、Android `res`、Web 页面图标文件夹或 SVG；配置阶段检查，生成时原样使用。规则见[应用图标](../Design.md#应用图标) |
+| `SidebarHeader(role: title)` | WinUI 3 与系统 XAML 不显示（标题栏已显示应用图标与标题）；GTK 不显示（侧栏的标题栏已显示应用名称，KDE 按它的按钮布局还在前缘显示应用图标）；其他目标照常显示 |
+| 电视布局（`Layout(size: tv)`、`window.tv`） | tvOS 永远是电视：构建时只保留 `tv` 布局并按已知的窗口条件裁剪（实测）。Android 按系统的电视模式或 leanback 特性、Web 按电视浏览器的用户代理判断，未在电视设备上验证。macOS、iOS、Windows、Linux 永远为假，`tv` 布局不生成 |
+| `Shortcut` | 没有控件的快捷键，六个目标生成：macOS、iOS、Web、Android、Linux、Windows 为键盘快捷键；tvOS 与 Android TV 为遥控按键（`escape` 返回、`space` 播放/暂停、方向键为焦点无处可移时的方向）。停用的快捷键把键让给之前显示的（Web 运行时测试覆盖）。tvOS 模拟器实测方向键；返回与播放/暂停、Android TV、其他目标的按键未实测 |
+| 电视字号（`text` 块的 `font(tv:)`） | tvOS 构建时取电视字号（模拟器实测）；Android 与 Web 运行时判断为电视时取（Web 由 `bern-television` 类切换，未在电视设备上验证）；macOS、iOS、Windows、Linux 不受影响。各后端生成器测试覆盖 |
+| 文字会话动作（`push_str`、`pop`） | 六个目标生成；tvOS 模拟器上经屏幕键盘实测输入与删除；SwiftUI 在 tvOS 与 macOS 上类型检查，Compose 随 Android 构建编译，GTK 在 Ubuntu 虚拟机上编译，WinUI 3 在 Windows PC 上编译 |
+| `Search(suggest: true)` | 未输入时就列出结果：SwiftUI 与 Web 获得焦点时、电视上一直列出（tvOS 模拟器实测）；Compose 的工具栏搜索页本来打开就列出；GTK 与 WinUI 3 获得焦点时弹出。tvOS 以外未实测交互 |
+| 性能追踪（`BERN_TRACE`、`trace.*`、`bern run --trace`） | 共用的 Rust 一侧对所有目标相同：规则与过滤、记录与汇总、时间线、会话命令，以及引擎（排队、执行、快照、比较、模块调用、`span!`）与桥接（解码、按字段编码、回调触发）的分段。各前端界面线程的打点尚未接入，交互链路与长帧暂不出现。见[性能追踪](Tracing.md) |
+| `default_focus` | `Button` / `IconButton` 出现时取得焦点，六个目标生成：tvOS 是焦点区域的首选焦点（模拟器实测），macOS / iOS 用 `FocusState`，Web 调用 `focus()`，Compose 用 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点；tvOS 以外未实测；GTK 在 Ubuntu 24.04 虚拟机上编译并通过 Clippy 与生成应用的类型检查，WinUI 3 在 Windows PC 上用 MSVC 编译生成的 gallery |
+
+## 最近新增能力的验证
+
+这一节只描述 2026-10-15 至 25 日的新增能力；已有平台的历史验收见各实现记录。构建成功不代替实际设备交互。
+
+| 范围 | 代码 / 构建证据 | 实际交互范围 |
+| --- | --- | --- |
+| macOS 的多页应用布局、控件与图片 Hero | 应用构建及相关生成器检查；图片 Hero 有真实 AppKit 容器回归 | 播放器覆盖层、分组、返回入口、舞台图片展开、缩到侧栏及恢复 |
+| Web 的多页应用适配 | WASM 构建、生成器与浏览器运行时回归 | Chromium 桌面及指定窄屏场景；桌面 Safari 27.0.1 的媒体库、主题、导航和布局复查，范围见 Web 记录 |
+| iOS 的近期播放器扩展 | 共享 SwiftUI 生成路径与能力声明 | 本轮未做播放器设备交互验收 |
+| Linux（GTK）的近期布局扩展（2026-10-18） | 上表 29 项能力与 `Stack` 样式在 GTK 实现；生成器测试含生成应用的类型检查；真实应用 `bern build --target linux` 通过 | Ubuntu 24.04 虚拟机经 Broadway 实测：引导模态、桌面侧栏与时间轴（`Rail(overhang:)` 量到）、播放器场景；手机布局的 `TabAccessory`、`ScrollView(open_at:)`、`scroll_scale` 与 `scroll_origin_y`、`pages.<id>.show()`；手机布局在临时把最小窗口宽改小后测得。未验证项见 [Linux 记录](../Implementation/Linux-GTK.md) |
+| Android / Windows 的近期布局扩展（2026-10-19） | 上表 29 项能力与 `Stack` 样式在 Compose 与 WinUI 3 实现，Android 另有 `window_landscape`；两个后端的生成器测试覆盖这些能力，WinUI 3 的测试在 Windows 上用 MSVC 编译两套前端；两个后端也实现了 `text_formats`；真实应用 `bern build --target android` 与 `--target windows`（在 Windows PC 上）构建成功 | Windows：一个临时巡览应用经 WinUI 3 与 Islands 实测侧栏顶栏与计数、无标题详情、工具栏前缘、缩放场景与跑马灯、手风琴、受控值、胶囊控件与控件组、搜索面板、模态、表单版式、`window.short`、`idle_enabled`；文本格式的测试应用在两种前端下与 SwiftUI、Web、GTK 输出相同；真实应用的引导页对照设计稿（Fluent 圆角按钮、透明动画 Logo）。Android：见 [Android 记录](../Implementation/Android-Compose.md)。未验证项见 [Windows 记录](../Implementation/Windows-WinUI3.md) |
+| 应用图标与只给窗口命名的侧栏头部（2026-10-19） | 配置测试覆盖各平台原生格式的检查与错误；六个后端的生成器测试覆盖原生格式的落位（`.icns`、`.appiconset`、`.ico`、图标主题改名、`res` 与 `roundIcon`、页面图标的链接） | 一个实际应用：Windows 11 实体机两种前端的标题栏显示应用图标与标题（图标取自 `.ico` 的位图项），`role: title` 的侧栏头部不显示；macOS 27.0.1 访达图标；iOS 26.5 模拟器主屏幕与 `Assets.car` 的着色版；Ubuntu 24.04 虚拟机运行时找到图标、`.deb` 装入全部尺寸；Web 的链接与开发服务器类型；Android 只检查 APK 内容，未装到设备 |
+| 虚线描边、`under_bars`、带内容的胶囊按钮（2026-10-19） | `Shape(dash:, dash_gap:)`、`Stack(under_bars: true)` 与 `shape: capsule` 的带内容按钮在六个目标实现；SwiftUI 另补上 `Stack` 里的 `Toolbar`（此前被丢掉）。各后端生成器测试覆盖虚线；SwiftUI 测试用 `swiftc` 类型检查；GTK 运行时在 Ubuntu 24.04 虚拟机上过 Clippy 与测试，生成应用的类型检查通过；Android 真实应用构建成功；WinUI 3 见右栏。Web 运行时测试覆盖撑满宽度的按钮让所在行撑满、固定尺寸的层在行里不收缩 | 一个实际应用里没有页面时的空画框窗口：macOS 27.0.1 窗口截图量得空画框在 1280 × 800 场景的 (103, 64, 1074 × 604)，与播放器退后时的画框逐点重合，工具栏与红绿灯浮在其上；iOS 26.5 模拟器上画框、按钮列与列表在设计稿位置 ±2 点，迷你播放器距屏幕底边 24 点；Chromium 桌面与 390 宽窄屏、Ubuntu 虚拟机 Broadway 的窗口快照。GTK 上顺带修正：`Stack` 里有自身厚度的 `Rail` 按 `Stack` 的对齐摆放（缩略图底部的进度条原先在正中）。之后在 MIX 2S（Android 15）与 Windows 11 实体机（150% 缩放）上实看，修正了 Compose 的 `unified` 顶栏、行里撑满的按钮、层叠里的轨道与模态里的共享元素，以及 WinUI 3 带内容按钮的边框与内容居中、`fill.strong` 的深浅、内容铺到标题栏下时页头的位置与 `TitleBar` 的让位宽度，见 [Android 记录](../Implementation/Android-Compose.md)与 [Windows 记录](../Implementation/Windows-WinUI3.md) |
+| `Canvas` 作为 `Stack` 的底板（2026-10-20） | 两个方向都不给尺寸的 `Canvas` 直接作为 `Stack` 的一层时，取其他层给出的尺寸而不撑开 `Stack`：SwiftUI 用 `BernLayers`（`Stack` 写了尺寸时按写的尺寸），Web 在布局意图中排除，GTK 在 `compute_expand` 中排除，Compose 修正了层叠标记没有传给画布的问题，WinUI 3 此前已实现；没写宽度的这种 `Stack` 在列里横向填满（SwiftUI `fillsWidth`、Web `align-self: stretch`、Compose `fillMaxWidth`、GTK 按分到的宽度、WinUI 3 `HorizontalAlignment.Stretch`）。顺带：Compose 行里的轨道分剩余宽度、`Label` 图标随字号缩放、定高行里的文字按行的对齐超出；GTK 的 `Form` 横向占满、`reflow` 行汇总子元素的撑开。SwiftUI、Compose、Web 运行时测试与 GTK（虚拟机上）的测试通过 | 一个实际应用的可选功能预览：macOS 27.0.1 设置窗口、Chromium 引导第二步、MIX 2S 引导第二步与设置子页、Ubuntu 24.04 虚拟机（Broadway）设置窗口，选中项只有一行高，侧栏底板铺满；设置页插件横幅在 macOS、Windows、Chromium、MIX 2S 与虚拟机上与正文同宽。iOS 未实看 |
+| 文字样式 `control`（2026-10-20） | `Text`、`Label` 的 `style: control` 取平台按钮标题的字体：SwiftUI 不设字体、WinUI 3 与 GTK 继承按钮、Compose 用 `labelLarge`、Web 继承按钮的 `font`；`style!` 的 `text` 块给它另定字号时构建失败（编译器测试覆盖） | 一个实际应用胶囊按钮里的文字：Windows 11 实体机 14 号常规体、macOS 27.0.1 与 Chromium（13 px、500）、Ubuntu 24.04 虚拟机，都与同一行的系统胶囊按钮标题一致 |
+| tvOS 目标与电视布局、`Shortcut`、`default_focus`（2026-10-20） | `swiftui + tvos` 生成与构建；`bern run --target tvos` 装进 tvOS 模拟器并启动；生成测试按 tvOS 模拟器 SDK 类型检查；分层图标的生成与检查有单元测试。`Layout(size: tv)`、`window.tv`、`Shortcut`、`default_focus` 六个目标生成：`examples/gallery` 用到它们，各后端的生成器测试覆盖，GTK 在 Ubuntu 24.04 虚拟机上编译（Clippy、生成应用的类型检查），WinUI 3 在 Windows PC 上用 MSVC 编译，Web 运行时测试覆盖停用的快捷键让键 | Apple TV 4K（第 3 代）模拟器（tvOS 26.5）：展示应用与一个实际应用的电视布局，标签栏、焦点移动、默认焦点、缩放场景与模态、播放器隐藏控制条时左右快退快进、全屏设置页；主屏幕图标与顶部货架图。返回与播放/暂停、真实遥控器与真机未验证，见 [tvOS 记录](../Implementation/tvOS-SwiftUI.md) |
+| 只显示图标的页签 `Tab(display: icon)`（2026-10-20） | 编译器测试（缺 `icon` 时报错）；六个后端的生成器测试（SwiftUI 在 tvOS 与 macOS 上类型检查，WinUI 3 在 Windows PC 上用 MSVC 编译生成的 gallery，GTK 在 Ubuntu 虚拟机上过 Clippy 与生成应用的类型检查）；Web 运行时测试覆盖 `aria-label` 与只有图标的按钮 | tvOS 模拟器上实际应用的标签栏只有放大镜（选中与未选中）；macOS 27 上窗口工具栏的页签只显示符号、对话框表单里的经典页签显示标题；Chromium、Ubuntu 虚拟机（Broadway，宽窗口的头部切换器与紧凑窗口的底部切换栏）、Windows PC 的 WinUI 3 与系统 XAML、Android 真机上 gallery 的“关于”页签只显示图标。iOS 未运行；读屏朗读未实测 |
+| 动画 SVG | 六目标生成；示例 macOS、iOS 模拟器、Android、Web 构建；Linux 随真实应用原生构建（WebKitGTK 6）；Windows 本轮未原生构建 | macOS / Web 实测 Logo 与交互；Linux 实测引导页的动画 Logo；Ubuntu 24.04 上 WebKit 沙箱需要 AppArmor 配置，`.deb` 已附带（同形配置下沙箱运行实测，安装未实测），`.tar.gz` 需手动添加，见 Linux 记录；iOS / Android 本轮未运行设备交互，Windows 未验收 |
+| 画布延伸 `Positioned(bleed:)`、`WindowButtons`、网页控件与中性色（2026-10-20） | `bleed` 在 Web、SwiftUI、Compose、GTK 与 WinUI 3 实现；`WindowButtons` 六个目标生成，SwiftUI 在 macOS 上占 84 点；Web、SwiftUI、Compose 的生成器测试覆盖 `bleed` 与 `WindowButtons`，GTK 与 WinUI 3 的生成器测试覆盖 `bleed`（GTK 生成的应用在 Ubuntu 24.04 虚拟机上类型检查，WinUI 3 的两种前端在 Windows PC 上用 MSVC 编译），GTK 的单元测试覆盖画布四周的空白与各边的延伸量；真实应用的 macOS 构建通过 Swift 类型检查，Linux 与 Windows 构建通过。Web 运行时测试覆盖带内容的胶囊按钮取标准高度 | Chromium 1280 × 800、1512 × 860、1920 × 970：播放器铺满时画面贴到窗口边（超宽窗口按 16:9 左右留黑），显示控件时画框与控制条在居中的设计画布里；顶栏图标按钮没有共享底板、相隔 6 px；菜单从按钮处弹出、尾端对齐按钮；控件在铺满与退后之间淡入淡出并移动 8 px。Ubuntu 24.04 虚拟机（Broadway，窗口 1600 × 713）：铺满时画面 1267 宽（按窗口高的 16:9），越出 1280 × 800 设计画布、两侧只留 16:9 之外的黑边；退后时画框在设计坐标 (103, 64, 1074)，控件在居中的设计画布里；各边的延伸量与画框随同一个弹簧逐帧移动，窗口变宽后下一次布局即用新的空白。Windows 11 实体机（WinUI 3，150% 缩放）：窗口 1600 × 800 时显示控件的画框在居中的设计画布里（x 268.7、宽 1063，即设计坐标 (103, 1074) 乘画布缩放 0.99），铺满时画面 1408 宽（按内容高的 16:9），越出设计画布；拉成 1400 × 800 后铺满的画面横跨整个内容宽度，1280 × 977 时按宽铺满、上下居中；静置隐藏控件后画面同样铺满，Windows 上过渡未逐帧采样。Android、iOS 上的 `bleed` 与 macOS 改窗口比例后的外观未实测 |
+| 按平台给出的长度与 `shape: chip`（2026-10-20） | 编译器测试覆盖 `style!` 里 `gap`、`padding_x`、`padding_y`、`width`（含 `fit`）、`height`、`font_size`、`row_height` 的解析与报错；构建每个目标前按它的平台替换元素写下的长度、在网页以外把 chip 换成 30 点胶囊，生成器测试覆盖两者；六个目标都经过这一步，不需要各自实现 | Chromium 1280 × 800 对照网页设计稿：侧边栏、品牌行、导航项、账户行、工具栏与搜索框、媒体库的标签与缩放、设置对话框的标题行、分组与行内下拉逐项量得与设计稿一致（相差不超过 1 px，系统滚动条占位与 Inter 字宽除外）；macOS 上同一应用的外观未在本轮实测 |
+| 应用自带的媒体内核（2026-10-21） | `bern-media` 的 `MediaKernel` 与 C ABI；SwiftUI 的视频视图在内核模式下给出 `CAMetalLayer` 与 `CADisplayLink` 帧时钟（macOS、iOS、tvOS 生成），macOS 上用一个实际应用自带的播放内核实测播放、跳转、视图间转移与命令行控制；WinUI 3 的视频视图给出 `SwapChainPanel` 与垂直空白帧时钟（2026-10-25），Windows 11 实体机上实测播放、字幕、硬件解码、暂停与跳转；GTK 的视频视图给出帧接收器 `FrameSink` 与 GTK 帧时钟（2026-10-27），Steam Deck 实体机上实测播放、字幕、暂停中跳转、全屏与视图间转移；iOS、tvOS 未实测；Compose、Web 不提供内核表面，内核不挂接，平台媒体设施照常 |
+| 性能追踪的引擎与桥接一侧（2026-10-21） | Rust 测试：规则解析与报错、环形缓冲（写满丢弃并计数、边写边读）、乱序到达的记录按 token 与修订号对上、长帧归因、同一命令过频时合并成一行、关闭时不读时钟也不分配缓冲；真实引擎走完命令写出可解析的时间线；bern-ffi 测试模拟一次控件操作，报告里从动作到上屏各段对上；`bern run --trace` 的传参有测试；WebAssembly 编译通过 | 未在设备或真实应用上实测；各前端界面线程一侧未接入 |
+| 跟随状态的快捷键、`ShortcutInput` 与菜单栏（2026-10-24） | `bound_shortcuts` 与 `shortcut_input` 六个目标实现，`menu_bar` 在 macOS 实现、其他目标声明为不适用；`examples/gallery` 用到三者（菜单栏的应用、文件、自建菜单与子菜单，跟随状态的详情快捷键，改键的 `ShortcutInput`），各后端的生成器测试随之覆盖；SwiftUI 另有测试按 macOS、iOS、tvOS 的 SDK 类型检查；Web 运行时测试覆盖跟随状态的键与录制；GTK 运行时的单元测试在 macOS 的 GTK 4 上通过；编译器与 trybuild 测试覆盖绑定、字面量 `current` 与形状检查；gallery 与一个实际应用 `bern check` 各目标无警告 | macOS 27 上 `examples/gallery` 实测：菜单出现在菜单栏，`ui.activate` 与真实点击菜单项执行命令，草稿与引擎状态变化后勾选、启用随之更新；改键后旧键失效、新键生效；`ShortcutInput` 录下 ⌃⌘F、Esc 保持、Delete 清空。`examples/gallery` 的 Android 构建编译了 Compose 的运行时代码；iOS、tvOS、Android、Linux、Windows、Web 未运行实测，WinUI 3 的 C++ 未编译 |
+| 静置区与 `landscape` 的适用范围（2026-10-24） | `idle_area` 在 Compose、GTK 与 WinUI 3 实现：Compose 按静置区的悬停进出，GTK 按拾取、WinUI 3 按命中测试找出鼠标所在的静置区；`window_landscape` 在 Web 实现（屏幕方向锁定），tvOS、Linux、Windows 声明为不适用。四个后端的生成器测试覆盖，Web 的运行时测试覆盖横屏锁定；临时应用 `bern check` 各目标无警告、`bern build --target android` 通过；WinUI 3 的两种前端在 bern-pc 上经 MSVC 编译（需先绕过当时 HEAD 中三处与本项无关的编译错误）；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy | 未运行实测：Ubuntu 虚拟机磁盘已满，Windows 只编译，Android 没有接鼠标的设备，横屏锁定没有在手机浏览器上试 |
+| 运行时切换的应用图标（`[app.alternate_icons]`、`WindowSet(icon:)`，2026-10-25） | 编译器测试覆盖枚举与备用图标的对应和错误；五个后端的生成器测试覆盖各自的打包与切换代码（iOS 的 `CFBundleAlternateIcons` 与 `--alternate-app-icon`、macOS 的 `Assets.car`、Android 的 `activity-alias`、Windows 的 `app-<名称>.ico`、GTK 的图标名、Web 的模板） | 一个实际应用：iOS 26.5 模拟器上切换后系统弹出确认、主屏幕换成备用图标；macOS 27.0.1 上程序坞随设置切换并能换回；Android 15 实体机上选中后离开应用，启动器入口换成该图标并能换回（开着主题图标时两款单色层相同，外观看不出区别）；Windows、Linux 未运行；tvOS 不支持 |
+| Icon Composer 的 `.icon` 图标（2026-10-25） | 配置测试覆盖 `macos`、`ios` 接受 `.icon` 及缺图、平台不符的错误；生成器测试覆盖两个平台的 `AppIcon.icon` 落位、`actool` 参数，以及 macOS `Info.plist` 的 `CFBundleIconName` | 一个实际应用：macOS 27.0.1 上 `actool` 编出 `Assets.car` 与 `AppIcon.icns`，`NSWorkspace.icon(forFile:)` 渲染的访达图标是液态玻璃版本，并随系统的深色图标风格显示 `.icon` 指定的深色底；iOS 26.5 模拟器主屏幕显示液态玻璃图标，`Assets.car` 带浅色、深色、着色三种外观。macOS 14、15 与 iOS 17、18 上的平面图未在真机上看过 |
+| iOS 的搜索结果、工具栏与表单下拉菜单，横向滚动不裁阴影（2026-10-24） | SwiftUI：页面里的搜索框有结果时由系统列表在页面位置列出、没有结果时居中显示；iOS 工具栏按钮不染强调色；表单里的 `Picker` 菜单把当前值放进填充胶囊、用正文色；横向 `ScrollView` 加 `.scrollClipDisabled()` | iOS 26.5 模拟器上一个实际应用的设置搜索、工具栏与媒体库横向滚动的筛选标签 |
+| `window.keyboard`（2026-10-24） | 七个目标生成：macOS、Linux、Windows 总是成立；iOS 与 tvOS 跟随 GameController 的键盘连接；Android 读当前配置的硬键盘；浏览器按指针与按键判断 | Android 真机（没接键盘）上一个实际应用的设置里不显示快捷键；接上键盘时的切换未实测 |
+| 行里领头的文字占去后面 `Spacer` 的位置（2026-10-24） | `bern_ir::leads_row`：SwiftUI 与 Compose 让文字取得剩余宽度并换行，后面的控件保持宽度；其他目标按 `Row` 的一般规则 | iOS 模拟器上一个实际应用的设置行：说明文字换行，开关不被挤出 |
+| 按内容定高的 `Modal`（2026-10-24、25） | 不写 `height` 时六个后端都按内容定高，超过窗口减 32 时由里面的滚动视图滚动；SwiftUI 在 iOS 上让卡片留在安全区内，遮罩仍铺满整屏 | macOS、iOS 26.5 模拟器与 Android 真机上一个实际应用的插件页（长短两种说明）；GTK 与 WinUI 3 见各自实现记录 |
+| 瀑布流 `Grid(masonry)` 与行内 Markdown `Text(markdown)`（2026-10-24） | 瀑布流：SwiftUI 与 Compose 用自定义布局，Web 用一像素高的网格行，GTK 与 WinUI 3 按普通网格排。Markdown：SwiftUI 用系统的 `AttributedString`，Compose 用 `AnnotatedString` 与 `LinkAnnotation`，Web 生成元素，GTK 用 Pango 标记，WinUI 3 去掉标记只显示文字 | macOS、iOS 模拟器与 Android 真机上一个实际应用的插件市场与插件页：多列卡片按高度错落排列，标题、列表（含嵌套）、粗体、链接与行内代码按平台样式显示；GTK 与 WinUI 3 未实测 |
+| 文字样式 `code`（2026-10-25） | 五个后端用各自平台的等宽字体：SwiftUI 的 `.monospaced`、Compose 的 `FontFamily.Monospace`、Web 的 `ui-monospace`、GTK 的 `monospace` 样式类、WinUI 3 的 Cascadia Mono；定了字号时 SwiftUI 也保留等宽 | Android 真机上一个实际应用插件页的代码块；其他目标未实测 |
+| 按明暗换色的 SVG 画成两张图、声明图片双采样（2026-10-26） | `bern-svg` 测试覆盖分类与按外观展开；`svg_targets` 覆盖 macOS、Windows、Android、Linux、Web 的降低（`dark_source`）与两张 PNG 的颜色；Compose、GTK、WinUI 3、SwiftUI（含 swiftc 类型检查）与 Web 的生成器测试，Web 运行时测试覆盖排进页面后选图与主题变化时换图；GTK 运行时在 macOS 的 GTK 4 上通过 Clippy；WinUI 3 与 XAML Islands 在 Windows PC 上经 MSVC 编译；临时示例 `bern build` 的 macOS、Android、Web 构建通过 | macOS 27：窗口里、`appearance: dark` 部件里、`appearance: light` 部件里各一张，跟随系统（深色）、`WindowSet(appearance:)` 强制浅色与深色、回到跟随系统时都显示对应那张；Chromium（内置浏览器）上同样四种情况及模拟系统切到浅色都对。macOS 的系统外观切换、iOS、tvOS、Android、Linux、Windows 未运行实测 |
+| 只为鼠标显示的滚动条 `ScrollView(indicators: mouse)`（2026-10-27） | SwiftUI 在 macOS 照系统滚动条样式（接着鼠标或设为始终显示时显示）、在 iOS 指针悬停后显示，tvOS 不显示；WinUI 3 按指针设备类型、GTK 按事件设备来源、Web 按 `pointerType` 在显示与隐藏之间切换，触摸与笔隐藏；Compose 本来不画滚动条。生成器测试含 macOS 与 iOS 的 Swift 类型检查，`bern-gtk` 编译通过；WinUI 3 的 C++ 未编译 | 未在任何设备上实测 |
+| 状态栏项 `StatusItem`（2026-10-28） | `status_item`：macOS 为 `MenuBarExtra`（单色 SF Symbol，没有窗口时收起 Dock 图标），Windows 为通知区域图标与系统弹出菜单，Linux 为 StatusNotifierItem 与 dbusmenu；iOS、tvOS、Android、Web 不适用。编译器测试覆盖降入窗口目录与不属于窗口的规则；SwiftUI 测试按三个 SDK 类型检查；WinUI 3 与 GTK 的生成器测试覆盖菜单函数（条件、`if let`、`match`、`ForEach`）；显示器调节程序的三个桌面目标都构建成功 | Windows 实体机：关窗后应用留在通知区域，单击图标重开窗口，右键菜单的各项与子菜单正确，子菜单的预设把显示器亮度设为 30，“退出”结束进程并移除图标。Linux 虚拟机：在测试用的 watcher 下登记、属性、菜单、`Activate` 与菜单项点击、退出都经 D-Bus 验证。macOS 未运行实测；KDE、GNOME 的真实状态区未看 |
+| 受控滑块绑定整数（2026-10-28） | `Slider(current:)` 读写 `i64` 时，SwiftUI、GTK 与 Web 把滑块的值取整后交给命令，与 WinUI 3、Compose 相同：此前 SwiftUI 编译失败（`Double` 交给 `Int64`），GTK 把浮点数按整数的位置编码，Web 交出非整数 | 显示器调节程序的 macOS 版构建通过；其他目标未实测 |
+| 状态栏项的“登录时启动” `login_item`（2026-10-29） | 菜单在“退出”前加一项，由用户勾选；勾选时系统在登录时以不开窗口的方式启动应用。Windows 为当前用户 `Run` 键下以 `bundle_id` 命名的值（命令带 `--at-login`，任务管理器关掉的算未勾选，卸载程序删去），Linux 为 XDG 自启桌面文件，macOS 为 `SMAppService.mainApp` 并按 `keyAELaunchedAsLogInItem` 关闭启动时的窗口。编译器、SwiftUI（三个 SDK 类型检查）、WinUI 3 与 GTK 的生成测试覆盖这一项；`bern-gtk` 测试覆盖自启命令的引号规则 | Windows 实体机（release 安装版）：按登录命令启动后只有通知区域图标、没有窗口，勾选写入 `Run` 值、取消删去，任务管理器的禁用记录显示为未勾选、重新勾选后清除，运行中再次启动直接结束，卸载删去 `Run` 值。Linux 虚拟机（测试 watcher）：勾选写出自启文件，`Hidden=true` 显示为未勾选，按 `Exec` 启动没有窗口，重复启动直接结束，单击图标打开主窗口，取消删去文件。未验证：真实的注销再登录、Windows 隐藏启动后从图标打开窗口、macOS 的全部行为 |
+| 表格 `Table`、受控 `TextInput(current:)`、`paste:` 与引擎的 `copy_text`（2026-10-29） | `table`、`controlled_text` 七个目标实现，`paste` 除 tvOS 外实现（tvOS 没有剪贴板）。编译器测试覆盖表格的结构规则、`KeysField` 与 `pick`/`paste` 互斥；六个后端的生成器测试含 gallery 的表格页；SwiftUI 生成代码按 macOS、iOS、tvOS 的 SDK 类型检查；WinUI 3 与 Islands 的 gallery 在 Windows 实体机上经 MSVC 编译；Android gallery 构建出 APK；`bern-gtk` 的 clippy 与测试在虚拟机上通过（不含需 WebKitGTK 6 的 `svg`、`script` 特性） | Linux 虚拟机（Broadway）上一个实际应用：表格的选择、右键先选中再出菜单、菜单项、点表头换排序、主操作，增删换序的压力测试无 GTK 断言，受控输入的编辑到达引擎，复制再粘贴的分享链接一字不差。网页（Chromium 内核）：选择、行菜单、排序、双击、受控输入；剪贴板读写用替身。macOS、iOS、tvOS、Android、Windows 未运行 |
+| 状态栏项自己的单色图标 `StatusItem(image:)`（2026-10-29） | `status_item` 的三个桌面目标：构建时把 SVG 的形状画成各平台的尺寸；macOS 是 18 点的模板图片，Windows 是黑白两个 `.ico`（图标资源 2、3，跟随任务栏的明暗），Linux 是嵌进程序的黑色 PNG，运行时按 GNOME 顶栏或设置门户的 `color-scheme` 涂成白色或黑色。编译器测试覆盖 `icon` 与 `image` 二选一、只收已声明的 SVG；三个后端的生成测试检查生成的图片与代码，SwiftUI 按 macOS SDK 类型检查，WinUI 3 在 Windows 实体机上经 `rc` 与 MSVC 编译 | Linux 虚拟机：测试用的 watcher 与门户下，浅色配色时六种尺寸都是黑色，门户改为深色后发出 `NewIcon`、全部变白。macOS 与 Windows 未运行 |
+
+Firefox 与 Safari 手机布局尚未实测。用于验收的应用在 macOS 上由应用自带的媒体内核播放，其他平台的播放器仍有模拟状态；播放器界面和图片过渡的验收不等于已接入完整媒体播放功能。
+
+## 来源与维护
+
+- 功能定义及拒绝规则：[bern-target-api 的功能定义](../../../crates/bern-target-api/src/lib.rs)与[功能检查](../../../crates/bern-target-api/src/check/features.rs)。
+- [SwiftUI 清单](../../../crates/bern-backend-swiftui/src/lib.rs)及 [iOS 描述](../../../crates/bern-backend-swiftui/src/ios.rs)、[tvOS 描述](../../../crates/bern-backend-swiftui/src/tvos.rs)。
+- [Web](../../../crates/bern-backend-web/src/lib.rs)、[Compose](../../../crates/bern-backend-compose/src/lib.rs)、[GTK](../../../crates/bern-backend-gtk/src/lib.rs)、[WinUI 3](../../../crates/bern-backend-winui3/src/lib.rs) 清单。
+- 验收：[macOS](../Implementation/macOS-SwiftUI.md)、[iOS](../Implementation/iOS-SwiftUI.md)、[tvOS](../Implementation/tvOS-SwiftUI.md)、[Android](../Implementation/Android-Compose.md)、[Web](../Implementation/Web.md)、[Linux](../Implementation/Linux-GTK.md)、[Windows](../Implementation/Windows-WinUI3.md)。
+
+新增后端特性时同时更新此表和对应实现记录，并保留对尚未验收场景的说明。

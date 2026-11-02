@@ -1,90 +1,92 @@
-# iOS SwiftUI 实现记录
+**English** · [简体中文](../zh-CN/Implementation/iOS-SwiftUI.md)
 
-当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
+# iOS SwiftUI implementation notes
 
-- 日期：2026-10-12
-- 依据：[Bern 架构设计 v0.24](../Design.md)
-- 工具链：Rust 1.99.0（`aarch64-apple-ios-sim` 与 `aarch64-apple-ios`）；Xcode 26.5，iOS 26.5 SDK，Swift 6.3.2；iPad 窗口化模式的后半部分用 Xcode 27.0，iOS 27.0 模拟器 SDK，Swift 6.4
-- 验证环境：iPhone 17 Pro 与 iPad Pro 13 英寸（M5）模拟器，iOS 26.5（M4 Mac）
+For the current component interface see the [component reference](../Reference/UI.md); for per-item support and the recent verification scope see the [platform capability table](../Reference/Platforms.md). The implementation and acceptance records of each phase are kept below.
 
-本文记录 `swiftui + ios` 目标的实际完成情况。同一个应用包在 iPhone 与 iPad 上运行，窗口的呈现方式在运行时按设备决定（见“iPad”）。展示应用（`examples/showcase`）的声明、协议、业务核心和 IR 不变，只增加了 `[targets.ios]`；生成器与 macOS 共用，按平台区分窗口、场景与少数控件样式。这一版构建模拟器应用；真机目标能编译链接，但还没有签名、安装与打包。
+- Date: 2026-10-12
+- Basis: [Bern architecture design v0.24](../Design.md)
+- Toolchain: Rust 1.99.0 (`aarch64-apple-ios-sim` and `aarch64-apple-ios`); Xcode 26.5, iOS 26.5 SDK, Swift 6.3.2; the second half of the iPad windowed mode work used Xcode 27.0, the iOS 27.0 simulator SDK, Swift 6.4
+- Verification environment: iPhone 17 Pro and iPad Pro 13-inch (M5) simulators, iOS 26.5 (M4 Mac)
 
-## 完成情况
+This document records what was actually completed for the `swiftui + ios` target. The same app bundle runs on iPhone and iPad; how windows are presented is decided at runtime by device (see "iPad"). The declaration, protocol, business core and IR of the showcase app (`examples/showcase`) are unchanged, with only `[targets.ios]` added; the generator is shared with macOS and differs by platform in windows, scenes and a few control styles. This version builds a simulator app; the device target compiles and links, but signing, installation and packaging are not done yet.
 
-| 设计要求 | 状态 | 说明 |
+## Completion status
+
+| Design requirement | Status | Notes |
 | --- | --- | --- |
-| 生成代码可构建 | 完成 | `bern build --target ios` 生成 Swift 与胶水 crate，构建模拟器应用包、Mac 上的 CLI 与 MCP 服务器；生成测试按 iOS 模拟器 SDK 对生成的 Swift 做类型检查 |
-| 窗口、导航、菜单与生命周期按平台区分 | 完成 | 运行时分为共用的 `BernRuntime.swift`、`BernMedia.swift` 与平台文件 `BernAppKit.swift`（macOS）、`BernUIKit.swift`（iOS），构建只编译自己平台的那一个 |
-| 不支持原生多窗口时用虚拟窗口 | 完成 | iPhone：一个场景，主窗口铺满，其他窗口是叠在上面的 sheet；窗口事实报告为 `Virtual` |
-| 支持多窗口的环境按已验证的原生能力选择 | 完成 | iPad：除设置外每种窗口是独立的原生窗口（`WindowGroup` 场景），报告为 `Native`；设置是主窗口上的 sheet |
-| 前后台生命周期 | 完成 | 进入后台时窗口报告为隐藏、失去焦点，回到前台恢复；媒体按 AVFoundation 的实际状态报告 |
-| 屏幕旋转、键盘、安全区域 | 部分 | 键盘输入、安全区域与 iPad 窗口缩放（停在最小尺寸）实测；旋转由 SwiftUI 处理，未实测 |
-| 状态可订阅；带参数命令与错误返回 | 完成 | 与 macOS 相同的运行时：引擎状态、会话草稿、查询、关闭协议 |
-| Video 原生呈现 | 完成 | AVFoundation 执行端与 `AVPlayerLayer` 呈现、命令驱动的控制条 |
-| 真机构建与打包 | 未完成 | 引擎与界面能按 `aarch64-apple-ios` 编译链接；签名、描述文件、安装与 `bern package` 未做 |
+| Generated code builds | Done | `bern build --target ios` generates Swift and the glue crate, and builds the simulator app bundle plus the CLI and MCP server on the Mac; the generation tests type-check the generated Swift against the iOS simulator SDK |
+| Windows, navigation, menus and lifecycle differ by platform | Done | The runtime is split into the shared `BernRuntime.swift` and `BernMedia.swift` and the platform files `BernAppKit.swift` (macOS) and `BernUIKit.swift` (iOS); a build compiles only the one for its own platform |
+| Virtual windows when native multiple windows are not supported | Done | iPhone: one scene, the main window fills it, other windows are sheets stacked on top; window facts report `Virtual` |
+| Environments that support multiple windows choose by verified native capability | Done | iPad: every window kind except settings is an independent native window (a `WindowGroup` scene), reported as `Native`; settings is a sheet on the main window |
+| Foreground and background lifecycle | Done | On entering the background windows report hidden and lose focus, and are restored on returning to the foreground; media reports AVFoundation's actual state |
+| Screen rotation, keyboard, safe areas | Partial | Keyboard input, safe areas and iPad window resizing (stopping at the minimum size) measured; rotation is handled by SwiftUI, not measured |
+| Subscribable state; commands with parameters and error returns | Done | The same runtime as macOS: engine state, session drafts, queries, close protocol |
+| Native Video presentation | Done | AVFoundation executor and `AVPlayerLayer` presentation, command-driven control bar |
+| Device build and packaging | Not done | The engine and UI compile and link for `aarch64-apple-ios`; signing, provisioning profiles, installation and `bern package` not done |
 
-## 工程结构
+## Project structure
 
-| 位置 | 内容 |
+| Location | Contents |
 | --- | --- |
-| `crates/bern-backend-swiftui/src/ios.rs` | iOS 目标：目标描述、检查、生成与构建步骤 |
-| `crates/bern-backend-swiftui/src/swift/` | 两个平台共用的生成器，`Platform` 决定差异 |
-| `templates/BernUIKit.swift` | iOS 平台部分：虚拟窗口宿主、sheet、窗口事实、开发快照、视频视图 |
-| `templates/BernAppKit.swift` | macOS 平台部分，从原来的 `BernRuntime.swift` 分出，行为不变 |
+| `crates/bern-backend-swiftui/src/ios.rs` | iOS target: target description, checks, generation and build steps |
+| `crates/bern-backend-swiftui/src/swift/` | Generator shared by both platforms; `Platform` decides the differences |
+| `templates/BernUIKit.swift` | iOS platform part: virtual window host, sheets, window facts, development snapshots, video view |
+| `templates/BernAppKit.swift` | macOS platform part, split out of the original `BernRuntime.swift`, behavior unchanged |
 
-生成的应用包是 iOS 的扁平结构：可执行文件、`Info.plist`、各语言的 `.lproj` 与随包资源都在包的顶层。图标由 `actool` 把 1024 像素的 PNG 编译进 `Assets.car`（未声明图标时是 Bern 标志的方形版本，声明的较小图标先用 `sips` 放大；`[app.icon].ios` 为 `.appiconset` 文件夹时原样编译，其中的深色、着色版随之生效；为 Icon Composer 的 `.icon` 文件夹时以 `AppIcon.icon` 与资源目录一起交给 `actool`，iOS 26 起显示液态玻璃图标，更早的系统用从它画出的浅色、深色、着色平面图）。`Info.plist` 声明启动屏（否则应用以兼容模式显示，不铺满屏幕）、多场景（iPad 的多窗口；iPhone 始终只有一个场景）、iPhone 与 iPad、iPad 上的全部四个方向、最低 iOS 17.0。
+The generated app bundle has the flat iOS structure: the executable, `Info.plist`, each language's `.lproj` and the bundled resources are all at the top level of the bundle. `actool` compiles the 1024-pixel PNG icon into `Assets.car` (with no icon declared it is a square version of the Bern logo, and a smaller declared icon is first enlarged with `sips`; when `[app.icon].ios` is an `.appiconset` folder it is compiled as is, and its dark and tinted variants take effect with it; when it is an Icon Composer `.icon` folder it is handed to `actool` as `AppIcon.icon` together with the asset catalog, iOS 26 and later show the Liquid Glass icon, and earlier systems use the light, dark and tinted flat images drawn from it). `Info.plist` declares a launch screen (otherwise the app is shown in compatibility mode and does not fill the screen), multiple scenes (multiple windows on iPad; iPhone always has only one scene), iPhone and iPad, all four orientations on iPad, and a minimum of iOS 17.0.
 
-最低 iOS 17：与 macOS 14 同一代，运行时用到的 Observation、`ContentUnavailableView` 等从这一版起提供。
+Minimum iOS 17: the same generation as macOS 14; Observation, `ContentUnavailableView` and other APIs the runtime uses are available from this version on.
 
-## 与 macOS 的差异
+## Differences from macOS
 
-生成器只在以下几处按平台区分：
+The generator differs by platform only in the following places:
 
-- **场景**：macOS 每个窗口种类一个 `Window` 或 `Settings` 场景；iOS 没有这两种场景，主窗口与设置以外的每种窗口各是一个 `WindowGroup`，主窗口的场景内容是 `BernVirtualHost`（它在 iPhone 上承载所有虚拟窗口，在 iPad 上承载设置）。
-- **窗口尺寸**：声明的宽高与最小尺寸只用于人能调整大小的窗口，即 iPad；iPhone 上由屏幕与 sheet 决定。
-- **侧边栏**：iOS 上分栏视图在窄屏时折叠为导航栈，侧边栏是第一屏，标题为窗口标题（`.navigationTitle(bernWindow.title)`）。侧边栏控件登记在整个分栏视图上，所以只显示详情时外部入口也能切换页面（macOS 上效果相同）。
-- **文本输入**：iOS 的表单只显示输入框的提示文字，不显示标签。单行与密码输入改为 `LabeledContent`（标签在左、输入在右，与“设置”应用相同），多行输入的标签放在上方。
-- **控件样式**：`Switch` 的 `checkbox` 样式在 iOS 上是开关（iOS 没有复选框）；`Picker` 的 `radio` 样式在 iOS 上是带勾选标记的内嵌列表；`chips` 与 macOS 相同，是 30 点的系统玻璃胶囊按钮（见 macOS 文档“标签选择器与换行工具条”）。
+- **Scenes**: macOS has one `Window` or `Settings` scene per window kind; iOS has neither of these scenes, so every window kind other than the main window and settings is a `WindowGroup` of its own, and the main window's scene content is `BernVirtualHost` (on iPhone it hosts all virtual windows, on iPad it hosts settings).
+- **Window size**: the declared width, height and minimum size are used only for windows people can resize, that is, on iPad; on iPhone the screen and the sheet decide.
+- **Sidebar**: on iOS the split view collapses into a navigation stack on narrow screens; the sidebar is the first screen, titled with the window title (`.navigationTitle(bernWindow.title)`). The sidebar control is registered on the whole split view, so external entry points can switch pages even when only the detail is shown (the same effect on macOS).
+- **Text input**: iOS forms show only an input field's placeholder, not its label. Single-line and password inputs become `LabeledContent` (label on the left, input on the right, as in the Settings app); multi-line inputs put the label above.
+- **Control styles**: the `checkbox` style of `Switch` is a toggle switch on iOS (iOS has no checkboxes); the `radio` style of `Picker` is an inline list with checkmarks on iOS; `chips` is the same as on macOS, 30-point system glass capsule buttons (see "Tag pickers and wrapping toolbars" in the macOS document).
 
-## 窗口
+## Windows
 
-iPhone 只能有一个场景，按设计文档用虚拟窗口，形式遵循 iOS 的习惯（iPad 上设置窗口同样如此）：
+iPhone can have only one scene, so per the design document it uses virtual windows, in forms that follow iOS conventions (the settings window on iPad works the same way):
 
-- **主窗口**铺满场景。被命令关闭后，场景显示应用名与“打开“…””按钮，点按后重新打开（新的实例代次）。
-- **其他窗口**是 sheet，按打开顺序一层叠一层：导航栏显示窗口标题，右上角“完成”按钮经关闭协议请求关闭。设置窗口的页签是 sheet 底部的标签栏。
-- **下滑关闭**：没有待确认的修改时可以下滑关闭，作为系统事实报告（`changed_by: System`）；关闭检查需要确认时禁止下滑，只能用“完成”按钮，此时弹出存储、不存储、取消。
-- **窗口动作**：只有最上面的窗口可以激活；它和主窗口可以关闭。被 sheet 盖住的窗口不能被提到前面（iOS 只能先关掉上面的），`window.activate` 与 `window.close` 返回 `target_unavailable`；`minimize`、`restore`、`maximize`、`move`、`resize` 同样返回 `target_unavailable`，并列出可用动作。
-- **窗口事实**：可见性跟随场景（进入后台为隐藏），帧是窗口根视图在场景中的位置（点），只有活动场景中最上面的窗口有焦点。
+- **The main window** fills the scene. After it is closed by a command, the scene shows the app name and an Open "…" button; tapping it reopens the window (a new instance generation).
+- **Other windows** are sheets, stacked one on another in the order they were opened: the navigation bar shows the window title, and a "Done" button at the top right requests closing through the close protocol. The settings window's tabs are a tab bar at the bottom of the sheet.
+- **Swipe down to close**: with no pending changes to confirm, a sheet can be swiped down to close, reported as a system fact (`changed_by: System`); when the close check needs confirmation, swiping down is disabled and only the "Done" button works, which then presents Save, Don't Save and Cancel.
+- **Window actions**: only the topmost window can be activated; it and the main window can be closed. A window covered by a sheet cannot be brought to the front (on iOS the ones above it can only be closed first), so `window.activate` and `window.close` return `target_unavailable`; `minimize`, `restore`, `maximize`, `move` and `resize` likewise return `target_unavailable` and list the available actions.
+- **Window facts**: visibility follows the scene (hidden in the background), the frame is the position of the window's root view in the scene (in points), and only the topmost window in the active scene has focus.
 
 ## iPad
 
-同一个应用包在 iPad 上按苹果的说明处理窗口：
+On iPad the same app bundle handles windows as Apple's documentation describes:
 
-- **能否开多个窗口**：SwiftUI 应用在 iPadOS 上声明了 `UIApplicationSupportsMultipleScenes` 时可以打开多个窗口（`supportsMultipleWindows` 的说明），iPhone 上同样的声明不起作用。运行时在启动引擎前按“iPad 且声明了多场景”决定，经 `bern_app_native_windows` 告诉引擎，窗口事实里的呈现方式因此与实际一致：iPad 上是 `Native`，iPhone 上是 `Virtual`。
-- **窗口**：iPadOS 没有 macOS 的 `Window`（单个窗口）场景，只有 `WindowGroup`。每种窗口是一个 `WindowGroup(id:for:)`，打开时以窗口种类作为值（`openWindow(id:value:)`）；SwiftUI 对同一个值不新开窗口而把已有的调到前面，与 Bern 每种窗口默认一个实例的规则一致。关闭用 `dismissWindow(id:value:)`，激活即再次打开。窗口标题是声明的标题，系统的窗口列表与菜单栏用它区分窗口。
-- **设置**：iPadOS 没有 `Settings` 场景；设置窗口是主窗口上的表单 sheet，与 iPhone 相同。人机界面指南要求接了键盘时 ⌘, 打开设置，生成的 `.commands` 把 iPadOS 菜单栏里的“设置”项换成打开设置窗口，快捷键 ⌘,。
-- **次级窗口的外观**：内容没有自带导航时放在带行内标题的导航栈里。WWDC25 的《Elevate the design of your iPad app》要求工具栏包住窗口控件，否则系统使用只为兼容而存在的安全区；有了工具栏，窗口化时窗口控件排在标题栏前缘。
-- **尺寸**：TN3192 要求支持可调整大小的场景（启动屏、iPad 上全部四个方向、不用 `UIRequiresFullScreen`），SwiftUI 以 `.windowResizability(.contentMinSize)` 与内容的最小 `frame` 表达最小尺寸。生成代码对声明了最小尺寸的窗口加上这两者（`frame` 只在 iPad 上生效，iPhone 不受影响），声明了宽高的窗口加 `.defaultSize`。
-- **窗口事实**：每个窗口的可见性来自它自己场景的阶段（全屏模式下切到另一个窗口时，原来的窗口为隐藏），帧是窗口根视图在屏幕上的位置。窗口化模式下几个窗口的场景同时是活动的，系统窗口也各自是自己场景的 key，只有最前面的窗口“显示为活动”，所以焦点还要看 SwiftUI 的 `appearsActive`（iOS 18 起）；iOS 17 没有这个值，焦点只看场景阶段与 key。被设置 sheet 盖住的主窗口不能激活，与 iPhone 相同。没有公开接口最小化、移动或调整 iPad 窗口，这些命令返回 `target_unavailable`。
-- **导航**：常规宽度下分栏视图并排显示侧边栏与详情，侧边栏顶部是窗口标题；`Adaptive` 按内容宽度选择布局，视频页在 iPad 上是展开布局。
+- **Whether multiple windows can be opened**: a SwiftUI app on iPadOS can open multiple windows when it declares `UIApplicationSupportsMultipleScenes` (per the documentation of `supportsMultipleWindows`); the same declaration has no effect on iPhone. Before starting the engine the runtime decides by "iPad and multiple scenes declared" and tells the engine through `bern_app_native_windows`, so the presentation in window facts matches reality: `Native` on iPad, `Virtual` on iPhone.
+- **Windows**: iPadOS has no `Window` (single window) scene as on macOS, only `WindowGroup`. Each window kind is one `WindowGroup(id:for:)`, opened with the window kind as the value (`openWindow(id:value:)`); for the same value SwiftUI does not open a new window but brings the existing one to the front, which matches Bern's rule of one instance per window kind by default. Closing uses `dismissWindow(id:value:)`; activating is opening again. The window title is the declared title, which the system's window list and menu bar use to tell windows apart.
+- **Settings**: iPadOS has no `Settings` scene; the settings window is a form sheet on the main window, the same as on iPhone. The Human Interface Guidelines require ⌘, to open settings when a keyboard is attached; the generated `.commands` replace the "Settings" item in the iPadOS menu bar with one that opens the settings window, with the shortcut ⌘,.
+- **Appearance of secondary windows**: content without its own navigation is placed in a navigation stack with an inline title. WWDC25's "Elevate the design of your iPad app" requires the toolbar to wrap the window controls, otherwise the system uses a safe area that exists only for compatibility; with a toolbar, in windowed mode the window controls sit at the leading edge of the title bar.
+- **Size**: TN3192 requires supporting resizable scenes (a launch screen, all four orientations on iPad, no `UIRequiresFullScreen`), and SwiftUI expresses a minimum size with `.windowResizability(.contentMinSize)` and a minimum `frame` on the content. The generated code adds both to windows that declare a minimum size (the `frame` takes effect only on iPad; iPhone is not affected), and `.defaultSize` to windows that declare a width and height.
+- **Window facts**: each window's visibility comes from the phase of its own scene (in full-screen mode, after switching to another window the previous window is hidden), and the frame is the position of the window's root view on the screen. In windowed mode the scenes of several windows are active at the same time and each system window is also the key window of its own scene, yet only the frontmost window "appears active", so focus also depends on SwiftUI's `appearsActive` (iOS 18 and later); iOS 17 has no such value, so there focus depends only on the scene phase and key status. A main window covered by the settings sheet cannot be activated, the same as on iPhone. There is no public API to minimize, move or resize iPad windows, so these commands return `target_unavailable`.
+- **Navigation**: at regular width the split view shows the sidebar and the detail side by side, with the window title at the top of the sidebar; `Adaptive` chooses its layout by content width, and the video page uses the expanded layout on iPad.
 
-## 本地控制通道
+## Local control channel
 
-模拟器里的应用是 Mac 上的进程，可以和 Mac 共用文件系统，所以 CLI、JSON 客户端与 MCP 服务器（为 Mac 构建）能经 IPC 通道连到它。应用自己的临时目录在很深的容器路径里，套接字路径超过 Unix 套接字的长度上限；`bern run` 因此把 Mac 的临时目录经 `BERN_IPC_DIR` 交给应用（`simctl` 的 `SIMCTL_CHILD_` 变量），通道在其中建立套接字。iOS 上通道只在设置了这个变量时监听：从主屏幕点按启动或装在真机上时，没有别的进程能连到应用，通道不启动。
+The app in the simulator is a process on the Mac and can share the file system with the Mac, so the CLI, the JSON client and the MCP server (built for the Mac) can connect to it over the IPC channel. The app's own temporary directory is in a deep container path, and the socket path exceeds the length limit of Unix sockets; `bern run` therefore hands the Mac's temporary directory to the app through `BERN_IPC_DIR` (via `simctl`'s `SIMCTL_CHILD_` variables), and the channel creates its socket there. On iOS the channel listens only when this variable is set: when the app is launched by tapping it on the Home Screen or is installed on a device, no other process can connect to it, so the channel does not start.
 
-`BERN_IPC_DIR` 在其他平台上同样有效：它代替临时目录作为各应用套接字目录的上级目录。
+`BERN_IPC_DIR` works on other platforms too: it replaces the temporary directory as the parent of each app's socket directory.
 
-模拟器里的应用与 macOS 版包标识相同时，两者的引擎在同一个目录里，CLI 会列出两个引擎并要求用 `--engine` 指定。
+When the app in the simulator has the same bundle identifier as the macOS version, the engines of both are in the same directory, and the CLI lists both engines and requires `--engine` to pick one.
 
-iOS 会挂起完全在后台的应用，挂起时引擎不应答。客户端的握手因此有 5 秒的超时，超时报告“引擎不应答”，不再无限等待；握手之后的命令不受这个超时限制。
+iOS suspends apps that are fully in the background, and a suspended engine does not respond. The client's handshake therefore has a 5-second timeout; on timeout it reports "engine not responding" instead of waiting forever; commands after the handshake are not subject to this timeout.
 
-## 媒体
+## Media
 
-执行端与 macOS 共用（`BernMedia.swift`）。视频视图是只呈现的 `UIView`，以 `AVPlayerLayer` 显示播放器，不处理触摸，不会自行改变播放。第一个播放器创建时把音频会话设为 `.playback`（影片模式），静音开关打开时视频仍有声音，与视频应用相同。
+The executor is shared with macOS (`BernMedia.swift`). The video view is a presentation-only `UIView` that shows the player with `AVPlayerLayer`; it does not handle touches and never changes playback on its own. When the first player is created the audio session is set to `.playback` (movie mode), so video still has sound when the Silent switch is on, as in video apps.
 
-播完后若播放器没有收到跳转命令就离开了结尾，它不再是“已结束”：iOS 在应用进入后台时把已播完的播放器移回开头（AVFoundation 报告的当前时间变为 0），这时报告为暂停、位置 0，再播放从头开始。这个处理在两个平台共用的执行端中，macOS 不受影响。
+If a player that has finished leaves the end without having received a seek command, it is no longer "ended": iOS moves a finished player back to the start when the app enters the background (the current time AVFoundation reports becomes 0); it is then reported as paused at position 0, and playing again starts from the beginning. This handling is in the executor shared by both platforms; macOS is not affected.
 
-## 构建与运行
+## Build and run
 
 ```bash
 rustup target add aarch64-apple-ios-sim
@@ -93,143 +95,143 @@ open -a Simulator
 bern run --target ios
 ```
 
-`bern run --target ios` 把应用装进正在运行的 iOS 模拟器并启动，应用的输出显示在终端，直到应用退出；`BERN_*` 环境变量（例如 `BERN_APPEARANCE=dark`）一并交给应用。没有正在运行的模拟器时报错并提示启动方法。不带 `--target` 的 `bern run` 优先选择与本机系统相同的目标，Mac 上仍然启动 macOS 版。`bern doctor` 检查 iOS 模拟器 SDK 与 Rust 的模拟器目标；有没有可运行的模拟器只影响 `bern run`，不影响构建（Xcode 更新后模拟器设备要过一阵才加载完，此时构建不应失败）。
+`bern run --target ios` installs the app into the running iOS simulator and launches it; the app's output appears in the terminal until the app exits; `BERN_*` environment variables (for example `BERN_APPEARANCE=dark`) are passed to the app as well. When no simulator is running it reports an error and explains how to start one. `bern run` without `--target` prefers the target matching the host system, so on a Mac it still launches the macOS version. `bern doctor` checks the iOS simulator SDK and Rust's simulator target; whether a runnable simulator exists affects only `bern run`, not builds (after an Xcode update the simulator devices take a while to finish loading, and builds should not fail in the meantime).
 
-构建步骤：为模拟器构建引擎静态库（`IPHONEOS_DEPLOYMENT_TARGET=17.0`）与为 Mac 构建 CLI、MCP 服务器；把随包资源镜像到包顶层；`actool` 编译图标；`xcrun --sdk iphonesimulator swiftc` 编译界面；dSYM 移到包旁；ad hoc 签名。
+Build steps: build the engine static library for the simulator (`IPHONEOS_DEPLOYMENT_TARGET=17.0`) and the CLI and MCP server for the Mac; mirror the bundled resources to the top level of the bundle; compile the icon with `actool`; compile the UI with `xcrun --sdk iphonesimulator swiftc`; move the dSYM next to the bundle; sign ad hoc.
 
-## 验证记录
+## Verification log
 
-2026-10-12，iPhone 17 Pro 模拟器（iOS 26.5），由生成的 CLI 与模拟器截图驱动：
+2026-10-12, iPhone 17 Pro simulator (iOS 26.5), driven by the generated CLI and simulator screenshots:
 
-- **构建与测试**：`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 通过；新增 iOS 生成测试（按 iOS 模拟器 SDK 类型检查、Info.plist、构建步骤、资源命名规则）。真机：引擎按 `aarch64-apple-ios` 构建，界面按 `arm64-apple-ios17.0` 编译链接，得到平台为 iOS、最低 17.0 的 arm64 可执行文件；未签名、未安装。
-- **外观**：iOS 26 的标准控件与 Liquid Glass 导航栏、搜索栏与标签栏；侧边栏在底部有搜索栏；按钮页的工具栏按钮、开关与滑块页的分段与菜单选择器、滑块两端图标均为系统控件。`BERN_APPEARANCE=dark` 时全部为深色。
-- **导航**：启动时直接显示详情（标题与文字），返回后是侧边栏；点按侧边栏项进入对应页面；CLI 的 `ui select --target main_window.pages` 在只显示详情时也能切换页面；列表页点按“影片”推入项目详情。
-- **输入**：点按名字输入框后用键盘输入“Ada”，预览即时显示“你好，Ada”。
-- **窗口**：“打开设置…”以 sheet 打开设置窗口，主窗口失去焦点且只剩关闭动作；输入名称后点“完成”弹出存储确认，选“存储”后名称写入引擎并关闭；未修改时下滑关闭（`changed_by: System`），有未存储修改时下滑无效；CLI 关闭返回 `ConfirmationRequired`，期间控件为 `blocked_by_modal`，`Discard` 后关闭；`minimize`、`resize` 与激活被盖住的主窗口返回 `target_unavailable`；关闭主窗口后显示“打开“Bern 控件展示””，点按后主窗口以 `main#2` 打开；`ui set-language --language en` 后界面全部变为英文。
-- **生命周期**：按 Home 键后主窗口为 `Hidden`、无焦点，CLI 仍能读取状态；回到前台后恢复 `Visible` 与焦点。
-- **媒体**：预览播放器播放色条片段、跳转与结束（`Ended 6000 / 6000`）；离开并回到视频页后状态不变；播放中进入后台时模拟器里继续播放直到结束；播完后进入后台报告为 `Paused 0`，再播放从头开始。视频页窄屏时片段选择是“换片”菜单。
-- **图片**：随包图片与 Grid 正常；PQ 的 PNG 做了色调映射。带增益图的 JPEG 在模拟器里按 HDR 解码得到全黑的像素（把解码结果画到 8 位上下文读回为 0），所以模拟器构建只解码 SDR 版本，显示作者给的 SDR 图。
-- **MCP**：`showcase-mcp` 完成 `initialize`，`window_list` 返回模拟器里应用的 `Virtual` 窗口。
-- **macOS 未受影响**：运行时拆分后重新构建运行 macOS 版，设置窗口、关闭协议、最小化与恢复由 CLI 实测正常。
+- **Build and tests**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` pass; new iOS generation tests (type check against the iOS simulator SDK, Info.plist, build steps, resource naming rules). Device: the engine builds for `aarch64-apple-ios` and the UI compiles and links for `arm64-apple-ios17.0`, producing an arm64 executable with platform iOS and minimum 17.0; not signed, not installed.
+- **Appearance**: iOS 26 standard controls and the Liquid Glass navigation bar, search bar and tab bar; the sidebar has a search bar at the bottom; the toolbar buttons on the buttons page, the segmented and menu pickers on the switches and sliders page, and the icons at both ends of the sliders are all system controls. With `BERN_APPEARANCE=dark` everything is dark.
+- **Navigation**: at launch the detail is shown directly (title and text), and going back shows the sidebar; tapping a sidebar item enters the corresponding page; the CLI's `ui select --target main_window.pages` switches pages even when only the detail is shown; on the list page tapping "Movies" pushes the item detail.
+- **Input**: after tapping the name field and typing "Ada" on the keyboard, the preview immediately shows "Hello, Ada".
+- **Windows**: "Open Settings…" opens the settings window as a sheet, and the main window loses focus and has only the close action left; after entering a name, tapping "Done" brings up the save confirmation, and choosing "Save" writes the name into the engine and closes; with no changes, swiping down closes (`changed_by: System`), and with unsaved changes swiping down has no effect; closing from the CLI returns `ConfirmationRequired`, during which controls are `blocked_by_modal`, and after `Discard` it closes; `minimize`, `resize` and activating the covered main window return `target_unavailable`; after the main window is closed the scene shows Open "Bern Showcase", and tapping it opens the main window as `main#2`; after `ui set-language --language en` the whole UI switches to English.
+- **Lifecycle**: after pressing the Home button the main window is `Hidden` with no focus, and the CLI can still read state; after returning to the foreground it is `Visible` with focus again.
+- **Media**: the preview player plays the color bars clip, seeks and ends (`Ended 6000 / 6000`); after leaving the video page and coming back the state is unchanged; when the app enters the background during playback it keeps playing to the end in the simulator; entering the background after playback has finished reports `Paused 0`, and playing again starts from the beginning. On narrow screens the clip selection on the video page is a "Change Clip" menu.
+- **Images**: bundled images and Grid work; PQ PNGs are tone-mapped. JPEGs with a gain map decode as HDR in the simulator into all-black pixels (drawing the decoded result into an 8-bit context reads back 0), so simulator builds decode only the SDR version and show the SDR image the author provided.
+- **MCP**: `showcase-mcp` completes `initialize`, and `window_list` returns the `Virtual` windows of the app in the simulator.
+- **macOS unaffected**: after the runtime split the macOS version was rebuilt and run; the settings window, the close protocol, minimize and restore were measured through the CLI and work.
 
-iPad，同日，iPad Pro 13 英寸（M5）模拟器（iOS 26.5，全屏模式）。展示应用只有主窗口与设置窗口，为测试多窗口临时加了一个普通的“检查器”窗口（未提交）：
+iPad, same day, iPad Pro 13-inch (M5) simulator (iOS 26.5, full-screen mode). The showcase app has only a main window and a settings window, so an ordinary "Inspector" window was added temporarily to test multiple windows (not committed):
 
-- 主窗口为 `Native`、可见、有焦点（帧 1032 × 1324），分栏视图并排显示侧边栏与详情，右下角是 iPadOS 26 的窗口缩放手柄。
-- `window open --kind inspector` 打开独立的窗口（`Native`，带“检查器”标题栏），全屏模式下切到它，主窗口为 `Hidden`；`window activate --window main#1` 切回主窗口；再次打开检查器得到同一个实例 `inspector#1`；`window close` 关闭检查器，系统回到主屏幕，主窗口仍在后台。
-- 设置以表单 sheet 显示在主窗口上（`Virtual`，宽 580），此时主窗口无焦点，检查器在后台。
-- 视频页在 iPad 宽度下是展开布局，预览播放器播放正常。
-- 应用整个进入后台后被挂起，原来的 CLI 在握手时一直等待；加上握手超时后改为报告引擎不应答（新增测试）。
-- 回到 iPhone 回归：三个窗口都是 `Virtual`，检查器是带“完成”按钮的 sheet，被设置盖住时 `window activate` 返回 `target_unavailable`。
+- The main window is `Native`, visible and focused (frame 1032 × 1324); the split view shows the sidebar and the detail side by side, with the iPadOS 26 window resize handle at the bottom right.
+- `window open --kind inspector` opens an independent window (`Native`, with an "Inspector" title bar); in full-screen mode the system switches to it and the main window is `Hidden`; `window activate --window main#1` switches back to the main window; opening the inspector again yields the same instance `inspector#1`; `window close` closes the inspector, the system returns to the Home Screen, and the main window is still in the background.
+- Settings is shown as a form sheet on the main window (`Virtual`, width 580); meanwhile the main window has no focus and the inspector is in the background.
+- At iPad width the video page uses the expanded layout, and the preview player plays normally.
+- When the whole app entered the background it was suspended, and the existing CLI kept waiting at the handshake; with the handshake timeout added it now reports that the engine is not responding (new test).
+- iPhone regression: all three windows are `Virtual`, the inspector is a sheet with a "Done" button, and while it is covered by settings `window activate` returns `target_unavailable`.
 
-iPad 窗口化模式，同日，同一模拟器在“设置 > 多任务与手势”中选了“窗口化 App”；后半部分换到 Xcode 27.0 重新构建：
+iPad windowed mode, same day, the same simulator with "Windowed Apps" selected in "Settings > Multitasking & Gestures"; the second half was rebuilt with Xcode 27.0:
 
-- 窗口带 iPadOS 26 的窗口控件，主窗口的控件排在侧边栏工具栏前缘，检查器的控件排在它的标题栏前缘；拖动右下角缩放时停在声明的最小尺寸 720 × 480；主窗口与检查器可以同时显示、互相部分遮挡。
-- 焦点：最初按“场景活动且系统窗口为 key”报告，两个窗口同时报告有焦点——窗口化时两个场景都是活动的，系统窗口也都是 key。之后改为记住最近被命令或场景激活带到前面的窗口，命令切换正确，但点按后面的窗口时两个场景都保持活动、没有任何阶段变化，记住的窗口就过时了；打开新窗口时，后面窗口的场景还会先变为不活动再变回活动，被当成了“到了前面”。最后改用 `appearsActive`：`window open`、`window activate` 来回切换与点按两个窗口，每次都只有最前面的窗口报告有焦点。
-- 按 Home 键时 iPadOS 把窗口推到屏幕边缘露出主屏幕，应用没有被挂起（CLI 立即得到回答），场景仍是活动的，窗口仍报告可见、主窗口有焦点；点程序坞图标回来后不变。
-- 重新启动应用时 iPadOS 只恢复了上次最前面的检查器，主窗口留在“隐藏窗口”里，引擎只看到 `inspector#1`；`window open --kind main` 把主窗口找回来。
-- `window close` 关闭检查器，主窗口得到焦点；设置在 iPad 上以 sheet 打开（`Virtual`），关闭后主窗口恢复焦点。
-- 有一次重装后应用窗口全黑、没有控制通道（进程里没有 IPC 线程，环境里没有 `BERN_IPC_DIR`），同时留下一份启动时在 `UIApplicationMain` 准备阶段读取包信息崩溃的报告，像是安装与启动重叠；重新运行后正常，没有再出现。
-- iPhone 17 Pro 回归：检查器与设置依次叠为 sheet，被盖住的窗口没有可用动作，点“完成”关闭检查器后主窗口恢复焦点。
+- Windows carry the iPadOS 26 window controls: the main window's controls sit at the leading edge of the sidebar toolbar, and the inspector's at the leading edge of its title bar; dragging the bottom-right corner to resize stops at the declared minimum size of 720 × 480; the main window and the inspector can be shown at the same time and partly cover each other.
+- Focus: at first it was reported as "scene active and system window is key", and both windows reported focus at the same time — in windowed mode both scenes are active and both system windows are key. It was then changed to remember the window most recently brought to the front by a command or a scene activation; switching by command was correct, but when the window behind was tapped both scenes stayed active without any phase change, so the remembered window went stale; and when a new window was opened, the scene of the window behind first became inactive and then active again, and was taken as having "come to the front". Finally it switched to `appearsActive`: switching back and forth with `window open` and `window activate` and tapping the two windows, each time only the frontmost window reports focus.
+- On pressing the Home button iPadOS pushes the windows to the edge of the screen to reveal the Home Screen; the app is not suspended (the CLI gets an answer immediately), the scenes are still active, and the windows still report visible, with the main window focused; nothing changes after coming back through the Dock icon.
+- On relaunching the app iPadOS restored only the inspector that was frontmost last time; the main window stayed among the "hidden windows" and the engine saw only `inspector#1`; `window open --kind main` brings the main window back.
+- `window close` closes the inspector and the main window gets focus; on iPad settings opens as a sheet (`Virtual`), and after it closes the main window regains focus.
+- Once after reinstalling, the app window was all black with no control channel (no IPC thread in the process, no `BERN_IPC_DIR` in the environment), and a crash report was left from reading bundle information during the preparation stage of `UIApplicationMain` at launch, which looked like installation and launch overlapping; after running again it was fine and did not recur.
+- iPhone 17 Pro regression: the inspector and settings stack as sheets in turn, the covered window has no available actions, and after tapping "Done" to close the inspector the main window regains focus.
 
-展示应用随之调整：图片页的两行图片从 `Row` 改为 `Grid`，原来四张 120 宽的图片在 iPhone 上放不下、被两侧裁掉，现在窄屏时自动换行，宽窗口中仍是一行。
+The showcase app was adjusted accordingly: the two rows of images on the images page changed from `Row` to `Grid`; the original four 120-wide images did not fit on iPhone and were clipped on both sides, and now they wrap automatically on narrow screens and stay on one row in wide windows.
 
-### 标签选择器与换行工具条（2026-10-20）
+### Tag pickers and wrapping toolbars (2026-10-20)
 
-iPhone 17 模拟器（iOS 26.1），经 CLI 打开设置 › 插件：第一行是分段控件「市场 / 已安装 3」与靠右的「全部」「弹幕」「画面」，「工具」「外观」换到第二行靠左，与原型苹果版手机布局一致；chip 是 30 点的系统玻璃胶囊，选中的「全部」为主题色。首次引导的按钮在 iOS 上同时挂载了两份（`ui activate` 报 `target_ambiguous`），与本次改动无关，当时未处理（已修复，见下一节）。
+iPhone 17 simulator (iOS 26.1), Settings › Plugins opened through the CLI: the first row is the segmented control "Market / Installed 3" with "All", "Danmaku" and "Picture" aligned right, and "Tools" and "Appearance" wrap to the second row aligned left, matching the Apple phone layout of the prototype; the chips are 30-point system glass capsules, and the selected "All" is in the theme color. The first-run onboarding buttons were mounted twice at the same time on iOS (`ui activate` reported `target_ambiguous`), unrelated to this change and not handled at the time (since fixed, see the next section).
 
-### 控件登记不留残项（2026-10-20）
+### Control registrations leave no stale entries (2026-10-20)
 
-iPhone 17 模拟器（iOS 26.1），一个真实应用首次启动即显示全屏的引导流程（`Modal(cover: compact)`），用生成的 CLI 检查：
+iPhone 17 simulator (iOS 26.1); a real app shows a full-screen onboarding flow (`Modal(cover: compact)`) on first launch; checked with the generated CLI:
 
-- **现象**：`ui inspect` 把引导脚部的 `skip`、`start` 各列两次，`ui activate --target onboarding_footer.skip` 报 `target_ambiguous`；被引导盖住的首页也有许多控件重复 2～5 次，窗口里共 125 项。走完引导后 `skip`、`start` 仍在列表里，纯播放页上还列着只有宽屏才显示的桌面版按钮；启动后再打开引导，桌面版的那些按钮又多一份。Mac 与 Android 上每个目标只列一次。
-- **原因**：首个布局时还不知道宽度。窗口宽度为 0 时不算 compact，`Adaptive` 的宽度为 `nil` 时按无限宽取布局，所以先挂上宽屏布局（模态先排成浮动面板），量到 402 后再换成手机布局。控件原来在 `.task(id:)` 里登记、在 `onDisappear` 里注销；iOS 26.1 上任务在这次更新之后才开始，这些一闪而过的控件先被注销、后被登记，从此留在列表里。macOS 27 上任务随视图出现立即执行，所以 Mac 上看不到：在屏幕外窗口里打印出现、任务与消失的顺序，任务总在出现之前，按 macOS 15 的部署目标编译也一样。
-- **修复**：`BernControl` 在 `onAppear` 登记，窗口、目标、标签或可用状态变化时重新登记，在 `onDisappear` 注销，全部同步。Compose（`SideEffect` 与 `DisposableEffect`）、Web（`onCleanup`）、GTK 与 WinUI 3（作用域清理）本来就同步配对，没有这个问题。首个布局仍会先构建一次宽屏布局再换掉，只是不再留下登记（已修复，见下一节）。
-- **测试**：`tests/control_registry.rs` 在屏幕外窗口里运行真实的 SwiftUI 修饰符：模态式的先浮动后铺满、`Adaptive` 式的先宽后窄，每个目标只列一次、`find` 能找到，移除后清空，再插入后恢复；另一项检查登记不在任务里，因为 macOS 27 无法在运行时重现晚开始的任务。
-- **验证**：修复后首次启动，`ui inspect` 共 32 项，`onboarding_footer.skip` 与 `.start` 各一次，桌面版的 `stage.*`、`timeline.schedule` 不再出现；`ui activate --target onboarding_footer.skip` 跳到最后一步，`ui activate --target onboarding_footer.finish` 关闭引导，之后只剩手机纯播放页的 9 个控件和 `main_shell.shell`，引导的目标全部消失；启动后再打开引导，每个目标一次，桌面版控件不再出现。
+- **Symptom**: `ui inspect` listed the onboarding footer's `skip` and `start` twice each, and `ui activate --target onboarding_footer.skip` reported `target_ambiguous`; the home page covered by the onboarding also had many controls repeated 2–5 times, 125 entries in the window in total. After the onboarding was completed, `skip` and `start` were still in the list, and the playback-only page still listed desktop buttons that are shown only on wide screens; opening the onboarding again after launch added another copy of those desktop buttons. On the Mac and on Android each target is listed once.
+- **Cause**: the width is not yet known at the first layout. With a window width of 0 the window does not count as compact, and `Adaptive` with a `nil` width picks its layout as if infinitely wide, so the wide layout is mounted first (the modal is first laid out as a floating panel), then replaced by the phone layout once 402 is measured. Controls used to register in `.task(id:)` and unregister in `onDisappear`; on iOS 26.1 the task starts only after this update, so these momentary controls were unregistered first and registered afterwards, and stayed in the list from then on. On macOS 27 the task runs immediately as the view appears, which is why this does not show on the Mac: printing the order of appear, task and disappear in an offscreen window, the task always came before appear, also when compiled with a macOS 15 deployment target.
+- **Fix**: `BernControl` registers in `onAppear`, registers again when the window, target, label or enabled state changes, and unregisters in `onDisappear`, all synchronously. Compose (`SideEffect` and `DisposableEffect`), Web (`onCleanup`), GTK and WinUI 3 (scope cleanup) were already paired synchronously and did not have this problem. The first layout still builds the wide layout once before replacing it, it just no longer leaves registrations behind (since fixed, see the next section).
+- **Tests**: `tests/control_registry.rs` runs the real SwiftUI modifiers in an offscreen window: modal-style floating first and then filling, and `Adaptive`-style wide first and then narrow; each target is listed only once and `find` finds it, the list is cleared after removal and restored after reinsertion; another test checks that registration is not in a task, because a late-starting task cannot be reproduced at runtime on macOS 27.
+- **Verification**: after the fix, on first launch `ui inspect` has 32 entries in total, `onboarding_footer.skip` and `.start` once each, and the desktop `stage.*` and `timeline.schedule` no longer appear; `ui activate --target onboarding_footer.skip` jumps to the last step and `ui activate --target onboarding_footer.finish` closes the onboarding, after which only the 9 controls of the phone playback-only page and `main_shell.shell` remain, and all onboarding targets are gone; when the onboarding is opened again after launch, each target appears once and the desktop controls no longer appear.
 
-### 首个布局就是手机布局（2026-10-20）
+### The first layout is the phone layout (2026-10-20)
 
-- **问题**：上一节的修复之后，手机上每挂一棵新的子树——应用启动时，或条件切换时新建的 `Adaptive`——仍先构建一次宽屏布局，`Modal(cover: compact)` 仍先排成浮动面板，量到宽度后才换。白做的构建会带出入场动画、共享元素计数、播放器绑定等副作用。
-- **修复**：窗口量到宽度之前，`window.compact` 等档位与 `window.short` 按平台给出的尺寸计算（`BernWindowContext.layoutWidth`、`layoutHeight`）：只有一个场景时取场景的尺寸；能开独立窗口时（iPad）取屏幕的尺寸，因为新窗口可能开成任意大小。两者都不小于窗口实际得到的尺寸，宽窗口不会先构建窄布局。`Adaptive` 在量到自己的可用宽度之前取所在窗口的宽度，可用宽度不会比窗口更宽。macOS 在首次布局前不知道窗口尺寸，仍从最宽的档开始。
-- **测试**：`tests/adaptive_first_layout.rs` 在屏幕外窗口里运行真实的 `BernAdaptive`，记录每个布局的构建次数：390 宽、平台尺寸为手机的窗口，启动时与之后插入的 `Adaptive` 都只构建 `compact`，盖满式模态只构建铺满的一种；1000 宽的窗口，平台尺寸为平板屏幕或未知（macOS）时都只构建 `expanded`。同一测试换成改前的运行时会失败：启动时 `expanded` 与浮动面板各构建一次。
-- **验证**：iPhone 17 模拟器（iOS 26.1），一个首屏有 `Adaptive(id: start)` 与 `Modal(cover: compact)`、打开开关后插入 `Adaptive(id: inserted)` 的最小应用，在布局与模态的构建处临时打印选中的尺寸（验证后删除）：
-  - 改前：启动时 `start` 先构建 `expanded`，模态先构建浮动面板，量到宽度后再分别换成 `compact` 与铺满；`ui set-bool --target home.more --value true` 插入的 `inserted` 也先构建 `expanded`。
-  - 改后：启动时窗口宽度还是 0，按场景宽 402 估计，`start` 第一次构建就是 `compact`，模态第一次构建就铺满；插入的 `inserted` 第一次构建就是 `compact`（自身宽度未知，窗口宽 402）。整个过程没有构建过 `expanded`，`ui inspect` 里两个 adaptive 一开始就是 `compact`。
-  - 示例 gallery 在手机上切到胶片页（`ui select --target main_window.pages --option Film`），`film.film_controls` 同样只构建 `compact`。
+- **Problem**: after the fix in the previous section, on phones every newly mounted subtree — at app launch, or an `Adaptive` newly created by a conditional switch — still built the wide layout once first, and `Modal(cover: compact)` was still first laid out as a floating panel, switching only after the width was measured. The wasted builds brought side effects such as entrance animations, shared-element counts and player bindings.
+- **Fix**: until the window's width is measured, size classes such as `window.compact` and `window.short` are computed from the size the platform gives (`BernWindowContext.layoutWidth`, `layoutHeight`): with only one scene it takes the scene's size; where independent windows can be opened (iPad) it takes the screen's size, because a new window may open at any size. Both are no smaller than the size the window actually gets, so a wide window does not first build a narrow layout. Until `Adaptive` has measured its own available width it takes the width of its window, as the available width cannot be wider than the window. macOS does not know the window size before the first layout, so it still starts from the widest class.
+- **Tests**: `tests/adaptive_first_layout.rs` runs the real `BernAdaptive` in an offscreen window and records how many times each layout is built: in a window 390 wide whose platform size is a phone, both an `Adaptive` present at launch and one inserted later build only `compact`, and a covering modal builds only the filling form; in a window 1000 wide, whether the platform size is a tablet screen or unknown (macOS), only `expanded` is built. The same test fails with the runtime from before the change: at launch `expanded` and the floating panel are each built once.
+- **Verification**: iPhone 17 simulator (iOS 26.1), a minimal app with `Adaptive(id: start)` and `Modal(cover: compact)` on the first screen that inserts `Adaptive(id: inserted)` once a switch is turned on; the chosen size was printed temporarily where the layouts and the modal are built (removed after verification):
+  - Before: at launch `start` first built `expanded` and the modal first built the floating panel, and after the width was measured they changed to `compact` and filling respectively; `inserted`, inserted by `ui set-bool --target home.more --value true`, also first built `expanded`.
+  - After: at launch the window width is still 0 and is estimated from the scene width of 402; `start` is `compact` on its first build and the modal fills on its first build; the inserted `inserted` is `compact` on its first build (its own width unknown, window width 402). `expanded` was never built during the whole run, and in `ui inspect` both adaptives are `compact` from the start.
+  - The gallery example on the phone, switched to the film page (`ui select --target main_window.pages --option Film`): `film.film_controls` likewise builds only `compact`.
 
-### 直接写在窗口正文里的样式变体（2026-10-20）
+### Style variants written directly in a window body (2026-10-20)
 
-生成器测试 `a_style_variant_in_a_window_is_defined` 为 iOS 生成窗口正文里的 `variant: stage`，`BernStyles` 有 `buttonStage`，按模拟器 SDK 做类型检查通过（原因见 WinUI 3 实现记录的同日条目）。模拟器当时没有启动 iOS 设备，没有看画面。
+The generator test `a_style_variant_in_a_window_is_defined` generates `variant: stage` in a window body for iOS; `BernStyles` has `buttonStage`, and the type check against the simulator SDK passes (for the reason see the same-day entry in the WinUI 3 implementation notes). No iOS device was booted in the simulator at the time, so the screen was not looked at.
 
-直接写在窗口正文里的 `Drop(opens: true)` 此前不进 Info.plist 的文档类型与导入类型，原因与修正见 macOS 实现记录的同日条目；生成器测试 `a_drop_in_a_window_lists_its_document_types` 也为 iOS 断言导入类型。
+A `Drop(opens: true)` written directly in a window body was previously not added to the document types and imported types in Info.plist; for the cause and the fix see the same-day entry in the macOS implementation notes; the generator test `a_drop_in_a_window_lists_its_document_types` also asserts the imported types for iOS.
 
-### 窗口正文的摆放（2026-10-21）
+### Placement of the window body (2026-10-21)
 
-窗口正文比窗口小时从内容区的左上角排起（规则与修正见 macOS 实现记录的同日条目，iOS 共用同一段生成）。iPhone 17 Pro 模拟器（iOS 26.5），探针应用经 CLI 切换正文，`simctl io screenshot` 截屏：改前默认列整体在屏幕正中（水平、竖直都居中）；改后默认列从安全区左上角排起、按钮保持自身宽度，写在组件里的 `Column(align: center)` 水平居中、靠顶，只有一个小层的 `Stack` 在内容区正中；图标按钮、菜单、浮层按钮在默认列里保持自身宽度。生成器测试 `content_in_a_window_starts_at_its_top_leading_corner` 按模拟器 SDK 类型检查 iOS 的生成。
+When the window body is smaller than the window it is laid out from the top-leading corner of the content area (for the rule and the fix see the same-day entry in the macOS implementation notes; iOS shares the same generation code). iPhone 17 Pro simulator (iOS 26.5), a probe app switching bodies through the CLI, screenshots with `simctl io screenshot`: before the change the default column as a whole was in the middle of the screen (centered both horizontally and vertically); after the change the default column is laid out from the top-leading corner of the safe area with buttons keeping their own width, a `Column(align: center)` written in a component is centered horizontally and at the top, and a `Stack` with only one small layer is in the middle of the content area; icon buttons, menus and popover buttons keep their own width in the default column. The generator test `content_in_a_window_starts_at_its_top_leading_corner` type-checks the iOS generation against the simulator SDK.
 
-### 与框架类型同名的值类型（2026-10-21）
+### Value types with the same name as framework types (2026-10-21)
 
-值类型在生成的 Swift 中写成 `App_` 加声明的名字，原因与写法见 macOS 实现记录的同日条目（iOS 共用同一段生成）。`tests/framework_names.rs` 为 iOS 生成示例 `examples/framework-names`，按 iOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；UIKit 运行时 `BernUIKit.swift` 也在检查之内。没有在模拟器上运行。
+In generated Swift a value type is written as `App_` plus the declared name; for the reason and the form see the same-day entry in the macOS implementation notes (iOS shares the same generation code). `tests/framework_names.rs` generates the example `examples/framework-names` for iOS and type-checks it with swiftc against the iOS 27.0 simulator SDK, which passes; the UIKit runtime `BernUIKit.swift` is included in the check as well. Not run in the simulator.
 
-### 与框架类型同名的组件与会话（2026-10-21）
+### Components and sessions with the same name as framework types (2026-10-21)
 
-组件写成 `AppView_` 加声明的名字、会话类写成 `App_` 加声明的名字、视图读会话的变量写成 `session_` 加声明的名字，原因与实测见 macOS 实现记录的同日条目（iOS 共用同一段生成）。加入这些组件与会话的示例 `examples/framework-names` 按 iOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
+A component is written as `AppView_` plus the declared name, a session class as `App_` plus the declared name, and the variable through which a view reads a session as `session_` plus the declared name; for the reason and the measurements see the same-day entry in the macOS implementation notes (iOS shares the same generation code). The example `examples/framework-names`, with these components and sessions added, type-checks with swiftc against the iOS 27.0 simulator SDK, which passes; not run in the simulator.
 
-## 错峰、比例轨道、浮层按钮与四档尺寸
+## Staggering, proportional tracks, popover buttons and four size classes
 
-2026-10-14，v0.30，iPhone 17 Pro 模拟器（iOS 26.5），与 macOS 共用同一套 SwiftUI 实现，启动时用 `SIMCTL_CHILD_BERN_MOTION=slow` 放慢动效。
+2026-10-14, v0.30, iPhone 17 Pro simulator (iOS 26.5), sharing the same SwiftUI implementation with macOS; launched with `SIMCTL_CHILD_BERN_MOTION=slow` to slow motion down.
 
-- **错峰**：录下模拟器画面（`simctl io recordVideo`，只含模拟器）逐帧查看，从胶片页回到图案页时卡片按 Gingham、Tartan、Madras 的顺序依次淡入升起。
-- **比例轨道**：胶片页的时间轴、刻度与名字在窄屏上按比例排开；`film.level` 设为 0.8 后竖线与底色移到 80%，底色与面板等高。名字用 `anchor: start`，窄屏时最后两个名字会相互挤压，属于界面声明。
-- **浮层按钮**：画框页静置后控件隐藏；后台循环等待 `frame.volume` 挂载，再用模拟器点按画面唤醒，挂载后立即 `ui activate`：按钮值为 `open`，浮层中的音量滑块挂载、值为 0.7。截图中 iPhone 上显示的是指向按钮的气泡（`presentationCompactAdaptation(.popover)`），外观随画框页为深色。
-- **四档尺寸**：iPhone 竖屏时胶片页的 `Adaptive` 为 `compact`，显示两个图标按钮。iPad 与横屏未测。
+- **Staggering**: recording the simulator screen (`simctl io recordVideo`, the simulator only) and stepping through it frame by frame, when going back from the film page to the patterns page the cards fade in and rise one after another in the order Gingham, Tartan, Madras.
+- **Proportional tracks**: the film page's timeline, ticks and names are spaced proportionally on narrow screens; with `film.level` set to 0.8 the vertical line and the background move to 80%, and the background is as tall as the panel. The names use `anchor: start`; on narrow screens the last two names squeeze each other, which comes from the interface declaration.
+- **Popover buttons**: on the frame page the controls hide after it sits idle; a background loop waits for `frame.volume` to mount, a tap on the picture in the simulator then wakes the controls, and `ui activate` runs immediately after mounting: the button value is `open`, and the volume slider in the popover mounts with the value 0.7. In the screenshot the iPhone shows a bubble pointing at the button (`presentationCompactAdaptation(.popover)`), and its appearance is dark along with the frame page.
+- **Four size classes**: with the iPhone in portrait, the film page's `Adaptive` is `compact` and shows two icon buttons. iPad and landscape not tested.
 
-## 表格、受控文字与剪贴板（2026-10-29）
+## Tables, controlled text and the clipboard (2026-10-29)
 
-与 macOS 共用生成器（见 macOS 的实现记录）：`Table` 是 SwiftUI 的 `Table`，紧凑宽度的 iPhone 上系统只显示第一列，行菜单是长按的上下文菜单；`paste:` 读 `UIPasteboard.general`，系统第一次会问用户是否允许粘贴；引擎的 `copy_text` 写 `UIPasteboard.general`。验证：生成的 Swift 按 iOS SDK 类型检查，gallery 的 iOS 构建成功；未在模拟器或设备上运行。
+The generator is shared with macOS (see the macOS implementation notes): `Table` is SwiftUI's `Table`, on a compact-width iPhone the system shows only the first column, and the row menu is a long-press context menu; `paste:` reads `UIPasteboard.general`, and the first time the system asks the user whether to allow pasting; the engine's `copy_text` writes `UIPasteboard.general`. Verification: the generated Swift type-checks against the iOS SDK, and the gallery's iOS build succeeds; not run in the simulator or on a device.
 
-## 跟随值的动作与文字颜色（2026-10-29）
+## Actions that follow values, and text color (2026-10-29)
 
-`Watch` 与 `Text(color:)` 与 macOS 相同（`BernWatch`、`foregroundStyle`）。iOS 没有登录项，`Switch(login_item: true)` 生成 `EmptyView`（能力 `login_switch` 不适用）。验证：`tables` 测试按 iOS SDK 类型检查；未在模拟器上运行。
+`Watch` and `Text(color:)` are the same as on macOS (`BernWatch`, `foregroundStyle`). iOS has no login items, so `Switch(login_item: true)` generates `EmptyView` (the capability `login_switch` does not apply). Verification: the `tables` test type-checks against the iOS SDK; not run in the simulator.
 
-## 未完成与已知限制
+## Incomplete work and known limitations
 
-- 只构建模拟器应用。真机需要开发者签名与描述文件，安装与 `bern package` 未实现。
-- HDR：模拟器显示不了 HDR，增益图在模拟器里只解码 SDR 版本；真机上图片按 HDR 解码，视频由 `AVPlayerLayer` 显示，HDR 均未验证。
-- 真机上没有声明后台音频，进入后台后系统会暂停播放；只在模拟器里观察过（模拟器里继续播放）。
-- iPadOS 菜单栏中的“设置”与 ⌘, 只经过类型检查，未实测（模拟器上没有接键盘的菜单栏操作）。
-- iOS 17 没有 `appearsActive`，几个窗口同时显示时可能都报告有焦点；手上没有 iOS 17 的模拟器，未验证。
-- iPadOS 重新启动应用时只恢复它记住的窗口，主窗口不一定在启动时打开；Bern 按系统恢复的窗口报告。
-- 全屏模式下关闭当前窗口后，系统回到主屏幕，不会切到应用的其他窗口；其他窗口仍在后台，从程序坞或应用切换器回到它们。
-- 屏幕旋转未实测。
-- 被 sheet 盖住的窗口不能单独激活或关闭，需要先关掉上面的窗口。
-- 窗口内容自带分栏或导航栈时，它作为 sheet 打开时没有“完成”按钮（嵌套的导航栈会出问题），只能下滑或用命令关闭。
+- Only simulator apps are built. Devices need developer signing and provisioning profiles; installation and `bern package` are not implemented.
+- HDR: the simulator cannot display HDR, and in the simulator gain maps decode only the SDR version; on a device images decode as HDR and video is shown by `AVPlayerLayer`, with HDR not verified for either.
+- No background audio is declared, so on a device the system pauses playback after the app enters the background; this was only observed in the simulator (where playback continues).
+- The "Settings" item and ⌘, in the iPadOS menu bar are only type-checked, not measured (the simulator offers no menu bar operation with an attached keyboard).
+- iOS 17 has no `appearsActive`, so when several windows are shown at once they may all report focus; no iOS 17 simulator is at hand, not verified.
+- When iPadOS relaunches the app it restores only the windows it remembers, so the main window does not necessarily open at launch; Bern reports the windows the system restores.
+- In full-screen mode, after the current window is closed the system returns to the Home Screen and does not switch to the app's other windows; those windows are still in the background and can be reached from the Dock or the App Switcher.
+- Screen rotation not measured.
+- A window covered by a sheet cannot be activated or closed on its own; the windows above it must be closed first.
+- When a window's content has its own split view or navigation stack, it has no "Done" button when opened as a sheet (nested navigation stacks cause problems), and can only be closed by swiping down or by a command.
 
-## 手机外壳与像素对照（2026-10-18）
+## Phone shell and pixel comparison (2026-10-18)
 
-iPhone 17e 模拟器（iOS 26.5，390 × 844 点，截图 1170 × 2532）上，以一个真实应用的手机首页对照它的网页原型。原型用无界面 Chrome 按 3 倍渲染成同尺寸图片，两边用同一工具逐行、逐列找出内容边界比较；以下改动后，首页各元素的位置和尺寸与原型相差都在 1 点以内（中文字形见下文）。
+On an iPhone 17e simulator (iOS 26.5, 390 × 844 points, screenshots 1170 × 2532), a real app's phone home page was compared with its web prototype. The prototype was rendered at 3x into an image of the same size with headless Chrome, and the content boundaries on both sides were found row by row and column by column with the same tool and compared; after the changes below, every element on the home page is within 1 point of the prototype in position and size (for Chinese glyphs see below).
 
-- **搜索面板**：`Search(style: palette)` 与 `SearchItem` 在 iOS 上也生成同一个面板（原先只有 macOS 接受）。输入框换成系统 `TextField`，点遮罩关闭，硬件键盘的方向键、回车、Esc 仍可用；macOS 保留 AppKit 输入框和窗口点击监视。生成器回归测试为 iOS 生成并类型检查同一夹具。
-- **`Tabs` 里的 `Pages`**：编译期把模块页面展开成 `Tab`，内容是页面组件，和侧栏里的 `Pages` 同源。选中的标签取应用强调色（`.bernAccentTint()` 加在 `TabView` 上）；普通玻璃按钮和圆形图标按钮在 iOS 上改用主文字色（`bernPrimaryLabel`），不被标签栏的强调色染色。
-- **`Adaptive` 量可用宽度**：原先测的是所选布局自己的宽度，`frame(maxWidth:)` 没有最小值时不小于内容，宽屏布局先被选中就一直量出宽屏。现在 `minWidth: 0`，量的是父视图给的宽度。
-- **固定尺寸的 `Stack` 按 `align` 摆放**：`Stack(align:, width:, height:)` 的 `.frame` 带上同一对齐，内容不再总在正中。
-- **无圆角的表面铺满安全区**：没有 `corner` 的 `Stack` 样式背景用 SwiftUI 的形状样式背景，延伸到状态栏和标签栏下面。
-- **`Button(width: fill)`**：系统按钮随标签撑满容器宽度（能力 `fill_buttons`，SwiftUI 与 Web）。
-- **`IconButton(height:)`**：指定直径的系统玻璃圆钮，和指定高度的胶囊控件同一做法；iOS 原生圆钮只有约 31 与 47 点两档。胶囊控件按设计尺寸档取字号：42 点及以上为 15 点半粗，其余 13 点中等。
-- **`Row` 按项目自己的宽度排**：`HStack` 把空间按弹性从小到大平分给各项，一行放得下时也会先给某个可截断的短文字不足它宽度的一份，把它截成省略号（实测一行三项、标签组只分到 81 点而需要 88 点）。现在 `Row` 生成 `BernRow`（`Layout`），规则与其他目标的行相同：放得下时每项取自己的宽度，剩余空间由会伸展的项（`Spacer`、撑满的框）尽量平分；放不下时其余项按各自宽度的比例收缩，不小于各自的最小宽度。行里的 `Spacer` 带上 `BernRowSpacer` 标记，只沿行伸展、不参与行高；行里的 `Divider` 包一层 `HStack`，保持竖线方向。行与列里的 `Spacer` 都生成 `Spacer(minLength: 0)`，`BernRow` 也不取它的最小宽度：系统 `Spacer()` 的最小长度随平台不同（macOS 实测 8 点，tvOS 60 点），其他目标的 `Spacer` 没有最小长度。
-- **定宽高的 `Column` / `Row` 从起始边排内容**：原先 `.frame(width:)` 把较窄的内容放在正中，`Column(width: 58)` 里的文字因而偏右。现在列从顶部开始、横向按 `align`（默认前缘），行从前缘开始、纵向按 `align`，与其他目标一致。
-- **手机下拉胶囊**：iOS 的 `Menu(shape: capsule)` 按设计 6.3 排列：符号在 16 点框内，箭头在 12 点框内、60 % 不透明度，间距 6，箭头一侧离边 11 点。`Picker(style: menu, shape: capsule)` 的按钮同样带这个箭头（iOS 的菜单按钮本身不画箭头）。
-- **胶囊分段按钮**：`SplitButton(shape: capsule)` 的开关部分不用系统 `Label`，符号在 16 点框内、与文字相隔 6，离胶囊端 14、离分隔线 10；下拉部分宽 30。macOS 与 iOS 同一做法。
-- **沉浸窗口铺满屏幕**：`immersive` 为真时，iOS 窗口内容伸到安全区下（`ignoresSafeArea`），横屏手机上 844 × 390 的画面按 1 倍铺满；为假时回到安全区内。
-- **标签栏附件**：`TabAccessory` 在 iOS 26.1 起生成 `tabViewBottomAccessory(isEnabled:)`，内容只构建一次（`AnyView`），`shown` 为假时系统收起附件；更早的 iOS 在每页底部的安全区内嵌一条材质胶囊。附件里的图标按钮是条上的符号（环境 `bernOnBar`）：不再各带玻璃，`IconButton(height:)` 只给出点按区域的大小。iPhone 17e 模拟器（iOS 26.5）上实测附件随播放出现在标签栏上方、关闭播放器后收起。
-- **胶囊按钮的内部排列**：`Button(shape: capsule)` 带图标时不再用系统 `Label`（两端平台间距不同），改为符号在 16 点框内（30 点高的标签胶囊为 14 点）、与文字相隔 6；左右内边距按尺寸档取：42 点及以上 22，30 点及以下 13，其余 14。macOS 与 iOS 同一做法。
+- **Search panel**: `Search(style: palette)` and `SearchItem` also generate the same panel on iOS (previously only macOS accepted them). The input field is replaced with a system `TextField`; tapping the scrim closes the panel, and a hardware keyboard's arrow keys, Return and Esc still work; macOS keeps the AppKit input field and the window click monitor. The generator regression test generates and type-checks the same fixture for iOS.
+- **`Pages` in `Tabs`**: at compile time the module pages are expanded into `Tab`s whose content is the page component, from the same source as `Pages` in the sidebar. The selected tab takes the app's accent color (`.bernAccentTint()` on the `TabView`); on iOS plain glass buttons and round icon buttons use the primary text color instead (`bernPrimaryLabel`), so they are not tinted by the tab bar's accent color.
+- **`Adaptive` measures the available width**: it used to measure the width of the chosen layout itself, and `frame(maxWidth:)` without a minimum is no smaller than its content, so once the wide layout had been chosen first it kept measuring wide. Now with `minWidth: 0` it measures the width the parent offers.
+- **Fixed-size `Stack` placed by `align`**: the `.frame` of `Stack(align:, width:, height:)` carries the same alignment, so the content is no longer always in the center.
+- **Surfaces without rounded corners fill the safe area**: the style background of a `Stack` without `corner` uses SwiftUI's shape-style background, which extends under the status bar and the tab bar.
+- **`Button(width: fill)`**: the system button stretches with its label to fill the container width (capability `fill_buttons`, SwiftUI and Web).
+- **`IconButton(height:)`**: a system glass round button with the given diameter, done the same way as capsule controls with a given height; native iOS round buttons come in only two sizes, about 31 and 47 points. Capsule controls take their font size from the design size class: 15-point semibold at 42 points and above, 13-point medium otherwise.
+- **`Row` lays out by each item's own width**: `HStack` divides space among the items evenly, from the least to the most flexible, so even when a row fits it may first give a short truncatable text a share smaller than its width and truncate it with an ellipsis (measured: a row of three items in which the tag group got only 81 points but needed 88). Now `Row` generates `BernRow` (a `Layout`) with the same rules as rows on the other targets: when everything fits each item takes its own width, and the remaining space is shared as evenly as possible among the items that stretch (`Spacer`, filling frames); when it does not fit, the other items shrink in proportion to their own widths, no smaller than their minimum widths. A `Spacer` in a row carries the `BernRowSpacer` marker, so it stretches only along the row and does not take part in the row height; a `Divider` in a row is wrapped in an `HStack` to keep its vertical orientation. A `Spacer` in a row or a column generates `Spacer(minLength: 0)`, and `BernRow` does not take its minimum width either: the minimum length of the system `Spacer()` differs by platform (measured 8 points on macOS, 60 points on tvOS), and `Spacer` on the other targets has no minimum length.
+- **Fixed-width or fixed-height `Column` / `Row` lay out content from the start edge**: previously `.frame(width:)` put narrower content in the center, so the text in `Column(width: 58)` sat off to the right. Now a column starts from the top and follows `align` horizontally (leading by default), and a row starts from the leading edge and follows `align` vertically, consistent with the other targets.
+- **Phone dropdown capsules**: on iOS `Menu(shape: capsule)` is laid out per design section 6.3: the symbol in a 16-point frame, the arrow in a 12-point frame at 60 % opacity, spacing 6, and 11 points from the edge on the arrow side. The button of `Picker(style: menu, shape: capsule)` carries the same arrow (iOS menu buttons do not draw an arrow themselves).
+- **Capsule split buttons**: the toggle part of `SplitButton(shape: capsule)` does not use the system `Label`; the symbol is in a 16-point frame, 6 from the text, 14 from the end of the capsule and 10 from the divider; the dropdown part is 30 wide. macOS and iOS do it the same way.
+- **Immersive windows fill the screen**: when `immersive` is true, iOS window content extends under the safe area (`ignoresSafeArea`), and on a phone in landscape an 844 × 390 picture fills it at 1x; when it is false the content returns inside the safe area.
+- **Tab bar accessory**: from iOS 26.1 on, `TabAccessory` generates `tabViewBottomAccessory(isEnabled:)`, with the content built only once (`AnyView`), and when `shown` is false the system collapses the accessory; earlier iOS versions embed a material capsule inside the safe area at the bottom of each page. Icon buttons in the accessory are symbols on the bar (environment `bernOnBar`): they no longer each carry glass, and `IconButton(height:)` only gives the size of the tap area. Measured on an iPhone 17e simulator (iOS 26.5): the accessory appears above the tab bar when playback starts and collapses after the player is closed.
+- **Internal layout of capsule buttons**: `Button(shape: capsule)` with an icon no longer uses the system `Label` (its spacing differs between the two platforms); instead the symbol is in a 16-point frame (14 points for 30-point-tall tag capsules), 6 from the text; the horizontal padding follows the size class: 22 at 42 points and above, 13 at 30 points and below, 14 otherwise. macOS and iOS do it the same way.
 
-中文字形：同为 30 点系统字体，Chrome 渲染的苹方汉字前进宽度为 1 em，iOS 原生渲染约 0.947 em，所以中文标题看起来小约 5%。布局按点对齐，字形交给系统渲染，没有放大字号补偿。
+Chinese glyphs: with the same 30-point system font, the advance width of PingFang Han characters rendered by Chrome is 1 em, while native iOS rendering gives about 0.947 em, so Chinese titles look about 5% smaller. Layout is aligned by points and glyph rendering is left to the system; the font size was not enlarged to compensate.
 
-## 跟随状态的快捷键与改键（2026-10-24）
+## Shortcuts and rebinding that follow state (2026-10-24)
 
-与 macOS 共用生成：`shortcut:` 与 `Shortcut(key:)` 绑定文本时生成 `BernShortcuts.keyboard(…)`。`ShortcutInput` 在 iOS 上等待硬件键盘的按键（`focusable` 加 `onKeyPress`），没有硬件键盘时只显示快捷键。`MenuBar` 在 iOS 上不生成（iPad 的菜单栏未接入，能力 `menu_bar` 不适用）。验证：`tests/menu_bar.rs` 按 iOS 模拟器 SDK 类型检查；未在模拟器或设备上运行。
+Generation is shared with macOS: when `shortcut:` and `Shortcut(key:)` are bound to text, `BernShortcuts.keyboard(…)` is generated. On iOS `ShortcutInput` waits for a key press on a hardware keyboard (`focusable` plus `onKeyPress`); without a hardware keyboard it only shows the shortcut. `MenuBar` is not generated on iOS (the iPad menu bar is not hooked up; the capability `menu_bar` does not apply). Verification: `tests/menu_bar.rs` type-checks against the iOS simulator SDK; not run in the simulator or on a device.
 
-## 只为鼠标显示的滚动条（2026-10-27）
+## Scroll bars shown only for the mouse (2026-10-27)
 
-`ScrollView(indicators: mouse)` 与 macOS 共用 `.bernMouseIndicators()`：只有指针会悬停，手指不会，所以 iPad 上指针悬停过滚动视图后为 `.scrollIndicators(.automatic)`，此前与只用手指时为 `.never`。验证：生成器测试对 iOS 做 Swift 类型检查；未在 iPad 或模拟器上实测。
+`ScrollView(indicators: mouse)` shares `.bernMouseIndicators()` with macOS: only a pointer can hover, a finger cannot, so on iPad, once a pointer has hovered over the scroll view, it uses `.scrollIndicators(.automatic)`, and before that, as well as when only fingers are used, `.never`. Verification: the generator test type-checks the Swift for iOS; not measured on an iPad or in the simulator.

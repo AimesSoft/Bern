@@ -1,109 +1,111 @@
-# tvOS SwiftUI 实现记录
+**English** · [简体中文](../zh-CN/Implementation/tvOS-SwiftUI.md)
 
-当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)，Apple 平台的官方依据见 [Apple 适配规范](../Adaptation/Apple.md)。
+# tvOS SwiftUI implementation notes
 
-- 日期：2026-10-20
-- 依据：[Bern 架构设计 v0.33](../Design.md)
-- 工具链：Rust 1.99.0（`aarch64-apple-tvos-sim`）；Xcode 27.0，tvOS 27.0 模拟器 SDK
-- 验证环境：Apple TV 4K（第 3 代）（1080p）模拟器，tvOS 26.5（M4 Mac）
+For the current component interface see the [component reference](../Reference/UI.md); for per-item support and the recent verification scope see the [platform capability table](../Reference/Platforms.md); for the official basis on Apple platforms see the [Apple adaptation guidelines](../Adaptation/Apple.md).
 
-本文记录 `swiftui + tvos` 目标的实际完成情况。它与 iOS 共用生成器与运行时（`Platform::Tvos`），在电视上是一个铺满屏幕的场景，由焦点引擎与 Siri Remote 操作，没有触摸与指针。这一版构建模拟器应用；真机目标未做。
+- Date: 2026-10-20
+- Basis: [Bern architecture design v0.33](../Design.md)
+- Toolchain: Rust 1.99.0 (`aarch64-apple-tvos-sim`); Xcode 27.0, tvOS 27.0 simulator SDK
+- Verification environment: Apple TV 4K (3rd generation) (1080p) simulator, tvOS 26.5 (M4 Mac)
 
-## 完成情况
+This document records what was actually completed for the `swiftui + tvos` target. It shares the generator and the runtime with iOS (`Platform::Tvos`); on a TV it is a single scene that fills the screen, operated through the focus engine and the Siri Remote, with no touch and no pointer. This version builds a simulator app; the device target is not done.
 
-| 设计要求 | 状态 | 说明 |
+## Completion status
+
+| Design requirement | Status | Notes |
 | --- | --- | --- |
-| 平台解析 | 完成 | `platform = "tvos"` 默认 `ui = "swiftui"`，`bern doctor`、`bern build`、`bern run` 认得这个目标 |
-| 生成代码可构建 | 完成 | `bern build --target tvos` 生成 Swift 与胶水 crate，构建 Apple TV 模拟器应用包、Mac 上的 CLI 与 MCP 服务器；生成测试按 tvOS 模拟器 SDK 类型检查 |
-| 只构建电视显示的部分 | 完成 | `Adaptive` 有 `Layout(size: tv)` 时只保留它，`window.tv` 为真，窗口尺寸档由屏幕决定；永远不显示的分支与组件不生成、不参与能力检查（见“电视布局”） |
-| 焦点与遥控导航 | 完成 | 系统焦点引擎与系统焦点效果；`default_focus` 指定起始焦点；滑块是可聚焦的轨道 |
-| 遥控按键 | 部分 | `Shortcut` 与控件的 `shortcut:` 对应返回、播放/暂停与触控板边缘；方向键在模拟器实测，返回与播放/暂停未验证（见“验证记录”） |
-| 应用图标 | 完成 | `[app.icon].tvos` 接受 `.brandassets` 文件夹或方形 PNG；未声明时由默认图标生成分层图标与顶部货架图 |
-| `bern run --target tvos` | 完成 | 装进正在运行的 tvOS 模拟器并启动；生成的 CLI 经 IPC 控制 |
-| 真机构建与打包 | 未完成 | 签名、描述文件、安装与 `bern package` 未做；`aarch64-apple-tvos` 的引擎构建未试 |
+| Platform resolution | Done | `platform = "tvos"` defaults to `ui = "swiftui"`; `bern doctor`, `bern build` and `bern run` recognize this target |
+| Generated code builds | Done | `bern build --target tvos` generates Swift and the glue crate, and builds the Apple TV simulator app bundle plus the CLI and MCP server on the Mac; the generation tests type-check against the tvOS simulator SDK |
+| Build only the part the TV shows | Done | When `Adaptive` has a `Layout(size: tv)`, only that one is kept, `window.tv` is true, and the window size class is determined by the screen; branches and components that are never shown are not generated and do not take part in the capability check (see "TV layout") |
+| Focus and remote navigation | Done | The system focus engine and system focus effects; `default_focus` sets the starting focus; a slider is a focusable track |
+| Remote buttons | Partial | `Shortcut` and a control's `shortcut:` map to back, play/pause and the edges of the touch surface; the arrow keys were measured in the simulator, back and play/pause are not verified (see "Verification log") |
+| App icon | Done | `[app.icon].tvos` accepts a `.brandassets` folder or a square PNG; when none is declared, a layered icon and the Top Shelf image are generated from the default icon |
+| `bern run --target tvos` | Done | Installs into the running tvOS simulator and launches; the generated CLI controls it over IPC |
+| Device build and packaging | Not done | Signing, provisioning profiles, installation and `bern package` are not done; the engine build for `aarch64-apple-tvos` has not been tried |
 
-## 工具链
+## Toolchain
 
-Rust 1.99.0 的 rustup 为 `aarch64-apple-tvos` 与 `aarch64-apple-tvos-sim` 提供预编译的标准库（tier 2，没有宿主工具），`rustup target add aarch64-apple-tvos-sim` 后用工作区固定的稳定版即可构建。因此没有用 nightly 的 `-Zbuild-std`：那要求换 nightly 工具链、每次构建重新编译标准库，与其他目标用的 1.99.0 不一致，而这里没有它解决得了、预编译标准库解决不了的问题。Intel Mac 上对应的模拟器目标是 `x86_64-apple-tvos`。
+With Rust 1.99.0, rustup provides prebuilt standard libraries for `aarch64-apple-tvos` and `aarch64-apple-tvos-sim` (tier 2, no host tools), so after `rustup target add aarch64-apple-tvos-sim` the stable version pinned by the workspace builds it. Nightly's `-Zbuild-std` is therefore not used: it would require switching to a nightly toolchain and recompiling the standard library on every build, inconsistent with the 1.99.0 used by the other targets, and there is no problem here that it would solve and the prebuilt standard library would not. The corresponding simulator target on an Intel Mac is `x86_64-apple-tvos`.
 
-最低 tvOS 18.0：运行时用到的 Observation、开关样式的 `Toggle` 与新的标签页 API 从这一版起都有；tvOS 18 支持的设备与 tvOS 17 相同（Apple TV HD 与全部 Apple TV 4K）。
+Minimum tvOS 18.0: Observation, the switch-style `Toggle` and the new tab API that the runtime uses are all available from this version on; tvOS 18 supports the same devices as tvOS 17 (Apple TV HD and every Apple TV 4K).
 
-## 工程结构
+## Project structure
 
-| 位置 | 内容 |
+| Location | Contents |
 | --- | --- |
-| `crates/bern-backend-swiftui/src/tvos.rs` | tvOS 目标：目标描述、检查、生成与构建步骤 |
-| `crates/bern-ir/src/television.rs` | `Application::on_television`：电视显示的应用 |
-| `crates/bern-target-api/src/brand_assets.rs` | 分层图标与顶部货架图：检查、生成 |
-| `templates/BernUIKit.swift` | 与 iOS 共用的平台部分；`#if os(tvOS)` 里是遥控按键、焦点滑块与窗口的遥控命令 |
-| `templates/BernStyle.swift` | 焦点效果、缩放场景里的控件外观、默认焦点 |
+| `crates/bern-backend-swiftui/src/tvos.rs` | tvOS target: target description, checks, generation and build steps |
+| `crates/bern-ir/src/television.rs` | `Application::on_television`: the app as shown on a TV |
+| `crates/bern-target-api/src/brand_assets.rs` | Layered icons and Top Shelf images: checking, generation |
+| `templates/BernUIKit.swift` | Platform part shared with iOS; inside `#if os(tvOS)` are the remote buttons, the focus slider and the windows' remote commands |
+| `templates/BernStyle.swift` | Focus effects, control appearance in scaled scenes, default focus |
 
-应用包与 iOS 相同是扁平结构。`Info.plist` 声明 `UIDeviceFamily` 3、`AppleTVSimulator`、单场景、图标名 `App Icon` 与顶部货架图 `TVTopShelfImage`。
+As on iOS, the app bundle has a flat structure. `Info.plist` declares `UIDeviceFamily` 3, `AppleTVSimulator`, a single scene, the icon name `App Icon` and the Top Shelf image `TVTopShelfImage`.
 
-## 与 iOS 的差异
+## Differences from iOS
 
-- **场景与窗口**：一个 `WindowGroup`，内容是 `BernVirtualHost`，主窗口铺满屏幕；其他窗口（含设置）以 `fullScreenCover` 铺满屏幕打开，没有标题栏与“完成”按钮（tvOS 自己的全屏页也没有），菜单键（返回）关闭；需要关闭按钮时由窗口内容自己画。tvOS 的 sheet 是屏幕中间的小卡片，放不下表单与分栏。窗口事实报告为 `Virtual`。没有 iOS 的方向、状态栏、iPad 多窗口与 ⌘, 菜单。电视总是横屏，`Window(landscape:)` 不适用：能力表声明 `window_landscape`，运行时什么也不做，检查不再警告（2026-10-24）。
-- **正文字号**：tvOS 的正文是 29 点，生成的默认字号随之取 29（iOS 17）。应用在 `text` 块里给了电视字号（`font(size: 13, tv: 16)`）时，tvOS 取电视字号。
-- **控件**：都是 tvOS 的系统控件，焦点下抬起、变白、带阴影。tvOS 没有的控件按系统做法替换：
-  - `Slider` 是 `BernFocusSlider`：一条可聚焦的轨道，焦点在上时触控板左右各移动一步（没有 `step` 时为范围的二十分之一），连续按的一串算一次编辑（最后一次后 0.5 秒结束），辅助功能为可调节元素。`Video` 的进度条同样如此。
-  - `PopoverButton` 的内容以 sheet 显示；`Switch(style: button)` 是普通开关（tvOS 没有按钮样式的开关）；`TextInput` 与搜索框用系统输入框，输入时是系统键盘与听写。
-  - `Pinch`、`Swipe` 只保留辅助功能的调节，没有手势；`Drop` 没有拖放；`reveal: hover` 的内容一直显示（检查给出警告），焦点像其他控件一样到达它。
-  - `Sidebar(width:)` 无效（tvOS 的侧边栏是系统宽度的浮动面板），检查给出警告；侧边栏的搜索框在系统默认位置。
-  - `Tab(display: icon)` 的标签项只放符号图像（`accessibilityLabel` 为 `label`），标签栏里只显示符号，例如搜索的放大镜；选中时符号在系统的选中底上。
-- **焦点效果**：系统按钮用系统的焦点效果。样式自己画的按钮按设计稿的 Apple TV 焦点画（`bernTelevisionFocus`）：样式只在悬停时有背景的是列表行，焦点下变白、内容转深色、放大 1.03；有自己背景的（如屏幕键盘的键）焦点下变白、放大 1.1；其余是图片（海报、画框、缩略图），放大 1.08 带阴影。没有焦点时什么也不画。最初用的 `hoverEffect(.highlight)` 在 tvOS 26 上没有焦点时也画一圈底板与描边，与设计稿不符，已换掉。样式写 `focus: none` 时不显示焦点效果，例如铺满画面、只为接收遥控而存在的按钮。
-- **缩放场景**：`ScaleBox` 把按设计尺寸画的场景放大到屏幕（例如 1280 × 720 放大 1.5 倍到 1920 × 1080）。tvOS 的控件按 1080p 设计，放大后会再大一半，所以场景里的控件按设计尺寸画：
-  - 胶囊与圆形按钮：设计高度（未写高度时 46，大号 52），焦点下白底黑字、放大 1.1、带阴影；`prominence: plain` 的按钮只是文字（16 点、次要色），焦点下套上白色胶囊。
-  - 没有指定字体的系统文字取应用正文的电视字号（`bernSceneBodySize`）；表单的分组标题取设计稿的 12.5 点半粗次要色，不是 tvOS 的大标题。
-  - 输入框与搜索框用 tvOS 自己的输入框（它画底板与焦点），只设设计高度与字号。
-  - 菜单式 `Picker`：tvOS 的菜单选择器只显示当前值，在 tvOS 上改为一行：左边是标签，行尾是带下拉箭头的胶囊菜单（46 点）。
-  - 分段 `Picker`：tvOS 的分段控件无法改尺寸，场景里画成设计稿的分段（40 点、15 点字，选中的一段抬起，焦点的一段变白放大）；不在场景里时仍是 tvOS 自己的。
-  - 开关：tvOS 没有开关，只有写着“开”“关”的按钮；改为画出来的开关（64 × 28 胶囊，开时填强调色，白色圆钮），遥控的选择键切换，焦点下外面一圈描边、放大 1.1。不在场景里时按 1.5 倍画。
-  - 滑块：细轨道填强调色到白色胶囊滑块（40 × 24），焦点下外面一圈描边；长的滑块不放大，免得盖住旁边的时间。
-  - `Modal` 被提到窗口根部显示，按它所在场景的放大倍数放大。
-- **无键盘快捷键**：tvOS 没有 `keyboardShortcut`；`shortcut:` 与 `Shortcut` 改为遥控按键（见下）。
+- **Scenes and windows**: one `WindowGroup` whose content is `BernVirtualHost`, with the main window filling the screen; other windows (including settings) open as a `fullScreenCover` that fills the screen, with no title bar and no "Done" button (tvOS's own full-screen pages have none either), and are closed with the Menu button (back); when a close button is needed, the window content draws it itself. A tvOS sheet is a small card in the middle of the screen, too small for forms and split views. Window facts report `Virtual`. There are no iOS orientations, status bar, iPad multiple windows or ⌘, menu. A TV is always landscape, so `Window(landscape:)` does not apply: the capability table declares `window_landscape`, the runtime does nothing, and the check no longer warns (2026-10-24).
+- **Body text size**: tvOS body text is 29 points, and the generated default font size follows it at 29 (17 on iOS). When the app gives a TV size in a `text` block (`font(size: 13, tv: 16)`), tvOS takes the TV size.
+- **Controls**: all are tvOS system controls, which lift, turn white and gain a shadow under focus. Controls that tvOS does not have are replaced the way the system does it:
+  - `Slider` is `BernFocusSlider`: a focusable track; while it has focus, each press left or right on the touch surface moves one step (one twentieth of the range when there is no `step`), a run of consecutive presses counts as one edit (ending 0.5 seconds after the last one), and for accessibility it is an adjustable element. The progress bar of `Video` works the same way.
+  - The content of `PopoverButton` is shown as a sheet; `Switch(style: button)` is an ordinary switch (tvOS has no button-style switch); `TextInput` and search fields use the system text field, and typing goes through the system keyboard and dictation.
+  - `Pinch` and `Swipe` keep only the accessibility adjustment, with no gesture; `Drop` has no drag and drop; content with `reveal: hover` is always shown (the check gives a warning), and focus reaches it like any other control.
+  - `Sidebar(width:)` has no effect (the tvOS sidebar is a floating panel of system width), and the check gives a warning; the sidebar's search field is in the system's default position.
+  - The tab item of `Tab(display: icon)` holds only a symbol image (its `accessibilityLabel` is `label`), so the tab bar shows only the symbol, for example the magnifying glass for search; when selected, the symbol sits on the system's selection background.
+- **Focus effects**: system buttons use the system focus effect. Buttons that their style draws are drawn with the prototype's Apple TV focus (`bernTelevisionFocus`): those whose style has a background only on hover are list rows, which under focus turn white, with the content turning dark, and scale to 1.03; those with their own background (such as the keys of the on-screen keyboard) turn white under focus and scale to 1.1; the rest are images (posters, frames, thumbnails), which scale to 1.08 with a shadow. Nothing is drawn without focus. The `hoverEffect(.highlight)` used at first draws a plate and an outline on tvOS 26 even without focus, which does not match the prototype, and has been replaced. When a style writes `focus: none`, no focus effect is shown, for example for a button that fills the picture and exists only to receive the remote.
+- **Scaled scenes**: `ScaleBox` enlarges a scene drawn at the design size to the screen (for example 1280 × 720 enlarged 1.5 times to 1920 × 1080). tvOS controls are designed for 1080p and would become half as large again after enlarging, so the controls in a scene are drawn at the design size:
+  - Capsule and round buttons: the design height (46 when no height is written, 52 for large), white background with black text under focus, scaled to 1.1, with a shadow; a `prominence: plain` button is just text (16 points, secondary color) and is wrapped in a white capsule under focus.
+  - System text with no font specified takes the app's TV body size (`bernSceneBodySize`); the section headers of forms take the prototype's 12.5-point semibold secondary color, not tvOS's large headings.
+  - Text fields and search fields use tvOS's own text field (it draws the plate and the focus), with only the design height and font size set.
+  - Menu `Picker`: the tvOS menu picker shows only the current value; on tvOS it becomes a row instead: the label on the left, and at the end of the row a capsule menu with a drop-down arrow (46 points).
+  - Segmented `Picker`: the tvOS segmented control cannot be resized, so in a scene it is drawn as the prototype's segments (40 points, 15-point text, the selected segment lifted, the focused segment white and enlarged); outside a scene it is still tvOS's own.
+  - Switch: tvOS has no switch, only a button reading "On" or "Off"; it is replaced by a drawn switch (a 64 × 28 capsule filled with the accent color when on, with a white knob), toggled with the remote's select button, with an outline around it and scaled to 1.1 under focus. Outside a scene it is drawn at 1.5 times.
+  - Slider: a thin track filled with the accent color up to a white capsule thumb (40 × 24), with an outline around it under focus; a long slider is not enlarged, so that it does not cover the time next to it.
+  - `Modal` is lifted to the window root for display and enlarged by the scale factor of the scene it is in.
+- **No keyboard shortcuts**: tvOS has no `keyboardShortcut`; `shortcut:` and `Shortcut` become remote buttons instead (see below).
 
-`Svg` 在 tvOS 上不可用：动画 SVG 由 WebKit 播放，tvOS SDK 没有 WebKit（已知，编译即报错）。检查器报告用到它的位置；应用在电视布局里换成静态图片。
+`Svg` is not available on tvOS: animated SVG is played by WebKit, and the tvOS SDK has no WebKit (known; it is a compile error). The checker reports where it is used; the app uses a static image instead in its TV layout.
 
-## 电视布局
+## TV layout
 
-电视的窗口永远是整个屏幕，所以窗口相关的条件在构建时就已知。`Application::on_television` 在 tvOS 的检查与生成之前改写应用：
+A TV window is always the whole screen, so window-related conditions are already known at build time. `Application::on_television` rewrites the app before tvOS checking and generation:
 
-- `Adaptive` 有 `Layout(size: tv)` 时只保留这一个布局；没有时照常按尺寸档选择（电视按 1920 点宽、`[layouts]` 的断点得到尺寸档，常见为 `large`）。
-- `window.tv` 为真；`window.compact` 等尺寸档与 `window.short` 由屏幕的 1920 × 1080 点与断点得到；`!`、`&&`、`||` 按已知部分化简；`window.idle` 等运行时才知道的条件保留。
-- 条件已知为假的分支去掉，已知为真的分支取代整个条件；只被去掉的部分放置的组件不生成。
+- When `Adaptive` has a `Layout(size: tv)`, only that layout is kept; when it has none, a layout is chosen by size class as usual (a TV gets its size class from a width of 1920 points and the breakpoints in `[layouts]`, commonly `large`).
+- `window.tv` is true; size classes such as `window.compact`, and `window.short`, are derived from the screen's 1920 × 1080 points and the breakpoints; `!`, `&&` and `||` are simplified using the known parts; conditions known only at runtime, such as `window.idle`, are kept.
+- A branch whose condition is known to be false is removed, and a branch known to be true replaces the whole condition; components placed only by the removed parts are not generated.
 
-因此手机或桌面布局里用到电视没有的能力（例如 `pick:` 选文件）时，tvOS 的检查不会报错，只检查电视实际显示的部分。其他目标上 `window.tv` 在 Android TV 与网页的电视浏览器上为真（见[平台能力表](../Reference/Platforms.md)，未在电视设备上验证），桌面与 iOS 为假，`tv` 布局不被选中。Android TV 的遥控按键与 tvOS 相同：返回键对应 `escape`、播放/暂停键对应 `space`，方向键先移动焦点。
+So when a phone or desktop layout uses a capability the TV does not have (for example `pick:` to pick files), the tvOS check does not report an error; it checks only what the TV actually shows. On other targets, `window.tv` is true on Android TV and in TV web browsers (see the [platform capability table](../Reference/Platforms.md); not verified on TV devices) and false on desktop and iOS, where the `tv` layout is not selected. The remote buttons on Android TV are the same as on tvOS: the back button maps to `escape`, the play/pause button to `space`, and the arrow keys move focus first.
 
-`Stack(under_bars: true)` 在 tvOS 上忽略全部容器安全区，内容铺到屏幕边缘；电视的过扫描边距（HIG：上下 60、左右 80 点）由设计在场景内留出，避免在已有安全区的容器外重复留白。
+On tvOS, `Stack(under_bars: true)` ignores all container safe areas, and the content extends to the edges of the screen; the TV overscan margins (HIG: 60 points top and bottom, 80 points left and right) are left inside the scene by the design, to avoid leaving the margin a second time outside containers that already have safe areas.
 
-## 遥控器
+## Remote
 
-`Shortcut(key:)` 与控件的 `shortcut:` 在 tvOS 上对应遥控器的按键：
+On tvOS, `Shortcut(key:)` and a control's `shortcut:` map to buttons on the remote:
 
-| 键 | Siri Remote | SwiftUI |
+| Key | Siri Remote | SwiftUI |
 | --- | --- | --- |
-| `escape` | 返回（菜单） | `onExitCommand` |
-| `space` | 播放/暂停 | `onPlayPauseCommand` |
-| `left`、`right`、`up`、`down` | 触控板的方向，焦点无处可移时 | `onMoveCommand` |
+| `escape` | Back (Menu) | `onExitCommand` |
+| `space` | Play/Pause | `onPlayPauseCommand` |
+| `left`, `right`, `up`, `down` | Directions on the touch surface, when focus has nowhere to move | `onMoveCommand` |
 
-带修饰键的组合与其他键在电视上没有对应按键，不生成。每个窗口的根视图把这些命令交给本窗口当前显示且启用的快捷键，同一个键有多个时取最后显示的那个，停用的不参与；没有返回键的快捷键时，返回交给系统（关闭全屏页、回到主屏幕）。方向键只在焦点移不动时到达快捷键，所以“画面上没有可聚焦的控件时左右快退快进”这类设计用一个铺满画面、`focus: none` 的按钮接住焦点。没有快捷键接住的方向按压算作输入，让 `window.idle` 回到假。
+Combinations with modifier keys and other keys have no corresponding button on a TV and are not generated. Each window's root view hands these commands to the shortcuts currently shown and enabled in that window; when several have the same key, the last one shown takes it, and disabled ones do not take part; when there is no shortcut for the back button, back goes to the system (closing the full-screen page, returning to the Home screen). The arrow keys reach shortcuts only when focus cannot move, so a design such as "left and right skip back and forward when there is no focusable control on the screen" uses a button that fills the picture with `focus: none` to catch focus. A directional press that no shortcut catches counts as input and sets `window.idle` back to false.
 
-`default_focus: true` 写在 `Button` 或 `IconButton` 上，界面出现时焦点从它开始。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），每个标签页是一个焦点区域，所以标签栏下的每页各有自己的起始焦点；其他平台上是键盘焦点（见能力表）。
+`default_focus: true` is written on a `Button` or `IconButton`, and focus starts from it when the interface appears. On tvOS it is the preferred focus of its focus region (`prefersDefaultFocus`), and each tab is a focus region, so each page under the tab bar has its own starting focus; on other platforms it is keyboard focus (see the capability table).
 
-## 应用图标
+## App icon
 
-`[app.icon]` 的 `tvos` 键：
+The `tvos` key of `[app.icon]`:
 
-- `.brandassets` 文件夹原样编译：检查 `Contents.json` 列出的资源都在、每个图像栈有 2 至 5 层、每层的图片存在，且有 400 × 240 的主应用图标。
-- 方形 PNG，或未声明时用默认图标：生成分层图标。背景层是图标不透明像素中最常见的颜色（按 5 位量化），前景层是透明底上的图标；图标本身是满幅方形时铺满高度，有透明边时按安全区留出边距。生成 400 × 240（@1x、@2x）的主屏幕图标、1280 × 768 的 App Store 图标、1920 × 720 与 2320 × 720（@1x、@2x）的顶部货架图。
+- A `.brandassets` folder is compiled as is: the check confirms that the assets listed in `Contents.json` are all present, that each image stack has 2 to 5 layers, that each layer's image exists, and that there is a 400 × 240 primary app icon.
+- A square PNG, or the default icon when none is declared: a layered icon is generated. The back layer is the most common color among the icon's opaque pixels (quantized to 5 bits), and the front layer is the icon on a transparent background; when the icon itself is a full-bleed square it fills the height, and when it has transparent edges a margin is left according to the safe area. This generates the 400 × 240 (@1x, @2x) Home screen icon, the 1280 × 768 App Store icon, and the 1920 × 720 and 2320 × 720 (@1x, @2x) Top Shelf images.
 
-`actool` 以 `--platform appletvsimulator --target-device tv --app-icon "App Icon & Top Shelf Image"` 编译，`Info.plist` 的图标与顶部货架图键由它的局部 plist 给出。
+`actool` compiles with `--platform appletvsimulator --target-device tv --app-icon "App Icon & Top Shelf Image"`, and the icon and Top Shelf image keys of `Info.plist` come from its partial plist.
 
-## 本地控制通道
+## Local control channel
 
-与 iOS 相同：`bern run` 把 Mac 的临时目录经 `SIMCTL_CHILD_BERN_IPC_DIR` 交给应用，Mac 上的 CLI、JSON 客户端与 MCP 服务器经 IPC 连到模拟器里的应用；从主屏幕启动时通道不监听。同一包标识的 macOS、iOS 或 Android 引擎同时在运行时，用 `--engine` 指定。
+Same as iOS: `bern run` hands the Mac's temporary directory to the app through `SIMCTL_CHILD_BERN_IPC_DIR`, and the CLI, JSON client and MCP server on the Mac connect over IPC to the app in the simulator; when the app is launched from the Home screen, the channel does not listen. When a macOS, iOS or Android engine with the same bundle identifier is running at the same time, pick one with `--engine`.
 
-## 构建与运行
+## Build and run
 
 ```bash
 rustup target add aarch64-apple-tvos-sim
@@ -117,57 +119,57 @@ bern build --target tvos
 bern run --target tvos
 ```
 
-`bern run --target tvos` 只找正在运行的 tvOS 模拟器（运行时标识含 `.tvOS-`），没有时报错并提示启动方法。构建步骤：为模拟器构建引擎静态库（`TVOS_DEPLOYMENT_TARGET=18.0`）与为 Mac 构建 CLI、MCP 服务器；把随包资源镜像到包顶层；`actool` 编译图标；`xcrun --sdk appletvsimulator swiftc` 以 `arm64-apple-tvos18.0-simulator` 编译界面；dSYM 移到包旁；ad hoc 签名。
+`bern run --target tvos` looks only for a running tvOS simulator (one whose runtime identifier contains `.tvOS-`); when there is none, it reports an error with a hint on how to start one. Build steps: build the engine static library for the simulator (`TVOS_DEPLOYMENT_TARGET=18.0`) and the CLI and MCP server for the Mac; mirror the bundled resources to the top level of the bundle; compile the icon with `actool`; compile the UI with `xcrun --sdk appletvsimulator swiftc` for `arm64-apple-tvos18.0-simulator`; move the dSYM next to the bundle; sign ad hoc.
 
-## 验证记录
+## Verification log
 
-2026-10-20，Apple TV 4K（第 3 代）（1080p）模拟器，tvOS 26.5，Xcode 27.0。只截取模拟器屏幕（`simctl io screenshot`），没有录屏、没有桌面范围的模拟输入。
+2026-10-20, Apple TV 4K (3rd generation) (1080p) simulator, tvOS 26.5, Xcode 27.0. Only the simulator screen was captured (`simctl io screenshot`); no screen recording and no desktop-wide synthetic input.
 
-模拟器的输入：Simulator 应用的遥控器窗口要在桌面上点按，所以改用一个只对这台模拟器发送 HID 事件的小工具，以模拟游戏手柄的方向键和按钮输入。方向键能移动焦点并产生 `onMoveCommand`；手柄的 A 键在系统按钮、自定义样式按钮与纯样式按钮上都没有触发按钮动作（在一个只含这三种按钮的探针应用里确认），B 键让应用回到主屏幕，没有到达探针里的 `onExitCommand`，X、Y 没有产生播放/暂停。所以按钮动作经 CLI 的 `ui activate` 触发，返回与播放/暂停的映射**未验证**；真实遥控器上 `onExitCommand` 与 `onPlayPauseCommand` 的行为是 Apple 文档给出的（已知），Bern 的对应未在真实遥控器上实测。
+Input in the simulator: the Simulator app's remote window has to be clicked on the desktop, so a small tool that sends HID events only to this simulator was used instead, to simulate game controller D-pad and button input. The D-pad moves focus and produces `onMoveCommand`; the controller's A button did not trigger the button action on system buttons, buttons with a custom style or buttons drawn purely by a style (confirmed in a probe app containing only these three kinds of buttons), the B button sent the app to the Home screen without reaching the probe's `onExitCommand`, and X and Y did not produce play/pause. So button actions were triggered through the CLI's `ui activate`, and the back and play/pause mappings are **not verified**; the behavior of `onExitCommand` and `onPlayPauseCommand` on a real remote is as given in Apple's documentation (known), and Bern's mapping has not been measured on a real remote.
 
-- **构建与测试**：`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 通过；新增 tvOS 生成测试（Info.plist、生成的分层图标通过与声明图标相同的检查、构建步骤与 `actool` 参数、按 tvOS 模拟器 SDK 类型检查）、电视布局的裁剪与遥控快捷键的生成测试（同一应用在 macOS 上生成键盘快捷键并类型检查）、分层图标的单元测试。
-- **其他目标的新代码**：`examples/gallery` 用到电视布局、`Shortcut` 与 `default_focus`；GTK 在 Ubuntu 24.04 虚拟机上过 Clippy 与生成应用的类型检查，WinUI 3 在 Windows PC 上用 MSVC 编译，Android 版 gallery 用 Gradle 构建成功（Kotlin 编译），Web 运行时测试覆盖快捷键让键。都没有运行交互。
-- **展示应用**：构建、安装、启动；主屏幕显示生成的分层图标，选中时顶部货架显示生成的货架图。
-- **一个实际应用的电视布局**（按设计稿 1280 × 720 场景放大 1.5 倍）：
-  - 顶部是系统标签栏（搜索在最前），右上角是“打开”、设置与账户；方向键在标签栏与内容之间、内容的控件之间移动焦点，焦点效果为系统的抬起与变白。
-  - 引导页铺满屏幕，起始焦点在“开始”，之后每步在“继续”；CLI 读到 `Adaptive` 选中的布局为 `tv`。
-  - “打开链接”的模态按场景放大，焦点只在模态里。
-  - 播放器：控制条显示时起始焦点在暂停按钮；控制条隐藏时，铺满画面的按钮接住焦点，方向左右快退、快进 10 秒且不唤醒控制条（位置 558.65 → 549.15，558.65 → 569.4），方向上唤醒控制条；小窗播放在右下角。
-  - 新番、媒体库、搜索（含结果）、详情与设置（`fullScreenCover`，tvOS 的表单与侧边栏）页面显示正常。
-- **未验证**：真实遥控器；返回与播放/暂停的映射；手柄 A 键之外的“选择”（模拟器里按钮动作经 CLI 触发）；真机；HDR 与杜比视界的显示；Top Shelf 的动态内容（未实现）。
+- **Build and tests**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` pass; new tvOS generation tests (Info.plist, the generated layered icon passing the same check as a declared icon, build steps and `actool` arguments, type-checking against the tvOS simulator SDK), generation tests for TV layout pruning and remote shortcuts (the same app generates keyboard shortcuts on macOS and is type-checked), and unit tests for layered icons.
+- **New code on other targets**: `examples/gallery` uses the TV layout, `Shortcut` and `default_focus`; GTK passes Clippy and type-checking of the generated app in an Ubuntu 24.04 VM, WinUI 3 compiles with MSVC on the Windows PC, the Android gallery builds successfully with Gradle (Kotlin compilation), and the Web runtime tests cover shortcuts yielding keys. None of them were run interactively.
+- **Showcase app**: built, installed, launched; the Home screen shows the generated layered icon, and when it is selected the Top Shelf shows the generated shelf image.
+- **A real app's TV layout** (the prototype's 1280 × 720 scene enlarged 1.5 times):
+  - At the top is the system tab bar (search first), and at the top right are "Open", settings and account; the arrow keys move focus between the tab bar and the content and among the content's controls, and the focus effect is the system lift and whitening.
+  - The onboarding pages fill the screen, with the starting focus on "Start" and then on "Continue" at each step; the CLI reads `tv` as the layout selected by `Adaptive`.
+  - The "Open link" modal is enlarged with the scene, and focus stays inside the modal.
+  - Player: when the control bar is shown, the starting focus is on the pause button; when the control bar is hidden, a button filling the picture catches focus, and left and right skip back and forward 10 seconds without waking the control bar (position 558.65 → 549.15, 558.65 → 569.4), while up wakes the control bar; the mini player plays in the bottom-right corner.
+  - The seasonal, media library, search (with results), detail and settings (`fullScreenCover`, tvOS forms and sidebar) pages display correctly.
+- **Not verified**: a real remote; the back and play/pause mappings; "select" other than the controller's A button (button actions in the simulator were triggered through the CLI); a real device; HDR and Dolby Vision display; dynamic Top Shelf content (not implemented).
 
-同日第二轮：对照设计稿电视模式（`design/app.html` 选“电视”）逐屏量取后修正。第一轮的实际应用复用了桌面的组件与尺寸，没有设计稿给电视的那套覆盖（字号、页边距、按钮高度），设置页行标签丢失、搜索结果太小、开关显示成“开/关”文字等问题都来自这里。修正：
+A second round on the same day: corrections after measuring screen by screen against the prototype's TV mode (`design/app.html` with "TV" selected). In the first round the real app reused the desktop components and sizes, without the set of overrides the prototype gives the TV (font sizes, page margins, button heights); problems such as missing row labels on the settings page, search results that were too small and switches shown as "On/Off" text all came from this. Corrections:
 
-- Bern：文本样式的电视字号（`font(tv:)`，六个目标）；文字会话动作 `push_str`、`pop`（六个目标，屏幕键盘用）；`Search(suggest: true)`（六个目标）；上面“缩放场景”一节的控件画法；自绘按钮的电视焦点；电视上其他窗口不加标题栏与“完成”。
-- 实际应用：字号、56 点页边距、首页舞台 560 × 315、新番 500 高、媒体库六列海报与 40 点筛选、详情、全屏引导、屏幕键盘搜索页、全屏设置（300 点的页面面板、页标题、关闭按钮）、右上角顺序。
-- 模拟器截图对照：首页、新番、媒体库、详情、搜索（含输入首字母与删除）、设置的通用 / 外观 / 播放 / 弹幕 / 可选功能 / 关于、引导四步、播放器、打开链接、小窗，位置与设计稿相差在几点以内。
-- 观察到的问题（当时在应用里绕开，之后在 Bern 里修正）：新番收起的星期列标题，`Row { Canvas(width: 16); Column { Row { Text(lines: 1); Spacer } … } }`，文字被压成首字的一条细边。与按钮无关：同一标题放在按钮外、86 点宽时一样被压，200 点宽时在按钮内外都正常。原因是 tvOS 上系统 `Spacer()` 的最小长度为 60 点（同样量法 macOS 为 8 点），`BernRow` 把它当作 `Spacer` 的最小宽度，70 点宽的行里只剩 10 点给 45 点宽的星期名，第二行的两段文字只分到 2 点左右。现在 `BernRow` 里的 `Spacer` 没有最小宽度，生成的 `Spacer` 一律是 `Spacer(minLength: 0)`（列里同样），与其他目标相同。
-  - 验证：Apple TV 模拟器上一个小工程把同一标题放在按钮外（200、86 点）、带样式按钮里（86、200 点）、无样式按钮里与再包一层 `Column(width: 86)` 的按钮里，修正前 86 点的四个都被压，修正后六个都完整显示；实际应用的副本把收起列换回原来的标题后，新番页七列标题与展开列一致。回归测试：`tests/row_layout.rs` 在 macOS 上把这个标题排进 86 点宽、`Spacer` 最小 60 点的 `BernRow`，修正前星期名只分到 11 点（需要 45 点）；生成测试检查行与列的 `Spacer` 形式。
+- Bern: TV font sizes for text styles (`font(tv:)`, six targets); the text session actions `push_str` and `pop` (six targets, used by the on-screen keyboard); `Search(suggest: true)` (six targets); the control drawing in the "Scaled scenes" section above; TV focus for self-drawn buttons; on a TV other windows get no title bar and no "Done".
+- The real app: font sizes, 56-point page margins, a 560 × 315 home stage, a 500-high seasonal page, a six-column poster grid and 40-point filters in the media library, detail, full-screen onboarding, an on-screen keyboard search page, full-screen settings (a 300-point page panel, page titles, a close button), the order at the top right.
+- Simulator screenshots compared: home, seasonal, media library, detail, search (including typing a first letter and deleting), settings' General / Appearance / Playback / Danmaku / Optional features / About, the four onboarding steps, the player, Open link, the mini player; positions are within a few points of the prototype.
+- A problem observed (worked around in the app at the time, later fixed in Bern): the header of a collapsed weekday column on the seasonal page, `Row { Canvas(width: 16); Column { Row { Text(lines: 1); Spacer } … } }`, had its text squeezed into a thin sliver of the first character. It was unrelated to buttons: the same header outside a button at 86 points wide was squeezed the same way, and at 200 points wide it was fine both inside and outside a button. The cause is that on tvOS the system `Spacer()` has a minimum length of 60 points (8 points on macOS, measured the same way), and `BernRow` took that as the minimum width of `Spacer`, so a 70-point-wide row left only 10 points for the 45-point-wide weekday name, and the two pieces of text on the second row got only about 2 points. Now `Spacer` in `BernRow` has no minimum width, and every generated `Spacer` is `Spacer(minLength: 0)` (in columns too), the same as on the other targets.
+  - Verification: on the Apple TV simulator, a small project placed the same header outside a button (200 and 86 points), in a styled button (86 and 200 points), in an unstyled button, and in a button wrapped in an extra `Column(width: 86)`; before the fix all four at 86 points were squeezed, after the fix all six display in full; in a copy of the real app with the collapsed column switched back to the original header, the seven column headers on the seasonal page match the expanded column. Regression test: `tests/row_layout.rs` lays this header out on macOS into an 86-point-wide `BernRow` whose `Spacer` has a 60-point minimum; before the fix the weekday name got only 11 points (it needs 45); generation tests check the form of `Spacer` in rows and columns.
 
-2026-10-21，窗口正文的摆放（规则与修正见 macOS 实现记录的同日条目，tvOS 共用同一段生成）：Apple TV 4K（第 3 代）（1080p）模拟器，tvOS 26.5，探针应用经 CLI 切换正文，只截模拟器屏幕。改后默认列从左上排起、按钮保持自身宽度，写在组件里的 `Column(align: center)` 水平居中、靠顶，只有一个小层的 `Stack` 在屏幕正中。改前没有在电视上截图。
+2026-10-21, placement of the window body (the rules and the fix are in the same-day entry of the macOS implementation notes; tvOS shares the same generation code): Apple TV 4K (3rd generation) (1080p) simulator, tvOS 26.5, a probe app switching the body through the CLI, only the simulator screen captured. After the change, the default column is laid out from the top left and buttons keep their own width; a `Column(align: center)` written in a component is centered horizontally and sits at the top; only a `Stack` with a single small layer is in the middle of the screen. Before the change, no screenshots were taken on the TV.
 
-同日补充：设计稿电视标签栏里的搜索只是放大镜，为此新增 `Tab(display: icon)`（六个目标）。另建一台同型号的临时模拟器（tvOS 26.5），实际应用的标签栏里搜索只显示放大镜，经 CLI `ui select` 选中后放大镜在选中底上，`ui inspect` 读到的选中名为“搜索”。读屏朗读未实测。
+A same-day addition: search in the prototype's TV tab bar is only a magnifying glass, so `Tab(display: icon)` (six targets) was added for it. On another temporary simulator of the same model (tvOS 26.5), search in the real app's tab bar shows only the magnifying glass; after it is selected with the CLI's `ui select`, the magnifying glass sits on the selection background, and the selected name read by `ui inspect` is "Search". Screen reader speech was not measured.
 
-2026-10-21，与框架类型同名的值类型：生成的 Swift 把值类型写成 `App_` 加声明的名字（原因与写法见 macOS 实现记录的同日条目，tvOS 共用同一段生成）。`tests/framework_names.rs` 为 tvOS 生成示例 `examples/framework-names`，按 tvOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
+2026-10-21, value types with the same name as framework types: the generated Swift writes value types as `App_` plus the declared name (for the reason and the form see the same-day entry of the macOS implementation notes; tvOS shares the same generation code). `tests/framework_names.rs` generates the example `examples/framework-names` for tvOS and type-checks it with swiftc against the tvOS 27.0 simulator SDK: passes; not run in the simulator.
 
-2026-10-21，与框架类型同名的组件与会话：组件写成 `AppView_` 加声明的名字、会话类写成 `App_` 加声明的名字、视图读会话的变量写成 `session_` 加声明的名字（原因与实测见 macOS 实现记录的同日条目，tvOS 共用同一段生成）。加入这些组件与会话的示例按 tvOS 27.0 模拟器 SDK 做 swiftc 类型检查，通过；没有在模拟器上运行。
+2026-10-21, components and sessions with the same name as framework types: components are written as `AppView_` plus the declared name, session classes as `App_` plus the declared name, and the variables through which views read sessions as `session_` plus the declared name (for the reason and the measurements see the same-day entry of the macOS implementation notes; tvOS shares the same generation code). The example with these components and sessions added is type-checked with swiftc against the tvOS 27.0 simulator SDK: passes; not run in the simulator.
 
-## 表格与受控文字（2026-10-29）
+## Tables and controlled text (2026-10-29)
 
-tvOS 没有 `Table`：生成为 `List` 里每行一个按钮，各列的格子在按钮里横排（间距 24）；按下时选择设为只有这一行并运行主操作，长按出行菜单（`contextMenu`），菜单项同样先只选中这一行。表头与排序标记不显示。`TextInput(current:)` 与 macOS 相同（`BernHeldText`）。tvOS 没有剪贴板：能力 `paste` 不声明（检查报告不可用），`BernClipboard` 是空实现，引擎的 `copy_text` 返回 `platform_unavailable`。验证：生成的 Swift 按 tvOS SDK 类型检查；未在模拟器上运行。
+tvOS has no `Table`: it is generated as a `List` with one button per row, with the cells of the columns laid out horizontally inside the button (spacing 24); a press sets the selection to only this row and runs the primary action, and a long press opens the row menu (`contextMenu`), whose items likewise first select only this row. The header and the sort indicators are not shown. `TextInput(current:)` is the same as on macOS (`BernHeldText`). tvOS has no clipboard: the capability `paste` is not declared (the check reports it as unavailable), `BernClipboard` is an empty implementation, and the engine's `copy_text` returns `platform_unavailable`. Verification: the generated Swift type-checks against the tvOS SDK; not run in the simulator.
 
-## 跟随值的动作与文字颜色（2026-10-29）
+## Actions that follow a value and text color (2026-10-29)
 
-`Watch` 与 `Text(color:)` 与 macOS 相同。tvOS 没有登录项，`Switch(login_item: true)` 生成 `EmptyView`。验证：`tables` 测试按 tvOS SDK 类型检查；未在模拟器上运行。
+`Watch` and `Text(color:)` are the same as on macOS. tvOS has no login items, so `Switch(login_item: true)` generates `EmptyView`. Verification: the `tables` test type-checks against the tvOS SDK; not run in the simulator.
 
-## 未完成与已知限制
+## Not done and known limitations
 
-- 只构建模拟器应用；真机需要签名与描述文件，安装与 `bern package` 未实现。
-- `Svg` 不可用（tvOS 没有 WebKit）；动画 Logo 在电视上用静态图片。
-- 选文件（`pick:`）、拖放、悬停显示在电视上没有对应的系统部件；这些能力只能出现在电视不显示的布局里。
-- 设置窗口侧边栏的搜索框获得焦点时，系统键盘行会盖住详情的上部（tvOS 的系统行为）。
-- 模拟器里的输入受工具限制，见上文。
+- Only simulator apps are built; a real device needs signing and a provisioning profile, and installation and `bern package` are not implemented.
+- `Svg` is not available (tvOS has no WebKit); an animated logo uses a static image on the TV.
+- Picking files (`pick:`), drag and drop and reveal on hover have no corresponding system parts on a TV; these capabilities can appear only in layouts the TV does not show.
+- When the search field in the settings window's sidebar gets focus, the system keyboard row covers the top of the detail (tvOS system behavior).
+- Input in the simulator is limited by the tools; see above.
 
-## 跟随状态的遥控按键（2026-10-24）
+## Remote buttons that follow state (2026-10-24)
 
-`Shortcut(key: app.keys.x)` 与控件的 `shortcut` 绑定文本时，遥控按键由 `BernShortcuts.remote(…)` 在视图求值时读取：文本是 `escape`、`space` 或方向键时对应返回、播放/暂停与触控板方向，其他文本没有按键；文本变化时按键重新登记。`ShortcutInput` 在电视上只显示快捷键，`MenuBar` 不生成。验证：`tests/menu_bar.rs` 按 tvOS 模拟器 SDK 类型检查；未在模拟器上运行。
+When `Shortcut(key: app.keys.x)` and a control's `shortcut` are bound to text, the remote button is read by `BernShortcuts.remote(…)` when the view is evaluated: when the text is `escape`, `space` or an arrow key, it maps to back, play/pause and the touch surface directions, and other text has no button; when the text changes, the button is registered again. On a TV, `ShortcutInput` only displays the shortcut, and `MenuBar` is not generated. Verification: `tests/menu_bar.rs` type-checks against the tvOS simulator SDK; not run in the simulator.

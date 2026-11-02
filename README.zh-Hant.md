@@ -28,8 +28,8 @@
 </p>
 
 <p>
-<a href="README.md">简体中文</a> ·
-<a href="README.en.md">English</a> ·
+<a href="README.md">English</a> ·
+<a href="README.zh-CN.md">简体中文</a> ·
 <b>繁體中文</b> ·
 <a href="README.ja.md">日本語</a>
 </p>
@@ -40,7 +40,7 @@
 <a href="#實測數據">實測數據</a> ·
 <a href="#與其他跨平台框架比較">比較</a> ·
 <a href="#快速開始">快速開始</a> ·
-<a href="Docs/Design.md">設計文件</a>
+<a href="Docs/zh-CN/Design.md">設計文件</a>
 </p>
 
 </div>
@@ -299,7 +299,7 @@ counter-mcp   # 同一份命令目錄，提供給 AI Agent
 <img alt="支援的平台：macOS、Windows、Linux、Web 應用程式、WebUI 與 Android 可用，iOS 與 tvOS 目前建置模擬器應用程式；下一步是 flutter + macos、iOS 實機打包與 HarmonyOS" src="Docs/Assets/tables/platforms-zh-Hant-light.svg" width="100%">
 </picture>
 
-實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web 與 WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)；下一步的平台見[適配規範](Docs/Adaptation/README.md)。
+實作紀錄：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web 與 WebUI](Docs/zh-CN/Implementation/Web.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md)；下一步的平台見[適配規範](Docs/zh-CN/Adaptation/README.md)。
 
 未指定 UI 技術時採用平台的預設技術；預設技術無法使用時直接回報錯誤，不會悄悄換成另一套技術。
 
@@ -490,12 +490,12 @@ cargo test --workspace
 
 ## 文件
 
-- [文件目錄](Docs/README.md) · [目前元件用法](Docs/Reference/UI.md) · [完整屬性表](Docs/Reference/Component-Properties.md) · [平台能力與驗證範圍](Docs/Reference/Platforms.md)（簡體中文）
-- [設計文件](Docs/Design.md)：目標、架構、元件、主題、命令、視窗與媒體
-- [適配規範](Docs/Adaptation/README.md)：Apple、Windows 與 Linux、Web、Android、HarmonyOS
-- 實作紀錄：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- [文件目錄](Docs/zh-CN/README.md) · [目前元件用法](Docs/zh-CN/Reference/UI.md) · [完整屬性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力與驗證範圍](Docs/zh-CN/Reference/Platforms.md)（簡體中文）
+- [設計文件](Docs/zh-CN/Design.md)：目標、架構、元件、主題、命令、視窗與媒體
+- [適配規範](Docs/zh-CN/Adaptation/README.md)：Apple、Windows 與 Linux、Web、Android、HarmonyOS
+- 實作紀錄：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web](Docs/zh-CN/Implementation/Web.md)
 
-設計與實作文件以簡體中文撰寫。
+設計與實作文件以簡體中文撰寫，另有[英文版](Docs/README.md)。
 
 ## 授權
 
