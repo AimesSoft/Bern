@@ -2888,11 +2888,37 @@ private struct BernSidebarToggleFollowsCover: ViewModifier {
     func body(content: Content) -> some View {
         #if os(tvOS)
         content
+        #elseif os(macOS)
+        // A toolbar left with no item shrinks to the title bar and moves
+        // the window's content up; an empty item holds it at its height.
+        if !covered {
+            content
+        } else if #available(macOS 26.0, *) {
+            content.toolbar(removing: .sidebarToggle).toolbar {
+                ToolbarItem { BernToolbarSpace() }.sharedBackgroundVisibility(.hidden)
+            }
+        } else {
+            content.toolbar(removing: .sidebarToggle).toolbar {
+                ToolbarItem { BernToolbarSpace() }
+            }
+        }
         #else
         content.toolbar(removing: covered ? .sidebarToggle : nil)
         #endif
     }
 }
+
+#if os(macOS)
+/// Room in a toolbar that shows nothing and takes no clicks.
+private struct BernToolbarSpace: View {
+    var body: some View {
+        Color.clear
+            .frame(width: 28, height: 28)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+#endif
 
 /// macOS 14 and iOS 17 do not tell how a scroll view is scrolled; there
 /// `browsing` stays false.
