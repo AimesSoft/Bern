@@ -282,8 +282,68 @@ fn handshake_rejects_stale_catalogs_and_wrong_engines() {
     );
     assert!(matches!(
         Client::connect(&bundle, Some("missing"), "cli", None),
-        Err(ConnectError::NotFound(_))
+        Err(ConnectError::NotFound { .. })
     ));
+}
+
+#[test]
+fn engines_are_picked_by_id_or_by_system() {
+    let (server, bundle) = start("system");
+    let name = server.path().file_name().unwrap().to_str().unwrap();
+    assert!(name.ends_with(&format!(".{SYSTEM}.sock")), "{name}");
+    let client = Client::connect(&bundle, Some(SYSTEM), "cli", None).unwrap();
+    assert_eq!(
+        discover(&bundle),
+        vec![Engine {
+            id: client.engine_id.clone(),
+            system: Some(SYSTEM.into()),
+            path: server.path().to_path_buf(),
+        }]
+    );
+
+    let engine = |file: &str| Engine::from_path(PathBuf::from(file)).unwrap();
+    let mac = engine("08e7915605c300.macos.sock");
+    let phone = engine("1e9c3585fdcd00.ios.sock");
+    let tablet = engine("9d2f5574963a00.ios.sock");
+    let older = engine("5aa8ceb0000000.sock");
+    let android = engine(ANDROID_FORWARD);
+    assert_eq!(
+        (android.id.as_str(), android.system.as_deref()),
+        ("android", Some("android"))
+    );
+    assert_eq!(older.system, None);
+    assert!(Engine::from_path(PathBuf::from("notes.txt")).is_none());
+
+    let all = vec![
+        mac.clone(),
+        phone.clone(),
+        tablet,
+        older.clone(),
+        android.clone(),
+    ];
+    let pick = |name| choose(all.clone(), name).map_err(|error| error.to_string());
+    assert_eq!(pick(Some("macos")), Ok(mac));
+    assert_eq!(pick(Some("1e9c3585fdcd00")), Ok(phone));
+    assert_eq!(pick(Some("5aa8ceb0000000")), Ok(older));
+    assert_eq!(pick(Some("android")), Ok(android));
+    assert_eq!(
+        pick(Some("ios")),
+        Err("several engines are running (1e9c3585fdcd00 (ios), 9d2f5574963a00 (ios)); choose one with --engine and its id or system".into())
+    );
+    // What runs is listed, as an older build whose socket names no system.
+    assert_eq!(
+        pick(Some("linux")),
+        Err("engine `linux` is not running; running: 08e7915605c300 (macos), 1e9c3585fdcd00 (ios), 9d2f5574963a00 (ios), 5aa8ceb0000000, android".into())
+    );
+    assert_eq!(
+        choose(Vec::new(), Some("linux")).map_err(|error| error.to_string()),
+        Err("engine `linux` is not running".into())
+    );
+    assert!(
+        pick(None)
+            .unwrap_err()
+            .contains("08e7915605c300 (macos), 1e9c3585fdcd00 (ios)")
+    );
 }
 
 #[test]

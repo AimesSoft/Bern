@@ -351,7 +351,7 @@ sequenceDiagram
 
 ## External entry points
 
-The control channel is assembled only with `[targets.macos] channels = ["ipc"]` in `Bern.toml`. The channel is at `$TMPDIR/bern-<app-id-hash>/<engine_id>.sock`, with directory permissions 0700 and socket permissions 0600, and serves only the same user. The handshake checks the protocol version and can check the catalog fingerprint. Messages are line-delimited JSON; 64-bit integers beyond ±(2^53−1) are encoded as decimal strings, and revision numbers are strings too.
+The control channel is assembled only with `[targets.macos] channels = ["ipc"]` in `Bern.toml`. The channel is at `$TMPDIR/bern-<app-id-hash>/<engine_id>.macos.sock`, with directory permissions 0700 and socket permissions 0600, and serves only the same user. The name ends in the system the engine runs on, which `--engine` takes in place of the id, since the id is new each time the app starts. The handshake checks the protocol version and can check the catalog fingerprint. Messages are line-delimited JSON; 64-bit integers beyond ±(2^53−1) are encoded as decimal strings, and revision numbers are strings too.
 
 ```sh
 target/bern/macos/bin/showcase --help

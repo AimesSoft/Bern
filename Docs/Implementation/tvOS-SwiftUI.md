@@ -103,7 +103,7 @@ The `tvos` key of `[app.icon]`:
 
 ## Local control channel
 
-Same as iOS: `bern run` hands the Mac's temporary directory to the app through `SIMCTL_CHILD_BERN_IPC_DIR`, and the CLI, JSON client and MCP server on the Mac connect over IPC to the app in the simulator; when the app is launched from the Home screen, the channel does not listen. When a macOS, iOS or Android engine with the same bundle identifier is running at the same time, pick one with `--engine`.
+Same as iOS: `bern run` hands the Mac's temporary directory to the app through `SIMCTL_CHILD_BERN_IPC_DIR`, and the CLI, JSON client and MCP server on the Mac connect over IPC to the app in the simulator; when the app is launched from the Home screen, the channel does not listen. When a macOS, iOS or Android engine with the same bundle identifier is running at the same time, pick one with `--engine`: `--engine tvos` picks the simulator's.
 
 ## Build and run
 

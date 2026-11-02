@@ -1509,7 +1509,7 @@ The entry-point mapping for the same seek operation looks like this:
 }
 ```
 
-This JSON is a draft of the control protocol. The encoding of numbers, optional values and errors follows the unified schema, so no entry point has to guess Rust types on its own. Channels such as MCP can determine the engine from the bound connection context; the key point is that a different instance must never be picked quietly.
+This JSON is a draft of the control protocol. The encoding of numbers, optional values and errors follows the unified schema, so no entry point has to guess Rust types on its own. Channels such as MCP can determine the engine from the bound connection context; the key point is that a different instance must never be picked quietly. Like the app CLI, the MCP server takes `--engine` when it starts and then sends every call to that engine. `--engine` takes the engine's id or the system it runs on (`macos`, `ios`, `tvos`, `windows`, `linux`, `android`, which the socket's name carries); the id is new each time the app starts, so a registration names the system. Without it, the only engine running is taken; when several run, or several on the named system, none is picked and the error lists them with their systems.
 
 ### Same engine and session identity
 

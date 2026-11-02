@@ -4,7 +4,9 @@
 //! engine commands and framework session commands with schemas derived from
 //! the catalog; every call goes to the running engine through the local
 //! control channel, the same host the UI and CLI use. Custom control-channel
-//! envelopes are never passed off as MCP messages.
+//! envelopes are never passed off as MCP messages. `--engine` binds the
+//! server to one engine, by its id or by the system it runs on, when several
+//! copies of the app run.
 
 use bern_adapter_json::{ClientMessage, ServerMessage, command_input_schema};
 use bern_media::media_catalog;
@@ -16,12 +18,52 @@ use std::io::{BufRead, Write};
 /// Protocol versions this server can speak, newest first.
 pub const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
+const USAGE_ERROR: i32 = 2;
+
 pub struct Server<'a> {
     descriptor: &'a ProtocolDescriptor,
     bundle_id: String,
     name: String,
     version: String,
+    /// The engine every call goes to; `None` takes the only one running.
+    engine: Option<String>,
     client: Option<Client>,
+}
+
+#[derive(Debug, Default, PartialEq)]
+struct Options {
+    engine: Option<String>,
+    help: bool,
+}
+
+fn parse(args: &[String]) -> Result<Options, String> {
+    let mut options = Options::default();
+    let mut args = args.iter();
+    while let Some(arg) = args.next() {
+        if arg == "--help" || arg == "-h" {
+            options.help = true;
+            continue;
+        }
+        let engine = if arg == "--engine" {
+            args.next().map(String::as_str)
+        } else if let Some(engine) = arg.strip_prefix("--engine=") {
+            Some(engine)
+        } else {
+            return Err(format!("unexpected argument `{arg}`"));
+        };
+        match engine {
+            Some(engine) if !engine.is_empty() => options.engine = Some(engine.to_string()),
+            _ => return Err("`--engine` needs a value".into()),
+        }
+    }
+    Ok(options)
+}
+
+fn help(name: &str, descriptor: &ProtocolDescriptor) -> String {
+    format!(
+        "{name}-mcp: MCP server for the running `{}` engine, on standard input and output\n\nUsage: {name}-mcp [--engine ID|SYSTEM]\n\nOptions:\n  --engine ID|SYSTEM  Connect to this engine, by its id, which is new each time\n                      the app starts, or by the system it runs on: macos, ios,\n                      tvos, windows, linux or android. Without it, connect to\n                      the only one running; when several run, tool calls fail\n                      with an error listing them.\n",
+        descriptor.namespace
+    )
 }
 
 fn tool(spec: &CommandSpec, input: Json, session: bool) -> Json {
@@ -71,8 +113,15 @@ impl<'a> Server<'a> {
             bundle_id: bundle_id.into(),
             name: name.into(),
             version: version.into(),
+            engine: None,
             client: None,
         }
+    }
+
+    /// Send every call to the engine `engine` instead of the only one running.
+    pub fn with_engine(mut self, engine: Option<String>) -> Self {
+        self.engine = engine;
+        self
     }
 
     pub fn tools(&self) -> Vec<Json> {
@@ -121,7 +170,7 @@ impl<'a> Server<'a> {
         if self.client.is_none() {
             let client = Client::connect(
                 &self.bundle_id,
-                None,
+                self.engine.as_deref(),
                 "mcp",
                 Some(self.descriptor.fingerprint()),
             )
@@ -279,9 +328,32 @@ impl<'a> Server<'a> {
     }
 }
 
-/// Serve MCP over stdio until stdin closes; returns the exit code.
+/// Serve MCP over stdio until stdin closes, with the process arguments;
+/// returns the exit code.
 pub fn run(descriptor: &ProtocolDescriptor, bundle_id: &str, name: &str, version: &str) -> i32 {
-    let mut server = Server::new(descriptor, bundle_id, name, version);
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    run_with(descriptor, bundle_id, name, version, &args)
+}
+
+pub fn run_with(
+    descriptor: &ProtocolDescriptor,
+    bundle_id: &str,
+    name: &str,
+    version: &str,
+    args: &[String],
+) -> i32 {
+    let options = match parse(args) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("error: {message}; see `{name}-mcp --help`");
+            return USAGE_ERROR;
+        }
+    };
+    if options.help {
+        print!("{}", help(name, descriptor));
+        return 0;
+    }
+    let mut server = Server::new(descriptor, bundle_id, name, version).with_engine(options.engine);
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
     for line in stdin.lock().lines() {
@@ -430,5 +502,39 @@ mod tests {
             .handle(&json!({ "jsonrpc": "2.0", "id": 4, "method": "unknown" }))
             .unwrap();
         assert_eq!(reply["error"]["code"], -32601);
+    }
+
+    #[test]
+    fn engine_comes_from_the_arguments() {
+        let args =
+            |args: &[&str]| parse(&args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>());
+        assert_eq!(args(&[]), Ok(Options::default()));
+        for given in [&["--engine", "e1"][..], &["--engine=e1"]] {
+            assert_eq!(args(given).unwrap().engine.as_deref(), Some("e1"));
+        }
+        assert!(args(&["--help"]).unwrap().help);
+        for wrong in [
+            &["--engine"][..],
+            &["--engine="],
+            &["--session", "s1"],
+            &["e1"],
+        ] {
+            assert!(args(wrong).is_err(), "{wrong:?}");
+        }
+    }
+
+    #[test]
+    fn a_named_engine_that_is_not_running_is_a_tool_error() {
+        let descriptor = descriptor();
+        let mut server = Server::new(&descriptor, "dev.bern.mcp-test-named", "player", "1.0.0")
+            .with_engine(Some("e9".into()));
+        let reply = server
+            .handle(&json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": { "name": "bern_state", "arguments": {} } }))
+            .unwrap();
+        assert_eq!(reply["result"]["isError"], true);
+        assert_eq!(
+            reply["result"]["content"][0]["text"],
+            "engine `e9` is not running"
+        );
     }
 }

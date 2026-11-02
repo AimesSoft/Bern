@@ -351,7 +351,7 @@ sequenceDiagram
 
 ## 外部入口
 
-`Bern.toml` 中 `[targets.macos] channels = ["ipc"]` 才会装配控制通道。通道位置是 `$TMPDIR/bern-<应用标识哈希>/<engine_id>.sock`，目录权限 0700，套接字 0600，只服务同一用户。握手核对协议版本，并可核对目录指纹。消息为逐行 JSON；64 位整数超出 ±(2^53−1) 时编码为十进制字符串，修订号也是字符串。
+`Bern.toml` 中 `[targets.macos] channels = ["ipc"]` 才会装配控制通道。通道位置是 `$TMPDIR/bern-<应用标识哈希>/<engine_id>.macos.sock`，目录权限 0700，套接字 0600，只服务同一用户。名字最后是引擎运行的系统，`--engine` 可以用它代替 id，因为 id 在应用每次启动时都会变。握手核对协议版本，并可核对目录指纹。消息为逐行 JSON；64 位整数超出 ±(2^53−1) 时编码为十进制字符串，修订号也是字符串。
 
 ```sh
 target/bern/macos/bin/showcase --help
