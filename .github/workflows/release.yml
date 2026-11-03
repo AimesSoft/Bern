@@ -1,6 +1,8 @@
 # Releases Bern for a tag like v0.2.0, which must name the crates' version:
 # builds `bern` for macOS, Linux and Windows, attaches the archives to a
-# GitHub release, where `cargo binstall bern-cli` finds them, then publishes
+# GitHub release described by .github/releases/<tag>.md, written by hand so
+# that it says what the version brings and names no app built with Bern,
+# where `cargo binstall bern-cli` finds the archives, then publishes
 # every Bern crate to crates.io with the CARGO_REGISTRY_TOKEN secret. A pull
 # request that changes the release builds the archives and packages the
 # crates without publishing anything.
@@ -85,6 +87,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -96,7 +99,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "Bern ${GITHUB_REF_NAME#v}" \
-            --generate-notes \
+            --notes-file ".github/releases/$GITHUB_REF_NAME.md" \
             --verify-tag
 
   crates:
