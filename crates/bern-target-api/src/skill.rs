@@ -111,15 +111,16 @@ pub fn android_connect(app: &Application) -> String {
 }
 
 /// What an app in the iOS or tvOS simulator needs: it listens only when
-/// started with the directory the programs use.
-pub fn simulator_connect(app: &Application) -> String {
+/// started with the directory the programs use. `system` is the one it
+/// runs on, `ios` or `tvos`.
+pub fn simulator_connect(app: &Application, system: &str) -> String {
     let id = &app.app.bundle_id;
     format!(
         "The app runs in the simulator and listens only when it was started with `BERN_IPC_DIR` naming the directory the programs use. `bern run` starts it so; otherwise launch it with:\n\n\
          ```bash\n\
          SIMCTL_CHILD_BERN_IPC_DIR=\"${{BERN_IPC_DIR:-${{TMPDIR:-/tmp}}}}\" xcrun simctl launch booted {id}\n\
          ```\n\n\
-         When this Mac runs the macOS build of the same app too, both answer: choose with `--engine` (the error lists their ids)."
+         When this Mac runs the macOS build of the same app too, both answer: choose the simulator's with `--engine {system}`."
     )
 }
 
@@ -457,13 +458,13 @@ pub fn markdown(app: &Application, place: &Place) -> String {
 
     let _ = writeln!(
         out,
-        "## Calling commands\n\n```\n{cli} [--engine ID] [--session ID] <command> [--parameter value]...\n```\n"
+        "## Calling commands\n\n```\n{cli} [--engine ID|SYSTEM] [--session ID] <command> [--parameter value]...\n```\n"
     );
     let _ = writeln!(
         out,
         "- Write parameters as `--name value` or `--name=value`. Text goes as it is; `int` and `float` as numbers; `bool` as `true` or `false`; an optional parameter takes `none` for no value; a choice takes its variant name. Lists, records and variants with fields go as JSON (see Types below).\n\
          - Each run waits for the result and prints it as JSON. Exit status: 0 done, 1 the command failed (`error[code]: message` on standard error), 2 wrong usage, 3 the app is not running or the connection was lost.\n\
-         - `--engine ID` picks the app when several copies run; the error lists their ids. `--session ID` picks the window session for `ui` and `window` commands when several are open.\n\
+         - `--engine` picks the app when several copies run: by the system it runs on (`macos`, `ios`, `tvos`, `windows`, `linux`, `android`), or by its id, which is new each time it starts; the error lists them. `--session ID` picks the window session for `ui` and `window` commands when several are open.\n\
          - `{cli} state` prints the state below, `{cli} sessions` the open UI sessions and windows, `{cli} catalog` the whole catalog as JSON, `{cli} --help` the commands.\n"
     );
 
@@ -471,6 +472,10 @@ pub fn markdown(app: &Application, place: &Place) -> String {
     let _ = writeln!(
         out,
         "## MCP server\n\n`{cli}-mcp` speaks MCP over standard input and output. Register it with its absolute path, for example:\n\n```json\n{{ \"mcpServers\": {{ \"{cli}\": {{ \"command\": \"/absolute/path/to/{mcp_file}\" }} }} }}\n```\n"
+    );
+    let _ = writeln!(
+        out,
+        "When several copies of the app run, its tools fail with an error listing them: start it with `--engine` and the system or id, as the command line takes it, to bind it to one. Name the system in a registration, for example `\"args\": [\"--engine\", \"macos\"]`; the id is new each time the app starts.\n"
     );
     let _ = writeln!(
         out,
@@ -773,6 +778,7 @@ mod tests {
 
         assert!(text.contains("| `my-planner` | `../../bin/my-planner` |"));
         assert!(text.contains("| `my-planner-mcp` | `../../bin/my-planner-mcp` |"));
+        assert!(text.contains("`\"args\": [\"--engine\", \"macos\"]`"));
         assert!(text.contains("### `my-planner planner rename`\n\nDoc of rename.\nSecond line.\n"));
         assert!(text.contains("- `--new-title <text>`: The new_title\n"));
         assert!(text.contains("- `--priority <Low|High>`: The priority\n"));

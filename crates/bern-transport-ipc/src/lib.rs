@@ -57,6 +57,11 @@ pub fn android_socket(bundle_id: &str) -> String {
 /// app's [`android_socket`], named like an engine.
 pub const ANDROID_FORWARD: &str = "android.sock";
 
+/// The system this engine runs on, in its socket's name: `macos`, `ios`,
+/// `tvos`, `windows`, `linux` or `android`. Clients pick an engine by it,
+/// since the engine id is new each time the app starts.
+pub const SYSTEM: &str = std::env::consts::OS;
+
 /// Directory holding the sockets of one application, unique per user.
 pub fn socket_dir(bundle_id: &str) -> PathBuf {
     std::env::var_os(DIR_VARIABLE)
@@ -252,7 +257,7 @@ impl Server {
         let dir = socket_dir(bundle_id);
         platform::prepare_dir(&dir)?;
         remove_stale_sockets(&dir);
-        let path = dir.join(format!("{}.sock", host.engine_id()));
+        let path = dir.join(format!("{}.{SYSTEM}.sock", host.engine_id()));
         if path.as_os_str().len() > 100 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -611,7 +616,11 @@ fn serve(stream: UnixStream, host: Host, sessions: Sessions, media: MediaHub) ->
 pub enum ConnectError {
     NoEngine,
     Ambiguous(Vec<String>),
-    NotFound(String),
+    /// `--engine name` named none of the engines `running`.
+    NotFound {
+        name: String,
+        running: Vec<String>,
+    },
     Io(io::Error),
     Rejected(CommandError),
     /// The engine took the connection but did not answer the handshake.
@@ -626,10 +635,16 @@ impl std::fmt::Display for ConnectError {
             ),
             ConnectError::Ambiguous(engines) => write!(
                 f,
-                "several engines are running ({}); choose one with --engine",
+                "several engines are running ({}); choose one with --engine and its id or system",
                 engines.join(", ")
             ),
-            ConnectError::NotFound(engine) => write!(f, "engine `{engine}` is not running"),
+            ConnectError::NotFound { name, running } => {
+                write!(f, "engine `{name}` is not running")?;
+                if !running.is_empty() {
+                    write!(f, "; running: {}", running.join(", "))?;
+                }
+                Ok(())
+            }
             ConnectError::Io(error) => write!(f, "connection failed: {error}"),
             ConnectError::Rejected(error) => write!(f, "the engine refused the connection: {error}"),
             ConnectError::NoAnswer => f.write_str(
@@ -641,22 +656,85 @@ impl std::fmt::Display for ConnectError {
 
 impl std::error::Error for ConnectError {}
 
+/// A running engine of an application, from its socket's name.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Engine {
+    pub id: String,
+    /// The [`SYSTEM`] it runs on; `None` for sockets named before it was.
+    pub system: Option<String>,
+    pub path: PathBuf,
+}
+
+impl Engine {
+    /// The engine a socket `<id>.<system>.sock` (or `<id>.sock`) belongs to.
+    fn from_path(path: PathBuf) -> Option<Engine> {
+        if path.extension()? != "sock" {
+            return None;
+        }
+        let stem = path.file_stem()?.to_str()?;
+        let (id, system) = match stem.split_once('.') {
+            Some((id, system)) => (id, Some(system)),
+            None if path.file_name()? == ANDROID_FORWARD => (stem, Some("android")),
+            None => (stem, None),
+        };
+        Some(Engine {
+            id: id.to_string(),
+            system: system.map(str::to_string),
+            path,
+        })
+    }
+
+    /// How errors list it: the id, and the system when it adds something.
+    fn label(&self) -> String {
+        match &self.system {
+            Some(system) if *system != self.id => format!("{} ({system})", self.id),
+            _ => self.id.clone(),
+        }
+    }
+}
+
 /// Running engines of an application that accept connections.
-pub fn discover(bundle_id: &str) -> Vec<(String, PathBuf)> {
+pub fn discover(bundle_id: &str) -> Vec<Engine> {
     let Ok(entries) = std::fs::read_dir(socket_dir(bundle_id)) else {
         return Vec::new();
     };
     let mut engines: Vec<_> = entries
         .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            let engine = path.file_stem()?.to_str()?.to_string();
-            (path.extension()? == "sock" && UnixStream::connect(&path).is_ok())
-                .then_some((engine, path))
-        })
+        .filter_map(|entry| Engine::from_path(entry.path()))
+        .filter(|engine| UnixStream::connect(&engine.path).is_ok())
         .collect();
     engines.sort();
     engines
+}
+
+/// The engine `name` picks: an id names one engine, a system every engine
+/// running on it; with no name, the only engine running.
+fn choose(engines: Vec<Engine>, name: Option<&str>) -> Result<Engine, ConnectError> {
+    let running: Vec<String> = engines.iter().map(Engine::label).collect();
+    let mut chosen = match name {
+        Some(name) if engines.iter().any(|engine| engine.id == name) => engines
+            .into_iter()
+            .filter(|engine| engine.id == name)
+            .collect(),
+        Some(name) => engines
+            .into_iter()
+            .filter(|engine| engine.system.as_deref() == Some(name))
+            .collect(),
+        None => engines,
+    };
+    match chosen.len() {
+        0 => Err(match name {
+            Some(name) => ConnectError::NotFound {
+                name: name.to_string(),
+                running,
+            },
+            None => ConnectError::NoEngine,
+        }),
+        1 => Ok(chosen.remove(0)),
+        _ => Err(ConnectError::Ambiguous(
+            chosen.iter().map(Engine::label).collect(),
+        )),
+    }
 }
 
 /// Blocking control channel client.
@@ -669,31 +747,16 @@ pub struct Client {
 }
 
 impl Client {
-    /// Connect to the only running engine, or to the one named `engine`.
+    /// Connect to the only running engine, or to the one `engine` names by
+    /// its id or by the system it runs on.
     pub fn connect(
         bundle_id: &str,
         engine: Option<&str>,
         entry: &str,
         fingerprint: Option<u64>,
     ) -> Result<Client, ConnectError> {
-        let engines = discover(bundle_id);
-        let path = match engine {
-            Some(engine) => engines
-                .into_iter()
-                .find(|(id, _)| id == engine)
-                .map(|(_, path)| path)
-                .ok_or_else(|| ConnectError::NotFound(engine.to_string()))?,
-            None => match engines.len() {
-                0 => return Err(ConnectError::NoEngine),
-                1 => engines.into_iter().next().unwrap().1,
-                _ => {
-                    return Err(ConnectError::Ambiguous(
-                        engines.into_iter().map(|(id, _)| id).collect(),
-                    ));
-                }
-            },
-        };
-        Self::connect_path(&path, entry, fingerprint)
+        let engine = choose(discover(bundle_id), engine)?;
+        Self::connect_path(&engine.path, entry, fingerprint)
     }
 
     pub fn connect_path(

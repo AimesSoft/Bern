@@ -41,7 +41,7 @@
 <a href="#实测数据">实测数据</a> ·
 <a href="#与其他跨平台框架对比">对比</a> ·
 <a href="#快速开始">快速开始</a> ·
-<a href="Docs/Design.md">设计文档</a>
+<a href="Docs/zh-CN/Design.md">设计文档</a>
 </p>
 
 </div>
@@ -300,7 +300,7 @@ counter-mcp   # 同一份命令目录，提供给 AI Agent
 <img alt="支持的平台：macOS、Windows、Linux、Web 应用、WebUI 与 Android 可用，iOS 与 tvOS 目前构建模拟器应用；下一步是 flutter + macos、iOS 真机打包与 HarmonyOS" src="Docs/Assets/tables/platforms-light.svg" width="100%">
 </picture>
 
-实现记录：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web 与 WebUI](Docs/Implementation/Web.md) · [Android](Docs/Implementation/Android-Compose.md)；下一步的平台见[适配规范](Docs/Adaptation/README.md)。
+实现记录：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web 与 WebUI](Docs/zh-CN/Implementation/Web.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md)；下一步的平台见[适配规范](Docs/zh-CN/Adaptation/README.md)。
 
 不指定 UI 技术时使用平台的默认技术；默认技术不可用时直接报错，不会悄悄换成另一套技术。
 
@@ -491,10 +491,12 @@ cargo test --workspace
 
 ## 文档
 
-- [文档目录](Docs/README.md) · [当前组件用法](Docs/Reference/UI.md) · [完整属性表](Docs/Reference/Component-Properties.md) · [平台能力与验证范围](Docs/Reference/Platforms.md)
-- [设计文档](Docs/Design.md)：目标、架构、组件、主题、命令、窗口与媒体
-- [适配规范](Docs/Adaptation/README.md)：Apple、Windows 与 Linux、Web、Android、HarmonyOS
-- 实现记录：[macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
+- [文档目录](Docs/zh-CN/README.md) · [当前组件用法](Docs/zh-CN/Reference/UI.md) · [完整属性表](Docs/zh-CN/Reference/Component-Properties.md) · [平台能力与验证范围](Docs/zh-CN/Reference/Platforms.md)
+- [设计文档](Docs/zh-CN/Design.md)：目标、架构、组件、主题、命令、窗口与媒体
+- [适配规范](Docs/zh-CN/Adaptation/README.md)：Apple、Windows 与 Linux、Web、Android、HarmonyOS
+- 实现记录：[macOS](Docs/zh-CN/Implementation/macOS-SwiftUI.md) · [iOS](Docs/zh-CN/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/zh-CN/Implementation/tvOS-SwiftUI.md) · [Android](Docs/zh-CN/Implementation/Android-Compose.md) · [Windows](Docs/zh-CN/Implementation/Windows-WinUI3.md) · [Linux](Docs/zh-CN/Implementation/Linux-GTK.md) · [Web](Docs/zh-CN/Implementation/Web.md)
+
+文档另有[英文版](Docs/README.md)。
 
 ## 许可证
 

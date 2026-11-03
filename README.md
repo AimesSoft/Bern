@@ -29,7 +29,7 @@ No JS engine and no embedded browser on the desktop or the phone; every button i
 
 <p>
 <b>English</b> ·
-<a href="README.zh-Hans.md">简体中文</a> ·
+<a href="README.zh-CN.md">简体中文</a> ·
 <a href="README.zh-Hant.md">繁體中文</a> ·
 <a href="README.ja.md">日本語</a>
 </p>
@@ -491,12 +491,12 @@ Tests include declarations that must fail to compile, and type-check the generat
 
 ## Documentation
 
-- [Documentation index](Docs/README.md) · [Current component guide](Docs/Reference/UI.md) · [Property reference](Docs/Reference/Component-Properties.md) · [Platform capabilities and verification](Docs/Reference/Platforms.md) (Chinese)
+- [Documentation index](Docs/README.md) · [Current component guide](Docs/Reference/UI.md) · [Property reference](Docs/Reference/Component-Properties.md) · [Platform capabilities and verification](Docs/Reference/Platforms.md)
 - [Design document](Docs/Design.md) – goals, architecture, components, theming, commands, windows, media
 - [Adaptation specs](Docs/Adaptation/README.md) – Apple, Windows and Linux, Web, Android, HarmonyOS
 - Implementation notes – [macOS](Docs/Implementation/macOS-SwiftUI.md) · [iOS](Docs/Implementation/iOS-SwiftUI.md) · [tvOS](Docs/Implementation/tvOS-SwiftUI.md) · [Android](Docs/Implementation/Android-Compose.md) · [Windows](Docs/Implementation/Windows-WinUI3.md) · [Linux](Docs/Implementation/Linux-GTK.md) · [Web](Docs/Implementation/Web.md)
 
-The design and implementation documents are written in Chinese.
+The documentation is also available in [Simplified Chinese](Docs/zh-CN/README.md).
 
 ## License
 

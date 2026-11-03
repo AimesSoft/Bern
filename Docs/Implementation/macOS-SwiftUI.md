@@ -1,108 +1,110 @@
-# macOS SwiftUI 实现记录
+**English** · [简体中文](../zh-CN/Implementation/macOS-SwiftUI.md)
 
-- 首次记录：2026-10-10
-- 更新日期：2026-10-17
-- 最初依据：[Bern 架构设计 v0.14](../Design.md)、[Apple 平台适配](../Adaptation/Apple.md)
-- 工具链：Rust 1.99.0（Edition 2024）；Swift 6.3.2，以 Swift 6 语言模式编译；Xcode 26.5（SDK 26.5）
-- 部署：最低 macOS 14，构建本机架构，本地临时签名
-- 补记：2026-10-12，[架构设计 v0.25–v0.27](../Design.md) 的样式覆盖、动效、自绘与模块化应用（见“样式、动效、自绘与模块化”一节；工具链 Xcode 27.0，SDK 27.0，Swift 6.4）
+# macOS SwiftUI implementation notes
 
-本文记录阶段一（编译边界验证）、阶段二（macOS SwiftUI 与四入口闭环，含 Video、窗口关闭协议、窗口最小化与恢复、声明式异步查询与随包资源）与阶段四（本地化与功能契约）在 macOS 上的实际完成情况。当前声明接口见[组件参考](../Reference/UI.md)，后端覆盖见[平台能力表](../Reference/Platforms.md)；下文保留各阶段的验收记录与未完成项。
+- First recorded: 2026-10-10
+- Updated: 2026-10-17
+- Original basis: [Bern architecture design v0.14](../Design.md), [Apple platform adaptation](../Adaptation/Apple.md)
+- Toolchain: Rust 1.99.0 (Edition 2024); Swift 6.3.2, compiled in Swift 6 language mode; Xcode 26.5 (SDK 26.5)
+- Deployment: minimum macOS 14, built for the host architecture, ad-hoc signed locally
+- Addendum: 2026-10-12, style overrides, motion, self-drawing and modular apps from [architecture design v0.25–v0.27](../Design.md) (see the section "Style, motion, self-drawing and modularity"; toolchain Xcode 27.0, SDK 27.0, Swift 6.4)
 
-## 完成情况
+This document records what was actually completed on macOS for Phase 1 (compile boundary validation), Phase 2 (macOS SwiftUI and the closed loop of four entry points, including Video, the window close protocol, window minimize and restore, declarative asynchronous queries and bundled resources) and Phase 4 (localization and feature contracts). For the current declaration interface see the [component reference](../Reference/UI.md), and for backend coverage the [platform capability table](../Reference/Platforms.md); the acceptance records and unfinished items of each phase are kept below.
 
-### 阶段一 编译边界验证
+## Completion status
 
-| 设计要求 | 状态 | 说明 |
+### Phase 1: compile boundary validation
+
+| Design requirement | Status | Notes |
 | --- | --- | --- |
-| 组件、显式属性、组件引用及错误位置 | 完成 | `#[component]` + `ui!`；宏与编译器的诊断都定位到声明源码 |
-| 多模块组件组合，未知引用和非法结构报错 | 完成 | 组件可跨模块引用；未知组件、未知属性、缺少必需属性、错误的子节点结构均报错 |
-| 受限表达式与合法引用由 rustc 检查实际类型；未知函数、直接赋值、任意回调编译失败 | 完成 | 声明展开为从不执行的类型检查代码；`crates/bern/tests/ui` 中 13 个编译失败用例 |
-| 带版本的描述原型，用独立依赖 crate 验证引用与配置匹配 | 完成 | 组件库有自己的 `Bern.toml`；编译器生成带描述版本、IR 版本、包版本和源码指纹的描述，并检查库是否覆盖应用要求的全部语言；示例 `showcase-widgets` |
-| 公共目标接口，独立测试目标消费同一 IR，注册新目标无需改动解析器 | 完成 | `bern-target-api`；编译器测试中从外部注册的目标消费展示应用 IR |
-| 业务核心与 UI 分离，命令和状态可在无 UI 环境运行 | 完成 | `showcase-core` 只依赖协议；其测试通过共享 `Host` 无界面运行 |
-| 注册命令目录并生成各入口描述；重复标识、未知命令、参数不匹配无法通过 | 完成 | 命令描述含 ID、目录版本、参数和结果 schema、作用域、策略、错误码和显式 CLI/MCP 名称；名称冲突报错 |
-| 标准控件自动生成会话命令，业务动作缺失绑定编译失败（B301） | 完成 | 输入框、开关、滑块、选择器等写会话字段；按钮缺少命令报 B301 |
-| 窗口目录检查 | 部分 | 已检查重复 ID、主窗口、窗口命令引用、呈现能力和关闭检查（只能读本窗口拥有的草稿，存储动作必须是引擎命令）；首版只支持单实例窗口，多实例参数与 key 未实现 |
-| 本地化文本类型与严格诊断 | 完成 | 本地化文本、运行时文本、普通字符串分开；缺少语言（B102）、展示属性直接写字面量（B103）、插值不一致均报错 |
-| 目标能力描述中声明颜色来源 | 完成 | `ColorSource::Native` / `BernTheme`；macOS 为 Native |
+| Components, explicit properties, component references and error locations | Done | `#[component]` + `ui!`; diagnostics from both the macros and the compiler point to the declaration source |
+| Composing components across modules; unknown references and invalid structure report errors | Done | Components can be referenced across modules; unknown components, unknown properties, missing required properties and wrong child structure all report errors |
+| Constrained expressions and valid references have their actual types checked by rustc; unknown functions, direct assignment and arbitrary callbacks fail to compile | Done | Declarations expand to type-checking code that never runs; 13 compile-fail cases in `crates/bern/tests/ui` |
+| Versioned description prototype; a separate dependency crate verifies that references match the configuration | Done | A component library has its own `Bern.toml`; the compiler generates a description carrying the description version, IR version, package version and source fingerprint, and checks that the library covers every language the app requires; example `showcase-widgets` |
+| Public target interface; an independent test target consumes the same IR; registering a new target needs no change to the parser | Done | `bern-target-api`; in the compiler tests an externally registered target consumes the showcase app's IR |
+| Business core separated from the UI; commands and state can run without a UI | Done | `showcase-core` depends only on the protocol; its tests run headless through the shared `Host` |
+| Register the command catalog and generate descriptions for each entry point; duplicate identifiers, unknown commands and mismatched parameters do not pass | Done | Command descriptions contain the ID, catalog version, parameter and result schemas, scope, policy, error codes and explicit CLI/MCP names; name conflicts report errors |
+| Standard controls generate session commands automatically; a business action with a missing binding fails to compile (B301) | Done | Text inputs, switches, sliders, pickers and the like write session fields; a button without a command reports B301 |
+| Window catalog checks | Partial | Checked: duplicate IDs, the main window, window command references, presentation capabilities and close checks (which can only read drafts owned by this window, and whose save action must be an engine command); the first version supports only single-instance windows, and multi-instance parameters and keys are not implemented |
+| Localized text types and strict diagnostics | Done | Localized text, runtime text and plain strings are kept separate; a missing language (B102), a literal written directly into a display property (B103) and inconsistent interpolation all report errors |
+| Target capability descriptions declare the color source | Done | `ColorSource::Native` / `BernTheme`; macOS is Native |
 
-### 阶段二 macOS SwiftUI 与四入口闭环
+### Phase 2: macOS SwiftUI and the closed loop of four entry points
 
-| 设计要求 | 状态 | 说明 |
+| Design requirement | Status | Notes |
 | --- | --- | --- |
-| 控件展示示例：侧边栏与详情、标题与文字层级、按钮、开关、滑块、输入框、侧边栏搜索、列表到详情的推入导航、工具栏分段选择器；设置窗口使用页签；至少两种语言 | 完成 | `examples/showcase`，中文与英文 |
-| 引擎与会话运行时在应用进程内运行 | 完成 | Rust 静态库链接进应用 |
-| 显式装配本地 IPC 通道，提供 CLI、JSON、MCP，连接同一引擎 | 完成 | `channels = ["ipc"]`；生成 `Contents/Helpers/showcase` 与 `showcase-mcp`，包旁的 `bin/` 链接到它们 |
-| 未装配外部入口时无辅助进程、无监听；本地调用不经过 JSON | 完成 | 桥接使用类型化二进制值；`ipc = false` 由单元测试覆盖；装配 IPC 时实测无子进程、无 TCP 端口 |
-| 未声明样式覆盖时只用标准 SwiftUI 组件与系统样式 | 完成 | 生成测试检查展示应用（没有样式覆盖）生成的视图代码不含 `Color(`、`.background(`、`glassEffect`；运行时模板按功能需要分系统版本，例如视频控制条的媒体进度条在 macOS 26 以下绘制回退（见 [Apple 适配](../Adaptation/Apple.md) 第 8 节） |
-| 浅色与深色截图，与系统自带应用对照 | 部分 | 浅色、深色、英文截图已检查；与“系统设置”的并排对照未做（见验证记录） |
-| 切换应用语言后文本更新；严格模式负面用例编译失败 | 完成 | 通过系统按应用指定语言验证；应用内实时切换在阶段四实现 |
-| 版本不兼容、外部入口断开、结果未知 | 部分 | 协议版本、目录指纹、前端与引擎指纹不匹配均明确失败；会话请求超时返回 `ui_timeout`（结果未知），不重放 |
-| 状态变化只更新相关展示，批次内一致 | 完成 | 引擎按修订号发布字段差异；Swift 侧为按字段观察的 `@Observable` |
-| 滑块产生带参数命令 | 完成 | 拖动只改会话预览，松开提交 `showcase.set_volume(value)` |
-| 四入口驱动同一实例；无 UI 引擎可运行；缺少会话返回明确错误 | 完成 | 无会话返回 `requires_ui_session`，多会话未指定返回 `session_required` |
-| 标准编辑、选择动作由会话命令驱动，CLI/MCP 可调用 | 完成 | `ui.edit`、`ui.set_bool`、`ui.set_number`、`ui.select`、`ui.activate`、`ui.back` 等，经真实控件闭包执行 |
-| 已接受与完成结果可区分 | 部分 | 引擎命令同步完成；媒体命令在播放器状态的 `request` 中区分已接受（Accepted）、执行端已执行（Executed）与失败（Failed），实际播放只看执行端回报的 `phase` |
-| 会话命令写回控件不触发重复动作 | 完成 | 写入通过同一 setter；SwiftUI 对程序写回不调用绑定 setter；开关使用幂等的设置而非翻转 |
-| 条件分支挂载与卸载、订阅清理 | 完成 | `if` / `if let` / `match`；控件登记随视图出现与消失 |
-| 列表按 key 保持实例 | 完成 | `ForEach(items, id: \.key)`；键必须是 `i64` 或 `String` 字段 |
-| 键盘、输入法、语义标签 | 部分 | 使用系统控件与可访问名称；输入法组合与键盘遍历未实测 |
-| 不写深浅色分支，控件跟随系统 | 完成 | 未设置任何颜色 |
-| “搜索列表 → 详情 → 播放 → 返回” | 完成 | 侧边栏搜索经引擎查询 `showcase.search_library` 筛选列表 → 详情 → 在应用级播放器中打开并播放 → 返回，经真实控件驱动，返回后搜索结果与播放都保留 |
-| 可控时钟与异步顺序场景 | 完成 | 查询在协议中声明、在 `ui!` 中以 `Query` 绑定（见“异步查询”与“查询订阅与答复”）；`showcase-core` 的场景测试用 `ManualClock` 驱动真实引擎、宿主与会话订阅，较早的慢搜索不会覆盖较新的结果；C ABI 测试覆盖同一路径 |
-| 主窗口与设置窗口：四入口打开/关闭/激活、重复打开复用、独立草稿 | 完成 | 窗口实例带代次，重开后旧引用被拒绝；启动时总是打开 `initial: open` 的主窗口，主窗口关闭后点 Dock 图标重新打开 |
-| 关闭确认、模态阻挡、确认失效 | 完成 | 见“窗口关闭协议”；系统关闭按钮与 File > Close 先走关闭检查 |
-| 最后一个窗口关闭后保留引擎 | 完成 | `applicationShouldTerminateAfterLastWindowClosed` 返回 false；应用级播放器继续播放；声明了 `StatusItem` 时没有窗口就收起 Dock 图标，见“状态栏项” |
-| 最小化后恢复 | 完成 | `window.minimize`、`window.restore`、`window.maximize`、`window.move`、`window.resize` 与查询 `window.list`；系统完成的最小化、缩放、移动与聚焦以带来源和代次的事实同步，不派发命令（见“窗口呈现”）；最小化不释放草稿、导航与查询订阅 |
-| macOS Video 验证 | 完成 | 见“Video”；用受控测试媒体实测 AVFoundation 播放 |
+| Control showcase example: sidebar and detail, title and text hierarchy, buttons, switches, sliders, text inputs, sidebar search, push navigation from list to detail, segmented picker in the toolbar; the settings window uses tabs; at least two languages | Done | `examples/showcase`, Chinese and English |
+| Engine and session runtime run inside the app process | Done | Rust static library linked into the app |
+| Explicitly assembled local IPC channel providing CLI, JSON and MCP, connected to the same engine | Done | `channels = ["ipc"]`; generates `Contents/Helpers/showcase` and `showcase-mcp`, and `bin/` next to the bundle links to them |
+| Without external entry points assembled there are no helper processes and no listeners; local calls do not go through JSON | Done | The bridge uses typed binary values; `ipc = false` is covered by unit tests; with IPC assembled, measured: no child processes and no TCP port |
+| Without declared style overrides, only standard SwiftUI components and system styles are used | Done | Generation tests check that the view code generated for the showcase app (which has no style overrides) contains no `Color(`, `.background(` or `glassEffect`; runtime templates branch by system version where a feature needs it, e.g. the media progress bar of the video control bar draws a fallback below macOS 26 (see section 8 of [Apple adaptation](../Adaptation/Apple.md)) |
+| Light and dark screenshots, compared with built-in system apps | Partial | Light, dark and English screenshots checked; the side-by-side comparison with System Settings has not been done (see Verification log) |
+| Text updates after switching the app language; strict-mode negative cases fail to compile | Done | Verified through the system's per-app language setting; live in-app switching is implemented in Phase 4 |
+| Version incompatibility, external entry point disconnected, result unknown | Partial | Mismatched protocol versions, catalog fingerprints and frontend/engine fingerprints all fail explicitly; a session request that times out returns `ui_timeout` (result unknown) and is not replayed |
+| State changes update only the affected display, consistent within a batch | Done | The engine publishes field diffs by revision number; the Swift side uses `@Observable`, observed per field |
+| Slider produces a command with a parameter | Done | Dragging only changes the session preview; releasing submits `showcase.set_volume(value)` |
+| Four entry points drive the same instance; the engine runs without a UI; a missing session returns a clear error | Done | With no session it returns `requires_ui_session`; with several sessions and none specified it returns `session_required` |
+| Standard edit and select actions are driven by session commands and callable from CLI/MCP | Done | `ui.edit`, `ui.set_bool`, `ui.set_number`, `ui.select`, `ui.activate`, `ui.back` and so on, executed through the real controls' closures |
+| Accepted and completed results can be told apart | Partial | Engine commands complete synchronously; media commands distinguish accepted (Accepted), executed by the executor (Executed) and failed (Failed) in the `request` of the player state, and actual playback is judged only by the `phase` reported by the executor |
+| Session commands writing back to controls do not trigger duplicate actions | Done | Writes go through the same setter; SwiftUI does not call the binding setter for programmatic write-backs; switches use an idempotent set rather than a toggle |
+| Mounting and unmounting conditional branches, subscription cleanup | Done | `if` / `if let` / `match`; control registrations follow views appearing and disappearing |
+| Lists keep instances by key | Done | `ForEach(items, id: \.key)`; the key must be an `i64` or `String` field |
+| Keyboard, input methods, semantic labels | Partial | Uses system controls and accessible names; input method composition and keyboard traversal not measured |
+| No light/dark branches; controls follow the system | Done | No colors set anywhere |
+| "Search list → detail → play → back" | Done | Sidebar search filters the list through the engine query `showcase.search_library` → detail → opens and plays in the app-level player → back, driven through real controls; after going back, both the search results and playback are kept |
+| Controllable clock and asynchronous ordering scenarios | Done | Queries are declared in the protocol and bound with `Query` in `ui!` (see "Asynchronous queries" and "Query subscriptions and answers"); the scenario tests of `showcase-core` drive the real engine, host and session subscriptions with `ManualClock`, and an earlier slow search does not overwrite a newer result; C ABI tests cover the same path |
+| Main window and settings window: open/close/activate from four entry points, repeated opening reuses the window, independent drafts | Done | Window instances carry a generation, and after reopening, old references are rejected; at launch the `initial: open` main window always opens, and after the main window is closed, clicking the Dock icon reopens it |
+| Close confirmation, modal blocking, confirmation invalidation | Done | See "Window close protocol"; the system close button and File > Close go through the close check first |
+| Engine kept after the last window closes | Done | `applicationShouldTerminateAfterLastWindowClosed` returns false; the app-level player keeps playing; when a `StatusItem` is declared, the Dock icon is hidden while there are no windows, see "Status bar item" |
+| Restore after minimize | Done | `window.minimize`, `window.restore`, `window.maximize`, `window.move`, `window.resize` and the query `window.list`; minimize, zoom, move and focus done by the system are synchronized as facts carrying a source and a generation, without dispatching commands (see "Window presentation"); minimizing does not release drafts, navigation or query subscriptions |
+| macOS Video verification | Done | See "Video"; AVFoundation playback measured with controlled test media |
 
-### 阶段四 本地化与功能契约
+### Phase 4: localization and feature contracts
 
-| 设计要求 | 状态 | 说明 |
+| Design requirement | Status | Notes |
 | --- | --- | --- |
-| `compact` 与 `expanded` 布局 | 完成 | `[layouts] compact_below`；`Adaptive` 生成 `BernAdaptive`，用 `onGeometryChange` 量自身可用宽度并选择布局 |
-| 按钮、菜单等不同入口形式 | 完成 | `Menu` / `MenuItem` 生成系统 `Menu`；菜单项的控件登记挂在菜单按钮上，菜单未打开时外部入口也能执行 |
-| 功能契约与覆盖检查 | 完成 | 与目标无关，见 [设计文档](../Design.md)“覆盖检查规则”；`bern check` 输出每个功能在每个尺寸上的结果 |
-| 负面用例互相区分 | 完成 | 编译器测试分别覆盖 B101–B104、B201–B206、B401–B402 |
-| 运行时切换语言与布局，不丢失应共享的状态 | 完成 | 见“验证记录”；语言经 `LanguagePicker` 与 `ui.set_language` 切换 |
+| `compact` and `expanded` layouts | Done | `[layouts] compact_below`; `Adaptive` generates `BernAdaptive`, which measures its own available width with `onGeometryChange` and picks the layout |
+| Different entry-point forms such as buttons and menus | Done | `Menu` / `MenuItem` generate a system `Menu`; the control registrations of menu items hang on the menu button, so external entry points can run them while the menu is not open |
+| Feature contracts and coverage checks | Done | Target-independent, see "Coverage check rules" in the [design document](../Design.md); `bern check` outputs the result of each feature at each size |
+| Negative cases are distinguished from each other | Done | Compiler tests cover B101–B104, B201–B206 and B401–B402 separately |
+| Switching language and layout at runtime without losing state that should be shared | Done | See "Verification log"; the language is switched through `LanguagePicker` and `ui.set_language` |
 
-### 阶段六 组件库第一批
+### Phase 6: first batch of the component library
 
-| 组件 | SwiftUI | 说明 |
+| Component | SwiftUI | Notes |
 | --- | --- | --- |
-| `Image` | 运行时视图 `BernImage` | 状态里的图片（`MediaSource` 的文件或 http(s) 地址）在后台任务里读取并解码，宽高写死时与声明的图片一样按画框像素的两倍解码（`kCGImageSourceThumbnailMaxPixelSize`），按地址与解码尺寸缓存；解码都带 `kCGImageSourceShouldCacheImmediately`，在解码的线程上完成，而不是留到第一次绘制时在界面线程上做（2026-10-27，此前状态里的图片按原图大小解码）。声明的图片用 ImageIO 从 `Contents/Resources` 解码（按名称缓存）：macOS 15 起按 HDR 解码，带增益图的 JPEG 应用增益图，PQ 与 HLG 的 PNG 保留原有范围；EXIF 方向由 `Image(decorative:scale:orientation:)` 应用。`resizable()` 后按 `fit` 用 `.fit`、`.fill` 或直接拉伸，`frame` 后 `clipped()`，并允许高动态范围（`.allowedDynamicRange(.high)`）；只写一边时另一边按图片比例。有 `label` 时是带名称的图片元素，没有时对辅助技术隐藏 |
-| `Progress` | `ProgressView` | 有 `value` 时为 `ProgressView(value:total:)`，数值先限制在 0 到 `total`；没有时为不确定的 `ProgressView()`（转圈）；`label` 是它的标签 |
-| `Grid` | `LazyVGrid` | 一列 `GridItem(.adaptive(minimum: min_width), spacing: gap)`，行距同为 `gap` |
-| `Stack` | `ZStack(alignment:)` | 九个方位对应 `.topLeading` 到 `.bottomTrailing` |
+| `Image` | runtime view `BernImage` | Images from state (a file or http(s) address in a `MediaSource`) are read and decoded in a background task; when width and height are fixed they are decoded, like declared images, at twice the frame's pixel size (`kCGImageSourceThumbnailMaxPixelSize`), and cached by address and decode size; all decoding uses `kCGImageSourceShouldCacheImmediately` and finishes on the decoding thread instead of being left to the UI thread at the first draw (2026-10-27; before this, images from state were decoded at their original size). Declared images are decoded with ImageIO from `Contents/Resources` (cached by name): from macOS 15 they are decoded as HDR, JPEGs with a gain map apply the gain map, and PQ and HLG PNGs keep their original range; EXIF orientation is applied by `Image(decorative:scale:orientation:)`. After `resizable()`, `fit` selects `.fit`, `.fill` or plain stretching, `frame` is followed by `clipped()`, and high dynamic range is allowed (`.allowedDynamicRange(.high)`); when only one side is written, the other follows the image's aspect ratio. With `label` it is a named image element; without it, it is hidden from assistive technologies |
+| `Progress` | `ProgressView` | With `value` it is `ProgressView(value:total:)`, with the value first clamped to the range 0 to `total`; without it, an indeterminate `ProgressView()` (spinner); `label` is its label |
+| `Grid` | `LazyVGrid` | A single column definition `GridItem(.adaptive(minimum: min_width), spacing: gap)`; row spacing is also `gap` |
+| `Stack` | `ZStack(alignment:)` | The nine positions map to `.topLeading` through `.bottomTrailing` |
 
-在展示应用的“图片与布局”页验证：同一张 16:9 图片在 120×90 的框中按 `contain`、`cover`、`fill` 分别留白、裁掉两边、拉伸，只写宽度的标志保持比例；层叠中标志在右上角；音量（引擎状态，`total: 100`）与亮度（会话草稿）两个进度条在 CLI 执行 `showcase set-volume --value 90` 与 `ui set-number --target layout_page.layout_brightness --value 0.2` 后立即变为 90% 与 20%；920 宽的窗口中网格为三列。HDR 图片在 M4 的内建屏幕（EDR 余量最高 2 倍）上验证：测试图左半为 SDR 白、右半为它的 4 倍，用 ScreenCaptureKit 以 HDR 截取窗口读像素值。改为 HDR 解码并允许高动态范围之前，带增益图的 JPEG 只显示 SDR 基础图（右半 0.96），PQ 的 PNG 被压进 SDR（0.94）；之后系统把余量提到 2.0，两者右半分别为 1.79 与 1.87，普通 SDR 图仍为 1.0。带 EXIF 方向 6 的照片按竖图显示。HDR 视频不用额外处理：`AVPlayerView` 自动按 EDR 显示，用 ffmpeg 把 PQ 测试图编成 10 位 HEVC（BT.2020、PQ、HDR10 元数据）作为展示应用的精选片段播放，画面最亮处为 SDR 白的 1.48 倍。
+Verified on the "Images and layout" page of the showcase app: the same 16:9 image in a 120×90 frame is letterboxed, cropped on both sides and stretched for `contain`, `cover` and `fill` respectively, and the logo with only a width written keeps its aspect ratio; in the stack the logo sits in the top-right corner; the two progress bars for volume (engine state, `total: 100`) and brightness (session draft) change to 90% and 20% immediately after the CLI runs `showcase set-volume --value 90` and `ui set-number --target layout_page.layout_brightness --value 0.2`; in a 920-wide window the grid has three columns. HDR images were verified on the built-in display of an M4 (EDR headroom up to 2x): the left half of the test image is SDR white and the right half 4 times that, and the window was captured in HDR with ScreenCaptureKit to read pixel values. Before switching to HDR decoding and allowing high dynamic range, the JPEG with a gain map showed only the SDR base image (right half 0.96) and the PQ PNG was squeezed into SDR (0.94); afterwards the system raised the headroom to 2.0, the right halves were 1.79 and 1.87 respectively, and an ordinary SDR image stayed at 1.0. A photo with EXIF orientation 6 is shown as portrait. HDR video needs no extra handling: `AVPlayerView` displays it with EDR automatically; a PQ test image encoded with ffmpeg as 10-bit HEVC (BT.2020, PQ, HDR10 metadata) and played as the showcase app's featured clip has its brightest area at 1.48 times SDR white.
 
-另外，Bern 的引擎几乎不增加启动时间：用 `benchmarks/measure.swift` 在 M4 上测，Hello 10 次启动的中位数为 0.20 s，只有一个窗口和一行文字的空白 SwiftUI 应用 5 次的中位数为 0.22 s。
+In addition, Bern's engine adds almost no launch time: measured with `benchmarks/measure.swift` on an M4, the median of 10 launches of Hello is 0.20 s, and the median of 5 launches of a blank SwiftUI app with only one window and one line of text is 0.22 s.
 
-## 工程结构
+## Project structure
 
-| crate | 职责 |
+| crate | Responsibility |
 | --- | --- |
-| `bern` | 应用接口：宏、绑定类型、`Host`、`CommandError` |
-| `bern-macros` | `#[bern::protocol]`、`#[bern::value]`、`#[bern::session]`、`#[component]` |
-| `bern-syntax` | 宏与编译器共用的唯一解析器，以及协议描述的降级 |
-| `bern-protocol` | 值、schema、命令与状态描述、框架会话命令目录、二进制编码 |
-| `bern-media` | 媒体契约：`MediaSource`、播放器身份、标准媒体命令与状态、执行端协议、`MediaHub`（路由与状态归并） |
-| `bern-ir` | 平台无关 IR、组件规格表、组件库描述 |
-| `bern-command` | 引擎宿主：边界校验、串行执行命令、异步作答且可取消的只读查询、按修订号发布状态；宿主装配的随包资源 `Resources` |
-| `bern-runtime` | UI 会话：窗口实例与代次、窗口作用域草稿、关闭协议、会话命令路由；异步查询资源、窗口所属的查询订阅与时钟（系统时钟、可控时钟） |
-| `bern-compiler` | 读取 `Bern.toml`、校验并展开随包资源、显式源码收集、语义检查、输出 IR |
-| `bern-target-api` | 目标描述、能力检查、构建计划、按平台解析默认目标 |
-| `bern-backend-swiftui` | `swiftui + macos` 目标：生成 Swift、Rust 胶水 crate 与资源。Swift 运行时分为与 iOS 共用的 `BernRuntime.swift`、`BernMedia.swift` 和 macOS 专用的 `BernAppKit.swift`（窗口事实与命令、关闭守卫、开发快照、`AVPlayerView`）；iOS 见 [iOS SwiftUI 实现记录](iOS-SwiftUI.md) |
-| `bern-ffi` | 进程内 C ABI |
-| `bern-adapter-json` / `bern-transport-ipc` | JSON 编码与本地控制通道 |
-| `bern-adapter-cli` / `bern-adapter-mcp` | 从命令目录派生的应用 CLI 与 MCP 服务器 |
-| `bern-cli` | 构建工具 `bern` |
+| `bern` | App interface: macros, binding types, `Host`, `CommandError` |
+| `bern-macros` | `#[bern::protocol]`, `#[bern::value]`, `#[bern::session]`, `#[component]` |
+| `bern-syntax` | The single parser shared by the macros and the compiler, plus the lowering of protocol descriptions |
+| `bern-protocol` | Values, schemas, command and state descriptions, the framework session command catalog, binary encoding |
+| `bern-media` | Media contract: `MediaSource`, player identity, standard media commands and state, the executor protocol, `MediaHub` (routing and state merging) |
+| `bern-ir` | Platform-independent IR, the component spec table, component library descriptions |
+| `bern-command` | Engine host: boundary validation, serial command execution, read-only queries that are answered asynchronously and can be cancelled, publishing state by revision number; the bundled `Resources` assembled by the host |
+| `bern-runtime` | UI session: window instances and generations, window-scoped drafts, the close protocol, session command routing; asynchronous query resources, window-owned query subscriptions and clocks (system clock, controllable clock) |
+| `bern-compiler` | Reads `Bern.toml`, validates and expands bundled resources, explicit source collection, semantic checks, IR output |
+| `bern-target-api` | Target descriptions, capability checks, build plans, resolving the default target per platform |
+| `bern-backend-swiftui` | The `swiftui + macos` target: generates Swift, the Rust glue crate and resources. The Swift runtime is split into `BernRuntime.swift` and `BernMedia.swift`, shared with iOS, and the macOS-only `BernAppKit.swift` (window facts and commands, the close guard, development snapshots, `AVPlayerView`); for iOS see [iOS SwiftUI implementation notes](iOS-SwiftUI.md) |
+| `bern-ffi` | In-process C ABI |
+| `bern-adapter-json` / `bern-transport-ipc` | JSON encoding and the local control channel |
+| `bern-adapter-cli` / `bern-adapter-mcp` | App CLI and MCP server derived from the command catalog |
+| `bern-cli` | The build tool `bern` |
 
-## 声明语法
+## Declaration syntax
 
-### 协议
+### Protocol
 
 ```rust
 #[bern::protocol(namespace = "showcase", version = 1)]
@@ -123,7 +125,7 @@ pub mod showcase {
 
     #[commands]
     pub trait Commands {
-        /// 提交音量
+        /// Submit the volume
         #[idempotent]
         #[errors("out_of_range")]
         fn set_volume(&mut self, value: f64) -> Result<(), CommandError>;
@@ -131,7 +133,7 @@ pub mod showcase {
 
     #[queries]
     pub trait Queries {
-        /// 按类别名称搜索资料库
+        /// Search the library by category name
         #[reads(items)]
         #[errors("invalid_search")]
         fn search_library(&self, text: String, answer: Answer<Vec<Item>>);
@@ -139,9 +141,9 @@ pub mod showcase {
 }
 ```
 
-协议模块自包含：只含 `use`、`#[value]` 类型、一个 `#[state]`、一个 `#[commands]` 和可选的 `#[queries]`。宏生成描述、引擎适配器 `Adapter<E>`、需要实现的 `Engine` trait（同时要求命令与查询 trait），以及 UI 声明用的类型化客户端 `Client`。命令 ID 为 `命名空间.名称`；CLI 名称为 `showcase set-volume`，MCP 工具名为 `showcase_set_volume`，冲突时报错。跨边界类型限于 `bool`、`i64`、`f64`、`String`、`Option`、`Vec`、枚举与记录；`i32`、引用、泛型等会给出替代建议。
+The protocol module is self-contained: it contains only `use`, `#[value]` types, one `#[state]`, one `#[commands]` and an optional `#[queries]`. The macro generates the description, the engine adapter `Adapter<E>`, the `Engine` trait to implement (which requires both the command and the query traits), and the typed client `Client` used by UI declarations. Command IDs are `namespace.name`; the CLI name is `showcase set-volume` and the MCP tool name is `showcase_set_volume`, and conflicts report errors. Types crossing the boundary are limited to `bool`, `i64`, `f64`, `String`, `Option`, `Vec`, enums and records; `i32`, references, generics and the like get a suggested replacement.
 
-### 会话状态与组件
+### Session state and components
 
 ```rust
 #[bern::session]
@@ -162,20 +164,20 @@ pub fn controls_page(app: showcase::Client, #[session] draft: MainDraft) -> impl
 }
 ```
 
-- `#[session]` 参数由宿主窗口持有，同一窗口内同类型共享一个实例，每个窗口实例各有一份。
-- 组件主体只有一个 `ui!`，且只有一个根节点。
-- 元素：`名称(属性: 值, …) |模板变量| { 子节点 } => 客户端.命令(位置参数)`。
-- 控制结构：`if 条件 { } else { }`、`if let Some(x) = 绑定 { }`、`match 绑定 { 类型::变体 { 字段 } => { } }`。
-- 表达式：字面量、`tr!`、绑定路径（如 `app.volume`、`item.kind`）、`类型::变体 { 字段: 值 }`、`! - == != < <= > >= && ||`。不允许函数调用、索引、赋值和闭包。
-- `tr! { "zh-Hans" => "按钮共按下 {count} 次", "en" => "…"; count: app.activations }`：插值参数写在分号之后。
-- 组件引用使用命名参数：`item_detail(app: app, id: id)`，库组件写成 `showcase_widgets::item_count(count: item.count)`。
-- 根组件主体为 `WindowSet(handle: AppWindows, primary: main) { Window(…) { … } }`，并生成类型化窗口句柄 `windows.settings.open()`。
-- 应用级播放器用 `#[bern::players]` 声明，字段名就是稳定的 `player_id`；组件以 `players: Players` 参数接收，动作写成 `=> players.preview.open(clip)`、`play()`、`pause()`、`seek(ms)`、`set_volume(v)`、`set_muted(b)`。
-- `MediaSource { url }` 是框架值类型（`bern::prelude::MediaSource`），可以出现在协议状态、命令参数与 UI 值里；协议和 UI 不能自行声明同名类型。
+- `#[session]` parameters are held by the host window: within one window, parameters of the same type share one instance, and each window instance has its own.
+- A component body has exactly one `ui!`, with exactly one root node.
+- Elements: `Name(property: value, …) |template_var| { children } => client.command(positional_args)`.
+- Control structures: `if condition { } else { }`, `if let Some(x) = binding { }`, `match binding { Type::Variant { field } => { } }`.
+- Expressions: literals, `tr!`, binding paths (such as `app.volume`, `item.kind`), `Type::Variant { field: value }`, `! - == != < <= > >= && ||`. Function calls, indexing, assignment and closures are not allowed.
+- `tr! { "zh-Hans" => "按钮共按下 {count} 次", "en" => "…"; count: app.activations }`: interpolation arguments are written after the semicolon.
+- Component references use named arguments: `item_detail(app: app, id: id)`; library components are written as `showcase_widgets::item_count(count: item.count)`.
+- The root component body is `WindowSet(handle: AppWindows, primary: main) { Window(…) { … } }`, and typed window handles such as `windows.settings.open()` are generated.
+- App-level players are declared with `#[bern::players]`, and the field name is the stable `player_id`; components receive them through a `players: Players` parameter, and actions are written as `=> players.preview.open(clip)`, `play()`, `pause()`, `seek(ms)`, `set_volume(v)`, `set_muted(b)`.
+- `MediaSource { url }` is a framework value type (`bern::prelude::MediaSource`) that can appear in protocol state, command parameters and UI values; protocols and UIs cannot declare their own type with the same name.
 
-### 异步查询
+### Asynchronous queries
 
-查询只读：方法取 `&self`，最后一个参数是 `answer: Answer<T>`，没有返回值。提供器可以立即作答，也可以把 `answer` 交给计时器或其他线程稍后作答（`answer.ok(v)`、`answer.fail(e)`、`answer.send(r)`）；`answer.is_cancelled()` 让提供器在请求作废时提前停止。`#[reads(字段)]` 声明答复依赖的状态字段，`#[errors(...)]` 与命令相同。`&mut self`、带返回值、缺少 `Answer<T>`、读未声明的字段都会报错。
+Queries are read-only: the method takes `&self`, its last parameter is `answer: Answer<T>`, and it has no return value. A provider can answer immediately, or hand `answer` to a timer or another thread to answer later (`answer.ok(v)`, `answer.fail(e)`, `answer.send(r)`); `answer.is_cancelled()` lets the provider stop early when the request has been invalidated. `#[reads(field)]` declares the state fields the answer depends on, and `#[errors(...)]` works as for commands. `&mut self`, a return value, a missing `Answer<T>` and reading an undeclared field all report errors.
 
 ```rust
 Query(
@@ -190,31 +192,31 @@ Query(
 }
 ```
 
-- `query:` 是 `ui!` 里唯一能写调用的位置，而且只能调用引擎客户端上的查询；参数是受限表达式，由 `rustc` 与编译器检查类型。客户端的查询方法返回 `QueryRef`，命令方法返回 `CommandRef`：把查询写成 `=>` 动作、把命令写进 `query:` 都编译失败。
-- 模板变量是查询结果；结果是 `Option<T>` 时是其中的 `T`。
-- 状态：首次加载显示 `loading` 文案与系统进度指示；就绪由模板显示数据；刷新时保留上一份数据，并在其上方显示进度行；失败而没有数据时显示 `ContentUnavailableView` 与“重试”，有上一份数据时在数据上方显示错误行与“重试”。`loading`、`failed` 省略时使用框架文案。
-- 空结果是成功：列表为空或可选结果为 `None` 时，若声明了 `empty` 则显示以 `icon`（默认 `tray`）为图标的 `ContentUnavailableView`，否则模板照常显示空数据。`empty` 只能用于列表或可选结果，`icon` 必须与 `empty` 同时出现。
-- 查询登记为控件 `组件.id`，角色 `query`：`ui.inspect` 的值形如 `ready v3 (2)`（阶段、参数版本、条数），`ui.activate` 以当前参数重新请求。
+- `query:` is the only place in `ui!` where a call can be written, and it can only call a query on the engine client; the arguments are constrained expressions whose types are checked by `rustc` and the compiler. The client's query methods return `QueryRef` and its command methods return `CommandRef`: writing a query as a `=>` action or a command in `query:` fails to compile.
+- The template variable is the query result; when the result is `Option<T>`, it is the `T` inside.
+- States: the first load shows the `loading` text and a system progress indicator; when ready, the template shows the data; a refresh keeps the previous data and shows a progress row above it; a failure with no data shows `ContentUnavailableView` and "Retry", and a failure with previous data shows an error row and "Retry" above the data. When `loading` and `failed` are omitted, framework strings are used.
+- An empty result is a success: when a list is empty or an optional result is `None`, a `ContentUnavailableView` with `icon` (default `tray`) as its icon is shown if `empty` is declared; otherwise the template shows the empty data as usual. `empty` can only be used with list or optional results, and `icon` must appear together with `empty`.
+- A query is registered as the control `component.id` with the role `query`: the value from `ui.inspect` looks like `ready v3 (2)` (phase, argument version, count), and `ui.activate` requests again with the current arguments.
 
 ### Video
 
 ```rust
 #[bern::players]
 pub struct Players {
-    /// 跨页面、跨窗口持续播放
+    /// Keeps playing across pages and windows
     pub preview: Player,
 }
 
-Video(id: featured, source: app.featured_source)                 // 由声明创建播放器
-Video(id: preview, player: players.preview, controls: standard)  // 附着到应用级播放器
+Video(id: featured, source: app.featured_source)                 // player created by the declaration
+Video(id: preview, player: players.preview, controls: standard)  // attached to an app-level player
 ```
 
-- `source:` 与 `player:` 必须且只能写一个，类型分别为 `MediaSource`/`Option<MediaSource>` 的绑定和应用级播放器；`controls` 为 `standard`（默认）或 `none`，`fit` 为 `contain`（默认）、`cover`、`fill`，`label` 是可访问名称。
-- source 方式：播放器属于声明所在的组件实例，`player_id` 为 `窗口实例/组件.控件id`（如 `main#1/media_page.featured`）。源由绑定决定：同一个值不会重复加载；新值以新的源版本加载；外部 `media.open` 返回 `source_bound`，换源要调用源所有者的命令（示例中为 `showcase feature`）。组件实例结束或窗口关闭时释放播放器。
-- player 方式：只附着呈现；源由该播放器的命令更新。视图卸载只解除附着，应用级播放器在离开页面或关闭窗口后继续播放。
-- 标准控制条的进度与音量使用 `BernScrubber`：macOS 26 及以上是系统 `Slider` 加 `.tint(.primary)`，已播放部分为中性色；更早的系统绘制同样形状的回退（6 pt 轨道、20 × 16 pt 白色圆角滑块、柔和阴影，非活动窗口中已播放部分变浅），向辅助功能报告为系统 `Slider`，方向键逐步调整。拖动只更新预览，松开时提交一次，与 `Slider` 的编辑结束相同。见 [Apple 适配](../Adaptation/Apple.md) 第 8 节。
+- Exactly one of `source:` and `player:` must be written; their types are, respectively, a binding of `MediaSource`/`Option<MediaSource>` and an app-level player; `controls` is `standard` (default) or `none`, `fit` is `contain` (default), `cover` or `fill`, and `label` is the accessible name.
+- The source form: the player belongs to the component instance where it is declared, and its `player_id` is `window_instance/component.control_id` (e.g. `main#1/media_page.featured`). The source is decided by the binding: the same value is not loaded again; a new value is loaded with a new source version; an external `media.open` returns `source_bound`, and changing the source means calling the command of the source's owner (`showcase feature` in the example). The player is released when the component instance ends or the window closes.
+- The player form: it only attaches the presentation; the source is updated through that player's commands. Unmounting the view only detaches it, and the app-level player keeps playing after leaving the page or closing the window.
+- The progress and volume of the standard control bar use `BernScrubber`: on macOS 26 and later it is a system `Slider` with `.tint(.primary)`, with the played part in a neutral color; earlier systems draw a fallback of the same shape (6 pt track, 20 × 16 pt white rounded thumb, soft shadow, and a lighter played part in inactive windows), reported to accessibility as a system `Slider` and adjusted step by step with the arrow keys. Dragging only updates the preview, and releasing commits once, the same as the end of editing in `Slider`. See section 8 of [Apple adaptation](../Adaptation/Apple.md).
 
-### 窗口关闭检查
+### Window close checks
 
 ```rust
 #[component]
@@ -231,13 +233,13 @@ pub fn app(app: showcase::Client, windows: AppWindows, players: Players,
 }
 ```
 
-- `confirm_close` 是受限布尔表达式，`close_message` 是 `tr!` 文本，两者同时出现；`Window` 上的动作是存储命令（只能是引擎命令），有它时决策为“存储 / 不存储 / 取消”，否则为“放弃更改 / 取消”。
-- 根组件的 `#[session]` 参数按窗口实例求值，只能用在拥有该会话类型的窗口的关闭检查里，编译器检查归属。
+- `confirm_close` is a constrained boolean expression and `close_message` is `tr!` text, and the two appear together; the action on `Window` is the save command (it can only be an engine command); with it the decision is "Save / Don't Save / Cancel", otherwise "Discard Changes / Cancel".
+- The root component's `#[session]` parameters are evaluated per window instance and can only be used in the close check of the window that owns that session type; the compiler checks the ownership.
 
-### 随包资源
+### Bundled resources
 
 ```toml
-# Bern.toml：每项是相对本文件的文件或目录，也是引擎使用的资源名称
+# Bern.toml: each entry is a file or directory relative to this file, and also the resource name the engine uses
 [resources]
 paths = ["media/aurora.mp4", "media/tides.mp4", "media/broken.mp4"]
 ```
@@ -245,111 +247,111 @@ paths = ["media/aurora.mp4", "media/tides.mp4", "media/broken.mp4"]
 ```rust
 use bern::resources::Resources;
 
-let resources = Resources::host();                                  // 应用宿主装配
-let clip = MediaSource::resource(&resources, "media/aurora.mp4")?;  // 包内文件 URL
-let seed = resources.path("data/seed.json")?;                       // 包内文件路径
+let resources = Resources::host();                                  // assembled by the app host
+let clip = MediaSource::resource(&resources, "media/aurora.mp4")?;  // URL of the file in the bundle
+let seed = resources.path("data/seed.json")?;                       // path of the file in the bundle
 ```
 
-- 名称是相对 `Bern.toml` 的 `/` 分隔路径，每段只能用 ASCII 字母、数字、`-`、`_`、`.`，不以 `.` 开头；目录展开为其下全部文件（跳过隐藏项）。条目不存在、符号链接、空目录、名称不合法、重复列出、只有大小写不同都是构建错误，位置指向 `Bern.toml` 中的条目（如 `examples/showcase/Bern.toml:43:10`）。规则由 `bern_protocol::check_resource_name` 定义，构建与运行时共用。
-- macOS 目标另外拒绝含 `.` 的目录段与以 `.lproj` 结尾的段（签名工具把含点目录当作包，`.lproj` 存放生成的本地化），报错同样指向声明位置。
-- 引擎按名称解析：`Resources::host()` 是宿主为本进程装配的资源；`Resources::catalog(目录, 名称)` 与宿主相同但显式给出；`Resources::directory(目录)` 不带名称目录，只供测试与工具。错误码为 `invalid_resource_name`、`resources_unavailable`（没有宿主装配，例如单元测试直接调用 `Default`）、`undeclared_resource`（即使包里有同名文件）、`resource_missing`。没有回退路径。
-- 示例引擎 `ShowcaseEngine::new(时钟, 资源)` 与注入时钟的方式相同；`Default` 使用 `SystemClock` 与 `Resources::host()`。片段解析失败时引擎无法构造，应用显示“the engine panicked while starting: resources_unavailable: …”这样带原因的启动错误。测试用 `bern_compiler::config::load` 读取示例的 `Bern.toml`，以与应用包相同的名称目录在源码目录中解析，因此引擎使用未声明的名称会在测试中失败。
+- A name is a `/`-separated path relative to `Bern.toml`; each segment may only use ASCII letters, digits, `-`, `_` and `.`, and must not start with `.`; a directory expands to all files under it (skipping hidden items). A missing entry, a symbolic link, an empty directory, an invalid name, an entry listed twice, and names that differ only in case are all build errors, with the location pointing at the entry in `Bern.toml` (e.g. `examples/showcase/Bern.toml:43:10`). The rules are defined by `bern_protocol::check_resource_name`, shared by the build and the runtime.
+- The macOS target additionally rejects directory segments that contain `.` and segments ending in `.lproj` (the signing tool treats directories with a dot as bundles, and `.lproj` holds the generated localizations); the error likewise points at the declaration.
+- The engine resolves by name: `Resources::host()` is the resources the host assembled for this process; `Resources::catalog(dir, names)` is the same as the host's but given explicitly; `Resources::directory(dir)` has no name catalog and is only for tests and tools. The error codes are `invalid_resource_name`, `resources_unavailable` (nothing assembled by a host, e.g. a unit test calling `Default` directly), `undeclared_resource` (even if the bundle has a file with that name) and `resource_missing`. There is no fallback path.
+- The example engine `ShowcaseEngine::new(clock, resources)` takes resources the same way it injects the clock; `Default` uses `SystemClock` and `Resources::host()`. When a clip fails to resolve, the engine cannot be constructed, and the app shows a startup error with the reason, such as "the engine panicked while starting: resources_unavailable: …". The tests read the example's `Bern.toml` with `bern_compiler::config::load` and resolve in the source directory with the same name catalog as the app bundle, so an engine that uses an undeclared name fails in the tests.
 
-### 组件规格
+### Component specs
 
-规格表位于 `crates/bern-ir/src/spec.rs`，宏、编译器和目标共同读取。首批组件：`WindowSet`、`Window`、`SplitView`、`Sidebar`、`SidebarItem`、`Detail`、`Navigation`、`Destination`、`NavLink`、`Tabs`、`Tab`、`Toolbar`、`Form`、`Section`、`Column`、`Row`、`ScrollView`、`List`、`ForEach`、`Spacer`、`Divider`、`Text`、`Label`、`Button`、`IconButton`、`TextInput`、`Search`、`Switch`、`Slider`、`Video`、`Query`、`Picker`；阶段四加入 `Adaptive`、`Layout`、`Menu`、`MenuItem` 与 `LanguagePicker`；阶段六加入 `Image`、`Progress`、`Grid` 与 `Stack`。IR 因加入查询绑定升为版本 2，加入随包资源清单后为版本 3，浮动窗口呈现为版本 4，布局断点与功能契约为版本 5，资源属性（`Image` 的 `source`）为版本 6。可操作控件必须有 `id`；同一 `Adaptive` 的不同布局中 `id` 相同的控件是同一控件。
+The spec table is at `crates/bern-ir/src/spec.rs` and is read by the macros, the compiler and the targets alike. First batch of components: `WindowSet`, `Window`, `SplitView`, `Sidebar`, `SidebarItem`, `Detail`, `Navigation`, `Destination`, `NavLink`, `Tabs`, `Tab`, `Toolbar`, `Form`, `Section`, `Column`, `Row`, `ScrollView`, `List`, `ForEach`, `Spacer`, `Divider`, `Text`, `Label`, `Button`, `IconButton`, `TextInput`, `Search`, `Switch`, `Slider`, `Video`, `Query`, `Picker`; Phase 4 added `Adaptive`, `Layout`, `Menu`, `MenuItem` and `LanguagePicker`; Phase 6 added `Image`, `Progress`, `Grid` and `Stack`. The IR moved to version 2 with query bindings, version 3 with the bundled resource manifest, version 4 with floating window presentation, version 5 with layout breakpoints and feature contracts, and version 6 with resource properties (`source` of `Image`). Actionable controls must have an `id`; controls with the same `id` in different layouts of the same `Adaptive` are the same control.
 
-默认行为：`Column` 前缘对齐；`Row` 垂直居中；`Grid` 的 `gap` 为 8；`Stack` 居中；未写 `style` 时使用平台默认样式。`Image` 的 `source` 必须是声明过的 PNG 或 JPEG 资源，编译器在整个应用（包括组件库中的组件）范围内检查，`width`、`height` 至少写一个且大于零；`Progress` 的 `value` 是整数或浮点数的受限表达式，`total` 必须大于零且只能与 `value` 一起写。`Search` 可以放在 Sidebar 或 Toolbar；`style: palette` 仅在 macOS 的 Toolbar 中开放；`Picker` 的枚举不能携带数据。
+Defaults: `Column` aligns to the leading edge; `Row` centers vertically; the `gap` of `Grid` is 8; `Stack` centers; without `style`, the platform default style is used. The `source` of `Image` must be a declared PNG or JPEG resource, which the compiler checks across the whole app (including components in component libraries), and at least one of `width` and `height` must be written and greater than zero; the `value` of `Progress` is a constrained integer or floating-point expression, and `total` must be greater than zero and can only be written together with `value`. `Search` can be placed in a Sidebar or a Toolbar; `style: palette` is only available in a Toolbar on macOS; the enum of a `Picker` cannot carry data.
 
-## 运行结构
+## Runtime structure
 
 ```mermaid
 flowchart LR
-    UI[SwiftUI 视图] -->|会话字段写入| RT[bern-runtime 会话]
-    UI -->|引擎命令 类型化二进制| H[bern-command Host]
-    H -->|修订号与字段差异| UI
-    IPC[本地控制通道] --> H
-    IPC -->|会话命令| RT
-    RT -->|转发到真实控件| UI
-    CLI[应用 CLI] --> IPC
-    MCP[MCP 服务器] --> IPC
-    JSON[JSON 客户端] --> IPC
+    UI[SwiftUI views] -->|session field writes| RT[bern-runtime session]
+    UI -->|engine commands, typed binary| H[bern-command Host]
+    H -->|revision and field diffs| UI
+    IPC[Local control channel] --> H
+    IPC -->|session commands| RT
+    RT -->|forwarded to real controls| UI
+    CLI[App CLI] --> IPC
+    MCP[MCP server] --> IPC
+    JSON[JSON client] --> IPC
 ```
 
-- **进程内桥接**：固定 C ABI（`bern.h`）只有少量函数。参数、状态与回执按 `bern_protocol::codec` 的二进制布局传递，两端由生成代码按 schema 编解码；接收端仍做 schema 校验。前端与引擎的目录指纹不一致时拒绝启动。
-- **引擎**：命令在专用线程上串行执行；参数在边界校验；panic 使引擎拒绝后续命令；状态按字段比较，只在变化时递增修订号。
-- **窗口与会话**：窗口出现时向运行时登记，获得代次与外部 ID（如 `settings#2`）。草稿属于窗口实例，关闭即释放；带旧代次的写入返回 `stale_window`。
-- **窗口呈现**：真实窗口属于目标。宿主观察每个 `NSWindow` 的最小化、全屏、缩放、移动、尺寸（实时缩放结束时一次）、聚焦、遮挡与可见性，以及应用隐藏，把结果作为事实报告给会话运行时：可见性（可见、最小化、隐藏）、尺寸状态（普通、最大化、全屏）、以主显示器左上角为原点的外框、是否聚焦、当前可用动作，并标明来源（命令或用户与系统）。事实带窗口代次，旧实例的迟到事实返回 `stale_window` 被丢弃；值不变时版本号不变。事实从不派发命令，外部入口也无法注入事实。
-  - `window.list` 由运行时按记录的事实回答，不经过界面线程；窗口刚挂载、事实未到时生命周期为 `Opening`，关闭确认待决时为 `Closing`（目前 Bern 唯一的模态关系）。
-  - 呈现命令先按事实检查动作是否可用（否则 `target_unavailable`，并列出可用动作），再由宿主执行，等 AppKit 报告完成（最小化与恢复等待动画结束的通知，超时 5 秒返回 `ui_timeout`），最后返回运行时记录的窗口信息，因此结果是实际状态而不是请求。
-  - 最大化即 AppKit 的缩放；只有可调整大小的窗口能最大化（固定尺寸窗口的 `isZoomed` 不算）。恢复一次撤销一步：最小化、全屏、最大化依次。AppKit 没有可回到的尺寸时（窗口以缩放尺寸启动），恢复到最大化前的外框，或居中的声明尺寸。
-  - `window.move` 要求标题栏仍在某个显示器的可见区域内，`window.resize` 保持左上角并遵守窗口的最小与最大尺寸（含 SwiftUI 按根视图设置的内容尺寸），越界返回 `out_of_range` 并给出限制。
-- **启动与重新打开**：`initial: open` 表示会话初始化时打开一次，因此不恢复上次运行时窗口的开关状态（`ApplePersistenceIgnoreState`），否则上次退出前关掉的主窗口启动后不出现；窗口尺寸与位置仍由系统记住。主窗口不存在时，点 Dock 图标（重新打开事件）打开主窗口，与“系统设置”“音乐”一致。
-- **控件登记与会话命令**：每个可操作控件挂载时登记目标 ID（`组件.控件id`，列表行附加 `[键]`）、角色、名称、启用状态，以及与用户输入相同的动作闭包。名称取控件自己的文案；侧边栏与标签页取当前选中项的文案，导航链接取行内第一段文字（经过容器与 `match` 分支），导航容器与查询没有名称。外部的 `ui.activate` 等命令在主线程上经这些闭包执行；禁用控件返回 `target_unavailable`，被本窗口关闭确认阻挡的控件返回 `target_blocked`，同一目标挂载在多处返回 `target_ambiguous`；密码框的值不暴露。`ui.inspect` 的 `reason` 给出不可操作原因（`disabled`、`blocked_by_modal`）。
+- **In-process bridge**: the fixed C ABI (`bern.h`) has only a few functions. Arguments, state and receipts are passed in the binary layout of `bern_protocol::codec`, encoded and decoded on both ends by generated code according to the schema; the receiving end still validates against the schema. When the catalog fingerprints of the frontend and the engine differ, launch is refused.
+- **Engine**: commands run serially on a dedicated thread; arguments are validated at the boundary; a panic makes the engine refuse all later commands; state is compared per field, and the revision number is incremented only when something changed.
+- **Windows and sessions**: when a window appears it registers with the runtime and receives a generation and an external ID (e.g. `settings#2`). Drafts belong to the window instance and are released when it closes; writes with an old generation return `stale_window`.
+- **Window presentation**: real windows belong to the target. The host observes each `NSWindow`'s minimize, full screen, zoom, move, size (once at the end of a live resize), focus, occlusion and visibility, as well as app hiding, and reports the results to the session runtime as facts: visibility (visible, minimized, hidden), size state (normal, maximized, full screen), the frame with the top-left corner of the main display as the origin, whether it is focused, the currently available actions, and the source (a command, or the user and the system). Facts carry the window generation, so late facts from an old instance return `stale_window` and are discarded; when the value is unchanged, the version number does not change. Facts never dispatch commands, and external entry points cannot inject facts.
+  - `window.list` is answered by the runtime from the recorded facts, without going through the UI thread; when a window has just mounted and its facts have not arrived yet, its lifecycle is `Opening`, and while a close confirmation is pending it is `Closing` (currently Bern's only modal relationship).
+  - Presentation commands first check against the facts whether the action is available (otherwise `target_unavailable`, listing the available actions), then the host executes them and waits for AppKit to report completion (minimize and restore wait for the notification that the animation has ended, and a 5-second timeout returns `ui_timeout`), and finally they return the window information recorded by the runtime, so the result is the actual state rather than the request.
+  - Maximize is AppKit's zoom; only resizable windows can be maximized (`isZoomed` on a fixed-size window does not count). Restore undoes one step at a time: minimize, full screen, maximize, in that order. When AppKit has no size to return to (the window launched at the zoomed size), restore goes back to the frame before maximizing, or to the declared size, centered.
+  - `window.move` requires the title bar to stay within the visible area of some display, and `window.resize` keeps the top-left corner and respects the window's minimum and maximum size (including the content size SwiftUI sets from the root view); going out of bounds returns `out_of_range` with the limits.
+- **Launch and reopening**: `initial: open` means the window is opened once when the session initializes, so the open or closed state of windows from the last run is not restored (`ApplePersistenceIgnoreState`); otherwise a main window closed before the last quit would not appear after launch. Window size and position are still remembered by the system. When the main window does not exist, clicking the Dock icon (the reopen event) opens the main window, as in System Settings and Music.
+- **Control registration and session commands**: each actionable control registers on mount its target ID (`component.control_id`, with `[key]` appended for list rows), role, name, enabled state, and the same action closure that user input uses. The name is taken from the control's own text; sidebars and tabs take the text of the currently selected item, navigation links take the first piece of text in the row (looking through containers and `match` branches), and navigation containers and queries have no name. External commands such as `ui.activate` run through these closures on the main thread; a disabled control returns `target_unavailable`, a control blocked by this window's close confirmation returns `target_blocked`, and a target mounted in several places returns `target_ambiguous`; the values of password fields are not exposed. The `reason` from `ui.inspect` gives why a control cannot be operated (`disabled`, `blocked_by_modal`).
 
-- **随包资源**：构建计划在签名之前以 `Mirror` 步骤把声明的文件复制到 `Showcase.app/Contents/Resources/<名称>`：只复制内容、不带扩展属性，大小与修改时间相同的文件不重复复制，删除不再声明的旧文件，保留生成的 `<语言>.lproj`。生成的胶水把声明名称写入 `AppSpec.resources`；Swift 宿主启动时把 `Bundle.main.resourceURL` 的路径传给 `bern_app_start`，`bern-ffi` 在构造引擎之前以“包内目录 + 声明名称”装配 `Resources::host()`。同一进程再次以不同目录装配会失败。`build.json` 记录资源名称。
+- **Bundled resources**: before signing, the build plan copies the declared files into `Showcase.app/Contents/Resources/<name>` with a `Mirror` step: only the content is copied, without extended attributes; files with the same size and modification time are not copied again; old files that are no longer declared are deleted; and the generated `<language>.lproj` are kept. The generated glue writes the declared names into `AppSpec.resources`; at launch the Swift host passes the path of `Bundle.main.resourceURL` to `bern_app_start`, and `bern-ffi` assembles `Resources::host()` from "directory in the bundle + declared names" before constructing the engine. Assembling again in the same process with a different directory fails. `build.json` records the resource names.
 
-### Video 与媒体
+### Video and media
 
 ```mermaid
 flowchart LR
-    Bar[标准控制条] -->|media.* 命令| Hub[MediaHub]
-    Ext[CLI / JSON / MCP] -->|media.* 命令| Hub
-    Decl[Video source 绑定] -->|源版本加载| Hub
-    Hub -->|带源版本的请求| AV[AVFoundation 执行端]
-    AV -->|执行结果| Hub
-    AV -->|观察到的事实（带源版本）| Hub
-    Hub -->|归并后的播放器状态| Bar
-    Hub -->|归并后的播放器状态| Ext
+    Bar[Standard control bar] -->|media.* commands| Hub[MediaHub]
+    Ext[CLI / JSON / MCP] -->|media.* commands| Hub
+    Decl[Video source binding] -->|load by source version| Hub
+    Hub -->|requests with source version| AV[AVFoundation executor]
+    AV -->|execution results| Hub
+    AV -->|observed facts, with source version| Hub
+    Hub -->|merged player state| Bar
+    Hub -->|merged player state| Ext
 ```
 
-- **媒体契约**（`bern-media`，契约版本 1）：命令 `media.players`、`media.state`（查询），`media.open`、`media.play`、`media.pause`、`media.seek`、`media.set_volume`、`media.set_muted`；CLI 为 `showcase media play --player-id …`，MCP 工具为 `media_play` 等。播放器状态 `MediaPlayer` 含 `owner`、`source_bound`、`source`、`source_version`、`phase`（Idle、Loading、Ready、Playing、Paused、Buffering、Ended、Failed、Unavailable）、`position_ms`、`duration_ms`（未知或直播时为空）、`seekable`、`volume`、`muted`、`error`、`views` 与最近一次请求 `request`。
-- **路由与归并**：命令先在 `MediaHub` 校验（`player_not_found`、`no_source`、`media_failed`、`not_seekable`、`out_of_range`、`source_bound`、`executor_unavailable`），再带当前源版本交给执行端；执行端按版本拒绝过期请求（`stale_source`）。执行端回报的是事实，只有与当前源版本一致时才归并；合并事实不会产生任何命令。命令在执行端完成后才返回结果；外部入口等待 10 秒仍无结果时返回 `media_timeout`（结果未知）。
-- **执行端与呈现**：应用启动时 AVFoundation 执行端登记到 hub；每个 `player_id` 一个 `AVPlayer`，周期观察 0.5 秒。视频由 `AVPlayerView` 呈现，`controlsStyle = .none`、不接收键鼠、不接入 Now Playing，因此播放状态只会因 Bern 命令改变。新源加载后保持暂停，等待播放命令。
-- **标准控制条**：系统控件（无边框按钮、`Slider`、系统文字样式），位于视频下方而非覆盖在画面上，颜色全部来自系统；拖动进度和音量只改本地预览，松开时提交一次命令，状态更新不会回调成命令。控件登记为 `目标.play_pause`、`目标.position`、`目标.mute`、`目标.volume`，可由 `ui.*` 驱动；视频区域登记为角色 `video`，值为当前阶段与时间。无媒体、加载、失败、不可用时显示系统 `ContentUnavailableView` 或 `ProgressView`，不在视频上叠加文字。
-- **生命周期**：视图附着按窗口记录；窗口关闭时立即解除该窗口的附着、释放其组件拥有的播放器，应用级播放器继续。执行端断开时所有播放器变为 `Unavailable`，等待中的请求失败，不再显示已确认的“正在播放”。
-- **应用自带的媒体内核**（2026-10-21）：启动时先问 `bern_media_kernel_attach` 能否挂接应用登记的内核（提供 `MetalLayer`）；能时不挂接 AVFoundation，`Video` 改用 `BernKernelVideoSurface`：一个以 `CAMetalLayer` 为图层、不接收点按的 `NSView`，把图层地址、物理像素尺寸（视图大小 × 窗口像素比 × 外层 `ScaleBox` 的放大）与 `fit` 交给内核，布局、换屏或像素比变化时报告新尺寸，卸载时先停帧时钟再同步取回表面。帧时钟是视图给出的 `CADisplayLink`（`NSView.displayLink(target:selector:)`），加在名为 “Bern media frames” 的线程的运行循环上；每帧持锁调用 `bern_media_surface_frame`，应用停止前清空，保证停止后没有帧到达。圆角照常裁在图层上。实测见[设计文档](../Design.md#应用自带的媒体内核)。
-- **构建后刷新图标登记**（2026-10-21）：每次构建都在同一位置替换应用包，Finder 与程序坞会一直显示第一次见到的图标（换了图标后仍是旧图标）。签名之后先 `touch` 应用包，再用 Launch Services 的 `lsregister -f` 重新登记，程序坞与 Finder 随之读取新图标；正在运行的应用重新打开后生效。
-- **引擎依赖的原生库**：构建引擎后再用 `cargo rustc --lib -- --print native-static-libs=…` 把静态库需要的系统框架与库写进 `libbern_app.native-libs`，swiftc 以响应文件（`@文件`）读入，并用 `-no_warn_duplicate_libraries` 去掉与 swiftc 自带库重复的警告。媒体内核等依赖链接的 Metal、VideoToolbox、CoreAudio、libc++ 等因此不用在生成器里逐个写；iOS 与 tvOS 的构建同样处理。
+- **Media contract** (`bern-media`, contract version 1): the commands are `media.players`, `media.state` (queries), `media.open`, `media.play`, `media.pause`, `media.seek`, `media.set_volume` and `media.set_muted`; the CLI form is `showcase media play --player-id …`, and the MCP tools are `media_play` and so on. The player state `MediaPlayer` contains `owner`, `source_bound`, `source`, `source_version`, `phase` (Idle, Loading, Ready, Playing, Paused, Buffering, Ended, Failed, Unavailable), `position_ms`, `duration_ms` (empty when unknown or live), `seekable`, `volume`, `muted`, `error`, `views` and the most recent request, `request`.
+- **Routing and merging**: commands are first validated in `MediaHub` (`player_not_found`, `no_source`, `media_failed`, `not_seekable`, `out_of_range`, `source_bound`, `executor_unavailable`), then handed to the executor with the current source version; the executor rejects outdated requests by version (`stale_source`). What the executor reports back are facts, which are merged only when they match the current source version; merging facts never produces any command. A command returns its result only after the executor has finished; when an external entry point still has no result after waiting 10 seconds, it returns `media_timeout` (result unknown).
+- **Executor and presentation**: at app launch the AVFoundation executor registers with the hub; there is one `AVPlayer` per `player_id`, observed periodically every 0.5 seconds. Video is presented by `AVPlayerView` with `controlsStyle = .none`, receiving no keyboard or mouse input and not connected to Now Playing, so the playback state changes only through Bern commands. After a new source loads, it stays paused and waits for a play command.
+- **Standard control bar**: system controls (borderless buttons, `Slider`, system text styles), placed below the video rather than overlaid on the picture, with all colors from the system; dragging the progress and volume only changes a local preview, and releasing submits one command, while state updates do not call back as commands. The controls are registered as `target.play_pause`, `target.position`, `target.mute` and `target.volume` and can be driven by `ui.*`; the video area is registered with the role `video`, and its value is the current phase and time. With no media, while loading, on failure or when unavailable, the system `ContentUnavailableView` or `ProgressView` is shown, and no text is overlaid on the video.
+- **Lifecycle**: view attachments are recorded per window; when a window closes, that window's attachments are detached immediately and the players owned by its components are released, while app-level players continue. When the executor disconnects, all players become `Unavailable`, pending requests fail, and a confirmed "playing" is no longer shown.
+- **The app's own media core** (2026-10-21): at launch, the host first asks `bern_media_kernel_attach` whether the media core the app registered (one that provides a `MetalLayer`) can be attached; if it can, AVFoundation is not attached and `Video` uses `BernKernelVideoSurface` instead: an `NSView` backed by a `CAMetalLayer` that does not receive clicks, which hands the layer address, the physical pixel size (view size × window pixel ratio × the scale of the outer `ScaleBox`) and `fit` to the core, reports the new size when the layout, the screen or the pixel ratio changes, and on unmount first stops the frame clock and then takes the surface back synchronously. The frame clock is the `CADisplayLink` provided by the view (`NSView.displayLink(target:selector:)`), added to the run loop of a thread named "Bern media frames"; each frame calls `bern_media_surface_frame` while holding a lock, and this is cleared before the app stops, which guarantees that no frame arrives after stopping. Rounded corners are clipped on the layer as usual. For measurements see the [design document](../Design.md#app-provided-media-cores).
+- **Refreshing the icon registration after a build** (2026-10-21): every build replaces the app bundle at the same location, and Finder and the Dock keep showing the icon they saw first (still the old icon after the icon has changed). After signing, the app bundle is first `touch`ed and then registered again with Launch Services' `lsregister -f`, after which the Dock and Finder read the new icon; a running app picks it up after it is reopened.
+- **Native libraries the engine depends on**: after the engine is built, `cargo rustc --lib -- --print native-static-libs=…` writes the system frameworks and libraries that the static library needs into `libbern_app.native-libs`, which swiftc reads as a response file (`@file`), with `-no_warn_duplicate_libraries` to remove the warnings about libraries duplicated with swiftc's own. Metal, VideoToolbox, CoreAudio, libc++ and others that dependencies such as the media core link against therefore need not be listed one by one in the generator; the iOS and tvOS builds are handled the same way.
 
-### 查询订阅与答复
+### Query subscriptions and answers
 
 ```mermaid
 sequenceDiagram
-    participant V as Query 视图
-    participant R as 会话运行时（订阅）
-    participant H as 引擎宿主
-    participant P as 查询提供器
-    V->>R: 参数 "m"（版本 1）
-    R->>H: 请求 1（可取消）
+    participant V as Query view
+    participant R as Session runtime (subscriptions)
+    participant H as Engine host
+    participant P as Query provider
+    V->>R: arguments "m" (version 1)
+    R->>H: request 1 (cancellable)
     H->>P: search_library("m")
-    V->>R: 参数 "mo"（版本 2，取消请求 1）
-    R->>H: 请求 2
+    V->>R: arguments "mo" (version 2, cancels request 1)
+    R->>H: request 2
     H->>P: search_library("mo")
-    P-->>R: 答复 2
-    R-->>V: 就绪（版本 2）
-    P-->>R: 请求 1 已取消
-    Note over R: 丢弃，不覆盖版本 2
+    P-->>R: answer 2
+    R-->>V: ready (version 2)
+    P-->>R: request 1 cancelled
+    Note over R: discarded, does not overwrite version 2
 ```
 
-- **目录**：查询排在命令之后，`kind: query`、`concurrency: overlapping`（按到达顺序启动、答复可以乱序）、`retry: idempotent`、`cancellable: true`，`reads` 列出依赖的状态字段。CLI 名称、MCP 工具与 JSON 调用和命令一样从同一目录派生（`showcase showcase search-library --text mo`、`showcase_search_library`）；CLI 帮助把查询单独列出，MCP 工具标为 `readOnlyHint`。
-- **宿主**：提供器在引擎线程上按到达顺序启动，看到之前命令留下的状态，然后通过 `Answer<T>` 在任意时刻、任意线程作答；答复按结果 schema 校验（`invalid_result`）。请求取消后才作答的返回 `cancelled`，提供器丢弃未答复的请求返回 `query_dropped`，排队时已被取消的请求不会启动提供器；提供器 panic 与命令一样使引擎拒绝后续请求。查询不发布新的修订号。
-- **会话订阅**：生成的 `Query` 视图为自己的窗口实例打开订阅（`bern_query_open`），每次渲染编码参数，参数变化后在本次更新之外调用 `bern_query_request`。运行时（`QuerySubscriptions`，基于 `bern_runtime::query::Query`）为每次请求分配新版本并取消上一请求，只把当前版本的答复经 `on_query` 回调交给视图；Swift 侧同样忽略比已显示状态更旧的版本。视图身份结束（例如切换到其他页面）时订阅结束，窗口关闭时运行时结束该窗口的全部订阅，在途请求随之取消；导航栈覆盖页面时订阅保留。
-- **随状态刷新**：引擎修订中有字段属于某个查询的 `#[reads]` 时，该查询的每个订阅以相同参数重新请求，界面保留数据并显示“刷新”；例如添加或删除项目后搜索结果自动更新。
-- **外部入口**：CLI、JSON 与 MCP 的每次调用是一次请求，最多等待 10 秒，超时返回 `query_timeout` 并取消请求；查询没有副作用，可以直接再次调用。
-- **示例提供器**：`showcase-core` 的搜索按类别的全部译名（中文与英文）匹配，`!` 开头返回 `invalid_search`。宽泛的搜索比精确的搜索慢（0 个字符 250 ms，1 个 900 ms，2 个 450 ms，更多 150 ms），因此快速输入时答复会乱序到达；计时来自注入的时钟，应用中是 `SystemClock`，测试中是 `ManualClock`。
+- **Catalog**: queries come after commands, with `kind: query`, `concurrency: overlapping` (started in order of arrival, answers may come out of order), `retry: idempotent` and `cancellable: true`, and `reads` lists the state fields they depend on. CLI names, MCP tools and JSON calls are derived from the same catalog as for commands (`showcase showcase search-library --text mo`, `showcase_search_library`); the CLI help lists queries separately, and the MCP tools are marked `readOnlyHint`.
+- **Host**: providers start on the engine thread in order of arrival and see the state left by earlier commands, then answer through `Answer<T>` at any time on any thread; answers are validated against the result schema (`invalid_result`). An answer given after the request was cancelled returns `cancelled`, a provider dropping an unanswered request returns `query_dropped`, and a request cancelled while queued never starts the provider; a provider panic, like a command panic, makes the engine refuse later requests. Queries do not publish a new revision number.
+- **Session subscriptions**: the generated `Query` view opens a subscription for its own window instance (`bern_query_open`), encodes the arguments on every render, and when the arguments change calls `bern_query_request` outside the current update. The runtime (`QuerySubscriptions`, built on `bern_runtime::query::Query`) assigns a new version to each request and cancels the previous request, and passes only answers for the current version to the view through the `on_query` callback; the Swift side likewise ignores versions older than the state already shown. When the view identity ends (e.g. on switching to another page) the subscription ends; when the window closes, the runtime ends all of that window's subscriptions, and in-flight requests are cancelled with them; when a navigation stack covers the page, the subscription is kept.
+- **Refreshing with state**: when an engine revision contains a field that belongs to a query's `#[reads]`, every subscription of that query requests again with the same arguments, and the UI keeps the data and shows "refreshing"; for example, search results update automatically after items are added or deleted.
+- **External entry points**: each call from the CLI, JSON or MCP is one request that waits at most 10 seconds; a timeout returns `query_timeout` and cancels the request; queries have no side effects, so they can simply be called again.
+- **Example provider**: the search in `showcase-core` matches against all translated names of a category (Chinese and English), and text starting with `!` returns `invalid_search`. Broad searches are slower than precise ones (0 characters 250 ms, 1 character 900 ms, 2 characters 450 ms, more 150 ms), so answers arrive out of order during fast typing; the timing comes from the injected clock, which is `SystemClock` in the app and `ManualClock` in tests.
 
-### 窗口关闭协议
+### Window close protocol
 
-- 请求关闭（UI 动作、系统关闭按钮与 File > Close、`window.close`）都先求值窗口声明的关闭检查，再由会话运行时决定：`Closed` 立即关闭；`ConfirmationRequired` 返回确认 ID、绑定的草稿修订号和可选决策，同时以系统警告框（窗口级 sheet）显示。重复请求返回同一个确认，不重复弹框。
-- `window.confirm_close` 提交与对话框相同的类型化决策：`Save` 运行声明的存储命令，失败则 `Rejected`（`save_failed: …`）且窗口保留；`Discard` 关闭并释放草稿；`Cancel` 返回 `Rejected`（`cancelled`）。
-- 确认绑定窗口代次与草稿修订号：确认之后草稿又改变、确认已被处理、或窗口已关闭重开时，决策返回 `stale_confirmation` 或 `stale_window`，不会丢弃后来的修改。
-- 确认待决时，该窗口的控件对所有入口都被阻挡（`target_blocked`），其他窗口不受影响。
-- 系统关闭的拦截：窗口有关闭检查时，Bern 以转发代理替换窗口委托，只实现 `windowShouldClose(_:)`，其余委托消息转给 SwiftUI 原有的委托。
+- Close requests (UI actions, the system close button and File > Close, `window.close`) all first evaluate the close check declared on the window, and then the session runtime decides: `Closed` closes immediately; `ConfirmationRequired` returns a confirmation ID, the bound draft revision and the decisions offered, and at the same time shows a system alert (a window-level sheet). Repeated requests return the same confirmation and do not show the dialog again.
+- `window.confirm_close` submits the same typed decision as the dialog: `Save` runs the declared save command, and on failure returns `Rejected` (`save_failed: …`) and the window stays; `Discard` closes the window and releases the draft; `Cancel` returns `Rejected` (`cancelled`).
+- A confirmation is bound to the window generation and the draft revision: when the draft has changed again after the confirmation, the confirmation has already been handled, or the window has been closed and reopened, the decision returns `stale_confirmation` or `stale_window`, and later changes are not discarded.
+- While a confirmation is pending, that window's controls are blocked for all entry points (`target_blocked`); other windows are not affected.
+- Intercepting system close: when a window has a close check, Bern replaces the window delegate with a forwarding proxy that implements only `windowShouldClose(_:)` and forwards all other delegate messages to SwiftUI's original delegate.
 
-## 外部入口
+## External entry points
 
-`Bern.toml` 中 `[targets.macos] channels = ["ipc"]` 才会装配控制通道。通道位置是 `$TMPDIR/bern-<应用标识哈希>/<engine_id>.sock`，目录权限 0700，套接字 0600，只服务同一用户。握手核对协议版本，并可核对目录指纹。消息为逐行 JSON；64 位整数超出 ±(2^53−1) 时编码为十进制字符串，修订号也是字符串。
+The control channel is assembled only with `[targets.macos] channels = ["ipc"]` in `Bern.toml`. The channel is at `$TMPDIR/bern-<app-id-hash>/<engine_id>.macos.sock`, with directory permissions 0700 and socket permissions 0600, and serves only the same user. The name ends in the system the engine runs on, which `--engine` takes in place of the id, since the id is new each time the app starts. The handshake checks the protocol version and can check the catalog fingerprint. Messages are line-delimited JSON; 64-bit integers beyond ±(2^53−1) are encoded as decimal strings, and revision numbers are strings too.
 
 ```sh
 target/bern/macos/bin/showcase --help
@@ -375,308 +377,308 @@ target/bern/macos/bin/showcase window close --window settings#1
 target/bern/macos/bin/showcase window confirm-close --window settings#1 --confirmation settings#1:c1 --decision Save
 ```
 
-退出码：0 成功，1 命令失败，2 用法错误，3 无法连接。CLI 只连接已运行的引擎，不会另起一份。`showcase-mcp` 通过 stdio 实现 MCP（JSON-RPC 2.0，协议版本 2025-06-18 / 2025-03-26 / 2024-11-05），工具来自引擎命令目录（含只读查询）、媒体命令目录与框架会话命令目录，另有 `bern_state` 与 `bern_sessions`。JSON 客户端订阅后除引擎状态更新外，还会收到完整的 `media` 播放器状态（新修订号覆盖旧的）。`MediaSource` 参数在 CLI 中可以直接写 URL。
+Exit codes: 0 success, 1 command failed, 2 usage error, 3 cannot connect. The CLI only connects to an engine that is already running and never starts another one. `showcase-mcp` implements MCP over stdio (JSON-RPC 2.0, protocol versions 2025-06-18 / 2025-03-26 / 2024-11-05); its tools come from the engine command catalog (including read-only queries), the media command catalog and the framework session command catalog, plus `bern_state` and `bern_sessions`. After subscribing, a JSON client receives the complete `media` player state in addition to engine state updates (a newer revision replaces older ones). `MediaSource` arguments can be written directly as a URL in the CLI.
 
-## 本地化、主题与视觉规则
+## Localization, theme and visual rules
 
-- 运行时语言：`BernLanguage`（`@Observable`）持有当前语言与对应的 `.lproj` 资源包，`BernText.string` 都经它查找，因此切换语言后读取文本的视图在同一次更新中重新计算。支持的语言取自应用包的本地化列表，启动时取系统为本应用选择的首选语言。`ui.language` 返回当前语言，`ui.set_language` 切换，不支持的标签返回 `unsupported_language`。每个窗口根视图的 `locale` 环境值取当前语言，因此 SF Symbols 的本地化变体（例如 `textformat` 在英文中为“Aa”、在中文中为“格式”）与数字、日期格式随应用语言而不是系统语言。系统托管的文案（菜单栏中由系统提供的项目等）仍随系统语言。
-- `LanguagePicker` 生成系统 `Picker`，选项用 `Locale` 给出的语言自称。
+- Runtime language: `BernLanguage` (`@Observable`) holds the current language and the matching `.lproj` resource bundle, and `BernText.string` always looks up through it, so views that read text recompute in the same update after the language switches. The supported languages are taken from the app bundle's localization list, and at launch the preferred language that the system chose for this app is used. `ui.language` returns the current language, `ui.set_language` switches it, and an unsupported tag returns `unsupported_language`. The `locale` environment value of each window's root view is the current language, so the localized variants of SF Symbols (e.g. `textformat` is "Aa" in English and "格式" in Chinese) and number and date formats follow the app language rather than the system language. System-managed strings (items in the menu bar provided by the system, etc.) still follow the system language.
+- `LanguagePicker` generates a system `Picker`, whose options are each language's name in that language, as given by `Locale`.
 
-- 资源键可追溯到源码：元素文案为 `组件.节点路径.属性`，枚举标签为 `枚举.变体`，应用名为 `app.name`。生成各语言的 `Localizable.strings` 与 `InfoPlist.strings`。不带参数的文本原样写入（`{{`、`}}` 还原为括号）；带参数的文本保留 Bern 的[消息格式](../Reference/UI.md#文本内容与格式化)，由 `BernText.format(键, [名: BernArg])` 在运行时随当前语言写出复数分支、日期与时长，月名与星期名作为框架文本写入。显示变体字段的枚举标签在 `bernLabel` 中按变体取字段；`CalendarDate` 生成 `bernArg`。2026-10-18 以临时工程经 `BERN_SNAPSHOT_DIR` 快照实测中英文结果。Info.plist 声明 `CFBundleDevelopmentRegion` 与 `CFBundleLocalizations`。
-- 框架自身文案（失败提示、视频控制条、关闭确认按钮等）内置 zh-Hans、zh-Hant、en、ja；应用要求其他语言时构建失败。
-- 颜色全部来自系统：生成代码不设置颜色、背景或材质。未声明品牌色时使用用户的系统强调色；声明了 `[theme].brand_seed` 而没有 `WindowSet(accent:)` 时，每个窗口生成 `BernThemeChoice(accent: BernColor.fixed(light:, dark:))`，两种模式的颜色由 `bern_target_api::style::brand_accent` 求出（2026-10-30 起；此前 SwiftUI 不读 `brand_seed`，只有 GTK、WinUI 3 与 Web 用它）。
-- 设置窗口按内容定高、切换页签时自动调整；侧边栏详情列以选中项名称为标题，`Form(title:)` 可为推入页面命名。窗口内容外的 `BernSearchPaletteHost` 平时用 `GeometryReader` 让内容铺满窗口、从左上角开始，但 `GeometryReader` 没有自己的理想高度：按内容定高（`fixedSize`）时它只有 10 点高，直接写一个 `Form` 的设置窗口因此是空白的（用页签的设置窗口此前实测正常；2026-10-29 修正）。设置窗口改为 `BernSearchPaletteHost(fits: true)`，内容不在 `GeometryReader` 里，窗口取内容的高度；搜索面板的覆盖层不变。离屏量得同样的分组表单在旧写法下 10 点高、新写法下 446 点；`settings_window` 测试检查生成代码并按 macOS SDK 类型检查。
+- Resource keys can be traced back to the source: element text is `component.node_path.property`, enum labels are `Enum.Variant`, and the app name is `app.name`. `Localizable.strings` and `InfoPlist.strings` are generated for each language. Text without arguments is written as is (`{{` and `}}` are turned back into braces); text with arguments keeps Bern's [message format](../Reference/UI.md#text-content-and-formatting), and `BernText.format(key, [name: BernArg])` writes out plural branches, dates and durations at runtime in the current language, with month and weekday names written as framework text. Enum labels that show variant fields take the field per variant in `bernLabel`; `CalendarDate` generates `bernArg`. On 2026-10-18 the Chinese and English results were measured with `BERN_SNAPSHOT_DIR` snapshots in a temporary project. Info.plist declares `CFBundleDevelopmentRegion` and `CFBundleLocalizations`.
+- The framework's own strings (failure messages, the video control bar, close confirmation buttons, etc.) are built in for zh-Hans, zh-Hant, en and ja; the build fails when the app requires other languages.
+- All colors come from the system: generated code sets no colors, backgrounds or materials. Without a declared brand color, the user's system accent color is used; when `[theme].brand_seed` is declared and there is no `WindowSet(accent:)`, each window generates `BernThemeChoice(accent: BernColor.fixed(light:, dark:))`, with the colors for both modes computed by `bern_target_api::style::brand_accent` (since 2026-10-30; before that SwiftUI did not read `brand_seed`, and only GTK, WinUI 3 and Web used it).
+- The settings window sizes its height to its content and adjusts automatically when switching tabs; the detail column of a sidebar uses the name of the selected item as its title, and `Form(title:)` can name a pushed page. The `BernSearchPaletteHost` outside the window content normally uses `GeometryReader` so that the content fills the window, starting from the top-left corner, but `GeometryReader` has no ideal height of its own: when sized to its content (`fixedSize`) it is only 10 points tall, so a settings window written directly as a single `Form` was blank (settings windows using tabs had measured fine before; fixed 2026-10-29). The settings window now uses `BernSearchPaletteHost(fits: true)`: the content is not inside the `GeometryReader`, and the window takes the content's height; the search panel overlay is unchanged. Measured offscreen, the same grouped form is 10 points tall with the old approach and 446 points with the new one; the `settings_window` test checks the generated code and type-checks it against the macOS SDK.
 
-## 构建与运行
+## Building and running
 
 ```sh
 cargo run -p bern-cli -- build --manifest examples/showcase/Bern.toml
 open target/bern/macos/Showcase.app
 ```
 
-产物位于 `target/bern/macos/`：`Showcase.app`、调试符号 `Showcase.app.dSYM`、`bin/showcase`、`bin/showcase-mcp`、`skills/showcase/SKILL.md`、生成源码 `Sources/`、胶水 crate `glue/`、构建清单 `build.json`（启用视频时记录媒体契约、媒体后端 `avfoundation` 与呈现适配 `avplayerview` 的版本及应用级播放器，并记录随包资源名称）。组件库描述写到 `target/bern/libraries/`。`bern check` 只做检查，`bern ir` 输出 IR JSON。`bern` 使用最近一层 Cargo workspace，因此嵌套在另一个 workspace 里的检出（例如 Git worktree）只用自己的 crate 与 `target/`。
+The outputs are in `target/bern/macos/`: `Showcase.app`, the debug symbols `Showcase.app.dSYM`, `bin/showcase`, `bin/showcase-mcp`, `skills/showcase/SKILL.md`, the generated sources `Sources/`, the glue crate `glue/` and the build manifest `build.json` (with video enabled, it records the versions of the media contract, the media backend `avfoundation` and the presentation adapter `avplayerview`, as well as the app-level players, and it records the bundled resource names). Component library descriptions are written to `target/bern/libraries/`. `bern check` only checks, and `bern ir` outputs the IR as JSON. `bern` uses the nearest Cargo workspace, so a checkout nested inside another workspace (e.g. a Git worktree) uses only its own crates and `target/`.
 
-应用 CLI 与 MCP 服务器在包里的 `Contents/Helpers`，Agent skill 在 `Contents/Resources/skills/<程序>/SKILL.md`（程序路径相对它写成 `../../../Helpers/…`，并写出装进“应用程序”后的位置）；两个程序先做临时签名，再签应用，应用的签名封住它们与 skill。所以把 `.app` 拖到别处或装进“应用程序”，Agent 仍能调用它们，例如 `/Applications/Showcase.app/Contents/Helpers/showcase state`。包旁的 `bin/showcase`、`bin/showcase-mcp` 是指向包内程序的相对链接，`skills/showcase/SKILL.md` 经 `bin/` 找到它们，所以开发时的命令不变。此前（2026-10-30 之前）两个程序只复制到包旁的 `bin/`，skill 也只在包旁，只有 `bern package` 生成的磁盘映像里的应用才带着它们，直接拿走构建出的 `.app` 时 Agent 无从调用。
+The app CLI and MCP server are in `Contents/Helpers` inside the bundle, and the agent skill is in `Contents/Resources/skills/<program>/SKILL.md` (the program paths in it are written relative to it as `../../../Helpers/…`, and it also gives the location after the app is installed in Applications); the two programs are ad-hoc signed first, then the app is signed, and the app's signature seals them and the skill. So after the `.app` is dragged elsewhere or installed in Applications, an agent can still call them, e.g. `/Applications/Showcase.app/Contents/Helpers/showcase state`. `bin/showcase` and `bin/showcase-mcp` next to the bundle are relative links to the programs inside the bundle, and `skills/showcase/SKILL.md` finds them through `bin/`, so the commands used during development are unchanged. Previously (before 2026-10-30) the two programs were only copied to `bin/` next to the bundle and the skill was also only next to the bundle; only the app inside the disk image produced by `bern package` carried them, and when the built `.app` was taken directly, an agent had no way to call them.
 
-应用图标为 `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`）。没有声明 `[app].icon` 时是 Bern 标志铺满方形画布的版本，16 到 1024 像素各一张 PNG，由系统裁成圆角方形；圆形图标会被 macOS 放进灰色底板，所以 macOS 不用圆形版。资源同步保留这个文件，随包资源不能与它同名。`[app.icon].macos` 为 `.icns` 时原样使用。为 Icon Composer 的 `.icon` 文件夹时，它以 `AppIcon.icon` 放在包旁，由 `actool` 编译进 `Contents/Resources/Assets.car`，同时写出给更早系统的 `AppIcon.icns`；`Info.plist` 另加 `CFBundleIconName`，随包资源也不能叫 `Assets.car`。macOS 26 起显示液态玻璃图标，macOS 14、15 用 `Assets.car` 中从它画出的平面图（1024 像素以内各尺寸）。macOS 26 起，自带底板的旧式图标只有在底板正是苹果模板的形状时才按原样显示：1024 画布中 (100, 100) 起的 824 方块、圆角 185.4 的连续圆角矩形（与 `RoundedRectangle(style: .continuous)` 同一条路径）。底板是别的形状（例如指数 5 的超椭圆，轮廓相差约 4000 像素）或根本没有底板时，系统把整个图标缩小放进灰色底板；铺满方形的画面被裁成系统形状。以上为 macOS 27.0.1 实测：以 `NSWorkspace.icon(forFile:)` 渲染访达图标，比较本机多个只带 `.icns` 的应用，并交换图标排除构建所用 SDK 的影响。
+The app icon is `Contents/Resources/AppIcon.icns` (`CFBundleIconFile`). Without a declared `[app].icon` it is the version of the Bern logo that fills a square canvas, one PNG for each size from 16 to 1024 pixels, which the system crops to a rounded square; macOS would put a round icon on a gray icon plate, so macOS does not use the round version. Resource syncing keeps this file, and bundled resources cannot have the same name. When `[app.icon].macos` is an `.icns`, it is used as is. When it is an Icon Composer `.icon` folder, it is placed next to the bundle as `AppIcon.icon` and compiled by `actool` into `Contents/Resources/Assets.car`, which also writes an `AppIcon.icns` for earlier systems; `Info.plist` additionally gets `CFBundleIconName`, and bundled resources cannot be named `Assets.car` either. From macOS 26 the Liquid Glass icon is shown; macOS 14 and 15 use the flat images drawn from it in `Assets.car` (every size up to 1024 pixels). From macOS 26, an old-style icon with its own plate is shown as is only when the plate is exactly Apple's template shape: an 824 square starting at (100, 100) in a 1024 canvas, a continuous rounded rectangle with a corner radius of 185.4 (the same path as `RoundedRectangle(style: .continuous)`). When the plate has another shape (e.g. a superellipse with exponent 5, whose outline differs by about 4000 pixels) or there is no plate at all, the system shrinks the whole icon and puts it on a gray plate; artwork that fills the square is cropped to the system shape. All of the above was measured on macOS 27.0.1: the Finder icon was rendered with `NSWorkspace.icon(forFile:)`, several apps on this machine that ship only an `.icns` were compared, and icons were swapped to rule out the influence of the SDK used for the build.
 
-调试符号不随应用包发布：debug 与 release 都以 `-g` 编译，swiftc 写在 `Contents/MacOS/` 中的 dSYM 在签名前移到包旁边的 `Showcase.app.dSYM`（lldb 与崩溃报告符号化在这里查找），上次构建留下的 dSYM 先删除。release 还以 `-dead_strip` 链接，并在签名前用 `strip -S -x` 去掉可执行文件中由 dSYM 保留的调试与本地符号：展示应用的包为 2.6 MB，可执行文件 2.2 MB（此前 5.7 MB），dSYM 约 9 MB。
+Debug symbols are not shipped in the app bundle: both debug and release compile with `-g`, and the dSYM that swiftc writes into `Contents/MacOS/` is moved before signing to `Showcase.app.dSYM` next to the bundle (where lldb and crash report symbolication look for it), after first deleting the dSYM left by the previous build. Release also links with `-dead_strip` and, before signing, uses `strip -S -x` to remove from the executable the debug and local symbols that the dSYM keeps: the showcase app's bundle is 2.6 MB, the executable 2.2 MB (previously 5.7 MB), and the dSYM about 9 MB.
 
-示例的受控测试媒体在 `examples/showcase/media/`，由 `make-media.sh` 用 ffmpeg 生成：`aurora.mp4`（8 秒）、`tides.mp4`（6 秒）、`broken.mp4`（不是影片，用于失败）声明为随包资源，随应用包发布；`live/live.m3u8`（没有结束标记的 HLS，时长未知、不可跳转）不随包发布，只作开发辅助：AVFoundation 只通过 HTTP 播放 HLS，例如 `python3 -m http.server --directory examples/showcase/media`。
+The example's controlled test media are in `examples/showcase/media/`, generated with ffmpeg by `make-media.sh`: `aurora.mp4` (8 seconds), `tides.mp4` (6 seconds) and `broken.mp4` (not a movie, used for failure) are declared as bundled resources and shipped with the app bundle; `live/live.m3u8` (HLS without an end tag, unknown duration, not seekable) is not shipped and serves only as a development aid: AVFoundation plays HLS only over HTTP, e.g. `python3 -m http.server --directory examples/showcase/media`.
 
-开发时设置 `BERN_SNAPSHOT_DIR` 可让应用在启动后和每条会话命令之后，把自己的窗口渲染成 PNG（本地文件的视频画面会画进截图）；`BERN_APPEARANCE=light|dark` 用于覆盖外观；`BERN_DEV_WINDOW_SIGNALS=<窗口种类>` 时，向进程发送 SIGUSR1 会对该窗口调用 `performClose(_:)`，SIGUSR2 调用 `performMiniaturize(_:)`，与点按标题栏的关闭、最小化按钮相同，供没有屏幕访问的工具验证系统关闭路径和来自用户的窗口事实；设置 `BERN_TIMING` 时，应用把收到的点击与按键、草稿写回、引擎命令、引擎送来的状态，以及主线程每一轮忙超过 4 毫秒的时长，按系统开机以来的毫秒数（其他工具读的是同一个时钟）写到标准错误，用来把一次慢的交互分成等待与干活。这四项只用于开发检查，默认关闭。
+During development, setting `BERN_SNAPSHOT_DIR` makes the app render its own windows to PNG after launch and after every session command (video frames from local files are drawn into the screenshots); `BERN_APPEARANCE=light|dark` overrides the appearance; with `BERN_DEV_WINDOW_SIGNALS=<window kind>`, sending SIGUSR1 to the process calls `performClose(_:)` on that window and SIGUSR2 calls `performMiniaturize(_:)`, the same as clicking the close and minimize buttons in the title bar, so that tools without screen access can verify the system close path and window facts that come from the user; with `BERN_TIMING` set, the app writes the clicks and key presses it receives, draft write-backs, engine commands, state sent by the engine, and the duration of every main-thread turn that is busy for more than 4 milliseconds to standard error, timestamped in milliseconds since system boot (the same clock other tools read), to split a slow interaction into waiting and working. These four are only for development checks and are off by default.
 
-### 打包
+### Packaging
 
-`bern package --target macos` 按 release 构建，生成 `target/bern/dist/<产品>-<版本>-macos-<架构>.dmg`：
+`bern package --target macos` builds in release and produces `target/bern/dist/<product>-<version>-macos-<arch>.dmg`:
 
-- 应用复制到暂存目录，构建时已放进包里的应用 CLI、MCP 服务器（`Contents/Helpers`）与 Agent skill（`Contents/Resources/skills`）随之复制；先签工具、再签应用；磁盘映像里另有指向“应用程序”的链接。
-- 有 `BERN_MACOS_SIGNING_IDENTITY` 时以强化运行时与安全时间戳签名，并签磁盘映像；再有 `BERN_MACOS_NOTARY_PROFILE` 时经 `notarytool` 公证并装订。没有时做临时签名，只能在本机打开，并提示 Gatekeeper 会拒绝。
-- 磁盘映像在有 `diskutil image` 的系统上用它生成（macOS 27 上 `hdiutil create` 已提示弃用），否则用 `hdiutil`。
-- 实测（2026-10-12，新项目）：磁盘映像 1.8 MB；挂载后签名校验通过，从映像中直接启动应用，`Contents/Helpers/my-app state` 能读到引擎状态。公证需要 Developer ID，这台机器只有开发证书，未实测。
+- The app is copied to a staging directory, and the app CLI, MCP server (`Contents/Helpers`) and agent skill (`Contents/Resources/skills`) that the build already placed in the bundle are copied along with it; the tools are signed first, then the app; the disk image also contains a link to Applications.
+- With `BERN_MACOS_SIGNING_IDENTITY`, signing uses the hardened runtime and a secure timestamp, and the disk image is signed too; with `BERN_MACOS_NOTARY_PROFILE` as well, it is notarized through `notarytool` and stapled. Without them it is ad-hoc signed, can only be opened on this machine, and a notice says that Gatekeeper will reject it.
+- The disk image is created with `diskutil image` on systems that have it (`hdiutil create` already shows a deprecation notice on macOS 27), otherwise with `hdiutil`.
+- Measured (2026-10-12, a new project): the disk image is 1.8 MB; after mounting it, signature verification passed, the app launched directly from the image, and `Contents/Helpers/my-app state` read the engine state. Notarization requires a Developer ID, and this machine has only a development certificate, so it was not measured.
 
-## 验证记录
+## Verification log
 
-2026-10-11，调试符号与可执行文件体积，本机 macOS 27.0.1（arm64）：
+2026-10-11, debug symbols and executable size, on this machine, macOS 27.0.1 (arm64):
 
-- 此前 release 构建本身不生成 dSYM，但 debug 构建由 swiftc 写入包内的 `Contents/MacOS/Showcase.dSYM`（约 41 MB）会一直留到之后的 release 包里，且与 release 可执行文件的 UUID 不一致。现在 debug 构建后包内只有可执行文件，`Showcase.app.dSYM` 在包旁边，UUID 与可执行文件一致；随后的 release 构建同样如此（dSYM 9.0 MB），`codesign --verify --deep --strict` 通过，`atos` 以 dSYM 解析出 `bern_app_start` 等符号。
-- release 可执行文件：只加 `-dead_strip` 为 3.8 MB，再剥离符号为 2.35 MB（此前 5.95 MB）；整个应用包 2.6 MB。`-g` 让 release 的 Swift 编译多约 0.4 秒。
-- 功能：直接启动 release 包（`-ApplePersistenceIgnoreState YES`，CLI 用 `--engine`），页面切换、开关、滑块、选择器、按钮与禁用按钮的 `target_unavailable`、精选片段播放、设置窗口的关闭确认与 `Save` 均正常。
-- 性能（口径同 README，预热 1 次后 3 次取中位数，`footprint` 以字节计）：新可执行文件 0.413 秒、39.5 MB（复测 0.409 秒、40.0 MB）；只换回旧可执行文件 0.377 秒、39.9 MB，差异在测量波动之内。
-- `cargo test --workspace`（171 项）、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；新增断言：dSYM 在签名前移出包、上次的 dSYM 先删除、产物包含 dSYM，release 以 `-g` 与 `-dead_strip` 编译并在签名前剥离符号。
+- Previously the release build itself did not generate a dSYM, but the `Contents/MacOS/Showcase.dSYM` (about 41 MB) that swiftc wrote into the bundle during a debug build stayed in later release bundles, and its UUID did not match the release executable. Now after a debug build the bundle contains only the executable, and `Showcase.app.dSYM` sits next to the bundle with a UUID matching the executable; the same holds for a subsequent release build (dSYM 9.0 MB), `codesign --verify --deep --strict` passes, and `atos` resolves symbols such as `bern_app_start` with the dSYM.
+- Release executable: 3.8 MB with only `-dead_strip` added, 2.35 MB with symbols also stripped (previously 5.95 MB); the whole app bundle is 2.6 MB. `-g` adds about 0.4 seconds to the release Swift compile.
+- Functionality: launching the release bundle directly (`-ApplePersistenceIgnoreState YES`, the CLI with `--engine`), page switching, switches, sliders, pickers, buttons and the `target_unavailable` of a disabled button, featured clip playback, and the close confirmation and `Save` of the settings window all work.
+- Performance (measured as in the README: one warm-up, then the median of 3 runs; `footprint` in bytes): the new executable 0.413 seconds, 39.5 MB (retest 0.409 seconds, 40.0 MB); with only the old executable swapped back, 0.377 seconds, 39.9 MB; the difference is within measurement noise.
+- `cargo test --workspace` (171 tests), `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` all pass; new assertions: the dSYM is moved out of the bundle before signing, the previous dSYM is deleted first, the outputs include the dSYM, and release compiles with `-g` and `-dead_strip` and strips symbols before signing.
 
-2026-10-10，随包资源，本机 macOS 27.0.1（arm64）：
+2026-10-10, bundled resources, on this machine, macOS 27.0.1 (arm64):
 
-- `cargo test --workspace`（110 项）、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；`bern build` 无警告，`codesign --verify --deep --strict` 通过。
-- 新增测试：资源名称规则；`Bern.toml` 校验 3 组（目录展开与跳过隐藏项、每个文件指向声明它的条目；不存在、绝对路径、`..`、非法字符、空目录、重复列出、目录内文件重复、只有大小写不同、符号链接均报错且定位到条目）；macOS 目标拒绝 `.lproj` 与含 `.` 的目录段；生成的胶水、`build.json` 与构建计划（`Mirror` 在签名之前，保留本地化文件）；构建驱动的 `Mirror`（只留声明与保留的文件、源文件改变时重新复制、文件与目录互换）；`Resources` 的四种错误；C ABI 3 项（无资源目录时 `resources_unavailable`、宿主目录中只有声明名称可解析、同一进程以不同目录再次装配被拒绝，以及引擎构造失败时启动错误带上原因）；`showcase-core` 以 `Bern.toml` 声明的名称目录解析片段，没有宿主时引擎不能构造。
-- 实机：把 `Showcase.app` 复制到仓库之外的临时目录，并把源码中的 `examples/showcase/media` 改名移走，直接启动复制出的应用（`-ApplePersistenceIgnoreState YES`，CLI 用 `--engine` 指定）：
-  - `showcase state` 中 `featured_source` 与 6 个项目的片段都是复制出的包内 `…/elsewhere/Showcase.app/Contents/Resources/media/*.mp4`。
-  - `ui select --target main_window.pages --option Media` 后，`media players` 中 `main#1/media_page.featured` 为 `Ready`、时长 8000 ms、可跳转，来源为包内的 `aurora.mp4`；`media play` 后 `Playing`；`showcase feature --clip Bars` 后源版本 2、时长 6000（`tides.mp4`）；`--clip Damaged` 后 `Failed`（“无法打开”，`broken.mp4`）；`showcase add-item` 新增项目的片段同样来自包内。
-  - 源码媒体移走时 `bern check` 对三个条目分别报 `resource … does not exist`，位置为 `examples/showcase/Bern.toml:43:10`、`:30`、`:49`。
-- 在包的 `Contents/Resources` 中放入未声明的旧文件后重新构建：旧文件被删除，本地化文件保留，未变化的片段没有重新复制（inode 与修改时间不变），签名校验通过。
+- `cargo test --workspace` (110 tests), `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` all pass; `bern build` has no warnings, and `codesign --verify --deep --strict` passes.
+- New tests: resource name rules; 3 groups of `Bern.toml` validation (directory expansion and skipping hidden items, each file pointing to the entry that declared it; a nonexistent path, an absolute path, `..`, illegal characters, an empty directory, a duplicate listing, duplicate files within a directory, names differing only in case and symbolic links all report errors located at the entry); the macOS target rejects `.lproj` and directory segments containing `.`; the generated glue, `build.json` and the build plan (`Mirror` before signing, localization files kept); the build driver's `Mirror` (keeps only declared and reserved files, recopies when a source file changes, a file and a directory swapping places); the four errors of `Resources`; 3 C ABI tests (`resources_unavailable` without a resource directory, only declared names resolve in the host directory, assembling again in the same process with a different directory is rejected, and when engine construction fails the startup error carries the reason); `showcase-core` resolves clips through the name directory declared in `Bern.toml`, and without a host the engine cannot be constructed.
+- Real machine: `Showcase.app` was copied to a temporary directory outside the repository, `examples/showcase/media` in the source was renamed and moved away, and the copied app was launched directly (`-ApplePersistenceIgnoreState YES`, the CLI pointed at it with `--engine`):
+  - In `showcase state`, `featured_source` and the clips of the 6 items are all `…/elsewhere/Showcase.app/Contents/Resources/media/*.mp4` inside the copied bundle.
+  - After `ui select --target main_window.pages --option Media`, in `media players` `main#1/media_page.featured` is `Ready`, with a duration of 8000 ms, seekable, and its source is `aurora.mp4` inside the bundle; after `media play` it is `Playing`; after `showcase feature --clip Bars` the source version is 2 and the duration 6000 (`tides.mp4`); after `--clip Damaged` it is `Failed` ("Cannot Open", `broken.mp4`); the clip of an item added with `showcase add-item` also comes from inside the bundle.
+  - With the source media moved away, `bern check` reports `resource … does not exist` for each of the three entries, located at `examples/showcase/Bern.toml:43:10`, `:30` and `:49`.
+- After an undeclared old file was put into the bundle's `Contents/Resources` and the app was rebuilt: the old file is deleted, localization files are kept, unchanged clips are not recopied (inode and modification time unchanged), and signature verification passes.
 
-未完成的验证：资源目录较大时的复制耗时；在另一台机器上运行构建产物（本次以复制到其他目录并移走源码代替）。
+Verification not done: copy time when the resource directory is large; running the build outputs on another machine (this time replaced by copying to another directory and moving the source away).
 
-2026-10-10，声明式异步查询，本机 macOS 27.0.1（arm64）：
+2026-10-10, declarative asynchronous queries, on this machine, macOS 27.0.1 (arm64):
 
-- `cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；`bern build` 无警告，生成的 Swift 以 `-swift-version 6` 类型检查零错误零警告。
-- 新增测试：协议描述（只有查询声明读取的字段，字段必须存在）；宿主 4 项（查询看到之前命令的状态且不产生修订、答复从其他线程乱序到达、取消/丢弃/非法结果/超时、提供器 panic 使引擎拒绝后续请求）；运行时 2 项（订阅随窗口结束、读取的字段变化时以相同参数刷新；系统时钟按到期顺序触发）；解析 3 项与组件规格 1 项；编译器正反用例各 1 组；rustc 用例 1 个通过（声明、引擎、宿主端到端）与 5 个失败（查询写成动作、`query:` 写命令、参数类型错误、标量结果写 `empty:`、查询取 `&mut self`）；C ABI 1 项（乱序答复只显示当前版本、状态变化刷新、失败保留旧数据、关窗后订阅结束）；IPC 与 CLI、MCP 的查询用例；`showcase-core` 场景 3 项（`ManualClock` 下“m”慢、“mo”快时页面保持“mo”的结果并计入 1 次丢弃；中文类别名匹配、添加项目后刷新、失败保留旧数据、空结果；外部入口得到同样的答复）。
-- 实机（隔离实例，`-ApplePersistenceIgnoreState YES`，CLI 用 `--engine` 指定）：
-  - 列表页登记查询控件 `library_page.library_results`，`ui.inspect` 为 `ready v1 (5)`。经真实搜索框 `ui edit` 相隔约 20 ms 输入“m”与“mo”：立即 `refreshing v3 (5)`，0.52 s 后 `ready v3 (1)`（影片），直到 1.6 s 仍不变，“m”在 0.9 s 时的答复没有出现。
-  - 截图（中文浅色）：刷新时进度行在旧数据上方；“zzz”显示居中的“没有与“zzz”匹配的项目”；“!x”在有旧数据时显示错误行与“重试”，离开页面再回来（新订阅 `v1`）时显示 `ContentUnavailableView` 与“重试”。英文深色下空结果文案为英文，颜色全部来自系统。
-  - 搜索“影”“下载”分别得到影片与下载。在列表打开时用 CLI `showcase add-item --kind Downloads`：0.01 s `refreshing v3 (1)`，0.43 s `ready v3 (2)`。`ui activate --target library_page.library_results` 以当前参数重新请求。离开列表页后查询控件消失（订阅结束），回来后是新订阅。
-  - 搜索进行中关闭主窗口：直接关闭、无错误；重新打开的 `main#2` 草稿为新，查询 `ready v1 (5)`。
-  - CLI：`showcase search-library --text mo` 约 0.47 s 返回影片；`--text '!x'` 退出码 1（`invalid_search`）；帮助单独列出“Queries”。JSON：目录中 `kind: query`、`concurrency: overlapping`、`reads: [items]`，原始套接字调用返回音乐。MCP：29 个工具，`showcase_search_library` 带 `readOnlyHint`、`idempotentHint`，调用“照片”返回照片，“!”返回 `isError`。
+- `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` all pass; `bern build` has no warnings, and the generated Swift type-checks with `-swift-version 6` with zero errors and zero warnings.
+- New tests: protocol descriptions (only the fields a query declares it reads; the fields must exist); 4 host tests (a query sees the state of earlier commands and does not produce a revision, answers arrive out of order from other threads, cancel/discard/invalid result/timeout, a provider panic makes the engine reject later requests); 2 runtime tests (subscriptions end with their window and refresh with the same parameters when a field they read changes; the system clock fires in order of expiry); 3 parsing tests and 1 component spec test; one group each of positive and negative compiler cases; rustc cases: 1 passing (declaration, engine and host end to end) and 5 failing (a query written as an action, a command written in `query:`, a wrong parameter type, `empty:` written for a scalar result, a query taking `&mut self`); 1 C ABI test (out-of-order answers show only the current version, state changes refresh, a failure keeps the old data, the subscription ends after the window closes); query cases for IPC, the CLI and MCP; 3 `showcase-core` scenarios (under `ManualClock`, with "m" slow and "mo" fast, the page keeps the result for "mo" and counts 1 discard; Chinese category names match, refresh after adding an item, a failure keeps the old data, empty results; external entry points get the same answer).
+- Real machine (isolated instance, `-ApplePersistenceIgnoreState YES`, the CLI pointed at it with `--engine`):
+  - The list page registers the query control `library_page.library_results`, and `ui.inspect` gives `ready v1 (5)`. Typing "m" and "mo" about 20 ms apart through the real search field with `ui edit`: immediately `refreshing v3 (5)`, after 0.52 s `ready v3 (1)` (Movies), still unchanged at 1.6 s; the answer for "m" at 0.9 s did not appear.
+  - Screenshots (Chinese, light): while refreshing, the progress row is above the old data; "zzz" shows a centered "No Items Match “zzz”"; "!x" shows an error row and "Retry" when there is old data, and after leaving the page and coming back (a new subscription, `v1`) it shows `ContentUnavailableView` and "Retry". In English and dark mode the empty-result text is in English, and all colors come from the system.
+  - Searching for "影" and "下载" gives Movies and Downloads respectively. With the list open, the CLI `showcase add-item --kind Downloads`: `refreshing v3 (1)` at 0.01 s, `ready v3 (2)` at 0.43 s. `ui activate --target library_page.library_results` requests again with the current parameters. After leaving the list page the query control disappears (the subscription ends), and after coming back it is a new subscription.
+  - Closing the main window while a search is in progress: it closes directly, with no error; the draft of the reopened `main#2` is fresh, and the query is `ready v1 (5)`.
+  - CLI: `showcase search-library --text mo` returns Movies in about 0.47 s; `--text '!x'` exits with code 1 (`invalid_search`); the help lists "Queries" separately. JSON: the catalog has `kind: query`, `concurrency: overlapping`, `reads: [items]`, and a raw socket call returns Music. MCP: 29 tools, `showcase_search_library` carries `readOnlyHint` and `idempotentHint`; calling it with "照片" returns Photos, and with "!" returns `isError`.
 
-未完成的验证：真实键盘在搜索框里输入（用 `ui.edit` 走同一个 setter 代替）、真实点按“重试”（用 `ui.activate` 代替）、VoiceOver 读出进度行。
+Verification not done: typing in the search field with a real keyboard (replaced by `ui.edit`, which goes through the same setter), really clicking "Retry" (replaced by `ui.activate`), VoiceOver reading out the progress row.
 
-2026-10-10，Video、窗口关闭协议与异步查询，本机 macOS 27.0.1（arm64）：
+2026-10-10, Video, window close protocol and asynchronous queries, on this machine, macOS 27.0.1 (arm64):
 
-- `cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --check` 均通过；生成的 Swift（含 `BernMedia.swift`）以 `-swift-version 6` 类型检查零错误零警告。
-- 新增测试：`bern-media` 12 项（路由与执行后才回复、事实不产生命令、旧源版本回报被忽略、源绑定不重复加载与拒绝外部换源、未知时长与失败、超时结果未知、执行端断开、组件与窗口释放、版本化快照）；`bern-runtime` 关闭协议 3 项与查询场景 3 项；C ABI 与 IPC 的媒体及关闭用例；编译器 Video、播放器与关闭检查的正反用例；rustc 失败用例 4 个（Video 缺少来源、来源类型错误、播放器动作参数类型错误、关闭检查缺少文案）。
-- 实机（隔离实例，不与其他运行中的 Showcase 共用窗口恢复状态）：
-  - 页面播放器：经真实控件播放，CLI 暂停、跳转到 4000 ms，`ui set-bool`/`ui set-number` 静音和调音量，状态与实际播放一致。重复 `showcase feature --clip Pattern` 不重新加载；换为色条后源版本 2、时长 6000；换为损坏文件后 `Failed`（系统错误“无法打开”），`media play` 返回 `media_failed`；外部 `media open` 返回 `source_bound`。
-  - 应用级播放器：MCP `media_open`、`media_play` 生效；列表 → 详情 →“在预览播放器中打开”→ 控制条播放 → 返回后仍为 `Playing`，附着视图数从 1 变为 0；回到“视频”页重新附着。关闭主窗口后页面播放器被释放，应用级播放器继续播放。
-  - 直播 HLS（本机 HTTP）：`Playing`，`duration_ms` 为空，进度条禁用并显示“直播”，`media seek` 返回 `not_seekable`。
-  - 关闭协议：备注有内容时 `window close` 与系统关闭（SIGUSR1 → `performClose`）返回同一个确认，系统警告框以窗口 sheet 显示，窗口控件对 CLI 返回 `target_blocked`；`Cancel` → `Rejected`，之后修改草稿再用旧确认 `Discard` → `stale_confirmation`；新确认 `Discard` → 窗口关闭、引擎继续运行；关闭后旧窗口 ID 返回 `target_not_found`。设置窗口以空白名称 `Save` → `Rejected`（`save_failed: invalid_name`）窗口保留，有效名称 `Save` → 关闭且引擎状态更新。没有未存储内容时，系统关闭直接关闭窗口。
-  - 截图：浅色与深色下视频页与控制条使用系统控件与系统颜色，视频画面保持原色；关闭确认为标准系统警告框。
+- `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --check` all pass; the generated Swift (including `BernMedia.swift`) type-checks with `-swift-version 6` with zero errors and zero warnings.
+- New tests: 12 `bern-media` tests (routing and replying only after execution, facts do not produce commands, reports for an old source version are ignored, source binding does not reload the same source and rejects external source changes, unknown duration and failure, a timeout's result is unknown, executor disconnect, component and window release, versioned snapshots); 3 close protocol tests and 3 query scenario tests in `bern-runtime`; media and close cases for the C ABI and IPC; positive and negative compiler cases for Video, players and close checks; 4 rustc failure cases (Video missing a source, a wrong source type, a wrong parameter type for a player action, a close check missing its text).
+- Real machine (isolated instance, not sharing window restoration state with other running Showcase instances):
+  - Page player: playing through the real control, pausing and seeking to 4000 ms through the CLI, muting and adjusting the volume with `ui set-bool`/`ui set-number`; the state matches actual playback. Repeating `showcase feature --clip Pattern` does not reload; after switching to the color bars the source version is 2 and the duration 6000; after switching to the corrupt file it is `Failed` (system error "Cannot Open"), and `media play` returns `media_failed`; an external `media open` returns `source_bound`.
+  - App-level player: MCP `media_open` and `media_play` take effect; list → detail → "Open in Preview Player" → play from the control bar → after going back it is still `Playing`, and the number of attached views goes from 1 to 0; back on the "Video" page it attaches again. After the main window closes, the page player is released and the app-level player keeps playing.
+  - Live HLS (local HTTP): `Playing`, `duration_ms` is empty, the progress bar is disabled and shows "Live", and `media seek` returns `not_seekable`.
+  - Close protocol: when the notes have content, `window close` and a system close (SIGUSR1 → `performClose`) return the same confirmation, the system alert is shown as a window sheet, and the window's controls return `target_blocked` to the CLI; `Cancel` → `Rejected`; after that, modifying the draft and then using the old confirmation with `Discard` → `stale_confirmation`; a new confirmation with `Discard` → the window closes and the engine keeps running; after closing, the old window ID returns `target_not_found`. In the settings window, `Save` with a blank name → `Rejected` (`save_failed: invalid_name`) and the window stays; `Save` with a valid name → the window closes and the engine state updates. When there is no unsaved content, a system close closes the window directly.
+  - Screenshots: in light and dark mode the video page and the control bar use system controls and system colors, and the video picture keeps its original colors; the close confirmation is a standard system alert.
 
-未完成的验证：真实点按标题栏关闭按钮与 Cmd-W（没有屏幕与辅助功能权限，用 `performClose(_:)` 代替）；VoiceOver 读出视频控制条；Intel 与 macOS 14 真机。
+Verification not done: really clicking the title bar's close button and Cmd-W (no screen or accessibility permission; replaced with `performClose(_:)`); VoiceOver reading out the video control bar; real Intel and macOS 14 machines.
 
-2026-10-10，合并后在主仓库复验（不带 `-ApplePersistenceIgnoreState` 启动）：
+2026-10-10, re-verified in the main repository after the merge (launched without `-ApplePersistenceIgnoreState`):
 
-- 合并后首次启动没有窗口：上次运行时主窗口已关闭，macOS 恢复了“关闭”状态。修复后，关闭主窗口再退出、重新启动，`sessions` 为 `main#1`；运行中关闭主窗口后对应用发送重新打开事件（`open Showcase.app`，与点 Dock 图标相同），得到 `main#2`。
-- `ui.inspect` 名称：侧边栏为“列表与详情”“视频”等当前页，标签页为“通用”，列表链接为“文稿”“照片”等行文字。
-- 经真实搜索框 `ui edit` 输入“mo”：立即 `refreshing v2 (5)`，约 1 s 后 `ready v2 (1)`，只剩“影片”链接。
-- 设置窗口修改显示名称后 `window close` 返回确认，系统警告框“要存储对显示名称的更改吗？”带存储、不存储、取消；待决时开关返回 `target_blocked`；`Save` 后窗口关闭，引擎 `display_name` 更新。
-- 视频页：精选片段 `Ready 0:00 / 0:08`，预览播放器 `Idle`，其播放与进度控件禁用；截图中画面、系统控制条与片段按钮正常。
+- The first launch after the merge had no window: the main window had been closed during the previous run, and macOS restored the "closed" state. After the fix, closing the main window, quitting and relaunching gives `sessions` as `main#1`; closing the main window while running and then sending the app a reopen event (`open Showcase.app`, the same as clicking the Dock icon) gives `main#2`.
+- `ui.inspect` names: the sidebar is the current page, such as "List & Detail" or "Video", the tab is "General", and the list links are the row texts, such as "Documents" and "Photos".
+- Typing "mo" through the real search field with `ui edit`: immediately `refreshing v2 (5)`, about 1 s later `ready v2 (1)`, with only the "Movies" link left.
+- After the display name is changed in the settings window, `window close` returns a confirmation, and the system alert "Do you want to save the display name?" has Save, Don't Save and Cancel; while it is pending, the switch returns `target_blocked`; after `Save` the window closes and the engine's `display_name` updates.
+- Video page: the featured clip is `Ready 0:00 / 0:08`, the preview player is `Idle`, and its play and progress controls are disabled; in the screenshot the picture, the system control bar and the clip buttons are correct.
 
-2026-10-10，窗口最小化、恢复与呈现查询：
+2026-10-10, window minimize, restore and presentation queries:
 
-- 新增测试：运行时 3 项（事实按实例计版本、旧代次被拒、未变化不升版本；动作按事实判断可用并列出可用动作；`WindowInfo` 符合会话目录 schema）；C ABI 1 项（事实未到时 `Opening` 且拒绝最小化；`window.list` 不经过界面；最小化命令到达前端、前端报告事实后无值答复，结果是运行时记录的窗口；关闭后迟到事实被丢弃）。共 114 项通过，clippy 与 fmt 干净，生成的 Swift 零警告。
-- 实机（CLI）：
-  - `window minimize --window main#1` 约 0.58 s 后返回（等动画结束），`Minimized`、可用动作只剩激活、关闭、恢复，来源 `Command`；`sessions` 仍为 `main#1`，控件仍登记。恢复后搜索框文字、所选页面与查询订阅（`ready v1 (1)`）不变。
-  - 恢复一次撤销一步；以缩放尺寸启动的窗口恢复到居中的声明尺寸 920 × 640。最大化后 `Maximized`，再恢复回到原外框；无可恢复时返回 `target_unavailable`。
-  - `window move --x 120 --y 90`、`window resize --width 1000 --height 700` 返回实际外框；`--width 300 --height 200` 返回“needs at least 720 × 532”（`out_of_range`）；`--x 99999` 返回标题栏不在任何显示器上。
-  - 设置窗口（固定尺寸）为 `Normal`，可用动作为激活、关闭、移动；最小化与调整尺寸返回 `target_unavailable`。
-  - 系统路径：`BERN_DEV_WINDOW_SIGNALS=main` 下 SIGUSR2（`performMiniaturize`，与黄色按钮相同）后，`window.list` 为 `Minimized`、来源 `System`，没有派发命令；对应用发送重新打开事件（与点 Dock 图标相同）后恢复为 `Visible`，来源 `System`。
-  - 刚打开的设置窗口起初报告为隐藏：AppKit 在窗口上屏前发出移动与尺寸通知，上屏本身在应用未激活时不发出所观察的通知。改为同时以键值观察跟踪 `isVisible` 后为 `Visible`。
-  - 关闭已最小化的主窗口直接关闭；MCP 共 35 个工具，`window_list` 带 `readOnlyHint`，`window_restore` 不幂等。
-  - `window activate` 后 `focused` 仍为 false：macOS 14 起激活是协作式的，后台应用不能从前台应用（本次为 Claude）抢走焦点；事实如实反映。
+- New tests: 3 runtime tests (facts are versioned per instance, old generations are rejected, and facts that do not change do not bump the version; actions are judged available from facts and the available actions are listed; `WindowInfo` conforms to the session catalog schema); 1 C ABI test (`Opening` before facts arrive, rejecting minimize; `window.list` does not go through the UI; the minimize command reaches the frontend, and after the frontend reports the facts it answers with no value, the result being the window as recorded by the runtime; late facts after closing are discarded). 114 tests pass in total, clippy and fmt are clean, and the generated Swift has zero warnings.
+- Real machine (CLI):
+  - `window minimize --window main#1` returns after about 0.58 s (it waits for the animation to end): `Minimized`, with only activate, close and restore left as available actions, source `Command`; `sessions` is still `main#1`, and the controls are still registered. After restoring, the search field text, the selected page and the query subscription (`ready v1 (1)`) are unchanged.
+  - Each restore undoes one step; a window launched at the zoomed size restores to the centered declared size 920 × 640. After maximizing it is `Maximized`, and restoring again returns it to the original frame; when there is nothing to restore it returns `target_unavailable`.
+  - `window move --x 120 --y 90` and `window resize --width 1000 --height 700` return the actual frame; `--width 300 --height 200` returns "needs at least 720 × 532" (`out_of_range`); `--x 99999` returns that the title bar is not on any display.
+  - The settings window (fixed size) is `Normal`, and its available actions are activate, close and move; minimize and resize return `target_unavailable`.
+  - System path: with `BERN_DEV_WINDOW_SIGNALS=main`, after SIGUSR2 (`performMiniaturize`, the same as the yellow button), `window.list` shows `Minimized`, source `System`, and no command is dispatched; after the app is sent a reopen event (the same as clicking the Dock icon) it is restored to `Visible`, source `System`.
+  - A newly opened settings window was at first reported as hidden: AppKit sends the move and resize notifications before the window is on screen, and the window coming on screen does not itself send the observed notifications while the app is not active. After `isVisible` was also tracked with key-value observing, it is `Visible`.
+  - Closing a minimized main window closes it directly; MCP has 35 tools in total, `window_list` carries `readOnlyHint`, and `window_restore` is not idempotent.
+  - After `window activate`, `focused` is still false: since macOS 14 activation is cooperative, and a background app cannot take focus away from the foreground app (Claude, this time); the facts reflect this accurately.
 
-未完成的验证：真实点按黄色、绿色按钮与双击标题栏（以 `performMiniaturize(_:)` 代替黄色按钮）；进入全屏后恢复（没有全屏命令，系统路径需要屏幕访问）；应用隐藏（Cmd-H）时为 `Hidden`；多显示器下的坐标与标题栏检查。
+Verification not done: really clicking the yellow and green buttons and double-clicking the title bar (`performMiniaturize(_:)` stood in for the yellow button); restoring after entering full screen (there is no full-screen command, and the system path needs screen access); `Hidden` when the app is hidden (Cmd-H); coordinates and the title bar check with multiple displays.
 
-2026-10-10，阶段一与阶段二主干，本机 macOS 27.0.1（arm64）：
+2026-10-10, Phase 1 and the core of Phase 2, on this machine, macOS 27.0.1 (arm64):
 
-- `cargo test --workspace` 全部通过，`cargo clippy --workspace --all-targets -- -D warnings` 无警告，`cargo fmt --check` 通过。
-- 编译失败用例覆盖：按钮无命令、任意回调、控件写引擎状态、命令参数类型错误、未知命令、显示 bool、静态文本、未知组件、未知绑定、match 不完整、缺少组件参数、函数调用、不支持的类型。
-- 生成的 Swift 以 `-swift-version 6` 类型检查，零错误零警告。
-- `bern build` 完成 Rust 静态库、Swift 编译、签名，生成 CLI 与 MCP。
-- CLI 驱动：切换侧边栏页面；激活按钮后引擎计数增加；禁用按钮返回 `target_unavailable`；开关、滑块提交（引擎音量变为 72）、文本编辑生效；推入详情页；打开和关闭设置窗口；`showcase set-volume --value 140` 返回 `out_of_range`。
-- MCP：`initialize`、`tools/list`（17 个工具）、调用引擎命令、`window_open`、`bern_state` 均成功。
-- 装配 IPC 时，`lsof` 显示应用无 TCP/UDP 套接字、无子进程，只有一个 0600 的 Unix 套接字；正常退出后套接字被删除。
-- 截图（开发快照）：浅色、深色、英文界面下各页面与设置窗口均为原生分组表单、系统控件与工具栏样式。
+- `cargo test --workspace` passes in full, `cargo clippy --workspace --all-targets -- -D warnings` has no warnings, and `cargo fmt --check` passes.
+- Compile-fail cases cover: a button without a command, an arbitrary callback, a control writing engine state, a wrong command parameter type, an unknown command, displaying a bool, static text, an unknown component, an unknown binding, an incomplete match, a missing component parameter, a function call, an unsupported type.
+- The generated Swift type-checks with `-swift-version 6` with zero errors and zero warnings.
+- `bern build` completes the Rust static library, the Swift compile and signing, and generates the CLI and MCP.
+- Driven through the CLI: switching sidebar pages; activating a button increments the engine's counter; a disabled button returns `target_unavailable`; switches, slider commits (the engine volume becomes 72) and text editing take effect; pushing the detail page; opening and closing the settings window; `showcase set-volume --value 140` returns `out_of_range`.
+- MCP: `initialize`, `tools/list` (17 tools), calling engine commands, `window_open` and `bern_state` all succeed.
+- With IPC assembled, `lsof` shows that the app has no TCP/UDP sockets and no child processes, only one Unix socket with mode 0600; after a normal quit the socket is deleted.
+- Screenshots (development snapshots): in light, dark and English UI, every page and the settings window use native grouped forms, system controls and toolbar styles.
 
-未完成的验证：
+Verification not done:
 
-- 开发快照依赖视图自绘，侧边栏等系统材质在图中显示为空白，工具栏玻璃控件也不完整；截图时窗口未激活，强调色显示为灰色。侧边栏的实际外观需要在屏幕上目视确认。
-- 与“系统设置”并排对照需要屏幕访问，本次没有获得授权，未进行。
-- 输入法组合、键盘遍历、VoiceOver 未实测；macOS 14 与 Intel 真机未测试。
+- Development snapshots rely on the views drawing themselves, so system materials such as the sidebar appear blank in the images, and the toolbar glass controls are incomplete too; the window was not active when the screenshots were taken, so the accent color shows as gray. The sidebar's actual appearance needs to be confirmed by eye on screen.
+- A side-by-side comparison with System Settings needs screen access, which was not granted this time, so it was not done.
+- Input method composition, keyboard traversal and VoiceOver were not measured; real macOS 14 and Intel machines were not tested.
 
-2026-10-10，阶段四，本机 macOS 27.0.1：
+2026-10-10, Phase 4, on this machine, macOS 27.0.1:
 
-- `bern check` 输出 `MediaFeature::Clip` 在 `compact` 与 `expanded` 都由 `media_page.pattern`、`media_page.bars`、`media_page.damaged` 覆盖。
-- 宽 920 pt 时 `ui.inspect` 中 `media_page.clip_choice` 为 `expanded`，三个片段按钮挂载；`window.resize` 到 720 pt 后为 `compact`，挂载“换片”菜单（`media_page.clip_menu`），三个菜单项仍是 `media_page.pattern`、`bars`、`damaged`。菜单未打开时 `ui.activate --target media_page.bars` 让引擎的 `featured` 变为 `Bars`。
-- 设置窗口的显示名称草稿写入“Ada”后执行 `ui.set_language --language en`：侧边栏、页面标题、菜单、设置页签与表单全部变为英文（截图），`ui.language` 返回 `en`，草稿仍是“Ada”，两个窗口都保持打开；`--language fr` 返回 `unsupported_language`。
-- 新增测试：编译器 9 项（覆盖、B201、B202、B203 与 B206、条件分支全覆盖、B204、B205 只对所列平台、B401 与 B402、同 `id` 跨布局），`rustc` 侧 2 项（声明能编译、未知功能报错）；生成的 Swift 在 Swift 6 模式下类型检查通过。
+- `bern check` outputs that `MediaFeature::Clip` is covered in both `compact` and `expanded` by `media_page.pattern`, `media_page.bars` and `media_page.damaged`.
+- At a width of 920 pt, `media_page.clip_choice` in `ui.inspect` is `expanded`, and the three clip buttons are mounted; after `window.resize` to 720 pt it is `compact`, and the "Change Clip" menu (`media_page.clip_menu`) is mounted, whose three menu items are still `media_page.pattern`, `bars` and `damaged`. With the menu not open, `ui.activate --target media_page.bars` changes the engine's `featured` to `Bars`.
+- After "Ada" is written into the display name draft of the settings window, `ui.set_language --language en` is run: the sidebar, page titles, menus, settings tabs and forms all switch to English (screenshots), `ui.language` returns `en`, the draft is still "Ada", and both windows stay open; `--language fr` returns `unsupported_language`.
+- New tests: 9 compiler tests (coverage, B201, B202, B203 and B206, full coverage of conditional branches, B204, B205 only for the listed platforms, B401 and B402, the same `id` across layouts), 2 on the `rustc` side (the declaration compiles, an unknown feature reports an error); the generated Swift type-checks in Swift 6 mode.
 
-2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文，`Window` 正文里直接写的 `variant:` 不生成 `BernStyles` 的条目，Swift 编译失败（原因见 WinUI 3 实现记录的同日条目）。生成器测试 `a_style_variant_in_a_window_is_defined` 为 macOS 与 iOS 生成并做 Swift 6 类型检查，通过。测试应用的 macOS 窗口（只截该窗口）：窗口正文里的 `Button.stage` 是强调色底、圆角 12，组件里的 `Button.card` 是 `fill.subtle` 底、圆角 4。
+2026-10-20, style variants written directly in a window's body: previously `style::used` looked only at the bodies of components, so a `variant:` written directly in a `Window` body generated no entry in `BernStyles`, and the Swift compile failed (for the cause, see the entry of the same date in the WinUI 3 implementation notes). The generator test `a_style_variant_in_a_window_is_defined` generates for macOS and iOS and type-checks with Swift 6; it passes. In the test app's macOS window (only that window captured), `Button.stage` in the window body has an accent-color background with a corner radius of 12, and `Button.card` in a component has a `fill.subtle` background with a corner radius of 4.
 
-2026-10-20，直接写在窗口正文里的 `Drop(opens: true)`：Info.plist 的 `CFBundleDocumentTypes` 此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类；macOS 与 iOS 共用这份收集，改为连同窗口正文一起看。生成器测试 `a_drop_in_a_window_lists_its_document_types` 为 macOS 与 iOS 生成，改前失败、改后通过。未在系统的“打开方式”里查看。
+2026-10-20, `Drop(opens: true)` written directly in a window's body: the `CFBundleDocumentTypes` of Info.plist previously looked only at the bodies of components (for the same reason as the previous entry), so a drop zone written directly in a window's body did not register its kinds; macOS and iOS share this collection, which now looks at window bodies as well. The generator test `a_drop_in_a_window_lists_its_document_types` generates for macOS and iOS; it fails before the change and passes after it. Not checked in the system's "Open With".
 
-2026-10-21，窗口正文的摆放（设计文档“一套窗口声明”）：
+2026-10-21, placement of a window's body (design document "One set of window declarations"):
 
-- 改前：窗口正文由 `BernSearchPaletteHost` 用窗口大小的 `frame` 包住，没写对齐，SwiftUI 默认居中，比窗口小的正文整体在窗口里水平、竖直都居中。同一份正文在 Windows 与 Web 上靠左上，Android 上水平居中、靠顶，GTK 上横向铺满。
-- 修正：这层 `frame` 改为 `alignment: .topLeading`。生成器给直接写在窗口里（经条件或组件也算）、没写宽度的 `Column` 加 `.frame(maxWidth: .infinity, alignment:)`，对齐取它的 `align`，于是它与窗口同宽、子元素按 `align` 摆放；没写尺寸的 `Stack` 加铺满窗口、按它的 `align` 对齐的 `frame`（`under_bars` 本来就铺满）。列里的按钮本来就保持自身宽度。iOS 与 tvOS 共用这段生成。
-- 测试：`content_in_a_window_starts_at_its_top_leading_corner` 为 macOS 与 iOS 生成并做 Swift 6 类型检查；撤掉修正时失败。
-- 实机（macOS 27，探针应用的 420 × 300 窗口，只截应用窗口，用 CLI 切换正文）：改前默认列、写在组件里的 `Column(align: center)` 与只有一个小层的 `Stack` 都在窗口正中；改后默认列从内容区的 (24, 24) 排起，按钮保持自身宽度，居中列在窗口里水平居中、靠顶，`Stack` 的小层仍在正中。图标按钮、菜单、浮层按钮在默认列里同样保持自身宽度、站在前缘。
+- Before: the window body was wrapped by `BernSearchPaletteHost` in a window-sized `frame` with no alignment written, so SwiftUI centered it by default, and a body smaller than the window sat centered in the window both horizontally and vertically. The same body sits at the top left on Windows and the Web, is horizontally centered and at the top on Android, and fills the width on GTK.
+- Fix: this `frame` now uses `alignment: .topLeading`. The generator gives a `Column` without a width that is written directly in a window (also when reached through a condition or a component) a `.frame(maxWidth: .infinity, alignment:)` whose alignment comes from its `align`, so it is as wide as the window and its children are placed by `align`; a `Stack` without a size gets a `frame` that fills the window and aligns by its `align` (`under_bars` already filled it). Buttons in a column already kept their own width. iOS and tvOS share this part of the generation.
+- Test: `content_in_a_window_starts_at_its_top_leading_corner` generates for macOS and iOS and type-checks with Swift 6; it fails when the fix is removed.
+- Real machine (macOS 27, a 420 × 300 window of a probe app, capturing only the app window, switching the body with the CLI): before the change, the default column, a `Column(align: center)` written in a component and a `Stack` with only one small layer were all in the exact center of the window; after the change, the default column is laid out from (24, 24) of the content area with buttons keeping their own width, the centered column is horizontally centered in the window and at the top, and the small layer of the `Stack` is still in the exact center. Icon buttons, menus and popover buttons in the default column likewise keep their own width and stand at the leading edge.
 
-## 样式、动效、自绘与模块化
+## Style, motion, self-drawing and modularity
 
-2026-10-12 补记，在 macOS 上用 `examples/planner`（外壳加“笔记”“标签”两个模块）与新建的应用验证。
+Addendum of 2026-10-12, verified on macOS with `examples/planner` (a shell plus two modules, "Notes" and "Tags") and with newly created apps.
 
-- **模块化应用**：外壳与模块的命令目录、状态与类型按命名空间合并，CLI 按模块分组（`planner notes add`、`planner tags tag`）；模块界面经插槽与页面插槽出现在外壳中（侧栏的“笔记”页、概览中的摘要）；可选模块关闭后它的命令返回 `module_disabled`、状态读默认值、页面从侧栏消失，依赖它的模块随之关闭；模块间的事件、经 `#[on]` 的应答命令、对依赖模块的命令调用与状态读取实测正常。`bern new --module` 新建的模块加入工作区后编译运行。
-- **样式覆盖**：`Button`、`IconButton` 与 `SidebarItem` 的覆盖由 Bern 绘制：带样式的侧栏项选中时填充强调色，列表本身不再保留系统的选中；`Button.hero` 变体是强调色背景、大号尺寸。没有样式的控件保持系统外观。
-- **动效**：结构过渡（`appear`、`disappear`、`reflow`）与共享元素（`hero`）用逐帧截图确认在移动：标签弹出、标题在两种字号间放大。悬停与按下的弹簧手感未验证。系统“减弱动态效果”或 `BERN_MOTION=reduce` 时变换静止、过渡改为淡入淡出。
-- **窗口外观**：`chrome: unified` 的窗口内容延伸到标题栏下；`idle_after: 3` 与 `immersive: draft.focus && window.idle` 时，静置 3 秒后标题栏隐藏，点按后恢复。
-- **自绘与标注**：`Canvas` 的格纹、面积与折线随引擎状态重绘（“记一笔”后折线多出新点）；有 `label` 的画布在辅助功能中是带名称的图像；`Text(mark:)` 在标题下画出胶囊形底纹，macOS 15 以下退回下划线（未实测）。
-- **按条件出现的导航项**：“在侧栏显示归档”关闭时 `ui select --option Archive` 返回 `invalid_params`；打开后可选中；在归档页关闭开关后选中回到 `fallback` 指定的概览，详情标题随之更新。
-- 未实现：带样式的侧栏中用方向键切换选中。
+- **Modular apps**: the command catalogs, state and types of the shell and the modules are merged by namespace, and the CLI groups commands by module (`planner notes add`, `planner tags tag`); module UIs appear in the shell through slots and page slots (the "Notes" page in the sidebar, the summary in the overview); after an optional module is turned off, its commands return `module_disabled`, its state reads default values, its pages disappear from the sidebar, and the modules that depend on it are turned off with it; events between modules, response commands via `#[on]`, command calls to a dependency module and reading its state were measured to work. A module newly created with `bern new --module` compiles and runs after being added to the workspace.
+- **Style overrides**: the overrides of `Button`, `IconButton` and `SidebarItem` are drawn by Bern: a styled sidebar item is filled with the accent color when selected, and the list itself no longer keeps the system selection; the `Button.hero` variant has an accent-color background and a large size. Controls without styles keep the system appearance.
+- **Motion**: structural transitions (`appear`, `disappear`, `reflow`) and shared elements (`hero`) were confirmed to move with frame-by-frame screenshots: a tag pops in, and a title scales up between two font sizes. The spring feel of hover and press is not verified. With the system's Reduce Motion or `BERN_MOTION=reduce`, transforms are static and transitions become crossfades.
+- **Window appearance**: the content of a `chrome: unified` window extends under the title bar; with `idle_after: 3` and `immersive: draft.focus && window.idle`, the title bar hides after 3 seconds idle and comes back after a click.
+- **Self-drawing and annotation**: the grid, area and polyline of a `Canvas` redraw with engine state (after "Record a day" the polyline gains a new point); a canvas with a `label` is a named image in accessibility; `Text(mark:)` draws a capsule-shaped highlight under the title, falling back to an underline below macOS 15 (not measured).
+- **Conditional navigation items**: with "Show the archive in the sidebar" off, `ui select --option Archive` returns `invalid_params`; once it is on, the item can be selected; turning the switch off on the archive page moves the selection back to the overview specified by `fallback`, and the detail title updates with it.
+- Not implemented: switching the selection with the arrow keys in a styled sidebar.
 
-## 错峰、比例轨道、浮层按钮与四档尺寸
+## Stagger, proportional rails, popover buttons and four size classes
 
-2026-10-14，v0.30，本机 macOS 27.0，用 `examples/gallery`。窗口始终在后台，用窗口截图（`screencapture -l`）与 CLI 检查，不把应用调到前面；动效用 `BERN_MOTION=slow` 放慢 10 倍后逐帧截图。
+2026-10-14, v0.30, on this machine, macOS 27.0, with `examples/gallery`. The window stays in the background throughout; checks use window screenshots (`screencapture -l`) and the CLI, without bringing the app to the front; motion is slowed down 10 times with `BERN_MOTION=slow` and captured frame by frame.
 
-- **错峰**：`BernStaggerScope` 把一只时钟放进环境，带 `appear` 的子元素出现时先隐藏，向时钟要一个顺序。最初按 `onAppear` 的先后排队，`LazyVGrid` 报告的先后不固定，海报墙按 6、4、2、5、3、1 的顺序出现；改为同一次更新中先收集所有新出现的元素，下一轮主队列再按它们在窗口中的位置排队（自上而下，同一行内按书写方向）。从胶片页切到图案页，6 帧截图中卡片从 Gingham 到 Windowpane 依次淡入升起。窗口首次显示前出现的元素直接显示。
-- **比例轨道**：`BernRail` 是自定义 `Layout`，`at` 与 `from`/`to` 经 `LayoutValueKey` 传入，绑定值变化时随 `animate` 的弹簧移动。胶片页的时间轴、6 个刻度与名字位置正确；`ui set-number --target film.level --value 0.9` 后竖线与底色从 0.5 移到 0.9。拖动面板里的底色起初只有 10 pt 高：`ZStack` 中的层不能跟随其他层的大小，没写高度的画布在轨道里按理想高度测量。改为含轨道的 `Stack` 生成 `BernLayers`，轨道不参与决定大小，再按其他层给出的大小摆放；轨道把得到的厚度提供给 `from`/`to` 的子元素。之后底色与 120 pt 的面板等高。
-- **浮层按钮**：`BernPopoverButton` 用系统 `.popover`，内容只在打开时存在。画框页静置 3 秒后控件隐藏，因此在重新启动后的 3 秒内经 CLI 打开：打开前 `ui.inspect` 中没有 `frame.volume_level`，`ui activate --target frame.volume` 后按钮值为 `open`、滑块出现且值为 0.7，截图中浮层从按钮下方弹出。浮层是单独的窗口，可以伸出主窗口。
-- **四档尺寸**：`BernWindowContext` 记录窗口内容宽度，`window.compact` 等按 `[layouts]` 断点计算；`Adaptive` 按自己的可用宽度选档，没有对应 `Layout` 的档按“先大后小”借用。经“系统事件”改变窗口大小：宽 600 时胶片页为 `compact`（图标按钮），1100 时为 `medium`（文字按钮），1470 时为 `expanded`（多一行说明）。窗口宽度在 1470 封顶（屏幕宽度）；打开检查器时系统会加宽窗口。
-- 发给窗口的鼠标移动事件（`CGEventPostToPid`）不经过应用的本地事件监视器，不能用来唤醒静置的页面；本次没有移动真实指针。
+- **Stagger**: `BernStaggerScope` puts a clock into the environment; a child with `appear` is hidden at first when it appears and asks the clock for its place in the order. At first the queue followed the order of `onAppear`, but the order `LazyVGrid` reports is not fixed, so the poster wall appeared in the order 6, 4, 2, 5, 3, 1; now all elements newly appearing in the same update are collected first, and on the next turn of the main queue they are queued by their position in the window (top to bottom, and within a row in the writing direction). Switching from the Film page to the Patterns page, in 6 captured frames the cards fade in and rise one after another from Gingham to Windowpane. Elements that appear before the window is first shown are shown directly.
+- **Proportional rails**: `BernRail` is a custom `Layout`; `at` and `from`/`to` are passed in through `LayoutValueKey`, and when the bound value changes the children move with the spring of `animate`. On the Film page the timeline, the 6 ticks and the names are in the right places; after `ui set-number --target film.level --value 0.9` the vertical line and the fill move from 0.5 to 0.9. The fill in the drag panel was at first only 10 pt tall: a layer in a `ZStack` cannot follow the size of the other layers, and a canvas without a height is measured at its ideal height in the rail. Now a `Stack` that contains a rail generates `BernLayers`: the rail does not take part in deciding the size and is placed according to the size given by the other layers; the rail offers the thickness it gets to its children with `from`/`to`. After that the fill is as tall as the 120 pt panel.
+- **Popover buttons**: `BernPopoverButton` uses the system `.popover`, and its content exists only while it is open. On the Frame page the controls hide after 3 seconds idle, so the popover was opened through the CLI within 3 seconds of a relaunch: before opening, `ui.inspect` has no `frame.volume_level`; after `ui activate --target frame.volume` the button's value is `open`, the slider appears with a value of 0.7, and in the screenshot the popover pops out below the button. The popover is a separate window and can extend beyond the main window.
+- **Four size classes**: `BernWindowContext` records the width of the window content, and `window.compact` and the like are computed from the `[layouts]` breakpoints; `Adaptive` chooses a class by its own available width, and a class without a matching `Layout` borrows one "larger first, then smaller". Resizing the window through System Events: at a width of 600 the Film page is `compact` (icon buttons), at 1100 it is `medium` (text buttons), and at 1470 it is `expanded` (one more line of description). The window width is capped at 1470 (the screen width); opening the inspector makes the system widen the window.
+- Mouse move events sent to the window (`CGEventPostToPid`) do not go through the app's local event monitor and cannot be used to wake an idle page; the real pointer was not moved this time.
 
-## 引擎读取交来的文件
+## The engine reads files handed to it
 
-2026-10-14：`file://` 地址由引擎直接打开，不经宿主。`examples/gallery` 经 `ui.set_file` 收到本地的“海浪 Tides #2.mp4”后，引擎状态中的提示为“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”。地址与路径的互相转换（含 Windows 的盘符与共享路径）由 `bern-command` 的单元测试覆盖。
+2026-10-14: `file://` addresses are opened by the engine directly, not through the host. After `examples/gallery` received the local file "海浪 Tides #2.mp4" through `ui.set_file`, the prompt in the engine state is "▶ 海浪 Tides #2.mp4 · MP4 · 49 KB". Conversion between addresses and paths (including Windows drive letters and share paths) is covered by the unit tests of `bern-command`.
 
-2026-10-20，macOS 27.0.1，用于验收的媒体类应用的设置窗口“可选功能”（窗口截图与生成的 CLI）：两个方向都不给尺寸的 `Canvas` 作为 `Stack` 的一层时标记为 `bernFillsLayers()`，`Stack` 改用 `BernLayers`，底板取其他层的尺寸；`Stack` 写了尺寸时 `BernLayers` 按写的尺寸算，底板铺满它。此前预览里选中项的底色被拉成整列高的一块。实测选中项一行高，72 宽的侧栏底板铺满 188 高。iOS 走同一生成路径，模拟器本轮未实看。
+2026-10-20, macOS 27.0.1, the "Optional features" of the settings window of a media app used for acceptance (window screenshots and the generated CLI): a `Canvas` that is given no size in either direction, as a layer of a `Stack`, is marked `bernFillsLayers()`, and the `Stack` switches to `BernLayers`, with the backing plate taking the size of the other layers; when the `Stack` has a size written, `BernLayers` computes with the written size and the backing plate fills it. Previously the highlight of the selected item in the preview was stretched into a block as tall as the whole column. Measured: the selected item is one row tall, and the 72-wide sidebar backing plate fills the height of 188. iOS goes through the same generation path; the simulator was not looked at in this round.
 
-## 状态栏项（2026-10-28）
+## Status bar item (2026-10-28)
 
-`StatusItem` 生成为 SwiftUI 的 `MenuBarExtra` 场景，标签是 `Image(systemName: icon)`：SF Symbol 由菜单栏按模板图标着色，跟随菜单栏的明暗，不显示彩色的应用图标；`label` 是它的可访问名称。菜单是视图 `BernStatusMenu`：“打开“主窗口标题””（`BernHost.open`）、声明的项（与菜单栏的项同一套生成：按钮、勾选的开关、子菜单，随状态更新）、“退出”（`NSApplication.terminate`）。菜单项以 `status_item.<id>` 登记为外部入口；它们执行命令时用 `BernMenuBarWindow.primary`，与菜单栏共用。
+`StatusItem` generates a SwiftUI `MenuBarExtra` scene whose label is `Image(systemName: icon)`: the SF Symbol is tinted by the menu bar as a template icon and follows the menu bar's appearance, and the colored app icon is not shown; `label` is its accessible name. The menu is the view `BernStatusMenu`: "Open “<main window title>”" (`BernHost.open`), the declared items (generated the same way as menu bar items: buttons, checked switches, submenus, updating with state), and "Quit" (`NSApplication.terminate`). The menu items are registered as external entry points as `status_item.<id>`; when they run commands they use `BernMenuBarWindow.primary`, shared with the menu bar.
 
-有状态栏项时 `BernStatusArea.shown` 为真：窗口登记与注销时，没有窗口就切到 `accessory` 激活策略（Dock 里的图标收起），有窗口就回到 `regular`。应用本来就在最后一个窗口关闭后保持运行。
+With a status bar item, `BernStatusArea.shown` is true: when windows register and unregister, the app switches to the `accessory` activation policy when there are no windows (the icon in the Dock goes away), and back to `regular` when there are. The app already keeps running after its last window closes.
 
-`login_item` 时菜单在“退出”前有 `BernLoginItemToggle`：勾选状态是 `SMAppService.mainApp.status == .enabled`，勾选时 `register()`，取消时 `unregister()`；用户在系统设置里关掉的（`requiresApproval`）勾选时打开系统设置的登录项页（`openSystemSettingsLoginItems`）。登录项不能带参数，登录启动由 `BernAppDelegate.applicationDidFinishLaunching` 识别：当前的 Apple 事件是打开应用（`kAEOpenApplication`）且 `keyAEPropData` 为 `keyAELaunchedAsLogInItem` 时，`BernStatusArea.hidingAtLaunch` 为真，已经出现的窗口关闭，之后出现的窗口在取得 NSWindow 时关闭，激活策略保持 `accessory`；用户从菜单打开窗口（`BernStatusArea.open`）或在 Finder 再次打开应用时结束。macOS 14 上 `Window` 场景总在启动时出现，所以窗口是先出现再关闭，不是不创建。
+With `login_item`, the menu has a `BernLoginItemToggle` before "Quit": its checked state is `SMAppService.mainApp.status == .enabled`, checking it calls `register()`, and unchecking it calls `unregister()`; when the user has turned it off in System Settings (`requiresApproval`), checking it opens the Login Items page of System Settings (`openSystemSettingsLoginItems`). Login items cannot take arguments, so a launch at login is recognized by `BernAppDelegate.applicationDidFinishLaunching`: when the current Apple event is open application (`kAEOpenApplication`) and its `keyAEPropData` is `keyAELaunchedAsLogInItem`, `BernStatusArea.hidingAtLaunch` is true, windows that have already appeared are closed, windows that appear later are closed when their NSWindow is obtained, and the activation policy stays `accessory`; this ends when the user opens a window from the menu (`BernStatusArea.open`) or opens the app again in Finder. On macOS 14 the `Window` scene always appears at launch, so the window appears first and is then closed, rather than never being created.
 
-验证（2026-10-28）：`bern-backend-swiftui` 的 `menu_bar` 测试含状态栏项，生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过（iOS 与 tvOS 不生成）；显示器调节程序的 macOS 版构建成功。未运行实测：菜单栏里的图标、菜单、Dock 图标的收起与恢复都未在真机上看过。“登录时启动”同样只有生成测试（含 `BernLoginItemToggle`）与类型检查：登录项的登记、登录启动时 Apple 事件是否带 `keyAELaunchedAsLogInItem`（`SMAppService` 登记的登录项未查证）、窗口关闭前是否闪现都未验证。
+Verification (2026-10-28): the `menu_bar` test of `bern-backend-swiftui` includes a status bar item, and the generated Swift type-checks against the macOS, iOS and tvOS SDKs (iOS and tvOS do not generate it); the macOS version of the display adjustment app builds successfully. Not measured: the icon in the menu bar, the menu, and the Dock icon going away and coming back have not been seen on a real machine. "Open at Login" likewise has only the generation test (including `BernLoginItemToggle`) and type checking: registering the login item, whether the Apple event of a launch at login carries `keyAELaunchedAsLogInItem` (not confirmed for login items registered through `SMAppService`), and whether the window flashes before it is closed are all not verified.
 
 
-`StatusItem(image:)`（2026-10-29）：构建时把 SVG 的形状画成黑色、背景透明的 18 与 36 像素图，放进 `Contents/Resources` 的 `BernStatusIcon.png` 与 `BernStatusIcon@2x.png`（声明的资源不能用这两个名字）；`BernStatusArea.picture` 用 `NSImage(named:)` 读出，设为 18 × 18 点的模板图片，`MenuBarExtra` 的标签是 `Image(nsImage:)`，由菜单栏按自己的明暗着色。构建计划里把声明的资源放进 `Contents/Resources` 的一步会删去它不认识的文件，两张图加进了保留名单（第一次 release 构建时它们就是这样被删掉的）。验证：`status_image` 测试检查两张图的尺寸、保留名单与生成的标签，生成的 Swift 按 macOS SDK 类型检查通过；未运行，菜单栏里的样子未看。
-## 表格、受控文字与剪贴板（2026-10-29）
+`StatusItem(image:)` (2026-10-29): at build time the SVG's shapes are drawn in black on a transparent background as 18- and 36-pixel images and placed in `Contents/Resources` as `BernStatusIcon.png` and `BernStatusIcon@2x.png` (declared resources cannot use these two names); `BernStatusArea.picture` reads them with `NSImage(named:)` and sets them up as an 18 × 18 point template image, and the label of the `MenuBarExtra` is `Image(nsImage:)`, tinted by the menu bar according to its own appearance. The build plan step that puts declared resources into `Contents/Resources` deletes files it does not recognize, so the two images were added to its keep list (that is how they were deleted in the first release build). Verification: the `status_image` test checks the sizes of the two images, the keep list and the generated label, and the generated Swift type-checks against the macOS SDK; not run, and what it looks like in the menu bar has not been seen.
+## Tables, controlled text and the clipboard (2026-10-29)
 
-`Table` 生成为 SwiftUI 的 `Table(of: BernTableRow<行, 键>.self, selection:, sortOrder:)`，`BernTableRow` 把行的值与它的键（`Identifiable`）包在一起：
+`Table` generates a SwiftUI `Table(of: BernTableRow<Row, Key>.self, selection:, sortOrder:)`; `BernTableRow` wraps a row's value together with its key (`Identifiable`):
 
-- 选择绑定读草稿的 `Set`，写的时候经 `bernChosen` 按行的顺序排好再写回草稿。
-- 有动作或写了 `sorted` 的列带 `sortUsing: BernColumnOrder(column: n)`：这个比较器什么都不比较（行的顺序由引擎决定），只用来让表头显示排序标记；`sortOrder` 的读取由各列的 `sorted`、`descending` 算出，写入（点表头）运行那一列的动作。写了 `width` 的列是 `.width(min: 40, ideal: width)`。
-- 行菜单与主操作是 `.contextMenu(forSelectionType: 键.self, menu:, primaryAction:)`：系统给出菜单打开时所指的行（右键点的行不在选中行里时就是那一行），每个菜单项先把草稿设为这些行，再运行动作；主操作（双击、Enter）同样先设选择。菜单为空集合时（在空白处）不显示菜单项。
-- 外部入口：`bernControl` 的角色 `table`，`select` 收逗号分隔的键，`value` 是选中的键；行菜单的项各自是 `button`，菜单关着也能操作。
+- The selection binding reads the draft's `Set`, and when it writes, it sorts the keys into row order through `bernChosen` before writing them back to the draft.
+- Columns that have an action or have `sorted` written get `sortUsing: BernColumnOrder(column: n)`: this comparator compares nothing (the row order is decided by the engine) and serves only to make the header show the sort indicator; reading `sortOrder` computes it from each column's `sorted` and `descending`, and writing it (clicking a header) runs that column's action. A column with `width` written is `.width(min: 40, ideal: width)`.
+- The row menu and the primary action are `.contextMenu(forSelectionType: Key.self, menu:, primaryAction:)`: the system gives the rows the menu was opened for (when the right-clicked row is not among the selected rows, it is that row), and each menu item first sets the draft to these rows and then runs its action; the primary action (double-click, Enter) likewise sets the selection first. When the menu's set is empty (on blank space), no menu items are shown.
+- External entry points: `bernControl` with the role `table`; `select` takes comma-separated keys, and `value` is the selected keys; each item of the row menu is a `button` of its own and can be operated while the menu is closed.
 
-`TextInput(current:)` 生成 `BernHeldText`：视图里有一份 `@State` 文字绑定给系统的文本框，编辑时（与引擎的值不同）每次都运行动作；引擎的值变化时，只有不在 `@FocusState` 焦点上才替换；失去焦点时换回引擎的值。`paste:` 生成 `BernClipboard.paste { text in 草稿 = text; 动作 }`：macOS 是 `NSPasteboard.general.string(forType: .string)`，iOS 是 `UIPasteboard.general.string`，没有文字时不执行。`copy_text`：`bern_app_start` 之前调用 `bern_platform_install(nil, bernPlatformRequest)`，请求在主队列上 `BernClipboard.copy`（macOS 先 `clearContents` 再 `setString`）。
+`TextInput(current:)` generates `BernHeldText`: the view holds a `@State` text that is bound to the system text field, and every edit (that differs from the engine's value) runs the action; when the engine's value changes, it replaces the text only when the field does not have `@FocusState` focus; on losing focus, the field switches back to the engine's value. `paste:` generates `BernClipboard.paste { text in draft = text; action }`: on macOS this is `NSPasteboard.general.string(forType: .string)`, on iOS `UIPasteboard.general.string`, and nothing runs when there is no text. `copy_text`: before `bern_app_start`, `bern_platform_install(nil, bernPlatformRequest)` is called, and requests run `BernClipboard.copy` on the main queue (on macOS, `clearContents` first, then `setString`).
 
-验证：`bern-backend-swiftui` 的 `tables` 测试（表格、受控输入、`paste` 按钮与菜单项）生成的 Swift 按 macOS、iOS、tvOS 的 SDK 类型检查通过；gallery 的 macOS 与 iOS 构建成功，一个实际应用的 macOS 版构建成功（第一次因与 `BernStyle.swift` 的 `BernRow` 布局重名而失败，行类型改名为 `BernTableRow`）。未运行：表格的选择、菜单、排序标记与剪贴板的读写在 macOS 与 iOS 上都未实测。
+Verification: the Swift generated by the `tables` test of `bern-backend-swiftui` (tables, controlled input, `paste` buttons and menu items) type-checks against the macOS, iOS and tvOS SDKs; the macOS and iOS builds of gallery succeed, and the macOS version of a real app builds successfully (the first time it failed because the row type had the same name as the `BernRow` layout in `BernStyle.swift`; the row type was renamed `BernTableRow`). Not run: table selection, menus, sort indicators and clipboard reads and writes have not been measured on macOS or iOS.
 
-## 跟随值的动作、文字颜色与登录项开关（2026-10-29）
+## Actions that follow values, text colors and the login item switch (2026-10-29)
 
-`Watch` 生成 `BernWatch(value:)`：一个不可见的视图，`.onChange(of: value, initial: true)` 运行动作；它跟随的值都是 `Equatable` 的（数值、文字、列表、可选值与生成的枚举）。`Text(color:)` 加 `.foregroundStyle(BernColor.role(…).color)`：状态色是系统的 green、orange、red，`accent` 是应用选的或系统的强调色。`Switch(login_item: true)` 生成 `BernLoginItemToggle(label:)`，与状态栏菜单的“登录时启动”共用 `BernLoginItem`（`SMAppService.mainApp` 的 register 与 unregister，被用户在系统设置里关掉的打开系统设置的登录项页），出现时重读状态；外部入口的 `set_bool` 也经它。
+`Watch` generates `BernWatch(value:)`: an invisible view whose `.onChange(of: value, initial: true)` runs the action; the values it follows are all `Equatable` (numbers, text, lists, optionals and generated enums). `Text(color:)` adds `.foregroundStyle(BernColor.role(…).color)`: the status colors are the system green, orange and red, and `accent` is the accent color the app chose or the system one. `Switch(login_item: true)` generates `BernLoginItemToggle(label:)`, which shares `BernLoginItem` with "Open at Login" in the status bar menu (register and unregister of `SMAppService.mainApp`; when the user has turned it off in System Settings, it opens the Login Items page of System Settings) and rereads the state when it appears; `set_bool` from external entry points also goes through it.
 
-验证：`tables` 测试覆盖三者，按 macOS、iOS、tvOS 的 SDK 类型检查；一个实际应用的 macOS debug 构建编译通过。未在 Mac 上运行。
+Verification: the `tables` test covers all three and is type-checked against the macOS, iOS and tvOS SDKs; a macOS debug build of a real app compiles. Not run on a Mac.
 
-## 侧栏数量、登录项状态与点击耗时（2026-10-30）
+## Sidebar counts, login item state and click latency (2026-10-30)
 
-带 `badge` 的 `SidebarItem` 生成 `.badge(n).tag(value)`。此前是 `.tag(value).badge(n)`：数量在选中值外面，系统侧栏的这一行就没有选中值，点它什么都不发生，经会话选中则正常。
+A `SidebarItem` with a `badge` generates `.badge(n).tag(value)`. Previously it was `.tag(value).badge(n)`: the count sat outside the selection value, so this row of the system sidebar had no selection value and clicking it did nothing, while selecting it through a session worked.
 
-登录项开关不再在每次更新视图时读 `SMAppService.mainApp.status`（它经 XPC 回答，设置窗口每更新一次多几十毫秒），改读 `BernLoginItemState` 记下的值：启动时、应用变为活跃时、开关出现时和每次改动后读一次。外部入口的 `set_bool` 与读值也经它。
+The login item switch no longer reads `SMAppService.mainApp.status` on every view update (it answers over XPC, which added tens of milliseconds to every update of the settings window); it reads the value recorded by `BernLoginItemState` instead, which is read once at launch, when the app becomes active, when the switch appears and after every change. `set_bool` and value reads from external entry points also go through it.
 
-验证（2026-10-30，GitHub 的 `xcode-27` 运行器，macOS 27.0.1、Xcode 27.1，一个实际应用的 release 构建；辅助功能接口找元素，真实鼠标事件点击）：改前侧栏中带数量的两项点击后 5 秒内都没有选中，改后选中、详情换页；同一台机器上直接用 SwiftUI 写的侧栏里，先 `tag` 后 `badge` 的一行同样点不中，先 `badge` 后 `tag` 的可以。打开含登录项开关的设置窗口，主线程合计忙的时间从 740–860 毫秒降到约 570 毫秒。`BERN_TIMING` 量得换页时主线程忙 70–310 毫秒（概览约 70，带表格、工具栏、搜索与检查器的列表页 220–310），同一台机器上把这几页直接用 SwiftUI 写一遍的对照程序是 70–570 毫秒，两者相当：时间花在 SwiftUI 重建工具栏、AppKit 按玻璃样式重排工具栏和创建表格与检查器上，不在 Bern 的代码里。运行器是虚拟机，真机上的绝对数值未量。iOS 走同一生成路径，未实看。
+Verification (2026-10-30, GitHub's `xcode-27` runner, macOS 27.0.1, Xcode 27.1, a release build of a real app; elements found through the accessibility API and clicked with real mouse events): before the change, neither of the two items with counts in the sidebar was selected within 5 seconds of a click; after the change they are selected and the detail switches pages; in a sidebar written directly in SwiftUI on the same machine, a row with `tag` before `badge` likewise cannot be clicked, while one with `badge` before `tag` can. When the settings window containing the login item switch opens, the total main-thread busy time dropped from 740–860 milliseconds to about 570 milliseconds. `BERN_TIMING` measured the main thread busy for 70–310 milliseconds on a page switch (about 70 for the overview, 220–310 for the list page with a table, toolbar, search and inspector); a comparison program that writes these pages directly in SwiftUI took 70–570 milliseconds on the same machine, so the two are comparable: the time goes to SwiftUI rebuilding the toolbar, AppKit relaying out the toolbar for the glass style, and creating the table and the inspector, not to Bern's code. The runner is a virtual machine; absolute numbers on real hardware were not measured. iOS goes through the same generation path and was not looked at.
 
-## 带样式侧栏的选中（2026-10-30）
+## Selection in a styled sidebar (2026-10-30)
 
-带样式的侧栏项在 macOS 上重新由系统列表选中：生成 `List(selection:)`，每个 `BernSidebarRow` 后跟 `.tag(value)`，不再生成 `.bernSidebarNavigation`。此前列表不保留选中，每行用 `onTapGesture` 选中自己：窗口在后台时点一行，这一下只把窗口带到前面，手势收不到，要再点一次；系统侧栏在同一下就选中。`allowsWindowActivationEvents(true)`（macOS 15 起）只对列表外的视图有效，列表里的行加上它仍收不到那一下，所以改回系统选中。
+Styled sidebar items on macOS are once again selected by the system list: `List(selection:)` is generated, each `BernSidebarRow` is followed by `.tag(value)`, and `.bernSidebarNavigation` is no longer generated. Previously the list did not keep a selection, and each row selected itself with `onTapGesture`: when the window was in the background, clicking a row only brought the window to the front, the gesture did not receive that click, and a second click was needed; the system sidebar selects on the same click. `allowsWindowActivationEvents(true)` (since macOS 15) only works for views outside a list; rows in a list still do not receive that click with it, so selection went back to the system.
 
-行的背后放一个 `BernListRowProbe`：把所在 `NSTableView` 的 `selectionHighlightStyle` 设为 `.none`，选中仍由行按样式绘制；按下改由窗口的局部事件监视器报告（在行内按下到松开）。行上任何手势，包括 `bernPressWatch` 的 `DragGesture(minimumDistance: 0)`，都会让列表在窗口已在前台时选不中。方向键由列表自己处理。iOS 与 tvOS 不变：行自己选中，`bernSidebarNavigation` 处理方向键。
+A `BernListRowProbe` is placed behind each row: it sets the `selectionHighlightStyle` of the containing `NSTableView` to `.none`, so the selection is still drawn by the row according to its style; presses are now reported by the window's local event monitor (pressed and released within the row). Any gesture on a row, including the `DragGesture(minimumDistance: 0)` of `bernPressWatch`, makes the list fail to select when the window is already in the foreground. The arrow keys are handled by the list itself. iOS and tvOS are unchanged: rows select themselves, and `bernSidebarNavigation` handles the arrow keys.
 
-验证（本机 macOS 27.2，一个实际应用的 release 构建，真实鼠标点击）：改前窗口在后台时点侧栏某项，窗口到前面但页面不换；改后同一下就选中、详情换页，之后的点击与上下方向键正常，选中项是样式的填充与粗体，没有系统的选中色。最小的 SwiftUI 程序对照：列表里的行加 `allowsWindowActivationEvents` 仍收不到那一下，列表外的按钮可以；`List(selection:)` 的系统选中可以；行上加按下手势后，前台窗口里点击不再选中，改用事件监视器后正常，按下时行按样式缩小。`dynamic_navigation_items_type_check` 改为检查 macOS 的带样式侧栏用系统选中、每行带 `tag`，iOS 的仍生成方向键导航并包含按条件、重复与 `match` 出现的项，两者都做 Swift 6 类型检查；SwiftUI 后端全部测试通过。未运行：macOS 14 与 15、按住一会儿再松开（测试工具模拟的按住在系统列表里同样不选中，无法判断）、iOS 与 tvOS 上的实际界面（生成未变）。
+Verification (on this machine, macOS 27.2, a release build of a real app, real mouse clicks): before the change, clicking an item in the sidebar while the window was in the background brought the window to the front but did not switch pages; after the change it is selected on that same click and the detail switches pages, later clicks and the up and down arrow keys work, and the selected item shows the style's fill and bold text, without the system selection color. Comparison with a minimal SwiftUI program: a row in a list with `allowsWindowActivationEvents` still does not receive that click, while a button outside the list does; the system selection of `List(selection:)` works; after a press gesture is added to the rows, clicks in a foreground window no longer select, and with an event monitor instead it works, with the row shrinking according to the style while pressed. `dynamic_navigation_items_type_check` now checks that the macOS styled sidebar uses system selection and that each row carries a `tag`, and that the iOS one still generates arrow-key navigation and includes items that appear through conditions, repetition and `match`; both are type-checked with Swift 6; all tests of the SwiftUI backend pass. Not run: macOS 14 and 15, pressing and holding for a while before releasing (a press and hold simulated by the test tool likewise does not select in a system list, so this cannot be judged), and the actual UI on iOS and tvOS (generation unchanged).
 
-## 未完成与已知限制
+## Incomplete work and known limitations
 
-- 多实例窗口、焦点管理（布局切换时的焦点迁移在 macOS 上未实现）均未实现。菜单栏已在 2026-10-24 实现，见下文“菜单栏、跟随状态的快捷键与改键”。
-- 查询只读引擎（作用域 Engine）；会话作用域的查询、分页与增量结果、输入防抖、外部入口订阅查询结果（目前每次调用得到一次答复）均未实现。`#[reads]` 由开发者声明，宏只检查字段存在，不能证明提供器只读这些字段。
-- `Query` 的进度行与错误行作为普通行出现在数据上方，刷新时列表会下移一行；没有覆盖在内容上的刷新指示。
-- Video 未实现：倍速与轨道选择、全屏与画中画、海报、循环、自动播放与初始静音等媒体属性、覆盖层（字幕、弹幕）、系统媒体键与 Now Playing（会绕过命令，因此未接入）、受保护媒体。HLS 需经 HTTP 加载。同一 source 声明在一个窗口里挂载多次时第二个播放器创建失败（`player_exists`）。
-- 进程内执行端与引擎同生同灭，“执行端断开”只由 hub 测试覆盖。
-- 应用退出（Cmd-Q）不经过窗口关闭检查。
-- 窗口呈现：没有进入全屏的命令（全屏只能由用户进入，可由 `window.restore` 退出）；`window.activate` 受系统协作式激活限制，后台应用不一定获得焦点；虚拟窗口的呈现属于 Web 阶段。
-- 首版引擎命令同步完成，没有执行中句柄、取消与进度。
-- 组件库只支持展示型组件（值参数），不能持有会话状态或调用命令；库从源码现场生成描述，尚无预发布描述的分发与缓存。
-- 其他目标见各自的实现记录。
-- 控件目标 ID 以 `组件.控件id` 为基础；重复项会携带各层 key，例如 `card.open[3]`，经过组件仍保留上下文。同一窗口中重复使用相同 ID 且没有可区分上下文时，仍可能返回 `target_ambiguous`。
-- 设置窗口禁用了滚动以贴合内容高度，内容超出屏幕高度时无法滚动。
-- 随包资源只能由应用清单声明，组件库不能；资源只解析为本机文件路径与文件 URL，引擎与媒体执行端不在同一位置（WebUI 等）时的地址方案尚未实现；可执行代码、框架与插件不能作为资源发布；没有列出资源目录的接口。
+- Multi-instance windows and focus management (focus migration when the layout switches is not implemented on macOS) are not implemented. The menu bar was implemented on 2026-10-24; see "Menu bar, state-following shortcuts and rebinding" below.
+- Queries only read the engine (scope Engine); session-scoped queries, pagination and incremental results, input debouncing, and external entry points subscribing to query results (currently each call gets one answer) are not implemented. `#[reads]` is declared by the developer; the macro only checks that the fields exist and cannot prove that the provider reads only these fields.
+- The progress row and the error row of `Query` appear as ordinary rows above the data, so the list moves down one row while refreshing; there is no refresh indicator overlaid on the content.
+- Not implemented for Video: playback speed and track selection, full screen and picture in picture, posters, looping, media properties such as autoplay and initial mute, overlays (subtitles, danmaku), system media keys and Now Playing (these would bypass commands, so they are not connected), protected media. HLS must be loaded over HTTP. When the same source declaration is mounted several times in one window, creating the second player fails (`player_exists`).
+- The in-process executor lives and dies with the engine; "executor disconnected" is covered only by hub tests.
+- Quitting the app (Cmd-Q) does not go through the window close checks.
+- Window presentation: there is no command to enter full screen (full screen can only be entered by the user, and can be exited with `window.restore`); `window.activate` is limited by the system's cooperative activation, so a background app does not necessarily get focus; the presentation of virtual windows belongs to the Web phase.
+- In the first version, engine commands complete synchronously, with no in-progress handles, cancellation or progress.
+- Component libraries support only presentational components (value parameters) and cannot hold session state or call commands; libraries generate their descriptions on the spot from source, and there is no distribution or caching of prepublished descriptions yet.
+- For other targets, see their own implementation notes.
+- Control target IDs are based on `component.control_id`; repeated items carry the keys of each level, e.g. `card.open[3]`, and the context is kept through components. When the same ID is used more than once in one window without a distinguishing context, `target_ambiguous` may still be returned.
+- The settings window disables scrolling to fit its content height, so it cannot scroll when the content is taller than the screen.
+- Bundled resources can only be declared by the app manifest, not by component libraries; resources resolve only to local file paths and file URLs, and an address scheme for when the engine and the media executor are not in the same place (WebUI etc.) is not yet implemented; executable code, frameworks and plug-ins cannot be shipped as resources; there is no API for listing the resource directory.
 
-### 图片跨分栏 Hero（2026-10-17）
+### Cross-column Hero for images (2026-10-17)
 
-`Image(hero:, hero_key:)` 在 macOS 使用窗口级像素覆盖层，绕过 SwiftUI 匹配几何无法跨 NavigationSplitView 列移动的限制。图片的布局、辅助功能和点击由原视图保留；临时画面插值窗口坐标、尺寸和圆角，使用声明的 hero 弹簧。反向切换沿用当前画面位置，窗口之间不配对，减少动态效果时不飞行。图片以外的 `hero` 以及 iOS 仍使用原有 matchedGeometryEffect。
+On macOS, `Image(hero:, hero_key:)` uses a window-level pixel overlay, working around the limitation that SwiftUI's matched geometry cannot move across NavigationSplitView columns. The image's layout, accessibility and taps stay with the original view; the temporary picture interpolates window coordinates, size and corner radius, using the declared hero spring. A reverse switch continues from the current position of the picture, windows are not paired with each other, and with Reduce Motion nothing flies. `hero` on elements other than images, and iOS, still use the existing matchedGeometryEffect.
 
-`tests/image_hero.rs` 将真实 AppKit 实现放在两个原生容器中，验证插值、快速反向、还原可见性、减少动态效果及目标卸载清理；真实应用的 macOS 版实测首页舞台展开、完整播放器缩到侧栏及恢复。范围为 Image，不代表 Video 已实现窗口级画面传递。
+`tests/image_hero.rs` puts the real AppKit implementation into two native containers and verifies interpolation, fast reversal, restored visibility, Reduce Motion and cleanup when the target unmounts; on the macOS version of a real app, the home page stage expanding, the full player shrinking into the sidebar and restoring were measured. The scope is Image; it does not mean that Video has implemented a window-level handoff of its picture.
 
-### 分栏视图的工具栏安全区（2026-10-18）
+### Toolbar safe area of split views (2026-10-18)
 
-macOS 上 `NavigationSplitView` 的工具栏安全区受以下做法影响，出问题时侧栏和详情栏的内容会压到标题栏和红绿灯下面，之后也不会恢复：
+On macOS the toolbar safe area of `NavigationSplitView` is affected by the following practices; when something goes wrong, the content of the sidebar and the detail column is pushed under the title bar and the traffic lights, and it does not recover afterwards:
 
-- **关闭命中测试**：给分栏视图（或包着它的容器）加 `.allowsHitTesting(false)`，安全区当场消失。`Stack(enabled: false)` 因此只生成 `.disabled` 和 `.accessibilityHidden`；`.disabled` 已经让其中的控件和手势失效，全窗口的 `Modal` 遮罩也挡住了指针。
-- **共享元素改动布局**：原先非图片的 `hero` 用 `matchedGeometryEffect` 配对整个 frame，分栏视图在动画中按中间尺寸布局；只配对位置、或只在绘制上缩放，替换接连很快时仍会复现。macOS 上非图片的 `hero` 现在和图片一样在窗口上层飞快照（`BernViewHero`）：对旧、新元素所在区域各截一张图，从旧位置飞到新位置并交叉淡化，过渡期间真实元素只是透明，布局和变换都不动。iOS 改为只影响绘制的 `offset` 和 `scaleEffect`；两边都不再使用 `matchedGeometryEffect`。只有前一个同名元素还在、或刚离开不到半秒，新元素才算替换它；列表里滚回来的条目不会飞。
-- **分支切换带动画**：分支里有共享元素时，生成器原先给整个分支加 `.animation(_:value:)`，好让 `matchedGeometryEffect` 有动画可用；新插入的分栏视图因此在动画里布局，同样会让侧栏压到标题栏下。共享元素现在自己驱动动画，这个分支动画只为 `appear` / `disappear` 生成。
-- **弹窗**：`Modal` 的图层通过偏好值挂在窗口根部的覆盖层，原来出现和消失都没有过渡。现在覆盖层自己给弹窗图层做淡入淡出，面板按 `appear` 在出现时动画，不会连带窗口其余部分。浮动面板由 `BernModalStage`（一个 `Layout`）放置：不写高度时按面板宽度以不限高的提议量内容的理想高度（`ScrollView` 的理想高度就是所滚内容的高度），再以窗口为限；iOS 与 tvOS 共用（2026-10-25，`tests/modal_fit.rs` 在屏幕外窗口里量）。
-- **滚动视图的进场**：标题栏背景由它下面的滚动视图绘制，`ScrollView` 或 `Form` 自身做 `appear` 的位移、淡入时，标题栏背景也一起移动、变淡。`ScrollView` 的进场现在作用在它的内容上，内容在滚动视图里滑入、淡入，滚动视图本身不动；`Form` 的行无法包裹，只淡入顶部安全区以下的部分（`bernScrollEntrance`，遮罩淡入，不位移）。两者都立即离开。慢放逐帧测量，窗口在后台时标题栏背景全程不变；窗口在前台时只截到一次，那次标题栏下没有这层背景。
-- **图片离开的位置**：图片共享元素被移除时，若它的容器已脱离窗口，换算出的位置会落在原点附近，过渡就从窗口左上角起飞。现在已脱离时改用最后一次布局记下的位置。
+- **Turning off hit testing**: adding `.allowsHitTesting(false)` to the split view (or a container wrapping it) makes the safe area disappear on the spot. `Stack(enabled: false)` therefore generates only `.disabled` and `.accessibilityHidden`; `.disabled` already disables the controls and gestures inside, and the window-wide scrim of `Modal` also blocks the pointer.
+- **Shared elements changing layout**: previously a non-image `hero` paired the whole frame with `matchedGeometryEffect`, and the split view was laid out at intermediate sizes during the animation; pairing only the position, or scaling only in drawing, still reproduced the problem when replacements followed each other quickly. On macOS a non-image `hero` now flies a snapshot on the window's top layer just like images (`BernViewHero`): it captures one image each of the regions of the old and the new element, flies from the old position to the new one while crossfading, and during the transition the real elements are only made transparent, with their layout and transforms untouched. iOS now uses `offset` and `scaleEffect`, which affect only drawing; neither side uses `matchedGeometryEffect` anymore. A new element counts as replacing the previous element of the same name only when that element is still there or left less than half a second ago; items scrolled back into view in a list do not fly.
+- **Animated branch switches**: when a branch contained a shared element, the generator used to add `.animation(_:value:)` to the whole branch so that `matchedGeometryEffect` had an animation to use; a newly inserted split view was therefore laid out inside the animation, which likewise pushed the sidebar under the title bar. Shared elements now drive their own animation, and this branch animation is generated only for `appear` / `disappear`.
+- **Popups**: the layers of `Modal` are attached through a preference value to an overlay at the window root, and originally had no transition on appearing or disappearing. Now the overlay itself fades the popup layers in and out, and the panel animates on appearing according to `appear` without taking the rest of the window with it. Floating panels are placed by `BernModalStage` (a `Layout`): when no height is written, it measures the content's ideal height with a proposal of the panel's width and unlimited height (the ideal height of a `ScrollView` is the height of the content it scrolls), and then limits it to the window; iOS and tvOS share it (2026-10-25, `tests/modal_fit.rs` measures it in an offscreen window).
+- **Scroll view entrances**: the title bar background is drawn by the scroll view below it, so when a `ScrollView` or `Form` itself does the offset and fade-in of `appear`, the title bar background moves and fades along with it. The entrance of a `ScrollView` now applies to its content, which slides and fades in within the scroll view while the scroll view itself stays still; the rows of a `Form` cannot be wrapped, so only the part below the top safe area fades in (`bernScrollEntrance`, a mask fade-in without offset). Both leave immediately. Measured frame by frame in slow motion: with the window in the background, the title bar background stays unchanged throughout; with the window in the foreground only one frame was captured, and in it there was no such background under the title bar.
+- **Where an image leaves from**: when an image shared element is removed and its container has already left the window, the converted position falls near the origin, and the transition takes off from the top-left corner of the window. Now, when the container has already left, the position recorded at the last layout is used.
 
-`tests/image_hero.rs` 增加了普通视图快照飞行的用例。以上都在一个真实应用上验证：首次引导快节奏连续完成 8 次、慢放（`BERN_MOTION=slow`）2 次，以及完成后切换模块、打开详情和播放器，侧栏位置都正确；慢放下引导窗口从小弹出，完成时小窗口从预览位置长成主窗口。生成器回归测试检查 `Stack(enabled:)` 不再输出 `.allowsHitTesting(`。这个回归测试在高负载时有 2/9 次在原有的图片计时断言处失败，改动前的版本连跑 4 次都通过，怀疑是计时抖动，未证实。
+`tests/image_hero.rs` adds a case for snapshot flights of ordinary views. All of the above was verified in a real app: completing the first-run onboarding 8 times in a row at a fast pace and 2 times in slow motion (`BERN_MOTION=slow`), and after completing it switching modules and opening details and the player, the sidebar was always in the right place; in slow motion the onboarding window pops out from small, and on completion the small window grows from the preview position into the main window. A generator regression test checks that `Stack(enabled:)` no longer outputs `.allowsHitTesting(`. Under heavy load this regression test failed 2 times out of 9 at an existing image timing assertion, while the version before the change passed 4 runs in a row; timing jitter is suspected, not confirmed.
 
-`ScrollView(indicators: hidden)` 生成 `.scrollIndicators(.never)`：`.hidden` 在系统设为「始终显示滚动条」时仍会显示滚动条。
+`ScrollView(indicators: hidden)` generates `.scrollIndicators(.never)`: `.hidden` still shows scroll bars when the system is set to show scroll bars "Always".
 
-`ScrollView(indicators: mouse)`（2026-10-27）生成 `.bernMouseIndicators()`，只在用鼠标时显示滚动条：鼠标不能像手指那样拖动横向的条带。macOS 上照 `NSScroller.preferredScrollerStyle`：系统给常驻滚动条时（接着鼠标，或设为「始终显示滚动条」）为 `.automatic`，只有触控板、系统给浮层滚动条时为 `.never`；插拔鼠标或改设置时随 `preferredScrollerStyleDidChangeNotification` 更新。iOS 见 iOS 实现记录，tvOS 总是 `.never`。验证：`search_palette_generates_native_controls_and_type_checks` 生成这种滚动视图，并对 macOS 与 iOS 做 Swift 类型检查；未在应用里看过滚动条。
+`ScrollView(indicators: mouse)` (2026-10-27) generates `.bernMouseIndicators()`, which shows scroll bars only when a mouse is in use: a mouse cannot drag a horizontal strip the way a finger can. On macOS it follows `NSScroller.preferredScrollerStyle`: when the system gives persistent scroll bars (a mouse is connected, or the setting is "Always") it is `.automatic`, and when there is only a trackpad and the system gives overlay scroll bars it is `.never`; it updates through `preferredScrollerStyleDidChangeNotification` when a mouse is plugged in or out or the setting changes. For iOS see the iOS implementation notes; tvOS is always `.never`. Verification: `search_palette_generates_native_controls_and_type_checks` generates such a scroll view and type-checks it with Swift for macOS and iOS; the scroll bars have not been looked at in an app.
 
-### 标签选择器与换行工具条（2026-10-20）
+### Chip pickers and wrapping bars (2026-10-20)
 
-`Picker(style: chips)` 生成 `BernChips`：每个选项一个系统 `Button`，用 `bernCapsuleControl(height: 30, prominent:)` 画成设计 6.3 的 30 点 chip（13 点中等字重，两端 13 点）；macOS / iOS 26 是系统可交互的 Liquid Glass，选中项染主题色，26 之前是材质胶囊与主题色胶囊；tvOS 上高 40 点、按 tvOS 的焦点样式。选中项带 `.isSelected` 无障碍特征。不显示标签且直接放在 `Flow` 里时，`BernChips` 的主体是一个 `ForEach`，每个按钮都是 `BernFlow` 的子视图，控件登记挂在第一个按钮上；其他位置它们放进自己的 `BernFlow(gap: 8)`，整组带标签作为无障碍名称。
+`Picker(style: chips)` generates `BernChips`: one system `Button` per option, drawn with `bernCapsuleControl(height: 30, prominent:)` as the 30-point chip from section 6.3 of the design (13-point medium weight, 13 points at each end); on macOS / iOS 26 it is the system's interactive Liquid Glass, with the selected item tinted with the theme color, and before 26 it is a material capsule and a theme-color capsule; on tvOS it is 40 points tall and follows tvOS's focus style. The selected item carries the `.isSelected` accessibility trait. When no label is shown and it is placed directly in a `Flow`, the body of `BernChips` is a `ForEach`, each button is a child view of `BernFlow`, and the control registration is attached to the first button; elsewhere the buttons go into their own `BernFlow(gap: 8)`, and the whole group has the label as its accessible name.
 
-`BernFlow` 先按宽度断行（`Spacer` 带 `BernRowSpacer` 布局值，断行时不占宽度），再把每行余下的宽度平分给这一行的 `Spacer`，子项在行高内竖直居中，与 Web 的 `flex-wrap` 加 `flex: 1` 一致。生成器在 `Flow` 的子项上设 `row` 与 `flow`，所以其中的 `Spacer` 生成 `BernRowSpacer`、分隔线竖立。
+`BernFlow` first breaks lines by width (a `Spacer` carries the `BernRowSpacer` layout value and takes no width when lines are broken), then divides the remaining width of each line equally among that line's `Spacer`s, and children are vertically centered within the line height, consistent with `flex-wrap` plus `flex: 1` on the Web. The generator sets `row` and `flow` on the children of a `Flow`, so a `Spacer` in it generates `BernRowSpacer`, and dividers stand vertically.
 
-验证（2026-10-20，macOS 26，窗口截图）：应用的设置 › 插件页，1000 点宽的设置窗口中分段控件「市场 / 已安装 3」靠左，五个 chip 靠右，chip 52 × 30 点、间距 10，与原型苹果版（52 × 30、间距 10）一致，选中的「全部」为主题色玻璃胶囊，两者竖直居中。设置窗口最小宽 1000，macOS 上看不到换行；换行在 Web、Android 与 iOS 的手机宽度下验证。`showcase_generates_swift_that_type_checks` 与 iOS 版类型检查通过。
+Verification (2026-10-20, macOS 26, window screenshots): on the app's Settings › Plugins page, in a 1000-point-wide settings window, the segmented control "Marketplace / Installed 3" is on the left and five chips are on the right; the chips are 52 × 30 points with a spacing of 10, matching the Apple version of the prototype (52 × 30, spacing 10); the selected "All" is a theme-color glass capsule, and the two are vertically centered. The settings window is at least 1000 wide, so wrapping cannot be seen on macOS; wrapping was verified at phone widths on the Web, Android and iOS. The type checks of `showcase_generates_swift_that_type_checks` and of its iOS version pass.
 
-### 与框架类型同名的值类型（2026-10-21）
+### Value types with the same names as framework types (2026-10-21)
 
-协议里名为 `Layout` 的 `#[value]` 枚举曾让 macOS 构建失败：生成的值类型与 SwiftUI、运行时同在一个模块的顶层，应用的 `Layout` 遮住了 SwiftUI 的 `Layout` 协议，`BernStyle.swift` 中的 `struct …: Layout` 报 `inheritance from non-protocol type 'Layout'` 与 `cannot find type 'Subviews' in scope`。现在 `BernGenerated.swift` 把每个值类型（协议与 UI 的 `#[value]`，以及 `MediaSource`、`CalendarDate` 等框架值类型）写成 `App_` 加声明的名字：`enum App_Layout`、`struct App_Text`、`[App_Text]`、`App_Color.green`，名字统一由 `bern_target_api::names::value_type` 给出（规则见设计文档“跨语言绑定”）。枚举的 case 是值，不会遮住类型，写法不变；字符串表的键（`Layout.Column`）、`bernName` 与解码错误（`invalid Layout`）仍用声明的名字。`pick:` 与 `Drop` 存文件时原先直接写 `MediaSource(url:)`，现在同样经 `value_type`。
+A `#[value]` enum named `Layout` in the protocol once made the macOS build fail: the generated value types are at the top level of the same module as SwiftUI and the runtime, so the app's `Layout` shadowed SwiftUI's `Layout` protocol, and `struct …: Layout` in `BernStyle.swift` reported `inheritance from non-protocol type 'Layout'` and `cannot find type 'Subviews' in scope`. Now `BernGenerated.swift` writes each value type (the `#[value]` types of the protocol and the UI, and framework value types such as `MediaSource` and `CalendarDate`) as `App_` plus the declared name: `enum App_Layout`, `struct App_Text`, `[App_Text]`, `App_Color.green`; the names all come from `bern_target_api::names::value_type` (for the rules see "Language bindings" in the design document). Enum cases are values and do not shadow types, so they are written as before; the keys of the string table (`Layout.Column`), `bernName` and decoding errors (`invalid Layout`) still use the declared names. `pick:` and `Drop` used to write `MediaSource(url:)` directly when storing files, and now also go through `value_type`.
 
-会遮住框架或运行时类型的常见名字：SwiftUI 的 `Layout`、`View`、`Text`、`Image`、`Color`、`Button`、`Toggle`、`Picker`、`List`、`Font`、`Animation`、`Scene`、`Window`、`Shape`、`Path`、`Alignment`；Swift 与 Foundation 的 `Error`（运行时的 `BernDecodeError: Error`）、`Task`、`Data`、`Date`、`Locale`、`Timer`、`Notification`、`Bundle`。
+Common names that shadow framework or runtime types: SwiftUI's `Layout`, `View`, `Text`, `Image`, `Color`, `Button`, `Toggle`, `Picker`, `List`, `Font`, `Animation`, `Scene`, `Window`, `Shape`, `Path`, `Alignment`; Swift's and Foundation's `Error` (the runtime's `BernDecodeError: Error`), `Task`, `Data`, `Date`, `Locale`, `Timer`, `Notification`, `Bundle`.
 
-示例 `examples/framework-names` 用这些名字声明协议类型，另有 UI 类型 `Shape` 与变体名同为类型名的 `Content`。`tests/framework_names.rs` 为 macOS、iOS、tvOS 生成并按各自 SDK 做 swiftc 类型检查。实测（macOS 27.0.1，Xcode 27.0，Swift 6.4）：三个平台都通过；去掉前缀生成同一示例时，macOS 的 swiftc 报 `inheritance from non-protocol type 'View'`、`thrown expression type 'BernDecodeError' does not conform to 'Error'`，运行时模板中 `type 'Content' constrained to non-protocol, non-class type 'View'`。
+The example `examples/framework-names` declares protocol types with these names, plus a UI type `Shape` and a `Content` whose variant names are also type names. `tests/framework_names.rs` generates for macOS, iOS and tvOS and type-checks with swiftc against each SDK. Measured (macOS 27.0.1, Xcode 27.0, Swift 6.4): all three platforms pass; when the same example is generated without the prefix, swiftc for macOS reports `inheritance from non-protocol type 'View'` and `thrown expression type 'BernDecodeError' does not conform to 'Error'`, and in the runtime templates `type 'Content' constrained to non-protocol, non-class type 'View'`.
 
-### 与框架类型同名的组件与会话（2026-10-21）
+### Components and sessions with the same names as framework types (2026-10-21)
 
-组件原先生成 `struct` 大驼峰名加 `View`、会话类为声明的名字加 `Session`、视图里读会话的变量为 `bern` 加声明的名字，都在模块顶层或视图内与框架、运行时的名字相遇：组件 `empty`、`any`、`progress`、`scroll`、`tab`、`navigation`、`timeline`、`content_unavailable` 生成 SwiftUI 的同名视图，`bern_player`、`bern_query` 生成运行时的 `BernPlayerView`、`BernQueryView`；会话 `URL` 生成 Foundation 的 `URLSession`；会话 `Window`、`Engine` 的变量就是视图自己的 `bernWindow`、`bernEngine`。现在 `BernGenerated.swift` 写 `struct AppView_empty: View`、`final class App_URL: BernSessionState`、`@Environment(App_Window.self) private var session_Window`，名字由 `bern_target_api::names` 的 `component`、`session_type`、`session_variable` 给出（规则见设计文档“跨语言绑定”）。
+Components used to generate a `struct` named with the UpperCamelCase name plus `View`, session classes were the declared name plus `Session`, and the variables that read sessions in views were `bern` plus the declared name, all of which met framework and runtime names at the module top level or inside views: the components `empty`, `any`, `progress`, `scroll`, `tab`, `navigation`, `timeline` and `content_unavailable` generated SwiftUI's views of the same names, and `bern_player` and `bern_query` generated the runtime's `BernPlayerView` and `BernQueryView`; the session `URL` generated Foundation's `URLSession`; the variables of the sessions `Window` and `Engine` were exactly the view's own `bernWindow` and `bernEngine`. Now `BernGenerated.swift` writes `struct AppView_empty: View`, `final class App_URL: BernSessionState` and `@Environment(App_Window.self) private var session_Window`, with names given by `component`, `session_type` and `session_variable` of `bern_target_api::names` (for the rules see "Language bindings" in the design document).
 
-示例 `examples/framework-names` 加了上述组件和会话 `URL`、`Window`、`Engine`（协议里的值类型 `Window` 改为 UI 的会话，Bern 的类型名在应用内唯一）。实测（macOS 27.0.1，Xcode 27.0，Swift 6.4，macOS 27.0 SDK）：
+The example `examples/framework-names` adds the components above and the sessions `URL`, `Window` and `Engine` (the value type `Window` in the protocol became a UI session, since Bern type names are unique within an app). Measured (macOS 27.0.1, Xcode 27.0, Swift 6.4, macOS 27.0 SDK):
 
-- 改前的生成器生成这个示例，swiftc 报 `invalid redeclaration of 'BernPlayerView'`、`'BernQueryView'`、`'bernWindow'`、`'bernEngine'`。
-- 改后的生成里每次只把一个组件换回旧名：`any` 让 `BernAppKit.swift` 报 3 处 `argument passed to call that takes no arguments`，`scroll` 让 `BernStyle.swift` 报 `extra trailing closure passed in call`，`content_unavailable` 让 `BernMedia.swift` 报 `argument passed to call that takes no arguments`，`bern_player`、`bern_query` 报重复声明；`empty`、`progress`、`tab`、`navigation`、`timeline` 单独换回时类型检查通过（它们同样遮住 SwiftUI 的同名类型，只是运行时现有的写法没有因此报错）。会话没有逐个换回测量，`URLSession` 单独的影响未测。
-- 改后 macOS、iOS、tvOS 的 swiftc 类型检查都通过；之后补进 `tests/framework_names.rs` 的写法断言只对照生成文件逐条核对过，没有再运行测试。
+- Generating this example with the generator from before the change, swiftc reports `invalid redeclaration of 'BernPlayerView'`, `'BernQueryView'`, `'bernWindow'` and `'bernEngine'`.
+- In the output of the changed generator, switching only one component back to its old name at a time: `any` makes `BernAppKit.swift` report 3 instances of `argument passed to call that takes no arguments`, `scroll` makes `BernStyle.swift` report `extra trailing closure passed in call`, `content_unavailable` makes `BernMedia.swift` report `argument passed to call that takes no arguments`, and `bern_player` and `bern_query` report duplicate declarations; `empty`, `progress`, `tab`, `navigation` and `timeline` pass type checking when switched back individually (they shadow SwiftUI's types of the same names just the same; the runtime's current code simply does not fail because of it). The sessions were not switched back one at a time and measured; the effect of `URLSession` alone was not measured.
+- After the change, the swiftc type checks for macOS, iOS and tvOS all pass; the assertions on the generated code's form that were later added to `tests/framework_names.rs` were only checked one by one against the generated files, and the test was not run again.
 
-### 菜单栏、跟随状态的快捷键与改键（2026-10-24）
+### Menu bar, state-following shortcuts and rebinding (2026-10-24)
 
-`MenuBar` 生成为主窗口场景上的 `.commands { BernMenuBar() }`：自己的菜单是 `CommandMenu`，带 `role` 的是 `CommandGroup`（`app` 在设置项之后、`file` 替换新建文档项、`edit` 在剪贴板项之后、`view` 在工具栏项之前、`window` 在窗口排列项之后、`help` 替换帮助项）。每个菜单的项生成为一个视图 `BernMenuN`：只写在 `Commands` 的 `body` 里时，项读到的引擎状态与草稿变了菜单也不更新（实测勾选和启用停在第一次的样子），放进视图的 `body` 后由 Observation 跟随。项读写的草稿取主窗口的 `BernWindowContext`（`BernMenuBarWindow.primary`），主窗口还没打开或已关闭时取一份新的；`BernHost.windowRevision` 随窗口打开、关闭变化，让菜单换到新打开的主窗口。`CommandItem` 是 `Button`，有 `checked` 时是 `Toggle`；`.keyboardShortcut(_:)` 接受可选的快捷键，跟随状态的快捷键为 nil 时没有按键。每次显示菜单项时 `BernMenuItems` 把它登记为外部入口 `menu_bar.<id>`（角色 `menu_item`）。
+`MenuBar` generates `.commands { BernMenuBar() }` on the main window scene: the app's own menus are `CommandMenu`, and those with a `role` are `CommandGroup` (`app` after the settings item, `file` replacing the new-document item, `edit` after the clipboard items, `view` before the toolbar items, `window` after the window arrangement items, `help` replacing the help item). The items of each menu are generated as a view `BernMenuN`: when they were written only in the `body` of `Commands`, the menu did not update when the engine state and drafts the items read changed (measured: check marks and enabled states stayed as they were the first time); placed in a view's `body`, they are followed by Observation. The drafts that items read and write are taken from the main window's `BernWindowContext` (`BernMenuBarWindow.primary`), and a fresh one is taken when the main window has not been opened yet or has been closed; `BernHost.windowRevision` changes as windows open and close, which makes the menu switch to a newly opened main window. `CommandItem` is a `Button`, or a `Toggle` when it has `checked`; `.keyboardShortcut(_:)` accepts an optional shortcut, and when a state-following shortcut is nil there is no key. Each time a menu item is shown, `BernMenuItems` registers it as the external entry point `menu_bar.<id>` (role `menu_item`).
 
-跟随状态的快捷键由 `BernShortcuts.keyboard(_:)` 在视图求值时把文本读成 `KeyboardShortcut?`；tvOS 用 `BernShortcuts.remote(_:)`，遥控按键随文本重新登记。`ShortcutInput` 是 `BernShortcutInput`：一个系统按钮，按下后用 `NSEvent.addLocalMonitorForEvents` 在窗口和菜单之前取下一次按键（键码换成 Bern 的键名，字符键取不带修饰键时的字符），鼠标按下时停止等待；iOS 用硬件键盘的 `onKeyPress`；tvOS 只显示。
+State-following shortcuts are read from text into a `KeyboardShortcut?` by `BernShortcuts.keyboard(_:)` when the view is evaluated; tvOS uses `BernShortcuts.remote(_:)`, and remote keys are registered again when the text changes. `ShortcutInput` is `BernShortcutInput`: a system button that, once pressed, uses `NSEvent.addLocalMonitorForEvents` to take the next key press before the window and the menus do (key codes are converted to Bern's key names, and for character keys the character without modifiers is taken), and stops waiting when the mouse is pressed; iOS uses `onKeyPress` of the hardware keyboard; tvOS only displays it.
 
-验证（macOS 27.0.1）：
+Verification (macOS 27.0.1):
 
-- `examples/gallery`：菜单栏多出“图案”菜单，文件菜单里有“打开视频…”，帮助菜单里是“关于图案集”，“强调色”子菜单展开；`ui.activate menu_bar.menu_details` 打开详情后，读菜单的辅助功能属性（`AXMenuItemMarkChar`、`enabled`）得到“详情”打勾、“关闭详情”可用；用 System Events 点“群青”后引擎的强调色改变、勾随之移动。`set-details-key` 改成 ⇧⌘D 后向进程投递按键：⌘⌥I 不再打开详情，⇧⌘D 打开。点“关于”窗口里的 `ShortcutInput` 后投递 ⌃⌘F，状态变为 `cmd+ctrl+f`；Esc 保持，Delete 清空为空文本。
-- 一个实际应用（用临时的 bundle id 构建，数据与钥匙串和正式版分开）：菜单栏的应用菜单、文件菜单、自建的“播放”菜单（含倍速子菜单）与显示菜单按声明出现，菜单项显示的按键与状态一致（`AXMenuItemCmdChar`、`AXMenuItemCmdModifiers`）；打开文件的键改成 ⌘P 后菜单显示 ⌘P，⌘O 不再打开面板、⌘P 打开一个面板；同一个键既是窗口里控件的快捷键又是菜单项的快捷键时（空格、D、→、⌘P），每按一次只执行一次；输入框获得焦点时按 F、空格、X，字符进入输入框，不触发菜单里没有修饰键的项（系统输入法为拼音时测得）；改键在应用重启后仍在。
-- `tests/menu_bar.rs` 为 macOS、iOS、tvOS 生成同一个应用并按各自 SDK 类型检查：iOS 与 tvOS 不生成菜单栏，`window.menu_bar` 的分支只留在 macOS。
+- `examples/gallery`: the menu bar gains a "Patterns" menu, the File menu has "Open Video…", the Help menu has "About Gallery", and the "Accent" submenu expands; after `ui.activate menu_bar.menu_details` opens the details, reading the menus' accessibility attributes (`AXMenuItemMarkChar`, `enabled`) shows "Details" checked and "Close the Details" enabled; clicking "Ultramarine" through System Events changes the engine's accent color, and the check mark moves with it. After `set-details-key` changes the key to ⇧⌘D, key presses were posted to the process: ⌘⌥I no longer opens the details, and ⇧⌘D does. After clicking the `ShortcutInput` in the "About" window and posting ⌃⌘F, the state becomes `cmd+ctrl+f`; Esc keeps it, and Delete clears it to empty text.
+- A real app (built with a temporary bundle id, its data and keychain kept apart from the release version): the app menu, the File menu, the app's own "Playback" menu (with a speed submenu) and the View menu in the menu bar appear as declared, and the keys shown by menu items match the state (`AXMenuItemCmdChar`, `AXMenuItemCmdModifiers`); after the key for opening files is changed to ⌘P, the menu shows ⌘P, ⌘O no longer opens the panel, and ⌘P opens one panel; when the same key is both a shortcut of a control in the window and of a menu item (Space, D, →, ⌘P), each press runs it only once; when a text field has focus, pressing F, Space and X puts the characters into the field and does not trigger the menu items without modifiers (measured with the system input method set to Pinyin); rebindings persist after the app restarts.
+- `tests/menu_bar.rs` generates the same app for macOS, iOS and tvOS and type-checks it against each SDK: iOS and tvOS do not generate a menu bar, and the `window.menu_bar` branch remains only on macOS.
 
-未验证：iPad 的菜单栏（未生成）；没有输入法时输入框与无修饰键菜单项的关系只在拼音输入法下测过；读屏朗读。
+Not verified: the iPad menu bar (not generated); how text fields and menu items without modifiers interact without an input method (tested only with the Pinyin input method); screen reader announcements.
 
-#### 应用自己的“关于”与帮助（2026-10-30）
+#### The app's own "About" and Help (2026-10-30)
 
-`CommandMenu(role: about)` 生成 `CommandGroup(replacing: .appInfo) { BernMenuN() }`：应用菜单的第一项换成声明的项，系统的标准关于面板不再出现；`role: help` 照旧是 `CommandGroup(replacing: .help)`，帮助菜单里系统的搜索框仍在，其下是声明的项。两者的项与其他菜单项一样是视图，登记为 `menu_bar.<id>`。`examples/gallery` 的“关于图案集”从帮助菜单移到 `role: about`。
+`CommandMenu(role: about)` generates `CommandGroup(replacing: .appInfo) { BernMenuN() }`: the first item of the app menu is replaced by the declared items, and the system's standard About panel no longer appears; `role: help` is still `CommandGroup(replacing: .help)`: the system's search field in the Help menu stays, with the declared items below it. The items of both are views like other menu items and are registered as `menu_bar.<id>`. In `examples/gallery`, "About Gallery" moved from the Help menu to `role: about`.
 
-验证：`tests/menu_bar.rs` 加入两种角色，检查生成的 `.appInfo` 与 `.help` 两组，Swift 按 macOS SDK 类型检查通过。本机 macOS 27.2 上一个实际应用的 release 构建实测：System Events 点应用菜单的第一项与帮助菜单里的项，执行的是应用的命令（打开应用自己的弹窗），没有出现系统的关于面板与“没有帮助”的提示；帮助项显示声明的 ⌘?。用 `postToPid` 投递的 ⌘? 没有触发这一项（同样投递的 ⌘, 能打开设置），真实键盘未试。未运行：`examples/gallery`。
+Verification: `tests/menu_bar.rs` adds both roles and checks the generated `.appInfo` and `.help` groups, and the Swift type-checks against the macOS SDK. Measured with a release build of a real app on this machine, macOS 27.2: clicking the first item of the app menu and the item in the Help menu through System Events runs the app's commands (opening the app's own popups), and neither the system's About panel nor the "Help isn't available" notice appears; the help item shows the declared ⌘?. A ⌘? posted with `postToPid` did not trigger this item (a ⌘, posted the same way opens Settings); a real keyboard was not tried. Not run: `examples/gallery`.

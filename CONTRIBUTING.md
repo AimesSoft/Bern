@@ -1,8 +1,10 @@
-# 参与贡献
+**English** · [简体中文](CONTRIBUTING.zh-CN.md)
 
-## 提交前的检查
+# Contributing
 
-CI（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）在每个拉取请求上运行下面这些检查，提交前在本地跑一遍：
+## Checks before submitting
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the following checks on every pull request; run them locally before submitting:
 
 ```sh
 cargo fmt --all --check
@@ -11,7 +13,7 @@ cargo test --workspace
 node --test crates/bern-svg/tests/*.test.mjs crates/bern-backend-web/tests/*.test.mjs
 ```
 
-GTK 运行时 `crates/bern-gtk` 不是工作区成员，要单独检查。它需要 GTK 4.14、libadwaita 1.5 和 WebKitGTK 6 的开发包（Debian 与 Ubuntu 上是 `libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev`）：
+The GTK runtime `crates/bern-gtk` is not a workspace member and is checked separately. It needs the development packages for GTK 4.14, libadwaita 1.5 and WebKitGTK 6 (on Debian and Ubuntu, `libgtk-4-dev libadwaita-1-dev libwebkitgtk-6.0-dev`):
 
 ```sh
 cd crates/bern-gtk
@@ -20,31 +22,33 @@ cargo clippy --all-features --all-targets -- -D warnings
 cargo test --all-features
 ```
 
-装了 GTK 4 和 libadwaita 时，`bern-backend-gtk` 的测试还会对生成的 Linux 应用做类型检查。
+With GTK 4 and libadwaita installed, the `bern-backend-gtk` tests also type-check the generated Linux app.
 
-## 测试
+## Tests
 
-- 测试要在任何一台电脑上得到同样的结果。需要 Xcode、Android SDK 或 Windows SDK 的部分，在缺少工具链时只检查能检查的内容，不能因此失败。只需要工具路径的地方，像 `crates/bern-cli/tests/svg_targets.rs` 那样在测试里给一套空的工具目录。
-- 生成器的改动，最好用测试检查生成的代码；能在本机编译生成结果的目标，测试会顺带编译它。
+- Tests must give the same result on any computer. Parts that need Xcode, the Android SDK or the Windows SDK check only what they can when the toolchain is missing, and must not fail because of it. Where only tool paths are needed, give the test an empty set of tool directories, as `crates/bern-cli/tests/svg_targets.rs` does.
+- For generator changes, prefer tests that check the generated code; for targets whose generated output can be compiled on the local machine, the tests compile it as well.
 
-## 运行时文案
+## Runtime strings
 
-各运行时自己显示的文字只在 [`crates/bern-target-api/src/texts.rs`](crates/bern-target-api/src/texts.rs) 的 `FRAMEWORK_TEXTS` 里声明一次，并且要写全每一种框架语言。测试会检查每种语言都有译文，也会检查运行时和生成器用到的每个 `bern.*` 键都已声明。
+Text that a runtime displays on its own is declared only once, in `FRAMEWORK_TEXTS` in [`crates/bern-target-api/src/texts.rs`](crates/bern-target-api/src/texts.rs), and must cover every framework language. Tests check that every language has a translation, and that every `bern.*` key used by the runtimes and generators is declared.
 
-## 提交信息
+## Commit messages
 
-沿用仓库已有的写法：
+Follow the style already used in the repository:
 
 ```text
-<type>(<scope>): <用英文小写写成的一句摘要>
+<type>(<scope>): <one-sentence summary in lowercase English>
 
-<正文：为什么改、改了什么行为，必要时写清没有改什么>
+<body: why the change was made, what behavior changed, and, where needed, what did not change>
 ```
 
-- `type` 用 `feat`、`fix`、`refactor`、`test`、`docs`、`ci` 或 `style`；`scope` 是改动所在的部分，例如 `swiftui`、`gtk`、`compiler`、`targets`，跨度大时可以省略。
-- 摘要说明这次提交做了什么，读者不打开 diff 也能看懂。`1`、`macos适配` 这样的信息说明不了改了什么。
-- 一次提交只做一件事；格式化、重构和行为改动分开提交。
+- `type` is `feat`, `fix`, `refactor`, `test`, `docs`, `ci` or `style`; `scope` is the part the change is in, for example `swiftui`, `gtk`, `compiler`, `targets`, and may be omitted when the change spans a lot.
+- The summary says what the commit does, so that a reader understands it without opening the diff. Messages like `1` or `macos适配` say nothing about what changed.
+- One commit does one thing; formatting, refactoring and behavior changes go in separate commits.
 
-## 文档
+## Documentation
 
-组件、属性或平台能力变化时，按 [Docs/README.md 的更新规则](Docs/README.md#更新规则) 同步参考文档与验收记录。
+When components, properties or platform capabilities change, update the reference documents and acceptance records according to [the update rules in Docs/README.md](Docs/README.md#update-rules).
+
+The documentation is in English and Simplified Chinese; a change to one page changes both languages in the same commit, and `cargo test -p bern --test docs` checks that they correspond.

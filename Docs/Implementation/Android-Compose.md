@@ -1,120 +1,122 @@
-# Android Compose 实现记录
+**English** · [简体中文](../zh-CN/Implementation/Android-Compose.md)
 
-当前组件接口见[组件参考](../Reference/UI.md)，逐项支持与近期验证范围见[平台能力表](../Reference/Platforms.md)。下文保留各阶段实现和验收记录。
+# Android Compose implementation notes
 
-## 引擎的 Android 宿主服务
+The current component interface is in the [component reference](../Reference/UI.md); per-item support and the scope of recent verification are in the [platform capability table](../Reference/Platforms.md). The sections below keep the implementation and acceptance records of each phase.
 
-`bern::platform` 提供 Android 宿主需要完成的操作。宿主在引擎启动前登记实现；没有实现的其他目标返回 `platform_unavailable`，不会静默成功。
+## Android host services for the engine
+
+`bern::platform` provides the operations that the Android host has to carry out. The host registers its implementation before the engine starts; other targets without an implementation return `platform_unavailable` and never silently succeed.
 
 ```rust
-bern::platform::copy_text("要复制的文字")?;
+bern::platform::copy_text("text to copy")?;
 bern::platform::open_path(&received_file)?;
 let imported = bern::platform::import_folder(&selected_tree.url, &import_cache)?;
 let exported_uri = bern::platform::export_path(&received_file, &selected_tree.url)?;
 ```
 
-`copy_text` 与 `open_path` 由主线程调用 Android 的剪贴板和 `ACTION_VIEW`。私有文件通过 `${applicationId}.bern.files` 的 `FileProvider` 提供，只授予选中文件的读取权限，不授予 URI 前缀权限。私有目录无法由其他应用直接浏览，应先导出至用户选择的文件夹；`open_path` 对此返回错误。
+`copy_text` and `open_path` call Android's clipboard and `ACTION_VIEW` on the main thread. Private files are served through the `FileProvider` at `${applicationId}.bern.files`, which grants read permission only for the selected file and never grants URI prefix permission. A private directory cannot be browsed directly by other apps, so it should first be exported to a folder the user picks; `open_path` returns an error for it.
 
-目录来自 `Button(pick: draft.folder, files: "folder")` 的系统目录选择器。`import_folder` 递归复制用户所选的文档树，返回缓存中的新根目录；`export_path` 将一个文件或目录递归导出到用户所选的文档树，返回新根文档的 `content://` URI。两者保留原内容，同名编号，失败时尝试清理本次新建的副本。选择器保存目录的读写授权；只读提供方则退回读取授权，导出会明确失败。
+Folders come from the system folder picker of `Button(pick: draft.folder, files: "folder")`. `import_folder` recursively copies the document tree the user picked and returns the new root directory in the cache; `export_path` recursively exports a file or directory into the document tree the user picked and returns the `content://` URI of the new root document. Both keep the original content, number items whose name already exists, and on failure try to clean up the copies created in that run. The picker keeps a read-write grant for the folder; read-only providers fall back to a read grant, and export then fails explicitly.
 
-导入和导出是同步 I/O，调用方应放在工作线程上，不能放在 UI 线程。2026-10-23 实现，Android 构建与真机验证记录待补充。
+Import and export are synchronous I/O; callers should run them on a worker thread, never on the UI thread. Implemented on 2026-10-23; records of the Android build and of verification on a real device are still to be added.
 
-不复制也能读所选的文件夹：`bern::files::list` 与 `walk` 直接列出文档树，`open` 打开其中的文档（见设计文档“引擎读取交来的文件”）。Rust 一侧的 `content` 打开方式经 JNI 调 `BernBridge.listFolder`：文档树（`…/tree/<id>`）代表它的顶层文档，树下的文档地址（`…/tree/<id>/document/<id>`）原样使用；先查文档的类型，不是文件夹答复 `error:not_a_folder`，是文件夹就用 `buildChildDocumentsUriUsingTree` 查询子文档的 ID、显示名、类型、大小与修改时间，每个子文档经 `buildDocumentUriUsingTree` 得到同一文档树下的地址，选择器保存的授权覆盖它们。结果以 `ok:` 开头、每个字段后跟一个 NUL 交回，失败时是 `error:` 与原因。`fileName` 也接受文档树，取顶层文档的显示名，`files::name` 因此得到文件夹的名字。2026-11-02 在模拟器（API 36）上用一个音乐应用验证：选择器选中 `Music` 下的一个文件夹后列出含子文件夹在内的三首歌与一个 `.lrc`，读出标签、封面与歌词并从文档地址播放，重启后授权仍在、重新遍历结果相同；未授权的文档树列举失败（`SecurityException`），引擎得到 `source_unavailable`。
+The chosen folder can be read without copying it: `bern::files::list` and `walk` list the document tree directly, and `open` opens the documents in it (see "The engine reads files handed to it" in the design document). The Rust side's opener for `content` calls `BernBridge.listFolder` through JNI: a document tree (`…/tree/<id>`) stands for its top-level document, and a document address under the tree (`…/tree/<id>/document/<id>`) is used as is; the document's type is queried first, and something that is not a folder replies `error:not_a_folder`; for a folder, `buildChildDocumentsUriUsingTree` queries the children's IDs, display names, types, sizes and modification times, each child gets an address under the same document tree through `buildDocumentUriUsingTree`, and the grant the picker saved covers them. The result comes back starting with `ok:`, each field followed by a NUL; on failure it is `error:` and the reason. `fileName` also accepts a document tree and takes the display name of the top-level document, so `files::name` gets the folder's name. Verified on 2026-11-02 on an emulator (API 36) with a music app: after choosing a folder under `Music` in the picker, three songs (one of them in a subfolder) and one `.lrc` are listed, tags, artwork and lyrics are read, and playback reads from the document addresses; after a restart the grant is still there and walking again gives the same result; listing a document tree without a grant fails (`SecurityException`), and the engine gets `source_unavailable`.
 
-- 日期：2026-10-14（页面级布局、场景与控件形态的能力于 2026-10-19 补齐，见同名一节）
-- 依据：[Bern 架构设计 v0.30](../Design.md)，[Android 适配规范](../Adaptation/Android.md)
-- 工具链：Rust 1.99.0（`aarch64-linux-android`）；Android NDK 29.0.14206865；Android Gradle 插件 9.3.3、Gradle 9.5.1、JDK 21（Android Studio 自带的运行时）；Kotlin 2.4.21 的 Compose 编译器插件；Compose BOM 2026.09.00（Compose 1.12.1、Material 3）；Media3 1.11.1；compileSdk 37、targetSdk 36、minSdk 26
-- 验证环境：小米 MIX 2S，LineageOS，Android 15（API 35），arm64-v8a，1080 × 2160、440 dpi（约 393 dp 宽），经 USB 调试连接 M4 Mac
+- Date: 2026-10-14 (the page-level layout, scene and control-shape capabilities were filled in on 2026-10-19, see the section of the same name)
+- Basis: [Bern architecture design v0.30](../Design.md), [Android adaptation guidelines](../Adaptation/Android.md)
+- Toolchain: Rust 1.99.0 (`aarch64-linux-android`); Android NDK 29.0.14206865; Android Gradle Plugin 9.3.3, Gradle 9.5.1, JDK 21 (the runtime bundled with Android Studio); the Compose compiler plugin of Kotlin 2.4.21; Compose BOM 2026.09.00 (Compose 1.12.1, Material 3); Media3 1.11.1; compileSdk 37, targetSdk 36, minSdk 26
+- Verification environment: Xiaomi MIX 2S, LineageOS, Android 15 (API 35), arm64-v8a, 1080 × 2160, 440 dpi (about 393 dp wide), connected to an M4 Mac over USB debugging
 
-本文记录 `compose + android` 目标的实际完成情况。目标模块是新的 `bern-backend-compose`：生成 Kotlin 与 Jetpack Compose 代码和一个 Gradle 工程，引擎经 NDK 编译后在应用进程内运行。展示应用（`examples/showcase`）、`examples/planner` 与 `examples/hello` 只增加了 `[targets.android]`，声明、协议与业务核心不变。
+This document records what the `compose + android` target actually delivers. The target module is the new `bern-backend-compose`: it generates Kotlin and Jetpack Compose code and a Gradle project, and the engine, compiled with the NDK, runs inside the app process. The showcase app (`examples/showcase`), `examples/planner` and `examples/hello` only gained `[targets.android]`; their declarations, protocol and business core are unchanged.
 
-## 完成情况
+## Status
 
-| 设计要求 | 状态 | 说明 |
+| Design requirement | Status | Notes |
 | --- | --- | --- |
-| 生成代码可构建 | 完成 | `bern build --target android` 生成 Kotlin、Gradle 工程与胶水 crate，用 NDK 编译引擎库、Gradle 打包 APK，并为这台电脑构建 CLI 与 MCP 服务器；生成测试检查三个示例的 Kotlin、清单、构建脚本与字符串表 |
-| 引擎在应用进程内 | 完成 | 引擎、会话运行时与 JNI 桥编译为 `libbern_app.so`；值按与 C ABI 相同的二进制布局传递 |
-| 不支持原生多窗口时用虚拟窗口 | 完成 | 一个 Activity：主窗口铺满屏幕，其他窗口叠在上面，系统返回关闭最上面的窗口；窗口事实报告为 `Virtual` |
-| 屏幕旋转、键盘、安全区域 | 部分 | Activity 自己处理配置变化，窗口与草稿不因旋转重建；内容避开系统栏与输入法（edge-to-edge 下按 insets 留出位置）；旋转未实测 |
-| 状态可订阅；带参数命令与错误返回 | 完成 | Kotlin 运行时与 Swift 运行时一一对应：引擎状态、会话草稿、查询、关闭协议、外部会话命令 |
-| 深浅色与平台主题 | 完成 | Material 3 配色；Android 12 起用壁纸的动态取色；深浅色跟随系统 |
-| 运行时切换语言 | 完成 | 字符串表是 assets 中的 JSON，切换语言不重建界面 |
-| Video 原生呈现 | 完成 | Media3 的 ExoPlayer 执行端与不带控件的 `PlayerView`，命令驱动的控制条 |
-| 样式覆盖、动效、`Canvas` 与标注 | 完成 | 与 SwiftUI 相同的组件与状态；出现、消失、重排与共享元素动效 |
-| 本地控制通道 | 完成 | 抽象套接字，`bern run` 用 `adb forward` 接到这台电脑 |
-| 打包与签名 | 完成 | `bern package` 生成发布版 APK 与 AAB，发布密钥从环境变量读取 |
+| Generated code builds | Done | `bern build --target android` generates the Kotlin, the Gradle project and the glue crate, compiles the engine library with the NDK, packages the APK with Gradle, and builds the CLI and MCP server for this computer; generation tests check the Kotlin, manifest, build scripts and string tables of the three examples |
+| Engine inside the app process | Done | The engine, the session runtime and the JNI bridge compile to `libbern_app.so`; values are passed in the same binary layout as the C ABI |
+| Virtual windows where native multi-window is not supported | Done | One Activity: the main window fills the screen, other windows stack on top of it, and system back closes the topmost window; the window fact is reported as `Virtual` |
+| Screen rotation, keyboard, safe areas | Partial | The Activity handles configuration changes itself, so windows and drafts are not recreated on rotation; content avoids the system bars and the input method (under edge-to-edge, space is left according to the insets); rotation not measured |
+| Subscribable state; commands with parameters and error returns | Done | The Kotlin runtime corresponds one-to-one to the Swift runtime: engine state, session drafts, queries, the close protocol, external session commands |
+| Light and dark mode and platform theme | Done | Material 3 color scheme; dynamic color from the wallpaper from Android 12 on; light and dark follow the system |
+| Runtime language switching | Done | String tables are JSON in assets; switching language does not rebuild the UI |
+| Native Video presentation | Done | A Media3 ExoPlayer executor and a `PlayerView` without controls, with a command-driven control bar |
+| Style overrides, motion, `Canvas` and annotation | Done | The same components and states as SwiftUI; appear, disappear, reflow and shared-element motion |
+| Local control channel | Done | Abstract socket; `bern run` connects it to this computer with `adb forward` |
+| Packaging and signing | Done | `bern package` produces a release APK and AAB; the release key is read from environment variables |
 
-## 工程结构
+## Project structure
 
-| 位置 | 内容 |
+| Location | Contents |
 | --- | --- |
-| `crates/bern-backend-compose/src/lib.rs` | 目标：描述、检查、生成、构建与打包步骤 |
-| `src/kotlin/` | Kotlin 生成器：值类型、引擎状态、会话草稿、每个组件与窗口一个 composable、Activity |
-| `src/style.rs` | `style!` 在 Compose 上的能力与 `BernStyle` 声明 |
-| `src/project.rs` | Gradle 脚本、清单、主题、应用名与字符串表 |
-| `src/glue.rs` | 引擎库（cdylib）与这台电脑上的 CLI、MCP 服务器 |
-| `src/toolchain.rs` | 查找 SDK、NDK、Gradle 与 JDK |
-| `src/icons.rs` | 图标表：每个图标名对应的 Material 图标，生成 `BernIcons.get` 的分支，检查据此拒绝表中没有的名字 |
-| `templates/BernRuntime.kt` | 编解码、宿主、窗口、控件登记、外部会话命令、窗口根 |
-| `templates/BernViews.kt` | 标准组件的 Material 3 实现、图标映射、查询 |
-| `templates/BernStyle.kt` | 颜色角色、样式覆盖、弹簧、过渡、共享元素、`Canvas` 与标注 |
-| `templates/BernMedia.kt` | 媒体执行端与视频视图 |
-| `templates/BernFeatures.kt` | v0.29 与 v0.30 的能力：明暗与强调色、快捷键、绑定的长度、阴影、带内容的按钮、开关按钮、工具栏搜索、侧面板、轻提示、分体按钮、运行时图片与取色、文件选取与拖放、滚动联动与停靠、晃一下、手势区、按比例摆放的轨道、浮层按钮 |
-| `crates/bern-ffi/src/android.rs` | JNI 方法与回调 |
+| `crates/bern-backend-compose/src/lib.rs` | The target: description, check, generation, build and packaging steps |
+| `src/kotlin/` | Kotlin generator: value types, engine state, session drafts, one composable per component and window, the Activity |
+| `src/style.rs` | The capabilities of `style!` on Compose and the `BernStyle` declarations |
+| `src/project.rs` | Gradle scripts, manifest, theme, app name and string tables |
+| `src/glue.rs` | The engine library (cdylib) and the CLI and MCP server on this computer |
+| `src/toolchain.rs` | Locating the SDK, NDK, Gradle and JDK |
+| `src/icons.rs` | Icon table: the Material icon for each icon name; generates the branches of `BernIcons.get`, and the check uses it to reject names that are not in the table |
+| `templates/BernRuntime.kt` | Encoding and decoding, host, windows, control registration, external session commands, window root |
+| `templates/BernViews.kt` | Material 3 implementations of the standard components, icon mapping, queries |
+| `templates/BernStyle.kt` | Color roles, style overrides, springs, transitions, shared elements, `Canvas` and annotation |
+| `templates/BernMedia.kt` | Media executor and video view |
+| `templates/BernFeatures.kt` | The v0.29 and v0.30 capabilities: appearance and accent color, keyboard shortcuts, bound lengths, shadows, buttons with content, toggle buttons, toolbar search, side panels, toasts, split buttons, runtime images and color sampling, file picking and drag and drop, scroll-linked effects and snapping, nudge, gesture areas, rails with proportional placement, popover buttons |
+| `crates/bern-ffi/src/android.rs` | JNI methods and callbacks |
 
-生成的 Gradle 工程在 `target/bern/android/project/`。引擎库复制到 `app/src/main/jniLibs/arm64-v8a/`，随包资源镜像到 `assets/bern/resources/`，运行时首次启动（以及每次更新后）把它们解压到应用的文件目录，引擎按文件路径读取。生成的 Kotlin 在以包标识命名的包中，运行时在 `dev.bern.runtime` 中。
+The generated Gradle project is in `target/bern/android/project/`. The engine library is copied to `app/src/main/jniLibs/arm64-v8a/`, and bundled resources are mirrored to `assets/bern/resources/`; on first launch (and after every update) the runtime extracts them into the app's files directory, and the engine reads them by file path. The generated Kotlin is in a package named after the package identifier, and the runtime is in `dev.bern.runtime`.
 
-## 引擎与 JNI
+## Engine and JNI
 
-Kotlin 对象 `BernNative` 声明 C ABI 的每个函数，`bern-ffi` 的 `android` 模块以 JNI 方法实现它们，只做字节数组的复制；`BernNative.start` 由生成的胶水实现，因为它要构造应用自己的引擎。引擎的回调（状态、命令答复、外部会话命令、媒体请求与状态、查询）在引擎或通道线程上调用 Kotlin 的 `BernBridge`，线程以守护线程方式附着到 Java 虚拟机，`BernBridge` 再把工作转到主线程。回调抛出的异常被清除，不会让引擎线程崩溃。JNI 只用 `jni-sys` 的函数表，不引入更大的绑定库。
+The Kotlin object `BernNative` declares every function of the C ABI, and the `android` module of `bern-ffi` implements them as JNI methods that only copy byte arrays; `BernNative.start` is implemented by the generated glue, because it has to construct the app's own engine. Engine callbacks (state, command replies, external session commands, media requests and status, queries) call Kotlin's `BernBridge` on the engine or channel thread; the thread attaches to the Java virtual machine as a daemon thread, and `BernBridge` then moves the work to the main thread. Exceptions thrown by a callback are cleared and do not crash the engine thread. JNI uses only the function table of `jni-sys`, without pulling in a larger binding library.
 
-## 界面
+## UI
 
-生成器与 SwiftUI 生成器一一对应，组件改用 Material 3：
+The generator corresponds one-to-one to the SwiftUI generator, with components switched to Material 3:
 
-- **窗口根**：每个窗口一个 `Scaffold`，顶栏显示窗口标题，或里面的页面声明的标题（`Form` 的标题、分栏的选中项）、返回与工具栏操作。被叠在上面的窗口不响应系统返回。叠在主窗口上的窗口左上角是关闭按钮，经关闭协议请求关闭。
-- **分栏**：宽度不小于 600 dp 时侧边栏（280 dp）与详情并排；更窄时先显示侧边栏列表，选中后进入详情，系统返回与顶栏的返回箭头回到列表。外部入口选择侧栏项时同样进入详情。
-- **页签**：底部 `NavigationBar`；工具栏中的选择器显示为顶栏里的下拉菜单，因为顶栏只有一行高。
-- **控件**：`Button` 默认是色调按钮，`prominent` 为实心按钮，`plain` 为文字按钮；`Switch` 是整行可点按的开关或复选框；`Picker` 按样式是下拉框、分段按钮、单选列表或一排 `FilterChip`（`chips`）；分段按钮不带对勾（设计的 `.c-seg` 只以底色标出选中段），标签按整行宽度量，计数等后缀不会被截掉；`TextInput` 是带标签的描边输入框；`Slider` 可带两端图标。
-- **启动器图标**：没有声明或声明 PNG 时生成自适应图标（`mipmap-anydpi-v26/ic_launcher.xml`）：前景层 `ic_launcher_foreground.png` 边长 432 像素，画面缩放到中间 72/108 的安全区，背景层是画面角上颜色的 `drawable/ic_launcher_background.xml`；Android 8 以前仍用 `mipmap-xxxhdpi/ic_launcher.png`。此前只有 `ic_launcher.png`，启动器把它整个缩进圆形，比其他应用的图标小一圈（2026-11-01）。PNG 读不出来时只生成旧的 `ic_launcher.png`。`[app.icon].android` 为 `res` 文件夹时原样并入应用的 `res`，自适应图标与主题图标（单色层）随之生效，有 `ic_launcher_round` 时清单加 `android:roundIcon`。
-- **图标**：Bern 的图标名（SF Symbols 命名）映射到 Material 图标：Material 核心图标集里有的直接用，核心集没有的（暂停、音量、亮度、网格、归档、文件夹、调色板、媒体库、同步、插件、键盘、无线网络等）由运行时按 Material 图标（baseline 样式）的路径数据绘制。对照表只有一份（`src/icons.rs`），生成时写进 `BernIcons.get`；应用用到表中没有的名字时检查报错并指向声明，不再在运行时显示中性圆点（圆点只留给没有图标的位置）。表至少包含 Bern 图标集（`bern_target_api::icon_set::NAMES`）的全部名字，测试逐个核对。
-- **导航项按条件出现**：`if`、`match` 与 `ForEach` 中的侧栏项与页签照常生成，选中项消失时回到 `fallback` 或第一个可见项。
+- **Window root**: one `Scaffold` per window; the top bar shows the window title, or the title declared by the page inside it (the title of a `Form`, the selected item of a split view), plus back and toolbar actions. A window covered by another window does not respond to system back. A window stacked on the main window has a close button at the top left, which requests closing through the close protocol.
+- **Split view**: at widths of at least 600 dp the sidebar (280 dp) and the detail sit side by side; on narrower widths the sidebar list shows first, choosing an item enters the detail, and system back and the back arrow in the top bar return to the list. Selecting a sidebar item from an external entry point enters the detail as well.
+- **Tabs**: a bottom `NavigationBar`; pickers in the toolbar show as a dropdown menu in the top bar, because the top bar is only one row high.
+- **Controls**: `Button` is a tonal button by default, `prominent` is a filled button, `plain` is a text button; `Switch` is a switch or checkbox that the whole row responds to; `Picker`, depending on its style, is a dropdown, segmented buttons, a radio list or a row of `FilterChip` (`chips`); segmented buttons carry no checkmark (the design's `.c-seg` marks the selected segment only by its background), and labels are measured against the full row width, so suffixes such as counts are not cut off; `TextInput` is an outlined text field with a label; `Slider` can carry icons at both ends.
+- **Launcher icon**: with no declaration or a declared PNG an adaptive icon is generated (`mipmap-anydpi-v26/ic_launcher.xml`): the foreground layer `ic_launcher_foreground.png` is 432 pixels square with the artwork scaled into the central 72/108 safe zone, and the background layer is `drawable/ic_launcher_background.xml` in the color of the artwork's corner; before Android 8, `mipmap-xxxhdpi/ic_launcher.png` is still used. Previously there was only `ic_launcher.png`, which the launcher shrank whole into a circle, a size smaller than other apps' icons (2026-11-01). When the PNG cannot be read, only the old `ic_launcher.png` is generated. When `[app.icon].android` is a `res` folder it is merged into the app's `res` as is, so adaptive icons and themed icons (the monochrome layer) take effect, and when there is an `ic_launcher_round` the manifest gets `android:roundIcon`.
+- **Icons**: Bern icon names (SF Symbols naming) map to Material icons: names in the Material core icon set are used directly, and those the core set lacks (pause, volume, brightness, grid, archive, folder, palette, media library, sync, plugin, keyboard, Wi-Fi and others) are drawn by the runtime from the path data of the Material icons (baseline style). There is only one mapping table (`src/icons.rs`), written into `BernIcons.get` at generation time; when an app uses a name that is not in the table, the check reports an error pointing at the declaration, instead of a neutral dot showing at runtime (the dot is kept only for positions without an icon). The table contains at least every name of the Bern icon set (`bern_target_api::icon_set::NAMES`), and a test checks them one by one.
+- **Conditional navigation items**: sidebar items and tabs inside `if`, `match` and `ForEach` are generated as usual; when the selected item disappears, the selection returns to `fallback` or the first visible item.
 
-## 样式与动效
+## Style and motion
 
-- **样式覆盖**：`Button`、`IconButton` 与 `SidebarItem` 支持与 SwiftUI 相同的属性与状态。只有变换的样式套在 Material 控件上，由控件自己的交互状态驱动；改变外观的样式由 Bern 绘制。颜色角色映射到 Material 配色。
-- **出现与消失**：条件分支用 `AnimatedContent` 切换，新旧分支在同一位置交替，进入与离开各用分支第一个元素声明的过渡；列表中在窗口第一次显示之后加入的元素播放出现过渡。列表项移除时没有消失过渡。单个元素的出现过渡（`BernAppear`）不用 `AnimatedVisibility`：一个从 0 到 1 的进度按声明的弹簧（及错峰、`appear_delay` 的等待）推进，所在层的透明度、位移与缩放由它算出，与 `AnimatedVisibility` 用同一弹簧分别推进各属性的效果相同；布局与 `AnimatedVisibility` 一样（同样的约束，取最大的子元素，放在左上角）。进度走完协程就结束，元素留在页面上时不再有等待的协程。
-- **样式的状态变换**：缩放与位移合成一个四维值、透明度一个值，只在外观变化时启动弹簧，走完即结束；按下与悬停由按钮自己的交互源在发出时记下（`BernInteractions`），不再各开一个收集协程。阴影同样只在半径变化时运行。
-- **重排**：声明了 `reflow` 的容器以弹簧动画改变尺寸。
-- **共享元素**：窗口根是共享过渡布局，带相同 `hero` 键的元素在分支切换时从原位置移到新位置；元素按自身尺寸布局、再缩放到移动的边界，所以文字在过渡中不重新换行，两者交叉淡化。
-- **系统关闭动画时**（开发者选项或无障碍中的“移除动画”），变换保持静止，过渡改为 150 毫秒的淡入淡出。这个设置在应用启动时与每次回到前台时读一次，存为一个状态；`reduce_motion` 的持有者也合成一个状态，各元素组合时只读这两个值。
-- **`Canvas` 与标注**：Compose 的 `Canvas` 绘制形状、数值序列与图案；里面什么也不画、只用来占位置的 `Canvas` 生成为同样大小的 `Spacer`（没有绘制节点，也不带清空的语义节点；有 `label` 时保留它的语义）。`Text(mark:)` 从文字的行布局取得每行位置，在文字后面画底纹。
+- **Style overrides**: `Button`, `IconButton` and `SidebarItem` support the same properties and states as SwiftUI. Styles that only transform are applied on top of the Material control and driven by the control's own interaction state; styles that change the appearance are drawn by Bern. Color roles map to the Material color scheme.
+- **Appear and disappear**: conditional branches switch with `AnimatedContent`, the old and new branch alternate in the same place, and entering and leaving each use the transition declared on the branch's first element; elements added to a list after the window first shows play their appear transition. Removed list items have no disappear transition. The appear transition of a single element (`BernAppear`) does not use `AnimatedVisibility`: a progress from 0 to 1 advances by the declared spring (and the wait for stagger and `appear_delay`), and the opacity, offset and scale of the element's layer are computed from it, with the same effect as `AnimatedVisibility` advancing each property separately with the same spring; layout is the same as with `AnimatedVisibility` (the same constraints, takes the largest child, placed at the top left). The coroutine ends once the progress completes, so no waiting coroutine remains while the element stays on the page.
+- **State transforms of styles**: scale and offset are combined into one four-dimensional value and opacity into one value; the spring starts only when the appearance changes and ends once it completes; press and hover are recorded by the button's own interaction source as they are emitted (`BernInteractions`), instead of each starting its own collecting coroutine. Shadows likewise run only when the radius changes.
+- **Reflow**: containers that declare `reflow` change size with a spring animation.
+- **Shared elements**: the window root is a shared transition layout, and elements with the same `hero` key move from their old position to the new one when a branch switches; an element lays out at its own size and is then scaled to the moving bounds, so text does not rewrap during the transition, and the two cross-fade.
+- **When the system turns off animations** ("Remove animations" in developer options or accessibility), transforms stay still and transitions become a 150 ms fade. This setting is read once at app launch and every time the app returns to the foreground, and stored as one state; the holders of `reduce_motion` are also combined into one state, and elements read only these two values when they compose.
+- **`Canvas` and annotation**: Compose's `Canvas` draws shapes, value series and patterns; a `Canvas` that draws nothing and only takes up space is generated as a `Spacer` of the same size (no draw node, and no semantics node with cleared semantics; when it has a `label` its semantics are kept). `Text(mark:)` gets the position of each line from the text's line layout and draws the shading behind the text.
 
-## 窗口外观
+## Window appearance
 
-- `chrome` 在手机上不起作用：手机窗口没有标题栏，顶栏是导航的一部分（与 iPhone 相同）。
-- `immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；为假时恢复。只有最上面的窗口控制系统栏。
-- `idle_after`：触摸、指针与按键都会重新计时，计时到期后 `window.idle` 为真。布局变化后 Compose 会在原位置重发一次指针事件，位置没变的移动不算输入，否则控制层淡出、顶栏收起后窗口会立即被自己唤醒。页面上有 `idle_area` 时见“静置区”。
+- `chrome` has no effect on phones: a phone window has no title bar, and the top bar is part of navigation (as on iPhone).
+- When `immersive` is true, the top bar and the system status bar and navigation bar are hidden, and swiping from a screen edge shows the system bars temporarily; when it is false they are restored. Only the topmost window controls the system bars.
+- `idle_after`: touch, pointer and key input all restart the timer, and when it expires `window.idle` is true. After a layout change Compose resends a pointer event at the same position; a move whose position did not change does not count as input, otherwise the window would wake itself immediately after the control layer fades out and the top bar collapses. When the page has an `idle_area`, see "Idle area".
 
-## 本地控制通道
+## Local control channel
 
-应用是自己的系统用户，开发者的工具不能与它共用目录，所以 Android 上通道监听抽象套接字 `bern.<包标识>`。对端检查允许应用自己的用户和 `adb` 所在的 shell 用户（开发版系统上为 root），其他应用连不上。`bern run` 在应用启动后执行 `adb forward`，把这台电脑上应用目录里的 `android.sock` 接到这个抽象套接字，CLI、JSON 客户端与 MCP 服务器（为这台电脑构建）因此和桌面一样找到它。再次运行时先移除旧的转发再重建，否则旧转发不会重新创建套接字文件。
+The app is its own system user, and developer tools cannot share a directory with it, so on Android the channel listens on the abstract socket `bern.<package-id>`. The peer check allows the app's own user and the shell user that `adb` runs as (root on development builds of the system), so other apps cannot connect. After the app starts, `bern run` runs `adb forward`, connecting `android.sock` in the app directory on this computer to this abstract socket, so the CLI, JSON clients and the MCP server (built for this computer) find it just as on desktop; when other engines of the app run too, `--engine android` picks it. On a later run it first removes the old forward and then recreates it; otherwise the old forward would not recreate the socket file.
 
-## 媒体
+## Media
 
-ExoPlayer 是执行端：每个播放器一个 ExoPlayer，按媒体契约执行载入、播放、暂停、跳转、音量与静音，并按源版本报告阶段、位置、时长与错误；静音由执行端记住，播放器音量设为 0。视频视图是不带控件的 `PlayerView`，所有播放变化都经 Bern 的媒体命令。能力描述声明：一个播放器同一时刻只在一个视图中显示；后台继续播放需要媒体服务（`MediaSessionService`），应用目前不声明，所以声明为不支持。
+ExoPlayer is the executor: one ExoPlayer per player, which carries out load, play, pause, seek, volume and mute according to the media contract, and reports phase, position, duration and errors per source version; mute is remembered by the executor, which sets the player volume to 0. The video view is a `PlayerView` without controls, and every playback change goes through Bern's media commands. The capability description declares: a player is shown in only one view at a time; background playback needs a media service (`MediaSessionService`), which the app does not declare at present, so it is declared unsupported.
 
-## 图片的读取
+## Image loading
 
-`Image(source:)` 的声明资源与引擎给出的图片（文件、`content://`、http(s)）都由 `BernPictures` 读取，不在主线程解码：
+Declared resources in `Image(source:)` and images given by the engine (files, `content://`, http(s)) are all read by `BernPictures`, never decoded on the main thread:
 
-- 在 `Dispatchers.IO` 上先只读尺寸（`inJustDecodeBounds`），再按显示大小取 `inSampleSize`：图片自身像素除以仍能盖住显示尺寸的最大 2 的幂。显示尺寸由声明的宽高与屏幕密度算出，跟随图片比例的一边不计；没有声明宽高、铺满容器宽度的图片按布局量出的宽度读取，量出之前不读（一帧）。显示变大、已读的像素不够时重新读取，期间仍显示已读的那张。解码后调用 `prepareToDraw()`，在第一次绘制前交给 GPU。
-- 最近读过的图片按位图字节保留 64 MB（`LruCache`，以 URL 为键），重新出现的图片立即显示；同一图片正在读取时共用那次读取。各图片的比例在进程内一直记住。
-- 读到之前，框保持声明的大小：两边都给出或给了 `aspect` 时与读到后相同；比例要跟随图片时，声明资源在组合时只读文件头（每个文件一次），框不跳动；引擎给出的图片在比例未知时按海报的 2:3 占位。读不出文件头的声明资源不占位置，与此前一样。
+- On `Dispatchers.IO` it first reads only the dimensions (`inJustDecodeBounds`), then picks `inSampleSize` for the display size: the largest power of 2 by which the image's own pixels can be divided and still cover the display size. The display size is computed from the declared width and height and the screen density, not counting a side that follows the image's ratio; an image with no declared width or height that fills the container width is read at the width measured by layout, and is not read before it is measured (one frame). When the display grows and the pixels already read are not enough, it reads again, showing the image already read in the meantime. After decoding it calls `prepareToDraw()`, handing the image to the GPU before the first draw.
+- Recently read images are kept up to 64 MB of bitmap bytes (`LruCache`, keyed by URL), so an image that reappears shows immediately; while the same image is being read, requests share that read. Each image's ratio is remembered for the life of the process.
+- Until it is read, the frame keeps the declared size: when both sides are given, or `aspect` is given, it is the same as after reading; when the ratio has to follow the image, declared resources read only the file header during composition (once per file), so the frame does not jump; images given by the engine hold a 2:3 poster placeholder while their ratio is unknown. Declared resources whose file header cannot be read take no space, as before.
 
-## 构建、运行与打包
+## Build, run and packaging
 
-Rust 引擎的网络访问不能从 UI 推断，使用显式 Android 目标选项声明：
+The Rust engine's network access cannot be inferred from the UI, so it is declared with explicit Android target options:
 
 ```toml
 [targets.android]
@@ -123,7 +125,7 @@ channels = ["ipc"]
 android = { network = true, multicast = true }
 ```
 
-`network` 生成 `INTERNET` 权限；`multicast` 同时生成 `INTERNET` 与 `CHANGE_WIFI_MULTICAST_STATE`，并在 Activity 的 `onStart` 持有非引用计数的 `WifiManager.MulticastLock`，在 `onStop` 释放，以接收前台局域网发现的 Wi-Fi 组播。两项默认关闭；声明媒体或网络图片的应用仍按原规则获得网络权限。`android` 选项只能用于 Android 目标，未知字段会报错。后台持续接收需另外的 Android 后台服务支持，不由这个锁保持应用运行。
+`network` generates the `INTERNET` permission; `multicast` generates both `INTERNET` and `CHANGE_WIFI_MULTICAST_STATE`, and holds a non-reference-counted `WifiManager.MulticastLock` from the Activity's `onStart`, releasing it in `onStop`, to receive the Wi-Fi multicast of LAN discovery in the foreground. Both are off by default; apps that declare media or network images still get network permission by the existing rules. The `android` options can only be used on Android targets, and unknown fields are reported as errors. Continuous receiving in the background needs separate support for Android background services; this lock does not keep the app running.
 
 ```bash
 rustup target add aarch64-linux-android
@@ -132,326 +134,326 @@ bern run --target android
 bern package --target android
 ```
 
-- `bern doctor` 检查 Android SDK、NDK、Gradle 与 Rust 的 Android 目标。工具的位置：`ANDROID_HOME`（或 Android Studio 的默认位置）、`ANDROID_NDK_HOME`（或 SDK 中最新的 NDK）、`BERN_GRADLE`（或 `PATH` 中的 `gradle`、Gradle 包装器下载的 9.4 以上版本）、`BERN_JAVA_HOME`（或 Android Studio 自带的运行时、`JAVA_HOME`）。缺少时 `bern build` 跳过 Android 并说明要装什么。
-- 构建步骤：用 NDK 的 clang 为 `aarch64-linux-android` 构建引擎库；复制到 `jniLibs`；镜像随包资源；Gradle 构建 APK；为这台电脑构建 CLI 与 MCP 服务器。第一次构建时 Gradle 从 Google 与 Maven Central 下载插件与库。
-- `bern run --target android` 要求恰好连着一台设备（真机或模拟器），安装 APK、启动 Activity、转发控制通道并显示应用的日志，应用进程结束时返回。
-- **基线配置文件**：生成的工程带 `app/src/main/baseline-prof.txt`，列出 Bern 运行时（`dev/bern/runtime`）与生成的界面代码（应用的包）的全部类与方法；Gradle 把它与 Compose 等库自带的规则一起编进 APK 与 AAB。商店安装时系统按它预先编译；发布版构建另把 Gradle 为 Android 12 及以上生成的 `.dm` 复制为 APK 旁的 `<应用>.dm`，`bern run` 在 Android 12 及以上的设备上用 `adb install-multiple` 把两者一起装上，装完即为 `speed-profile`（设备不接受时只装 APK 并提示）；调试版不编译，构建时删掉旧的 `.dm`。直接装 APK 时由 Compose 带的 ProfileInstaller 在首次启动后写入配置文件，系统在下次后台编译时才用上，在那之前这些代码由解释器与 JIT 运行。
-- `bern package` 在 `target/bern/dist/` 生成 `<应用>-<版本>-android.apk` 与 `.aab`。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，密码不写进任何文件；没有设置时用调试密钥签名，并提示不能上架。
+- `bern doctor` checks the Android SDK, the NDK, Gradle and Rust's Android target. Tool locations: `ANDROID_HOME` (or Android Studio's default location), `ANDROID_NDK_HOME` (or the newest NDK in the SDK), `BERN_GRADLE` (or `gradle` on `PATH`, or a version 9.4 or later downloaded by the Gradle wrapper), `BERN_JAVA_HOME` (or the runtime bundled with Android Studio, or `JAVA_HOME`). When something is missing, `bern build` skips Android and says what to install.
+- Build steps: build the engine library for `aarch64-linux-android` with the NDK's clang; copy it into `jniLibs`; mirror the bundled resources; build the APK with Gradle; build the CLI and MCP server for this computer. On the first build Gradle downloads plugins and libraries from Google and Maven Central.
+- `bern run --target android` requires exactly one connected device (a real device or an emulator); it installs the APK, starts the Activity, forwards the control channel and shows the app's log, and returns when the app process ends.
+- **Baseline profile**: the generated project carries `app/src/main/baseline-prof.txt`, which lists every class and method of the Bern runtime (`dev/bern/runtime`) and of the generated UI code (the app's package); Gradle compiles it into the APK and AAB together with the rules that libraries such as Compose ship. On store installs the system compiles ahead of time according to it; release builds additionally copy the `.dm` that Gradle generates for Android 12 and later to `<app>.dm` next to the APK, and on devices with Android 12 or later `bern run` installs both together with `adb install-multiple`, so the app is `speed-profile` as soon as it is installed (when the device does not accept this, only the APK is installed, with a notice); debug builds are not compiled ahead of time, and the build deletes an old `.dm`. When the APK is installed directly, the ProfileInstaller that ships with Compose writes the profile after the first launch, and the system uses it only at its next background compilation; until then this code runs in the interpreter and the JIT.
+- `bern package` produces `<app>-<version>-android.apk` and `.aab` in `target/bern/dist/`. Gradle reads the release key from `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS` (optionally `BERN_ANDROID_KEY_PASSWORD`), and passwords are not written into any file; when these are not set it signs with the debug key and warns that the result cannot be published to a store.
 
-## 媒体类应用的能力（v0.29）
+## Capabilities for media apps (v0.29)
 
-能力描述列出全部 `features`（`session_actions`、`reveal`、`bound_lengths`、`appearance`、`shortcuts`、`runtime_theme`、`button_content`、`toolbar_search`、`search_results`、`toggle_button`、`dialog_windows`、`runtime_images`、`picture_fills`、`file_pick`、`scroll_snap`），动效属性加上 `animate`、`scroll_scale`、`scroll_opacity` 与 `nudge`。
+The capability description lists all `features` (`session_actions`, `reveal`, `bound_lengths`, `appearance`, `shortcuts`, `runtime_theme`, `button_content`, `toolbar_search`, `search_results`, `toggle_button`, `dialog_windows`, `runtime_images`, `picture_fills`, `file_pick`, `scroll_snap`), and the motion properties gain `animate`, `scroll_scale`, `scroll_opacity` and `nudge`.
 
-- **带内容的按钮与阴影**：`clickable` 加 `hoverable`，阴影随状态的弹簧变化；重复项中的控件经 `LocalBernItemKeys` 带上每一层的 key。触屏没有悬停，`reveal` 的内容一直显示。
-- **明暗与强调色**：`appearance` 在子树里换一套 Material 配色；`WindowSet(accent:, appearance:)` 改全局配色，状态栏图标随明暗变色。没有运行时强调色时，`[theme].brand_seed` 经 `bern_target_api::style::brand_accent` 生成 `BernThemeChoice(BernColor.Fixed(浅色, 深色), null)`（2026-10-30 起，未在设备上看过）。
-- **快捷键**：活动的 `dispatchKeyEvent` 先查当前屏幕上的控件登记的快捷键，`cmd` 是 Ctrl；按键也让 `window.idle` 重新计时。
-- **绑定的长度**：`animateDpAsState` 跟随，值与回弹都不低于零。
-- **视频圆角**：有 `corner` 时 `PlayerView` 改用 `TextureView` 才能被裁住。
-- **对话框窗口**：居中的 `Dialog`，宽高按声明。分体按钮的浮层是 `DropdownMenu`；侧面板在手机上是底部弹层。
-- **运行时图片与取色**：图片在后台读取，平均色由缩到 32×32 的整张图算出（取色只按 32 像素见方的大小解码，不进缓存）。图片的读法见下文“图片的读取”。
-- **文件**：`pick` 用系统的文档选择器，按种类过滤并保留读取授权；`Drop` 用 `dragAndDropTarget`，并向系统请求拖入内容的读取权限；`opens: true` 在清单里登记 `VIEW` 与 `SEND` 意图，活动为 `singleTask`，运行中交来的文件经 `onNewIntent` 送到拖放区。用到网络地址时清单加上 `INTERNET`。
-- **滚动联动与停靠**：带 `snap` 或 `position` 的 `ScrollView` 记录每一格在滚动内容中的位置（不随滚动变化），`graphicsLayer` 按每格离视口中心的距离缩放、变淡；停靠用自己的 `FlingBehavior`，按惯性算出落点后取最近的一格；首次显示时先定位到字段所指的一格，再开始跟随用户滚动。
-- **晃一下与手势区**：`nudge` 用 `graphicsLayer` 放大再弹回；`Pinch` 从多指指针事件累计缩放（`calculateZoom`），`Swipe` 用竖向拖动手势，松手执行动作。
+- **Buttons with content and shadows**: `clickable` plus `hoverable`, and the shadow changes with the state's spring; controls in repeated items carry the key of every level through `LocalBernItemKeys`. Touch screens have no hover, so `reveal` content is always shown.
+- **Appearance and accent color**: `appearance` switches a subtree to a different Material color scheme; `WindowSet(accent:, appearance:)` changes the global color scheme, and the status bar icons change color with the appearance. When there is no runtime accent color, `[theme].brand_seed` goes through `bern_target_api::style::brand_accent` to generate `BernThemeChoice(BernColor.Fixed(light, dark), null)` (since 2026-10-30, not looked at on a device).
+- **Keyboard shortcuts**: the activity's `dispatchKeyEvent` first checks the shortcuts registered by the controls currently on screen, and `cmd` is Ctrl; key presses also restart the `window.idle` timer.
+- **Bound lengths**: they follow through `animateDpAsState`, and neither the value nor the bounce goes below zero.
+- **Video corners**: with `corner`, `PlayerView` switches to `TextureView` so that it can be clipped.
+- **Dialog windows**: a centered `Dialog` with the declared width and height. The popup of a split button is a `DropdownMenu`; side panels are bottom sheets on phones.
+- **Runtime images and color sampling**: images are read in the background, and the average color is computed from the whole image scaled down to 32×32 (sampling decodes only at a size of 32 pixels square and does not go into the cache). How images are read is described in "Image loading" above.
+- **Files**: `pick` uses the system document picker, filtered by kind, and keeps the read grant; `Drop` uses `dragAndDropTarget` and asks the system for read permission on the dropped content; `opens: true` registers `VIEW` and `SEND` intents in the manifest, the activity is `singleTask`, and files handed over while the app is running reach the drop area through `onNewIntent`. When network addresses are used, the manifest gets `INTERNET`.
+- **Scroll-linked effects and snapping**: a `ScrollView` with `snap` or `position` records each cell's position in the scroll content (which does not change with scrolling), and `graphicsLayer` scales and fades each cell by its distance from the viewport center; snapping uses its own `FlingBehavior`, which computes the landing point from inertia and takes the nearest cell; on first display it first moves to the cell the field points to and only then starts following the user's scrolling.
+- **Nudge and gesture areas**: `nudge` scales up and springs back with `graphicsLayer`; `Pinch` accumulates zoom from multi-pointer events (`calculateZoom`), and `Swipe` uses a vertical drag gesture and runs the action on release.
 
-## v0.30 的四项扩展
+## The four v0.30 extensions
 
-能力描述的 `features` 加上 `rails`、`popover_button` 与 `size_classes`，动效属性加上 `stagger`。
+The capability description's `features` gain `rails`, `popover_button` and `size_classes`, and the motion properties gain `stagger`.
 
-- **错峰出现（`stagger`）**：声明了 `stagger` 的 `Column`、`Row`、`Grid`、`Stack`、`ForEach` 与 `List` 用 `BernStaggered` 给直接子元素提供一个时钟（`LocalBernStagger`）。带 `appear` 的直接子元素第一次组合时向时钟取一个轮次，延迟为轮次乘 `stagger`；同一次更新中组合的子元素（主线程空下来之前）按组合顺序依次取轮次，也就是子元素与各行的书写顺序（`Grid` 与非惰性的 `ForEach` 按顺序组合，惰性列表的首屏也按序号组合），之后计数归零，所以容器出现时、一次更新加入几个子元素时都从 0 开始依次排开。Compose 的弹簧没有延迟参数，出现过渡的动画规格由 `BernDelayed` 包一层：等待期间数值停在起点，元素透明地占着自己的位置，不让兄弟元素跳动。`ForEach` 不加布局，它的各行是所在容器的直接子元素；组件的根也可能是直接子元素（海报墙的卡片就是组件），所以应用中有 `stagger` 时，直接子元素中不出现的元素与组件的根在下面用 `BernUnstaggered` 清掉时钟，只有直接子元素取轮次。窗口首次显示不播放；系统关闭动画时不错峰，仍是 150 毫秒的淡入。
-- **按比例摆放（`Rail`）**：`BernRail` 是一个自定义 `Layout`。写了 `at`、`from` 或 `to` 的元素外面包一层 `BernPlace`，以 `layoutId` 把比例交给轨道；比例夹到 0 到 1，有 `animate` 时由 `animateFloatAsState` 按弹簧跟随。轨道沿轴取它得到的最大长度（没有上限时取 `at` 子元素中最长的）；交叉方向的厚度是 `at` 子元素的尺寸、`from`/`to` 子元素自身的固有厚度与父容器给的最小值中最大的。`at` 子元素按自身大小、按 `anchor` 以起点、中心或终点对准那一点；`from`/`to` 子元素沿轴量得两点之间的长度，交叉方向最多到轨道厚度，没写交叉尺寸的 `Canvas` 因此铺满厚度。子元素在交叉方向居中，可以超出轨道，不裁切；从右到左的语言中横向轨道从右边量起（`placeRelative`）。轨道没有指针输入，触摸落到下面的层。`Stack` 中直接作为一层、只放着没写交叉尺寸的 `from`/`to` 子元素的轨道加 `matchParentSize()`，随整个 `Stack` 的大小铺满（与 Web 中“含无尺寸绘图的层铺满 `Stack`”一致）。
-- **浮层按钮（`PopoverButton`）**：有图标时是 `IconButton`，只有文字时是色调按钮，在顶栏中是文字按钮；浮层是与分体按钮相同的 `DropdownMenu`，内容放在内边距 16、最小宽 240 的竖排中，只在打开时组合，所以其中的控件只在打开时出现在 `ui.inspect` 里。`presented` 绑定会话字段时，浮层跟随字段，点按按钮、点到外面关闭都写回字段；没有绑定时由按钮自己记住。控件角色是 `popover_button`，`ui.activate` 打开，值为 `open` 或 `closed`；`shortcut` 也打开它。
-- **四档尺寸**：`[layouts]` 的断点在活动启动时写入 `BernHost.layouts`。每个窗口在 `Scaffold` 上量自己的宽度（`onSizeChanged`），量到之前用屏幕宽度（对话框窗口用声明的宽度）估计，所以首帧就是正确的档位；`window.compact`、`window.medium`、`window.expanded`、`window.large` 是窗口上下文的属性，读它们的表达式随窗口宽度换档。`Adaptive` 仍按所在位置的可用宽度（`BoxWithConstraints`）选择，某档没有自己的 `Layout` 时用更大一档的，没有更大的就用更小一档的；`ui.inspect` 中的值是宽度所在的档。
-- **图标**：`chevron.left` 映射到 Material 的左箭头（胶片页紧凑布局的“第一个”之前显示为圆点）。
-- **构建**：输出目录 `target/bern/android` 被这里构建的每个应用共用，Gradle 前用 `Mirror` 只留下本应用的 Kotlin，另一个应用留下的生成文件不再被编进来（之前运行时接口变化后，留下的旧文件会让编译失败）。
+- **Staggered appearance (`stagger`)**: a `Column`, `Row`, `Grid`, `Stack`, `ForEach` or `List` that declares `stagger` uses `BernStaggered` to give its direct children a clock (`LocalBernStagger`). A direct child with `appear` takes a turn from the clock when it first composes, and its delay is the turn times `stagger`; children composed in the same update (before the main thread becomes idle) take turns in composition order, which is the written order of the children and rows (`Grid` and non-lazy `ForEach` compose in order, and the first screen of a lazy list also composes by index), after which the count goes back to zero, so both when the container appears and when one update adds several children they are spaced out starting from 0. Compose springs have no delay parameter, so the animation spec of the appear transition is wrapped in `BernDelayed`: while it waits, the value stays at its start and the element holds its place transparently, so siblings do not jump. `ForEach` adds no layout, and its rows are direct children of the enclosing container; the root of a component can also be a direct child (the cards of the poster wall are components), so when the app has `stagger`, direct children with no appear transition and the roots of components clear the clock below them with `BernUnstaggered`, and only direct children take turns. Nothing plays on the window's first display; when the system turns off animations there is no staggering, and it is still the 150 ms fade-in.
+- **Proportional placement (`Rail`)**: `BernRail` is a custom `Layout`. An element that writes `at`, `from` or `to` is wrapped in a `BernPlace`, which hands its fraction to the rail through `layoutId`; fractions are clamped to 0 to 1, and with `animate` they follow by spring through `animateFloatAsState`. Along the axis the rail takes the largest length it is offered (with no upper bound, the longest of its `at` children); the thickness across is the largest of the size of the `at` children, the intrinsic thickness of the `from`/`to` children themselves, and the minimum given by the parent. `at` children keep their own size and align their start, center or end with that point according to `anchor`; `from`/`to` children are measured to the length between their two points along the axis and at most the rail's thickness across, so a `Canvas` with no cross size fills the thickness. Children are centered across the rail and may extend beyond it without being clipped; in right-to-left languages a horizontal rail measures from the right (`placeRelative`). The rail takes no pointer input, so touches fall through to the layers below. A rail that is a direct layer of a `Stack` and holds only `from`/`to` children with no cross size gets `matchParentSize()` and fills the size of the whole `Stack` (consistent with the Web, where "a layer containing an unsized drawing fills the `Stack`").
+- **Popover button (`PopoverButton`)**: with an icon it is an `IconButton`, with only text a tonal button, and in the top bar a text button; the popover is the same `DropdownMenu` as for split buttons, with the content in a vertical stack with padding 16 and minimum width 240, composed only while it is open, so the controls inside appear in `ui.inspect` only while it is open. When `presented` binds a session field, the popover follows the field, and tapping the button and tapping outside to close both write back to the field; without a binding the button remembers the state itself. The control role is `popover_button`, `ui.activate` opens it, and its value is `open` or `closed`; `shortcut` also opens it.
+- **Four size classes**: the breakpoints of `[layouts]` are written into `BernHost.layouts` when the activity starts. Each window measures its own width on its `Scaffold` (`onSizeChanged`), and until then estimates it from the screen width (dialog windows use the declared width), so the first frame is already in the right class; `window.compact`, `window.medium`, `window.expanded` and `window.large` are properties of the window context, and expressions that read them switch class with the window width. `Adaptive` still chooses by the width available where it sits (`BoxWithConstraints`); when a class has no `Layout` of its own it uses the next larger one, and when there is no larger one, the next smaller; the value in `ui.inspect` is the class the width falls into.
+- **Icons**: `chevron.left` maps to Material's left arrow (before this, "First" in the compact layout of the film page showed as a dot).
+- **Build**: the output directory `target/bern/android` is shared by every app built here, so before Gradle, `Mirror` keeps only this app's Kotlin, and generated files left by another app are no longer compiled in (previously, after the runtime interface changed, the stale files left behind made compilation fail).
 
-## 页面级布局、场景与控件形态的能力（2026-10-19）
+## Page-level layout, scene and control-shape capabilities (2026-10-19)
 
-能力描述补上此前只有 SwiftUI、Web 与 GTK 声明的 29 项 `features`（`text_weights`、`text_lines`、`image_corners`、`sidebar_width`、`controlled_values`、`search_palette`、`image_template`、`adaptive_images`、`scaled_scene`、`accordion_layout`、`capsule_controls`、`modal_flow_timer`、`page_badges`、`idle_control`、`fill_buttons`、`grid_cells`、`page_search`、`form_layout`、`modal_cover`、`window_short`、`edge_grow`、`delayed_appear`、`toolbar_leading`、`axis_padding`、`icon_menus`、`icon_labels`、`row_baseline`、`sidebar_header`、`untitled_detail`），另加 `window_landscape`（手机转为横屏），动效补上 `appear_delay`、`nudge_key`、`nudge_scale`、`reduce_motion`，样式补上 `Stack` 的 `background`、`foreground`、`corner`。新的运行时在 `BernScene.kt`。
+The capability description adds the 29 `features` that previously only SwiftUI, Web and GTK declared (`text_weights`, `text_lines`, `image_corners`, `sidebar_width`, `controlled_values`, `search_palette`, `image_template`, `adaptive_images`, `scaled_scene`, `accordion_layout`, `capsule_controls`, `modal_flow_timer`, `page_badges`, `idle_control`, `fill_buttons`, `grid_cells`, `page_search`, `form_layout`, `modal_cover`, `window_short`, `edge_grow`, `delayed_appear`, `toolbar_leading`, `axis_padding`, `icon_menus`, `icon_labels`, `row_baseline`, `sidebar_header`, `untitled_detail`), plus `window_landscape` (the phone turns to landscape); motion adds `appear_delay`, `nudge_key`, `nudge_scale` and `reduce_motion`, and styles add `background`, `foreground` and `corner` for `Stack`. The new runtime is in `BernScene.kt`.
 
-### 外观与文字
+### Appearance and text
 
-- `Stack` 的样式：`BernStack` 先按圆角裁剪（`clip`），再画底色，`foreground` 作为 `LocalContentColor` 向下传给文字与图标。`Stack(enabled: false)` 在各层之上盖一层吃掉全部指针事件的透明层，各层原样显示。
-- `text { … }`：活动启动时把各文字样式的字重与字号写入 `BernTypography`；`bernTextStyle` 取 Material 的对应样式，换上字重，给了字号时用该字号（sp）与字体自身的行高。`Text(lines:)` 是 `maxLines` 加末尾省略号；`font_size`（可绑定）与 `line_height` 是 sp，行高按 CSS 把多出的空间均分在上下（`LineHeightStyle.Alignment.Center`、`Trim.None`）。`Label(font_size:)` 同时设置文字与图标的大小，`display: icon` 只显示图标，标题作无障碍描述。
-- `Image(corner:)` 是（可绑定、可弹簧的）圆角裁剪；`rendering: template` 用 `ColorFilter.tint(LocalContentColor, SrcIn)`；`aspect` 取代图片自身比例；两边都不给时铺满宽度、高度按 `aspect` 或图片自身的比例（`aspectRatio`，与 SwiftUI 的 `resizable().aspectRatio(contentMode: .fit)` 一致；此前没有 `aspect` 时高度取位图的像素高度）。
+- `Stack` styles: `BernStack` first clips to the corner radius (`clip`), then draws the background, and passes `foreground` down to text and icons as `LocalContentColor`. `Stack(enabled: false)` puts a transparent layer that swallows all pointer events on top of the layers, and the layers display unchanged.
+- `text { … }`: when the activity starts, the weight and size of each text style are written into `BernTypography`; `bernTextStyle` takes the corresponding Material style, swaps in the weight, and when a size is given uses that size (sp) with the font's own line height. `Text(lines:)` is `maxLines` plus a trailing ellipsis; `font_size` (bindable) and `line_height` are in sp, and the line height splits the extra space evenly above and below, as in CSS (`LineHeightStyle.Alignment.Center`, `Trim.None`). `Label(font_size:)` sets the size of both the text and the icon; `display: icon` shows only the icon, with the title as the accessibility description.
+- `Image(corner:)` is a (bindable, springable) rounded-corner clip; `rendering: template` uses `ColorFilter.tint(LocalContentColor, SrcIn)`; `aspect` replaces the image's own ratio; when neither side is given the image fills the width, and the height follows `aspect` or the image's own ratio (`aspectRatio`, matching SwiftUI's `resizable().aspectRatio(contentMode: .fit)`; previously, without `aspect`, the height was the bitmap's pixel height).
 
-### 控件形态与受控值
+### Control shapes and controlled values
 
-- `shape: capsule` 是 `CircleShape`（Material 3 的按钮本来就是胶囊），`height` 设置控件高度并去掉上下内边距。`IconButton(height:)` 是该直径的 `FilledTonalIconButton`，`prominence: prominent` 为 `FilledIconButton`，`plain` 与没有 `height` 时仍是无底色的 `IconButton`；`font_size` 是图标大小。`Button(width: fill)` 横向撑满。`ControlGroup` 是 `surfaceContainerHigh` 的胶囊 `Surface`（默认高 40），控件排在其中。
-- `Menu(style: icon)`：只显示图标，有 `height` 时是该直径的色调圆形按钮；`Menu(shape:, height:)` 是色调胶囊按钮。胶囊形的下拉 `Picker` 是色调胶囊按钮加 `DropdownMenu`，当前项前有对勾。
-- 受控值：`Switch(checked:)`、`Picker(selected:)`、`Slider(current:)` 显示表达式的值，改动时执行动作的命令，参数中与该表达式相同的一项换成新值（整数参数四舍五入）；受控滑块拖动时只移动自己，松开时执行命令。绑定草稿并带动作的 `Switch`、`Picker` 先写草稿再执行动作。`PickerOption` 给出自己的值与标签。`label_hidden` 不显示标签，只作无障碍描述。
+- `shape: capsule` is `CircleShape` (Material 3 buttons are capsules anyway), and `height` sets the control's height and removes the vertical padding. `IconButton(height:)` is a `FilledTonalIconButton` of that diameter, `prominence: prominent` is a `FilledIconButton`, and with `plain` or without `height` it is still an `IconButton` with no background; `font_size` is the icon size. `Button(width: fill)` stretches horizontally. `ControlGroup` is a capsule `Surface` in `surfaceContainerHigh` (40 high by default), with the controls laid out in it.
+- `Menu(style: icon)`: shows only the icon, and with `height` it is a tonal round button of that diameter; `Menu(shape:, height:)` is a tonal capsule button. A capsule-shaped dropdown `Picker` is a tonal capsule button plus a `DropdownMenu`, with a checkmark before the current item.
+- Controlled values: `Switch(checked:)`, `Picker(selected:)` and `Slider(current:)` show the value of the expression, and on a change run the action's command, with the argument identical to that expression replaced by the new value (integer arguments are rounded); a controlled slider moves only itself while dragging and runs the command on release. A `Switch` or `Picker` that binds a draft and has an action writes the draft first and then runs the action. `PickerOption` gives its own value and label. `label_hidden` does not show the label and uses it only as the accessibility description.
 
-### 布局与页面结构
+### Layout and page structure
 
-- `padding_x`、`padding_y` 在 `padding` 之上分别覆盖左右与上下。`Row(align: baseline)` 的每个直接子元素（`Spacer` 除外）外包一层 `Box(Modifier.alignByBaseline())`，组件也一样。
-- `Grid(row_gap:)` 单独设置行距；`Grid(cell_ratio:, cell_extra:)` 每行高为列宽 ÷ `cell_ratio` + `cell_extra`，各格从顶部排，内容更高时伸进行距。`Flow` 是 `FlowRow`：子项竖直居中（`itemVerticalAlignment`），`Spacer` 是 `weight(1f)`，占满所在行余下的宽度；其中的分段 `Picker` 取自身宽度，不显示标签的 `chips` 把每个 `FilterChip` 直接放进这个 `FlowRow`。
-- `ScaleBox`：子元素在声明的逻辑尺寸中层叠（左上对齐），整体在 `placeWithLayer` 中缩放到能放下并居中，超出部分裁掉；Compose 的命中测试经过同一个变换，点击区域与画面对齐。`Positioned` 在所在层叠中占满，内容按（可弹簧的）`x`、`y`、`width`、`height` 放置并居中。`Marquee`：内容按自然宽度从右缘外跑到左缘外，位置在图层中按帧时钟写入，不重新组合；`paused` 时停住，减少动态效果时静止在宽度 28% 处；其中的文字带 1 dp 的黑色阴影（`LocalBernTextShadow`）。
-- `Accordion`：每列一个 0 到 1 的权重（`Animatable`），列宽由权重分配，总宽不变，每列在图层中按 `corner` 圆角裁剪。
-- 顶栏：工具栏中 `Spacer` 之前的项放在返回按钮之后（`TopAppBar` 的导航位置），之后的放在末端；`Text` 可以放在工具栏里。`SidebarHeader` 固定在侧栏列表上方，`Sidebar(width:)` 是宽窗口中侧栏的宽度，`Detail(titled: false)` 时顶栏不显示所选目的地的名称，`SidebarItem(badge:)` 是 `NavigationDrawerItem` 的 `badge`（为 0 时隐藏）。
-- `Form(gap:, row_height:, padding_x:, padding_y:)` 与 `Section(style: plain, padding_x:, padding_y:)`：分节间距；有行高或内边距时，分节的每个直接子元素是一行，按内边距缩进、至少为该行高、内容竖向居中（`Section` 自己的内边距优先；plain 分节不取表单的内边距与行高，只用自己的内边距）；表单以 plain 分节开头时从页面顶部开始：plain 分节在顶边给出一条对齐线（`BernHeadingTop`），表单的列把子项的对齐线往上传，表单量出这条线在 0 处时不留顶部的 16，所以插槽、组件或条件给出的标题也算，条件变了跟着变。页面中的 `Search` 给了 `width`、`height` 或 `font_size` 时是 Material 搜索框样式的胶囊（`surfaceContainerHigh`、搜索图标、清除按钮），按这些尺寸。
+- `padding_x` and `padding_y` override the left and right, and the top and bottom, of `padding` respectively. Every direct child of `Row(align: baseline)` (except `Spacer`) is wrapped in a `Box(Modifier.alignByBaseline())`, components included.
+- `Grid(row_gap:)` sets the row gap separately; with `Grid(cell_ratio:, cell_extra:)` each row is column width ÷ `cell_ratio` + `cell_extra` high, cells are laid out from the top, and taller content extends into the row gap. `Flow` is a `FlowRow`: children are centered vertically (`itemVerticalAlignment`), and a `Spacer` is `weight(1f)`, taking the rest of its line's width; a segmented `Picker` inside it takes its own width, and `chips` without a label put each `FilterChip` directly into that `FlowRow`.
+- `ScaleBox`: the children are stacked in the declared logical size (aligned top left), and the whole is scaled in `placeWithLayer` to fit and centered, with anything beyond clipped; Compose's hit testing goes through the same transform, so tap areas line up with what is drawn. `Positioned` fills its enclosing stack, and its content is placed by (springable) `x`, `y`, `width` and `height`, centered. `Marquee`: the content, at its natural width, runs from beyond the right edge to beyond the left edge, with the position written in the layer by the frame clock, without recomposition; `paused` stops it, and under Reduce Motion it stays still at 28% of the width; text inside it carries a 1 dp black shadow (`LocalBernTextShadow`).
+- `Accordion`: each column has a weight from 0 to 1 (`Animatable`); column widths are distributed by weight with the total width unchanged, and each column is clipped in its layer to `corner` rounded corners.
+- Top bar: toolbar items before the `Spacer` go after the back button (the navigation slot of `TopAppBar`), and those after it go at the end; `Text` can be placed in the toolbar. `SidebarHeader` is fixed above the sidebar list, `Sidebar(width:)` is the sidebar's width in wide windows, with `Detail(titled: false)` the top bar does not show the name of the selected destination, and `SidebarItem(badge:)` is the `badge` of `NavigationDrawerItem` (hidden when 0).
+- `Form(gap:, row_height:, padding_x:, padding_y:)` and `Section(style: plain, padding_x:, padding_y:)`: spacing between sections; with a row height or padding, each direct child of a section is one row, indented by the padding, at least that row height, with its content centered vertically (the `Section`'s own padding takes precedence; plain sections do not take the form's padding and row height, only their own padding); a form that begins with a plain section starts at the top of the page: the plain section gives an alignment line at its top edge (`BernHeadingTop`), the form's column passes its children's alignment lines upward, and when the form measures this line at 0 it leaves out the top 16, so titles given by slots, components or conditions count as well, and it follows when the condition changes. A `Search` on a page that is given `width`, `height` or `font_size` is a capsule in the Material search bar style (`surfaceContainerHigh`, search icon, clear button), at those sizes.
 
-### 模态、搜索面板与计时
+### Modals, search panel and timers
 
-- `Modal` 是 Material 的 `Dialog`：背景按 0.24 变暗并吸收输入，卡片是对话框的形状与底色，为声明尺寸且离窗口边缘至少 16，不写高度时取内容的固有高度（`maxIntrinsicHeight`，竖向滚动的列取所滚内容的高度，权重 `Spacer` 为 0；内容说不出固有高度时取窗口允许的高度）；`cover: compact` 时在紧凑窗口中铺满整个屏幕，避开系统栏。元素的 `appear`、`disappear` 作用在卡片上：在带过渡的条件分支中，卡片随分支的进出（`animateEnterExit`）播放，播完消失过渡后对话框才关闭。系统返回不关闭模态。
-- `Search(style: palette)`：一个搜索图标按钮；打开时是一个对话框，紧凑窗口铺满屏幕，较宽时是 `width` × `height`（默认 640×480）的卡片：上方是搜索框与关闭按钮，下面是结果，结果只在打开时组合。方向键在 `navigation` 不为假的 `SearchItem` 之间移动（按屏幕上的先后），回车选中当前项，没有当前项时执行提交动作；系统返回、Esc 或关闭按钮关闭。`SearchItem` 是 Material 的 `ListItem`，选中后先关闭面板再执行动作；不在面板中时是普通的结果行。
-- `Timer`：启用且组合中时每 `interval` 秒（不少于 0.05）执行动作，关掉或离开时取消。`Window(idle_enabled:)` 为假时 `window.idle` 保持为假且不计时，变真时重新计时。`window.short` 是窗口高度低于紧凑断点。`Window(landscape:)` 为真时活动请求横屏（`SCREEN_ORIENTATION_SENSOR_LANDSCAPE`），变假后交还系统决定方向。
+- `Modal` is a Material `Dialog`: the background is dimmed by 0.24 and absorbs input; the card has the dialog's shape and background, at the declared size and at least 16 from the window's edges; when no height is written it takes the content's intrinsic height (`maxIntrinsicHeight`: a vertically scrolling column takes the height of the content it scrolls, and a weighted `Spacer` counts as 0; when the content cannot report an intrinsic height it takes the height the window allows); with `cover: compact` it fills the whole screen in compact windows, avoiding the system bars. An element's `appear` and `disappear` act on the card: in a conditional branch with a transition, the card plays along with the branch entering and leaving (`animateEnterExit`), and the dialog closes only after the disappear transition has finished. System back does not close a modal.
+- `Search(style: palette)`: a search icon button; when open it is a dialog, which fills the screen in compact windows and in wider ones is a card of `width` × `height` (default 640×480): the search field and close button on top, the results below, and the results are composed only while it is open. Arrow keys move between `SearchItem`s whose `navigation` is not false (in on-screen order), and Return selects the current item, or runs the submit action when there is no current item; system back, Esc or the close button closes it. `SearchItem` is a Material `ListItem`, which when selected first closes the panel and then runs the action; outside the panel it is an ordinary result row.
+- `Timer`: while enabled and in composition it runs the action every `interval` seconds (no less than 0.05), and it is canceled when turned off or when it leaves composition. When `Window(idle_enabled:)` is false, `window.idle` stays false and no timer runs; when it becomes true the timer restarts. `window.short` means the window's height is below the compact breakpoint. When `Window(landscape:)` is true the activity requests landscape (`SCREEN_ORIENTATION_SENSOR_LANDSCAPE`); when it becomes false, the orientation is left to the system again.
 
-### 动效补充
+### Motion additions
 
-- `appear_delay` 在错峰延迟之上再等待，有延迟时窗口首次显示也播放 `appear`；`nudge_key` 的值每次变化晃动一次，`nudge_scale` 是晃动的倍数（默认 1.06）；`reduce_motion` 为真时整个应用按减少动态效果运行，与系统关闭动画相同。
-- `grow(edge:)` 过渡：单独出现的元素在图层中沿一个轴从 0 伸展、该边不动、不淡入淡出；条件分支切换时用 `expandHorizontally`/`expandVertically` 从该边展开。
+- `appear_delay` waits on top of the stagger delay, and with a delay `appear` also plays on the window's first display; each change of the value of `nudge_key` nudges once, and `nudge_scale` is the nudge's scale factor (default 1.06); when `reduce_motion` is true the whole app runs with Reduce Motion, the same as when the system turns off animations.
+- `grow(edge:)` transition: an element appearing on its own stretches from 0 along one axis in its layer, with that edge fixed and no fade; when a conditional branch switches, it expands from that edge with `expandHorizontally`/`expandVertically`.
 
-### 文本格式（`text_formats`）
+### Text formats (`text_formats`)
 
-- 带参数的翻译文本在字符串表（`assets/bern/texts/<语言>.json`）中保留 Bern 的格式原文，不再转成 `%1$s`；不带参数的文本把 `{{`、`}}` 还原为花括号后原样显示。月名与星期名（`bern.date.*`）随表写入，没有该语言时用英文。
-- `BernText.format(key, mapOf("名" to 参数))` 在运行时按 `BernTextParser` 解析当前语言的文本再写出：`BernArg` 是文本、数字（值与 Bern 的写法）或日期；复数分支先找 `=N`、再找当前语言的类别（中日韩越泰印尼马来只有 `other`，其余语言 1 为 `one`），最后 `other`，`#` 写出数字；日期按 `y`、`M`、`d`、`E` 的连写取字段或月名、星期名；时长中写出的最大字段吸收更大的单位。语言切换时文字随 `BernLanguage.current` 重新组合。
-- 生成器给每个参数传带类型的值：`CalendarDate` 是 `(值).bernArg`（生成的记录类带这个属性），整数与小数是数字，枚举是它的标签，其余是文本。枚举标签显示变体字段时，`bernLabel` 对该变体调用 `BernText.format`，字段按同样的规则传入（枚举字段用自己的标签，可以嵌套）。
+- Translated text with arguments keeps Bern's format source in the string table (`assets/bern/texts/<language>.json`) instead of being converted to `%1$s`; text without arguments turns `{{` and `}}` back into braces and is shown as is. Month and weekday names (`bern.date.*`) are written along with the table, in English when the language has none.
+- `BernText.format(key, mapOf("name" to argument))` parses the current language's text at runtime with `BernTextParser` and writes it out: a `BernArg` is text, a number (the value and Bern's written form) or a date; plural branches first look for `=N`, then the current language's category (Chinese, Japanese, Korean, Vietnamese, Thai, Indonesian and Malay have only `other`; in the other languages 1 is `one`), and finally `other`, and `#` writes the number; dates take fields, or month and weekday names, by runs of `y`, `M`, `d` and `E`; in durations the largest field written absorbs the larger units. When the language switches, the text recomposes with `BernLanguage.current`.
+- The generator passes a typed value for each argument: a `CalendarDate` is `(value).bernArg` (generated record classes carry this property), integers and decimals are numbers, an enum is its label, and everything else is text. When an enum label shows a variant's fields, `bernLabel` calls `BernText.format` for that variant, passing the fields by the same rules (enum fields use their own labels, which can nest).
 
-### 对照设计稿（Material 3 手机版）的修正
+### Fixes from comparing with the design mockups (Material 3 phone version)
 
-- 滚动视图在所在的列或行中占剩余空间，与 SwiftUI 的 `ScrollView` 一致：直接在列中的用 `Modifier.weight(1f)`；在组件里的，组件在列或行中被调用时由 `LocalBernFlex` 带入那一列或行的作用域，`Modifier.bernFlexible()` 据此占剩余空间（组件函数体不在 `ColumnScope` 中，不能直接写 `weight`）。带 `snap`/`position` 的 `BernScroll` 同样占剩余空间，并把自己的列或行作用域提供给内容。此前引导页（铺满手机屏幕）的底栏悬在内容下面，没有贴底。
-- 动画 SVG 的 `WebView` 设为 `MATCH_PARENT` 布局参数：`AndroidView` 默认的 `WRAP_CONTENT` 让页面的布局视口按内容定高，`height: 100%` 解析为 0，SVG 高度为 0 而不显示（经 WebView 的 DevTools 查得）。
-- 不给尺寸的 `Canvas` 在层叠中是其他层的底板（`Modifier.matchParentSize()`），层叠只有底板时仍按原样铺满。
-- 语言的自称：`zh-Hans`、`zh-Hant` 写作“简体中文”“繁體中文”，与其他目标相同（此前为系统给出的“中文 (简体中文)”）。
-- `chrome: unified`：手机没有窗口标题栏，只有窗口标题可显示时不出现顶栏；内容给出标题、返回、前缘或后缘工具时照常显示（此前没有页面的空画框上方多出一条写着应用名的 `TopAppBar`）。
-- 行里撑满的按钮（`width: fill`，或内容里有直接的 `Spacer`、`width: fill` 而撑开的带内容按钮）在行中用 `Modifier.weight(1f)` 分剩余宽度；此前用 `fillMaxWidth()`，第一个按钮占满整行，“打开文件夹”旁的“打开链接”被挤出，迷你播放器的暂停与关闭也被挤出屏幕。
-- `Stack` 里有自身厚度的 `Rail`，在给了尺寸的层旁按 `Stack` 的对齐摆放（外面套一层 `matchParentSize()` 的 `Box`），缩略图底部的进度条贴底；此前轨道撑满层叠，缩略图被拉高。只在层叠里有给了尺寸的层时这样做，画廊中只有轨道与不定尺寸的层时保持原样。
-- 模态（`Dialog`）里的内容不参与共享元素（`LocalBernShared` 设为空）：对话框是另一个窗口，与页面中的同名元素不在同一个布局层级，引导结束时 `SharedTransitionLayout` 抛出“layouts are not part of the same hierarchy”而崩溃。
+- A scroll view takes the remaining space in its column or row, matching SwiftUI's `ScrollView`: one directly in a column uses `Modifier.weight(1f)`; for one inside a component, when the component is called in a column or row, `LocalBernFlex` carries in that column's or row's scope, and `Modifier.bernFlexible()` uses it to take the remaining space (a component's function body is not in a `ColumnScope`, so it cannot write `weight` directly). A `BernScroll` with `snap`/`position` likewise takes the remaining space and provides its own column or row scope to its content. Previously the bottom bar of the onboarding page (which fills the phone screen) hung below the content instead of sticking to the bottom.
+- The `WebView` for animated SVGs is given `MATCH_PARENT` layout params: the default `WRAP_CONTENT` of `AndroidView` made the page's layout viewport take its height from the content, so `height: 100%` resolved to 0 and the SVG had a height of 0 and did not show (found with the WebView's DevTools).
+- A `Canvas` with no size in a stack is the backdrop of the other layers (`Modifier.matchParentSize()`); a stack that has only a backdrop still fills as before.
+- Self-names of languages: `zh-Hans` and `zh-Hant` are written "简体中文" and "繁體中文", the same as on other targets (previously the system-provided "中文 (简体中文)").
+- `chrome: unified`: phones have no window title bar, so when the window title is the only thing that could be shown, no top bar appears; when the content gives a title, back, or leading or trailing tools, it shows as usual (previously an empty frame with no page got an extra `TopAppBar` above it reading the app's name).
+- Buttons that fill a row (`width: fill`, or buttons with content that stretch because their content has a direct `Spacer` or `width: fill`) share the remaining width of the row with `Modifier.weight(1f)`; previously they used `fillMaxWidth()`, so the first button took the whole row, "Open Link" next to "Open Folder" was pushed out, and the mini player's pause and close were pushed off the screen as well.
+- A `Rail` with its own thickness in a `Stack` is placed next to the sized layer according to the `Stack`'s alignment (wrapped in a `Box` with `matchParentSize()`), so the progress bar at the bottom of a thumbnail sticks to the bottom; previously the rail filled the stack and the thumbnail was stretched taller. This is done only when the stack has a sized layer; in the gallery, which has only rails and layers of indefinite size, it stays as it was.
+- Content in a modal (`Dialog`) does not take part in shared elements (`LocalBernShared` is set to null): the dialog is another window and not in the same layout hierarchy as the same-named elements on the page, so at the end of onboarding `SharedTransitionLayout` threw "layouts are not part of the same hierarchy" and crashed.
 
-### 顺带的修正
+### Incidental fixes
 
-- `BernRail` 的参数顺序：`overhang` 加入后，在 `Stack` 中铺满的轨道把 `Modifier.matchParentSize()` 传给了 `overhang`（Kotlin 编译失败）；`modifier` 现在在 `overhang` 之前。
-- 侧栏与页签收集选项时会进入搜索框的结果，结果中的查询模板变量在那里不存在（Kotlin 编译失败）；现在只进入 `Section`。
+- Parameter order of `BernRail`: after `overhang` was added, a rail that fills a `Stack` passed `Modifier.matchParentSize()` to `overhang` (Kotlin compilation failed); `modifier` now comes before `overhang`.
+- When collecting their options, sidebars and tabs descended into the results of search fields, where the query template variables used in the results do not exist (Kotlin compilation failed); they now descend only into `Section`.
 
-## 图标补齐（2026-10-20）
+## Icon coverage (2026-10-20)
 
-- 此前 Material 对照表写在 `BernViews.kt` 的 `when` 里，表中没有的名字显示中性圆点，检查不知道。用于验收的媒体类应用在手机上的“媒体库”标签、设置“可选功能”里的插件、快捷键、画质增强、账号同步、网络媒体源、局域网与远程等行以及插件卡片上都是圆点。
-- 对照表移到 `src/icons.rs`（按名字排序），生成 `BernViews.kt` 时替换 `/*bern:icon-branches*/` 写成 `when` 的分支；检查对表中没有的图标名报错（“the Material icon set has no `…`”），与 Web、Windows 相同。
-- 新增的名字与 Material 图标：`film.stack` → Video Library、`server.rack` → Dns、`sparkles` → Auto Awesome、`puzzlepiece.extension` → Extension、`keyboard` → Keyboard、`wifi` → Wifi、`arrow.triangle.2.circlepath` → Sync、`arrow.up.arrow.down` → Swap Vert、`arrow.up.left.and.arrow.down.right` → Open In Full、`arrow.up.right.square` → Open In New、`backward.end.fill` / `forward.end.fill` → Skip Previous / Skip Next、`gobackward.10` / `goforward.10` → Replay 10 / Forward 10、`pip.enter` → Picture In Picture Alt、`camera` → Photo Camera、`eye.slash` → Visibility Off、`line.3.horizontal.decrease` → Filter List、`link` → Link、`scissors` → Content Cut、`shield` → Shield、`tv` → Tv、`arrow.down` → Arrow Downward、`arrow.left` → 自动镜像的 Arrow Back（核心集）、`circle` / `circle.fill` → Radio Button Unchecked / Circle、`square` → Crop Square、`square.on.square` → Filter None、`switch.2` → Toggle On、`hand.tap` → Touch App、`character.cursor.ibeam` → Text Fields。路径取自 Android Studio 自带的 Material Icons 矢量资源（与 `material-icons-extended` 同源）；有几条路径的图标（Photo Camera、Replay 10、Forward 10）逐条加入，不合并成一条路径。
-- 顺带改正：`minus` 原为叉号（Clear），改为 Remove；`moon` 原为调色板，改为 Dark Mode；`text.bubble` 原与字幕共用 Subtitles，改为带文字的对话气泡 Chat。
-- 测试：`icons.rs` 的单元测试核对表已排序、覆盖 Bern 图标集、每个表达式在 `BernViews.kt` 中有定义或导入；生成测试核对生成的 `BernViews.kt` 对图标集中每个名字都有分支、新名字落到预期的图标，并把画廊的第一个图标换成新名字（检查通过）和不存在的名字（检查报错）。
+- Previously the Material mapping table was written in a `when` in `BernViews.kt`, names not in the table showed a neutral dot, and the check did not know about them. In the media app used for acceptance, on the phone, the "Library" tab, the rows in Settings > "Optional features" for plugins, keyboard shortcuts, picture enhancement, account sync, network media sources, LAN and remote, and the plugin cards all showed dots.
+- The mapping table moved to `src/icons.rs` (sorted by name), and when `BernViews.kt` is generated, `/*bern:icon-branches*/` is replaced with the branches of the `when`; the check reports an error for icon names not in the table ("the Material icon set has no `…`"), the same as Web and Windows.
+- New names and their Material icons: `film.stack` → Video Library, `server.rack` → Dns, `sparkles` → Auto Awesome, `puzzlepiece.extension` → Extension, `keyboard` → Keyboard, `wifi` → Wifi, `arrow.triangle.2.circlepath` → Sync, `arrow.up.arrow.down` → Swap Vert, `arrow.up.left.and.arrow.down.right` → Open In Full, `arrow.up.right.square` → Open In New, `backward.end.fill` / `forward.end.fill` → Skip Previous / Skip Next, `gobackward.10` / `goforward.10` → Replay 10 / Forward 10, `pip.enter` → Picture In Picture Alt, `camera` → Photo Camera, `eye.slash` → Visibility Off, `line.3.horizontal.decrease` → Filter List, `link` → Link, `scissors` → Content Cut, `shield` → Shield, `tv` → Tv, `arrow.down` → Arrow Downward, `arrow.left` → the auto-mirrored Arrow Back (core set), `circle` / `circle.fill` → Radio Button Unchecked / Circle, `square` → Crop Square, `square.on.square` → Filter None, `switch.2` → Toggle On, `hand.tap` → Touch App, `character.cursor.ibeam` → Text Fields. The paths are taken from the Material Icons vector assets bundled with Android Studio (the same source as `material-icons-extended`); icons with several paths (Photo Camera, Replay 10, Forward 10) add them path by path, without merging them into one path.
+- Corrected along the way: `minus` was a cross (Clear) and is now Remove; `moon` was a palette and is now Dark Mode; `text.bubble` used to share Subtitles with subtitles and is now Chat, a speech bubble with text.
+- Tests: the unit tests in `icons.rs` check that the table is sorted, that it covers the Bern icon set, and that every expression is defined or imported in `BernViews.kt`; the generation tests check that the generated `BernViews.kt` has a branch for every name in the icon set and that the new names land on the expected icons, and replace the gallery's first icon with a new name (the check passes) and with a nonexistent name (the check reports an error).
 
 
-## 与框架类型同名的值类型（2026-10-21）
+## Value types named like framework types (2026-10-21)
 
-生成的 Kotlin 在应用的包里声明值类型，原先直接用声明的名字，三处会撞：`BernGenerated.kt` 的显式导入优先于同包的声明，名为 `Color`、`Modifier`、`Alignment`、`Arrangement`、`Text`、`Role`、`Bundle`、`Canvas`、`Row`、`Column`、`Box`、`Spacer`、`Composable` 的应用类型在这个文件里被导入的框架类型顶替；同包的声明又遮住默认导入（`List`、`Map`、`Pair`）；带字段的变体是 sealed class 内部的类，名为 `String`、`List`、`Boolean`、`Long`、`Double` 或与某个记录同名（`Text { text: Text }`）的变体在类内遮住这些类型。现在值类型写成 `App_` 加声明的名字（`enum class App_Layout`、`data class App_Text`、`sealed class App_Content`），变体类字段里的 Kotlin 标准类型写全名（`data class String(val value: kotlin.String) : App_Content()`），sealed class 内的 `bernName`、`bernLabel` 为 `kotlin.String`；规则见设计文档“跨语言绑定”。变体名、字符串表的键与解码错误（`invalid Layout`）不变。`pick:` 与 `Drop` 存文件时原先直接写 `MediaSource(url)`，现在同样经 `value_type`。
+The generated Kotlin declares value types in the app's package. It used to use the declared names directly, which collided in three places: the explicit imports in `BernGenerated.kt` take precedence over declarations in the same package, so app types named `Color`, `Modifier`, `Alignment`, `Arrangement`, `Text`, `Role`, `Bundle`, `Canvas`, `Row`, `Column`, `Box`, `Spacer` or `Composable` were replaced in that file by the imported framework types; declarations in the same package in turn shadow the default imports (`List`, `Map`, `Pair`); variants with fields are classes nested inside a sealed class, and a variant named `String`, `List`, `Boolean`, `Long`, `Double`, or named like a record (`Text { text: Text }`) shadows those types inside the class. Value types are now written as `App_` plus the declared name (`enum class App_Layout`, `data class App_Text`, `sealed class App_Content`), Kotlin standard types in the fields of variant classes are written with their full names (`data class String(val value: kotlin.String) : App_Content()`), and `bernName` and `bernLabel` inside the sealed class are `kotlin.String`; the rules are in the design document under "Language bindings". Variant names, the keys of the string table and decoding errors (`invalid Layout`) are unchanged. When `pick:` and `Drop` stored a file they used to write `MediaSource(url)` directly; they now go through `value_type` as well.
 
-`tests/framework_names.rs` 生成示例 `examples/framework-names` 并核对这些写法；设 `BERN_TEST_KOTLIN=1` 时用 Gradle 的 `:app:compileDebugKotlin` 编译生成的工程。实测（2026-10-21，macOS 27.0.1，Gradle 9.5.1）：编译通过（约 30 秒）；把生成文件换回原名后 kotlinc 报 73 个错误（期望 `androidx.compose.ui.graphics.Color`、实际 `dev.bern.names.Color` 一类的类型不符，`Content.String` 与 `String` 互不相容等）；只加前缀、不写全名时还有 16 个，都来自变体类的遮挡。没有在手机上运行。
+`tests/framework_names.rs` generates the example `examples/framework-names` and checks these forms; with `BERN_TEST_KOTLIN=1` set, it compiles the generated project with Gradle's `:app:compileDebugKotlin`. Measured (2026-10-21, macOS 27.0.1, Gradle 9.5.1): it compiles (about 30 seconds); with the generated files switched back to the original names, kotlinc reports 73 errors (type mismatches such as expected `androidx.compose.ui.graphics.Color`, found `dev.bern.names.Color`, `Content.String` and `String` being incompatible with each other, and so on); with only the prefix and no full names there are still 16, all from shadowing by the variant classes. Not run on a phone.
 
-## 与框架类型同名的组件与会话（2026-10-21）
+## Components and sessions named like framework types (2026-10-21)
 
-组件原先生成大驼峰名加 `View` 的函数、会话类为声明的名字加 `Session`、组件函数里读会话的局部变量为 `bern` 加声明的名字。名为 `Window` 的会话因此与组件函数开头的 `val bernWindow = LocalBernWindow.current` 同名，在同一作用域重复声明；组件函数与生成的代码同在应用的包里，同包的声明优先于通配导入的 `dev.bern.runtime.*`，名为 `bern_query` 的组件生成的 `BernQueryView` 与运行时的同名函数争同一个调用名。现在与 Swift 一致：组件写成 `fun AppView_empty()`，会话类写成 `class App_URL : BernSessionState(1)`，局部变量写成 `val session_Window = bernWindow.session(App_Window::class.java)`（规则见设计文档“跨语言绑定”）。
+Components used to generate a function named with the UpperCamelCase name plus `View`, session classes were the declared name plus `Session`, and the local variable that reads a session in a component function was `bern` plus the declared name. A session named `Window` therefore had the same name as `val bernWindow = LocalBernWindow.current` at the start of the component function and was declared twice in the same scope; component functions live in the app's package together with the generated code, and declarations in the same package take precedence over the wildcard import `dev.bern.runtime.*`, so the `BernQueryView` generated for a component named `bern_query` competed for the same call name with the runtime function of that name. Now, as in Swift: components are written as `fun AppView_empty()`, session classes as `class App_URL : BernSessionState(1)`, and local variables as `val session_Window = bernWindow.session(App_Window::class.java)` (the rules are in the design document under "Language bindings").
 
-`tests/framework_names.rs` 核对这些写法（示例新增的组件与会话见 macOS 实现记录的同日条目）。这次没有设 `BERN_TEST_KOTLIN=1` 编译生成的工程，上面两处冲突也没有在 kotlinc 上实测，未验证；新的断言没有运行。
+`tests/framework_names.rs` checks these forms (the components and sessions added to the example are in the same-day entry of the macOS implementation notes). This time the generated project was not compiled with `BERN_TEST_KOTLIN=1`, and the two conflicts above were not measured with kotlinc either; not verified. The new assertions were not run.
 
-## 静置区（2026-10-24）
+## Idle area (2026-10-24)
 
-`idle_area` 生成为元素外层 `Box` 上的 `bernIdleArea(秒数)`：元素在组合中时登记为窗口的静置区，鼠标的悬停进入与移动把它记为“鼠标停在上面”，悬停离开时去掉。悬停按 Compose 自己的命中测试判断，所以立在静置区上面、接收指针的控件会把鼠标从静置区拿走；触摸与触控笔不算。窗口的计时用 `snapshotFlow` 跟随要等的秒数：最近一次指针输入来自鼠标、屏幕上又有静置区时，只有鼠标停在静置区上才按那个区的秒数计时，停在别处或移出窗口时不计时；触摸、触控笔与按键仍按 `idle_after`。静置区出现、消失，鼠标进出静置区，都重新计时。
+`idle_area` is generated as `bernIdleArea(seconds)` on the element's outer `Box`: while the element is in the composition it is registered as an idle area of the window; mouse hover enter and move mark it as "the mouse is resting on it", and hover exit clears that. Hover is decided by Compose's own hit testing, so a control that sits on top of the idle area and receives the pointer takes the mouse away from the idle area; touch and stylus do not count. The window's timer follows the number of seconds to wait through `snapshotFlow`: when the most recent pointer input came from a mouse and there is an idle area on screen, the timer runs with that area's seconds only while the mouse rests on the idle area, and does not run while the mouse rests elsewhere or has left the window; touch, stylus and keys still go by `idle_after`. An idle area appearing or disappearing, and the mouse entering or leaving an idle area, all restart the timer.
 
-验证：生成器测试 `an_idle_area_watches_where_the_mouse_rests` 检查生成的 `bernIdleArea` 与窗口参数；一个同时声明 `idle_after`、`landscape` 与 `idle_area` 的临时应用 `bern check` 各目标无警告，`bern build --target android` 编译 Kotlin 并打出 APK。没有在接鼠标的设备上实测。
+Verification: the generator test `an_idle_area_watches_where_the_mouse_rests` checks the generated `bernIdleArea` and the window parameters; for a temporary app that declares `idle_after`, `landscape` and `idle_area` together, `bern check` gives no warnings on any target, and `bern build --target android` compiles the Kotlin and produces an APK. Not measured on a device with a mouse.
 
-## 跟随状态的快捷键与改键（2026-10-24）
+## Keyboard shortcuts that follow state, and rebinding (2026-10-24)
 
-`BernShortcut` 的键可以是状态里的文本：组合时把当前文本登记进活动的快捷键表，文本变化随重组重新登记。`BernShortcutInput` 是一个色调按钮，按下后把 `BernShortcuts.recorder` 设为它自己：活动的 `dispatchKeyEvent` 先把下一次按键交给它（Ctrl 或 Meta 写作 `cmd`），Esc 与返回键保持原样，单独按 Delete 清空，只按修饰键继续等待；等待期间快捷键不执行。显示文字为 `Ctrl+Shift+K` 的写法，空格键按界面语言。`MenuBar` 不生成。验证：生成器测试（gallery）覆盖生成的调用；`examples/gallery` 用到跟随状态的快捷键与 `ShortcutInput`，`bern build --target android` 编译 Kotlin 并打出 APK；未在设备上运行。
+The key of a `BernShortcut` can be text from state: composition registers the current text in the activity's shortcut table, and when the text changes it is registered again on recomposition. `BernShortcutInput` is a tonal button; pressing it sets `BernShortcuts.recorder` to itself: the activity's `dispatchKeyEvent` first hands the next key press to it (Ctrl or Meta is written as `cmd`), Esc and the Back key are left as they are, Delete on its own clears it, and pressing only modifier keys keeps waiting; shortcuts do not run while it waits. The displayed text uses the `Ctrl+Shift+K` form, and the Space key is named in the UI language. `MenuBar` is not generated. Verification: generator tests (gallery) cover the generated calls; `examples/gallery` uses shortcuts that follow state and `ShortcutInput`, and `bern build --target android` compiles the Kotlin and produces an APK; not run on a device.
 
-## 表格、受控文字与剪贴板（2026-10-29）
+## Tables, controlled text and the clipboard (2026-10-29)
 
-Android 与 Material 3 都没有表格控件，`Table` 按 Material 数据表的样子生成：一个 `Column`（在列与行里取 `weight(1f)`），上面是 `BernTableHeadings`，下面是 `LazyColumn` 的行，行间有分隔线。
+Neither Android nor Material 3 has a table control, so `Table` is generated in the style of a Material data table: a `Column` (taking `weight(1f)` inside columns and rows) with `BernTableHeadings` on top and the rows in a `LazyColumn` below, with dividers between rows.
 
-- 表头一行最低 56dp：有 `selection` 时第一格是 `TriStateCheckbox`（全选、全不选，部分选中时为不定态），然后每列一个 `BernTableHeading`：`labelLarge` 的标题，`sorted` 时后面是 `chevron.up` / `chevron.down` 图标，有动作时整格可点。写了 `width` 的列是 `Modifier.width`，其他列分 `weight(1f)`；表头与行用同样的宽度。
-- 行（`BernTableRow`）最低 52dp：有 `selection` 时第一格是 `Checkbox`，加入或移出选择；选中的行底色是 `secondaryContainer`。点一行：有主操作时只选它并运行，没有时加入或移出选择；长按打开 `DropdownMenu` 的行菜单，那一行未选中时先只选中它。每格是一个 `Row`（竖直居中，间距 8），格子里的控件目标带上行的键。
-- `items(…, key = { BernKey.of(行.键) })` 保留行；草稿按行的顺序写（`tableKeys.filter { it in … }`）。外部入口：角色 `table`，`select` 收逗号分隔的键，`value` 是选中的键；行菜单的项各自登记为按钮。
+- The heading row is at least 56dp high: with `selection`, the first cell is a `TriStateCheckbox` (select all, select none, indeterminate when partly selected), followed by one `BernTableHeading` per column: a `labelLarge` title, followed by a `chevron.up` / `chevron.down` icon when `sorted`, with the whole cell clickable when there is an action. Columns with `width` get `Modifier.width`, the other columns share `weight(1f)`; the heading row and the rows use the same widths.
+- Rows (`BernTableRow`) are at least 52dp high: with `selection`, the first cell is a `Checkbox` that adds the row to or removes it from the selection; a selected row has a `secondaryContainer` background. Tapping a row: when there is a primary action, it selects only that row and runs the action; otherwise it adds the row to or removes it from the selection; a long press opens the row menu as a `DropdownMenu`, first selecting only that row if it was not selected. Each cell is a `Row` (vertically centered, spacing 8), and the control targets inside a cell carry the row's key.
+- `items(…, key = { BernKey.of(row.key) })` keeps rows; the draft is written in row order (`tableKeys.filter { it in … }`). External entry points: role `table`, `select` takes comma-separated keys, `value` is the selected keys; each item of the row menu is registered as a button.
 
-`TextInput(current:)` 生成 `BernHeldTextInput`：视图里记着用户正在编辑的文字（`held`），有它时显示它，每次编辑都运行动作；`onFocusChanged` 在失去焦点时清掉它，于是显示引擎的文字。`paste:` 生成 `BernClipboard.paste { text -> 草稿 = text; 动作 }`：`ClipboardManager.primaryClip` 的第一项 `coerceToText`，有文字才执行；Android 12 起系统会提示应用读了剪贴板。`BernClipboard.register(this)` 与 `BernFiles` 一样在 `onCreate` 时取应用上下文。引擎的 `copy_text` 原本就由 `platformRequest` 在主线程设 `ClipboardManager`。
+`TextInput(current:)` generates `BernHeldTextInput`: the view keeps the text the user is editing (`held`), shows it while it exists, and runs the action on every edit; `onFocusChanged` clears it when focus is lost, so the engine's text is shown. `paste:` generates `BernClipboard.paste { text -> draft = text; action }`: the first item of `ClipboardManager.primaryClip` goes through `coerceToText`, and the action runs only when there is text; from Android 12 the system shows a notice that the app read the clipboard. `BernClipboard.register(this)`, like `BernFiles`, takes the application context in `onCreate`. The engine's `copy_text` already set `ClipboardManager` on the main thread through `platformRequest`.
 
-验证：生成器测试（gallery 的表格页）覆盖表格、受控输入与 `paste`；`bern build --target android` 构建 gallery 成功（Gradle 编译生成的 Kotlin 与运行时）。未安装到设备，未运行。
+Verification: generator tests (the gallery's table page) cover tables, controlled input and `paste`; `bern build --target android` builds the gallery successfully (Gradle compiles the generated Kotlin and the runtime). Not installed on a device; not run.
 
-## 跟随值的动作与文字颜色（2026-10-29）
+## Actions that follow a value, and text color (2026-10-29)
 
-`Watch` 是 `BernWatch(value)`：`LaunchedEffect(value)` 在组合时与值变化时运行动作（`rememberUpdatedState` 取最新的动作），列表与枚举按值比较。`Text(color:)` 取 `bernPalette().role(…)`。Android 应用不在登录时打开，`Switch(login_item: true)` 不生成任何东西。验证：gallery 的生成器测试；未构建 APK、未在设备上运行。
+`Watch` is `BernWatch(value)`: `LaunchedEffect(value)` runs the action on composition and whenever the value changes (`rememberUpdatedState` takes the latest action), and lists and enums are compared by value. `Text(color:)` takes `bernPalette().role(…)`. Android apps do not open at login, so `Switch(login_item: true)` generates nothing. Verification: the gallery's generator tests; no APK built, not run on a device.
 
-## 歌词页所需的能力与原生音频（2026-10-31）
+## Capabilities for the lyrics page, and native audio (2026-10-31)
 
-- 跟随状态的模糊、条件加粗、滚动定位比例 `anchor` 与手动滚动 `browsing` 已实现，见设计文档“定位比例”“手动滚动”“跟随状态的模糊与加粗”。`Stack` 样式的 `shadow` 画在圆角裁切之外。
-- `SidebarFooter` 里直接调用组件时，生成代码在页脚的 lambda 里引用 `this`；页脚改为 `ColumnScope` 的接收者 lambda。
-- 引擎依赖里的 C++（如 cpal 的 Oboe 音频）需要 `CXX_aarch64_linux_android`，构建与 `CC_…` 一起传入 NDK 的 `clang++`。Oboe 静态链接 libc++ 时，应用自己的构建脚本需再链接 `c++abi`。
-- 通过 `ndk-context` 找 Java 虚拟机与应用的库（cpal 的音频输出即是）此前在启动音频时 panic，线程静默退出：`BernBridge` 新增 `applicationContext()`，`bern-ffi` 启动时用它初始化 `ndk-context`，进程内只做一次。
-- 新增 Material 图标：`backward.fill` / `forward.fill`（Fast Rewind / Fast Forward）、`chart.bar`（Bar Chart）、`info.circle.fill`、`iphone`（Smartphone）、`qrcode`、`qrcode.viewfinder`（QR Code Scanner）、`quote.bubble(.fill)`（Mic None / Mic：Material 没有引号气泡，按苹果音乐类应用里它作为歌词按钮的含义取麦克风）、`rectangle.portrait.and.arrow.right`（Logout）、`repeat`、`repeat.1`、`shuffle`。
-- 实测（Android 16 模拟器，一个音乐应用）：歌词页正在唱的一行加粗放大、两侧逐渐模糊；播放进度推进（输出音量设为 0）。
+- Blur that follows state, conditional bold, the scroll anchor ratio `anchor` and hand scrolling `browsing` are implemented, see "Anchor ratio", "Hand scrolling" and "Blur and bold that follow state" in the design document. The `shadow` of a `Stack` style is drawn outside the rounded clip.
+- When a component is called directly in `SidebarFooter`, the generated code referred to `this` inside the footer's lambda; the footer is now a lambda with a `ColumnScope` receiver.
+- C++ in the engine's dependencies (such as cpal's Oboe audio) needs `CXX_aarch64_linux_android`; the build passes the NDK's `clang++` along with `CC_…`. When Oboe links libc++ statically, the app's own build script must also link `c++abi`.
+- Libraries that find the Java VM and the app through `ndk-context` (cpal's audio output is one) used to panic when starting audio, and the thread exited silently: `BernBridge` adds `applicationContext()`, and `bern-ffi` uses it to initialize `ndk-context` at startup, once per process.
+- New Material icons: `backward.fill` / `forward.fill` (Fast Rewind / Fast Forward), `chart.bar` (Bar Chart), `info.circle.fill`, `iphone` (Smartphone), `qrcode`, `qrcode.viewfinder` (QR Code Scanner), `quote.bubble(.fill)` (Mic None / Mic: Material has no quote bubble, so the microphone is taken for its meaning as the lyrics button in Apple's music apps), `rectangle.portrait.and.arrow.right` (Logout), `repeat`, `repeat.1`, `shuffle`.
+- Measured (Android 16 emulator, a music app): on the lyrics page the line being sung is bold and larger, and the lines around it blur progressively; playback progress advances (output volume set to 0).
 
-## 浮起的标签栏与圆形图标按钮（2026-10-31）
+## Floating tab bar and round icon buttons (2026-10-31)
 
-- `Tabs(bar: floating)`：标签栏是离开屏幕两侧与底边的胶囊（`surfaceContainer`，阴影 6dp，避开系统导航条），每项占一份宽度，选中的一项图标与文字取强调色、背后另有一块胶囊；`TabAccessory` 随之成为同宽的胶囊。不写时仍是 Material 的 `NavigationBar`。
-- 带样式且写了 `height` 的 `IconButton` 宽高都取这个直径、不再加样式的内边距，样式的 `corner` 取半径时就是圆形按钮；此前它按内边距撑成横向的胶囊，图标也被挤小。
-- 行里包着文字输入框或滑块的 `Stack` 占去其余的宽度（`weight(1f)`），与直接写在行里的输入框相同；此前它按输入框铺满整行，把同一行后面的按钮挤出屏幕。
-- 实测（Android 16 模拟器，一个音乐应用）：首页底部为胶囊标签栏与胶囊迷你播放器，右上角圆形搜索按钮；搜索层的输入框与“取消”同在一行。
+- `Tabs(bar: floating)`: the tab bar is a capsule clear of the screen's sides and bottom edge (`surfaceContainer`, 6dp shadow, clear of the system navigation bar); each item takes an equal share of the width, and the selected item's icon and text take the accent color, with a capsule of its own behind it; `TabAccessory` becomes a capsule of the same width along with it. Without it, it is still Material's `NavigationBar`.
+- An `IconButton` with a style and a `height` takes that diameter for both width and height, without adding the style's padding, so with the style's `corner` at the radius it is a round button; previously the padding stretched it into a horizontal capsule and squeezed the icon smaller.
+- A `Stack` in a row that wraps a text input or a slider takes the remaining width (`weight(1f)`), the same as an input written directly in the row; previously it filled the whole row like the input, pushing the buttons after it in the same row off the screen.
+- Measured (Android 16 emulator, a music app): at the bottom of the home page are the capsule tab bar and the capsule mini player, with a round search button at the top right; the search layer's input and "Cancel" are in the same row.
 
-## 行里的搜索框与选择器（2026-11-01）
+## Search fields and pickers in rows (2026-11-01)
 
-- 行里的 `Search` 与 `TextInput` 一样占去其余的宽度（`weight(1f)`）；此前它铺满整行，把同一行的“取消”挤出屏幕。包着它的 `Stack` 同样占去其余宽度。
-- 行里的 `Picker` 与 `LanguagePicker` 保持自己的宽度：菜单样式是写着所选项的文字按钮，点开列出其他选项（与 iOS 设置行末尾的菜单相同），分段样式不再铺满整行；此前它们铺满整行，把同一行的名称挤成一字一行。
-- 实测（Android 16 模拟器，一个音乐应用的设置页）：音质、语言的菜单在行末，外观的分段控件靠右，各行名称完整。
-- `Tabs(bar: floating)` 时页面铺到屏幕底部、在胶囊标签栏与 `TabAccessory` 之下，与 iOS 相同；纵向滚动视图（`ScrollView` 与按位置停靠的滚动视图）按标签栏盖住自己的高度在内容末尾留出空白，最后几项能滚到标签栏之上；标签栏本身也延伸到系统导航条之下，按导航条的高度在底部留出内边距，导航条后面不再是一条空白（2026-11-01）。此前页面止于标签栏上方，胶囊两侧与背后是一条空白，滚到底时内容像被截断（2026-11-01，Android 16 模拟器上验证首页滚到底时最后一行完整露出）。
+- A `Search` in a row takes the remaining width like `TextInput` (`weight(1f)`); previously it filled the whole row, pushing "Cancel" in the same row off the screen. A `Stack` that wraps it takes the remaining width too.
+- A `Picker` or `LanguagePicker` in a row keeps its own width: the menu style is a text button showing the selected option that lists the others when tapped (like the menu at the end of an iOS settings row), and the segmented style no longer fills the whole row; previously they filled the whole row and squeezed the name in the same row into one character per line.
+- Measured (Android 16 emulator, a music app's settings page): the quality and language menus are at the ends of their rows, the appearance segmented control is on the right, and every row's name is complete.
+- With `Tabs(bar: floating)` the page extends to the bottom of the screen, under the capsule tab bar and `TabAccessory`, as on iOS; vertical scroll views (`ScrollView` and scroll views that dock by position) leave space at the end of their content for the height of the tab bar covering them, so the last items can scroll above the tab bar; the tab bar itself also extends under the system navigation bar, with bottom padding of the navigation bar's height, so there is no longer an empty strip behind the navigation bar (2026-11-01). Previously the page ended above the tab bar, there was an empty strip on both sides of and behind the capsule, and at the bottom of a scroll the content looked cut off (2026-11-01, verified on the Android 16 emulator that the last row of the home page shows in full when scrolled to the bottom).
 
-## 验证记录
+## Verification log
 
-2026-10-12 至 13，小米 MIX 2S（Android 15），由生成的 CLI、`adb` 截图与录屏驱动：
+2026-10-12 to 13, Xiaomi MIX 2S (Android 15), driven by the generated CLI, `adb` screenshots and screen recordings:
 
-- **构建与测试**：`cargo test --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`（另对 `bern-ffi` 与 `bern-transport-ipc` 按 `aarch64-linux-android` 运行）、`cargo fmt --check` 通过；hello、planner、showcase 的 Kotlin 由 Gradle 编译通过。
-- **hello**：标题栏与“你好，世界！”；系统语言为简体中文时界面为简体中文；深色跟随系统；`hello hello wave` 从电脑改变了手机上引擎的状态。
-- **planner**：模块的页面在侧栏中；带样式的侧栏项（选中时填充强调色）与“改名”按钮；`Canvas` 的格纹、面积与折线随“记一笔”更新；文字标注；“在侧栏显示归档”打开后侧栏出现归档项，在归档页关闭后选中回到概览。录屏逐帧确认：新加的标签从 0.4 倍弹出、略微过冲再回落，后面的按钮平滑让位；打开“大标题”时标题在两种字号间放大，文字不被裁切，下方内容平滑下移。专注模式下静置后顶栏与系统栏隐藏，点按后恢复。
-- **showcase**：冷启动显示侧栏列表（搜索框、分组、图标）；文字、按钮（含工具栏按钮）、开关与滑块（工具栏的“全部”下拉）、输入框、图片与布局（适配方式与 `Grid`）、列表与详情（`Query` 结果 5 项、推入链接）各页正常；视频页从 CLI 播放精选片段，状态为 `Playing 0:02 / 0:08`，控制条同步；`window open --kind settings` 打开设置窗口（语言、开关、输入框、底部页签），`window list` 报告两个 `Virtual` 窗口；设置窗口叠在详情页上时，第一次系统返回只关闭设置窗口，第二次回到侧栏列表；`ui set-language --language en` 后界面全部变为英文。
-- **控制通道**：`ui inspect`、`ui select`、`ui set-bool`、`ui activate`、`window open`、`window list` 经 `adb forward` 正常。
+- **Build and tests**: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` (also run for `bern-ffi` and `bern-transport-ipc` against `aarch64-linux-android`) and `cargo fmt --check` pass; the Kotlin of hello, planner and showcase compiles with Gradle.
+- **hello**: the title bar and "Hello, World!"; with the system language set to Simplified Chinese, the UI is in Simplified Chinese; dark mode follows the system; `hello hello wave` from the computer changed the state of the engine on the phone.
+- **planner**: the module's pages are in the sidebar; styled sidebar items (filled with the accent color when selected) and the "Rename" button; the grid pattern, area and line of the `Canvas` update with "Record a day"; annotation text; after turning on "Show the archive in the sidebar" an archive item appears in the sidebar, and turning it off on the archive page moves the selection back to Overview. Checked frame by frame in screen recordings: a newly added tag pops out from 0.4×, overshoots slightly and settles back, and the buttons after it make room smoothly; turning on "Large title" scales the title between the two font sizes without clipping the text, and the content below moves down smoothly. In focus mode, the top bar and the system bars hide after a period of idleness and come back on a tap.
+- **showcase**: a cold start shows the sidebar list (search field, groups, icons); the text, buttons (including toolbar buttons), toggles and sliders (the "All" drop-down in the toolbar), text fields, images and layout (fit modes and `Grid`), and lists and detail (5 `Query` results, pushed links) pages work; the video page plays the featured clip from the CLI, with status `Playing 0:02 / 0:08` and the control bar in sync; `window open --kind settings` opens the settings window (language, toggles, text field, bottom tabs), and `window list` reports two `Virtual` windows; with the settings window over the detail page, the first system Back closes only the settings window and the second returns to the sidebar list; after `ui set-language --language en` the whole UI switches to English.
+- **Control channel**: `ui inspect`, `ui select`, `ui set-bool`, `ui activate`, `window open` and `window list` work over `adb forward`.
 
-2026-10-13，Android 模拟器（Android 15，arm64），`examples/gallery`，由生成的 CLI、`adb` 截图与模拟器的 gRPC 触摸接口驱动（`input` 命令只能模拟单指）：
+2026-10-13, Android emulator (Android 15, arm64), `examples/gallery`, driven by the generated CLI, `adb` screenshots and the emulator's gRPC touch interface (the `input` command can only simulate a single finger):
 
-- **图案页**：卡片点按打开图案、星标点按收藏并弹出轻提示；双指张开把卡片撑到上限 320、捏合缩小，`ui set-number` 也能设置。
-- **工具栏**：分组之间的空隙；外观菜单切换强调色与明暗；详情开关打开底部弹层，里面的海报与取色铺底；外接键盘的 Ctrl+O 打开系统选择器、Ctrl+Alt+I 开关详情。
-- **文件**：系统选择器只列出视频或图片，选中后播放或显示；分屏时从“文件”长按拖入视频，经过时 `over` 变真、松手后播放；`am start` 的 `VIEW` 意图交来的视频交给拖放区播放。
-- **画框页**：在浅色窗口中保持深色，其中的菜单也是深色；静置三秒后铺满、圆角收为直角、按钮隐藏，触摸后退回；分体按钮的浮层是深色。
-- **胶片页**：初始位置停在设定的一格正中；手指快滑前进一格、短拖弹回原格；按钮滚到首尾并停在正中；上下拖动改变值。
-- **关于对话框**：从侧栏底部打开，按“好”关闭。
+- **Patterns page**: tapping a card opens the pattern, tapping the star adds it to Favorites and shows a toast; spreading two fingers enlarges the cards up to the limit of 320 and pinching shrinks them, and `ui set-number` can set it too.
+- **Toolbar**: the gaps between groups; the appearance menu switches the accent color and light/dark; the detail toggle opens a bottom sheet with the poster and a background filled from its picked color; on an external keyboard Ctrl+O opens the system picker and Ctrl+Alt+I toggles the detail.
+- **Files**: the system picker lists only videos or images, and the chosen file plays or is shown; in split screen, a video long-pressed and dragged in from Files sets `over` to true while passing over and plays on release; a video delivered by a `VIEW` intent from `am start` is handed to the drop area and plays.
+- **Frame page**: stays dark in a light window, and its menus are dark too; after three idle seconds it fills the window, the rounded corners become square and the buttons hide, and a touch brings them back; the split button's popover is dark.
+- **Film page**: the initial position rests centered on the configured cell; a quick finger flick advances one cell and a short drag springs back to the original cell; the buttons scroll to the first and last cell and stop centered; dragging up and down changes the value.
+- **About dialog**: opens from the bottom of the sidebar and closes with "OK".
 
-2026-10-14，Android 模拟器（Pixel 9 Pro XL 镜像，Android 15，arm64），v0.30 的四项扩展，`examples/gallery` 与一个只在本机临时目录中的探针应用（覆盖画廊没有用到的 `presented`、工具栏中的浮层按钮、只有文字的浮层按钮、竖向轨道与 `Column` 的错峰）。这台电脑同时有其他构建，模拟器用软件渲染时每帧约 0.7 秒，所以把显示改为 672 × 1496，用 `wm density` 改变逻辑宽度；需要看时序时把系统的动画时长倍率临时调为 100（测完还原为 1），在模拟器内连续截图并记下时间，逐张量每个元素与背景的差别：
+2026-10-14, Android emulator (Pixel 9 Pro XL image, Android 15, arm64), the four v0.30 extensions, `examples/gallery` and a probe app that exists only in a local temporary directory (covering what the gallery does not use: `presented`, popover buttons in the toolbar, text-only popover buttons, vertical rails and stagger in a `Column`). This computer was running other builds at the same time, and with software rendering the emulator took about 0.7 seconds per frame, so the display was changed to 672 × 1496 and the logical width was changed with `wm density`; where timing mattered, the system animation duration scale was temporarily set to 100 (restored to 1 after the measurements), screenshots were taken continuously inside the emulator with their times recorded, and the difference between each element and the background was measured screenshot by screenshot:
 
-- **错峰**：从收藏页用 `ui select` 切到图案页，海报墙（`ForEach(stagger: 0.04)`，卡片组件的根 `appear: rise`）的 6 张卡片按阅读顺序（Gingham、Tartan、Madras、Glen、Houndstooth、Windowpane）依次开始升起，在倍率 100 下相邻约 4 秒开始（达到 30% 的时刻平均相隔 3.8 秒），即正常速度下约 40 毫秒；等待中的卡片占着自己的格子，其他卡片不移动。探针中打开开关让 `Column(stagger: 0.1)` 出现，其中 4 行文字依次在约 0、13、21、31 秒（倍率 100）开始，即约 0.1 秒一个。
-- **轨道**：胶片页 448 dp 宽时，6 个刻度落在 x = 36 + f × 600（像素，f = 0 到 1），“现在”竖线在 0.5 处，名字以起点对准刻度；`ui set-number` 把 level 从 0.5 改为 0.8 后，竖线按 `smooth` 弹簧从 336 平滑移到 516（倍率 100 下逐张截图看到 336、342、358、377、464、…、497），没有 `animate` 的底色立即涨到 0.8（538 / 672）；拖动区的底色铺满 120 dp 高、宽随 level，`Stack` 仍是 120 dp 高（轨道用 `matchParentSize()`：不参与 `Stack` 的尺寸，再按 `Stack` 的大小量）。窗口变为 896 dp 宽时轨道随宽度重排，竖线仍在 0.8 处。探针中竖向轨道 `anchor: end`：底色从顶端铺到 0.3 × 200 dp，文字的底端对准同一点，两者在轨道厚度内居中；`Stack` 中叠在滑块上的轨道，在它 0.25 处的竖条上点按，滑块照常收到（0.5 变为 0.247）。
-- **浮层按钮**：画框页的音量按钮只显示图标；`ui.inspect` 中为 `closed`、其中的滑块不在列表里，`ui activate` 后为 `open`，“音量”标题与 0.7 的滑块出现在按钮下方的深色浮层中（画框页固定深色），滑块也出现在 `ui.inspect` 中；点到浮层外关闭，滑块随之卸载；点按按钮打开。探针中工具栏的浮层按钮显示为文字按钮，`presented` 绑定会话字段：把绑定同一字段的开关设为真时浮层打开、设为假时关闭，`ui activate` 打开后开关变为真，点到外面关闭后变回假；`shortcut: "cmd+j"` 的 Ctrl+J 打开它；只有文字的浮层按钮是色调按钮。
-- **四档尺寸**：用 `wm density` 把窗口设为 448、896、1344、1493 dp 宽（断点 600 / 1024 / 1440），海报墙的页边距量得 16、24、32、约 48 dp（`window.compact`、`medium`、`expanded`、`large`）；896 dp 起侧栏与详情并排。胶片页的 `Adaptive(id: film_controls)` 在 `ui.inspect` 中依次为 `compact`（图标按钮）、`medium`（文字按钮）、`expanded`（文字按钮加提示文字），1493 dp 时详情约 1213 dp 宽，仍为 `expanded`。
-- **构建与测试**：`cargo test -p bern-backend-compose`（新增画廊的生成测试）、`cargo clippy -p bern-backend-compose --all-targets -- -D warnings` 通过；画廊与探针的 Kotlin 由 Gradle 编译通过。
+- **Stagger**: switching from the Favorites page to the Patterns page with `ui select`, the 6 cards of the poster wall (`ForEach(stagger: 0.04)`, with `appear: rise` on the root of the card component) start rising one after another in reading order (Gingham, Tartan, Madras, Glen, Houndstooth, Windowpane), neighbors starting about 4 seconds apart at scale 100 (the moments they reach 30% are 3.8 seconds apart on average), that is, about 40 milliseconds at normal speed; waiting cards hold their own cells and the other cards do not move. In the probe, turning on a toggle makes a `Column(stagger: 0.1)` appear, and its 4 lines of text start at about 0, 13, 21 and 31 seconds (scale 100), that is, about one every 0.1 seconds.
+- **Rails**: with the Film page 448 dp wide, the 6 ticks fall at x = 36 + f × 600 (pixels, f = 0 to 1), the "Now" line is at 0.5, and the names align their start with the ticks; after `ui set-number` changes level from 0.5 to 0.8, the line moves smoothly from 336 to 516 on the `smooth` spring (screenshot by screenshot at scale 100: 336, 342, 358, 377, 464, …, 497), while the background without `animate` grows to 0.8 at once (538 / 672); the drag area's background fills the 120 dp height with a width that follows level, and the `Stack` is still 120 dp high (the rail uses `matchParentSize()`: it takes no part in the size of the `Stack`, and is then measured at the size of the `Stack`). When the window becomes 896 dp wide, the rail lays out again with the width and the line is still at 0.8. In the probe, a vertical rail with `anchor: end`: the background fills from the top to 0.3 × 200 dp, the bottom of the text aligns with the same point, and both are centered within the rail's thickness; for a rail stacked over a slider in a `Stack`, tapping on the bar at its 0.25 still reaches the slider as usual (0.5 becomes 0.247).
+- **Popover buttons**: the volume button on the Frame page shows only an icon; in `ui.inspect` it is `closed` and the slider inside it is not in the list; after `ui activate` it is `open`, the "Volume" title and a slider at 0.7 appear in a dark popover below the button (the Frame page is always dark), and the slider also appears in `ui.inspect`; tapping outside the popover closes it, and the slider is unmounted with it; tapping the button opens it. In the probe, the popover button in the toolbar shows as a text button, with `presented` bound to a session field: setting a toggle bound to the same field to true opens the popover and setting it to false closes it; after `ui activate` opens it the toggle becomes true, and after tapping outside closes it, it goes back to false; Ctrl+J for `shortcut: "cmd+j"` opens it; a text-only popover button is a tonal button.
+- **Four size classes**: with `wm density` setting the window to 448, 896, 1344 and 1493 dp wide (breakpoints 600 / 1024 / 1440), the page margins of the poster wall measure 16, 24, 32 and about 48 dp (`window.compact`, `medium`, `expanded`, `large`); from 896 dp the sidebar and the detail sit side by side. The Film page's `Adaptive(id: film_controls)` is, in turn, `compact` (icon buttons), `medium` (text buttons) and `expanded` (text buttons plus hint text) in `ui.inspect`; at 1493 dp the detail is about 1213 dp wide and still `expanded`.
+- **Build and tests**: `cargo test -p bern-backend-compose` (with new generation tests for the gallery) and `cargo clippy -p bern-backend-compose --all-targets -- -D warnings` pass; the Kotlin of the gallery and the probe compiles with Gradle.
 
-2026-10-14，引擎读取交来的文件，Android 模拟器（Android 15），`examples/gallery`：
+2026-10-14, the engine reading files handed to the app, Android emulator (Android 15), `examples/gallery`:
 
-- 把 `tides.mp4` 以“海浪 Tides #2.mp4”放进模拟器的 `Movies` 并让媒体库建索引，用 `am start -a android.intent.action.VIEW --grant-read-uri-permission` 把 `content://media/external/video/media/29` 交给应用；切到画框页后拖放区收下它并播放，引擎状态中的提示为“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”：名字来自系统的显示名，MP4 由文件开头的 `ftyp` 认出，大小来自描述符。
-- 经 CLI 播放不存在的 `content://media/external/video/media/9999`：取不到名字、打不开，提示只显示地址。
+- `tides.mp4` was put into the emulator's `Movies` as "海浪 Tides #2.mp4" and indexed by the media store, and `am start -a android.intent.action.VIEW --grant-read-uri-permission` handed `content://media/external/video/media/29` to the app; after switching to the Frame page, the drop area accepted it and played it, and the hint in the engine state read "▶ 海浪 Tides #2.mp4 · MP4 · 49 KB": the name comes from the system's display name, MP4 is recognized from the `ftyp` at the start of the file, and the size comes from the descriptor.
+- Playing the nonexistent `content://media/external/video/media/9999` through the CLI: no name can be obtained and it cannot be opened, so the hint shows only the address.
 
-2026-10-19，页面级布局、场景、控件形态与文本格式：
+2026-10-19, page-level layout, scenes, control shapes and text formats:
 
-- **测试与构建**：`cargo test -p bern-backend-compose`（新增 `layout_features_generate_for_compose` 与 `text_formats_generate_for_compose`）、`cargo clippy -p bern-backend-compose --all-targets -- -D warnings`（另外忽略 `bern-target-api` 中已有的 `for_kv_map`）与 `cargo fmt --check` 通过；gallery、showcase、planner、一个覆盖 29 项与 `Stack` 样式的临时巡览应用、文本格式的临时测试应用与用于验收的媒体类应用 `bern build --target android` 由 Gradle 编译成 APK。
-- **文本格式**：把运行时中的解析与写出代码（`BernArg`、`BernPiece`、`BernTextParser` 与 `BernText.format`）原样取出，用 Gradle 缓存中的 Kotlin 编译器在 JVM 上运行，读取为测试应用生成的字符串表：英文依次为“no files”“1 file”“3 files”“Today is Monday, October 12, 2026”“3:04 used (0:03:04)”“3 large files”“Saved Tides #1.mp4 on Mon, Oct 12”，简体中文为“0 个文件”“3 个文件”“今天是 2026年10月12日 星期一”“已用 3:04（0:03:04）”“3 个大文件”“已保存 Tides #1.mp4，10月12日 周一”，与 SwiftUI、Web、GTK 相同；`{{`、`}}` 写出花括号，`#` 只在复数分支中写出数字。这是 JVM 上的结果，不是设备上的。
-- **设备**：手机解锁后实测（MIX 2S，`adb` 截图与生成的 CLI，没有发送按键）：文本格式测试应用英文与简体中文的全部输出与上面相同；用于验收的媒体类应用的引导页与设计稿 Material 手机版对照，修正后动画 Logo 显示在格纹插画上、底栏贴底、“跳过”为 Tonal、“开始”为品牌色 Filled。其余 29 项、`Stack` 样式与动效补充在设备上的显示与交互仍**未验证**（应用的其他页面没有逐屏对照）。
+- **Tests and build**: `cargo test -p bern-backend-compose` (new: `layout_features_generate_for_compose` and `text_formats_generate_for_compose`), `cargo clippy -p bern-backend-compose --all-targets -- -D warnings` (additionally ignoring the existing `for_kv_map` in `bern-target-api`) and `cargo fmt --check` pass; for gallery, showcase, planner, a temporary tour app covering the 29 items and `Stack` styles, a temporary test app for text formats and the media app used for acceptance, `bern build --target android` compiles an APK with Gradle.
+- **Text formats**: the parsing and output code of the runtime (`BernArg`, `BernPiece`, `BernTextParser` and `BernText.format`) was taken out unchanged and run on the JVM with the Kotlin compiler from the Gradle cache, reading the string table generated for the test app: the English outputs are, in order, "no files", "1 file", "3 files", "Today is Monday, October 12, 2026", "3:04 used (0:03:04)", "3 large files", "Saved Tides #1.mp4 on Mon, Oct 12", and the Simplified Chinese ones "0 个文件", "3 个文件", "今天是 2026年10月12日 星期一", "已用 3:04（0:03:04）", "3 个大文件", "已保存 Tides #1.mp4，10月12日 周一", the same as SwiftUI, Web and GTK; `{{` and `}}` output braces, and `#` outputs the number only inside plural branches. These are results on the JVM, not on a device.
+- **Device**: measured with the phone unlocked (MIX 2S, `adb` screenshots and the generated CLI, no key events sent): all English and Simplified Chinese outputs of the text-format test app are the same as above; the onboarding page of the media app used for acceptance was compared with the Material phone version of the design mockup, and after the fixes the animated logo shows over the checkered illustration, the bottom bar sits at the bottom, "Skip" is Tonal and "Start" is Filled in the brand color. The display and interaction on a device of the other 29 items, `Stack` styles and the motion additions remain **not verified** (the app's other pages were not compared screen by screen).
 
-2026-10-19（续），没有页面时的空画框（纯粹模式），MIX 2S（Android 15），`adb` 截图与生成的 CLI，没有发送按键，滚动用一次 `input swipe`：
+2026-10-19 (continued), the empty frame when there are no pages (pure mode), MIX 2S (Android 15), `adb` screenshots and the generated CLI, no key events sent, one `input swipe` for scrolling:
 
-- 引导选“纯粹播放”并完成，不再崩溃；顶栏不出现，空画框（虚线描边）、“打开文件”、并排的“打开文件夹”与“打开链接”、“继续上次”、说明文字与“最近播放”在设计稿 Material 手机版的位置；最近播放的缩略图底部是进度条。
-- 从“继续上次”播放后收起：迷你播放器显示缩略图、标题、暂停与关闭；列表滚到底时最后一行完整地停在迷你播放器上方（应用在播放时给列表底部留出空间）。
-- 测试：`cargo test -p bern-backend-compose`、`cargo clippy --workspace --all-targets`、`cargo fmt --check` 通过。
+- Choosing "Pure playback" in onboarding and finishing it no longer crashes; the top bar does not appear, and the empty frame (dashed outline), "Open File", "Open Folder" and "Open Link" side by side, "Resume", the description text and "Recently played" are where the Material phone version of the design mockup puts them; recently played thumbnails have a progress bar at the bottom.
+- After playing from "Resume" and collapsing: the mini player shows the thumbnail, the title, pause and close; when the list is scrolled to the end, the last row rests fully above the mini player (the app leaves space at the bottom of the list while playing).
+- Tests: `cargo test -p bern-backend-compose`, `cargo clippy --workspace --all-targets` and `cargo fmt --check` pass.
 
-2026-10-20，可选功能的预览与设置页，MIX 2S（Android 15），`adb` 截图与生成的 CLI，没有发送按键，滚动用一次 `input swipe`：
+2026-10-20, the previews of optional features and the settings pages, MIX 2S (Android 15), `adb` screenshots and the generated CLI, no key events sent, one `input swipe` for scrolling:
 
-- 不给尺寸的 `Canvas` 作为 `Stack` 的一层时用 `Modifier.matchParentSize()` 当底板：此前元素生成时只把层叠标记传给 `Rail`（拆分生成器时留下），画布拿到的是铺满，引导第二步预览里选中的“首页”底色撑满整列、“新番”“媒体库”被挤走。
-- 行里的水平 `Rail`（列里的竖直 `Rail`）用 `Modifier.weight(1f)` 分剩余空间：此前它先占走全部剩余宽度，预览播放条上“弹幕”和后面的图标被挤出。
-- 没写 `font_size` 的 `Label` 的图标随文字样式的字号缩放（`bernIconSize`），图标与文字的间距为字号的 0.6 倍（4 到 12）：此前固定 24 dp 与 8 dp，小字号的“首页”被挤成竖排。
-- 给了高度的 `Row` 里，文字（`Text`、`Label`）按自己的行高排、按行的对齐超出这一行（`wrapContentHeight(…, unbounded = true)`），与其他目标相同：此前被压进行高并裁掉，设置子页的大标题“可选功能”上沿与“能”字右侧缺了一块。
-- 实测：引导第二步的预览里选中项只有一行高，三项都在，播放条显示进度、“弹幕”与图标；设置子页只有一份返回与大标题（应用一侧删去重复的 `Slot(id: form_header)`）；侧栏与设置页的头像肩部被圆裁住。未覆盖的图标名仍显示圆点（见下）。
-- 列里没写宽度、带底板的 `Stack` 横向填满（`fillMaxWidth()`），与其他目标的“列里的块”一致：设置页插件横幅与正文同宽。
-- 列里的列（行里的行）直接含 `Spacer` 且没写这个方向的尺寸时用 `Modifier.weight(1f)` 占满剩余空间，`Spacer` 才有空间可分，与其他目标相同；滚动内容、列表与 `Form` 的行不分（它们的高度不定）。此前引导最后一步的列只有内容高，`Spacer` 为零，底部的“上一步 / 开始使用”被挤出屏幕。实测引导最后一步底栏在屏幕底部，纯净模式首页、设置列表与设置子页没有变化。
+- A `Canvas` without a size, as a layer of a `Stack`, uses `Modifier.matchParentSize()` as a backdrop: previously element generation passed the layer flag only to `Rail` (left over from splitting the generator), so the canvas got filling, and in the preview in step two of onboarding the background of the selected "Home" stretched over the whole column, pushing out "Airing" and "Library".
+- A horizontal `Rail` in a row (a vertical `Rail` in a column) shares the remaining space with `Modifier.weight(1f)`: previously it took all the remaining width first, pushing "Danmaku" and the icons after it off the playback bar of the preview.
+- The icon of a `Label` without `font_size` scales with the font size of the text style (`bernIconSize`), and the spacing between icon and text is 0.6 times the font size (4 to 12): previously these were fixed at 24 dp and 8 dp, and a small "Home" was squeezed into vertical text.
+- In a `Row` with a given height, text (`Text`, `Label`) lays out at its own line height and overflows the row according to the row's alignment (`wrapContentHeight(…, unbounded = true)`), as on the other targets: previously it was squeezed into the row height and clipped, and the large title "可选功能" on the settings subpage was missing a piece along its top edge and on the right side of the character "能".
+- Measured: in the preview in step two of onboarding, the selected item is only one row high and all three items are there, and the playback bar shows the progress, "Danmaku" and the icons; the settings subpage has only one Back and one large title (on the app side, the duplicate `Slot(id: form_header)` was removed); the shoulders of the avatars in the sidebar and on the settings page are clipped by the circle. Icon names not covered still show a dot (see below).
+- A `Stack` with a backdrop and no width inside a column fills horizontally (`fillMaxWidth()`), consistent with "blocks in a column" on the other targets: the plugin banner on the settings page is as wide as the body text.
+- A column inside a column (a row inside a row) that directly contains a `Spacer` and has no size in that direction takes the remaining space with `Modifier.weight(1f)`, so that the `Spacer` has space to share, as on the other targets; scrolling content, lists and `Form` rows do not take it (their heights are unbounded). Previously the column of the last onboarding step was only as tall as its content, the `Spacer` was zero, and "Previous / Get started" at the bottom was pushed off the screen. Measured: the bottom bar of the last onboarding step is at the bottom of the screen, and the pure-mode home page, the settings list and the settings subpage are unchanged.
 
-2026-10-20，图标补齐，MIX 2S（Android 15），只用 `adb` 截屏，不发送按键、不操作界面（当时另有会话在用这台手机，手机上是它用当前 Bern 工作树构建的包，含本次改动）：底部标签的首页、新番、媒体库（Video Library）与搜索，设置列表的播放、可选功能、插件（Extension）、快捷键（Keyboard）、关于，插件市场卡片的防剧透（Visibility Off）、正则弹幕过滤（Filter List）、敏感词屏蔽（Shield）、片段导出（Content Cut）、外部播放器（Open In New）都显示 Material 图标，没有圆点。之后手机空出来，用生成的 CLI（`ui activate`，不发按键）打开“可选功能”页：弹幕（Chat）、画质增强（Auto Awesome）、媒体库、追番、账号同步（Sync）、网络媒体源（Dns）、局域网与远程（Wifi）、下载八行的图标都正常，看完回到原来的插件页。另外把 `BernViews.kt` 的 58 条路径用 rsvg 渲染核对过图形（`character.cursor.ibeam` 因此改用已有的 `text`，两者路径相同）。
+2026-10-20, icon coverage, MIX 2S (Android 15), `adb` screenshots only, no key events sent and no interaction with the UI (another session was using this phone at the time; the phone had that session's package built from the current Bern working tree, including this change): in the bottom tabs Home, Airing, Library (Video Library) and Search, in the settings list Playback, Optional features, Plugins (Extension), Keyboard shortcuts (Keyboard) and About, and on the plugin market cards Spoiler protection (Visibility Off), Regex danmaku filter (Filter List), Sensitive word blocking (Shield), Clip export (Content Cut) and External player (Open In New) all show Material icons, with no dots. Later, when the phone was free, the "Optional features" page was opened with the generated CLI (`ui activate`, no key events): the icons of the eight rows Danmaku (Chat), Picture enhancement (Auto Awesome), Library, Following, Account sync (Sync), Network media sources (Dns), LAN and remote (Wifi) and Downloads are all correct, and afterwards it went back to the original plugin page. In addition, the 58 paths in `BernViews.kt` were rendered with rsvg to check their shapes (`character.cursor.ibeam` therefore now uses the existing `text`; the two have the same path).
 
-2026-10-20，标签选择器与换行工具条，MIX 2S（Android 15，393 dp 宽），装包后经 CLI 打开设置 › 插件，用 `adb` 截屏与 `uiautomator` 读位置，不发送按键：
+2026-10-20, chip pickers and wrapping tool strips, MIX 2S (Android 15, 393 dp wide), Settings › Plugins opened via the CLI after installing the package, `adb` screenshots and `uiautomator` for positions, no key events sent:
 
-- 插件页的 `Flow(gap: 10)` 里是分段 `Picker`、`Spacer` 与 `Picker(style: chips)`。第一行是分段控件与靠右的「全部」「弹幕」，其余三个 chip 换到第二行靠左；`FilterChip` 32 dp 高，选中的「全部」为色调底色，不带对勾。经 CLI 选「工具」后它变为选中，列表只剩工具类插件。
-- 原型（Material，手机）第一行放得下三个 chip：它的分段控件 123 宽、chip 54 宽（13 px 字）。Compose 的 `SegmentedButton` 各段等宽，且总为对勾留出 18 + 8 dp（不显示对勾时也留），`FilterChip` 为 14 sp 字、60 dp 宽，这一行在 361 dp 里放不下第三个。这是系统控件自己的尺寸，没有改画。
-- 发现并修正：分段按钮按各段的最小固有宽度排，文字的最小固有宽度是最长的一个词，带计数的标签「已安装 3」原来被截成「已安装」；现在标签按整行宽度量。
+- The `Flow(gap: 10)` on the plugins page holds a segmented `Picker`, a `Spacer` and a `Picker(style: chips)`. The first line has the segmented control and, on the right, "All" and "Danmaku"; the other three chips wrap to the second line on the left; a `FilterChip` is 32 dp high, and the selected "All" has a tonal background with no checkmark. After "Tools" is selected via the CLI it becomes selected, and the list shows only tool plugins.
+- The prototype (Material, phone) fits three chips on the first line: its segmented control is 123 wide and its chips 54 wide (13 px text). Compose's `SegmentedButton` gives every segment the same width and always reserves 18 + 8 dp for the checkmark (even when no checkmark is shown), and a `FilterChip` has 14 sp text and is 60 dp wide, so the third one does not fit on this line in 361 dp. These are the system controls' own sizes; they were not redrawn.
+- Found and fixed: segmented buttons were laid out by each segment's minimum intrinsic width, and the minimum intrinsic width of text is its longest word, so the label with a count "Installed 3" was cut to "Installed"; labels are now measured at the width of the whole line.
 
-2026-10-20，直接写在窗口正文里的样式变体：此前 `style::used` 只看组件的正文，窗口正文里写的 `variant:` 不生成 `BernStyles` 的条目，生成的 Kotlin 引用不存在的 `BernStyles.buttonStage`（原因见 WinUI 3 实现记录的同日条目）。生成器测试 `a_style_variant_in_a_window_is_defined` 断言定义与引用；测试应用 `bern build --target android` 完成 Kotlin 编译并打出 APK。MIX 2S（Android 15）上装包后截屏（不发按键，看完切回原来的应用并卸载测试包）：窗口正文里的按钮是强调色底、圆角 12，组件里的是 `fill.subtle` 底、圆角 4。
+2026-10-20, style variants written directly in a window body: previously `style::used` looked only at component bodies, so a `variant:` written in a window body generated no `BernStyles` entry, and the generated Kotlin referred to a nonexistent `BernStyles.buttonStage` (the cause is in the same-day entry of the WinUI 3 implementation notes). The generator test `a_style_variant_in_a_window_is_defined` asserts the definition and the reference; for a test app, `bern build --target android` completes the Kotlin compilation and produces an APK. Screenshots after installing on a MIX 2S (Android 15) (no key events sent; afterwards it switched back to the original app and uninstalled the test package): the button in the window body has an accent-color background and corner radius 12, the one in the component a `fill.subtle` background and corner radius 4.
 
-2026-10-20，直接写在窗口正文里的 `Drop(opens: true)` 与网络图片：清单的 `VIEW`、`SEND` 意图与 `INTERNET` 权限此前只看组件的正文（与上一条同因），窗口正文里直接写的拖放区不登记它的种类、活动不是 `singleTask`，那里取自网络的图片不给清单加 `INTERNET`。改为连同窗口正文一起看；生成器测试 `a_drop_and_a_network_picture_in_a_window_reach_the_manifest` 改前失败、改后通过。没有装到手机上。
+2026-10-20, `Drop(opens: true)` and network images written directly in a window body: the manifest's `VIEW` and `SEND` intents and the `INTERNET` permission previously looked only at component bodies (the same cause as the previous entry), so a drop area written directly in a window body did not register its kinds, the activity was not `singleTask`, and images loaded from the network there did not add `INTERNET` to the manifest. Window bodies are now included; the generator test `a_drop_and_a_network_picture_in_a_window_reach_the_manifest` fails before the change and passes after it. Not installed on a phone.
 
-2026-10-21，图片不在主线程解码（见“图片的读取”）。此前声明资源的 `Image` 在组合时用 `BitmapFactory.decodeFile` 整张解码，页面每次重新出现都再解一次；引擎给出的图片已在后台读取，但按原尺寸解码、一直保留，而且共用一个状态表，每读到一张就让屏幕上所有图片重组。在小米 MIX 2S（Android 15）上用独立包名的 release 测试包对照，两版只差这两个 Kotlin 文件；经控制通道切页（不发输入事件），每次切换前清零、切换后取 `dumpsys gfxinfo framestats`，记下这次切换里最长的 UI 线程时间（`HandleInputStart` 到 `SyncQueued`），下面是中位数：
+2026-10-21, images are not decoded on the main thread (see "Image loading"). Previously an `Image` of a declared resource was decoded in full with `BitmapFactory.decodeFile` during composition, and again every time the page reappeared; images provided by the engine were already read in the background, but were decoded at their original size and kept forever, and they shared one state map, so every image read made all images on screen recompose. Compared on a Xiaomi MIX 2S (Android 15) with release test packages under a separate package name, the two versions differing only in these two Kotlin files; pages were switched through the control channel (no input events sent), resetting before each switch and taking `dumpsys gfxinfo framestats` after it, and recording the longest UI-thread time in that switch (`HandleInputStart` to `SyncQueued`); the medians are below:
 
-- 应用自带的图片（字标 473×216、海报 240×344）：两版没有可测出的差别，打开“关于”页 81 / 80 ms，其余页面相同。
-- 把字标放大到 3784×1728、海报放大到 960×1376：打开“关于”页 190–194 ms → 73–81 ms（三轮，每轮 12 次），省下的就是字标在主线程的解码；媒体库、首页与新番切日两版相同（这些图片改前已在后台读取）。走一遍海报页、强制回收后，Native Heap 114–126 MB → 53 MB，Graphics 121 MB → 64 MB（各两轮）。第一版对只给 `aspect`、铺满网格格子的海报以窗口宽度为上限，结果仍按原尺寸解码，同一张海报在不同页面又各读一次，内存反而更高；改为按布局量出的宽度读取后才是上面的数字。
-- “关于”页的字标与媒体库海报网格的画面改前改后一致。
-- 两版切页本身都有 60–130 ms 的 UI 线程帧（打开“关于”页约 80 ms、首页约 125 ms、媒体库约 105 ms、切日约 58 ms），与图片无关，这次没有处理。
+- The app's own images (wordmark 473×216, posters 240×344): no measurable difference between the two versions; opening the "About" page 81 / 80 ms, the other pages the same.
+- With the wordmark enlarged to 3784×1728 and the posters to 960×1376: opening the "About" page 190–194 ms → 73–81 ms (three rounds of 12 each); the saving is exactly the wordmark's decoding on the main thread; Library, Home and switching days on Airing are the same in both versions (those images were already read in the background before the change). After going through the poster pages and forcing a garbage collection, Native Heap 114–126 MB → 53 MB and Graphics 121 MB → 64 MB (two rounds each). The first version capped posters that give only `aspect` and fill a grid cell at the window width, so they were still decoded at their original size, and the same poster was read again on each page, so memory was actually higher; the numbers above came only after changing to reading at the width measured by layout.
+- The wordmark on the "About" page and the Library poster grid look the same before and after the change.
+- In both versions, page switches themselves have UI-thread frames of 60–130 ms (opening the "About" page about 80 ms, Home about 125 ms, Library about 105 ms, switching days about 58 ms), unrelated to images; not addressed this time.
 
-生成的调用没有变化，生成器测试不用改；`cargo test -p bern-backend-compose` 通过。
+The generated calls did not change, so the generator tests needed no changes; `cargo test -p bern-backend-compose` passes.
 
-2026-10-21，窗口正文的摆放（设计文档“一套窗口声明”）：
+2026-10-21, placement of the window body (design document, "One set of window declarations"):
 
-- 改前：窗口内容区是 `Box(contentAlignment = Alignment.TopCenter)`，比窗口小的正文整体水平居中、靠顶；直接写在窗口里的 `Stack` 也只是水平居中、靠顶。
-- 修正：内容区改为 `Alignment.TopStart`。生成器把直接写在窗口里（经条件或组件也算）、没写宽度的 `Column` 放进 `Box(Modifier.fillMaxWidth(), contentAlignment = …)`，对齐按它的 `align` 取 `TopStart`、`TopCenter` 或 `TopEnd`；没写尺寸的 `Stack` 放进 `Box(Modifier.fillMaxSize(), contentAlignment = …)`，对齐取它的 `align`（`under_bars` 本来就铺满）。列里的 Material 按钮本来就保持自身宽度。
-- 测试：`content_in_a_window_starts_at_its_top_leading_corner` 断言内容区与这几层 `Box`，组件自己的正文不加；撤掉修正时失败。探针应用的 Kotlin 编译通过。
-- 实机（MIX 2S，Android 15，探针应用经 CLI 切换正文，`screencap` 截屏，用完卸载）：改前默认列与写在组件里的 `Column(align: center)` 都整体水平居中、靠顶，`Stack` 的小层水平居中、靠顶；改后默认列从左上排起、按钮保持自身宽度，居中列水平居中、靠顶，`Stack` 的小层在内容区正中。图标按钮、菜单、浮层按钮那一种正文没有在手机上看。
+- Before: the window's content area was `Box(contentAlignment = Alignment.TopCenter)`, so a body smaller than the window was centered horizontally as a whole and placed at the top; a `Stack` written directly in the window was likewise only centered horizontally and placed at the top.
+- Fix: the content area is now `Alignment.TopStart`. The generator puts a `Column` written directly in the window (also counting one reached through a condition or a component) without a width into `Box(Modifier.fillMaxWidth(), contentAlignment = …)`, with the alignment taken from its `align` as `TopStart`, `TopCenter` or `TopEnd`; a `Stack` without a size goes into `Box(Modifier.fillMaxSize(), contentAlignment = …)`, with the alignment taken from its `align` (`under_bars` already fills). Material buttons in a column already keep their own width.
+- Tests: `content_in_a_window_starts_at_its_top_leading_corner` asserts the content area and these `Box` layers, and that a component's own body gets none; it fails with the fix removed. The probe app's Kotlin compiles.
+- On a device (MIX 2S, Android 15, probe app switching bodies via the CLI, `screencap` screenshots, uninstalled afterwards): before the change, the default column and a `Column(align: center)` written in a component were both centered horizontally as a whole and placed at the top, and the small layer of the `Stack` was centered horizontally and at the top; after the change, the default column lays out from the top left with buttons keeping their own width, the centered column is centered horizontally at the top, and the small layer of the `Stack` is in the exact center of the content area. The body with icon buttons, menus and popover buttons was not looked at on the phone.
 
-2026-10-21，切页时的长帧（上面图片一条最后说的 60–130 ms）。测法同那一条：独立包名的 release 测试包，只经控制通道切页，每次切换前清零、切换后取 `framestats`，记这次切换里最长的 UI 线程时间，取中位数；另用 `atrace`（带应用自己的段）看每帧的阶段，在加了 `profileable` 的同一个包上用 `simpleperf`（DWARF 调用栈）看长帧里的调用。
+2026-10-21, long frames on page switches (the 60–130 ms mentioned at the end of the image entry above). Measured as in that entry: release test packages under a separate package name, pages switched only through the control channel, resetting before each switch and taking `framestats` after it, recording the longest UI-thread time in the switch and taking the median; in addition, `atrace` (with the app's own sections) for the phases of each frame, and `simpleperf` (DWARF call stacks) on the same package with `profileable` added for the calls in long frames.
 
-长帧从哪里来：
+Where the long frames come from:
 
-- **代码没有预先编译**：`adb install` 装上的 release 包是 `status=verify`，APK 里只有 Compose 等库自带的基线规则，Bern 运行时与生成的界面代码都在解释器与 JIT 里跑。同一个包用 `cmd package compile -m speed` 全编译后，打开“关于”80 → 47 ms、返回 74 → 30、首页 121 → 84、媒体库 112 → 63、新番切日 55 → 43。
-- **全编译后剩下的**：切到首页那一帧约 86 ms，组合几乎都发生在测量阶段（`Adaptive` 的 `BoxWithConstraints` 在测量时子组合；窗口根是共享元素的 `SharedTransitionLayout`，所以先做前瞻测量），`measureAndLayout` 约 50 ms；应用节点变更约 17 ms、释放旧页约 8 ms、绘制约 5 ms。长帧里的采样按调用归类：组合 22%、协程的启动与取消 18%、测量与布局 16%、快照读写 14%、节点增删 9%、文字布局 6%、绘制 4%。
-- **协程那一份是每个元素各自带的**：`BernAppear` 的 `AnimatedVisibility`（过渡对象，加一个一直等着的 `snapshotFlow` 收集）；带样式按钮的 5 个 `animateFloatAsState` 与阴影的 `animateDpAsState`，每个都有一个一直等着的协程；按下与悬停各一个收集协程；Material 按钮自己的水波纹。页面离开时这些挂起的协程逐个取消，每次取消在协程里抛一次异常，ART 为它回溯一遍栈。
-- **其余属于运行时的**：`bernReduceMotion` 在每个新元素里读一次 `Settings.Global`，每次组合还遍历一个状态表；`BernScheme` 每次组合重算壁纸取色（`dynamicDarkColorScheme`，`appearance:` 固定明暗的每个元素各算一次）；`BernText.format` 每次逐字重新解析模板；只用来占位置的空 `Canvas` 每个都是带绘制与清空语义的节点（测试应用生成的代码里有 153 处）。
-- 打开“关于”页的那一帧里，动画 SVG 的 `WebView` 创建（`WebViewChromium.init`）占 10–15 ms。
-- 切换后约 1 秒内超过 16.7 ms 的帧大多由 RenderThread 决定（每帧 12–20 ms），UI 线程每帧只有 3–8 ms；其中很多帧只超出一点（17–18 ms）。按超过 33 ms 计，每次切换 4–24 帧，同一个包两轮之间就差到一倍，改前改后看不出差别，这次没有处理。
+- **The code is not compiled ahead of time**: a release package installed with `adb install` is `status=verify`; the APK contains only the baseline rules that Compose and other libraries ship, and the Bern runtime and the generated UI code run in the interpreter and the JIT. After the same package is fully compiled with `cmd package compile -m speed`: opening "About" 80 → 47 ms, back 74 → 30, Home 121 → 84, Library 112 → 63, switching days on Airing 55 → 43.
+- **What remains after full compilation**: the frame switching to Home is about 86 ms, and composition happens almost entirely in the measure phase (`Adaptive`'s `BoxWithConstraints` subcomposes during measurement; the window root is the shared-element `SharedTransitionLayout`, so a lookahead measurement comes first), with `measureAndLayout` about 50 ms; applying node changes about 17 ms, disposing the old page about 8 ms, drawing about 5 ms. Samples in long frames grouped by call: composition 22%, coroutine launch and cancellation 18%, measure and layout 16%, snapshot reads and writes 14%, node insertion and removal 9%, text layout 6%, drawing 4%.
+- **The coroutine share is carried by each element on its own**: `BernAppear`'s `AnimatedVisibility` (a transition object, plus a `snapshotFlow` collection that is always waiting); a styled button's 5 `animateFloatAsState` and the shadow's `animateDpAsState`, each with a coroutine that is always waiting; one collecting coroutine each for press and hover; the Material button's own ripple. When the page goes away, these suspended coroutines are cancelled one by one; each cancellation throws an exception in the coroutine, and ART walks the stack for it.
+- **The rest belongs to the runtime**: `bernReduceMotion` reads `Settings.Global` once in every new element and also walks a state map on every composition; `BernScheme` recomputes the wallpaper colors on every composition (`dynamicDarkColorScheme`, once more for every element whose `appearance:` fixes light or dark); `BernText.format` reparses the template character by character every time; every empty `Canvas` used only to take up space is a node with drawing and cleared semantics (153 of them in the code generated for the test app).
+- In the frame that opens the "About" page, creating the `WebView` for the animated SVG (`WebViewChromium.init`) takes 10–15 ms.
+- Frames over 16.7 ms within about 1 second after a switch are mostly determined by the RenderThread (12–20 ms per frame), while the UI thread takes only 3–8 ms per frame; many of these frames exceed the limit only slightly (17–18 ms). Counting frames over 33 ms, there are 4–24 per switch, and two rounds of the same package already differ by as much as a factor of two, so no difference between before and after the change can be seen; not addressed this time.
 
-修正（“样式与动效”“`Canvas` 与标注”“构建、运行与打包”各条已改）：基线配置文件列出运行时与生成代码的全部方法，`bern run` 连同 `.dm` 一起安装；`BernAppear` 用一个进度驱动所在层，不再用 `AnimatedVisibility`；样式变换与阴影只在外观变化时启动弹簧，按下与悬停由 `BernInteractions` 在发出时记下；动画开关的系统设置在启动与回到前台时读一次，`reduce_motion` 的持有者合成一个状态；配色按当前配置、明暗与强调色缓存，同一配置只算一次；文字模板解析一次后缓存；空 `Canvas` 生成为 `Spacer`。
+Fix (the "Style and motion", "`Canvas` and annotation" and "Build, run and packaging" entries are updated): the baseline profile lists all methods of the runtime and the generated code, and `bern run` installs it together with the `.dm`; `BernAppear` drives its layer with a single progress value and no longer uses `AnimatedVisibility`; style transforms and shadows start springs only when the appearance changes, and press and hover are recorded by `BernInteractions` when they are emitted; the system setting for animations is read once at startup and on returning to the foreground, and the holders of `reduce_motion` are combined into one state; color schemes are cached by the current configuration, light/dark and accent color, so the same configuration is computed only once; text templates are cached after being parsed once; an empty `Canvas` is generated as a `Spacer`.
 
-结果（MIX 2S，Android 15，电池温度 35.0–36.0 ℃；每次切换里最长的 UI 线程时间的中位数，ms。“改前，装后即测”是与改后交替测的一轮；“带配置文件安装”是 `bern run --release` 的装法，装完即为 `status=speed-profile`；“全编译”是 `cmd package compile -m speed`。测试脚本没有关掉首次启动的引导页，它盖在主窗口上，切页仍在下面的主窗口里组合、布局与绘制，两版条件相同；关掉引导页后另录了屏，见下）：
+Results (MIX 2S, Android 15, battery temperature 35.0–36.0 ℃; median of the longest UI-thread time in each switch, ms. "Before, measured right after install" is a round measured alternately with the after version; "installed with profile" is how `bern run --release` installs, which gives `status=speed-profile` right after installation; "fully compiled" is `cmd package compile -m speed`. The test script did not dismiss the first-launch onboarding, which covers the main window; page switches still compose, lay out and draw in the main window underneath, under the same conditions for both versions; a separate screen recording was made with onboarding dismissed, see below):
 
-| 切换 | 改前，装后即测 | 改后，装后即测 | 改后，带配置文件安装 | 改前，全编译 | 改后，全编译 |
+| Switch | Before, measured right after install | After, measured right after install | After, installed with profile | Before, fully compiled | After, fully compiled |
 | --- | --- | --- | --- | --- | --- |
-| 打开“关于” | 78.5 | 73.1 | 54.0 | 47.1 | 46.9 |
-| 从“关于”返回 | 75.8 | 69.4 | 34.1 | 30.0 | 28.7 |
-| 新番切日 | 58.5 | 52.0 | 36.9 | 43.2 | 35.6 |
-| 切到首页 | 123.4 | 106.2 | 75.9 | 83.6 | 69.0 |
-| 切到媒体库 | 106.2 | 91.8 | 61.6 | 62.5 | 53.5 |
+| Open "About" | 78.5 | 73.1 | 54.0 | 47.1 | 46.9 |
+| Back from "About" | 75.8 | 69.4 | 34.1 | 30.0 | 28.7 |
+| Switch days on Airing | 58.5 | 52.0 | 36.9 | 43.2 | 35.6 |
+| Switch to Home | 123.4 | 106.2 | 75.9 | 83.6 | 69.0 |
+| Switch to Library | 106.2 | 91.8 | 61.6 | 62.5 | 53.5 |
 
-- 改前用户拿到的是第一列；改后按 `bern run` 的方式安装是第三列，长帧短了 31–55%。直接装 APK（第二列）只有代码改动的 7–14%（另一轮 4–23%），配置文件要等系统下次后台编译才用上。
-- 全编译的两列只差代码：首页、媒体库与切日短了 14–18%；“关于”与返回没有变，那一帧主要是 `WebView` 的创建与页面本身的组合。
-- 带配置文件安装仍比全编译慢一些（首页 75.9 / 69.0）：库里不在它们自带配置文件中的代码仍由 JIT 跑，系统后台编译时会把运行中热起来的方法补上。没有把整个 Compose 与协程库加进规则（安装时间与编译产物会大很多）。
-- 关掉引导页、套用全部功能后录屏（`screenrecord`，按 30 帧抽图）：切到媒体库时先是“正在载入…”，随后整页淡入上移，海报按错峰逐个淡入上移，约半秒排齐；新番切日时周一收成胶囊、周四展开，最后的画面与改前一致。带样式按钮的按下反馈没有在真机上点按确认（测试不发输入事件）。
-- 生成器测试 `a_canvas_with_nothing_to_draw_is_a_spacer`、`the_runtime_and_the_interface_are_in_the_baseline_profile`；`cargo test -p bern-backend-compose` 通过。
+- Before the change, users got the first column; after the change, installed the way `bern run` installs, they get the third column, with long frames 31–55% shorter. Installing the APK directly (second column) gets only the 7–14% from the code changes (4–23% in another round); the profile is used only after the system's next background compilation.
+- The two fully compiled columns differ only in code: Home, Library and switching days are 14–18% shorter; "About" and back did not change, since that frame is mainly the creation of the `WebView` and the composition of the page itself.
+- Installing with the profile is still somewhat slower than full compilation (Home 75.9 / 69.0): library code that is not in the libraries' own profiles still runs in the JIT, and the system's background compilation adds the methods that became hot while running. The whole of Compose and the coroutine library were not added to the rules (installation time and compiled output would be much larger).
+- Screen recording with onboarding dismissed and all features applied (`screenrecord`, frames extracted at 30 per second): switching to Library first shows "Loading…", then the whole page fades in and moves up, and the posters fade in and move up one by one with stagger, settling in about half a second; when switching days on Airing, Monday collapses into a capsule and Thursday expands, and the final picture matches the version before the change. The press feedback of styled buttons was not confirmed by tapping on a real device (the tests send no input events).
+- Generator tests `a_canvas_with_nothing_to_draw_is_a_spacer` and `the_runtime_and_the_interface_are_in_the_baseline_profile`; `cargo test -p bern-backend-compose` passes.
 
-2026-10-21，切页后由 RenderThread 决定的帧（上一条最后说的每帧 12–20 ms）。测法同上一条：独立包名的 release 测试包，按 `bern run` 的方式带配置文件安装，只经控制通道切页；这次先关掉首次启动的引导页再套用全部功能（上一条测量时引导页一直盖在主窗口上）。除 `framestats` 外，用手机上的 `perfetto` 同时记下应用的 atrace 段（`gfx`、`view`、`webview`）、Adreno 驱动的 kgsl 事件（每批 GPU 命令的提交与完成，完成事件带 GPU 时钟上的开始与结束）与 SurfaceFlinger 的 FrameTimeline（系统为每一帧判定的掉帧类型）。这台手机没有 `gpu.counters` 数据源，GPU 时间取自 kgsl。
+2026-10-21, frames determined by the RenderThread after a page switch (the 12–20 ms per frame mentioned at the end of the previous entry). Measured as in the previous entry: release test packages under a separate package name, installed with the profile the way `bern run` installs, pages switched only through the control channel; this time the first-launch onboarding was dismissed first and then all features were applied (during the previous entry's measurements, onboarding stayed over the main window the whole time). Besides `framestats`, `perfetto` on the phone recorded at the same time the app's atrace sections (`gfx`, `view`, `webview`), the Adreno driver's kgsl events (submission and completion of each batch of GPU commands; completion events carry the start and end on the GPU clock) and SurfaceFlinger's FrameTimeline (the jank type the system assigns to each frame). This phone has no `gpu.counters` data source, so GPU time is taken from kgsl.
 
-这些帧从哪里来：
+Where these frames come from:
 
-- **大多不是掉帧，是排队**：切页那一两帧在 UI 线程误了截止时间，之后的帧在缓冲队列里多排一到两块，RenderThread 在 `dequeueBuffer` 里等空闲的缓冲区，或者 GPU 等拿到的缓冲区被显示放开。`framestats` 的 `SyncStart` 到 `FrameCompleted` 包含这段等待，所以每帧显示 12–20 ms；按 `IntendedVsync` 到 `FrameCompleted` 计，多排一块时每帧约 17 ms、两块时约 33 ms，取决于切页长帧落在哪里。同一个包两轮之间“超过 33 ms 的帧数”因此差很多（首页每次切换 8.5 与 38.4 帧）。FrameTimeline 把这些帧判为缓冲区塞满（Buffer Stuffing）；`DisplayPresentTime` 仍是每 16.7 ms 一帧（多排一块时比预定晚约 49 ms），画面连续，只是整体晚一到两帧。
-- **RenderThread 自己的工作每帧约 7 ms，GPU 约 2 ms**：媒体库、首页与新番切日共 927 帧，`Drawing`（录制并提交绘制命令）中位 5.3–5.8 ms、最长 8.2–9.6 ms，同步 0.6 ms，其中 `eglSwapBuffers` 1.2 ms；kgsl 量得每帧 GPU 执行中位 2.1–2.2 ms、最长 4.1–4.4 ms。出现过渡的透明层已由 HWUI 提升为离屏层，每帧只重画变了的部分（`drawLayer [graphicsLayer] 1080 x 1863` 约 1 ms），没有纹理上传或着色器编译造成的长帧。FrameTimeline 中这三种共 17 次切换，除切页的一两帧外只有 1 帧判为应用误时，那一帧 RenderThread 只画了 5.5 ms，是在等缓冲区。
-- **由 RenderThread 误时的只有动画 SVG**：“关于”页的动画图标在 `WebView` 里播放，页面显示期间每帧都重绘。`WebViewFunctor::drawGl` 平时每帧约 5 ms；每次打开后图标出现的那一帧 9–22 ms，有时误一帧。同一次打开里，主线程新建 `WebView`（`AwContents.constructor`）三轮中位数 47–52 ms，占切页帧（96–105 ms）的一半。
-- 剩下看得见的卡顿是切页本身的一两帧，在 UI 线程：媒体库先是约 25 ms，数据到达后整页在测量阶段组合的一帧 72–76 ms；首页 77–82 ms；切日 26–52 ms（见上一条）。
+- **Mostly not dropped frames but queuing**: the one or two frames of the page switch miss their deadline on the UI thread, after which the following frames queue one or two extra buffers in the buffer queue, and the RenderThread waits in `dequeueBuffer` for a free buffer, or the GPU waits for the buffer it got to be released by the display. `framestats`' `SyncStart` to `FrameCompleted` includes this wait, so each frame shows 12–20 ms; counted from `IntendedVsync` to `FrameCompleted`, each frame is about 17 ms with one extra buffer queued and about 33 ms with two, depending on where the long page-switch frame falls. The "number of frames over 33 ms" therefore differs a lot between two rounds of the same package (8.5 and 38.4 frames per switch to Home). FrameTimeline classifies these frames as Buffer Stuffing; `DisplayPresentTime` is still one frame every 16.7 ms (about 49 ms later than scheduled with one extra buffer queued), so the picture is continuous, only one or two frames late overall.
+- **The RenderThread's own work is about 7 ms per frame, the GPU's about 2 ms**: over 927 frames of Library, Home and switching days on Airing, `Drawing` (recording and submitting draw commands) has a median of 5.3–5.8 ms and a maximum of 8.2–9.6 ms, sync 0.6 ms, and of these `eglSwapBuffers` 1.2 ms; kgsl measures GPU execution per frame at a median of 2.1–2.2 ms and a maximum of 4.1–4.4 ms. Transparent layers with appear transitions are already promoted to offscreen layers by HWUI, and each frame redraws only the part that changed (`drawLayer [graphicsLayer] 1080 x 1863` about 1 ms); there are no long frames caused by texture uploads or shader compilation. In FrameTimeline, across the 17 switches of these three kinds, apart from the one or two page-switch frames only 1 frame is classified as an app deadline miss, and in that frame the RenderThread drew for only 5.5 ms; it was waiting for a buffer.
+- **Only the animated SVG makes the RenderThread miss deadlines**: the animated icon on the "About" page plays in a `WebView` and redraws every frame while the page is shown. `WebViewFunctor::drawGl` normally takes about 5 ms per frame; the frame in which the icon appears after each opening takes 9–22 ms and sometimes misses a frame. In the same opening, creating the `WebView` on the main thread (`AwContents.constructor`) has a median of 47–52 ms over three rounds, half of the page-switch frame (96–105 ms).
+- The remaining visible stutter is the one or two frames of the page switch itself, on the UI thread: Library first about 25 ms, then 72–76 ms for the frame in which the whole page composes in the measure phase after the data arrives; Home 77–82 ms; switching days 26–52 ms (see the previous entry).
 
-修正（[动画 SVG](Animated-SVG.md) 的 Android 补充）：离开屏幕的 `WebView` 不立即销毁，换成空白页后按文档与活动留一个，30 秒内同一文档再显示时取回并重新载入文档，脚本与动画仍从头开始；超过 30 秒、活动停止或渲染进程退出时释放。留下的视图处理 `onRenderProcessGone`：它不可见时渲染进程可能被系统回收，不处理会连带结束应用。
+Fix (the Android addition to [Animated SVG](Animated-SVG.md)): a `WebView` that leaves the screen is not destroyed immediately; after switching it to a blank page, one is kept per document and activity, and when the same document is shown again within 30 seconds it is taken back and the document is reloaded, with scripts and animations still starting from the beginning; it is released after 30 seconds, when the activity stops, or when the render process exits. The kept view handles `onRenderProcessGone`: while it is invisible the system may reclaim the render process, and without handling that, the app would be ended along with it.
 
-结果（MIX 2S，Android 15，电池 35–36 ℃；改前改后各三轮，穿插进行，改后第三轮是带 30 秒释放的最终版本；每轮每种切换 10 次，trace 每轮打开 4 次）：
+Results (MIX 2S, Android 15, battery 35–36 ℃; three rounds each before and after the change, interleaved, the third round after the change being the final version with the 30-second release; 10 switches of each kind per round, 4 openings per round in the trace):
 
-| 打开“关于” | 改前 | 改后 |
+| Opening "About" | Before | After |
 | --- | --- | --- |
-| 最长 UI 线程时间（`framestats` 中位数，ms） | 99.4 / 98.7 / 97.2 | 39.2 / 38.7 / 37.9 |
-| 切页帧（trace 中位数，ms） | 96.4 / 105.2 / 103.7 | 39.8 / 39.4 / 40.7 |
-| 其中新建 `WebView`（ms） | 46.8 / 51.7 / 51.4 | 0 |
-| 图标出现那一帧的 `drawGl`（ms） | 17.5 / 10.5 / 11.9 | 12.4 / 10.2 / 13.9 |
-| 切页帧之后 1.2 s 内判为应用误时的帧（每次打开） | 0.75 / 0.5 / 0.75 | 0.25 / 0.25 / 0 |
+| Longest UI-thread time (`framestats` median, ms) | 99.4 / 98.7 / 97.2 | 39.2 / 38.7 / 37.9 |
+| Page-switch frame (trace median, ms) | 96.4 / 105.2 / 103.7 | 39.8 / 39.4 / 40.7 |
+| Of which creating the `WebView` (ms) | 46.8 / 51.7 / 51.4 | 0 |
+| `drawGl` in the frame in which the icon appears (ms) | 17.5 / 10.5 / 11.9 | 12.4 / 10.2 / 13.9 |
+| Frames classified as app deadline misses within 1.2 s after the page-switch frame (per opening) | 0.75 / 0.5 / 0.75 | 0.25 / 0.25 / 0 |
 
-- 返回、媒体库、首页与切日两版相同（最长 UI 线程时间分别约 30–37、60–63、71–75、31–39 ms）。
-- 图标出现那一帧与平时每帧的 `drawGl` 没有变：重新载入的文档仍要整页栅格化，这是 `WebView` 自己的代价。
-- 留下的视图让 `WebView` 的渲染进程继续存在：离开“关于”后 PSS 98.5 MB，其中私有脏页 21 MB、私有干净页 55 MB；应用进程两版都是 199 MB。改前离开后渲染进程随即退出。所以只留 30 秒。
-- 生命周期（控制通道驱动）：第一次打开新建；30 秒内再打开复用，这次切页帧 27 ms；离开 35 秒后渲染进程已退出，再打开重新新建（114 ms）；测试包退到后台时立即释放，回来再打开新建；全程没有崩溃。第一次打开“关于”仍要新建，复用只在同一次使用里再次打开时生效。
-- 以后看切页后是否流畅，用 FrameTimeline 的掉帧类型或 `DisplayPresentTime` 的间隔，不用 `framestats` 的每帧时长。
+- Back, Library, Home and switching days are the same in both versions (longest UI-thread time about 30–37, 60–63, 71–75 and 31–39 ms respectively).
+- `drawGl` in the frame in which the icon appears and in ordinary frames did not change: the reloaded document still has to rasterize the whole page, which is the `WebView`'s own cost.
+- The kept view keeps the `WebView`'s render process alive: after leaving "About", its PSS is 98.5 MB, of which 21 MB are private dirty pages and 55 MB private clean pages; the app process is 199 MB in both versions. Before the change, the render process exited right after leaving. That is why the view is kept for only 30 seconds.
+- Lifecycle (driven through the control channel): the first opening creates a new one; opening again within 30 seconds reuses it, with a page-switch frame of 27 ms this time; 35 seconds after leaving, the render process has exited, and opening again creates a new one (114 ms); when the test package goes to the background it is released immediately, and opening after coming back creates a new one; no crashes throughout. The first opening of "About" still has to create one; reuse applies only when it is opened again within the same use.
+- From now on, to judge whether things are smooth after a page switch, use FrameTimeline's jank types or the intervals of `DisplayPresentTime`, not the per-frame durations of `framestats`.
 
-## 未完成与已知限制
+## Unfinished work and known limitations
 
-- 只构建 arm64-v8a。32 位设备与 x86_64 模拟器的引擎库未构建。
-- 宽度不小于 600 dp 的布局只在模拟器上用 `wm density` 改变逻辑宽度验证过；真的平板、折叠屏展开与横屏未实测。
-- 屏幕旋转未实测。
-- `idle_area` 未在接鼠标的设备（平板、ChromeOS、桌面模式）上实测，包括按下鼠标键时 Android 先报一次悬停离开的情况。
-- 窗口事实不报告窗口的位置与尺寸（为 0）。
-- 后台继续播放未实现（需要媒体服务）；一个播放器同一时刻只在一个视图中显示。
-- HDR 图片与 HDR 视频未验证；这台手机的屏幕按 SDR 显示。
-- 发布版没有开启 R8 缩减，hello 的发布版 APK 约 12 MB。
-- 列表项移除时没有消失过渡。
-- 带样式的侧栏项不支持方向键切换。
-- 交给应用的文件是 `content://` 地址。引擎经 `MediaSource::file_name()` 与 `open()` 读取：Rust 一侧经 JNI 调 `BernBridge.fileName` 与 `openFile`，前者查 `OpenableColumns.DISPLAY_NAME`，后者用内容解析器打开文档并交出文件描述符（`detachFd`），引擎当普通文件读取。经管道提供内容的文档提供方给出的描述符不能跳转、长度为 0。选择器给的文件夹经 `listFolder` 列举，每个文件夹一次跨进程查询。
-- 只有当前屏幕上的控件登记快捷键：手机上停在侧栏时，页面工具栏的快捷键不生效。
-- 胶片的放大与停靠在宽屏布局、`arrival: nudge` 的晃动在 Android 上未逐帧确认。
-- 错峰：一次更新加入几个子元素（而不是容器本身出现）时的错峰、系统关闭动画时不错峰，未验证；画廊与探针都没有一次加入几行的操作。时序是在动画放慢 100 倍时量的，正常速度下的间隔是按倍率换算的。
-- 出现过渡的规则比设计宽（按实现推断，未逐帧确认）：窗口首帧之后组合的带 `appear` 的元素都会播放，包括随所在的 `ForEach` 一起出现的各行（设计中只有错峰的容器才这样）。
-- 轨道：从右到左的语言中横向轨道从右边量起（`placeRelative`），未验证。`Stack` 中只在轨道直接放着没写交叉尺寸的 `from`/`to` 元素时才随 `Stack` 铺满；其中有组件、或轨道本身带出现过渡等包装时，厚度只来自子元素。
-- 浮层按钮：浮层是 Material 的 `DropdownMenu`，位置由它决定（锚在按钮下方，放不下时左移），没有箭头。画框页静置三秒后按钮行隐藏，打开的浮层随之卸载，这是声明的行为。
-- 动画 SVG 第一次显示时新建 `WebView`，主线程约 50 ms；离开后 30 秒内再显示同一文档才复用。图标出现的那一帧在 RenderThread 上 9–22 ms，可能误一帧；显示期间每帧约 5 ms。
-- 切页的长帧之后，其后的帧在缓冲队列里多排一到两块，整体晚一到两帧上屏，直到动画结束（不是掉帧）；这是切页长帧的后果，没有单独处理。
+- Only arm64-v8a is built. The engine libraries for 32-bit devices and the x86_64 emulator are not built.
+- Layouts at widths of 600 dp or more have been verified only on the emulator, by changing the logical width with `wm density`; real tablets, unfolded foldables and landscape have not been measured.
+- Screen rotation has not been measured.
+- `idle_area` has not been measured on devices with a mouse (tablets, ChromeOS, desktop mode), including the case where Android first reports a hover exit when a mouse button is pressed.
+- Window facts do not report the window's position and size (they are 0).
+- Continued playback in the background is not implemented (it needs a media service); a player is shown in only one view at a time.
+- HDR images and HDR video are not verified; this phone's screen displays them as SDR.
+- Release builds do not enable R8 shrinking; the release APK of hello is about 12 MB.
+- List items have no disappear transition when they are removed.
+- Styled sidebar items do not support switching with the arrow keys.
+- Files handed to the app are `content://` addresses. The engine reads them through `MediaSource::file_name()` and `open()`: the Rust side calls `BernBridge.fileName` and `openFile` through JNI; the former queries `OpenableColumns.DISPLAY_NAME`, the latter opens the document with the content resolver and hands over the file descriptor (`detachFd`), which the engine reads as an ordinary file. Descriptors from document providers that supply content through a pipe cannot seek and have a length of 0. Folders from the picker are listed through `listFolder`, one cross-process query per folder.
+- Only controls currently on screen register keyboard shortcuts: on a phone, while the sidebar is showing, the page toolbar's shortcuts do not work.
+- The film strip's magnification and snapping in wide layouts, and the wiggle of `arrival: nudge`, have not been confirmed frame by frame on Android.
+- Stagger: staggering when one update adds several children (rather than the container itself appearing), and no stagger when the system has animations turned off, are not verified; neither the gallery nor the probe has an action that adds several rows at once. The timing was measured with animations slowed down 100 times; the intervals at normal speed are converted by the scale.
+- The rule for appear transitions is broader than the design (inferred from the implementation, not confirmed frame by frame): every element with `appear` composed after the window's first frame plays it, including the rows that appear together with their `ForEach` (in the design, only staggered containers do this).
+- Rails: in right-to-left languages a horizontal rail measures from the right (`placeRelative`); not verified. In a `Stack`, a rail fills along with the `Stack` only when it directly holds `from`/`to` elements without a cross-axis size; when it contains components, or the rail itself has a wrapper such as an appear transition, its thickness comes only from its children.
+- Popover buttons: the popover is a Material `DropdownMenu`, which decides its position (anchored below the button, shifted left when it does not fit), and has no arrow. On the Frame page the button row hides after three idle seconds and an open popover is unmounted with it; this is the declared behavior.
+- An animated SVG creates a `WebView` the first time it is shown, about 50 ms on the main thread; it is reused only when the same document is shown again within 30 seconds after leaving. The frame in which the icon appears takes 9–22 ms on the RenderThread and may miss a frame; while it is shown, each frame takes about 5 ms.
+- After a long page-switch frame, the following frames queue one or two extra buffers in the buffer queue and reach the screen one or two frames late overall until the animation ends (not dropped frames); this is a consequence of the long page-switch frame and has not been addressed separately.
 
-## 滚动条（2026-10-27）
+## Scroll bars (2026-10-27)
 
-`ScrollView` 的 `indicators`（`automatic`、`hidden`、`mouse`）在 Compose 上都不生成代码：`horizontalScroll`、`verticalScroll` 本身不画滚动条。
+`ScrollView`'s `indicators` (`automatic`, `hidden`, `mouse`) generate no code on Compose: `horizontalScroll` and `verticalScroll` do not draw scroll bars themselves.

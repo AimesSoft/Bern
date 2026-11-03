@@ -1,210 +1,212 @@
-# Bern UI 框架设计文档
+**English** · [简体中文](zh-CN/Design.md)
 
-- 版本：v0.34
-- 状态：架构与语义规范；当前接口、平台支持与待实现目标分别标注
-- 更新日期：2026-10-21
-- 项目名称：Bern UI
-- 仓库：AimesSoft/Bern
-- 主要开发语言：Rust
-- 首个目标平台：macOS（SwiftUI）
+# Bern UI framework design document
 
-当前已提供 macOS / iOS / tvOS SwiftUI、Android Compose、Windows WinUI 3、Linux GTK 和 Web 后端，以及命令、查询、会话、模块组合、资源、构建与打包工具。近期补齐了 Web 设置与引导、受控控件、搜索面板、播放器坐标布局、共享胶囊控件和图片跨分栏 Hero。各后端的功能覆盖与验证程度不同，以[平台能力表](Reference/Platforms.md)及各平台实现记录为准。
+- Version: v0.34
+- Status: architecture and semantics specification; current interfaces, platform support and targets yet to be implemented are marked separately
+- Updated: 2026-10-21
+- Project name: Bern UI
+- Repository: AimesSoft/Bern
+- Main development language: Rust
+- First target platform: macOS (SwiftUI)
 
-编写界面时使用[组件参考](Reference/UI.md)和[完整属性表](Reference/Component-Properties.md)。本文保留架构决策、语义与后续目标；入口和专题索引见[文档目录](README.md)。
+Backends are currently provided for macOS / iOS / tvOS SwiftUI, Android Compose, Windows WinUI 3, Linux GTK and the Web, along with tools for commands, queries, sessions, module composition, resources, building and packaging. Recent work filled in Web settings and onboarding, controlled controls, the search panel, the player coordinate layout, shared capsule controls and image Hero transitions across split-view columns. Feature coverage and the degree of verification differ between backends; the [platform capability table](Reference/Platforms.md) and each platform's implementation notes are authoritative.
 
-平台官方依据、UI 自适应映射和各设备验收场景见 [UI 自适应适配规范](Adaptation/README.md)。其中新增研究的平台与设备不代表已实现后端；核心架构约束仍以本文为准。
+Write interfaces with the [component reference](Reference/UI.md) and the [full property table](Reference/Component-Properties.md). This document keeps the architectural decisions, semantics and future targets; entry points and the topic index are in the [documentation index](README.md).
 
-原生 UI 连接机制与实现经验见 [React Native 源码研究](Research/ReactNative.md)，其中区分了运行时渲染、接口代码生成与 Bern 的目标代码生成路线。
+Official platform sources, the UI adaptation mappings and the acceptance scenarios for each device are in the [UI adaptation guidelines](Adaptation/README.md). Platforms and devices newly researched there do not mean a backend has been implemented; this document remains authoritative for the core architectural constraints.
 
-Bern 是一个基于 Rust、以命令为中心的模块化应用框架，Bern UI 是其中的声明式跨平台界面层，面向开发者与 AI Agent。框架同时定义命令、查询、状态、会话和入口适配协议。开发者在 Rust 源文件中定义组件，由 Bern 将可分析的 UI 声明编译为各平台的界面实现，复用已有 UI 技术，不自行开发完整的图形渲染引擎。
+Native UI connection mechanisms and implementation experience are covered in the [React Native source study](Research/ReactNative.md), which distinguishes runtime rendering, interface code generation and Bern's target code generation approach.
 
-本版本确立的核心约束是：**可跨平台导出的 UI 组件必须使用受约束、可静态分析的声明；每个可操作入口必须绑定类型化命令。** 标准控件的通用交互由 Bern 自动生成会话命令，业务操作绑定应用已注册命令，缺少绑定或绕过命令的 UI 声明必须编译报错。普通 Rust 用于命令处理器、查询提供器和应用内部实现，不将任意 Rust 代码转译为 Dart、Swift 或 Kotlin。
+Bern is a Rust-based, command-centered modular application framework, and Bern UI is its declarative cross-platform interface layer, aimed at developers and AI agents. The framework also defines commands, queries, state, sessions and the entry point adaptation protocol. Developers define components in Rust source files, and Bern compiles the analyzable UI declarations into each platform's interface implementation, reusing existing UI technology instead of developing a complete graphics rendering engine of its own.
 
-**前后端分离与模块化是底层架构要求。** 应用的 UI 前端通过类型化协议连接业务核心；编译器通过版本化 IR 和生成器接口接入不同 UI 技术。Flutter、macOS 原生 UI 及后续新目标应作为独立模块扩展，不能要求应用重写业务核心，也不能在核心编译器中不断添加平台特例。
+The core constraint established in this version is: **UI components that can be exported across platforms must use constrained, statically analyzable declarations; every actionable entry point must be bound to a typed command.** Bern automatically generates session commands for the common interactions of standard controls, business operations bind to commands the app has registered, and UI declarations that lack a binding or bypass commands must fail to compile. Ordinary Rust is used for command handlers, query providers and the app's internal implementation; arbitrary Rust code is not transpiled into Dart, Swift or Kotlin.
 
-**UI、CLI、JSON 控制通道和 MCP 服务器是同一个应用引擎的不同入口。** 它们共享命令描述、执行规则、状态和结果，不各自实现业务逻辑。Bern 提供通用命令基础设施与适配接口，具体业务处理器由应用提供；使用现有引擎时，由适配层接入同一契约。
+**Frontend–backend separation and modularity are fundamental architectural requirements.** An app's UI frontend connects to the business core through a typed protocol; the compiler connects to different UI technologies through a versioned IR and a generator interface. Flutter, native macOS UI and later new targets should be extended as independent modules; they must not require apps to rewrite their business core, nor keep adding platform special cases to the core compiler.
 
-**每个 UI 控件从底层支持深浅色模式，颜色默认由目标 UI 框架提供。** 目标 UI 框架自身具备完整的深浅色与语义颜色体系时，例如 SwiftUI、WinUI 3 和 Compose，Bern 直接使用其系统颜色、材质和标准控件样式；只有目标缺少这类体系（例如 Web）或控件由 Bern 自行绘制时，才使用 Bern 的统一色彩算法、语义颜色和控件状态配方。应用默认无需配置颜色、判断深浅色或维护两套样式。这个要求同时约束内置控件、扩展控件和所有 UI 目标。
+**The UI, CLI, JSON control channel and MCP server are different entry points to the same application engine.** They share command descriptions, execution rules, state and results, and do not each implement business logic. Bern provides general command infrastructure and adaptation interfaces, and the app provides the concrete business handlers; when an existing engine is used, an adaptation layer connects it to the same contract.
 
-**原生目标以平台视觉规范为准。** 具备明确设计规范与原生组件库的目标，例如 macOS，生成代码使用平台标准容器、控件和系统样式，外观随 SDK 与系统版本演进。需要明确容器、尺寸或分组时可以使用系统视觉接口；较新接口按系统版本分支，并定义旧系统回退。应用设计稿所要求的按钮容器与功能分组应由声明表达，不能由后端擅自移除。
+**Every UI control supports light and dark mode from the ground up, and colors come from the target UI framework by default.** When the target UI framework has its own complete light/dark and semantic color system, such as SwiftUI, WinUI 3 and Compose, Bern uses its system colors, materials and standard control styles directly; only when the target lacks such a system (for example the Web) or a control is drawn by Bern itself does Bern use its unified color algorithm, semantic colors and control state recipes. By default an app does not need to configure colors, check for light or dark mode, or maintain two sets of styles. This requirement applies equally to built-in controls, extension controls and all UI targets.
 
-**多窗口是统一的声明能力。** 同一套 Window 声明与窗口命令在支持的平台使用原生窗口，无法提供所需原生多窗口能力时自动使用应用内虚拟窗口。窗口身份、状态与业务连接不因呈现方式不同而改变。
+**Native targets follow the platform design guidelines.** For targets with clear design guidelines and a native component library, such as macOS, the generated code uses the platform's standard containers, controls and system styles, and the appearance evolves with the SDK and system version. When an explicit container, size or grouping is needed, system visual APIs may be used; newer APIs are branched by system version with a defined fallback for older systems. Button containers and functional groupings required by an app's design are expressed by the declaration and must not be removed by a backend on its own.
 
-**Web 提供两种独立构建产物。** Web 应用在浏览器内运行 UI 与 Rust WASM 业务引擎；WebUI 只包含界面、前端运行时和协议客户端，通过 JSON 控制通道连接独立运行的 Bern 引擎。两种构建共用 Web 后端、组件声明与命令协议，业务引擎的运行位置由构建配置明确选择。
+**Multiple windows are a unified declarative capability.** The same Window declarations and window commands use native windows on platforms that support them, and automatically use in-app virtual windows where the required native multi-window capability is unavailable. Window identity, state and business connections do not change with the presentation.
 
-本文同时保留已实现语义与明确标注的后续设计。当前组件和属性以 `bern-ir::spec::COMPONENTS` 为准，目标支持以各后端的 `TargetDescriptor` 与能力检查为准；本文中的省略号及伪代码用于解释语义。可构建的完整应用见 `examples/hello`、`examples/showcase`、`examples/planner`、`examples/gallery` 和 `examples/svg-animation`。API 尚处于早期演进阶段，不把待实现条目当作现有接口。
+**The Web provides two independent build outputs.** A Web app runs the UI and the Rust WASM business engine in the browser; WebUI contains only the interface, the frontend runtime and the protocol client, and connects to a separately running Bern engine through the JSON control channel. The two builds share the Web backend, component declarations and command protocol; where the business engine runs is chosen explicitly by the build configuration.
 
-## 项目目标
+This document keeps both implemented semantics and clearly marked future designs. Current components and properties are defined by `bern-ir::spec::COMPONENTS`, and target support by each backend's `TargetDescriptor` and capability checks; the ellipses and pseudocode in this document explain semantics. Complete buildable apps are in `examples/hello`, `examples/showcase`, `examples/planner`, `examples/gallery` and `examples/svg-animation`. The API is still in an early stage of evolution; items yet to be implemented are not to be taken as existing interfaces.
 
-Bern 名称来自《海猫鸣泣之时》中的 Frederica Bernkastel。Bern 作为独立通用框架开发，不依赖任何具体应用的业务模型或命令实现。
+## Project goals
 
-项目目标包括：
+The name Bern comes from Frederica Bernkastel in *Umineko When They Cry*. Bern is developed as an independent general-purpose framework and does not depend on any specific app's business model or command implementations.
 
-- 使用一套 Rust 组件声明表达可移植的 UI 语义，允许不同尺寸和输入方式使用不同布局。
-- 分离应用 UI、业务核心与传输实现；让 UI 技术和运行平台可以独立选择。
-- 新 UI 目标通过独立生成器、运行时适配与构建集成接入，核心层不依赖具体 UI 框架。
-- 默认提供完整的深浅色适配：原生目标使用平台自身的颜色体系，缺少该体系的目标由 Bern 统一推导颜色、控件状态和对比关系，使应用使用者不承担主题适配工作。
-- 通过编译期诊断检查组件属性、本地化完整性、功能入口覆盖和平台能力要求。
-- 强制 UI 的所有语义操作命令化，使 UI、CLI、JSON 控制通道和 MCP 可以驱动同一引擎实例。
-- 从同一份类型化描述派生各入口，提供导航、焦点、异步资源和可复现场景的通用规则。
-- 以统一声明支持多个独立窗口，在原生多窗口不可用时自动适配虚拟窗口，保留各窗口的交互状态。
-- 保持必要且明确的运行时，负责动态状态、事件和平台桥接。
-- 提供稳定、简短且写法一致的 API，让 Agent 能根据诊断完成修改。
+The project goals include:
 
-初期不追求任意 Rust UI 的自动跨语言转换，也不承诺各平台逐像素一致。现阶段不开发新的独立源文件语言、完整渲染引擎，也不在框架中内置媒体库、账号等应用业务；通用命令描述、调度协议、视频组件与媒体适配接口属于框架职责。Bern 复用已有媒体设施，不自行实现通用音视频解码器。
+- Express portable UI semantics with one set of Rust component declarations, allowing different sizes and input methods to use different layouts.
+- Separate app UI, business core and transport implementation, so that UI technology and runtime platform can be chosen independently.
+- New UI targets connect through independent generators, runtime adaptation and build integration; the core layer does not depend on any specific UI framework.
+- Provide complete light and dark mode adaptation by default: native targets use the platform's own color system, and for targets lacking it Bern derives colors, control states and contrast relationships uniformly, so that people building apps do not take on theme adaptation work.
+- Check component properties, localization completeness, feature entry point coverage and platform capability requirements through compile-time diagnostics.
+- Require every semantic operation of the UI to be a command, so that the UI, CLI, JSON control channel and MCP can drive the same engine instance.
+- Derive every entry point from the same typed description, and provide general rules for navigation, focus, asynchronous resources and reproducible scenarios.
+- Support multiple independent windows with a unified declaration, adapting automatically to virtual windows when native multiple windows are unavailable, and preserving each window's interaction state.
+- Keep a necessary and explicit runtime responsible for dynamic state, events and platform bridging.
+- Provide a stable, short and consistently written API so that agents can complete changes from the diagnostics.
 
-桌面和移动端不引入 JavaScript 引擎作为 UI 运行时。Web 允许使用必要的 JavaScript 和 Web API 绑定。应用开启运行时插件时带一个执行插件脚本的 JavaScript 引擎，它不参与界面；没有开启插件的应用不链接它。
+Initially the project does not pursue automatic cross-language conversion of arbitrary Rust UI, nor does it promise pixel-identical results across platforms. For now it does not develop a new standalone source file language or a complete rendering engine, and does not build app business such as media libraries or accounts into the framework; general command descriptions, the dispatch protocol, the video component and the media adaptation interface are framework responsibilities. Bern reuses existing media facilities and does not implement a general audio/video decoder itself.
 
-## 核心决策
+Desktop and mobile do not introduce a JavaScript engine as the UI runtime. The Web may use the necessary JavaScript and Web API bindings. An app that enables runtime plugins carries a JavaScript engine that runs plugin scripts; it takes no part in the interface, and apps that do not enable plugins do not link it.
 
-| 领域 | 决策 |
+## Core decisions
+
+| Area | Decision |
 | --- | --- |
-| 源码组织 | 所有 UI 定义位于 `.rs` 文件，复用 Rust 模块与依赖管理 |
-| 声明入口 | 使用 `#[component]` 标记可导出组件，在组件内使用统一的 `ui!` 声明 |
-| 静态边界 | 组件结构、表达式、命令引用和功能入口必须可被 Bern 前端识别 |
-| 动态行为 | 条件、列表和属性值可以动态变化，以明确的 IR 节点和 Rust 绑定表达 |
-| 类型检查 | Bern 检查声明语义，生成 Rust 类型约束，由 `rustc` 检查实际 Rust 类型 |
-| 本地化 | 用户可见静态文本与翻译共同声明，使用字符串字面量承载自然语言 |
-| 功能覆盖 | 显式 Feature Contract 是依据，各自适应布局必须声明并实现要求的入口 |
-| 自动主题 | 原生优先：目标 UI 框架具备深浅色体系时使用其系统颜色与标准样式，默认跟随系统；品牌色可选，映射为平台强调色 |
-| 色彩算法 | 共享的 Rust 主题内核为缺少原生体系的目标（如 Web）和 Bern 自绘控件生成并校验配色，这些部分消费同一主题快照 |
-| 原生视觉 | 原生目标使用平台标准组件与系统样式；支持显式容器、尺寸、功能分组及按版本回退的系统视觉接口；macOS 规则见后端实现边界 |
-| 强制命令化 | 所有可操作入口绑定引擎命令或会话命令，标准交互自动生成，违规声明编译失败 |
-| 多入口引擎 | UI、应用 CLI、JSON 通道与 MCP 使用同一命令目录、调度契约和引擎状态 |
-| 操作语义 | Command 执行动作，Query 保持只读，Event 通知事实，统一描述但不混淆副作用 |
-| 运行时插件 | 应用可选开启；插件按应用定义的权限组使用命令目录，经钩子交回结果；首版运行 JavaScript，不在运行时装入原生代码 |
-| 编译入口 | `bern build` 协调组件收集、代码生成、Rust 编译与平台构建 |
-| 随包资源 | `Bern.toml` 受限声明随应用发布的文件，构建严格校验并由目标复制进产物；引擎经宿主装配的 `Resources` 按名称解析，不依赖平台布局 |
-| 应用分层 | 通用命令宿主路由引擎与 UI 会话命令，业务核心不依赖具体 UI |
-| 目标扩展 | 公共 IR 与目标接口对接独立生成器，平台运行时和构建工具各自适配 |
-| 目标选择 | UI 技术与运行平台是两个维度，同一平台可选择不同 UI 前端 |
-| 桌面默认 | macOS 使用 SwiftUI，Linux 使用 GTK，Windows 使用 WinUI 3；显式配置可选择其他已支持目标 |
-| 多窗口 | WindowSet 与 Window 声明窗口，默认原生优先、不可用时自动虚拟呈现，共享身份、命令及生命周期 |
-| 视频播放 | 使用专门的 Video 声明，Web 默认映射 video 元素，其他平台通过独立媒体后端与呈现接口接入 |
-| 部署方式 | 首版优先本地运行，业务协议不绑定同进程、FFI 或网络传输 |
-| 首个后端 | macOS SwiftUI：生成使用标准原生组件的 SwiftUI 代码，业务引擎默认在应用进程内运行 |
-| Web 构建 | `app` 生成浏览器内 UI 与 WASM 引擎；`ui` 生成连接独立引擎的 WebUI，分别构建与验收 |
+| Source organization | All UI definitions live in `.rs` files, reusing Rust modules and dependency management |
+| Declaration entry | `#[component]` marks exportable components, and a component uses the unified `ui!` declaration |
+| Static boundary | Component structure, expressions, command references and feature entry points must be recognizable by the Bern frontend |
+| Dynamic behavior | Conditions, lists and property values can change dynamically, expressed as explicit IR nodes and Rust bindings |
+| Type checking | Bern checks declaration semantics and generates Rust type constraints; `rustc` checks the actual Rust types |
+| Localization | User-visible static text is declared together with its translations, with natural language carried by string literals |
+| Feature coverage | An explicit Feature Contract is the basis; each adaptive layout must declare and implement the required entry points |
+| Automatic theming | Native first: when the target UI framework has a light/dark system, its system colors and standard styles are used, following the system by default; a brand color is optional and maps to the platform accent color |
+| Color algorithm | A shared Rust theme core generates and validates color schemes for targets lacking a native system (such as the Web) and for Bern's self-drawn controls; these parts consume the same theme snapshot |
+| Native visuals | Native targets use platform standard components and system styles; explicit containers, sizes, functional groups and system visual APIs with version-based fallbacks are supported; the macOS rules are under backend implementation boundaries |
+| Mandatory commands | Every actionable entry point binds an engine command or session command; standard interactions are generated automatically, and violating declarations fail to compile |
+| Multi-entry engine | The UI, app CLI, JSON channel and MCP use the same command catalog, dispatch contract and engine state |
+| Operation semantics | A Command performs an action, a Query stays read-only, an Event reports a fact; they are described uniformly without blurring side effects |
+| Runtime plugins | Opt-in per app; plugins use the command catalog according to app-defined permission groups and hand results back through hooks; the first version runs JavaScript and loads no native code at runtime |
+| Build entry | `bern build` coordinates component collection, code generation, Rust compilation and platform builds |
+| Bundled resources | `Bern.toml` declares, in a restricted form, the files shipped with the app; the build validates them strictly and targets copy them into the outputs; the engine resolves them by name through the `Resources` assembled by the host, independent of platform layout |
+| App layering | A general command host routes engine and UI session commands; the business core does not depend on any specific UI |
+| Target extension | The public IR and target interface connect to independent generators; platform runtimes and build tools are each adapted |
+| Target selection | UI technology and runtime platform are two dimensions; the same platform can choose different UI frontends |
+| Desktop defaults | macOS uses SwiftUI, Linux uses GTK, Windows uses WinUI 3; explicit configuration can select other supported targets |
+| Multiple windows | WindowSet and Window declare windows; native first by default and presented virtually when native is unavailable, sharing identity, commands and lifecycle |
+| Video playback | Uses a dedicated Video declaration; the Web maps it to the video element by default, other platforms connect through independent media backends and presentation interfaces |
+| Deployment | The first version prioritizes local execution; the business protocol is not tied to in-process, FFI or network transport |
+| First backend | macOS SwiftUI: generates SwiftUI code that uses standard native components, with the business engine running in the app process by default |
+| Web builds | `app` generates the in-browser UI and WASM engine; `ui` generates WebUI that connects to a separate engine; they are built and accepted separately |
 
-`ui!` 内仍然存在一套声明语法。使用 Rust 宏意味着不增加独立文件格式，不意味着可以省去语法规则、工具支持和学习成本。因此，同一功能应只有一种推荐写法。
+`ui!` still contains a declaration syntax. Using a Rust macro means no additional file format; it does not mean that syntax rules, tool support and learning costs go away. Therefore each feature should have only one recommended way of writing it.
 
-## 平台目标与原生语义
+## Platform targets and native semantics
 
-平台不与某一种 UI 技术永久绑定。构建目标由“UI 技术、运行平台、构建模式、UI 桥接和业务传输”共同确定，只有经过声明与验证的组合才可用。构建模式决定产物包含哪些运行部分，不是新增一种 UI 技术。
+A platform is not permanently bound to one UI technology. A build target is determined jointly by "UI technology, runtime platform, build mode, UI bridge and business transport", and only combinations that have been declared and verified are available. The build mode decides which runtime parts the output contains; it is not an additional UI technology.
 
-| UI 技术 | 目标运行平台 | 生成产物 | 定位与阶段 |
+| UI technology | Target runtime platform | Generated output | Role and phase |
 | --- | --- | --- | --- |
-| Web DOM | 浏览器 | Web 应用或 WebUI；共用 HTML、CSS、绑定与前端 WASM，按模式决定是否包含业务引擎 | 第二个正式后端，需 Bern 自定视觉规范与主题算法，两种模式均需验收 |
-| SwiftUI | macOS、iOS、tvOS | SwiftUI 视图、Swift 绑定与平台工程集成 | macOS、iOS 与 tvOS 默认；macOS 为首个正式后端，iOS 与 tvOS 目标已构建模拟器应用，真机签名与打包后续实现 |
-| GTK | Linux | GTK 控件、Rust 绑定与桌面集成 | Linux 默认；阶段五第一批已实现 |
-| WinUI 3 | Windows | WinUI 3 界面（无运行时时回退到系统 XAML）、C++/WinRT 平台宿主与 Rust 桥接 | Windows 默认；阶段五第二批已实现 |
-| Jetpack Compose | Android | Kotlin Compose UI、绑定与 Android 工程集成 | Android 默认；第一版已实现 |
-| Flutter | Flutter 支持且 Bern 已适配的平台 | Dart Widget、绑定代码与 Flutter 工程集成 | 可选跨平台目标 |
-| GPUI | Windows、macOS、Linux（含没有桌面环境的嵌入式 Linux） | GPUI Rust UI、Rust 运行时与原生窗口 | 可选桌面目标，面向大型生产力软件、跨平台一致外观与嵌入式设备；macOS 第一版 |
-| AppKit | macOS | AppKit 控件及窗口集成 | 可独立扩展，或辅助 SwiftUI 适配 |
+| Web DOM | Browser | Web app or WebUI; shares HTML, CSS, bindings and frontend WASM, with the mode deciding whether the business engine is included | Second official backend; needs Bern's own design guidelines and theme algorithm; both modes need acceptance |
+| SwiftUI | macOS, iOS, tvOS | SwiftUI views, Swift bindings and platform project integration | Default for macOS, iOS and tvOS; macOS is the first official backend; the iOS and tvOS targets have built simulator apps, while device signing and packaging come later |
+| GTK | Linux | GTK widgets, Rust bindings and desktop integration | Linux default; first batch of Phase 5 implemented |
+| WinUI 3 | Windows | WinUI 3 interface (falling back to system XAML when the runtime is absent), C++/WinRT platform host and Rust bridge | Windows default; second batch of Phase 5 implemented |
+| Jetpack Compose | Android | Kotlin Compose UI, bindings and Android project integration | Android default; first version implemented |
+| Flutter | Platforms that Flutter supports and Bern has adapted to | Dart Widgets, binding code and Flutter project integration | Optional cross-platform target |
+| GPUI | Windows, macOS, Linux (including embedded Linux without a desktop environment) | GPUI Rust UI, Rust runtime and native windows | Optional desktop target for large productivity software, a consistent cross-platform look and embedded devices; first version on macOS |
+| AppKit | macOS | AppKit controls and window integration | Can be extended independently, or assist SwiftUI adaptation |
 
-PC 默认采用各平台的原生 UI 技术：`swiftui + macos`、`gtk + linux`、`winui3 + windows`。`swiftui + macos` 是首个正式实现目标：macOS 有明确的设计规范和成熟的原生组件库，最容易达到系统自带应用的视觉水准，并验证完整架构。Web 没有统一的样式规范，需要 Bern 自行定义视觉规范与主题算法，作为第二个正式目标。其他桌面默认映射不代表对应后端已经实现。
+PCs default to each platform's native UI technology: `swiftui + macos`, `gtk + linux`, `winui3 + windows`. `swiftui + macos` is the first official implementation target: macOS has clear design guidelines and a mature native component library, making it the easiest place to reach the visual standard of the system's own apps and to verify the complete architecture. The Web has no unified style guidelines, so Bern must define its own design guidelines and theme algorithm; it is the second official target. The other desktop default mappings do not mean the corresponding backends have been implemented.
 
-项目可以显式选择 `flutter + macos`、`gpui + windows` 等其他受支持组合。GPUI 与 Flutter 主要使用各自的绘制体系，作为可选方案保留。Linux 有多种桌面环境与 UI 工具包，GTK 是 Bern 选择的 Linux 默认技术；支持范围按实际环境验证，不假设所有 Linux 桌面行为一致。
+A project can explicitly select other supported combinations such as `flutter + macos` and `gpui + windows`. GPUI and Flutter mainly use their own drawing systems and are kept as optional choices. Linux has many desktop environments and UI toolkits, and GTK is the Linux default Bern has chosen; the support scope is verified per actual environment, without assuming that all Linux desktops behave the same.
 
-默认映射由目标注册与配置装配层提供，不写入公共 IR 或业务核心。未指定 UI 技术时按目标平台解析默认值；默认后端未实现、未安装或无法满足包含标准替代方案在内的契约时明确报错，不静默切换为 GPUI、Flutter 或 Web。窗口的原生与虚拟自动选择发生在同一已选 UI 后端内，不改变 UI 技术。显式选择始终优先，并接受同样的能力检查。
+The default mappings are provided by the target registration and configuration assembly layer, not written into the public IR or the business core. When no UI technology is specified, the default is resolved from the target platform; when the default backend is not implemented, not installed, or cannot satisfy the contract including its standard alternatives, an explicit error is reported, with no silent switch to GPUI, Flutter or the Web. The automatic choice between native and virtual windows happens within the same selected UI backend and does not change the UI technology. An explicit selection always takes precedence and is subject to the same capability checks.
 
-Flutter 后端复用 Flutter 的引擎与工具链，不代表 Bern 自研渲染引擎。Flutter 自身支持某个平台，也不代表 Bern 的绑定、资源和能力已经适配该平台。所有能力均按具体组合报告。
+The Flutter backend reuses Flutter's engine and toolchain; it does not mean Bern develops its own rendering engine. Flutter itself supporting a platform also does not mean that Bern's bindings, resources and capabilities have been adapted to that platform. All capabilities are reported per specific combination.
 
-Bern 统一组件的语义、状态接口、功能契约与主题协议。控件几何、文本度量、输入法行为和部分交互可以遵循平台习惯；深浅色适配必须由后端完成。目标 UI 框架具备深浅色体系时由平台提供配色；Bern 自绘部分及缺少该体系的目标使用统一算法，规则见下文。只有写入组件规范的行为，才属于跨后端一致性承诺。
+Bern unifies component semantics, state interfaces, feature contracts and the theme protocol. Control geometry, text metrics, input method behavior and some interactions may follow platform conventions; light and dark mode adaptation must be done by the backend. When the target UI framework has a light/dark system, the platform provides the colors; Bern's self-drawn parts and targets lacking such a system use the unified algorithm, with the rules given below. Only behavior written into the component specification is part of the cross-backend consistency promise.
 
-## 前后端分离与模块边界
+## Frontend–backend separation and module boundaries
 
-### 应用分层与编译器分层
+### App layering and compiler layering
 
-“前端”和“后端”有两组含义，接口与模块命名必须区分：
+"Frontend" and "backend" have two sets of meanings, and interface and module names must keep them apart:
 
-| 层次 | 前端 | 后端 |
+| Layer | Frontend | Backend |
 | --- | --- | --- |
-| 应用运行 | 用户看到的 Web、Flutter、SwiftUI 等 UI，以及其局部交互 | 提供业务操作与状态的 Application Core |
-| UI 编译 | 读取受约束 Rust 声明并建立语义模型的 Compiler Frontend | 把公共 IR 转换为目标 UI 代码的 Target Backend |
+| App runtime | The Web, Flutter, SwiftUI or other UI the user sees, and its local interactions | The Application Core that provides business operations and state |
+| UI compilation | The Compiler Frontend that reads constrained Rust declarations and builds a semantic model | The Target Backend that turns the public IR into target UI code |
 
-因此，增加一个 Flutter 应用前端，对 Bern 编译器而言是增加 Flutter 目标后端。两者通过明确的接口组合，不将业务逻辑放进生成器。
+So adding a Flutter app frontend is, for the Bern compiler, adding a Flutter target backend. The two are composed through explicit interfaces, and business logic is not put into generators.
 
 ```mermaid
 flowchart TD
-    Source[Rust UI 声明] --> Front[语法与语义分析]
-    Front --> IR[版本化公共 IR]
-    IR --> Web[Web 目标模块]
-    IR --> Flutter[Flutter 目标模块]
-    IR --> Apple[SwiftUI 或 AppKit 目标模块]
-    IR --> LinuxUI[GTK 目标模块]
-    IR --> WindowsUI[WinUI 3 目标模块]
-    IR --> Other[其他目标模块]
-    Web --> UI[生成的 UI 与前端运行时]
+    Source[Rust UI declaration] --> Front[Syntax and semantic analysis]
+    Front --> IR[Versioned public IR]
+    IR --> Web[Web target module]
+    IR --> Flutter[Flutter target module]
+    IR --> Apple[SwiftUI or AppKit target module]
+    IR --> LinuxUI[GTK target module]
+    IR --> WindowsUI[WinUI 3 target module]
+    IR --> Other[Other target modules]
+    Web --> UI[Generated UI and frontend runtime]
     Flutter --> UI
     Apple --> UI
     LinuxUI --> UI
     WindowsUI --> UI
     Other --> UI
-    UI --> Port[类型化应用客户端]
-    Port --> Transport[可替换的业务传输适配器]
-    Transport --> Adapter[应用协议适配层]
-    Adapter --> Core[独立业务核心]
+    UI --> Port[Typed application client]
+    Port --> Transport[Replaceable business transport adapter]
+    Transport --> Adapter[Application protocol adaptation layer]
+    Adapter --> Core[Independent business core]
 ```
 
-图中的 UI 表示每个目标各自生成的前端，不是把所有 UI 框架同时装入一个应用。图中展示引擎连接路径，状态与事件通过同一协议反向通知前端；局部会话命令按后文的路由规则就地执行，不必经过业务传输。
+UI in the diagram stands for the frontend that each target generates on its own, not all UI frameworks loaded into one app at the same time. The diagram shows the engine connection path; state and events notify the frontend in the reverse direction through the same protocol, and local session commands run in place according to the routing rules later in this document and need not pass through the business transport.
 
-### 必须保持的依赖方向
+### Dependency directions that must hold
 
-- 公共语义、IR、协议和检查规则不依赖 Flutter、SwiftUI、GTK、WinUI 3、GPUI、DOM 或具体操作系统 SDK。
-- 编译器核心调用目标扩展接口，目标模块实现该接口；核心层不导入具体目标实现。
-- 只有构建宿主或注册入口选择并装配目标模块，业务核心不选择 UI 后端。
-- 业务核心不依赖生成的组件、窗口对象、UI 运行时或编译器。现有应用可以由独立适配层实现 Bern 协议，无须改造为 Bern 专用业务框架。
-- 通用前端运行时只处理状态绑定、组件身份与事件协议；具体 UI 调度、控件和资源生命周期由目标运行时适配器负责。
-- 主题内核属于独立的前端基础模块，不依赖业务核心、网络或某个目标 UI SDK；所有目标通过主题协议使用它。
-- 通用媒体契约不依赖 UI SDK 或具体解码器；媒体后端与呈现适配器负责实际播放及视图附着，由装配层选择兼容组合。
-- 应用和前端之间不共享可随意修改的内存对象；跨边界通过声明的值、命令和订阅交互。Bern 管理的 UI 会话主动操作也通过会话命令执行；窗口管理器等外部系统已发生的事实通过受信任适配器事件同步。
+- The public semantics, IR, protocols and check rules do not depend on Flutter, SwiftUI, GTK, WinUI 3, GPUI, the DOM or any specific operating system SDK.
+- The compiler core calls the target extension interface, and target modules implement that interface; the core layer does not import concrete target implementations.
+- Only the build host or the registration entry selects and assembles target modules; the business core does not choose a UI backend.
+- The business core does not depend on generated components, window objects, the UI runtime or the compiler. An existing app can implement the Bern protocol through an independent adaptation layer, without being reworked into a Bern-specific business framework.
+- The general frontend runtime handles only state binding, component identity and the event protocol; concrete UI scheduling, controls and resource lifecycles are the responsibility of the target runtime adapter.
+- The theme core is an independent frontend foundation module that does not depend on the business core, the network or any target UI SDK; all targets use it through the theme protocol.
+- The general media contract does not depend on UI SDKs or specific decoders; media backends and presentation adapters handle the actual playback and view attachment, and the assembly layer selects compatible combinations.
+- The app and the frontend do not share freely mutable in-memory objects; across the boundary they interact through declared values, commands and subscriptions. Active UI session operations managed by Bern also run through session commands; facts that have already happened in external systems such as the window manager are synchronized through trusted adapter events.
 
-开发时可以在同一 workspace 中组织这些模块，发布时也可以打包为同一个可执行程序。逻辑分离不要求每个应用部署服务器。
+During development these modules can be organized in the same workspace, and on release they can also be packaged into a single executable. Logical separation does not require every app to deploy a server.
 
-### 前端计算与业务核心
+### Frontend computation and the business core
 
-严格 UI 声明只允许类型化状态快照、事件字段、字面量、受限运算和框架已知转换。自定义 Rust 计算通过有描述的 Query 或派生状态提供器输出值，UI 不直接执行无法分析的函数或读写业务核心对象。业务核心可以独立编译、运行并通过无 UI 的测试验证。
+Strict UI declarations allow only typed state snapshots, event fields, literals, restricted operations and conversions known to the framework. Custom Rust computation outputs values through described Queries or derived state providers; the UI does not directly run functions that cannot be analyzed, or read or write business core objects. The business core can be compiled and run independently and verified by tests without a UI.
 
-受限表达式和类型化绑定可在生成的 Rust 前端绑定模块中执行，Flutter 或 SwiftUI 通过桥接使用它们；这不意味着将任意 Rust 转写成 Dart 或 Swift，也不要求把完整业务核心打入客户端。
+Restricted expressions and typed bindings can run in the generated Rust frontend binding module, which Flutter or SwiftUI use through a bridge; this does not mean transliterating arbitrary Rust into Dart or Swift, nor does it require bundling the complete business core into the client.
 
-昂贵的业务计算通过 Query 或 Command 在业务侧提供。焦点、编辑和导航等操作由前端会话命令执行；命令化不要求网络传输或 JSON 序列化。绘制、布局、动画采样及原始输入采样是运行机制，不需要将每一帧或每个指针坐标发布成业务命令。
+Expensive business computation is provided on the business side through Queries or Commands. Operations such as focus, editing and navigation are performed by frontend session commands; making them commands does not require network transport or JSON serialization. Drawing, layout, animation sampling and raw input sampling are runtime mechanisms; there is no need to publish every frame or every pointer coordinate as a business command.
 
-### UI 桥接与业务传输
+### UI bridge and business transport
 
-UI 桥接负责 Dart、Swift、JavaScript 等 UI 代码与 Rust 前端绑定模块之间的交互。业务传输负责类型化应用客户端与业务核心之间的交互。两者是独立扩展点：Flutter 可以经 Dart FFI 使用本地前端绑定，同时通过网络连接远程业务核心。
+The UI bridge handles the interaction between UI code such as Dart, Swift and JavaScript and the Rust frontend binding module. The business transport handles the interaction between the typed application client and the business core. The two are independent extension points: Flutter can use local frontend bindings through Dart FFI while connecting to a remote business core over the network.
 
-业务接口在概念上提供类型化 `dispatch`、快照查询与状态订阅。协议 schema 独立于传输编码；本地 Rust 调用可以直接传递值，不要求为模块化而强制序列化。
+Conceptually the business interface provides a typed `dispatch`, snapshot queries and state subscriptions. The protocol schema is independent of the transport encoding; local Rust calls can pass values directly, without forcing serialization for the sake of modularity.
 
-| 业务部署 | 传输适配方式 | 架构要求 |
+| Business deployment | Transport adaptation | Architectural requirements |
 | --- | --- | --- |
-| 同进程 | Rust 直接调用或本地通道 | 不泄漏核心内部对象，允许异步完成 |
-| 不同进程 | IPC 适配器 | 定义消息编码、进程断开及资源清理 |
-| 远程服务 | 网络适配器 | 定义连接身份、版本协商、重连与状态重同步 |
+| In-process | Direct Rust calls or a local channel | Core internal objects do not leak; asynchronous completion is allowed |
+| Separate processes | IPC adapter | Defines message encoding, process disconnection and resource cleanup |
+| Remote service | Network adapter | Defines connection identity, version negotiation, reconnection and state resynchronization |
 
-初期同时验证 Web 应用的浏览器内引擎路径，以及 WebUI 连接独立引擎所需的最小浏览器可访问控制通道。四入口联调优先让 WebUI、CLI、JSON 和 MCP 连接同一个本机引擎宿主。独立 CLI 进程不能靠重新实例化业务核心冒充共享引擎。广泛 IPC 与远程部署方案分别验收，不将最小通道通过视为全部网络环境已经支持。网络重试不能默认重复执行有副作用命令；传输适配器必须明确请求身份、失败与重试语义。
+Initially, both the Web app's in-browser engine path and the minimal browser-accessible control channel that WebUI needs to connect to a separate engine are verified. Joint testing of the four entry points first has WebUI, the CLI, JSON and MCP connect to the same local engine host. A separate CLI process must not pose as the shared engine by instantiating the business core again. Broad IPC and remote deployment schemes are accepted separately; passing the minimal channel is not taken to mean that all network environments are supported. Network retries must not re-execute commands with side effects by default; transport adapters must make request identity, failure and retry semantics explicit.
 
-应用协议应独立记录版本，连接时检查命令参数、状态 schema 和服务能力。UI target 与业务协议分别演进，替换 UI 技术不应迫使业务 API 改名或重写。
+The application protocol should be versioned independently, and on connection the command parameters, state schema and service capabilities are checked. UI targets and the business protocol evolve separately; replacing the UI technology should not force business APIs to be renamed or rewritten.
 
-## 模块化应用
+## Modular applications
 
-实现进度：命令目录、状态与引擎的组合，模块界面，按目录收集源文件，插槽与页面插槽，可选模块的开关与级联，模块间的命令、事件与状态读取，以及 `bern new --module`，已在 macOS 上用 `examples/planner` 和新建的应用验证。尚未实现：模块资源。模块关闭时它的页面从侧栏消失，选中的页面随之回到侧栏的 `fallback`（见“UI 执行模型”中的导航项规则）；动态导航项现已由 SwiftUI、Compose、Web、GTK 与 WinUI 3 实现，具体验证范围见“允许的动态行为”和各后端记录。
+Implementation progress: composition of the command catalog, state and engine, module UIs, collecting source files by directory, slots and page slots, enabling, disabling and cascading of optional modules, commands, events and state reads between modules, and `bern new --module` have been verified on macOS with `examples/planner` and newly created apps. Not yet implemented: module resources. When a module is disabled, its pages disappear from the sidebar and the selected page returns to the sidebar's `fallback` (see the navigation item rules in "UI execution model"); dynamic navigation items are now implemented by SwiftUI, Compose, Web, GTK and WinUI 3, with the verification scope given in "Allowed dynamic behavior" and each backend's notes.
 
-大型应用由多人和多个 Agent 并行开发。状态、命令、界面、翻译与资源需要按功能拆开：每个功能是一个模块，改动一个模块不需要碰其他模块的文件，模块之间只通过声明过的协议交互。
+Large apps are developed in parallel by many people and many agents. State, commands, interfaces, translations and resources need to be split up by feature: each feature is a module, changing one module does not require touching other modules' files, and modules interact only through declared protocols.
 
-### 模块的组成
+### What a module consists of
 
-一个模块是一个目录，带自己的 `Bern.toml`。它通常有三部分，各是一个 crate：
+A module is a directory with its own `Bern.toml`. It usually has three parts, each of them a crate:
 
-| 部分 | 内容 | 可以依赖 |
+| Part | Content | May depend on |
 | --- | --- | --- |
-| 协议 | `#[bern::protocol(namespace = "…")]`：本模块的值类型、状态、命令、查询与事件 | 所依赖模块的协议 |
-| 引擎 | 实现本模块协议的业务逻辑 | 本模块与所依赖模块的协议、不依赖 Bern 的普通库 |
-| 界面 | 本模块的组件与页面，可以绑定本模块与所依赖模块的状态和命令 | 本模块与所依赖模块的协议与界面、组件库 |
+| Protocol | `#[bern::protocol(namespace = "…")]`: this module's value types, state, commands, queries and events | The protocols of the modules it depends on |
+| Engine | The business logic that implements this module's protocol | The protocols of this module and the modules it depends on, ordinary libraries that do not depend on Bern |
+| UI | This module's components and pages, which can bind the state and commands of this module and the modules it depends on | The protocols and UIs of this module and the modules it depends on, component libraries |
 
-只有逻辑没有界面的模块，以及只有展示组件、没有状态的组件库，都是允许的形式。
+A module with only logic and no UI, and a component library with only presentational components and no state, are both allowed forms.
 
-模块的协议可以直接使用它所依赖的模块的协议声明的值类型，写 `use library_protocol::library::Song;` 后在状态、命令与事件中使用 `Song`，依赖模块的界面组件因此能直接显示它。宏与构建工具读取所依赖模块的协议，把用到的类型（以及这些类型再用到的类型）复制进本协议的描述符，描述符仍然自成一体；组合后整个应用只有一份。没有声明依赖的模块的类型找不到（2026-11-02）。
+A module's protocol can use the value types declared by the protocols of the modules it depends on directly: after writing `use library_protocol::library::Song;`, it uses `Song` in its state, commands and events, so the dependency module's UI components can show it directly. The macros and the build tool read the protocols of the modules depended on and copy the types used (and the types those types use in turn) into this protocol's descriptor, so the descriptor stays self-contained; after composition the whole app has only one copy. Types of modules not declared as dependencies are not found (2026-11-02).
 
 ```toml
 # modules/downloads/Bern.toml
@@ -224,7 +226,7 @@ type = "downloads_core::DownloadsEngine"
 
 [module.ui]
 package = "downloads-ui"
-sources = "ui/src"            # 目录：收集其中全部 .rs 文件
+sources = "ui/src"            # Directory: collects every .rs file in it
 
 [languages]
 supported = ["zh-Hans", "en"]
@@ -245,7 +247,7 @@ toolbar = ["downloads_progress"]
 settings = ["downloads_settings"]
 ```
 
-应用的 `Bern.toml` 按顺序登记模块，顺序决定插槽中内容的先后：
+The app's `Bern.toml` registers the modules in order, and the order determines the order of content in the slots:
 
 ```toml
 [[modules]]
@@ -255,23 +257,23 @@ path = "modules/library"
 path = "modules/downloads"
 ```
 
-应用自身的 `[protocol]`、`[engine]` 与 `[ui]` 仍然存在，是装配各模块的外壳：窗口、导航框架、插槽与跨模块的流程。
+The app's own `[protocol]`, `[engine]` and `[ui]` still exist; they are the shell that assembles the modules: windows, the navigation frame, slots and cross-module flows.
 
-### 命令目录、状态与引擎的组合
+### Composing the command catalog, state and engine
 
-- **命令目录**：应用的命令目录由外壳与各模块的协议合并而成。命令 ID 为 `命名空间.命令`，CLI 与 MCP 按模块分组，例如 `app downloads add`。命名空间重复时构建失败。
-- **类型名**：值类型、会话草稿与组件的名称在整个应用中唯一，冲突时构建失败并指出两处声明；生成的各语言代码因此使用与源码相同的名称。每个模块的状态合成为一个记录类型，名称为模块 ID 的大驼峰形式加 `State`，例如 `DownloadsState`。
-- **状态**：每个模块在应用状态中占一个顶层字段。界面组件以参数接收模块客户端，例如 `downloads: downloads::Client`，绑定写 `downloads.items`。
-- **引擎**：应用引擎由外壳引擎与各模块引擎组成。宿主按命名空间把命令交给对应的模块，状态快照由各部分拼成，状态版本仍是一个序列，四种入口的行为不变。
-- **调用依赖模块**：每个协议模块生成 `calls::命令名(…)` 与 `current_state()`。模块引擎处理命令时，用前者向所依赖的模块排队发出命令，用后者读取它们的当前状态（关闭的模块读到 `None`）。状态在读取时才取，一条命令里同一模块只取一次；不读的模块不花这份开销（2026-11-02，此前每条命令和每次唤醒都先复制全部依赖模块的状态）。排队的命令在当前命令完成后依次执行，不嵌套，也不重入。
-- **事件**：模块在协议中用 `#[events]` 声明事件，在引擎中用生成的 `emit::事件名(…)` 发出。依赖它的模块用一条普通命令响应，命令标注 `#[on(模块::事件)]`，参数与事件相同；应用外壳也可以响应任何模块的事件。发出事件的命令完成后，宿主按目录顺序执行这些命令，关闭的模块收不到事件。下层模块因此不需要知道上层模块，例如播放模块报告“打开了一个文件”，其他模块各自响应。
-- **失败与循环**：原命令失败时，它排出的命令与事件全部丢弃；后续命令失败只写入日志，不改变原命令的结果。一条命令引发的后续命令超过一万条时，其余的作为循环丢弃并写入日志。
-- **依赖规则**：依赖必须无环；没有声明的依赖在编译时就无法访问，因为对方的协议 crate 不在依赖中。
-- **会话命令**：窗口、导航与焦点等生成的会话命令属于应用会话，不归任何模块。
+- **Command catalog**: The app's command catalog is merged from the protocols of the shell and of each module. Command IDs have the form `namespace.command`, and the CLI and MCP group them by module, for example `app downloads add`. A duplicate namespace fails the build.
+- **Type names**: The names of value types, session drafts and components are unique across the whole app; a conflict fails the build and points to both declarations; the generated code in each language therefore uses the same names as the source. Each module's state is combined into one record type, named after the module ID in UpperCamelCase plus `State`, for example `DownloadsState`.
+- **State**: Each module occupies one top-level field in the app state. UI components receive the module client as a parameter, for example `downloads: downloads::Client`, and bindings are written `downloads.items`.
+- **Engine**: The app engine consists of the shell engine and the engines of the modules. The host hands each command to the matching module by namespace, the state snapshot is assembled from the parts, the state version is still a single sequence, and the behavior of the four entry points is unchanged.
+- **Calling dependency modules**: Each protocol module generates `calls::command_name(…)` and `current_state()`. When a module engine handles a command, it uses the former to queue commands to the modules it depends on and the latter to read their current state (a disabled module reads as `None`). The state is taken only when it is read, once per module within a command, so modules that are not read cost nothing (2026-11-02; previously every command and every wake first copied the state of all the dependency modules). Queued commands run one after another after the current command completes, without nesting and without reentry.
+- **Events**: A module declares events with `#[events]` in its protocol and emits them in its engine with the generated `emit::event_name(…)`. A module that depends on it responds with an ordinary command annotated `#[on(module::event)]`, whose parameters are the same as the event's; the app shell can also respond to any module's events. After the command that emitted the event completes, the host runs these commands in catalog order; disabled modules do not receive events. Lower-level modules therefore do not need to know about higher-level ones; for example, the playback module reports "a file was opened" and the other modules each respond.
+- **Failures and loops**: When the original command fails, all the commands and events it queued are discarded; a failure of a follow-up command is only written to the log and does not change the original command's result. When the follow-up commands triggered by one command exceed ten thousand, the rest are discarded as a loop and written to the log.
+- **Dependency rules**: Dependencies must be acyclic; an undeclared dependency cannot even be accessed at compile time, because the other module's protocol crate is not among the dependencies.
+- **Session commands**: Generated session commands such as those for windows, navigation and focus belong to the app session, not to any module.
 
-### 插槽
+### Slots
 
-外壳在界面中声明插槽，模块在清单中声明往哪个插槽放哪些组件，编译器在构建时接好：
+The shell declares slots in its interface, modules declare in their manifests which components go into which slot, and the compiler wires them up at build time:
 
 ```rust
 Toolbar {
@@ -288,82 +290,82 @@ SplitView {
 }
 ```
 
-- **普通插槽**：`Slot` 按模块登记顺序依次放入各模块贡献的组件。插槽可以声明传给贡献组件的参数，例如 `Slot(id: player_controls, player: players.main)`；贡献组件按参数名接收这些值，所需的模块客户端与会话草稿由 Bern 注入。
-- **应用的贡献**：应用自己的 `Bern.toml` 也可以写 `[contributes]`，把外壳的组件放进插槽，包括模块页面里声明的插槽（例如模块页面在滚动内容顶部留一个 `Slot(id: page_header)`，外壳放进手机的顶栏）。应用的贡献排在各模块之前，不随可选模块开关。贡献组件需要窗口句柄时由 Bern 提供，插槽所在的组件不必有 `windows` 参数。
-- **页面插槽**：`Pages` 在导航容器中为每个贡献的页面生成导航项；`PageContent` 显示选中的页面。选择值的类型由插槽生成，其中的取值来自构建时登记的全部页面，所以仍是类型化、可检查的。
-- **页面的显示与起始**：清单里的页面可以写 `when = "字段"`，导航项只在本模块这个布尔状态字段为真时显示，例如某个页面的入口在它依赖的功能关闭时一起隐藏；`start = true` 让页面排在插槽枚举的最前，选择从它开始，没有排除它时就是启动后选中的页面（一个插槽只能有一个）；`tab = false` 让 `Tabs` 不列出它，只在侧栏中出现，用于手机上由模块自己的按钮进入的页面，例如搜索。三者只是展开插槽时生成的条件与变体顺序，各目标都支持（2026-11-02）。
-- **打开页面**：组件里的动作写 `=> pages.downloads.show()`，切到某个页面插槽中 ID 为 `downloads` 的页面，例如首页上“全部 ›”跳到模块自己的页面。模块不需要知道外壳怎样显示页面：编译器找到选择这个插槽的枚举，再找到持有该枚举的会话字段（外壳的 `Sidebar`、`Tabs` 或 `PageContent` 按它选择），把动作落成对这个字段的赋值，并让组件读取那份会话草稿。没有这样的页面、有两个插槽都有这个 ID、或者持有该枚举的会话字段不是恰好一个时构建失败。它只是会话赋值，各目标都支持。
-- **容器规则**：插槽所在的容器只接受它允许的子元素。例如工具栏插槽的贡献组件，根元素必须是工具栏允许的子元素。不符合时构建失败，并指出贡献组件的声明位置。
+- **Ordinary slots**: `Slot` places the components contributed by each module in module registration order. A slot can declare parameters passed to the contributed components, for example `Slot(id: player_controls, player: players.main)`; contributed components receive these values by parameter name, and Bern injects the module clients and session drafts they need.
+- **App contributions**: The app's own `Bern.toml` can also have `[contributes]`, placing shell components into slots, including slots declared in module pages (for example, a module page leaves a `Slot(id: page_header)` at the top of its scrolling content, and the shell puts the phone's top bar there). App contributions come before all modules and are not switched on and off with optional modules. When a contributed component needs a window handle, Bern provides it; the component containing the slot does not need a `windows` parameter.
+- **Page slots**: `Pages` generates a navigation item in the navigation container for each contributed page; `PageContent` shows the selected page. The type of the selection value is generated by the slot, and its values come from all pages registered at build time, so it is still typed and checkable.
+- **Page visibility and start**: a page in the manifest can write `when = "field"`, so that its navigation item shows only while this boolean state field of the module is true, for example hiding a page's entry while the feature behind it is turned off; `start = true` puts the page first in the slot enum, so selection starts from it, and when it is not excluded it is the page selected after launch (a slot can have only one); `tab = false` keeps `Tabs` from listing it, so it appears only in the sidebar, for pages that a module's own button opens on phones, such as search. All three only shape the conditions and the variant order generated when the slot is expanded, and all targets support them (2026-11-02).
+- **Opening a page**: An action in a component written `=> pages.downloads.show()` switches to the page with ID `downloads` in a page slot, for example "All ›" on the home page jumping to the module's own page. The module does not need to know how the shell displays pages: the compiler finds the enum that selects this slot, then the session field holding that enum (the shell's `Sidebar`, `Tabs` or `PageContent` selects by it), turns the action into an assignment to that field, and has the component read that session draft. The build fails when there is no such page, when two slots both have this ID, or when there is not exactly one session field holding the enum. It is only a session assignment, and all targets support it.
+- **Container rules**: The container a slot sits in accepts only the children it allows. For example, the root element of a component contributed to a toolbar slot must be a child that the toolbar allows. When it does not match, the build fails and points to the declaration of the contributed component.
 
-### 可选模块
+### Optional modules
 
-声明 `optional = true` 的模块可以在运行时开启与关闭：
+A module that declares `optional = true` can be enabled and disabled at runtime:
 
-- Bern 在应用状态末尾生成字段 `modules`，每个可选模块一个布尔值，外壳写作 `app.modules.downloads`；以及命令 `modules.set_enabled(id, enabled)`。
-  - 开启一个模块时，它依赖的模块一起开启；关闭一个模块时，依赖它的模块一起关闭。
-  - 命令结果列出实际改变的模块，界面可以据此提示。
-  - 一直运行的模块不能依赖可选模块，构建时检查。
-- 关闭的模块没有引擎：开启时由它的 `Default` 新建一个，并像宿主启动时那样唤醒一次（`wake`），从头需要的工作在那里开始，它发出的命令在开启命令之后执行（2026-11-02）；关闭时丢弃。关闭期间它的命令返回 `module_disabled`，状态读出默认值。它在插槽与页面中的贡献由框架包在“是否开启”的条件里，关闭时自动消失，应用不需要到处写条件。外壳直接绑定可选模块的状态时，关闭期间读到默认值；需要隐藏时自己写条件。
-- 应用没有保存过选择时，可选模块按清单的 `enabled` 运行，默认开启。外壳引擎实现 `initial_modules` 返回保存的选择，实现 `modules_changed` 在每次变化后保存；存储方式由应用决定。
+- Bern generates a field `modules` at the end of the app state, with one boolean per optional module, written `app.modules.downloads` in the shell; and the command `modules.set_enabled(id, enabled)`.
+  - Enabling a module also enables the modules it depends on; disabling a module also disables the modules that depend on it.
+  - The command result lists the modules that actually changed, which the interface can use to notify the user.
+  - A module that always runs cannot depend on an optional module; this is checked at build time.
+- A disabled module has no engine: when it is enabled a new one is created from its `Default` and woken once, as the host does at startup (`wake`), so work needed from the start begins there, and the commands it sends run after the enabling command (2026-11-02); when it is disabled the engine is dropped. While it is disabled, its commands return `module_disabled` and its state reads as default values. Its contributions to slots and pages are wrapped by the framework in an "is enabled" condition and disappear automatically when it is disabled, so the app does not need to write conditions everywhere. When the shell binds directly to an optional module's state, it reads default values while the module is disabled; if it needs to hide something, it writes the condition itself.
+- When the app has not saved a choice, optional modules run according to the manifest's `enabled`, which defaults to enabled. The shell engine implements `initial_modules` to return the saved choice and `modules_changed` to save after each change; how the choice is stored is up to the app.
 
-### 源文件、翻译与资源
+### Source files, translations and resources
 
-- **源文件**：`sources` 可以写目录，收集其中全部 `.rs` 文件并按路径排序，新增文件不需要修改清单；也可以继续逐个列出文件。
-- **翻译**：按模块检查。每个模块的语言集合必须覆盖应用声明的语言，缺少时按应用的严格设置报错或回退。
-- **资源**：按模块声明，资源名带模块前缀，例如 `downloads/images/empty.png`，不同模块之间不会冲突。
+- **Source files**: `sources` can name a directory, collecting every `.rs` file in it sorted by path, so new files need no change to the manifest; files can also still be listed one by one.
+- **Translations**: Checked per module. Each module's language set must cover the languages the app declares; when one is missing, an error is reported or a fallback is used according to the app's strictness setting.
+- **Resources**: Declared per module, with resource names prefixed by the module, for example `downloads/images/empty.png`, so different modules do not conflict.
 
-### 工具与测试
+### Tools and tests
 
-- `bern new --module <id>` 生成模块目录（协议、引擎、界面、清单、说明与测试），在应用的 `Bern.toml` 中登记，并把三个 crate 加入 Cargo 工作区。新应用的模板在窗口里留有 `Slot(id: extras)`，新模块默认把自己的页面组件放在那里，生成后立即可见。
-- 生成的代码中，模块命令的名字带模块前缀，例如 Swift 的 `downloadsAddOne`，外壳与模块的同名命令不会冲突。
-- 模块的引擎测试只需要本模块与所依赖模块的协议，依赖模块可以用测试替身代替，不需要界面，也不需要其他模块。
-- 外部入口可以单独列出一个模块的命令，例如 `app downloads --help`。
-- 界面 crate 也能直接用 `cargo check` 与 `cargo test` 编译：宏读应用的 `Bern.toml`，给外壳协议的 `Client` 加上 `modules`（每个可选模块一个开关），给标了 `pages = "slot"` 的枚举加上各模块在该插槽登记的页面，名字与构建工具组合出的相同。Rust 里引用另一个文件或 crate 的组件时，要同时引入组件函数和它的属性结构 `<组件>_props`，例如 `use player::{player, player_props};`。
+- `bern new --module <id>` generates a module directory (protocol, engine, UI, manifest, readme and tests), registers it in the app's `Bern.toml`, and adds the three crates to the Cargo workspace. The new app template leaves a `Slot(id: extras)` in the window, and a new module puts its page component there by default, so it is visible immediately after generation.
+- In the generated code, module command names carry the module prefix, for example Swift's `downloadsAddOne`, so same-named commands of the shell and of modules do not conflict.
+- A module's engine tests need only the protocols of this module and of the modules it depends on; dependency modules can be replaced with test doubles, and neither a UI nor other modules are needed.
+- External entry points can list a single module's commands, for example `app downloads --help`.
+- UI crates can also be compiled directly with `cargo check` and `cargo test`: the macro reads the app's `Bern.toml`, adds `modules` (one switch per optional module) to the shell protocol's `Client`, and adds to enums marked `pages = "slot"` the pages each module registered in that slot, with the same names as those the build tool composes. When Rust code references a component from another file or crate, it must import both the component function and its props struct `<component>_props`, for example `use player::{player, player_props};`.
 
-### 验收
+### Acceptance
 
-- 两个模块各自定义同名命令可以同时存在；同名类型在构建时报出两处声明；
-- 关闭可选模块后，它的插槽内容与页面消失，命令返回 `module_disabled`，引擎部分停止；重新开启后恢复；
-- 开启与关闭沿依赖级联，结果列出受影响的模块；
-- 一个模块的事件由依赖它的模块按依赖顺序处理；
-- 新增一个模块只在应用 `Bern.toml` 中加一次登记，不修改其他模块的文件。
+- Two modules that each define a command with the same name can coexist; same-named types report both declarations at build time;
+- After an optional module is disabled, its slot content and pages disappear, its commands return `module_disabled`, and its engine part stops; after it is enabled again, everything is restored;
+- Enabling and disabling cascade along dependencies, and the result lists the affected modules;
+- A module's events are handled by the modules that depend on it, in dependency order;
+- Adding a module needs only one registration in the app's `Bern.toml`, with no change to other modules' files.
 
-## 运行时插件
+## Runtime plugins
 
-实现进度：尚未实现，本节为设计。
+Implementation progress: not yet implemented; this section is a design.
 
-模块在构建时编入应用；插件是安装之后才装入的模块，由用户或 Agent 在运行时添加、开启与关闭。应用在 `Bern.toml` 中开启插件后，命令目录里的命令、查询、状态、事件与钩子按应用定义的权限组开放给插件，开发者不需要为插件另写一套接口。没有开启插件的应用不链接任何插件运行时，也没有下文生成的 `plugins` 状态与命令。
+Modules are compiled into the app at build time; plugins are modules loaded only after installation, added, enabled and disabled at runtime by the user or an agent. Once an app enables plugins in `Bern.toml`, the commands, queries, state, events and hooks in the command catalog are opened to plugins according to the permission groups the app defines, and developers do not need to write a separate interface for plugins. An app that does not enable plugins links no plugin runtime and has none of the `plugins` state and commands generated below.
 
-### 插件与模块的关系
+### Plugins and modules
 
-插件沿用模块的规则：
+Plugins follow the rules of modules:
 
-- 开启与关闭同可选模块：开启时新建运行时并执行入口，关闭时先调用插件的停止处理再丢弃运行时。关闭的插件不收事件，也不参与钩子。
-- 插件发出的命令排队，在当前命令完成后依次执行，不嵌套，也不重入；失败与循环的处理同模块间的命令。
-- 插件响应事件的方式与 `#[on]` 相同，按插件顺序在模块之后执行。
+- Enabling and disabling work as for optional modules: enabling creates a new runtime and runs the entry, and disabling first calls the plugin's stop handler and then drops the runtime. A disabled plugin receives no events and takes no part in hooks.
+- Commands issued by a plugin are queued and run one after another after the current command completes, without nesting and without reentry; failures and loops are handled as for commands between modules.
+- Plugins respond to events in the same way as `#[on]`, running after the modules, in plugin order.
 
-与模块的区别：
+Differences from modules:
 
-- 不经过 `rustc`：参数与结果在调用边界按目录的 schema 校验，不符时返回 `invalid_params`。
-- 没有编译进应用的界面：插件只通过设置表单出现在界面上，由应用自己的组件显示。
-- 首版不能向命令目录添加命令；插件提供的能力经应用声明的钩子接入。
+- No `rustc`: parameters and results are validated against the catalog's schema at the call boundary, and a mismatch returns `invalid_params`.
+- No UI compiled into the app: a plugin appears in the interface only through its settings form, which the app's own components display.
+- In the first version a plugin cannot add commands to the command catalog; capabilities that plugins provide plug in through hooks the app declares.
 
-### 运行时
+### Runtimes
 
-| 形式 | 阶段 | 说明 |
+| Form | Phase | Notes |
 | --- | --- | --- |
-| JavaScript | 首版 | 内嵌 QuickJS，每个插件一个独立运行时；同步执行，没有事件循环，也不能访问网络与文件 |
-| WebAssembly | 后续 | 解释执行，在不允许 JIT 的平台同样可用 |
-| 动态库 | 不在运行时装入 | 安全上等同应用自身的代码；需要时作为依赖随应用构建并签名，不经插件安装 |
+| JavaScript | First version | Embedded QuickJS, one independent runtime per plugin; runs synchronously, with no event loop and no access to the network or files |
+| WebAssembly | Later | Interpreted, so it also works on platforms that do not allow JIT |
+| Dynamic libraries | Not loaded at runtime | Equivalent in security to the app's own code; when needed, they are built and signed with the app as a dependency, not installed as plugins |
 
-每次调用有时限与内存上限，在 `[plugins]` 中配置；超限时中断这次调用并记录，插件显示错误。WebUI 的引擎宿主与桌面相同；Web 应用在浏览器中运行引擎，它的插件运行时后续实现。
+Each call has a time limit and a memory cap, configured in `[plugins]`; when a limit is exceeded, the call is interrupted and recorded, and the plugin shows an error. WebUI's engine host is the same as on desktop; a Web app runs the engine in the browser, and its plugin runtime will be implemented later.
 
-### 开启插件与权限组
+### Enabling plugins and permission groups
 
 ```toml
 [plugins]
 runtimes = ["js"]
-api = 1                       # 应用对插件承诺的接口版本，与应用版本号分开
+api = 1                       # Interface version the app promises to plugins, separate from the app's version number
 
 [plugins.permissions."player.control"]
 name = { "zh-Hans" = "播放器控制", "en" = "Player control" }
@@ -375,12 +377,12 @@ name = { "zh-Hans" = "链接解析", "en" = "Link resolution" }
 hooks = ["links.resolve"]
 ```
 
-- 权限组由应用定义，列出可用的 `commands`、`queries`、`state`、`events` 与 `hooks`，可以写 `模块.*`。组名是任意字符串，不必与命名空间对应。
-- 插件在清单中申请权限组，安装时显示给用户。调用未获准的接口由宿主拒绝并返回 `permission_denied`；检查在宿主一侧进行，插件脚本无法绕过。
-- 插件自己的存储、设置与日志不需要权限。会话命令（窗口、导航、`ui.activate` 等）首版不开放给插件。
-- 应用改了开放给插件的命令名或参数时提高 `api`；插件声明的 `api` 与应用不同时拒绝装入。
+- Permission groups are defined by the app and list the available `commands`, `queries`, `state`, `events` and `hooks`; `module.*` may be written. A group name is an arbitrary string and need not correspond to a namespace.
+- A plugin requests permission groups in its manifest, and they are shown to the user at installation. A call to an interface that was not granted is rejected by the host with `permission_denied`; the check is made on the host side, and plugin scripts cannot bypass it.
+- A plugin's own storage, settings and logs need no permission. Session commands (windows, navigation, `ui.activate` and so on) are not opened to plugins in the first version.
+- When the app changes the names or parameters of the commands opened to plugins, it raises `api`; a plugin whose declared `api` differs from the app's is refused loading.
 
-### 插件包
+### Plugin packages
 
 ```toml
 # plugin.toml
@@ -394,151 +396,151 @@ priority = 50
 permissions = ["links.resolve"]
 ```
 
-- `id` 由字母、数字、`.`、`_` 与 `-` 组成，在应用内唯一。`priority` 决定插件在事件与钩子中的先后，小的在前，相同时按安装顺序，默认 50。
-- 包是一个目录或 `.zip`，安装到应用数据目录的 `plugins/<id>/`。同一 ID 只能装更高的版本；开发时可以重新装入同一版本。
+- `id` consists of letters, digits, `.`, `_` and `-`, and is unique within the app. `priority` determines the plugin's order in events and hooks: smaller values come first, ties follow installation order, and the default is 50.
+- A package is a directory or a `.zip`, installed to `plugins/<id>/` in the app data directory. Only a higher version can be installed for the same ID; during development the same version can be loaded again.
 
-### JavaScript 接口
+### JavaScript interface
 
-入口脚本在插件开启时执行一次，通过全局对象 `bern` 注册处理函数、调用应用：
+The entry script runs once when the plugin is enabled, and registers handlers and calls the app through the global object `bern`:
 
-| 接口 | 作用 |
+| Interface | Purpose |
 | --- | --- |
-| `bern.call(command, params, done?)` | 排队执行引擎命令，立即返回；给了 `done` 时，命令完成后以结果调用它 |
-| `bern.query(query, params)` | 执行只读查询并返回结果 |
-| `bern.state(field)` | 读取当前状态快照中的字段 |
-| `bern.on(event, handler)` | 响应事件，`handler` 收到事件参数 |
-| `bern.hook(hook, handler)` | 实现钩子，见下文 |
-| `bern.onStop(handler)` | 插件关闭前调用 |
-| `bern.storage.get / set / remove / keys` | 插件自己的持久数据，值为 JSON |
-| `bern.form(items)` | 设定插件的设置表单，可以随时替换 |
-| `bern.settings.get(item)`、`bern.settings.set(item, value)` | 读写表单项的值 |
-| `bern.onSetting(handler)` | 表单项的值被改动 |
-| `bern.onPress(handler)` | 表单中的按钮被按下；返回 `{ title, text }` 时由宿主显示给用户 |
-| `bern.log(text)`、`bern.error(text)` | 写入应用日志，带插件 ID |
+| `bern.call(command, params, done?)` | Queues an engine command and returns immediately; when `done` is given, it is called with the result after the command completes |
+| `bern.query(query, params)` | Runs a read-only query and returns the result |
+| `bern.state(field)` | Reads a field of the current state snapshot |
+| `bern.on(event, handler)` | Responds to an event; `handler` receives the event parameters |
+| `bern.hook(hook, handler)` | Implements a hook, see below |
+| `bern.onStop(handler)` | Called before the plugin is disabled |
+| `bern.storage.get / set / remove / keys` | The plugin's own persistent data, with JSON values |
+| `bern.form(items)` | Sets the plugin's settings form; it can be replaced at any time |
+| `bern.settings.get(item)`, `bern.settings.set(item, value)` | Reads and writes the value of a form item |
+| `bern.onSetting(handler)` | The value of a form item was changed |
+| `bern.onPress(handler)` | A button in the form was pressed; when it returns `{ title, text }`, the host shows it to the user |
+| `bern.log(text)`, `bern.error(text)` | Writes to the app log, tagged with the plugin ID |
 
-值的 JSON 形式与 JSON 控制通道相同，包括 64 位整数的编码。处理函数抛出的异常被记录，不影响其他插件；入口脚本出错时插件标为未载入并显示错误。
+The JSON form of values is the same as in the JSON control channel, including the encoding of 64-bit integers. Exceptions thrown by handlers are recorded and do not affect other plugins; when the entry script fails, the plugin is marked as not loaded and shows the error.
 
-### 钩子
+### Hooks
 
-事件只通知已发生的事实，响应者不能把结果交回发出方。需要插件交回结果的位置由应用在协议中声明为钩子：
+Events only report facts that have already happened, and responders cannot hand results back to the emitter. Places where plugins need to hand back results are declared by the app in its protocol as hooks:
 
 ```rust
 #[hooks]
 pub trait Hooks {
-    /// 字幕载入后依次交给插件改写。
+    /// After captions load, they are passed to the plugins in turn for rewriting.
     #[chain]
     fn captions_loaded(&self, cues: Vec<Cue>) -> Vec<Cue>;
-    /// 第一个认得这个链接的插件接手。
+    /// The first plugin that recognizes this link takes over.
     #[first]
     fn resolve(&self, input: LinkInput) -> Option<LinkStep>;
-    /// 收集各插件的屏蔽词。
+    /// Collects each plugin's blocked words.
     #[collect]
     fn blocked_words(&self) -> Vec<String>;
 }
 ```
 
-| 合并方式 | 规则 |
+| Merge mode | Rule |
 | --- | --- |
-| `#[chain]` | 按插件顺序依次调用，每个收到上一个的结果；没有返回值或出错时原样传给下一个 |
-| `#[first]` | 按顺序调用，第一个返回非空的插件接手。引擎得到结果和这个插件，可以用 `hooks::resolve_with(plugin, …)` 只问它，进行多轮交互；两轮之间引擎可以等待网络等操作 |
-| `#[collect]` | 调用全部插件，按顺序得到各自的结果 |
+| `#[chain]` | Called in plugin order, each receiving the previous result; when a plugin returns nothing or fails, the value is passed on unchanged to the next |
+| `#[first]` | Called in order, and the first plugin that returns a non-empty value takes over. The engine gets the result and this plugin, and can ask only that plugin with `hooks::resolve_with(plugin, …)` for a multi-round interaction; between two rounds the engine can wait for operations such as network requests |
+| `#[collect]` | Calls all plugins and gets each one's result, in order |
 
-- 引擎在命令处理器或引擎任务中调用生成的 `hooks::名称(…)`，同步得到合并后的结果。没有开启的插件实现某个钩子时，`chain` 原样返回输入，`first` 返回 `None`，`collect` 返回空列表。
-- 钩子执行期间，插件可以读状态、调用查询；它发出的命令排在当前命令之后。
-- 钩子出现在命令目录中：CLI 与 MCP 可以列出每个钩子当前由哪些插件实现，但不能调用钩子。首版只有插件实现钩子。
+- The engine calls the generated `hooks::name(…)` in a command handler or engine task and gets the merged result synchronously. When no enabled plugin implements a hook, `chain` returns the input unchanged, `first` returns `None` and `collect` returns an empty list.
+- While a hook runs, plugins can read state and call queries; the commands they issue are queued after the current command.
+- Hooks appear in the command catalog: the CLI and MCP can list which plugins currently implement each hook, but cannot call hooks. In the first version only plugins implement hooks.
 
-### 设置表单与插件管理
+### Settings forms and plugin management
 
-开启插件的应用由 Bern 生成状态字段 `plugins` 与以下命令；它们和其他命令一样出现在 CLI、MCP 与 Agent skill 中：
+For an app with plugins enabled, Bern generates the state field `plugins` and the following commands; like other commands, they appear in the CLI, MCP and the agent skill:
 
-| 命令 | 作用 |
+| Command | Purpose |
 | --- | --- |
-| `plugins.install(path)` | 安装插件包，或交给导入器转换的文件 |
-| `plugins.remove(id)` | 关闭并删除插件 |
-| `plugins.set_enabled(id, enabled)` | 开启或关闭插件 |
-| `plugins.set_setting(id, item, value)` | 修改表单项的值，插件的 `onSetting` 随之调用 |
-| `plugins.press(id, item)` | 按下表单中的按钮，结果是插件返回的提示 |
+| `plugins.install(path)` | Installs a plugin package, or a file to be converted by an importer |
+| `plugins.remove(id)` | Disables and deletes a plugin |
+| `plugins.set_enabled(id, enabled)` | Enables or disables a plugin |
+| `plugins.set_setting(id, item, value)` | Changes the value of a form item, after which the plugin's `onSetting` is called |
+| `plugins.press(id, item)` | Presses a button in the form; the result is the message the plugin returns |
 
-`plugins` 列出每个插件的 ID、名称、版本、作者、是否开启与载入、错误、申请的权限、不支持的部分、表单及各项的值。表单项分开关、文本与按钮三种，每项有 ID、标题与说明；开关与文本有默认值，文本可以有提示文字。
+`plugins` lists each plugin's ID, name, version, author, whether it is enabled and loaded, errors, requested permissions, unsupported parts, the form and the value of each item. There are three kinds of form items, switch, text and button, each with an ID, a title and a description; switches and text items have default values, and text items can have placeholder text.
 
-应用用普通组件显示插件列表与表单：`ForEach` 遍历插件与表单项，`match` 表单项的种类，分别放 `Switch`、`TextInput` 与 `Button`。插件界面因此在每个后端都是平台标准控件，不需要新组件，也不在运行时生成界面。
+Apps display the plugin list and forms with ordinary components: `ForEach` over the plugins and form items, `match` on the kind of form item, and place a `Switch`, `TextInput` or `Button` accordingly. Plugin interfaces are therefore platform standard controls on every backend, needing no new components and no interface generated at runtime.
 
-开启的插件、表单的值与插件的存储保存在应用数据目录，按应用的 bundle ID 隔离。插件的远程目录、更新检查与下载由应用实现，最后用 `plugins.install` 安装。
+Enabled plugins, form values and plugin storage are saved in the app data directory, isolated by the app's bundle ID. A remote plugin catalog, update checks and downloads are implemented by the app, which finally installs with `plugins.install`.
 
-### 应用前后台事件
+### App background and foreground events
 
-应用进入后台与回到前台时，Bern 发出标准事件 `app.suspended` 与 `app.resumed`，模块与插件都可以响应。各后端从平台的应用生命周期取得这两个事实；桌面上“后台”指应用的所有窗口都不再处于活动状态。
+When the app enters the background and returns to the foreground, Bern emits the standard events `app.suspended` and `app.resumed`, and both modules and plugins can respond. Each backend obtains these two facts from the platform's app lifecycle; on desktop, "background" means that none of the app's windows is active any more.
 
-### 导入器与兼容层
+### Importers and compatibility layers
 
-应用可以装上导入器，在安装时把其他格式的插件转换为插件包，用来兼容已有的插件生态：
+An app can install importers that convert plugins in other formats into plugin packages at installation, to stay compatible with existing plugin ecosystems:
 
-- 导入器收到被安装的文件，返回清单、入口脚本，以及可选的前置脚本。
-- 前置脚本由应用提供，与入口在同一个运行时中先于入口执行，可以使用全部 `bern` 接口。它在 `bern` 之上实现另一套插件接口：定义对方插件期望的全局对象与函数，把对方的回调接到 `bern.on`、`bern.hook` 与 `bern.onPress` 上。
-- 原格式中的权限按应用给出的对应关系换成权限组，宿主照常检查。
-- 无法支持的声明列入插件状态的“不支持的部分”。其余部分仍可用时插件照常装入；没有任何可用部分时拒绝安装并说明原因。
+- An importer receives the file being installed and returns a manifest, an entry script and an optional prelude script.
+- The prelude script is provided by the app and runs before the entry in the same runtime, with access to the whole `bern` interface. It implements another plugin interface on top of `bern`: it defines the global objects and functions that the foreign plugins expect, and connects their callbacks to `bern.on`, `bern.hook` and `bern.onPress`.
+- Permissions in the original format are converted into permission groups according to the mapping the app provides, and the host checks them as usual.
+- Declarations that cannot be supported are listed under "unsupported parts" in the plugin state. When the rest is still usable, the plugin loads as usual; when no part is usable, installation is refused with the reason.
 
-### 平台与安全
+### Platforms and security
 
-- 插件运行时随应用一起分发和签名，不下载可执行代码；插件脚本由运行时解释执行。部分应用商店限制下载后改变应用功能的代码，是否允许用户从网上安装插件由应用决定。
-- 插件不能直接访问文件、网络、进程或系统接口，只能使用应用经权限组开放的命令。需要网络时，由应用提供命令，或在钩子的多轮交互中代为请求。
+- The plugin runtime is distributed and signed with the app, and no executable code is downloaded; plugin scripts are interpreted by the runtime. Some app stores restrict code downloaded later that changes an app's functionality; whether users may install plugins from the internet is up to the app.
+- Plugins cannot access files, the network, processes or system interfaces directly, and can only use the commands that the app opens through permission groups. When network access is needed, the app provides a command, or makes the request on the plugin's behalf in the multi-round interaction of a hook.
 
-### 验收
+### Acceptance
 
-- 开启插件的应用生成 `plugins` 状态与命令，CLI 与 MCP 能安装、开启、关闭插件并修改设置；没有开启插件的应用不链接插件运行时；
-- 未获准的命令、查询、状态、事件与钩子被宿主拒绝，插件脚本无法绕过；
-- 三种钩子按插件顺序合并，关闭的插件不参与，出错的插件被跳过且不影响其他插件；
-- 插件发出的命令在当前命令之后执行，不重入；
-- 设置表单在每个后端以标准控件显示，按钮返回的提示显示给用户；
-- 应用进入后台与回到前台时，每个后端都发出对应事件；
-- 经导入器转换的另一种格式的插件不经修改即可运行，不支持的部分在插件列表中标出。
+- An app with plugins enabled generates the `plugins` state and commands, and the CLI and MCP can install, enable and disable plugins and change their settings; an app without plugins enabled does not link the plugin runtime;
+- Commands, queries, state, events and hooks that were not granted are rejected by the host, and plugin scripts cannot bypass this;
+- The three kinds of hooks merge in plugin order, disabled plugins take no part, and failing plugins are skipped without affecting other plugins;
+- Commands issued by plugins run after the current command, without reentry;
+- Settings forms display with standard controls on every backend, and the messages returned by buttons are shown to the user;
+- When the app enters the background and returns to the foreground, every backend emits the corresponding event;
+- A plugin in another format, converted by an importer, runs without modification, and its unsupported parts are marked in the plugin list.
 
-## UI 目标扩展协议
+## UI target extension protocol
 
-### 一个目标模块包含的职责
+### Responsibilities of a target module
 
-新增 UI 技术不仅需要静态组件映射，还需要可用的运行时与构建集成。一个目标包可以由多个独立模块组成：
+Adding a UI technology requires not only static component mappings but also a working runtime and build integration. A target package can consist of several independent modules:
 
-| 接口职责 | 输入与输出 |
+| Interface responsibility | Input and output |
 | --- | --- |
-| 目标描述 | 声明目标 ID、版本、支持平台，以及 IR、目标接口、UI 绑定与主题协议版本范围 |
-| 能力描述 | 声明组件、属性、事件、可访问性、主题映射、样式覆盖属性与动效用法、原生与虚拟窗口能力、平台服务、视频呈现兼容性及允许的替代实现 |
-| 合法性检查 | 对标准 IR 给出支持、显式替代或带源码位置的不支持诊断 |
-| 目标转换 | 将公共 IR 转为目标私有表示，保留结构身份和语义 |
-| 代码与资源生成 | 输出目标源码、资源、绑定需求清单和源码映射 |
-| 运行时适配 | 提供目标语言客户端、UI 调度、主题环境监听、快照应用及实例生命周期实现 |
-| 构建适配 | 返回工具链要求、构建步骤、依赖和产物清单，由构建驱动执行 |
+| Target description | Declares the target ID, version and supported platforms, and the version ranges of the IR, target interface, UI binding and theme protocol |
+| Capability description | Declares components, properties, events, accessibility, theme mapping, style override properties and motion usage, native and virtual window capabilities, platform services, video presentation compatibility and the allowed alternative implementations |
+| Validity check | For standard IR, reports support, an explicit alternative, or an unsupported diagnostic with the source location |
+| Target transformation | Turns the public IR into a target-private representation, preserving structural identity and semantics |
+| Code and resource generation | Outputs target source code, resources, a list of binding requirements and source maps |
+| Runtime adaptation | Provides the target-language client, UI scheduling, theme environment listening, snapshot application and the instance lifecycle implementation |
+| Build adaptation | Returns toolchain requirements, build steps, dependencies and the list of outputs, executed by the build driver |
 
-公共接口可概括为描述、检查、转换、生成和构建计划；具体 Rust trait 名称与函数签名待原型确认。目标生成器收到的是 IR、schema 和绑定 ID，不需要重新解析 Rust UI 源码或推断业务函数类型。
+The public interface can be summarized as describe, check, transform, generate and build plan; the concrete Rust trait names and function signatures are to be confirmed by a prototype. A target generator receives the IR, schemas and binding IDs, and does not need to reparse Rust UI source or infer the types of business functions.
 
-后端专用转换在目标私有表示中完成。例如 Flutter 可以组织 Widget，SwiftUI 可以选择视图组合，Web 可以生成 DOM 模板。公共 IR 不加入 `BuildContext`、`NSView` 或 CSS 选择器等特定框架对象。
+Backend-specific transformations happen in the target-private representation. For example, Flutter can organize Widgets, SwiftUI can choose a view composition, and the Web can generate DOM templates. The public IR does not add framework-specific objects such as `BuildContext`, `NSView` or CSS selectors.
 
-### 注册与版本兼容
+### Registration and version compatibility
 
-首版使用独立 crate 和显式注册表装配目标，目标实现可以与构建宿主一起编译。新增目标允许增加依赖、注册项和项目配置，但在公共语义已能表达需求时，不应修改解析器、公共 IR、核心检查规则或业务核心。
+The first version assembles targets with independent crates and an explicit registry, and target implementations can be compiled together with the build host. A new target may add dependencies, registry entries and project configuration, but when the public semantics can already express the need, it should not modify the parser, the public IR, the core check rules or the business core.
 
-不将 Rust 动态库 ABI 当作稳定插件协议。需要外部进程形式的生成器时，再定义版本化序列化请求与响应；不能直接把内部 trait object 当成第三方二进制插件接口。
+The Rust dynamic library ABI is not treated as a stable plugin protocol. When generators in the form of external processes are needed, versioned serialized requests and responses will be defined then; internal trait objects cannot be used directly as a third-party binary plugin interface.
 
-公共 IR、目标扩展接口、UI 绑定协议、主题协议和应用协议分别记录版本。目标模块检查自己消费的 IR、UI 绑定和主题等接口；应用客户端、业务适配器和服务检查应用协议。启用视频时，还需检查媒体契约版本及媒体后端与呈现适配器的兼容范围。生成器可以消费命令 schema 来生成类型化绑定，但不因此依赖具体业务传输。初版 API 尚未稳定；不兼容版本应明确失败，不能忽略未知节点后继续生成不完整 UI。
+The public IR, target extension interface, UI binding protocol, theme protocol and application protocol are versioned separately. Target modules check the IR, UI binding, theme and other interfaces they consume; application clients, business adapters and services check the application protocol. When video is enabled, the media contract version and the compatibility ranges of media backends and presentation adapters must also be checked. Generators can consume command schemas to generate typed bindings without thereby depending on a specific business transport. The initial API is not yet stable; incompatible versions should fail explicitly, not ignore unknown nodes and go on generating an incomplete UI.
 
-如果新目标需要公共 IR 尚未表达的新语义，应通过独立设计扩展语义并增加验收，而不是把全部目标代码塞进字符串逃生口。平台专用组件可以采用命名空间扩展描述，但仍需属性 schema、能力要求及其他目标的替代或失败规则。
+If a new target needs new semantics that the public IR does not yet express, the semantics should be extended through a separate design with added acceptance, instead of stuffing all the target code into a string escape hatch. Platform-specific components can use namespaced extension descriptions, but still need a property schema, capability requirements, and alternative or failure rules for the other targets.
 
-### 能力协商与配置
+### Capability negotiation and configuration
 
-应用声明所需能力，目标按具体平台组合提供支持矩阵，构建驱动在生成前计算是否满足要求。缺少必需能力时默认失败，只有标准组件契约已定义的替代路径，或应用显式声明的替代路径与豁免可以使用。Window 的默认 auto 策略明确包含原生到虚拟的适配，属于正常契约；它不能替代应用显式要求的系统任务栏、跨显示器等原生能力。
+The app declares the capabilities it needs, targets provide a support matrix per concrete platform combination, and the build driver computes before generation whether the requirements are met. A missing required capability fails by default; only alternative paths that a standard component contract defines, or alternative paths and exemptions that the app declares explicitly, may be used. Window's default auto policy explicitly includes adaptation from native to virtual and is part of the normal contract; it cannot substitute for native capabilities the app explicitly requires, such as the system taskbar or spanning multiple displays.
 
-以下配置演示三个桌面平台的默认选择、显式切换 Flutter，以及 Web 的两种构建。配置键仍是草案；桌面省略 `ui` 时使用上述平台默认映射，UI 桥接由目标组合决定，不代表允许任意拼接不兼容模块。Web 目标必须显式声明 `web_mode`，取值为 `app` 或 `ui`，不根据服务地址猜测模式。
+The following configuration shows the default selection on the three desktop platforms, an explicit switch to Flutter, and the two Web builds. The configuration keys are still a draft; when `ui` is omitted on desktop, the platform default mapping above is used, and the UI bridge is determined by the target combination, which does not mean that incompatible modules may be combined arbitrarily. Web targets must declare `web_mode` explicitly, with the value `app` or `ui`; the mode is not guessed from the service address.
 
 ```toml
 [targets.native_macos]
-platform = "macos"       # ui 默认 swiftui
+platform = "macos"       # ui defaults to swiftui
 
 [targets.native_linux]
-platform = "linux"       # ui 默认 gtk
+platform = "linux"       # ui defaults to gtk
 
 [targets.native_windows]
-platform = "windows"     # ui 默认 winui3
-frontends = ["winui3", "xaml-islands"]   # 默认两个都编译，可只写其一
+platform = "windows"     # ui defaults to winui3
+frontends = ["winui3", "xaml-islands"]   # Both are compiled by default; you can list just one
 
 [targets.flutter_macos]
 ui = "flutter"
@@ -560,21 +562,21 @@ application_transport = "websocket"
 application_codec = "json"
 ```
 
-Windows 目标的 `frontends` 选择编译哪几套前端：`winui3`、`xaml-islands`，默认两个都编译；列表为空、名称未知或重复，以及用在其他平台上，都在构建时失败。`web_app` 与 `web_ui` 是项目内的目标名称；`web_mode` 才是构建模式。示例中的 `websocket` 是传输，`json` 是编码；WebUI 也可使用另行实现并验收的浏览器兼容传输。连接地址通过运行时连接配置提供，凭据不写入静态构建资源。`app` 必须装配浏览器内引擎适配，`ui` 必须装配独立引擎客户端；不兼容配置在构建时失败。配置拼写与 `bern build --target web_app`、`bern build --target web_ui` 命令形式均为草案。
+The Windows target's `frontends` chooses which frontends to compile: `winui3` and `xaml-islands`, both by default; an empty list, an unknown or duplicate name, and use on any other platform all fail at build time. `web_app` and `web_ui` are target names within the project; `web_mode` is what sets the build mode. In the example `websocket` is the transport and `json` the encoding; WebUI can also use a browser-compatible transport that is implemented and accepted separately. The connection address is provided through the runtime connection configuration, and credentials are not written into static build resources. `app` must assemble the in-browser engine adaptation and `ui` must assemble the separate engine client; incompatible configurations fail at build time. The configuration spelling and the command forms `bern build --target web_app` and `bern build --target web_ui` are all drafts.
 
-这些目标可以共享组件声明、功能契约和业务核心。因能力或平台交互需要不同布局时，差异必须在可分析的自适应分支或显式平台扩展中表达。
+These targets can share component declarations, feature contracts and the business core. When capabilities or platform interaction call for different layouts, the differences must be expressed in analyzable adaptive branches or explicit platform extensions.
 
-### 扩展完成的判断标准
+### Criteria for a completed extension
 
-新增目标必须使用与已有目标相同的样例验证状态、命令、条件分支、稳定 key 列表、本地化、功能入口、多窗口语义和完整深浅色适配。没有原生多窗口能力的目标必须提供虚拟窗口路径。只实现一种外观模式或要求应用补写颜色，不能通过标准控件的目标验收。
+A new target must be verified with the same samples as existing targets for state, commands, conditional branches, stable-key lists, localization, feature entry points, multi-window semantics and complete light and dark mode adaptation. A target without native multi-window capability must provide a virtual window path. A target that implements only one appearance mode, or requires apps to add colors themselves, cannot pass acceptance for standard controls.
 
-模块化验收还必须检查：在公共语义范围内加入一个独立目标时，解析器与业务核心是否保持不变；删除或禁用某目标后，其他目标是否仍可单独构建。具体框架 SDK 不得成为构建所有目标的全局前置条件。
+Modularity acceptance must also check whether the parser and the business core stay unchanged when an independent target is added within the scope of the public semantics, and whether the other targets can still be built on their own after a target is removed or disabled. No specific framework SDK may become a global prerequisite for building all targets.
 
-## 受约束的组件声明
+## Constrained component declarations
 
-### 组件定义与引用
+### Component definition and references
 
-可移植组件使用显式标记，首版要求组件主体为单个 `ui!` 声明。组件参数必须具有显式类型，组件名称与 Rust 函数名称一致。
+Portable components use an explicit marker, and the first version requires the component body to be a single `ui!` declaration. Component parameters must have explicit types, and the component name is the same as the Rust function name.
 
 ```rust
 #[component]
@@ -601,247 +603,247 @@ fn player_screen(player: PlayerHandle) -> impl View {
 }
 ```
 
-内置组件采用固定名称，自定义组件通过函数名或显式路径引用，不隐式将 `play_button` 改写为 `PlayButton`。引用必须解析到已收集的组件描述；不允许通过猜测函数返回类型判断它是否为可导出组件。
+Built-in components have fixed names; custom components are referenced by function name or explicit path, and `play_button` is not implicitly rewritten as `PlayButton`. A reference must resolve to a collected component description; whether a function is an exportable component is never decided by guessing its return type.
 
-示例中的 `PlayerHandle` 表示前端使用的类型化应用客户端，不是业务核心对象的直接引用。`player.title` 必须是已声明的快照状态绑定；`player.toggle()` 必须解析为已注册命令的类型化引用，在事件发生时派发，不是任意方法调用。应用接口的声明语法另行定稿。
+`PlayerHandle` in the example stands for the typed application client used by the frontend, not a direct reference to a business core object. `player.title` must be a declared snapshot state binding; `player.toggle()` must resolve to a typed reference to a registered command, dispatched when the event occurs, not an arbitrary method call. The declaration syntax for the application interface will be finalized separately.
 
-### 允许的动态行为
+### Allowed dynamic behavior
 
-受约束声明不等于静态页面。Bern 必须支持以下动态行为，并保留它们的结构：
+Constrained declarations do not mean static pages. Bern must support the following dynamic behaviors and preserve their structure:
 
-| 行为 | IR 表达 | 运行时责任 |
+| Behavior | IR representation | Runtime responsibility |
 | --- | --- | --- |
-| 属性随状态改变 | 属性绑定与依赖集合 | 重新计算并更新相关属性 |
-| 条件显示 | `If` 节点及各分支 | 求值条件并挂载或卸载分支 |
-| 动态列表 | `List` 节点及元素模板 | 按稳定 key 创建、更新和移除实例 |
-| 自适应布局 | `Adaptive` 节点及选择规则 | 根据环境切换布局 |
-| 用户事件 | 类型化语义动作与命令绑定 | 提取事件参数并派发引擎或会话命令 |
-| 展示计算 | 受限表达式或显式查询结果绑定 | 求值已知运算或订阅派生值 |
-| 长度随状态改变 | 长度属性绑定的数值表达式 | 重新计算长度，按元素的 `animate` 动效过渡 |
+| Properties change with state | Property bindings and dependency sets | Recompute and update the affected properties |
+| Conditional display | `If` nodes and their branches | Evaluate conditions and mount or unmount branches |
+| Dynamic lists | `List` nodes and element templates | Create, update and remove instances by stable key |
+| Adaptive layout | `Adaptive` nodes and selection rules | Switch layouts according to the environment |
+| User events | Typed semantic actions and command bindings | Extract event parameters and dispatch engine or session commands |
+| Presentation computation | Restricted expressions or explicit query result bindings | Evaluate known operations or subscribe to derived values |
+| Lengths change with state | Numeric expressions bound to length properties | Recompute the length and transition with the element's `animate` motion |
 
-导航容器的项同样可以是动态的：`Sidebar`、`Tabs`、`Toolbar` 以及侧边栏中 `Section` 的项可以写在 `if`、`match` 与 `ForEach` 中，各分支与模板只能产生该容器允许的子元素。当前选中项所在的分支消失时，选中回到容器声明的 `fallback` 值；没有声明时回到第一个可见项，并以 `changed_by: System` 的事实报告。项的增删可以使用元素的出现、消失与重排过渡（见“样式覆盖、动效与自绘”）。
+The items of navigation containers can be dynamic too: the items of `Sidebar`, `Tabs`, `Toolbar` and of a `Section` in a sidebar can be written inside `if`, `match` and `ForEach`, and each branch and template may produce only the children that the container allows. When the branch holding the currently selected item disappears, the selection returns to the `fallback` value the container declares; without one, it returns to the first visible item, and this is reported as a fact with `changed_by: System`. Items being added and removed can use the element appear, disappear and reorder transitions (see "Style overrides, motion and self-drawing").
 
-实现进度：形式检查按分支与模板中的元素检查这些容器的项；SwiftUI 生成条件、`match` 与列表中的项，`fallback` 与回到第一个可见项，可访问控件的可选项只包含当前可见的项，已在 macOS 上用 `examples/planner` 验证侧栏，并用生成代码的类型检查覆盖 `Tabs` 与 `Toolbar`。尚未实现：`changed_by: System` 的报告，以及 `SidebarItem` 与 `Tab` 的出现、消失过渡（它们目前不接受动效属性）。Web 已实现：侧栏与页签的内容生成为普通的构建函数，`if`、`match` 与 `ForEach` 照常工作，侧栏项与页签挂载时登记、卸载时注销，选中项消失时回到 `fallback` 或第一个可见项；浏览器中用 `examples/planner` 验证关闭“笔记”模块时它的侧栏项消失、选中回到“概览”，重新开启后又出现；页签在媒体类应用的手机外壳中按模块增减（2026-10-21，此前 Web 只生成直接写在 `Tabs` 里的页签）。GTK 与 WinUI 3 已实现（WinUI 3 的侧栏项是 `NavigationView` 的菜单项，页签是 `SelectorBar` 的项，Islands 为按钮组），Linux 虚拟机与 Windows PC 上用 `examples/planner` 验证“归档”项出现与消失、选中回到 `fallback`，“笔记”页经可选模块出现。GTK 的页签此前不读 `fallback`：选中的页签消失后选中停在已卸载的值上、页面空白；2026-10-21 起与侧栏相同地回到 `fallback` 或第一个页签，Linux 虚拟机上用探针应用验证（有 `fallback` 的回到它，没有的回到第一个页签）。GPUI 同样回到 `fallback` 或第一个页签（2026-11-01：每次构建时检查选中的值是否还在页签中，不在就写回替代值）；`bar: floating` 只作用于手机，GPUI 只在桌面上运行，页签栏照旧。GTK 上晚于其他页签挂载的页签此前排在切换器末尾；同日起排在声明的位置，`ForEach` 重排时也跟着重排（单元测试覆盖排序，实机未验证）。
+Implementation progress: structural checking checks the items of these containers element by element in branches and templates; SwiftUI generates items in conditions, `match` and lists, `fallback` and the return to the first visible item, and the options the control exposes to accessibility include only the currently visible items; the sidebar has been verified on macOS with `examples/planner`, and type checks of the generated code cover `Tabs` and `Toolbar`. Not yet implemented: reporting `changed_by: System`, and appear and disappear transitions for `SidebarItem` and `Tab` (they do not accept motion properties yet). Web implemented: sidebar and tab content is generated as ordinary builder functions, so `if`, `match` and `ForEach` work as usual; sidebar items and tabs register when mounted and unregister when unmounted, and when the selected item disappears the selection returns to `fallback` or the first visible item; verified in the browser with `examples/planner` that disabling the "Notes" module removes its sidebar item and returns the selection to "Overview", and that the item reappears after re-enabling; tabs are added and removed by module in the phone shell of a media app (2026-10-21; before that, the Web generated only tabs written directly in `Tabs`). GTK and WinUI 3 implemented (WinUI 3 sidebar items are `NavigationView` menu items, tabs are `SelectorBar` items, and in Islands a button group); verified on the Linux VM and the Windows PC with `examples/planner` that the "Archive" item appears and disappears, the selection returns to `fallback`, and the "Notes" page appears through the optional module. GTK tabs previously did not read `fallback`: after the selected tab disappeared, the selection stayed on the unmounted value and the page was blank; since 2026-10-21 the selection returns to `fallback` or the first tab, as for the sidebar, verified on the Linux VM with a probe app (with `fallback` it returns there, without it to the first tab). GPUI likewise returns to `fallback` or the first tab (2026-11-01: on every build it checks whether the selected value is still among the tabs and writes back the replacement if not); `bar: floating` applies only to phones and GPUI runs only on desktops, so its tab bar is unchanged. On GTK, tabs mounted later than other tabs used to be placed at the end of the switcher; since the same day they are placed at their declared position and also reorder when `ForEach` reorders (unit tests cover the ordering; not verified on a real machine).
 
-受限表达式可以用 `if 条件 { 值 } else { 值 }` 在两个同类型的值中选一个，`else if` 可以接着写；整数与小数并列时结果是小数。长度属性——容器的 `padding`、`gap`、`width`、`height`，`Grid` 的 `min_width`，`Image` 与 `Canvas` 的尺寸，`Video` 的 `corner`——可以写字面量，也可以绑定数值表达式，例如 `padding: if window.idle { 0 } else { 24 }`、`min_width: draft.card_size`。显示的文字不接受 `if`，两种文字用元素级的 `if` 分别写。实现进度：表达式的 `if` 五个目标都生成；绑定的长度 SwiftUI 与 Compose 已实现（Compose 不接受负的内边距与尺寸，绑定的值与回弹越过零的弹簧都停在零），Web 已实现（长度由页面的弹簧驱动并写进样式，同样不低于零）。GTK 与 WinUI 3 已实现，`animate` 时随弹簧变化，Linux 虚拟机与 Windows PC 上验证画框页静置后边距收为 0、视频圆角 20 收为直角。
+A restricted expression can use `if condition { value } else { value }` to choose between two values of the same type, and `else if` can follow; when integers and decimals are mixed, the result is a decimal. Length properties (a container's `padding`, `gap`, `width` and `height`, `Grid`'s `min_width`, the size of `Image` and `Canvas`, and `Video`'s `corner`) can be literals or bound to numeric expressions, for example `padding: if window.idle { 0 } else { 24 }` or `min_width: draft.card_size`. Displayed text does not accept `if`; write the two texts separately with an element-level `if`. Implementation progress: all five targets generate expression `if`; bound lengths are implemented in SwiftUI and Compose (Compose does not accept negative padding or sizes, so bound values and springs that overshoot past zero both stop at zero) and on the Web (lengths are driven by the page's springs and written into styles, likewise never below zero). GTK and WinUI 3 implemented, following the spring when `animate` is set; verified on the Linux VM and the Windows PC that after the frame page goes idle its padding shrinks to 0 and the video's corner radius of 20 becomes square corners.
 
-标题、进度或条件可以来自受限表达式和类型化查询结果，但不能通过任意函数调用暗中执行业务操作，也不能返回无法分析的组件树。动态列表使用已知元素模板；不能靠运行时回调选择未声明的组件类型。
+Titles, progress or conditions can come from restricted expressions and typed query results, but they cannot secretly perform business operations through arbitrary function calls, nor return component trees that cannot be analyzed. Dynamic lists use known element templates; undeclared component types cannot be chosen through runtime callbacks.
 
-绑定所需的状态依赖必须来自类型化快照或显式查询描述。Bern 不尝试从任意 Rust 函数内部推导依赖或证明纯性。自定义查询实现须遵守只读契约；改变业务或交互状态必须通过命令，查询执行所需的资源访问由查询提供器管理。
+The state dependencies a binding needs must come from typed snapshots or explicit query descriptions. Bern does not try to derive dependencies or prove purity from inside arbitrary Rust functions. Custom query implementations must follow the read-only contract; changes to business or interaction state must go through commands, and the resource access that query execution needs is managed by the query provider.
 
-### 首版静态约束
+### Static constraints in the first version
 
-- 可导出组件必须具有显式身份、属性接口和完整的声明体。
-- 自定义组件引用必须有对应描述；首版不支持运行时选择任意组件工厂。
-- 动态条件的每个结构分支都必须出现在可分析声明中。
-- 可更新列表必须提供稳定且在同级列表中唯一的 key，不能默认使用位置代替数据身份。
-- 不支持任意递归组件结构；需要递归数据展示时，应先设计专门的可分析机制。
-- 首版不支持通过任意宏展开、`include!` 或构建脚本隐式生成待收集组件。
-- 组件导出接口只使用已支持的明确类型；不将任意泛型、trait object、闭包或借用跨语言导出。
-- 交互处理器只能引用已注册命令，或使用标准控件自动生成的会话命令；不接受任意 `on_click` 闭包、直接字段赋值或平台事件逃生口。
-- 展示表达式不得调用未纳入受限表达式规范的 Rust 函数。自定义计算移到有契约的 Query 或派生状态提供器。
+- An exportable component must have an explicit identity, a property interface and a complete declaration body.
+- Every custom component reference must have a corresponding description; the first version does not support choosing an arbitrary component factory at runtime.
+- Every structural branch of a dynamic condition must appear in an analyzable declaration.
+- An updatable list must provide a key that is stable and unique among its siblings; position cannot stand in for data identity by default.
+- Arbitrary recursive component structures are not supported; displaying recursive data requires first designing a dedicated analyzable mechanism.
+- The first version does not support implicitly generating components to be collected through arbitrary macro expansion, `include!` or build scripts.
+- Component export interfaces use only supported, explicit types; arbitrary generics, trait objects, closures or borrows are not exported across languages.
+- Interaction handlers may only reference registered commands or use the session commands generated automatically by standard controls; arbitrary `on_click` closures, direct field assignment and platform event escape hatches are not accepted.
+- Display expressions must not call Rust functions that are not covered by the constrained expression specification. Custom computation moves into a Query or derived-state provider that has a contract.
 
-受限运算只针对 schema 已知的基础值与记录字段，不能通过自定义运算符或 trait 实现重新引入任意用户代码。生成的 UI 句柄只暴露读取、订阅和命令派发，不向组件提供可写的业务状态引用；修改权限归相应处理器所有。
+Constrained operations apply only to base values and record fields known to the schema; arbitrary user code cannot be reintroduced through custom operators or trait implementations. The generated UI handle exposes only reading, subscription and command dispatch, and gives components no writable reference to business state; the right to modify it belongs to the corresponding handler.
 
-普通 Rust 函数仍然可用于应用实现，但未声明为 Bern 组件的 `fn ... -> impl View` 不自动获得跨平台导出资格。遇到不可分析结构或命令旁路时必须报错，不静默退化为部分检查。宏只约束其掌握的声明；业务处理器、查询提供器、原生桥接与外部插件属于受信任实现边界，不能据此声称证明整个 Rust 程序不存在副作用。
+Ordinary Rust functions remain available for implementing the app, but an `fn ... -> impl View` that is not declared as a Bern component does not automatically qualify for cross-platform export. An unanalyzable structure or a command bypass must produce an error and must not silently degrade to a partial check. The macro constrains only the declarations it controls; business handlers, query providers, native bridges and external plugins lie within the trusted implementation boundary, and none of this can be used to claim proof that the whole Rust program has no side effects.
 
-## 组件与布局语义
+## Component and layout semantics
 
-下表概述组件语义与实现范围；完整的当前接口以[属性表](Reference/Component-Properties.md)为准。组件语义和默认行为由 Bern 规范定义，IR 保持平台无关，不引入 SwiftUI 类型。
+The table below outlines component semantics and implementation scope; the complete current interface is defined by the [property table](Reference/Component-Properties.md). Component semantics and default behavior are defined by the Bern specification; the IR stays platform-independent and does not introduce SwiftUI types.
 
-| 组件 | 核心语义 | 说明与实现范围 |
+| Component | Core semantics | Notes and implementation scope |
 | --- | --- | --- |
-| WindowSet 和 Window | 窗口目录、内容、实例策略、原生或虚拟呈现与生命周期 | 基础组件，macOS 使用原生窗口，Web 使用页面宿主与应用内虚拟窗口 |
-| SplitView 和 Sidebar | 侧边栏与详情分栏、侧边栏分组和选中项；Sidebar 可带 `id` 供外部入口切换；项可按条件或列表出现，并在选中项消失时执行 fallback | 基础组件 |
-| SidebarFooter | 固定在侧边栏底部、列表下方的内容，自上而下排列，例如小播放器、账号与设置入口；列表在它上方滚动；一个侧边栏最多一个 | 媒体类应用；SwiftUI 已实现（安全区内嵌）；Compose 与 Web 已实现（侧栏底部的一栏），Web 浏览器中已验证；GTK 与 WinUI 3 已实现（WinUI 3 为 `NavigationView.PaneFooter`），Linux 虚拟机与 Windows PC 上已验证 |
-| Navigation、Destination 和 NavLink | 推入导航与返回，绑定类型化路由；Navigation 可带 `id` 供外部入口返回 | 基础组件 |
-| Tabs 和 Tab | 同级页面的页签切换；Tabs 可带 `id` 供外部入口切换。`Tab(display: icon)` 只显示图标（必须写 `icon`），`label` 仍是可访问名称，桌面上也是悬停提示，例如电视标签栏里只是放大镜的搜索页；关键词与 `Label(display:)` 相同 | 基础组件。`display: icon` 为能力 `icon_tabs`，六个目标生成：tvOS 与 iOS 的标签项只放符号图像（`accessibilityLabel` 为 label）；macOS 27 上窗口工具栏里的页签是只显示图标的 `Label`；对话框表单里的经典页签只能画文字，那里显示标题（只放图像或图标式 `Label` 的页签是空白的，macOS 27 实测）；macOS 27 以前未实测工具栏页签，也显示标题；Compose 的 `NavigationBarItem` 不带文字，图标的 `contentDescription` 为 label；Web 的页签按钮只有图标，`aria-label` 与 `title` 为 label；GTK 隐藏 `AdwViewSwitcher` 与底部切换栏按钮里的标题，label 为提示与可访问名称（切换器在页面增减时重建按钮，之后重新隐藏）；WinUI 3 的 `SelectorBarItem` 只设图标，系统 XAML 的切换按钮内容为图标，label 为 UI 自动化名称与提示。tvOS 模拟器、macOS 27、Chromium、Ubuntu 虚拟机（Broadway）、Windows PC 两种前端与 Android 真机上看过；读屏朗读未实测 |
-| TabAccessory | 随页签常驻、在每一页上都显示的一条，例如正在播放的小播放器；直接写在 `Tabs` 里，最多一个，用 `shown:` 收起而不是写在 `if` 里。条是系统画的底，里面的图标按钮是条上的符号，不再各带一层玻璃 | 能力 `tab_accessory`。SwiftUI：iOS 26.1 起为标签视图的 `tabViewBottomAccessory`（标签栏上方的系统玻璃条，iPhone 模拟器 iOS 26.5 上已验证），更早的 iOS 与 macOS 在每页底部的安全区内嵌一条材质胶囊；Compose 为导航栏上方的一块抬高表面；GTK 为页面下方滑出的 Adwaita 卡片（`GtkRevealer`）；WinUI 3 为页面下方的卡片；Web 为页面下方的一条。Compose、GTK、WinUI 3 与 Web 未验证 |
-| Toolbar | 窗口或页面级操作区；可以放一个 `Search`，直接写在工具栏中，不放在条件或重复里。相邻的项是一组，`Divider` 把它们分成几组：按功能分组，一组的项在平台上共享一块底（Liquid Glass 的同一个胶囊），组与组之间留固定间隔；`Divider` 只能直接写在两项之间，平台建议不超过三组 | 基础组件；工具栏中的搜索框 SwiftUI 已实现。分组：SwiftUI 生成 `ToolbarItemGroup`，macOS 26 与 iOS 26 起组间插 `ToolbarSpacer(.fixed)`；组里的图标按钮交给工具栏绘制，和别的项同组的菜单不显示下拉箭头（带箭头的菜单会自成一块），macOS 上已验证。GTK 与 WinUI 3 在组间画一条竖线，Linux 虚拟机与 Windows PC 上已验证（WinUI 3 两种前端相同）；Web 同样画一条竖线，浏览器中已验证；Compose 在组间留 12dp，Android 上已验证 |
-| Column 和 Row | 单轴排列、间距、对齐、约束；`width` 与 `height` 定下尺寸。子元素合起来比它长时从开头排起、越出末端；声明了比它更宽（更高）的子元素保持自己的尺寸、按对齐方式越出（居中时两边均分）；两种越出都不裁剪。`Column` 不写 `align` 时与 `leading` 相同：子元素保持自己的宽度、站在 `align` 指定的位置，按钮、图标按钮、菜单与浮层按钮不被拉宽，内层的 `Column` 与 `Stack` 只与自己的内容同宽，要横跨整列写 `Button(width: fill)`；横向填满的内容（输入框、滑块、分隔线、`Grid`、`Flow`、`List`、有数值的进度条、滚动视图、没写宽度的 `Canvas`、只写 `aspect` 的图片、含 `Spacer` 的行、带底板的 `Stack`）以及装着它们的列与 `Stack` 横跨整列，之后才出现的这类内容让外层随之横跨、离开后外层收回；直接写在窗口里时见“一套窗口声明”。行里领头的文字（没写宽度的 `Text`，或靠前缘的 `Column`）后面紧跟 `Spacer` 时，文字占去 `Spacer` 的位置、在剩下的宽度里换行，后面的控件保持自己的宽度，如系统列表行的标签 | 基础组件；六个目标按同一规则排；领头文字占去 `Spacer` 的位置由 SwiftUI 与 Compose 实现（`bern_ir::leads_row`） |
-| Grid | 等宽的列，列宽不小于 `min_width`，放得下几列就排几列，子元素逐行填入；`gap` 默认 8。`masonry` 时为瀑布流：各项按自己的高度排，每一项放进目前最短的一列，适合高度不一的卡片。子元素只有一个 `ForEach`（不是瀑布流）的网格放在纵向滚动视图里时只建出看得见的行和前后各一屏的行，滚出范围的行连同其中的控件与状态一起释放，滚回来时重建；没建出的行按已建出过的高度、没量过的按第一个建出的项的高度占位，所以几千行的列表打开与滚动都不卡；不在纵向滚动视图里时照常全部建出。`ScrollView(position:)` 设到一个还没建出的行时，先按估计的位置滚到它附近、在那里建出，再停到它上面 | 已实现；`masonry` 由 SwiftUI 与 Compose（自定义布局）、Web（一像素高的网格行）实现，GTK 与 WinUI 3 按普通网格排。只建可见行：SwiftUI 本就是 `LazyVGrid`；Compose 是 `SubcomposeLayout`（`BernLazyGrid`），滚动视图提供看得见的部分（`LocalBernViewport`）；WinUI 3 是自定义面板（`LazyGridPanel`），按 `EffectiveViewportChanged` 在布局之外建行；GTK 是自定义部件（`lazy.rs`），跟随滚动视图的 `vadjustment` 在空闲时建行；Web 与 GPUI 在上下各放一段占位，按上一帧看得见的部分只建中间的行（Web `B.LazyGrid`，GPUI `lazy_grid`）。`examples/catalog` 的五千行列表与六百张卡片在六个目标上验证：只建出二十来行，滚到中间、末尾与“到第 4000 行”都建出对应的行；Windows PC 上一个应用的本地音乐列表（1327 首）打开从约 5 秒降到 0.1–0.3 秒 |
-| Stack | 叠放：后写的一层在上面，先接收输入；整体与最大的一层一样大（写了 `width`、`height` 时按它们），较小的层按 `align` 的九个方位之一对齐，默认居中 | 已实现 |
-| Accordion | 横向手风琴；`count` 是列数，`selected` 是从 0 开始的展开列，其他列宽 `collapsed_width`，展开列填满余宽；`gap` 与 `height` 定义间距与高度，`corner` 定义每列的裁切圆角。`animate` 逐帧改变列宽，位置由当前列宽累加，内容裁切到各列；减弱动态效果时直接切换 | 六个目标实现（`accordion_layout`） |
-| ScaleBox / Positioned | 固定逻辑画布等比适配父容器；图层用逻辑坐标声明位置、尺寸与状态动画 | 六个目标实现（`scaled_scene`）；见[播放器布局](Reference/UI.md#坐标场景与滚动内容) |
-| Marquee | 渲染端计时的水平循环内容，支持暂停、相位、透明度和减少动态效果 | 六个目标实现（`scaled_scene`）；不提供逐帧业务回调 |
-| ControlGroup | 按功能将控件放入共享胶囊，保留各自的命中区域、菜单和动作 | 六个目标实现（`capsule_controls`）；见[控件容器](Reference/UI.md#控件容器与尺寸) |
-| SidebarHeader | 固定在侧栏顶部、列表上方的内容；`role: title` 表示它只给窗口命名（应用图标与名称），标题栏已显示应用名称的 Windows 与 Linux 不显示它 | 六个目标实现（`sidebar_header`） |
-| WindowButtons | 伸到标题栏下面的内容里，窗口自己的按钮在前缘占的位置：macOS 是红绿灯，其他目标在那里没有按钮，不占位也不留间距 | 六个目标生成；SwiftUI 在 macOS 上占 84 点 |
-| Svg | 按需呈现打包的动画与交互 SVG 文档 | 见[专项接口与依赖](Implementation/Animated-SVG.md) |
-| Form 和 Section | 分组表单、行标签、分组标题与说明；Form 可声明所在页面的标题。`Section(style: plain)` 是随表单滚动的标题，行直接在页面上，不取 Form 给分组的行内边距，只用自己的；表单以它开头时从页面顶部开始，这个标题也可以来自插槽、组件或条件，各目标在布局时看第一项，条件变了跟着变 | 基础组件；六个目标按同一规则实现 |
-| Label | 图标与标题组合；`display: icon` 只显示图标，保留 `title` 作为可访问名称，图标字号仍由 `style` 决定 | `display: icon` 六个目标实现（`icon_labels`） |
-| Spacer 和 Divider | 弹性空白与分隔线 | 基础组件 |
-| Text | 本地化或动态文本、文字层级、换行及截断；`color` 用强调色或状态色画文字（与 `emphasis` 二选一）；`mark` 标注底纹；`markdown` 把内容当作行内 Markdown（强调、代码、删除线与链接）按平台样式显示；`style: code` 是平台的等宽字体 | 基础组件；`mark` 见“画布与标注文字”；`markdown` 由 SwiftUI、Compose、Web 与 GTK 实现，WinUI 3 去掉标记只显示文字，整篇文档由应用分块后逐块显示；`code` 五个后端都用各自平台的等宽字体，见[属性表](Reference/Component-Properties.md)；`color` 六个后端实现：SwiftUI 的 `foregroundStyle`（系统的 green、orange、red 与强调色）、libadwaita 的 `accent`/`success`/`warning`/`error` 文字类、WinUI 3 的主题画刷、Compose 的调色板、网页的主题变量 |
-| Button | 可访问名称、语义角色、强调程度、启用状态及激活事件；可以带一个子元素作为它显示的内容，见“带内容的按钮与悬停显示”。`pick: draft.file` 让按下先弹出系统的打开面板，选中一个文件后存进这个会话字段（`MediaSource` 或 `Option<MediaSource>`）再执行动作，取消则什么都不做；`files` 写接受的种类：`any`（默认）、`video`、`audio`、`picture`、`folder` 与 `.ass` 这样的扩展名，用空格或逗号分开。`IconButton` 与 `MenuItem` 同样可以写 | 基础组件；带内容见该节的实现进度。`pick` SwiftUI 已实现（`file_pick`）：macOS 是挂在窗口上的打开面板，不接受的文件变灰，已验证；iOS 是文档选择器，选中的文件就地打开并保持可读，iOS 26.5 模拟器已验证。Compose 用系统的文档选择器（`OpenDocument`），按种类过滤并保留读取授权，Android 模拟器上验证了只列出视频或图片、选中后播放或显示。`video` 除系统的影片类型外还收 mkv、webm、flv、rmvb 等系统未必认识的容器。Web 用浏览器的文件选择框（`<input type=file>`），按种类过滤，选中的文件以页面的 `blob:` 地址交给动作；系统的选择框无法在自动化中操作，未实测，用 `ui.set_file` 验证了动作。GTK 用 `GtkFileDialog`，按种类过滤，虚拟机上没有桌面门户，选择未实测；WinUI 3 用 `FileOpenPicker` 与 `FolderPicker`，Windows PC 上验证 Ctrl+O 弹出打开面板 |
-| IconButton | 图标激活、点击区域与可访问名称 | 基础组件；原生目标默认使用平台的图标按钮样式 |
-| FocusRegion | 编辑区：包着一块内容，里面的输入框正在编辑时，在区域外的第一次按下只结束编辑（不提交、不清空），这次按下不再交给别的控件；区域里的控件与之后的按下照常 | 六个目标生成 |
-| TextInput | 文本编辑、输入法与提交事件；在行里占行内剩余的宽度、行窄时让出，在列里横跨整列；`label_hidden: true` 时标签只作可访问名称、不显示；`submit: clear` 提交并执行动作后清空草稿、交出键盘焦点（如发弹幕、发消息的输入框），旁边的发送按钮写 `clears: draft.x` 做同样的事 | 基础组件；`submit: clear` 与按钮的 `clears`（2026-10-21）：六个目标在生成的动作后追加清空草稿，SwiftUI 与 Web 同时交出焦点；macOS 上在一个实际应用的输入框中实测清空 |
-| Search | 搜索文本编辑与提交；子元素是在搜索框使用时显示在它下方的结果，例如由 `Query` 驱动的结果列表，结果中的按钮直接打开或执行 | 基础组件；结果 SwiftUI 已实现：macOS 为 `searchSuggestions`；iOS 有结果时由系统列表在页面所在的位置列出，没有结果时居中显示，iOS 26.5 模拟器已验证；Web 的结果是搜索框下方的浮层，有焦点且有文字时显示，选中结果后收起，浏览器中已验证；GTK 与 WinUI 3（`Flyout`，不用 `AutoSuggestBox` 的建议列表）同样是搜索框下方的浮层，Linux 虚拟机与 Windows PC 上验证 Ctrl+K 聚焦、输入后列出匹配项（GTK 点选“Tartan”后打开它并收起结果） |
-| Switch | 布尔状态与修改事件；`style: button` 是开着时保持按下的按钮，可带 `icon`，也可以放进 `Toolbar`；`login_item: true` 是系统的登录项（见“状态栏项”） | 基础组件；按钮样式六个目标实现（`toggle_button`）；`login_item` 三个桌面目标实现，其他目标不显示（`login_switch`） |
-| SplitButton | 分体开关按钮：一侧是开关，另一侧在浮层中显示它的子元素，例如所开功能的常用设置；开关与 `Switch` 一样二选一：`value:` 绑定 `bool` 草稿，或 `checked:` 显示引擎状态、切换时执行动作（`checked: app.show_danmaku => app.set_show_danmaku(app.show_danmaku)`，动作参数里的这个表达式是新值）；`more_label` 是第二部分的可访问名称；外部入口用 `set_bool` 开关、`activate` 打开浮层 | 媒体类应用；SwiftUI 已实现（`ControlGroup` 与浮层），在 macOS 上验证开关、浮层与其中的控件，浮层跟随 `appearance`；iPhone 上浮层原本会被系统改成整页表单、背景按浅色解析，现在保持为浮层并在所在区域的明暗中绘制，iOS 26.5 模拟器已验证；Web 是开关按钮加弹出浮层的箭头按钮，浏览器中验证浮层与其中的滑块，浮层跟随 `appearance`；GTK 与 WinUI 3（`ToggleSplitButton`）已实现，Linux 虚拟机与 Windows PC 上验证开关与浮层，浮层跟随 `appearance`。`checked:` 与动作（2026-10-21）：六个目标的生成器都改用 `Switch` 的受控写法，GTK 与 WinUI 3 的运行时改收 `Model`；编译器测试、各后端生成测试（gallery 的「说明」改为引擎状态）、GTK 运行时在 macOS 上类型检查、SwiftUI 在 macOS 上的一个实际应用中实测；GTK、WinUI 3 尚未在实机上运行 |
-| Inspector | 侧面板：`presented` 为真时显示在它所在容器的尾侧，容器的其余内容让出位置；直接写在容器中，不放在条件或重复里，一个容器最多一个 | 媒体类应用；SwiftUI 已实现（`.inspector`）；Web 是详情栏尾部滑入的面板，推开内容，窄窗口时是底部弹层，浏览器中验证宽窗口的推开与关闭；GTK（`AdwOverlaySplitView`）与 WinUI 3（右侧窗格的 `SplitView`）已实现，Linux 虚拟机与 Windows PC 上验证详情面板推开海报墙 |
-| Drop | 拖放区：它的内容接受拖到上面的文件，`files` 同 `pick`；拿着可接受的文件停在上面时 `over` 绑定的会话字段为真，其他文件被拒绝且不触发；松手后文件存进 `value` 再执行动作。只接一个文件。`opens: true` 让它也接收系统交给应用的文件：访达里的“打开方式”、拖到程序坞图标、iOS 的“用…打开”；应用为这些种类登记为可选的打开方式（不抢默认），屏幕上没有这样的拖放区时主窗口回来、文件等它出现 | 媒体类应用；SwiftUI 已实现：macOS 上从访达拖入视频时 `over` 变真、松手后播放，拖入 txt 被拒绝，已验证；`opens: true` 在 macOS 上验证了系统把应用列为 mp4 与 mkv 的打开方式（txt、png 不列），运行中与未运行时用它打开文件都交给拖放区并开始播放，拖放区不在屏幕上时文件等到它出现；iOS 26.5 模拟器验证了“用…打开”，从“文件”拖入未验证。Compose 已实现（`dragAndDropTarget`，`opens: true` 在清单里登记 `VIEW` 与 `SEND` 意图），Android 模拟器上验证：分屏时从“文件”长按拖入视频，经过时 `over` 变真、松手后播放；其他应用用 `VIEW` 意图交来的视频交给拖放区播放。Web 已实现：拿着可接受的文件经过时 `over` 变真，松手后以页面的 `blob:` 地址交给动作；浏览器中用页面里构造的真实视频文件模拟拖入，描边出现、画框晃一下，松手后播放，描边淡出；`opens: true` 只在页面作为应用安装后经浏览器的 `launchQueue` 收到文件，未验证。GTK（`GtkDropTarget`，`opens: true` 在桌面文件中登记 `MimeType` 与 `%U`）与 WinUI 3（`StorageItems` 拖放，不登记文件关联）已实现，真实拖放与系统交来的文件都未验证（Broadway 不支持从系统拖入文件），用 `ui.set_file` 验证了动作 |
-| PopoverButton | 浮层按钮：按下弹出一个浮层，里面放任意内容（滑块、开关、文字），例如音量键；`label` 是可访问名称，有 `icon` 时只显示图标；`prominence: plain` 不画底，`font_size` 定图标大小，与旁边的 `IconButton(prominence: plain)` 一样（iOS 与 macOS 26 上不再是单独一个玻璃圆，Linux 上去掉边框）；`presented` 可以绑定会话的 `bool` 字段；或用 `open: app.panel => app.set_panel(app.panel)` 跟随引擎状态，动作中相同表达式替换为新的开关值，点击外部或 Escape 关闭也提交 `false`；两种写法互斥；外部入口用 `ui.activate` 打开；内容里的控件随浮层挂载 | 媒体类应用；Web 已实现（弹出层），浏览器中验证画框页的音量浮层：关闭时只有按钮，`ui.activate` 打开后其中的滑块才出现在 `ui.inspect` 里，关闭后随之卸载；macOS 与 iOS 已实现（系统浮层，iPhone 上也保持气泡而不是底部面板），在 macOS 与 iPhone 17 Pro 模拟器上同样验证；Compose 已实现（Material 的 `DropdownMenu` 浮层；只有文字时是色调按钮），Android 模拟器上验证同样只在打开时挂载滑块，`presented` 的两个方向与 `shortcut` 在临时应用中验证；GTK 与 WinUI 3（`Flyout`）已实现，Linux 虚拟机上验证 `ui.activate` 打开后滑块出现在 `ui.inspect`，Windows PC 上验证打开时挂载、关闭后卸载；GPUI 有 `icon` 时只显示图标（36 点见方，此前图标后面还跟着标签文字），`prominence: plain` 用图标按钮的无底配色，`font_size` 定图标大小（2026-11-01，一个播放列表按钮在 GPUI 上编译运行） |
-| Toast | 轻提示：出现或 `key`（没写时是内容）变化时浮现，`duration` 秒后（默认 3）自己隐藏；放在哪里就显示在哪里，通常叠放在页面底部 | 媒体类应用；SwiftUI 已实现；Web 在窗口底部居中弹出、按时下沉淡出，浏览器中已验证；GTK（`AdwToast`）与 WinUI 3（带 `ThemeShadow` 的胶囊）已实现，Linux 虚拟机与 Windows PC 上验证收藏后的轻提示 |
-| Slider | 范围值、连续变化和提交事件 | 基础组件 |
-| Picker | 从有限选项中单选，按场景呈现为菜单、分段控件、单选列表或一排标签（`style: chips`，每个选项一枚系统的开关按钮或 chip；直接放在 `Flow` 里且不显示标签时，每枚都是 Flow 的子项） | 基础组件；`chips` 六个目标都已实现（2026-10-20）。菜单不取应用的强调色：macOS 是系统自己的弹出按钮，值与箭头用文字颜色；iOS 表单行里的值用次要文字色；胶囊形的菜单选择（`shape: capsule`）与胶囊形的 `Menu` 在 SwiftUI 上取文字颜色为着色（macOS 的无边框下拉按钮本会把标签画成强调色），Compose 的胶囊用 `surfaceContainerHighest` 与 `onSurface` |
-| ScrollView、List 和 ForEach | 滚动容器、有身份的列表及任意容器内的键控重复；`ScrollView` 的 `snap` 与 `position` 见“联动”。纵向滚动视图里 `Column` 的键控 `ForEach` 同样只建看得见的行和前后各一屏，不必改写成网格：每个目标在生成前把它换成一列的懒网格（`bern_ir::lower_lists`，在 `style!` 的长度落到各平台之后），行按这一列的 `align` 站位、间距取这一列的 `gap`（没写时取该平台列的默认间距：SwiftUI 系统间距，Compose、GTK 与 WinUI 3 为 8，Web 与 GPUI 为 0），没有行时不占位置也不占间距，这一列的 `stagger` 照常作用于各行；一行由几部分组成时（例如一行内容与它下面的分隔线），这几部分放进一个按这一列的 `align` 与 `gap` 排列的列里，仍旧上下排开，每个目标的格子里都只有一行（此前 Compose 与 WinUI 3 把几部分叠在格子的同一处，分隔线画到了这一行的顶上）；条件分支里的 `ForEach` 一样，组件只在每个用到它的地方都处于纵向滚动视图中时才算。写了 `reflow` 的列、不在纵向滚动视图里的列照常全部建出 | 基础组件；懒列表（2026-11-01）：SwiftUI 把这一列生成为 `LazyVStack`；Compose、Web、GTK、WinUI 3 与 GPUI 用 Grid 的懒网格，按列的对齐放每一行（Compose 宽度放宽、按 `Alignment.Horizontal` 放；Web 用 `justify-items`，铺满的行仍然铺满；GTK 与 WinUI 3 的行容器按列的方式对齐子元素，懒列表报告已建出的最宽一行为自己想要的宽度，免得放在随内容定宽的滚动视图里时被压成零；GPUI 的单元格 `items_start` 等，列表按其行的需求决定是否铺满）。`examples/catalog` 的五千行与六十行歌词式列表都写成 `Column { ForEach }` 后，在 Chromium、GPUI（macOS 离屏）、macOS SwiftUI、Android 模拟器（Compose）与 Linux 虚拟机（GTK，Broadway）上验证：开始只建 14–28 行，“到第 4000 行”停在第 4000 行，歌词式列表的当前行仍在 0.35 处；WinUI 3 只做了生成检查，没有在 Windows 上编译运行；`snap`、`position` SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动”；`snap`、`position` SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动”；iOS 上横向滚动视图不裁切内容与阴影（`.scrollClipDisabled()`） |
-| PreviewList | 有界的竖向预览：只排能完整放下的行，没放下的项收成一个 +N 标记，`item_height` 是每行高度、`more_height` 是标记的高度；不滚动 | 六个目标生成 |
-| Pinch 和 Swipe | 把双指缩放或拖动绑定到一个会话数值，见“联动” | 媒体类应用；SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“联动” |
-| Image | 随包的 PNG 或 JPEG 资源，或引擎状态中的 `MediaSource`（本地文件或 http(s) 地址，运行时读取，可以是 `Option`，为空时不显示）；`width`、`height`、`aspect` 至少写一个；只写宽或高时另一边按图片比例，仅写 aspect 时随父容器宽度保持该比例；三者都不写而 `fit: cover` 时铺满父容器给的空间、多出的部分裁掉，用来在 `Stack` 里铺一层底图，窗口怎样改变比例都不露边；`fit` 为 `contain`（默认）、`cover` 或 `fill`；`label` 是替代文本，不写为装饰图片；照片按 EXIF 方向转正。`MediaSource` 换成另一个地址后，新图片读到之前什么都不显示，不拿上一张顶替：放在它下面的一层（例如加载动画）这时露出来（2026-11-02，此前 SwiftUI、Web 与 GTK 会一直显示上一张，直到新的读完）。HDR 图片（PQ 或 HLG 的 PNG、带增益图的 JPEG）在显示器能显示 HDR 时按高动态范围显示，SDR 白保持在系统的 SDR 亮度，高光按显示器峰值做色调映射；不能显示 HDR 时，带增益图的 JPEG 显示作者给的 SDR 图，PQ 与 HLG 做色调映射 | 已实现；`MediaSource` 图片 SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现（`runtime_images`），只显示 SDR；不写尺寸铺满父容器（`cover_images`）SwiftUI、Compose、WinUI 3 与 GTK 已实现，Web 与 GPUI 由能力检查报错；WinUI 3 的 http(s) 图片未验证。HDR 在 macOS 与 Web（Chrome）实测；Windows 自绘，只在 SDR 显示器上实测；Linux 的 HDR 输出要 GTK 4.16 起并由用户打开 GTK 的色彩管理，未实测；iOS 模拟器显示 SDR 版本，真机未实测 |
-| Progress | 有 `value` 时是进度条，进度为 `value / total`（`total` 默认 1，超出范围按边界显示）；没有 `value` 时是不确定进度；`label` 同时是可访问名称 | 已实现 |
-| Menu 和 MenuItem | 收纳操作入口的菜单；每个菜单项绑定命令，可绑定功能 | 已实现 |
-| Adaptive 和 Layout | 按可用宽度在 `compact`、`medium`、`expanded`、`large` 四档布局之间选择，保留状态 | 已实现 |
-| LanguagePicker | 运行时切换界面语言；`label_hidden: true` 时标签只作可访问名称，用于自己排了名称的设置行 | 已实现；`label_hidden`（2026-11-01）：SwiftUI `labelsHidden()`，Compose 不显示标签，GTK 在列表中改用不带标题的下拉框，WinUI 3 不加标题，Web 不包标签，GPUI 的菜单前不显示标签；iPhone 模拟器、Android 模拟器与 macOS 上实测 |
-| ContextMenu | 按钮的上下文菜单：写在 `Button` 里，含 `MenuItem` 与 `Divider`，不算按钮显示的内容；桌面上右键（以及菜单键、Shift+F10）、触屏上长按时打开，打开它的这次按压不会再按下按钮。菜单项与其他控件一样登记，菜单关着时外部入口也能 `ui.activate`。按钮里的菜单项不受“按钮不能含控件”的限制；同一组件中 `if` 两支各写一个带菜单的按钮时，两支的 id 要不同 | 2026-11-01 实现：SwiftUI 为 `.contextMenu`（iOS 是系统的长按菜单与预览，macOS 是右键菜单），iPhone 17 Pro 模拟器上长按歌曲行验证；Compose 为包住按钮的 `Box`，在子视图之前看到按压（`PointerEventPass.Initial`），右键或按住不动时打开 `DropdownMenu` 并吞掉余下的按压，Android 16 模拟器上长按歌曲行验证菜单出现而歌曲未播放；WinUI 3 设为按钮的 `ContextFlyout`；GTK 为右键与仅触屏的长按手势加 `PopoverMenu`（与表格行菜单共用）；Web 为 `contextmenu` 事件与 500 毫秒的触摸长按；GPUI 把按钮包一层，右键（macOS 上 GPUI 把 Control 点按当作右键）在指针处打开与 `Menu` 同样的面板，面板外按下即关闭。macOS 上经 `ui.activate` 验证“下一首播放”“加入播放队列”；GPUI 上经 `ui.activate` 验证 `examples/catalog` 每一行的“删除”删掉那一行（2026-11-01），右键本身没有实测（合成的鼠标事件到不了 GPUI 的窗口）；WinUI 3、GTK 与 Web 只编译或类型检查，未实测 |
-| Rail | 按比例摆放：沿 `axis` 把子元素放在 `at` 比例处，或铺在 `from` 到 `to` 之间，比例可以绑定状态，见“按比例摆放” | 媒体类应用；实现进度见该节 |
-| Canvas | 不可交互的绘图区：形状、来自状态的数值序列与平铺图案，颜色只用语义角色 | SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“画布与标注文字” |
-| Dialog | 应用内对话框、焦点及关闭行为 | 用 `Window(role: dialog)` 表达，并非独立 Dialog 组件；SwiftUI、Compose、Web、GTK 与 WinUI 3 已实现，见“声明式多窗口” |
-| Video | 媒体源、受管理播放器、播放命令、状态与标准控件；`corner` 把画面裁成圆角 | 早期验证 macOS 原生媒体适配及 Web video 映射。HDR 视频在 macOS 实测；Windows 由媒体引擎输出，只在 SDR 显示器上实测；Linux、Web 与 iOS 未实测 |
+| WindowSet and Window | Window catalog, content, instance policy, native or virtual presentation and lifecycle | Basic component; macOS uses native windows, the Web uses the page host and in-app virtual windows |
+| SplitView and Sidebar | Sidebar and detail split view, sidebar groups and the selected item; a Sidebar can carry an `id` so external entry points can switch it; items can appear conditionally or from a list, and run fallback when the selected item disappears | Basic component |
+| SidebarFooter | Content fixed at the bottom of the sidebar, below the list, laid out top to bottom, such as a mini player or account and settings entry points; the list scrolls above it; at most one per sidebar | For media apps; implemented in SwiftUI (inset in the safe area); implemented in Compose and the Web (a section at the bottom of the sidebar), verified in a web browser; implemented in GTK and WinUI 3 (WinUI 3 uses `NavigationView.PaneFooter`), verified on the Linux VM and the Windows PC |
+| Navigation, Destination and NavLink | Push navigation and back, bound to typed routes; a Navigation can carry an `id` so external entry points can go back | Basic component |
+| Tabs and Tab | Tab switching between sibling pages; Tabs can carry an `id` so external entry points can switch it. `Tab(display: icon)` shows only the icon (`icon` is required); `label` is still the accessible name, and on desktop also the hover tooltip, for example a search page that is only a magnifying glass in a TV tab bar; the keywords are the same as for `Label(display:)` | Basic component. `display: icon` is the capability `icon_tabs`, generated by all six targets: tvOS and iOS tab items hold only the symbol image (`accessibilityLabel` is the label); on macOS 27 the tabs in the window toolbar are `Label` views that show only the icon; the classic tabs in a dialog form can only draw text, so the title is shown there (a tab holding only an image or an icon-style `Label` is blank, measured on macOS 27); toolbar tabs before macOS 27 were not measured and also show the title; Compose's `NavigationBarItem` carries no text, and the icon's `contentDescription` is the label; the Web's tab buttons hold only the icon, with `aria-label` and `title` set to the label; GTK hides the titles in the `AdwViewSwitcher` and bottom switcher bar buttons, and the label is the tooltip and accessible name (the switcher rebuilds its buttons when pages are added or removed, and they are hidden again afterwards); WinUI 3's `SelectorBarItem` sets only the icon, in system XAML the content of the switch button is the icon, and the label is the UI Automation name and tooltip. Viewed on the tvOS simulator, macOS 27, Chromium, the Ubuntu VM (Broadway), both frontends on the Windows PC and a real Android phone; screen reader announcements not measured |
+| TabAccessory | A strip that stays with the tabs and shows on every page, such as a mini player for what is playing; written directly in `Tabs`, at most one, collapsed with `shown:` rather than written inside an `if`. The strip is a background drawn by the system, and the icon buttons in it are symbols on the strip, no longer each with its own layer of glass | Capability `tab_accessory`. SwiftUI: from iOS 26.1 it is the tab view's `tabViewBottomAccessory` (the system glass strip above the tab bar, verified on the iPhone simulator with iOS 26.5); earlier iOS and macOS inset a material capsule in the safe area at the bottom of each page; Compose uses a raised surface above the navigation bar; GTK an Adwaita card that slides out below the page (`GtkRevealer`); WinUI 3 a card below the page; the Web a strip below the page. Compose, GTK, WinUI 3 and the Web not verified |
+| Toolbar | Window- or page-level action area; it can hold one `Search`, written directly in the toolbar, not inside a condition or repetition. Adjacent items form a group, and `Divider` splits them into several groups: group by function; the items of a group share one background on the platform (the same Liquid Glass capsule), with a fixed gap between groups; `Divider` can only be written directly between two items, and platform guidelines recommend no more than three groups | Basic component; the search field in the toolbar is implemented in SwiftUI. Grouping: SwiftUI generates `ToolbarItemGroup`, and from macOS 26 and iOS 26 inserts `ToolbarSpacer(.fixed)` between groups; icon buttons in a group are left to the toolbar to draw, and a menu grouped with other items shows no dropdown arrow (a menu with an arrow becomes a block of its own), verified on macOS. GTK and WinUI 3 draw a vertical line between groups, verified on the Linux VM and the Windows PC (the same for both WinUI 3 frontends); the Web also draws a vertical line, verified in a browser; Compose leaves 12dp between groups, verified on Android |
+| Column and Row | Single-axis arrangement, spacing, alignment, constraints; `width` and `height` set the size. When the children together are longer than it, they are laid out from the start and overflow past the end; a child declared wider (taller) than it keeps its own size and overflows according to the alignment (split evenly on both sides when centered); neither kind of overflow is clipped. A `Column` without `align` behaves as `leading`: children keep their own width and stand where `align` puts them; buttons, icon buttons, menus and popover buttons are not stretched, and inner `Column` and `Stack` containers are only as wide as their own content; to span the whole column write `Button(width: fill)`; horizontally filling content (text inputs, sliders, dividers, `Grid`, `Flow`, `List`, progress bars with a value, scroll views, a `Canvas` without a width, an image with only `aspect`, a row containing a `Spacer`, a `Stack` with a backing plate) and the columns and `Stack` containers holding it span the whole column; such content appearing later makes the outer container span along with it, and the outer container shrinks back after it leaves; when written directly in a window, see "One set of window declarations". When leading text in a row (a `Text` without a width, or a `Column` against the leading edge) is immediately followed by a `Spacer`, the text takes the `Spacer`'s place and wraps within the remaining width, and the controls after it keep their own width, like the label of a system list row | Basic component; the six targets lay out by the same rules; leading text taking the `Spacer`'s place is implemented by SwiftUI and Compose (`bern_ir::leads_row`) |
+| Grid | Equal-width columns, each no narrower than `min_width`, as many columns as fit, with children filled in row by row; `gap` defaults to 8. With `masonry` it is a masonry layout: items are laid out at their own height, each placed into the currently shortest column, suited to cards of varying height. A grid whose only child is a `ForEach` (not masonry) inside a vertical scroll view builds only the visible rows and one screen of rows before and after; rows scrolled out of range are released together with their controls and state, and rebuilt when scrolled back; rows not yet built hold their place at the height they had when built, or, if never measured, at the height of the first item built, so lists of thousands of rows open and scroll without stutter; outside a vertical scroll view all rows are built as usual. When `ScrollView(position:)` is set to a row not yet built, it first scrolls near it by the estimated position, builds it there, and then stops on it | Implemented; `masonry` is implemented by SwiftUI and Compose (custom layout) and the Web (one-pixel-high grid rows), while GTK and WinUI 3 lay it out as an ordinary grid. Building only visible rows: SwiftUI is `LazyVGrid` already; Compose is a `SubcomposeLayout` (`BernLazyGrid`), with the scroll view providing the visible part (`LocalBernViewport`); WinUI 3 is a custom panel (`LazyGridPanel`) that builds rows outside layout on `EffectiveViewportChanged`; GTK is a custom widget (`lazy.rs`) that builds rows when idle, following the scroll view's `vadjustment`; the Web and GPUI put a spacer above and below and build only the rows in between, from the part visible in the previous frame (Web `B.LazyGrid`, GPUI `lazy_grid`). The five-thousand-row list and six hundred cards of `examples/catalog` were verified on all six targets: only about twenty rows are built, and scrolling to the middle, to the end and "Go to row 4000" build the corresponding rows; on the Windows PC, opening an app's list of 1327 local songs went from about 5 seconds to 0.1–0.3 seconds |
+| Stack | Layering: a layer written later is on top and receives input first; the whole is as large as the largest layer (or as `width` and `height` when written), and smaller layers align to one of the nine positions of `align`, centered by default | Implemented |
+| Accordion | Horizontal accordion; `count` is the number of columns, `selected` is the zero-based expanded column, the other columns are `collapsed_width` wide, and the expanded column fills the remaining width; `gap` and `height` define the spacing and height, and `corner` defines each column's clipping corner radius. `animate` changes the column widths frame by frame, positions accumulate from the current column widths, and content is clipped to each column; with Reduce Motion it switches directly | Implemented by the six targets (`accordion_layout`) |
+| ScaleBox / Positioned | A fixed logical canvas scaled proportionally to fit its parent container; layers declare position, size and state animations in logical coordinates | Implemented by the six targets (`scaled_scene`); see [player layout](Reference/UI.md#coordinate-scenes-and-scrolling-content) |
+| Marquee | Horizontally looping content timed on the rendering side, supporting pause, phase, opacity and Reduce Motion | Implemented by the six targets (`scaled_scene`); no per-frame business callbacks |
+| ControlGroup | Puts controls into a shared capsule by function, keeping each one's own hit area, menu and action | Implemented by the six targets (`capsule_controls`); see [control containers](Reference/UI.md#control-containers-and-sizes) |
+| SidebarHeader | Content fixed at the top of the sidebar, above the list; `role: title` means it only names the window (app icon and name), and it is not shown on Windows and Linux, where the title bar already shows the app name | Implemented by the six targets (`sidebar_header`) |
+| WindowButtons | In content that extends under the title bar, the space the window's own buttons take at the leading edge: on macOS the traffic lights; other targets have no buttons there, so it takes no space and leaves no gap | Generated by the six targets; SwiftUI takes 84 points on macOS |
+| Svg | Presents bundled animated and interactive SVG documents on demand | See [dedicated interface and dependencies](Implementation/Animated-SVG.md) |
+| Form and Section | Grouped forms, row labels, section headers and descriptions; a Form can declare the title of the page it is on. `Section(style: plain)` is a header that scrolls with the form; its rows sit directly on the page and do not take the row insets the Form gives sections, only their own; a form that begins with it starts at the top of the page; this header can also come from a slot, a component or a condition, and each target looks at the first item during layout and follows it when the condition changes | Basic component; the six targets implement it by the same rules |
+| Label | Icon and title combined; `display: icon` shows only the icon and keeps `title` as the accessible name; the icon's font size is still determined by `style` | `display: icon` implemented by the six targets (`icon_labels`) |
+| Spacer and Divider | Flexible space and divider lines | Basic component |
+| Text | Localized or dynamic text, text hierarchy, wrapping and truncation; `color` draws the text in the accent color or a status color (mutually exclusive with `emphasis`); `mark` adds annotation shading; `markdown` treats the content as inline Markdown (emphasis, code, strikethrough and links) shown in the platform style; `style: code` is the platform's monospaced font | Basic component; for `mark` see "Canvas and annotation text"; `markdown` is implemented by SwiftUI, Compose, the Web and GTK, WinUI 3 strips the markup and shows only the text, and a whole document is split into blocks by the app and shown block by block; for `code` all five backends use their own platform's monospaced font, see the [property table](Reference/Component-Properties.md); `color` is implemented by six backends: SwiftUI's `foregroundStyle` (the system green, orange, red and accent color), libadwaita's `accent`/`success`/`warning`/`error` text classes, WinUI 3's theme brushes, the Compose palette and the Web's theme variables |
+| Button | Accessible name, semantic role, emphasis level, enabled state and activation event; it can carry one child as the content it shows, see "Buttons with content and reveal on hover". `pick: draft.file` makes a press first bring up the system Open panel; after one file is chosen it is stored in this session field (`MediaSource` or `Option<MediaSource>`) and then the action runs, and canceling does nothing; `files` lists the accepted kinds: `any` (default), `video`, `audio`, `picture`, `folder` and extensions such as `.ass`, separated by spaces or commas. `IconButton` and `MenuItem` can be written the same way | Basic component; for content, see that section's implementation progress. `pick` is implemented in SwiftUI (`file_pick`): on macOS it is an Open panel attached to the window, with files that are not accepted grayed out, verified; on iOS it is the document picker, and the chosen file is opened in place and stays readable, verified on the iOS 26.5 simulator. Compose uses the system document picker (`OpenDocument`), filtering by kind and keeping the read grant; verified on the Android emulator that only videos or only images are listed and that the chosen one plays or is shown. Besides the system movie types, `video` also accepts containers such as mkv, webm, flv and rmvb that the system may not recognize. The Web uses the browser's file chooser (`<input type=file>`), filtering by kind, and the chosen file is passed to the action as a page `blob:` URL; the system chooser cannot be operated by automation, so this is not measured, and the action was verified with `ui.set_file`. GTK uses `GtkFileDialog`, filtering by kind; the VM has no desktop portal, so choosing is not measured; WinUI 3 uses `FileOpenPicker` and `FolderPicker`, verified on the Windows PC that Ctrl+O brings up the Open panel |
+| IconButton | Icon activation, hit area and accessible name | Basic component; native targets use the platform's icon button style by default |
+| FocusRegion | Editing region: it wraps a piece of content; while a text input inside it is being edited, the first press outside the region only ends editing (no submit, no clearing), and that press is not passed on to other controls; controls inside the region and later presses work as usual | Generated by the six targets |
+| TextInput | Text editing, input methods and the submit event; in a row it takes the remaining width of the row and gives way when the row is narrow, and in a column it spans the whole column; with `label_hidden: true` the label serves only as the accessible name and is not shown; `submit: clear` clears the draft and gives up keyboard focus after submitting and running the action (like an input for sending danmaku or messages), and a send button next to it writes `clears: draft.x` to do the same | Basic component; `submit: clear` and the button's `clears` (2026-10-21): the six targets append clearing the draft after the generated action, and SwiftUI and the Web also give up focus; clearing measured on macOS in a text input of a real app |
+| Search | Search text editing and submission; its children are the results shown below the search field while it is in use, such as a result list driven by a `Query`, and buttons in the results open or run directly | Basic component; results are implemented in SwiftUI: on macOS as `searchSuggestions`; on iOS, when there are results they are listed by a system list where the page is, and when there are none it is shown centered, verified on the iOS 26.5 simulator; on the Web the results are a popover below the search field, shown when it has focus and text and dismissed after a result is chosen, verified in a browser; GTK and WinUI 3 (`Flyout`, not the suggestion list of `AutoSuggestBox`) likewise use a popover below the search field, verified on the Linux VM and the Windows PC that Ctrl+K focuses it and typing lists the matching items (on GTK, clicking "Tartan" opens it and dismisses the results) |
+| Switch | Boolean state and change event; `style: button` is a button that stays pressed while on, can carry an `icon` and can also be placed in a `Toolbar`; `login_item: true` is the system login item (see "Status bar items") | Basic component; the button style is implemented by the six targets (`toggle_button`); `login_item` is implemented by the three desktop targets and is not shown on other targets (`login_switch`) |
+| SplitButton | Split toggle button: one side is a toggle, and the other shows its children in a popover, such as common settings for the feature it turns on; as with `Switch`, the toggle takes one of two forms: `value:` binds a `bool` draft, or `checked:` shows engine state and runs an action when toggled (`checked: app.show_danmaku => app.set_show_danmaku(app.show_danmaku)`, where this expression in the action arguments is the new value); `more_label` is the accessible name of the second part; external entry points toggle it with `set_bool` and open the popover with `activate` | For media apps; implemented in SwiftUI (`ControlGroup` and a popover), verified on macOS: the toggle, the popover and the controls in it, with the popover following `appearance`; on iPhone the system would otherwise turn the popover into a full-page sheet with its background resolved as light; it now stays a popover and is drawn in the appearance of the area it is in, verified on the iOS 26.5 simulator; on the Web it is a toggle button plus an arrow button that pops up the popover, verified in a browser: the popover and the slider in it, with the popover following `appearance`; GTK and WinUI 3 (`ToggleSplitButton`) are implemented, verified on the Linux VM and the Windows PC: the toggle and the popover, with the popover following `appearance`. `checked:` and actions (2026-10-21): the generators of all six targets switched to the controlled form of `Switch`, and the GTK and WinUI 3 runtimes now take a `Model`; compiler tests, each backend's generation tests (the gallery's "Caption" changed to engine state), the GTK runtime type-checked on macOS, SwiftUI measured on macOS in a real app; GTK and WinUI 3 not yet run on real machines |
+| Inspector | Side panel: when `presented` is true it is shown at the trailing side of the container it is in, and the rest of the container's content makes room; written directly in the container, not inside a condition or repetition, at most one per container | For media apps; implemented in SwiftUI (`.inspector`); on the Web it is a panel that slides in at the trailing end of the detail column and pushes the content aside, and a bottom sheet in narrow windows; verified in a browser: pushing aside and closing in a wide window; GTK (`AdwOverlaySplitView`) and WinUI 3 (a `SplitView` with the pane on the right) are implemented, verified on the Linux VM and the Windows PC that the detail panel pushes the poster wall aside |
+| Drop | Drop zone: its content accepts files dragged onto it, with `files` as for `pick`; while an acceptable file is held over it, the session field bound to `over` is true, and other files are rejected and trigger nothing; on release the file is stored in `value` and then the action runs. Accepts only one file. `opens: true` makes it also receive files the system hands to the app: "Open With" in Finder, dragging onto the Dock icon, "Open in…" on iOS; the app registers as an optional handler for these kinds (without taking over the default), and when no such drop zone is on screen the main window comes back and the file waits for it to appear | For media apps; implemented in SwiftUI: verified on macOS that dragging a video in from Finder makes `over` true and releasing plays it, and that dragging in a txt is rejected; for `opens: true`, verified on macOS that the system lists the app under Open With for mp4 and mkv (not for txt or png), that opening a file with it, both while running and while not running, hands the file to the drop zone and starts playback, and that when the drop zone is not on screen the file waits until it appears; "Open in…" verified on the iOS 26.5 simulator, dragging in from Files not verified. Implemented in Compose (`dragAndDropTarget`; `opens: true` registers `VIEW` and `SEND` intents in the manifest), verified on the Android emulator: in split screen, long-pressing a video in Files and dragging it in makes `over` true while passing over and plays it on release; videos handed over by other apps with a `VIEW` intent are passed to the drop zone and played. Implemented on the Web: `over` becomes true while an acceptable file passes over, and on release the file is passed to the action as a page `blob:` URL; in a browser, a drag was simulated with a real video file constructed in the page: the outline appears and the frame wiggles, on release it plays and the outline fades out; `opens: true` receives files only through the browser's `launchQueue` after the page is installed as an app, not verified. GTK (`GtkDropTarget`; `opens: true` registers `MimeType` and `%U` in the desktop file) and WinUI 3 (`StorageItems` drag and drop, no file association registered) are implemented; neither real drag and drop nor files handed over by the system are verified (Broadway does not support dragging files in from the system), and the action was verified with `ui.set_file` |
+| PopoverButton | Popover button: pressing it pops up a popover holding arbitrary content (sliders, toggles, text), such as a volume button; `label` is the accessible name, and with an `icon` only the icon is shown; `prominence: plain` draws no background and `font_size` sets the icon size, like an `IconButton(prominence: plain)` beside it (on iOS and macOS 26 it is no longer a separate glass circle, and on Linux the border is removed); `presented` can bind a session `bool` field; alternatively `open: app.panel => app.set_panel(app.panel)` follows engine state, with the same expression in the action replaced by the new open value, and closing by clicking outside or with Escape also submits `false`; the two forms are mutually exclusive; external entry points open it with `ui.activate`; the controls in the content mount with the popover | For media apps; implemented on the Web (a popup layer), verified in a browser with the volume popover on the Frame page: when closed there is only the button, the slider in it appears in `ui.inspect` only after `ui.activate` opens it, and it unmounts after closing; implemented on macOS and iOS (system popover, which stays a bubble on iPhone rather than a bottom sheet), verified the same way on macOS and the iPhone 17 Pro simulator; implemented in Compose (a Material `DropdownMenu` popup; a tonal button when it has only text), verified on the Android emulator that the slider is likewise mounted only while open, with both directions of `presented` and `shortcut` verified in a temporary app; GTK and WinUI 3 (`Flyout`) are implemented, verified on the Linux VM that the slider appears in `ui.inspect` after `ui.activate` opens it, and on the Windows PC that it mounts on opening and unmounts after closing; on GPUI, with an `icon` only the icon is shown (36 points square; previously the label text followed the icon), `prominence: plain` uses the icon button's backgroundless colors, and `font_size` sets the icon size (2026-11-01, a playlist button compiled and run on GPUI) |
+| Toast | Brief notification: appears when it is shown or its `key` (the content when not written) changes, and hides itself after `duration` seconds (default 3); shown wherever it is placed, usually layered at the bottom of the page | For media apps; implemented in SwiftUI; on the Web it pops up centered at the bottom of the window and sinks and fades out on time, verified in a browser; GTK (`AdwToast`) and WinUI 3 (a capsule with `ThemeShadow`) are implemented, verified on the Linux VM and the Windows PC with the toast after adding a favorite |
+| Slider | Range value, continuous change and commit event | Basic component |
+| Picker | Single choice from a finite set of options, presented according to context as a menu, segmented control, radio list or a row of tags (`style: chips`, each option a system toggle button or chip; when placed directly in a `Flow` without a label, each one is a child of the Flow) | Basic component; `chips` is implemented by all six targets (2026-10-20). The menu does not take the app's accent color: on macOS it is the system's own pop-up button, with the value and arrow in the text color; in an iOS form row the value is in the secondary text color; capsule menu pickers (`shape: capsule`) and capsule `Menu`s take the text color as their tint on SwiftUI (macOS's borderless pull-down button would otherwise draw the label in the accent color), and Compose's capsules use `surfaceContainerHighest` and `onSurface` |
+| ScrollView, List and ForEach | Scroll container, list with identity, and keyed repetition in any container; for `ScrollView`'s `snap` and `position` see "Linked effects". A keyed `ForEach` in a `Column` inside a vertical scroll view likewise builds only the visible rows and one screen before and after, without being rewritten as a grid: before generating, every target replaces it with a one-column lazy grid (`bern_ir::lower_lists`, after `style!` lengths are resolved for each platform); rows take their place by this column's `align`, the spacing is this column's `gap` (when not written, the platform's default column spacing: the system spacing on SwiftUI, 8 on Compose, GTK and WinUI 3, 0 on the Web and GPUI), no rows take neither space nor spacing, and this column's `stagger` applies to the rows as usual; when a row consists of several parts (for example a row of content and the divider below it), the parts go into a column arranged by this column's `align` and `gap`, still laid out one above the other, so every target's cell holds only one row (previously Compose and WinUI 3 stacked the parts at the same place in the cell, drawing the divider on top of the row); a `ForEach` in a conditional branch is the same, and a component counts only when every place that uses it is inside a vertical scroll view. Columns with `reflow` and columns outside vertical scroll views are built in full as usual | Basic component; lazy lists (2026-11-01): SwiftUI generates this column as a `LazyVStack`; Compose, the Web, GTK, WinUI 3 and GPUI use Grid's lazy grid, placing each row by the column's alignment (Compose widens the width and places by `Alignment.Horizontal`; the Web uses `justify-items`, so rows that fill still fill; GTK and WinUI 3 row containers align children the way the column does, and the lazy list reports the widest row built so far as the width it wants, so that it is not squeezed to zero inside a scroll view sized by its content; GPUI's cells use `items_start` and so on, with the list filling or not as its rows need). With the five-thousand-row list and the sixty-line lyrics-style list of `examples/catalog` both written as `Column { ForEach }`, verified in Chromium, GPUI (macOS offscreen), macOS SwiftUI, the Android emulator (Compose) and the Linux VM (GTK, Broadway): only 14–28 rows are built at first, "Go to row 4000" stops at row 4000, and the lyrics-style list's current line is still at 0.35; WinUI 3 only passed the generation checks and was not compiled or run on Windows; `snap` and `position` are implemented by SwiftUI, Compose, the Web, GTK and WinUI 3, see "Linked effects"; on iOS horizontal scroll views do not clip content and shadows (`.scrollClipDisabled()`) |
+| PreviewList | Bounded vertical preview: lays out only the rows that fit completely and collapses the items that do not fit into a +N marker; `item_height` is the height of each row and `more_height` the height of the marker; does not scroll | Generated by the six targets |
+| Pinch and Swipe | Bind a two-finger pinch or a drag to a session number, see "Linked effects" | For media apps; implemented by SwiftUI, Compose, the Web, GTK and WinUI 3, see "Linked effects" |
+| Image | A bundled PNG or JPEG resource, or a `MediaSource` in engine state (a local file or an http(s) address, read at runtime; it can be an `Option`, and nothing is shown when it is empty); at least one of `width`, `height` and `aspect` must be written; with only the width or the height, the other side follows the image's proportions, and with only aspect it keeps that ratio at the parent container's width; with none of the three and `fit: cover` it fills the space the parent container gives, cropping what is beyond, for laying a background image as a layer in a `Stack` that never shows its edges however the window's proportions change; `fit` is `contain` (default), `cover` or `fill`; `label` is the alternative text, and without it the image is decorative; photos are turned upright according to their EXIF orientation. After a `MediaSource` changes to another address, nothing is shown until the new image has been read, rather than standing in with the previous one: the layer below it (for example a loading animation) shows through meanwhile (2026-11-02; previously SwiftUI, the Web and GTK kept showing the previous image until the new one was read). HDR images (PQ or HLG PNGs, JPEGs with a gain map) are shown in high dynamic range when the display can show HDR, with SDR white kept at the system's SDR brightness and highlights tone-mapped to the display's peak; when HDR cannot be shown, JPEGs with a gain map show the SDR image the author provided, and PQ and HLG are tone-mapped | Implemented; `MediaSource` images are implemented by SwiftUI, Compose, the Web, GTK and WinUI 3 (`runtime_images`), shown in SDR only; filling the parent container without sizes (`cover_images`) is implemented by SwiftUI, Compose, WinUI 3 and GTK, and on the Web and GPUI the capability check reports an error; http(s) images on WinUI 3 not verified. HDR measured on macOS and the Web (Chrome); on Windows it is self-drawn, measured only on an SDR display; HDR output on Linux needs GTK 4.16 or later with GTK's color management turned on by the user, not measured; the iOS simulator shows the SDR version, real device not measured |
+| Progress | With `value` it is a progress bar, with progress `value / total` (`total` defaults to 1, and values out of range are shown at the bounds); without `value` it is indeterminate progress; `label` is also the accessible name | Implemented |
+| Menu and MenuItem | A menu holding action entries; each menu item binds a command and can bind a feature | Implemented |
+| Adaptive and Layout | Chooses among four layout tiers, `compact`, `medium`, `expanded` and `large`, by available width, keeping state | Implemented |
+| LanguagePicker | Switches the UI language at runtime; with `label_hidden: true` the label serves only as the accessible name, for settings rows that lay out their own name | Implemented; `label_hidden` (2026-11-01): SwiftUI `labelsHidden()`, Compose shows no label, GTK uses a dropdown without a title in lists, WinUI 3 adds no header, the Web wraps no label, and GPUI shows no label before the menu; measured on an iPhone simulator, an Android emulator and macOS |
+| ContextMenu | A button's context menu: written inside a `Button`, holding `MenuItem` and `Divider`, and not part of what the button shows; it opens on right-click (and the Menu key, Shift+F10) on desktops and on long press on touch screens, and the press that opens it does not also press the button. Menu items are registered like other controls, so external entry points can `ui.activate` them while the menu is closed. Menu items in a button are exempt from the rule that buttons cannot contain controls; when the two branches of an `if` in the same component each have a button with a menu, the two branches need different ids | Implemented 2026-11-01: SwiftUI is `.contextMenu` (on iOS the system's long-press menu with preview, on macOS a right-click menu), verified by long-pressing a song row on an iPhone 17 Pro simulator; Compose is a `Box` wrapping the button that sees presses before its children (`PointerEventPass.Initial`), opening a `DropdownMenu` on right-click or press-and-hold and swallowing the rest of the press, verified on an Android 16 emulator by long-pressing a song row: the menu appeared and the song did not play; WinUI 3 sets the button's `ContextFlyout`; GTK adds a `PopoverMenu` for right-click and a touch-only long-press gesture (shared with table row menus); the Web uses the `contextmenu` event and a 500-millisecond touch long press; GPUI wraps the button in a layer, and a right click (GPUI treats Control-click as a right click on macOS) opens the same panel as `Menu` at the pointer, closing on a press outside the panel. On macOS "Play Next" and "Add to Queue" were verified through `ui.activate`; on GPUI, "Delete" on each row of `examples/catalog` was verified through `ui.activate` to delete that row (2026-11-01), while the right click itself was not measured (synthetic mouse events do not reach GPUI's window); WinUI 3, GTK and the Web were only compiled or type-checked, not measured |
+| Rail | Proportional placement: along `axis`, places children at the `at` fraction, or spreads them between `from` and `to`; the fractions can bind state, see "Proportional placement" | For media apps; see that section for implementation progress |
+| Canvas | Non-interactive drawing area: shapes, number series from state and tiled patterns, with colors only from semantic roles | Implemented by SwiftUI, Compose, the Web, GTK and WinUI 3, see "Canvas and annotation text" |
+| Dialog | In-app dialogs, focus and dismissal behavior | Expressed with `Window(role: dialog)`, not as a separate Dialog component; implemented by SwiftUI, Compose, the Web, GTK and WinUI 3, see "Declarative multi-window" |
+| Video | Media source, managed player, playback commands, state and standard controls; `corner` clips the picture to rounded corners | Early verification of the native media adaptation on macOS and of the Web video mapping. HDR video measured on macOS; on Windows output by the media engine, measured only on an SDR display; Linux, the Web and iOS not measured |
 
-组件规范必须写清默认行为，避免由首个后端反向定义标准：
+Component specifications must spell out default behavior, so that the first backend does not end up defining the standard in reverse:
 
-- 尺寸使用逻辑单位，后端负责缩放换算；布局区分固定、内容适配和可用空间分配。
-- 明确最小和最大尺寸、溢出、滚动、对齐、换行与遮挡语义。
-- 文本编辑必须覆盖输入法组合过程、选择、提交和撤销边界，不能仅用字符串替换模拟所有编辑行为。
-- 可交互组件必须具备语义角色、可访问名称、禁用状态和基本键盘操作。
-- 颜色通过语义角色与控件主题配方表达；字体、间距等样式使用平台无关属性，不把 CSS 属性当作 IR 的标准属性。
-- 每个控件必须声明适用的交互状态、颜色角色与前景背景关系，深浅色适配不能留给应用逐个补齐。
-- 平台专用扩展必须声明适用后端、能力要求及其他后端的处理方式。
+- Sizes use logical units, and backends handle the scale conversion; layout distinguishes fixed sizes, fitting the content and allocating available space.
+- Specify minimum and maximum sizes and the semantics of overflow, scrolling, alignment, wrapping and occlusion.
+- Text editing must cover input method composition, selection, submission and undo boundaries; string replacement alone cannot be used to simulate all editing behavior.
+- Interactive components must have a semantic role, an accessible name, a disabled state and basic keyboard operation.
+- Colors are expressed through semantic roles and control theme recipes; fonts, spacing and other styles use platform-independent properties, and CSS properties are not treated as standard IR properties.
+- Each control must declare its applicable interaction states, color roles and foreground–background relationships; light and dark mode adaptation cannot be left for apps to fill in one by one.
+- Platform-specific extensions must declare the backends they apply to, their capability requirements and how other backends handle them.
 
-TV 的方向键焦点、触摸手势和鼠标悬停作为独立交互能力规划，不假设同一布局天然适合所有输入方式。
+D-pad focus on TV, touch gestures and mouse hover are planned as separate interaction capabilities, without assuming that one layout naturally suits every input method.
 
-## 自动深浅色与主题算法
+## Automatic light and dark mode and the theme algorithm
 
-### 原生优先，算法兜底
+### Native first, algorithm as fallback
 
-颜色来源由目标能力决定。目标在能力描述中声明自己属于哪种情况，应用代码不随之改变：
+The source of colors is determined by the target's capabilities. A target declares in its capability description which case it belongs to, and app code does not change with it:
 
-| 目标情况 | 颜色来源 | 示例 |
+| Target case | Color source | Examples |
 | --- | --- | --- |
-| UI 框架具备完整的深浅色、语义颜色与标准控件样式 | 框架自身的系统颜色、材质与标准控件样式；默认不覆盖系统托管表面，应用声明的样式覆盖除外 | SwiftUI、AppKit、WinUI 3、Compose、Flutter，以及已验证桌面主题下的 GTK |
-| UI 框架缺少统一的深浅色体系或样式规范 | Bern 主题内核生成的语义颜色与控件配方 | Web、GPUI |
-| 任意目标上由 Bern 自行绘制的控件或表面 | Bern 主题内核，并与相邻的系统表面协调 | 自绘图形、媒体覆盖层 |
+| The UI framework has complete light and dark mode, semantic colors and standard control styles | The framework's own system colors, materials and standard control styles; system-managed surfaces are not overridden by default, except for style overrides the app declares | SwiftUI, AppKit, WinUI 3, Compose, Flutter, and GTK under verified desktop themes |
+| The UI framework lacks a unified light and dark system or style guidelines | Semantic colors and control recipes generated by the Bern theme core | Web, GPUI |
+| Controls or surfaces Bern draws itself, on any target | The Bern theme core, coordinated with the adjacent system surfaces | Self-drawn graphics, media overlays |
 
-应用声明品牌色时，原生目标将其映射为平台强调色接口，例如 SwiftUI 的 tint 或 AccentColor、WinUI 3 的强调色资源；未声明时使用用户在系统中选择的强调色。算法目标以品牌种子生成配色。两种情况下，应用都不编写深浅色分支。
+When an app declares a brand color, native targets map it to the platform's accent color interface, such as SwiftUI's tint or AccentColor and WinUI 3's accent color resources; when none is declared, the accent color the user chose in the system is used. Algorithmic targets generate the palette from the brand seed. In both cases, the app writes no light/dark branches.
 
-### 零配置的控件契约
+### Zero-configuration control contract
 
-应用直接使用标准组件即可获得完整主题适配，不需要传入 `is_dark`、手写 `light_color` 和 `dark_color`，也不需要在每个组件中读取系统外观。未提供主题配置时，原生目标使用系统配色与系统强调色，算法目标使用 Bern 内置品牌种子和中性色，均默认跟随系统。
+Apps get complete theme adaptation just by using standard components, without passing `is_dark`, hand-writing `light_color` and `dark_color`, or reading the system appearance in every component. When no theme configuration is provided, native targets use the system palette and the system accent color, and algorithmic targets use Bern's built-in brand seed and neutral colors; both follow the system by default.
 
-主题模式为 `system`、`light` 和 `dark`。显式应用或窗口设置决定使用哪个模式；`system` 由目标适配器读取所属窗口的系统环境。无法检测时统一采用浅色，检测恢复后正常更新。提高对比度、强制系统颜色和减少动态效果属于独立环境偏好，不能只压缩成一个深色布尔值。
+The theme modes are `system`, `light` and `dark`. Explicit app or window settings decide which mode is used; for `system`, the target adapter reads the system environment of the window it belongs to. When detection is not possible, light is used uniformly, and updates resume normally once detection recovers. Increased contrast, forced system colors and Reduce Motion are separate environment preferences and cannot be compressed into a single dark-mode boolean.
 
-应用可以只提供一个品牌色：原生目标将其映射为平台强调色，算法目标由 Bern 自动生成各模式与状态所需颜色。自定义品牌是可选项；普通应用无需知道调色算法和后端样式细节。用户可主动选择外观模式，但无需参与逐控件调色。
+An app can provide a single brand color: native targets map it to the platform accent color, and on algorithmic targets Bern automatically generates the colors each mode and state needs. A custom brand is optional; ordinary apps need not know the color algorithm or the details of backend styles. Users can actively choose an appearance mode but need not take part in coloring individual controls.
 
-`brand_seed` 在 SwiftUI 与 Compose 上与 `style!` 的 `accents` 里只写一个颜色时相同：浅色、深色各取 `bern_theme::native_accent` 调到可读的颜色（`bern_target_api::style::brand_accent`），作为系统控件的着色并替换 `accent` 角色；GTK 与 WinUI 3 把它交给系统的强调色资源，Web 用它做 Bern 配色的种子。`WindowSet(accent:)` 在运行时选强调色时，选中的那个优先。
+On SwiftUI and Compose, `brand_seed` is the same as writing a single color in the `accents` of `style!`: light and dark each take the color as adjusted for readability by `bern_theme::native_accent` (`bern_target_api::style::brand_accent`), which tints the system controls and replaces the `accent` role; GTK and WinUI 3 hand it to the system accent color resources, and the Web uses it as the seed of the Bern palette. When `WindowSet(accent:)` chooses an accent color at runtime, the chosen one takes precedence.
 
 ```toml
-# 整段均可省略，默认跟随系统；原生目标使用系统配色，算法目标使用 Bern 内置配色。
+# The whole section can be omitted and follows the system by default; native targets use the system palette, algorithmic targets use Bern's built-in palette.
 [theme]
 mode = "system"
-# brand_seed = "#6750A4"  # 可选，仅为一个品牌输入示例。
+# brand_seed = "#6750A4"  # Optional; only an example of a brand input.
 ```
 
-### 共享主题内核与控件配方
+### Shared theme core and control recipes
 
-本节至“主题快照与运行时切换”描述的主题内核、语义颜色和控件配方，适用于上表的后两种情况；原生目标的标准控件不经过 Bern 配方求解。
+The theme core, semantic colors and control recipes described from this section through "Theme snapshot and runtime switching" apply to the last two cases in the table above; the standard controls of native targets are not resolved through Bern recipes.
 
-主题能力由独立的 `bern-theme` 模块承担，包含确定性的配色算法、语义颜色 schema、控件配方求解与对比检查。纯计算部分不访问平台 API；平台适配器只负责提供环境、输出目标颜色与应用快照。
+Theme capability is provided by a separate `bern-theme` module, which contains the deterministic palette algorithm, the semantic color schema, control recipe resolution and contrast checks. The purely computational part does not access platform APIs; platform adapters only supply the environment, output target colors and apply snapshots.
 
-一套共享算法生成调色结果，每类控件具有自己的状态配方。配方描述角色和规则，不是两套手工颜色表。所有内置控件都必须具备配方，组合控件默认继承子控件能力，新增控件也遵循同一扩展协议。
+One shared algorithm generates the palette, and each kind of control has its own state recipe. A recipe describes roles and rules, not two hand-made color tables. Every built-in control must have a recipe; composite controls inherit the capabilities of their child controls by default, and new controls follow the same extension protocol.
 
 ```text
 ThemeSnapshot = generate(seed, resolved_mode, contrast_policy, algorithm_version)
 ControlStyle  = resolve(recipe, ThemeSnapshot, surface_context, interaction_state)
 ```
 
-状态求解可以预生成受支持组合，目标运行时只需按状态选取；依赖实际背景的部分由本地主题内核求解。不得让 Web、Flutter、SwiftUI 各自复制并修改一套颜色算法。
+State resolution can pre-generate the supported combinations, so the target runtime only selects by state; the parts that depend on the actual background are resolved by the local theme core. The Web, Flutter and SwiftUI must not each copy and modify their own version of the color algorithm.
 
-### 语义颜色与表面关系
+### Semantic colors and surface relationships
 
-组件引用有意义的颜色角色，由算法决定最终值：
+Components reference meaningful color roles, and the algorithm decides the final values:
 
-| 角色组 | 用途 |
+| Role group | Use |
 | --- | --- |
-| surface.canvas、surface.panel、surface.raised | 页面、内容区域与浮层的层级 |
-| text.primary、text.secondary、text.placeholder | 正文、次要说明及可读的输入提示 |
-| icon.primary、icon.secondary | 操作图标与辅助图标 |
-| accent、on_accent | 强调背景及其上文字和图标的配对 |
-| status.success、status.warning、status.error | 业务状态及对应的背景和前景配对 |
-| control.border、control.track、control.thumb | 必要控件边界、滑轨与滑块 |
-| focus.indicator、selection.background、selection.foreground | 焦点与选中反馈 |
-| fill.subtle、fill.strong | 不带强调的中性底色，例如悬停与按下时的底色；原生目标映射到系统的填充色 |
-| disabled.foreground、disabled.surface | 禁用状态专用颜色 |
+| surface.canvas, surface.panel, surface.raised | The layering of pages, content areas and overlays |
+| text.primary, text.secondary, text.placeholder | Body text, secondary descriptions and readable input placeholders |
+| icon.primary, icon.secondary | Action icons and auxiliary icons |
+| accent, on_accent | Accent backgrounds paired with the text and icons on them |
+| status.success, status.warning, status.error | Business states and the corresponding background and foreground pairs |
+| control.border, control.track, control.thumb | Necessary control borders, slider tracks and thumbs |
+| focus.indicator, selection.background, selection.foreground | Focus and selection feedback |
+| fill.subtle, fill.strong | Neutral fills without emphasis, such as the fills for hover and pressed; native targets map them to the system fill colors |
+| disabled.foreground, disabled.surface | Colors dedicated to the disabled state |
 
-颜色角色必须声明使用关系。例如 `on_accent` 只保证与其声明的强调表面配对，不能认为它适用于所有背景。表面上下文由布局和主题作用域传递，包括背景角色、透明度及已知叠层。
+Color roles must declare their usage relationships. For example, `on_accent` is only guaranteed to pair with the accent surface it is declared for and cannot be assumed to suit every background. Surface context is passed through layout and theme scopes, including the background role, opacity and known layers.
 
-错误、警告、选中等信息不能只靠颜色区分，应保留文字、图标、形状或可访问状态。主题算法只负责颜色部分，不替代组件的语义设计。
+Errors, warnings, selection and similar information cannot be distinguished by color alone; text, icons, shapes or accessible state must be kept. The theme algorithm only handles the color part and does not replace the semantic design of components.
 
-### Bern 色彩算法的参考流程
+### Reference flow of the Bern color algorithm
 
-算法暂称 Bern Theme Algorithm v1。以下是必须实现的求解流程；具体色阶参数、色度上限与搜索精度需通过原型和视觉评估确定，不在草案中声称已经获得最佳参数。
+The algorithm is provisionally called Bern Theme Algorithm v1. Below is the resolution flow that must be implemented; the concrete tonal-scale parameters, chroma limits and search precision are to be settled through prototypes and visual evaluation, and this draft does not claim to have found the best parameters.
 
-1. **规范输入。** 读取内置或应用提供的品牌种子、解析后的模式与对比策略。中性色和状态色使用框架默认种子，目标平台不能擅自换成另一套品牌调色算法。
-2. **生成候选色。** 将种子转换到 OKLCH，在可感知的明度、色度和色相空间中推导表面层级、文字与语义色。浅色与深色分别分配色阶，深色模式不使用 RGB 反色或单纯明度取反。
-3. **映射可用色域。** 首版统一输出明确编码的 sRGB 颜色。候选色超出色域时优先降低色度，尽量保留色相；映射后重新计算实际显示参数，不假定 OKLCH 明度等于最终可读性。
-4. **解算前景背景配对。** 根据控件配方和表面上下文，取得实际用于显示的颜色。对受支持的透明叠层，按目标声明的混合规则先合成，再检查最终 sRGB 颜色的相对亮度。首版优先使用不透明的关键文字与稳定背景，减少无法推断的组合。
-5. **校正对比。** 在受支持范围内搜索前景或背景的明度与色度，优先满足阅读和操作辨识要求，再尽量接近品牌种子。每次色域映射或状态调整后重新检查；无法满足时使用已验证的中性前景背景配对，并输出可诊断的回退信息。
-6. **展开状态。** 根据各控件配方生成悬停、按下、焦点、选中、禁用和错误等适用状态及组合，对需要辨识的元素继续检查。不能用统一降低透明度代替禁用状态设计。
-7. **输出确定结果。** 固定输入与算法版本应生成相同 token 和配方结果。输出主题快照、颜色编码及受控配对的校验信息，供各后端消费和测试。
+1. **Normalize the inputs.** Read the built-in or app-supplied brand seed, the resolved mode and the contrast policy. Neutral and status colors use the framework's default seeds; a target platform cannot swap in a different brand palette algorithm of its own.
+2. **Generate candidate colors.** Convert the seed to OKLCH and derive surface layers, text and semantic colors in the perceptual lightness, chroma and hue space. Light and dark are assigned tonal scales separately; dark mode does not use RGB inversion or simple lightness inversion.
+3. **Map to the usable gamut.** The first version outputs explicitly encoded sRGB colors throughout. When a candidate is out of gamut, chroma is reduced first and hue is kept as far as possible; after mapping, the actual display parameters are recomputed, without assuming that OKLCH lightness equals final readability.
+4. **Resolve foreground–background pairs.** From the control recipe and the surface context, obtain the colors actually used for display. For supported transparent layers, composite first according to the blending rules the target declares, then check the relative luminance of the final sRGB colors. The first version prefers opaque key text and stable backgrounds, reducing combinations that cannot be inferred.
+5. **Correct the contrast.** Within the supported range, search the lightness and chroma of the foreground or background, first meeting the requirements for reading and for recognizing controls and then staying as close as possible to the brand seed. Recheck after every gamut mapping or state adjustment; when the requirements cannot be met, use a verified neutral foreground–background pair and output diagnosable fallback information.
+6. **Expand the states.** From each control recipe, generate the applicable states and their combinations, such as hover, pressed, focus, selected, disabled and error, and keep checking the elements that must be distinguishable. A uniform reduction in opacity cannot replace designing the disabled state.
+7. **Output deterministic results.** Fixed inputs and a fixed algorithm version must produce the same tokens and recipe results. Output the theme snapshot, the color encodings and validation information for controlled pairs, for each backend to consume and test.
 
-对比度采用最终颜色的相对亮度计算：`(Y较亮 + 0.05) / (Y较暗 + 0.05)`，其中 Y 来自正确线性化的 sRGB。初始设计基线为：可用的普通文本至少 4.5:1，辨识操作所必需的非文字图形、边界和焦点反馈与相关相邻颜色至少 3:1。次要文本和占位文字不能因“弱化”而自动免检；装饰元素和不可用控件另有明确分类，不套用同一个阈值。强调色填充的控件（突出按钮、选中的导航项）上的标题与图标按图形对比度检查，与各平台系统强调色按钮上的白色标题一致，使强调色可以就是用户选的颜色；高对比度策略下为 4.5:1。
+Contrast is computed from the relative luminance of the final colors: `(Y_lighter + 0.05) / (Y_darker + 0.05)`, where Y comes from correctly linearized sRGB. The initial design baseline is: usable normal text at least 4.5:1, and non-text graphics, borders and focus feedback needed to recognize controls at least 3:1 against the relevant adjacent colors. Secondary text and placeholder text are not automatically exempt from the check for being "de-emphasized"; decorative elements and unavailable controls have their own explicit categories and do not get the same threshold. Titles and icons on controls filled with the accent color (prominent buttons, selected navigation items) are checked against the graphics contrast, consistent with the white titles on each platform's system accent-colored buttons, so that the accent color can be exactly the color the user chose; under the high-contrast policy the requirement is 4.5:1.
 
-可读性优先于品牌色的数值完全不变。品牌图案和照片等原始内容不参与该颜色搜索；按钮的强调色可以是品牌种子的可读变体。
+Readability takes precedence over keeping the brand color's values exactly unchanged. Original content such as brand artwork and photos does not take part in this color search; a button's accent color can be a readable variant of the brand seed.
 
-颜色求解与回退只能调整配方允许的颜色槽或已声明可调的承载表面，不能改变外观契约，例如给没有底板的控件自动加上底板。标准控件通过内置安全配方覆盖支持场景；仍不可解的扩展配方应给出诊断，由控件或后端作者修正，不能以错误颜色静默通过。
+Color resolution and fallback can only adjust the color slots a recipe allows or carrier surfaces declared as adjustable; they cannot change the appearance contract, for example by automatically adding a backing plate to a control that has none. Standard controls cover the supported scenarios with built-in safe recipes; extension recipes that still cannot be resolved should produce diagnostics for the control or backend author to fix, and must not pass silently with wrong colors.
 
-### 控件状态与自动适配边界
+### Control states and the limits of automatic adaptation
 
-每个控件配方列出支持的状态、组合规则和冲突处理，例如选中并悬停、错误且聚焦。禁用状态阻止相应操作，但不能丢掉必要的选择或错误语义。键盘焦点反馈必须独立保留，不能被普通悬停样式覆盖。
+Each control recipe lists its supported states, combination rules and conflict handling, such as selected and hovered, or error and focused. The disabled state blocks the corresponding operation but must not drop necessary selection or error semantics. Keyboard focus feedback must be kept independently and cannot be overridden by ordinary hover styles.
 
-图片、视频、封面和品牌图案默认保留原始颜色，不自动反色或施加全局滤镜。单色语义图标参与主题着色；完整彩色资源作为内容处理。`Image(rendering: template)` 明确把图片的透明度作为单色图案，使用所在位置的文字前景色，随明暗外观变化；适用于已留出透明镂空的品牌标志，不是对彩色照片做灰度处理。省略或写 `rendering: original` 保留原色。SwiftUI 支持此能力（`image_template`），其他目标未实现时构建报错。文字或控件覆盖动态媒体时，由组件提供声明过的稳定承载表面或整体遮罩，不要求应用为每一帧选择文字颜色。使用半透明遮罩时，需要校验允许背景范围中的最坏情况；不能只取一帧的平均颜色就认为后续均可读。
+Images, videos, covers and brand artwork keep their original colors by default, without automatic inversion or global filters. Monochrome semantic icons take part in theme tinting; full-color resources are treated as content. `Image(rendering: template)` explicitly uses the image's transparency as a monochrome pattern, drawn in the text foreground color of the place it is in and changing with the appearance; it is meant for brand logos that already have transparent cutouts, not for turning color photos gray. Omitting it or writing `rendering: original` keeps the original colors. SwiftUI supports this capability (`image_template`); on other targets that have not implemented it, the build reports an error. When text or controls cover dynamic media, the component provides a declared stable carrier surface or a whole scrim, and apps are not required to choose a text color for every frame. When a semi-transparent scrim is used, the worst case within the allowed background range must be checked; the average color of a single frame cannot be taken to mean that later frames are all readable.
 
-Image、Video 等组件的外壳、加载与错误提示及叠加操作仍参与自动主题；保留的是内容像素，不是免除整个组件的主题要求。
+The shells, loading and error indicators and overlaid actions of components such as Image and Video still take part in automatic theming; what is preserved is the content pixels, and the component as a whole is not exempt from the theme requirements.
 
-无法得知背景的任意透明叠层、外部嵌入内容和自定义像素绘制，不能仅凭 token 校验就声称对比度已证明。标准控件的实现必须建立可验证的背景条件；扩展组件须声明边界并完成对应验证，不能静默把责任转回应用。
+For arbitrary transparent layers over unknown backgrounds, external embedded content and custom pixel drawing, token checks alone cannot be used to claim that contrast is proven. Implementations of standard controls must establish verifiable background conditions; extension components must declare their limits and complete the corresponding verification, and cannot silently shift the responsibility back onto the app.
 
-### 自定义控件与颜色类型
+### Custom controls and color types
 
-主题协议区分语义颜色、调色种子和内容固定颜色。常规控件样式接受语义颜色引用；应用只指定“主要操作”“危险操作”等角色即可。自定义控件作者注册配方及颜色关系，不要求每个应用分别适配明暗两套颜色。
+The theme protocol distinguishes semantic colors, palette seeds and content-fixed colors. Ordinary control styles accept semantic color references; the app only names a role such as "primary action" or "destructive action". Custom control authors register recipes and color relationships, so that each app is not required to adapt two sets of light and dark colors separately.
 
-编译期检查可识别的控件声明：颜色角色存在、配方完整、适用状态有规则、前景背景配对合法且目标支持映射。直接把固定颜色写入受主题管理的标准样式槽应产生诊断；样式覆盖中的固定颜色须同时给出浅色与深色两个值并通过对比检查。用于原始素材或明确品牌图形的固定色需要显式内容类型，不能借此绕过标准控件要求。
+Compile-time checks cover recognizable control declarations: the color roles exist, the recipes are complete, the applicable states have rules, the foreground–background pairs are valid and the target supports the mapping. Writing a fixed color directly into a theme-managed standard style slot should produce a diagnostic; a fixed color in a style override must give both a light and a dark value and pass the contrast check. Fixed colors used for original material or explicit brand graphics need an explicit content type and cannot be used to get around the requirements for standard controls.
 
-任意自绘代码不能被静态证明为正确适配。此类控件必须消费主题快照、声明受支持模式和完成目标验证，才能作为符合 Bern 主题契约的组件发布。
+Arbitrary self-drawn code cannot be statically proven to adapt correctly. Such controls must consume the theme snapshot, declare their supported modes and complete target verification before they can be published as components conforming to the Bern theme contract.
 
-### 原生控件与后端映射
+### Native controls and backend mapping
 
-原生目标的标准控件、窗口、菜单与材质由系统托管，通过系统外观、语义颜色和受支持的 tint 接口适配；Bern 默认不在系统托管表面上叠加自定义背景色，应用声明的样式覆盖除外，覆盖的颜色同样经过主题内核检查。Bern 自绘部分与算法目标使用同一算法与快照。两条路径都由后端完成，应用不需要补写颜色。
+The standard controls, windows, menus and materials of native targets are managed by the system and adapt through the system appearance, semantic colors and the supported tint interfaces; by default Bern does not layer custom background colors over system-managed surfaces, except for style overrides the app declares, whose colors also pass the theme core's checks. The parts Bern draws itself use the same algorithm and snapshot as algorithmic targets. Both paths are completed by the backend, and the app does not need to add any colors.
 
-目标组件描述须区分 Bern 管理与系统托管的部分。前者验证 token 和配方，后者验证系统深浅色、高对比行为及相邻 Bern 表面的协调，不承诺系统内部每个像素等于 Bern 色值。标准控件不能因系统托管而缺少深色适配；后端必须提供符合约定的实现或报告不支持。
+A target's component description must distinguish the parts Bern manages from the parts the system manages. For the former, tokens and recipes are verified; for the latter, the system's light and dark mode, high-contrast behavior and coordination with adjacent Bern surfaces are verified, without promising that every pixel drawn inside the system equals a Bern color value. A standard control cannot go without dark mode adaptation because it is system-managed; the backend must provide an implementation that meets the contract or report it as unsupported.
 
-| 目标 | 主题适配责任 |
+| Target | Theme adaptation responsibility |
 | --- | --- |
-| Web | 使用 Bern 主题快照映射语义 token 与状态样式，监听系统外观和强制颜色偏好，区分 Bern 样式与浏览器托管控件 |
-| Flutter | 使用框架自身的深浅色主题体系并同时配置两种模式，品牌色作为其配色输入；Bern 自绘部分消费 Bern 快照 |
-| SwiftUI 和 AppKit | 使用系统语义颜色、材质与标准控件样式，品牌色映射为 tint 或 AccentColor；默认不覆盖窗口、侧边栏、表单等系统表面的背景 |
-| GTK | 使用 GTK 与已支持桌面主题的深浅色样式；所选环境无法提供完整深浅色时，按能力描述改用 Bern 配色并验证系统托管部分 |
-| WinUI 3 | 使用 WinUI 主题资源、平台外观和高对比语义，品牌色映射为强调色资源 |
-| GPUI | 没有统一的平台配色体系，使用 Bern token 和配方绘制，接入系统外观与对比偏好 |
-| Compose | 使用 Material 深浅色配色，可接入平台动态取色，品牌色作为配色输入 |
+| Web | Maps semantic tokens and state styles from the Bern theme snapshot, listens to the system appearance and forced-colors preferences, and distinguishes Bern styles from browser-managed controls |
+| Flutter | Uses the framework's own light and dark theme system and configures both modes, with the brand color as its palette input; the parts Bern draws itself consume the Bern snapshot |
+| SwiftUI and AppKit | Use system semantic colors, materials and standard control styles, with the brand color mapped to tint or AccentColor; by default the backgrounds of system surfaces such as windows, sidebars and forms are not overridden |
+| GTK | Uses the light and dark styles of GTK and supported desktop themes; when the chosen environment cannot provide complete light and dark mode, it switches to the Bern palette as the capability description specifies and verifies the system-managed parts |
+| WinUI 3 | Uses WinUI theme resources, the platform appearance and high-contrast semantics, with the brand color mapped to accent color resources |
+| GPUI | Has no unified platform color system; draws with Bern tokens and recipes, connected to the system appearance and contrast preferences |
+| Compose | Uses Material light and dark color schemes, can connect to platform dynamic color, and takes the brand color as a palette input |
 
-操作系统的强制颜色或必要辅助功能策略优先于品牌精确配色；平台托管的可访问性行为不能被自定义色值覆盖失效。高对比支持和未知背景的处理应按能力报告，并通过实际平台验收。
+The operating system's forced colors or required accessibility policies take precedence over exact brand colors; platform-managed accessibility behavior must not be defeated by custom color values. Support for high contrast and the handling of unknown backgrounds should be reported per capability and pass acceptance on the actual platform.
 
-### 主题快照与运行时切换
+### Theme snapshot and runtime switching
 
-原生目标的系统颜色随外观变化由平台自动更新，不经过 Bern 主题快照；本节规则适用于 Bern 配色部分。
+On native targets, system colors are updated automatically by the platform when the appearance changes, without going through the Bern theme snapshot; the rules in this section apply to the parts colored by Bern.
 
-主题快照包含 schema 版本、算法版本、解析后的外观与对比策略、语义 token、配方兼容信息及确定的颜色编码。系统和窗口环境由 UI 适配器上报，主题内核在本地计算或选择缓存快照；不等待业务服务器，不把系统外观变化当作业务命令。
+A theme snapshot contains the schema version, the algorithm version, the resolved appearance and contrast policy, the semantic tokens, recipe compatibility information and the determined color encodings. The system and window environment is reported by the UI adapter, and the theme core computes locally or selects a cached snapshot; it does not wait for a business server and does not treat changes in the system appearance as business commands.
 
-运行时按窗口或主题作用域传递单调更新版本，在同一更新批次提交 token 和控件状态结果，避免一部分控件已变色、另一部分仍使用旧主题。主题切换不重建业务状态，也不丢失焦点、输入法组合、编辑内容和列表身份。
+At runtime, a monotonically increasing update version is passed per window or theme scope, and tokens and control state results are committed in the same update batch, so that it never happens that some controls have already changed color while others still use the old theme. Switching themes does not rebuild business state, and does not lose focus, input method composition, edited content or list identity.
 
-首帧应在可行时使用已解析的外观或预生成快照，避免先显示错误模式。未能预知系统模式时使用确定的回退并及时更新。模式切换默认可直接提交，不要求动画；若实现过渡，仍需满足对比条件并尊重减少动态效果。
+When feasible, the first frame should use the resolved appearance or a pre-generated snapshot, to avoid first showing the wrong mode. When the system mode cannot be known in advance, a deterministic fallback is used and updated promptly. By default, mode switches can be committed directly without animation; if a transition is implemented, it must still meet the contrast conditions and respect Reduce Motion.
 
-应用也可以让用户在运行时选择强调色与明暗。`style!` 的 `accents` 块声明可选的强调色，`WindowSet` 用 `accent` 绑定一个枚举，枚举的每个值对应一个同名的强调色（不分大小写，忽略下划线），用 `appearance` 绑定一个由 `System`、`Light`、`Dark` 组成的枚举。这两个值通常是引擎状态，因为它们是用户的偏好，随设置保存。
+Apps can also let users choose the accent color and the appearance at runtime. The `accents` block of `style!` declares the selectable accent colors; `WindowSet` binds an enum with `accent`, each value of which corresponds to the accent color of the same name (case-insensitive, underscores ignored), and binds an enum made of `System`, `Light` and `Dark` with `appearance`. These two values are usually engine state, because they are the user's preferences and are saved with the settings.
 
 ```rust
 style! {
@@ -855,40 +857,40 @@ style! {
 WindowSet(handle: AppWindows, primary: main, accent: app.accent, appearance: app.appearance) { … }
 ```
 
-只写一个颜色时，编译器为浅色、深色各算一次实际使用的颜色（`bern_theme::native_accent`）。原生控件拿强调色着色，并在它的填充上放白字或近黑字（亮度高于 0.4 用近黑字，各原生目标一致）。所以这个颜色要和该模式的各层表面达到 3:1，上面的字也要达到 3:1。达到时原样使用；达不到时保持色相，只调明度，调到刚好达到为止。上例中绯红两种模式都原样使用；荧绿在浅色模式下加深为 `#00A75F` 配白字，深色模式原样使用，配近黑字。`color(light:, dark:)` 按写的值使用，不再调整。
+When only one color is written, the compiler computes the color actually used once for light and once for dark (`bern_theme::native_accent`). Native controls are tinted with the accent color and put white or near-black text on its fill (near-black text when the luminance is above 0.4, the same on every native target). So the color must reach 3:1 against each surface layer of that mode, and the text on it must also reach 3:1. When it does, it is used as is; when it does not, the hue is kept and only the lightness is adjusted, just until it does. In the example above, crimson is used as is in both modes; neon green is darkened to `#00A75F` with white text in light mode, and used as is with near-black text in dark mode. `color(light:, dark:)` is used as written, without further adjustment.
 
-所选的强调色作为系统控件的着色，并替换 `accent` 角色，Bern 自绘的部分（标注、图案、填充）随之变化；所选的明暗作用于所有窗口，`System` 跟随系统。编译时检查枚举的每个值都有对应的强调色。实现进度：SwiftUI 已实现，在 macOS 上用 `examples/gallery` 验证三种强调色与浅色、深色的切换；系统绘制的侧栏选中高亮仍是系统强调色。Web 已实现：构建时为每个强调色各生成浅色、深色及更高对比的主题变量，运行时在根元素上切换 `data-bern-accent` 与 `data-bern-appearance`，画布随之重绘；浏览器中验证了绯红、群青与浅色、深色的切换。GTK 已实现：强调色以 `@define-color` 写入一份更高优先级的样式表，明暗由 `AdwStyleManager` 设置；WinUI 3 已实现：直接改主题字典中的强调色画刷并更新 `SystemAccentColor` 各档，明暗设在窗口根的 `RequestedTheme`；Linux 虚拟机与 Windows PC 上验证 gallery 由绯红换群青、浅色换深色，画布随之重绘（WinUI 3 两种前端都验证）。
+The chosen accent color tints system controls and replaces the `accent` role, and the parts Bern draws itself (annotations, patterns, fills) change with it; the chosen appearance applies to all windows, and `System` follows the system. The compiler checks that every value of the enum has a corresponding accent color. Implementation progress: implemented in SwiftUI, verified on macOS with `examples/gallery` switching among three accent colors and between light and dark; the sidebar selection highlight drawn by the system is still the system accent color. Implemented on the Web: at build time, light, dark and higher-contrast theme variables are generated for each accent color, and at runtime `data-bern-accent` and `data-bern-appearance` are switched on the root element, with the canvas redrawn accordingly; verified in a browser switching between crimson and ultramarine and between light and dark. Implemented in GTK: the accent color is written with `@define-color` into a higher-priority style sheet, and the appearance is set through `AdwStyleManager`; implemented in WinUI 3: the accent color brush in the theme dictionary is changed directly and the `SystemAccentColor` shades are updated, and the appearance is set on the `RequestedTheme` of the window root; verified on the Linux VM and the Windows PC that the gallery switches from crimson to ultramarine and from light to dark, with the canvas redrawn accordingly (verified with both WinUI 3 frontends).
 
-算法版本变化可能影响外观，需要受控升级和视觉回归。编译期可以验证配方并预生成已知模式的快照，但 `system` 和运行时品牌输入不能在构建时永久解析成一个模式。
+A change in the algorithm version can affect appearance and needs a controlled upgrade and visual regression testing. Recipes can be verified and snapshots for known modes pre-generated at compile time, but `system` and runtime brand input cannot be permanently resolved into one mode at build time.
 
-### 主题验收
+### Theme acceptance
 
-每个标准控件和目标组合必须覆盖浅色、深色、跟随系统切换，以及所有适用状态与关键组合。验证包括多种品牌种子、嵌套表面、菜单和对话框、错误与焦点同时存在、禁用状态及媒体上方控件。
+Every combination of standard control and target must cover light, dark and switching while following the system, as well as all applicable states and key combinations. Verification includes several brand seeds, nested surfaces, menus and dialogs, error and focus present at the same time, the disabled state and controls over media.
 
-主题内核的测试检查色域、结果确定性、回退路径和已知配对的对比度；目标测试检查实际控件输出和快照应用。原生系统托管部分使用平台交互与外观测试，不依赖计算 token 推断系统实际绘制结果；原生目标在没有样式覆盖时还须与同一系统版本的系统自带应用对照。
+Tests of the theme core check gamut, determinism of results, fallback paths and the contrast of known pairs; target tests check actual control output and snapshot application. The system-managed parts of native targets use platform interaction and appearance tests and do not infer what the system actually draws from computed tokens; without style overrides, native targets must also be compared against the system's own apps on the same system version.
 
-“应用未编写任何深浅色分支仍能正确使用所有标准控件”是默认主题的验收条件。自动颜色校验覆盖受控配对，完整界面仍需验证真实层叠、文字与交互可用性。
+"Every standard control is used correctly without the app writing any light/dark branch" is the acceptance condition for the default theme. Automatic color checks cover controlled pairs; the complete interface still needs verification of real layering, text and interaction usability.
 
-## 样式覆盖、动效与自绘
+## Style overrides, motion and self-drawing
 
-实现进度：`style!` 的解析、校验与 IR，各目标的样式能力检查，以及 SwiftUI 上 `Button`、`IconButton`、`SidebarItem` 的样式覆盖与状态变换动效，已在 macOS 上用 `examples/planner` 验证；Web 已实现：基础外观写成样式，悬停、按下、焦点、禁用与选中的外观按顺序合并，颜色用短暂的 CSS 过渡，缩放、位移与透明度用状态的弹簧、回到普通状态用 `settle`；浏览器中用 `examples/planner` 验证侧栏项悬停放大到 1.03 并出现底色、按下 0.96、离开回 1，主要按钮的强调色底、10 圆角与大尺寸。GTK 已实现：每个样式写成一张样式表，状态取自 GTK 自己的状态标志，同优先级下后写的胜出，正是状态的合并顺序；WinUI 3 已实现：颜色与边框写成控件自己的轻量样式资源，状态由控件模板的视觉状态切换，阴影由 Direct2D 画成位图垫在按钮下；两者的缩放、位移与透明度都用弹簧。Linux 虚拟机与 Windows PC 上用 `examples/planner` 与 `gallery` 验证侧栏项悬停放大到 1.03 与选中填色、卡片悬停放大并投影。WinUI 3 不支持选中侧栏项的 `indicator`（`NavigationView` 只画前缘的指示条），检查时报错。状态变换不能打断系统侧栏自己的选中动画：WinUI 3 的 `NavigationView` 只在新旧两条指示条横向对齐时把指示条从旧项滑到新项，否则两条同时各自缩放，看上去断成两段；所以那里侧栏项的缩放以指示条所在的竖线为原点，选中改变的那一刻各项暂时回到无变换，Windows PC 上逐帧验证。其他目标的系统侧栏没有在项之间移动的指示条（SwiftUI 与 GTK 是选中底色，Compose 是 `NavigationDrawerItem` 的整行胶囊，Web 是强调色填充），样式画的 `indicator` 随选中逐行出现与消失。SwiftUI 侧栏项一旦有样式，就由 Bern 绘制选中、悬停与按下，列表不再保留系统的选中；这种侧栏获得焦点后，上下方向键按当前可见条目的顺序切换选中；隐藏的条件项和关闭模块的页面不参与导航。中性底色上的图标仍跟随应用强调色，显式前景色或有色选中填充保持原来的对比配色。结构过渡（`appear`、`disappear`、`reflow`）、共享元素（`hero`）、窗口的 `chrome`、`immersive` 与 `idle_after`、`Canvas` 与标注文字也已在 SwiftUI 上实现，并在 macOS 上验证：过渡与共享元素用逐帧截图确认在移动，沉浸窗口静置后隐藏标题栏、点击后恢复。悬停与按下的弹簧手感未验证。Web 也已实现：弹簧由页面自己的逐帧积分驱动，可打断并保留速度；一个元素的变换分成几层（样式状态、出现与消失、共享元素、让位、晃一下、滚动联动）各自驱动后合成；共享元素在旧元素卸载时记下它的位置并留一份副本，新元素从那里长出、副本同时淡出；消失的元素等过渡播完才离开页面；`window.idle` 由窗口内的指针、触摸、滚轮与按键重新计时，沉浸时隐藏页头并在静置时隐藏指针。浏览器中逐帧采样确认 planner 的标题在两种字号间放大并交叉淡化、新标签从 0.4 倍弹出，拖放描边淡出后移除，沉浸窗口静置 3 秒后隐藏页头、移动指针后恢复。GTK 与 WinUI 3 也已实现全部动效用法与窗口外观，做法与验证见下面各节和它们的实现记录。尚未实现：其余控件的样式覆盖。各平台映射是依据平台文档的预期，实现时逐项实测，做不到的如实报告。
+Implementation progress: the parsing, validation and IR of `style!`, the style capability checks of each target, and on SwiftUI the style overrides and state-transform motion of `Button`, `IconButton` and `SidebarItem` have been verified on macOS with `examples/planner`. Implemented on the Web: the base appearance is written as styles, and the hover, pressed, focus, disabled and selected appearances are merged in order; colors use short CSS transitions, while scale, offset and opacity use the state's spring, and returning to the normal state uses `settle`; verified in a browser with `examples/planner` that a sidebar item scales up to 1.03 on hover and gains a fill, goes to 0.96 when pressed and back to 1 on leaving, and that the primary button has the accent-colored fill, a corner radius of 10 and the large size. Implemented in GTK: each style is written as a style sheet, states come from GTK's own state flags, and at equal priority the one written later wins, which is exactly the merge order of states; implemented in WinUI 3: colors and borders are written as the control's own lightweight styling resources, states are switched by the visual states of the control template, and shadows are drawn by Direct2D into a bitmap placed under the button; both use springs for scale, offset and opacity. Verified on the Linux VM and the Windows PC with `examples/planner` and `gallery`: sidebar items scale up to 1.03 on hover and fill when selected, and cards scale up and cast a shadow on hover. WinUI 3 does not support `indicator` for the selected sidebar item (`NavigationView` draws only the indicator bar at the leading edge), and the check reports an error. State transforms must not interrupt the system sidebar's own selection animation: WinUI 3's `NavigationView` slides the indicator bar from the old item to the new one only when the old and new indicator bars are horizontally aligned; otherwise the two bars scale separately at the same time and look broken into two pieces; so there, sidebar items scale with the vertical line where the indicator bar sits as the origin, and at the moment the selection changes every item temporarily returns to no transform, verified frame by frame on the Windows PC. The system sidebars of the other targets have no indicator that moves between items (SwiftUI and GTK use a selection fill, Compose the full-row capsule of `NavigationDrawerItem`, the Web an accent-color fill), and an `indicator` drawn by a style appears and disappears row by row with the selection. Once a SwiftUI sidebar item has a style, Bern draws the selected, hover and pressed states, and the list no longer keeps the system selection; when such a sidebar has focus, the up and down arrow keys move the selection in the order of the currently visible items; hidden conditional items and the pages of modules that are turned off do not take part in navigation. Icons on a neutral fill still follow the app's accent color, and an explicit foreground color or a colored selection fill keeps its original contrast pairing. Structural transitions (`appear`, `disappear`, `reflow`), shared elements (`hero`), the window's `chrome`, `immersive` and `idle_after`, and `Canvas` and annotation text are also implemented in SwiftUI and verified on macOS: transitions and shared elements were confirmed to move with frame-by-frame screenshots, and immersive windows hide the title bar when idle and restore it after a click. The spring feel of hover and press is not verified. Also implemented on the Web: springs are driven by the page's own per-frame integration and can be interrupted while keeping their velocity; an element's transform is split into several layers (style state, appear and disappear, shared element, making room, wiggle, scroll linkage), each driven separately and then composed; a shared element records its position when the old element unmounts and keeps a copy, and the new element grows from there while the copy fades out at the same time; a disappearing element leaves the page only after its transition has finished; `window.idle` restarts its timer on pointer, touch, wheel and key input within the window, and in immersive mode the page header is hidden, and the pointer is hidden when idle. Frame-by-frame sampling in a browser confirmed that the planner's title scales between two font sizes with a cross-fade, that a new tag pops out from 0.4 times its size, that the drop outline is removed after fading out, and that the immersive window hides the page header after 3 seconds idle and restores it when the pointer moves. GTK and WinUI 3 also implement all motion uses and window appearances; for how they do it and how it was verified, see the sections below and their implementation notes. Not yet implemented: style overrides for the remaining controls. The mapping on each platform is an expectation based on platform documentation, measured item by item during implementation, and whatever cannot be done is reported as it is.
 
-### 默认外观与覆盖层次
+### Default appearance and override layers
 
-标准控件默认使用目标平台的原生外观与交互反馈。这是 Bern 的默认值，不是对应用的限制：Bern 是 UI 引擎，不规定应用的设计。应用需要在各平台上呈现同一套设计时，显式声明样式覆盖。覆盖分四层，越往后越自由，各平台的一致性也越多由应用自己负责：
+Standard controls use the target platform's native appearance and interaction feedback by default. This is Bern's default value, not a restriction on apps: Bern is a UI engine and does not dictate an app's design. When an app needs to present the same design on every platform, it declares style overrides explicitly. Overrides come in four layers; the later the layer, the more freedom it gives, and the more the consistency across platforms is the app's own responsibility:
 
-| 层次 | 内容 | 例子 |
+| Layer | Content | Example |
 | --- | --- | --- |
-| 系统默认 | 不写样式，使用平台控件的外观与反馈 | 各平台侧栏选中项各自的样子 |
-| 样式意图 | Bern 定义的有限选项，各目标映射到最接近的原生实现 | 侧栏选中项为 `indicator` 或 `fill`，悬停为 `none`、`highlight` 或 `scale` |
-| 参数 | 颜色角色、圆角、内边距、边框、尺寸档、指示条尺寸、变换与动效 | 选中填充 `accent`、圆角 8、悬停放大 1.03 |
-| 自绘 | 应用用 Bern 组件与 `Canvas` 组合出外观，交互仍由标准控件与命令提供 | 带数据曲线的进度条 |
+| System default | No style written; the appearance and feedback of the platform control are used | Each platform's own look for the selected sidebar item |
+| Style intent | A limited set of options defined by Bern, which each target maps to the closest native implementation | The selected sidebar item as `indicator` or `fill`, hover as `none`, `highlight` or `scale` |
+| Parameters | Color roles, corner radius, padding, border, size tier, indicator size, transforms and motion | Selected fill `accent`, corner radius 8, hover scale 1.03 |
+| Self-drawn | The app composes the appearance from Bern components and `Canvas`, with interaction still provided by standard controls and commands | A progress bar with a data curve |
 
-覆盖只改外观与动效，不改控件的语义角色、命令绑定、可访问名称与键盘操作。焦点反馈可以改样式，但不能去掉；触屏下的点击区域不小于 44 个逻辑单位。
+Overrides change only appearance and motion, not the control's semantic role, command binding, accessible name or keyboard operation. Focus feedback can be restyled but not removed; under touch, the hit area is no smaller than 44 logical units.
 
-### 样式声明
+### Style declaration
 
-应用在界面 crate 中用 `style!` 声明全应用的样式，编译器像收集组件一样收集它，一个应用最多一份。样式按组件种类声明，全应用一致；需要例外的实例用命名变体。
+Apps declare app-wide styles with `style!` in the UI crate; the compiler collects it as it collects components, and an app has at most one. Styles are declared per component kind and are consistent across the whole app; instances that need an exception use named variants.
 
 ```rust
 style! {
@@ -923,13 +925,13 @@ style! {
 }
 ```
 
-- **选择器**：组件种类（`SidebarItem`），或种类加命名变体（`Button.hero`，实例写 `variant: hero` 选用；`style` 已是 `Text`、`Picker` 等组件的属性，不复用）。不按位置、层级或运行时条件选择；实例写在组件里或直接写在 `Window` 的正文里都一样。
-- **状态**：`hover`、`pressed`、`selected`、`focus`、`disabled`，与控件配方的状态相同；组合按配方规则合并，焦点反馈独立保留。写在状态中的变换用所带的动效进入该状态；`settle` 是回到普通状态时使用的动效。
-- **属性**：只接受 Bern 定义的集合。外观有 `background`、`foreground`、`border`（`border: 角色`，或 `border: border(角色, width: 0.5)` 指定线宽，默认 1）、`corner`、`padding`、`size`（`small`、`regular`、`large`、`extra_large`，映射到平台的控件尺寸）；选中有 `fill(角色)` 与 `indicator(角色, edge, width)`；变换有 `scale`、`offset`、`opacity`；阴影 `shadow(半径, y: 下移, opacity: 不透明度)` 像控件浮起，`y` 默认为半径的三分之一，不透明度默认 0.2，静止时写 `shadow: 4`；`system` 表示该项使用平台默认，`none` 表示该状态没有任何反馈。各组件可用的属性与状态写在组件规范中。
-- **颜色**：只写语义角色，例如 `accent`、`fill.subtle`、`text.primary`。前景自动与背景配对，`fill(accent)` 上的文字与图标使用 `on_accent`，由主题内核按模式与对比策略求解并检查，运行时改变品牌色时随之更新。确需固定颜色时写 `color(light: "#…", dark: "#…")`，两种模式都要给出并通过对比检查，否则构建失败。
-- **确定性**：样式在构建时确定。运行时只有交互状态与主题快照会改变结果，不能用状态绑定切换样式。
-- **目标例外**：`#[target(...)]` 块在指定目标上覆盖同名声明，用于平台差异或在某个目标上退回系统默认。
-- **具名圆角**：各平台的设计语言圆角不同（例如卡片在苹果上 22、Fluent 上 8），应用在 `corner` 块里给圆角起名，`#[target(...)]` 的 `corner` 块给这些平台另定取值，样式规则与元素都写名字：
+- **Selectors**: a component kind (`SidebarItem`), or a kind plus a named variant (`Button.hero`, chosen by an instance with `variant: hero`; `style` is already a property of components such as `Text` and `Picker` and is not reused). Selection is never by position, hierarchy or runtime condition; an instance written inside a component and one written directly in the body of a `Window` are treated the same.
+- **States**: `hover`, `pressed`, `selected`, `focus`, `disabled`, the same as the states of control recipes; combinations are merged by the recipe rules, and focus feedback is kept independently. A transform written in a state enters that state with the motion it carries; `settle` is the motion used when returning to the normal state.
+- **Properties**: only the set defined by Bern is accepted. Appearance has `background`, `foreground`, `border` (`border: role`, or `border: border(role, width: 0.5)` to set the line width, default 1), `corner`, `padding` and `size` (`small`, `regular`, `large`, `extra_large`, mapped to the platform's control sizes); selection has `fill(role)` and `indicator(role, edge, width)`; transforms have `scale`, `offset` and `opacity`; the shadow `shadow(radius, y: offset, opacity: opacity)` looks like the control floating up, with `y` defaulting to a third of the radius and the opacity to 0.2, and for a shadow at rest write `shadow: 4`; `system` means the item uses the platform default, and `none` means the state has no feedback at all. The properties and states available to each component are given in the component specification.
+- **Colors**: only semantic roles are written, such as `accent`, `fill.subtle`, `text.primary`. The foreground is paired with the background automatically: text and icons on `fill(accent)` use `on_accent`, which the theme core resolves and checks according to the mode and contrast policy and updates when the brand color changes at runtime. When a fixed color is really needed, write `color(light: "#…", dark: "#…")`; both modes must be given and must pass the contrast check, or the build fails.
+- **Determinism**: styles are fixed at build time. At runtime only the interaction state and the theme snapshot change the result, and styles cannot be switched with state bindings.
+- **Target exceptions**: a `#[target(...)]` block overrides the declaration of the same name on the specified targets, for platform differences or for falling back to the system default on one target.
+- **Named corner radii**: each platform's design language uses different corner radii (for example, cards are 22 on Apple platforms and 8 in Fluent); the app names corner radii in a `corner` block, `corner` blocks under `#[target(...)]` give those platforms other values, and style rules and elements write the names:
 
   ```rust
   style! {
@@ -944,17 +946,17 @@ style! {
   Image(source: app.still, corner: if shown { card } else { 0 }, animate: hero)
   ```
 
-  名字先要在不带 `#[target]` 的块里给出所有平台的取值，目标块只能覆盖已有的名字；同一个名字在所有平台的块里只能出现一次，平台块无论写在前后都覆盖它。凡是 `corner` 属性（`Image`、`Video`、`Shape`、`Accordion` 与样式规则）都可以写名字，绑定的 `corner` 表达式里也可以；在 `corner` 里，`style!` 声明过的名字先于同名的变量。名字在构建时换成该目标平台的数值，各目标拿到的仍是数字：`bern build` 对每个目标先求值再检查与生成，样式规则展开为全平台的取值加上取值不同的平台各一条只含圆角的目标规则。实现进度：编译器与 `bern` 命令行实现，六个目标的生成器都只看到数字，不需要各自实现；Windows 实体机上验证，见 WinUI 3 实现记录。
+  A name must first be given its value for all platforms in a block without `#[target]`, and target blocks can only override existing names; the same name can appear only once in the all-platform blocks, and a platform block overrides it whether written before or after it. Every `corner` property (`Image`, `Video`, `Shape`, `Accordion` and style rules) can use a name, and so can a bound `corner` expression; inside `corner`, names declared by `style!` take precedence over variables of the same name. Names are replaced with the target platform's numbers at build time, so each target still receives numbers: `bern build` evaluates for each target first and then checks and generates, and style rules expand into the all-platform values plus, for each platform whose value differs, a target rule holding only the corner radius. Implementation progress: implemented in the compiler and the `bern` command line; the generators of all six targets only see numbers and need no implementation of their own; verified on a physical Windows machine, see the WinUI 3 implementation notes.
 
-样式覆盖同样适用于系统托管的控件：原生目标通过平台提供的样式接口实现，例如 SwiftUI 的修饰符与样式协议、WinUI 3 的轻量样式资源与模板、GTK 的样式表；Web 直接改变 Bern 配方。各平台实现同一项覆盖的代价差别很大，例如系统绘制的侧栏选中高亮，在一些平台上需要换掉系统的选中呈现并自行维护选中与键盘导航。
+Style overrides also apply to system-managed controls: native targets implement them through the styling interfaces the platform provides, such as SwiftUI modifiers and style protocols, WinUI 3 lightweight styling resources and templates, and GTK style sheets; the Web changes the Bern recipe directly. The cost of implementing the same override differs greatly between platforms; for example, overriding the system-drawn sidebar selection highlight requires, on some platforms, replacing the system's selection presentation and maintaining the selection and keyboard navigation itself.
 
-### 带内容的按钮与悬停显示
+### Buttons with content and reveal on hover
 
-海报、卡片、列表行这类“点了就打开”的东西，显示的是图片与文字，而不是按钮标题。`Button` 可以带一个子元素作为它显示的内容，`label` 仍是必写的可访问名称，`icon` 与 `prominence` 不能再写；多个元素放进 `Column`、`Row` 或 `Stack`。内容里不能有其他控件，经过组件也一样，否则一次按下有两种含义，构建失败；需要第二个操作时，把它放在按钮旁边，例如叠放在同一个 `Stack` 中。没有控制条的视频（`Video(controls: none)`）只显示画面、不接收输入，与 `Image` 一样可以作为按钮的内容，例如按下就暂停的播放器画框。
+Posters, cards and list rows, the things that open when clicked, show pictures and text rather than a button title. A `Button` can take one child element as the content it shows; `label` is still required as the accessible name, and `icon` and `prominence` can no longer be written; several elements go into a `Column`, `Row` or `Stack`. The content cannot contain other controls, including through components, otherwise one press would have two meanings, and the build fails; when a second action is needed, place it next to the button, for example layered in the same `Stack`. A video without a control bar (`Video(controls: none)`) only shows the picture and receives no input, and like `Image` it can be a button's content, for example a player frame that pauses when pressed.
 
-`style!` 的 `text` 块给文本样式定字重与字号，例如 `body: font(size: 13, weight: regular)`。设计稿给电视另一套字号时写 `tv:`，例如 `body: font(size: 13, tv: 16)`、`caption: font(tv: 14)`（只给电视定字号）：电视在远处看，tvOS 构建时就取电视的字号，Android 与 Web 在运行时判断为电视时取它（Web 在文档上加 `bern-television` 类），macOS、iOS、Windows、Linux 不受影响。tvOS 上按设计尺寸画的场景（`ScaleBox`）里，没有指定字体的系统文字取应用正文的电视字号，不取 tvOS 自己的 29 点。
+The `text` block of `style!` sets weight and size for text styles, for example `body: font(size: 13, weight: regular)`. When the design gives TV a separate set of sizes, write `tv:`, for example `body: font(size: 13, tv: 16)` or `caption: font(tv: 14)` (sets a size only for TV): a TV is viewed from a distance, so tvOS builds take the TV size at build time, Android and Web take it when they determine at runtime that they run on a TV (Web adds the `bern-television` class to the document), and macOS, iOS, Windows and Linux are unaffected. In scenes drawn at design size on tvOS (`ScaleBox`), system text without a specified font takes the TV size of the app's body text, not tvOS's own 29 points.
 
-`shape: capsule` 的带内容按钮是平台自己的胶囊按钮包着内容。内容里的文字写 `style: control` 时取平台按钮标题的字体，与同一界面里其他按钮的标题一致：macOS 与 iOS 不另设字体，用控件所在环境的字体（macOS 13 点，iOS 17 点）；WinUI 3 继承按钮的字号（14）与字重；GTK 继承按钮标题的字体；Compose 用 Material 按钮的 `labelLarge`（14 sp，中等字重）；Web 继承按钮的字体。`control` 只表示平台的控件字体，`style!` 的 `text` 块不能给它另定字号或字重；写了 `font_size` 时只换字号。
+A content button with `shape: capsule` is the platform's own capsule button wrapping the content. Text in the content written with `style: control` takes the font of the platform's button titles, matching the titles of the other buttons in the same interface: macOS and iOS set no font of their own and use the font of the control's environment (13 points on macOS, 17 points on iOS); WinUI 3 inherits the button's size (14) and weight; GTK inherits the font of the button title; Compose uses the Material button's `labelLarge` (14 sp, medium weight); Web inherits the button's font. `control` only denotes the platform's control font, and the `text` block of `style!` cannot give it a different size or weight; when `font_size` is written, only the size changes.
 
 ```rust
 Stack(align: top_trailing) {
@@ -965,45 +967,45 @@ Stack(align: top_trailing) {
 }
 ```
 
-- 带内容的按钮没有平台的按钮外框，内容按原样显示；样式覆盖对它同样有效，`corner` 同时把内容裁成圆角，`shadow` 沿裁切后的形状投下。没有样式时，按下时内容变暗。
-- 写了 `shape: capsule` 的带内容按钮是平台自己的胶囊按钮包着这份内容，外框、高度（`height`）与 `prominence: prominent` 的强调色都和只有标题的胶囊按钮相同，例如带键位提示的「继续上次 [空格]」。SwiftUI 用系统胶囊控件（26 起为液态玻璃），GTK 保留按钮本来的外框，WinUI 3 用默认或强调按钮样式，Compose 用 `FilledTonalButton` 或 `Button`，Web 用标准按钮类。
-- `reveal: hover` 可以写在任何元素上：指针在它所在的容器上时显示，离开时隐藏，切换使用 `snappy` 动效。元素获得键盘焦点时也显示，辅助技术始终能读到它；没有指针的设备上它一直显示。悬停显示只是捷径，不能是某个操作唯一的入口。
-- 预期实现：SwiftUI 用不带外框的 `ButtonStyle`、`.clipShape` 与 `.shadow`，悬停用 `.onHover` 与环境值传给内容；Compose 用 `Modifier.clickable` 与 `hoverable`；WinUI 3 用内容为任意元素的 `Button` 与轻量样式；GTK 用带子控件的 `.flat` 按钮与 `GtkEventControllerMotion`；Web 用内容为任意元素的 `<button>` 与 `:hover`、`:focus-within`。
+- A content button has no platform button frame, and the content is shown as it is; style overrides apply to it as well, `corner` also clips the content to the rounded corners, and `shadow` is cast along the clipped shape. Without a style, the content darkens when pressed.
+- A content button with `shape: capsule` is the platform's own capsule button wrapping this content; its frame, its height (`height`) and the accent color of `prominence: prominent` are the same as for a capsule button with only a title, for example "Resume [Space]" with a key hint. SwiftUI uses the system capsule control (Liquid Glass from 26 on), GTK keeps the button's own frame, WinUI 3 uses the default or accent button style, Compose uses `FilledTonalButton` or `Button`, and Web uses the standard button classes.
+- `reveal: hover` can be written on any element: the element is shown while the pointer is over its container and hidden when the pointer leaves, switching with the `snappy` motion. It is also shown when it gets keyboard focus, and assistive technologies can always read it; on devices without a pointer it is always shown. Reveal on hover is only a shortcut and cannot be the only entry point to an action.
+- Expected implementation: SwiftUI uses a frameless `ButtonStyle`, `.clipShape` and `.shadow`, with hover passed to the content through `.onHover` and an environment value; Compose uses `Modifier.clickable` and `hoverable`; WinUI 3 uses a `Button` whose content is an arbitrary element, plus lightweight styling; GTK uses a `.flat` button with a child widget and `GtkEventControllerMotion`; Web uses a `<button>` whose content is an arbitrary element, plus `:hover` and `:focus-within`.
 
-实现进度：SwiftUI 已实现，用 `examples/gallery` 在 macOS 上验证：悬停时卡片放大并投下阴影、星标出现，圆角裁住内容，卡片与星标都能经命令行按行的 key 触发。按下的弹簧手感、键盘焦点显示星标与 iOS 未实测。Compose 已实现（`clickable` 与 `hoverable`，阴影用 `shadow`），Android 模拟器上验证了卡片与星标的点按；触屏没有悬停，`reveal` 的内容一直显示。Web 已实现：带内容的按钮是没有外框的 `<button>`，`reveal` 的内容在所在容器悬停或获得焦点时显示，没有指针的设备上一直显示；浏览器中验证卡片悬停放大到 1.03 并投下阴影、星标出现，点星标收藏并弹出轻提示，点卡片打开图案。GTK 与 WinUI 3 已实现（WinUI 3 的圆角用 Composition 的圆角几何裁剪，`reveal` 在指针位于容器上或获得焦点时淡入），Linux 虚拟机与 Windows PC 上验证卡片悬停放大、投下阴影、星标出现。
+Implementation status: SwiftUI is implemented and verified on macOS with `examples/gallery`: on hover the card scales up and casts a shadow and the star appears, the rounded corners clip the content, and both the card and the star can be triggered from the command line by the row's key. The spring feel of pressing, keyboard focus showing the star, and iOS are not measured. Compose is implemented (`clickable` and `hoverable`, the shadow with `shadow`), and tapping the card and the star is verified on the Android emulator; touch screens have no hover, so the `reveal` content is always shown. Web is implemented: a content button is a `<button>` without a frame, the `reveal` content is shown when its container is hovered or gets focus and is always shown on devices without a pointer; verified in the browser: hovering a card scales it up to 1.03 and casts a shadow and the star appears, clicking the star favorites the item and shows a toast, and clicking the card opens the pattern. GTK and WinUI 3 are implemented (WinUI 3 clips the rounded corners with Composition's rounded-rectangle geometry, and `reveal` fades in when the pointer is over the container or it gets focus); verified on the Linux VM and the Windows PC: hovering a card scales it up and casts a shadow, and the star appears.
 
-### 动效
+### Motion
 
-动效用弹簧描述：周期 T（无阻尼振荡周期，秒）与阻尼比 ζ。换算到刚度与阻尼时质量取 1：刚度 = (2π / T)²，阻尼 = 4πζ / T。Bern 内置以下 token，应用可以在 `style!` 的 `motion` 中改变取值或增加新的 token：
+Motion is described with springs: the period T (the undamped oscillation period, in seconds) and the damping ratio ζ. When converting to stiffness and damping, the mass is 1: stiffness = (2π / T)², damping = 4πζ / T. Bern has the following built-in tokens; apps can change their values or add new tokens in the `motion` block of `style!`:
 
-| Token | T | ζ | 手感 |
+| Token | T | ζ | Feel |
 | --- | --- | --- | --- |
-| `press` | 0.12 | 1.00 | 立即，没有回弹 |
-| `snappy` | 0.22 | 0.85 | 干脆 |
-| `smooth` | 0.45 | 1.00 | 平滑，没有回弹 |
-| `bouncy` | 0.50 | 0.62 | 轻微回弹 |
-| `jelly` | 0.42 | 0.42 | 明显回弹 |
-| `hero` | 0.48 | 0.86 | 几乎不回弹，用于共享元素 |
+| `press` | 0.12 | 1.00 | Immediate, no bounce |
+| `snappy` | 0.22 | 0.85 | Crisp |
+| `smooth` | 0.45 | 1.00 | Smooth, no bounce |
+| `bouncy` | 0.50 | 0.62 | Slight bounce |
+| `jelly` | 0.42 | 0.42 | Pronounced bounce |
+| `hero` | 0.48 | 0.86 | Almost no bounce, for shared elements |
 
-动效有以下几种用法，不开放时间轴，也不开放逐帧回调：
+Motion is used in the following ways; neither a timeline nor per-frame callbacks are exposed:
 
-1. **状态变换**：在样式中为状态声明缩放、位移与透明度，作用在控件的外层容器上，不改变控件本身的绘制，也不影响相邻元素的布局。
-2. **结构过渡**：任何元素可以声明 `appear` 与 `disappear`，在它因 `if`、`match` 或 `ForEach` 的变化而挂载或卸载时播放；首次显示不播放。过渡只有 `fade`、`pop`、`slide`、`grow` 与 `move` 几种，各带一个动效 token，写在最后，省略时为 `smooth`。容器可以声明 `reflow: 动效`，让相邻元素平滑让位。
+1. **State transforms**: styles declare scale, offset and opacity for states; they act on the control's outer container, do not change how the control itself is drawn, and do not affect the layout of neighboring elements.
+2. **Structural transitions**: any element can declare `appear` and `disappear`, played when it is mounted or unmounted because of a change in `if`, `match` or `ForEach`; they do not play on first display. The only transitions are `fade`, `pop`, `slide`, `grow` and `move`, each taking a motion token written last, `smooth` when omitted. A container can declare `reflow: motion` so that neighboring elements move aside smoothly.
 
-   过渡的参数可以按名称写，也可以按位置写，两种写法含义相同：
+   Transition parameters can be written by name or by position; both forms mean the same:
 
-   | 过渡 | 按名称 | 按位置 | 省略时 |
+   | Transition | By name | By position | When omitted |
    | --- | --- | --- | --- |
-   | `pop` | `pop(from: 0.8, bouncy)` | `pop(0.8, bouncy)` | 从 0.8 倍放大 |
-   | `slide` | `slide(edge: bottom, distance: 12, smooth)` | `slide(bottom, 12, smooth)` | 从底边滑入 16 点 |
-   | `grow` | `grow(edge: trailing, jelly)` | `grow(trailing, jelly)` | 固定底边 |
-   | `move` | `move(edge: bottom, sheet)` | `move(bottom, sheet)` | 从底边移入 |
+   | `pop` | `pop(from: 0.8, bouncy)` | `pop(0.8, bouncy)` | Scales up from 0.8 |
+   | `slide` | `slide(edge: bottom, distance: 12, smooth)` | `slide(bottom, 12, smooth)` | Slides in 16 points from the bottom edge |
+   | `grow` | `grow(edge: trailing, jelly)` | `grow(trailing, jelly)` | Bottom edge fixed |
+   | `move` | `move(edge: bottom, sheet)` | `move(bottom, sheet)` | Moves in from the bottom edge |
 
-   边只有 `leading`、`trailing`、`top`、`bottom` 四个，`left`、`right` 等其他名称构建报错。按位置写时，边是动效 token 之前的名称；只写一个名称时，它是边名就作边（`slide(leading)`），否则作 token（`slide(jelly)`），两者都不是则构建报错。`slide` 的距离是一个不小于 0 的数，单位为点；`grow` 没有距离。`slide` 与 `grow` 的同一参数写两次、多出名称或数字，同样构建报错，不会悄悄换成默认值。在 macOS 窗口放慢 10 倍逐帧截取，一个真实应用以 `slide(trailing, 24, hero)` 出现的面板从右侧水平移入，没有竖直位移；以位置写法声明的换页过渡生成的位移也分别是声明的 12 点与 8 点，不再统一为 16 点。
+   The only edges are `leading`, `trailing`, `top` and `bottom`; `left`, `right` and other names are build errors. In the positional form, the edge is the name before the motion token; when only one name is written, it is the edge if it is an edge name (`slide(leading)`), otherwise the token (`slide(jelly)`), and if it is neither, it is a build error. The distance of `slide` is a number not less than 0, in points; `grow` has no distance. Writing the same parameter of `slide` or `grow` twice, or extra names or numbers, is likewise a build error and is not silently replaced by a default. Captured frame by frame in a macOS window slowed down 10 times, a panel in a real app that appears with `slide(trailing, 24, hero)` moves in horizontally from the right with no vertical offset; the offsets generated for page-change transitions declared in the positional form are also the declared 12 points and 8 points respectively, no longer uniformly 16 points.
 
-   `move` 是整页的移入移出：元素从一边移过自己的整个宽度或高度进来，消失时原路退出，不淡入淡出，例如从底部升起、向下收起的播放页 `Stack(appear: sheet, disappear: sheet)`（`sheet: move(bottom, sheet)`）。与 `slide` 一样只有边，没有距离。六个目标实现（2026-11-01）：SwiftUI 是 `.move(edge:)`，`stagger` 中按元素自己的尺寸偏移；Compose 是 `slideIn`/`slideOut` 整个尺寸；Web 按 `offsetHeight`/`offsetWidth` 位移；GTK、WinUI 3 与 GPUI 按分配到的尺寸位移。SwiftUI 的 `ZStack` 会把正在离开的一层画到其余层后面，整页的退出因此一开始就被它让出的页面挡住；所以一个 `Stack` 的条件里有带过渡的层时，每一层按书写顺序得到自己的 `zIndex`，离开的一层留在原位、不越过写在它后面的层（提示、对话框）。macOS 上逐帧截图验证播放页升起与收起都在移动；iPhone 17 Pro 模拟器录屏验证第二次起的升起与收起，首次打开的调试构建要先建好整个播放页，第一段移动会卡一下。
+   `move` moves a whole page in and out: the element moves in from one side across its own full width or height, and when it disappears it leaves the way it came, without fading, for example a player page that rises from the bottom and sinks down, `Stack(appear: sheet, disappear: sheet)` (`sheet: move(bottom, sheet)`). Like `slide`, it has only an edge, no distance. Implemented on all six targets (2026-11-01): SwiftUI is `.move(edge:)`, offset by the element's own size in `stagger`; Compose is `slideIn`/`slideOut` by the full size; the Web moves by `offsetHeight`/`offsetWidth`; GTK, WinUI 3 and GPUI move by the allocated size. SwiftUI's `ZStack` draws a layer that is leaving behind the other layers, so a whole page's exit would be hidden from the start by the page it reveals; so when the conditions of a `Stack` contain a layer with a transition, every layer gets its own `zIndex` in writing order, and a leaving layer stays in place without passing the layers written after it (hints, dialogs). Verified on macOS with frame-by-frame screenshots that the player page moves as it rises and sinks; on an iPhone 17 Pro simulator a screen recording verified rising and sinking from the second time on; on first opening, a debug build first has to build the whole player page, so the first movement hitches.
 
-   SwiftUI 的 `match` 与 `if` 一样，在分支直接子元素声明过渡时，为判别值变化建立动画事务；未声明过渡的 `match` 保持原来的行为。已用动态导航回归覆盖生成代码及 Swift 类型检查，并在一个真实应用的设置页慢放确认普通分类、相同组件的不同分支和独立布局之间的淡入与位移；修改当前页内的偏好不会重播入场。
+   In SwiftUI, `match`, like `if`, sets up an animation transaction for changes of the discriminant when the direct children of a branch declare transitions; a `match` without declared transitions keeps its previous behavior. The dynamic navigation regression test covers the generated code and Swift type checking, and slow motion on a real app's settings page confirmed the fades and offsets between ordinary categories, between different branches of the same component and between standalone layouts; changing a preference within the current page does not replay the entrance.
 
    ```rust
    ForEach(items: app.sections, key: id, reflow: smooth) |section| {
@@ -1011,9 +1013,9 @@ Stack(align: top_trailing) {
    }
    ```
 
-   `grow(edge: bottom, bouncy)` 是固定某一边、沿垂直于该边的方向从零伸展到完整尺寸的过渡，不淡入，也不缩放另一轴。`appear_delay: 秒` 必须配合 `appear`，延迟非负，和 `stagger` 的轮次延迟相加；每次挂载（包括首次加载）在首帧布局就绪后开始计时，卸载取消等待，普通状态更新不重播。系统减少动态效果时立即显示，不等待、不伸展。SwiftUI 与 Web 已实现（`edge_grow`、`delayed_appear`），其他目标用到时构建报错。
+   `grow(edge: bottom, bouncy)` is a transition that keeps one edge fixed and extends from zero to full size perpendicular to that edge; it does not fade in and does not scale the other axis. `appear_delay: seconds` must be paired with `appear`; the delay is non-negative and adds to the round delay of `stagger`; each mount (including the first load) starts the clock once the first frame's layout is ready, unmounting cancels the wait, and ordinary state updates do not replay it. With the system's Reduce Motion the element is shown immediately, with no wait and no extension. SwiftUI and Web are implemented (`edge_grow`, `delayed_appear`); other targets report a build error when these are used.
 
-   容器可以声明 `stagger: 秒`，让子元素错峰出现：这个容器本身出现时，或一次更新给它加入了几个子元素时，带 `appear` 的直接子元素依次播放各自的过渡，每个比前一个晚 `stagger` 秒。与平常不同，容器出现时它的这些子元素也播放 `appear`，这正是错峰的用途；首次显示默认不播放，显式写 `appear_delay` 时等待首帧布局完成再播放，系统减少动态效果时不错峰。`stagger` 写在 `Column`、`Row`、`Grid`、`Stack`、`ForEach` 与 `List` 上，取 0 到 1 秒；`ForEach` 的子元素是它的各行。实现进度：Web 已实现，在浏览器中用 `examples/gallery` 的海报墙（`ForEach(stagger: 0.04)`，卡片 `appear: rise`）逐帧确认切到“图案”页时 6 张卡片依次在约 0、47、97、130、164、214 毫秒开始升起；macOS 与 iOS 已实现，同一次更新中出现的子元素按阅读顺序（自上而下，同一行内按书写方向）排队，不依赖系统报告出现的先后（懒加载网格报告的先后不固定），在 macOS 窗口与 iPhone 17 Pro 模拟器上放慢 10 倍逐帧确认卡片从 Gingham 到 Windowpane 依次升起；Compose、GTK 与 WinUI 3 已实现，轮次在组合或构建各行时按书写与条目顺序分配：Android 模拟器上把动画倍率调为 100 逐张截图、Windows PC 上逐帧截取，6 张卡片同样依次升起；Linux 虚拟机上由动效日志量出 6 张卡片在约 3、44、84、123、164、204 毫秒开始。一次更新加入几个子元素的情形在 Compose 上未验证。
+   A container can declare `stagger: seconds` so that its children appear staggered: when the container itself appears, or when one update adds several children to it, its direct children with `appear` play their own transitions one after another, each `stagger` seconds after the previous one. Unlike usual, these children also play `appear` when the container appears, which is exactly what staggering is for; by default it does not play on first display, and when `appear_delay` is written explicitly it plays after the first frame's layout completes; with the system's Reduce Motion there is no staggering. `stagger` is written on `Column`, `Row`, `Grid`, `Stack`, `ForEach` and `List` and takes 0 to 1 seconds; the children of `ForEach` are its rows. Implementation status: Web is implemented; in the browser, with the poster wall of `examples/gallery` (`ForEach(stagger: 0.04)`, cards with `appear: rise`), frame-by-frame inspection confirmed that on switching to the "Patterns" page the 6 cards start rising one after another at about 0, 47, 97, 130, 164 and 214 milliseconds; macOS and iOS are implemented: children that appear in the same update are queued in reading order (top to bottom, and within a row in the writing direction), not in the order in which the system reports their appearance (the order reported by lazy grids is not fixed); slowed down 10 times in a macOS window and on the iPhone 17 Pro simulator, frame-by-frame inspection confirmed the cards rising in order from Gingham to Windowpane; Compose, GTK and WinUI 3 are implemented, with rounds assigned in writing and item order while composing or building the rows: with the animation scale set to 100 on the Android emulator and screenshots taken one by one, and with frames captured one by one on the Windows PC, the 6 cards likewise rise one after another; on the Linux VM the motion log measured the 6 cards starting at about 3, 44, 84, 123, 164 and 204 milliseconds. The case of one update adding several children is not verified on Compose.
 
    ```rust
    Column(gap: 12, stagger: 0.03) {
@@ -1023,32 +1025,32 @@ Stack(align: top_trailing) {
    }
    ```
 
-3. **共享元素**：两个元素声明相同的静态 `hero` 名称，并可用 `hero_key` 绑定记录身份，例如 `hero: poster, hero_key: item.id`。在同一窗口中，一次更新让带某个键的元素出现、而更新前另一个带同一键的元素可见时，后端让新元素从旧元素的位置与尺寸以 `hero` 动效展开，内容交叉淡化；返回时反向。同一时刻同一窗口中最多一个可见元素带某个键，跨窗口不配对。macOS 的 `Image` 使用窗口级像素覆盖层，Web 图片使用视口级副本并等待 ScaleBox 首次有效布局；两者已验证跨分栏的图片展开、缩小和恢复。iOS 及 macOS 其他视图仍沿用匹配几何，不能由图片验证推断视频画面的连续传递已经完成。
-4. **长度变化**：元素声明 `animate: 动效` 后，它绑定的长度变化时用这个动效过渡，例如画面在铺满与退后之间：`Column(padding: if window.idle { 0 } else { 40 }, animate: hero)`。`Video` 的 `corner` 同样过渡，画面图层的圆角由平台的图层动画驱动。
+3. **Shared elements**: two elements declare the same static `hero` name and can bind a record identity with `hero_key`, for example `hero: poster, hero_key: item.id`. Within one window, when an update makes an element with a given key appear while another element with the same key was visible before the update, the backend expands the new element from the old element's position and size with the `hero` motion and cross-fades the content; going back reverses it. At any moment at most one visible element in a window carries a given key; elements are not paired across windows. On macOS, `Image` uses a window-level pixel overlay, and Web images use a viewport-level copy and wait for the first valid layout of ScaleBox; both are verified for an image expanding, shrinking and restoring across split-view columns. iOS and the other macOS views still use matched geometry, and the image verification cannot be taken to mean that continuous handoff of the video picture is complete.
+4. **Length changes**: once an element declares `animate: motion`, changes to the lengths it binds transition with that motion, for example a picture moving between filling the window and stepping back: `Column(padding: if window.idle { 0 } else { 40 }, animate: hero)`. The `corner` of `Video` transitions too; the rounded corners of the picture layer are driven by the platform's layer animation.
 
-另有两个与动效无关的通用属性：`appearance: dark` 或 `light` 让元素及其中的一切固定使用深色或浅色外观，不随窗口切换，例如始终是深色的播放层；`reveal: hover` 见“带内容的按钮与悬停显示”。实现进度：`animate`、`appearance` 与 `Video` 的圆角 SwiftUI 已实现，在 macOS 上用 `examples/gallery` 验证：画框静置后铺满、移动指针后退后，圆角裁在画面上，画框区域在浅色窗口中保持深色；过渡的中间帧未逐帧确认。从其中弹出的浮层跟随 `appearance`，已验证。AppKit 按窗口的外观画菜单，从这样的部分弹出的菜单原先是浅色的；现在部分的背后放一个不接收点按的标记视图，菜单开始跟踪时取指针下最内层部分的外观设给这个菜单，macOS 上验证浅色窗口里画框中的菜单是深色、菜单项照常生效。iOS 上 UIKit 按菜单所出自的控件的外观画菜单，而 SwiftUI 的菜单按钮（iOS 26 上是一个 UIKit 按钮）不随部分的外观，所以同样的菜单原先也是浅色；现在标记视图在窗口上旁观触摸，触摸在部分里的菜单控件上开始时，把最内层部分的外观设给这个控件，菜单弹出时照这个外观画。iOS 26.5 模拟器验证：浅色窗口里画框中的菜单是深色，录屏逐帧看展开动画从第一帧起就是深色，选「大」后字号为 18；临时把画框改成 `light`、窗口设为深色时，菜单是浅色；部分以外的工具栏菜单仍跟随窗口。没有触摸过、从键盘或 VoiceOver 打开的菜单，按实现仍是窗口的外观，未实测。iOS 上应用选择的明暗（`WindowSet(appearance:)`）原先被场景根上的快照设置覆盖而不生效，已修正，iOS 26.5 模拟器验证了切换深色与跟随系统。Compose 已实现，Android 模拟器上验证：画框区域在浅色窗口中保持深色，从其中弹出的分体按钮浮层与菜单也是深色；静置三秒后画框铺满、圆角收为直角，触摸后退回并恢复圆角（圆角的视频用 `TextureView` 才能被裁住）；切换深色时状态栏图标随之变色。Web 已实现：部分换用另一套主题变量，其中弹出的浮层与菜单在页面结构上仍在这部分里，随之是深色；浏览器中验证浅色窗口里画框保持深色，分体按钮的浮层与“字号”菜单都是深色，画框静置 3 秒后铺满、圆角收为直角、按钮隐藏。GTK 已实现：把 libadwaita 的样式规则限定在部分之下、换用另一种外观的命名颜色；WinUI 3 已实现：部分的 `RequestedTheme`，浮层另设同样的主题；Linux 虚拟机与 Windows PC 上验证画框页在浅色窗口中为深色，其中分体按钮的浮层也是深色。
+There are also two general properties unrelated to motion: `appearance: dark` or `light` makes an element and everything in it always use the dark or light appearance, without switching with the window, for example a playback layer that is always dark; for `reveal: hover`, see "Buttons with content and reveal on hover". Implementation status: `animate`, `appearance` and the rounded corners of `Video` are implemented in SwiftUI and verified on macOS with `examples/gallery`: the frame fills the window when idle and steps back when the pointer moves, the rounded corners clip the picture, and the frame area stays dark in a light window; the intermediate frames of the transition were not confirmed frame by frame. Overlays popping up from it follow `appearance`, verified. AppKit draws menus in the window's appearance, so menus popping up from such a region used to be light; now a marker view that does not receive clicks sits behind the region, and when a menu begins tracking, the appearance of the innermost region under the pointer is set on that menu; verified on macOS: in a light window the menu in the frame is dark and its items work as usual. On iOS, UIKit draws a menu in the appearance of the control it comes from, and SwiftUI's menu button (a UIKit button on iOS 26) does not follow the region's appearance, so the same menu used to be light as well; now the marker view observes touches on the window, and when a touch begins on a menu control inside a region, it sets the innermost region's appearance on that control, and the menu is drawn in that appearance when it pops up. Verified on the iOS 26.5 simulator: in a light window the menu in the frame is dark, a screen recording viewed frame by frame shows the expansion animation dark from the first frame, and after choosing "Large" the text size is 18; with the frame temporarily changed to `light` and the window set to dark, the menu is light; toolbar menus outside the region still follow the window. Menus that were never touched, opened from the keyboard or with VoiceOver, still use the window's appearance according to the implementation; not measured. On iOS the appearance chosen by the app (`WindowSet(appearance:)`) used to be overridden by the snapshot setting on the scene root and had no effect; this is fixed, and switching to dark and following the system are verified on the iOS 26.5 simulator. Compose is implemented and verified on the Android emulator: the frame area stays dark in a light window, and the split-button overlay and the menu popping up from it are dark too; after three seconds idle the frame fills the window and its rounded corners become square, and a touch makes it step back and restores the rounded corners (a video with rounded corners can only be clipped with `TextureView`); when switching to dark, the status bar icons change color accordingly. Web is implemented: the region switches to another set of theme variables, and overlays and menus popping up from it are still inside this region in the page structure, so they are dark along with it; verified in the browser: in a light window the frame stays dark, the split button's overlay and the "Font size" menu are both dark, and after 3 seconds idle the frame fills the window, its rounded corners become square and the buttons hide. GTK is implemented: libadwaita's style rules are scoped under the region and use the named colors of the other appearance; WinUI 3 is implemented: the region's `RequestedTheme`, with the same theme set separately on overlays; verified on the Linux VM and the Windows PC: the frame page is dark in a light window, and the split-button overlay inside it is dark too.
 
-各目标的预期实现：
+Expected implementation per target:
 
-| 目标 | 弹簧与变换 | 共享元素 |
+| Target | Springs and transforms | Shared elements |
 | --- | --- | --- |
-| SwiftUI | `.spring(response: T, dampingFraction: ζ)`，可打断并保留速度 | 同一视图层级用 `matchedGeometryEffect`；导航推入在 iOS 18 起用 `navigationTransition(.zoom)` |
-| WinUI 3 | 运行时自己的弹簧，每帧在 `CompositionTarget.Rendering` 中推进并保留速度，写到 `Translation`、`Scale`、`Opacity` | 离开的元素移到窗口覆盖层，新元素从旧位置与尺寸展开、旧元素同时淡出（`ConnectedAnimationService` 要求导航时成对准备，不用它） |
-| GTK | libadwaita 的 `AdwSpringAnimation`；任意控件的变换在分配时应用 | 没有原生方案：离开的元素留一张画面在窗口上方的层里，新元素从旧位置与尺寸展开、旧画面随之移动并淡出（视频与画布不留画面） |
-| Web | 页面自己的逐帧弹簧积分（`requestAnimationFrame`），打断时保留当前值与速度 | 新元素从旧元素的位置与尺寸长出（FLIP），旧元素的副本同时淡出 |
+| SwiftUI | `.spring(response: T, dampingFraction: ζ)`, interruptible with velocity preserved | `matchedGeometryEffect` within one view hierarchy; navigation pushes use `navigationTransition(.zoom)` from iOS 18 on |
+| WinUI 3 | The runtime's own spring, advanced every frame in `CompositionTarget.Rendering` with velocity preserved, written to `Translation`, `Scale` and `Opacity` | The leaving element moves to the window overlay, and the new element expands from the old position and size while the old element fades out (`ConnectedAnimationService` requires preparing pairs during navigation, so it is not used) |
+| GTK | libadwaita's `AdwSpringAnimation`; transforms of any widget are applied during allocation | No native solution: the leaving element leaves a picture in a layer above the window, and the new element expands from the old position and size while the old picture moves along and fades out (video and canvas leave no picture) |
+| Web | The page's own per-frame spring integration (`requestAnimationFrame`), keeping the current value and velocity when interrupted | The new element grows from the old element's position and size (FLIP) while a copy of the old element fades out |
 
-- **打断**：弹簧接受新的目标值，从当前位置继续；平台能保留速度时保留速度。
-- **减少动态效果**：系统开启时，状态变换不再执行，结构过渡与共享元素改为 150 毫秒的淡入淡出。开发与测试可用 `BERN_MOTION=reduce` 强制这一设置，使截图与场景回放确定；SwiftUI 目标还可用 `BERN_MOTION=slow` 把弹簧与错峰放慢 10 倍，便于逐帧截图检查动效。
-- **事实与语义树**：状态、窗口事实与 `ui.inspect` 报告更新后的目标状态，不报告动画中间值；命令不等待动画结束。
-- **做不到的映射**：目标在能力描述中声明支持的动效用法；不支持时按表中的退回方式呈现并在构建诊断中列出。
+- **Interruption**: a spring accepts a new target value and continues from the current position; it preserves velocity where the platform can.
+- **Reduce Motion**: when the system setting is on, state transforms no longer run, and structural transitions and shared elements become 150-millisecond fades. Development and tests can force this setting with `BERN_MOTION=reduce` so that screenshots and scene replays are deterministic; the SwiftUI target can also use `BERN_MOTION=slow` to slow springs and staggering down 10 times, for checking motion with frame-by-frame screenshots.
+- **Facts and the semantic tree**: state, window facts and `ui.inspect` report the updated target state, not intermediate animation values; commands do not wait for animations to finish.
+- **Mappings that cannot be done**: targets declare the motion uses they support in their capability descriptions; an unsupported use is presented with the fallback in the table and listed in the build diagnostics.
 
-#### 联动
+#### Linked effects
 
-随滚动位置或手势连续变化的效果不用弹簧，也不开放逐帧回调：界面只声明对应关系，由平台的渲染系统逐帧计算。
+Effects that change continuously with the scroll position or a gesture do not use springs, and no per-frame callbacks are exposed either: the interface only declares the mapping, and the platform's rendering system computes it frame by frame.
 
-- **随滚动变化**：元素写 `scroll_scale: 1.12` 时，在它所在滚动区的中心放大到 1.12 倍，离中心越远越接近原大，到边缘为 1；`scroll_opacity: 0.6` 让它在边缘时为 0.6、在中心时完全不透明。两者可以同时写，只改变绘制、不改变布局；不在滚动区里的元素不受影响。减少动态效果时不再变化。
-- **滚动对齐**：`ScrollView(snap: start | center)` 让滚动停下时有一项对齐到开头或正中；`center` 时首尾两项也能停到正中。
-- **滚动位置**：`ScrollView(position: draft.x)` 绑定一个与列表 key 同类型的会话字段（`i64` 或 `String`），表示停在锚点（`snap: center` 时为正中，否则为开头）的那一项。用户滚动时字段跟着变；字段被设成另一项的 key 时（例如 `=> draft.x.set(item.id)`）以 `smooth` 滚过去。剧集胶片的“下一集停在正中”、拼音索引的“点字母滚过去”都这样写：
+- **Changing with scrolling**: with `scroll_scale: 1.12`, an element is scaled up to 1.12 times at the center of the scroll area it is in, gets closer to its original size the farther it is from the center, and is 1 at the edge; `scroll_opacity: 0.6` makes it 0.6 at the edge and fully opaque at the center. Both can be written together; they only change drawing, not layout, and elements that are not in a scroll area are unaffected. With Reduce Motion they no longer change.
+- **Scroll snapping**: `ScrollView(snap: start | center)` makes one item align to the start or the center when scrolling stops; with `center`, the first and last items can also stop at the center.
+- **Scroll position**: `ScrollView(position: draft.x)` binds a session field of the same type as the list key (`i64` or `String`) that denotes the item resting at the anchor (the center with `snap: center`, otherwise the start). When the user scrolls, the field follows; when the field is set to another item's key (for example `=> draft.x.set(item.id)`), the view scrolls there with `smooth`. An episode filmstrip's "next episode rests at the center" and a pinyin index's "tap a letter to scroll there" are both written this way:
 
 ```rust
 ScrollView(axis: horizontal, snap: center, position: draft.episode) {
@@ -1062,37 +1064,37 @@ ScrollView(axis: horizontal, snap: center, position: draft.episode) {
 }
 ```
 
-- **晃一下**：任何元素写 `nudge: 条件`，条件变真时它稍稍放大、再以 `jelly` 弹簧弹回，例如拖入文件时画框晃一下：`Stack(nudge: draft.dragging)`。`ScrollView(position:, arrival: nudge)` 让设置 `position` 滚到的那一项在停稳后晃一下，例如点拼音索引后那张海报；用户自己滚动不会触发。减少动态效果时不晃。
-- **转动**：任何元素写 `spin: 条件`，条件成立时它绕自己的中心匀速转动，`spin_period` 秒一圈（默认 1），负数逆时针；条件不成立时停在当时的角度，再成立时从那里接着转，减少动态效果时不转。转动不影响布局，只是画面。例如接收服务就绪时转动的标志：`Image(source: "logo.png", width: 200, height: 200, spin: app.ready, spin_period: 15)`。只为转一张图不必用 `Svg`：`Svg` 需要文档引擎（各平台的网页视图），位图加 `spin` 由系统的合成器转动。SwiftUI 用 `TimelineView` 与 `rotationEffect`，Compose 用逐帧时钟写 `graphicsLayer` 的 `rotationZ`，WinUI 3 每帧写包装层的 `Rotation`，GTK 在帧时钟里给 `MotionBox` 的变换加上旋转，Web 用 CSS 的 `rotate` 属性动画（与其他动效的 `transform` 互不覆盖）。GPUI 只转资源里的 `Image`：图里可见的像素是同一种颜色（或 `rendering: template`）时作为单色图形在 GPU 上带变换绘制；多色的在后台线程逐帧转好再画；其他元素不转，`bern check` 给出警告。
-- **光效**：任何元素写 `glow: 倍数`，指针在它的范围内时，一团白光跟着指针：半径为元素短边的这个倍数，中心的不透明度为 `glow_opacity`（默认 0.4），到半径的 55% 处降为中心的五分之一，到半径处为零；光加在元素的画面上，留在元素的范围与圆角之内，出现与消失各淡入淡出 0.18 秒。鼠标悬停时亮；触屏上手指按住时亮、跟着手指走、抬起后消失。看的是指针在不在元素的范围内，不是元素是不是最上面的那一个，所以压在封面上的标题、歌词预览不会让封面在那里不亮；光不接收点按，不影响布局。例如歌曲封面：`Image(source: app.cover, width: 320, height: 320, corner: 12, glow: 1.05, glow_opacity: 0.22)`。各窗口在根上跟踪指针，带光效的元素按自己的位置取用：SwiftUI 在窗口根上用 `onContinuousHover`，iOS 另在窗口上挂一个只旁观、从不识别的手势识别器跟随手指，光是按 `plusLighter` 混合的径向渐变；Compose 在窗口内容上以 `Initial` 阶段只看不消费地读指针，光在绘制阶段读指针、按 `Plus` 混合，指针移动不触发重组；Web 在文档上监听指针，光是 `plus-lighter` 混合的一层，图片这类不能有子元素的元素旁边放一层、按图片画出来的位置摆放；GTK 在窗口上以捕获阶段的动作与触摸控制器旁观，光在 `MotionBox` 的绘制里按 `Screen` 混合；WinUI 3 在窗口内容上以 `handledEventsToo` 收指针事件，光是元素上方 Composition 的径向渐变精灵，按普通透明度叠加（Composition 不带 Win2D 时没有加亮混合）。GPUI 把元素包一层，层上的画布在每次绘制时读窗口的指针位置，再注册一个只旁观的鼠标移动监听让指针在元素上移动或离开时重画；光是一张预先画好的白色径向图片（中心为 `glow_opacity`，55% 处五分之一，边缘为零），以指针为中心按 `paint_image` 画进元素的范围，并按元素的圆角裁剪（GPUI 的图片精灵自带圆角距离场），淡入淡出按经过的时间线性推进；GPUI 没有混合模式，与 WinUI 3 一样按普通透明度叠加。
-- **模糊**：任何元素写 `blur: 半径` 时，它的画面按这个半径（点）模糊，模糊不越出元素的范围与圆角，边缘随之变淡；常用来把同一张封面模糊后铺在后面。SwiftUI 用 `blur(radius:)` 加圆角裁剪；Compose 用 `Modifier.blur`（Android 12 起，更早的系统保持清晰）；Web 用 CSS `filter: blur()` 与按圆角的 `clip-path`，样式投下的阴影与模糊并存；GTK 在 `MotionBox` 的绘制里用模糊节点（半径取两倍，与 CSS 的标准差一致）；WinUI 3 在元素上方放一个 Composition 精灵，用自己描述给 Direct2D 的高斯模糊效果模糊它下面的画面（不需要 Win2D），所以靠近边缘处会带进一点周围的颜色。GPUI 没有元素滤镜，分三种画法：图片在 CPU 上模糊——先按 `fit` 摆进元素的框，框外透明，再用三次盒式模糊近似高斯（预乘颜色，边缘因此变淡、颜色不变），半径大时先缩小再模糊（高斯本来就去掉了细节），结果按元素的圆角画出，按图片、尺寸与半径缓存，换掉的旧图从图集里移除；容器的模糊传给其中的文字与图标：文字保留原来的排版位置，由画布把排好的文字按高斯分布的一组偏移（黄金角螺线，8 到 40 份）各画一遍，每份的不透明度取得让笔画中间的浓度与真实高斯模糊相同（按笔画约为字号的一成估算），图标同样画多份；容器自己以 `overflow_hidden` 把这些留在框内。跟随状态的半径按 `animate` 的弹簧变化，每帧重画。
+- **Nudge**: any element can write `nudge: condition`; when the condition becomes true, the element scales up slightly and springs back with `jelly`, for example a frame that wiggles when a file is dragged in: `Stack(nudge: draft.dragging)`. `ScrollView(position:, arrival: nudge)` makes the item that setting `position` scrolled to wiggle once it has come to rest, for example the poster after tapping the pinyin index; the user's own scrolling does not trigger it. With Reduce Motion there is no wiggle.
+- **Rotation**: any element can write `spin: condition`; while the condition holds, the element rotates at constant speed around its own center, one turn every `spin_period` seconds (default 1), counterclockwise when negative; when the condition stops holding it stops at its current angle, and when it holds again it continues from there; with Reduce Motion it does not rotate. Rotation does not affect layout; it is only drawing. For example, a logo that rotates when the receiving service is ready: `Image(source: "logo.png", width: 200, height: 200, spin: app.ready, spin_period: 15)`. Rotating an image does not need `Svg`: `Svg` needs a document engine (each platform's web view), whereas a bitmap with `spin` is rotated by the system compositor. SwiftUI uses `TimelineView` and `rotationEffect`, Compose writes `rotationZ` of `graphicsLayer` from a per-frame clock, WinUI 3 writes the `Rotation` of a wrapper layer every frame, GTK adds the rotation to the transform of `MotionBox` in the frame clock, and Web uses a CSS `rotate` property animation (it and the `transform` of other motion do not override each other). GPUI rotates only an `Image` from the resources: when the visible pixels in the image are all one color (or `rendering: template`), it is drawn on the GPU with a transform as a monochrome shape; multicolor images are rotated frame by frame on a background thread and then drawn; other elements do not rotate, and `bern check` gives a warning.
+- **Glow**: any element can write `glow: multiple`; while the pointer is within it, a white glow follows the pointer: its radius is this multiple of the element's shorter side, the opacity at its center is `glow_opacity` (default 0.4), it falls to a fifth of the center at 55% of the radius and to zero at the radius; the glow is added to the element's picture, stays within the element's bounds and corner radius, and fades in and out over 0.18 seconds each. It lights up while the mouse hovers; on touch screens it lights up while a finger is held down, follows the finger and disappears when it lifts. It looks at whether the pointer is within the element's bounds, not at whether the element is the topmost one, so a title or a lyrics preview laid over a cover does not keep the cover from lighting up there; the glow takes no taps and does not affect layout. For example a song cover: `Image(source: app.cover, width: 320, height: 320, corner: 12, glow: 1.05, glow_opacity: 0.22)`. Each window tracks the pointer at its root, and elements with a glow take it according to their own position: SwiftUI uses `onContinuousHover` at the window root, and iOS additionally attaches a gesture recognizer to the window that only observes and never recognizes, to follow fingers; the glow is a radial gradient blended with `plusLighter`. Compose reads the pointer on the window content in the `Initial` pass, looking without consuming; the glow reads the pointer in the draw phase and blends with `Plus`, so pointer movement does not trigger recomposition. The Web listens to the pointer on the document; the glow is a layer blended with `plus-lighter`, and for elements that cannot have children, such as images, a layer is placed beside them at the position where the image is drawn. GTK observes with capture-phase motion and touch controllers on the window, and the glow blends with `Screen` in `MotionBox`'s drawing. WinUI 3 receives pointer events on the window content with `handledEventsToo`; the glow is a Composition radial gradient sprite above the element, overlaid with ordinary opacity (Composition without Win2D has no additive blending). GPUI wraps the element in a layer whose canvas reads the window's pointer position each time it draws, and registers an observe-only mouse move listener so that it redraws when the pointer moves over or leaves the element; the glow is a pre-drawn white radial image (`glow_opacity` at the center, a fifth at 55%, zero at the edge), drawn with `paint_image` centered on the pointer within the element's bounds and clipped to the element's corner radius (GPUI's image sprites carry their own corner distance field), with the fades advancing linearly with elapsed time; GPUI has no blend modes, so like WinUI 3 it overlays with ordinary opacity.
+- **Blur**: when any element writes `blur: radius`, its picture is blurred by this radius (points); the blur does not go beyond the element's bounds and corner radius, and the edges fade with it; it is often used to lay a blurred copy of the same cover behind. SwiftUI uses `blur(radius:)` plus a rounded clip; Compose uses `Modifier.blur` (from Android 12; earlier systems stay sharp); the Web uses CSS `filter: blur()` and a `clip-path` following the corner radius, and the shadow a style casts coexists with the blur; GTK uses a blur node in `MotionBox`'s drawing (with twice the radius, matching CSS's standard deviation); WinUI 3 places a Composition sprite above the element that blurs the picture below it with a Gaussian blur effect it describes to Direct2D itself (no Win2D needed), so a little of the surrounding color comes in near the edges. GPUI has no element filters and draws in three ways: images are blurred on the CPU, first laid into the element's box by `fit`, transparent outside the box, then blurred with three box blurs approximating a Gaussian (premultiplied colors, so the edges fade while the colors stay), scaled down first for large radii (a Gaussian removes the detail anyway), drawn with the element's corner radius, and cached by image, size and radius, with replaced old images removed from the atlas; a container's blur passes to the text and icons in it: text keeps its original layout position, and a canvas draws the laid-out text once at each of a set of offsets with a Gaussian distribution (a golden-angle spiral, 8 to 40 copies), each copy's opacity chosen so that the density in the middle of the strokes equals that of a real Gaussian blur (estimating strokes at about a tenth of the font size), and icons are likewise drawn several times; the container itself keeps these inside its box with `overflow_hidden`. A radius that follows state changes with `animate`'s spring and redraws every frame.
 
-  实测（2026-10-31，`examples/gallery` 关于窗口：模糊的海报上叠着转动的唱片，海报带光效）：Chromium 中指针在唱片上与海报上时海报都亮、离开后不亮，光的位置与半径按海报自己的单位（窗口被缩放时仍对齐），模糊裁在 12 点圆角内；Android 15 模拟器上手指按住唱片时海报在唱片周围变亮（同一像素 152 → 166），抬起后恢复，模糊显示正常，Kotlin 编译无警告；SwiftUI 的 `tests/glow.rs` 在屏幕外渲染运行时的光效与模糊：光在指针处、中心更亮、叠在上面的视图与圆角外不亮、指针离开后不亮，模糊不越出边界；WinUI 3 与系统 XAML 两套前端在 Windows PC 上用 MSVC 编译通过。未验证：macOS 上真实鼠标经窗口根的悬停（合成的鼠标事件不驱动 SwiftUI 的悬停）、iOS 的手指、GTK（只过了 clippy，Linux 虚拟机未开）与 WinUI 3 的实际画面。
-- **定位比例**：`ScrollView(position: draft.x, anchor: 0.35)` 不吸附，把 `position` 的那一项停在视图 35% 处，内容首尾够不着时自然贴边（不像 `snap: center` 那样在首尾留出边距）。用于歌词这类“正在进行的一项略偏上、开头不留空”的列表。SwiftUI 用 `scrollPosition(id:anchor:)` 的锚点；Compose、GTK、WinUI 3、Web 与 GPUI 按同一比例计算该项的滚动位置（项与视图的同一比例点对齐），只有 `snap` 时松手后才吸附到最近一项，只写 `position` 与 `anchor` 时停在用户松手的地方。
-- **层下的滚动视图**：`under_bars` 的层显示期间，窗口工具栏不画背景，层里的滚动视图也不画顶边的效果（macOS 15 起 `toolbarBackgroundVisibility(.hidden)`，26 起再加 `scrollEdgeEffectHidden`）：此前滚动视图在自己的范围里按窗口的浅色外观画出工具栏背景，深色的层上顶边出现一条灰白（2026-10-31 在 macOS 27 上复现并验证消失）。
-- **盖住窗口的层**：`Stack(under_bars: true)` 里有控件时，它是盖住整个窗口的一页，显示期间分栏视图不显示显示/隐藏侧栏的按钮；只有图片与色块的层（例如垫在分栏视图下的背景）不影响它。SwiftUI 上这一层向窗口根报告，侧栏列表按它 `toolbar(removing: .sidebarToggle)`：这个按钮只能从侧栏一列移除，在层上移除无效（2026-10-31 在 macOS 27 上验证：歌词页上按钮消失，收起后回来）。macOS 上它是工具栏里唯一的项，移除后工具栏缩成标题栏，红绿灯与整个窗口的内容随之上移；所以移除的同时放进一个同样大小、不画任何东西、不接收点击的项（macOS 26 起不带共享的玻璃底），工具栏保持原来的高度（2026-11-03 在 macOS 27 上验证：歌词页打开与收起时红绿灯不动）。WinUI 3 上同样的层显示期间，标题栏的窗格开关、图标与标题淡出，只留标题按钮，标题栏照样能拖动窗口；标题按钮的明暗随这一页的 `appearance`（`AppWindowTitleBar.PreferredTheme`），深色的页上是浅色按钮，收起后回到窗口的明暗；层上的控件放在标题按钮下方之外的地方，否则被标题栏的拖动区挡住（2026-11-01 在 Windows 11 上验证：歌词页上只剩标题按钮，垫在页面下的封面背景不影响标题栏）。
-- **手动滚动**：`ScrollView(browsing: draft.x)` 绑定一个会话布尔字段，用户亲手滚动（拖动、触控板与滚轮，以及松手后的惯性）期间为真，停下后为假；设置 `position` 引起的滚动不算。用于“用户在翻看时先别跟随”，例如歌词：翻看期间取消模糊、不再自动滚到正在唱的一行，停下几秒后再回来。SwiftUI 用 `onScrollPhaseChange`，`tracking`、`interacting`、`decelerating` 算亲手滚动，`animating` 不算；macOS 14 与 iOS 17 没有这个接口，字段一直为假。实测（2026-10-31，macOS 27，一个实际应用的歌词页）：设置位置引起的滚动只报告 `animating`，字段保持为假；亲手滚动需要真实的鼠标或触控板，合成的滚轮事件到不了 SwiftUI，未实测。Compose 以“正在滚动且不是设置位置引起的”为准（`isScrollInProgress`，惯性包括在内）；GTK 在不是自己引起的滚动值变化时置真，滚动静止 160 毫秒后置假；WinUI 3 在不是自己调用 `ChangeView` 引起的中间视图变化时置真，最终一次变化时置假；Web 只认用户的输入（滚轮、键盘、拖动滚动条、触摸拖动后的惯性）之后 400 毫秒内的滚动，滚动停下 200 毫秒后置假，点一行引起的设置位置不算；GPUI 在滚轮与触控板事件（惯性也是这类事件）时置真，停下 160 毫秒后置假，视图自己设置的偏移不产生这类事件。实测（2026-10-31）：Android 模拟器、Windows 11 与 Linux（GTK，Broadway）上一个实际应用的歌词页由设置位置引起的滚动保持为假；亲手滚动未在这三个目标上实测。
-- **跟随状态的模糊与加粗**：`blur` 可以写成表达式，`Text(bold: 条件)` 让文字在条件成立时加粗；两者都配合元素的 `animate`，变化时按它的动效过渡，例如正在唱的一行变大变粗、其他行模糊：`Text(content: line.text, font_size: if line.current { 32 } else { 26 }, bold: line.current, animate: smooth)`。SwiftUI 的模糊与加粗都跟随 `.animation`；Compose 的模糊半径经 `bernLength` 按 `animate` 的弹簧变化，加粗改 `fontWeight`；GTK 的模糊半径经 `bind_number` 弹簧变化，加粗加上 `label.bern-bold`；WinUI 3 的高斯模糊效果把标准差声明为可动画属性 `Blur.Deviation`，半径经 `BindLen` 弹簧写入，加粗在样式字重与粗体之间切换，`animate` 同时让绑定的字号按弹簧变化。Web 的模糊经 `bindNumber` 按弹簧变化，与样式的阴影分开保存后合成 `filter`（浏览器会改写 `filter` 的数值写法，不能按字符串替换），加粗切换 `bern-bold`（字重 700，配 `animate` 时按它的时长过渡）；GPUI 的模糊半径经 `eased` 按弹簧变化，见上文的模糊画法，加粗换成粗体字重。实测（2026-10-31）：同一歌词页在 Android 模拟器、Windows 11 与 Linux 上，正在唱的一行加粗放大，近处轻微、远处更多模糊。实测（2026-11-01，`examples/catalog` 的歌词式面板：60 行、`anchor: 0.35`、按距离模糊、当前行加粗）：Chromium（无头）中按九次“下一行”后当前行停在视图 0.35 处、字重 700、字号 24，模糊依次为 6、4.5、3、1.5、0、1.5……，期间 `browsing` 一直为假；真实滚轮滚动时为真、所有行的模糊弹到接近 0，停下后为假、回到当前行的 0.35 处、模糊恢复。GPUI（macOS，离屏窗口）中当前行同样停在约 0.35 处、加粗，远处的行明显模糊，铺满窗口的背景图在 CPU 上模糊后与网页的效果一致；一个音乐应用构建到 GPUI 后，播放页的背景、歌词的加粗与按距离模糊正确。GPUI 上的亲手滚动没有实测：合成的滚轮与鼠标事件到不了 GPUI 的窗口。
-- **重复反馈**（SwiftUI）：`nudge_key: app.revision` 在键每次变化时播放一次反馈，首次挂载不播放；可配 `nudge_scale: 0.95`，先收缩、90 ms 后用 `jelly` 弹回。用于重复点选同一预设等不会改变选中值的操作；新事件取消上次等待，减少动态效果时保持静止。其他后端暂不播放并给出能力警告。
-- **手势绑定到值**：`Pinch` 与 `Swipe` 是包住内容的手势区。`Pinch(value:, min:, max:)` 用双指缩放的倍数乘到值上；`Swipe(value:, min:, max:, axis:, distance:)` 把拖动的距离换算成值的变化，向上或向右增大，`distance` 点（默认 300）走完整个范围。动作在手指离开时执行，与 `Slider` 一样；外部入口用 `ui.set_number`，辅助技术按十分之一范围调节。手势不能是唯一的入口：同一个值应另有滑块、按钮或菜单。
+  Measured (2026-10-31, the about window of `examples/gallery`: a spinning record over a blurred poster, the poster with a glow): in Chromium the poster lights up while the pointer is over the record and over the poster and not after it leaves, the glow's position and radius follow the poster's own units (still aligned when the window is zoomed), and the blur is clipped within the 12-point corner radius; on an Android 15 emulator the poster lights up around the record while a finger holds the record down (the same pixel 152 → 166) and recovers after lifting, the blur shows correctly, and Kotlin compiles without warnings; SwiftUI's `tests/glow.rs` renders the runtime's glow and blur offscreen: the glow is at the pointer and brighter at the center, a view on top and the area outside the corner radius do not light up, nothing lights up after the pointer leaves, and the blur does not go beyond the bounds; the WinUI 3 and system XAML frontends compile with MSVC on the Windows PC. Not verified: hovering with a real mouse through the window root on macOS (synthetic mouse events do not drive SwiftUI's hover), fingers on iOS, GTK (only clippy passed; the Linux VM was not started) and the actual picture on WinUI 3.
+- **Anchor ratio**: `ScrollView(position: draft.x, anchor: 0.35)` does not snap; it stops the `position` item at 35% of the view, and where the start or end of the content cannot reach that, it naturally rests against the edge (unlike `snap: center`, which leaves margins at the start and end). Used for lists such as lyrics, where the current item sits slightly above the middle and there is no gap at the start. SwiftUI uses the anchor of `scrollPosition(id:anchor:)`; Compose, GTK, WinUI 3, the Web and GPUI compute the item's scroll position from the same ratio (the item and the view are aligned at the same ratio point); only with `snap` does it snap to the nearest item after the user lets go, and with only `position` and `anchor` it stays where the user lets go.
+- **Scroll views under layers**: while an `under_bars` layer is shown, the window toolbar draws no background, and scroll views in the layer do not draw their top edge effect either (`toolbarBackgroundVisibility(.hidden)` from macOS 15, plus `scrollEdgeEffectHidden` from 26): previously the scroll view drew the toolbar background in the window's light appearance within its own bounds, and a grey-white strip appeared at the top edge of a dark layer (reproduced and verified gone on macOS 27 on 2026-10-31).
+- **Layers that cover the window**: when a `Stack(under_bars: true)` contains controls, it is a page covering the whole window, and while it is shown the split view does not show the button that shows and hides the sidebar; layers with only images and color blocks (such as a background under the split view) do not affect it. On SwiftUI this layer reports to the window root, and the sidebar list applies `toolbar(removing: .sidebarToggle)` accordingly: this button can only be removed from the sidebar column, and removing it on the layer has no effect (verified on macOS 27 on 2026-10-31: the button disappears on the lyrics page and comes back after it closes). On macOS it is the only item in the toolbar, and once it is removed the toolbar shrinks to a title bar, moving the traffic lights and the whole window's content up; so while removing it, an item of the same size that draws nothing and takes no clicks is put in (from macOS 26 without the shared glass background), and the toolbar keeps its height (verified on macOS 27 on 2026-11-03: the traffic lights do not move when the lyrics page opens and closes). On WinUI 3, while the same layer is shown, the title bar's pane toggle, icon and title fade out, leaving only the caption buttons, and the title bar still drags the window; the caption buttons' appearance follows this page's `appearance` (`AppWindowTitleBar.PreferredTheme`), so on a dark page they are light buttons, returning to the window's appearance after the page closes; controls on the layer are placed away from the area below the caption buttons, otherwise the title bar's drag region blocks them (verified on Windows 11 on 2026-11-01: only the caption buttons remain on the lyrics page, and the cover background under the page does not affect the title bar).
+- **Hand scrolling**: `ScrollView(browsing: draft.x)` binds a session boolean field that is true while the user scrolls by hand (dragging, trackpad and scroll wheel, and the momentum after letting go) and false once it stops; scrolling caused by setting `position` does not count. Used to hold off following while the user is browsing, for example lyrics: while browsing, the blur is removed and the view no longer scrolls automatically to the line being sung, coming back a few seconds after it stops. SwiftUI uses `onScrollPhaseChange`: `tracking`, `interacting` and `decelerating` count as hand scrolling, `animating` does not; macOS 14 and iOS 17 lack this API, and the field stays false. Measured (2026-10-31, macOS 27, a real app's lyrics page): scrolling caused by setting the position reports only `animating`, and the field stays false; hand scrolling needs a real mouse or trackpad, and synthetic scroll wheel events do not reach SwiftUI, so it was not measured. Compose goes by scrolling that is in progress and not caused by setting the position (`isScrollInProgress`, momentum included); GTK sets it true on scroll value changes it did not cause itself and false after scrolling has been still for 160 milliseconds; WinUI 3 sets it true on intermediate view changes not caused by its own `ChangeView` calls and false on the final change; the Web counts only scrolling within 400 milliseconds of user input (scroll wheel, keyboard, dragging the scroll bar, momentum after a touch drag) and sets it false 200 milliseconds after scrolling stops, so setting the position by tapping a line does not count; GPUI sets it true on scroll wheel and trackpad events (momentum is also such events) and false 160 milliseconds after they stop, and offsets the view sets itself produce no such events. Measured (2026-10-31): on an Android emulator, Windows 11 and Linux (GTK, Broadway), scrolling of a real app's lyrics page caused by setting the position keeps it false; hand scrolling has not been measured on these three targets.
+- **Blur and bold that follow state**: `blur` can be written as an expression, and `Text(bold: condition)` makes text bold while the condition holds; both work with the element's `animate`, transitioning with its motion when they change, for example the line being sung grows bigger and bolder while the other lines blur: `Text(content: line.text, font_size: if line.current { 32 } else { 26 }, bold: line.current, animate: smooth)`. On SwiftUI both blur and bold follow `.animation`; Compose's blur radius follows `animate`'s spring through `bernLength`, and bold changes `fontWeight`; GTK's blur radius follows the spring through `bind_number`, and bold adds `label.bern-bold`; WinUI 3's Gaussian blur effect declares its standard deviation as the animatable property `Blur.Deviation`, the radius is written with a spring through `BindLen`, bold switches between the style's weight and bold, and `animate` also makes a bound font size follow the spring. The Web's blur follows the spring through `bindNumber`, kept separately from the style's shadow and then composed into `filter` (browsers rewrite how `filter` values are written, so it cannot be replaced as a string), and bold toggles `bern-bold` (weight 700, transitioning over `animate`'s duration); GPUI's blur radius follows the spring through `eased`, see the blur drawing above, and bold switches to the bold weight. Measured (2026-10-31): on the same lyrics page on an Android emulator, Windows 11 and Linux, the line being sung is bold and larger, with slight blur nearby and more further away. Measured (2026-11-01, the lyrics-style panel of `examples/catalog`: 60 lines, `anchor: 0.35`, blur by distance, the current line bold): in Chromium (headless), after pressing "Next line" nine times the current line stops at 0.35 of the view with weight 700 and size 24, and the blurs run 6, 4.5, 3, 1.5, 0, 1.5…, with `browsing` false throughout; with real scroll wheel scrolling it is true and all lines' blur springs to near 0, and after stopping it is false, the view returns to the current line at 0.35 and the blur comes back. In GPUI (macOS, offscreen window) the current line likewise stops at about 0.35 and is bold, distant lines are clearly blurred, and the background image filling the window, blurred on the CPU, matches the web's result; with a music app built for GPUI, the player page's background and the lyrics' bold and blur by distance are correct. Hand scrolling on GPUI has not been measured: synthetic scroll wheel and mouse events do not reach GPUI's windows.
+- **Repeat feedback** (SwiftUI): `nudge_key: app.revision` plays feedback once each time the key changes, not on first mount; it can be combined with `nudge_scale: 0.95`, which shrinks first and springs back with `jelly` after 90 ms. Used for operations that do not change the selected value, such as choosing the same preset again; a new event cancels the previous wait, and with Reduce Motion the element stays still. Other backends do not play it for now and give a capability warning.
+- **Gestures bound to values**: `Pinch` and `Swipe` are gesture areas that wrap content. `Pinch(value:, min:, max:)` multiplies the value by the two-finger zoom factor; `Swipe(value:, min:, max:, axis:, distance:)` converts the drag distance into a change of the value, increasing upward or to the right, with `distance` points (default 300) covering the whole range. The action runs when the finger lifts, as with `Slider`; external entry points use `ui.set_number`, and assistive technologies adjust in steps of one tenth of the range. A gesture cannot be the only entry point: the same value should also have a slider, buttons or a menu.
 
-各目标的预期实现：SwiftUI 的 `scrollTransition`、`scrollTargetBehavior`、`MagnifyGesture` 与 `DragGesture`；Compose 的 `graphicsLayer` 按每格的位置与滚动量计算、自己的 `FlingBehavior` 与多指指针事件的 `calculateZoom`；WinUI 3 的合成表达式动画（`ExpressionAnimation` 读 `ScrollViewer` 的位移）、`SnapPointsType` 与操作事件；GTK 在帧时钟中读取调整量，`GtkGestureZoom` 与 `GtkGestureDrag`；Web 的滚动驱动动画（`animation-timeline: view()`）、`scroll-snap` 与指针事件。
+Expected implementation per target: SwiftUI's `scrollTransition`, `scrollTargetBehavior`, `MagnifyGesture` and `DragGesture`; in Compose, `graphicsLayer` computed from each cell's position and the scroll amount, its own `FlingBehavior`, and `calculateZoom` on multi-pointer events; WinUI 3's composition expression animations (`ExpressionAnimation` reading the offset of `ScrollViewer`), `SnapPointsType` and manipulation events; GTK reads the adjustments in the frame clock and uses `GtkGestureZoom` and `GtkGestureDrag`; Web's scroll-driven animations (`animation-timeline: view()`), `scroll-snap` and pointer events.
 
-实现进度：SwiftUI 已实现，用 `examples/gallery` 的“胶片”页验证。macOS：正中一格放大、两侧变小变淡；滚轮滚动后停在某一格正中，字段随之更新；按钮设置字段后滚到第一格或最后一格并停在正中；鼠标上下拖动改变值；`ui.set_number` 驱动 `Pinch` 改变海报墙的列数；按钮滚到第一格后，录屏逐帧确认那一格停稳后放大再弹回；从访达拖入视频时画框放大再弹回（逐帧量出回弹越过原位）。iOS 26.5 模拟器：手指快滑与慢拖都停在某一格正中，包括按钮滚动之后的第一次手势；双指捏合与张开把海报墙的卡片尺寸压到下限、撑到上限；手指上拖 90 点使值增加 0.3。iOS 18.6 模拟器：初始位置与按钮滚动都停在正中，手指操作未实测；macOS 触控板的双指缩放未实测。Compose 已实现：放大与变淡在 `graphicsLayer` 中按每格离视口中心的距离计算，停靠用自己的 `FlingBehavior`（按惯性算出落点后取最近的一格），每格的位置按它在滚动内容中的坐标记录，不随滚动变化；Android 模拟器上验证：初始位置停在设定的一格正中，手指快滑前进一格、短拖弹回原格，按钮滚到首尾，上下拖动改变值，双指张开把海报墙的卡片撑到上限、捏合缩小（经模拟器的 gRPC 触摸接口发送两指触摸）。Web 已实现：停靠用 CSS 的 `scroll-snap`，滚动停下后字段跟随停在锚点的一格，设置字段时平滑滚过去、到达后晃一下，首尾两格靠滚动视图两侧按最大一格留出的空白也能停到正中；放大与变淡在每次滚动的下一帧按离视口中心的距离计算；捏合接受两指触摸与触控板（浏览器报告为带 Control 的滚轮），`Swipe` 用指针拖动。浏览器中验证：初始位置停在设定的一格正中，滚轮滚动后吸附到某一格且字段随之更新，按钮滚到首尾并晃一下，上拖使值增加，带 Control 的滚轮把卡片撑到上限。GTK 已实现：滚动停下 160 毫秒后取最近的一项对齐到锚点，走过 24 点以上时取运动方向上的下一项；Linux 虚拟机上验证初始停在指定一格正中、正中一格放大到 1.12、按钮滚到末尾并停在正中，`ui.set_number` 设置 `Swipe` 与 `Pinch`，触摸板捏合与触摸拖动未验证。WinUI 3 已实现：在 `ViewChanged` 停下后以动画对齐最近一项，滚动联动是 `ExpressionAnimation`，捏合是触摸的 `ManipulationDelta` 与带 Ctrl 的滚轮；Windows PC 上验证初始停在正中、首尾居中、滚轮后吸附并写回字段，上拖使值由 0.5 变为 0.767，带 Ctrl 的滚轮放大卡片，触摸与触控板手势未验证。
+Implementation status: SwiftUI is implemented and verified with the "Filmstrip" page of `examples/gallery`. macOS: the center cell is scaled up and the cells on both sides get smaller and fainter; after wheel scrolling it stops with a cell at the center and the field updates accordingly; buttons set the field, scroll to the first or last cell and stop at the center; dragging the mouse up and down changes the value; `ui.set_number` drives `Pinch` to change the column count of the poster wall; after a button scrolls to the first cell, a screen recording viewed frame by frame confirmed that the cell scales up and springs back once it has come to rest; dragging a video in from Finder makes the frame scale up and spring back (measured frame by frame, the bounce overshoots the original position). iOS 26.5 simulator: fast flicks and slow drags with a finger both stop with a cell at the center, including the first gesture after a button scroll; pinching and spreading two fingers press the card size of the poster wall down to the lower bound and stretch it to the upper bound; dragging a finger up 90 points increases the value by 0.3. iOS 18.6 simulator: the initial position and button scrolling both stop at the center; finger operations are not measured; two-finger zoom on the macOS trackpad is not measured. Compose is implemented: scaling and fading are computed in `graphicsLayer` from each cell's distance to the viewport center, snapping uses its own `FlingBehavior` (it computes the landing point from the inertia and takes the nearest cell), and each cell's position is recorded as its coordinates within the scroll content, which do not change with scrolling; verified on the Android emulator: the initial position stops with the set cell at the center, a fast flick with a finger advances one cell and a short drag springs back to the original cell, buttons scroll to the first and last cell, dragging up and down changes the value, and spreading two fingers stretches the cards of the poster wall to the upper bound while pinching shrinks them (two-finger touches sent through the emulator's gRPC touch interface). Web is implemented: snapping uses CSS `scroll-snap`, after scrolling stops the field follows the cell resting at the anchor, setting the field scrolls there smoothly and wiggles on arrival, and the first and last cells can also stop at the center thanks to blank space on both sides of the scroll view sized for the largest cell; scaling and fading are computed from the distance to the viewport center on the next frame after each scroll; pinch accepts two-finger touches and the trackpad (reported by the browser as a wheel with Control), and `Swipe` uses pointer dragging. Verified in the browser: the initial position stops with the set cell at the center, wheel scrolling snaps to a cell and the field updates accordingly, buttons scroll to the first and last cell and wiggle, dragging up increases the value, and the wheel with Control stretches the cards to the upper bound. GTK is implemented: 160 milliseconds after scrolling stops, the nearest item is aligned to the anchor, and after a movement of more than 24 points the next item in the direction of motion is taken; verified on the Linux VM: it initially stops with the specified cell at the center, the center cell is scaled up to 1.12, buttons scroll to the end and stop at the center, and `ui.set_number` sets `Swipe` and `Pinch`; touchpad pinching and touch dragging are not verified. WinUI 3 is implemented: once `ViewChanged` stops, the nearest item is aligned with an animation, the scroll linkage is an `ExpressionAnimation`, and pinch is touch `ManipulationDelta` and the wheel with Ctrl; verified on the Windows PC: it initially stops at the center, the first and last cells are centered, wheel scrolling snaps and writes back the field, dragging up changes the value from 0.5 to 0.767, and the wheel with Ctrl scales the cards up; touch and trackpad gestures are not verified.
 
-`snap: center` 在内容前后留出的边距按滚动视图的长度算；滚动视图按内容定长时（例如在 `Stack(under_bars: true)` 里的一行中），它的长度又包含这段边距，两者互相推高，SwiftUI 的主线程从此不停重新布局。现在长度的增长若恰好是边距变化的两倍，视为边距自己的回响，不再跟随（2026-10-31，一个实际应用的全窗口歌词页上复现并验证：修改前长度每轮加 2、主线程占满，修改后静止时 CPU 为 0）。
+`snap: center` leaves margins before and after the content based on the scroll view's length; when the scroll view takes its length from its content (for example in a row inside `Stack(under_bars: true)`), its length in turn includes those margins, the two push each other up, and SwiftUI's main thread keeps laying out from then on. Now when the length grows by exactly twice the change in the margins, it is treated as the margins' own echo and no longer followed (2026-10-31, reproduced and verified on a real app's full-window lyrics page: before the change the length grew by 2 each round and the main thread was saturated; after it, CPU is 0 at rest).
 
-停靠的规则由 Bern 自己实现（自定义 `ScrollTargetBehavior`）：各项上报自己在内容中的位置，滚动停下时取离预计停点最近的一项对齐到锚点，所以快滑仍会走过几格，iOS 17 与 macOS 14 起都可用。平台自带的 `viewAligned(anchor: .center)` 只在 26 起有，并且在 iOS 上被程序滚动过之后的下一次手势会停偏，因此不用。平台的滚动位置在用户滚动时只会清空、不报告停在哪一项，Bern 由各项上报自己相对视口的位置，取离锚点最近的一项写回字段；一次设置位置引起的滚动停稳（约 150 毫秒不动）后，平台的位置绑定随即放开，以免影响用户接下来的手势。其他目标对 `snap`、`position` 构建失败，对 `scroll_scale`、`scroll_opacity` 给出警告并保持原样，`Pinch` 与 `Swipe` 不在其能力描述中。
+The snapping rule is implemented by Bern itself (a custom `ScrollTargetBehavior`): each item reports its position in the content, and when scrolling stops, the item nearest the predicted stopping point is aligned to the anchor, so a fast flick still travels several cells; this works from iOS 17 and macOS 14 on. The platform's own `viewAligned(anchor: .center)` exists only from 26 on, and on iOS the next gesture after a programmatic scroll stops off target, so it is not used. The platform's scroll position only gets cleared when the user scrolls and does not report which item it rests on; Bern has each item report its position relative to the viewport and writes the item nearest the anchor back to the field; once a scroll caused by setting the position has come to rest (no movement for about 150 milliseconds), the platform's position binding is released right away so that it does not affect the user's next gestures. Other targets fail the build for `snap` and `position`, give a warning for `scroll_scale` and `scroll_opacity` and leave the element as it is, and `Pinch` and `Swipe` are not in their capability descriptions.
 
-### 画布与标注文字
+### Canvas and annotation text
 
-`Canvas` 是不可交互的绘图区，用于数据图形、装饰图案和组件外观的自绘部分。它的子元素只能是绘图元素：
+`Canvas` is a non-interactive drawing area for data graphics, decorative patterns and the self-drawn parts of component appearances. Its children can only be drawing elements:
 
-- `Shape`：矩形、圆角矩形、胶囊与椭圆，指定位置、尺寸、填充与描边；`dash` 把描边画成虚线，每段长 `dash`、间隔 `dash_gap`（省略时与 `dash` 等长），例如空画框里的虚线内框；
-- `Series`：来自状态的一列数值，按 `area` 或 `line` 铺满画布宽度，`max` 可声明或按数据取最大值；
-- `Pattern`：由条带序列定义的平铺图案。每条带有颜色角色、宽度与不透明度，序列同时用于横纵两个方向即成格纹，`twill: true` 叠加 45° 斜纹。
+- `Shape`: rectangles, rounded rectangles, capsules and ellipses, with position, size, fill and stroke; `dash` draws the stroke as a dashed line, each dash `dash` long with a gap of `dash_gap` (the same as `dash` when omitted), for example the dashed inner border in an empty frame;
+- `Series`: a list of numbers from state, spanning the canvas width as `area` or `line`; `max` can be declared or taken as the largest value in the data;
+- `Pattern`: a tiled pattern defined by a sequence of bands. Each band has a color role, a width and an opacity; using the sequence in both the horizontal and the vertical direction makes a check, and `twill: true` overlays a 45° twill.
 
-`Shape(fill_from: 图片)` 用一张图片的平均颜色填充，图片可以是随包资源或引擎状态中的 `MediaSource`；`fade: up | down | left | right` 让填充向该方向渐隐为透明。海报详情页的头部取海报的颜色铺满、向下融进页面，就是这样写的：
+`Shape(fill_from: image)` fills with the average color of an image, which can be a bundled resource or a `MediaSource` in engine state; `fade: up | down | left | right` makes the fill fade to transparent in that direction. The header of a poster detail page that takes the poster's color, fills the width and blends down into the page is written like this:
 
 ```rust
 Stack(align: bottom_leading) {
@@ -1103,11 +1105,11 @@ Stack(align: bottom_leading) {
 }
 ```
 
-平均颜色是装饰：图片未读到时用 `fill`（不写为默认的填充角色）代替，读到后重绘；叠在上面的文字仍用自身的表面配对，不按取到的颜色换色。
+The average color is decoration: until the image has been read, `fill` (the default fill role when not written) is used instead, and the shape is redrawn once it is read; text layered on top still uses its own surface pairing and does not change color according to the sampled color.
 
-坐标与尺寸以画布的点为单位，原点在左上角。`Shape` 不写尺寸时延伸到画布边缘；`Canvas` 不写 `width` 或 `height` 时在该方向上填满可用空间。两个方向都不写尺寸的 `Canvas` 直接作为 `Stack` 的一层时，是其他层的底板：取其他层给 `Stack` 的尺寸（`Stack` 写了尺寸时取它的尺寸），不让 `Stack` 变大，也不让它沿所在行或列的方向撑开；`Stack` 没写宽度、放在列（或网格单元格）里时，像列里的块一样横向填满，底板随之铺满这一宽度；`Stack` 里只有底板时照常填满。例如侧栏选中项的底色只有那一行高，设置页里横幅的底图与正文同宽。绘图元素按书写顺序绘制，后写的在上面；画布只直接包含绘图元素，不写条件，需要时把整个画布放进条件。
+Coordinates and sizes are in canvas points, with the origin at the top left. A `Shape` without a size extends to the canvas edges; a `Canvas` without `width` or `height` fills the available space in that direction. A `Canvas` with no size in either direction that is directly a layer of a `Stack` is a backdrop for the other layers: it takes the size the other layers give the `Stack` (its own size when the `Stack` has one), does not make the `Stack` bigger, and does not make it expand along the direction of the row or column it is in; when the `Stack` has no width and is in a column (or a grid cell), it fills the width like a block in a column, and the backdrop covers that width along with it; when the `Stack` contains only the backdrop, it fills as usual. For example, the background of a selected sidebar item is only as tall as that row, and the backing image of a banner on a settings page is as wide as the body text. Drawing elements are drawn in the order they are written, later ones on top; a canvas directly contains only drawing elements and no conditions; when needed, put the whole canvas in a condition.
 
-图案在 `style!` 的 `pattern` 块中声明，由画布中的 `Pattern(name:)` 引用。`band(颜色, 宽度, 不透明度)` 是一条色带，`gap(宽度)` 是一段空隙，至少要有一条有宽度的色带：
+Patterns are declared in the `pattern` block of `style!` and referenced by `Pattern(name:)` in a canvas. `band(color, width, opacity)` is a color band and `gap(width)` is a gap; there must be at least one band with a width:
 
 ```rust
 style! {
@@ -1126,19 +1128,19 @@ Stack {
 }
 ```
 
-- 画布的颜色只用语义角色，由主题内核随模式求解；画布属于 Bern 自绘，适用自绘部分的主题规则。图案与数据图形是装饰或展示，不能承载唯一的操作入口；表达信息时须提供 `label`。
-- 交互由叠放在上面的标准控件提供，例如上例中的 `Slider`，所以命令、键盘与可访问性不受影响。
-- 预期实现：SwiftUI 的 `Canvas` 与 `Shape`，WinUI 3 的 XAML 形状与平铺画刷，GTK 的 `GtkSnapshot`，Web 的 SVG 或 `<canvas>`。图案按主题生成平铺图并缓存，不随包携带位图。
-- 实现进度：SwiftUI 已实现，画布读取的状态在视图更新时取值，状态变化即重绘；`fill_from` 的图片在后台读取并缩成 1×1 像素取平均色，与 `Image` 共用缓存（`picture_fills`），macOS 上已验证；Compose 缩成 32×32 后取全图平均（单个像素只采到中间），Android 模拟器上验证了从系统选择器换海报后头部取到它的颜色；图案目前每次绘制时直接画出条带，没有缓存平铺图。有 `label` 的画布是一个带名称的图像，没有的对辅助技术隐藏。Web 已实现：画布是 2D `<canvas>`，按设备像素比绘制，状态、尺寸或颜色变化时重绘，`fill_from` 的图片缩成 32×32 后取平均色（跨域且没有 CORS 的图片读不到颜色，用 `fill`），浏览器中验证了 planner 的格纹、面积与折线，gallery 的海报墙、胶片与取色铺底。GTK 已实现（`GtkDrawingArea`，`fill_from` 在后台读取后缩到 32×32 取平均色）；WinUI 3 已实现（Direct2D 画进 WIC 位图交给 `Image`，两种前端同一套代码）；Linux 虚拟机与 Windows PC 上验证 planner 的格纹、面积与折线、胶囊，gallery 卡片的图案与详情的取色渐隐。
+- Canvas colors use only semantic roles, which the theme core resolves for each mode; the canvas is drawn by Bern itself, so the theme rules for self-drawn parts apply. Patterns and data graphics are decoration or display and cannot carry the only entry point to an action; when they convey information, a `label` must be provided.
+- Interaction is provided by standard controls layered on top, such as the `Slider` in the example above, so commands, keyboard and accessibility are unaffected.
+- Expected implementation: SwiftUI's `Canvas` and `Shape`, WinUI 3's XAML shapes and tiled brushes, GTK's `GtkSnapshot`, and Web's SVG or `<canvas>`. Patterns are generated as tiles per theme and cached; no bitmaps are shipped in the package.
+- Implementation status: SwiftUI is implemented; the state a canvas reads is read when the view updates, and a state change redraws the canvas; the `fill_from` image is read in the background and scaled down to 1×1 pixel to get the average color, sharing a cache with `Image` (`picture_fills`), verified on macOS; Compose scales it down to 32×32 and averages the whole image (a single pixel only samples the middle), and on the Android emulator it is verified that after changing the poster from the system picker the header takes its color; patterns are currently drawn directly as bands on every draw, without cached tiles. A canvas with a `label` is a named image, and one without is hidden from assistive technologies. Web is implemented: the canvas is a 2D `<canvas>` drawn at the device pixel ratio and redrawn when state, size or colors change, and the `fill_from` image is scaled down to 32×32 for the average color (a cross-origin image without CORS cannot be read, and `fill` is used); verified in the browser: the check, area and line of planner, and the poster wall, filmstrip and color-sampled background of gallery. GTK is implemented (`GtkDrawingArea`; `fill_from` reads the image in the background, scales it down to 32×32 and averages it); WinUI 3 is implemented (Direct2D draws into a WIC bitmap handed to an `Image`, the same code for both frontends); verified on the Linux VM and the Windows PC: the check, area, line and capsules of planner, and the patterns on gallery cards and the color-sampled fade on the detail page.
 
-`Text` 可以声明标注 `mark: 角色`：在每一行文字下方画一条胶囊形底纹，文字颜色不变。底纹默认覆盖行高的 74% 至 98%，右端比文字多出 0.4 个字宽且不占排版空间；按设计这些参数可在 `style!` 的 `Text` 中覆盖，这一点尚未实现。底纹颜色是纯色角色，因为文字颜色不变，可读性由文字自身的配对保证。预期实现：SwiftUI 在 macOS 15 与 iOS 18 起用 `TextRenderer` 取得行的位置，更早的系统退回下划线；Web 用行内元素的背景与 `box-decoration-break: clone`；GTK 用 Pango 的行范围在自绘中绘制；WinUI 3 的做法待验证。
+`Text` can declare an annotation `mark: role`: a capsule-shaped underlay is drawn under each line of the text, and the text color stays unchanged. By default the underlay covers 74% to 98% of the line height, and its right end extends 0.4 character widths beyond the text without taking layout space; by design these parameters can be overridden for `Text` in `style!`, which is not yet implemented. The underlay color is a solid color role, because the text color does not change and readability is ensured by the text's own pairing. Expected implementation: SwiftUI uses `TextRenderer` from macOS 15 and iOS 18 on to get the line positions, falling back to an underline on earlier systems; Web uses the background of an inline element with `box-decoration-break: clone`; GTK draws it in custom drawing using Pango's line extents; the WinUI 3 approach is still to be verified.
 
-实现进度：SwiftUI 已按上述默认参数实现，macOS 上已验证；在 `style!` 中覆盖底纹参数尚未实现。Web 已实现：每行的位置由文字的行框（`Range.getClientRects`）取得，底纹画在文字后面，文字换行或字体载入后重画，浏览器中已验证。GTK 与 WinUI 3 已按默认参数实现（WinUI 3 由 `TextPointer` 取每行的矩形），Linux 虚拟机与 Windows PC 上验证 planner 的“最近的进度”。
+Implementation status: SwiftUI is implemented with the default parameters above, verified on macOS; overriding the underlay parameters in `style!` is not yet implemented. Web is implemented: each line's position comes from the text's line boxes (`Range.getClientRects`), the underlay is drawn behind the text and redrawn when the text rewraps or fonts load, verified in the browser. GTK and WinUI 3 are implemented with the default parameters (WinUI 3 gets each line's rectangle from `TextPointer`); planner's "Recent progress" is verified on the Linux VM and the Windows PC.
 
 
-### 按比例摆放
+### Proportional placement
 
-时间轴上按播出时间摆放的海报、进度条上的章节刻度与名称、弹幕高峰点、下载行按进度涨满的底色、按钮里的安装进度，都需要把元素放在一段长度的某个比例上，比例来自状态。`Rail` 是这样的一条轨道：沿 `axis`（默认横向）铺满它得到的长度，每个子元素写 `at: 比例` 放在那一点上，或写 `from: 比例, to: 比例` 铺在两点之间；比例是 0 到 1 的数，可以绑定状态，越界时夹到两端。
+Posters placed by air time on a timeline, chapter ticks and names on a progress bar, comment peaks, the background of a download row that fills up with progress, and install progress inside a button all need an element placed at some fraction of a length, with the fraction coming from state. `Rail` is such a track: along `axis` (horizontal by default) it spans the length it is given, and each child writes `at: fraction` to be placed at that point, or `from: fraction, to: fraction` to span between two points; a fraction is a number from 0 to 1, can be bound to state, and is clamped to the ends when out of range.
 
 ```rust
 Stack(align: center) {
@@ -1156,33 +1158,33 @@ Stack(align: leading) {
 }
 ```
 
-- 写 `at` 的子元素按自己的大小，默认以中心对准那一点；`Rail(anchor: start)` 或 `end` 让子元素的起点或终点对准它。写 `from` 与 `to` 的子元素沿轴从一点铺到另一点，没写交叉方向尺寸时铺满轨道的厚度。子元素必须写其中一种。
-- 轨道沿轴占满它得到的长度；交叉方向的厚度是最厚的子元素，或由父容器拉伸。在 `Stack` 中轨道是其他层的背板，不撑大 `Stack`：`Stack` 的大小由其他层决定，轨道沿轴取这个长度。子元素都没写交叉方向的尺寸时轨道铺满这个大小，例如面板里按数值涨满的底色与面板一样高；否则轨道按子元素的厚度、按 `Stack` 的对齐摆放，例如带内容的按钮里图片底边的进度条与图片同宽，不随按钮所在的侧栏变宽。横向与竖向轨道相同。子元素可以超出轨道，不裁切；轨道本身不接收点按，叠在滑块上时滑块照常可拖。
-- 子元素变化时不重排兄弟元素：互相重叠由布局声明者避免，例如章节名用 `anchor: start` 并控制字数。`at`、`from`、`to` 绑定的状态变化时，元素随 `animate` 的弹簧移动；没有 `animate` 时直接移到新位置。
-- 目标在能力描述中列出 `rails` 才能构建 `Rail`；不支持的目标构建失败。
-- 实现进度：Web 已实现，横向轨道的子元素共用一格网格、按比例的起始边距定位，竖向轨道用绝对定位；在浏览器中用 `examples/gallery` 的胶片页验证一条时间轴（底线、6 个按引擎给出的比例摆放的刻度、`anchor: start` 的名字、绑定 `draft.level` 的“现在”竖线）与按数值涨满的底色，拖动时竖线随 `animate: smooth` 从 50% 平滑移到 80%。macOS 与 iOS 已实现（自定义布局；含轨道的 `Stack` 改用让轨道铺满其他层大小的布局），在 macOS 窗口与 iPhone 17 Pro 模拟器上验证同一条时间轴，`ui.set-number` 把数值改为 0.9 与 0.8 后竖线与底色移到对应比例，底色与面板等高。Compose 已实现（自定义布局，子元素以 `layoutId` 带上比例；`Stack` 中的轨道用 `matchParentSize()`），Android 模拟器上验证同一条时间轴，level 从 0.5 改为 0.8 后竖线平滑移动、底色铺满 120 dp 高的面板，竖向轨道与 `anchor: end` 也已验证。GTK 与 WinUI 3 已实现，轨道只沿轴扩展，在 `Stack` 中铺满其他层给出的尺寸；Linux 虚拟机与 Windows PC 上验证时间轴与竖线随数值移动，窗口有多余高度时底色仍与 120 点的面板等高。WinUI 3 的轨道原先在测量时把得到的长度报为自己要的长度，`Stack` 放在不拉伸它的带内容按钮里时，按钮可得的宽度就成了 `Stack` 的宽度，图片底边的进度条比图片宽；竖向轨道原先两向都铺满，在 `Stack` 中把它撑满。2026-10-20 改为轨道沿轴不要长度、竖向轨道只沿轴铺满：Windows PC 上 296 宽的列里，208 宽图片底边的进度条与图片同宽，竖向轨道与旁边 120 高的条同高；macOS 窗口、浏览器、Linux 虚拟机（GTK）与 Android 手机（Compose）中同一结构本来就是这样。比例来自引擎：Bern 的表达式没有算术，例子里每一格的位置由引擎算好放进状态。
-### 能力声明与构建检查
+- A child with `at` keeps its own size and by default centers on that point; `Rail(anchor: start)` or `end` aligns the child's start or end with it instead. A child with `from` and `to` spans along the axis from one point to the other and, when it has no cross-axis size, fills the thickness of the track. Every child must use one of the two.
+- A track takes the full length it is given along the axis; its cross-axis thickness is that of the thickest child, or it is stretched by the parent container. In a `Stack`, a track is a backdrop for the other layers and does not enlarge the `Stack`: the size of the `Stack` is determined by the other layers, and the track takes that length along the axis. When no child has a cross-axis size, the track fills that size, for example a background in a panel that fills up with a value is as tall as the panel; otherwise the track takes the thickness of its children and is placed by the alignment of the `Stack`, for example a progress bar along the bottom edge of an image inside a content button is as wide as the image and does not get wider with the sidebar the button is in. Horizontal and vertical tracks behave the same. Children can extend beyond the track and are not clipped; the track itself does not receive clicks, so when it is layered over a slider the slider can still be dragged as usual.
+- A change in one child does not rearrange its siblings: avoiding overlaps is up to whoever declares the layout, for example chapter names use `anchor: start` and keep their length in check. When the state bound by `at`, `from` or `to` changes, the element moves with the `animate` spring; without `animate` it jumps to the new position.
+- A target must list `rails` in its capability description to build `Rail`; targets that do not support it fail the build.
+- Implementation status: Web is implemented: the children of a horizontal track share one grid cell and are positioned with a proportional start margin, and vertical tracks use absolute positioning; verified in the browser with the filmstrip page of `examples/gallery`: a timeline (a baseline, 6 ticks placed at fractions given by the engine, names with `anchor: start`, and a "now" vertical line bound to `draft.level`) and a background that fills up with a value; when dragging, the vertical line moves smoothly from 50% to 80% with `animate: smooth`. macOS and iOS are implemented (a custom layout; a `Stack` that contains a track switches to a layout that makes the track fill the size of the other layers), verified with the same timeline in a macOS window and on the iPhone 17 Pro simulator: after `ui.set-number` changes the value to 0.9 and 0.8, the vertical line and the background move to the corresponding fractions, and the background is as tall as the panel. Compose is implemented (a custom layout in which children carry their fractions through `layoutId`; a track in a `Stack` uses `matchParentSize()`), verified with the same timeline on the Android emulator: after level changes from 0.5 to 0.8, the vertical line moves smoothly and the background fills the 120 dp tall panel; vertical tracks and `anchor: end` are verified as well. GTK and WinUI 3 are implemented: a track expands only along its axis and, in a `Stack`, fills the size given by the other layers; verified on the Linux VM and the Windows PC: the timeline and the vertical line move with the value, and when the window has extra height the background is still as tall as the 120-point panel. The WinUI 3 track used to report the length it was given as its desired length during measurement, so when the `Stack` was inside a content button that does not stretch it, the width available to the button became the width of the `Stack`, and the progress bar along the bottom edge of the image was wider than the image; vertical tracks used to fill in both directions, stretching the `Stack` to the full size. On 2026-10-20 this was changed so that a track requests no length along its axis and a vertical track fills only along its axis: in a 296-wide column on the Windows PC, the progress bar along the bottom edge of a 208-wide image is as wide as the image, and a vertical track is as tall as the 120-tall bar next to it; in a macOS window, the browser, the Linux VM (GTK) and on an Android phone (Compose), the same structure already behaved this way. The fractions come from the engine: Bern's expressions have no arithmetic, and the position of each cell in the example is computed by the engine and put into state.
+### Capability declarations and build checks
 
-每个目标在能力描述中列出：各组件支持覆盖的属性与状态、支持的动效用法及退回方式、`Canvas` 的绘图元素与 `Text` 标注，以及它能构建的其他 IR 功能（`features`，例如 `button_content`、`reveal`），新增的能力都按名称登记在这份清单里。构建时逐项比对：
+Each target lists in its capability description: the properties and states each component supports overriding, the motion uses it supports and their fallbacks, the drawing elements of `Canvas` and the `Text` annotations, and the other IR features it can build (`features`, for example `button_content`, `reveal`); every new capability is registered by name in this list. At build time they are compared item by item:
 
-- 应用声明的覆盖在某个目标上无法实现时构建失败，并指出声明位置与目标；
-- 应用确认接受该目标的系统默认时，在 `style!` 中用 `#[target(...)]` 写 `system`，或用 `#[exempt(目标, "原因")]` 标注该声明块；
-- 不允许目标静默忽略覆盖。
+- When an override declared by the app cannot be implemented on a target, the build fails and names the declaration's location and the target;
+- When the app confirms it accepts that target's system default, it writes `system` with `#[target(...)]` in `style!`, or annotates the declaration block with `#[exempt(target, "reason")]`;
+- Targets are not allowed to silently ignore overrides.
 
-### 验收
+### Acceptance
 
-- 声明了覆盖的控件在各目标的浅色、深色与提高对比下截图，覆盖的颜色通过主题内核的配对检查；
-- 状态变换与过渡在每个目标上实测打断（动画中途改变目标）与减少动态效果；
-- 共享元素在支持的目标上实测导航推入与返回，在退回的目标上确认为交叉淡化；
-- 去掉 `style!` 后，界面恢复为各平台的系统默认外观。
+- Controls with declared overrides are screenshotted on each target in light, dark and increased contrast, and the override colors pass the theme core's pairing check;
+- State transforms and transitions are measured on each target for interruption (changing the target mid-animation) and for Reduce Motion;
+- Shared elements are measured for navigation push and back on the targets that support them, and confirmed to be cross-fades on the fallback targets;
+- After `style!` is removed, the interface returns to each platform's system default appearance.
 
-## 本地化
+## Localization
 
-### 同位置声明与文本类型
+### Co-located declarations and text types
 
-用户可见的静态文本及其翻译必须在同一逻辑声明中维护。默认写在组件附近；重复使用的文案可以抽取为有明确身份的本地化声明，但所有语言仍保存在一起。
+User-visible static text and its translations must be maintained in the same logical declaration. By default it is written next to the component; reused strings can be extracted into localization declarations with a clear identity, but all languages are still kept together.
 
-采用字符串字面量承载自然语言，保留空白、标点和转义，避免将任意自然语言直接作为 Rust token 解析：
+Natural language is carried in string literals, which preserve whitespace, punctuation and escapes, instead of parsing arbitrary natural language directly as Rust tokens:
 
 ```rust
 tr! {
@@ -1192,15 +1194,15 @@ tr! {
 }
 ```
 
-语言标识使用标准语言标签，例如 `zh-Hans`、`zh-Hant`、`en`、`ja`。区域差异可以使用更具体的标签。首版要求配置与声明中的标签精确匹配，不依赖隐式回退猜测。
+Language identifiers are standard language tags, for example `zh-Hans`, `zh-Hant`, `en`, `ja`. Regional differences can use more specific tags. The first version requires the tags in the configuration and in the declarations to match exactly and does not rely on guesses from implicit fallback.
 
-类型系统应区分本地化文本、运行时文本以及普通字符串。窗口标题、按钮标签、提示、错误信息、菜单项和可访问名称等展示属性必须接受合适的展示文本类型；路径、命令 ID、资源标识等内部字符串不受翻译规则约束。
+The type system should distinguish localized text, runtime text and plain strings. Display properties such as window titles, button labels, hints, error messages, menu items and accessible names must accept the appropriate display text type; internal strings such as paths, command IDs and resource identifiers are not subject to the translation rules.
 
-运行时文本适用于媒体标题、用户输入等数据，不能作为静态文案绕过翻译的常规通道。编译器不追踪任意应用函数返回的字符串来源，而是要求来源声明自己：协议与 UI 类型的文本字段、组件的文本参数写 `#[content]` 才是内容（标题、文件名、用户写的笔记），只有内容能直接显示或作为 `tr!` 参数，否则报 B105；会话字段是用户输入，算作内容。引擎因此不拼句子：它给出数字、`CalendarDate` 与枚举，界面用 `tr!` 或带标签的枚举（标签可显示变体字段）写成读者的语言。引擎要知道今天是哪天、现在几点时调用 `bern::date::now()`：它给出 UTC 秒数和当时本地时区比 UTC 快的秒数，原生目标取系统时钟与时区，浏览器取页面的 `Date.now()` 与时区偏移（2026-10-21）。
+Runtime text is for data such as media titles and user input, and cannot serve as a routine channel for static text to bypass translation. The compiler does not trace where strings returned by arbitrary app functions come from; instead it requires sources to declare themselves: text fields of protocol and UI types and text parameters of components are content (titles, file names, notes the user wrote) only when written with `#[content]`, and only content can be displayed directly or used as a `tr!` argument, otherwise B105 is reported; session fields are user input and count as content. The engine therefore does not assemble sentences: it provides numbers, `CalendarDate` and enums, and the interface writes them in the reader's language with `tr!` or labeled enums (labels can display variant fields). When the engine needs to know today's date or the current time, it calls `bern::date::now()`: it returns the UTC seconds and the number of seconds the local time zone is ahead of UTC at that moment; native targets take the system clock and time zone, and browsers take the page's `Date.now()` and time zone offset (2026-10-21).
 
-### 项目配置与完整性检查
+### Project configuration and completeness checks
 
-项目配置参考如下，配置文件暂定为 `Bern.toml`：
+A reference project configuration follows; the configuration file is tentatively named `Bern.toml`:
 
 ```toml
 [languages]
@@ -1209,16 +1211,16 @@ default = "zh-Hans"
 strict = true
 ```
 
-严格模式检查：
+Strict mode checks:
 
-- 每条本地化声明包含所有必需语言，默认语言也在支持列表中。
-- 语言标签没有重复或拼写错误；外部组件附带的额外语言可以保留，不算遗漏。
-- 直接写入展示属性的静态文本没有绕过本地化声明。
-- 插值变量已声明，各语言引用一致的参数集合，参数类型与用法相符（复数与时长是数字，日期是 `CalendarDate`），每种语言写出它用到的复数类别。
-- 显示的运行时文本与 `tr!` 的文本参数来自 `#[content]` 字段或参数。
-- 引用的共享文本存在，生成资源 ID 无冲突且可追溯到源码。
+- Every localization declaration contains all required languages, and the default language is also in the supported list.
+- Language tags have no duplicates or misspellings; extra languages shipped with external components can stay and do not count as omissions.
+- Static text written directly into display properties does not bypass localization declarations.
+- Interpolation variables are declared, every language references a consistent set of parameters, parameter types match their usage (plurals and durations are numbers, dates are `CalendarDate`), and each language writes out the plural categories it uses.
+- Displayed runtime text and the text arguments of `tr!` come from `#[content]` fields or parameters.
+- Referenced shared text exists, and generated resource IDs do not collide and can be traced back to the source code.
 
-示例诊断：
+Example diagnostic:
 
 ```text
 error[B102]: Missing translation
@@ -1228,107 +1230,107 @@ Missing language: ja
 Required languages: zh-Hans, en, ja
 ```
 
-诊断各有编号，负面用例能互相区分：
+Each diagnostic has its own code, so negative test cases can be told apart:
 
-| 编号 | 问题 |
+| Code | Problem |
 | --- | --- |
-| B101 | 语言标签重复，或不在 `[languages].supported` 中（拼写错误） |
-| B102 | 缺少必需语言的翻译 |
-| B103 | 展示属性直接写字面量，绕过本地化声明 |
-| B104 | 插值不合法：占位符没有对应参数、参数未被任何翻译使用、各语言的占位符集合不一致、占位符写法错误、缺少语言所需的复数分支，或参数类型与用法不符 |
-| B105 | 显示的文本不是内容：未标 `#[content]` 的文本字段或参数被直接显示或作为 `tr!` 参数，或 `tr!` 参数写了字面量 |
+| B101 | Duplicate language tag, or a tag not in `[languages].supported` (misspelling) |
+| B102 | Missing translation for a required language |
+| B103 | A display property is written as a literal directly, bypassing localization declarations |
+| B104 | Invalid interpolation: a placeholder without a matching parameter, a parameter not used by any translation, inconsistent placeholder sets across languages, a malformed placeholder, a missing plural branch that a language requires, or a parameter type that does not match its usage |
+| B105 | Displayed text is not content: a text field or parameter not marked `#[content]` is displayed directly or used as a `tr!` argument, or a `tr!` argument is written as a literal |
 
-### 消息格式
+### Message format
 
-`tr!` 与枚举标签共用 ICU MessageFormat 的一个子集，由 `bern-protocol` 解析与检查，各后端按同一语义在运行时随当前语言写出：
+`tr!` and enum labels share a subset of ICU MessageFormat, parsed and checked by `bern-protocol`; every backend writes messages out at runtime in the current language with the same semantics:
 
-- `{name}`：文本原样，数字按 Bern 的写法，枚举写它的标签。
-- `{n, plural, =0 {…} one {# 项} other {# 项}}`：按数字在该语言中的复数类别选分支，`=N` 精确匹配优先，`#` 是这个数。中文、日文、韩文、越南文、泰文、印尼文、马来文只有 `other`，其余语言区分 `one` 与 `other`。
-- `{d, date, 模式}`：`CalendarDate` 按 `y`、`yy`、`M`、`MM`、`MMM`、`MMMM`、`d`、`dd`、`EEE`、`EEEE` 写出，月名与星期名是框架文本。
-- `{t, duration, 模式}`：秒数按 `h`、`m`、`s`（双写补零）写出，写出的最大单位容纳更大的部分。
-- `{{`、`}}` 是字面括号；复数分支里 `}` 总是结束分支。
+- `{name}`: text as it is, numbers in Bern's notation, enums as their labels.
+- `{n, plural, =0 {…} one {# 项} other {# 项}}`: selects a branch by the number's plural category in that language; an exact `=N` match takes precedence, and `#` is the number. Chinese, Japanese, Korean, Vietnamese, Thai, Indonesian and Malay have only `other`; all other languages distinguish `one` and `other`.
+- `{d, date, pattern}`: a `CalendarDate` written out with `y`, `yy`, `M`, `MM`, `MMM`, `MMMM`, `d`, `dd`, `EEE`, `EEEE`; month and weekday names are framework text.
+- `{t, duration, pattern}`: a number of seconds written out with `h`, `m`, `s` (doubled for zero padding); the largest unit written out absorbs the larger parts.
+- `{{` and `}}` are literal braces; inside a plural branch, `}` always ends the branch.
 
-数字的本地写法（千分位、小数点）、货币、相对时间与 RTL 仍需明确的格式化及布局规则，后续独立扩展。翻译语义质量不属于完整性检查的保证。
+Locale-specific number notation (thousands separators, decimal point), currency, relative time and RTL still need explicit formatting and layout rules and will be extended separately later. The semantic quality of translations is not something the completeness checks guarantee.
 
-### 运行时切换语言
+### Switching languages at runtime
 
-显示语言属于 UI 会话：macOS 应用的界面是一个会话，每个 Web 页面各是一个会话。会话启动时按系统或浏览器的语言偏好在支持列表中选出语言，之后可以在运行中切换：
+The display language belongs to the UI session: the interface of a macOS app is one session, and each Web page is a session of its own. When a session starts, it picks a language from the supported list according to the system or browser language preferences, and the language can then be switched while the app runs:
 
-- `LanguagePicker(id: …, label: …)` 组件列出支持的语言，每项用该语言自己的名称显示（如“简体中文”“English”“日本語”），选择即切换。
-- 会话命令 `ui.set_language`（参数为语言标签）供 CLI、JSON 与 MCP 使用，与组件走同一条切换路径；`ui.language` 返回当前语言。不在支持列表中的标签返回 `unsupported_language`。
+- The `LanguagePicker(id: …, label: …)` component lists the supported languages, each shown under its own name (such as "简体中文", "English", "日本語"); choosing one switches to it.
+- The session command `ui.set_language` (whose argument is a language tag) is for the CLI, JSON and MCP and takes the same switching path as the component; `ui.language` returns the current language. A tag not in the supported list returns `unsupported_language`.
 
-切换时所有本地化文本（含窗口标题、标签、提示与框架自身文案）在同一次更新中重新计算。引擎状态、会话草稿、导航路径、打开的窗口与播放器都不受影响，不重建窗口。平台托管的系统文案（例如 macOS 菜单栏中由系统提供的项目）随系统语言，不在切换范围内，须在后端文档中说明。
+On a switch, all localized text (including window titles, labels, hints and the framework's own strings) is recomputed in the same update. Engine state, session drafts, navigation paths, open windows and players are unaffected, and windows are not rebuilt. System strings managed by the platform (for example the items the system provides in the macOS menu bar) follow the system language and are outside the scope of the switch; this must be stated in the backend documentation.
 
-### 平台资源生成
+### Generating platform resources
 
-核心编译器验证本地化声明并保留统一描述，由各目标模块生成 Web、SwiftUI、GTK、WinUI 3、Flutter、GPUI 或 Compose 所需的数据与资源。生成文件是构建产物，不是翻译权威来源。跨平台格式化应保持相同语义，不把某个平台的占位符格式直接推广为统一规则。
+The core compiler validates localization declarations and keeps a unified description, and each target module generates the data and resources that Web, SwiftUI, GTK, WinUI 3, Flutter, GPUI or Compose need. Generated files are build outputs, not the authoritative source of translations. Formatting across platforms should keep the same semantics, without promoting one platform's placeholder format directly into the common rule.
 
-依赖组件的文本也必须纳入应用的语言检查。依赖应附带结构化翻译描述；缺少应用所需语言时，严格构建失败。依赖翻译补充与覆盖机制在跨 crate 支持阶段定稿，不能默默回退后宣称检查通过。
+Text from dependency components must also be included in the app's language checks. Dependencies should ship structured translation descriptions; when a language the app needs is missing, a strict build fails. The mechanism for supplementing and overriding dependency translations is to be finalized in the cross-crate support phase; it must not silently fall back and then claim that the check passed.
 
-## 自适应布局与功能契约
+## Adaptive layout and feature contracts
 
-### 布局选择
+### Layout selection
 
-布局选择依据窗口可用尺寸、输入方式和设备能力，不能只按操作系统分类。首版优先提供 `compact` 与 `expanded` 两种尺寸布局；电视用 `Layout(size: tv)`（见下），其他交互模式后续扩展。
+Layout selection is based on the window's available size, the input method and the device capabilities, not just on the category of operating system. The first version provides the two size layouts `compact` and `expanded` first; TV uses `Layout(size: tv)` (see below), and other interaction modes will be extended later.
 
-选择规则必须确定、可测试，并保证任意受支持环境都有匹配分支。断点、优先级和兜底规则由项目明确配置。跨尺寸与输入模式的组合应显式枚举，不能声称检查了未声明的所有组合。
+Selection rules must be deterministic and testable, and guarantee that every supported environment has a matching branch. Breakpoints, priorities and fallback rules are configured explicitly by the project. Combinations across sizes and input modes should be enumerated explicitly; the checks cannot claim to cover every undeclared combination.
 
-切换布局保留应用状态。局部编辑内容、焦点、滚动位置等是否跨分支保留，必须通过稳定身份及迁移规则定义；不按组件在树中的位置自动推断为同一实例。
+Switching layouts preserves app state. Whether local edits, focus, scroll position and the like carry across branches must be defined through stable identities and migration rules; components are not automatically inferred to be the same instance from their position in the tree.
 
-声明方式：
+Declaration:
 
 ```toml
 [layouts]
-compact_below = 600     # 逻辑单位
-medium_below = 1024     # 可选：没有时没有 medium 档
-expanded_below = 1440   # 可选：没有时没有 large 档
+compact_below = 600     # logical units
+medium_below = 1024     # optional: without it there is no medium class
+expanded_below = 1440   # optional: without it there is no large class
 ```
 
 ```rust
 Adaptive(id: clip_choice) {
-    Layout(size: expanded) { /* 宽布局 */ }
-    Layout(size: compact) { /* 窄布局 */ }
+    Layout(size: expanded) { /* wide layout */ }
+    Layout(size: compact) { /* narrow layout */ }
 }
 ```
 
-- 尺寸档有四个：小于 `compact_below` 为 `compact`，小于 `medium_below` 为 `medium`，小于 `expanded_below` 为 `expanded`，其余为 `large`；没写的断点让对应的档不存在，宽度落入上一档。任何宽度都恰好落入一个尺寸，规则确定、可测试。输入方式后续扩展，不声称检查了它们。
-- `Adaptive` 的选择依据是它所在位置的可用宽度。它只能包含 `Layout`，`compact` 与 `expanded` 各一个是必需的，`medium` 与 `large` 可选；某一档没有自己的 `Layout` 时用更大一档的，没有更大的就用更小一档的，因此只写 `compact` 与 `expanded` 的应用行为不变。缺少必需的、重复，或写了配置中不存在的档，报 B401。使用 `Adaptive` 而没有配置 `[layouts]` 报 B402。
-- 表达式可以读窗口宽度所在的档：`window.compact`、`window.medium`、`window.expanded`、`window.large`，恰有一个为真，例如页边距 `padding: if window.large { 48 } else if window.expanded { 32 } else if window.medium { 24 } else { 16 }`。它们按窗口宽度和同一组断点计算，需要 `[layouts]`。目标在能力描述中列出 `size_classes` 才支持 `medium`、`large` 与这些窗口字段；不支持的目标构建失败。实现进度：Web 已实现，浏览器中把视口设为 1024、800、1100 宽验证：海报墙页边距随窗口档位为 32、24、32；胶片页的 `Adaptive` 在可用宽度约 560 时为 `compact`（图标按钮），约 860 时为 `medium`（文字按钮）。macOS 与 iOS 已实现：macOS 窗口宽 880、1200 与 1440 以上时海报墙页边距为 24、32、48；胶片页的 `Adaptive` 在窗口宽 600、1100、1470 时为 `compact`、`medium`、`expanded`；iPhone 17 Pro 竖屏为 `compact`。Compose 已实现，Android 模拟器上把窗口设为 448、896、1344、1493 dp 宽：海报墙页边距为 16、24、32、约 48，胶片页的 `Adaptive` 依次为 `compact`、`medium`、`expanded`。GTK 已实现，窗口内容顶部一个高 0 的探针测量宽度，Linux 虚拟机上中号窗口时胶片页为 `medium`；WinUI 3 已实现，Windows PC 上验证海报墙页边距随档位变化、胶片页在 `compact`、`medium`、`expanded` 之间切换。功能契约的覆盖仍按 `compact` 与 `expanded` 检查。
-- `window.keyboard`：连着实体键盘。macOS、Linux、Windows 总是成立；iOS 与 tvOS 跟随 GameController 报告的键盘连接与断开；Android 读当前配置里的硬键盘（全键盘且未收起），插拔时随配置变化更新；浏览器不报告键盘，主指针不是粗指针（触屏）时成立，按下一个有名字的实体键后成立（屏幕键盘的按键没有名字）。用来在没有键盘时藏起只对键盘有用的内容，例如快捷键设置。
-- `window.short`：窗口高度低于 `compact_below` 断点，例如手机横过来时（iPhone 横屏高 390），与宽度档位无关，需要 `[layouts]`。能力 `window_short`：SwiftUI 与 Web 已实现，其他目标构建失败。窗口的 `landscape` 是另一回事：手机上条件成立时请求横屏、不成立时回到竖屏（能力 `window_landscape`：iOS、Android 与 Web 实现，Web 只在浏览器允许锁定方向时生效，多为手机浏览器全屏或作为已安装的应用运行时；电视总是横屏、桌面窗口没有方向，tvOS、macOS、Linux、Windows 视为不适用，同样声明这项能力而不警告；未声明的目标给出警告并保持设备方向）。
-- **量到宽度之前**：窗口和 `Adaptive` 第一次构建时还没有量到宽度，这时也按将得到的宽度选择，不先按最宽的档构建、量到后再换掉——白做的构建会带出入场动画、控件登记、播放器绑定等副作用。窗口在首次布局前按打开时将得到的尺寸计算 `window.compact` 等档位与 `window.short`：iOS 取场景的尺寸，能开独立窗口时（iPad）取屏幕的尺寸；Android 取屏幕的宽度或对话框声明的宽度；Web 的主窗口取页面的尺寸，对话框与浮动窗口取声明的尺寸（浮动窗口有位置记录时取记录）并以页面为限；GTK 取声明的尺寸并以最大的显示器为限；Windows 取打开时设定的尺寸，对话框取声明的宽度（未声明时最多 548）并以所在窗口为限。`Adaptive` 在量到自己的可用宽度之前按所在窗口的宽度选择，它的可用宽度不会比窗口更宽。因此手机上新挂的子树——应用启动时的，或条件切换时新建的 `Adaptive`——只构建手机布局，`Modal(cover: compact)` 一开始就铺满；iOS 与 Web 的估计不小于实际尺寸，宽窗口也不会先构建窄布局。macOS 在首次布局前不知道窗口尺寸（SwiftUI 可能恢复上次的窗口大小），窗口字段仍从最宽的档开始；窗口量到宽度后再插入的 `Adaptive` 按窗口宽度选择。Compose 的 `Adaptive` 在布局阶段按实际约束组合，本来就不会先构建别的布局。测试：SwiftUI 在屏幕外窗口里统计各布局的构建次数，Web 在 DOM 夹具里检查 `Adaptive` 的首次构建与窗口的估计尺寸，GTK 检查打开尺寸的计算。实测（2026-10-20）：iPhone 17 模拟器与浏览器 375 宽的视口上，启动时与插入时的 `Adaptive` 都只构建 `compact`，盖满式模态一开始就铺满，1280 宽的视口只构建 `expanded`；Linux 虚拟机（GTK，经 Broadway）上声明 900 宽的窗口打开即为 `medium`，切到胶片页时新挂的 `Adaptive` 只构建一次 `medium`，对话框按声明的 360 打开即为 `compact`；Windows PC（WinUI 3）上声明 400 与 900 宽的窗口打开即为 `compact` 与 `medium`，启动时与插入时的 `Adaptive` 各只构建一次，窄窗口里盖满式模态一开始就铺满。两种情况仍会多构建一次：`Adaptive` 所在位置比窗口窄一档时（例如旁边有侧栏），先按窗口宽构建大一档的布局，量到后再换（GTK 上实测）；GTK 窗口的内容最小宽度大于显示器时，窗口比估计宽，先按窄一档构建（Broadway 上实测）。
-- **电视**：`Layout(size: tv)` 是电视上的布局，可选、最多一个，不受尺寸档的必需与回退规则约束：在电视上，有它的 `Adaptive` 只显示它；不是电视时它不被选中，其余布局照常按宽度选择。表达式可读 `window.tv`，电视上为真，不需要 `[layouts]`。电视的窗口永远是整个屏幕（1920 × 1080 点），所以只运行在电视上的目标（tvOS）构建时就知道这些条件：只保留 `tv` 布局，`window.tv`、尺寸档与 `window.short` 按屏幕求值，已知为假的分支与只被它们放置的组件不生成，能力检查只看电视显示的部分，手机布局里的选文件不会让 tvOS 构建失败。其他目标在运行时判断：Android 按系统的电视模式或 leanback 特性，Web 按电视浏览器的用户代理，macOS、iOS、Windows、Linux 恒为假。实现进度：tvOS 在模拟器上实测；Android 与 Web 的判断未在电视设备上验证。
-- 状态保留规则：引擎状态与会话草稿不在视图树中，切换布局不受影响；控件身份是“组件 + 控件 `id`”，两个布局中 `id` 相同的控件是同一控件，切换后焦点迁移到它（目标支持焦点迁移时）；滚动位置与未提交的局部编辑首版不迁移。
-- 带 `id` 的 `Adaptive` 出现在 `ui.inspect` 中，值为当前尺寸，外部入口可以确认布局切换。
+- There are four size classes: below `compact_below` is `compact`, below `medium_below` is `medium`, below `expanded_below` is `expanded`, and the rest is `large`; a breakpoint that is not written makes the corresponding class not exist, and its widths fall into the class above. Every width falls into exactly one size class; the rule is deterministic and testable. Input methods will be extended later, and the checks do not claim to cover them.
+- `Adaptive` selects by the available width at its position. It can contain only `Layout`; one `compact` and one `expanded` are required, and `medium` and `large` are optional; when a class has no `Layout` of its own, the next larger class's is used, or the next smaller class's when there is no larger one, so apps that write only `compact` and `expanded` behave as before. A missing required class, a duplicate, or a class that does not exist in the configuration reports B401. Using `Adaptive` without configuring `[layouts]` reports B402.
+- Expressions can read the class the window width falls into: `window.compact`, `window.medium`, `window.expanded`, `window.large`, of which exactly one is true, for example page margins `padding: if window.large { 48 } else if window.expanded { 32 } else if window.medium { 24 } else { 16 }`. They are computed from the window width with the same set of breakpoints and need `[layouts]`. A target must list `size_classes` in its capability description to support `medium`, `large` and these window fields; targets that do not support it fail the build. Implementation status: Web is implemented, verified in the browser with the viewport set to 1024, 800 and 1100 wide: the page margins of the poster wall follow the window class as 32, 24 and 32; the `Adaptive` of the filmstrip page is `compact` (icon buttons) at an available width of about 560 and `medium` (text buttons) at about 860. macOS and iOS are implemented: with the macOS window 880, 1200 and over 1440 wide, the page margins of the poster wall are 24, 32 and 48; the `Adaptive` of the filmstrip page is `compact`, `medium` and `expanded` at window widths of 600, 1100 and 1470; iPhone 17 Pro in portrait is `compact`. Compose is implemented; with the window set to 448, 896, 1344 and 1493 dp wide on the Android emulator, the page margins of the poster wall are 16, 24, 32 and about 48, and the `Adaptive` of the filmstrip page is `compact`, `medium` and `expanded` in turn. GTK is implemented: a zero-height probe at the top of the window content measures the width, and on the Linux VM the filmstrip page is `medium` in a medium-sized window; WinUI 3 is implemented, verified on the Windows PC: the page margins of the poster wall change with the class, and the filmstrip page switches between `compact`, `medium` and `expanded`. The coverage of feature contracts is still checked against `compact` and `expanded`.
+- `window.keyboard`: a physical keyboard is connected. Always true on macOS, Linux and Windows; iOS and tvOS follow the keyboard connections and disconnections reported by GameController; Android reads the hardware keyboard in the current configuration (a full keyboard that is not hidden) and updates as the configuration changes when one is plugged in or out; browsers do not report keyboards, so it is true when the primary pointer is not a coarse pointer (touch screen), and becomes true once a named physical key is pressed (keys of on-screen keyboards have no name). Used to hide content that is only useful with a keyboard when there is none, for example keyboard shortcut settings.
+- `window.short`: the window height is below the `compact_below` breakpoint, for example when a phone is turned sideways (an iPhone in landscape is 390 tall), independent of the width class; needs `[layouts]`. Capability `window_short`: SwiftUI and Web are implemented; other targets fail the build. A window's `landscape` is something else: on a phone, it requests landscape while the condition holds and returns to portrait when it does not (capability `window_landscape`: implemented on iOS, Android and Web, where Web only takes effect when the browser allows locking the orientation, mostly when a phone browser is in full screen or runs as an installed app; TVs are always landscape and desktop windows have no orientation, so tvOS, macOS, Linux and Windows treat it as not applicable and likewise declare this capability, without a warning; targets that do not declare it give a warning and keep the device orientation).
+- **Before the width is measured**: when a window and an `Adaptive` are first built, the width has not been measured yet; selection then still goes by the width that will be obtained, instead of building with the widest class first and replacing it once measured: a wasted build brings side effects such as entrance animations, control registration and player binding. Before its first layout, a window computes `window.compact` and the other classes and `window.short` from the size it will get when opened: iOS takes the scene's size, or the screen's size where separate windows can be opened (iPad); Android takes the screen width or the width declared for a dialog; on Web, the main window takes the page size, and dialogs and floating windows take the declared size (a floating window with a recorded position takes the recorded one), limited by the page; GTK takes the declared size, limited by the largest display; Windows takes the size set when opening, and dialogs take the declared width (at most 548 when not declared), limited by the containing window. Until it has measured its own available width, an `Adaptive` selects by the width of its window; its available width cannot be wider than the window. So on a phone a newly mounted subtree, whether at app launch or an `Adaptive` newly created when a condition switches, builds only the phone layout, and `Modal(cover: compact)` fills the screen from the start; the estimates on iOS and Web are not smaller than the actual size, so wide windows do not build the narrow layout first either. macOS does not know the window size before the first layout (SwiftUI may restore the last window size), so the window fields still start from the widest class; an `Adaptive` inserted after the window has measured its width selects by the window width. Compose's `Adaptive` composes according to the actual constraints in the layout phase, so it never builds another layout first anyway. Tests: SwiftUI counts the builds of each layout in an offscreen window, Web checks the first build of `Adaptive` and the window's estimated size in a DOM fixture, and GTK checks the computation of the opening size. Measured (2026-10-20): on the iPhone 17 simulator and in a 375-wide browser viewport, `Adaptive` at launch and on insertion builds only `compact`, and a covering modal fills the screen from the start, while a 1280-wide viewport builds only `expanded`; on the Linux VM (GTK, via Broadway) a window declared 900 wide is `medium` as soon as it opens, the `Adaptive` newly mounted when switching to the filmstrip page builds `medium` only once, and a dialog opened at the declared 360 is `compact` right away; on the Windows PC (WinUI 3), windows declared 400 and 900 wide are `compact` and `medium` as soon as they open, `Adaptive` at launch and on insertion builds only once each, and a covering modal in a narrow window fills it from the start. Two cases still cost one extra build: when the position of the `Adaptive` is one class narrower than the window (for example with a sidebar next to it), it first builds the layout one class larger by the window width and replaces it once measured (measured on GTK); when the minimum content width of a GTK window is larger than the display, the window is wider than estimated and first builds one class narrower (measured on Broadway).
+- **TV**: `Layout(size: tv)` is the layout on a TV; it is optional, at most one is allowed, and it is not subject to the required-class and fallback rules of the size classes: on a TV, an `Adaptive` that has it shows only it; when not on a TV it is never selected, and the other layouts are selected by width as usual. Expressions can read `window.tv`, which is true on a TV and does not need `[layouts]`. A TV window is always the whole screen (1920 × 1080 points), so a target that runs only on TVs (tvOS) knows these conditions at build time: only the `tv` layout is kept, `window.tv`, the size classes and `window.short` are evaluated against the screen, branches known to be false and the components placed only by them are not generated, capability checks look only at what the TV shows, and a file picker in the phone layout does not make the tvOS build fail. Other targets decide at runtime: Android by the system's TV mode or the leanback feature, Web by the user agent of TV browsers, and on macOS, iOS, Windows and Linux it is always false. Implementation status: tvOS is measured on the simulator; the detection on Android and Web is not verified on TV devices.
+- State preservation rules: engine state and session drafts are not in the view tree and are unaffected by layout switches; a control's identity is "component + control `id`", so controls with the same `id` in two layouts are the same control, and after a switch focus moves to it (when the target supports focus migration); scroll positions and uncommitted local edits are not migrated in the first version.
+- An `Adaptive` with an `id` appears in `ui.inspect` with the current size as its value, so external entry points can confirm a layout switch.
 
-### Feature 与 Command
+### Feature and Command
 
-Feature 表示用户能完成的一项功能，Command 表示执行某个引擎或会话动作的请求。Feature 可以由一个命令实现，也可以由多个交互步骤组成。
+A Feature is something the user can accomplish; a Command is a request to perform an engine or session action. A Feature can be implemented by a single command, or it can consist of several interaction steps.
 
-例如，`subtitle` 功能可以先打开选择菜单，再发送具体的字幕选择命令。只要这条入口关系有声明且能被追踪，就不要求桌面和手机出现相同按钮。
+For example, the `subtitle` feature can first open a selection menu and then send the specific subtitle-selection command. As long as this entry-point relationship is declared and can be traced, desktop and phone are not required to show the same button.
 
-Feature Contract 必须显式声明功能标识、适用范围和实现绑定。以下表格表达一个播放器契约：
+A Feature Contract must explicitly declare feature identifiers, scope and implementation bindings. The following table expresses a player contract:
 
-| Feature | 行为 | expanded 入口 | compact 入口 |
+| Feature | Behavior | expanded entry point | compact entry point |
 | --- | --- | --- | --- |
-| play | 切换播放状态 | 工具栏按钮 | 播放按钮 |
-| seek | 按给定位置跳转 | 进度滑块 | 进度滑块 |
-| subtitle | 选择字幕轨道 | 字幕菜单 | 更多菜单中的字幕项 |
-| fullscreen | 切换全屏 | 工具栏按钮 | 更多菜单中的全屏项 |
+| play | Toggle playback | Toolbar button | Play button |
+| seek | Jump to a given position | Progress slider | Progress slider |
+| subtitle | Select a subtitle track | Subtitle menu | Subtitle item in the More menu |
+| fullscreen | Toggle full screen | Toolbar button | Full-screen item in the More menu |
 
-契约到命令、入口到 Feature 的绑定都需要显式表达，不能根据按钮文案或命令名称猜测。首版语法：
+The bindings from contract to command and from entry point to Feature both have to be expressed explicitly; they cannot be guessed from button text or command names. First-version syntax:
 
 ```rust
-/// 媒体页能完成的功能。
+/// Features the media page can perform.
 #[bern::features]
 pub enum MediaFeature {
-    /// 选择要播放的片段。
+    /// Select the clip to play.
     #[commands(feature)]
     Clip,
-    /// 切换全屏。
+    /// Toggle full screen.
     #[commands(toggle_fullscreen)]
     #[layouts(expanded)]
-    #[exempt(browser, "浏览器全屏需要用户手势，无法由命令触发")]
+    #[exempt(browser, "Browser full screen needs a user gesture and cannot be triggered by a command")]
     Fullscreen,
 }
 
@@ -1349,26 +1351,26 @@ pub fn media_page(app: showcase::Client) -> impl View {
 }
 ```
 
-- `#[bern::features]` 声明一个契约的功能集合，变体即功能标识，引用经 `rustc` 类型检查。
-- `#[commands(…)]` 列出实现该功能的命令：协议中的命令名，或 `media.<操作>` 标准媒体命令。绑定到该功能的入口只能运行这些命令。
-- `#[layouts(…)]` 限定功能适用的尺寸，省略时适用于所有尺寸。
-- `#[guaranteed("理由")]` 对无法静态证明的条件入口给出人工保证；`#[exempt(平台, "理由")]` 声明能力豁免，平台名与 `[targets.*].platform` 一致（如 `macos`、`browser`）。
-- `#[component(features = X)]` 把组件确立为契约范围；范围内运行业务命令的入口用 `feature: X::变体` 绑定功能。可以带 `feature` 的元素是有业务动作的 Button、IconButton、MenuItem、TextInput、Search 与 Slider。
-- 不同入口形式由组件表达：同一功能在宽布局可以是按钮，在窄布局可以是 `Menu` 中的 `MenuItem`。
+- `#[bern::features]` declares the feature set of a contract; the variants are the feature identifiers, and references to them are type-checked by `rustc`.
+- `#[commands(…)]` lists the commands that implement the feature: command names in the protocol, or `media.<operation>` standard media commands. Entry points bound to the feature can only run these commands.
+- `#[layouts(…)]` restricts the sizes the feature applies to; when omitted, it applies to all sizes.
+- `#[guaranteed("reason")]` gives a manual guarantee for a conditional entry point that cannot be proven statically; `#[exempt(platform, "reason")]` declares a capability exemption, with platform names matching `[targets.*].platform` (such as `macos`, `browser`).
+- `#[component(features = X)]` establishes the component as the scope of the contract; within the scope, entry points that run business commands bind a feature with `feature: X::Variant`. The elements that can carry `feature` are Button, IconButton, MenuItem, TextInput, Search and Slider when they have a business action.
+- Different entry-point forms are expressed through components: the same feature can be a button in a wide layout and a `MenuItem` inside a `Menu` in a narrow layout.
 
-### 覆盖检查规则
+### Coverage check rules
 
-显式契约是必需功能集合的唯一依据，不能仅根据桌面布局反推其他布局应具备的功能。在契约管理的范围内，用户可触发的业务操作必须绑定已登记 Feature；打开菜单、焦点移动等会话操作可以不登记业务 Feature，但仍必须绑定会话命令。不需要 Feature 不等于可以绕过 Command。
+The explicit contract is the sole basis for the set of required features; the features other layouts should have cannot be inferred from the desktop layout alone. Within the scope managed by a contract, business operations the user can trigger must bind a registered Feature; session operations such as opening a menu or moving focus need not register a business Feature, but must still bind a session command. Not needing a Feature does not mean Command can be bypassed.
 
-新增截图功能时，应先将 `screenshot` 加入契约，再为每个适用布局提供入口。只添加未登记的业务入口也应产生诊断，避免通过直接绑定命令绕过契约。
+When adding a screenshot feature, first add `screenshot` to the contract, then provide an entry point for each applicable layout. Adding only an unregistered business entry point should also produce a diagnostic, so that the contract cannot be bypassed by binding a command directly.
 
-检查以一个已注册的屏幕或功能范围为单位，递归合并组件描述和已声明的菜单、对话框、导航目标关系。外部组件必须提供能够组合的功能入口描述，不能只提供一个无法追溯的“已覆盖”布尔值。
+The check works per registered screen or feature scope, recursively merging component descriptions with the declared menu, dialog and navigation-target relationships. External components must provide composable descriptions of their feature entry points, not just an untraceable "covered" boolean.
 
-条件入口需要附带条件信息。依赖运行时查询结果或无法静态证明条件的入口不能自动视为无条件覆盖；必要时要求显式声明适用条件、能力关系或人工保证，并在报告中单列未被静态证明的部分。首版只对框架理解的条件规则作证明。
+Conditional entry points need to carry condition information. Entry points that depend on runtime query results, or whose conditions cannot be proven statically, cannot automatically count as unconditional coverage; where necessary, explicit declarations of applicable conditions, capability relationships or manual guarantees are required, and the parts not proven statically are listed separately in the report. The first version only proves the condition rules the framework understands.
 
-无法证明的必需 Feature 默认按未覆盖处理并阻止构建。项目只有显式接受人工保证才能放行相关项，报告仍须标为未证明，不能计入严格的静态覆盖成功。
+A required Feature that cannot be proven is treated as uncovered by default and blocks the build. A project can let such items pass only by explicitly accepting a manual guarantee; the report must still mark them as unproven, and they cannot count toward strict static coverage success.
 
-平台缺少能力时，契约可以声明替代入口或有理由的能力豁免。豁免必须出现在构建报告中；缺失、替代和豁免是不同结果，不能都显示为普通覆盖成功。
+When a platform lacks a capability, the contract can declare an alternative entry point or a justified capability exemption. Exemptions must appear in the build report; missing, alternative and exempt are different results and cannot all be shown as ordinary coverage success.
 
 ```text
 error[B201]: Feature missing in adaptive layout
@@ -1378,65 +1380,65 @@ expanded: covered
 compact: missing
 ```
 
-静态检查证明的是：在已声明的结构、适用条件和能力范围内，存在关联到功能的入口。它不能证明入口没有被遮挡、焦点可到达、权限总是满足或操作必然成功。这些行为仍需 UI 测试和应用级测试验证。
+What the static check proves is this: within the declared structure, applicable conditions and capability scope, an entry point associated with the feature exists. It cannot prove that the entry point is not obscured, that focus can reach it, that permissions are always satisfied, or that the operation necessarily succeeds. These behaviors still have to be verified by UI tests and application-level tests.
 
-首版的检查规则：
+First-version check rules:
 
-- **范围**：从契约组件出发，递归进入它渲染的子组件、`Menu`、`Tabs` 的各页、`Navigation` 的目标页与 `Adaptive` 的各布局。子组件若有自己的契约，属于该契约的入口由子契约检查。
-- **尺寸**：`Adaptive` 的某个 `Layout` 中的入口只覆盖该尺寸；不在任何 `Adaptive` 中的入口覆盖所有尺寸。
-- **条件**：位于 `if`、`if let`、`match` 分支中的入口是条件入口。框架能证明的只有一种情形：同一功能在该条件的每个分支中都有入口（`if` 带 `else`、`if let` 带 `else`、`match` 覆盖全部变体），此时视为无条件覆盖。
-- **业务入口**：契约范围内运行引擎命令或标准媒体命令的入口都必须绑定功能。窗口、导航、会话草稿等会话操作不需要功能，但仍须绑定会话命令。
+- **Scope**: starting from the contract component, recurse into the child components it renders, `Menu`, the pages of `Tabs`, the target pages of `Navigation` and the layouts of `Adaptive`. If a child component has its own contract, the entry points belonging to that contract are checked by the child contract.
+- **Size**: entry points in one `Layout` of an `Adaptive` cover only that size; entry points not inside any `Adaptive` cover all sizes.
+- **Conditions**: entry points inside `if`, `if let` or `match` branches are conditional entry points. The framework can prove only one case: the same feature has an entry point in every branch of the condition (`if` with `else`, `if let` with `else`, `match` covering all variants), in which case it counts as unconditional coverage.
+- **Business entry points**: every entry point within a contract scope that runs an engine command or a standard media command must bind a feature. Session operations such as windows, navigation and session drafts do not need a feature, but must still bind a session command.
 
-每个功能在每个适用尺寸上得到一个结果。`bern check` 与 `bern build` 为每个目标输出完整报告，构建还把它写入产物目录的 `features.json`：
+Each feature gets one result for each applicable size. `bern check` and `bern build` output a full report for each target, and the build also writes it to `features.json` in the output directory:
 
-| 结果 | 含义 | 诊断 |
+| Result | Meaning | Diagnostic |
 | --- | --- | --- |
-| 已覆盖 | 存在无条件入口 | — |
-| 人工保证 | 只有条件入口，功能声明了 `#[guaranteed]`；报告中单列为未证明 | 警告 B206 |
-| 豁免 | 没有入口，当前目标平台在 `#[exempt]` 中 | 提示 B205 |
-| 缺失 | 没有入口且未豁免 | 错误 B201 |
-| 未证明 | 只有条件入口且没有人工保证 | 错误 B203 |
+| Covered | An unconditional entry point exists | — |
+| Manual guarantee | Only conditional entry points, and the feature declares `#[guaranteed]`; listed separately in the report as unproven | Warning B206 |
+| Exempt | No entry point, and the current target platform is in `#[exempt]` | Note B205 |
+| Missing | No entry point and not exempt | Error B201 |
+| Unproven | Only conditional entry points and no manual guarantee | Error B203 |
 
-此外，契约范围内未绑定功能的业务入口报 B202；入口运行的命令不在其功能的 `#[commands]` 中报 B204；`feature:` 引用不属于所在契约，或出现在任何契约范围之外，也报 B204。
+In addition, a business entry point within a contract scope that does not bind a feature reports B202; an entry point that runs a command not in its feature's `#[commands]` reports B204; a `feature:` that references a feature not belonging to the enclosing contract, or that appears outside any contract scope, also reports B204.
 
-## 强制命令化与多入口引擎
+## Mandatory commands and the multi-entry-point engine
 
-### 命令是所有可操作入口的基础
+### Commands underlie every actionable entry point
 
-Bern 将“每个操作都是一个命令”落实为严格的声明与运行协议。Bern 提供的播放、搜索、修改设置、编辑草稿、开关窗口、打开菜单、导航和移动焦点等语义操作，都必须有类型化命令。纯展示组件没有操作时不需要虚构命令；原始输入采样、绘制与布局属于框架执行机制。
+Bern turns "every operation is a command" into a strict declaration and runtime protocol. The semantic operations Bern provides, such as playing, searching, changing settings, editing drafts, opening and closing windows, opening menus, navigating and moving focus, must all have typed commands. Purely presentational components with no operations do not need invented commands; raw input sampling, drawing and layout are execution mechanisms of the framework.
 
-命令约束覆盖 Bern 拥有的交互入口与主动请求。操作系统窗口管理器、宿主终止等外部系统产生的不可拦截变化是事实事件，只能由受信任适配器同步观察结果；不能事后伪造命令，也不能承诺框架控制整个操作系统。这个边界不允许应用以“平台事件”为由添加任意回调或直接修改业务状态。
+The command constraint covers the interaction entry points and active requests that Bern owns. Changes that cannot be intercepted and are produced by external systems, such as the operating system's window manager or termination by the host, are factual events; only trusted adapters may synchronize the observed results. Commands cannot be forged after the fact, and the framework cannot promise to control the whole operating system. This boundary does not let applications add arbitrary callbacks or modify business state directly on the grounds of "platform events".
 
-Query 保持只读，Event 表示已发生的事实。它们与 Command 使用统一目录和类型描述，可以由相同入口访问，但不能因入口叫作命令行就把查询标记为写操作。引擎接收计时器、解码器等内部事件更新状态也不要求伪造一次 UI 点击；这些来源由引擎自身管理。
+Query stays read-only, and Event represents a fact that has happened. They use the same catalog and type descriptions as Command and can be accessed from the same entry points, but a query must not be marked as a write operation just because the entry point is called a command line. The engine receiving internal events such as timers and decoders to update its state also does not require forging a UI click; these sources are managed by the engine itself.
 
-| 类别 | 作用域与责任 | 示例 |
+| Category | Scope and responsibility | Examples |
 | --- | --- | --- |
-| Engine Command | 改变应用引擎状态，不依赖界面存在 | 播放、定位、修改播放设置 |
-| Session Command | 操作明确的 UI 会话或窗口，由会话处理器执行 | 开关窗口、编辑草稿、导航、打开菜单、焦点移动 |
-| Query | 读取引擎或会话的状态，声明结果类型及订阅能力 | 播放状态、当前路由、控件可用性 |
-| Event | 通知事实和状态版本，不作为外部写入状态的旁路 | 播放位置变化、路由已改变 |
+| Engine Command | Changes the application engine's state; does not depend on the UI existing | Play, seek, change playback settings |
+| Session Command | Operates on an explicit UI session or window; executed by session handlers | Open and close windows, edit drafts, navigate, open menus, move focus |
+| Query | Reads engine or session state; declares the result type and subscription capability | Playback state, current route, control availability |
+| Event | Notifies facts and state versions; not a side path for writing state from outside | Playback position changed, route changed |
 
-引擎命令与会话命令共用描述格式和调用规则，处理器分别注册。通用命令宿主负责路由；会话处理器在前端执行，业务核心不持有窗口对象。高频编辑和焦点命令可以在本地执行，不要求绕行远程业务服务器。
+Engine commands and session commands share the description format and invocation rules, and their handlers are registered separately. The general command host handles routing; session handlers execute in the frontend, and the business core holds no window objects. High-frequency edit and focus commands can execute locally, without a detour through a remote business server.
 
-### 自动生成与编译失败规则
+### Automatic generation and compile failure rules
 
-标准控件能够确定语义的操作由 Bern 自动适配为会话命令，例如编辑字段、展开菜单、关闭弹窗和维护焦点。自动生成的是类型化命令描述与绑定，可以被查询和驱动，不是偷偷保留无描述的事件回调。
+Operations whose semantics a standard control can determine are adapted by Bern automatically into session commands, such as editing fields, expanding menus, closing popups and maintaining focus. What is generated automatically is typed command descriptions and bindings that can be queried and driven, not event callbacks quietly kept without descriptions.
 
-自动动作使用稳定的动作描述与明确的实例目标；列表实例通过数据 key 和实例版本定位。具体参数与有效目标可以从会话目录查询，不依赖屏幕坐标、翻译文案或某个 UI 框架的内部对象地址。
+Automatic actions use stable action descriptions and explicit instance targets; list instances are located by data key and instance version. Concrete parameters and valid targets can be queried from the session catalog, without depending on screen coordinates, translated text or the internal object address of some UI framework.
 
-业务意图必须显式绑定已注册命令。框架不能根据“播放”按钮文案推断要调用哪个播放器，也不能把任意闭包自动包装后宣称业务接口已经完整。
+Business intent must explicitly bind a registered command. The framework cannot infer which player to call from the text of a "Play" button, nor can it automatically wrap arbitrary closures and then claim that the business interface is complete.
 
-| UI 声明 | 编译结果 |
+| UI declaration | Compile result |
 | --- | --- |
-| 标准 TextInput 编辑有明确类型的会话草稿字段 | 自动生成编辑命令并绑定字段 |
-| Menu 展开、Dialog 关闭等标准交互 | 自动生成或引用对应会话命令 |
-| Window 打开、请求关闭、激活等窗口操作 | 自动生成类型化窗口命令，原生与虚拟呈现共用 |
-| Slider 预览本地拖动值，再显式绑定提交命令 | 分别使用会话命令和业务命令 |
-| Button 指向已注册命令，参数来源可检查 | 生成类型化绑定 |
-| Button 没有行为，或引用未知命令 | 编译失败，要求有效绑定 |
-| 修改只读业务快照，却没有绑定业务命令 | 编译失败，不猜测反向写入方式 |
-| 任意 on_click 闭包、直接状态赋值、未知函数调用 | 编译失败，要求移入已注册处理器或查询 |
-| 第三方交互组件缺少命令描述 | 不能作为合规组件导出 |
+| A standard TextInput edits an explicitly typed session draft field | Generates an edit command automatically and binds the field |
+| Standard interactions such as Menu expansion and Dialog closing | Generates or references the corresponding session command automatically |
+| Window operations such as opening a Window, requesting close and activation | Generates typed window commands automatically, shared by native and virtual presentation |
+| Slider previews a local drag value, then explicitly binds a commit command | Uses a session command and a business command respectively |
+| Button points to a registered command, with checkable parameter sources | Generates a typed binding |
+| Button has no behavior, or references an unknown command | Compile failure; a valid binding is required |
+| Modifies a read-only business snapshot without binding a business command | Compile failure; does not guess how to write back |
+| Arbitrary on_click closures, direct state assignment, unknown function calls | Compile failure; must be moved into a registered handler or query |
+| A third-party interactive component lacks a command description | Cannot be exported as a compliant component |
 
 ```text
 error[B301]: UI action must bind a registered command
@@ -1446,74 +1448,74 @@ Found: arbitrary callback
 Required: engine command or session command
 ```
 
-该约束是 Bern 组件模型的默认要求，不提供通过关闭检查把任意回调混入标准组件的模式。预览使用明确的模拟命令处理器，不能把预览占位处理器当作真实业务实现交付。
+This constraint is the default requirement of the Bern component model; there is no mode that turns the check off to mix arbitrary callbacks into standard components. Previews use explicit mock command handlers, and preview placeholder handlers cannot be delivered as the real business implementation.
 
-Bern 检查自己控制的声明与绑定，`rustc` 检查实际类型。查询实现的只读性、原生适配器的忠实性及任意 Rust 处理器内部逻辑还需实现审查和测试；不能声称宏证明了整个程序的所有副作用。
+Bern checks the declarations and bindings it controls, and `rustc` checks the actual types. The read-only nature of query implementations, the faithfulness of native adapters and the internal logic of arbitrary Rust handlers still require implementation review and tests; one cannot claim that the macros prove all side effects of the whole program.
 
-### 一个命令目录驱动所有入口
+### One command catalog drives all entry points
 
-命令描述是 Rust 客户端、应用 CLI、JSON schema、MCP 工具映射、帮助信息和随应用附带的 Agent skill 的共同来源。通道只解析、编码、提供调用上下文并转发，不复制业务逻辑。
+Command descriptions are the common source of the Rust client, the app CLI, the JSON schema, the MCP tool mapping, the help text and the agent skill shipped with the app. Channels only parse, encode, provide invocation context and forward; they do not duplicate business logic.
 
-每个描述至少包含：稳定命令 ID、目录版本、参数与结果 schema、结构化错误、引擎或会话作用域、所需能力，以及可取消性、并发和重试策略。查询与事件描述复用类型体系并保留各自类别。
+Each description contains at least: a stable command ID, the catalog version, parameter and result schemas, structured errors, engine or session scope, required capabilities, and the cancellability, concurrency and retry policies. Query and event descriptions reuse the type system and keep their own categories.
 
-构建目录定义稳定的操作与类型，运行时会话目录枚举当前有效实例及其动作目标。实例发现不允许悄悄改变已编译的业务 schema；目录版本变化需要重新匹配兼容性。
+The build catalog defines stable operations and types; the runtime session catalog enumerates the currently valid instances and their action targets. Instance discovery must not quietly change the compiled business schema; a change of catalog version requires compatibility to be matched again.
 
-外部名称需要显式、稳定且无冲突的映射。例如命令 ID `player.seek` 可以映射到 CLI 的 `player seek` 和 MCP 工具 `player_seek`，但不能只用不可逆的字符串替换处理所有名称。描述冲突或 schema 不兼容必须诊断。
+External names need explicit, stable and conflict-free mappings. For example, the command ID `player.seek` can map to `player seek` in the CLI and to the MCP tool `player_seek`, but not every name can be handled with an irreversible string replacement alone. Description conflicts or schema incompatibilities must be diagnosed.
 
 ```mermaid
 flowchart LR
-    UI[UI 语义动作] --> UA[UI 命令适配]
-    CLI[应用 CLI] --> CA[CLI 参数适配]
-    JSON[JSON 控制通道] --> JA[消息适配]
-    MCP[MCP 服务器] --> MA[MCP 协议适配]
-    UA --> Host[统一命令宿主与调度契约]
+    UI[UI semantic actions] --> UA[UI command adaptation]
+    CLI[App CLI] --> CA[CLI argument adaptation]
+    JSON[JSON control channel] --> JA[Message adaptation]
+    MCP[MCP server] --> MA[MCP protocol adaptation]
+    UA --> Host[Unified command host and dispatch contract]
     CA --> Host
     JA --> Host
     MA --> Host
-    Catalog[类型化命令目录] -.-> Host
-    Host --> Engine[引擎处理器与共享状态]
-    Host --> Session[会话路由与 UI 处理器]
-    Engine --> Updates[结果与版本化状态订阅]
+    Catalog[Typed command catalog] -.-> Host
+    Host --> Engine[Engine handlers and shared state]
+    Host --> Session[Session routing and UI handlers]
+    Engine --> Updates[Results and versioned state subscriptions]
     Session --> Updates
 ```
 
-统一宿主表示共同路由与执行规则，不强制所有调用经过一个远程进程。会话处理器可以就地执行；向引擎派发的调用仍必须连接指定的同一实例。
+The unified host stands for common routing and execution rules; it does not force every invocation through one remote process. Session handlers can execute in place; invocations dispatched to the engine must still connect to the specified, same instance.
 
-### 四种入口的职责
+### Responsibilities of the four entry points
 
-| 入口 | 责任 |
+| Entry point | Responsibility |
 | --- | --- |
-| UI | 将鼠标、触摸、键盘、遥控器等输入转成控件语义动作，绑定参数并派发命令 |
-| 应用 CLI | 从目录派生子命令、参数、帮助与结果格式，连接指定引擎，提供明确退出状态 |
-| JSON 控制通道 | 接收结构化请求并返回结果或状态消息，具体承载方式由适配器实现 |
-| MCP 服务器 | 按命令目录映射工具及查询能力，遵循 MCP 协议，再调用相同调度接口 |
+| UI | Turns mouse, touch, keyboard, remote control and other input into semantic control actions, binds parameters and dispatches commands |
+| App CLI | Derives subcommands, parameters, help and result format from the catalog, connects to the specified engine and provides an explicit exit status |
+| JSON control channel | Receives structured requests and returns results or status messages; the concrete transport is implemented by adapters |
+| MCP server | Maps tools and query capabilities from the command catalog, follows the MCP protocol, then calls the same dispatch interface |
 
-应用 CLI 与 `bern build` 是两个概念：前者控制生成的应用，后者构建应用。命令适配模块不得混入 UI 生成器，也不能要求无 UI 引擎安装 Flutter 或 Xcode。
+The app CLI and `bern build` are two different things: the former controls the generated application, the latter builds the application. The command adaptation module must not be mixed into the UI generators, and it cannot require a UI-less engine to install Flutter or Xcode.
 
-JSON 是编码，不等于传输，也不等于 MCP。JSON 控制消息可以经本地通道或网络承载；MCP 服务器有独立协议适配，不把自定义 JSON 信封冒充 MCP 报文。生成入口能力不自动启动网络监听，应用宿主决定装配哪些通道。
+JSON is an encoding; it is not a transport, and it is not MCP. JSON control messages can be carried over a local channel or the network; the MCP server has its own protocol adapter and does not pass off a custom JSON envelope as MCP messages. Generating entry-point capabilities does not automatically start a network listener; the application host decides which channels to assemble.
 
-### 随应用附带的 Agent skill
+### The agent skill shipped with the app
 
-应用监听控制通道（目标声明 `channels = ["ipc"]`）时，构建在 `bin/` 旁写出 `skills/<程序>/SKILL.md`（macOS 另在应用包的 `Contents/Resources/skills` 里写一份，程序在 `Contents/Helpers`），让 Agent 通过应用 CLI 与 MCP 服务器使用应用。它与 CLI 帮助、MCP 工具列表出自同一份命令目录，列出本次构建的全部内容：
+When an application listens on the control channel (the target declares `channels = ["ipc"]`), the build writes `skills/<program>/SKILL.md` next to `bin/` (on macOS another copy goes into the app bundle's `Contents/Resources/skills`, with the program in `Contents/Helpers`), so that agents can use the application through the app CLI and the MCP server. It comes from the same command catalog as the CLI help and the MCP tool list, and lists everything in this build:
 
-- 状态字段及其类型与说明；
-- 每条引擎命令与查询：CLI 写法、参数（类型、可否省略、说明）、结果类型、错误码、重复执行是否得到相同状态、MCP 工具名，以及自动触发它的事件；
-- 应用声明播放器时，播放器与媒体命令；
-- 驱动界面的会话命令、窗口种类 id、界面语言与控件身份的写法；
-- 参数和结果用到的记录与枚举的 JSON 形式。
+- state fields with their types and descriptions;
+- each engine command and query: the CLI syntax, parameters (type, whether it can be omitted, description), result type, error codes, whether running it again yields the same state, the MCP tool name, and the events that trigger it automatically;
+- the player and media commands, when the application declares a player;
+- the session commands that drive the UI, the window kind ids, and how to write the UI language and control identities;
+- the JSON form of the records and enums used by parameters and results.
 
-文件以 skill 的 front matter 开头：`name` 为程序名，`description` 写应用各语言的名称、用途和命令列表，不超过 1024 个字符。正文说明程序相对 skill 文件的位置与安装后的位置、调用写法、退出状态和 MCP 的注册方式；同组命令共有的错误码只在组首说明一次。需要额外步骤才能连上的目标另有说明：iOS 与 tvOS 模拟器中的应用要以 `BERN_IPC_DIR` 启动，Android 要用 `adb forward` 转发控制通道，WebUI 要先启动引擎宿主。整个文件夹可以原样复制到 Agent 的 skills 目录。
+The file starts with skill front matter: `name` is the program name, and `description` gives the application's name in each language, its purpose and the command list, in no more than 1024 characters. The body explains where the program is relative to the skill file and after installation, the invocation syntax, the exit status and how to register the MCP server; error codes shared by a group of commands are explained only once, at the head of the group. Targets that need extra steps to connect get additional notes: apps in the iOS and tvOS simulators must be launched with `BERN_IPC_DIR`, Android needs `adb forward` to forward the control channel, and WebUI needs the engine host to be started first. The whole folder can be copied as is into an agent's skills directory.
 
-不监听控制通道的目标不写 skill，并删除之前构建留下的；Web `app` 构建没有 CLI，也没有 skill。安装包同样附带：macOS 放在应用的 `Contents/Resources/skills`，随应用一起签名；Windows 的安装程序与 `.zip`、Linux 的 `.deb`（`/opt/<bundle_id>/skills`）与 `.tar.gz`、WebUI 的压缩包都放在 `bin/` 旁。Android 的 APK 与 AAB 不含 CLI，也不含 skill。
+Targets that do not listen on the control channel write no skill, and delete one left by an earlier build; Web `app` builds have no CLI and no skill. Installers ship it too: macOS puts it in the app's `Contents/Resources/skills`, signed together with the app; the Windows installer and `.zip`, the Linux `.deb` (`/opt/<bundle_id>/skills`) and `.tar.gz`, and the WebUI archive all put it next to `bin/`. Android APKs and AABs contain neither the CLI nor the skill.
 
-同一个跳转操作的入口映射示意如下：
+The entry-point mapping for the same seek operation looks like this:
 
-| 入口 | 请求 |
+| Entry point | Request |
 | --- | --- |
-| UI | 进度滑块提交 90000 毫秒，绑定 `player.seek` |
-| 应用 CLI | `my-app --engine engine-main player seek --position-ms 90000` |
-| JSON | 下方控制消息 |
-| MCP | 调用映射后的 `player_seek` 工具，参数指向相同引擎与位置 |
+| UI | The progress slider commits 90000 milliseconds, bound to `player.seek` |
+| App CLI | `my-app --engine engine-main player seek --position-ms 90000` |
+| JSON | The control message below |
+| MCP | Calls the mapped `player_seek` tool, with parameters pointing to the same engine and position |
 
 ```json
 {
@@ -1525,109 +1527,109 @@ JSON 是编码，不等于传输，也不等于 MCP。JSON 控制消息可以经
 }
 ```
 
-该 JSON 是控制协议草案。数值、可选值与错误的编码遵循统一 schema，不让各入口自行猜测 Rust 类型。MCP 等通道可以通过已绑定的连接上下文确定引擎，关键是不能悄悄选取不同实例。
+This JSON is a draft of the control protocol. The encoding of numbers, optional values and errors follows the unified schema, so no entry point has to guess Rust types on its own. Channels such as MCP can determine the engine from the bound connection context; the key point is that a different instance must never be picked quietly. Like the app CLI, the MCP server takes `--engine` when it starts and then sends every call to that engine. `--engine` takes the engine's id or the system it runs on (`macos`, `ios`, `tvos`, `windows`, `linux`, `android`, which the socket's name carries); the id is new each time the app starts, so a registration names the system. Without it, the only engine running is taken; when several run, or several on the named system, none is picked and the error lists them with their systems.
 
-### 同一引擎与会话身份
+### Same engine and session identity
 
-运行中的引擎具有可识别的 `engine_id`，UI 会话和窗口具有自己的稳定身份。CLI 默认连接明确指定或可唯一发现的现有引擎；存在歧义应要求指定，未运行应返回明确错误。启动新实例必须是显式行为，不能每调用一次 CLI 都重新创建一份应用状态。
+A running engine has an identifiable `engine_id`, and UI sessions and windows have their own stable identities. By default the CLI connects to an existing engine that is explicitly specified or can be discovered uniquely; when there is ambiguity it should require one to be specified, and when none is running it should return an explicit error. Starting a new instance must be an explicit action; a CLI invocation must not create a fresh copy of the application state every time.
 
-引擎命令不以 UI 存在为通用前提，可以在无界面宿主中调用；需要媒体执行端或设备的操作仍按能力检查，不能保证缺少设备时也执行成功。会话命令需要指定 `session_id`，必要时还要指定窗口与控件身份。已知命令缺少可用会话时返回 `requires_ui_session`，目标已经销毁时返回相应失效错误。窗口打开命令可以在已有可用会话内显式创建窗口；不能为了执行其他命令偷偷启动 UI 或假装命令成功。
+Engine commands do not generally presuppose a UI and can be called in a UI-less host; operations that need a media executor or a device are still checked by capability, and success cannot be guaranteed when the device is missing. Session commands need a `session_id`, and where necessary a window and control identity as well. A known command with no usable session returns `requires_ui_session`; when the target has already been destroyed, the corresponding invalidation error is returned. A window-open command can explicitly create a window inside an existing usable session; the UI must not be started secretly in order to execute other commands, and a command must not pretend to have succeeded.
 
-各入口读取同一引擎的状态快照、版本和事件；UI 会话状态单独注明归属。订阅断开后通过快照与版本恢复，不能把命令响应当成所有状态变化的唯一来源。
+All entry points read the same engine's state snapshots, versions and events; UI session state is marked separately with its owner. After a subscription disconnects, it recovers through the snapshot and the version; command responses must not be treated as the only source of all state changes.
 
-### 命令验证与执行结果
+### Command validation and execution results
 
-每个入口都经过统一的参数、调用权限、作用域、能力和业务前置条件检查。身份与权限来自宿主验证的调用上下文，不由命令参数自行声明。UI 禁用态不是业务权限，执行时仍需重新检查条件；引擎命令可以在界面未显示时被 CLI 调用。`ui.activate` 这类会话命令则必须检查控件存在、可见、启用和可操作状态，不能直接跳过 UI 路径调用业务处理器。
+Every entry point goes through the same checks of parameters, invocation permissions, scope, capabilities and business preconditions. Identity and permissions come from the invocation context verified by the host, not from something the command parameters declare themselves. A disabled state in the UI is not a business permission, and conditions must be checked again at execution time; engine commands can be called by the CLI while the UI is not shown. Session commands such as `ui.activate`, on the other hand, must check that the control exists and is visible, enabled and operable, and cannot skip the UI path to call business handlers directly.
 
-生成的 Rust 调用引用类型化客户端，由 `rustc` 验证实际参数类型；适配器到处理器的映射也需验型。动态外部输入在接收边界校验。远程客户端编译只能验证约定 schema，服务端版本和实现需独立验证。
+Generated Rust calls reference a typed client, and `rustc` verifies the actual parameter types; the mapping from adapters to handlers also has to be type-checked. Dynamic external input is validated at the receiving boundary. Compiling a remote client can only verify the agreed schema; the server's version and implementation need independent verification.
 
-命令结果区分已接受、执行中、成功、失败和取消。耗时操作可返回操作句柄，随后查询进度或等待完成；收到请求不等于业务操作已完成。应用 CLI 默认等待最终结果再给出相应退出状态，显式后台模式可以返回句柄，但输出必须标明仅已接受。
+Command results distinguish accepted, running, succeeded, failed and cancelled. A long operation can return an operation handle, through which progress can then be queried or completion awaited; receiving a request does not mean the business operation has completed. By default the app CLI waits for the final result before giving the corresponding exit status; an explicit background mode can return a handle, but its output must state that the command has only been accepted.
 
-`request_id` 用于关联调用，幂等键用于约定范围内的去重，二者不自动等价。命令描述应规定同一资源上的排队、拒绝或合并策略；取消请求不意味着已经回滚已发生的副作用。外部连接关闭也不默认取消应用级业务操作。
+`request_id` correlates invocations, and the idempotency key deduplicates within an agreed scope; the two are not automatically equivalent. A command description should specify the queuing, rejection or merge policy on the same resource; a cancellation request does not mean that side effects that already happened have been rolled back. Closing an external connection also does not cancel application-level business operations by default.
 
-高频滑块更新可以采用“预览会话命令加提交引擎命令”，或在命令明确允许时合并待执行值。不能把所有命令都按只保留最新处理，尤其不能丢掉必须逐次执行的业务操作。
+High-frequency slider updates can use "a preview session command plus a commit engine command", or merge pending values when the command explicitly allows it. Commands cannot all be processed by keeping only the latest value; above all, business operations that must execute every time cannot be dropped.
 
-## 状态与异步资源
+## State and asynchronous resources
 
-### 响应式状态与生命周期
+### Reactive state and lifecycle
 
-应用状态通过只读快照或订阅提供给 UI。运行时记录依赖关系，仅更新受影响的绑定。多属性状态更新需要批次或版本边界，避免一次业务变化让界面短暂读到互相矛盾的状态。
+Application state is provided to the UI through read-only snapshots or subscriptions. The runtime records dependencies and updates only the affected bindings. State updates that touch several properties need batch or version boundaries, so that one business change does not let the UI briefly read mutually contradictory state.
 
-界面自己的状态写在会话草稿中（`#[bern::session]`），例如面板是否打开、流程走到第几步、选中哪一项。控件可以直接改草稿：开关、选择器、输入框改它们绑定的字段；按钮通过会话动作改，写作 `=> draft.panel.set(true)` 或 `=> draft.panel.toggle()`（只用于 `bool`）；小数字段可以写整数，例如 `=> draft.size.set(12)`。文字字段还有 `=> draft.query.push_str("A")`（在后面接上文字）与 `=> draft.query.pop()`（删去最后一个字符，按字符而不是字节或 UTF-16 单元），用于屏幕键盘一类的按键；名字取自 Rust 的 `String`，六个目标都实现（Web 运行时测试之外，SwiftUI 在 tvOS 与 macOS 上类型检查，GTK 与 WinUI 3 在各自系统上编译）。会话动作只改这个会话的草稿，不进入业务引擎，也不是业务命令，所以不属于任何功能；它们和其他动作一样经 `ui.activate` 由外部入口触发。实现进度：SwiftUI、Compose 与 Web 已实现，Web 上验证了菜单项把字号设为 18；GTK 与 WinUI 3 已实现，Windows PC 上验证菜单项把字号设为 18、分体按钮的浮层显示 18，GTK 上未单独验证。
+The UI's own state is written in the session draft (`#[bern::session]`), for example whether a panel is open, which step a flow has reached, or which item is selected. Controls can change the draft directly: switches, pickers and input fields change the fields they bind; buttons change it through session actions, written `=> draft.panel.set(true)` or `=> draft.panel.toggle()` (only for `bool`); decimal fields can be given integers, for example `=> draft.size.set(12)`. Text fields also have `=> draft.query.push_str("A")` (appends text at the end) and `=> draft.query.pop()` (removes the last character, by character rather than by byte or UTF-16 unit), for keys such as those of an on-screen keyboard; the names are taken from Rust's `String`, and all six targets implement them (besides the Web runtime tests, SwiftUI is type-checked on tvOS and macOS, and GTK and WinUI 3 are compiled on their own systems). Session actions change only this session's draft; they do not enter the business engine and are not business commands, so they belong to no feature; like other actions, they are triggered by external entry points through `ui.activate`. Implementation progress: SwiftUI, Compose and Web are implemented, and on Web a menu item setting the font size to 18 was verified; GTK and WinUI 3 are implemented, verified on the Windows PC that a menu item sets the font size to 18 and the split button's flyout shows 18, not verified separately on GTK.
 
-最小运行时必须处理：
+The minimal runtime must handle:
 
-- 应用状态、组件局部状态及派生状态的归属。
-- 组件挂载、更新、卸载和订阅释放。
-- 逻辑窗口目录、实例生命周期、原生或虚拟呈现及各窗口的状态作用域。
-- 动态列表的身份与局部状态保留。
-- 事件派发、异步完成和错误呈现。
-- 更新批处理，以及各平台 UI 线程的调度。
-- 本地主题环境变化、快照版本与统一提交，保持组件实例和交互状态。
+- Ownership of application state, component-local state and derived state.
+- Mounting, updating and unmounting components, and releasing subscriptions.
+- The logical window catalog, instance lifecycles, native or virtual presentation, and the state scope of each window.
+- Identity and preservation of local state for dynamic lists.
+- Event dispatch, asynchronous completion and error presentation.
+- Update batching, and scheduling on each platform's UI thread.
+- Changes of the local theme environment, snapshot versions and a unified commit that keeps component instances and interaction state.
 
-不要求首版引入通用虚拟 DOM。静态节点可以直接生成创建和更新逻辑；条件与列表使用明确的结构更新机制。是否需要更通用的树协调，应由原型需求决定。
+The first version is not required to introduce a general virtual DOM. Static nodes can directly generate creation and update logic; conditions and lists use explicit structural update mechanisms. Whether more general tree reconciliation is needed should be decided by what prototypes require.
 
-### 异步查询与展示状态
+### Asynchronous queries and presentation state
 
-查询资源需要统一表达首次加载、已有数据、刷新与失败，避免应用为每个控件重复拼接布尔标志。空结果属于一次成功查询的内容语义，由声明的空状态规则决定如何展示；不能把空列表等同于请求失败。
+Query resources need a unified expression for first load, data available, refreshing and failure, so that applications do not piece together boolean flags again for every control. An empty result is part of the content semantics of a successful query, and how it is shown is decided by the declared empty-state rules; an empty list must not be equated with a failed request.
 
-刷新时可以保留上一份成功数据，同时记录刷新进度或错误。每个查询订阅使用独立的参数版本与请求身份，默认仅接受当前参数对应的结果。例如连续输入两次搜索，较早请求的慢响应不能覆盖新结果。资源提供器应支持取消不再需要的查询；无法立即取消时也必须丢弃失效结果。
+During a refresh, the previous successful data can be kept while refresh progress or errors are recorded. Each query subscription uses its own parameter version and request identity, and by default accepts only the result for the current parameters. For example, when two searches are typed in a row, a slow response to the earlier request cannot overwrite the newer results. Resource providers should support cancelling queries that are no longer needed; when a query cannot be cancelled immediately, its stale result must still be discarded.
 
-这一“只接受当前结果”的策略适用于查询与展示资源，不自动推广到引擎命令。重试业务命令必须遵守其幂等和执行策略。
+This "accept only the current result" policy applies to queries and presentation resources and does not automatically extend to engine commands. Retrying a business command must follow its idempotency and execution policies.
 
-### 引擎在别处做的工作
+### Work the engine does elsewhere
 
-命令在引擎线程上依次执行，所以耗时的工作（网络请求、扫描文件夹、计算校验）不在命令里等待：命令把工作交给别的线程后立即返回，工作做完时那个线程唤醒引擎，引擎在自己的线程上把结果收进状态，宿主随后像命令执行后一样发布状态（2026-10-21）。
+Commands execute one after another on the engine thread, so time-consuming work (network requests, scanning folders, computing checksums) is not waited for inside a command: the command hands the work to another thread and returns immediately; when the work is done, that thread wakes the engine, the engine takes the result into its state on its own thread, and the host then publishes the state as it does after a command (2026-10-21).
 
-- 引擎在执行命令、查询或唤醒时，用 `bern::wake::waker()` 取得自己的 `Waker`，交给做工作的线程；那个线程完成后调用 `waker.wake()`，引擎停止后它返回 `false`。
-- 宿主随后在引擎线程上调用引擎的 `wake`（协议宏生成的 `Engine` 特征里有默认的空实现），之后发布状态；由模块组成的应用依次唤醒外壳与每个开着的模块，它们发出的调用与事件像命令之后一样执行。
-- 引擎排队等待期间到达的多次唤醒合并成一次：`wake` 收进所有已就绪的结果，而不是一次唤醒对应一个结果。
-- 宿主启动时先唤醒每个引擎一次，引擎可以在这里开始从一开始就需要的工作，例如读取缓存后刷新网络数据。
-- `Waker` 不会让已经没有宿主的引擎线程继续存在；在 WebAssembly 上没有线程，唤醒在调用方的线程上排队执行。
+- While executing a command, a query or a wake, the engine gets its own `Waker` with `bern::wake::waker()` and gives it to the thread doing the work; that thread calls `waker.wake()` when it finishes, which returns `false` once the engine has stopped.
+- The host then calls the engine's `wake` on the engine thread (the `Engine` trait generated by the protocol macro has a default empty implementation) and publishes the state afterwards; an application made of modules wakes the shell and each open module in turn, and the calls and events they emit execute as they do after a command.
+- Several wakes that arrive while the engine is waiting in the queue are merged into one: `wake` takes in all results that are ready, rather than one wake corresponding to one result.
+- When the host starts, it first wakes each engine once, and the engine can start here the work it needs from the very beginning, for example refreshing network data after reading a cache.
+- A `Waker` does not keep alive an engine thread that no longer has a host; on WebAssembly there are no threads, and wakes are queued and run on the caller's thread.
 
-### 所有权与释放规则
+### Ownership and release rules
 
-每份状态、订阅和长期资源都必须有明确所有者：组件、页面、窗口、UI 会话或应用引擎。标准控件的临时编辑状态由框架自动选择合理作用域；应用级资源通过显式描述声明，不根据当前是否可见推断寿命。
+Every piece of state, every subscription and every long-lived resource must have an explicit owner: a component, page, window, UI session or the application engine. For the temporary edit state of standard controls the framework picks a reasonable scope automatically; application-level resources are declared through explicit descriptions, and their lifetime is not inferred from whether they are currently visible.
 
-| 所有者示例 | 销毁时的处理 |
+| Owner example | Handling on destruction |
 | --- | --- |
-| 搜索页面的查询订阅 | 解除订阅，取消或丢弃页面不再需要的结果 |
-| 组件临时预览值 | 组件卸载后释放，不写回已销毁实例 |
-| 导航栈中保留的页面状态 | 按路由恢复策略保留，直到页面退出对应作用域 |
-| 窗口级草稿、导航与任务 | 窗口关闭确认完成后按策略释放；仅隐藏、最小化或切换虚拟窗口不销毁 |
-| 应用级播放器 | 离开某个页面只解除其观察关系，不自动停止播放 |
+| Query subscription of a search page | Unsubscribe; cancel or discard results the page no longer needs |
+| Temporary preview value of a component | Released after the component unmounts; not written back to a destroyed instance |
+| Page state kept in the navigation stack | Kept according to the route restoration policy until the page leaves the corresponding scope |
+| Window-level drafts, navigation and tasks | Released according to policy once the window's close confirmation completes; merely hiding, minimizing or switching virtual windows does not destroy them |
+| Application-level player | Leaving a page only removes that page's observation of it; playback does not stop automatically |
 
-资源释放通过所属作用域的生命周期规则执行。Bern 管理的关闭、退出和停止通过相应命令进入这些规则；系统强制销毁等事实由适配器同步并执行清理，内部清理不需要伪造额外用户操作。清理应处理订阅、任务、缓存引用和跨语言 handle，避免资源仍引用已经销毁的 UI 实例。
+Resources are released through the lifecycle rules of the owning scope. Closing, quitting and stopping managed by Bern enter these rules through the corresponding commands; facts such as forced destruction by the system are synchronized by adapters, which then perform the cleanup, and internal cleanup does not need to forge additional user operations. Cleanup should handle subscriptions, tasks, cache references and cross-language handles, so that no resource still references a UI instance that has already been destroyed.
 
-## 交互语义与类型化导航
+## Interaction semantics and typed navigation
 
-### 输入归一化与焦点作用域
+### Input normalization and focus scopes
 
-目标适配器将鼠标、触摸、键盘、遥控器及可访问动作转换为激活、编辑、选择、提交、返回等语义动作，再派发对应命令。控件不自行维护另一套鼠标专用业务回调。平台按键、输入法与手势的原生规则由适配器保留。
+Target adapters convert mouse, touch, keyboard, remote control and accessibility actions into semantic actions such as activate, edit, select, submit and back, and then dispatch the corresponding commands. Controls do not maintain a separate set of mouse-only business callbacks. Adapters preserve the platform's native rules for keys, input methods and gestures.
 
-适配器必须区分输入请求和已执行结果的写回。会话命令或状态订阅更新原生控件后产生的变化回调，不能再次派发同一动作。使用明确的更新来源、应用版本或目标框架的写回保护来防止回环；不能按时间窗口或值相等粗略吞掉真实用户输入。命令到控件再到平台回调的路径需要专门测试，防止双执行与无限循环。
+Adapters must distinguish input requests from the write-back of results that have already been executed. Change callbacks produced after a session command or a state subscription updates a native control must not dispatch the same action again. Loops are prevented with an explicit update source, an applied version or the target framework's write-back guard; real user input must not be crudely swallowed by a time window or by value equality. The path from command to control to platform callback needs dedicated tests to prevent double execution and infinite loops.
 
-Bern 发起的焦点操作由标准会话命令与焦点管理器执行，必须声明作用域；操作系统实际激活与失焦通过事件同步，不假设焦点请求必然成功。默认规则包括：
+Focus operations initiated by Bern are executed by standard session commands and the focus manager, and must declare a scope; actual activation and loss of focus by the operating system are synchronized through events, without assuming that a focus request necessarily succeeds. The default rules include:
 
-- 模态弹窗打开后把焦点交给其有效入口，防止导航到被遮挡的下层控件；关闭后尝试恢复触发控件。
-- 当前焦点控件被移除时，按声明顺序选择同作用域的有效目标；没有有效目标则退回作用域入口，不保留悬空引用。
-- 列表以数据 key 标识项，重排后不把焦点错误交给同位置的另一条数据。
-- 自适应切换通过明确的逻辑身份映射恢复焦点；无法映射时使用新布局的默认入口。
-- 输入法组合与文本选择属于编辑会话，不能把中间组合状态误当成最终提交命令。
+- When a modal popup opens, focus moves to its valid entry, preventing navigation to the obscured controls beneath it; after it closes, focus tries to return to the control that triggered it.
+- When the currently focused control is removed, a valid target in the same scope is chosen in declared order; when there is none, focus falls back to the scope's entry, and no dangling reference is kept.
+- Lists identify items by data key, so after reordering, focus is not wrongly handed to a different data item at the same position.
+- Adaptive switching restores focus through an explicit logical identity mapping; when no mapping exists, the new layout's default entry is used.
+- Input method composition and text selection belong to the editing session; an intermediate composition state must not be mistaken for a final submit command.
 
-平台存在多个输入方式时，尺寸布局与输入模式分别描述。TV 的方向导航需要独立验证，不能仅扩大桌面按钮后宣称适配完成。
+When a platform has several input methods, size layouts and input modes are described separately. Directional navigation on TV needs independent verification; adaptation cannot be declared complete just by enlarging desktop buttons.
 
-`ui.set_file` 把一个 `file://` 或 http(s) 地址交给带 `pick` 的按钮或 `Drop`，如同用户选中或拖入了它，随后执行动作；种类不符时答复 `unsupported_file`，地址不合法时答复 `invalid_url`。外部入口与测试用它代替系统面板和拖放。实现进度：SwiftUI 已实现并在 macOS 上验证；Compose 已实现；Web 已实现并在浏览器中验证：不是地址时答复 `invalid_url`，不是视频时答复 `unsupported_file`，页面能访问的视频地址交给“打开视频”后开始播放；GTK 与 WinUI 3 已实现，Linux 虚拟机与 Windows PC 上验证 `invalid_url`、`unsupported_file` 与视频地址交给拖放区后播放。文件夹的 `file://` 地址只交给 `files` 含 `folder` 的按钮，四个目标相同（GTK 与 WinUI 3 此前一律拒收文件夹，2026-11-01 补上；Windows PC 上验证给“添加文件夹”交一个文件夹后读出其中的音乐）。
+`ui.set_file` hands a `file://` or http(s) address to a button with `pick` or to a `Drop`, as if the user had chosen or dropped it, and then runs the action; when the kind does not match it replies `unsupported_file`, and when the address is invalid it replies `invalid_url`. External entry points and tests use it instead of system panels and drag and drop. Implementation progress: SwiftUI is implemented and verified on macOS; Compose is implemented; Web is implemented and verified in the browser: something that is not an address replies `invalid_url`, something that is not a video replies `unsupported_file`, and a video address the page can access, handed to "Open Video", starts playing; GTK and WinUI 3 are implemented, and `invalid_url`, `unsupported_file` and playback after handing a video address to the drop zone were verified on the Linux VM and the Windows PC. A folder's `file://` address is handed only to buttons whose `files` include `folder`, the same on all four targets (GTK and WinUI 3 previously refused folders altogether, filled in on 2026-11-01; verified on the Windows PC that handing a folder to "Add Folder" reads the music in it).
 
-`ui.focus` 是给控件键盘焦点的标准会话命令，外部入口用它聚焦搜索框，搜索框的结果随之出现。实现进度：SwiftUI 的搜索框支持，需要 macOS 15 或 iOS 18（`searchFocused`），已在 macOS 上验证结果出现并可经 `ui.activate` 打开；Web 的搜索框同样支持，浏览器中验证聚焦后输入即出现结果下拉，点结果打开图案。GTK 与 WinUI 3 的搜索框也支持，未单独验证。其他控件与其他目标对它答复 `target_unavailable` 或 `unknown_command`。
+`ui.focus` is the standard session command that gives a control keyboard focus; external entry points use it to focus the search field, whose results then appear. Implementation progress: SwiftUI's search field supports it, requiring macOS 15 or iOS 18 (`searchFocused`), and on macOS it was verified that the results appear and can be opened through `ui.activate`; Web's search field supports it too, verified in the browser that typing after focusing shows the results dropdown and clicking a result opens the pattern. The GTK and WinUI 3 search fields also support it, not verified separately. Other controls and other targets reply to it with `target_unavailable` or `unknown_command`.
 
-### 快捷键
+### Keyboard shortcuts
 
-按钮、图标按钮、菜单项、开关与搜索框可以声明 `shortcut`：修饰键 `cmd`、`ctrl`、`alt`、`shift` 加一个键，用 `+` 连接，例如 `"cmd+k"`、`"cmd+shift+p"`、`"space"`、`"escape"`。`cmd` 是主修饰键：苹果系统上是 Command，其他系统上是 Control。键是一个可打印字符，或 `space`、`escape`、`return`、`tab`、`delete`、方向键 `up`、`down`、`left`、`right`、`home`、`end`、`pageup`、`pagedown`；写法不分大小写，编译时规范化并检查。快捷键做的事与点击该控件相同：按钮执行它的动作，开关切换，搜索框获得焦点。控件被禁用或不在界面上时，它的快捷键不起作用。
+Buttons, icon buttons, menu items, switches and search fields can declare `shortcut`: the modifier keys `cmd`, `ctrl`, `alt`, `shift` plus one key, joined with `+`, for example `"cmd+k"`, `"cmd+shift+p"`, `"space"`, `"escape"`. `cmd` is the primary modifier: Command on Apple systems, Control on other systems. The key is a printable character, or `space`, `escape`, `return`, `tab`, `delete`, the arrow keys `up`, `down`, `left`, `right`, `home`, `end`, `pageup`, `pagedown`; the notation is case-insensitive and is normalized and checked at compile time. A shortcut does the same thing as clicking its control: a button runs its action, a switch toggles, a search field gets focus. When the control is disabled or not in the UI, its shortcut has no effect.
 
-预期实现：SwiftUI 的 `keyboardShortcut`（菜单项同时显示按键）；Compose 在活动的 `dispatchKeyEvent` 中先查快捷键（Compose 只把按键交给有焦点的控件及其上层，没有控件获得焦点时根上的 `onPreviewKeyEvent` 收不到），`cmd` 在这里是 Ctrl；WinUI 3 的 `KeyboardAccelerator`；GTK 的 `GtkShortcutController`；Web 在页面上监听按键。实现进度：SwiftUI 已实现，macOS 上向前台的 `examples/gallery` 发送键盘事件验证：⌘O 弹出打开面板，⌘⌥I 开关详情面板，⌘K 聚焦搜索框，接着键入即出现结果下拉；Compose 已实现，Android 模拟器上用外接键盘的组合键验证 Ctrl+O 打开系统选择器、Ctrl+Alt+I 开关详情面板；只有当前屏幕上的控件登记快捷键，手机上停在侧栏时页面工具栏的快捷键不生效。Web 已实现：页面上监听按键，`cmd` 在苹果系统上是 ⌘、其他系统是 Ctrl，没有修饰键的快捷键不在输入文字时触发；浏览器中验证 ⌘⌥I 开关详情、⌘K 聚焦搜索框（⌘O 会弹出系统的文件对话框，没有在自动化中触发）。GTK 已实现：每个窗口一个捕获阶段的按键控制器，`cmd` 与 `ctrl` 都是 Control，Linux 虚拟机上验证 Ctrl+K 聚焦搜索框、Ctrl+Alt+I 开关详情；WinUI 3 已实现：窗口根元素上的 `KeyboardAccelerator`，Windows PC 上以真实按键验证 Ctrl+O 弹出打开面板、Ctrl+Alt+I 开关详情、Ctrl+K 聚焦搜索框，Islands 前端未验证。两者都不在编辑文字时触发没有 Ctrl 或 Alt 的快捷键。
+Expected implementation: SwiftUI's `keyboardShortcut` (menu items also show the keys); Compose checks shortcuts first in the activity's `dispatchKeyEvent` (Compose only delivers keys to the focused control and its ancestors, so when no control has focus an `onPreviewKeyEvent` on the root receives nothing), where `cmd` is Ctrl; WinUI 3's `KeyboardAccelerator`; GTK's `GtkShortcutController`; Web listens for keys on the page. Implementation progress: SwiftUI is implemented, verified on macOS by sending keyboard events to the frontmost `examples/gallery`: ⌘O brings up the open panel, ⌘⌥I toggles the details panel, ⌘K focuses the search field, and typing after that shows the results dropdown; Compose is implemented, verified on the Android emulator with key combinations from an external keyboard that Ctrl+O opens the system picker and Ctrl+Alt+I toggles the details panel; only controls on the current screen register shortcuts, so on a phone that is showing the sidebar, the page toolbar's shortcuts have no effect. Web is implemented: keys are listened for on the page, `cmd` is ⌘ on Apple systems and Ctrl on other systems, and shortcuts without modifiers do not fire while text is being typed; verified in the browser that ⌘⌥I toggles details and ⌘K focuses the search field (⌘O brings up the system file dialog and was not triggered in automation). GTK is implemented: one capture-phase key controller per window, where `cmd` and `ctrl` are both Control, verified on the Linux VM that Ctrl+K focuses the search field and Ctrl+Alt+I toggles details; WinUI 3 is implemented: a `KeyboardAccelerator` on the window's root element, verified on the Windows PC with real key presses that Ctrl+O brings up the open panel, Ctrl+Alt+I toggles details and Ctrl+K focuses the search field; the Islands frontend is not verified. Neither of the two fires shortcuts without Ctrl or Alt while text is being edited.
 
-没有对应控件的快捷键用 `Shortcut`：
+Shortcuts that have no corresponding control use `Shortcut`:
 
 ```rust
 if app.details_open {
@@ -1636,13 +1638,13 @@ if app.details_open {
 Shortcut(key: "space", enabled: app.has_video) => app.toggle_pause()
 ```
 
-它没有外观，在界面上且启用（`enabled` 可绑定，默认 true）时，按键执行动作，用于“Esc 关闭详情”“空格暂停”这类属于页面而不属于某个按钮的操作；键的写法与 `shortcut` 相同。六个目标都生成：SwiftUI 的隐藏按钮加 `keyboardShortcut`，Web 的页面按键监听，Compose 的活动快捷键表，GTK 的捕获阶段按键控制器，WinUI 3 的 `KeyboardAccelerator`。
+It has no appearance; while it is in the UI and enabled (`enabled` can be bound and defaults to true), pressing the key runs the action. It is for operations like "Esc closes details" or "Space pauses" that belong to the page rather than to a particular button; the key notation is the same as for `shortcut`. All six targets generate it: a hidden button plus `keyboardShortcut` in SwiftUI, a page key listener on Web, the activity's shortcut table in Compose, a capture-phase key controller in GTK, and `KeyboardAccelerator` in WinUI 3.
 
-电视没有键盘，`Shortcut` 与控件的 `shortcut` 对应 Siri Remote 的按键：`escape` 是返回（菜单）键，`space` 是播放/暂停键，方向键是触控板的方向，只在焦点无处可移时到达快捷键（否则移动焦点）；带修饰键的组合在电视上没有对应按键。Android TV 同样如此：遥控器的返回键对应 `escape`、播放/暂停键对应 `space`，方向键先移动焦点，焦点移不动时才交给快捷键。同一个键有多个启用的快捷键时，最后显示的那个生效，停用的把键让给之前显示的（tvOS、Web、Compose、GTK 如此；macOS、iOS 与 WinUI 3 上同键的先后由系统决定，未验证）；没有返回键的快捷键时，返回交给系统（关闭全屏页、回到主屏幕）。实现进度：tvOS 模拟器上实测方向键；Web 运行时测试覆盖停用让键；返回与播放/暂停、Android TV、其他目标的 `Shortcut` 按键未实测。
+TVs have no keyboard, so `Shortcut` and a control's `shortcut` correspond to buttons on the Siri Remote: `escape` is the Back (Menu) button, `space` is the Play/Pause button, and the arrow keys are touchpad directions, which reach shortcuts only when focus has nowhere to move (otherwise they move focus); combinations with modifiers have no corresponding button on a TV. Android TV works the same way: the remote's Back button corresponds to `escape` and the Play/Pause button to `space`, and the arrow keys move focus first and are handed to shortcuts only when focus cannot move. When the same key has several enabled shortcuts, the one shown last takes effect, and a disabled one gives the key back to the one shown before it (this holds on tvOS, Web, Compose and GTK; on macOS, iOS and WinUI 3 the order for the same key is decided by the system, not verified); when there is no shortcut for the Back key, Back goes to the system (closing a full-screen page, returning to the home screen). Implementation progress: the arrow keys were measured on the tvOS simulator; Web runtime tests cover a disabled shortcut giving up its key; Back and Play/Pause, Android TV, and `Shortcut` keys on other targets were not measured.
 
-#### 跟随状态的快捷键与改键
+#### State-following shortcuts and rebinding
 
-快捷键也可以跟随状态：`shortcut:` 与 `Shortcut(key:)` 除了字面量，还可以写一段文本绑定，例如 `shortcut: app.keys.open`。文本的写法与字面量相同（`cmd+o`、`space`），运行时每次变化都按同样的规则读取；空文本或读不成快捷键的文本表示没有快捷键，控件照常可用，只是没有按键。字面量仍在编译时检查。引擎保存用户选的键之前用 `bern::shortcut::parse_shortcut` 规范化，判断两段键在某个系统上是不是同一组按键用 `bern::shortcut::same_keys`（苹果系统以外 `cmd` 与 `ctrl` 都是 Control）。目标能力 `bound_shortcuts`。
+Shortcuts can also follow state: besides a literal, `shortcut:` and `Shortcut(key:)` can take a text binding, for example `shortcut: app.keys.open`. The text uses the same notation as the literal (`cmd+o`, `space`) and is read by the same rules every time it changes at runtime; empty text, or text that cannot be read as a shortcut, means there is no shortcut, and the control remains usable, just without a key. Literals are still checked at compile time. Before saving the keys the user chose, the engine normalizes them with `bern::shortcut::parse_shortcut`, and it uses `bern::shortcut::same_keys` to decide whether two key texts are the same key combination on a given system (outside Apple systems, `cmd` and `ctrl` are both Control). Target capability `bound_shortcuts`.
 
 ```rust
 Button(id: open, label: tr! { "zh-Hans" => "打开", "en" => "Open" }, pick: draft.file, files: "video", shortcut: app.keys.open) => app.open(draft.file)
@@ -1650,13 +1652,13 @@ Shortcut(key: app.keys.back) => app.close_details()
 ShortcutInput(id: open_key, label: tr! { "zh-Hans" => "打开文件", "en" => "Open File" }, current: app.keys.open) => app.set_open_key(app.keys.open)
 ```
 
-`ShortcutInput` 让用户按下新的组合键来改键：它是一个系统按钮，按平台的写法显示 `current`（苹果系统上 `⇧⌘O`，其他系统 `Ctrl+Shift+O`，空格键按界面语言写出），没有快捷键时显示 `empty`（默认“无”）。按下按钮后显示 `prompt`（默认“按下快捷键…”）并等待下一次按键：带修饰键的组合按 Bern 的写法交给动作（动作参数中与 `current` 相同的表达式换成新值，与受控控件一样），只按修饰键继续等待，Esc 保持原样，单独按 Delete（退格）清空；再按一次按钮或点到别处也停止等待。等待期间按键不触发任何快捷键与菜单项。外部入口用 `ui.edit` 直接设定（`cmd+shift+o`，空文本清空）。`current` 必须是状态，不能是字面量；冲突、保存与恢复默认由应用的引擎决定。目标能力 `shortcut_input`。
+`ShortcutInput` lets the user rebind a shortcut by pressing a new key combination: it is a system button that shows `current` in the platform's notation (`⇧⌘O` on Apple systems, `Ctrl+Shift+O` on other systems, with the space key written out in the UI language), and shows `empty` (default "None") when there is no shortcut. After the button is pressed it shows `prompt` (default "Press shortcut…") and waits for the next key press: a combination with modifiers is passed to the action in Bern's notation (expressions in the action arguments identical to `current` are replaced by the new value, as with controlled controls), pressing only modifiers keeps it waiting, Esc leaves the shortcut unchanged, and pressing Delete (Backspace) on its own clears it; pressing the button again or clicking elsewhere also stops the waiting. While it waits, key presses trigger no shortcuts or menu items. External entry points set it directly with `ui.edit` (`cmd+shift+o`; empty text clears it). `current` must be state, not a literal; conflicts, saving and restoring defaults are decided by the application's engine. Target capability `shortcut_input`.
 
-实现：SwiftUI 用 `KeyboardShortcut?` 与可选的遥控按键（tvOS），`ShortcutInput` 在 macOS 上用应用内的按键监视器、在 iOS 上用硬件键盘的 `onKeyPress`，tvOS 只显示快捷键；Web 在每次按键时读取文本，`ShortcutInput` 在捕获阶段取键；Compose 在活动的快捷键表里登记当前文本，`ShortcutInput` 经活动的 `dispatchKeyEvent` 取键（返回键等同 Esc）；GTK 在每次按键时读取文本，`ShortcutInput` 经窗口的捕获阶段按键控制器取键；WinUI 3 随文本重建 `KeyboardAccelerator`，`ShortcutInput` 在按钮的 `PreviewKeyDown` 取键并在等待时停用加速键。实现进度（2026-10-24）：macOS 上用 `examples/gallery` 实测——改键后旧键失效、新键生效，`ShortcutInput` 录下 ⌃⌘F、Esc 保持、Delete 清空；SwiftUI 测试按 macOS、iOS、tvOS 的 SDK 类型检查；Web 运行时测试覆盖跟随状态的键、录制、Esc、Delete 与 `ui.edit`；GTK 运行时的单元测试覆盖按键的写法与每次读取；Compose 随 `examples/gallery` 的 Android 构建编译，未在设备上运行；WinUI 3 只经过生成器测试，C++ 未编译。
+Implementation: SwiftUI uses `KeyboardShortcut?` and optional remote buttons (tvOS); `ShortcutInput` uses an in-app key monitor on macOS and the hardware keyboard's `onKeyPress` on iOS, while tvOS only shows the shortcut. Web reads the text on every key press, and `ShortcutInput` takes keys in the capture phase. Compose registers the current text in the activity's shortcut table, and `ShortcutInput` takes keys through the activity's `dispatchKeyEvent` (the Back key is equivalent to Esc). GTK reads the text on every key press, and `ShortcutInput` takes keys through the window's capture-phase key controller. WinUI 3 rebuilds the `KeyboardAccelerator` when the text changes, and `ShortcutInput` takes keys in the button's `PreviewKeyDown` and disables accelerators while waiting. Implementation progress (2026-10-24): measured on macOS with `examples/gallery`: after rebinding, the old key stops working and the new key works, and `ShortcutInput` records ⌃⌘F, Esc keeps the shortcut and Delete clears it; SwiftUI tests type-check against the macOS, iOS and tvOS SDKs; Web runtime tests cover state-following keys, recording, Esc, Delete and `ui.edit`; unit tests of the GTK runtime cover the key notation and reading on every key press; Compose compiles with the Android build of `examples/gallery`, not run on a device; WinUI 3 has only been through generator tests, and the C++ was not compiled.
 
-### 菜单栏
+### Menu bar
 
-应用的菜单写在 `WindowSet` 里的 `MenuBar` 中：每个 `CommandMenu` 是菜单栏上的一个菜单，或用 `role` 把其中的项加进系统的同名菜单（`app` 应用菜单、`file`、`edit`、`view`、`window`、`help`）；`CommandMenu` 里再放 `CommandMenu` 是在该项旁展开的子菜单；`Divider` 分隔各组。系统菜单里有两项由系统提供：应用菜单的“关于”项打开系统的标准关于面板，帮助菜单的帮助项打开应用的帮助手册（没有手册时只提示没有帮助）。`role: about` 的项代替前者，`role: help` 的项代替后者，应用借此打开自己的关于与帮助界面；不写这两个角色时系统的项保持原样。`CommandItem` 是一个命令：`label`、绑定的动作、可选的 `shortcut`（字面量或跟随状态）、可绑定的 `enabled`（为假时变灰）与 `checked`（为真时打勾），`pick` 与 `files` 与按钮一样先选文件。菜单里可以写 `if`、`match` 与 `ForEach`。
+An application's menus are written in a `MenuBar` inside the `WindowSet`: each `CommandMenu` is one menu on the menu bar, or uses `role` to add its items to the system menu of the same name (`app` the app menu, `file`, `edit`, `view`, `window`, `help`); a `CommandMenu` placed inside a `CommandMenu` is a submenu that opens beside that item; `Divider` separates groups. Two items in the system menus are provided by the system: the app menu's "About" item opens the system's standard About panel, and the Help menu's help item opens the application's help book (when there is no help book it only says that no help is available). An item with `role: about` replaces the former and an item with `role: help` replaces the latter, which lets the application open its own About and help screens; without these two roles the system items stay as they are. `CommandItem` is one command: `label`, the bound action, an optional `shortcut` (literal or state-following), a bindable `enabled` (greyed out when false) and `checked` (shows a checkmark when true); `pick` and `files` choose a file first, as with buttons. Menus can contain `if`, `match` and `ForEach`.
 
 ```rust
 WindowSet(handle: AppWindows, primary: main) {
@@ -1679,15 +1681,15 @@ WindowSet(handle: AppWindows, primary: main) {
 }
 ```
 
-菜单栏属于应用而不属于某个窗口：菜单项从任何窗口都能执行，它们读写的草稿是主窗口（`primary`）的，根组件用 `#[session]` 参数声明，主窗口因此拥有这些草稿；主窗口关闭时菜单项读写一份新的草稿。外部入口把菜单项列为 `menu_bar.<id>`（角色 `menu_item`），`ui.activate` 与在菜单里选择它相同。
+The menu bar belongs to the application, not to any window: menu items can be executed from any window, and the drafts they read and write are those of the primary window (`primary`); the root component declares them with a `#[session]` parameter, so the primary window owns these drafts; when the primary window is closed, menu items read and write a new draft. External entry points list menu items as `menu_bar.<id>` (role `menu_item`), and `ui.activate` is the same as choosing the item in the menu.
 
-只有系统菜单栏属于应用的平台显示 `MenuBar`：macOS。表达式可以读 `window.menu_bar`，它在构建每个平台时就已知（macOS 为真，其他为假），用来只在 Mac 上显示只有菜单才有的设置，例如这些菜单项的快捷键。iOS、tvOS、Android、Linux、Windows 与网页没有应用菜单栏，目标能力 `menu_bar` 在那里“不适用”：接受声明，什么也不生成，不警告；菜单项的命令应当另有界面入口。“关于”与帮助也是如此：Windows 与 Linux 没有系统规定的关于项与帮助项（GNOME 应用自己的主菜单里放“关于”，Windows 应用各自放在帮助菜单、设置或标题栏的按钮里），`role: about` 与 `role: help` 在那里同样不生成任何东西，应用把打开关于与帮助的命令放进自己的界面，例如设置里的“关于”页，与 macOS 的菜单项执行同一个命令。
+Only platforms whose system menu bar belongs to the application show `MenuBar`: macOS. Expressions can read `window.menu_bar`, which is already known when building for each platform (true on macOS, false elsewhere), to show settings that only menus have, such as the shortcuts of these menu items, on the Mac only. iOS, tvOS, Android, Linux, Windows and the Web have no application menu bar, and the target capability `menu_bar` is "not applicable" there: the declaration is accepted, nothing is generated and there is no warning; the commands of the menu items should have other entry points in the UI. The same goes for "About" and help: Windows and Linux have no system-defined About and help items (GNOME apps put "About" in their own main menu, and Windows apps each put it in the Help menu, in settings or behind a button in the title bar), so `role: about` and `role: help` generate nothing there either, and the application puts the commands that open About and help in its own UI, for example an "About" page in settings, which executes the same command as the macOS menu item.
 
-预期实现：SwiftUI 的 `.commands`：自己的菜单是 `CommandMenu`，系统菜单是 `CommandGroup`（`app` 在设置项之后、`about` 替换关于项 `.appInfo`、`file` 替换新建文档项、`edit` 在剪贴板项之后、`view` 在工具栏项之前、`window` 在窗口排列项之后、`help` 替换帮助项），每个菜单的项是一个视图，因此启用、勾选与快捷键随状态更新。实现进度（2026-10-24）：macOS 已实现，用 `examples/gallery` 与一个实际应用实测：菜单出现在菜单栏，系统菜单的项在对应位置，子菜单展开，`ui.activate` 与真实点击菜单项都执行命令，草稿与引擎状态变化后勾选和启用随之更新（读菜单的辅助功能属性验证）。`role: about`（2026-10-30）：macOS 已实现，见 macOS 实现记录。
+Expected implementation: SwiftUI's `.commands`: the application's own menus are `CommandMenu`, and system menus are `CommandGroup` (`app` after the settings item, `about` replaces the About item `.appInfo`, `file` replaces the new-document item, `edit` after the pasteboard items, `view` before the toolbar items, `window` after the window arrangement items, `help` replaces the help item); the items of each menu are a view, so enabled state, checkmarks and shortcuts update with state. Implementation progress (2026-10-24): macOS is implemented, measured with `examples/gallery` and a real application: the menus appear in the menu bar, items of the system menus are in their positions, submenus open, `ui.activate` and real clicks on menu items both execute commands, and checkmarks and enabled state update after the draft and engine state change (verified by reading the menus' accessibility attributes). `role: about` (2026-10-30): macOS is implemented, see the macOS implementation notes.
 
-### 状态栏项
+### Status bar item
 
-应用可以在 `WindowSet` 里声明一个 `StatusItem`：应用在系统状态区域的一项，常说的托盘图标。有了它，关闭最后一个窗口时应用不退出，而是留在那里，从它的菜单再打开窗口或退出。
+An application can declare one `StatusItem` in its `WindowSet`: the application's item in the system status area, commonly called a tray icon. With it, closing the last window does not quit the application; the application stays there, and from the item's menu windows can be opened again or the application quit.
 
 ```rust
 WindowSet(handle: AppWindows, primary: main) {
@@ -1702,29 +1704,29 @@ WindowSet(handle: AppWindows, primary: main) {
 }
 ```
 
-- `label` 是它的提示文字与可访问名称，可以带状态参数；`icon` 是 Bern 图标名，只在 macOS 用：菜单栏里的状态项按系统规定是单色的模板图标，由系统按菜单栏的明暗着色。Windows 的通知区域与 Linux 的状态区显示应用图标（`[app.icon]`，没有时是 Bern 的标志），与其他程序一样是彩色的。
-- 也可以写 `image: "art/tray.svg"`（与 `icon` 二选一）：`[resources]` 里的一张单色 SVG，只取它的形状，颜色不论；镂空的图标就是在形状里挖掉的部分。三个桌面平台都显示它，像系统自己的状态图标一样随所在栏的明暗是白色或黑色：macOS 是模板图片，由菜单栏着色；Windows 在浅色任务栏上是黑色、深色任务栏上是白色，系统切换明暗时随之换；Linux 在 GNOME 的顶栏（总是深色）与深色配色上是白色，浅色配色上是黑色，跟随设置门户的 `color-scheme`。图片在构建时由 Bern 画成各平台要的尺寸，应用里不带 SVG 渲染器。
-- 菜单由 Bern 组成：第一项打开主窗口（“打开“主窗口标题””），然后是声明里的 `CommandItem`、`CommandMenu`（子菜单）与 `Divider`，最后一项退出应用；分隔线只出现在两项之间。菜单项可以写在 `if`、`if let`、`match` 与 `ForEach` 里，跟随引擎状态增减、勾选与变灰。
-- 在 Windows 与 Linux 上，单击图标打开主窗口（已打开时把它带到前面），右键打开菜单；macOS 上点按图标打开菜单。
-- 状态项不属于任何窗口：它可能在没有窗口时打开，所以菜单只读引擎状态、执行命令与窗口动作，不读写草稿，不读 `window.compact` 这类窗口自己的字段（构建期就知道的 `window.menu_bar` 等除外），菜单项不带 `pick` 与 `shortcut`，这些都在编译时报错。命令失败时显示在打开着的主窗口里。
-- 退出不经过窗口的关闭检查，与 macOS 的 Cmd-Q、Linux 的 Ctrl+Q 相同。
-- `login_item: true` 在“退出”前加一项“登录时启动”：勾选时系统在用户登录时启动应用，这样启动的应用不打开窗口，只有状态项，要用时再从它打开；取消勾选就不再启动。开关只由用户在菜单里打开，应用不自行登记，这是各平台对登录项的要求。设置就是系统里的登录项本身，应用不另存：在系统设置或任务管理器里关掉的，菜单里也显示为未勾选；登记的是另一份副本（例如开发构建）时同样算未勾选，勾选后改为当前这一份。
-- 设置窗口里的开关写 `Switch(id:, label:, login_item: true)`：它就是这个登录项，与菜单里的“登录时启动”读写同一处，两处互相跟随；不写 `value`、`checked` 与动作，同样只在用户拨动时登记。没有登录项的手机、电视与网页不显示它（目标能力 `login_switch` 不适用）。
-- 手机、电视与网页没有给应用的状态区域：目标能力 `status_item` 在 iOS、tvOS、Android 与网页上“不适用”，接受声明、不生成任何东西、不警告，应用照常随平台的规则结束。
+- `label` is its tooltip and accessible name and can take state arguments; `icon` is a Bern icon name, used only on macOS: by system rule, status items in the menu bar are monochrome template icons, which the system tints according to the menu bar's appearance. The Windows notification area and the Linux status area show the application icon (`[app.icon]`, or the Bern logo when there is none), in color like other programs.
+- You can also write `image: "art/tray.svg"` (either it or `icon`): a monochrome SVG in `[resources]`, of which only the shape is used, whatever its color; the hollow parts of the icon are what is cut out of the shape. All three desktop platforms show it, white or black depending on the appearance of the bar it sits in, like the system's own status icons: on macOS it is a template image tinted by the menu bar; on Windows it is black on a light taskbar and white on a dark taskbar, and changes when the system switches appearance; on Linux it is white on GNOME's top bar (always dark) and in dark color schemes and black in light color schemes, following the `color-scheme` of the settings portal. Bern draws the image at build time in the sizes each platform needs; the application carries no SVG renderer.
+- The menu is put together by Bern: the first item opens the primary window (Open "primary window title"), followed by the declared `CommandItem`, `CommandMenu` (submenus) and `Divider`, and the last item quits the application; dividers appear only between two items. Menu items can be written inside `if`, `if let`, `match` and `ForEach`, and are added, removed, checked and greyed out following engine state.
+- On Windows and Linux, clicking the icon opens the primary window (bringing it to the front if it is already open), and right-clicking opens the menu; on macOS, clicking the icon opens the menu.
+- The status item belongs to no window: it can be opened when no window exists, so its menu only reads engine state and executes commands and window actions; it does not read or write drafts or read the window's own fields such as `window.compact` (except those already known at build time, such as `window.menu_bar`), and its menu items take no `pick` or `shortcut`; all of these report errors at compile time. When a command fails, the failure is shown in the primary window if it is open.
+- Quitting does not go through the windows' close checks, the same as Cmd-Q on macOS and Ctrl+Q on Linux.
+- `login_item: true` adds a "Open at Login" item before "Quit": when it is checked, the system starts the application when the user logs in; an application started this way opens no window, only the status item, from which it is opened when needed; unchecking it stops the launch. The switch is turned on only by the user in the menu, and the application never registers itself; this is what every platform requires of login items. The setting is the system's login item itself, and the application stores nothing separately: one turned off in System Settings or Task Manager also shows as unchecked in the menu; when the registered item belongs to another copy (for example a development build) it also counts as unchecked, and checking it switches it to the current copy.
+- A switch in the settings window written `Switch(id:, label:, login_item: true)` is this login item: it reads and writes the same place as "Open at Login" in the menu, and the two follow each other; it takes no `value`, `checked` or action, and likewise registers only when the user flips it. Phones, TVs and the Web, which have no login items, do not show it (the target capability `login_switch` is not applicable).
+- Phones, TVs and the Web have no status area for applications: the target capability `status_item` is "not applicable" on iOS, tvOS, Android and the Web; the declaration is accepted, nothing is generated, there is no warning, and the application ends according to the platform's rules as usual.
 
-各平台的实现：macOS 是 SwiftUI 的 `MenuBarExtra`，`icon` 是 SF Symbol，`image` 是包里 18 点的模板图片（`BernStatusIcon.png` 与 `@2x`）；没有窗口打开时应用切到 `accessory` 激活策略，Dock 里的图标随之收起，再打开窗口时回到 `regular`，与菜单栏应用的习惯一致。Windows 是 `Shell_NotifyIcon` 放进通知区域的图标（版本 4 的回调；`image` 画成黑白两个 `.ico`，编为图标资源 2 与 3，按 `SystemUsesLightTheme` 选用，收到 `ImmersiveColorSet` 的设置变更时换），由一个隐藏窗口接收它的消息，菜单是系统的弹出菜单（`TrackPopupMenuEx`），在打开时按当时的状态建立；系统处于深色模式时菜单也是深色的（经 uxtheme 的 `SetPreferredAppMode`），资源管理器重启后图标重新加入。Linux 没有 GTK 控件可用：应用在会话总线上提供 StatusNotifierItem 与 `com.canonical.dbusmenu` 菜单，向 `org.kde.StatusNotifierWatcher` 登记，图标是应用图标或 `image` 按几种尺寸给出的 ARGB 像素；KDE Plasma 自己显示这些项，GNOME 经 AppIndicator 扩展（Ubuntu 默认带有）显示；菜单随它读的状态重建，打开前（`AboutToShow`）也重建一次；Wayland 上单击时用状态区给的激活令牌把窗口带到前面。macOS 上外部入口把菜单项列为 `status_item.<id>`（角色 `menu_item`），Windows 与 Linux 的菜单在打开时才建立，外部入口不列出它们，菜单项的命令照常是各自的工具。
+Implementation on each platform: on macOS it is SwiftUI's `MenuBarExtra`; `icon` is an SF Symbol, and `image` is an 18-point template image in the bundle (`BernStatusIcon.png` and `@2x`); when no window is open, the application switches to the `accessory` activation policy and its Dock icon goes away, and it returns to `regular` when a window is opened again, as menu bar apps customarily do. On Windows it is an icon placed in the notification area with `Shell_NotifyIcon` (version 4 callbacks; `image` is drawn as two `.ico` files, black and white, compiled as icon resources 2 and 3, chosen by `SystemUsesLightTheme`, and swapped when the `ImmersiveColorSet` setting change arrives), with a hidden window receiving its messages; the menu is the system's popup menu (`TrackPopupMenuEx`), built when it opens from the state at that moment; when the system is in dark mode the menu is dark too (through uxtheme's `SetPreferredAppMode`), and the icon is added again after Explorer restarts. Linux has no GTK control for this: the application provides a StatusNotifierItem and a `com.canonical.dbusmenu` menu on the session bus and registers with `org.kde.StatusNotifierWatcher`; the icon is the application icon or `image`, given as ARGB pixels in several sizes; KDE Plasma shows these items itself, and GNOME shows them through the AppIndicator extension (included by default on Ubuntu); the menu is rebuilt with the state it reads, and also once before it opens (`AboutToShow`); on Wayland, a click brings the window to the front with the activation token provided by the status area. On macOS, external entry points list menu items as `status_item.<id>` (role `menu_item`); on Windows and Linux the menu is built only when it opens, so external entry points do not list its items, and the commands of the menu items are available as their own tools as usual.
 
-“登录时启动”的登录项：Windows 是当前用户 `Run` 键下以 `bundle_id` 命名的值，命令是程序的完整路径加 `--at-login`，任务管理器的“启动应用”里关掉的（`StartupApproved` 里第一个字节为奇数）算未勾选，勾选时把它清掉；卸载程序删去这个值。Linux 是 XDG 自启的桌面文件 `~/.config/autostart/<bundle_id>.desktop`，`Exec` 同样带 `--at-login`，`TryExec` 指向程序，程序删去后会话不再启动它；`Hidden=true` 或 GNOME 的 `X-GNOME-Autostart-enabled=false` 算未勾选，取消勾选时删去文件。macOS 是 `SMAppService.mainApp`：勾选时 `register`，取消时 `unregister`，用户在系统设置里关掉的（`requiresApproval`）由这一项打开系统设置的登录项页。带 `--at-login` 启动时不打开初始窗口；已有实例在运行时，这次启动直接结束，不把那个实例带到前面。macOS 的登录项不能带参数，应用在 `applicationDidFinishLaunching` 里看打开应用的 Apple 事件是否标着 `keyAELaunchedAsLogInItem`，是就关闭这次启动打开的窗口、不显示 Dock 图标，直到用户从菜单或 Finder 再打开。
+The login item behind "Open at Login": on Windows it is a value named after `bundle_id` under the current user's `Run` key, whose command is the program's full path plus `--at-login`; one turned off in Task Manager's "Startup apps" (an odd first byte in `StartupApproved`) counts as unchecked, and checking the item clears that record; the uninstaller removes the value. On Linux it is the XDG autostart desktop file `~/.config/autostart/<bundle_id>.desktop`, whose `Exec` also carries `--at-login` and whose `TryExec` points to the program, so the session no longer starts it once the program has been removed; `Hidden=true` or GNOME's `X-GNOME-Autostart-enabled=false` counts as unchecked, and unchecking removes the file. On macOS it is `SMAppService.mainApp`: `register` when checked, `unregister` when unchecked; when the user has turned it off in System Settings (`requiresApproval`), this item opens the Login Items page of System Settings. When started with `--at-login`, the application opens no initial window; when an instance is already running, this launch simply ends without bringing that instance to the front. Login items on macOS cannot take arguments, so in `applicationDidFinishLaunching` the application checks whether the Apple event that opened it is marked `keyAELaunchedAsLogInItem`; if so, it closes the windows this launch opened and shows no Dock icon until the user opens it again from the menu or the Finder.
 
-实现进度（2026-10-28）：三个桌面目标已实现。Windows 实体机上用一个实际应用实测：关闭最后一个窗口后应用留在通知区域，单击图标重新打开主窗口，右键菜单的各项与 `ForEach` 生成的子菜单正确，子菜单的项执行命令，“退出”结束应用并移除图标；深色模式下的菜单与资源管理器重启后重新加入图标未验证。Linux 在虚拟机上以测试用的 StatusNotifierWatcher 经 D-Bus 验证登记、属性、菜单、单击、菜单项与退出，KDE 与 GNOME 的真实状态区未看。macOS 只构建与类型检查，未运行。见各平台的实现记录。
+Implementation progress (2026-10-28): the three desktop targets are implemented. Measured on a physical Windows machine with a real application: after the last window is closed the application stays in the notification area, clicking the icon opens the primary window again, the items of the right-click menu and the submenus generated by `ForEach` are correct, submenu items execute commands, and "Quit" ends the application and removes the icon; the menu in dark mode and re-adding the icon after Explorer restarts are not verified. On Linux, registration, properties, the menu, clicking, menu items and quitting were verified in the VM over D-Bus with a test StatusNotifierWatcher; the real status areas of KDE and GNOME were not looked at. macOS was only built and type-checked, not run. See the implementation notes of each platform.
 
-“登录时启动”（2026-10-29）：三个桌面目标已实现。Windows 实体机上用 release 安装版实测：按登录时的命令启动后只有通知区域图标、没有窗口；菜单勾选写入 `Run` 值、取消删去；任务管理器的禁用记录显示为未勾选，重新勾选后清除；运行中再次启动直接结束；卸载删去 `Run` 值。Linux 在虚拟机上以测试用的 watcher 验证勾选写出自启文件、被关掉时显示为未勾选、按 `Exec` 启动没有窗口、重复启动直接结束、单击图标打开主窗口、取消删去文件。真实的注销再登录、Windows 上隐藏启动后从图标打开窗口未验证；macOS 只有生成测试与类型检查。
+"Open at Login" (2026-10-29): the three desktop targets are implemented. Measured on a physical Windows machine with the installed release build: started with the login command, there is only the notification-area icon and no window; checking the item in the menu writes the `Run` value and unchecking removes it; a disabled record from Task Manager shows as unchecked and is cleared after checking again; launching again while running simply ends; uninstalling removes the `Run` value. On Linux, verified in the VM with a test watcher: checking writes the autostart file, a turned-off item shows as unchecked, starting through `Exec` opens no window, a repeated launch simply ends, clicking the icon opens the primary window, and unchecking removes the file. A real log-out and log-in, and opening the window from the icon after a hidden launch on Windows, are not verified; macOS has only generator tests and type checking.
 
-`Button` 与 `IconButton` 可写 `default_focus: true`：界面出现时焦点从它开始。电视上焦点就是遥控器操作的位置，每个界面应给出起始焦点，例如引导的“继续”、播放器的暂停。tvOS 上它是所在焦点区域的首选焦点（`prefersDefaultFocus`），标签页的每页各是一个焦点区域；其他平台上是键盘焦点：SwiftUI 的 `FocusState`，Web 的 `focus()`，Compose 的 `FocusRequester`，GTK 与 WinUI 3 在控件显示后请求焦点。实现进度：tvOS 模拟器实测；其他目标未实测。
+`Button` and `IconButton` can take `default_focus: true`: when the screen appears, focus starts from it. On a TV, focus is where the remote acts, so every screen should provide a starting focus, for example "Continue" in onboarding or pause in the player. On tvOS it is the preferred focus of its focus section (`prefersDefaultFocus`), and each tab page is a focus section of its own; on other platforms it is keyboard focus: SwiftUI's `FocusState`, Web's `focus()`, Compose's `FocusRequester`, and GTK and WinUI 3 request focus after the control is shown. Implementation progress: measured on the tvOS simulator; other targets not measured.
 
-### 表格
+### Table
 
-`Table` 把记录列表排成列：每项一行，`key` 是行的身份，行随状态增删与换序时保留各自的控件与状态。`TableColumn` 有表头 `title`，可给 `width`，子节点是每行这一格的内容，用表格的行变量写；不写 `width` 的列分去其余的宽度。格子里可以写 `if`、`match` 与任意内容，随行的值更新。
+`Table` lays out a list of records in columns: one row per item, with `key` as the row's identity, and rows keep their own controls and state as they are added, removed and reordered following state. `TableColumn` has a header `title` and can take a `width`; its children are the content of this column's cell in each row, written with the table's row variable; columns without `width` share the remaining width. Cells can contain `if`, `match` and any content, and update with the row's value.
 
 ```rust
 Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, items: app.servers, key: id, selection: draft.selected) |server| {
@@ -1737,32 +1739,32 @@ Table(id: servers, label: tr! { "zh-Hans" => "服务器", "en" => "Servers" }, i
 } => app.use_chosen(draft.selected)
 ```
 
-- 选择：`selection` 是 `Vec<String>` 或 `Vec<i64>` 草稿，按行的顺序存选中行的键。桌面上单击只选一行，Shift 连选，平台的切换键（macOS 的 Command，Windows 与 Linux 的 Ctrl）加选或减选，与各平台的列表相同。外部入口用 `ui select` 给出逗号分隔的键来选行，其中有不存在的键时失败。
-- 主操作：表格的动作在双击或按 Enter 时对选中行运行。触屏上点一行就只选它并运行；没有动作时点一行把它加入或移出选择。
-- 排序：点表头运行该列的动作，由引擎换顺序；`sorted` 与 `descending` 只决定表头上哪一列显示排序标记、朝哪个方向。行的顺序始终是 `items` 的顺序，Bern 不在界面里排序，所以排序可以按界面看不见的规则（比如没测过的行总在最后）。
-- 行菜单：`TableMenu` 里的 `MenuItem` 与 `Divider` 在右键（键盘的菜单键或 Shift+F10）或长按一行时打开。那一行不在选中行里时先只选中它，所以菜单项读 `selection` 就是要处理的行，与 Finder、资源管理器的习惯相同。菜单项与 `Menu` 的一样各自是外部入口的控件，菜单关着也能操作。
+- Selection: `selection` is a `Vec<String>` or `Vec<i64>` draft that stores the keys of the selected rows in row order. On the desktop a click selects just one row, Shift extends the selection over a range, and the platform's toggle key (Command on macOS, Ctrl on Windows and Linux) adds a row to or removes it from the selection, the same as each platform's lists. External entry points select rows with `ui select` and comma-separated keys; it fails when any of the keys does not exist.
+- Primary action: the table's action runs on the selected rows on double-click or Enter. On touch screens, tapping a row selects only that row and runs the action; when there is no action, tapping a row adds it to or removes it from the selection.
+- Sorting: clicking a header runs that column's action, and the engine changes the order; `sorted` and `descending` only decide which column's header shows the sort indicator and in which direction. Row order is always the order of `items`; Bern does not sort in the UI, so sorting can follow rules that are invisible in the UI (for example, rows that have not been tested always come last).
+- Row menu: the `MenuItem` and `Divider` items in `TableMenu` open on right-click (or the keyboard's Menu key or Shift+F10) or a long press on a row. If that row is not among the selected rows, it alone is selected first, so menu items that read `selection` get exactly the rows to act on, as in the Finder and File Explorer. Like those of `Menu`, the menu items are each controls for external entry points and can be operated while the menu is closed.
 
-各平台：macOS 与 iOS 是 SwiftUI 的 `Table`，表头的排序标记由 `sortOrder` 绑定显示，行菜单与主操作是 `contextMenu(forSelectionType:primaryAction:)`；紧凑宽度的 iPhone 上系统只显示第一列。tvOS 没有表格，是一列行按钮，各列的格子横排，按下运行主操作，长按出行菜单。GTK 是 `GtkColumnView` 与 `GtkMultiSelection`，表头的排序标记由 `GtkColumnViewSorter` 显示，行菜单是 `GtkPopoverMenu`；每个格子放在一个边界盒里，Bern 的伸缩规则不越过它进入 ColumnView 自己的部件（越过时 GTK 在行回收时断言失败）。WinUI 3 没有系统表格（DataGrid 在社区工具包里，不随 Windows App SDK 提供）：行是 `ListView`（`Extended` 选择），上面一排表头按钮，列宽在表头与各行之间共用，表头对齐到行里格子的位置；行菜单是 `MenuFlyout`。网页是 `<table>`，表头是按钮，`aria-sort` 标出排序，方向键在行间移动。Android 也没有表格控件，按 Material 数据表的样子做：表头一行，每行前有勾选框，表头的勾选框全选或全不选，选中的行用 `secondaryContainer` 着色，长按出 `DropdownMenu`。
+On each platform: on macOS and iOS it is SwiftUI's `Table`, with the header's sort indicator shown through a `sortOrder` binding, and the row menu and primary action are `contextMenu(forSelectionType:primaryAction:)`; on a compact-width iPhone the system shows only the first column. tvOS has no table, so it is a column of row buttons with each column's cells laid out horizontally; pressing runs the primary action and a long press shows the row menu. GTK uses `GtkColumnView` and `GtkMultiSelection`, the header's sort indicator is shown by `GtkColumnViewSorter`, and the row menu is a `GtkPopoverMenu`; each cell sits in a boundary box, so Bern's stretch rules do not cross into ColumnView's own widgets (when they did, GTK failed an assertion while recycling rows). WinUI 3 has no system table (DataGrid is in the Community Toolkit and does not ship with the Windows App SDK): the rows are a `ListView` (`Extended` selection) under a row of header buttons, column widths are shared between the header and the rows, and the header aligns with the positions of the cells in the rows; the row menu is a `MenuFlyout`. The Web uses a `<table>` whose headers are buttons, `aria-sort` marks the sorting, and the arrow keys move between rows. Android has no table control either, so it follows the look of Material data tables: a header row, a checkbox in front of each row, a header checkbox that selects all or none, selected rows tinted with `secondaryContainer`, and a long press that shows a `DropdownMenu`.
 
-实现进度（2026-10-29）：七个目标已实现。Linux 虚拟机上用一个实际应用（GTK，Broadway）实测：反复增删与换序行的压力测试、选择、右键先选中再出菜单、菜单项、点表头换排序、经外部入口的主操作；网页在浏览器里实测单击与 Shift 选择、行菜单、排序与双击。macOS、iOS 与 Android 只构建，WinUI 3 只经 MSVC 编译，都未运行。
+Implementation progress (2026-10-29): seven targets are implemented. Measured on the Linux VM with a real application (GTK, Broadway): a stress test repeatedly adding, removing and reordering rows, selection, right-click selecting the row first and then showing the menu, menu items, clicking headers to change the sorting, and the primary action through external entry points; on the Web, single click and Shift selection, the row menu, sorting and double-click were measured in the browser. macOS, iOS and Android were only built, and WinUI 3 was only compiled with MSVC; none of them were run.
 
-### 剪贴板
+### Clipboard
 
-控件读剪贴板、引擎写剪贴板，各走一条路：
+Controls read the clipboard and the engine writes it, each by its own path:
 
-- `Button`、`IconButton`、`MenuItem` 与 `CommandItem` 的 `paste: draft.text`：按下时先把剪贴板里的文字放进该草稿，再运行动作；剪贴板里没有文字时草稿与动作都不动。与 `pick` 二选一。读剪贴板要用户按下，这也是 iOS 与浏览器的要求（iOS 第一次会问用户，浏览器会请求许可）。
-- 引擎的 `bern::platform::copy_text(text)`：把文字放上剪贴板，任何线程都可以调用，由界面线程完成；宿主在启动引擎前经 `bern_platform_install` 接上（Android 早已经 JNI 提供）。macOS 是 `NSPasteboard`，iOS 是 `UIPasteboard`，Windows 是 `Clipboard.SetContent` 加 `Flush`（应用退出后文字仍在），GTK 是 `GdkClipboard`，网页是 `navigator.clipboard.writeText`。tvOS 没有剪贴板：`paste` 不可用（能力检查报告），`copy_text` 返回失败。
+- `paste: draft.text` on `Button`, `IconButton`, `MenuItem` and `CommandItem`: when pressed, it first puts the text on the clipboard into that draft and then runs the action; when the clipboard holds no text, neither the draft nor the action is touched. Mutually exclusive with `pick`. Reading the clipboard requires a press by the user, which is also what iOS and browsers require (iOS asks the user the first time; the browser requests permission).
+- The engine's `bern::platform::copy_text(text)`: puts text on the clipboard; it can be called from any thread and is carried out by the UI thread; the host wires it up through `bern_platform_install` before starting the engine (Android already provides it through JNI). macOS uses `NSPasteboard`, iOS `UIPasteboard`, Windows `Clipboard.SetContent` plus `Flush` (the text remains after the app exits), GTK `GdkClipboard`, and the web `navigator.clipboard.writeText`. tvOS has no clipboard: `paste` is unavailable (the capability check reports it), and `copy_text` returns failure.
 
-实现进度（2026-10-29）：Linux 虚拟机上实测从应用复制分享链接、再用 `paste` 读回，内容一字不差；网页在浏览器里只验证到调用剪贴板接口（浏览器拒绝了自动化读取，读的结果用替身代替）。其他目标未运行。
+Implementation status (2026-10-29): measured on the Linux VM: a share link copied from an app and read back with `paste` matches character for character; on the web, only the call to the clipboard API was verified in the browser (the browser refused automated reads, and the read result was replaced with a stand-in). Other targets not run.
 
-### 系统的正在播放
+### The system's Now Playing
 
-播放音乐、播客与视频的应用要出现在系统的播放控制里：键盘的媒体键、耳机的线控、菜单栏与控制中心的“正在播放”、锁屏、通知栏。这由引擎自己做，界面不必声明什么：
+Apps that play music, podcasts and video need to appear in the system's playback controls: the keyboard's media keys, headset controls, "Now Playing" in the menu bar and Control Center, the lock screen and the notification shade. The engine does this itself, and the UI does not need to declare anything:
 
 ```rust
 bern::now_playing::update(Some(&NowPlaying {
     title, artist, album,
-    artwork: Some(cover_bytes),   // JPEG 或 PNG
+    artwork: Some(cover_bytes),   // JPEG or PNG
     duration: 245.0, position: 12.5, playing: true,
 }));
 for command in bern::now_playing::take_commands() {
@@ -1775,17 +1777,17 @@ for command in bern::now_playing::take_commands() {
 }
 ```
 
-- `update` 在歌曲、播放与暂停、位置跳变时调用；`None` 表示没有在播放，系统的控制随之收起。系统自己按 `position` 与 `playing` 推算进度，不必每秒更新。
-- 系统送来的命令有播放、暂停、播放或暂停、下一首、上一首与跳到某秒；每来一条就唤醒引擎（`bern::wake`），引擎在下一次处理时用 `take_commands` 取走。
-- `[app].background_audio = true` 让应用在后台与锁屏时继续出声：iOS 声明 `UIBackgroundModes` 的 `audio`，Android 声明前台服务权限，播放时由一个 `mediaPlayback` 类型的前台服务（`BernPlaybackService`）守着进程。桌面平台不需要它。
+- `update` is called when the song changes, on play and pause, and when the position jumps; `None` means nothing is playing, and the system's controls go away with it. The system extrapolates progress itself from `position` and `playing`, so there is no need to update every second.
+- The commands the system sends are play, pause, play or pause, next, previous and seek to a second; each one wakes the engine (`bern::wake`), and the engine takes them with `take_commands` the next time it handles something.
+- `[app].background_audio = true` lets the app keep sounding in the background and on the lock screen: iOS declares `audio` in `UIBackgroundModes`, and Android declares the foreground service permissions, with a foreground service of type `mediaPlayback` (`BernPlaybackService`) guarding the process during playback. Desktop platforms do not need it.
 
-各平台的实现：macOS 与 iOS 是 MediaPlayer 的 `MPNowPlayingInfoCenter` 与 `MPRemoteCommandCenter`，在主队列上更新；iOS 另把音频会话设为 `playback`。Windows 是系统媒体传输控件（SMTC）：在自己的线程上建一个关掉了命令管理器的 `MediaPlayer`，只借用它的控件。Linux 在会话总线上提供 MPRIS（`org.mpris.MediaPlayer2.<bundle_id 的最后一段>`），由 zbus 实现。Android 由宿主建 `MediaSession`、带 `MediaStyle` 的通知与前台服务，命令经 JNI 的 `nowPlayingCommand` 回到引擎。
+Implementation on each platform: macOS and iOS use MediaPlayer's `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter`, updated on the main queue; iOS also sets the audio session to `playback`. Windows uses the System Media Transport Controls (SMTC): a `MediaPlayer` with its command manager turned off is created on its own thread, only to borrow its controls. Linux provides MPRIS on the session bus (`org.mpris.MediaPlayer2.<last component of the bundle_id>`), implemented with zbus. On Android the host creates a `MediaSession`, a notification with `MediaStyle` and a foreground service, and commands return to the engine through JNI's `nowPlayingCommand`.
 
-实现进度（2026-11-03）：一个实际的音乐应用实测：macOS 上媒体键播放、暂停与下一首有效，系统的正在播放显示歌名、歌手与封面；iOS 模拟器与 Android 模拟器上系统收到正在播放，Android 的通知栏按钮回到引擎；Linux 虚拟机上用 D-Bus 读到 MPRIS 的状态、元数据与位置，`PlayPause`、`Next` 与 `SetPosition` 变成命令。Windows 只编译，未运行。
+Implementation progress (2026-11-03): measured with a real music app: on macOS the media keys for play, pause and next work, and the system's Now Playing shows the title, artist and cover; on the iOS simulator and the Android emulator the system receives Now Playing, and Android's notification buttons return to the engine; on the Linux VM, MPRIS state, metadata and position were read over D-Bus, and `PlayPause`, `Next` and `SetPosition` become commands. Windows was only compiled, not run.
 
-### 悬浮文字
+### Floating text
 
-`bern::overlay` 在所有窗口上面显示几行文字，例如桌面歌词，或 Windows 任务栏上的一行：
+`bern::overlay` shows a few lines of text above all windows, for example desktop lyrics, or a line on the Windows taskbar:
 
 ```rust
 bern::overlay::show("lyrics", &Overlay {
@@ -1800,39 +1802,39 @@ bern::overlay::show("lyrics", &Overlay {
 for (overlay, button) in bern::overlay::take_presses() { /* … */ }
 ```
 
-- 文字带柔和的阴影，在任何背景上都看得清，窗口本身透明。`Place::Free` 在用户上次放下的地方（第一次在主屏幕下方居中），位置由 `storage` 记住；`Place::Taskbar` 立在 Windows 任务栏上通知区域的左边。
-- 未锁定时可以拖动；锁定时点击穿过它，落到下面的窗口上。
-- `buttons` 是自由放置的悬浮文字上方的一排按钮，指针移到文字上时出现，未锁定时连同一块半透明的底板；锁定时只出现 `while_locked` 的按钮，各在未锁定时的位置上，也只有它们接收指针，用户由此就地解锁。按钮的按下经 `take_presses` 回到引擎，每次都唤醒引擎。`symbol` 是 SF Symbols 名称：macOS 画任何一个，其他平台画 `backward.fill`、`forward.fill`、`play.fill`、`pause.fill`、`lock.fill`、`lock.open.fill` 与 `xmark`。
-- Android 上应用先要用户允许“显示在其他应用的上层”：`allowed()` 回答是否已允许，`ask()` 打开系统的设置页；`[app].overlays = true` 声明 `SYSTEM_ALERT_WINDOW` 权限。那里没有悬停，未锁定时点一下文字出现按钮，几秒后收起，窗口上移按钮那么高，文字不动。
-- `supported()` 回答这个系统是否有悬浮文字：iOS、tvOS 与网页没有。
+- The text has a soft shadow so it is legible on any background, and the window itself is transparent. `Place::Free` puts it where the user last left it (the first time centered near the bottom of the main screen), with the position remembered by `storage`; `Place::Taskbar` stands it on the Windows taskbar, to the left of the notification area.
+- When unlocked it can be dragged; when locked, clicks pass through it to the window below.
+- `buttons` is a row of buttons above freely placed floating text that appears when the pointer moves over the text, together with a translucent backing plate when unlocked; when locked only the `while_locked` buttons appear, each at its unlocked position, and only they receive the pointer, so the user can unlock in place. Button presses return to the engine through `take_presses`, waking the engine each time. `symbol` is an SF Symbols name: macOS draws any of them, and the other platforms draw `backward.fill`, `forward.fill`, `play.fill`, `pause.fill`, `lock.fill`, `lock.open.fill` and `xmark`.
+- On Android the app first needs the user to allow "Display over other apps": `allowed()` answers whether it is allowed, and `ask()` opens the system settings page; `[app].overlays = true` declares the `SYSTEM_ALERT_WINDOW` permission. There is no hover there: when unlocked, tapping the text shows the buttons, which go away after a few seconds, and the window moves up by the buttons' height while the text stays still.
+- `supported()` answers whether this system has floating text: iOS, tvOS and the web do not.
 
-各平台的实现：macOS 是无边框、不激活的 `NSPanel`，在状态栏层级、所有桌面空间与全屏应用之上，每行一个文字标签；按钮是 `NSButton`，指针由定时读 `NSEvent.mouseLocation` 得知，锁定时面板只在指针落在按钮上时接收鼠标。Windows 是分层的置顶工具窗口，Direct2D 与 DirectWrite 画进位图，`UpdateLayeredWindow` 取它的透明度；锁定时带 `WS_EX_TRANSPARENT`，指针落在按钮上时去掉；按钮的图形来自系统图标字体（Windows 11 的 Segoe Fluent Icons，之前是 Segoe MDL2 Assets）；任务栏上的每秒放回任务栏上面。Linux 由 GTK 宿主经 `overlay::install` 接上：无装饰的透明窗口，锁定时输入区域只含解锁的按钮，未锁定时按下即由合成器移动；GTK 4 不能要求位置与置顶，这两样由桌面决定。Android 是 `TYPE_APPLICATION_OVERLAY` 的系统浮窗，锁定时带 `FLAG_NOT_TOUCHABLE`，按钮的图形由宿主自己画。
+Implementation on each platform: macOS uses a borderless, non-activating `NSPanel` at the status bar level, above all desktop spaces and full-screen apps, with one text label per line; the buttons are `NSButton`s, the pointer is known by reading `NSEvent.mouseLocation` on a timer, and when locked the panel receives the mouse only while the pointer is over a button. Windows uses a layered topmost tool window drawn into a bitmap with Direct2D and DirectWrite, whose transparency `UpdateLayeredWindow` takes; when locked it has `WS_EX_TRANSPARENT`, removed while the pointer is over a button; the buttons' glyphs come from the system icon font (Segoe Fluent Icons on Windows 11, Segoe MDL2 Assets before); the one on the taskbar is put back above the taskbar every second. On Linux the GTK host connects it through `overlay::install`: an undecorated transparent window whose input region, when locked, contains only the unlock button, and which the compositor moves on a press when unlocked; GTK 4 cannot request a position or staying on top, so the desktop decides both. On Android it is a system floating window of type `TYPE_APPLICATION_OVERLAY`, with `FLAG_NOT_TOUCHABLE` when locked, and the host draws the buttons' glyphs itself.
 
-实现进度（2026-11-03）：一个实际的音乐应用实测：macOS 上显示、拖动、锁定后点击穿过，指针移上去出现按钮，暂停、锁定与就地解锁有效；Android 模拟器上显示，点一下出现按钮，暂停、播放与锁定有效。Linux 只在 Broadway 显示上试过：指针移上去出现按钮与底板，按钮有效；锁定后的输入区域与真实合成器上的置顶未验证。Windows 只编译，未运行。
+Implementation progress (2026-11-03): measured with a real music app: on macOS it shows, drags, lets clicks through after locking, shows the buttons when the pointer moves over it, and pause, lock and unlocking in place work; on the Android emulator it shows, a tap shows the buttons, and pause, play and lock work. Linux was only tried on the Broadway display: the buttons and the plate appear when the pointer moves over it and the buttons work; the input region after locking and staying on top on a real compositor have not been verified. Windows was only compiled, not run.
 
-### 跟随值的动作
+### Actions that follow a value
 
-`Watch(value: draft.selected) => app.inspect(draft.selected)` 在挂载时运行一次动作，之后值每变一次运行一次，相等的新值不算变化。它让引擎知道只在界面里的状态：表格选中的行（检查器据此显示那一行）、侧栏选中的页面（引擎据此只列出那一组的服务器）、搜索框的文字。值是布尔、数值、文本、枚举，或它们的可选值与列表；记录不行，因为各平台比较记录的方式不一。动作可以是命令、会话动作或窗口动作。写在 `if` 里时它随条件挂载，条件成立的那一刻运行一次，例如某个状态出现时切到另一页。
+`Watch(value: draft.selected) => app.inspect(draft.selected)` runs the action once on mount and then once each time the value changes; an equal new value does not count as a change. It lets the engine know about state that exists only in the UI: the selected row of a table (the inspector shows that row accordingly), the page selected in the sidebar (the engine lists only that group's servers accordingly), the text of a search field. The value is a boolean, number, text or enum, or an optional or list of them; records are not allowed, because platforms compare records differently. The action can be a command, a session action or a window action. Written inside an `if`, it mounts with the condition and runs once the moment the condition becomes true, for example to switch to another page when a certain state appears.
 
-各平台：SwiftUI 是 `onChange(of:initial:)`；GTK、WinUI 3 与网页是记着上一次值的 effect，动作在不追踪依赖的范围里运行，所以动作读到的状态不会让它再运行；Compose 是 `LaunchedEffect(value)`。
+Per platform: SwiftUI uses `onChange(of:initial:)`; GTK, WinUI 3 and the web use an effect that remembers the previous value, with the action running in an untracked scope, so state the action reads does not make it run again; Compose uses `LaunchedEffect(value)`.
 
-实现进度（2026-10-29）：七个目标实现（`watch`）。Linux 虚拟机上一个实际应用实测侧栏换页、表格选中行与搜索框经它到达引擎；网页运行时测试覆盖首次运行、变化、相等的值与卸载；SwiftUI 按 macOS、iOS、tvOS 的 SDK 类型检查；WinUI 3 经 MSVC 编译了用到它的实际应用；Compose 只有生成器测试。
+Implementation status (2026-10-29): implemented on seven targets (`watch`). Measured with a real app on the Linux VM: sidebar page changes, the selected table row and the search field reach the engine through it; web runtime tests cover the first run, changes, equal values and unmounting; SwiftUI is type-checked against the macOS, iOS and tvOS SDKs; for WinUI 3, a real app that uses it was compiled with MSVC; Compose has only generator tests.
 
-### 路由与返回行为
+### Routing and back behavior
 
-路由目录声明稳定身份、类型化参数、目的地和状态保留规则。`ui.navigate`、`ui.back` 等会话命令引用该目录；传输中可以使用路由 ID，但不能用任意字符串路径替代参数类型检查。
+The route catalog declares stable identities, typed parameters, destinations and state-retention rules. Session commands such as `ui.navigate` and `ui.back` reference this catalog; route IDs may be used in transport, but arbitrary string paths cannot replace parameter type checking.
 
-同一个“查看视频详情”意图可以在手机进入新页面，在桌面更新详情区域。布局负责映射展示方式，业务命令不硬编码页面栈或窗口对象。需要先执行业务操作再导航的流程，应显式组合命令并处理结果，不能让后台业务处理器偷偷打开界面。
+The same "view video details" intent can enter a new page on a phone and update the detail area on a desktop. The layout is responsible for mapping how it is presented; business commands do not hard-code page stacks or window objects. Flows that need to run a business operation before navigating must compose commands explicitly and handle the result; background business handlers must not quietly open UI.
 
-返回操作默认优先交给当前窗口最内层可关闭的浮层，再交给该窗口导航栈；仍无法处理时，非主虚拟窗口请求关闭并经过统一关闭检查，主窗口则通知宿主。被模态关系阻挡的窗口不得响应返回。具体容器可以声明规则，但不能让浏览器返回、系统返回和键盘返回各自产生互相矛盾的状态。
+By default, a back action goes first to the innermost dismissible overlay of the current window, then to that window's navigation stack; if it is still unhandled, a non-primary virtual window requests close and goes through the unified close check, while the primary window notifies the host. A window blocked by a modal relationship must not respond to back. Specific containers may declare rules, but browser back, system back and keyboard back must not each produce mutually contradictory state.
 
-滚动位置、搜索条件、编辑草稿和焦点分别声明保留策略，使用页面身份与数据 key 恢复。数据或目标已失效时采用明确回退，不强行恢复到另一项。跨进程或应用重启的恢复使用有版本的可序列化状态，不保存活跃任务或平台对象。
+Scroll position, search criteria, edit drafts and focus each declare a retention policy and are restored using page identity and data keys. When the data or target is no longer valid, an explicit fallback is used rather than forcing restoration onto another item. Restoration across processes or app restarts uses versioned serializable state and does not save active tasks or platform objects.
 
-## 声明式多窗口与虚拟窗口
+## Declarative multi-window and virtual windows
 
-### 一套窗口声明
+### One set of window declarations
 
-Window 表达具有独立身份和交互状态的逻辑窗口。WindowSet 在会话根登记窗口声明，由窗口管理器创建实例；它不是普通的行列布局容器。应用使用同一份声明，不需要为 Web 或手机重写一套弹窗界面。
+Window expresses a logical window with its own identity and interaction state. WindowSet registers window declarations at the session root, and the window manager creates the instances; it is not an ordinary row or column layout container. Apps use the same declaration and do not need to rewrite a set of popup UIs for the web or phones.
 
 ```rust
 #[component]
@@ -1874,53 +1876,53 @@ fn application(windows: WindowManagerHandle) -> impl View {
 }
 ```
 
-示例中的 `settings_screen` 是已登记的普通 Bern 组件。`WindowManagerHandle` 是类型化会话客户端，`windows.settings.open()` 由窗口目录生成，是命令引用。`id` 定义静态窗口种类，不是平台句柄；每个会话根 WindowSet 的 primary 必须引用唯一的单实例主窗口，不能指向按 key 创建多个实例的种类，也不通过名称或打开顺序猜测。主窗口角色与初始状态分别声明，允许多个窗口初始打开。`presentation: auto` 为默认值；初始状态默认为 closed，示例显式打开主窗口。
+`settings_screen` in the example is an ordinary registered Bern component. `WindowManagerHandle` is a typed session client; `windows.settings.open()` is generated from the window catalog and is a command reference. `id` defines a static window kind, not a platform handle; the primary of each session-root WindowSet must reference a unique single-instance primary window, cannot point to a kind that creates multiple instances by key, and is not guessed from names or opening order. The primary window role and the initial state are declared separately, and multiple windows may be open initially. `presentation: auto` is the default; the initial state defaults to closed, and the example opens the primary window explicitly.
 
-窗口正文也可以不经组件直接写元素，编译器像检查组件正文一样检查它们：引用的随包资源必须在 `[resources]` 中声明；它们读写的会话草稿与窗口所放组件的 `#[session]` 一样，归这个窗口的每个实例所有；窗口和组件都不能放置根组件。窗口自己的关闭检查与 `immersive`、`idle_enabled`、`landscape` 表达式只能读这个窗口拥有的会话草稿，即所放组件的 `#[session]` 与正文直接读写的那些；运行时只为窗口实例建它拥有的会话，读别的草稿在编译时报错。
+A window body can also contain elements written directly, without a component, and the compiler checks them as it checks a component body: referenced bundled resources must be declared in `[resources]`; the session drafts they read and write belong to each instance of this window, just like the `#[session]` of a component placed in the window; neither windows nor components can place the root component. The window's own close check and its `immersive`, `idle_enabled` and `landscape` expressions can only read session drafts this window owns, that is, the `#[session]` of the placed components and the drafts the body reads and writes directly; the runtime builds only the sessions a window instance owns, and reading other drafts is a compile-time error.
 
-窗口正文占窗口的内容区：桌面窗口的标题栏与工具栏之下，手机上顶栏之下、安全区之内。比内容区小的正文从内容区的左上角（前缘与顶部）排起，不居中。直接写在窗口里、没写宽度的 `Column` 与内容区同宽，子元素按它的 `align`（默认 `leading`）横向摆放：`Window { Column(gap: 12, padding: 24) { Text …; Button … } }` 的标题与按钮从左上角排起，按钮保持自己的宽度；`Column(align: center)` 让它们在窗口里水平居中。直接写在窗口里、没写尺寸的 `Stack` 铺满内容区，较小的层按它的 `align` 对齐（默认居中）。经过条件或组件写在窗口里的正文一样。六个目标按此实现（2026-10-21），在 macOS、iOS 与 tvOS 模拟器、Android 手机、Windows PC、Linux 虚拟机与 Chromium 上看过；改前各平台分别是居中、水平居中靠顶、靠左上与横向铺满，见各实现记录。
+The window body occupies the window's content area: below the title bar and toolbar in a desktop window; on a phone, below the top bar and within the safe area. A body smaller than the content area is laid out from the content area's top-left corner (leading edge and top), not centered. A `Column` written directly in a window without a width is as wide as the content area, and its children are placed horizontally according to its `align` (default `leading`): in `Window { Column(gap: 12, padding: 24) { Text …; Button … } }` the title and the button are laid out from the top-left, and the button keeps its own width; `Column(align: center)` centers them horizontally in the window. A `Stack` written directly in a window without a size fills the content area, and smaller layers are aligned according to its `align` (centered by default). Bodies placed in the window through conditions or components behave the same. Six targets implement this (2026-10-21), and it was checked on macOS, the iOS and tvOS simulators, an Android phone, a Windows PC, the Linux VM and Chromium; before the change, the platforms respectively centered, centered horizontally at the top, placed at the top-left, and stretched horizontally; see the implementation notes of each.
 
-窗口声明只登记内容、参数与策略，不在每次求值或重绘时创建窗口。`initial: open` 在会话初始化时生成一次打开命令，窗口关闭后不会因重绘重新打开。窗口目录的条件必须能在构建配置中确定；运行时条件影响可用性，不动态创造未知窗口种类，也不因按钮或页面卸载而撤销已打开窗口。
+Window declarations only register content, parameters and policies; they do not create windows on each evaluation or redraw. `initial: open` generates an open command once at session initialization; once the window is closed, a redraw does not reopen it. Window catalog conditions must be determinable from the build configuration; runtime conditions affect availability, do not dynamically create unknown window kinds, and do not revoke already open windows because a button or page unmounts.
 
-默认每个窗口种类在一个会话中只有一个存活实例；再次 open 返回已有实例并请求激活，不清空草稿。多文档场景可以声明类型化参数与稳定 key，同一 key 定位同一实例，不同 key 创建不同实例。打开命令不隐式改写已有实例参数；参数不一致时返回冲突，更新内容需另有明确命令。多实例的具体属性拼写待原型验证，禁止用任意运行时组件工厂代替可分析的声明。
+By default, each window kind has only one live instance in a session; opening it again returns the existing instance and requests activation, without clearing drafts. Multi-document scenarios can declare typed parameters and a stable key: the same key locates the same instance, and different keys create different instances. The open command does not implicitly rewrite an existing instance's parameters; mismatched parameters return a conflict, and updating the content requires a separate explicit command. The exact property spelling for multiple instances awaits prototype validation; arbitrary runtime component factories must not replace analyzable declarations.
 
-### 原生优先，自动虚拟呈现
+### Native first, automatic virtual presentation
 
-auto 根据所选 UI 后端、平台和当前宿主能力决定呈现方式：
+auto decides the presentation based on the chosen UI backend, the platform and the current host's capabilities:
 
-| 环境 | 默认窗口实现 |
+| Environment | Default window implementation |
 | --- | --- |
-| 支持所需原生窗口能力的桌面目标 | 各自的系统窗口，共享同一个 Bern 引擎与会话 |
-| Web 浏览器 | 页面宿主中的虚拟呈现：主窗口就是页面本身，次级窗口按角色呈现为对话框或侧边面板；不依赖弹出窗口权限 |
-| 不支持原生多窗口的移动端或受限宿主 | 单个宿主表面中的虚拟窗口 |
-| 支持多场景或多窗口的移动端环境 | 按已验证的原生能力选择，否则使用虚拟窗口 |
+| Desktop targets that support the required native window capabilities | Their own system windows, sharing one Bern engine and session |
+| Web browser | Virtual presentation in the page host: the primary window is the page itself, and secondary windows are presented as dialogs or side panels according to their role; does not rely on popup-window permission |
+| Mobile or restricted hosts without native multi-window support | Virtual windows in a single host surface |
+| Mobile environments that support multiple scenes or windows | Chosen according to verified native capabilities, otherwise virtual windows |
 
-虚拟窗口是应用内的窗口呈现，使用目标 UI 技术的布局、控件和层叠能力，不要求 Bern 自研渲染引擎。虚拟呈现的形式遵循宿主自己的设计习惯，而不是模仿桌面操作系统的窗口：在网页中，主窗口就是页面本身，没有标题栏和窗口按钮；次级窗口按角色呈现，设置窗口默认为居中的对话框，其他窗口默认为对话框，宿主可按窗口声明的尺寸与角色选择侧边面板；窄屏时对话框与面板占满可用区域。隐藏的实例保留导航栈、编辑草稿和窗口级资源；全屏展示一个实例不等于关闭其他实例。
+A virtual window is an in-app window presentation that uses the target UI technology's layout, controls and layering, and does not require a rendering engine built by Bern. The form of virtual presentation follows the host's own design conventions instead of imitating desktop operating system windows: in a web page, the primary window is the page itself, with no title bar and no window buttons; secondary windows are presented according to their role: a settings window defaults to a centered dialog, other windows default to dialogs, and the host can choose a side panel based on the window's declared size and role; on narrow screens, dialogs and panels fill the available area. Hidden instances keep their navigation stack, edit drafts and window-level resources; showing one instance full screen does not mean closing the others.
 
-可拖动、可调整大小的浮动窗口与窗口切换条不是网页的默认呈现，而是应用显式选择的形式（`presentation: floating`），适合编辑器、监控台等确实需要并排多个窗口的应用；不支持的目标在构建时报错。
+Draggable, resizable floating windows and a window switcher bar are not the default presentation on the web but a form the app chooses explicitly (`presentation: floating`), suited to apps such as editors and monitoring consoles that really need several windows side by side; targets that do not support it report an error at build time.
 
-自动适配属于 Window 的标准契约，不需要应用额外声明一遍 fallback。应用可显式选择 virtual 以获得固定的应用内呈现，选择 floating 以获得可拖动、可调整大小的浮动窗口，或声明 native_required 表示确实依赖原生窗口；floating 与 native_required 在不支持时明确失败。UI 后端本身缺失或初始化失败不由窗口回退掩盖，未实现虚拟窗口也不能被报告为已满足多窗口契约。
+Automatic adaptation is part of Window's standard contract; apps do not need to declare a fallback separately. An app can explicitly choose virtual for a fixed in-app presentation, choose floating for draggable, resizable floating windows, or declare native_required to state that it truly depends on native windows; floating and native_required fail explicitly when unsupported. A missing UI backend or one that fails to initialize is not masked by window fallback, and unimplemented virtual windows cannot be reported as satisfying the multi-window contract.
 
-能力检查覆盖创建前的实际环境。原生能力确实不可用且虚拟呈现可满足要求时，auto 选择虚拟实现；资源不足、配置错误等执行失败不能一律当成能力不足。创建过程中若需回退，必须先确认并清理部分创建的原生对象，避免同一请求产生两个窗口。首版不承诺已打开窗口在原生与虚拟之间任意热迁移；尺寸变化下的虚拟布局切换必须保持逻辑实例。
+The capability check covers the actual environment before creation. When native capability is truly unavailable and virtual presentation can meet the requirements, auto chooses the virtual implementation; execution failures such as insufficient resources or configuration errors cannot all be treated as missing capability. If fallback is needed during creation, partially created native objects must first be confirmed and cleaned up, so that one request does not produce two windows. The first version does not promise arbitrary hot migration of open windows between native and virtual; virtual layout switching under size changes must keep the logical instance.
 
-虚拟窗口不能模拟跨显示器摆放、系统任务栏独立条目、相对其他应用置顶等系统级能力。窗口描述区分通用操作与原生专属要求；通用的最大化仅表示占满所属呈现区域，不能冒充操作系统全屏。几何使用逻辑单位并注明宿主坐标或屏幕坐标空间；移动和尺寸请求允许由窗口管理器调整，返回实际结果。原生仅有的必需能力无法满足时仍需报错。
+Virtual windows cannot simulate system-level capabilities such as placement across displays, separate entries in the system taskbar, or staying on top of other apps. Window descriptions distinguish common operations from native-only requirements; the common maximize only means filling the presentation area the window belongs to, and cannot pass itself off as operating system full screen. Geometry uses logical units and states whether it is in host or screen coordinate space; move and resize requests may be adjusted by the window manager, which returns the actual result. When a required native-only capability cannot be met, an error is still reported.
 
-虚拟窗口必须依附有效 UI 宿主；无界面引擎没有窗口宿主时返回 `requires_ui_session`，不能因为存在虚拟实现就自行启动 UI。宿主是承载窗口的应用表面，主窗口是启动时显示的逻辑实例，两者的生命周期不默认等同。Web 不把 `window.open()` 视为可靠的标准多窗口实现；独立浏览器窗口只能作为另行验证的扩展能力。
+Virtual windows must attach to a valid UI host; a headless engine without a window host returns `requires_ui_session`, and must not start a UI on its own because a virtual implementation exists. The host is the app surface that carries the windows, and the primary window is the logical instance shown at startup; their lifetimes are not the same by default. The web does not treat `window.open()` as a reliable standard multi-window implementation; separate browser windows can only be an extension capability verified separately.
 
-### 对话框窗口
+### Dialog windows
 
-`role: dialog` 的窗口是叠在主窗口上的模态窗口，例如首次启动的引导：它有窗口的一切——身份、草稿、关闭检查与保存、打开与关闭命令——只是呈现为主窗口上的表单（sheet），打开时主窗口不能操作。在对话框里再打开对话框，新的叠在上面；关闭一个对话框，它上面的也一起关闭。声明的 `width` 与 `height` 是它至少的尺寸。
+A window with `role: dialog` is a modal window stacked on the primary window, for example first-launch onboarding: it has everything a window has (identity, drafts, close check and saving, open and close commands), except that it is presented as a sheet over the primary window, and the primary window cannot be operated while it is open. Opening a dialog from inside a dialog stacks the new one on top; closing a dialog also closes those above it. The declared `width` and `height` are its minimum size.
 
-预期实现：macOS 与 iOS 用 `.sheet`，iPad 上也是表单而不是独立场景；Compose 用居中的 `Dialog`，宽高按声明；GTK 用模态的临时窗口；WinUI 3 用 `ContentDialog`；Web 与其他次级窗口一样用对话框。实现进度：SwiftUI 已实现，在 macOS 上用 `examples/gallery` 验证：按钮与 `window open`、`window close` 都能打开与关闭，声明的尺寸生效；iPhone 上是按声明高度（加标题栏）从底部弹出的表单，iOS 26.5 模拟器已验证。Compose 已实现，Android 模拟器上验证了从侧栏底部打开、按“好”关闭。Web 已实现，浏览器中验证对话框以声明的宽度显示在主窗口的遮罩上，按“好”关闭。GTK 已实现（主窗口的模态临时窗口，Esc 关闭），Linux 虚拟机上验证关于窗口以模态对话框打开、按“好”关闭，GNOME 中附着在主窗口上未验证（Broadway 没有窗口管理器）；WinUI 3 已实现（主窗口上的 `ContentDialog`，声明的宽度在对话框允许的范围内生效），Windows PC 上验证按钮与 `window open`、`window close` 打开与关闭（两种前端）。
+Expected implementation: macOS and iOS use `.sheet`, which on iPad is also a sheet rather than a separate scene; Compose uses a centered `Dialog`, sized as declared; GTK uses a modal transient window; WinUI 3 uses `ContentDialog`; the web uses a dialog, like other secondary windows. Implementation status: SwiftUI implemented, verified on macOS with `examples/gallery`: buttons as well as `window open` and `window close` open and close it, and the declared size takes effect; on iPhone it is a sheet rising from the bottom at the declared height (plus the title bar), verified on the iOS 26.5 simulator. Compose implemented; verified on the Android emulator opening it from the bottom of the sidebar and closing it with "OK". Web implemented; verified in the browser that the dialog is shown at the declared width over the primary window's scrim and closes with "OK". GTK implemented (a modal transient window of the primary window, closed with Esc); verified on the Linux VM that the About window opens as a modal dialog and closes with "OK"; attachment to the primary window under GNOME not verified (Broadway has no window manager); WinUI 3 implemented (`ContentDialog` on the primary window; the declared width takes effect within the range the dialog allows), verified on the Windows PC opening and closing it with buttons and with `window open` and `window close` (both frontends).
 
-### 窗口外框、沉浸与覆盖层
+### Window chrome, immersion and overlays
 
-窗口外框与空闲检测已有后端实现，以下分别说明语义与验证范围。macOS / Web 的全窗口播放器覆盖层已在真实应用中验证；图片 Hero 与 Video 画面传递的状态分开记录。
+Window chrome and idle detection already have backend implementations; the semantics and verification scope of each are described below. The macOS / Web full-window player overlay has been verified in a real app; the status of image Hero transitions and of handing off Video frames is recorded separately.
 
 ```rust
 Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, chrome: unified, idle_after: 3, immersive: draft.playing && window.idle) {
     Stack {
-        SplitView { /* 侧边栏与详情 */ }
+        SplitView { /* sidebar and detail */ }
         if draft.playing {
             player_layer(player: app.player)
         }
@@ -1928,206 +1930,206 @@ Window(id: main, title: tr! { "zh-Hans" => "主窗口", "en" => "Main" }, chrome
 }
 ```
 
-- **`chrome`**：`standard` 是平台默认的标题栏；`unified` 让内容延伸到标题栏下，标题栏透明，侧边栏到达窗口顶边，后端为系统窗口控件预留位置并保留拖动区域。预期实现：macOS 的全尺寸内容与透明标题栏，WinUI 3 的 `ExtendsContentIntoTitleBar`（窗口已使用 Mica 背景），GTK 的 `AdwToolbarView` 平铺顶栏。网页与 iPhone 没有窗口标题栏，不受影响。实现进度：WinUI 3 的内容本来就延伸到标题栏，标题栏照常在应用图标旁显示窗口标题（Fluent 窗口如此），Islands 保留系统标题栏；GTK 用平铺顶栏去掉分隔阴影，内容不延伸到标题栏下；Android 手机没有窗口标题栏，`unified` 时只有窗口标题可显示的顶栏不出现，内容给出标题、返回或工具时照常显示。
-- **`under_bars`**：`Stack(under_bars: true)` 显示期间铺满整个窗口直到边缘：桌面窗口里越过标题栏与工具栏（它们浮在这一层上方，标题栏不显示标题文字），手机上越过状态栏与主屏幕指示条。用于按窗口坐标画的场景，例如与沉浸播放器同一坐标系的空画框，打开播放器时两者的画框完全重合。实现：SwiftUI 在 macOS 上忽略顶部安全区、在 iOS 上忽略全部容器安全区；Web 让应用栏与页头浮在内容上方；GTK 打开窗口 `AdwToolbarView` 的 `extend-content-to-top-edge`；WinUI 3 让内容跨过标题栏行与页头行，标题栏与页头留在上层，页头仍在标题栏下方，后缘让出标题按钮的宽度再加 12；窗口里的层叠中，这一层包在包装、只有一个孩子的容器里（例如 `Adaptive` 的布局）也照样到顶，其余的层仍让出标题栏；Compose 让这一层按 `Scaffold` 的内边距向外扩，并在显示期间把顶栏改为透明。
-- **`immersive`**：布尔绑定。为真时窗口隐藏标题栏与工具栏，触屏平台同时隐藏状态栏与主屏幕指示条，指针停止移动后隐藏、移动时重新出现；为假时恢复。它不是全屏，窗口尺寸不变，全屏仍是窗口命令。预期实现：macOS 的工具栏可见性与 `NSCursor.setHiddenUntilMouseMoves`，GTK 的 `AdwToolbarView:reveal-top-bars` 与空指针，iOS 的 `statusBarHidden` 与 `persistentSystemOverlays`，Web 的 `cursor: none`；WinUI 3 收起标题栏并去掉系统标题栏与标题按钮、静置时隐藏指针（Islands 去掉 `WS_CAPTION`）。实现进度：GTK 与 WinUI 3 已实现，Linux 虚拟机与 Windows PC 上验证 planner 的专注模式静置 3 秒后标题栏隐藏；WinUI 3 移动指针后恢复，Islands 的恢复未验证。
-- **`idle_after` 与 `window.idle`**：声明 `idle_after` 秒数后，窗口提供只读的会话状态 `window.idle`：指针、键盘与触摸在这段时间内都没有输入时为真，一有输入立即变为假。控制层的淡出与 `immersive` 都可以绑定它，应用不需要自己计时。它是 UI 会话状态，不进入业务引擎。`idle_enabled` 默认 true，可绑定布尔状态；false 暂停检测并清除闲置状态，恢复后重新计时。该开关目前由 SwiftUI 与 Web 消费，其他后端尚未接入，不能依赖它停用计时。macOS 编辑文字、打开菜单或子窗口时会保留控制层。任何元素可以声明 `idle_area: 秒数`（静置区，例如播放器的画面）：页面上有静置区时，鼠标只在静置区上停住这么多秒才进入静置，停在别处或移出窗口时保持醒着；触屏、遥控器与键盘仍按 `idle_after`。实现进度（2026-10-24）：macOS（`onContinuousHover` 记录指针所在的静置区）、Web（只认鼠标的指针事件，到时按指针位置重新命中）、Compose（静置区的悬停进出，只认鼠标）、GTK 与 WinUI 3（记下鼠标在窗口里的位置，开始计时与到时分别按 GTK 的拾取、XAML 的命中测试找出它所在的静置区）已实现，macOS 上用一个实际应用的播放画面实测，Compose、GTK、WinUI 3 只经过编译与生成器测试；iOS、tvOS 没有鼠标，不受影响。
-- **覆盖层**：窗口内容可以是 `Stack`，在导航容器之上叠放其他层，例如全窗口的播放层或固定在侧边栏底部的小播放器。macOS 与 Web 已验证在导航容器之上叠放播放器及切换侧栏迷你播放器。最上层先处理返回，规则同“路由与返回行为”。播放器与视图分离：两个位置可附着同一个播放器；不支持多视图的媒体后端由最新附着的视图显示画面。跨分栏动画当前验收的是 `Image`；`Video` 的连续画面转移仍需媒体后端专项实现与验证。
+- **`chrome`**: `standard` is the platform's default title bar; `unified` extends the content under the title bar, makes the title bar transparent and lets the sidebar reach the window's top edge, with the backend reserving room for the system window controls and keeping a drag area. Expected implementation: full-size content and a transparent title bar on macOS, `ExtendsContentIntoTitleBar` on WinUI 3 (the window already uses a Mica backdrop), a flat top bar in `AdwToolbarView` on GTK. The web and iPhone have no window title bar and are unaffected. Implementation status: on WinUI 3 the content already extends into the title bar, and the title bar shows the window title next to the app icon as usual (as Fluent windows do), while Islands keeps the system title bar; GTK uses a flat top bar to remove the separator shadow, and the content does not extend under the title bar; Android phones have no window title bar: with `unified`, a top bar that would show only the window title does not appear, and the top bar appears as usual when the content provides a title, back or tools.
+- **`under_bars`**: while shown, `Stack(under_bars: true)` fills the whole window to its edges: in a desktop window it extends past the title bar and toolbar (they float above this layer, and the title bar shows no title text); on a phone it extends past the status bar and the home indicator. Used for scenes drawn in window coordinates, for example an empty frame in the same coordinate system as the immersive player, so that when the player opens the two frames coincide exactly. Implementation: SwiftUI ignores the top safe area on macOS and all container safe areas on iOS; the web floats the app bar and page header above the content; GTK turns on `extend-content-to-top-edge` of the window's `AdwToolbarView`; WinUI 3 lets the content span the title bar row and the header row, with the title bar and header staying on the layer above, the header still below the title bar, and its trailing edge leaving room for the width of the caption buttons plus 12; in a stack in the window, this layer reaches the top even when wrapped in a wrapper or a container with only one child (for example the layout of an `Adaptive`), while the other layers still leave room for the title bar; Compose expands this layer outward by the `Scaffold` padding and makes the top bar transparent while the layer is shown.
+- **`immersive`**: a boolean binding. When true, the window hides its title bar and toolbar, touch platforms also hide the status bar and home indicator, and the pointer hides after it stops moving and reappears when it moves; when false, everything is restored. It is not full screen: the window size does not change, and full screen remains a window command. Expected implementation: toolbar visibility and `NSCursor.setHiddenUntilMouseMoves` on macOS, `AdwToolbarView:reveal-top-bars` and a blank cursor on GTK, `statusBarHidden` and `persistentSystemOverlays` on iOS, `cursor: none` on the web; WinUI 3 collapses its title bar, removes the system title bar and caption buttons, and hides the pointer when idle (Islands removes `WS_CAPTION`). Implementation status: GTK and WinUI 3 implemented; verified on the Linux VM and the Windows PC that planner's focus mode hides the title bar after 3 seconds idle; WinUI 3 restores it after the pointer moves; restoration on Islands not verified.
+- **`idle_after` and `window.idle`**: once `idle_after` is declared in seconds, the window provides the read-only session state `window.idle`: true when there has been no pointer, keyboard or touch input during that time, and false as soon as there is input. Fading out a control layer and `immersive` can both bind to it, so the app does not need its own timer. It is UI session state and does not enter the business engine. `idle_enabled` defaults to true and can bind a boolean state; false pauses detection and clears the idle state, and timing restarts when it resumes. This switch is currently consumed by SwiftUI and the web; other backends have not wired it up yet, and it cannot be relied on to stop the timer there. On macOS, editing text or opening a menu or child window keeps the control layer. Any element can declare `idle_area: seconds` (an idle area, for example the player's picture): when the page has an idle area, the mouse enters idle only after resting on the idle area for that many seconds, and resting elsewhere or leaving the window keeps it awake; touch, remote and keyboard still follow `idle_after`. Implementation status (2026-10-24): implemented on macOS (`onContinuousHover` records which idle area the pointer is in), the web (only mouse pointer events count; when the time is up it hit-tests again at the pointer position), Compose (hover enter and exit of idle areas, mouse only), GTK and WinUI 3 (they record the mouse position in the window and, when timing starts and when it expires, find the idle area it is in through GTK picking and XAML hit testing respectively); measured on macOS with the playback view of a real app; Compose, GTK and WinUI 3 have only been through compilation and generator tests; iOS and tvOS have no mouse and are unaffected.
+- **Overlays**: a window's content can be a `Stack` that layers other things above the navigation container, for example a full-window playback layer or a mini player pinned to the bottom of the sidebar. macOS and the web have verified layering a player above the navigation container and switching to the sidebar mini player. The topmost layer handles back first, under the same rules as in "Routing and back behavior". Players are separate from views: two positions can attach the same player; media backends that do not support multiple views show the picture in the most recently attached view. The cross-column animation accepted so far is for `Image`; continuous picture transfer for `Video` still needs a dedicated media backend implementation and verification.
 
-### 身份、状态与统一命令
+### Identity, state and unified commands
 
-运行时区分静态 `window_kind`、逻辑 `window_id` 和实例代次。命令按 `engine_id`、`session_id`、`window_id` 及代次定位实例；同一种窗口关闭后重新打开，旧引用必须失效。原生句柄、DOM 节点和虚拟面板对象仅由适配器管理。
+The runtime distinguishes the static `window_kind`, the logical `window_id` and the instance generation. Commands locate an instance by `engine_id`, `session_id`, `window_id` and generation; when a window of the same kind is closed and reopened, old references must become invalid. Native handles, DOM nodes and virtual panel objects are managed only by adapters.
 
-窗口管理器自动提供打开、请求关闭、激活、最小化、恢复、最大化及设置位置尺寸等类型化会话命令，并通过查询返回实际呈现方式、生命周期、可见性、几何、焦点、模态关系和可用动作。打开以窗口种类、参数和可选 key 为目标，其余动作定位实例。命令目录的 schema 稳定，可用能力及不可操作原因随实例更新：例如网页中呈现为页面或对话框的窗口没有最小化、最大化、移动与调整尺寸，`window.list` 如实列出可用动作，执行这些命令返回 `target_unavailable`，不伪装成功。
+The window manager automatically provides typed session commands to open, request close, activate, minimize, restore, maximize, and set position and size, and through queries returns the actual presentation, lifecycle, visibility, geometry, focus, modal relationships and available actions. Open targets a window kind, parameters and an optional key; the other actions locate an instance. The command catalog's schema is stable, while available capabilities and reasons an action cannot be performed update with the instance: for example, a window presented as a page or a dialog on the web has no minimize, maximize, move or resize; `window.list` lists the available actions truthfully, and executing these commands returns `target_unavailable` instead of pretending to succeed.
 
-UI 控件、Bern 快捷键、虚拟标题栏及 CLI、JSON、MCP 都调用同一命令。创建过程区分已接受与已打开；重复或并发 open 按单实例或 key 策略合并，不额外创建窗口。激活可能被操作系统拒绝，设置位置可能被调整，不能仅凭请求已发送便宣布完成。
+UI controls, Bern keyboard shortcuts, virtual title bars, and the CLI, JSON and MCP all call the same command. Creation distinguishes accepted from opened; repeated or concurrent opens are merged according to the single-instance or key policy, without creating extra windows. Activation may be refused by the operating system and a position setting may be adjusted; completion cannot be announced merely because the request was sent.
 
-能够在执行前可靠拦截的原生关闭请求转换为同一请求关闭命令。操作系统已经完成的聚焦、拖动、缩放、最小化或强制销毁，以带来源和实例版本的事实事件同步；不再派发一次同名命令形成回环。外部控制入口不能直接注入这种适配器事件，窗口事件也不能成为直接修改业务状态的通道。虚拟窗口的拖动和缩放由标准会话命令管理，可合并高频预览，实际布局采样无需逐帧发布命令。
+Native close requests that can be reliably intercepted before they take effect are converted into the same request-close command. Focus changes, drags, resizes, minimizing or forced destruction that the operating system has already completed are synchronized as fact events carrying their source and the instance version; a command of the same name is not dispatched again, which would form a loop. External control entry points cannot inject such adapter events directly, and window events cannot become a channel for directly modifying business state. Dragging and resizing virtual windows are managed by standard session commands, which may coalesce high-frequency previews; actual layout sampling does not need to publish a command per frame.
 
-### 关闭、焦点与资源归属
+### Close, focus and resource ownership
 
-关闭协议在原生和虚拟呈现下保持一致：请求关闭后执行已声明的关闭检查，返回已关闭、拒绝或 `confirmation_required`。确认需要用户选择时，UI 展示标准对话框；CLI、JSON 和 MCP 可提交同一类型化确认决策，不必等待无人操作的弹窗。确认上下文绑定窗口代次与相关草稿版本，旧确认不能丢弃后来新增的修改；重复关闭请求合并，不重复弹框。
+The close protocol is the same under native and virtual presentation: after a close request, the declared close checks run and return closed, refused or `confirmation_required`. When confirmation needs a choice from the user, the UI shows a standard dialog; the CLI, JSON and MCP can submit the same typed confirmation decision without waiting for a popup that no one is operating. The confirmation context is bound to the window generation and the relevant draft versions, so an old confirmation cannot discard modifications made afterwards; repeated close requests are merged and do not show the dialog again.
 
-保存或丢弃业务数据由相应引擎命令处理，保存失败不完成关闭。原生后端必须能暂缓普通关闭以执行声明的检查；无法做到时按能力选择满足契约的虚拟呈现，或在 native_required 下失败。操作系统强制终止、浏览器页面卸载或崩溃可能无法阻止，只能按可用能力清理与保存恢复信息，不能承诺所有宿主关闭都能被确认框拦住。
+Saving or discarding business data is handled by the corresponding engine commands, and a failed save does not complete the close. Native backends must be able to defer an ordinary close to run the declared checks; when they cannot, a virtual presentation that satisfies the contract is chosen according to capability, or failure is reported under native_required. Forced termination by the operating system, browser page unload or crashes may not be preventable; only cleanup and saving recovery information according to the available capabilities are possible, and there is no promise that every host close can be stopped by a confirmation dialog.
 
-每个窗口拥有自己的导航、焦点作用域和编辑会话。模态默认只阻挡所属窗口，阻挡整个 Bern 会话需显式声明；模态关系是逻辑关系，不依赖原生父子句柄。即使通过 CLI 或 MCP 发出 UI 激活命令，也必须检查目标窗口是否被模态阻挡。关闭后优先恢复仍有效的打开者焦点，失效则选择可用窗口。系统实际焦点始终以观察结果为准。
+Each window has its own navigation, focus scope and edit session. By default a modal blocks only the window it belongs to; blocking the whole Bern session requires an explicit declaration; modal relationships are logical and do not depend on native parent–child handles. Even when a UI activation command is issued through the CLI or MCP, whether the target window is blocked by a modal must be checked. After a close, focus is preferably restored to the opener if it is still valid; otherwise an available window is chosen. The system's actual focus is always taken from observation.
 
-普通窗口默认由会话持有，关闭打开它的窗口不自动级联关闭；声明为从属模态窗口的实例跟随所有者关闭协议处理，子窗口拒绝关闭时不能先释放所有者。关闭最后一个逻辑窗口采用明确的宿主策略，默认 keep_running 保留引擎和会话，允许后续打开；可配置 request_quit 进入应用退出命令。各平台的默认按平台习惯：macOS 与 Linux 保留运行，Windows 随最后一个窗口退出；声明了 `StatusItem` 时三者都保留运行，从状态项再打开窗口或退出（见“状态栏项”）。虚拟宿主保留重新打开窗口的入口，主窗口关闭不等于直接关闭浏览器页面。宿主或进程被外部销毁后的状态另按会话断连规则处理。
+Ordinary windows are held by the session by default, and closing the window that opened them does not cascade-close them; instances declared as dependent modal windows are handled under their owner's close protocol, and when a child window refuses to close, the owner cannot be released first. Closing the last logical window follows an explicit host policy: the default keep_running keeps the engine and session and allows opening windows later; request_quit can be configured to enter the app quit command. Each platform's default follows platform convention: macOS and Linux keep running, while Windows quits with the last window; when a `StatusItem` is declared, all three keep running, and windows are reopened or the app quit from the status item (see "Status bar items"). Virtual hosts keep an entry point for reopening windows; closing the primary window does not mean directly closing the browser page. State after the host or process is destroyed externally is handled separately by the session disconnection rules.
 
-关闭窗口释放其订阅和窗口级资源，并解除 Video 呈现附着。应用级播放器和任务按自身所有者继续存活；多个窗口共享一个 player_id 时检查媒体后端的多视图能力，不支持时显式转移附着或返回不支持，不能暗中复制播放器。切换虚拟窗口导致视图暂时不显示时，也不能把不可用的后台播放能力伪装为持续播放。
+Closing a window releases its subscriptions and window-level resources and detaches its Video presentation. App-level players and tasks live on according to their own owners; when multiple windows share one player_id, the media backend's multi-view capability is checked, and when it is unsupported the attachment is transferred explicitly or unsupported is returned; the player cannot be duplicated behind the scenes. When switching virtual windows temporarily hides a view, an unavailable background playback capability cannot be passed off as continuous playback.
 
-虚拟呈现的对话框、面板、浮动窗口的标题栏与切换器、加载与关闭确认使用统一深浅色主题和可访问性语义。对话框与面板提供标题和关闭按钮，Esc 等同关闭请求，仍经过关闭协议。浮动窗口的最小化实例必须有可发现的恢复入口；窗口切换、拖动和缩放提供键盘或命令等价操作。标题栏与对话框的图标按钮保留足够的点击区域、可访问名称与焦点反馈。原生系统装饰遵循已声明的系统托管主题边界。
+Dialogs, panels, floating window title bars and switchers, and loading and close confirmations in virtual presentation use the unified light and dark theme and accessibility semantics. Dialogs and panels provide a title and a close button; Esc is equivalent to a close request and still goes through the close protocol. Minimized floating window instances must have a discoverable restore entry point; window switching, dragging and resizing provide keyboard or command equivalents. Icon buttons in title bars and dialogs keep a sufficient hit area, an accessible name and focus feedback. Native system decorations follow the declared boundary of the system-managed theme.
 
-## Agent 检查与可复现场景
+## Agent inspection and reproducible scenarios
 
-### 可查询的运行时语义树
+### Queryable runtime semantic tree
 
-开发模式提供独立的检查接口，使 Agent 和测试工具可以读取：控件稳定身份、角色、可访问名称、状态、所属窗口与作用域、窗口的实际呈现方式、当前布局、主题、命令与 Feature 绑定，以及可用的源码位置。
+Development mode provides a separate inspection interface through which agents and test tools can read: stable control identity, role, accessible name, state, owning window and scope, the window's actual presentation, the current layout, theme, command and Feature bindings, and available source locations.
 
-控件不可操作时应提供机器可读原因，例如未挂载、隐藏、禁用、被模态作用域阻挡或能力不可用。语义树快照带版本，列表节点身份包含稳定数据 key；遇到过时引用应明确失败，不能误操作后来占据同位置的另一个控件。重复项中的控件在目标名后依次加上每一层重复的 key，由外到内，经过组件也一样，例如 `card.open[3]` 是第 3 项卡片中的 `open`。实现进度：SwiftUI 在运行时由每一层重复把 key 交给其中的控件，已在 macOS 上验证；其他目标目前只在同一个组件内加上最内层的 key。
+When a control cannot be operated, a machine-readable reason should be provided, for example not mounted, hidden, disabled, blocked by a modal scope, or capability unavailable. Semantic tree snapshots carry versions, and list node identities include stable data keys; a stale reference should fail explicitly rather than mistakenly operate another control that later occupies the same position. For a control inside repeated items, the key of each level of repetition is appended to the target name in turn, from outer to inner, across components too; for example `card.open[3]` is the `open` in the card of item 3. Implementation status: in SwiftUI, each level of repetition passes its key to the controls inside it at runtime, verified on macOS; other targets currently only append the innermost key within the same component.
 
-控件只在挂载期间出现在语义树里：随控件出现而登记、随它消失而注销，两者都同步进行。只挂载了一瞬的控件不留下登记，例如量出宽度之前先显示的宽屏布局、手机上先排成浮动面板再改为铺满的模态；否则同一目标会列出多份，`ui.activate` 报 `target_ambiguous`。Compose、Web、GTK 与 WinUI 3 在构建控件时登记、在清理时注销；SwiftUI（macOS、iOS、tvOS 共用）在 `onAppear` 登记、`onDisappear` 注销，不放进可能在控件消失后才开始的任务里。iPhone 17 模拟器（iOS 26.1）上验证，见 iOS 实现记录。
+Controls appear in the semantic tree only while mounted: they are registered when the control appears and unregistered when it disappears, both synchronously. A control mounted only for an instant leaves no registration, for example the wide layout shown before the width is measured, or a modal on a phone first laid out as a floating panel and then changed to fill the screen; otherwise the same target would be listed several times and `ui.activate` would report `target_ambiguous`. Compose, the web, GTK and WinUI 3 register when building the control and unregister on cleanup; SwiftUI (shared by macOS, iOS and tvOS) registers in `onAppear` and unregisters in `onDisappear`, not in a task that might start only after the control has disappeared. Verified on the iPhone 17 simulator (iOS 26.1); see the iOS implementation notes.
 
-源码检查、详细布局诊断和测试驱动属于可选开发模块，不成为业务核心的必要依赖。生产会话仍保留命令调用所需的目标身份与动作描述；关闭开发检查器不能移除正常的命令可驱动性。
+Source inspection, detailed layout diagnostics and test drivers belong to optional development modules and do not become required dependencies of the business core. Production sessions still keep the target identities and action descriptions that command calls need; turning off the development inspector cannot remove normal command drivability.
 
-### 引擎测试与 UI 测试
+### Engine tests and UI tests
 
-引擎测试直接调用命令，检查四入口在同一初始状态和受控环境下产生等价业务结果。另行验证各入口连接同一运行实例时能观察到连续、一致的状态版本。
+Engine tests call commands directly and check that the four entry points produce equivalent business results from the same initial state in a controlled environment. It is verified separately that the entry points, when connected to the same running instance, observe continuous, consistent state versions.
 
-UI 测试按稳定控件身份调用 `ui.activate`、编辑和焦点等会话动作，经目标适配器进入真实控件的事件绑定流程，再派发业务命令。不能为了让测试通过，绕过禁用状态直接调用控件所绑定的引擎命令。纯业务调用成功不证明 UI 入口可操作。
+UI tests call session actions such as `ui.activate`, editing and focus by stable control identity; through the target adapter these enter the real control's event binding flow, which then dispatches the business command. Tests must not bypass the disabled state and call the engine command a control is bound to directly just to make the test pass. A successful pure business call does not prove that the UI entry point is operable.
 
-语义测试可以跨后端复用；命中区域、遮挡、实际按键、输入法和原生焦点仍需对应后端的真实输入测试。MCP 或 CLI 可以调用引擎命令，也可以针对明确会话驱动 UI 测试命令，两者的验证结论必须区分。
+Semantic tests can be reused across backends; hit areas, occlusion, actual key presses, input methods and native focus still need real input tests on the corresponding backend. MCP or the CLI can call engine commands and can also drive UI test commands against an explicit session; the verification conclusions of the two must be kept distinct.
 
-### 可复现的页面场景
+### Reproducible page scenarios
 
-组件或页面可以声明加载中、空结果、失败、长文本、深色窄窗口等命名场景。场景包含模拟数据、环境参数和操作步骤，可以用于预览、示例与回归测试，不再另外维护一套展示逻辑。
+Components or pages can declare named scenarios such as loading, empty results, failure, long text, and a dark narrow window. A scenario contains mock data, environment parameters and operation steps, and can be used for previews, examples and regression tests, without maintaining a separate set of presentation logic.
 
-场景运行器创建隔离的测试引擎与会话，允许注入时钟、资源提供器及异步完成顺序。初始状态由 fixture 初始化，运行中的用户操作仍走命令路径。重现竞态时可以故意交换搜索结果顺序、断开订阅或在操作完成前卸载页面。
+The scenario runner creates an isolated test engine and session, and allows injecting the clock, resource providers and the order in which async work completes. The initial state is set up by a fixture, and user operations during the run still go through the command path. To reproduce races, the order of search results can be swapped deliberately, subscriptions disconnected, or the page unmounted before an operation completes.
 
-命令记录可包含请求、结果与状态版本以辅助定位，但外部资源与异步环境也影响结果，不能只重放命令名称就宣称完整可复现。场景应记录或模拟必要环境，各后端验收共同的交互语义，不要求像素完全一致。
+Command records can include requests, results and state versions to help locate problems, but external resources and the async environment also affect the results, so replaying only command names cannot be claimed as complete reproducibility. Scenarios should record or simulate the necessary environment; each backend is accepted against the shared interaction semantics, and pixel-perfect equality is not required.
 
-## 调试与性能追踪
+## Debugging and performance tracing
 
-界面卡顿时要能看出卡在哪一步。应用代码不在界面线程上运行，界面线程上只有框架生成的代码和系统 UI 框架，所以框架在自己的各个环节打点，就能把一次操作的耗时分得很完整。追踪是框架的一部分，release 构建也包含，默认关闭；开关、规则与输出格式见[性能追踪参考](Reference/Tracing.md)。
+When the UI stutters, it must be possible to see which step it is stuck in. App code does not run on the UI thread; the UI thread runs only framework-generated code and the system UI framework, so by placing trace points in each of its own stages, the framework can break down the time of an operation completely. Tracing is part of the framework and is included in release builds, off by default; for switches, rules and output format see the [performance tracing reference](Reference/Tracing.md).
 
-### 分段
+### Segments
 
-一次操作从控件开始，经过这些段，最后在某一帧上屏：
+An operation starts at a control, passes through these segments, and finally reaches the screen in some frame:
 
-1. 前端编码参数并派发命令（界面线程）。
-2. 在引擎队列中等待（引擎线程）。
-3. 执行命令；查询单独统计从开始到答复的时间。组合引擎中模块发出的命令列在发出它的命令里。
-4. 快照、逐字段比较与编码：哪些字段变了、各多少字节、列表多少项。改动大列表中的一项会使整个列表重新快照、比较和发送，这一段把它标出来。
-5. 回调触发后，等到界面线程开始处理：直接反映界面线程有多忙。
-6. 界面线程逐字段解码并写入。
+1. The frontend encodes the arguments and dispatches the command (UI thread).
+2. Waiting in the engine queue (engine thread).
+3. Executing the command; queries separately record the time from start to reply. In a composed engine, commands issued by modules are listed under the command that issued them.
+4. Snapshot, per-field comparison and encoding: which fields changed, how many bytes each, how many items each list has. Changing one item in a large list makes the whole list get snapshotted, compared and sent again, and this segment marks that.
+5. After the callback fires, waiting until the UI thread starts processing: a direct reflection of how busy the UI thread is.
+6. The UI thread decodes and writes field by field.
 
-交互链路把这些段连起来：从控件的动作开始，到它发出的命令的结果都写入后的第一帧上屏。长帧检测在帧间隔超过阈值时列出这一帧里 Bern 自己的段，其余记为 Bern 之外的时间（生成视图的重算与系统的布局绘制），并列出同期引擎在做什么。
+The interaction chain links these segments: from the control's action to the first frame on screen after the results of the commands it issued have all been written. Long-frame detection, when a frame interval exceeds the threshold, lists Bern's own segments in that frame and records the rest as time outside Bern (recomputation of generated views and the system's layout and drawing), along with what the engine was doing at the same time.
 
-### 记录与关联
+### Recording and correlation
 
-每个打点先读一个分类掩码，关闭时这是全部开销。打开时，打点读平台的单调时钟，把定长记录写入本线程的环形缓冲；界面线程上不做同步 IO。后台线程读取各线程的缓冲，按命令 token、引擎任务序号和状态修订号把不同线程的记录对上，再输出三种结果：终端汇总、Perfetto 可读的时间线文件和 `trace.report`。共用部分在 `bern-command`（引擎一侧与汇总）和 `bern-ffi`（桥接一侧与 C 接口），前端只补界面线程的时间点。
+Each trace point first reads a category mask; when tracing is off, that is the entire overhead. When it is on, the trace point reads the platform's monotonic clock and writes a fixed-length record into the current thread's ring buffer; no synchronous IO is done on the UI thread. A background thread reads each thread's buffer, matches records from different threads by command token, engine task sequence number and state revision number, and then outputs three results: a terminal summary, a timeline file Perfetto can read, and `trace.report`. The shared parts are in `bern-command` (engine side and summary) and `bern-ffi` (bridge side and C interface); frontends only add the UI-thread time points.
 
-`trace.start`、`trace.stop`、`trace.report` 是会话命令，CLI 与 MCP 自动获得；运行时自己回答，不经前端。AI 可以先用 `ui.activate` 把界面操作一遍，再读 `trace.report` 里每条命令的 p50、p95、最大值、最慢的交互与长帧。
+`trace.start`, `trace.stop` and `trace.report` are session commands, which the CLI and MCP get automatically; the runtime answers them itself, without going through the frontend. An AI can first operate the UI with `ui.activate`, then read in `trace.report` each command's p50, p95 and maximum, the slowest interactions and the long frames.
 
-### 实现进度与后续
+### Implementation status and next steps
 
-已实现：规则与过滤、记录与汇总、时间线、会话命令、`bern run --trace`、引擎与桥接两侧的分段，以及应用代码的 `bern::trace::span!`，在 Rust 测试中验证。各前端的界面线程打点（派发、切换、写入、控件动作、帧节拍）尚未接入。
+Implemented: rules and filtering, recording and summary, the timeline, the session commands, `bern run --trace`, the segments on the engine and bridge sides, and `bern::trace::span!` for app code, verified in Rust tests. The UI-thread trace points in each frontend (dispatch, thread switch, write, control actions, frame ticks) are not wired up yet.
 
-后续：在生成的组件入口统计视图重算的次数与耗时（分类 `view` 已预留）；所有打点经统一入口，以便同时发出系统 profiler 标记（`os_signpost`、`android.os.Trace`、Windows TraceLogging、浏览器的 `performance.mark`）。系统标记必须在打点当场发出，不能交给后台线程。
+Next steps: count view recomputations and their duration at generated component entry points (the category `view` is reserved); route all trace points through a unified entry so they can also emit system profiler markers (`os_signpost`, `android.os.Trace`, Windows TraceLogging, the browser's `performance.mark`). System markers must be emitted at the trace point itself and cannot be handed to a background thread.
 
-## UI 中间表示
+## UI intermediate representation
 
-Bern IR 表达跨平台语义，不以 DOM、CSS、GPUI 元素、Flutter Widget、SwiftUI 类型、GTK 对象或 WinUI 3 控件作为标准节点。核心检查完成后，同一份公共 IR 可供不同目标模块消费；目标专用优化不应反向改变应用的公共语义。
+Bern IR expresses cross-platform semantics and does not use DOM, CSS, GPUI elements, Flutter Widgets, SwiftUI types, GTK objects or WinUI 3 controls as standard nodes. After the core checks complete, the same shared IR can be consumed by different target modules; target-specific optimizations should not change the app's shared semantics in reverse.
 
-| IR 内容 | 需要保留的信息 |
+| IR content | Information to preserve |
 | --- | --- |
-| Component | 稳定身份、属性接口、源码位置、子结构 |
-| ComponentRef | 被引用组件身份、参数及依赖版本 |
-| Element | 标准组件种类、静态属性及布局约束 |
-| Binding | 受限表达式或查询绑定身份、声明类型及状态依赖 |
-| If | 条件绑定与全部结构分支 |
-| List | 数据绑定、稳定 key、元素模板及作用域 |
-| Adaptive | 环境条件、分支优先级与兜底 |
-| WindowSet 和 Window | 窗口种类、参数与实例策略、内容引用、初始打开、呈现策略、关闭检查及能力要求 |
-| CommandBinding | 语义动作、类型化命令引用、参数映射及引擎或会话目标 |
-| Route | 类型化路由引用、目的地及状态保留策略 |
-| FocusScope | 焦点作用域、稳定身份与恢复规则 |
-| Video | 媒体源或播放器引用、实例归属、播放命令、状态绑定、呈现策略与覆盖层要求 |
-| Resource | 随包资源的名称与声明位置；不含文件内容与平台路径 |
-| LocalizedText | 语言值、插值参数、文本身份 |
-| ThemeRef | 语义颜色角色、控件配方、表面与主题作用域、内容色边界 |
-| Style | 样式覆盖表：组件种类与命名变体、状态、属性、目标例外与豁免 |
-| Motion | 动效 token，元素的出现、消失与重排过渡，共享元素键 |
-| Canvas | 绘图元素、数据绑定、图案条带与可访问名称 |
-| Feature | 契约、入口关系、适用条件及豁免 |
-| Capability | 后端能力要求、替代实现或失败规则 |
-| Accessibility | 语义角色、名称、状态与必要交互信息 |
+| Component | Stable identity, property interface, source location, child structure |
+| ComponentRef | Referenced component identity, arguments and dependency version |
+| Element | Standard component kind, static properties and layout constraints |
+| Binding | Constrained expression or query binding identity, declared type and state dependencies |
+| If | Condition binding and all structural branches |
+| List | Data binding, stable key, element template and scope |
+| Adaptive | Environment conditions, branch priority and fallback |
+| WindowSet and Window | Window kind, parameters and instance policy, content reference, initial open, presentation policy, close check and capability requirements |
+| CommandBinding | Semantic action, typed command reference, argument mapping and engine or session target |
+| Route | Typed route reference, destination and state-retention policy |
+| FocusScope | Focus scope, stable identity and restoration rules |
+| Video | Media source or player reference, instance ownership, playback commands, state bindings, presentation policy and overlay requirements |
+| Resource | Name and declaration location of bundled resources; no file contents or platform paths |
+| LocalizedText | Language values, interpolation parameters, text identity |
+| ThemeRef | Semantic color roles, control recipes, surface and theme scope, content color boundary |
+| Style | Style override table: component kinds and named variants, states, properties, target exceptions and exemptions |
+| Motion | Motion tokens, appear, disappear and reorder transitions of elements, shared element keys |
+| Canvas | Drawing elements, data bindings, pattern strips and accessible names |
+| Feature | Contract, entry point relationships, applicability conditions and exemptions |
+| Capability | Backend capability requirements, alternative implementations or failure rules |
+| Accessibility | Semantic role, name, state and necessary interaction information |
 
-IR 中的运行时计算使用受限表达式或类型化查询绑定，不包含供目标后端随意执行的 Rust AST。可操作入口只能关联到 CommandBinding，不保留任意回调作为绕过命令的逃生口。平台事实从受信任适配器的类型化事件接口进入，不是 UI 声明中的写状态回调。结构分析不能执行应用代码来发现界面。
+Runtime computation in the IR uses constrained expressions or typed query bindings and contains no Rust AST for target backends to execute at will. Actionable entry points can only be associated with a CommandBinding; arbitrary callbacks are not kept as an escape hatch that bypasses commands. Platform facts enter through the typed event interfaces of trusted adapters, not through state-writing callbacks in UI declarations. Structural analysis cannot run app code to discover the UI.
 
-IR 和组件描述需要版本号，应用协议、目标扩展接口及主题协议分别版本化。生成产物应记录 UI 技术、平台、构建模式、引擎部署方式、传输与编码、目标模块与主题算法版本、配置摘要和依赖版本；启用视频时也记录媒体契约、媒体后端与呈现适配器版本，以识别过时或不兼容的描述。源码映射应贯穿检查与生成流程，让错误返回到开发者编写的声明位置。
+The IR and component descriptions need version numbers, and the app protocol, the target extension interface and the theme protocol are versioned separately. Generated outputs should record the UI technology, platform, build mode, engine deployment, transport and encoding, target module and theme algorithm versions, a configuration digest and dependency versions; when video is enabled, also the media contract, media backend and presentation adapter versions, so that stale or incompatible descriptions can be recognized. Source mapping should run through the whole check and generation pipeline, so that errors point back to the declaration location the developer wrote.
 
-## 编译器与构建集成
+## Compiler and build integration
 
-### 职责划分
+### Division of responsibilities
 
-Rust 过程宏只能处理传给它的 token，不会自动获得任意函数体、跨 crate 的完整程序信息或 Rust 类型推导结果。Bern 必须区分语法解析、元数据收集和实际语言编译。
+Rust procedural macros can only process the tokens passed to them; they do not automatically get arbitrary function bodies, whole-program information across crates, or the results of Rust type inference. Bern must distinguish syntax parsing, metadata collection and actual language compilation.
 
-| 层 | 责任 |
+| Layer | Responsibility |
 | --- | --- |
-| 共享前端 | 解析受约束组件声明与表达式，建立结构和符号引用 |
-| 过程宏 | 在 Rust 作用域内展开组件及绑定代码，生成类型检查所需约束 |
-| 元数据收集器 | 按明确输入收集组件与依赖描述，不依赖宏执行顺序 |
-| 语义检查与 IR | 验证命令化约束、表达式、声明、本地化、主题配方、功能契约和能力 |
-| 命令描述与适配生成 | 从统一目录生成类型化客户端、应用 CLI、JSON 与 MCP 映射 |
-| 主题内核 | 生成与校验语义配色，解算控件配方，供构建期和前端运行时共用 |
-| 目标后端接口 | 向独立模块提供 IR、能力检查、生成及构建计划协议 |
-| 目标模块 | 实现具体 UI 技术的结构、资源、绑定与运行时适配 |
-| 构建驱动 | 装配已注册目标，管理输入、配置、生成目录与工具链调用 |
-| 目标编译器 | Rust、Dart、Swift、Kotlin 及目标所选的 C++ 或 C# 等工具链检查并构建产物 |
+| Shared frontend | Parses constrained component declarations and expressions, builds the structure and symbol references |
+| Procedural macros | Expand components and binding code within Rust scope, generate the constraints needed for type checking |
+| Metadata collector | Collects component and dependency descriptions from explicit inputs, without depending on macro execution order |
+| Semantic checks and IR | Validate the command-routing constraints, expressions, declarations, localization, theme recipes, feature contracts and capabilities |
+| Command descriptions and adapter generation | Generate typed clients, the app CLI, JSON and MCP mappings from the unified catalog |
+| Theme core | Generates and validates semantic color schemes and resolves control recipes, shared by build time and the frontend runtime |
+| Target backend interface | Provides IR, capability checks, generation and the build plan protocol to independent modules |
+| Target modules | Implement the structure, resources, bindings and runtime adaptation for a specific UI technology |
+| Build driver | Assembles registered targets, manages inputs, configuration, generated directories and toolchain invocations |
+| Target compilers | Toolchains such as Rust, Dart, Swift, Kotlin and the C++ or C# a target chooses check and build the outputs |
 
-### 参考构建流程
+### Reference build flow
 
 ```mermaid
 flowchart TD
-    A[Rust 组件源码与项目配置] --> B[显式收集组件和依赖描述]
-    B --> C[共享前端解析]
-    C --> D[符号 IR 与框架语义检查]
-    T[目标注册与能力描述] --> D
-    D --> E[目标模块生成代码和资源]
-    D --> F[Rust 类型约束和绑定生成]
-    F --> G[rustc 检查与编译]
-    E --> H[构建适配器与目标工具链]
+    A[Rust component source and project configuration] --> B[Explicitly collect component and dependency descriptions]
+    B --> C[Shared frontend parsing]
+    C --> D[Symbol IR and framework semantic checks]
+    T[Target registration and capability descriptions] --> D
+    D --> E[Target modules generate code and resources]
+    D --> F[Rust type constraints and binding generation]
+    F --> G[rustc checking and compilation]
+    E --> H[Build adapters and target toolchains]
     G --> H
-    H --> I[Web 应用 WebUI 或原生应用]
+    H --> I[Web app, WebUI or native app]
 ```
 
-`bern build` 的参考执行顺序如下：
+The reference execution order of `bern build` is as follows:
 
-1. 读取项目配置、UI 技术与平台组合、构建模式及 Cargo 依赖信息，确定 features、条件配置及使用的目标模块；校验并展开声明的随包资源。
-2. 从显式登记的组件模块和依赖描述收集输入，验证描述版本及配置是否匹配。
-3. 使用与过程宏共用的解析库建立符号 IR，解析受限表达式、查询结果与类型化命令引用。
-4. 核心检查命令覆盖、参数来源、表达式、组件属性、本地化、主题配方及 Feature Contract；通过目标能力描述与检查接口验证所选组合。
-5. 从命令目录生成所选入口的客户端与适配代码，再调用目标生成器输出 UI 源码、资源及绑定需求；可预生成已知主题输入的深浅色快照。生成 Rust 胶水时保留合法引用的作用域与卫生性。
-6. 调用 `rustc` 验证生成约束及实际类型，编译前端绑定库，以及当前模式需要的业务库。Web 应用将其业务核心编译为浏览器可用的 WASM；WebUI 依据版本化协议描述编译客户端，不将独立引擎处理器和服务端依赖链接进前端。独立引擎拥有自己的类型检查、构建和部署产物。
-7. 根据目标模块的构建计划复制随包资源、调用需要的工具链并打包。只有全部必要步骤成功才算构建成功。
+1. Read the project configuration, the UI technology and platform combination, the build mode and Cargo dependency information, and determine the features, conditional configuration and target modules used; validate and expand the declared bundled resources.
+2. Collect inputs from explicitly registered component modules and dependency descriptions, and verify that description versions match the configuration.
+3. Build the symbol IR with the parsing library shared with the procedural macros, resolving constrained expressions, query results and typed command references.
+4. The core checks command coverage, argument sources, expressions, component properties, localization, theme recipes and the Feature Contract; the chosen combination is verified through target capability descriptions and check interfaces.
+5. Generate the clients and adapter code for the chosen entry points from the command catalog, then call the target generators to output UI source, resources and binding requirements; light and dark snapshots for known theme inputs can be pre-generated. When generating Rust glue, the scope and hygiene of legitimate references are preserved.
+6. Call `rustc` to verify the generated constraints and actual types, and compile the frontend binding library and the business library the current mode needs. A Web app compiles its business core to WASM usable in the browser; WebUI compiles its client from the versioned protocol description and does not link the standalone engine's handlers or server-side dependencies into the frontend. The standalone engine has its own type checking, build and deployment outputs.
+7. Following the target module's build plan, copy bundled resources, call the needed toolchains and package. A build succeeds only when all required steps succeed.
 
-具体步骤可以为工具链依赖进行分阶段调整，但不能把符号检查成功当作 Rust 类型检查已经通过。
+Specific steps can be staged differently to suit toolchain dependencies, but successful symbol checking cannot be taken to mean that Rust type checking has passed.
 
-### 元数据收集的首版边界
+### First-version scope of metadata collection
 
-参考方案采用显式模块清单与源码收集。首版只覆盖登记过、符合受限声明规则的组件来源，不实现整个 Rust 编译器的宏展开与名称解析。
+The reference approach uses an explicit module manifest and source collection. The first version only covers registered component sources that follow the constrained declaration rules, and does not implement the macro expansion and name resolution of the whole Rust compiler.
 
-可移植组件引用采用可解析的显式路径；别名、重导出及条件模块的支持范围必须在前端规则中列出。无法可靠解析时直接诊断，不能依靠字符串匹配猜测目标。
+Portable component references use resolvable explicit paths; the supported scope of aliases, re-exports and conditional modules must be listed in the frontend rules. When a reference cannot be resolved reliably, a diagnostic is issued directly; string matching must not be used to guess the target.
 
-跨 crate 组件需要随依赖提供版本化描述，包含组件身份、属性 schema、结构引用、命令与查询引用、会话动作、主题配方、功能入口条件、本地化内容、能力要求和绑定接口。描述由同一源码生成，并与依赖版本和构建配置关联；具体生成、分发与缓存机制须在原型阶段验证。
+Cross-crate components need versioned descriptions shipped with the dependency, containing component identity, property schema, structure references, command and query references, session actions, theme recipes, feature entry point conditions, localized content, capability requirements and binding interfaces. Descriptions are generated from the same source and associated with the dependency version and build configuration; the concrete generation, distribution and caching mechanisms must be validated in the prototype phase.
 
-`cfg`、Cargo features、目标平台和依赖描述必须一致。对于尚未支持的条件组合，应明确失败，不能合并所有平台分支后给出错误的覆盖结论。初期可以限制为同一 workspace 内的组件，跨 crate 验证通过后再开放第三方组件包。
+`cfg`, Cargo features, the target platform and dependency descriptions must be consistent. Condition combinations that are not yet supported should fail explicitly, rather than merging all platform branches and giving a wrong coverage conclusion. Initially this can be restricted to components within the same workspace, with third-party component packages opened up after cross-crate validation passes.
 
-构建脚本或额外编译参数也可能引入自定义 `cfg`。收集器无法可靠获取并匹配这些条件时，首版必须拒绝受影响的组件声明，不能默认条件不存在。
+Build scripts or extra compiler arguments may also introduce custom `cfg`. When the collector cannot reliably obtain and match these conditions, the first version must reject the affected component declarations rather than assume the conditions do not exist.
 
-不依赖过程宏向共享文件追加数据，不依赖宏的执行顺序，不以全局可变状态收集整个应用。避免把偶然可用的编译过程行为作为协议。
+Collection does not rely on procedural macros appending data to shared files, does not rely on macro execution order, and does not use global mutable state to collect the whole app. Compiler behavior that happens to work is not to be treated as a protocol.
 
-### 随包资源
+### Bundled resources
 
-应用可以声明随构建产物发布的文件，例如示例媒体、初始数据和模板。资源与组件一样使用受限、可分析的声明，写在项目配置中：
+Apps can declare files that are published with the build outputs, such as sample media, initial data and templates. Like components, resources use constrained, analyzable declarations, written in the project configuration:
 
 ```toml
 [resources]
 paths = ["media/aurora.mp4", "media/tides.mp4", "data"]
 ```
 
-`paths` 的每一项是相对 `Bern.toml` 所在目录的文件或目录。资源名称就是文件相对该目录、以 `/` 分隔的路径，例如 `media/aurora.mp4`；目录发布其下的全部文件，名称为各文件的相对路径，以 `.` 开头的隐藏项不发布。名称的每一段只能使用 ASCII 字母、数字、`-`、`_` 和 `.`，不能以 `.` 开头；绝对路径、`..`、反斜杠和离开项目目录的路径都不合法。首版只有应用清单可以声明资源，组件库不能。
+Each item of `paths` is a file or directory relative to the directory containing `Bern.toml`. A resource's name is the file's path relative to that directory, separated by `/`, for example `media/aurora.mp4`; a directory publishes all files under it, each named by its relative path, and hidden items starting with `.` are not published. Each segment of a name may only use ASCII letters, digits, `-`, `_` and `.`, and cannot start with `.`; absolute paths, `..`, backslashes and paths that leave the project directory are invalid. In the first version only the app manifest can declare resources; component libraries cannot.
 
-构建驱动在生成前校验资源。以下情况都是指向 `Bern.toml` 对应条目的构建错误，不跳过后继续构建：
+The build driver validates resources before generation. The following are all build errors pointing at the corresponding `Bern.toml` entry; the build does not skip them and continue:
 
-- 条目不存在，或者既不是普通文件也不是目录，例如符号链接。
-- 名称不合法，或目录中没有可发布的文件。
-- 同一文件被列出两次（包括已由所列目录包含的文件），或两个名称只有大小写不同。
+- The entry does not exist, or is neither a regular file nor a directory, for example a symbolic link.
+- The name is invalid, or the directory contains no publishable files.
+- The same file is listed twice (including a file already included by a listed directory), or two names differ only in case.
 
-编译器把展开后的资源清单（名称与声明位置）写入 IR，文件内容与构建机路径不进入 IR。目标模块决定资源在产物中的位置，检查名称与自身布局的冲突并报告到声明位置，在构建计划中复制资源；从清单删除的资源不得残留在产物中。
+The compiler writes the expanded resource manifest (names and declaration locations) into the IR; file contents and build machine paths do not enter the IR. Target modules decide where resources go in the outputs, check names for conflicts with their own layout and report them at the declaration location, and copy resources in the build plan; resources removed from the manifest must not remain in the outputs.
 
-引擎按名称引用资源，不了解平台布局：
+The engine references resources by name and knows nothing about platform layout:
 
 ```rust
 let resources = Resources::host();
@@ -2135,375 +2137,375 @@ let clip = MediaSource::resource(&resources, "media/aurora.mp4")?;
 let seed = std::fs::read(resources.path("data/seed.json")?)?;
 ```
 
-`Resources` 由引擎宿主在构造引擎之前装配，包含产物中资源的位置与构建时声明的名称目录。解析失败返回结构化错误，不回退到源码目录：名称不合法为 `invalid_resource_name`，未声明为 `undeclared_resource`（即使同名文件恰好存在），产物中缺少为 `resource_missing`，宿主没有装配资源为 `resources_unavailable`。引擎不读取 `CARGO_MANIFEST_DIR` 等构建期路径，也不自行拼接平台路径。
+`Resources` is assembled by the engine host before it constructs the engine, and contains the location of the resources in the outputs and the catalog of names declared at build time. Resolution failures return structured errors and do not fall back to the source directory: an invalid name is `invalid_resource_name`, an undeclared one is `undeclared_resource` (even if a file with that name happens to exist), one missing from the outputs is `resource_missing`, and a host that has not assembled resources gives `resources_unavailable`. The engine does not read build-time paths such as `CARGO_MANIFEST_DIR`, and does not build platform paths itself.
 
-解析结果是宿主所在部署可以访问的位置：同进程原生应用得到产物内的文件路径与文件 URL。引擎与媒体执行端不在同一位置时，例如 WebUI 连接的独立引擎，宿主必须提供执行端能够访问的地址，具体方式在相应目标实现时定义。测试与无界面工具可以像注入时钟一样显式传入指向项目源码的 `Resources`；这种装配只用于开发，不进入发布产物。
+The resolution result is a location that the host's deployment can access: a native app in the same process gets a file path and a file URL inside the outputs. When the engine and the media executor are not in the same place, for example a standalone engine connected to WebUI, the host must provide an address the executor can access; the exact mechanism is defined when the corresponding target is implemented. Tests and headless tools can explicitly pass a `Resources` pointing to the project source, the same way a clock is injected; this assembly is only for development and does not enter release outputs.
 
-### 应用图标
+### App icon
 
-应用可以在 `[app]` 中声明自己的图标：
+Apps can declare their own icon in `[app]`:
 
 ```toml
 [app]
 icon = "art/icon.png"
 ```
 
-`icon` 是相对 `Bern.toml` 的方形 PNG，边长为 256、512 或 1024 像素（建议 1024），路径规则与随包资源相同。不存在、经过符号链接、不是 PNG、不是方形或尺寸不符都是指向该条目的构建错误。IR 只记录相对路径，目标模块在生成时读取文件。
+`icon` is a square PNG relative to `Bern.toml`, 256, 512 or 1024 pixels on a side (1024 recommended), with the same path rules as bundled resources. A file that does not exist, goes through a symbolic link, is not a PNG, is not square or has the wrong size is a build error pointing at that entry. The IR records only the relative path; target modules read the file during generation.
 
-各平台也可以有自己的图标。设计工具通常按平台导出原生格式，写成表即可原样使用：
+Each platform can also have its own icon. Design tools usually export native formats per platform; written as a table, they are used as-is:
 
 ```toml
 [app.icon]
-default = "art/icon.png"                    # 没有单独声明的平台都用它，可省略
-macos = "art/macos/App.icns"                # .icns、Icon Composer 的 .icon 文件夹，或方形 PNG
-ios = "art/ios/AppIcon.appiconset"          # .appiconset 文件夹（可含深色、着色版）、.icon 文件夹，或方形 PNG
-tvos = "art/tvos/App.brandassets"           # .brandassets 文件夹（分层图标与顶部货架图），或方形 PNG
-windows = "art/windows/app.ico"             # .ico，或方形 PNG
-linux = "art/linux/hicolor"                 # 按 hicolor 排布的图标主题文件夹，或方形 PNG
-android = "art/android/res"                 # 含 mipmap-*/ic_launcher 的 res 文件夹，或方形 PNG
-browser = "art/web"                         # 页面图标文件夹、SVG，或方形 PNG
+default = "art/icon.png"                    # used by every platform not declared separately; can be omitted
+macos = "art/macos/App.icns"                # .icns, an Icon Composer .icon folder, or a square PNG
+ios = "art/ios/AppIcon.appiconset"          # .appiconset folder (may include dark and tinted versions), .icon folder, or a square PNG
+tvos = "art/tvos/App.brandassets"           # .brandassets folder (layered icons and Top Shelf images), or a square PNG
+windows = "art/windows/app.ico"             # .ico, or a square PNG
+linux = "art/linux/hicolor"                 # icon theme folder laid out as hicolor, or a square PNG
+android = "art/android/res"                 # res folder containing mipmap-*/ic_launcher, or a square PNG
+browser = "art/web"                         # page icon folder, SVG, or a square PNG
 ```
 
-键是 `[targets]` 中的平台名，另有 `default`。每一项都可以是方形 PNG（规则同上）；原生格式在配置阶段按平台检查，问题都是指向 `icon` 条目的构建错误：
+The keys are the platform names in `[targets]`, plus `default`. Every entry can be a square PNG (same rules as above); native formats are checked per platform during configuration, and any problem is a build error pointing at the `icon` entry:
 
-| 平台 | 原生格式 | 检查 | 生成 |
+| Platform | Native format | Check | Generated |
 | --- | --- | --- | --- |
-| `macos` | `.icns` 文件 | 文件头与各项长度 | 原样作为 `AppIcon.icns` |
-| `ios` | `.appiconset` 文件夹 | `Contents.json` 可解析，列出的图片都在文件夹顶层 | 文件夹内容原样放进资源目录的 `AppIcon.appiconset`，由 `actool` 编译；深色与着色版随之生效 |
-| `macos`、`ios` | Icon Composer 的 `.icon` 文件夹 | `icon.json` 可解析，有 `groups`，各层引用的图片（含按外观替换的）都在 `Assets` 里 | 文件夹内容以 `AppIcon.icon` 放在应用包旁，由 `actool` 编译进 `Assets.car`：macOS 26、iOS 26 起显示液态玻璃图标，深色、清透与着色外观随之生效；更早的系统用 `actool` 从它画出的平面图。macOS 另得到 `AppIcon.icns`，`Info.plist` 加 `CFBundleIconName` |
-| `tvos` | `.brandassets` 文件夹 | `Contents.json` 列出的图像栈与图像集都在；图像栈 2 至 5 层，每层的图片都在；有 400 × 240 的主应用图标 | 文件夹内容原样放进资源目录的 `App Icon & Top Shelf Image.brandassets`，由 `actool` 编译；方形 PNG 则生成分层图标与顶部货架图（见下表） |
-| `windows` | `.ico` 文件 | 文件头与各图片位置 | 原样作为 `app.ico`；其中的 PNG 与位图项都可用 |
-| `linux` | 图标主题文件夹 | 只含 `<尺寸>/apps/<名称>.png`（尺寸目录如 `48x48`、`48x48@2`，PNG 尺寸须与目录相符）、`scalable/apps/<名称>.svg`、`symbolic/apps/<名称>-symbolic.svg`，同一个名称，至少一个 PNG | 名称换成 `bundle_id`；最大的 PNG 放在可执行文件旁供运行时使用，全部图标放在 `icons/hicolor` 下，`.deb` 装进 `/usr/share/icons/hicolor` |
-| `android` | `res` 文件夹 | 只含 `mipmap*`、`drawable*`、`values*` 资源目录，有 `mipmap*/ic_launcher`，不含 Bern 自己写的 `strings.xml`、`themes.xml` | 原样并入应用的 `res`：自适应图标、主题图标（单色层）随之生效；有 `ic_launcher_round` 时清单加 `android:roundIcon` |
-| `browser` | 页面图标文件夹或 SVG | 文件夹只在顶层放 `.svg`、`.ico`、`.png` 与 `.webmanifest`（或 `manifest.json`），文件名可作 URL，至少一张图 | 文件夹复制到 `icons/`，按种类生成 `<link>`：`.ico`、SVG、`apple-touch-icon*.png` 与清单，没有 SVG 和 `.ico` 时链接非 maskable 的 PNG；单个 SVG 是 `favicon.svg` |
+| `macos` | `.icns` file | File header and the length of each entry | Used as-is as `AppIcon.icns` |
+| `ios` | `.appiconset` folder | `Contents.json` parses, and the images it lists are all at the folder's top level | The folder's contents are placed as-is into `AppIcon.appiconset` in the asset catalog and compiled by `actool`; dark and tinted versions take effect along with it |
+| `macos`, `ios` | Icon Composer `.icon` folder | `icon.json` parses and has `groups`, and the images each layer references (including per-appearance replacements) are all in `Assets` | The folder's contents are placed next to the app bundle as `AppIcon.icon` and compiled by `actool` into `Assets.car`: from macOS 26 and iOS 26 on, the Liquid Glass icon is shown, with the dark, clear and tinted appearances taking effect along with it; older systems use the flat image `actool` renders from it. macOS also gets `AppIcon.icns`, and `Info.plist` gets `CFBundleIconName` |
+| `tvos` | `.brandassets` folder | The image stacks and image sets listed in `Contents.json` all exist; image stacks have 2 to 5 layers, with the images of every layer present; there is a 400 × 240 primary app icon | The folder's contents are placed as-is into `App Icon & Top Shelf Image.brandassets` in the asset catalog and compiled by `actool`; a square PNG instead generates the layered icon and Top Shelf images (see the table below) |
+| `windows` | `.ico` file | File header and the position of each image | Used as-is as `app.ico`; both PNG and bitmap entries in it are usable |
+| `linux` | Icon theme folder | Contains only `<size>/apps/<name>.png` (size directories such as `48x48`, `48x48@2`; the PNG size must match its directory), `scalable/apps/<name>.svg` and `symbolic/apps/<name>-symbolic.svg`, all with the same name, and at least one PNG | The name is replaced with `bundle_id`; the largest PNG is placed next to the executable for use at runtime, all icons go under `icons/hicolor`, and the `.deb` installs them into `/usr/share/icons/hicolor` |
+| `android` | `res` folder | Contains only `mipmap*`, `drawable*` and `values*` resource directories, has `mipmap*/ic_launcher`, and does not contain `strings.xml` or `themes.xml`, which Bern writes itself | Merged as-is into the app's `res`: adaptive icons and themed icons (the monochrome layer) take effect along with it; when `ic_launcher_round` exists, the manifest gets `android:roundIcon` |
+| `browser` | Page icon folder or SVG | The folder holds only `.svg`, `.ico`, `.png` and `.webmanifest` (or `manifest.json`) files at its top level, with file names usable in URLs, and at least one image | The folder is copied to `icons/`, and `<link>` tags are generated by kind: `.ico`, SVG, `apple-touch-icon*.png` and the manifest; when there is no SVG and no `.ico`, the non-maskable PNGs are linked; a single SVG becomes `favicon.svg` |
 
-没有声明时，所有目标使用 Bern 的标志，应用启动后在系统各处显示的就是它。标志按各平台的显示方式随目标模块分发，并预先渲染成各平台需要的尺寸：
+When nothing is declared, all targets use the Bern logo, and that is what the app shows throughout the system after launch. The logo ships with the target modules in the form each platform displays, pre-rendered at the sizes each platform needs:
 
-| 目标 | 图标 | 显示位置 |
+| Target | Icon | Where it shows |
 | --- | --- | --- |
-| macOS | `Contents/Resources/AppIcon.icns`（`CFBundleIconFile`），标志铺满方形画布，由系统裁成圆角方形 | 程序坞、访达、切换器 |
-| iOS | 资源目录中的 `AppIcon.appiconset`（1024 像素），由系统裁成圆角方形 | 主屏幕、设置、切换器 |
-| tvOS | 资源目录中的 `App Icon & Top Shelf Image.brandassets`：两层的主屏幕图标（400 × 240，背景层是标志的主色，前景层是标志）、App Store 图标（1280 × 768）与顶部货架图（1920 × 720、2320 × 720）；声明的方形 PNG 同样这样生成 | 主屏幕、顶部货架 |
-| Windows | `app.ico` 编入可执行文件的图标资源；运行时设为每个窗口的大小图标，WinUI 3 标题栏也显示它 | 资源管理器、任务栏、Alt+Tab、标题栏 |
-| Linux | 可执行文件旁的 `icons/<bundle_id>.png`，加入图标主题的搜索路径并设为窗口的默认图标；生成的 `.desktop` 文件指向它 | 窗口与桌面项。GNOME 在 Wayland 下从已安装的 `.desktop` 文件取程序坞图标 |
-| Android | 自适应图标：前景层是 432 像素的 `mipmap-xxxhdpi/ic_launcher_foreground.png`，标志放在中间 72/108 的安全区里，背景层是标志的角上颜色；Android 8 以前用 `mipmap-xxxhdpi/ic_launcher.png` | 启动器 |
-| Web | `favicon.svg`、`icon.png` 与 `apple-touch-icon.png` | 浏览器标签页与主屏幕 |
+| macOS | `Contents/Resources/AppIcon.icns` (`CFBundleIconFile`); the logo fills a square canvas and the system clips it to a rounded square | Dock, Finder, app switcher |
+| iOS | `AppIcon.appiconset` in the asset catalog (1024 pixels), clipped by the system to a rounded square | Home Screen, Settings, app switcher |
+| tvOS | `App Icon & Top Shelf Image.brandassets` in the asset catalog: a two-layer Home Screen icon (400 × 240; the back layer is the logo's main color, the front layer is the logo), an App Store icon (1280 × 768) and Top Shelf images (1920 × 720, 2320 × 720); a declared square PNG is generated the same way | Home Screen, Top Shelf |
+| Windows | `app.ico` compiled into the executable's icon resource; at runtime it is set as each window's large and small icon, and the WinUI 3 title bar shows it too | File Explorer, taskbar, Alt+Tab, title bar |
+| Linux | `icons/<bundle_id>.png` next to the executable, added to the icon theme search path and set as the windows' default icon; the generated `.desktop` file points to it | Windows and desktop entries. GNOME on Wayland takes the dock icon from the installed `.desktop` file |
+| Android | Adaptive icon: the foreground layer is a 432-pixel `mipmap-xxxhdpi/ic_launcher_foreground.png` with the logo in the central 72/108 safe zone, and the background layer is the color of the logo's corner; before Android 8, `mipmap-xxxhdpi/ic_launcher.png` | Launcher |
+| Web | `favicon.svg`, `icon.png` and `apple-touch-icon.png` | Browser tabs and home screen |
 
-圆形标志以透明背景用于 Windows、Linux、Android 与 Web；macOS 会把非圆角方形的图标放进灰色底板，因此使用同一画面铺满方形的版本。声明的 PNG 按原样使用，不缩放，Android 例外：启动器把图标裁成圆形或圆角方形、只露出中间部分，原样放进去的方形 PNG 会被缩成比其他应用小一圈的画面，所以它同样生成自适应图标，整幅画面放进前景层的安全区（2026-11-01，Android 16 模拟器上与系统应用的图标同样大小）；macOS 上应提供铺满方形的画面，或按苹果模板画好底板的图标（824 方块、圆角 185.4 的连续圆角矩形；底板形状不符时 macOS 26 起会把图标放进灰色底板）。需要各平台各自的形状（圆角底板、自适应分层、单色主题图标）时用上表的原生格式；要 macOS 26、iOS 26 的液态玻璃图标时声明 Icon Composer 的 `.icon`，两个平台可以指向同一个文件夹。
+The round logo with a transparent background is used on Windows, Linux, Android and the web; macOS puts icons that are not rounded squares onto a grey plate, so it uses a version of the same artwork that fills the square. Declared PNGs are used as-is, without scaling, except on Android: the launcher crops icons to a circle or rounded square showing only the middle, and a square PNG put in as is would be shrunk to a picture a size smaller than other apps' icons, so an adaptive icon is generated there too, with the whole picture placed in the foreground layer's safe zone (2026-11-01, the same size as system apps' icons on an Android 16 emulator); on macOS, provide artwork that fills the square, or an icon with its plate drawn to Apple's template (an 824 square, a continuous rounded rectangle with corner radius 185.4; when the plate shape does not match, macOS 26 and later put the icon onto a grey plate). When each platform needs its own shape (rounded plate, adaptive layers, monochrome themed icon), use the native formats in the table above; for the Liquid Glass icons of macOS 26 and iOS 26, declare an Icon Composer `.icon`, and both platforms can point to the same folder.
 
-#### 运行时切换的图标
+#### Icons switched at runtime
 
-应用可以让用户在几个图标之间切换（比如设置里的「应用图标」）。备用图标在 `[app.alternate_icons.<名称>]` 下声明，写法与 `[app.icon]` 相同，名称用小写字母、数字与 `_`，以字母开头，不能叫 `default`：
+Apps can let users switch between several icons (for example "App Icon" in settings). Alternate icons are declared under `[app.alternate_icons.<name>]`, written the same way as `[app.icon]`; names use lowercase letters, digits and `_`, start with a letter, and cannot be `default`:
 
 ```toml
 [app.alternate_icons.skin]
-default = "art/skin/icon.png"               # 没有单独声明的平台都用它
-macos = "art/skin/App.icon"                 # 平台各自的格式，规则同 [app.icon]
+default = "art/skin/icon.png"               # used by every platform not declared separately
+macos = "art/skin/App.icon"                 # each platform's own format, same rules as [app.icon]
 ios = "art/skin/App.icon"
 ```
 
-根组件的 `WindowSet(icon:)` 绑定一个枚举：`Default` 变体是 `[app.icon]`，其余每个变体指一个备用图标，`DarkSkin` 指 `dark_skin`；变体指向未声明的备用图标是构建错误。值变化时各目标这样切换：
+The root component's `WindowSet(icon:)` binds an enum: the `Default` variant is `[app.icon]`, and every other variant refers to an alternate icon, `DarkSkin` to `dark_skin`; a variant that refers to an undeclared alternate icon is a build error. When the value changes, each target switches like this:
 
-| 目标 | 切换 | 打包 |
+| Target | Switching | Packaging |
 | --- | --- | --- |
-| iOS | `setAlternateIconName`，系统弹出确认 | `.icon`、`.appiconset` 或 1024 像素 PNG，以 `AppIcon-<名称>` 编进 `Assets.car`（`--alternate-app-icon`），`Info.plist` 列在 `CFBundleAlternateIcons` |
-| macOS | 应用运行时程序坞显示该图标（`applicationIconImage`）；关闭后访达与程序坞仍是应用包自带的图标，改它会改动已签名的应用包 | `.icon` 编进 `Assets.car`，`.icns` 或 PNG 放进 `Contents/Resources`，都名为 `AppIcon-<名称>` |
-| Android | 每个图标是主活动的一个 `activity-alias`；应用离开屏幕（界面停止）时才启用选中的、停用其余的，因为停用启动它的那个入口会把应用关掉；启动器稍后刷新，开着主题图标时显示的是各图标的单色层 | `res` 文件夹里的 `ic_launcher*` 改名为 `ic_launcher_<名称>*` 并入，PNG 放进 `mipmap-xxxhdpi` |
-| Windows | 每个窗口的标题栏、任务栏按钮与 Alt+Tab 换成该图标；可执行文件与快捷方式的图标不变 | `.ico`（PNG 打包成 `.ico`）放在可执行文件旁，名为 `app-<名称>.ico` |
-| Linux | 窗口的图标名换成 `<bundle_id>-<名称>`；GNOME 在 Wayland 下的程序坞取 `.desktop` 里的图标，不跟着变 | 图标主题里最大的 PNG 或声明的 PNG，放进可执行文件旁的 `icons/` |
-| Web | 页面的图标链接换成该图标的；网页应用清单不变 | 页面图标文件夹、SVG 或 PNG 复制到 `icons-<名称>/`，链接放在页面的 `<template id="bern-icon-<名称>">` 里 |
+| iOS | `setAlternateIconName`; the system shows a confirmation | `.icon`, `.appiconset` or a 1024-pixel PNG, compiled into `Assets.car` as `AppIcon-<name>` (`--alternate-app-icon`) and listed in `CFBundleAlternateIcons` in `Info.plist` |
+| macOS | While the app runs, the Dock shows that icon (`applicationIconImage`); after it quits, Finder and the Dock still show the icon that comes with the app bundle, since changing that would modify the signed app bundle | `.icon` compiled into `Assets.car`, `.icns` or PNG placed in `Contents/Resources`, all named `AppIcon-<name>` |
+| Android | Each icon is an `activity-alias` of the main activity; the selected one is enabled and the others disabled only when the app leaves the screen (its UI stops), because disabling the entry that launched it would close the app; the launcher refreshes a little later, and with themed icons turned on it shows each icon's monochrome layer | `ic_launcher*` in the `res` folder is renamed to `ic_launcher_<name>*` and merged; a PNG goes into `mipmap-xxxhdpi` |
+| Windows | Each window's title bar, taskbar button and Alt+Tab entry switch to that icon; the icons of the executable and of shortcuts do not change | `.ico` (a PNG is packaged into an `.ico`) placed next to the executable, named `app-<name>.ico` |
+| Linux | The window's icon name becomes `<bundle_id>-<name>`; the dock of GNOME on Wayland takes the icon from the `.desktop` file and does not follow | The largest PNG in the icon theme, or the declared PNG, placed in `icons/` next to the executable |
+| Web | The page's icon links switch to that icon's; the web app manifest does not change | The page icon folder, SVG or PNG is copied to `icons-<name>/`, and the links are placed in the page's `<template id="bern-icon-<name>">` |
 
-tvOS 暂不支持备用图标：绑定了 `icon` 的应用在电视上保持主图标。
+tvOS does not support alternate icons yet: apps that bind `icon` keep the primary icon on TV.
 
-### 构建产物与增量更新
+### Build outputs and incremental updates
 
-生成产物建议写入 `target/bern/<target>/`，其中 target 是配置中的独立目标身份，与手写源码分开。示例的两种 Web 构建分别写入 `target/bern/web_app/` 与 `target/bern/web_ui/`，不得复用一个目录导致引擎文件残留。缓存必须考虑源文件、项目配置、依赖描述、协议版本、主题算法与配方版本、目标模块与工具版本，以及 UI 技术、平台、构建模式、引擎部署方式、传输与编码的变化。
+It is recommended to write generated outputs to `target/bern/<target>/`, where target is the independent target identity in the configuration, kept apart from handwritten source. The example's two Web builds write to `target/bern/web_app/` and `target/bern/web_ui/` respectively and must not share one directory, which would leave engine files behind. Caching must account for changes to source files, project configuration, dependency descriptions, protocol versions, theme algorithm and recipe versions, and target module and tool versions, as well as the UI technology, platform, build mode, engine deployment, and transport and encoding.
 
-初期优先保证全量构建正确和可重复；增量编译、开发服务器及热更新在闭环验证后增加。默认构建不执行应用业务代码，不访问真实用户状态以决定生成结构。
+Early on, correct and repeatable full builds come first; incremental compilation, the development server and hot reload are added after closed-loop validation. Default builds do not run app business code and do not access real user state to decide the generated structure.
 
-与应用无关、编译代价又高的部分由目标模块缓存，并按其全部输入判断是否失效。Windows 目标把 C++/WinRT 头文件与运行时放进按配置保存的预编译头，以运行时与编译选项的指纹、编译器版本、SDK 版本和路径为键；应用的改动只重新编译生成的源码。
+Parts that are independent of the app but expensive to compile are cached by the target module and invalidated based on all of their inputs. The Windows target puts the C++/WinRT headers and runtime into a precompiled header saved per configuration, keyed by a fingerprint of the runtime and compile options, the compiler version, the SDK version and paths; changes to the app only recompile the generated sources.
 
-### 构建工具命令
+### Build tool commands
 
-`bern` 是构建工具，与构建生成的应用 CLI 是两个程序：
+`bern` is the build tool; it and the app CLI produced by a build are two separate programs:
 
-| 命令 | 作用 |
+| Command | Purpose |
 | --- | --- |
-| `bern new <路径>` | 在空目录中创建应用 |
-| `bern run` | 构建一个目标并启动它 |
-| `bern build` | 构建目标 |
-| `bern package` | 按 release 构建，并生成供安装与分发的包 |
-| `bern check` | 只做声明、本地化与功能覆盖检查，不生成、不调用工具链 |
-| `bern doctor` | 检查本机构建各目标需要的工具，给出缺少时的安装方法 |
-| `bern ir` | 输出编译得到的 IR |
+| `bern new <path>` | Creates an app in an empty directory |
+| `bern run` | Builds one target and launches it |
+| `bern build` | Builds targets |
+| `bern package` | Builds in release mode and produces packages for installation and distribution |
+| `bern check` | Only runs the declaration, localization and feature coverage checks; generates nothing and calls no toolchain |
+| `bern doctor` | Checks the tools this machine needs to build each target, and gives installation instructions for missing ones |
+| `bern ir` | Prints the compiled IR |
 
-`bern new` 生成独立的 Cargo 工作区：`Bern.toml`、根 `Cargo.toml`、与 Bern 一致的 `rust-toolchain.toml`、`.gitignore`，以及协议、引擎、界面三个 crate。起始应用是一个带计数的窗口：状态一个字段，两条命令，界面上两个按钮，引擎附带单元测试。名称取目录名，`-` 与 `_` 都可以，应用 id 为小写下划线形式；`--bundle-id` 默认 `com.example.<名称>`；`--languages` 默认 `en,zh-Hans`，第一个为默认语言，模板只带 `en`、`zh-Hans`、`zh-Hant`、`ja` 四种文案，其他语言在创建后自行补充。`Bern.toml` 声明全部四个目标，桌面目标开启 `channels = ["ipc"]`，并注明删去即不监听任何通道。新项目必须直接通过全部编译检查，由测试保证。
+`bern new` generates a standalone Cargo workspace: `Bern.toml`, a root `Cargo.toml`, a `rust-toolchain.toml` matching Bern's, `.gitignore`, and three crates: protocol, engine and UI. The starter app is a window with a counter: one state field, two commands, two buttons in the UI, and unit tests for the engine. The name is taken from the directory name, and both `-` and `_` are allowed; the app id is the lowercase underscore form; `--bundle-id` defaults to `com.example.<name>`; `--languages` defaults to `en,zh-Hans`, the first being the default language; the template only carries text for four languages, `en`, `zh-Hans`, `zh-Hant` and `ja`, and other languages are added after creation. `Bern.toml` declares all four targets, turns on `channels = ["ipc"]` for the desktop targets, and notes that removing it means no channel is listened on. A new project must pass all compile checks as generated, which a test guarantees.
 
-新项目的 `bern` 依赖默认指向构建当前 `bern` 的检出目录；该目录位于 Cargo 的 Git 缓存时改用公开仓库，不存在时（从 crates.io 安装或从发布下载的 `bern`）改用 crates.io 上与当前 `bern` 同一版本的 Bern，也可以用 `--bern-path` 指定检出目录。`bern --version` 输出当前 `bern` 的版本。
+The `bern` dependency of a new project points by default to the checkout directory the current `bern` was built from; when that directory lies in Cargo's Git cache, the public repository is used instead, and when it does not exist (a `bern` installed from crates.io or downloaded from a release), Bern of the same version from crates.io; `--bern-path` can name a checkout directory. `bern --version` prints the current `bern`'s version.
 
-生成的胶水 crate 不假定项目位于 Bern 仓库内。构建驱动经 `cargo metadata --no-deps` 读出引擎包 `bern` 依赖的来源，胶水按同一来源引用每个 Bern crate：检出目录时取同一 `crates` 目录下的 crate，Git 仓库时使用同一地址与 `branch`、`tag` 或 `rev`，crates.io 时使用同一版本要求。来源必须完全相同，否则应用与胶水会得到两份 Bern crate、类型互不兼容。项目的 Cargo 配置用 `[patch]` 把 `bern` 换成本地检出目录时（例如声明公开仓库的固定版本、开发时改用旁边的检出），构建驱动再经离线的 `cargo metadata` 读出 Cargo 实际解析到的 `bern`，胶水改从这个检出目录取每个 Bern crate，配置里只需替换 `bern` 一个 crate；离线解析不了时仍按声明的来源。
+The generated glue crate does not assume the project lives inside the Bern repository. The build driver reads the source of the engine package's `bern` dependency via `cargo metadata --no-deps`, and the glue references every Bern crate from the same source: for a checkout directory, the crates in the same `crates` directory; for a Git repository, the same URL and the same `branch`, `tag` or `rev`; for crates.io, the same version requirement. The sources must be exactly the same, otherwise the app and the glue get two copies of the Bern crates whose types are incompatible with each other. When the project's Cargo configuration uses `[patch]` to replace `bern` with a local checkout directory (for example, declaring a pinned version of the public repository and switching to a checkout next to it during development), the build driver also reads, via an offline `cargo metadata`, the `bern` that Cargo actually resolved, and the glue takes every Bern crate from that checkout directory instead, so the configuration only needs to replace the one crate `bern`; when the offline resolution fails, the declared source is still used.
 
-未指定 `--target` 时，`bern build` 构建本机能构建的全部目标：目标模块声明可构建的操作系统（SwiftUI 为 macOS，WinUI 3 为 Windows，GTK 为 Linux，Web 不限），其他系统的目标以及本机缺少工具的目标被跳过，并说明原因与安装方法。指定目标时，不在本机系统或缺少工具都直接失败，不进入工具链。`bern check` 始终检查全部目标。
+When `--target` is not given, `bern build` builds every target this machine can build: each target module declares the operating systems it can be built on (macOS for SwiftUI, Windows for WinUI 3, Linux for GTK, any for Web); targets for other systems and targets whose tools are missing on this machine are skipped, with the reason and how to install the tools. When a target is given, being on the wrong system or missing tools fails immediately, without entering the toolchain. `bern check` always checks all targets.
 
-浏览器 app 可用 `bern run --target web_app --port 4173` 固定开发 origin，使刷新与重启继续读同一份 localStorage。`--port` 仅用于浏览器 app，范围 1–65535，省略时选择空闲端口；目标名以项目清单为准。
+A browser app can use `bern run --target web_app --port 4173` to fix the development origin, so that reloads and restarts keep reading the same localStorage. `--port` applies only to browser apps and ranges over 1–65535; when omitted, a free port is chosen; the target name follows the project manifest.
 
-`bern run --trace <规则>` 让启动的应用带上性能追踪，规则与 `BERN_TRACE` 相同，写错时在构建前报错：桌面程序与 WebUI 引擎宿主得到环境变量 `BERN_TRACE`，模拟器经 `SIMCTL_CHILD_BERN_TRACE`，Android 经启动意图的 `bern.trace`，浏览器 app 经地址的 `#bern-trace=`。规则与输出见[性能追踪参考](Reference/Tracing.md)。
+`bern run --trace <rule>` launches the app with performance tracing; the rule is the same as for `BERN_TRACE`, and a malformed rule is reported before the build: desktop programs and the WebUI engine host get the environment variable `BERN_TRACE`, the simulator gets it via `SIMCTL_CHILD_BERN_TRACE`, Android via `bern.trace` on the launch intent, and browser apps via `#bern-trace=` in the address. For rules and output see the [performance tracing reference](Reference/Tracing.md).
 
-`bern run` 默认选择本机系统的桌面目标，没有时选择任何系统都能构建的目标。构建后按目标模块给出的方式启动：桌面目标直接运行可执行文件并等待它退出；Web `app` 构建在 127.0.0.1 上提供页面（与 WebUI 宿主相同的 `Host` 校验，不带 WebSocket 通道）并打开浏览器；WebUI 构建运行引擎宿主，打开它打印的地址。
+`bern run` picks this system's desktop target by default, or, when there is none, a target any system can build. After building, it launches the target in the way its target module specifies: desktop targets run the executable directly and wait for it to exit; a Web `app` build serves the page on 127.0.0.1 (with the same `Host` check as the WebUI host, without the WebSocket channel) and opens the browser; a WebUI build runs the engine host and opens the address it prints.
 
-`bern doctor` 检查 Rust 版本（1.99 起）、macOS SDK 26 与 Swift 编译器、带 C++ 工具的 Visual Studio 与含 `cppwinrt.exe` 的 Windows SDK 以及 MSVC 版 Rust、GTK 4.14 与 libadwaita 1.5 的开发包、`wasm32-unknown-unknown` 目标。在项目内运行时还列出 Bern 的来源与每个目标在本机能否构建；本机能构建的已声明目标缺少工具时以失败退出。
+`bern doctor` checks the Rust version (1.99 or later), macOS SDK 26 and the Swift compiler, Visual Studio with C++ tools plus a Windows SDK containing `cppwinrt.exe` and the MSVC build of Rust, the development packages of GTK 4.14 and libadwaita 1.5, and the `wasm32-unknown-unknown` target. Run inside a project, it also lists Bern's source and whether each target can be built on this machine; it exits with a failure when a declared target that this machine can build is missing tools.
 
-生成的 crate 是独立的工作区，应用工作区 `Cargo.toml` 里的 `[profile]` 原样带进去（`bern_target_api::glue::profiles`），例如 `[profile.dev.package."*"] opt-level = 3` 让 debug 构建里读标签、解图片、解音频的库也是优化过的：Windows PC 上一个应用导入 1345 个音乐文件从约 100 秒降到 5.5 秒。release 构建的生成 crate 统一以 `lto = true`、`codegen-units = 1`、`strip = true` 编译（`bern_target_api::glue::RELEASE_PROFILE`，应用自己的 release 设置覆盖它；引擎捕获 panic 的地方保持 `panic = "unwind"`，这一项应用不能改）：macOS arm64 上 planner 的应用 CLI 与 MCP 服务器从 1.50 MB 降到 0.91 MB，WebUI 引擎宿主从 2.50 MB 降到 1.35 MB，页面模块从 685 KB 降到 518 KB，宿主的 release 构建约慢一倍。
+Generated crates are workspaces of their own, and the `[profile]` sections in the app workspace's `Cargo.toml` are carried into them as is (`bern_target_api::glue::profiles`); for example `[profile.dev.package."*"] opt-level = 3` makes the libraries that read tags, decode images and decode audio optimized in debug builds too: on the Windows PC, an app's import of 1345 music files went from about 100 seconds to 5.5 seconds. In release builds, generated crates are all compiled with `lto = true`, `codegen-units = 1` and `strip = true` (`bern_target_api::glue::RELEASE_PROFILE`, which the app's own release settings override; where the engine catches panics, `panic = "unwind"` is kept, and the app cannot change this one): on macOS arm64, planner's app CLI and MCP server shrink from 1.50 MB to 0.91 MB, the WebUI engine host from 2.50 MB to 1.35 MB, and the page module from 685 KB to 518 KB; the host's release build takes about twice as long.
 
-`bern package` 按 release 构建本机能构建的目标，再由目标模块生成安装包，统一写入 `target/bern/dist/`：
+`bern package` builds the targets this machine can build in release mode, then has the target modules produce installation packages, all written to `target/bern/dist/`:
 
-| 目标 | 包 | 说明 |
+| Target | Package | Notes |
 | --- | --- | --- |
-| macOS | `<产品>-<版本>-macos-<架构>.dmg` | 应用与指向“应用程序”的链接；应用 CLI 与 MCP 服务器放在 `Contents/Helpers`，Agent skill 放在 `Contents/Resources/skills` |
-| iOS | `<产品>-<版本>-ios.ipa` | 模拟器构建出的包，引擎、SwiftUI 前端与图标按真机（`aarch64-apple-ios`、`iphoneos`）重新编译，Info.plist 标为 `iPhoneOS`，临时签名；iOS 只装开发者签过的应用，用 AltStore、Sideloadly 这类以 Apple ID 重新签名的工具安装（开发者证书与描述文件的签名尚未实现） |
-| Windows | `…-windows-<架构>-setup.exe` 与 `.zip` | 安装程序由 Bern 生成并用同一套 MSVC 编译：按当前用户安装到 `%LOCALAPPDATA%\Programs`，不需要管理员权限，创建开始菜单快捷方式与“应用和功能”中的卸载项，`/S` 静默安装与卸载；应用运行时拒绝覆盖或卸载。`.zip` 为免安装版本。两者都带 `bin\` 中的 CLI 与 MCP 服务器和 `skills\` 中的 Agent skill |
-| Linux | `<程序>_<版本>_<架构>.deb` 与 `.tar.gz` | `.deb` 安装到 `/opt/<bundle_id>`，附带菜单项、图标主题中的图标与 `/usr/bin` 启动器，依赖声明 GTK 4.14 与 libadwaita 1.5，使用媒体时另加 GStreamer；系统没有 `dpkg-deb` 时只生成 `.tar.gz`。两者都带 `bin/` 中的 CLI 与 MCP 服务器和 `skills/` 中的 Agent skill |
-| Android | `<应用>-<版本>-android.apk` 与 `.aab` | APK 直接安装，App Bundle 用于上架；Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS`（可选 `BERN_ANDROID_KEY_PASSWORD`）读取发布密钥，没有设置时用调试密钥签名并提示不能上架 |
-| Web | `<程序>-<版本>-web.zip`，WebUI 为 `…-webui-<系统>-<架构>` | 只含服务器需要的文件；WebUI 另含引擎宿主及其 CLI、MCP 服务器与 Agent skill |
+| macOS | `<product>-<version>-macos-<arch>.dmg` | The app and a link to "Applications"; the app CLI and MCP server go in `Contents/Helpers`, the agent skill in `Contents/Resources/skills` |
+| iOS | `<product>-<version>-ios.ipa` | The bundle built for the simulator, with the engine, the SwiftUI frontend and the icon recompiled for devices (`aarch64-apple-ios`, `iphoneos`), Info.plist marked `iPhoneOS`, and an ad-hoc signature; iOS installs only apps signed by a developer, so install it with a tool such as AltStore or Sideloadly that re-signs it with an Apple ID (signing with developer certificates and provisioning profiles is not implemented yet) |
+| Windows | `…-windows-<arch>-setup.exe` and `.zip` | The installer is generated by Bern and compiled with the same MSVC: it installs per user into `%LOCALAPPDATA%\Programs` without administrator rights, creates a Start menu shortcut and an uninstall entry in "Apps & features", and `/S` installs and uninstalls silently; while the app is running, it refuses to overwrite or uninstall it. The `.zip` is the portable version. Both carry the CLI and MCP server in `bin\` and the agent skill in `skills\` |
+| Linux | `<program>_<version>_<arch>.deb` and `.tar.gz` | The `.deb` installs into `/opt/<bundle_id>`, with a menu entry, an icon in the icon theme and a launcher in `/usr/bin`; its dependencies declare GTK 4.14 and libadwaita 1.5, plus GStreamer when media is used; when the system has no `dpkg-deb`, only the `.tar.gz` is produced. Both carry the CLI and MCP server in `bin/` and the agent skill in `skills/` |
+| Android | `<app>-<version>-android.apk` and `.aab` | The APK installs directly, the App Bundle is for store publishing; Gradle reads the release key from `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD`, `BERN_ANDROID_KEY_ALIAS` (optionally `BERN_ANDROID_KEY_PASSWORD`); when they are not set, it signs with the debug key and warns that the package cannot be published to a store |
+| Web | `<program>-<version>-web.zip`, for WebUI `…-webui-<os>-<arch>` | Contains only the files the server needs; WebUI additionally contains the engine host with its CLI, MCP server and agent skill |
 
-签名所需的证书只留在构建的机器或 CI 服务中，经环境变量提供，不写入 `Bern.toml`：`BERN_MACOS_SIGNING_IDENTITY` 以强化运行时与安全时间戳签名应用、工具与磁盘映像，`BERN_MACOS_NOTARY_PROFILE` 再提交公证并装订；`BERN_WINDOWS_CERTIFICATE`（证书库中的指纹或 `.pfx`，密码取自 `BERN_WINDOWS_CERTIFICATE_PASSWORD`）以 `signtool` 签名应用、工具与安装程序并加 RFC 3161 时间戳。没有配置时仍生成包，并说明未签名的后果。`[app].publisher` 是可选的发布者名称，显示在安装程序、卸载项与 Debian 包中。`[app].files_folder = true` 让 iOS 上应用的 Documents 文件夹出现在「文件」App 中（`UIFileSharingEnabled` 与 `LSSupportsOpeningDocumentsInPlace`），用户放进去的文件由引擎自己读取，例如音乐应用的本地曲库；其他平台没有对应的东西。`[app].background_audio = true` 让应用在后台与锁屏时继续播放自己的声音（iOS 的 `audio` 后台模式；Android 的前台服务权限与 `BernPlaybackService`），`[app].overlays = true` 让 Android 应用可以请求显示悬浮文字（`SYSTEM_ALERT_WINDOW`），见“系统的正在播放”与“悬浮文字”。
+The certificates needed for signing stay only on the build machine or in the CI service and are supplied through environment variables, never written into `Bern.toml`: `BERN_MACOS_SIGNING_IDENTITY` signs the app, the tools and the disk image with the hardened runtime and a secure timestamp, and `BERN_MACOS_NOTARY_PROFILE` additionally submits them for notarization and staples the ticket; `BERN_WINDOWS_CERTIFICATE` (a thumbprint in the certificate store or a `.pfx`, with the password taken from `BERN_WINDOWS_CERTIFICATE_PASSWORD`) signs the app, the tools and the installer with `signtool` and adds an RFC 3161 timestamp. Without this configuration packages are still produced, with an explanation of the consequences of being unsigned. `[app].publisher` is an optional publisher name, shown in the installer, the uninstall entry and the Debian package. `[app].files_folder = true` makes the app's Documents folder appear in the Files app on iOS (`UIFileSharingEnabled` and `LSSupportsOpeningDocumentsInPlace`), and the engine reads the files the user puts there itself, for example a music app's local library; other platforms have nothing corresponding. `[app].background_audio = true` lets the app keep playing its own sound in the background and on the lock screen (iOS's `audio` background mode; Android's foreground service permissions and `BernPlaybackService`), and `[app].overlays = true` lets an Android app request to show floating text (`SYSTEM_ALERT_WINDOW`), see "The system's Now Playing" and "Floating text".
 
-直接写在 `Window` 中的控件以窗口 id 作为组件名，目标形如 `main.add_one`；写在组件中的控件仍为 `组件名.控件 id`。四个目标一致。
+Controls written directly in a `Window` use the window id as their component name, so targets look like `main.add_one`; controls written inside a component are still `component.control_id`. The four targets agree on this.
 
-### 发布 Bern
+### Releasing Bern
 
-Bern 的 crate 以同一版本一起发布，相互之间按 `=版本` 精确依赖：工作区的 `[workspace.dependencies]` 写明版本，`bern-gtk` 不在工作区里，自己写。发新版本时改工作区的 `version`、`[workspace.dependencies]` 里的版本与 `bern-gtk` 的版本和依赖，再推送 `v<版本>` 标签，由 `.github/workflows/release.yml` 发布：
+Bern's crates are released together at one version and require one another at exactly that version (`=version`): the workspace's `[workspace.dependencies]` states the versions, and `bern-gtk`, which is outside the workspace, states its own. For a new version, change the workspace `version`, the versions in `[workspace.dependencies]`, and `bern-gtk`'s version and dependencies, then push a `v<version>` tag; `.github/workflows/release.yml` releases it:
 
-- 为 macOS（arm64、x86_64）、Linux（x86_64、arm64，在 Ubuntu 22.04 上编译，glibc 2.35 起的发行版都能运行；`bern-command` 的 keyring 链接系统的 libdbus，所以不能用 musl 静态链接）、Windows（x64、arm64）编译 `bern`，附在 GitHub Release 上：`bern-<目标>.tar.gz`，Windows 为 `.zip`，内含 `bern` 与许可证。`bern-cli` 的 `[package.metadata.binstall]` 指向它们，`cargo binstall bern-cli` 直接下载，不必编译。
-- 再按依赖顺序（开发依赖也算，crates.io 要求它们已经存在）把每个 crate 发布到 crates.io，令牌取自仓库机密 `CARGO_REGISTRY_TOKEN`（`.github/scripts/publish-crates.py`）。标签必须与 crate 的版本相同。已在 crates.io 上的版本跳过，中途停下的发布重跑即可补完。crates.io 让一个账号连续发布五个新 crate，之后每十分钟一个，遇到时等待后重试：第一次发布 28 个 crate 约需四小时，之后的版本不受这个限制。
-- 修改发布流程的拉取请求只编译各平台的 `bern`、打包并逐个编译每个 crate，不发布任何东西。
+- It builds `bern` for macOS (arm64, x86_64), Linux (x86_64, arm64, built on Ubuntu 22.04, so it runs on distributions with glibc 2.35 or later; `bern-command`'s keyring links the system's libdbus, which a static musl build cannot) and Windows (x64, arm64), and attaches them to a GitHub release: `bern-<target>.tar.gz`, `.zip` on Windows, holding `bern` and the license. `bern-cli`'s `[package.metadata.binstall]` points at them, so `cargo binstall bern-cli` downloads `bern` instead of compiling it.
+- It then publishes every crate to crates.io in dependency order (dev-dependencies count too: crates.io requires them to exist), with the token from the repository secret `CARGO_REGISTRY_TOKEN` (`.github/scripts/publish-crates.py`). The tag must match the crates' version. Versions already on crates.io are skipped, so running it again finishes a release that stopped part way. crates.io lets an account publish five new crates in a row and then one every ten minutes; the script waits and retries when it meets that limit, so the first release of 28 crates takes about four hours, and later versions are not limited this way.
+- A pull request that changes the release only builds `bern` for each platform and packages and builds every crate, publishing nothing.
 
-发布的 crate 只含自己目录下的文件。几个 crate 共用的文件由其中一个以常量提供：JavaScript 运行时在 `bern-script`，Windows 脚本宿主的来源在 `bern_target_api::script::WINDOWS_SOURCES`；GTK 图标表在 `bern-gtk` 与 `bern-backend-gtk` 各有一份，测试保证二者相同。`bern-gpui` 暂不发布，选 `ui = "gpui"` 的应用要从检出目录或 Git 仓库取 Bern。
+A published crate holds only the files in its own directory. A file several crates share is provided as a constant by one of them: the JavaScript runtime by `bern-script`, the sources of the Windows script host by `bern_target_api::script::WINDOWS_SOURCES`; the GTK icon table exists in both `bern-gtk` and `bern-backend-gtk`, and a test keeps the two equal. `bern-gpui` is not published yet: apps that choose `ui = "gpui"` take Bern from a checkout or the Git repository.
 
-## 跨语言绑定
+## Language bindings
 
-Web、Flutter、SwiftUI、GTK、WinUI 3 和 Compose 使用统一定义的 UI 绑定 schema，具体传递方式各自适配。采用 Rust 绑定的目标可以直接使用本地类型化接口，跨语言目标使用相应桥接，不强制所有后端经过 FFI。UI 绑定管理展示值、原生事件到命令的映射和前端实例；统一命令协议定义引擎与会话调用，业务引擎仍不需要理解平台控件。两者不能因同样使用 FFI 或消息传递就混为一个接口。
+Web, Flutter, SwiftUI, GTK, WinUI 3 and Compose use a uniformly defined UI binding schema, with the concrete transport adapted by each. Targets that use Rust bindings can use local typed interfaces directly, cross-language targets use the corresponding bridges, and not every backend is forced through FFI. UI bindings manage display values, the mapping from native events to commands, and frontend instances; the unified command protocol defines engine and session calls, and the business engine still does not need to understand platform controls. The two must not be merged into one interface just because both use FFI or message passing.
 
-首版跨边界数据仅支持明确 schema 的布尔、数值、字符串、枚举、可选值、记录和必要的列表。Rust 数值范围、字符串编码、可选值和错误必须具有确定映射；例如不能把所有 64 位整数未经处理地映射为 JavaScript Number。
+In the first version, data crossing the boundary supports only booleans, numbers, strings, enums, optional values, records and necessary lists, each with an explicit schema. Rust numeric ranges, string encoding, optional values and errors must have deterministic mappings; for example, 64-bit integers must not all be mapped to JavaScript Number without handling.
 
-Rust 借用引用、泛型实例、任意闭包、trait object 和平台对象不直接跨语言传递。需要共享长期对象时使用有生命周期规则的 handle，释放订阅和对象时必须可验证。
+Rust borrowed references, generic instances, arbitrary closures, trait objects and platform objects are not passed across languages directly. Sharing long-lived objects uses handles with lifetime rules, and the release of subscriptions and objects must be verifiable.
 
-应用的值类型（协议与 UI 中 `#[value]` 的枚举和记录）可以与平台框架的类型同名，例如 `Layout`、`View`、`Text`、`Color`、`Modifier`、`List`、`Error`。生成代码与框架、Bern 运行时同在一个模块里，目标必须保证应用类型既不遮住框架类型，也不被框架类型遮住；不能要求应用改名，`bern check` 也不因此报错。在生成代码中把值类型声明为本语言类型的目标（SwiftUI 的 Swift、Compose 的 Kotlin）一律写成 `App_` 加声明的名字（`App_Layout`），框架与 Bern 运行时（`Bern…`）都没有以 `App_` 开头的类型；Kotlin 把带字段的变体写成枚举类内部的类，变体名会遮住同名的 Kotlin 类型，这些类里的 Kotlin 标准类型写全名（`kotlin.String`、`kotlin.collections.List`）。按名字向运行时描述类型的目标不产生类型名：WinUI 3 的 C++ 与 GTK 的 Rust 以字符串描述，Web 的 JavaScript 把编解码、变体名和标签存为 `T`、`N`、`L` 对象的属性。字符串表的键、外部入口与错误信息仍用声明的名字。示例 `examples/framework-names` 的类型与六个平台的常见框架类型同名，每个后端的生成器测试生成它，并在装有相应工具链时编译或解析（Kotlin 需设 `BERN_TEST_KOTLIN=1`）。
+An app's value types (the `#[value]` enums and records in the protocol and the UI) may share names with platform framework types, such as `Layout`, `View`, `Text`, `Color`, `Modifier`, `List`, `Error`. Generated code lives in the same module as the framework and the Bern runtime, so a target must ensure that app types neither shadow framework types nor are shadowed by them; it cannot require the app to rename them, and `bern check` does not report an error for this either. Targets that declare value types as types of their own language in generated code (Swift for SwiftUI, Kotlin for Compose) always write them as `App_` plus the declared name (`App_Layout`); neither the framework nor the Bern runtime (`Bern…`) has types starting with `App_`. Kotlin writes variants with fields as classes nested inside the enum class, and the variant names shadow Kotlin types of the same name, so Kotlin standard types inside these classes are written with their full names (`kotlin.String`, `kotlin.collections.List`). Targets that describe types to the runtime by name produce no type names: WinUI 3's C++ and GTK's Rust describe them with strings, and Web's JavaScript stores codecs, variant names and labels as properties of `T`, `N` and `L` objects. Keys of the string tables, external entry points and error messages still use the declared names. The types in the example `examples/framework-names` share names with common framework types of the six platforms; each backend's generator tests generate it and, when the corresponding toolchain is installed, compile or parse it (Kotlin needs `BERN_TEST_KOTLIN=1`).
 
-组件与会话的名字同样由应用决定，生成名也不能与框架和运行时的名字相撞。由声明的名字加后缀得出的名字会撞：组件名转成大驼峰加 `View`，`empty`、`any`、`scroll`、`content_unavailable` 成了 SwiftUI 的 `EmptyView`、`AnyView`、`ScrollView`、`ContentUnavailableView`，`bern_player` 成了运行时的 `BernPlayerView`；会话名加 `Session`，`URL` 成了 Foundation 的 `URLSession`；视图里读会话的变量是 `bern` 加会话名，`Window`、`Engine` 成了视图自己的 `bernWindow`、`bernEngine`。Swift 与 Kotlin 的生成代码因此把会话类写成 `App_` 加声明的名字（`App_URL`；Bern 的类型名在一个应用内唯一，会话与值类型共用这个前缀），组件写成 `AppView_` 加声明的名字（`AppView_empty`、`AppView_content_unavailable`），视图读会话的变量写成 `session_` 加声明的名字（`session_Window`），三者统一由 `bern_target_api::names` 给出。框架与 Bern 运行时没有以这些前缀开头的名字，参数与绑定的生成名不含下划线，前缀之后原样保留声明的名字，所以不同的组件、会话仍然得到不同的名字。WinUI 3 的 C++、GTK 的 Rust 与 Web 的 JavaScript 已经把组件写成 `c_` 加声明的名字的函数，以名字字符串和序号描述会话，运行时没有以 `c_` 开头的函数，无需改动。示例 `examples/framework-names` 含这些名字的组件与会话，各后端的 `tests/framework_names.rs` 核对生成的写法。
+Component and session names are likewise decided by the app, and generated names must not collide with framework and runtime names either. Names derived from a declared name plus a suffix do collide: a component name converted to UpperCamelCase plus `View` turns `empty`, `any`, `scroll` and `content_unavailable` into SwiftUI's `EmptyView`, `AnyView`, `ScrollView` and `ContentUnavailableView`, and `bern_player` into the runtime's `BernPlayerView`; a session name plus `Session` turns `URL` into Foundation's `URLSession`; the variable through which a view reads a session is `bern` plus the session name, which turns `Window` and `Engine` into the view's own `bernWindow` and `bernEngine`. Swift and Kotlin generated code therefore writes session classes as `App_` plus the declared name (`App_URL`; Bern type names are unique within an app, so sessions and value types share this prefix), components as `AppView_` plus the declared name (`AppView_empty`, `AppView_content_unavailable`), and the variables through which views read sessions as `session_` plus the declared name (`session_Window`); all three are given uniformly by `bern_target_api::names`. The framework and the Bern runtime have no names starting with these prefixes, generated names of parameters and bindings contain no underscores, and the declared name is kept verbatim after the prefix, so different components and sessions still get different names. WinUI 3's C++, GTK's Rust and Web's JavaScript already write components as functions named `c_` plus the declared name and describe sessions by name string and index; the runtimes have no functions starting with `c_`, so no change is needed. The example `examples/framework-names` contains components and sessions with these names, and each backend's `tests/framework_names.rs` checks the generated spelling.
 
-两组协议分别定义自己的身份、版本与生命周期：
+The two protocols each define their own identity, versioning and lifecycle:
 
-| 协议 | 需要定义的内容 |
+| Protocol | What must be defined |
 | --- | --- |
-| UI 绑定 | 展示值与更新批次、主题快照引用及版本、属性与事件绑定 ID、窗口与 UI 实例身份及代次、列表 key、局部订阅、线程调度与实例释放 |
-| 应用协议 | 引擎与会话作用域、类型化命令与查询、请求 ID、参数与结果、结构化错误、所属状态版本与订阅 |
+| UI binding | Display values and update batches, theme snapshot references and versions, property and event binding IDs, window and UI instance identity and generation, list keys, partial subscriptions, thread scheduling and instance release |
+| App protocol | Engine and session scope, typed commands and queries, request IDs, parameters and results, structured errors, the state version they belong to, and subscriptions |
 
-Bern 管理的可操作 UI 事件必须经已声明绑定转为引擎或会话命令，但原始事件与命令请求不默认共用身份或生命周期。外部平台已发生的事实经适配器事件归并，不伪造主动请求。通用会话路由可以识别会话、窗口与控件目标，业务处理器不需要接收 Widget 对象或视图身份；UI 生成器也不需要知道业务网络消息的具体编码。组件卸载应解除其展示订阅；已经发出的业务请求按独立命令策略处理。
+Actionable UI events managed by Bern must be turned into engine or session commands through declared bindings, but raw events and command requests do not share identity or lifecycle by default. Facts that have already happened on an external platform are merged through adapter events, without forging active requests. General session routing can identify session, window and control targets, and business handlers do not need to receive Widget objects or view identities; the UI generator likewise does not need to know the concrete encoding of business network messages. Unmounting a component should release its display subscriptions; business requests already sent are handled by their own command policy.
 
-跨边界调用不假设同步、零开销或天然有序。高频进度变化需要批处理或合并策略；不同请求的过时结果不能错误覆盖较新的状态。采用 IPC 或网络业务传输时，这些身份与版本规则仍应保留，前端不能持有服务端进程内句柄。
+Cross-boundary calls are not assumed to be synchronous, zero-cost or inherently ordered. High-frequency progress changes need batching or coalescing strategies; stale results of different requests must not wrongly overwrite newer state. When IPC or network business transport is used, these identity and version rules still apply, and the frontend cannot hold in-process handles of the server.
 
-## 后端实现边界
+## Backend implementation boundaries
 
-### macOS 默认 SwiftUI
+### macOS: SwiftUI by default
 
-macOS 是首个正式后端。SwiftUI 目标生成 Swift 视图、状态适配与事件绑定；窗口、菜单和必要的桌面集成可以通过 AppKit 补充。独立 AppKit 生成器可以作为另一个目标实现同一扩展接口。
+macOS is the first official backend. The SwiftUI target generates Swift views, state adaptation and event bindings; windows, menus and necessary desktop integration can be supplemented via AppKit. A standalone AppKit generator can be implemented as another target behind the same extension interface.
 
-SwiftUI 和 AppKit 都通过应用客户端连接业务核心，不直接持有任意 Rust 对象。目标模块负责 Swift 与 Rust 桥接、主线程调度、窗口和订阅释放，以及 Xcode 或相应工具链的工程集成。
+Both SwiftUI and AppKit connect to the business core through the app client and do not hold arbitrary Rust objects directly. The target module is responsible for the Swift–Rust bridge, main-thread scheduling, window and subscription release, and project integration with Xcode or the corresponding toolchain.
 
-macOS 目标以系统自带应用的视觉水准为验收参照，遵守以下规则：
+The macOS target takes the visual standard of the system's built-in apps as its acceptance reference and follows these rules:
 
-- 生成代码使用 SwiftUI 标准场景、容器与控件，例如 `WindowGroup`、`Settings`、`NavigationSplitView`、`NavigationStack`、`Form`、`List`、`Toggle`、`Slider`、`TextField` 和工具栏，并采用系统提供的样式。
-- 默认不在窗口、侧边栏、表单等系统托管表面上设置自定义背景色，应用声明的样式覆盖除外；文字层级使用系统字体样式，颜色使用系统语义颜色。
-- 标准组件的外观由构建 SDK 与运行系统共同决定：新系统自动呈现新设计，旧系统保持原有外观。显式声明的胶囊与控件分组在 macOS / iOS 26 起使用系统 `glassEffect`，较旧系统回退到系统材质胶囊。其他较新接口同样按系统版本分支使用，在较旧系统上的行为与限制须写明。
-- 构建使用已安装的最新正式版 SDK。使用旧 SDK 构建的应用，在新系统上可能保持旧外观。
-- 首版最低部署版本为 macOS 14。该版本提供状态桥接使用的 Observation，以及 Inspector、ContentUnavailableView、SettingsLink 等标准组件；提高最低版本须单独评估收益与放弃的设备范围。
+- Generated code uses SwiftUI's standard scenes, containers and controls, such as `WindowGroup`, `Settings`, `NavigationSplitView`, `NavigationStack`, `Form`, `List`, `Toggle`, `Slider`, `TextField` and toolbars, with system-provided styles.
+- By default no custom background color is set on system-managed surfaces such as windows, sidebars and forms, except for style overrides declared by the app; text hierarchy uses system font styles, and colors use system semantic colors.
+- The appearance of standard components is determined jointly by the build SDK and the running system: new systems automatically show the new design, and older systems keep their existing appearance. Explicitly declared capsules and control groups use the system `glassEffect` from macOS / iOS 26 on and fall back to system-material capsules on older systems. Other newer APIs are likewise used behind system version branches, and their behavior and limits on older systems must be documented.
+- Builds use the latest installed release SDK. Apps built with an older SDK may keep the old appearance on new systems.
+- The minimum deployment version of the first release is macOS 14. That version provides Observation, used by the state bridge, and standard components such as Inspector, ContentUnavailableView and SettingsLink; raising the minimum version requires a separate assessment of the benefits and of the device range given up.
 
-默认构建将业务引擎、会话运行时与生成的 Rust 绑定编译为静态库并链接进应用，Swift 与 Rust 在同一进程内通过类型化接口通信：不启动辅助进程，不监听网络端口，本地调用也不经过 JSON 字符串。应用 CLI、JSON 或 MCP 入口需要连接该引擎时，由应用宿主显式装配本地 IPC 通道，例如 Unix domain socket，并遵守前文的引擎身份、权限、断线与重同步规则。
+The default build compiles the business engine, the session runtime and the generated Rust bindings into a static library linked into the app, and Swift and Rust communicate in the same process through typed interfaces: no helper process is started, no network port is listened on, and local calls do not go through JSON strings. When the app CLI, JSON or MCP entry points need to connect to this engine, the app host explicitly assembles a local IPC channel, such as a Unix domain socket, and follows the earlier rules on engine identity, permissions, disconnection and resynchronization.
 
-生成器按项目语言配置输出各语言的 `.lproj` 字符串资源，并在 Info.plist 中声明支持的语言与开发区域；界面语言跟随系统或用户为该应用单独选择的语言。
+The generator outputs `.lproj` string resources for each language according to the project's language configuration and declares the supported languages and the development region in Info.plist; the UI language follows the system or the language the user has chosen separately for this app.
 
-SwiftUI 同时支持 iOS 与 macOS，不意味着窗口、导航、菜单和生命周期逻辑可以不加区分地复用；能力描述及验证仍按平台组合执行。
+SwiftUI supporting both iOS and macOS does not mean that window, navigation, menu and lifecycle logic can be reused indiscriminately; capability descriptions and verification are still carried out per platform combination.
 
-### Web 应用与 WebUI
+### Web app and WebUI
 
-Web 后端生成 HTML 和 CSS，以及必要的 DOM 创建、事件监听和属性更新绑定。它提供两个明确的构建模式，共用组件语义、主题、命令绑定、虚拟窗口和 Video 实现。
+The Web backend generates HTML and CSS, plus the necessary bindings for DOM creation, event listening and property updates. It provides two explicit build modes that share component semantics, theme, command bindings, virtual windows and the Video implementation.
 
-| 维度 | Web 应用 `app` | WebUI `ui` |
+| Aspect | Web app `app` | WebUI `ui` |
 | --- | --- | --- |
-| 浏览器内包含 | UI、前端运行时、协议客户端和 Rust WASM 业务引擎 | UI、前端运行时与独立引擎的协议客户端 |
-| 权威业务状态 | 当前浏览器引擎实例 | 连接的独立 Bern 引擎实例 |
-| 引擎命令执行 | 通过类型化本地适配调用浏览器内引擎 | 通过 JSON 控制通道请求独立引擎执行 |
-| 前端 WASM | 承担 UI 绑定、主题计算等前端职责，并包含可用的引擎实现 | 可继续承担 UI 绑定、主题计算和受限展示计算，不包含业务引擎实现 |
-| 部署产物 | 静态 Web 资源与包含引擎的 WASM 产物 | 可独立部署或由引擎宿主提供的静态 UI 资源；引擎单独构建部署 |
-| 关闭页面 | 浏览器内引擎的生命周期按其宿主策略结束或保留，持久化另行声明 | 解除或失效该 UI 会话及浏览器执行端，不默认终止独立引擎 |
+| Contained in the browser | UI, frontend runtime, protocol client and the Rust WASM business engine | UI, frontend runtime and the protocol client of a standalone engine |
+| Authoritative business state | The current in-browser engine instance | The connected standalone Bern engine instance |
+| Engine command execution | Calls the in-browser engine through a typed local adapter | Asks the standalone engine to execute through the JSON control channel |
+| Frontend WASM | Takes on frontend duties such as UI binding and theme computation, and contains a usable engine implementation | Can still take on UI binding, theme computation and limited display computation, and contains no business engine implementation |
+| Deployment outputs | Static Web resources and a WASM output that contains the engine | Static UI resources, deployed independently or served by the engine host; the engine is built and deployed separately |
+| Closing the page | The in-browser engine's lifecycle ends or is kept according to its host policy; persistence is declared separately | Releases or invalidates that UI session and the browser executor; does not terminate the standalone engine by default |
 
-Web 应用不要求额外运行 Bern 引擎服务，但这不代表所有功能都离线可用；媒体地址、外部服务、存储和浏览器权限仍按能力处理。引擎依赖不能编译为 WASM 或能力无法满足时，构建应给出定位明确的诊断，不自动切为 WebUI。每个浏览器引擎实例有独立身份，不能假定多个标签页天然共享同一份状态。
+A Web app does not require running an additional Bern engine service, but this does not mean every feature is available offline; media addresses, external services, storage and browser permissions are still handled by capability. When engine dependencies cannot be compiled to WASM or a capability cannot be met, the build should give a precisely located diagnostic and not switch to WebUI automatically. Each in-browser engine instance has its own identity; multiple tabs cannot be assumed to share the same state.
 
-WebUI 中“不包含业务引擎”不等于“没有本地状态或不允许 WASM”。导航、编辑草稿、焦点和虚拟窗口仍由已登记的前端 Session Command 管理；主题与展示计算不必为每次交互请求服务器。业务查询与 Engine Command 通过独立引擎客户端完成，不能在 UI 中复制服务端处理器或维护第二份权威业务状态。构建客户端仅需相容的协议描述，不要求服务端依赖也能编译为 WASM。
+In WebUI, "contains no business engine" does not mean "has no local state or allows no WASM". Navigation, editing drafts, focus and virtual windows are still managed by registered frontend Session Commands; theme and display computation need not ask the server on every interaction. Business queries and Engine Commands go through the standalone engine client; the UI must not duplicate server handlers or maintain a second authoritative business state. Building the client only needs a compatible protocol description; the server's dependencies are not required to compile to WASM too.
 
-WebUI 的 JSON 控制通道必须使用浏览器可访问的传输，示例采用 WebSocket；HTTP 请求与事件流等替代方案另行声明和验收，浏览器不能直接连接普通进程 stdin 或 Unix socket。JSON 编码继续遵守统一命令、查询、事件和错误 schema，不新增一套只供 WebUI 使用的业务 API。
+WebUI's JSON control channel must use a transport the browser can access, and the example uses WebSocket; alternatives such as HTTP requests and event streams are declared and accepted separately, and the browser cannot connect directly to an ordinary process's stdin or a Unix socket. The JSON encoding continues to follow the unified command, query, event and error schemas, without adding a separate business API only for WebUI.
 
-连接建立时核对协议兼容性、宿主验证的身份与权限、`engine_id` 和能力，再建立 UI 会话与状态订阅。允许多个 WebUI 会话连接同一引擎，分别保留自己的窗口和草稿。外部 CLI、JSON 与 MCP 若要驱动某个浏览器会话，必须由宿主路由到已注册的 `session_id`；不能只完成引擎命令转发就宣称已支持全部 UI 会话操作。
+When a connection is established, protocol compatibility, the identity and permissions verified by the host, the `engine_id` and capabilities are checked before the UI session and state subscriptions are set up. Multiple WebUI sessions may connect to the same engine, each keeping its own windows and drafts. For external CLI, JSON and MCP to drive a particular browser session, the host must route to the registered `session_id`; merely forwarding engine commands does not justify claiming support for all UI session operations.
 
-断线时保留允许保留的前端会话状态，并标记远端状态可能过期；依赖引擎的操作报告不可用或结果待确认，不静默缓存后重放有副作用命令。重连通过快照和版本恢复订阅；已发出请求按请求身份与执行结果对账。若会话已经失效，则显式建立新会话，旧窗口和控件引用不能继续使用。部署在同源或跨域环境时，连接配置、来源校验与访问控制由宿主和传输适配器落实，静态资源中的引擎地址不代表调用权限。
+On disconnection, frontend session state that is allowed to be kept is kept, and remote state is marked as possibly stale; operations that depend on the engine report that they are unavailable or that their result awaits confirmation, and commands with side effects are not silently cached and replayed. Reconnection restores subscriptions through snapshots and versions; requests already sent are reconciled by request identity and execution result. If the session has become invalid, a new session is explicitly established, and old window and control references can no longer be used. Whether deployed same-origin or cross-origin, connection configuration, origin checks and access control are enforced by the host and the transport adapter; an engine address in static resources does not represent permission to call it.
 
-两种构建的标准 Video 节点都默认生成 HTML `<video>` 并绑定媒体协议，不经过 Canvas 逐帧复制或要求应用上传纹理。WebUI 连接独立引擎不意味着视频必须在服务端播放：浏览器播放器作为媒体执行端登记，命令路由到实际持有该播放器的执行端，结果与事件归并到引擎中的唯一播放器状态。控制通道不承担视频字节传输；媒体源、用户激活限制和控制条遵循下文的视频契约。
+In both builds, the standard Video node by default generates an HTML `<video>` bound to the media protocol, without copying frame by frame through Canvas or requiring the app to upload textures. WebUI connecting to a standalone engine does not mean video must play on the server: the browser player registers as a media executor, commands are routed to the executor that actually holds that player, and results and events are merged into the single player state in the engine. The control channel does not carry video bytes; media sources, user activation restrictions and control bars follow the video contract below.
 
-用户在页面里选到或拖入的文件以页面的 `blob:` 地址交给动作，地址里没有文件名，也只在这个页面里有效：页面的播放器与图片能读。引擎在页面中时经 `MediaSource::file_name()` 与 `open()` 读取它的名字与内容；选的文件夹也是 `blob:` 地址，引擎经 `bern::files::list` 与 `walk` 列出其中的文件，见“引擎读取交来的文件”；WebUI 中原生运行的引擎读不到页面的文件。
+Files the user picks or drops in the page are handed to actions as the page's `blob:` addresses; the address contains no file name and is only valid within this page: the page's players and images can read it. When the engine is in the page, it reads the file's name and content via `MediaSource::file_name()` and `open()`; a chosen folder is also a `blob:` address, and the engine lists the files in it through `bern::files::list` and `walk`, see "The engine reads files handed to it"; an engine running natively in WebUI cannot read the page's files.
 
-WindowSet 使用一个页面宿主，Window 默认按网页习惯虚拟呈现：主窗口就是页面，次级窗口呈现为对话框或侧边面板（设置窗口默认为对话框），声明 `presentation: floating` 的窗口呈现为可拖动、可调整大小的浮动窗口。后端处理层叠、焦点、模态及窄屏呈现，窗口实例不依赖浏览器弹窗。原生视频覆盖层与虚拟呈现的层叠需要共同验证。
+WindowSet uses one page host, and Window is presented virtually by default, following web conventions: the main window is the page, secondary windows appear as dialogs or side panels (the settings window defaults to a dialog), and windows that declare `presentation: floating` appear as draggable, resizable floating windows. The backend handles stacking, focus, modality and narrow-screen presentation, and window instances do not depend on browser popups. The stacking of native video overlays with virtual presentation needs to be verified together.
 
-AOT 生成的是结构模板、静态资源和更新代码，不要求构建时知道动态列表的数据，也不保证所有节点都能写成最终静态 HTML。初始静态标记与运行时创建节点的具体分工由原型决定。
+AOT generates structure templates, static resources and update code; it does not require knowing the data of dynamic lists at build time, nor does it guarantee that every node can be written as final static HTML. The exact division between initial static markup and nodes created at runtime is decided by the prototype.
 
-允许使用 JavaScript 作为 Web API 桥接，不给桥接大小作未经测量的承诺。正确的输入法、可访问性、事件清理和动态更新优先于单纯压缩桥接行数。
+JavaScript may be used as the Web API bridge, and no unmeasured promises are made about the bridge's size. Correct input methods, accessibility, event cleanup and dynamic updates take priority over merely reducing the bridge's line count.
 
-Web 是第二个正式后端，承担两种正式构建、浏览器预览和自动化 UI 测试。Web 没有统一的平台样式规范，后端需要基于 Bern 主题算法定义自己的视觉规范与控件样式，并在实现前单独成文。这套规范是 Bern 自有的中性网页风格：提炼各家网页设计系统共有的做法（页面即应用、顶部应用栏、对话框与侧边面板、标签在输入框上方、浅色底的选中态等），不复制 Material、Fluent 或任何一家公司的视觉语言，也不模仿桌面操作系统的窗口与控件外观。两种模式都必须通过强制命令化、自动主题、自适应、多窗口和媒体相关验收。IR 的标准语义必须独立于 DOM。文件系统、原生解码器和操作系统能力需要 Web 替代实现或明确的不支持诊断。PWA、离线缓存、SSR 或嵌入其他宿主是另外的能力，不由 `app` 或 `ui` 名称自动承诺。
+Web is the second official backend and carries both official builds, browser preview and automated UI testing. Web has no unified platform style guidelines, so the backend needs to define its own design guidelines and control styles based on Bern's theme algorithm, written up separately before implementation. These guidelines are Bern's own neutral web style: they distill the practices common to the various web design systems (the page is the app, a top app bar, dialogs and side panels, labels above input fields, selection states on a light background, and so on), without copying Material, Fluent or any one company's visual language, and without imitating the window and control appearance of desktop operating systems. Both modes must pass the acceptance for mandatory command routing, automatic theming, adaptivity, multiple windows and media. The standard semantics of the IR must be independent of the DOM. File system, native decoders and operating system capabilities need Web replacement implementations or explicit unsupported diagnostics. PWA, offline caching, SSR or embedding in other hosts are separate capabilities, not automatically promised by the names `app` or `ui`.
 
-### GPUI 可选桌面目标
+### GPUI optional desktop target
 
-GPUI 目标模块作为显式选择的可选后端生成 Rust UI 代码，不再承担 PC 默认路线。它仍使用统一应用客户端获取状态和执行命令。窗口、字体、输入法、可访问性、焦点和视频表面集成需分别验证，不能只根据一个平台的成功推定全部桌面平台已支持。
+The GPUI target module, an explicitly selected optional backend, generates Rust UI code; it no longer serves as the default route for PCs. It still uses the unified app client to get state and execute commands. Windows, fonts, input methods, accessibility, focus and video surface integration need to be verified separately; success on one platform must not be taken to mean that all desktop platforms are supported.
 
-实现进度：第一版。macOS 上 RustSend 与一个大型媒体类应用能通过检查、构建并运行；Windows 上同一个媒体类应用与规划示例、Linux 上一个视频探针应用与那个媒体类应用构建并运行过，包括这两个平台的窗口框架与视频；Linux 平台包带上 wgpu 30，应用依赖里钉着旧版 `js-sys` 的在 Linux 上无法解析。见 [GPUI 实现记录](Implementation/GPUI.md)。
+Implementation progress: first version. On macOS, RustSend and a large media app pass the checks, build and run; on Windows the same media app and the planner example, and on Linux a video probe app and that media app, have been built and run, including the window frames and video on those two platforms; the Linux platform crate brings in wgpu 30, and apps whose dependencies pin an older `js-sys` cannot be resolved on Linux. See the [GPUI implementation notes](Implementation/GPUI.md).
 
-Windows 与 Linux 的窗口框架由运行时画：
+The runtime draws the window frames on Windows and Linux:
 
-- **Windows**：统一标题栏的窗口画系统样子的标题栏按钮，交给 Windows 命中测试。
-- **Linux**：在桌面不给服务端装饰时（GNOME 的 Wayland 会话），以及统一窗口，画 Adwaita 样子的标题栏、圆角、阴影与调整大小的边。
-- **标题栏下的工具栏**：`Stack(under_bars:)` 里的 `Toolbar` 站在标题栏那一行，与窗口按钮同一条中线，标题栏取这一行的高度（macOS 52 点，红绿灯移到这一行的中线；Windows 48 点的高标题栏；Linux 46 点），工具栏的空处拖动窗口。
+- **Windows**: windows with a unified title bar draw title bar buttons that look like the system's and hand them to Windows hit testing.
+- **Linux**: when the desktop provides no server-side decorations (a GNOME Wayland session), and for unified windows, the runtime draws an Adwaita-style title bar, rounded corners, shadow and resize edges.
+- **Toolbar under the title bar**: a `Toolbar` in `Stack(under_bars:)` stands in the title bar's row, on the same center line as the window buttons, and the title bar takes this row's height (52 points on macOS, with the traffic lights moved to this row's center line; a tall 48-point title bar on Windows; 46 points on Linux); dragging an empty part of the toolbar moves the window.
 
-视频的表面：
+Video surfaces:
 
-- **Windows**：媒体内核的交换链放在 GPUI 后面的 DirectComposition 树里。
-- **Linux，以及只渲染图像的内核**：内核交来图像，窗口当图片画。
+- **Windows**: the media core's swap chain sits in the DirectComposition tree behind GPUI.
+- **Linux, and cores that only render images**: the core hands over images, and the window draws them as pictures.
 
-这个目标服务三类应用，它们是选择 GPUI 而不是平台默认目标的理由：
+This target serves three kinds of apps, and they are the reasons for choosing GPUI over the platform's default target:
 
-- **大型生产力软件**：几十万行的表格与列表、可停靠和拖动的多面板布局、代码与富文本编辑、每秒多次刷新的数据视图。这些界面需要虚拟滚动、自绘与 GPU 合成，用系统控件拼出来代价高、各平台表现也不一致。
-- **跨平台一致的外观**：同一个应用在 macOS、Windows 与 Linux 上外观和交互相同，由应用决定视觉，而不是跟随各平台的系统控件。
-- **没有原生 UI 的嵌入式设备**：只有 Linux、GPU 驱动和一个显示服务、没有桌面环境与 GTK 的设备，例如工控面板、车机、信息亭。
+- **Large productivity software**: tables and lists with hundreds of thousands of rows, multi-panel layouts that dock and drag, code and rich text editing, data views that refresh several times per second. These interfaces need virtual scrolling, self-drawing and GPU compositing; assembling them from system controls is costly, and the result behaves inconsistently across platforms.
+- **Consistent cross-platform appearance**: the same app looks and behaves the same on macOS, Windows and Linux, with the app deciding the visuals instead of following each platform's system controls.
+- **Embedded devices without a native UI**: devices with only Linux, a GPU driver and a display server, and no desktop environment or GTK, such as industrial control panels, in-car systems and kiosks.
 
-目标的定位：
+The target's positioning:
 
-- 显式选择：`ui = "gpui"`，`platform` 为 `macos`、`windows` 或 `linux`，不作为任何平台的默认值。同一应用可以同时构建 GPUI 目标与平台默认目标。
-- 颜色来源为 `BernTheme`：与 Web 同属算法目标，控件按 Bern 自有的视觉规范绘制（现为 [Web 视觉规范](Adaptation/Web.md)，两个算法目标共用，不模仿任何系统的控件外观）。主题快照由 `bern-theme` 在运行时生成，接入系统的明暗、对比偏好，以及平台能提供时的强调色。
-- 引擎与界面同在一个进程，都是 Rust，经 `bern-ffi` 的进程内接口相连，与 GTK 目标相同；没有 C 接口、Swift 或 C++ 宿主。
+- Explicit selection: `ui = "gpui"`, with `platform` set to `macos`, `windows` or `linux`; it is not the default for any platform. The same app can build a GPUI target and the platform's default target at the same time.
+- Colors come from `BernTheme`: like Web, this is an algorithmic target, and controls are drawn according to Bern's own design guidelines (currently the [Web design guidelines](Adaptation/Web.md), shared by the two algorithmic targets and not imitating any system's control appearance). The theme snapshot is generated at runtime by `bern-theme`, hooked up to the system's appearance and contrast preferences, and to the accent color where the platform provides one.
+- The engine and the UI are in one process, both in Rust, connected through the in-process interface of `bern-ffi`, the same as the GTK target; there is no C interface and no Swift or C++ host.
 
-目标由两个 crate 组成：
+The target consists of two crates:
 
-| crate | 职责 |
+| crate | Responsibility |
 | --- | --- |
-| `bern-backend-gpui` | 目标描述、能力检查、生成 Rust 代码、构建计划与打包；只生成代码，不依赖 GPUI |
-| `bern-gpui` | 运行时：窗口宿主、会话桥接、主题、控件、图标与动效；与 `bern-gtk` 一样不属于 Bern 工作区，GPUI 只是这个目标的构建依赖 |
+| `bern-backend-gpui` | Target description, capability checks, Rust code generation, build plan and packaging; it only generates code and does not depend on GPUI |
+| `bern-gpui` | Runtime: window host, session bridge, theme, controls, icons and motion; like `bern-gtk`, it is not part of the Bern workspace, and GPUI is only a build dependency of this target |
 
-依赖与接口隔离：
+Dependency and interface isolation:
 
-- crates.io 上的官方 `gpui` 停在 0.2.2（2025-10）。Zed 主线由 longbridge 每周发布为 `gpui-pre`，GPUI Kit（`gpui-base`、`gpui-component`）与它同步发布。运行时钉死一组相互匹配的版本；升级是一次单独的改动，并重跑这个目标的验收。
-- 生成的代码只调用 `bern-gpui` 的函数，不直接调用 GPUI 或控件库，GPUI 的接口变化挡在运行时里，不波及生成器。
-- macOS 使用 `runtime_shaders`：着色器在启动时编译，构建不需要 Xcode 的 Metal 工具链。
+- The official `gpui` on crates.io stopped at 0.2.2 (2025-10). The Zed mainline is published weekly by longbridge as `gpui-pre`, and GPUI Kit (`gpui-base`, `gpui-component`) is published in sync with it. The runtime pins a set of versions that match each other; upgrading is a separate change and reruns this target's acceptance.
+- Generated code only calls functions of `bern-gpui`, never GPUI or the control library directly; changes in GPUI's interfaces stay inside the runtime and do not reach the generator.
+- macOS uses `runtime_shaders`: shaders are compiled at startup, and the build does not need Xcode's Metal toolchain.
 
-控件的行为与外观分开：
+Control behavior and appearance are kept separate:
 
-- 行为来自 GPUI Kit 的无样式层 `gpui-base`：输入框与输入法、文字选择、焦点陷阱、虚拟列表、表格、可停靠面板、弹层定位、减少动效与 AccessKit 无障碍。这些是自绘控件中最难做对的部分，不自己重写。
-- 外观由 `bern-gpui` 按 Bern 视觉规范与 `bern-theme` 的控件配方绘制。不采用 `gpui-component` 的成品样式：它是另一套设计语言，会让 GPUI 与 Web 两个算法目标外观不同。`gpui-base` 没有行为层、只有 `gpui-component` 提供的复杂组件（例如代码编辑器）逐个评估。
+- Behavior comes from GPUI Kit's unstyled layer `gpui-base`: input fields and input methods, text selection, focus traps, virtual lists, tables, dockable panels, popover positioning, Reduce Motion and AccessKit accessibility. These are the hardest parts of self-drawn controls to get right, and are not rewritten.
+- Appearance is drawn by `bern-gpui` according to Bern's design guidelines and the control recipes of `bern-theme`. The ready-made styles of `gpui-component` are not adopted: they are a different design language and would make the two algorithmic targets, GPUI and Web, look different. Complex components that only `gpui-component` provides and for which `gpui-base` has no behavior layer (for example a code editor) are evaluated one by one.
 
-平台与窗口：
+Platforms and windows:
 
-| 平台 | 渲染 | 显示 |
+| Platform | Rendering | Display |
 | --- | --- | --- |
-| macOS | Metal | AppKit 窗口 |
-| Windows | Direct3D 11 与 DirectComposition | Win32 窗口 |
-| Linux | wgpu：Vulkan，或 OpenGL ES | Wayland 或 X11 |
+| macOS | Metal | AppKit windows |
+| Windows | Direct3D 11 and DirectComposition | Win32 windows |
+| Linux | wgpu: Vulkan, or OpenGL ES | Wayland or X11 |
 
-三个平台都使用原生多窗口；Window 的虚拟呈现不是这个目标的需要。GPUI 的 Linux 平台只连接 Wayland 与 X11，没有直接写 DRM/KMS 的输出，所以嵌入式设备上由一个全屏的 Wayland 合成器（例如 cage，或 weston 的 kiosk 模式）承载应用。设备至少需要 Vulkan 或 OpenGL ES 3.0 的驱动；只有 OpenGL ES 2 或没有 GPU 的设备不在范围内。嵌入式另需交叉编译与只有一个全屏窗口的呈现，在后续阶段单独设计，并在目标设备上验收。
+All three platforms use native multiple windows; this target does not need the virtual presentation of Window. GPUI's Linux platform only connects to Wayland and X11 and has no output that writes to DRM/KMS directly, so on embedded devices a fullscreen Wayland compositor (for example cage, or weston in kiosk mode) hosts the app. Devices need at least a Vulkan or OpenGL ES 3.0 driver; devices with only OpenGL ES 2 or without a GPU are out of scope. Embedded use additionally needs cross-compilation and presentation with only one fullscreen window, designed separately in a later phase and accepted on the target devices.
 
-能力按实现逐项声明：首版能力描述只列出已经实现的组件与功能标记，应用用到其余部分时，现有的能力检查在构建时报错，不生成占位界面。能力表随实现同步。
+Capabilities are declared item by item as they are implemented: the first version's capability description lists only the components and feature flags already implemented; when an app uses anything else, the existing capability check reports an error at build time, and no placeholder UI is generated. The capability table is kept in sync with the implementation.
 
-实施顺序：
+Implementation order:
 
-1. 准备：依赖版本与构建实测、目标与运行时骨架、最小应用能构建运行。
-2. 控件展示示例：开关、滑块、输入框、选择器、侧栏导航、工具栏、设置窗口、多窗口、本地化与明暗。
-3. 生产力软件所需：虚拟列表与 `Table`、可调整与停靠的分栏、快捷键与命令面板、菜单栏，以及大数据量下的帧时间与内存测量。
-4. 视频、`Canvas`、样式覆盖与动效、状态栏项等平台服务。
-5. 嵌入式：交叉编译、全屏呈现与目标设备实测。
+1. Preparation: dependency versions and build measurements, the target and runtime skeleton, a minimal app that builds and runs.
+2. Control showcase example: toggles, sliders, input fields, pickers, sidebar navigation, toolbars, the settings window, multiple windows, localization and appearance.
+3. What productivity software needs: virtual lists and `Table`, resizable and dockable split views, keyboard shortcuts and a command palette, the menu bar, and frame time and memory measurements with large data volumes.
+4. Video, `Canvas`, style overrides and motion, and platform services such as status bar items.
+5. Embedded: cross-compilation, fullscreen presentation and measurements on target devices.
 
-每个阶段按“扩展完成的判断标准”验收：解析器、IR 与业务核心不变；去掉 GPUI 目标后其他目标照常构建；三个平台分别实测，不用 macOS 的结果代替 Windows 与 Linux。
+Each phase is accepted by the "Criteria for a completed extension": the parser, the IR and the business core stay unchanged; with the GPUI target removed, the other targets still build as usual; each of the three platforms is measured on its own, and macOS results do not stand in for Windows and Linux.
 
 ### Flutter
 
-Flutter 目标模块生成 Dart Widget、属性与事件绑定、本地化数据以及所需工程配置。Flutter 管理布局、绘制和目标侧控件生命周期；Bern 的 Rust 前端绑定模块处理保留在 Rust 中的表达式与协议客户端。
+The Flutter target module generates Dart Widgets, property and event bindings, localization data and the required project configuration. Flutter manages layout, drawing and the lifecycle of target-side controls; Bern's Rust frontend binding module handles the expressions kept in Rust and the protocol client.
 
-原生 Flutter 构建可通过 Dart FFI 连接 Rust；Flutter Web 需要单独验证 WASM 与 JavaScript 互操作方案，不能直接复用原生 FFI 假设。生成器必须明确状态通知、Dart isolate 调度、订阅释放及稳定 key 的映射。
+Native Flutter builds can connect to Rust via Dart FFI; Flutter Web needs separate verification of a WASM and JavaScript interop approach and cannot directly reuse native FFI assumptions. The generator must make explicit the mapping of state notification, Dart isolate scheduling, subscription release and stable keys.
 
-是否使用某个现成的 Dart 与 Rust 绑定工具是适配器内部选择，不应改变组件声明或业务协议。Flutter 框架与 Dart 运行时是该目标的依赖，由目标构建适配器管理。
+Whether to use a particular off-the-shelf Dart–Rust binding tool is an internal choice of the adapter and should not change component declarations or the business protocol. The Flutter framework and the Dart runtime are dependencies of this target, managed by the target's build adapter.
 
-### Linux 默认 GTK
+### Linux: GTK by default
 
-Linux 默认通过 GTK 目标生成控件结构、状态绑定和命令适配。目标采用 Rust 的 GTK 绑定（gtk4-rs），生成的 Rust 代码调用独立的 GTK 运行时 crate，引擎与会话运行时在同一进程内经同一进程内接口连接；GTK 4、libadwaita 与绑定版本写入目标支持矩阵和构建清单。
+On Linux, the GTK target generates the control structure, state bindings and command adapters by default. The target uses Rust's GTK bindings (gtk4-rs): the generated Rust code calls a standalone GTK runtime crate, and the engine and the session runtime connect in the same process through the same in-process interface; the versions of GTK 4, libadwaita and the bindings are written into the target support matrix and the build manifest.
 
-后端负责主循环调度、对象与订阅释放、输入法、焦点、可访问性、窗口及视频表面集成。系统外观检测、显示环境和发行依赖按实际目标验证，不从“使用 GTK”推定所有 Linux 桌面已经兼容。
+The backend is responsible for main loop scheduling, the release of objects and subscriptions, input methods, focus, accessibility, and window and video surface integration. System appearance detection, display environments and distribution dependencies are verified on actual targets; "uses GTK" does not imply that all Linux desktops are already compatible.
 
-`gtk + linux` 目标显式采用 libadwaita：它提供 GNOME HIG 的标准容器与行、自适应分栏、对话框，以及跟随系统深浅色与强调色的样式管理器，是 GNOME 平台视觉规范的原生实现。这一依赖由目标描述与构建清单声明（首版最低 GTK 4.14、libadwaita 1.5，即 Ubuntu 24.04 的版本），控件仍经 Bern 的命令契约，颜色全部来自 libadwaita；不提供 libadwaita 的环境或其他 Linux UI 路线须作为另外的目标声明，不由 GTK 目标静默改变依赖。GTK 运行时不属于 Bern 工作区的默认构建，只在生成的 Linux 应用中编译，GTK 不成为构建其他目标的前置条件。
+The `gtk + linux` target explicitly adopts libadwaita: it provides the standard containers and rows of the GNOME HIG, adaptive split views, dialogs, and a style manager that follows the system's light and dark mode and accent color, and it is the native implementation of GNOME's platform design guidelines. This dependency is declared by the target description and the build manifest (the first version's minimum is GTK 4.14 and libadwaita 1.5, the versions in Ubuntu 24.04); controls still go through Bern's command contract, and all colors come from libadwaita; environments that do not provide libadwaita, or other Linux UI routes, must be declared as separate targets, and the GTK target does not silently change its dependencies. The GTK runtime is not part of the Bern workspace's default build and is compiled only in generated Linux apps, so GTK does not become a prerequisite for building other targets.
 
-GTK 4 不提供窗口位置的读取与设置，Wayland 合成器也不报告窗口已最小化：目标如实报告这些动作不可用或结果未知，不把请求发出当作已完成。
+GTK 4 provides no way to read or set window positions, and Wayland compositors do not report that a window has been minimized: the target truthfully reports these actions as unavailable or their results as unknown, and does not treat sending the request as completion.
 
-### Windows 默认 WinUI 3
+### Windows: WinUI 3 by default
 
-Windows 默认通过 WinUI 3 目标生成界面、平台宿主和 Rust 绑定。宿主采用 C++/WinRT：生成的 C++ 代码调用随目标模块分发的 C++ 运行时，界面全部以代码构建，不生成 XAML 页面；业务逻辑和命令目录继续保留在独立 Rust 引擎中，引擎、会话运行时与 C 接口编译为静态库链入同一个可执行文件，运行时直接调用与 SwiftUI 目标相同的进程内接口。C++ 运行时不属于 Bern 工作区的构建，MSVC 与 Windows SDK 不成为构建其他目标的前置条件。
+On Windows, the WinUI 3 target generates the UI, the platform host and the Rust bindings by default. The host uses C++/WinRT: the generated C++ code calls a C++ runtime distributed with the target module, and the UI is built entirely in code, with no XAML pages generated; business logic and the command catalog stay in the standalone Rust engine, the engine, the session runtime and the C interface are compiled into a static library linked into the same executable, and the runtime directly calls the same in-process interface as the SwiftUI target. The C++ runtime is not part of the Bern workspace build, so MSVC and the Windows SDK do not become prerequisites for building other targets.
 
-应用只使用系统已有的组件：同一个可执行文件默认包含两套前端，启动时选择。系统有 Windows App Runtime 2（任何 2.x，其他程序安装的或 Windows 11 自带的）时使用 WinUI 3（Windows 11 外观）；没有时不提示安装，而是回退到每台 Windows 10 与 11 都有的系统 XAML，经 XAML Islands 承载（Windows 10 外观）。目标也可以用 `frontends` 只编译其中一套：只有系统 XAML 时不查找运行时、不随附引导程序；只有 WinUI 3 时，没有运行时的系统上按界面语言提示，并可在浏览器中打开最新运行时的安装程序。两套前端共用一份运行时源码与一份生成代码，按 XAML 命名空间各编译一次；窗口事实与命令在两者中都经 Win32 取得。应用不随附 .NET、Windows App SDK 或 VC++ 运行库，C 运行库静态链接。
+Apps use only components already on the system: by default the same executable contains two frontends, and one is chosen at startup. When the system has Windows App Runtime 2 (any 2.x, installed by another program or bundled with Windows 11), WinUI 3 is used (Windows 11 look); when it does not, the app does not prompt for an installation but falls back to the system XAML present on every Windows 10 and 11 machine, hosted through XAML Islands (Windows 10 look). A target can also use `frontends` to compile only one of them: with only system XAML, it does not look for the runtime and ships no bootstrapper; with only WinUI 3, on systems without the runtime it shows a prompt in the UI language and can open the installer of the latest runtime in the browser. The two frontends share one runtime source and one set of generated code, compiled once per XAML namespace; in both, window facts and commands are obtained through Win32. Apps ship no .NET, Windows App SDK or VC++ runtime libraries, and the C runtime is linked statically.
 
-后端负责 UI 线程调度、平台对象生命周期、事件与命令的双向映射、主题资源、焦点、输入法、可访问性及窗口集成。状态写回必须遵守防止原生回调重复派发的统一规则。应用按 Windows 惯例单实例运行，再次启动显示主窗口，最后一个窗口关闭后退出；品牌色映射为 `SystemAccentColor` 及其各档浅色与深色资源。
+The backend is responsible for UI thread scheduling, platform object lifecycles, the two-way mapping between events and commands, theme resources, focus, input methods, accessibility and window integration. State writeback must follow the unified rules that prevent native callbacks from dispatching twice. Following Windows conventions, the app runs as a single instance: launching it again shows the main window, and it exits after the last window closes; the brand color maps to `SystemAccentColor` and its resources for the lighter and darker shades.
 
-Windows App SDK、所需 Windows SDK、最低系统版本、构建环境和部署方式由目标描述明确声明：按最新的 Windows App SDK 编写（目前 2.5.1，其头文件与元数据只用于构建），只使用每个 2.x 都有的接口，运行时接受任何 2.x：先用引导程序找其他程序安装的，再经系统的动态依赖接口找 Windows 11 自带的副本（`Microsoft.WindowsAppRuntime.CBS.2`，这时由应用把 WinUI 指向这份运行时的资源索引）；C++/WinRT 头文件由 Windows SDK 的 `cppwinrt` 生成，最低 Windows 10 2004（10.0.19041），应用不打包。WinUI 3 与回退前端的支持范围需要实际构建与运行验证，不能把“Windows 原生”当作支持所有 Windows 环境的保证。
+The Windows App SDK, the required Windows SDK, the minimum system version, the build environment and the deployment method are explicitly declared by the target description: the code is written against the latest Windows App SDK (currently 2.5.1, whose headers and metadata are used only for building) and uses only APIs present in every 2.x, and at runtime any 2.x is accepted: first the bootstrapper looks for one installed by another program, then the system's dynamic dependency API looks for the copy bundled with Windows 11 (`Microsoft.WindowsAppRuntime.CBS.2`, in which case the app points WinUI to this runtime's resource index); C++/WinRT headers are generated by the Windows SDK's `cppwinrt`, the minimum is Windows 10 2004 (10.0.19041), and the app is unpackaged. The supported range of WinUI 3 and of the fallback frontend needs verification through actual builds and runs; "Windows native" must not be taken as a guarantee of supporting every Windows environment.
 
-### Android 与 iOS
+### Android and iOS
 
-Android 的 Compose 路线生成 Kotlin UI，iOS 的 SwiftUI 路线生成 Swift UI。Flutter 也可以作为独立选择。各路线都通过相同应用协议连接业务，目标模块分别负责 UI 框架与语言桥接。
+Android's Compose route generates Kotlin UI, and iOS's SwiftUI route generates Swift UI. Flutter can also be chosen separately. Every route connects to the business logic through the same app protocol, and the target modules are each responsible for the UI framework and the language bridge.
 
-移动端适配必须处理前后台生命周期、屏幕旋转、平台导航、键盘、安全区域与资源释放。原生多窗口或多场景能力按实际环境检测；不可用时提供保留各窗口状态的虚拟窗口及窄屏切换。具体 FFI 工具、工程模板及打包流程在验证后确定。
+Mobile adaptation must handle the foreground and background lifecycle, screen rotation, platform navigation, the keyboard, safe areas and resource release. Native multi-window or multi-scene capability is detected in the actual environment; when it is unavailable, virtual windows that keep each window's state, plus narrow-screen switching, are provided. The specific FFI tools, project templates and packaging process are decided after verification.
 
-**`compose + android` 的实现。** 目标模块 `bern-backend-compose` 从 IR 生成 Kotlin 与 Jetpack Compose（Material 3），放进它生成的 Gradle 工程：
+**Implementation of `compose + android`.** The target module `bern-backend-compose` generates Kotlin and Jetpack Compose (Material 3) from the IR and puts them into the Gradle project it generates:
 
-- 引擎、会话运行时与桥接用 NDK 编译成 `libbern_app.so`，在应用进程内运行；Kotlin 运行时通过 JNI 调用它，引擎的回调在 Rust 线程上进入 Kotlin 后转到主线程。值的二进制布局与 C ABI 相同。
-- 一个 Activity 承载所有窗口：主窗口铺满屏幕，其他窗口叠在上面，系统返回关闭最上面的窗口。Activity 自己处理旋转等配置变化，窗口与草稿不因此重建。顶栏显示窗口或页面的标题、返回与工具栏操作。
-- 侧边栏分栏在宽度不小于 600dp 时并排显示，较窄时先显示列表、选中后进入目标页，系统返回回到列表。标签页显示为底部导航栏。
-- 颜色来自 Material 3 配色，Android 12 起跟随壁纸的动态取色，深浅色跟随系统。界面语言从系统语言中选应用支持的，字符串表放在 APK 的 assets 中，运行时切换语言不重建界面。
-- 控制通道监听抽象套接字；`bern run` 安装并启动应用后用 `adb forward` 把它接到这台电脑的应用目录，构建同时生成在这台电脑上运行的命令行与 MCP 服务，所以 `ui.inspect` 等外部入口与桌面相同。
-- 工具链：Android SDK 与 NDK、Gradle 9.4 以上、JDK 17 以上。生成的工程使用 Android Gradle 插件 9.3、Compose BOM 2026.09，compileSdk 37、targetSdk 36、minSdk 26（Android 8.0），只构建 arm64-v8a。首次构建由 Gradle 下载插件与库。
+- The engine, the session runtime and the bridge are compiled with the NDK into `libbern_app.so` and run inside the app process; the Kotlin runtime calls it via JNI, and engine callbacks enter Kotlin on Rust threads and are then moved to the main thread. The binary layout of values is the same as in the C ABI.
+- One Activity hosts all windows: the main window fills the screen, other windows are stacked on top of it, and system back closes the topmost window. The Activity handles configuration changes such as rotation itself, so windows and drafts are not recreated because of them. The top bar shows the window or page title, back, and toolbar actions.
+- Sidebar split views are shown side by side when the width is at least 600dp; when narrower, the list is shown first, selecting an item enters the destination page, and system back returns to the list. Tabs are shown as a bottom navigation bar.
+- Colors come from the Material 3 color scheme, following the wallpaper's dynamic color from Android 12 on, and light and dark mode follow the system. The UI language is chosen from the system languages among those the app supports; string tables are placed in the APK's assets, and switching languages at runtime does not rebuild the UI.
+- The control channel listens on an abstract socket; after `bern run` installs and launches the app, it uses `adb forward` to connect the socket to the app directory on this computer, and the build also generates a command line and an MCP service that run on this computer, so external entry points such as `ui.inspect` are the same as on desktop.
+- Toolchain: the Android SDK and NDK, Gradle 9.4 or later, JDK 17 or later. The generated project uses Android Gradle Plugin 9.3, Compose BOM 2026.09, compileSdk 37, targetSdk 36 and minSdk 26 (Android 8.0), and builds only arm64-v8a. On the first build Gradle downloads the plugins and libraries.
 
-- 视频：Media3 的 ExoPlayer 是媒体执行端，`Video` 用不带自身控件的 `PlayerView` 显示画面，控制条由 Material 组件组成，所有播放变化都经 Bern 媒体命令。一个播放器同一时刻只在一个视图中显示；后台继续播放需要媒体服务，应用目前不声明，所以能力描述中声明不支持后台播放。
-- `bern package` 在 `target/bern/dist/` 生成发布版 APK（直接安装）与 Android App Bundle（上架商店）。Gradle 从 `BERN_ANDROID_KEYSTORE`、`BERN_ANDROID_KEYSTORE_PASSWORD`、`BERN_ANDROID_KEY_ALIAS` 读取发布密钥，密码不写进任何文件；没有这些变量时用调试密钥签名，并提示不能上架。
-- `chrome` 对手机不起作用，手机窗口没有标题栏；`immersive` 为真时隐藏顶栏与系统状态栏、导航栏，从屏幕边缘滑动可暂时显示系统栏；iOS 上窗口内容同时铺满整个屏幕、伸到安全区下（刘海、圆角与主屏幕指示条的区域），像视频播放器那样，由应用自己避开这些区域；`idle_after` 由触摸、指针与按键重新计时。iOS 上触摸由挂在窗口上、只观察不参与识别的 UIKit 手势识别器察觉：原先用 SwiftUI 的拖动手势察觉，会让导航栏的返回与工具栏按钮点不动，已在 iOS 26.5 模拟器上修正并验证。
+- Video: Media3's ExoPlayer is the media executor; `Video` shows the picture with a `PlayerView` that has no controls of its own, the control bar is made of Material components, and all playback changes go through Bern media commands. A player is shown in only one view at a time; playing in the background needs a media service, which the app does not currently declare, so the capability description declares background playback unsupported.
+- `bern package` produces a release APK (installed directly) and an Android App Bundle (for store publishing) in `target/bern/dist/`. Gradle reads the release key from `BERN_ANDROID_KEYSTORE`, `BERN_ANDROID_KEYSTORE_PASSWORD` and `BERN_ANDROID_KEY_ALIAS`, and passwords are not written into any file; without these variables it signs with the debug key and warns that the package cannot be published to a store.
+- `chrome` has no effect on phones, since phone windows have no title bar; when `immersive` is true, the top bar and the system status and navigation bars are hidden, and swiping from the screen edge shows the system bars temporarily; on iOS the window content also fills the whole screen and extends under the safe areas (the notch, the rounded corners and the home indicator area), like a video player, and the app itself keeps clear of those areas; `idle_after` is restarted by touch, pointer and key input. On iOS, touches are noticed by a UIKit gesture recognizer attached to the window that only observes and does not take part in recognition: noticing them with a SwiftUI drag gesture, as was done before, made the navigation bar's back button and the toolbar buttons untappable; this was fixed and verified on the iOS 26.5 simulator.
 
-实现进度：已在小米 MIX 2S（LineageOS，Android 15）上运行 `examples/hello`、`examples/planner` 与 `examples/showcase`。验证了模块、侧栏与条件出现的项、开关、按钮、样式覆盖、`Canvas` 与图案、文字标注、控制通道，showcase 的各页（文字、按钮、开关与滑块、输入框、图片与布局、`Query` 查询列表、视频播放）与设置窗口；列表中后加入的项的弹出过渡与共享元素（标题在两种字号间放大）用录屏逐帧确认；沉浸模式静置后隐藏顶栏与系统栏、触摸后恢复；设置窗口叠在详情页上时，返回先关闭设置窗口。条件分支的切换用 `AnimatedContent`，新旧分支占同一位置；共享元素按自身尺寸布局后缩放到移动的边界，文字在过渡中不重新换行。HDR 图片在这台手机上按 SDR 显示，HDR 显示未验证。
+Implementation progress: `examples/hello`, `examples/planner` and `examples/showcase` have run on a Xiaomi MIX 2S (LineageOS, Android 15). Verified: modules, the sidebar and conditionally appearing items, toggles, buttons, style overrides, `Canvas` and shapes, text annotations, the control channel, every page of showcase (text, buttons, toggles and sliders, input fields, images and layout, the `Query` list, video playback) and the settings window; the pop-in transition of items added to a list later and shared elements (a title growing between two font sizes) were confirmed frame by frame from screen recordings; in immersive mode the top bar and the system bars hide after a period of inactivity and come back on touch; when the settings window is stacked over a detail page, back closes the settings window first. Switching conditional branches uses `AnimatedContent`, with the old and new branches occupying the same position; shared elements are laid out at their own size and then scaled to the moving bounds, and text does not rewrap during the transition. HDR images are shown as SDR on this phone; HDR display is not verified.
 
-v0.29 的能力在 Compose 上全部实现，能力描述列出全部 `features` 与 `scroll_scale`、`scroll_opacity`、`nudge` 等动效属性；`examples/gallery` 在 Android 模拟器（Android 15）上逐项验证，各项结果写在对应小节。手指与多指操作经模拟器的 gRPC 触摸接口发送，`input` 命令只能模拟单指。实测中修了四个问题：胶片初始定位后，各格的位置按定位前的窗口坐标与定位后的滚动量合算，跟随把字段写回了第二格，改为按滚动内容中的坐标记录；绑定的内边距随弹簧收到零时越过零，Compose 拒绝负值而崩溃；没有控件获得焦点时快捷键收不到按键；取色只采到图片中间的一个像素。
+All v0.29 capabilities are implemented on Compose, and the capability description lists all `features` and the motion properties such as `scroll_scale`, `scroll_opacity` and `nudge`; `examples/gallery` was verified item by item on the Android emulator (Android 15), with each result written in the corresponding subsection. Single-finger and multi-finger gestures were sent through the emulator's gRPC touch interface, since the `input` command can only simulate a single finger. Four problems were fixed during the measurements: after the filmstrip's initial positioning, each cell's position was computed from the window coordinates before positioning combined with the scroll offset after it, so following wrote the second cell back into the field; positions are now recorded in the scroll content's coordinates; a bound padding overshot zero while a spring shrank it to zero, and Compose rejects negative values, so it crashed; keyboard shortcuts received no key presses when no control had focus; color sampling took only one pixel in the middle of the image.
 
-Android 交给应用的文件（选择器、拖放、“用…打开”）是 `content://` 地址，地址里没有文件名，也不是路径。引擎经 `MediaSource::file_name()` 与 `open()` 读取它的名字与内容：宿主经内容解析器取显示名、打开文档并交出文件描述符；选择器给的文件夹是文档树，引擎经 `bern::files::list` 与 `walk` 列出其中的文档，见“引擎读取交来的文件”。
+Files Android hands to the app (pickers, drag and drop, "Open with…") are `content://` addresses; the address contains no file name and is not a path. The engine reads the file's name and content via `MediaSource::file_name()` and `open()`: the host gets the display name through the content resolver, opens the document and hands over a file descriptor; a folder from the picker is a document tree, and the engine lists the documents in it through `bern::files::list` and `walk`, see "The engine reads files handed to it".
 
-iOS 目标（`swiftui + ios`）已确定以下做法：
+The iOS target (`swiftui + ios`) has settled on the following:
 
-- 与 macOS 共用 SwiftUI 生成器、运行时与 C ABI，引擎以静态库链入应用进程；窗口、场景与生命周期在平台各自的运行时文件中实现，生成器只在场景、窗口尺寸与少数控件样式上区分平台。最低 iOS 17，与 macOS 14 同一代。
-- 同一个应用包，窗口的呈现方式在启动时按设备决定并告诉引擎。iPhone 只有一个场景，窗口都是虚拟窗口，形式遵循 iOS 习惯：主窗口铺满场景，其他窗口是按打开顺序叠放的 sheet，带标题与经关闭协议关闭的“完成”按钮；关闭检查需要确认时不能下滑关闭。被盖住的窗口不能单独激活或关闭，如实报告为不可用。
-- iPad 支持多个窗口（应用声明多场景），除设置外每种窗口是原生窗口：一个以窗口种类为值的 `WindowGroup`，再次打开时把已有窗口调到前面，保持每种窗口一个实例；声明的默认尺寸与最小尺寸用于可调整大小的 iPad 窗口。iPadOS 没有设置场景，设置窗口仍是主窗口上的 sheet，⌘, 打开。最小化、移动与调整尺寸没有公开接口，报告为不可用。窗口化模式下几个窗口的场景可以同时活动，焦点按窗口是否显示为活动（`appearsActive`）报告。
-- 前后台变化作为窗口事实报告（进入后台为隐藏、失去焦点）；媒体只报告 AVFoundation 的实际状态。
-- 先构建模拟器应用。模拟器中的应用经 IPC 通道接受 Mac 上的 CLI、JSON 与 MCP 入口：`bern run` 把 Mac 的目录经 `BERN_IPC_DIR` 交给应用，iOS 上只有设置了该目录时通道才监听。真机的签名、描述文件、安装与打包后续实现。
+- It shares the SwiftUI generator, the runtime and the C ABI with macOS, and the engine is linked into the app process as a static library; windows, scenes and lifecycle are implemented in each platform's own runtime files, and the generator distinguishes the platforms only in scenes, window sizes and a few control styles. The minimum is iOS 17, the same generation as macOS 14.
+- There is one app bundle; how windows are presented is decided per device at startup and told to the engine. iPhone has only one scene, and all windows are virtual windows in the forms iOS uses: the main window fills the scene, and other windows are sheets stacked in the order they were opened, with a title and a "Done" button that closes them through the close protocol; when the close check needs confirmation, the sheet cannot be swiped down to close. A covered window cannot be activated or closed on its own, which is truthfully reported as unavailable.
+- iPad supports multiple windows (the app declares multiple scenes), and every kind of window except settings is a native window: one `WindowGroup` whose value is the window kind, which brings an existing window to the front when it is opened again, keeping one instance per kind of window; the declared default size and minimum size are used for resizable iPad windows. iPadOS has no settings scene, so the settings window is still a sheet on the main window, opened with ⌘,. Minimizing, moving and resizing have no public API and are reported as unavailable. In windowed mode the scenes of several windows can be active at the same time, and focus is reported by whether a window appears active (`appearsActive`).
+- Foreground and background changes are reported as window facts (entering the background counts as hidden and losing focus); media reports only the actual state of AVFoundation.
+- Simulator apps are built first. An app in the simulator accepts the Mac's CLI, JSON and MCP entry points through the IPC channel: `bern run` hands a directory on the Mac to the app via `BERN_IPC_DIR`, and on iOS the channel listens only when that directory is set. Signing, provisioning profiles, installation and packaging for real devices are implemented later.
 
-tvOS 目标（`swiftui + tvos`）已确定以下做法：
+The tvOS target (`swiftui + tvos`) has settled on the following:
 
-- 与 iOS 共用 SwiftUI 生成器、UIKit 运行时与 C ABI，平台差异用 `#if os(tvOS)` 区分。最低 tvOS 18，引擎用 rustup 预编译标准库的 `aarch64-apple-tvos-sim` 目标（不需要 nightly 的 `-Zbuild-std`）。
-- 一个铺满屏幕的场景，窗口都是虚拟窗口：主窗口铺满，其他窗口（含设置）以全屏页打开，返回键关闭。控件全部是 tvOS 系统控件与系统焦点效果；tvOS 没有的控件按系统做法替换：滑块是可聚焦、按方向步进的轨道，浮层按钮的内容以 sheet 显示，没有选文件、拖放与悬停。
-- 只构建电视显示的部分：`Layout(size: tv)` 与已知的窗口条件在构建时裁剪（见“自适应布局”）；`Shortcut` 与 `shortcut` 是遥控按键，`default_focus` 是首选焦点。
-- 图标为分层的 brand assets（`[app.icon].tvos`）。模拟器构建与 `bern run --target tvos`，CLI、JSON 与 MCP 经 IPC 连到模拟器里的应用。`Svg` 依赖 WebKit，tvOS 没有，不可用。详见 [tvOS 实现记录](Implementation/tvOS-SwiftUI.md)。
+- It shares the SwiftUI generator, the UIKit runtime and the C ABI with iOS, with platform differences separated by `#if os(tvOS)`. The minimum is tvOS 18, and the engine uses the `aarch64-apple-tvos-sim` target, for which rustup provides a precompiled standard library (nightly `-Zbuild-std` is not needed).
+- One fullscreen scene, and all windows are virtual windows: the main window fills the screen, other windows (including settings) open as fullscreen pages, and the back button closes them. All controls are tvOS system controls with the system focus effects; controls tvOS lacks are replaced the way the system does it: a slider is a focusable track that steps with the direction buttons, the content of a popover button is shown as a sheet, and there is no file picking, drag and drop or hover.
+- Only the parts shown on a TV display are built: `Layout(size: tv)` and known window conditions are pruned at build time (see "Adaptive layout"); `Shortcut` and `shortcut` are remote buttons, and `default_focus` is the preferred focus.
+- The icon is a layered set of brand assets (`[app.icon].tvos`). Simulator builds and `bern run --target tvos`; CLI, JSON and MCP connect to the app in the simulator through IPC. `Svg` depends on WebKit, which tvOS does not have, so it is unavailable. For details see the [tvOS implementation notes](Implementation/tvOS-SwiftUI.md).
 
-## 声明式视频与可扩展媒体后端
+## Declarative video and extensible media backends
 
-### 专门的视频语义
+### Dedicated video semantics
 
-应用通过 Video 声明“播放什么、如何呈现以及使用哪些控制”，不负责取帧、管理纹理、绘制 Canvas 或传递原生窗口句柄。`VideoSurface` 不再是应用层的推荐组件；具体表面类型仅属于媒体后端与 UI 适配器的实现细节。
+An app uses Video to declare "what to play, how to present it and which controls to use"; it is not responsible for grabbing frames, managing textures, drawing on a Canvas or passing native window handles. `VideoSurface` is no longer a recommended app-level component; concrete surface types are only implementation details of the media backend and the UI adapter.
 
-最简写法由框架创建受管理的播放器实例并绑定标准命令：
+In the simplest form, the framework creates a managed player instance and binds the standard commands:
 
 ```rust
 ui! {
@@ -2515,9 +2517,9 @@ ui! {
 }
 ```
 
-`media.current` 是类型化 MediaSource 值或快照字段，普通 URL、受支持的本地资源及媒体清单都通过该类型表达；随包资源由引擎经宿主按名称解析为执行端可访问的位置，见“随包资源”。资源定位符不是用户可见文案，不需要本地化。`controls: standard` 是默认值，生成符合主题、可访问性和命令契约的标准控制条，应用无需逐个连接播放、暂停和进度条。
+`media.current` is a typed MediaSource value or snapshot field; ordinary URLs, supported local resources and media manifests are all expressed through this type; bundled resources are resolved by name by the engine, via the host, into locations the executor can access, see "Bundled resources". Resource locators are not user-visible text and need no localization. `controls: standard` is the default; it generates a standard control bar that conforms to the theme, accessibility and the command contract, so the app does not need to wire up play, pause and the progress bar one by one.
 
-需要跨页面持续播放、由 CLI 打开媒体或复用已有引擎播放器时，仍使用同一个 Video 节点，绑定已有实例：
+When playback must continue across pages, media is opened from the CLI, or an existing engine player is reused, the same Video node is still used, bound to an existing instance:
 
 ```rust
 ui! {
@@ -2525,441 +2527,441 @@ ui! {
 }
 ```
 
-`source` 与 `player` 是互斥的创建与附着方式，必须选择其一。source 方式由声明生成具有稳定身份和明确作用域的播放器描述，初始及后续源版本变化通过框架生成的加载命令处理，不在每次布局或重绘时重新打开媒体。player 方式仅附着到已有实例，媒体源由该实例的命令更新，避免多个视图竞争写入同一个源。
+`source` and `player` are mutually exclusive ways of creating and attaching, and exactly one must be chosen. The source form generates from the declaration a player description with a stable identity and an explicit scope; the initial source and later source version changes are handled through framework-generated load commands, and media is not reopened on every layout or redraw. The player form only attaches to an existing instance, and the media source is updated by that instance's commands, which avoids multiple views competing to write the same source.
 
-source 方式的源由声明绑定统一决定。CLI 等外部入口需要换源时，应调用源所有者的命令来更新绑定值，或使用 player 方式；不能独立改写受控播放器的源后，又被下一次绑定更新覆盖。媒体适配器应拒绝与源绑定冲突的直接换源请求，播放、暂停等其他命令仍使用同一播放器。
+In the source form, the source is decided solely by the declared binding. When an external entry point such as the CLI needs to change the source, it should call the command of the source's owner to update the bound value, or use the player form; it must not independently rewrite the source of a controlled player only to have it overwritten by the next binding update. The media adapter should reject direct source-change requests that conflict with the source binding; other commands such as play and pause still use the same player.
 
-`fit`、海报、预加载策略、循环、初始静音和覆盖层等是专门的媒体属性，具体名称与支持范围待原型确认。声明请求改变播放行为时，同样生成已声明的命令；后端实际状态的观察结果通过事件同步，不伪装为新的用户命令。视频不提供绕过命令的任意平台回调。
+`fit`, poster, preload policy, looping, initial mute, overlays and the like are dedicated media properties; their exact names and supported range await confirmation by the prototype. When a declaration requests a change in playback behavior, it likewise generates declared commands; observations of the backend's actual state are synchronized through events and are not disguised as new user commands. Video provides no arbitrary platform callbacks that bypass commands.
 
-### 播放器与视图分离
+### Separation of player and view
 
-播放器实例由组件、页面或应用级作用域持有，视图只建立呈现附着。source 简写默认跟随所属组件作用域；持续播放应使用显式持有的播放器。跨自适应布局复用同一个实例时，切换视图不意味着重新加载源或自动停止播放。
+Player instances are held by a component, page or app-level scope, and views only establish presentation attachments. The source shorthand follows the scope of the component it belongs to by default; continuous playback should use an explicitly held player. When the same instance is reused across adaptive layouts, switching views does not imply reloading the source or automatically stopping playback.
 
-每个播放器具有稳定 `player_id`。打开媒体、播放、暂停、跳转、音量、静音、倍速和轨道选择使用标准类型化命令；全屏和画中画等呈现操作还需要有效的视图或会话目标。命令 schema 来自构建目录，各实例按能力报告命令是否可用及原因；运行时能力变化不偷偷改写命令 schema，缺失能力应返回明确结果。
+Each player has a stable `player_id`. Opening media, play, pause, seek, volume, mute, playback rate and track selection use standard typed commands; presentation operations such as fullscreen and picture-in-picture also need a valid view or session target. The command schema comes from the build catalog, and each instance reports, by capability, whether a command is available and why not; runtime capability changes do not silently rewrite the command schema, and missing capabilities should return explicit results.
 
-命令名称可以由框架媒体命名空间提供，应用也可将已有 `player.*` 命令显式映射到同一播放器。别名或适配不创建第二个执行实例。UI、CLI、JSON 和 MCP 必须定位同一个 `player_id` 及其执行端，不因为入口不同另开一份播放器。
+Command names can be provided by the framework's media namespace, and an app can also explicitly map existing `player.*` commands to the same player. Aliases or adaptation do not create a second executing instance. UI, CLI, JSON and MCP must target the same `player_id` and its executor, and must not open another player just because the entry point differs.
 
-视图卸载只解除附着和对应订阅；是否释放播放器由所有者决定。如果后端无法在无视图时继续播放，应明确报告这项能力，并按声明的暂停或释放策略处理，不能假装播放仍在继续。多个视图或投屏能否同时附着由后端声明，不默认保证。
+Unmounting a view only removes the attachment and the corresponding subscriptions; whether the player is released is decided by its owner. If a backend cannot continue playing without a view, it should explicitly report this capability and act according to the declared pause or release policy, and must not pretend that playback is still going on. Whether multiple views or casting can attach at the same time is declared by the backend and not guaranteed by default.
 
-### Web 默认 HTML video
+### Web: HTML video by default
 
-Web 默认媒体适配器直接管理 HTMLMediaElement，使用 `<video>` 加载和呈现资源。它负责媒体属性、播放请求、事件订阅与清理，应用只提供声明和媒体源。
+The Web default media adapter manages the HTMLMediaElement directly, using `<video>` to load and present resources. It is responsible for media properties, playback requests, event subscription and cleanup; the app only provides the declaration and the media source.
 
-播放器状态至少区分加载、就绪、播放、暂停、缓冲、结束与失败，并分别表达播放位置、可用时长及轨道信息。直播或尚未获得元数据时不能把未知时长伪装为零时长文件，也不能假定任意位置都可跳转。
+Player state distinguishes at least loading, ready, playing, paused, buffering, ended and failed, and separately expresses the playback position, the available duration and track information. For live streams, or before metadata is available, an unknown duration must not be disguised as a zero-length file, nor may any position be assumed to be seekable.
 
-播放命令被接受不等于已经播放。Web 适配器依据 `play()` 的完成或失败及媒体事件更新实际状态；后端观察结果经媒体协议归并为同一播放器状态，再向所有入口发布。UI 本地不能维护另一份独立的“正在播放”事实。
+A play command being accepted does not mean playback has started. The Web adapter updates the actual state based on the completion or failure of `play()` and on media events; backend observations are merged through the media protocol into the same player state and then published to all entry points. The UI must not maintain a separate, independent "is playing" fact locally.
 
-每次换源具有新的源版本或加载身份，旧源的延迟事件不得覆盖新源。命令请求、执行结果和媒体事件区分来源，收到 `pause`、`timeupdate` 等事实通知不能再次派发同一命令形成回环。
+Each source change gets a new source version or load identity, and delayed events from an old source must not overwrite the new source. Command requests, execution results and media events are distinguished by origin; receiving fact notifications such as `pause` and `timeupdate` must not dispatch the same command again and form a loop.
 
-浏览器原生 `controls` 往往先改变媒体状态再通知脚本，无法普遍在副作用发生前拦截。为满足强制命令化，Web Video 默认关闭该原生控制条，使用 Bern 自动生成的标准控件驱动 `<video>`。事后记录一条命令不算满足强制命令化；不能可靠遵守契约的控制方案不作为标准合规配置。
+The browser's native `controls` often change media state first and notify scripts afterwards, and generally cannot be intercepted before the side effect happens. To satisfy mandatory command routing, Web Video turns this native control bar off by default and drives `<video>` with standard controls generated automatically by Bern. Recording a command after the fact does not count as satisfying mandatory command routing; control schemes that cannot reliably honor the contract are not standard compliant configurations.
 
-自动播放、带声音播放、全屏与画中画可能需要真实用户激活。浏览器适配器应在允许时保留真实手势调用路径，通过同一套本地校验与命令分发执行受限 API；无法跨越异步或远程边界保留的资格必须明确返回 `user_activation_required` 等结果。不能为保留手势跳过必要的执行检查，也不能承诺 CLI 或 MCP 能绕过浏览器策略。
+Autoplay, playback with sound, fullscreen and picture-in-picture may require genuine user activation. Where this is allowed, the browser adapter should keep the genuine gesture call path and execute the restricted APIs through the same local validation and command dispatch; eligibility that cannot be carried across asynchronous or remote boundaries must explicitly return results such as `user_activation_required`. Necessary execution checks must not be skipped to keep the gesture, and it must not be promised that the CLI or MCP can bypass browser policy.
 
-资源 URL、跨域策略、媒体格式、流式协议和 DRM 按浏览器能力检查。默认方案不为了统一其他平台而强制改用 Canvas、WebGL 或某个 WASM 解码器；这些可以作为另行声明能力的可选媒体实现。
+Resource URLs, cross-origin policies, media formats, streaming protocols and DRM are checked against browser capabilities. The default approach does not force a switch to Canvas, WebGL or some WASM decoder for the sake of uniformity with other platforms; these can be optional media implementations with separately declared capabilities.
 
-### 媒体接口独立于 UI 后端
+### Media interfaces independent of the UI backend
 
-UI 后端决定生成 SwiftUI、GTK、WinUI 3、Flutter 或 Web 控件。媒体后端决定加载、解码、播放和报告媒体状态。两类扩展各自版本化，通过呈现适配接口组合，新增播放器不要求重写整个 UI 生成器。
+The UI backend decides whether SwiftUI, GTK, WinUI 3, Flutter or Web controls are generated. The media backend decides loading, decoding, playback and the reporting of media state. The two kinds of extension are versioned separately and combined through a presentation adapter interface, so adding a player does not require rewriting the whole UI generator.
 
-| 接口职责 | 需要表达的内容 |
+| Interface responsibility | What it must express |
 | --- | --- |
-| MediaSource | 源身份、位置或资源引用、必要选项及版本；平台文件句柄通过受管理引用表达 |
-| MediaBackend | 创建和释放播放器、执行已声明媒体命令、提供状态与错误事件 |
-| MediaCapabilities | 格式、轨道、跳转、倍速、硬件解码、受保护媒体及无视图运行等能力 |
-| VideoPresenter | 将指定播放器附着到目标视图，处理尺寸、缩放、可见性和解除附着 |
-| PresentationCapabilities | 全屏、画中画、覆盖层、输入命中及多视图附着能力 |
+| MediaSource | Source identity, location or resource reference, necessary options and version; platform file handles are expressed through managed references |
+| MediaBackend | Creating and releasing players, executing declared media commands, providing state and error events |
+| MediaCapabilities | Capabilities such as formats, tracks, seeking, playback rate, hardware decoding, protected media and running without a view |
+| VideoPresenter | Attaching a given player to a target view, and handling size, scaling, visibility and detaching |
+| PresentationCapabilities | Fullscreen, picture-in-picture, overlays, input hit testing and multi-view attachment capabilities |
 
-这些是接口职责，具体 trait 名称待验证。跨语言协议只传递有规则的媒体引用、命令和状态，不暴露裸指针或要求应用持有 GPU 纹理。后端内部可以使用原生媒体视图、平台表面或纹理，但由适配器管理。
+These are interface responsibilities; the concrete trait names await verification. The cross-language protocol only passes media references, commands and state that follow defined rules; it does not expose raw pointers or require the app to hold GPU textures. Backends may use native media views, platform surfaces or textures internally, but these are managed by the adapter.
 
-macOS、Linux 和 Windows 可以分别接入其平台媒体设施，也可以由应用通过接口选择其他播放内核。Flutter 等 UI 目标同样能提供自己的呈现适配；媒体内核不因桌面默认使用 SwiftUI、GTK、WinUI 3 就被硬编码进公共 IR。
+macOS, Linux and Windows can each plug in their platform media facilities, or an app can choose another playback core through the interface. UI targets such as Flutter can likewise provide their own presentation adapters; the media core is not hardcoded into the public IR just because the desktops use SwiftUI, GTK and WinUI 3 by default.
 
-并非任意媒体内核都能直接嵌入任意 UI 框架。目标支持矩阵必须校验“UI 技术、平台、媒体后端、呈现适配器”的组合。版本或挂载能力不匹配时明确失败，不把纹理或窗口句柄交回应用自行补救。
+Not every media core can be embedded directly into every UI framework. The target support matrix must validate the combination of "UI technology, platform, media backend, presentation adapter". When versions or mounting capabilities do not match, the build fails explicitly, and textures or window handles are not handed back to the app to patch things up on its own.
 
-### 媒体执行端与能力边界
+### Media executors and capability boundaries
 
-浏览器的真实播放发生在浏览器执行端。使用独立引擎宿主时，媒体代理必须将命令路由到持有该播放器的执行端，并把实际结果和事件归并到唯一播放器状态；不能在服务端声明已播放、浏览器却没有执行。
+Real browser playback happens in the browser executor. When a standalone engine host is used, the media proxy must route commands to the executor that holds the player and merge the actual results and events into the single player state; the server must not declare that playback has started while the browser has not executed it.
 
-控制协议只负责命令与状态，媒体数据由执行端按 MediaSource 获取；共享引擎不意味着首版需要实现远程视频传输或转码服务。
+The control protocol is only responsible for commands and state; media data is fetched by the executor according to the MediaSource; a shared engine does not mean that the first version needs to implement remote video transport or transcoding services.
 
-执行端断开时应发布不可用或断开状态，后续请求返回明确结果。引擎可以继续无界面运行，但需要有效媒体执行端的播放或呈现能力不能凭空存在。浏览器端状态回报只是适配器协议，不允许任意 UI 控件直接写业务快照。
+When an executor disconnects, an unavailable or disconnected state should be published, and later requests return explicit results. The engine can keep running without a UI, but playback or presentation capabilities that need a valid media executor cannot appear out of nothing. State reports from the browser side are only an adapter protocol; arbitrary UI controls are not allowed to write the business snapshot directly.
 
-能力检查区分构建时支持与运行时可用。硬件解码、字幕、受保护媒体、系统权限和浏览器限制分别描述，不能因为存在 Video 节点就认为全部可用。默认控制条根据能力组合可用动作；项目要求的必需 Feature 仍按原有规则检查，不能静默隐藏后声称已覆盖。
+Capability checks distinguish build-time support from runtime availability. Hardware decoding, subtitles, protected media, system permissions and browser restrictions are described separately; the presence of a Video node does not mean all of them are available. The default control bar assembles the available actions according to the capabilities; required Features demanded by the project are still checked by the existing rules, and must not be silently hidden while coverage is claimed.
 
-视频内容像素保持原始颜色，控制条、加载状态和错误提示使用统一主题。弹幕、字幕和自定义工具栏通过声明的覆盖层组合，必须验证原生视频表面上的层叠和命中能力，不假设所有平台都与 DOM 一样。
+Video content pixels keep their original colors; the control bar, loading states and error messages use the unified theme. Danmaku, subtitles and custom toolbars are composed through declared overlays, and the stacking and hit testing on native video surfaces must be verified, without assuming that every platform behaves like the DOM.
 
-### 应用自带的媒体内核
+### App-provided media cores
 
-应用可以用自己的播放内核代替平台的媒体设施，例如一个用 Rust 写成、自己解码并渲染的内核。引擎在创建时登记实现了 `MediaKernel` 的内核；前端启动时报告它的视频视图能创建哪些原生表面，内核能画进其中一种时，内核成为所有播放器的执行端，前端不再挂接自己的媒体设施。应用的声明不变：仍是 `Video(player: …)` 或 `Video(source: …)`。
+An app can replace the platform's media facilities with its own playback core, for example a core written in Rust that does its own decoding and rendering. The engine registers a core that implements `MediaKernel` when it is created; at startup the frontend reports which native surfaces its video views can create, and when the core can draw into one of them, the core becomes the executor of all players, and the frontend no longer hooks up its own media facilities. The app's declaration does not change: it is still `Video(player: …)` or `Video(source: …)`.
 
 ```rust
-// 引擎创建时，在支持的平台上
+// When the engine is created, on supported platforms
 let kernel = Arc::new(MyKernel::start());
 bern::media::kernel::install(kernel.clone());
 ```
 
-| 接口 | 内容 |
+| Interface | Contents |
 | --- | --- |
-| `MediaKernel: MediaExecutor` | `capabilities`、能画进的表面种类 `surfaces`；`attached(hub)` 与 `detached`；`attach_surface(view, player, surface)`、`resize_surface`、`detach_surface`；每帧的 `frame(view, timing)` |
-| `KernelHub` | 内核眼中的媒体中心：`complete` 完成请求，`observe` 报告带源版本的事实，`dispatch` 代它的应用发标准媒体命令 |
-| `VideoSurface` | 表面句柄（`SurfaceHandle`：Apple 上是 `CAMetalLayer` 的地址，Windows 上是 `SwapChainPanel` 的 `ISwapChainPanelNative`，GTK 上是帧接收器 `FrameSink` 的登记）、物理像素尺寸与像素比（`SurfaceSize`，含外层 `ScaleBox` 的放大）、声明的 `fit` |
-| `FrameTiming` | 帧时钟触发的时刻与这一帧上屏的时刻，宿主单调时钟（Apple 上是 `CACurrentMediaTime`，Windows 上是性能计数器，GTK 上是 `g_get_monotonic_time`）的秒数 |
-| `FrameSink` | 自己合成画面的视图（GTK）给内核的接收器：内核按表面的物理像素渲染整幅画面（RGBA、不透明，`VideoFrame`），交给 `present`；每幅取代上一幅，视图按自己的节奏显示最新的一幅，内核从不等它。`register_frame_sink` 与 `unregister_frame_sink` 由视图调用，内核用 `frame_sink(handle)` 取得接收器 |
+| `MediaKernel: MediaExecutor` | `capabilities`, and the surface kinds it can draw into, `surfaces`; `attached(hub)` and `detached`; `attach_surface(view, player, surface)`, `resize_surface`, `detach_surface`; the per-frame `frame(view, timing)` |
+| `KernelHub` | The media hub as the core sees it: `complete` completes requests, `observe` reports facts carrying a source version, `dispatch` sends standard media commands on behalf of its app |
+| `VideoSurface` | The surface handle (`SurfaceHandle`: on Apple the address of a `CAMetalLayer`, on Windows the `ISwapChainPanelNative` of a `SwapChainPanel`, on GTK the registration of a frame sink, `FrameSink`), the size in physical pixels and the pixel ratio (`SurfaceSize`, including magnification by an outer `ScaleBox`), and the declared `fit` |
+| `FrameTiming` | The time the frame clock fired and the time this frame reaches the screen, in seconds of the host's monotonic clock (`CACurrentMediaTime` on Apple, the performance counter on Windows, `g_get_monotonic_time` on GTK) |
+| `FrameSink` | The receiver that a view which composites its own picture (GTK) gives to the core: the core renders the whole picture at the surface's physical pixels (RGBA, opaque, `VideoFrame`) and hands it to `present`; each picture replaces the previous one, the view shows the latest one at its own pace, and the core never waits for it. `register_frame_sink` and `unregister_frame_sink` are called by the view, and the core gets the receiver with `frame_sink(handle)` |
 
-- 标准媒体命令照常经媒体中心校验、带源版本路由给内核，内核经 `KernelHub` 完成请求、报告事实，事实不产生命令。应用自己的命令要打开、播放、暂停、跳转或调音量时，内核也经 `KernelHub::dispatch` 发标准命令，与 CLI、MCP 一样校验并计入源版本，所以各入口看到的仍是同一个播放器。标准命令以外的能力（字幕轨、弹幕、超分辨率等）由应用的引擎直接调用内核，不进入媒体契约。
-- 表面由视图持有，应用代码不接触：视图创建内核要求的原生表面而不是平台的播放器视图，把它交给内核（`attach_surface`），尺寸或像素比变化时 `resize_surface`，视图卸载前 `detach_surface`，返回后内核不再使用该表面。跨语言的命令与状态协议里没有表面句柄。
-- 帧时钟：每个表面一个显示同步的帧回调，运行在专门的线程上，不受主线程布局与动画影响；内核应合并来不及处理的帧，`frame` 只登记、不在调用线程上绘制。GTK 只有界面线程上的帧时钟，帧回调在界面线程上，所以 `frame` 更要立刻返回。
-- GTK 把整个窗口画进一个表面，视图没有自己的原生表面可交，于是给内核一个帧接收器：内核画好的画面经它交回视图，视图把最新的一幅作为纹理显示，由 GTK 与周围、上面的内容（控制条、圆角、过渡）一起合成。每幅画面都要从显卡读回再上传，内核在画面不变时（例如暂停后）应停止渲染。
-- 能力 `multi_view: false` 时，一个播放器画在最后附着的视图里；那个视图卸载后回到仍附着的上一个视图。例如播放层缩进侧栏的迷你播放器时，画面跟到迷你播放器里继续播放。
-- 没有登记内核，或内核不支持前端提供的任何表面种类时，前端照常挂接平台媒体设施。所以一个只在部分平台上有的内核（例如没有 Web 版的内核）不影响其他目标。
-- 实现进度：`bern-media` 的 `kernel` 模块、C ABI（`bern_media_kernel_attach`、`bern_media_surface_attach`、`_resize`、`_detach`、`_frame`）；SwiftUI 的视频视图在内核模式下创建以 `CAMetalLayer` 为图层的视图，帧时钟是视图所在屏幕的 `CADisplayLink`（macOS 14 起由视图给出，跟随窗口换屏），在名为 “Bern media frames” 的线程上运行。macOS 上用一个实际应用自带的播放内核实测（2026-10-21）：播放 HEVC 的 mkv，画面、ASS 字幕、音频、暂停、跳转、倍速、换字幕轨、播完与重播都经内核；画框铺满、退后与推开时圆角与尺寸跟随；播放层缩进侧栏后画面转到迷你播放器继续播放，展开时转回；窗口缩成手机横屏布局时转到另一个视图；`media.pause` 等命令行命令作用于同一个播放器。iOS、tvOS 生成同样的视图（`UIView` 的图层类为 `CAMetalLayer`，`CADisplayLink`），未实测。WinUI 3（2026-10-25）：视频视图在内核模式下给出 `SwapChainPanel`，内核用为合成创建的交换链绘制，任意线程经 `ISwapChainPanelNative::SetSwapChain` 交来，视图在界面线程上放进面板；面板的像素与画框的物理像素一一对应，`fit` 由内核自己画（含留边）；帧时钟是名为 “Bern media frames” 的线程，每次主显示器垂直空白（`IDXGIOutput::WaitForVBlank`）给每个表面一帧。Windows 11 实体机上用同一个实际应用的内核实测：播放 HEVC 10 位的 mkv，画面与两条 ASS 字幕、硬件解码、暂停、跳转都经内核。GTK（2026-10-27）：视频视图在内核模式下给出帧接收器（`FrameSink`），内核按视图的物理像素渲染、交回画面，视图在界面线程上把最新的一幅做成 `GdkMemoryTexture` 画满自身；帧时钟是视图的 GTK 帧时钟（`add_tick_callback`），每帧先跟随视图的尺寸与像素比（`GdkSurface::scale`），再以下一次上屏之后一帧为目标调用 `bern_media_surface_frame`（画面经接收器交回后要到下一帧才上屏）。Steam Deck 实体机（SteamOS 3.8，KDE Plasma 的 Wayland 会话，AMD 显卡）上用同一个实际应用的内核实测：播放 HEVC 的 mkv，画面、ASS 字幕、音频、暂停、暂停中跳转、继续播放、全屏、缩进迷你播放器与展开回播放层都经内核；60 Hz 屏幕上每秒交回并显示约 60 幅；圆角在迷你播放器上照常裁剪。Compose 与 Web 尚未提供内核表面，内核不会被挂接。
+- Standard media commands are, as usual, validated by the media hub and routed to the core with their source version; the core completes requests and reports facts via `KernelHub`, and facts produce no commands. When the app's own commands need to open, play, pause, seek or change the volume, the core also sends standard commands via `KernelHub::dispatch`, which are validated and counted toward the source version just like those from the CLI and MCP, so every entry point still sees the same player. Capabilities beyond the standard commands (subtitle tracks, danmaku, super-resolution, etc.) are called on the core directly by the app's engine and do not enter the media contract.
+- Surfaces are held by views, and app code does not touch them: the view creates the native surface the core requires instead of the platform's player view and hands it to the core (`attach_surface`), calls `resize_surface` when the size or pixel ratio changes, and `detach_surface` before the view unmounts; once that returns, the core no longer uses the surface. The cross-language command and state protocol contains no surface handles.
+- Frame clock: each surface has a display-synchronized frame callback that runs on a dedicated thread, unaffected by main-thread layout and animation; the core should coalesce frames it cannot keep up with, and `frame` only records and does not draw on the calling thread. GTK has a frame clock only on the UI thread, so its frame callbacks are on the UI thread, and `frame` must return immediately all the more.
+- GTK draws the whole window into one surface, so a view has no native surface of its own to hand over, and it gives the core a frame sink instead: pictures the core finishes come back to the view through it, and the view shows the latest one as a texture, composited by GTK together with the surrounding and overlying content (control bar, rounded corners, transitions). Every picture must be read back from the GPU and uploaded again, so the core should stop rendering while the picture does not change (for example after pausing).
+- With the capability `multi_view: false`, a player draws into the most recently attached view; after that view unmounts, it returns to the previous view that is still attached. For example, when the playback layer shrinks into the mini player in the sidebar, the picture follows into the mini player and keeps playing.
+- When no core is registered, or the core supports none of the surface kinds the frontend offers, the frontend hooks up the platform media facilities as usual. So a core that exists only on some platforms (for example a core without a Web version) does not affect other targets.
+- Implementation progress: the `kernel` module of `bern-media` and the C ABI (`bern_media_kernel_attach`, `bern_media_surface_attach`, `_resize`, `_detach`, `_frame`); in core mode, SwiftUI's video view creates a view backed by a `CAMetalLayer`, and the frame clock is the `CADisplayLink` of the screen the view is on (provided by the view from macOS 14 on, following the window to another screen), running on a thread named "Bern media frames". Measured on macOS with the playback core bundled by a real app (2026-10-21): playing an HEVC mkv, the picture, ASS subtitles, audio, pause, seek, playback rate, switching subtitle tracks, finishing and replaying all go through the core; when the video box fills the window, recedes or is pushed aside, its rounded corners and size follow; after the playback layer shrinks into the sidebar, the picture moves to the mini player and keeps playing, and moves back on expanding; when the window is narrowed to the phone landscape layout, it moves to another view; command-line commands such as `media.pause` act on the same player. iOS and tvOS generate the same view (a `UIView` whose layer class is `CAMetalLayer`, with `CADisplayLink`); not measured. WinUI 3 (2026-10-25): in core mode the video view provides a `SwapChainPanel`; the core draws with a swap chain created for composition and hands it over from any thread via `ISwapChainPanelNative::SetSwapChain`, and the view puts it into the panel on the UI thread; the panel's pixels correspond one to one to the video box's physical pixels, and `fit` is drawn by the core itself (including letterboxing); the frame clock is a thread named "Bern media frames", which gives each surface one frame at every vertical blank of the primary display (`IDXGIOutput::WaitForVBlank`). Measured on a physical Windows 11 machine with the same real app's core: playing an HEVC 10-bit mkv, the picture with two ASS subtitle tracks, hardware decoding, pause and seek all go through the core. GTK (2026-10-27): in core mode the video view provides a frame sink (`FrameSink`); the core renders at the view's physical pixels and hands pictures back, and on the UI thread the view turns the latest one into a `GdkMemoryTexture` that fills the view; the frame clock is the view's GTK frame clock (`add_tick_callback`), which on each frame first follows the view's size and pixel ratio (`GdkSurface::scale`), then calls `bern_media_surface_frame` targeting the frame after the next presentation (a picture handed back through the sink only reaches the screen on the next frame). Measured on a physical Steam Deck (SteamOS 3.8, KDE Plasma Wayland session, AMD GPU) with the same real app's core: playing an HEVC mkv, the picture, ASS subtitles, audio, pause, seeking while paused, resuming, fullscreen, shrinking into the mini player and expanding back to the playback layer all go through the core; about 60 pictures per second are handed back and shown on the 60 Hz screen; the rounded corners on the mini player are clipped as usual. Compose and Web do not yet provide core surfaces, so the core is not hooked up there.
 
-### 引擎读取交来的文件
+### The engine reads files handed to it
 
-用户选中、拖入或用应用打开的文件以 `MediaSource` 交给引擎。播放器与图片按地址读取它；引擎自己也常要读：按文件名与开头的内容认出作品、计算校验值、交给应用自带的解码内核。地址的写法因平台而异：macOS、iOS、Linux 与 Windows 交 `file://` 地址；Android 交 `content://` 文档地址，它没有文件名，也不是路径；网页交页面的 `blob:` 地址。引擎不分辨这些写法，统一经 `MediaSource` 读取：
+Files that the user selects, drops in or opens with the app are handed to the engine as a `MediaSource`. Players and images read it by URL; the engine itself often needs to read it too: to recognize the work from the file name and the content at the start, to compute checksums, or to pass it to the app's own decoding core. How the URL is written differs by platform: macOS, iOS, Linux and Windows hand over `file://` URLs; Android hands over `content://` document URLs, which have no file name and are not paths; the web hands over the page's `blob:` URLs. The engine does not tell these forms apart and reads all of them through `MediaSource`:
 
 ```rust
 let name = source.file_name();   // Option<String>
-let mut file = source.open()?;    // Read + Seek，file.len() 是字节数
+let mut file = source.open()?;    // Read + Seek; file.len() is the size in bytes
 ```
 
-- `file_name()`：`file://` 取路径的最后一段，http(s) 取地址路径的最后一段，都做百分号解码；`content://` 取系统为这份文档显示的名字（`OpenableColumns.DISPLAY_NAME`）；`blob:` 取用户交给页面的文件的名字。没有名字时为 `None`。
-- `open()`：`file://` 直接打开本地文件；`content://` 由 Android 宿主经内容解析器打开，把文件描述符交给引擎持有，引擎当普通文件读取，可以跳转；`blob:` 由页面读取它记住的那个文件，每次读一段。http(s) 地址答复 `unreadable_source`，引擎用自己的网络客户端获取；文件已不存在或读取授权已失去时答复 `source_unavailable`；不是地址时答复 `invalid_url`。
-- 读取在调用的线程上同步进行。原生目标的命令在引擎线程上执行，读开头几 MB 与读本地文件的成本相同；长时间的读取交给引擎自己的线程，`SourceFile` 可以移到其他线程。Web 的引擎与页面在同一线程，页面用同步请求读取文件的一段，读取期间页面不响应，适合读开头与计算校验，不适合把大文件整份读入。
-- 本地文件与地址解析在引擎一侧完成（`bern-command` 的 `files` 模块）；只有宿主能解析的地址，由宿主在引擎启动时为这个协议登记打开方式（`files::Opener` 的名字、打开与列举），Android 登记 `content`；Web 由页面提供文件名、大小、按段读取与列举文件夹四个导入。应用代码在各目标上相同。
-- 限制：Android 上经管道提供内容的文档提供方（例如部分网盘）给出的描述符不能跳转，长度为 0；WebUI 构建的引擎在独立的引擎宿主中，读不到页面的文件，`blob:` 地址答复 `unreadable_source`，把文件交给引擎宿主需要另行设计；iOS 与 macOS 选择器交来的文件在应用运行期间可读，应用重启后的长期访问（安全作用域书签）尚未实现，未验证。Android 的选择器保留读取授权，重启后仍可读。
-- 实现进度：`examples/gallery` 的引擎在播放时用 `file_name()` 与 `open()` 写出提示，例如“▶ 海浪 Tides #2.mp4 · MP4 · 49 KB”，其中的格式由文件开头的字节认出，大小来自打开的文件。Android 模拟器上用“打开方式”把媒体库中的视频（`content://media/external/video/media/29`）交给应用，引擎得到系统显示的中文文件名、认出 MP4、读出大小；不存在的文档只显示地址。Web（引擎在页面中的构建）在浏览器中把页面构造的真实视频文件拖入画框，得到同样的提示，控制台没有报错。macOS 上经 `ui.set_file` 交给本地文件，结果相同。iOS、Linux 与 Windows 交的是 `file://` 地址，走同一段代码，未单独验证。
+- `file_name()`: for `file://`, the last segment of the path; for http(s), the last segment of the URL path; both are percent-decoded; for `content://`, the name the system displays for the document (`OpenableColumns.DISPLAY_NAME`); for `blob:`, the name of the file the user gave the page. `None` when there is no name.
+- `open()`: `file://` opens the local file directly; `content://` is opened by the Android host through the content resolver, which hands the file descriptor over for the engine to hold, and the engine reads it like an ordinary file and can seek; for `blob:`, the page reads the file it remembers, one chunk per read. http(s) URLs answer `unreadable_source`, and the engine fetches them with its own network client; when the file no longer exists or the read permission has been lost, the answer is `source_unavailable`; when it is not a URL, the answer is `invalid_url`.
+- Reads happen synchronously on the calling thread. On native targets commands run on the engine thread, and reading the first few MB costs the same as reading a local file; long reads go to the engine's own threads, and a `SourceFile` can be moved to other threads. On the web the engine and the page share one thread; the page reads a chunk of the file with a synchronous request and does not respond during the read, which suits reading the start of a file and computing checksums but not reading a large file in full.
+- Local files and URL parsing are handled on the engine side (the `files` module of `bern-command`); for URLs that only the host can resolve, the host registers how to open that scheme when the engine starts (the name, opening and listing of `files::Opener`), and Android registers `content`; on the web the page provides four imports: the file name, the size, chunked reads and folder listing. App code is the same on every target.
+- Limits: on Android, descriptors from document providers that supply content through a pipe (for example some cloud drives) cannot seek and have a length of 0; in WebUI builds the engine is in a separate engine host and cannot read the page's files, so `blob:` URLs answer `unreadable_source`, and handing files to the engine host needs a separate design; files handed over by the iOS and macOS pickers are readable while the app runs, and long-term access after the app restarts (security-scoped bookmarks) is not yet implemented and not verified. The Android picker keeps the read permission, so the files remain readable after a restart.
+- Implementation progress: the engine of `examples/gallery` uses `file_name()` and `open()` to write a hint during playback, for example "▶ 海浪 Tides #2.mp4 · MP4 · 49 KB", where the format is recognized from the file's first bytes and the size comes from the opened file. On the Android emulator, "Open with" handed a video from the media library (`content://media/external/video/media/29`) to the app, and the engine got the Chinese file name the system displays, recognized MP4 and read the size; a document that does not exist shows only the URL. On the web (the build with the engine in the page), dropping a real video file constructed by the page onto the frame in the browser gave the same hint, with no errors in the console. On macOS, a local file handed over through `ui.set_file` gave the same result. iOS, Linux and Windows hand over `file://` URLs and go through the same code; not verified separately.
 
-用户选的文件夹（`Button(pick: draft.folder, files: "folder")`）同样以 `MediaSource` 交给引擎：macOS、iOS、Linux 与 Windows 交 `file://` 地址，Android 交系统选择器给出的文档树（`content://…/tree/…`），网页交页面为这个文件夹做的 `blob:` 地址。引擎经 `bern::files` 读它，不分辨这些写法，也不必先把文件夹复制到本地：
+The folder the user chooses (`Button(pick: draft.folder, files: "folder")`) is likewise handed to the engine as a `MediaSource`: macOS, iOS, Linux and Windows hand a `file://` address, Android hands the document tree the system picker gives (`content://…/tree/…`), and the web hands the `blob:` address the page made for this folder. The engine reads it through `bern::files` without telling these forms apart, and does not need to copy the folder locally first:
 
 ```rust
-let here = bern::files::list(&folder.url)?;                                   // 这一层的 Vec<Entry>
-let all = bern::files::walk(&folder.url, |entry| !entry.name.starts_with('.'))?; // 连同里面各层，隐藏的不要
+let here = bern::files::list(&folder.url)?;                                   // this level's Vec<Entry>
+let all = bern::files::walk(&folder.url, |entry| !entry.name.starts_with('.'))?; // with the levels inside, without hidden entries
 for entry in all.iter().filter(|entry| !entry.folder) {
-    let mut file = bern::files::open(&entry.url)?; // entry.size 与 entry.modified 来自列举
+    let mut file = bern::files::open(&entry.url)?; // entry.size and entry.modified come from the listing
 }
 ```
 
-- `Entry`：`url` 是这一项自己的地址，`open`、`name` 与 `list` 都接受它；`name` 是用户认得的名字；`path` 是它在所列文件夹里的位置，`walk` 中是途经的文件夹与它自己的名字用 `/` 连起来，例如 `Live/01 Intro.mp3`，应用用它找同一处的其他文件，例如同名的 `.lrc`；还有 `folder`、`size`（字节，文件夹为 0）与 `modified`（系统给出时才有）。各平台的地址写法不同，应用不要拼接或拆开地址，旁边的文件从列举结果中找。
-- `list(url)`：这一层的文件与文件夹，顺序不定。本地文件夹经 `std::fs` 读取，链接按它指向的东西列出，指向不存在之处的链接与不是合法 Unicode 的名字不列；Android 的文档树由宿主经 `DocumentsContract` 查询子文档（显示名、类型、大小、修改时间），每一项是同一文档树下的文档地址，选择器保存的读取授权覆盖它们，重启后仍可读；网页由页面列出选择时记下的文件与文件夹。文件答复 `not_a_folder`，已不存在或失去授权答复 `source_unavailable`，http(s) 地址答复 `unreadable_source`，不是地址答复 `invalid_url`。
-- `walk(url, keep)`：连同里面各层的文件夹，一个文件夹排在它的内容之前；`keep` 先看每一项，它拒绝的项不列，拒绝的文件夹也不进入。只有最外层必须读得到，里面读不了的文件夹只列它自己；每个文件夹只进入一次（本地文件夹按真实路径分辨，链接绕回上层不会重复），最多 64 层。
-- `name(url)` 也给文件夹的名字：Android 的文档树取它顶层文档的显示名，网页取所选文件夹的名字。
-- 列举在调用的线程上同步进行，Android 上每个文件夹一次跨进程查询；大文件夹交给引擎自己的线程。
-- 限制：网页中所选文件夹的内容在选择时定下，之后放进去的文件看不到，再选一次才有；浏览器不交出没有文件的文件夹，选了空文件夹动作不执行；拖放区只接一个文件，拖入文件夹不支持。WebUI 中原生运行的引擎读不到页面的文件夹。
-- 实现进度（2026-11-02）：`bern-command` 的单元测试覆盖本地文件夹的列举与遍历（隐藏项由 `keep` 拒绝、链接绕回上层只进入一次、文件、已删除的文件夹与 http(s) 地址的答复）、经宿主打开方式遍历文档树，以及宿主交来的列举格式；Web 的运行时测试检查所选文件夹在页面中按层记下、每个文件有自己的地址、交给引擎的列举文本；`bern-ffi` 与 `bern-command` 分别为 Android 与 wasm32 编译通过。Android 模拟器（API 36）上用实际应用实测：在系统选择器里选 `Music` 下的一个文件夹并允许访问，引擎经 `walk` 列出两首歌、一个 `.lrc` 与子文件夹 `Live` 里的一首，文件夹名取自显示名；引擎经 `open` 读出标签、时长与内嵌封面，按列举中同名的 `.lrc` 显示歌词，播放从文档地址读入（音量 0），子文件夹里的歌同样播放；强制停止再启动后授权仍在，启动时重新遍历得到同样的三首。未授权的文档树（`primary:Download`）答复 `source_unavailable`。Web 只跑了运行时测试，没有在浏览器里选文件夹（系统的选择框无法在自动化中操作）；macOS、iOS、Linux 与 Windows 走 `std::fs` 的同一段代码，只在 macOS 上由单元测试验证。
+- `Entry`: `url` is the entry's own address, which `open`, `name` and `list` all accept; `name` is the name the user recognizes; `path` is its position in the listed folder: in `walk`, the names of the folders passed through and its own joined with `/`, for example `Live/01 Intro.mp3`, which apps use to find other files in the same place, such as an `.lrc` of the same name; there are also `folder`, `size` (bytes, 0 for folders) and `modified` (only when the system provides it). Address forms differ per platform, so apps should not join or split addresses, and should find neighboring files in the listing.
+- `list(url)`: the files and folders of this level, in no particular order. Local folders are read through `std::fs`, links are listed as what they point to, and links pointing nowhere and names that are not valid Unicode are not listed; for Android document trees the host queries the children through `DocumentsContract` (display name, type, size, modification time), each entry is a document address under the same document tree, and the read grant the picker saved covers them, so they stay readable after a restart; on the web the page lists the files and folders recorded at the time of choosing. A file replies `not_a_folder`, something no longer there or no longer granted replies `source_unavailable`, an http(s) address replies `unreadable_source`, and something that is not an address replies `invalid_url`.
+- `walk(url, keep)`: together with the folders at the levels inside, a folder coming before its contents; `keep` looks at each entry first, entries it rejects are not listed, and folders it rejects are not entered. Only the outermost level must be readable, and a folder inside that cannot be read lists only itself; each folder is entered only once (local folders are told apart by their real path, so links looping back up are not repeated), at most 64 levels deep.
+- `name(url)` also gives a folder's name: for an Android document tree the display name of its top-level document, on the web the name of the chosen folder.
+- Listing runs synchronously on the calling thread, with one cross-process query per folder on Android; hand large folders to the engine's own thread.
+- Limits: on the web the content of a chosen folder is fixed at the time of choosing, and files put in later are not seen until it is chosen again; browsers do not hand over folders with no files, so choosing an empty folder does not run the action; drop zones take only one file, and dropping a folder is not supported. An engine running natively in WebUI cannot read the page's folders.
+- Implementation progress (2026-11-02): `bern-command`'s unit tests cover listing and walking local folders (hidden entries rejected by `keep`, links looping back up entered only once, and the replies for files, deleted folders and http(s) addresses), walking a document tree through the host's opener, and the listing format the host hands over; the Web runtime tests check that a chosen folder is recorded level by level in the page, that each file has its own address, and the listing text handed to the engine; `bern-ffi` and `bern-command` compile for Android and wasm32 respectively. Measured on an Android emulator (API 36) with a real app: after choosing a folder under `Music` in the system picker and allowing access, the engine lists two songs, an `.lrc` and a song in the subfolder `Live` through `walk`, with the folder name taken from the display name; through `open` the engine reads the tags, duration and embedded cover, shows the lyrics from the `.lrc` of the same name in the listing, and playback reads from the document address (volume 0), with the song in the subfolder playing too; after a force stop and restart the grant is still there, and walking again at startup gives the same three songs. A document tree without a grant (`primary:Download`) replies `source_unavailable`. The web only ran the runtime tests, without choosing a folder in a browser (the system's picker cannot be operated in automation); macOS, iOS, Linux and Windows go through the same `std::fs` code, verified by unit tests only on macOS.
 
-## 工程组织
+## Project organization
 
-Bern 在一个 Rust workspace 中开发，不为编译器另外创建仓库。建议按职责拆分，初期可以合并小型 crate：
+Bern is developed in one Rust workspace; the compiler does not get a separate repository. A split by responsibility is recommended; small crates can be merged at first:
 
-| 模块或 crate | 责任 |
+| Module or crate | Responsibility |
 | --- | --- |
-| bern | 面向应用的公共接口与类型 |
-| bern-macros | 组件、UI 和相关声明宏 |
-| bern-syntax | 共享语法解析与源码位置 |
-| bern-ir | IR、组件描述与版本协议 |
-| bern-protocol | 独立于 UI 框架的命令、查询、状态、会话身份与订阅 schema |
-| bern-command | 通用命令目录、调度契约、调用上下文与结果生命周期，以及宿主向引擎提供的随包资源定位 |
-| bern-adapter-cli | 从目录生成应用命令行入口并连接指定引擎 |
-| bern-adapter-json | JSON 控制消息编码、校验与结果映射 |
-| bern-adapter-mcp | MCP 工具及查询适配，复用统一目录和调度接口 |
-| bern-target-api | 公共目标描述、能力、生成器及构建适配接口 |
-| bern-theme | 纯 Rust 色彩算法、语义颜色与配方 schema、对比检查及主题快照 |
-| bern-media | MediaSource、播放器身份、标准媒体命令与状态、执行端路由及媒体能力契约，不依赖具体 UI SDK |
-| bern-image | 为不能自行显示 HDR 图片的目标解码 PQ、HLG 的 PNG 与带增益图的 JPEG（ISO 21496-1、Ultra HDR），输出以 SDR 白为 1.0 的线性光，并提供转为 SDR 的色调映射 |
-| bern-media-backend-* | Web HTMLMediaElement、平台媒体设施或第三方播放内核的执行适配 |
-| bern-video-presenter-* | 兼容的媒体后端与 UI 目标之间的视频附着、布局、覆盖层及呈现能力适配 |
-| bern-compiler | 语义检查、结构分析及通过公共接口协调生成，不依赖具体目标 |
-| bern-runtime | 前端绑定、会话命令、实例生命周期、焦点与类型化导航，不引入目标 UI SDK |
-| bern-window | 窗口目录、实例与关闭协议、呈现选择、焦点及模态协调；通过目标适配器接入原生窗口或虚拟宿主 |
-| bern-transport-* | 同进程、本地控制通道及后续通用 IPC、远程传输适配 |
-| bern-backend-web | 共用 Web 生成器与前端运行时，按 app/ui 模式装配引擎或客户端并输出独立构建产物 |
-| bern-backend-flutter | Flutter 生成器、Dart 适配与 Flutter 构建计划 |
-| bern-backend-swiftui | SwiftUI 生成器及按 macOS、iOS 区分的适配 |
-| bern-backend-gtk | Linux 默认 GTK 生成器、运行时与桌面构建适配 |
-| bern-backend-winui3 | Windows 默认 WinUI 3 生成器、宿主、Rust 桥接与构建适配 |
-| 其他 bern-backend-* | GPUI、AppKit、Compose 或第三方 UI 目标 |
-| bern-cli | 构建工具、平台默认映射与目标注册装配，不与生成应用的 CLI 混用 |
-| bern-devtools | 语义树检查、场景预览与跨目标测试驱动 |
-| examples | 无业务耦合的功能验证应用 |
+| bern | Public app-facing interfaces and types |
+| bern-macros | Declaration macros for components, UI and related items |
+| bern-syntax | Shared syntax parsing and source locations |
+| bern-ir | IR, component descriptions and the version protocol |
+| bern-protocol | UI-framework-independent schemas for commands, queries, state, session identity and subscriptions |
+| bern-command | The general command catalog, dispatch contract, invocation context and result lifecycle, and the bundled-resource lookup the host provides to the engine |
+| bern-adapter-cli | Generates the app's command-line entry point from the catalog and connects to a specified engine |
+| bern-adapter-json | JSON control message encoding, validation and result mapping |
+| bern-adapter-mcp | MCP tool and query adaptation, reusing the unified catalog and dispatch interface |
+| bern-target-api | Public interfaces for target descriptions, capabilities, generators and build adapters |
+| bern-theme | Pure-Rust color algorithm, semantic color and recipe schema, contrast checks and theme snapshots |
+| bern-media | MediaSource, player identity, standard media commands and state, executor routing and the media capability contract, independent of any specific UI SDK |
+| bern-image | For targets that cannot display HDR images themselves, decodes PQ and HLG PNGs and JPEGs with gain maps (ISO 21496-1, Ultra HDR), outputs linear light with SDR white at 1.0, and provides tone mapping to SDR |
+| bern-media-backend-* | Execution adapters for the Web HTMLMediaElement, platform media facilities or third-party playback cores |
+| bern-video-presenter-* | Adapters for video attachment, layout, overlays and presentation capabilities between compatible media backends and UI targets |
+| bern-compiler | Semantic checks, structural analysis and coordination of generation through the public interfaces, independent of any specific target |
+| bern-runtime | Frontend bindings, session commands, instance lifecycle, focus and typed navigation, without pulling in a target UI SDK |
+| bern-window | Window catalog, instance and close protocol, presentation selection, focus and modal coordination; connects to native windows or a virtual host through target adapters |
+| bern-transport-* | Adapters for in-process transport, the local control channel, and later general IPC and remote transport |
+| bern-backend-web | Shared Web generator and frontend runtime; assembles the engine or the client by app/ui mode and emits independent build outputs |
+| bern-backend-flutter | Flutter generator, Dart adaptation and Flutter build plan |
+| bern-backend-swiftui | SwiftUI generator and adaptations split by macOS and iOS |
+| bern-backend-gtk | Default Linux GTK generator, runtime and desktop build adaptation |
+| bern-backend-winui3 | Default Windows WinUI 3 generator, host, Rust bridge and build adaptation |
+| Other bern-backend-* | GPUI, AppKit, Compose or third-party UI targets |
+| bern-cli | Build tool, platform default mapping and target registration assembly; kept separate from the CLI of generated apps |
+| bern-devtools | Semantic tree inspection, scene preview and cross-target test drivers |
+| examples | Feature verification apps with no business coupling |
 
-这些是职责边界，不要求一次创建全部 crate。后端包中的代码生成器和目标运行时可以再分包，避免把构建期依赖打入应用。未启用的目标不得把 Flutter、Xcode 等工具链变成全局构建要求。
+These are boundaries of responsibility; not every crate has to be created at once. The code generator and the target runtime in a backend package can be split into further packages, so that build-time dependencies do not end up in the app. Targets that are not enabled must not make toolchains such as Flutter or Xcode a global build requirement.
 
-主题配方 schema 和算法内核不依赖具体控件实现或 UI SDK。标准控件随描述提供配方，扩展控件按同一 schema 注册；目标适配器负责映射，不能各自成为独立的主题权威来源。
+The theme recipe schema and the algorithm core do not depend on specific control implementations or UI SDKs. Standard controls ship recipes with their descriptions, and extension controls register under the same schema; target adapters are responsible for the mapping and must not each become an independent authoritative source of the theme.
 
-本地化与 Feature 分析属于编译器能力；通用媒体命令、视频组件及适配接口属于可选媒体模块。具体应用的媒体库、账号、播放历史等业务，以及应用的文件管理规则，不进入框架核心。应用业务 crate 与协议适配 crate 分开，业务测试不需要创建窗口或加载生成器。组件接口与协议应能被其他 Rust 应用独立使用。
+Localization and Feature analysis are compiler capabilities; general media commands, the video component and the adapter interfaces belong to the optional media module. App-specific business such as media libraries, accounts and playback history, as well as an app's file management rules, does not enter the framework core. App business crates are kept separate from protocol adapter crates, and business tests do not need to create a window or load a generator. Component interfaces and protocols should be usable independently by other Rust apps.
 
-## 分阶段实施与验收
+## Phased implementation and acceptance
 
-### 阶段一 编译边界验证
+### Phase 1: verifying the compile boundary
 
-验证受限声明确实可以同时用于源码分析和 Rust 展开：
+Verify that constrained declarations really can serve both source analysis and Rust expansion:
 
-- 定义组件、显式属性、组件引用及清晰的错误位置。
-- 让两个模块中的组件能够组合，未知引用和非法结构明确报错。
-- 验证受限表达式与合法引用的生成，由 `rustc` 检查实际类型；未知函数、直接赋值和任意回调必须编译失败。
-- 建立带版本的描述原型，并用一个独立依赖 crate 验证引用与配置匹配。
-- 建立公共目标接口，用独立测试目标消费同一 IR，验证注册新目标无需改动解析器。
-- 将示例业务核心与 UI 客户端分离，让命令和状态可以在无 UI 环境下运行。
-- 注册同一命令目录并生成各入口描述，验证重复标识、未知命令和参数不匹配无法通过检查。
-- 验证标准控件自动生成会话命令，业务动作缺失绑定则编译失败。
-- 检查窗口目录的重复 ID、无效主窗口或命令引用、参数与 key 类型、呈现能力要求；重复求值不生成额外打开操作。
-- 定义本地化文本、运行时文本与普通字符串的类型区分及项目语言配置；严格模式下缺少语言、展示属性直接写入字面量和插值参数不一致能被诊断。
-- 在目标能力描述中声明颜色来源（平台原生或 Bern 配色），应用声明不因目标不同而改变。
+- Define components, explicit properties, component references and clear error locations.
+- Let components in two modules compose, with unknown references and invalid structures reporting clear errors.
+- Verify the generation of constrained expressions and valid references, with `rustc` checking the actual types; unknown functions, direct assignment and arbitrary callbacks must fail to compile.
+- Build a versioned description prototype, and verify reference and configuration matching with a separate dependency crate.
+- Build the public target interface, consume the same IR with a separate test target, and verify that registering a new target requires no changes to the parser.
+- Separate the example business core from the UI client, so that commands and state can run without a UI.
+- Register the same command catalog and generate descriptions for each entry point, verifying that duplicate identifiers, unknown commands and parameter mismatches cannot pass the check.
+- Verify that standard controls generate session commands automatically and that a business action without a binding fails to compile.
+- Check the window catalog for duplicate IDs, an invalid main window or command reference, parameter and key types, and presentation capability requirements; repeated evaluation does not generate extra open operations.
+- Define the type distinction between localized text, runtime text and plain strings, and the project language configuration; in strict mode, missing languages, literals written directly into display properties and mismatched interpolation arguments can be diagnosed.
+- Declare the color source (platform native or Bern palette) in the target capability description; the app declaration does not change from target to target.
 
-此阶段先解决结构和类型责任的边界，不以大量静态组件数量作为完成标准。
+This phase first settles the boundaries of structural and type responsibilities; a large number of static components is not the completion criterion.
 
-### 阶段二 macOS SwiftUI 与四入口闭环
+### Phase 2: macOS SwiftUI and the four-entry-point loop
 
-构建一个独立的控件展示示例。主窗口采用侧边栏与详情结构，包含标题与文字层级、按钮、开关、滑块、输入框、侧边栏搜索、列表到详情的推入导航以及工具栏分段选择器；设置窗口使用页签。业务核心只需最小模拟实现，例如记录最近一次按钮操作，用于验证命令从界面到引擎再回到界面的完整路径。示例至少声明两种语言。
+Build a standalone control showcase example. The main window uses a sidebar and detail structure and contains a title and text hierarchy, buttons, switches, sliders, text fields, sidebar search, list-to-detail push navigation and a toolbar segmented picker; the settings window uses tabs. The business core needs only a minimal mock implementation, for example recording the most recent button action, to verify the complete path of a command from the UI to the engine and back to the UI. The example declares at least two languages.
 
-示例生成 macOS 应用，业务引擎与会话运行时在应用进程内运行。界面闭环通过后，由应用宿主显式装配本地 IPC 通道，提供最小应用 CLI、JSON 控制通道和 MCP 适配，共同连接这个运行中的引擎实例；不得为外部入口另起一份引擎冒充共享状态。
+The example generates a macOS app, with the business engine and the session runtime running in the app process. Once the UI loop passes, the app host explicitly assembles a local IPC channel and provides a minimal app CLI, a JSON control channel and an MCP adapter, all connecting to this running engine instance; a separate engine must not be started for the external entry points to pose as shared state.
 
-macOS 首先单独验证：
+macOS is first verified on its own:
 
-- 未装配外部入口时，应用不启动辅助进程，也没有网络或 IPC 监听；本地调用不经过 JSON 字符串。
-- 生成代码只使用标准 SwiftUI 场景、容器、控件与系统样式，未声明样式覆盖时系统托管表面没有自定义颜色。
-- 浅色与深色下分别截图，与同一系统版本的系统自带应用（例如“系统设置”）对照间距、字体层级与控件样式。
-- 切换应用语言后界面文本按声明更新；严格模式的本地化负面用例编译失败。
-- 版本不兼容、断开外部入口及请求结果未知具有明确结果，不重复执行副作用命令。
+- When no external entry points are assembled, the app starts no helper process and has no network or IPC listener; local calls do not go through JSON strings.
+- Generated code uses only standard SwiftUI scenes, containers, controls and system styles; when no style overrides are declared, system-managed surfaces have no custom colors.
+- Take screenshots in light and in dark mode and compare spacing, type hierarchy and control styles with system apps of the same OS version (for example System Settings).
+- After the app language is switched, UI text updates as declared; strict-mode localization negative cases fail to compile.
+- Version incompatibility, disconnected external entry points and unknown request results have explicit outcomes, and commands with side effects are not executed twice.
 
-验收必须覆盖：
+Acceptance must cover:
 
-- 状态变化只更新相关展示，批次内数据一致。
-- 滑块产生带参数命令，异步结果及错误正确返回。
-- 四入口驱动同一实例并观察共享状态；引擎无 UI 时仍可运行，缺少会话的 UI 命令返回明确错误。
-- 标准编辑和展开动作由会话命令驱动，CLI 或 MCP 可针对已存在的会话调用相同动作。
-- 已接受与完成结果能够区分，重复请求、取消与失效会话遵守已声明策略。
-- 会话命令更新原生控件后不会由回调再次触发同一动作，真实输入与结果写回能被区分。
-- 条件分支能够挂载和卸载，订阅及时清理。
-- 列表插入、删除和重排后，按 key 保留正确实例状态。
-- 基本键盘交互、输入法编辑和语义标签可以使用。
-- 应用不编写任何深浅色分支，所有已实现控件及其状态跟随系统深浅色与强调色切换。
-- 外观切换保持输入、焦点与列表身份。
-- 用“搜索列表 → 详情 → 返回”验证类型化导航与状态恢复；加入视频后扩展为“搜索列表 → 详情 → 播放 → 返回”，验证资源归属。
-- 提供可控时钟和异步顺序的最小场景，验证旧搜索结果不会覆盖新结果，返回列表不会错误销毁应用级播放资源。
+- State changes update only the related display, and data within a batch is consistent.
+- Sliders produce commands with arguments, and async results and errors come back correctly.
+- The four entry points drive the same instance and observe shared state; the engine still runs without a UI, and a UI command without a session returns an explicit error.
+- Standard editing and expand actions are driven by session commands, and the CLI or MCP can invoke the same actions against an existing session.
+- Accepted and completed results can be told apart, and duplicate requests, cancellation and invalidated sessions follow the declared policy.
+- After a session command updates a native control, the callback does not trigger the same action again, and real input can be distinguished from result write-back.
+- Conditional branches can mount and unmount, and subscriptions are cleaned up promptly.
+- After list insertion, deletion and reordering, the correct instance state is kept by key.
+- Basic keyboard interaction, input method editing and semantic labels work.
+- The app writes no light/dark branches, and all implemented controls and their states follow system light and dark mode and accent color changes.
+- Appearance changes keep input, focus and list identity.
+- Use "search list → detail → back" to verify typed navigation and state restoration; after video is added, extend it to "search list → detail → play → back" to verify resource ownership.
+- Provide a minimal scene with a controllable clock and async ordering to verify that old search results do not overwrite new results and that returning to the list does not wrongly destroy app-level playback resources.
 
-在同一应用中加入主窗口与设置窗口，验证 WindowSet 声明使用原生窗口、四入口打开/关闭/激活、重复打开复用及独立草稿和导航状态。覆盖最小化后恢复、模态阻挡、关闭取消、外部入口确认、草稿变化后旧确认失效、关闭再打开后的旧引用与延迟事件被拒绝。最后一个逻辑窗口关闭后按宿主策略保留可重新打开的入口，不意外退出引擎。
+Add a main window and a settings window to the same app to verify that WindowSet declarations use native windows, open/close/activate from the four entry points, reuse on repeated opening, and independent drafts and navigation state. Cover restoring after minimizing, modal blocking, close cancellation, confirmation from external entry points, old confirmations becoming invalid after a draft changes, and rejection of old references and late events after closing and reopening. After the last logical window closes, keep a reopenable entry point according to the host policy, without unexpectedly exiting the engine.
 
-上述模拟闭环通过后，用受控测试媒体增加真实 macOS Video 验证，媒体后端与控制条遵循视频契约，不能用模拟播放状态代替媒体后端验收：
+Once the mock loop above passes, add real macOS Video verification with controlled test media; the media backend and the control bar follow the video contract, and mock playback state must not stand in for media backend acceptance:
 
-- 播放、暂停、跳转、静音和音量等已支持操作全部经过命令。
-- UI、CLI、JSON 与 MCP 操作同一个 `player_id`，各入口观察的状态与实际播放一致。
-- 验证播放失败、未知时长及不可跳转资源，区分已接受、实际执行与失败。
-- 换源后忽略旧源结果，播放事件不会再次派发命令；命令与事件顺序可控的测试覆盖重复执行风险。
-- source 简写不会因重绘反复加载，外部换源不会与绑定争夺写入权；共享播放器的视图卸载、重新附着与所有者销毁遵守生命周期策略。
-- 执行端断开明确报告不可用，不能继续显示已确认的正在播放状态；控制条随深浅色变化而视频内容保持原色。
+- All supported operations, such as play, pause, seek, mute and volume, go through commands.
+- UI, CLI, JSON and MCP operate the same `player_id`, and the state observed by each entry point matches actual playback.
+- Verify playback failure, unknown duration and non-seekable resources, distinguishing accepted, actually executed and failed.
+- After a source change, results from the old source are ignored, and playback events do not dispatch commands again; tests with controllable command and event ordering cover the risk of duplicate execution.
+- The source shorthand does not reload repeatedly on redraw, and external source changes do not compete with bindings for write ownership; view unmounting, reattachment and owner destruction for shared players follow the lifecycle policy.
+- An executor disconnect is explicitly reported as unavailable and must not keep showing a confirmed playing state; the control bar follows light and dark mode changes while the video content keeps its original colors.
 
-### 阶段三 Web 双构建
+### Phase 3: two Web builds
 
-Web 实现前先单独定义 Web 视觉规范，并完成 Bern 主题内核：定义主题角色、控件配方和快照协议，验证共享算法在纯 Rust 环境下可确定地生成两种模式，并通过受控配对和品牌种子变化的验证。
+Before the Web implementation, first define the Web design guidelines separately and complete the Bern theme core: define theme roles, control recipes and the snapshot protocol, verify that the shared algorithm deterministically generates both modes in a pure Rust environment, and pass verification of controlled pairings and brand seed changes.
 
-阶段二的示例必须分别生成 Web 应用与 WebUI。先验证 `app` 在浏览器内运行 WASM 引擎，再用 `ui` 连接独立本机 Rust 引擎完成四入口联调；浏览器通过受支持的本地服务连接方式访问该实例，CLI 与其他适配器连接相同宿主。浏览器 WASM 不能直接充当普通本地监听服务；`app` 若要接受外部 CLI、JSON 或 MCP 控制，必须另有明确中继指向该浏览器引擎实例，中继的连通与生命周期也要验收。无论使用哪种部署，都只保留一个权威引擎状态源，不在浏览器与本地服务各启动一份引擎冒充共享状态。
+The Phase 2 example must generate both a Web app and a WebUI. First verify `app` running the WASM engine in the browser, then use `ui` to connect to a separate local Rust engine for joint testing of the four entry points; the browser reaches that instance through a supported local service connection, and the CLI and the other adapters connect to the same host. Browser WASM cannot directly act as an ordinary local listening service; if `app` is to accept external CLI, JSON or MCP control, there must be an explicit relay pointing to that browser engine instance, and the relay's connectivity and lifecycle also need acceptance. Whichever deployment is used, only one authoritative source of engine state is kept; the browser and a local service must not each start an engine to pose as shared state.
 
-两种构建分别验证：
+The two builds are verified separately:
 
-- 同一组件声明与命令 schema 可生成两个独立目录；模式变化使不兼容缓存失效，不残留另一模式的引擎或连接产物。
-- `app` 在没有独立 Bern 引擎服务时可完成示例业务；不支持 WASM 的业务依赖明确失败。
-- `ui` 产物不包含业务处理器与服务端实现依赖；前端 WASM、主题和 Session Command 正常工作。
-- WebUI 连接同一 `engine_id` 的多个会话共享业务状态，窗口与草稿互不串用；CLI/MCP 能正确路由到指定会话。
-- 版本不兼容、权限不足、断线、请求结果未知及重连重同步具有明确结果，不重复执行副作用命令。
-- 阶段二的通用验收项在 Web 上重新执行；主题切换另需验证颜色算法的受控配对。
-- 主窗口呈现为页面、设置窗口呈现为对话框，补充宽窄屏切换；`presentation: floating` 的浮动窗口另行验证拖动、调整尺寸、最小化与恢复入口。
-- Video 生成实际 `<video>`，并验证 `play()` 拒绝与用户激活不足等浏览器限制。
+- The same component declarations and command schema can generate two independent directories; a mode change invalidates incompatible caches and leaves no engine or connection outputs of the other mode behind.
+- `app` can complete the example's business without a separate Bern engine service; business dependencies that do not support WASM fail explicitly.
+- `ui` outputs contain no business handlers or server implementation dependencies; the frontend WASM, the theme and Session Command work normally.
+- Multiple sessions of a WebUI connected to the same `engine_id` share business state, while windows and drafts are not mixed up between them; CLI/MCP route correctly to the specified session.
+- Version incompatibility, insufficient permissions, disconnects, unknown request results and reconnect resync have explicit outcomes, and commands with side effects are not executed twice.
+- The general acceptance items of Phase 2 are run again on the web; theme switching additionally needs verification of the color algorithm's controlled pairings.
+- The main window is presented as the page and the settings window as a dialog, with switching between wide and narrow screens added; floating windows with `presentation: floating` are separately verified for dragging, resizing, minimizing and the restore entry point.
+- Video generates an actual `<video>`, and browser restrictions such as `play()` rejection and insufficient user activation are verified.
 
-### 阶段四 本地化与功能契约
+### Phase 4: localization and feature contracts
 
-加入 `compact` 与 `expanded` 布局，以及按钮、菜单等不同入口形式。
+Add `compact` and `expanded` layouts, and different entry point forms such as buttons and menus.
 
-通过负面用例验证：缺少语言、非法插值、漏掉必需 Feature、未登记业务入口、无法证明的条件入口与能力豁免能被区分。测试运行时切换语言和布局，不丢失应共享的业务状态。
+Verify through negative cases that missing languages, invalid interpolation, missing required Features, unregistered business entry points, unprovable conditional entry points and capability exemptions can be told apart. Test switching language and layout at runtime without losing business state that should be shared.
 
-验收内容：
+Acceptance:
 
-- 编译器对 B101–B104、B201–B206、B401–B402 各有负面用例，诊断编号与位置互不混淆；豁免与人工保证在报告中与“已覆盖”分开。
-- 示例应用声明一个功能契约，同一功能在宽布局为按钮、在窄布局为菜单项，`bern check` 输出完整的覆盖报告。
-- macOS 与 Web 都实现 `Adaptive`、`Menu`、`MenuItem` 与 `LanguagePicker`；改变窗口宽度时布局切换，外部入口可以看到当前尺寸，会话草稿与引擎状态不变，同 `id` 的控件在两种布局中保持同一目标。
-- 运行中经 `LanguagePicker` 与 `ui.set_language` 切换语言，界面文本全部更新，草稿、导航与窗口保持不变。
+- The compiler has negative cases for each of B101–B104, B201–B206 and B401–B402, and diagnostic codes and locations are not confused with each other; exemptions and manual guarantees are reported separately from "covered".
+- The example app declares a feature contract in which the same feature is a button in the wide layout and a menu item in the narrow layout, and `bern check` outputs a complete coverage report.
+- Both macOS and Web implement `Adaptive`, `Menu`, `MenuItem` and `LanguagePicker`; changing the window width switches the layout, external entry points can see the current size, session drafts and engine state stay unchanged, and controls with the same `id` keep the same target in both layouts.
+- Switching the language at runtime through `LanguagePicker` and `ui.set_language` updates all UI text, while drafts, navigation and windows stay unchanged.
 
-### 阶段五 扩展性与其他原生前端验证
+### Phase 5: extensibility and verification of other native frontends
 
-在扩展大量组件之前，分批完成 `gtk + linux` 和 `winui3 + windows` 两个默认桌面组合的最小示例，并用显式选择的 `flutter + macos` 验证后端可替换性。第一批 `gtk + linux` 已完成，见 [Linux GTK 实现记录](Implementation/Linux-GTK.md)；第二批 `winui3 + windows` 已完成，见 [Windows WinUI 3 实现记录](Implementation/Windows-WinUI3.md)。它们使用同一业务核心、应用协议和公共 IR，验证目标扩展不依赖重写解析器，也不要求把业务改写为 UI 宿主语言。
+Before expanding to a large number of components, complete minimal examples for the two default desktop combinations `gtk + linux` and `winui3 + windows` in batches, and verify backend replaceability with an explicitly selected `flutter + macos`. The first batch, `gtk + linux`, is done; see the [Linux GTK implementation notes](Implementation/Linux-GTK.md); the second batch, `winui3 + windows`, is done; see the [Windows WinUI 3 implementation notes](Implementation/Windows-WinUI3.md). They use the same business core, app protocol and public IR, verifying that extending targets does not depend on rewriting the parser and does not require rewriting the business logic in the UI host language.
 
-验收内容包括生成代码可构建、状态可订阅、带参数命令与错误可返回、列表身份正确、订阅可释放、同一主题快照能正确映射深浅色，以及目标禁用后其他构建仍独立可用。系统托管控件按其主题能力单独验证。需要新增公共语义的部分应单列说明，不能用复制整套编译器的方式通过验收。
+Acceptance covers: generated code builds, state can be subscribed to, commands with arguments and errors come back, list identity is correct, subscriptions can be released, the same theme snapshot maps correctly to light and dark, and other builds remain independently usable after a target is disabled. System-managed controls are verified separately according to their theming capabilities. Parts that need new public semantics should be described separately; acceptance cannot be passed by copying the whole compiler.
 
-各默认桌面目标分别在所需工具链和实际平台环境中验收，不能用 macOS 成功代替 Linux 或 Windows 验证。还须测试省略 UI 技术时的默认解析、显式目标覆盖，以及默认目标不可用时明确失败而不静默替换。
+Each default desktop target is accepted in its required toolchain and actual platform environment; success on macOS cannot stand in for Linux or Windows verification. Also test default resolution when the UI technology is omitted, explicit target overrides, and an explicit failure without silent substitution when the default target is unavailable.
 
-用同一 WindowSet 验证原生多窗口与显式 virtual 呈现，并用受控能力环境验证 auto 回退、native_required 失败以及部分创建对象的清理。原生标题栏关闭、系统焦点与尺寸调整需真实平台测试；请求结果与已发生事件不能重复派发。验证关闭一个窗口不影响另一个窗口的状态或复制业务引擎，以及窗口级与应用级媒体资源的释放差异。窄屏与移动端另验窗口切换、返回和安全区域，不将桌面浮窗测试视为已经通过。
+Use the same WindowSet to verify native multi-window and explicit virtual presentation, and use controlled capability environments to verify auto fallback, native_required failure and cleanup of partially created objects. Closing from the native title bar, system focus and resizing need tests on the real platform; request results and events that have already occurred must not be dispatched twice. Verify that closing one window does not affect another window's state or duplicate the business engine, as well as the difference between releasing window-level and app-level media resources. Narrow screens and mobile additionally verify window switching, back and safe areas; desktop floating-window tests are not taken as having passed them.
 
-GPUI、Compose 和更多平台组合在同一接口上继续扩展；桌面试验不能替代移动端生命周期验证。业务传输使用替身验证异步和断连行为；阶段二最小本地控制通道以外的 IPC 与远程网络扩展另外验收。
+GPUI, Compose and more platform combinations continue to extend on the same interface; desktop trials cannot replace mobile lifecycle verification. Business transport uses stand-ins to verify async and disconnect behavior; IPC and remote network extensions beyond the minimal local control channel of Phase 2 are accepted separately.
 
-并行验证 Video 的原生呈现适配，包括播放器与视图分别释放、布局切换、字幕与控制条覆盖、输入命中及全屏能力。至少在一个已验证的 UI 目标上替换媒体后端，检查应用声明与命令 schema 无需改变；不兼容组合必须明确失败。试验结果用于修正组件契约，不立即宣称所有原生平台可用。
+In parallel, verify Video's native presentation adaptation, including separate release of the player and the view, layout switching, subtitle and control bar overlays, input hit testing and full-screen capability. Replace the media backend on at least one verified UI target and check that the app declaration and the command schema need no changes; incompatible combinations must fail explicitly. Trial results are used to correct the component contract; do not immediately claim that all native platforms are usable.
 
-### 阶段六 工程化与组件库
+### Phase 6: engineering and the component library
 
-在前述闭环稳定后，扩展组件库与主题定制能力，完善资源管理、平台打包、增量构建和开发工具。基础深浅色能力必须随第一批控件交付，不能推迟到此阶段。性能结论应基于启动、状态更新、列表交互、内存与跨边界开销的测量。
+Once the loops above are stable, expand the component library and theme customization, and improve resource management, platform packaging, incremental builds and developer tools. Basic light and dark mode support must ship with the first batch of controls and cannot be postponed to this phase. Performance conclusions should be based on measurements of startup, state updates, list interaction, memory and cross-boundary overhead.
 
-## 验证策略
+## Verification strategy
 
-验证直接对应框架承诺：
+Verification maps directly to the framework's promises:
 
-| 范围 | 验证重点 |
+| Scope | Verification focus |
 | --- | --- |
-| 前端与编译诊断 | 无效组件、属性、引用、本地化和 Feature 用例应按预期失败 |
-| 强制命令化 | 无绑定操作、任意回调、直接写状态、未知表达式与无描述扩展组件必须失败 |
-| 多入口引擎 | 四入口共用处理器与同一实例，目录一致，结果及状态版本可对应 |
-| Rust 类型约束 | 错误命令参数、错误状态类型和不支持的导出类型不能通过编译 |
-| 构建与元数据 | 配置变化使旧描述失效，跨 crate 引用与目标条件一致 |
-| 运行时 | 生命周期、订阅释放、异步结果顺序和列表身份 |
-| 交互与导航 | 焦点作用域、模态返回顺序、路由参数和状态恢复 |
-| 多窗口 | 声明与实例分离、原生/虚拟自动选择、单实例与 key、关闭确认、焦点模态、窄屏状态保留及最后窗口策略 |
-| 窗口平台边界 | 四入口目标一致、原生请求与事实事件区分、旧实例拒绝、能力不足和创建失败、无宿主错误及虚拟能力限制 |
-| Agent 与场景 | 稳定目标身份、不可操作原因、真实 UI 绑定路径及可控异步复现 |
-| Web 双构建 | app 包含浏览器内引擎，ui 只包含前端及客户端；产物与缓存隔离，配置冲突及 WASM 能力缺失明确失败 |
-| WebUI 连接 | 协议与身份校验、唯一引擎、多会话路由、断线结果、重连重同步及不重复执行副作用命令 |
-| Web 交互 | 两种模式的真实输入、焦点、菜单入口、自适应切换和文本编辑 |
-| 视频与媒体命令 | HTML video 实际播放、标准控件命令覆盖、四入口同一播放器、请求与实际状态区分、换源与事件回环 |
-| 媒体能力与呈现 | 用户激活、执行端断开、独立生命周期、后端替换、覆盖层与 UI/媒体组合兼容性 |
-| 原生绑定 | 数据映射、线程调度、对象释放和平台生命周期 |
-| 模块边界 | 核心不依赖 UI SDK，业务可无 UI 测试，目标可单独启用和移除 |
-| 主题算法 | 色域、确定性、品牌色回退、最终合成色对比度与配方完整性 |
-| 控件主题 | 深浅色与状态组合、系统切换、无配置使用、自定义控件及图标按钮无容器 |
-| 目标扩展 | 同一 IR 能供独立生成器消费，默认与显式选择一致，缺失能力和不兼容版本明确失败 |
-| 业务传输 | 更换本地或异步适配器不改变命令 schema，失败与状态重同步行为明确 |
-| 契约一致性 | 多后端保留组件语义和功能入口要求，允许已声明的外观差异 |
+| Frontend and compile diagnostics | Invalid component, property, reference, localization and Feature cases fail as expected |
+| Mandatory commands | Unbound operations, arbitrary callbacks, direct state writes, unknown expressions and extension components without descriptions must fail |
+| Multi-entry-point engine | The four entry points share handlers and the same instance, the catalog is consistent, and results and state versions correspond |
+| Rust type constraints | Wrong command arguments, wrong state types and unsupported export types cannot compile |
+| Build and metadata | Configuration changes invalidate old descriptions; cross-crate references and target conditions are consistent |
+| Runtime | Lifecycle, subscription release, async result ordering and list identity |
+| Interaction and navigation | Focus scopes, modal return order, route parameters and state restoration |
+| Multi-window | Separation of declaration and instance, automatic native/virtual selection, single instance and key, close confirmation, focus and modality, state retention on narrow screens, and last-window policy |
+| Window platform boundary | Consistent targets across the four entry points, distinction between native requests and fact events, rejection of old instances, insufficient capability and creation failure, no-host errors and virtual capability limits |
+| Agents and scenes | Stable target identity, reasons for not being actionable, real UI binding paths and controllable async reproduction |
+| Two Web builds | app contains the in-browser engine, ui contains only the frontend and the client; outputs and caches are isolated, and configuration conflicts and missing WASM capabilities fail explicitly |
+| WebUI connection | Protocol and identity validation, a single engine, multi-session routing, disconnect results, reconnect resync and no duplicate execution of side-effect commands |
+| Web interaction | Real input, focus, menu entry points, adaptive switching and text editing in both modes |
+| Video and media commands | Actual HTML video playback, command coverage of the standard controls, the same player across the four entry points, distinction between requested and actual state, source changes and event loops |
+| Media capability and presentation | User activation, executor disconnect, independent lifecycles, backend replacement, overlays and UI/media combination compatibility |
+| Native bindings | Data mapping, thread scheduling, object release and platform lifecycle |
+| Module boundaries | The core does not depend on UI SDKs, business can be tested without a UI, and targets can be enabled and removed individually |
+| Theme algorithm | Gamut, determinism, brand color fallback, contrast of the final composited colors and recipe completeness |
+| Control theming | Light/dark and state combinations, system switching, use with no configuration, custom controls, and icon buttons without containers |
+| Target extension | The same IR can be consumed by independent generators, default and explicit selection agree, and missing capabilities and incompatible versions fail explicitly |
+| Business transport | Swapping local or async adapters does not change the command schema; failure and state resync behavior is explicit |
+| Contract consistency | Multiple backends keep component semantics and feature entry point requirements, with declared appearance differences allowed |
 
-静态检查与 UI 测试各自报告所能证明的内容，不用截图相似度替代功能验证，也不用功能摘要替代实际可操作性测试。
+Static checks and UI tests each report what they can prove; screenshot similarity does not replace functional verification, and functional summaries do not replace tests of actual operability.
 
-## 待原型确认的问题
+## Open questions for the prototype
 
-以下机制尚未定稿，不能被当作已实现能力：
+The following mechanisms are not yet finalized and must not be treated as implemented capabilities:
 
-1. 显式组件清单的配置形式，以及模块路径、别名与重导出的支持范围。
-2. 过程宏与构建器生成绑定身份的方式，如何保持 Rust 作用域、卫生性与稳定源码映射。
-3. 跨 crate 描述的生成和分发，以及 Cargo features、`cfg` 和目标配置的一致性检查。
-4. 类型化状态、命令、展示文本与跨语言 schema 的具体 Rust API。
-5. Feature 条件覆盖的首版可证明范围，以及显式人工保证如何呈现。
-6. 布局切换时的局部状态、焦点和编辑会话保留机制。
-7. Web、Dart、Swift、GTK、WinUI 3 和 Kotlin 的绑定实现，以及 Video 原生呈现集成。
-8. 目标注册、能力描述、生成器和构建适配接口的最小集合与兼容策略。
-9. 应用协议与 UI 绑定的具体分包，以及本地、IPC、网络传输的生命周期规则。
-10. Bern 色阶参数、对比求解策略、控件配方 schema 及原生系统托管主题能力的验证范围。
-11. 受限表达式的精确集合、自动会话命令命名及命令目录跨入口映射规则。
-12. 同一引擎的发现与连接、会话路由、长任务结果和幂等策略的最小协议。
-13. 路由与焦点恢复、异步资源所有权及可复现场景的首版 API。
-14. GTK 版本与显示环境矩阵、WinUI 3 宿主语言与工具链，以及三个默认桌面后端的打包和系统版本范围。
-15. Video 的 source/player API、媒体契约与呈现接口、各平台默认媒体后端及组合支持矩阵。
-16. 浏览器媒体执行端与共享引擎的命令路由、真实用户激活路径、标准控制条及状态归并的最小实现。
-17. WindowSet、Window、多实例 key 与参数的精确语法，类型化窗口客户端及关闭确认协议。
-18. 各目标的原生窗口能力与虚拟宿主接口、窄屏切换规则、最后窗口策略，以及跨窗口媒体附着与资源恢复的验证范围。
-19. Web 双构建的配置与产物清单、WebUI 浏览器传输和会话注册、运行时连接配置，以及浏览器内引擎的外部控制中继与持久化策略。
-20. 样式属性的完整集合、各组件可覆盖的属性与状态，以及系统绘制选中态等覆盖在各平台的实现代价。
-21. 动画期间的命中与焦点规则；Web、GTK 与 WinUI 3 的弹簧都可打断并保留速度，共享元素在 GTK 与 WinUI 3 上用留下的画面替代，手感仍需在真实桌面会话中确认。
-22. `Canvas` 绘图元素与图案描述的最终形式；沉浸模式在 Islands 前端移动指针后的恢复。
-23. 模块事件的派发顺序与失败处理、插槽贡献组件的参数注入规则、页面插槽选择值的生成方式，以及可选模块开启状态的保存入口。
+1. The configuration form of explicit component manifests, and the supported scope of module paths, aliases and re-exports.
+2. How procedural macros and the builder generate binding identities, and how they keep Rust scoping, hygiene and stable source mapping.
+3. Generation and distribution of cross-crate descriptions, and consistency checks for Cargo features, `cfg` and target configuration.
+4. The concrete Rust APIs for typed state, commands, display text and cross-language schemas.
+5. The provable scope of Feature conditional coverage in the first version, and how explicit manual guarantees are presented.
+6. Mechanisms for keeping local state, focus and editing sessions when the layout switches.
+7. Binding implementations for Web, Dart, Swift, GTK, WinUI 3 and Kotlin, and native presentation integration for Video.
+8. The minimal set and compatibility policy of the target registration, capability description, generator and build adapter interfaces.
+9. The concrete package split of the app protocol and UI bindings, and lifecycle rules for local, IPC and network transports.
+10. Bern tonal scale parameters, the contrast solving strategy, the control recipe schema, and the verification scope of native system-managed theming capabilities.
+11. The exact set of constrained expressions, automatic session command naming, and the rules for mapping the command catalog across entry points.
+12. A minimal protocol for discovering and connecting to the same engine, session routing, long-task results and the idempotency policy.
+13. First-version APIs for routing and focus restoration, async resource ownership and reproducible scenes.
+14. The GTK version and display environment matrix, the WinUI 3 host language and toolchain, and the packaging and OS version ranges of the three default desktop backends.
+15. Video's source/player API, the media contract and presentation interface, each platform's default media backend, and the combination support matrix.
+16. A minimal implementation of command routing between browser media executors and a shared engine, the real user activation path, the standard control bar and state merging.
+17. The exact syntax of WindowSet, Window, multi-instance keys and parameters, typed window clients and the close confirmation protocol.
+18. Each target's native window capabilities and virtual host interface, narrow-screen switching rules, the last-window policy, and the verification scope of cross-window media attachment and resource restoration.
+19. The configuration and output manifests of the two Web builds, WebUI browser transport and session registration, runtime connection configuration, and the external control relay and persistence policy of the in-browser engine.
+20. The complete set of style properties, the properties and states each component allows to be overridden, and the cost on each platform of implementing overrides such as system-drawn selection states.
+21. Hit-testing and focus rules during animations; springs on Web, GTK and WinUI 3 can all be interrupted and keep their velocity, and shared elements on GTK and WinUI 3 use the left-behind picture as a stand-in; the feel still needs to be confirmed in real desktop sessions.
+22. The final form of `Canvas` drawing elements and pattern descriptions; restoring immersive mode after the pointer moves in the Islands frontend.
+23. The dispatch order and failure handling of module events, the parameter injection rules for components contributed to slots, how page slot selection values are generated, and where the enabled state of optional modules is saved.
 
-原型应优先回答这些问题，再固定公开 API。受约束组件、强制命令化、统一引擎多入口、应用前后端分离、可替换目标模块、默认自动主题与原生或虚拟多窗口是架构基础，具体工具与语法可以在验证后调整。
+Prototypes should answer these questions first, before the public API is fixed. Constrained components, mandatory commands, one engine with multiple entry points, frontend–backend separation of apps, replaceable target modules, automatic theming by default, and native or virtual multi-window are the architectural foundation; specific tools and syntax can be adjusted after verification.
 
-## 版本记录
+## Version history
 
-以下保留各版本当时的设计和实现范围；历史条目的“尚未实现”不是当前状态，当前支持情况见[平台能力表](Reference/Platforms.md)。
+The following keeps the design and implementation scope of each version as it was at the time; "not yet implemented" in historical entries is not the current status; for current support, see the [platform capability table](Reference/Platforms.md).
 
-| 版本 | 主要内容 |
+| Version | Main content |
 | --- | --- |
-| v0.41 | GPUI 目标的定位与准备：面向大型生产力软件、跨平台一致外观与没有原生 UI 的嵌入式设备；运行时钉死 `gpui-pre` 版本，控件行为取自 `gpui-base`、外观按 Bern 视觉规范绘制；嵌入式 Linux 经全屏 Wayland 合成器承载；`bern-backend-gpui` 与 `bern-gpui` 的第一版 |
-| v0.40 | 跟随状态的快捷键：`shortcut:` 与 `Shortcut(key:)` 可绑定文本，六个目标运行时读取；`ShortcutInput` 按下新的组合键改键；`MenuBar`、`CommandMenu`、`CommandItem`：应用的菜单栏菜单、系统菜单里的项与子菜单，项有动作、快捷键、可绑定的启用与勾选，macOS 实现，其他目标不适用；`window.menu_bar`；引擎侧的 `bern::shortcut` |
-| v0.39 | 现在与本地时区（`bern::date::now()`，浏览器取页面的时钟）；引擎在别处做的工作：命令把耗时工作交给别的线程，完成后用 `bern::wake::Waker` 唤醒引擎收进结果；应用的数据与缓存文件夹（`bern::storage::data_dir / cache_dir`，按各平台规范）；系统凭据库中的机密（`bern::secrets`） |
-| v0.38 | 输入框 `submit: clear` 与按钮 `clears: draft.x`：发送后清空草稿并交出焦点 |
-| v0.37 | 静置区 `idle_area: 秒数`：页面上有静置区时，鼠标只在其上停住才让窗口静置 |
-| v0.36 | `SplitButton` 与 `Switch` 一样可以用 `checked:` 显示引擎状态、切换时执行动作 |
-| v0.35 | 应用自带的媒体内核：引擎登记 `MediaKernel`，前端的视频视图给它原生表面（Apple 上是 `CAMetalLayer`）与显示同步的帧时钟，标准媒体命令照常经媒体中心路由给它；没有控制条的 `Video` 可以作为按钮的内容；Apple 目标把引擎依赖需要的系统框架与库（rustc 的 `native-static-libs`）交给 swiftc 链接 |
-| v0.34 | `style!` 按平台给出长度（`gap`、`padding_x`、`padding_y`、`width` 与 `fit`、`height`、`font_size`、`row_height`），构建每个目标前替换元素写下的长度；`shape: chip`；`Positioned(bleed:)` 在 GTK 与 WinUI 3 补齐；不写 `align` 的 `Column` 在 GTK 与 WinUI 3 也是前缘列；与框架类型同名的值类型、组件与会话在各目标都能编译；监听控制通道的构建在 `bin/` 旁附带列出命令的 Agent skill；release 构建的生成 crate 以 LTO、单一代码生成单元编译并剥离符号；WebUI 安装包只带本应用的程序；框架级性能追踪（`BERN_TRACE`、会话命令 `trace.*`、`bern run --trace` 与 `bern::trace::span!`），先接入引擎与桥接一侧 |
-| v0.33 | `swiftui + tvos`：Apple TV 模拟器构建与 `bern run --target tvos`，一个场景中的虚拟窗口、系统焦点与遥控器；电视布局 `Layout(size: tv)` 与 `window.tv`，只运行在电视上的目标在构建时裁剪电视不显示的部分；没有控件的快捷键 `Shortcut`，电视上对应遥控按键；按钮的起始焦点 `default_focus`；`[app.icon].tvos` 接受 `.brandassets`，未声明时由图标生成分层图标与顶部货架图；文本样式的电视字号 `font(tv:)`；文字会话动作 `push_str` 与 `pop`；`Search(suggest: true)` 未输入时就列出结果；以上 Bern 新能力六个目标都生成；tvOS 上按设计尺寸画的场景里控件按设计尺寸画（开关、分段、滑块、菜单行、分组标题、正文字号），自绘按钮按设计稿的电视焦点（行变白、图片抬起、按钮变白放大）；`Sidebar(width:)` 在保持系统侧栏宽度的目标上改为警告；只显示图标的页签 `Tab(display: icon)`（电视标签栏里的搜索只是放大镜） |
-| v0.32 | 文档与当前接口同步：新增组件与属性参考、目标能力矩阵；播放器坐标场景与滚动内容、共享胶囊和受控滑块、空闲检测开关、图片跨分栏 Hero；同步 Web 搜索、引导、布局与存储支持。历史验证记录保留各自的范围，后续设计单独标注；`[app.icon]` 让各平台使用自己的图标（方形 PNG 或平台原生格式：`.icns`、`.appiconset`、`.ico`、hicolor 图标主题、Android `res`、页面图标文件夹）；`SidebarHeader(role: title)` 在标题栏已显示应用图标与标题的 Windows 上不显示 |
-| v0.2 | 提出 Rust 宏 UI、多语言、自适应功能契约和多后端编译目标 |
-| v0.3 | 明确受约束的可导出组件，补充动态 IR、编译职责、状态与跨语言绑定、本地化类型、条件覆盖及分阶段验收 |
-| v0.4 | 将应用前后端分离、目标扩展协议及 UI 技术与平台独立选择确立为架构要求，增加 Flutter 与 macOS 原生 UI 路线及模块化验收 |
-| v0.5 | 将所有控件的自动深浅色适配确立为底层契约，增加共享色彩算法、语义角色、控件状态配方、主题快照及跨目标验收 |
-| v0.6 | 明确 Bern 的命令驱动应用框架定位，强制 UI 操作命令化并自动生成标准会话动作，增加四入口共享引擎、受限表达式、导航焦点、异步所有权及 Agent 可复现场景 |
-| v0.7 | 将 PC 默认后端改为 macOS SwiftUI、Linux GTK、Windows WinUI 3，保留 GPUI 与 Flutter 可选，并同步主题、构建、模块及验收规则 |
-| v0.8 | 引入专门的 Video 声明、受管理播放器及独立媒体与呈现接口；Web 默认使用 HTML video 与命令化标准控件，补充真实播放状态、执行端能力及跨入口验证 |
-| v0.9 | 增加 WindowSet 与 Window 多窗口声明，原生不可用时自动虚拟呈现，统一身份、命令、关闭确认、焦点模态、窄屏状态和资源生命周期，明确操作系统事实事件边界 |
-| v0.10 | 明确 Web 应用与 WebUI 两种构建，区分浏览器内 WASM 引擎与独立引擎客户端，补充配置、产物隔离、会话与媒体路由、断线重连及双模式验收 |
-| v0.11 | 首个正式后端改为 macOS SwiftUI，Web 顺延为第二个；主题改为原生优先、算法兜底；macOS 使用标准组件与系统样式、不单独调用新系统视觉接口，最低 macOS 14，引擎默认同进程运行；扩充初期组件并重排实施阶段 |
-| v0.12 | 增加随包资源：`Bern.toml` 的受限声明与严格构建校验、IR 资源清单、目标复制，以及引擎经宿主装配的 `Resources` 按名称解析 |
-| v0.13 | 虚拟呈现遵循宿主的设计习惯：网页中主窗口即页面，次级窗口为对话框或侧边面板，浮动窗口改为显式选择的 `presentation: floating`；不提供的窗口动作如实报告为不可用；Web 视觉规范定为 Bern 自有的中性网页风格 |
-| v0.14 | 确定阶段四的声明方式：`[layouts]` 断点与 `Adaptive`/`Layout`、`Menu`/`MenuItem`、`#[bern::features]` 功能契约与覆盖检查（B201–B206）、本地化诊断编号（B101–B104）、按 UI 会话的运行时语言切换（`LanguagePicker` 与 `ui.set_language`） |
-| v0.15 | 阶段五第一批：`gtk + linux` 目标采用 gtk4-rs 与显式声明的 libadwaita（最低 GTK 4.14、libadwaita 1.5），运行时 crate 不进入工作区默认构建；如实报告 GTK 4 与 Wayland 下不可用或无法确认的窗口动作 |
-| v0.16 | 阶段五第二批：`winui3 + windows` 目标以 C#/.NET 为宿主，代码构建界面、经 P/Invoke 调用 `bern_app.dll` 中的同一进程内接口；声明 Windows App SDK 1.8、.NET 10 与最低 Windows 版本；单实例并在最后一个窗口关闭后退出；本地控制通道与资源文件 URL 支持 Windows |
-| v0.17 | `winui3 + windows` 宿主改为 C++/WinRT：一个可执行文件含 WinUI 3 与系统 XAML（XAML Islands）两套前端，启动时按系统是否有 Windows App Runtime 自动选择；引擎以静态库链入，C 运行库静态链接，不需要 .NET，不随附 Windows App SDK |
-| v0.18 | 增加应用图标：`[app].icon` 声明方形 PNG 并严格校验；未声明时各目标使用 Bern 标志，分别生成 macOS 的 `.icns`、Windows 的图标资源、Linux 的图标主题条目与 Web 的页面图标 |
-| v0.19 | 增加构建工具命令 `bern new`、`bern run` 与 `bern doctor`；生成的胶水按项目自身 `bern` 依赖的来源引用 Bern crate，项目不再需要位于 Bern 仓库内；未指定目标时按本机系统与工具选择目标；直接写在窗口中的控件以窗口 id 命名；Windows 目标以预编译头做增量构建，改用 Windows App SDK 2.x 并接受任何 2.x 运行时（包括 Windows 11 自带的），可用 `frontends` 只编译 WinUI 3 或系统 XAML；增加 `bern package` 与 `[app].publisher`，生成 macOS 磁盘映像、Windows 安装程序、Debian 包与 Web 压缩包，签名经环境变量配置 |
-| v0.20 | 组件库第一批：`Image`（随包 PNG 与 JPEG，编译器检查资源已声明，包括组件库中的引用）、`Progress`（确定与不确定进度，数值为受限表达式）、`Grid`（不小于 `min_width` 的等宽自适应列）与 `Stack`（叠放与九方位对齐）；IR 版本 6 |
-| v0.21 | HDR 图片：`Image` 在能显示 HDR 的显示器上按高动态范围显示 PQ、HLG 的 PNG 与带增益图的 JPEG，不能时显示 SDR 版本；新增 `bern-image` 在 Rust 中解码，Windows 两种前端以 `SwapChainPanel` 与 Direct2D 自绘，GTK 4.16 起交给 GTK 合成、更早的 GTK 显示 SDR 版本 |
-| v0.22 | Windows 的 `Video` 改用 Media Foundation 媒体引擎：每个源一个引擎，以无窗口交换链模式绘制，两种前端用 `SwapChainPanel` 显示，HDR 视频由引擎输出（HDR 显示器未实测）；一个播放器同一时间只在最新附着的视图中显示画面 |
-| v0.23 | `swiftui + ios`：与 macOS 共用生成器与运行时，平台部分分为 AppKit 与 UIKit 两个运行时文件；一个场景中的虚拟窗口（主窗口铺满、其他窗口为 sheet）；模拟器构建与 `bern run` 安装启动，`BERN_IPC_DIR` 让 Mac 上的 CLI 与 MCP 连到模拟器中的应用；最低 iOS 17 |
-| v0.31 | 引擎读取交来的文件：`MediaSource::file_name()` 与 `open()` 统一读取本地文件、Android 的 `content://` 文档与网页的 `blob:` 文件，宿主为只有它能解析的协议登记打开方式 |
-| v0.30 | 设计稿可行性审阅后补的四项：容器的 `stagger` 让子元素错峰出现；`Rail` 把子元素放在状态给出的比例处或铺在两点之间；`PopoverButton` 弹出放任意内容的浮层；尺寸档扩展为 `compact`、`medium`、`expanded`、`large` 四档，表达式可读 `window.compact` 等窗口档位 |
-| v0.29 | 媒体类应用需要的能力（逐项进行中）：带内容的按钮与 `reveal: hover`，样式的 `shadow`；侧边栏底部区域 `SidebarFooter`，工具栏中的 `Search` 与搜索结果；会话动作（`draft.x.set(…)`、`toggle()`），侧面板 `Inspector`，轻提示 `Toast`，`Switch(style: button)`，对话框窗口 `role: dialog`；表达式的 `if`，绑定状态的长度与 `animate`，容器尺寸，`Video` 的圆角，`appearance`；快捷键 `shortcut` 与会话命令 `ui.focus`；运行时选择的强调色与明暗（`accents`、`WindowSet(accent:, appearance:)`）；分体开关按钮 `SplitButton`；引擎给出的图片 `Image(source: app.x)`，形状取图片的平均色 `Shape(fill_from:)` 并向一侧渐隐 `fade`；按钮的 `pick` 与 `files` 弹出打开面板，拖放区 `Drop`，会话命令 `ui.set_file`；工具栏用 `Divider` 分组；联动：`scroll_scale`、`scroll_opacity`，`ScrollView(snap:, position:, arrival:)`，`nudge`，手势区 `Pinch` 与 `Swipe`；`Drop(opens: true)` 接收系统交给应用的文件并登记文档类型；目标能力描述增加 `features` 清单；重复项中的控件身份带上每一层的 key，经过组件也一样；新增示例 `examples/gallery`；以上能力 SwiftUI、Compose 与 Web 都已实现，Web 同时补上了样式覆盖、`Canvas` 与标注、结构过渡与共享元素、可增减的侧栏项与窗口静置 |
-| v0.28 | `compose + android` 第一版：生成 Kotlin、Compose 与 Gradle 工程，引擎经 NDK 编译后通过 JNI 在进程内运行；控制通道经 `adb forward` 接入；样式覆盖、`Canvas`、文字标注、条件出现的导航项，出现、消失、重排与共享元素动效，`Query`，基于 Media3 的 `Video`，沉浸与空闲，`bern package` 生成 APK 与 AAB；`bern run` 安装到连接的设备；框架自带文字与样式规则合并移入共享的目标接口 |
-| v0.27 | 实现 v0.25 与 v0.26 的 SwiftUI 部分并在 macOS 上验证：模块组合、插槽与可选模块，`style!` 的覆盖与动效 token，结构过渡、共享元素与窗口沉浸，`Canvas` 与图案（`style!` 中的 `pattern` 块，新增 `gap`），`Text` 标注，导航容器中按条件与列表出现的项及 `fallback`；目标能力描述增加标注与动态导航项，做不到的构建时报错或警告 |
-| v0.26 | 模块化应用的设计：应用由外壳与多个模块组成，每个模块有自己的协议、引擎、界面、翻译与资源；命令目录与状态按命名空间合并，模块间通过依赖模块的命令与事件交互；插槽与页面插槽让模块向外壳贡献界面；可选模块可在运行时开关并沿依赖级联；`sources` 可以写目录；`bern new --module` |
-| v0.25 | 样式覆盖、动效与自绘的设计（尚未实现）：标准控件默认原生外观，应用用 `style!` 声明全应用的样式覆盖与动效 token，颜色只用语义角色并由主题内核检查，目标做不到的覆盖在构建时报出；元素可声明出现、消失、重排过渡与共享元素；导航容器的项可按条件出现；窗口增加 `chrome`、`immersive` 与 `idle_after`；`Canvas` 与 `Text` 标注；新增 `fill.subtle`、`fill.strong` 角色。删除图标按钮不画容器、不覆盖系统托管表面等外观限制；功能所需的较新系统接口可以按版本分支使用 |
-| v0.24 | iPad：同一个 iOS 应用包在 iPad 上使用原生多窗口（每种窗口一个 `WindowGroup`，以窗口种类为值保持单实例），设置仍为 sheet 并以 ⌘, 打开；呈现方式在启动时按设备决定并报告给引擎；声明的默认与最小尺寸用于可调整的 iPad 窗口；焦点按窗口是否显示为活动报告；IPC 客户端的握手有超时，被系统挂起的应用报告为不应答 |
+| v0.41 | Positioning and preparation of the GPUI target: aimed at large productivity software, a consistent cross-platform appearance, and embedded devices without a native UI; the runtime pins the `gpui-pre` version, control behavior comes from `gpui-base`, and the appearance is drawn per the Bern design guidelines; embedded Linux is hosted through a full-screen Wayland compositor; the first version of `bern-backend-gpui` and `bern-gpui` |
+| v0.40 | Keyboard shortcuts that follow state: `shortcut:` and `Shortcut(key:)` can be bound to text, read by the runtimes of the six targets; `ShortcutInput` rebinds when a new key combination is pressed; `MenuBar`, `CommandMenu`, `CommandItem`: the app's menu bar menus and items and submenus in system menus, where items have an action, a keyboard shortcut, and bindable enabled and checked states, implemented on macOS and not applicable on other targets; `window.menu_bar`; the engine-side `bern::shortcut` |
+| v0.39 | The current time and local time zone (`bern::date::now()`; the browser takes the page's clock); work the engine does elsewhere: a command hands time-consuming work to another thread, and when it finishes, `bern::wake::Waker` wakes the engine to take in the result; the app's data and cache folders (`bern::storage::data_dir / cache_dir`, following each platform's conventions); secrets in the system credential store (`bern::secrets`) |
+| v0.38 | Text field `submit: clear` and button `clears: draft.x`: after sending, the draft is cleared and focus is given up |
+| v0.37 | Idle area `idle_area: seconds`: when the page has an idle area, the window goes idle only when the mouse rests over it |
+| v0.36 | `SplitButton`, like `Switch`, can show engine state with `checked:` and run an action when toggled |
+| v0.35 | Media cores shipped with the app: the engine registers a `MediaKernel`, the frontend's video view gives it a native surface (a `CAMetalLayer` on Apple) and a display-synchronized frame clock, and standard media commands are routed to it through the media hub as usual; a `Video` without a control bar can be the content of a button; Apple targets hand the system frameworks and libraries needed by the engine's dependencies (rustc's `native-static-libs`) to swiftc for linking |
+| v0.34 | `style!` gives lengths per platform (`gap`, `padding_x`, `padding_y`, `width` and `fit`, `height`, `font_size`, `row_height`), replacing the lengths written on elements before each target is built; `shape: chip`; `Positioned(bleed:)` filled in on GTK and WinUI 3; a `Column` without `align` is a leading-edge column on GTK and WinUI 3 as well; value types, components and sessions with the same name as framework types compile on every target; builds that listen on the control channel ship an agent skill listing the commands next to `bin/`; the generated crate of release builds is compiled with LTO and a single codegen unit and has its symbols stripped; the WebUI installer carries only this app's programs; framework-level performance tracing (`BERN_TRACE`, the session commands `trace.*`, `bern run --trace` and `bern::trace::span!`), wired into the engine and bridge side first |
+| v0.33 | `swiftui + tvos`: Apple TV simulator builds and `bern run --target tvos`, virtual windows in one scene, system focus and the remote; the TV layout `Layout(size: tv)` and `window.tv`, with targets that run only on TV trimming at build time the parts the TV does not show; keyboard shortcuts without a control, `Shortcut`, which map to remote buttons on TV; the initial focus of buttons, `default_focus`; `[app.icon].tvos` accepts `.brandassets`, and when it is not declared, layered icons and the top shelf image are generated from the icon; TV font sizes for text styles, `font(tv:)`; the text session actions `push_str` and `pop`; `Search(suggest: true)` lists results before any input; all six targets generate the new Bern capabilities above; in scenes drawn at design size on tvOS, controls are drawn at design size (switches, segments, sliders, menu rows, group headings, body font size), and self-drawn buttons follow the TV focus of the design mockups (rows turn white, images lift, buttons turn white and scale up); `Sidebar(width:)` becomes a warning on targets that keep the system sidebar width; icon-only tabs `Tab(display: icon)` (search in the TV tab bar is just a magnifying glass) |
+| v0.32 | Docs synced with the current interfaces: a new component and property reference and target capability matrix; player coordinate scenes and scroll content, shared capsules and controlled sliders, the idle detection switch, image Hero transitions across split-view columns; Web search, onboarding, layout and storage support synced. Historical verification records keep their own scope, and later designs are marked separately; `[app.icon]` lets each platform use its own icon (a square PNG or a platform-native format: `.icns`, `.appiconset`, `.ico`, a hicolor icon theme, Android `res`, a page icon folder); `SidebarHeader(role: title)` is not shown on Windows, where the title bar already shows the app icon and title |
+| v0.2 | Proposes Rust macro UI, multiple languages, adaptive feature contracts and multi-backend compile targets |
+| v0.3 | Clarifies constrained exportable components; adds the dynamic IR, compile responsibilities, state and language bindings, localization types, conditional coverage and phased acceptance |
+| v0.4 | Establishes app frontend–backend separation, the target extension protocol, and independent choice of UI technology and platform as architectural requirements; adds the Flutter and macOS native UI routes and modular acceptance |
+| v0.5 | Establishes automatic light and dark mode adaptation of all controls as an underlying contract; adds the shared color algorithm, semantic roles, control state recipes, theme snapshots and cross-target acceptance |
+| v0.6 | Clarifies Bern's positioning as a command-driven application framework, makes every UI operation a command and generates standard session actions automatically; adds a shared engine for the four entry points, constrained expressions, navigation focus, async ownership and reproducible scenes for agents |
+| v0.7 | Changes the default PC backends to macOS SwiftUI, Linux GTK and Windows WinUI 3, keeps GPUI and Flutter as options, and syncs the theme, build, module and acceptance rules |
+| v0.8 | Introduces a dedicated Video declaration, managed players and independent media and presentation interfaces; Web uses HTML video and command-driven standard controls by default; adds real playback state, executor capabilities and cross-entry-point verification |
+| v0.9 | Adds WindowSet and Window multi-window declarations, automatic virtual presentation when native windows are unavailable, and unified identity, commands, close confirmation, focus and modality, narrow-screen state and resource lifecycle; clarifies the boundary of OS fact events |
+| v0.10 | Clarifies the two builds, Web app and WebUI, distinguishing the in-browser WASM engine from the client of a separate engine; adds configuration, output isolation, session and media routing, disconnect and reconnect, and acceptance for both modes |
+| v0.11 | Changes the first official backend to macOS SwiftUI, with Web moved to second; theming becomes native first with the algorithm as the fallback; macOS uses standard components and system styles and does not call new-OS visual APIs separately, the minimum is macOS 14, and the engine runs in-process by default; expands the initial components and reorders the implementation phases |
+| v0.12 | Adds bundled resources: constrained declarations in `Bern.toml` with strict build validation, the IR resource manifest, copying by targets, and name resolution through the `Resources` the host assembles for the engine |
+| v0.13 | Virtual presentation follows the host's design conventions: on the web the main window is the page, secondary windows are dialogs or side panels, and floating windows become the explicitly chosen `presentation: floating`; window actions that are not provided are reported truthfully as unavailable; the Web design guidelines are set as Bern's own neutral web style |
+| v0.14 | Settles the declaration style of Phase 4: `[layouts]` breakpoints and `Adaptive`/`Layout`, `Menu`/`MenuItem`, `#[bern::features]` feature contracts and the coverage check (B201–B206), localization diagnostic codes (B101–B104), and runtime language switching per UI session (`LanguagePicker` and `ui.set_language`) |
+| v0.15 | Phase 5, first batch: the `gtk + linux` target uses gtk4-rs and explicitly declared libadwaita (minimum GTK 4.14, libadwaita 1.5), and the runtime crate is not part of the workspace's default build; window actions that are unavailable or cannot be confirmed under GTK 4 and Wayland are reported truthfully |
+| v0.16 | Phase 5, second batch: the `winui3 + windows` target uses C#/.NET as the host, builds the UI in code, and calls the same in-process interface in `bern_app.dll` through P/Invoke; declares Windows App SDK 1.8, .NET 10 and the minimum Windows version; single instance, exiting after the last window closes; the local control channel and resource file URLs support Windows |
+| v0.17 | The `winui3 + windows` host changes to C++/WinRT: one executable contains two frontends, WinUI 3 and system XAML (XAML Islands), chosen automatically at startup by whether the system has the Windows App Runtime; the engine is linked in as a static library and the C runtime is linked statically; no .NET is needed and the Windows App SDK is not shipped |
+| v0.18 | Adds the app icon: `[app].icon` declares a square PNG with strict validation; when it is not declared, every target uses the Bern logo, generating the macOS `.icns`, the Windows icon resource, the Linux icon theme entry and the Web page icon |
+| v0.19 | Adds the build tool commands `bern new`, `bern run` and `bern doctor`; the generated glue references Bern crates by the source of the project's own `bern` dependency, so projects no longer need to be inside the Bern repository; when no target is specified, the target is chosen by the local OS and tools; controls written directly in a window are named by the window id; the Windows target builds incrementally with precompiled headers, switches to Windows App SDK 2.x and accepts any 2.x runtime (including the one that ships with Windows 11), and can compile only WinUI 3 or only system XAML with `frontends`; adds `bern package` and `[app].publisher`, producing macOS disk images, Windows installers, Debian packages and Web archives, with signing configured through environment variables |
+| v0.20 | Component library, first batch: `Image` (bundled PNG and JPEG; the compiler checks that the resource is declared, including references in component libraries), `Progress` (determinate and indeterminate progress; the value is a constrained expression), `Grid` (adaptive equal-width columns no narrower than `min_width`) and `Stack` (layering with nine-position alignment); IR version 6 |
+| v0.21 | HDR images: `Image` shows PQ and HLG PNGs and JPEGs with gain maps in high dynamic range on displays that can show HDR, and the SDR version where they cannot; the new `bern-image` decodes them in Rust; both Windows frontends draw them themselves with `SwapChainPanel` and Direct2D; GTK 4.16 and later hands them to GTK to composite, and earlier GTK shows the SDR version |
+| v0.22 | The Windows `Video` switches to the Media Foundation media engine: one engine per source, drawing in windowless swap chain mode, displayed with `SwapChainPanel` in both frontends; HDR video is output by the engine (not measured on an HDR display); a player shows its picture only in the most recently attached view at any one time |
+| v0.23 | `swiftui + ios`: shares the generator and runtime with macOS, with the platform parts split into two runtime files, AppKit and UIKit; virtual windows in one scene (the main window fills the screen, other windows are sheets); simulator builds and install-and-launch with `bern run`; `BERN_IPC_DIR` lets the CLI and MCP on the Mac connect to the app in the simulator; minimum iOS 17 |
+| v0.31 | The engine reads files handed to it: `MediaSource::file_name()` and `open()` uniformly read local files, Android `content://` documents and web `blob:` files, and the host registers how to open schemes that only it can resolve |
+| v0.30 | Four additions after the feasibility review of the design mockups: a container's `stagger` makes its children appear staggered; `Rail` places children at a ratio given by state or spreads them between two points; `PopoverButton` pops up a floating layer holding arbitrary content; size classes expand to four: `compact`, `medium`, `expanded` and `large`, and expressions can read window classes such as `window.compact` |
+| v0.29 | Capabilities that media apps need (in progress item by item): buttons with content and `reveal: hover`, the style `shadow`; the sidebar footer area `SidebarFooter`, `Search` in the toolbar and search results; session actions (`draft.x.set(…)`, `toggle()`), the side panel `Inspector`, the lightweight notification `Toast`, `Switch(style: button)`, dialog windows `role: dialog`; `if` in expressions, lengths bound to state and `animate`, container sizes, rounded corners on `Video`, `appearance`; the keyboard shortcut `shortcut` and the session command `ui.focus`; accent color and appearance chosen at runtime (`accents`, `WindowSet(accent:, appearance:)`); the split toggle button `SplitButton`; images provided by the engine, `Image(source: app.x)`, and shapes that take an image's average color, `Shape(fill_from:)`, and fade toward one side, `fade`; a button's `pick` and `files` pop up an open panel, the drop zone `Drop`, the session command `ui.set_file`; toolbar grouping with `Divider`; linked motion: `scroll_scale`, `scroll_opacity`, `ScrollView(snap:, position:, arrival:)`, `nudge`, the gesture areas `Pinch` and `Swipe`; `Drop(opens: true)` receives files the system hands to the app and registers document types; target capability descriptions gain a `features` list; control identities in repeated items carry the key of every level, also through components; the new example `examples/gallery`; SwiftUI, Compose and Web have all implemented the capabilities above, and Web also filled in style overrides, `Canvas` and annotations, structural transitions and shared elements, sidebar items that can be added and removed, and window idling |
+| v0.28 | First version of `compose + android`: generates a Kotlin, Compose and Gradle project, and the engine is compiled with the NDK and runs in-process through JNI; the control channel is reached through `adb forward`; style overrides, `Canvas`, text annotations, navigation items that appear conditionally, appear, disappear, reorder and shared-element motion, `Query`, `Video` based on Media3, immersive and idle, `bern package` producing APK and AAB; `bern run` installs onto the connected device; the framework's built-in strings and style rules are merged and moved into the shared target interface |
+| v0.27 | Implements the SwiftUI part of v0.25 and v0.26 and verifies it on macOS: module composition, slots and optional modules, `style!` overrides and motion tokens, structural transitions, shared elements and window immersion, `Canvas` and patterns (the `pattern` block in `style!`, with the new `gap`), `Text` annotations, items in navigation containers that appear conditionally and from lists, and `fallback`; target capability descriptions gain annotations and dynamic navigation items, and what a target cannot do is reported as an error or warning at build time |
+| v0.26 | Design of modular apps: an app consists of a shell and several modules, each with its own protocol, engine, UI, translations and resources; command catalogs and state are merged by namespace, and modules interact through the commands and events of the modules they depend on; slots and page slots let modules contribute UI to the shell; optional modules can be turned on and off at runtime, cascading along dependencies; `sources` can name directories; `bern new --module` |
+| v0.25 | Design of style overrides, motion and self-drawing (not yet implemented): standard controls default to the native appearance; apps declare app-wide style overrides and motion tokens with `style!`, colors use only semantic roles and are checked by the theme core, and overrides a target cannot do are reported at build time; elements can declare appear, disappear and reorder transitions and shared elements; items of navigation containers can appear conditionally; windows gain `chrome`, `immersive` and `idle_after`; `Canvas` and `Text` annotations; the new roles `fill.subtle` and `fill.strong`. Removes appearance restrictions such as icon buttons drawing no container and system-managed surfaces not being overridden; newer system APIs needed for features may be used in version branches |
+| v0.24 | iPad: the same iOS app bundle uses native multi-window on iPad (one `WindowGroup` per window kind, kept to a single instance with the window kind as the value), and settings remain a sheet opened with ⌘,; the presentation is decided by device at startup and reported to the engine; the declared default and minimum sizes are used for resizable iPad windows; focus is reported by whether the window is shown as active; the IPC client's handshake has a timeout, and an app suspended by the system is reported as not responding |
 
 
-### 搜索面板（2026-10-14）
+### Search panel (2026-10-14)
 
-`Toolbar` 中的 `Search(style: palette)` 是命令面板：点击搜索入口或快捷键后，从入口展开至内容区上方，遮罩覆盖窗口，自动聚焦输入；Esc、点击外部及激活结果都关闭。`panel_prompt` 是展开时的提示，`width`/`height` 是面板的理想宽度与最大高度（默认 640/480），随窗口缩小并随结果高度收缩。普通 `Search` 保留原生建议列表。
+`Search(style: palette)` in a `Toolbar` is a command palette: after a click on the search entry point or the keyboard shortcut, it expands from the entry point above the content area, a scrim covers the window, and the input is focused automatically; Esc, clicking outside and activating a result all close it. `panel_prompt` is the prompt shown when it is expanded, and `width`/`height` are the panel's ideal width and maximum height (default 640/480); it shrinks with the window and with the height of the results. A plain `Search` keeps the native suggestion list.
 
-页面里的 `Search` 平时在使用中（获得焦点或有文字）才列出结果。写 `suggest: true` 时还没输入就列出，例如没有键盘、用遥控器的屏幕键盘输入首字母的电视搜索页：SwiftUI 与 Web 在获得焦点时列出，电视上一直列出，Compose 工具栏的搜索页本来打开就列出，GTK 与 WinUI 3 在获得焦点时弹出结果。
+A `Search` in a page normally lists results only while in use (focused or containing text). With `suggest: true` it lists them before any input, for example on a TV search page with no keyboard, where the first letters are typed on the remote's on-screen keyboard: SwiftUI and Web list them on focus, on TV they are always listed, the search page of the Compose toolbar lists them as soon as it opens anyway, and GTK and WinUI 3 pop up the results on focus.
 
-`SearchItem` 是搜索结果的按钮，`id`、`label`、动作必需，`icon`、`detail`、`hint` 可选。行高 42；子元素可替换默认行，例如 70×105 海报。`navigation: false` 的海报仍可点击和 Tab 聚焦，不参加上下方向键选择。结果按声明顺序导航，Enter 激活，查询改变后重新选第一行；支持 `pick`/`files`。面板按窗口独立保存状态，关闭后结果卸载、焦点归还搜索入口；减少动态效果时不做几何变换。
+`SearchItem` is a search result button; `id`, `label` and an action are required, and `icon`, `detail` and `hint` are optional. The row height is 42; children can replace the default row, for example with a 70×105 poster. A poster with `navigation: false` can still be clicked and focused with Tab, but does not take part in up/down arrow key selection. Results are navigated in declaration order, Enter activates, and the first row is selected again after the query changes; `pick`/`files` are supported. The panel keeps its state per window; after it closes, the results are unmounted and focus returns to the search entry point; with Reduce Motion, no geometric transforms are applied.
 
-七个目标都声明了 `search_palette`（见[平台能力表](Reference/Platforms.md)）。macOS 使用原生视图，Web 使用带键盘导航与焦点恢复的 dialog。
+All seven targets declare `search_palette` (see the [platform capability table](Reference/Platforms.md)). macOS uses a native view, and Web uses a dialog with keyboard navigation and focus restoration.
 
-### 自适应海报（2026-10-14）
+### Adaptive posters (2026-10-14)
 
-`Button(shape: capsule, height: 32)` 和 `Menu(shape: capsule, height: 32)` 声明同高胶囊控件；`Picker`、`Switch` 和 `SplitButton` 也接受 `shape` / `height`。相关操作用 `ControlGroup(height: 40)` 共享一个胶囊，子控件保留独立交互。SwiftUI 在 macOS / iOS 26 使用系统交互式 Liquid Glass；菜单保留系统弹出与键盘交互，移除旧式菜单按钮的矩形底板后再应用玻璃。旧系统使用系统材质胶囊。省略形状保持原有控件。Web 已提供同一声明的胶囊和控件分组，使用 Web 自身样式；其余目标通过 `capsule_controls` 能力检查拒绝尚未实现的用法。
+`Button(shape: capsule, height: 32)` and `Menu(shape: capsule, height: 32)` declare capsule controls of the same height; `Picker`, `Switch` and `SplitButton` also accept `shape` / `height`. Related actions share one capsule with `ControlGroup(height: 40)`, and the child controls keep their own interaction. SwiftUI uses the system's interactive Liquid Glass on macOS / iOS 26; menus keep the system popup and keyboard interaction, and the glass is applied after the rectangular backing of old-style menu buttons is removed. Older systems use a system material capsule. Omitting the shape keeps the original control. Web already provides capsules and control groups for the same declaration, using Web's own styles; the other targets reject usage that is not yet implemented through the `capsule_controls` capability check.
 
-`Image(aspect: 0.6666666667, fit: cover)` 按父容器提供的宽度保持 2:3 比例，无需固定宽高；裁切在该比例内，加载前后布局不跳动。`Grid(row_gap:)` 可将行距与列距分别设置；省略时仍使用 `gap`。SwiftUI 与 Web 支持，其他后端通过 `adaptive_images` 能力检查明确报错。
+`Image(aspect: 0.6666666667, fit: cover)` keeps a 2:3 ratio at the width offered by the parent container, without a fixed width or height; cropping stays within that ratio, and the layout does not jump before or after loading. `Grid(row_gap:)` can set the row spacing separately from the column spacing; when it is omitted, `gap` is still used. SwiftUI and Web support this; other backends report an explicit error through the `adaptive_images` capability check.
 
-`Stack` 中的 `Rail` 即使由条件分支或 `ForEach` 生成，也只覆盖其他层给出的区域，不参与撑大叠层尺寸。网格同一行的条目顶部对齐，标题换行不移动海报。`Slider(label_hidden: true)` 隐藏可见标签并保留可访问名称；`Text(font_size:)` 可细调索引字号，多行上限文字保留换行高度。查询参数变化时保留上一份结果及视图身份，避免筛选时整页重新入场；订阅所属窗口代次变化后清除旧结果。
+A `Rail` in a `Stack`, even when generated by a conditional branch or `ForEach`, only covers the area given by the other layers and does not take part in enlarging the stack. Items in the same grid row are top-aligned, so a wrapping title does not move the poster. `Slider(label_hidden: true)` hides the visible label and keeps the accessible name; `Text(font_size:)` can fine-tune the index font size, and multi-line text with a line limit keeps the height of its wrapped lines. When query parameters change, the previous result and the view identity are kept, so that the whole page does not re-enter while filtering; after the generation of the window that owns the subscription changes, the old results are cleared.
 
 
-### 引擎驱动的设置控件（2026-10-14）
+### Engine-driven settings controls (2026-10-14)
 
-`Switch(checked: app.enabled) => app.set_enabled(app.enabled)` 与
-`Picker(selected: app.appearance) => app.set_appearance(app.appearance)`，以及
+`Switch(checked: app.enabled) => app.set_enabled(app.enabled)` and
+`Picker(selected: app.appearance) => app.set_appearance(app.appearance)`, as well as
 `Slider(current: app.volume, min: 0, max: 1) => app.set_volume(app.volume)`
-读取引擎快照（此处省略各控件必填的 id 和 label）；动作参数中与 `checked` / `selected` / `current` **完全相同的表达式**代表用户刚选择的新值。只替换完整的参数表达式，不替换字符串或其他字段。控件不直接修改引擎快照。原有 `value: draft.field` 继续用于会话草稿，可选动作在写入后执行。
+read the engine snapshot (the id and label each control requires are omitted here); in the action arguments, an expression **exactly the same as** `checked` / `selected` / `current` stands for the new value the user just chose. Only complete argument expressions are replaced, not strings or other fields. Controls do not modify the engine snapshot directly. The existing `value: draft.field` is still used for session drafts, and an optional action runs after the write.
 
-`TextInput(current: app.name) => app.rename(app.name)` 同样读引擎快照（2026-10-29）：每次编辑都运行动作，动作参数里与 `current` 相同的表达式是改后的整段文字。字段有焦点时，用户的文字留在框里，引擎的回应不替换它，否则一来一回的延迟会挪走光标、吞掉刚打的字；焦点离开后显示引擎的文字。七个目标都这样实现（SwiftUI、Compose 在视图里留一份正在编辑的文字，GTK、WinUI 3、网页在有焦点时不写入控件）。
+`TextInput(current: app.name) => app.rename(app.name)` likewise reads the engine snapshot (2026-10-29): every edit runs the action, and the expression in the action arguments that is the same as `current` is the whole edited text. While the field has focus, the user's text stays in the field and the engine's response does not replace it, because otherwise the round-trip delay would move the cursor and swallow characters just typed; once focus leaves, the engine's text is shown. All seven targets implement it this way (SwiftUI and Compose keep a copy of the text being edited in the view; GTK, WinUI 3 and the web do not write into the control while it has focus).
 
-两个来源必须且只能写一个；引擎来源必须声明提交动作，`selected` 必须是所有变体都有标签的枚举。`label_hidden: true` 隐藏可见标签，保留可访问名称。SwiftUI 的鼠标、键盘与 `ui.set-bool` / `ui.select` 使用同一个 setter。Web 同样支持受控控件；Slider 拖动时显示本地预览，拖动结束提交。其余目标通过 `controlled_values` 能力检查拒绝尚未实现的用法。
+Exactly one of the two sources must be written; an engine source must declare a commit action, and `selected` must be an enum whose variants all have labels. `label_hidden: true` hides the visible label and keeps the accessible name. In SwiftUI, mouse, keyboard and `ui.set-bool` / `ui.select` use the same setter. Web supports controlled controls too; a Slider shows a local preview while being dragged and commits when the drag ends. The other targets reject usage that is not yet implemented through the `controlled_values` capability check.
 
-容器可写 `reduce_motion: app.preferences.reduce_motion`。SwiftUI 将应用偏好与系统辅助功能合并；应用关闭此选项不会抵消系统的减少动态效果。共享的 `BernReducedMotion` 属性包装器让按钮、转场、共享元素、滚动和搜索面板读取同一偏好。
+Containers can write `reduce_motion: app.preferences.reduce_motion`. SwiftUI merges the app preference with the system accessibility setting; turning this option off in the app does not cancel the system's Reduce Motion. The shared `BernReducedMotion` property wrapper lets buttons, transitions, shared elements, scrolling and the search panel read the same preference.
 
-外壳引擎可调用 `bern::modules::set_enabled(id, enabled)`，命令结束后由 Composite 排队执行。依赖、引擎释放和 `modules_changed` 仍归 Composite 管理；应用用回调更新预览，不自行复制依赖算法。
-
-
-### 设置页布局表面（2026-10-15）
-
-`Sidebar(width: 220)` 声明固定列宽；SwiftUI 同时设置分栏最小/理想/最大宽度以及内容框宽度，避免系统按照搜索与列表的最小固有宽度压缩侧栏。省略时仍使用可调整的 180–320 pt 默认列宽。WinUI 3 与 Islands 的 `NavigationView` 窗格本身不能拖宽，Bern 在展开的窗格边缘放一条看不见、带系统左右调整光标的拖动条：省略 `width` 时从系统默认的 320 起，可拖到 180–480（最窄与 macOS 相同，最宽是 320 的一倍半，与 macOS 理想 210、最宽 320 的比例相近）；声明 `width` 时固定、没有拖动条。侧栏的开关按钮由各平台自己的分栏给出：macOS 是工具栏中的系统按钮，侧栏整个隐藏；WinUI 3 是标题栏 `TitleBar` 的窗格开关（应用图标左侧），Islands 是窗格顶部的按钮，侧栏收成 `NavigationView` 的图标栏，页眉与页脚随之隐藏、展开时恢复。Web 的开关是详情页头最前端的图标按钮，侧栏连同页眉、搜索框与页脚整个滑出隐藏，与 macOS 相同，也是 Web 设计稿所用 Window Splitter 模式收起主窗格的方式（Web 的侧栏项可以没有图标，图标栏放不下分组与搜索）；省略 `width` 时侧栏边缘有一条 Window Splitter 拖动条，从 240 起，指针拖动或方向键调整到 200–320（Web 设计稿的范围）；声明 `width` 时固定、没有拖动条。窄窗口中侧栏是第一页，Web 不显示开关与拖动条。tvOS 的侧边栏是系统宽度的浮动面板，`width` 不起作用，检查给出警告，侧栏照常显示；没有列出 `sidebar_width` 的其他目标同样给出警告。
-
-`style!` 中的 `Stack.<variant>` 可配置背景、前景色和圆角。前景色传给原生子控件；圆角表面也裁切子层，格纹与图片不会越过边缘。SwiftUI 与 Web 已实现，其他目标按自身样式能力检查处理。
+The shell engine can call `bern::modules::set_enabled(id, enabled)`, which Composite queues and runs after the command finishes. Dependencies, engine release and `modules_changed` are still managed by Composite; apps update their preview with a callback and do not copy the dependency algorithm themselves.
 
 
-### 同窗口引导与后台状态（2026-10-15）
+### Settings page layout surfaces (2026-10-15)
 
-`Modal(width: 960, height: 600)` 在窗口根部呈现居中遮罩，尺寸不超过窗口减去 32 pt，不被背景内容的固有宽度撑大；与主界面共享元素命名空间，并将入场、退场和减少动画偏好应用到实际面板。小窗口避开 macOS 顶部工具栏。调用方通过 `Stack(enabled: false)` 禁用背景子树（点击、键盘及无障碍），正文可用 `ScrollView`，页脚放在滚动区域外。不写 `height` 时（2026-10-25 起）面板与内容一样高：按面板的宽度量内容要的高度，其中竖向 `ScrollView` 报告它滚动的内容的高度、`Spacer` 不占高度；超过窗口减 32 pt 时停在那里，由 `ScrollView` 滚动。此前缺省高度是 600，应用只能按内容估算高度写死，内容随状态变化（多一行提示、换一种账号）就要跟着改数，手机上的短对话框不是留下大片空白就是用 `cover: compact` 铺满屏幕。六个目标一致：SwiftUI 用一个 `Layout` 在不限高的提议下量卡片的理想高度；Compose 量内容的固有高度（说不出固有高度的内容，如惰性列表，取窗口允许的高度）；Web 的 `<dialog>` 不设高度，由 flex 布局收缩；GTK 按卡片宽度量自然高度，其中的滚动视图传递内容的自然高度；WinUI 的内容面板先按不限高量一次，放得下就用这个高度。写了 `height` 的面板不变。iOS 上卡片留在安全区内，不顶到状态栏和灵动岛、不压住底部横条与键盘，遮罩仍铺满整屏（2026-10-25）。`Flow(gap: 8)` 按固有尺寸从左到右换行，每行的子项竖直居中；`align: center` 或 `trailing` 让没有 `Spacer` 的一行居中或靠后（与 CSS 的 `justify-content` 相同），如登录卡片里换行的几枚标签在窄屏上排成居中的两行，六个目标实现（2026-11-01）；`Spacer` 换行时不占宽度，排好后占满所在行余下的宽度（与 CSS 的 `flex-wrap` 加 `flex: 1` 相同），六个目标一致（2026-10-20）。
+`Sidebar(width: 220)` declares a fixed column width; SwiftUI sets the split view column's minimum/ideal/maximum width and the content frame width together, so that the system does not compress the sidebar to the minimum intrinsic width of the search and the list. When it is omitted, the adjustable default column width of 180–320 pt is still used. The `NavigationView` pane in WinUI 3 and Islands cannot be dragged wider by itself, so Bern places an invisible drag bar with the system left-right resize cursor at the edge of the expanded pane: when `width` is omitted, the pane starts at the system default of 320 and can be dragged within 180–480 (the narrowest is the same as macOS, and the widest is one and a half times 320, close to the proportion between macOS's ideal 210 and maximum 320); when `width` is declared, the width is fixed and there is no drag bar. The sidebar's toggle button comes from each platform's own split view: on macOS it is the system button in the toolbar, and the whole sidebar hides; on WinUI 3 it is the pane toggle of the `TitleBar` (to the left of the app icon), and on Islands it is the button at the top of the pane; the sidebar collapses into the `NavigationView` icon bar, with the header and footer hidden, and restored when it expands. On the web the toggle is the icon button at the very start of the detail page header, and the whole sidebar, together with its header, search field and footer, slides out and hides, the same as on macOS, which is also how the Window Splitter pattern used by the Web design mockups collapses the primary pane (Web sidebar items can have no icon, and an icon bar has no room for groups and search); when `width` is omitted, the sidebar edge has a Window Splitter drag bar that starts at 240 and can be adjusted by pointer drag or arrow keys within 200–320 (the range of the Web design mockups); when `width` is declared, the width is fixed and there is no drag bar. In narrow windows the sidebar is the first page, and the web shows neither the toggle nor the drag bar. The tvOS sidebar is a floating panel of system width, `width` has no effect, the check gives a warning and the sidebar is shown as usual; other targets that do not list `sidebar_width` give a warning as well.
 
-`Timer(interval: 0.5, enabled: app.running) => app.tick()` 在启用且挂载期间定时提交命令，卸载和禁用取消任务，不是逐帧绘制 API。可通过模块贡献插入后台插槽，跨页面保持运行。`Picker` 可显式包含 `PickerOption(value:, label:)`，标签可插入状态计数。以上由 SwiftUI 与 Web 的 `modal_flow_timer` 能力提供，其他目标明确拒绝。
+`Stack.<variant>` in `style!` can configure the background, foreground color and corner radius. The foreground color is passed on to native child controls; rounded surfaces also clip child layers, so checkered patterns and images do not cross the edge. SwiftUI and Web have implemented this; other targets handle it according to their own style capability checks.
 
-`SidebarItem(badge: app.count)` 显示正数计数；模块页面清单的 `badge = "active_count"` 自动绑定到该模块的数字状态字段。SwiftUI 与 Web 通过 `page_badges` 提供，其余目标明确拒绝。
 
-`bern::storage::Store::host()` 读取 / 写入按应用 bundle ID 隔离的小文件，key 限简单文件名；写入使用同目录临时文件、同步与替换。FFI 宿主在构造引擎前安装存储，macOS/iOS 使用 Application Support，Windows 使用 APPDATA，Linux 使用 XDG_CONFIG_HOME / ~/.config；Web app 使用按 bundle ID 隔离的同源 localStorage，受浏览器权限和容量限制；WebUI 使用其原生引擎宿主的文件存储。其他未接入的宿主暂不持久化。未安装宿主的引擎可用于纯内存测试，`Store::directory` 可指定测试目录。
+### Same-window onboarding and background state (2026-10-15)
 
-存储装好之后，应用还知道自己的两个文件夹（2026-10-21）：`bern::storage::data_dir()` 放不是设置的自有数据，例如数据库；`bern::storage::cache_dir()` 放随时可以重新取回的文件，系统或用户可能随时清空它。两者都已按应用身份命名，取用时不存在就建好。macOS 与 iOS 分别是 Application Support 和 Caches；Windows 都在 LOCALAPPDATA，缓存另有 `Cache` 子文件夹（小值仍在会随账户漫游的 APPDATA）；Linux 按 XDG 基础目录规范分别是 `XDG_DATA_HOME`（默认 `~/.local/share`）与 `XDG_CACHE_HOME`（默认 `~/.cache`），只认绝对路径；tvOS 只能写缓存，两者都在 Caches 里，空间紧张时系统会清掉；Android 没有主目录，宿主把应用私有的 files 文件夹交给 Bern（资源已经放在那里），数据在其中，缓存在旁边的 cache 文件夹，小值也随之持久化。浏览器里两者都是 `None`。
+`Modal(width: 960, height: 600)` presents a centered panel over a scrim at the window root; its size does not exceed the window minus 32 pt and is not stretched by the intrinsic width of the background content; it shares the shared-element namespace with the main UI and applies entry, exit and reduced-animation preferences to the actual panel. In small windows it avoids the macOS top toolbar. Callers disable the background subtree (clicks, keyboard and accessibility) with `Stack(enabled: false)`; the body can use a `ScrollView`, and the footer is placed outside the scroll area. When `height` is not written (since 2026-10-25), the panel is as tall as its content: the height the content needs is measured at the panel's width, where a vertical `ScrollView` reports the height of the content it scrolls and a `Spacer` takes no height; beyond the window minus 32 pt it stops there and the `ScrollView` scrolls. Previously the default height was 600, and apps could only estimate a height from the content and hard-code it; whenever the content changed with state (one more hint line, a different kind of account), the number had to change too, and short dialogs on phones either left a large blank area or used `cover: compact` to fill the screen. The six targets agree: SwiftUI uses a `Layout` to measure the card's ideal height under a proposal with unbounded height; Compose measures the content's intrinsic height (content that cannot state an intrinsic height, such as a lazy list, takes the height the window allows); the web's `<dialog>` sets no height and is shrunk by the flex layout; GTK measures the natural height at the card's width, and scroll views inside pass on the natural height of their content; the WinUI content panel first measures once with unbounded height and uses that height if it fits. Panels with `height` written do not change. On iOS the card stays within the safe area, not reaching up to the status bar and the Dynamic Island and not covering the home indicator at the bottom or the keyboard, while the scrim still fills the whole screen (2026-10-25). `Flow(gap: 8)` wraps children from left to right by their intrinsic size, centering the children of each row vertically; `align: center` or `trailing` centers a row without a `Spacer` or puts it at the end (the same as CSS `justify-content`), for example several tags wrapping in a sign-in card form two centered rows on a narrow screen, implemented on all six targets (2026-11-01); a `Spacer` takes no width when wrapping and, once laid out, fills the remaining width of its row (the same as CSS `flex-wrap` with `flex: 1`); the six targets agree (2026-10-20).
 
-引擎读用户选的文件或文件夹时，用 `bern::files` 的 `open`、`list` 与 `walk`，它们在每个目标上都读得了选择器交来的地址（见“引擎读取交来的文件”）；`bern::files::name` 取用户认得的名字。只有确实要本机路径时才用 `bern::files::file_path`：它把 `file:` 地址换成本机路径（百分号解码，Windows 上换成盘符路径或共享路径），Android 的文档与网页的文件没有路径，得到 `None`；反过来 `MediaSource::file(路径)` 得到规范的 `file:` 地址。例如媒体类应用扫描用户添加的文件夹，找到的视频按地址记下，再交给播放器。
+`Timer(interval: 0.5, enabled: app.running) => app.tick()` submits the command periodically while it is enabled and mounted; unmounting and disabling cancel the task; it is not a per-frame drawing API. It can be inserted into a background slot through a module contribution to keep running across pages. A `Picker` can explicitly contain `PickerOption(value:, label:)`, and labels can interpolate state counts. These are provided by the `modal_flow_timer` capability of SwiftUI and Web; other targets reject them explicitly.
 
-用户的机密，例如登录后拿到的令牌，交给 `bern::secrets::read / write / delete`，存进系统的凭据库：macOS 与 iOS 的钥匙串、Windows 的凭据管理器、Linux 的 Secret Service（构建需要 dbus 的开发文件）。每条机密按应用身份加一个简单名字保存，不进应用的任何文件，备份或同步那些文件不会带出机密。未安装宿主的引擎把机密留在本进程的内存里；tvOS、Android 与浏览器暂时没有可用的凭据库，读取得到空，写入返回 `secrets_unavailable`。实现进度：macOS 上单元测试与读写验证；Windows 通过类型检查；Linux 未验证。
+`SidebarItem(badge: app.count)` shows a positive count; `badge = "active_count"` in a module's page manifest is automatically bound to that module's numeric state field. SwiftUI and Web provide this through `page_badges`; the other targets reject it explicitly.
+
+`bern::storage::Store::host()` reads/writes small files isolated by the app's bundle ID, with keys limited to simple file names; writes go through a temporary file in the same directory, a sync and a replace. FFI hosts install storage before constructing the engine: macOS/iOS use Application Support, Windows uses APPDATA, and Linux uses XDG_CONFIG_HOME / ~/.config; the Web app uses same-origin localStorage isolated by bundle ID, subject to browser permissions and capacity limits; WebUI uses the file storage of its native engine host. Other hosts that are not wired up yet do not persist for now. An engine without an installed host can be used for pure in-memory tests, and `Store::directory` can point to a test directory.
+
+Once storage is installed, the app also knows its two folders (2026-10-21): `bern::storage::data_dir()` holds the app's own data that is not settings, for example a database; `bern::storage::cache_dir()` holds files that can be fetched again at any time, which the system or the user may clear at any time. Both are already named after the app identity and are created on access if they do not exist. On macOS and iOS they are Application Support and Caches respectively; on Windows both are in LOCALAPPDATA, with the cache in a separate `Cache` subfolder (small values stay in APPDATA, which roams with the account); on Linux, following the XDG Base Directory Specification, they are `XDG_DATA_HOME` (default `~/.local/share`) and `XDG_CACHE_HOME` (default `~/.cache`) respectively, and only absolute paths are accepted; tvOS can only write caches, so both are in Caches, and the system clears them when space is tight; Android has no home directory, so the host hands the app-private files folder to Bern (resources are already placed there): the data is in it, the cache is in the cache folder next to it, and small values are persisted there too. In the browser both are `None`.
+
+When the engine reads a file or folder the user chose, it uses `bern::files`'s `open`, `list` and `walk`, which can read the addresses pickers hand over on every target (see "The engine reads files handed to it"); `bern::files::name` takes the name the user recognizes. Only when a local path is really needed is `bern::files::file_path` used: it turns a `file:` URL into a local path (percent-decoded; on Windows, into a drive-letter path or a share path), while Android documents and web files have no path and get `None`; conversely, `MediaSource::file(path)` gives the canonical `file:` URL. For example, a media app scans the folders the user added, records the videos it finds by URL, and then hands them to the player.
+
+The user's secrets, for example a token obtained after signing in, go to `bern::secrets::read / write / delete`, which keeps them in the system credential store: the Keychain on macOS and iOS, Credential Manager on Windows, and the Secret Service on Linux (the build needs the dbus development files). Each secret is stored under the app identity plus a simple name and does not go into any of the app's files, so backing up or syncing those files does not carry the secrets along. An engine without an installed host keeps secrets in this process's memory; tvOS, Android and the browser have no usable credential store for now: reads get nothing and writes return `secrets_unavailable`. Implementation progress: unit tests and read/write verification on macOS; Windows passes type checking; Linux not verified.

@@ -1,141 +1,143 @@
-# Emby 和 Jellyfin 客户端适配
+**English** · [简体中文](../zh-CN/Adaptation/MediaClients.md)
 
-- 文档版本：v0.1
-- 官方资料核查日期：2026-10-09
-- 适用范围：用 Bern 开发的媒体客户端；作为框架验证场景，不将服务端业务写入 Bern 核心。
-- 上位约束：[架构设计](../Design.md)与[自适应总则](README.md)。
+# Emby and Jellyfin client adaptation
 
-Emby 和 Jellyfin 提供客户端文档、接口、品牌资源及部分界面规则。本次检索未定位到一份覆盖所有客户端平台、相当于 Apple HIG 的统一设计规范。因此，原生交互采用对应操作系统指南，服务端连接与媒体行为采用各自官方协议，下面的页面组织是 Bern 客户端设计建议。
+- Document version: v0.1
+- Official sources checked on: 2026-10-09
+- Scope: media clients developed with Bern; as a framework validation scenario, server-side business logic is not written into the Bern core.
+- Governing constraints: [architecture design](../Design.md) and [general adaptation principles](README.md).
 
-## 官方资料的适用范围
+Emby and Jellyfin provide client documentation, APIs, brand assets and some interface rules. This search did not locate a unified design specification, comparable to Apple's HIG, that covers all client platforms. Therefore native interaction follows the guidelines of the corresponding operating system, server connection and media behavior follow each project's official protocol, and the page organization below is a design recommendation for Bern clients.
 
-| 官方资料 | 可以据此确定的内容 | 不能推导的内容 |
+## Scope of the official materials
+
+| Official material | What it can establish | What cannot be inferred from it |
 | --- | --- | --- |
-| Emby 客户端用户文档 | 首页配置、功能行为、指定客户端的主题与交互选项 | 所有平台必须使用相同控件与布局 |
-| Emby Plugin UI | 服务端插件设置页面的声明式生成方式 | 第三方完整播放器的跨平台 HIG |
-| Emby REST 与 WebSocket 文档 | 会话控制、播放状态报告与能力字段 | 请求已发送即设备已执行 |
-| Jellyfin Branding 与 jellyfin-ux | 项目命名、标识使用及共享视觉资源 | 第三方客户端必须复刻 Jellyfin Web |
-| Jellyfin 客户端及媒体文档 | 登录方式、客户端范围、播放兼容性的判断维度 | 每个原生客户端都执行服务端 CSS |
-| Jellyfin Style Guides | 源代码风格 | 视觉与交互设计系统 |
+| Emby client user documentation | Home screen configuration, feature behavior, theme and interaction options of specific clients | That all platforms must use the same controls and layout |
+| Emby Plugin UI | How the settings pages of server plugins are generated declaratively | A cross-platform HIG for complete third-party players |
+| Emby REST and WebSocket documentation | Session control, playback state reporting and capability fields | That a request having been sent means the device has executed it |
+| Jellyfin Branding and jellyfin-ux | Project naming, logo usage and shared visual assets | That third-party clients must replicate Jellyfin Web |
+| Jellyfin client and media documentation | Sign-in methods, the range of clients, the dimensions for judging playback compatibility | That every native client executes server CSS |
+| Jellyfin Style Guides | Source code style | A visual and interaction design system |
 
-Emby 的插件界面由模型/属性描述生成，其适用对象是插件配置。Jellyfin 的 Style Guides 明确讨论代码风格；jellyfin-ux 的 README 主要列出品牌图像、标识等资源。它们可以提供参考，但不能替代平台适配规范。[Emby Plugin UI](https://dev.emby.media/doc/plugins/ui/index.html)、[Jellyfin Style Guides](https://jellyfin.org/docs/general/style-guides/)、[Jellyfin UX](https://github.com/jellyfin/jellyfin-ux)。
+Emby's plugin interface is generated from model/property descriptions, and it applies to plugin configuration. Jellyfin's Style Guides explicitly discuss code style; the jellyfin-ux README mainly lists assets such as brand images and logos. They can serve as references but cannot replace platform adaptation guidelines. [Emby Plugin UI](https://dev.emby.media/doc/plugins/ui/index.html), [Jellyfin Style Guides](https://jellyfin.org/docs/general/style-guides/), [Jellyfin UX](https://github.com/jellyfin/jellyfin-ux).
 
-## Emby 官方行为与 Bern 映射
+## Emby official behavior and Bern mapping
 
-### 首页与浏览
+### Home screen and browsing
 
-Emby 当前首页文档针对 Server 4.10.x 及以后版本：区块可配置筛选、展示图片与滚动方向；Auto 滚动方向由客户端根据尺寸、方向和设备形态选择。旧版首页配置另有文档，不能将新版选项无条件发送给旧服务器。[User Preferences Home Screen](https://emby.media/support/articles/apps/common/User-Prefs-HomeScreen.html)。
+Emby's current home screen documentation targets Server 4.10.x and later: sections can configure filters, the displayed images and the scroll direction; the Auto scroll direction is chosen by the client based on size, orientation and device form factor. The older home screen configuration has separate documentation, and the new options must not be sent unconditionally to older servers. [User Preferences Home Screen](https://emby.media/support/articles/apps/common/User-Prefs-HomeScreen.html).
 
-Bern 客户端保留服务器支持的首页区块、顺序与用户偏好，用自己的组件呈现。窄屏可减少同时出现的列数，电视可以使用遥控器可达的横向内容行，桌面可使用更高信息密度的网格。重排不能改变筛选含义、已选媒体或播放队列；不支持的配置需明确呈现原因。
+A Bern client keeps the home screen sections, order and user preferences that the server supports, and presents them with its own components. Narrow screens can reduce the number of columns shown at once, TV can use horizontal content rows reachable with the remote, and desktop can use grids with higher information density. Reflow must not change the meaning of filters, the selected media or the playback queue; for unsupported configuration, the reason must be shown clearly.
 
-### 远程会话与播放状态
+### Remote sessions and playback state
 
-Emby 的 Remote Control 接口先枚举可控制会话，再按会话身份派发播放或通用控制；会话提供 SupportedCommands 等能力信息。WebSocket 文档将通知与远程控制消息分别描述。[Remote Control](https://dev.emby.media/doc/restapi/Remote-Control.html)、[Web Socket](https://dev.emby.media/doc/restapi/Web-Socket.html)。
+Emby's Remote Control API first enumerates controllable sessions, then dispatches playback or general controls by session identity; sessions provide capability information such as SupportedCommands. The WebSocket documentation describes notifications and remote control messages separately. [Remote Control](https://dev.emby.media/doc/restapi/Remote-Control.html), [Web Socket](https://dev.emby.media/doc/restapi/Web-Socket.html).
 
-Bern 映射规则：
+Bern mapping rules:
 
-- 用户先明确选择播放目标，界面持续显示本机或远程设备名称；同名设备仍按稳定身份区分。
-- 服务端 Session ID、Bern session_id 和 player_id 是不同命名空间，由服务适配器维护映射，不能直接视为同一 ID。
-- 远程播放请求先进入 Bern 已登记命令及权限检查，再由 Emby 适配器发送；远端状态回报更新同一播放目标的观察状态。
-- `SupportedCommands` 影响动作是否可用，不动态改写 Bern 已编译命令 schema。
-- 连接中、已发送、已确认、失败与目标离线分开显示。协议不能确认执行时，不宣称“已经播放”。
+- The user first explicitly chooses the playback target, and the interface keeps showing the name of the local or remote device; devices with the same name are still distinguished by stable identity.
+- The server's Session ID, Bern's session_id and player_id are different namespaces; the service adapter maintains the mapping, and they cannot be treated directly as the same ID.
+- A remote playback request first goes through Bern's registered commands and permission checks, and is then sent by the Emby adapter; state reports from the remote end update the observed state of the same playback target.
+- `SupportedCommands` affects whether actions are available; it does not dynamically rewrite Bern's compiled command schema.
+- Connecting, sent, confirmed, failed and target offline are shown separately. When the protocol cannot confirm execution, the client does not claim "now playing".
 
-Emby Playback Check-ins 分别报告开始、进度与停止，并携带媒体源、播放会话和轨道等信息。其当前指南建议约每 10 秒报告进度，用户交互后及时报告；这个频率是 Emby 接口行为，不能成为 Bern 的绘制时钟或全部后端的固定规则。[Playback Check-ins](https://dev.emby.media/doc/restapi/Playback-Check-ins.html)。
+Emby Playback Check-ins report start, progress and stop separately, and carry information such as the media source, the playback session and tracks. Its current guide recommends reporting progress about every 10 seconds and reporting promptly after user interaction; this frequency is Emby API behavior and cannot become Bern's drawing clock or a fixed rule for all backends. [Playback Check-ins](https://dev.emby.media/doc/restapi/Playback-Check-ins.html).
 
-Bern 只依据实际播放结果报告 started/stopped。换源、切换远端或重连后，旧播放会话的延迟回报不得覆盖新会话。服务端进度估计可以用于平滑展示，但要保留更新时间与连接状态。
+Bern reports started/stopped only on the basis of actual playback results. After switching sources, switching the remote target or reconnecting, delayed reports from the old playback session must not overwrite the new session. Server-side progress estimates can be used for smooth display, but the update time and the connection state must be kept.
 
-### 主题与可访问性
+### Theme and accessibility
 
-Emby Windows 客户端的无障碍说明包含键盘焦点和高对比度；其中自动跟随系统高对比度有启用 Windows 主题且不覆盖深浅色的前提。这是该客户端的配置条件，不是 Bern 可以要求用户手动配置主题的理由。[Feature Accessibility](https://emby.media/support/articles/apps/windows/features/Win-Feature-Accessibility.html)。
+The accessibility notes for the Emby Windows client cover keyboard focus and high contrast; there, automatically following the system's high contrast requires that the Windows theme is enabled and that light and dark mode is not overridden. This is a configuration condition of that client, not a reason for Bern to require users to configure the theme manually. [Feature Accessibility](https://emby.media/support/articles/apps/windows/features/Win-Feature-Accessibility.html).
 
-Bern 控件仍执行自动深浅色和高对比度契约。服务端返回的封面与视频保持内容原色；颜色、标题长度及海报比例不能成为判断设备种类的条件。
+Bern controls still follow the automatic light and dark mode and high contrast contract. Covers and videos returned by the server keep the content's original colors; colors, title length and poster aspect ratio cannot become conditions for determining the kind of device.
 
-## Jellyfin 官方行为与 Bern 映射
+## Jellyfin official behavior and Bern mapping
 
-### 品牌与客户端独立性
+### Brand and client independence
 
-Jellyfin 的品牌指南要求第三方使用独立名称与标识，可在说明中表达兼容关系。官方客户端目录的收录条件和界面设计要求是不同问题；本章不把“支持 Jellyfin”表述为“Jellyfin 官方客户端”。[Branding](https://jellyfin.org/docs/general/contributing/branding/)、[Clients](https://jellyfin.org/docs/general/clients/)。
+Jellyfin's branding guidelines require third parties to use their own name and logo, and the compatibility relationship can be stated in descriptions. The inclusion criteria of the official client directory and interface design requirements are different questions; this chapter does not present "supports Jellyfin" as "official Jellyfin client". [Branding](https://jellyfin.org/docs/general/contributing/branding/), [Clients](https://jellyfin.org/docs/general/clients/).
 
-Jellyfin Custom CSS 只作用于使用 Jellyfin Web 的客户端，并不覆盖所有客户端。因此原生 Bern 前端不需要解释或执行任意服务端 CSS；需要支持的用户展示偏好应映射成经过定义的类型化设置。[CSS Customization](https://jellyfin.org/docs/general/clients/css-customization/)。
+Jellyfin Custom CSS only applies to clients that use Jellyfin Web and does not cover all clients. Native Bern frontends therefore do not need to interpret or execute arbitrary server CSS; user display preferences that need to be supported should be mapped to defined, typed settings. [CSS Customization](https://jellyfin.org/docs/general/clients/css-customization/).
 
-### 电视登录
+### TV sign-in
 
-Quick Connect 使用临时代码，由已经登录的设备授权新客户端，适合电视等输入受限设备；服务器可关闭该功能，而且“允许登录”和“授权其他设备”是不同客户端能力。[Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/)。
+Quick Connect uses a temporary code with which an already signed-in device authorizes a new client, which suits input-limited devices such as TVs; the server can turn the feature off, and "allowing sign-in" and "authorizing other devices" are different client capabilities. [Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/).
 
-Bern 的电视连接页在服务端支持时提供这一入口，并保留明确的其他登录路径。等待授权、已授权、过期、拒绝和重新生成代码是不同状态。切换服务器或用户后，旧授权结果不得进入新会话。代码应便于远距离阅读，不把账号输入设计成只能依赖手机才能完成。
+Bern's TV connection page offers this entry point when the server supports it, and keeps clear alternative sign-in paths. Waiting for authorization, authorized, expired, denied and code regenerated are different states. After switching servers or users, an old authorization result must not enter the new session. The code should be easy to read from a distance, and account entry is not designed so that it can only be completed with a phone.
 
-Emby 的登录由 Emby 适配器独立实现；不能因为两个产品存在历史关系就直接发送 Jellyfin Quick Connect 请求。
+Emby sign-in is implemented separately by the Emby adapter; the historical relationship between the two products is no reason to send Jellyfin Quick Connect requests directly.
 
-### 媒体兼容性
+### Media compatibility
 
-Jellyfin 官方媒体说明按容器、视频、音频与字幕的组合判断 Direct Play、Direct Stream 或转码。字幕可能改变播放方案，因此不能仅检查文件扩展名或一个视频编码名称就断言可直接播放。[Codec Support](https://jellyfin.org/docs/general/clients/codec-support/)。
+Jellyfin's official media notes decide between Direct Play, Direct Stream and transcoding based on the combination of container, video, audio and subtitles. Subtitles can change the playback method, so direct playability cannot be asserted by checking only the file extension or a single video codec name. [Codec Support](https://jellyfin.org/docs/general/clients/codec-support/).
 
-Bern 的 MediaCapabilities 来自真实执行端，服务适配器据此协商播放源。UI 提供清晰的质量、音轨、字幕与播放目标选择；调试详情可解释转码原因，但普通播放流程不暴露内部协议字段。切换字幕或质量需要源版本及请求身份，避免多次异步协商互相覆盖。
+Bern's MediaCapabilities come from the real executor, and the service adapter negotiates the playback source based on them. The UI offers clear choices of quality, audio track, subtitles and playback target; debug details can explain why transcoding happens, but the normal playback flow does not expose internal protocol fields. Switching subtitles or quality requires a source version and a request identity, so that multiple asynchronous negotiations do not overwrite each other.
 
-## Bern 媒体客户端页面契约
+## Bern media client page contract
 
-下表是 Bern 的产品设计建议，功能由应用的 Feature Contract 声明；不是 Emby 或 Jellyfin 官方规定的页面顺序。
+The table below is Bern's product design recommendation, with features declared by the app's Feature Contract; it is not a page order officially prescribed by Emby or Jellyfin.
 
-| 页面或动作 | 紧凑触屏 | 宽窗口和键鼠 | 电视与遥控器 |
+| Page or action | Compact touch | Wide window, keyboard and mouse | TV and remote |
 | --- | --- | --- | --- |
-| 服务器与用户选择 | 单列流程，清楚区分连接和登录错误 | 可并列展示已保存服务器与详情 | 大字号、少输入、支持时提供配对登录 |
-| 媒体库与首页 | 当前区块和可滚动网格 | 侧边导航与内容网格 | 焦点明确的内容行或网格 |
-| 搜索与筛选 | 搜索页或覆盖面板，筛选可返回 | 搜索框、快捷键与辅助筛选区 | 遥控器可达搜索入口，不依赖悬停 |
-| 详情与剧集 | 逐级导航，保留来源列表位置 | 列表详情或辅助面板 | 明确的播放/继续播放入口，焦点恢复到原条目 |
-| 播放控制 | 触控控件与可发现的音轨字幕菜单 | 键盘与鼠标并行，菜单列出快捷键 | 方向键、确认、返回、播放暂停键完整可用 |
-| 播放目标 | 明确显示当前本机或远端目标 | 目标列表和状态可查询 | 大屏上仍可查看并切换目标，不只显示模糊投屏图标 |
-| 设置 | 分类导航或虚拟窗口 | 原生设置窗口或应用内面板 | 按任务分组，全屏虚拟窗口和明确返回路径 |
+| Server and user selection | Single-column flow that clearly distinguishes connection errors from sign-in errors | Saved servers and their details can be shown side by side | Large type, little input, pairing sign-in when supported |
+| Libraries and home | The current section and a scrollable grid | Side navigation and a content grid | Content rows or grids with clear focus |
+| Search and filters | A search page or an overlay panel; filters can be backed out of | Search field, keyboard shortcuts and a secondary filter area | A search entry point reachable with the remote, no reliance on hover |
+| Details and episodes | Level-by-level navigation that keeps the position in the source list | List-detail or a secondary panel | Clear play/resume entry points; focus restored to the original item |
+| Playback controls | Touch controls and a discoverable audio track and subtitle menu | Keyboard and mouse in parallel; menus list the keyboard shortcuts | Arrow keys, select, back and the play/pause key fully usable |
+| Playback target | The current local or remote target shown explicitly | Target list and state can be queried | Targets can still be viewed and switched on the big screen, not just a vague casting icon |
+| Settings | Category navigation or a virtual window | A native settings window or an in-app panel | Grouped by task; full-screen virtual window and a clear way back |
 
-继续播放与从头播放是不同命令；切换视图不能重复派发播放。恢复进度、收藏、标记已看、字幕选择、远程控制等操作均进入统一引擎目录。不能通过调用外部播放器私有回调绕过四入口契约。
+Resume and play from the beginning are different commands; switching views must not dispatch playback again. Operations such as restoring progress, favoriting, marking as watched, subtitle selection and remote control all go into the unified engine catalog. The four-entry-point contract cannot be bypassed by calling an external player's private callbacks.
 
-认证、媒体目录、播放历史、服务端偏好和服务协议位于应用业务模块。Bern 核心只提供通用命令、状态、导航、Window、Video、主题和可访问性机制。
+Authentication, the media catalog, playback history, server preferences and the service protocol live in the app's business modules. The Bern core provides only the generic command, state, navigation, Window, Video, theme and accessibility mechanisms.
 
-## 状态和错误设计
+## State and error design
 
-| 情况 | 客户端必须表达的差异 |
+| Situation | Differences the client must express |
 | --- | --- |
-| 未发现服务器 | 发现失败与手动地址入口；不能直接判断账号错误 |
-| 局域网权限被拒绝 | 权限状态与服务端离线分别报告，按平台规则引导恢复 |
-| 会话失效 | 保留允许恢复的导航，重新认证后重新验证访问权限 |
-| 媒体不兼容 | 区分本地后端不支持、服务器可转码、无可用播放方案 |
-| 远端掉线 | 目标不可用与最后观察状态并存，不继续确认播放成功 |
-| 有进度但未知总时长 | 不把未知长度显示为零，不提供无法完成的任意跳转 |
-| 用户或服务器切换 | 清理旧身份所属订阅与敏感显示，不串用进度或授权 |
+| No server found | Discovery failure and an entry point for a manual address; cannot be directly judged as an account error |
+| Local network permission denied | The permission state and the server being offline are reported separately; recovery is guided according to platform rules |
+| Session expired | Keep the navigation that is allowed to be restored, and re-check access permissions after re-authentication |
+| Incompatible media | Distinguish the local backend not supporting it, the server being able to transcode, and no available playback method |
+| Remote end dropped | The target being unavailable is shown together with the last observed state; playback success is no longer confirmed |
+| Progress known but total duration unknown | Do not show an unknown length as zero, and do not offer arbitrary seeking that cannot be completed |
+| User or server switch | Clear subscriptions and sensitive display belonging to the old identity, and do not mix up progress or authorization |
 
-局域网与后台播放要求随目标平台及版本变化，需按目标平台另行核验具体权限与运行条件；布局和生命周期参考 [Apple](Apple.md)、[Android](Android.md) 和 [HarmonyOS](HarmonyOS.md) 分册，不用重试掩盖权限拒绝。
+Local network and background playback requirements vary with the target platform and version, so the specific permissions and runtime conditions have to be verified separately for each target platform; for layout and lifecycle, refer to the [Apple](Apple.md), [Android](Android.md) and [HarmonyOS](HarmonyOS.md) volumes, and do not mask a permission denial with retries.
 
-## 验收清单
+## Acceptance checklist
 
-- [ ] 同一媒体从首页、搜索、详情和外部命令进入时定位相同媒体与播放目标。
-- [ ] 服务器能力不足时动作提供不可用原因，不因窄屏隐藏必需功能。
-- [ ] 遥控器能完成登录、搜索、选集、播放、字幕选择和退出，焦点没有死路。
-- [ ] 从详情返回长列表后恢复正确条目，列表刷新或重排不恢复到同位置的另一项。
-- [ ] 关闭设置窗口不会停止应用级播放器，切换设备布局不重复播放。
-- [ ] 同一 player_id 的 UI、CLI、JSON 和 MCP 操作经过相同命令处理与结果同步。
-- [ ] 远程请求不冒充本地播放，旧会话回报和过期登录码不会污染新状态。
-- [ ] 分别测试可直接播放、需改变封装、需音视频转码、字幕导致方案变化和彻底不支持。
-- [ ] 播放 started/progress/stopped 与真实执行端一致；协议测试不以 UI 截图代替。
-- [ ] 深浅色、高对比度、长标题、放大字体、屏幕阅读器和电视远距离可读性通过对应平台检查。
-- [ ] Emby 与 Jellyfin 分别对明确记录的服务器版本进行协议测试，不假设接口永久相同。
+- [ ] Entering the same media from the home screen, search, details and an external command locates the same media and playback target.
+- [ ] When server capabilities are insufficient, actions give the reason they are unavailable; required features are not hidden because the screen is narrow.
+- [ ] The remote can complete sign-in, search, episode selection, playback, subtitle selection and exit, and focus has no dead ends.
+- [ ] Returning from details to a long list restores the correct item; after the list refreshes or reflows, a different item at the same position is not restored instead.
+- [ ] Closing the settings window does not stop the app-level player, and switching the device layout does not start playback again.
+- [ ] UI, CLI, JSON and MCP operations on the same player_id go through the same command handling and result synchronization.
+- [ ] Remote requests do not pose as local playback, and reports from old sessions and expired sign-in codes do not pollute the new state.
+- [ ] Test separately: directly playable, container change needed, audio/video transcoding needed, subtitles changing the method, and completely unsupported.
+- [ ] Playback started/progress/stopped matches the real executor; protocol tests are not replaced by UI screenshots.
+- [ ] Light and dark mode, high contrast, long titles, enlarged fonts, screen readers and readability at TV viewing distance pass the corresponding platform checks.
+- [ ] Emby and Jellyfin each get protocol tests against explicitly recorded server versions, without assuming the APIs stay the same forever.
 
-## 来源核验记录
+## Source verification record
 
-以下官方页面在 2026-10-09 已读取相关正文；其中 REST 指南包含历史示例，API 接入前仍应匹配待支持服务器的正式 schema。
+The relevant body text of the following official pages was read on 2026-10-09; the REST guide among them contains historical examples, so before API integration the formal schema of the servers to be supported should still be matched.
 
-| 来源 | 范围或版本边界 |
+| Source | Scope or version boundary |
 | --- | --- |
-| [Emby Home Screen](https://emby.media/support/articles/apps/common/User-Prefs-HomeScreen.html) | 页面明确覆盖 Server 4.10.x 及以后 |
-| [Emby Plugin UI](https://dev.emby.media/doc/plugins/ui/index.html) | 服务端插件配置界面 |
-| [Emby Accessibility](https://emby.media/support/articles/apps/windows/features/Win-Feature-Accessibility.html) | 指定 Windows 客户端及主题条件 |
-| [Emby Remote Control](https://dev.emby.media/doc/restapi/Remote-Control.html) | 会话枚举、能力与远控请求 |
-| [Emby Web Socket](https://dev.emby.media/doc/restapi/Web-Socket.html) | 通知与远控消息；不是 Bern 公共协议 |
-| [Emby Playback Check-ins](https://dev.emby.media/doc/restapi/Playback-Check-ins.html) | 播放状态回报 |
-| [Jellyfin Branding](https://jellyfin.org/docs/general/contributing/branding/) | 品牌规则 |
-| [Jellyfin UX](https://github.com/jellyfin/jellyfin-ux) | 官方资源仓库 README，未据此审核全部资源 |
-| [Jellyfin Style Guides](https://jellyfin.org/docs/general/style-guides/) | 代码风格说明 |
-| [Jellyfin Clients](https://jellyfin.org/docs/general/clients/) | 客户端范围与目录收录条件 |
-| [Jellyfin CSS Customization](https://jellyfin.org/docs/general/clients/css-customization/) | Jellyfin Web 的自定义 CSS 范围 |
-| [Jellyfin Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/) | 配对登录行为及客户端能力差异 |
-| [Jellyfin Codec Support](https://jellyfin.org/docs/general/clients/codec-support/) | 兼容性判断原则；表中结果不可替代设备运行检测 |
+| [Emby Home Screen](https://emby.media/support/articles/apps/common/User-Prefs-HomeScreen.html) | The page explicitly covers Server 4.10.x and later |
+| [Emby Plugin UI](https://dev.emby.media/doc/plugins/ui/index.html) | Server plugin configuration interface |
+| [Emby Accessibility](https://emby.media/support/articles/apps/windows/features/Win-Feature-Accessibility.html) | The specific Windows client and its theme conditions |
+| [Emby Remote Control](https://dev.emby.media/doc/restapi/Remote-Control.html) | Session enumeration, capabilities and remote control requests |
+| [Emby Web Socket](https://dev.emby.media/doc/restapi/Web-Socket.html) | Notifications and remote control messages; not a Bern public protocol |
+| [Emby Playback Check-ins](https://dev.emby.media/doc/restapi/Playback-Check-ins.html) | Playback state reports |
+| [Jellyfin Branding](https://jellyfin.org/docs/general/contributing/branding/) | Brand rules |
+| [Jellyfin UX](https://github.com/jellyfin/jellyfin-ux) | README of the official asset repository; not all assets were reviewed on this basis |
+| [Jellyfin Style Guides](https://jellyfin.org/docs/general/style-guides/) | Code style notes |
+| [Jellyfin Clients](https://jellyfin.org/docs/general/clients/) | Range of clients and the directory's inclusion criteria |
+| [Jellyfin CSS Customization](https://jellyfin.org/docs/general/clients/css-customization/) | Scope of custom CSS in Jellyfin Web |
+| [Jellyfin Quick Connect](https://jellyfin.org/docs/general/server/quick-connect/) | Pairing sign-in behavior and differences in client capabilities |
+| [Jellyfin Codec Support](https://jellyfin.org/docs/general/clients/codec-support/) | Principles for judging compatibility; the results in its tables cannot replace runtime detection on the device |
 
-尚未完成服务器联调、真实播放或客户端视觉测试。上述勾选项用于后续实现验收。
+Server integration testing, real playback and client visual tests have not been done yet. The checklist items above are for acceptance of the later implementation.

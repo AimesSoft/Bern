@@ -474,8 +474,9 @@ impl Target for SwiftUiIos {
         ]);
         // The agent skill beside `bin/`, where the app listens.
         let listens = skill::listens(&context.target.channels);
-        let place = listens
-            .then(|| skill::Place::beside_bin(app, false).connect(skill::simulator_connect(app)));
+        let place = listens.then(|| {
+            skill::Place::beside_bin(app, false).connect(skill::simulator_connect(app, "ios"))
+        });
         steps.extend(skill::steps(app, output, place.as_ref()));
         let mut products = vec![
             bundle.clone(),
